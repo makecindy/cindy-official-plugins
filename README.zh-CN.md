@@ -20,6 +20,7 @@ submodule 随桌面端打包或在启动时播种。
 | Web Search       | [`cindy-web-search`](./cindy-web-search) | 公网搜索（Brave / Tavily，用户自备 API key）                   |
 | 163 邮箱         | [`163-mail`](./163-mail)                 | 通过 IMAP/SMTP 搜索、阅读、整理、撰写和发送 163 邮箱邮件       |
 | QQ 邮箱          | [`qq-mail`](./qq-mail)                   | Cindy 安全保存授权码，按需通过 IMAP/SMTP 搜索、阅读、整理和发送 |
+| Yahoo Mail       | [`yahoo-mail`](./yahoo-mail)             | Cindy 安全保存应用密码，按需通过 IMAP/SMTP 管理和发送邮件      |
 | TapTap Maker     | [`taptap-maker`](./taptap-maker)         | 账号连接、项目同步、构建与官方动态工具                         |
 
 ## 仓库结构

@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "id": "yahoo-mail",
+  "name": "Yahoo Mail",
+  "description": "通过 Yahoo Mail IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。应用密码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
+  "whenToUse": "需要查找、阅读或整理 Yahoo Mail 邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入完整 Yahoo 邮箱地址和应用密码并完成连接测试。",
+  "version": "0.1.0",
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "settingsHeight": 520,
+  "slots": [
+    "tool",
+    "node"
+  ],
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 3600,
+    "secretBindings": [
+      {
+        "key": "yahoo_mail_app_password",
+        "label": "Yahoo 应用密码",
+        "methods": [
+          "account/connect",
+          "mail/action"
+        ],
+        "hint": "Yahoo 账户安全页面生成的应用密码，不是 Yahoo 账户密码",
+        "url": "https://help.yahoo.com/kb/account/access-yahoo-mail-third-party-apps-sln15241.html"
+      }
+    ]
+  },
+  "command": "yahoo-mail",
+  "tools": [
+    {
+      "name": "yahoo_mail_status",
+      "description": "查询 Yahoo Mail 是否已配置。只返回邮箱地址和连接状态，不返回应用密码。"
+    },
+    {
+      "name": "yahoo_mail",
+      "description": "执行 Yahoo Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list_folders",
+              "search",
+              "read",
+              "send",
+              "draft",
+              "mark_read",
+              "mark_unread",
+              "move"
+            ]
+          },
+          "folder": {
+            "type": "string",
+            "description": "IMAP 文件夹原始名称，默认 INBOX。非 INBOX 操作前先调用 list_folders，逐字使用服务器返回的 path，不要翻译。"
+          },
+          "message_uid": {
+            "type": "integer",
+            "description": "邮件 UID。UID 只在对应 folder 内有效，必须与搜索结果返回的 folder 一起使用。"
+          },
+          "target_folder": {
+            "type": "string",
+            "description": "move 的目标文件夹原始 path；先调用 list_folders 获取。"
+          },
+          "text": {
+            "type": "string",
+            "description": "search 的全文关键词，可省略。"
+          },
+          "from": {
+            "type": "string",
+            "description": "search 的发件人关键词。"
+          },
+          "to": {
+            "description": "search 时是收件人关键词；send/draft 时是收件人地址，可传逗号分隔字符串或字符串数组。"
+          },
+          "cc": {
+            "description": "send/draft 的抄送地址，可传逗号分隔字符串或字符串数组。"
+          },
+          "bcc": {
+            "description": "send/draft 的密送地址，可传逗号分隔字符串或字符串数组。"
+          },
+          "subject": {
+            "type": "string",
+            "description": "search 时是主题关键词；send/draft 时是邮件主题。"
+          },
+          "body_text": {
+            "type": "string",
+            "description": "send/draft 的纯文本正文。"
+          },
+          "unread": {
+            "type": "boolean",
+            "description": "search 时 true 仅查未读，false 仅查已读；省略不限制。"
+          },
+          "since": {
+            "type": "string",
+            "description": "search 起始日期，ISO 日期或日期时间。"
+          },
+          "before": {
+            "type": "string",
+            "description": "search 截止日期，ISO 日期或日期时间。"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "search 返回条数，默认 10，最大 20。"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ]
+}
