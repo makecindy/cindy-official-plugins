@@ -20,6 +20,7 @@ are no longer bundled with the desktop app as submodules or seeded at startup.
 | Notion           | [`cindy-notion`](./cindy-notion)         | Read/write Notion pages, databases, and knowledge bases            |
 | Web Search       | [`cindy-web-search`](./cindy-web-search) | Public web search (Brave / Tavily, user-provided API key)          |
 | 163 Mail         | [`163-mail`](./163-mail)                 | Search, read, organize, compose, and send 163 Mail via IMAP/SMTP   |
+| Microsoft Outlook | [`microsoft-outlook`](./microsoft-outlook) | Connect Outlook independently to search, read, organize, draft, and send mail |
 | QQ Mail          | [`qq-mail`](./qq-mail)                   | Cindy stores the authorization code securely; search, read, organize, and send via IMAP/SMTP on demand |
 | TapTap Maker     | [`taptap-maker`](./taptap-maker)         | Account connection, project sync, builds, and official news tools  |
 

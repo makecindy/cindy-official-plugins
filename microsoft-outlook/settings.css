@@ -1,0 +1,14 @@
+* { box-sizing: border-box; margin: 0; }
+body { padding: 2px 0 0; color: var(--text-primary, #1a1a1a); font: 13px/1.5 system-ui, sans-serif; }
+.title { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.badge { padding: 1px 8px; border-radius: 6px; font-size: 11px; font-weight: 400; background: var(--surface-chip, #efefec); color: var(--text-tertiary, #8a8a86); }
+.hint, #status { margin-top: 6px; font-size: 11px; color: var(--text-tertiary, #8a8a86); }
+.account { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px; border: 1px solid var(--border-default, #e4e4e0); border-radius: 10px; }
+.email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font-size: 11px; color: var(--text-tertiary, #8a8a86); }
+.expired { color: var(--error-fg, #b53333); }
+button { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border-default, #e4e4e0); background: transparent; color: inherit; cursor: pointer; font: inherit; }
+button.primary { margin-top: 10px; background: var(--accent-cta-bg, #262626); color: var(--accent-pure-cta-fg, #fff); border-color: transparent; }
+button:disabled { opacity: .5; cursor: default; }
+#accounts:empty::after { content: '尚未连接账号'; display: block; margin-top: 8px; font-size: 11px; color: var(--text-tertiary, #8a8a86); }
+#status:empty { display: none; }

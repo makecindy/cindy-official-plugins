@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "id": "microsoft-outlook",
+  "name": "Outlook",
+  "description": "独立连接 Microsoft Outlook：搜索、阅读、整理邮件并生成草稿或发送邮件。授权与令牌由 Cindy 托管。",
+  "whenToUse": "需要查 Outlook 邮件、读取邮件正文、整理邮件、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Microsoft 账号。",
+  "version": "1.0.0",
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "slots": ["tool", "network"],
+  "command": "microsoft-outlook",
+  "network": {
+    "hosts": [
+      "login.microsoftonline.com",
+      "graph.microsoft.com"
+    ],
+    "secrets": [
+      {
+        "key": "outlook_account",
+        "label": "Outlook 账号",
+        "source": "oauth",
+        "hint": "只授权 Outlook 邮箱权限；到本插件详情页点「连接账号」完成授权",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": ["graph.microsoft.com"]
+        },
+        "oauth": {
+          "authorizeUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+          "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+          "clientId": "93f8508e-04c6-4c69-b707-8f5cd45b17c5",
+          "scopes": [
+            "openid",
+            "profile",
+            "email",
+            "offline_access",
+            "User.Read",
+            "Mail.ReadWrite",
+            "Mail.Send"
+          ],
+          "pkce": true,
+          "redirectPort": 53683,
+          "extraAuthorizeParams": {
+            "prompt": "select_account"
+          },
+          "identity": {
+            "url": "https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail,displayName,id",
+            "labelPath": "userPrincipalName"
+          }
+        }
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "outlook_accounts",
+      "description": "列出本插件已连接的 Microsoft Outlook 账号及状态。账号必须先在 Outlook 插件详情页单独授权。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "outlook",
+      "description": "执行 Outlook 邮箱操作：search 搜索邮件，read 读取正文，send 发送邮件，draft 保存草稿，mark_read/mark_unread 修改已读状态，move 移动邮件，list_folders 列出文件夹。发送和整理动作必须由用户明确表达。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "search",
+              "read",
+              "send",
+              "draft",
+              "mark_read",
+              "mark_unread",
+              "move",
+              "list_folders"
+            ]
+          },
+          "account": {
+            "type": "string",
+            "description": "账号 id；省略时使用本插件默认账号"
+          },
+          "query": {
+            "type": "string",
+            "description": "search 使用的纯文本关键词或短语"
+          },
+          "max_results": {
+            "type": "number",
+            "description": "search 返回条数，默认 5，最大 10"
+          },
+          "message_id": {
+            "type": "string",
+            "description": "read、mark_read、mark_unread、move 使用的邮件 id"
+          },
+          "destination_folder_id": {
+            "type": "string",
+            "description": "move 的目标文件夹 id；先调用 list_folders 获取"
+          },
+          "to": {
+            "type": "string",
+            "description": "send/draft 收件人，多个用逗号分隔"
+          },
+          "cc": {
+            "type": "string",
+            "description": "send/draft 抄送人，多个用逗号分隔"
+          },
+          "bcc": {
+            "type": "string",
+            "description": "send/draft 密送人，多个用逗号分隔"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body_text": {
+            "type": "string"
+          }
+        },
+        "required": ["action"]
+      }
+    }
+  ]
+}
