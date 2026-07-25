@@ -1,0 +1,13 @@
+{
+  "name": "Yahoo Mail",
+  "description": "通过 Yahoo Mail IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。应用密码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
+  "whenToUse": "需要查找、阅读或整理 Yahoo Mail 邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入完整 Yahoo 邮箱地址和应用密码并完成连接测试。",
+  "tools": {
+    "yahoo_mail_status": {
+      "description": "查询 Yahoo Mail 是否已配置。只返回邮箱地址和连接状态，不返回应用密码。"
+    },
+    "yahoo_mail": {
+      "description": "执行 Yahoo Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。"
+    }
+  }
+}

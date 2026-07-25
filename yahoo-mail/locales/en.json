@@ -1,0 +1,13 @@
+{
+  "name": "Yahoo Mail",
+  "description": "Search, read, and organize messages through Yahoo Mail IMAP/SMTP, and create drafts or send mail. Cindy stores the app password securely and provides it to the plugin Worker only while handling a mail request.",
+  "whenToUse": "Use when the user needs to find, read, or organize Yahoo Mail messages, create a draft, or send mail. Before first use, enter the complete Yahoo email address and app password in the plugin details and complete the connection test.",
+  "tools": {
+    "yahoo_mail_status": {
+      "description": "Check whether Yahoo Mail is configured. Returns only the email address and connection status, never the app password."
+    },
+    "yahoo_mail": {
+      "description": "Perform Yahoo Mail operations: list folders, search, read, send, save drafts, mark messages read or unread, and move messages. Each operation opens a temporary IMAP/SMTP connection and closes it afterward. Sending, moving, and changing read status require explicit user intent."
+    }
+  }
+}
