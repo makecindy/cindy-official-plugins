@@ -5,6 +5,12 @@
   "description": "独立连接 Microsoft Outlook：搜索、阅读、整理邮件并生成草稿或发送邮件。授权与令牌由 Cindy 托管。",
   "whenToUse": "需要查 Outlook 邮件、读取邮件正文、整理邮件、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Microsoft 账号。",
   "version": "1.0.0",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
   "author": "Cindy",
   "icon": "assets/icon.png",
   "entry": "main.js",

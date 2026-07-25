@@ -1,0 +1,13 @@
+{
+  "name": "Outlook",
+  "description": "Microsoft Outlook에 별도로 연결하여 메일을 검색하고 읽고 정리하며, 임시보관 메일을 만들거나 메일을 보냅니다. 인증과 토큰은 Cindy가 관리합니다.",
+  "whenToUse": "Outlook 메일 검색, 본문 읽기, 메일 정리, 임시보관 또는 보내기가 필요할 때 사용합니다. 먼저 이 플러그인 상세 화면에서 Microsoft 계정을 별도로 연결하세요.",
+  "tools": {
+    "outlook_accounts": {
+      "description": "이 플러그인에 연결된 Microsoft Outlook 계정과 상태를 표시합니다. 각 계정은 먼저 Outlook 플러그인 상세 화면에서 인증해야 합니다."
+    },
+    "outlook": {
+      "description": "Outlook에서 메일 검색, 본문 읽기, 보내기, 임시보관, 읽음·읽지 않음 표시, 메일 이동, 폴더 목록 조회를 수행합니다. 보내기와 정리 작업에는 사용자의 명확한 요청이 필요합니다."
+    }
+  }
+}

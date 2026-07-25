@@ -1,0 +1,13 @@
+{
+  "name": "Outlook",
+  "description": "Microsoft Outlookへ個別に接続し、メールの検索、閲覧、整理、下書き作成、送信を行います。認可とトークンはCindyが管理します。",
+  "whenToUse": "Outlookメールの検索、本文の閲覧、整理、下書き作成、または送信が必要な場合に使用します。最初にこのプラグインの詳細画面でMicrosoftアカウントを個別に接続してください。",
+  "tools": {
+    "outlook_accounts": {
+      "description": "このプラグインに接続済みのMicrosoft Outlookアカウントと状態を一覧表示します。各アカウントは先にOutlookプラグインの詳細画面で認可する必要があります。"
+    },
+    "outlook": {
+      "description": "Outlookでメール検索、本文閲覧、送信、下書き保存、既読・未読の変更、メール移動、フォルダー一覧を実行します。送信や整理操作にはユーザーの明確な指示が必要です。"
+    }
+  }
+}
