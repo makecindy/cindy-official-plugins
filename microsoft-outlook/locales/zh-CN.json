@@ -1,0 +1,13 @@
+{
+  "name": "Outlook",
+  "description": "独立连接 Microsoft Outlook：搜索、阅读、整理邮件并生成草稿或发送邮件。授权与令牌由 Cindy 托管。",
+  "whenToUse": "需要查 Outlook 邮件、读取邮件正文、整理邮件、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Microsoft 账号。",
+  "tools": {
+    "outlook_accounts": {
+      "description": "列出本插件已连接的 Microsoft Outlook 账号及状态。账号必须先在 Outlook 插件详情页单独授权。"
+    },
+    "outlook": {
+      "description": "执行 Outlook 邮箱操作：search 搜索邮件，read 读取正文，send 发送邮件，draft 保存草稿，mark_read/mark_unread 修改已读状态，move 移动邮件，list_folders 列出文件夹。发送和整理动作必须由用户明确表达。"
+    }
+  }
+}

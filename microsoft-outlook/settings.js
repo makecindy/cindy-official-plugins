@@ -1,0 +1,93 @@
+(function () {
+  'use strict';
+  var KEY = 'outlook_account';
+  var LABEL = 'Microsoft';
+  var $ = function (id) { return document.getElementById(id); };
+  function status(text) { $('status').textContent = text; }
+  function connectError(result) {
+    var labels = {
+      NO_CLIENT_CONFIG: '插件缺少 OAuth 客户端配置，请更新插件',
+      INVALID_CONFIG: 'OAuth 配置无效，请更新插件',
+      CALLBACK_INVALID: '授权回调校验失败，请重试',
+      EXCHANGE_FAILED: 'Microsoft token 交换失败，请检查 Entra 应用的桌面回调配置',
+      NETWORK: '连接 Microsoft 失败，请检查网络后重试',
+      TIMEOUT: '授权等待超时，请重试',
+      CANCELLED: '授权已取消',
+      ACCOUNT_LIMIT: '已达到账号数量上限',
+      VAULT_WRITE_FAILED: '账号保存失败，请重试',
+    };
+    var code = result && result.error ? String(result.error) : '';
+    var message = labels[code] || '连接失败，请重试';
+    var detail = result && result.detail ? String(result.detail).trim() : '';
+    return detail ? message + '（' + detail + '）' : message;
+  }
+  function render(entry) {
+    var box = $('accounts');
+    box.textContent = '';
+    ((entry && entry.accounts) || []).forEach(function (account) {
+      var row = document.createElement('div');
+      row.className = 'account';
+      var email = document.createElement('span');
+      email.className = 'email';
+      email.textContent = account.label || account.id;
+      row.appendChild(email);
+      var tag = document.createElement('span');
+      tag.className = 'tag' + (account.status === 'expired' ? ' expired' : '');
+      tag.textContent = account.status === 'expired' ? '需重新连接' : account.isDefault ? '默认' : '';
+      row.appendChild(tag);
+      if (!account.isDefault && account.status !== 'expired') {
+        var makeDefault = document.createElement('button');
+        makeDefault.textContent = '设为默认';
+        makeDefault.onclick = function () {
+          void fetch('/oauth/' + KEY + '/default', {
+            method: 'POST',
+            body: JSON.stringify({ accountId: account.id }),
+          }).then(load);
+        };
+        row.appendChild(makeDefault);
+      }
+      var disconnect = document.createElement('button');
+      disconnect.textContent = '断开';
+      disconnect.onclick = function () {
+        void fetch('/oauth/' + KEY + '/accounts/' + encodeURIComponent(account.id), {
+          method: 'DELETE',
+        }).then(load);
+      };
+      row.appendChild(disconnect);
+      box.appendChild(row);
+    });
+  }
+  async function load() {
+    try {
+      var response = await fetch('/oauth');
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var list = await response.json();
+      if (!Array.isArray(list)) throw new Error('invalid response');
+      render(list.find(function (item) { return item && item.key === KEY; }));
+    } catch (_err) {
+      render(null);
+      status('账号状态加载失败，请重试');
+    }
+  }
+  async function connect() {
+    $('connect').disabled = true;
+    status('已打开浏览器，请完成 ' + LABEL + ' 授权…');
+    try {
+      var response = await fetch('/oauth/' + KEY + '/connect', { method: 'POST' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var result = await response.json();
+      if (result.ok) {
+        status('已连接 ' + (result.account && result.account.label ? result.account.label : '账号'));
+      } else {
+        status(connectError(result));
+      }
+      await load();
+    } catch (_err) {
+      status('连接失败，请重试');
+    } finally {
+      $('connect').disabled = false;
+    }
+  }
+  $('connect').onclick = function () { void connect(); };
+  void load();
+})();

@@ -1,0 +1,13 @@
+{
+  "name": "Outlook",
+  "description": "Connect Microsoft Outlook independently to search, read, and organize messages, and create drafts or send mail. Cindy manages authorization and tokens.",
+  "whenToUse": "Use when the user needs to search Outlook mail, read message bodies, organize messages, create drafts, or send mail. Connect a Microsoft account separately in this plugin's details first.",
+  "tools": {
+    "outlook_accounts": {
+      "description": "List the Microsoft Outlook accounts connected to this plugin and their status. Each account must first be authorized in the Outlook plugin details."
+    },
+    "outlook": {
+      "description": "Perform Outlook operations: search messages, read message bodies, send mail, save drafts, mark messages read or unread, move messages, and list folders. Sending and organization actions require explicit user intent."
+    }
+  }
+}
