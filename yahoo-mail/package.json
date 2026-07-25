@@ -1,7 +1,7 @@
 {
   "name": "@cindy-official/yahoo-mail",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build-only dependencies for the Cindy Yahoo Mail plugin Node Worker.",
   "scripts": {
     "build": "esbuild src/entry.cjs --bundle --platform=node --format=cjs --target=node20 --outfile=node/worker.cjs --legal-comments=eof"

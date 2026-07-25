@@ -15,7 +15,10 @@ const YAHOO = Object.freeze({
 const MAX_BODY_CHARS = 20000;
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SECRET_KEY = 'yahoo_mail_app_password';
+const SECRET_KEYS = Object.freeze({
+  a: 'yahoo_mail_app_password',
+  b: 'yahoo_mail_app_password_b',
+});
 
 function normalizeCredentials(value) {
   const input = value && typeof value === 'object' ? value : {};
@@ -42,8 +45,16 @@ function consumeRequestCredentials(request) {
   const params = request.params && typeof request.params === 'object' ? request.params : {};
   const cindy = request.cindy && typeof request.cindy === 'object' ? request.cindy : {};
   const secrets = cindy.secrets && typeof cindy.secrets === 'object' ? cindy.secrets : {};
-  const rawCode = secrets[SECRET_KEY];
-  secrets[SECRET_KEY] = '';
+  const credentialSlot = params.credentialSlot === undefined ? 'a' : params.credentialSlot;
+  const rawCode = credentialSlot === 'a' || credentialSlot === 'b'
+    ? secrets[SECRET_KEYS[credentialSlot]]
+    : undefined;
+  Object.values(SECRET_KEYS).forEach((key) => {
+    secrets[key] = '';
+  });
+  if (credentialSlot !== 'a' && credentialSlot !== 'b') {
+    throw new Error('INVALID_CREDENTIAL_SLOT');
+  }
   return normalizeCredentials({
     email: params.email,
     appPassword: rawCode,
@@ -380,6 +391,7 @@ async function saveDraft(credentials, action, deps) {
     return withImap(credentials, deps, async (client) => {
       const folder = await findDraftFolder(client);
       const appended = await client.append(folder, info.message, ['\\Draft'], new Date());
+      if (!appended) throw new Error('DRAFT_SAVE_FAILED');
       return {
         draft: true,
         folder,
@@ -503,6 +515,9 @@ function humanizeError(error) {
   if (message === 'NOT_CONFIGURED') {
     return '尚未配置 Yahoo Mail，请到「Yahoo Mail」插件详情页输入邮箱和应用密码';
   }
+  if (message === 'INVALID_CREDENTIAL_SLOT') {
+    return 'Yahoo Mail 凭证状态无效，请在插件详情页重新连接';
+  }
   if (
     code === 'EAUTH'
     || combined.includes('authenticationfailed')
@@ -528,6 +543,9 @@ function humanizeError(error) {
   if (message === 'MESSAGE_TOO_LARGE') return '邮件内容过大，当前版本暂时无法处理';
   if (message === 'DRAFT_FOLDER_NOT_FOUND') {
     return '没有找到 Yahoo Mail 草稿箱，请先调用 list_folders 确认服务器文件夹';
+  }
+  if (message === 'DRAFT_SAVE_FAILED') {
+    return 'Yahoo Mail 未能保存草稿，请稍后重试';
   }
   if (message === 'TARGET_FOLDER_REQUIRED') return 'move 需要目标文件夹';
   if (message === 'TARGET_FOLDER_SAME') return '目标文件夹不能与当前文件夹相同';

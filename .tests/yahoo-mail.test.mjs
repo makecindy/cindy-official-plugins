@@ -40,8 +40,14 @@ function createMainHarness(nodeResponder, initial = {}) {
   FakeBroadcastChannel.instances.length = 0;
   const nodeRequests = [];
   const sent = [];
-  const kv = { email: initial.email || 'user@yahoo.com' };
-  let secretSaved = initial.secretSaved !== false;
+  const kv = {
+    email: initial.email || 'user@yahoo.com',
+    credentialSlot: initial.credentialSlot || 'a',
+  };
+  const secretSaved = {
+    a: initial.secretSaved !== false,
+    b: initial.secretSavedB === true,
+  };
   let hostHandler;
   let resolveToolResult;
   const fetchCalls = [];
@@ -68,7 +74,10 @@ function createMainHarness(nodeResponder, initial = {}) {
     fetchCalls.push({ path, options });
     if (path === '/kv') return response({ ...kv });
     if (path === '/secrets') {
-      return response([{ key: 'yahoo_mail_app_password', saved: secretSaved }]);
+      return response([
+        { key: 'yahoo_mail_app_password', saved: secretSaved.a },
+        { key: 'yahoo_mail_app_password_b', saved: secretSaved.b },
+      ]);
     }
     return response(null, false);
   }
@@ -89,8 +98,8 @@ function createMainHarness(nodeResponder, initial = {}) {
     fetchCalls,
     nodeRequests,
     sent,
-    setSecretSaved(value) {
-      secretSaved = value;
+    setSecretSaved(slot, value) {
+      secretSaved[slot] = value;
     },
     async settings(action, payload, reqId = `settings-${action}`) {
       const channel = FakeBroadcastChannel.instances[0];
@@ -139,15 +148,24 @@ function createWorkerHarness(overrides = {}, parseMessage = async () => ({})) {
 
 test('manifest 声明 Cindy 持久凭证及其最小 Node 注入范围', () => {
   assert.equal(manifest.id, 'yahoo-mail');
-  assert.equal(manifest.version, '0.1.0');
+  assert.equal(manifest.version, '0.1.1');
   assert.deepEqual(manifest.slots, ['tool', 'node']);
-  assert.deepEqual(manifest.node.secretBindings, [{
-    key: 'yahoo_mail_app_password',
-    label: 'Yahoo 应用密码',
-    methods: ['account/connect', 'mail/action'],
-    hint: 'Yahoo 账户安全页面生成的应用密码，不是 Yahoo 账户密码',
-    url: 'https://help.yahoo.com/kb/account/access-yahoo-mail-third-party-apps-sln15241.html',
-  }]);
+  assert.deepEqual(manifest.node.secretBindings, [
+    {
+      key: 'yahoo_mail_app_password',
+      label: 'Yahoo 应用密码 A',
+      methods: ['account/connect', 'mail/action'],
+      hint: 'Yahoo 账户安全页面生成的应用密码，不是 Yahoo 账户密码',
+      url: 'https://help.yahoo.com/kb/account/access-yahoo-mail-third-party-apps-sln15241.html',
+    },
+    {
+      key: 'yahoo_mail_app_password_b',
+      label: 'Yahoo 应用密码 B',
+      methods: ['account/connect', 'mail/action'],
+      hint: 'Yahoo 账户安全页面生成的应用密码，不是 Yahoo 账户密码',
+      url: 'https://help.yahoo.com/kb/account/access-yahoo-mail-third-party-apps-sln15241.html',
+    },
+  ]);
   assert.match(manifest.description, /Cindy 安全保存/);
 });
 
@@ -160,19 +178,36 @@ test('Worker 使用 Yahoo 官方 IMAP/SMTP SSL 端点', () => {
   });
 });
 
-test('设置页把 Yahoo 应用密码直接写入 /secrets，BroadcastChannel 只发送邮箱', () => {
-  assert.match(settingsSource, /fetch\('\/secrets\/'\s*\+\s*SECRET_KEY/);
+test('设置页使用双凭证槽安全切换，BroadcastChannel 不发送 Yahoo 应用密码', () => {
+  assert.match(settingsSource, /fetch\('\/secrets\/'\s*\+\s*SECRET_KEYS\[credentialSlot\]/);
   assert.match(settingsSource, /body:\s*JSON\.stringify\(\{\s*value:\s*value\s*\}\)/);
-  assert.match(settingsSource, /payload:\s*\{\s*email:\s*email\s*\}/);
+  assert.match(
+    settingsSource,
+    /payload:\s*\{\s*email:\s*email,\s*credentialSlot:\s*credentialSlot\s*\}/,
+  );
   assert.doesNotMatch(mainSource, /appPassword/);
   assert.match(
     settingsSource,
     /fetch\('\/wake'\)\.then\(beginPosting,\s*beginPosting\)/,
     '设置页必须等 /wake 完成后再开始发送连接请求',
   );
+  const stageIndex = settingsSource.indexOf(
+    'await saveAppPassword(candidateSlot, appPassword)',
+  );
+  const validateIndex = settingsSource.indexOf(
+    'await sendConnect(email, candidateSlot, 50000)',
+  );
+  const commitStartedIndex = settingsSource.indexOf('commitStarted = true');
+  const commitIndex = settingsSource.indexOf(
+    'await saveAccountState(email, candidateSlot)',
+  );
+  assert.ok(stageIndex >= 0 && stageIndex < validateIndex);
+  assert.ok(validateIndex < commitStartedIndex && commitStartedIndex < commitIndex);
+  assert.match(settingsSource, /candidateStored\s*&&\s*!commitStarted/);
+  assert.match(settingsSource, /render\(previousState\s*\|\|\s*\{\s*connected:\s*false\s*\}\)/);
 });
 
-test('main.js 的连接与邮件请求都只携带非敏感邮箱地址', async () => {
+test('main.js 的连接与邮件请求只携带邮箱和非敏感凭证槽位', async () => {
   const harness = createMainHarness(async (request) => ({
     ok: true,
     result: request.method === 'account/connect'
@@ -180,17 +215,21 @@ test('main.js 的连接与邮件请求都只携带非敏感邮箱地址', async 
       : { folder: 'INBOX', messages: [] },
   }));
 
-  const connected = await harness.settings('connect', { email: 'USER@yahoo.com' });
+  const connected = await harness.settings('connect', {
+    email: 'USER@yahoo.com',
+    credentialSlot: 'b',
+  });
   assert.equal(connected.ok, true);
   assert.equal(
     JSON.stringify(harness.nodeRequests[0].params),
-    JSON.stringify({ email: 'user@yahoo.com' }),
+    JSON.stringify({ email: 'user@yahoo.com', credentialSlot: 'b' }),
   );
 
   const result = await harness.call('yahoo_mail', { action: 'search', text: '账单' });
   assert.equal(result.ok, true);
   assert.equal(harness.nodeRequests[1].method, 'mail/action');
   assert.equal(harness.nodeRequests[1].params.email, 'user@yahoo.com');
+  assert.equal(harness.nodeRequests[1].params.credentialSlot, 'a');
   assert.equal('credentials' in harness.nodeRequests[1].params, false);
   assert.equal('appPassword' in harness.nodeRequests[1].params, false);
 });
@@ -210,7 +249,7 @@ test('状态取自 Cindy 持久存储，不依赖 Worker 是否仍在运行', as
   );
   assert.equal(harness.nodeRequests.length, 0);
 
-  harness.setSecretSaved(false);
+  harness.setSecretSaved('a', false);
   const disconnected = await harness.call('yahoo_mail_status');
   assert.equal(disconnected.result.connected, false);
   assert.equal(disconnected.result.email, 'user@yahoo.com');
@@ -277,8 +316,13 @@ test('Worker 每次只消费宿主注入凭证，并让 IMAP 操作 connect + lo
   };
   const connectRequest = {
     method: 'account/connect',
-    params: { email: 'user@yahoo.com' },
-    cindy: { secrets: { yahoo_mail_app_password: 'abcdefghijklmnop' } },
+    params: { email: 'user@yahoo.com', credentialSlot: 'b' },
+    cindy: {
+      secrets: {
+        yahoo_mail_app_password: 'old-password',
+        yahoo_mail_app_password_b: 'abcdefghijklmnop',
+      },
+    },
   };
   const connected = await worker.handleRequest(connectRequest, {
     ...deps,
@@ -291,20 +335,28 @@ test('Worker 每次只消费宿主注入凭证，并让 IMAP 操作 connect + lo
   });
   assert.equal(connected.persistence, 'cindy-safe-storage');
   assert.equal(connectRequest.cindy.secrets.yahoo_mail_app_password, '');
+  assert.equal(connectRequest.cindy.secrets.yahoo_mail_app_password_b, '');
 
   calls.length = 0;
   const actionRequest = {
     method: 'mail/action',
     params: {
       email: 'user@yahoo.com',
+      credentialSlot: 'a',
       action: { action: 'list_folders' },
     },
-    cindy: { secrets: { yahoo_mail_app_password: 'abcdefghijklmnop' } },
+    cindy: {
+      secrets: {
+        yahoo_mail_app_password: 'abcdefghijklmnop',
+        yahoo_mail_app_password_b: 'unused-password',
+      },
+    },
   };
   const result = await worker.handleRequest(actionRequest, deps);
   assert.deepEqual(calls, ['connect', 'list', 'logout']);
   assert.equal(result.folders[0].path, 'INBOX');
   assert.equal(actionRequest.cindy.secrets.yahoo_mail_app_password, '');
+  assert.equal(actionRequest.cindy.secrets.yahoo_mail_app_password_b, '');
   assert.equal(JSON.stringify(result).includes('abcdefghijklmnop'), false);
 });
 
@@ -440,6 +492,37 @@ test('Worker 仅在服务器返回目标 UID 映射时报告移动成功', async
   assert.equal(moveCalls, 3);
 });
 
+test('Worker 不会把 IMAP append 返回 false 误报为草稿保存成功', async () => {
+  const harness = createWorkerHarness({
+    async list() {
+      return [{ path: 'Drafts', specialUse: '\\Drafts' }];
+    },
+    async append() {
+      return false;
+    },
+  });
+  harness.deps.createComposer = () => ({
+    async sendMail() {
+      return { message: Buffer.from('Subject: Test\r\n\r\nDraft') };
+    },
+    close() {},
+  });
+
+  await assert.rejects(
+    worker.performAction(
+      { email: 'user@yahoo.com', appPassword: 'abcdefghijklmnop' },
+      {
+        action: 'draft',
+        to: 'recipient@example.com',
+        subject: 'Test',
+        body_text: 'Draft',
+      },
+      harness.deps,
+    ),
+    /DRAFT_SAVE_FAILED/,
+  );
+});
+
 test('Worker 分块读取邮件，并在解析前拒绝超过 12 MiB 的内容', async () => {
   const maxSourceBytes = 12 * 1024 * 1024;
   let parseCalls = 0;
@@ -483,4 +566,5 @@ test('Worker 将认证、网络与频控错误转换成可行动文案', () => {
   assert.match(worker.humanizeError(Object.assign(new Error('connect timed out'), { code: 'ETIMEDOUT' })), /网络/);
   assert.match(worker.humanizeError(new Error('Too many simultaneous connections')), /稍后/);
   assert.match(worker.humanizeError(new Error('MESSAGE_MOVE_UNCONFIRMED')), /重新搜索/);
+  assert.match(worker.humanizeError(new Error('DRAFT_SAVE_FAILED')), /草稿/);
 });

@@ -66110,7 +66110,10 @@ var require_worker = __commonJS({
     var MAX_BODY_CHARS = 2e4;
     var MAX_SOURCE_BYTES = 12 * 1024 * 1024;
     var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    var SECRET_KEY = "yahoo_mail_app_password";
+    var SECRET_KEYS = Object.freeze({
+      a: "yahoo_mail_app_password",
+      b: "yahoo_mail_app_password_b"
+    });
     function normalizeCredentials(value) {
       const input = value && typeof value === "object" ? value : {};
       const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
@@ -66125,8 +66128,14 @@ var require_worker = __commonJS({
       const params = request.params && typeof request.params === "object" ? request.params : {};
       const cindy = request.cindy && typeof request.cindy === "object" ? request.cindy : {};
       const secrets = cindy.secrets && typeof cindy.secrets === "object" ? cindy.secrets : {};
-      const rawCode = secrets[SECRET_KEY];
-      secrets[SECRET_KEY] = "";
+      const credentialSlot = params.credentialSlot === void 0 ? "a" : params.credentialSlot;
+      const rawCode = credentialSlot === "a" || credentialSlot === "b" ? secrets[SECRET_KEYS[credentialSlot]] : void 0;
+      Object.values(SECRET_KEYS).forEach((key) => {
+        secrets[key] = "";
+      });
+      if (credentialSlot !== "a" && credentialSlot !== "b") {
+        throw new Error("INVALID_CREDENTIAL_SLOT");
+      }
       return normalizeCredentials({
         email: params.email,
         appPassword: rawCode
@@ -66425,6 +66434,7 @@ var require_worker = __commonJS({
         return withImap(credentials, deps, async (client) => {
           const folder = await findDraftFolder(client);
           const appended = await client.append(folder, info.message, ["\\Draft"], /* @__PURE__ */ new Date());
+          if (!appended) throw new Error("DRAFT_SAVE_FAILED");
           return {
             draft: true,
             folder,
@@ -66535,6 +66545,9 @@ var require_worker = __commonJS({
       if (message === "NOT_CONFIGURED") {
         return "\u5C1A\u672A\u914D\u7F6E Yahoo Mail\uFF0C\u8BF7\u5230\u300CYahoo Mail\u300D\u63D2\u4EF6\u8BE6\u60C5\u9875\u8F93\u5165\u90AE\u7BB1\u548C\u5E94\u7528\u5BC6\u7801";
       }
+      if (message === "INVALID_CREDENTIAL_SLOT") {
+        return "Yahoo Mail \u51ED\u8BC1\u72B6\u6001\u65E0\u6548\uFF0C\u8BF7\u5728\u63D2\u4EF6\u8BE6\u60C5\u9875\u91CD\u65B0\u8FDE\u63A5";
+      }
       if (code === "EAUTH" || combined.includes("authenticationfailed") || combined.includes("authentication failed") || combined.includes("invalid credentials") || combined.includes("login failed")) {
         return "Yahoo Mail \u62D2\u7EDD\u767B\u5F55\u3002\u8BF7\u786E\u8BA4\u90AE\u7BB1\u5730\u5740\u6B63\u786E\uFF0C\u5E76\u4F7F\u7528\u751F\u6210\u7684\u5E94\u7528\u5BC6\u7801\uFF08\u4E0D\u662F Yahoo \u8D26\u6237\u5BC6\u7801\uFF09";
       }
@@ -66548,6 +66561,9 @@ var require_worker = __commonJS({
       if (message === "MESSAGE_TOO_LARGE") return "\u90AE\u4EF6\u5185\u5BB9\u8FC7\u5927\uFF0C\u5F53\u524D\u7248\u672C\u6682\u65F6\u65E0\u6CD5\u5904\u7406";
       if (message === "DRAFT_FOLDER_NOT_FOUND") {
         return "\u6CA1\u6709\u627E\u5230 Yahoo Mail \u8349\u7A3F\u7BB1\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u786E\u8BA4\u670D\u52A1\u5668\u6587\u4EF6\u5939";
+      }
+      if (message === "DRAFT_SAVE_FAILED") {
+        return "Yahoo Mail \u672A\u80FD\u4FDD\u5B58\u8349\u7A3F\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
       }
       if (message === "TARGET_FOLDER_REQUIRED") return "move \u9700\u8981\u76EE\u6807\u6587\u4EF6\u5939";
       if (message === "TARGET_FOLDER_SAME") return "\u76EE\u6807\u6587\u4EF6\u5939\u4E0D\u80FD\u4E0E\u5F53\u524D\u6587\u4EF6\u5939\u76F8\u540C";

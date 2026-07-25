@@ -4,7 +4,7 @@
   "name": "Yahoo Mail",
   "description": "通过 Yahoo Mail IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。应用密码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
   "whenToUse": "需要查找、阅读或整理 Yahoo Mail 邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入完整 Yahoo 邮箱地址和应用密码并完成连接测试。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -28,7 +28,17 @@
     "secretBindings": [
       {
         "key": "yahoo_mail_app_password",
-        "label": "Yahoo 应用密码",
+        "label": "Yahoo 应用密码 A",
+        "methods": [
+          "account/connect",
+          "mail/action"
+        ],
+        "hint": "Yahoo 账户安全页面生成的应用密码，不是 Yahoo 账户密码",
+        "url": "https://help.yahoo.com/kb/account/access-yahoo-mail-third-party-apps-sln15241.html"
+      },
+      {
+        "key": "yahoo_mail_app_password_b",
+        "label": "Yahoo 应用密码 B",
         "methods": [
           "account/connect",
           "mail/action"

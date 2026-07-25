@@ -2,7 +2,10 @@
   'use strict';
 
   var CHANNEL = 'yahoo-mail-settings';
-  var SECRET_KEY = 'yahoo_mail_app_password';
+  var SECRET_KEYS = {
+    a: 'yahoo_mail_app_password',
+    b: 'yahoo_mail_app_password_b',
+  };
   var channel = new BroadcastChannel(CHANNEL);
   var pending = {};
 
@@ -51,40 +54,59 @@
       : {};
     var secretItems = Array.isArray(values[1]) ? values[1] : [];
     var email = typeof kv.email === 'string' ? kv.email.trim().toLowerCase() : '';
-    var secretSaved = secretItems.some(function hasSavedSecret(item) {
-      return item && item.key === SECRET_KEY && item.saved === true;
+    var credentialSlot = kv.credentialSlot === 'b' ? 'b' : 'a';
+    var savedSlots = { a: false, b: false };
+    secretItems.forEach(function recordSavedSecret(item) {
+      if (!item || item.saved !== true) return;
+      if (item.key === SECRET_KEYS.a) savedSlots.a = true;
+      if (item.key === SECRET_KEYS.b) savedSlots.b = true;
     });
-    return { connected: Boolean(email && secretSaved), email: email || null };
+    return {
+      connected: Boolean(email && savedSlots[credentialSlot]),
+      email: email || null,
+      credentialSlot: credentialSlot,
+      savedSlots: savedSlots,
+    };
   }
 
-  async function saveEmail(email) {
+  async function saveAccountState(email, credentialSlot) {
     var current = await readJson('/kv');
     var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
     data.email = email;
+    data.credentialSlot = credentialSlot;
     var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error('保存 Yahoo 邮箱地址失败');
+    if (!response.ok) throw new Error('保存 Yahoo Mail 连接状态失败');
   }
 
-  async function saveAppPassword(value) {
-    var response = await fetch('/secrets/' + SECRET_KEY, {
+  async function clearAccountState() {
+    var current = await readJson('/kv');
+    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+    delete data.email;
+    delete data.credentialSlot;
+    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+    if (!response.ok) throw new Error('清除 Yahoo Mail 连接状态失败');
+  }
+
+  async function saveAppPassword(credentialSlot, value) {
+    var response = await fetch('/secrets/' + SECRET_KEYS[credentialSlot], {
       method: 'PUT',
       body: JSON.stringify({ value: value }),
     });
     if (!response.ok) throw new Error('安全保存 Yahoo 应用密码失败');
   }
 
-  async function removeAppPassword() {
-    var response = await fetch('/secrets/' + SECRET_KEY, { method: 'DELETE' });
+  async function removeAppPassword(credentialSlot) {
+    var response = await fetch('/secrets/' + SECRET_KEYS[credentialSlot], { method: 'DELETE' });
     if (!response.ok) throw new Error('清除 Yahoo 应用密码失败');
   }
 
-  function sendConnect(email, timeoutMs) {
+  function sendConnect(email, credentialSlot, timeoutMs) {
     var reqId = requestId();
     var message = {
       type: 'settings-request',
       reqId: reqId,
       action: 'connect',
-      payload: { email: email },
+      payload: { email: email, credentialSlot: credentialSlot },
     };
     return new Promise(function (resolve, reject) {
       var settled = false;
@@ -134,26 +156,48 @@
     setBusy(true);
     showStatus('正在安全保存应用密码并测试 IMAP 和 SMTP 连接…');
     $('appPassword').value = '';
-    var secretStored = false;
+    var previousState = null;
+    var candidateSlot = 'a';
+    var candidateStored = false;
+    var commitStarted = false;
     try {
-      await saveEmail(email);
-      await saveAppPassword(appPassword);
-      secretStored = true;
+      previousState = await loadState();
+      candidateSlot = previousState.savedSlots[previousState.credentialSlot]
+        ? (previousState.credentialSlot === 'a' ? 'b' : 'a')
+        : previousState.credentialSlot;
+      await saveAppPassword(candidateSlot, appPassword);
+      candidateStored = true;
       appPassword = '';
-      var state = await sendConnect(email, 50000);
-      render(state);
+      var state = await sendConnect(email, candidateSlot, 50000);
+      // PUT 的响应可能丢失；从开始提交起，候选槽位就可能已被 KV 引用，不能再删除。
+      commitStarted = true;
+      await saveAccountState(email, candidateSlot);
+      render({ connected: true, email: state.email || email });
       showStatus('连接成功。Yahoo 应用密码已由 Cindy 安全保存。');
-    } catch (error) {
-      appPassword = '';
-      // 测试未通过时不保留未经验证的应用密码；清理失败不覆盖原始错误。
-      if (secretStored) {
+
+      // 新密码验证并提交成功后，再尽力清除旧槽位；清理失败不会影响新连接。
+      if (
+        previousState.credentialSlot !== candidateSlot
+        && previousState.savedSlots[previousState.credentialSlot]
+      ) {
         try {
-          await removeAppPassword();
-        } catch (_removeError) {
-          // 后续可通过“断开并清除”再次移除。
+          await removeAppPassword(previousState.credentialSlot);
+        } catch (_removeOldError) {
+          // 旧槽位已不再被引用，下次连接或断开时会再次清理。
         }
       }
-      render({ connected: false });
+    } catch (error) {
+      appPassword = '';
+      // 只有提交开始前失败才能安全清理候选槽位。即使清理失败，因为 KV 尚未引用
+      // 候选槽位，设置页和状态工具也不会把未经验证的密码误报为已连接。
+      if (candidateStored && !commitStarted) {
+        try {
+          await removeAppPassword(candidateSlot);
+        } catch (_removeError) {
+          // 清理失败不覆盖原始错误；候选槽位未被 KV 引用。
+        }
+      }
+      render(previousState || { connected: false });
       showStatus(error && error.message ? error.message : '连接失败，请重试', true);
     } finally {
       setBusy(false);
@@ -164,7 +208,13 @@
     setBusy(true);
     showStatus('');
     try {
-      await removeAppPassword();
+      var state = await loadState();
+      var inactiveSlot = state.credentialSlot === 'a' ? 'b' : 'a';
+      if (state.savedSlots[inactiveSlot]) await removeAppPassword(inactiveSlot);
+      if (state.savedSlots[state.credentialSlot]) {
+        await removeAppPassword(state.credentialSlot);
+      }
+      await clearAccountState();
       render({ connected: false });
       showStatus('已断开并从 Cindy 安全存储中清除 Yahoo 应用密码。');
     } catch (error) {
