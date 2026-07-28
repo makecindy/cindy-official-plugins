@@ -4,7 +4,7 @@
   "name": "X Manager",
   "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量为本地估算,不是官方账单。",
   "whenToUse": "需要搜 X / Twitter 上的舆情、讨论、风向,查某个账号最近说了什么、某话题近几天的走势,或需要以用户身份在 X 上发帖 / 回帖时找我。先调 x_status 看凭证与路由是否就绪,再决定用我还是改用浏览器。",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "command": "x-manager",

@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.5';
+const PLUGIN_VERSION = '1.0.6';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -96,9 +96,29 @@ const LIGHT_RANGES = [
   [0x2032, 0x2037],
 ];
 
-function weightedLength(text) {
-  let total = 0;
-  for (const ch of text) {
+/* URL 一律按 t.co 变换后的固定长度计,与原始长度无关(X 的 transformedURLLength)。
+ * 不按这条算会两头错:长链接被误拒,短链接被误放行。 */
+const TCO_URL_WEIGHT = 23;
+const URL_RE = /(?:https?:\/\/|www\.)[^\s]+/gi;
+
+/** 按字素簇切分,让 ZWJ emoji 家族这类多码点序列算作一个单位。 */
+function segmentGraphemes(text) {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      const out = [];
+      for (const piece of seg.segment(text)) out.push(piece.segment);
+      return out;
+    }
+  } catch (_) {
+    /* 没有 Segmenter 就退回逐码点,只影响 emoji 的精度 */
+  }
+  return Array.from(text);
+}
+
+/** 单个字素簇的权重:含任一非轻量码点(emoji / CJK 等)整簇算 2,否则逐码点算 1。 */
+function clusterWeight(cluster) {
+  for (const ch of cluster) {
     const cp = ch.codePointAt(0);
     let light = false;
     for (const [lo, hi] of LIGHT_RANGES) {
@@ -107,24 +127,60 @@ function weightedLength(text) {
         break;
       }
     }
-    total += light ? 1 : 2;
+    if (!light) return 2;
   }
+  return Array.from(cluster).length;
+}
+
+function weightedLength(text) {
+  let total = 0;
+  let rest = '';
+  let cursor = 0;
+  URL_RE.lastIndex = 0;
+  let m;
+  while ((m = URL_RE.exec(text)) !== null) {
+    rest += text.slice(cursor, m.index);
+    total += TCO_URL_WEIGHT;
+    cursor = m.index + m[0].length;
+  }
+  rest += text.slice(cursor);
+  for (const cluster of segmentGraphemes(rest)) total += clusterWeight(cluster);
   return total;
 }
 
 /* ── 3. 小工具 ────────────────────────────────────────────────────────── */
 
+/**
+ * 请求关联 id(x-grok-req-id / conv-id / session-id)。**不参与任何安全判定**,
+ * 但一律走 crypto:不用 Math.random,免得看起来像在安全场景里用弱随机。
+ */
+let idCounter = 0;
+
 function uuid() {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   } catch (_) {
+    /* 继续走下一档 */
+  }
+  try {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const b = new Uint8Array(16);
+      crypto.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40; // version 4
+      b[8] = (b[8] & 0x3f) | 0x80; // variant
+      let hex = '';
+      for (const n of b) hex += n.toString(16).padStart(2, '0');
+      return (
+        hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20)
+      );
+    }
+  } catch (_) {
     /* 继续走兜底 */
   }
-  let out = '';
-  for (let i = 0; i < 32; i += 1) out += Math.floor(Math.random() * 16).toString(16);
-  return (
-    out.slice(0, 8) + '-' + out.slice(8, 12) + '-4' + out.slice(13, 16) + '-a' + out.slice(17, 20) + '-' + out.slice(20)
-  );
+  /* 最后兜底:crypto 完全不可用时用单调计数器凑一个唯一串(仅用于请求关联) */
+  idCounter += 1;
+  const tail = String(idCounter).padStart(12, '0');
+  return '00000000-0000-4000-a000-' + tail;
 }
 
 /* 同一电子脑生命周期内复用会话/对话 id(代理头要求;不含任何用户数据) */
@@ -295,11 +351,22 @@ async function readUsage() {
   return usage;
 }
 
+/* /kv 是整份覆盖(last-write-wins),并发的读-改-写会互相丢更新:两次调用同时
+ * 收尾时,后写的那次会把前一次的计数与金额抹掉。用一条串行链把写入排队。 */
+let usageWriteChain = Promise.resolve();
+
 /**
  * 读-改-写 /kv 的 usage 段(整体覆盖 last-write-wins,所以先读回其它字段保留)。
+ * 经 usageWriteChain 串行化,避免并发调用互相覆盖。
  * 记账失败绝不影响工具结果——静默吞掉。
  */
-async function recordUsage(mutate) {
+function recordUsage(mutate) {
+  const run = usageWriteChain.then(() => recordUsageLocked(mutate));
+  usageWriteChain = run.catch(() => {}); // 单次失败不能卡死后续记账
+  return run;
+}
+
+async function recordUsageLocked(mutate) {
   try {
     const kv = (await readJson('/kv')) || {};
     const month = currentMonth();
