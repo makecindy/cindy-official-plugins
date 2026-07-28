@@ -4,7 +4,7 @@
   "name": "Google Drive",
   "description": "独立连接 Google Drive：搜索、读取、下载、上传、移动和删除云端文件。只申请 Drive 所需权限，授权与令牌由主机托管。",
   "whenToUse": "需要搜索或管理 Google Drive、Docs、Slides 文件时使用。请先在本插件详情页单独连接 Google Drive 账号。",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
