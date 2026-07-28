@@ -7,7 +7,7 @@
       "description": "Report readiness: whether the Grok subscription OAuth is connected, whether an xAI API key is saved, whether the X API is connected, which route x_search will take, plus this month's locally recorded call counts and estimated spend. Call it first whenever you are unsure the plugin can run; the advice field states the next step (including switching to a browser on x.com when nothing is configured). It costs nothing by itself; with probe set to true it also sends two free, non-token requests.",
       "parameters": {
         "/properties/probe": {
-          "description": "Whether to also send a free liveness request to verify each route really admits us (the 403 subscription-tier gate on the Grok route only shows up in a real request). Defaults to false, which only reads local credential state. Pass true when the user reports search failures or you need to confirm xAI admits the subscription route."
+          "description": "Whether to also run a free authentication and connectivity check (it hits the account/catalog endpoint to confirm the credential is accepted and the network is reachable). Defaults to false, which only reads local credential state. Note: it can NOT prove that search is permitted — xAI's subscription-tier 403 gate only triggers on an actual search request, so the only way to confirm is to run a real x_search. Pass true when the user reports search failures, to rule out credential and network causes first."
         }
       }
     },

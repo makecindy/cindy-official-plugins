@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.6';
+const PLUGIN_VERSION = '1.0.7';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -97,9 +97,28 @@ const LIGHT_RANGES = [
 ];
 
 /* URL 一律按 t.co 变换后的固定长度计,与原始长度无关(X 的 transformedURLLength)。
- * 不按这条算会两头错:长链接被误拒,短链接被误放行。 */
+ * 不按这条算会两头错:长链接被误拒,短链接被误放行。
+ *
+ * 三种形态都要认:带协议、www. 开头、以及**裸域名**(X 同样会 t.co 变换
+ * `example.com`)。裸域名的 TLD 用常见白名单而不是"任意字母"——后者会把
+ * `main.js` / `settings.html` 这类文件名当成链接、把近上限的正常文案误拒;
+ * 与 twitter-text 的完整 TLD 表严格对齐不在本插件范围内,X 侧的判定是最终
+ * 权威,被拒时有结构化错误兜底。 */
 const TCO_URL_WEIGHT = 23;
-const URL_RE = /(?:https?:\/\/|www\.)[^\s]+/gi;
+const COMMON_TLD =
+  'com|net|org|edu|gov|mil|int|info|biz|io|ai|co|dev|app|me|xyz|tv|cc|ly|sh|gg|so|to|' +
+  'cn|jp|kr|tw|hk|sg|in|ru|br|au|ca|uk|de|fr|nl|se|no|fi|dk|pl|tr|es|it|eu|us';
+/* URL 主体只收 RFC 3986 允许的 ASCII 字符。用 [^\s]+ 会把紧跟其后的中文一起
+ * 吞进链接——中文行文里 URL 后面常常没有空格,那样整段中文会被算成 23。 */
+const URL_BODY = "[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]";
+const URL_RE = new RegExp(
+  '(?:https?://|www\\.)' + URL_BODY + '+' +
+    '|\\b[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*' +
+    '\\.(?:' + COMMON_TLD + ')\\b(?::\\d{1,5})?(?:/' + URL_BODY + '*)?',
+  'gi'
+);
+/* URL 后面紧跟的标点不属于 URL,吞进固定权重会漏计这些字符(近上限时会误放行)。 */
+const URL_TRAILING_RE = /[.,;:!?)\]}'"…、，。；：！？）】》」』]+$/;
 
 /** 按字素簇切分,让 ZWJ emoji 家族这类多码点序列算作一个单位。 */
 function segmentGraphemes(text) {
@@ -139,9 +158,17 @@ function weightedLength(text) {
   URL_RE.lastIndex = 0;
   let m;
   while ((m = URL_RE.exec(text)) !== null) {
+    const raw = m[0];
+    const trail = raw.match(URL_TRAILING_RE);
+    const url = trail ? raw.slice(0, raw.length - trail[0].length) : raw;
+    if (!url) {
+      URL_RE.lastIndex = m.index + raw.length; // 整段都是标点:跳过,别原地死循环
+      continue;
+    }
     rest += text.slice(cursor, m.index);
     total += TCO_URL_WEIGHT;
-    cursor = m.index + m[0].length;
+    cursor = m.index + url.length; // 尾随标点退回普通字符逐个计
+    URL_RE.lastIndex = cursor;
   }
   rest += text.slice(cursor);
   for (const cluster of segmentGraphemes(rest)) total += clusterWeight(cluster);
@@ -701,8 +728,15 @@ async function probeRoute(route, callId) {
     route: route.id,
     endpoint: route.probeUrl,
     status: res && res.ok === true ? res.status : null,
-    verdict: cls.kind === 'success' ? 'reachable' : cls.kind,
+    /* 只说明"凭证能不能过、网络通不通",不声称搜索一定放行:探活打的是
+     * 账号/目录端点,订阅档位门禁只在真正的 /v1/responses 上才会 403。 */
+    verdict: cls.kind === 'success' ? 'auth_ok' : cls.kind,
+    checks: 'authentication-and-connectivity',
     detail: classifyText(route, cls),
+    caveat: tx({
+      zh: '这是免费的认证与连通性检查,不能证明搜索一定被放行——xAI 的订阅档位 403 门禁只在真正的搜索请求上才会触发。要确认能不能搜,只有真跑一次 x_search。',
+      en: 'This is a free authentication and connectivity check; it cannot prove that search is permitted — xAI\'s subscription-tier 403 gate only triggers on an actual search request. The only way to confirm is to run a real x_search.',
+    }),
   };
 }
 

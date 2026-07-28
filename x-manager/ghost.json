@@ -4,7 +4,7 @@
   "name": "X Manager",
   "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量为本地估算,不是官方账单。",
   "whenToUse": "需要搜 X / Twitter 上的舆情、讨论、风向,查某个账号最近说了什么、某话题近几天的走势,或需要以用户身份在 X 上发帖 / 回帖时找我。先调 x_status 看凭证与路由是否就绪,再决定用我还是改用浏览器。",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "command": "x-manager",
@@ -29,7 +29,7 @@
         "properties": {
           "probe": {
             "type": "boolean",
-            "description": "是否额外打一次免费探活请求实测路由是否真的放行(Grok 订阅路由的订阅档位门禁 403 只有实测才能发现)。默认 false,只看本地凭证状态。用户抱怨搜索失败、或你需要确认订阅路由是否被 xAI 放行时传 true。"
+            "description": "是否额外打一次免费的认证与连通性检查(打账号/目录端点,确认凭证能过、网络通)。默认 false,只看本地凭证状态。注意:它**不能**证明搜索一定被放行——xAI 的订阅档位 403 门禁只在真正的搜索请求上才触发,要确认只能真跑一次 x_search。用户抱怨搜索失败时传 true,可先排除掉凭证与网络这两类原因。"
           }
         }
       }
