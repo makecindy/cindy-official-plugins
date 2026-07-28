@@ -34,14 +34,6 @@
 node --test .tests/localization.test.mjs
 ```
 
-邮件插件（`163-mail`、`icloud-mail`、`qq-mail`）有各自的测试文件，需要先装该插件的
-依赖才能跑：
-
-```bash
-cd 163-mail && npm ci && cd ..
-node --test .tests/163-mail.test.mjs
-```
-
 改动任何插件的 `ghost.json` 或 `locales/` 后，**必须**跑一遍
 `node --test .tests/localization.test.mjs`——发布流水线会在打包前执行同一份检查，
 四语言（`zh-CN` / `en` / `ja` / `ko`）资源不完整会直接拦下整次发布。

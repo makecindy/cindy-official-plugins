@@ -41,14 +41,6 @@ The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 node --test .tests/localization.test.mjs
 ```
 
-The mail plugins (`163-mail`, `icloud-mail`, `qq-mail`) have their own test
-files that require the plugin's dependencies first:
-
-```bash
-cd 163-mail && npm ci && cd ..
-node --test .tests/163-mail.test.mjs
-```
-
 After changing any plugin's `ghost.json` or `locales/`, you **must** run
 `node --test .tests/localization.test.mjs`. The publish pipeline runs the same
 check before packaging, and incomplete four-language resources (`zh-CN` / `en` /
