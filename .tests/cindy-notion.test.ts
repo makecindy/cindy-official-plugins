@@ -218,6 +218,12 @@ async function createSettingsHarness(
         json: async () => [{ key: 'notion_token', saved: true, tail: '1234' }],
       };
     }
+    if (input === '/app-context') {
+      return {
+        status: 200,
+        json: async () => ({ ok: true, context: { locale: 'zh-CN' } }),
+      };
+    }
     if (input === '/kv') {
       return {
         status: 200,
@@ -237,6 +243,7 @@ async function createSettingsHarness(
     return { status: 204, json: async () => ({}) };
   });
   const document = {
+    documentElement: new FakeSettingsElement('html'),
     getElementById: (id: string) => elements.get(id) ?? null,
     querySelector: (selector: string) => {
       if (selector === '.steps-section') return stepsSection;
@@ -765,8 +772,23 @@ describe('Cindy Notion', () => {
 
 describe('Cindy Notion settings', () => {
   it('授权指引同时兼容新旧 integration 名称', () => {
-    expect(settingsHtml).toContain('新建时通常为 Notion');
-    expect(settingsHtml).toContain('旧版可能显示 Cindy Notion');
+    expect(settingsHtml).toContain('usually Notion for new integrations');
+    expect(settingsHtml).toContain('older ones may show Cindy Notion');
+    expect(settingsSource).toContain('新建时通常为 Notion');
+    expect(settingsSource).toContain('旧版可能显示 Cindy Notion');
+  });
+
+  it('跟随宿主四语言并以英文回退', () => {
+    expect(settingsHtml).toContain('<html lang="en">');
+    expect(settingsSource).toContain("fetch('/app-context')");
+    expect(settingsSource).toContain("currentLocale = 'en'");
+    expect(settingsSource).toContain('document.documentElement.lang = currentLocale');
+    expect(settingsSource).not.toMatch(/\bnavigator\.(?:language|languages)\b/);
+    for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+      expect(settingsSource).toContain(`${locale.includes('-') ? `'${locale}'` : locale}: {`);
+    }
+    expect(settingsSource).toContain('locale: currentLocale');
+    expect(notionSource).toContain('SETTINGS_MESSAGES');
   });
 
   it('密钥删除失败时保留身份缓存并显示失败', async () => {

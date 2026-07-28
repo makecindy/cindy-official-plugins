@@ -965,6 +965,39 @@ var bc = new BroadcastChannel('cindy-notion');
 var seenTests = {};
 var latestTestId = '';
 var identityWriteQueue = Promise.resolve();
+var SETTINGS_MESSAGES = {
+  en: {
+    failed: 'Notion connection test failed: ',
+    visibilityFailed: 'The token is valid, but the page access check failed: ',
+    noPages: 'The token is valid, but no Notion pages are authorized yet.',
+    connected: 'Notion connected. Accessible content: {count}',
+  },
+  'zh-CN': {
+    failed: 'Notion 连接测试失败：',
+    visibilityFailed: 'Token 有效，但页面授权检查失败：',
+    noPages: 'Token 有效，但还没有授权任何 Notion 页面',
+    connected: 'Notion 已连接，可读取 {count} 项内容',
+  },
+  ja: {
+    failed: 'Notion 接続テストに失敗しました：',
+    visibilityFailed: 'トークンは有効ですが、ページのアクセス確認に失敗しました：',
+    noPages: 'トークンは有効ですが、Notion ページがまだ許可されていません。',
+    connected: 'Notion に接続しました。アクセス可能な内容：{count} 件',
+  },
+  ko: {
+    failed: 'Notion 연결 테스트 실패: ',
+    visibilityFailed: '토큰은 유효하지만 페이지 접근 확인에 실패했습니다: ',
+    noPages: '토큰은 유효하지만 아직 허용된 Notion 페이지가 없습니다.',
+    connected: 'Notion 연결됨. 접근 가능한 콘텐츠: {count}개',
+  },
+};
+
+function settingsMessage(locale, key, values) {
+  var messages = SETTINGS_MESSAGES[locale] || SETTINGS_MESSAGES.en;
+  return messages[key].replace(/\{(\w+)\}/g, function (_match, name) {
+    return values && values[name] !== undefined ? String(values[name]) : '';
+  });
+}
 
 function clearCachedIdentity() {
   identityWriteQueue = identityWriteQueue.then(async function () {
@@ -1021,7 +1054,7 @@ bc.onmessage = function (event) {
       });
       void cindy.send({
         type: 'notify',
-        text: 'Notion 连接测试失败：' + String(status.err).slice(0, 145),
+        text: settingsMessage(message.locale, 'failed') + String(status.err).slice(0, 145),
         tone: 'error',
       });
       return;
@@ -1055,20 +1088,22 @@ bc.onmessage = function (event) {
     if (identity.visibilityError) {
       void cindy.send({
         type: 'notify',
-        text: 'Token 有效，但页面授权检查失败：' + String(identity.visibilityError).slice(0, 125),
+        text: settingsMessage(message.locale, 'visibilityFailed') +
+          String(identity.visibilityError).slice(0, 125),
         tone: 'warning',
       });
     } else if (identity.visibleCount === 0) {
       void cindy.send({
         type: 'notify',
-        text: 'Token 有效，但还没有授权任何 Notion 页面',
+        text: settingsMessage(message.locale, 'noPages'),
         tone: 'warning',
       });
     } else {
       void cindy.send({
         type: 'notify',
-        text: 'Notion 已连接，可读取 ' + identity.visibleCount +
-          (identity.visibleHasMore ? '+' : '') + ' 项内容',
+        text: settingsMessage(message.locale, 'connected', {
+          count: identity.visibleCount + (identity.visibleHasMore ? '+' : ''),
+        }),
         tone: 'success',
       });
     }

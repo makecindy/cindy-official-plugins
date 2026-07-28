@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,30 +9,30 @@
   <section class="settings" aria-labelledby="page-title">
     <header class="page-head">
       <h2 id="page-title">Notion</h2>
-      <p>连接后，Cindy 可以读取和编辑你授权的 Notion 页面。</p>
+      <p data-i18n="pageIntro">Once connected, Cindy can read and edit the Notion pages you authorize.</p>
     </header>
 
-    <section class="connection-row" id="connection-row" aria-label="连接状态">
+    <section class="connection-row" id="connection-row" aria-label="Connection status" data-i18n-aria-label="connectionAria">
       <div class="connection-copy">
         <div class="status-title">
           <span class="status-dot" aria-hidden="true"></span>
-          <strong id="hero-status">尚未连接</strong>
+          <strong id="hero-status">Not connected</strong>
         </div>
-        <p id="workspace-meta">完成下面 3 个步骤后即可使用</p>
+        <p id="workspace-meta">Complete the three steps below to get started</p>
       </div>
       <div class="connection-actions">
-        <button class="btn secondary" id="clear" type="button" hidden>清除</button>
-        <button class="btn primary" id="rebind" type="button">开始连接</button>
+        <button class="btn secondary" id="clear" type="button" hidden data-i18n="clear">Clear</button>
+        <button class="btn primary" id="rebind" type="button">Start connection</button>
       </div>
     </section>
 
     <section class="steps-section" aria-labelledby="steps-title">
       <button class="steps-toggle" id="steps-toggle" type="button" aria-expanded="true">
         <span>
-          <strong id="steps-title">连接步骤</strong>
-          <small id="steps-summary">尚未完成</small>
+          <strong id="steps-title" data-i18n="stepsTitle">Connection steps</strong>
+          <small id="steps-summary">Not completed</small>
         </span>
-        <span class="toggle-copy" id="toggle-copy">收起步骤</span>
+        <span class="toggle-copy" id="toggle-copy">Collapse steps</span>
         <span class="toggle-chevron" aria-hidden="true">⌃</span>
       </button>
 
@@ -41,15 +41,15 @@
           <button class="step-head" type="button" aria-expanded="false">
             <span class="step-index">01</span>
             <span class="step-body">
-              <strong>创建 Internal connection</strong>
-              <small>在 Notion Developer portal 中创建 “Notion”</small>
+              <strong data-i18n="createTitle">Create an Internal connection</strong>
+              <small data-i18n="createHint">Create "Notion" in the Notion developer portal</small>
             </span>
-            <span class="step-result">待完成</span>
+            <span class="step-result">Pending</span>
             <span class="chevron" aria-hidden="true">⌄</span>
           </button>
           <div class="step-panel">
-            <p>进入 Internal connections，创建连接后在 Configuration 中复制 Installation access token。</p>
-            <a href="https://www.notion.so/profile/integrations/internal">打开 Internal connections ↗</a>
+            <p data-i18n="createPanel">Open Internal connections, create the integration, then copy the Installation access token from Configuration.</p>
+            <a href="https://www.notion.so/profile/integrations/internal" data-i18n="openInternal">Open Internal connections ↗</a>
           </div>
         </article>
 
@@ -57,22 +57,22 @@
           <button class="step-head" type="button" aria-expanded="false">
             <span class="step-index">02</span>
             <span class="step-body">
-              <strong>保存 Token</strong>
-              <small>复制以 <code>ntn_</code> 开头的访问令牌</small>
+              <strong data-i18n="saveTokenTitle">Save the token</strong>
+              <small data-i18n="saveTokenHint">Copy the access token beginning with ntn_</small>
             </span>
-            <span class="step-result">待完成</span>
+            <span class="step-result">Pending</span>
             <span class="chevron" aria-hidden="true">⌄</span>
           </button>
           <div class="step-panel">
             <div class="token-row">
               <label class="token-input">
                 <span class="sr-only">Notion Token</span>
-                <input id="token" type="password" placeholder="粘贴 ntn_…" autocomplete="off" spellcheck="false">
-                <button id="eye" type="button" aria-label="显示或隐藏 Token">显示</button>
+                <input id="token" type="password" placeholder="Paste ntn_…" aria-label="Notion Token" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false">
+                <button id="eye" type="button" aria-label="Show or hide token" data-i18n-aria-label="toggleToken">Show</button>
               </label>
-              <button class="btn primary" id="save" type="button">保存并检查</button>
+              <button class="btn primary" id="save" type="button" data-i18n="saveAndCheck">Save and check</button>
             </div>
-            <p class="helper">Token 只保存在 Cindy 保险库，无法被页面读回。</p>
+            <p class="helper" data-i18n="vaultHint">The token is stored only in the Cindy vault and cannot be read back by this page.</p>
           </div>
         </article>
 
@@ -80,17 +80,17 @@
           <button class="step-head" type="button" aria-expanded="false">
             <span class="step-index">03</span>
             <span class="step-body">
-              <strong>授权页面</strong>
-              <small>在 Content access 中选择 Cindy 可以访问的内容</small>
+              <strong data-i18n="authorizeTitle">Authorize pages</strong>
+              <small data-i18n="authorizeHint">Choose what Cindy can access under Content access</small>
             </span>
-            <span class="step-result">待完成</span>
+            <span class="step-result">Pending</span>
             <span class="chevron" aria-hidden="true">⌄</span>
           </button>
           <div class="step-panel">
-            <p>选择此前创建的 integration（新建时通常为 Notion，旧版可能显示 Cindy Notion）→ Content access → Edit access，可批量授权页面；也可以在单个页面的 Connections 菜单中添加。</p>
+            <p data-i18n="authorizePanel">Select the integration you created (usually Notion for new integrations; older ones may show Cindy Notion), then open Content access → Edit access to authorize pages in bulk. You can also add it from a page's Connections menu.</p>
             <div class="panel-actions">
-              <a href="https://www.notion.so/profile/integrations/internal">打开 Content access ↗</a>
-              <button class="btn secondary" id="test" type="button">检查页面</button>
+              <a href="https://www.notion.so/profile/integrations/internal" data-i18n="openContentAccess">Open Content access ↗</a>
+              <button class="btn secondary" id="test" type="button" data-i18n="checkPages">Check pages</button>
             </div>
             <div id="visible-list" class="visible-list"></div>
           </div>
