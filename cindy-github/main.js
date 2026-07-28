@@ -1337,6 +1337,17 @@ async function callTool(args, callId) {
 
 var bc = new BroadcastChannel('cindy-github');
 var seenTestReqs = {};
+var SETTINGS_MESSAGES = {
+  en: { failed: 'GitHub connection test failed: ', success: 'Connected: @' },
+  'zh-CN': { failed: 'GitHub 连接测试失败：', success: '连接成功：@' },
+  ja: { failed: 'GitHub 接続テストに失敗しました：', success: '接続しました：@' },
+  ko: { failed: 'GitHub 연결 테스트 실패: ', success: '연결됨: @' },
+};
+
+function settingsMessage(locale, key) {
+  var messages = SETTINGS_MESSAGES[locale] || SETTINGS_MESSAGES.en;
+  return messages[key];
+}
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
@@ -1351,7 +1362,11 @@ bc.onmessage = function (ev) {
       bc.postMessage({ type: 'test-connection-result', reqId: m.reqId, ok: false, message: r.err });
       // 结果同时走系统提示(notify 槽,主机画壳带身份头):失败也报,tone 区分。
       // 限速 5 秒内的重复点击会被主机拒(ok:false),页面内 status 仍在,不补救。
-      void cindy.send({ type: 'notify', text: 'GitHub 连接测试失败:' + String(r.err).slice(0, 150), tone: 'error' });
+      void cindy.send({
+        type: 'notify',
+        text: settingsMessage(m.locale, 'failed') + String(r.err).slice(0, 150),
+        tone: 'error',
+      });
       return;
     }
     // 注:scope 信息在 X-OAuth-Scopes 响应头里,但主机响应头白名单不透传
@@ -1369,7 +1384,11 @@ bc.onmessage = function (ev) {
       type: 'test-connection-result', reqId: m.reqId, ok: true,
       login: login, name: (r.data && r.data.name) || '',
     });
-    void cindy.send({ type: 'notify', text: '连接成功:@' + login, tone: 'success' });
+    void cindy.send({
+      type: 'notify',
+      text: settingsMessage(m.locale, 'success') + login,
+      tone: 'success',
+    });
   })();
 };
 

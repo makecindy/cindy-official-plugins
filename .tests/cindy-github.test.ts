@@ -29,6 +29,17 @@ const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
   'utf8',
 );
+const githubSettingsSource = readFileSync(
+  new URL('../cindy-github/settings.js', import.meta.url),
+  'utf8',
+);
+const githubSettingsHtml = readFileSync(
+  new URL('../cindy-github/settings.html', import.meta.url),
+  'utf8',
+);
+const githubManifest = JSON.parse(
+  readFileSync(new URL('../cindy-github/ghost.json', import.meta.url), 'utf8'),
+);
 
 /** 最小 BroadcastChannel 假体：内置意识启动时会注册设置页连接测试通道。 */
 class FakeBroadcastChannel {
@@ -244,5 +255,26 @@ describe('内置意识 Cindy GitHub create_branch', () => {
       params: expect.stringContaining('default_branch'),
     });
     expect(`${createBranch?.description} ${createBranch?.params}`).not.toContain('默认 main');
+  });
+});
+
+describe('Cindy GitHub settings localization', () => {
+  it('follows the host locale, supports four languages, and falls back to English', () => {
+    expect(githubManifest.version).toBe('1.2.3');
+    expect(githubSettingsHtml).toContain('<html lang="en">');
+    expect(githubSettingsSource).toContain("fetch('/app-context')");
+    expect(githubSettingsSource).toContain("currentLocale = 'en'");
+    expect(githubSettingsSource).toContain('document.documentElement.lang = currentLocale');
+    expect(githubSettingsSource).not.toMatch(/\bnavigator\.(?:language|languages)\b/);
+    for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+      expect(githubSettingsSource).toContain(`${locale.includes('-') ? `'${locale}'` : locale}: {`);
+    }
+  });
+
+  it('passes the resolved locale to runtime connection feedback', () => {
+    expect(githubSettingsSource).toContain('locale: currentLocale');
+    expect(githubSource).toContain("SETTINGS_MESSAGES");
+    expect(githubSource).toContain("settingsMessage(m.locale, 'failed')");
+    expect(githubSource).toContain("settingsMessage(m.locale, 'success')");
   });
 });

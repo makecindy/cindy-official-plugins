@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <!-- GitHub 意识自定义设置区(意识自绘,cindy-ghost:// 沙箱页)。
@@ -83,25 +83,25 @@
 </head>
 <body>
   <div class="label-row">
-    <span class="name">GitHub 账号</span>
+    <span class="name" data-i18n="accountTitle">GitHub account</span>
     <span class="badge">github.com</span>
   </div>
   <div id="account"></div>
   <div class="input-row" id="token-row">
     <div class="pill">
-      <input id="token" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false">
-      <button id="eye" class="icon-btn" type="button" title="显示或隐藏">
+      <input id="token" type="password" placeholder="ghp_… or github_pat_…" data-i18n-placeholder="emptyPlaceholder" autocomplete="off" spellcheck="false">
+      <button id="eye" class="icon-btn" type="button" title="Show or hide" aria-label="Show or hide token" data-i18n-title="toggleToken" data-i18n-aria-label="toggleToken">
         <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
         <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
       </button>
     </div>
-    <button id="save" class="btn" type="button">保存</button>
+    <button id="save" class="btn" type="button" data-i18n="save">Save</button>
   </div>
   <div class="input-row">
-    <button id="test" class="btn" type="button">测试连接</button>
-    <button id="clear" class="btn" type="button">清除</button>
+    <button id="test" class="btn" type="button" data-i18n="testConnection">Test connection</button>
+    <button id="clear" class="btn" type="button" data-i18n="clear">Clear</button>
   </div>
-  <a class="console-link" href="https://github.com/settings/tokens">前往控制台获取 ↗</a>
+  <a class="console-link" href="https://github.com/settings/tokens" data-i18n="openConsole">Get a token from GitHub ↗</a>
   <p id="status"></p>
   <script src="/settings.js"></script>
 </body>
