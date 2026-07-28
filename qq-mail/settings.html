@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="/settings.css">
@@ -7,47 +7,48 @@
 <body>
   <header>
     <div>
-      <h1>QQ 邮箱账号</h1>
-      <p class="subtle">由 Cindy 安全保存</p>
+      <h1 data-i18n="accountTitle">QQ Mail account</h1>
+      <p class="subtle" data-i18n="securedByCindy">Secured by Cindy</p>
     </div>
-    <span id="stateBadge" class="badge">未连接</span>
+    <span id="stateBadge" class="badge">Not connected</span>
   </header>
 
   <section id="connectedCard" class="connected-card" hidden>
     <div class="account-mark" aria-hidden="true">Q</div>
     <div class="account-copy">
       <strong id="connectedEmail"></strong>
-      <span>授权码已加密保存在 Cindy 本机</span>
+      <span data-i18n="storedLocally">The authorization code is encrypted and stored locally by Cindy</span>
     </div>
-    <button id="disconnect" class="secondary compact" type="button">断开</button>
+    <button id="disconnect" class="secondary compact" type="button" data-i18n="disconnect">Disconnect</button>
   </section>
 
   <form id="connectForm">
-    <label for="email">QQ 邮箱地址</label>
+    <label for="email" data-i18n="emailLabel">QQ Mail address</label>
     <input id="email" name="email" type="email" inputmode="email"
       autocomplete="username" placeholder="example@qq.com" maxlength="254">
 
-    <label for="authorizationCode">IMAP/SMTP 授权码</label>
+    <label for="authorizationCode" data-i18n="secretLabel">IMAP/SMTP authorization code</label>
     <div class="secret-row">
       <input id="authorizationCode" name="authorizationCode" type="password"
-        autocomplete="current-password" placeholder="通常为 16 位授权码" maxlength="128">
-      <button id="toggleSecret" class="secondary compact" type="button" aria-label="显示授权码">显示</button>
+        autocomplete="current-password" placeholder="Usually a 16-character code"
+        data-i18n-placeholder="secretPlaceholder" maxlength="128">
+      <button id="toggleSecret" class="secondary compact" type="button"
+        aria-label="Show authorization code" data-i18n="show"
+        data-i18n-aria-label="showSecret">Show</button>
     </div>
 
-    <p class="help">
-      请先在 QQ 邮箱网页版的“设置 → 账号与安全 → 安全设置”中开启
-      IMAP/SMTP，并生成授权码。这里不要填写 QQ 密码。
-    </p>
+    <p class="help" data-i18n="setupHelp">In QQ Mail on the web, open "Settings → Account
+      and Security → Security Settings", enable IMAP/SMTP, and generate an authorization code.
+      Do not enter your QQ password here.</p>
 
-    <button id="connect" class="primary" type="submit">连接并测试</button>
+    <button id="connect" class="primary" type="submit" data-i18n="connect">Connect and test</button>
   </form>
 
   <p id="status" role="status" aria-live="polite"></p>
 
-  <aside>
-    授权码不会进入 Agent 参数或插件 main.js，仅在执行邮箱请求时由 Cindy 临时提供
-    给插件 Worker。邮件操作使用短连接，完成后会立即断开 IMAP/SMTP。
-  </aside>
+  <aside data-i18n="securityNotice">The authorization code is never included in Agent
+    parameters or plugin main.js. Cindy provides it to the plugin Worker only while a mail
+    request is running. IMAP/SMTP connections close immediately after each operation.</aside>
 
   <script src="/settings.js"></script>
 </body>

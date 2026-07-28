@@ -4,7 +4,7 @@
   "name": "QQ 邮箱",
   "description": "通过 QQ 邮箱 IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。授权码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
   "whenToUse": "需要查找、阅读或整理 QQ 邮箱邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入 QQ 邮箱地址和 IMAP/SMTP 授权码并完成连接测试。",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

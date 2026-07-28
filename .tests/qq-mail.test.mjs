@@ -8,6 +8,7 @@ import { createContext, Script } from 'node:vm';
 const pluginRoot = new URL('../qq-mail/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
 const mainSource = readFileSync(new URL('main.js', pluginRoot), 'utf8');
+const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
 const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
 const require = createRequire(import.meta.url);
 const worker = require('../qq-mail/src/worker.cjs');
@@ -169,6 +170,17 @@ test('设置页把授权码直接写入 /secrets，BroadcastChannel 只发送邮
     /fetch\('\/wake'\)\.then\(beginPosting,\s*beginPosting\)/,
     '设置页必须等 /wake 完成后再开始发送连接请求',
   );
+});
+
+test('设置页跟随宿主四语言并以英文回退', () => {
+  assert.match(settingsHtml, /<html lang="en">/);
+  assert.match(settingsSource, /fetch\('\/app-context'\)/);
+  assert.doesNotMatch(settingsSource, /navigator\.(?:language|languages)/);
+  for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+    assert.match(settingsSource, new RegExp(`(?:^|\\n)    ['"]?${locale.replace('-', '\\-')}['"]?: \\{`));
+  }
+  assert.match(settingsSource, /currentLocale = 'en'/);
+  assert.match(settingsSource, /document\.documentElement\.lang = currentLocale/);
 });
 
 test('main.js 的连接与邮件请求都只携带非敏感邮箱地址', async () => {
