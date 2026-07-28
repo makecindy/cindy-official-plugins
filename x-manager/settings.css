@@ -1,0 +1,376 @@
+/* X Manager 设置区样式
+ * - 基线背景由主机注入(宿主设置卡片色),这里不铺整页底色
+ * - 颜色全部走主机注入的语义 CSS 变量并带回退值 → Light / Dark 双模式都跟随
+ * - 内容自然撑高,不用 height:100% / 100vh(自适应高度靠主机量内容)
+ * - 标签切换只改 display,高度变化由宿主的 ResizeObserver 自动跟随
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary, #1a1a1a);
+  font: 13px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+/* ── 标签条 ─────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 9px;
+  background: var(--surface, #f7f7f5);
+}
+
+.tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.tab:hover {
+  opacity: 0.85;
+}
+
+.tab.is-active {
+  border-color: var(--border-default, #e4e4e0);
+  background: var(--panel-bg, #fff);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tabpanel.is-hidden {
+  display: none;
+}
+
+/* 通用隐藏(应用身份的「已保存」/「编辑」两态互斥切换用) */
+.is-hidden {
+  display: none !important;
+}
+
+/* 应用身份已保存时的摘要行 */
+.appid-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.appid-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary, #666);
+}
+
+/* ── 卡片 ───────────────────────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 10px;
+  background: var(--surface, #f7f7f5);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.badge {
+  padding: 1px 6px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.pill {
+  padding: 2px 8px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.pill.on {
+  border-color: #2e9e5b;
+  color: #2e9e5b;
+}
+
+.pill.warn {
+  border-color: #c78a1e;
+  color: #c78a1e;
+}
+
+.pill.off {
+  opacity: 0.6;
+}
+
+/* ── 文字 ───────────────────────────────────────────────────────────── */
+
+.hint,
+.note,
+.feedback {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.78;
+}
+
+.note {
+  font-size: 11px;
+  opacity: 0.62;
+}
+
+.feedback:empty {
+  display: none;
+}
+
+.feedback.err {
+  color: #c0392b;
+  opacity: 1;
+}
+
+.feedback.ok {
+  color: #2e9e5b;
+  opacity: 1;
+}
+
+/* ── 折叠区(风险与教程都收进来)─────────────────────────────────────── */
+
+.fold {
+  border-top: 1px solid var(--border-default, #e4e4e0);
+  padding-top: 6px;
+}
+
+.fold > summary {
+  font-size: 12px;
+  opacity: 0.7;
+  cursor: pointer;
+  list-style: revert;
+}
+
+.fold > summary:hover {
+  opacity: 1;
+}
+
+.fold > *:not(summary) {
+  margin-top: 6px;
+}
+
+/* ── 控件 ───────────────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.input {
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 7px;
+  background: var(--panel-bg, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.input[readonly] {
+  opacity: 0.8;
+}
+
+.btn {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn:hover:not([disabled]) {
+  border-color: var(--text-primary, #1a1a1a);
+}
+
+.btn.primary {
+  border-color: var(--text-primary, #1a1a1a);
+  font-weight: 600;
+}
+
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.tiny {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+/* ── 账号列表 ───────────────────────────────────────────────────────── */
+
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.accounts:empty {
+  display: none;
+}
+
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 8px;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.avatar-fallback {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.account-label {
+  flex: 1 1 90px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default, #e4e4e0);
+  opacity: 0.8;
+}
+
+/* ── 教程与用量 ─────────────────────────────────────────────────────── */
+
+.steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.steps li {
+  margin-bottom: 4px;
+}
+
+.callback-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.stats dt {
+  opacity: 0.7;
+}
+
+.stats dd {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 数值本体 + 来源徽标(API / 本地)+ 补充说明 */
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-sub {
+  opacity: 0.6;
+}
+
+.console-link {
+  color: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.8;
+}
+
+.console-link:hover {
+  opacity: 1;
+}

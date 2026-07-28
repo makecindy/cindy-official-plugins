@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>X Manager</title>
+<!-- 样式外挂:CSP 同源放行外部文件,不依赖 style 内联白名单 -->
+<link rel="stylesheet" href="/settings.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- 顶部标签(纯 JS 切 display;高度变化由宿主 ResizeObserver 自动跟随) -->
+  <nav class="tabs">
+    <button class="tab is-active" id="tab-search" data-tab="search" data-i18n="tab.search">搜索</button>
+    <button class="tab" id="tab-posting" data-tab="posting" data-i18n="tab.posting">发帖</button>
+    <button class="tab" id="tab-usage" data-tab="usage" data-i18n="tab.usage">用量</button>
+  </nav>
+
+  <!-- ① 搜索:Grok 订阅(推荐)+ xAI API key(兜底) -->
+  <div class="tabpanel" id="panel-search">
+    <section class="card">
+      <div class="card-head">
+        <h2><span data-i18n="grok.title">Grok 订阅</span><span class="badge" data-i18n="badge.recommended">推荐</span></h2>
+        <span class="pill" id="grok-pill" data-i18n="state.loading">读取中…</span>
+      </div>
+      <p class="hint" data-i18n="grok.hint"></p>
+      <div class="accounts" id="grok-accounts"></div>
+      <div class="row">
+        <button class="btn primary" id="grok-connect" data-i18n="grok.connect">连接 Grok 账号</button>
+      </div>
+      <details class="fold">
+        <summary data-i18n="grok.foldSummary">连接说明与已知限制</summary>
+        <p class="note" data-i18n="grok.consent"></p>
+        <p class="note" data-i18n="grok.risk"></p>
+      </details>
+      <p class="feedback" id="grok-feedback"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2><span data-i18n="key.title">xAI API Key</span><span class="badge" data-i18n="badge.fallback">兜底</span></h2>
+        <span class="pill" id="key-pill" data-i18n="state.loading">读取中…</span>
+      </div>
+      <p class="hint" data-i18n="key.hint"></p>
+      <div class="row">
+        <input class="input" id="key-input" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="key.placeholder">
+        <button class="btn primary" id="key-save" data-i18n="action.save">保存</button>
+        <button class="btn" id="key-clear" data-i18n="action.clear">清除</button>
+      </div>
+      <!-- 外链 href 与 ghost.json network.secrets[key=xai_api_key].url 逐字一致 -->
+      <p class="row"><a class="console-link" href="https://console.x.ai/" data-i18n="key.console">前往 xAI 控制台创建 API key ↗</a></p>
+      <p class="feedback" id="key-feedback"></p>
+    </section>
+  </div>
+
+  <!-- ② 发帖:X 官方 API(用户自带 developer app) -->
+  <div class="tabpanel is-hidden" id="panel-posting">
+    <section class="card">
+      <div class="card-head">
+        <h2><span data-i18n="xapi.title">X 官方 API</span></h2>
+        <span class="pill" id="xapi-pill" data-i18n="state.loading">读取中…</span>
+      </div>
+      <p class="hint" data-i18n="xapi.hint"></p>
+      <details class="fold" id="xapi-guide">
+        <summary data-i18n="xapi.guideSummary">怎么拿到 Client ID(约 5 分钟)</summary>
+        <ol class="steps">
+          <li data-i18n="xapi.step1"></li>
+          <li data-i18n="xapi.step2"></li>
+          <li>
+            <span data-i18n="xapi.step3"></span>
+            <span class="callback-row">
+              <input class="input mono" id="xapi-callback" type="text" readonly value="http://127.0.0.1:57126/callback">
+              <button class="btn tiny" id="xapi-copy" data-i18n="action.copy">复制</button>
+            </span>
+          </li>
+          <li data-i18n="xapi.step4"></li>
+          <li data-i18n="xapi.step5"></li>
+        </ol>
+        <p class="note"><strong data-i18n="xapi.troubleTitle">卡住了?</strong> <span data-i18n="xapi.trouble"></span></p>
+      </details>
+      <!-- 应用身份·已保存视图(保存后显示,输入框收起) -->
+      <div class="row appid-row is-hidden" id="xapi-client-view">
+        <span class="appid-label" data-i18n="xapi.clientSaved">应用身份已保存</span>
+        <button class="btn tiny" id="xapi-client-edit" data-i18n="action.modify">修改</button>
+      </div>
+      <!-- 应用身份·编辑视图(未配置时默认展开;已配置时点「修改」才出现) -->
+      <div class="row is-hidden" id="xapi-client-form">
+        <input class="input" id="xapi-client-id" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="xapi.clientId">
+        <input class="input" id="xapi-client-secret" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="xapi.clientSecret">
+        <button class="btn primary" id="xapi-client-save" data-i18n="action.save">保存</button>
+        <button class="btn is-hidden" id="xapi-client-cancel" data-i18n="action.cancel">取消</button>
+      </div>
+      <div class="accounts" id="xapi-accounts"></div>
+      <div class="row">
+        <!-- 未保存应用身份前不可点(初始即禁用,不等状态回来才禁) -->
+        <button class="btn primary" id="xapi-connect" data-i18n="xapi.connect" disabled>连接 X 账号</button>
+      </div>
+      <!-- 外链 href 与 ghost.json network.secrets[key=x_api_oauth].url 逐字一致 -->
+      <p class="row"><a class="console-link" href="https://console.x.com/" data-i18n="xapi.portal">打开 X 开发者后台 console.x.com ↗</a></p>
+      <p class="feedback" id="xapi-feedback"></p>
+    </section>
+  </div>
+
+  <!-- ③ 用量:本地记账(/kv) -->
+  <div class="tabpanel is-hidden" id="panel-usage">
+    <section class="card">
+      <div class="card-head">
+        <h2><span data-i18n="usage.title">用量估算</span></h2>
+        <button class="btn tiny" id="usage-refresh" data-i18n="action.refresh">刷新</button>
+      </div>
+      <dl class="stats" id="usage-stats"></dl>
+      <p class="note" data-i18n="usage.note"></p>
+    </section>
+  </div>
+
+</div>
+<!-- 脚本必须外挂(CSP 不放行内联 script) -->
+<script src="/settings.js"></script>
+</body>
+</html>

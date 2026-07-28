@@ -42,6 +42,11 @@
     },
     "163-mail": {
       "audience": "all"
+    },
+    "x-manager": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }
