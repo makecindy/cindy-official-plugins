@@ -46,31 +46,6 @@ After changing any plugin's `ghost.json` or `locales/`, you **must** run
 check before packaging, and incomplete four-language resources (`zh-CN` / `en` /
 `ja` / `ko`) fail the entire publish.
 
-## Audience registration (provisioning.json)
-
-`provisioning.json` at the repository root controls who gets each official
-plugin installed by default. **A plugin directory that is not registered here
-is seeded to every user on merge** — that is the host's default, not an
-explicit choice. Every pull request that adds a plugin directory must register
-it in the same pull request, and `.tests/provisioning.test.mjs` fails the
-build otherwise.
-
-`audience` values:
-
-- `"all"` — install for everyone.
-- `{ "userIds": [...], "emails": [...] }` — install only for the listed users;
-  either dimension matching is enough. Targeted installs land at login and are
-  reclaimed on logout or when the user no longer matches.
-- `{ "userIds": [], "emails": [] }` — install for no one. Use this to stage a
-  plugin: merge the code safely, then widen the audience in a follow-up once a
-  maintainer signs off.
-
-The marketplace is public and `"all"` is the normal choice for any plugin
-meant for general availability. If a plugin spends the user's real money or
-credentials (paid API quotas, metered calls, OAuth grants), say so plainly in
-its `ghost.json` `description` so users see the cost before installing — the
-audience stays `"all"`.
-
 For plugins with a Node Worker (`163-mail`, `icloud-mail`, `qq-mail`),
 `node/worker.cjs` is an esbuild artifact — do not edit it by hand. After changing
 `src/`, rebuild in the plugin directory and commit the artifact along with the

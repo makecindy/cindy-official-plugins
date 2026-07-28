@@ -38,24 +38,6 @@ node --test .tests/localization.test.mjs
 `node --test .tests/localization.test.mjs`——发布流水线会在打包前执行同一份检查，
 四语言（`zh-CN` / `en` / `ja` / `ko`）资源不完整会直接拦下整次发布。
 
-## 受众登记（provisioning.json）
-
-仓库根目录的 `provisioning.json` 控制每个官方插件默认装给谁。**没在这里登记的插件
-目录，合入后会被播种给所有用户**——这是宿主的默认行为，不是你的显式选择。新增插件
-目录的 PR 必须在同一个 PR 里完成登记，否则 `.tests/provisioning.test.mjs` 会拦下构建。
-
-`audience` 取值：
-
-- `"all"`——装给所有人。
-- `{ "userIds": [...], "emails": [...] }`——只装给列出的用户，任一维度命中即装；
-  定向安装登录时生效，登出或不再命中时回收。
-- `{ "userIds": [], "emails": [] }`——谁都不装。用于预演上架：先把插件安全合入，
-  后续由维护者拍板再单独放开受众。
-
-插件市场是公开的，面向所有用户的插件用 `"all"` 就是正常选择。涉及用户真实花费或
-凭证的插件（付费 API 额度、计费调用、OAuth 授权），在 `ghost.json` 的
-`description` 里如实说明，让用户在安装前知道代价——受众仍然保持 `"all"`。
-
 带 Node Worker 的插件（`163-mail`、`icloud-mail`、`qq-mail`）的 `node/worker.cjs` 是
 esbuild 产物，不要手改。改 `src/` 后在插件目录里重新构建并把产物一起提交：
 
