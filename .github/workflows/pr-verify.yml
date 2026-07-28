@@ -98,6 +98,11 @@ jobs:
               echo "::group::node --test ${test_file}"
               node --test "${test_file}" || failed=1
               echo "::endgroup::"
+            else
+              # Several plugins only have archived vitest-based *.test.ts files
+              # (or none at all); make the skip visible instead of leaving a
+              # green step that ran zero plugin tests.
+              echo "::notice::no runnable .tests/${directory}.test.mjs — plugin-specific tests skipped for ${directory}"
             fi
           done
           exit "${failed}"
