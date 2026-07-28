@@ -47,13 +47,9 @@ cindy-art/
 根目录的 `provisioning.json` 按插件声明哪些受众会把它作为内置插件装上。每个插件目录
 都有对应条目，因此新增插件时也要同步加一行。
 
-`.tests/` 目录存放插件行为测试，分两层：
-
-- `*.test.mjs` 用 Node 内置 test runner 运行
-  （`node --test .tests/<文件>.test.mjs`）。其中 `localization.test.mjs` 不只是本地检查
-  —— 两个发布 Workflow 都会在打包前把它作为门禁执行。
-- `*.test.ts` 是按 vitest 写的，但本仓目前没有接入 vitest（没有根 `package.json`），
-  处于存档状态，现状下无法直接运行。
+`.tests/` 目录存放插件行为测试，用 Node 内置 test runner 运行
+（`node --test .tests/<文件>.test.mjs`）。其中 `localization.test.mjs` 不只是本地检查
+—— 两个发布 Workflow 都会在打包前把它作为门禁执行。
 
 ## 设计原则
 

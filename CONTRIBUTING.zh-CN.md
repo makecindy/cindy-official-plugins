@@ -62,6 +62,11 @@ cd 163-mail && npm ci && npm run build
    不同内容会被服务端以 `RELEASE_VERSION_CONFLICT` 拒绝，且不会覆盖已有 release。
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
    Agent 行为的影响——这段描述就是 Agent 读到的使用手册。
+
+每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 localization 与
+provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装该插件的依赖），并用
+与发布流水线完全相同的打包步骤做 dry-run。真正的上传仍然只在合入 `main` 之后发生。
+
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后发布流水线会自动把改动的插件
    同步到 Cindy 插件市场。

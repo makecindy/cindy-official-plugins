@@ -78,6 +78,13 @@ do not edit the generated `dist/maker.js` by hand.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
+
+Every non-draft pull request is verified by the `Verify pull request`
+workflow: it runs the localization and provisioning gates, runs the `*.test.mjs`
+tests of every changed plugin (installing that plugin's dependencies first),
+and dry-runs the exact packaging step the publish pipeline uses. The actual
+upload still happens only after merge to `main`.
+
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
 6. Wait for review; do not push directly to `main`. After a merge to `main`, the

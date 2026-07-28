@@ -156,23 +156,9 @@ jobs:
         env:
           PLUGIN_DIRECTORY: ${{ matrix.plugin.directory }}
         run: |
-          set -euo pipefail
-          # Apache-2.0 4(a)/(d): a redistributed artifact must carry the License
-          # and the NOTICE. Both live at the repository root, so an archive of a
-          # plugin subdirectory would omit them without --add-file. A plugin's own
-          # THIRD-PARTY-LICENSES.txt already travels, being inside its directory.
-          # -c core.autocrlf=false: the root .gitattributes is outside the
-          # archived subtree, so its eol=lf pins do not apply here. Without this,
-          # a runner defaulting to autocrlf=true would silently ship CRLF copies
-          # of the committed bundles instead of the LF blobs.
-          git -c core.autocrlf=false archive \
-            --format=zip \
-            --output="$RUNNER_TEMP/plugin.cindy" \
-            --add-file=LICENSE \
-            --add-file=NOTICE \
-            --add-file=TRADEMARKS.md \
-            --add-file=TRADEMARKS.zh-CN.md \
-            "HEAD:${PLUGIN_DIRECTORY}"
+          .github/scripts/package-plugin.sh \
+            "${PLUGIN_DIRECTORY}" \
+            "$RUNNER_TEMP/plugin.cindy"
 
       - name: Publish plugin
         env:
