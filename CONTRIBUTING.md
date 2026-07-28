@@ -82,10 +82,8 @@ do not edit the generated `dist/maker.js` by hand.
 Every non-draft pull request is verified by the `Verify pull request`
 workflow: it runs the localization and provisioning gates, runs the `*.test.mjs`
 tests of every changed plugin (installing that plugin's dependencies first),
-and dry-runs the exact packaging step the publish pipeline uses. The archived
-`*.test.ts` files are skipped — they target vitest, which this repository does
-not wire up (see [`README.md`](README.md#repository-layout)). The actual upload
-still happens only after merge to `main`.
+and dry-runs the exact packaging step the publish pipeline uses. The actual
+upload still happens only after merge to `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.

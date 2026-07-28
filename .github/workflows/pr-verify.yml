@@ -76,10 +76,6 @@ jobs:
               | sed 's/^/plugins=/' >> "${GITHUB_OUTPUT}"
           fi
 
-      # Only `*.test.mjs` files are run here: `*.test.ts` files target vitest,
-      # which this repository intentionally does not wire up (see README —
-      # they are archived and cannot run as-is), so Node's built-in runner
-      # would fail on their unresolved `vitest` import.
       - name: Run plugin tests (installing per-plugin dependencies first)
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         env:
@@ -99,9 +95,8 @@ jobs:
               node --test "${test_file}" || failed=1
               echo "::endgroup::"
             else
-              # Several plugins only have archived vitest-based *.test.ts files
-              # (or none at all); make the skip visible instead of leaving a
-              # green step that ran zero plugin tests.
+              # Make the skip visible instead of leaving a green step that ran
+              # zero plugin tests.
               echo "::notice::no runnable .tests/${directory}.test.mjs — plugin-specific tests skipped for ${directory}"
             fi
           done

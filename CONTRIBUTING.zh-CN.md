@@ -65,9 +65,7 @@ cd 163-mail && npm ci && npm run build
 
 每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 localization 与
 provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装该插件的依赖），并用
-与发布流水线完全相同的打包步骤做 dry-run。归档的 `*.test.ts` 会被跳过——它们面向
-vitest，而本仓没有接线（见 [`README.md`](README.md)）。真正的上传仍然只在合入
-`main` 之后发生。
+与发布流水线完全相同的打包步骤做 dry-run。真正的上传仍然只在合入 `main` 之后发生。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后发布流水线会自动把改动的插件

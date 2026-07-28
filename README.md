@@ -49,14 +49,10 @@ cindy-art/
 receives it as a built-in. Every plugin directory has a corresponding entry, so
 adding a plugin means adding a row there too.
 
-The `.tests/` directory holds plugin behavior tests in two tiers:
-
-- `*.test.mjs` run on Node's built-in test runner
-  (`node --test .tests/<file>.test.mjs`). `localization.test.mjs` is not merely
-  a local check — both publish workflows run it as a gate before packaging.
-- `*.test.ts` are written for vitest, which this repository does not currently
-  wire up (there is no root `package.json`). They are archived until a runner is
-  configured, and cannot be run as-is.
+The `.tests/` directory holds plugin behavior tests that run on Node's built-in
+test runner (`node --test .tests/<file>.test.mjs`). `localization.test.mjs` is
+not merely a local check — both publish workflows run it as a gate before
+packaging.
 
 ## Design principles
 
