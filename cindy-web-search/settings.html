@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <!-- Web Search 自定义设置区(意识自绘,cindy-ghost:// 沙箱页):
@@ -74,42 +74,42 @@
 </style>
 </head>
 <body>
-  <div class="secret" data-key="brave_api_key" data-tail-prefix="BSA…" data-empty-ph="粘贴 BSA 开头的 key">
+  <div class="secret" data-key="brave_api_key" data-tail-prefix="BSA…" data-empty-key="bravePlaceholder">
     <div class="label-row">
       <span class="name">Brave Search API Key</span>
-      <span class="badge">✓ 已保存</span>
+      <span class="badge" data-i18n="savedBadge">✓ Saved</span>
     </div>
     <div class="input-row">
       <div class="pill">
         <input class="key-input" type="password" autocomplete="off" spellcheck="false">
-        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+        <button class="icon-btn eye hidden" type="button" title="Show or hide key" aria-label="Show or hide key" data-i18n-title="toggleKey" data-i18n-aria-label="toggleKey">
           <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         </button>
       </div>
-      <button class="btn save" type="button">保存</button>
-      <button class="btn clear" type="button">清除</button>
+      <button class="btn save" type="button" data-i18n="save">Save</button>
+      <button class="btn clear" type="button" data-i18n="clear">Clear</button>
     </div>
-    <a class="console-link" href="https://api-dashboard.search.brave.com/app/keys">前往控制台获取 ↗</a>
+    <a class="console-link" href="https://api-dashboard.search.brave.com/app/keys" data-i18n="openConsole">Get a key from the provider ↗</a>
   </div>
 
-  <div class="secret" data-key="tavily_api_key" data-tail-prefix="tvly-…" data-empty-ph="粘贴 tvly- 开头的 key">
+  <div class="secret" data-key="tavily_api_key" data-tail-prefix="tvly-…" data-empty-key="tavilyPlaceholder">
     <div class="label-row">
       <span class="name">Tavily API Key</span>
-      <span class="badge">✓ 已保存</span>
+      <span class="badge" data-i18n="savedBadge">✓ Saved</span>
     </div>
     <div class="input-row">
       <div class="pill">
         <input class="key-input" type="password" autocomplete="off" spellcheck="false">
-        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+        <button class="icon-btn eye hidden" type="button" title="Show or hide key" aria-label="Show or hide key" data-i18n-title="toggleKey" data-i18n-aria-label="toggleKey">
           <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         </button>
       </div>
-      <button class="btn save" type="button">保存</button>
-      <button class="btn clear" type="button">清除</button>
+      <button class="btn save" type="button" data-i18n="save">Save</button>
+      <button class="btn clear" type="button" data-i18n="clear">Clear</button>
     </div>
-    <a class="console-link" href="https://app.tavily.com/home">前往控制台获取 ↗</a>
+    <a class="console-link" href="https://app.tavily.com/home" data-i18n="openConsole">Get a key from the provider ↗</a>
   </div>
 
   <p id="status"></p>

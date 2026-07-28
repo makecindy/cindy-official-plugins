@@ -4,7 +4,7 @@
   "name": "Web Search",
   "description": "Cindy 内置的网页搜索插件:用你自己的 Brave / Tavily key 搜索公网。key 在主界面侧边栏「插件」→「Web Search」详情页填写,加密存本机、只注入声明域名的请求。",
   "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态时找我(需先在主界面侧边栏「插件」→「Web Search」详情页配置 Brave 或 Tavily key)。",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
