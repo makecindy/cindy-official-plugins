@@ -1,0 +1,122 @@
+name: Verify pull request
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verify-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Repository-wide gates
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate plugin localization resources
+        run: node --test .tests/localization.test.mjs
+
+      - name: Validate provisioning registrations
+        run: node --test .tests/provisioning.test.mjs
+
+      - name: Validate publish workflows
+        run: node --test .tests/publish-workflows.test.mjs
+
+  changed-plugins:
+    name: Test and dry-run packaging for changed plugins
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed plugin directories
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git ls-tree -r --name-only "${HEAD_SHA}" \
+            | sed -n 's|/ghost\.json$||p' | sort -u > "${RUNNER_TEMP}/plugin-roots"
+          git diff --name-only --no-renames --diff-filter=AMD "${BASE_SHA}" "${HEAD_SHA}" \
+            > "${RUNNER_TEMP}/changed-files"
+          changed="$(
+            awk '
+              NR == FNR { roots[$0] = 1; next }
+              {
+                for (root in roots) {
+                  if ($0 == root || index($0, root "/") == 1) {
+                    print root
+                    break
+                  }
+                }
+              }
+            ' "${RUNNER_TEMP}/plugin-roots" "${RUNNER_TEMP}/changed-files" | sort -u
+          )"
+          if [[ -z "${changed}" ]]; then
+            echo "plugins=[]" >> "${GITHUB_OUTPUT}"
+          else
+            printf '%s\n' "${changed}" | jq -R -s -c 'split("\n")[:-1] | map({directory: .})' \
+              | sed 's/^/plugins=/' >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Run plugin tests (installing per-plugin dependencies first)
+        if: ${{ steps.changes.outputs.plugins != '[]' }}
+        env:
+          PLUGINS: ${{ steps.changes.outputs.plugins }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for directory in $(jq -r '.[].directory' <<<"${PLUGINS}"); do
+            if [[ -f "${directory}/package.json" ]]; then
+              echo "::group::npm ci (${directory})"
+              npm ci --prefix "${directory}"
+              echo "::endgroup::"
+            fi
+            for test_file in ".tests/${directory}.test.mjs" ".tests/${directory}.test.ts"; do
+              if [[ -f "${test_file}" ]]; then
+                echo "::group::node --test ${test_file}"
+                node --test "${test_file}" || failed=1
+                echo "::endgroup::"
+              fi
+            done
+          done
+          exit "${failed}"
+
+      - name: Dry-run plugin packaging
+        if: ${{ steps.changes.outputs.plugins != '[]' }}
+        env:
+          PLUGINS: ${{ steps.changes.outputs.plugins }}
+        run: |
+          set -euo pipefail
+          for directory in $(jq -r '.[].directory' <<<"${PLUGINS}"); do
+            echo "::group::Package ${directory}"
+            package="${RUNNER_TEMP}/${directory//\//_}.cindy"
+            .github/scripts/package-plugin.sh "${directory}" "${package}"
+            unzip -l "${package}"
+            # git archive places the plugin directory's contents at the zip
+            # root (HEAD:<dir>), alongside the --add-file'd root documents.
+            for required in LICENSE NOTICE TRADEMARKS.md TRADEMARKS.zh-CN.md ghost.json; do
+              unzip -l "${package}" | grep -q " ${required}\$" || {
+                echo "::error::${package} is missing ${required}"
+                exit 1
+              }
+            done
+            echo "::endgroup::"
+          done

@@ -41,10 +41,43 @@ The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 node --test .tests/localization.test.mjs
 ```
 
+The mail plugins (`163-mail`, `icloud-mail`, `qq-mail`) have their own test
+files that require the plugin's dependencies first:
+
+```bash
+cd 163-mail && npm ci && cd ..
+node --test .tests/163-mail.test.mjs
+```
+
 After changing any plugin's `ghost.json` or `locales/`, you **must** run
 `node --test .tests/localization.test.mjs`. The publish pipeline runs the same
 check before packaging, and incomplete four-language resources (`zh-CN` / `en` /
 `ja` / `ko`) fail the entire publish.
+
+## Audience registration (provisioning.json)
+
+`provisioning.json` at the repository root controls who gets each official
+plugin installed by default. **A plugin directory that is not registered here
+is seeded to every user on merge** — that is the host's default, not an
+explicit choice. Every pull request that adds a plugin directory must register
+it in the same pull request, and `.tests/provisioning.test.mjs` fails the
+build otherwise.
+
+`audience` values:
+
+- `"all"` — install for everyone.
+- `{ "userIds": [...], "emails": [...] }` — install only for the listed users;
+  either dimension matching is enough. Targeted installs land at login and are
+  reclaimed on logout or when the user no longer matches.
+- `{ "userIds": [], "emails": [] }` — install for no one. Use this to stage a
+  plugin: merge the code safely, then widen the audience in a follow-up once a
+  maintainer signs off.
+
+The marketplace is public and `"all"` is the normal choice for any plugin
+meant for general availability. If a plugin spends the user's real money or
+credentials (paid API quotas, metered calls, OAuth grants), say so plainly in
+its `ghost.json` `description` so users see the cost before installing — the
+audience stays `"all"`.
 
 For plugins with a Node Worker (`163-mail`, `icloud-mail`, `qq-mail`),
 `node/worker.cjs` is an esbuild artifact — do not edit it by hand. After changing
@@ -78,6 +111,18 @@ do not edit the generated `dist/maker.js` by hand.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
+
+Every pull request is verified by the `Verify pull request` workflow: it runs
+the localization and provisioning gates, runs the tests of every changed
+plugin (installing that plugin's dependencies first), and dry-runs the exact
+packaging step the publish pipeline uses. The actual upload still happens only
+after merge to `main`.
+
+Tip: `gh repo clone -- --depth N` creates a single-branch shallow clone whose
+refspec only fetches `main`; `gh pr create` then fails with "must first push
+the current branch" until you run
+`git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`
+and `git fetch`. Plain `git clone --depth 1` does not have this problem.
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
 6. Wait for review; do not push directly to `main`. After a merge to `main`, the
