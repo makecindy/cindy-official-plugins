@@ -112,11 +112,6 @@ and dry-runs the exact packaging step the publish pipeline uses. The archived
 not wire up (see [`README.md`](README.md#repository-layout)). The actual upload
 still happens only after merge to `main`.
 
-Tip: `gh repo clone -- --depth N` creates a single-branch shallow clone whose
-refspec only fetches `main`; `gh pr create` then fails with "must first push
-the current branch" until you run
-`git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`
-and `git fetch`. Plain `git clone --depth 1` does not have this problem.
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
 6. Wait for review; do not push directly to `main`. After a merge to `main`, the

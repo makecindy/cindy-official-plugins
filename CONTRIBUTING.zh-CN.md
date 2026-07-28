@@ -87,11 +87,6 @@ provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装�
 vitest，而本仓没有接线（见 [`README.md`](README.md)）。真正的上传仍然只在合入
 `main` 之后发生。
 
-提示：`gh repo clone -- --depth N` 是单分支浅克隆，refspec 只抓 `main`，之后
-`gh pr create` 会报 "must first push the current branch"。先执行
-`git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'`
-再 `git fetch` 即可恢复；直接用 `git clone --depth 1` 没有这个问题。
-
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后发布流水线会自动把改动的插件
    同步到 Cindy 插件市场。
