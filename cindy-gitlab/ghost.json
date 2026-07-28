@@ -4,7 +4,7 @@
   "name": "GitLab",
   "description": "内置的 GitLab 服务插件:支持自建与多实例 GitLab——在主界面侧边栏「插件」→「GitLab」详情页添加实例地址与 Personal Access Token(api scope)即可读写 issue / MR / code review / 仓库 / CI / release / 搜索等 107 个操作(两段式目录)。token 由主机加密保管,只注入对应实例的 API 请求。",
   "whenToUse": "只管 GitLab 实例(gitlab.com/公司/自建),github.com 的链接不归我、找 GitHub。需要查/建/改 GitLab issue 或 MR,提交/回复/发布 code review,合并或 rebase MR,查仓库/分支/commit/文件内容,查 CI pipeline 与 job 日志,管理 release / tag / 分支,搜索全实例内容,或下载仓库归档时找我(需先在主界面侧边栏「插件」→「GitLab」详情页添加实例与 token)。",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

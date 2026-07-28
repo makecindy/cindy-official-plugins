@@ -1529,6 +1529,17 @@ async function callTool(args, callId) {
 
 var bc = new BroadcastChannel('cindy-gitlab');
 var seenTestReqs = {};
+var SETTINGS_MESSAGES = {
+  en: { failed: 'GitLab connection test failed: ', success: 'Connected: @' },
+  'zh-CN': { failed: 'GitLab 连接测试失败：', success: '连接成功：@' },
+  ja: { failed: 'GitLab 接続テストに失敗しました：', success: '接続しました：@' },
+  ko: { failed: 'GitLab 연결 테스트 실패: ', success: '연결됨: @' },
+};
+
+function settingsMessage(locale, key) {
+  var messages = SETTINGS_MESSAGES[locale] || SETTINGS_MESSAGES.en;
+  return messages[key];
+}
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
@@ -1542,7 +1553,11 @@ bc.onmessage = function (ev) {
     var inst = await resolveInstance(m.connectionId ? { instance: m.connectionId } : {});
     if (inst.err) {
       bc.postMessage({ type: 'test-connection-result', reqId: m.reqId, ok: false, message: inst.err });
-      void cindy.send({ type: 'notify', text: 'GitLab 连接测试失败:' + String(inst.err).slice(0, 150), tone: 'error' });
+      void cindy.send({
+        type: 'notify',
+        text: settingsMessage(m.locale, 'failed') + String(inst.err).slice(0, 150),
+        tone: 'error',
+      });
       return;
     }
     var r = await api({ url: 'https://' + inst.host + '/api/v4/user' });
@@ -1550,7 +1565,11 @@ bc.onmessage = function (ev) {
       bc.postMessage({ type: 'test-connection-result', reqId: m.reqId, ok: false, message: r.err });
       // 结果同时走系统提示(notify 槽,主机画壳带身份头):失败也报,tone 区分。
       // 限速 5 秒内的重复点击会被主机拒(ok:false),页面内 status 仍在,不补救。
-      void cindy.send({ type: 'notify', text: 'GitLab 连接测试失败:' + String(r.err).slice(0, 150), tone: 'error' });
+      void cindy.send({
+        type: 'notify',
+        text: settingsMessage(m.locale, 'failed') + String(r.err).slice(0, 150),
+        tone: 'error',
+      });
       return;
     }
     var username = (r.data && r.data.username) || '';
@@ -1569,7 +1588,11 @@ bc.onmessage = function (ev) {
       type: 'test-connection-result', reqId: m.reqId, ok: true,
       username: username, name: (r.data && r.data.name) || '', host: inst.host,
     });
-    void cindy.send({ type: 'notify', text: '连接成功:@' + username + '(' + inst.host + ')', tone: 'success' });
+    void cindy.send({
+      type: 'notify',
+      text: settingsMessage(m.locale, 'success') + username + ' (' + inst.host + ')',
+      tone: 'success',
+    });
   })();
 };
 

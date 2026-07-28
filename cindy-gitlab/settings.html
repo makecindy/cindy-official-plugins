@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <!-- GitLab 意识自定义设置区(意识自绘,cindy-ghost:// 沙箱页)。
@@ -88,24 +88,24 @@
 </head>
 <body>
   <div class="label-row">
-    <span class="name">GitLab 实例</span>
-    <span class="badge">自建 / 多实例</span>
+    <span class="name" data-i18n="instancesTitle">GitLab instances</span>
+    <span class="badge" data-i18n="instancesBadge">Self-hosted / multiple instances</span>
   </div>
   <div id="list"></div>
   <div class="input-row">
     <div class="pill">
-      <input id="host" type="text" placeholder="Instance URL, e.g. git.example.com or https://git.example.com" autocomplete="off" spellcheck="false">
+      <input id="host" type="text" placeholder="Instance URL, e.g. git.example.com" aria-label="GitLab instance URL" data-i18n-placeholder="hostPlaceholder" data-i18n-aria-label="hostAria" autocomplete="off" spellcheck="false">
     </div>
   </div>
   <div class="input-row">
     <div class="pill">
-      <input id="token" type="password" placeholder="glpat-…(api scope 的 Personal Access Token)" autocomplete="off" spellcheck="false">
-      <button id="eye" class="icon-btn" type="button" title="显示或隐藏">
+      <input id="token" type="password" placeholder="glpat-… Personal Access Token with api scope" aria-label="GitLab Personal Access Token" data-i18n-placeholder="tokenPlaceholder" data-i18n-aria-label="tokenAria" autocomplete="off" spellcheck="false">
+      <button id="eye" class="icon-btn" type="button" title="Show or hide token" aria-label="Show or hide token" data-i18n-title="toggleToken" data-i18n-aria-label="toggleToken">
         <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
         <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
       </button>
     </div>
-    <button id="add" class="btn" type="button">添加</button>
+    <button id="add" class="btn" type="button" data-i18n="add">Add</button>
   </div>
   <p id="status"></p>
   <script src="/settings.js"></script>
