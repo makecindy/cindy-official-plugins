@@ -1,15 +1,18 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
-  <div class="title">Google Calendar 账号 <span class="badge">独立授权</span></div>
-  <p class="hint">只授权 Calendar 权限，不会同时取得 Gmail、Drive 或 Sheets 权限。</p>
+  <div class="title">
+    <span data-i18n="accountTitle">Google Calendar account</span>
+    <span class="badge" data-i18n="separateAuthorization">Separate authorization</span>
+  </div>
+  <p class="hint" data-i18n="permissionHint">Only requests Calendar access and does not grant Gmail, Drive, or Sheets access.</p>
   <div id="accounts"></div>
-  <button id="connect" class="primary" type="button">连接账号</button>
-  <p id="status"></p>
+  <button id="connect" class="primary" type="button" data-i18n="connectAccount">Connect account</button>
+  <p id="status" role="status" aria-live="polite"></p>
   <script src="/settings.js"></script>
 </body>
 </html>

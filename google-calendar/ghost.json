@@ -4,7 +4,7 @@
   "name": "Google Calendar",
   "description": "独立连接 Google Calendar：查询日程、空闲时间、创建和修改会议。只申请日历所需权限，授权与令牌由主机托管。",
   "whenToUse": "需要查询 Google 日历、安排会议、修改或取消日程时使用。请先在本插件详情页单独连接 Google Calendar 账号。",
-  "version": "1.3.12",
+  "version": "1.3.13",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

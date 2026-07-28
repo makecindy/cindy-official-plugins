@@ -97,7 +97,7 @@ describe('Google Calendar 自绘卡', () => {
     const calendarTool = manifest.tools.find((tool) => tool.name === 'google_calendar');
 
     expect(manifest.slots).toContain('card');
-    expect(manifest.version).toBe('1.3.11');
+    expect(manifest.version).toBe('1.3.13');
     expect(calendarTool?.parameters.properties.location?.type).toBe('string');
     expect(
       manifest.network.secrets.some((secret) => secret.url === 'https://calendar.google.com/'),
