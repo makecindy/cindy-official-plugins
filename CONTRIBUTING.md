@@ -112,11 +112,13 @@ do not edit the generated `dist/maker.js` by hand.
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
 
-Every pull request is verified by the `Verify pull request` workflow: it runs
-the localization and provisioning gates, runs the tests of every changed
-plugin (installing that plugin's dependencies first), and dry-runs the exact
-packaging step the publish pipeline uses. The actual upload still happens only
-after merge to `main`.
+Every non-draft pull request is verified by the `Verify pull request`
+workflow: it runs the localization and provisioning gates, runs the `*.test.mjs`
+tests of every changed plugin (installing that plugin's dependencies first),
+and dry-runs the exact packaging step the publish pipeline uses. The archived
+`*.test.ts` files are skipped — they target vitest, which this repository does
+not wire up (see [`README.md`](README.md#repository-layout)). The actual upload
+still happens only after merge to `main`.
 
 Tip: `gh repo clone -- --depth N` creates a single-branch shallow clone whose
 refspec only fetches `main`; `gh pr create` then fails with "must first push

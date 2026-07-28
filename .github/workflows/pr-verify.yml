@@ -76,6 +76,10 @@ jobs:
               | sed 's/^/plugins=/' >> "${GITHUB_OUTPUT}"
           fi
 
+      # Only `*.test.mjs` files are run here: `*.test.ts` files target vitest,
+      # which this repository intentionally does not wire up (see README —
+      # they are archived and cannot run as-is), so Node's built-in runner
+      # would fail on their unresolved `vitest` import.
       - name: Run plugin tests (installing per-plugin dependencies first)
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         env:
@@ -89,13 +93,12 @@ jobs:
               npm ci --prefix "${directory}"
               echo "::endgroup::"
             fi
-            for test_file in ".tests/${directory}.test.mjs" ".tests/${directory}.test.ts"; do
-              if [[ -f "${test_file}" ]]; then
-                echo "::group::node --test ${test_file}"
-                node --test "${test_file}" || failed=1
-                echo "::endgroup::"
-              fi
-            done
+            test_file=".tests/${directory}.test.mjs"
+            if [[ -f "${test_file}" ]]; then
+              echo "::group::node --test ${test_file}"
+              node --test "${test_file}" || failed=1
+              echo "::endgroup::"
+            fi
           done
           exit "${failed}"
 

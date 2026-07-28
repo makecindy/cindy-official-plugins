@@ -89,9 +89,11 @@ cd 163-mail && npm ci && npm run build
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
    Agent 行为的影响——这段描述就是 Agent 读到的使用手册。
 
-每个 PR 都会由 `Verify pull request` workflow 验证：跑 localization 与 provisioning
-门禁、跑每个被改动插件的测试（先装该插件的依赖），并用与发布流水线完全相同的打包
-步骤做 dry-run。真正的上传仍然只在合入 `main` 之后发生。
+每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 localization 与
+provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装该插件的依赖），并用
+与发布流水线完全相同的打包步骤做 dry-run。归档的 `*.test.ts` 会被跳过——它们面向
+vitest，而本仓没有接线（见 [`README.md`](README.md)）。真正的上传仍然只在合入
+`main` 之后发生。
 
 提示：`gh repo clone -- --depth N` 是单分支浅克隆，refspec 只抓 `main`，之后
 `gh pr create` 会报 "must first push the current branch"。先执行
