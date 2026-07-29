@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.7';
+const PLUGIN_VERSION = '1.0.8';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -117,8 +117,30 @@ const URL_RE = new RegExp(
     '\\.(?:' + COMMON_TLD + ')\\b(?::\\d{1,5})?(?:/' + URL_BODY + '*)?',
   'gi'
 );
-/* URL 后面紧跟的标点不属于 URL,吞进固定权重会漏计这些字符(近上限时会误放行)。 */
-const URL_TRAILING_RE = /[.,;:!?)\]}'"…、，。；：！？）】》」』]+$/;
+/* URL 后面紧跟的标点不属于 URL,吞进固定权重会漏计这些字符(近上限时会误放行)。
+ * 但**配平的右括号是路径的一部分**(如 .../foo(bar) ),剥掉会多计一位、误拒。 */
+const URL_TRAILING_CHARS = new Set(".,;:!?)]}'\"…、，。；：！？）】》」』".split(''));
+const URL_BRACKET_PAIRS = { ')': '(', ']': '[', '}': '{', '）': '（', '】': '【', '》': '《', '」': '「', '』': '『' };
+
+function stripUrlTrailing(url) {
+  let end = url.length;
+  while (end > 0) {
+    const ch = url[end - 1];
+    if (!URL_TRAILING_CHARS.has(ch)) break;
+    const open = URL_BRACKET_PAIRS[ch];
+    if (open) {
+      let opens = 0;
+      let closes = 0;
+      for (let i = 0; i < end; i += 1) {
+        if (url[i] === open) opens += 1;
+        else if (url[i] === ch) closes += 1;
+      }
+      if (opens >= closes) break; // 配平 → 属于 URL 自身,保留
+    }
+    end -= 1;
+  }
+  return url.slice(0, end);
+}
 
 /** 按字素簇切分,让 ZWJ emoji 家族这类多码点序列算作一个单位。 */
 function segmentGraphemes(text) {
@@ -159,8 +181,7 @@ function weightedLength(text) {
   let m;
   while ((m = URL_RE.exec(text)) !== null) {
     const raw = m[0];
-    const trail = raw.match(URL_TRAILING_RE);
-    const url = trail ? raw.slice(0, raw.length - trail[0].length) : raw;
+    const url = stripUrlTrailing(raw);
     if (!url) {
       URL_RE.lastIndex = m.index + raw.length; // 整段都是标点:跳过,别原地死循环
       continue;
@@ -1162,12 +1183,32 @@ async function toolPost(msg) {
   }
 
   if (!res || res.ok !== true) {
-    fail(msg.callId, 'POST_NOT_DISPATCHED', [
-      tx({ zh: '发帖请求没能发出。主机原因:', en: 'The post request was not dispatched. Host reason:' }) +
-        ' ' +
-        String((res && res.message) || '').slice(0, 300),
-      xApiSetupHint(state.xapiClient !== true),
-      tx({ zh: '文案尚未发布,重试前先确认凭证已配好。', en: 'Nothing was published; make sure the credential is configured before retrying.' }),
+    const why = String((res && res.message) || '').slice(0, 300);
+    /* 只有能确定"请求根本没离开本机"时才敢说没发布:凭证没配、域名不在白名单
+     * 这两类是主机在出网前就拒了。超时 / 网络中断都可能是**帖子已经发出去、
+     * 只是响应丢了**——这时候断言"未发布 + 去重试"会造成重复公开发帖。 */
+    const preflightRejected = /凭证|credential|白名单|not allowed|whitelist|未配置|not configured/i.test(why);
+    if (preflightRejected) {
+      fail(msg.callId, 'POST_NOT_DISPATCHED', [
+        tx({ zh: '发帖请求没能发出(主机在出网前就拒了)。原因:', en: 'The post request never left the machine (the host rejected it before dispatch). Reason:' }) + ' ' + why,
+        xApiSetupHint(state.xapiClient !== true),
+        tx({ zh: '文案确定没有发布,配好凭证后可以安全重试。', en: 'Nothing was published; it is safe to retry once the credential is configured.' }),
+      ]);
+      return;
+    }
+    fail(msg.callId, 'POST_DELIVERY_UNKNOWN', [
+      tx({
+        zh: '发帖结果不确定:请求已经发出,但没拿到 X 的响应(超时或网络中断)。原因:',
+        en: 'The outcome is indeterminate: the request went out but no response came back from X (timeout or network interruption). Reason:',
+      }) + ' ' + why,
+      tx({
+        zh: '**这条帖子可能已经发布成功了**——X 收到请求后响应丢失也会走到这里。**不要直接重试**,否则可能重复公开发帖。',
+        en: '**The post may well have been published** — a lost response after X accepted the request lands here too. **Do not simply retry**, or you may post a public duplicate.',
+      }),
+      tx({
+        zh: '正确做法:请用户去自己的 X 时间线确认那条帖子在不在。确认没发出去,再重试同一份文案;已经发出去了就别再发了。',
+        en: 'Correct next step: ask the user to check their own X timeline for the post. Retry the same copy only if it is genuinely absent; if it is there, do not post again.',
+      }),
     ]);
     return;
   }
