@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.10';
+const PLUGIN_VERSION = '1.0.11';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -96,53 +96,24 @@ const LIGHT_RANGES = [
   [0x2032, 0x2037],
 ];
 
-/* URL 一律按 t.co 变换后的固定长度计,与原始长度无关(X 的 transformedURLLength)。
- * 不按这条算会两头错:长链接被误拒,短链接被误放行。
+/* ── 本地字数校验:**下限估算**,不是 twitter-text 的精确复刻 ──────────────
  *
- * 三种形态都要认:带协议、www. 开头、以及**裸域名**(X 同样会 t.co 变换
- * `example.com`)。裸域名的 TLD 用常见白名单而不是"任意字母"——后者会把
- * `main.js` / `settings.html` 这类文件名当成链接、把近上限的正常文案误拒;
- * 与 twitter-text 的完整 TLD 表严格对齐不在本插件范围内,X 侧的判定是最终
- * 权威,被拒时有结构化错误兜底。 */
+ * 设计决策(2026-07-29,连修五轮后重做):精确复刻 X 的加权算法要跟它的完整
+ * IANA TLD 表、query/路径形态、邮箱排除、括号配平、NFC 归一一路对齐——每补
+ * 一处就冒出下一处,收敛不了。而两种误差的代价并不对称:
+ *
+ *   - 误拒(本地算多了)= 挡住用户合法的文案,用户只能跟插件较劲,插件帮倒忙;
+ *   - 误放(本地算少了)= X 直接返回明确报错,帖子没发出、不计费,插件如实转达。
+ *
+ * 所以本地只算**下限**:凡是"可能被 X 当成 URL"的片段,取 min(字面权重, 23)
+ * ——两种判定里取小的那个。下限都超过 280,才是确定超限、可以放心拒;没超就
+ * 交给 X 判定。这样彻底消掉"误拒合法文案"这一整类问题,代价只是偶尔多一次
+ * 往返(而 X 的报错本身就是清晰可转达的)。
+ * ------------------------------------------------------------------------ */
 const TCO_URL_WEIGHT = 23;
-const COMMON_TLD =
-  'com|net|org|edu|gov|mil|int|info|biz|io|ai|co|dev|app|me|xyz|tv|cc|ly|sh|gg|so|to|' +
-  'cn|jp|kr|tw|hk|sg|in|ru|br|au|ca|uk|de|fr|nl|se|no|fi|dk|pl|tr|es|it|eu|us';
-/* URL 主体只收 RFC 3986 允许的 ASCII 字符。用 [^\s]+ 会把紧跟其后的中文一起
- * 吞进链接——中文行文里 URL 后面常常没有空格,那样整段中文会被算成 23。 */
-const URL_BODY = "[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]";
-/* 裸域名分支前置 (?<![@\w.-]):邮箱里的域名(me@example.com)X 不做 t.co 变换,
- * 按 23 计会误拒近上限的正常文案;同时避免从域名中段截断出一个"子域名"。 */
-const URL_RE = new RegExp(
-  '(?:https?://|www\\.)' + URL_BODY + '+' +
-    '|(?<![@\\w.-])[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*' +
-    '\\.(?:' + COMMON_TLD + ')\\b(?::\\d{1,5})?(?:/' + URL_BODY + '*)?',
-  'gi'
-);
-/* URL 后面紧跟的标点不属于 URL,吞进固定权重会漏计这些字符(近上限时会误放行)。
- * 但**配平的右括号是路径的一部分**(如 .../foo(bar) ),剥掉会多计一位、误拒。 */
-const URL_TRAILING_CHARS = new Set(".,;:!?)]}'\"…、，。；：！？）】》」』".split(''));
-const URL_BRACKET_PAIRS = { ')': '(', ']': '[', '}': '{', '）': '（', '】': '【', '》': '《', '」': '「', '』': '『' };
-
-function stripUrlTrailing(url) {
-  let end = url.length;
-  while (end > 0) {
-    const ch = url[end - 1];
-    if (!URL_TRAILING_CHARS.has(ch)) break;
-    const open = URL_BRACKET_PAIRS[ch];
-    if (open) {
-      let opens = 0;
-      let closes = 0;
-      for (let i = 0; i < end; i += 1) {
-        if (url[i] === open) opens += 1;
-        else if (url[i] === ch) closes += 1;
-      }
-      if (opens >= closes) break; // 配平 → 属于 URL 自身,保留
-    }
-    end -= 1;
-  }
-  return url.slice(0, end);
-}
+/* 宽松匹配即可:因为取 min,多认几个"疑似 URL"只会让估算更低,不会造成误拒。 */
+const URL_CANDIDATE_RE =
+  /(?:https?:\/\/|www\.)\S+|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)*\.[A-Za-z]{2,}(?:[:/?#]\S*)?/g;
 
 /** 按字素簇切分,让 ZWJ emoji 家族这类多码点序列算作一个单位。 */
 function segmentGraphemes(text) {
@@ -175,9 +146,19 @@ function clusterWeight(cluster) {
   return Array.from(cluster).length;
 }
 
-function weightedLength(input) {
-  /* X 先把文本规范化成 NFC 再计数:分解形式的 e+́ 属于同一个字符,不该按两个
-   * 码点计权,否则带重音的文案会被误拒。 */
+/** 纯文本权重(不含 URL 变换):按字素簇累加。入参需已 NFC 归一。 */
+function plainWeight(text) {
+  let total = 0;
+  for (const cluster of segmentGraphemes(text)) total += clusterWeight(cluster);
+  return total;
+}
+
+/**
+ * X 加权字数的**下限**。返回值 > 280 即可确定超限;≤ 280 不保证 X 一定接受。
+ * 见上方设计决策:宁可放行让 X 明确报错,也不误拒用户合法的文案。
+ */
+function weightedLengthLowerBound(input) {
+  /* X 计数前先规范化成 NFC:分解形式的 e+◌́ 是同一个字符,按两个码点计会算多。 */
   let text = input;
   try {
     text = input.normalize('NFC');
@@ -187,22 +168,16 @@ function weightedLength(input) {
   let total = 0;
   let rest = '';
   let cursor = 0;
-  URL_RE.lastIndex = 0;
+  URL_CANDIDATE_RE.lastIndex = 0;
   let m;
-  while ((m = URL_RE.exec(text)) !== null) {
-    const raw = m[0];
-    const url = stripUrlTrailing(raw);
-    if (!url) {
-      URL_RE.lastIndex = m.index + raw.length; // 整段都是标点:跳过,别原地死循环
-      continue;
-    }
+  while ((m = URL_CANDIDATE_RE.exec(text)) !== null) {
     rest += text.slice(cursor, m.index);
-    total += TCO_URL_WEIGHT;
-    cursor = m.index + url.length; // 尾随标点退回普通字符逐个计
-    URL_RE.lastIndex = cursor;
+    /* 取小:X 当它是 URL 就是 23,不当就是字面权重,两者取下限 */
+    total += Math.min(TCO_URL_WEIGHT, plainWeight(m[0]));
+    cursor = m.index + m[0].length;
   }
   rest += text.slice(cursor);
-  for (const cluster of segmentGraphemes(rest)) total += clusterWeight(cluster);
+  total += plainWeight(rest);
   return total;
 }
 
@@ -1156,12 +1131,12 @@ async function toolPost(msg) {
     ]);
     return;
   }
-  const length = weightedLength(trimmed);
+  const length = weightedLengthLowerBound(trimmed);
   if (length > MAX_POST_CHARS) {
     fail(msg.callId, 'TEXT_TOO_LONG', [
       tx({
-        zh: '文案加权字数 ' + length + ',超过 X 的 ' + MAX_POST_CHARS + ' 上限(X 按加权计数:中日韩字符每个算 2,所以纯中文约 140 字封顶)。请和用户一起删减后重试,不要自己大改后直接发。',
-        en: 'The copy weighs ' + length + ' characters, over X\'s limit of ' + MAX_POST_CHARS + ' (X counts CJK characters as 2 each, so an all-Chinese post caps out around 140 characters). Trim it with the user before retrying; do not rewrite and post on your own.',
+        zh: '文案超长:按 X 的加权口径**下限**已经是 ' + length + ',超过上限 ' + MAX_POST_CHARS + '(中日韩字符每个算 2,所以纯中文约 140 字封顶;链接按固定长度计)。下限都超了就是确定超限。请和用户一起删减后重试,不要自己大改后直接发。',
+        en: 'The copy is too long: even a lower-bound estimate under X\'s weighting is ' + length + ', over the limit of ' + MAX_POST_CHARS + ' (CJK characters count as 2 each, so an all-Chinese post caps out around 140; links count as a fixed length). Exceeding the lower bound means it is definitely over. Trim it with the user before retrying; do not rewrite and post on your own.',
       }),
     ]);
     return;

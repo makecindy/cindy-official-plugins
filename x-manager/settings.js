@@ -299,13 +299,23 @@ function renderAccounts(containerId, secretKey, entry, feedbackId) {
   }
 }
 
+/* 顶部徽标按**默认账号**判定:请求不带 authAccount,主机用的就是默认账号。
+ * 若按"任一账号已连接"判定,默认账号过期时徽标会显示已连接,与实际能力矛盾
+ * (与 main.js 的 oauthStatusOf 同一口径)。 */
 function oauthTone(entry) {
   var accounts = entry && Array.isArray(entry.accounts) ? entry.accounts : [];
   if (!accounts.length) return { key: 'state.absent', tone: 'off' };
+  var target = null;
   for (var i = 0; i < accounts.length; i += 1) {
-    if (accounts[i] && accounts[i].status === 'connected') return { key: 'state.connected', tone: 'on' };
+    if (accounts[i] && accounts[i].isDefault) {
+      target = accounts[i];
+      break;
+    }
   }
-  return { key: 'state.expired', tone: 'warn' };
+  if (!target) target = accounts[0]; // 主机没标默认时按首条,取确定值而非乐观值
+  return target && target.status === 'connected'
+    ? { key: 'state.connected', tone: 'on' }
+    : { key: 'state.expired', tone: 'warn' };
 }
 
 /* ── 应用身份(X API client)两态渲染 ──────────────────────────────────
