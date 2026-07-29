@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.8';
+const PLUGIN_VERSION = '1.0.9';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -111,9 +111,11 @@ const COMMON_TLD =
 /* URL 主体只收 RFC 3986 允许的 ASCII 字符。用 [^\s]+ 会把紧跟其后的中文一起
  * 吞进链接——中文行文里 URL 后面常常没有空格,那样整段中文会被算成 23。 */
 const URL_BODY = "[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]";
+/* 裸域名分支前置 (?<![@\w.-]):邮箱里的域名(me@example.com)X 不做 t.co 变换,
+ * 按 23 计会误拒近上限的正常文案;同时避免从域名中段截断出一个"子域名"。 */
 const URL_RE = new RegExp(
   '(?:https?://|www\\.)' + URL_BODY + '+' +
-    '|\\b[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*' +
+    '|(?<![@\\w.-])[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*' +
     '\\.(?:' + COMMON_TLD + ')\\b(?::\\d{1,5})?(?:/' + URL_BODY + '*)?',
   'gi'
 );
@@ -333,12 +335,24 @@ function pickEntry(list, key) {
   return null;
 }
 
+/**
+ * 凭证状态按**默认账号**判定。cindy.fetch 不带 authAccount,主机用的就是默认
+ * 账号;若按"任一账号已连接"判定,会在"默认账号过期、另一个还连着"时误报可用
+ * ——搜索会悄悄降级到计费的 API key 路由,发帖则直接失败。
+ */
 function oauthStatusOf(entry) {
   if (!entry) return 'absent';
   const accounts = Array.isArray(entry.accounts) ? entry.accounts : [];
   if (!accounts.length) return entry.clientConfigured === false ? 'no_client' : 'absent';
-  for (const a of accounts) if (a && a.status === 'connected') return 'connected';
-  return 'expired';
+  let target = null;
+  for (const a of accounts) {
+    if (a && a.isDefault) {
+      target = a;
+      break;
+    }
+  }
+  if (!target) target = accounts[0]; // 主机没标默认时按首条(与其取任一"能用的"乐观值,不如取确定值)
+  return target && target.status === 'connected' ? 'connected' : 'expired';
 }
 
 /**
@@ -772,8 +786,8 @@ function plannedRoute(state) {
 function statusAdvice(state, route) {
   if (route === ROUTE_OAUTH) {
     return tx({
-      zh: '走 Grok 订阅路由(计订阅配额,无 API 账单)。注意:x_search 经 OAuth 路由属「结构确认、可用性未实测」,失败会自动降级到 API key;xAI 按订阅档位做 403 门禁,想提前确认就传 probe:true。',
-      en: 'Use the Grok subscription route (subscription quota, no API bill). Note: x_search over the OAuth route is structurally confirmed but not empirically verified; failures fall back to the API key automatically. xAI gates access by subscription tier with 403 — pass probe:true to check ahead.',
+      zh: '走 Grok 订阅路由(计订阅配额,无 API 账单)。注意:xAI 按订阅档位做 403 门禁,而门禁只在真正的搜索请求上才触发——probe 是认证与连通性检查,查不出它,想确认只能真跑一次 x_search;真被挡下时本工具会自动降级到 API key 并在 route_used 标注。',
+      en: 'Use the Grok subscription route (subscription quota, no API bill). Note: xAI gates access by subscription tier with 403, and that gate only fires on an actual search request — probe is an authentication and connectivity check and cannot see it, so the only way to confirm is to run a real x_search. If the gate does block you, the tool falls back to the API key and records it in route_used.',
     });
   }
   if (route === ROUTE_API_KEY) {
@@ -989,6 +1003,20 @@ async function toolSearch(msg) {
 
       const data = parseResponses(res.body);
       if (!data || (!data.answer && !data.citations.length)) {
+        /* 2xx 就已经计费了。哪怕正文解析不出来,也要把这次调用与它回报的金额
+         * 记进账,否则"API 回报的月度合计"会在响应结构变动时偏低。 */
+        if (data && route.id === ROUTE_API_KEY) {
+          await recordUsage(function (u) {
+            u.x_search_calls += 1;
+            u.tokens_in += data.tokensIn;
+            u.tokens_out += data.tokensOut;
+            if (data.billedUsd === null) u.billed_unknown_calls = (u.billed_unknown_calls || 0) + 1;
+            else u.billed_usd = (u.billed_usd || 0) + data.billedUsd;
+            u.last_route = route.id;
+            if (!u.calls_by_route) u.calls_by_route = { oauth: 0, api_key: 0 };
+            u.calls_by_route[route.id] = (u.calls_by_route[route.id] || 0) + 1;
+          });
+        }
         attempts.push({
           route: route.id,
           outcome: 'unexpected_response_shape',
@@ -1261,6 +1289,8 @@ async function toolPost(msg) {
   const status = res.status;
   const lines = [];
   let code = 'POST_FAILED';
+  /* 结果是否"不确定"(帖子可能已建好):决定收尾那句是"确定没发"还是"先去确认"。 */
+  let indeterminate = false;
   /* X 自己给的原话最有诊断价值,放在最前面——通用排查清单是它说不清时的兜底,
    * 不能盖过它(实测教训:403 的确切原因被埋在四条清单之后)。 */
   if (hint) lines.push(tx({ zh: 'X 返回:', en: 'X said:' }) + ' ' + hint);
@@ -1310,8 +1340,16 @@ async function toolPost(msg) {
       })
     );
   } else if (status >= 500) {
-    code = 'X_API_UPSTREAM';
-    lines.push(tx({ zh: 'X 服务端错误(' + status + '),稍后重试。', en: 'X server error (' + status + '); retry later.' }));
+    /* 5xx 同样是不确定态:X 可能已经建好了帖子,只是生成响应时出错。
+     * 当成"没发出去 + 稍后重试"会造成重复公开发帖。 */
+    indeterminate = true;
+    code = 'POST_DELIVERY_UNKNOWN';
+    lines.push(
+      tx({
+        zh: '发帖结果不确定:X 返回服务端错误(' + status + ')。**帖子可能已经建好了**,只是 X 在生成响应时出错。',
+        en: 'The outcome is indeterminate: X returned a server error (' + status + '). **The post may already have been created**, with X failing only while producing the response.',
+      })
+    );
   } else {
     lines.push(
       tx({
@@ -1320,7 +1358,14 @@ async function toolPost(msg) {
       })
     );
   }
-  lines.push(tx({ zh: '文案没有发布出去,不要向用户报告已发布。', en: 'Nothing was published; do not tell the user it was posted.' }));
+  lines.push(
+    indeterminate
+      ? tx({
+          zh: '**不要直接重试**,否则可能重复公开发帖。请用户先去自己的 X 时间线确认那条帖子在不在:确实没有再重试同一份文案,已经在了就别再发。',
+          en: '**Do not simply retry**, or you may post a public duplicate. Ask the user to check their own X timeline first: retry the same copy only if the post is genuinely absent; if it is there, do not post again.',
+        })
+      : tx({ zh: '文案没有发布出去,不要向用户报告已发布。', en: 'Nothing was published; do not tell the user it was posted.' })
+  );
   fail(msg.callId, code, lines);
 }
 

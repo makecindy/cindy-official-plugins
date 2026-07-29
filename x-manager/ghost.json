@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "id": "x-manager",
   "name": "X Manager",
-  "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量为本地估算,不是官方账单。",
+  "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量取 API 回报的真实数字,不做估算。",
   "whenToUse": "需要搜 X / Twitter 上的舆情、讨论、风向,查某个账号最近说了什么、某话题近几天的走势,或需要以用户身份在 X 上发帖 / 回帖时找我。先调 x_status 看凭证与路由是否就绪,再决定用我还是改用浏览器。",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "command": "x-manager",
@@ -23,7 +23,7 @@
   "tools": [
     {
       "name": "x_status",
-      "description": "查询本插件的就绪状态:Grok 订阅 OAuth 是否已连接、xAI API key 是否已保存、X 官方 API 是否已连接,当前 x_search 会走哪条路由,以及本月本地记账的调用次数与估算花费。不确定能不能用时先调它,返回的 advice 字段给出下一步建议(全部不可用时会建议改用浏览器直接访问 x.com)。本身不产生 API 费用;probe 为 true 时会多打两个不计 token 的探活请求。",
+      "description": "查询本插件的就绪状态:Grok 订阅 OAuth 是否已连接、xAI API key 是否已保存、X 官方 API 是否已连接,当前 x_search 会走哪条路由,以及本月的调用次数与 xAI 回报的真实计费额。不确定能不能用时先调它,返回的 advice 字段给出下一步建议(全部不可用时会建议改用浏览器直接访问 x.com)。本身不产生 API 费用;probe 为 true 时会多打两个不计 token 的认证与连通性检查。",
       "parameters": {
         "type": "object",
         "properties": {
