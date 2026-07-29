@@ -1,6 +1,6 @@
 {
   "name": "X Manager",
-  "description": "X(Twitter)의 여론을 검색하고 글을 올립니다. 검색은 xAI의 x_search 서버 사이드 도구를 사용하며 Grok 구독 OAuth와 xAI API key 두 경로를 자동으로 전환합니다. 게시는 공식 X API v2를 사용하고 본인 developer app이 필요합니다. 사용량은 로컬 추정치이며 공식 청구서가 아닙니다.",
+  "description": "X(Twitter)의 여론을 검색하고 글을 올립니다. 검색은 xAI의 x_search 서버 사이드 도구를 사용하며 Grok 구독 OAuth와 xAI API key 두 경로를 자동으로 전환합니다. 게시는 공식 X API v2를 사용하고 본인 developer app이 필요합니다. 사용량은 API가 보고하는 실제 수치이며 추정치가 아닙니다.",
   "whenToUse": "X / Twitter의 여론, 논의, 흐름을 검색해야 할 때, 특정 계정이 최근에 무슨 말을 했는지나 어떤 주제의 며칠간 추이를 알고 싶을 때, 또는 사용자 본인 명의로 X에 글을 올리거나 답글을 달아야 할 때 사용하세요. 먼저 x_status로 자격 증명과 경로 준비 상태를 확인한 뒤 이 플러그인을 쓸지 브라우저로 갈지 결정합니다.",
   "tools": {
     "x_status": {

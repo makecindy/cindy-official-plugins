@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.9';
+const PLUGIN_VERSION = '1.0.10';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -175,7 +175,15 @@ function clusterWeight(cluster) {
   return Array.from(cluster).length;
 }
 
-function weightedLength(text) {
+function weightedLength(input) {
+  /* X 先把文本规范化成 NFC 再计数:分解形式的 e+́ 属于同一个字符,不该按两个
+   * 码点计权,否则带重音的文案会被误拒。 */
+  let text = input;
+  try {
+    text = input.normalize('NFC');
+  } catch (_) {
+    /* 环境不支持 normalize 时按原文计,只影响分解形式的精度 */
+  }
   let total = 0;
   let rest = '';
   let cursor = 0;
@@ -1003,20 +1011,24 @@ async function toolSearch(msg) {
 
       const data = parseResponses(res.body);
       if (!data || (!data.answer && !data.citations.length)) {
-        /* 2xx 就已经计费了。哪怕正文解析不出来,也要把这次调用与它回报的金额
-         * 记进账,否则"API 回报的月度合计"会在响应结构变动时偏低。 */
-        if (data && route.id === ROUTE_API_KEY) {
-          await recordUsage(function (u) {
-            u.x_search_calls += 1;
+        /* 2xx 表示这次上游请求真的跑了:API key 路由已计费、订阅路由已扣配额。
+         * 哪怕正文解析不出来(响应结构变了、或压根不是 JSON),调用也必须计数,
+         * 否则降级后账面上只剩兜底那一次,看不出实际打了两次。金额只有 API key
+         * 路由有,且以上游回报为准、缺失就记为不可知,不估算。 */
+        await recordUsage(function (u) {
+          u.x_search_calls += 1;
+          if (data) {
             u.tokens_in += data.tokensIn;
             u.tokens_out += data.tokensOut;
-            if (data.billedUsd === null) u.billed_unknown_calls = (u.billed_unknown_calls || 0) + 1;
+          }
+          if (route.id === ROUTE_API_KEY) {
+            if (!data || data.billedUsd === null) u.billed_unknown_calls = (u.billed_unknown_calls || 0) + 1;
             else u.billed_usd = (u.billed_usd || 0) + data.billedUsd;
-            u.last_route = route.id;
-            if (!u.calls_by_route) u.calls_by_route = { oauth: 0, api_key: 0 };
-            u.calls_by_route[route.id] = (u.calls_by_route[route.id] || 0) + 1;
-          });
-        }
+          }
+          u.last_route = route.id;
+          if (!u.calls_by_route) u.calls_by_route = { oauth: 0, api_key: 0 };
+          u.calls_by_route[route.id] = (u.calls_by_route[route.id] || 0) + 1;
+        });
         attempts.push({
           route: route.id,
           outcome: 'unexpected_response_shape',
