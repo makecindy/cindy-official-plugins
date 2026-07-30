@@ -19,7 +19,7 @@
     {
       "id": "approved-credential-injection-only",
       "severity": "high",
-      "rule": "凭证注入只认可本仓三种已声明机制：普通插件的 network.secrets[].inject、多实例插件的 network.connections[].inject、Node 插件的 node.secretBindings[]。三者都由主机保管并注入，插件代码不得读取、复制、转存凭证到 KV/localStorage/日志/页面状态/网络请求体。出现三种之外的注入字段、或绕过主机注入自行处理凭证，均按 P1 违规处理。若官方第三方运行时自管凭证（如 taptap-maker），插件只允许把凭证交给该运行时，不得复制进 Cindy KV/Secret 或留存明文。"
+      "rule": "凭证注入只认可本仓三种已声明机制：普通插件的 network.secrets[].inject、多实例插件的 network.connections[].inject、Node 插件的 node.secretBindings[]。三者都由主机保管并注入，插件代码不得读取、复制、转存凭证到 KV/localStorage/日志/页面状态/网络请求体。出现三种之外的注入字段、或绕过主机注入自行处理凭证，均按 P1 违规处理。若官方第三方运行时自管凭证（如 taptap-maker），插件只允许把凭证交给该运行时，不得复制进 Cindy KV/Secret 或留存明文。例外：设置页把用户输入的凭证通过同源 PUT /secrets/<key> 写入宿主只写通道，是本仓唯一批准的保存路径，不属于『转存』；该禁令只针对外部/插件自控的请求目标。"
     },
     {
       "id": "network-allowlist",

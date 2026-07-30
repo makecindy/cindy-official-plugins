@@ -95,6 +95,9 @@ PR 新增插件目录（出现新的 `ghost.json`）时，必须通读仓内现�
   （尤其 `"all"`）；
 - 四语言 locale 资源齐全（zh-CN/en/ja/ko，`.tests/localization.test.mjs` 口径）；
 - `ghost.json` 的 icon 引用有效、assets 体积合理；
+- bundle 了第三方依赖的插件（如带 Node worker 的邮件类）必须随包提供
+  `THIRD-PARTY-LICENSES.txt`（完整许可证文本）。注意：ignorePatterns 只是不逐行
+  review 该文件的内容，**文件缺失本身必须报**；
 - PR 描述包含实机验证说明（在 Cindy 客户端安装 `.cindy` 包实测过哪些工具）；
   没有实测的必须如实标注，reviewer 应在 summary 里显式提示「未经实机验证」。
 
