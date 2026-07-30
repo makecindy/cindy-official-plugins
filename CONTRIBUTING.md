@@ -12,7 +12,7 @@ maintained in separate repositories and are outside the scope of this repository
 ## Before you start
 
 - Read [`README.md`](README.md) first. It is the source of truth for the
-  repository layout, the plugin list, the four design principles, and the publish
+  repository layout, the plugin list, the review standards, and the publish
   flow; this guide does not duplicate them.
 - The complete plugin-authoring contract (all `ghost.json` fields, slots, the
   `cindy.send` pipe API, the packaging flow) is defined by the manual returned by
@@ -40,6 +40,10 @@ The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 ```bash
 node --test .tests/localization.test.mjs
 ```
+
+The `*.test.ts` files under `.tests/` are written for vitest, which this
+repository does not currently wire up (there is no root `package.json`). They
+are archived until a runner is configured and cannot be run as-is.
 
 After changing any plugin's `ghost.json` or `locales/`, you **must** run
 `node --test .tests/localization.test.mjs`. The publish pipeline runs the same
@@ -90,6 +94,10 @@ upload still happens only after merge to `main`.
 6. Wait for review; do not push directly to `main`. After a merge to `main`, the
    publish workflow syncs the changed plugins to the Cindy marketplace
    automatically.
+7. Paired bilingual documents move together: a pull request that changes
+   `README.md`, `CONTRIBUTING.md`, or any other document with a `.zh-CN`
+   counterpart must update both files in the same pull request, and vice
+   versa. A pull request that updates only one side will not be merged.
 
 Bug fixes and small improvements are welcome as direct pull requests. For a new
 official plugin, open an issue first to discuss positioning and boundaries

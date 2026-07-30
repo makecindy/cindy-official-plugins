@@ -10,7 +10,7 @@
 
 ## 开始之前
 
-- 先读 [README.zh-CN.md](README.zh-CN.md)：仓库结构、插件清单、四条设计原则和发布流程
+- 先读 [README.zh-CN.md](README.zh-CN.md)：仓库结构、插件清单、审查标准和发布流程
   都以它为准，本指南不重复维护副本。
 - 完整的插件编写契约（`ghost.json` 全字段、卡槽、`cindy.send` 管子 API、打包流程）由
   Cindy 客户端内置的 `ghost_forge_guide` 工具返回——在 Cindy 对话里说「帮我做一个插件」
@@ -33,6 +33,9 @@
 ```bash
 node --test .tests/localization.test.mjs
 ```
+
+`.tests/` 下的 `*.test.ts` 按 vitest 编写，但本仓目前没有接入 vitest（没有根
+`package.json`），处于存档状态，接入 runner 之前无法直接运行。
 
 改动任何插件的 `ghost.json` 或 `locales/` 后，**必须**跑一遍
 `node --test .tests/localization.test.mjs`——发布流水线会在打包前执行同一份检查，
@@ -70,6 +73,9 @@ provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装�
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后发布流水线会自动把改动的插件
    同步到 Cindy 插件市场。
+7. 成对的双语文档必须同 PR 同步：改动 `README.md`、`CONTRIBUTING.md` 或任何有
+   `.zh-CN` 对应版本的文档时，两份必须在同一个 PR 内一起更新，反之亦然。只改
+   一边的 PR 不予合并。
 
 Bug 修复和小改进可以直接提 PR。新官方插件请先开 issue 讨论定位与边界（避免与现有插件
 重叠），对齐后再提 PR。

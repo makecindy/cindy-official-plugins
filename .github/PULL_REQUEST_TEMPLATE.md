@@ -17,9 +17,27 @@ Title format: <type>(<scope>): <short description>
 
 ## Checklist
 
+<!--
+Quality & security items come from README → Review standards; the full
+review contract is .greptile/rules.md. 质量与安全项来自 README 审查标准，
+完整审查契约见 .greptile/rules.md。
+-->
+
 - [ ] Reviewed the complete diff — no credentials, tokens, authorization codes,
       real user data, unrelated generated files, or `node_modules`.
       已 review 完整 diff —— 无凭证、令牌、授权码、真实用户数据、无关生成文件或 `node_modules`。
+- [ ] `ghost.json` declares only capabilities actually used (network hosts /
+      slots / secrets); any new capability is justified in this PR description.
+      `ghost.json` 只声明实际用到的能力（网络域名 / slots / 密钥）；新增能力已在
+      PR 描述中说明必要性。
+- [ ] Tools with irreversible external side effects (send / post / delete)
+      handle every failure path as "not executed / executed / unknown", and
+      never suggest a blind retry on "unknown".
+      有不可逆外发副作用的工具已在每条失败路径上区分「未执行 / 已执行 / 不确定」
+      三态，不确定态不提示盲目重试。
+- [ ] Every changed tool `description` still matches actual behavior; SKILL.md
+      and settings copy stay consistent with it.
+      改动过的 tool `description` 仍与实际行为一致；SKILL.md 与设置页文案同步。
 - [ ] Bumped `ghost.json` `version` for every plugin whose packaged content
       changed. 每个打包内容发生变化的插件都已 bump `ghost.json` 的 `version`。
 - [ ] Ran `node --test .tests/localization.test.mjs` if any `ghost.json` or
