@@ -274,7 +274,9 @@ function renderAccounts(containerId, secretKey, entry, feedbackId) {
       row.appendChild(el('span', 'tag', account.status === 'connected' ? t('state.connected') : t('state.expired')));
       if (account.isDefault) row.appendChild(el('span', 'tag', t('tag.default')));
 
-      if (accounts.length > 1 && !account.isDefault) {
+      /* 只有已连接的账号能设为默认:请求不带 authAccount 时用的就是默认账号,
+       * 把过期账号设成默认会让发帖直接失败、搜索莫名降级到计费路由。 */
+      if (accounts.length > 1 && !account.isDefault && account.status === 'connected') {
         var mk = el('button', 'btn tiny', t('action.setdefault'));
         mk.addEventListener('click', async function () {
           mk.disabled = true;

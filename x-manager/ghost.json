@@ -4,7 +4,7 @@
   "name": "X Manager",
   "description": "在 X(Twitter)上搜舆情、发帖。搜索经 xAI 的 x_search 服务端工具,Grok 订阅 OAuth 与 xAI API key 双通道自动降级;发帖走 X 官方 API v2(需你自备 developer app)。用量取 API 回报的真实数字,不做估算。",
   "whenToUse": "需要搜 X / Twitter 上的舆情、讨论、风向,查某个账号最近说了什么、某话题近几天的走势,或需要以用户身份在 X 上发帖 / 回帖时找我。先调 x_status 看凭证与路由是否就绪,再决定用我还是改用浏览器。",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "command": "x-manager",
@@ -90,7 +90,7 @@
         "properties": {
           "text": {
             "type": "string",
-            "description": "帖子正文,≤280 字符(超长会被拒绝并返回实际字符数)。必须是用户已经确认过的最终文案。"
+            "description": "帖子正文。X 的上限是 280 **加权**字符(中日韩字符每个算 2,所以纯中文约 140 字;链接按固定长度计)。插件只做**下限估算**校验:下限都超了会直接拒绝并返回该下限值;没超也不代表 X 一定接受——最终以 X 的判定为准,被 X 拒时会返回它的原话。必须是用户已经确认过的最终文案。"
           },
           "reply_to_id": {
             "type": "string",

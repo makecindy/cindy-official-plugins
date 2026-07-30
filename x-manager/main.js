@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.11';
+const PLUGIN_VERSION = '1.0.12';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -111,9 +111,15 @@ const LIGHT_RANGES = [
  * 往返(而 X 的报错本身就是清晰可转达的)。
  * ------------------------------------------------------------------------ */
 const TCO_URL_WEIGHT = 23;
-/* 宽松匹配即可:因为取 min,多认几个"疑似 URL"只会让估算更低,不会造成误拒。 */
-const URL_CANDIDATE_RE =
-  /(?:https?:\/\/|www\.)\S+|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)*\.[A-Za-z]{2,}(?:[:/?#]\S*)?/g;
+/* 宽松匹配即可:因为取 min,多认几个"疑似 URL"只会让估算更低,不会造成误拒。
+ * 域名部分用 \p{L}\p{N} 而不是 ASCII 类,才能覆盖国际化域名(如 xxx.中国)
+ * ——X 对 IDN 同样做 t.co 变换,只认 ASCII 会把它按字面(每个汉字算 2)计,
+ * 那就破坏了"下限永不高于 X 真实计数"这条保证、又变成误拒。 */
+const URL_CANDIDATE_RE = new RegExp(
+  '(?:https?://|www\\.)\\S+' +
+    '|[\\p{L}\\p{N}][\\p{L}\\p{N}-]*(?:\\.[\\p{L}\\p{N}][\\p{L}\\p{N}-]*)*\\.[\\p{L}]{2,24}(?:[:/?#]\\S*)?',
+  'gu'
+);
 
 /** 按字素簇切分,让 ZWJ emoji 家族这类多码点序列算作一个单位。 */
 function segmentGraphemes(text) {
@@ -269,17 +275,23 @@ function upstreamHint(body) {
 /* ── 4. 宿主语言(插件语言只跟随宿主;绝不读浏览器或操作系统语言)────────── */
 
 let LOCALE = 'zh-CN';
-let localeLoaded = false;
+/* 缓存的是**取语言这件事本身**,不是一个"已开始"的布尔位:原来先置 true 再
+ * await,并发进来的第二个 tool-call 会立刻返回并带着缺省 zh-CN 跑,英日韩用户
+ * 会收到中文。改成共享同一个 promise,后到者一起等它 settle。 */
+let localePromise = null;
 
-async function ensureLocale() {
-  if (localeLoaded) return;
-  localeLoaded = true;
-  try {
-    const r = await cindy.request({ kind: 'app-context' });
-    if (r && r.ok && r.context && typeof r.context.locale === 'string') LOCALE = r.context.locale;
-  } catch (_) {
-    /* 取不到就用缺省 */
+function ensureLocale() {
+  if (!localePromise) {
+    localePromise = (async () => {
+      try {
+        const r = await cindy.request({ kind: 'app-context' });
+        if (r && r.ok && r.context && typeof r.context.locale === 'string') LOCALE = r.context.locale;
+      } catch (_) {
+        /* 取不到就用缺省 */
+      }
+    })();
   }
+  return localePromise;
 }
 
 /** 双语文案挑选:宿主非中文时统一用英文(手册:不支持的语言固定回退 en)。 */

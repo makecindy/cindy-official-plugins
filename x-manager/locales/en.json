@@ -38,7 +38,7 @@
       "description": "Publish a post, or reply to a post, as the user on X (official API v2). This is an outbound write: show the user the exact final copy and get explicit approval before calling, never rewrite and publish on your own, and never treat publishing as the default action. It requires the X API account to be connected in the Plugins panel under X Manager; if it is not, you get structured guidance on where to configure it — do not publish through any other channel instead.",
       "parameters": {
         "/properties/text": {
-          "description": "The post body, at most 280 characters (longer text is rejected and the actual count is returned). It must be the final copy the user already approved."
+          "description": "The post body. X's limit is 280 **weighted** characters (CJK characters count as 2 each, so an all-Chinese post caps out around 140; links count as a fixed length). The plugin only validates a **lower-bound estimate**: exceeding the lower bound is rejected outright and that bound is returned; staying under it does not guarantee X will accept the post — X is the authority, and its own wording is returned when it rejects. It must be the final copy the user already approved."
         },
         "/properties/reply_to_id": {
           "description": "The id of the post to reply to (digits only, taken from the end of the post URL). Only pass it when the user explicitly wants a reply."
