@@ -22,7 +22,9 @@ This is the source for every official plugin (Ghost) in the
 [Cindy](https://github.com/makecindy/cindy) plugin marketplace.
 
 - **Using Cindy?** You don't need this repository — open **Plugins** in the
-  Cindy client and install anything below with one click.
+  Cindy client and install any generally available plugin below with one click
+  (rows marked "targeted rollout" are still being staged and not yet
+  installable for everyone).
 - **Want to build a plugin?** This repository accepts external contributions.
   Once your PR merges to `main`, the plugin is published to the marketplace
   automatically — usually live within minutes. Start at
