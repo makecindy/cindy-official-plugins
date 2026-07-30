@@ -6,7 +6,7 @@ body:
     id: plugin
     attributes:
       label: Plugin / 插件
-      description: Directory name, or "new plugin" / 目录名，或填「新插件」
+      description: Directory name of an existing plugin, e.g. "x-manager" / 现有插件的目录名，如 "x-manager"
     validations:
       required: true
 
@@ -28,10 +28,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Proposing a **new official plugin**? Open this issue first to discuss its
-        positioning and boundaries (avoiding overlap with existing plugins)
-        before writing code — see
-        [CONTRIBUTING.md](https://github.com/makecindy/cindy-official-plugins/blob/main/CONTRIBUTING.md).
+        Proposing a **new official plugin**? Use the dedicated
+        [New plugin proposal](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
+        form instead — it covers scope alignment, overlap check, capability
+        declaration, and side-effect disclosure required for review.
 
-        提议**新增官方插件**？请先用这个 issue 讨论定位与边界（避免与现有插件职责重叠）
-        再动手写代码 —— 见 [CONTRIBUTING.zh-CN.md](https://github.com/makecindy/cindy-official-plugins/blob/main/CONTRIBUTING.zh-CN.md)。
+        提议**新增官方插件**？请使用专用的
+        [新插件提案](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
+        表单——涵盖定位对齐、查重、能力声明与副作用披露，审查必需。
