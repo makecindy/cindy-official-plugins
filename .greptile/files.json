@@ -1,0 +1,20 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "description": "仓库定位、插件清单、四条设计原则、发布流水线——审查设计原则的原文出处"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "PR 标题规范、version bump 硬要求、本地化门禁、Node Worker 重建流程、DCO"
+    },
+    {
+      "path": "docs/localization.md",
+      "description": "四语言资源与英文回退契约——判定 settings 页缺翻译是否为缺陷时必须先读这份协议"
+    },
+    {
+      "path": "provisioning.json",
+      "description": "各插件的安装受众（audience）登记表；audience 为 all 表示推送给全体用户"
+    }
+  ]
+}
