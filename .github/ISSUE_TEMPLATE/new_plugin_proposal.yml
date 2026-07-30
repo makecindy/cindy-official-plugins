@@ -22,7 +22,7 @@ body:
     id: overlap
     attributes:
       label: Overlap check / 与现有插件的查重
-      description: Compare against every plugin in the README table — which come close, and why is this one different or complementary? Same-provider families (Gmail/Drive/Calendar) and same-protocol providers (163/iCloud/QQ mail) coexist fine; a second generic web search does not. / 对照 README 插件表逐一比对：哪些接近？差异化定位或互补理由是什么？同服务商产品家族、同协议不同服务商属合理共存；重复的通用能力不是。
+      description: "Which existing plugins are closest, and why is yours different? Same-provider families coexist fine; duplicate generic capabilities (e.g. a second web search) do not. / 与 README 表哪些最相近？差异化或互补理由。"
     validations:
       required: true
 
@@ -30,9 +30,7 @@ body:
     id: capabilities
     attributes:
       label: Required capabilities / 所需能力声明
-      description: |
-        Network hosts to allowlist; credential type (API token via /secrets, OAuth, node.secretBindings); whether the Node runtime is genuinely required and why. Minimal declarations only — this is the security review's starting point.
-        需要加入白名单的网络域名；凭证类型（/secrets token、OAuth、node.secretBindings）；是否确需 Node Runtime 及原因。只写最小声明——这是安全审查的起点。
+      description: "Network hosts; credential type (/secrets, OAuth, node.secretBindings); whether Node Runtime is needed and why. Minimal only — security review starting point. / 网络域名、凭证类型、是否需 Node Runtime。"
     validations:
       required: true
 
