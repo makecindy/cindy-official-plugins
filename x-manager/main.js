@@ -13,7 +13,7 @@
 /* ── 1. 常量:路由与端点(研究文档 xai-oauth.md §4;集中一处便于升级)────── */
 
 const PLUGIN_ID = 'x-manager';
-const PLUGIN_VERSION = '1.0.12';
+const PLUGIN_VERSION = '1.0.13';
 const SETTINGS_PATH = '「插件」面板 → X Manager';
 const SETTINGS_PATH_EN = 'Plugins panel → X Manager';
 
@@ -1386,6 +1386,22 @@ cindy.onHostMessage(async function (msg) {
     await handler(msg);
   } catch (e) {
     const detail = String((e && e.message) || e || '').slice(0, 300);
+    /* 发帖的异常兜底不能笼统建议"重试一次":异常可能抛在 POST 已经发出之后
+     * (例如 cindy.fetch 直接 reject 而不是返回 ok:false),那时帖子可能已经
+     * 建好了,重试就是重复公开发帖。与 toolPost 内部的超时 / 5xx 同一口径。 */
+    if (msg.tool === 'x_post') {
+      fail(msg.callId, 'POST_DELIVERY_UNKNOWN', [
+        tx({
+          zh: 'X Manager 内部出错,发帖结果不确定:' + detail,
+          en: 'X Manager hit an internal error and the posting outcome is indeterminate: ' + detail,
+        }),
+        tx({
+          zh: '**帖子可能已经发出去了**(异常可能抛在请求发出之后)。**不要直接重试**,否则可能重复公开发帖。请用户先去自己的 X 时间线确认那条帖子在不在:确实没有再重试同一份文案,已经在了就别再发。',
+          en: '**The post may already have been published** (the exception can be thrown after the request went out). **Do not simply retry**, or you may post a public duplicate. Ask the user to check their own X timeline first: retry the same copy only if the post is genuinely absent; if it is there, do not post again.',
+        }),
+      ]);
+      return;
+    }
     fail(msg.callId, 'PLUGIN_ERROR', [
       tx({
         zh: 'X Manager 内部出错,本次调用没有完成:' + detail,

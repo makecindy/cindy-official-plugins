@@ -57,8 +57,8 @@ var DICT = {
     en: 'The consent page is hosted by xAI and titled "Grok Build" — that is the shared ecosystem OAuth client, not phishing.',
   },
   'grok.risk': {
-    zh: '已知限制:xAI 按订阅档位对 OAuth 通道做 403 门禁,登录成功不等于可用;搜索工具是否走该通道也未实测。这两种情况插件都会自动改用 xAI API key,所以建议两条都配。',
-    en: 'Known limits: xAI gates the OAuth channel by subscription tier with 403, so a successful login does not guarantee access, and whether the search tool is served there is unverified. In both cases the plugin switches to the xAI API key, so configuring both is recommended.',
+    zh: '已知限制:xAI 按订阅档位对 OAuth 通道做 403 门禁,登录成功不等于可用。被挡下时插件会自动改用 xAI API key,所以建议两条都配。',
+    en: 'Known limit: xAI gates the OAuth channel by subscription tier with 403, so a successful login does not guarantee access. If you are blocked, the plugin switches to the xAI API key, so configuring both is recommended.',
   },
 
   'key.title': { zh: 'xAI API Key', en: 'xAI API key' },
