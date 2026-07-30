@@ -4,7 +4,7 @@
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成图片、画画、插画、配图、头像、海报,基于已生成的图改图、加元素、换风格、P 图,或想生成短视频、让一张图动起来时找我。",
-  "version": "1.10.2",
+  "version": "1.11.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -53,12 +53,25 @@
           },
           "model": {
             "type": "string",
+            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名某家/某型号时才传,值用主机模型目录里的图像模型 id(如 gpt-image-2;nano banana / gemini / 谷歌 / 纳米香蕉 → gemini 系;说 grok / xAI → xai/ 前缀系;说 OpenAI 直连 → openai/ 前缀系)。点名不在册的 id 会被主机明拒并附当前可用清单,按清单纠正后重试。"
+          },
+          "aspectRatio": {
+            "type": "string",
             "enum": [
-              "gpt-image-2",
-              "gemini-3-pro-image-preview",
-              "gemini-3.1-flash-image-preview"
+              "1:1",
+              "3:2",
+              "2:3"
             ],
-            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式说 nano banana / gemini / google / 谷歌 / 纳米香蕉 时才传 gemini 系(pro 最终稿 / flash 草稿求快)。"
+            "description": "可选。默认不传(跟随模型自动画幅);仅当用户明确要方图(1:1)/横图(3:2)/竖图(2:3)时才传。"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "standard",
+              "best"
+            ],
+            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,说要最好的/精修传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -87,12 +100,25 @@
           },
           "model": {
             "type": "string",
+            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名某家/某型号时才传,值用主机模型目录里的图像模型 id(如 gpt-image-2;nano banana / gemini / 谷歌 / 纳米香蕉 → gemini 系;说 grok / xAI → xai/ 前缀系;说 OpenAI 直连 → openai/ 前缀系)。点名不在册的 id 会被主机明拒并附当前可用清单,按清单纠正后重试。"
+          },
+          "aspectRatio": {
+            "type": "string",
             "enum": [
-              "gpt-image-2",
-              "gemini-3-pro-image-preview",
-              "gemini-3.1-flash-image-preview"
+              "1:1",
+              "3:2",
+              "2:3"
             ],
-            "description": "可选。默认不传;规则同 gen_image。"
+            "description": "可选。默认不传(跟随模型自动画幅);仅当用户明确要方图(1:1)/横图(3:2)/竖图(2:3)时才传。"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "standard",
+              "best"
+            ],
+            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,说要最好的/精修传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -118,6 +144,15 @@
               "happyhorse"
             ],
             "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名(如 seedance pro / happyhorse / 高质量视频)时才传。"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "standard",
+              "best"
+            ],
+            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,要最高质量传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -152,6 +187,15 @@
               "happyhorse"
             ],
             "description": "可选。默认不传;规则同 gen_video。"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "standard",
+              "best"
+            ],
+            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,要最高质量传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [

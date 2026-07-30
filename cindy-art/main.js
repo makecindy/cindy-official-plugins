@@ -151,6 +151,8 @@ async function handleGenImage(msg) {
   // callId 归因:让这单代办在主机日志/账单里对得上"哪次工具调用花的钱"。
   const req = { type: 'cindy-request', kind: 'gen_image', prompt: prompt, callId: msg.callId };
   if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.aspectRatio === 'string') req.aspectRatio = msg.args.aspectRatio;
+  if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);
   if (!gen || gen.ok !== true) {
@@ -184,6 +186,8 @@ async function handleEditImage(msg) {
 
   const req = { type: 'cindy-request', kind: 'edit_image', prompt: prompt, hashes: hashes, callId: msg.callId };
   if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.aspectRatio === 'string') req.aspectRatio = msg.args.aspectRatio;
+  if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);
   if (!gen || gen.ok !== true) {
@@ -200,6 +204,7 @@ async function handleGenVideo(msg) {
 
   const req = { type: 'cindy-request', kind: 'gen_video', prompt: prompt, callId: msg.callId };
   if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);
   if (!gen || gen.ok !== true) {
@@ -230,6 +235,7 @@ async function handleEditVideo(msg) {
 
   const req = { type: 'cindy-request', kind: 'edit_video', prompt: prompt, hashes: hashes, callId: msg.callId };
   if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);
   if (!gen || gen.ok !== true) {
