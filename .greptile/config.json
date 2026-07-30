@@ -24,7 +24,7 @@
     {
       "id": "network-allowlist",
       "severity": "high",
-      "rule": "main.js/settings.js/worker 中所有网络访问目标必须命中该插件 ghost.json 的 network.hosts 白名单。发现未声明的域名/IP、硬编码内网或调试地址（localhost/127.x/192.168.x/10.x）、或绕过 cindy.fetch 的直连（原生 fetch 到外部域名/XMLHttpRequest/WebSocket/EventSource）必须按 P1 指出。白名单本身新增条目时，必须能在 PR 描述或源码中找到必要性出处。"
+      "rule": "main.js/settings.js/worker 中所有网络访问目标必须命中该插件 ghost.json 的 network.hosts 白名单。发现未声明的域名/IP、硬编码内网或调试地址（localhost/127.x/192.168.x/10.x）、或绕过 cindy.fetch 的直连（原生 fetch 到外部域名/XMLHttpRequest/WebSocket/EventSource）必须按 P1 指出。白名单本身新增条目时，必须能在 PR 描述或源码中找到必要性出处。例外：声明了 node slot 的插件，其 node/worker.cjs 的网络访问按 node 能力边界审查（固定 IMAP/SMTP/API 端点），不适用 network.hosts 白名单要求；此类审查参照 capability-minimization 规则。"
     },
     {
       "id": "capability-minimization",
