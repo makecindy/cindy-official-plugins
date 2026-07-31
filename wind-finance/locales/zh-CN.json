@@ -1,0 +1,16 @@
+{
+  "name": "Wind Finance",
+  "description": "万得金融数据服务只读查询插件：通过用户已授权的官方 HTTPS API 或企业 API 网关查询行情与公司基本信息，不执行交易。",
+  "whenToUse": "需要查询万得股票或指数行情、公司基本信息时使用。请先在插件详情页添加兼容的万得 API 网关域名和凭证。",
+  "tools": {
+    "wind_status": {
+      "description": "测试当前万得 API 连接，只读调用 GET /v1/status。"
+    },
+    "wind_quote": {
+      "description": "只读查询股票或指数行情；不执行交易、下单、撤单或其他写操作。"
+    },
+    "wind_company": {
+      "description": "只读查询公司基本信息；不执行交易、下单、撤单或其他写操作。"
+    }
+  }
+}

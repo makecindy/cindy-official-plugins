@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "id": "wind-finance",
+  "name": "Wind Finance",
+  "description": "万得金融数据服务只读查询插件：通过用户已授权的官方 HTTPS API 或企业 API 网关查询行情与公司基本信息。插件不执行交易、不下单，也不绕过万得授权或数据权限。",
+  "whenToUse": "需要查询万得金融数据、股票或指数行情、公司基本信息时使用。首次使用前请在插件详情页添加万得官方 API/企业网关域名和 API 凭证；当前版本只支持已提供兼容 HTTP API 的接入，不支持网页自动化或直接调用本地 WindPy 客户端。",
+  "version": "0.1.0",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "Cindy",
+  "icon": "assets/icon.svg",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "slots": [
+    "tool",
+    "network",
+    "notify"
+  ],
+  "command": "wind-finance",
+  "network": {
+    "connections": [
+      {
+        "key": "wind_finance_conn",
+        "label": "Wind API 服务",
+        "hint": "添加万得官方 HTTPS API 或企业 API 网关域名与 API 凭证。仅支持 HTTPS 默认端口 443，不支持网页账号密码或本地 WindPy 客户端。",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}"
+        },
+        "maxConnections": 4
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "wind_status",
+      "description": "测试当前万得 API 连接，并返回服务状态。只发起 GET /v1/status；如果接口没有提供该路径，请在插件设置中确认管理员提供的 API 网关遵循本插件约定的 HTTP 适配协议。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "可选，已配置连接的 id 或 host；配置多个连接时用于指定目标"
+          }
+        }
+      }
+    },
+    {
+      "name": "wind_quote",
+      "description": "只读查询股票或指数行情。请求当前连接的 POST /v1/quote，参数为 symbols（代码或代码数组）、可选 fields（字段名或字段数组）和 asOf。返回 API 原始数据；不执行交易、下单、撤单或任何写操作。未配置连接、鉴权失败、权限不足或接口地址不兼容时返回可行动错误。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "可选，已配置连接的 id 或 host；配置多个连接时用于指定目标"
+          },
+          "symbols": {
+            "type": ["string", "array"],
+            "description": "Wind 证券代码，例如 600000.SH、000001.SZ；数组最多 50 个"
+          },
+          "fields": {
+            "type": ["string", "array"],
+            "description": "可选字段，例如 last、open、high、low、volume、pct_chg；数组最多 30 个"
+          },
+          "asOf": {
+            "type": "string",
+            "description": "可选，查询时点或日期，格式由万得 API 网关约定"
+          }
+        },
+        "required": ["symbols"]
+      }
+    },
+    {
+      "name": "wind_company",
+      "description": "只读查询公司基本信息。请求当前连接的 POST /v1/company，参数为 symbol 和可选 fields。返回 API 原始数据；不执行交易、下单、撤单或任何写操作。未配置连接、鉴权失败、权限不足或接口地址不兼容时返回可行动错误。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "可选，已配置连接的 id 或 host；配置多个连接时用于指定目标"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Wind 证券代码或公司标识，例如 600000.SH"
+          },
+          "fields": {
+            "type": ["string", "array"],
+            "description": "可选字段，例如 name、sec_name、industry、list_date；数组最多 30 个"
+          }
+        },
+        "required": ["symbol"]
+      }
+    }
+  ]
+}

@@ -47,6 +47,11 @@
       "audience": {
         "emails": []
       }
+    },
+    "wind-finance": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }

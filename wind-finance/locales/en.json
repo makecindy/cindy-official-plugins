@@ -1,0 +1,16 @@
+{
+  "name": "Wind Finance",
+  "description": "A read-only Wind financial data plugin. Query market data and company profiles through a user-authorized official HTTPS API or enterprise gateway. It never places trades.",
+  "whenToUse": "Use for Wind stock or index quotes and company profiles. Add a compatible Wind API gateway host and credential in the plugin details first.",
+  "tools": {
+    "wind_status": {
+      "description": "Test the current Wind API connection with a read-only GET /v1/status request."
+    },
+    "wind_quote": {
+      "description": "Query stock or index quotes. This tool is read-only and never places, cancels, or modifies trades."
+    },
+    "wind_company": {
+      "description": "Query a company profile. This tool is read-only and never places, cancels, or modifies trades."
+    }
+  }
+}

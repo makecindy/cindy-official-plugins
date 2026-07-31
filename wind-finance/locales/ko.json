@@ -1,0 +1,16 @@
+{
+  "name": "Wind Finance",
+  "description": "사용자가 인증한 공식 HTTPS API 또는 기업 게이트웨이를 통해 시세와 기업 기본 정보를 조회하는 읽기 전용 Wind 금융 데이터 플러그인입니다. 거래를 실행하지 않습니다.",
+  "whenToUse": "Wind 주식·지수 시세나 기업 기본 정보를 조회할 때 사용합니다. 먼저 플러그인 세부 정보에서 호환되는 API 게이트웨이 호스트와 인증 정보를 추가하세요.",
+  "tools": {
+    "wind_status": {
+      "description": "읽기 전용 GET /v1/status 요청으로 현재 Wind API 연결을 테스트합니다."
+    },
+    "wind_quote": {
+      "description": "주식 또는 지수 시세를 조회합니다. 주문, 취소 또는 거래 변경을 수행하지 않습니다."
+    },
+    "wind_company": {
+      "description": "기업 기본 정보를 조회합니다. 주문, 취소 또는 거래 변경을 수행하지 않습니다."
+    }
+  }
+}
