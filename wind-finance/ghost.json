@@ -12,7 +12,7 @@
     "ko": "locales/ko.json"
   },
   "author": "Cindy",
-  "icon": "assets/icon.svg",
+  "icon": "assets/icon.png",
   "entry": "main.js",
   "settingsHtml": "settings.html",
   "slots": [

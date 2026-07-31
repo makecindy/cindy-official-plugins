@@ -37,7 +37,7 @@
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid 图表源码规范化与常见语法修复 |
 | <img src="./cindy-notion/assets/icon.png" width="22" alt=""> | Notion | [`cindy-notion`](./cindy-notion) | Notion 页面、数据库与知识库读写 |
 | <img src="./cindy-web-search/assets/icon.png" width="22" alt=""> | Web Search | [`cindy-web-search`](./cindy-web-search) | 公网搜索（Brave / Tavily，用户自备 API key） |
-| <img src="./wind-finance/assets/icon.svg" width="22" alt=""> | Wind Finance | [`wind-finance`](./wind-finance) | 通过已授权的 HTTPS API 网关只读查询万得行情与公司基本信息；定向灰度 |
+| <img src="./wind-finance/assets/icon.png" width="22" alt=""> | Wind Finance | [`wind-finance`](./wind-finance) | 通过已授权的 HTTPS API 网关只读查询万得行情与公司基本信息；定向灰度 |
 | <img src="./google-gmail/assets/icon.png" width="22" alt=""> | Gmail | [`google-gmail`](./google-gmail) | 搜索、阅读、整理 Gmail 邮件，生成草稿或发送邮件；授权由宿主托管 |
 | <img src="./google-drive/assets/icon.png" width="22" alt=""> | Google Drive | [`google-drive`](./google-drive) | 搜索、读取、下载、上传、移动和删除云端文件 |
 | <img src="./google-calendar/assets/icon.png" width="22" alt=""> | Google Calendar | [`google-calendar`](./google-calendar) | 查询日程与空闲时间，创建或修改会议 |
