@@ -71,7 +71,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,说要最好的/精修传 best。与 model 同时给时 model 优先。"
+            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,明确要标准/普通质量传 standard,说要最好的/精修传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -118,7 +118,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,说要最好的/精修传 best。与 model 同时给时 model 优先。"
+            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,明确要标准/普通质量传 standard,说要最好的/精修传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -152,7 +152,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,要最高质量传 best。与 model 同时给时 model 优先。"
+            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,明确要标准/普通质量传 standard,要最高质量传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
@@ -195,7 +195,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,要最高质量传 best。与 model 同时给时 model 优先。"
+            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,明确要标准/普通质量传 standard,要最高质量传 best。与 model 同时给时 model 优先。"
           }
         },
         "required": [
