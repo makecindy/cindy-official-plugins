@@ -48,6 +48,11 @@ vendor/dist changes require itemized evidence, never a bare "looks fine".
   `docs/localization.md` defines the English-fallback contract — do not demand
   translations the contract allows to fall back.
 - DCO: every commit signed off (`git commit -s`), author matching the sign-off.
+  Reviewers: audit ONLY the PR's actual commit list on GitHub
+  (`gh pr view <N> --json commits` or the DCO status check) — never a local
+  `git log`. Commits that exist only in your own sandbox checkout (e.g. a
+  scaffold commit your harness created to materialize the diff) are NOT part
+  of the PR and must not be flagged.
 - Bundled third-party dependencies changed → update that plugin's
   `THIRD-PARTY-LICENSES.txt`.
 - Paired bilingual docs (`README.md` ↔ `README.zh-CN.md`, etc.) must change in
