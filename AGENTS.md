@@ -31,7 +31,8 @@ credentials only via the three host-injection channels
 flagged: a settings page saving the user-entered credential through same-origin
 `PUT /secrets/<key>` (the sanctioned write-only path), and handing credentials
 to an approved third-party runtime (e.g. TapTap Maker) without copying them
-into Cindy KV/Secret; network targets ⊆ `ghost.json` allowlist (Node
+into Cindy KV/Secret or retaining plaintext anywhere else (logs, page state);
+network targets ⊆ `ghost.json` allowlist (Node
 workers reviewed against their fixed endpoints instead); tools with
 irreversible external side effects must distinguish "not executed / executed /
 unknown" on every failure path; no `Math.random` for externally-visible ids;
