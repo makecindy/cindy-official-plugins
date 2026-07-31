@@ -341,7 +341,7 @@ function normalizeWhoRows(rows, indicator) {
       displayValue: row.Value === undefined ? null : row.Value,
       low: row.Low === undefined ? null : row.Low,
       high: row.High === undefined ? null : row.High,
-      unit: row.Dim1Type || null,
+      dimensionType: row.Dim1Type || null,
       dimension: row.Dim1 || null,
       sourceUpdatedAt: isoDate(row.Date),
       source: 'WHO GHO'

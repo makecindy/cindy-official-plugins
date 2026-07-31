@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <style>
@@ -58,23 +58,23 @@
 </head>
 <body>
   <div class="label-row">
-    <span class="name">FAOSTAT API Token（可选）</span>
-    <span id="badge" class="badge">✓ 已保存</span>
+    <span class="name" data-i18n="tokenTitle">FAOSTAT API Token (optional)</span>
+    <span id="badge" class="badge" data-i18n="savedBadge">✓ Saved</span>
   </div>
   <p class="hint">
-    WHO 数据无需配置；配置 Token 后可查询 FAOSTAT 农业、粮食与食品安全数据。
-    <a href="https://www.fao.org/faostat/en/#developer-portal">获取 FAOSTAT Token ↗</a>
+    <span data-i18n="tokenHint">WHO needs no setup. Add a token to query FAOSTAT agriculture, food, and food-security data.</span>
+    <a href="https://www.fao.org/faostat/en/#developer-portal" data-i18n="getToken">Get a FAOSTAT token ↗</a>
   </p>
   <div class="input-row">
     <div class="pill">
-      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 FAOSTAT API Token">
-      <button id="eye" class="icon-btn hidden" type="button" title="显示或隐藏">
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste FAOSTAT API token" data-i18n-placeholder="tokenPlaceholder">
+      <button id="eye" class="icon-btn hidden" type="button" title="Show or hide" data-i18n-title="toggleVisibility">
         <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
         <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
       </button>
     </div>
-    <button id="save" class="btn" type="button">保存</button>
-    <button id="clear" class="btn" type="button">清除</button>
+    <button id="save" class="btn" type="button" data-i18n="save">Save</button>
+    <button id="clear" class="btn" type="button" data-i18n="clear">Clear</button>
   </div>
   <p id="status"></p>
   <script src="/settings.js"></script>

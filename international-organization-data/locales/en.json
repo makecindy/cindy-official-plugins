@@ -1,7 +1,7 @@
 {
   "name": "International Organization Data",
   "description": "Query official WHO and FAO health, agriculture, food, and food-security statistics. WHO needs no API key; FAOSTAT requires an official API token configured in the plugin settings.",
-  "whenToUse": "Use when the user asks for WHO health indicators or FAO agriculture, food-security, trade, and production statistics. Results include the source, indicator, unit, statistical year, and update time; this is not a personal medical diagnosis tool.",
+  "whenToUse": "Use when the user asks for WHO health indicators or FAO agriculture, food-security, trade, and production statistics. Results include the source, indicator, statistical year, original display value, and update time; this is not a personal medical diagnosis tool.",
   "tools": {
     "international_org_catalog": {
       "description": "Browse official WHO or FAO data catalogs. WHO supports common indicators, health indicators, and countries; FAO supports groups, domains, dimensions, and filter codes. FAO catalog actions require an API token."

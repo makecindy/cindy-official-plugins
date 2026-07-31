@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "id": "world-bank-open-data",
+  "name": "World Bank Open Data",
+  "description": "查询世界银行公开的全球经济、社会与发展指标，包括 GDP、人口、通胀、就业、教育、健康、环境等数据。数据来自世界银行 Indicators API，无需 API Key；本插件只读，不修改任何外部数据。",
+  "whenToUse": "需要查询或比较国家、地区的世界银行发展指标，查看指标定义、国家元数据、历史趋势或最近一期数据时使用。它不是股票或外汇实时行情源；结果可能按年或按其他统计周期发布，并可能晚于当前日期。",
+  "version": "0.1.0",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "slots": [
+    "tool",
+    "network"
+  ],
+  "command": "world-bank-data",
+  "network": {
+    "hosts": [
+      "api.worldbank.org"
+    ]
+  },
+  "tools": [
+    {
+      "name": "world_bank_countries",
+      "description": "查询世界银行国家/地区元数据，返回代码、名称、所属地区、收入等级、首都和经纬度。可传 codes 精确查询多个 ISO2/ISO3 代码，也可传 query 按名称、代码、地区、收入等级或首都搜索。默认排除世界、地区组合等聚合项；只读，无需 API Key。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可选，国家/地区 ISO2 或 ISO3 代码数组，最多 50 个，例如 [\"CHN\", \"USA\"]"
+          },
+          "query": {
+            "type": "string",
+            "description": "可选，按国家名称、代码、地区、收入等级或首都搜索"
+          },
+          "includeAggregates": {
+            "type": "boolean",
+            "description": "是否包含 World、地区组合、收入组等聚合项；默认 false"
+          },
+          "limit": {
+            "type": "number",
+            "description": "最多返回多少条，默认 20，最大 100"
+          }
+        }
+      }
+    },
+    {
+      "name": "world_bank_catalog",
+      "description": "浏览世界银行指标目录。action=common 返回插件内置的常用指标别名；topics 返回主题列表；topic_indicators 按主题分页列出指标；indicator 返回某个指标的名称、单位、来源说明和主题。只读，无需 API Key。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "common",
+              "topics",
+              "topic_indicators",
+              "indicator"
+            ],
+            "description": "目录操作；默认 common"
+          },
+          "topicId": {
+            "type": "string",
+            "description": "action=topic_indicators 时必填，来自 topics 返回的 id"
+          },
+          "indicator": {
+            "type": "string",
+            "description": "action=indicator 时必填，可传指标代码或 common 返回的别名"
+          },
+          "page": {
+            "type": "number",
+            "description": "topic_indicators 页码，默认 1"
+          },
+          "limit": {
+            "type": "number",
+            "description": "topic_indicators 每页数量，默认 20，最大 100"
+          }
+        }
+      }
+    },
+    {
+      "name": "world_bank_data",
+      "description": "按国家/地区和指标查询世界银行数据。countries 最多 25 个，indicator 可传世界银行指标代码或 common 目录中的别名。不传 startYear/endYear 时默认返回每个国家最近一期有效值；传年份范围时返回该区间数据。返回值带指标名称、数据更新时间、国家、年份、数值和单位。若单页结果仍过大，会保留结构化元数据和部分 records，并返回 responseTruncated、recordsAvailableInPage、recordsReturned 与缩小查询提示。只读、无需 API Key，也不代表实时市场行情。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "国家/地区 ISO2 或 ISO3 代码数组，最多 25 个，例如 [\"CHN\", \"USA\"]"
+          },
+          "indicator": {
+            "type": "string",
+            "description": "世界银行指标代码或 common 目录中的别名，例如 NY.GDP.MKTP.CD、gdp、population"
+          },
+          "startYear": {
+            "type": "number",
+            "description": "可选，起始年份；必须与 endYear 一起传"
+          },
+          "endYear": {
+            "type": "number",
+            "description": "可选，结束年份；必须与 startYear 一起传"
+          },
+          "recent": {
+            "type": "number",
+            "description": "未传年份范围时，每个国家返回最近多少期有效值；默认 1，最大 20"
+          },
+          "includeNulls": {
+            "type": "boolean",
+            "description": "是否保留 value=null 的缺失记录；默认 false"
+          },
+          "page": {
+            "type": "number",
+            "description": "结果页码，默认 1"
+          },
+          "limit": {
+            "type": "number",
+            "description": "每页记录数，默认 200，最大 1000"
+          }
+        },
+        "required": [
+          "countries",
+          "indicator"
+        ]
+      }
+    }
+  ]
+}

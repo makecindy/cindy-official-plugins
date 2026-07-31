@@ -52,6 +52,11 @@
       "audience": {
         "emails": []
       }
+    },
+    "world-bank-open-data": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }

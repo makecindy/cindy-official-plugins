@@ -112,9 +112,23 @@ test('WHO recent queries are ordered and scoped per country', () => {
     );
     assert.equal(requestedUrls.length, 2);
     assert.ok(requestedUrls.every((url) => url.includes('$orderby=TimeDim desc')));
+    assert.ok(requestedUrls.every((url) => url.includes("Dim1 eq 'SEX_BTSX'")));
     assert.equal(requestedUrls.filter((url) => url.includes("SpatialDim eq 'CHN'")).length, 1);
     assert.equal(requestedUrls.filter((url) => url.includes("SpatialDim eq 'USA'")).length, 1);
+    assert.equal(Object.hasOwn(result.result.rows[0], 'unit'), false);
+    assert.equal(result.result.rows[0].dimensionType, 'SEX');
   });
+});
+
+test('settings page follows the host locale with an English fallback', () => {
+  const html = fs.readFileSync(path.join(root, 'settings.html'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'settings.js'), 'utf8');
+  assert.match(html, /data-i18n="tokenTitle"/);
+  assert.match(html, /data-i18n-placeholder="tokenPlaceholder"/);
+  assert.match(source, /fetch\('\/app-context'/);
+  for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+    assert.ok(source.includes(locale));
+  }
 });
 
 test('FAOSTAT auth failures have actionable guidance', async () => {

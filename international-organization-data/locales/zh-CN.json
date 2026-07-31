@@ -1,7 +1,7 @@
 {
   "name": "国际组织官方数据",
   "description": "查询 WHO 与 FAO 的官方健康、农业、粮食与食品安全统计数据。WHO 无需 API Key；FAOSTAT 需要在插件设置页配置官方 API Token。",
-  "whenToUse": "需要查询 WHO 全球健康指标，或 FAO 农业、粮食、食品安全、贸易与生产统计时使用。结果带数据源、指标、单位、统计年份与更新时间；不用于个人医疗诊断。",
+  "whenToUse": "需要查询 WHO 全球健康指标，或 FAO 农业、粮食、食品安全、贸易与生产统计时使用。结果带数据源、指标、统计年份、原始显示值与更新时间；不用于个人医疗诊断。",
   "tools": {
     "international_org_catalog": {
       "description": "浏览 WHO 或 FAO 的官方数据目录。WHO 支持常用指标、健康指标和国家目录；FAO 支持数据组、数据域、维度和过滤代码。FAO 目录需要先配置 API Token。"
