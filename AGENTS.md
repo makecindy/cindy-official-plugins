@@ -68,3 +68,14 @@ review, all threads resolved, required checks including the automated
 `Cindy Plugin Review` verdict). Reviewers report; **merge decisions belong to
 maintainers**. Automated reviewers must never merge, close, or approve.
 自动 reviewer 只出结论，不合并、不关闭、不 approve。
+
+## Reply language / 回复语言
+
+When reviewing, commenting on, or requesting changes to a pull request, reply
+in the **PR author's primary language** — infer it from the PR description,
+commit messages, and the author's previous comments. Use Simplified Chinese
+for Chinese-speaking authors, English for everyone else or when unsure. The
+rule files being written in Chinese does not mean replies must be Chinese.
+一切 agent reviewer（Greptile / Codex / Cindy 巡检等）审 PR、评论、打回时，
+用 PR 作者的主语言回复（从 PR 描述、commit message、作者历史评论判断）：
+中文作者用简体中文，其余或无法判断用英文；规则条文是中文不代表必须用中文回复。
