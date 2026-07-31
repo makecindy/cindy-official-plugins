@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    padding: 2px 0 0;
+    color: var(--text-primary, #1a1a1a);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .label-row { display: flex; align-items: center; gap: 8px; padding-left: 2px; }
+  .label-row .name { font-weight: 500; }
+  .badge {
+    display: none; padding: 2px 8px 0; border-radius: 999px; font-size: 11px;
+    font-weight: 500; background: var(--accent-cta-bg, #262626);
+    color: var(--accent-pure-cta-fg, #ffffff);
+  }
+  .badge.on { display: inline-block; }
+  .hint {
+    margin: 8px 2px 0; color: var(--text-tertiary, #8a8a86);
+    font-size: 12px;
+  }
+  .hint a { color: var(--text-primary, #1a1a1a); font-weight: 500; }
+  .input-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .pill {
+    display: flex; flex: 1 1 auto; align-items: center; height: 32px;
+    border: 1px solid var(--border-default, #e4e4e0); border-radius: 999px;
+    background: var(--surface-elevated, #ffffff); padding: 0 4px 0 12px;
+  }
+  .pill:focus-within { border-color: var(--focus-ring, #4c8dff); }
+  .pill input {
+    flex: 1 1 auto; min-width: 0; border: 0; outline: none;
+    background: transparent; color: var(--text-primary, #1a1a1a); font: inherit;
+  }
+  .pill input::placeholder { color: var(--text-placeholder, #a8a8a4); }
+  .icon-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border: 0; border-radius: 999px;
+    background: transparent; color: var(--text-tertiary, #8a8a86); cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--surface-chip, #efefec); }
+  .icon-btn.hidden { visibility: hidden; pointer-events: none; }
+  .icon-btn svg { width: 14px; height: 14px; }
+  .icon-btn .off { display: none; }
+  .icon-btn.revealed .on { display: none; }
+  .icon-btn.revealed .off { display: block; }
+  .btn {
+    padding: 5px 16px; border-radius: 999px; cursor: pointer; flex: 0 0 auto;
+    border: 1px solid var(--border-default, #e4e4e0);
+    background: transparent; color: var(--text-primary, #1a1a1a);
+    font: inherit; font-weight: 500;
+  }
+  .btn:hover { background: var(--surface-chip, #efefec); }
+  #status { margin-top: 8px; font-size: 11px; color: var(--text-tertiary, #8a8a86); min-height: 16px; }
+  #status:empty { display: none; }
+</style>
+</head>
+<body>
+  <div class="label-row">
+    <span class="name">FAOSTAT API Token（可选）</span>
+    <span id="badge" class="badge">✓ 已保存</span>
+  </div>
+  <p class="hint">
+    WHO 数据无需配置；配置 Token 后可查询 FAOSTAT 农业、粮食与食品安全数据。
+    <a href="https://www.fao.org/faostat/en/#developer-portal">获取 FAOSTAT Token ↗</a>
+  </p>
+  <div class="input-row">
+    <div class="pill">
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 FAOSTAT API Token">
+      <button id="eye" class="icon-btn hidden" type="button" title="显示或隐藏">
+        <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+      </button>
+    </div>
+    <button id="save" class="btn" type="button">保存</button>
+    <button id="clear" class="btn" type="button">清除</button>
+  </div>
+  <p id="status"></p>
+  <script src="/settings.js"></script>
+</body>
+</html>
