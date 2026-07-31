@@ -1,6 +1,10 @@
 {
   "strictness": 2,
-  "commentTypes": ["logic", "syntax", "info"],
+  "commentTypes": [
+    "logic",
+    "syntax",
+    "info"
+  ],
   "triggerOnUpdates": true,
   "triggerOnDrafts": false,
   "statusCheck": true,
@@ -9,7 +13,7 @@
   "includeConfidenceScore": true,
   "shouldUpdateDescription": false,
   "ignorePatterns": "**/.DS_Store\n**/THIRD-PARTY-LICENSES.txt",
-  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动发布给全体用户，安全与体验风险由所有用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。",
+  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动发布给全体用户，安全与体验风险由所有用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。评论语言跟随 PR 作者的主语言：根据 PR 描述、commit message 与作者历史评论判断——中文作者用简体中文回复，英文作者用英文回复，其他语言作者用英文；无法判断时用英文。规则条文本身是中文不代表必须用中文回复。",
   "rules": [
     {
       "id": "no-hardcoded-secrets",
@@ -49,13 +53,17 @@
     {
       "id": "provisioning-audience",
       "severity": "high",
-      "scope": ["provisioning.json"],
+      "scope": [
+        "provisioning.json"
+      ],
       "rule": "provisioning.json 的 audience/tier 变更直接影响插件安装范围（audience 为 'all' 即推送给全体用户）。任何从定向受众放宽到 'all' 的变更、以及新插件首次登记为 'all'，必须显式标注并确认 PR 描述中有维护者的明确决策依据；没有就按 P1 提出。"
     },
     {
       "id": "publish-pipeline",
       "severity": "high",
-      "scope": [".github/**"],
+      "scope": [
+        ".github/**"
+      ],
       "rule": ".github/workflows 与 .github/scripts 变更涉及 OIDC 发布、环境 URL、secrets、打包脚本时按高危变更审查：permissions 最小化、不可注入未审查的代码路径、发布目标端点不得被指向仓库 secrets 之外的来源。"
     }
   ]
