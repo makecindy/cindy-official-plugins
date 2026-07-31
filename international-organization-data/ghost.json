@@ -98,7 +98,7 @@
     },
     {
       "name": "who_health_data",
-      "description": "查询 WHO 全球健康指标。indicator 可传 WHO 指标代码或常用别名；countries 使用 ISO3 国家代码；可选年份范围。默认优先返回总体维度，结果带国家、年份、数值、单位、原始值与 WHO 更新时间。只读，无需 API Key。健康统计仅供信息参考，不用于个人诊断。",
+      "description": "查询 WHO 全球健康指标。indicator 可传 WHO 指标代码或常用别名；countries 使用 ISO3 国家代码；可选年份范围。不传年份范围时必须提供 countries，插件会按国家分别查询并返回每个国家最近有效值，最终最多返回 countries 数量 × recent 条，避免全局截断遗漏国家。结果带国家、年份、数值、单位、原始值与 WHO 更新时间。只读，无需 API Key。健康统计仅供信息参考，不用于个人诊断。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -111,7 +111,7 @@
             "items": {
               "type": "string"
             },
-            "description": "可选，ISO3 国家代码数组，最多 25 个，例如 [\"CHN\", \"USA\"]"
+            "description": "ISO3 国家代码数组，最多 25 个，例如 [\"CHN\", \"USA\"]；不传年份范围时必填"
           },
           "startYear": {
             "type": "number",
@@ -127,7 +127,7 @@
           },
           "limit": {
             "type": "number",
-            "description": "最多返回多少条，默认 50，最大 200"
+            "description": "传年份范围时是单次返回上限；不传年份时是每个国家向 WHO 请求的候选行上限，最终每国最多返回 recent 条。默认 50，最大 200"
           }
         },
         "required": [

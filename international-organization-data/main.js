@@ -79,19 +79,24 @@ async function getJson(url) {
       message: '请求失败：' + truncateMessage(error && error.message ? error.message : error)
     };
   }
-  if (!response || !response.ok) {
+  if (!response) {
     return {
       ok: false,
-      message: response && response.message
-        ? response.message
-        : '请求失败'
+      message: '请求失败'
     };
   }
-  if (response.status < 200 || response.status >= 300) {
+  if (typeof response.status === 'number' && (response.status < 200 || response.status >= 300)) {
     var errorText = response.body ? truncateMessage(response.body) : '';
     return {
       ok: false,
+      status: response.status,
       message: '上游返回 HTTP ' + response.status + (errorText ? '：' + errorText : '')
+    };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: response.message || '请求失败'
     };
   }
   try {
@@ -192,8 +197,19 @@ async function whoCatalog(args) {
 function faoMissingToken(result) {
   return !result.ok && typeof result.message === 'string'
     && (result.message.indexOf('401') >= 0
+      || result.message.indexOf('403') >= 0
       || result.message.indexOf('Authorization') >= 0
       || result.message.indexOf('尚未配置') >= 0);
+}
+
+function faoAuthMessage(status) {
+  if (status === 401) {
+    return 'FAOSTAT 未接受当前 API Token（HTTP 401）。请在插件设置页配置或重新保存官方 FAOSTAT API Token 后重试。';
+  }
+  if (status === 403) {
+    return 'FAOSTAT 拒绝了当前 API Token（HTTP 403）。请在插件设置页检查 Token 是否有效、权限是否已开通；确认后重新保存 Token 再重试。';
+  }
+  return 'FAOSTAT 需要 API Token。请在插件设置页配置官方 FAOSTAT API Token 后重试。';
 }
 
 async function faoGet(path, params) {
@@ -207,9 +223,12 @@ async function faoGet(path, params) {
     .join('&');
   var result = await getJson(FAO_BASE + path + (query ? '?' + query : ''));
   if (faoMissingToken(result)) {
+    var authStatus = result.status;
+    if (!authStatus && result.message.indexOf('403') >= 0) authStatus = 403;
+    if (!authStatus && result.message.indexOf('401') >= 0) authStatus = 401;
     return {
       ok: false,
-      message: 'FAOSTAT 需要 API Token。请在插件设置页配置官方 FAOSTAT API Token 后重试。'
+      message: faoAuthMessage(authStatus)
     };
   }
   return result;
@@ -274,6 +293,43 @@ function whoFilter(countries, startYear, endYear, overallOnly) {
   return buildQuery(parts);
 }
 
+function whoDataUrl(indicator, countries, startYear, endYear, overallOnly, top) {
+  var url = WHO_BASE + '/' + encodeURIComponent(indicator.code)
+    + '?$top=' + top + '&$format=json';
+  var filter = whoFilter(countries, startYear, endYear, overallOnly);
+  if (filter) url += '&$filter=' + encodeURIComponent(filter);
+  if (startYear === null && endYear === null) {
+    url += '&$orderby=' + encodeURIComponent('TimeDim desc');
+  }
+  return url;
+}
+
+async function fetchWhoRows(indicator, countries, startYear, endYear, top, overallOnly) {
+  var result = await getJson(whoDataUrl(
+    indicator,
+    countries,
+    startYear,
+    endYear,
+    overallOnly,
+    top
+  ));
+  if (!result.ok) return result;
+  var rows = envelopeRows(result.data);
+  if (!rows.length && overallOnly) {
+    var fallback = await getJson(whoDataUrl(
+      indicator,
+      countries,
+      startYear,
+      endYear,
+      false,
+      top
+    ));
+    if (!fallback.ok) return fallback;
+    rows = envelopeRows(fallback.data);
+  }
+  return { ok: true, rows: rows };
+}
+
 function normalizeWhoRows(rows, indicator) {
   return rows.map(function (row) {
     return {
@@ -308,38 +364,35 @@ async function whoHealthData(args) {
   }
 
   var limit = clampNumber(args.limit, 50, 1, MAX_LIMIT);
-  var url = WHO_BASE + '/' + encodeURIComponent(indicator.code)
-    + '?$top=' + limit
-    + '&$format=json';
-  var filter = whoFilter(countries, startYear, endYear, true);
-  if (filter) url += '&$filter=' + encodeURIComponent(filter);
-  var result = await getJson(url);
-  if (!result.ok) return result;
-
-  var rows = envelopeRows(result.data);
-  if (!rows.length) {
-    var fallbackUrl = WHO_BASE + '/' + encodeURIComponent(indicator.code)
-      + '?$top=' + limit + '&$format=json';
-    var fallbackFilter = whoFilter(countries, startYear, endYear, false);
-    if (fallbackFilter) fallbackUrl += '&$filter=' + encodeURIComponent(fallbackFilter);
-    var fallback = await getJson(fallbackUrl);
-    if (!fallback.ok) return fallback;
-    rows = envelopeRows(fallback.data);
+  var recent = clampNumber(args.recent, 1, 1, 20);
+  var normalized = [];
+  if (startYear === null && !countries.length) {
+    return {
+      ok: false,
+      message: '不传 startYear/endYear 时 countries 不能为空；这样才能按国家分别查询并可靠返回最近有效值'
+    };
   }
-  var normalized = normalizeWhoRows(rows, indicator);
-  if (startYear === null && normalized.length) {
-    var byCountry = {};
-    normalized.forEach(function (row) {
-      var key = row.country || '_unknown';
-      if (!byCountry[key]) byCountry[key] = [];
-      byCountry[key].push(row);
-    });
-    var recent = clampNumber(args.recent, 1, 1, 20);
-    normalized = Object.keys(byCountry).reduce(function (acc, key) {
-      return acc.concat(byCountry[key].sort(function (a, b) {
+  if (startYear === null) {
+    for (var i = 0; i < countries.length; i++) {
+      var countryResult = await fetchWhoRows(
+        indicator,
+        [countries[i]],
+        null,
+        null,
+        Math.max(limit, recent),
+        true
+      );
+      if (!countryResult.ok) return countryResult;
+      var countryRows = normalizeWhoRows(countryResult.rows, indicator);
+      countryRows.sort(function (a, b) {
         return (b.year || 0) - (a.year || 0);
-      }).slice(0, recent));
-    }, []);
+      });
+      normalized = normalized.concat(countryRows.slice(0, recent));
+    }
+  } else {
+    var result = await fetchWhoRows(indicator, countries, startYear, endYear, limit, true);
+    if (!result.ok) return result;
+    normalized = normalizeWhoRows(result.rows, indicator);
   }
   return {
     ok: true,
