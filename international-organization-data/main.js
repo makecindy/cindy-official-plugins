@@ -290,6 +290,7 @@ function whoFilter(countries, startYear, endYear, overallOnly) {
   if (typeof startYear === 'number') parts.push('TimeDim ge ' + Math.floor(startYear));
   if (typeof endYear === 'number') parts.push('TimeDim le ' + Math.floor(endYear));
   if (overallOnly) parts.push("Dim1 eq 'SEX_BTSX'");
+  parts.push('(NumericValue ne null or Value ne null)');
   return buildQuery(parts);
 }
 
@@ -383,7 +384,9 @@ async function whoHealthData(args) {
         true
       );
       if (!countryResult.ok) return countryResult;
-      var countryRows = normalizeWhoRows(countryResult.rows, indicator);
+      var countryRows = normalizeWhoRows(countryResult.rows, indicator).filter(function (row) {
+        return row.value !== null || row.displayValue !== null;
+      });
       countryRows.sort(function (a, b) {
         return (b.year || 0) - (a.year || 0);
       });

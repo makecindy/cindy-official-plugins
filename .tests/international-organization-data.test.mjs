@@ -113,11 +113,41 @@ test('WHO recent queries are ordered and scoped per country', () => {
     assert.equal(requestedUrls.length, 2);
     assert.ok(requestedUrls.every((url) => url.includes('$orderby=TimeDim desc')));
     assert.ok(requestedUrls.every((url) => url.includes("Dim1 eq 'SEX_BTSX'")));
+    assert.ok(requestedUrls.every((url) => url.includes('(NumericValue ne null or Value ne null)')));
     assert.equal(requestedUrls.filter((url) => url.includes("SpatialDim eq 'CHN'")).length, 1);
     assert.equal(requestedUrls.filter((url) => url.includes("SpatialDim eq 'USA'")).length, 1);
     assert.equal(Object.hasOwn(result.result.rows[0], 'unit'), false);
     assert.equal(result.result.rows[0].dimensionType, 'SEX');
   });
+});
+
+test('WHO recent queries do not let empty newer observations consume the result', async () => {
+  const runtime = loadRuntime(async () => ({
+    ok: true,
+    status: 200,
+    body: JSON.stringify({
+      value: [
+        {
+          IndicatorCode: 'WHOSIS_000001', SpatialDim: 'CHN', TimeDim: 2022,
+          NumericValue: null, Value: null, Dim1Type: 'SEX', Dim1: 'SEX_BTSX',
+        },
+        {
+          IndicatorCode: 'WHOSIS_000001', SpatialDim: 'CHN', TimeDim: 2021,
+          NumericValue: 77.6, Value: '77.6', Dim1Type: 'SEX', Dim1: 'SEX_BTSX',
+        },
+      ],
+    }),
+  }));
+
+  const result = await runtime.call('who_health_data', {
+    indicator: 'life_expectancy',
+    countries: ['CHN'],
+    recent: 1,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.rows.length, 1);
+  assert.equal(result.result.rows[0].year, 2021);
+  assert.equal(result.result.rows[0].value, 77.6);
 });
 
 test('settings page follows the host locale with an English fallback', () => {
