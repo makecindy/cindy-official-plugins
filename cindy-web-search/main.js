@@ -59,14 +59,21 @@ async function searchSearch1api(query, limit) {
     }),
   });
   if (!r.ok) return r;
-  // Search1API 把“上游搜索完成但没有结果”表示为 404;对搜索工具来说这是空结果,
-  // 不是服务故障。其余常见状态给用户可直接执行的下一步,不裸抛响应正文。
+  // Search1API 的公开错误契约明确把 /search 的 404 定义为“搜索完成但无结果”,
+  // 对搜索工具来说应返回空列表,不是服务故障:
+  // https://www.search1api.com/docs/essentials/error-handling#treat-a-search-404-as-zero-results
+  // 其余状态给用户可直接执行的下一步,不裸抛响应正文或 HTTP 状态码。
   if (r.status === 404) return { ok: true, provider: 'search1api', results: [] };
   if (r.status === 401) {
     return { ok: false, message: 'Search1API API Key 无效。请到插件详情页更新 Key 后重试。' };
   }
+  // 公开错误契约中 402 同时覆盖按次付款挑战和账号 credits 不足;Cindy 会在
+  // 已配置时注入 Bearer Key,但这里仍给出同时适用于两种情况的行动指引。
   if (r.status === 402) {
-    return { ok: false, message: 'Search1API credits 不足。请前往 Search1API 控制台补充 credits 后重试。' };
+    return {
+      ok: false,
+      message: 'Search1API 需要完成付款或补充 credits。请前往 Search1API 控制台检查账号余额后重试。',
+    };
   }
   if (r.status === 403) {
     return { ok: false, message: 'Search1API 拒绝了请求。请检查账号权限或套餐后重试。' };
@@ -80,8 +87,14 @@ async function searchSearch1api(query, limit) {
   if (r.status >= 500) {
     return { ok: false, message: 'Search1API 服务暂时不可用。请稍后再试。' };
   }
+  if (r.status >= 400 && r.status < 500) {
+    return { ok: false, message: 'Search1API 未接受本次请求。请检查账号状态或联系 Search1API 支持。' };
+  }
   if (r.status !== 200) {
-    return { ok: false, message: 'Search1API 请求失败(HTTP ' + r.status + ')。请稍后再试。' };
+    return {
+      ok: false,
+      message: 'Search1API 返回了无法处理的响应。请稍后再试；若问题持续，请联系 Search1API 支持。',
+    };
   }
 
   var data;
@@ -142,7 +155,7 @@ async function searchWeb(args) {
   if (!isKeyMissing(s1api)) return s1api;
   return {
     ok: false,
-    message: '三个搜索源的 key 都还没配置。' + brave.message,
+    message: '三个搜索源的 key 都还没配置。请到 Web Search 插件详情页配置 Brave、Tavily 或 Search1API Key。',
   };
 }
 

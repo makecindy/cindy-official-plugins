@@ -77,7 +77,19 @@ test('missing Brave and Tavily keys fall back to Search1API', async () => {
   assert.equal(result.result.provider, 'search1api');
 });
 
-test('Search1API 404 is a successful empty search', async () => {
+test('missing all search keys returns provider-neutral setup guidance', async () => {
+  const { requests, result } = await invoke(
+    { query: 'missing keys' },
+    async () => ({ ok: false, message: '凭证尚未配置，请前往插件详情页填写' }),
+  );
+
+  assert.equal(requests.length, 3);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Web Search 插件详情页/);
+  assert.match(result.message, /Brave、Tavily 或 Search1API/);
+});
+
+test('Search1API documented no-results 404 is a successful empty search', async () => {
   const { result } = await invoke(
     { query: 'no results', provider: 'search1api' },
     async () => ({ ok: true, status: 404, body: '{"message":"not found"}' }),
@@ -90,9 +102,11 @@ test('Search1API 404 is a successful empty search', async () => {
 
 for (const [status, expected] of [
   [401, /插件详情页.*Key/],
-  [402, /credits.*控制台/],
+  [402, /付款或补充 credits.*控制台/],
   [403, /账号权限或套餐/],
   [429, /稍后再试/],
+  [409, /账号状态.*支持/],
+  [302, /无法处理.*支持/],
   [500, /服务暂时不可用/],
 ]) {
   test(`Search1API ${status} returns an actionable error`, async () => {
@@ -104,6 +118,7 @@ for (const [status, expected] of [
     assert.equal(result.ok, false);
     assert.match(result.message, expected);
     assert.doesNotMatch(result.message, /upstream/);
+    assert.doesNotMatch(result.message, /HTTP\s*\d{3}|\(\d{3}\)/);
   });
 }
 
