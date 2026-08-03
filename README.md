@@ -39,7 +39,7 @@ This is the source for every official plugin (Ghost) in the
 | <img src="./cindy-gitlab/assets/icon.png" width="22" alt=""> | GitLab | [`cindy-gitlab`](./cindy-gitlab) | GitLab (gitlab.com and self-hosted) issues / MRs / repository operations |
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid diagram source normalization and common syntax fixes |
 | <img src="./cindy-notion/assets/icon.png" width="22" alt=""> | Notion | [`cindy-notion`](./cindy-notion) | Read/write Notion pages, databases, and knowledge bases |
-| <img src="./cindy-web-search/assets/icon.png" width="22" alt=""> | Web Search | [`cindy-web-search`](./cindy-web-search) | Public web search (Brave / Tavily, user-provided API key) |
+| <img src="./cindy-web-search/assets/icon.png" width="22" alt=""> | Web Search | [`cindy-web-search`](./cindy-web-search) | Public web search (Brave / Tavily / Search1API, user-provided API key) |
 | <img src="./world-bank-open-data/assets/icon.png" width="22" alt=""> | World Bank Open Data | [`world-bank-open-data`](./world-bank-open-data) | Public country, economic, social, and development indicators with no API key; staged rollout |
 | <img src="./google-gmail/assets/icon.png" width="22" alt=""> | Gmail | [`google-gmail`](./google-gmail) | Search, read, and organize Gmail, create drafts, and send messages; host-managed OAuth |
 | <img src="./google-drive/assets/icon.png" width="22" alt=""> | Google Drive | [`google-drive`](./google-drive) | Search, read, download, upload, move, and delete Drive files |

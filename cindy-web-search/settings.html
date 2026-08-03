@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <!-- Web Search 自定义设置区(意识自绘,cindy-ghost:// 沙箱页):
-     Brave / Tavily 两条 key 收单——观感对齐 cindy-mivo 设置页(label + 已保存徽标 +
+     Brave / Tavily / Search1API 三条 key 收单——观感对齐 cindy-mivo 设置页(label + 已保存徽标 +
      提示行 + 圆角输入框 + 眼睛切换 + 保存/清除),行结构由 data-* 驱动、settings.js
      统一接线。
      安全模型:这里只是收单;值经协议 /secrets 一次性交给主机保险库(OS 级加密),
@@ -110,6 +110,25 @@
       <button class="btn clear" type="button">清除</button>
     </div>
     <a class="console-link" href="https://app.tavily.com/home">前往控制台获取 ↗</a>
+  </div>
+
+  <div class="secret" data-key="search1api_api_key" data-tail-prefix="…" data-empty-ph="粘贴 Search1API key">
+    <div class="label-row">
+      <span class="name">Search1API API Key</span>
+      <span class="badge">✓ 已保存</span>
+    </div>
+    <div class="input-row">
+      <div class="pill">
+        <input class="key-input" type="password" autocomplete="off" spellcheck="false">
+        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+          <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+        </button>
+      </div>
+      <button class="btn save" type="button">保存</button>
+      <button class="btn clear" type="button">清除</button>
+    </div>
+    <a class="console-link" href="https://dashboard.search1api.com/api-keys">前往控制台获取 API Key ↗</a>
   </div>
 
   <p id="status"></p>
