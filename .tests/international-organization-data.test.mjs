@@ -45,12 +45,13 @@ test('international organization data manifest is read-only and allowlisted', ()
   assert.deepEqual(manifest.network.hosts, [
     'ghoapi.azureedge.net',
     'faostatservices.fao.org',
-    'www.fao.org',
   ]);
   assert.equal(manifest.network.secrets.length, 1);
   assert.equal(manifest.network.secrets[0].key, 'faostat_api_token');
   assert.equal(manifest.network.secrets[0].inject.hosts[0], 'faostatservices.fao.org');
   assert.equal(manifest.tools.length, 3);
+  assert.equal(manifest.version, '0.1.1');
+  assert.equal(manifest.tools[1].parameters.properties.countries.maxItems, 25);
   assert.ok(manifest.tools.every((tool) => !/send|delete|write|update|create/i.test(tool.description)));
 });
 
@@ -148,6 +149,55 @@ test('WHO recent queries do not let empty newer observations consume the result'
   assert.equal(result.result.rows.length, 1);
   assert.equal(result.result.rows[0].year, 2021);
   assert.equal(result.result.rows[0].value, 77.6);
+});
+
+test('WHO rejects country lists above the declared limit instead of truncating them', async () => {
+  let fetchCalls = 0;
+  const runtime = loadRuntime(async () => {
+    fetchCalls += 1;
+    throw new Error('fetch should not run');
+  });
+  const countries = Array.from({ length: 26 }, (_, index) => `C${String(index).padStart(2, '0')}`);
+  const result = await runtime.call('who_health_data', {
+    indicator: 'life_expectancy',
+    countries,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /最多支持 25 个国家/);
+  assert.match(result.message, /拆分为多次查询/);
+  assert.equal(fetchCalls, 0);
+});
+
+test('WHO year-range queries are ordered and disclose server-side truncation', async () => {
+  let requestedUrl = '';
+  const runtime = loadRuntime(async ({ url }) => {
+    requestedUrl = decodeURIComponent(url);
+    return {
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        '@odata.count': 392,
+        value: [
+          { IndicatorCode: 'WHOSIS_000001', SpatialDim: 'CHN', TimeDim: 2021, NumericValue: 77.6, Value: '77.6' },
+          { IndicatorCode: 'WHOSIS_000001', SpatialDim: 'USA', TimeDim: 2021, NumericValue: 76.4, Value: '76.4' },
+        ],
+      }),
+    };
+  });
+  const result = await runtime.call('who_health_data', {
+    indicator: 'life_expectancy',
+    startYear: 2020,
+    endYear: 2021,
+    limit: 2,
+  });
+  assert.equal(result.ok, true);
+  assert.match(requestedUrl, /\$orderby=TimeDim desc/);
+  assert.match(requestedUrl, /\$count=true/);
+  assert.equal(result.result.responseTruncated, true);
+  assert.equal(result.result.totalMatched, 392);
+  assert.equal(result.result.recordsAvailableInPage, 2);
+  assert.equal(result.result.recordsReturned, 2);
+  assert.match(result.result.hint, /缩小年份范围/);
 });
 
 test('settings page follows the host locale with an English fallback', () => {

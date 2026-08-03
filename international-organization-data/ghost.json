@@ -4,7 +4,7 @@
   "name": "International Organization Data",
   "description": "查询 WHO 与 FAO 的官方健康、农业、粮食与食品安全统计数据。WHO 公共数据无需 API Key；FAOSTAT 数据需要在插件设置页配置官方 API Token。插件只读，不修改任何外部数据。",
   "whenToUse": "需要查询 WHO 全球健康指标，或 FAO 农业、粮食、食品安全、贸易与生产统计时使用。结果会保留数据源、指标、统计年份、原始显示值与更新时间；它不是实时监测、个人医疗诊断或投资建议工具。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -23,8 +23,7 @@
   "network": {
     "hosts": [
       "ghoapi.azureedge.net",
-      "faostatservices.fao.org",
-      "www.fao.org"
+      "faostatservices.fao.org"
     ],
     "secrets": [
       {
@@ -98,7 +97,7 @@
     },
     {
       "name": "who_health_data",
-      "description": "查询 WHO 全球健康指标。indicator 可传 WHO 指标代码或常用别名；countries 使用 ISO3 国家代码；可选年份范围。不传年份范围时必须提供 countries，插件会按国家分别查询并返回每个国家最近有效值，最终最多返回 countries 数量 × recent 条，避免全局截断遗漏国家。结果带国家、年份、数值、原始显示值、分组维度与 WHO 更新时间；不会把 WHO 的维度类型误标为计量单位。只读，无需 API Key。健康统计仅供信息参考，不用于个人诊断。",
+      "description": "查询 WHO 全球健康指标。indicator 可传 WHO 指标代码或常用别名；countries 使用 ISO3 国家代码，最多 25 个；可选年份范围。不传年份范围时必须提供 countries，插件会按国家分别查询并返回每个国家最近有效值，最终最多返回 countries 数量 × recent 条，避免全局截断遗漏国家。传年份范围时按年份从新到旧返回；若匹配记录超过 limit，会返回 responseTruncated、totalMatched、recordsAvailableInPage、recordsReturned 与缩小查询提示。结果带国家、年份、数值、原始显示值、分组维度与 WHO 更新时间；不会把 WHO 的维度类型误标为计量单位。只读，无需 API Key。健康统计仅供信息参考，不用于个人诊断。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -108,6 +107,7 @@
           },
           "countries": {
             "type": "array",
+            "maxItems": 25,
             "items": {
               "type": "string"
             },

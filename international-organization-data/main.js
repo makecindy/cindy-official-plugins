@@ -118,8 +118,7 @@ function normalizeCountries(args) {
   return countries
     .filter(function (item) { return typeof item === 'string'; })
     .map(function (item) { return item.trim().toUpperCase(); })
-    .filter(Boolean)
-    .slice(0, MAX_COUNTRIES);
+    .filter(Boolean);
 }
 
 function resolveWhoIndicator(value) {
@@ -299,9 +298,8 @@ function whoDataUrl(indicator, countries, startYear, endYear, overallOnly, top) 
     + '?$top=' + top + '&$format=json';
   var filter = whoFilter(countries, startYear, endYear, overallOnly);
   if (filter) url += '&$filter=' + encodeURIComponent(filter);
-  if (startYear === null && endYear === null) {
-    url += '&$orderby=' + encodeURIComponent('TimeDim desc');
-  }
+  if (startYear !== null && endYear !== null) url += '&$count=true';
+  url += '&$orderby=' + encodeURIComponent('TimeDim desc');
   return url;
 }
 
@@ -316,6 +314,9 @@ async function fetchWhoRows(indicator, countries, startYear, endYear, top, overa
   ));
   if (!result.ok) return result;
   var rows = envelopeRows(result.data);
+  var totalMatched = result.data && typeof result.data['@odata.count'] === 'number'
+    ? result.data['@odata.count']
+    : null;
   if (!rows.length && overallOnly) {
     var fallback = await getJson(whoDataUrl(
       indicator,
@@ -327,8 +328,11 @@ async function fetchWhoRows(indicator, countries, startYear, endYear, top, overa
     ));
     if (!fallback.ok) return fallback;
     rows = envelopeRows(fallback.data);
+    totalMatched = fallback.data && typeof fallback.data['@odata.count'] === 'number'
+      ? fallback.data['@odata.count']
+      : null;
   }
-  return { ok: true, rows: rows };
+  return { ok: true, rows: rows, totalMatched: totalMatched };
 }
 
 function normalizeWhoRows(rows, indicator) {
@@ -355,6 +359,12 @@ async function whoHealthData(args) {
   if (!indicator) return { ok: false, message: 'indicator 不能为空；可先调用 international_org_catalog(source=who, action=common)' };
 
   var countries = normalizeCountries(args || {});
+  if (countries.length > MAX_COUNTRIES) {
+    return {
+      ok: false,
+      message: 'countries 最多支持 ' + MAX_COUNTRIES + ' 个国家；请拆分为多次查询，每次不超过 ' + MAX_COUNTRIES + ' 个'
+    };
+  }
   var startYear = typeof args.startYear === 'number' ? args.startYear : null;
   var endYear = typeof args.endYear === 'number' ? args.endYear : null;
   if ((startYear === null) !== (endYear === null)) {
@@ -367,6 +377,7 @@ async function whoHealthData(args) {
   var limit = clampNumber(args.limit, 50, 1, MAX_LIMIT);
   var recent = clampNumber(args.recent, 1, 1, 20);
   var normalized = [];
+  var rangeMeta = null;
   if (startYear === null && !countries.length) {
     return {
       ok: false,
@@ -396,8 +407,21 @@ async function whoHealthData(args) {
     var result = await fetchWhoRows(indicator, countries, startYear, endYear, limit, true);
     if (!result.ok) return result;
     normalized = normalizeWhoRows(result.rows, indicator);
+    var recordsAvailableInPage = result.rows.length;
+    var responseTruncated = result.totalMatched !== null
+      ? result.totalMatched > recordsAvailableInPage
+      : recordsAvailableInPage >= limit;
+    rangeMeta = {
+      responseTruncated: responseTruncated,
+      totalMatched: result.totalMatched,
+      recordsAvailableInPage: recordsAvailableInPage,
+      recordsReturned: normalized.length
+    };
+    if (responseTruncated) {
+      rangeMeta.hint = '匹配记录超过本次返回上限；结果已按年份从新到旧截断。请缩小年份范围、减少国家数量，或提高 limit（最大 ' + MAX_LIMIT + '）后重试';
+    }
   }
-  return {
+  var response = {
     ok: true,
     source: 'WHO',
     indicator: indicator,
@@ -406,6 +430,14 @@ async function whoHealthData(args) {
     count: normalized.length,
     note: 'WHO 健康统计数据仅供信息参考，不用于个人医疗诊断。'
   };
+  if (rangeMeta) {
+    response.responseTruncated = rangeMeta.responseTruncated;
+    response.totalMatched = rangeMeta.totalMatched;
+    response.recordsAvailableInPage = rangeMeta.recordsAvailableInPage;
+    response.recordsReturned = rangeMeta.recordsReturned;
+    if (rangeMeta.hint) response.hint = rangeMeta.hint;
+  }
+  return response;
 }
 
 async function faoAgricultureData(args) {

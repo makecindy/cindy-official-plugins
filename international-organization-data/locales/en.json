@@ -7,7 +7,7 @@
       "description": "Browse official WHO or FAO data catalogs. WHO supports common indicators, health indicators, and countries; FAO supports groups, domains, dimensions, and filter codes. FAO catalog actions require an API token."
     },
     "who_health_data": {
-      "description": "Query WHO global health indicators by WHO indicator code or common alias, ISO3 country codes, and optional year range. Without a year range, provide countries so the plugin can query each country separately and return up to countries × recent deterministic non-empty observations without global truncation. No API key is required; informational only, not personal medical diagnosis."
+      "description": "Query WHO global health indicators by WHO indicator code or common alias, up to 25 ISO3 country codes, and an optional year range. Without a year range, provide countries so the plugin can query each country separately and return up to countries × recent deterministic non-empty observations without global truncation. Year-range results are ordered newest first and explicitly disclose truncation beyond limit with guidance to narrow the query. No API key is required; informational only, not personal medical diagnosis."
     },
     "fao_agriculture_data": {
       "description": "Query official FAOSTAT agriculture, food, food-security, trade, and production statistics. Discover domains and filter codes first; configure an official API token in plugin settings and provide at least one filter. Read-only."
