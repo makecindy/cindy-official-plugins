@@ -30,6 +30,7 @@ owners:
 | iCloud, Apple (Apple Inc.) | `icloud-mail` plugin display name |
 | QQ Mail, Tencent (Tencent Technology (Shenzhen) Co., Ltd.) | `qq-mail/assets/icon.png`, plugin display name |
 | 163 Mail, NetEase (NetEase (Hangzhou) Network Co., Ltd.) | `163-mail/assets/icon.png`, plugin display name |
+| Yahoo Mail, Yahoo (Yahoo Holdings Inc.) | `yahoo-mail/assets/icon.png` — the official Yahoo Mail app icon, unmodified; plugin display name |
 | TapTap (X.D. Network Inc.) | `taptap-maker/assets/icon.png`, plugin display name |
 | Brave Search (Brave Software, Inc.), Tavily | service names in `cindy-web-search` copy |
 | Mermaid | `cindy-mermaid` plugin display name |
