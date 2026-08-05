@@ -161,9 +161,11 @@ cindy-art/
 - `main` 的普通 push 只发布本次发生变化的插件目录；没有触及任何插件目录的 push 不会
   发布任何东西。
 - Actions 页面手动运行会全量发布当前全部插件，供仓库迁移后首次建档或显式重发使用。
-- 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）发布到由仓库 Secret 提供的
-  端点。两次运行独立打包、独立执行、独立汇报，一边失败不影响另一边的 Workflow 状态。
-  仓库不提供 Dev 发布 Workflow。
+- 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）发布到由仓库 Secret
+  `CINDY_PLUGIN_PLATFORM_URL_CN` 与 `CINDY_PLUGIN_PLATFORM_URL_GLOBAL` 提供的对应生产
+  Cindy Platform 入口。Platform 负责发布编排并把 OIDC Token 与包体转发给 Plugin
+  Server，Workflow 不再直连 Plugin Server。两次运行独立打包、独立执行、独立汇报，
+  一边失败不影响另一边的 Workflow 状态。仓库不提供 Dev 发布 Workflow。
 
 由于两者由同一次 push 触发，一次改动插件的合并会产生两个 Release —— 每个区域一个。
 
