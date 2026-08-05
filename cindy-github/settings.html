@@ -7,7 +7,7 @@
      PAT 经 /secrets 只写通道一次性交给主机保险库(交出后本页只能查回
      saved + 尾 4 位指纹,拿不回明文)。GET /secrets 额外回 gh 可用布尔,
      不回账号或 token。
-     「测试连接」由电子脑代跑:本页 fetch('/wake') 叫醒电子脑,经 BroadcastChannel
+     「测试连接」只检查当前生效的 GitHub 连接,由电子脑代跑:本页 fetch('/wake') 叫醒电子脑,经 BroadcastChannel
      递活,电子脑 cindy.fetch GET /user(PAT 由主机注入)后把用户名广播回来——
      本页零网络直连,token 字节不经过任何可读回的地方。 -->
 <style>
@@ -105,7 +105,7 @@
     <button id="save" class="btn" type="button">保存</button>
   </div>
   <div class="input-row">
-    <button id="test" class="btn" type="button">测试连接</button>
+    <button id="test" class="btn" type="button">测试当前连接</button>
     <button id="clear" class="btn" type="button">清除</button>
   </div>
   <a class="console-link" href="https://github.com/settings/tokens">获取备用 Token ↗</a>

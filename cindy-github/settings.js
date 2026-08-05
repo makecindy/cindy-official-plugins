@@ -115,10 +115,10 @@
       input.value = '';
       syncEye();
       await load();
-      // gh 可用时真实请求会优先走 gh,不能把它的成功误报成备用 PAT 已验证。
-      // 只有当前没有 gh 时才顺手验新 PAT。
+      // 保存只确认凭证已写入；认证来源可能在异步窗口内切换，不能把
+      // 「当前连接」的成功误报成刚保存的备用 Token 已验证。
       if (ghAvailable) showStatus('备用 Token 已保存；当前仍优先使用本机 GitHub 登录');
-      else void test();
+      else showStatus('备用 Token 已保存；点击“测试连接”可检查当前 GitHub 连接');
     } catch (e) {
       showStatus('保存失败,请重试', true);
     } finally {
@@ -131,7 +131,7 @@
     var reqId = 'test-' + Date.now() + '-' + (++testSeq);
     var btn = $('test');
     btn.disabled = true;
-    showStatus('正在连接 GitHub 验证…', true);
+    showStatus('正在检查当前 GitHub 连接…', true);
     try {
       await fetch('/wake');
     } catch (e) { /* 叫不醒也让重发兜底 */ }

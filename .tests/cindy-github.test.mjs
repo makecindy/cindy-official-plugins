@@ -62,7 +62,7 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.2.5');
+  assert.equal(manifest.version, '1.2.6');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -86,5 +86,7 @@ test('settings show only host availability and fallback-token storage state', ()
   assert.match(settingsSource, /function renderHostAccount\(available\)/);
   assert.doesNotMatch(settingsSource, /renderHostAccount\(hostAvailable,\s*\w+/);
   assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource|fetch\(['"]\/kv/);
+  assert.doesNotMatch(settingsSource, /else void test\(\)/);
+  assert.match(settingsSource, /检查当前 GitHub 连接/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
 });
