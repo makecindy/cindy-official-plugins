@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "GitHub の組み込みサービスプラグインです。Personal Access Token を設定すると、issue、Pull Request、レビュー、リポジトリ、Actions、release、検索など、カタログ化された 117 操作を読み書きできます。github.com のみ対応します。トークンはホストが暗号化して保管し、GitHub API リクエストにだけ注入します。",
-  "whenToUse": "github.com のリポジトリとリンクにだけ使用します。GitLab インスタンスには GitLab を使用してください。issue や Pull Request の確認・変更、コードレビューの投稿・返信、Pull Request のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions の実行・確認、release 管理、コード・リポジトリ・ユーザー検索、Actions の成果物やログのダウンロードができます。先にプラグイン詳細で GitHub トークンを設定してください。",
+  "description": "GitHub の組み込みサービスプラグインです。お使いのコンピューターの GitHub ログインを優先し、利用できない場合は予備の Personal Access Token にフォールバックして、issue、Pull Request、レビュー、リポジトリ、Actions、release、検索など、カタログ化された 117 操作を読み書きできます。github.com のみ対応し、トークンはホストだけが GitHub API リクエストに注入します。",
+  "whenToUse": "github.com のリポジトリとリンクにだけ使用します。GitLab インスタンスには GitLab を使用してください。issue や Pull Request の確認・変更、コードレビューの投稿・返信、Pull Request のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions の実行・確認、release 管理、コード・リポジトリ・ユーザー検索、Actions の成果物やログのダウンロードができます。GitHub ログインを優先し、まだ接続されていない場合は Agent にログインを手伝ってもらうか、プラグイン詳細で予備のトークンを設定します。",
   "tools": {
     "list_tools": {
       "description": "issues、pulls、repo、commits、actions、releases、search、users、orgs、events、notifications、gists、git_data、reactions、meta を含む 117 個の GitHub 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"

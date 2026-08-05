@@ -29,6 +29,22 @@ const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
   'utf8',
 );
+const githubManifest = JSON.parse(
+  readFileSync(new URL('../cindy-github/ghost.json', import.meta.url), 'utf8'),
+) as {
+  version: string;
+  network?: {
+    secrets?: Array<{
+      key?: string;
+      source?: string;
+      inject?: { header?: string; format?: string; hosts?: string[] };
+    }>;
+  };
+};
+const githubSettingsSource = readFileSync(
+  new URL('../cindy-github/settings.js', import.meta.url),
+  'utf8',
+);
 
 /** 最小 BroadcastChannel 假体：内置意识启动时会注册设置页连接测试通道。 */
 class FakeBroadcastChannel {
@@ -101,6 +117,32 @@ function createGithubHarness(
     },
   };
 }
+
+describe('内置意识 Cindy GitHub 宿主认证桥', () => {
+  it('manifest 声明 gh-cli 优先来源并把注入范围钉死在 GitHub API', () => {
+    const auth = githubManifest.network?.secrets?.find(
+      (secret) => secret.key === 'github_pat',
+    );
+    expect(githubManifest.version).toBe('1.2.4');
+    expect(auth).toMatchObject({
+      source: 'gh-cli',
+      inject: {
+        header: 'Authorization',
+        format: 'Bearer {value}',
+        hosts: ['api.github.com'],
+      },
+    });
+  });
+
+  it('设置页只读 gh 可用状态，并把 PAT 明确作为备用配置', () => {
+    expect(githubSettingsSource).toMatch(/hostSource\s*===\s*["']gh-cli["']/);
+    expect(githubSettingsSource).toContain('hostAvailable');
+    expect(githubSettingsSource).toContain('已连接 GitHub，可直接使用');
+    expect(githubSettingsSource).toContain('已保存备用 Token');
+    expect(githubSettingsSource).toContain('当前仍优先使用本机 GitHub 登录');
+    expect(githubSettingsSource).not.toContain('gh auth token');
+  });
+});
 
 describe('内置意识 Cindy GitHub create_branch', () => {
   it.each(['main', 'master', 'release/next'])(

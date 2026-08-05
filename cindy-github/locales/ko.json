@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "GitHub 내장 서비스 플러그인입니다. Personal Access Token을 설정하면 issue, Pull Request, 리뷰, 저장소, Actions, release, 검색 등 카탈로그화된 117개 작업을 읽고 쓸 수 있습니다. github.com만 지원합니다. 토큰은 호스트가 암호화해 보관하며 GitHub API 요청에만 주입합니다.",
-  "whenToUse": "github.com 저장소와 링크에만 사용합니다. GitLab 인스턴스는 GitLab을 사용하세요. issue와 Pull Request 조회·수정, 코드 리뷰 제출·답변, Pull Request 병합, 저장소·브랜치·commit·파일 조회, GitHub Actions 실행·확인, release 관리, 코드·저장소·사용자 검색, Actions 산출물과 로그 다운로드를 지원합니다. 먼저 플러그인 상세 화면에서 GitHub 토큰을 설정하세요.",
+  "description": "GitHub 내장 서비스 플러그인입니다. 컴퓨터의 GitHub 로그인을 우선 사용하고, 사용할 수 없으면 예비 Personal Access Token으로 대체하여 issue, Pull Request, 리뷰, 저장소, Actions, release, 검색 등 카탈로그화된 117개 작업을 읽고 쓸 수 있습니다. github.com만 지원하며 토큰은 호스트만 GitHub API 요청에 주입합니다.",
+  "whenToUse": "github.com 저장소와 링크에만 사용합니다. GitLab 인스턴스는 GitLab을 사용하세요. issue와 Pull Request 조회·수정, 코드 리뷰 제출·답변, Pull Request 병합, 저장소·브랜치·commit·파일 조회, GitHub Actions 실행·확인, release 관리, 코드·저장소·사용자 검색, Actions 산출물과 로그 다운로드를 지원합니다. GitHub 로그인을 우선 사용하며, 아직 연결되지 않았다면 Agent에게 로그인을 도움받거나 플러그인 상세 화면에서 예비 토큰을 구성하세요.",
   "tools": {
     "list_tools": {
       "description": "issues, pulls, repo, commits, actions, releases, search, users, orgs, events, notifications, gists, git_data, reactions, meta를 포함한 117개 GitHub 작업을 나열합니다. category를 생략하면 카테고리 이름, 개수, 설명을 반환하고, category를 지정하면 해당 카테고리의 모든 작업과 설명 및 매개변수를 반환합니다."

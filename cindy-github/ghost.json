@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "id": "cindy-github",
   "name": "GitHub",
-  "description": "内置的 GitHub 服务插件:填入 Personal Access Token 即可读写 GitHub(issue / PR / review / 仓库 / Actions / release / 搜索等 117 个操作,两段式目录)。仅支持 github.com;token 由主机加密保管,只注入 GitHub API 请求。",
-  "whenToUse": "只管 github.com 域名的仓库/链接(GitLab 实例的找 GitLab)。需要查/建/改 GitHub issue 或 PR,提交/回复 code review,合并 PR,查仓库/分支/commit/文件内容,触发或查看 GitHub Actions,管理 release,搜索代码/仓库/用户,或下载 Actions 产物与日志时找我(需先在主界面侧边栏「插件」→「GitHub」详情页填入 GitHub token)。",
-  "version": "1.2.2",
+  "description": "内置的 GitHub 服务插件:优先使用本机 GitHub 登录,不可用时回落到备用 Personal Access Token,可读写 GitHub(issue / PR / review / 仓库 / Actions / release / 搜索等 117 个操作,两段式目录)。仅支持 github.com;token 只由主机注入 GitHub API 请求。",
+  "whenToUse": "只管 github.com 域名的仓库/链接(GitLab 实例的找 GitLab)。需要查/建/改 GitHub issue 或 PR,提交/回复 code review,合并 PR,查仓库/分支/commit/文件内容,触发或查看 GitHub Actions,管理 release,搜索代码/仓库/用户,或下载 Actions 产物与日志时找我。宿主优先使用本机 GitHub 登录;若尚未连接,可让 Agent 帮你完成登录,或在插件详情页配置备用 Token。",
+  "version": "1.2.4",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -31,8 +31,9 @@
     "secrets": [
       {
         "key": "github_pat",
-        "label": "GitHub Personal Access Token",
-        "hint": "GitHub → Settings → Developer settings → Personal access tokens 生成后粘贴",
+        "label": "GitHub 登录",
+        "source": "gh-cli",
+        "hint": "宿主优先使用本机 GitHub 登录；不可用时可粘贴备用 Token",
         "url": "https://github.com/settings/tokens",
         "inject": {
           "header": "Authorization",

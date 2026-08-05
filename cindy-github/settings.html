@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <!-- GitHub 意识自定义设置区(意识自绘,cindy-ghost:// 沙箱页)。
-     主流程 = 粘贴 Personal Access Token:值经 /secrets 只写通道一次性交给主机
-     保险库(交出后本页只能查回 saved + 尾 4 位指纹,拿不回明文)。
+     主流程 = 宿主优先复用本机 gh 登录；本页只管理备用 Personal Access Token。
+     PAT 经 /secrets 只写通道一次性交给主机保险库(交出后本页只能查回
+     saved + 尾 4 位指纹,拿不回明文)。GET /secrets 额外回 gh 可用布尔,
+     不回账号或 token。
      「测试连接」由电子脑代跑:本页 fetch('/wake') 叫醒电子脑,经 BroadcastChannel
      递活,电子脑 cindy.fetch GET /user(PAT 由主机注入)后把用户名广播回来——
      本页零网络直连,token 字节不经过任何可读回的地方。 -->
@@ -18,6 +20,8 @@
   /* title 与控制台链接右缩 2px 对齐胶囊输入框的文字视觉边(同 xd-mivo)。 */
   .label-row { display: flex; align-items: center; gap: 8px; padding-left: 2px; }
   .label-row .name { font-weight: 500; }
+  .hint { margin: 7px 2px 0; font-size: 12px; color: var(--text-tertiary, #8a8a86); }
+  .subhead { margin: 14px 2px 0; font-size: 12px; font-weight: 500; }
   .badge {
     padding: 1px 8px; border-radius: 6px; font-size: 11px;
     background: var(--surface-chip, #efefec); color: var(--text-tertiary, #8a8a86);
@@ -86,7 +90,10 @@
     <span class="name">GitHub 账号</span>
     <span class="badge">github.com</span>
   </div>
-  <div id="account"></div>
+  <p class="hint">Cindy 会优先使用本机 GitHub 登录；如果尚未连接，可以让 Agent 帮你完成登录，也可以使用下方备用 Token。</p>
+  <div id="host-account"></div>
+  <div class="subhead">备用 Token</div>
+  <div id="fallback-account"></div>
   <div class="input-row" id="token-row">
     <div class="pill">
       <input id="token" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false">
@@ -101,7 +108,7 @@
     <button id="test" class="btn" type="button">测试连接</button>
     <button id="clear" class="btn" type="button">清除</button>
   </div>
-  <a class="console-link" href="https://github.com/settings/tokens">前往控制台获取 ↗</a>
+  <a class="console-link" href="https://github.com/settings/tokens">获取备用 Token ↗</a>
   <p id="status"></p>
   <script src="/settings.js"></script>
 </body>

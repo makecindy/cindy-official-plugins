@@ -1,7 +1,8 @@
 /**
  * GitHub 意识设置页脚本(CSP 禁内联,外挂加载)。
  * 数据面:
- *   GET  /secrets                → [{ key, saved, tail? }](永远拿不回值)
+ *   GET  /secrets                → [{ key, saved, tail?, hostSource?, hostAvailable? }]
+ *                                  (永远拿不回 gh/PAT 值)
  *   PUT  /secrets/github_pat     → { value } 一次性入库(204)
  *   DELETE /secrets/github_pat   → 清除
  *   GET  /kv                     → { connectedLogin? } 上次测试成功的用户名(只读展示)
@@ -15,6 +16,7 @@
 
   var KEY = 'github_pat';
   var bc = new BroadcastChannel('cindy-github');
+  var ghAvailable = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -25,16 +27,33 @@
     if (!sticky) statusTimer = setTimeout(function () { $('status').textContent = ''; }, 4000);
   }
 
-  /** 渲染已保存状态卡片(saved + tail 指纹 + 上次测试到的用户名)。 */
-  function renderAccount(saved, tail, login) {
-    var box = $('account');
+  /** 宿主 gh 状态卡:只展示可用布尔与上次测试用户名,拿不到 token/账号详情。 */
+  function renderHostAccount(available, login) {
+    var box = $('host-account');
+    box.textContent = '';
+    var row = document.createElement('div');
+    row.className = 'account';
+    var who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = available ? '已连接 GitHub，可直接使用' : '尚未连接 GitHub';
+    row.appendChild(who);
+    var tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = login ? '最近验证 @' + login : (available ? '优先使用' : '可使用备用 Token');
+    row.appendChild(tag);
+    box.appendChild(row);
+  }
+
+  /** 渲染备用 PAT 保存状态(saved + tail 指纹)。 */
+  function renderFallbackAccount(saved, tail) {
+    var box = $('fallback-account');
     box.textContent = '';
     if (!saved) return;
     var row = document.createElement('div');
     row.className = 'account';
     var who = document.createElement('span');
     who.className = 'who';
-    who.textContent = login ? '@' + login : '已保存 token';
+    who.textContent = '已保存备用 Token';
     row.appendChild(who);
     var tag = document.createElement('span');
     tag.className = 'tag';
@@ -47,21 +66,28 @@
     try {
       var saved = false;
       var tail = '';
+      var hostAvailable = false;
       var list = await (await fetch('/secrets')).json();
       for (var i = 0; i < list.length; i++) {
-        if (list[i] && list[i].key === KEY) { saved = Boolean(list[i].saved); tail = list[i].tail || ''; }
+        if (list[i] && list[i].key === KEY) {
+          saved = Boolean(list[i].saved);
+          tail = list[i].tail || '';
+          hostAvailable = list[i].hostSource === 'gh-cli' && Boolean(list[i].hostAvailable);
+        }
       }
+      ghAvailable = hostAvailable;
       var login = '';
       try {
         var kv = await (await fetch('/kv')).json();
-        if (saved && kv && typeof kv.connectedLogin === 'string') login = kv.connectedLogin;
+        if ((hostAvailable || saved) && kv && typeof kv.connectedLogin === 'string') login = kv.connectedLogin;
       } catch (e) { /* kv 读失败只影响用户名展示 */ }
-      renderAccount(saved, tail, login);
+      renderHostAccount(hostAvailable, login);
+      renderFallbackAccount(saved, tail);
       // 单凭证语义要在输入行上说破:已保存时空输入框容易被误读成"还能再绑
       // 一个",实际再存 = 覆盖唯一的一条。占位与按钮文案切成「更换」。
-      $('token').placeholder = saved ? '粘贴新 token 以更换(覆盖当前)' : 'ghp_… 或 github_pat_…';
+      $('token').placeholder = saved ? '粘贴新的备用 Token 以更换(覆盖当前)' : '粘贴备用 Token';
       $('save').textContent = saved ? '更换' : '保存';
-      $('test').disabled = !saved;
+      $('test').disabled = !hostAvailable && !saved;
       $('clear').disabled = !saved;
     } catch (e) {
       showStatus('状态加载失败,请稍后重试');
@@ -95,8 +121,10 @@
       input.value = '';
       syncEye();
       await load();
-      // 保存成功顺手验一次,让用户当场看到 token 是否可用。
-      void test();
+      // gh 可用时真实请求会优先走 gh,不能把它的成功误报成备用 PAT 已验证。
+      // 只有当前没有 gh 时才顺手验新 PAT。
+      if (ghAvailable) showStatus('备用 Token 已保存；当前仍优先使用本机 GitHub 登录');
+      else void test();
     } catch (e) {
       showStatus('保存失败,请重试', true);
     } finally {
@@ -153,11 +181,13 @@
     try {
       await fetch('/secrets/' + KEY, { method: 'DELETE' });
       try {
-        // 顺手清掉缓存的用户名展示,避免"清了 token 还挂着 @login"。
-        var kv = await (await fetch('/kv')).json();
-        if (kv && typeof kv === 'object') {
-          delete kv.connectedLogin;
-          await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+        // gh 仍可用时用户名属于当前有效认证,不应随备用 PAT 一起清掉。
+        if (!ghAvailable) {
+          var kv = await (await fetch('/kv')).json();
+          if (kv && typeof kv === 'object') {
+            delete kv.connectedLogin;
+            await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+          }
         }
       } catch (e) { /* 展示缓存清不掉不影响主流程 */ }
       showStatus('已清除');

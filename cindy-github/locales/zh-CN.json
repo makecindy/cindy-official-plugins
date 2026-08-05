@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "内置的 GitHub 服务插件：填入 Personal Access Token 后即可读写 GitHub issue、PR、review、仓库、Actions、release、搜索等 117 个操作，并通过两段式目录调用。仅支持 github.com；Token 由宿主加密保管，只注入 GitHub API 请求。",
-  "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。请先在插件详情页配置 GitHub Token。",
+  "description": "内置的 GitHub 服务插件：优先使用本机 GitHub 登录，不可用时回落到备用 Personal Access Token，可读写 GitHub issue、PR、review、仓库、Actions、release、搜索等 117 个操作，并通过两段式目录调用。仅支持 github.com；Token 只由宿主注入 GitHub API 请求。",
+  "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。宿主优先使用本机 GitHub 登录；若尚未连接，可让 Agent 帮你完成登录，或在插件详情页配置备用 Token。",
   "tools": {
     "list_tools": {
       "description": "列出本插件 117 个 GitHub 操作，覆盖 issues、pulls、repo、commits、actions、releases、search、users、orgs、events、notifications、gists、git_data、reactions、meta。不传 category 时返回类目名称、数量和说明；传 category 时返回该类目下所有操作的名称、说明与参数。"
