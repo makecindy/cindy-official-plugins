@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy 内置的网页搜索插件：使用你自己的 Brave 或 Tavily Key 搜索公网。Key 在插件详情页填写，在本机加密保存，并且只注入发往已声明域名的请求。",
-  "whenToUse": "需要搜索公网信息、查资料、找网页或查看最新动态时使用。请先在 Web Search 插件详情页配置 Brave 或 Tavily Key。",
+  "description": "Cindy 内置的网页搜索插件：使用你自己的 Brave、Tavily 或 Search1API Key 搜索公网。Key 在插件详情页填写，在本机加密保存，并且只注入发往已声明域名的请求。",
+  "whenToUse": "需要搜索公网信息、查资料、找网页或查看最新动态时使用。请先在 Web Search 插件详情页配置 Brave、Tavily 或 Search1API Key。",
   "tools": {
     "search_web": {
-      "description": "搜索公网并返回 { title, url, snippet } 结果列表。默认使用 Brave；需要网页正文摘录或指定域名过滤时使用 Tavily。返回 { provider, results }。两个搜索源的 Key 都没配置时，把返回的 message 原样告诉用户。"
+      "description": "搜索公网并返回 { title, url, snippet } 结果列表。provider 可指定 brave、tavily 或 search1api；省略时按 Brave → Tavily → Search1API 顺序使用首个已配置 Key 的搜索源。返回 { provider, results }。所有搜索源的 Key 都没配置时，把返回的 message 原样告诉用户。"
     }
   }
 }

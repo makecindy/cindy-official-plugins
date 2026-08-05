@@ -4,7 +4,7 @@
  *   GET /secrets           → [{ key, saved, tail? }](只有状态 + 尾 4 位指纹,永远没有值)
  *   PUT /secrets/<key>     → { value } 单向入库(主机 OS 级加密保管)
  *   DELETE /secrets/<key>  → 清除
- * 双凭证(Brave / Tavily)同构:行结构与文案由 settings.html 的 data-* 驱动,
+ * 三条凭证(Brave / Tavily / Search1API)同构:行结构与文案由 settings.html 的 data-* 驱动,
  * 本脚本按 .secret 容器统一接线。收单不存值:保存成功后清空输入框、点亮
  * 「已保存」;明文读不回来,想换 key 直接粘贴新值覆盖。
  */

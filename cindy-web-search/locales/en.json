@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy's built-in web search plugin. Search the public web with your own Brave or Tavily API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
-  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Configure a Brave or Tavily key in the Web Search plugin details first.",
+  "description": "Cindy's built-in web search plugin. Search the public web with your own Brave, Tavily, or Search1API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
+  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Configure a Brave, Tavily, or Search1API key in the Web Search plugin details first.",
   "tools": {
     "search_web": {
-      "description": "Search the public web and return a list of { title, url, snippet } results. Brave is used by default; use Tavily when page-content extracts or domain filters are needed. Returns { provider, results }. If neither search key is configured, return the provided message to the user unchanged."
+      "description": "Search the public web and return a list of { title, url, snippet } results. Set provider to brave, tavily, or search1api; when omitted, use the first source with a configured key in Brave → Tavily → Search1API order. Returns { provider, results }. If no search key is configured, return the provided message to the user unchanged."
     }
   }
 }

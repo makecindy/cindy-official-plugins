@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy 内蔵のウェブ検索プラグインです。自分の Brave または Tavily API キーで公開ウェブを検索します。キーはプラグイン詳細で設定し、ローカルで暗号化され、宣言済みホストへのリクエストにだけ注入されます。",
-  "whenToUse": "公開ウェブの検索、調査、ウェブページの発見、最新情報の確認に使用します。先に Web Search プラグイン詳細で Brave または Tavily のキーを設定してください。",
+  "description": "Cindy 内蔵のウェブ検索プラグインです。自分の Brave、Tavily、または Search1API の API キーで公開ウェブを検索します。キーはプラグイン詳細で設定し、ローカルで暗号化され、宣言済みホストへのリクエストにだけ注入されます。",
+  "whenToUse": "公開ウェブの検索、調査、ウェブページの発見、最新情報の確認に使用します。先に Web Search プラグイン詳細で Brave、Tavily、または Search1API のキーを設定してください。",
   "tools": {
     "search_web": {
-      "description": "公開ウェブを検索し、{ title, url, snippet } の結果一覧を返します。既定では Brave を使い、ページ本文の抜粋やドメイン指定が必要な場合は Tavily を使います。{ provider, results } を返します。どちらの検索キーも未設定の場合は、返された message を変更せずユーザーに伝えてください。"
+      "description": "公開ウェブを検索し、{ title, url, snippet } の結果一覧を返します。provider には brave、tavily、search1api を指定できます。省略した場合は Brave → Tavily → Search1API の順で、キーが設定済みの最初の検索元を使用します。{ provider, results } を返します。どの検索キーも未設定の場合は、返された message を変更せずユーザーに伝えてください。"
     }
   }
 }
