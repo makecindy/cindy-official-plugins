@@ -19,8 +19,7 @@ function jsonResponse(data, status = 200) {
   return { ok: true, status, body: JSON.stringify(data), headers: {} };
 }
 
-async function testConnectionSource(hostAvailable) {
-  let kv = {};
+async function testConnection() {
   let channel;
   let resolveResult;
   const result = new Promise((resolve) => { resolveResult = resolve; });
@@ -33,24 +32,7 @@ async function testConnectionSource(hostAvailable) {
     }
   }
 
-  const fetch = async (url, options = {}) => {
-    if (url === '/secrets') {
-      return {
-        json: async () => [{
-          key: 'github_pat',
-          saved: true,
-          hostSource: 'gh-cli',
-          hostAvailable,
-        }],
-      };
-    }
-    if (url === '/kv' && options.method === 'PUT') {
-      kv = JSON.parse(options.body);
-      return { status: 204 };
-    }
-    if (url === '/kv') return { json: async () => ({ ...kv }) };
-    throw new Error(`unexpected fetch: ${url}`);
-  };
+  const fetch = async (url) => { throw new Error(`unexpected fetch: ${url}`); };
 
   const cindy = {
     onHostMessage() {},
@@ -76,12 +58,11 @@ async function testConnectionSource(hostAvailable) {
   await channel.onmessage({ data: { type: 'test-connection', reqId: 'req-1' } });
   const message = await result;
   assert.equal(message.ok, true);
-  return kv;
 }
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.2.4');
+  assert.equal(manifest.version, '1.2.5');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -96,15 +77,14 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   });
 });
 
-test('connection tests persist whether the host login or fallback token was used', async () => {
-  assert.equal((await testConnectionSource(true)).connectedSource, 'host');
-  assert.equal((await testConnectionSource(false)).connectedSource, 'fallback');
+test('connection tests never cache an identity that the plugin cannot attribute atomically', async () => {
+  await testConnection();
+  assert.doesNotMatch(githubSource, /connectedLogin|connectedSource/);
 });
 
-test('settings only show a cached username for the active fallback-token source', () => {
-  assert.match(settingsSource, /kv\.connectedSource === 'fallback'/);
+test('settings show only host availability and fallback-token storage state', () => {
   assert.match(settingsSource, /function renderHostAccount\(available\)/);
   assert.doesNotMatch(settingsSource, /renderHostAccount\(hostAvailable,\s*\w+/);
-  assert.match(settingsSource, /delete kv\.connectedSource/);
+  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource|fetch\(['"]\/kv/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
 });

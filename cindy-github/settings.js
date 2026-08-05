@@ -5,7 +5,6 @@
  *                                  (永远拿不回 gh/PAT 值)
  *   PUT  /secrets/github_pat     → { value } 一次性入库(204)
  *   DELETE /secrets/github_pat   → 清除
- *   GET  /kv                     → { connectedLogin?, connectedSource? } 上次测试结果
  *   GET  /wake                   → 叫醒电子脑(幂等)
  * 测试连接经 BroadcastChannel('cindy-github') 递活给电子脑:
  *   发 { type:'test-connection', reqId },按 reqId 每 400ms 重发直到收到
@@ -45,7 +44,7 @@
   }
 
   /** 渲染备用 PAT 保存状态(saved + tail 指纹)。 */
-  function renderFallbackAccount(saved, tail, login) {
+  function renderFallbackAccount(saved, tail) {
     var box = $('fallback-account');
     box.textContent = '';
     if (!saved) return;
@@ -53,7 +52,7 @@
     row.className = 'account';
     var who = document.createElement('span');
     who.className = 'who';
-    who.textContent = login ? '@' + login : '已保存备用 Token';
+    who.textContent = '已保存备用 Token';
     row.appendChild(who);
     var tag = document.createElement('span');
     tag.className = 'tag';
@@ -76,19 +75,8 @@
         }
       }
       ghAvailable = hostAvailable;
-      var fallbackLogin = '';
-      try {
-        var kv = await (await fetch('/kv')).json();
-        if (
-          !hostAvailable &&
-          saved &&
-          kv &&
-          kv.connectedSource === 'fallback' &&
-          typeof kv.connectedLogin === 'string'
-        ) fallbackLogin = kv.connectedLogin;
-      } catch (e) { /* kv 读失败只影响用户名展示 */ }
       renderHostAccount(hostAvailable);
-      renderFallbackAccount(saved, tail, fallbackLogin);
+      renderFallbackAccount(saved, tail);
       // 单凭证语义要在输入行上说破:已保存时空输入框容易被误读成"还能再绑
       // 一个",实际再存 = 覆盖唯一的一条。占位与按钮文案切成「更换」。
       $('token').placeholder = saved ? '粘贴新的备用 Token 以更换(覆盖当前)' : '粘贴备用 Token';
@@ -98,17 +86,6 @@
     } catch (e) {
       showStatus('状态加载失败,请稍后重试');
     }
-  }
-
-  /** 清掉和旧凭证绑定的账号展示；新凭证必须重新测试后才显示。 */
-  async function clearCachedIdentity() {
-    try {
-      var kv = await (await fetch('/kv')).json();
-      if (!kv || typeof kv !== 'object') return;
-      delete kv.connectedLogin;
-      delete kv.connectedSource;
-      await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
-    } catch (e) { /* 展示缓存清不掉不影响凭证主流程 */ }
   }
 
   /**
@@ -137,7 +114,6 @@
       if (r.status !== 204) { showStatus('保存失败(' + r.status + '),请重试', true); return; }
       input.value = '';
       syncEye();
-      await clearCachedIdentity();
       await load();
       // gh 可用时真实请求会优先走 gh,不能把它的成功误报成备用 PAT 已验证。
       // 只有当前没有 gh 时才顺手验新 PAT。
@@ -198,7 +174,6 @@
     $('clear').disabled = true;
     try {
       await fetch('/secrets/' + KEY, { method: 'DELETE' });
-      await clearCachedIdentity();
       showStatus('已清除');
     } catch (e) {
       showStatus('清除失败,请重试');
