@@ -1338,6 +1338,26 @@ async function callTool(args, callId) {
 var bc = new BroadcastChannel('cindy-github');
 var seenTestReqs = {};
 
+/**
+ * 测试请求实际会优先走宿主 GitHub 登录；只有它不可用时才回落备用 Token。
+ * 把来源和用户名一起落 KV，避免设置页把备用 Token 的账号误认成宿主账号。
+ */
+async function connectionAuthSource() {
+  try {
+    var list = await (await fetch('/secrets')).json();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].key === 'github_pat') {
+        return list[i].hostSource === 'gh-cli' && Boolean(list[i].hostAvailable)
+          ? 'host'
+          : 'fallback';
+      }
+    }
+  } catch (e) {
+    /* 来源状态读失败时不猜；用户名也不写入可展示缓存。 */
+  }
+  return '';
+}
+
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
@@ -1346,6 +1366,7 @@ bc.onmessage = function (ev) {
   if (Object.keys(seenTestReqs).length > 200) seenTestReqs = {};
   seenTestReqs[m.reqId] = 1;
   void (async function () {
+    var authSource = await connectionAuthSource();
     var r = await api({ url: API + '/user' });
     if (r.err) {
       bc.postMessage({ type: 'test-connection-result', reqId: m.reqId, ok: false, message: r.err });
@@ -1360,7 +1381,13 @@ bc.onmessage = function (ev) {
     try {
       var kv = await (await fetch('/kv')).json();
       kv = kv && typeof kv === 'object' ? kv : {};
-      kv.connectedLogin = login;
+      if (authSource) {
+        kv.connectedLogin = login;
+        kv.connectedSource = authSource;
+      } else {
+        delete kv.connectedLogin;
+        delete kv.connectedSource;
+      }
       await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
     } catch (e) {
       /* 缓存写失败不影响测试结果 */
