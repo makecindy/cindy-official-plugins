@@ -15,7 +15,7 @@ const globalWorkflow = readFileSync(
 test('CN and Global plugin publishers are operationally independent', () => {
   assert.match(cnWorkflow, /^name: Publish Cindy Plugins \(CN\)$/m);
   assert.match(globalWorkflow, /^name: Publish Cindy Plugins \(Global\)$/m);
-  assert.match(cnWorkflow, /group: cindy-plugin-publish-cn-prod-/);
+  assert.match(cnWorkflow, /group: cindy-plugin-publish-\$\{\{.*inputs\.deployment.*cn-prod/);
   assert.match(globalWorkflow, /group: cindy-plugin-publish-global-prod-/);
 
   assert.match(cnWorkflow, /CINDY_PLUGIN_SERVER_URL_CN/);
@@ -28,12 +28,28 @@ test('both regional publishers support main pushes and full manual republish', (
   for (const workflow of [cnWorkflow, globalWorkflow]) {
     assert.match(workflow, /push:\n    branches:\n      - main/);
     assert.match(workflow, /workflow_dispatch:/);
-    assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
-    assert.match(workflow, /EVENT_NAME === 'workflow_dispatch'/);
+    assert.match(workflow, /(?:process\.env\.EVENT_NAME|eventName) === 'workflow_dispatch'/);
     assert.match(workflow, /Publishing all Cindy plugins:/);
     assert.match(workflow, /id-token: write/);
     assert.match(workflow, /audience=cindy-plugin/);
   }
+  assert.match(globalWorkflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(
+    cnWorkflow,
+    /if: github\.event_name == 'workflow_dispatch' \|\| github\.ref == 'refs\/heads\/main'/,
+  );
+});
+
+test('CN publisher has an isolated single-plugin dev validation path', () => {
+  assert.match(cnWorkflow, /deployment:/);
+  assert.match(cnWorkflow, /plugin_directory:/);
+  assert.match(cnWorkflow, /plugin_directory is required for dev publishing/);
+  assert.match(cnWorkflow, /Manual production publishing is only supported from main/);
+  assert.match(
+    cnWorkflow,
+    /https:\/\/platform-dev\.cindy\.com\.cn\/api\/platform\/v1\/plugin-publish\/publish/,
+  );
+  assert.doesNotMatch(globalWorkflow, /platform-dev\.cindy\.com\.cn/);
 });
 
 test('both regional publishers pin actions in the OIDC publishing chain', () => {

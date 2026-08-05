@@ -160,10 +160,14 @@ cindy-art/
 
 - `main` 的普通 push 只发布本次发生变化的插件目录；没有触及任何插件目录的 push 不会
   发布任何东西。
-- Actions 页面手动运行会全量发布当前全部插件，供仓库迁移后首次建档或显式重发使用。
+- 手动运行 CN Workflow 并选择 `dev` 时，只把明确指定的一个插件经 Cindy Platform
+  发布到 sh-dev；该验证入口允许从测试分支运行，不会改变两个生产端点。
+- 从 `main` 手动运行生产 Workflow 时，会全量发布当前全部插件，供仓库迁移后首次
+  建档或显式重发使用。
 - 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）发布到由仓库 Secret 提供的
-  端点。两次运行独立打包、独立执行、独立汇报，一边失败不影响另一边的 Workflow 状态。
-  仓库不提供 Dev 发布 Workflow。
+  生产端点。两次生产运行独立打包、独立执行、独立汇报，一边失败不影响另一边的
+  Workflow 状态。CN Workflow 的手动 `dev` 目标仅用于单插件验证未来的 Platform
+  发布链路；验证通过前，sh-prod 与 sgp-prod 的现有入口保持不变。
 
 由于两者由同一次 push 触发，一次改动插件的合并会产生两个 Release —— 每个区域一个。
 

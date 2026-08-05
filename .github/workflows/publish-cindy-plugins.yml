@@ -5,18 +5,31 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deployment:
+        description: Publish target
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - cn-prod
+      plugin_directory:
+        description: Single plugin directory (required for dev; empty means all on cn-prod)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: cindy-plugin-publish-cn-prod-${{ github.repository }}-${{ github.ref }}
+  group: cindy-plugin-publish-${{ github.event_name == 'workflow_dispatch' && inputs.deployment || 'cn-prod' }}-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   detect:
     name: Detect plugins to publish
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       plugins: ${{ steps.changes.outputs.result }}
@@ -34,8 +47,11 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
+          DEPLOYMENT: ${{ inputs.deployment }}
+          PLUGIN_DIRECTORY: ${{ inputs.plugin_directory }}
         with:
           script: |
             const { execFileSync } = require('node:child_process');
@@ -47,9 +63,20 @@ jobs:
               .split('\0')
               .filter(Boolean);
 
+            const eventName = process.env.EVENT_NAME ?? '';
+            const ref = process.env.REF ?? '';
+            const deployment = process.env.DEPLOYMENT ?? '';
+            const requestedDirectory = (process.env.PLUGIN_DIRECTORY ?? '').trim();
             const after = process.env.AFTER_SHA ?? '';
             if (!/^[0-9a-f]{40}$/i.test(after)) {
               throw new Error('GitHub event is missing a valid target SHA');
+            }
+            if (
+              eventName === 'workflow_dispatch'
+              && deployment === 'cn-prod'
+              && ref !== 'refs/heads/main'
+            ) {
+              throw new Error(`Manual production publishing is only supported from main, received ${ref}`);
             }
 
             const trackedFiles = lines(git([
@@ -65,7 +92,20 @@ jobs:
               .filter((directory) => directory !== '.')
               .sort((left, right) => right.length - left.length || left.localeCompare(right));
 
-            if (process.env.EVENT_NAME === 'workflow_dispatch') {
+            if (eventName === 'workflow_dispatch') {
+              if (!['dev', 'cn-prod'].includes(deployment)) {
+                throw new Error(`Unsupported deployment: ${deployment}`);
+              }
+              if (requestedDirectory) {
+                if (!pluginRoots.includes(requestedDirectory)) {
+                  throw new Error(`Unknown plugin directory: ${requestedDirectory}`);
+                }
+                core.info(`Publishing selected plugin: ${requestedDirectory}`);
+                return [{ directory: requestedDirectory }];
+              }
+              if (deployment === 'dev') {
+                throw new Error('plugin_directory is required for dev publishing');
+              }
               const plugins = [...pluginRoots]
                 .sort((left, right) => left.localeCompare(right))
                 .map((directory) => ({ directory }));
@@ -137,7 +177,7 @@ jobs:
             return plugins;
 
   publish:
-    name: Publish ${{ matrix.plugin.directory }} to CN prod
+    name: Publish ${{ matrix.plugin.directory }} to ${{ github.event_name == 'workflow_dispatch' && inputs.deployment || 'cn-prod' }}
     needs: detect
     if: ${{ needs.detect.outputs.plugins != '[]' }}
     runs-on: ubuntu-latest
@@ -163,9 +203,10 @@ jobs:
       - name: Publish plugin
         env:
           CINDY_PLUGIN_SERVER_URL_CN: ${{ secrets.CINDY_PLUGIN_SERVER_URL_CN }}
+          CINDY_PLUGIN_PUBLISH_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment == 'dev' && 'https://platform-dev.cindy.com.cn/api/platform/v1/plugin-publish/publish' || secrets.CINDY_PLUGIN_SERVER_URL_CN }}
         run: |
           set -euo pipefail
-          : "${CINDY_PLUGIN_SERVER_URL_CN:?CINDY_PLUGIN_SERVER_URL_CN is not configured}"
+          : "${CINDY_PLUGIN_PUBLISH_URL:?CINDY_PLUGIN_PUBLISH_URL is not configured}"
 
           oidc_response="$(curl \
             --fail-with-body \
@@ -188,5 +229,5 @@ jobs:
             --header "Authorization: Bearer ${oidc_token}" \
             --header "Content-Type: application/octet-stream" \
             --data-binary "@$RUNNER_TEMP/plugin.cindy" \
-            "${CINDY_PLUGIN_SERVER_URL_CN%/}"
+            "${CINDY_PLUGIN_PUBLISH_URL%/}"
           echo

@@ -190,13 +190,18 @@ Both are active and behave identically:
 
 - A regular push to `main` publishes only the plugin directories changed in
   that push. A push that touches no plugin directory publishes nothing.
-- Manually running a workflow from the Actions page publishes all current
+- Manually running the CN workflow with target `dev` publishes one explicitly
+  selected plugin through Cindy Platform in sh-dev. This validation path may
+  run from a test branch and never changes either production endpoint.
+- Manually running a production workflow from `main` publishes all current
   plugins in full — for initial setup after a repository migration or an
   explicit re-release.
 - Each publishes via GitHub Actions OIDC (audience `cindy-plugin`) to its own
-  endpoint, supplied by a repository secret. The two runs package, execute, and
-  report independently; a failure on one side does not affect the other's
-  workflow status. There is no development publishing workflow.
+  production endpoint, supplied by a repository secret. The two production
+  runs package, execute, and report independently; a failure on one side does
+  not affect the other's workflow status. The CN workflow's manual `dev` target
+  is only a single-plugin validation path for the future Platform publishing
+  chain; sh-prod and sgp-prod remain unchanged until that validation passes.
 
 Because both fire on the same push, one merge that changes a plugin produces two
 releases of it — one per region.
