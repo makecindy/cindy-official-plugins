@@ -25,7 +25,8 @@
   "network": {
     "hosts": [
       "api.github.com",
-      "*.githubusercontent.com",
+      "objects.githubusercontent.com",
+      "*.actions.githubusercontent.com",
       "*.blob.core.windows.net"
     ],
     "secrets": [
