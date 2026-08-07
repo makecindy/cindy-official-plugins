@@ -26,7 +26,7 @@
     "hosts": [
       "api.github.com",
       "objects.githubusercontent.com",
-      "*.actions.githubusercontent.com",
+      "results-receiver.actions.githubusercontent.com",
       "*.blob.core.windows.net"
     ],
     "secrets": [
