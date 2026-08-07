@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "Built-in GitHub service plugin. It prefers your computer's GitHub login and falls back to an optional Personal Access Token for issues, pull requests, reviews, repositories, Actions, releases, search, and 117 catalogued operations. Supports github.com only. Tokens are injected only by the host into GitHub API requests.",
-  "whenToUse": "Use only for github.com repositories and links; use GitLab for GitLab instances. Supports issues, pull requests, reviews, merges, repositories, branches, commits, files, Actions, releases, search, artifacts, and logs. The host uses your GitHub login first; if it is not connected, ask the agent to help you sign in or configure a fallback token in the plugin details.",
+  "description": "Built-in GitHub service plugin. Prefers your GitHub login, falls back to a Personal Access Token. Covers issues, PRs, reviews, repos, Actions, releases, search, and 117 operations. github.com only. Tokens are host-injected into API requests.",
+  "whenToUse": "Use for github.com repos and links; use GitLab for GitLab instances. Covers issues, PRs, reviews, merges, repos, branches, commits, files, Actions, releases, search, artifacts, and logs. Host uses your GitHub login first; if not connected, ask the agent to sign in or configure a token.",
   "tools": {
     "list_tools": {
       "description": "List this plugin's 117 GitHub operations across issues, pulls, repo, commits, actions, releases, search, users, orgs, events, notifications, gists, git_data, reactions, and meta. With no category, return category names, counts, and descriptions; with a category, return every operation in that category with its description and parameters."
