@@ -29,6 +29,10 @@ function extractHash(s) {
   return m ? m[0] : null;
 }
 
+function mapVideoModel(model) {
+  return model === 'seedance-2.5' ? 'bytedance/seedance-2.5' : model;
+}
+
 /** 交卷失败的统一姿势。 */
 function failCall(callId, message) {
   return cindy
@@ -203,7 +207,7 @@ async function handleGenVideo(msg) {
   if (!prompt) return failCall(msg.callId, '缺少 prompt(视频描述)');
 
   const req = { type: 'cindy-request', kind: 'gen_video', prompt: prompt, callId: msg.callId };
-  if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.model === 'string') req.model = mapVideoModel(msg.args.model);
   if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);
@@ -234,7 +238,7 @@ async function handleEditVideo(msg) {
   if (hashes.length === 0) return failCall(msg.callId, '缺少参考图(images 或用户图片附件)');
 
   const req = { type: 'cindy-request', kind: 'edit_video', prompt: prompt, hashes: hashes, callId: msg.callId };
-  if (msg.args && typeof msg.args.model === 'string') req.model = msg.args.model;
+  if (msg.args && typeof msg.args.model === 'string') req.model = mapVideoModel(msg.args.model);
   if (msg.args && typeof msg.args.tier === 'string') req.tier = msg.args.tier;
 
   const gen = await cindy.send(req);

@@ -4,7 +4,7 @@
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成图片、画画、插画、配图、头像、海报,基于已生成的图改图、加元素、换风格、P 图,或想生成短视频、让一张图动起来时找我。",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -141,9 +141,10 @@
             "enum": [
               "seedance-fast",
               "seedance-pro",
+              "seedance-2.5",
               "happyhorse"
             ],
-            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名(如 seedance pro / happyhorse / 高质量视频)时才传。"
+            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名(如 seedance 2.5 / seedance pro / happyhorse / 高质量视频)时才传。"
           },
           "tier": {
             "type": "string",
@@ -184,6 +185,7 @@
             "enum": [
               "seedance-fast",
               "seedance-pro",
+              "seedance-2.5",
               "happyhorse"
             ],
             "description": "可选。默认不传;规则同 gen_video。"
