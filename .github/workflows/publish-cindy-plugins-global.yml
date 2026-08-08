@@ -146,6 +146,7 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         plugin: ${{ fromJSON(needs.detect.outputs.plugins) }}
     steps:
@@ -162,10 +163,10 @@ jobs:
 
       - name: Publish plugin
         env:
-          CINDY_PLUGIN_SERVER_URL_GLOBAL: ${{ secrets.CINDY_PLUGIN_SERVER_URL_GLOBAL }}
+          CINDY_PLUGIN_PLATFORM_URL_GLOBAL: ${{ secrets.CINDY_PLUGIN_PLATFORM_URL_GLOBAL }}
         run: |
           set -euo pipefail
-          : "${CINDY_PLUGIN_SERVER_URL_GLOBAL:?CINDY_PLUGIN_SERVER_URL_GLOBAL is not configured}"
+          : "${CINDY_PLUGIN_PLATFORM_URL_GLOBAL:?CINDY_PLUGIN_PLATFORM_URL_GLOBAL is not configured}"
 
           oidc_response="$(curl \
             --fail-with-body \
@@ -188,5 +189,5 @@ jobs:
             --header "Authorization: Bearer ${oidc_token}" \
             --header "Content-Type: application/octet-stream" \
             --data-binary "@$RUNNER_TEMP/plugin.cindy" \
-            "${CINDY_PLUGIN_SERVER_URL_GLOBAL%/}"
+            "${CINDY_PLUGIN_PLATFORM_URL_GLOBAL%/}"
           echo

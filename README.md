@@ -194,9 +194,12 @@ Both are active and behave identically:
   plugins in full — for initial setup after a repository migration or an
   explicit re-release.
 - Each publishes via GitHub Actions OIDC (audience `cindy-plugin`) to its own
-  endpoint, supplied by a repository secret. The two runs package, execute, and
-  report independently; a failure on one side does not affect the other's
-  workflow status. There is no development publishing workflow.
+  production Cindy Platform endpoint, supplied by the repository secrets
+  `CINDY_PLUGIN_PLATFORM_URL_CN` and `CINDY_PLUGIN_PLATFORM_URL_GLOBAL`.
+  Platform orchestrates the release and forwards the OIDC token and package to
+  Plugin Server; the workflows never call Plugin Server directly. The two runs
+  package, execute, and report independently; a failure on one side does not
+  affect the other's workflow status. There is no development publishing workflow.
 
 Because both fire on the same push, one merge that changes a plugin produces two
 releases of it — one per region.
