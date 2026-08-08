@@ -1,0 +1,5 @@
+{
+  "name": "iOS Simulator",
+  "description": "Adds the workflow and manual entry for Cindy's Host-owned embedded iOS Simulator. WDA, Native H.264, Native HID, lifecycle, recovery, and fallback remain managed by the Host.",
+  "whenToUse": "Use when the user wants to build, launch, inspect, or interact with an iOS app in Cindy instead of opening the external Simulator.app."
+}

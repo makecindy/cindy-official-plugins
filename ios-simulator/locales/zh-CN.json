@@ -1,0 +1,5 @@
+{
+  "name": "iOS 模拟器",
+  "description": "为 Cindy 主机管理的内置 iOS 模拟器提供工作流与手动入口。WDA、Native H.264、Native HID、生命周期、恢复与回退仍由主机负责。",
+  "whenToUse": "用户希望在 Cindy 内构建、启动、检查或操作 iOS App，而不是打开外部 Simulator.app 时使用。"
+}

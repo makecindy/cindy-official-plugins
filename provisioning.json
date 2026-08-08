@@ -57,6 +57,12 @@
       "audience": {
         "emails": []
       }
+    },
+    "ios-simulator": {
+      "audience": {
+        "emails": []
+      },
+      "tier": "builtin"
     }
   }
 }
