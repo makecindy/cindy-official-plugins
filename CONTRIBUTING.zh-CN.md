@@ -41,6 +41,10 @@ node --test .tests/localization.test.mjs
 `node --test .tests/localization.test.mjs`——发布流水线会在打包前执行同一份检查，
 四语言（`zh-CN` / `en` / `ja` / `ko`）资源不完整会直接拦下整次发布。
 
+CI 还会在本仓检查每份 `ghost.json`，并按 Server / Desktop 交付限制的交集验证最终
+`.cindy` 包，包括文本长度、声明文件、安全路径、包大小和条目数。贡献者无需 checkout
+其他仓库。
+
 带 Node Worker 的插件（`163-mail`、`icloud-mail`、`qq-mail`）的 `node/worker.cjs` 是
 esbuild 产物，不要手改。改 `src/` 后在插件目录里重新构建并把产物一起提交：
 
@@ -61,18 +65,21 @@ cd 163-mail && npm ci && npm run build
    `fix(qq-mail): 校验移动结果`。type 取
    `feat` / `fix` / `refactor` / `perf` / `chore` / `docs` / `test` / `revert` /
    `build` / `ci`。
-3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 用同一版本号发布
-   不同内容会被服务端以 `RELEASE_VERSION_CONFLICT` 拒绝，且不会覆盖已有 release。
+3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
+   `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
-   Agent 行为的影响——这段描述就是 Agent 读到的使用手册。
+   Agent 行为的影响——这段描述就是 Agent 读到的使用手册。新增或提高
+   `minCindyVersion` 时，还要记录真实 `.cindy` 包在该精确 Cindy 版本的安装结果；降低
+   或删除该字段会扩大声称支持的范围，必须交维护者人工 review。
 
-每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 localization 与
-provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装该插件的依赖），并用
-与发布流水线完全相同的打包步骤做 dry-run。真正的上传仍然只在合入 `main` 之后发生。
+每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 Server / Desktop 交付
+契约、localization 与 provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装
+该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。真正上传仍只在合入
+`main` 后发生。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
-6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后发布流水线会自动把改动的插件
-   同步到 Cindy 插件市场。
+6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后区域 Workflow 会把改动包提交
+   到 Plugin Platform；CN / Global 独立审核，只有对应区域批准后才会在该区客户端可见。
 7. 成对的双语文档必须同 PR 同步：改动 `README.md`、`CONTRIBUTING.md` 或任何有
    `.zh-CN` 对应版本的文档时，两份必须在同一个 PR 内一起更新，反之亦然。只改
    一边的 PR 不予合并。

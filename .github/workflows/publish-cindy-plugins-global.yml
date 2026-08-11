@@ -26,6 +26,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate official plugin publish contract
+        run: node --test .tests/plugin-contract.test.mjs
+
       - name: Validate plugin localization resources
         run: node --test .tests/localization.test.mjs
 
@@ -119,6 +122,12 @@ jobs:
               '--',
             ]));
             const changedRoots = new Set();
+            const sharedPackageFiles = new Set([
+              'LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md',
+            ]);
+            if (changedFiles.some((file) => sharedPackageFiles.has(file))) {
+              for (const root of pluginRoots) changedRoots.add(root);
+            }
             for (const file of changedFiles) {
               const root = pluginRoots.find(
                 (directory) => file === directory || file.startsWith(`${directory}/`),
@@ -162,10 +171,10 @@ jobs:
 
       - name: Publish plugin
         env:
-          CINDY_PLUGIN_SERVER_URL_GLOBAL: ${{ secrets.CINDY_PLUGIN_SERVER_URL_GLOBAL }}
+          CINDY_PLUGIN_PLATFORM_URL_GLOBAL: ${{ secrets.CINDY_PLUGIN_PLATFORM_URL_GLOBAL }}
         run: |
           set -euo pipefail
-          : "${CINDY_PLUGIN_SERVER_URL_GLOBAL:?CINDY_PLUGIN_SERVER_URL_GLOBAL is not configured}"
+          : "${CINDY_PLUGIN_PLATFORM_URL_GLOBAL:?CINDY_PLUGIN_PLATFORM_URL_GLOBAL is not configured}"
 
           oidc_response="$(curl \
             --fail-with-body \
@@ -188,5 +197,5 @@ jobs:
             --header "Authorization: Bearer ${oidc_token}" \
             --header "Content-Type: application/octet-stream" \
             --data-binary "@$RUNNER_TEMP/plugin.cindy" \
-            "${CINDY_PLUGIN_SERVER_URL_GLOBAL%/}"
+            "${CINDY_PLUGIN_PLATFORM_URL_GLOBAL%/}"
           echo

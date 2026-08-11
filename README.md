@@ -26,8 +26,9 @@ This is the source for every official plugin (Ghost) in the
   (rows marked "targeted rollout" are still being staged and not yet
   installable for everyone).
 - **Want to build a plugin?** This repository accepts external contributions.
-  Once your PR merges to `main`, the plugin is published to the marketplace
-  automatically — usually live within minutes. Start at
+  Once your PR merges to `main`, the package is submitted automatically to the
+  CN and Global review queues. It becomes visible in a region only after that
+  region approves it. Start at
   [Submit your plugin](#submit-your-plugin).
 
 ## Plugins
@@ -79,14 +80,16 @@ The full path from idea to marketplace:
    add the `provisioning.json` entry; complete four-language locales
    (`zh-CN` / `en` / `ja` / `ko`); sign off every commit (`git commit -s`,
    [DCO](./DCO)). Details in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-5. **Review** — CI runs the localization / provisioning gates plus a packaging
-   dry-run; automated review enforces the full ruleset in
+5. **Review** — CI validates each manifest and the Server/Desktop delivery
+   limits within this repository, checks localization / provisioning,
+   and dry-runs the exact package; automated review enforces the full ruleset in
    [`.greptile/rules.md`](./.greptile/rules.md); a maintainer reviews against
    the same [review standards](#review-standards). Walk through the self-check
    list below before requesting review.
-6. **Ship** — after merge to `main`, the CN and Global publish workflows
-   release the plugin automatically. No manual publishing step; it typically
-   appears in the marketplace within minutes.
+6. **Submit and approve** — after merge to `main`, the CN and Global workflows
+   submit the real package through Plugin Platform. Each region reviews its own
+   pending release; only an approved release becomes available to compatible
+   clients. Rejection leaves the previous approved release in service.
 
 ## Review standards
 
@@ -131,6 +134,9 @@ experience risk, so review is strict by design. Four hard principles:
 - [ ] User-facing errors are actionable; no raw status codes or stack traces
 - [ ] Four-language locales complete; `node --test .tests/localization.test.mjs`
       passes
+- [ ] If `minCindyVersion` is added or raised, the packaged `.cindy` was
+      installed on that exact Cindy version and the result is recorded in the
+      PR; lowering or removing it requires maintainer review
 - [ ] `ghost.json.version` bumped; `provisioning.json` entry present with an
       audience decision stated in the PR
 - [ ] No credentials, real user data, `node_modules`, or unrelated generated
@@ -175,10 +181,10 @@ the catalog layer; self-rendered settings pages are being migrated independently
 to the same host-driven locale contract, while runtime error copy is still
 primarily Chinese-only.
 
-## Automated publishing
+## Automated submission and review
 
-In one sentence: **merging to `main` releases automatically to both regions —
-there is no manual publishing step.**
+In one sentence: **merging to `main` submits automatically to both regions;
+public availability still requires Plugin Platform approval in each region.**
 
 Two workflows publish, and both only from `main`:
 
@@ -187,25 +193,28 @@ Two workflows publish, and both only from `main`:
 - [`publish-cindy-plugins-global.yml`](./.github/workflows/publish-cindy-plugins-global.yml) —
   `Publish Cindy Plugins (Global)`
 
-Both are active and behave identically:
+Both are active and use the same submission flow:
 
-- A regular push to `main` publishes only the plugin directories changed in
-  that push. A push that touches no plugin directory publishes nothing.
-- Manually running a workflow from the Actions page publishes all current
-  plugins in full — for initial setup after a repository migration or an
-  explicit re-release.
-- Each publishes via GitHub Actions OIDC (audience `cindy-plugin`) to its own
-  endpoint, supplied by a repository secret. The two runs package, execute, and
-  report independently; a failure on one side does not affect the other's
-  workflow status. There is no development publishing workflow.
+- A regular push to `main` submits only the plugin directories changed in that
+  push. A push that touches no plugin directory submits nothing.
+- Manually running a workflow from the Actions page submits all current plugins
+  in full — for initial setup after a repository migration or an explicit
+  re-submission.
+- Each workflow uses GitHub Actions OIDC (audience `cindy-plugin`) to call its
+  protected Plugin Platform endpoint. Platform creates a pending release and
+  notifies reviewers; it does not bypass review by calling Plugin Server
+  directly.
+- The two regions package, submit, review, and report independently. Failure or
+  rejection in one region does not affect the other. There is no development
+  publishing workflow.
 
-Because both fire on the same push, one merge that changes a plugin produces two
-releases of it — one per region.
+After approval, compatible clients receive that release; clients below its
+`minCindyVersion` continue to receive the newest older compatible release, when
+one exists.
 
 When changing plugin content you must bump `ghost.json.version` in the same
-change. Publishing different content under the same version is rejected by the
-server with `RELEASE_VERSION_CONFLICT` and will not overwrite an existing
-release.
+change. The new `major.minor.patch` SemVer must be greater than the version on
+`main`; otherwise CI blocks the pull request before Server submission.
 
 ## Local development
 

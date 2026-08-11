@@ -50,6 +50,11 @@ After changing any plugin's `ghost.json` or `locales/`, you **must** run
 check before packaging, and incomplete four-language resources (`zh-CN` / `en` /
 `ja` / `ko`) fail the entire publish.
 
+CI also checks every `ghost.json` and validates the exact `.cindy` archive
+against the Server/Desktop delivery limits (including text lengths, declared
+files, safe paths, package sizes, and entry count). These checks live entirely
+in this repository, so contributors do not need another repository checkout.
+
 For plugins with a Node Worker (`163-mail`, `icloud-mail`, `qq-mail`),
 `node/worker.cjs` is an esbuild artifact — do not edit it by hand. After changing
 `src/`, rebuild in the plugin directory and commit the artifact along with the
@@ -76,24 +81,28 @@ do not edit the generated `dist/maker.js` by hand.
    `fix(qq-mail): validate the move result`. Available types: `feat`, `fix`,
    `refactor`, `perf`, `chore`, `docs`, `test`, `revert`, `build`, `ci`.
 3. **Any change to plugin content must bump `ghost.json`'s `version` in the same
-   pull request.** Publishing different content under the same version is rejected
-   by the server with `RELEASE_VERSION_CONFLICT` and will not overwrite an existing
-   release.
+   pull request.** The new `major.minor.patch` SemVer must be greater than the
+   version on `main`; otherwise CI blocks the pull request.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
+   If `minCindyVersion` is added or raised, also record a real packaged `.cindy`
+   install on that exact Cindy version. Lowering or removing the field expands
+   claimed compatibility and requires maintainer review.
 
 Every non-draft pull request is verified by the `Verify pull request`
-workflow: it runs the localization and provisioning gates, runs the `*.test.mjs`
-tests of every changed plugin (installing that plugin's dependencies first),
-and dry-runs the exact packaging step the publish pipeline uses. The actual
-upload still happens only after merge to `main`.
+workflow: it runs the Server/Desktop delivery contract, localization and
+provisioning gates, runs the `*.test.mjs` tests of every changed plugin
+(installing that plugin's dependencies first), and dry-runs the exact packaging
+step the publish pipeline uses. The actual upload still happens only after
+merge to `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
 6. Wait for review; do not push directly to `main`. After a merge to `main`, the
-   publish workflow syncs the changed plugins to the Cindy marketplace
-   automatically.
+   regional workflows submit changed packages to Plugin Platform. CN and Global
+   review independently; a package becomes visible in a region only after that
+   region approves it.
 7. Paired bilingual documents move together: a pull request that changes
    `README.md`, `CONTRIBUTING.md`, or any other document with a `.zh-CN`
    counterpart must update both files in the same pull request, and vice

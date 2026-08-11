@@ -39,7 +39,17 @@ review contract is .greptile/rules.md. 质量与安全项来自 README 审查标
       and settings copy stay consistent with it.
       改动过的 tool `description` 仍与实际行为一致；SKILL.md 与设置页文案同步。
 - [ ] Bumped `ghost.json` `version` for every plugin whose packaged content
-      changed. 每个打包内容发生变化的插件都已 bump `ghost.json` 的 `version`。
+      changed; the new SemVer is greater than the version on `main`.
+      每个打包内容发生变化的插件都已 bump `ghost.json` 的 `version`，且新 SemVer
+      大于 `main` 上的当前版本。
+- [ ] If `minCindyVersion` was added or raised, installed the packaged `.cindy`
+      on that exact Cindy version and recorded the result below. Lowering or
+      removing it is explicitly called out for maintainer review.
+      如新增或提高 `minCindyVersion`，已在该精确 Cindy 版本安装真实包并在下方记录；
+      如降低或删除，已明确标注交维护者人工 review。
+- [ ] For a new plugin, linked the acknowledged proposal issue and recorded the
+      `provisioning.json` audience decision below.
+      新插件已关联维护者确认过的提案 issue，并在下方记录 audience 决策。
 - [ ] Ran `node --test .tests/localization.test.mjs` if any `ghost.json` or
       `locales/` changed. 改动过 `ghost.json` 或 `locales/` 的已跑本地化检查。
 - [ ] Rebuilt `node/worker.cjs` via `npm ci && npm run build` and committed the
@@ -60,4 +70,21 @@ Agent behaviour — that description is the manual the Agent reads.
 
 ## Verification / 验证
 
-<!-- Commands actually run and their results. / 实际执行的命令和结果。 -->
+<!--
+Commands actually run and their results. If minCindyVersion was added/raised,
+include the exact Cindy version, packaged .cindy install result, and core tools
+verified. / 实际执行的命令和结果；如新增/提高 minCindyVersion，写明精确 Cindy
+版本、真实 .cindy 安装结果和已验证的核心工具。
+-->
+
+## Sensitive changes / 敏感变更
+
+<!--
+Explicitly list any dependency/vendor/binary resource, OAuth/API scope,
+credential/auth boundary, network/secret/slot/tool/Node capability,
+provisioning audience, minCindyVersion reduction/removal, or publishing/review
+policy change. Write "None / 无" only after checking the complete diff.
+明确列出依赖/vendor/二进制资源、OAuth/API scope、凭证/鉴权边界、
+network/secret/slot/tool/Node 能力、audience、minCindyVersion 降低/删除、发布或
+审查策略变更。完整检查 diff 后无此类改动才写 "None / 无"。
+-->

@@ -2,8 +2,9 @@
 
 > 本文件供自动 review（Greptile 等）与人工 reviewer 共同使用。安全红线类规则以
 > `.greptile/config.json` 的结构化条目为准（带 severity），本文件补充设计标准、
-> 流程纪律与判定口径。合入 `main` 的插件会自动发布给全体用户——审查从严，
-> 宁可误报交人工裁决，不可漏报放行。
+> 流程纪律与判定口径。合入 `main` 后会自动向 CN / Global 的 Plugin Platform
+> 提交真实包，区域审核通过后才对用户可见——审查从严，宁可误报交人工裁决，
+> 不可漏报放行。
 
 ## 设计契约
 
@@ -60,14 +61,41 @@
 的行为字段）有变更但同目录 `ghost.json` 的 `version` 未 bump 时提醒（仅注释/
 格式改动除外）。服务端对同版本不同内容返回 `RELEASE_VERSION_CONFLICT` 拒绝发布。
 
-### 同版本元信息更新契约
+### 版本必须递增
 
-version 不变时，`ghost.json` 仅允许修改 name/description/author/icon 四个纯展示
-字段，其余字段（whenToUse/entry/launch/slots/tools/agent/node/network/subscribe/
-panel/settingsHtml/command/cindy/preview）或任何包内运行文件变化都必须 bump
-version——这是防止同版本静默改变模型行为或权限的硬门禁。注意：该同版本豁免
-依赖服务端尚未上线的能力；在服务端支持放行之前，任何插件内容变更（含这四个
-展示字段）仍必须 bump version。
+本仓发布流水线按完整包上传。为避免 Server 对同版本不同 SHA 返回
+`RELEASE_VERSION_CONFLICT`，插件目录下任何被打进 `.cindy` 的内容发生变化时都必须
+bump version，包括 name/description/author/icon 等展示字段；新版本必须使用
+`major.minor.patch` SemVer，且严格大于 `main` 上的当前版本。新插件只校验 SemVer 格式，
+不做大小比较。不要尝试在本仓复刻 Server 的元数据特例；CI 对完整包执行统一版本门禁。
+
+### Server 与客户端交付契约
+
+CI 必须在本仓校验全部 `ghost.json`，不得 checkout Cindy 或私有 Server 仓库；同时对
+最终 `.cindy` 包执行 Server 与 Desktop 约束的交集：压缩/解压大小、条目数、
+manifest/icon/locale/Skill/Manual 单文件上限、安全路径、大小写路径冲突、客户端保留
+文件、声明文件存在性、四语言结构和文本长度。尤其是插件与 locale 的 description
+不得超过 300 字符。修改或移除这些门禁属于发布链路敏感变更，按 P1 转人工 review。
+
+官方仓提交的是 Server public release：禁止 `oidc-token` secret；携带 Skill bundle
+的 public 插件仅允许 Server 现有豁免 id（`ios-simulator` / `taptap-maker` /
+`x-manager`）；携带 Manual 的插件必须声明 `minCindyVersion`。不要用 Greptile 对
+manifest schema 的猜测替代 CI 的确定性校验结果。
+
+### 最低客户端版本
+
+`minCindyVersion` 表示这个 release 能被安装和运行的最低 Cindy 版本。新增或提高
+该字段时，PR 描述必须记录真实打包 `.cindy` 在声明的精确版本上安装成功，并列出实际
+验证的核心功能；没有证据按 P1 要求补齐。降低或删除该字段会扩大支持范围，静态 CI
+无法证明旧客户端可用，必须转维护者人工 review。未声明字段的旧插件继续按现有兼容
+语义处理，不要求为了补字段而批量修改。
+
+### 发布与审核链路
+
+合入后 Workflow 只能通过 CN / Global 各自的受保护 Plugin Platform endpoint 提交，
+不得绕过 Platform 直接调用 Plugin Server。Platform 负责创建 pending release、通知
+reviewer 并记录批准/拒绝；只有批准的 release 才能被兼容客户端发现。两个区域独立，
+一边失败或拒绝不得阻塞或替换另一边已有的批准版本。
 
 ## 新插件准入
 
@@ -85,7 +113,8 @@ PR 新增插件目录（出现新的 `ghost.json`）时，必须通读仓内现�
   协议的不同服务商（163/icloud/qq/yahoo 邮箱）不算重复。
 
 此项为 review 提示，不直接判 fail——重叠是否合理由人工 reviewer 拍板，但重叠
-证据必须完整摆出。
+证据必须完整摆出。新增插件本身属于产品准入决策，即使代码无问题也不得自动 approve，
+必须由维护者确认提案、定位与 audience。
 
 ### 新插件必备项
 
@@ -109,6 +138,8 @@ PR 中新增/替换的图片（icon/截图等）：自动 review 无法读取像
 可见信息——文件位于正确 assets 目录、体积合理（icon 不应为数 MB）、文件名无
 不雅词汇、`ghost.json` 的 icon 路径引用有效。图片内容合规性（血腥/暴力/色情）
 由人工 reviewer 在 GitHub 预览中目检，自动 review 不对图片内容本身下结论。
+因此新增或替换图片、二进制文件、预编译资源时不得自动 approve，必须显式转人工
+检查真实内容；仅修改 `ghost.json.icon` 文本路径不等同于替换资源。
 
 ### summary 与置信度表述
 

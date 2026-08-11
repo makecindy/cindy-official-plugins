@@ -24,8 +24,9 @@
 - **正在用 Cindy？** 不需要本仓库——在 Cindy 客户端打开「插件」页，下方已
   全量开放的插件都可以一键安装（标注「定向灰度」的仍在分批放量，暂未对所有
   人开放）。
-- **想给 Cindy 写插件？** 本仓库接受外部贡献：PR 合入 `main` 后自动发布上架，
-  通常几分钟内出现在插件市场。从[提交你的插件](#提交你的插件)开始。
+- **想给 Cindy 写插件？** 本仓库接受外部贡献：PR 合入 `main` 后，包会自动提交到
+  CN / Global 两区审核队列；只有对应区域审核通过后才会在客户端可见。从
+  [提交你的插件](#提交你的插件)开始。
 
 ## 插件列表
 
@@ -71,11 +72,14 @@
    `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）
    齐全；每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
    [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)。
-5. **审查**——CI 自动跑本地化 / provisioning 门禁与打包 dry-run；自动 review
-   按 [`.greptile/rules.md`](./.greptile/rules.md) 的完整规则执行；维护者按
-   同一套[审查标准](#审查标准)人工审查。请求 review 前先过一遍下方自查清单。
-6. **上架**——合入 `main` 后 CN / Global 双区发布 Workflow 自动发布，无任何
-   人工上架环节，通常几分钟内出现在插件市场。
+5. **审查**——CI 在本仓校验 manifest、Server / Desktop 交付限制、本地化 /
+   provisioning 门禁，并对真实包做 dry-run；
+   自动 review 按
+   [`.greptile/rules.md`](./.greptile/rules.md) 的完整规则执行；维护者按同一套
+   [审查标准](#审查标准)人工审查。请求 review 前先过一遍下方自查清单。
+6. **提交并上架**——合入 `main` 后 CN / Global Workflow 自动通过 Plugin Platform
+   提交真实包。两区分别审核；只有审核通过的 release 才会下发给兼容客户端，拒绝
+   不会影响此前已通过的版本。
 
 ## 审查标准
 
@@ -108,6 +112,8 @@
 - [ ] 每个 tool 的 `description` 与实际行为一致——能力、限制、返回值、副作用
 - [ ] 面向用户的报错可行动；无裸状态码、无英文堆栈
 - [ ] 四语言 locale 齐全；`node --test .tests/localization.test.mjs` 通过
+- [ ] 新增或提高了 `minCindyVersion` 时，已在该精确 Cindy 版本安装真实 `.cindy`
+      包并在 PR 记录结果；降低或删除最低版本需维护者人工 review
 - [ ] `ghost.json.version` 已 bump；`provisioning.json` 有对应条目且 PR 描述里
       写明 audience 决策
 - [ ] diff 中无凭证、真实用户数据、`node_modules` 或无关生成文件；fixture 用
@@ -146,9 +152,10 @@ cindy-art/
 [`docs/localization.zh-CN.md`](./docs/localization.zh-CN.md)。共享资源覆盖清单层；
 自绘设置页正独立迁移到同一套宿主语言契约，运行时报错文案目前仍以中文单语为主。
 
-## 自动发布
+## 自动提交与审核
 
-一句话：**合入 `main` 即自动双区发布，没有任何人工上架环节。**
+一句话：**合入 `main` 会自动提交到双区；对用户可见仍需每个区域的 Plugin Platform
+分别审核通过。**
 
 共有两个发布 Workflow，都只允许从 `main` 发布：
 
@@ -157,19 +164,21 @@ cindy-art/
 - [`publish-cindy-plugins-global.yml`](./.github/workflows/publish-cindy-plugins-global.yml) ——
   `Publish Cindy Plugins (Global)`
 
-两者均已启用，行为完全一致：
+两者均已启用，使用相同的提交链路：
 
-- `main` 的普通 push 只发布本次发生变化的插件目录；没有触及任何插件目录的 push 不会
-  发布任何东西。
-- Actions 页面手动运行会全量发布当前全部插件，供仓库迁移后首次建档或显式重发使用。
-- 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）发布到由仓库 Secret 提供的
-  端点。两次运行独立打包、独立执行、独立汇报，一边失败不影响另一边的 Workflow 状态。
-  仓库不提供 Dev 发布 Workflow。
+- `main` 的普通 push 只提交本次发生变化的插件目录；没有触及插件目录的 push 不提交。
+- Actions 页面手动运行会全量提交当前全部插件，供仓库迁移后首次建档或显式重提使用。
+- 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）访问受保护的 Plugin Platform
+  端点。Platform 创建待审核 release 并通知 reviewer，不允许 Workflow 绕过审核直连
+  Plugin Server。
+- 两区独立打包、提交、审核和汇报；一边失败或拒绝不影响另一边。仓库不提供 Dev 发布
+  Workflow。
 
-由于两者由同一次 push 触发，一次改动插件的合并会产生两个 Release —— 每个区域一个。
+审核通过后，兼容客户端会收到该 release；低于 `minCindyVersion` 的客户端会继续收到
+已有的最新兼容旧 release（如果存在）。
 
-修改插件内容时必须同步更新 `ghost.json.version`。同一版本内容不同会被服务端以
-`RELEASE_VERSION_CONFLICT` 拒绝，不会覆盖既有 Release。
+修改插件内容时必须同步更新 `ghost.json.version`。新的 `major.minor.patch` SemVer 必须
+大于 `main` 上的当前版本，否则 CI 会在提交 Server 前阻止合并。
 
 ## 本地开发
 

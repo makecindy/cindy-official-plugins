@@ -9,11 +9,52 @@
   "triggerOnDrafts": false,
   "statusCheck": true,
   "statusCommentsEnabled": true,
+  "autoApprove": {
+    "enabled": true,
+    "riskCeiling": "medium",
+    "filters": {
+      "excludePaths": [
+        ".greptile/**",
+        "AGENTS.md",
+        ".tests/contracts/**",
+        ".tests/plugin-contract.test.mjs",
+        ".tests/localization.test.mjs",
+        ".tests/provisioning.test.mjs",
+        ".tests/publish-workflows.test.mjs",
+        ".github/workflows/**",
+        ".github/scripts/**",
+        "provisioning.json",
+        "**/package.json",
+        "**/package-lock.json",
+        "**/vendor/**",
+        "**/dist/**",
+        "**/node/worker.cjs",
+        "**/THIRD-PARTY-LICENSES.txt",
+        "**/assets/**",
+        "**/*.png",
+        "**/*.jpg",
+        "**/*.jpeg",
+        "**/*.gif",
+        "**/*.webp",
+        "**/*.svg",
+        "**/*.ico",
+        "**/*.wasm",
+        "**/*.node",
+        "**/*.dll",
+        "**/*.dylib",
+        "**/*.so",
+        "**/*.exe",
+        "**/*.zip",
+        "**/*.cindy",
+        "**/*.pdf"
+      ]
+    }
+  },
   "includeIssuesTable": true,
   "includeConfidenceScore": true,
   "shouldUpdateDescription": false,
   "ignorePatterns": "**/.DS_Store\n**/THIRD-PARTY-LICENSES.txt",
-  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动发布给全体用户，安全与体验风险由所有用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。评论语言跟随 PR 作者的主语言：根据 PR 描述、commit message 与作者历史评论判断——中文作者用简体中文回复，英文作者用英文回复，其他语言作者用英文；无法判断时用英文。规则条文本身是中文不代表必须用中文回复。",
+  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动提交到 CN/Global 的 Plugin Platform 审核队列，批准后才对对应区域用户可见；安全与体验风险由真实用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。以下变更属于敏感审查路由：新增插件目录；删除/重命名已有插件目录或修改已发布 id；新增、升级或删除第三方依赖及 vendor/dist/worker 生成物；新增/替换无法由文本 review 验证内容的图片、二进制文件或可执行资源；扩大 OAuth/API scope；修改凭证注入、认证或授权边界；新增 network.hosts、secret、slot、tool、Node 或子进程能力；降低或删除 minCindyVersion；放宽 provisioning audience；修改发布 workflow、OIDC、权限或 secrets；修改 .greptile/ 或 AGENTS.md 审查策略。仅修改版本号或 name/description/author/icon 路径等纯展示文本元数据不属于敏感变更。命中敏感审查路由时必须将 PR 风险标为 high 或 critical，使 riskCeiling 阻止自动 approve，并在 summary 首行标注『敏感变更，需要维护者人工 review』；审查路由本身不是实现缺陷，如果没有发现真实代码问题，不得仅因需要人工 review 而生成 P1/行级评论、降低 confidence score 或使 status check 失败。评论语言跟随 PR 作者的主语言：根据 PR 描述、commit message 与作者历史评论判断——中文作者用简体中文回复，英文作者用英文回复，其他语言作者用英文；无法判断时用英文。规则条文本身是中文不代表必须用中文回复。",
   "rules": [
     {
       "id": "no-hardcoded-secrets",
@@ -65,6 +106,16 @@
         ".github/**"
       ],
       "rule": ".github/workflows 与 .github/scripts 变更涉及 OIDC 发布、环境 URL、secrets、打包脚本时按高危变更审查：permissions 最小化、不可注入未审查的代码路径、发布目标端点不得被指向仓库 secrets 之外的来源。"
+    },
+    {
+      "id": "server-public-release-policy",
+      "severity": "high",
+      "rule": "官方仓发布的是 Server public release，必须符合其公开发布边界：network.secrets[].source 禁止 oidc-token；携带 skill.items 的 public 插件只允许 Server 现有豁免 id（ios-simulator、taptap-maker、x-manager）；携带 manual 的插件必须声明 minCindyVersion。CI 在本仓执行 manifest、包结构与这些准入检查，不得 checkout Cindy 或私有 Server 仓库；review 中发现绕过、弱化或移除对应门禁必须按 P1 报。"
+    },
+    {
+      "id": "minimum-client-version-evidence",
+      "severity": "high",
+      "rule": "新增或提高 minCindyVersion 时，PR Verification 必须记录真实打包 .cindy 在声明的精确最低 Cindy 版本上安装成功，并列出实际验证的核心功能；缺失证据按 P1 要求补齐。降低或删除 minCindyVersion 会扩大支持范围，必须转维护者人工 review，不能只凭静态 CI 放行。"
     }
   ]
 }
