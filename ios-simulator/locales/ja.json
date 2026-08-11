@@ -1,0 +1,5 @@
+{
+  "name": "iOS シミュレータ",
+  "description": "Cindy Host が管理する内蔵 iOS シミュレータのワークフローと手動入口を追加します。WDA、Native H.264、Native HID、ライフサイクル、復旧、フォールバックは引き続き Host が管理します。",
+  "whenToUse": "外部の Simulator.app を開かず、Cindy 内で iOS App をビルド、起動、確認、操作したいときに使用します。"
+}

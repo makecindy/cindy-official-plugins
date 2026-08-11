@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "id": "ios-simulator",
+  "name": "iOS Simulator",
+  "description": "Adds the workflow and manual entry for Cindy's Host-owned embedded iOS Simulator. WDA, Native H.264, Native HID, lifecycle, recovery, and fallback remain managed by Cindy Host.",
+  "whenToUse": "Use when the user wants to build, launch, inspect, or interact with an iOS app in Cindy's embedded simulator rather than opening the external Simulator.app.",
+  "version": "1.0.1",
+  "minCindyVersion": "0.1.39",
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "launch": "on-demand",
+  "slots": [
+    "skill",
+    "ios-simulator"
+  ],
+  "skill": {
+    "items": [
+      {
+        "dir": "skills/cindy-ios-simulator",
+        "name": "cindy-ios-simulator",
+        "description": "Use Cindy's Host-owned embedded iOS Simulator for app build, launch, inspection, and interaction without opening the external Simulator.app."
+      }
+    ]
+  },
+  "locales": {
+    "zh-CN": "locales/zh-CN.json",
+    "en": "locales/en.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  }
+}
