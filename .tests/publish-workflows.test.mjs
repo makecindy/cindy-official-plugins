@@ -18,10 +18,18 @@ test('CN and Global plugin publishers are operationally independent', () => {
   assert.match(cnWorkflow, /group: cindy-plugin-publish-cn-prod-/);
   assert.match(globalWorkflow, /group: cindy-plugin-publish-global-prod-/);
 
-  assert.match(cnWorkflow, /CINDY_PLUGIN_SERVER_URL_CN/);
-  assert.doesNotMatch(cnWorkflow, /CINDY_PLUGIN_SERVER_URL_GLOBAL/);
-  assert.match(globalWorkflow, /CINDY_PLUGIN_SERVER_URL_GLOBAL/);
-  assert.doesNotMatch(globalWorkflow, /CINDY_PLUGIN_SERVER_URL_CN/);
+  assert.match(cnWorkflow, /secrets\.CINDY_PLUGIN_PLATFORM_URL_CN/);
+  assert.doesNotMatch(cnWorkflow, /CINDY_PLUGIN_PLATFORM_URL_GLOBAL/);
+  assert.match(globalWorkflow, /secrets\.CINDY_PLUGIN_PLATFORM_URL_GLOBAL/);
+  assert.doesNotMatch(globalWorkflow, /CINDY_PLUGIN_PLATFORM_URL_CN/);
+});
+
+test('both production publishers route through protected Platform endpoints', () => {
+  for (const workflow of [cnWorkflow, globalWorkflow]) {
+    assert.doesNotMatch(workflow, /CINDY_PLUGIN_SERVER_URL_/);
+    assert.doesNotMatch(workflow, /api\/publisher\/releases/);
+    assert.doesNotMatch(workflow, /https:\/\/(?:plugin|platform)\./);
+  }
 });
 
 test('both regional publishers support main pushes and full manual republish', () => {
@@ -33,6 +41,7 @@ test('both regional publishers support main pushes and full manual republish', (
     assert.match(workflow, /Publishing all Cindy plugins:/);
     assert.match(workflow, /id-token: write/);
     assert.match(workflow, /audience=cindy-plugin/);
+    assert.match(workflow, /max-parallel: 2/);
   }
 });
 
