@@ -86,6 +86,7 @@ function createHarness(options = {}) {
     JSON,
     String,
     Error,
+    URL,
   });
   assert.equal(typeof handler, 'function');
 
@@ -93,14 +94,20 @@ function createHarness(options = {}) {
     networkCalls,
     cindyRequests,
     toolResults,
-    async search(args = {}) {
+    async tool(tool, args = {}) {
       await handler({
         type: 'tool-call',
-        tool: 'search_web',
+        tool,
         callId: 'call-1',
-        args: { query: 'Cindy', ...args },
+        args,
       });
       return toolResults.at(-1);
+    },
+    async search(args = {}) {
+      return this.tool('search_web', { query: 'Cindy', ...args });
+    },
+    async fetchPage(args = {}) {
+      return this.tool('fetch_page', { url: 'https://example.test/article', ...args });
     },
   };
 }
@@ -183,20 +190,237 @@ function createSettingsHarness(options = {}) {
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.3.2');
+  assert.equal(manifest.version, '1.4.0');
   assert.equal(manifest.minCindyVersion, '0.1.37');
   assert.deepEqual(manifest.cindy, { search: ['web'] });
   assert.ok(manifest.slots.includes('cindy'));
   assert.deepEqual(manifest.setup, { requires: [] });
-  const provider = manifest.tools[0].parameters.properties.provider;
+  const searchTool = manifest.tools.find((tool) => tool.name === 'search_web');
+  const fetchTool = manifest.tools.find((tool) => tool.name === 'fetch_page');
+  assert.ok(searchTool);
+  assert.ok(fetchTool);
+  const provider = searchTool.parameters.properties.provider;
   assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily']);
   assert.equal(provider.enum.includes('auto'), false);
-  const query = manifest.tools[0].parameters.properties.query;
+  const query = searchTool.parameters.properties.query;
   assert.equal(query.maxLength, 2000);
-  assert.match(manifest.tools[0].description, /2000/);
+  assert.match(searchTool.description, /2000/);
   assert.match(query.description, /2000/);
+  assert.equal(fetchTool.parameters.properties.url.maxLength, 2048);
+  assert.deepEqual(fetchTool.parameters.properties.extract_depth.enum, ['basic', 'advanced']);
+  assert.match(fetchTool.description, /50000/);
+  assert.match(fetchTool.description, /不可信/);
+  assert.match(fetchTool.description, /响应过大/);
   for (const locale of locales) {
     assert.match(locale.tools.search_web.description, /2000/);
+    assert.match(locale.tools.fetch_page.description, /50000/);
+  }
+});
+
+test('fetch_page calls Tavily Extract without handling credentials in the sandbox', async () => {
+  const harness = createHarness({
+    networkResult(request) {
+      assert.equal(request.url, 'https://api.tavily.com/extract');
+      assert.equal(request.method, 'POST');
+      assert.equal(request.headers['Content-Type'], 'application/json');
+      assert.equal(request.headers.Accept, 'application/json');
+      assert.equal(request.timeoutMs, 55000);
+      assert.equal(request.callId, 'call-1');
+      assert.equal('Authorization' in request.headers, false);
+      assert.deepEqual(JSON.parse(request.body), {
+        urls: 'https://example.test/article',
+        extract_depth: 'basic',
+        include_images: false,
+        include_favicon: false,
+        format: 'markdown',
+        timeout: 20,
+      });
+      return {
+        ok: true,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          results: [{ url: 'https://example.test/article', raw_content: '# Article\n\nBody' }],
+          failed_results: [],
+        }),
+      };
+    },
+  });
+
+  const result = await harness.fetchPage();
+
+  assert.equal(harness.networkCalls.length, 1);
+  assert.equal(harness.cindyRequests.length, 0);
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result)), {
+    provider: 'tavily',
+    url: 'https://example.test/article',
+    content: '# Article\n\nBody',
+    format: 'markdown',
+    extract_depth: 'basic',
+    content_chars: 15,
+    truncated: false,
+    content_is_untrusted: true,
+  });
+});
+
+test('fetch_page supports advanced extraction and marks content truncation explicitly', async () => {
+  const content = 'x'.repeat(50001);
+  const harness = createHarness({
+    networkResult(request) {
+      const body = JSON.parse(request.body);
+      assert.equal(body.extract_depth, 'advanced');
+      assert.equal(body.timeout, 45);
+      return {
+        ok: true,
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          results: [{ url: 'https://example.test/dynamic', raw_content: content }],
+          failed_results: [],
+        }),
+      };
+    },
+  });
+
+  const result = await harness.fetchPage({
+    url: 'https://example.test/dynamic',
+    extract_depth: 'advanced',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.extract_depth, 'advanced');
+  assert.equal(result.result.content.length, 50000);
+  assert.equal(result.result.content_chars, 50001);
+  assert.equal(result.result.truncated, true);
+});
+
+test('fetch_page rejects invalid URLs before any network request', async (t) => {
+  const invalidUrls = [
+    '',
+    '/relative',
+    'file:///etc/passwd',
+    'ftp://example.test/file',
+    'https://user:pass@example.test/',
+    'https:\\example.test\\article',
+    ' https://example.test/article',
+    'http://localhost/admin',
+    'http://127.0.0.1/admin',
+    'http://10.0.0.1/admin',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://192.168.1.1/admin',
+    'http://[::1]/admin',
+    'http://[fd00::1]/admin',
+    'http://[::ffff:127.0.0.1]/admin',
+    `https://example.test/${'x'.repeat(2048)}`,
+  ];
+  for (const url of invalidUrls) {
+    await t.test(JSON.stringify(url).slice(0, 80), async () => {
+      const harness = createHarness();
+      const result = await harness.fetchPage({ url });
+      assert.equal(result.ok, false);
+      assert.match(result.message, /HTTP\(S\)/);
+      assert.equal(harness.networkCalls.length, 0);
+    });
+  }
+});
+
+test('fetch_page returns actionable errors without exposing upstream response bodies', async (t) => {
+  const cases = [
+    [401, /API Key/],
+    [403, /权限|账户/],
+    [429, /频繁|限流/],
+    [432, /额度|账户/],
+    [433, /额度|账户/],
+    [500, /暂时不可用/],
+  ];
+  for (const [status, expected] of cases) {
+    await t.test(String(status), async () => {
+      const harness = createHarness({
+        networkResult() {
+          return {
+            ok: true,
+            status,
+            headers: {},
+            body: 'sensitive upstream response',
+          };
+        },
+      });
+      const result = await harness.fetchPage();
+      assert.equal(result.ok, false);
+      assert.match(result.message, expected);
+      assert.doesNotMatch(result.message, /sensitive/);
+    });
+  }
+});
+
+test('fetch_page fails closed on transport and malformed provider responses', async (t) => {
+  const cases = [
+    {
+      name: 'missing key',
+      response: { ok: false, message: 'secret not configured: sensitive-name' },
+      expected: /API Key 未配置/,
+    },
+    {
+      name: 'host truncation',
+      response: { ok: true, status: 200, headers: {}, body: '{', truncated: true },
+      expected: /数据过大/,
+    },
+    {
+      name: 'oversized response',
+      response: { ok: true, status: 200, headers: {}, body: 'x'.repeat(1000001) },
+      expected: /数据过大/,
+    },
+    {
+      name: 'invalid json',
+      response: { ok: true, status: 200, headers: {}, body: '<html>upstream</html>' },
+      expected: /无法解析/,
+    },
+    {
+      name: 'failed result',
+      response: {
+        ok: true,
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ results: [], failed_results: [{ url: 'https://example.test/article' }] }),
+      },
+      expected: /无法读取/,
+    },
+    {
+      name: 'unsafe result url',
+      response: {
+        ok: true,
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          results: [{ url: 'file:///etc/passwd', raw_content: 'bad' }],
+          failed_results: [],
+        }),
+      },
+      expected: /格式异常/,
+    },
+    {
+      name: 'empty content',
+      response: {
+        ok: true,
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          results: [{ url: 'https://example.test/article', raw_content: '   ' }],
+          failed_results: [],
+        }),
+      },
+      expected: /没有可读取/,
+    },
+  ];
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const harness = createHarness({ networkResult: () => testCase.response });
+      const result = await harness.fetchPage();
+      assert.equal(result.ok, false);
+      assert.match(result.message, testCase.expected);
+      assert.doesNotMatch(result.message, /sensitive-name|upstream/);
+    });
   }
 });
 
