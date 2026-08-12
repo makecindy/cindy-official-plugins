@@ -40,7 +40,9 @@
       }
     },
     "taptap-maker": {
-      "audience": "all"
+      "audience": {
+        "emails": []
+      }
     },
     "cindy-notion": {
       "audience": "all"

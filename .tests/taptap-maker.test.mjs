@@ -161,7 +161,7 @@ function loadAccountInternals() {
   return context.__accountInternals;
 }
 
-test('manifest、默认播种和官方 Runtime 版本保持一致', () => {
+test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
   assert.equal(manifest.version, '2.1.10');
@@ -201,7 +201,7 @@ test('manifest、默认播种和官方 Runtime 版本保持一致', () => {
   assert.deepEqual(manifest.node.entries, ['node/account.cjs', 'node/maker-child.cjs']);
   assert.equal(manifest.node.childSpawn, true);
   assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn']);
-  assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: 'all' });
+  assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
   assert.equal(vendorPackage.version, '0.0.28');
 });
