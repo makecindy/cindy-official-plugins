@@ -152,6 +152,8 @@ function parsePublicPageUrl(value) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     if (parsed.username || parsed.password || !parsed.hostname) return null;
     if (isClearlyNonPublicHostname(parsed.hostname)) return null;
+    // Fragments are browser-local and may contain OAuth tokens; never disclose them to Tavily.
+    parsed.hash = '';
     return parsed.href;
   } catch (e) {
     return null;

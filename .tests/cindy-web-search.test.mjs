@@ -337,6 +337,33 @@ test('fetch_page accepts uppercase characters in valid public URLs', async (t) =
   }
 });
 
+test('fetch_page strips browser-local URL fragments before contacting Tavily', async () => {
+  const harness = createHarness({
+    networkResult(request) {
+      const body = JSON.parse(request.body);
+      assert.equal(body.urls, 'https://example.test/callback?Token=ABC');
+      assert.doesNotMatch(request.body, /access_token|SECRET/);
+      return {
+        ok: true,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          results: [{ url: body.urls, raw_content: '# Callback' }],
+          failed_results: [],
+        }),
+      };
+    },
+  });
+
+  const result = await harness.fetchPage({
+    url: 'https://example.test/callback?Token=ABC#access_token=SECRET',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.url, 'https://example.test/callback?Token=ABC');
+  assert.equal(harness.networkCalls.length, 1);
+});
+
 test('fetch_page rejects invalid URLs before any network request', async (t) => {
   const invalidUrls = [
     '',
