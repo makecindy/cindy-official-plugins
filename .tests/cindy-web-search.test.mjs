@@ -10,6 +10,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'ghost.json'), 
 const source = fs.readFileSync(path.join(pluginDir, 'main.js'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(pluginDir, 'settings.js'), 'utf8');
 const settingsHtml = fs.readFileSync(path.join(pluginDir, 'settings.html'), 'utf8');
+const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+const readmeZh = fs.readFileSync(path.join(root, 'README.zh-CN.md'), 'utf8');
 const locales = ['zh-CN', 'en', 'ja', 'ko'].map((locale) =>
   JSON.parse(fs.readFileSync(path.join(pluginDir, 'locales', `${locale}.json`), 'utf8')),
 );
@@ -107,7 +109,11 @@ function createHarness(options = {}) {
       return this.tool('search_web', { query: 'Cindy', ...args });
     },
     async fetchPage(args = {}) {
-      return this.tool('fetch_page', { url: 'https://example.test/article', ...args });
+      return this.tool('fetch_page', {
+        url: 'https://example.test/article',
+        confirm_public_url: true,
+        ...args,
+      });
     },
   };
 }
@@ -207,26 +213,36 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.match(searchTool.description, /2000/);
   assert.match(query.description, /2000/);
   assert.equal(fetchTool.parameters.properties.url.maxLength, 2048);
+  assert.equal(fetchTool.parameters.properties.confirm_public_url.type, 'boolean');
+  assert.deepEqual(fetchTool.parameters.required, ['url', 'confirm_public_url']);
   assert.deepEqual(fetchTool.parameters.properties.extract_depth.enum, ['basic', 'advanced']);
   assert.match(fetchTool.description, /50000/);
   assert.match(fetchTool.description, /不可信/);
   assert.match(fetchTool.description, /响应过大/);
   assert.match(fetchTool.description, /浏览器登录/);
   assert.match(fetchTool.description, /执行页面脚本/);
+  assert.match(fetchTool.description, /confirm_public_url=true/);
   assert.match(manifest.whenToUse, /任意公开 HTTP\(S\) 页面/);
   assert.match(manifest.whenToUse, /包括但不限于搜索结果页/);
+  assert.match(manifest.description, /用户明确确认/);
+  assert.match(manifest.whenToUse, /用户明确确认/);
   const localeRoutingContracts = [
-    [/任意公开 HTTP\(S\) 页面/, /包括但不限于搜索结果页/],
-    [/any public HTTP\(S\) page/, /including but not limited to search results/],
-    [/任意の公開 HTTP\(S\) ページ/, /検索結果ページを含む/],
-    [/모든 공개 HTTP\(S\) 페이지/, /검색 결과 페이지를 포함한/],
+    [/任意公开 HTTP\(S\) 页面/, /包括但不限于搜索结果页/, /明确确认/],
+    [/any public HTTP\(S\) page/, /including but not limited to search results/, /explicit.*confirm/i],
+    [/任意の公開 HTTP\(S\) ページ/, /検索結果ページを含む/, /明示的.*確認/],
+    [/모든 공개 HTTP\(S\) 페이지/, /검색 결과 페이지를 포함한/, /명시적.*확인/],
   ];
   for (const [index, locale] of locales.entries()) {
     assert.match(locale.tools.search_web.description, /2000/);
     assert.match(locale.tools.fetch_page.description, /50000/);
+    assert.match(locale.tools.fetch_page.description, /confirm_public_url=true/);
     assert.match(locale.whenToUse, localeRoutingContracts[index][0]);
     assert.match(locale.whenToUse, localeRoutingContracts[index][1]);
+    assert.match(locale.description, localeRoutingContracts[index][2]);
+    assert.match(locale.whenToUse, localeRoutingContracts[index][2]);
   }
+  assert.match(readme, /explicitly confirmed public HTTP\(S\) page/);
+  assert.match(readmeZh, /用户明确确认的任意公开 HTTP\(S\) 网页正文/);
 });
 
 test('fetch_page calls Tavily Extract without handling credentials in the sandbox', async () => {
@@ -310,7 +326,7 @@ test('fetch_page supports advanced extraction and marks content truncation expli
 test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
   const cases = [
     ['https://example.test/Article', 'https://example.test/Article'],
-    ['https://example.test/?Token=ABC', 'https://example.test/'],
+    ['https://example.test/?Token=ABC', 'https://example.test/?Token=ABC'],
     ['HTTPS://EXAMPLE.TEST/Article', 'https://example.test/Article'],
   ];
   for (const [url, normalizedUrl] of cases) {
@@ -337,12 +353,11 @@ test('fetch_page accepts uppercase characters in valid public URLs', async (t) =
   }
 });
 
-test('fetch_page strips query parameters and fragments before contacting Tavily', async () => {
+test('fetch_page preserves a search result query and strips its browser-only fragment', async () => {
   const harness = createHarness({
     networkResult(request) {
       const body = JSON.parse(request.body);
-      assert.equal(body.urls, 'https://example.test/callback');
-      assert.doesNotMatch(request.body, /Token|access_token|ABC|SECRET/);
+      assert.equal(body.urls, 'https://example.test/article?id=42');
       return {
         ok: true,
         status: 200,
@@ -356,58 +371,27 @@ test('fetch_page strips query parameters and fragments before contacting Tavily'
   });
 
   const result = await harness.fetchPage({
-    url: 'https://example.test/callback?Token=ABC#access_token=SECRET',
+    url: 'https://example.test/article?id=42#section',
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.result.url, 'https://example.test/callback');
+  assert.equal(result.result.url, 'https://example.test/article?id=42');
   assert.equal(harness.networkCalls.length, 1);
 });
 
-test('fetch_page never discloses credential-bearing query parameters to Tavily', async (t) => {
-  const sensitiveUrls = [
-    'https://example.test/callback?access_token=SECRET',
-    'https://example.test/callback?%61ccess%5Ftoken=SECRET',
-    'https://example.test/callback?Refresh-Token=SECRET',
-    'https://example.test/reset?code=ONE_TIME_CODE',
-    'https://example.test/reset?oobCode=ONE_TIME_CODE',
-    'https://example.test/reset?token_hash=SECRET',
-    'https://example.test/download?X-Amz-Signature=SIGNED',
-    'https://example.test/download?x-goog-credential=CREDENTIAL',
-    'https://example.test/download?sig=SIGNED',
-    'https://example.test/page?api_key=SECRET',
-    'https://example.test/page?client_secret=SECRET',
-    'https://example.test/page?password=SECRET',
-    'https://example.test/page?token=SECRET',
-    'https://example.test/page?auth=SECRET',
-    'https://example.test/page?key=SECRET',
-  ];
-  for (const url of sensitiveUrls) {
-    await t.test(url, async () => {
-      const expectedUrl = new URL(url);
-      expectedUrl.search = '';
-      const harness = createHarness({
-        networkResult(request) {
-          const body = JSON.parse(request.body);
-          assert.equal(body.urls, expectedUrl.href);
-          assert.doesNotMatch(request.body, /SECRET|SIGNED|ONE_TIME_CODE|CREDENTIAL/);
-          return {
-            ok: true,
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              results: [{ url: body.urls, raw_content: '# Public page' }],
-              failed_results: [],
-            }),
-          };
-        },
-      });
-      const result = await harness.fetchPage({ url });
-      assert.equal(result.ok, true);
-      assert.equal(result.result.url, expectedUrl.href);
-      assert.equal(harness.networkCalls.length, 1);
+test('fetch_page requires explicit confirmation before disclosing the full URL to Tavily', async () => {
+  const harness = createHarness();
+  for (const confirmation of [undefined, false]) {
+    const result = await harness.tool('fetch_page', {
+      url: 'https://example.test/reset/session-secret?token=SECRET',
+      ...(confirmation === undefined ? {} : { confirm_public_url: confirmation }),
     });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /confirm_public_url:true/);
+    assert.match(result.message, /Tavily/);
+    assert.doesNotMatch(result.message, /session-secret|SECRET/);
   }
+  assert.equal(harness.networkCalls.length, 0);
 });
 
 test('fetch_page rejects invalid URLs before any network request', async (t) => {
@@ -671,7 +655,7 @@ test('explicit provider wins over settings and provider failures never fall back
 });
 
 test('settings explains that Tavily independently enables page reading', () => {
-  assert.match(settingsHtml, /Tavily Key 还会独立启用网页正文读取/);
+  assert.match(settingsHtml, /Tavily Key 还会独立启用经用户确认的公开网页正文读取/);
   assert.match(settingsHtml, /即使保持 Cindy AI 搜索也可单独使用正文读取/);
 });
 

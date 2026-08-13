@@ -152,9 +152,7 @@ function parsePublicPageUrl(value) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     if (parsed.username || parsed.password || !parsed.hostname) return null;
     if (isClearlyNonPublicHostname(parsed.hostname)) return null;
-    // Query strings and fragments may carry credentials or browser-local state.
-    // The extraction provider receives only the public origin and path.
-    parsed.search = '';
+    // Fragments are browser-local and are never part of the HTTP resource.
     parsed.hash = '';
     return parsed.href;
   } catch (e) {
@@ -189,6 +187,12 @@ async function fetchPage(args, callId) {
   var requestedUrl = parsePublicPageUrl(args && args.url);
   if (!requestedUrl) {
     return { ok: false, message: 'url 必须是最多 2048 字符且不含凭证的公开 HTTP(S) 绝对地址' };
+  }
+  if (!args || args.confirm_public_url !== true) {
+    return {
+      ok: false,
+      message: '发送前必须请用户明确确认：该 URL 是公开页面，完整路径和查询参数不含会话、重置、签名或 webhook 凭证，并允许将完整 URL 发送给 Tavily；确认后传 confirm_public_url:true 重试',
+    };
   }
   var depth = args && args.extract_depth === 'advanced' ? 'advanced' : 'basic';
   if (args && args.extract_depth !== undefined && args.extract_depth !== 'basic' && args.extract_depth !== 'advanced') {
