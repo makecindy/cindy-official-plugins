@@ -1,5 +1,5 @@
 {
   "name": "iOS 시뮬레이터",
-  "description": "Cindy Host가 관리하는 내장 iOS 시뮬레이터의 워크플로와 수동 진입점을 추가합니다. WDA, Native H.264, Native HID, 수명 주기, 복구와 폴백은 계속 Host가 관리합니다.",
-  "whenToUse": "외부 Simulator.app을 열지 않고 Cindy 안에서 iOS 앱을 빌드, 실행, 검사하거나 조작하려 할 때 사용합니다."
+  "description": "Cindy Host가 관리하는 내장 iOS 시뮬레이터의 워크플로와 수동 진입점을 추가합니다. WDA, Native H.264, Native HID, 수명 주기, 복구, admission, 소유권 및 호환성 폴백은 계속 Host가 관리하며, 외부 Xcode/Simulator/simctl은 Host가 명시적으로 허용하고 Cindy 소유 런타임이 실행 중이 아닐 때만 최후의 수단으로 사용합니다.",
+  "whenToUse": "먼저 Cindy의 내장 시뮬레이터를 사용합니다. Host가 미설치·비활성화·admission 거부를 보고하고 runningInstanceCount=0이며 Cindy 런타임·정리·lease·generation 전환이 없고 지정된 외부 워크플로, 정확한 기기 ID, 원래 작업을 모두 제공한 경우에만 폴백합니다. 그 외에는 중지합니다."
 }
