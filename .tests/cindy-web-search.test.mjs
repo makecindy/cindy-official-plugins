@@ -211,6 +211,8 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.match(fetchTool.description, /50000/);
   assert.match(fetchTool.description, /不可信/);
   assert.match(fetchTool.description, /响应过大/);
+  assert.match(fetchTool.description, /浏览器登录/);
+  assert.match(fetchTool.description, /执行页面脚本/);
   assert.match(manifest.whenToUse, /任意公开 HTTP\(S\) 页面/);
   assert.match(manifest.whenToUse, /包括但不限于搜索结果页/);
   const localeRoutingContracts = [
@@ -308,7 +310,7 @@ test('fetch_page supports advanced extraction and marks content truncation expli
 test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
   const cases = [
     ['https://example.test/Article', 'https://example.test/Article'],
-    ['https://example.test/?token=ABC', 'https://example.test/?token=ABC'],
+    ['https://example.test/?Token=ABC', 'https://example.test/?Token=ABC'],
     ['HTTPS://EXAMPLE.TEST/Article', 'https://example.test/Article'],
   ];
   for (const [url, normalizedUrl] of cases) {
