@@ -310,7 +310,7 @@ test('fetch_page supports advanced extraction and marks content truncation expli
 test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
   const cases = [
     ['https://example.test/Article', 'https://example.test/Article'],
-    ['https://example.test/?Topic=ABC', 'https://example.test/?Topic=ABC'],
+    ['https://example.test/?Token=ABC', 'https://example.test/?Token=ABC'],
     ['HTTPS://EXAMPLE.TEST/Article', 'https://example.test/Article'],
   ];
   for (const [url, normalizedUrl] of cases) {
@@ -341,7 +341,7 @@ test('fetch_page strips browser-local URL fragments before contacting Tavily', a
   const harness = createHarness({
     networkResult(request) {
       const body = JSON.parse(request.body);
-      assert.equal(body.urls, 'https://example.test/callback?Topic=ABC');
+      assert.equal(body.urls, 'https://example.test/callback?Token=ABC');
       assert.doesNotMatch(request.body, /access_token|SECRET/);
       return {
         ok: true,
@@ -356,23 +356,28 @@ test('fetch_page strips browser-local URL fragments before contacting Tavily', a
   });
 
   const result = await harness.fetchPage({
-    url: 'https://example.test/callback?Topic=ABC#access_token=SECRET',
+    url: 'https://example.test/callback?Token=ABC#access_token=SECRET',
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.result.url, 'https://example.test/callback?Topic=ABC');
+  assert.equal(result.result.url, 'https://example.test/callback?Token=ABC');
   assert.equal(harness.networkCalls.length, 1);
 });
 
 test('fetch_page rejects credential-bearing query parameters before contacting Tavily', async (t) => {
   const sensitiveUrls = [
     'https://example.test/callback?access_token=SECRET',
+    'https://example.test/callback?%61ccess%5Ftoken=SECRET',
     'https://example.test/callback?Refresh-Token=SECRET',
     'https://example.test/reset?code=ONE_TIME_CODE',
+    'https://example.test/reset?oobCode=ONE_TIME_CODE',
+    'https://example.test/reset?token_hash=SECRET',
     'https://example.test/download?X-Amz-Signature=SIGNED',
     'https://example.test/download?x-goog-credential=CREDENTIAL',
     'https://example.test/download?sig=SIGNED',
     'https://example.test/page?api_key=SECRET',
+    'https://example.test/page?client_secret=SECRET',
+    'https://example.test/page?password=SECRET',
   ];
   for (const url of sensitiveUrls) {
     await t.test(url, async () => {
@@ -380,6 +385,7 @@ test('fetch_page rejects credential-bearing query parameters before contacting T
       const result = await harness.fetchPage({ url });
       assert.equal(result.ok, false);
       assert.match(result.message, /HTTP\(S\)/);
+      assert.doesNotMatch(result.message, /SECRET|SIGNED|ONE_TIME_CODE|CREDENTIAL/);
       assert.equal(harness.networkCalls.length, 0);
     });
   }

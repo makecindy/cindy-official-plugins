@@ -145,24 +145,42 @@ function isClearlyNonPublicHostname(hostname) {
 
 function hasSensitiveQueryParameter(searchParams) {
   var exactSensitiveNames = {
+    accesstoken: true,
     apikey: true,
-    auth: true,
-    authorization: true,
+    awsaccesskeyid: true,
+    clientassertion: true,
+    clientsecret: true,
     code: true,
-    key: true,
+    googleaccessid: true,
+    idtoken: true,
+    keypairid: true,
+    oauthrequesttoken: true,
+    oauthtoken: true,
+    oauthverifier: true,
+    onetimecode: true,
+    oobcode: true,
     otp: true,
+    password: true,
+    passwordresettoken: true,
+    passwd: true,
+    recoverycode: true,
+    refreshtoken: true,
+    resettoken: true,
+    samlresponse: true,
     sig: true,
-    ticket: true,
+    signature: true,
+    tokenhash: true,
+    verificationcode: true,
+    xamzcredential: true,
+    xamzsecuritytoken: true,
+    xamzsignature: true,
+    xgoogcredential: true,
+    xgoogsignature: true,
   };
   var sensitive = false;
   searchParams.forEach(function (_value, name) {
-    var normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (
-      exactSensitiveNames[normalized]
-      || /(?:credential|password|passwd|secret|signature|token)$/.test(normalized)
-    ) {
-      sensitive = true;
-    }
+    var normalized = name.toLowerCase().replace(/[-_.\s]/g, '');
+    if (exactSensitiveNames[normalized]) sensitive = true;
   });
   return sensitive;
 }
