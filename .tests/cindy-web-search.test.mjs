@@ -310,7 +310,7 @@ test('fetch_page supports advanced extraction and marks content truncation expli
 test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
   const cases = [
     ['https://example.test/Article', 'https://example.test/Article'],
-    ['https://example.test/?Token=ABC', 'https://example.test/?Token=ABC'],
+    ['https://example.test/?Token=ABC', 'https://example.test/'],
     ['HTTPS://EXAMPLE.TEST/Article', 'https://example.test/Article'],
   ];
   for (const [url, normalizedUrl] of cases) {
@@ -337,12 +337,12 @@ test('fetch_page accepts uppercase characters in valid public URLs', async (t) =
   }
 });
 
-test('fetch_page strips browser-local URL fragments before contacting Tavily', async () => {
+test('fetch_page strips query parameters and fragments before contacting Tavily', async () => {
   const harness = createHarness({
     networkResult(request) {
       const body = JSON.parse(request.body);
-      assert.equal(body.urls, 'https://example.test/callback?Token=ABC');
-      assert.doesNotMatch(request.body, /access_token|SECRET/);
+      assert.equal(body.urls, 'https://example.test/callback');
+      assert.doesNotMatch(request.body, /Token|access_token|ABC|SECRET/);
       return {
         ok: true,
         status: 200,
@@ -360,11 +360,11 @@ test('fetch_page strips browser-local URL fragments before contacting Tavily', a
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.result.url, 'https://example.test/callback?Token=ABC');
+  assert.equal(result.result.url, 'https://example.test/callback');
   assert.equal(harness.networkCalls.length, 1);
 });
 
-test('fetch_page rejects credential-bearing query parameters before contacting Tavily', async (t) => {
+test('fetch_page never discloses credential-bearing query parameters to Tavily', async (t) => {
   const sensitiveUrls = [
     'https://example.test/callback?access_token=SECRET',
     'https://example.test/callback?%61ccess%5Ftoken=SECRET',
@@ -378,15 +378,34 @@ test('fetch_page rejects credential-bearing query parameters before contacting T
     'https://example.test/page?api_key=SECRET',
     'https://example.test/page?client_secret=SECRET',
     'https://example.test/page?password=SECRET',
+    'https://example.test/page?token=SECRET',
+    'https://example.test/page?auth=SECRET',
+    'https://example.test/page?key=SECRET',
   ];
   for (const url of sensitiveUrls) {
     await t.test(url, async () => {
-      const harness = createHarness();
+      const expectedUrl = new URL(url);
+      expectedUrl.search = '';
+      const harness = createHarness({
+        networkResult(request) {
+          const body = JSON.parse(request.body);
+          assert.equal(body.urls, expectedUrl.href);
+          assert.doesNotMatch(request.body, /SECRET|SIGNED|ONE_TIME_CODE|CREDENTIAL/);
+          return {
+            ok: true,
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              results: [{ url: body.urls, raw_content: '# Public page' }],
+              failed_results: [],
+            }),
+          };
+        },
+      });
       const result = await harness.fetchPage({ url });
-      assert.equal(result.ok, false);
-      assert.match(result.message, /HTTP\(S\)/);
-      assert.doesNotMatch(result.message, /SECRET|SIGNED|ONE_TIME_CODE|CREDENTIAL/);
-      assert.equal(harness.networkCalls.length, 0);
+      assert.equal(result.ok, true);
+      assert.equal(result.result.url, expectedUrl.href);
+      assert.equal(harness.networkCalls.length, 1);
     });
   }
 });
