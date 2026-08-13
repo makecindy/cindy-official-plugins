@@ -470,6 +470,17 @@ test('fetch_page fails closed on transport and malformed provider responses', as
   }
 });
 
+test('fetch_page hides unexpected runtime errors behind an actionable message', async () => {
+  const harness = createHarness({ networkResult: () => null });
+  const result = await harness.fetchPage();
+
+  assert.equal(result.type, 'tool-result');
+  assert.equal(result.callId, 'call-1');
+  assert.equal(result.ok, false);
+  assert.equal(result.message, '网页正文读取失败，请稍后重试');
+  assert.doesNotMatch(result.message, /search|搜索|TypeError|Cannot read/i);
+});
+
 test('missing provider uses Cindy AI by default and does not touch BYO network', async () => {
   const harness = createHarness();
   const result = await harness.search();

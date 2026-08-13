@@ -331,7 +331,10 @@ cindy.onHostMessage(async function (msg) {
       type: 'tool-result',
       callId: msg.callId,
       ok: false,
-      message: '搜索失败:' + (err && err.message ? err.message : String(err)),
+      message:
+        msg.tool === 'fetch_page'
+          ? '网页正文读取失败，请稍后重试'
+          : '搜索失败:' + (err && err.message ? err.message : String(err)),
     });
   }
 });
