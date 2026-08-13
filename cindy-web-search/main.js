@@ -143,6 +143,30 @@ function isClearlyNonPublicHostname(hostname) {
   return false;
 }
 
+function hasSensitiveQueryParameter(searchParams) {
+  var exactSensitiveNames = {
+    apikey: true,
+    auth: true,
+    authorization: true,
+    code: true,
+    key: true,
+    otp: true,
+    sig: true,
+    ticket: true,
+  };
+  var sensitive = false;
+  searchParams.forEach(function (_value, name) {
+    var normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (
+      exactSensitiveNames[normalized]
+      || /(?:credential|password|passwd|secret|signature|token)$/.test(normalized)
+    ) {
+      sensitive = true;
+    }
+  });
+  return sensitive;
+}
+
 function parsePublicPageUrl(value) {
   if (typeof value !== 'string' || !value || value.length > FETCH_PAGE_MAX_URL_CHARS) return null;
   if (value !== value.trim() || value.indexOf('\\') !== -1) return null;
@@ -152,6 +176,9 @@ function parsePublicPageUrl(value) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     if (parsed.username || parsed.password || !parsed.hostname) return null;
     if (isClearlyNonPublicHostname(parsed.hostname)) return null;
+    // Page extraction sends the URL to a third party. Reject known credential,
+    // signature, and one-time-code parameters rather than disclosing them.
+    if (hasSensitiveQueryParameter(parsed.searchParams)) return null;
     // Fragments are browser-local and may contain OAuth tokens; never disclose them to Tavily.
     parsed.hash = '';
     return parsed.href;

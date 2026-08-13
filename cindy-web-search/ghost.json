@@ -71,7 +71,7 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "url": { "type": "string", "maxLength": 2048, "description": "要读取的单个公开 HTTP(S) 网页绝对地址，最多 2048 字符且不能包含用户名或密码" },
+          "url": { "type": "string", "maxLength": 2048, "description": "要读取的单个公开 HTTP(S) 网页绝对地址，最多 2048 字符，不能包含用户名、密码、访问令牌、签名或一次性代码等凭证" },
           "extract_depth": { "type": "string", "enum": ["basic", "advanced"], "description": "提取深度，默认 basic；仅在动态页面、表格或嵌入内容需要更高成功率时使用 advanced" }
         },
         "required": ["url"]
