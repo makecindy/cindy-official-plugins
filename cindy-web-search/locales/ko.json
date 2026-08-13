@@ -1,7 +1,7 @@
 {
   "name": "Web Search",
   "description": "Cindy에 내장된 웹 검색 플러그인입니다. 기본적으로 Cindy AI를 사용하며 사용자의 Brave 또는 Tavily API 키로도 검색할 수 있습니다. Tavily 키를 설정하면 웹페이지 한 개의 본문도 읽을 수 있습니다. 키는 플러그인 상세 화면에서 설정하며 로컬에서 암호화되고 선언된 호스트 요청에만 주입됩니다.",
-  "whenToUse": "공개 웹 검색, 자료 조사, 페이지 찾기, 최신 정보 확인 또는 검색 결과 페이지의 본문 읽기에 사용합니다. 검색은 기본적으로 Cindy AI를 사용하며, 본문 읽기에는 Web Search 플러그인 상세 화면에 설정한 Tavily 키가 필요합니다.",
+  "whenToUse": "공개 웹 검색, 자료 조사, 페이지 찾기, 최신 정보 확인 또는 검색 결과 페이지를 포함한 모든 공개 HTTP(S) 페이지의 본문 읽기에 사용합니다. 검색은 기본적으로 Cindy AI를 사용하며, 본문 읽기에는 Web Search 플러그인 상세 화면에 설정한 Tavily 키가 필요합니다.",
   "tools": {
     "search_web": {
       "description": "최대 2000자의 검색어로 공개 웹을 검색해 { title, url, snippet } 결과 목록을 반환합니다. 기본적으로 Cindy AI를 사용하며 Brave 또는 Tavily도 지정할 수 있습니다. { provider, results }를 반환합니다. 지정한 Brave 또는 Tavily 키가 설정되지 않았다면 반환된 message를 그대로 사용자에게 전달하세요."

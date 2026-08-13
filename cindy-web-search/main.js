@@ -145,7 +145,8 @@ function isClearlyNonPublicHostname(hostname) {
 
 function parsePublicPageUrl(value) {
   if (typeof value !== 'string' || !value || value.length > FETCH_PAGE_MAX_URL_CHARS) return null;
-  if (value !== value.trim() || /[\\\u0000-\u001f\u007f]/.test(value)) return null;
+  if (value !== value.trim() || value.indexOf('\\') !== -1) return null;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null;
   try {
     var parsed = new URL(value);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;

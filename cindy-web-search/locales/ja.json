@@ -1,7 +1,7 @@
 {
   "name": "Web Search",
   "description": "Cindy 内蔵のウェブ検索プラグインです。既定では Cindy AI を使い、自分の Brave または Tavily API キーでも検索できます。Tavily キーを設定すると、単一ウェブページの本文も取得できます。キーはプラグイン詳細で設定し、ローカルで暗号化され、宣言済みホストへのリクエストにだけ注入されます。",
-  "whenToUse": "公開ウェブの検索、調査、ページの発見、最新情報の確認、または検索結果ページの本文取得に使用します。検索は既定で Cindy AI を使い、本文取得には Web Search プラグイン詳細で設定した Tavily キーが必要です。",
+  "whenToUse": "公開ウェブの検索、調査、ページの発見、最新情報の確認、または検索結果ページを含む任意の公開 HTTP(S) ページの本文取得に使用します。検索は既定で Cindy AI を使い、本文取得には Web Search プラグイン詳細で設定した Tavily キーが必要です。",
   "tools": {
     "search_web": {
       "description": "最大 2000 文字のクエリで公開ウェブを検索し、{ title, url, snippet } の結果一覧を返します。既定では Cindy AI を使い、Brave または Tavily も指定できます。{ provider, results } を返します。指定した Brave または Tavily のキーが未設定の場合は、返された message を変更せずユーザーに伝えてください。"

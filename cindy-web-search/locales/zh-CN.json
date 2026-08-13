@@ -1,7 +1,7 @@
 {
   "name": "Web Search",
   "description": "Cindy 内置的网页搜索插件：默认使用 Cindy AI 搜索，也可使用你自己的 Brave 或 Tavily Key 搜索公网；配置 Tavily Key 后还能读取单个网页正文。Key 在插件详情页填写，在本机加密保存，并且只注入发往已声明域名的请求。",
-  "whenToUse": "需要搜索公网信息、查资料、找网页、查看最新动态，或读取搜索结果网页的正文时使用。默认使用 Cindy AI 搜索；正文读取需要在 Web Search 插件详情页配置 Tavily Key。",
+  "whenToUse": "需要搜索公网信息、查资料、找网页、查看最新动态，或读取任意公开 HTTP(S) 页面的正文时使用，包括但不限于搜索结果页。默认使用 Cindy AI 搜索；正文读取需要在 Web Search 插件详情页配置 Tavily Key。",
   "tools": {
     "search_web": {
       "description": "使用最多 2000 字符的查询搜索公网，并返回 { title, url, snippet } 结果列表。默认使用 Cindy AI 搜索，也可指定 Brave 或 Tavily。返回 { provider, results }。使用 Brave 或 Tavily 但对应 Key 未配置时，把返回的 message 原样告诉用户。"

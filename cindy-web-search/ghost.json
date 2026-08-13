@@ -3,7 +3,7 @@
   "id": "cindy-web-search",
   "name": "Web Search",
   "description": "Cindy 内置的网页搜索插件:默认使用 Cindy AI 搜索,也可用你自己的 Brave / Tavily key 搜索公网;配置 Tavily key 后还能读取单个网页正文。key 在插件详情页填写,加密存本机、只注入声明域名的请求。",
-  "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态,或读取搜索结果网页的正文时找我。默认使用 Cindy AI 搜索;正文读取需要在 Web Search 插件详情页配置 Tavily key。",
+  "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态，或读取任意公开 HTTP(S) 页面的正文时找我，包括但不限于搜索结果页。默认使用 Cindy AI 搜索；正文读取需要在 Web Search 插件详情页配置 Tavily Key。",
   "version": "1.4.0",
   "minCindyVersion": "0.1.37",
   "locales": {

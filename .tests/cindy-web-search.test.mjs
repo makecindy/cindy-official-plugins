@@ -211,9 +211,19 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.match(fetchTool.description, /50000/);
   assert.match(fetchTool.description, /不可信/);
   assert.match(fetchTool.description, /响应过大/);
-  for (const locale of locales) {
+  assert.match(manifest.whenToUse, /任意公开 HTTP\(S\) 页面/);
+  assert.match(manifest.whenToUse, /包括但不限于搜索结果页/);
+  const localeRoutingContracts = [
+    [/任意公开 HTTP\(S\) 页面/, /包括但不限于搜索结果页/],
+    [/any public HTTP\(S\) page/, /including but not limited to search results/],
+    [/任意の公開 HTTP\(S\) ページ/, /検索結果ページを含む/],
+    [/모든 공개 HTTP\(S\) 페이지/, /검색 결과 페이지를 포함한/],
+  ];
+  for (const [index, locale] of locales.entries()) {
     assert.match(locale.tools.search_web.description, /2000/);
     assert.match(locale.tools.fetch_page.description, /50000/);
+    assert.match(locale.whenToUse, localeRoutingContracts[index][0]);
+    assert.match(locale.whenToUse, localeRoutingContracts[index][1]);
   }
 });
 
@@ -295,6 +305,36 @@ test('fetch_page supports advanced extraction and marks content truncation expli
   assert.equal(result.result.truncated, true);
 });
 
+test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
+  const cases = [
+    ['https://example.test/Article', 'https://example.test/Article'],
+    ['https://example.test/?token=ABC', 'https://example.test/?token=ABC'],
+    ['HTTPS://EXAMPLE.TEST/Article', 'https://example.test/Article'],
+  ];
+  for (const [url, normalizedUrl] of cases) {
+    await t.test(url, async () => {
+      const harness = createHarness({
+        networkResult(request) {
+          assert.equal(JSON.parse(request.body).urls, normalizedUrl);
+          return {
+            ok: true,
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              results: [{ url: normalizedUrl, raw_content: '# Article' }],
+              failed_results: [],
+            }),
+          };
+        },
+      });
+      const result = await harness.fetchPage({ url });
+      assert.equal(result.ok, true);
+      assert.equal(result.result.url, normalizedUrl);
+      assert.equal(harness.networkCalls.length, 1);
+    });
+  }
+});
+
 test('fetch_page rejects invalid URLs before any network request', async (t) => {
   const invalidUrls = [
     '',
@@ -303,6 +343,10 @@ test('fetch_page rejects invalid URLs before any network request', async (t) => 
     'ftp://example.test/file',
     'https://user:pass@example.test/',
     'https:\\example.test\\article',
+    'https://example.test/\u0000article',
+    'https://example.test/\tarticle',
+    'https://example.test/\narticle',
+    'https://example.test/\u007farticle',
     ' https://example.test/article',
     'http://localhost/admin',
     'http://127.0.0.1/admin',
