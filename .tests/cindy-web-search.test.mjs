@@ -586,6 +586,11 @@ test('explicit provider wins over settings and provider failures never fall back
   assert.equal(failedResult.message, 'Cindy AI quota exhausted');
 });
 
+test('settings explains that Tavily independently enables page reading', () => {
+  assert.match(settingsHtml, /Tavily Key 还会独立启用网页正文读取/);
+  assert.match(settingsHtml, /即使保持 Cindy AI 搜索也可单独使用正文读取/);
+});
+
 test('settings controls stay disabled until initial preferences load', async () => {
   const pendingKv = deferred();
   const harness = createSettingsHarness({
