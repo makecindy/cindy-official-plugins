@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "id": "google-sheets",
   "name": "Google Sheets",
-  "description": "独立连接 Google Sheets：读取工作表、读取范围并写入单元格。只申请 Sheets 所需权限，授权与令牌由主机托管。",
+  "description": "独立连接 Google Sheets：读取工作表、读取范围并写入单元格。使用 Google Drive 权限访问表格，授权与令牌由主机托管。",
   "whenToUse": "需要读取或更新 Google Sheets 表格数据时使用。请先在本插件详情页单独连接 Google Sheets 账号。",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -29,7 +29,7 @@
         "key": "google_sheets_account",
         "label": "Google Sheets 账号",
         "source": "oauth",
-        "hint": "只授权 Google Sheets 权限；到本插件详情页点「连接账号」完成授权",
+        "hint": "授权 Google Drive 权限以访问表格；到本插件详情页点「连接账号」完成授权",
         "inject": {
           "header": "Authorization",
           "format": "Bearer {value}",
@@ -38,12 +38,12 @@
         "oauth": {
           "authorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
           "tokenUrl": "https://oauth2.googleapis.com/token",
-          "clientId": "966060737739-d3dfjdsaace1ur4thk03h3aj4hpnjucq.apps.googleusercontent.com",
-          "clientSecret": "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",
+          "clientId": "948713214926-onmd8lp4prlfl78qppbfjpl568mc504r.apps.googleusercontent.com",
+          "clientSecret": "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",
           "scopes": [
             "openid",
             "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/spreadsheets"
+            "https://www.googleapis.com/auth/drive"
           ],
           "pkce": true,
           "extraAuthorizeParams": {

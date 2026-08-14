@@ -1,13 +1,13 @@
 {
   "name": "Gmail",
-  "description": "Connect Gmail independently to search, read, and organize email or create drafts and send messages. Only Gmail permissions are requested; authorization and tokens are managed by the host.",
-  "whenToUse": "Use this plugin to search Gmail, read message bodies, organize labels, create drafts, or send email. Connect a Gmail account separately in this plugin's details first.",
+  "description": "Connect Gmail independently to search and read email or create drafts and send messages. Only Gmail permissions are requested; authorization and tokens are managed by the host.",
+  "whenToUse": "Use this plugin to search Gmail, read message bodies, list labels, create drafts, or send email. Connect a Gmail account separately in this plugin's details first.",
   "tools": {
     "gmail_accounts": {
       "description": "List the Gmail accounts connected to this plugin and their status. Accounts must be authorized separately in the Gmail plugin details."
     },
     "gmail": {
-      "description": "Run a Gmail operation: search messages, read message bodies, send email, save a draft, modify labels, or list labels. Sending and organizing actions require clear user intent."
+      "description": "Run a Gmail operation: search messages, read message bodies, send email, save a draft, or list labels. modify_labels is temporarily unavailable and returns an insufficient-permissions error. Sending requires clear user intent."
     }
   }
 }

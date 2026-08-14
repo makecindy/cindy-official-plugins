@@ -1,13 +1,13 @@
 {
   "name": "Gmail",
-  "description": "独立连接 Gmail：搜索、阅读、整理邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由宿主管理。",
-  "whenToUse": "需要查 Gmail 邮件、读取邮件正文、整理标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
+  "description": "独立连接 Gmail：搜索、阅读邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由宿主管理。",
+  "whenToUse": "需要查 Gmail 邮件、读取邮件正文、列出标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
   "tools": {
     "gmail_accounts": {
       "description": "列出本插件已连接的 Gmail 账号及状态。账号必须先在 Gmail 插件详情页单独授权。"
     },
     "gmail": {
-      "description": "执行 Gmail 操作：search 搜索邮件、read 读取正文、send 发送邮件、draft 保存草稿、modify_labels 修改标签、list_labels 列出标签。发送和整理操作必须有用户明确意图。"
+      "description": "执行 Gmail 操作：search 搜索邮件、read 读取正文、send 发送邮件、draft 保存草稿、list_labels 列出标签。modify_labels 暂不可用并返回权限不足。发送操作必须有用户明确意图。"
     }
   }
 }

@@ -3,6 +3,32 @@
   var KEY = 'gmail_account';
   var LABEL = 'Gmail';
   var $ = function (id) { return document.getElementById(id); };
+  var REAUTH_MESSAGES = {
+    'zh-CN': 'Google 授权已失效，请重新连接账号。',
+    en: 'Your Google authorization has expired. Please reconnect your account.',
+    ja: 'Google の認証が期限切れです。アカウントを再接続してください。',
+    ko: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
+  };
+  async function loadLocale() {
+    var locale = 'en';
+    var controller = new AbortController();
+    var timeout = setTimeout(function abortLocaleRequest() {
+      controller.abort();
+    }, 2000);
+    try {
+      var response = await fetch('/app-context', { signal: controller.signal });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var result = await response.json();
+      var requested = result && result.context && result.context.locale;
+      if (Object.prototype.hasOwnProperty.call(REAUTH_MESSAGES, requested)) locale = requested;
+    } catch (_err) {
+      locale = 'en';
+    } finally {
+      clearTimeout(timeout);
+    }
+    document.documentElement.lang = locale;
+    $('reauth').textContent = REAUTH_MESSAGES[locale];
+  }
   function status(text) { $('status').textContent = text; }
   function connectError(result) {
     var labels = {
@@ -24,7 +50,9 @@
   function render(entry) {
     var box = $('accounts');
     box.textContent = '';
-    ((entry && entry.accounts) || []).forEach(function (account) {
+    var accounts = (entry && entry.accounts) || [];
+    $('reauth').hidden = !accounts.some(function (account) { return account.status === 'expired'; });
+    accounts.forEach(function (account) {
       var row = document.createElement('div');
       row.className = 'account';
       var email = document.createElement('span');
@@ -89,5 +117,5 @@
     }
   }
   $('connect').onclick = function () { void connect(); };
-  void load();
+  void loadLocale().then(load);
 })();

@@ -6,7 +6,8 @@
 </head>
 <body>
   <div class="title">Google Sheets 账号 <span class="badge">独立授权</span></div>
-  <p class="hint">只授权 Sheets 权限，不会同时取得 Gmail、Calendar 或 Drive 权限。</p>
+  <p id="scope-hint" class="hint"></p>
+  <p id="reauth" class="hint expired" hidden></p>
   <div id="accounts"></div>
   <button id="connect" class="primary" type="button">连接账号</button>
   <p id="status"></p>

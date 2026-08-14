@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "id": "google-gmail",
   "name": "Gmail",
-  "description": "独立连接 Gmail：搜索、阅读、整理邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由主机托管。",
-  "whenToUse": "需要查 Gmail 邮件、读取邮件正文、整理标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
-  "version": "1.1.1",
+  "description": "独立连接 Gmail：搜索、阅读邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由主机托管。",
+  "whenToUse": "需要查 Gmail 邮件、读取邮件正文、列出标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
+  "version": "1.1.2",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -38,12 +38,13 @@
         "oauth": {
           "authorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
           "tokenUrl": "https://oauth2.googleapis.com/token",
-          "clientId": "966060737739-d3dfjdsaace1ur4thk03h3aj4hpnjucq.apps.googleusercontent.com",
-          "clientSecret": "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",
+          "clientId": "948713214926-onmd8lp4prlfl78qppbfjpl568mc504r.apps.googleusercontent.com",
+          "clientSecret": "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",
           "scopes": [
             "openid",
             "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/gmail.modify"
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose"
           ],
           "pkce": true,
           "extraAuthorizeParams": {
@@ -69,7 +70,7 @@
     },
     {
       "name": "gmail",
-      "description": "执行 Gmail 操作：search 搜索邮件，read 读取正文，send 发送邮件，draft 保存草稿，modify_labels 修改标签，list_labels 列出标签。发送和整理动作必须由用户明确表达。",
+      "description": "执行 Gmail 操作：search 搜索邮件，read 读取正文，send 发送邮件，draft 保存草稿，list_labels 列出标签。modify_labels 暂不可用并返回权限不足。发送动作必须由用户明确表达。",
       "parameters": {
         "type": "object",
         "properties": {

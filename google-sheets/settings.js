@@ -3,6 +3,45 @@
   var KEY = 'google_sheets_account';
   var LABEL = 'Google Sheets';
   var $ = function (id) { return document.getElementById(id); };
+  var MESSAGES = {
+    'zh-CN': {
+      scopeHint: '使用 Google Drive 权限读写 Sheets 文件，不会同时取得 Gmail 或 Calendar 权限。',
+      reauth: 'Google 授权已失效，请重新连接账号。',
+    },
+    en: {
+      scopeHint: 'Uses Google Drive permission to read and write Sheets files without requesting Gmail or Calendar access.',
+      reauth: 'Your Google authorization has expired. Please reconnect your account.',
+    },
+    ja: {
+      scopeHint: 'Google Drive の権限で Sheets ファイルを読み書きします。Gmail や Calendar の権限は要求しません。',
+      reauth: 'Google の認証が期限切れです。アカウントを再接続してください。',
+    },
+    ko: {
+      scopeHint: 'Google Drive 권한으로 Sheets 파일을 읽고 씁니다. Gmail 또는 Calendar 권한은 요청하지 않습니다.',
+      reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
+    },
+  };
+  async function loadLocale() {
+    var locale = 'en';
+    var controller = new AbortController();
+    var timeout = setTimeout(function abortLocaleRequest() {
+      controller.abort();
+    }, 2000);
+    try {
+      var response = await fetch('/app-context', { signal: controller.signal });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var result = await response.json();
+      var requested = result && result.context && result.context.locale;
+      if (Object.prototype.hasOwnProperty.call(MESSAGES, requested)) locale = requested;
+    } catch (_err) {
+      locale = 'en';
+    } finally {
+      clearTimeout(timeout);
+    }
+    document.documentElement.lang = locale;
+    $('scope-hint').textContent = MESSAGES[locale].scopeHint;
+    $('reauth').textContent = MESSAGES[locale].reauth;
+  }
   function status(text) { $('status').textContent = text; }
   function connectError(result) {
     var labels = {
@@ -24,7 +63,9 @@
   function render(entry) {
     var box = $('accounts');
     box.textContent = '';
-    ((entry && entry.accounts) || []).forEach(function (account) {
+    var accounts = (entry && entry.accounts) || [];
+    $('reauth').hidden = !accounts.some(function (account) { return account.status === 'expired'; });
+    accounts.forEach(function (account) {
       var row = document.createElement('div');
       row.className = 'account';
       var email = document.createElement('span');
@@ -84,5 +125,5 @@
     }
   }
   $('connect').onclick = function () { void connect(); };
-  void load();
+  void loadLocale().then(load);
 })();

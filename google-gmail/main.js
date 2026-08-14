@@ -193,21 +193,7 @@ async function gmail(args, callId) {
   }
 
   if (args.action === 'modify_labels') {
-    if (!args.message_id) return fail('modify_labels 需要 message_id');
-    var add = Array.isArray(args.add_label_ids) ? args.add_label_ids : [];
-    var remove = Array.isArray(args.remove_label_ids) ? args.remove_label_ids : [];
-    if (!add.length && !remove.length) {
-      return fail('modify_labels 需要 add_label_ids 或 remove_label_ids');
-    }
-    var modified = await api({
-      url: BASE + '/messages/' + encodeURIComponent(args.message_id) + '/modify',
-      method: 'POST',
-      body: { addLabelIds: add, removeLabelIds: remove },
-      account: account,
-      callId: callId,
-    });
-    if (modified.err) return fail(modified.err);
-    return { ok: true, result: { modified: true, label_ids: modified.data.labelIds || [] } };
+    return fail('Insufficient permissions. Please wait for a future plugin update.');
   }
 
   if (args.action === 'send' || args.action === 'draft') {
