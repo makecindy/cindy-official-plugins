@@ -7,6 +7,12 @@ const root = new URL('../cindy-art/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', root), 'utf8'));
 const source = readFileSync(new URL('main.js', root), 'utf8');
 
+function normalizePreference(preference) {
+  return typeof preference === 'string'
+    ? { modelId: preference, providerId: 'xd' }
+    : preference;
+}
+
 function mediaCatalogsForPreferences(configuredModels) {
   const catalogs = { image: [], video: [] };
   const requirements = {
@@ -15,12 +21,21 @@ function mediaCatalogsForPreferences(configuredModels) {
     'video.generate': { type: 'video', input: ['text'], output: ['video'] },
     'video.image_to_video': { type: 'video', input: ['text', 'image'], output: ['video'] },
   };
-  for (const [capability, id] of Object.entries(configuredModels)) {
+  for (const [capability, rawPreference] of Object.entries(configuredModels)) {
     const requirement = requirements[capability];
     if (!requirement) continue;
-    let model = catalogs[requirement.type].find((candidate) => candidate.id === id);
+    const preference = normalizePreference(rawPreference);
+    const { modelId, providerId } = preference;
+    let model = catalogs[requirement.type].find(
+      (candidate) => candidate.id === modelId && candidate.providerId === providerId,
+    );
     if (!model) {
-      model = { id, name: id, modalities: { input: [], output: [] } };
+      model = {
+        id: modelId,
+        name: modelId,
+        providerId,
+        modalities: { input: [], output: [] },
+      };
       catalogs[requirement.type].push(model);
     }
     model.modalities.input = [...new Set([...model.modalities.input, ...requirement.input])];
@@ -51,10 +66,11 @@ function createHarness(
     async send(message) {
       if (message.type === 'host-request' && message.kind === 'cindy-preference') {
         hostRequests.push(structuredClone(message));
-        const modelId = hostPreferences[message.capability];
-        if (modelId instanceof Error) throw modelId;
-        return modelId
-          ? { ok: true, capability: message.capability, modelId }
+        const rawPreference = hostPreferences[message.capability];
+        if (rawPreference instanceof Error) throw rawPreference;
+        const preference = normalizePreference(rawPreference);
+        return preference
+          ? { ok: true, capability: message.capability, ...preference }
           : { ok: false, errorCode: 'NOT_AVAILABLE', message: '当前没有可用的媒体模型' };
       }
       if (message.type === 'tool-result') {
@@ -119,8 +135,8 @@ function createHarness(
 }
 
 test('manifest exposes only the four media preparation tools', () => {
-  assert.equal(manifest.version, '1.13.2');
-  assert.equal(manifest.minCindyVersion, '0.1.53');
+  assert.equal(manifest.version, '1.13.3');
+  assert.equal(manifest.minCindyVersion, '0.1.56');
   assert.equal(manifest.slots.includes('card'), false);
   assert.deepEqual(
     manifest.tools.map(({ name }) => name),
@@ -129,6 +145,8 @@ test('manifest exposes only the four media preparation tools', () => {
   for (const tool of manifest.tools) {
     assert.equal(tool.parameters.properties.model.type, 'string');
     assert.equal(tool.parameters.properties.model.enum, undefined);
+    assert.match(tool.description, /request\.providerId/);
+    assert.match(tool.description, /provider_id/);
   }
   assert.doesNotMatch(JSON.stringify(manifest), /import_artwork|gallery|画廊/);
 });
@@ -162,13 +180,17 @@ test('each operation uses the exact model configured by Host for that capability
 
   assert.equal(image.ok, true);
   assert.equal(image.result.request.modelId, hostPreferences['image.generate']);
+  assert.equal(image.result.request.providerId, 'xd');
   assert.equal(edit.result.request.modelId, hostPreferences['image.edit']);
+  assert.equal(edit.result.request.providerId, 'xd');
   assert.deepEqual(structuredClone(edit.result.request.referenceMedia.managedMediaUrls), [
     `cindy-media://blobs/${hash}.png`,
   ]);
   assert.equal(video.result.request.modelId, hostPreferences['video.generate']);
+  assert.equal(video.result.request.providerId, 'xd');
   assert.equal(imageToVideo.result.request.capability, 'video.image_to_video');
   assert.equal(imageToVideo.result.request.modelId, hostPreferences['video.edit']);
+  assert.equal(imageToVideo.result.request.providerId, 'xd');
   assert.deepEqual(
     harness.hostRequests.map(({ capability }) => capability),
     ['image.generate', 'image.edit', 'video.generate', 'video.edit'],
@@ -191,7 +213,33 @@ test('a model explicitly named by the user overrides Host configuration', async 
 
   assert.equal(result.ok, true);
   assert.equal(result.result.request.modelId, 'image-explicit');
+  assert.equal(result.result.request.providerId, 'xd');
   assert.deepEqual(harness.hostRequests, []);
+});
+
+test('Host provider selection disambiguates duplicate model ids', async () => {
+  const modelId = 'openai/gpt-image-2';
+  const model = {
+    id: modelId,
+    name: 'GPT Image 2',
+    modalities: { input: ['text'], output: ['image'] },
+  };
+  const harness = createHarness(
+    { 'image.generate': { modelId, providerId: 'openai' } },
+    {
+      image: [
+        { ...model, providerId: 'xd' },
+        { ...model, providerId: 'openai' },
+      ],
+      video: [],
+    },
+  );
+
+  const result = await harness.call('gen_image', { prompt: 'a cat' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.request.modelId, modelId);
+  assert.equal(result.result.request.providerId, 'openai');
 });
 
 test('Art rejects a configured model whose modalities do not support the operation', async () => {
@@ -203,6 +251,7 @@ test('Art rejects a configured model whose modalities do not support the operati
         {
           id: 'text-only-image',
           name: 'Text Only Image',
+          providerId: 'xd',
           modalities: { input: ['text'], output: ['image'] },
         },
       ],
