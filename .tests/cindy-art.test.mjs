@@ -145,6 +145,8 @@ test('manifest exposes only the four media preparation tools', () => {
   for (const tool of manifest.tools) {
     assert.equal(tool.parameters.properties.model.type, 'string');
     assert.equal(tool.parameters.properties.model.enum, undefined);
+    assert.match(tool.description, /request\.providerId/);
+    assert.match(tool.description, /provider_id/);
   }
   assert.doesNotMatch(JSON.stringify(manifest), /import_artwork|gallery|画廊/);
 });
