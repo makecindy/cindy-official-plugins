@@ -110,7 +110,9 @@ async function readConfiguredModel(invocationCapability) {
     result.ok !== true ||
     result.capability !== capability ||
     typeof result.modelId !== 'string' ||
-    !result.modelId.trim()
+    !result.modelId.trim() ||
+    typeof result.providerId !== 'string' ||
+    !result.providerId.trim()
   ) {
     throw new Error(
       result && typeof result.message === 'string'
@@ -118,7 +120,10 @@ async function readConfiguredModel(invocationCapability) {
         : '无法读取 Art 详情页中的模型配置',
     );
   }
-  return result.modelId.trim();
+  return {
+    modelId: result.modelId.trim(),
+    providerId: result.providerId.trim(),
+  };
 }
 
 async function selectedModel(args, invocationCapability) {
@@ -126,15 +131,19 @@ async function selectedModel(args, invocationCapability) {
   if (!requirement) throw new Error('Art 不认识媒体能力：' + invocationCapability);
 
   const models = await readMediaCatalog(requirement.type);
-  const modelId = optionalString(args, 'model') || await readConfiguredModel(invocationCapability);
+  const explicitModelId = optionalString(args, 'model');
+  const configured = explicitModelId ? null : await readConfiguredModel(invocationCapability);
+  const modelId = explicitModelId || configured.modelId;
   const model = models.find(function (candidate) {
-    return candidate && candidate.id === modelId;
+    return candidate && candidate.id === modelId && (
+      explicitModelId || candidate.providerId === configured.providerId
+    );
   });
   if (!model) throw new Error('模型「' + modelId + '」当前不可用');
   if (!supportsCapability(model, invocationCapability)) {
     throw new Error('模型「' + modelId + '」未声明支持' + requirement.label + '所需的输入输出模态');
   }
-  return modelId;
+  return { modelId: modelId, providerId: model.providerId };
 }
 
 function sourceMedia(args, maxItems) {
@@ -174,9 +183,9 @@ async function returnArtRequest(msg, capability, options) {
     return failCall(msg.callId, '缺少参考图(images 或用户图片附件)');
   }
 
-  let modelId;
+  let selected;
   try {
-    modelId = await selectedModel(args, capability);
+    selected = await selectedModel(args, capability);
   } catch (error) {
     return failCall(msg.callId, String((error && error.message) || error));
   }
@@ -185,7 +194,8 @@ async function returnArtRequest(msg, capability, options) {
   const request = {
     capability: capability,
     prompt: prompt,
-    modelId: modelId,
+    modelId: selected.modelId,
+    providerId: selected.providerId,
   };
   if (aspectRatio) request.aspectRatioIntent = aspectRatio;
   if (qualityIntent) request.qualityIntent = qualityIntent;
@@ -193,7 +203,7 @@ async function returnArtRequest(msg, capability, options) {
 
   await finishCall(msg.callId, {
     note:
-      'Art 已整理创作参数。除非用户在本次对话明确点名模型，request.modelId 就是 Art 详情页「Cindy 能力」为当前操作配置的模型；调用 Cindy Core media（完整工具名 mcp__cindy__media）prepare 时必须原样作为 model_id，不要另行选型。referenceMedia.managedMediaUrls 是 Core 可读取的受管地址；attachedMediaCount 对应用户随当前消息交出的媒体，调用 Core 时继续使用对话中的原始媒体地址。',
+      'Art 已整理创作参数。除非用户在本次对话明确点名模型，request.modelId/request.providerId 就是 Art 详情页「Cindy 能力」为当前操作配置的精确模型来源；调用 Cindy Core media（完整工具名 mcp__cindy__media）prepare 时必须分别原样作为 model_id/provider_id，不要另行选型。referenceMedia.managedMediaUrls 是 Core 可读取的受管地址；attachedMediaCount 对应用户随当前消息交出的媒体，调用 Core 时继续使用对话中的原始媒体地址。',
     request: request,
   });
 }
