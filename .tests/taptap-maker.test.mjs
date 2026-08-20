@@ -164,7 +164,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.10');
+  assert.equal(manifest.version, '2.1.11');
   assert.match(manifest.whenToUse, /不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行/);
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -400,6 +400,8 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     },
   });
   assert.equal(init.ok, true);
+  assert.equal(harness.nodeRequests[0].timeoutMs, 180_000);
+  assert.equal(harness.nodeRequests[0].maxTotalMs, 900_000);
   assert.equal(
     harness.nodeRequests[0].params.arguments.workdir,
     '/tmp/trusted-maker',
@@ -413,7 +415,7 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     },
   });
   assert.equal(build.ok, true);
-  assert.equal(harness.nodeRequests[1].timeoutMs, 60_000);
+  assert.equal(harness.nodeRequests[1].timeoutMs, 180_000);
   assert.equal(harness.nodeRequests[1].maxTotalMs, 900_000);
   assert.match(
     harness.nodeRequests[1].params._meta.progressToken,
@@ -465,6 +467,43 @@ test('动态工具列表携带可信项目 root，并过滤固定工具', async 
   }]);
   assert.equal(harness.nodeRequests[0].method, 'cindy/tools-list');
   assert.deepEqual(JSON.parse(JSON.stringify(harness.nodeRequests[0].params)), {
+    target_dir: '/tmp/trusted-maker',
+  });
+});
+
+test('长时间动态工具允许三分钟无响应并保留十五分钟总上限', async () => {
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'generate_image' }] },
+      };
+    }
+    return {
+      ok: true,
+      result: { content: [{ type: 'text', text: 'generated' }] },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'generate_image',
+    args: { name: 'timeout-probe' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.nodeRequests[1].method, 'tools/call');
+  assert.equal(harness.nodeRequests[1].timeoutMs, 180_000);
+  assert.equal(harness.nodeRequests[1].maxTotalMs, 900_000);
+  assert.match(
+    harness.nodeRequests[1].params._meta.progressToken,
+    /^cindy-maker-\d+$/,
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.nodeRequests[1].params.arguments)), {
+    name: 'timeout-probe',
     target_dir: '/tmp/trusted-maker',
   });
 });
