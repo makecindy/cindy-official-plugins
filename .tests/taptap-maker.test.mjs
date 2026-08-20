@@ -554,6 +554,45 @@ test('Maker 状态保留登录结论但不暴露本地绝对路径', async () =>
   assert.doesNotMatch(JSON.stringify(result.result), /\/Users|\/private\/tmp|\/opt\/homebrew/);
 });
 
+test('Maker 状态认证恢复提示使用插件设置页或 maker_login，不引导裸 CLI', async () => {
+  const cases = [
+    {
+      name: 'PAT 已存在但 TapTap auth 缺失',
+      text: 'TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'TapTap auth 缺失。请在 TapTap Maker 插件设置页重新保存 PAT，或调用 `maker_login` 重新连接账号。',
+    },
+    {
+      name: 'PAT 和 TapTap auth 都缺失',
+      text: 'Maker PAT 和 TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'Maker PAT 和 TapTap auth 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    },
+    {
+      name: 'TapTap auth 已存在但 PAT 缺失',
+      text: 'Maker PAT 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'Maker PAT 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    },
+  ];
+
+  for (const testCase of cases) {
+    const harness = createMainHarness(async () => ({
+      ok: true,
+      result: {
+        content: [{ type: 'text', text: testCase.text }],
+      },
+    }));
+    const result = await harness.call('maker_status', {
+      session_context: {
+        workdir_is_local: true,
+        workdir: '/tmp/trusted-maker',
+      },
+    });
+    const text = result.result.content[0].text;
+    assert.equal(text, testCase.expected, testCase.name);
+    assert.match(text, /maker_login/, testCase.name);
+    assert.doesNotMatch(text, /taptap-maker login/, testCase.name);
+  }
+});
+
 test('账号工具不向模型返回 PAT 提示和 CLI 本地保存路径', async () => {
   const harness = createMainHarness(async () => ({
     ok: true,

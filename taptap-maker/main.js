@@ -277,12 +277,30 @@ function makerFailureDetails(message) {
   return details;
 }
 
+function normalizeMakerAuthGuidance(value) {
+  return String(value || '')
+    .replace(
+      'Maker PAT 和 TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      'Maker PAT 和 TapTap auth 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    )
+    .replace(
+      'TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      'TapTap auth 缺失。请在 TapTap Maker 插件设置页重新保存 PAT，或调用 `maker_login` 重新连接账号。',
+    )
+    .replace(
+      'Maker PAT 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      'Maker PAT 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    );
+}
+
 function sanitizeMakerStatus(result) {
   if (!isObject(result) || !Array.isArray(result.content)) return result;
   return Object.assign({}, result, {
     content: result.content.map(function sanitizeStatusItem(item) {
       if (!isObject(item) || item.type !== 'text' || typeof item.text !== 'string') return item;
-      return Object.assign({}, item, { text: redactLocalPaths(item.text) });
+      return Object.assign({}, item, {
+        text: normalizeMakerAuthGuidance(redactLocalPaths(item.text)),
+      });
     }),
     ...(result.structuredContent !== undefined
       ? { structuredContent: redactLocalPathsInValue(result.structuredContent) }
