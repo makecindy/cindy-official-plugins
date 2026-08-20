@@ -7,7 +7,10 @@
       "description": "Inspect only the current session workspace's TapTap Maker status, including login, project binding, Git, Python, Lua LSP, and tool readiness. If the project is elsewhere, ask the user to open it in Cindy; do not bypass the plugin with Shell, CLI, npx, or direct MCP.",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "Set to true during frequent polling to skip the remote Git sync check."
+          "description": "In full diagnostic mode, set true to skip remote Git sync and development-tool freshness checks. Summary mode is local-only by default."
+        },
+        "/properties/detail": {
+          "description": "Set true only for a full diagnostic; the default is a fast, local, read-only status summary."
         }
       }
     },

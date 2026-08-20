@@ -17,6 +17,8 @@ import rootRouterModule from '../taptap-maker/node/mcp-root-router.cjs';
 const pluginRoot = new URL('../taptap-maker/', import.meta.url);
 const mainSource = readFileSync(new URL('main.js', pluginRoot), 'utf8');
 const accountSource = readFileSync(new URL('node/account.cjs', pluginRoot), 'utf8');
+const makerMcpSource = readFileSync(new URL('node/maker-mcp.cjs', pluginRoot), 'utf8');
+const makerChildSource = readFileSync(new URL('node/maker-child.cjs', pluginRoot), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
 const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
@@ -24,6 +26,10 @@ const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
 const provisioning = JSON.parse(readFileSync(new URL('../provisioning.json', import.meta.url), 'utf8'));
 const vendorPackage = JSON.parse(
   readFileSync(new URL('vendor/taptap-maker/package.json', pluginRoot), 'utf8'),
+);
+const vendorBundleSource = readFileSync(
+  new URL('vendor/taptap-maker/dist/maker.js', pluginRoot),
+  'utf8',
 );
 const requireFromTest = createRequire(import.meta.url);
 
@@ -164,7 +170,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.10');
+  assert.equal(manifest.version, '2.1.11');
   assert.match(manifest.whenToUse, /不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行/);
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -173,6 +179,10 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_ads_guide').description,
     /不会修改项目/,
+  );
+  assert.match(
+    manifest.tools.find((tool) => tool.name === 'maker_status').parameters.properties.detail.description,
+    /完整诊断/,
   );
   assert.doesNotMatch(
     manifest.tools.find((tool) => tool.name === 'maker_call_tool').description,
@@ -203,7 +213,17 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn']);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.28');
+  assert.equal(vendorPackage.version, '0.0.31');
+  assert.match(vendorBundleSource, /TAPTAP_MAKER_DISTRIBUTION/);
+});
+
+test('Cindy 的 Maker Runtime 入口固定声明插件分发环境', () => {
+  for (const source of [makerMcpSource, makerChildSource]) {
+    assert.match(
+      source,
+      /process\.env\.TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin';/,
+    );
+  }
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
@@ -1053,8 +1073,11 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
       target_dir: '/tmp/cindy-taptap-maker-unbound-test',
     });
     assert.equal(listed.error, undefined, stderr);
+    assert.equal(listed.result.tools.length, 18);
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_status_lite'));
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_build_current_directory'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'generate_image'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'get_debug_feedbacks'));
 
     const guide = await request('3', 'resources/read', {
       uri: 'maker://ads-integration-guide',
@@ -1063,6 +1086,17 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
     assert.match(guide.result.contents[0].text, /TapTap Maker ads integration guide/);
     assert.match(guide.result.contents[0].text, /get_ad_config/);
     assert.match(guide.result.contents[0].text, /engine-docs\/recipes\/sdk\.md/);
+
+    const status = await request('4', 'tools/call', {
+      name: 'maker_status_lite',
+      arguments: {
+        target_dir: '/tmp/cindy-taptap-maker-unbound-test',
+        detail: true,
+        skip_remote_sync: true,
+      },
+    });
+    assert.equal(status.error, undefined, stderr);
+    assert.match(status.result.content[0].text, /- status: managed_by_plugin/);
   } finally {
     child.kill();
     await once(child, 'close');
