@@ -1,6 +1,6 @@
 {
   "name": "@taptap/maker",
-  "version": "0.0.28",
+  "version": "0.0.31",
   "type": "module",
   "description": "TapTap Maker local development CLI and MCP server",
   "main": "dist/maker.js",

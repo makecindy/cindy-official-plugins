@@ -7,7 +7,10 @@
       "description": "現在のセッションワークスペースだけを対象に、ログイン、プロジェクト関連付け、Git、Python、Lua LSP、開発ツールの状態を確認します。別の場所にある場合は Cindy で開くよう案内し、Shell、CLI、npx、直接 MCP で迂回しません。",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "頻繁に確認する場合は true にして、リモート Git 同期チェックを省略できます。"
+          "description": "完全診断モードで true にすると、リモート Git 同期と開発ツールの更新確認を省略します。既定の概要モードはローカル状態だけを確認します。"
+        },
+        "/properties/detail": {
+          "description": "完全診断が必要な場合だけ true にします。既定では高速なローカル読み取り専用の状態概要を返します。"
         }
       }
     },

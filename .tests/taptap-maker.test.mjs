@@ -17,6 +17,8 @@ import rootRouterModule from '../taptap-maker/node/mcp-root-router.cjs';
 const pluginRoot = new URL('../taptap-maker/', import.meta.url);
 const mainSource = readFileSync(new URL('main.js', pluginRoot), 'utf8');
 const accountSource = readFileSync(new URL('node/account.cjs', pluginRoot), 'utf8');
+const makerMcpSource = readFileSync(new URL('node/maker-mcp.cjs', pluginRoot), 'utf8');
+const makerChildSource = readFileSync(new URL('node/maker-child.cjs', pluginRoot), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
 const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
@@ -24,6 +26,10 @@ const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
 const provisioning = JSON.parse(readFileSync(new URL('../provisioning.json', import.meta.url), 'utf8'));
 const vendorPackage = JSON.parse(
   readFileSync(new URL('vendor/taptap-maker/package.json', pluginRoot), 'utf8'),
+);
+const vendorBundleSource = readFileSync(
+  new URL('vendor/taptap-maker/dist/maker.js', pluginRoot),
+  'utf8',
 );
 const requireFromTest = createRequire(import.meta.url);
 
@@ -164,7 +170,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.10');
+  assert.equal(manifest.version, '2.1.11');
   assert.match(manifest.whenToUse, /不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行/);
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -173,6 +179,10 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_ads_guide').description,
     /不会修改项目/,
+  );
+  assert.match(
+    manifest.tools.find((tool) => tool.name === 'maker_status').parameters.properties.detail.description,
+    /完整诊断/,
   );
   assert.doesNotMatch(
     manifest.tools.find((tool) => tool.name === 'maker_call_tool').description,
@@ -203,7 +213,44 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn']);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.28');
+  assert.equal(vendorPackage.version, '0.0.31');
+  assert.match(vendorBundleSource, /TAPTAP_MAKER_DISTRIBUTION/);
+});
+
+test('Cindy 的 Maker Runtime 入口固定声明插件分发环境', () => {
+  for (const source of [makerMcpSource, makerChildSource]) {
+    assert.match(
+      source,
+      /process\.env\.TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin';/,
+    );
+  }
+});
+
+test('不可逆的角色音色确认不会在结果未知时被 Runtime 自动重放', () => {
+  assert.match(
+    vendorBundleSource,
+    /NON_RETRYABLE_REMOTE_PROXY_TOOLS[^\n]+confirm_character_voice/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /attempts: mustNotRetry \? 1 : void 0/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /confirm_character_voice may have completed before its response was interrupted\.[\s\S]{0,240}Do not retry automatically/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /if \(isNonReplayableTool\(req\.name\)\) \{\s*req\.resolve\(nonReplayableToolResult\(req\.name, "not_executed"\)\);\s*continue;/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /if \(isNonReplayableTool\(name\)\) \{\s*return nonReplayableToolResult\(name, "unknown"\);/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /Confirmation consumes one ElevenLabs Voice Slot\.[\s\S]{0,300}execution state is unknown[\s\S]{0,300}Do not retry automatically/,
+  );
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
@@ -532,6 +579,45 @@ test('Maker 状态保留登录结论但不暴露本地绝对路径', async () =>
   assert.match(result.result.content[0].text, /reconnect in \/mcp/);
   assert.equal(result.result.structuredContent.configPath, '<local-path>');
   assert.doesNotMatch(JSON.stringify(result.result), /\/Users|\/private\/tmp|\/opt\/homebrew/);
+});
+
+test('Maker 状态认证恢复提示使用插件设置页或 maker_login，不引导裸 CLI', async () => {
+  const cases = [
+    {
+      name: 'PAT 已存在但 TapTap auth 缺失',
+      text: 'TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'TapTap auth 缺失。请在 TapTap Maker 插件设置页重新保存 PAT，或调用 `maker_login` 重新连接账号。',
+    },
+    {
+      name: 'PAT 和 TapTap auth 都缺失',
+      text: 'Maker PAT 和 TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'Maker PAT 和 TapTap auth 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    },
+    {
+      name: 'TapTap auth 已存在但 PAT 缺失',
+      text: 'Maker PAT 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+      expected: 'Maker PAT 缺失。请调用 `maker_login` 重新连接账号，或在 TapTap Maker 插件设置页配置 PAT。',
+    },
+  ];
+
+  for (const testCase of cases) {
+    const harness = createMainHarness(async () => ({
+      ok: true,
+      result: {
+        content: [{ type: 'text', text: testCase.text }],
+      },
+    }));
+    const result = await harness.call('maker_status', {
+      session_context: {
+        workdir_is_local: true,
+        workdir: '/tmp/trusted-maker',
+      },
+    });
+    const text = result.result.content[0].text;
+    assert.equal(text, testCase.expected, testCase.name);
+    assert.match(text, /maker_login/, testCase.name);
+    assert.doesNotMatch(text, /taptap-maker login/, testCase.name);
+  }
 });
 
 test('账号工具不向模型返回 PAT 提示和 CLI 本地保存路径', async () => {
@@ -1053,8 +1139,11 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
       target_dir: '/tmp/cindy-taptap-maker-unbound-test',
     });
     assert.equal(listed.error, undefined, stderr);
+    assert.equal(listed.result.tools.length, 18);
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_status_lite'));
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_build_current_directory'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'generate_image'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'get_debug_feedbacks'));
 
     const guide = await request('3', 'resources/read', {
       uri: 'maker://ads-integration-guide',
@@ -1063,6 +1152,17 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
     assert.match(guide.result.contents[0].text, /TapTap Maker ads integration guide/);
     assert.match(guide.result.contents[0].text, /get_ad_config/);
     assert.match(guide.result.contents[0].text, /engine-docs\/recipes\/sdk\.md/);
+
+    const status = await request('4', 'tools/call', {
+      name: 'maker_status_lite',
+      arguments: {
+        target_dir: '/tmp/cindy-taptap-maker-unbound-test',
+        detail: true,
+        skip_remote_sync: true,
+      },
+    });
+    assert.equal(status.error, undefined, stderr);
+    assert.match(status.result.content[0].text, /- status: managed_by_plugin/);
   } finally {
     child.kill();
     await once(child, 'close');
