@@ -226,6 +226,33 @@ test('Cindy 的 Maker Runtime 入口固定声明插件分发环境', () => {
   }
 });
 
+test('不可逆的角色音色确认不会在结果未知时被 Runtime 自动重放', () => {
+  assert.match(
+    vendorBundleSource,
+    /NON_RETRYABLE_REMOTE_PROXY_TOOLS[^\n]+confirm_character_voice/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /attempts: mustNotRetry \? 1 : void 0/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /confirm_character_voice may have completed before its response was interrupted\.[\s\S]{0,240}Do not retry automatically/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /if \(isNonReplayableTool\(req\.name\)\) \{\s*req\.resolve\(nonReplayableToolResult\(req\.name, "not_executed"\)\);\s*continue;/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /if \(isNonReplayableTool\(name\)\) \{\s*return nonReplayableToolResult\(name, "unknown"\);/,
+  );
+  assert.match(
+    vendorBundleSource,
+    /Confirmation consumes one ElevenLabs Voice Slot\.[\s\S]{0,300}execution state is unknown[\s\S]{0,300}Do not retry automatically/,
+  );
+});
+
 test('设置页跟随宿主四语言并以英文回退', () => {
   const messages = readSettingsMessages();
   const englishKeys = Object.keys(messages.en).sort();

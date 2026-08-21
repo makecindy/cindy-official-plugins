@@ -43453,7 +43453,8 @@ var MAKER_REMOTE_PROXY_PUBLIC_DESCRIPTIONS = {
     "Call this tool only after audition_voices_for_character and only after the user explicitly selects a candidate or explicitly accepts the recommended candidate.",
     "Omit selected_index only after the user explicitly accepts the recommendation; absence of a user choice is not acceptance.",
     "Confirmation consumes one ElevenLabs Voice Slot.",
-    "Process one character at a time and do not call this tool in parallel for the same project."
+    "Process one character at a time and do not call this tool in parallel for the same project.",
+    "If the connection is interrupted after the request is sent, execution state is unknown. Do not retry automatically; first manually verify the character voice mapping and available Voice Slots."
   ].join(" "),
   create_3d_asset: [
     'Manage the complete Maker 3D asset lifecycle. Use action="start" to begin, action="query" to check progress, action="get_options" to inspect step options, action="continue" after review, and action="post_process" for supported follow-up operations.',
@@ -44736,6 +44737,7 @@ var VERSION = true ? "0.0.31" : "dev";
 var DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1e3;
 var DEFAULT_PROXY_RETRY_ATTEMPTS = 5;
 var DEFAULT_PROXY_RETRY_DELAY_MS = 30 * 1e3;
+var NON_RETRYABLE_REMOTE_PROXY_TOOLS = /* @__PURE__ */ new Set(["confirm_character_voice"]);
 var PREVIEW_REFRESH_TIMEOUT_MS = 15 * 1e3;
 var WATCHER_STOP_TIMEOUT_MS = 1500;
 var WATCHER_PROCESS_PATTERN = /(?:\btaptap-maker\b|\bmaker\.js\b).*\blogs\b.*\bwatch\b/;
@@ -45021,20 +45023,36 @@ async function callRemoteProxyTool(options) {
       });
     }
   };
-  const result = await retryMakerProxyOperation(callTool, {
-    onRetry: options.progressToken ? (event) => {
-      options.extra.sendNotification({
-        method: "notifications/progress",
-        params: {
-          progressToken: options.progressToken,
-          progress: event.attempt,
-          total: event.attempts,
-          message: event.message
-        }
-      }).catch(() => {
-      });
-    } : void 0
-  });
+  const mustNotRetry = NON_RETRYABLE_REMOTE_PROXY_TOOLS.has(options.name);
+  let result;
+  try {
+    result = await retryMakerProxyOperation(callTool, {
+      attempts: mustNotRetry ? 1 : void 0,
+      onRetry: options.progressToken ? (event) => {
+        options.extra.sendNotification({
+          method: "notifications/progress",
+          params: {
+            progressToken: options.progressToken,
+            progress: event.attempt,
+            total: event.attempts,
+            message: event.message
+          }
+        }).catch(() => {
+        });
+      } : void 0
+    });
+  } catch (error2) {
+    if (!mustNotRetry) {
+      throw error2;
+    }
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: "confirm_character_voice may have completed before its response was interrupted. Its execution state is unknown. Do not retry automatically. First manually verify the character voice mapping and available ElevenLabs Voice Slots; retry only after confirmation."
+      }]
+    };
+  }
   return await materializeRemoteProxyToolAssets({
     toolName: options.name,
     targetDir: proxy.projectRoot,
@@ -54187,6 +54205,28 @@ var VERSION3 = typeof __PROXY_VERSION__ !== "undefined" ? __PROXY_VERSION__ : "d
 var LOCAL_PROXY_TAG = "local";
 var DEFAULT_RECONNECT_INTERVAL_MS = 5e3;
 var MAX_RECONNECT_INTERVAL_MS = 60 * 1e3;
+var NON_REPLAYABLE_TOOL_NAMES = /* @__PURE__ */ new Set(["confirm_character_voice"]);
+function isNonReplayableTool(name) {
+  return NON_REPLAYABLE_TOOL_NAMES.has(name);
+}
+function nonReplayableToolResult(name, executionState) {
+  if (executionState === "not_executed") {
+    return {
+      isError: true,
+      content: [{
+        type: "text",
+        text: `${name} was not sent while the Maker proxy was reconnecting. It was not executed. Wait for the connection to recover, then ask the user to explicitly retry.`
+      }]
+    };
+  }
+  return {
+    isError: true,
+    content: [{
+      type: "text",
+      text: `${name} may have completed before its response was interrupted. Its execution state is unknown. Do not retry automatically. First manually verify the character voice mapping and available ElevenLabs Voice Slots; retry only after confirmation.`
+    }]
+  };
+}
 function convertMcpApplicationErrorToToolResult(error2) {
   if (!(error2 instanceof Error)) {
     return void 0;
@@ -54734,6 +54774,10 @@ var TapTapMCPProxy = class {
     this.log("info", `Processing ${this.pendingRequests.length} pending requests...`);
     while (this.pendingRequests.length > 0) {
       const req = this.pendingRequests.shift();
+      if (isNonReplayableTool(req.name)) {
+        req.resolve(nonReplayableToolResult(req.name, "not_executed"));
+        continue;
+      }
       if (now - req.timestamp > timeout) {
         req.reject(new Error("Request timeout while waiting for reconnection"));
         continue;
@@ -54868,6 +54912,9 @@ var TapTapMCPProxy = class {
       }
       if (!this.connected) {
         if (this.reconnecting) {
+          if (isNonReplayableTool(name)) {
+            return nonReplayableToolResult(name, "not_executed");
+          }
           this.log("info", `⏳ Queueing request: ${name} (reconnecting...)`);
           return new Promise((resolve, reject) => {
             this.pendingRequests.push({
@@ -54904,9 +54951,15 @@ var TapTapMCPProxy = class {
         if (this.isNetworkError(error2)) {
           this.log("error", "❌ Network error detected, marking connection as lost");
           this.connected = false;
-          if (!this.reconnecting) {
+          const reconnectWasActive = this.reconnecting;
+          if (!reconnectWasActive) {
             this.log("info", "Triggering immediate reconnection...");
             this.reconnectToServer();
+          }
+          if (isNonReplayableTool(name)) {
+            return nonReplayableToolResult(name, "unknown");
+          }
+          if (!reconnectWasActive) {
             this.log("info", `⏳ Queueing current request: ${name}`);
             return new Promise((resolve, reject) => {
               this.pendingRequests.push({
