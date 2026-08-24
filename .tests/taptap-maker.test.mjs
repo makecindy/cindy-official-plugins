@@ -752,6 +752,11 @@ test('Maker 完整状态将独立 CLI 指引改为 Cindy 插件工具', async ()
         type: 'text',
         text: [
           'Maker MCP issue reporting',
+          '  maker://status; use maker_status_lite when resources are unavailable.',
+          'Build, preview, run, submit, or push with maker_build_current_directory.',
+          '- next_action: 仅当用户明确要求构建、提交或预览时调用 maker_build_current_directory。',
+          'Maker PAT not found. Run `taptap-maker login` to complete Maker CLI login, or provide MAKER_PAT/PAT only for CI/emergency fallback.',
+          'Maker CLI login timed out. Run `taptap-maker login` and try again.',
           '- After consent, send sanitized evidence through stdin. Reuse the active client exact Maker command/args and append:',
           '  mcp report --ide <client> --target-dir <project> --context-stdin --consent --json',
           '- Never use an unversioned npm package; preserve the configured version and Windows absolute launcher.',
@@ -784,10 +789,14 @@ test('Maker 完整状态将独立 CLI 指引改为 Cindy 插件工具', async ()
   assert.match(text, /maker_init/);
   assert.match(text, /maker_login/);
   assert.match(text, /maker_doctor/);
+  assert.match(text, /maker_status/);
+  assert.match(text, /maker_build/);
   assert.match(text, /- package: @taptap\/maker@0\.0\.31/);
   assert.doesNotMatch(text, /\bmcp report\b/);
   assert.doesNotMatch(text, /\btaptap-maker\b|\bnpx\b/);
   assert.doesNotMatch(text, /active client exact Maker command|unversioned npm package/);
+  assert.doesNotMatch(text, /maker_status_lite|maker_build_current_directory/);
+  assert.doesNotMatch(text, /Maker CLI login|MAKER_PAT|PAT only for CI/);
   assert.doesNotMatch(text, /``/);
 });
 
@@ -1334,6 +1343,22 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
     });
     assert.equal(status.error, undefined, stderr);
     assert.match(status.result.content[0].text, /- status: managed_by_plugin/);
+
+    const harness = createMainHarness(async () => ({ ok: true, result: status.result }));
+    const sanitizedStatus = await harness.call('maker_status', {
+      detail: true,
+      skip_remote_sync: true,
+      session_context: {
+        workdir_is_local: true,
+        workdir: '/tmp/cindy-taptap-maker-unbound-test',
+      },
+    });
+    const sanitizedText = sanitizedStatus.result.content[0].text;
+    assert.match(sanitizedText, /- status: managed_by_plugin/);
+    assert.match(sanitizedText, /maker_build/);
+    assert.doesNotMatch(sanitizedText, /maker_status_lite|maker_build_current_directory/);
+    assert.doesNotMatch(sanitizedText, /\btaptap-maker\b|\bnpx\b|\bmcp report\b/);
+    assert.doesNotMatch(sanitizedText, /Maker CLI login|MAKER_PAT|PAT only for CI/);
   } finally {
     child.kill();
     await once(child, 'close');

@@ -313,6 +313,14 @@ function normalizeMakerPluginGuidance(value) {
       /本地 Maker 工作流请参考 taptap-maker-local workflow guide document；CLI 负责初始化\/PAT\/app\/clone，MCP 只保留状态和同步构建。/g,
       '本地 Maker 工作流请参考 taptap-maker-local workflow guide document；Cindy 插件的 `maker_login`、`maker_apps` 和 `maker_init` 负责账号与项目初始化。',
     )
+    .replace(
+      /Maker PAT not found\. Run `taptap-maker login` to complete Maker CLI login,\s*or provide MAKER_PAT\/PAT only for CI\/emergency fallback\./g,
+      'Maker PAT not found. Call `maker_login` to reconnect the account, or configure PAT in TapTap Maker plugin settings.',
+    )
+    .replace(
+      /Maker CLI login timed out\. Run `taptap-maker login` and try again\./g,
+      'Maker account connection timed out. Call `maker_login` and try again.',
+    )
     .split(/\r?\n/)
     .map(function normalizeMakerGuidanceLine(line) {
       if (/\bmcp report\b|active client(?:'s)? exact Maker command|unversioned npm package/i.test(line)) {
@@ -321,11 +329,14 @@ function normalizeMakerPluginGuidance(value) {
         return '- 经用户同意后，请通过 Cindy 的反馈渠道提交已脱敏的问题信息；不要运行独立 Maker CLI。';
       }
       var normalized = line
+        .replace(/`?maker_status_lite`?/g, '`maker_status`')
+        .replace(/`?maker_build_current_directory`?/g, '`maker_build`')
         .replace(/`?taptap-maker login`?/g, '`maker_login`')
         .replace(/`?taptap-maker apps(?:\s+--json)?`?/g, '`maker_apps`')
         .replace(/`?taptap-maker dev-kit update`?/g, '`maker_init`')
         .replace(/`?taptap-maker doctor`?/g, '`maker_doctor`')
-        .replace(/`?taptap-maker init(?:\s+--skip-mcp-install)?`?/g, '`maker_init`');
+        .replace(/`?taptap-maker init(?:\s+--skip-mcp-install)?`?/g, '`maker_init`')
+        .replace(/Maker CLI login/g, 'Maker account connection');
       if (/\btaptap-maker\b|\bnpx\b/i.test(normalized)) {
         if (fallbackGuidanceAdded) return '';
         fallbackGuidanceAdded = true;
