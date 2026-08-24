@@ -62,7 +62,7 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.2.7');
+  assert.equal(manifest.version, '1.2.9');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
