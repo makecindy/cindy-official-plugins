@@ -293,13 +293,58 @@ function normalizeMakerAuthGuidance(value) {
     );
 }
 
+function normalizeMakerPluginGuidance(value) {
+  var reportGuidanceAdded = false;
+  var fallbackGuidanceAdded = false;
+  return normalizeMakerAuthGuidance(value)
+    .replace(
+      /Maker initialization next_step: execute `taptap-maker init(?: --skip-mcp-install)?`(?: through the bundled plugin CLI)?\./g,
+      'Maker initialization next_step: call `maker_apps`, then `maker_init` through the Cindy plugin.',
+    )
+    .replace(
+      /当前目录尚未绑定 Maker 项目。请运行 `taptap-maker init`。/g,
+      '当前目录尚未绑定 Maker 项目。请先调用 `maker_apps` 选择应用，再调用 `maker_init` 初始化当前目录。',
+    )
+    .replace(
+      /如果缺少 Maker PAT，CLI 会在 init 流程内自动打开登录授权页面并完成本地保存。/g,
+      '如果缺少 Maker PAT，请调用 `maker_login`，或在 TapTap Maker 插件设置页配置 PAT。',
+    )
+    .replace(
+      /本地 Maker 工作流请参考 taptap-maker-local workflow guide document；CLI 负责初始化\/PAT\/app\/clone，MCP 只保留状态和同步构建。/g,
+      '本地 Maker 工作流请参考 taptap-maker-local workflow guide document；Cindy 插件的 `maker_login`、`maker_apps` 和 `maker_init` 负责账号与项目初始化。',
+    )
+    .split(/\r?\n/)
+    .map(function normalizeMakerGuidanceLine(line) {
+      if (/\bmcp report\b|active client(?:'s)? exact Maker command|unversioned npm package/i.test(line)) {
+        if (reportGuidanceAdded) return '';
+        reportGuidanceAdded = true;
+        return '- 经用户同意后，请通过 Cindy 的反馈渠道提交已脱敏的问题信息；不要运行独立 Maker CLI。';
+      }
+      var normalized = line
+        .replace(/`?taptap-maker login`?/g, '`maker_login`')
+        .replace(/`?taptap-maker apps(?:\s+--json)?`?/g, '`maker_apps`')
+        .replace(/`?taptap-maker dev-kit update`?/g, '`maker_init`')
+        .replace(/`?taptap-maker doctor`?/g, '`maker_doctor`')
+        .replace(/`?taptap-maker init(?:\s+--skip-mcp-install)?`?/g, '`maker_init`');
+      if (/\btaptap-maker\b|\bnpx\b/i.test(normalized)) {
+        if (fallbackGuidanceAdded) return '';
+        fallbackGuidanceAdded = true;
+        return '- 请使用 Cindy 插件工具完成该步骤：`maker_login`、`maker_apps`、`maker_init` 或 `maker_doctor`。';
+      }
+      return normalized;
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function sanitizeMakerStatus(result) {
   if (!isObject(result) || !Array.isArray(result.content)) return result;
   return Object.assign({}, result, {
     content: result.content.map(function sanitizeStatusItem(item) {
       if (!isObject(item) || item.type !== 'text' || typeof item.text !== 'string') return item;
       return Object.assign({}, item, {
-        text: normalizeMakerAuthGuidance(redactLocalPaths(item.text)),
+        text: normalizeMakerPluginGuidance(redactLocalPaths(item.text)),
       });
     }),
     ...(result.structuredContent !== undefined

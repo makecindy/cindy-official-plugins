@@ -744,6 +744,53 @@ test('Maker 状态认证恢复提示使用插件设置页或 maker_login，不�
   }
 });
 
+test('Maker 完整状态将独立 CLI 指引改为 Cindy 插件工具', async () => {
+  const harness = createMainHarness(async () => ({
+    ok: true,
+    result: {
+      content: [{
+        type: 'text',
+        text: [
+          'Maker MCP issue reporting',
+          '- After consent, send sanitized evidence through stdin. Reuse the active client exact Maker command/args and append:',
+          '  mcp report --ide <client> --target-dir <project> --context-stdin --consent --json',
+          '- Never use an unversioned npm package; preserve the configured version and Windows absolute launcher.',
+          'Maker initialization next_step: execute `taptap-maker init`.',
+          'Maker initialization next_step: execute `taptap-maker init`.',
+          '当前目录尚未绑定 Maker 项目。请运行 `taptap-maker init`。',
+          '- next_action: 当前目录没有可用的独立 Maker Git 仓库；请运行 `taptap-maker init` 重新初始化。',
+          '用户选择 0/new 或已有 app 后，next_step: 执行 `taptap-maker init`。',
+          '如需完整列表，请运行 taptap-maker apps --json 查看全部 app。',
+          '如果本地鉴权已失效，请运行 `taptap-maker login` 重新完成 Maker 登录授权。',
+          '- next_step: 请运行 taptap-maker dev-kit update，或重新执行 taptap-maker init。',
+          '- next_step: 当前目录已经有 Maker 绑定信息；先运行 taptap-maker doctor 或读取 maker://status 确认状态。',
+          '  `npx -y --package @taptap/maker@0.0.31 taptap-maker mcp report ...`.',
+          '- package: @taptap/maker@0.0.31',
+          '如果缺少 Maker PAT，CLI 会在 init 流程内自动打开登录授权页面并完成本地保存。',
+        ].join('\n'),
+      }],
+    },
+  }));
+
+  const result = await harness.call('maker_status', {
+    detail: true,
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+  const text = result.result.content[0].text;
+  assert.match(text, /maker_apps/);
+  assert.match(text, /maker_init/);
+  assert.match(text, /maker_login/);
+  assert.match(text, /maker_doctor/);
+  assert.match(text, /- package: @taptap\/maker@0\.0\.31/);
+  assert.doesNotMatch(text, /\bmcp report\b/);
+  assert.doesNotMatch(text, /\btaptap-maker\b|\bnpx\b/);
+  assert.doesNotMatch(text, /active client exact Maker command|unversioned npm package/);
+  assert.doesNotMatch(text, /``/);
+});
+
 test('账号工具不向模型返回 PAT 提示和 CLI 本地保存路径', async () => {
   const harness = createMainHarness(async () => ({
     ok: true,
