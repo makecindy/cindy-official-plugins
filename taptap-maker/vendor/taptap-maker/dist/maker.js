@@ -44577,6 +44577,18 @@ function createDefaultClient(_context, handlers) {
     }
   );
 }
+function markMakerProxyToolNotExecuted(error2) {
+  if (error2 instanceof Error) {
+    error2.makerProxyToolNotExecuted = true;
+    return error2;
+  }
+  const wrapped = new Error(String(error2));
+  wrapped.makerProxyToolNotExecuted = true;
+  return wrapped;
+}
+function isMakerProxyToolNotExecuted(error2) {
+  return typeof error2 === "object" && error2 !== null && error2.makerProxyToolNotExecuted === true;
+}
 function createMakerRemoteProxyManager(options = {}) {
   const connections = /* @__PURE__ */ new Map();
   const retiredEntries = /* @__PURE__ */ new Set();
@@ -44685,8 +44697,13 @@ function createMakerRemoteProxyManager(options = {}) {
       throw error2;
     }
   };
-  const run = async (context, operation) => {
-    const entry = await acquire(context);
+  const run = async (context, operation, markConnectFailure = false) => {
+    let entry;
+    try {
+      entry = await acquire(context);
+    } catch (error2) {
+      throw markConnectFailure ? markMakerProxyToolNotExecuted(error2) : error2;
+    }
     entry.lastUsedAt = Date.now();
     try {
       return await operation(entry.client);
@@ -44710,7 +44727,8 @@ function createMakerRemoteProxyManager(options = {}) {
     async callTool(context, request, requestOptions) {
       return await run(
         context,
-        async (client) => await client.callTool(request, void 0, requestOptions)
+        async (client) => await client.callTool(request, void 0, requestOptions),
+        true
       );
     },
     getCachedTools(context) {
@@ -44989,25 +45007,32 @@ async function callRemoteProxyTool(options) {
       requestOptions
     );
   } : async () => {
-    const transport = trackMakerChildTransport(
-      new StdioClientTransport({
-        command: proxy.command,
-        args: proxy.args,
-        env: mergeStringEnv2(process.env, proxy.envVars),
-        stderr: "pipe"
-      })
-    );
-    const client = new Client(
-      {
-        name: "taptap-maker-tool-call-forwarder",
-        version: VERSION
-      },
-      {
-        capabilities: {}
-      }
-    );
+    let client;
     try {
+      const transport = trackMakerChildTransport(
+        new StdioClientTransport({
+          command: proxy.command,
+          args: proxy.args,
+          env: mergeStringEnv2(process.env, proxy.envVars),
+          stderr: "pipe"
+        })
+      );
+      client = new Client(
+        {
+          name: "taptap-maker-tool-call-forwarder",
+          version: VERSION
+        },
+        {
+          capabilities: {}
+        }
+      );
       await client.connect(transport);
+    } catch (error2) {
+      await (client == null ? void 0 : client.close().catch(() => {
+      }));
+      throw markMakerProxyToolNotExecuted(error2);
+    }
+    try {
       return await client.callTool(
         {
           name: options.name,
@@ -45045,7 +45070,14 @@ async function callRemoteProxyTool(options) {
     if (!mustNotRetry) {
       throw error2;
     }
-    return {
+    const executionState = isMakerProxyToolNotExecuted(error2) ? "not_executed" : "unknown";
+    return executionState === "not_executed" ? {
+      isError: true,
+      content: [{
+        type: "text",
+        text: "confirm_character_voice was not sent because the Maker proxy connection could not be established. It was not executed. Wait for the connection to recover, then ask the user to explicitly retry."
+      }]
+    } : {
       isError: true,
       content: [{
         type: "text",

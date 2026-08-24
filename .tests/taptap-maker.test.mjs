@@ -167,6 +167,57 @@ function loadAccountInternals() {
   return context.__accountInternals;
 }
 
+function extractVendorBundleSection(startMarker, endMarker) {
+  const start = vendorBundleSource.indexOf(startMarker);
+  assert.notEqual(start, -1, `missing vendor bundle marker: ${startMarker}`);
+  const end = vendorBundleSource.indexOf(endMarker, start);
+  assert.notEqual(end, -1, `missing vendor bundle marker: ${endMarker}`);
+  return vendorBundleSource.slice(start, end);
+}
+
+function loadVendorVoiceConfirmationInternals(overrides = {}) {
+  const managerSource = extractVendorBundleSection(
+    'function createContextKey',
+    '// src/maker/server/mcp.ts',
+  );
+  const toolCallSource = extractVendorBundleSection(
+    'async function callRemoteProxyTool',
+    'function createRemoteProxyProgressHandler',
+  );
+  const context = createContext({
+    Client: class {},
+    Error,
+    ErrorCode: { ConnectionClosed: -32000 },
+    MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES: [],
+    Map,
+    NON_RETRYABLE_REMOTE_PROXY_TOOLS: new Set(['confirm_character_voice']),
+    Promise,
+    Set,
+    StdioClientTransport: class {},
+    createHash: () => ({ update: () => ({ digest: () => 'test-context' }) }),
+    createRemoteProxyCallToolOptions: () => ({}),
+    createRemoteProxyContext: ({ targetDir }) => ({
+      args: [],
+      command: 'unused',
+      envVars: {},
+      projectRoot: targetDir,
+    }),
+    isConnectionClosedError: () => false,
+    materializeRemoteProxyToolAssets: async ({ result }) => result,
+    mergeStringEnv2: () => ({}),
+    prepareRemoteProxyToolArgsAsync: async ({ args }) => args,
+    retryMakerProxyOperation: async (operation) => operation(),
+    trackMakerChildTransport: (transport) => transport,
+    ...overrides,
+  });
+  new Script(
+    `${managerSource}\n${toolCallSource}\n` +
+      'globalThis.__voiceConfirmationInternals = { callRemoteProxyTool, createMakerRemoteProxyManager };',
+    { filename: 'taptap-maker/vendor/taptap-maker/dist/maker.js' },
+  ).runInContext(context);
+  return context.__voiceConfirmationInternals;
+}
+
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
@@ -251,6 +302,79 @@ test('不可逆的角色音色确认不会在结果未知时被 Runtime 自动�
     vendorBundleSource,
     /Confirmation consumes one ElevenLabs Voice Slot\.[\s\S]{0,300}execution state is unknown[\s\S]{0,300}Do not retry automatically/,
   );
+});
+
+test('角色音色确认在 Proxy 初始化失败时明确返回未执行', async () => {
+  const { callRemoteProxyTool, createMakerRemoteProxyManager } =
+    loadVendorVoiceConfirmationInternals();
+  const manager = createMakerRemoteProxyManager({
+    createTransport: () => ({}),
+    createClient: () => ({
+      async connect() {
+        throw new Error('MCP initialize failed');
+      },
+      async close() {},
+    }),
+  });
+
+  const result = await callRemoteProxyTool({
+    targetDir: '/tmp/maker-project',
+    name: 'confirm_character_voice',
+    args: {},
+    extra: { sendNotification: async () => {} },
+    manager,
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /It was not executed/);
+  assert.doesNotMatch(result.content[0].text, /execution state is unknown/);
+});
+
+test('角色音色确认在直接 Proxy 初始化失败时明确返回未执行', async () => {
+  class FakeClient {
+    async connect() {
+      throw new Error('direct MCP initialize failed');
+    }
+
+    async close() {}
+  }
+
+  const { callRemoteProxyTool } = loadVendorVoiceConfirmationInternals({
+    Client: FakeClient,
+    StdioClientTransport: class {},
+  });
+  const result = await callRemoteProxyTool({
+    targetDir: '/tmp/maker-project',
+    name: 'confirm_character_voice',
+    args: {},
+    extra: { sendNotification: async () => {} },
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /It was not executed/);
+  assert.doesNotMatch(result.content[0].text, /execution state is unknown/);
+});
+
+test('角色音色确认在请求派发后中断时返回未知态且不重试', async () => {
+  const { callRemoteProxyTool } = loadVendorVoiceConfirmationInternals();
+  let attempts = 0;
+  const result = await callRemoteProxyTool({
+    targetDir: '/tmp/maker-project',
+    name: 'confirm_character_voice',
+    args: {},
+    extra: { sendNotification: async () => {} },
+    manager: {
+      async callTool() {
+        attempts += 1;
+        throw new Error('connection reset after request dispatch');
+      },
+    },
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /execution state is unknown/);
+  assert.match(result.content[0].text, /Do not retry automatically/);
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
