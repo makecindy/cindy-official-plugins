@@ -70,7 +70,7 @@
       }
     },
     "maker_list_tools": {
-      "description": "現在のワークスペースで利用可能な公式 Maker 動的ツールとパラメータ schema を一覧表示します。maker_call_tool の前に必ず呼び出します。別の場所にある場合はワークスペースの切り替えを案内し、Shell、CLI、npx、直接 MCP で迂回しません。"
+      "description": "同梱 Runtime が固定提供する公式 Maker 動的ツール一覧とパラメータ schema のスナップショットです。現在のワークスペースのリアルタイム可用性確認ではなく、実際の呼び出しはアカウント権限、プロジェクト状態、リモートサービスに依存します。maker_call_tool の前に呼び出し、Shell、CLI、npx、直接 MCP で迂回しないでください。"
     },
     "maker_call_tool": {
       "description": "maker_list_tools が直前に返した公式 Maker 動的ツールを現在のワークスペースで呼び出し、Shell、CLI、npx、直接 MCP で迂回しません。.project/project.json がない場合はビルドが提出と push を行うと説明し、確認後だけ maker_build と再試行を行います。missing_taptap_identity はプラグインが一度だけ回復します。「MCP error -32600: INSUFFICIENT_BALANCE」だけをクレジット不足と判断し、確認後に Art を案内します。",

@@ -14,7 +14,7 @@ description: 使用 Cindy 的 TapTap Maker 插件完成账号连接、项目检�
 3. 未连接账号时调用 `maker_login`，等待浏览器授权完成后继续原任务，不要求用户重新发起。
 4. 初始化已有项目时先用 `maker_apps` 获取 `app_id`，再调用 `maker_init`。只有用户明确要求新建项目时才传 `create=true` 和 `name`。
 5. 构建、运行或预览用 `maker_build`。成功结果含 `user_facing_markdown` 时原样引用，不放进代码块；右侧预览由插件打开。
-6. 使用素材、广告、调试或其它 Maker 能力前，先调用 `maker_list_tools` 获取实时工具与参数，再通过 `maker_call_tool` 调用，不凭记忆猜工具名。
+6. 使用素材、广告、调试或其它 Maker 能力前，先调用 `maker_list_tools` 获取随包 Runtime 固定发布的工具目录与参数 schema 快照；它不表示当前工作区实时可用，实际可用性以 `maker_call_tool` 的结果为准。再通过 `maker_call_tool` 调用，不凭记忆猜工具名。
 
 ## 约束与恢复
 

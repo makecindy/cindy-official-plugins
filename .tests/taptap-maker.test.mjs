@@ -20,6 +20,12 @@ const accountSource = readFileSync(new URL('node/account.cjs', pluginRoot), 'utf
 const makerMcpSource = readFileSync(new URL('node/maker-mcp.cjs', pluginRoot), 'utf8');
 const makerChildSource = readFileSync(new URL('node/maker-child.cjs', pluginRoot), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
+const localeManifests = Object.fromEntries(
+  ['zh-CN', 'en', 'ja', 'ko'].map((locale) => [
+    locale,
+    JSON.parse(readFileSync(new URL(`locales/${locale}.json`, pluginRoot), 'utf8')),
+  ]),
+);
 const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
 const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
@@ -235,6 +241,22 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
     manifest.tools.find((tool) => tool.name === 'maker_status').parameters.properties.detail.description,
     /完整诊断/,
   );
+  const listToolsDescription = manifest.tools.find((tool) => tool.name === 'maker_list_tools').description;
+  assert.match(listToolsDescription, /固定.*schema.*快照/);
+  assert.doesNotMatch(listToolsDescription, /列出当前工作区实时可用/);
+  assert.match(skillMd, /固定发布的工具目录与参数 schema 快照/);
+  assert.doesNotMatch(skillMd, /获取实时工具与参数/);
+  const staleAvailabilityClaims = {
+    'zh-CN': /列出当前工作区实时可用/,
+    en: /currently available in the workspace/,
+    ja: /現在のワークスペースで利用可能/,
+    ko: /현재 작업 공간에서 사용할 수 있는/,
+  };
+  for (const [locale, localized] of Object.entries(localeManifests)) {
+    const description = localized.tools.maker_list_tools.description;
+    assert.match(description, /快照|snapshot|スナップショット|스냅샷/, locale);
+    assert.doesNotMatch(description, staleAvailabilityClaims[locale], locale);
+  }
   assert.doesNotMatch(
     manifest.tools.find((tool) => tool.name === 'maker_call_tool').description,
     /素材能力优先使用 Maker/,

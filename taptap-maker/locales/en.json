@@ -70,7 +70,7 @@
       }
     },
     "maker_list_tools": {
-      "description": "List the official Maker dynamic tools and parameter schemas currently available in the workspace. Always call this before maker_call_tool. If the project is elsewhere, ask the user to switch workspaces; do not bypass the plugin with Shell, CLI, npx, or direct MCP."
+      "description": "List the bundled Runtime's fixed Maker tool catalog and schema snapshot. It is not a live workspace availability probe; calls still depend on account access, project state, and the remote service. Call it before maker_call_tool; never bypass the plugin with Shell, CLI, npx, or direct MCP."
     },
     "maker_call_tool": {
       "description": "Call an official Maker dynamic tool just returned by maker_list_tools in the current workspace; never bypass the plugin with Shell, CLI, npx, or direct MCP. If .project/project.json is missing, explain that building submits and pushes the project, then call maker_build only after confirmation and retry. The plugin handles missing_taptap_identity once. Only the exact error “MCP error -32600: INSUFFICIENT_BALANCE” means insufficient credits; offer Art only after confirmation.",

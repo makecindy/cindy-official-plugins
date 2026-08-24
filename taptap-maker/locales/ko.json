@@ -70,7 +70,7 @@
       }
     },
     "maker_list_tools": {
-      "description": "현재 작업 공간에서 사용할 수 있는 공식 Maker 동적 도구와 매개변수 schema를 나열하며 maker_call_tool 전에 항상 호출합니다. 프로젝트가 다른 위치에 있으면 작업 공간 전환을 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다."
+      "description": "번들 Runtime에 고정된 공식 Maker 동적 도구 목록과 매개변수 schema 스냅샷입니다. 현재 작업 공간의 실시간 가용성 검사가 아니며 실제 호출은 계정 권한, 프로젝트 상태 및 원격 서비스에 따라 달라집니다. maker_call_tool 전에 호출하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 마세요."
     },
     "maker_call_tool": {
       "description": "maker_list_tools가 방금 반환한 공식 Maker 동적 도구를 현재 작업 공간에서 호출하며 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다. .project/project.json이 없으면 빌드가 제출과 push를 수행한다고 설명하고 확인 후에만 maker_build와 재시도를 수행합니다. missing_taptap_identity는 플러그인이 한 번 자동 복구합니다. “MCP error -32600: INSUFFICIENT_BALANCE”만 크레딧 부족으로 판단하고 확인 후 Art를 안내합니다.",

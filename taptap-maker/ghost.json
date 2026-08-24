@@ -154,7 +154,7 @@
     },
     {
       "name": "maker_list_tools",
-      "description": "列出当前工作区实时可用的官方 Maker 动态工具及参数 schema。调用 maker_call_tool 前先调用本工具，不要凭记忆硬编码工具名；目标项目在其他目录时先让用户切换工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。"
+      "description": "列出随包 Runtime 固定发布的官方 Maker 动态工具目录与参数 schema 快照；这不是当前工作区的实时可用性探测，实际调用仍受账号权限、项目状态和远端服务限制。调用 maker_call_tool 前先调用本工具；目标项目在其他目录时先让用户切换工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。"
     },
     {
       "name": "maker_call_tool",
