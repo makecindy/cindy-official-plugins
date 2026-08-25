@@ -78,11 +78,10 @@ The full path from idea to marketplace:
    (network hosts, credentials, long-lived Node runtime). Wait for a maintainer ack before writing
    code — it keeps you from building something that overlaps or won't be
    accepted.
-3. **Build** — in a Cindy conversation, say "help me build a plugin" to get
-   the complete authoring manual (`ghost_forge_guide`: every `ghost.json`
-   field, direct capability declarations, the `cindy.send` pipe API, packaging). Scaffold with
-   `ghost_forge_scaffold` or copy the layout of any plugin here. Import the
-   directory or a packaged `.cindy` into a dev environment to verify.
+3. **Build** — follow the [Agent quick path](#agent-quick-path) in a Cindy
+   conversation. The Agent reads the relevant sections of the live Forge
+   manual, creates a Manifest-v3 project with `ghost_forge_scaffold`, and
+   packages the finished source with `ghost_forge_pack` for verification.
 4. **Open a PR** — title `feat(<directory>): …`; bump `ghost.json.version`;
    add the `provisioning.json` entry; complete four-language locales
    (`zh-CN` / `en` / `ja` / `ko`); sign off every commit (`git commit -s`,
@@ -234,17 +233,22 @@ change. The new `major.minor.patch` SemVer must be greater than the version on
 
 ## Local development
 
-The complete plugin-authoring contract (all `ghost.json` fields, direct capability declarations, the
-`cindy.send` pipe API, packaging flow) is defined by the manual returned by the
-`ghost_forge_guide` tool built into the Cindy client — just say "help me build
-a plugin" in a Cindy conversation to get it on the spot.
+The complete plugin-authoring contract (all `ghost.json` fields, direct
+capability declarations, the `cindy.send` pipe API, and packaging flow) is
+defined by the versioned manual returned by the Cindy client's
+`ghost_forge_guide` tool. A no-argument call returns only its table of contents;
+the Agent must then call it again with `section` to read the relevant chapters
+before writing code.
 
-New plugins use `schemaVersion: 3`, include `minCindyVersion` (at least `0.1.61`),
-and declare capabilities directly through fields such as `tools`, `network`,
-`node`, or `notify: true`; v3 must not contain `slots`. Existing v2 manifests
-stay untouched until that plugin's packaged content actually changes. The PR
-that changes it must migrate the manifest to v3—there is no repository-wide
-bulk migration or release solely for the schema change.
+New plugins use `schemaVersion: 3` and declare capabilities directly through
+fields such as `tools`, `network`, `node`, or `notify: true`; v3 must not contain
+`slots`. The v3 floor is `minCindyVersion: "0.1.61"`, but that is not always the
+correct value: use the first stable Cindy version that supports every Host
+capability and manifest field the plugin actually depends on, whichever is
+later. Existing v2 manifests stay untouched until that plugin's packaged
+content actually changes. The PR that changes it must migrate the manifest to
+v3—there is no repository-wide bulk migration or release solely for the schema
+change.
 
 Direct fields describe plugin contributions and **autonomous** Host use. They are
 not a pre-registration list for a specific command, host, or path. Whether the
@@ -254,14 +258,65 @@ authorization; ordinary HTTPS and workdir operations pass the Host-issued
 existing Node worker. Managed credentials and any use outside that in-flight call
 still require the corresponding explicit declaration.
 
-Typical flow:
+### Agent quick path
 
-1. Scaffold with the client's `ghost_forge_scaffold`, or copy the layout of any
-   plugin in this repository.
-2. In a dev environment, import the plugin directory or a `.cindy` package
-   directly for verification.
-3. When done, package it with `ghost_forge_pack` into a `.cindy` and install it
-   to verify.
+Paste this into a Cindy conversation and replace the bracketed text:
+
+```text
+Build a Cindy plugin for [what it should do]. First call ghost_forge_guide
+without a section to get the table of contents. Before writing code, read
+section 0, every capability chapter needed by this plugin, Sandbox red lines,
+and Packaging and testing by calling ghost_forge_guide with section. Align the
+design and required capabilities with me, then create a new Manifest-v3 project
+with ghost_forge_scaffold, implement it in the current workspace, and package
+it with ghost_forge_pack. Do not install it unless I explicitly ask you to.
+```
+
+The Agent should follow this order:
+
+1. Read the Forge table of contents and the required chapters. Receiving the
+   table of contents alone is not enough to start implementation.
+2. Use `ghost_forge_scaffold` as the v3 baseline. Do **not** copy an existing
+   official plugin's `ghost.json`: the repository intentionally retains legacy
+   v2 manifests until those plugins change. Existing source may be consulted
+   only for implementation patterns.
+3. Implement and verify the source, then call `ghost_forge_pack`. This validates
+   and creates `<id>-<version>.cindy`; it does not install or update anything.
+4. Only when the user explicitly asks the current Agent to install or update
+   the source, call `ghost_forge_install`. The user may instead import the
+   packaged `.cindy` manually; both paths use the same installation transaction.
+
+The plain scaffold starts from this minimal runnable Manifest-v3 shape (the
+live Forge manual remains authoritative for every field and capability):
+
+```json
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.61",
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "description": "A one-sentence description for people.",
+  "whenToUse": "Use this when the user needs the plugin's capability.",
+  "version": "1.0.0",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "hello",
+      "description": "Return a greeting to verify that the plugin works.",
+      "parameters": { "type": "object", "properties": {} }
+    }
+  ]
+}
+```
+
+That scaffold is enough for local development. Before submitting it to this
+official repository, add a `provisioning.json` entry and declare locale files
+for exactly `zh-CN`, `en`, `ja`, and `ko`, covering the plugin text and every
+tool description. Then follow [`CONTRIBUTING.md`](./CONTRIBUTING.md) and install
+the exact packaged `.cindy` on a real device running an eligible stable
+production Cindy build.
 
 `taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.28`
 with the plugin. When upgrading, replace the published npm package content

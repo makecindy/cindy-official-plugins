@@ -12,9 +12,9 @@
 
 - 先读 [README.zh-CN.md](README.zh-CN.md)：仓库结构、插件清单、审查标准和发布流程
   都以它为准，本指南不重复维护副本。
-- 完整的插件编写契约（`ghost.json` 全字段、直接能力声明、`cindy.send` 管子 API、打包流程）由
-  Cindy 客户端内置的 `ghost_forge_guide` 工具返回——在 Cindy 对话里说「帮我做一个插件」
-  即可拿到当时版本的手册。
+- 完整的插件编写契约（`ghost.json` 全字段、直接能力声明、`cindy.send` 管子 API 和
+  打包流程）由 Cindy 客户端内置的 `ghost_forge_guide` 工具返回。无参结果只是目录；
+  写代码前还要传入 `section`，读取第 0 章、相关能力章节、「沙箱红线」和「打包与测试」。
 - 增加 Manifest 字段前先判断谁执行：插件工具是否执行由既有 Agent 授权决定；普通
   HTTPS 与 workdir 操作使用 Host 下发的在途 `callId`，CLI 继续走已有 Node 工作进程。
   具体命令、域名或路径无需预登记；只有脱离该调用的插件自主 Host 能力才写入 `ghost.json`。
@@ -25,11 +25,19 @@
 
 ## 开发与验证
 
-典型流程：
+从 [`README.zh-CN.md` 的「给 Agent 的快速路径」](README.zh-CN.md#给-agent-的快速路径)
+开始：
 
-1. 用客户端的 `ghost_forge_scaffold` 生成骨架，或直接照抄本仓任一插件的目录结构。
-2. 在开发环境里导入插件目录或 `.cindy` 包验证。
-3. 完成后用 `ghost_forge_pack` 打成 `.cindy` 安装验证。
+1. 读取 Forge 目录和必要章节，先对齐设计与最小能力，再开始实现。
+2. 用 `ghost_forge_scaffold` 创建新的 Manifest v3 项目。**不要复制本仓现有插件的
+   `ghost.json`**：未改动的官方插件可能刻意保留旧 v2 清单。现有源码只能用于参考
+   实现方式。
+3. 完成实现和源码验证后调用 `ghost_forge_pack`。它只校验并生成 `.cindy` 包，绝不会
+   安装或更新插件。
+4. 只有用户明确要求当前 Agent 安装或更新这份源码时，才调用
+   `ghost_forge_install`；否则由用户手动导入打好的 `.cindy`。
+5. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
+   `ja`、`ko` 四份 locale 资源。
 
 `.tests/` 下的 `*.test.mjs` 用 Node 内置 test runner 运行，例如：
 
@@ -71,7 +79,9 @@ cd 163-mail && npm ci && npm run build
 3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
    `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
    同一个改动还必须把现有 v2 清单迁移为 `schemaVersion: 3`：增加
-   `minCindyVersion`（至少 `0.1.61`）、移除 `slots`，并用对应顶层字段表达等价能力。
+   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。v3 基线是
+   `0.1.61`；如果插件依赖的 Host 能力或 Manifest 字段在更晚的 Cindy 正式稳定版才
+   首次支持，应填写那个更晚的版本。
    未改动的 v2 插件刻意保持原样，禁止批量迁移。
    Plugin Server 按用户当前 Cindy 版本选择最近曾上架的兼容 Release；current 不兼容时
    回退到兼容历史版本，没有兼容历史版本时不展示该插件。

@@ -26,10 +26,11 @@ review contract is .greptile/rules.md. 质量与安全项来自 README 审查标
 - [ ] Reviewed the complete diff — no credentials, tokens, authorization codes,
       real user data, unrelated generated files, or `node_modules`.
       已 review 完整 diff —— 无凭证、令牌、授权码、真实用户数据、无关生成文件或 `node_modules`。
-- [ ] `ghost.json` declares only capabilities actually used (network hosts /
-      slots / secrets); any new capability is justified in this PR description.
-      `ghost.json` 只声明实际用到的能力（网络域名 / slots / 密钥）；新增能力已在
-      PR 描述中说明必要性。
+- [ ] `ghost.json` declares only capabilities actually used (direct capability
+      fields / autonomous network hosts / secrets / Node runtime); any new
+      capability is justified in this PR description.
+      `ghost.json` 只声明实际用到的能力（直接能力字段 / 自主网络域名 / 密钥 / Node
+      Runtime）；新增能力已在 PR 描述中说明必要性。
 - [ ] Tools with irreversible external side effects (send / post / delete)
       handle every failure path as "not executed / executed / unknown", and
       never suggest a blind retry on "unknown".
@@ -82,10 +83,10 @@ Commands actually run and their results. / 实际执行的命令和结果。
 
 <!--
 Explicitly list any dependency/vendor/binary resource, OAuth/API scope,
-credential/auth boundary, network/secret/slot/tool/Node capability,
+credential/auth boundary, direct network/secret/tool/Node capability,
 provisioning audience, minCindyVersion reduction/removal, or publishing/review
 policy change. Write "None / 无" only after checking the complete diff.
 明确列出依赖/vendor/二进制资源、OAuth/API scope、凭证/鉴权边界、
-network/secret/slot/tool/Node 能力、audience、minCindyVersion 降低/删除、发布或
+直接 network/secret/tool/Node 能力、audience、minCindyVersion 降低/删除、发布或
 审查策略变更。完整检查 diff 后无此类改动才写 "None / 无"。
 -->

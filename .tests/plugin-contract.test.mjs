@@ -511,6 +511,49 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
   assert.equal(validateGhostManifest({ ...direct, notify: false }).ok, false, 'Manifest v3 boolean capabilities must be literal true');
 });
 
+test('authoring docs provide an executable Manifest-v3 Forge path', () => {
+  const docs = new Map([
+    ['README.md', readUtf8(path.join(root, 'README.md'))],
+    ['README.zh-CN.md', readUtf8(path.join(root, 'README.zh-CN.md'))],
+    ['CONTRIBUTING.md', readUtf8(path.join(root, 'CONTRIBUTING.md'))],
+    ['CONTRIBUTING.zh-CN.md', readUtf8(path.join(root, 'CONTRIBUTING.zh-CN.md'))],
+  ]);
+
+  for (const [file, contents] of docs) {
+    for (const required of [
+      'ghost_forge_guide',
+      'section',
+      'ghost_forge_scaffold',
+      'ghost_forge_pack',
+      'ghost_forge_install',
+    ]) {
+      assert.ok(contents.includes(required), `${file} must document ${required}`);
+    }
+    assert.ok(contents.includes('ghost.json'), `${file} must name the manifest file`);
+    assert.match(contents, /\bv2\b/i, `${file} must identify the legacy manifest version`);
+    if (file.endsWith('.zh-CN.md')) {
+      assert.ok(contents.includes('不要复制'), `${file} must warn against copying an existing ghost.json`);
+    } else {
+      assert.match(contents, /do \*\*not\*\* copy/i, `${file} must warn against copying an existing ghost.json`);
+    }
+  }
+
+  for (const file of ['README.md', 'README.zh-CN.md']) {
+    const contents = docs.get(file);
+    const jsonBlocks = [...contents.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+    const manifestSource = jsonBlocks.find((block) => block.includes('"schemaVersion": 3'));
+    assert.ok(manifestSource, `${file} must contain a minimal Manifest-v3 example`);
+    const manifest = JSON.parse(manifestSource);
+    const result = validateGhostManifest(manifest);
+    assert.ok(result.ok, `${file} Manifest-v3 example is rejected by Cindy: ${result.reason}`);
+    assert.equal(Object.hasOwn(manifest, 'slots'), false, `${file} Manifest-v3 example must not contain slots`);
+  }
+
+  const pullRequestTemplate = readUtf8(path.join(root, '.github/PULL_REQUEST_TEMPLATE.md'));
+  assert.doesNotMatch(pullRequestTemplate, /\bslots?\b/i, 'the PR template must use Manifest-v3 direct capability language');
+  assert.match(pullRequestTemplate, /direct capability\s+fields/, 'the PR template must review direct capability declarations');
+});
+
 test('all official plugins satisfy the repository publish contract', () => {
   assert.ok(pluginDirs.length > 0, 'no official plugins found');
   for (const pluginDir of pluginDirs) {

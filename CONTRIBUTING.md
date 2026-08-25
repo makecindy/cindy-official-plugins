@@ -14,10 +14,12 @@ maintained in separate repositories and are outside the scope of this repository
 - Read [`README.md`](README.md) first. It is the source of truth for the
   repository layout, the plugin list, the review standards, and the publish
   flow; this guide does not duplicate them.
-- The complete plugin-authoring contract (all `ghost.json` fields, direct capability declarations, the
-  `cindy.send` pipe API, the packaging flow) is defined by the manual returned by
-  the `ghost_forge_guide` tool built into the Cindy client — just say "help me
-  build a plugin" in a Cindy conversation to get the current version.
+- The complete plugin-authoring contract (all `ghost.json` fields, direct
+  capability declarations, the `cindy.send` pipe API, and packaging flow) is
+  defined by the manual returned by the `ghost_forge_guide` tool built into the
+  Cindy client. Its no-argument result is only the table of contents; before
+  coding, call it again with `section` to read section 0, the relevant
+  capability chapters, Sandbox red lines, and Packaging and testing.
 - Decide who performs an operation before adding a manifest field. Whether the
   plugin tool runs is decided by existing Agent authorization. Ordinary HTTPS and
   workdir operations use the Host-issued in-flight `callId`; CLIs continue through
@@ -31,14 +33,21 @@ maintained in separate repositories and are outside the scope of this repository
 
 ## Development and verification
 
-Typical flow:
+Start with the [Agent quick path in `README.md`](README.md#agent-quick-path):
 
-1. Scaffold with the client's `ghost_forge_scaffold`, or copy the layout of any
-   plugin in this repository.
-2. In a dev environment, import the plugin directory or a `.cindy` package
-   directly for verification.
-3. When done, package it with `ghost_forge_pack` into a `.cindy` and install it to
-   verify.
+1. Read the Forge table of contents and required sections, then align the
+   design and minimum capabilities before implementation.
+2. Create a new Manifest-v3 project with `ghost_forge_scaffold`. Do **not** copy
+   an existing official plugin's `ghost.json`: unchanged official plugins may
+   intentionally retain legacy v2 manifests. Existing source may be consulted
+   only for implementation patterns.
+3. Implement and verify the source, then call `ghost_forge_pack`. It validates
+   and creates a `.cindy` package but never installs or updates it.
+4. Call `ghost_forge_install` only when the user explicitly asks the current
+   Agent to install or update the source. Otherwise let the user import the
+   packaged `.cindy` manually.
+5. Before opening an official-plugin PR, add the `provisioning.json` entry and
+   complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 
 The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 
@@ -89,8 +98,10 @@ do not edit the generated `dist/maker.js` by hand.
    pull request.** The new `major.minor.patch` SemVer must be greater than the
    version on `main`; otherwise CI blocks the pull request.
    The same change must migrate an existing schema-v2 manifest to
-   `schemaVersion: 3`: add `minCindyVersion` (at least `0.1.61`), remove
-   `slots`, and express the same capabilities through their direct fields.
+   `schemaVersion: 3`: add `minCindyVersion`, remove `slots`, and express the
+   same capabilities through their direct fields. The v3 floor is `0.1.61`;
+   when a required Host capability or manifest field first appeared in a later
+   stable Cindy release, use that later version instead.
    Unchanged v2 plugins are intentionally left alone; do not bulk-migrate them.
    Plugin Server selects the newest previously listed release compatible with the
    user's Cindy version. If the current release is incompatible, an eligible
