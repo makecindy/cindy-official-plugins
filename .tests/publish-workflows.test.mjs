@@ -20,6 +20,11 @@ test('pull request verification requires the production Cindy attestation', () =
   assert.match(prWorkflow, /\.pull_request\.body/);
   assert.match(prWorkflow, /GITHUB_EVENT_PATH/);
   assert.doesNotMatch(prWorkflow, /github\.event\.pull_request\.body/);
+  assert.ok(
+    prWorkflow.indexOf('name: Dry-run plugin packaging') <
+      prWorkflow.indexOf('name: Require production Cindy verification attestation'),
+    'package validation must run before a pending manual attestation blocks the job',
+  );
 });
 
 test('CN and Global plugin publishers are operationally independent', () => {
