@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.dbbf169.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.014a471.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -21,7 +21,7 @@ const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'taptap-maker', 'x-man
 const OFFICIAL_SLOTS = new Set([
   'subscribe', 'tool', 'card', 'panel', 'cindy', 'agent', 'node', 'network',
   'notify', 'badge', 'confirm', 'fs', 'session-context', 'pick', 'preview',
-  'skill', 'workspace', 'ios-simulator',
+  'library', 'skill', 'workspace', 'ios-simulator',
 ]);
 
 const pluginDirs = pluginRootsAt('HEAD');
@@ -122,7 +122,7 @@ function validateOfficialManifest(pluginDir, manifest) {
   assert.ok(manifest && typeof manifest === 'object' && !Array.isArray(manifest), `${pluginDir}/ghost.json must be an object`);
   const protocolResult = validateGhostManifest(manifest);
   assert.ok(protocolResult.ok, `${pluginDir}/ghost.json is rejected by Cindy: ${protocolResult.reason}`);
-  assert.equal(manifest.schemaVersion, 2, `${pluginDir}: unsupported ghost.json schemaVersion`);
+  assert.ok(manifest.schemaVersion === 2 || manifest.schemaVersion === 3, `${pluginDir}: unsupported ghost.json schemaVersion`);
   assert.match(manifest.id ?? '', /^[a-z0-9][a-z0-9-]{0,31}$/, `${pluginDir}: invalid plugin id`);
   stableSemver(manifest.version, pluginDir);
   assertText(manifest.name, `${pluginDir}.name`, 64);
@@ -131,9 +131,14 @@ function validateOfficialManifest(pluginDir, manifest) {
   if (manifest.author !== undefined) assertText(manifest.author, `${pluginDir}.author`, 64);
   assert.ok(isSafePackagePath(manifest.entry), `${pluginDir}.entry must be a safe relative path`);
   assert.ok(manifest.launch === undefined || manifest.launch === 'on-demand' || manifest.launch === 'resident', `${pluginDir}.launch must be on-demand or resident`);
-  assert.ok(Array.isArray(manifest.slots) && manifest.slots.length > 0, `${pluginDir}.slots must be a non-empty array`);
-  assert.equal(new Set(manifest.slots).size, manifest.slots.length, `${pluginDir}.slots contains duplicates`);
-  for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
+  if (manifest.schemaVersion === 2) {
+    assert.ok(Array.isArray(manifest.slots), `${pluginDir}.slots must be an array`);
+    assert.equal(new Set(manifest.slots).size, manifest.slots.length, `${pluginDir}.slots contains duplicates`);
+    for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
+  } else {
+    assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
+    assertManifestV3Floor(pluginDir, manifest);
+  }
   if (manifest.tools !== undefined) {
     assert.ok(Array.isArray(manifest.tools) && manifest.tools.length > 0 && manifest.tools.length <= 16, `${pluginDir}.tools must contain 1-16 entries`);
     const toolNames = new Set();
@@ -149,7 +154,9 @@ function validateOfficialManifest(pluginDir, manifest) {
       }
     }
   }
-  assert.equal(manifest.slots.includes('tool'), manifest.tools !== undefined, `${pluginDir}: tool slot and tools declarations must appear together`);
+  if (manifest.schemaVersion === 2) {
+    assert.equal(manifest.slots.includes('tool'), manifest.tools !== undefined, `${pluginDir}: tool slot and tools declarations must appear together`);
+  }
   return manifest;
 }
 
@@ -402,10 +409,24 @@ function pluginRootsAt(revision) {
     .sort();
 }
 
-function stableSemver(version, pluginDir) {
+function stableSemver(version, pluginDir, field = 'ghost.json.version') {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
-  assert.ok(match, `${pluginDir}: ghost.json.version must use major.minor.patch SemVer`);
+  assert.ok(match, `${pluginDir}: ${field} must use major.minor.patch SemVer`);
   return match.slice(1).map(BigInt);
+}
+
+function assertManifestV3Floor(pluginDir, manifest) {
+  const parts = stableSemver(manifest.minCindyVersion, pluginDir, 'minCindyVersion');
+  assert.ok(
+    parts[0] > 0n || parts[1] > 1n || (parts[1] === 1n && parts[2] >= 61n),
+    `${pluginDir}: Manifest v3 minCindyVersion must be at least 0.1.61`,
+  );
+}
+
+function assertChangedPluginUsesManifestV3(pluginDir, manifest) {
+  assert.equal(manifest.schemaVersion, 3, `${pluginDir}: changed plugin packages must migrate to schemaVersion 3`);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
+  assertManifestV3Floor(pluginDir, manifest);
 }
 
 function compareStableSemver(left, right, pluginDir) {
@@ -443,25 +464,51 @@ function validateReleaseDiff() {
         compareStableSemver(after.version, before.version, pluginDir) > 0,
         `${pluginDir}: packaged content changed, so ghost.json.version must be greater than ${before.version}`,
       );
+      assertChangedPluginUsesManifestV3(pluginDir, after);
     }
   }
   for (const pluginDir of targetRoots) {
     if (baseRootSet.has(pluginDir)) continue;
     const manifest = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
     stableSemver(manifest.version, pluginDir);
+    assertChangedPluginUsesManifestV3(pluginDir, manifest);
   }
 }
 
 test('the pinned Cindy manifest contract rejects client-incompatible shapes', () => {
-  const pluginDir = pluginDirs[0];
-  const manifest = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
-  assert.equal(validateGhostManifest(manifest).ok, true, `${pluginDir}: baseline fixture must be valid`);
-  assert.equal(validateGhostManifest({ ...manifest, kind: 'declaration' }).ok, false, 'legacy kind must be rejected');
+  const legacy = {
+    schemaVersion: 2,
+    id: 'legacy-contract-fixture',
+    name: 'Legacy contract fixture',
+    version: '1.0.0',
+    entry: 'main.js',
+    slots: ['tool'],
+    tools: [{ name: 'run', description: 'Run the fixture' }],
+  };
+  assert.equal(validateGhostManifest(legacy).ok, true, 'legacy fixture must be valid');
+  assert.equal(validateGhostManifest({ ...legacy, kind: 'declaration' }).ok, false, 'legacy kind must be rejected');
   assert.equal(
-    validateGhostManifest({ ...manifest, panel: { html: manifest.entry } }).ok,
+    validateGhostManifest({ ...legacy, panel: { html: legacy.entry } }).ok,
     false,
     'panel declaration without the panel slot must be rejected',
   );
+  const direct = {
+    schemaVersion: 3,
+    minCindyVersion: '0.1.61',
+    id: 'direct-contract-fixture',
+    name: 'Direct contract fixture',
+    version: '1.0.0',
+    entry: 'main.js',
+    tools: [{ name: 'run', description: 'Run the fixture' }],
+    notify: true,
+    futureCapability: { mode: 'preserved' },
+  };
+  const directResult = validateGhostManifest(direct);
+  assert.equal(directResult.ok, true, 'Manifest v3 direct declarations must be accepted');
+  assert.equal(Object.hasOwn(directResult.manifest, 'slots'), false, 'Manifest v3 output must not contain slots');
+  assert.deepEqual(directResult.manifest.futureCapability, { mode: 'preserved' }, 'unknown v3 fields must survive normalization');
+  assert.equal(validateGhostManifest({ ...direct, slots: ['tool'] }).ok, false, 'Manifest v3 slots must be rejected');
+  assert.equal(validateGhostManifest({ ...direct, notify: false }).ok, false, 'Manifest v3 boolean capabilities must be literal true');
 });
 
 test('all official plugins satisfy the repository publish contract', () => {

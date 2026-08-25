@@ -42,11 +42,15 @@ review contract is .greptile/rules.md. 质量与安全项来自 README 审查标
       changed; the new SemVer is greater than the version on `main`.
       每个打包内容发生变化的插件都已 bump `ghost.json` 的 `version`，且新 SemVer
       大于 `main` 上的当前版本。
-- [ ] If `minCindyVersion` was added or raised, installed the packaged `.cindy`
-      on that exact Cindy version and recorded the result below. Lowering or
-      removing it is explicitly called out for maintainer review.
-      如新增或提高 `minCindyVersion`，已在该精确 Cindy 版本安装真实包并在下方记录；
-      如降低或删除，已明确标注交维护者人工 review。
+- [ ] **Production Cindy verification / 生产版 Cindy 验证** — Installed every
+      changed plugin's packaged `.cindy` on a real device running a stable
+      production Cindy build and verified its core functionality. When a plugin
+      declares `minCindyVersion`, the verified Cindy version was greater than or
+      equal to it. 已在运行正式稳定版 Cindy 的实际设备上安装每个改动插件的真实
+      `.cindy` 包并验证核心功能；插件声明 `minCindyVersion` 时，验证所用 Cindy
+      版本不低于该最低版本。
+- [ ] Lowering or removing `minCindyVersion` is explicitly called out for
+      maintainer review. 降低或删除 `minCindyVersion` 已明确标注交维护者人工 review。
 - [ ] For a new plugin, linked the acknowledged proposal issue and recorded the
       `provisioning.json` audience decision below.
       新插件已关联维护者确认过的提案 issue，并在下方记录 audience 决策。
@@ -71,10 +75,7 @@ Agent behaviour — that description is the manual the Agent reads.
 ## Verification / 验证
 
 <!--
-Commands actually run and their results. If minCindyVersion was added/raised,
-include the exact Cindy version, packaged .cindy install result, and core tools
-verified. / 实际执行的命令和结果；如新增/提高 minCindyVersion，写明精确 Cindy
-版本、真实 .cindy 安装结果和已验证的核心工具。
+Commands actually run and their results. / 实际执行的命令和结果。
 -->
 
 ## Sensitive changes / 敏感变更

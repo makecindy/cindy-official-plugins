@@ -11,6 +11,16 @@ const globalWorkflow = readFileSync(
   new URL('publish-cindy-plugins-global.yml', workflowRoot),
   'utf8',
 );
+const prWorkflow = readFileSync(new URL('pr-verify.yml', workflowRoot), 'utf8');
+
+test('pull request verification requires the production Cindy attestation', () => {
+  assert.match(prWorkflow, /^      - edited$/m);
+  assert.match(prWorkflow, /name: Require production Cindy verification attestation/);
+  assert.match(prWorkflow, /Production Cindy verification \/ 生产版 Cindy 验证/);
+  assert.match(prWorkflow, /\.pull_request\.body/);
+  assert.match(prWorkflow, /GITHUB_EVENT_PATH/);
+  assert.doesNotMatch(prWorkflow, /github\.event\.pull_request\.body/);
+});
 
 test('CN and Global plugin publishers are operationally independent', () => {
   assert.match(cnWorkflow, /^name: Publish Cindy Plugins \(CN\)$/m);

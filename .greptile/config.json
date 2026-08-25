@@ -54,7 +54,7 @@
   "includeConfidenceScore": true,
   "shouldUpdateDescription": false,
   "ignorePatterns": "**/.DS_Store\n**/THIRD-PARTY-LICENSES.txt",
-  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动提交到 CN/Global 的 Plugin Platform 审核队列，批准后才对对应区域用户可见；安全与体验风险由真实用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。以下变更属于敏感审查路由：新增插件目录；删除/重命名已有插件目录或修改已发布 id；新增、升级或删除第三方依赖及 vendor/dist/worker 生成物；新增/替换无法由文本 review 验证内容的图片、二进制文件或可执行资源；扩大 OAuth/API scope；修改凭证注入、认证或授权边界；新增 network.hosts、secret、slot、tool、Node 或子进程能力；降低或删除 minCindyVersion；放宽 provisioning audience；修改发布 workflow、OIDC、权限或 secrets；修改 .greptile/ 或 AGENTS.md 审查策略。仅修改版本号或 name/description/author/icon 路径等纯展示文本元数据不属于敏感变更。命中敏感审查路由时必须将 PR 风险标为 high 或 critical，使 riskCeiling 阻止自动 approve，并在 summary 首行标注『敏感变更，需要维护者人工 review』；审查路由本身不是实现缺陷，如果没有发现真实代码问题，不得仅因需要人工 review 而生成 P1/行级评论、降低 confidence score 或使 status check 失败。评论语言跟随 PR 作者的主语言：根据 PR 描述、commit message 与作者历史评论判断——中文作者用简体中文回复，英文作者用英文回复，其他语言作者用英文；无法判断时用英文。规则条文本身是中文不代表必须用中文回复。",
+  "instructions": "这是 Cindy 官方插件仓：每个合入 main 的插件都会自动提交到 CN/Global 的 Plugin Platform 审核队列，批准后才对对应区域用户可见；安全与体验风险由真实用户承担，审查标准从严。审查依据按优先级：本目录 rules.md 的完整规则 > README.md 设计原则 > 一般工程判断。对安全类规则（凭证、网络边界、子进程、vendor）：结论必须给出核查证据（查了哪些文件、grep 了什么、结果如何），不允许只写『未发现问题』。summary 首行必须显式列出所有未解决的 P1（如有），不要让『可安全合并』的措辞掩盖挂起的阻断项。以下变更属于敏感审查路由：新增插件目录；删除/重命名已有插件目录或修改已发布 id；新增、升级或删除第三方依赖及 vendor/dist/worker 生成物；新增/替换无法由文本 review 验证内容的图片、二进制文件或可执行资源；扩大 OAuth/API scope；修改凭证注入、认证或授权边界；新增 network.hosts、secret、直接能力字段、tool、Node 或子进程能力；降低或删除 minCindyVersion；放宽 provisioning audience；修改发布 workflow、OIDC、权限或 secrets；修改 .greptile/ 或 AGENTS.md 审查策略。仅修改版本号或 name/description/author/icon 路径等纯展示文本元数据不属于敏感变更。命中敏感审查路由时必须将 PR 风险标为 high 或 critical，使 riskCeiling 阻止自动 approve，并在 summary 首行标注『敏感变更，需要维护者人工 review』；审查路由本身不是实现缺陷，如果没有发现真实代码问题，不得仅因需要人工 review 而生成 P1/行级评论、降低 confidence score 或使 status check 失败。评论语言跟随 PR 作者的主语言：根据 PR 描述、commit message 与作者历史评论判断——中文作者用简体中文回复，英文作者用英文回复，其他语言作者用英文；无法判断时用英文。规则条文本身是中文不代表必须用中文回复。",
   "rules": [
     {
       "id": "no-hardcoded-secrets",
@@ -69,12 +69,12 @@
     {
       "id": "network-allowlist",
       "severity": "high",
-      "rule": "main.js/settings.js/worker 中所有网络访问目标必须命中该插件 ghost.json 的 network.hosts 白名单。发现未声明的域名/IP、硬编码内网或调试地址（localhost/127.x/192.168.x/10.x）、或绕过 cindy.fetch 的直连（原生 fetch 到外部域名/XMLHttpRequest/WebSocket/EventSource）必须按 P1 指出。白名单本身新增条目时，必须能在 PR 描述或源码中找到必要性出处。例外：声明了 node slot 的插件，其 node/worker.cjs 的网络访问按 node 能力边界审查（固定 IMAP/SMTP/API 端点），不适用 network.hosts 白名单要求；此类审查参照 capability-minimization 规则。"
+      "rule": "插件自主联网（Panel/订阅/scheduler/常驻进程等脱离当前 Agent 调用的场景）的所有目标必须命中 ghost.json 的 network.hosts 白名单。当前 Agent 工具调用内的普通 HTTPS 可以经 cindy.fetch 携带 Host 下发且严格在途的 callId 复用 Agent 授权，review 不得因未声明该域名误报；此途径不得注入未在 manifest 声明并命中目标 host 的托管凭证。发现硬编码内网或调试地址（localhost/127.x/192.168.x/10.x）、或绕过 cindy.fetch 的直连（原生 fetch/XMLHttpRequest/WebSocket/EventSource）必须按 P1 指出。自主白名单新增条目时，必须能在 PR 描述或源码中找到必要性出处。例外：声明顶层 node 字段的插件，其 node/worker.cjs 网络按 node 自主能力边界审查（固定 IMAP/SMTP/API 端点）。"
     },
     {
       "id": "capability-minimization",
       "severity": "high",
-      "rule": "ghost.json 变更时：slots/node/network.hosts 只能最小化声明，新增任何能力（新 slot、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node slot 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。"
+      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、填写不低于 0.1.61 的 minCindyVersion、移除 slots；未触及的 v2 插件不得被要求批量迁移。"
     },
     {
       "id": "irreversible-side-effect-tri-state",
@@ -115,7 +115,7 @@
     {
       "id": "minimum-client-version-evidence",
       "severity": "high",
-      "rule": "新增或提高 minCindyVersion 时，PR Verification 必须记录真实打包 .cindy 在声明的精确最低 Cindy 版本上安装成功，并列出实际验证的核心功能；缺失证据按 P1 要求补齐。降低或删除 minCindyVersion 会扩大支持范围，必须转维护者人工 review，不能只凭静态 CI 放行。"
+      "rule": "每个改动插件包的 PR Body 都必须勾选生产版 Cindy 验证项，确认真实打包 .cindy 已在运行正式稳定版 Cindy 的实际设备上安装并验证核心功能；CI 会确定性检查该勾选项。插件声明 minCindyVersion 时，验证所用 Cindy 版本必须不低于它。降低或删除 minCindyVersion 会扩大支持范围，必须转维护者人工 review，不能只凭静态 CI 放行。"
     }
   ]
 }

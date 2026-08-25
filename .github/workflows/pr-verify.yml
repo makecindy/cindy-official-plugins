@@ -7,6 +7,7 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+      - edited
     branches:
       - main
 
@@ -114,6 +115,17 @@ jobs:
             fi
           done
           exit "${failed}"
+
+      - name: Require production Cindy verification attestation
+        if: ${{ steps.changes.outputs.plugins != '[]' }}
+        run: |
+          set -euo pipefail
+          pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
+          if ! grep -Eq '^- \[[xX]\] \*\*Production Cindy verification / 生产版 Cindy 验证\*\*' \
+            <<<"${pr_body}"; then
+            echo "::error::Check the Production Cindy verification / 生产版 Cindy 验证 box in the PR body after installing and exercising every changed plugin on a real device with a stable production Cindy build. If a plugin declares minCindyVersion, the verified Cindy version must be greater than or equal to it."
+            exit 1
+          fi
 
       - name: Dry-run plugin packaging
         if: ${{ steps.changes.outputs.plugins != '[]' }}

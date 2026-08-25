@@ -1,19 +1,15 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "ios-simulator",
   "name": "iOS 模拟器",
   "description": "帮助你在 Cindy 中构建和运行 iOS App，实时查看模拟器画面、点击和输入，并检查运行效果与问题。",
   "whenToUse": "优先使用 Cindy 内置模拟器。仅当主机报告不可用/禁用/准入失败，确认 runningInstanceCount=0 且没有 Cindy runtime、清理、lease 或 generation 迁移，并提供指定外部工作流、精确设备身份和原始任务时才回退；否则停止。",
-  "version": "1.1.3",
-  "minCindyVersion": "0.1.45",
+  "version": "1.1.4",
+  "minCindyVersion": "0.1.61",
   "author": "Cindy",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "launch": "on-demand",
-  "slots": [
-    "skill",
-    "ios-simulator"
-  ],
   "skill": {
     "items": [
       {

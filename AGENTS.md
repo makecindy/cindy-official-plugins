@@ -34,8 +34,11 @@ flagged: a settings page saving the user-entered credential through same-origin
 `PUT /secrets/<key>` (the sanctioned write-only path), and handing credentials
 to an approved third-party runtime (e.g. TapTap Maker) without copying them
 into Cindy KV/Secret or retaining plaintext anywhere else (logs, page state);
-network targets ⊆ `ghost.json` allowlist (Node
-workers reviewed against their fixed endpoints instead); tools with
+autonomous plugin network targets ⊆ `ghost.json` allowlist (ordinary HTTPS
+performed inside the current Agent tool call may instead use the Host-issued,
+strictly in-flight `callId`; managed credentials still require an explicit
+declaration and matching host); plugins declaring the top-level `node` field
+have their autonomous workers reviewed against fixed endpoints instead; tools with
 irreversible external side effects must distinguish "not executed / executed /
 unknown" on every failure path; no `Math.random` for externally-visible ids;
 vendor/dist changes require itemized evidence, never a bare "looks fine".
@@ -46,8 +49,8 @@ vendor/dist changes require itemized evidence, never a bare "looks fine".
   the new `major.minor.patch` SemVer must be greater than the version on `main`.
 - CI must enforce the official repository manifest and package contract in
   `.tests/plugin-contract.test.mjs` without checking out another repository.
-- Run `node --test .tests/localization.test.mjs .tests/provisioning.test.mjs
-  .tests/publish-workflows.test.mjs`, plus the changed plugin's own
+- Run `node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs
+  .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs`, plus the changed plugin's own
   `.tests/<plugin>.test.mjs` if present.
 - Four-language locales (`zh-CN` / `en` / `ja` / `ko`) complete;
   `docs/localization.md` defines the English-fallback contract — do not demand
@@ -60,9 +63,11 @@ vendor/dist changes require itemized evidence, never a bare "looks fine".
   of the PR and must not be flagged.
 - Bundled third-party dependencies changed → update that plugin's
   `THIRD-PARTY-LICENSES.txt`.
-- If `minCindyVersion` is added or raised, record a real packaged `.cindy`
-  install on that exact Cindy version in the PR. Lowering/removing it requires
-  maintainer review.
+- Every changed plugin package requires the PR's production Cindy verification
+  checkbox, attesting that its packaged `.cindy` was installed and exercised on
+  a real device running a stable production Cindy build. If the plugin declares
+  `minCindyVersion`, that Cindy build must be greater than or equal to it.
+  Lowering/removing the field requires maintainer review.
 - Paired bilingual docs (`README.md` ↔ `README.zh-CN.md`, etc.) must change in
   the same PR. 双语文档必须同 PR 同步。
 - Never commit credentials, real user data, or `node_modules`; fixtures use

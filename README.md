@@ -31,6 +31,13 @@ This is the source for every official plugin (Ghost) in the
   region approves it. Start at
   [Submit your plugin](#submit-your-plugin).
 
+Already-installed marketplace plugins follow their recorded source and update
+silently. A merged version bump can therefore reach installed users without
+another click or capability-confirmation dialog. Treat capability expansion and
+runtime changes as immediate production changes: declare the minimum required
+capabilities in `ghost.json`, and keep the published package within the
+marketplace manifest's declared capability ceiling.
+
 ## Plugins
 
 |  | Plugin | Directory | Description |
@@ -67,13 +74,13 @@ The full path from idea to marketplace:
    (163 / iCloud / QQ mail) are fine, but a second generic web search is not.
 2. **Align** — open a
    [new plugin proposal](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)
-   describing the scenario, boundaries, and required capabilities (network
-   hosts, credentials, Node runtime). Wait for a maintainer ack before writing
+   describing the scenario, boundaries, and any autonomous Host capabilities
+   (network hosts, credentials, long-lived Node runtime). Wait for a maintainer ack before writing
    code — it keeps you from building something that overlaps or won't be
    accepted.
 3. **Build** — in a Cindy conversation, say "help me build a plugin" to get
    the complete authoring manual (`ghost_forge_guide`: every `ghost.json`
-   field, slots, the `cindy.send` pipe API, packaging). Scaffold with
+   field, direct capability declarations, the `cindy.send` pipe API, packaging). Scaffold with
    `ghost_forge_scaffold` or copy the layout of any plugin here. Import the
    directory or a packaged `.cindy` into a dev environment to verify.
 4. **Open a PR** — title `feat(<directory>): …`; bump `ghost.json.version`;
@@ -89,18 +96,24 @@ The full path from idea to marketplace:
 6. **Submit and approve** — after merge to `main`, the CN and Global workflows
    submit the real package through Plugin Platform. Each region reviews its own
    pending release; only an approved release becomes available to compatible
-   clients. Rejection leaves the previous approved release in service.
+   clients and is then picked up silently by installations following that market
+   source. Rejection leaves the previous approved release in service.
 
 ## Review standards
 
 Every official plugin is installed by real users who carry its security and
 experience risk, so review is strict by design. Four hard principles:
 
-1. **Pure sandbox by default, capabilities declared explicitly.** Regular
-   plugins run in Cindy's isolated sandbox and may only use the network
-   allowlist and host channels declared in `ghost.json`. Official plugins that
-   genuinely need the Node Runtime must explicitly declare the `node` slot, a
-   fixed entry point, and a minimal child-process boundary.
+1. **Pure sandbox by default; authorization follows the executor.** Regular
+   plugins run in Cindy's isolated sandbox. Whether a plugin tool runs is decided
+   by the current `ghost_call` and Cindy's existing Agent authorization. Ordinary
+   HTTPS and workdir operations use the Host-issued, strictly in-flight `callId`;
+   bundled code and CLIs continue to use the existing Node worker. Do not add a
+   Slot or manifest field just to pre-register a specific command, host, or path.
+   A plugin that uses Host capabilities autonomously from a panel,
+   subscription, scheduler, or long-lived process must declare the corresponding
+   direct field in `ghost.json`. An autonomous Node Runtime still requires the
+   top-level `node` field, a fixed entry point, and a minimal child-process boundary.
 2. **Clear secret ownership.** Ordinary API tokens are stored through the
    host's write-only `/secrets` channel. When a Node plugin needs plaintext
    credentials, use `node.secretBindings` to restrict them to specific Worker
@@ -119,9 +132,10 @@ experience risk, so review is strict by design. Four hard principles:
 
 ### Self-check before requesting review
 
-- [ ] `ghost.json` declares only the network hosts and host channels actually
-      used; no `node` slot unless genuinely required
-- [ ] Node plugins: explicit `node` slot, fixed entry, minimal child-process
+- [ ] Execution ownership is explicit: plugin tools use existing Agent authorization,
+      HTTPS/workdir operations use the current `callId`, and CLIs use the existing
+      Node worker without pre-registering individual commands
+- [ ] Node plugins: explicit `node` field, fixed entry, minimal child-process
       boundary; `node/worker.cjs` is an esbuild artifact rebuilt from `src/`
 - [ ] No plaintext credentials anywhere: tokens go through the write-only
       `/secrets` channel or `node.secretBindings`; never through `main.js`,
@@ -134,9 +148,10 @@ experience risk, so review is strict by design. Four hard principles:
 - [ ] User-facing errors are actionable; no raw status codes or stack traces
 - [ ] Four-language locales complete; `node --test .tests/localization.test.mjs`
       passes
-- [ ] If `minCindyVersion` is added or raised, the packaged `.cindy` was
-      installed on that exact Cindy version and the result is recorded in the
-      PR; lowering or removing it requires maintainer review
+- [ ] Every changed plugin's packaged `.cindy` was installed and exercised on a
+      real device running a stable production Cindy build, and the PR
+      verification box is checked; when the plugin declares `minCindyVersion`,
+      the verified Cindy build is greater than or equal to it
 - [ ] `ghost.json.version` bumped; `provisioning.json` entry present with an
       audience decision stated in the PR
 - [ ] No credentials, real user data, `node_modules`, or unrelated generated
@@ -210,7 +225,8 @@ Both are active and use the same submission flow:
 
 After approval, compatible clients receive that release; clients below its
 `minCindyVersion` continue to receive the newest older compatible release, when
-one exists.
+one exists. Desktop trusts this Server projection and does not add a second
+version-confirmation step.
 
 When changing plugin content you must bump `ghost.json.version` in the same
 change. The new `major.minor.patch` SemVer must be greater than the version on
@@ -218,10 +234,25 @@ change. The new `major.minor.patch` SemVer must be greater than the version on
 
 ## Local development
 
-The complete plugin-authoring contract (all `ghost.json` fields, slots, the
+The complete plugin-authoring contract (all `ghost.json` fields, direct capability declarations, the
 `cindy.send` pipe API, packaging flow) is defined by the manual returned by the
 `ghost_forge_guide` tool built into the Cindy client — just say "help me build
 a plugin" in a Cindy conversation to get it on the spot.
+
+New plugins use `schemaVersion: 3`, include `minCindyVersion` (at least `0.1.61`),
+and declare capabilities directly through fields such as `tools`, `network`,
+`node`, or `notify: true`; v3 must not contain `slots`. Existing v2 manifests
+stay untouched until that plugin's packaged content actually changes. The PR
+that changes it must migrate the manifest to v3—there is no repository-wide
+bulk migration or release solely for the schema change.
+
+Direct fields describe plugin contributions and **autonomous** Host use. They are
+not a pre-registration list for a specific command, host, or path. Whether the
+plugin tool runs is decided by the current `ghost_call` and existing Agent
+authorization; ordinary HTTPS and workdir operations pass the Host-issued
+`callId` to `cindy.fetch` or `cindy.fs`. Bundled code and CLIs continue to use the
+existing Node worker. Managed credentials and any use outside that in-flight call
+still require the corresponding explicit declaration.
 
 Typical flow:
 
