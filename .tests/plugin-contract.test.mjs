@@ -511,7 +511,7 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
   assert.equal(validateGhostManifest({ ...direct, notify: false }).ok, false, 'Manifest v3 boolean capabilities must be literal true');
 });
 
-test('authoring docs provide an executable Manifest-v3 Forge path', () => {
+test('authoring docs provide a harness-independent Manifest-v3 path', () => {
   const docs = new Map([
     ['README.md', readUtf8(path.join(root, 'README.md'))],
     ['README.zh-CN.md', readUtf8(path.join(root, 'README.zh-CN.md'))],
@@ -520,16 +520,11 @@ test('authoring docs provide an executable Manifest-v3 Forge path', () => {
   ]);
 
   for (const [file, contents] of docs) {
-    for (const required of [
-      'ghost_forge_guide',
-      'section',
-      'ghost_forge_scaffold',
-      'ghost_forge_pack',
-      'ghost_forge_install',
-    ]) {
+    for (const required of ['ghost.json', '.cindy', 'scripts/validate-plugin-manifest.mjs']) {
       assert.ok(contents.includes(required), `${file} must document ${required}`);
     }
-    assert.ok(contents.includes('ghost.json'), `${file} must name the manifest file`);
+    assert.match(contents, /harness/i, `${file} must make the authoring flow harness-independent`);
+    assert.doesNotMatch(contents, /ghost_forge_guide/, `${file} must not require a Cindy-only guide tool`);
     assert.match(contents, /\bv2\b/i, `${file} must identify the legacy manifest version`);
     if (file.endsWith('.zh-CN.md')) {
       assert.ok(contents.includes('不要复制'), `${file} must warn against copying an existing ghost.json`);
@@ -540,6 +535,9 @@ test('authoring docs provide an executable Manifest-v3 Forge path', () => {
 
   for (const file of ['README.md', 'README.zh-CN.md']) {
     const contents = docs.get(file);
+    for (const runtimeContract of ['cindy.onHostMessage', 'cindy.send', 'tool-result']) {
+      assert.ok(contents.includes(runtimeContract), `${file} must document ${runtimeContract}`);
+    }
     const jsonBlocks = [...contents.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]);
     const manifestSource = jsonBlocks.find((block) => block.includes('"schemaVersion": 3'));
     assert.ok(manifestSource, `${file} must contain a minimal Manifest-v3 example`);
@@ -548,6 +546,13 @@ test('authoring docs provide an executable Manifest-v3 Forge path', () => {
     assert.ok(result.ok, `${file} Manifest-v3 example is rejected by Cindy: ${result.reason}`);
     assert.equal(Object.hasOwn(manifest, 'slots'), false, `${file} Manifest-v3 example must not contain slots`);
   }
+
+  const validatorOutput = execFileSync(
+    process.execPath,
+    [path.join(root, 'scripts', 'validate-plugin-manifest.mjs'), path.join(root, 'cindy-art')],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.match(validatorOutput, /valid Cindy plugin manifest/, 'the documented validator command must be executable');
 
   const pullRequestTemplate = readUtf8(path.join(root, '.github/PULL_REQUEST_TEMPLATE.md'));
   assert.doesNotMatch(pullRequestTemplate, /\bslots?\b/i, 'the PR template must use Manifest-v3 direct capability language');

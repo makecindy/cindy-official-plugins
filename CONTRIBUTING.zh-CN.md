@@ -12,9 +12,9 @@
 
 - 先读 [README.zh-CN.md](README.zh-CN.md)：仓库结构、插件清单、审查标准和发布流程
   都以它为准，本指南不重复维护副本。
-- 完整的插件编写契约（`ghost.json` 全字段、直接能力声明、`cindy.send` 管子 API 和
-  打包流程）由 Cindy 客户端内置的 `ghost_forge_guide` 工具返回。无参结果只是目录；
-  写代码前还要传入 `section`，读取第 0 章、相关能力章节、「沙箱红线」和「打包与测试」。
+- 插件编写契约就在本仓库中：`README.zh-CN.md`、本指南、`.tests/contracts/` 中固定
+  版本的 Manifest 校验器和打包门禁共同组成正本。无论用哪一种 Agent 或 harness
+  创建文件都遵循同一契约；Cindy Forge 命令只是可选捷径。
 - 增加 Manifest 字段前先判断谁执行：插件工具是否执行由既有 Agent 授权决定；普通
   HTTPS 与 workdir 操作使用 Host 下发的在途 `callId`，CLI 继续走已有 Node 工作进程。
   具体命令、域名或路径无需预登记；只有脱离该调用的插件自主 Host 能力才写入 `ghost.json`。
@@ -25,18 +25,19 @@
 
 ## 开发与验证
 
-从 [`README.zh-CN.md` 的「给 Agent 的快速路径」](README.zh-CN.md#给-agent-的快速路径)
+从 [`README.zh-CN.md` 的「工具无关的快速路径」](README.zh-CN.md#工具无关的快速路径)
 开始：
 
-1. 读取 Forge 目录和必要章节，先对齐设计与最小能力，再开始实现。
-2. 用 `ghost_forge_scaffold` 创建新的 Manifest v3 项目。**不要复制本仓现有插件的
+1. 对齐设计与最小能力后，使用普通文件操作在仓库根目录创建新的插件目录。
+2. 从文档中的 Manifest v3 与 `main.js` 示例开始。**不要复制本仓现有插件的
    `ghost.json`**：未改动的官方插件可能刻意保留旧 v2 清单。现有源码只能用于参考
    实现方式。
-3. 完成实现和源码验证后调用 `ghost_forge_pack`。它只校验并生成 `.cindy` 包，绝不会
-   安装或更新插件。
-4. 只有用户明确要求当前 Agent 安装或更新这份源码时，才调用
-   `ghost_forge_install`；否则由用户手动导入打好的 `.cindy`。
-5. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
+3. 运行 `node scripts/validate-plugin-manifest.mjs ./<插件目录>` 校验 Manifest。
+4. 把插件目录的**内容**（不是目录本身）压成 `.cindy` ZIP 包，并从 Cindy 本地插件
+   入口导入这一个确切的包。
+5. 如果当前 harness 提供 Cindy Forge 命令，可以用它替代手工脚手架/打包步骤；它不会
+   改变源码格式和审查契约。安装仍然必须来自用户的明确要求。
+6. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
    `ja`、`ko` 四份 locale 资源。
 
 `.tests/` 下的 `*.test.mjs` 用 Node 内置 test runner 运行，例如：

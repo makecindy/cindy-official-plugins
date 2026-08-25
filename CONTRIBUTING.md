@@ -14,12 +14,10 @@ maintained in separate repositories and are outside the scope of this repository
 - Read [`README.md`](README.md) first. It is the source of truth for the
   repository layout, the plugin list, the review standards, and the publish
   flow; this guide does not duplicate them.
-- The complete plugin-authoring contract (all `ghost.json` fields, direct
-  capability declarations, the `cindy.send` pipe API, and packaging flow) is
-  defined by the manual returned by the `ghost_forge_guide` tool built into the
-  Cindy client. Its no-argument result is only the table of contents; before
-  coding, call it again with `section` to read section 0, the relevant
-  capability chapters, Sandbox red lines, and Packaging and testing.
+- The plugin-authoring contract lives in this repository: `README.md`, this
+  guide, the pinned Manifest validator under `.tests/contracts/`, and the
+  packaging checks. It is independent of the Agent or harness used to create
+  the files. Cindy Forge commands are optional shortcuts only.
 - Decide who performs an operation before adding a manifest field. Whether the
   plugin tool runs is decided by existing Agent authorization. Ordinary HTTPS and
   workdir operations use the Host-issued in-flight `callId`; CLIs continue through
@@ -33,20 +31,23 @@ maintained in separate repositories and are outside the scope of this repository
 
 ## Development and verification
 
-Start with the [Agent quick path in `README.md`](README.md#agent-quick-path):
+Start with the
+[harness-independent quick path in `README.md`](README.md#harness-independent-quick-path):
 
-1. Read the Forge table of contents and required sections, then align the
-   design and minimum capabilities before implementation.
-2. Create a new Manifest-v3 project with `ghost_forge_scaffold`. Do **not** copy
+1. Align the design and minimum capabilities, then create a new root-level
+   plugin directory using ordinary file operations.
+2. Start from the documented Manifest-v3 and `main.js` examples. Do **not** copy
    an existing official plugin's `ghost.json`: unchanged official plugins may
    intentionally retain legacy v2 manifests. Existing source may be consulted
    only for implementation patterns.
-3. Implement and verify the source, then call `ghost_forge_pack`. It validates
-   and creates a `.cindy` package but never installs or updates it.
-4. Call `ghost_forge_install` only when the user explicitly asks the current
-   Agent to install or update the source. Otherwise let the user import the
-   packaged `.cindy` manually.
-5. Before opening an official-plugin PR, add the `provisioning.json` entry and
+3. Validate the Manifest with
+   `node scripts/validate-plugin-manifest.mjs ./<plugin-directory>`.
+4. Package the directory contents—not the directory itself—as a `.cindy` ZIP
+   archive and import that exact package through Cindy's local plugin entry.
+5. If the chosen harness exposes Cindy Forge commands, they may replace the
+   manual scaffold/package steps, but they do not change the source format or
+   the review contract. Installation still requires an explicit user request.
+6. Before opening an official-plugin PR, add the `provisioning.json` entry and
    complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 
 The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
