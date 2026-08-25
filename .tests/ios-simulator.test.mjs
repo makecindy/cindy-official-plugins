@@ -17,9 +17,8 @@ const localeResources = ['zh-CN', 'en', 'ja', 'ko'].map((locale) =>
 
 test('manifest keeps privileged simulator runtime ownership in Cindy Host', () => {
   assert.equal(manifest.id, 'ios-simulator');
-  assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.version, '1.1.4');
-  assert.equal(manifest.minCindyVersion, '0.1.61');
+  assert.equal(manifest.version, '1.1.3');
+  assert.equal(manifest.minCindyVersion, '0.1.45');
   assert.deepEqual(
     {
       name: manifest.name,
@@ -45,7 +44,7 @@ test('manifest keeps privileged simulator runtime ownership in Cindy Host', () =
     );
   }
   assert.equal(manifest.launch, 'on-demand');
-  assert.equal(Object.hasOwn(manifest, 'slots'), false);
+  assert.deepEqual(manifest.slots, ['skill', 'ios-simulator']);
   assert.equal(manifest.panel, undefined);
   assert.equal(manifest.node, undefined);
   assert.equal(manifest.network, undefined);

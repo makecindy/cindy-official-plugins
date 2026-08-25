@@ -15,7 +15,10 @@ const prWorkflow = readFileSync(new URL('pr-verify.yml', workflowRoot), 'utf8');
 
 test('pull request verification requires the production Cindy attestation', () => {
   assert.match(prWorkflow, /^      - edited$/m);
-  assert.match(prWorkflow, /name: Require production Cindy verification attestation/);
+  assert.match(
+    prWorkflow,
+    /name: Require production Cindy verification attestation\n        if: \$\{\{ steps\.changes\.outputs\.plugins != '\[\]' \}\}/,
+  );
   assert.match(prWorkflow, /Production Cindy verification \/ 生产版 Cindy 验证/);
   assert.match(prWorkflow, /\.pull_request\.body/);
   assert.match(prWorkflow, /GITHUB_EVENT_PATH/);
