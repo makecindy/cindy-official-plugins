@@ -41709,7 +41709,7 @@ function addRemoteProxyErrorExecutionState(result) {
   };
 }
 function normalizeRemoteProxyExecutionState(value) {
-  return value === "not_executed" || value === "unknown" ? value : void 0;
+  return value === "not_executed" || value === "executed" || value === "unknown" ? value : void 0;
 }
 function shouldMaterializeRemoteProxyTool(toolName) {
   return [

@@ -23,6 +23,10 @@ const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf
 const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
 const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
+const vendorMakerSource = readFileSync(
+  new URL('vendor/taptap-maker/dist/maker.js', pluginRoot),
+  'utf8',
+);
 const provisioning = JSON.parse(readFileSync(new URL('../provisioning.json', import.meta.url), 'utf8'));
 const vendorPackage = JSON.parse(
   readFileSync(new URL('vendor/taptap-maker/package.json', pluginRoot), 'utf8'),
@@ -270,6 +274,18 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
     localizedCallToolDescriptions.ko,
     /execution_state가 없거나 명시적으로 not_executed.*executed 또는 unknown은 재시도하지 않습니다/,
   );
+});
+
+test('官方 Runtime 保留远端错误结果的 executed 执行态', () => {
+  const functionSource = vendorMakerSource.match(
+    /function normalizeRemoteProxyExecutionState\(value\) \{[\s\S]*?\n\}/,
+  );
+  assert.ok(functionSource, 'Runtime must define normalizeRemoteProxyExecutionState');
+  const context = createContext({ normalized: null });
+  new Script(
+    `${functionSource[0]}; normalized = normalizeRemoteProxyExecutionState('executed');`,
+  ).runInContext(context);
+  assert.equal(context.normalized, 'executed');
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
