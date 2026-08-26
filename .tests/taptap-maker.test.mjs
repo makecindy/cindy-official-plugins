@@ -210,6 +210,33 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
   assert.match(statusTool.parameters.properties.detail.description, /完整诊断/);
+  assert.match(statusTool.description, /\/tracking/);
+  assert.doesNotMatch(
+    Object.values(statusTool.parameters.properties).map(({ description }) => description).join('\n'),
+    /仅检查本地状态|本地只读/,
+  );
+  const localizedStatusTools = Object.fromEntries(
+    ['zh-CN', 'en', 'ja', 'ko'].map((locale) => [
+      locale,
+      JSON.parse(readFileSync(new URL(`locales/${locale}.json`, pluginRoot), 'utf8'))
+        .tools.maker_status,
+    ]),
+  );
+  const staleStatusClaims = {
+    'zh-CN': /仅检查本地状态|本地只读/,
+    en: /local-only|local, read-only/,
+    ja: /ローカル状態のみ|ローカル読み取り専用/,
+    ko: /로컬 상태만|로컬 읽기 전용/,
+  };
+  for (const [locale, localizedStatusTool] of Object.entries(localizedStatusTools)) {
+    assert.match(localizedStatusTool.description, /\/tracking/);
+    assert.doesNotMatch(
+      Object.values(localizedStatusTool.parameters)
+        .map(({ description }) => description)
+        .join('\n'),
+      staleStatusClaims[locale],
+    );
+  }
   const listTools = manifest.tools.find((tool) => tool.name === 'maker_list_tools');
   assert.match(listTools.description, /固定发布/);
   assert.match(listTools.description, /不是当前工作区的实时可用性探测/);

@@ -4,13 +4,13 @@
   "whenToUse": "Use this plugin for TapTap Maker work in the current Cindy workspace. If the project is elsewhere, ask the user to open it in Cindy; never use Shell, CLI, npx, direct MCP, or a browser. Only “MCP error -32600: INSUFFICIENT_BALANCE” means insufficient credits; offer Art after confirmation.",
   "tools": {
     "maker_status": {
-      "description": "Inspect only the current session workspace's TapTap Maker status, including login, project binding, Git, Python, Lua LSP, and tool readiness. If the project is elsewhere, ask the user to open it in Cindy; do not bypass the plugin with Shell, CLI, npx, or direct MCP.",
+      "description": "Inspect only the current session workspace's TapTap Maker status, including login, project binding, Git, Python, Lua LSP, and tool readiness. The default summary does not modify project files or perform remote Git sync; for a bound project, the official Runtime still sends call telemetry to Maker `/tracking`, including the user ID, project ID, tool identifier, and call status. If the project is elsewhere, ask the user to open it in Cindy; do not bypass the plugin with Shell, CLI, npx, or direct MCP.",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "In full diagnostic mode, set true to skip remote Git sync and development-tool freshness checks. Summary mode is local-only by default."
+          "description": "In full diagnostic mode, set true to skip remote Git sync and development-tool freshness checks. Summary mode does not perform either check."
         },
         "/properties/detail": {
-          "description": "Set true only for a full diagnostic; the default is a fast, local, read-only status summary."
+          "description": "Set true only for a full diagnostic; the default is a fast status summary that does not modify project files, but bound projects still send the Maker call telemetry described above."
         }
       }
     },

@@ -4,13 +4,13 @@
   "whenToUse": "TapTap Maker 项目操作统一通过本插件工具完成，只操作当前本地会话工作区；目标项目在其他目录时先让用户在 Cindy 中打开该目录，不通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行。只有完整错误为“MCP error -32600: INSUFFICIENT_BALANCE”才表示积分不足，此时说明 Art 插件可替代并等待用户确认。",
   "tools": {
     "maker_status": {
-      "description": "仅检查当前会话工作区的 TapTap Maker 状态，包括登录、项目绑定、Git、Python、Lua LSP 与开发工具就绪情况。目标项目在其他目录时先让用户在 Cindy 中打开该目录，不通过 Shell、CLI、npx 或直接 MCP 绕行。",
+      "description": "仅检查当前会话工作区的 TapTap Maker 状态，包括登录、项目绑定、Git、Python、Lua LSP 与开发工具就绪情况。默认摘要不会修改项目文件或执行远端 Git 同步；已绑定项目仍会由官方 Runtime 向 Maker `/tracking` 上报用户 ID、项目 ID、工具标识与调用状态等遥测。目标项目在其他目录时先让用户在 Cindy 中打开该目录，不通过 Shell、CLI、npx 或直接 MCP 绕行。",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "完整诊断模式下可设为 true，跳过远端 Git 同步和开发工具新鲜度检查。默认摘要模式仅检查本地状态。"
+          "description": "完整诊断模式下可设为 true，跳过远端 Git 同步和开发工具新鲜度检查。默认摘要模式不执行这两项检查。"
         },
         "/properties/detail": {
-          "description": "仅在需要完整诊断时设为 true；默认返回快速、本地只读的状态摘要。"
+          "description": "仅在需要完整诊断时设为 true；默认返回快速状态摘要且不会修改项目文件，但已绑定项目仍会发送上述 Maker 调用遥测。"
         }
       }
     },

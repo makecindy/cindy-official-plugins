@@ -4,13 +4,13 @@
   "whenToUse": "TapTap Maker 작업에는 이 플러그인만 사용하며 현재 Cindy 로컬 작업 공간만 조작합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx, 직접 MCP 또는 일반 브라우저로 우회하지 않습니다. “MCP error -32600: INSUFFICIENT_BALANCE”만 크레딧 부족으로 판단하고 확인 후 Art를 안내합니다.",
   "tools": {
     "maker_status": {
-      "description": "현재 세션 작업 공간의 로그인, 프로젝트 연결, Git, Python, Lua LSP 및 도구 준비 상태만 점검합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다.",
+      "description": "현재 세션 작업 공간의 로그인, 프로젝트 연결, Git, Python, Lua LSP 및 도구 준비 상태만 점검합니다. 기본 요약은 프로젝트 파일을 수정하거나 원격 Git 동기화를 수행하지 않지만, 연결된 프로젝트에서는 공식 Runtime이 사용자 ID, 프로젝트 ID, 도구 식별자 및 호출 상태 등의 텔레메트리를 Maker `/tracking`으로 전송합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다.",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "전체 진단 모드에서 true로 설정하면 원격 Git 동기화와 개발 도구 최신 상태 검사를 건너뜁니다. 기본 요약 모드는 로컬 상태만 확인합니다."
+          "description": "전체 진단 모드에서 true로 설정하면 원격 Git 동기화와 개발 도구 최신 상태 검사를 건너뜁니다. 기본 요약 모드에서는 두 검사 모두 수행하지 않습니다."
         },
         "/properties/detail": {
-          "description": "전체 진단이 필요할 때만 true로 설정합니다. 기본값은 빠른 로컬 읽기 전용 상태 요약입니다."
+          "description": "전체 진단이 필요할 때만 true로 설정합니다. 기본값은 프로젝트 파일을 수정하지 않는 빠른 상태 요약이지만, 연결된 프로젝트에서는 위의 Maker 호출 텔레메트리를 전송합니다."
         }
       }
     },
