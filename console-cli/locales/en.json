@@ -1,0 +1,14 @@
+{
+  "name": "Console",
+  "description": "Dynamically discovers and executes Console API operations published in its CLI manifest. The token is kept by the Cindy host and no CLI binary is bundled.",
+  "whenToUse": "Use for applications, deployments, clusters, tasks, releases, or on-call resources in Console. Configure a Console HTTPS host and API token first.",
+  "tools": {
+    "list_tools": { "description": "Read the current Console CLI manifest and list the operations, parameters, and request bodies published by that server. Read-only." },
+    "call_tool": { "description": "Execute one operation from the manifest. Mutations report executed, not_executed, or unknown; check state before retrying unknown results." }
+  },
+  "network": {
+    "connections": {
+      "console_conn": { "label": "Console instance", "hint": "Enter the Console HTTPS host and API token. Default HTTPS port only; never put the token in the URL." }
+    }
+  }
+}

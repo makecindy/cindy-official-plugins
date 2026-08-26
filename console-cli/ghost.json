@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "id": "console-cli",
+  "name": "Console",
+  "description": "通过 Console 官方 CLI API manifest 在 Cindy 中执行部署、应用、集群、任务与值班等已发布操作；不携带 CLI 二进制，Token 由 Cindy 主机加密保管并按 Console 实例注入。",
+  "whenToUse": "需要查询或操作 TapTap Infra Console 中的应用、部署、集群、任务、镜像发布、运行状态或值班资源时使用。先在插件详情页添加 Console 实例与 API Token；操作目录实时来自该实例的 CLI manifest。",
+  "version": "0.1.0",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "settingsHeight": 560,
+  "slots": [
+    "tool",
+    "network",
+    "notify"
+  ],
+  "command": "console-cli",
+  "network": {
+    "connections": [
+      {
+        "key": "console_conn",
+        "label": "Console 实例",
+        "hint": "填写 Console 的 HTTPS 域名和 API Token；仅支持默认 HTTPS 端口，不要填写路径或 Token 到 URL 中",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}"
+        },
+        "maxConnections": 8
+      }
+    ]
+  },
+  "setup": {
+    "requires": [
+      {
+        "anyOf": [
+          "connection:console_conn"
+        ]
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "list_tools",
+      "description": "读取当前 Console 实例的 CLI manifest，列出服务端实际发布的操作、HTTP 方法、路径、参数和请求体说明。可传 category 只查看一个命令类目；此工具只读，不执行 Console 操作。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "可选命令类目，例如 deployment、kubefiles-app、oncall；不传返回类目概览。"
+          },
+          "instance": {
+            "type": "string",
+            "description": "可选连接 id 或 Console 域名；配置多个实例时必须指定。"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "call_tool",
+      "description": "执行 list_tools 返回的一个 Console CLI manifest 操作。name 必须来自当前实例的 manifest；params 只能包含该操作声明的 path/query 参数，body 只能在 manifest 声明 request body 时提供。GET 等只读操作成功返回 execution=not_applicable；写操作成功返回 execution=executed，校验失败返回 not_executed，网络/服务端错误返回 unknown。execution=unknown 时不要盲目重试，先重新查询 Console 状态。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "manifest 中的命令 id 或点分 command path，例如 deployment.get。"
+          },
+          "instance": {
+            "type": "string",
+            "description": "可选连接 id 或 Console 域名；配置多个实例时必须指定。"
+          },
+          "params": {
+            "type": "object",
+            "description": "path/query 参数对象；只能使用 manifest 为该命令声明的参数名。"
+          },
+          "body": {
+            "description": "manifest 声明的 JSON request body；未声明 request body 的命令不能传此字段。"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

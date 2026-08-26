@@ -1,0 +1,14 @@
+{
+  "name": "Console",
+  "description": "通过 Console 发布的 CLI manifest 动态发现并执行已允许的 API 操作。Token 由 Cindy 主机保管，不打包 CLI 二进制。",
+  "whenToUse": "需要查询或操作 Console 中的应用、部署、集群、任务、发布或值班资源时使用；先配置 Console HTTPS 域名与 API Token。",
+  "tools": {
+    "list_tools": { "description": "读取当前 Console 实例的 CLI manifest，列出服务端实际发布的操作、参数和请求体；只读。" },
+    "call_tool": { "description": "执行 manifest 中的一个操作。写操作返回 executed、not_executed 或 unknown；unknown 时先查询状态再决定是否重试。" }
+  },
+  "network": {
+    "connections": {
+      "console_conn": { "label": "Console 实例", "hint": "填写 Console HTTPS 域名和 API Token；仅支持默认 HTTPS 端口，不要把 Token 放进 URL。" }
+    }
+  }
+}

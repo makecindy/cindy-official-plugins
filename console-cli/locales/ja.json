@@ -1,0 +1,14 @@
+{
+  "name": "Console",
+  "description": "Console の CLI manifest から許可された API 操作を動的に検出して実行します。Token は Cindy ホストが保管し、CLI バイナリは同梱しません。",
+  "whenToUse": "Console のアプリ、デプロイ、クラスター、タスク、リリース、オンコール資源を確認・操作するときに使用します。先に HTTPS ホストと API Token を設定してください。",
+  "tools": {
+    "list_tools": { "description": "現在の Console CLI manifest を読み、サーバーが公開する操作、パラメーター、リクエスト本文を一覧します。読み取り専用です。" },
+    "call_tool": { "description": "manifest の操作を 1 つ実行します。変更操作は executed、not_executed、unknown を返します。unknown の場合は状態を確認してから再試行してください。" }
+  },
+  "network": {
+    "connections": {
+      "console_conn": { "label": "Console インスタンス", "hint": "Console の HTTPS ホストと API Token を入力します。既定の HTTPS ポートのみ対応し、Token を URL に入れないでください。" }
+    }
+  }
+}
