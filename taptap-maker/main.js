@@ -264,9 +264,14 @@ function publicMakerErrorMessage(result) {
 function sanitizeMakerFailure(result) {
   if (!makerResultIsFailure(result)) return result;
   var message = publicMakerErrorMessage(result);
+  var executionDetails = makerExecutionDetails(result);
+  if (executionDetails.execution_state === 'unknown') {
+    message = 'TapTap Maker 操作执行结果不确定。请先核对 Maker 端实际状态、产物和用量，再决定是否重试；不要自动或盲目重试。\n'
+      + message;
+  }
   return makerErrorResult(
     message,
-    Object.assign({}, makerFailureDetails(message), makerExecutionDetails(result)),
+    Object.assign({}, makerFailureDetails(message), executionDetails),
   );
 }
 

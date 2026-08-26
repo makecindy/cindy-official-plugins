@@ -833,6 +833,8 @@ test('执行状态未知的动态工具不会触发身份恢复自动重试', as
   assert.equal(result.result.isError, true);
   assert.equal(result.result.structuredContent.execution_state, 'unknown');
   assert.equal(result.result.structuredContent.automatic_retry, false);
+  assert.match(result.result.content[0].text, /先核对 Maker 端实际状态、产物和用量/);
+  assert.match(result.result.content[0].text, /不要自动或盲目重试/);
 });
 
 test('真实 Runtime remote_result 错误保留未知执行态且不自动重试', async () => {
