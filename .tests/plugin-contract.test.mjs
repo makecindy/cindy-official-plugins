@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.014a471.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.dae1c66.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -137,7 +137,7 @@ function validateOfficialManifest(pluginDir, manifest) {
     for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
   } else {
     assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
-    assertManifestV3Floor(pluginDir, manifest);
+    assertManifestV3MinCindyVersion(pluginDir, manifest);
   }
   if (manifest.tools !== undefined) {
     assert.ok(Array.isArray(manifest.tools) && manifest.tools.length > 0 && manifest.tools.length <= 16, `${pluginDir}.tools must contain 1-16 entries`);
@@ -415,18 +415,18 @@ function stableSemver(version, pluginDir, field = 'ghost.json.version') {
   return match.slice(1).map(BigInt);
 }
 
-function assertManifestV3Floor(pluginDir, manifest) {
+function assertManifestV3MinCindyVersion(pluginDir, manifest) {
   const parts = stableSemver(manifest.minCindyVersion, pluginDir, 'minCindyVersion');
   assert.ok(
-    parts[0] > 0n || parts[1] > 1n || (parts[1] === 1n && parts[2] >= 61n),
-    `${pluginDir}: Manifest v3 minCindyVersion must be at least 0.1.61`,
+    parts.some((part) => part > 0n),
+    `${pluginDir}: minCindyVersion must name a released stable Cindy version, not 0.0.0`,
   );
 }
 
 function assertChangedPluginUsesManifestV3(pluginDir, manifest) {
   assert.equal(manifest.schemaVersion, 3, `${pluginDir}: changed plugin packages must migrate to schemaVersion 3`);
   assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
-  assertManifestV3Floor(pluginDir, manifest);
+  assertManifestV3MinCindyVersion(pluginDir, manifest);
 }
 
 function compareStableSemver(left, right, pluginDir) {
@@ -494,7 +494,7 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
   );
   const direct = {
     schemaVersion: 3,
-    minCindyVersion: '0.1.61',
+    minCindyVersion: '0.1.0',
     id: 'direct-contract-fixture',
     name: 'Direct contract fixture',
     version: '1.0.0',
@@ -509,6 +509,16 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
   assert.deepEqual(directResult.manifest.futureCapability, { mode: 'preserved' }, 'unknown v3 fields must survive normalization');
   assert.equal(validateGhostManifest({ ...direct, slots: ['tool'] }).ok, false, 'Manifest v3 slots must be rejected');
   assert.equal(validateGhostManifest({ ...direct, notify: false }).ok, false, 'Manifest v3 boolean capabilities must be literal true');
+  assert.equal(
+    validateGhostManifest({ ...direct, minCindyVersion: '0.0.1' }).ok,
+    true,
+    'Manifest v3 must not impose a repository-wide Cindy version floor',
+  );
+  assert.throws(
+    () => assertManifestV3MinCindyVersion('direct-contract-fixture', { minCindyVersion: '0.0.0' }),
+    /released stable Cindy version/,
+    'official releases must not use the versionless development sentinel',
+  );
 });
 
 test('authoring docs provide a harness-independent Manifest-v3 path', () => {

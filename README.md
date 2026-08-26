@@ -241,13 +241,13 @@ shortcuts, not part of the plugin format and not a prerequisite for development.
 
 New plugins use `schemaVersion: 3` and declare capabilities directly through
 fields such as `tools`, `network`, `node`, or `notify: true`; v3 must not contain
-`slots`. The v3 floor is `minCindyVersion: "0.1.61"`, but that is not always the
-correct value: use the first stable Cindy version that supports every Host
-capability and manifest field the plugin actually depends on, whichever is
-later. Existing v2 manifests stay untouched until that plugin's packaged
-content actually changes. The PR that changes it must migrate the manifest to
-v3—there is no repository-wide bulk migration or release solely for the schema
-change.
+`slots`. Every v3 package declares its own `minCindyVersion`: use the first
+stable Cindy version that supports every Host capability and manifest field
+the concrete plugin actually depends on. Manifest v3 itself does not impose a
+repository-wide Cindy version floor. Existing v2 manifests stay untouched until
+that plugin's packaged content actually changes. The PR that changes it must
+migrate the manifest to v3—there is no repository-wide bulk migration or
+release solely for the schema change.
 
 Direct fields describe plugin contributions and **autonomous** Host use. They are
 not a pre-registration list for a specific command, host, or path. Whether the
@@ -287,10 +287,13 @@ source may be consulted only for implementation patterns.
 
 Start `ghost.json` from this minimal runnable Manifest-v3 shape:
 
+The `1.2.3` below is only an example. Replace it with the first stable Cindy
+version that supports the concrete plugin you are building.
+
 ```json
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.61",
+  "minCindyVersion": "1.2.3",
   "id": "my-plugin",
   "name": "My Plugin",
   "description": "A one-sentence description for people.",

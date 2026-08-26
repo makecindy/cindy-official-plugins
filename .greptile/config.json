@@ -74,7 +74,7 @@
     {
       "id": "capability-minimization",
       "severity": "high",
-      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、填写不低于 0.1.61 的 minCindyVersion、移除 slots；未触及的 v2 插件不得被要求批量迁移。"
+      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、按该插件实际依赖填写首个稳定版 minCindyVersion、移除 slots；仓库不设置统一 Cindy 版本下限，未触及的 v2 插件不得被要求批量迁移。"
     },
     {
       "id": "irreversible-side-effect-tri-state",

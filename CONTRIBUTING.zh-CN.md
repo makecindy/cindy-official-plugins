@@ -80,9 +80,9 @@ cd 163-mail && npm ci && npm run build
 3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
    `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
    同一个改动还必须把现有 v2 清单迁移为 `schemaVersion: 3`：增加
-   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。v3 基线是
-   `0.1.61`；如果插件依赖的 Host 能力或 Manifest 字段在更晚的 Cindy 正式稳定版才
-   首次支持，应填写那个更晚的版本。
+   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。`minCindyVersion`
+   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个 Cindy 正式稳定版本；
+   Manifest v3 本身不设置仓库级 Cindy 版本下限。
    未改动的 v2 插件刻意保持原样，禁止批量迁移。
    Plugin Server 按用户当前 Cindy 版本选择最近曾上架的兼容 Release；current 不兼容时
    回退到兼容历史版本，没有兼容历史版本时不展示该插件。

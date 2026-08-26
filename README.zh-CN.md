@@ -198,10 +198,10 @@ cindy-art/
 只是可选捷径，不属于插件格式，也不是开发前置条件。
 
 新插件使用 `schemaVersion: 3`，并通过 `tools`、`network`、`node`、`notify: true`
-等顶层字段直接声明能力；v3 不得再有 `slots`。v3 的最低基线是
-`minCindyVersion: "0.1.61"`，但实际值不一定就是 `0.1.61`：应填写同时支持插件所依赖
-的全部 Host 能力和 Manifest 字段的第一个 Cindy 正式稳定版本，并取它与 v3 基线中
-较新的版本。现有 v2 清单保持原样，直到该插件的实际打包内容发生变化；改动它的 PR
+等顶层字段直接声明能力；v3 不得再有 `slots`。每个 v3 插件包都必须独立填写
+`minCindyVersion`：它应是同时支持这个具体插件所依赖的全部 Host 能力和 Manifest 字段的
+第一个 Cindy 正式稳定版本。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
+保持原样，直到该插件的实际打包内容发生变化；改动它的 PR
 必须同时迁移到 v3。本仓不会只为 schema 变化批量迁移、批量发布现有插件。
 
 直接字段表达插件贡献项和**自主** Host 能力，不是具体命令、域名或路径的预登记清单。
@@ -235,10 +235,12 @@ my-plugin/
 
 `ghost.json` 从下面这份最小可运行 Manifest v3 开始：
 
+下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个 Cindy 正式稳定版本。
+
 ```json
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.61",
+  "minCindyVersion": "1.2.3",
   "id": "my-plugin",
   "name": "My Plugin",
   "description": "给用户看的单句说明。",

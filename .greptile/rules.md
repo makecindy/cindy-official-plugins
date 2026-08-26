@@ -93,7 +93,8 @@ manifest schema 的猜测替代 CI 的确定性校验结果。
 
 `.tests/plugin-contract.test.mjs` 同时接受未改动的 legacy v2 与合法 v3；但新插件，
 以及实际打包内容发生变化的现有插件，必须在同一 PR 迁移到 `schemaVersion: 3`、
-填写不低于 `0.1.61` 的 `minCindyVersion`、移除 `slots` 并保持直接能力声明等价。
+按该插件实际依赖填写首个稳定版 `minCindyVersion`、移除 `slots` 并保持直接能力声明等价；
+仓库不设置统一 Cindy 版本下限。
 只改仓库级文档、CI 或其它插件时，不得要求顺手迁移无关的 v2 清单。
 
 ### 最低客户端版本
@@ -135,7 +136,7 @@ PR 新增插件目录（出现新的 `ghost.json`）时，必须通读仓内现�
 
 新插件 PR 缺以下任何一项时逐条指出：
 
-- `ghost.json` 使用 `schemaVersion: 3`、填写 `minCindyVersion`（不得低于 `0.1.61`）、
+- `ghost.json` 使用 `schemaVersion: 3`、按该插件实际依赖填写首个稳定版 `minCindyVersion`、
   不含 `slots`，并以直接顶层字段声明能力；
 - `provisioning.json` 有对应条目，且 audience 取值有 PR 描述里的决策依据
   （尤其 `"all"`）；

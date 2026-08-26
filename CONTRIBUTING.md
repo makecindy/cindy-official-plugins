@@ -100,9 +100,10 @@ do not edit the generated `dist/maker.js` by hand.
    version on `main`; otherwise CI blocks the pull request.
    The same change must migrate an existing schema-v2 manifest to
    `schemaVersion: 3`: add `minCindyVersion`, remove `slots`, and express the
-   same capabilities through their direct fields. The v3 floor is `0.1.61`;
-   when a required Host capability or manifest field first appeared in a later
-   stable Cindy release, use that later version instead.
+   same capabilities through their direct fields. Set `minCindyVersion` to the
+   first stable Cindy release that supports the concrete plugin's required Host
+   capabilities and manifest fields; Manifest v3 has no repository-wide Cindy
+   version floor.
    Unchanged v2 plugins are intentionally left alone; do not bulk-migrate them.
    Plugin Server selects the newest previously listed release compatible with the
    user's Cindy version. If the current release is incompatible, an eligible
