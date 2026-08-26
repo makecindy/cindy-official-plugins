@@ -84,7 +84,7 @@ async function accountRequest(action, payload, longRunning) {
       name: ACCOUNT_TOOL,
       arguments: args,
     },
-    timeoutMs: longRunning ? 60000 : 30000,
+    timeoutMs: longRunning ? 180000 : 30000,
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
   var parsed = parseAccountResult(result);
@@ -141,7 +141,7 @@ async function callMakerTool(name, args, longRunning) {
       arguments: args,
       ...(progressToken ? { _meta: { progressToken: progressToken } } : {}),
     },
-    timeoutMs: longRunning ? 60000 : 30000,
+    timeoutMs: longRunning ? 180000 : 30000,
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
 }
