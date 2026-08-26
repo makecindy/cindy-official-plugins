@@ -951,6 +951,52 @@ test('真实 Runtime error_details 未知态不会触发身份恢复自动重试
   assert.equal(result.result.structuredContent.automatic_retry, false);
 });
 
+test('真实 Runtime message 中的未知态不会触发身份恢复自动重试', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'confirm_character_voice' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: [
+            '✗ Maker MCP proxy tool failed',
+            '',
+            '- tool: confirm_character_voice',
+            '- reason: remote_proxy_tool_call_error',
+            '- error_name: RemoteProxyToolCallError',
+            '- message: Remote proxy tool confirm_character_voice failed with execution_state=unknown; automatic retry is disabled. missing_taptap_identity; call generate_test_qrcode',
+            '',
+            'next_action: verify remote output before retrying',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'confirm_character_voice',
+    args: { character_name: 'hero' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, ['confirm_character_voice']);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+  assert.match(result.result.content[0].text, /先核对 Maker 端实际状态、产物和用量/);
+});
+
 test('身份初始化后的重试返回未知态时仍保留执行三态', async () => {
   let voiceCalls = 0;
   const calledTools = [];
@@ -1027,6 +1073,8 @@ test('身份初始化后的重试返回未知态时仍保留执行三态', async
   assert.equal(result.result.isError, true);
   assert.equal(result.result.structuredContent.execution_state, 'unknown');
   assert.equal(result.result.structuredContent.automatic_retry, false);
+  assert.match(result.result.content[0].text, /先核对 Maker 端实际状态、产物和用量/);
+  assert.match(result.result.content[0].text, /不要自动或盲目重试/);
 });
 
 test('兼容 Maker JSON 文本中的缺失身份信号并重试原调用一次', async () => {

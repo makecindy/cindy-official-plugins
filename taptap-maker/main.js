@@ -344,6 +344,16 @@ function makerExecutionDetails(result) {
       var diagnosticDetails = makerExecutionDetailsFromValue(diagnosticPayload);
       if (diagnosticDetails) return diagnosticDetails;
     }
+    var inlineStateMatch = /\bexecution_state\s*=\s*(not_executed|executed|unknown)\b/i
+      .exec(content[contentIndex].text);
+    if (inlineStateMatch) {
+      return {
+        execution_state: inlineStateMatch[1].toLowerCase(),
+        ...(/\bautomatic retry is disabled\b/i.test(content[contentIndex].text)
+          ? { automatic_retry: false }
+          : {}),
+      };
+    }
   }
   return {};
 }
@@ -544,11 +554,15 @@ async function callMakerToolWithIdentityRecovery(name, args, workdir) {
   }
   var retried = await callMakerTool(name, args, true);
   if (makerRequestsIdentityRecovery(retried)) {
+    var retryDetails = makerExecutionDetails(retried);
+    var retryMessage = retryDetails.execution_state === 'unknown'
+      ? 'TapTap Maker 已完成一次身份初始化，但原工具调用的执行结果不确定。请先核对 Maker 端实际状态、产物和用量，再决定是否重试；不要自动或盲目重试。'
+      : 'TapTap Maker 已完成一次身份初始化，但项目仍缺少可用的 App 身份，已停止自动重试。';
     return makerErrorResult(
-      'TapTap Maker 已完成一次身份初始化，但项目仍缺少可用的 App 身份，已停止自动重试。',
+      retryMessage,
       Object.assign(
         { step: 'retry_after_identity_initialization' },
-        makerExecutionDetails(retried),
+        retryDetails,
       ),
     );
   }
