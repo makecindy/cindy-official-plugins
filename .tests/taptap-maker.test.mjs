@@ -17,6 +17,8 @@ import rootRouterModule from '../taptap-maker/node/mcp-root-router.cjs';
 const pluginRoot = new URL('../taptap-maker/', import.meta.url);
 const mainSource = readFileSync(new URL('main.js', pluginRoot), 'utf8');
 const accountSource = readFileSync(new URL('node/account.cjs', pluginRoot), 'utf8');
+const makerMcpSource = readFileSync(new URL('node/maker-mcp.cjs', pluginRoot), 'utf8');
+const makerChildSource = readFileSync(new URL('node/maker-child.cjs', pluginRoot), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
 const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
@@ -164,7 +166,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.10');
+  assert.equal(manifest.version, '2.1.11');
   assert.match(manifest.whenToUse, /不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行/);
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -203,7 +205,44 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn']);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.28');
+  assert.equal(vendorPackage.version, '0.0.32');
+  assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
+  assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
+  const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
+  assert.match(statusTool.parameters.properties.detail.description, /完整诊断/);
+  const listTools = manifest.tools.find((tool) => tool.name === 'maker_list_tools');
+  assert.match(listTools.description, /固定发布/);
+  assert.match(listTools.description, /不是当前工作区的实时可用性探测/);
+  assert.match(skillMd, /固定发布的工具目录与参数 schema 快照/);
+  const callTool = manifest.tools.find((tool) => tool.name === 'maker_call_tool');
+  assert.match(callTool.description, /execution_state 未提供或明确为 not_executed/);
+  assert.match(callTool.description, /executed 或 unknown 时不自动重试/);
+  assert.match(skillMd, /execution_state` 未提供或明确为 `not_executed`/);
+  assert.match(skillMd, /`executed` 或 `unknown` 时不自动重试/);
+
+  const localizedCallToolDescriptions = Object.fromEntries(
+    ['zh-CN', 'en', 'ja', 'ko'].map((locale) => [
+      locale,
+      JSON.parse(readFileSync(new URL(`locales/${locale}.json`, pluginRoot), 'utf8'))
+        .tools.maker_call_tool.description,
+    ]),
+  );
+  assert.match(
+    localizedCallToolDescriptions['zh-CN'],
+    /execution_state 未提供或明确为 not_executed.*executed 或 unknown 时不自动重试/,
+  );
+  assert.match(
+    localizedCallToolDescriptions.en,
+    /execution_state is absent or explicitly not_executed.*does not retry executed or unknown/,
+  );
+  assert.match(
+    localizedCallToolDescriptions.ja,
+    /execution_state が未指定または明示的に not_executed.*executed または unknown は再試行しません/,
+  );
+  assert.match(
+    localizedCallToolDescriptions.ko,
+    /execution_state가 없거나 명시적으로 not_executed.*executed 또는 unknown은 재시도하지 않습니다/,
+  );
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
@@ -510,6 +549,10 @@ test('Maker 状态保留登录结论但不暴露本地绝对路径', async () =>
           '- pat: found (/Users/example/.taptap-maker/pat.json)',
           '- python: /opt/homebrew/bin/python3',
           '- target_dir: /private/tmp/maker-project',
+          'Maker PAT 缺失。请运行 `taptap-maker login` 刷新登录授权。',
+          '当前目录尚未绑定 Maker 项目。请运行 `taptap-maker init`。',
+          '- retry_tool: maker_build_current_directory',
+          '- next_action: run taptap-maker mcp report after consent',
           '- next_action: reconnect in /mcp',
         ].join('\n'),
       }],
@@ -529,9 +572,143 @@ test('Maker 状态保留登录结论但不暴露本地绝对路径', async () =>
   assert.match(result.result.content[0].text, /pat: found \(<local-path>\)/);
   assert.match(result.result.content[0].text, /python: <local-path>/);
   assert.match(result.result.content[0].text, /target_dir: <local-path>/);
+  assert.match(result.result.content[0].text, /maker_login/);
+  assert.match(result.result.content[0].text, /maker_init/);
+  assert.match(result.result.content[0].text, /maker_build/);
+  assert.match(result.result.content[0].text, /Cindy 的反馈渠道/);
   assert.match(result.result.content[0].text, /reconnect in \/mcp/);
+  assert.doesNotMatch(
+    result.result.content[0].text,
+    /taptap-maker|maker_status_lite|maker_build_current_directory|\bnpx\b|\bmcp report\b/i,
+  );
   assert.equal(result.result.structuredContent.configPath, '<local-path>');
   assert.doesNotMatch(JSON.stringify(result.result), /\/Users|\/private\/tmp|\/opt\/homebrew/);
+});
+
+test('Maker 完整状态对本地诊断依赖给出中性说明而不推荐无效插件工具', async () => {
+  const harness = createMainHarness(async () => ({
+    ok: true,
+    result: {
+      content: [{
+        type: 'text',
+        text: [
+          'TapTap Maker MCP status',
+          'Python environment',
+          '- python_status: missing',
+          '- setup_command: taptap-maker python setup',
+          '- path_command: taptap-maker python path',
+          '- next_action: 未检测到可用 Python。请运行 `taptap-maker python setup` 准备 Python 环境。',
+          'Lua LSP environment',
+          '- lsp_status: missing',
+          '- install_command: maker-lua-lsp install --ide codex,cursor,claude',
+          '- setup_command: taptap-maker lua-lsp setup',
+          '- doctor_command: taptap-maker lua-lsp doctor',
+          '- next_action: 未检测到 maker-lua-lsp。请运行 `taptap-maker lua-lsp setup`。',
+        ].join('\n'),
+      }],
+    },
+  }));
+
+  const result = await harness.call('maker_status', {
+    detail: true,
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  const text = result.result.content[0].text;
+  assert.match(text, /本地诊断环境未就绪/);
+  assert.match(text, /插件暂不提供 Python 或 Lua LSP 自动安装入口/);
+  assert.match(text, /不影响远端构建/);
+  assert.doesNotMatch(text, /maker_login|maker_apps|maker_init|maker_doctor/);
+  assert.doesNotMatch(
+    text,
+    /taptap-maker (?:python|lua-lsp) (?:setup|path|doctor)|maker-lua-lsp install/i,
+  );
+  assert.equal(
+    text.match(/本地诊断环境未就绪/g)?.length,
+    1,
+    '重复的本地诊断命令应合并成一条说明',
+  );
+});
+
+test('Maker 本地诊断已就绪时只移除安装命令而不误报环境缺失', async () => {
+  const harness = createMainHarness(async () => ({
+    ok: true,
+    result: {
+      content: [{
+        type: 'text',
+        text: [
+          'Python environment',
+          '- python_status: ready',
+          '- ready: yes',
+          '- setup_command: taptap-maker python setup',
+          '- path_command: taptap-maker python path',
+          '- next_action: 本地 Python 运行时可用；Maker Lua 诊断脚本可以复用该解释器。',
+          'Lua LSP environment',
+          '- lsp_status: ready',
+          '- ready: yes',
+          '- install_command: maker-lua-lsp install --ide codex,cursor,claude',
+          '- setup_command: taptap-maker lua-lsp setup',
+          '- doctor_command: taptap-maker lua-lsp doctor',
+          '- next_action: maker-lua-lsp 已安装；本地 Lua 诊断可用。',
+        ].join('\n'),
+      }],
+    },
+  }));
+
+  const result = await harness.call('maker_status', {
+    detail: true,
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  const text = result.result.content[0].text;
+  assert.match(text, /本地 Python 运行时可用/);
+  assert.match(text, /maker-lua-lsp 已安装/);
+  assert.doesNotMatch(text, /本地诊断环境未就绪/);
+  assert.doesNotMatch(
+    text,
+    /taptap-maker (?:python|lua-lsp) (?:setup|path|doctor)|maker-lua-lsp install/i,
+  );
+});
+
+test('Maker Python 已就绪但建议升级时不会误报环境缺失', async () => {
+  const harness = createMainHarness(async () => ({
+    ok: true,
+    result: {
+      content: [{
+        type: 'text',
+        text: [
+          'Python environment',
+          '- python_status: ready',
+          '- ready: yes',
+          '- python_version: 3.11.9',
+          '- warning: Python 3.12 or newer is recommended for Maker Lua diagnostics.',
+          '- setup_command: taptap-maker python setup',
+          '- next_action: 本地 Python 满足最低要求 3.8，但推荐使用 3.12 或更新版本；如需统一环境，可运行 `taptap-maker python setup` 准备 Python 3.12 环境。',
+        ].join('\n'),
+      }],
+    },
+  }));
+
+  const result = await harness.call('maker_status', {
+    detail: true,
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  const text = result.result.content[0].text;
+  assert.match(text, /Python 3\.12 or newer is recommended/);
+  assert.match(text, /本地诊断环境已就绪/);
+  assert.match(text, /暂不提供 Python 或 Lua LSP 自动升级入口/);
+  assert.doesNotMatch(text, /本地诊断环境未就绪/);
+  assert.doesNotMatch(text, /taptap-maker python setup/i);
 });
 
 test('账号工具不向模型返回 PAT 提示和 CLI 本地保存路径', async () => {
@@ -575,6 +752,11 @@ test('Maker 明确要求恢复身份时会自动创建身份并重试原调用�
         ok: true,
         result: {
           isError: true,
+          structuredContent: {
+            status: 'missing_taptap_identity',
+            execution_state: 'not_executed',
+            automatic_retry: false,
+          },
           content: [{
             type: 'text',
             text: [
@@ -605,6 +787,244 @@ test('Maker 明确要求恢复身份时会自动创建身份并重试原调用�
     'get_debug_feedbacks',
   ]);
   assert.equal(result.result.content[0].text, 'feedbacks');
+});
+
+test('执行状态未知的动态工具不会触发身份恢复自动重试', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'confirm_character_voice' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        structuredContent: {
+          status: 'missing_taptap_identity',
+          execution_state: 'unknown',
+          automatic_retry: false,
+        },
+        content: [{
+          type: 'text',
+          text: [
+            '- status: missing_taptap_identity',
+            '- next_action: call generate_test_qrcode',
+            '- execution_state: unknown',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'confirm_character_voice',
+    args: { character_name: 'hero' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, ['confirm_character_voice']);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+});
+
+test('真实 Runtime remote_result 错误保留未知执行态且不自动重试', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'confirm_character_voice' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: [
+            '✗ Maker MCP proxy tool failed',
+            '',
+            '- tool: confirm_character_voice',
+            '- reason: remote_proxy_tool_result_error',
+            '- error_name: RemoteProxyToolResultError',
+            '- message: voice mapping persistence failed',
+            '',
+            'remote_result:',
+            '  {',
+            '    "isError": true,',
+            '    "content": [{"type":"text","text":"missing_taptap_identity"}],',
+            '    "structuredContent": {',
+            '      "status": "missing_taptap_identity",',
+            '      "execution_state": "unknown",',
+            '      "automatic_retry": false',
+            '    }',
+            '  }',
+            '',
+            'next_action: report the sanitized remote result',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'confirm_character_voice',
+    args: { character_name: 'hero' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, ['confirm_character_voice']);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+});
+
+test('真实 Runtime error_details 未知态不会触发身份恢复自动重试', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'confirm_character_voice' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    if (request.params.name === 'generate_test_qrcode') {
+      return { ok: true, result: { content: [{ type: 'text', text: 'created' }] } };
+    }
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: [
+            '✗ Maker MCP proxy tool failed',
+            '',
+            '- tool: confirm_character_voice',
+            '- reason: remote_proxy_tool_call_error',
+            '- error_name: RemoteProxyToolCallError',
+            '- message: missing_taptap_identity; call generate_test_qrcode',
+            '',
+            'error_details:',
+            '  {',
+            '    "automaticRetry": false,',
+            '    "toolName": "confirm_character_voice",',
+            '    "executionState": "unknown",',
+            '    "originalError": {"message":"missing_taptap_identity"}',
+            '  }',
+            '',
+            'next_action: verify remote output before retrying',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'confirm_character_voice',
+    args: { character_name: 'hero' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, ['confirm_character_voice']);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+});
+
+test('身份初始化后的重试返回未知态时仍保留执行三态', async () => {
+  let voiceCalls = 0;
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'confirm_character_voice' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    if (request.params.name === 'generate_test_qrcode') {
+      return { ok: true, result: { content: [{ type: 'text', text: 'created' }] } };
+    }
+    voiceCalls += 1;
+    if (voiceCalls === 1) {
+      return {
+        ok: true,
+        result: {
+          isError: true,
+          structuredContent: {
+            status: 'missing_taptap_identity',
+            execution_state: 'not_executed',
+            automatic_retry: false,
+          },
+          content: [{
+            type: 'text',
+            text: '- status: missing_taptap_identity\n- next_action: call generate_test_qrcode',
+          }],
+        },
+      };
+    }
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: [
+            '✗ Maker MCP proxy tool failed',
+            '',
+            '- message: identity persistence response was interrupted',
+            '',
+            'remote_result:',
+            '  {',
+            '    "isError": true,',
+            '    "content": [{"type":"text","text":"missing_taptap_identity; call generate_test_qrcode"}],',
+            '    "structuredContent": {',
+            '      "status": "missing_taptap_identity",',
+            '      "execution_state": "unknown",',
+            '      "automatic_retry": false',
+            '    }',
+            '  }',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'confirm_character_voice',
+    args: { character_name: 'hero' },
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, [
+    'confirm_character_voice',
+    'generate_test_qrcode',
+    'confirm_character_voice',
+  ]);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
 });
 
 test('兼容 Maker JSON 文本中的缺失身份信号并重试原调用一次', async () => {
@@ -761,6 +1181,80 @@ test('二维码缺构建信息时引导用户主动构建，不泄露凭证、�
   );
   assert.equal(result.result.structuredContent.step, 'generate_test_qrcode');
   assert.equal(result.result.structuredContent.errorCode, -32603);
+});
+
+test('自动身份初始化执行态未知时保留三态并禁止盲目重试', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return {
+        ok: true,
+        result: { tools: [{ name: 'get_ad_config' }] },
+      };
+    }
+    calledTools.push(request.params.name);
+    if (request.params.name === 'get_ad_config') {
+      return {
+        ok: true,
+        result: {
+          isError: true,
+          structuredContent: {
+            status: 'missing_taptap_identity',
+            execution_state: 'not_executed',
+            automatic_retry: false,
+          },
+          content: [{
+            type: 'text',
+            text: '- status: missing_taptap_identity\n- next_action: generate_test_qrcode',
+          }],
+        },
+      };
+    }
+    return {
+      ok: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: [
+            '✗ Maker MCP proxy tool failed',
+            '',
+            '- tool: generate_test_qrcode',
+            '- reason: remote_proxy_tool_call_error',
+            '- error_name: RemoteProxyToolCallError',
+            '- message: upload response was interrupted',
+            '',
+            'error_details:',
+            '  {',
+            '    "automaticRetry": false,',
+            '    "toolName": "generate_test_qrcode",',
+            '    "executionState": "unknown",',
+            '    "originalError": {"message":"socket closed"}',
+            '  }',
+            '',
+            'next_action: verify remote output before retrying',
+          ].join('\n'),
+        }],
+      },
+    };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'get_ad_config',
+    args: {},
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+    },
+  });
+
+  assert.deepEqual(calledTools, ['get_ad_config', 'generate_test_qrcode']);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.step, 'generate_test_qrcode');
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+  assert.match(result.result.content[0].text, /核对 Maker 端实际状态/);
+  assert.match(result.result.content[0].text, /不要自动或盲目重试/);
 });
 
 test('普通 Maker 工具失败也会统一脱敏并保留积分不足信号', async () => {
@@ -1055,6 +1549,14 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
     assert.equal(listed.error, undefined, stderr);
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_status_lite'));
     assert.ok(listed.result.tools.some((tool) => tool.name === 'maker_build_current_directory'));
+    assert.ok(listed.result.tools.some((tool) => tool.name === 'generate_image'));
+    const confirmVoice = listed.result.tools.find(
+      (tool) => tool.name === 'confirm_character_voice',
+    );
+    assert.ok(confirmVoice);
+    assert.match(confirmVoice.description, /Voice Slot/);
+    assert.match(confirmVoice.description, /not retried automatically/i);
+    assert.match(confirmVoice.description, /execution state may be unknown/i);
 
     const guide = await request('3', 'resources/read', {
       uri: 'maker://ads-integration-guide',
@@ -1063,6 +1565,36 @@ test('真实 Maker Runtime 可经插件入口完成 initialize 与 roots-aware t
     assert.match(guide.result.contents[0].text, /TapTap Maker ads integration guide/);
     assert.match(guide.result.contents[0].text, /get_ad_config/);
     assert.match(guide.result.contents[0].text, /engine-docs\/recipes\/sdk\.md/);
+
+    const status = await request('4', 'tools/call', {
+      name: 'maker_status_lite',
+      arguments: {
+        target_dir: '/tmp/cindy-taptap-maker-unbound-test',
+        detail: true,
+        skip_remote_sync: true,
+      },
+    });
+    assert.equal(status.error, undefined, stderr);
+    assert.match(status.result.content[0].text, /- status: managed_by_plugin/);
+
+    const harness = createMainHarness(async () => ({ ok: true, result: status.result }));
+    const sanitizedStatus = await harness.call('maker_status', {
+      detail: true,
+      skip_remote_sync: true,
+      session_context: {
+        workdir_is_local: true,
+        workdir: '/tmp/cindy-taptap-maker-unbound-test',
+      },
+    });
+    const sanitizedText = sanitizedStatus.result.content[0].text;
+    assert.match(sanitizedText, /- status: managed_by_plugin/);
+    assert.match(sanitizedText, /maker_build/);
+    assert.doesNotMatch(sanitizedText, /maker_status_lite|maker_build_current_directory/);
+    assert.doesNotMatch(
+      sanitizedText,
+      /taptap-maker (?:login|apps|dev-kit update|doctor|init|python|lua-lsp)\b|maker-lua-lsp install|\bnpx\b|\bmcp report\b/i,
+    );
+    assert.doesNotMatch(sanitizedText, /Maker CLI login|MAKER_PAT|PAT only for CI/);
   } finally {
     child.kill();
     await once(child, 'close');

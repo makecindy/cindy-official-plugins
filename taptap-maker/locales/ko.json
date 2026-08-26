@@ -7,7 +7,10 @@
       "description": "현재 세션 작업 공간의 로그인, 프로젝트 연결, Git, Python, Lua LSP 및 도구 준비 상태만 점검합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다.",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "자주 점검할 때 true로 설정하면 원격 Git 동기화 검사를 건너뜁니다."
+          "description": "전체 진단 모드에서 true로 설정하면 원격 Git 동기화와 개발 도구 최신 상태 검사를 건너뜁니다. 기본 요약 모드는 로컬 상태만 확인합니다."
+        },
+        "/properties/detail": {
+          "description": "전체 진단이 필요할 때만 true로 설정합니다. 기본값은 빠른 로컬 읽기 전용 상태 요약입니다."
         }
       }
     },
@@ -67,10 +70,10 @@
       }
     },
     "maker_list_tools": {
-      "description": "현재 작업 공간에서 사용할 수 있는 공식 Maker 동적 도구와 매개변수 schema를 나열하며 maker_call_tool 전에 항상 호출합니다. 프로젝트가 다른 위치에 있으면 작업 공간 전환을 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다."
+      "description": "번들 Runtime에 고정 배포된 Maker 도구 목록과 schema 스냅샷을 표시합니다. 현재 작업 공간의 실시간 사용 가능 여부를 확인하는 기능은 아니며 실제 호출은 계정 권한, 프로젝트 상태 및 원격 서비스에 따라 달라집니다. maker_call_tool 전에 호출하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다."
     },
     "maker_call_tool": {
-      "description": "maker_list_tools가 방금 반환한 공식 Maker 동적 도구를 현재 작업 공간에서 호출하며 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다. .project/project.json이 없으면 빌드가 제출과 push를 수행한다고 설명하고 확인 후에만 maker_build와 재시도를 수행합니다. missing_taptap_identity는 플러그인이 한 번 자동 복구합니다. “MCP error -32600: INSUFFICIENT_BALANCE”만 크레딧 부족으로 판단하고 확인 후 Art를 안내합니다.",
+      "description": "maker_list_tools가 방금 반환한 공식 Maker 동적 도구를 현재 작업 공간에서 호출하며 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다. .project/project.json이 없으면 빌드가 제출과 push를 수행한다고 설명하고 확인 후에만 maker_build와 재시도를 수행합니다. missing_taptap_identity는 Runtime이 안전하게 복구 가능한 결과(execution_state가 없거나 명시적으로 not_executed)를 반환할 때만 플러그인이 초기화하고 한 번 재시도합니다. executed 또는 unknown은 재시도하지 않습니다. “MCP error -32600: INSUFFICIENT_BALANCE”만 크레딧 부족으로 판단하고 확인 후 Art를 안내합니다.",
       "parameters": {
         "/properties/name": {
           "description": "가장 최근 maker_list_tools 결과의 동적 도구 이름입니다."

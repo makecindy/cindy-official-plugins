@@ -7,7 +7,10 @@
       "description": "Inspect only the current session workspace's TapTap Maker status, including login, project binding, Git, Python, Lua LSP, and tool readiness. If the project is elsewhere, ask the user to open it in Cindy; do not bypass the plugin with Shell, CLI, npx, or direct MCP.",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "Set to true during frequent polling to skip the remote Git sync check."
+          "description": "In full diagnostic mode, set true to skip remote Git sync and development-tool freshness checks. Summary mode is local-only by default."
+        },
+        "/properties/detail": {
+          "description": "Set true only for a full diagnostic; the default is a fast, local, read-only status summary."
         }
       }
     },
@@ -67,10 +70,10 @@
       }
     },
     "maker_list_tools": {
-      "description": "List the official Maker dynamic tools and parameter schemas currently available in the workspace. Always call this before maker_call_tool. If the project is elsewhere, ask the user to switch workspaces; do not bypass the plugin with Shell, CLI, npx, or direct MCP."
+      "description": "List the bundled Runtime's fixed Maker tool catalog and schema snapshot. It is not a live workspace availability probe; calls still depend on account access, project state, and the remote service. Call it before maker_call_tool; never bypass the plugin with Shell, CLI, npx, or direct MCP."
     },
     "maker_call_tool": {
-      "description": "Call an official Maker dynamic tool just returned by maker_list_tools in the current workspace; never bypass the plugin with Shell, CLI, npx, or direct MCP. If .project/project.json is missing, explain that building submits and pushes the project, then call maker_build only after confirmation and retry. The plugin handles missing_taptap_identity once. Only the exact error “MCP error -32600: INSUFFICIENT_BALANCE” means insufficient credits; offer Art only after confirmation.",
+      "description": "Call an official Maker dynamic tool just returned by maker_list_tools in the current workspace; never bypass the plugin with Shell, CLI, npx, or direct MCP. If .project/project.json is missing, explain that building submits and pushes the project, then call maker_build only after confirmation and retry. The plugin initializes identity and retries once only for a safely recoverable missing_taptap_identity result (execution_state is absent or explicitly not_executed); it does not retry executed or unknown. Only the exact error “MCP error -32600: INSUFFICIENT_BALANCE” means insufficient credits; offer Art only after confirmation.",
       "parameters": {
         "/properties/name": {
           "description": "The dynamic tool name from the most recent maker_list_tools result."

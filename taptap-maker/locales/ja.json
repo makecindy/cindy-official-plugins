@@ -7,7 +7,10 @@
       "description": "現在のセッションワークスペースだけを対象に、ログイン、プロジェクト関連付け、Git、Python、Lua LSP、開発ツールの状態を確認します。別の場所にある場合は Cindy で開くよう案内し、Shell、CLI、npx、直接 MCP で迂回しません。",
       "parameters": {
         "/properties/skip_remote_sync": {
-          "description": "頻繁に確認する場合は true にして、リモート Git 同期チェックを省略できます。"
+          "description": "完全診断モードでは true にすると、リモート Git 同期と開発ツールの更新確認を省略します。既定の概要モードはローカル状態のみを確認します。"
+        },
+        "/properties/detail": {
+          "description": "完全な診断が必要な場合のみ true にします。既定では高速なローカル読み取り専用の概要を返します。"
         }
       }
     },
@@ -67,10 +70,10 @@
       }
     },
     "maker_list_tools": {
-      "description": "現在のワークスペースで利用可能な公式 Maker 動的ツールとパラメータ schema を一覧表示します。maker_call_tool の前に必ず呼び出します。別の場所にある場合はワークスペースの切り替えを案内し、Shell、CLI、npx、直接 MCP で迂回しません。"
+      "description": "同梱 Runtime に固定収録された Maker ツール一覧と schema スナップショットを表示します。現在のワークスペースでの利用可否をリアルタイム判定するものではなく、実行はアカウント権限、プロジェクト状態、リモートサービスに依存します。maker_call_tool の前に呼び出し、Shell、CLI、npx、直接 MCP で迂回しません。"
     },
     "maker_call_tool": {
-      "description": "maker_list_tools が直前に返した公式 Maker 動的ツールを現在のワークスペースで呼び出し、Shell、CLI、npx、直接 MCP で迂回しません。.project/project.json がない場合はビルドが提出と push を行うと説明し、確認後だけ maker_build と再試行を行います。missing_taptap_identity はプラグインが一度だけ回復します。「MCP error -32600: INSUFFICIENT_BALANCE」だけをクレジット不足と判断し、確認後に Art を案内します。",
+      "description": "maker_list_tools が直前に返した公式 Maker 動的ツールを現在のワークスペースで呼び出し、Shell、CLI、npx、直接 MCP で迂回しません。.project/project.json がない場合はビルドが提出と push を行うと説明し、確認後だけ maker_build と再試行を行います。missing_taptap_identity は、Runtime が安全に回復可能な結果（execution_state が未指定または明示的に not_executed）を返した場合のみ、プラグインが初期化して一度再試行します。executed または unknown は再試行しません。「MCP error -32600: INSUFFICIENT_BALANCE」だけをクレジット不足と判断し、確認後に Art を案内します。",
       "parameters": {
         "/properties/name": {
           "description": "直近の maker_list_tools が返した動的ツール名です。"
