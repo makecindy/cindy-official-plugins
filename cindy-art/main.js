@@ -130,14 +130,18 @@ async function selectedModel(args, invocationCapability) {
   const requirement = MEDIA_REQUIREMENTS[invocationCapability];
   if (!requirement) throw new Error('Art 不认识媒体能力：' + invocationCapability);
 
-  const models = await readMediaCatalog(requirement.type);
   const explicitModelId = optionalString(args, 'model');
-  const configured = explicitModelId ? null : await readConfiguredModel(invocationCapability);
-  const modelId = explicitModelId || configured.modelId;
+  if (!explicitModelId) {
+    // Host preference is authoritative. Subscription-backed models may be
+    // intentionally absent from the public catalog, but Core can still route
+    // them when given the exact (modelId, providerId) pair from Host.
+    return readConfiguredModel(invocationCapability);
+  }
+
+  const models = await readMediaCatalog(requirement.type);
+  const modelId = explicitModelId;
   const model = models.find(function (candidate) {
-    return candidate && candidate.id === modelId && (
-      explicitModelId || candidate.providerId === configured.providerId
-    );
+    return candidate && candidate.id === modelId;
   });
   if (!model) throw new Error('模型「' + modelId + '」当前不可用');
   if (!supportsCapability(model, invocationCapability)) {
