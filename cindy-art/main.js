@@ -207,7 +207,7 @@ async function returnArtRequest(msg, capability, options) {
 
   await finishCall(msg.callId, {
     note:
-      'Art 已整理创作参数。除非用户在本次对话明确点名模型，request.modelId/request.providerId 就是 Art 详情页「Cindy 能力」为当前操作配置的精确模型来源；调用 Cindy Core media（完整工具名 mcp__cindy__media）prepare 时必须分别原样作为 model_id/provider_id，不要另行选型。referenceMedia.managedMediaUrls 是 Core 可读取的受管地址；attachedMediaCount 对应用户随当前消息交出的媒体，调用 Core 时继续使用对话中的原始媒体地址。',
+      'Art 已整理创作参数。除非用户在本次对话明确点名模型，request.modelId/request.providerId 就是 Art 详情页「Cindy 能力」为当前操作配置的精确模型来源；调用 Cindy Core media（完整工具名 mcp__cindy__media）prepare 时必须分别原样作为 model_id/provider_id，不要另行选型。referenceMedia.managedMediaUrls 是 Core 可读取的受管地址；attachedMediaCount 对应用户随当前消息交出的媒体，调用 Core 时继续使用对话中的原始媒体地址。Core 成功返回的 cindy-media:// 或历史 xdt-*:// 地址是可直接展示、复用和通过 attachments 交接的受管地址，不需要本地路径；图片结果请在最终回复中使用返回地址只嵌入展示一次。仅当用户明确询问文件存储位置或本地路径时，调用 mcp__cindy__media 的 resolve_local_path，并把 cindy-media://、xdt-image:// 或 xdt-video:// 地址原样放进 url。不要寻找或猜测路径，也不要扫描本地磁盘。',
     request: request,
   });
 }

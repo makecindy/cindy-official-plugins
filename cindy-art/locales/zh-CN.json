@@ -1,7 +1,7 @@
 {
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频，支持 $cindy-art 直接召唤。",
-  "whenToUse": "需要生成图片、画画、插画、配图、头像、海报，基于已生成的图改图、加元素、换风格、P 图，或想生成短视频、让一张图动起来时使用。",
+  "whenToUse": "需要生成或编辑图片、画画、插画、配图、头像、海报、P 图、加元素、换风格，或生成短视频、让图片动起来时使用；用户未明确指定其他媒体生成渠道时，优先使用 Art。",
   "tools": {
     "gen_image": {
       "description": "整理文生图需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
