@@ -191,7 +191,7 @@ cindy-art/
 3. 完成后用 `ghost_forge_pack` 打包成 `.cindy` 装入验证。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
-`@taptap/maker@0.0.28`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
+`@taptap/maker@0.0.32`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 不要单独修改生成后的 `dist/maker.js`。
 
 ## 社区
