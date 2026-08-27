@@ -1,5 +1,5 @@
 {
-  "name": "Console CLI",
+  "name": "TapTap Console",
   "description": "通过本机安装的 Console CLI 发现并执行 Console Agent 工作流；插件不直接调用 API、不保存 Token，也不打包 CLI 二进制。",
   "whenToUse": "需要通过 Console CLI 查询或操作 Console 资源时使用。先检查 CLI 和生产登录状态；未登录只在用户明确要求后发起 CLI 浏览器授权。",
   "tools": {

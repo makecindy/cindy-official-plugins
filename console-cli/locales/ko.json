@@ -1,5 +1,5 @@
 {
-  "name": "Console CLI",
+  "name": "TapTap Console",
   "description": "로컬에 설치된 Console CLI로 Console 에이전트 워크플로를 검색하고 실행합니다. 플러그인은 API를 직접 호출하거나 Token을 저장하지 않으며 CLI 바이너리를 포함하지 않습니다.",
   "whenToUse": "로컬 CLI를 통해 Console 리소스를 조회하거나 조작할 때 사용합니다. 먼저 CLI와 프로덕션 로그인 상태를 확인하고, 사용자가 명시적으로 로그인할 때만 브라우저 인증을 시작합니다.",
   "tools": {

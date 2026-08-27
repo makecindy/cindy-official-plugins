@@ -1,5 +1,5 @@
 {
-  "name": "Console CLI",
+  "name": "TapTap Console",
   "description": "ローカルにインストールされた Console CLI で Console の Agent ワークフローを検出・実行します。プラグインは API を直接呼び出さず、Token を保存せず、CLI バイナリも同梱しません。",
   "whenToUse": "ローカル CLI 経由で Console のリソースを確認・操作するときに使用します。まず CLI と本番ログイン状態を確認し、ログインはユーザーが明示的に要求した場合だけ開始します。",
   "tools": {

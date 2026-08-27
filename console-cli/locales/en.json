@@ -1,5 +1,5 @@
 {
-  "name": "Console CLI",
+  "name": "TapTap Console",
   "description": "Uses the locally installed Console CLI to discover and execute Console agent workflows. The plugin does not call the API directly, store tokens, or bundle the CLI binary.",
   "whenToUse": "Use for Console resources through the local CLI. Check the CLI and production login first; start browser authorization only when the user explicitly asks to log in.",
   "tools": {

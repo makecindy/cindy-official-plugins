@@ -16,7 +16,9 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.2');
+  assert.equal(manifest.version, '0.1.3');
+  assert.equal(manifest.id, 'console-cli');
+  assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
   assert.equal(manifest.network, undefined);
   assert.equal(manifest.node.entry, 'node/worker.cjs');
@@ -25,6 +27,14 @@ test('manifest uses a production-only Node CLI bridge', () => {
     manifest.tools.map((tool) => tool.name),
     ['console_cli_status', 'console_cli_login', 'console_cli_discover', 'console_cli_help', 'console_cli_schema', 'console_cli_call'],
   );
+});
+
+test('display name is consistent across the manifest and locales', () => {
+  for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+    const resource = JSON.parse(readFileSync(path.join(pluginRoot, 'locales', `${locale}.json`), 'utf8'));
+    assert.equal(resource.name, 'TapTap Console', locale);
+  }
+  assert.match(settings, /<span class="name">TapTap Console<\/span>/);
 });
 
 test('settings provides a manual missing-CLI install guide', () => {
