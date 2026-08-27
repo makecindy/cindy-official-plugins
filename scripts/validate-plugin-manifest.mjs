@@ -25,6 +25,8 @@ if (validators.length !== 1) {
 }
 
 const { validateGhostManifest } = await import(pathToFileURL(path.join(contractDir, validators[0])).href);
+// Shape validation only: this does not inspect bundled files or prove Host support.
+// See docs/plugin-authoring.md for runtime examples and the separate delivery checks.
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const result = validateGhostManifest(manifest);
 

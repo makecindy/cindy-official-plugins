@@ -15,9 +15,12 @@
 - 插件编写契约就在本仓库中：`README.zh-CN.md`、本指南、`.tests/contracts/` 中固定
   版本的 Manifest 校验器和打包门禁共同组成正本。无论用哪一种 Agent 或 harness
   创建文件都遵循同一契约；Cindy Forge 命令只是可选捷径。
+- 字段映射与具体运行时调用见[插件编写与迁移参考](docs/plugin-authoring.zh-CN.md)。
+  执行任务的 Agent 根据现有代码处理适配，作者不需要自行提供迁移步骤。
 - 增加 Manifest 字段前先判断谁执行：插件工具是否执行由既有 Agent 授权决定；普通
   HTTPS 与 workdir 操作使用 Host 下发的在途 `callId`，CLI 继续走已有 Node 工作进程。
-  具体命令、域名或路径无需预登记；只有脱离该调用的插件自主 Host 能力才写入 `ghost.json`。
+  具体命令、域名或路径无需预登记；脱离该调用的插件自主 Host 能力须有对应声明。
+  随包 Node 入口与 Host 托管凭证即使在工具调用内使用，也仍需显式声明。
 - 参与社区时请遵守 [`CODE_OF_CONDUCT.zh-CN.md`](CODE_OF_CONDUCT.zh-CN.md)；普通使用问题见
   [`SUPPORT.zh-CN.md`](SUPPORT.zh-CN.md)。
 - 不要提交凭证、令牌、邮箱授权码、OAuth refresh token、个人数据或真实用户邮件内容——
@@ -80,7 +83,9 @@ cd 163-mail && npm ci && npm run build
 3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
    `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
    同一个改动还必须把现有 v2 清单迁移为 `schemaVersion: 3`：增加
-   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。`minCindyVersion`
+   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。按
+   [映射表](docs/plugin-authoring.zh-CN.md#manifest-v2-到-v3保留行为转换表达)
+   保留 `card`、`sessionContext` 等纯声明能力；仅删除 `slots` 不算完成迁移。`minCindyVersion`
    应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个 Cindy 正式稳定版本；
    Manifest v3 本身不设置仓库级 Cindy 版本下限。
    未改动的 v2 插件刻意保持原样，禁止批量迁移。

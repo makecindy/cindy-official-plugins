@@ -35,8 +35,9 @@ Already-installed marketplace plugins follow their recorded source and update
 silently. A merged version bump can therefore reach installed users without
 another click or capability-confirmation dialog. Treat capability expansion and
 runtime changes as immediate production changes: declare the minimum required
-capabilities in `ghost.json`, and keep the published package within the
-marketplace manifest's declared capability ceiling.
+capabilities in the package's `ghost.json`, and preserve Host authorization and
+credential boundaries. Marketplace summaries are not a separate installation
+permission gate.
 
 ## Plugins
 
@@ -239,6 +240,12 @@ The authoring contract is defined by this repository: the guidance below and in
 the Agent or harness used to edit files. Cindy's Forge tools are optional
 shortcuts, not part of the plugin format and not a prerequisite for development.
 
+For existing-plugin maintenance, v2/v3 field mappings, and concrete HTTPS,
+file, and Node/CLI calls, use the
+[authoring and migration reference](./docs/plugin-authoring.md). An Agent can
+derive the required adaptations from this reference and the existing code;
+authors do not need to perform a separate migration checklist.
+
 New plugins use `schemaVersion: 3` and declare capabilities directly through
 fields such as `tools`, `network`, `node`, or `notify: true`; v3 must not contain
 `slots`. Every v3 package declares its own `minCindyVersion`: use the first
@@ -263,8 +270,9 @@ Paste this into any coding Agent or harness that can edit files and run commands
 
 ```text
 Using only the authoring contract in this repository, build a Cindy plugin for
-[what it should do]. Before coding, align the user scenario, tool behavior,
-side effects, and minimum required Host capabilities with me. Create a new
+[what it should do]. Read AGENTS.md and docs/plugin-authoring.md, infer the
+necessary declarations and runtime interfaces from the task, and clarify only
+product choices or verification gaps that the repository cannot establish. Create a new
 Manifest-v3 plugin directory without copying an existing v2 ghost.json. Validate
 its manifest with the repository validator, package the directory contents as a
 .cindy ZIP archive, and report the artifact path. Do not install it unless I

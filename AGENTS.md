@@ -14,6 +14,17 @@ experience risks land on real users, so review is strict by design.
 每次合入 `main` 都会自动向 CN / Global 审核队列提交真实包，审核通过后才对用户
 可见，审查从严。
 
+## Authoring reference / 编写参考
+
+For plugin creation or maintenance, read the
+[authoring and migration reference](./docs/plugin-authoring.md)
+([中文](./docs/plugin-authoring.zh-CN.md)) alongside the README. It documents
+equivalent v2/v3 declarations, existing runtime APIs, and verification boundaries.
+Infer routine adaptations from the requested functionality and existing code;
+do not require authors to perform the migration checklist themselves.
+编写或维护插件时，依据上述参考与现有代码自行完成格式适配、声明保留和校验；
+只把无法从事实确定的功能取舍、目标版本或实机验证缺口交给作者，不增加手工迁移步骤。
+
 ## Review contract / 审查契约
 
 - **Authoritative ruleset: [`.greptile/rules.md`](./.greptile/rules.md)** plus

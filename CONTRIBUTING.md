@@ -18,11 +18,16 @@ maintained in separate repositories and are outside the scope of this repository
   guide, the pinned Manifest validator under `.tests/contracts/`, and the
   packaging checks. It is independent of the Agent or harness used to create
   the files. Cindy Forge commands are optional shortcuts only.
+- Use the [authoring and migration reference](docs/plugin-authoring.md) for
+  field mappings and concrete runtime calls. The implementing Agent handles
+  adaptations from existing code; authors do not need to supply migration steps.
 - Decide who performs an operation before adding a manifest field. Whether the
   plugin tool runs is decided by existing Agent authorization. Ordinary HTTPS and
   workdir operations use the Host-issued in-flight `callId`; CLIs continue through
   the existing Node worker. Specific commands, hosts, and paths are not pre-registered;
-  only autonomous Host use outside that call is declared in `ghost.json`.
+  autonomous Host use outside that call requires the corresponding declaration.
+  Bundled Node entries and Host-managed credentials remain explicitly declared,
+  including when used inside a tool call.
 - Follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) when participating in
   the community. For ordinary usage questions, see [`SUPPORT.md`](SUPPORT.md).
 - Do not commit credentials, tokens, mailbox authorization codes, OAuth refresh
@@ -100,7 +105,10 @@ do not edit the generated `dist/maker.js` by hand.
    version on `main`; otherwise CI blocks the pull request.
    The same change must migrate an existing schema-v2 manifest to
    `schemaVersion: 3`: add `minCindyVersion`, remove `slots`, and express the
-   same capabilities through their direct fields. Set `minCindyVersion` to the
+   same capabilities through their direct fields. Follow the
+   [mapping table](docs/plugin-authoring.md#manifest-v2-to-v3-preserve-behavior-change-representation),
+   retaining presence-only capabilities such as `card` and `sessionContext`;
+   deleting `slots` alone is not a complete migration. Set `minCindyVersion` to the
    first stable Cindy release that supports the concrete plugin's required Host
    capabilities and manifest fields; Manifest v3 has no repository-wide Cindy
    version floor.
