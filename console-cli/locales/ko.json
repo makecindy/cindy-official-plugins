@@ -1,14 +1,13 @@
 {
-  "name": "Console",
-  "description": "Console CLI manifest에 공개된 API 작업을 동적으로 검색하고 실행합니다. Token은 Cindy 호스트가 보관하며 CLI 바이너리는 포함하지 않습니다.",
-  "whenToUse": "Console의 애플리케이션, 배포, 클러스터, 작업, 릴리스 또는 온콜 리소스를 조회하거나 조작할 때 사용합니다. 먼저 HTTPS 호스트와 API Token을 설정하세요.",
+  "name": "Console CLI",
+  "description": "로컬에 설치된 Console CLI로 Console 에이전트 워크플로를 검색하고 실행합니다. 플러그인은 API를 직접 호출하거나 Token을 저장하지 않으며 CLI 바이너리를 포함하지 않습니다.",
+  "whenToUse": "로컬 CLI를 통해 Console 리소스를 조회하거나 조작할 때 사용합니다. 먼저 CLI와 프로덕션 로그인 상태를 확인하고, 사용자가 명시적으로 로그인할 때만 브라우저 인증을 시작합니다.",
   "tools": {
-    "list_tools": { "description": "현재 Console CLI manifest를 읽고 서버가 공개한 작업, 매개변수, 요청 본문을 나열합니다. 읽기 전용입니다." },
-    "call_tool": { "description": "manifest의 작업 하나를 실행합니다. 변경 작업은 executed, not_executed 또는 unknown을 반환하며 unknown이면 상태를 확인한 뒤 재시도하세요." }
-  },
-  "network": {
-    "connections": {
-      "console_conn": { "label": "Console 인스턴스", "hint": "Console HTTPS 호스트와 API Token을 입력하세요. 기본 HTTPS 포트만 지원하며 Token을 URL에 넣지 마세요." }
-    }
+    "console_cli_status": { "description": "로컬 Console CLI 설치 여부, 버전, 프로덕션 로그인 상태를 확인합니다. Token은 반환하지 않고 안전한 계정·권한 요약만 반환하며, 미설치 시 공식 수동 설치 안내를 제공합니다." },
+    "console_cli_login": { "description": "사용자가 명시적으로 로그인을 요청한 경우에만 console-cli auth login을 실행합니다. CLI가 브라우저 OAuth와 로그인 상태 저장을 담당하며 권한 수준과 profile은 동시에 지정할 수 없습니다." },
+    "console_cli_discover": { "description": "Console CLI의 공식 Agent discovery overview 또는 skill 목록을 읽습니다. 읽기 전용입니다." },
+    "console_cli_help": { "description": "Console CLI 루트 도움말 또는 소문자 점 구분 명령의 도움말을 읽습니다. 임의 flags나 shell은 허용하지 않습니다." },
+    "console_cli_schema": { "description": "console-cli schema를 사용해 manifest-backed 명령의 매개변수, 요청 본문, 응답 및 제약을 가져옵니다." },
+    "console_cli_call": { "description": "고정된 프로덕션 context에서 로컬 console-cli로 manifest-backed 명령을 실행합니다. shell, 임의 argv, endpoint, Token은 거부하며 변경 작업 실패를 not_executed와 unknown으로 구분합니다." }
   }
 }

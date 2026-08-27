@@ -1,14 +1,13 @@
 {
-  "name": "Console",
-  "description": "通过 Console 发布的 CLI manifest 动态发现并执行已允许的 API 操作。Token 由 Cindy 主机保管，不打包 CLI 二进制。",
-  "whenToUse": "需要查询或操作 Console 中的应用、部署、集群、任务、发布或值班资源时使用；先配置 Console HTTPS 域名与 API Token。",
+  "name": "Console CLI",
+  "description": "通过本机安装的 Console CLI 发现并执行 Console Agent 工作流；插件不直接调用 API、不保存 Token，也不打包 CLI 二进制。",
+  "whenToUse": "需要通过 Console CLI 查询或操作 Console 资源时使用。先检查 CLI 和生产登录状态；未登录只在用户明确要求后发起 CLI 浏览器授权。",
   "tools": {
-    "list_tools": { "description": "读取当前 Console 实例的 CLI manifest，列出服务端实际发布的操作、参数和请求体；只读。" },
-    "call_tool": { "description": "执行 manifest 中的一个操作。写操作返回 executed、not_executed 或 unknown；unknown 时先查询状态再决定是否重试。" }
-  },
-  "network": {
-    "connections": {
-      "console_conn": { "label": "Console 实例", "hint": "填写 Console HTTPS 域名和 API Token；仅支持默认 HTTPS 端口，不要把 Token 放进 URL。" }
-    }
+    "console_cli_status": { "description": "检查本机 Console CLI、版本和生产登录状态；只返回可安全展示的账号与权限摘要，不返回 Token。未安装时提示官方手动安装命令。" },
+    "console_cli_login": { "description": "仅在用户明确要求登录时调用 console-cli auth login；由 CLI 打开浏览器完成 OAuth 并保存登录态。可选权限级别或 permission profile，二者不能同时传。" },
+    "console_cli_discover": { "description": "读取 Console CLI 官方 Agent discovery 的 overview 或 skills 内容；只读，不执行 Console 操作。" },
+    "console_cli_help": { "description": "读取本机 Console CLI 根帮助或指定小写点分命令的帮助；不接受任意 flags 或 shell。" },
+    "console_cli_schema": { "description": "调用 console-cli schema 获取 manifest-backed 命令的结构化参数、请求体、响应和约束。" },
+    "console_cli_call": { "description": "通过本机 console-cli 执行 manifest-backed 命令；固定生产环境，不接受 shell、任意 argv、endpoint 或 Token。写操作失败会区分 not_executed 与 unknown。" }
   }
 }

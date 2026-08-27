@@ -1,200 +1,180 @@
 import assert from 'node:assert/strict';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
 
-const root = new URL('..', import.meta.url);
-const source = readFileSync(new URL('console-cli/main.js', root), 'utf8');
-const manifest = JSON.parse(readFileSync(new URL('console-cli/ghost.json', root), 'utf8'));
+const root = path.resolve(import.meta.dirname, '..');
+const pluginRoot = path.join(root, 'console-cli');
+const source = readFileSync(path.join(pluginRoot, 'main.js'), 'utf8');
+const worker = readFileSync(path.join(pluginRoot, 'src/worker.cjs'), 'utf8');
+const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
-const commandManifest = {
-  manifest_version: 'v2',
-  server_version: 'test',
-  commands: [
-    {
-      id: 'app.list',
-      command_path: ['app', 'list'],
-      summary: 'List apps',
-      http_method: 'GET',
-      path: '/api/v1/app',
-      params: [
-        { name: 'team', in: 'query', required: false, type: 'string' },
-      ],
-    },
-    {
-      id: 'deployment.rollout-restart',
-      command_path: ['deployment', 'rollout-restart'],
-      http_method: 'POST',
-      path: '/api/v1/deployment/{id}/rollout-restart',
-      params: [
-        { name: 'id', in: 'path', required: true, type: 'string' },
-      ],
-      request_body: {
-        required: false,
-        content_type: 'application/json',
-        schema: { type: 'object', properties: { reason: { type: 'string' } } },
-      },
-    },
-    {
-      id: 'deployment.logs',
-      command_path: ['deployment', 'logs'],
-      http_method: 'GET',
-      path: '/api/v1/deployment/{id}/logs',
-      params: [
-        { name: 'id', in: 'path', required: true, type: 'string' },
-        { name: 'follow', in: 'query', required: false, type: 'boolean' },
-      ],
-      cli_constraints: {
-        params: { follow: { disallow_true: true, note: 'follow=true is not supported' } },
-      },
-    },
-  ],
-};
+test('manifest uses a production-only Node CLI bridge', () => {
+  assert.equal(manifest.version, '0.1.1');
+  assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
+  assert.equal(manifest.network, undefined);
+  assert.equal(manifest.node.entry, 'node/worker.cjs');
+  assert.equal(manifest.node.protocol, 'json-rpc-stdio');
+  assert.deepEqual(
+    manifest.tools.map((tool) => tool.name),
+    ['console_cli_status', 'console_cli_login', 'console_cli_discover', 'console_cli_help', 'console_cli_schema', 'console_cli_call'],
+  );
+});
 
-function response(data, status = 200) {
-  return { ok: status >= 200 && status < 300, status, body: JSON.stringify(data), headers: {} };
+test('browser entry never calls Console network APIs or handles credentials', () => {
+  assert.doesNotMatch(source, /cindy\.fetch|fetch\s*\(/);
+  assert.doesNotMatch(source, /Authorization|Bearer|secretBindings|network\.connections/);
+  assert.match(source, /cindy\.node\.request/);
+  assert.doesNotMatch(worker, /exec\s*\(|execSync|spawnSync|shell\s*:\s*true/);
+});
+
+test('worker validates command and login boundaries', async () => {
+  const { commandParts, normalizeLoginArgs } = await import(path.join(pluginRoot, 'src/worker.cjs'));
+  assert.deepEqual(commandParts('deployment.logs', true), ['deployment', 'logs']);
+  assert.throws(() => commandParts('Deployment.logs', true), /小写点分/);
+  assert.throws(() => commandParts('app.list --token=x', true), /小写点分/);
+  assert.deepEqual(normalizeLoginArgs({ permission_level: 'readonly' }), { permission_level: 'readonly' });
+  assert.throws(() => normalizeLoginArgs({ permission_level: 'sensitive', permission_profile: 'ops' }), /不能同时/);
+  assert.throws(() => normalizeLoginArgs({ permission_level: 'admin' }), /必须是 readonly/);
+});
+
+async function makeFakeCli(t, mode = 'normal') {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'console-cli-plugin-'));
+  const bin = path.join(home, '.local', 'bin');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(bin, { recursive: true }));
+  const cliPath = path.join(bin, 'console-cli');
+  const script = `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === 'version') {
+  process.stdout.write(JSON.stringify({ version: 'v-test', os: 'test', arch: 'arm64' }));
+} else if (args[0] === 'auth' && args[1] === 'status') {
+  process.stdout.write(${mode === 'logged-out' ? JSON.stringify('not logged in') : JSON.stringify(JSON.stringify({ email: 'agent@example.test', authorization_mode: 'grant', permission_level: 'readonly' }))});
+} else if (args[0] === 'auth' && args[1] === 'login') {
+  process.stdout.write('logged in');
+} else if (args[0] === 'skill' && args[1] === 'show') {
+  process.stdout.write('overview skill');
+} else if (args[0] === 'skill' && args[1] === 'list') {
+  process.stdout.write(JSON.stringify([{ name: 'overview', source: 'builtin' }]));
+} else if (args[0] === 'schema') {
+  const name = args[1];
+  const method = name === 'deployment.restart' || name === 'deployment.fail' || name === 'deployment.denied' ? 'POST' : 'GET';
+  process.stdout.write(JSON.stringify({ commandPath: name.split('.'), httpMethod: method, path: '/api/v1/test' }));
+} else if (args.includes('--help')) {
+  process.stdout.write('help text');
+} else if (args[0] === 'deployment' && args[1] === 'fail') {
+  process.stderr.write('network timeout');
+  process.exitCode = 1;
+} else if (args[0] === 'deployment' && args[1] === 'denied') {
+  process.stderr.write('HTTP 403 forbidden');
+  process.exitCode = 1;
+} else if (args[0] === 'app' && args[1] === 'list') {
+  process.stdout.write(JSON.stringify({ args }));
+} else if (args[0] === 'deployment' && args[1] === 'restart') {
+  process.stdout.write(JSON.stringify({ args }));
+} else {
+  process.stderr.write('unknown command');
+  process.exitCode = 1;
+}
+`;
+  await writeFile(cliPath, script, 'utf8');
+  await chmod(cliPath, 0o755);
+  t.after(() => rm(home, { recursive: true, force: true }));
+  return home;
 }
 
-async function boot({ connections = [{ id: 'one', host: 'console.example.test', isDefault: true }], manifestData = commandManifest, manifestResponses, requestResult = response({ code: 0, data: { ok: true } }) } = {}) {
+function runWorker(home, request) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(pluginRoot, 'src/worker.cjs')], {
+      env: { HOME: home, PATH: `${home}/.local/bin:/bin:/usr/bin` },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', () => {
+      try {
+        const line = stdout.trim().split(/\r?\n/).at(-1);
+        resolve({ response: JSON.parse(line), stderr });
+      } catch (error) {
+        reject(new Error(`worker output invalid: ${error.message}; stderr=${stderr}`));
+      }
+    });
+    child.stdin.end(`${JSON.stringify({ jsonrpc: '2.0', id: 1, ...request })}\n`);
+  });
+}
+
+test('worker proxies CLI discovery, schema, and calls without arbitrary argv', async (t) => {
+  const home = await makeFakeCli(t);
+  const status = await runWorker(home, { method: 'console/status', params: {} });
+  assert.equal(status.response.result.ok, true);
+  assert.equal(status.response.result.result.logged_in, true);
+  assert.equal(status.response.result.result.email, 'agent@example.test');
+
+  const overview = await runWorker(home, { method: 'console/discover', params: { mode: 'overview' } });
+  assert.equal(overview.response.result.result.content, 'overview skill');
+  const schema = await runWorker(home, { method: 'console/schema', params: { command: 'app.list' } });
+  assert.equal(schema.response.result.result.httpMethod, 'GET');
+  const help = await runWorker(home, { method: 'console/help', params: { command: 'app.list' } });
+  assert.equal(help.response.result.result.content, 'help text');
+
+  const call = await runWorker(home, { method: 'console/call', params: { command: 'app.list', params: { team_id: 'ops' } } });
+  assert.equal(call.response.result.ok, true);
+  assert.equal(call.response.result.result.execution, 'not_applicable');
+  assert.deepEqual(call.response.result.result.data.args.slice(-3), ['--params', '{"team_id":"ops"}', '--context=prod']);
+
+  const mutation = await runWorker(home, { method: 'console/call', params: { command: 'deployment.restart', body: { reason: 'test' } } });
+  assert.equal(mutation.response.result.result.execution, 'executed');
+  assert.deepEqual(mutation.response.result.result.data.args.slice(-5), ['--params', '{}', '--json', '{"reason":"test"}', '--context=prod']);
+
+  const unknown = await runWorker(home, { method: 'console/call', params: { command: 'deployment.fail' } });
+  assert.equal(unknown.response.result.execution, 'unknown');
+  const denied = await runWorker(home, { method: 'console/call', params: { command: 'deployment.denied' } });
+  assert.equal(denied.response.result.execution, 'not_executed');
+  const forbidden = await runWorker(home, { method: 'console/call', params: { command: 'auth.status' } });
+  assert.equal(forbidden.response.result.execution, 'not_executed');
+});
+
+test('worker returns actionable missing-install and login results', async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'console-cli-plugin-missing-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const missing = await runWorker(home, { method: 'console/status', params: {} });
+  assert.equal(missing.response.result.ok, false);
+  assert.match(missing.response.result.message, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
+
+  const loggedOutHome = await makeFakeCli(t, 'logged-out');
+  const login = await runWorker(loggedOutHome, { method: 'console/login', params: { permission_level: 'readonly' } });
+  assert.equal(login.response.result.ok, false);
+  assert.equal(login.response.result.execution, 'unknown');
+  assert.match(login.response.result.message, /仍未登录|无法确认/);
+});
+
+test('main bridges tool calls to the Node worker methods', async () => {
   let hostHandler;
-  let manifestCalls = 0;
-  let clock = Date.now();
   const requests = [];
+  const messages = [];
   const cindy = {
     onHostMessage(handler) { hostHandler = handler; },
-    async send(message) { this.messages.push(message); },
-    messages: [],
-    async fetch(request) {
+    async send(message) { messages.push(message); },
+    async nodeRequest() {},
+    node: { async request(request) {
       requests.push(request);
-      if (request.url.endsWith('/api/v1/cli/manifest')) {
-        const configured = manifestResponses && manifestResponses[Math.min(manifestCalls, manifestResponses.length - 1)];
-        manifestCalls += 1;
-        return configured || response({ code: 0, data: manifestData });
-      }
-      if (typeof requestResult === 'function') return requestResult(request);
-      return requestResult;
-    },
+      return { ok: true, result: { ok: true, result: { installed: true, logged_in: false } } };
+    } },
   };
-  const context = createContext({
-    cindy,
-    fetch: async (url) => {
-      assert.equal(url, '/connections');
-      return { ok: true, async json() { return [{ key: 'console_conn', connections }]; } };
-    },
-    BroadcastChannel: undefined,
-    setTimeout,
-    clearTimeout,
-    Date: class TestDate extends Date {
-      static now() { return clock; }
-    },
-    URL,
-    encodeURIComponent,
-  });
+  const context = createContext({ cindy, BroadcastChannel: undefined, setTimeout });
   new Script(source, { filename: 'console-cli/main.js' }).runInContext(context);
-  assert.equal(typeof hostHandler, 'function');
-  async function call(tool, args = {}) {
-    await hostHandler({ type: 'tool-call', tool, args, callId: 'test-call' });
-    return cindy.messages.at(-1);
-  }
-  return { call, requests, advance(ms) { clock += ms; } };
-}
-
-test('manifest declares host-injected Console connection and no CLI binary', () => {
-  assert.equal(manifest.version, '0.1.0');
-  assert.equal(manifest.entry, 'main.js');
-  assert.equal(manifest.network.connections[0].key, 'console_conn');
-  assert.deepEqual(manifest.network.connections[0].inject, {
-    header: 'Authorization',
-    format: 'Bearer {value}',
-  });
-  assert.equal(manifest.network.connections[0].inject.hosts, undefined);
-});
-
-test('list_tools loads the fixed manifest endpoint and projects categories', async () => {
-  const { call, requests } = await boot();
-  const result = await call('list_tools');
-  assert.equal(result.ok, true);
-  assert.equal(result.result.categories.app.count, 1);
-  assert.deepEqual(Array.from(result.result.categories.deployment.commands), ['deployment.rollout-restart', 'deployment.logs']);
-  assert.equal(requests[0].url, 'https://console.example.test/api/v1/cli/manifest');
-  assert.equal(requests[0].headers.Authorization, undefined);
-  const category = await call('list_tools', { category: 'deployment' });
-  assert.equal(category.result.commands[0].request_body.schema.type, 'object');
-  assert.equal(category.result.commands[0].request_body.schema.properties.reason.type, 'string');
-});
-
-test('manifest ETag revalidation accepts a cached 304 response', async () => {
-  const { call, requests, advance } = await boot({
-    manifestResponses: [
-      response({ code: 0, data: commandManifest }),
-      { ok: false, status: 304, body: '', headers: {} },
-    ],
-  });
-  assert.equal((await call('list_tools')).ok, true);
-  advance(12 * 60 * 60 * 1000 + 1);
-  const result = await call('list_tools');
-  assert.equal(result.ok, true);
-  assert.equal(requests.filter((request) => request.url.endsWith('/api/v1/cli/manifest')).length, 2);
-});
-
-test('call_tool builds escaped path/query parameters and JSON body', async () => {
-  const { call, requests } = await boot();
-  const result = await call('call_tool', {
-    name: 'deployment.rollout-restart',
-    params: { id: 'a/b', ignored: true },
-    body: { reason: 'manual' },
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.execution, 'not_executed');
-  const successful = await call('call_tool', {
-    name: 'deployment.rollout-restart',
-    params: { id: 'a/b' },
-    body: { reason: 'manual' },
-  });
-  assert.equal(successful.ok, true);
-  assert.equal(successful.result.execution, 'executed');
-  assert.equal(requests.at(-1).url, 'https://console.example.test/api/v1/deployment/a%2Fb/rollout-restart');
-  assert.equal(requests.at(-1).body, JSON.stringify({ reason: 'manual' }));
-  assert.equal(requests.at(-1).headers.Authorization, undefined);
-});
-
-test('validation failures are not executed and manifest constraints are enforced', async () => {
-  const { call, requests } = await boot();
-  const missingBody = await call('call_tool', { name: 'deployment.rollout-restart', params: {} });
-  assert.equal(missingBody.execution, 'not_executed');
-  const forbidden = await call('call_tool', { name: 'deployment.logs', params: { id: 'd1', follow: true } });
-  assert.equal(forbidden.ok, false);
-  assert.match(forbidden.message, /follow=true/);
-  assert.equal(requests.length, 1); // manifest fetch only
-});
-
-test('network or HTTP failures after dispatch are unknown for mutations', async () => {
-  const { call } = await boot({ requestResult: { ok: false, status: 503, body: 'temporarily unavailable', headers: {} } });
-  const result = await call('call_tool', { name: 'deployment.rollout-restart', params: { id: 'd1' } });
-  assert.equal(result.ok, false);
-  assert.equal(result.execution, 'unknown');
-});
-
-test('multiple Console instances require explicit selection', async () => {
-  const { call } = await boot({ connections: [
-    { id: 'one', host: 'one.console.example.test' },
-    { id: 'two', host: 'two.console.example.test' },
-  ] });
-  const ambiguous = await call('list_tools');
-  assert.equal(ambiguous.execution, 'not_executed');
-  const selected = await call('list_tools', { instance: 'two' });
-  assert.equal(selected.ok, true);
-  assert.equal(selected.result.instance, 'two.console.example.test');
-});
-
-test('malformed connection hosts are rejected before any request is sent', async () => {
-  const { call, requests } = await boot({ connections: [{ id: 'bad', host: 'console.example.test@evil.example.test', isDefault: true }] });
-  const result = await call('list_tools');
-  assert.equal(result.execution, 'not_executed');
-  assert.equal(requests.length, 0);
-});
-
-test('source never handles a token value directly', () => {
-  assert.doesNotMatch(source, /Authorization\s*:/);
-  assert.doesNotMatch(source, /token\s*=/i);
+  await hostHandler({ type: 'tool-call', tool: 'console_cli_status', args: {}, callId: 'status' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests[0].method, 'console/status');
+  assert.equal(messages.at(-1).ok, true);
+  await hostHandler({ type: 'tool-call', tool: 'console_cli_call', args: { command: 'app.list', params: {} }, callId: 'call' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests[1].method, 'console/call');
+  assert.equal(messages.at(-1).callId, 'call');
 });

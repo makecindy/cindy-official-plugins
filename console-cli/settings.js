@@ -1,186 +1,105 @@
 (function () {
   'use strict';
 
-  var KEY = 'console_conn';
-  var bc = typeof BroadcastChannel === 'function' ? new BroadcastChannel('console-cli') : null;
-  var current = [];
-  var statusTimer = null;
+  var channel = typeof BroadcastChannel === 'function'
+    ? new BroadcastChannel('console-cli-settings')
+    : null;
+  var sequence = 0;
+  var pending = Object.create(null);
 
   function $(id) { return document.getElementById(id); }
-  function status(text, sticky) {
-    $('status').textContent = text || '';
-    if (statusTimer) clearTimeout(statusTimer);
-    if (!sticky && text) statusTimer = setTimeout(function () { $('status').textContent = ''; }, 4000);
+
+  function showMessage(text, error) {
+    var node = $('message');
+    node.textContent = text || '';
+    node.classList.toggle('error', Boolean(error));
   }
-  function normalizeHost(raw) {
-    var host = String(raw || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
-    if (!host || !/^[a-z0-9.-]+$/.test(host)) return null;
-    var labels = host.split('.');
-    if (labels.some(function (label) {
-      return !label || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label);
-    })) return null;
-    return host;
-  }
-  function findHost(host) {
-    return current.find(function (item) { return item && item.host === host; }) || null;
-  }
-  function render(connections) {
-    current = connections;
-    var box = $('list');
+
+  function showAccount(value) {
+    var box = $('account');
     box.textContent = '';
-    if (!connections.length) {
-      var empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = '尚未添加 Console 实例';
-      box.appendChild(empty);
+    if (!value || value.installed !== true) {
+      box.hidden = true;
       return;
     }
-    connections.forEach(function (connection) {
+    var rows = [
+      ['CLI', value.cli_version || '已安装'],
+      ['登录', value.logged_in ? '已登录' : '未登录'],
+    ];
+    if (value.email) rows.push(['账号', value.email]);
+    if (value.permission_level) rows.push(['权限级别', value.permission_level]);
+    if (value.permission_profile) rows.push(['权限 profile', value.permission_profile]);
+    rows.forEach(function (item) {
       var row = document.createElement('div');
-      row.className = 'account';
-      var host = document.createElement('span');
-      host.className = 'host';
-      host.textContent = connection.host;
-      row.appendChild(host);
-      var tail = document.createElement('span');
-      tail.className = 'tail';
-      tail.textContent = connection.tail ? '尾号 ' + connection.tail : '';
-      row.appendChild(tail);
-      if (connection.isDefault) {
-        var badge = document.createElement('span');
-        badge.className = 'default-badge';
-        badge.textContent = '默认';
-        row.appendChild(badge);
-      } else {
-        var defaultButton = document.createElement('button');
-        defaultButton.className = 'mini';
-        defaultButton.type = 'button';
-        defaultButton.textContent = '设为默认';
-        defaultButton.addEventListener('click', function () { void setDefault(connection.id); });
-        row.appendChild(defaultButton);
-      }
-      var testButton = document.createElement('button');
-      testButton.className = 'mini';
-      testButton.type = 'button';
-      testButton.textContent = '测试';
-      testButton.addEventListener('click', function () { void test(connection.id, testButton); });
-      row.appendChild(testButton);
-      var deleteButton = document.createElement('button');
-      deleteButton.className = 'mini';
-      deleteButton.type = 'button';
-      deleteButton.textContent = '删除';
-      deleteButton.addEventListener('click', function () { void remove(connection.id); });
-      row.appendChild(deleteButton);
+      row.className = 'account-row';
+      var key = document.createElement('span');
+      key.className = 'key';
+      key.textContent = item[0];
+      var valueNode = document.createElement('span');
+      valueNode.className = 'value';
+      valueNode.textContent = item[1];
+      row.appendChild(key);
+      row.appendChild(valueNode);
       box.appendChild(row);
     });
+    box.hidden = false;
   }
-  async function load() {
-    try {
-      var response = await fetch('/connections');
-      if (!response.ok) throw new Error('connections');
-      var rows = await response.json();
-      var entry = Array.isArray(rows) && rows.find(function (item) { return item && item.key === KEY; });
-      render(entry && Array.isArray(entry.connections) ? entry.connections : []);
-    } catch (_error) {
-      status('连接列表加载失败，请稍后重试', true);
-    }
+
+  function request(action, payload, timeoutMs) {
+    if (!channel) return Promise.reject(new Error('当前 Cindy 客户端不支持插件设置操作'));
+    sequence += 1;
+    var reqId = 'settings-' + sequence;
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        delete pending[reqId];
+        reject(new Error(action === 'login' ? '登录等待超时，请调用状态检查登录结果' : '状态检查超时'));
+      }, timeoutMs);
+      pending[reqId] = { resolve: resolve, reject: reject, timer: timer };
+      void fetch('/wake').catch(function () {});
+      channel.postMessage({ type: 'settings-request', reqId: reqId, action: action, payload: payload || {} });
+    });
   }
-  async function add() {
-    var host = normalizeHost($('host').value);
-    var token = $('token').value.trim();
-    if (!host) { status('请填写不带端口和路径的 HTTPS 域名'); return; }
-    if (!token) { status('请填写 API Token / PAT'); return; }
-    $('add').disabled = true;
-    status(findHost(host) ? '正在更新 Token，请确认系统弹窗…' : '正在添加，请确认系统弹窗…', true);
-    try {
-      var response = await fetch('/connections/' + KEY, { method: 'POST', body: JSON.stringify({ host: host, token: token }) });
-      var result = null;
-      try { result = await response.json(); } catch (_error) {}
-      if (!result || result.ok !== true) {
-        status('保存失败: ' + ((result && (result.error || result.errorCode)) || response.status || '请重试'), true);
-        return;
-      }
-      $('host').value = '';
-      $('token').value = '';
-      syncEye();
-      status('已保存 ' + host);
-      await load();
-      var saved = findHost(host);
-      if (saved) void test(saved.id, null);
-    } catch (_error) {
-      status('保存失败，请重试', true);
-    } finally {
-      $('add').disabled = false;
-    }
-  }
-  var testSeq = 0;
-  async function test(connectionId, button) {
-    if (!bc) { status('当前客户端不支持连接测试', true); return; }
-    var reqId = 'test-' + Date.now() + '-' + (++testSeq);
-    if (button) button.disabled = true;
-    status('正在读取 Console CLI manifest…', true);
-    try { await fetch('/wake'); } catch (_error) {}
-    var settled = false;
-    var timer;
-    var deadline = setTimeout(function () {
-      if (settled) return;
-      settled = true;
-      if (timer) clearInterval(timer);
-      if (button) button.disabled = false;
-      status('测试超时，请稍后重试', true);
-    }, 15000);
-    function onMessage(event) {
-      var message = event && event.data;
-      if (!message || message.type !== 'test-connection-result' || message.reqId !== reqId || settled) return;
-      settled = true;
-      bc.removeEventListener('message', onMessage);
-      clearTimeout(deadline);
-      if (timer) clearInterval(timer);
-      if (button) button.disabled = false;
-      status(message.ok ? '连接成功: 已读取 ' + message.count + ' 个操作' : (message.message || '连接失败'), !message.ok);
-    }
-    bc.addEventListener('message', onMessage);
-    var send = function () { bc.postMessage({ type: 'test-connection', reqId: reqId, instance: connectionId }); };
-    send();
-    timer = setInterval(function () { if (!settled) send(); }, 400);
-  }
-  async function remove(connectionId) {
-    try {
-      await fetch('/connections/' + KEY + '/' + encodeURIComponent(connectionId), { method: 'DELETE' });
-      status('已删除');
-    } catch (_error) {
-      status('删除失败，请重试', true);
-    } finally {
-      void load();
-    }
-  }
-  async function setDefault(connectionId) {
-    try {
-      await fetch('/connections/' + KEY + '/default', { method: 'POST', body: JSON.stringify({ connectionId: connectionId }) });
-      status('已设为默认');
-    } catch (_error) {
-      status('设置默认实例失败，请重试', true);
-    } finally {
-      void load();
-    }
-  }
-  function syncEye() {
-    var input = $('token');
-    var eye = $('eye');
-    var empty = !input.value;
-    eye.classList.toggle('hidden', empty);
-    if (empty) { input.type = 'password'; eye.classList.remove('revealed'); }
-  }
-  $('eye').addEventListener('click', function () {
-    var input = $('token');
-    var reveal = input.type === 'password';
-    input.type = reveal ? 'text' : 'password';
-    $('eye').classList.toggle('revealed', reveal);
+
+  channel && (channel.onmessage = function onMessage(event) {
+    var message = event && event.data;
+    if (!message || message.type !== 'settings-result' || !pending[message.reqId]) return;
+    var item = pending[message.reqId];
+    delete pending[message.reqId];
+    clearTimeout(item.timer);
+    if (message.ok) item.resolve(message.result);
+    else item.reject(new Error(message.message || 'Console CLI 操作失败'));
   });
-  $('token').addEventListener('input', syncEye);
-  $('add').addEventListener('click', function () { void add(); });
-  $('token').addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); void add(); } });
-  $('host').addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); $('token').focus(); } });
-  syncEye();
-  void load();
+
+  async function checkStatus() {
+    $('status-button').disabled = true;
+    showMessage('正在检查本机 Console CLI…');
+    try {
+      var result = await request('status', {}, 30000);
+      showAccount(result);
+      showMessage(result.logged_in ? 'Console 已登录' : 'CLI 已安装，请点击“登录 Console”');
+    } catch (error) {
+      showAccount(null);
+      showMessage(error.message, true);
+    } finally {
+      $('status-button').disabled = false;
+    }
+  }
+
+  async function login() {
+    $('login-button').disabled = true;
+    showMessage('正在调用 Console CLI，浏览器授权完成后会自动返回…', false);
+    try {
+      var result = await request('login', {}, 660000);
+      showAccount(result);
+      showMessage('Console 已登录');
+    } catch (error) {
+      showMessage(error.message, true);
+    } finally {
+      $('login-button').disabled = false;
+    }
+  }
+
+  $('status-button').addEventListener('click', function () { void checkStatus(); });
+  $('login-button').addEventListener('click', function () { void login(); });
+  void checkStatus();
 }());

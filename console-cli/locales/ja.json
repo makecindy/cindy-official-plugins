@@ -1,14 +1,13 @@
 {
-  "name": "Console",
-  "description": "Console の CLI manifest から許可された API 操作を動的に検出して実行します。Token は Cindy ホストが保管し、CLI バイナリは同梱しません。",
-  "whenToUse": "Console のアプリ、デプロイ、クラスター、タスク、リリース、オンコール資源を確認・操作するときに使用します。先に HTTPS ホストと API Token を設定してください。",
+  "name": "Console CLI",
+  "description": "ローカルにインストールされた Console CLI で Console の Agent ワークフローを検出・実行します。プラグインは API を直接呼び出さず、Token を保存せず、CLI バイナリも同梱しません。",
+  "whenToUse": "ローカル CLI 経由で Console のリソースを確認・操作するときに使用します。まず CLI と本番ログイン状態を確認し、ログインはユーザーが明示的に要求した場合だけ開始します。",
   "tools": {
-    "list_tools": { "description": "現在の Console CLI manifest を読み、サーバーが公開する操作、パラメーター、リクエスト本文を一覧します。読み取り専用です。" },
-    "call_tool": { "description": "manifest の操作を 1 つ実行します。変更操作は executed、not_executed、unknown を返します。unknown の場合は状態を確認してから再試行してください。" }
-  },
-  "network": {
-    "connections": {
-      "console_conn": { "label": "Console インスタンス", "hint": "Console の HTTPS ホストと API Token を入力します。既定の HTTPS ポートのみ対応し、Token を URL に入れないでください。" }
-    }
+    "console_cli_status": { "description": "ローカル Console CLI の有無、バージョン、本番ログイン状態を確認します。Token は返さず、安全なアカウント・権限概要だけを返します。未インストール時は公式の手動インストール案内を返します。" },
+    "console_cli_login": { "description": "ユーザーが明示的にログインを求めた場合だけ console-cli auth login を実行し、CLI がブラウザ OAuth とログイン状態の保存を行います。権限レベルと profile は同時指定できません。" },
+    "console_cli_discover": { "description": "Console CLI の Agent discovery overview または skill 一覧を読みます。読み取り専用です。" },
+    "console_cli_help": { "description": "Console CLI のルートヘルプまたは小文字のドット区切りコマンドのヘルプを読みます。任意の flags や shell は受け付けません。" },
+    "console_cli_schema": { "description": "console-cli schema で manifest-backed コマンドのパラメーター、リクエスト本文、レスポンス、制約を取得します。" },
+    "console_cli_call": { "description": "固定された本番環境で、ローカル console-cli を通じて manifest-backed コマンドを実行します。shell、任意 argv、endpoint、Token は拒否し、変更操作の失敗は not_executed と unknown を区別します。" }
   }
 }

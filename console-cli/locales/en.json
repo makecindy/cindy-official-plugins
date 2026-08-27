@@ -1,14 +1,13 @@
 {
-  "name": "Console",
-  "description": "Dynamically discovers and executes Console API operations published in its CLI manifest. The token is kept by the Cindy host and no CLI binary is bundled.",
-  "whenToUse": "Use for applications, deployments, clusters, tasks, releases, or on-call resources in Console. Configure a Console HTTPS host and API token first.",
+  "name": "Console CLI",
+  "description": "Uses the locally installed Console CLI to discover and execute Console agent workflows. The plugin does not call the API directly, store tokens, or bundle the CLI binary.",
+  "whenToUse": "Use for Console resources through the local CLI. Check the CLI and production login first; start browser authorization only when the user explicitly asks to log in.",
   "tools": {
-    "list_tools": { "description": "Read the current Console CLI manifest and list the operations, parameters, and request bodies published by that server. Read-only." },
-    "call_tool": { "description": "Execute one operation from the manifest. Mutations report executed, not_executed, or unknown; check state before retrying unknown results." }
-  },
-  "network": {
-    "connections": {
-      "console_conn": { "label": "Console instance", "hint": "Enter the Console HTTPS host and API token. Default HTTPS port only; never put the token in the URL." }
-    }
+    "console_cli_status": { "description": "Check whether the local Console CLI is installed, its version, and production login state. Returns only safe account and permission summaries, never tokens; gives the official manual install hint when missing." },
+    "console_cli_login": { "description": "Only when the user explicitly asks to log in, run console-cli auth login so the CLI opens the browser for OAuth and stores its own session. An optional permission level or profile may be supplied, but not both." },
+    "console_cli_discover": { "description": "Read the Console CLI agent-discovery overview or skill list. Read-only; it does not execute Console operations." },
+    "console_cli_help": { "description": "Read root help or help for a lower-case dotted CLI command. Arbitrary flags and shell commands are not accepted." },
+    "console_cli_schema": { "description": "Use console-cli schema to retrieve structured parameters, request body, response, and constraints for a manifest-backed command." },
+    "console_cli_call": { "description": "Execute a manifest-backed command through the local console-cli in the fixed production context. Shell, arbitrary argv, endpoints, and tokens are rejected; mutation failures distinguish not_executed from unknown." }
   }
 }
