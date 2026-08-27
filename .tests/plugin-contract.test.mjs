@@ -367,7 +367,7 @@ function validatePluginSource(pluginDir, manifest) {
   assert.ok(totalBytes <= maxTotal, `${pluginDir}: uncompressed package exceeds ${maxTotal} bytes`);
 
   requireTrackedFile(files, pluginDir, 'ghost.json', MAX_MANIFEST_BYTES);
-  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.settingsHtml, manifest.icon]
+  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.mainView?.html, manifest.settingsHtml, manifest.icon]
     .filter(Boolean);
   if (manifest.node) declaredFiles.push(manifest.node.entry, ...(manifest.node.entries ?? []));
   for (const relativePath of declaredFiles) {
@@ -518,6 +518,29 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
     () => assertManifestV3MinCindyVersion('direct-contract-fixture', { minCindyVersion: '0.0.0' }),
     /released stable Cindy version/,
     'official releases must not use the versionless development sentinel',
+  );
+});
+
+test('mainView HTML must exist among tracked package files', () => {
+  const pluginDir = 'cindy-github';
+  const fixture = {
+    ...readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES),
+    schemaVersion: 3,
+    minCindyVersion: '1.0.0',
+  };
+  delete fixture.slots;
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, fixture), 'mainView remains optional');
+
+  const present = { ...fixture, mainView: { html: 'settings.html' } };
+  assert.doesNotThrow(() => validateOfficialManifest(pluginDir, present));
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, present));
+
+  const missing = { ...fixture, mainView: { html: 'missing-main-view.html' } };
+  assert.doesNotThrow(() => validateOfficialManifest(pluginDir, missing), 'a safe path is valid at the manifest layer');
+  assert.throws(
+    () => validatePluginSource(pluginDir, missing),
+    /declared file is not tracked: missing-main-view\.html/,
+    'package validation must reject a missing mainView HTML file',
   );
 });
 
