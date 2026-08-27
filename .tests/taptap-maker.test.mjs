@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
@@ -18,7 +18,7 @@ const pluginRoot = new URL('../taptap-maker/', import.meta.url);
 const mainSource = readFileSync(new URL('main.js', pluginRoot), 'utf8');
 const accountSource = readFileSync(new URL('node/account.cjs', pluginRoot), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', pluginRoot), 'utf8'));
-const skillMd = readFileSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot), 'utf8');
+const manualMd = readFileSync(new URL('manual/taptap-maker/MANUAL.md', pluginRoot), 'utf8');
 const settingsHtml = readFileSync(new URL('settings.html', pluginRoot), 'utf8');
 const settingsSource = readFileSync(new URL('settings.js', pluginRoot), 'utf8');
 const provisioning = JSON.parse(readFileSync(new URL('../provisioning.json', import.meta.url), 'utf8'));
@@ -164,8 +164,8 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.10');
-  assert.match(manifest.whenToUse, /不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行/);
+  assert.equal(manifest.version, '2.1.11');
+  assert.equal(manifest.minCindyVersion, '0.1.48');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
     /user_facing_markdown/,
@@ -180,23 +180,25 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   );
   assert.deepEqual(
     manifest.slots,
-    ['tool', 'card', 'node', 'session-context', 'pick', 'preview', 'skill'],
+    ['tool', 'card', 'node', 'session-context', 'pick', 'preview'],
   );
-  assert.deepEqual(manifest.skill, {
+  assert.equal(manifest.skill, undefined);
+  assert.equal(existsSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot)), false);
+  assert.deepEqual(manifest.manual, {
     items: [{
-      dir: 'skills/taptap-maker',
+      dir: 'manual/taptap-maker',
       name: 'taptap-maker',
-      description: '使用 Cindy 的 TapTap Maker 插件完成账号连接、项目检查或初始化、构建预览，以及调用官方 Maker 动态工具。用户要求创建、打开、检查、构建或预览 TapTap Maker 游戏，或使用 Maker 素材与调试能力时使用。',
+      description: 'TapTap Maker 游戏项目的账号连接、初始化、构建预览、动态工具调用与失败恢复流程。',
     }],
   });
-  assert.equal(/^name:\s*(.+)$/m.exec(skillMd)?.[1], manifest.skill.items[0].name);
-  assert.equal(
-    /^description:\s*(.+)$/m.exec(skillMd)?.[1],
-    manifest.skill.items[0].description,
-  );
-  assert.match(skillMd, /ghost_call\(\{ ghost_id: "taptap-maker"/);
-  assert.match(skillMd, /ghost_list/);
-  assert.match(skillMd, /maker_ads_guide/);
+  assert.equal(manifest.command, 'taptap-maker');
+  assert.match(manualMd, /^# TapTap Maker 工作流/);
+  assert.match(manualMd, /ghost_info\(\{ ghost_id: "taptap-maker" \}\)/);
+  assert.match(manualMd, /ghost_call\(\{ ghost_id: "taptap-maker", tool: "maker_list_tools"/);
+  assert.match(manualMd, /ghost_call\(\{ ghost_id: "taptap-maker", tool: "maker_call_tool"/);
+  assert.match(manualMd, /maker_ads_guide/);
+  assert.match(manualMd, /INSUFFICIENT_BALANCE/);
+  assert.match(manualMd, /os\.clock\(\)/);
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.node.entries, ['node/account.cjs', 'node/maker-child.cjs']);
   assert.equal(manifest.node.childSpawn, true);
@@ -204,6 +206,22 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
   assert.equal(vendorPackage.version, '0.0.28');
+});
+
+test('召回文案在四语言中限定 Maker 项目并排除泛 TapTap 和插件源码维护', () => {
+  const recallBoundaries = {
+    'zh-CN': [/仅用于明确的 TapTap Maker 游戏项目操作/, /仅提到 TapTap/, /源码维护时不适用/],
+    en: [/Only for explicit TapTap Maker game-project work/, /Not for generic TapTap mentions/, /source-code maintenance/],
+    ja: [/TapTap Maker のゲームプロジェクトに対する明示的な作業/, /TapTap への言及だけ/, /ソース保守には使用しません/],
+    ko: [/TapTap Maker 게임 프로젝트의 명시적 작업/, /TapTap을 언급만 하거나/, /소스 코드 유지보수에는 사용하지 않습니다/],
+  };
+  for (const [locale, patterns] of Object.entries(recallBoundaries)) {
+    const resource = JSON.parse(readFileSync(new URL(manifest.locales[locale], pluginRoot), 'utf8'));
+    for (const pattern of patterns) assert.match(resource.whenToUse, pattern, locale);
+    assert.ok(resource.whenToUse.length <= 300, locale);
+    assert.doesNotMatch(resource.whenToUse, /INSUFFICIENT_BALANCE|ghost_call|Shell|npx/, locale);
+    if (locale === 'zh-CN') assert.equal(manifest.whenToUse, resource.whenToUse);
+  }
 });
 
 test('设置页跟随宿主四语言并以英文回退', () => {
