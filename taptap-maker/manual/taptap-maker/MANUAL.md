@@ -1,20 +1,17 @@
----
-name: taptap-maker
-description: 使用 Cindy 的 TapTap Maker 插件完成账号连接、项目检查或初始化、构建预览，以及调用官方 Maker 动态工具。用户要求创建、打开、检查、构建或预览 TapTap Maker 游戏，或使用 Maker 素材与调试能力时使用。
----
+# TapTap Maker 工作流
 
-# TapTap Maker
+本手册只适用于明确的 TapTap Maker 游戏项目操作。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时，不调用 Maker Runtime。
 
-下面的 `maker_*` 都通过 `ghost_call({ ghost_id: "taptap-maker", tool: "<maker_* 工具名>", args: { ... } })` 调用；上下文没有工具清单时先调用 `ghost_list`。不要调用 Shell、`npx`、外部 CLI、直接 MCP、通用浏览器或运行时内部工具；插件会复用随包 Runtime、当前账号和宿主可信工作区。
+下面的 `maker_*` 都通过 `ghost_call({ ghost_id: "taptap-maker", tool: "<maker_* 工具名>", args: { ... } })` 调用；上下文没有工具清单时先调用 `ghost_info({ ghost_id: "taptap-maker" })`。Maker 项目操作不要通过 Shell、`npx`、外部 CLI、直接 MCP、通用浏览器或运行时内部工具绕行；插件会复用随包 Runtime、当前账号和宿主可信工作区。
 
 ## 基本流程
 
-1. 广告、激励视频、广告位或 `ShowRewardVideoAd` 请求先调用 `maker_ads_guide`，再按官方指南检查项目状态、调用 `get_ad_config`，并读取项目内 `engine-docs/recipes/sdk.md` 后修改广告代码。
+1. Maker 项目中的广告、激励视频、广告位或 `ShowRewardVideoAd` 请求先调用 `maker_ads_guide`，再按官方指南检查项目状态、调用 `get_ad_config`，并读取项目内 `engine-docs/recipes/sdk.md` 后修改广告代码。
 2. 其它项目任务先调用 `maker_status`；广告请求在读取指南后调用。需要更完整的环境诊断时调用 `maker_doctor`。
 3. 未连接账号时调用 `maker_login`，等待浏览器授权完成后继续原任务，不要求用户重新发起。
 4. 初始化已有项目时先用 `maker_apps` 获取 `app_id`，再调用 `maker_init`。只有用户明确要求新建项目时才传 `create=true` 和 `name`。
 5. 构建、运行或预览用 `maker_build`。成功结果含 `user_facing_markdown` 时原样引用，不放进代码块；右侧预览由插件打开。
-6. 使用素材、广告、调试或其它 Maker 能力前，先调用 `maker_list_tools` 获取实时工具与参数，再通过 `maker_call_tool` 调用，不凭记忆猜工具名。
+6. 使用素材、广告、调试或其它 Maker 能力前，先调用 `ghost_call({ ghost_id: "taptap-maker", tool: "maker_list_tools", args: {} })` 获取实时工具与参数，再通过 `ghost_call({ ghost_id: "taptap-maker", tool: "maker_call_tool", args: { name: "<刚返回的工具名>", args: { ... } } })` 调用，不凭记忆猜工具名。
 
 ## 约束与恢复
 
