@@ -7,6 +7,7 @@
     ? new BroadcastChannel('console-cli-settings')
     : null;
   var sequence = 0;
+  var statusSequence = 0;
   var pending = Object.create(null);
 
   function $(id) { return document.getElementById(id); }
@@ -29,10 +30,11 @@
     if (visible) $('close-install-dialog').focus();
   }
 
+  function copyUnsupportedError() {
+    return new Error('当前客户端不支持复制，请手动复制安装命令');
+  }
+
   function copyText(text) {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      return navigator.clipboard.writeText(text);
-    }
     var input = document.createElement('textarea');
     input.value = text;
     input.setAttribute('readonly', '');
@@ -43,7 +45,18 @@
     var copied = false;
     try { copied = document.execCommand('copy'); } catch (_error) { copied = false; }
     input.remove();
-    return copied ? Promise.resolve() : Promise.reject(new Error('当前客户端不支持复制，请手动复制安装命令'));
+    if (copied) return Promise.resolve();
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        return Promise.resolve(navigator.clipboard.writeText(text)).catch(function () {
+          throw copyUnsupportedError();
+        });
+      } catch (_error) {
+        return Promise.reject(copyUnsupportedError());
+      }
+    }
+    return Promise.reject(copyUnsupportedError());
   }
 
   async function copyInstallCommand(button) {
@@ -114,14 +127,17 @@
   });
 
   async function checkStatus() {
+    var requestSequence = ++statusSequence;
     $('status-button').disabled = true;
     showMessage('正在检查本机 Console CLI…');
     try {
       var result = await request('status', {}, 30000);
+      if (requestSequence !== statusSequence) return;
       showAccount(result);
       setInstallDialogVisible(false);
       showMessage(result.logged_in ? 'Console 已登录' : 'CLI 已安装，请点击“登录 Console”');
     } catch (error) {
+      if (requestSequence !== statusSequence) return;
       showAccount(null);
       if (isMissingCliError(error)) {
         showMessage('需要先安装 Console CLI。', true);
@@ -131,7 +147,7 @@
         showMessage(error.message, true);
       }
     } finally {
-      $('status-button').disabled = false;
+      if (requestSequence === statusSequence) $('status-button').disabled = false;
     }
   }
 

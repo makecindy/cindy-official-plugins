@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.3');
+  assert.equal(manifest.version, '0.1.4');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -46,7 +46,15 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.match(settingsScript, /isMissingCliError/);
   assert.match(settingsScript, /setInstallDialogVisible\(true/);
   assert.match(settingsScript, /else \{\n        setInstallDialogVisible\(false\);\n        showMessage\(error\.message, true\);/);
+  assert.match(settingsScript, /document\.execCommand\('copy'\)/);
   assert.match(settingsScript, /navigator\.clipboard/);
+  assert.match(settingsScript, /当前客户端不支持复制，请手动复制安装命令/);
+  assert.ok(
+    settingsScript.indexOf("document.execCommand('copy')") < settingsScript.indexOf('navigator.clipboard'),
+    'the synchronous copy fallback should be attempted before Clipboard API',
+  );
+  assert.match(settingsScript, /var statusSequence = 0/);
+  assert.match(settingsScript, /requestSequence !== statusSequence/);
   assert.match(settingsScript, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
   assert.doesNotMatch(settingsScript, /child_process|execFile|spawn\s*\(/);
 });
