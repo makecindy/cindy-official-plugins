@@ -4,16 +4,16 @@
   "whenToUse": "이미지, 일러스트, 삽화, 아바타, 포스터를 만들거나 생성된 이미지에 요소를 추가하고 스타일을 바꾸거나, 짧은 동영상을 만들거나 정지 이미지를 움직이게 할 때 사용합니다.",
   "tools": {
     "gen_image": {
-      "description": "텍스트로 이미지를 만들기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent가 플러그인 상세 페이지의 이미지 생성 모델로 Cindy Core media를 호출합니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
+      "description": "텍스트로 이미지를 만들기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent는 Host가 플러그인 상세 페이지에 설정한 modelId/providerId를 그대로 사용합니다. 공개 카탈로그에 없는 구독 전용 모델도 다른 모델로 바꾸지 않습니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
     },
     "edit_image": {
-      "description": "참조 이미지를 최대 4장까지 편집, 다시 그리기, 요소 추가, 스타일 변경 또는 합성하기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent가 플러그인 상세 페이지의 이미지 편집 모델로 Cindy Core media를 호출합니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
+      "description": "참조 이미지를 최대 4장까지 편집, 다시 그리기, 요소 추가, 스타일 변경 또는 합성하기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent는 Host가 플러그인 상세 페이지에 설정한 modelId/providerId를 그대로 사용합니다. 공개 카탈로그에 없는 구독 전용 모델도 다른 모델로 바꾸지 않습니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
     },
     "gen_video": {
-      "description": "텍스트로 동영상을 만들기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent가 플러그인 상세 페이지의 동영상 생성 모델로 Cindy Core media를 호출합니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
+      "description": "텍스트로 동영상을 만들기 위한 일반 매개변수를 정리합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent는 Host가 플러그인 상세 페이지에 설정한 modelId/providerId를 그대로 사용합니다. 공개 카탈로그에 없는 구독 전용 모델도 다른 모델로 바꾸지 않습니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
     },
     "edit_video": {
-      "description": "참조 이미지로 동영상을 만들기 위한 일반 매개변수를 정리합니다. 1장은 첫 프레임, 2장은 첫 프레임과 마지막 프레임을 뜻합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent가 플러그인 상세 페이지의 이미지-동영상 모델로 Cindy Core media를 호출합니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
+      "description": "참조 이미지로 동영상을 만들기 위한 일반 매개변수를 정리합니다. 1장은 첫 프레임, 2장은 첫 프레임과 마지막 프레임을 뜻합니다. 사용자가 이번 대화에서 모델을 명시하지 않은 경우 현재 Agent는 Host가 플러그인 상세 페이지에 설정한 modelId/providerId를 그대로 사용합니다. 공개 카탈로그에 없는 구독 전용 모델도 다른 모델로 바꾸지 않습니다. 결과에는 request.modelId와 request.providerId가 포함되며 Core prepare에서 model_id와 provider_id로 그대로 전달합니다."
     }
   }
 }

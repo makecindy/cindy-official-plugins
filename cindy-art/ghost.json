@@ -4,7 +4,7 @@
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成图片、画画、插画、配图、头像、海报,基于已生成的图改图、加元素、换风格、P 图,或想生成短视频、让一张图动起来时找我。",
-  "version": "1.13.3",
+  "version": "1.13.4",
   "minCindyVersion": "0.1.56",
   "locales": {
     "en": "locales/en.json",
@@ -43,7 +43,7 @@
   "tools": [
     {
       "name": "gen_image",
-      "description": "整理文生图需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API或另行选型。返回 request.modelId/request.providerId；Core prepare 必须原样传为 model_id/provider_id。",
+      "description": "整理文生图需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -81,7 +81,7 @@
     },
     {
       "name": "edit_image",
-      "description": "整理改图需求并返回普通创作参数，最多 4 张参考图。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。返回 request.modelId/request.providerId；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
+      "description": "整理改图需求并返回普通创作参数，最多 4 张参考图。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -128,7 +128,7 @@
     },
     {
       "name": "gen_video",
-      "description": "整理文生视频需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。返回 request.modelId/request.providerId；Core prepare 必须原样传为 model_id/provider_id。视频生成可能需要轮询数分钟。",
+      "description": "整理文生视频需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。视频生成可能需要轮询数分钟。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -157,7 +157,7 @@
     },
     {
       "name": "edit_video",
-      "description": "整理图生视频需求并返回普通创作参数：1 张参考图作为首帧，2 张参考图表示首尾帧。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。返回 request.modelId/request.providerId；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
+      "description": "整理图生视频需求并返回普通创作参数：1 张参考图作为首帧，2 张参考图表示首尾帧。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
       "parameters": {
         "type": "object",
         "properties": {

@@ -135,7 +135,7 @@ function createHarness(
 }
 
 test('manifest exposes only the four media preparation tools', () => {
-  assert.equal(manifest.version, '1.13.3');
+  assert.equal(manifest.version, '1.13.4');
   assert.equal(manifest.minCindyVersion, '0.1.56');
   assert.equal(manifest.slots.includes('card'), false);
   assert.deepEqual(
@@ -242,10 +242,28 @@ test('Host provider selection disambiguates duplicate model ids', async () => {
   assert.equal(result.result.request.providerId, 'openai');
 });
 
-test('Art rejects a configured model whose modalities do not support the operation', async () => {
+test('Art forwards a configured subscription model even when it is absent from the public catalog', async () => {
   const hash = 'c'.repeat(64);
   const harness = createHarness(
-    { 'image.edit': 'text-only-image' },
+    { 'image.edit': { modelId: 'grok-image-subscription', providerId: 'grok-oauth' } },
+    { image: [], video: [] },
+  );
+
+  const result = await harness.call('edit_image', {
+    prompt: 'add snow',
+    images: [`cindy-media://blobs/${hash}.png`],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.request.modelId, 'grok-image-subscription');
+  assert.equal(result.result.request.providerId, 'grok-oauth');
+  assert.deepEqual(harness.fetches, []);
+});
+
+test('Art still validates explicitly named models against the media catalog', async () => {
+  const hash = 'd'.repeat(64);
+  const harness = createHarness(
+    {},
     {
       image: [
         {
@@ -262,10 +280,26 @@ test('Art rejects a configured model whose modalities do not support the operati
   const result = await harness.call('edit_image', {
     prompt: 'add snow',
     images: [`cindy-media://blobs/${hash}.png`],
+    model: 'text-only-image',
   });
 
   assert.equal(result.ok, false);
   assert.match(result.message, /未声明支持改图所需的输入输出模态/);
+});
+
+test('configured subscription models do not depend on a media catalog response', async () => {
+  const harness = createHarness(
+    { 'video.generate': { modelId: 'grok-video-subscription', providerId: 'grok-oauth' } },
+    { image: [], video: [] },
+    'network',
+  );
+
+  const result = await harness.call('gen_video', { prompt: 'a moving cat' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.request.modelId, 'grok-video-subscription');
+  assert.equal(result.result.request.providerId, 'grok-oauth');
+  assert.deepEqual(harness.fetches, []);
 });
 
 test('Art reports Host preference failures instead of silently choosing the catalog default', async () => {
@@ -295,11 +329,11 @@ test('Art translates rejected Host preference requests into an actionable error'
 test('Art translates media catalog transport and JSON failures into actionable errors', async () => {
   const networkResult = await createHarness({}, { image: [], video: [] }, 'network').call(
     'gen_image',
-    { prompt: 'a cat' },
+    { prompt: 'a cat', model: 'explicit-image' },
   );
   const jsonResult = await createHarness({}, { image: [], video: [] }, 'json').call(
     'gen_image',
-    { prompt: 'a cat' },
+    { prompt: 'a cat', model: 'explicit-image' },
   );
 
   assert.equal(networkResult.ok, false);
@@ -315,7 +349,7 @@ test('Art logs media catalog HTTP failures and returns one user-facing state', a
     const harness = createHarness({}, { image: [], video: [] }, `http-${status}`);
     const result = await harness.call(
       'gen_image',
-      { prompt: 'a cat' },
+      { prompt: 'a cat', model: 'explicit-image' },
     );
     assert.equal(result.ok, false);
     assert.equal(result.message, '暂无可用模型');
