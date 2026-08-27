@@ -11,10 +11,12 @@ const root = path.resolve(import.meta.dirname, '..');
 const pluginRoot = path.join(root, 'console-cli');
 const source = readFileSync(path.join(pluginRoot, 'main.js'), 'utf8');
 const worker = readFileSync(path.join(pluginRoot, 'src/worker.cjs'), 'utf8');
+const settings = readFileSync(path.join(pluginRoot, 'settings.html'), 'utf8');
+const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8');
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.1');
+  assert.equal(manifest.version, '0.1.2');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
   assert.equal(manifest.network, undefined);
   assert.equal(manifest.node.entry, 'node/worker.cjs');
@@ -23,6 +25,20 @@ test('manifest uses a production-only Node CLI bridge', () => {
     manifest.tools.map((tool) => tool.name),
     ['console_cli_status', 'console_cli_login', 'console_cli_discover', 'console_cli_help', 'console_cli_schema', 'console_cli_call'],
   );
+});
+
+test('settings provides a manual missing-CLI install guide', () => {
+  assert.match(settings, /id="install-dialog"/);
+  assert.match(settings, /id="copy-install-command"/);
+  assert.match(settings, /id="dialog-copy-install-command"/);
+  assert.match(settings, /id="open-install-url"/);
+  assert.match(settings, /id="retry-install"/);
+  assert.match(settingsScript, /isMissingCliError/);
+  assert.match(settingsScript, /setInstallDialogVisible\(true/);
+  assert.match(settingsScript, /else \{\n        setInstallDialogVisible\(false\);\n        showMessage\(error\.message, true\);/);
+  assert.match(settingsScript, /navigator\.clipboard/);
+  assert.match(settingsScript, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
+  assert.doesNotMatch(settingsScript, /child_process|execFile|spawn\s*\(/);
 });
 
 test('browser entry never calls Console network APIs or handles credentials', () => {

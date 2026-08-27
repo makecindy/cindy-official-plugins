@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  var INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
+  var INSTALL_COMMAND = 'curl -fsSL ' + INSTALL_URL + ' | sh';
   var channel = typeof BroadcastChannel === 'function'
     ? new BroadcastChannel('console-cli-settings')
     : null;
@@ -13,6 +15,47 @@
     var node = $('message');
     node.textContent = text || '';
     node.classList.toggle('error', Boolean(error));
+  }
+
+  function isMissingCliError(error) {
+    var message = error && error.message ? String(error.message) : '';
+    return message.indexOf(INSTALL_URL) !== -1 || message.indexOf('未检测到本机 Console CLI') !== -1;
+  }
+
+  function setInstallDialogVisible(visible, detail) {
+    var dialog = $('install-dialog');
+    dialog.hidden = !visible;
+    if (detail !== undefined) $('install-dialog-detail').textContent = detail || '';
+    if (visible) $('close-install-dialog').focus();
+  }
+
+  function copyText(text) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text);
+    }
+    var input = document.createElement('textarea');
+    input.value = text;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    var copied = false;
+    try { copied = document.execCommand('copy'); } catch (_error) { copied = false; }
+    input.remove();
+    return copied ? Promise.resolve() : Promise.reject(new Error('当前客户端不支持复制，请手动复制安装命令'));
+  }
+
+  async function copyInstallCommand(button) {
+    button.disabled = true;
+    try {
+      await copyText(INSTALL_COMMAND);
+      showMessage('安装命令已复制，请在本机终端执行后重新检查。');
+    } catch (error) {
+      showMessage(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function showAccount(value) {
@@ -76,10 +119,17 @@
     try {
       var result = await request('status', {}, 30000);
       showAccount(result);
+      setInstallDialogVisible(false);
       showMessage(result.logged_in ? 'Console 已登录' : 'CLI 已安装，请点击“登录 Console”');
     } catch (error) {
       showAccount(null);
-      showMessage(error.message, true);
+      if (isMissingCliError(error)) {
+        showMessage('需要先安装 Console CLI。', true);
+        setInstallDialogVisible(true, error.message);
+      } else {
+        setInstallDialogVisible(false);
+        showMessage(error.message, true);
+      }
     } finally {
       $('status-button').disabled = false;
     }
@@ -93,6 +143,8 @@
       showAccount(result);
       showMessage('Console 已登录');
     } catch (error) {
+      if (isMissingCliError(error)) setInstallDialogVisible(true, error.message);
+      else setInstallDialogVisible(false);
       showMessage(error.message, true);
     } finally {
       $('login-button').disabled = false;
@@ -101,5 +153,15 @@
 
   $('status-button').addEventListener('click', function () { void checkStatus(); });
   $('login-button').addEventListener('click', function () { void login(); });
+  $('copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
+  $('dialog-copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
+  $('retry-install').addEventListener('click', function () { void checkStatus(); });
+  $('close-install-dialog').addEventListener('click', function () { setInstallDialogVisible(false); });
+  $('install-dialog').addEventListener('click', function (event) {
+    if (event.target === event.currentTarget) setInstallDialogVisible(false);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !$('install-dialog').hidden) setInstallDialogVisible(false);
+  });
   void checkStatus();
 }());
