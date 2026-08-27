@@ -3,8 +3,9 @@
   "id": "taptap-maker",
   "name": "TapTap Maker",
   "description": "使用插件随附的官方 TapTap Maker Runtime 连接账号、同步或初始化项目、构建游戏并打开官方预览；无需自行安装 CLI 或配置 MCP。",
-  "whenToUse": "TapTap Maker 项目操作统一通过本插件工具完成，只操作当前本地会话工作区；目标项目在其他目录时，提示用户先在 Cindy 中打开该目录，不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行。创建、初始化、检查、构建或预览 Maker 游戏，以及调用 Maker 素材和调试工具时使用。仅当 Maker 工具完整返回“MCP error -32600: INSUFFICIENT_BALANCE”时才说明积分不足，并在用户确认后提供 Art 插件替代能力；其他错误不视为积分不足。",
-  "version": "2.1.10",
+  "whenToUse": "仅用于明确的 TapTap Maker 游戏项目操作：账号连接、项目初始化/检查、构建/运行/预览，或 Maker 专属素材、广告与调试。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时不适用。",
+  "version": "2.1.11",
+  "minCindyVersion": "0.1.48",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -21,8 +22,7 @@
     "node",
     "session-context",
     "pick",
-    "preview",
-    "skill"
+    "preview"
   ],
   "card": {
     "externalLinks": true
@@ -43,12 +43,12 @@
       "maker.taptap.cn"
     ]
   },
-  "skill": {
+  "manual": {
     "items": [
       {
-        "dir": "skills/taptap-maker",
+        "dir": "manual/taptap-maker",
         "name": "taptap-maker",
-        "description": "使用 Cindy 的 TapTap Maker 插件完成账号连接、项目检查或初始化、构建预览，以及调用官方 Maker 动态工具。用户要求创建、打开、检查、构建或预览 TapTap Maker 游戏，或使用 Maker 素材与调试能力时使用。"
+        "description": "TapTap Maker 游戏项目的账号连接、初始化、构建预览、动态工具调用与失败恢复流程。"
       }
     ]
   },
@@ -69,7 +69,7 @@
     },
     {
       "name": "maker_ads_guide",
-      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。任何广告、激励视频、广告位或 ShowRewardVideoAd 请求都应在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
+      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。仅在 Maker 项目中接入广告、激励视频、广告位或 ShowRewardVideoAd 时，在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
     },
     {
       "name": "maker_login",
