@@ -1,7 +1,7 @@
 {
   "name": "TapTap Maker",
   "description": "플러그인에 포함된 공식 TapTap Maker Runtime으로 계정을 연결하고 프로젝트를 동기화하거나 초기화하며 게임을 빌드하고 공식 미리보기를 엽니다. CLI를 별도로 설치하거나 MCP를 설정할 필요가 없습니다.",
-  "whenToUse": "TapTap Maker 작업에는 이 플러그인만 사용하며 현재 Cindy 로컬 작업 공간만 조작합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx, 직접 MCP 또는 일반 브라우저로 우회하지 않습니다. “MCP error -32600: INSUFFICIENT_BALANCE”만 크레딧 부족으로 판단하고 확인 후 Art를 안내합니다.",
+  "whenToUse": "TapTap Maker 게임 프로젝트의 명시적 작업(계정 연결, 초기화/점검, 빌드/실행/미리보기, Maker 전용 에셋/광고/디버깅)에만 사용합니다. TapTap을 언급만 하거나 Maker가 아닌 플랫폼/SDK/스토어 출시 작업 또는 이 플러그인의 소스 코드 유지보수에는 사용하지 않습니다.",
   "tools": {
     "maker_status": {
       "description": "현재 세션 작업 공간의 로그인, 프로젝트 연결, Git, Python, Lua LSP 및 도구 준비 상태만 점검합니다. 기본 요약은 프로젝트 파일을 수정하거나 원격 Git 동기화를 수행하지 않지만, 연결된 프로젝트에서는 공식 Runtime이 사용자 ID, 프로젝트 ID, 도구 식별자 및 호출 상태 등의 텔레메트리를 Maker `/tracking`으로 전송합니다. 프로젝트가 다른 위치에 있으면 Cindy에서 열도록 안내하고 Shell, CLI, npx 또는 직접 MCP로 우회하지 않습니다.",
@@ -15,7 +15,7 @@
       }
     },
     "maker_ads_guide": {
-      "description": "포함된 공식 Runtime의 TapTap Maker 광고 연동 가이드를 읽습니다. 광고, 보상형 동영상, 광고 배치 또는 ShowRewardVideoAd 작업에서는 프로젝트 상태 확인, get_ad_config 호출 또는 광고 코드 변경 전에 먼저 호출해야 합니다. 프로젝트는 변경하지 않습니다."
+      "description": "포함된 공식 Runtime의 TapTap Maker 광고 연동 가이드를 읽습니다. Maker 프로젝트의 광고, 보상형 동영상, 광고 배치 또는 ShowRewardVideoAd 연동에만 사용하며, 프로젝트 상태 확인, get_ad_config 호출 또는 광고 코드 변경 전에 호출합니다. 프로젝트는 변경하지 않습니다."
     },
     "maker_login": {
       "description": "TapTap Maker 공식 CLI를 통해 브라우저 인증을 열고 계정을 연결합니다. 기존 PAT를 플러그인 설정 화면에서 직접 구성할 수도 있습니다."

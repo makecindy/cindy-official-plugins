@@ -1,7 +1,7 @@
 {
   "name": "TapTap Maker",
   "description": "同梱の公式 TapTap Maker Runtime を使って、アカウント接続、プロジェクトの同期・初期化、ゲームのビルド、公式プレビューの表示を行います。CLI の別途インストールや MCP 設定は不要です。",
-  "whenToUse": "TapTap Maker の操作にはこのプラグインだけを使い、現在の Cindy ローカルワークスペースだけを対象にします。別の場所にあるプロジェクトは Cindy で開くよう案内し、Shell、CLI、npx、直接 MCP、汎用ブラウザで迂回しません。「MCP error -32600: INSUFFICIENT_BALANCE」だけをクレジット不足と判断し、確認後に Art を案内します。",
+  "whenToUse": "TapTap Maker のゲームプロジェクトに対する明示的な作業（アカウント接続、初期化・確認、ビルド・実行・プレビュー、Maker 専用の素材・広告・デバッグ）にのみ使用します。TapTap への言及だけ、Maker 以外のプラットフォーム・SDK・ストア公開作業、本プラグインのソース保守には使用しません。",
   "tools": {
     "maker_status": {
       "description": "現在のセッションワークスペースだけを対象に、ログイン、プロジェクト関連付け、Git、Python、Lua LSP、開発ツールの状態を確認します。既定の概要はプロジェクトファイルを変更せず、リモート Git 同期も行いませんが、関連付け済みプロジェクトでは公式 Runtime がユーザー ID、プロジェクト ID、ツール識別子、呼び出し状態などのテレメトリを Maker の `/tracking` に送信します。別の場所にある場合は Cindy で開くよう案内し、Shell、CLI、npx、直接 MCP で迂回しません。",
@@ -15,7 +15,7 @@
       }
     },
     "maker_ads_guide": {
-      "description": "同梱の公式 Runtime に含まれる TapTap Maker 広告導入ガイドを読み取ります。広告、リワード動画、広告枠、ShowRewardVideoAd に関する作業では、プロジェクト状態の確認、get_ad_config の呼び出し、広告コードの変更より先に呼び出してください。プロジェクトは変更しません。"
+      "description": "同梱の公式 Runtime に含まれる TapTap Maker 広告導入ガイドを読み取ります。Maker プロジェクトの広告、リワード動画、広告枠、ShowRewardVideoAd の導入時にのみ、プロジェクト状態の確認、get_ad_config の呼び出し、広告コードの変更より先に呼び出します。プロジェクトは変更しません。"
     },
     "maker_login": {
       "description": "TapTap Maker 公式 CLI からブラウザ認証を開き、アカウントを接続します。既存の PAT をプラグイン設定で手動設定することもできます。"

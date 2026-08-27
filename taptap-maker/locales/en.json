@@ -1,7 +1,7 @@
 {
   "name": "TapTap Maker",
   "description": "Use the bundled official TapTap Maker Runtime to connect an account, sync or initialize projects, build games, and open official previews. No separate CLI installation or MCP configuration is required.",
-  "whenToUse": "Use this plugin for TapTap Maker work in the current Cindy workspace. If the project is elsewhere, ask the user to open it in Cindy; never use Shell, CLI, npx, direct MCP, or a browser. Only “MCP error -32600: INSUFFICIENT_BALANCE” means insufficient credits; offer Art after confirmation.",
+  "whenToUse": "Only for explicit TapTap Maker game-project work: account connection, project init/check, build/run/preview, or Maker-specific assets, ads and debugging. Not for generic TapTap mentions, non-Maker platform/SDK/store tasks, or this plugin's source-code maintenance.",
   "tools": {
     "maker_status": {
       "description": "Inspect only the current session workspace's TapTap Maker status, including login, project binding, Git, Python, Lua LSP, and tool readiness. The default summary does not modify project files or perform remote Git sync; for a bound project, the official Runtime still sends call telemetry to Maker `/tracking`, including the user ID, project ID, tool identifier, and call status. If the project is elsewhere, ask the user to open it in Cindy; do not bypass the plugin with Shell, CLI, npx, or direct MCP.",
@@ -15,7 +15,7 @@
       }
     },
     "maker_ads_guide": {
-      "description": "Read the bundled official Runtime's TapTap Maker ads integration guide. For ads, rewarded videos, ad placements, or ShowRewardVideoAd, call this before checking project status, calling get_ad_config, or changing ad code. This tool does not modify the project."
+      "description": "Read the bundled TapTap Maker ads guide. Only for ads, rewarded videos, ad placements or ShowRewardVideoAd in a Maker project, before checking project status, calling get_ad_config or changing ad code. Does not modify the project."
     },
     "maker_login": {
       "description": "Open browser authorization through the official TapTap Maker CLI and connect an account. An existing PAT can also be configured manually in the plugin settings."

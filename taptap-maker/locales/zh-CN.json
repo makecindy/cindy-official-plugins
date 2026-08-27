@@ -1,7 +1,7 @@
 {
   "name": "TapTap Maker",
   "description": "使用插件随附的官方 TapTap Maker Runtime 连接账号、同步或初始化项目、构建游戏并打开官方预览，无需单独安装 CLI 或配置 MCP。",
-  "whenToUse": "TapTap Maker 项目操作统一通过本插件工具完成，只操作当前本地会话工作区；目标项目在其他目录时先让用户在 Cindy 中打开该目录，不通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行。只有完整错误为“MCP error -32600: INSUFFICIENT_BALANCE”才表示积分不足，此时说明 Art 插件可替代并等待用户确认。",
+  "whenToUse": "仅用于明确的 TapTap Maker 游戏项目操作：账号连接、项目初始化/检查、构建/运行/预览，或 Maker 专属素材、广告与调试。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时不适用。",
   "tools": {
     "maker_status": {
       "description": "仅检查当前会话工作区的 TapTap Maker 状态，包括登录、项目绑定、Git、Python、Lua LSP 与开发工具就绪情况。默认摘要不会修改项目文件或执行远端 Git 同步；已绑定项目仍会由官方 Runtime 向 Maker `/tracking` 上报用户 ID、项目 ID、工具标识与调用状态等遥测。目标项目在其他目录时先让用户在 Cindy 中打开该目录，不通过 Shell、CLI、npx 或直接 MCP 绕行。",
@@ -15,7 +15,7 @@
       }
     },
     "maker_ads_guide": {
-      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。任何广告、激励视频、广告位或 ShowRewardVideoAd 请求都应在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
+      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。仅在 Maker 项目中接入广告、激励视频、广告位或 ShowRewardVideoAd 时，在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
     },
     "maker_login": {
       "description": "通过 TapTap Maker 官方 CLI 打开浏览器授权并连接账号。也可在插件设置页手动配置已有 PAT。"
