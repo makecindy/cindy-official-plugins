@@ -373,7 +373,7 @@ plugin text and every tool description. Then follow
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) and install the exact packaged `.cindy` on
 a real device running an eligible stable production Cindy build.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.28`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.32`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly — do not edit the generated
 `dist/maker.js` by hand.

@@ -312,7 +312,7 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
-`@taptap/maker@0.0.28`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
+`@taptap/maker@0.0.32`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 不要单独修改生成后的 `dist/maker.js`。
 
 ## 社区

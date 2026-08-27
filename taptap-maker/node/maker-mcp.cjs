@@ -1,5 +1,7 @@
 'use strict';
 
+process.env.TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin';
+
 const path = require('node:path');
 const readline = require('node:readline');
 const { PassThrough, Readable } = require('node:stream');
