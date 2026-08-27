@@ -31,9 +31,12 @@ jobs:
 
       - name: Validate official plugin publish contract
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node --test .tests/plugin-contract.test.mjs
+        run: |
+          # Event base.sha can lag behind the checked-out PR merge commit.
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
+          export BASE_SHA="$(git rev-parse HEAD^1)"
+          node --test .tests/plugin-contract.test.mjs
 
       - name: Validate plugin localization resources
         run: node --test .tests/localization.test.mjs
@@ -57,12 +60,12 @@ jobs:
       - name: Detect changed plugin directories
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # pull_request checks out the merge result; exclude base-only changes.
-          git merge-base --is-ancestor "${HEAD_SHA}" HEAD
+          # Use both parents of the checked-out merge, not event base.sha.
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
+          BASE_SHA="$(git rev-parse HEAD^1)"
           git ls-tree -r --name-only HEAD \
             | sed -n 's|/ghost\.json$||p' | sort -u > "${RUNNER_TEMP}/plugin-roots"
           git diff --name-only --no-renames --diff-filter=AMD "${BASE_SHA}" HEAD \

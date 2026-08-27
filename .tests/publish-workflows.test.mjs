@@ -16,7 +16,7 @@ const globalWorkflow = readFileSync(
 );
 const prWorkflow = readFileSync(new URL('pr-verify.yml', workflowRoot), 'utf8');
 
-test('changed-plugin detection excludes base-only changes but includes PR package changes', (t) => {
+test('changed-plugin detection uses the merge parents even when event base is stale', (t) => {
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-plugin-pr-diff-'));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd: fixture, encoding: 'utf8' }).trim();
@@ -36,7 +36,7 @@ test('changed-plugin detection excludes base-only changes but includes PR packag
   write('base-only/ghost.json', '{}');
   write('pr-changed/ghost.json', '{}');
   write('LICENSE', 'fixture license');
-  commit();
+  const staleBase = commit();
   git('checkout', '-qb', 'feature');
   write('README.md', 'documentation-only PR');
   const head = commit();
@@ -44,22 +44,25 @@ test('changed-plugin detection excludes base-only changes but includes PR packag
   write('base-only/main.js', '// upstream-only change');
   const base = commit();
   git('checkout', '-q', 'feature');
-  git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'merge', '--no-ff', '-qm', 'PR merge result', 'main');
 
   const step = prWorkflow.match(/      - name: Detect changed plugin directories\n([\s\S]*?)(?=\n      - name:)/)?.[1];
   assert.ok(step, 'workflow must contain the changed-plugin detector');
   const source = step.split('        run: |\n')[1];
   assert.ok(source, 'detector must contain an executable shell script');
   const script = source.split('\n').map((line) => line.replace(/^          /, '')).join('\n');
+  let mergeNumber = 0;
   const detect = (prHead) => {
+    git('checkout', '-qb', `merge-${++mergeNumber}`, base);
+    git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'merge', '--no-ff', '-qm', 'PR merge result', prHead);
     const run = mkdtempSync(path.join(os.tmpdir(), 'cindy-plugin-pr-output-'));
     t.after(() => rmSync(run, { recursive: true, force: true }));
     const output = path.join(run, 'output');
     execFileSync('bash', ['-c', script], {
       cwd: fixture,
       encoding: 'utf8',
-      env: { ...process.env, BASE_SHA: base, HEAD_SHA: prHead, RUNNER_TEMP: run, GITHUB_OUTPUT: output },
+      env: { ...process.env, BASE_SHA: staleBase, HEAD_SHA: prHead, RUNNER_TEMP: run, GITHUB_OUTPUT: output },
     });
+    git('checkout', '-q', 'feature');
     return JSON.parse(readFileSync(output, 'utf8').trim().replace(/^plugins=/, ''));
   };
 
@@ -68,6 +71,12 @@ test('changed-plugin detection excludes base-only changes but includes PR packag
   assert.deepEqual(detect(commit()), [{ directory: 'pr-changed' }], 'a PR plugin change must still require verification');
   write('LICENSE', 'changed shared package license');
   assert.deepEqual(detect(commit()), [{ directory: 'base-only' }, { directory: 'pr-changed' }], 'shared packaged files must still select every plugin');
+
+  const contractStep = prWorkflow.match(/      - name: Validate official plugin publish contract\n([\s\S]*?)(?=\n      - name:)/)?.[1];
+  assert.ok(contractStep, 'workflow must contain the package contract gate');
+  assert.ok(contractStep.includes('test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"'));
+  assert.ok(contractStep.includes('export BASE_SHA="$(git rev-parse HEAD^1)"'));
+  assert.doesNotMatch(prWorkflow, /github\.event\.pull_request\.base\.sha/);
 });
 
 test('pull request verification requires the production Cindy attestation', () => {
