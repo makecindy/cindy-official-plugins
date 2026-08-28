@@ -1,5 +1,5 @@
 {
   "name": "iOS Simulator",
-  "description": "Adds Cindy's Host-owned embedded iOS Simulator workflow. WDA, H.264, HID, lifecycle, admission, ownership, recovery, and fallback remain Host-managed; external Xcode/Simulator/simctl is allowed only on an explicitly authorized fallback route with no Cindy-owned runtime active.",
+  "description": "Build and run iOS apps in Cindy, watch the simulator live, tap and type, and check how your app behaves or what went wrong.",
   "whenToUse": "Prefer Cindy's embedded simulator. Fallback only when Host reports unavailable/disabled or admission failure, confirms runningInstanceCount=0 with no Cindy runtime, cleanup, lease, or generation transition, and supplies an external workflow, exact device identity, and original task; otherwise stop."
 }

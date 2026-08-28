@@ -4,16 +4,16 @@
   "whenToUse": "需要生成图片、画画、插画、配图、头像、海报，基于已生成的图改图、加元素、换风格、P 图，或想生成短视频、让一张图动起来时使用。",
   "tools": {
     "gen_image": {
-      "description": "根据文字描述生成一张图片，返回可在聊天中渲染的图片地址。"
+      "description": "整理文生图需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
     },
     "edit_image": {
-      "description": "改图、重绘、加元素、风格化或融合最多 4 张源图。插件之前生成的图，用 gen_image / edit_image 返回的 cindy-media:// 地址填入 images；用户随消息发来的图，把 xdt-image:// 地址放进 ghost_call 顶层 attachments，由主机过户注入，不用再填 images。"
+      "description": "整理改图、重绘、加元素、风格化或最多 4 张源图融合的需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
     },
     "gen_video": {
-      "description": "根据文字描述生成一段短视频，通常需要几分钟，返回可在聊天中渲染的视频地址。"
+      "description": "整理文生视频需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
     },
     "edit_video": {
-      "description": "参考图生视频：1 张图作为首帧并动起来，2 张图生成首尾帧过渡。插件生成过的图用 cindy-media:// 地址填入 images；用户随消息发来的图放在 ghost_call 顶层 attachments，由主机过户注入。"
+      "description": "整理图生视频需求并返回普通创作参数：1 张图作为首帧，2 张图表示首尾帧。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
     }
   }
 }

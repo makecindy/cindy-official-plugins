@@ -4,16 +4,16 @@
   "whenToUse": "Use this plugin to create images, illustrations, avatars, posters, or other artwork; edit a generated image by adding elements or changing its style; generate a short video; or animate a still image.",
   "tools": {
     "gen_image": {
-      "description": "Generate one image from a text prompt and return an image URL that can be rendered in chat."
+      "description": "Prepare text-to-image parameters. Unless the user names a model, use the exact modelId/providerId configured by Host on the plugin page; do not replace a subscription-only model merely because it is absent from the public catalog. Returns request.modelId/request.providerId; pass both unchanged to Core prepare as model_id/provider_id."
     },
     "edit_image": {
-      "description": "Edit, redraw, stylize, or combine up to four source images. For images previously created by this plugin, pass the cindy-media:// URLs returned by gen_image or edit_image in images. For images attached by the user, put their xdt-image:// URLs in the top-level attachments field of ghost_call so the host can transfer them; do not also put them in images."
+      "description": "Prepare parameters to edit or combine up to four images. Unless the user names a model, use the exact modelId/providerId configured by Host on the plugin page; do not replace a subscription-only model merely because it is absent from the public catalog. Returns request.modelId/request.providerId; pass both unchanged to Core prepare as model_id/provider_id."
     },
     "gen_video": {
-      "description": "Generate a short video from a text prompt. This can take several minutes. Returns a video URL that can be rendered in chat."
+      "description": "Prepare text-to-video parameters. Unless the user names a model, use the exact modelId/providerId configured by Host on the plugin page; do not replace a subscription-only model merely because it is absent from the public catalog. Returns request.modelId/request.providerId; pass both unchanged to Core prepare as model_id/provider_id."
     },
     "edit_video": {
-      "description": "Generate a video from reference images: one image animates the first frame, while two images create a first-to-last-frame transition. For images created by this plugin, pass their cindy-media:// URLs in images. For user attachments, put them in the top-level attachments field of ghost_call so the host can transfer them."
+      "description": "Prepare image-to-video parameters: one image is the first frame; two are the first and last frames. Unless the user names a model, use the exact modelId/providerId configured by Host on the plugin page; do not replace a subscription-only model merely because it is absent from the public catalog. Returns request.modelId/request.providerId; pass both unchanged to Core prepare as model_id/provider_id."
     }
   }
 }

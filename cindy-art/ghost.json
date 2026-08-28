@@ -4,7 +4,8 @@
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成图片、画画、插画、配图、头像、海报,基于已生成的图改图、加元素、换风格、P 图,或想生成短视频、让一张图动起来时找我。",
-  "version": "1.11.1",
+  "version": "1.13.4",
+  "minCindyVersion": "0.1.56",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -16,8 +17,7 @@
   "entry": "main.js",
   "slots": [
     "cindy",
-    "tool",
-    "card"
+    "tool"
   ],
   "cindy": {
     "image": [
@@ -43,7 +43,7 @@
   "tools": [
     {
       "name": "gen_image",
-      "description": "根据文字描述生成一张图片。返回可在聊天中渲染的图片地址。",
+      "description": "整理文生图需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -53,7 +53,7 @@
           },
           "model": {
             "type": "string",
-            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名某家/某型号时才传,值用主机模型目录里的图像模型 id(如 gpt-image-2;nano banana / gemini / 谷歌 / 纳米香蕉 → gemini 系;说 grok / xAI → xai/ 前缀系;说 OpenAI 直连 → openai/ 前缀系)。点名不在册的 id 会被主机明拒并附当前可用清单,按清单纠正后重试。"
+            "description": "可选。仅当用户在本次对话明确点名模型时传模型目录里的 id；否则不传，由 Art 使用插件详情页「Cindy 能力」中为出图配置的模型。"
           },
           "aspectRatio": {
             "type": "string",
@@ -71,7 +71,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,明确要标准/普通质量传 standard,说要最好的/精修传 best。与 model 同时给时 model 优先。"
+            "description": "可选的质量意图。用户说草稿/快速出一版传 draft，明确要标准/普通质量传 standard，说要最好的/精修传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
           }
         },
         "required": [
@@ -81,7 +81,7 @@
     },
     {
       "name": "edit_image",
-      "description": "改图(重绘/加元素/风格化,最多 4 张源图融合)。源图两种:①本插件之前生成的图,用 gen_image / edit_image 返回的地址(cindy-media://…)填 images;②用户随消息发来的图,把其 xdt-image:// 地址放进 ghost_call 顶层 attachments(主机会过户注入,不用填 images)。",
+      "description": "整理改图需求并返回普通创作参数，最多 4 张参考图。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -96,11 +96,11 @@
             },
             "minItems": 1,
             "maxItems": 4,
-            "description": "可选:本插件之前生成的源图地址(cindy-media://blobs/<指纹>.<后缀> 或裸指纹)。只改用户发来的图时不填,把用户图放 ghost_call 顶层 attachments 即可(images 与 attachments 至少有一路)。"
+            "description": "可选：完整的 cindy-media://blobs/<指纹>.<后缀> 源图地址。只改用户发来的图时不填，把用户图放 ghost_call 顶层 attachments；调用 Core 时继续使用对话里的原始媒体地址(images 与 attachments 至少有一路)。"
           },
           "model": {
             "type": "string",
-            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名某家/某型号时才传,值用主机模型目录里的图像模型 id(如 gpt-image-2;nano banana / gemini / 谷歌 / 纳米香蕉 → gemini 系;说 grok / xAI → xai/ 前缀系;说 OpenAI 直连 → openai/ 前缀系)。点名不在册的 id 会被主机明拒并附当前可用清单,按清单纠正后重试。"
+            "description": "可选。仅当用户在本次对话明确点名模型时传模型目录里的 id；否则不传，由 Art 使用插件详情页「Cindy 能力」中为改图配置的模型。"
           },
           "aspectRatio": {
             "type": "string",
@@ -118,7 +118,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户说草稿/快速出一版传 draft,明确要标准/普通质量传 standard,说要最好的/精修传 best。与 model 同时给时 model 优先。"
+            "description": "可选的质量意图。用户说草稿/快速出一版传 draft，明确要标准/普通质量传 standard，说要最好的/精修传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
           }
         },
         "required": [
@@ -128,7 +128,7 @@
     },
     {
       "name": "gen_video",
-      "description": "根据文字描述生成一段短视频(分钟级耗时,耐心等)。返回可在聊天中渲染的视频地址。",
+      "description": "整理文生视频需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。视频生成可能需要轮询数分钟。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -138,13 +138,7 @@
           },
           "model": {
             "type": "string",
-            "enum": [
-              "seedance-fast",
-              "seedance-pro",
-              "seedance-2.5",
-              "happyhorse"
-            ],
-            "description": "可选。默认永远不传(主机按默认配置选型);仅当用户显式点名(如 seedance 2.5 / seedance pro / happyhorse / 高质量视频)时才传。"
+            "description": "可选。仅当用户在本次对话明确点名模型时传模型目录里的 id；否则不传，由 Art 使用插件详情页「Cindy 能力」中为生成视频配置的模型。"
           },
           "tier": {
             "type": "string",
@@ -153,7 +147,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,明确要标准/普通质量传 standard,要最高质量传 best。与 model 同时给时 model 优先。"
+            "description": "可选的质量意图。用户要快传 draft，明确要标准/普通质量传 standard，要最高质量传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
           }
         },
         "required": [
@@ -163,7 +157,7 @@
     },
     {
       "name": "edit_video",
-      "description": "参考图生视频:1 张=让这张图动起来(首帧),2 张=首尾帧过渡(分钟级耗时)。参考图两种:①本插件生成过的图,用其 cindy-media:// 地址填 images;②用户随消息发来的图,放 ghost_call 顶层 attachments(主机过户注入)。",
+      "description": "整理图生视频需求并返回普通创作参数：1 张参考图作为首帧，2 张参考图表示首尾帧。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -178,17 +172,11 @@
             },
             "minItems": 1,
             "maxItems": 2,
-            "description": "可选:本插件名下参考图地址(cindy-media://… 或裸指纹),1–2 张。只用用户发来的图时不填,走 attachments(两路至少有一路)。"
+            "description": "可选：完整的 cindy-media://blobs/<指纹>.<后缀> 参考图地址，1–2 张。只用用户发来的图时不填，走 attachments；调用 Core 时继续使用对话里的原始媒体地址(两路至少有一路)。"
           },
           "model": {
             "type": "string",
-            "enum": [
-              "seedance-fast",
-              "seedance-pro",
-              "seedance-2.5",
-              "happyhorse"
-            ],
-            "description": "可选。默认不传;规则同 gen_video。"
+            "description": "可选。仅当用户在本次对话明确点名模型时传模型目录里的 id；否则不传，由 Art 使用插件详情页「Cindy 能力」中为图生视频配置的模型。"
           },
           "tier": {
             "type": "string",
@@ -197,7 +185,7 @@
               "standard",
               "best"
             ],
-            "description": "可选。默认不传(主机按默认档位选型);用户要快传 draft,明确要标准/普通质量传 standard,要最高质量传 best。与 model 同时给时 model 优先。"
+            "description": "可选的质量意图。用户要快传 draft，明确要标准/普通质量传 standard，要最高质量传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
           }
         },
         "required": [

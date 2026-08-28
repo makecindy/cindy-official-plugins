@@ -8,15 +8,41 @@ const pluginRoot = path.join(root, 'ios-simulator');
 const manifest = JSON.parse(
   fs.readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'),
 );
+const zhCnLocale = JSON.parse(
+  fs.readFileSync(path.join(pluginRoot, 'locales/zh-CN.json'), 'utf8'),
+);
+const localeResources = ['zh-CN', 'en', 'ja', 'ko'].map((locale) =>
+  JSON.parse(fs.readFileSync(path.join(pluginRoot, `locales/${locale}.json`), 'utf8')),
+);
 
 test('manifest keeps privileged simulator runtime ownership in Cindy Host', () => {
   assert.equal(manifest.id, 'ios-simulator');
-  assert.equal(manifest.version, '1.1.2');
+  assert.equal(manifest.version, '1.1.3');
   assert.equal(manifest.minCindyVersion, '0.1.45');
-  assert.match(manifest.whenToUse, /cleanup/);
+  assert.deepEqual(
+    {
+      name: manifest.name,
+      description: manifest.description,
+      whenToUse: manifest.whenToUse,
+    },
+    {
+      name: zhCnLocale.name,
+      description: zhCnLocale.description,
+      whenToUse: zhCnLocale.whenToUse,
+    },
+    'top-level catalog copy must remain the zh-CN fallback for legacy clients',
+  );
+  assert.match(manifest.whenToUse, /清理/);
   assert.match(manifest.whenToUse, /lease/);
-  assert.match(manifest.whenToUse, /generation transition/);
-  assert.match(manifest.whenToUse, /external workflow/);
+  assert.match(manifest.whenToUse, /generation 迁移/);
+  assert.match(manifest.whenToUse, /外部工作流/);
+  for (const resource of localeResources) {
+    assert.doesNotMatch(
+      resource.description,
+      /\bWDA\b|H\.264|\bHID\b|\bruntime\b|\bsimctl\b|\badmission\b/i,
+      'catalog descriptions should explain user value without implementation jargon',
+    );
+  }
   assert.equal(manifest.launch, 'on-demand');
   assert.deepEqual(manifest.slots, ['skill', 'ios-simulator']);
   assert.equal(manifest.panel, undefined);

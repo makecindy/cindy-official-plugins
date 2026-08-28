@@ -3,8 +3,9 @@
   "id": "taptap-maker",
   "name": "TapTap Maker",
   "description": "使用插件随附的官方 TapTap Maker Runtime 连接账号、同步或初始化项目、构建游戏并打开官方预览；无需自行安装 CLI 或配置 MCP。",
-  "whenToUse": "TapTap Maker 项目操作统一通过本插件工具完成，只操作当前本地会话工作区；目标项目在其他目录时，提示用户先在 Cindy 中打开该目录，不得通过 Shell、CLI、npx、直接 MCP 或通用浏览器绕行。创建、初始化、检查、构建或预览 Maker 游戏，以及调用 Maker 素材和调试工具时使用。仅当 Maker 工具完整返回“MCP error -32600: INSUFFICIENT_BALANCE”时才说明积分不足，并在用户确认后提供 Art 插件替代能力；其他错误不视为积分不足。",
-  "version": "2.1.10",
+  "whenToUse": "仅用于明确的 TapTap Maker 游戏项目操作：账号连接、项目初始化/检查、构建/运行/预览，或 Maker 专属素材、广告与调试。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时不适用。",
+  "version": "2.1.12",
+  "minCindyVersion": "0.1.48",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -21,8 +22,7 @@
     "node",
     "session-context",
     "pick",
-    "preview",
-    "skill"
+    "preview"
   ],
   "card": {
     "externalLinks": true
@@ -43,12 +43,12 @@
       "maker.taptap.cn"
     ]
   },
-  "skill": {
+  "manual": {
     "items": [
       {
-        "dir": "skills/taptap-maker",
+        "dir": "manual/taptap-maker",
         "name": "taptap-maker",
-        "description": "使用 Cindy 的 TapTap Maker 插件完成账号连接、项目检查或初始化、构建预览，以及调用官方 Maker 动态工具。用户要求创建、打开、检查、构建或预览 TapTap Maker 游戏，或使用 Maker 素材与调试能力时使用。"
+        "description": "TapTap Maker 游戏项目的账号连接、初始化、构建预览、动态工具调用与失败恢复流程。"
       }
     ]
   },
@@ -56,20 +56,24 @@
   "tools": [
     {
       "name": "maker_status",
-      "description": "仅检查当前会话工作区的 TapTap Maker 状态，包括登录、项目绑定、Git、Python、Lua LSP 与开发工具就绪情况。目标项目在其他目录时先让用户在 Cindy 中打开该目录，不得通过 Shell、CLI、npx 或直接 MCP 绕行。",
+      "description": "仅检查当前会话工作区的 TapTap Maker 状态，包括登录、项目绑定、Git、Python、Lua LSP 与开发工具就绪情况。默认摘要不会修改项目文件或执行远端 Git 同步；已绑定项目仍会由官方 Runtime 向 Maker `/tracking` 上报用户 ID、项目 ID、工具标识与调用状态等遥测。目标项目在其他目录时先让用户在 Cindy 中打开该目录，不得通过 Shell、CLI、npx 或直接 MCP 绕行。",
       "parameters": {
         "type": "object",
         "properties": {
           "skip_remote_sync": {
             "type": "boolean",
-            "description": "频繁轮询时可设为 true，跳过远端 Git 同步检查。"
+            "description": "完整诊断模式下可设为 true，跳过远端 Git 同步和开发工具新鲜度检查。默认摘要模式不执行这两项检查。"
+          },
+          "detail": {
+            "type": "boolean",
+            "description": "仅在需要完整诊断时设为 true；默认返回快速状态摘要且不会修改项目文件，但已绑定项目仍会发送上述 Maker 调用遥测。"
           }
         }
       }
     },
     {
       "name": "maker_ads_guide",
-      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。任何广告、激励视频、广告位或 ShowRewardVideoAd 请求都应在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
+      "description": "只读获取插件随附官方 Runtime 的 TapTap Maker 广告接入指南。仅在 Maker 项目中接入广告、激励视频、广告位或 ShowRewardVideoAd 时，在检查项目状态、调用 get_ad_config 或修改广告代码前先调用；不会修改项目。"
     },
     {
       "name": "maker_login",
@@ -150,11 +154,11 @@
     },
     {
       "name": "maker_list_tools",
-      "description": "列出当前工作区实时可用的官方 Maker 动态工具及参数 schema。调用 maker_call_tool 前先调用本工具，不要凭记忆硬编码工具名；目标项目在其他目录时先让用户切换工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。"
+      "description": "列出随包 Runtime 固定发布的官方 Maker 动态工具目录与参数 schema 快照；这不是当前工作区的实时可用性探测，实际调用仍受账号权限、项目状态和远端服务限制。调用 maker_call_tool 前先调用本工具；目标项目在其他目录时先让用户切换工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。"
     },
     {
       "name": "maker_call_tool",
-      "description": "调用 maker_list_tools 刚返回的官方 Maker 动态工具，只操作当前会话工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。若 Runtime 报告项目尚未初始化或缺少 .project/project.json，应说明构建会提交并推送项目，询问用户是否现在构建或预览；用户确认后调用 maker_build，再重试原请求，禁止未经确认自动构建。项目已完成构建前置、Runtime 明确返回 missing_taptap_identity 时，插件会自动调用一次 generate_test_qrcode 并重试原工具；若仍要求屏幕方向等用户选择则停止并询问用户。只有错误完整匹配“MCP error -32600: INSUFFICIENT_BALANCE”时才说明积分不足，并告知 Art 插件可作为替代，等待用户确认后再切换。",
+      "description": "调用 maker_list_tools 刚返回的官方 Maker 动态工具，只操作当前会话工作区，不得通过 Shell、CLI、npx 或直接 MCP 绕行。若 Runtime 报告项目尚未初始化或缺少 .project/project.json，应说明构建会提交并推送项目，询问用户是否现在构建或预览；用户确认后调用 maker_build，再重试原请求，禁止未经确认自动构建。项目已完成构建前置且 Runtime 返回可安全恢复的 missing_taptap_identity（execution_state 未提供或明确为 not_executed）时，插件才自动调用一次 generate_test_qrcode 并重试；executed 或 unknown 时不自动重试。若仍要求屏幕方向等用户选择则停止并询问用户。只有错误完整匹配“MCP error -32600: INSUFFICIENT_BALANCE”时才说明积分不足，并告知 Art 插件可作为替代，等待用户确认后再切换。",
       "parameters": {
         "type": "object",
         "properties": {

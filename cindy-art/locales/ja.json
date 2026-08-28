@@ -4,16 +4,16 @@
   "whenToUse": "画像、イラスト、挿絵、アバター、ポスターの作成、生成済み画像への要素追加やスタイル変更、短い動画の生成、静止画のアニメーション化が必要なときに使用します。",
   "tools": {
     "gen_image": {
-      "description": "テキストの指示から画像を 1 枚生成し、チャット内で表示できる画像 URL を返します。"
+      "description": "テキストから画像を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
     },
     "edit_image": {
-      "description": "最大 4 枚の元画像を編集、再描画、要素追加、スタイル変換、合成します。このプラグインで生成した画像は、gen_image / edit_image が返した cindy-media:// URL を images に指定します。ユーザーが添付した画像は、xdt-image:// URL を ghost_call 最上位の attachments に入れてホストに受け渡しを依頼し、images には入れません。"
+      "description": "最大 4 枚の参照画像を編集、再描画、要素追加、スタイル変換、合成するための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
     },
     "gen_video": {
-      "description": "テキストの指示から短い動画を生成します。完了まで数分かかる場合があります。チャット内で表示できる動画 URL を返します。"
+      "description": "テキストから動画を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
     },
     "edit_video": {
-      "description": "参照画像から動画を生成します。1 枚ならその画像を先頭フレームとして動かし、2 枚なら先頭から末尾への遷移を生成します。このプラグインの画像は cindy-media:// URL を images に指定し、ユーザー添付画像は ghost_call 最上位の attachments に入れてホストに受け渡しを依頼します。"
+      "description": "参照画像から動画を作る通常パラメーターを整理します。1 枚は先頭フレーム、2 枚は先頭と末尾を表します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
     }
   }
 }
