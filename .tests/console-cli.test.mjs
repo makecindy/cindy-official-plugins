@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.8');
+  assert.equal(manifest.version, '0.1.9');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -56,15 +56,17 @@ test('settings provides a manual missing-CLI install guide', () => {
   );
   assert.match(settingsScript, /var statusSequence = 0/);
   assert.match(settingsScript, /requestSequence !== statusSequence/);
-  assert.match(settingsScript, /STATUS_REQUEST_TIMEOUT_MS = 15000/);
+  assert.match(settingsScript, /STATUS_REQUEST_TIMEOUT_MS = 8000/);
   assert.doesNotMatch(settingsScript, /STATUS_UI_NOTICE_MS|后台进行/);
   assert.match(settingsScript, /请点击“检查状态”检测本机 Console CLI/);
   assert.doesNotMatch(settingsScript, /\n\s+void checkStatus\(\);\n\}\(\);/);
+  assert.match(settingsScript, /setInterval\(send, 400\)/);
+  assert.match(settingsScript, /BroadcastChannel 的首条消息会丢失/);
   assert.doesNotMatch(settings, /install-dialog|dialog-backdrop|target="_blank"/);
   assert.doesNotMatch(settingsScript, /setInstallDialogVisible|dialog-copy-install-command|close-install-dialog/);
   assert.match(settingsScript, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
   assert.doesNotMatch(settingsScript, /child_process|execFile|spawn\s*\(/);
-  assert.match(source, /console\/status', \{\}, \{ timeoutMs: 15000 \}/);
+  assert.match(source, /console\/status', \{\}, \{ timeoutMs: 8000 \}/);
   assert.match(worker, /STATUS_COMMAND_TIMEOUT_MS = 3_000/);
   assert.match(worker, /runCli\(\['auth', 'status', \.\.\.CONTEXT_ARGS\], \{ timeoutMs: STATUS_COMMAND_TIMEOUT_MS \}/);
 });

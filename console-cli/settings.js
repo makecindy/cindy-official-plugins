@@ -3,7 +3,7 @@
 
   var INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
   var INSTALL_COMMAND = 'curl -fsSL ' + INSTALL_URL + ' | sh';
-  var STATUS_REQUEST_TIMEOUT_MS = 15000;
+  var STATUS_REQUEST_TIMEOUT_MS = 8000;
   var channel = typeof BroadcastChannel === 'function'
     ? new BroadcastChannel('console-cli-settings')
     : null;
@@ -104,13 +104,24 @@
     sequence += 1;
     var reqId = 'settings-' + sequence;
     return new Promise(function (resolve, reject) {
-      var timer = setTimeout(function () {
+      var message = { type: 'settings-request', reqId: reqId, action: action, payload: payload || {} };
+      var entry = { resolve: resolve, reject: reject, timer: null, retryTimer: null };
+      var send = function () {
+        if (pending[reqId] !== entry) return;
+        channel.postMessage(message);
+      };
+      entry.timer = setTimeout(function () {
+        if (pending[reqId] !== entry) return;
         delete pending[reqId];
+        if (entry.retryTimer) clearInterval(entry.retryTimer);
         reject(new Error(action === 'login' ? '登录等待超时，请调用状态检查登录结果' : '状态检查超时'));
       }, timeoutMs);
-      pending[reqId] = { resolve: resolve, reject: reject, timer: timer };
+      pending[reqId] = entry;
+      // /wake 可能尚未完成时，BroadcastChannel 的首条消息会丢失；短暂重发
+      // 直到主进程回执，避免把唤醒竞态误报成状态检查超时。
+      send();
+      entry.retryTimer = setInterval(send, 400);
       void fetch('/wake').catch(function () {});
-      channel.postMessage({ type: 'settings-request', reqId: reqId, action: action, payload: payload || {} });
     });
   }
 
@@ -120,6 +131,7 @@
     var item = pending[message.reqId];
     delete pending[message.reqId];
     clearTimeout(item.timer);
+    if (item.retryTimer) clearInterval(item.retryTimer);
     if (message.ok) item.resolve(message.result);
     else item.reject(new Error(message.message || 'Console CLI 操作失败'));
   });
