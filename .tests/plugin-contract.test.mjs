@@ -17,7 +17,7 @@ const MAX_MANUAL_MD_BYTES = 64 * 1024;
 const ROOT_PACKAGE_FILES = ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md'];
 const RESERVED_CLIENT_FILES = new Set(['.disabled', '.cindy-trust.json']);
 const RESERVED_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'taptap-maker', 'x-manager']);
+const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'x-manager']);
 const OFFICIAL_SLOTS = new Set([
   'subscribe', 'tool', 'card', 'panel', 'cindy', 'agent', 'node', 'network',
   'notify', 'badge', 'confirm', 'fs', 'session-context', 'pick', 'preview',

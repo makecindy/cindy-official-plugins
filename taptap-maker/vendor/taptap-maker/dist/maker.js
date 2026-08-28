@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // TapTap Maker MCP - Standalone Bundle
+// TapTap Maker MCP version: 0.0.32
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const __MAKER_BUNDLE_URL__ = import.meta.url;
@@ -3233,8 +3234,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path23) {
-      let input2 = path23;
+    function removeDotSegments(path29) {
+      let input2 = path29;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3433,8 +3434,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path23, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path23 && path23 !== "/" ? path23 : void 0;
+        const [path29, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path29 && path29 !== "/" ? path29 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -12491,12 +12492,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs21, exportName) {
+    function addFormats(ajv, list, fs27, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs21[f]);
+        ajv.addFormat(f, fs27[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -12509,8 +12510,8 @@ var require_windows = __commonJS({
   "node_modules/isexe/windows.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs21 = __require("fs");
-    function checkPathExt(path23, options) {
+    var fs27 = __require("fs");
+    function checkPathExt(path29, options) {
       var pathext = options.pathExt !== void 0 ? options.pathExt : process.env.PATHEXT;
       if (!pathext) {
         return true;
@@ -12521,25 +12522,25 @@ var require_windows = __commonJS({
       }
       for (var i = 0; i < pathext.length; i++) {
         var p = pathext[i].toLowerCase();
-        if (p && path23.substr(-p.length).toLowerCase() === p) {
+        if (p && path29.substr(-p.length).toLowerCase() === p) {
           return true;
         }
       }
       return false;
     }
-    function checkStat(stat, path23, options) {
+    function checkStat(stat, path29, options) {
       if (!stat.isSymbolicLink() && !stat.isFile()) {
         return false;
       }
-      return checkPathExt(path23, options);
+      return checkPathExt(path29, options);
     }
-    function isexe(path23, options, cb) {
-      fs21.stat(path23, function(er, stat) {
-        cb(er, er ? false : checkStat(stat, path23, options));
+    function isexe(path29, options, cb) {
+      fs27.stat(path29, function(er, stat) {
+        cb(er, er ? false : checkStat(stat, path29, options));
       });
     }
-    function sync(path23, options) {
-      return checkStat(fs21.statSync(path23), path23, options);
+    function sync(path29, options) {
+      return checkStat(fs27.statSync(path29), path29, options);
     }
   }
 });
@@ -12549,14 +12550,14 @@ var require_mode = __commonJS({
   "node_modules/isexe/mode.js"(exports, module) {
     module.exports = isexe;
     isexe.sync = sync;
-    var fs21 = __require("fs");
-    function isexe(path23, options, cb) {
-      fs21.stat(path23, function(er, stat) {
+    var fs27 = __require("fs");
+    function isexe(path29, options, cb) {
+      fs27.stat(path29, function(er, stat) {
         cb(er, er ? false : checkStat(stat, options));
       });
     }
-    function sync(path23, options) {
-      return checkStat(fs21.statSync(path23), options);
+    function sync(path29, options) {
+      return checkStat(fs27.statSync(path29), options);
     }
     function checkStat(stat, options) {
       return stat.isFile() && checkMode(stat, options);
@@ -12580,7 +12581,7 @@ var require_mode = __commonJS({
 // node_modules/isexe/index.js
 var require_isexe = __commonJS({
   "node_modules/isexe/index.js"(exports, module) {
-    var fs21 = __require("fs");
+    var fs27 = __require("fs");
     var core;
     if (process.platform === "win32" || global.TESTING_WINDOWS) {
       core = require_windows();
@@ -12589,7 +12590,7 @@ var require_isexe = __commonJS({
     }
     module.exports = isexe;
     isexe.sync = sync;
-    function isexe(path23, options, cb) {
+    function isexe(path29, options, cb) {
       if (typeof options === "function") {
         cb = options;
         options = {};
@@ -12599,7 +12600,7 @@ var require_isexe = __commonJS({
           throw new TypeError("callback not provided");
         }
         return new Promise(function(resolve, reject) {
-          isexe(path23, options || {}, function(er, is) {
+          isexe(path29, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
@@ -12608,7 +12609,7 @@ var require_isexe = __commonJS({
           });
         });
       }
-      core(path23, options || {}, function(er, is) {
+      core(path29, options || {}, function(er, is) {
         if (er) {
           if (er.code === "EACCES" || options && options.ignoreErrors) {
             er = null;
@@ -12618,9 +12619,9 @@ var require_isexe = __commonJS({
         cb(er, is);
       });
     }
-    function sync(path23, options) {
+    function sync(path29, options) {
       try {
-        return core.sync(path23, options || {});
+        return core.sync(path29, options || {});
       } catch (er) {
         if (options && options.ignoreErrors || er.code === "EACCES") {
           return false;
@@ -12636,7 +12637,7 @@ var require_isexe = __commonJS({
 var require_which = __commonJS({
   "node_modules/which/which.js"(exports, module) {
     var isWindows = process.platform === "win32" || process.env.OSTYPE === "cygwin" || process.env.OSTYPE === "msys";
-    var path23 = __require("path");
+    var path29 = __require("path");
     var COLON = isWindows ? ";" : ":";
     var isexe = require_isexe();
     var getNotFoundError = (cmd) => Object.assign(new Error(`not found: ${cmd}`), { code: "ENOENT" });
@@ -12674,7 +12675,7 @@ var require_which = __commonJS({
           return opt.all && found.length ? resolve(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
-        const pCmd = path23.join(pathPart, cmd);
+        const pCmd = path29.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
         resolve(subStep(p, i, 0));
       });
@@ -12701,7 +12702,7 @@ var require_which = __commonJS({
       for (let i = 0; i < pathEnv.length; i++) {
         const ppRaw = pathEnv[i];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
-        const pCmd = path23.join(pathPart, cmd);
+        const pCmd = path29.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
         for (let j = 0; j < pathExt.length; j++) {
           const cur = p + pathExt[j];
@@ -12749,7 +12750,7 @@ var require_path_key = __commonJS({
 var require_resolveCommand = __commonJS({
   "node_modules/cross-spawn/lib/util/resolveCommand.js"(exports, module) {
     "use strict";
-    var path23 = __require("path");
+    var path29 = __require("path");
     var which = require_which();
     var getPathKey = require_path_key();
     function resolveCommandAttempt(parsed, withoutPathExt) {
@@ -12767,7 +12768,7 @@ var require_resolveCommand = __commonJS({
       try {
         resolved = which.sync(parsed.command, {
           path: env[getPathKey({ env })],
-          pathExt: withoutPathExt ? path23.delimiter : void 0
+          pathExt: withoutPathExt ? path29.delimiter : void 0
         });
       } catch (e) {
       } finally {
@@ -12776,7 +12777,7 @@ var require_resolveCommand = __commonJS({
         }
       }
       if (resolved) {
-        resolved = path23.resolve(hasCustomCwd ? parsed.options.cwd : "", resolved);
+        resolved = path29.resolve(hasCustomCwd ? parsed.options.cwd : "", resolved);
       }
       return resolved;
     }
@@ -12830,8 +12831,8 @@ var require_shebang_command = __commonJS({
       if (!match) {
         return null;
       }
-      const [path23, argument] = match[0].replace(/#! ?/, "").split(" ");
-      const binary = path23.split("/").pop();
+      const [path29, argument] = match[0].replace(/#! ?/, "").split(" ");
+      const binary = path29.split("/").pop();
       if (binary === "env") {
         return argument;
       }
@@ -12844,16 +12845,16 @@ var require_shebang_command = __commonJS({
 var require_readShebang = __commonJS({
   "node_modules/cross-spawn/lib/util/readShebang.js"(exports, module) {
     "use strict";
-    var fs21 = __require("fs");
+    var fs27 = __require("fs");
     var shebangCommand = require_shebang_command();
     function readShebang(command) {
       const size = 150;
       const buffer = Buffer.alloc(size);
       let fd;
       try {
-        fd = fs21.openSync(command, "r");
-        fs21.readSync(fd, buffer, 0, size, 0);
-        fs21.closeSync(fd);
+        fd = fs27.openSync(command, "r");
+        fs27.readSync(fd, buffer, 0, size, 0);
+        fs27.closeSync(fd);
       } catch (e) {
       }
       return shebangCommand(buffer.toString());
@@ -12866,7 +12867,7 @@ var require_readShebang = __commonJS({
 var require_parse = __commonJS({
   "node_modules/cross-spawn/lib/parse.js"(exports, module) {
     "use strict";
-    var path23 = __require("path");
+    var path29 = __require("path");
     var resolveCommand = require_resolveCommand();
     var escape2 = require_escape();
     var readShebang = require_readShebang();
@@ -12891,7 +12892,7 @@ var require_parse = __commonJS({
       const needsShell = !isExecutableRegExp.test(commandFile);
       if (parsed.options.forceShell || needsShell) {
         const needsDoubleEscapeMetaChars = isCmdShimRegExp.test(commandFile);
-        parsed.command = path23.normalize(parsed.command);
+        parsed.command = path29.normalize(parsed.command);
         parsed.command = escape2.command(parsed.command);
         parsed.args = parsed.args.map((arg) => escape2.argument(arg, needsDoubleEscapeMetaChars));
         const shellCommand = [parsed.command].concat(parsed.args).join(" ");
@@ -12987,7 +12988,7 @@ var require_cross_spawn = __commonJS({
       enoent.hookChildProcess(spawned, parsed);
       return spawned;
     }
-    function spawnSync8(command, args, options) {
+    function spawnSync9(command, args, options) {
       const parsed = parse3(command, args, options);
       const result = cp.spawnSync(parsed.command, parsed.args, parsed.options);
       result.error = result.error || enoent.verifyENOENTSync(result.status, parsed);
@@ -12995,9 +12996,7327 @@ var require_cross_spawn = __commonJS({
     }
     module.exports = spawn5;
     module.exports.spawn = spawn5;
-    module.exports.sync = spawnSync8;
+    module.exports.sync = spawnSync9;
     module.exports._parse = parse3;
     module.exports._enoent = enoent;
+  }
+});
+
+// node_modules/yaml/dist/nodes/identity.js
+var require_identity = __commonJS({
+  "node_modules/yaml/dist/nodes/identity.js"(exports) {
+    "use strict";
+    var ALIAS = Symbol.for("yaml.alias");
+    var DOC = Symbol.for("yaml.document");
+    var MAP = Symbol.for("yaml.map");
+    var PAIR = Symbol.for("yaml.pair");
+    var SCALAR = Symbol.for("yaml.scalar");
+    var SEQ = Symbol.for("yaml.seq");
+    var NODE_TYPE = Symbol.for("yaml.node.type");
+    var isAlias = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
+    var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
+    var isMap3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+    var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
+    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isSeq3 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
+    function isCollection(node) {
+      if (node && typeof node === "object")
+        switch (node[NODE_TYPE]) {
+          case MAP:
+          case SEQ:
+            return true;
+        }
+      return false;
+    }
+    function isNode(node) {
+      if (node && typeof node === "object")
+        switch (node[NODE_TYPE]) {
+          case ALIAS:
+          case MAP:
+          case SCALAR:
+          case SEQ:
+            return true;
+        }
+      return false;
+    }
+    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    exports.ALIAS = ALIAS;
+    exports.DOC = DOC;
+    exports.MAP = MAP;
+    exports.NODE_TYPE = NODE_TYPE;
+    exports.PAIR = PAIR;
+    exports.SCALAR = SCALAR;
+    exports.SEQ = SEQ;
+    exports.hasAnchor = hasAnchor;
+    exports.isAlias = isAlias;
+    exports.isCollection = isCollection;
+    exports.isDocument = isDocument;
+    exports.isMap = isMap3;
+    exports.isNode = isNode;
+    exports.isPair = isPair;
+    exports.isScalar = isScalar;
+    exports.isSeq = isSeq3;
+  }
+});
+
+// node_modules/yaml/dist/visit.js
+var require_visit = __commonJS({
+  "node_modules/yaml/dist/visit.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var BREAK = Symbol("break visit");
+    var SKIP = Symbol("skip children");
+    var REMOVE = Symbol("remove node");
+    function visit(node, visitor) {
+      const visitor_ = initVisitor(visitor);
+      if (identity.isDocument(node)) {
+        const cd = visit_(null, node.contents, visitor_, Object.freeze([node]));
+        if (cd === REMOVE)
+          node.contents = null;
+      } else
+        visit_(null, node, visitor_, Object.freeze([]));
+    }
+    visit.BREAK = BREAK;
+    visit.SKIP = SKIP;
+    visit.REMOVE = REMOVE;
+    function visit_(key, node, visitor, path29) {
+      const ctrl = callVisitor(key, node, visitor, path29);
+      if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
+        replaceNode(key, path29, ctrl);
+        return visit_(key, ctrl, visitor, path29);
+      }
+      if (typeof ctrl !== "symbol") {
+        if (identity.isCollection(node)) {
+          path29 = Object.freeze(path29.concat(node));
+          for (let i = 0; i < node.items.length; ++i) {
+            const ci = visit_(i, node.items[i], visitor, path29);
+            if (typeof ci === "number")
+              i = ci - 1;
+            else if (ci === BREAK)
+              return BREAK;
+            else if (ci === REMOVE) {
+              node.items.splice(i, 1);
+              i -= 1;
+            }
+          }
+        } else if (identity.isPair(node)) {
+          path29 = Object.freeze(path29.concat(node));
+          const ck = visit_("key", node.key, visitor, path29);
+          if (ck === BREAK)
+            return BREAK;
+          else if (ck === REMOVE)
+            node.key = null;
+          const cv = visit_("value", node.value, visitor, path29);
+          if (cv === BREAK)
+            return BREAK;
+          else if (cv === REMOVE)
+            node.value = null;
+        }
+      }
+      return ctrl;
+    }
+    async function visitAsync(node, visitor) {
+      const visitor_ = initVisitor(visitor);
+      if (identity.isDocument(node)) {
+        const cd = await visitAsync_(null, node.contents, visitor_, Object.freeze([node]));
+        if (cd === REMOVE)
+          node.contents = null;
+      } else
+        await visitAsync_(null, node, visitor_, Object.freeze([]));
+    }
+    visitAsync.BREAK = BREAK;
+    visitAsync.SKIP = SKIP;
+    visitAsync.REMOVE = REMOVE;
+    async function visitAsync_(key, node, visitor, path29) {
+      const ctrl = await callVisitor(key, node, visitor, path29);
+      if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
+        replaceNode(key, path29, ctrl);
+        return visitAsync_(key, ctrl, visitor, path29);
+      }
+      if (typeof ctrl !== "symbol") {
+        if (identity.isCollection(node)) {
+          path29 = Object.freeze(path29.concat(node));
+          for (let i = 0; i < node.items.length; ++i) {
+            const ci = await visitAsync_(i, node.items[i], visitor, path29);
+            if (typeof ci === "number")
+              i = ci - 1;
+            else if (ci === BREAK)
+              return BREAK;
+            else if (ci === REMOVE) {
+              node.items.splice(i, 1);
+              i -= 1;
+            }
+          }
+        } else if (identity.isPair(node)) {
+          path29 = Object.freeze(path29.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path29);
+          if (ck === BREAK)
+            return BREAK;
+          else if (ck === REMOVE)
+            node.key = null;
+          const cv = await visitAsync_("value", node.value, visitor, path29);
+          if (cv === BREAK)
+            return BREAK;
+          else if (cv === REMOVE)
+            node.value = null;
+        }
+      }
+      return ctrl;
+    }
+    function initVisitor(visitor) {
+      if (typeof visitor === "object" && (visitor.Collection || visitor.Node || visitor.Value)) {
+        return Object.assign({
+          Alias: visitor.Node,
+          Map: visitor.Node,
+          Scalar: visitor.Node,
+          Seq: visitor.Node
+        }, visitor.Value && {
+          Map: visitor.Value,
+          Scalar: visitor.Value,
+          Seq: visitor.Value
+        }, visitor.Collection && {
+          Map: visitor.Collection,
+          Seq: visitor.Collection
+        }, visitor);
+      }
+      return visitor;
+    }
+    function callVisitor(key, node, visitor, path29) {
+      var _a3, _b, _c, _d, _e;
+      if (typeof visitor === "function")
+        return visitor(key, node, path29);
+      if (identity.isMap(node))
+        return (_a3 = visitor.Map) == null ? void 0 : _a3.call(visitor, key, node, path29);
+      if (identity.isSeq(node))
+        return (_b = visitor.Seq) == null ? void 0 : _b.call(visitor, key, node, path29);
+      if (identity.isPair(node))
+        return (_c = visitor.Pair) == null ? void 0 : _c.call(visitor, key, node, path29);
+      if (identity.isScalar(node))
+        return (_d = visitor.Scalar) == null ? void 0 : _d.call(visitor, key, node, path29);
+      if (identity.isAlias(node))
+        return (_e = visitor.Alias) == null ? void 0 : _e.call(visitor, key, node, path29);
+      return void 0;
+    }
+    function replaceNode(key, path29, node) {
+      const parent = path29[path29.length - 1];
+      if (identity.isCollection(parent)) {
+        parent.items[key] = node;
+      } else if (identity.isPair(parent)) {
+        if (key === "key")
+          parent.key = node;
+        else
+          parent.value = node;
+      } else if (identity.isDocument(parent)) {
+        parent.contents = node;
+      } else {
+        const pt = identity.isAlias(parent) ? "alias" : "scalar";
+        throw new Error(`Cannot replace node with ${pt} parent`);
+      }
+    }
+    exports.visit = visit;
+    exports.visitAsync = visitAsync;
+  }
+});
+
+// node_modules/yaml/dist/doc/directives.js
+var require_directives = __commonJS({
+  "node_modules/yaml/dist/doc/directives.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var visit = require_visit();
+    var escapeChars = {
+      "!": "%21",
+      ",": "%2C",
+      "[": "%5B",
+      "]": "%5D",
+      "{": "%7B",
+      "}": "%7D"
+    };
+    var escapeTagName = (tn) => tn.replace(/[!,[\]{}]/g, (ch) => escapeChars[ch]);
+    var Directives = class _Directives {
+      constructor(yaml, tags) {
+        this.docStart = null;
+        this.docEnd = false;
+        this.yaml = Object.assign({}, _Directives.defaultYaml, yaml);
+        this.tags = Object.assign({}, _Directives.defaultTags, tags);
+      }
+      clone() {
+        const copy = new _Directives(this.yaml, this.tags);
+        copy.docStart = this.docStart;
+        return copy;
+      }
+      /**
+       * During parsing, get a Directives instance for the current document and
+       * update the stream state according to the current version's spec.
+       */
+      atDocument() {
+        const res = new _Directives(this.yaml, this.tags);
+        switch (this.yaml.version) {
+          case "1.1":
+            this.atNextDocument = true;
+            break;
+          case "1.2":
+            this.atNextDocument = false;
+            this.yaml = {
+              explicit: _Directives.defaultYaml.explicit,
+              version: "1.2"
+            };
+            this.tags = Object.assign({}, _Directives.defaultTags);
+            break;
+        }
+        return res;
+      }
+      /**
+       * @param onError - May be called even if the action was successful
+       * @returns `true` on success
+       */
+      add(line, onError) {
+        if (this.atNextDocument) {
+          this.yaml = { explicit: _Directives.defaultYaml.explicit, version: "1.1" };
+          this.tags = Object.assign({}, _Directives.defaultTags);
+          this.atNextDocument = false;
+        }
+        const parts = line.trim().split(/[ \t]+/);
+        const name = parts.shift();
+        switch (name) {
+          case "%TAG": {
+            if (parts.length !== 2) {
+              onError(0, "%TAG directive should contain exactly two parts");
+              if (parts.length < 2)
+                return false;
+            }
+            const [handle, prefix] = parts;
+            this.tags[handle] = prefix;
+            return true;
+          }
+          case "%YAML": {
+            this.yaml.explicit = true;
+            if (parts.length !== 1) {
+              onError(0, "%YAML directive should contain exactly one part");
+              return false;
+            }
+            const [version2] = parts;
+            if (version2 === "1.1" || version2 === "1.2") {
+              this.yaml.version = version2;
+              return true;
+            } else {
+              const isValid2 = /^\d+\.\d+$/.test(version2);
+              onError(6, `Unsupported YAML version ${version2}`, isValid2);
+              return false;
+            }
+          }
+          default:
+            onError(0, `Unknown directive ${name}`, true);
+            return false;
+        }
+      }
+      /**
+       * Resolves a tag, matching handles to those defined in %TAG directives.
+       *
+       * @returns Resolved tag, which may also be the non-specific tag `'!'` or a
+       *   `'!local'` tag, or `null` if unresolvable.
+       */
+      tagName(source, onError) {
+        if (source === "!")
+          return "!";
+        if (source[0] !== "!") {
+          onError(`Not a valid tag: ${source}`);
+          return null;
+        }
+        if (source[1] === "<") {
+          const verbatim = source.slice(2, -1);
+          if (verbatim === "!" || verbatim === "!!") {
+            onError(`Verbatim tags aren't resolved, so ${source} is invalid.`);
+            return null;
+          }
+          if (source[source.length - 1] !== ">")
+            onError("Verbatim tags must end with a >");
+          return verbatim;
+        }
+        const [, handle, suffix] = source.match(/^(.*!)([^!]*)$/s);
+        if (!suffix)
+          onError(`The ${source} tag has no suffix`);
+        const prefix = this.tags[handle];
+        if (prefix) {
+          try {
+            return prefix + decodeURIComponent(suffix);
+          } catch (error2) {
+            onError(String(error2));
+            return null;
+          }
+        }
+        if (handle === "!")
+          return source;
+        onError(`Could not resolve tag: ${source}`);
+        return null;
+      }
+      /**
+       * Given a fully resolved tag, returns its printable string form,
+       * taking into account current tag prefixes and defaults.
+       */
+      tagString(tag) {
+        for (const [handle, prefix] of Object.entries(this.tags)) {
+          if (tag.startsWith(prefix))
+            return handle + escapeTagName(tag.substring(prefix.length));
+        }
+        return tag[0] === "!" ? tag : `!<${tag}>`;
+      }
+      toString(doc) {
+        const lines = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
+        const tagEntries = Object.entries(this.tags);
+        let tagNames;
+        if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
+          const tags = {};
+          visit.visit(doc.contents, (_key, node) => {
+            if (identity.isNode(node) && node.tag)
+              tags[node.tag] = true;
+          });
+          tagNames = Object.keys(tags);
+        } else
+          tagNames = [];
+        for (const [handle, prefix] of tagEntries) {
+          if (handle === "!!" && prefix === "tag:yaml.org,2002:")
+            continue;
+          if (!doc || tagNames.some((tn) => tn.startsWith(prefix)))
+            lines.push(`%TAG ${handle} ${prefix}`);
+        }
+        return lines.join("\n");
+      }
+    };
+    Directives.defaultYaml = { explicit: false, version: "1.2" };
+    Directives.defaultTags = { "!!": "tag:yaml.org,2002:" };
+    exports.Directives = Directives;
+  }
+});
+
+// node_modules/yaml/dist/doc/anchors.js
+var require_anchors = __commonJS({
+  "node_modules/yaml/dist/doc/anchors.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var visit = require_visit();
+    function anchorIsValid(anchor) {
+      if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
+        const sa = JSON.stringify(anchor);
+        const msg = `Anchor must not contain whitespace or control characters: ${sa}`;
+        throw new Error(msg);
+      }
+      return true;
+    }
+    function anchorNames(root) {
+      const anchors = /* @__PURE__ */ new Set();
+      visit.visit(root, {
+        Value(_key, node) {
+          if (node.anchor)
+            anchors.add(node.anchor);
+        }
+      });
+      return anchors;
+    }
+    function findNewAnchor(prefix, exclude) {
+      for (let i = 1; true; ++i) {
+        const name = `${prefix}${i}`;
+        if (!exclude.has(name))
+          return name;
+      }
+    }
+    function createNodeAnchors(doc, prefix) {
+      const aliasObjects = [];
+      const sourceObjects = /* @__PURE__ */ new Map();
+      let prevAnchors = null;
+      return {
+        onAnchor: (source) => {
+          aliasObjects.push(source);
+          prevAnchors ?? (prevAnchors = anchorNames(doc));
+          const anchor = findNewAnchor(prefix, prevAnchors);
+          prevAnchors.add(anchor);
+          return anchor;
+        },
+        /**
+         * With circular references, the source node is only resolved after all
+         * of its child nodes are. This is why anchors are set only after all of
+         * the nodes have been created.
+         */
+        setAnchors: () => {
+          for (const source of aliasObjects) {
+            const ref = sourceObjects.get(source);
+            if (typeof ref === "object" && ref.anchor && (identity.isScalar(ref.node) || identity.isCollection(ref.node))) {
+              ref.node.anchor = ref.anchor;
+            } else {
+              const error2 = new Error("Failed to resolve repeated object (this should not happen)");
+              error2.source = source;
+              throw error2;
+            }
+          }
+        },
+        sourceObjects
+      };
+    }
+    exports.anchorIsValid = anchorIsValid;
+    exports.anchorNames = anchorNames;
+    exports.createNodeAnchors = createNodeAnchors;
+    exports.findNewAnchor = findNewAnchor;
+  }
+});
+
+// node_modules/yaml/dist/doc/applyReviver.js
+var require_applyReviver = __commonJS({
+  "node_modules/yaml/dist/doc/applyReviver.js"(exports) {
+    "use strict";
+    function applyReviver(reviver, obj, key, val) {
+      if (val && typeof val === "object") {
+        if (Array.isArray(val)) {
+          for (let i = 0, len = val.length; i < len; ++i) {
+            const v0 = val[i];
+            const v1 = applyReviver(reviver, val, String(i), v0);
+            if (v1 === void 0)
+              delete val[i];
+            else if (v1 !== v0)
+              val[i] = v1;
+          }
+        } else if (val instanceof Map) {
+          for (const k of Array.from(val.keys())) {
+            const v0 = val.get(k);
+            const v1 = applyReviver(reviver, val, k, v0);
+            if (v1 === void 0)
+              val.delete(k);
+            else if (v1 !== v0)
+              val.set(k, v1);
+          }
+        } else if (val instanceof Set) {
+          for (const v0 of Array.from(val)) {
+            const v1 = applyReviver(reviver, val, v0, v0);
+            if (v1 === void 0)
+              val.delete(v0);
+            else if (v1 !== v0) {
+              val.delete(v0);
+              val.add(v1);
+            }
+          }
+        } else {
+          for (const [k, v0] of Object.entries(val)) {
+            const v1 = applyReviver(reviver, val, k, v0);
+            if (v1 === void 0)
+              delete val[k];
+            else if (v1 !== v0)
+              val[k] = v1;
+          }
+        }
+      }
+      return reviver.call(obj, key, val);
+    }
+    exports.applyReviver = applyReviver;
+  }
+});
+
+// node_modules/yaml/dist/nodes/toJS.js
+var require_toJS = __commonJS({
+  "node_modules/yaml/dist/nodes/toJS.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    function toJS(value, arg, ctx) {
+      if (Array.isArray(value))
+        return value.map((v, i) => toJS(v, String(i), ctx));
+      if (value && typeof value.toJSON === "function") {
+        if (!ctx || !identity.hasAnchor(value))
+          return value.toJSON(arg, ctx);
+        const data = { aliasCount: 0, count: 1, res: void 0 };
+        ctx.anchors.set(value, data);
+        ctx.onCreate = (res2) => {
+          data.res = res2;
+          delete ctx.onCreate;
+        };
+        const res = value.toJSON(arg, ctx);
+        if (ctx.onCreate)
+          ctx.onCreate(res);
+        return res;
+      }
+      if (typeof value === "bigint" && !(ctx == null ? void 0 : ctx.keep))
+        return Number(value);
+      return value;
+    }
+    exports.toJS = toJS;
+  }
+});
+
+// node_modules/yaml/dist/nodes/Node.js
+var require_Node = __commonJS({
+  "node_modules/yaml/dist/nodes/Node.js"(exports) {
+    "use strict";
+    var applyReviver = require_applyReviver();
+    var identity = require_identity();
+    var toJS = require_toJS();
+    var NodeBase = class {
+      constructor(type) {
+        Object.defineProperty(this, identity.NODE_TYPE, { value: type });
+      }
+      /** Create a copy of this node.  */
+      clone() {
+        const copy = Object.create(Object.getPrototypeOf(this), Object.getOwnPropertyDescriptors(this));
+        if (this.range)
+          copy.range = this.range.slice();
+        return copy;
+      }
+      /** A plain JavaScript representation of this node. */
+      toJS(doc, { mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+        if (!identity.isDocument(doc))
+          throw new TypeError("A document argument is required");
+        const ctx = {
+          anchors: /* @__PURE__ */ new Map(),
+          doc,
+          keep: true,
+          mapAsMap: mapAsMap === true,
+          mapKeyWarned: false,
+          maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
+        };
+        const res = toJS.toJS(this, "", ctx);
+        if (typeof onAnchor === "function")
+          for (const { count, res: res2 } of ctx.anchors.values())
+            onAnchor(res2, count);
+        return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
+      }
+    };
+    exports.NodeBase = NodeBase;
+  }
+});
+
+// node_modules/yaml/dist/nodes/Alias.js
+var require_Alias = __commonJS({
+  "node_modules/yaml/dist/nodes/Alias.js"(exports) {
+    "use strict";
+    var anchors = require_anchors();
+    var visit = require_visit();
+    var identity = require_identity();
+    var Node = require_Node();
+    var toJS = require_toJS();
+    var Alias = class extends Node.NodeBase {
+      constructor(source) {
+        super(identity.ALIAS);
+        this.source = source;
+        Object.defineProperty(this, "tag", {
+          set() {
+            throw new Error("Alias nodes cannot have tags");
+          }
+        });
+      }
+      /**
+       * Resolve the value of this alias within `doc`, finding the last
+       * instance of the `source` anchor before this node.
+       */
+      resolve(doc, ctx) {
+        let nodes;
+        if (ctx == null ? void 0 : ctx.aliasResolveCache) {
+          nodes = ctx.aliasResolveCache;
+        } else {
+          nodes = [];
+          visit.visit(doc, {
+            Node: (_key, node) => {
+              if (identity.isAlias(node) || identity.hasAnchor(node))
+                nodes.push(node);
+            }
+          });
+          if (ctx)
+            ctx.aliasResolveCache = nodes;
+        }
+        let found = void 0;
+        for (const node of nodes) {
+          if (node === this)
+            break;
+          if (node.anchor === this.source)
+            found = node;
+        }
+        return found;
+      }
+      toJSON(_arg, ctx) {
+        if (!ctx)
+          return { source: this.source };
+        const { anchors: anchors2, doc, maxAliasCount } = ctx;
+        const source = this.resolve(doc, ctx);
+        if (!source) {
+          const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
+          throw new ReferenceError(msg);
+        }
+        let data = anchors2.get(source);
+        if (!data) {
+          toJS.toJS(source, null, ctx);
+          data = anchors2.get(source);
+        }
+        if ((data == null ? void 0 : data.res) === void 0) {
+          const msg = "This should not happen: Alias anchor was not resolved?";
+          throw new ReferenceError(msg);
+        }
+        if (maxAliasCount >= 0) {
+          data.count += 1;
+          if (data.aliasCount === 0)
+            data.aliasCount = getAliasCount(doc, source, anchors2);
+          if (data.count * data.aliasCount > maxAliasCount) {
+            const msg = "Excessive alias count indicates a resource exhaustion attack";
+            throw new ReferenceError(msg);
+          }
+        }
+        return data.res;
+      }
+      toString(ctx, _onComment, _onChompKeep) {
+        const src = `*${this.source}`;
+        if (ctx) {
+          anchors.anchorIsValid(this.source);
+          if (ctx.options.verifyAliasOrder && !ctx.anchors.has(this.source)) {
+            const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
+            throw new Error(msg);
+          }
+          if (ctx.implicitKey)
+            return `${src} `;
+        }
+        return src;
+      }
+    };
+    function getAliasCount(doc, node, anchors2) {
+      if (identity.isAlias(node)) {
+        const source = node.resolve(doc);
+        const anchor = anchors2 && source && anchors2.get(source);
+        return anchor ? anchor.count * anchor.aliasCount : 0;
+      } else if (identity.isCollection(node)) {
+        let count = 0;
+        for (const item of node.items) {
+          const c = getAliasCount(doc, item, anchors2);
+          if (c > count)
+            count = c;
+        }
+        return count;
+      } else if (identity.isPair(node)) {
+        const kc = getAliasCount(doc, node.key, anchors2);
+        const vc = getAliasCount(doc, node.value, anchors2);
+        return Math.max(kc, vc);
+      }
+      return 1;
+    }
+    exports.Alias = Alias;
+  }
+});
+
+// node_modules/yaml/dist/nodes/Scalar.js
+var require_Scalar = __commonJS({
+  "node_modules/yaml/dist/nodes/Scalar.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Node = require_Node();
+    var toJS = require_toJS();
+    var isScalarValue = (value) => !value || typeof value !== "function" && typeof value !== "object";
+    var Scalar = class extends Node.NodeBase {
+      constructor(value) {
+        super(identity.SCALAR);
+        this.value = value;
+      }
+      toJSON(arg, ctx) {
+        return (ctx == null ? void 0 : ctx.keep) ? this.value : toJS.toJS(this.value, arg, ctx);
+      }
+      toString() {
+        return String(this.value);
+      }
+    };
+    Scalar.BLOCK_FOLDED = "BLOCK_FOLDED";
+    Scalar.BLOCK_LITERAL = "BLOCK_LITERAL";
+    Scalar.PLAIN = "PLAIN";
+    Scalar.QUOTE_DOUBLE = "QUOTE_DOUBLE";
+    Scalar.QUOTE_SINGLE = "QUOTE_SINGLE";
+    exports.Scalar = Scalar;
+    exports.isScalarValue = isScalarValue;
+  }
+});
+
+// node_modules/yaml/dist/doc/createNode.js
+var require_createNode = __commonJS({
+  "node_modules/yaml/dist/doc/createNode.js"(exports) {
+    "use strict";
+    var Alias = require_Alias();
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var defaultTagPrefix = "tag:yaml.org,2002:";
+    function findTagObject(value, tagName, tags) {
+      if (tagName) {
+        const match = tags.filter((t) => t.tag === tagName);
+        const tagObj = match.find((t) => !t.format) ?? match[0];
+        if (!tagObj)
+          throw new Error(`Tag ${tagName} not found`);
+        return tagObj;
+      }
+      return tags.find((t) => {
+        var _a3;
+        return ((_a3 = t.identify) == null ? void 0 : _a3.call(t, value)) && !t.format;
+      });
+    }
+    function createNode(value, tagName, ctx) {
+      var _a3, _b, _c;
+      if (identity.isDocument(value))
+        value = value.contents;
+      if (identity.isNode(value))
+        return value;
+      if (identity.isPair(value)) {
+        const map2 = (_b = (_a3 = ctx.schema[identity.MAP]).createNode) == null ? void 0 : _b.call(_a3, ctx.schema, null, ctx);
+        map2.items.push(value);
+        return map2;
+      }
+      if (value instanceof String || value instanceof Number || value instanceof Boolean || typeof BigInt !== "undefined" && value instanceof BigInt) {
+        value = value.valueOf();
+      }
+      const { aliasDuplicateObjects, onAnchor, onTagObj, schema, sourceObjects } = ctx;
+      let ref = void 0;
+      if (aliasDuplicateObjects && value && typeof value === "object") {
+        ref = sourceObjects.get(value);
+        if (ref) {
+          ref.anchor ?? (ref.anchor = onAnchor(value));
+          return new Alias.Alias(ref.anchor);
+        } else {
+          ref = { anchor: null, node: null };
+          sourceObjects.set(value, ref);
+        }
+      }
+      if (tagName == null ? void 0 : tagName.startsWith("!!"))
+        tagName = defaultTagPrefix + tagName.slice(2);
+      let tagObj = findTagObject(value, tagName, schema.tags);
+      if (!tagObj) {
+        if (value && typeof value.toJSON === "function") {
+          value = value.toJSON();
+        }
+        if (!value || typeof value !== "object") {
+          const node2 = new Scalar.Scalar(value);
+          if (ref)
+            ref.node = node2;
+          return node2;
+        }
+        tagObj = value instanceof Map ? schema[identity.MAP] : Symbol.iterator in Object(value) ? schema[identity.SEQ] : schema[identity.MAP];
+      }
+      if (onTagObj) {
+        onTagObj(tagObj);
+        delete ctx.onTagObj;
+      }
+      const node = (tagObj == null ? void 0 : tagObj.createNode) ? tagObj.createNode(ctx.schema, value, ctx) : typeof ((_c = tagObj == null ? void 0 : tagObj.nodeClass) == null ? void 0 : _c.from) === "function" ? tagObj.nodeClass.from(ctx.schema, value, ctx) : new Scalar.Scalar(value);
+      if (tagName)
+        node.tag = tagName;
+      else if (!tagObj.default)
+        node.tag = tagObj.tag;
+      if (ref)
+        ref.node = node;
+      return node;
+    }
+    exports.createNode = createNode;
+  }
+});
+
+// node_modules/yaml/dist/nodes/Collection.js
+var require_Collection = __commonJS({
+  "node_modules/yaml/dist/nodes/Collection.js"(exports) {
+    "use strict";
+    var createNode = require_createNode();
+    var identity = require_identity();
+    var Node = require_Node();
+    function collectionFromPath(schema, path29, value) {
+      let v = value;
+      for (let i = path29.length - 1; i >= 0; --i) {
+        const k = path29[i];
+        if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
+          const a = [];
+          a[k] = v;
+          v = a;
+        } else {
+          v = /* @__PURE__ */ new Map([[k, v]]);
+        }
+      }
+      return createNode.createNode(v, void 0, {
+        aliasDuplicateObjects: false,
+        keepUndefined: false,
+        onAnchor: () => {
+          throw new Error("This should not happen, please report a bug.");
+        },
+        schema,
+        sourceObjects: /* @__PURE__ */ new Map()
+      });
+    }
+    var isEmptyPath = (path29) => path29 == null || typeof path29 === "object" && !!path29[Symbol.iterator]().next().done;
+    var Collection = class extends Node.NodeBase {
+      constructor(type, schema) {
+        super(type);
+        Object.defineProperty(this, "schema", {
+          value: schema,
+          configurable: true,
+          enumerable: false,
+          writable: true
+        });
+      }
+      /**
+       * Create a copy of this collection.
+       *
+       * @param schema - If defined, overwrites the original's schema
+       */
+      clone(schema) {
+        const copy = Object.create(Object.getPrototypeOf(this), Object.getOwnPropertyDescriptors(this));
+        if (schema)
+          copy.schema = schema;
+        copy.items = copy.items.map((it) => identity.isNode(it) || identity.isPair(it) ? it.clone(schema) : it);
+        if (this.range)
+          copy.range = this.range.slice();
+        return copy;
+      }
+      /**
+       * Adds a value to the collection. For `!!map` and `!!omap` the value must
+       * be a Pair instance or a `{ key, value }` object, which may not have a key
+       * that already exists in the map.
+       */
+      addIn(path29, value) {
+        if (isEmptyPath(path29))
+          this.add(value);
+        else {
+          const [key, ...rest] = path29;
+          const node = this.get(key, true);
+          if (identity.isCollection(node))
+            node.addIn(rest, value);
+          else if (node === void 0 && this.schema)
+            this.set(key, collectionFromPath(this.schema, rest, value));
+          else
+            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+        }
+      }
+      /**
+       * Removes a value from the collection.
+       * @returns `true` if the item was found and removed.
+       */
+      deleteIn(path29) {
+        const [key, ...rest] = path29;
+        if (rest.length === 0)
+          return this.delete(key);
+        const node = this.get(key, true);
+        if (identity.isCollection(node))
+          return node.deleteIn(rest);
+        else
+          throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+      }
+      /**
+       * Returns item at `key`, or `undefined` if not found. By default unwraps
+       * scalar values from their surrounding node; to disable set `keepScalar` to
+       * `true` (collections are always returned intact).
+       */
+      getIn(path29, keepScalar) {
+        const [key, ...rest] = path29;
+        const node = this.get(key, true);
+        if (rest.length === 0)
+          return !keepScalar && identity.isScalar(node) ? node.value : node;
+        else
+          return identity.isCollection(node) ? node.getIn(rest, keepScalar) : void 0;
+      }
+      hasAllNullValues(allowScalar) {
+        return this.items.every((node) => {
+          if (!identity.isPair(node))
+            return false;
+          const n = node.value;
+          return n == null || allowScalar && identity.isScalar(n) && n.value == null && !n.commentBefore && !n.comment && !n.tag;
+        });
+      }
+      /**
+       * Checks if the collection includes a value with the key `key`.
+       */
+      hasIn(path29) {
+        const [key, ...rest] = path29;
+        if (rest.length === 0)
+          return this.has(key);
+        const node = this.get(key, true);
+        return identity.isCollection(node) ? node.hasIn(rest) : false;
+      }
+      /**
+       * Sets a value in this collection. For `!!set`, `value` needs to be a
+       * boolean to add/remove the item from the set.
+       */
+      setIn(path29, value) {
+        const [key, ...rest] = path29;
+        if (rest.length === 0) {
+          this.set(key, value);
+        } else {
+          const node = this.get(key, true);
+          if (identity.isCollection(node))
+            node.setIn(rest, value);
+          else if (node === void 0 && this.schema)
+            this.set(key, collectionFromPath(this.schema, rest, value));
+          else
+            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+        }
+      }
+    };
+    exports.Collection = Collection;
+    exports.collectionFromPath = collectionFromPath;
+    exports.isEmptyPath = isEmptyPath;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyComment.js
+var require_stringifyComment = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyComment.js"(exports) {
+    "use strict";
+    var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
+    function indentComment(comment, indent4) {
+      if (/^\n+$/.test(comment))
+        return comment.substring(1);
+      return indent4 ? comment.replace(/^(?! *$)/gm, indent4) : comment;
+    }
+    var lineComment = (str, indent4, comment) => str.endsWith("\n") ? indentComment(comment, indent4) : comment.includes("\n") ? "\n" + indentComment(comment, indent4) : (str.endsWith(" ") ? "" : " ") + comment;
+    exports.indentComment = indentComment;
+    exports.lineComment = lineComment;
+    exports.stringifyComment = stringifyComment;
+  }
+});
+
+// node_modules/yaml/dist/stringify/foldFlowLines.js
+var require_foldFlowLines = __commonJS({
+  "node_modules/yaml/dist/stringify/foldFlowLines.js"(exports) {
+    "use strict";
+    var FOLD_FLOW = "flow";
+    var FOLD_BLOCK = "block";
+    var FOLD_QUOTED = "quoted";
+    function foldFlowLines(text, indent4, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+      if (!lineWidth || lineWidth < 0)
+        return text;
+      if (lineWidth < minContentWidth)
+        minContentWidth = 0;
+      const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent4.length);
+      if (text.length <= endStep)
+        return text;
+      const folds = [];
+      const escapedFolds = {};
+      let end = lineWidth - indent4.length;
+      if (typeof indentAtStart === "number") {
+        if (indentAtStart > lineWidth - Math.max(2, minContentWidth))
+          folds.push(0);
+        else
+          end = lineWidth - indentAtStart;
+      }
+      let split = void 0;
+      let prev = void 0;
+      let overflow = false;
+      let i = -1;
+      let escStart = -1;
+      let escEnd = -1;
+      if (mode === FOLD_BLOCK) {
+        i = consumeMoreIndentedLines(text, i, indent4.length);
+        if (i !== -1)
+          end = i + endStep;
+      }
+      for (let ch; ch = text[i += 1]; ) {
+        if (mode === FOLD_QUOTED && ch === "\\") {
+          escStart = i;
+          switch (text[i + 1]) {
+            case "x":
+              i += 3;
+              break;
+            case "u":
+              i += 5;
+              break;
+            case "U":
+              i += 9;
+              break;
+            default:
+              i += 1;
+          }
+          escEnd = i;
+        }
+        if (ch === "\n") {
+          if (mode === FOLD_BLOCK)
+            i = consumeMoreIndentedLines(text, i, indent4.length);
+          end = i + indent4.length + endStep;
+          split = void 0;
+        } else {
+          if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
+            const next = text[i + 1];
+            if (next && next !== " " && next !== "\n" && next !== "	")
+              split = i;
+          }
+          if (i >= end) {
+            if (split) {
+              folds.push(split);
+              end = split + endStep;
+              split = void 0;
+            } else if (mode === FOLD_QUOTED) {
+              while (prev === " " || prev === "	") {
+                prev = ch;
+                ch = text[i += 1];
+                overflow = true;
+              }
+              const j = i > escEnd + 1 ? i - 2 : escStart - 1;
+              if (escapedFolds[j])
+                return text;
+              folds.push(j);
+              escapedFolds[j] = true;
+              end = j + endStep;
+              split = void 0;
+            } else {
+              overflow = true;
+            }
+          }
+        }
+        prev = ch;
+      }
+      if (overflow && onOverflow)
+        onOverflow();
+      if (folds.length === 0)
+        return text;
+      if (onFold)
+        onFold();
+      let res = text.slice(0, folds[0]);
+      for (let i2 = 0; i2 < folds.length; ++i2) {
+        const fold = folds[i2];
+        const end2 = folds[i2 + 1] || text.length;
+        if (fold === 0)
+          res = `
+${indent4}${text.slice(0, end2)}`;
+        else {
+          if (mode === FOLD_QUOTED && escapedFolds[fold])
+            res += `${text[fold]}\\`;
+          res += `
+${indent4}${text.slice(fold + 1, end2)}`;
+        }
+      }
+      return res;
+    }
+    function consumeMoreIndentedLines(text, i, indent4) {
+      let end = i;
+      let start = i + 1;
+      let ch = text[start];
+      while (ch === " " || ch === "	") {
+        if (i < start + indent4) {
+          ch = text[++i];
+        } else {
+          do {
+            ch = text[++i];
+          } while (ch && ch !== "\n");
+          end = i;
+          start = i + 1;
+          ch = text[start];
+        }
+      }
+      return end;
+    }
+    exports.FOLD_BLOCK = FOLD_BLOCK;
+    exports.FOLD_FLOW = FOLD_FLOW;
+    exports.FOLD_QUOTED = FOLD_QUOTED;
+    exports.foldFlowLines = foldFlowLines;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyString.js
+var require_stringifyString = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyString.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var foldFlowLines = require_foldFlowLines();
+    var getFoldOptions = (ctx, isBlock) => ({
+      indentAtStart: isBlock ? ctx.indent.length : ctx.indentAtStart,
+      lineWidth: ctx.options.lineWidth,
+      minContentWidth: ctx.options.minContentWidth
+    });
+    var containsDocumentMarker = (str) => /^(%|---|\.\.\.)/m.test(str);
+    function lineLengthOverLimit(str, lineWidth, indentLength) {
+      if (!lineWidth || lineWidth < 0)
+        return false;
+      const limit = lineWidth - indentLength;
+      const strLen = str.length;
+      if (strLen <= limit)
+        return false;
+      for (let i = 0, start = 0; i < strLen; ++i) {
+        if (str[i] === "\n") {
+          if (i - start > limit)
+            return true;
+          start = i + 1;
+          if (strLen - start <= limit)
+            return false;
+        }
+      }
+      return true;
+    }
+    function doubleQuotedString(value, ctx) {
+      const json2 = JSON.stringify(value);
+      if (ctx.options.doubleQuotedAsJSON)
+        return json2;
+      const { implicitKey } = ctx;
+      const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
+      const indent4 = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
+      let str = "";
+      let start = 0;
+      for (let i = 0, ch = json2[i]; ch; ch = json2[++i]) {
+        if (ch === " " && json2[i + 1] === "\\" && json2[i + 2] === "n") {
+          str += json2.slice(start, i) + "\\ ";
+          i += 1;
+          start = i;
+          ch = "\\";
+        }
+        if (ch === "\\")
+          switch (json2[i + 1]) {
+            case "u":
+              {
+                str += json2.slice(start, i);
+                const code = json2.substr(i + 2, 4);
+                switch (code) {
+                  case "0000":
+                    str += "\\0";
+                    break;
+                  case "0007":
+                    str += "\\a";
+                    break;
+                  case "000b":
+                    str += "\\v";
+                    break;
+                  case "001b":
+                    str += "\\e";
+                    break;
+                  case "0085":
+                    str += "\\N";
+                    break;
+                  case "00a0":
+                    str += "\\_";
+                    break;
+                  case "2028":
+                    str += "\\L";
+                    break;
+                  case "2029":
+                    str += "\\P";
+                    break;
+                  default:
+                    if (code.substr(0, 2) === "00")
+                      str += "\\x" + code.substr(2);
+                    else
+                      str += json2.substr(i, 6);
+                }
+                i += 5;
+                start = i + 1;
+              }
+              break;
+            case "n":
+              if (implicitKey || json2[i + 2] === '"' || json2.length < minMultiLineLength) {
+                i += 1;
+              } else {
+                str += json2.slice(start, i) + "\n\n";
+                while (json2[i + 2] === "\\" && json2[i + 3] === "n" && json2[i + 4] !== '"') {
+                  str += "\n";
+                  i += 2;
+                }
+                str += indent4;
+                if (json2[i + 2] === " ")
+                  str += "\\";
+                i += 1;
+                start = i + 1;
+              }
+              break;
+            default:
+              i += 1;
+          }
+      }
+      str = start ? str + json2.slice(start) : json2;
+      return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent4, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
+    }
+    function singleQuotedString(value, ctx) {
+      if (ctx.options.singleQuote === false || ctx.implicitKey && value.includes("\n") || /[ \t]\n|\n[ \t]/.test(value))
+        return doubleQuotedString(value, ctx);
+      const indent4 = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
+      const res = "'" + value.replace(/'/g, "''").replace(/\n+/g, `$&
+${indent4}`) + "'";
+      return ctx.implicitKey ? res : foldFlowLines.foldFlowLines(res, indent4, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
+    }
+    function quotedString(value, ctx) {
+      const { singleQuote } = ctx.options;
+      let qs;
+      if (singleQuote === false)
+        qs = doubleQuotedString;
+      else {
+        const hasDouble = value.includes('"');
+        const hasSingle = value.includes("'");
+        if (hasDouble && !hasSingle)
+          qs = singleQuotedString;
+        else if (hasSingle && !hasDouble)
+          qs = doubleQuotedString;
+        else
+          qs = singleQuote ? singleQuotedString : doubleQuotedString;
+      }
+      return qs(value, ctx);
+    }
+    var blockEndNewlines;
+    try {
+      blockEndNewlines = new RegExp("(^|(?<!\n))\n+(?!\n|$)", "g");
+    } catch {
+      blockEndNewlines = /\n+(?!\n|$)/g;
+    }
+    function blockString({ comment, type, value }, ctx, onComment, onChompKeep) {
+      const { blockQuote, commentString, lineWidth } = ctx.options;
+      if (!blockQuote || /\n[\t ]+$/.test(value)) {
+        return quotedString(value, ctx);
+      }
+      const indent4 = ctx.indent || (ctx.forceBlockIndent || containsDocumentMarker(value) ? "  " : "");
+      const literal2 = blockQuote === "literal" ? true : blockQuote === "folded" || type === Scalar.Scalar.BLOCK_FOLDED ? false : type === Scalar.Scalar.BLOCK_LITERAL ? true : !lineLengthOverLimit(value, lineWidth, indent4.length);
+      if (!value)
+        return literal2 ? "|\n" : ">\n";
+      let chomp;
+      let endStart;
+      for (endStart = value.length; endStart > 0; --endStart) {
+        const ch = value[endStart - 1];
+        if (ch !== "\n" && ch !== "	" && ch !== " ")
+          break;
+      }
+      let end = value.substring(endStart);
+      const endNlPos = end.indexOf("\n");
+      if (endNlPos === -1) {
+        chomp = "-";
+      } else if (value === end || endNlPos !== end.length - 1) {
+        chomp = "+";
+        if (onChompKeep)
+          onChompKeep();
+      } else {
+        chomp = "";
+      }
+      if (end) {
+        value = value.slice(0, -end.length);
+        if (end[end.length - 1] === "\n")
+          end = end.slice(0, -1);
+        end = end.replace(blockEndNewlines, `$&${indent4}`);
+      }
+      let startWithSpace = false;
+      let startEnd;
+      let startNlPos = -1;
+      for (startEnd = 0; startEnd < value.length; ++startEnd) {
+        const ch = value[startEnd];
+        if (ch === " ")
+          startWithSpace = true;
+        else if (ch === "\n")
+          startNlPos = startEnd;
+        else
+          break;
+      }
+      let start = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+      if (start) {
+        value = value.substring(start.length);
+        start = start.replace(/\n+/g, `$&${indent4}`);
+      }
+      const indentSize = indent4 ? "2" : "1";
+      let header = (startWithSpace ? indentSize : "") + chomp;
+      if (comment) {
+        header += " " + commentString(comment.replace(/ ?[\r\n]+/g, " "));
+        if (onComment)
+          onComment();
+      }
+      if (!literal2) {
+        const foldedValue = value.replace(/\n+/g, "\n$&").replace(/(?:^|\n)([\t ].*)(?:([\n\t ]*)\n(?![\n\t ]))?/g, "$1$2").replace(/\n+/g, `$&${indent4}`);
+        let literalFallback = false;
+        const foldOptions = getFoldOptions(ctx, true);
+        if (blockQuote !== "folded" && type !== Scalar.Scalar.BLOCK_FOLDED) {
+          foldOptions.onOverflow = () => {
+            literalFallback = true;
+          };
+        }
+        const body = foldFlowLines.foldFlowLines(`${start}${foldedValue}${end}`, indent4, foldFlowLines.FOLD_BLOCK, foldOptions);
+        if (!literalFallback)
+          return `>${header}
+${indent4}${body}`;
+      }
+      value = value.replace(/\n+/g, `$&${indent4}`);
+      return `|${header}
+${indent4}${start}${value}${end}`;
+    }
+    function plainString(item, ctx, onComment, onChompKeep) {
+      const { type, value } = item;
+      const { actualString, implicitKey, indent: indent4, indentStep, inFlow } = ctx;
+      if (implicitKey && value.includes("\n") || inFlow && /[[\]{},]/.test(value)) {
+        return quotedString(value, ctx);
+      }
+      if (/^[\n\t ,[\]{}#&*!|>'"%@`]|^[?-]$|^[?-][ \t]|[\n:][ \t]|[ \t]\n|[\n\t ]#|[\n\t :]$/.test(value)) {
+        return implicitKey || inFlow || !value.includes("\n") ? quotedString(value, ctx) : blockString(item, ctx, onComment, onChompKeep);
+      }
+      if (!implicitKey && !inFlow && type !== Scalar.Scalar.PLAIN && value.includes("\n")) {
+        return blockString(item, ctx, onComment, onChompKeep);
+      }
+      if (containsDocumentMarker(value)) {
+        if (indent4 === "") {
+          ctx.forceBlockIndent = true;
+          return blockString(item, ctx, onComment, onChompKeep);
+        } else if (implicitKey && indent4 === indentStep) {
+          return quotedString(value, ctx);
+        }
+      }
+      const str = value.replace(/\n+/g, `$&
+${indent4}`);
+      if (actualString) {
+        const test = (tag) => {
+          var _a3;
+          return tag.default && tag.tag !== "tag:yaml.org,2002:str" && ((_a3 = tag.test) == null ? void 0 : _a3.test(str));
+        };
+        const { compat, tags } = ctx.doc.schema;
+        if (tags.some(test) || (compat == null ? void 0 : compat.some(test)))
+          return quotedString(value, ctx);
+      }
+      return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent4, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
+    }
+    function stringifyString(item, ctx, onComment, onChompKeep) {
+      const { implicitKey, inFlow } = ctx;
+      const ss = typeof item.value === "string" ? item : Object.assign({}, item, { value: String(item.value) });
+      let { type } = item;
+      if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
+        if (/[\x00-\x08\x0b-\x1f\x7f-\x9f\u{D800}-\u{DFFF}]/u.test(ss.value))
+          type = Scalar.Scalar.QUOTE_DOUBLE;
+      }
+      const _stringify = (_type) => {
+        switch (_type) {
+          case Scalar.Scalar.BLOCK_FOLDED:
+          case Scalar.Scalar.BLOCK_LITERAL:
+            return implicitKey || inFlow ? quotedString(ss.value, ctx) : blockString(ss, ctx, onComment, onChompKeep);
+          case Scalar.Scalar.QUOTE_DOUBLE:
+            return doubleQuotedString(ss.value, ctx);
+          case Scalar.Scalar.QUOTE_SINGLE:
+            return singleQuotedString(ss.value, ctx);
+          case Scalar.Scalar.PLAIN:
+            return plainString(ss, ctx, onComment, onChompKeep);
+          default:
+            return null;
+        }
+      };
+      let res = _stringify(type);
+      if (res === null) {
+        const { defaultKeyType, defaultStringType } = ctx.options;
+        const t = implicitKey && defaultKeyType || defaultStringType;
+        res = _stringify(t);
+        if (res === null)
+          throw new Error(`Unsupported default string type ${t}`);
+      }
+      return res;
+    }
+    exports.stringifyString = stringifyString;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringify.js
+var require_stringify = __commonJS({
+  "node_modules/yaml/dist/stringify/stringify.js"(exports) {
+    "use strict";
+    var anchors = require_anchors();
+    var identity = require_identity();
+    var stringifyComment = require_stringifyComment();
+    var stringifyString = require_stringifyString();
+    function createStringifyContext(doc, options) {
+      const opt = Object.assign({
+        blockQuote: true,
+        commentString: stringifyComment.stringifyComment,
+        defaultKeyType: null,
+        defaultStringType: "PLAIN",
+        directives: null,
+        doubleQuotedAsJSON: false,
+        doubleQuotedMinMultiLineLength: 40,
+        falseStr: "false",
+        flowCollectionPadding: true,
+        indentSeq: true,
+        lineWidth: 80,
+        minContentWidth: 20,
+        nullStr: "null",
+        simpleKeys: false,
+        singleQuote: null,
+        trueStr: "true",
+        verifyAliasOrder: true
+      }, doc.schema.toStringOptions, options);
+      let inFlow;
+      switch (opt.collectionStyle) {
+        case "block":
+          inFlow = false;
+          break;
+        case "flow":
+          inFlow = true;
+          break;
+        default:
+          inFlow = null;
+      }
+      return {
+        anchors: /* @__PURE__ */ new Set(),
+        doc,
+        flowCollectionPadding: opt.flowCollectionPadding ? " " : "",
+        indent: "",
+        indentStep: typeof opt.indent === "number" ? " ".repeat(opt.indent) : "  ",
+        inFlow,
+        options: opt
+      };
+    }
+    function getTagObject(tags, item) {
+      var _a3;
+      if (item.tag) {
+        const match = tags.filter((t) => t.tag === item.tag);
+        if (match.length > 0)
+          return match.find((t) => t.format === item.format) ?? match[0];
+      }
+      let tagObj = void 0;
+      let obj;
+      if (identity.isScalar(item)) {
+        obj = item.value;
+        let match = tags.filter((t) => {
+          var _a4;
+          return (_a4 = t.identify) == null ? void 0 : _a4.call(t, obj);
+        });
+        if (match.length > 1) {
+          const testMatch = match.filter((t) => t.test);
+          if (testMatch.length > 0)
+            match = testMatch;
+        }
+        tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
+      } else {
+        obj = item;
+        tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
+      }
+      if (!tagObj) {
+        const name = ((_a3 = obj == null ? void 0 : obj.constructor) == null ? void 0 : _a3.name) ?? (obj === null ? "null" : typeof obj);
+        throw new Error(`Tag not resolved for ${name} value`);
+      }
+      return tagObj;
+    }
+    function stringifyProps(node, tagObj, { anchors: anchors$1, doc }) {
+      if (!doc.directives)
+        return "";
+      const props = [];
+      const anchor = (identity.isScalar(node) || identity.isCollection(node)) && node.anchor;
+      if (anchor && anchors.anchorIsValid(anchor)) {
+        anchors$1.add(anchor);
+        props.push(`&${anchor}`);
+      }
+      const tag = node.tag ?? (tagObj.default ? null : tagObj.tag);
+      if (tag)
+        props.push(doc.directives.tagString(tag));
+      return props.join(" ");
+    }
+    function stringify(item, ctx, onComment, onChompKeep) {
+      var _a3;
+      if (identity.isPair(item))
+        return item.toString(ctx, onComment, onChompKeep);
+      if (identity.isAlias(item)) {
+        if (ctx.doc.directives)
+          return item.toString(ctx);
+        if ((_a3 = ctx.resolvedAliases) == null ? void 0 : _a3.has(item)) {
+          throw new TypeError(`Cannot stringify circular structure without alias nodes`);
+        } else {
+          if (ctx.resolvedAliases)
+            ctx.resolvedAliases.add(item);
+          else
+            ctx.resolvedAliases = /* @__PURE__ */ new Set([item]);
+          item = item.resolve(ctx.doc);
+        }
+      }
+      let tagObj = void 0;
+      const node = identity.isNode(item) ? item : ctx.doc.createNode(item, { onTagObj: (o) => tagObj = o });
+      tagObj ?? (tagObj = getTagObject(ctx.doc.schema.tags, node));
+      const props = stringifyProps(node, tagObj, ctx);
+      if (props.length > 0)
+        ctx.indentAtStart = (ctx.indentAtStart ?? 0) + props.length + 1;
+      const str = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
+      if (!props)
+        return str;
+      return identity.isScalar(node) || str[0] === "{" || str[0] === "[" ? `${props} ${str}` : `${props}
+${ctx.indent}${str}`;
+    }
+    exports.createStringifyContext = createStringifyContext;
+    exports.stringify = stringify;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyPair.js
+var require_stringifyPair = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyPair.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var stringify = require_stringify();
+    var stringifyComment = require_stringifyComment();
+    function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
+      const { allNullValues, doc, indent: indent4, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
+      let keyComment = identity.isNode(key) && key.comment || null;
+      if (simpleKeys) {
+        if (keyComment) {
+          throw new Error("With simple keys, key nodes cannot have comments");
+        }
+        if (identity.isCollection(key) || !identity.isNode(key) && typeof key === "object") {
+          const msg = "With simple keys, collection cannot be used as a key value";
+          throw new Error(msg);
+        }
+      }
+      let explicitKey = !simpleKeys && (!key || keyComment && value == null && !ctx.inFlow || identity.isCollection(key) || (identity.isScalar(key) ? key.type === Scalar.Scalar.BLOCK_FOLDED || key.type === Scalar.Scalar.BLOCK_LITERAL : typeof key === "object"));
+      ctx = Object.assign({}, ctx, {
+        allNullValues: false,
+        implicitKey: !explicitKey && (simpleKeys || !allNullValues),
+        indent: indent4 + indentStep
+      });
+      let keyCommentDone = false;
+      let chompKeep = false;
+      let str = stringify.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      if (!explicitKey && !ctx.inFlow && str.length > 1024) {
+        if (simpleKeys)
+          throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
+        explicitKey = true;
+      }
+      if (ctx.inFlow) {
+        if (allNullValues || value == null) {
+          if (keyCommentDone && onComment)
+            onComment();
+          return str === "" ? "?" : explicitKey ? `? ${str}` : str;
+        }
+      } else if (allNullValues && !simpleKeys || value == null && explicitKey) {
+        str = `? ${str}`;
+        if (keyComment && !keyCommentDone) {
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
+        } else if (chompKeep && onChompKeep)
+          onChompKeep();
+        return str;
+      }
+      if (keyCommentDone)
+        keyComment = null;
+      if (explicitKey) {
+        if (keyComment)
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
+        str = `? ${str}
+${indent4}:`;
+      } else {
+        str = `${str}:`;
+        if (keyComment)
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
+      }
+      let vsb, vcb, valueComment;
+      if (identity.isNode(value)) {
+        vsb = !!value.spaceBefore;
+        vcb = value.commentBefore;
+        valueComment = value.comment;
+      } else {
+        vsb = false;
+        vcb = null;
+        valueComment = null;
+        if (value && typeof value === "object")
+          value = doc.createNode(value);
+      }
+      ctx.implicitKey = false;
+      if (!explicitKey && !keyComment && identity.isScalar(value))
+        ctx.indentAtStart = str.length + 1;
+      chompKeep = false;
+      if (!indentSeq && indentStep.length >= 2 && !ctx.inFlow && !explicitKey && identity.isSeq(value) && !value.flow && !value.tag && !value.anchor) {
+        ctx.indent = ctx.indent.substring(2);
+      }
+      let valueCommentDone = false;
+      const valueStr = stringify.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
+      let ws = " ";
+      if (keyComment || vsb || vcb) {
+        ws = vsb ? "\n" : "";
+        if (vcb) {
+          const cs = commentString(vcb);
+          ws += `
+${stringifyComment.indentComment(cs, ctx.indent)}`;
+        }
+        if (valueStr === "" && !ctx.inFlow) {
+          if (ws === "\n" && valueComment)
+            ws = "\n\n";
+        } else {
+          ws += `
+${ctx.indent}`;
+        }
+      } else if (!explicitKey && identity.isCollection(value)) {
+        const vs0 = valueStr[0];
+        const nl0 = valueStr.indexOf("\n");
+        const hasNewline = nl0 !== -1;
+        const flow = ctx.inFlow ?? value.flow ?? value.items.length === 0;
+        if (hasNewline || !flow) {
+          let hasPropsLine = false;
+          if (hasNewline && (vs0 === "&" || vs0 === "!")) {
+            let sp0 = valueStr.indexOf(" ");
+            if (vs0 === "&" && sp0 !== -1 && sp0 < nl0 && valueStr[sp0 + 1] === "!") {
+              sp0 = valueStr.indexOf(" ", sp0 + 1);
+            }
+            if (sp0 === -1 || nl0 < sp0)
+              hasPropsLine = true;
+          }
+          if (!hasPropsLine)
+            ws = `
+${ctx.indent}`;
+        }
+      } else if (valueStr === "" || valueStr[0] === "\n") {
+        ws = "";
+      }
+      str += ws + valueStr;
+      if (ctx.inFlow) {
+        if (valueCommentDone && onComment)
+          onComment();
+      } else if (valueComment && !valueCommentDone) {
+        str += stringifyComment.lineComment(str, ctx.indent, commentString(valueComment));
+      } else if (chompKeep && onChompKeep) {
+        onChompKeep();
+      }
+      return str;
+    }
+    exports.stringifyPair = stringifyPair;
+  }
+});
+
+// node_modules/yaml/dist/log.js
+var require_log = __commonJS({
+  "node_modules/yaml/dist/log.js"(exports) {
+    "use strict";
+    var node_process = __require("process");
+    function debug(logLevel, ...messages) {
+      if (logLevel === "debug")
+        console.log(...messages);
+    }
+    function warn(logLevel, warning) {
+      if (logLevel === "debug" || logLevel === "warn") {
+        if (typeof node_process.emitWarning === "function")
+          node_process.emitWarning(warning);
+        else
+          console.warn(warning);
+      }
+    }
+    exports.debug = debug;
+    exports.warn = warn;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/merge.js
+var require_merge = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var MERGE_KEY = "<<";
+    var merge2 = {
+      identify: (value) => value === MERGE_KEY || typeof value === "symbol" && value.description === MERGE_KEY,
+      default: "key",
+      tag: "tag:yaml.org,2002:merge",
+      test: /^<<$/,
+      resolve: () => Object.assign(new Scalar.Scalar(Symbol(MERGE_KEY)), {
+        addToJSMap: addMergeToJSMap
+      }),
+      stringify: () => MERGE_KEY
+    };
+    var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && (ctx == null ? void 0 : ctx.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default));
+    function addMergeToJSMap(ctx, map2, value) {
+      value = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
+      if (identity.isSeq(value))
+        for (const it of value.items)
+          mergeValue(ctx, map2, it);
+      else if (Array.isArray(value))
+        for (const it of value)
+          mergeValue(ctx, map2, it);
+      else
+        mergeValue(ctx, map2, value);
+    }
+    function mergeValue(ctx, map2, value) {
+      const source = ctx && identity.isAlias(value) ? value.resolve(ctx.doc) : value;
+      if (!identity.isMap(source))
+        throw new Error("Merge sources must be maps or map aliases");
+      const srcMap = source.toJSON(null, ctx, Map);
+      for (const [key, value2] of srcMap) {
+        if (map2 instanceof Map) {
+          if (!map2.has(key))
+            map2.set(key, value2);
+        } else if (map2 instanceof Set) {
+          map2.add(key);
+        } else if (!Object.prototype.hasOwnProperty.call(map2, key)) {
+          Object.defineProperty(map2, key, {
+            value: value2,
+            writable: true,
+            enumerable: true,
+            configurable: true
+          });
+        }
+      }
+      return map2;
+    }
+    exports.addMergeToJSMap = addMergeToJSMap;
+    exports.isMergeKey = isMergeKey;
+    exports.merge = merge2;
+  }
+});
+
+// node_modules/yaml/dist/nodes/addPairToJSMap.js
+var require_addPairToJSMap = __commonJS({
+  "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
+    "use strict";
+    var log = require_log();
+    var merge2 = require_merge();
+    var stringify = require_stringify();
+    var identity = require_identity();
+    var toJS = require_toJS();
+    function addPairToJSMap(ctx, map2, { key, value }) {
+      if (identity.isNode(key) && key.addToJSMap)
+        key.addToJSMap(ctx, map2, value);
+      else if (merge2.isMergeKey(ctx, key))
+        merge2.addMergeToJSMap(ctx, map2, value);
+      else {
+        const jsKey = toJS.toJS(key, "", ctx);
+        if (map2 instanceof Map) {
+          map2.set(jsKey, toJS.toJS(value, jsKey, ctx));
+        } else if (map2 instanceof Set) {
+          map2.add(jsKey);
+        } else {
+          const stringKey = stringifyKey(key, jsKey, ctx);
+          const jsValue = toJS.toJS(value, stringKey, ctx);
+          if (stringKey in map2)
+            Object.defineProperty(map2, stringKey, {
+              value: jsValue,
+              writable: true,
+              enumerable: true,
+              configurable: true
+            });
+          else
+            map2[stringKey] = jsValue;
+        }
+      }
+      return map2;
+    }
+    function stringifyKey(key, jsKey, ctx) {
+      if (jsKey === null)
+        return "";
+      if (typeof jsKey !== "object")
+        return String(jsKey);
+      if (identity.isNode(key) && (ctx == null ? void 0 : ctx.doc)) {
+        const strCtx = stringify.createStringifyContext(ctx.doc, {});
+        strCtx.anchors = /* @__PURE__ */ new Set();
+        for (const node of ctx.anchors.keys())
+          strCtx.anchors.add(node.anchor);
+        strCtx.inFlow = true;
+        strCtx.inStringifyKey = true;
+        const strKey = key.toString(strCtx);
+        if (!ctx.mapKeyWarned) {
+          let jsonStr = JSON.stringify(strKey);
+          if (jsonStr.length > 40)
+            jsonStr = jsonStr.substring(0, 36) + '..."';
+          log.warn(ctx.doc.options.logLevel, `Keys with collection values will be stringified due to JS Object restrictions: ${jsonStr}. Set mapAsMap: true to use object keys.`);
+          ctx.mapKeyWarned = true;
+        }
+        return strKey;
+      }
+      return JSON.stringify(jsKey);
+    }
+    exports.addPairToJSMap = addPairToJSMap;
+  }
+});
+
+// node_modules/yaml/dist/nodes/Pair.js
+var require_Pair = __commonJS({
+  "node_modules/yaml/dist/nodes/Pair.js"(exports) {
+    "use strict";
+    var createNode = require_createNode();
+    var stringifyPair = require_stringifyPair();
+    var addPairToJSMap = require_addPairToJSMap();
+    var identity = require_identity();
+    function createPair(key, value, ctx) {
+      const k = createNode.createNode(key, void 0, ctx);
+      const v = createNode.createNode(value, void 0, ctx);
+      return new Pair(k, v);
+    }
+    var Pair = class _Pair {
+      constructor(key, value = null) {
+        Object.defineProperty(this, identity.NODE_TYPE, { value: identity.PAIR });
+        this.key = key;
+        this.value = value;
+      }
+      clone(schema) {
+        let { key, value } = this;
+        if (identity.isNode(key))
+          key = key.clone(schema);
+        if (identity.isNode(value))
+          value = value.clone(schema);
+        return new _Pair(key, value);
+      }
+      toJSON(_, ctx) {
+        const pair = (ctx == null ? void 0 : ctx.mapAsMap) ? /* @__PURE__ */ new Map() : {};
+        return addPairToJSMap.addPairToJSMap(ctx, pair, this);
+      }
+      toString(ctx, onComment, onChompKeep) {
+        return (ctx == null ? void 0 : ctx.doc) ? stringifyPair.stringifyPair(this, ctx, onComment, onChompKeep) : JSON.stringify(this);
+      }
+    };
+    exports.Pair = Pair;
+    exports.createPair = createPair;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyCollection.js
+var require_stringifyCollection = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var stringify = require_stringify();
+    var stringifyComment = require_stringifyComment();
+    function stringifyCollection(collection, ctx, options) {
+      const flow = ctx.inFlow ?? collection.flow;
+      const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+      return stringify2(collection, ctx, options);
+    }
+    function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
+      const { indent: indent4, options: { commentString } } = ctx;
+      const itemCtx = Object.assign({}, ctx, { indent: itemIndent, type: null });
+      let chompKeep = false;
+      const lines = [];
+      for (let i = 0; i < items.length; ++i) {
+        const item = items[i];
+        let comment2 = null;
+        if (identity.isNode(item)) {
+          if (!chompKeep && item.spaceBefore)
+            lines.push("");
+          addCommentBefore(ctx, lines, item.commentBefore, chompKeep);
+          if (item.comment)
+            comment2 = item.comment;
+        } else if (identity.isPair(item)) {
+          const ik = identity.isNode(item.key) ? item.key : null;
+          if (ik) {
+            if (!chompKeep && ik.spaceBefore)
+              lines.push("");
+            addCommentBefore(ctx, lines, ik.commentBefore, chompKeep);
+          }
+        }
+        chompKeep = false;
+        let str2 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        if (comment2)
+          str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
+        if (chompKeep && comment2)
+          chompKeep = false;
+        lines.push(blockItemPrefix + str2);
+      }
+      let str;
+      if (lines.length === 0) {
+        str = flowChars.start + flowChars.end;
+      } else {
+        str = lines[0];
+        for (let i = 1; i < lines.length; ++i) {
+          const line = lines[i];
+          str += line ? `
+${indent4}${line}` : "\n";
+        }
+      }
+      if (comment) {
+        str += "\n" + stringifyComment.indentComment(commentString(comment), indent4);
+        if (onComment)
+          onComment();
+      } else if (chompKeep && onChompKeep)
+        onChompKeep();
+      return str;
+    }
+    function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
+      const { indent: indent4, indentStep, flowCollectionPadding: fcPadding, options: { commentString } } = ctx;
+      itemIndent += indentStep;
+      const itemCtx = Object.assign({}, ctx, {
+        indent: itemIndent,
+        inFlow: true,
+        type: null
+      });
+      let reqNewline = false;
+      let linesAtValue = 0;
+      const lines = [];
+      for (let i = 0; i < items.length; ++i) {
+        const item = items[i];
+        let comment = null;
+        if (identity.isNode(item)) {
+          if (item.spaceBefore)
+            lines.push("");
+          addCommentBefore(ctx, lines, item.commentBefore, false);
+          if (item.comment)
+            comment = item.comment;
+        } else if (identity.isPair(item)) {
+          const ik = identity.isNode(item.key) ? item.key : null;
+          if (ik) {
+            if (ik.spaceBefore)
+              lines.push("");
+            addCommentBefore(ctx, lines, ik.commentBefore, false);
+            if (ik.comment)
+              reqNewline = true;
+          }
+          const iv = identity.isNode(item.value) ? item.value : null;
+          if (iv) {
+            if (iv.comment)
+              comment = iv.comment;
+            if (iv.commentBefore)
+              reqNewline = true;
+          } else if (item.value == null && (ik == null ? void 0 : ik.comment)) {
+            comment = ik.comment;
+          }
+        }
+        if (comment)
+          reqNewline = true;
+        let str = stringify.stringify(item, itemCtx, () => comment = null);
+        if (i < items.length - 1)
+          str += ",";
+        if (comment)
+          str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
+        if (!reqNewline && (lines.length > linesAtValue || str.includes("\n")))
+          reqNewline = true;
+        lines.push(str);
+        linesAtValue = lines.length;
+      }
+      const { start, end } = flowChars;
+      if (lines.length === 0) {
+        return start + end;
+      } else {
+        if (!reqNewline) {
+          const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
+          reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
+        }
+        if (reqNewline) {
+          let str = start;
+          for (const line of lines)
+            str += line ? `
+${indentStep}${indent4}${line}` : "\n";
+          return `${str}
+${indent4}${end}`;
+        } else {
+          return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
+        }
+      }
+    }
+    function addCommentBefore({ indent: indent4, options: { commentString } }, lines, comment, chompKeep) {
+      if (comment && chompKeep)
+        comment = comment.replace(/^\n+/, "");
+      if (comment) {
+        const ic = stringifyComment.indentComment(commentString(comment), indent4);
+        lines.push(ic.trimStart());
+      }
+    }
+    exports.stringifyCollection = stringifyCollection;
+  }
+});
+
+// node_modules/yaml/dist/nodes/YAMLMap.js
+var require_YAMLMap = __commonJS({
+  "node_modules/yaml/dist/nodes/YAMLMap.js"(exports) {
+    "use strict";
+    var stringifyCollection = require_stringifyCollection();
+    var addPairToJSMap = require_addPairToJSMap();
+    var Collection = require_Collection();
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var Scalar = require_Scalar();
+    function findPair(items, key) {
+      const k = identity.isScalar(key) ? key.value : key;
+      for (const it of items) {
+        if (identity.isPair(it)) {
+          if (it.key === key || it.key === k)
+            return it;
+          if (identity.isScalar(it.key) && it.key.value === k)
+            return it;
+        }
+      }
+      return void 0;
+    }
+    var YAMLMap = class extends Collection.Collection {
+      static get tagName() {
+        return "tag:yaml.org,2002:map";
+      }
+      constructor(schema) {
+        super(identity.MAP, schema);
+        this.items = [];
+      }
+      /**
+       * A generic collection parsing method that can be extended
+       * to other node classes that inherit from YAMLMap
+       */
+      static from(schema, obj, ctx) {
+        const { keepUndefined, replacer } = ctx;
+        const map2 = new this(schema);
+        const add = (key, value) => {
+          if (typeof replacer === "function")
+            value = replacer.call(obj, key, value);
+          else if (Array.isArray(replacer) && !replacer.includes(key))
+            return;
+          if (value !== void 0 || keepUndefined)
+            map2.items.push(Pair.createPair(key, value, ctx));
+        };
+        if (obj instanceof Map) {
+          for (const [key, value] of obj)
+            add(key, value);
+        } else if (obj && typeof obj === "object") {
+          for (const key of Object.keys(obj))
+            add(key, obj[key]);
+        }
+        if (typeof schema.sortMapEntries === "function") {
+          map2.items.sort(schema.sortMapEntries);
+        }
+        return map2;
+      }
+      /**
+       * Adds a value to the collection.
+       *
+       * @param overwrite - If not set `true`, using a key that is already in the
+       *   collection will throw. Otherwise, overwrites the previous value.
+       */
+      add(pair, overwrite) {
+        var _a3;
+        let _pair;
+        if (identity.isPair(pair))
+          _pair = pair;
+        else if (!pair || typeof pair !== "object" || !("key" in pair)) {
+          _pair = new Pair.Pair(pair, pair == null ? void 0 : pair.value);
+        } else
+          _pair = new Pair.Pair(pair.key, pair.value);
+        const prev = findPair(this.items, _pair.key);
+        const sortEntries = (_a3 = this.schema) == null ? void 0 : _a3.sortMapEntries;
+        if (prev) {
+          if (!overwrite)
+            throw new Error(`Key ${_pair.key} already set`);
+          if (identity.isScalar(prev.value) && Scalar.isScalarValue(_pair.value))
+            prev.value.value = _pair.value;
+          else
+            prev.value = _pair.value;
+        } else if (sortEntries) {
+          const i = this.items.findIndex((item) => sortEntries(_pair, item) < 0);
+          if (i === -1)
+            this.items.push(_pair);
+          else
+            this.items.splice(i, 0, _pair);
+        } else {
+          this.items.push(_pair);
+        }
+      }
+      delete(key) {
+        const it = findPair(this.items, key);
+        if (!it)
+          return false;
+        const del = this.items.splice(this.items.indexOf(it), 1);
+        return del.length > 0;
+      }
+      get(key, keepScalar) {
+        const it = findPair(this.items, key);
+        const node = it == null ? void 0 : it.value;
+        return (!keepScalar && identity.isScalar(node) ? node.value : node) ?? void 0;
+      }
+      has(key) {
+        return !!findPair(this.items, key);
+      }
+      set(key, value) {
+        this.add(new Pair.Pair(key, value), true);
+      }
+      /**
+       * @param ctx - Conversion context, originally set in Document#toJS()
+       * @param {Class} Type - If set, forces the returned collection type
+       * @returns Instance of Type, Map, or Object
+       */
+      toJSON(_, ctx, Type) {
+        const map2 = Type ? new Type() : (ctx == null ? void 0 : ctx.mapAsMap) ? /* @__PURE__ */ new Map() : {};
+        if (ctx == null ? void 0 : ctx.onCreate)
+          ctx.onCreate(map2);
+        for (const item of this.items)
+          addPairToJSMap.addPairToJSMap(ctx, map2, item);
+        return map2;
+      }
+      toString(ctx, onComment, onChompKeep) {
+        if (!ctx)
+          return JSON.stringify(this);
+        for (const item of this.items) {
+          if (!identity.isPair(item))
+            throw new Error(`Map items must all be pairs; found ${JSON.stringify(item)} instead`);
+        }
+        if (!ctx.allNullValues && this.hasAllNullValues(false))
+          ctx = Object.assign({}, ctx, { allNullValues: true });
+        return stringifyCollection.stringifyCollection(this, ctx, {
+          blockItemPrefix: "",
+          flowChars: { start: "{", end: "}" },
+          itemIndent: ctx.indent || "",
+          onChompKeep,
+          onComment
+        });
+      }
+    };
+    exports.YAMLMap = YAMLMap;
+    exports.findPair = findPair;
+  }
+});
+
+// node_modules/yaml/dist/schema/common/map.js
+var require_map = __commonJS({
+  "node_modules/yaml/dist/schema/common/map.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var YAMLMap = require_YAMLMap();
+    var map2 = {
+      collection: "map",
+      default: true,
+      nodeClass: YAMLMap.YAMLMap,
+      tag: "tag:yaml.org,2002:map",
+      resolve(map3, onError) {
+        if (!identity.isMap(map3))
+          onError("Expected a mapping for this tag");
+        return map3;
+      },
+      createNode: (schema, obj, ctx) => YAMLMap.YAMLMap.from(schema, obj, ctx)
+    };
+    exports.map = map2;
+  }
+});
+
+// node_modules/yaml/dist/nodes/YAMLSeq.js
+var require_YAMLSeq = __commonJS({
+  "node_modules/yaml/dist/nodes/YAMLSeq.js"(exports) {
+    "use strict";
+    var createNode = require_createNode();
+    var stringifyCollection = require_stringifyCollection();
+    var Collection = require_Collection();
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var toJS = require_toJS();
+    var YAMLSeq = class extends Collection.Collection {
+      static get tagName() {
+        return "tag:yaml.org,2002:seq";
+      }
+      constructor(schema) {
+        super(identity.SEQ, schema);
+        this.items = [];
+      }
+      add(value) {
+        this.items.push(value);
+      }
+      /**
+       * Removes a value from the collection.
+       *
+       * `key` must contain a representation of an integer for this to succeed.
+       * It may be wrapped in a `Scalar`.
+       *
+       * @returns `true` if the item was found and removed.
+       */
+      delete(key) {
+        const idx = asItemIndex(key);
+        if (typeof idx !== "number")
+          return false;
+        const del = this.items.splice(idx, 1);
+        return del.length > 0;
+      }
+      get(key, keepScalar) {
+        const idx = asItemIndex(key);
+        if (typeof idx !== "number")
+          return void 0;
+        const it = this.items[idx];
+        return !keepScalar && identity.isScalar(it) ? it.value : it;
+      }
+      /**
+       * Checks if the collection includes a value with the key `key`.
+       *
+       * `key` must contain a representation of an integer for this to succeed.
+       * It may be wrapped in a `Scalar`.
+       */
+      has(key) {
+        const idx = asItemIndex(key);
+        return typeof idx === "number" && idx < this.items.length;
+      }
+      /**
+       * Sets a value in this collection. For `!!set`, `value` needs to be a
+       * boolean to add/remove the item from the set.
+       *
+       * If `key` does not contain a representation of an integer, this will throw.
+       * It may be wrapped in a `Scalar`.
+       */
+      set(key, value) {
+        const idx = asItemIndex(key);
+        if (typeof idx !== "number")
+          throw new Error(`Expected a valid index, not ${key}.`);
+        const prev = this.items[idx];
+        if (identity.isScalar(prev) && Scalar.isScalarValue(value))
+          prev.value = value;
+        else
+          this.items[idx] = value;
+      }
+      toJSON(_, ctx) {
+        const seq = [];
+        if (ctx == null ? void 0 : ctx.onCreate)
+          ctx.onCreate(seq);
+        let i = 0;
+        for (const item of this.items)
+          seq.push(toJS.toJS(item, String(i++), ctx));
+        return seq;
+      }
+      toString(ctx, onComment, onChompKeep) {
+        if (!ctx)
+          return JSON.stringify(this);
+        return stringifyCollection.stringifyCollection(this, ctx, {
+          blockItemPrefix: "- ",
+          flowChars: { start: "[", end: "]" },
+          itemIndent: (ctx.indent || "") + "  ",
+          onChompKeep,
+          onComment
+        });
+      }
+      static from(schema, obj, ctx) {
+        const { replacer } = ctx;
+        const seq = new this(schema);
+        if (obj && Symbol.iterator in Object(obj)) {
+          let i = 0;
+          for (let it of obj) {
+            if (typeof replacer === "function") {
+              const key = obj instanceof Set ? it : String(i++);
+              it = replacer.call(obj, key, it);
+            }
+            seq.items.push(createNode.createNode(it, void 0, ctx));
+          }
+        }
+        return seq;
+      }
+    };
+    function asItemIndex(key) {
+      let idx = identity.isScalar(key) ? key.value : key;
+      if (idx && typeof idx === "string")
+        idx = Number(idx);
+      return typeof idx === "number" && Number.isInteger(idx) && idx >= 0 ? idx : null;
+    }
+    exports.YAMLSeq = YAMLSeq;
+  }
+});
+
+// node_modules/yaml/dist/schema/common/seq.js
+var require_seq = __commonJS({
+  "node_modules/yaml/dist/schema/common/seq.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var YAMLSeq = require_YAMLSeq();
+    var seq = {
+      collection: "seq",
+      default: true,
+      nodeClass: YAMLSeq.YAMLSeq,
+      tag: "tag:yaml.org,2002:seq",
+      resolve(seq2, onError) {
+        if (!identity.isSeq(seq2))
+          onError("Expected a sequence for this tag");
+        return seq2;
+      },
+      createNode: (schema, obj, ctx) => YAMLSeq.YAMLSeq.from(schema, obj, ctx)
+    };
+    exports.seq = seq;
+  }
+});
+
+// node_modules/yaml/dist/schema/common/string.js
+var require_string = __commonJS({
+  "node_modules/yaml/dist/schema/common/string.js"(exports) {
+    "use strict";
+    var stringifyString = require_stringifyString();
+    var string4 = {
+      identify: (value) => typeof value === "string",
+      default: true,
+      tag: "tag:yaml.org,2002:str",
+      resolve: (str) => str,
+      stringify(item, ctx, onComment, onChompKeep) {
+        ctx = Object.assign({ actualString: true }, ctx);
+        return stringifyString.stringifyString(item, ctx, onComment, onChompKeep);
+      }
+    };
+    exports.string = string4;
+  }
+});
+
+// node_modules/yaml/dist/schema/common/null.js
+var require_null = __commonJS({
+  "node_modules/yaml/dist/schema/common/null.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var nullTag = {
+      identify: (value) => value == null,
+      createNode: () => new Scalar.Scalar(null),
+      default: true,
+      tag: "tag:yaml.org,2002:null",
+      test: /^(?:~|[Nn]ull|NULL)?$/,
+      resolve: () => new Scalar.Scalar(null),
+      stringify: ({ source }, ctx) => typeof source === "string" && nullTag.test.test(source) ? source : ctx.options.nullStr
+    };
+    exports.nullTag = nullTag;
+  }
+});
+
+// node_modules/yaml/dist/schema/core/bool.js
+var require_bool = __commonJS({
+  "node_modules/yaml/dist/schema/core/bool.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var boolTag = {
+      identify: (value) => typeof value === "boolean",
+      default: true,
+      tag: "tag:yaml.org,2002:bool",
+      test: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/,
+      resolve: (str) => new Scalar.Scalar(str[0] === "t" || str[0] === "T"),
+      stringify({ source, value }, ctx) {
+        if (source && boolTag.test.test(source)) {
+          const sv = source[0] === "t" || source[0] === "T";
+          if (value === sv)
+            return source;
+        }
+        return value ? ctx.options.trueStr : ctx.options.falseStr;
+      }
+    };
+    exports.boolTag = boolTag;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyNumber.js
+var require_stringifyNumber = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyNumber.js"(exports) {
+    "use strict";
+    function stringifyNumber({ format, minFractionDigits, tag, value }) {
+      if (typeof value === "bigint")
+        return String(value);
+      const num = typeof value === "number" ? value : Number(value);
+      if (!isFinite(num))
+        return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
+      let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
+      if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^\d/.test(n)) {
+        let i = n.indexOf(".");
+        if (i < 0) {
+          i = n.length;
+          n += ".";
+        }
+        let d = minFractionDigits - (n.length - i - 1);
+        while (d-- > 0)
+          n += "0";
+      }
+      return n;
+    }
+    exports.stringifyNumber = stringifyNumber;
+  }
+});
+
+// node_modules/yaml/dist/schema/core/float.js
+var require_float = __commonJS({
+  "node_modules/yaml/dist/schema/core/float.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var stringifyNumber = require_stringifyNumber();
+    var floatNaN = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
+      resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      stringify: stringifyNumber.stringifyNumber
+    };
+    var floatExp = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      format: "EXP",
+      test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
+      resolve: (str) => parseFloat(str),
+      stringify(node) {
+        const num = Number(node.value);
+        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node);
+      }
+    };
+    var float = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      test: /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/,
+      resolve(str) {
+        const node = new Scalar.Scalar(parseFloat(str));
+        const dot = str.indexOf(".");
+        if (dot !== -1 && str[str.length - 1] === "0")
+          node.minFractionDigits = str.length - dot - 1;
+        return node;
+      },
+      stringify: stringifyNumber.stringifyNumber
+    };
+    exports.float = float;
+    exports.floatExp = floatExp;
+    exports.floatNaN = floatNaN;
+  }
+});
+
+// node_modules/yaml/dist/schema/core/int.js
+var require_int = __commonJS({
+  "node_modules/yaml/dist/schema/core/int.js"(exports) {
+    "use strict";
+    var stringifyNumber = require_stringifyNumber();
+    var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
+    var intResolve = (str, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str.substring(offset), radix);
+    function intStringify(node, radix, prefix) {
+      const { value } = node;
+      if (intIdentify(value) && value >= 0)
+        return prefix + value.toString(radix);
+      return stringifyNumber.stringifyNumber(node);
+    }
+    var intOct = {
+      identify: (value) => intIdentify(value) && value >= 0,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "OCT",
+      test: /^0o[0-7]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 2, 8, opt),
+      stringify: (node) => intStringify(node, 8, "0o")
+    };
+    var int2 = {
+      identify: intIdentify,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      test: /^[-+]?[0-9]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 0, 10, opt),
+      stringify: stringifyNumber.stringifyNumber
+    };
+    var intHex = {
+      identify: (value) => intIdentify(value) && value >= 0,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "HEX",
+      test: /^0x[0-9a-fA-F]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 2, 16, opt),
+      stringify: (node) => intStringify(node, 16, "0x")
+    };
+    exports.int = int2;
+    exports.intHex = intHex;
+    exports.intOct = intOct;
+  }
+});
+
+// node_modules/yaml/dist/schema/core/schema.js
+var require_schema = __commonJS({
+  "node_modules/yaml/dist/schema/core/schema.js"(exports) {
+    "use strict";
+    var map2 = require_map();
+    var _null4 = require_null();
+    var seq = require_seq();
+    var string4 = require_string();
+    var bool = require_bool();
+    var float = require_float();
+    var int2 = require_int();
+    var schema = [
+      map2.map,
+      seq.seq,
+      string4.string,
+      _null4.nullTag,
+      bool.boolTag,
+      int2.intOct,
+      int2.int,
+      int2.intHex,
+      float.floatNaN,
+      float.floatExp,
+      float.float
+    ];
+    exports.schema = schema;
+  }
+});
+
+// node_modules/yaml/dist/schema/json/schema.js
+var require_schema2 = __commonJS({
+  "node_modules/yaml/dist/schema/json/schema.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var map2 = require_map();
+    var seq = require_seq();
+    function intIdentify(value) {
+      return typeof value === "bigint" || Number.isInteger(value);
+    }
+    var stringifyJSON = ({ value }) => JSON.stringify(value);
+    var jsonScalars = [
+      {
+        identify: (value) => typeof value === "string",
+        default: true,
+        tag: "tag:yaml.org,2002:str",
+        resolve: (str) => str,
+        stringify: stringifyJSON
+      },
+      {
+        identify: (value) => value == null,
+        createNode: () => new Scalar.Scalar(null),
+        default: true,
+        tag: "tag:yaml.org,2002:null",
+        test: /^null$/,
+        resolve: () => null,
+        stringify: stringifyJSON
+      },
+      {
+        identify: (value) => typeof value === "boolean",
+        default: true,
+        tag: "tag:yaml.org,2002:bool",
+        test: /^true$|^false$/,
+        resolve: (str) => str === "true",
+        stringify: stringifyJSON
+      },
+      {
+        identify: intIdentify,
+        default: true,
+        tag: "tag:yaml.org,2002:int",
+        test: /^-?(?:0|[1-9][0-9]*)$/,
+        resolve: (str, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str, 10),
+        stringify: ({ value }) => intIdentify(value) ? value.toString() : JSON.stringify(value)
+      },
+      {
+        identify: (value) => typeof value === "number",
+        default: true,
+        tag: "tag:yaml.org,2002:float",
+        test: /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/,
+        resolve: (str) => parseFloat(str),
+        stringify: stringifyJSON
+      }
+    ];
+    var jsonError = {
+      default: true,
+      tag: "",
+      test: /^/,
+      resolve(str, onError) {
+        onError(`Unresolved plain scalar ${JSON.stringify(str)}`);
+        return str;
+      }
+    };
+    var schema = [map2.map, seq.seq].concat(jsonScalars, jsonError);
+    exports.schema = schema;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/binary.js
+var require_binary = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports) {
+    "use strict";
+    var node_buffer = __require("buffer");
+    var Scalar = require_Scalar();
+    var stringifyString = require_stringifyString();
+    var binary = {
+      identify: (value) => value instanceof Uint8Array,
+      // Buffer inherits from Uint8Array
+      default: false,
+      tag: "tag:yaml.org,2002:binary",
+      /**
+       * Returns a Buffer in node and an Uint8Array in browsers
+       *
+       * To use the resulting buffer as an image, you'll want to do something like:
+       *
+       *   const blob = new Blob([buffer], { type: 'image/jpeg' })
+       *   document.querySelector('#photo').src = URL.createObjectURL(blob)
+       */
+      resolve(src, onError) {
+        if (typeof node_buffer.Buffer === "function") {
+          return node_buffer.Buffer.from(src, "base64");
+        } else if (typeof atob === "function") {
+          const str = atob(src.replace(/[\n\r]/g, ""));
+          const buffer = new Uint8Array(str.length);
+          for (let i = 0; i < str.length; ++i)
+            buffer[i] = str.charCodeAt(i);
+          return buffer;
+        } else {
+          onError("This environment does not support reading binary tags; either Buffer or atob is required");
+          return src;
+        }
+      },
+      stringify({ comment, type, value }, ctx, onComment, onChompKeep) {
+        if (!value)
+          return "";
+        const buf = value;
+        let str;
+        if (typeof node_buffer.Buffer === "function") {
+          str = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
+        } else if (typeof btoa === "function") {
+          let s = "";
+          for (let i = 0; i < buf.length; ++i)
+            s += String.fromCharCode(buf[i]);
+          str = btoa(s);
+        } else {
+          throw new Error("This environment does not support writing binary tags; either Buffer or btoa is required");
+        }
+        type ?? (type = Scalar.Scalar.BLOCK_LITERAL);
+        if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
+          const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
+          const n = Math.ceil(str.length / lineWidth);
+          const lines = new Array(n);
+          for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
+            lines[i] = str.substr(o, lineWidth);
+          }
+          str = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+        }
+        return stringifyString.stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
+      }
+    };
+    exports.binary = binary;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+var require_pairs = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var Scalar = require_Scalar();
+    var YAMLSeq = require_YAMLSeq();
+    function resolvePairs(seq, onError) {
+      if (identity.isSeq(seq)) {
+        for (let i = 0; i < seq.items.length; ++i) {
+          let item = seq.items[i];
+          if (identity.isPair(item))
+            continue;
+          else if (identity.isMap(item)) {
+            if (item.items.length > 1)
+              onError("Each pair must have its own sequence indicator");
+            const pair = item.items[0] || new Pair.Pair(new Scalar.Scalar(null));
+            if (item.commentBefore)
+              pair.key.commentBefore = pair.key.commentBefore ? `${item.commentBefore}
+${pair.key.commentBefore}` : item.commentBefore;
+            if (item.comment) {
+              const cn = pair.value ?? pair.key;
+              cn.comment = cn.comment ? `${item.comment}
+${cn.comment}` : item.comment;
+            }
+            item = pair;
+          }
+          seq.items[i] = identity.isPair(item) ? item : new Pair.Pair(item);
+        }
+      } else
+        onError("Expected a sequence for this tag");
+      return seq;
+    }
+    function createPairs(schema, iterable, ctx) {
+      const { replacer } = ctx;
+      const pairs2 = new YAMLSeq.YAMLSeq(schema);
+      pairs2.tag = "tag:yaml.org,2002:pairs";
+      let i = 0;
+      if (iterable && Symbol.iterator in Object(iterable))
+        for (let it of iterable) {
+          if (typeof replacer === "function")
+            it = replacer.call(iterable, String(i++), it);
+          let key, value;
+          if (Array.isArray(it)) {
+            if (it.length === 2) {
+              key = it[0];
+              value = it[1];
+            } else
+              throw new TypeError(`Expected [key, value] tuple: ${it}`);
+          } else if (it && it instanceof Object) {
+            const keys = Object.keys(it);
+            if (keys.length === 1) {
+              key = keys[0];
+              value = it[key];
+            } else {
+              throw new TypeError(`Expected tuple with one key, not ${keys.length} keys`);
+            }
+          } else {
+            key = it;
+          }
+          pairs2.items.push(Pair.createPair(key, value, ctx));
+        }
+      return pairs2;
+    }
+    var pairs = {
+      collection: "seq",
+      default: false,
+      tag: "tag:yaml.org,2002:pairs",
+      resolve: resolvePairs,
+      createNode: createPairs
+    };
+    exports.createPairs = createPairs;
+    exports.pairs = pairs;
+    exports.resolvePairs = resolvePairs;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/omap.js
+var require_omap = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var toJS = require_toJS();
+    var YAMLMap = require_YAMLMap();
+    var YAMLSeq = require_YAMLSeq();
+    var pairs = require_pairs();
+    var YAMLOMap = class _YAMLOMap extends YAMLSeq.YAMLSeq {
+      constructor() {
+        super();
+        this.add = YAMLMap.YAMLMap.prototype.add.bind(this);
+        this.delete = YAMLMap.YAMLMap.prototype.delete.bind(this);
+        this.get = YAMLMap.YAMLMap.prototype.get.bind(this);
+        this.has = YAMLMap.YAMLMap.prototype.has.bind(this);
+        this.set = YAMLMap.YAMLMap.prototype.set.bind(this);
+        this.tag = _YAMLOMap.tag;
+      }
+      /**
+       * If `ctx` is given, the return type is actually `Map<unknown, unknown>`,
+       * but TypeScript won't allow widening the signature of a child method.
+       */
+      toJSON(_, ctx) {
+        if (!ctx)
+          return super.toJSON(_);
+        const map2 = /* @__PURE__ */ new Map();
+        if (ctx == null ? void 0 : ctx.onCreate)
+          ctx.onCreate(map2);
+        for (const pair of this.items) {
+          let key, value;
+          if (identity.isPair(pair)) {
+            key = toJS.toJS(pair.key, "", ctx);
+            value = toJS.toJS(pair.value, key, ctx);
+          } else {
+            key = toJS.toJS(pair, "", ctx);
+          }
+          if (map2.has(key))
+            throw new Error("Ordered maps must not include duplicate keys");
+          map2.set(key, value);
+        }
+        return map2;
+      }
+      static from(schema, iterable, ctx) {
+        const pairs$1 = pairs.createPairs(schema, iterable, ctx);
+        const omap2 = new this();
+        omap2.items = pairs$1.items;
+        return omap2;
+      }
+    };
+    YAMLOMap.tag = "tag:yaml.org,2002:omap";
+    var omap = {
+      collection: "seq",
+      identify: (value) => value instanceof Map,
+      nodeClass: YAMLOMap,
+      default: false,
+      tag: "tag:yaml.org,2002:omap",
+      resolve(seq, onError) {
+        const pairs$1 = pairs.resolvePairs(seq, onError);
+        const seenKeys = [];
+        for (const { key } of pairs$1.items) {
+          if (identity.isScalar(key)) {
+            if (seenKeys.includes(key.value)) {
+              onError(`Ordered maps must not include duplicate keys: ${key.value}`);
+            } else {
+              seenKeys.push(key.value);
+            }
+          }
+        }
+        return Object.assign(new YAMLOMap(), pairs$1);
+      },
+      createNode: (schema, iterable, ctx) => YAMLOMap.from(schema, iterable, ctx)
+    };
+    exports.YAMLOMap = YAMLOMap;
+    exports.omap = omap;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/bool.js
+var require_bool2 = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    function boolStringify({ value, source }, ctx) {
+      const boolObj = value ? trueTag : falseTag;
+      if (source && boolObj.test.test(source))
+        return source;
+      return value ? ctx.options.trueStr : ctx.options.falseStr;
+    }
+    var trueTag = {
+      identify: (value) => value === true,
+      default: true,
+      tag: "tag:yaml.org,2002:bool",
+      test: /^(?:Y|y|[Yy]es|YES|[Tt]rue|TRUE|[Oo]n|ON)$/,
+      resolve: () => new Scalar.Scalar(true),
+      stringify: boolStringify
+    };
+    var falseTag = {
+      identify: (value) => value === false,
+      default: true,
+      tag: "tag:yaml.org,2002:bool",
+      test: /^(?:N|n|[Nn]o|NO|[Ff]alse|FALSE|[Oo]ff|OFF)$/,
+      resolve: () => new Scalar.Scalar(false),
+      stringify: boolStringify
+    };
+    exports.falseTag = falseTag;
+    exports.trueTag = trueTag;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/float.js
+var require_float2 = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var stringifyNumber = require_stringifyNumber();
+    var floatNaN = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
+      resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      stringify: stringifyNumber.stringifyNumber
+    };
+    var floatExp = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      format: "EXP",
+      test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
+      resolve: (str) => parseFloat(str.replace(/_/g, "")),
+      stringify(node) {
+        const num = Number(node.value);
+        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node);
+      }
+    };
+    var float = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      test: /^[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*$/,
+      resolve(str) {
+        const node = new Scalar.Scalar(parseFloat(str.replace(/_/g, "")));
+        const dot = str.indexOf(".");
+        if (dot !== -1) {
+          const f = str.substring(dot + 1).replace(/_/g, "");
+          if (f[f.length - 1] === "0")
+            node.minFractionDigits = f.length;
+        }
+        return node;
+      },
+      stringify: stringifyNumber.stringifyNumber
+    };
+    exports.float = float;
+    exports.floatExp = floatExp;
+    exports.floatNaN = floatNaN;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/int.js
+var require_int2 = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports) {
+    "use strict";
+    var stringifyNumber = require_stringifyNumber();
+    var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
+    function intResolve(str, offset, radix, { intAsBigInt }) {
+      const sign = str[0];
+      if (sign === "-" || sign === "+")
+        offset += 1;
+      str = str.substring(offset).replace(/_/g, "");
+      if (intAsBigInt) {
+        switch (radix) {
+          case 2:
+            str = `0b${str}`;
+            break;
+          case 8:
+            str = `0o${str}`;
+            break;
+          case 16:
+            str = `0x${str}`;
+            break;
+        }
+        const n2 = BigInt(str);
+        return sign === "-" ? BigInt(-1) * n2 : n2;
+      }
+      const n = parseInt(str, radix);
+      return sign === "-" ? -1 * n : n;
+    }
+    function intStringify(node, radix, prefix) {
+      const { value } = node;
+      if (intIdentify(value)) {
+        const str = value.toString(radix);
+        return value < 0 ? "-" + prefix + str.substr(1) : prefix + str;
+      }
+      return stringifyNumber.stringifyNumber(node);
+    }
+    var intBin = {
+      identify: intIdentify,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "BIN",
+      test: /^[-+]?0b[0-1_]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 2, 2, opt),
+      stringify: (node) => intStringify(node, 2, "0b")
+    };
+    var intOct = {
+      identify: intIdentify,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "OCT",
+      test: /^[-+]?0[0-7_]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 1, 8, opt),
+      stringify: (node) => intStringify(node, 8, "0")
+    };
+    var int2 = {
+      identify: intIdentify,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      test: /^[-+]?[0-9][0-9_]*$/,
+      resolve: (str, _onError, opt) => intResolve(str, 0, 10, opt),
+      stringify: stringifyNumber.stringifyNumber
+    };
+    var intHex = {
+      identify: intIdentify,
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "HEX",
+      test: /^[-+]?0x[0-9a-fA-F_]+$/,
+      resolve: (str, _onError, opt) => intResolve(str, 2, 16, opt),
+      stringify: (node) => intStringify(node, 16, "0x")
+    };
+    exports.int = int2;
+    exports.intBin = intBin;
+    exports.intHex = intHex;
+    exports.intOct = intOct;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/set.js
+var require_set = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var YAMLMap = require_YAMLMap();
+    var YAMLSet = class _YAMLSet extends YAMLMap.YAMLMap {
+      constructor(schema) {
+        super(schema);
+        this.tag = _YAMLSet.tag;
+      }
+      add(key) {
+        let pair;
+        if (identity.isPair(key))
+          pair = key;
+        else if (key && typeof key === "object" && "key" in key && "value" in key && key.value === null)
+          pair = new Pair.Pair(key.key, null);
+        else
+          pair = new Pair.Pair(key, null);
+        const prev = YAMLMap.findPair(this.items, pair.key);
+        if (!prev)
+          this.items.push(pair);
+      }
+      /**
+       * If `keepPair` is `true`, returns the Pair matching `key`.
+       * Otherwise, returns the value of that Pair's key.
+       */
+      get(key, keepPair) {
+        const pair = YAMLMap.findPair(this.items, key);
+        return !keepPair && identity.isPair(pair) ? identity.isScalar(pair.key) ? pair.key.value : pair.key : pair;
+      }
+      set(key, value) {
+        if (typeof value !== "boolean")
+          throw new Error(`Expected boolean value for set(key, value) in a YAML set, not ${typeof value}`);
+        const prev = YAMLMap.findPair(this.items, key);
+        if (prev && !value) {
+          this.items.splice(this.items.indexOf(prev), 1);
+        } else if (!prev && value) {
+          this.items.push(new Pair.Pair(key));
+        }
+      }
+      toJSON(_, ctx) {
+        return super.toJSON(_, ctx, Set);
+      }
+      toString(ctx, onComment, onChompKeep) {
+        if (!ctx)
+          return JSON.stringify(this);
+        if (this.hasAllNullValues(true))
+          return super.toString(Object.assign({}, ctx, { allNullValues: true }), onComment, onChompKeep);
+        else
+          throw new Error("Set items must all have null values");
+      }
+      static from(schema, iterable, ctx) {
+        const { replacer } = ctx;
+        const set3 = new this(schema);
+        if (iterable && Symbol.iterator in Object(iterable))
+          for (let value of iterable) {
+            if (typeof replacer === "function")
+              value = replacer.call(iterable, value, value);
+            set3.items.push(Pair.createPair(value, null, ctx));
+          }
+        return set3;
+      }
+    };
+    YAMLSet.tag = "tag:yaml.org,2002:set";
+    var set2 = {
+      collection: "map",
+      identify: (value) => value instanceof Set,
+      nodeClass: YAMLSet,
+      default: false,
+      tag: "tag:yaml.org,2002:set",
+      createNode: (schema, iterable, ctx) => YAMLSet.from(schema, iterable, ctx),
+      resolve(map2, onError) {
+        if (identity.isMap(map2)) {
+          if (map2.hasAllNullValues(true))
+            return Object.assign(new YAMLSet(), map2);
+          else
+            onError("Set items must all have null values");
+        } else
+          onError("Expected a mapping for this tag");
+        return map2;
+      }
+    };
+    exports.YAMLSet = YAMLSet;
+    exports.set = set2;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+var require_timestamp = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports) {
+    "use strict";
+    var stringifyNumber = require_stringifyNumber();
+    function parseSexagesimal(str, asBigInt) {
+      const sign = str[0];
+      const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
+      const num = (n) => asBigInt ? BigInt(n) : Number(n);
+      const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
+      return sign === "-" ? num(-1) * res : res;
+    }
+    function stringifySexagesimal(node) {
+      let { value } = node;
+      let num = (n) => n;
+      if (typeof value === "bigint")
+        num = (n) => BigInt(n);
+      else if (isNaN(value) || !isFinite(value))
+        return stringifyNumber.stringifyNumber(node);
+      let sign = "";
+      if (value < 0) {
+        sign = "-";
+        value *= num(-1);
+      }
+      const _60 = num(60);
+      const parts = [value % _60];
+      if (value < 60) {
+        parts.unshift(0);
+      } else {
+        value = (value - parts[0]) / _60;
+        parts.unshift(value % _60);
+        if (value >= 60) {
+          value = (value - parts[0]) / _60;
+          parts.unshift(value);
+        }
+      }
+      return sign + parts.map((n) => String(n).padStart(2, "0")).join(":").replace(/000000\d*$/, "");
+    }
+    var intTime = {
+      identify: (value) => typeof value === "bigint" || Number.isInteger(value),
+      default: true,
+      tag: "tag:yaml.org,2002:int",
+      format: "TIME",
+      test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+$/,
+      resolve: (str, _onError, { intAsBigInt }) => parseSexagesimal(str, intAsBigInt),
+      stringify: stringifySexagesimal
+    };
+    var floatTime = {
+      identify: (value) => typeof value === "number",
+      default: true,
+      tag: "tag:yaml.org,2002:float",
+      format: "TIME",
+      test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$/,
+      resolve: (str) => parseSexagesimal(str, false),
+      stringify: stringifySexagesimal
+    };
+    var timestamp = {
+      identify: (value) => value instanceof Date,
+      default: true,
+      tag: "tag:yaml.org,2002:timestamp",
+      // If the time zone is omitted, the timestamp is assumed to be specified in UTC. The time part
+      // may be omitted altogether, resulting in a date format. In such a case, the time part is
+      // assumed to be 00:00:00Z (start of day, UTC).
+      test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
+      resolve(str) {
+        const match = str.match(timestamp.test);
+        if (!match)
+          throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
+        const [, year, month, day, hour, minute, second] = match.map(Number);
+        const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
+        let date5 = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
+        const tz = match[8];
+        if (tz && tz !== "Z") {
+          let d = parseSexagesimal(tz, false);
+          if (Math.abs(d) < 30)
+            d *= 60;
+          date5 -= 6e4 * d;
+        }
+        return new Date(date5);
+      },
+      stringify: ({ value }) => (value == null ? void 0 : value.toISOString().replace(/(T00:00:00)?\.000Z$/, "")) ?? ""
+    };
+    exports.floatTime = floatTime;
+    exports.intTime = intTime;
+    exports.timestamp = timestamp;
+  }
+});
+
+// node_modules/yaml/dist/schema/yaml-1.1/schema.js
+var require_schema3 = __commonJS({
+  "node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports) {
+    "use strict";
+    var map2 = require_map();
+    var _null4 = require_null();
+    var seq = require_seq();
+    var string4 = require_string();
+    var binary = require_binary();
+    var bool = require_bool2();
+    var float = require_float2();
+    var int2 = require_int2();
+    var merge2 = require_merge();
+    var omap = require_omap();
+    var pairs = require_pairs();
+    var set2 = require_set();
+    var timestamp = require_timestamp();
+    var schema = [
+      map2.map,
+      seq.seq,
+      string4.string,
+      _null4.nullTag,
+      bool.trueTag,
+      bool.falseTag,
+      int2.intBin,
+      int2.intOct,
+      int2.int,
+      int2.intHex,
+      float.floatNaN,
+      float.floatExp,
+      float.float,
+      binary.binary,
+      merge2.merge,
+      omap.omap,
+      pairs.pairs,
+      set2.set,
+      timestamp.intTime,
+      timestamp.floatTime,
+      timestamp.timestamp
+    ];
+    exports.schema = schema;
+  }
+});
+
+// node_modules/yaml/dist/schema/tags.js
+var require_tags = __commonJS({
+  "node_modules/yaml/dist/schema/tags.js"(exports) {
+    "use strict";
+    var map2 = require_map();
+    var _null4 = require_null();
+    var seq = require_seq();
+    var string4 = require_string();
+    var bool = require_bool();
+    var float = require_float();
+    var int2 = require_int();
+    var schema = require_schema();
+    var schema$1 = require_schema2();
+    var binary = require_binary();
+    var merge2 = require_merge();
+    var omap = require_omap();
+    var pairs = require_pairs();
+    var schema$2 = require_schema3();
+    var set2 = require_set();
+    var timestamp = require_timestamp();
+    var schemas = /* @__PURE__ */ new Map([
+      ["core", schema.schema],
+      ["failsafe", [map2.map, seq.seq, string4.string]],
+      ["json", schema$1.schema],
+      ["yaml11", schema$2.schema],
+      ["yaml-1.1", schema$2.schema]
+    ]);
+    var tagsByName = {
+      binary: binary.binary,
+      bool: bool.boolTag,
+      float: float.float,
+      floatExp: float.floatExp,
+      floatNaN: float.floatNaN,
+      floatTime: timestamp.floatTime,
+      int: int2.int,
+      intHex: int2.intHex,
+      intOct: int2.intOct,
+      intTime: timestamp.intTime,
+      map: map2.map,
+      merge: merge2.merge,
+      null: _null4.nullTag,
+      omap: omap.omap,
+      pairs: pairs.pairs,
+      seq: seq.seq,
+      set: set2.set,
+      timestamp: timestamp.timestamp
+    };
+    var coreKnownTags = {
+      "tag:yaml.org,2002:binary": binary.binary,
+      "tag:yaml.org,2002:merge": merge2.merge,
+      "tag:yaml.org,2002:omap": omap.omap,
+      "tag:yaml.org,2002:pairs": pairs.pairs,
+      "tag:yaml.org,2002:set": set2.set,
+      "tag:yaml.org,2002:timestamp": timestamp.timestamp
+    };
+    function getTags(customTags, schemaName, addMergeTag) {
+      const schemaTags = schemas.get(schemaName);
+      if (schemaTags && !customTags) {
+        return addMergeTag && !schemaTags.includes(merge2.merge) ? schemaTags.concat(merge2.merge) : schemaTags.slice();
+      }
+      let tags = schemaTags;
+      if (!tags) {
+        if (Array.isArray(customTags))
+          tags = [];
+        else {
+          const keys = Array.from(schemas.keys()).filter((key) => key !== "yaml11").map((key) => JSON.stringify(key)).join(", ");
+          throw new Error(`Unknown schema "${schemaName}"; use one of ${keys} or define customTags array`);
+        }
+      }
+      if (Array.isArray(customTags)) {
+        for (const tag of customTags)
+          tags = tags.concat(tag);
+      } else if (typeof customTags === "function") {
+        tags = customTags(tags.slice());
+      }
+      if (addMergeTag)
+        tags = tags.concat(merge2.merge);
+      return tags.reduce((tags2, tag) => {
+        const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
+        if (!tagObj) {
+          const tagName = JSON.stringify(tag);
+          const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
+          throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
+        }
+        if (!tags2.includes(tagObj))
+          tags2.push(tagObj);
+        return tags2;
+      }, []);
+    }
+    exports.coreKnownTags = coreKnownTags;
+    exports.getTags = getTags;
+  }
+});
+
+// node_modules/yaml/dist/schema/Schema.js
+var require_Schema = __commonJS({
+  "node_modules/yaml/dist/schema/Schema.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var map2 = require_map();
+    var seq = require_seq();
+    var string4 = require_string();
+    var tags = require_tags();
+    var sortMapEntriesByKey = (a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+    var Schema = class _Schema {
+      constructor({ compat, customTags, merge: merge2, resolveKnownTags, schema, sortMapEntries, toStringDefaults }) {
+        this.compat = Array.isArray(compat) ? tags.getTags(compat, "compat") : compat ? tags.getTags(null, compat) : null;
+        this.name = typeof schema === "string" && schema || "core";
+        this.knownTags = resolveKnownTags ? tags.coreKnownTags : {};
+        this.tags = tags.getTags(customTags, this.name, merge2);
+        this.toStringOptions = toStringDefaults ?? null;
+        Object.defineProperty(this, identity.MAP, { value: map2.map });
+        Object.defineProperty(this, identity.SCALAR, { value: string4.string });
+        Object.defineProperty(this, identity.SEQ, { value: seq.seq });
+        this.sortMapEntries = typeof sortMapEntries === "function" ? sortMapEntries : sortMapEntries === true ? sortMapEntriesByKey : null;
+      }
+      clone() {
+        const copy = Object.create(_Schema.prototype, Object.getOwnPropertyDescriptors(this));
+        copy.tags = this.tags.slice();
+        return copy;
+      }
+    };
+    exports.Schema = Schema;
+  }
+});
+
+// node_modules/yaml/dist/stringify/stringifyDocument.js
+var require_stringifyDocument = __commonJS({
+  "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var stringify = require_stringify();
+    var stringifyComment = require_stringifyComment();
+    function stringifyDocument(doc, options) {
+      var _a3;
+      const lines = [];
+      let hasDirectives = options.directives === true;
+      if (options.directives !== false && doc.directives) {
+        const dir = doc.directives.toString(doc);
+        if (dir) {
+          lines.push(dir);
+          hasDirectives = true;
+        } else if (doc.directives.docStart)
+          hasDirectives = true;
+      }
+      if (hasDirectives)
+        lines.push("---");
+      const ctx = stringify.createStringifyContext(doc, options);
+      const { commentString } = ctx.options;
+      if (doc.commentBefore) {
+        if (lines.length !== 1)
+          lines.unshift("");
+        const cs = commentString(doc.commentBefore);
+        lines.unshift(stringifyComment.indentComment(cs, ""));
+      }
+      let chompKeep = false;
+      let contentComment = null;
+      if (doc.contents) {
+        if (identity.isNode(doc.contents)) {
+          if (doc.contents.spaceBefore && hasDirectives)
+            lines.push("");
+          if (doc.contents.commentBefore) {
+            const cs = commentString(doc.contents.commentBefore);
+            lines.push(stringifyComment.indentComment(cs, ""));
+          }
+          ctx.forceBlockIndent = !!doc.comment;
+          contentComment = doc.contents.comment;
+        }
+        const onChompKeep = contentComment ? void 0 : () => chompKeep = true;
+        let body = stringify.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
+        if (contentComment)
+          body += stringifyComment.lineComment(body, "", commentString(contentComment));
+        if ((body[0] === "|" || body[0] === ">") && lines[lines.length - 1] === "---") {
+          lines[lines.length - 1] = `--- ${body}`;
+        } else
+          lines.push(body);
+      } else {
+        lines.push(stringify.stringify(doc.contents, ctx));
+      }
+      if ((_a3 = doc.directives) == null ? void 0 : _a3.docEnd) {
+        if (doc.comment) {
+          const cs = commentString(doc.comment);
+          if (cs.includes("\n")) {
+            lines.push("...");
+            lines.push(stringifyComment.indentComment(cs, ""));
+          } else {
+            lines.push(`... ${cs}`);
+          }
+        } else {
+          lines.push("...");
+        }
+      } else {
+        let dc = doc.comment;
+        if (dc && chompKeep)
+          dc = dc.replace(/^\n+/, "");
+        if (dc) {
+          if ((!chompKeep || contentComment) && lines[lines.length - 1] !== "")
+            lines.push("");
+          lines.push(stringifyComment.indentComment(commentString(dc), ""));
+        }
+      }
+      return lines.join("\n") + "\n";
+    }
+    exports.stringifyDocument = stringifyDocument;
+  }
+});
+
+// node_modules/yaml/dist/doc/Document.js
+var require_Document = __commonJS({
+  "node_modules/yaml/dist/doc/Document.js"(exports) {
+    "use strict";
+    var Alias = require_Alias();
+    var Collection = require_Collection();
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var toJS = require_toJS();
+    var Schema = require_Schema();
+    var stringifyDocument = require_stringifyDocument();
+    var anchors = require_anchors();
+    var applyReviver = require_applyReviver();
+    var createNode = require_createNode();
+    var directives = require_directives();
+    var Document = class _Document {
+      constructor(value, replacer, options) {
+        this.commentBefore = null;
+        this.comment = null;
+        this.errors = [];
+        this.warnings = [];
+        Object.defineProperty(this, identity.NODE_TYPE, { value: identity.DOC });
+        let _replacer = null;
+        if (typeof replacer === "function" || Array.isArray(replacer)) {
+          _replacer = replacer;
+        } else if (options === void 0 && replacer) {
+          options = replacer;
+          replacer = void 0;
+        }
+        const opt = Object.assign({
+          intAsBigInt: false,
+          keepSourceTokens: false,
+          logLevel: "warn",
+          prettyErrors: true,
+          strict: true,
+          stringKeys: false,
+          uniqueKeys: true,
+          version: "1.2"
+        }, options);
+        this.options = opt;
+        let { version: version2 } = opt;
+        if (options == null ? void 0 : options._directives) {
+          this.directives = options._directives.atDocument();
+          if (this.directives.yaml.explicit)
+            version2 = this.directives.yaml.version;
+        } else
+          this.directives = new directives.Directives({ version: version2 });
+        this.setSchema(version2, options);
+        this.contents = value === void 0 ? null : this.createNode(value, _replacer, options);
+      }
+      /**
+       * Create a deep copy of this Document and its contents.
+       *
+       * Custom Node values that inherit from `Object` still refer to their original instances.
+       */
+      clone() {
+        const copy = Object.create(_Document.prototype, {
+          [identity.NODE_TYPE]: { value: identity.DOC }
+        });
+        copy.commentBefore = this.commentBefore;
+        copy.comment = this.comment;
+        copy.errors = this.errors.slice();
+        copy.warnings = this.warnings.slice();
+        copy.options = Object.assign({}, this.options);
+        if (this.directives)
+          copy.directives = this.directives.clone();
+        copy.schema = this.schema.clone();
+        copy.contents = identity.isNode(this.contents) ? this.contents.clone(copy.schema) : this.contents;
+        if (this.range)
+          copy.range = this.range.slice();
+        return copy;
+      }
+      /** Adds a value to the document. */
+      add(value) {
+        if (assertCollection(this.contents))
+          this.contents.add(value);
+      }
+      /** Adds a value to the document. */
+      addIn(path29, value) {
+        if (assertCollection(this.contents))
+          this.contents.addIn(path29, value);
+      }
+      /**
+       * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
+       *
+       * If `node` already has an anchor, `name` is ignored.
+       * Otherwise, the `node.anchor` value will be set to `name`,
+       * or if an anchor with that name is already present in the document,
+       * `name` will be used as a prefix for a new unique anchor.
+       * If `name` is undefined, the generated anchor will use 'a' as a prefix.
+       */
+      createAlias(node, name) {
+        if (!node.anchor) {
+          const prev = anchors.anchorNames(this);
+          node.anchor = // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+          !name || prev.has(name) ? anchors.findNewAnchor(name || "a", prev) : name;
+        }
+        return new Alias.Alias(node.anchor);
+      }
+      createNode(value, replacer, options) {
+        let _replacer = void 0;
+        if (typeof replacer === "function") {
+          value = replacer.call({ "": value }, "", value);
+          _replacer = replacer;
+        } else if (Array.isArray(replacer)) {
+          const keyToStr = (v) => typeof v === "number" || v instanceof String || v instanceof Number;
+          const asStr = replacer.filter(keyToStr).map(String);
+          if (asStr.length > 0)
+            replacer = replacer.concat(asStr);
+          _replacer = replacer;
+        } else if (options === void 0 && replacer) {
+          options = replacer;
+          replacer = void 0;
+        }
+        const { aliasDuplicateObjects, anchorPrefix, flow, keepUndefined, onTagObj, tag } = options ?? {};
+        const { onAnchor, setAnchors, sourceObjects } = anchors.createNodeAnchors(
+          this,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+          anchorPrefix || "a"
+        );
+        const ctx = {
+          aliasDuplicateObjects: aliasDuplicateObjects ?? true,
+          keepUndefined: keepUndefined ?? false,
+          onAnchor,
+          onTagObj,
+          replacer: _replacer,
+          schema: this.schema,
+          sourceObjects
+        };
+        const node = createNode.createNode(value, tag, ctx);
+        if (flow && identity.isCollection(node))
+          node.flow = true;
+        setAnchors();
+        return node;
+      }
+      /**
+       * Convert a key and a value into a `Pair` using the current schema,
+       * recursively wrapping all values as `Scalar` or `Collection` nodes.
+       */
+      createPair(key, value, options = {}) {
+        const k = this.createNode(key, null, options);
+        const v = this.createNode(value, null, options);
+        return new Pair.Pair(k, v);
+      }
+      /**
+       * Removes a value from the document.
+       * @returns `true` if the item was found and removed.
+       */
+      delete(key) {
+        return assertCollection(this.contents) ? this.contents.delete(key) : false;
+      }
+      /**
+       * Removes a value from the document.
+       * @returns `true` if the item was found and removed.
+       */
+      deleteIn(path29) {
+        if (Collection.isEmptyPath(path29)) {
+          if (this.contents == null)
+            return false;
+          this.contents = null;
+          return true;
+        }
+        return assertCollection(this.contents) ? this.contents.deleteIn(path29) : false;
+      }
+      /**
+       * Returns item at `key`, or `undefined` if not found. By default unwraps
+       * scalar values from their surrounding node; to disable set `keepScalar` to
+       * `true` (collections are always returned intact).
+       */
+      get(key, keepScalar) {
+        return identity.isCollection(this.contents) ? this.contents.get(key, keepScalar) : void 0;
+      }
+      /**
+       * Returns item at `path`, or `undefined` if not found. By default unwraps
+       * scalar values from their surrounding node; to disable set `keepScalar` to
+       * `true` (collections are always returned intact).
+       */
+      getIn(path29, keepScalar) {
+        if (Collection.isEmptyPath(path29))
+          return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path29, keepScalar) : void 0;
+      }
+      /**
+       * Checks if the document includes a value with the key `key`.
+       */
+      has(key) {
+        return identity.isCollection(this.contents) ? this.contents.has(key) : false;
+      }
+      /**
+       * Checks if the document includes a value at `path`.
+       */
+      hasIn(path29) {
+        if (Collection.isEmptyPath(path29))
+          return this.contents !== void 0;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path29) : false;
+      }
+      /**
+       * Sets a value in this document. For `!!set`, `value` needs to be a
+       * boolean to add/remove the item from the set.
+       */
+      set(key, value) {
+        if (this.contents == null) {
+          this.contents = Collection.collectionFromPath(this.schema, [key], value);
+        } else if (assertCollection(this.contents)) {
+          this.contents.set(key, value);
+        }
+      }
+      /**
+       * Sets a value in this document. For `!!set`, `value` needs to be a
+       * boolean to add/remove the item from the set.
+       */
+      setIn(path29, value) {
+        if (Collection.isEmptyPath(path29)) {
+          this.contents = value;
+        } else if (this.contents == null) {
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path29), value);
+        } else if (assertCollection(this.contents)) {
+          this.contents.setIn(path29, value);
+        }
+      }
+      /**
+       * Change the YAML version and schema used by the document.
+       * A `null` version disables support for directives, explicit tags, anchors, and aliases.
+       * It also requires the `schema` option to be given as a `Schema` instance value.
+       *
+       * Overrides all previously set schema options.
+       */
+      setSchema(version2, options = {}) {
+        if (typeof version2 === "number")
+          version2 = String(version2);
+        let opt;
+        switch (version2) {
+          case "1.1":
+            if (this.directives)
+              this.directives.yaml.version = "1.1";
+            else
+              this.directives = new directives.Directives({ version: "1.1" });
+            opt = { resolveKnownTags: false, schema: "yaml-1.1" };
+            break;
+          case "1.2":
+          case "next":
+            if (this.directives)
+              this.directives.yaml.version = version2;
+            else
+              this.directives = new directives.Directives({ version: version2 });
+            opt = { resolveKnownTags: true, schema: "core" };
+            break;
+          case null:
+            if (this.directives)
+              delete this.directives;
+            opt = null;
+            break;
+          default: {
+            const sv = JSON.stringify(version2);
+            throw new Error(`Expected '1.1', '1.2' or null as first argument, but found: ${sv}`);
+          }
+        }
+        if (options.schema instanceof Object)
+          this.schema = options.schema;
+        else if (opt)
+          this.schema = new Schema.Schema(Object.assign(opt, options));
+        else
+          throw new Error(`With a null YAML version, the { schema: Schema } option is required`);
+      }
+      // json & jsonArg are only used from toJSON()
+      toJS({ json: json2, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+        const ctx = {
+          anchors: /* @__PURE__ */ new Map(),
+          doc: this,
+          keep: !json2,
+          mapAsMap: mapAsMap === true,
+          mapKeyWarned: false,
+          maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
+        };
+        const res = toJS.toJS(this.contents, jsonArg ?? "", ctx);
+        if (typeof onAnchor === "function")
+          for (const { count, res: res2 } of ctx.anchors.values())
+            onAnchor(res2, count);
+        return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
+      }
+      /**
+       * A JSON representation of the document `contents`.
+       *
+       * @param jsonArg Used by `JSON.stringify` to indicate the array index or
+       *   property name.
+       */
+      toJSON(jsonArg, onAnchor) {
+        return this.toJS({ json: true, jsonArg, mapAsMap: false, onAnchor });
+      }
+      /** A YAML representation of the document. */
+      toString(options = {}) {
+        if (this.errors.length > 0)
+          throw new Error("Document with errors cannot be stringified");
+        if ("indent" in options && (!Number.isInteger(options.indent) || Number(options.indent) <= 0)) {
+          const s = JSON.stringify(options.indent);
+          throw new Error(`"indent" option must be a positive integer, not ${s}`);
+        }
+        return stringifyDocument.stringifyDocument(this, options);
+      }
+    };
+    function assertCollection(contents) {
+      if (identity.isCollection(contents))
+        return true;
+      throw new Error("Expected a YAML collection as document contents");
+    }
+    exports.Document = Document;
+  }
+});
+
+// node_modules/yaml/dist/errors.js
+var require_errors3 = __commonJS({
+  "node_modules/yaml/dist/errors.js"(exports) {
+    "use strict";
+    var YAMLError = class extends Error {
+      constructor(name, pos, code, message) {
+        super();
+        this.name = name;
+        this.code = code;
+        this.message = message;
+        this.pos = pos;
+      }
+    };
+    var YAMLParseError = class extends YAMLError {
+      constructor(pos, code, message) {
+        super("YAMLParseError", pos, code, message);
+      }
+    };
+    var YAMLWarning = class extends YAMLError {
+      constructor(pos, code, message) {
+        super("YAMLWarning", pos, code, message);
+      }
+    };
+    var prettifyError2 = (src, lc) => (error2) => {
+      if (error2.pos[0] === -1)
+        return;
+      error2.linePos = error2.pos.map((pos) => lc.linePos(pos));
+      const { line, col } = error2.linePos[0];
+      error2.message += ` at line ${line}, column ${col}`;
+      let ci = col - 1;
+      let lineStr = src.substring(lc.lineStarts[line - 1], lc.lineStarts[line]).replace(/[\n\r]+$/, "");
+      if (ci >= 60 && lineStr.length > 80) {
+        const trimStart = Math.min(ci - 39, lineStr.length - 79);
+        lineStr = "…" + lineStr.substring(trimStart);
+        ci -= trimStart - 1;
+      }
+      if (lineStr.length > 80)
+        lineStr = lineStr.substring(0, 79) + "…";
+      if (line > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
+        let prev = src.substring(lc.lineStarts[line - 2], lc.lineStarts[line - 1]);
+        if (prev.length > 80)
+          prev = prev.substring(0, 79) + "…\n";
+        lineStr = prev + lineStr;
+      }
+      if (/[^ ]/.test(lineStr)) {
+        let count = 1;
+        const end = error2.linePos[1];
+        if ((end == null ? void 0 : end.line) === line && end.col > col) {
+          count = Math.max(1, Math.min(end.col - col, 80 - ci));
+        }
+        const pointer = " ".repeat(ci) + "^".repeat(count);
+        error2.message += `:
+
+${lineStr}
+${pointer}
+`;
+      }
+    };
+    exports.YAMLError = YAMLError;
+    exports.YAMLParseError = YAMLParseError;
+    exports.YAMLWarning = YAMLWarning;
+    exports.prettifyError = prettifyError2;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-props.js
+var require_resolve_props = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-props.js"(exports) {
+    "use strict";
+    function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
+      let spaceBefore = false;
+      let atNewline = startOnNewline;
+      let hasSpace = startOnNewline;
+      let comment = "";
+      let commentSep = "";
+      let hasNewline = false;
+      let reqSpace = false;
+      let tab = null;
+      let anchor = null;
+      let tag = null;
+      let newlineAfterProp = null;
+      let comma = null;
+      let found = null;
+      let start = null;
+      for (const token of tokens) {
+        if (reqSpace) {
+          if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
+            onError(token.offset, "MISSING_CHAR", "Tags and anchors must be separated from the next token by white space");
+          reqSpace = false;
+        }
+        if (tab) {
+          if (atNewline && token.type !== "comment" && token.type !== "newline") {
+            onError(tab, "TAB_AS_INDENT", "Tabs are not allowed as indentation");
+          }
+          tab = null;
+        }
+        switch (token.type) {
+          case "space":
+            if (!flow && (indicator !== "doc-start" || (next == null ? void 0 : next.type) !== "flow-collection") && token.source.includes("	")) {
+              tab = token;
+            }
+            hasSpace = true;
+            break;
+          case "comment": {
+            if (!hasSpace)
+              onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
+            const cb = token.source.substring(1) || " ";
+            if (!comment)
+              comment = cb;
+            else
+              comment += commentSep + cb;
+            commentSep = "";
+            atNewline = false;
+            break;
+          }
+          case "newline":
+            if (atNewline) {
+              if (comment)
+                comment += token.source;
+              else if (!found || indicator !== "seq-item-ind")
+                spaceBefore = true;
+            } else
+              commentSep += token.source;
+            atNewline = true;
+            hasNewline = true;
+            if (anchor || tag)
+              newlineAfterProp = token;
+            hasSpace = true;
+            break;
+          case "anchor":
+            if (anchor)
+              onError(token, "MULTIPLE_ANCHORS", "A node can have at most one anchor");
+            if (token.source.endsWith(":"))
+              onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
+            anchor = token;
+            start ?? (start = token.offset);
+            atNewline = false;
+            hasSpace = false;
+            reqSpace = true;
+            break;
+          case "tag": {
+            if (tag)
+              onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
+            tag = token;
+            start ?? (start = token.offset);
+            atNewline = false;
+            hasSpace = false;
+            reqSpace = true;
+            break;
+          }
+          case indicator:
+            if (anchor || tag)
+              onError(token, "BAD_PROP_ORDER", `Anchors and tags must be after the ${token.source} indicator`);
+            if (found)
+              onError(token, "UNEXPECTED_TOKEN", `Unexpected ${token.source} in ${flow ?? "collection"}`);
+            found = token;
+            atNewline = indicator === "seq-item-ind" || indicator === "explicit-key-ind";
+            hasSpace = false;
+            break;
+          case "comma":
+            if (flow) {
+              if (comma)
+                onError(token, "UNEXPECTED_TOKEN", `Unexpected , in ${flow}`);
+              comma = token;
+              atNewline = false;
+              hasSpace = false;
+              break;
+            }
+          // else fallthrough
+          default:
+            onError(token, "UNEXPECTED_TOKEN", `Unexpected ${token.type} token`);
+            atNewline = false;
+            hasSpace = false;
+        }
+      }
+      const last = tokens[tokens.length - 1];
+      const end = last ? last.offset + last.source.length : offset;
+      if (reqSpace && next && next.type !== "space" && next.type !== "newline" && next.type !== "comma" && (next.type !== "scalar" || next.source !== "")) {
+        onError(next.offset, "MISSING_CHAR", "Tags and anchors must be separated from the next token by white space");
+      }
+      if (tab && (atNewline && tab.indent <= parentIndent || (next == null ? void 0 : next.type) === "block-map" || (next == null ? void 0 : next.type) === "block-seq"))
+        onError(tab, "TAB_AS_INDENT", "Tabs are not allowed as indentation");
+      return {
+        comma,
+        found,
+        spaceBefore,
+        comment,
+        hasNewline,
+        anchor,
+        tag,
+        newlineAfterProp,
+        end,
+        start: start ?? end
+      };
+    }
+    exports.resolveProps = resolveProps;
+  }
+});
+
+// node_modules/yaml/dist/compose/util-contains-newline.js
+var require_util_contains_newline = __commonJS({
+  "node_modules/yaml/dist/compose/util-contains-newline.js"(exports) {
+    "use strict";
+    function containsNewline(key) {
+      if (!key)
+        return null;
+      switch (key.type) {
+        case "alias":
+        case "scalar":
+        case "double-quoted-scalar":
+        case "single-quoted-scalar":
+          if (key.source.includes("\n"))
+            return true;
+          if (key.end) {
+            for (const st of key.end)
+              if (st.type === "newline")
+                return true;
+          }
+          return false;
+        case "flow-collection":
+          for (const it of key.items) {
+            for (const st of it.start)
+              if (st.type === "newline")
+                return true;
+            if (it.sep) {
+              for (const st of it.sep)
+                if (st.type === "newline")
+                  return true;
+            }
+            if (containsNewline(it.key) || containsNewline(it.value))
+              return true;
+          }
+          return false;
+        default:
+          return true;
+      }
+    }
+    exports.containsNewline = containsNewline;
+  }
+});
+
+// node_modules/yaml/dist/compose/util-flow-indent-check.js
+var require_util_flow_indent_check = __commonJS({
+  "node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports) {
+    "use strict";
+    var utilContainsNewline = require_util_contains_newline();
+    function flowIndentCheck(indent4, fc, onError) {
+      if ((fc == null ? void 0 : fc.type) === "flow-collection") {
+        const end = fc.end[0];
+        if (end.indent === indent4 && (end.source === "]" || end.source === "}") && utilContainsNewline.containsNewline(fc)) {
+          const msg = "Flow end indicator should be more indented than parent";
+          onError(end, "BAD_INDENT", msg, true);
+        }
+      }
+    }
+    exports.flowIndentCheck = flowIndentCheck;
+  }
+});
+
+// node_modules/yaml/dist/compose/util-map-includes.js
+var require_util_map_includes = __commonJS({
+  "node_modules/yaml/dist/compose/util-map-includes.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    function mapIncludes(ctx, items, search) {
+      const { uniqueKeys } = ctx.options;
+      if (uniqueKeys === false)
+        return false;
+      const isEqual = typeof uniqueKeys === "function" ? uniqueKeys : (a, b) => a === b || identity.isScalar(a) && identity.isScalar(b) && a.value === b.value;
+      return items.some((pair) => isEqual(pair.key, search));
+    }
+    exports.mapIncludes = mapIncludes;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-block-map.js
+var require_resolve_block_map = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-block-map.js"(exports) {
+    "use strict";
+    var Pair = require_Pair();
+    var YAMLMap = require_YAMLMap();
+    var resolveProps = require_resolve_props();
+    var utilContainsNewline = require_util_contains_newline();
+    var utilFlowIndentCheck = require_util_flow_indent_check();
+    var utilMapIncludes = require_util_map_includes();
+    var startColMsg = "All mapping items must start at the same column";
+    function resolveBlockMap({ composeNode, composeEmptyNode }, ctx, bm, onError, tag) {
+      var _a3;
+      const NodeClass = (tag == null ? void 0 : tag.nodeClass) ?? YAMLMap.YAMLMap;
+      const map2 = new NodeClass(ctx.schema);
+      if (ctx.atRoot)
+        ctx.atRoot = false;
+      let offset = bm.offset;
+      let commentEnd = null;
+      for (const collItem of bm.items) {
+        const { start, key, sep, value } = collItem;
+        const keyProps = resolveProps.resolveProps(start, {
+          indicator: "explicit-key-ind",
+          next: key ?? (sep == null ? void 0 : sep[0]),
+          offset,
+          onError,
+          parentIndent: bm.indent,
+          startOnNewline: true
+        });
+        const implicitKey = !keyProps.found;
+        if (implicitKey) {
+          if (key) {
+            if (key.type === "block-seq")
+              onError(offset, "BLOCK_AS_IMPLICIT_KEY", "A block sequence may not be used as an implicit map key");
+            else if ("indent" in key && key.indent !== bm.indent)
+              onError(offset, "BAD_INDENT", startColMsg);
+          }
+          if (!keyProps.anchor && !keyProps.tag && !sep) {
+            commentEnd = keyProps.end;
+            if (keyProps.comment) {
+              if (map2.comment)
+                map2.comment += "\n" + keyProps.comment;
+              else
+                map2.comment = keyProps.comment;
+            }
+            continue;
+          }
+          if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key)) {
+            onError(key ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+          }
+        } else if (((_a3 = keyProps.found) == null ? void 0 : _a3.indent) !== bm.indent) {
+          onError(offset, "BAD_INDENT", startColMsg);
+        }
+        ctx.atKey = true;
+        const keyStart = keyProps.end;
+        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
+        if (ctx.schema.compat)
+          utilFlowIndentCheck.flowIndentCheck(bm.indent, key, onError);
+        ctx.atKey = false;
+        if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
+          onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
+        const valueProps = resolveProps.resolveProps(sep ?? [], {
+          indicator: "map-value-ind",
+          next: value,
+          offset: keyNode.range[2],
+          onError,
+          parentIndent: bm.indent,
+          startOnNewline: !key || key.type === "block-scalar"
+        });
+        offset = valueProps.end;
+        if (valueProps.found) {
+          if (implicitKey) {
+            if ((value == null ? void 0 : value.type) === "block-map" && !valueProps.hasNewline)
+              onError(offset, "BLOCK_AS_IMPLICIT_KEY", "Nested mappings are not allowed in compact mappings");
+            if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
+              onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
+          }
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+          if (ctx.schema.compat)
+            utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
+          offset = valueNode.range[2];
+          const pair = new Pair.Pair(keyNode, valueNode);
+          if (ctx.options.keepSourceTokens)
+            pair.srcToken = collItem;
+          map2.items.push(pair);
+        } else {
+          if (implicitKey)
+            onError(keyNode.range, "MISSING_CHAR", "Implicit map keys need to be followed by map values");
+          if (valueProps.comment) {
+            if (keyNode.comment)
+              keyNode.comment += "\n" + valueProps.comment;
+            else
+              keyNode.comment = valueProps.comment;
+          }
+          const pair = new Pair.Pair(keyNode);
+          if (ctx.options.keepSourceTokens)
+            pair.srcToken = collItem;
+          map2.items.push(pair);
+        }
+      }
+      if (commentEnd && commentEnd < offset)
+        onError(commentEnd, "IMPOSSIBLE", "Map comment with trailing content");
+      map2.range = [bm.offset, offset, commentEnd ?? offset];
+      return map2;
+    }
+    exports.resolveBlockMap = resolveBlockMap;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-block-seq.js
+var require_resolve_block_seq = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-block-seq.js"(exports) {
+    "use strict";
+    var YAMLSeq = require_YAMLSeq();
+    var resolveProps = require_resolve_props();
+    var utilFlowIndentCheck = require_util_flow_indent_check();
+    function resolveBlockSeq({ composeNode, composeEmptyNode }, ctx, bs, onError, tag) {
+      const NodeClass = (tag == null ? void 0 : tag.nodeClass) ?? YAMLSeq.YAMLSeq;
+      const seq = new NodeClass(ctx.schema);
+      if (ctx.atRoot)
+        ctx.atRoot = false;
+      if (ctx.atKey)
+        ctx.atKey = false;
+      let offset = bs.offset;
+      let commentEnd = null;
+      for (const { start, value } of bs.items) {
+        const props = resolveProps.resolveProps(start, {
+          indicator: "seq-item-ind",
+          next: value,
+          offset,
+          onError,
+          parentIndent: bs.indent,
+          startOnNewline: true
+        });
+        if (!props.found) {
+          if (props.anchor || props.tag || value) {
+            if ((value == null ? void 0 : value.type) === "block-seq")
+              onError(props.end, "BAD_INDENT", "All sequence items must start at the same column");
+            else
+              onError(offset, "MISSING_CHAR", "Sequence item without - indicator");
+          } else {
+            commentEnd = props.end;
+            if (props.comment)
+              seq.comment = props.comment;
+            continue;
+          }
+        }
+        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start, null, props, onError);
+        if (ctx.schema.compat)
+          utilFlowIndentCheck.flowIndentCheck(bs.indent, value, onError);
+        offset = node.range[2];
+        seq.items.push(node);
+      }
+      seq.range = [bs.offset, offset, commentEnd ?? offset];
+      return seq;
+    }
+    exports.resolveBlockSeq = resolveBlockSeq;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-end.js
+var require_resolve_end = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-end.js"(exports) {
+    "use strict";
+    function resolveEnd(end, offset, reqSpace, onError) {
+      let comment = "";
+      if (end) {
+        let hasSpace = false;
+        let sep = "";
+        for (const token of end) {
+          const { source, type } = token;
+          switch (type) {
+            case "space":
+              hasSpace = true;
+              break;
+            case "comment": {
+              if (reqSpace && !hasSpace)
+                onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
+              const cb = source.substring(1) || " ";
+              if (!comment)
+                comment = cb;
+              else
+                comment += sep + cb;
+              sep = "";
+              break;
+            }
+            case "newline":
+              if (comment)
+                sep += source;
+              hasSpace = true;
+              break;
+            default:
+              onError(token, "UNEXPECTED_TOKEN", `Unexpected ${type} at node end`);
+          }
+          offset += source.length;
+        }
+      }
+      return { comment, offset };
+    }
+    exports.resolveEnd = resolveEnd;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-flow-collection.js
+var require_resolve_flow_collection = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var YAMLMap = require_YAMLMap();
+    var YAMLSeq = require_YAMLSeq();
+    var resolveEnd = require_resolve_end();
+    var resolveProps = require_resolve_props();
+    var utilContainsNewline = require_util_contains_newline();
+    var utilMapIncludes = require_util_map_includes();
+    var blockMsg = "Block collections are not allowed within flow collections";
+    var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
+    function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
+      var _a3;
+      const isMap3 = fc.start.source === "{";
+      const fcName = isMap3 ? "flow map" : "flow sequence";
+      const NodeClass = (tag == null ? void 0 : tag.nodeClass) ?? (isMap3 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const coll = new NodeClass(ctx.schema);
+      coll.flow = true;
+      const atRoot = ctx.atRoot;
+      if (atRoot)
+        ctx.atRoot = false;
+      if (ctx.atKey)
+        ctx.atKey = false;
+      let offset = fc.offset + fc.start.source.length;
+      for (let i = 0; i < fc.items.length; ++i) {
+        const collItem = fc.items[i];
+        const { start, key, sep, value } = collItem;
+        const props = resolveProps.resolveProps(start, {
+          flow: fcName,
+          indicator: "explicit-key-ind",
+          next: key ?? (sep == null ? void 0 : sep[0]),
+          offset,
+          onError,
+          parentIndent: fc.indent,
+          startOnNewline: false
+        });
+        if (!props.found) {
+          if (!props.anchor && !props.tag && !sep && !value) {
+            if (i === 0 && props.comma)
+              onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
+            else if (i < fc.items.length - 1)
+              onError(props.start, "UNEXPECTED_TOKEN", `Unexpected empty item in ${fcName}`);
+            if (props.comment) {
+              if (coll.comment)
+                coll.comment += "\n" + props.comment;
+              else
+                coll.comment = props.comment;
+            }
+            offset = props.end;
+            continue;
+          }
+          if (!isMap3 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+            onError(
+              key,
+              // checked by containsNewline()
+              "MULTILINE_IMPLICIT_KEY",
+              "Implicit keys of flow sequence pairs need to be on a single line"
+            );
+        }
+        if (i === 0) {
+          if (props.comma)
+            onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
+        } else {
+          if (!props.comma)
+            onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
+          if (props.comment) {
+            let prevItemComment = "";
+            loop: for (const st of start) {
+              switch (st.type) {
+                case "comma":
+                case "space":
+                  break;
+                case "comment":
+                  prevItemComment = st.source.substring(1);
+                  break loop;
+                default:
+                  break loop;
+              }
+            }
+            if (prevItemComment) {
+              let prev = coll.items[coll.items.length - 1];
+              if (identity.isPair(prev))
+                prev = prev.value ?? prev.key;
+              if (prev.comment)
+                prev.comment += "\n" + prevItemComment;
+              else
+                prev.comment = prevItemComment;
+              props.comment = props.comment.substring(prevItemComment.length + 1);
+            }
+          }
+        }
+        if (!isMap3 && !sep && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+          coll.items.push(valueNode);
+          offset = valueNode.range[2];
+          if (isBlock(value))
+            onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
+        } else {
+          ctx.atKey = true;
+          const keyStart = props.end;
+          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
+          if (isBlock(key))
+            onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
+          ctx.atKey = false;
+          const valueProps = resolveProps.resolveProps(sep ?? [], {
+            flow: fcName,
+            indicator: "map-value-ind",
+            next: value,
+            offset: keyNode.range[2],
+            onError,
+            parentIndent: fc.indent,
+            startOnNewline: false
+          });
+          if (valueProps.found) {
+            if (!isMap3 && !props.found && ctx.options.strict) {
+              if (sep)
+                for (const st of sep) {
+                  if (st === valueProps.found)
+                    break;
+                  if (st.type === "newline") {
+                    onError(st, "MULTILINE_IMPLICIT_KEY", "Implicit keys of flow sequence pairs need to be on a single line");
+                    break;
+                  }
+                }
+              if (props.start < valueProps.found.offset - 1024)
+                onError(valueProps.found, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit flow sequence key");
+            }
+          } else if (value) {
+            if ("source" in value && ((_a3 = value.source) == null ? void 0 : _a3[0]) === ":")
+              onError(value, "MISSING_CHAR", `Missing space after : in ${fcName}`);
+            else
+              onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
+          }
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+          if (valueNode) {
+            if (isBlock(value))
+              onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
+          } else if (valueProps.comment) {
+            if (keyNode.comment)
+              keyNode.comment += "\n" + valueProps.comment;
+            else
+              keyNode.comment = valueProps.comment;
+          }
+          const pair = new Pair.Pair(keyNode, valueNode);
+          if (ctx.options.keepSourceTokens)
+            pair.srcToken = collItem;
+          if (isMap3) {
+            const map2 = coll;
+            if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
+              onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
+            map2.items.push(pair);
+          } else {
+            const map2 = new YAMLMap.YAMLMap(ctx.schema);
+            map2.flow = true;
+            map2.items.push(pair);
+            const endRange = (valueNode ?? keyNode).range;
+            map2.range = [keyNode.range[0], endRange[1], endRange[2]];
+            coll.items.push(map2);
+          }
+          offset = valueNode ? valueNode.range[2] : valueProps.end;
+        }
+      }
+      const expectedEnd = isMap3 ? "}" : "]";
+      const [ce, ...ee] = fc.end;
+      let cePos = offset;
+      if ((ce == null ? void 0 : ce.source) === expectedEnd)
+        cePos = ce.offset + ce.source.length;
+      else {
+        const name = fcName[0].toUpperCase() + fcName.substring(1);
+        const msg = atRoot ? `${name} must end with a ${expectedEnd}` : `${name} in block collection must be sufficiently indented and end with a ${expectedEnd}`;
+        onError(offset, atRoot ? "MISSING_CHAR" : "BAD_INDENT", msg);
+        if (ce && ce.source.length !== 1)
+          ee.unshift(ce);
+      }
+      if (ee.length > 0) {
+        const end = resolveEnd.resolveEnd(ee, cePos, ctx.options.strict, onError);
+        if (end.comment) {
+          if (coll.comment)
+            coll.comment += "\n" + end.comment;
+          else
+            coll.comment = end.comment;
+        }
+        coll.range = [fc.offset, cePos, end.offset];
+      } else {
+        coll.range = [fc.offset, cePos, cePos];
+      }
+      return coll;
+    }
+    exports.resolveFlowCollection = resolveFlowCollection;
+  }
+});
+
+// node_modules/yaml/dist/compose/compose-collection.js
+var require_compose_collection = __commonJS({
+  "node_modules/yaml/dist/compose/compose-collection.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var YAMLMap = require_YAMLMap();
+    var YAMLSeq = require_YAMLSeq();
+    var resolveBlockMap = require_resolve_block_map();
+    var resolveBlockSeq = require_resolve_block_seq();
+    var resolveFlowCollection = require_resolve_flow_collection();
+    function resolveCollection(CN, ctx, token, onError, tagName, tag) {
+      const coll = token.type === "block-map" ? resolveBlockMap.resolveBlockMap(CN, ctx, token, onError, tag) : token.type === "block-seq" ? resolveBlockSeq.resolveBlockSeq(CN, ctx, token, onError, tag) : resolveFlowCollection.resolveFlowCollection(CN, ctx, token, onError, tag);
+      const Coll = coll.constructor;
+      if (tagName === "!" || tagName === Coll.tagName) {
+        coll.tag = Coll.tagName;
+        return coll;
+      }
+      if (tagName)
+        coll.tag = tagName;
+      return coll;
+    }
+    function composeCollection(CN, ctx, token, props, onError) {
+      var _a3;
+      const tagToken = props.tag;
+      const tagName = !tagToken ? null : ctx.directives.tagName(tagToken.source, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg));
+      if (token.type === "block-seq") {
+        const { anchor, newlineAfterProp: nl } = props;
+        const lastProp = anchor && tagToken ? anchor.offset > tagToken.offset ? anchor : tagToken : anchor ?? tagToken;
+        if (lastProp && (!nl || nl.offset < lastProp.offset)) {
+          const message = "Missing newline after block sequence props";
+          onError(lastProp, "MISSING_CHAR", message);
+        }
+      }
+      const expType = token.type === "block-map" ? "map" : token.type === "block-seq" ? "seq" : token.start.source === "{" ? "map" : "seq";
+      if (!tagToken || !tagName || tagName === "!" || tagName === YAMLMap.YAMLMap.tagName && expType === "map" || tagName === YAMLSeq.YAMLSeq.tagName && expType === "seq") {
+        return resolveCollection(CN, ctx, token, onError, tagName);
+      }
+      let tag = ctx.schema.tags.find((t) => t.tag === tagName && t.collection === expType);
+      if (!tag) {
+        const kt = ctx.schema.knownTags[tagName];
+        if ((kt == null ? void 0 : kt.collection) === expType) {
+          ctx.schema.tags.push(Object.assign({}, kt, { default: false }));
+          tag = kt;
+        } else {
+          if (kt) {
+            onError(tagToken, "BAD_COLLECTION_TYPE", `${kt.tag} used for ${expType} collection, but expects ${kt.collection ?? "scalar"}`, true);
+          } else {
+            onError(tagToken, "TAG_RESOLVE_FAILED", `Unresolved tag: ${tagName}`, true);
+          }
+          return resolveCollection(CN, ctx, token, onError, tagName);
+        }
+      }
+      const coll = resolveCollection(CN, ctx, token, onError, tagName, tag);
+      const res = ((_a3 = tag.resolve) == null ? void 0 : _a3.call(tag, coll, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg), ctx.options)) ?? coll;
+      const node = identity.isNode(res) ? res : new Scalar.Scalar(res);
+      node.range = coll.range;
+      node.tag = tagName;
+      if (tag == null ? void 0 : tag.format)
+        node.format = tag.format;
+      return node;
+    }
+    exports.composeCollection = composeCollection;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-block-scalar.js
+var require_resolve_block_scalar = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    function resolveBlockScalar(ctx, scalar, onError) {
+      const start = scalar.offset;
+      const header = parseBlockScalarHeader(scalar, ctx.options.strict, onError);
+      if (!header)
+        return { value: "", type: null, comment: "", range: [start, start, start] };
+      const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
+      const lines = scalar.source ? splitLines2(scalar.source) : [];
+      let chompStart = lines.length;
+      for (let i = lines.length - 1; i >= 0; --i) {
+        const content = lines[i][1];
+        if (content === "" || content === "\r")
+          chompStart = i;
+        else
+          break;
+      }
+      if (chompStart === 0) {
+        const value2 = header.chomp === "+" && lines.length > 0 ? "\n".repeat(Math.max(1, lines.length - 1)) : "";
+        let end2 = start + header.length;
+        if (scalar.source)
+          end2 += scalar.source.length;
+        return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
+      }
+      let trimIndent = scalar.indent + header.indent;
+      let offset = scalar.offset + header.length;
+      let contentStart = 0;
+      for (let i = 0; i < chompStart; ++i) {
+        const [indent4, content] = lines[i];
+        if (content === "" || content === "\r") {
+          if (header.indent === 0 && indent4.length > trimIndent)
+            trimIndent = indent4.length;
+        } else {
+          if (indent4.length < trimIndent) {
+            const message = "Block scalars with more-indented leading empty lines must use an explicit indentation indicator";
+            onError(offset + indent4.length, "MISSING_CHAR", message);
+          }
+          if (header.indent === 0)
+            trimIndent = indent4.length;
+          contentStart = i;
+          if (trimIndent === 0 && !ctx.atRoot) {
+            const message = "Block scalar values in collections must be indented";
+            onError(offset, "BAD_INDENT", message);
+          }
+          break;
+        }
+        offset += indent4.length + content.length + 1;
+      }
+      for (let i = lines.length - 1; i >= chompStart; --i) {
+        if (lines[i][0].length > trimIndent)
+          chompStart = i + 1;
+      }
+      let value = "";
+      let sep = "";
+      let prevMoreIndented = false;
+      for (let i = 0; i < contentStart; ++i)
+        value += lines[i][0].slice(trimIndent) + "\n";
+      for (let i = contentStart; i < chompStart; ++i) {
+        let [indent4, content] = lines[i];
+        offset += indent4.length + content.length + 1;
+        const crlf = content[content.length - 1] === "\r";
+        if (crlf)
+          content = content.slice(0, -1);
+        if (content && indent4.length < trimIndent) {
+          const src = header.indent ? "explicit indentation indicator" : "first line";
+          const message = `Block scalar lines must not be less indented than their ${src}`;
+          onError(offset - content.length - (crlf ? 2 : 1), "BAD_INDENT", message);
+          indent4 = "";
+        }
+        if (type === Scalar.Scalar.BLOCK_LITERAL) {
+          value += sep + indent4.slice(trimIndent) + content;
+          sep = "\n";
+        } else if (indent4.length > trimIndent || content[0] === "	") {
+          if (sep === " ")
+            sep = "\n";
+          else if (!prevMoreIndented && sep === "\n")
+            sep = "\n\n";
+          value += sep + indent4.slice(trimIndent) + content;
+          sep = "\n";
+          prevMoreIndented = true;
+        } else if (content === "") {
+          if (sep === "\n")
+            value += "\n";
+          else
+            sep = "\n";
+        } else {
+          value += sep + content;
+          sep = " ";
+          prevMoreIndented = false;
+        }
+      }
+      switch (header.chomp) {
+        case "-":
+          break;
+        case "+":
+          for (let i = chompStart; i < lines.length; ++i)
+            value += "\n" + lines[i][0].slice(trimIndent);
+          if (value[value.length - 1] !== "\n")
+            value += "\n";
+          break;
+        default:
+          value += "\n";
+      }
+      const end = start + header.length + scalar.source.length;
+      return { value, type, comment: header.comment, range: [start, end, end] };
+    }
+    function parseBlockScalarHeader({ offset, props }, strict, onError) {
+      if (props[0].type !== "block-scalar-header") {
+        onError(props[0], "IMPOSSIBLE", "Block scalar header not found");
+        return null;
+      }
+      const { source } = props[0];
+      const mode = source[0];
+      let indent4 = 0;
+      let chomp = "";
+      let error2 = -1;
+      for (let i = 1; i < source.length; ++i) {
+        const ch = source[i];
+        if (!chomp && (ch === "-" || ch === "+"))
+          chomp = ch;
+        else {
+          const n = Number(ch);
+          if (!indent4 && n)
+            indent4 = n;
+          else if (error2 === -1)
+            error2 = offset + i;
+        }
+      }
+      if (error2 !== -1)
+        onError(error2, "UNEXPECTED_TOKEN", `Block scalar header includes extra characters: ${source}`);
+      let hasSpace = false;
+      let comment = "";
+      let length = source.length;
+      for (let i = 1; i < props.length; ++i) {
+        const token = props[i];
+        switch (token.type) {
+          case "space":
+            hasSpace = true;
+          // fallthrough
+          case "newline":
+            length += token.source.length;
+            break;
+          case "comment":
+            if (strict && !hasSpace) {
+              const message = "Comments must be separated from other tokens by white space characters";
+              onError(token, "MISSING_CHAR", message);
+            }
+            length += token.source.length;
+            comment = token.source.substring(1);
+            break;
+          case "error":
+            onError(token, "UNEXPECTED_TOKEN", token.message);
+            length += token.source.length;
+            break;
+          /* istanbul ignore next should not happen */
+          default: {
+            const message = `Unexpected token in block scalar header: ${token.type}`;
+            onError(token, "UNEXPECTED_TOKEN", message);
+            const ts = token.source;
+            if (ts && typeof ts === "string")
+              length += ts.length;
+          }
+        }
+      }
+      return { mode, indent: indent4, chomp, comment, length };
+    }
+    function splitLines2(source) {
+      const split = source.split(/\n( *)/);
+      const first = split[0];
+      const m = first.match(/^( *)/);
+      const line0 = (m == null ? void 0 : m[1]) ? [m[1], first.slice(m[1].length)] : ["", first];
+      const lines = [line0];
+      for (let i = 1; i < split.length; i += 2)
+        lines.push([split[i], split[i + 1]]);
+      return lines;
+    }
+    exports.resolveBlockScalar = resolveBlockScalar;
+  }
+});
+
+// node_modules/yaml/dist/compose/resolve-flow-scalar.js
+var require_resolve_flow_scalar = __commonJS({
+  "node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports) {
+    "use strict";
+    var Scalar = require_Scalar();
+    var resolveEnd = require_resolve_end();
+    function resolveFlowScalar(scalar, strict, onError) {
+      const { offset, type, source, end } = scalar;
+      let _type;
+      let value;
+      const _onError = (rel, code, msg) => onError(offset + rel, code, msg);
+      switch (type) {
+        case "scalar":
+          _type = Scalar.Scalar.PLAIN;
+          value = plainValue(source, _onError);
+          break;
+        case "single-quoted-scalar":
+          _type = Scalar.Scalar.QUOTE_SINGLE;
+          value = singleQuotedValue(source, _onError);
+          break;
+        case "double-quoted-scalar":
+          _type = Scalar.Scalar.QUOTE_DOUBLE;
+          value = doubleQuotedValue(source, _onError);
+          break;
+        /* istanbul ignore next should not happen */
+        default:
+          onError(scalar, "UNEXPECTED_TOKEN", `Expected a flow scalar value, but found: ${type}`);
+          return {
+            value: "",
+            type: null,
+            comment: "",
+            range: [offset, offset + source.length, offset + source.length]
+          };
+      }
+      const valueEnd = offset + source.length;
+      const re = resolveEnd.resolveEnd(end, valueEnd, strict, onError);
+      return {
+        value,
+        type: _type,
+        comment: re.comment,
+        range: [offset, valueEnd, re.offset]
+      };
+    }
+    function plainValue(source, onError) {
+      let badChar = "";
+      switch (source[0]) {
+        /* istanbul ignore next should not happen */
+        case "	":
+          badChar = "a tab character";
+          break;
+        case ",":
+          badChar = "flow indicator character ,";
+          break;
+        case "%":
+          badChar = "directive indicator character %";
+          break;
+        case "|":
+        case ">": {
+          badChar = `block scalar indicator ${source[0]}`;
+          break;
+        }
+        case "@":
+        case "`": {
+          badChar = `reserved character ${source[0]}`;
+          break;
+        }
+      }
+      if (badChar)
+        onError(0, "BAD_SCALAR_START", `Plain value cannot start with ${badChar}`);
+      return foldLines(source);
+    }
+    function singleQuotedValue(source, onError) {
+      if (source[source.length - 1] !== "'" || source.length === 1)
+        onError(source.length, "MISSING_CHAR", "Missing closing 'quote");
+      return foldLines(source.slice(1, -1)).replace(/''/g, "'");
+    }
+    function foldLines(source) {
+      let first, line;
+      try {
+        first = new RegExp("(.*?)(?<![ 	])[ 	]*\r?\n", "sy");
+        line = new RegExp("[ 	]*(.*?)(?:(?<![ 	])[ 	]*)?\r?\n", "sy");
+      } catch {
+        first = /(.*?)[ \t]*\r?\n/sy;
+        line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
+      }
+      let match = first.exec(source);
+      if (!match)
+        return source;
+      let res = match[1];
+      let sep = " ";
+      let pos = first.lastIndex;
+      line.lastIndex = pos;
+      while (match = line.exec(source)) {
+        if (match[1] === "") {
+          if (sep === "\n")
+            res += sep;
+          else
+            sep = "\n";
+        } else {
+          res += sep + match[1];
+          sep = " ";
+        }
+        pos = line.lastIndex;
+      }
+      const last = /[ \t]*(.*)/sy;
+      last.lastIndex = pos;
+      match = last.exec(source);
+      return res + sep + ((match == null ? void 0 : match[1]) ?? "");
+    }
+    function doubleQuotedValue(source, onError) {
+      let res = "";
+      for (let i = 1; i < source.length - 1; ++i) {
+        const ch = source[i];
+        if (ch === "\r" && source[i + 1] === "\n")
+          continue;
+        if (ch === "\n") {
+          const { fold, offset } = foldNewline(source, i);
+          res += fold;
+          i = offset;
+        } else if (ch === "\\") {
+          let next = source[++i];
+          const cc = escapeCodes[next];
+          if (cc)
+            res += cc;
+          else if (next === "\n") {
+            next = source[i + 1];
+            while (next === " " || next === "	")
+              next = source[++i + 1];
+          } else if (next === "\r" && source[i + 1] === "\n") {
+            next = source[++i + 1];
+            while (next === " " || next === "	")
+              next = source[++i + 1];
+          } else if (next === "x" || next === "u" || next === "U") {
+            const length = { x: 2, u: 4, U: 8 }[next];
+            res += parseCharCode(source, i + 1, length, onError);
+            i += length;
+          } else {
+            const raw = source.substr(i - 1, 2);
+            onError(i - 1, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
+            res += raw;
+          }
+        } else if (ch === " " || ch === "	") {
+          const wsStart = i;
+          let next = source[i + 1];
+          while (next === " " || next === "	")
+            next = source[++i + 1];
+          if (next !== "\n" && !(next === "\r" && source[i + 2] === "\n"))
+            res += i > wsStart ? source.slice(wsStart, i + 1) : ch;
+        } else {
+          res += ch;
+        }
+      }
+      if (source[source.length - 1] !== '"' || source.length === 1)
+        onError(source.length, "MISSING_CHAR", 'Missing closing "quote');
+      return res;
+    }
+    function foldNewline(source, offset) {
+      let fold = "";
+      let ch = source[offset + 1];
+      while (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
+        if (ch === "\r" && source[offset + 2] !== "\n")
+          break;
+        if (ch === "\n")
+          fold += "\n";
+        offset += 1;
+        ch = source[offset + 1];
+      }
+      if (!fold)
+        fold = " ";
+      return { fold, offset };
+    }
+    var escapeCodes = {
+      "0": "\0",
+      // null character
+      a: "\x07",
+      // bell character
+      b: "\b",
+      // backspace
+      e: "\x1B",
+      // escape character
+      f: "\f",
+      // form feed
+      n: "\n",
+      // line feed
+      r: "\r",
+      // carriage return
+      t: "	",
+      // horizontal tab
+      v: "\v",
+      // vertical tab
+      N: "",
+      // Unicode next line
+      _: " ",
+      // Unicode non-breaking space
+      L: "\u2028",
+      // Unicode line separator
+      P: "\u2029",
+      // Unicode paragraph separator
+      " ": " ",
+      '"': '"',
+      "/": "/",
+      "\\": "\\",
+      "	": "	"
+    };
+    function parseCharCode(source, offset, length, onError) {
+      const cc = source.substr(offset, length);
+      const ok = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
+      const code = ok ? parseInt(cc, 16) : NaN;
+      if (isNaN(code)) {
+        const raw = source.substr(offset - 2, length + 2);
+        onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
+        return raw;
+      }
+      return String.fromCodePoint(code);
+    }
+    exports.resolveFlowScalar = resolveFlowScalar;
+  }
+});
+
+// node_modules/yaml/dist/compose/compose-scalar.js
+var require_compose_scalar = __commonJS({
+  "node_modules/yaml/dist/compose/compose-scalar.js"(exports) {
+    "use strict";
+    var identity = require_identity();
+    var Scalar = require_Scalar();
+    var resolveBlockScalar = require_resolve_block_scalar();
+    var resolveFlowScalar = require_resolve_flow_scalar();
+    function composeScalar(ctx, token, tagToken, onError) {
+      const { value, type, comment, range } = token.type === "block-scalar" ? resolveBlockScalar.resolveBlockScalar(ctx, token, onError) : resolveFlowScalar.resolveFlowScalar(token, ctx.options.strict, onError);
+      const tagName = tagToken ? ctx.directives.tagName(tagToken.source, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg)) : null;
+      let tag;
+      if (ctx.options.stringKeys && ctx.atKey) {
+        tag = ctx.schema[identity.SCALAR];
+      } else if (tagName)
+        tag = findScalarTagByName(ctx.schema, value, tagName, tagToken, onError);
+      else if (token.type === "scalar")
+        tag = findScalarTagByTest(ctx, value, token, onError);
+      else
+        tag = ctx.schema[identity.SCALAR];
+      let scalar;
+      try {
+        const res = tag.resolve(value, (msg) => onError(tagToken ?? token, "TAG_RESOLVE_FAILED", msg), ctx.options);
+        scalar = identity.isScalar(res) ? res : new Scalar.Scalar(res);
+      } catch (error2) {
+        const msg = error2 instanceof Error ? error2.message : String(error2);
+        onError(tagToken ?? token, "TAG_RESOLVE_FAILED", msg);
+        scalar = new Scalar.Scalar(value);
+      }
+      scalar.range = range;
+      scalar.source = value;
+      if (type)
+        scalar.type = type;
+      if (tagName)
+        scalar.tag = tagName;
+      if (tag.format)
+        scalar.format = tag.format;
+      if (comment)
+        scalar.comment = comment;
+      return scalar;
+    }
+    function findScalarTagByName(schema, value, tagName, tagToken, onError) {
+      var _a3;
+      if (tagName === "!")
+        return schema[identity.SCALAR];
+      const matchWithTest = [];
+      for (const tag of schema.tags) {
+        if (!tag.collection && tag.tag === tagName) {
+          if (tag.default && tag.test)
+            matchWithTest.push(tag);
+          else
+            return tag;
+        }
+      }
+      for (const tag of matchWithTest)
+        if ((_a3 = tag.test) == null ? void 0 : _a3.test(value))
+          return tag;
+      const kt = schema.knownTags[tagName];
+      if (kt && !kt.collection) {
+        schema.tags.push(Object.assign({}, kt, { default: false, test: void 0 }));
+        return kt;
+      }
+      onError(tagToken, "TAG_RESOLVE_FAILED", `Unresolved tag: ${tagName}`, tagName !== "tag:yaml.org,2002:str");
+      return schema[identity.SCALAR];
+    }
+    function findScalarTagByTest({ atKey, directives, schema }, value, token, onError) {
+      const tag = schema.tags.find((tag2) => {
+        var _a3;
+        return (tag2.default === true || atKey && tag2.default === "key") && ((_a3 = tag2.test) == null ? void 0 : _a3.test(value));
+      }) || schema[identity.SCALAR];
+      if (schema.compat) {
+        const compat = schema.compat.find((tag2) => {
+          var _a3;
+          return tag2.default && ((_a3 = tag2.test) == null ? void 0 : _a3.test(value));
+        }) ?? schema[identity.SCALAR];
+        if (tag.tag !== compat.tag) {
+          const ts = directives.tagString(tag.tag);
+          const cs = directives.tagString(compat.tag);
+          const msg = `Value may be parsed as either ${ts} or ${cs}`;
+          onError(token, "TAG_RESOLVE_FAILED", msg, true);
+        }
+      }
+      return tag;
+    }
+    exports.composeScalar = composeScalar;
+  }
+});
+
+// node_modules/yaml/dist/compose/util-empty-scalar-position.js
+var require_util_empty_scalar_position = __commonJS({
+  "node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports) {
+    "use strict";
+    function emptyScalarPosition(offset, before, pos) {
+      if (before) {
+        pos ?? (pos = before.length);
+        for (let i = pos - 1; i >= 0; --i) {
+          let st = before[i];
+          switch (st.type) {
+            case "space":
+            case "comment":
+            case "newline":
+              offset -= st.source.length;
+              continue;
+          }
+          st = before[++i];
+          while ((st == null ? void 0 : st.type) === "space") {
+            offset += st.source.length;
+            st = before[++i];
+          }
+          break;
+        }
+      }
+      return offset;
+    }
+    exports.emptyScalarPosition = emptyScalarPosition;
+  }
+});
+
+// node_modules/yaml/dist/compose/compose-node.js
+var require_compose_node = __commonJS({
+  "node_modules/yaml/dist/compose/compose-node.js"(exports) {
+    "use strict";
+    var Alias = require_Alias();
+    var identity = require_identity();
+    var composeCollection = require_compose_collection();
+    var composeScalar = require_compose_scalar();
+    var resolveEnd = require_resolve_end();
+    var utilEmptyScalarPosition = require_util_empty_scalar_position();
+    var CN = { composeNode, composeEmptyNode };
+    function composeNode(ctx, token, props, onError) {
+      const atKey = ctx.atKey;
+      const { spaceBefore, comment, anchor, tag } = props;
+      let node;
+      let isSrcToken = true;
+      switch (token.type) {
+        case "alias":
+          node = composeAlias(ctx, token, onError);
+          if (anchor || tag)
+            onError(token, "ALIAS_PROPS", "An alias node must not specify any properties");
+          break;
+        case "scalar":
+        case "single-quoted-scalar":
+        case "double-quoted-scalar":
+        case "block-scalar":
+          node = composeScalar.composeScalar(ctx, token, tag, onError);
+          if (anchor)
+            node.anchor = anchor.source.substring(1);
+          break;
+        case "block-map":
+        case "block-seq":
+        case "flow-collection":
+          node = composeCollection.composeCollection(CN, ctx, token, props, onError);
+          if (anchor)
+            node.anchor = anchor.source.substring(1);
+          break;
+        default: {
+          const message = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
+          onError(token, "UNEXPECTED_TOKEN", message);
+          node = composeEmptyNode(ctx, token.offset, void 0, null, props, onError);
+          isSrcToken = false;
+        }
+      }
+      if (anchor && node.anchor === "")
+        onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
+      if (atKey && ctx.options.stringKeys && (!identity.isScalar(node) || typeof node.value !== "string" || node.tag && node.tag !== "tag:yaml.org,2002:str")) {
+        const msg = "With stringKeys, all keys must be strings";
+        onError(tag ?? token, "NON_STRING_KEY", msg);
+      }
+      if (spaceBefore)
+        node.spaceBefore = true;
+      if (comment) {
+        if (token.type === "scalar" && token.source === "")
+          node.comment = comment;
+        else
+          node.commentBefore = comment;
+      }
+      if (ctx.options.keepSourceTokens && isSrcToken)
+        node.srcToken = token;
+      return node;
+    }
+    function composeEmptyNode(ctx, offset, before, pos, { spaceBefore, comment, anchor, tag, end }, onError) {
+      const token = {
+        type: "scalar",
+        offset: utilEmptyScalarPosition.emptyScalarPosition(offset, before, pos),
+        indent: -1,
+        source: ""
+      };
+      const node = composeScalar.composeScalar(ctx, token, tag, onError);
+      if (anchor) {
+        node.anchor = anchor.source.substring(1);
+        if (node.anchor === "")
+          onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
+      }
+      if (spaceBefore)
+        node.spaceBefore = true;
+      if (comment) {
+        node.comment = comment;
+        node.range[2] = end;
+      }
+      return node;
+    }
+    function composeAlias({ options }, { offset, source, end }, onError) {
+      const alias = new Alias.Alias(source.substring(1));
+      if (alias.source === "")
+        onError(offset, "BAD_ALIAS", "Alias cannot be an empty string");
+      if (alias.source.endsWith(":"))
+        onError(offset + source.length - 1, "BAD_ALIAS", "Alias ending in : is ambiguous", true);
+      const valueEnd = offset + source.length;
+      const re = resolveEnd.resolveEnd(end, valueEnd, options.strict, onError);
+      alias.range = [offset, valueEnd, re.offset];
+      if (re.comment)
+        alias.comment = re.comment;
+      return alias;
+    }
+    exports.composeEmptyNode = composeEmptyNode;
+    exports.composeNode = composeNode;
+  }
+});
+
+// node_modules/yaml/dist/compose/compose-doc.js
+var require_compose_doc = __commonJS({
+  "node_modules/yaml/dist/compose/compose-doc.js"(exports) {
+    "use strict";
+    var Document = require_Document();
+    var composeNode = require_compose_node();
+    var resolveEnd = require_resolve_end();
+    var resolveProps = require_resolve_props();
+    function composeDoc(options, directives, { offset, start, value, end }, onError) {
+      const opts = Object.assign({ _directives: directives }, options);
+      const doc = new Document.Document(void 0, opts);
+      const ctx = {
+        atKey: false,
+        atRoot: true,
+        directives: doc.directives,
+        options: doc.options,
+        schema: doc.schema
+      };
+      const props = resolveProps.resolveProps(start, {
+        indicator: "doc-start",
+        next: value ?? (end == null ? void 0 : end[0]),
+        offset,
+        onError,
+        parentIndent: 0,
+        startOnNewline: true
+      });
+      if (props.found) {
+        doc.directives.docStart = true;
+        if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
+          onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
+      }
+      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start, null, props, onError);
+      const contentEnd = doc.contents.range[2];
+      const re = resolveEnd.resolveEnd(end, contentEnd, false, onError);
+      if (re.comment)
+        doc.comment = re.comment;
+      doc.range = [offset, contentEnd, re.offset];
+      return doc;
+    }
+    exports.composeDoc = composeDoc;
+  }
+});
+
+// node_modules/yaml/dist/compose/composer.js
+var require_composer = __commonJS({
+  "node_modules/yaml/dist/compose/composer.js"(exports) {
+    "use strict";
+    var node_process = __require("process");
+    var directives = require_directives();
+    var Document = require_Document();
+    var errors = require_errors3();
+    var identity = require_identity();
+    var composeDoc = require_compose_doc();
+    var resolveEnd = require_resolve_end();
+    function getErrorPos(src) {
+      if (typeof src === "number")
+        return [src, src + 1];
+      if (Array.isArray(src))
+        return src.length === 2 ? src : [src[0], src[1]];
+      const { offset, source } = src;
+      return [offset, offset + (typeof source === "string" ? source.length : 1)];
+    }
+    function parsePrelude(prelude) {
+      var _a3;
+      let comment = "";
+      let atComment = false;
+      let afterEmptyLine = false;
+      for (let i = 0; i < prelude.length; ++i) {
+        const source = prelude[i];
+        switch (source[0]) {
+          case "#":
+            comment += (comment === "" ? "" : afterEmptyLine ? "\n\n" : "\n") + (source.substring(1) || " ");
+            atComment = true;
+            afterEmptyLine = false;
+            break;
+          case "%":
+            if (((_a3 = prelude[i + 1]) == null ? void 0 : _a3[0]) !== "#")
+              i += 1;
+            atComment = false;
+            break;
+          default:
+            if (!atComment)
+              afterEmptyLine = true;
+            atComment = false;
+        }
+      }
+      return { comment, afterEmptyLine };
+    }
+    var Composer = class {
+      constructor(options = {}) {
+        this.doc = null;
+        this.atDirectives = false;
+        this.prelude = [];
+        this.errors = [];
+        this.warnings = [];
+        this.onError = (source, code, message, warning) => {
+          const pos = getErrorPos(source);
+          if (warning)
+            this.warnings.push(new errors.YAMLWarning(pos, code, message));
+          else
+            this.errors.push(new errors.YAMLParseError(pos, code, message));
+        };
+        this.directives = new directives.Directives({ version: options.version || "1.2" });
+        this.options = options;
+      }
+      decorate(doc, afterDoc) {
+        const { comment, afterEmptyLine } = parsePrelude(this.prelude);
+        if (comment) {
+          const dc = doc.contents;
+          if (afterDoc) {
+            doc.comment = doc.comment ? `${doc.comment}
+${comment}` : comment;
+          } else if (afterEmptyLine || doc.directives.docStart || !dc) {
+            doc.commentBefore = comment;
+          } else if (identity.isCollection(dc) && !dc.flow && dc.items.length > 0) {
+            let it = dc.items[0];
+            if (identity.isPair(it))
+              it = it.key;
+            const cb = it.commentBefore;
+            it.commentBefore = cb ? `${comment}
+${cb}` : comment;
+          } else {
+            const cb = dc.commentBefore;
+            dc.commentBefore = cb ? `${comment}
+${cb}` : comment;
+          }
+        }
+        if (afterDoc) {
+          Array.prototype.push.apply(doc.errors, this.errors);
+          Array.prototype.push.apply(doc.warnings, this.warnings);
+        } else {
+          doc.errors = this.errors;
+          doc.warnings = this.warnings;
+        }
+        this.prelude = [];
+        this.errors = [];
+        this.warnings = [];
+      }
+      /**
+       * Current stream status information.
+       *
+       * Mostly useful at the end of input for an empty stream.
+       */
+      streamInfo() {
+        return {
+          comment: parsePrelude(this.prelude).comment,
+          directives: this.directives,
+          errors: this.errors,
+          warnings: this.warnings
+        };
+      }
+      /**
+       * Compose tokens into documents.
+       *
+       * @param forceDoc - If the stream contains no document, still emit a final document including any comments and directives that would be applied to a subsequent document.
+       * @param endOffset - Should be set if `forceDoc` is also set, to set the document range end and to indicate errors correctly.
+       */
+      *compose(tokens, forceDoc = false, endOffset = -1) {
+        for (const token of tokens)
+          yield* this.next(token);
+        yield* this.end(forceDoc, endOffset);
+      }
+      /** Advance the composer by one CST token. */
+      *next(token) {
+        if (node_process.env.LOG_STREAM)
+          console.dir(token, { depth: null });
+        switch (token.type) {
+          case "directive":
+            this.directives.add(token.source, (offset, message, warning) => {
+              const pos = getErrorPos(token);
+              pos[0] += offset;
+              this.onError(pos, "BAD_DIRECTIVE", message, warning);
+            });
+            this.prelude.push(token.source);
+            this.atDirectives = true;
+            break;
+          case "document": {
+            const doc = composeDoc.composeDoc(this.options, this.directives, token, this.onError);
+            if (this.atDirectives && !doc.directives.docStart)
+              this.onError(token, "MISSING_CHAR", "Missing directives-end/doc-start indicator line");
+            this.decorate(doc, false);
+            if (this.doc)
+              yield this.doc;
+            this.doc = doc;
+            this.atDirectives = false;
+            break;
+          }
+          case "byte-order-mark":
+          case "space":
+            break;
+          case "comment":
+          case "newline":
+            this.prelude.push(token.source);
+            break;
+          case "error": {
+            const msg = token.source ? `${token.message}: ${JSON.stringify(token.source)}` : token.message;
+            const error2 = new errors.YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", msg);
+            if (this.atDirectives || !this.doc)
+              this.errors.push(error2);
+            else
+              this.doc.errors.push(error2);
+            break;
+          }
+          case "doc-end": {
+            if (!this.doc) {
+              const msg = "Unexpected doc-end without preceding document";
+              this.errors.push(new errors.YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", msg));
+              break;
+            }
+            this.doc.directives.docEnd = true;
+            const end = resolveEnd.resolveEnd(token.end, token.offset + token.source.length, this.doc.options.strict, this.onError);
+            this.decorate(this.doc, true);
+            if (end.comment) {
+              const dc = this.doc.comment;
+              this.doc.comment = dc ? `${dc}
+${end.comment}` : end.comment;
+            }
+            this.doc.range[2] = end.offset;
+            break;
+          }
+          default:
+            this.errors.push(new errors.YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", `Unsupported token ${token.type}`));
+        }
+      }
+      /**
+       * Call at end of input to yield any remaining document.
+       *
+       * @param forceDoc - If the stream contains no document, still emit a final document including any comments and directives that would be applied to a subsequent document.
+       * @param endOffset - Should be set if `forceDoc` is also set, to set the document range end and to indicate errors correctly.
+       */
+      *end(forceDoc = false, endOffset = -1) {
+        if (this.doc) {
+          this.decorate(this.doc, true);
+          yield this.doc;
+          this.doc = null;
+        } else if (forceDoc) {
+          const opts = Object.assign({ _directives: this.directives }, this.options);
+          const doc = new Document.Document(void 0, opts);
+          if (this.atDirectives)
+            this.onError(endOffset, "MISSING_CHAR", "Missing directives-end indicator line");
+          doc.range = [0, endOffset, endOffset];
+          this.decorate(doc, false);
+          yield doc;
+        }
+      }
+    };
+    exports.Composer = Composer;
+  }
+});
+
+// node_modules/yaml/dist/parse/cst-scalar.js
+var require_cst_scalar = __commonJS({
+  "node_modules/yaml/dist/parse/cst-scalar.js"(exports) {
+    "use strict";
+    var resolveBlockScalar = require_resolve_block_scalar();
+    var resolveFlowScalar = require_resolve_flow_scalar();
+    var errors = require_errors3();
+    var stringifyString = require_stringifyString();
+    function resolveAsScalar(token, strict = true, onError) {
+      if (token) {
+        const _onError = (pos, code, message) => {
+          const offset = typeof pos === "number" ? pos : Array.isArray(pos) ? pos[0] : pos.offset;
+          if (onError)
+            onError(offset, code, message);
+          else
+            throw new errors.YAMLParseError([offset, offset + 1], code, message);
+        };
+        switch (token.type) {
+          case "scalar":
+          case "single-quoted-scalar":
+          case "double-quoted-scalar":
+            return resolveFlowScalar.resolveFlowScalar(token, strict, _onError);
+          case "block-scalar":
+            return resolveBlockScalar.resolveBlockScalar({ options: { strict } }, token, _onError);
+        }
+      }
+      return null;
+    }
+    function createScalarToken(value, context) {
+      const { implicitKey = false, indent: indent4, inFlow = false, offset = -1, type = "PLAIN" } = context;
+      const source = stringifyString.stringifyString({ type, value }, {
+        implicitKey,
+        indent: indent4 > 0 ? " ".repeat(indent4) : "",
+        inFlow,
+        options: { blockQuote: true, lineWidth: -1 }
+      });
+      const end = context.end ?? [
+        { type: "newline", offset: -1, indent: indent4, source: "\n" }
+      ];
+      switch (source[0]) {
+        case "|":
+        case ">": {
+          const he = source.indexOf("\n");
+          const head = source.substring(0, he);
+          const body = source.substring(he + 1) + "\n";
+          const props = [
+            { type: "block-scalar-header", offset, indent: indent4, source: head }
+          ];
+          if (!addEndtoBlockProps(props, end))
+            props.push({ type: "newline", offset: -1, indent: indent4, source: "\n" });
+          return { type: "block-scalar", offset, indent: indent4, props, source: body };
+        }
+        case '"':
+          return { type: "double-quoted-scalar", offset, indent: indent4, source, end };
+        case "'":
+          return { type: "single-quoted-scalar", offset, indent: indent4, source, end };
+        default:
+          return { type: "scalar", offset, indent: indent4, source, end };
+      }
+    }
+    function setScalarValue(token, value, context = {}) {
+      let { afterKey = false, implicitKey = false, inFlow = false, type } = context;
+      let indent4 = "indent" in token ? token.indent : null;
+      if (afterKey && typeof indent4 === "number")
+        indent4 += 2;
+      if (!type)
+        switch (token.type) {
+          case "single-quoted-scalar":
+            type = "QUOTE_SINGLE";
+            break;
+          case "double-quoted-scalar":
+            type = "QUOTE_DOUBLE";
+            break;
+          case "block-scalar": {
+            const header = token.props[0];
+            if (header.type !== "block-scalar-header")
+              throw new Error("Invalid block scalar header");
+            type = header.source[0] === ">" ? "BLOCK_FOLDED" : "BLOCK_LITERAL";
+            break;
+          }
+          default:
+            type = "PLAIN";
+        }
+      const source = stringifyString.stringifyString({ type, value }, {
+        implicitKey: implicitKey || indent4 === null,
+        indent: indent4 !== null && indent4 > 0 ? " ".repeat(indent4) : "",
+        inFlow,
+        options: { blockQuote: true, lineWidth: -1 }
+      });
+      switch (source[0]) {
+        case "|":
+        case ">":
+          setBlockScalarValue(token, source);
+          break;
+        case '"':
+          setFlowScalarValue(token, source, "double-quoted-scalar");
+          break;
+        case "'":
+          setFlowScalarValue(token, source, "single-quoted-scalar");
+          break;
+        default:
+          setFlowScalarValue(token, source, "scalar");
+      }
+    }
+    function setBlockScalarValue(token, source) {
+      const he = source.indexOf("\n");
+      const head = source.substring(0, he);
+      const body = source.substring(he + 1) + "\n";
+      if (token.type === "block-scalar") {
+        const header = token.props[0];
+        if (header.type !== "block-scalar-header")
+          throw new Error("Invalid block scalar header");
+        header.source = head;
+        token.source = body;
+      } else {
+        const { offset } = token;
+        const indent4 = "indent" in token ? token.indent : -1;
+        const props = [
+          { type: "block-scalar-header", offset, indent: indent4, source: head }
+        ];
+        if (!addEndtoBlockProps(props, "end" in token ? token.end : void 0))
+          props.push({ type: "newline", offset: -1, indent: indent4, source: "\n" });
+        for (const key of Object.keys(token))
+          if (key !== "type" && key !== "offset")
+            delete token[key];
+        Object.assign(token, { type: "block-scalar", indent: indent4, props, source: body });
+      }
+    }
+    function addEndtoBlockProps(props, end) {
+      if (end)
+        for (const st of end)
+          switch (st.type) {
+            case "space":
+            case "comment":
+              props.push(st);
+              break;
+            case "newline":
+              props.push(st);
+              return true;
+          }
+      return false;
+    }
+    function setFlowScalarValue(token, source, type) {
+      switch (token.type) {
+        case "scalar":
+        case "double-quoted-scalar":
+        case "single-quoted-scalar":
+          token.type = type;
+          token.source = source;
+          break;
+        case "block-scalar": {
+          const end = token.props.slice(1);
+          let oa = source.length;
+          if (token.props[0].type === "block-scalar-header")
+            oa -= token.props[0].source.length;
+          for (const tok of end)
+            tok.offset += oa;
+          delete token.props;
+          Object.assign(token, { type, source, end });
+          break;
+        }
+        case "block-map":
+        case "block-seq": {
+          const offset = token.offset + source.length;
+          const nl = { type: "newline", offset, indent: token.indent, source: "\n" };
+          delete token.items;
+          Object.assign(token, { type, source, end: [nl] });
+          break;
+        }
+        default: {
+          const indent4 = "indent" in token ? token.indent : -1;
+          const end = "end" in token && Array.isArray(token.end) ? token.end.filter((st) => st.type === "space" || st.type === "comment" || st.type === "newline") : [];
+          for (const key of Object.keys(token))
+            if (key !== "type" && key !== "offset")
+              delete token[key];
+          Object.assign(token, { type, indent: indent4, source, end });
+        }
+      }
+    }
+    exports.createScalarToken = createScalarToken;
+    exports.resolveAsScalar = resolveAsScalar;
+    exports.setScalarValue = setScalarValue;
+  }
+});
+
+// node_modules/yaml/dist/parse/cst-stringify.js
+var require_cst_stringify = __commonJS({
+  "node_modules/yaml/dist/parse/cst-stringify.js"(exports) {
+    "use strict";
+    var stringify = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
+    function stringifyToken(token) {
+      switch (token.type) {
+        case "block-scalar": {
+          let res = "";
+          for (const tok of token.props)
+            res += stringifyToken(tok);
+          return res + token.source;
+        }
+        case "block-map":
+        case "block-seq": {
+          let res = "";
+          for (const item of token.items)
+            res += stringifyItem(item);
+          return res;
+        }
+        case "flow-collection": {
+          let res = token.start.source;
+          for (const item of token.items)
+            res += stringifyItem(item);
+          for (const st of token.end)
+            res += st.source;
+          return res;
+        }
+        case "document": {
+          let res = stringifyItem(token);
+          if (token.end)
+            for (const st of token.end)
+              res += st.source;
+          return res;
+        }
+        default: {
+          let res = token.source;
+          if ("end" in token && token.end)
+            for (const st of token.end)
+              res += st.source;
+          return res;
+        }
+      }
+    }
+    function stringifyItem({ start, key, sep, value }) {
+      let res = "";
+      for (const st of start)
+        res += st.source;
+      if (key)
+        res += stringifyToken(key);
+      if (sep)
+        for (const st of sep)
+          res += st.source;
+      if (value)
+        res += stringifyToken(value);
+      return res;
+    }
+    exports.stringify = stringify;
+  }
+});
+
+// node_modules/yaml/dist/parse/cst-visit.js
+var require_cst_visit = __commonJS({
+  "node_modules/yaml/dist/parse/cst-visit.js"(exports) {
+    "use strict";
+    var BREAK = Symbol("break visit");
+    var SKIP = Symbol("skip children");
+    var REMOVE = Symbol("remove item");
+    function visit(cst, visitor) {
+      if ("type" in cst && cst.type === "document")
+        cst = { start: cst.start, value: cst.value };
+      _visit(Object.freeze([]), cst, visitor);
+    }
+    visit.BREAK = BREAK;
+    visit.SKIP = SKIP;
+    visit.REMOVE = REMOVE;
+    visit.itemAtPath = (cst, path29) => {
+      let item = cst;
+      for (const [field, index] of path29) {
+        const tok = item == null ? void 0 : item[field];
+        if (tok && "items" in tok) {
+          item = tok.items[index];
+        } else
+          return void 0;
+      }
+      return item;
+    };
+    visit.parentCollection = (cst, path29) => {
+      const parent = visit.itemAtPath(cst, path29.slice(0, -1));
+      const field = path29[path29.length - 1][0];
+      const coll = parent == null ? void 0 : parent[field];
+      if (coll && "items" in coll)
+        return coll;
+      throw new Error("Parent collection not found");
+    };
+    function _visit(path29, item, visitor) {
+      let ctrl = visitor(item, path29);
+      if (typeof ctrl === "symbol")
+        return ctrl;
+      for (const field of ["key", "value"]) {
+        const token = item[field];
+        if (token && "items" in token) {
+          for (let i = 0; i < token.items.length; ++i) {
+            const ci = _visit(Object.freeze(path29.concat([[field, i]])), token.items[i], visitor);
+            if (typeof ci === "number")
+              i = ci - 1;
+            else if (ci === BREAK)
+              return BREAK;
+            else if (ci === REMOVE) {
+              token.items.splice(i, 1);
+              i -= 1;
+            }
+          }
+          if (typeof ctrl === "function" && field === "key")
+            ctrl = ctrl(item, path29);
+        }
+      }
+      return typeof ctrl === "function" ? ctrl(item, path29) : ctrl;
+    }
+    exports.visit = visit;
+  }
+});
+
+// node_modules/yaml/dist/parse/cst.js
+var require_cst = __commonJS({
+  "node_modules/yaml/dist/parse/cst.js"(exports) {
+    "use strict";
+    var cstScalar = require_cst_scalar();
+    var cstStringify = require_cst_stringify();
+    var cstVisit = require_cst_visit();
+    var BOM = "\uFEFF";
+    var DOCUMENT = "";
+    var FLOW_END = "";
+    var SCALAR = "";
+    var isCollection = (token) => !!token && "items" in token;
+    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    function prettyToken(token) {
+      switch (token) {
+        case BOM:
+          return "<BOM>";
+        case DOCUMENT:
+          return "<DOC>";
+        case FLOW_END:
+          return "<FLOW_END>";
+        case SCALAR:
+          return "<SCALAR>";
+        default:
+          return JSON.stringify(token);
+      }
+    }
+    function tokenType(source) {
+      switch (source) {
+        case BOM:
+          return "byte-order-mark";
+        case DOCUMENT:
+          return "doc-mode";
+        case FLOW_END:
+          return "flow-error-end";
+        case SCALAR:
+          return "scalar";
+        case "---":
+          return "doc-start";
+        case "...":
+          return "doc-end";
+        case "":
+        case "\n":
+        case "\r\n":
+          return "newline";
+        case "-":
+          return "seq-item-ind";
+        case "?":
+          return "explicit-key-ind";
+        case ":":
+          return "map-value-ind";
+        case "{":
+          return "flow-map-start";
+        case "}":
+          return "flow-map-end";
+        case "[":
+          return "flow-seq-start";
+        case "]":
+          return "flow-seq-end";
+        case ",":
+          return "comma";
+      }
+      switch (source[0]) {
+        case " ":
+        case "	":
+          return "space";
+        case "#":
+          return "comment";
+        case "%":
+          return "directive-line";
+        case "*":
+          return "alias";
+        case "&":
+          return "anchor";
+        case "!":
+          return "tag";
+        case "'":
+          return "single-quoted-scalar";
+        case '"':
+          return "double-quoted-scalar";
+        case "|":
+        case ">":
+          return "block-scalar-header";
+      }
+      return null;
+    }
+    exports.createScalarToken = cstScalar.createScalarToken;
+    exports.resolveAsScalar = cstScalar.resolveAsScalar;
+    exports.setScalarValue = cstScalar.setScalarValue;
+    exports.stringify = cstStringify.stringify;
+    exports.visit = cstVisit.visit;
+    exports.BOM = BOM;
+    exports.DOCUMENT = DOCUMENT;
+    exports.FLOW_END = FLOW_END;
+    exports.SCALAR = SCALAR;
+    exports.isCollection = isCollection;
+    exports.isScalar = isScalar;
+    exports.prettyToken = prettyToken;
+    exports.tokenType = tokenType;
+  }
+});
+
+// node_modules/yaml/dist/parse/lexer.js
+var require_lexer = __commonJS({
+  "node_modules/yaml/dist/parse/lexer.js"(exports) {
+    "use strict";
+    var cst = require_cst();
+    function isEmpty(ch) {
+      switch (ch) {
+        case void 0:
+        case " ":
+        case "\n":
+        case "\r":
+        case "	":
+          return true;
+        default:
+          return false;
+      }
+    }
+    var hexDigits = new Set("0123456789ABCDEFabcdef");
+    var tagChars = new Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-#;/?:@&=+$_.!~*'()");
+    var flowIndicatorChars = new Set(",[]{}");
+    var invalidAnchorChars = new Set(" ,[]{}\n\r	");
+    var isNotAnchorChar = (ch) => !ch || invalidAnchorChars.has(ch);
+    var Lexer = class {
+      constructor() {
+        this.atEnd = false;
+        this.blockScalarIndent = -1;
+        this.blockScalarKeep = false;
+        this.buffer = "";
+        this.flowKey = false;
+        this.flowLevel = 0;
+        this.indentNext = 0;
+        this.indentValue = 0;
+        this.lineEndPos = null;
+        this.next = null;
+        this.pos = 0;
+      }
+      /**
+       * Generate YAML tokens from the `source` string. If `incomplete`,
+       * a part of the last line may be left as a buffer for the next call.
+       *
+       * @returns A generator of lexical tokens
+       */
+      *lex(source, incomplete = false) {
+        if (source) {
+          if (typeof source !== "string")
+            throw TypeError("source is not a string");
+          this.buffer = this.buffer ? this.buffer + source : source;
+          this.lineEndPos = null;
+        }
+        this.atEnd = !incomplete;
+        let next = this.next ?? "stream";
+        while (next && (incomplete || this.hasChars(1)))
+          next = yield* this.parseNext(next);
+      }
+      atLineEnd() {
+        let i = this.pos;
+        let ch = this.buffer[i];
+        while (ch === " " || ch === "	")
+          ch = this.buffer[++i];
+        if (!ch || ch === "#" || ch === "\n")
+          return true;
+        if (ch === "\r")
+          return this.buffer[i + 1] === "\n";
+        return false;
+      }
+      charAt(n) {
+        return this.buffer[this.pos + n];
+      }
+      continueScalar(offset) {
+        let ch = this.buffer[offset];
+        if (this.indentNext > 0) {
+          let indent4 = 0;
+          while (ch === " ")
+            ch = this.buffer[++indent4 + offset];
+          if (ch === "\r") {
+            const next = this.buffer[indent4 + offset + 1];
+            if (next === "\n" || !next && !this.atEnd)
+              return offset + indent4 + 1;
+          }
+          return ch === "\n" || indent4 >= this.indentNext || !ch && !this.atEnd ? offset + indent4 : -1;
+        }
+        if (ch === "-" || ch === ".") {
+          const dt = this.buffer.substr(offset, 3);
+          if ((dt === "---" || dt === "...") && isEmpty(this.buffer[offset + 3]))
+            return -1;
+        }
+        return offset;
+      }
+      getLine() {
+        let end = this.lineEndPos;
+        if (typeof end !== "number" || end !== -1 && end < this.pos) {
+          end = this.buffer.indexOf("\n", this.pos);
+          this.lineEndPos = end;
+        }
+        if (end === -1)
+          return this.atEnd ? this.buffer.substring(this.pos) : null;
+        if (this.buffer[end - 1] === "\r")
+          end -= 1;
+        return this.buffer.substring(this.pos, end);
+      }
+      hasChars(n) {
+        return this.pos + n <= this.buffer.length;
+      }
+      setNext(state) {
+        this.buffer = this.buffer.substring(this.pos);
+        this.pos = 0;
+        this.lineEndPos = null;
+        this.next = state;
+        return null;
+      }
+      peek(n) {
+        return this.buffer.substr(this.pos, n);
+      }
+      *parseNext(next) {
+        switch (next) {
+          case "stream":
+            return yield* this.parseStream();
+          case "line-start":
+            return yield* this.parseLineStart();
+          case "block-start":
+            return yield* this.parseBlockStart();
+          case "doc":
+            return yield* this.parseDocument();
+          case "flow":
+            return yield* this.parseFlowCollection();
+          case "quoted-scalar":
+            return yield* this.parseQuotedScalar();
+          case "block-scalar":
+            return yield* this.parseBlockScalar();
+          case "plain-scalar":
+            return yield* this.parsePlainScalar();
+        }
+      }
+      *parseStream() {
+        let line = this.getLine();
+        if (line === null)
+          return this.setNext("stream");
+        if (line[0] === cst.BOM) {
+          yield* this.pushCount(1);
+          line = line.substring(1);
+        }
+        if (line[0] === "%") {
+          let dirEnd = line.length;
+          let cs = line.indexOf("#");
+          while (cs !== -1) {
+            const ch = line[cs - 1];
+            if (ch === " " || ch === "	") {
+              dirEnd = cs - 1;
+              break;
+            } else {
+              cs = line.indexOf("#", cs + 1);
+            }
+          }
+          while (true) {
+            const ch = line[dirEnd - 1];
+            if (ch === " " || ch === "	")
+              dirEnd -= 1;
+            else
+              break;
+          }
+          const n = (yield* this.pushCount(dirEnd)) + (yield* this.pushSpaces(true));
+          yield* this.pushCount(line.length - n);
+          this.pushNewline();
+          return "stream";
+        }
+        if (this.atLineEnd()) {
+          const sp = yield* this.pushSpaces(true);
+          yield* this.pushCount(line.length - sp);
+          yield* this.pushNewline();
+          return "stream";
+        }
+        yield cst.DOCUMENT;
+        return yield* this.parseLineStart();
+      }
+      *parseLineStart() {
+        const ch = this.charAt(0);
+        if (!ch && !this.atEnd)
+          return this.setNext("line-start");
+        if (ch === "-" || ch === ".") {
+          if (!this.atEnd && !this.hasChars(4))
+            return this.setNext("line-start");
+          const s = this.peek(3);
+          if ((s === "---" || s === "...") && isEmpty(this.charAt(3))) {
+            yield* this.pushCount(3);
+            this.indentValue = 0;
+            this.indentNext = 0;
+            return s === "---" ? "doc" : "stream";
+          }
+        }
+        this.indentValue = yield* this.pushSpaces(false);
+        if (this.indentNext > this.indentValue && !isEmpty(this.charAt(1)))
+          this.indentNext = this.indentValue;
+        return yield* this.parseBlockStart();
+      }
+      *parseBlockStart() {
+        const [ch0, ch1] = this.peek(2);
+        if (!ch1 && !this.atEnd)
+          return this.setNext("block-start");
+        if ((ch0 === "-" || ch0 === "?" || ch0 === ":") && isEmpty(ch1)) {
+          const n = (yield* this.pushCount(1)) + (yield* this.pushSpaces(true));
+          this.indentNext = this.indentValue + 1;
+          this.indentValue += n;
+          return yield* this.parseBlockStart();
+        }
+        return "doc";
+      }
+      *parseDocument() {
+        yield* this.pushSpaces(true);
+        const line = this.getLine();
+        if (line === null)
+          return this.setNext("doc");
+        let n = yield* this.pushIndicators();
+        switch (line[n]) {
+          case "#":
+            yield* this.pushCount(line.length - n);
+          // fallthrough
+          case void 0:
+            yield* this.pushNewline();
+            return yield* this.parseLineStart();
+          case "{":
+          case "[":
+            yield* this.pushCount(1);
+            this.flowKey = false;
+            this.flowLevel = 1;
+            return "flow";
+          case "}":
+          case "]":
+            yield* this.pushCount(1);
+            return "doc";
+          case "*":
+            yield* this.pushUntil(isNotAnchorChar);
+            return "doc";
+          case '"':
+          case "'":
+            return yield* this.parseQuotedScalar();
+          case "|":
+          case ">":
+            n += yield* this.parseBlockScalarHeader();
+            n += yield* this.pushSpaces(true);
+            yield* this.pushCount(line.length - n);
+            yield* this.pushNewline();
+            return yield* this.parseBlockScalar();
+          default:
+            return yield* this.parsePlainScalar();
+        }
+      }
+      *parseFlowCollection() {
+        let nl, sp;
+        let indent4 = -1;
+        do {
+          nl = yield* this.pushNewline();
+          if (nl > 0) {
+            sp = yield* this.pushSpaces(false);
+            this.indentValue = indent4 = sp;
+          } else {
+            sp = 0;
+          }
+          sp += yield* this.pushSpaces(true);
+        } while (nl + sp > 0);
+        const line = this.getLine();
+        if (line === null)
+          return this.setNext("flow");
+        if (indent4 !== -1 && indent4 < this.indentNext && line[0] !== "#" || indent4 === 0 && (line.startsWith("---") || line.startsWith("...")) && isEmpty(line[3])) {
+          const atFlowEndMarker = indent4 === this.indentNext - 1 && this.flowLevel === 1 && (line[0] === "]" || line[0] === "}");
+          if (!atFlowEndMarker) {
+            this.flowLevel = 0;
+            yield cst.FLOW_END;
+            return yield* this.parseLineStart();
+          }
+        }
+        let n = 0;
+        while (line[n] === ",") {
+          n += yield* this.pushCount(1);
+          n += yield* this.pushSpaces(true);
+          this.flowKey = false;
+        }
+        n += yield* this.pushIndicators();
+        switch (line[n]) {
+          case void 0:
+            return "flow";
+          case "#":
+            yield* this.pushCount(line.length - n);
+            return "flow";
+          case "{":
+          case "[":
+            yield* this.pushCount(1);
+            this.flowKey = false;
+            this.flowLevel += 1;
+            return "flow";
+          case "}":
+          case "]":
+            yield* this.pushCount(1);
+            this.flowKey = true;
+            this.flowLevel -= 1;
+            return this.flowLevel ? "flow" : "doc";
+          case "*":
+            yield* this.pushUntil(isNotAnchorChar);
+            return "flow";
+          case '"':
+          case "'":
+            this.flowKey = true;
+            return yield* this.parseQuotedScalar();
+          case ":": {
+            const next = this.charAt(1);
+            if (this.flowKey || isEmpty(next) || next === ",") {
+              this.flowKey = false;
+              yield* this.pushCount(1);
+              yield* this.pushSpaces(true);
+              return "flow";
+            }
+          }
+          // fallthrough
+          default:
+            this.flowKey = false;
+            return yield* this.parsePlainScalar();
+        }
+      }
+      *parseQuotedScalar() {
+        const quote = this.charAt(0);
+        let end = this.buffer.indexOf(quote, this.pos + 1);
+        if (quote === "'") {
+          while (end !== -1 && this.buffer[end + 1] === "'")
+            end = this.buffer.indexOf("'", end + 2);
+        } else {
+          while (end !== -1) {
+            let n = 0;
+            while (this.buffer[end - 1 - n] === "\\")
+              n += 1;
+            if (n % 2 === 0)
+              break;
+            end = this.buffer.indexOf('"', end + 1);
+          }
+        }
+        const qb = this.buffer.substring(0, end);
+        let nl = qb.indexOf("\n", this.pos);
+        if (nl !== -1) {
+          while (nl !== -1) {
+            const cs = this.continueScalar(nl + 1);
+            if (cs === -1)
+              break;
+            nl = qb.indexOf("\n", cs);
+          }
+          if (nl !== -1) {
+            end = nl - (qb[nl - 1] === "\r" ? 2 : 1);
+          }
+        }
+        if (end === -1) {
+          if (!this.atEnd)
+            return this.setNext("quoted-scalar");
+          end = this.buffer.length;
+        }
+        yield* this.pushToIndex(end + 1, false);
+        return this.flowLevel ? "flow" : "doc";
+      }
+      *parseBlockScalarHeader() {
+        this.blockScalarIndent = -1;
+        this.blockScalarKeep = false;
+        let i = this.pos;
+        while (true) {
+          const ch = this.buffer[++i];
+          if (ch === "+")
+            this.blockScalarKeep = true;
+          else if (ch > "0" && ch <= "9")
+            this.blockScalarIndent = Number(ch) - 1;
+          else if (ch !== "-")
+            break;
+        }
+        return yield* this.pushUntil((ch) => isEmpty(ch) || ch === "#");
+      }
+      *parseBlockScalar() {
+        let nl = this.pos - 1;
+        let indent4 = 0;
+        let ch;
+        loop: for (let i2 = this.pos; ch = this.buffer[i2]; ++i2) {
+          switch (ch) {
+            case " ":
+              indent4 += 1;
+              break;
+            case "\n":
+              nl = i2;
+              indent4 = 0;
+              break;
+            case "\r": {
+              const next = this.buffer[i2 + 1];
+              if (!next && !this.atEnd)
+                return this.setNext("block-scalar");
+              if (next === "\n")
+                break;
+            }
+            // fallthrough
+            default:
+              break loop;
+          }
+        }
+        if (!ch && !this.atEnd)
+          return this.setNext("block-scalar");
+        if (indent4 >= this.indentNext) {
+          if (this.blockScalarIndent === -1)
+            this.indentNext = indent4;
+          else {
+            this.indentNext = this.blockScalarIndent + (this.indentNext === 0 ? 1 : this.indentNext);
+          }
+          do {
+            const cs = this.continueScalar(nl + 1);
+            if (cs === -1)
+              break;
+            nl = this.buffer.indexOf("\n", cs);
+          } while (nl !== -1);
+          if (nl === -1) {
+            if (!this.atEnd)
+              return this.setNext("block-scalar");
+            nl = this.buffer.length;
+          }
+        }
+        let i = nl + 1;
+        ch = this.buffer[i];
+        while (ch === " ")
+          ch = this.buffer[++i];
+        if (ch === "	") {
+          while (ch === "	" || ch === " " || ch === "\r" || ch === "\n")
+            ch = this.buffer[++i];
+          nl = i - 1;
+        } else if (!this.blockScalarKeep) {
+          do {
+            let i2 = nl - 1;
+            let ch2 = this.buffer[i2];
+            if (ch2 === "\r")
+              ch2 = this.buffer[--i2];
+            const lastChar = i2;
+            while (ch2 === " ")
+              ch2 = this.buffer[--i2];
+            if (ch2 === "\n" && i2 >= this.pos && i2 + 1 + indent4 > lastChar)
+              nl = i2;
+            else
+              break;
+          } while (true);
+        }
+        yield cst.SCALAR;
+        yield* this.pushToIndex(nl + 1, true);
+        return yield* this.parseLineStart();
+      }
+      *parsePlainScalar() {
+        const inFlow = this.flowLevel > 0;
+        let end = this.pos - 1;
+        let i = this.pos - 1;
+        let ch;
+        while (ch = this.buffer[++i]) {
+          if (ch === ":") {
+            const next = this.buffer[i + 1];
+            if (isEmpty(next) || inFlow && flowIndicatorChars.has(next))
+              break;
+            end = i;
+          } else if (isEmpty(ch)) {
+            let next = this.buffer[i + 1];
+            if (ch === "\r") {
+              if (next === "\n") {
+                i += 1;
+                ch = "\n";
+                next = this.buffer[i + 1];
+              } else
+                end = i;
+            }
+            if (next === "#" || inFlow && flowIndicatorChars.has(next))
+              break;
+            if (ch === "\n") {
+              const cs = this.continueScalar(i + 1);
+              if (cs === -1)
+                break;
+              i = Math.max(i, cs - 2);
+            }
+          } else {
+            if (inFlow && flowIndicatorChars.has(ch))
+              break;
+            end = i;
+          }
+        }
+        if (!ch && !this.atEnd)
+          return this.setNext("plain-scalar");
+        yield cst.SCALAR;
+        yield* this.pushToIndex(end + 1, true);
+        return inFlow ? "flow" : "doc";
+      }
+      *pushCount(n) {
+        if (n > 0) {
+          yield this.buffer.substr(this.pos, n);
+          this.pos += n;
+          return n;
+        }
+        return 0;
+      }
+      *pushToIndex(i, allowEmpty) {
+        const s = this.buffer.slice(this.pos, i);
+        if (s) {
+          yield s;
+          this.pos += s.length;
+          return s.length;
+        } else if (allowEmpty)
+          yield "";
+        return 0;
+      }
+      *pushIndicators() {
+        switch (this.charAt(0)) {
+          case "!":
+            return (yield* this.pushTag()) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+          case "&":
+            return (yield* this.pushUntil(isNotAnchorChar)) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+          case "-":
+          // this is an error
+          case "?":
+          // this is an error outside flow collections
+          case ":": {
+            const inFlow = this.flowLevel > 0;
+            const ch1 = this.charAt(1);
+            if (isEmpty(ch1) || inFlow && flowIndicatorChars.has(ch1)) {
+              if (!inFlow)
+                this.indentNext = this.indentValue + 1;
+              else if (this.flowKey)
+                this.flowKey = false;
+              return (yield* this.pushCount(1)) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+            }
+          }
+        }
+        return 0;
+      }
+      *pushTag() {
+        if (this.charAt(1) === "<") {
+          let i = this.pos + 2;
+          let ch = this.buffer[i];
+          while (!isEmpty(ch) && ch !== ">")
+            ch = this.buffer[++i];
+          return yield* this.pushToIndex(ch === ">" ? i + 1 : i, false);
+        } else {
+          let i = this.pos + 1;
+          let ch = this.buffer[i];
+          while (ch) {
+            if (tagChars.has(ch))
+              ch = this.buffer[++i];
+            else if (ch === "%" && hexDigits.has(this.buffer[i + 1]) && hexDigits.has(this.buffer[i + 2])) {
+              ch = this.buffer[i += 3];
+            } else
+              break;
+          }
+          return yield* this.pushToIndex(i, false);
+        }
+      }
+      *pushNewline() {
+        const ch = this.buffer[this.pos];
+        if (ch === "\n")
+          return yield* this.pushCount(1);
+        else if (ch === "\r" && this.charAt(1) === "\n")
+          return yield* this.pushCount(2);
+        else
+          return 0;
+      }
+      *pushSpaces(allowTabs) {
+        let i = this.pos - 1;
+        let ch;
+        do {
+          ch = this.buffer[++i];
+        } while (ch === " " || allowTabs && ch === "	");
+        const n = i - this.pos;
+        if (n > 0) {
+          yield this.buffer.substr(this.pos, n);
+          this.pos = i;
+        }
+        return n;
+      }
+      *pushUntil(test) {
+        let i = this.pos;
+        let ch = this.buffer[i];
+        while (!test(ch))
+          ch = this.buffer[++i];
+        return yield* this.pushToIndex(i, false);
+      }
+    };
+    exports.Lexer = Lexer;
+  }
+});
+
+// node_modules/yaml/dist/parse/line-counter.js
+var require_line_counter = __commonJS({
+  "node_modules/yaml/dist/parse/line-counter.js"(exports) {
+    "use strict";
+    var LineCounter = class {
+      constructor() {
+        this.lineStarts = [];
+        this.addNewLine = (offset) => this.lineStarts.push(offset);
+        this.linePos = (offset) => {
+          let low = 0;
+          let high = this.lineStarts.length;
+          while (low < high) {
+            const mid = low + high >> 1;
+            if (this.lineStarts[mid] < offset)
+              low = mid + 1;
+            else
+              high = mid;
+          }
+          if (this.lineStarts[low] === offset)
+            return { line: low + 1, col: 1 };
+          if (low === 0)
+            return { line: 0, col: offset };
+          const start = this.lineStarts[low - 1];
+          return { line: low, col: offset - start + 1 };
+        };
+      }
+    };
+    exports.LineCounter = LineCounter;
+  }
+});
+
+// node_modules/yaml/dist/parse/parser.js
+var require_parser = __commonJS({
+  "node_modules/yaml/dist/parse/parser.js"(exports) {
+    "use strict";
+    var node_process = __require("process");
+    var cst = require_cst();
+    var lexer = require_lexer();
+    function includesToken(list, type) {
+      for (let i = 0; i < list.length; ++i)
+        if (list[i].type === type)
+          return true;
+      return false;
+    }
+    function findNonEmptyIndex(list) {
+      for (let i = 0; i < list.length; ++i) {
+        switch (list[i].type) {
+          case "space":
+          case "comment":
+          case "newline":
+            break;
+          default:
+            return i;
+        }
+      }
+      return -1;
+    }
+    function isFlowToken(token) {
+      switch (token == null ? void 0 : token.type) {
+        case "alias":
+        case "scalar":
+        case "single-quoted-scalar":
+        case "double-quoted-scalar":
+        case "flow-collection":
+          return true;
+        default:
+          return false;
+      }
+    }
+    function getPrevProps(parent) {
+      switch (parent.type) {
+        case "document":
+          return parent.start;
+        case "block-map": {
+          const it = parent.items[parent.items.length - 1];
+          return it.sep ?? it.start;
+        }
+        case "block-seq":
+          return parent.items[parent.items.length - 1].start;
+        /* istanbul ignore next should not happen */
+        default:
+          return [];
+      }
+    }
+    function getFirstKeyStartProps(prev) {
+      var _a3;
+      if (prev.length === 0)
+        return [];
+      let i = prev.length;
+      loop: while (--i >= 0) {
+        switch (prev[i].type) {
+          case "doc-start":
+          case "explicit-key-ind":
+          case "map-value-ind":
+          case "seq-item-ind":
+          case "newline":
+            break loop;
+        }
+      }
+      while (((_a3 = prev[++i]) == null ? void 0 : _a3.type) === "space") {
+      }
+      return prev.splice(i, prev.length);
+    }
+    function fixFlowSeqItems(fc) {
+      if (fc.start.type === "flow-seq-start") {
+        for (const it of fc.items) {
+          if (it.sep && !it.value && !includesToken(it.start, "explicit-key-ind") && !includesToken(it.sep, "map-value-ind")) {
+            if (it.key)
+              it.value = it.key;
+            delete it.key;
+            if (isFlowToken(it.value)) {
+              if (it.value.end)
+                Array.prototype.push.apply(it.value.end, it.sep);
+              else
+                it.value.end = it.sep;
+            } else
+              Array.prototype.push.apply(it.start, it.sep);
+            delete it.sep;
+          }
+        }
+      }
+    }
+    var Parser = class {
+      /**
+       * @param onNewLine - If defined, called separately with the start position of
+       *   each new line (in `parse()`, including the start of input).
+       */
+      constructor(onNewLine) {
+        this.atNewLine = true;
+        this.atScalar = false;
+        this.indent = 0;
+        this.offset = 0;
+        this.onKeyLine = false;
+        this.stack = [];
+        this.source = "";
+        this.type = "";
+        this.lexer = new lexer.Lexer();
+        this.onNewLine = onNewLine;
+      }
+      /**
+       * Parse `source` as a YAML stream.
+       * If `incomplete`, a part of the last line may be left as a buffer for the next call.
+       *
+       * Errors are not thrown, but yielded as `{ type: 'error', message }` tokens.
+       *
+       * @returns A generator of tokens representing each directive, document, and other structure.
+       */
+      *parse(source, incomplete = false) {
+        if (this.onNewLine && this.offset === 0)
+          this.onNewLine(0);
+        for (const lexeme of this.lexer.lex(source, incomplete))
+          yield* this.next(lexeme);
+        if (!incomplete)
+          yield* this.end();
+      }
+      /**
+       * Advance the parser by the `source` of one lexical token.
+       */
+      *next(source) {
+        this.source = source;
+        if (node_process.env.LOG_TOKENS)
+          console.log("|", cst.prettyToken(source));
+        if (this.atScalar) {
+          this.atScalar = false;
+          yield* this.step();
+          this.offset += source.length;
+          return;
+        }
+        const type = cst.tokenType(source);
+        if (!type) {
+          const message = `Not a YAML token: ${source}`;
+          yield* this.pop({ type: "error", offset: this.offset, message, source });
+          this.offset += source.length;
+        } else if (type === "scalar") {
+          this.atNewLine = false;
+          this.atScalar = true;
+          this.type = "scalar";
+        } else {
+          this.type = type;
+          yield* this.step();
+          switch (type) {
+            case "newline":
+              this.atNewLine = true;
+              this.indent = 0;
+              if (this.onNewLine)
+                this.onNewLine(this.offset + source.length);
+              break;
+            case "space":
+              if (this.atNewLine && source[0] === " ")
+                this.indent += source.length;
+              break;
+            case "explicit-key-ind":
+            case "map-value-ind":
+            case "seq-item-ind":
+              if (this.atNewLine)
+                this.indent += source.length;
+              break;
+            case "doc-mode":
+            case "flow-error-end":
+              return;
+            default:
+              this.atNewLine = false;
+          }
+          this.offset += source.length;
+        }
+      }
+      /** Call at end of input to push out any remaining constructions */
+      *end() {
+        while (this.stack.length > 0)
+          yield* this.pop();
+      }
+      get sourceToken() {
+        const st = {
+          type: this.type,
+          offset: this.offset,
+          indent: this.indent,
+          source: this.source
+        };
+        return st;
+      }
+      *step() {
+        const top = this.peek(1);
+        if (this.type === "doc-end" && (top == null ? void 0 : top.type) !== "doc-end") {
+          while (this.stack.length > 0)
+            yield* this.pop();
+          this.stack.push({
+            type: "doc-end",
+            offset: this.offset,
+            source: this.source
+          });
+          return;
+        }
+        if (!top)
+          return yield* this.stream();
+        switch (top.type) {
+          case "document":
+            return yield* this.document(top);
+          case "alias":
+          case "scalar":
+          case "single-quoted-scalar":
+          case "double-quoted-scalar":
+            return yield* this.scalar(top);
+          case "block-scalar":
+            return yield* this.blockScalar(top);
+          case "block-map":
+            return yield* this.blockMap(top);
+          case "block-seq":
+            return yield* this.blockSequence(top);
+          case "flow-collection":
+            return yield* this.flowCollection(top);
+          case "doc-end":
+            return yield* this.documentEnd(top);
+        }
+        yield* this.pop();
+      }
+      peek(n) {
+        return this.stack[this.stack.length - n];
+      }
+      *pop(error2) {
+        const token = error2 ?? this.stack.pop();
+        if (!token) {
+          const message = "Tried to pop an empty stack";
+          yield { type: "error", offset: this.offset, source: "", message };
+        } else if (this.stack.length === 0) {
+          yield token;
+        } else {
+          const top = this.peek(1);
+          if (token.type === "block-scalar") {
+            token.indent = "indent" in top ? top.indent : 0;
+          } else if (token.type === "flow-collection" && top.type === "document") {
+            token.indent = 0;
+          }
+          if (token.type === "flow-collection")
+            fixFlowSeqItems(token);
+          switch (top.type) {
+            case "document":
+              top.value = token;
+              break;
+            case "block-scalar":
+              top.props.push(token);
+              break;
+            case "block-map": {
+              const it = top.items[top.items.length - 1];
+              if (it.value) {
+                top.items.push({ start: [], key: token, sep: [] });
+                this.onKeyLine = true;
+                return;
+              } else if (it.sep) {
+                it.value = token;
+              } else {
+                Object.assign(it, { key: token, sep: [] });
+                this.onKeyLine = !it.explicitKey;
+                return;
+              }
+              break;
+            }
+            case "block-seq": {
+              const it = top.items[top.items.length - 1];
+              if (it.value)
+                top.items.push({ start: [], value: token });
+              else
+                it.value = token;
+              break;
+            }
+            case "flow-collection": {
+              const it = top.items[top.items.length - 1];
+              if (!it || it.value)
+                top.items.push({ start: [], key: token, sep: [] });
+              else if (it.sep)
+                it.value = token;
+              else
+                Object.assign(it, { key: token, sep: [] });
+              return;
+            }
+            /* istanbul ignore next should not happen */
+            default:
+              yield* this.pop();
+              yield* this.pop(token);
+          }
+          if ((top.type === "document" || top.type === "block-map" || top.type === "block-seq") && (token.type === "block-map" || token.type === "block-seq")) {
+            const last = token.items[token.items.length - 1];
+            if (last && !last.sep && !last.value && last.start.length > 0 && findNonEmptyIndex(last.start) === -1 && (token.indent === 0 || last.start.every((st) => st.type !== "comment" || st.indent < token.indent))) {
+              if (top.type === "document")
+                top.end = last.start;
+              else
+                top.items.push({ start: last.start });
+              token.items.splice(-1, 1);
+            }
+          }
+        }
+      }
+      *stream() {
+        switch (this.type) {
+          case "directive-line":
+            yield { type: "directive", offset: this.offset, source: this.source };
+            return;
+          case "byte-order-mark":
+          case "space":
+          case "comment":
+          case "newline":
+            yield this.sourceToken;
+            return;
+          case "doc-mode":
+          case "doc-start": {
+            const doc = {
+              type: "document",
+              offset: this.offset,
+              start: []
+            };
+            if (this.type === "doc-start")
+              doc.start.push(this.sourceToken);
+            this.stack.push(doc);
+            return;
+          }
+        }
+        yield {
+          type: "error",
+          offset: this.offset,
+          message: `Unexpected ${this.type} token in YAML stream`,
+          source: this.source
+        };
+      }
+      *document(doc) {
+        if (doc.value)
+          return yield* this.lineEnd(doc);
+        switch (this.type) {
+          case "doc-start": {
+            if (findNonEmptyIndex(doc.start) !== -1) {
+              yield* this.pop();
+              yield* this.step();
+            } else
+              doc.start.push(this.sourceToken);
+            return;
+          }
+          case "anchor":
+          case "tag":
+          case "space":
+          case "comment":
+          case "newline":
+            doc.start.push(this.sourceToken);
+            return;
+        }
+        const bv = this.startBlockValue(doc);
+        if (bv)
+          this.stack.push(bv);
+        else {
+          yield {
+            type: "error",
+            offset: this.offset,
+            message: `Unexpected ${this.type} token in YAML document`,
+            source: this.source
+          };
+        }
+      }
+      *scalar(scalar) {
+        if (this.type === "map-value-ind") {
+          const prev = getPrevProps(this.peek(2));
+          const start = getFirstKeyStartProps(prev);
+          let sep;
+          if (scalar.end) {
+            sep = scalar.end;
+            sep.push(this.sourceToken);
+            delete scalar.end;
+          } else
+            sep = [this.sourceToken];
+          const map2 = {
+            type: "block-map",
+            offset: scalar.offset,
+            indent: scalar.indent,
+            items: [{ start, key: scalar, sep }]
+          };
+          this.onKeyLine = true;
+          this.stack[this.stack.length - 1] = map2;
+        } else
+          yield* this.lineEnd(scalar);
+      }
+      *blockScalar(scalar) {
+        switch (this.type) {
+          case "space":
+          case "comment":
+          case "newline":
+            scalar.props.push(this.sourceToken);
+            return;
+          case "scalar":
+            scalar.source = this.source;
+            this.atNewLine = true;
+            this.indent = 0;
+            if (this.onNewLine) {
+              let nl = this.source.indexOf("\n") + 1;
+              while (nl !== 0) {
+                this.onNewLine(this.offset + nl);
+                nl = this.source.indexOf("\n", nl) + 1;
+              }
+            }
+            yield* this.pop();
+            break;
+          /* istanbul ignore next should not happen */
+          default:
+            yield* this.pop();
+            yield* this.step();
+        }
+      }
+      *blockMap(map2) {
+        var _a3;
+        const it = map2.items[map2.items.length - 1];
+        switch (this.type) {
+          case "newline":
+            this.onKeyLine = false;
+            if (it.value) {
+              const end = "end" in it.value ? it.value.end : void 0;
+              const last = Array.isArray(end) ? end[end.length - 1] : void 0;
+              if ((last == null ? void 0 : last.type) === "comment")
+                end == null ? void 0 : end.push(this.sourceToken);
+              else
+                map2.items.push({ start: [this.sourceToken] });
+            } else if (it.sep) {
+              it.sep.push(this.sourceToken);
+            } else {
+              it.start.push(this.sourceToken);
+            }
+            return;
+          case "space":
+          case "comment":
+            if (it.value) {
+              map2.items.push({ start: [this.sourceToken] });
+            } else if (it.sep) {
+              it.sep.push(this.sourceToken);
+            } else {
+              if (this.atIndentedComment(it.start, map2.indent)) {
+                const prev = map2.items[map2.items.length - 2];
+                const end = (_a3 = prev == null ? void 0 : prev.value) == null ? void 0 : _a3.end;
+                if (Array.isArray(end)) {
+                  Array.prototype.push.apply(end, it.start);
+                  end.push(this.sourceToken);
+                  map2.items.pop();
+                  return;
+                }
+              }
+              it.start.push(this.sourceToken);
+            }
+            return;
+        }
+        if (this.indent >= map2.indent) {
+          const atMapIndent = !this.onKeyLine && this.indent === map2.indent;
+          const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
+          let start = [];
+          if (atNextItem && it.sep && !it.value) {
+            const nl = [];
+            for (let i = 0; i < it.sep.length; ++i) {
+              const st = it.sep[i];
+              switch (st.type) {
+                case "newline":
+                  nl.push(i);
+                  break;
+                case "space":
+                  break;
+                case "comment":
+                  if (st.indent > map2.indent)
+                    nl.length = 0;
+                  break;
+                default:
+                  nl.length = 0;
+              }
+            }
+            if (nl.length >= 2)
+              start = it.sep.splice(nl[1]);
+          }
+          switch (this.type) {
+            case "anchor":
+            case "tag":
+              if (atNextItem || it.value) {
+                start.push(this.sourceToken);
+                map2.items.push({ start });
+                this.onKeyLine = true;
+              } else if (it.sep) {
+                it.sep.push(this.sourceToken);
+              } else {
+                it.start.push(this.sourceToken);
+              }
+              return;
+            case "explicit-key-ind":
+              if (!it.sep && !it.explicitKey) {
+                it.start.push(this.sourceToken);
+                it.explicitKey = true;
+              } else if (atNextItem || it.value) {
+                start.push(this.sourceToken);
+                map2.items.push({ start, explicitKey: true });
+              } else {
+                this.stack.push({
+                  type: "block-map",
+                  offset: this.offset,
+                  indent: this.indent,
+                  items: [{ start: [this.sourceToken], explicitKey: true }]
+                });
+              }
+              this.onKeyLine = true;
+              return;
+            case "map-value-ind":
+              if (it.explicitKey) {
+                if (!it.sep) {
+                  if (includesToken(it.start, "newline")) {
+                    Object.assign(it, { key: null, sep: [this.sourceToken] });
+                  } else {
+                    const start2 = getFirstKeyStartProps(it.start);
+                    this.stack.push({
+                      type: "block-map",
+                      offset: this.offset,
+                      indent: this.indent,
+                      items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                    });
+                  }
+                } else if (it.value) {
+                  map2.items.push({ start: [], key: null, sep: [this.sourceToken] });
+                } else if (includesToken(it.sep, "map-value-ind")) {
+                  this.stack.push({
+                    type: "block-map",
+                    offset: this.offset,
+                    indent: this.indent,
+                    items: [{ start, key: null, sep: [this.sourceToken] }]
+                  });
+                } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
+                  const start2 = getFirstKeyStartProps(it.start);
+                  const key = it.key;
+                  const sep = it.sep;
+                  sep.push(this.sourceToken);
+                  delete it.key;
+                  delete it.sep;
+                  this.stack.push({
+                    type: "block-map",
+                    offset: this.offset,
+                    indent: this.indent,
+                    items: [{ start: start2, key, sep }]
+                  });
+                } else if (start.length > 0) {
+                  it.sep = it.sep.concat(start, this.sourceToken);
+                } else {
+                  it.sep.push(this.sourceToken);
+                }
+              } else {
+                if (!it.sep) {
+                  Object.assign(it, { key: null, sep: [this.sourceToken] });
+                } else if (it.value || atNextItem) {
+                  map2.items.push({ start, key: null, sep: [this.sourceToken] });
+                } else if (includesToken(it.sep, "map-value-ind")) {
+                  this.stack.push({
+                    type: "block-map",
+                    offset: this.offset,
+                    indent: this.indent,
+                    items: [{ start: [], key: null, sep: [this.sourceToken] }]
+                  });
+                } else {
+                  it.sep.push(this.sourceToken);
+                }
+              }
+              this.onKeyLine = true;
+              return;
+            case "alias":
+            case "scalar":
+            case "single-quoted-scalar":
+            case "double-quoted-scalar": {
+              const fs27 = this.flowScalar(this.type);
+              if (atNextItem || it.value) {
+                map2.items.push({ start, key: fs27, sep: [] });
+                this.onKeyLine = true;
+              } else if (it.sep) {
+                this.stack.push(fs27);
+              } else {
+                Object.assign(it, { key: fs27, sep: [] });
+                this.onKeyLine = true;
+              }
+              return;
+            }
+            default: {
+              const bv = this.startBlockValue(map2);
+              if (bv) {
+                if (bv.type === "block-seq") {
+                  if (!it.explicitKey && it.sep && !includesToken(it.sep, "newline")) {
+                    yield* this.pop({
+                      type: "error",
+                      offset: this.offset,
+                      message: "Unexpected block-seq-ind on same line with key",
+                      source: this.source
+                    });
+                    return;
+                  }
+                } else if (atMapIndent) {
+                  map2.items.push({ start });
+                }
+                this.stack.push(bv);
+                return;
+              }
+            }
+          }
+        }
+        yield* this.pop();
+        yield* this.step();
+      }
+      *blockSequence(seq) {
+        var _a3;
+        const it = seq.items[seq.items.length - 1];
+        switch (this.type) {
+          case "newline":
+            if (it.value) {
+              const end = "end" in it.value ? it.value.end : void 0;
+              const last = Array.isArray(end) ? end[end.length - 1] : void 0;
+              if ((last == null ? void 0 : last.type) === "comment")
+                end == null ? void 0 : end.push(this.sourceToken);
+              else
+                seq.items.push({ start: [this.sourceToken] });
+            } else
+              it.start.push(this.sourceToken);
+            return;
+          case "space":
+          case "comment":
+            if (it.value)
+              seq.items.push({ start: [this.sourceToken] });
+            else {
+              if (this.atIndentedComment(it.start, seq.indent)) {
+                const prev = seq.items[seq.items.length - 2];
+                const end = (_a3 = prev == null ? void 0 : prev.value) == null ? void 0 : _a3.end;
+                if (Array.isArray(end)) {
+                  Array.prototype.push.apply(end, it.start);
+                  end.push(this.sourceToken);
+                  seq.items.pop();
+                  return;
+                }
+              }
+              it.start.push(this.sourceToken);
+            }
+            return;
+          case "anchor":
+          case "tag":
+            if (it.value || this.indent <= seq.indent)
+              break;
+            it.start.push(this.sourceToken);
+            return;
+          case "seq-item-ind":
+            if (this.indent !== seq.indent)
+              break;
+            if (it.value || includesToken(it.start, "seq-item-ind"))
+              seq.items.push({ start: [this.sourceToken] });
+            else
+              it.start.push(this.sourceToken);
+            return;
+        }
+        if (this.indent > seq.indent) {
+          const bv = this.startBlockValue(seq);
+          if (bv) {
+            this.stack.push(bv);
+            return;
+          }
+        }
+        yield* this.pop();
+        yield* this.step();
+      }
+      *flowCollection(fc) {
+        const it = fc.items[fc.items.length - 1];
+        if (this.type === "flow-error-end") {
+          let top;
+          do {
+            yield* this.pop();
+            top = this.peek(1);
+          } while ((top == null ? void 0 : top.type) === "flow-collection");
+        } else if (fc.end.length === 0) {
+          switch (this.type) {
+            case "comma":
+            case "explicit-key-ind":
+              if (!it || it.sep)
+                fc.items.push({ start: [this.sourceToken] });
+              else
+                it.start.push(this.sourceToken);
+              return;
+            case "map-value-ind":
+              if (!it || it.value)
+                fc.items.push({ start: [], key: null, sep: [this.sourceToken] });
+              else if (it.sep)
+                it.sep.push(this.sourceToken);
+              else
+                Object.assign(it, { key: null, sep: [this.sourceToken] });
+              return;
+            case "space":
+            case "comment":
+            case "newline":
+            case "anchor":
+            case "tag":
+              if (!it || it.value)
+                fc.items.push({ start: [this.sourceToken] });
+              else if (it.sep)
+                it.sep.push(this.sourceToken);
+              else
+                it.start.push(this.sourceToken);
+              return;
+            case "alias":
+            case "scalar":
+            case "single-quoted-scalar":
+            case "double-quoted-scalar": {
+              const fs27 = this.flowScalar(this.type);
+              if (!it || it.value)
+                fc.items.push({ start: [], key: fs27, sep: [] });
+              else if (it.sep)
+                this.stack.push(fs27);
+              else
+                Object.assign(it, { key: fs27, sep: [] });
+              return;
+            }
+            case "flow-map-end":
+            case "flow-seq-end":
+              fc.end.push(this.sourceToken);
+              return;
+          }
+          const bv = this.startBlockValue(fc);
+          if (bv)
+            this.stack.push(bv);
+          else {
+            yield* this.pop();
+            yield* this.step();
+          }
+        } else {
+          const parent = this.peek(2);
+          if (parent.type === "block-map" && (this.type === "map-value-ind" && parent.indent === fc.indent || this.type === "newline" && !parent.items[parent.items.length - 1].sep)) {
+            yield* this.pop();
+            yield* this.step();
+          } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
+            const prev = getPrevProps(parent);
+            const start = getFirstKeyStartProps(prev);
+            fixFlowSeqItems(fc);
+            const sep = fc.end.splice(1, fc.end.length);
+            sep.push(this.sourceToken);
+            const map2 = {
+              type: "block-map",
+              offset: fc.offset,
+              indent: fc.indent,
+              items: [{ start, key: fc, sep }]
+            };
+            this.onKeyLine = true;
+            this.stack[this.stack.length - 1] = map2;
+          } else {
+            yield* this.lineEnd(fc);
+          }
+        }
+      }
+      flowScalar(type) {
+        if (this.onNewLine) {
+          let nl = this.source.indexOf("\n") + 1;
+          while (nl !== 0) {
+            this.onNewLine(this.offset + nl);
+            nl = this.source.indexOf("\n", nl) + 1;
+          }
+        }
+        return {
+          type,
+          offset: this.offset,
+          indent: this.indent,
+          source: this.source
+        };
+      }
+      startBlockValue(parent) {
+        switch (this.type) {
+          case "alias":
+          case "scalar":
+          case "single-quoted-scalar":
+          case "double-quoted-scalar":
+            return this.flowScalar(this.type);
+          case "block-scalar-header":
+            return {
+              type: "block-scalar",
+              offset: this.offset,
+              indent: this.indent,
+              props: [this.sourceToken],
+              source: ""
+            };
+          case "flow-map-start":
+          case "flow-seq-start":
+            return {
+              type: "flow-collection",
+              offset: this.offset,
+              indent: this.indent,
+              start: this.sourceToken,
+              items: [],
+              end: []
+            };
+          case "seq-item-ind":
+            return {
+              type: "block-seq",
+              offset: this.offset,
+              indent: this.indent,
+              items: [{ start: [this.sourceToken] }]
+            };
+          case "explicit-key-ind": {
+            this.onKeyLine = true;
+            const prev = getPrevProps(parent);
+            const start = getFirstKeyStartProps(prev);
+            start.push(this.sourceToken);
+            return {
+              type: "block-map",
+              offset: this.offset,
+              indent: this.indent,
+              items: [{ start, explicitKey: true }]
+            };
+          }
+          case "map-value-ind": {
+            this.onKeyLine = true;
+            const prev = getPrevProps(parent);
+            const start = getFirstKeyStartProps(prev);
+            return {
+              type: "block-map",
+              offset: this.offset,
+              indent: this.indent,
+              items: [{ start, key: null, sep: [this.sourceToken] }]
+            };
+          }
+        }
+        return null;
+      }
+      atIndentedComment(start, indent4) {
+        if (this.type !== "comment")
+          return false;
+        if (this.indent <= indent4)
+          return false;
+        return start.every((st) => st.type === "newline" || st.type === "space");
+      }
+      *documentEnd(docEnd) {
+        if (this.type !== "doc-mode") {
+          if (docEnd.end)
+            docEnd.end.push(this.sourceToken);
+          else
+            docEnd.end = [this.sourceToken];
+          if (this.type === "newline")
+            yield* this.pop();
+        }
+      }
+      *lineEnd(token) {
+        switch (this.type) {
+          case "comma":
+          case "doc-start":
+          case "doc-end":
+          case "flow-seq-end":
+          case "flow-map-end":
+          case "map-value-ind":
+            yield* this.pop();
+            yield* this.step();
+            break;
+          case "newline":
+            this.onKeyLine = false;
+          // fallthrough
+          case "space":
+          case "comment":
+          default:
+            if (token.end)
+              token.end.push(this.sourceToken);
+            else
+              token.end = [this.sourceToken];
+            if (this.type === "newline")
+              yield* this.pop();
+        }
+      }
+    };
+    exports.Parser = Parser;
+  }
+});
+
+// node_modules/yaml/dist/public-api.js
+var require_public_api = __commonJS({
+  "node_modules/yaml/dist/public-api.js"(exports) {
+    "use strict";
+    var composer = require_composer();
+    var Document = require_Document();
+    var errors = require_errors3();
+    var log = require_log();
+    var identity = require_identity();
+    var lineCounter = require_line_counter();
+    var parser = require_parser();
+    function parseOptions(options) {
+      const prettyErrors = options.prettyErrors !== false;
+      const lineCounter$1 = options.lineCounter || prettyErrors && new lineCounter.LineCounter() || null;
+      return { lineCounter: lineCounter$1, prettyErrors };
+    }
+    function parseAllDocuments(source, options = {}) {
+      const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+      const parser$1 = new parser.Parser(lineCounter2 == null ? void 0 : lineCounter2.addNewLine);
+      const composer$1 = new composer.Composer(options);
+      const docs = Array.from(composer$1.compose(parser$1.parse(source)));
+      if (prettyErrors && lineCounter2)
+        for (const doc of docs) {
+          doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+          doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
+        }
+      if (docs.length > 0)
+        return docs;
+      return Object.assign([], { empty: true }, composer$1.streamInfo());
+    }
+    function parseDocument3(source, options = {}) {
+      const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+      const parser$1 = new parser.Parser(lineCounter2 == null ? void 0 : lineCounter2.addNewLine);
+      const composer$1 = new composer.Composer(options);
+      let doc = null;
+      for (const _doc of composer$1.compose(parser$1.parse(source), true, source.length)) {
+        if (!doc)
+          doc = _doc;
+        else if (doc.options.logLevel !== "silent") {
+          doc.errors.push(new errors.YAMLParseError(_doc.range.slice(0, 2), "MULTIPLE_DOCS", "Source contains multiple documents; please use YAML.parseAllDocuments()"));
+          break;
+        }
+      }
+      if (prettyErrors && lineCounter2) {
+        doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+        doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
+      }
+      return doc;
+    }
+    function parse3(src, reviver, options) {
+      let _reviver = void 0;
+      if (typeof reviver === "function") {
+        _reviver = reviver;
+      } else if (options === void 0 && reviver && typeof reviver === "object") {
+        options = reviver;
+      }
+      const doc = parseDocument3(src, options);
+      if (!doc)
+        return null;
+      doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
+      if (doc.errors.length > 0) {
+        if (doc.options.logLevel !== "silent")
+          throw doc.errors[0];
+        else
+          doc.errors = [];
+      }
+      return doc.toJS(Object.assign({ reviver: _reviver }, options));
+    }
+    function stringify(value, replacer, options) {
+      let _replacer = null;
+      if (typeof replacer === "function" || Array.isArray(replacer)) {
+        _replacer = replacer;
+      } else if (options === void 0 && replacer) {
+        options = replacer;
+      }
+      if (typeof options === "string")
+        options = options.length;
+      if (typeof options === "number") {
+        const indent4 = Math.round(options);
+        options = indent4 < 1 ? void 0 : indent4 > 8 ? { indent: 8 } : { indent: indent4 };
+      }
+      if (value === void 0) {
+        const { keepUndefined } = options ?? replacer ?? {};
+        if (!keepUndefined)
+          return void 0;
+      }
+      if (identity.isDocument(value) && !_replacer)
+        return value.toString(options);
+      return new Document.Document(value, _replacer, options).toString(options);
+    }
+    exports.parse = parse3;
+    exports.parseAllDocuments = parseAllDocuments;
+    exports.parseDocument = parseDocument3;
+    exports.stringify = stringify;
+  }
+});
+
+// node_modules/yaml/dist/index.js
+var require_dist2 = __commonJS({
+  "node_modules/yaml/dist/index.js"(exports) {
+    "use strict";
+    var composer = require_composer();
+    var Document = require_Document();
+    var Schema = require_Schema();
+    var errors = require_errors3();
+    var Alias = require_Alias();
+    var identity = require_identity();
+    var Pair = require_Pair();
+    var Scalar = require_Scalar();
+    var YAMLMap = require_YAMLMap();
+    var YAMLSeq = require_YAMLSeq();
+    var cst = require_cst();
+    var lexer = require_lexer();
+    var lineCounter = require_line_counter();
+    var parser = require_parser();
+    var publicApi = require_public_api();
+    var visit = require_visit();
+    exports.Composer = composer.Composer;
+    exports.Document = Document.Document;
+    exports.Schema = Schema.Schema;
+    exports.YAMLError = errors.YAMLError;
+    exports.YAMLParseError = errors.YAMLParseError;
+    exports.YAMLWarning = errors.YAMLWarning;
+    exports.Alias = Alias.Alias;
+    exports.isAlias = identity.isAlias;
+    exports.isCollection = identity.isCollection;
+    exports.isDocument = identity.isDocument;
+    exports.isMap = identity.isMap;
+    exports.isNode = identity.isNode;
+    exports.isPair = identity.isPair;
+    exports.isScalar = identity.isScalar;
+    exports.isSeq = identity.isSeq;
+    exports.Pair = Pair.Pair;
+    exports.Scalar = Scalar.Scalar;
+    exports.YAMLMap = YAMLMap.YAMLMap;
+    exports.YAMLSeq = YAMLSeq.YAMLSeq;
+    exports.CST = cst;
+    exports.Lexer = lexer.Lexer;
+    exports.LineCounter = lineCounter.LineCounter;
+    exports.Parser = parser.Parser;
+    exports.parse = publicApi.parse;
+    exports.parseAllDocuments = publicApi.parseAllDocuments;
+    exports.parseDocument = publicApi.parseDocument;
+    exports.stringify = publicApi.stringify;
+    exports.visit = visit.visit;
+    exports.visitAsync = visit.visitAsync;
   }
 });
 
@@ -13366,8 +20685,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path23, errorMaps, issueData } = params;
-  const fullPath = [...path23, ...issueData.path || []];
+  const { data, path: path29, errorMaps, issueData } = params;
+  const fullPath = [...path29, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -13482,11 +20801,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path23, key) {
+  constructor(parent, value, path29, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path23;
+    this._path = path29;
     this._key = key;
   }
   get path() {
@@ -17135,10 +24454,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path23) {
-  if (!path23)
+function getElementAtPath(obj, path29) {
+  if (!path29)
     return obj;
-  return path23.reduce((acc, key) => acc == null ? void 0 : acc[key], obj);
+  return path29.reduce((acc, key) => acc == null ? void 0 : acc[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -17523,11 +24842,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path23, issues) {
+function prefixIssues(path29, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path23);
+    iss.path.unshift(path29);
     return iss;
   });
 }
@@ -29158,20 +36477,32 @@ import fs5 from "node:fs";
 import path6 from "node:path";
 
 // src/maker/capabilityRouting.ts
-var MAKER_CAPABILITY_ROUTING_INDEX = `TapTap Maker routing index:
-- Start or resume Maker work, or diagnose project/MCP readiness: read
-  maker://status; use maker_status_lite when resources are unavailable.
-- Build, preview, run, submit, or push: after checking project status, use
-  maker_build_current_directory.
-- Ads: read maker://ads-integration-guide before any ad-related work.
-- Tap flows: test QR -> generate_test_qrcode; current Maker game's online player feedback
-  (including player-submitted game bug reports, real-device game logs, or screenshots), or
-  server/Lua logs for a specified game session -> call get_debug_feedbacks only when it is
-  exposed by the current Maker tool list.
-- Game assets: Maker MCP also provides image, video, music, sound-effect,
-  dialogue/voice, and 3D generation tools when exposed.
-
-Follow the selected tool schema and returned next_action.`;
+function formatMakerCapabilityRoutingIndex(options) {
+  return [
+    "TapTap Maker routing index:",
+    "- Start or resume Maker work, or diagnose project/MCP readiness: read",
+    "  maker://status; use maker_status_lite when resources are unavailable.",
+    "- Build, preview, run, submit, or push: after checking project status, use",
+    "  maker_build_current_directory.",
+    "- Ads: read maker://ads-integration-guide before any ad-related work.",
+    options.includeFeedback ? "- Tap flows: test QR -> generate_test_qrcode; current Maker game's online player feedback" : "",
+    options.includeFeedback ? "  (including player-submitted game bug reports, real-device game logs, or screenshots), or" : "- Tap flows: test QR -> generate_test_qrcode.",
+    options.includeFeedback ? "  server/Lua logs for a specified game session -> call get_debug_feedbacks only when it is" : "",
+    options.includeFeedback ? "  exposed by the current Maker tool list." : "",
+    "- Game assets: Maker MCP also provides image, video, music, sound-effect,",
+    "  dialogue/voice, and 3D generation tools when exposed.",
+    "- MCP/proxy infrastructure failure: diagnose, ask once for user consent, then use the",
+    "  active client's exact Maker command/args with `mcp report`; never use an unversioned npm package. Do not report expected project or business errors.",
+    "",
+    "Follow the selected tool schema and returned next_action."
+  ].filter(Boolean).join("\n");
+}
+var MAKER_CAPABILITY_ROUTING_INDEX = formatMakerCapabilityRoutingIndex({
+  includeFeedback: true
+});
+var MAKER_PROJECT_POLICY_ROUTING_INDEX = formatMakerCapabilityRoutingIndex({
+  includeFeedback: false
+});
 
 // src/maker/cli/agentsPolicy.ts
 var MAKER_AGENTS_FILE = "AGENTS.md";
@@ -29260,8 +36591,12 @@ function createMakerAgentsPolicyBody() {
     "# TapTap Maker Project Asset Tool Policy",
     "",
     "This is a bound TapTap Maker project.",
+    "Do not use TapTap Developer Center documentation or docs for other TapTap game platforms",
+    "when developing or debugging this Maker game; use Maker MCP and the project-local",
+    "`AGENTS.md`, `engine-docs/`, `examples/`, `templates/`, `urhox-libs/`, and installed Maker",
+    "skills as the sources of truth.",
     "",
-    MAKER_CAPABILITY_ROUTING_INDEX,
+    MAKER_PROJECT_POLICY_ROUTING_INDEX,
     "",
     "Maker build workflow:",
     "",
@@ -29282,13 +36617,21 @@ function createMakerAgentsPolicyBody() {
     "- If tools are missing, the process exits immediately, or the client reports `-32000`,",
     "  `Connection closed`, or `command not found`, do not depend on Maker MCP tools for initial",
     "  diagnosis. Work from local config, shell output, and client logs.",
-    "- Attempt `npx -y -p @taptap/maker taptap-maker mcp verify --json`; on Windows use",
-    "  `npx.cmd -y -p @taptap/maker taptap-maker mcp verify --json`. Record command failure as",
-    "  diagnostic evidence instead of skipping the check.",
-    "- This uses the same resolved launcher as MCP install, starts `@taptap/maker`, completes MCP",
+    "- Current Maker MCP registers whitelisted proxy tool definitions before resolving cwd, project",
+    "  binding, auth, or the remote proxy. If only proxy tools are missing, compare the active",
+    "  package version and tools/list for stale client/session caching; do not rewrite cwd.",
+    "- Attempt `taptap-maker mcp verify --json`. It verifies the stable self runtime by default;",
+    "  use `--mode npx` only when the npm launch path itself needs diagnosis. Record command failure",
+    "  as diagnostic evidence instead of skipping the check.",
+    "- If `taptap-maker` is not on PATH, reuse that config's absolute command and ordered args,",
+    "  append `mcp verify --json`, and run the same argv directly.",
+    "- This uses the same stable launcher as MCP install and completes MCP",
     "  initialize and tools/list, and returns launcher_kind, command, stage, tools, stderr, error,",
     "  and failure_type. It does not read the client's active config or validate client trust,",
     "  client config caching, or Roots.",
+    "- In explicit npx mode, EPERM/EACCES or an unwritable npm cache is",
+    "  `npm_environment_error`; prefer `mcp install --launcher self` instead of blindly changing",
+    "  `~/.npm` ownership.",
     "- First identify the active AI client from reliable evidence, then inspect only that client's",
     "  active config path, command, ordered args, cwd, workspace/Roots, Node/npm/npx paths,",
     "  client PATH, exit status, and stderr.",
@@ -29301,8 +36644,12 @@ function createMakerAgentsPolicyBody() {
     '- Never repair cwd by wrapping the command with `cd /d "<project>" && npx.cmd ...`.',
     "  Maker supports Chinese project paths; command-shell quoting or client startup can fail",
     "  independently of the project path.",
-    "- If WorkBuddy ignores configured cwd, do not keep rewriting the cwd field. Use the active",
-    "  workspace/Roots and record the process actual cwd instead.",
+    "- User-level MCP config must not contain a project cwd. If WorkBuddy or DSH does not expose Roots,",
+    "  pass target_dir on the concrete Maker tool call and record the process actual cwd only as",
+    "  diagnostic evidence.",
+    "- If cwd fallback is not a bound Maker project, project-related proxy calls fail before remote",
+    "  access and report evaluated_target_dir plus project_context_source. Fix Roots or pass the",
+    "  correct target_dir; do not treat another directory as the project status.",
     "- Do not assume Windows 8.3 short paths exist or differ from the original long path. Verify",
     "  the result first; an unchanged or missing short path is not a usable cwd workaround.",
     "- Reproduce the configured Windows launch with the same direct argv boundary when possible.",
@@ -29325,6 +36672,27 @@ function createMakerAgentsPolicyBody() {
     "- Do not rewrite command, cwd, PATH, trust state, credentials, or game code unless the",
     "  collected evidence identifies that cause.",
     "",
+    "Maker MCP issue reporting:",
+    "",
+    "- Offer a report only for likely MCP, proxy, client integration, or service defects such as",
+    "  startup/connection failure, unexpected missing tools, timeouts, repeated reconnect failure,",
+    "  HTTP 5xx/unavailable responses, or unclassified internal server errors.",
+    "- Do not report expected user or project errors such as invalid parameters, missing files,",
+    "  documented auth recovery, user cancellation, project compile errors, or business validation.",
+    "- Ask the user once before submitting each distinct failure fingerprint. If the user declines,",
+    "  do not ask again for that fingerprint in the current conversation.",
+    "- Only after the user explicitly agrees, send a compact sanitized context JSON through stdin.",
+    "- Prefer the active client's exact Maker MCP command and ordered args, then append",
+    "  `mcp report --ide <client> --target-dir <project> --context-stdin --consent --json`.",
+    "- This preserves the configured package version and the absolute Windows node.exe/npm-cli.js.",
+    "- Only with a known exact installed version, fallback to",
+    "  `npx -y --package @taptap/maker@0.0.32 taptap-maker mcp report ...`.",
+    "- Never use an unversioned npm package, or assume `taptap-maker`/`npx` is globally available.",
+    "- Never include the complete conversation, project source, other MCP server entries, PAT/token",
+    "  values, or full environment variables. Normalize the user home path to `~`.",
+    "- A `manual_required` result means GitHub submission was unavailable. Show the sanitized report",
+    "  and manual Issue URL, then continue troubleshooting without treating reporting as a failure.",
+    "",
     "Maker ad workflow:",
     "",
     "- For any ad-related request or code touching ads, first read",
@@ -29343,20 +36711,6 @@ function createMakerAgentsPolicyBody() {
     "  `generate_test_qrcode` once to generate test QR code metadata, then call `get_ad_config`",
     "  again. Do not use publish-only tools for this recovery path.",
     "",
-    "Maker feedback workflow:",
-    "",
-    "- For user requests about the current Maker game's online player feedback, including",
-    "  player-submitted game bug reports, real-device game logs, or screenshots, or server/Lua",
-    "  logs for a specified game session, call the Maker proxy `get_debug_feedbacks` tool only",
-    "  when it is exposed by the current Maker tool list.",
-    "- This includes 当前 Maker 游戏的玩家反馈、玩家提交的游戏故障、真机游戏日志或截图、",
-    "  指定游戏会话的服务端/Lua 日志. It does not include AI client, plugin, or other product",
-    "  feedback.",
-    "- Use local runtime log files only for the current local build/runtime session. Do not use",
-    "  local logs as a substitute for remote player-submitted feedback.",
-    "- Follow the remote tool schema and return the feedback records, logs, screenshots, and",
-    "  full error payloads as provided by the remote Maker MCP server.",
-    "",
     "Maker MCP provides the following game asset generation and editing tools when they are",
     "exposed in the current session:",
     "",
@@ -29364,12 +36718,18 @@ function createMakerAgentsPolicyBody() {
     "- `batch_generate_images` for multiple image assets.",
     "- `edit_image` for modifying existing project images.",
     "- `create_video_task` for game video assets or referenced image/video generation.",
+    "- Only call `create_video_task` after the user explicitly requests video generation; do not",
+    "  generate video proactively while implementing gameplay or filling asset gaps.",
+    '- When duration exceeds 10 seconds or `model="2.5"`, show the rough credit estimate and',
+    "  upstream-token billing disclaimer, wait for explicit confirmation, then repeat the same",
+    "  request with `user_confirmed=true`.",
     "- `query_video_task` for refreshing video task status and fetching completed videos.",
     "- `text_to_music` for game music.",
     "- `text_to_sound_effect` for one sound effect.",
     "- `batch_sound_effects` for multiple sound effects.",
     "- `text_to_dialogue` for final character dialogue.",
-    "- `text_to_dialogue` automatically converts local project audio to data URLs and reuses confirmed local voice mappings.",
+    "- `text_to_dialogue` reuses confirmed local ElevenLabs voice mappings. After confirmation, pass only `character_name` and `text`.",
+    "- For ElevenLabs auditions, pass a detailed `character_description` and an `audition_line` of at least 100 characters. `candidate_count` is optional and accepts 1 to 3.",
     "- After `audition_voices_for_character` returns previews, show them to the user and wait",
     "  for the user to choose. Do not select or confirm a voice automatically.",
     "- Call `confirm_character_voice` only after the user explicitly chooses one preview.",
@@ -30539,12 +37899,12 @@ function getBlockingRemoteSyncFailure(status) {
   };
 }
 function includeMandatoryMakerSubmitFiles(cwd, files) {
-  const unique = new Set(files);
+  const unique2 = new Set(files);
   const changedFiles = parseGitStatusFiles(readGitSync(["-C", cwd, "status", "--porcelain", "-z"]));
   if (changedFiles.includes(".gitignore")) {
-    unique.add(".gitignore");
+    unique2.add(".gitignore");
   }
-  return [...unique];
+  return [...unique2];
 }
 async function readMakerProjectLocalChanges(cwd) {
   ensureGitAvailable();
@@ -30845,7 +38205,16 @@ function getMakerGitRetryDecision(message) {
   )) {
     return { retry: true, reason: "network_or_timeout" };
   }
-  if (/connection reset|connection refused|connection closed|remote end hung up|unexpected disconnect|early EOF|RPC failed|index-pack failed|HTTP\/2 stream.*not closed cleanly|SSL_ERROR_SYSCALL|curl\s+(?:18|28|35|52|55|56|92)/i.test(
+  if (/curl\s+92\b|HTTP\/2 stream.*not closed cleanly|HTTP\/2.{0,80}(?:not supported|unsupported)|(?:server|remote).{0,80}does not support HTTP\/2/i.test(
+    text
+  )) {
+    return {
+      retry: true,
+      reason: "http2_transport_error",
+      fallbackHttpVersion: "HTTP/1.1"
+    };
+  }
+  if (/connection reset|connection refused|connection closed|remote end hung up|unexpected disconnect|early EOF|RPC failed|index-pack failed|SSL_ERROR_SYSCALL|curl\s+(?:18|28|35|52|55|56)/i.test(
     text
   )) {
     return { retry: true, reason: "connection_interrupted" };
@@ -30926,10 +38295,14 @@ function pushGit(args, cwd, onProgress) {
   });
 }
 function pushGitWithTransientRetry(args, cwd, onProgress) {
-  return runWithTransientRetry(() => pushGit(args, cwd, onProgress), {
-    stage: "push",
-    onProgress
-  });
+  return runMakerGitNetworkOperationWithTransientRetry(
+    args,
+    (effectiveArgs) => pushGit(effectiveArgs, cwd, onProgress),
+    {
+      stage: "push",
+      onProgress
+    }
+  );
 }
 async function resolveMakerProjectUserId(options) {
   var _a3;
@@ -31379,10 +38752,15 @@ function readGit(args, cwd) {
   });
 }
 async function runGitWithTransientRetry(args, options) {
-  return runWithTransientRetry(() => runGit(args, options), {
-    stage: args[0] || "git",
-    onProgress: options.onProgress
-  });
+  const stage = args[0] || "git";
+  return runMakerGitNetworkOperationWithTransientRetry(
+    args,
+    (effectiveArgs) => runGit(effectiveArgs, { ...options, stage }),
+    {
+      stage,
+      onProgress: options.onProgress
+    }
+  );
 }
 async function runGitCaptureWithTransientRetry(args, options = {}) {
   return runWithTransientRetry(() => runGitCapture(args, options), {
@@ -31391,7 +38769,7 @@ async function runGitCaptureWithTransientRetry(args, options = {}) {
   });
 }
 async function runWithTransientRetry(operation, options) {
-  var _a3;
+  var _a3, _b;
   let retries = 0;
   const maxRetries = 5;
   for (; ; ) {
@@ -31407,7 +38785,8 @@ async function runWithTransientRetry(operation, options) {
         throw appendRetryExhausted(error2, retries, decision);
       }
       retries += 1;
-      (_a3 = options.onProgress) == null ? void 0 : _a3.call(options, {
+      (_a3 = options.onRetry) == null ? void 0 : _a3.call(options, decision);
+      (_b = options.onProgress) == null ? void 0 : _b.call(options, {
         phase: options.stage,
         message: formatGitRetryProgressMessage(options.stage, decision, retries, maxRetries)
       });
@@ -31415,8 +38794,25 @@ async function runWithTransientRetry(operation, options) {
     }
   }
 }
+async function runMakerGitNetworkOperationWithTransientRetry(args, operation, options) {
+  let fallbackHttpVersion;
+  return runWithTransientRetry(
+    () => operation(
+      fallbackHttpVersion ? ["-c", `http.version=${fallbackHttpVersion}`, ...args] : [...args]
+    ),
+    {
+      ...options,
+      onRetry: (decision) => {
+        fallbackHttpVersion = decision.fallbackHttpVersion || fallbackHttpVersion;
+      }
+    }
+  );
+}
 function formatGitRetryProgressMessage(stage, decision, retries, maxRetries) {
   const reason = decision.reason || "temporary_remote_failure";
+  if (reason === "http2_transport_error") {
+    return `Maker git HTTP/2 transport failed; retrying with command-local HTTP/1.1 ${retries}/${maxRetries}. Please keep this running.`;
+  }
   const prefix = (stage === "clone" || stage === "fetch") && reason === "remote_http_5xx" ? "Maker server may still be preparing the repository" : "Maker git remote is temporarily unavailable";
   return `${prefix} (${reason}); retrying ${retries}/${maxRetries}. Please keep this running.`;
 }
@@ -31517,7 +38913,7 @@ function runGit(args, options) {
         reject(
           new MakerGitError(
             createGitFailure({
-              stage: args[0] || "git",
+              stage: options.stage || args[0] || "git",
               command: `${gitCommand} ${args.join(" ")}`,
               exitCode: code,
               stdout: options.quiet ? "" : stdout,
@@ -31531,7 +38927,7 @@ function runGit(args, options) {
       reject(
         new MakerGitError(
           createGitFailure({
-            stage: args[0] || "git",
+            stage: options.stage || args[0] || "git",
             command: `${gitCommand} ${args.join(" ")}`,
             exitCode: null,
             stdout: options.quiet ? "" : stdout,
@@ -31583,65 +38979,6 @@ function parseGitProgressLine(line) {
     };
   }
   return void 0;
-}
-
-// src/maker/auth/patTap.ts
-function getObjectValue(data, key) {
-  if (!data || typeof data !== "object") {
-    return void 0;
-  }
-  return data[key];
-}
-function normalizeTapAuthResponse(data) {
-  const body = data;
-  const nested = getObjectValue(body, "data");
-  const source = nested && typeof nested === "object" ? nested : body;
-  const kid = source.kid;
-  const macKey = source.mac_key;
-  if (typeof kid !== "string" || kid.length === 0 || typeof macKey !== "string" || macKey.length === 0) {
-    throw new Error("TapTap token response does not contain kid/mac_key");
-  }
-  return {
-    kid,
-    mac_key: macKey,
-    token_type: typeof source.token_type === "string" ? source.token_type : "mac",
-    mac_algorithm: typeof source.mac_algorithm === "string" ? source.mac_algorithm : "hmac-sha-1",
-    raw: data
-  };
-}
-function getMakerTapTokenUrl(environment) {
-  const tapTokenUrl = getMakerEndpoints(environment).tapTokenUrl;
-  return requireMakerEndpoint("tapTokenUrl", tapTokenUrl, environment);
-}
-async function requestTapAuthWithPat(manualPat, environment, options = {}) {
-  const pat = requireMakerPat(manualPat);
-  const response = await fetchWithTimeout(
-    options.fetchImpl || fetch,
-    getMakerTapTokenUrl(environment),
-    {
-      headers: {
-        Authorization: `Bearer ${pat.token}`,
-        Accept: "application/json"
-      }
-    },
-    options.timeoutMs ?? DEFAULT_SHORT_FETCH_TIMEOUT_MS,
-    "TapTap token request"
-  );
-  const text = await response.text();
-  let json2 = {};
-  if (text) {
-    try {
-      json2 = JSON.parse(text);
-    } catch {
-      json2 = { error: text };
-    }
-  }
-  if (!response.ok) {
-    throw new Error(`TapTap token request failed: HTTP ${response.status} ${JSON.stringify(json2)}`);
-  }
-  const auth2 = normalizeTapAuthResponse(json2);
-  saveTapAuth(auth2);
-  return auth2;
 }
 
 // src/maker/system/python.ts
@@ -32392,9 +39729,35 @@ function saveLuaLspRuntimeConfig(environment) {
 import fs10 from "node:fs";
 import path11 from "node:path";
 import { fileURLToPath } from "node:url";
+
+// src/maker/pluginDistribution.ts
+function hasMakerPluginDistribution(distribution = process.env.TAPTAP_MAKER_DISTRIBUTION) {
+  return Boolean(distribution == null ? void 0 : distribution.trim());
+}
+function resolveMakerPluginDistribution(distribution = process.env.TAPTAP_MAKER_DISTRIBUTION) {
+  if (distribution === "codex_plugin") {
+    return { id: distribution, client: "codex", displayName: "Codex" };
+  }
+  if (distribution === "workbuddy_plugin") {
+    return { id: distribution, client: "workbuddy", displayName: "WorkBuddy" };
+  }
+  if (distribution === "dsh_plugin") {
+    return { id: distribution, client: "dsh", displayName: "DSH" };
+  }
+  return void 0;
+}
+function formatMakerPluginUpdateAction(distribution) {
+  if (distribution.client === "dsh") {
+    return "Update the installed DSH plugin via `dsh plugin --profile <profile> update @taptap/dsh-maker`; do not install or upgrade the standalone npm package.";
+  }
+  return `Update the installed ${distribution.displayName} plugin through its marketplace; do not install or upgrade the standalone npm package.`;
+}
+
+// src/maker/cli/skill.ts
 var MAKER_LOCAL_SKILL_NAME = "taptap-maker-local";
 var MAKER_DEV_KIT_GUIDE_SKILL_NAME = "taptap-maker-dev-kit-guide";
 var UPDATE_TAPTAP_MCP_SKILL_NAME = "update-taptap-mcp";
+var MAKER_PLUGIN_LIFECYCLE_SKILL_NAME = "taptap-maker-plugin-lifecycle";
 var BUNDLED_SKILLS = [
   {
     name: MAKER_LOCAL_SKILL_NAME
@@ -32407,7 +39770,10 @@ var BUNDLED_SKILLS = [
   }
 ];
 function formatMakerSkillStatus(_options = {}) {
-  const skillDocuments = BUNDLED_SKILLS.map((skill) => ({
+  const pluginDistribution = resolveMakerPluginDistribution();
+  const clientPluginDistribution = pluginDistribution && pluginDistribution.client !== "dsh" ? pluginDistribution : void 0;
+  const bundledSkills = clientPluginDistribution ? [...BUNDLED_SKILLS, { name: MAKER_PLUGIN_LIFECYCLE_SKILL_NAME }] : BUNDLED_SKILLS;
+  const skillDocuments = bundledSkills.map((skill) => ({
     name: skill.name,
     path: path11.join(resolveMakerSkillSourceDir(skill.name), "SKILL.md")
   }));
@@ -32417,6 +39783,27 @@ function formatMakerSkillStatus(_options = {}) {
     ...skillDocuments.map((skill) => `- ${skill.name}: ${skill.path}`),
     "",
     "Use these documents as reading references for Maker local workflows.",
+    ...clientPluginDistribution ? [
+      "",
+      `Maker ${clientPluginDistribution.displayName} plugin lifecycle`,
+      `- entry: ${MAKER_PLUGIN_LIFECYCLE_SKILL_NAME}`,
+      `- Inspect a legacy ${clientPluginDistribution.displayName} Maker MCP registration before first use.`,
+      ...clientPluginDistribution.client === "codex" ? [
+        "- Automatically disable an active legacy Codex Maker MCP; the plugin installation request is the authorization.",
+        "- Verify the legacy registration is disabled or absent before reporting the plugin ready.",
+        "- Require explicit confirmation only when restoring the old MCP during plugin removal."
+      ] : ["- Require explicit confirmation before disabling or restoring it."],
+      "- Initialize with `taptap-maker init --skip-mcp-install`; the plugin already provides MCP.",
+      `- ${formatMakerPluginUpdateAction(clientPluginDistribution)}`
+    ] : [],
+    ...(pluginDistribution == null ? void 0 : pluginDistribution.client) === "dsh" ? [
+      "",
+      "Maker DSH plugin lifecycle",
+      "- Inspect a legacy DSH L1 MCP registration with `taptap-maker plugin inspect --client dsh` before first use.",
+      "- Migrate/disable it with `taptap-maker plugin migrate --client dsh --confirm`; restore with `taptap-maker plugin restore --client dsh --confirm`.",
+      "- Initialize with `taptap-maker init --skip-mcp-install`; the DSH plugin already provides MCP.",
+      `- ${formatMakerPluginUpdateAction(pluginDistribution)}`
+    ] : [],
     "",
     "Maker Git workflow policy",
     `- entry: ${MAKER_LOCAL_SKILL_NAME} > Maker Git Workflow Policy`,
@@ -32430,11 +39817,14 @@ function formatMakerSkillStatus(_options = {}) {
     "- Follow the selected tool schema when one of these tools is used.",
     "- Use generate_image, batch_generate_images, edit_image for game image assets.",
     "- Use create_video_task and query_video_task for game video assets.",
+    "- Only call create_video_task after the user explicitly requests video generation; do not generate video proactively while implementing or filling asset gaps.",
+    '- When duration exceeds 10 seconds or model="2.5", show the rough credit estimate and upstream-token billing disclaimer, wait for explicit confirmation, then repeat the same request with user_confirmed=true.',
     "- Use text_to_music for game music.",
     "- Use text_to_sound_effect for one sound effect.",
     "- Use batch_sound_effects for multiple sound effects.",
     "- Use text_to_dialogue for final character dialogue.",
-    "- text_to_dialogue automatically converts local project audio to data URLs and reuses confirmed local voice mappings.",
+    "- text_to_dialogue reuses confirmed local ElevenLabs voice mappings; after confirmation pass only character_name and text.",
+    "- For ElevenLabs auditions, pass character_description and an audition_line of at least 100 characters; candidate_count is optional (1-3).",
     "- After audition_voices_for_character returns previews, wait for the user to choose.",
     "- Call confirm_character_voice only after the user explicitly chooses a preview.",
     "- Generated sound effects and dialogue are saved in the project.",
@@ -32452,7 +39842,16 @@ function formatMakerSkillStatus(_options = {}) {
     "- Local proxy may convert resolvable local reference media to data URLs before forwarding.",
     "- create_3d_asset local runtime model_files copy/extract instructions are materialized under assets/model.",
     "- Use local_delivery for the usable local model path and preview_assets for local review images.",
-    "Maker initialization next_step: execute `taptap-maker init`.",
+    "",
+    "Maker MCP issue reporting",
+    `- entry: ${MAKER_LOCAL_SKILL_NAME} > Maker MCP Issue Reporting`,
+    "- Ask the user once before submitting a likely MCP, proxy, client integration, or service defect.",
+    "- Do not offer issue reporting for expected parameter, auth, project, compile, or business errors.",
+    "- After consent, send sanitized evidence through stdin. Reuse the active client exact Maker command/args and append:",
+    "  mcp report --ide <client> --target-dir <project> --context-stdin --consent --json",
+    "- Never use an unversioned npm package; preserve the configured version and Windows absolute launcher.",
+    "- A manual_required result never blocks troubleshooting or the original Maker task.",
+    pluginDistribution ? "Maker initialization next_step: execute `taptap-maker init --skip-mcp-install` through the bundled plugin CLI." : "Maker initialization next_step: execute `taptap-maker init`.",
     "Load these documents when the current AI client supports reading local guide files."
   ].join("\n");
 }
@@ -32926,6 +40325,9 @@ function decideMakerPackageUpdate(currentVersion, policy) {
 async function checkMakerPackageUpdate(options) {
   const now = options.now ?? /* @__PURE__ */ new Date();
   const currentVersion = options.currentVersion;
+  if (hasMakerPluginDistribution()) {
+    return buildPluginManagedStatus(currentVersion);
+  }
   if (currentVersion === "dev") {
     return {
       status: "skipped",
@@ -32984,6 +40386,9 @@ async function checkMakerPackageUpdate(options) {
 async function getMakerPackageUpdateStatus(options) {
   var _a3, _b;
   const currentVersion = options.currentVersion;
+  if (hasMakerPluginDistribution()) {
+    return buildPluginManagedStatus(currentVersion);
+  }
   if (currentVersion === "dev") {
     return {
       status: "skipped",
@@ -33035,6 +40440,9 @@ async function getMakerPackageUpdateStatus(options) {
 }
 var backgroundCheck;
 function startMakerPackageUpdateCheck(options) {
+  if (hasMakerPluginDistribution()) {
+    return;
+  }
   const key = `${options.currentVersion}
 ${resolvePolicyUrl(options.policyUrl)}`;
   if ((backgroundCheck == null ? void 0 : backgroundCheck.key) === key) {
@@ -33068,7 +40476,7 @@ function formatMakerPackageUpdateStatus(status) {
   }
   if (status.blacklist_match) {
     lines.push(`- blacklist_match: ${status.blacklist_match}`);
-  } else if (status.status !== "skipped") {
+  } else if (status.status !== "skipped" && status.status !== "managed_by_plugin") {
     lines.push("- blacklist_match: no");
   }
   if (status.checked_at) {
@@ -33096,6 +40504,13 @@ function formatMakerPackageUpdateStatus(status) {
     lines.push(`- restart_required: ${status.restart_required ? "yes" : "no"}`);
   }
   return lines.join("\n");
+}
+function buildPluginManagedStatus(currentVersion) {
+  return {
+    status: "managed_by_plugin",
+    current_version: currentVersion,
+    restart_required: false
+  };
 }
 function formatUnavailableNonBlockingError(previousError, backgroundRefresh) {
   if (backgroundRefresh) {
@@ -33583,6 +40998,7 @@ function formatMakerProjectHealthStatus(health) {
     "Maker project structure",
     "",
     `- status: ${health.status}`,
+    `- evaluated_target_dir: ${health.projectRoot}`,
     `- can_build: ${health.canBuild ? "yes" : "no"}`,
     `- can_generate_test_qrcode: ${health.canGenerateTestQrcode ? "yes" : "no"}`
   ];
@@ -34067,7 +41483,9 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 // src/maker/server/diagnosticRedaction.ts
 function isSensitiveDiagnosticKey(key) {
   const normalized = key.replace(/[-\s]/gu, "_").toLowerCase();
-  return /^(?:authorization|cookie|pat|token|secret)$/u.test(normalized) || /(?:^|_)(?:access|refresh|id|api|auth|bearer|personal_access)?_?token$/u.test(normalized) || /(?:^|_)(?:client|app|api|mac)?_?secret$/u.test(normalized) || /(?:^|_)(?:api|auth|mac|private)?_?key$/u.test(normalized) || /(?:^|_)pat$/u.test(normalized);
+  return /(?:^|_)(?:authorization|cookie|password|passwd|passphrase|pat|token|secret|signature|sig|credential|credentials)$/u.test(
+    normalized
+  ) || /(?:^|_)(?:access|refresh|id|api|auth|bearer|personal_access)?_?token$/u.test(normalized) || /(?:^|_)(?:client|app|api|mac)?_?secret$/u.test(normalized) || /(?:^|_)(?:api|auth|mac|private)?_?key$/u.test(normalized) || /(?:^|_)pat$/u.test(normalized);
 }
 function sanitizeDiagnosticValue(value) {
   return sanitizeValue(value, true, /* @__PURE__ */ new WeakSet());
@@ -34106,8 +41524,11 @@ function sanitizeDiagnosticText(value) {
     }
   } catch {
   }
-  return value.replace(/\b(authorization|cookie)\b\s*:\s*[^\r\n]*/giu, "$1: <redacted>").replace(
-    /\b(token|secret|mac[_-]?key|pat)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
+  return value.replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#\s@]+@/gu, "$1<redacted>@").replace(/\b(authorization|cookie)\b\s*:\s*[^\r\n]*/giu, "$1: <redacted>").replace(
+    /(^|[\s,;])(--(?:[a-z0-9]+[-_])*(?:pat|token|secret|signature|sig|credential|credentials|authorization|cookie|password|passwd|passphrase|mac[-_]?key|api[-_]?key|auth[-_]?key|private[-_]?key))\s+(?:"[^"]*"|'[^']*'|(?:(?![&,;][A-Za-z][A-Za-z0-9_.-]*\s*[:=])[^\s])+)/gimu,
+    "$1$2 <redacted>"
+  ).replace(
+    /\b((?:[A-Za-z][A-Za-z0-9_-]*[_-])?(?:authorization|cookie|password|passwd|passphrase|pat|token|secret|signature|sig|credential|credentials|(?:api|auth|mac|private)[_-]?key))\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|(?:(?![&,;][A-Za-z][A-Za-z0-9_.-]*\s*[:=])[^\s])+)/giu,
     "$1=<redacted>"
   ).replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}(?=$|[\s,;'"()\x5B\x5D{}])/giu, "Bearer <redacted>").replace(/\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}\b/gu, "<redacted>");
 }
@@ -34125,7 +41546,7 @@ var AUDIO_REFERENCE_MAX_BYTES = 15 * 1024 * 1024;
 var AUDIO_DIALOGUE_REFERENCE_MAX_BYTES = 20 * 1024 * 1024;
 var AUDIO_DIALOGUE_INPUT_TOTAL_MAX_BYTES = 28 * 1024 * 1024;
 var AUDIO_CONFIRM_MAX_BYTES = 1 * 1024 * 1024;
-var VOICE_CONFIRMATION_NEXT_STEP_HINT = "Call text_to_dialogue with character_name and text. The confirmed voice mapping is reused automatically; omit reference_audio unless the user requests a one-time override.";
+var VOICE_CONFIRMATION_NEXT_STEP_HINT = "Call text_to_dialogue with character_name and text. The confirmed voice mapping is reused automatically.";
 var DEBUG_FEEDBACK_PATH_HINT = "Use local_dir/local_log_paths/local_screenshot_paths when they are returned. If only local_candidate_* is present, it is a possible project-relative location and must not be treated as a downloaded local file.";
 var CREATE_3D_ASSET_PROXY_TOOL_NAME = "create_3d_asset";
 var DATA_URL_MIME_BY_EXTENSION = {
@@ -34169,6 +41590,19 @@ var RemoteProxyToolResultError = class extends Error {
     this.result = result;
   }
 };
+var RemoteProxyToolCallError = class extends Error {
+  constructor(toolName, executionState, error2) {
+    const originalMessage = error2 instanceof Error ? error2.message : String(error2);
+    super(
+      `Remote proxy tool ${toolName} failed with execution_state=${executionState}; automatic retry is disabled. ${originalMessage}`
+    );
+    this.automaticRetry = false;
+    this.name = "RemoteProxyToolCallError";
+    this.toolName = toolName;
+    this.executionState = executionState;
+    this.originalError = error2;
+  }
+};
 function prepareRemoteProxyToolArgs(options) {
   if (options.toolName === "audition_voices_for_character") {
     return validateVoiceAuditionArgs(options.args);
@@ -34195,6 +41629,7 @@ function prepareRemoteProxyToolArgs(options) {
 }
 function validateVoiceAuditionArgs(args) {
   const voiceProfile = args.voice_profile;
+  if (voiceProfile === void 0) return args;
   const gender = isRecord2(voiceProfile) ? voiceProfile.gender : void 0;
   if (gender !== "male" && gender !== "female") {
     throw new Error(
@@ -34205,7 +41640,10 @@ function validateVoiceAuditionArgs(args) {
 }
 async function materializeRemoteProxyToolAssets(options) {
   if (isRemoteProxyToolErrorResult(options.result)) {
-    throw new RemoteProxyToolResultError(options.toolName, options.result);
+    throw new RemoteProxyToolResultError(
+      options.toolName,
+      addRemoteProxyErrorExecutionState(options.result)
+    );
   }
   if (!shouldMaterializeRemoteProxyTool(options.toolName)) {
     return options.result;
@@ -34254,6 +41692,24 @@ async function materializeRemoteProxyToolAssets(options) {
     };
   }
   return changed ? { ...options.result, content: nextContent } : options.result;
+}
+function addRemoteProxyErrorExecutionState(result) {
+  const resultWithStructuredContent = result;
+  const existingStructuredContent = resultWithStructuredContent.structuredContent;
+  const existingRecord = isRecord2(existingStructuredContent) ? existingStructuredContent : void 0;
+  const topLevelState = result.execution_state;
+  const explicitState = normalizeRemoteProxyExecutionState(existingRecord == null ? void 0 : existingRecord.execution_state) ?? normalizeRemoteProxyExecutionState(topLevelState);
+  return {
+    ...result,
+    structuredContent: {
+      ...existingRecord || (existingStructuredContent === void 0 ? {} : { remote_structured_content: existingStructuredContent }),
+      execution_state: explicitState ?? "unknown",
+      automatic_retry: false
+    }
+  };
+}
+function normalizeRemoteProxyExecutionState(value) {
+  return value === "not_executed" || value === "executed" || value === "unknown" ? value : void 0;
 }
 function shouldMaterializeRemoteProxyTool(toolName) {
   return [
@@ -35567,9 +43023,6 @@ function rewriteTextToDialogueArgs(targetDir, args) {
   }
   const registry2 = readGeneratedAssetRegistry(targetDir);
   const localElevenLabsMapping = readLocalElevenLabsVoiceMapping(targetDir);
-  const localDoubaoMapping = args.inputs.some(
-    (value) => isRecord2(value) && normalizeOptionalDialogueReference(value.reference_audio) === void 0 && normalizeOptionalDialogueReference(value.reference_audio_path) === void 0
-  ) ? readLocalDoubaoVoiceMapping(targetDir) : void 0;
   let referenceAudioInputBytes = 0;
   return {
     ...args,
@@ -35595,15 +43048,6 @@ function rewriteTextToDialogueArgs(targetDir, args) {
       if (localVoiceId) {
         normalizedValue._local_voice_id = localVoiceId;
       }
-      if (canonicalReference === void 0 && legacyReference === void 0) {
-        canonicalReference = resolveLocalDoubaoMappingReference({
-          targetDir,
-          characterName: value.character_name,
-          mapping: localDoubaoMapping,
-          registry: registry2,
-          index
-        });
-      }
       if (canonicalReference === void 0) canonicalReference = legacyReference;
       if (canonicalReference === void 0) return normalizedValue;
       const referenceAudio = normalizeDialogueReference(
@@ -35628,13 +43072,6 @@ function rewriteTextToDialogueArgs(targetDir, args) {
 async function prepareRemoteProxyToolArgsAsync(options) {
   return prepareRemoteProxyToolArgs(options);
 }
-function readLocalDoubaoVoiceMapping(targetDir) {
-  const mappingPath = path17.join(targetDir, ".project", "audio-voice-mapping.json");
-  if (!fs16.existsSync(mappingPath)) return void 0;
-  assertProjectDirectory(targetDir, path17.dirname(mappingPath));
-  const mapping = readJsonFile2(mappingPath);
-  return (mapping == null ? void 0 : mapping.provider) === "doubao" ? mapping : void 0;
-}
 function readLocalElevenLabsVoiceMapping(targetDir) {
   const mappingPath = path17.join(targetDir, ".project", "elevenlabs-voice-mapping.json");
   if (!fs16.existsSync(mappingPath)) return void 0;
@@ -35649,29 +43086,6 @@ function resolveLocalElevenLabsVoiceId(characterName, mapping) {
   const character = characters[characterName];
   if (!isRecord2(character) || character.provider !== "elevenlabs") return void 0;
   return stringField2(character.voice_id);
-}
-function resolveLocalDoubaoMappingReference(options) {
-  if (typeof options.characterName !== "string" || !options.mapping) return void 0;
-  const characters = options.mapping.characters;
-  if (!isRecord2(characters)) return void 0;
-  const character = characters[options.characterName];
-  if (!isRecord2(character) || character.provider !== "doubao") return void 0;
-  const referencePath = stringField2(character.reference_audio_path);
-  if (!referencePath) return void 0;
-  try {
-    const reference = normalizeDialogueReference(
-      options.targetDir,
-      referencePath,
-      options.registry,
-      options.index
-    );
-    return reference.toLowerCase().startsWith("data:") ? reference : void 0;
-  } catch (error2) {
-    const reason = error2 instanceof Error ? error2.message : String(error2);
-    throw new Error(
-      `Local Doubao voice mapping for character "${options.characterName}" references unavailable audio "${referencePath}". Re-run confirm_character_voice to restore it. ${reason}`
-    );
-  }
 }
 function normalizeOptionalDialogueReference(value) {
   if (value === void 0 || value === null) return void 0;
@@ -36040,14 +43454,20 @@ var MAKER_STATUS_LITE_PUBLIC_DESCRIPTION = [
   "Compatibility tool for clients that cannot read the maker://status resource; prefer the resource when it is available.",
   "Use it when starting or resuming Maker work, or when the current project context and readiness are uncertain.",
   "Pass target_dir when the project cannot be resolved from MCP Roots or the server working directory; if multiple Maker projects remain ambiguous, ask the user instead of guessing.",
-  "By default the check may perform remote Git, package, dev-kit, proxy, and authentication probes. skip_remote_sync skips only remote Git and dev-kit freshness checks; it is not an offline or read-only mode.",
+  "By default this is a fast local, read-only summary. Set detail=true only for explicit diagnostics; it enables remote Git, dev-kit, proxy, and maintenance checks. skip_remote_sync skips remote Git and dev-kit freshness checks in detail mode.",
   "Follow the returned next_action and next_step."
 ].join(" ");
 var MAKER_BUILD_CURRENT_DIRECTORY_PUBLIC_DESCRIPTION = [
   "Submit and remotely build the current bound Maker project. First read maker://status or maker_status_lite and resolve exactly one bound Maker project.",
+  "`Need to call maker_build_current_directory` is a normal project build prerequisite, not an MCP connectivity failure or issue-report trigger.",
   "Use this tool for explicit Maker build, preview, submit, or push requests. Code tests and lint do not trigger this remote workflow unless the user also explicitly asks to build, run, or preview the Maker game.",
   "Normal mode commits local changes when needed, pushes existing or new commits, and then starts the remote build; a clean workspace creates the required wake-up commit.",
   "Unsafe remote-sync or branch states stop before commit and push. A push failure stops before build, while a build failure after a successful push means the code is already on Maker remote; follow the structured result for recovery.",
+  "On failure, read failure_stage, code_submit_status, and remote_build_status before explaining whether project validation, code submit/push, or remote build failed.",
+  'Known local authentication or project-context preparation failures use failure_stage="local_build_context" and remote_build_status="not_started"; follow the returned login or init recovery instead of describing a remote build failure.',
+  'When an error explicitly reports a local PowerShell, CLI, or Git process blocked by sandbox policy, EPERM, or EACCES, ask the user to check the AI client sandbox and suggest Full Access mode ("完全访问模式") only for a trusted project. For remote Git or remote build failures, inspect the returned Git, code, and resource diagnostics first and mention sandbox access only if local commands are also blocked. Treat sandbox as a check, not a confirmed cause, for otherwise unclassified local execution failures. Follow the returned fix directly for known project-validation or project-context errors.',
+  "If the host reports `MCP error -32001: Request timed out`, treat it only as a timeout signal: timeout alone is not evidence of a Maker server failure. Do not claim a Maker server outage without HTTP 5xx, server logs, or service-status evidence.",
+  "Do not retry the build blindly. Run Maker doctor for the project through the active client launcher (`taptap-maker doctor --target-dir <PROJECT_DIR>` is the standalone CLI equivalent) for read-only host and project checks, then inspect the actual active client MCP command, args, cwd/Roots, session and tool registration, request timeout, and Node runtime. Doctor cannot inspect the active client configuration itself.",
   "After a successful build, read runtime_logs.local_file for gameplay diagnostics and runtime_logs.state_file for watcher health when those fields are returned.",
   "Do not combine Maker submission with generic branch, PR/MR, or separate commit/push workflows.",
   "Set confirm_remote_build_without_submit=true only after the user explicitly requests building the already committed remote version without submitting local changes."
@@ -36072,7 +43492,10 @@ var MAKER_REMOTE_PROXY_PUBLIC_DESCRIPTIONS = {
     "The local proxy attempts to materialize successful results into the Maker project and retain remote mapping; use returned workspace/local paths when present."
   ].join(" "),
   create_video_task: [
-    "Create a video generation task. The remote service normally performs server-side polling and waits for the final result in this call.",
+    "Create a video generation task only after the user explicitly requests video generation. Do not proactively or automatically generate videos while designing gameplay, implementing features, filling asset gaps, or self-improving the game.",
+    'Estimate the intended duration before calling. The confirmation estimate is 200 credits per second for model="2.0" and 300 credits per second for model="2.5"; it is only a rough estimate, while actual billing follows upstream token usage.',
+    'When duration exceeds 10 seconds or model="2.5" is used, show the estimate and billing disclaimer, wait for explicit user confirmation, then repeat the same request with user_confirmed=true. Default model="2.0" with omitted duration or duration=-1 does not require confirmation.',
+    "The remote service normally performs server-side polling and waits for the final result in this call.",
     "If the wait budget expires, the result returns a task_id; continue other work and use query_video_task no sooner than 120 seconds later.",
     "Mode-specific inputs and limits are defined by the input schema. Image, video, and audio references may use local project files, HTTP(S) URLs, or data URLs supported by the schema.",
     "Keep image references at 30 MiB or less, video references at 50 MiB or less, and audio references at 15 MiB or less.",
@@ -36091,35 +43514,35 @@ var MAKER_REMOTE_PROXY_PUBLIC_DESCRIPTIONS = {
     "The local proxy attempts to materialize successful audio and metadata into the Maker project and record them for later Maker references; use returned local paths when present."
   ].join(" "),
   text_to_sound_effect: [
-    "Generate one game sound effect from a Chinese or English description.",
-    "For the current Seed Audio provider, each call produces one output of at most 120 seconds. Split longer audio across multiple generations because this tool does not stitch outputs.",
+    "Generate one game sound effect from a Chinese or English description with Doubao Seed Audio.",
+    "Each call produces one output of at most 120 seconds. Split longer audio across multiple generations because this tool does not stitch outputs.",
     "duration_seconds is an approximate target and the actual duration may differ.",
     "The local proxy attempts to materialize successful audio in the provider original format under assets/audio/sfx and record it for later Maker references; use returned local paths when present."
   ].join(" "),
   batch_sound_effects: [
-    "Generate multiple game sound effects in one batch.",
-    "For the current Seed Audio provider, each item is an independent output of at most 120 seconds. Split longer audio across items or calls because this tool does not stitch outputs.",
+    "Generate multiple game sound effects with Doubao Seed Audio in one batch.",
+    "Each item is an independent output of at most 120 seconds. Split longer audio across items or calls because this tool does not stitch outputs.",
     "The result preserves per-item failures while the local proxy attempts to materialize successful audio in the provider original format under assets/audio/sfx and record it for later Maker references; use returned local paths when present."
   ].join(" "),
   text_to_dialogue: [
-    "Generate final character dialogue audio for a Maker game.",
-    "Each input needs a confirmed voice mapping or a reference_audio override. When neither is available, call audition_voices_for_character and then confirm_character_voice before retrying.",
-    "When reference_audio is omitted, the local proxy automatically reuses a confirmed local Doubao reference; the legacy provider still requires its confirmed voice mapping. Supported reference inputs and line-specific delivery controls are defined by the input schema.",
-    "For Doubao, each input produces at most 120 seconds of audio. Split longer dialogue across inputs or calls because this tool does not stitch outputs.",
+    "Generate final character dialogue audio with ElevenLabs Eleven v3.",
+    "Each character needs a confirmed ElevenLabs voice mapping in .project/elevenlabs-voice-mapping.json; when one is missing, call audition_voices_for_character and then confirm_character_voice before retrying.",
+    "Use stability from 0 to 1 (default 0.5) to tune variation. Eleven v3 supports audio tags such as [sad] and [laughing] plus punctuation-based pacing.",
     "The local proxy attempts to materialize successful dialogue under assets/audio/voice; use returned local paths when present."
   ].join(" "),
   audition_voices_for_character: [
-    "Create temporary voice previews for one game character.",
-    "Before calling, inspect the available character definition and relevant project context, then prepare a representative audition line that matches the character personality and speaking style.",
-    "voice_profile.gender is required and must be passed explicitly as male or female.",
-    "Doubao returns exactly three previews; the legacy provider follows candidate_count. Show every returned preview to the user and wait for an explicit choice before calling confirm_character_voice.",
+    "Create 1 to 3 temporary ElevenLabs Voice Design previews for one game character.",
+    "Prepare a detailed character description and an audition line of at least 100 characters that matches the character personality and speaking style.",
+    "candidate_count accepts 1 to 3 and defaults to 3.",
+    "Show every returned preview to the user and wait for an explicit choice before calling confirm_character_voice.",
     "Complete audition and confirmation for one character before starting another in the same project; do not run them in parallel.",
     "Preview files are temporary and are not saved as final game assets."
   ].join(" "),
   confirm_character_voice: [
-    "Confirm a voice selection and persist the character voice mapping for later text_to_dialogue calls.",
+    "Confirm an ElevenLabs Voice Design selection, create the permanent voice, and persist the character voice mapping for later text_to_dialogue calls.",
     "Call this tool only after audition_voices_for_character and only after the user explicitly selects a candidate or explicitly accepts the recommended candidate.",
     "Omit selected_index only after the user explicitly accepts the recommendation; absence of a user choice is not acceptance.",
+    "Confirmation consumes one ElevenLabs Voice Slot.",
     "Process one character at a time and do not call this tool in parallel for the same project."
   ].join(" "),
   create_3d_asset: [
@@ -36155,9 +43578,798 @@ var MAKER_REMOTE_PROXY_PUBLIC_DESCRIPTIONS = {
     "Session-log mode returns its own saved paths and progress information; use the returned result to continue when more history is available."
   ].join(" ")
 };
-function getMakerRemoteProxyPublicDescriptionOverride(toolName) {
-  return MAKER_REMOTE_PROXY_PUBLIC_DESCRIPTIONS[toolName];
-}
+var MAKER_REMOTE_PROXY_RETRY_GUIDANCE = [
+  "This tool is not retried automatically by the local Maker runtime.",
+  "If its response is interrupted after dispatch, its execution state may be unknown.",
+  "For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly."
+].join(" ");
+
+// src/maker/server/remoteProxyToolSnapshot.json
+var remoteProxyToolSnapshot_default = {
+  schemaVersion: 1,
+  toolOrder: [
+    "generate_image",
+    "batch_generate_images",
+    "edit_image",
+    "create_3d_asset",
+    "text_to_music",
+    "create_video_task",
+    "query_video_task",
+    "text_to_sound_effect",
+    "batch_sound_effects",
+    "text_to_dialogue",
+    "audition_voices_for_character",
+    "confirm_character_voice",
+    "generate_test_qrcode",
+    "add_test_whitelist",
+    "get_ad_config",
+    "get_debug_feedbacks"
+  ],
+  tools: [
+    {
+      name: "generate_image",
+      description: "Generate one new image asset for a Maker game. Use batch_generate_images for multiple new images and edit_image to modify an existing image. Optional reference images may guide style or content; supported sources, generation controls, and final target_size requirements are defined by the input schema. Keep each reference image supplied through local paths or data URLs at 10 MiB or less. The local proxy attempts to materialize successful results into the Maker project and retain remote mapping; use returned workspace/local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description: 'Short Chinese description of the image to generate (max 50KB). Example: "橙色小猫", "蓝色飞龙", "金币图标"'
+          },
+          name: {
+            type: "string",
+            description: 'File name for the generated image (without extension, max 100 characters). This will be used in the output filename: {name}_{timestamp}.png. Example: "小猫", "飞龙", "金币"'
+          },
+          aspect_ratio: {
+            type: "string",
+            enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "5:4", "4:5"],
+            description: 'Image aspect ratio. Default is "1:1". See tool description for use cases of each ratio.'
+          },
+          transparent: {
+            type: "boolean",
+            description: 'Whether to generate image with transparent background. Auto-detected if user mentions "透明", "透明背景", "抠图", or "无背景" in their request.'
+          },
+          target_size: {
+            type: "string",
+            description: '**REQUIRED.** Final image dimensions after scaling (format: "widthxheight").\nExamples: "256x256" (icon), "512x1024" (sprite).\nChoose aspect_ratio for shape, then target_size for exact pixel dimensions.'
+          },
+          reference_image: {
+            type: "string",
+            description: '[Deprecated] Path to a single reference image file (relative to workspace root). Use reference_images instead for multi-reference support. Example: "assets/cat.png"'
+          },
+          reference_images: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of reference images (up to 14). Each item can be a file path (relative to workspace root) OR a base64 data URL. Takes priority over reference_image. The generated image will incorporate style/content from these references."
+          },
+          seed: {
+            type: "number",
+            description: "Random seed for reproducible results. Use the same seed with the same prompt to get consistent outputs. Example: 42"
+          },
+          thinking_level: {
+            type: "string",
+            enum: ["minimal", "high"],
+            description: 'AI reasoning depth. "minimal" is faster, "high" produces better results for complex prompts.'
+          },
+          resolution: {
+            type: "string",
+            enum: ["0.5K", "1K", "2K", "4K"],
+            description: 'Generation resolution before scaling to target_size. Default is "1K". Higher values produce more detail but take longer.'
+          },
+          model: {
+            type: "string",
+            enum: ["nanobanana", "gpt"],
+            description: 'Model to use for generation. "nanobanana" uses Nano Banana 2 (Gemini). "gpt" uses GPT Image 2 (OpenAI). IMPORTANT: Do NOT set this parameter unless the user has explicitly named a model (e.g. "use nanobanana" / "switch to gpt"), or another parameter of this same tool documents that it requires a specific model. When the user does not specify, omit this field entirely so the server picks the default — never guess or default it yourself.'
+          },
+          quality: {
+            type: "string",
+            enum: ["low", "medium", "high", "auto"],
+            description: 'Image quality. One of "low", "medium", "high", "auto" (default). GPT Image 2 uses this setting; other models may ignore it.'
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["prompt", "name", "target_size"]
+      }
+    },
+    {
+      name: "batch_generate_images",
+      description: "Generate two or more new image assets in parallel in one call. Use generate_image for one new image and edit_image to modify an existing image. Each image request uses the fields and constraints defined by the input schema. Keep each reference image supplied through local paths or data URLs at 10 MiB or less. A batch may partially succeed; preserve successful images and report failed items with their returned errors. The local proxy attempts to materialize successful results into the Maker project and retain remote mapping; use returned workspace/local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          images: {
+            type: "array",
+            description: "Array of image generation requests to process in parallel (2-10 images recommended)",
+            items: {
+              type: "object",
+              properties: {
+                prompt: {
+                  type: "string",
+                  description: 'Short Chinese description of the image to generate (max 50KB). Example: "橙色小猫", "蓝色飞龙", "金币图标"'
+                },
+                name: {
+                  type: "string",
+                  description: 'File name for the generated image (without extension, max 100 characters). This will be used in the output filename: {name}_{timestamp}.png. Example: "小猫", "飞龙", "金币"'
+                },
+                aspect_ratio: {
+                  type: "string",
+                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "5:4", "4:5"],
+                  description: 'Image aspect ratio. Default is "1:1". See tool description for use cases of each ratio.'
+                },
+                transparent: {
+                  type: "boolean",
+                  description: 'Whether to generate image with transparent background. Auto-detected if user mentions "透明", "透明背景", "抠图", or "无背景" in their request.'
+                },
+                target_size: {
+                  type: "string",
+                  description: '**REQUIRED.** Final image dimensions after scaling (format: "widthxheight").\nExamples: "256x256" (icon), "512x1024" (sprite).\nChoose aspect_ratio for shape, then target_size for exact pixel dimensions.'
+                },
+                reference_image: {
+                  type: "string",
+                  description: '[Deprecated] Path to a single reference image file (relative to workspace root). Use reference_images instead for multi-reference support. Example: "assets/cat.png"'
+                },
+                reference_images: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "List of reference images (up to 14). Each item can be a file path (relative to workspace root) OR a base64 data URL. Takes priority over reference_image. The generated image will incorporate style/content from these references."
+                },
+                seed: {
+                  type: "number",
+                  description: "Random seed for reproducible results. Use the same seed with the same prompt to get consistent outputs. Example: 42"
+                },
+                thinking_level: {
+                  type: "string",
+                  enum: ["minimal", "high"],
+                  description: 'AI reasoning depth. "minimal" is faster, "high" produces better results for complex prompts.'
+                },
+                resolution: {
+                  type: "string",
+                  enum: ["0.5K", "1K", "2K", "4K"],
+                  description: 'Generation resolution before scaling to target_size. Default is "1K". Higher values produce more detail but take longer.'
+                },
+                model: {
+                  type: "string",
+                  enum: ["nanobanana", "gpt"],
+                  description: 'Model to use for generation. "nanobanana" uses Nano Banana 2 (Gemini). "gpt" uses GPT Image 2 (OpenAI). IMPORTANT: Do NOT set this parameter unless the user has explicitly named a model (e.g. "use nanobanana" / "switch to gpt"), or another parameter of this same tool documents that it requires a specific model. When the user does not specify, omit this field entirely so the server picks the default — never guess or default it yourself.'
+                },
+                quality: {
+                  type: "string",
+                  enum: ["low", "medium", "high", "auto"],
+                  description: 'Image quality. One of "low", "medium", "high", "auto" (default). GPT Image 2 uses this setting; other models may ignore it.'
+                }
+              },
+              required: ["prompt", "name", "target_size"]
+            }
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["images"]
+      }
+    },
+    {
+      name: "edit_image",
+      description: "Modify an existing image from text instructions. Use generate_image for one new image and batch_generate_images for multiple new images. The required original image accepts a local Maker project path, an HTTP(S) URL, or an image data URL. Additional reference images and output controls are defined by the input schema. Keep each local-path or data URL image at 10 MiB or less. The local proxy attempts to materialize successful results into the Maker project and retain remote mapping; use returned workspace/local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          image: {
+            type: "string",
+            description: 'Path to the image file (relative to workspace root), remote http/https image URL, or a base64 data URL (data:image/png;base64,...). Example: "assets/cat.png", "https://cdn.example.com/cat.png", "data:image/png;base64,iVBOR..."'
+          },
+          prompt: {
+            type: "string",
+            description: 'Edit instructions describing what modifications to make. Example: "把背景改成蓝色", "添加一个太阳"'
+          },
+          name: {
+            type: "string",
+            description: "Output filename (without extension, max 100 characters). This will be used in the output filename: edited_{name}_{timestamp}.png"
+          },
+          aspect_ratio: {
+            type: "string",
+            enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9", "5:4", "4:5"],
+            description: "Output image aspect ratio"
+          },
+          target_size: {
+            type: "string",
+            description: '**REQUIRED.** Final image dimensions after scaling (format: "widthxheight").\nExamples: "256x256" (icon), "512x1024" (sprite).\nChoose aspect_ratio for shape, then target_size for exact pixel dimensions.'
+          },
+          transparent: {
+            type: "boolean",
+            description: "Whether to generate image with transparent background."
+          },
+          reference_images: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of reference images for style/character consistency (up to 13). Each item can be a file path (relative to workspace root), remote http/https image URL, OR a base64 data URL. Combined with the original image, total must not exceed 14 (Nano Banana 2 limit)."
+          },
+          seed: {
+            type: "number",
+            description: "Random seed for reproducible results. Example: 42"
+          },
+          thinking_level: {
+            type: "string",
+            enum: ["minimal", "high"],
+            description: 'AI reasoning depth. "minimal" is faster, "high" produces better quality for complex edits.'
+          },
+          resolution: {
+            type: "string",
+            enum: ["0.5K", "1K", "2K", "4K"],
+            description: 'Generation resolution before scaling to target_size. Default is "1K".'
+          },
+          model: {
+            type: "string",
+            enum: ["nanobanana", "gpt"],
+            description: 'Model to use for generation. "nanobanana" uses Nano Banana 2 (Gemini). "gpt" uses GPT Image 2 (OpenAI). IMPORTANT: Do NOT set this parameter unless the user has explicitly named a model (e.g. "use nanobanana" / "switch to gpt"), or another parameter of this same tool documents that it requires a specific model. When the user does not specify, omit this field entirely so the server picks the default — never guess or default it yourself.'
+          },
+          quality: {
+            type: "string",
+            enum: ["low", "medium", "high", "auto"],
+            description: 'Image quality. One of "low", "medium", "high", "auto" (default). GPT Image 2 uses this setting; other models may ignore it.'
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["image", "prompt", "name", "target_size"]
+      }
+    },
+    {
+      name: "create_3d_asset",
+      description: 'Manage the complete Maker 3D asset lifecycle. Use action="start" to begin, action="query" to check progress, action="get_options" to inspect step options, action="continue" after review, and action="post_process" for supported follow-up operations. Use direct generation when no review checkpoint is needed, and reviewed generation when the user needs a preview before final generation. For reviewed generation, show every returned preview and wait for explicit user approval before action="continue"; never approve a review step automatically. Supported prompt, image, strategy, quality, and post-processing fields are defined by the input schema. Local image inputs are normalized for the remote service. The local proxy attempts to materialize completed model delivery under assets/model and review images under assets/image; use local_delivery, preview_assets, and other returned local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["start", "continue", "query", "get_options", "post_process"],
+            description: "Required lifecycle action: start, continue, query, get_options, or post_process."
+          },
+          asset_id: {
+            type: "string",
+            description: "Asset lifecycle id returned by this tool. Required for continue and post_process; preferred for query."
+          },
+          task_id: {
+            type: "string",
+            description: "Underlying Tripo task id. Query supports this as a fallback when asset_id is unavailable."
+          },
+          step_id: {
+            type: "string",
+            description: "Current lifecycle step, such as multiview_review or post_process. Required for continue."
+          },
+          payload: {
+            type: "object",
+            description: 'Action payload. For start: { generation_strategy?: "direct"|"reviewed", quality_tier?: "fast"|"balanced"|"high_quality", prompt?: string, images?: {front,left?,back?,right?}, options?: object }. For continue: { confirm?: true, images?: object, options?: object }. For post_process: { operation: "rig"|"texture"|"retopology"|"convert", options?: object }. Advanced options are service-controlled and may be ignored by policy.',
+            properties: {
+              generation_strategy: {
+                type: "string",
+                enum: ["direct", "reviewed", "reviewed_multiview"],
+                description: "Workflow strategy. direct means submit prompt/image/multiview directly to final model generation. reviewed means create or derive reviewable views first, wait for user confirmation, then submit multiview-to-model. Use reviewed for characters, creatures, NPCs, hero props, important gameplay objects, or precise art direction."
+              },
+              quality_tier: {
+                type: "string",
+                enum: ["fast", "balanced", "high_quality"],
+                description: "Final model quality tier, independent from workflow strategy. Use fast only for simple low-importance props or rough throwaway objects. Use balanced by default for ordinary assets. Use high_quality when the final model needs higher face limit and detailed texture settings."
+              },
+              operation: {
+                type: "string",
+                enum: ["rig", "texture", "retopology", "convert"],
+                description: 'Required for action="post_process". rig checks bindability internally and adds skeleton when possible. texture regenerates/adjusts materials and texture. retopology reduces/optimizes face count. convert exports another format. Tripo animation retargeting is intentionally not supported.'
+              },
+              prompt: { type: "string" },
+              subject_type: {
+                type: "string",
+                enum: ["biped", "quadruped", "scenery", "other"],
+                description: 'Required when starting a text prompt with generation_strategy="reviewed". Describes the type of subject being generated, used to select the appropriate pose/composition prompt:\n- "biped": humanoid character standing on two legs (person, warrior, robot, etc.) — A-pose will be enforced\n- "quadruped": four-legged animal or creature — neutral standing pose\n- "scenery": landscape, terrain, environment, background scene — no pose instructions\n- "other": object, vehicle, building, weapon, prop, etc. — no pose instructions'
+              },
+              images: {
+                type: "object",
+                properties: {
+                  front: {
+                    type: "string",
+                    description: "Required front image. In local mode, use an image data URL or HTTPS upload URL for an unsynced private image. Server mode may also use a synced workspace project path."
+                  },
+                  left: {
+                    type: "string",
+                    description: "Optional left-view image. Local unsynced private images must use a data URL or HTTPS upload URL."
+                  },
+                  back: {
+                    type: "string",
+                    description: "Optional back-view image. Local unsynced private images must use a data URL or HTTPS upload URL."
+                  },
+                  right: {
+                    type: "string",
+                    description: "Optional right-view image. Local unsynced private images must use a data URL or HTTPS upload URL."
+                  }
+                }
+              },
+              options: {
+                type: "object",
+                description: "Advanced options. For post_process: input/source_task_id/source_url can override the default current asset input; rig supports rig_type/model/spec and uses the service-controlled output format; texture supports texture_prompt/pbr/texture_quality/texture_alignment/bake; retopology supports face_limit/model/quad/bake; convert requires format and supports face_limit/texture_size/fbx_preset."
+              },
+              confirm: { type: "boolean" }
+            }
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["action"]
+      }
+    },
+    {
+      name: "text_to_music",
+      description: "Generate AI music for a Maker game, including background music or vocal tracks; do not use this tool for sound effects. The remote call polls server-side every 20 seconds and may wait up to 50 minutes. If generation is still running when the call times out, the result includes the task ID for operational tracking. Simple and custom generation controls are defined by the input schema. The local proxy attempts to materialize successful audio and metadata into the Maker project and record them for later Maker references; use returned local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          customMode: {
+            type: "boolean",
+            description: "Enable Custom Mode for fine-grained control. When true, you must provide style and title. When false (default), only prompt is needed.",
+            default: false
+          },
+          instrumental: {
+            type: "boolean",
+            description: "Generate instrumental track without vocals. Default false (with vocals). Only effective in custom mode.",
+            default: false
+          },
+          model: {
+            type: "string",
+            description: "Model version. V4_5 recommended for best quality. Newer models (V4_5+) support longer prompts and styles.",
+            enum: ["V3_5", "V4", "V4_5", "V4_5PLUS", "V5"],
+            default: "V4_5"
+          },
+          prompt: {
+            type: "string",
+            description: 'Music description or lyrics. Simple mode: describe the music you want (max 500 chars), e.g. "epic orchestral battle theme". Custom mode: can include lyrics (max 3000-5000 chars depending on model).'
+          },
+          style: {
+            type: "string",
+            description: 'Music style/genre. Required in custom mode. Examples: "electronic, ambient, synth", "orchestral, epic, cinematic". Max 200-1000 chars depending on model.'
+          },
+          title: {
+            type: "string",
+            description: 'Track title. Required in custom mode. Max 80 chars. Example: "Battle Theme", "Menu Music".'
+          },
+          negativeTags: {
+            type: "string",
+            description: 'Styles to avoid, comma-separated. Example: "vocals, loud, aggressive".'
+          },
+          vocalGender: {
+            type: "string",
+            description: 'Preferred vocal gender when instrumental=false. Use "m" for male, "f" for female.'
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["prompt"]
+      }
+    },
+    {
+      name: "create_video_task",
+      description: 'Create a video generation task only after the user explicitly requests video generation. Do not proactively or automatically generate videos while designing gameplay, implementing features, filling asset gaps, or self-improving the game. Estimate the intended duration before calling. The confirmation estimate is 200 credits per second for model="2.0" and 300 credits per second for model="2.5"; it is only a rough estimate, while actual billing follows upstream token usage. When duration exceeds 10 seconds or model="2.5" is used, show the estimate and billing disclaimer, wait for explicit user confirmation, then repeat the same request with user_confirmed=true. Default model="2.0" with omitted duration or duration=-1 does not require confirmation. The remote service normally performs server-side polling and waits for the final result in this call. If the wait budget expires, the result returns a task_id; continue other work and use query_video_task no sooner than 120 seconds later. Mode-specific inputs and limits are defined by the input schema. Image, video, and audio references may use local project files, HTTP(S) URLs, or data URLs supported by the schema. Keep image references at 30 MiB or less, video references at 50 MiB or less, and audio references at 15 MiB or less. The local proxy attempts to materialize successful video results into the Maker project; prefer returned workspace paths when present, unless the user needs an external share URL. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["text_to_video", "first_frame", "first_last_frame", "multi_modal_reference"],
+            description: 'REQUIRED. Video generation mode (4 mutually exclusive modes):\n- "text_to_video": Text prompt only. No images/videos/audios allowed.\n- "first_frame": Exactly 1 image as the video\'s first frame. No videos/audios.\n- "first_last_frame": Exactly 2 images (first frame + last frame). No videos/audios.\n- "multi_modal_reference": reference images, optionally with reference videos and audios. Per-model caps: see the `model` parameter.'
+          },
+          model: {
+            type: "string",
+            enum: ["2.0", "2.5"],
+            description: 'Seedance 模型版本，默认 "2.0"。\n- "2.0": Seedance 2.0 fast。duration 4-15s，参考图最多 9 张、参考视频 3 个、参考音频 3 个，音频不能单独输入。\n- "2.5": Seedance 2.5，效果与可控性更强、成本更高。duration 4-30s，参考图最多 30 张、参考视频 10 个、参考音频 10 个，支持仅传音频驱动生成。\n需要超过 15s 时长、大量参考素材或纯音频驱动时用 "2.5"，其余场景保持默认。使用 "2.5" 前须向开发者展示积分预估并二次确认。'
+          },
+          prompt: {
+            type: "string",
+            description: '视频生成提示词。mode="text_to_video" 时必填；其他模式可选。'
+          },
+          images: {
+            type: "array",
+            description: 'Image inputs. How images are used depends on the `mode` parameter:\n- mode="text_to_video": Do NOT provide images.\n- mode="first_frame": Provide exactly 1 image (role=first_frame).\n- mode="first_last_frame": Provide exactly 2 images (role=first_frame + last_frame).\n- mode="multi_modal_reference": Provide reference images (role=reference_image), up to 9 for model="2.0" / 30 for model="2.5". Can combine with videos/audios.\nRoles are auto-assigned based on mode. You may override by setting each image\'s role explicitly.\nSupported sources: local file path, https URL, asset://<asset_id> (from asset library), or data URL (data:image/png;base64,...).',
+            items: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "图片本地文件路径、远程 URL、素材库资产 URI（asset://<asset_id>）或 data URL（data:image/png;base64,...）。"
+                },
+                role: {
+                  type: "string",
+                  enum: ["first_frame", "last_frame", "reference_image"],
+                  description: "图片角色。通常由 mode 自动决定，仅在需要覆盖时手动指定。"
+                }
+              },
+              required: ["url"]
+            }
+          },
+          videos: {
+            type: "array",
+            description: '参考视频输入列表，model="2.0" 最多 3 个，model="2.5" 最多 10 个。支持本地文件路径、远程 URL 或 data URL（data:video/mp4;base64,...）；本地文件与 data URL 会先自动上传阿里云 OSS，再以 URL 形式提交给上游接口。仅支持 reference_video。',
+            items: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "视频本地文件路径、远程 URL 或 data URL（data:video/mp4;base64,...）。"
+                },
+                role: {
+                  type: "string",
+                  enum: ["reference_video"],
+                  description: "默认 reference_video。"
+                }
+              },
+              required: ["url"]
+            }
+          },
+          audios: {
+            type: "array",
+            description: '参考音频输入列表，model="2.0" 最多 3 个，model="2.5" 最多 10 个。支持本地文件路径、远程 URL 或 data URL（data:audio/mpeg;base64,...）。本地音频/data URL 会自动转成上游所需格式。仅支持 reference_audio；model="2.0" 下不能单独使用（需搭配参考图或参考视频），model="2.5" 支持仅传音频。',
+            items: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "音频本地文件路径、远程 URL 或 data URL（data:audio/mpeg;base64,...）。"
+                },
+                role: {
+                  type: "string",
+                  enum: ["reference_audio"],
+                  description: "默认 reference_audio。"
+                }
+              },
+              required: ["url"]
+            }
+          },
+          generate_audio: {
+            type: "boolean",
+            description: "是否生成有声视频。"
+          },
+          resolution: {
+            type: "string",
+            enum: ["480p", "720p"],
+            description: "输出分辨率，默认 720p。两个模型版本均仅支持 480p/720p。"
+          },
+          ratio: {
+            type: "string",
+            enum: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            description: '输出宽高比，默认 "adaptive"（由模型按输入或 prompt 自动选择）。\nmodel="2.5" 的以下场景只接受 "adaptive"，指定具体比例会被上游拒绝：mode="first_frame" / "first_last_frame"（跟随首帧图片）、以参考视频做视频编辑/延长（跟随输入视频）。\nmodel="2.0" 各场景均可指定具体比例。'
+          },
+          duration: {
+            type: "integer",
+            description: '视频时长（秒）。model="2.0" 支持 4-15，model="2.5" 支持 4-30；也可传 -1。明确传入超过 10 秒时，先按档位单价向开发者展示粗估并二次确认（2.0 为 200 积分/秒，2.5 为 300 积分/秒；仅供确认参考，实际按上游 token 扣费），再设 user_confirmed=true。不建议设为 -1；模型会自主选择时长。默认 2.0 下未指定或 -1 不触发确认。\nmodel="2.5" 以参考视频做视频编辑时只接受 -1（输出时长跟随输入视频），且输入视频时长需在 4-30s 内。'
+          },
+          user_confirmed: {
+            type: "boolean",
+            description: '仅当开发者已确认本次粗估（含「实际按上游 token 扣费」说明）后设为 true。触发条件：明确传入 duration 超过 10 秒，或使用 model="2.5"。未确认时不要传 true。默认 2.0 且时长未超过 10 秒时无需此参数。'
+          },
+          return_last_frame: {
+            type: "boolean",
+            description: "是否返回尾帧图片 URL。默认 true；如不需要可显式传 false。"
+          },
+          suppress_preview_links: {
+            type: "boolean",
+            description: "是否抑制工具结果中的会话预览链接以便静默执行。默认 false。"
+          },
+          enable_web_search: {
+            type: "boolean",
+            description: "启用联网搜索增强，仅支持纯文本生视频。默认关闭；仅在确实需要联网补充信息时显式开启。"
+          },
+          execution_expires_after: {
+            type: "integer",
+            description: "任务超时时间（秒），默认 172800，取值范围 3600-259200。"
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["mode"]
+      }
+    },
+    {
+      name: "query_video_task",
+      description: "Query video task status by task_id after create_video_task returns a pending task or reports a concurrency limit. If the task is still pending or running, continue other work and query again no sooner than 120 seconds later; do not poll continuously. Querying a completed task releases its task quota. The local proxy attempts to materialize successful video and last-frame results into the Maker project. Prefer workspace_video_path and workspace_last_frame_path when present; mention CDN URLs only when the user needs an external share link. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task_id: {
+            type: "string",
+            description: "由 create_video_task 返回的任务 ID。"
+          },
+          suppress_preview_links: {
+            type: "boolean",
+            description: "是否抑制工具结果中的会话预览链接以便静默执行。默认 false。"
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["task_id"]
+      }
+    },
+    {
+      name: "text_to_sound_effect",
+      description: "Generate one game sound effect from a Chinese or English description with Doubao Seed Audio. Each call produces one output of at most 120 seconds. Split longer audio across multiple generations because this tool does not stitch outputs. duration_seconds is an approximate target and the actual duration may differ. The local proxy attempts to materialize successful audio in the provider original format under assets/audio/sfx and record it for later Maker references; use returned local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "Sound effect description in Chinese or English. Be specific and detailed."
+          },
+          duration_seconds: {
+            type: "number",
+            exclusiveMinimum: 0,
+            maximum: 120,
+            description: "Approximate duration target greater than 0 and up to Seed Audio's 120-second output limit; the actual duration may differ."
+          },
+          loop: {
+            type: "boolean",
+            description: "Generate seamlessly looping sound. Good for ambient/background sounds.",
+            default: false
+          },
+          output_name: {
+            type: "string",
+            description: "Output filename without extension. If not provided, auto-generated."
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["text"]
+      }
+    },
+    {
+      name: "batch_sound_effects",
+      description: "Generate multiple game sound effects with Doubao Seed Audio in one batch. Each item is an independent output of at most 120 seconds. Split longer audio across items or calls because this tool does not stitch outputs. The result preserves per-item failures while the local proxy attempts to materialize successful audio in the provider original format under assets/audio/sfx and record it for later Maker references; use returned local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sounds: {
+            type: "array",
+            description: "Array of sound effect definitions",
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  description: "Output filename without extension"
+                },
+                text: {
+                  type: "string",
+                  description: "Sound effect description in Chinese or English"
+                },
+                duration: {
+                  type: "number",
+                  description: "Approximate duration target validated independently per item. It must be greater than 0 and no more than Seed Audio's 120-second output limit; the actual duration may differ."
+                },
+                loop: {
+                  type: "boolean",
+                  description: "Create looping sound"
+                }
+              },
+              required: ["name", "text"]
+            }
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["sounds"]
+      }
+    },
+    {
+      name: "text_to_dialogue",
+      description: "Generate final character dialogue audio with ElevenLabs Eleven v3. Each character needs a confirmed ElevenLabs voice mapping in .project/elevenlabs-voice-mapping.json; when one is missing, call audition_voices_for_character and then confirm_character_voice before retrying. Use stability from 0 to 1 (default 0.5) to tune variation. Eleven v3 supports audio tags such as [sad] and [laughing] plus punctuation-based pacing. The local proxy attempts to materialize successful dialogue under assets/audio/voice; use returned local paths when present. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          inputs: {
+            type: "array",
+            description: "Dialogue lines using confirmed ElevenLabs character voices.",
+            items: {
+              type: "object",
+              properties: {
+                character_name: {
+                  type: "string",
+                  description: "Character name matching an ElevenLabs voice mapping."
+                },
+                text: {
+                  type: "string",
+                  description: "Dialogue text. Eleven v3 audio tags such as [sad] and [laughing] are supported."
+                }
+              },
+              required: ["character_name", "text"]
+            }
+          },
+          language_code: {
+            type: "string",
+            default: "cmn",
+            description: "ISO 639-1 language code. Defaults to cmn (Chinese Mandarin)."
+          },
+          stability: {
+            type: "number",
+            default: 0.5,
+            description: "Eleven v3 voice stability. Recommended range 0 to 1; finite legacy values are accepted and quantized to 0, 0.5, or 1."
+          },
+          output_name: {
+            type: "string",
+            description: "Safe output basename without directory separators."
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["inputs"]
+      }
+    },
+    {
+      name: "audition_voices_for_character",
+      description: "Create 1 to 3 temporary ElevenLabs Voice Design previews for one game character. Prepare a detailed character description and an audition line of at least 100 characters that matches the character personality and speaking style. candidate_count accepts 1 to 3 and defaults to 3. Show every returned preview to the user and wait for an explicit choice before calling confirm_character_voice. Complete audition and confirmation for one character before starting another in the same project; do not run them in parallel. Preview files are temporary and are not saved as final game assets. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          character_name: {
+            type: "string",
+            description: "Character name"
+          },
+          character_description: {
+            type: "string",
+            description: "ElevenLabs Voice Design prompt covering age/gender, timbre, pacing, emotion, style, and recording quality."
+          },
+          audition_line: {
+            type: "string",
+            description: "Representative dialogue for the preview. MUST be at least 100 characters and match the requested character style.",
+            minLength: 100
+          },
+          candidate_count: {
+            type: "number",
+            minimum: 1,
+            maximum: 3,
+            default: 3,
+            description: "Number of voice candidates from 1 to 3, default 3."
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["character_name", "character_description", "audition_line"]
+      }
+    },
+    {
+      name: "confirm_character_voice",
+      description: "Confirm an ElevenLabs Voice Design selection, create the permanent voice, and persist the character voice mapping for later text_to_dialogue calls. Call this tool only after audition_voices_for_character and only after the user explicitly selects a candidate or explicitly accepts the recommended candidate. Omit selected_index only after the user explicitly accepts the recommendation; absence of a user choice is not acceptance. Confirmation consumes one ElevenLabs Voice Slot. Process one character at a time and do not call this tool in parallel for the same project. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          character_name: {
+            type: "string",
+            description: "Character name"
+          },
+          selected_index: {
+            type: "number",
+            description: "The candidate number user selected (1-based). If omitted, uses recommended candidate"
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["character_name"]
+      }
+    },
+    {
+      name: "generate_test_qrcode",
+      description: "Generate a mobile test QR code only when the user explicitly requests a test QR code or scan test, or when get_ad_config reports missing app_id or developer_id and requests this recovery step. Do not call this tool automatically during initialization, build, or publish workflows. When an explicit build is needed, use maker_build_current_directory separately. Call without confirmed_screen_orientation first. Reuse an existing project orientation; only when the tool reports it missing, ask the user in a separate conversation turn to choose landscape or portrait and then retry. An existing orientation is immutable. This operation may upload a test version, create the TapTap app identity, and return a displayable QR code. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          confirmed_screen_orientation: {
+            type: "string",
+            enum: ["landscape", "portrait"],
+            description: "Local-only first-time orientation choice. Omit this when the project already has screen_orientation. Supply it only after the tool reports that orientation is missing and the user selects a value in a separate conversation turn. Existing project orientation is immutable and takes precedence. This value is not forwarded to the remote Maker tool."
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: []
+      }
+    },
+    {
+      name: "add_test_whitelist",
+      description: "Add one TapTap user to the current game test whitelist. Use this only after maker_build_current_directory has initialized the project and generate_test_qrcode has established the TapTap app identity. Call it only with the TapTap user_id explicitly provided by the user; never infer an account ID. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          user_id: {
+            type: "number",
+            description: "The TapTap user ID to add to the test whitelist"
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: ["user_id"]
+      }
+    },
+    {
+      name: "get_ad_config",
+      description: "For any ad-related request, read maker://ads-integration-guide first. After Maker project status confirms the primary local project configs are initialized, use this as the first remote step. It is the source of truth for current ad activation and configuration, and synchronizes the result into .project/settings.json at @runtime.ad. The local preflight does not call the remote tool while project.json or settings.json is missing. Missing local configs do not authorize an automatic build. Use maker_build_current_directory only for an explicit user build, submit, or preview request, then check project status again. If configs remain missing, report the limitation and do not rebuild automatically. Do not infer ad readiness from local SDK docs, .maker-mcp/config.json, or runtime callbacks, and only implement or test ad behavior after the returned configuration is usable. If app_id or developer_id is missing, call generate_test_qrcode once and then retry this tool. If ad.status != 1, report warning and ad.url, follow the returned next_action, and retry only after the user completes that step. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: []
+      }
+    },
+    {
+      name: "get_debug_feedbacks",
+      description: "Fetch online player feedback for the current Maker project, or query server and Lua session logs when game_session_id is provided. The default feedback mode fetches unprocessed records and marks the returned records as processed. For a read-only feedback query, set fetch_and_mark_processed=false; use the input schema to select other filters or an exact feedback record. Downloaded feedback attachments are saved in the local project. Read only the returned local_dir, local_log_paths, and local_screenshot_paths; do not treat remote attachment paths as local files. Session-log mode returns its own saved paths and progress information; use the returned result to continue when more history is available. This tool is not retried automatically by the local Maker runtime. If its response is interrupted after dispatch, its execution state may be unknown. For generation, usage, or state-changing operations, verify remote output, state, and usage before deciding whether to retry explicitly.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          developer_id: {
+            type: "number",
+            description: "开发者 ID（可选，默认从 .project/project.json 读取）"
+          },
+          app_id: {
+            type: "number",
+            description: "应用 ID（可选，默认从 .project/project.json 读取）"
+          },
+          limit: { type: "number", description: "返回数量（默认 5）" },
+          status: {
+            type: "number",
+            description: "状态过滤：0=全部, 1=未处理, 2=已处理"
+          },
+          fetch_and_mark_processed: {
+            type: "boolean",
+            description: "仅拉取未处理数据并标记为已处理，优先级高于 status（默认 true）"
+          },
+          moment_id: {
+            type: "string",
+            description: "按玩家说帖子 ID 精确查询（64 位大整数，用字符串避免精度丢失）。传入时忽略 status 和 fetch_and_mark_processed 过滤"
+          },
+          user_id: {
+            type: "string",
+            description: "按提交反馈的玩家 user_id 过滤（64 位大整数，用字符串避免精度丢失），可与 status 组合；与 moment_id 互不影响"
+          },
+          game_session_id: {
+            type: "string",
+            description: "游戏局 ID（19 位数字）。提供时改为查询该局服务端+Lua 游戏局日志，落盘到 userpod /opt/log/server/<id>/"
+          },
+          target_dir: {
+            type: "string",
+            description: "Optional local Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass it explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This local-only value is not persisted in user-level MCP config and is not forwarded to the remote Maker tool."
+          }
+        },
+        required: []
+      }
+    }
+  ]
+};
 
 // src/mcp-proxy/config.ts
 var DEFAULT_TOOL_CALL_TIMEOUT_MS = 60 * 60 * 1e3;
@@ -36212,7 +44424,7 @@ Received: ${configJson.substring(0, 100)}...`
   return applyDefaults(config2);
 }
 function validateConfig(config2) {
-  var _a3;
+  var _a3, _b;
   const errors = [];
   if (!config2.server) {
     errors.push("- Missing required field: server");
@@ -36260,13 +44472,23 @@ function validateConfig(config2) {
       errors.push("- options.exposed_tools values must be non-empty strings");
     }
   }
+  if (((_b = config2.options) == null ? void 0 : _b.replayable_tools) !== void 0) {
+    const replayableTools = config2.options.replayable_tools;
+    if (!Array.isArray(replayableTools)) {
+      errors.push("- options.replayable_tools must be an array of tool names");
+    } else if (!replayableTools.every(
+      (toolName) => typeof toolName === "string" && toolName.trim().length > 0
+    )) {
+      errors.push("- options.replayable_tools values must be non-empty strings");
+    }
+  }
   if (errors.length > 0) {
     throw new Error("Invalid configuration:\n" + errors.join("\n"));
   }
 }
 var DEFAULT_LOG_ROOT = "/tmp/taptap-mcp/logs";
 function applyDefaults(config2) {
-  var _a3, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
+  var _a3, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t;
   const verbose = ((_a3 = config2.options) == null ? void 0 : _a3.verbose) ?? false;
   return {
     server: {
@@ -36288,15 +44510,17 @@ function applyDefaults(config2) {
       reset_timeout_on_progress: ((_e = config2.options) == null ? void 0 : _e.reset_timeout_on_progress) ?? true,
       health_check_interval: ((_f = config2.options) == null ? void 0 : _f.health_check_interval) ?? 3e4,
       enable_cookie_sticky: ((_g = config2.options) == null ? void 0 : _g.enable_cookie_sticky) ?? true,
-      inject_params_per_call: ((_h = config2.options) == null ? void 0 : _h.inject_params_per_call) ?? true,
-      force_inject_progress_token: ((_i = config2.options) == null ? void 0 : _i.force_inject_progress_token) ?? false,
-      exposed_tools: (_j = config2.options) == null ? void 0 : _j.exposed_tools,
+      disable_standalone_sse: ((_h = config2.options) == null ? void 0 : _h.disable_standalone_sse) ?? false,
+      inject_params_per_call: ((_i = config2.options) == null ? void 0 : _i.inject_params_per_call) ?? true,
+      force_inject_progress_token: ((_j = config2.options) == null ? void 0 : _j.force_inject_progress_token) ?? false,
+      exposed_tools: (_k = config2.options) == null ? void 0 : _k.exposed_tools,
+      replayable_tools: (_l = config2.options) == null ? void 0 : _l.replayable_tools,
       log: {
-        root: ((_l = (_k = config2.options) == null ? void 0 : _k.log) == null ? void 0 : _l.root) ?? DEFAULT_LOG_ROOT,
-        enabled: ((_n = (_m = config2.options) == null ? void 0 : _m.log) == null ? void 0 : _n.enabled) ?? false,
+        root: ((_n = (_m = config2.options) == null ? void 0 : _m.log) == null ? void 0 : _n.root) ?? DEFAULT_LOG_ROOT,
+        enabled: ((_p = (_o = config2.options) == null ? void 0 : _o.log) == null ? void 0 : _p.enabled) ?? false,
         // verbose=true 时自动使用 debug 级别
-        level: verbose ? "debug" : ((_p = (_o = config2.options) == null ? void 0 : _o.log) == null ? void 0 : _p.level) ?? "info",
-        max_days: ((_r = (_q = config2.options) == null ? void 0 : _q.log) == null ? void 0 : _r.max_days) ?? 7
+        level: verbose ? "debug" : ((_r = (_q = config2.options) == null ? void 0 : _q.log) == null ? void 0 : _r.level) ?? "info",
+        max_days: ((_t = (_s = config2.options) == null ? void 0 : _s.log) == null ? void 0 : _t.max_days) ?? 7
       }
     }
   };
@@ -36306,7 +44530,7 @@ function applyDefaults(config2) {
 var MAKER_MCP_TRACKING_ACTION = "tapmaker_mcp_call";
 var MAKER_MCP_TRACKING_SOURCE = "local_mcp";
 var MAKER_MCP_TRACKING_TIMEOUT_MS = 1500;
-var MAKER_MCP_VERSION = "0.0.28".trim() ? "0.0.28".trim() : "dev";
+var MAKER_MCP_VERSION = "0.0.32".trim() ? "0.0.32".trim() : "dev";
 var TRACKING_ERROR_MAX_LENGTH = 500;
 function buildMakerMcpTrackingPayload(event) {
   var _a3, _b, _c;
@@ -36593,11 +44817,11 @@ function createMakerRemoteProxyManager(options = {}) {
       cachedTools.set(key, tools2);
       return tools2;
     },
-    async callTool(context, request, requestOptions) {
-      return await run(
-        context,
-        async (client) => await client.callTool(request, void 0, requestOptions)
-      );
+    async callTool(context, request, requestOptions, onDispatch) {
+      return await run(context, async (client) => {
+        onDispatch == null ? void 0 : onDispatch();
+        return await client.callTool(request, void 0, requestOptions);
+      });
     },
     getCachedTools(context) {
       return cachedTools.get(createContextKey(context));
@@ -36619,7 +44843,7 @@ function createMakerRemoteProxyManager(options = {}) {
 }
 
 // src/maker/server/mcp.ts
-var VERSION = true ? "0.0.28" : "dev";
+var VERSION = true ? "0.0.32" : "dev";
 var DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1e3;
 var DEFAULT_PROXY_RETRY_ATTEMPTS = 5;
 var DEFAULT_PROXY_RETRY_DELAY_MS = 30 * 1e3;
@@ -36631,15 +44855,15 @@ var MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES = [
   "generate_image",
   "batch_generate_images",
   "edit_image",
+  CREATE_3D_ASSET_PROXY_TOOL_NAME,
+  "text_to_music",
   "create_video_task",
   "query_video_task",
-  "text_to_music",
   "text_to_sound_effect",
   "batch_sound_effects",
   "text_to_dialogue",
   "audition_voices_for_character",
   "confirm_character_voice",
-  CREATE_3D_ASSET_PROXY_TOOL_NAME,
   "generate_test_qrcode",
   "add_test_whitelist",
   "get_ad_config",
@@ -36700,6 +44924,7 @@ var MAKER_BUILD_MULTIPLAYER_SCHEMA = {
     }
   }
 };
+var MAKER_TARGET_DIR_SCHEMA_DESCRIPTION = "Optional Maker project directory. When omitted, Maker MCP uses one unambiguous MCP Roots workspace and process cwd only as the final fallback. Pass target_dir explicitly when Roots are unavailable or ambiguous, or when the fallback is not the intended project. This per-call value is never persisted in user-level MCP config.";
 var MakerCloneFailedError = class extends Error {
   constructor(targetDir, originalError) {
     const message = originalError instanceof Error ? originalError.message : String(originalError);
@@ -36719,11 +44944,15 @@ var tools = [
       properties: {
         target_dir: {
           type: "string",
-          description: "Optional user current working directory to inspect. Use when the MCP process cwd differs from the user project CWD."
+          description: MAKER_TARGET_DIR_SCHEMA_DESCRIPTION
         },
         skip_remote_sync: {
           type: "boolean",
-          description: "If true, skip git fetch/ahead-behind remote sync checks. Use this for frequent polling or quick local status checks."
+          description: "In detail mode, skip git fetch/ahead-behind remote sync and dev-kit freshness checks. Summary mode is already local-only; use this for frequent polling."
+        },
+        detail: {
+          type: "boolean",
+          description: "Set true only for explicit diagnostics. The default is a fast local summary without remote checks."
         }
       }
     }
@@ -36737,7 +44966,7 @@ var tools = [
       properties: {
         target_dir: {
           type: "string",
-          description: "Optional Maker project directory. Defaults to the MCP process cwd. Pass the user current working directory when it differs from the MCP process cwd."
+          description: MAKER_TARGET_DIR_SCHEMA_DESCRIPTION
         },
         entry: {
           type: "string",
@@ -36791,237 +45020,27 @@ var resources = [
     mimeType: "text/plain"
   }
 ];
-async function listMakerTools(options) {
-  var _a3;
-  let remoteTools = [];
-  try {
-    const context = await resolveMakerProjectContext({
-      targetDir: options.targetDir,
-      listClientRoots: options.listClientRoots,
-      allowFallbackOnAmbiguousRoots: false
-    });
-    const listedRemoteTools = options.listRemoteTools ?? (() => listRemoteProxyTools({
-      targetDir: context.targetDir,
-      serverUrl: options.serverUrl,
-      env: options.env
-    }));
-    try {
-      remoteTools = filterExposedRemoteProxyTools(await listedRemoteTools()).map(
-        decorateRemoteProxyToolDefinition
-      );
-    } catch (error2) {
-      const cachedTools = (_a3 = options.getCachedRemoteTools) == null ? void 0 : _a3.call(options);
-      if (!cachedTools) {
-        throw error2;
-      }
-      remoteTools = filterExposedRemoteProxyTools(cachedTools).map(
-        decorateRemoteProxyToolDefinition
-      );
-    }
-  } catch (error2) {
-    if (isMakerProjectContextAmbiguousError(error2)) {
-      logLifecycleEvent("maker-tools-list-roots-ambiguous", String(error2));
-    }
-    remoteTools = [];
-  }
+async function listMakerTools(_options = {}) {
   return {
-    tools: [...tools, ...remoteTools]
+    tools: [
+      ...tools,
+      ...createStaticRemoteProxyToolDefinitions()
+    ]
   };
+}
+function createStaticRemoteProxyToolDefinitions() {
+  return remoteProxyToolSnapshot_default.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  }));
 }
 function filterExposedRemoteProxyTools(toolsToFilter) {
   const exposedToolNames = new Set(MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES);
   return toolsToFilter.filter((tool) => exposedToolNames.has(tool.name));
 }
-function decorateRemoteProxyToolDefinition(tool) {
-  const publicDescription = getMakerRemoteProxyPublicDescriptionOverride(tool.name);
-  const guidance = remoteProxyToolGuidance(tool.name);
-  return {
-    ...tool,
-    inputSchema: decorateRemoteProxyToolInputSchema(tool.inputSchema, tool.name),
-    description: publicDescription || [tool.description, guidance].filter(Boolean).join("\n\n")
-  };
-}
-function decorateRemoteProxyToolInputSchema(inputSchema, toolName) {
-  const schema = isPlainRecord(inputSchema) ? inputSchema : {};
-  const properties = isPlainRecord(schema.properties) ? schema.properties : {};
-  const decoratedProperties = toolName === "text_to_dialogue" ? decorateTextToDialogueInputProperties(properties) : toolName === "audition_voices_for_character" ? decorateVoiceAuditionInputProperties(properties) : properties;
-  const required2 = Array.isArray(schema.required) ? schema.required : [];
-  const decoratedRequired = toolName === "audition_voices_for_character" ? [.../* @__PURE__ */ new Set([...required2, "voice_profile"])] : required2;
-  return {
-    ...schema,
-    type: schema.type || "object",
-    required: decoratedRequired,
-    properties: {
-      ...decoratedProperties,
-      ...toolName === "generate_test_qrcode" ? {
-        confirmed_screen_orientation: {
-          type: "string",
-          enum: ["landscape", "portrait"],
-          description: "Local-only first-time orientation choice. Omit this when the project already has screen_orientation. Supply it only after the tool reports that orientation is missing and the user selects a value in a separate conversation turn. Existing project orientation is immutable and takes precedence. This value is not forwarded to the remote Maker tool."
-        }
-      } : {},
-      target_dir: {
-        type: "string",
-        description: "Optional local Maker project directory. This is a local Maker MCP private parameter used to resolve the current project for asset materialization and reference rewriting; it is not forwarded to the remote Maker tool."
-      }
-    }
-  };
-}
-function decorateVoiceAuditionInputProperties(properties) {
-  const remoteVoiceProfile = properties.voice_profile;
-  const voiceProfile = isPlainRecord(remoteVoiceProfile) ? remoteVoiceProfile : {};
-  const profileProperties = isPlainRecord(voiceProfile.properties) ? voiceProfile.properties : {};
-  const profileRequired = Array.isArray(voiceProfile.required) ? voiceProfile.required : [];
-  const remoteGender = profileProperties.gender;
-  return {
-    ...properties,
-    voice_profile: {
-      ...voiceProfile,
-      type: voiceProfile.type || "object",
-      description: [
-        voiceProfile.description,
-        "Required for character voice audition. Extract gender from character_description or the character settings instead of relying on a default."
-      ].filter(Boolean).join(" "),
-      properties: {
-        ...profileProperties,
-        gender: {
-          ...isPlainRecord(remoteGender) ? remoteGender : {},
-          type: "string",
-          enum: ["male", "female"],
-          description: "Required structured character gender. Extract male or female from character_description or the character settings."
-        }
-      },
-      required: [.../* @__PURE__ */ new Set([...profileRequired, "gender"])]
-    }
-  };
-}
-function decorateTextToDialogueInputProperties(properties) {
-  const inputs = properties.inputs;
-  if (!isPlainRecord(inputs) || !isPlainRecord(inputs.items)) {
-    return properties;
-  }
-  const itemProperties = inputs.items.properties;
-  if (!isPlainRecord(itemProperties)) {
-    return properties;
-  }
-  const referenceAudio = itemProperties.reference_audio;
-  const referenceAudioPath = itemProperties.reference_audio_path;
-  return {
-    ...properties,
-    inputs: {
-      ...inputs,
-      items: {
-        ...inputs.items,
-        properties: {
-          ...itemProperties,
-          ...isPlainRecord(referenceAudio) ? {
-            reference_audio: {
-              ...referenceAudio,
-              description: [
-                referenceAudio.description,
-                "Use a local project audio path under assets/audio/, an HTTP(S) URL, or an audio data URL here. Local project audio must exist in the current project and is converted to a data URL automatically. Do not pass bare base64."
-              ].filter(Boolean).join(" ")
-            }
-          } : {},
-          ...isPlainRecord(referenceAudioPath) ? {
-            reference_audio_path: {
-              ...referenceAudioPath,
-              description: [
-                referenceAudioPath.description,
-                "This legacy local project audio path must exist under assets/audio/ or workspace/assets/audio/. The local proxy converts it to the canonical reference_audio data URL; it is not a project-external filesystem path."
-              ].filter(Boolean).join(" ")
-            }
-          } : {}
-        }
-      }
-    }
-  };
-}
 function isPlainRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function remoteProxyToolGuidance(toolName) {
-  const failurePolicy = "If this Maker proxy tool fails or returns isError, include the complete sanitized remote_result/error payload from the server so developers can diagnose the issue.";
-  const localMediaSizeHint = "Large local/data URL media can be slow or fail: image inputs are commonly limited to about 10 MB, video-task image inputs to about 30 MB, video inputs to about 50 MB, and audio inputs to about 15 MB.";
-  switch (toolName) {
-    case "generate_image":
-    case "batch_generate_images":
-      return [
-        "**Maker asset workflow hint:** Successful results are downloaded into the Maker project and recorded with remote mapping for later edits or video references.",
-        localMediaSizeHint,
-        failurePolicy
-      ].join(" ");
-    case "edit_image":
-      return [localMediaSizeHint, failurePolicy].join(" ");
-    case "create_video_task":
-      return [
-        "**Maker asset workflow hint:** Image, video, and audio references may use remote URLs, existing data URLs, or resolvable local files that the local proxy can forward as data URLs.",
-        localMediaSizeHint,
-        failurePolicy
-      ].join(" ");
-    case "query_video_task":
-      return [
-        "**Maker asset workflow hint:** Refreshing video task status releases completed task quota and materializes successful video results into the Maker project.",
-        "Use this Maker MCP proxy tool to refresh video task status when create_video_task returns a task_id or reports video concurrency limits.",
-        failurePolicy
-      ].join(" ");
-    case "text_to_music":
-      return [
-        "**Maker asset workflow hint:** Generated audio can be materialized into the project and recorded for later Maker references.",
-        failurePolicy
-      ].join(" ");
-    case "text_to_sound_effect":
-    case "batch_sound_effects":
-      return [
-        "**Maker asset workflow hint:** Successful audio is materialized in its original format under assets/audio/sfx and recorded for later Maker references.",
-        failurePolicy
-      ].join(" ");
-    case "text_to_dialogue":
-      return [
-        "**Maker voice workflow hint:** For normal dialogue, pass only character_name and text after voice confirmation; the local proxy automatically reuses a confirmed local Doubao reference. reference_audio is an optional per-call override and accepts a local project audio path under assets/audio/, an HTTP(S) URL, or an audio data URL. Project audio must exist locally and is converted to a data URL automatically. reference_audio and reference_audio_path are mutually exclusive; reference_audio is canonical and reference_audio_path is the legacy local-path field. Successful dialogue audio is materialized under assets/audio/voice.",
-        failurePolicy
-      ].join(" ");
-    case "audition_voices_for_character":
-      return [
-        "**Maker voice workflow hint:** Use this Maker MCP proxy tool to create temporary preview voices for one character. voice_profile.gender is required: extract male or female from character_description or the character settings and pass it explicitly. Show every returned preview URL to the user and wait for their choice before calling confirm_character_voice. Preview candidates are not saved as game assets.",
-        failurePolicy
-      ].join(" ");
-    case "confirm_character_voice":
-      return [
-        "**Maker voice workflow hint:** Call this Maker MCP proxy tool only after audition_voices_for_character and after the user selects a candidate or accepts the recommendation. Confirmation persists the provider-specific voice mapping for later text_to_dialogue calls.",
-        failurePolicy
-      ].join(" ");
-    case CREATE_3D_ASSET_PROXY_TOOL_NAME:
-      return [
-        "**Maker asset workflow hint:** Use this tool for the complete Maker 3D asset lifecycle: start, query, continue after explicit user review, inspect options, and post-process completed assets.",
-        "Local image paths in payload.images are forwarded as data URLs when they resolve inside the Maker project. Unknown server response fields are preserved. In local runtime query results, model_files copy/extract instructions are materialized into assets/model and local_delivery reports the usable local model path.",
-        "Review preview URLs are materialized into assets/image and returned in preview_assets when possible.",
-        'Do not automatically approve review steps; show the returned previews to the user and wait for explicit confirmation before action="continue".',
-        failurePolicy
-      ].join(" ");
-    case "get_ad_config":
-      return [
-        "**Maker hint:** Trigger this tool for ad-related requests only after Maker project status shows the primary local configs are initialized. The local preflight keeps ad config unavailable and does not call the remote tool while project.json or settings.json is missing. Build only for an explicit user build, submit, or preview request; if local configs remain missing after a successful build, explain the known limitation and do not rebuild automatically. Do not infer ad readiness from local SDK docs, .maker-mcp/config.json, or runtime callbacks. If this tool says app_id or developer_id is missing after configs are ready, call generate_test_qrcode once to generate test QR code metadata, then call this tool again.",
-        failurePolicy
-      ].join(" ");
-    case "generate_test_qrcode":
-      return [
-        "**Maker hint:** Use this only when the user explicitly asks for a test QR code/mobile scan test, or as the recovery step after get_ad_config reports missing app_id or developer_id. Call it without confirmed_screen_orientation first. If .project/project.json already has screen_orientation, reuse it and do not ask the user again. Only if it is missing, ask the user in a separate conversation turn to choose landscape or portrait, then retry with confirmed_screen_orientation. The local proxy records this first choice; an already configured orientation is immutable and always takes precedence. The private parameter is not forwarded to the remote Maker tool. Report the returned QR code or failure payload.",
-        failurePolicy
-      ].join(" ");
-    case "add_test_whitelist":
-      return [
-        "**Maker hint:** Use this after the project has been built and generate_test_qrcode has created the TapTap app identity. Call it only with the TapTap user_id explicitly provided by the user; do not infer an account ID.",
-        failurePolicy
-      ].join(" ");
-    case "get_debug_feedbacks":
-      return [
-        "**Maker hint:** Fetch online player feedback for the current Maker project. When logs or screenshots can be downloaded, this tool saves them under logs/feed_back/feedback_<id>/ in the local Maker project and returns local_dir/local_log_paths/local_screenshot_paths. Read those returned local paths before diagnosing the issue. Do not guess drive letters or fixed directories; only treat attachments as local files when local_* paths are returned.",
-        failurePolicy
-      ].join(" ");
-    default:
-      return void 0;
-  }
 }
 function isExposedRemoteProxyTool(name) {
   return MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES.includes(name);
@@ -37073,11 +45092,23 @@ async function callRemoteProxyTool(options) {
   const requestOptions = createRemoteProxyCallToolOptions(options.progressToken, options.extra);
   const callTool = options.manager ? async () => {
     proxy = createProxy();
-    return await options.manager.callTool(
-      proxy,
-      { name: options.name, arguments: finalArgs },
-      requestOptions
-    );
+    let dispatched = false;
+    try {
+      return await options.manager.callTool(
+        proxy,
+        { name: options.name, arguments: finalArgs },
+        requestOptions,
+        () => {
+          dispatched = true;
+        }
+      );
+    } catch (error2) {
+      throw new RemoteProxyToolCallError(
+        options.name,
+        dispatched ? "unknown" : "not_executed",
+        error2
+      );
+    }
   } : async () => {
     const transport = trackMakerChildTransport(
       new StdioClientTransport({
@@ -37098,6 +45129,12 @@ async function callRemoteProxyTool(options) {
     );
     try {
       await client.connect(transport);
+    } catch (error2) {
+      await client.close().catch(() => {
+      });
+      throw new RemoteProxyToolCallError(options.name, "not_executed", error2);
+    }
+    try {
       return await client.callTool(
         {
           name: options.name,
@@ -37108,25 +45145,14 @@ async function callRemoteProxyTool(options) {
           ...requestOptions
         }
       );
+    } catch (error2) {
+      throw new RemoteProxyToolCallError(options.name, "unknown", error2);
     } finally {
       await client.close().catch(() => {
       });
     }
   };
-  const result = await retryMakerProxyOperation(callTool, {
-    onRetry: options.progressToken ? (event) => {
-      options.extra.sendNotification({
-        method: "notifications/progress",
-        params: {
-          progressToken: options.progressToken,
-          progress: event.attempt,
-          total: event.attempts,
-          message: event.message
-        }
-      }).catch(() => {
-      });
-    } : void 0
-  });
+  const result = await callTool();
   return await materializeRemoteProxyToolAssets({
     toolName: options.name,
     targetDir: proxy.projectRoot,
@@ -37180,46 +45206,19 @@ async function startMakerMcpServer() {
     },
     {
       capabilities: {
-        tools: { listChanged: true },
+        tools: {},
         resources: {}
       },
       instructions: MAKER_CAPABILITY_ROUTING_INDEX
     }
   );
   const listClientRoots = createServerClientRootsProvider(server);
-  const remoteProxyManager = createMakerRemoteProxyManager({
-    onToolsChanged: async (_context, _definitions) => {
-      try {
-        await server.notification({
-          method: "notifications/tools/list_changed",
-          params: {}
-        });
-      } catch (error2) {
-        logLifecycleEvent("maker-tools-list-changed-notification-failed", String(error2));
-      }
-    }
-  });
+  const remoteProxyManager = createMakerRemoteProxyManager();
   const startupReportedProjects = /* @__PURE__ */ new Set();
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const contextPromise = resolveMakerMcpTrackingContext({ listClientRoots });
     void reportMakerMcpStartupFromPromise(contextPromise, startupReportedProjects);
-    let context;
-    try {
-      const resolved = await resolveMakerProjectContext({
-        listClientRoots,
-        allowFallbackOnAmbiguousRoots: false
-      });
-      context = createRemoteProxyContext({
-        targetDir: resolved.targetDir,
-        exposedTools: MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES
-      });
-    } catch {
-    }
-    return listMakerTools({
-      listClientRoots,
-      listRemoteTools: context ? () => remoteProxyManager.listTools(context) : void 0,
-      getCachedRemoteTools: context ? () => remoteProxyManager.getCachedTools(context) : void 0
-    });
+    return listMakerTools();
   });
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const contextPromise = resolveMakerMcpTrackingContext({ listClientRoots });
@@ -37282,6 +45281,7 @@ async function startMakerMcpServer() {
               text: await formatStatus({
                 targetDir: args.target_dir,
                 skipRemoteSync: args.skip_remote_sync,
+                detail: args.detail,
                 listClientRoots,
                 remoteProxyManager
               })
@@ -37331,6 +45331,7 @@ async function startMakerMcpServer() {
           throw error2;
         }
         const toolResult = {
+          isError: !isMakerBuildActivitySuccessful(result.mode),
           content: [
             {
               type: "text",
@@ -37354,9 +45355,23 @@ async function startMakerMcpServer() {
           listClientRoots,
           allowFallbackOnAmbiguousRoots: false
         });
+        const proxyProject = inspectMakerProxyProjectContext(context, name);
+        if (!proxyProject.ok) {
+          const result2 = {
+            isError: true,
+            content: [{ type: "text", text: proxyProject.message }]
+          };
+          void reportMakerMcpActivityFromPromise(contextPromise, {
+            toolName: name,
+            requestId: extra.requestId,
+            durationMs: Date.now() - startedAt,
+            success: false
+          });
+          return result2;
+        }
         if (name === "generate_test_qrcode") {
           const preflight = inspectMakerQrcodeToolPreflight(
-            context.targetDir,
+            proxyProject.targetDir,
             requestArgs.confirmed_screen_orientation
           );
           if (!preflight.ok) {
@@ -37373,7 +45388,7 @@ async function startMakerMcpServer() {
             return result2;
           }
         } else if (name === "get_ad_config" || name === "add_test_whitelist") {
-          const projectHealth = inspectMakerProxyToolPreflight(name, context.targetDir);
+          const projectHealth = inspectMakerProxyToolPreflight(name, proxyProject.targetDir);
           if (projectHealth && (projectHealth.status === "not_initialized" || !projectHealth.canBuild)) {
             const result2 = {
               isError: true,
@@ -37394,7 +45409,7 @@ async function startMakerMcpServer() {
           }
         }
         const result = await callRemoteProxyTool({
-          targetDir: context.targetDir,
+          targetDir: proxyProject.targetDir,
           name,
           args: remoteArgs,
           progressToken: (_b = request.params._meta) == null ? void 0 : _b.progressToken,
@@ -37521,6 +45536,9 @@ function installMakerServerExitHandlers(remoteProxyManager) {
 }
 async function formatStatus(options = {}) {
   var _a3;
+  const detail = options.detail === true;
+  const distribution = process.env.TAPTAP_MAKER_DISTRIBUTION;
+  const pluginDistribution = resolveMakerPluginDistribution(distribution);
   const projectContext = await resolveMakerProjectContext({
     targetDir: options.targetDir,
     listClientRoots: options.listClientRoots,
@@ -37532,49 +45550,92 @@ async function formatStatus(options = {}) {
   const mcpCwd = process.cwd();
   const mcpCwdIdentify = path18.resolve(mcpCwd) === path18.resolve(targetDir) ? identify : identifyMakerProject({ cwd: mcpCwd });
   const gitDirectoryStatus = inspectMakerDirectoryGitStatus(targetDir);
-  const remoteSyncText = identify.projectRoot && gitDirectoryStatus.isUsableMakerGitRepo && !options.skipRemoteSync ? await formatMakerRemoteSyncStatusSafely(identify.projectRoot) : identify.projectRoot && gitDirectoryStatus.isUsableMakerGitRepo ? formatMakerRemoteSyncSkipped() : "";
+  const remoteSyncText = detail && identify.projectRoot && gitDirectoryStatus.isUsableMakerGitRepo && !options.skipRemoteSync ? await formatMakerRemoteSyncStatusSafely(identify.projectRoot) : detail && identify.projectRoot && gitDirectoryStatus.isUsableMakerGitRepo ? formatMakerRemoteSyncSkipped() : "";
   const pat = loadPat();
-  let tapAuth = loadTapAuth();
-  let tapAuthRefreshText = "";
-  if (pat && !tapAuth) {
-    try {
-      tapAuth = await requestTapAuthWithPat(pat.token, env);
-      tapAuthRefreshText = [
-        "TapTap token",
-        "",
-        `本地已有 Maker PAT，已自动获取并保存 TapTap token: ${getTapAuthPath()}`
-      ].join("\n");
-    } catch (error2) {
-      tapAuthRefreshText = [
-        "TapTap token",
-        "",
-        "本地已有 Maker PAT，但自动获取 TapTap token 失败。",
-        `原因：${error2 instanceof Error ? error2.message : String(error2)}`
-      ].join("\n");
-    }
-  }
+  const tapAuth = loadTapAuth();
   const git = checkGitEnvironment();
   const python = checkMakerPythonEnvironment();
   const luaLsp = checkMakerLuaLspEnvironment({ pythonEnvironment: python });
-  const packageUpdateText = formatMakerPackageUpdateStatus(
-    await getMakerPackageUpdateStatus({
-      currentVersion: VERSION,
-      allowRemoteFetch: false
-    })
-  );
-  const projectInitializationText = identify.projectRoot ? formatMakerProjectInitializationStatus(
-    inspectMakerProjectInitialization(identify.projectRoot)
-  ) : "";
-  const projectHealthText = identify.projectRoot ? formatMakerProjectHealthStatus(inspectMakerProjectHealth(identify.projectRoot, "status")) : "";
-  const projectSection = identify.projectId ? [
-    "目标目录已绑定 Maker 项目。",
-    "请继续在当前绑定项目上执行状态、提交、构建等操作；用户明确要求切换或重新拉取项目时，再进入项目选择流程。",
-    "本地 Maker 工作流请参考 taptap-maker-local workflow guide document；CLI 负责初始化/PAT/app/clone，MCP 只保留状态和同步构建。"
-  ].join("\n") : isLikelyAiDialogueDirectory(targetDir) ? formatAiDialogueDirectoryHint(targetDir) : pat ? await formatAutoProjectListFromPat() : formatIdentifyHint();
+  const packageUpdateStatus = await getMakerPackageUpdateStatus({
+    currentVersion: VERSION,
+    allowRemoteFetch: false,
+    ...detail ? {} : { backgroundRefresh: false }
+  });
+  const packageUpdateText = detail ? formatMakerPackageUpdateStatusForDistribution(packageUpdateStatus, distribution) : "";
+  const projectInitialization = identify.projectRoot ? inspectMakerProjectInitialization(identify.projectRoot) : void 0;
+  const projectHealth = identify.projectRoot ? inspectMakerProjectHealth(identify.projectRoot, "status") : void 0;
+  const projectInitializationText = projectInitialization ? formatMakerProjectInitializationStatus(projectInitialization) : "";
+  const projectHealthText = projectHealth ? formatMakerProjectHealthStatus(projectHealth) : "";
+  let projectSection;
+  if (projectContext.roots.status === "ambiguous") {
+    projectSection = [
+      "MCP client roots are ambiguous; do not continue Maker operations from the cwd fallback.",
+      "Open a single Maker workspace or pass target_dir explicitly before status-dependent actions."
+    ].join("\n");
+  } else if (identify.projectId) {
+    projectSection = [
+      "目标目录已绑定 Maker 项目。",
+      "请继续在当前绑定项目上执行状态、提交、构建等操作；用户明确要求切换或重新拉取项目时，再进入项目选择流程。",
+      "本地 Maker 工作流请参考 taptap-maker-local workflow guide document；CLI 负责初始化/PAT/app/clone，MCP 只保留状态和同步构建。"
+    ].join("\n");
+  } else if (isLikelyAiDialogueDirectory(targetDir)) {
+    projectSection = formatAiDialogueDirectoryHint(targetDir);
+  } else if (detail && pat) {
+    projectSection = await formatAutoProjectListFromPat();
+  } else {
+    projectSection = formatIdentifyHint();
+  }
+  const summaryText = [
+    "Status summary",
+    "",
+    `- project: ${identify.projectId ? "bound" : "unbound"}`,
+    `- target_dir: ${targetDir}`,
+    `- tap_auth: ${tapAuth ? "found" : "missing"}`,
+    `- pat: ${pat ? "found" : "missing"}`,
+    `- git: ${gitDirectoryStatus.isUsableMakerGitRepo ? "ready" : gitDirectoryStatus.issue || "unavailable"}`,
+    `- python: ${python.status}`,
+    `- lua_lsp: ${luaLsp.status}`,
+    "Maker MCP package update",
+    `- status: ${packageUpdateStatus.status}`,
+    pluginDistribution ? `- distribution: ${pluginDistribution.id}` : "",
+    packageUpdateStatus.target_version ? `- target_version: ${packageUpdateStatus.target_version}` : "",
+    pluginDistribution && packageUpdateStatus.status !== "managed_by_plugin" ? `- next_action: ${formatMakerPluginUpdateAction(pluginDistribution)}` : packageUpdateStatus.next_action ? `- next_action: ${packageUpdateStatus.next_action}` : "",
+    projectInitialization ? `- project_initialization: ${projectInitialization.status}` : "",
+    projectHealth ? `- project_health: ${projectHealth.status}` : "",
+    formatMakerClientRootsSummary(projectContext.roots),
+    "",
+    formatAuthNextStep({
+      hasPat: Boolean(pat),
+      hasTapAuth: Boolean(tapAuth),
+      isProjectBound: Boolean(identify.projectRoot),
+      rootsAmbiguous: projectContext.roots.status === "ambiguous"
+    }),
+    formatMakerSummaryNextAction({
+      git,
+      gitDirectoryStatus,
+      projectInitialization,
+      projectHealth,
+      rootsAmbiguous: projectContext.roots.status === "ambiguous"
+    }),
+    "",
+    projectSection
+  ].filter(Boolean).join("\n");
+  if (!detail) {
+    return [
+      "TapTap Maker MCP status",
+      "",
+      `- version: ${VERSION}`,
+      pluginDistribution ? `- distribution: ${pluginDistribution.id}` : "",
+      `- env: ${env}`,
+      `- project_context_source: ${projectContext.source}`,
+      summaryText
+    ].join("\n");
+  }
   return [
     "TapTap Maker MCP status",
     "",
     `- version: ${VERSION}`,
+    pluginDistribution ? `- distribution: ${pluginDistribution.id}` : "",
     `- env: ${env}`,
     `- tap_auth: ${tapAuth ? "found" : "missing"} (${getTapAuthPath()})`,
     `- pat: ${pat ? "found" : "missing"} (${getPatPath()})`,
@@ -37614,9 +45675,14 @@ async function formatStatus(options = {}) {
       remoteProxyManager: options.remoteProxyManager
     }) : "",
     "",
-    formatAuthNextStep({ hasPat: Boolean(pat), isProjectBound: Boolean(identify.projectRoot) }),
+    formatAuthNextStep({
+      hasPat: Boolean(pat),
+      hasTapAuth: Boolean(tapAuth),
+      isProjectBound: Boolean(identify.projectRoot),
+      rootsAmbiguous: projectContext.roots.status === "ambiguous"
+    }),
     "",
-    tapAuthRefreshText,
+    "",
     "",
     identify.projectRoot ? formatMakerAgentsPolicyStatus(identify.projectRoot) : "",
     "",
@@ -37630,7 +45696,38 @@ async function formatStatus(options = {}) {
     projectSection
   ].filter(Boolean).join("\n");
 }
+function formatMakerPackageUpdateStatusForDistribution(status, distribution) {
+  const formatted = formatMakerPackageUpdateStatus(status);
+  const pluginDistribution = resolveMakerPluginDistribution(distribution);
+  if (!pluginDistribution) {
+    return formatted;
+  }
+  const lines = [
+    ...formatted.split("\n").filter((line) => !line.startsWith("- next_action:")),
+    `- distribution: ${pluginDistribution.id}`
+  ];
+  if (status.status !== "managed_by_plugin") {
+    lines.push(`- next_action: ${formatMakerPluginUpdateAction(pluginDistribution)}`);
+  }
+  return lines.join("\n");
+}
 function formatAuthNextStep(options) {
+  if (!options.hasTapAuth) {
+    if (options.hasPat) {
+      return [
+        "Auth next step",
+        "",
+        "TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。"
+      ].join("\n");
+    }
+    if (options.isProjectBound) {
+      return [
+        "Auth next step",
+        "",
+        "Maker PAT 和 TapTap auth 缺失。请运行 `taptap-maker login` 刷新登录授权。"
+      ].join("\n");
+    }
+  }
   if (options.hasPat) {
     return "";
   }
@@ -37641,12 +45738,100 @@ function formatAuthNextStep(options) {
       "Maker PAT 缺失。请运行 `taptap-maker login` 刷新登录授权。"
     ].join("\n");
   }
+  if (options.rootsAmbiguous) {
+    return "";
+  }
   return [
     "Initialization next step",
     "",
     "当前目录尚未绑定 Maker 项目。请运行 `taptap-maker init`。",
     "如果缺少 Maker PAT，CLI 会在 init 流程内自动打开登录授权页面并完成本地保存。"
   ].join("\n");
+}
+function formatMakerClientRootsSummary(roots) {
+  if (roots.status === "not_requested") {
+    return "";
+  }
+  const lines = ["MCP client roots", "", `- status: ${roots.status}`];
+  if (roots.status === "selected") {
+    lines.push(
+      `- selected_project_root: ${roots.selectedProjectRoot || roots.selectedRoot}`,
+      `- reason: ${roots.reason}`
+    );
+  } else if (roots.status === "ambiguous") {
+    lines.push(
+      `- roots: ${roots.roots.join(", ") || "(none)"}`,
+      `- maker_project_roots: ${roots.makerProjectRoots.join(", ") || "(none)"}`,
+      "- next_action: Open a single Maker workspace, or pass target_dir explicitly for this call."
+    );
+  } else if (roots.status === "unsupported") {
+    lines.push(
+      "- next_action: This client did not advertise MCP Roots. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
+  } else if (roots.status === "unavailable") {
+    lines.push(
+      `- failure_message: ${roots.message || "(unknown)"}`,
+      "- next_action: Could not read MCP Roots. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
+  } else {
+    lines.push(
+      "- next_action: No MCP Roots are attached. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
+  }
+  return lines.join("\n");
+}
+function formatMakerSummaryNextAction(options) {
+  var _a3, _b, _c, _d, _e;
+  if (options.rootsAmbiguous) {
+    return "";
+  }
+  if (!options.git.installed) {
+    return "- next_action: Git 未安装。请先安装 Git，并执行 `git --version` 验证。";
+  }
+  if (!options.gitDirectoryStatus.isUsableMakerGitRepo) {
+    const nextAction = options.gitDirectoryStatus.issue === "inside_parent_git_repo" ? "当前目录位于外层 Git 仓库中；请使用独立 Maker 项目目录重新 clone。" : "当前目录没有可用的独立 Maker Git 仓库；请运行 `taptap-maker init` 重新初始化。";
+    return `- next_action: ${nextAction}`;
+  }
+  if (((_a3 = options.projectHealth) == null ? void 0 : _a3.status) === "misplaced_config") {
+    return "- next_action: 修复 Maker 项目结构或配置问题后再构建；检查器不会自动移动或覆盖文件。";
+  }
+  if (((_b = options.projectHealth) == null ? void 0 : _b.status) === "error" && !options.projectHealth.issues.some((issue3) => issue3.code === "invalid_project_json")) {
+    const settingsIssue = options.projectHealth.issues.find(
+      (issue3) => issue3.code === "invalid_settings_json" || issue3.code === "invalid_project_settings"
+    );
+    if (settingsIssue) {
+      return "- next_action: 恢复 .project/settings.json 的构建关键字段后再构建；保留合法的 @runtime 配置。";
+    }
+    return "- next_action: 修复 Maker 项目结构或配置问题后再构建；检查器不会自动移动或覆盖文件。";
+  }
+  if (options.projectInitialization) {
+    switch (options.projectInitialization.status) {
+      case "missing_taptap_identity":
+        return "- next_action: 先调用 `generate_test_qrcode` 一次生成测试二维码元数据，再重试 `get_ad_config`。";
+      case "invalid_project_json":
+        return "- next_action: 从 Git 或完整副本恢复合法的 `.project/project.json`，不要依赖构建覆盖已有坏文件。";
+      case "missing_project_json":
+        return "- next_action: 仅当用户明确要求构建、提交或预览时调用 `maker_build_current_directory`。";
+      default:
+        break;
+    }
+  }
+  if (((_c = options.projectHealth) == null ? void 0 : _c.status) === "error") {
+    const settingsIssue = options.projectHealth.issues.find(
+      (issue3) => issue3.code === "invalid_settings_json" || issue3.code === "invalid_project_settings"
+    );
+    if (settingsIssue) {
+      return "- next_action: 恢复 .project/settings.json 的构建关键字段后再构建；保留合法的 @runtime 配置。";
+    }
+    return "- next_action: 修复 Maker 项目结构或配置问题后再构建；检查器不会自动移动或覆盖文件。";
+  }
+  if (((_d = options.projectHealth) == null ? void 0 : _d.status) === "warning") {
+    return "- next_action: 调用 `maker_status_lite` 并设置 `detail=true` 查看项目结构告警后再继续。";
+  }
+  if (((_e = options.projectHealth) == null ? void 0 : _e.status) === "not_initialized") {
+    return "- next_action: 仅当用户明确要求构建、提交或预览时调用 `maker_build_current_directory`。";
+  }
+  return "";
 }
 function formatMakerRemoteSyncSkipped() {
   return [
@@ -37679,15 +45864,15 @@ function formatMakerToolRegistrationCwdStatus(options) {
     return "";
   }
   return [
-    "MCP tool registration cwd",
+    "MCP project context cwd",
     "",
     "- status: mismatch",
     `- mcp_cwd: ${mcpCwd}`,
     `- inspected_target_dir: ${targetDir}`,
     `- maker_project_dir: ${projectRoot}`,
     `- mcp_cwd_project_dir: ${mcpProjectRoot || "(none)"}`,
-    "- impact: Maker proxy tools may not appear in this MCP session because tools/list used the MCP server cwd.",
-    "- next_action: Start Claude Code from the Maker project directory, or set the taptap-maker MCP config cwd to maker_project_dir, then Reconnect taptap-maker in /mcp."
+    "- impact: Maker proxy tools remain registered, but calls without target_dir may resolve an unbound or wrong project.",
+    "- next_action: Open the Maker project as the active workspace, or pass the Maker project directory as target_dir. Do not rewrite a shared user-level MCP cwd."
   ].join("\n");
 }
 async function formatMakerProxyToolsStatusSafely(options) {
@@ -37725,7 +45910,8 @@ async function formatMakerProxyToolsStatusSafely(options) {
       `- missing_tools: ${MAKER_REMOTE_PROXY_EXPOSED_TOOL_NAMES.join(", ")}`,
       "- build_available: no",
       `- failure_message: ${error2 instanceof Error ? error2.message : String(error2)}`,
-      "- retry_policy: explicit proxy tool/build calls retry 5 total attempts, 30s apart",
+      "- build_retry_policy: up to 5 total attempts, 30s apart",
+      "- proxy_tool_retry_policy: single attempt; never replayed automatically",
       "- next_action: Maker proxy 连接失败；远端 proxy tools 和 build 构建都不可用。请检查网络、PAT/TapTap token、Maker MCP 环境和远端服务后重试。"
     ].join("\n");
   }
@@ -37893,6 +46079,24 @@ function formatAiDialogueDirectoryHint(targetDir) {
     "- do_not_show_app_selection_here: yes"
   ].join("\n");
 }
+function inspectMakerProxyProjectContext(context, toolName) {
+  const evaluatedTargetDir = path18.resolve(context.targetDir);
+  const identify = identifyMakerProject({ cwd: evaluatedTargetDir });
+  if (identify.projectRoot) {
+    return { ok: true, targetDir: identify.projectRoot };
+  }
+  return {
+    ok: false,
+    message: [
+      "No bound Maker project was found for this proxy tool call.",
+      `- tool: ${toolName}`,
+      `- evaluated_target_dir: ${evaluatedTargetDir}`,
+      `- project_context_source: ${context.source}`,
+      `- required_config: ${path18.join(evaluatedTargetDir, ".maker-mcp", "config.json")}`,
+      "- next_action: Open the Maker project as the active workspace, or pass target_dir explicitly. Do not write a project cwd into user-level MCP config."
+    ].join("\n")
+  };
+}
 function createServerClientRootsProvider(server) {
   return async () => {
     const capabilities = server.getClientCapabilities();
@@ -37940,9 +46144,6 @@ var MakerProjectContextAmbiguousError = class extends Error {
     this.name = "MakerProjectContextAmbiguousError";
   }
 };
-function isMakerProjectContextAmbiguousError(error2) {
-  return error2 instanceof MakerProjectContextAmbiguousError;
-}
 async function resolveMakerClientRoots(listClientRoots) {
   if (!listClientRoots) {
     return { status: "not_requested", roots: [] };
@@ -38049,10 +46250,18 @@ function formatMakerClientRootsStatus(roots) {
       "- next_action: Open a single Maker workspace, or pass target_dir explicitly for this call."
     );
   } else if (roots.status === "unsupported") {
-    lines.push("- next_action: This client did not advertise MCP roots; falling back to MCP cwd.");
+    lines.push(
+      "- next_action: This client did not advertise MCP Roots. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
   } else if (roots.status === "unavailable") {
     lines.push(`- failure_message: ${roots.message || "(unknown)"}`);
-    lines.push("- next_action: Could not read MCP roots; falling back to MCP cwd.");
+    lines.push(
+      "- next_action: Could not read MCP Roots. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
+  } else {
+    lines.push(
+      "- next_action: No MCP Roots are attached. Maker MCP is using process cwd only as the final fallback; pass target_dir explicitly when that is not the intended Maker project. Do not rewrite user-level MCP config."
+    );
   }
   return lines.join("\n");
 }
@@ -38203,7 +46412,7 @@ function formatClonePartialStateLines(targetDir) {
 function createRemoteProxyContext(options) {
   const identify = identifyMakerProject({ cwd: options.targetDir });
   if (!identify.projectRoot || !identify.projectId) {
-    throw new Error(
+    throw new MakerBuildContextError(
       `${options.targetDir} is not bound to a Maker project. Run taptap-maker init first.`
     );
   }
@@ -38212,7 +46421,7 @@ function createRemoteProxyContext(options) {
   const env = getMakerEnvironment(options.env, identify.projectRoot);
   const tapAuth = loadTapAuth();
   if (!tapAuth) {
-    throw new Error("Tap auth not found. Run `taptap-maker login` first.");
+    throw new MakerBuildContextError("Tap auth not found. Run `taptap-maker login` first.");
   }
   let userId = projectConfig == null ? void 0 : projectConfig.user_id;
   if (!userId) {
@@ -38220,7 +46429,7 @@ function createRemoteProxyContext(options) {
     userId = jwt2 ? getUserIdFromMakerJwt(jwt2) : void 0;
   }
   if (!userId) {
-    throw new Error(
+    throw new MakerBuildContextError(
       "Cannot resolve user_id. Re-run taptap-maker init with PAT so the project config can cache user_id."
     );
   }
@@ -38243,7 +46452,9 @@ function createRemoteProxyContext(options) {
       verbose: true,
       reset_timeout_on_progress: true,
       force_inject_progress_token: true,
-      exposed_tools: options.exposedTools
+      disable_standalone_sse: true,
+      exposed_tools: options.exposedTools,
+      replayable_tools: ["build"]
     }
   };
   const proxyConfigJson = JSON.stringify(proxyCfg);
@@ -38376,6 +46587,12 @@ var RemoteBuildFailedError = class extends Error {
     this.buildResult = buildResult;
   }
 };
+var MakerBuildContextError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "MakerBuildContextError";
+  }
+};
 async function buildCurrentDirectory(options) {
   var _a3;
   const localChanges = await readMakerProjectLocalChanges(options.targetDir);
@@ -38427,12 +46644,23 @@ async function buildCurrentDirectory(options) {
     try {
       buildResult = await runRemoteBuildCurrentDirectory(options, localChanges.projectRoot);
     } catch (error2) {
+      const buildFailure = toMakerBuildFailure(error2);
+      if (error2 instanceof MakerBuildContextError) {
+        return {
+          mode: "build_context_failed_before_remote",
+          projectRoot: localChanges.projectRoot,
+          projectId: (config2 == null ? void 0 : config2.project_id) || "unknown",
+          codeSubmitStatus: "succeeded",
+          submitResult,
+          buildFailure
+        };
+      }
       return {
         mode: "build_failed_after_submit",
         projectRoot: localChanges.projectRoot,
         projectId: (config2 == null ? void 0 : config2.project_id) || "unknown",
         submitResult,
-        buildFailure: toMakerBuildFailure(error2)
+        buildFailure
       };
     }
     return {
@@ -38451,6 +46679,17 @@ async function buildCurrentDirectory(options) {
         projectId: error2.buildResult.projectId,
         buildResult: error2.buildResult,
         buildFailure: toMakerBuildFailure(error2)
+      };
+    }
+    const buildFailure = toMakerBuildFailure(error2);
+    if (error2 instanceof MakerBuildContextError) {
+      const identify = identifyMakerProject({ cwd: options.targetDir });
+      return {
+        mode: "build_context_failed_before_remote",
+        projectRoot: identify.projectRoot || path18.resolve(options.targetDir),
+        projectId: identify.projectId || "unknown",
+        codeSubmitStatus: "skipped_by_user",
+        buildFailure
       };
     }
     throw error2;
@@ -39042,12 +47281,14 @@ function formatRemoteToolResult(result) {
   }).join("\n");
 }
 function formatBuildResult(result, progressSummary) {
+  var _a3;
   if (result.mode === "remote_build_failed") {
     return [
       "✗ Remote Maker build failed",
       "",
       `- project_root: ${result.projectRoot}`,
       `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines("remote_build", "skipped_by_user", "failed"),
       `- maker_url: ${result.buildResult.makerUrl || formatMakerAppWebUrl(result.buildResult.projectId, result.buildResult.env)}`,
       `- project_path: ${result.buildResult.projectPath}`,
       `- timeout_ms: ${result.buildResult.timeoutMs}`,
@@ -39055,6 +47296,10 @@ function formatBuildResult(result, progressSummary) {
       ...formatProgressSummary(progressSummary),
       "",
       ...formatMakerBuildFailureLines(result.buildFailure),
+      "",
+      ...formatRemoteBuildDiagnosisLines(result.buildFailure, result.projectRoot),
+      "",
+      ...formatBuildLocalExecutionCheckLines({ context: "remote_build" }),
       "",
       "remote_result:",
       indent2(String(sanitizeRemoteDiagnosticValue(result.buildResult.resultText)))
@@ -39066,6 +47311,7 @@ function formatBuildResult(result, progressSummary) {
       "",
       `- project_root: ${result.projectRoot}`,
       `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines("code_submit", "failed", "not_started"),
       `- branch: ${result.submitResult.branch}`,
       `- status: ${result.submitResult.status}`,
       `- committed: ${result.submitResult.committed ? "yes" : "no"}`,
@@ -39080,8 +47326,10 @@ function formatBuildResult(result, progressSummary) {
         "",
         ...formatPushRecoveryLines(result.submitResult),
         "",
-        ...formatMakerFailureLines(result.submitResult.failure)
-      ] : []
+        ...formatMakerFailureLines(result.submitResult.failure),
+        "",
+        ...formatBuildLocalExecutionCheckLines({ failure: result.submitResult.failure })
+      ] : ["", ...formatBuildLocalExecutionCheckLines()]
     ].filter(Boolean).join("\n");
   }
   if (result.mode === "settings_invalid_before_build") {
@@ -39090,6 +47338,7 @@ function formatBuildResult(result, progressSummary) {
       "",
       `- project_root: ${result.projectRoot}`,
       `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines("project_validation", "not_started", "not_started"),
       ...formatProgressSummary(progressSummary),
       "",
       formatMakerProjectSettingsStatus(result.settingsStatus)
@@ -39101,9 +47350,32 @@ function formatBuildResult(result, progressSummary) {
       "",
       `- project_root: ${result.projectRoot}`,
       `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines("project_validation", "not_started", "not_started"),
       ...formatProgressSummary(progressSummary),
       "",
       formatMakerProjectHealthStatus(result.projectHealth)
+    ].filter(Boolean).join("\n");
+  }
+  if (result.mode === "build_context_failed_before_remote") {
+    return [
+      result.codeSubmitStatus === "succeeded" ? "✗ Maker project submitted, but local build context preparation failed; remote build was not started" : "✗ Local build context preparation failed; remote build was not started",
+      "",
+      `- project_root: ${result.projectRoot}`,
+      `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines(
+        "local_build_context",
+        result.codeSubmitStatus,
+        "not_started"
+      ),
+      result.submitResult ? `- branch: ${result.submitResult.branch}` : "",
+      result.submitResult ? `- status: ${result.submitResult.status}` : "",
+      result.submitResult ? `- committed: ${result.submitResult.committed ? "yes" : "no"}` : "",
+      ((_a3 = result.submitResult) == null ? void 0 : _a3.commitHash) ? `- commit_hash: ${result.submitResult.commitHash}` : "",
+      ...formatProgressSummary(progressSummary),
+      "",
+      ...formatMakerBuildFailureLines(result.buildFailure),
+      "",
+      ...formatLocalBuildContextDiagnosisLines(result.buildFailure)
     ].filter(Boolean).join("\n");
   }
   if (result.mode === "build_failed_after_submit") {
@@ -39112,6 +47384,7 @@ function formatBuildResult(result, progressSummary) {
       "",
       `- project_root: ${result.projectRoot}`,
       `- project_id: ${result.projectId}`,
+      ...formatBuildFailureStageLines("remote_build", "succeeded", "failed"),
       `- branch: ${result.submitResult.branch}`,
       `- status: ${result.submitResult.status}`,
       `- committed: ${result.submitResult.committed ? "yes" : "no"}`,
@@ -39121,7 +47394,11 @@ function formatBuildResult(result, progressSummary) {
       result.submitResult.transientRetries ? `- transient_git_retries: ${result.submitResult.transientRetries}` : "",
       ...formatProgressSummary(progressSummary),
       "",
-      ...formatMakerBuildFailureLines(result.buildFailure)
+      ...formatMakerBuildFailureLines(result.buildFailure),
+      "",
+      ...formatRemoteBuildDiagnosisLines(result.buildFailure, result.projectRoot),
+      "",
+      ...formatBuildLocalExecutionCheckLines({ context: "remote_build" })
     ].filter(Boolean).join("\n");
   }
   const submitLines = result.submitResult ? [
@@ -39241,6 +47518,110 @@ ${indent2(formatDiagnosticJson(details))}` : "",
 ${indent2(String(sanitizeRemoteDiagnosticValue(failure.stack)))}` : ""
   ].filter(Boolean);
 }
+function formatBuildFailureStageLines(failureStage, codeSubmitStatus, remoteBuildStatus) {
+  return [
+    `- failure_stage: ${failureStage}`,
+    `- code_submit_status: ${codeSubmitStatus}`,
+    `- remote_build_status: ${remoteBuildStatus}`
+  ];
+}
+function formatBuildLocalExecutionCheckLines(options = {}) {
+  if (options.context === "remote_build") {
+    return [
+      "local_execution_check:",
+      "- restriction_signal: not_detected",
+      "- diagnostic_priority: remote_build_error_first",
+      "- sandbox_check_condition: only_if_local_commands_are_also_blocked",
+      '- fallback_check: If Windows PowerShell, CLI, Git, or MCP commands are also blocked locally, ask the user to check the AI client sandbox/access setting and enable Full Access mode ("完全访问模式") only for a trusted project.',
+      "- evidence_rule: A remote build failure is not evidence of a local sandbox restriction."
+    ];
+  }
+  const restrictionSignal = options.failure ? hasLocalExecutionRestrictionSignal(options.failure) : false;
+  if (options.failure && !restrictionSignal && isRemoteGitFailure(options.failure)) {
+    return [
+      "local_execution_check:",
+      "- restriction_signal: not_detected",
+      "- diagnostic_priority: remote_git_error_first",
+      "- sandbox_check_condition: only_if_local_commands_are_also_blocked",
+      '- fallback_check: If Windows PowerShell, CLI, Git, or MCP commands are also blocked locally, ask the user to check the AI client sandbox/access setting and enable Full Access mode ("完全访问模式") only for a trusted project.',
+      "- evidence_rule: A remote Git failure is not evidence of a local sandbox restriction."
+    ];
+  }
+  return [
+    "local_execution_check:",
+    `- restriction_signal: ${restrictionSignal ? "detected" : "not_detected"}`,
+    restrictionSignal ? "- assessment: The current error reports a sandbox or local access restriction; code execution may be blocked before Maker can complete the build workflow." : "- assessment: Maker cannot inspect the AI client access-mode setting, so the current build failure does not confirm whether local execution is restricted.",
+    "- windows_check: Check whether the AI client is running Windows PowerShell, CLI, Git, or MCP commands in a sandbox or restricted mode.",
+    restrictionSignal ? '- next_action: For a trusted project, enable Full Access mode ("完全访问模式") in the AI client, reconnect MCP, and retry only after confirming local commands can execute.' : '- next_action: Check the AI client sandbox/access setting. For a trusted project, enable Full Access mode ("完全访问模式"), reconnect MCP, and retry after confirming local commands can execute.',
+    "- evidence_rule: This is a diagnostic check, not proof that sandbox restrictions caused this failure."
+  ];
+}
+function hasLocalExecutionRestrictionSignal(failure) {
+  const localText = gitFailureSearchText(failure).split(/\r?\n/u).filter((line) => !/^\s*remote:/iu.test(line)).join("\n");
+  const hasLocalProcessMarker = /\bPowerShell(?:\.exe)?\b|\bspawn\s+(?:(?:[^\r\n]{0,160})[\\/])?(?:git(?:\.exe)?|PowerShell(?:\.exe)?)\b/iu.test(
+    localText
+  );
+  const hasRestrictionMarker = /sandbox|沙盒|blocked|disabled|not permitted|EPERM|EACCES/iu.test(
+    localText
+  );
+  return hasLocalProcessMarker && hasRestrictionMarker;
+}
+function isRemoteGitFailure(failure) {
+  return [
+    "remote_transient",
+    "remote_rejected",
+    "auth",
+    "branch_not_allowed",
+    "forbidden_path"
+  ].includes(failure.classification) || /(?:^|\n)\s*remote:/iu.test(gitFailureSearchText(failure));
+}
+function gitFailureSearchText(failure) {
+  return [failure.message, failure.stderr, failure.stdout].filter(Boolean).join("\n");
+}
+function formatRemoteBuildDiagnosisLines(failure, projectRoot) {
+  const isRequestTimeout = isMcpRequestTimeoutFailure(failure);
+  return [
+    "remote_build_diagnosis:",
+    isRequestTimeout ? "- failure_signal: mcp_request_timeout" : "",
+    "- root_cause: unconfirmed",
+    isRequestTimeout ? "- maker_server_fault_confirmed: no" : "",
+    "- inspect_first: returned build_failure and any remote_result for code or resource diagnostics",
+    "- diagnostic_action_modified_local_project_files: no",
+    ...isRequestTimeout ? ["", ...formatMcpTimeoutLocalDiagnosticLines(projectRoot)] : []
+  ].filter(Boolean);
+}
+function formatLocalBuildContextDiagnosisLines(failure) {
+  return [
+    "local_build_context_diagnosis:",
+    "- root_cause: known_local_context",
+    "- remote_request_status: not_started",
+    `- next_action: ${failure.message}`
+  ];
+}
+function isMcpRequestTimeoutFailure(failure) {
+  return /MCP error\s+-32001:\s*Request timed out/iu.test(failure.message);
+}
+function formatMcpTimeoutLocalDiagnosticLines(projectRoot) {
+  const processCwd = process.cwd();
+  const cwdAlignment = normalizePathForCompare2(processCwd) === normalizePathForCompare2(projectRoot) ? "same_project" : "different_from_project";
+  return [
+    "mcp_timeout_local_diagnostics:",
+    "- mode: read_only",
+    `- project_root: ${projectRoot}`,
+    `- mcp_process_cwd: ${processCwd}`,
+    `- cwd_alignment: ${cwdAlignment}`,
+    `- node_version: ${process.version}`,
+    `- platform: ${process.platform}/${process.arch}`,
+    `- node_exec_path: ${process.execPath}`,
+    "- active_client_config: not_checked",
+    "- active_client_session: not_checked",
+    "- limitation: Maker MCP cannot inspect the active AI client's command, args, workspace Roots, session, or request timeout.",
+    "- next_action_1: Run Maker doctor for project_root through the active client launcher; standalone CLI equivalent: `taptap-maker doctor --target-dir <PROJECT_DIR>`.",
+    "- next_action_2: Inspect the actual active client MCP command, args, cwd/Roots, session and tool registration, request timeout, and Node runtime.",
+    "- evidence_rule: Do not claim a Maker server outage without HTTP 5xx, server logs, or service status evidence.",
+    "- retry_rule: Do not retry the build blindly; diagnose the failed boundary first."
+  ];
+}
 function buildFailureDiagnosticFields(failure) {
   const details = {};
   for (const [key, value] of Object.entries(failure)) {
@@ -39271,6 +47652,7 @@ ${indent2(failure.stdout)}` : "",
 function formatToolException(toolName, error2) {
   const message = error2 instanceof Error ? error2.message : String(error2);
   const stack = error2 instanceof Error ? error2.stack : void 0;
+  const buildLocalExecutionCheckLines = toolName === "maker_build_current_directory" && !isKnownBuildContextError(error2) ? ["", ...formatBuildLocalExecutionCheckLines()] : [];
   if (error2 instanceof MakerGitNotFoundError) {
     return [
       "✗ Maker MCP tool stopped",
@@ -39280,7 +47662,8 @@ function formatToolException(toolName, error2) {
       "",
       message,
       "",
-      "next_action: 请只引导用户安装 Git；在 `git --version` 可用之前，不要继续调用 clone、fetch、commit 或 push。"
+      "next_action: 请只引导用户安装 Git；在 `git --version` 可用之前，不要继续调用 clone、fetch、commit 或 push。",
+      ...buildLocalExecutionCheckLines
     ].join("\n");
   }
   if (error2 instanceof MakerCloneFailedError) {
@@ -39350,8 +47733,18 @@ function formatToolException(toolName, error2) {
     "debug:",
     stack ? indent2(stack) : indent2(message),
     "",
-    "next_action: 请把上面的完整错误反馈给开发者；如果本地已有 commit 但 push 未完成，不要重复 commit，直接重试 maker_build_current_directory。"
+    "next_action: 请把上面的完整错误反馈给开发者；如果本地已有 commit 但 push 未完成，不要重复 commit，直接重试 maker_build_current_directory。",
+    ...buildLocalExecutionCheckLines
   ].join("\n");
+}
+function isKnownBuildContextError(error2) {
+  if (error2 instanceof MakerBuildContextError || error2 instanceof MakerProjectContextAmbiguousError) {
+    return true;
+  }
+  const message = error2 instanceof Error ? error2.message : String(error2);
+  return /target_dir must be a string when provided|is not bound to a Maker project|must be an independent Git repository before build or submit|is bound to a Maker project but is not a Git repository/iu.test(
+    message
+  );
 }
 function stripNestedMcpErrorPrefixes(message) {
   const prefix = /^MCP error -?\d+:\s*/i;
@@ -39450,13 +47843,14 @@ function indent2(value) {
 }
 
 // src/maker/cli/commands.ts
-import { spawnSync as spawnSync7 } from "node:child_process";
-import crypto3 from "node:crypto";
-import fs19 from "node:fs";
-import os4 from "node:os";
-import path20 from "node:path";
+import { spawnSync as spawnSync8 } from "node:child_process";
+import crypto5 from "node:crypto";
+import fs25 from "node:fs";
+import os8 from "node:os";
+import path26 from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { pathToFileURL } from "node:url";
 
 // src/maker/auth/cliLogin.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
@@ -39599,12 +47993,145 @@ function formatError2(error2) {
   return error2 instanceof Error ? error2.message : String(error2);
 }
 
+// src/maker/auth/patTap.ts
+function getObjectValue(data, key) {
+  if (!data || typeof data !== "object") {
+    return void 0;
+  }
+  return data[key];
+}
+function normalizeTapAuthResponse(data) {
+  const body = data;
+  const nested = getObjectValue(body, "data");
+  const source = nested && typeof nested === "object" ? nested : body;
+  const kid = source.kid;
+  const macKey = source.mac_key;
+  if (typeof kid !== "string" || kid.length === 0 || typeof macKey !== "string" || macKey.length === 0) {
+    throw new Error("TapTap token response does not contain kid/mac_key");
+  }
+  return {
+    kid,
+    mac_key: macKey,
+    token_type: typeof source.token_type === "string" ? source.token_type : "mac",
+    mac_algorithm: typeof source.mac_algorithm === "string" ? source.mac_algorithm : "hmac-sha-1",
+    raw: data
+  };
+}
+function getMakerTapTokenUrl(environment) {
+  const tapTokenUrl = getMakerEndpoints(environment).tapTokenUrl;
+  return requireMakerEndpoint("tapTokenUrl", tapTokenUrl, environment);
+}
+async function requestTapAuthWithPat(manualPat, environment, options = {}) {
+  const pat = requireMakerPat(manualPat);
+  const response = await fetchWithTimeout(
+    options.fetchImpl || fetch,
+    getMakerTapTokenUrl(environment),
+    {
+      headers: {
+        Authorization: `Bearer ${pat.token}`,
+        Accept: "application/json"
+      }
+    },
+    options.timeoutMs ?? DEFAULT_SHORT_FETCH_TIMEOUT_MS,
+    "TapTap token request"
+  );
+  const text = await response.text();
+  let json2 = {};
+  if (text) {
+    try {
+      json2 = JSON.parse(text);
+    } catch {
+      json2 = { error: text };
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`TapTap token request failed: HTTP ${response.status} ${JSON.stringify(json2)}`);
+  }
+  const auth2 = normalizeTapAuthResponse(json2);
+  saveTapAuth(auth2);
+  return auth2;
+}
+
 // src/maker/cli/mcpLauncher.ts
 import fs18 from "node:fs";
 import path19 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_VERIFY_TIMEOUT_MS = 9e4;
 var VERIFY_CLIENT_VERSION = "1.0.0";
 var REQUIRED_TOOL_NAME = "maker_status_lite";
+var PUBLISHED_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+var SELF_RUNTIME_DIRECTORIES = [
+  "skills/taptap-maker-local",
+  "skills/taptap-maker-dev-kit-guide",
+  "skills/update-taptap-mcp"
+];
+var SELF_RUNTIME_FILES = ["dist/maker.js", "docs/MAKER_MCP_CONNECTION_TROUBLESHOOTING.md"];
+var SELF_RUNTIME_COPY_FALLBACK_CODES = /* @__PURE__ */ new Set(["EIO", "EACCES", "EPERM"]);
+function resolveMakerPackageSpec(packageName, currentVersion) {
+  return PUBLISHED_VERSION_PATTERN.test(currentVersion) ? `${packageName}@${currentVersion}` : packageName;
+}
+function materializeMakerSelfLauncher(options) {
+  if (!PUBLISHED_VERSION_PATTERN.test(options.version) && options.version !== "dev") {
+    throw new Error(`Invalid Maker runtime version: ${options.version}`);
+  }
+  const execPath = options.execPath ?? process.execPath;
+  if (!path19.isAbsolute(execPath) || !fs18.existsSync(execPath)) {
+    throw new Error("Maker self launcher requires an existing absolute Node executable.");
+  }
+  const sourceBundle = fileURLToPath3(options.bundleUrl);
+  const sourceRoot = path19.dirname(path19.dirname(sourceBundle));
+  const runtimeRoot = path19.join(path19.resolve(options.makerHome), "mcp-runtime", options.version);
+  for (const relativePath of [...SELF_RUNTIME_FILES, ...SELF_RUNTIME_DIRECTORIES]) {
+    const sourcePath = path19.join(sourceRoot, relativePath);
+    if (!fs18.existsSync(sourcePath)) {
+      throw new Error(`Maker self runtime source is incomplete: ${sourcePath}`);
+    }
+  }
+  if (path19.resolve(sourceRoot) !== path19.resolve(runtimeRoot)) {
+    for (const relativePath of SELF_RUNTIME_FILES) {
+      const sourcePath = path19.join(sourceRoot, relativePath);
+      const targetPath = path19.join(runtimeRoot, relativePath);
+      fs18.mkdirSync(path19.dirname(targetPath), { recursive: true });
+      fs18.copyFileSync(sourcePath, targetPath);
+    }
+    for (const relativePath of SELF_RUNTIME_DIRECTORIES) {
+      copySelfRuntimeDirectory(
+        path19.join(sourceRoot, relativePath),
+        path19.join(runtimeRoot, relativePath)
+      );
+    }
+  }
+  const stableBundle = path19.join(runtimeRoot, "dist", "maker.js");
+  return {
+    kind: "self_runtime",
+    command: execPath,
+    args: [stableBundle],
+    commandAndArgs: [execPath, stableBundle]
+  };
+}
+function copySelfRuntimeDirectory(sourcePath, targetPath) {
+  try {
+    fs18.cpSync(sourcePath, targetPath, { recursive: true });
+  } catch (error2) {
+    const code = typeof error2 === "object" && error2 !== null && "code" in error2 ? String(error2.code) : void 0;
+    if (!code || !SELF_RUNTIME_COPY_FALLBACK_CODES.has(code)) {
+      throw error2;
+    }
+    copyDirectoryEntries(sourcePath, targetPath);
+  }
+}
+function copyDirectoryEntries(sourcePath, targetPath) {
+  fs18.mkdirSync(targetPath, { recursive: true });
+  for (const entry of fs18.readdirSync(sourcePath, { withFileTypes: true })) {
+    const sourceEntry = path19.join(sourcePath, entry.name);
+    const targetEntry = path19.join(targetPath, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectoryEntries(sourceEntry, targetEntry);
+    } else {
+      fs18.copyFileSync(sourceEntry, targetEntry);
+    }
+  }
+}
 function resolveMakerMcpLauncher(options) {
   const platform = options.platform ?? process.platform;
   if (platform !== "win32") {
@@ -39648,7 +48175,7 @@ function resolveMakerMcpLauncher(options) {
   );
 }
 async function verifyMakerMcpLauncher(launcher, options = {}) {
-  var _a3;
+  var _a3, _b;
   const timeoutMs = options.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS;
   const transport = new StdioClientTransport({
     command: launcher.command,
@@ -39691,9 +48218,16 @@ async function verifyMakerMcpLauncher(launcher, options = {}) {
     };
   } catch (error2) {
     const message = error2 instanceof Error ? error2.message : String(error2);
-    return failureResult(launcher, stage, stderr, classifyVerificationFailure(message), message);
+    return failureResult(
+      launcher,
+      stage,
+      stderr,
+      classifyVerificationFailure(message, stderr),
+      message
+    );
   } finally {
     await closeClient(client);
+    (_b = transport.stderr) == null ? void 0 : _b.destroy();
   }
 }
 function failureResult(launcher, stage, stderr, failureType, error2, toolNames = []) {
@@ -39708,7 +48242,14 @@ function failureResult(launcher, stage, stderr, failureType, error2, toolNames =
     failureType
   };
 }
-function classifyVerificationFailure(message) {
+function classifyVerificationFailure(message, stderr) {
+  const diagnosticText = `${message}
+${stderr}`;
+  if (/npm\s+(?:(?:ERR!|error)\s+)?(?:code\s+)?E(?:PERM|ACCES)|cache folder contains root-owned files|cache[^\n]*(?:permission|not writable|write failed)/i.test(
+    diagnosticText
+  )) {
+    return "npm_environment_error";
+  }
   if (/timed out/i.test(message)) {
     return "timeout";
   }
@@ -39751,11 +48292,2001 @@ function uniqueStrings(values) {
   return Array.from(new Set(values.filter((value) => Boolean(value))));
 }
 
+// src/maker/cli/mcpIssueReport.ts
+import { spawnSync as spawnSync7 } from "node:child_process";
+import fs20 from "node:fs";
+import os5 from "node:os";
+import path21 from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+
+// src/maker/cli/dshMcpConfig.ts
+var import_yaml = __toESM(require_dist2());
+import fs19 from "node:fs";
+import os4 from "node:os";
+import path20 from "node:path";
+var DSH_MCP_PLUGIN_NAME = "@deepseek-ai/dsh-mcp-client";
+var DSH_MAKER_PLUGIN_ID = "mcp-taptap-maker";
+var DSH_MAKER_TOOL_CALL_TIMEOUT_MS = 60 * 60 * 1e3;
+function getDshHome(options = {}) {
+  var _a3;
+  const configured = (_a3 = (options.environment || process.env).DSH_HOME) == null ? void 0 : _a3.trim();
+  if (configured) {
+    const expanded = configured === "~" ? options.homeDir || os4.homedir() : configured.startsWith("~/") || configured.startsWith("~\\") ? path20.join(options.homeDir || os4.homedir(), configured.slice(2)) : configured;
+    return path20.resolve(expanded);
+  }
+  return path20.join(options.homeDir || os4.homedir(), ".dsh");
+}
+function createDshMakerPluginConfig(options) {
+  return {
+    id: DSH_MAKER_PLUGIN_ID,
+    name: DSH_MCP_PLUGIN_NAME,
+    config: {
+      serverName: options.mcpName,
+      transport: "stdio",
+      command: options.command,
+      args: [...options.args],
+      ...options.env && Object.keys(options.env).length > 0 ? { env: { ...options.env } } : {},
+      toolCallTimeoutMs: DSH_MAKER_TOOL_CALL_TIMEOUT_MS,
+      failOnStartupError: true
+    }
+  };
+}
+function mergeDshMakerMcpConfig(configPath, desired) {
+  const existed = fs19.existsSync(configPath);
+  const previousContent = existed ? fs19.readFileSync(configPath, "utf8") : "[]\n";
+  const document = parseDshDocument(previousContent, configPath);
+  const sequence = ensurePluginSequence(document, configPath);
+  const candidates = findDshMakerPluginCandidates(
+    sequence.items.map((item) => item == null ? void 0 : item.toJSON()),
+    desired.config.serverName
+  );
+  if (candidates.length > 1) {
+    throw new Error(
+      `Multiple DSH Maker MCP plugin entries found in ${configPath}. Keep only one ${DSH_MCP_PLUGIN_NAME} entry with serverName ${desired.config.serverName}.`
+    );
+  }
+  if (candidates.length === 1 && candidates[0].insertIndex !== void 0 && deepEqual(candidates[0].value, desired)) {
+    return { changed: false };
+  }
+  const desiredNode = document.createNode(desired);
+  if (candidates.length === 1) {
+    const candidate = candidates[0];
+    if (candidate.insertIndex === void 0) {
+      sequence.items[candidate.patchIndex] = document.createNode({
+        insert: [desired]
+      });
+    } else {
+      const patchNode = sequence.items[candidate.patchIndex];
+      const insertNode = (0, import_yaml.isMap)(patchNode) ? patchNode.get("insert", true) : void 0;
+      if (!(0, import_yaml.isSeq)(insertNode)) {
+        throw new Error(`Invalid DSH insert patch in ${configPath}.`);
+      }
+      insertNode.items[candidate.insertIndex] = desiredNode;
+    }
+  } else {
+    sequence.items.push(
+      document.createNode({ insert: [desired] })
+    );
+  }
+  sequence.flow = false;
+  const nextContent = document.toString({ lineWidth: 0 });
+  return writeDshConfigWithBackup(configPath, previousContent, existed, nextContent, desired);
+}
+function parseDshPluginEntries(content, source = "DSH config") {
+  const document = parseDshDocument(content, source);
+  if (document.contents === null) {
+    return [];
+  }
+  if (!(0, import_yaml.isSeq)(document.contents)) {
+    throw new Error(`${source} top-level value must be a plugin array.`);
+  }
+  return document.contents.items.map((item) => item == null ? void 0 : item.toJSON());
+}
+function findDshMakerPluginEntry(content, mcpName, source = "DSH config") {
+  var _a3;
+  const matches = findDshMakerPluginCandidates(parseDshPluginEntries(content, source), mcpName);
+  if (matches.length > 1) {
+    throw new Error(`${source} contains multiple Maker MCP plugin entries.`);
+  }
+  return isRecord3((_a3 = matches[0]) == null ? void 0 : _a3.value) ? matches[0].value : void 0;
+}
+function getDshMcpInstallPaths(options) {
+  const dshHome = getDshHome(options);
+  const homePatchPath = path20.join(dshHome, "cordis.patch.yml");
+  const homeHasMaker = dshConfigFileHasMaker(homePatchPath, options.mcpName);
+  const profilePatchPaths = listDshProfilePatchPathsForInstall(dshHome).filter(
+    (configPath) => dshConfigFileHasMaker(configPath, options.mcpName)
+  );
+  if (homeHasMaker && profilePatchPaths.length > 0) {
+    throw new Error(
+      `Maker MCP is registered in both ${homePatchPath} and DSH profile patch files: ${profilePatchPaths.join(", ")}. Remove the duplicate profile-scoped entry before reinstalling.`
+    );
+  }
+  if (homeHasMaker) {
+    return [homePatchPath];
+  }
+  return profilePatchPaths.length > 0 ? profilePatchPaths : [homePatchPath];
+}
+function listDshProfilePatchPathsForInstall(dshHome) {
+  const profilesDir = path20.join(dshHome, "profiles");
+  let entries;
+  try {
+    entries = fs19.readdirSync(profilesDir, { withFileTypes: true });
+  } catch (error2) {
+    if (isMissingPathError(error2)) {
+      return [];
+    }
+    throw error2;
+  }
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().map((profileName) => path20.join(profilesDir, profileName, "cordis.patch.yml"));
+}
+function dshConfigFileHasMaker(configPath, mcpName) {
+  let content;
+  try {
+    content = fs19.readFileSync(configPath, "utf8");
+  } catch (error2) {
+    if (isMissingPathError(error2)) {
+      return false;
+    }
+    throw error2;
+  }
+  return Boolean(findDshMakerPluginEntry(content, mcpName, configPath));
+}
+function isMissingPathError(error2) {
+  return typeof error2 === "object" && error2 !== null && "code" in error2 && error2.code === "ENOENT";
+}
+function listDshMcpConfigPaths(options) {
+  const dshHome = options.dshHome || path20.join(options.homeDir, ".dsh");
+  const paths = [path20.join(dshHome, "cordis.patch.yml")];
+  const profilesDir = path20.join(dshHome, "profiles");
+  if (!fs19.existsSync(profilesDir)) {
+    return paths;
+  }
+  let profileNames = [];
+  try {
+    profileNames = fs19.readdirSync(profilesDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().slice(0, 50);
+  } catch {
+    return paths;
+  }
+  for (const profileName of profileNames) {
+    const profileDir = path20.join(profilesDir, profileName);
+    paths.push(path20.join(profileDir, "cordis.patch.yml"), path20.join(profileDir, "cordis.yml"));
+  }
+  return paths;
+}
+function parseDshDocument(content, source) {
+  const document = (0, import_yaml.parseDocument)(content, { prettyErrors: true });
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid YAML in ${source}: ${document.errors[0].message}`);
+  }
+  return document;
+}
+function ensurePluginSequence(document, source) {
+  if (document.contents === null) {
+    document.contents = document.createNode([]);
+  }
+  if (!(0, import_yaml.isSeq)(document.contents)) {
+    throw new Error(`${source} top-level value must be a plugin array.`);
+  }
+  return document.contents;
+}
+function isMakerPluginCandidate(value, mcpName) {
+  if (!isRecord3(value)) {
+    return false;
+  }
+  if (value.id === DSH_MAKER_PLUGIN_ID) {
+    return true;
+  }
+  const config2 = isRecord3(value.config) ? value.config : void 0;
+  return value.name === DSH_MCP_PLUGIN_NAME && (config2 == null ? void 0 : config2.serverName) === mcpName;
+}
+function findDshMakerPluginCandidates(patches, mcpName) {
+  const candidates = [];
+  patches.forEach((patch, patchIndex) => {
+    if (!isRecord3(patch)) {
+      return;
+    }
+    if (Array.isArray(patch.insert)) {
+      patch.insert.forEach((entry, insertIndex) => {
+        if (isMakerPluginCandidate(entry, mcpName)) {
+          candidates.push({ patchIndex, insertIndex, value: entry });
+        }
+      });
+      return;
+    }
+    if (isMakerPluginCandidate(patch, mcpName)) {
+      candidates.push({ patchIndex, value: patch });
+    }
+  });
+  return candidates;
+}
+function writeDshConfigWithBackup(configPath, previousContent, existed, nextContent, desired) {
+  const backupPath = existed ? `${configPath}.taptap-maker.bak.latest` : void 0;
+  fs19.mkdirSync(path20.dirname(configPath), { recursive: true });
+  if (backupPath) {
+    fs19.writeFileSync(backupPath, previousContent, "utf8");
+  }
+  try {
+    fs19.writeFileSync(configPath, nextContent, "utf8");
+    const written = findDshMakerPluginEntry(
+      fs19.readFileSync(configPath, "utf8"),
+      desired.config.serverName,
+      configPath
+    );
+    if (!deepEqual(written, desired)) {
+      throw new Error(
+        `Generated DSH MCP config for ${desired.config.serverName} failed validation.`
+      );
+    }
+    return { changed: true, backupPath };
+  } catch (error2) {
+    if (existed) {
+      fs19.writeFileSync(configPath, previousContent, "utf8");
+    } else {
+      fs19.rmSync(configPath, { force: true });
+    }
+    throw error2;
+  }
+}
+function isRecord3(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) && !(0, import_yaml.isMap)(value);
+}
+function deepEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+// src/maker/cli/mcpIssueReport.ts
+var MAKER_MCP_NAME = "taptap-maker";
+var GITHUB_REPOSITORY = "taptap/instant-games-open-mcp";
+var GITHUB_NEW_ISSUE_URL = `https://github.com/${GITHUB_REPOSITORY}/issues/new`;
+function parseMakerMcpReportContext(input2) {
+  const trimmed = input2.trim();
+  if (!trimmed) {
+    return { summary: "Maker MCP problem report" };
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (isRecord4(parsed)) {
+      return pickMakerMcpReportContext(parsed);
+    }
+  } catch {
+  }
+  return {
+    summary: "Maker MCP problem report",
+    error_message: trimmed
+  };
+}
+function validateMakerMcpReportContext(context) {
+  var _a3, _b;
+  const errorMessage = ((_a3 = context.error_message) == null ? void 0 : _a3.trim()) || "";
+  const hasErrorCode = typeof context.error_code === "number" || typeof context.error_code === "string" && context.error_code.trim().length > 0;
+  const hasFailedOperation = Boolean((_b = context.failed_operation) == null ? void 0 : _b.trim());
+  if (errorMessage === "Need to call maker_build_current_directory" && !hasErrorCode) {
+    return {
+      ok: false,
+      reason: "This is an expected Maker project build prerequisite, not an MCP connectivity failure."
+    };
+  }
+  if (hasErrorCode || hasFailedOperation || errorMessage) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    reason: "Report context must include at least one of error_code, failed_operation, or error_message."
+  };
+}
+function extractMakerMcpServerConfig(config2, mcpName) {
+  const container = isRecord4(config2.mcpServers) ? config2.mcpServers : isRecord4(config2.mcp) ? config2.mcp : void 0;
+  const server = container == null ? void 0 : container[mcpName];
+  if (!isRecord4(server)) {
+    return void 0;
+  }
+  const result = {};
+  for (const key of ["type", "command", "args", "cwd", "disabled"]) {
+    if (server[key] !== void 0) {
+      result[key] = (key === "command" || key === "args") && Array.isArray(server[key]) ? sanitizeCommandArguments(server[key]) : server[key];
+    }
+  }
+  const environment = isRecord4(server.env) ? server.env : isRecord4(server.environment) ? server.environment : void 0;
+  if (environment) {
+    result.env_keys = Object.keys(environment).sort();
+    if (typeof environment.TAPTAP_MCP_CLIENT_IDE === "string") {
+      result.client_ide = environment.TAPTAP_MCP_CLIENT_IDE;
+    }
+  }
+  return result;
+}
+function inspectMakerMcpClientConfig(options) {
+  const ide = options.ide.trim().toLowerCase();
+  const configPaths = getMcpConfigPaths({ ...options, ide });
+  if (!configPaths) {
+    return { ide, status: "unsupported", entries: [] };
+  }
+  const entries = configPaths.filter((configPath) => fs20.existsSync(configPath)).map((configPath) => inspectMcpConfigFile(configPath, ide, options.mcpName || MAKER_MCP_NAME));
+  const status = entries.some((entry) => entry.status === "found") ? "found" : entries.some((entry) => entry.status === "unreadable") ? "unreadable" : entries.length > 0 ? "missing_entry" : "not_found";
+  return { ide, status, entries };
+}
+function resolveMakerMcpReportRuntime(options) {
+  const pluginDistribution = resolveMakerPluginDistribution(options.distribution);
+  if (!pluginDistribution) {
+    return void 0;
+  }
+  if (!options.bundleUrl) {
+    throw new Error(
+      `${pluginDistribution.displayName} plugin diagnostics require the active Maker bundle URL.`
+    );
+  }
+  const bundlePath = path21.resolve(fileURLToPath4(options.bundleUrl));
+  const pluginRoot = path21.dirname(path21.dirname(bundlePath));
+  const execPath = options.execPath ?? process.execPath;
+  return {
+    distribution: pluginDistribution.id,
+    client: pluginDistribution.client,
+    config_source: {
+      format: "json",
+      paths: [path21.join(pluginRoot, ".mcp.json")],
+      mcp_name: "taptap-maker-plugin"
+    },
+    launcher: {
+      kind: "self_runtime",
+      command: execPath,
+      args: [bundlePath],
+      commandAndArgs: [execPath, bundlePath]
+    },
+    cwd: pluginRoot,
+    env: {
+      TAPTAP_MAKER_DISTRIBUTION: pluginDistribution.id,
+      TAPTAP_MCP_CLIENT_IDE: pluginDistribution.client
+    }
+  };
+}
+function buildMakerMcpIssue(options) {
+  const context = sanitizePublicValue(options.context, options.homeDir);
+  const diagnostics = sanitizePublicValue(
+    options.diagnostics,
+    options.homeDir
+  );
+  const summary = stripControlCharacters(sanitizePublicText(context.summary, options.homeDir)).replace(/\s+/gu, " ").trim() || "Maker MCP problem report";
+  const title = `[Maker MCP] ${summary}`.slice(0, 120);
+  const body = [
+    "<!-- maker-mcp-auto-report -->",
+    "> 由 TapTap Maker AI 故障上报流程自动生成；凭证和用户主目录已经脱敏。",
+    "",
+    "## 问题摘要",
+    "",
+    summary,
+    "",
+    "## AI 会话与错误上下文",
+    "",
+    fencedJson(context, 24e3),
+    "",
+    "## Maker MCP 本地诊断",
+    "",
+    fencedJson(diagnostics, 24e3),
+    "",
+    "## 隐私说明",
+    "",
+    "- 未包含完整聊天记录、项目源码、完整环境变量或其它 MCP server 配置。",
+    "- PAT、token、Authorization、Cookie、密钥和用户主目录已自动脱敏。"
+  ].join("\n");
+  return { title, body };
+}
+async function collectMakerMcpIssueDiagnostics(options) {
+  var _a3, _b;
+  const platform = options.platform || process.platform;
+  const homeDir = options.homeDir || os5.homedir();
+  const processCwd = path21.resolve(options.processCwd || process.cwd());
+  const targetDir = path21.resolve(options.targetDir);
+  const identify = identifyMakerProject({ cwd: targetDir });
+  const projectContext = identify.projectRoot ? {
+    status: "bound",
+    source: identify.source,
+    project_root: identify.projectRoot,
+    config_path: identify.configPath
+  } : {
+    status: "not_bound",
+    source: identify.source
+  };
+  const client = (_a3 = options.ide) == null ? void 0 : _a3.trim().toLowerCase();
+  const environment = options.environment || process.env;
+  const clientConfig = client ? options.configSource ? inspectMakerMcpConfigSource(client, options.configSource) : inspectMakerMcpClientConfig({
+    ide: client,
+    homeDir,
+    platform,
+    appData: options.appData || environment.APPDATA,
+    dshHome: client === "dsh" ? getDshHome({ homeDir, environment }) : void 0
+  }) : { status: "not_checked", reason: "active_client_not_provided" };
+  let mcpVerify;
+  try {
+    mcpVerify = options.verify ? await options.verify() : await collectMcpVerifyEvidence(options.makerVersion);
+  } catch {
+    mcpVerify = {
+      ok: false,
+      stage: "collect",
+      failure_type: "verification_unavailable"
+    };
+  }
+  const diagnostics = {
+    occurred_at: (options.now || (() => /* @__PURE__ */ new Date()))().toISOString(),
+    client,
+    os_arch: `${platform} ${options.arch || process.arch}`,
+    node_version: process.version,
+    maker_package_version: options.makerVersion,
+    process_cwd: processCwd,
+    target_dir: targetDir,
+    project_context: projectContext,
+    client_config: clientConfig,
+    mcp_verify: mcpVerify,
+    network_proxy: {
+      http_proxy_configured: hasEnvironmentValue(environment, "HTTP_PROXY"),
+      https_proxy_configured: hasEnvironmentValue(environment, "HTTPS_PROXY"),
+      no_proxy_configured: hasEnvironmentValue(environment, "NO_PROXY")
+    },
+    ...options.distribution ? { distribution: options.distribution } : {}
+  };
+  if (client === "workbuddy") {
+    diagnostics.workbuddy_trust = inspectWorkBuddyTrust(
+      homeDir,
+      ((_b = options.configSource) == null ? void 0 : _b.mcp_name) || MAKER_MCP_NAME
+    );
+  }
+  return diagnostics;
+}
+function submitMakerMcpIssue(issue3, options = {}) {
+  try {
+    const run = options.run || runGitHubIssueCreate;
+    const result = run(
+      ["issue", "create", "--repo", GITHUB_REPOSITORY, "--title", issue3.title, "--body-file", "-"],
+      issue3.body
+    );
+    const issueUrl = result.stdout.trim();
+    if (result.status === 0 && new RegExp(`^https://github\\.com/${escapeRegExp2(GITHUB_REPOSITORY)}/issues/\\d+$`, "u").test(
+      issueUrl
+    )) {
+      return { status: "created", issue_url: issueUrl };
+    }
+  } catch {
+  }
+  return {
+    status: "manual_required",
+    issue_url: GITHUB_NEW_ISSUE_URL,
+    ...issue3
+  };
+}
+function getMcpConfigPaths(options) {
+  const { ide, homeDir, platform } = options;
+  if (ide === "codex") {
+    return [path21.join(homeDir, ".codex", "config.toml")];
+  }
+  if (ide === "cursor") {
+    return [path21.join(homeDir, ".cursor", "mcp.json")];
+  }
+  if (ide === "claude") {
+    return [path21.join(homeDir, ".claude.json")];
+  }
+  if (ide === "opencode") {
+    return [path21.join(homeDir, ".config", "opencode", "opencode.jsonc")];
+  }
+  if (ide === "workbuddy") {
+    const primary = path21.join(homeDir, ".workbuddy", "mcp.json");
+    if (fs20.existsSync(primary)) {
+      return [primary];
+    }
+    const legacy = path21.join(homeDir, ".workbuddy", ".mcp.json");
+    return fs20.existsSync(legacy) ? [legacy] : [primary];
+  }
+  if (ide === "trae") {
+    const root = platform === "win32" ? options.appData || path21.join(homeDir, "AppData", "Roaming") : path21.join(homeDir, "Library", "Application Support");
+    return ["TRAE SOLO", "TRAE SOLO CN", "Trae", "TRAE", "Trae CN"].map(
+      (name) => path21.join(root, name, "User", "mcp.json")
+    );
+  }
+  if (ide === "dsh") {
+    return listDshMcpConfigPaths({ homeDir, dshHome: options.dshHome });
+  }
+  return void 0;
+}
+function inspectMcpConfigFile(configPath, ide, mcpName, format) {
+  try {
+    const resolvedFormat = format ?? (ide === "codex" ? "codex_toml" : ide === "dsh" ? "dsh" : ide === "opencode" ? "jsonc" : "json");
+    const content = fs20.readFileSync(configPath, "utf8");
+    const server = resolvedFormat === "codex_toml" ? extractCodexMcpServerConfig(content, mcpName) : resolvedFormat === "dsh" ? extractDshMcpServerConfig(content, mcpName, configPath) : extractMakerMcpServerConfig(
+      parseJsonConfig(content, resolvedFormat === "jsonc"),
+      mcpName
+    );
+    return server ? { path: configPath, status: "found", server } : { path: configPath, status: "missing_entry" };
+  } catch {
+    return { path: configPath, status: "unreadable" };
+  }
+}
+function inspectMakerMcpConfigSource(ide, source) {
+  const entries = source.paths.filter((configPath) => fs20.existsSync(configPath)).map((configPath) => inspectMcpConfigFile(configPath, ide, source.mcp_name, source.format));
+  const status = entries.some((entry) => entry.status === "found") ? "found" : entries.some((entry) => entry.status === "unreadable") ? "unreadable" : entries.length > 0 ? "missing_entry" : "not_found";
+  return { ide, status, entries };
+}
+function extractDshMcpServerConfig(content, mcpName, source) {
+  const plugin = findDshMakerPluginEntry(content, mcpName, source);
+  if (!plugin) {
+    return void 0;
+  }
+  const config2 = isRecord4(plugin.config) ? plugin.config : {};
+  const server = {
+    id: plugin.id,
+    name: plugin.name
+  };
+  if (typeof config2.serverName === "string") {
+    server.server_name = config2.serverName;
+  }
+  if (typeof config2.transport === "string") {
+    server.transport = config2.transport;
+  }
+  if (typeof config2.command === "string") {
+    server.command = config2.command;
+  }
+  if (Array.isArray(config2.args)) {
+    server.args = sanitizeCommandArguments(config2.args);
+  }
+  if (typeof config2.cwd === "string") {
+    server.cwd = config2.cwd;
+  }
+  if (typeof config2.toolCallTimeoutMs === "number") {
+    server.tool_call_timeout_ms = config2.toolCallTimeoutMs;
+  }
+  if (typeof config2.failOnStartupError === "boolean") {
+    server.fail_on_startup_error = config2.failOnStartupError;
+  }
+  if (isRecord4(config2.env)) {
+    server.env_keys = Object.keys(config2.env).sort();
+    if (typeof config2.env.TAPTAP_MCP_CLIENT_IDE === "string") {
+      server.client_ide = config2.env.TAPTAP_MCP_CLIENT_IDE;
+    }
+  }
+  return server;
+}
+function extractCodexMcpServerConfig(content, mcpName) {
+  var _a3;
+  const rootNames = /* @__PURE__ */ new Set([`mcp_servers.${mcpName}`, `mcp_servers."${mcpName}"`]);
+  const envNames = new Set(Array.from(rootNames, (name) => `${name}.env`));
+  const server = {};
+  const envKeys = [];
+  let section = "other";
+  let found = false;
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    const header = (_a3 = /^\[([^\]]+)\]$/u.exec(line)) == null ? void 0 : _a3[1];
+    if (header) {
+      section = rootNames.has(header) ? "root" : envNames.has(header) ? "env" : "other";
+      found ||= section !== "other";
+      continue;
+    }
+    if (!line || line.startsWith("#") || section === "other") {
+      continue;
+    }
+    const assignment = /^([A-Za-z0-9_-]+)\s*=\s*(.+)$/u.exec(line);
+    if (!assignment) {
+      continue;
+    }
+    const [, key, rawValue] = assignment;
+    if (section === "env") {
+      envKeys.push(key);
+      if (key === "TAPTAP_MCP_CLIENT_IDE") {
+        const value = parseTomlJsonValue(rawValue);
+        if (typeof value === "string") {
+          server.client_ide = value;
+        }
+      }
+      continue;
+    }
+    if (["command", "args", "cwd", "disabled"].includes(key)) {
+      server[key] = parseTomlJsonValue(rawValue);
+    }
+  }
+  if (!found) {
+    return void 0;
+  }
+  if (envKeys.length > 0) {
+    server.env_keys = envKeys.sort();
+  }
+  return server;
+}
+function parseTomlJsonValue(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return "<unparsed>";
+  }
+}
+function parseJsonConfig(content, jsonc) {
+  const withoutBom = content.charCodeAt(0) === 65279 ? content.slice(1) : content;
+  const normalized = jsonc ? removeTrailingCommas(stripJsonComments(withoutBom)) : withoutBom;
+  const parsed = JSON.parse(normalized);
+  if (!isRecord4(parsed)) {
+    throw new Error("MCP config top-level value must be an object.");
+  }
+  return parsed;
+}
+function stripJsonComments(content) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    const next = content[index + 1];
+    if (lineComment) {
+      if (character === "\n" || character === "\r") {
+        lineComment = false;
+        result += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n" || character === "\r") {
+        result += character;
+      }
+      continue;
+    }
+    if (inString) {
+      result += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      result += character;
+    } else if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else {
+      result += character;
+    }
+  }
+  return result;
+}
+function removeTrailingCommas(content) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      result += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      result += character;
+      continue;
+    }
+    if (character === ",") {
+      let lookahead = index + 1;
+      while (/\s/u.test(content[lookahead] || "")) {
+        lookahead += 1;
+      }
+      if (content[lookahead] === "}" || content[lookahead] === "]") {
+        continue;
+      }
+    }
+    result += character;
+  }
+  return result;
+}
+function runGitHubIssueCreate(args, input2) {
+  const result = spawnSync7("gh", args, {
+    input: input2,
+    encoding: "utf8",
+    env: { ...process.env, GH_PROMPT_DISABLED: "1" },
+    shell: false,
+    timeout: 15e3,
+    maxBuffer: 2 * 1024 * 1024
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  return {
+    status: result.status,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : ""
+  };
+}
+function inspectWorkBuddyTrust(homeDir, mcpName) {
+  const emptyCounts = {
+    accounts_checked: 0,
+    trusted_accounts: 0,
+    disabled_accounts: 0,
+    pending_accounts: 0,
+    unreadable_accounts: 0
+  };
+  const connectorsDir = path21.join(homeDir, ".workbuddy", "connectors");
+  if (!fs20.existsSync(connectorsDir)) {
+    return { status: "not_found", ...emptyCounts };
+  }
+  let entries;
+  try {
+    entries = fs20.readdirSync(connectorsDir, { withFileTypes: true });
+  } catch {
+    return { status: "unreadable", ...emptyCounts };
+  }
+  const counts = { ...emptyCounts };
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const statePath = path21.join(connectorsDir, entry.name, "connector-states.json");
+    if (!fs20.existsSync(statePath)) {
+      continue;
+    }
+    try {
+      const state = JSON.parse(fs20.readFileSync(statePath, "utf8"));
+      if (!isRecord4(state)) {
+        counts.accounts_checked += 1;
+        counts.unreadable_accounts += 1;
+        continue;
+      }
+      const enabled = asStringArray(state.enabled).includes(mcpName);
+      const userDisabled = asStringArray(state.userDisabled).includes(mcpName);
+      const everConnected = asStringArray(state.everConnected).includes(mcpName);
+      if (!enabled && !userDisabled && !everConnected) {
+        continue;
+      }
+      counts.accounts_checked += 1;
+      if (enabled && !userDisabled) {
+        counts.trusted_accounts += 1;
+      } else if (userDisabled) {
+        counts.disabled_accounts += 1;
+      } else {
+        counts.pending_accounts += 1;
+      }
+    } catch {
+      counts.accounts_checked += 1;
+      counts.unreadable_accounts += 1;
+    }
+  }
+  if (counts.accounts_checked === 0) {
+    return { status: "not_found", ...counts };
+  }
+  const observedStates = [
+    counts.trusted_accounts,
+    counts.disabled_accounts,
+    counts.pending_accounts,
+    counts.unreadable_accounts
+  ].filter((count) => count > 0).length;
+  const status = observedStates > 1 ? "mixed" : counts.trusted_accounts > 0 ? "trusted" : counts.disabled_accounts > 0 ? "disabled" : counts.pending_accounts > 0 ? "pending" : "unreadable";
+  return { status, ...counts };
+}
+function hasEnvironmentValue(environment, key) {
+  return Boolean(environment[key] || environment[key.toLowerCase()]);
+}
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+async function collectMcpVerifyEvidence(makerVersion) {
+  try {
+    const launcher = resolveMakerMcpLauncher({
+      packageName: resolveMakerPackageSpec("@taptap/maker", makerVersion)
+    });
+    const result = await verifyMakerMcpLauncher(launcher, { timeoutMs: 15e3 });
+    return {
+      ok: result.ok,
+      stage: result.stage,
+      launcher_kind: result.launcherKind,
+      command: result.command,
+      tools: result.toolNames,
+      stderr: result.stderr,
+      error: result.error,
+      failure_type: result.failureType
+    };
+  } catch {
+    return {
+      ok: false,
+      stage: "resolve",
+      failure_type: "launcher_not_found"
+    };
+  }
+}
+function sanitizePublicValue(value, homeDir) {
+  return normalizeHomePaths(sanitizeDiagnosticValue(value), homeDir, /* @__PURE__ */ new WeakSet());
+}
+function sanitizePublicText(value, homeDir) {
+  const sanitized = sanitizeDiagnosticValue(value);
+  return replaceHomePath(
+    redactReportText(typeof sanitized === "string" ? sanitized : String(sanitized)),
+    homeDir
+  );
+}
+function normalizeHomePaths(value, homeDir, visited) {
+  if (typeof value === "string") {
+    return replaceHomePath(redactReportText(value), homeDir);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (visited.has(value)) {
+    return "<circular>";
+  }
+  visited.add(value);
+  const result = Array.isArray(value) ? value.map((item) => normalizeHomePaths(item, homeDir, visited)) : Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      normalizeHomePaths(item, homeDir, visited)
+    ])
+  );
+  visited.delete(value);
+  return result;
+}
+function replaceHomePath(value, homeDir) {
+  const trimmedHome = homeDir.replace(/[\\/]+$/u, "");
+  if (!trimmedHome) {
+    return value;
+  }
+  const variants = /* @__PURE__ */ new Set([
+    trimmedHome,
+    trimmedHome.replaceAll("\\", "/"),
+    trimmedHome.replaceAll("/", "\\")
+  ]);
+  let result = value;
+  for (const variant of variants) {
+    const flags = /^[A-Za-z]:[\\/]/u.test(variant) ? "giu" : "gu";
+    result = result.replace(new RegExp(escapeRegExp2(variant), flags), "~");
+  }
+  return result;
+}
+function fencedJson(value, maxLength) {
+  const serialized = JSON.stringify(value, null, 2);
+  const content = serialized.length <= maxLength ? serialized : `${serialized.slice(0, maxLength)}
+... <truncated>`;
+  return ["```json", content, "```"].join("\n");
+}
+function isRecord4(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function escapeRegExp2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+function pickMakerMcpReportContext(parsed) {
+  const context = {
+    summary: typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "Maker MCP problem report"
+  };
+  for (const key of [
+    "error_message",
+    "failed_operation",
+    "request_or_correlation_id",
+    "client_version"
+  ]) {
+    if (typeof parsed[key] === "string") {
+      context[key] = parsed[key];
+    }
+  }
+  if (typeof parsed.error_code === "string" || typeof parsed.error_code === "number") {
+    context.error_code = parsed.error_code;
+  }
+  for (const key of ["error_data", "redacted_request_params", "remote_result"]) {
+    if (parsed[key] !== void 0) {
+      context[key] = parsed[key];
+    }
+  }
+  for (const key of ["reproduction_steps", "session_tools", "workspace_roots"]) {
+    if (Array.isArray(parsed[key])) {
+      context[key] = parsed[key].filter((item) => typeof item === "string").slice(0, 100);
+    }
+  }
+  return context;
+}
+function sanitizeCommandArguments(args) {
+  let redactNext = false;
+  return args.map((arg) => {
+    if (redactNext) {
+      redactNext = false;
+      return "<redacted>";
+    }
+    if (typeof arg !== "string") {
+      return arg;
+    }
+    if (isSensitiveCliFlag(arg)) {
+      redactNext = true;
+      return arg;
+    }
+    return redactReportText(arg);
+  });
+}
+function isSensitiveCliFlag(value) {
+  return /^--(?:[a-z0-9]+[-_])*(?:pat|token|secret|signature|sig|credential|credentials|authorization|cookie|password|passwd|passphrase|mac[-_]?key|api[-_]?key|auth[-_]?key|private[-_]?key)$/iu.test(
+    value
+  );
+}
+function redactReportText(value) {
+  return value.replace(
+    /(^|[\s,;])(--(?:[a-z0-9]+[-_])*(?:pat|token|secret|signature|sig|credential|credentials|authorization|cookie|password|passwd|passphrase|mac[-_]?key|api[-_]?key|auth[-_]?key|private[-_]?key))\s+(?:"[^"]*"|'[^']*'|(?:(?![&,;][A-Za-z][A-Za-z0-9_.-]*\s*[:=])[^\s])+)/gimu,
+    "$1$2 <redacted>"
+  ).replace(
+    /(--(?:[a-z0-9]+[-_])*(?:pat|token|secret|signature|sig|credential|credentials|authorization|cookie|password|passwd|passphrase|mac[-_]?key|api[-_]?key|auth[-_]?key|private[-_]?key)=)([^\s]+)/giu,
+    "$1<redacted>"
+  ).replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^@\s/?#]+)@/gu, "$1<redacted>@").replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/gu, "<redacted>").replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/gu, "<redacted>");
+}
+function stripControlCharacters(value) {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) || 0;
+    return codePoint < 32 || codePoint === 127 ? " " : character;
+  }).join("");
+}
+
+// src/maker/cli/pluginMigration.ts
+import fs22 from "node:fs";
+import os6 from "node:os";
+import path23 from "node:path";
+import crypto3 from "node:crypto";
+
+// src/maker/cli/codexMcpConfig.ts
+function findCodexMcpTables(content, mcpName) {
+  const mainPath = `mcp_servers.${mcpName}`;
+  return findTomlTables(content).flatMap((table) => {
+    const normalizedPath = normalizeCodexMcpTablePath(table.path, mcpName);
+    if (!normalizedPath) {
+      return [];
+    }
+    return [
+      {
+        headerStart: table.headerStart,
+        bodyStart: table.bodyStart,
+        bodyEnd: table.bodyEnd,
+        normalizedPath,
+        isMain: normalizedPath === mainPath
+      }
+    ];
+  });
+}
+function removeCodexMcpTables(content, mcpName) {
+  const tables = findCodexMcpTables(content, mcpName);
+  return [...tables].reverse().reduce(
+    (updated, table) => `${updated.slice(0, table.headerStart)}${updated.slice(table.bodyEnd)}`,
+    content
+  );
+}
+function findCodexMcpTableDuplicates(text, mcpName) {
+  const seen = /* @__PURE__ */ new Set();
+  const duplicates = /* @__PURE__ */ new Set();
+  for (const table of findCodexMcpTables(text, mcpName)) {
+    if (seen.has(table.normalizedPath)) {
+      duplicates.add(table.normalizedPath);
+    } else {
+      seen.add(table.normalizedPath);
+    }
+  }
+  return Array.from(duplicates);
+}
+function findTomlBooleanAssignment(content, start, end, key) {
+  const keyPattern = escapeRegExp3(key);
+  let multiline;
+  for (const line of splitTomlLines(content, start, end)) {
+    if (!multiline) {
+      const match = new RegExp(`^\\s*${keyPattern}\\s*=\\s*(true|false)\\s*(?:#.*)?$`).exec(
+        line.text
+      );
+      if ((match == null ? void 0 : match.index) !== void 0) {
+        const relativeValueStart = match.index + match[0].indexOf(match[1]);
+        return {
+          value: match[1] === "true",
+          valueStart: line.start + relativeValueStart,
+          valueEnd: line.start + relativeValueStart + match[1].length
+        };
+      }
+    }
+    multiline = scanTomlLine(line.text, multiline);
+  }
+  return void 0;
+}
+function escapeTomlString(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function findTomlTables(content) {
+  const tables = [];
+  let multiline;
+  for (const line of splitTomlLines(content)) {
+    if (!multiline) {
+      const match = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(line.text);
+      if (match) {
+        const previous = tables[tables.length - 1];
+        if (previous) {
+          previous.bodyEnd = line.start;
+        }
+        tables.push({
+          headerStart: line.start,
+          bodyStart: line.end,
+          bodyEnd: content.length,
+          path: match[1]
+        });
+      }
+    }
+    multiline = scanTomlLine(line.text, multiline);
+  }
+  return tables;
+}
+function splitTomlLines(content, start = 0, end = content.length) {
+  const lines = [];
+  let lineStart = start;
+  while (lineStart < end) {
+    const newline = content.indexOf("\n", lineStart);
+    const nextLineStart = newline === -1 || newline >= end ? end : newline + 1;
+    let lineEnd = newline === -1 || newline >= end ? end : newline;
+    if (lineEnd > lineStart && content[lineEnd - 1] === "\r") {
+      lineEnd -= 1;
+    }
+    lines.push({
+      start: lineStart,
+      end: lineEnd,
+      text: content.slice(lineStart, lineEnd)
+    });
+    lineStart = nextLineStart;
+  }
+  return lines;
+}
+function scanTomlLine(line, initial) {
+  let multiline = initial;
+  let index = 0;
+  while (index < line.length) {
+    if (multiline === "basic") {
+      const closing = findUnescapedTripleQuote(line, index, '"""');
+      if (closing === -1) {
+        return multiline;
+      }
+      multiline = void 0;
+      index = closing + 3;
+      continue;
+    }
+    if (multiline === "literal") {
+      const closing = line.indexOf("'''", index);
+      if (closing === -1) {
+        return multiline;
+      }
+      multiline = void 0;
+      index = closing + 3;
+      continue;
+    }
+    const character = line[index];
+    if (character === "#") {
+      return void 0;
+    }
+    if (line.startsWith('"""', index)) {
+      multiline = "basic";
+      index += 3;
+      continue;
+    }
+    if (line.startsWith("'''", index)) {
+      multiline = "literal";
+      index += 3;
+      continue;
+    }
+    if (character === '"') {
+      index = skipBasicString(line, index + 1);
+      continue;
+    }
+    if (character === "'") {
+      const closing = line.indexOf("'", index + 1);
+      index = closing === -1 ? line.length : closing + 1;
+      continue;
+    }
+    index += 1;
+  }
+  return multiline;
+}
+function findUnescapedTripleQuote(line, start, delimiter) {
+  let match = line.indexOf(delimiter, start);
+  while (match !== -1) {
+    let backslashes = 0;
+    for (let index = match - 1; index >= 0 && line[index] === "\\"; index -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 0) {
+      return match;
+    }
+    match = line.indexOf(delimiter, match + delimiter.length);
+  }
+  return -1;
+}
+function skipBasicString(line, start) {
+  let escaped = false;
+  for (let index = start; index < line.length; index += 1) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (line[index] === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (line[index] === '"') {
+      return index + 1;
+    }
+  }
+  return line.length;
+}
+function normalizeCodexMcpTablePath(tablePath, mcpName) {
+  const keyPattern = createCodexMcpKeyPattern(mcpName);
+  const match = new RegExp(`^mcp_servers\\.${keyPattern}(\\..+)?$`).exec(tablePath);
+  if (!match) {
+    return void 0;
+  }
+  return `mcp_servers.${mcpName}${match[1] || ""}`;
+}
+function createCodexMcpKeyPattern(mcpName) {
+  const quotedKey = `"${escapeRegExp3(mcpName)}"`;
+  if (!/^[A-Za-z0-9_-]+$/.test(mcpName)) {
+    return quotedKey;
+  }
+  return `(?:${quotedKey}|${escapeRegExp3(mcpName)})`;
+}
+function escapeRegExp3(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// src/maker/cli/configWrite.ts
+import fs21 from "node:fs";
+import path22 from "node:path";
+function writeConfigWithTapTapBackupIfChanged(filePath, nextContent, validate) {
+  const existed = fs21.existsSync(filePath);
+  const previousContent = existed ? fs21.readFileSync(filePath, "utf8") : void 0;
+  if (previousContent === nextContent) {
+    return { changed: false };
+  }
+  const backupPath = existed ? `${filePath}.taptap-maker.bak.latest` : void 0;
+  fs21.mkdirSync(path22.dirname(filePath), { recursive: true });
+  if (previousContent !== void 0 && backupPath) {
+    fs21.writeFileSync(backupPath, previousContent, "utf8");
+  }
+  try {
+    fs21.writeFileSync(filePath, nextContent, "utf8");
+    validate == null ? void 0 : validate(fs21.readFileSync(filePath, "utf8"));
+    return { changed: true, backupPath };
+  } catch (error2) {
+    if (previousContent !== void 0) {
+      fs21.writeFileSync(filePath, previousContent, "utf8");
+    } else {
+      fs21.rmSync(filePath, { force: true });
+    }
+    throw error2;
+  }
+}
+
+// src/maker/cli/pluginMigration.ts
+function inspectCodexLegacyMakerMcp(options = {}) {
+  const configPath = options.configPath ?? path23.join(os6.homedir(), ".codex", "config.toml");
+  if (!fs22.existsSync(configPath)) {
+    return createInspection(configPath, "not_found", 0);
+  }
+  const content = fs22.readFileSync(configPath, "utf8");
+  const registrations = findCodexMakerMainTables(content);
+  if (registrations.length === 0) {
+    return createInspection(configPath, "not_found", 0);
+  }
+  if (registrations.length > 1) {
+    return createInspection(configPath, "ambiguous", registrations.length);
+  }
+  const enabled = registrations[0].enabled;
+  return {
+    ...createInspection(configPath, enabled ? "active" : "disabled", 1),
+    enabled
+  };
+}
+function migrateCodexLegacyMakerMcp(options = {}) {
+  const configPath = options.configPath ?? path23.join(os6.homedir(), ".codex", "config.toml");
+  const makerHome = options.makerHome ?? getMakerHome();
+  const statePath = getCodexPluginMigrationStatePath(makerHome);
+  const inspection = inspectCodexLegacyMakerMcp({ configPath });
+  if (inspection.status === "not_found") {
+    return { ...inspection, action: "not_found", changed: false };
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `Codex Maker MCP migration found ${inspection.registration_count} equivalent registrations; resolve the duplicate tables before migrating.`
+    );
+  }
+  if (inspection.status === "disabled") {
+    const state2 = readMigrationState(statePath);
+    const content = fs22.readFileSync(configPath, "utf8");
+    const registration2 = findCodexMakerMainTables(content)[0];
+    const owned = (state2 == null ? void 0 : state2.config_path) === configPath && sha256(readCodexMakerRegistration(content, registration2)) === state2.migrated_registration_sha256;
+    return {
+      ...inspection,
+      action: owned ? "already_migrated" : "already_disabled",
+      changed: false,
+      ...owned ? { state_path: statePath } : {}
+    };
+  }
+  if (!options.confirm) {
+    throw new Error("Disabling the legacy Codex Maker MCP requires explicit confirmation.");
+  }
+  const previousContent = fs22.readFileSync(configPath, "utf8");
+  const registration = findCodexMakerMainTables(previousContent)[0];
+  const nextContent = disableCodexMakerRegistration(previousContent, registration);
+  const state = {
+    schema_version: 2,
+    client: "codex",
+    config_path: configPath,
+    previous_enabled: registration.enabledExplicitly ? "true" : "implicit",
+    original_registration_sha256: sha256(readCodexMakerRegistration(previousContent, registration)),
+    migrated_registration_sha256: sha256(
+      readCodexMakerRegistration(nextContent, findCodexMakerMainTables(nextContent)[0])
+    ),
+    migrated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  fs22.mkdirSync(path23.dirname(statePath), { recursive: true });
+  const write = writeConfigWithTapTapBackupIfChanged(configPath, nextContent, () => {
+    const migratedInspection = inspectCodexLegacyMakerMcp({ configPath });
+    if (migratedInspection.status !== "disabled") {
+      throw new Error("Codex Maker MCP migration validation did not find a disabled registration.");
+    }
+    fs22.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}
+`, "utf8");
+  });
+  return {
+    ...inspectCodexLegacyMakerMcp({ configPath }),
+    action: "disabled",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function restoreCodexLegacyMakerMcp(options = {}) {
+  const configPath = options.configPath ?? path23.join(os6.homedir(), ".codex", "config.toml");
+  const makerHome = options.makerHome ?? getMakerHome();
+  const statePath = getCodexPluginMigrationStatePath(makerHome);
+  const inspection = inspectCodexLegacyMakerMcp({ configPath });
+  const state = readMigrationState(statePath);
+  if (!state || state.config_path !== configPath) {
+    return { ...inspection, action: "not_owned", changed: false };
+  }
+  if (!options.confirm) {
+    throw new Error("Restoring the legacy Codex Maker MCP requires explicit confirmation.");
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `Codex Maker MCP restoration found ${inspection.registration_count} equivalent registrations; resolve the duplicate tables before restoring.`
+    );
+  }
+  if (inspection.status === "not_found") {
+    throw new Error(
+      "The migrated Codex Maker MCP registration no longer exists and cannot be restored."
+    );
+  }
+  const previousContent = fs22.readFileSync(configPath, "utf8");
+  const registration = findCodexMakerMainTables(previousContent)[0];
+  const registrationSha256 = sha256(readCodexMakerRegistration(previousContent, registration));
+  if (inspection.status === "active") {
+    if (registrationSha256 !== state.original_registration_sha256) {
+      return { ...inspection, action: "not_owned", changed: false };
+    }
+    fs22.unlinkSync(statePath);
+    return { ...inspection, action: "already_restored", changed: false };
+  }
+  if (registrationSha256 !== state.migrated_registration_sha256) {
+    return { ...inspection, action: "not_owned", changed: false };
+  }
+  const nextContent = restoreCodexMakerRegistration(previousContent, registration, state);
+  const write = writeConfigWithTapTapBackupIfChanged(configPath, nextContent, () => {
+    const restoredInspection = inspectCodexLegacyMakerMcp({ configPath });
+    if (restoredInspection.status !== "active") {
+      throw new Error(
+        "Codex Maker MCP restoration validation did not find an active registration."
+      );
+    }
+    const restoredContent = fs22.readFileSync(configPath, "utf8");
+    const restoredRegistration = findCodexMakerMainTables(restoredContent)[0];
+    if (sha256(readCodexMakerRegistration(restoredContent, restoredRegistration)) !== state.original_registration_sha256) {
+      throw new Error("Codex Maker MCP restoration changed the migrated registration identity.");
+    }
+    fs22.unlinkSync(statePath);
+  });
+  return {
+    ...inspectCodexLegacyMakerMcp({ configPath }),
+    action: "restored",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function findCodexMakerMainTables(content) {
+  return findCodexMcpTables(content, "taptap-maker").filter((table) => table.isMain).map((table) => {
+    const enabledAssignment = findTomlBooleanAssignment(
+      content,
+      table.bodyStart,
+      table.bodyEnd,
+      "enabled"
+    );
+    return {
+      headerStart: table.headerStart,
+      bodyStart: table.bodyStart,
+      bodyEnd: table.bodyEnd,
+      enabled: (enabledAssignment == null ? void 0 : enabledAssignment.value) !== false,
+      enabledExplicitly: Boolean(enabledAssignment),
+      ...enabledAssignment ? {
+        enabledValueStart: enabledAssignment.valueStart,
+        enabledValueEnd: enabledAssignment.valueEnd
+      } : {}
+    };
+  });
+}
+function disableCodexMakerRegistration(content, registration) {
+  if (registration.enabledValueStart !== void 0 && registration.enabledValueEnd !== void 0) {
+    return `${content.slice(0, registration.enabledValueStart)}false${content.slice(
+      registration.enabledValueEnd
+    )}`;
+  }
+  return `${content.slice(0, registration.bodyStart)}
+enabled = false${content.slice(
+    registration.bodyStart
+  )}`;
+}
+function restoreCodexMakerRegistration(content, registration, state) {
+  if (state.previous_enabled === "true") {
+    if (registration.enabledValueStart === void 0 || registration.enabledValueEnd === void 0) {
+      throw new Error("The migrated Codex Maker MCP enabled value is missing.");
+    }
+    return `${content.slice(0, registration.enabledValueStart)}true${content.slice(
+      registration.enabledValueEnd
+    )}`;
+  }
+  const insertedLine = "\nenabled = false";
+  if (!content.startsWith(insertedLine, registration.bodyStart)) {
+    throw new Error("The plugin-owned Codex Maker MCP disabled marker was modified.");
+  }
+  return `${content.slice(0, registration.bodyStart)}${content.slice(
+    registration.bodyStart + insertedLine.length
+  )}`;
+}
+function readCodexMakerRegistration(content, registration) {
+  return content.slice(registration.headerStart, registration.bodyEnd).trimEnd();
+}
+function getCodexPluginMigrationStatePath(makerHome) {
+  return path23.join(makerHome, "plugin-migrations", "codex.json");
+}
+function readMigrationState(statePath) {
+  if (!fs22.existsSync(statePath)) {
+    return void 0;
+  }
+  try {
+    const state = JSON.parse(fs22.readFileSync(statePath, "utf8"));
+    return (state == null ? void 0 : state.schema_version) === 2 && state.client === "codex" ? state : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function sha256(content) {
+  return crypto3.createHash("sha256").update(content).digest("hex");
+}
+function createInspection(configPath, status, registrationCount) {
+  return {
+    client: "codex",
+    status,
+    config_path: configPath,
+    registration_count: registrationCount
+  };
+}
+function inspectWorkBuddyLegacyMakerMcp(options = {}) {
+  const configPaths = getWorkBuddyConfigPaths(options.configPaths);
+  const registrations = findWorkBuddyMakerRegistrations(configPaths);
+  const registrationPaths = registrations.map((entry) => entry.configPath);
+  if (registrations.length === 0) {
+    return createWorkBuddyInspection(configPaths[0], "not_found", []);
+  }
+  const activeRegistrations = registrations.filter((entry) => entry.registration.disabled !== true);
+  if (activeRegistrations.length > 1) {
+    return createWorkBuddyInspection(configPaths[0], "ambiguous", registrationPaths);
+  }
+  if (activeRegistrations.length === 0) {
+    return {
+      ...createWorkBuddyInspection(registrations[0].configPath, "disabled", registrationPaths),
+      enabled: false
+    };
+  }
+  const active = activeRegistrations[0];
+  return {
+    ...createWorkBuddyInspection(active.configPath, "active", registrationPaths),
+    enabled: true
+  };
+}
+function migrateWorkBuddyLegacyMakerMcp(options = {}) {
+  const configPaths = getWorkBuddyConfigPaths(options.configPaths);
+  const makerHome = options.makerHome ?? getMakerHome();
+  const statePath = getWorkBuddyPluginMigrationStatePath(makerHome);
+  const inspection = inspectWorkBuddyLegacyMakerMcp({ configPaths });
+  if (inspection.status === "not_found") {
+    return { ...inspection, action: "not_found", changed: false };
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `WorkBuddy Maker MCP migration found registrations in multiple config files: ${inspection.config_paths.join(", ")}`
+    );
+  }
+  const registrations = findWorkBuddyMakerRegistrations(configPaths);
+  if (inspection.status === "disabled") {
+    const state2 = readWorkBuddyMigrationState(statePath);
+    const current2 = state2 ? registrations.find((entry) => entry.configPath === state2.config_path) : registrations[0];
+    const owned = Boolean(
+      state2 && current2 && hashWorkBuddyRegistration(current2.registration) === state2.migrated_registration_sha256
+    );
+    return {
+      ...inspection,
+      ...owned && current2 ? { config_path: current2.configPath } : {},
+      action: owned ? "already_migrated" : "already_disabled",
+      changed: false,
+      ...owned ? { state_path: statePath } : {}
+    };
+  }
+  if (!options.confirm) {
+    throw new Error("Disabling the legacy WorkBuddy Maker MCP requires explicit confirmation.");
+  }
+  const current = registrations.find((entry) => entry.configPath === inspection.config_path);
+  if (!current) {
+    throw new Error("The active WorkBuddy Maker MCP registration could not be resolved.");
+  }
+  const originalRegistration = { ...current.registration };
+  const previousDisabled = Object.prototype.hasOwnProperty.call(originalRegistration, "disabled") ? false : "missing";
+  const migratedRegistration = { ...originalRegistration, disabled: true };
+  setWorkBuddyMakerRegistration(current.config, migratedRegistration);
+  const nextContent = `${JSON.stringify(current.config, null, 2)}
+`;
+  const state = {
+    schema_version: 1,
+    client: "workbuddy",
+    config_path: current.configPath,
+    previous_disabled: previousDisabled,
+    original_registration_sha256: hashWorkBuddyRegistration(originalRegistration),
+    migrated_registration_sha256: hashWorkBuddyRegistration(migratedRegistration),
+    migrated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  fs22.mkdirSync(path23.dirname(statePath), { recursive: true });
+  const write = writeConfigWithTapTapBackupIfChanged(current.configPath, nextContent, () => {
+    const migrated = findWorkBuddyMakerRegistrations(configPaths).find(
+      (entry) => entry.configPath === current.configPath
+    );
+    if (!migrated || hashWorkBuddyRegistration(migrated.registration) !== state.migrated_registration_sha256) {
+      throw new Error(
+        "WorkBuddy Maker MCP migration validation did not find the disabled registration."
+      );
+    }
+    fs22.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}
+`, "utf8");
+  });
+  const migratedInspection = inspectWorkBuddyLegacyMakerMcp({ configPaths });
+  return {
+    ...migratedInspection,
+    config_path: current.configPath,
+    action: "disabled",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function restoreWorkBuddyLegacyMakerMcp(options = {}) {
+  const configPaths = getWorkBuddyConfigPaths(options.configPaths);
+  const makerHome = options.makerHome ?? getMakerHome();
+  const statePath = getWorkBuddyPluginMigrationStatePath(makerHome);
+  const inspection = inspectWorkBuddyLegacyMakerMcp({ configPaths });
+  const state = readWorkBuddyMigrationState(statePath);
+  if (!state) {
+    return { ...inspection, action: "not_owned", changed: false };
+  }
+  if (!options.confirm) {
+    throw new Error("Restoring the legacy WorkBuddy Maker MCP requires explicit confirmation.");
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `WorkBuddy Maker MCP restoration found registrations in multiple config files: ${inspection.config_paths.join(", ")}`
+    );
+  }
+  if (inspection.status === "not_found") {
+    throw new Error(
+      "The migrated WorkBuddy Maker MCP registration no longer exists and cannot be restored."
+    );
+  }
+  const current = findWorkBuddyMakerRegistrations(configPaths).find(
+    (entry) => entry.configPath === state.config_path
+  );
+  if (!current) {
+    throw new Error(
+      "The migrated WorkBuddy Maker MCP registration no longer exists and cannot be restored."
+    );
+  }
+  const registrationSha256 = hashWorkBuddyRegistration(current.registration);
+  const currentEnabled = current.registration.disabled !== true;
+  if (currentEnabled) {
+    if (registrationSha256 !== state.original_registration_sha256) {
+      return {
+        ...inspection,
+        config_path: current.configPath,
+        action: "not_owned",
+        changed: false
+      };
+    }
+    fs22.unlinkSync(statePath);
+    return {
+      ...inspection,
+      config_path: current.configPath,
+      action: "already_restored",
+      changed: false
+    };
+  }
+  if (registrationSha256 !== state.migrated_registration_sha256) {
+    return { ...inspection, config_path: current.configPath, action: "not_owned", changed: false };
+  }
+  const restoredRegistration = { ...current.registration };
+  if (state.previous_disabled === "missing") {
+    delete restoredRegistration.disabled;
+  } else {
+    restoredRegistration.disabled = false;
+  }
+  setWorkBuddyMakerRegistration(current.config, restoredRegistration);
+  const nextContent = `${JSON.stringify(current.config, null, 2)}
+`;
+  const write = writeConfigWithTapTapBackupIfChanged(current.configPath, nextContent, () => {
+    const restoredInspection = inspectWorkBuddyLegacyMakerMcp({ configPaths });
+    if (restoredInspection.status !== "active") {
+      throw new Error(
+        "WorkBuddy Maker MCP restoration validation did not find an active registration."
+      );
+    }
+    const restored = findWorkBuddyMakerRegistrations(configPaths).find(
+      (entry) => entry.configPath === state.config_path
+    );
+    if (!restored || hashWorkBuddyRegistration(restored.registration) !== state.original_registration_sha256) {
+      throw new Error("WorkBuddy Maker MCP restoration changed the registration identity.");
+    }
+    fs22.unlinkSync(statePath);
+  });
+  return {
+    ...inspectWorkBuddyLegacyMakerMcp({ configPaths }),
+    config_path: current.configPath,
+    action: "restored",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function getWorkBuddyConfigPaths(configPaths) {
+  return configPaths ?? [
+    path23.join(os6.homedir(), ".workbuddy", "mcp.json"),
+    path23.join(os6.homedir(), ".workbuddy", ".mcp.json")
+  ];
+}
+function findWorkBuddyMakerRegistrations(configPaths) {
+  const registrations = [];
+  for (const configPath of configPaths) {
+    if (!fs22.existsSync(configPath)) {
+      continue;
+    }
+    let config2;
+    try {
+      config2 = JSON.parse(fs22.readFileSync(configPath, "utf8"));
+    } catch (error2) {
+      throw new Error(
+        `Cannot parse WorkBuddy MCP config ${configPath}: ${error2 instanceof Error ? error2.message : String(error2)}`
+      );
+    }
+    if (!isRecord5(config2)) {
+      throw new Error(`WorkBuddy MCP config must contain a JSON object: ${configPath}`);
+    }
+    const servers = config2.mcpServers;
+    if (servers === void 0) {
+      continue;
+    }
+    if (!isRecord5(servers)) {
+      throw new Error(`WorkBuddy MCP config mcpServers must be an object: ${configPath}`);
+    }
+    const registration = servers["taptap-maker"];
+    if (registration === void 0) {
+      continue;
+    }
+    if (!isRecord5(registration)) {
+      throw new Error(`WorkBuddy taptap-maker MCP registration must be an object: ${configPath}`);
+    }
+    registrations.push({ configPath, config: config2, registration });
+  }
+  return registrations;
+}
+function setWorkBuddyMakerRegistration(config2, registration) {
+  const servers = config2.mcpServers;
+  if (!isRecord5(servers)) {
+    throw new Error("WorkBuddy MCP config mcpServers must be an object.");
+  }
+  servers["taptap-maker"] = registration;
+}
+function getWorkBuddyPluginMigrationStatePath(makerHome) {
+  return path23.join(makerHome, "plugin-migrations", "workbuddy.json");
+}
+function readWorkBuddyMigrationState(statePath) {
+  if (!fs22.existsSync(statePath)) {
+    return void 0;
+  }
+  try {
+    const state = JSON.parse(fs22.readFileSync(statePath, "utf8"));
+    return (state == null ? void 0 : state.schema_version) === 1 && state.client === "workbuddy" ? state : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function hashWorkBuddyRegistration(registration) {
+  return sha256(JSON.stringify(registration));
+}
+function createWorkBuddyInspection(configPath, status, configPaths) {
+  return {
+    client: "workbuddy",
+    status,
+    config_path: configPath,
+    config_paths: configPaths,
+    registration_count: configPaths.length
+  };
+}
+function isRecord5(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// src/maker/cli/dshPluginMigration.ts
+var import_yaml2 = __toESM(require_dist2());
+import fs23 from "node:fs";
+import os7 from "node:os";
+import path24 from "node:path";
+import crypto4 from "node:crypto";
+var DSH_MAKER_MCP_NAME = "taptap-maker";
+function inspectDshLegacyMakerMcp(options = {}) {
+  const registrations = findDshMakerRegistrations(options.dshHome);
+  const configPaths = unique(registrations.map((entry) => entry.configPath));
+  if (registrations.length === 0) {
+    return createDshInspection("not_found", [], configPaths);
+  }
+  if (registrations.length > 1) {
+    return createDshInspection("ambiguous", configPaths, configPaths);
+  }
+  return createDshInspection("active", [registrations[0].configPath], configPaths);
+}
+function migrateDshLegacyMakerMcp(options = {}) {
+  const makerHome = getMakerHome();
+  const statePath = getDshPluginMigrationStatePath(makerHome);
+  const registrations = findDshMakerRegistrations(options.dshHome);
+  const inspection = inspectDshLegacyMakerMcp(options);
+  if (inspection.status === "not_found") {
+    return { ...inspection, action: "not_found", changed: false };
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `DSH Maker MCP migration found ${inspection.registration_count} registrations in ${inspection.config_paths.join(", ")}; resolve the duplicates before migrating.`
+    );
+  }
+  if (!options.confirm) {
+    throw new Error(
+      "Removing the legacy DSH Maker MCP registration requires explicit confirmation."
+    );
+  }
+  const registration = registrations[0];
+  const previousContent = fs23.readFileSync(registration.configPath, "utf8");
+  const document = (0, import_yaml2.parseDocument)(previousContent, { prettyErrors: true });
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid YAML in ${registration.configPath}: ${document.errors[0].message}`);
+  }
+  removeDshMakerRegistration(document, registration);
+  const nextContent = document.toString({ lineWidth: 0 });
+  const state = {
+    schema_version: 1,
+    client: "dsh",
+    config_path: registration.configPath,
+    removed_registration: registration.registration,
+    removed_registration_sha256: sha2562(JSON.stringify(registration.registration)),
+    migrated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  fs23.mkdirSync(path24.dirname(statePath), { recursive: true });
+  const write = writeConfigWithTapTapBackupIfChanged(registration.configPath, nextContent, () => {
+    const after = findDshMakerRegistrations(options.dshHome);
+    if (after.some((entry) => entry.configPath === registration.configPath)) {
+      throw new Error("DSH Maker MCP migration validation still found a registration.");
+    }
+    fs23.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}
+`, "utf8");
+  });
+  return {
+    ...inspectDshLegacyMakerMcp(options),
+    action: "removed",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function restoreDshLegacyMakerMcp(options = {}) {
+  const makerHome = getMakerHome();
+  const statePath = getDshPluginMigrationStatePath(makerHome);
+  const inspection = inspectDshLegacyMakerMcp(options);
+  const state = readDshMigrationState(statePath);
+  if (!state) {
+    return { ...inspection, action: "not_owned", changed: false };
+  }
+  if (!options.confirm) {
+    throw new Error(
+      "Restoring the legacy DSH Maker MCP registration requires explicit confirmation."
+    );
+  }
+  if (inspection.status === "ambiguous") {
+    throw new Error(
+      `DSH Maker MCP restoration found ${inspection.registration_count} registrations; resolve the duplicates before restoring.`
+    );
+  }
+  if (inspection.status === "active") {
+    const current = findDshMakerRegistrations(options.dshHome)[0];
+    const currentSha = sha2562(JSON.stringify(current.registration));
+    if (currentSha === state.removed_registration_sha256) {
+      fs23.rmSync(statePath, { force: true });
+      return { ...inspection, action: "already_restored", changed: false, state_path: statePath };
+    }
+    return { ...inspection, action: "not_owned", changed: false };
+  }
+  const configPath = state.config_path;
+  const previousContent = fs23.readFileSync(configPath, "utf8");
+  const document = (0, import_yaml2.parseDocument)(previousContent, { prettyErrors: true });
+  if (document.errors.length > 0) {
+    throw new Error(`Invalid YAML in ${configPath}: ${document.errors[0].message}`);
+  }
+  reinsertDshMakerRegistration(document, state.removed_registration);
+  const nextContent = document.toString({ lineWidth: 0 });
+  const write = writeConfigWithTapTapBackupIfChanged(configPath, nextContent, () => {
+    const restored = findDshMakerRegistrations(options.dshHome);
+    const match = restored.find((entry) => entry.configPath === configPath);
+    if (!match || sha2562(JSON.stringify(match.registration)) !== state.removed_registration_sha256) {
+      throw new Error("DSH Maker MCP restoration changed the registration identity.");
+    }
+    fs23.rmSync(statePath, { force: true });
+  });
+  return {
+    ...inspectDshLegacyMakerMcp(options),
+    action: "restored",
+    changed: write.changed,
+    ...write.backupPath ? { backup_path: write.backupPath } : {},
+    state_path: statePath
+  };
+}
+function findDshMakerRegistrations(dshHome) {
+  const resolvedDshHome = dshHome || getDshHome();
+  const configPaths = listDshMcpConfigPaths({ homeDir: os7.homedir(), dshHome: resolvedDshHome });
+  const registrations = [];
+  for (const configPath of configPaths) {
+    if (!fs23.existsSync(configPath)) {
+      continue;
+    }
+    const content = fs23.readFileSync(configPath, "utf8");
+    const document = (0, import_yaml2.parseDocument)(content, { prettyErrors: true });
+    if (document.errors.length > 0) {
+      throw new Error(`Invalid YAML in ${configPath}: ${document.errors[0].message}`);
+    }
+    const candidates = findDshMakerCandidates(document);
+    for (const candidate of candidates) {
+      registrations.push({ configPath, ...candidate });
+    }
+  }
+  return registrations;
+}
+function findDshMakerCandidates(document) {
+  const candidates = [];
+  const top = document.contents;
+  if (!(0, import_yaml2.isSeq)(top)) {
+    return candidates;
+  }
+  top.items.forEach((rawPatch, patchIndex) => {
+    const patchNode = rawPatch;
+    const patch = patchNode.toJSON();
+    if (Array.isArray(patch == null ? void 0 : patch.insert)) {
+      const insertNode = (0, import_yaml2.isMap)(patchNode) ? patchNode.get("insert", true) : void 0;
+      if (!(0, import_yaml2.isSeq)(insertNode)) {
+        return;
+      }
+      insertNode.items.forEach((rawRow, insertIndex) => {
+        const rowNode = rawRow;
+        const row = rowNode.toJSON();
+        if (isDshMakerPluginCandidate(row)) {
+          candidates.push({
+            patchIndex,
+            insertIndex,
+            registration: row
+          });
+        }
+      });
+      return;
+    }
+    if (isDshMakerPluginCandidate(patch)) {
+      candidates.push({
+        patchIndex,
+        registration: patch
+      });
+    }
+  });
+  return candidates;
+}
+function removeDshMakerRegistration(document, registration) {
+  const top = document.contents;
+  if (!(0, import_yaml2.isSeq)(top)) {
+    throw new Error("DSH config top-level value must be a plugin array.");
+  }
+  if (registration.insertIndex !== void 0) {
+    const patchNode = top.items[registration.patchIndex];
+    const insertNode = (0, import_yaml2.isMap)(patchNode) ? patchNode.get("insert", true) : void 0;
+    if (!(0, import_yaml2.isSeq)(insertNode)) {
+      throw new Error("Invalid DSH insert patch.");
+    }
+    insertNode.items.splice(registration.insertIndex, 1);
+    if (insertNode.items.length === 0) {
+      top.items.splice(registration.patchIndex, 1);
+    }
+    return;
+  }
+  top.items.splice(registration.patchIndex, 1);
+}
+function reinsertDshMakerRegistration(document, registration) {
+  const top = document.contents;
+  if (!(0, import_yaml2.isSeq)(top)) {
+    throw new Error("DSH config top-level value must be a plugin array.");
+  }
+  top.items.push(document.createNode({ insert: [registration] }));
+}
+function isDshMakerPluginCandidate(value) {
+  if (!isRecord6(value)) {
+    return false;
+  }
+  if (value.id === DSH_MAKER_PLUGIN_ID) {
+    return true;
+  }
+  const config2 = isRecord6(value.config) ? value.config : void 0;
+  return value.name === DSH_MCP_PLUGIN_NAME && (config2 == null ? void 0 : config2.serverName) === DSH_MAKER_MCP_NAME;
+}
+function getDshPluginMigrationStatePath(makerHome) {
+  return path24.join(makerHome, "plugin-migrations", "dsh.json");
+}
+function readDshMigrationState(statePath) {
+  if (!fs23.existsSync(statePath)) {
+    return void 0;
+  }
+  try {
+    const state = JSON.parse(fs23.readFileSync(statePath, "utf8"));
+    return (state == null ? void 0 : state.schema_version) === 1 && state.client === "dsh" ? state : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function createDshInspection(status, primaryPaths, allPaths) {
+  return {
+    client: "dsh",
+    status,
+    config_path: primaryPaths[0] ?? "",
+    config_paths: allPaths,
+    registration_count: primaryPaths.length
+  };
+}
+function sha2562(content) {
+  return crypto4.createHash("sha256").update(content).digest("hex");
+}
+function isRecord6(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function unique(values) {
+  return [...new Set(values)];
+}
+
+// src/maker/cli/workBuddyProjectSkills.ts
+import fs24 from "node:fs";
+import path25 from "node:path";
+function syncWorkBuddyProjectSkills(targetDir, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const projectDir = path25.resolve(targetDir);
+  const sourceDir = path25.join(projectDir, ".installer", "skills");
+  const workBuddySkillsDir = path25.join(projectDir, ".workbuddy", "skills");
+  const result = {
+    status: "skipped",
+    sourceDir,
+    targetDir: workBuddySkillsDir,
+    installedSkills: [],
+    skippedSkills: []
+  };
+  if (!isDirectory(sourceDir)) {
+    result.reason = "source_not_found";
+    return result;
+  }
+  const sourceSkills = fs24.readdirSync(sourceDir, { withFileTypes: true }).filter(
+    (entry) => entry.isDirectory() && fs24.existsSync(path25.join(sourceDir, entry.name, "SKILL.md"))
+  ).map((entry) => entry.name).sort();
+  for (const sourceSkillName of sourceSkills) {
+    const workBuddySkillName = `taptap-maker-${sourceSkillName}`;
+    const workBuddySkillDir = path25.join(workBuddySkillsDir, workBuddySkillName);
+    if (pathEntryExists(workBuddySkillDir)) {
+      result.skippedSkills.push(workBuddySkillName);
+      continue;
+    }
+    fs24.mkdirSync(workBuddySkillsDir, { recursive: true });
+    installSkillContents(path25.join(sourceDir, sourceSkillName), workBuddySkillDir, platform);
+    result.installedSkills.push(workBuddySkillName);
+  }
+  if (result.installedSkills.length > 0) {
+    result.status = "installed";
+  }
+  return result;
+}
+function installSkillContents(sourceDir, targetDir, platform) {
+  fs24.mkdirSync(targetDir);
+  try {
+    for (const entry of fs24.readdirSync(sourceDir)) {
+      linkOrCopyEntry(path25.join(sourceDir, entry), path25.join(targetDir, entry), platform);
+    }
+  } catch (error2) {
+    fs24.rmSync(targetDir, { recursive: true, force: true });
+    throw error2;
+  }
+}
+function linkOrCopyEntry(source, target, platform) {
+  const stat = fs24.statSync(source);
+  if (platform === "win32" && stat.isFile()) {
+    fs24.copyFileSync(source, target);
+    return;
+  }
+  try {
+    const linkTarget = platform === "win32" ? source : path25.relative(path25.dirname(target), source);
+    const linkType = stat.isDirectory() ? platform === "win32" ? "junction" : "dir" : "file";
+    fs24.symlinkSync(linkTarget, target, linkType);
+  } catch (error2) {
+    try {
+      fs24.cpSync(source, target, { recursive: stat.isDirectory() });
+    } catch (copyError) {
+      throw new Error(
+        `Failed to install WorkBuddy project skill entry ${source}: ${formatError3(error2)}; copy fallback: ${formatError3(copyError)}`
+      );
+    }
+  }
+}
+function isDirectory(value) {
+  try {
+    return fs24.statSync(value).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function pathEntryExists(value) {
+  try {
+    fs24.lstatSync(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function formatError3(error2) {
+  return error2 instanceof Error ? error2.message : String(error2);
+}
+
 // src/maker/cli/commands.ts
-var VERSION2 = true ? "0.0.28" : "dev";
+var VERSION2 = true ? "0.0.32" : "dev";
 var DEFAULT_MCP_NAME = "taptap-maker";
 var MAKER_NPM_PACKAGE = "@taptap/maker";
-var TWO_PART_COMMANDS = /* @__PURE__ */ new Set(["pat", "mcp", "dev-kit", "logs", "python", "lua-lsp", "agents"]);
+var TWO_PART_COMMANDS = /* @__PURE__ */ new Set([
+  "pat",
+  "mcp",
+  "dev-kit",
+  "logs",
+  "python",
+  "lua-lsp",
+  "agents",
+  "plugin"
+]);
 var BOOLEAN_OPTIONS = /* @__PURE__ */ new Set([
   "json",
   "skip_confirm",
@@ -39765,6 +50296,9 @@ var BOOLEAN_OPTIONS = /* @__PURE__ */ new Set([
   "reset",
   "all",
   "create",
+  "consent",
+  "confirm",
+  "context_stdin",
   "h",
   "help"
 ]);
@@ -39814,8 +50348,16 @@ async function runMakerCli(argv) {
     await runMcpVerify(parsed, ctx);
     return;
   }
+  if (command === "mcp" && subcommand === "report") {
+    await runMcpReport(parsed, ctx);
+    return;
+  }
   if (command === "agents" && subcommand === "update") {
     await runAgentsUpdate(parsed, ctx);
+    return;
+  }
+  if (command === "plugin") {
+    runPluginLifecycle(parsed, ctx);
     return;
   }
   if (command === "upgrade") {
@@ -39839,6 +50381,57 @@ async function runMakerCli(argv) {
     return;
   }
   throw new Error(`Unknown taptap-maker command: ${formatUnknownCommand(parsed.command)}`);
+}
+function runPluginLifecycle(parsed, ctx) {
+  const subcommand = parsed.command[1];
+  const client = stringOption(parsed, "client") || "codex";
+  if (client !== "codex" && client !== "workbuddy" && client !== "dsh") {
+    throw new Error(
+      `Unsupported Maker plugin client: ${client}. Supported clients: codex, workbuddy, dsh.`
+    );
+  }
+  if (subcommand === "inspect") {
+    writePluginLifecycleResult(
+      ctx,
+      client === "codex" ? inspectCodexLegacyMakerMcp() : client === "workbuddy" ? inspectWorkBuddyLegacyMakerMcp() : inspectDshLegacyMakerMcp()
+    );
+    return;
+  }
+  if (subcommand === "migrate") {
+    writePluginLifecycleResult(
+      ctx,
+      client === "codex" ? migrateCodexLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") }) : client === "workbuddy" ? migrateWorkBuddyLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") }) : migrateDshLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") })
+    );
+    return;
+  }
+  if (subcommand === "restore") {
+    writePluginLifecycleResult(
+      ctx,
+      client === "codex" ? restoreCodexLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") }) : client === "workbuddy" ? restoreWorkBuddyLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") }) : restoreDshLegacyMakerMcp({ confirm: booleanOption(parsed, "confirm") })
+    );
+    return;
+  }
+  throw new Error("Unknown Maker plugin command. Use inspect, migrate, or restore.");
+}
+function writePluginLifecycleResult(ctx, result) {
+  if (ctx.json) {
+    writeJson(result);
+    return;
+  }
+  process.stdout.write(
+    [
+      "TapTap Maker plugin migration",
+      "",
+      `- client: ${result.client}`,
+      `- legacy_mcp_status: ${result.status}`,
+      `- config_path: ${result.config_path}`,
+      ..."config_paths" in result && result.config_paths.length > 1 ? [`- config_paths: ${result.config_paths.join(", ")}`] : [],
+      `- registration_count: ${result.registration_count}`,
+      ..."action" in result ? [`- action: ${result.action}`, `- changed: ${result.changed}`] : [],
+      ..."backup_path" in result && result.backup_path ? [`- backup_path: ${result.backup_path}`] : [],
+      ""
+    ].join("\n")
+  );
 }
 function parseArgs(argv) {
   const command = [];
@@ -39887,7 +50480,7 @@ function toOptionKey(value) {
 }
 async function runInit(parsed, ctx) {
   rejectPackageOption(parsed);
-  const targetDir = path20.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
   const env = makerEnvOption(parsed);
   const skipConfirm = booleanOption(parsed, "skip_confirm");
   const skipMcpInstall = booleanOption(parsed, "skip_mcp_install");
@@ -39956,16 +50549,17 @@ async function runInit(parsed, ctx) {
   });
   if (!skipMcpInstall) {
     const ides = parseIdeList(stringOption(parsed, "register_mcp") || "");
-    const prepared = await prepareMcpLauncher({ env });
+    const prepared = await prepareMcpLauncher({ env, mode: mcpLauncherOption(parsed) });
     if (!prepared.ok) {
       emit(ctx, "mcp_install", formatMcpLauncherFailure(prepared), prepared);
       throw new Error(prepared.error);
     }
     const installResults = installMcpConfigs({
       ides: ides.length > 0 ? ides : getDefaultMcpInstallIdes(),
-      env,
+      env: makerMcpConfigEnvOption(parsed),
       mcpName: DEFAULT_MCP_NAME,
-      launcher: prepared.launcher
+      launcher: prepared.launcher,
+      launcherEnv: prepared.launcherEnv
     });
     for (const result of installResults) {
       emit(ctx, "mcp_install", result.message, result);
@@ -40001,7 +50595,7 @@ async function runInit(parsed, ctx) {
 }
 async function runDoctor(parsed, ctx) {
   var _a3, _b;
-  const targetDir = path20.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
   const env = makerEnvOption(parsed);
   const git = checkGitEnvironment();
   const python = checkMakerPythonEnvironment();
@@ -40092,8 +50686,8 @@ async function runDoctor(parsed, ctx) {
   );
 }
 function inspectMakerDoctorExecutionContext(options) {
-  const doctorCwd = path20.resolve(process.cwd());
-  const makerProjectDir = options.makerProjectDir ? path20.resolve(options.makerProjectDir) : void 0;
+  const doctorCwd = path26.resolve(process.cwd());
+  const makerProjectDir = options.makerProjectDir ? path26.resolve(options.makerProjectDir) : void 0;
   if (!makerProjectDir) {
     return {
       active_client_session: "not_checked",
@@ -40128,9 +50722,9 @@ function samePath2(left, right) {
   return normalizePathForCompare3(left) === normalizePathForCompare3(right);
 }
 function normalizePathForCompare3(value) {
-  const resolved = path20.resolve(value);
+  const resolved = path26.resolve(value);
   try {
-    return fs19.realpathSync.native(resolved);
+    return fs25.realpathSync.native(resolved);
   } catch {
     return resolved;
   }
@@ -40139,7 +50733,7 @@ function inspectMakerOrphanProcesses() {
   if (process.platform === "win32") {
     return { status: "not_supported_on_windows", processes: [] };
   }
-  const result = spawnSync7("ps", ["-axo", "pid,ppid,pcpu,etime,command"], {
+  const result = spawnSync8("ps", ["-axo", "pid,ppid,pcpu,etime,command"], {
     encoding: "utf8"
   });
   if (result.status !== 0 || typeof result.stdout !== "string") {
@@ -40448,7 +51042,7 @@ async function runPatSet(parsed, ctx) {
 }
 async function resolvePatSet(parsed, ctx) {
   if (booleanOption(parsed, "pat_stdin") || booleanOption(parsed, "pat_from_stdin")) {
-    const pat = fs19.readFileSync(0, "utf8").trim();
+    const pat = fs25.readFileSync(0, "utf8").trim();
     if (!pat) {
       throw new Error("No PAT found on stdin.");
     }
@@ -40472,20 +51066,18 @@ async function resolvePatSet(parsed, ctx) {
 async function runMcpInstall(parsed, ctx) {
   rejectPackageOption(parsed);
   const ides = parseIdeList(stringOption(parsed, "ide") || stringOption(parsed, "ides") || "");
-  const explicitTargetDir = stringOption(parsed, "target_dir");
   const env = makerEnvOption(parsed);
-  const cwd = explicitTargetDir ? path20.resolve(explicitTargetDir) : void 0;
-  const prepared = await prepareMcpLauncher({ env, cwd });
+  const prepared = await prepareMcpLauncher({ env, mode: mcpLauncherOption(parsed) });
   if (!prepared.ok) {
     writeMcpLauncherFailure(ctx, prepared);
     return;
   }
   const results = installMcpConfigs({
     ides: ides.length > 0 ? ides : getDefaultMcpInstallIdes(),
-    env,
+    env: makerMcpConfigEnvOption(parsed),
     mcpName: stringOption(parsed, "name") || DEFAULT_MCP_NAME,
-    cwd,
-    launcher: prepared.launcher
+    launcher: prepared.launcher,
+    launcherEnv: prepared.launcherEnv
   });
   const ok = results.every((result) => result.ok);
   if (!ok) {
@@ -40500,17 +51092,35 @@ async function runMcpInstall(parsed, ctx) {
 }
 async function prepareMcpLauncher(options) {
   let launcher;
+  let launcherEnv;
   try {
-    launcher = resolveMakerMcpLauncher({ packageName: MAKER_NPM_PACKAGE });
+    if (options.mode === "self") {
+      launcher = materializeMakerSelfLauncher({
+        version: VERSION2,
+        bundleUrl: typeof __MAKER_BUNDLE_URL__ !== "undefined" ? __MAKER_BUNDLE_URL__ : pathToFileURL(path26.resolve(process.cwd(), "dist", "maker.js")).href,
+        makerHome: getMakerHome()
+      });
+    } else {
+      const packageSpec = resolveMakerPackageSpec(MAKER_NPM_PACKAGE, VERSION2);
+      launcher = resolveMakerMcpLauncher({ packageName: packageSpec });
+      const configuredCache = process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE;
+      const npmCacheDir = path26.resolve(
+        configuredCache || path26.join(getMakerHome(), "cache", "npm")
+      );
+      fs25.mkdirSync(npmCacheDir, { recursive: true });
+      launcherEnv = { npm_config_cache: npmCacheDir };
+    }
   } catch (error2) {
     return createMcpLauncherResolutionFailure(error2);
   }
   const verification = await verifyMakerMcpLauncher(launcher, {
-    cwd: options.cwd,
-    env: options.env === "production" ? void 0 : { TAPTAP_MCP_ENV: options.env }
+    env: {
+      ...options.env === "production" ? {} : { TAPTAP_MCP_ENV: options.env },
+      ...launcherEnv
+    }
   });
   if (!verification.ok) {
-    return {
+    return addMcpLauncherFailureGuidance({
       ok: false,
       stage: verification.stage,
       launcher_kind: verification.launcherKind,
@@ -40519,9 +51129,9 @@ async function prepareMcpLauncher(options) {
       error: verification.error || "Maker MCP launcher connectivity check failed.",
       stderr: verification.stderr,
       tools: verification.toolNames
-    };
+    });
   }
-  return { ok: true, launcher, verification };
+  return { ok: true, launcher, verification, launcherEnv };
 }
 function createMcpLauncherResolutionFailure(error2) {
   return {
@@ -40551,23 +51161,44 @@ function formatMcpLauncherFailure(failure) {
     `- error: ${failure.error}`,
     failure.stderr ? `- stderr:
 ${indent3(failure.stderr)}` : "",
-    "- next_action: Fix the launcher shown above, then rerun taptap-maker mcp install."
+    failure.explanation ? `- explanation: ${failure.explanation}` : "",
+    ...(failure.next_steps || ["Fix the launcher shown above, then rerun `taptap-maker mcp install`."]).map((step) => `- next_action: ${step}`)
   ].filter(Boolean).join("\n");
+}
+function addMcpLauncherFailureGuidance(failure) {
+  if (failure.failure_type !== "npm_environment_error") {
+    return failure;
+  }
+  return {
+    ...failure,
+    explanation: "The npm cache is not writable in the current environment. This is a local sandbox or cache restriction, not a Maker protocol error.",
+    next_steps: [
+      "Run `taptap-maker mcp install --launcher self` to auto-detect clients and avoid npm.",
+      "If npx mode is required, set a writable `npm_config_cache` before retrying. Do not change npm cache ownership based only on the generic npm message."
+    ]
+  };
 }
 async function runMcpVerify(parsed, ctx) {
   rejectPackageOption(parsed);
   const mode = mcpVerifyModeOption(parsed);
-  let launcher;
-  try {
-    launcher = mode === "npx" ? resolveMakerMcpLauncher({ packageName: MAKER_NPM_PACKAGE }) : getCurrentCliCommand();
-  } catch (error2) {
-    writeMcpLauncherFailure(ctx, createMcpLauncherResolutionFailure(error2));
+  const prepared = await prepareMcpLauncher({ env: makerEnvOption(parsed), mode });
+  if (!prepared.ok && prepared.stage === "resolve") {
+    writeMcpLauncherFailure(ctx, prepared);
     return;
   }
-  const result = await verifyMakerMcpLauncher(launcher);
+  const result = prepared.ok ? prepared.verification : {
+    ok: false,
+    stage: prepared.stage,
+    launcherKind: prepared.launcher_kind,
+    command: prepared.command || "",
+    toolNames: prepared.tools,
+    stderr: prepared.stderr,
+    error: prepared.error,
+    failureType: prepared.failure_type
+  };
   const payload = {
     mode,
-    package: mode === "npx" ? MAKER_NPM_PACKAGE : void 0,
+    package: mode === "npx" ? resolveMakerPackageSpec(MAKER_NPM_PACKAGE, VERSION2) : void 0,
     launcher_kind: result.launcherKind,
     command: result.command,
     stage: result.stage,
@@ -40592,7 +51223,7 @@ async function runMcpVerify(parsed, ctx) {
       payload.ok ? "✓ Maker MCP launcher connectivity verified" : payload.stage === "tools_list" ? "✗ Maker MCP started but tools/list validation failed" : "✗ MCP config command check failed before Maker MCP started",
       `- mode: ${payload.mode}`,
       `- command: ${payload.command}`,
-      mode === "npx" ? "- scope: verifies the package launcher written by taptap-maker mcp install" : "- scope: verifies only the currently running CLI binary",
+      mode === "npx" ? "- scope: verifies the exact-version npm package launcher" : "- scope: verifies the stable self runtime written by taptap-maker mcp install",
       `- launcher_kind: ${payload.launcher_kind}`,
       `- stage: ${payload.stage}`,
       payload.failure_type ? `- failure_type: ${payload.failure_type}` : "",
@@ -40607,8 +51238,110 @@ ${indent3(payload.stderr)}` : "",
     ].filter(Boolean).join("\n")
   );
 }
+async function runMcpReport(parsed, ctx) {
+  rejectPackageOption(parsed);
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const contextInput = booleanOption(parsed, "context_stdin") ? await readStdinText() : "";
+  const context = parseMakerMcpReportContext(contextInput);
+  const contextValidation = validateMakerMcpReportContext(context);
+  if (!contextValidation.ok) {
+    const payload = {
+      status: "invalid_context",
+      reason: contextValidation.reason,
+      issue_url: "https://github.com/taptap/instant-games-open-mcp/issues/new"
+    };
+    if (ctx.json) {
+      writeJson(payload);
+      return;
+    }
+    process.stdout.write(
+      [
+        "Maker MCP issue report was not prepared: actionable error context is missing.",
+        `Reason: ${payload.reason}`,
+        `Manual issue URL: ${payload.issue_url}`,
+        ""
+      ].join("\n")
+    );
+    return;
+  }
+  const reportRuntime = resolveMakerMcpReportRuntime({
+    distribution: process.env.TAPTAP_MAKER_DISTRIBUTION,
+    bundleUrl: typeof __MAKER_BUNDLE_URL__ !== "undefined" ? __MAKER_BUNDLE_URL__ : void 0
+  });
+  const diagnostics = await collectMakerMcpIssueDiagnostics({
+    ide: stringOption(parsed, "ide") || (reportRuntime == null ? void 0 : reportRuntime.client),
+    targetDir,
+    makerVersion: VERSION2,
+    configSource: reportRuntime == null ? void 0 : reportRuntime.config_source,
+    distribution: reportRuntime == null ? void 0 : reportRuntime.distribution,
+    verify: async () => {
+      if (reportRuntime) {
+        const verification = await verifyMakerMcpLauncher(reportRuntime.launcher, {
+          cwd: reportRuntime.cwd,
+          env: reportRuntime.env,
+          timeoutMs: 15e3
+        });
+        return {
+          ok: verification.ok,
+          stage: verification.stage,
+          launcher_kind: verification.launcherKind,
+          command: verification.command,
+          tools: verification.toolNames,
+          stderr: verification.stderr,
+          error: verification.error,
+          failure_type: verification.failureType
+        };
+      }
+      const prepared = await prepareMcpLauncher({
+        env: makerEnvOption(parsed),
+        mode: "self"
+      });
+      if (!prepared.ok) {
+        return prepared;
+      }
+      return {
+        ok: prepared.verification.ok,
+        stage: prepared.verification.stage,
+        launcher_kind: prepared.verification.launcherKind,
+        command: prepared.verification.command,
+        tools: prepared.verification.toolNames,
+        stderr: prepared.verification.stderr,
+        error: prepared.verification.error,
+        failure_type: prepared.verification.failureType
+      };
+    }
+  });
+  const issue3 = buildMakerMcpIssue({
+    context,
+    diagnostics,
+    homeDir: os8.homedir()
+  });
+  const submission = booleanOption(parsed, "consent") ? submitMakerMcpIssue(issue3) : {
+    status: "consent_required",
+    issue_url: "https://github.com/taptap/instant-games-open-mcp/issues/new",
+    ...issue3
+  };
+  if (ctx.json) {
+    writeJson(submission);
+    return;
+  }
+  if (submission.status === "created") {
+    process.stdout.write(`Maker MCP issue submitted: ${submission.issue_url}
+`);
+    return;
+  }
+  process.stdout.write(
+    [
+      submission.status === "consent_required" ? "Maker MCP issue report prepared but not submitted: user consent is required." : "Maker MCP issue report prepared, but GitHub submission is unavailable.",
+      `Manual issue URL: ${submission.issue_url}`,
+      "",
+      submission.body,
+      ""
+    ].join("\n")
+  );
+}
 async function runAgentsUpdate(parsed, ctx) {
-  const targetDir = path20.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
   const result = updateMakerAgentsPolicy(targetDir);
   if (ctx.json) {
     writeJson(result);
@@ -40627,22 +51360,25 @@ async function runAgentsUpdate(parsed, ctx) {
 async function runUpgrade(parsed, ctx) {
   rejectPackageOption(parsed);
   const explicitTargetDir = stringOption(parsed, "target_dir");
-  const targetDir = path20.resolve(explicitTargetDir || process.cwd());
+  const targetDir = path26.resolve(explicitTargetDir || process.cwd());
   const env = makerEnvOption(parsed);
   const ides = parseIdeList(stringOption(parsed, "ide") || stringOption(parsed, "ides") || "");
-  const cwd = explicitTargetDir ? targetDir : void 0;
-  const prepared = await prepareMcpLauncher({ env, cwd });
-  if (!prepared.ok) {
-    writeMcpLauncherFailure(ctx, prepared);
-    return;
+  const pluginDistribution = resolveMakerPluginDistribution();
+  let installResults = [];
+  if (!pluginDistribution) {
+    const prepared = await prepareMcpLauncher({ env, mode: mcpLauncherOption(parsed) });
+    if (!prepared.ok) {
+      writeMcpLauncherFailure(ctx, prepared);
+      return;
+    }
+    installResults = installMcpConfigs({
+      ides: ides.length > 0 ? ides : getDefaultMcpInstallIdes(),
+      env: makerMcpConfigEnvOption(parsed),
+      mcpName: stringOption(parsed, "name") || DEFAULT_MCP_NAME,
+      launcher: prepared.launcher,
+      launcherEnv: prepared.launcherEnv
+    });
   }
-  const installResults = installMcpConfigs({
-    ides: ides.length > 0 ? ides : getDefaultMcpInstallIdes(),
-    env,
-    mcpName: stringOption(parsed, "name") || DEFAULT_MCP_NAME,
-    cwd,
-    launcher: prepared.launcher
-  });
   const identify = identifyMakerProject({ cwd: targetDir });
   const agentsResult = identify.projectRoot ? updateMakerAgentsPolicy(identify.projectRoot) : void 0;
   const payload = {
@@ -40651,7 +51387,10 @@ async function runUpgrade(parsed, ctx) {
     env,
     mcp_install: installResults,
     agents_policy: agentsResult,
-    restart_required: true
+    restart_required: false,
+    apply_mode: "next_mcp_start",
+    current_session: "preserved",
+    plugin_distribution: pluginDistribution == null ? void 0 : pluginDistribution.id
   };
   if (!payload.ok) {
     process.exitCode = 1;
@@ -40662,9 +51401,9 @@ async function runUpgrade(parsed, ctx) {
   }
   process.stdout.write(
     [
-      payload.ok ? "TapTap Maker upgrade completed" : "TapTap Maker upgrade completed with errors",
+      pluginDistribution ? "TapTap Maker project policy update completed" : payload.ok ? "TapTap Maker upgrade completed" : "TapTap Maker upgrade completed with errors",
       "",
-      ...installResults.map((result) => result.message),
+      ...pluginDistribution ? [`✓ Standalone MCP registration unchanged (${pluginDistribution.displayName} plugin)`] : installResults.map((result) => result.message),
       "",
       agentsResult ? [
         agentsResult.changed ? "✓ AGENTS.md managed policy updated" : "✓ AGENTS.md managed policy current",
@@ -40672,7 +51411,8 @@ async function runUpgrade(parsed, ctx) {
         `- previous_status: ${agentsResult.previousStatus}`
       ].join("\n") : "AGENTS.md managed policy skipped: current directory is not bound to a Maker project.",
       "",
-      "Restart or reconnect the AI client MCP session so the updated server and AGENTS.md are loaded.",
+      pluginDistribution ? formatMakerPluginUpdateAction(pluginDistribution) : "Current MCP session remains unchanged and continues using the existing version.",
+      pluginDistribution ? "The updated AGENTS.md policy is available to the current project." : "The updated package and AGENTS.md will take effect on the next MCP start or user-requested reconnect.",
       ""
     ].join("\n")
   );
@@ -40680,8 +51420,14 @@ async function runUpgrade(parsed, ctx) {
 function getMcpVerifyFailureExplanation(mode, result) {
   if (mode === "self") {
     return [
-      "The current taptap-maker CLI help command did not exit cleanly.",
-      "This is a local CLI startup check, not a Maker MCP business error."
+      `The stable self runtime failed during MCP ${result.stage}.`,
+      "This is a local Node and stdio MCP connectivity check, not a Maker business tool error."
+    ].join(" ");
+  }
+  if (result.failureType === "npm_environment_error") {
+    return [
+      "The npm launcher could not write its cache in the current sandbox or user environment.",
+      "Do not change cache ownership based only on npm generic guidance."
     ].join(" ");
   }
   return [
@@ -40691,28 +51437,32 @@ function getMcpVerifyFailureExplanation(mode, result) {
 }
 function getMcpVerifyNextSteps(mode, commandText) {
   if (mode === "self") {
-    return ["Run `taptap-maker help` directly and inspect the printed error."];
+    return [
+      `Run the command above directly: ${commandText}`,
+      "Rerun `taptap-maker mcp install --launcher self` to rebuild the stable runtime."
+    ];
   }
   return [
     `Run the command above directly: ${commandText}`,
-    "Run `taptap-maker mcp verify --mode self` to verify the current CLI binary.",
+    "Use `taptap-maker mcp install --launcher self` to avoid npm cache and npx startup.",
     "On Windows, check the absolute node/npm paths shown above; do not repair cwd with `cd && npx.cmd`."
   ];
 }
 async function runDevKitUpdate(parsed, ctx) {
-  const targetDir = path20.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
   const result = await installAiDevKit({
     targetDir,
     preserveExisting: false,
     replaceManagedEntries: true,
     environment: makerEnvOption(parsed)
   });
+  syncWorkBuddyDevKitSkills(targetDir, ctx);
   finalizeStagedDevKitGitignore(targetDir);
   emit(ctx, "dev_kit", formatDevKitInstallMessage("AI dev kit updated", result), result);
   emitDevKitSkillInstallerFailure(ctx, result.skillInstaller, "AI skills install failed");
 }
 async function runLogsWatch(parsed, ctx) {
-  const targetDir = path20.resolve(stringOption(parsed, "target_dir") || process.cwd());
+  const targetDir = path26.resolve(stringOption(parsed, "target_dir") || process.cwd());
   const intervalMs = parseDurationMs(stringOption(parsed, "interval") || "5s");
   const timeoutMs = numberOption(parsed, "timeout_ms") ?? DEFAULT_TOOL_CALL_TIMEOUT_MS;
   const maxPolls = numberOption(parsed, "max_polls");
@@ -40722,9 +51472,9 @@ async function runLogsWatch(parsed, ctx) {
     serverUrl: stringOption(parsed, "server_url"),
     env: makerEnvOption(parsed)
   });
-  const runtimeDir = path20.join(proxy.projectRoot, ".maker", "logs", "runtime");
-  const runtimeLog = path20.join(runtimeDir, "runtime.log");
-  const pidFile = path20.join(runtimeDir, "watcher.pid");
+  const runtimeDir = path26.join(proxy.projectRoot, ".maker", "logs", "runtime");
+  const runtimeLog = path26.join(runtimeDir, "runtime.log");
+  const pidFile = path26.join(runtimeDir, "watcher.pid");
   const replacedWatcher = registerRuntimeLogWatcherProcess(pidFile);
   const runtimeLogClient = createRemoteRuntimeLogClient(proxy, timeoutMs);
   emit(ctx, "logs_watch_start", "Maker runtime log watcher started", {
@@ -40769,10 +51519,10 @@ async function runLogsWatch(parsed, ctx) {
   }
 }
 function registerRuntimeLogWatcherProcess(pidFile) {
-  fs19.mkdirSync(path20.dirname(pidFile), { recursive: true });
+  fs25.mkdirSync(path26.dirname(pidFile), { recursive: true });
   const existingPid = readPidFile(pidFile);
   const previous = existingPid && existingPid !== process.pid ? stopExistingRuntimeLogWatcher(pidFile) : {};
-  fs19.writeFileSync(
+  fs25.writeFileSync(
     pidFile,
     `${JSON.stringify(
       {
@@ -40790,10 +51540,10 @@ function registerRuntimeLogWatcherProcess(pidFile) {
   return previous;
 }
 function readPidFile(pidFile) {
-  if (!fs19.existsSync(pidFile)) {
+  if (!fs25.existsSync(pidFile)) {
     return void 0;
   }
-  const raw = fs19.readFileSync(pidFile, "utf8").trim();
+  const raw = fs25.readFileSync(pidFile, "utf8").trim();
   let pid = Number(raw);
   if (!Number.isInteger(pid) || pid <= 0) {
     try {
@@ -40813,7 +51563,7 @@ function installRuntimeLogWatcherPidCleanup(pidFile) {
     }
     cleaned = true;
     if (readPidFile(pidFile) === process.pid) {
-      fs19.rmSync(pidFile, { force: true });
+      fs25.rmSync(pidFile, { force: true });
     }
   };
   process.once("exit", cleanup);
@@ -40964,9 +51714,10 @@ async function prepareDevKit(targetDir, ctx, options = {}) {
         onStart: (event) => emitSkillInstallerStart(ctx, event)
       });
       writeDevKitStagedGitignore(
-        path20.join(targetDir, DEV_KIT_GITIGNORE_STAGING_FILE),
+        path26.join(targetDir, DEV_KIT_GITIGNORE_STAGING_FILE),
         listPresentDevKitManagedEntries(targetDir)
       );
+      syncWorkBuddyDevKitSkills(targetDir, ctx);
       if (options.finalizeGitignore) {
         finalizeStagedDevKitGitignore(targetDir);
       }
@@ -40981,7 +51732,7 @@ async function prepareDevKit(targetDir, ctx, options = {}) {
       );
     } catch (error2) {
       writeDevKitStagedGitignore(
-        path20.join(targetDir, DEV_KIT_GITIGNORE_STAGING_FILE),
+        path26.join(targetDir, DEV_KIT_GITIGNORE_STAGING_FILE),
         listPresentDevKitManagedEntries(targetDir)
       );
       if (options.finalizeGitignore) {
@@ -41002,6 +51753,7 @@ ${detail}`, {
       environment: options.environment,
       onSkillInstallerStart: (event) => emitSkillInstallerStart(ctx, event)
     });
+    syncWorkBuddyDevKitSkills(targetDir, ctx);
     if (options.finalizeGitignore) {
       finalizeStagedDevKitGitignore(targetDir);
     }
@@ -41014,6 +51766,38 @@ ${detail}`, {
   } catch (error2) {
     const detail = error2 instanceof Error ? error2.message : String(error2);
     emit(ctx, "dev_kit_warning", `AI dev kit preparation failed; clone will continue
+${detail}`, {
+      error: detail
+    });
+  }
+}
+function syncWorkBuddyDevKitSkills(targetDir, ctx) {
+  var _a3;
+  if (((_a3 = resolveMakerPluginDistribution()) == null ? void 0 : _a3.client) !== "workbuddy") {
+    return;
+  }
+  try {
+    const result = syncWorkBuddyProjectSkills(targetDir);
+    const managedSkillPaths = [...result.installedSkills, ...result.skippedSkills].map(
+      (skillName) => path26.join(".workbuddy", "skills", skillName)
+    );
+    if (managedSkillPaths.length > 0) {
+      writeDevKitStagedGitignore(path26.join(targetDir, DEV_KIT_GITIGNORE_STAGING_FILE), [
+        ...listPresentDevKitManagedEntries(targetDir),
+        ...managedSkillPaths
+      ]);
+    }
+    if (result.installedSkills.length > 0) {
+      emit(
+        ctx,
+        "dev_kit",
+        `WorkBuddy project skills installed: ${result.installedSkills.length}`,
+        result
+      );
+    }
+  } catch (error2) {
+    const detail = error2 instanceof Error ? error2.message : String(error2);
+    emit(ctx, "dev_kit_warning", `WorkBuddy project skills install failed
 ${detail}`, {
       error: detail
     });
@@ -41075,30 +51859,29 @@ function installMcpConfig(ide, options) {
 }
 function installMcpConfigUnsafe(ide, options) {
   if (ide === "codex") {
-    const configPath = path20.join(os4.homedir(), ".codex", "config.toml");
+    const configPath = path26.join(os8.homedir(), ".codex", "config.toml");
     const write = mergeCodexMcpConfig(configPath, withClientIde(options, "codex"));
     return [createMcpInstallResult(ide, "Codex", configPath, write)];
   }
   if (ide === "cursor") {
-    const configPath = path20.join(os4.homedir(), ".cursor", "mcp.json");
+    const configPath = path26.join(os8.homedir(), ".cursor", "mcp.json");
     const write = mergeJsonMcpConfig(configPath, withClientIde(options, "cursor"));
     return [createMcpInstallResult(ide, "Cursor", configPath, write)];
   }
   if (ide === "claude") {
     const claudeOptions = withClientIde(options, "claude");
-    if (!options.cwd) {
-      const claudeResult = tryClaudeMcpAdd(claudeOptions);
-      if (claudeResult.ok) {
-        return [
-          {
-            ide,
-            ok: true,
-            message: "✓ Claude Code MCP config updated with claude mcp add"
-          }
-        ];
-      }
+    const claudeResult = tryClaudeMcpAdd(claudeOptions);
+    if (claudeResult.ok) {
+      return [
+        {
+          ide,
+          ok: true,
+          changed: claudeResult.changed,
+          message: claudeResult.changed ? "✓ Claude Code MCP config updated with claude mcp add" : "✓ Claude Code MCP config already current; no update required"
+        }
+      ];
     }
-    const configPath = path20.join(os4.homedir(), ".claude.json");
+    const configPath = path26.join(os8.homedir(), ".claude.json");
     const write = mergeJsonMcpConfig(configPath, claudeOptions);
     return [createMcpInstallResult(ide, "Claude fallback", configPath, write)];
   }
@@ -41112,7 +51895,7 @@ function installMcpConfigUnsafe(ide, options) {
   }
   if (ide === "opencode") {
     const configPath = getOpenCodeMcpConfigPath();
-    if (!fs19.existsSync(configPath)) {
+    if (!fs25.existsSync(configPath)) {
       return [{ ide, ok: false, message: "Skipped OpenCode: no supported config file found" }];
     }
     const write = mergeOpenCodeMcpConfig(configPath, withClientIde(options, "opencode"));
@@ -41141,6 +51924,21 @@ function installMcpConfigUnsafe(ide, options) {
 ${formatWorkBuddyTrustInspection(trust)}`
       } : result
     );
+  }
+  if (ide === "dsh") {
+    const dshOptions = withClientIde(options, "dsh");
+    const desired = createDshMakerPluginConfig({
+      mcpName: dshOptions.mcpName,
+      command: dshOptions.launcher.command,
+      args: dshOptions.launcher.args,
+      env: createMcpEnvironmentValues(dshOptions.env, dshOptions.clientIde, dshOptions.launcherEnv)
+    });
+    return getDshMcpInstallPaths({ mcpName: dshOptions.mcpName }).map((configPath) => {
+      const write = mergeDshMakerMcpConfig(configPath, desired);
+      const result = createMcpInstallResult(ide, "DeepSeek Harness", configPath, write);
+      result.message += "\n  DSH watches this patch and hot-reloads the MCP plugin; no IDE restart is required.";
+      return result;
+    });
   }
   return [{ ide, ok: false, message: `Skipped unknown IDE: ${ide}` }];
 }
@@ -41180,11 +51978,14 @@ function getDefaultMcpInstallIdes() {
   if (getTraeMcpInstallPaths().length > 0) {
     ides.push("trae");
   }
-  if (fs19.existsSync(getOpenCodeMcpConfigPath())) {
+  if (fs25.existsSync(getOpenCodeMcpConfigPath())) {
     ides.push("opencode");
   }
   if (getWorkBuddyMcpInstallPaths().length > 0) {
     ides.push("workbuddy");
+  }
+  if (fs25.existsSync(getDshHome())) {
+    ides.push("dsh");
   }
   return ides;
 }
@@ -41197,7 +51998,7 @@ function getExistingTraeUserConfigPaths(paths) {
   const seen = /* @__PURE__ */ new Set();
   return paths.filter((configPath) => {
     const key = normalizeConfigPathKey(configPath);
-    if (seen.has(key) || !fs19.existsSync(path20.dirname(configPath))) {
+    if (seen.has(key) || !fs25.existsSync(path26.dirname(configPath))) {
       return false;
     }
     seen.add(key);
@@ -41208,7 +52009,7 @@ function getExistingConfigPaths(paths) {
   const seen = /* @__PURE__ */ new Set();
   return paths.filter((configPath) => {
     const key = normalizeConfigPathKey(configPath);
-    if (seen.has(key) || !fs19.existsSync(configPath)) {
+    if (seen.has(key) || !fs25.existsSync(configPath)) {
       return false;
     }
     seen.add(key);
@@ -41216,62 +52017,62 @@ function getExistingConfigPaths(paths) {
   });
 }
 function normalizeConfigPathKey(configPath) {
-  const resolved = path20.resolve(configPath);
+  const resolved = path26.resolve(configPath);
   return process.platform === "win32" || process.platform === "darwin" ? resolved.toLowerCase() : resolved;
 }
 function getTraeSoloMcpConfigPaths() {
   if (process.platform === "win32") {
-    const roaming = process.env.APPDATA || path20.join(os4.homedir(), "AppData", "Roaming");
+    const roaming = process.env.APPDATA || path26.join(os8.homedir(), "AppData", "Roaming");
     return [
-      path20.join(roaming, "TRAE SOLO", "User", "mcp.json"),
-      path20.join(roaming, "TRAE SOLO CN", "User", "mcp.json")
+      path26.join(roaming, "TRAE SOLO", "User", "mcp.json"),
+      path26.join(roaming, "TRAE SOLO CN", "User", "mcp.json")
     ];
   }
-  const appSupport = path20.join(os4.homedir(), "Library", "Application Support");
+  const appSupport = path26.join(os8.homedir(), "Library", "Application Support");
   return [
-    path20.join(appSupport, "TRAE SOLO CN", "User", "mcp.json"),
-    path20.join(appSupport, "TRAE SOLO", "User", "mcp.json")
+    path26.join(appSupport, "TRAE SOLO CN", "User", "mcp.json"),
+    path26.join(appSupport, "TRAE SOLO", "User", "mcp.json")
   ];
 }
 function getTraeUnverifiedMcpConfigPaths() {
   if (process.platform === "win32") {
-    const roaming = process.env.APPDATA || path20.join(os4.homedir(), "AppData", "Roaming");
+    const roaming = process.env.APPDATA || path26.join(os8.homedir(), "AppData", "Roaming");
     return [
-      path20.join(roaming, "Trae", "User", "mcp.json"),
-      path20.join(roaming, "TRAE", "User", "mcp.json"),
-      path20.join(roaming, "Trae CN", "User", "mcp.json")
+      path26.join(roaming, "Trae", "User", "mcp.json"),
+      path26.join(roaming, "TRAE", "User", "mcp.json"),
+      path26.join(roaming, "Trae CN", "User", "mcp.json")
     ];
   }
-  const appSupport = path20.join(os4.homedir(), "Library", "Application Support");
+  const appSupport = path26.join(os8.homedir(), "Library", "Application Support");
   return [
-    path20.join(appSupport, "Trae", "User", "mcp.json"),
-    path20.join(appSupport, "TRAE", "User", "mcp.json"),
-    path20.join(appSupport, "Trae CN", "User", "mcp.json")
+    path26.join(appSupport, "Trae", "User", "mcp.json"),
+    path26.join(appSupport, "TRAE", "User", "mcp.json"),
+    path26.join(appSupport, "Trae CN", "User", "mcp.json")
   ];
 }
 function getOpenCodeMcpConfigPath() {
-  return path20.join(os4.homedir(), ".config", "opencode", "opencode.jsonc");
+  return path26.join(os8.homedir(), ".config", "opencode", "opencode.jsonc");
 }
 function getWorkBuddyHome() {
-  return path20.join(os4.homedir(), ".workbuddy");
+  return path26.join(os8.homedir(), ".workbuddy");
 }
 function getWorkBuddyMcpInstallPaths(options = {}) {
-  const primary = path20.join(getWorkBuddyHome(), "mcp.json");
-  if (fs19.existsSync(primary) || options.createPrimary) {
+  const primary = path26.join(getWorkBuddyHome(), "mcp.json");
+  if (fs25.existsSync(primary) || options.createPrimary) {
     return [primary];
   }
-  const legacy = path20.join(getWorkBuddyHome(), ".mcp.json");
-  if (fs19.existsSync(legacy)) {
+  const legacy = path26.join(getWorkBuddyHome(), ".mcp.json");
+  if (fs25.existsSync(legacy)) {
     return [legacy];
   }
   return [];
 }
 function inspectWorkBuddyTrustState(mcpName) {
   const workbuddyHome = getWorkBuddyHome();
-  const connectorsDir = path20.join(workbuddyHome, "connectors");
+  const connectorsDir = path26.join(workbuddyHome, "connectors");
   const accounts = [];
   const stateFiles = [];
-  if (!fs19.existsSync(connectorsDir)) {
+  if (!fs25.existsSync(connectorsDir)) {
     return {
       status: "not_found",
       mcp_name: mcpName,
@@ -41281,12 +52082,12 @@ function inspectWorkBuddyTrustState(mcpName) {
       accounts
     };
   }
-  for (const entry of fs19.readdirSync(connectorsDir, { withFileTypes: true })) {
+  for (const entry of fs25.readdirSync(connectorsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) {
       continue;
     }
-    const statePath = path20.join(connectorsDir, entry.name, "connector-states.json");
-    if (!fs19.existsSync(statePath)) {
+    const statePath = path26.join(connectorsDir, entry.name, "connector-states.json");
+    if (!fs25.existsSync(statePath)) {
       continue;
     }
     stateFiles.push(statePath);
@@ -41299,9 +52100,9 @@ function inspectWorkBuddyTrustState(mcpName) {
     accounts.push({
       account_id: entry.name,
       path: statePath,
-      enabled: asStringArray(state.enabled).includes(mcpName),
-      ever_connected: asStringArray(state.everConnected).includes(mcpName),
-      user_disabled: asStringArray(state.userDisabled).includes(mcpName)
+      enabled: asStringArray2(state.enabled).includes(mcpName),
+      ever_connected: asStringArray2(state.everConnected).includes(mcpName),
+      user_disabled: asStringArray2(state.userDisabled).includes(mcpName)
     });
   }
   const trusted = accounts.some((account) => account.enabled && !account.user_disabled);
@@ -41314,7 +52115,7 @@ function inspectWorkBuddyTrustState(mcpName) {
     accounts
   };
 }
-function asStringArray(value) {
+function asStringArray2(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
 }
 function formatWorkBuddyTrustInspection(inspection) {
@@ -41351,7 +52152,11 @@ function getReadableWorkBuddyTrustPath() {
 function mergeJsonMcpConfig(configPath, options) {
   const existing = readJsonObject(configPath);
   const mcpServers = asObject(existing.mcpServers);
-  mcpServers[options.mcpName] = createJsonMcpServerConfig(options);
+  const desired = createJsonMcpServerConfig(options);
+  if (deepJsonEqual(mcpServers[options.mcpName], desired)) {
+    return { changed: false };
+  }
+  mcpServers[options.mcpName] = desired;
   existing.mcpServers = mcpServers;
   return writeConfigWithTapTapBackupIfChanged(
     configPath,
@@ -41361,13 +52166,18 @@ function mergeJsonMcpConfig(configPath, options) {
   );
 }
 function mergeOpenCodeMcpConfig(configPath, options) {
-  const rawContent = fs19.readFileSync(configPath, "utf8");
+  const rawContent = fs25.readFileSync(configPath, "utf8");
   const rewroteJsonc = normalizeJsonConfigContent(rawContent, { jsonc: true }) !== rawContent;
   const existing = readJsonObject(configPath, { jsonc: true });
   const mcp = asObject(existing.mcp);
-  mcp[options.mcpName] = createOpenCodeMcpServerConfig(options);
+  const desired = createOpenCodeMcpServerConfig(options);
+  const legacyMcpServers = asObject(existing.mcpServers);
+  if (deepJsonEqual(mcp[options.mcpName], desired) && !Object.prototype.hasOwnProperty.call(legacyMcpServers, options.mcpName) && existing.$schema === "https://opencode.ai/config.json") {
+    return { changed: false, rewroteJsonc: false };
+  }
+  mcp[options.mcpName] = desired;
   existing.mcp = mcp;
-  const mcpServers = asObject(existing.mcpServers);
+  const mcpServers = legacyMcpServers;
   if (Object.prototype.hasOwnProperty.call(mcpServers, options.mcpName)) {
     delete mcpServers[options.mcpName];
     if (Object.keys(mcpServers).length === 0) {
@@ -41388,21 +52198,21 @@ function mergeOpenCodeMcpConfig(configPath, options) {
   return { ...write, rewroteJsonc: write.changed && rewroteJsonc };
 }
 function mergeCodexMcpConfig(configPath, options) {
-  const existing = fs19.existsSync(configPath) ? fs19.readFileSync(configPath, "utf8") : "";
-  const sectionPattern = createCodexMcpSectionPattern(options.mcpName);
-  const withoutOld = existing.replace(sectionPattern, "").trimEnd();
+  const existing = fs25.existsSync(configPath) ? fs25.readFileSync(configPath, "utf8") : "";
+  const withoutOld = removeCodexMcpTables(existing, options.mcpName).trimEnd();
   const launch = options.launcher;
-  const envValues = createMcpEnvironmentValues(options.env, options.clientIde);
+  const envValues = createMcpEnvironmentValues(options.env, options.clientIde, options.launcherEnv);
   const envSection = Object.keys(envValues).length === 0 ? [] : [
     "",
     `[mcp_servers."${options.mcpName}".env]`,
-    ...Object.entries(envValues).map(([key, value]) => `${key} = "${escapeToml(value)}"`)
+    ...Object.entries(envValues).map(
+      ([key, value]) => `${key} = "${escapeTomlString(value)}"`
+    )
   ];
   const section = [
     `[mcp_servers."${options.mcpName}"]`,
-    `command = "${escapeToml(launch.command)}"`,
-    `args = [${launch.args.map((arg) => `"${escapeToml(arg)}"`).join(", ")}]`,
-    options.cwd ? `cwd = "${escapeToml(options.cwd)}"` : "",
+    `command = "${escapeTomlString(launch.command)}"`,
+    `args = [${launch.args.map((arg) => `"${escapeTomlString(arg)}"`).join(", ")}]`,
     ...envSection,
     ""
   ].join("\n");
@@ -41421,47 +52231,16 @@ function mergeCodexMcpConfig(configPath, options) {
     }
   );
 }
-function createCodexMcpSectionPattern(mcpName) {
-  const keyPattern = createCodexMcpKeyPattern(mcpName);
-  return new RegExp(
-    `\\n?\\[mcp_servers\\.${keyPattern}(?:\\.[^\\]]+)?\\][\\s\\S]*?(?=\\n\\[(?!mcp_servers\\.${keyPattern}(?:\\.|\\]))|$)`,
-    "g"
-  );
-}
-function createCodexMcpKeyPattern(mcpName) {
-  const quotedKey = `"${escapeRegExp2(mcpName)}"`;
-  if (!isTomlBareKey(mcpName)) {
-    return quotedKey;
-  }
-  return `(?:${quotedKey}|${escapeRegExp2(mcpName)})`;
-}
-function findCodexMcpTableDuplicates(text, mcpName) {
-  const seen = /* @__PURE__ */ new Set();
-  const duplicates = /* @__PURE__ */ new Set();
-  const headerPattern = /^\s*\[([^\]]+)\]\s*$/gm;
-  let match;
-  while ((match = headerPattern.exec(text)) !== null) {
-    const normalized = normalizeCodexMcpTablePath(match[1], mcpName);
-    if (!normalized) {
-      continue;
-    }
-    if (seen.has(normalized)) {
-      duplicates.add(normalized);
-      continue;
-    }
-    seen.add(normalized);
-  }
-  return Array.from(duplicates);
-}
-function normalizeCodexMcpTablePath(tablePath, mcpName) {
-  const keyPattern = createCodexMcpKeyPattern(mcpName);
-  const match = new RegExp(`^mcp_servers\\.${keyPattern}(\\..+)?$`).exec(tablePath);
-  if (!match) {
-    return void 0;
-  }
-  return `mcp_servers.${mcpName}${match[1] || ""}`;
-}
 function tryClaudeMcpAdd(options) {
+  const configPath = path26.join(os8.homedir(), ".claude.json");
+  try {
+    const existing = readJsonObject(configPath);
+    const server = asObject(asObject(existing.mcpServers)[options.mcpName]);
+    if (deepJsonEqual(server, createJsonMcpServerConfig(options))) {
+      return { ok: true, changed: false };
+    }
+  } catch {
+  }
   const npxLaunch = options.launcher;
   const claudeArgs = [
     "mcp",
@@ -41470,27 +52249,36 @@ function tryClaudeMcpAdd(options) {
     "user",
     "--transport",
     "stdio",
-    ...options.env === "production" ? [] : ["--env", `TAPTAP_MCP_ENV=${options.env}`],
-    ...options.clientIde ? ["--env", `TAPTAP_MCP_CLIENT_IDE=${options.clientIde}`] : [],
+    ...Object.entries(
+      createMcpEnvironmentValues(options.env, options.clientIde, options.launcherEnv)
+    ).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
     options.mcpName,
     "--",
     ...npxLaunch.commandAndArgs
   ];
   const claude = getWindowsCmdLaunchCommand("claude.cmd", claudeArgs);
-  const result = spawnSync7(
+  const result = spawnSync8(
     process.platform === "win32" ? claude.command : "claude",
     process.platform === "win32" ? claude.args : claudeArgs,
     { encoding: "utf8" }
   );
-  return { ok: result.status === 0 };
+  if (result.status !== 0) {
+    return { ok: false, changed: false };
+  }
+  try {
+    const updated = readJsonObject(configPath);
+    const server = asObject(asObject(updated.mcpServers)[options.mcpName]);
+    return deepJsonEqual(server, createJsonMcpServerConfig(options)) ? { ok: true, changed: true } : { ok: false, changed: false };
+  } catch {
+    return { ok: false, changed: false };
+  }
 }
 function createJsonMcpServerConfig(options) {
   const launch = options.launcher;
   return {
     command: launch.command,
     args: launch.args,
-    ...options.cwd ? { cwd: options.cwd } : {},
-    ...createOptionalMcpEnvironment(options.env, "env", options.clientIde),
+    ...createOptionalMcpEnvironment(options.env, "env", options.clientIde, options.launcherEnv),
     ...options.disabled !== void 0 ? { disabled: options.disabled } : {}
   };
 }
@@ -41498,13 +52286,17 @@ function createOpenCodeMcpServerConfig(options) {
   return {
     type: "local",
     command: options.launcher.commandAndArgs,
-    ...options.cwd ? { cwd: options.cwd } : {},
-    ...createOptionalMcpEnvironment(options.env, "environment", options.clientIde),
+    ...createOptionalMcpEnvironment(
+      options.env,
+      "environment",
+      options.clientIde,
+      options.launcherEnv
+    ),
     enabled: true
   };
 }
-function createOptionalMcpEnvironment(env, key, clientIde) {
-  const values = createMcpEnvironmentValues(env, clientIde);
+function createOptionalMcpEnvironment(env, key, clientIde, launcherEnv) {
+  const values = createMcpEnvironmentValues(env, clientIde, launcherEnv);
   if (Object.keys(values).length === 0) {
     return {};
   }
@@ -41512,8 +52304,8 @@ function createOptionalMcpEnvironment(env, key, clientIde) {
     [key]: values
   };
 }
-function createMcpEnvironmentValues(env, clientIde) {
-  const values = {};
+function createMcpEnvironmentValues(env, clientIde, launcherEnv) {
+  const values = { ...launcherEnv };
   if (env !== "production") {
     values.TAPTAP_MCP_ENV = env;
   }
@@ -41522,33 +52314,21 @@ function createMcpEnvironmentValues(env, clientIde) {
   }
   return values;
 }
-function getCurrentCliCommand() {
-  if (process.argv[1]) {
-    return {
-      kind: "current_cli",
-      command: process.execPath,
-      args: [process.argv[1]],
-      commandAndArgs: [process.execPath, process.argv[1]]
-    };
-  }
-  const command = process.platform === "win32" ? "taptap-maker.cmd" : "taptap-maker";
-  return { kind: "current_cli", command, args: [], commandAndArgs: [command] };
-}
 function getWindowsCmdLaunchCommand(command, args) {
   return { command: "cmd.exe", args: ["/d", "/s", "/c", command, ...args] };
 }
 function rejectPackageOption(parsed) {
   if (Object.prototype.hasOwnProperty.call(parsed.options, "package")) {
     throw new Error(
-      "--package is no longer supported. Maker MCP configs and npx verification use @taptap/maker."
+      "--package is no longer supported. @taptap/maker uses its packaged runtime; select only --launcher self or npx."
     );
   }
 }
 function readJsonObject(filePath, options = {}) {
-  if (!fs19.existsSync(filePath)) {
+  if (!fs25.existsSync(filePath)) {
     return {};
   }
-  const raw = fs19.readFileSync(filePath, "utf8");
+  const raw = fs25.readFileSync(filePath, "utf8");
   try {
     const normalized = normalizeJsonConfigContent(raw, options);
     const parsed = JSON.parse(normalized);
@@ -41566,30 +52346,6 @@ function asObject(value) {
     return value;
   }
   return {};
-}
-function writeConfigWithTapTapBackupIfChanged(filePath, nextContent, validate) {
-  const existed = fs19.existsSync(filePath);
-  const previousContent = existed ? fs19.readFileSync(filePath, "utf8") : void 0;
-  if (previousContent === nextContent) {
-    return { changed: false };
-  }
-  const backupPath = existed ? `${filePath}.taptap-maker.bak.latest` : void 0;
-  fs19.mkdirSync(path20.dirname(filePath), { recursive: true });
-  if (previousContent !== void 0 && backupPath) {
-    fs19.writeFileSync(backupPath, previousContent, "utf8");
-  }
-  try {
-    fs19.writeFileSync(filePath, nextContent, "utf8");
-    validate == null ? void 0 : validate(fs19.readFileSync(filePath, "utf8"));
-    return { changed: true, backupPath };
-  } catch (error2) {
-    if (previousContent !== void 0) {
-      fs19.writeFileSync(filePath, previousContent, "utf8");
-    } else {
-      fs19.rmSync(filePath, { force: true });
-    }
-    throw error2;
-  }
 }
 function validateJsonMcpServersConfig(content, options) {
   const parsed = parseGeneratedJsonObject(content);
@@ -41621,7 +52377,18 @@ function parseGeneratedJsonObject(content) {
   return parsed;
 }
 function deepJsonEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return JSON.stringify(sortJsonObjectKeys(left)) === JSON.stringify(sortJsonObjectKeys(right));
+}
+function sortJsonObjectKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonObjectKeys);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, sortJsonObjectKeys(item)])
+  );
 }
 function normalizeJsonConfigContent(content, options = {}) {
   const withoutBom = stripLeadingBom(content);
@@ -41631,9 +52398,9 @@ function stripLeadingBom(content) {
   return content.charCodeAt(0) === 65279 ? content.slice(1) : content;
 }
 function normalizeJsonc(content) {
-  return removeTrailingCommas(stripJsonComments(content));
+  return removeTrailingCommas2(stripJsonComments2(content));
 }
-function stripJsonComments(content) {
+function stripJsonComments2(content) {
   let result = "";
   let inString = false;
   let escaped = false;
@@ -41688,7 +52455,7 @@ function stripJsonComments(content) {
   }
   return result;
 }
-function removeTrailingCommas(content) {
+function removeTrailingCommas2(content) {
   let result = "";
   let inString = false;
   let escaped = false;
@@ -41733,10 +52500,10 @@ function formatMcpInstallMessage(label, configPath, write) {
   ].filter(Boolean).join("\n");
 }
 function saveInitState(targetDir, state) {
-  fs19.mkdirSync(getMakerHome(), { recursive: true });
-  const key = crypto3.createHash("sha256").update(path20.resolve(targetDir)).digest("hex").slice(0, 16);
-  fs19.writeFileSync(
-    path20.join(getMakerHome(), `init-state-${key}.json`),
+  fs25.mkdirSync(getMakerHome(), { recursive: true });
+  const key = crypto5.createHash("sha256").update(path26.resolve(targetDir)).digest("hex").slice(0, 16);
+  fs25.writeFileSync(
+    path26.join(getMakerHome(), `init-state-${key}.json`),
     `${JSON.stringify({ ...state, updated_at: (/* @__PURE__ */ new Date()).toISOString() }, null, 2)}
 `,
     "utf8"
@@ -41849,7 +52616,7 @@ function formatUnknownCommand(command) {
   return `${primary} ${isKnownSubcommand(primary, secondary) ? secondary : "<redacted>"}`;
 }
 function isKnownSubcommand(command, subcommand) {
-  return command === "pat" && subcommand === "set" || command === "mcp" && (subcommand === "install" || subcommand === "verify") || command === "agents" && subcommand === "update" || command === "upgrade" || command === "dev-kit" && subcommand === "update" || command === "logs" && subcommand === "watch" || command === "python" && (subcommand === "doctor" || subcommand === "setup" || subcommand === "path") || command === "lua-lsp" && (subcommand === "doctor" || subcommand === "setup");
+  return command === "pat" && subcommand === "set" || command === "mcp" && (subcommand === "install" || subcommand === "verify" || subcommand === "report") || command === "agents" && subcommand === "update" || command === "upgrade" || command === "dev-kit" && subcommand === "update" || command === "logs" && subcommand === "watch" || command === "python" && (subcommand === "doctor" || subcommand === "setup" || subcommand === "path") || command === "lua-lsp" && (subcommand === "doctor" || subcommand === "setup");
 }
 function stringOption(parsed, key) {
   const value = parsed.options[key];
@@ -41884,14 +52651,24 @@ function makerEnvOption(parsed) {
     return env;
   }
   const targetDir = stringOption(parsed, "target_dir");
-  return getMakerEnvironment(void 0, targetDir ? path20.resolve(targetDir) : process.cwd());
+  return getMakerEnvironment(void 0, targetDir ? path26.resolve(targetDir) : process.cwd());
+}
+function makerMcpConfigEnvOption(parsed) {
+  return stringOption(parsed, "env") === "rnd" ? "rnd" : "production";
 }
 function mcpVerifyModeOption(parsed) {
-  const mode = stringOption(parsed, "mode") || "npx";
+  const mode = stringOption(parsed, "mode") || "self";
   if (mode === "npx" || mode === "self") {
     return mode;
   }
   throw new Error("Invalid mcp verify --mode. Use npx or self.");
+}
+function mcpLauncherOption(parsed) {
+  const launcher = stringOption(parsed, "launcher") || "self";
+  if (launcher === "npx" || launcher === "self") {
+    return launcher;
+  }
+  throw new Error("Invalid --launcher value. Use self or npx.");
 }
 function parseIdeList(value) {
   return value.split(/[\s,]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
@@ -41904,15 +52681,6 @@ function mask(value) {
     return "***";
   }
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-function escapeRegExp2(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function escapeToml(value) {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-function isTomlBareKey(value) {
-  return /^[A-Za-z0-9_-]+$/.test(value);
 }
 function indent3(value) {
   return value.split("\n").map((line) => `  ${line}`).join("\n");
@@ -41928,7 +52696,7 @@ function printHelp() {
       "  taptap-maker init [--app-id ID] [--target-dir DIR] [--pat PAT]",
       "                     [--create --name NAME]",
       "                     [--skip-confirm] [--skip-mcp-install]",
-      "                     [--register-mcp codex,cursor,claude,trae,opencode,workbuddy]",
+      "                     [--launcher self|npx]",
       "                     [--json]",
       "",
       "Init flows:",
@@ -41948,30 +52716,49 @@ function printHelp() {
       "  taptap-maker login [--json]",
       "  taptap-maker pat set [--pat-stdin] [--json]",
       "  taptap-maker pat set [PAT|--pat PAT] [--json]  # fallback; warns: PAT appears in ps/history",
-      "  taptap-maker install [--ide codex,cursor,claude,trae,opencode,workbuddy]",
-      "                        [--target-dir DIR]",
-      "                        [--json]  # alias for mcp install",
-      "  taptap-maker mcp install [--ide codex,cursor,claude,trae,opencode,workbuddy]",
-      "                             [--target-dir DIR] [--json]",
+      "  taptap-maker install [--launcher self|npx] [--json]  # alias for mcp install",
+      "  taptap-maker mcp install [--launcher self|npx] [--json]",
       "  taptap-maker mcp verify [--mode npx|self] [--json]",
+      "  taptap-maker mcp report [--ide CLIENT] [--target-dir DIR]",
+      "                            [--context-stdin] [--consent] [--json]",
+      "                            # Run only after the user agrees to submit",
       "  taptap-maker agents update [--target-dir DIR] [--json]",
-      "  taptap-maker upgrade [--ide codex,cursor,claude]",
-      "                         [--target-dir DIR] [--json]",
+      "  taptap-maker plugin inspect --client codex|workbuddy|dsh [--json]",
+      "  taptap-maker plugin migrate --client codex|workbuddy|dsh --confirm [--json]",
+      "  taptap-maker plugin restore --client codex|workbuddy|dsh --confirm [--json]",
+      "  taptap-maker upgrade [--launcher self|npx] [--target-dir DIR] [--json]",
       "  taptap-maker dev-kit update [--target-dir DIR] [--json]",
       "  taptap-maker logs watch [--target-dir DIR] [--interval 5s] [--reset] [--json]",
       "",
-      "MCP install and verify use the same validated @taptap/maker package launcher.",
+      "MCP install and verify default to a stable self runtime under the Maker home directory.",
+      "Use --launcher npx only when npm startup is explicitly required; released builds pin",
+      "the exact @taptap/maker version and persist a dedicated writable npm cache.",
       "",
       "MCP install defaults:",
-      "  Writes Codex, Cursor, Claude, detected Trae/OpenCode/WorkBuddy configs,",
-      "  unless --ide is specified. It does not create missing Trae config files.",
+      "  Automatically detects supported installed IDEs and writes their Maker MCP configs.",
+      "  Legacy --ide/--register-mcp selection remains accepted for existing automation only.",
       "",
       "Windows note:",
-      "  MCP configs use an absolute node.exe + npm-cli.js launcher on Windows.",
-      "  Missing absolute Node/npm launchers fail without changing client configs.",
+      "  The default self launcher uses absolute node.exe plus a stable versioned maker.js.",
+      "  Explicit npx mode uses absolute node.exe + npm-cli.js and never persists .cmd wrappers.",
       ""
     ].join("\n")
   );
+}
+async function readStdinText() {
+  const chunks = [];
+  let length = 0;
+  const maxLength = 256 * 1024;
+  for await (const chunk of input) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    const remaining = maxLength - length;
+    if (remaining <= 0) {
+      break;
+    }
+    chunks.push(text.slice(0, remaining));
+    length += Math.min(text.length, remaining);
+  }
+  return chunks.join("");
 }
 function formatCliError(error2) {
   if (error2 instanceof MakerGitNotFoundError) {
@@ -42008,13 +52795,13 @@ function createFetchWithInit(baseFetch = fetch, baseInit) {
 }
 
 // node_modules/pkce-challenge/dist/index.node.js
-var crypto4;
+var crypto6;
 var _a2;
-crypto4 = ((_a2 = globalThis.crypto) == null ? void 0 : _a2.webcrypto) ?? // Node.js [18-16] REPL
+crypto6 = ((_a2 = globalThis.crypto) == null ? void 0 : _a2.webcrypto) ?? // Node.js [18-16] REPL
 globalThis.crypto ?? // Node.js >18
 import("node:crypto").then((m) => m.webcrypto);
 async function getRandomValues(size) {
-  return (await crypto4).getRandomValues(new Uint8Array(size));
+  return (await crypto6).getRandomValues(new Uint8Array(size));
 }
 async function random(size) {
   const mask2 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~";
@@ -42030,7 +52817,7 @@ async function generateVerifier(length) {
   return await random(length);
 }
 async function generateChallenge(code_verifier) {
-  const buffer = await (await crypto4).subtle.digest("SHA-256", new TextEncoder().encode(code_verifier));
+  const buffer = await (await crypto6).subtle.digest("SHA-256", new TextEncoder().encode(code_verifier));
   return btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "");
 }
 async function pkceChallenge(length) {
@@ -43385,8 +54172,8 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/mcp-proxy/proxy.ts
-import * as path22 from "node:path";
-import * as crypto6 from "node:crypto";
+import * as path28 from "node:path";
+import * as crypto8 from "node:crypto";
 
 // src/mcp-proxy/cookieJar.ts
 var CookieJar = class {
@@ -43551,10 +54338,13 @@ var CookieJar = class {
     return this.cookies.size > 0;
   }
 };
-function createCookieFetch(cookieJar) {
+function createCookieFetch(cookieJar, options = {}) {
   return async (input2, init) => {
+    if (options.rejectStandaloneSse && isStandaloneSseRequest(input2, init)) {
+      return new Response(null, { status: 405, statusText: "Method Not Allowed" });
+    }
     const modifiedInit = { ...init };
-    const cookieHeader = cookieJar.getCookieHeader();
+    const cookieHeader = options.enableCookies === false ? void 0 : cookieJar.getCookieHeader();
     if (cookieHeader) {
       const headers = new Headers(modifiedInit.headers);
       headers.set("Cookie", cookieHeader);
@@ -43565,11 +54355,22 @@ function createCookieFetch(cookieJar) {
     return response;
   };
 }
+function isStandaloneSseRequest(input2, init) {
+  var _a3;
+  const method = ((init == null ? void 0 : init.method) || (input2 instanceof Request ? input2.method : "GET")).toUpperCase();
+  if (method !== "GET") {
+    return false;
+  }
+  const headers = new Headers(
+    (init == null ? void 0 : init.headers) || (input2 instanceof Request ? input2.headers : void 0)
+  );
+  return ((_a3 = headers.get("accept")) == null ? void 0 : _a3.split(",").some((value) => value.trim().split(";", 1)[0].toLowerCase() === "text/event-stream")) === true;
+}
 
 // src/core/utils/logWriter.ts
-import * as fs20 from "node:fs";
-import * as path21 from "node:path";
-import * as crypto5 from "node:crypto";
+import * as fs26 from "node:fs";
+import * as path27 from "node:path";
+import * as crypto7 from "node:crypto";
 
 // src/core/types/log.ts
 var LOG_LEVEL_PRIORITY = {
@@ -43609,7 +54410,7 @@ var LogWriter = class {
       return;
     }
     try {
-      await fs20.promises.mkdir(this.config.logDir, { recursive: true });
+      await fs26.promises.mkdir(this.config.logDir, { recursive: true });
       await this.cleanupOldLogs();
       this.initialized = true;
     } catch (error2) {
@@ -43632,7 +54433,7 @@ var LogWriter = class {
    */
   getLogFilePath(date5) {
     const d = date5 || this.getCurrentDate();
-    return path21.join(this.config.logDir, `${this.config.prefix}-${d}.log`);
+    return path27.join(this.config.logDir, `${this.config.prefix}-${d}.log`);
   }
   /**
    * 获取或创建写入流
@@ -43647,7 +54448,7 @@ var LogWriter = class {
       }
       this.currentDate = date5;
       try {
-        this.writeStream = fs20.createWriteStream(this.getLogFilePath(date5), {
+        this.writeStream = fs26.createWriteStream(this.getLogFilePath(date5), {
           flags: "a",
           encoding: "utf8"
         });
@@ -43699,11 +54500,11 @@ var LogWriter = class {
     if (this.shouldWriteToFile(level) && this.initialized && this.config.enabled) {
       try {
         const filePath = this.getLogFilePath();
-        const dir = path21.dirname(filePath);
-        if (!fs20.existsSync(dir)) {
-          fs20.mkdirSync(dir, { recursive: true });
+        const dir = path27.dirname(filePath);
+        if (!fs26.existsSync(dir)) {
+          fs26.mkdirSync(dir, { recursive: true });
         }
-        fs20.appendFileSync(filePath, message, "utf8");
+        fs26.appendFileSync(filePath, message, "utf8");
       } catch {
       }
     }
@@ -43714,7 +54515,7 @@ var LogWriter = class {
   async cleanupOldLogs() {
     if (this.config.maxDays <= 0) return;
     try {
-      const files = await fs20.promises.readdir(this.config.logDir);
+      const files = await fs26.promises.readdir(this.config.logDir);
       const cutoffDate = /* @__PURE__ */ new Date();
       cutoffDate.setDate(cutoffDate.getDate() - this.config.maxDays);
       const prefix = this.config.prefix;
@@ -43729,7 +54530,7 @@ var LogWriter = class {
           if (!Number.isNaN(year) && !Number.isNaN(month) && !Number.isNaN(day)) {
             const fileDate = new Date(year, month - 1, day);
             if (fileDate < cutoffDate) {
-              await fs20.promises.unlink(path21.join(this.config.logDir, file2));
+              await fs26.promises.unlink(path27.join(this.config.logDir, file2));
               process.stderr.write(`[LogWriter] Deleted old log: ${file2}
 `);
             }
@@ -43768,12 +54569,23 @@ var VERSION3 = typeof __PROXY_VERSION__ !== "undefined" ? __PROXY_VERSION__ : "d
 var LOCAL_PROXY_TAG = "local";
 var DEFAULT_RECONNECT_INTERVAL_MS = 5e3;
 var MAX_RECONNECT_INTERVAL_MS = 60 * 1e3;
+function createNonReplayableToolResult(name, executionState) {
+  const text = executionState === "not_executed" ? `${name} was not sent because the upstream MCP connection is unavailable. It was not executed. Automatic retry is disabled; retry explicitly after the connection recovers.` : `${name} may have completed before the upstream MCP response was interrupted. Its execution state is unknown. Automatic retry is disabled; verify remote output, state, and usage before deciding whether to retry explicitly.`;
+  return {
+    isError: true,
+    content: [{ type: "text", text }],
+    structuredContent: {
+      execution_state: executionState,
+      automatic_retry: false
+    }
+  };
+}
 function convertMcpApplicationErrorToToolResult(error2) {
   if (!(error2 instanceof Error)) {
     return void 0;
   }
   const data = error2.data;
-  if (!isRecord3(data) || !("remote_result" in data) || data.remote_result === void 0) {
+  if (!isRecord7(data) || !("remote_result" in data) || data.remote_result === void 0) {
     return void 0;
   }
   return {
@@ -43790,7 +54602,7 @@ function convertMcpApplicationErrorToToolResult(error2) {
     ]
   };
 }
-function isRecord3(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function formatProxyDiagnosticValue(value) {
@@ -43850,10 +54662,10 @@ var TapTapMCPProxy = class {
     const { user_id, project_id } = this.config.tenant;
     let logDir;
     if (user_id && project_id) {
-      logDir = path22.join(logRoot, "proxy", user_id, project_id);
+      logDir = path28.join(logRoot, "proxy", user_id, project_id);
     } else {
-      const kidHash = crypto6.createHash("sha256").update(this.config.auth.kid).digest("hex").substring(0, 8);
-      logDir = path22.join(logRoot, "proxy", kidHash);
+      const kidHash = crypto8.createHash("sha256").update(this.config.auth.kid).digest("hex").substring(0, 8);
+      logDir = path28.join(logRoot, "proxy", kidHash);
     }
     return new LogWriter({
       logDir,
@@ -44010,17 +54822,29 @@ var TapTapMCPProxy = class {
       throw new McpError(ErrorCode.MethodNotFound, `Tool is not exposed by this proxy: ${name}`);
     }
   }
+  isToolReplayable(name) {
+    var _a3;
+    const replayableTools = (_a3 = this.config.options) == null ? void 0 : _a3.replayable_tools;
+    return replayableTools === void 0 || replayableTools.includes(name);
+  }
   /**
    * 连接到 TapTap MCP Server
    */
   async connectToServer() {
-    var _a3, _b, _c;
+    var _a3, _b, _c, _d, _e;
     this.log("info", `Connecting to ${this.config.server.url}...`);
     try {
       const cookieEnabled = ((_a3 = this.config.options) == null ? void 0 : _a3.enable_cookie_sticky) ?? true;
-      const customFetch = cookieEnabled ? createCookieFetch(this.cookieJar) : void 0;
-      if (cookieEnabled && ((_b = this.config.options) == null ? void 0 : _b.verbose)) {
+      const standaloneSseDisabled = ((_b = this.config.options) == null ? void 0 : _b.disable_standalone_sse) ?? false;
+      const customFetch = cookieEnabled || standaloneSseDisabled ? createCookieFetch(this.cookieJar, {
+        enableCookies: cookieEnabled,
+        rejectStandaloneSse: standaloneSseDisabled
+      }) : void 0;
+      if (cookieEnabled && ((_c = this.config.options) == null ? void 0 : _c.verbose)) {
         this.log("debug", "Cookie sticky session enabled");
+      }
+      if (standaloneSseDisabled && ((_d = this.config.options) == null ? void 0 : _d.verbose)) {
+        this.log("debug", "Standalone SSE disabled; using POST response streams");
       }
       const sessionHeaders = this.buildSessionHeaders();
       const transport = new StreamableHTTPClientTransport(new URL(this.config.server.url), {
@@ -44035,7 +54859,7 @@ var TapTapMCPProxy = class {
       this.connected = true;
       this.sessionValidated = true;
       this.lastValidationTime = Date.now();
-      this.reconnectDelayMs = ((_c = this.config.options) == null ? void 0 : _c.reconnect_interval) ?? DEFAULT_RECONNECT_INTERVAL_MS;
+      this.reconnectDelayMs = ((_e = this.config.options) == null ? void 0 : _e.reconnect_interval) ?? DEFAULT_RECONNECT_INTERVAL_MS;
       this.log("info", "✅ Connected and session validated");
       this.startHealthCheck();
       if (this.reconnecting) {
@@ -44315,6 +55139,10 @@ var TapTapMCPProxy = class {
     this.log("info", `Processing ${this.pendingRequests.length} pending requests...`);
     while (this.pendingRequests.length > 0) {
       const req = this.pendingRequests.shift();
+      if (!this.isToolReplayable(req.name)) {
+        req.resolve(createNonReplayableToolResult(req.name, req.executionState ?? "unknown"));
+        continue;
+      }
       if (now - req.timestamp > timeout) {
         req.reject(new Error("Request timeout while waiting for reconnection"));
         continue;
@@ -44448,6 +55276,9 @@ var TapTapMCPProxy = class {
         }
       }
       if (!this.connected) {
+        if (!this.isToolReplayable(name)) {
+          return createNonReplayableToolResult(name, "not_executed");
+        }
         if (this.reconnecting) {
           this.log("info", `⏳ Queueing request: ${name} (reconnecting...)`);
           return new Promise((resolve, reject) => {
@@ -44457,6 +55288,7 @@ var TapTapMCPProxy = class {
               resolve,
               reject,
               timestamp: Date.now(),
+              executionState: "not_executed",
               onprogress: callToolOptions.onprogress
             });
           });
@@ -44488,6 +55320,9 @@ var TapTapMCPProxy = class {
           if (!this.reconnecting) {
             this.log("info", "Triggering immediate reconnection...");
             this.reconnectToServer();
+            if (!this.isToolReplayable(name)) {
+              return createNonReplayableToolResult(name, "unknown");
+            }
             this.log("info", `⏳ Queueing current request: ${name}`);
             return new Promise((resolve, reject) => {
               this.pendingRequests.push({
@@ -44496,9 +55331,13 @@ var TapTapMCPProxy = class {
                 resolve,
                 reject,
                 timestamp: Date.now(),
+                executionState: "unknown",
                 onprogress: callToolOptions.onprogress
               });
             });
+          }
+          if (!this.isToolReplayable(name)) {
+            return createNonReplayableToolResult(name, "unknown");
           }
         }
         throw error2;
@@ -44547,7 +55386,8 @@ function printHelp2() {
       "  taptap-maker                         Start MCP server mode",
       "  taptap-maker init [--app-id ID] [--target-dir DIR] [--pat PAT]",
       "                     [--create --name NAME]",
-      "                     [--skip-confirm] [--skip-mcp-install] [--register-mcp codex,cursor,claude]",
+      "                     [--skip-confirm] [--skip-mcp-install]",
+      "                     [--launcher self|npx]",
       "                     [--json]",
       "",
       "Init flows:",
@@ -44567,24 +55407,31 @@ function printHelp2() {
       "  taptap-maker login [--json]",
       "  taptap-maker pat set [--pat-stdin] [--json]",
       "  taptap-maker pat set [PAT|--pat PAT] [--json]  # fallback; warns: PAT appears in ps/history",
-      "  taptap-maker install [--ide codex,cursor,claude]",
-      "                        [--target-dir DIR]",
-      "                        [--json]  # alias for mcp install",
-      "  taptap-maker mcp install [--ide codex,cursor,claude]",
-      "                             [--target-dir DIR] [--json]",
+      "  taptap-maker install [--launcher self|npx] [--json]  # alias for mcp install",
+      "  taptap-maker mcp install [--launcher self|npx] [--json]",
       "  taptap-maker mcp verify [--mode npx|self] [--json]",
+      "  taptap-maker mcp report [--ide CLIENT] [--target-dir DIR]",
+      "                            [--context-stdin] [--consent] [--json]",
+      "                            # Run only after the user agrees to submit",
       "  taptap-maker agents update [--target-dir DIR] [--json]",
-      "  taptap-maker upgrade [--ide codex,cursor,claude]",
-      "                         [--target-dir DIR] [--json]",
+      "  taptap-maker plugin inspect --client codex|workbuddy [--json]",
+      "  taptap-maker plugin migrate --client codex|workbuddy --confirm [--json]",
+      "  taptap-maker plugin restore --client codex|workbuddy --confirm [--json]",
+      "  taptap-maker upgrade [--launcher self|npx] [--target-dir DIR] [--json]",
       "  taptap-maker dev-kit update [--target-dir DIR] [--json]",
       "  taptap-maker logs watch [--target-dir DIR] [--interval 5s] [--reset] [--json]",
       "",
-      "MCP install verifies initialize + tools/list before writing AI client config.",
-      "Maker MCP configs and launcher verification use @taptap/maker.",
+      "MCP install and verify default to a stable self runtime under the Maker home directory.",
+      "Use --launcher npx only when npm startup is explicitly required; released builds pin",
+      "the exact @taptap/maker version and persist a dedicated writable npm cache.",
+      "",
+      "MCP install defaults:",
+      "  Automatically detects supported installed IDEs and writes their Maker MCP configs.",
+      "  Legacy --ide/--register-mcp selection remains accepted for existing automation only.",
       "",
       "Windows note:",
-      "  Generated MCP configs prefer absolute node.exe + npm-cli.js on Windows.",
-      "  Project cwd is always structured; the CLI never generates cd && npx commands.",
+      "  The default self launcher uses absolute node.exe plus a stable versioned maker.js.",
+      "  Explicit npx mode uses absolute node.exe + npm-cli.js and never persists .cmd wrappers.",
       ""
     ].join("\n")
   );

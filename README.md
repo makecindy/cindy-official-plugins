@@ -232,7 +232,7 @@ Typical flow:
 3. When done, package it with `ghost_forge_pack` into a `.cindy` and install it
    to verify.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.28`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.32`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly — do not edit the generated
 `dist/maker.js` by hand.

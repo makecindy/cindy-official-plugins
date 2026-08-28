@@ -2,7 +2,7 @@ Third-Party Notices for the Cindy TapTap Maker plugin
 =====================================================
 
 This plugin ships a vendored copy of the official @taptap/maker npm package
-(version 0.0.28, MIT, https://github.com/taptap/instant-games-open-mcp). Its
+(version 0.0.32, MIT, https://github.com/taptap/instant-games-open-mcp). Its
 MIT license text is reproduced in vendor/taptap-maker/LICENSE, which covers
 TapTap's own code only.
 
@@ -17,13 +17,13 @@ The package list was derived from the module paths that esbuild retained as
 comments in the shipped bundle (grep for "^// node_modules/" in maker.js), so
 it reflects the packages actually present in the artifact.
 
-Exact dependency versions are not recorded in the vendored artifact and the
-upstream lockfile for 0.0.28 is not published, so version numbers are
-deliberately omitted rather than guessed. Where a package changed license
-across major versions, the version present in the bundle was identified from
-its file layout: the bundle contains isexe/index.js, isexe/mode.js and
-isexe/windows.js, which is the isexe 2.x layout (ISC) rather than 3.x+
-(BlueOak-1.0.0).
+Exact dependency versions are not recorded in the vendored artifact, and the
+published npm tarball does not include an upstream lockfile. Version numbers
+are therefore deliberately omitted rather than inferred from repository
+state. Where a package changed license across major versions, the version
+present in the bundle was identified from its file layout: the bundle contains
+isexe/index.js, isexe/mode.js and isexe/windows.js, which is the isexe 2.x
+layout (ISC) rather than 3.x+ (BlueOak-1.0.0).
 
 Summary
 -------
@@ -41,6 +41,7 @@ Summary
  - shebang-command — MIT
  - shebang-regex — MIT
  - which — ISC
+ - yaml — ISC
  - zod — MIT
  - zod-to-json-schema — ISC
 
@@ -408,6 +409,27 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ================================================================================
+yaml
+License: ISC
+Author: Eemeli Aro <eemeli@gmail.com>
+Homepage: https://eemeli.org/yaml/
+
+--- LICENSE ---
+Copyright Eemeli Aro <eemeli@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+================================================================================
 zod
 License: MIT
 Author: Colin McDonnell <zod@colinhacks.com>
@@ -457,4 +479,3 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
