@@ -10,6 +10,7 @@ const CONTEXT_ARGS = ['--context=prod'];
 const MAX_OUTPUT_BYTES = 768 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 600;
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const STATUS_COMMAND_TIMEOUT_MS = 3_000;
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const FIXED_COMMANDS = new Set([
   'auth',
@@ -203,9 +204,9 @@ function normalizeLoginArgs(params) {
 }
 
 async function status() {
-  const version = await runCli(['version', ...CONTEXT_ARGS]);
+  const version = await runCli(['version', ...CONTEXT_ARGS], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
   if (!version.ok) return failureResult(version, 'Console CLI 状态查询失败');
-  const auth = await runCli(['auth', 'status', ...CONTEXT_ARGS]);
+  const auth = await runCli(['auth', 'status', ...CONTEXT_ARGS], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
   if (!auth.ok) return failureResult(auth, 'Console CLI 登录状态查询失败');
   const versionData = parseOutput(version.stdout);
   const authData = parseOutput(auth.stdout);
