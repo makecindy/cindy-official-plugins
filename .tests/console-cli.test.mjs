@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.4');
+  assert.equal(manifest.version, '0.1.5');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -38,14 +38,13 @@ test('display name is consistent across the manifest and locales', () => {
 });
 
 test('settings provides a manual missing-CLI install guide', () => {
-  assert.match(settings, /id="install-dialog"/);
+  assert.match(settings, /id="install-guide"[^>]*hidden/);
   assert.match(settings, /id="copy-install-command"/);
-  assert.match(settings, /id="dialog-copy-install-command"/);
   assert.match(settings, /id="open-install-url"/);
   assert.match(settings, /id="retry-install"/);
   assert.match(settingsScript, /isMissingCliError/);
-  assert.match(settingsScript, /setInstallDialogVisible\(true/);
-  assert.match(settingsScript, /else \{\n        setInstallDialogVisible\(false\);\n        showMessage\(error\.message, true\);/);
+  assert.match(settingsScript, /setInstallGuideVisible\(true\)/);
+  assert.match(settingsScript, /setInstallGuideVisible\(false\)/);
   assert.match(settingsScript, /document\.execCommand\('copy'\)/);
   assert.match(settingsScript, /navigator\.clipboard/);
   assert.match(settingsScript, /当前客户端不支持复制，请手动复制安装命令/);
@@ -55,6 +54,8 @@ test('settings provides a manual missing-CLI install guide', () => {
   );
   assert.match(settingsScript, /var statusSequence = 0/);
   assert.match(settingsScript, /requestSequence !== statusSequence/);
+  assert.doesNotMatch(settings, /install-dialog|dialog-backdrop|target="_blank"/);
+  assert.doesNotMatch(settingsScript, /setInstallDialogVisible|dialog-copy-install-command|close-install-dialog/);
   assert.match(settingsScript, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
   assert.doesNotMatch(settingsScript, /child_process|execFile|spawn\s*\(/);
 });

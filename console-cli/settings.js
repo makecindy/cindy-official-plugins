@@ -23,11 +23,8 @@
     return message.indexOf(INSTALL_URL) !== -1 || message.indexOf('未检测到本机 Console CLI') !== -1;
   }
 
-  function setInstallDialogVisible(visible, detail) {
-    var dialog = $('install-dialog');
-    dialog.hidden = !visible;
-    if (detail !== undefined) $('install-dialog-detail').textContent = detail || '';
-    if (visible) $('close-install-dialog').focus();
+  function setInstallGuideVisible(visible) {
+    $('install-guide').hidden = !visible;
   }
 
   function copyUnsupportedError() {
@@ -134,16 +131,16 @@
       var result = await request('status', {}, 30000);
       if (requestSequence !== statusSequence) return;
       showAccount(result);
-      setInstallDialogVisible(false);
+      setInstallGuideVisible(false);
       showMessage(result.logged_in ? 'Console 已登录' : 'CLI 已安装，请点击“登录 Console”');
     } catch (error) {
       if (requestSequence !== statusSequence) return;
       showAccount(null);
       if (isMissingCliError(error)) {
-        showMessage('需要先安装 Console CLI。', true);
-        setInstallDialogVisible(true, error.message);
+        setInstallGuideVisible(true);
+        showMessage('未检测到 Console CLI，请先安装。', true);
       } else {
-        setInstallDialogVisible(false);
+        setInstallGuideVisible(false);
         showMessage(error.message, true);
       }
     } finally {
@@ -157,11 +154,16 @@
     try {
       var result = await request('login', {}, 660000);
       showAccount(result);
+      setInstallGuideVisible(false);
       showMessage('Console 已登录');
     } catch (error) {
-      if (isMissingCliError(error)) setInstallDialogVisible(true, error.message);
-      else setInstallDialogVisible(false);
-      showMessage(error.message, true);
+      if (isMissingCliError(error)) {
+        setInstallGuideVisible(true);
+        showMessage('未检测到 Console CLI，请先安装。', true);
+      } else {
+        setInstallGuideVisible(false);
+        showMessage(error.message, true);
+      }
     } finally {
       $('login-button').disabled = false;
     }
@@ -170,14 +172,6 @@
   $('status-button').addEventListener('click', function () { void checkStatus(); });
   $('login-button').addEventListener('click', function () { void login(); });
   $('copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
-  $('dialog-copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
   $('retry-install').addEventListener('click', function () { void checkStatus(); });
-  $('close-install-dialog').addEventListener('click', function () { setInstallDialogVisible(false); });
-  $('install-dialog').addEventListener('click', function (event) {
-    if (event.target === event.currentTarget) setInstallDialogVisible(false);
-  });
-  document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && !$('install-dialog').hidden) setInstallDialogVisible(false);
-  });
   void checkStatus();
 }());

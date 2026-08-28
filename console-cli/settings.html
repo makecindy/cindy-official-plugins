@@ -21,12 +21,6 @@
   .install { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border-default, #e4e4e0); border-radius: 10px; color: var(--text-secondary, #55554f); }
   .install-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .btn-link { text-decoration: none; }
-  .dialog-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / 38%); }
-  .dialog { width: min(430px, 100%); padding: 18px; border: 1px solid var(--border-default, #e4e4e0); border-radius: 10px; background: var(--surface-elevated, #fff); box-shadow: 0 12px 36px rgb(0 0 0 / 20%); }
-  .dialog-title { font-weight: 600; }
-  .dialog-copy { margin-top: 8px; color: var(--text-secondary, #55554f); }
-  .dialog-detail { margin-top: 8px; color: var(--text-danger, #b42318); overflow-wrap: anywhere; }
-  .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   code { display: block; margin-top: 6px; overflow-wrap: anywhere; color: var(--text-primary, #1a1a1a); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   #message { margin-top: 10px; min-height: 18px; color: var(--text-tertiary, #777771); }
   #message.error { color: var(--text-danger, #b42318); }
@@ -40,29 +34,16 @@
     <button id="login-button" class="btn" type="button">登录 Console</button>
   </div>
   <div id="account" class="account" hidden></div>
-  <div class="install">
-    未安装 CLI 时，请在本机终端手动执行官方安装命令：
+  <div id="install-guide" class="install" hidden>
+    未检测到 Console CLI，请在本机终端手动执行官方安装命令：
     <code id="install-command">curl -fsSL https://console.tapsvc.com/cli/console-cli/install.sh | sh</code>
     <div class="install-actions">
       <button id="copy-install-command" class="btn" type="button">复制命令</button>
-      <a id="open-install-url" class="btn btn-link" href="https://console.tapsvc.com/cli/console-cli/install.sh" target="_blank" rel="noopener noreferrer">打开官方地址</a>
+      <a id="open-install-url" class="btn btn-link" href="https://console.tapsvc.com/cli/console-cli/install.sh">打开官方地址</a>
+      <button id="retry-install" class="btn" type="button">重新检查</button>
     </div>
   </div>
   <p id="message" role="status"></p>
-  <div id="install-dialog" class="dialog-backdrop" hidden>
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="install-dialog-title">
-      <div id="install-dialog-title" class="dialog-title">需要安装 Console CLI</div>
-      <p class="dialog-copy">插件需要调用本机的 Console CLI。请先在本机终端完成安装，插件不会自动执行远程安装脚本。</p>
-      <code>curl -fsSL https://console.tapsvc.com/cli/console-cli/install.sh | sh</code>
-      <p id="install-dialog-detail" class="dialog-detail"></p>
-      <div class="dialog-actions">
-        <button id="dialog-copy-install-command" class="btn" type="button">复制安装命令</button>
-        <a id="dialog-open-install-url" class="btn btn-link" href="https://console.tapsvc.com/cli/console-cli/install.sh" target="_blank" rel="noopener noreferrer">打开官方地址</a>
-        <button id="retry-install" class="btn" type="button">重新检查</button>
-        <button id="close-install-dialog" class="btn" type="button">稍后处理</button>
-      </div>
-    </div>
-  </div>
   <script src="/settings.js"></script>
 </body>
 </html>
