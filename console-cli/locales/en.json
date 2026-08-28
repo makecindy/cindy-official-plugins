@@ -1,13 +1,13 @@
 {
   "name": "TapTap Console",
-  "description": "Uses the locally installed Console CLI to discover and execute Console agent workflows. The plugin does not call the API directly, store tokens, or bundle the CLI binary.",
-  "whenToUse": "Use for Console resources through the local CLI. Check the CLI and production login first; start browser authorization only when the user explicitly asks to log in.",
+  "description": "Uses the installed console-cli to discover and run TapTap Infra Console agent workflows for delivery, clusters, workloads, LightApps, migrations, inference, and on-call. No direct API calls, token storage, or bundled CLI.",
+  "whenToUse": "Use for TapTap Infra Console apps, deployments, revisions, clusters, workloads, logs, LightApps, migrations, inference, on-call, and change tasks. Order: status; discover overview/skills; help; schema; call; read back mutations. Web-only approvals/releases and users/RBAC go to Console web.",
   "tools": {
-    "console_cli_status": { "description": "Check whether the local Console CLI is installed, its version, and production login state. Returns only safe account and permission summaries, never tokens; gives the official manual install hint when missing." },
+    "console_cli_status": { "description": "First step before any Console operation: check local Console CLI installation, version, and production login. Return only safe account and permission summaries, never tokens; give the official manual install hint when missing." },
     "console_cli_login": { "description": "Only when the user explicitly asks to log in, run console-cli auth login so the CLI opens the browser for OAuth and stores its own session. An optional permission level or profile may be supplied, but not both." },
-    "console_cli_discover": { "description": "Read the Console CLI agent-discovery overview or skill list. Read-only; it does not execute Console operations." },
-    "console_cli_help": { "description": "Read root help or help for a lower-case dotted CLI command. Arbitrary flags and shell commands are not accepted." },
-    "console_cli_schema": { "description": "Use console-cli schema to retrieve structured parameters, request body, response, and constraints for a manifest-backed command." },
-    "console_cli_call": { "description": "Execute a manifest-backed command through the local console-cli in the fixed production context. Shell, arbitrary argv, endpoints, and tokens are rejected; mutation failures distinguish not_executed from unknown." }
+    "console_cli_discover": { "description": "Read the official Agent discovery. Start with overview for a new or unclear Console request; use skills when selecting a workflow. Read-only; it does not execute Console operations." },
+    "console_cli_help": { "description": "After selecting a domain or skill, read root help or help for a lower-case dotted command before constructing arguments. Arbitrary flags and shell commands are not accepted." },
+    "console_cli_schema": { "description": "After help, use console-cli schema for the current manifest-backed command's structured parameters, request body, response, and constraints; never guess arguments from memory." },
+    "console_cli_call": { "description": "Only after discovery, help, and schema, execute a current manifest-backed command through local console-cli in fixed production context. Follow skill confirmation or approval rules, read back mutation status, and distinguish not_executed from unknown; web-only approvals, production release execution, and RBAC go to Console web." }
   }
 }

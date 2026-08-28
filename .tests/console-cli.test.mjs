@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.10');
+  assert.equal(manifest.version, '0.1.11');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -29,6 +29,28 @@ test('manifest uses a production-only Node CLI bridge', () => {
     manifest.tools.map((tool) => tool.name),
     ['console_cli_status', 'console_cli_login', 'console_cli_discover', 'console_cli_help', 'console_cli_schema', 'console_cli_call'],
   );
+});
+
+test('manifest and locales record Console recall boundaries and CLI call order', () => {
+  assert.match(manifest.whenToUse, /TapTap Infra Console/);
+  for (const term of ['console_cli_status', 'console_cli_discover', 'skills', 'help', 'schema', 'call']) {
+    assert.ok(manifest.whenToUse.includes(term), `manifest.whenToUse should mention ${term}`);
+  }
+  assert.match(manifest.whenToUse, /审批|生产上线执行|RBAC/);
+
+  for (const locale of ['en', 'zh-CN', 'ja', 'ko']) {
+    const resource = JSON.parse(readFileSync(path.join(pluginRoot, 'locales', `${locale}.json`), 'utf8'));
+    const text = resource.whenToUse;
+    const order = ['status', 'discover', 'skills', 'help', 'schema'];
+    for (let index = 1; index < order.length; index += 1) {
+      assert.ok(
+        text.indexOf(order[index - 1]) < text.indexOf(order[index]),
+        `${locale}.whenToUse should preserve ${order[index - 1]} before ${order[index]}`,
+      );
+    }
+    assert.match(text, /schema[\s\S]{0,40}call/);
+    assert.match(text, /RBAC/);
+  }
 });
 
 test('display name is consistent across the manifest and locales', () => {
