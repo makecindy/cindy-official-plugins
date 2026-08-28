@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.7');
+  assert.equal(manifest.version, '0.1.8');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -58,6 +58,8 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.match(settingsScript, /requestSequence !== statusSequence/);
   assert.match(settingsScript, /STATUS_REQUEST_TIMEOUT_MS = 15000/);
   assert.doesNotMatch(settingsScript, /STATUS_UI_NOTICE_MS|后台进行/);
+  assert.match(settingsScript, /请点击“检查状态”检测本机 Console CLI/);
+  assert.doesNotMatch(settingsScript, /\n\s+void checkStatus\(\);\n\}\(\);/);
   assert.doesNotMatch(settings, /install-dialog|dialog-backdrop|target="_blank"/);
   assert.doesNotMatch(settingsScript, /setInstallDialogVisible|dialog-copy-install-command|close-install-dialog/);
   assert.match(settingsScript, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);

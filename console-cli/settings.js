@@ -174,5 +174,5 @@
   $('login-button').addEventListener('click', function () { void login(); });
   $('copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
   $('retry-install').addEventListener('click', function () { void checkStatus(); });
-  void checkStatus();
+  showMessage('请点击“检查状态”检测本机 Console CLI。');
 }());

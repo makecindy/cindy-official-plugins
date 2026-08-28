@@ -4,7 +4,7 @@
   "name": "TapTap Console",
   "description": "通过本机安装的 Console CLI 在 Cindy 中发现并执行 Console 的 Agent 工作流；插件不直接调用 Console API、不保存 Token，也不打包 CLI 二进制。",
   "whenToUse": "需要通过 Console CLI 查询或操作应用、部署、集群、任务、发布或值班资源时使用。先调用 console_cli_status 检查 CLI 和登录状态；未安装时按返回提示手动安装，未登录时仅在用户明确要求后调用 console_cli_login。",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
