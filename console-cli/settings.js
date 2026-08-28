@@ -3,6 +3,8 @@
 
   var INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
   var INSTALL_COMMAND = 'curl -fsSL ' + INSTALL_URL + ' | sh';
+  var STATUS_REQUEST_TIMEOUT_MS = 120000;
+  var STATUS_UI_NOTICE_MS = 5000;
   var channel = typeof BroadcastChannel === 'function'
     ? new BroadcastChannel('console-cli-settings')
     : null;
@@ -127,8 +129,14 @@
     var requestSequence = ++statusSequence;
     $('status-button').disabled = true;
     showMessage('正在检查本机 Console CLI…');
+    var noticeTimer = setTimeout(function () {
+      if (requestSequence !== statusSequence) return;
+      setInstallGuideVisible(true);
+      showMessage('检查仍在后台进行；如果尚未安装 Console CLI，可按下方命令安装，完成后点击“重新检查”。');
+      $('status-button').disabled = false;
+    }, STATUS_UI_NOTICE_MS);
     try {
-      var result = await request('status', {}, 30000);
+      var result = await request('status', {}, STATUS_REQUEST_TIMEOUT_MS);
       if (requestSequence !== statusSequence) return;
       showAccount(result);
       setInstallGuideVisible(false);
@@ -144,6 +152,7 @@
         showMessage(error.message, true);
       }
     } finally {
+      clearTimeout(noticeTimer);
       if (requestSequence === statusSequence) $('status-button').disabled = false;
     }
   }

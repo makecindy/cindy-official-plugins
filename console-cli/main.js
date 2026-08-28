@@ -53,7 +53,7 @@ async function nodeRequest(method, params, options) {
 
 async function statusResult() {
   try {
-    return { ok: true, result: await nodeRequest('console/status', {}, { timeoutMs: 30000 }) };
+    return { ok: true, result: await nodeRequest('console/status', {}, { timeoutMs: 120000 }) };
   } catch (error) {
     return fail(error && error.message ? error.message : 'Console CLI 状态查询失败');
   }
