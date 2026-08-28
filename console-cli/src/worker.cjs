@@ -6,21 +6,15 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
-const CONTEXT_ARGS = ['--context=prod'];
 const MAX_OUTPUT_BYTES = 768 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 600;
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 const STATUS_COMMAND_TIMEOUT_MS = 3_000;
-const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const FIXED_COMMANDS = new Set([
-  'auth',
-  'completion',
-  'deploy',
-  'schema',
-  'skill',
-  'upgrade',
-  'version',
-]);
+const RUN_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
+const MAX_ARG_COUNT = 128;
+const MAX_ARG_CHARS = 16 * 1024;
+const MAX_TOTAL_ARG_CHARS = 64 * 1024;
+const FORBIDDEN_AGENT_FLAGS = ['--token', '--server-endpoint', '--web-url'];
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -173,13 +167,35 @@ function failureResult(run, fallback, execution) {
   return fail(failureMessage(run, fallback), execution);
 }
 
-function classifyExecution(run, method) {
-  if (!MUTATING_METHODS.has(method)) return undefined;
+function classifyExecution(run) {
+  if (!run.started || run.kind === 'missing') return 'not_executed';
   const lower = String(run.diagnostic || '').toLowerCase();
   if (/not logged in|api token is required|cached access token has expired|unknown command|unknown flag|parse --params|parse --json|request body is required|401|unauthorized|403|forbidden|permission denied/.test(lower)) {
     return 'not_executed';
   }
   return 'unknown';
+}
+
+function normalizeRunArgs(params) {
+  const argv = isObject(params) ? params.argv : undefined;
+  if (!Array.isArray(argv) || argv.length === 0 || argv.length > MAX_ARG_COUNT) {
+    throw new Error(`argv 必须是 1–${MAX_ARG_COUNT} 个 CLI 参数组成的数组`);
+  }
+  let totalChars = 0;
+  const normalized = argv.map((arg) => {
+    if (typeof arg !== 'string' || arg.length === 0 || arg.length > MAX_ARG_CHARS || arg.includes('\u0000')) {
+      throw new Error(`argv 每项必须是 1–${MAX_ARG_CHARS} 字符且不含 NUL 的字符串`);
+    }
+    totalChars += arg.length;
+    return arg;
+  });
+  if (totalChars > MAX_TOTAL_ARG_CHARS) throw new Error(`argv 总长度不能超过 ${MAX_TOTAL_ARG_CHARS} 字符`);
+  for (const arg of normalized) {
+    if (FORBIDDEN_AGENT_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`))) {
+      throw new Error('argv 不允许传 --token、--server-endpoint 或 --web-url；请使用 Console CLI 本地登录态和默认服务地址');
+    }
+  }
+  return normalized;
 }
 
 function normalizeLoginArgs(params) {
@@ -204,16 +220,15 @@ function normalizeLoginArgs(params) {
 }
 
 async function status() {
-  const version = await runCli(['version', ...CONTEXT_ARGS], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
+  const version = await runCli(['version'], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
   if (!version.ok) return failureResult(version, 'Console CLI 状态查询失败');
-  const auth = await runCli(['auth', 'status', ...CONTEXT_ARGS], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
+  const auth = await runCli(['auth', 'status'], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
   if (!auth.ok) return failureResult(auth, 'Console CLI 登录状态查询失败');
   const versionData = parseOutput(version.stdout);
   const authData = parseOutput(auth.stdout);
   const loggedIn = isObject(authData) && typeof authData.email === 'string' || isObject(authData) && typeof authData.authorization_mode === 'string';
   const result = {
     installed: true,
-    context: 'prod',
     cli_version: isObject(versionData) && typeof versionData.version === 'string' ? versionData.version : String(versionData || 'unknown'),
     logged_in: loggedIn,
   };
@@ -232,7 +247,7 @@ async function login(params) {
   } catch (error) {
     return fail(error.message, 'not_executed');
   }
-  const args = ['auth', 'login', ...CONTEXT_ARGS];
+  const args = ['auth', 'login'];
   if (loginArgs.permission_level) args.push('--permission-level', loginArgs.permission_level);
   if (loginArgs.permission_profile) args.push('--permission-profile', loginArgs.permission_profile);
   const run = await runCli(args, { timeoutMs: LOGIN_TIMEOUT_MS, heartbeatMs: 10000 });
@@ -250,7 +265,7 @@ async function discover(params) {
   const mode = isObject(params) && params.mode !== undefined ? params.mode : 'overview';
   if (mode !== 'overview' && mode !== 'skills') return fail('mode 必须是 overview 或 skills', 'not_executed');
   const command = mode === 'skills' ? ['skill', 'list'] : ['skill', 'show', 'overview'];
-  const run = await runCli([...command, ...CONTEXT_ARGS]);
+  const run = await runCli(command);
   if (!run.ok) return failureResult(run, 'Console CLI discovery 失败');
   return { ok: true, result: { mode, content: parseOutput(run.stdout) } };
 }
@@ -262,7 +277,7 @@ async function help(params) {
   } catch (error) {
     return fail(error.message, 'not_executed');
   }
-  const run = await runCli([...parts, '--help', ...CONTEXT_ARGS]);
+  const run = await runCli([...parts, '--help']);
   if (!run.ok) return failureResult(run, 'Console CLI 帮助查询失败', 'not_executed');
   return { ok: true, result: { command: commandString(parts), content: parseOutput(run.stdout) } };
 }
@@ -278,58 +293,25 @@ async function schema(params) {
   if (input.resolve_refs !== undefined && typeof input.resolve_refs !== 'boolean') return fail('resolve_refs 必须是 boolean', 'not_executed');
   const args = ['schema', commandString(parts)];
   if (input.resolve_refs === true) args.push('--resolve-refs');
-  args.push(...CONTEXT_ARGS);
   const run = await runCli(args);
   if (!run.ok) return failureResult(run, 'Console CLI schema 查询失败', 'not_executed');
   return { ok: true, result: parseOutput(run.stdout) };
 }
 
-async function call(params) {
-  let parts;
+async function run(params) {
+  let argv;
   try {
-    parts = commandParts(isObject(params) ? params.command : undefined, true);
+    argv = normalizeRunArgs(params);
   } catch (error) {
     return fail(error.message, 'not_executed');
   }
-  if (FIXED_COMMANDS.has(parts[0])) return fail(`console_cli_call 只允许 manifest-backed 命令，不能调用 ${parts[0]}；请使用对应的专用 discovery/login 工具。`, 'not_executed');
-  const input = isObject(params) ? params : {};
-  const command = commandString(parts);
-  const schemaRun = await runCli(['schema', command, ...CONTEXT_ARGS]);
-  if (!schemaRun.ok) return failureResult(schemaRun, '调用前无法读取 Console CLI schema', 'not_executed');
-  const schemaData = parseOutput(schemaRun.stdout);
-  const method = isObject(schemaData) && typeof schemaData.httpMethod === 'string'
-    ? schemaData.httpMethod.toUpperCase()
-    : 'GET';
-  if (!/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(method)) return fail('Console CLI schema 返回了不支持的 HTTP method', 'not_executed');
-  const cliArgs = [...parts];
-  const cliParams = input.params === undefined ? {} : input.params;
-  if (!isObject(cliParams)) return fail('params 必须是对象', 'not_executed');
-  let paramsJson;
-  try {
-    paramsJson = JSON.stringify(cliParams);
-  } catch (_error) {
-    return fail('params 不是合法 JSON', 'not_executed');
-  }
-  cliArgs.push('--params', paramsJson);
-  if (input.body !== undefined) {
-    let bodyJson;
-    try {
-      bodyJson = JSON.stringify(input.body);
-    } catch (_error) {
-      return fail('body 不是合法 JSON', 'not_executed');
-    }
-    if (bodyJson === undefined) return fail('body 不是合法 JSON', 'not_executed');
-    cliArgs.push('--json', bodyJson);
-  }
-  cliArgs.push(...CONTEXT_ARGS);
-  const run = await runCli(cliArgs, { timeoutMs: 120000, heartbeatMs: 10000 });
-  if (!run.ok) return failureResult(run, `Console CLI ${command} 执行失败`, classifyExecution(run, method));
+  const result = await runCli(argv, { timeoutMs: RUN_COMMAND_TIMEOUT_MS, heartbeatMs: 10000 });
+  if (!result.ok) return failureResult(result, 'Console CLI 执行失败', classifyExecution(result));
   return {
     ok: true,
     result: {
-      command,
-      execution: MUTATING_METHODS.has(method) ? 'executed' : 'not_applicable',
-      data: parseOutput(run.stdout),
+      execution: 'executed',
+      data: parseOutput(result.stdout),
     },
   };
 }
@@ -342,7 +324,7 @@ async function handleRequest(request) {
     case 'console/discover': return discover(request.params);
     case 'console/help': return help(request.params);
     case 'console/schema': return schema(request.params);
-    case 'console/call': return call(request.params);
+    case 'console/run': return run(request.params);
     default: return fail('未知 Console CLI Worker 方法', 'not_executed');
   }
 }
@@ -369,11 +351,11 @@ function startStdio() {
 if (require.main === module) startStdio();
 
 module.exports = {
-  FIXED_COMMANDS,
   classifyExecution,
   commandParts,
   handleRequest,
   normalizeLoginArgs,
+  normalizeRunArgs,
   parseOutput,
   redactDiagnostic,
   resolveCliPath,

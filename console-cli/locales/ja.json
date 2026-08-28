@@ -1,13 +1,13 @@
 {
   "name": "TapTap Console",
   "description": "インストール済みの console-cli で TapTap Infra Console の Agent ワークフローを検出・実行します。アプリ配信、クラスター、ワークロード、LightApp、移行、推論、オンコールに対応し、API を直接呼ばず Token や CLI バイナリを保持しません。",
-  "whenToUse": "TapTap Infra Console（console.tapsvc.com）のアプリ、デプロイ/リビジョン、クラスター、ワークロード/ログ、LightApp、移行、推論サービス、オンコール、変更タスクを確認・操作するときに使用します。順序は status、未知の領域なら discover の overview→skills、help、schema、call；変更後は状態を再取得します。Web 専用の承認/本番リリース実行、ユーザー/RBAC/権限管理には使わず Console Web に案内します。",
+  "whenToUse": "TapTap Infra Console（console.tapsvc.com）のリソースを確認・操作するときに使用します。まず status、不明な作業では必要に応じて discover、help、schema を読み、run に CLI argv を渡して変更後は状態を再取得します。コマンド、flags、schema、権限は CLI が検証し、未対応の作業だけ Console Web に案内します。",
   "tools": {
     "console_cli_status": { "description": "Console 操作の最初に、ローカル CLI の有無、バージョン、本番ログイン状態を確認します。Token は返さず、安全なアカウント・権限概要だけを返し、未インストール時は公式の手動案内を返します。" },
     "console_cli_login": { "description": "ユーザーが明示的にログインを求めた場合だけ console-cli auth login を実行し、CLI がブラウザ OAuth とログイン状態の保存を行います。権限レベルと profile は同時指定できません。" },
     "console_cli_discover": { "description": "公式 Agent discovery を読みます。初回または不明な領域では overview、ワークフロー選択時は skills を使います。読み取り専用です。" },
-    "console_cli_help": { "description": "領域や skill を選んだ後、引数を組み立てる前にルートまたは小文字ドット区切りコマンドの help を読みます。任意の flags や shell は受け付けません。" },
-    "console_cli_schema": { "description": "help の後に console-cli schema で現在の manifest-backed コマンドのパラメーター、本文、レスポンス、制約を取得します。記憶で引数を作らないでください。" },
-    "console_cli_call": { "description": "discovery、help、schema の後だけ、固定された本番環境で manifest-backed コマンドを実行します。skill の確認/承認規則に従い、変更後は状態を再取得し、not_executed と unknown を区別します。承認・本番リリース実行・RBAC は Web へ案内します。" }
+    "console_cli_help": { "description": "CLI コマンド選択の補助として、ルートまたは小文字ドット区切りコマンドの help を任意で読みます。任意の flags や shell は受け付けません。" },
+    "console_cli_schema": { "description": "manifest-backed コマンドの構造化されたパラメーター、本文、レスポンス、制約を確認するため console-cli schema を任意で使います。実行時も CLI 自身が検証します。" },
+    "console_cli_run": { "description": "argv でローカル console-cli を直接実行します。CLI がコマンド、flags、schema、権限を検証し、deploy など静的ワークフローも使えます。プラグインは業務引数を解析せず schema を事前確認せず context も追加せず、実行ファイル固定と shell 無効だけを担います。--token、--server-endpoint、--web-url は拒否します。ログイン、upgrade、デプロイ変更はユーザーの明示要求時だけ実行し、失敗は not_executed と unknown を区別します。" }
   }
 }

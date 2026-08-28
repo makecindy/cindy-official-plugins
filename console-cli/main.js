@@ -103,13 +103,11 @@ async function schemaResult(args) {
   }
 }
 
-async function callResult(args) {
+async function runResult(args) {
   try {
     var input = isObject(args) ? args : {};
-    return { ok: true, result: await nodeRequest('console/call', {
-      command: input.command,
-      ...(input.params !== undefined ? { params: input.params } : {}),
-      ...(input.body !== undefined ? { body: input.body } : {}),
+    return { ok: true, result: await nodeRequest('console/run', {
+      argv: input.argv,
     }, { timeoutMs: 60000, maxTotalMs: 900000 }) };
   } catch (error) {
     return fail(error && error.message ? error.message : 'Console CLI 操作失败', error && error.execution);
@@ -123,7 +121,7 @@ async function dispatch(message) {
   if (message.tool === 'console_cli_discover') return discoverResult(args);
   if (message.tool === 'console_cli_help') return helpResult(args);
   if (message.tool === 'console_cli_schema') return schemaResult(args);
-  if (message.tool === 'console_cli_call') return callResult(args);
+  if (message.tool === 'console_cli_run') return runResult(args);
   return fail('未知工具: ' + String(message.tool || ''));
 }
 

@@ -3,8 +3,8 @@
   "id": "console-cli",
   "name": "TapTap Console",
   "description": "通过本机安装的 console-cli 发现并执行 TapTap Infra Console 的 Agent 工作流，覆盖应用交付、集群与工作负载、LightApp、迁移、推理、告警值班等；插件不直接调用 API、不保存 Token、不打包 CLI。",
-  "whenToUse": "当用户要查询或处理 TapTap Infra Console（console.tapsvc.com）中的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理服务、告警值班或变更任务时使用。顺序：先 console_cli_status；首次或不确定领域先 console_cli_discover(overview)，需要选工作流再 skills；随后 help、schema、call；写操作后回读确认状态。审批/生产上线执行、用户/RBAC/权限治理等 Web 专属场景不要调用本插件，应引导 Console 控制台。",
-  "version": "0.1.12",
+  "whenToUse": "处理 TapTap Infra Console（console.tapsvc.com）的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理、值班或变更任务时使用。先 status；新或不确定领域可读 discover、help、schema，再用 run 传入 CLI argv，变更后回读。命令、flags、schema、权限由 CLI 判断；CLI 不支持的工作流转 Console 控制台。",
+  "version": "0.1.13",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -39,7 +39,7 @@
     },
     {
       "name": "console_cli_login",
-      "description": "在用户明确要求登录时调用本机 console-cli auth login --context=prod；由 CLI 打开浏览器完成 OAuth，登录态由 CLI 自己保存。可选 permission_level 或 permission_profile，但二者不能同时传；未安装 CLI 时只提示手动安装。",
+      "description": "在用户明确要求登录时调用本机 console-cli auth login；由 CLI 打开浏览器完成 OAuth，登录态由 CLI 自己保存。可选 permission_level 或 permission_profile，但二者不能同时传；未安装 CLI 时只提示手动安装。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -77,7 +77,7 @@
     },
     {
       "name": "console_cli_help",
-      "description": "选定领域或 skill 后先读取本机 Console CLI 的 --help，再构造参数。可省略 command 查看根帮助，或传小写点分命令路径（例如 deployment.logs）；不接受任意 flags 或 shell。",
+      "description": "可选地读取本机 Console CLI 的 --help，帮助 Agent 选择命令。可省略 command 查看根帮助，或传小写点分命令路径（例如 deployment.logs）；不接受任意 flags 或 shell。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -91,7 +91,7 @@
     },
     {
       "name": "console_cli_schema",
-      "description": "在 help 之后调用 console-cli schema，获取 manifest-backed 命令的结构化参数、请求体、响应和约束；不要凭记忆拼参数。先通过 discovery 找到领域，再传小写点分命令路径，例如 app.list。",
+      "description": "可选地调用 console-cli schema，获取 manifest-backed 命令的结构化参数、请求体、响应和约束；CLI 执行时仍会自行验证。传小写点分命令路径，例如 app.list。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -109,24 +109,22 @@
       }
     },
     {
-      "name": "console_cli_call",
-      "description": "仅在 discovery、help、schema 完成后执行 manifest-backed Console 命令；command 必须来自当前 CLI manifest。插件固定生产 context，不接受 shell、任意 argv、endpoint 或 Token。写操作前遵守 skill 的确认/审批规则，成功后回读状态；失败区分 not_executed 与 unknown，unknown 先查状态再重试。审批、生产发布执行、RBAC 等不支持场景引导 Web 控制台。",
+      "name": "console_cli_run",
+      "description": "直接以 argv 数组调用本机 console-cli；CLI 自己负责命令、flags、schema 和权限校验，支持 manifest 命令与静态工作流（如 deploy）。插件不解析业务参数、不预检 schema、不追加 context；固定执行本机 CLI 且不启用 shell。不得传 --token、--server-endpoint 或 --web-url；涉及登录、升级、发布等副作用的命令仅在用户明确要求后执行。命令未启动时失败为 not_executed，启动后无法确认结果为 unknown。",
       "parameters": {
         "type": "object",
         "properties": {
-          "command": {
-            "type": "string",
-            "description": "Console CLI 的小写点分命令路径，例如 app.list。"
-          },
-          "params": {
-            "type": "object",
-            "description": "传给 CLI --params 的 path/query 参数对象，默认 {}。"
-          },
-          "body": {
-            "description": "仅在 schema 声明 request body 时传给 CLI --json 的 JSON 值。"
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "description": "按终端拆分的 console-cli 参数数组，不含可执行文件；例如 [\"deploy\", \"set-image\", \"--deployment=my-app\", \"--cluster=tap-prod-sh-a\", \"--tag=v1.2.3\"]。"
           }
         },
-        "required": ["command"],
+        "required": ["argv"],
         "additionalProperties": false
       }
     }
