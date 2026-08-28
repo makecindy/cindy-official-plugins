@@ -4,12 +4,14 @@
   var INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
   var INSTALL_COMMAND = 'curl -fsSL ' + INSTALL_URL + ' | sh';
   var STATUS_REQUEST_TIMEOUT_MS = 8000;
+  var AUTO_STATUS_DELAY_MS = 3000;
   var channel = typeof BroadcastChannel === 'function'
     ? new BroadcastChannel('console-cli-settings')
     : null;
   var sequence = 0;
   var statusSequence = 0;
   var pending = Object.create(null);
+  var autoStatusTimer = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -162,6 +164,10 @@
   }
 
   async function login() {
+    if (autoStatusTimer) {
+      clearTimeout(autoStatusTimer);
+      autoStatusTimer = null;
+    }
     $('login-button').disabled = true;
     showMessage('正在调用 Console CLI，浏览器授权完成后会自动返回…', false);
     try {
@@ -182,9 +188,21 @@
     }
   }
 
-  $('status-button').addEventListener('click', function () { void checkStatus(); });
+  function triggerStatusCheck() {
+    if (autoStatusTimer) {
+      clearTimeout(autoStatusTimer);
+      autoStatusTimer = null;
+    }
+    void checkStatus();
+  }
+
+  $('status-button').addEventListener('click', triggerStatusCheck);
   $('login-button').addEventListener('click', function () { void login(); });
   $('copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
-  $('retry-install').addEventListener('click', function () { void checkStatus(); });
-  showMessage('请点击“检查状态”检测本机 Console CLI。');
+  $('retry-install').addEventListener('click', triggerStatusCheck);
+  showMessage('插件正在启动，稍后会自动检查 Console CLI；也可以立即点击“检查状态”。');
+  autoStatusTimer = setTimeout(function () {
+    autoStatusTimer = null;
+    void checkStatus();
+  }, AUTO_STATUS_DELAY_MS);
 }());
