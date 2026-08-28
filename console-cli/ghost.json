@@ -4,7 +4,7 @@
   "name": "TapTap Console",
   "description": "通过本机安装的 console-cli 发现并执行 TapTap Infra Console 的 Agent 工作流，覆盖应用交付、集群与工作负载、LightApp、迁移、推理、告警值班等；插件不直接调用 API、不保存 Token、不打包 CLI。",
   "whenToUse": "当用户要查询或处理 TapTap Infra Console（console.tapsvc.com）中的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理服务、告警值班或变更任务时使用。顺序：先 console_cli_status；首次或不确定领域先 console_cli_discover(overview)，需要选工作流再 skills；随后 help、schema、call；写操作后回读确认状态。审批/生产上线执行、用户/RBAC/权限治理等 Web 专属场景不要调用本插件，应引导 Console 控制台。",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

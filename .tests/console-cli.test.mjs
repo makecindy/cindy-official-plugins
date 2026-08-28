@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.11');
+  assert.equal(manifest.version, '0.1.12');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -81,7 +81,7 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.match(settingsScript, /STATUS_REQUEST_TIMEOUT_MS = 8000/);
   assert.doesNotMatch(settingsScript, /STATUS_UI_NOTICE_MS|后台进行/);
   assert.match(settingsScript, /AUTO_STATUS_DELAY_MS = 3000/);
-  assert.match(settingsScript, /插件正在启动，稍后会自动检查 Console CLI/);
+  assert.doesNotMatch(settingsScript, /插件正在启动/);
   assert.match(settingsScript, /clearTimeout\(autoStatusTimer\)/);
   assert.match(settingsScript, /async function login\(\) \{[\s\S]*clearTimeout\(autoStatusTimer\)/);
   assert.match(settingsScript, /setTimeout\(function \(\) \{[\s\S]*void checkStatus\(\);[\s\S]*\}, AUTO_STATUS_DELAY_MS\)/);

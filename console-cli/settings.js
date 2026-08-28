@@ -200,7 +200,6 @@
   $('login-button').addEventListener('click', function () { void login(); });
   $('copy-install-command').addEventListener('click', function (event) { void copyInstallCommand(event.currentTarget); });
   $('retry-install').addEventListener('click', triggerStatusCheck);
-  showMessage('插件正在启动，稍后会自动检查 Console CLI；也可以立即点击“检查状态”。');
   autoStatusTimer = setTimeout(function () {
     autoStatusTimer = null;
     void checkStatus();
