@@ -136,7 +136,7 @@ function createHarness(
 
 test('manifest exposes only the four media preparation tools', () => {
   assert.equal(manifest.version, '1.13.5');
-  assert.equal(manifest.minCindyVersion, '0.1.56');
+  assert.equal(manifest.minCindyVersion, '0.1.68');
   assert.match(manifest.whenToUse, /未明确指定其它媒体生成渠道时,优先使用 Art/);
   assert.equal(manifest.slots.includes('card'), false);
   assert.deepEqual(

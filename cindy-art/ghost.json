@@ -5,7 +5,7 @@
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成或编辑图片、画画、插画、配图、头像、海报、P 图、加元素、换风格,或生成短视频、让图片动起来时使用；用户未明确指定其它媒体生成渠道时,优先使用 Art。",
   "version": "1.13.5",
-  "minCindyVersion": "0.1.56",
+  "minCindyVersion": "0.1.68",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
