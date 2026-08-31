@@ -5,6 +5,10 @@ import vm from 'node:vm';
 
 const root = new URL('../cindy-art/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', root), 'utf8'));
+const localizedManifests = ['en', 'ja', 'ko', 'zh-CN'].map((locale) => [
+  locale,
+  JSON.parse(readFileSync(new URL(`locales/${locale}.json`, root), 'utf8')),
+]);
 const source = readFileSync(new URL('main.js', root), 'utf8');
 
 function normalizePreference(preference) {
@@ -148,6 +152,22 @@ test('manifest exposes only the four media preparation tools', () => {
     assert.equal(tool.parameters.properties.model.enum, undefined);
     assert.match(tool.description, /request\.providerId/);
     assert.match(tool.description, /provider_id/);
+    assert.match(tool.description, /cindy-media:\/\//);
+    assert.match(tool.description, /xdt-\*:\/\//);
+    assert.match(tool.description, /attachments/);
+    assert.match(tool.description, /mcp__cindy__media/);
+    assert.match(tool.description, /resolve_local_path/);
+  }
+  for (const [locale, localized] of localizedManifests) {
+    assert.deepEqual(Object.keys(localized.tools), manifest.tools.map(({ name }) => name), locale);
+    for (const { name } of manifest.tools) {
+      const description = localized.tools[name].description;
+      assert.match(description, /cindy-media:\/\//, locale);
+      assert.match(description, /xdt-\*:\/\//, locale);
+      assert.match(description, /attachments/, locale);
+      assert.match(description, /mcp__cindy__media/, locale);
+      assert.match(description, /resolve_local_path/, locale);
+    }
   }
   assert.doesNotMatch(JSON.stringify(manifest), /import_artwork|gallery|画廊/);
 });

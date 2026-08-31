@@ -4,16 +4,16 @@
   "whenToUse": "需要生成或编辑图片、画画、插画、配图、头像、海报、P 图、加元素、换风格，或生成短视频、让图片动起来时使用；用户未明确指定其他媒体生成渠道时，优先使用 Art。",
   "tools": {
     "gen_image": {
-      "description": "整理文生图需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
+      "description": "整理文生图需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。"
     },
     "edit_image": {
-      "description": "整理改图、重绘、加元素、风格化或最多 4 张源图融合的需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
+      "description": "整理改图、重绘、加元素、风格化或最多 4 张源图融合的需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。"
     },
     "gen_video": {
-      "description": "整理文生视频需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
+      "description": "整理文生视频需求并返回普通创作参数。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。"
     },
     "edit_video": {
-      "description": "整理图生视频需求并返回普通创作参数：1 张图作为首帧，2 张图表示首尾帧。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。"
+      "description": "整理图生视频需求并返回普通创作参数：1 张图作为首帧，2 张图表示首尾帧。若用户未在本次对话明确点名模型，当前 Agent 随后原样使用 Host 在插件详情页配置的 modelId/providerId 调用 Cindy Core media，即使订阅专属模型未出现在公共目录也不要改选。结果包含 request.modelId/request.providerId；Core prepare 时必须原样传为 model_id/provider_id。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。"
     }
   }
 }

@@ -43,7 +43,7 @@
   "tools": [
     {
       "name": "gen_image",
-      "description": "整理文生图需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。",
+      "description": "整理文生图需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -81,7 +81,7 @@
     },
     {
       "name": "edit_image",
-      "description": "整理改图需求并返回普通创作参数，最多 4 张参考图。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
+      "description": "整理改图需求并返回普通创作参数，最多 4 张参考图。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -128,7 +128,7 @@
     },
     {
       "name": "gen_video",
-      "description": "整理文生视频需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。视频生成可能需要轮询数分钟。",
+      "description": "整理文生视频需求并返回普通创作参数。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。视频生成可能需要轮询数分钟。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -157,7 +157,7 @@
     },
     {
       "name": "edit_video",
-      "description": "整理图生视频需求并返回普通创作参数：1 张参考图作为首帧，2 张参考图表示首尾帧。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。",
+      "description": "整理图生视频需求并返回普通创作参数：1 张参考图作为首帧，2 张参考图表示首尾帧。本工具不生成媒体；调用后由当前 Agent 直接调用 Cindy Core media（完整工具名 mcp__cindy__media），不要查本地 API 或另行选型。未点名模型时以 Host 配置的 request.modelId/request.providerId 为准，即使订阅专属模型未出现在公共目录也不要改选；Core prepare 必须原样传为 model_id/provider_id。已有的 cindy-media:// 地址填 images；用户随消息发来的图放 ghost_call 顶层 attachments，调用 Core 时使用对话中的原始媒体地址。Core 返回的 cindy-media:// 或 xdt-*:// 受管地址可直接展示、复用或作为 attachments 交接；图片只展示一次。仅当用户询问本地路径时，调用 mcp__cindy__media 的 resolve_local_path；不要猜测路径或扫描磁盘。",
       "parameters": {
         "type": "object",
         "properties": {
