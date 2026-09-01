@@ -354,12 +354,22 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 
 A `.cindy` file is a ZIP archive whose root contains `ghost.json`, `main.js`,
 and the declared resources—do not wrap them in an extra `my-plugin/` directory.
-Create it with any ZIP implementation. For example on macOS/Linux:
+After reviewing and committing the plugin files, create the exact archive from
+Git-tracked `HEAD` content with the repository packager:
 
 ```bash
-(cd my-plugin && zip -r ../my-plugin-1.0.0.cindy . \
-  -x '*.cindy' 'node_modules/*' '.git/*' '.DS_Store')
+.github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
+unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
+
+The script uses `git archive` for the plugin directory, adds the fixed repository
+legal files, and validates the result. It intentionally excludes uncommitted and
+untracked files from the plugin directory. Never
+recursively ZIP a plugin working directory: local `.env`, `.npmrc`, private keys,
+or other credentials may be included. If a harness packages an uncommitted
+working copy, it must select an explicit reviewed file list. Before installation
+or sharing, inspect the archive listing for the expected files, no outer plugin
+directory, and no credentials.
 
 The user can import that file through Cindy's local plugin entry. If the chosen
 harness exposes Cindy Forge tools, `ghost_forge_scaffold` can create the same v3

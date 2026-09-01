@@ -568,6 +568,15 @@ test('authoring docs provide a harness-independent Manifest-v3 path', () => {
 
   for (const file of ['README.md', 'README.zh-CN.md']) {
     const contents = docs.get(file);
+    assert.ok(
+      contents.includes('.github/scripts/package-plugin.sh'),
+      `${file} must use the tracked-content package script`,
+    );
+    assert.doesNotMatch(
+      contents,
+      /zip\s+-r\b/,
+      `${file} must not recommend recursively packaging a working directory`,
+    );
     for (const runtimeContract of ['cindy.onHostMessage', 'cindy.send', 'tool-result']) {
       assert.ok(contents.includes(runtimeContract), `${file} must document ${runtimeContract}`);
     }

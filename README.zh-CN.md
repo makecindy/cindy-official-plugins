@@ -294,12 +294,19 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 ```
 
 `.cindy` 是普通 ZIP：压缩包根目录必须直接包含 `ghost.json`、`main.js` 和声明的资源，
-不能在外层再套一层 `my-plugin/`。可以使用任意 ZIP 实现；macOS/Linux 示例：
+不能在外层再套一层 `my-plugin/`。审查并提交插件文件后，用仓库打包脚本从 Git 已跟踪的
+`HEAD` 内容生成确切产物：
 
 ```bash
-(cd my-plugin && zip -r ../my-plugin-1.0.0.cindy . \
-  -x '*.cindy' 'node_modules/*' '.git/*' '.DS_Store')
+.github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
+unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
+
+该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件并校验产物，刻意不包含
+插件目录中未提交和未跟踪的文件。
+不要递归压缩插件工作目录，否则本地 `.env`、`.npmrc`、私钥或其他凭证可能进入包中。
+若 harness 要打包尚未提交的工作区，必须使用经过审查的显式文件清单。安装或分享前，
+检查归档列表只含预期文件、没有外层插件目录，也没有凭证。
 
 用户可以从 Cindy 的本地插件入口导入这个包。如果当前 harness 恰好提供 Cindy Forge
 工具，`ghost_forge_scaffold` 可以生成同样的 v3 基线，`ghost_forge_pack` 可以校验并

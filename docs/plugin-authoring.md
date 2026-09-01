@@ -7,7 +7,7 @@
 This reference works with any coding Agent, editor, or human developer. Cindy
 Forge and a particular harness are not prerequisites. See the
 [README](../README.md#local-development) for the minimum layout, complete starter
-Manifest, and ZIP packaging, and [Contributing](../CONTRIBUTING.md) for official
+Manifest, and package format, and [Contributing](../CONTRIBUTING.md) for official
 publishing requirements. This document adds migration mappings and common runtime calls.
 
 ## Derive changes from the task
@@ -290,10 +290,12 @@ proof of account connection.
    every official publishing rule.
 3. Run the repository gates and relevant plugin tests from Contributing. The
    official `.github/scripts/package-plugin.sh <directory> <output.cindy>`
-   archives committed **HEAD**, not uncommitted changes. The README's ZIP command
-   can package a working copy, but production verification must cover the final
-   submitted contents. Inspect the archive root and declared files; do not wrap
-   them in an outer plugin directory.
+   archives that plugin's committed **HEAD** content and adds fixed repository
+   legal files; it does not include uncommitted plugin changes. Never recursively
+   ZIP a working directory: a local credential file can enter the archive. A harness
+   packaging uncommitted work must use an explicit reviewed file list. Inspect
+   every final archive for expected files, no outer plugin directory, and no
+   credentials; production verification must cover the submitted contents.
 4. Install the final package in a production stable Cindy build meeting its real
    minimum, exercise core tools and failures, and check retained capabilities.
    The Agent does this when authorized operating tools are available; otherwise

@@ -5,7 +5,7 @@
 # 插件编写与迁移参考
 
 本文供任何 coding Agent、编辑器或人工开发者使用，不依赖 Cindy Forge 或特定 harness。
-最小目录、完整入门 Manifest 与 ZIP 打包见 [README](../README.zh-CN.md#本地开发)；
+最小目录、完整入门 Manifest 与包格式见 [README](../README.zh-CN.md#本地开发)；
 官方仓发布要求见 [贡献指南](../CONTRIBUTING.zh-CN.md)。本文补充迁移映射与常用运行时调用。
 
 ## 从任务事实推导改动
@@ -245,9 +245,11 @@ Worker 使用明文时用 `node.secretBindings` 限定方法和入口，Host 在
 2. `node scripts/validate-plugin-manifest.mjs ./<目录>` 只校验 JSON/Manifest 形状，
    不检查文件存在、包内容、目标客户端实际支持情况或官方仓全部发布规则。
 3. 按贡献指南运行仓库门禁及相关插件测试。官方打包脚本
-   `.github/scripts/package-plugin.sh <目录> <输出.cindy>` 从已提交的 **HEAD** 归档，
-   不会包含未提交修改；验证工作区产物可先用 README 的 ZIP 命令，正式验收必须对应
-   最终提交内容。查看包根目录及声明文件，不能把外层插件目录一起套进去。
+   `.github/scripts/package-plugin.sh <目录> <输出.cindy>` 从已提交的 **HEAD** 归档
+   该插件并补入固定的仓库法律文件，不会包含插件目录中的未提交修改。禁止递归压缩
+   工作目录，避免本地凭证文件混入包中；harness
+   打包未提交工作区时必须使用经过审查的显式文件清单。检查每个最终归档只含预期文件、
+   没有外层插件目录或凭证；正式验收必须对应最终提交内容。
 4. 在满足真实最低版本的生产稳定版 Cindy 上安装最终包，实际调用核心工具、确认失败
    分支和原有能力仍可用。有可用且获授权的操作工具时由 Agent 完成；否则明确交接
    尚未验证的步骤，不能替作者虚假勾选。CI 读取的是 PR 实机验证声明，不是实机证据
