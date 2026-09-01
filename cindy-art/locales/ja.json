@@ -1,19 +1,19 @@
 {
   "name": "Art",
   "description": "Cindy の画像・動画機能で、画像の生成と編集、短い動画の生成を行います。$cindy-art で直接呼び出すこともできます。",
-  "whenToUse": "画像、イラスト、挿絵、アバター、ポスターの作成、生成済み画像への要素追加やスタイル変更、短い動画の生成、静止画のアニメーション化が必要なときに使用します。",
+  "whenToUse": "画像、イラスト、挿絵、アバター、ポスターの作成や編集、要素追加、スタイル変更、短い動画の生成、静止画のアニメーション化に使用します。ユーザーが別のメディア生成手段を明示していない場合は Art を優先します。",
   "tools": {
     "gen_image": {
-      "description": "テキストから画像を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
+      "description": "テキストから画像を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。Core が返す cindy-media:// または xdt-*:// の管理 URI は、そのまま表示、再利用、attachments で受け渡しできます。画像は 1 回だけ表示します。ユーザーがローカルパスを求めた場合に限り mcp__cindy__media の resolve_local_path を呼び出し、パスを推測したりディスクを走査したりしないでください。"
     },
     "edit_image": {
-      "description": "最大 4 枚の参照画像を編集、再描画、要素追加、スタイル変換、合成するための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
+      "description": "最大 4 枚の参照画像を編集、再描画、要素追加、スタイル変換、合成するための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。Core が返す cindy-media:// または xdt-*:// の管理 URI は、そのまま表示、再利用、attachments で受け渡しできます。画像は 1 回だけ表示します。ユーザーがローカルパスを求めた場合に限り mcp__cindy__media の resolve_local_path を呼び出し、パスを推測したりディスクを走査したりしないでください。"
     },
     "gen_video": {
-      "description": "テキストから動画を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
+      "description": "テキストから動画を作るための通常パラメーターを整理します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。Core が返す cindy-media:// または xdt-*:// の管理 URI は、そのまま表示、再利用、attachments で受け渡しできます。画像は 1 回だけ表示します。ユーザーがローカルパスを求めた場合に限り mcp__cindy__media の resolve_local_path を呼び出し、パスを推測したりディスクを走査したりしないでください。"
     },
     "edit_video": {
-      "description": "参照画像から動画を作る通常パラメーターを整理します。1 枚は先頭フレーム、2 枚は先頭と末尾を表します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。"
+      "description": "参照画像から動画を作る通常パラメーターを整理します。1 枚は先頭フレーム、2 枚は先頭と末尾を表します。この会話でユーザーがモデルを明示していない場合、現在の Agent は Host がプラグイン詳細ページで設定した modelId/providerId をそのまま使います。公開カタログにないサブスクリプション専用モデルでも別モデルに置き換えません。結果には request.modelId と request.providerId が含まれ、Core prepare では model_id と provider_id としてそのまま渡します。Core が返す cindy-media:// または xdt-*:// の管理 URI は、そのまま表示、再利用、attachments で受け渡しできます。画像は 1 回だけ表示します。ユーザーがローカルパスを求めた場合に限り mcp__cindy__media の resolve_local_path を呼び出し、パスを推測したりディスクを走査したりしないでください。"
     }
   }
 }

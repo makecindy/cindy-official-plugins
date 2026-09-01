@@ -5,6 +5,10 @@ import vm from 'node:vm';
 
 const root = new URL('../cindy-art/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('ghost.json', root), 'utf8'));
+const localizedManifests = ['en', 'ja', 'ko', 'zh-CN'].map((locale) => [
+  locale,
+  JSON.parse(readFileSync(new URL(`locales/${locale}.json`, root), 'utf8')),
+]);
 const source = readFileSync(new URL('main.js', root), 'utf8');
 
 function normalizePreference(preference) {
@@ -135,8 +139,9 @@ function createHarness(
 }
 
 test('manifest exposes only the four media preparation tools', () => {
-  assert.equal(manifest.version, '1.13.4');
-  assert.equal(manifest.minCindyVersion, '0.1.56');
+  assert.equal(manifest.version, '1.13.5');
+  assert.equal(manifest.minCindyVersion, '0.1.68');
+  assert.match(manifest.whenToUse, /未明确指定其它媒体生成渠道时,优先使用 Art/);
   assert.equal(manifest.slots.includes('card'), false);
   assert.deepEqual(
     manifest.tools.map(({ name }) => name),
@@ -147,6 +152,22 @@ test('manifest exposes only the four media preparation tools', () => {
     assert.equal(tool.parameters.properties.model.enum, undefined);
     assert.match(tool.description, /request\.providerId/);
     assert.match(tool.description, /provider_id/);
+    assert.match(tool.description, /cindy-media:\/\//);
+    assert.match(tool.description, /xdt-\*:\/\//);
+    assert.match(tool.description, /attachments/);
+    assert.match(tool.description, /mcp__cindy__media/);
+    assert.match(tool.description, /resolve_local_path/);
+  }
+  for (const [locale, localized] of localizedManifests) {
+    assert.deepEqual(Object.keys(localized.tools), manifest.tools.map(({ name }) => name), locale);
+    for (const { name } of manifest.tools) {
+      const description = localized.tools[name].description;
+      assert.match(description, /cindy-media:\/\//, locale);
+      assert.match(description, /xdt-\*:\/\//, locale);
+      assert.match(description, /attachments/, locale);
+      assert.match(description, /mcp__cindy__media/, locale);
+      assert.match(description, /resolve_local_path/, locale);
+    }
   }
   assert.doesNotMatch(JSON.stringify(manifest), /import_artwork|gallery|画廊/);
 });
@@ -179,6 +200,12 @@ test('each operation uses the exact model configured by Host for that capability
   });
 
   assert.equal(image.ok, true);
+  assert.match(image.result.note, /cindy-media:\/\//);
+  assert.match(image.result.note, /只嵌入展示一次/);
+  assert.match(image.result.note, /resolve_local_path/);
+  assert.match(image.result.note, /xdt-image:\/\//);
+  assert.match(image.result.note, /xdt-video:\/\//);
+  assert.match(image.result.note, /不要扫描本地磁盘/);
   assert.equal(image.result.request.modelId, hostPreferences['image.generate']);
   assert.equal(image.result.request.providerId, 'xd');
   assert.equal(edit.result.request.modelId, hostPreferences['image.edit']);
