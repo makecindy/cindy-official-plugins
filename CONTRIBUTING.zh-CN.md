@@ -12,9 +12,15 @@
 
 - 先读 [README.zh-CN.md](README.zh-CN.md)：仓库结构、插件清单、审查标准和发布流程
   都以它为准，本指南不重复维护副本。
-- 完整的插件编写契约（`ghost.json` 全字段、卡槽、`cindy.send` 管子 API、打包流程）由
-  Cindy 客户端内置的 `ghost_forge_guide` 工具返回——在 Cindy 对话里说「帮我做一个插件」
-  即可拿到当时版本的手册。
+- 插件编写契约就在本仓库中：`README.zh-CN.md`、本指南、`.tests/contracts/` 中固定
+  版本的 Manifest 校验器和打包门禁共同组成正本。无论用哪一种 Agent 或 harness
+  创建文件都遵循同一契约；Cindy Forge 命令只是可选捷径。
+- 字段映射与具体运行时调用见[插件编写与迁移参考](docs/plugin-authoring.zh-CN.md)。
+  执行任务的 Agent 根据现有代码处理适配，作者不需要自行提供迁移步骤。
+- 增加 Manifest 字段前先判断谁执行：插件工具是否执行由既有 Agent 授权决定；普通
+  HTTPS 与 workdir 操作使用 Host 下发的在途 `callId`，CLI 继续走已有 Node 工作进程。
+  具体命令、域名或路径无需预登记；脱离该调用的插件自主 Host 能力须有对应声明。
+  随包 Node 入口与 Host 托管凭证即使在工具调用内使用，也仍需显式声明。
 - 参与社区时请遵守 [`CODE_OF_CONDUCT.zh-CN.md`](CODE_OF_CONDUCT.zh-CN.md)；普通使用问题见
   [`SUPPORT.zh-CN.md`](SUPPORT.zh-CN.md)。
 - 不要提交凭证、令牌、邮箱授权码、OAuth refresh token、个人数据或真实用户邮件内容——
@@ -22,11 +28,20 @@
 
 ## 开发与验证
 
-典型流程：
+从 [`README.zh-CN.md` 的「工具无关的快速路径」](README.zh-CN.md#工具无关的快速路径)
+开始：
 
-1. 用客户端的 `ghost_forge_scaffold` 生成骨架，或直接照抄本仓任一插件的目录结构。
-2. 在开发环境里导入插件目录或 `.cindy` 包验证。
-3. 完成后用 `ghost_forge_pack` 打成 `.cindy` 安装验证。
+1. 对齐设计与最小能力后，使用普通文件操作在仓库根目录创建新的插件目录。
+2. 从文档中的 Manifest v3 与 `main.js` 示例开始。**不要复制本仓现有插件的
+   `ghost.json`**：未改动的官方插件可能刻意保留旧 v2 清单。现有源码只能用于参考
+   实现方式。
+3. 运行 `node scripts/validate-plugin-manifest.mjs ./<插件目录>` 校验 Manifest。
+4. 把插件目录的**内容**（不是目录本身）压成 `.cindy` ZIP 包，并从 Cindy 本地插件
+   入口导入这一个确切的包。
+5. 如果当前 harness 提供 Cindy Forge 命令，可以用它替代手工脚手架/打包步骤；它不会
+   改变源码格式和审查契约。安装仍然必须来自用户的明确要求。
+6. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
+   `ja`、`ko` 四份 locale 资源。
 
 `.tests/` 下的 `*.test.mjs` 用 Node 内置 test runner 运行，例如：
 
@@ -67,15 +82,27 @@ cd 163-mail && npm ci && npm run build
    `build` / `ci`。
 3. **改动插件内容必须在同一个 PR 里 bump `ghost.json` 的 `version`。** 新的
    `major.minor.patch` SemVer 必须大于 `main` 上的当前版本，否则 CI 会阻止合并。
+   同一个改动还必须把现有 v2 清单迁移为 `schemaVersion: 3`：增加
+   `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。按
+   [映射表](docs/plugin-authoring.zh-CN.md#manifest-v2-到-v3保留行为转换表达)
+   保留 `card`、`sessionContext` 等纯声明能力；仅删除 `slots` 不算完成迁移。`minCindyVersion`
+   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个 Cindy 正式稳定版本；
+   Manifest v3 本身不设置仓库级 Cindy 版本下限。
+   未改动的 v2 插件刻意保持原样，禁止批量迁移。
+   Plugin Server 按用户当前 Cindy 版本选择最近曾上架的兼容 Release；current 不兼容时
+   回退到兼容历史版本，没有兼容历史版本时不展示该插件。
+   Desktop 以该 Server 选择为准，不再追加 `minCindyVersion` 二次筛选或安装确认，
+   因此必须准确填写这个字段。
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
-   Agent 行为的影响——这段描述就是 Agent 读到的使用手册。新增或提高
-   `minCindyVersion` 时，还要记录真实 `.cindy` 包在该精确 Cindy 版本的安装结果；降低
-   或删除该字段会扩大声称支持的范围，必须交维护者人工 review。
+   Agent 行为的影响——这段描述就是 Agent 读到的使用手册。每个改动插件都必须先在
+   运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并验证核心功能，再勾选 PR
+   的生产版 Cindy 验证项；插件声明 `minCindyVersion` 时，验证所用 Cindy 版本必须
+   不低于该最低版本。降低或删除该字段会扩大声称支持的范围，必须交维护者人工 review。
 
 每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 Server / Desktop 交付
 契约、localization 与 provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装
-该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。真正上传仍只在合入
-`main` 后发生。
+该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。只要 PR 改动了插件
+包，CI 还会要求 PR Body 勾选生产版 Cindy 验证项。真正上传仍只在合入 `main` 后发生。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后区域 Workflow 会把改动包提交

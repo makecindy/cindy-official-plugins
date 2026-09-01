@@ -64,8 +64,9 @@ The Cindy client is responsible for:
 2. Validating at Forge packaging time and at install time that the resource
    files exist, are valid JSON, are no larger than 64KB each, and fully cover
    the manifest's existing fields and all tools.
-3. Resolving the plugin list, details, install confirmation, and the Agent tool
-   catalog using the host's current language.
+3. Resolving the plugin list, details (including declared capabilities), and
+   the Agent tool catalog using the host's current language. Installation and
+   source-bound updates do not add a separate capability-confirmation dialog.
 4. Falling back to the English resources when the plugin lacks the target
    language, the host language is unsupported, or the installed target
    resource is corrupted.
