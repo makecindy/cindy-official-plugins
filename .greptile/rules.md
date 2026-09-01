@@ -8,6 +8,15 @@
 
 ## 设计契约
 
+### 授权跟随执行者
+
+当前 Agent 工具调用内的普通 HTTPS 与 workdir 文件操作，使用 Host 下发且严格在途的
+`callId` 复用 Cindy 既有 Agent 授权；CLI 继续走已有 Node 工作进程，工具是否执行由
+当前 `ghost_call` 的既有 Agent 授权决定。不得仅为了预登记具体命令、域名或路径新增
+Slot 或 Manifest 字段。只有 Panel、订阅、scheduler、常驻进程等脱离当前 Agent 调用的
+自主 Host 能力，才必须在 `ghost.json` 直接声明；自主 Node Runtime 仍须声明顶层
+`node`、固定入口和最小子进程边界。Host 托管凭证也仍须按声明守门。
+
 ### tool description 即契约
 
 `ghost.json` 里每个 tool 的 `description` 与顶层 `whenToUse` 是 Agent 读到的唯一
@@ -82,13 +91,20 @@ manifest/icon/locale/Skill/Manual 单文件上限、安全路径、大小写路�
 `x-manager`）；携带 Manual 的插件必须声明 `minCindyVersion`。不要用 Greptile 对
 manifest schema 的猜测替代 CI 的确定性校验结果。
 
+`.tests/plugin-contract.test.mjs` 同时接受未改动的 legacy v2 与合法 v3；但新插件，
+以及实际打包内容发生变化的现有插件，必须在同一 PR 迁移到 `schemaVersion: 3`、
+按该插件实际依赖填写首个稳定版 `minCindyVersion`、移除 `slots` 并保持直接能力声明等价；
+仓库不设置统一 Cindy 版本下限。
+只改仓库级文档、CI 或其它插件时，不得要求顺手迁移无关的 v2 清单。
+
 ### 最低客户端版本
 
-`minCindyVersion` 表示这个 release 能被安装和运行的最低 Cindy 版本。新增或提高
-该字段时，PR 描述必须记录真实打包 `.cindy` 在声明的精确版本上安装成功，并列出实际
-验证的核心功能；没有证据按 P1 要求补齐。降低或删除该字段会扩大支持范围，静态 CI
-无法证明旧客户端可用，必须转维护者人工 review。未声明字段的旧插件继续按现有兼容
-语义处理，不要求为了补字段而批量修改。
+每个改动插件包的 PR Body 都必须勾选生产版 Cindy 验证项，确认真实打包 `.cindy` 已在
+运行正式稳定版 Cindy 的实际设备上安装并验证核心功能；CI 会确定性检查该勾选项。
+`minCindyVersion` 表示这个 release 能被安装和运行的最低 Cindy 版本，插件声明该字段
+时，验证所用 Cindy 版本必须不低于它。降低或删除该字段会扩大支持范围，静态 CI 无法
+证明旧客户端可用，必须转维护者人工 review。未声明字段的旧插件继续按现有兼容语义
+处理，不要求为了补字段而批量修改。
 
 ### 发布与审核链路
 
@@ -120,6 +136,8 @@ PR 新增插件目录（出现新的 `ghost.json`）时，必须通读仓内现�
 
 新插件 PR 缺以下任何一项时逐条指出：
 
+- `ghost.json` 使用 `schemaVersion: 3`、按该插件实际依赖填写首个稳定版 `minCindyVersion`、
+  不含 `slots`，并以直接顶层字段声明能力；
 - `provisioning.json` 有对应条目，且 audience 取值有 PR 描述里的决策依据
   （尤其 `"all"`）；
 - 四语言 locale 资源齐全（zh-CN/en/ja/ko，`.tests/localization.test.mjs` 口径）；
@@ -129,6 +147,10 @@ PR 新增插件目录（出现新的 `ghost.json`）时，必须通读仓内现�
   review 该文件的内容，**文件缺失本身必须报**；
 - PR 描述包含实机验证说明（在 Cindy 客户端安装 `.cindy` 包实测过哪些工具）；
   没有实测的必须如实标注，reviewer 应在 summary 里显式提示「未经实机验证」。
+
+现有 v2 插件不做专项批量迁移；但 PR 一旦改变该插件目录内会进入 `.cindy` 的实际
+打包内容，就必须在同一 PR 把清单迁移到 v3，并保持能力等价。只改仓库级文档、CI 或
+其它插件时，不得要求顺手迁移未触及的 v2 清单。
 
 ## 其他判定口径
 

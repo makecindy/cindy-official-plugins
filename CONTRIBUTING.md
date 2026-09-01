@@ -14,10 +14,20 @@ maintained in separate repositories and are outside the scope of this repository
 - Read [`README.md`](README.md) first. It is the source of truth for the
   repository layout, the plugin list, the review standards, and the publish
   flow; this guide does not duplicate them.
-- The complete plugin-authoring contract (all `ghost.json` fields, slots, the
-  `cindy.send` pipe API, the packaging flow) is defined by the manual returned by
-  the `ghost_forge_guide` tool built into the Cindy client — just say "help me
-  build a plugin" in a Cindy conversation to get the current version.
+- The plugin-authoring contract lives in this repository: `README.md`, this
+  guide, the pinned Manifest validator under `.tests/contracts/`, and the
+  packaging checks. It is independent of the Agent or harness used to create
+  the files. Cindy Forge commands are optional shortcuts only.
+- Use the [authoring and migration reference](docs/plugin-authoring.md) for
+  field mappings and concrete runtime calls. The implementing Agent handles
+  adaptations from existing code; authors do not need to supply migration steps.
+- Decide who performs an operation before adding a manifest field. Whether the
+  plugin tool runs is decided by existing Agent authorization. Ordinary HTTPS and
+  workdir operations use the Host-issued in-flight `callId`; CLIs continue through
+  the existing Node worker. Specific commands, hosts, and paths are not pre-registered;
+  autonomous Host use outside that call requires the corresponding declaration.
+  Bundled Node entries and Host-managed credentials remain explicitly declared,
+  including when used inside a tool call.
 - Follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) when participating in
   the community. For ordinary usage questions, see [`SUPPORT.md`](SUPPORT.md).
 - Do not commit credentials, tokens, mailbox authorization codes, OAuth refresh
@@ -26,14 +36,24 @@ maintained in separate repositories and are outside the scope of this repository
 
 ## Development and verification
 
-Typical flow:
+Start with the
+[harness-independent quick path in `README.md`](README.md#harness-independent-quick-path):
 
-1. Scaffold with the client's `ghost_forge_scaffold`, or copy the layout of any
-   plugin in this repository.
-2. In a dev environment, import the plugin directory or a `.cindy` package
-   directly for verification.
-3. When done, package it with `ghost_forge_pack` into a `.cindy` and install it to
-   verify.
+1. Align the design and minimum capabilities, then create a new root-level
+   plugin directory using ordinary file operations.
+2. Start from the documented Manifest-v3 and `main.js` examples. Do **not** copy
+   an existing official plugin's `ghost.json`: unchanged official plugins may
+   intentionally retain legacy v2 manifests. Existing source may be consulted
+   only for implementation patterns.
+3. Validate the Manifest with
+   `node scripts/validate-plugin-manifest.mjs ./<plugin-directory>`.
+4. Package the directory contents—not the directory itself—as a `.cindy` ZIP
+   archive and import that exact package through Cindy's local plugin entry.
+5. If the chosen harness exposes Cindy Forge commands, they may replace the
+   manual scaffold/package steps, but they do not change the source format or
+   the review contract. Installation still requires an explicit user request.
+6. Before opening an official-plugin PR, add the `provisioning.json` entry and
+   complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 
 The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 
@@ -83,19 +103,38 @@ do not edit the generated `dist/maker.js` by hand.
 3. **Any change to plugin content must bump `ghost.json`'s `version` in the same
    pull request.** The new `major.minor.patch` SemVer must be greater than the
    version on `main`; otherwise CI blocks the pull request.
+   The same change must migrate an existing schema-v2 manifest to
+   `schemaVersion: 3`: add `minCindyVersion`, remove `slots`, and express the
+   same capabilities through their direct fields. Follow the
+   [mapping table](docs/plugin-authoring.md#manifest-v2-to-v3-preserve-behavior-change-representation),
+   retaining presence-only capabilities such as `card` and `sessionContext`;
+   deleting `slots` alone is not a complete migration. Set `minCindyVersion` to the
+   first stable Cindy release that supports the concrete plugin's required Host
+   capabilities and manifest fields; Manifest v3 has no repository-wide Cindy
+   version floor.
+   Unchanged v2 plugins are intentionally left alone; do not bulk-migrate them.
+   Plugin Server selects the newest previously listed release compatible with the
+   user's Cindy version. If the current release is incompatible, an eligible
+   historical release is delivered instead; without one, the plugin is hidden.
+   Desktop treats that Server selection as authoritative and does not add a
+   second `minCindyVersion` filter or install confirmation, so keep this field accurate.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
-   If `minCindyVersion` is added or raised, also record a real packaged `.cindy`
-   install on that exact Cindy version. Lowering or removing the field expands
-   claimed compatibility and requires maintainer review.
+   Check the production Cindy verification item only after installing every
+   changed plugin's packaged `.cindy` on a real device running a stable
+   production Cindy build and exercising its core functionality. If a plugin
+   declares `minCindyVersion`, that Cindy build must be greater than or equal to
+   it. Lowering or removing the field expands claimed compatibility and
+   requires maintainer review.
 
 Every non-draft pull request is verified by the `Verify pull request`
 workflow: it runs the Server/Desktop delivery contract, localization and
 provisioning gates, runs the `*.test.mjs` tests of every changed plugin
 (installing that plugin's dependencies first), and dry-runs the exact packaging
-step the publish pipeline uses. The actual upload still happens only after
-merge to `main`.
+step the publish pipeline uses. For every changed plugin package, CI also
+requires the production Cindy verification checkbox in the pull request body.
+The actual upload still happens only after merge to `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.

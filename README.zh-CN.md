@@ -28,6 +28,11 @@
   CN / Global 两区审核队列；只有对应区域审核通过后才会在客户端可见。从
   [提交你的插件](#提交你的插件)开始。
 
+已安装的市场插件会沿安装时记录的来源静默更新。因此，合入后的版本升级可以在
+用户无需再次点击、也不会出现能力确认弹窗的情况下到达已安装用户。请把能力扩张
+和运行时行为变更视为立即生效的线上变更：包内 `ghost.json` 只声明实际必需的最小能力，
+遵守 Host 授权及凭证边界；市场摘要不是另一套安装权限门禁。
+
 ## 插件列表
 
 |  | 插件 | 目录 | 说明 |
@@ -64,10 +69,9 @@
    [新插件提案 issue](https://github.com/makecindy/cindy-official-plugins/issues/new?template=new_plugin_proposal.yml)，
    说明场景、边界和所需能力（网络域名、凭证类型、是否需要 Node Runtime）。
    **拿到维护者确认后再动手写代码**——避免做出重叠或不会被接受的东西。
-3. **开发**——在 Cindy 对话里说「帮我做一个插件」即可拿到完整编写手册
-   （`ghost_forge_guide`：`ghost.json` 全字段、卡槽、`cindy.send` 管子 API、
-   打包流程）。用 `ghost_forge_scaffold` 生成骨架或参考本仓任一插件；dev
-   环境下导入插件目录或 `.cindy` 包验证。
+3. **开发**——在任意 coding Agent 或开发环境中按照
+   [工具无关的快速路径](#工具无关的快速路径)操作。文件格式、运行时消息、校验命令和
+   打包格式都由本仓库说明，不要求 Cindy 专用的插件制作工具。
 4. **提交 PR**——标题 `feat(<目录名>): …`；bump `ghost.json.version`；补
    `provisioning.json` 条目；四语言 locale（`zh-CN` / `en` / `ja` / `ko`）
    齐全；每个 commit 带签名（`git commit -s`，[DCO](./DCO)）。细节见
@@ -79,16 +83,20 @@
    [审查标准](#审查标准)人工审查。请求 review 前先过一遍下方自查清单。
 6. **提交并上架**——合入 `main` 后 CN / Global Workflow 自动通过 Plugin Platform
    提交真实包。两区分别审核；只有审核通过的 release 才会下发给兼容客户端，拒绝
-   不会影响此前已通过的版本。
+   不会影响此前已通过的版本。审核通过后，绑定该市场来源的已安装客户端会静默更新。
 
 ## 审查标准
 
 每个官方插件都会被真实用户安装，安全与体验风险由用户承担，因此审查从严。
 四条硬原则：
 
-1. **默认纯沙箱、能力显式声明**：普通插件运行在 Cindy 的隔离沙箱中，只能使用
-   `ghost.json` 声明的网络白名单与主机通道。确需 Node Runtime 的官方插件必须
-   显式声明 `node` slot、固定入口和最小子进程边界。
+1. **默认纯沙箱，授权跟随执行者**：普通插件运行在 Cindy 的隔离沙箱中。插件工具
+   是否执行由当前 `ghost_call` 的既有 Agent 授权决定；普通 HTTPS 与 workdir 文件操作
+   使用 Host 下发且严格在途的 `callId`，随包代码与 CLI 继续走已有 Node 工作进程。
+   不要仅为了预登记具体命令、域名或路径新增 Slot 或 Manifest 字段。插件若要从
+   Panel、订阅、scheduler 或常驻进程中自主使用 Host
+   能力，才在 `ghost.json` 声明对应直接字段。自主 Node Runtime 仍必须显式声明顶层
+   `node` 字段、固定入口和最小子进程边界。
 2. **密钥归属明确**：普通 API token 通过主机的 `/secrets` 只写通道保存；Node
    插件需明文凭证时，用 `node.secretBindings` 将其限制到指定 Worker 方法并由
    宿主临时注入，不经过浏览器 `main.js`、Agent 参数或日志。若官方第三方
@@ -102,8 +110,9 @@
 
 ### 请求 review 前的自查清单
 
-- [ ] `ghost.json` 只声明实际用到的网络域名与主机通道；非必要不声明 `node` slot
-- [ ] Node 插件：显式 `node` slot、固定入口、最小子进程边界；`node/worker.cjs`
+- [ ] 已分清执行者：插件工具调用由现有 Agent 授权，HTTPS／workdir 操作用当前
+      `callId`；CLI 走已有 Node 工作进程，`ghost.json` 不预登记具体命令
+- [ ] Node 插件：显式 `node` 字段、固定入口、最小子进程边界；`node/worker.cjs`
       是随 `src/` 重建的 esbuild 产物
 - [ ] 任何地方无明文凭证：token 走 `/secrets` 只写通道或 `node.secretBindings`；
       不经过 `main.js`、Agent 参数、日志、KV、页面状态
@@ -112,8 +121,9 @@
 - [ ] 每个 tool 的 `description` 与实际行为一致——能力、限制、返回值、副作用
 - [ ] 面向用户的报错可行动；无裸状态码、无英文堆栈
 - [ ] 四语言 locale 齐全；`node --test .tests/localization.test.mjs` 通过
-- [ ] 新增或提高了 `minCindyVersion` 时，已在该精确 Cindy 版本安装真实 `.cindy`
-      包并在 PR 记录结果；降低或删除最低版本需维护者人工 review
+- [ ] 每个改动插件都已在运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并
+      验证核心功能，且已勾选 PR 验证项；插件声明 `minCindyVersion` 时，验证所用
+      Cindy 版本不低于该最低版本
 - [ ] `ghost.json.version` 已 bump；`provisioning.json` 有对应条目且 PR 描述里
       写明 audience 决策
 - [ ] diff 中无凭证、真实用户数据、`node_modules` 或无关生成文件；fixture 用
@@ -175,20 +185,138 @@ cindy-art/
   Workflow。
 
 审核通过后，兼容客户端会收到该 release；低于 `minCindyVersion` 的客户端会继续收到
-已有的最新兼容旧 release（如果存在）。
+已有的最新兼容旧 release（如果存在）。Desktop 信任该 Server 投影，不再追加版本确认。
 
 修改插件内容时必须同步更新 `ghost.json.version`。新的 `major.minor.patch` SemVer 必须
 大于 `main` 上的当前版本，否则 CI 会在提交 Server 前阻止合并。
 
 ## 本地开发
 
-插件编写的完整契约（`ghost.json` 全字段、卡槽、`cindy.send` 管子 API、打包流程）以 Cindy 客户端内置的 `ghost_forge_guide` 工具返回的手册为准 —— 在 Cindy 对话里说"帮我做一个插件"即可现拿现读。
+插件编写契约由本仓库定义：以下说明与 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)、
+`.tests/contracts/` 中固定版本的 Cindy Manifest 校验器，以及仓库打包门禁共同组成
+正本。无论使用哪一种 Agent 或 harness，写出的文件都遵循同一契约。Cindy Forge 工具
+只是可选捷径，不属于插件格式，也不是开发前置条件。
 
-常用流程：
+维护已有插件、v2/v3 字段映射、HTTPS、文件和 Node/CLI 的具体调用见
+[插件编写与迁移参考](./docs/plugin-authoring.zh-CN.md)。Agent 可依据这些事实和
+现有代码自行完成必要适配，作者不需要另外手工执行迁移清单。
 
-1. 用客户端的 `ghost_forge_scaffold` 生成骨架，或直接参考本仓任一插件的写法。
-2. dev 环境下直接导入插件目录或 `.cindy` 包验证。
-3. 完成后用 `ghost_forge_pack` 打包成 `.cindy` 装入验证。
+新插件使用 `schemaVersion: 3`，并通过 `tools`、`network`、`node`、`notify: true`
+等顶层字段直接声明能力；v3 不得再有 `slots`。每个 v3 插件包都必须独立填写
+`minCindyVersion`：它应是同时支持这个具体插件所依赖的全部 Host 能力和 Manifest 字段的
+第一个 Cindy 正式稳定版本。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
+保持原样，直到该插件的实际打包内容发生变化；改动它的 PR
+必须同时迁移到 v3。本仓不会只为 schema 变化批量迁移、批量发布现有插件。
+
+直接字段表达插件贡献项和**自主** Host 能力，不是具体命令、域名或路径的预登记清单。
+插件工具是否执行由当前 `ghost_call` 的既有 Agent 授权决定；普通 HTTPS 与 workdir
+文件操作把 Host 下发的 `callId` 传给 `cindy.fetch` 或 `cindy.fs`。随包代码与 CLI
+继续走已有 Node 工作进程。Host 托管凭证以及脱离该在途调用的使用仍须对应的显式声明。
+
+### 工具无关的快速路径
+
+把下面这段发给任意能够编辑文件、运行命令的 coding Agent 或 harness：
+
+```text
+只按照当前仓库中的插件编写契约，帮我制作一个用于[具体用途]的 Cindy 插件。先读
+AGENTS.md 和 docs/plugin-authoring.zh-CN.md，根据任务自行判断所需声明与运行时接口，
+只确认仓库事实无法确定的功能取舍或验证缺口。新建 Manifest v3 插件目录，
+不要复制现有 v2 ghost.json。使用仓库校验器检查 Manifest，把目录内容打成 .cindy ZIP
+包并返回产物路径。除非我明确要求，否则不要安装插件。
+```
+
+先创建最小目录：
+
+```text
+my-plugin/
+├── ghost.json
+├── main.js
+└── assets/
+    └── icon.png
+```
+
+**不要复制本仓现有插件的 `ghost.json`**：仓库会刻意保留尚未发生内容改动的旧 v2
+清单。现有源码只能用于参考实现方式。
+
+`ghost.json` 从下面这份最小可运行 Manifest v3 开始：
+
+下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个 Cindy 正式稳定版本。
+
+```json
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "1.2.3",
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "description": "给用户看的单句说明。",
+  "whenToUse": "当用户需要这个插件提供的能力时使用。",
+  "version": "1.0.0",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "hello",
+      "description": "返回一句问候，用来确认插件已经正常工作。",
+      "parameters": { "type": "object", "properties": {} }
+    }
+  ]
+}
+```
+
+在 `assets/icon.png` 放入真实 PNG；如果暂时没有图标，就同时删除 Manifest 的 `icon`
+字段和未使用的 `assets/` 项。禁止打包 Manifest 已声明、包内却不存在的文件。
+
+在 `main.js` 中按 Host 消息契约实现已经声明的工具：
+
+```js
+cindy.onHostMessage(async function (message) {
+  if (message.type !== 'tool-call' || message.tool !== 'hello') return;
+
+  await cindy.send({
+    type: 'tool-result',
+    callId: message.callId,
+    ok: true,
+    result: { message: '插件已经正常工作。' }
+  });
+});
+```
+
+`callId` 只属于当前这一次在途工具调用；插件必须使用相同 `callId` 返回且只返回一个
+`tool-result`。普通 HTTPS 与 workdir 文件操作同样把 Host 下发的 `callId` 传给
+`cindy.fetch` / `cindy.fs`，沿用 Cindy 现有运行时授权，不需要在 Manifest 中预登记
+具体命令、域名或路径。只有插件贡献项或脱离该调用的自主 Host 使用才声明对应顶层能力。
+
+在仓库根目录校验 Manifest：
+
+```bash
+node scripts/validate-plugin-manifest.mjs ./my-plugin
+```
+
+`.cindy` 是普通 ZIP：压缩包根目录必须直接包含 `ghost.json`、`main.js` 和声明的资源，
+不能在外层再套一层 `my-plugin/`。审查并提交插件文件后，用仓库打包脚本从 Git 已跟踪的
+`HEAD` 内容生成确切产物：
+
+```bash
+.github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
+unzip -Z1 /tmp/my-plugin-1.0.0.cindy
+```
+
+该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件并校验产物，刻意不包含
+插件目录中未提交和未跟踪的文件。
+不要递归压缩插件工作目录，否则本地 `.env`、`.npmrc`、私钥或其他凭证可能进入包中。
+若 harness 要打包尚未提交的工作区，必须使用经过审查的显式文件清单。安装或分享前，
+检查归档列表只含预期文件、没有外层插件目录，也没有凭证。
+
+用户可以从 Cindy 的本地插件入口导入这个包。如果当前 harness 恰好提供 Cindy Forge
+工具，`ghost_forge_scaffold` 可以生成同样的 v3 基线，`ghost_forge_pack` 可以校验并
+打包，`ghost_forge_install` 可以在用户明确要求后安装。它们只是可选加速器；源码与
+`.cindy` 格式完全相同。
+
+提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
+`zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
+按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查，并在符合最低版本要求的
+Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
 `@taptap/maker@0.0.32`。升级时应整体替换 npm 包发布内容并同步更新插件版本，

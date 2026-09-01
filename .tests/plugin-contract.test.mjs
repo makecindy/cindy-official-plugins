@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.dbbf169.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.dae1c66.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -21,7 +21,7 @@ const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'x-manager']);
 const OFFICIAL_SLOTS = new Set([
   'subscribe', 'tool', 'card', 'panel', 'cindy', 'agent', 'node', 'network',
   'notify', 'badge', 'confirm', 'fs', 'session-context', 'pick', 'preview',
-  'skill', 'workspace', 'ios-simulator',
+  'library', 'skill', 'workspace', 'ios-simulator',
 ]);
 
 const pluginDirs = pluginRootsAt('HEAD');
@@ -122,7 +122,7 @@ function validateOfficialManifest(pluginDir, manifest) {
   assert.ok(manifest && typeof manifest === 'object' && !Array.isArray(manifest), `${pluginDir}/ghost.json must be an object`);
   const protocolResult = validateGhostManifest(manifest);
   assert.ok(protocolResult.ok, `${pluginDir}/ghost.json is rejected by Cindy: ${protocolResult.reason}`);
-  assert.equal(manifest.schemaVersion, 2, `${pluginDir}: unsupported ghost.json schemaVersion`);
+  assert.ok(manifest.schemaVersion === 2 || manifest.schemaVersion === 3, `${pluginDir}: unsupported ghost.json schemaVersion`);
   assert.match(manifest.id ?? '', /^[a-z0-9][a-z0-9-]{0,31}$/, `${pluginDir}: invalid plugin id`);
   stableSemver(manifest.version, pluginDir);
   assertText(manifest.name, `${pluginDir}.name`, 64);
@@ -131,9 +131,14 @@ function validateOfficialManifest(pluginDir, manifest) {
   if (manifest.author !== undefined) assertText(manifest.author, `${pluginDir}.author`, 64);
   assert.ok(isSafePackagePath(manifest.entry), `${pluginDir}.entry must be a safe relative path`);
   assert.ok(manifest.launch === undefined || manifest.launch === 'on-demand' || manifest.launch === 'resident', `${pluginDir}.launch must be on-demand or resident`);
-  assert.ok(Array.isArray(manifest.slots) && manifest.slots.length > 0, `${pluginDir}.slots must be a non-empty array`);
-  assert.equal(new Set(manifest.slots).size, manifest.slots.length, `${pluginDir}.slots contains duplicates`);
-  for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
+  if (manifest.schemaVersion === 2) {
+    assert.ok(Array.isArray(manifest.slots), `${pluginDir}.slots must be an array`);
+    assert.equal(new Set(manifest.slots).size, manifest.slots.length, `${pluginDir}.slots contains duplicates`);
+    for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
+  } else {
+    assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
+    assertManifestV3MinCindyVersion(pluginDir, manifest);
+  }
   if (manifest.tools !== undefined) {
     assert.ok(Array.isArray(manifest.tools) && manifest.tools.length > 0 && manifest.tools.length <= 16, `${pluginDir}.tools must contain 1-16 entries`);
     const toolNames = new Set();
@@ -149,7 +154,9 @@ function validateOfficialManifest(pluginDir, manifest) {
       }
     }
   }
-  assert.equal(manifest.slots.includes('tool'), manifest.tools !== undefined, `${pluginDir}: tool slot and tools declarations must appear together`);
+  if (manifest.schemaVersion === 2) {
+    assert.equal(manifest.slots.includes('tool'), manifest.tools !== undefined, `${pluginDir}: tool slot and tools declarations must appear together`);
+  }
   return manifest;
 }
 
@@ -360,7 +367,7 @@ function validatePluginSource(pluginDir, manifest) {
   assert.ok(totalBytes <= maxTotal, `${pluginDir}: uncompressed package exceeds ${maxTotal} bytes`);
 
   requireTrackedFile(files, pluginDir, 'ghost.json', MAX_MANIFEST_BYTES);
-  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.settingsHtml, manifest.icon]
+  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.mainView?.html, manifest.settingsHtml, manifest.icon]
     .filter(Boolean);
   if (manifest.node) declaredFiles.push(manifest.node.entry, ...(manifest.node.entries ?? []));
   for (const relativePath of declaredFiles) {
@@ -402,10 +409,24 @@ function pluginRootsAt(revision) {
     .sort();
 }
 
-function stableSemver(version, pluginDir) {
+function stableSemver(version, pluginDir, field = 'ghost.json.version') {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
-  assert.ok(match, `${pluginDir}: ghost.json.version must use major.minor.patch SemVer`);
+  assert.ok(match, `${pluginDir}: ${field} must use major.minor.patch SemVer`);
   return match.slice(1).map(BigInt);
+}
+
+function assertManifestV3MinCindyVersion(pluginDir, manifest) {
+  const parts = stableSemver(manifest.minCindyVersion, pluginDir, 'minCindyVersion');
+  assert.ok(
+    parts.some((part) => part > 0n),
+    `${pluginDir}: minCindyVersion must name a released stable Cindy version, not 0.0.0`,
+  );
+}
+
+function assertChangedPluginUsesManifestV3(pluginDir, manifest) {
+  assert.equal(manifest.schemaVersion, 3, `${pluginDir}: changed plugin packages must migrate to schemaVersion 3`);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
+  assertManifestV3MinCindyVersion(pluginDir, manifest);
 }
 
 function compareStableSemver(left, right, pluginDir) {
@@ -443,25 +464,141 @@ function validateReleaseDiff() {
         compareStableSemver(after.version, before.version, pluginDir) > 0,
         `${pluginDir}: packaged content changed, so ghost.json.version must be greater than ${before.version}`,
       );
+      assertChangedPluginUsesManifestV3(pluginDir, after);
     }
   }
   for (const pluginDir of targetRoots) {
     if (baseRootSet.has(pluginDir)) continue;
     const manifest = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
     stableSemver(manifest.version, pluginDir);
+    assertChangedPluginUsesManifestV3(pluginDir, manifest);
   }
 }
 
 test('the pinned Cindy manifest contract rejects client-incompatible shapes', () => {
-  const pluginDir = pluginDirs[0];
-  const manifest = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
-  assert.equal(validateGhostManifest(manifest).ok, true, `${pluginDir}: baseline fixture must be valid`);
-  assert.equal(validateGhostManifest({ ...manifest, kind: 'declaration' }).ok, false, 'legacy kind must be rejected');
+  const legacy = {
+    schemaVersion: 2,
+    id: 'legacy-contract-fixture',
+    name: 'Legacy contract fixture',
+    version: '1.0.0',
+    entry: 'main.js',
+    slots: ['tool'],
+    tools: [{ name: 'run', description: 'Run the fixture' }],
+  };
+  assert.equal(validateGhostManifest(legacy).ok, true, 'legacy fixture must be valid');
+  assert.equal(validateGhostManifest({ ...legacy, kind: 'declaration' }).ok, false, 'legacy kind must be rejected');
   assert.equal(
-    validateGhostManifest({ ...manifest, panel: { html: manifest.entry } }).ok,
+    validateGhostManifest({ ...legacy, panel: { html: legacy.entry } }).ok,
     false,
     'panel declaration without the panel slot must be rejected',
   );
+  const direct = {
+    schemaVersion: 3,
+    minCindyVersion: '0.1.0',
+    id: 'direct-contract-fixture',
+    name: 'Direct contract fixture',
+    version: '1.0.0',
+    entry: 'main.js',
+    tools: [{ name: 'run', description: 'Run the fixture' }],
+    notify: true,
+    futureCapability: { mode: 'preserved' },
+  };
+  const directResult = validateGhostManifest(direct);
+  assert.equal(directResult.ok, true, 'Manifest v3 direct declarations must be accepted');
+  assert.equal(Object.hasOwn(directResult.manifest, 'slots'), false, 'Manifest v3 output must not contain slots');
+  assert.deepEqual(directResult.manifest.futureCapability, { mode: 'preserved' }, 'unknown v3 fields must survive normalization');
+  assert.equal(validateGhostManifest({ ...direct, slots: ['tool'] }).ok, false, 'Manifest v3 slots must be rejected');
+  assert.equal(validateGhostManifest({ ...direct, notify: false }).ok, false, 'Manifest v3 boolean capabilities must be literal true');
+  assert.equal(
+    validateGhostManifest({ ...direct, minCindyVersion: '0.0.1' }).ok,
+    true,
+    'Manifest v3 must not impose a repository-wide Cindy version floor',
+  );
+  assert.throws(
+    () => assertManifestV3MinCindyVersion('direct-contract-fixture', { minCindyVersion: '0.0.0' }),
+    /released stable Cindy version/,
+    'official releases must not use the versionless development sentinel',
+  );
+});
+
+test('mainView HTML must exist among tracked package files', () => {
+  const pluginDir = 'cindy-github';
+  const fixture = {
+    ...readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES),
+    schemaVersion: 3,
+    minCindyVersion: '1.0.0',
+  };
+  delete fixture.slots;
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, fixture), 'mainView remains optional');
+
+  const present = { ...fixture, mainView: { html: 'settings.html' } };
+  assert.doesNotThrow(() => validateOfficialManifest(pluginDir, present));
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, present));
+
+  const missing = { ...fixture, mainView: { html: 'missing-main-view.html' } };
+  assert.doesNotThrow(() => validateOfficialManifest(pluginDir, missing), 'a safe path is valid at the manifest layer');
+  assert.throws(
+    () => validatePluginSource(pluginDir, missing),
+    /declared file is not tracked: missing-main-view\.html/,
+    'package validation must reject a missing mainView HTML file',
+  );
+});
+
+test('authoring docs provide a harness-independent Manifest-v3 path', () => {
+  const docs = new Map([
+    ['README.md', readUtf8(path.join(root, 'README.md'))],
+    ['README.zh-CN.md', readUtf8(path.join(root, 'README.zh-CN.md'))],
+    ['CONTRIBUTING.md', readUtf8(path.join(root, 'CONTRIBUTING.md'))],
+    ['CONTRIBUTING.zh-CN.md', readUtf8(path.join(root, 'CONTRIBUTING.zh-CN.md'))],
+  ]);
+
+  for (const [file, contents] of docs) {
+    for (const required of ['ghost.json', '.cindy', 'scripts/validate-plugin-manifest.mjs']) {
+      assert.ok(contents.includes(required), `${file} must document ${required}`);
+    }
+    assert.match(contents, /harness/i, `${file} must make the authoring flow harness-independent`);
+    assert.doesNotMatch(contents, /ghost_forge_guide/, `${file} must not require a Cindy-only guide tool`);
+    assert.match(contents, /\bv2\b/i, `${file} must identify the legacy manifest version`);
+    if (file.endsWith('.zh-CN.md')) {
+      assert.ok(contents.includes('不要复制'), `${file} must warn against copying an existing ghost.json`);
+    } else {
+      assert.match(contents, /do \*\*not\*\* copy/i, `${file} must warn against copying an existing ghost.json`);
+    }
+  }
+
+  for (const file of ['README.md', 'README.zh-CN.md']) {
+    const contents = docs.get(file);
+    assert.ok(
+      contents.includes('.github/scripts/package-plugin.sh'),
+      `${file} must use the tracked-content package script`,
+    );
+    assert.doesNotMatch(
+      contents,
+      /zip\s+-r\b/,
+      `${file} must not recommend recursively packaging a working directory`,
+    );
+    for (const runtimeContract of ['cindy.onHostMessage', 'cindy.send', 'tool-result']) {
+      assert.ok(contents.includes(runtimeContract), `${file} must document ${runtimeContract}`);
+    }
+    const jsonBlocks = [...contents.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+    const manifestSource = jsonBlocks.find((block) => block.includes('"schemaVersion": 3'));
+    assert.ok(manifestSource, `${file} must contain a minimal Manifest-v3 example`);
+    const manifest = JSON.parse(manifestSource);
+    const result = validateGhostManifest(manifest);
+    assert.ok(result.ok, `${file} Manifest-v3 example is rejected by Cindy: ${result.reason}`);
+    assert.equal(Object.hasOwn(manifest, 'slots'), false, `${file} Manifest-v3 example must not contain slots`);
+  }
+
+  const validatorOutput = execFileSync(
+    process.execPath,
+    [path.join(root, 'scripts', 'validate-plugin-manifest.mjs'), path.join(root, 'cindy-art')],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.match(validatorOutput, /valid Cindy plugin manifest/, 'the documented validator command must be executable');
+
+  const pullRequestTemplate = readUtf8(path.join(root, '.github/PULL_REQUEST_TEMPLATE.md'));
+  assert.doesNotMatch(pullRequestTemplate, /\bslots?\b/i, 'the PR template must use Manifest-v3 direct capability language');
+  assert.match(pullRequestTemplate, /direct capability\s+fields/, 'the PR template must review direct capability declarations');
 });
 
 test('all official plugins satisfy the repository publish contract', () => {
