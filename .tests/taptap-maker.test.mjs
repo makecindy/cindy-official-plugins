@@ -170,8 +170,9 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.12');
+  assert.equal(manifest.version, '2.1.13');
   assert.equal(manifest.minCindyVersion, '0.1.48');
+  assert.equal(manifest.schemaVersion, 3);
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
     /user_facing_markdown/,
@@ -184,10 +185,9 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
     manifest.tools.find((tool) => tool.name === 'maker_call_tool').description,
     /素材能力优先使用 Maker/,
   );
-  assert.deepEqual(
-    manifest.slots,
-    ['tool', 'card', 'node', 'session-context', 'pick', 'preview'],
-  );
+  assert.equal(manifest.slots, undefined);
+  assert.equal(manifest.sessionContext, true);
+  assert.equal(manifest.pick, true);
   assert.equal(manifest.skill, undefined);
   assert.equal(existsSync(new URL('skills/taptap-maker/SKILL.md', pluginRoot)), false);
   assert.deepEqual(manifest.manual, {
@@ -504,6 +504,8 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     harness.nodeRequests[0].params.arguments.workdir,
     '/tmp/trusted-maker',
   );
+  assert.equal(harness.nodeRequests[0].timeoutMs, 120_000);
+  assert.equal(harness.nodeRequests[0].maxTotalMs, 900_000);
 
   const build = await harness.call('maker_build', {
     session_context: {
