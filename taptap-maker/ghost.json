@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "taptap-maker",
   "name": "TapTap Maker",
   "description": "使用插件随附的官方 TapTap Maker Runtime 连接账号、同步或初始化项目、构建游戏并打开官方预览；无需自行安装 CLI 或配置 MCP。",
   "whenToUse": "仅用于明确的 TapTap Maker 游戏项目操作：账号连接、项目初始化/检查、构建/运行/预览，或 Maker 专属素材、广告与调试。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时不适用。",
-  "version": "2.1.12",
+  "version": "2.1.13",
   "minCindyVersion": "0.1.48",
   "locales": {
     "en": "locales/en.json",
@@ -16,14 +16,8 @@
   "icon": "assets/icon.png",
   "entry": "main.js",
   "settingsHtml": "settings.html",
-  "slots": [
-    "tool",
-    "card",
-    "node",
-    "session-context",
-    "pick",
-    "preview"
-  ],
+  "sessionContext": true,
+  "pick": true,
   "card": {
     "externalLinks": true
   },
