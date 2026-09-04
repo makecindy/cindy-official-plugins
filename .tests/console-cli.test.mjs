@@ -16,10 +16,13 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.14');
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(manifest.version, '0.1.15');
+  assert.equal(manifest.minCindyVersion, '0.1.72');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
-  assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
+  assert.equal(manifest.notify, true);
   assert.equal(manifest.network, undefined);
   assert.equal(manifest.node.entry, 'node/worker.cjs');
   assert.equal(manifest.node.protocol, 'json-rpc-stdio');
