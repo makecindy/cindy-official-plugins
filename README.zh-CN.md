@@ -322,6 +322,12 @@ Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
 `@taptap/maker@0.0.32`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 不要单独修改生成后的 `dist/maker.js`。
 
+`console-cli/node/worker.cjs` 是插件自有、可重复生成的入口产物，不是第三方
+vendor 代码。`console-cli/package.json` 中的构建脚本会把 `src/entry.cjs` 复制到
+声明的运行入口；修改 worker 前请在 `console-cli/` 执行
+`npm ci && npm run build`，并验证两个文件完全一致。PR 若改动该产物，必须列出
+源码/构建来源、完整外联域名清单和动态代码扫描结果。
+
 ## 社区
 
 提 PR 前请读 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)：其中包含 PR 标题规范、必须同步

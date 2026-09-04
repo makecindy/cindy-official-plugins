@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 3,
+  "id": "console-cli",
+  "name": "TapTap Console",
+  "description": "通过本机安装的 console-cli 发现并执行 TapTap Infra Console 的 Agent 工作流，覆盖应用交付、集群与工作负载、LightApp、迁移、推理、告警值班等；插件不直接调用 API、不保存 Token、不打包 CLI。",
+  "whenToUse": "处理 TapTap Infra Console（console.tapsvc.com）的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理、值班或变更任务时使用。先 status；新或不确定领域可读 discover、help、schema，再用 run 传入 CLI argv，变更后回读。命令、flags、schema、权限由 CLI 判断；CLI 不支持的工作流转 Console 控制台。",
+  "version": "0.1.17",
+  "minCindyVersion": "0.1.72",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "Cindy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "settingsHeight": 430,
+  "notify": true,
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "resident"
+  },
+  "command": "console-cli",
+  "tools": [
+    {
+      "name": "console_cli_status",
+      "description": "任何 Console 操作前先检查本机 Console CLI、版本和生产登录状态。只返回可安全展示的账号与权限摘要，不返回 Token 或认证文件；未安装时 macOS/Linux 告诉用户完整官方安装命令，Windows 请说明脚本不支持并请管理员提供 CLI，安装完成后重新检查。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "console_cli_login",
+      "description": "在用户明确要求登录时调用本机 console-cli auth login；由 CLI 打开浏览器完成 OAuth，登录态由 CLI 自己保存。可选 permission_level 或 permission_profile，但二者不能同时传；未安装时 macOS/Linux 告诉用户完整官方安装命令，Windows 请管理员提供 CLI，安装后重新检查。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "permission_level": {
+            "type": "string",
+            "enum": [
+              "readonly",
+              "low-risk",
+              "sensitive"
+            ],
+            "description": "可选 delegated permission level；仅在用户明确指定权限级别时传。"
+          },
+          "permission_profile": {
+            "type": "string",
+            "description": "可选 Console permission profile 名称；仅在用户明确指定 profile 时传。"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "console_cli_discover",
+      "description": "读取 Console CLI 官方 Agent discovery。首次接触 Console 或不确定领域时先用 mode=overview；需要选择具体工作流时再用 mode=skills。这是只读调用，不执行 Console 操作。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["overview", "skills"],
+            "description": "默认为 overview；需要选择具体领域时传 skills。"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "console_cli_help",
+      "description": "可选地读取本机 Console CLI 的 --help，帮助 Agent 选择命令。可省略 command 查看根帮助，或传小写点分命令路径（例如 deployment.logs）；不接受任意 flags 或 shell。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "可选的小写点分 CLI 命令路径，例如 app.list。"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "console_cli_schema",
+      "description": "可选地调用 console-cli schema，获取 manifest-backed 命令的结构化参数、请求体、响应和约束；CLI 执行时仍会自行验证。传小写点分命令路径，例如 app.list。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Console CLI 的小写点分命令路径，例如 app.list 或 deployment.revision.create。"
+          },
+          "resolve_refs": {
+            "type": "boolean",
+            "description": "是否内联 schema 引用，默认为 false。"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "console_cli_run",
+      "description": "直接以 argv 数组调用本机 console-cli；CLI 自己负责命令、flags、schema 和权限校验，支持 manifest 命令与静态工作流（如 deploy）。插件不解析业务参数、不预检 schema、不追加 context；固定执行本机 CLI 且不启用 shell，仅使用生产登录态。不得传 --token、--context、--server-endpoint 或 --web-url；涉及登录、升级、发布等副作用的命令仅在用户明确要求后执行。命令未启动时失败为 not_executed，启动后无法确认结果为 unknown。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "description": "按终端拆分的 console-cli 参数数组，不含可执行文件；例如 [\"deploy\", \"set-image\", \"--deployment=my-app\", \"--cluster=tap-prod-sh-a\", \"--tag=v1.2.3\"]。"
+          }
+        },
+        "required": ["argv"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

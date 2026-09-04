@@ -1,0 +1,13 @@
+{
+  "name": "TapTap Console",
+  "description": "通过本机安装的 console-cli 发现并执行 TapTap Infra Console 的 Agent 工作流，覆盖应用交付、集群与工作负载、LightApp、迁移、推理、告警值班等；插件不直接调用 API、不保存 Token、不打包 CLI。",
+  "whenToUse": "当用户要查询或处理 TapTap Infra Console（console.tapsvc.com）中的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理服务、告警值班或变更任务时使用。先 status；首次或不确定领域可读 discover、help、schema；再用 run 传入精确 CLI argv，写操作后按 CLI 指引回读状态。命令、flags、schema 与权限由 CLI 判断；仅 CLI 明确不支持的工作流转 Console 控制台。",
+  "tools": {
+    "console_cli_status": { "description": "任何 Console 操作前先检查本机 Console CLI、版本和生产登录状态；只返回可安全展示的账号与权限摘要，不返回 Token。macOS/Linux 未安装时告诉用户完整官方安装命令；Windows 说明脚本不支持并请管理员提供 CLI，安装完成后重新检查。" },
+    "console_cli_login": { "description": "仅在用户明确要求登录时调用 console-cli auth login；由 CLI 打开浏览器完成 OAuth 并保存登录态。可选权限级别或 permission profile，二者不能同时传。macOS/Linux 未安装时告诉用户完整官方安装命令；Windows 请管理员提供 CLI，安装后重新检查。" },
+    "console_cli_discover": { "description": "读取 Console CLI 官方 Agent discovery；首次接触或不确定领域先读 overview，需要选择工作流时再读 skills。只读，不执行 Console 操作。" },
+    "console_cli_help": { "description": "可选地读取根帮助或小写点分命令帮助，协助选择 CLI 命令；不接受任意 flags 或 shell。" },
+    "console_cli_schema": { "description": "可选地调用 console-cli schema 获取 manifest-backed 命令的结构化参数、请求体、响应和约束；实际执行仍由 CLI 自己校验。" },
+    "console_cli_run": { "description": "直接以 argv 调用本机 console-cli；命令、flags、schema 与权限由 CLI 自己校验，支持 deploy 等静态工作流。插件不解析业务参数、不预检 schema、不追加 context，仅使用生产 context、固定本机可执行文件并禁用 shell。拒绝 --token、--context、--server-endpoint、--web-url；副作用命令仅在用户明确要求后执行，失败区分 not_executed 与 unknown。" }
+  }
+}

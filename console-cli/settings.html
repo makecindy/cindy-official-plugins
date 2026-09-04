@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { padding: 2px 0 0; color: var(--text-primary, #1a1a1a); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .label-row { display: flex; align-items: center; gap: 8px; }
+  .name { font-weight: 600; }
+  .badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--surface-chip, #efefec); color: var(--text-tertiary, #777771); }
+  .hint { margin-top: 8px; color: var(--text-secondary, #55554f); }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .btn { padding: 6px 14px; border: 1px solid var(--border-default, #e4e4e0); border-radius: 999px; cursor: pointer; background: transparent; color: var(--text-primary, #1a1a1a); font: inherit; font-weight: 500; }
+  .btn:hover { background: var(--surface-chip, #efefec); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .account { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border-default, #e4e4e0); border-radius: 10px; background: var(--surface-elevated, #fff); }
+  .account-row { display: flex; gap: 8px; justify-content: space-between; }
+  .account-row + .account-row { margin-top: 4px; }
+  .key { color: var(--text-tertiary, #777771); }
+  .value { text-align: right; word-break: break-word; }
+  .install { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--border-default, #e4e4e0); border-radius: 10px; color: var(--text-secondary, #55554f); }
+  .install-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .btn-link { text-decoration: none; }
+  code { display: block; margin-top: 6px; overflow-wrap: anywhere; color: var(--text-primary, #1a1a1a); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #message { margin-top: 10px; min-height: 18px; color: var(--text-tertiary, #777771); }
+  #message.error { color: var(--text-danger, #b42318); }
+</style>
+</head>
+<body>
+  <div class="label-row"><span class="name">TapTap Console</span><span class="badge">本机生产环境</span></div>
+  <p class="hint">插件调用本机已安装的 console-cli。CLI 负责 OAuth 登录、Token 保存、权限和 API 自动发现。</p>
+  <div class="actions">
+    <button id="status-button" class="btn" type="button">检查状态</button>
+    <button id="login-button" class="btn" type="button">登录 Console</button>
+  </div>
+  <div id="account" class="account" hidden></div>
+  <div id="install-guide" class="install" hidden>
+    如果本机尚未安装 Console CLI，请在本机终端手动执行官方安装命令：
+    <code id="install-command">curl -fsSL https://console.tapsvc.com/cli/console-cli/install.sh | sh</code>
+    <div class="install-actions">
+      <button id="copy-install-command" class="btn" type="button">复制命令</button>
+      <a id="open-install-url" class="btn btn-link" href="https://console.tapsvc.com/cli/console-cli/install.sh">打开官方地址</a>
+      <button id="retry-install" class="btn" type="button">重新检查</button>
+    </div>
+  </div>
+  <p id="message" role="status"></p>
+  <script src="/settings.js"></script>
+</body>
+</html>

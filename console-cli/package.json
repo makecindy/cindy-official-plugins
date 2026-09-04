@@ -1,0 +1,9 @@
+{
+  "name": "@cindy-official/console-cli",
+  "private": true,
+  "version": "0.1.1",
+  "description": "Build helper for the Cindy Console CLI plugin Node Worker.",
+  "scripts": {
+    "build": "node -e \"require('node:fs').copyFileSync('src/entry.cjs','node/worker.cjs')\""
+  }
+}

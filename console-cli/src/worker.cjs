@@ -1,0 +1,385 @@
+'use strict';
+
+const { execFile } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const readline = require('node:readline');
+
+const INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
+const INSTALL_COMMAND = `curl -fsSL ${INSTALL_URL} | sh`;
+const MAX_OUTPUT_BYTES = 768 * 1024;
+const MAX_DIAGNOSTIC_CHARS = 600;
+const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+const STATUS_COMMAND_TIMEOUT_MS = 3_000;
+const RUN_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
+const MAX_ARG_COUNT = 128;
+const MAX_ARG_CHARS = 16 * 1024;
+const MAX_TOTAL_ARG_CHARS = 64 * 1024;
+const FORBIDDEN_AGENT_FLAGS = ['--token', '--context', '--server-endpoint', '--web-url'];
+
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function fail(message, execution) {
+  const result = { ok: false, message: String(message || 'Console CLI 操作失败') };
+  if (execution) result.execution = execution;
+  return result;
+}
+
+function installMessage(platform = process.platform) {
+  if (platform === 'win32') {
+    return '未检测到本机 Console CLI。官方安装脚本目前仅支持 macOS/Linux；Windows 请联系 Console 管理员获取 Windows 版 console-cli，并将其加入 PATH。安装完成后告诉我，我会重新检查；确认已登录后才能继续执行 Console 操作。';
+  }
+  return `未检测到本机 Console CLI。请先在本机终端执行：${INSTALL_COMMAND}\n安装完成后告诉我，我会重新检查；确认已登录后才能继续执行 Console 操作。`;
+}
+
+function commandParts(value, required) {
+  if (typeof value !== 'string') throw new Error('command 必须是小写点分 CLI 命令路径');
+  const command = value.trim();
+  if (!required && command === '') return [];
+  const parts = command.split('.');
+  if (parts.length === 0 || parts.length > 8 || parts.some((part) => !/^[a-z][a-z0-9-]{0,63}$/.test(part))) {
+    throw new Error('command 必须是 1–8 段小写点分路径，例如 deployment.logs');
+  }
+  return parts;
+}
+
+function commandString(parts) {
+  return parts.join('.');
+}
+
+function cliCandidates() {
+  const candidates = [];
+  const home = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
+  if (home) {
+    candidates.push(path.join(home, '.local', 'bin', 'console-cli'));
+    candidates.push(path.join(home, 'bin', 'console-cli'));
+  }
+  candidates.push('/opt/homebrew/bin/console-cli', '/usr/local/bin/console-cli', '/usr/bin/console-cli');
+  const pathValue = typeof process.env.PATH === 'string' ? process.env.PATH : '';
+  for (const entry of pathValue.split(path.delimiter)) {
+    if (entry) candidates.push(path.join(entry, process.platform === 'win32' ? 'console-cli.exe' : 'console-cli'));
+  }
+  return [...new Set(candidates)];
+}
+
+function resolveCliPath() {
+  for (const candidate of cliCandidates()) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch (_error) {
+      // Continue through the fixed installation locations.
+    }
+  }
+  return null;
+}
+
+function redactDiagnostic(value) {
+  return String(value || '')
+    .replace(/Bearer\s+[^\s]+/gi, 'Bearer <redacted>')
+    .replace(/["']?((?:token|access[_-]?token|refresh[_-]?token|password|secret|authorization))["']?\s*([:=])\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1$2<redacted>')
+    .replace(/(?:\/Users|\/home|\/private|\/tmp|[A-Za-z]:\\)[^\s"']+/g, '<local-path>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_CHARS);
+}
+
+function runCli(args, options = {}) {
+  const executable = resolveCliPath();
+  if (!executable) return Promise.resolve({ ok: false, kind: 'missing', started: false, diagnostic: '' });
+
+  const timeoutMs = Number.isInteger(options.timeoutMs) ? options.timeoutMs : 60000;
+  const heartbeatMs = Number.isInteger(options.heartbeatMs) ? options.heartbeatMs : 0;
+  return new Promise((resolve) => {
+    let heartbeat = null;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (heartbeat) clearInterval(heartbeat);
+      resolve(result);
+    };
+    try {
+      execFile(executable, args, {
+        encoding: 'utf8',
+        timeout: timeoutMs,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        shell: false,
+        windowsHide: true,
+      }, (error, stdout, stderr) => {
+        if (!error) {
+          finish({ ok: true, stdout: String(stdout || ''), stderr: String(stderr || ''), started: true });
+          return;
+        }
+        const timedOut = error.code === 'ETIMEDOUT' || error.killed === true || error.signal === 'SIGTERM';
+        const tooLarge = error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+        finish({
+          ok: false,
+          kind: tooLarge ? 'output_limit' : timedOut ? 'timeout' : 'exit',
+          started: true,
+          code: error.code,
+          signal: error.signal,
+          diagnostic: redactDiagnostic(`${stderr || ''}\n${stdout || ''}`),
+        });
+      });
+      if (heartbeatMs > 0) {
+        heartbeat = setInterval(() => {
+          process.stderr.write('console-cli is still running; waiting for completion\n');
+        }, heartbeatMs);
+        heartbeat.unref?.();
+      }
+    } catch (error) {
+      finish({
+        ok: false,
+        kind: error && error.code === 'ENOENT' ? 'missing' : 'exit',
+        started: false,
+        diagnostic: redactDiagnostic(error && error.message),
+      });
+    }
+  });
+}
+
+function parseOutput(stdout) {
+  const text = String(stdout || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return text;
+  }
+}
+
+function failureMessage(run, fallback, execution) {
+  if (run.kind === 'missing') return installMessage();
+  if (run.kind === 'timeout') return 'Console CLI 请求超时，可能是网络不通或仍在等待浏览器授权；请先检查网络并调用 console_cli_status 确认状态，不要盲目重试可能已产生副作用的命令。';
+  if (execution === 'unknown') {
+    if (run.kind === 'output_limit') {
+      return 'Console CLI 已启动但返回内容过大，执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。';
+    }
+    const detail = run.diagnostic;
+    return detail
+      ? `Console CLI 已启动但执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。诊断：${detail}`
+      : 'Console CLI 已启动但执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。';
+  }
+  if (run.kind === 'output_limit') return 'Console CLI 返回内容过大，已停止读取；请缩小查询范围后重试。';
+  const detail = run.diagnostic;
+  const lower = detail.toLowerCase();
+  if (/not logged in|api token is required|run `console-cli auth login`|cached access token has expired/.test(lower)) {
+    return 'Console CLI 尚未登录，请在用户明确要求后调用 console_cli_login。';
+  }
+  if (/unknown command|unknown flag|parse --params|parse --json|request body is required|schema .* not found|manifest .* unavailable/.test(lower)) {
+    return detail || fallback;
+  }
+  if (/401|unauthorized/.test(lower)) return 'Console CLI 登录已失效，请调用 console_cli_login 重新授权。';
+  if (/403|forbidden|permission denied/.test(lower)) return 'Console CLI 当前账号没有执行该操作所需的 Console 权限。';
+  if (/network|connection refused|connection reset|no such host|dns|dial tcp|timed out|temporary failure|unreachable/.test(lower)) {
+    return `${fallback}：无法连接 Console 服务，请检查网络和服务地址；如果是变更命令，请先核对远端状态。`;
+  }
+  return detail ? `${fallback}: ${detail}` : fallback;
+}
+
+function failureResult(run, fallback, execution) {
+  return fail(failureMessage(run, fallback, execution), execution);
+}
+
+function classifyExecution(run) {
+  if (!run.started || run.kind === 'missing') return 'not_executed';
+  const lower = String(run.diagnostic || '').toLowerCase();
+  if (/not logged in|api token is required|cached access token has expired|unknown command|unknown flag|parse --params|parse --json|request body is required|401|unauthorized|403|forbidden|permission denied/.test(lower)) {
+    return 'not_executed';
+  }
+  return 'unknown';
+}
+
+function normalizeRunArgs(params) {
+  const argv = isObject(params) ? params.argv : undefined;
+  if (!Array.isArray(argv) || argv.length === 0 || argv.length > MAX_ARG_COUNT) {
+    throw new Error(`argv 必须是 1–${MAX_ARG_COUNT} 个 CLI 参数组成的数组`);
+  }
+  let totalChars = 0;
+  const normalized = argv.map((arg) => {
+    if (typeof arg !== 'string' || arg.length === 0 || arg.length > MAX_ARG_CHARS || arg.includes('\u0000')) {
+      throw new Error(`argv 每项必须是 1–${MAX_ARG_CHARS} 字符且不含 NUL 的字符串`);
+    }
+    totalChars += arg.length;
+    return arg;
+  });
+  if (totalChars > MAX_TOTAL_ARG_CHARS) throw new Error(`argv 总长度不能超过 ${MAX_TOTAL_ARG_CHARS} 字符`);
+  for (const arg of normalized) {
+    if (FORBIDDEN_AGENT_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`))) {
+      throw new Error('argv 不允许传 --token、--context、--server-endpoint 或 --web-url；请使用 Console CLI 本地登录态和默认生产服务地址');
+    }
+  }
+  return normalized;
+}
+
+function normalizeLoginArgs(params) {
+  const input = isObject(params) ? params : {};
+  const hasLevel = input.permission_level !== undefined;
+  const hasProfile = input.permission_profile !== undefined;
+  if (hasLevel && hasProfile) throw new Error('permission_level 和 permission_profile 不能同时传');
+  const result = {};
+  if (hasLevel) {
+    if (!['readonly', 'low-risk', 'sensitive'].includes(input.permission_level)) {
+      throw new Error('permission_level 必须是 readonly、low-risk 或 sensitive');
+    }
+    result.permission_level = input.permission_level;
+  }
+  if (hasProfile) {
+    if (typeof input.permission_profile !== 'string' || !/^[^\u0000-\u001F\u007F]{1,128}$/.test(input.permission_profile.trim())) {
+      throw new Error('permission_profile 必须是 1–128 位非空 profile 名称');
+    }
+    result.permission_profile = input.permission_profile.trim();
+  }
+  return result;
+}
+
+async function status() {
+  const version = await runCli(['version'], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
+  if (!version.ok) return failureResult(version, 'Console CLI 状态查询失败');
+  const auth = await runCli(['auth', 'status'], { timeoutMs: STATUS_COMMAND_TIMEOUT_MS });
+  if (!auth.ok) return failureResult(auth, 'Console CLI 登录状态查询失败');
+  const versionData = parseOutput(version.stdout);
+  const authData = parseOutput(auth.stdout);
+  const loggedIn = isObject(authData) && (
+    typeof authData.account === 'string' && authData.account.trim() !== '' ||
+    typeof authData.email === 'string' && authData.email.trim() !== '' ||
+    typeof authData.authorization_mode === 'string' && authData.authorization_mode.trim() !== ''
+  );
+  const result = {
+    installed: true,
+    cli_version: isObject(versionData) && typeof versionData.version === 'string' ? versionData.version : String(versionData || 'unknown'),
+    logged_in: loggedIn,
+  };
+  if (loggedIn && isObject(authData)) {
+    for (const key of ['email', 'authorization_mode', 'permission_level', 'permission_profile']) {
+      if (typeof authData[key] === 'string' && authData[key]) result[key] = authData[key];
+    }
+  }
+  return { ok: true, result };
+}
+
+async function login(params) {
+  let loginArgs;
+  try {
+    loginArgs = normalizeLoginArgs(params);
+  } catch (error) {
+    return fail(error.message, 'not_executed');
+  }
+  const args = ['auth', 'login'];
+  if (loginArgs.permission_level) args.push('--permission-level', loginArgs.permission_level);
+  if (loginArgs.permission_profile) args.push('--permission-profile', loginArgs.permission_profile);
+  const run = await runCli(args, { timeoutMs: LOGIN_TIMEOUT_MS, heartbeatMs: 10000 });
+  if (!run.ok) {
+    if (run.kind === 'missing') return failureResult(run, 'Console CLI 登录失败', 'not_executed');
+    return failureResult(run, 'Console CLI 登录失败', 'unknown');
+  }
+  const current = await status();
+  if (!current.ok) return fail('Console CLI 登录命令已结束，但登录状态无法确认；请调用 console_cli_status。', 'unknown');
+  if (!current.result.logged_in) return fail('Console CLI 登录命令已结束，但当前仍未登录；请调用 console_cli_status。', 'unknown');
+  return current;
+}
+
+async function discover(params) {
+  const mode = isObject(params) && params.mode !== undefined ? params.mode : 'overview';
+  if (mode !== 'overview' && mode !== 'skills') return fail('mode 必须是 overview 或 skills', 'not_executed');
+  const command = mode === 'skills' ? ['skill', 'list'] : ['skill', 'show', 'overview'];
+  const run = await runCli(command);
+  if (!run.ok) return failureResult(run, 'Console CLI discovery 失败');
+  return { ok: true, result: { mode, content: parseOutput(run.stdout) } };
+}
+
+async function help(params) {
+  let parts;
+  try {
+    parts = commandParts(isObject(params) ? params.command || '' : '', false);
+  } catch (error) {
+    return fail(error.message, 'not_executed');
+  }
+  const run = await runCli([...parts, '--help']);
+  if (!run.ok) return failureResult(run, 'Console CLI 帮助查询失败', 'not_executed');
+  return { ok: true, result: { command: commandString(parts), content: parseOutput(run.stdout) } };
+}
+
+async function schema(params) {
+  let parts;
+  try {
+    parts = commandParts(isObject(params) ? params.command : undefined, true);
+  } catch (error) {
+    return fail(error.message, 'not_executed');
+  }
+  const input = isObject(params) ? params : {};
+  if (input.resolve_refs !== undefined && typeof input.resolve_refs !== 'boolean') return fail('resolve_refs 必须是 boolean', 'not_executed');
+  const args = ['schema', commandString(parts)];
+  if (input.resolve_refs === true) args.push('--resolve-refs');
+  const run = await runCli(args);
+  if (!run.ok) return failureResult(run, 'Console CLI schema 查询失败', 'not_executed');
+  return { ok: true, result: parseOutput(run.stdout) };
+}
+
+async function run(params) {
+  let argv;
+  try {
+    argv = normalizeRunArgs(params);
+  } catch (error) {
+    return fail(error.message, 'not_executed');
+  }
+  const result = await runCli(argv, { timeoutMs: RUN_COMMAND_TIMEOUT_MS, heartbeatMs: 10000 });
+  if (!result.ok) return failureResult(result, 'Console CLI 执行失败', classifyExecution(result));
+  return {
+    ok: true,
+    result: {
+      execution: 'executed',
+      data: parseOutput(result.stdout),
+    },
+  };
+}
+
+async function handleRequest(request) {
+  if (!request || typeof request !== 'object') throw new Error('请求格式无效');
+  switch (request.method) {
+    case 'console/status': return status();
+    case 'console/login': return login(request.params);
+    case 'console/discover': return discover(request.params);
+    case 'console/help': return help(request.params);
+    case 'console/schema': return schema(request.params);
+    case 'console/run': return run(request.params);
+    default: return fail('未知 Console CLI Worker 方法', 'not_executed');
+  }
+}
+
+function writeReply(value) {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function startStdio() {
+  readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+    let request;
+    try {
+      request = JSON.parse(line);
+    } catch (_error) {
+      writeReply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: '请求格式无效' } });
+      return;
+    }
+    void handleRequest(request)
+      .then((result) => writeReply({ jsonrpc: '2.0', id: request.id, result }))
+      .catch((error) => writeReply({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } }));
+  });
+}
+
+if (require.main === module) startStdio();
+
+module.exports = {
+  classifyExecution,
+  commandParts,
+  failureMessage,
+  handleRequest,
+  installMessage,
+  normalizeLoginArgs,
+  normalizeRunArgs,
+  parseOutput,
+  redactDiagnostic,
+  resolveCliPath,
+  startStdio,
+};
