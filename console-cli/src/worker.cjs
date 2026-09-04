@@ -15,7 +15,7 @@ const RUN_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_ARG_COUNT = 128;
 const MAX_ARG_CHARS = 16 * 1024;
 const MAX_TOTAL_ARG_CHARS = 64 * 1024;
-const FORBIDDEN_AGENT_FLAGS = ['--token', '--server-endpoint', '--web-url'];
+const FORBIDDEN_AGENT_FLAGS = ['--token', '--context', '--server-endpoint', '--web-url'];
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -78,7 +78,7 @@ function resolveCliPath() {
 function redactDiagnostic(value) {
   return String(value || '')
     .replace(/Bearer\s+[^\s]+/gi, 'Bearer <redacted>')
-    .replace(/\b(?:token|access[_-]?token|refresh[_-]?token|password|secret|authorization)\s*[:=]\s*[^\s,;]+/gi, '<credential>=<redacted>')
+    .replace(/["']?((?:token|access[_-]?token|refresh[_-]?token|password|secret|authorization))["']?\s*([:=])\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1$2<redacted>')
     .replace(/(?:\/Users|\/home|\/private|\/tmp|[A-Za-z]:\\)[^\s"']+/g, '<local-path>')
     .replace(/\s+/g, ' ')
     .trim()
@@ -152,7 +152,7 @@ function parseOutput(stdout) {
 
 function failureMessage(run, fallback) {
   if (run.kind === 'missing') return installMessage();
-  if (run.kind === 'timeout') return 'Console CLI 执行超时；登录可能仍在等待浏览器授权，请先调用 console_cli_status 确认状态。';
+  if (run.kind === 'timeout') return 'Console CLI 请求超时，可能是网络不通或仍在等待浏览器授权；请先检查网络并调用 console_cli_status 确认状态，不要盲目重试可能已产生副作用的命令。';
   if (run.kind === 'output_limit') return 'Console CLI 返回内容过大，已停止读取；请缩小查询范围后重试。';
   const detail = run.diagnostic;
   const lower = detail.toLowerCase();
@@ -164,6 +164,9 @@ function failureMessage(run, fallback) {
   }
   if (/401|unauthorized/.test(lower)) return 'Console CLI 登录已失效，请调用 console_cli_login 重新授权。';
   if (/403|forbidden|permission denied/.test(lower)) return 'Console CLI 当前账号没有执行该操作所需的 Console 权限。';
+  if (/network|connection refused|connection reset|no such host|dns|dial tcp|timed out|temporary failure|unreachable/.test(lower)) {
+    return `${fallback}：无法连接 Console 服务，请检查网络和服务地址；如果是变更命令，请先核对远端状态。`;
+  }
   return detail ? `${fallback}: ${detail}` : fallback;
 }
 
@@ -196,7 +199,7 @@ function normalizeRunArgs(params) {
   if (totalChars > MAX_TOTAL_ARG_CHARS) throw new Error(`argv 总长度不能超过 ${MAX_TOTAL_ARG_CHARS} 字符`);
   for (const arg of normalized) {
     if (FORBIDDEN_AGENT_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`))) {
-      throw new Error('argv 不允许传 --token、--server-endpoint 或 --web-url；请使用 Console CLI 本地登录态和默认服务地址');
+      throw new Error('argv 不允许传 --token、--context、--server-endpoint 或 --web-url；请使用 Console CLI 本地登录态和默认生产服务地址');
     }
   }
   return normalized;
@@ -230,7 +233,11 @@ async function status() {
   if (!auth.ok) return failureResult(auth, 'Console CLI 登录状态查询失败');
   const versionData = parseOutput(version.stdout);
   const authData = parseOutput(auth.stdout);
-  const loggedIn = isObject(authData) && typeof authData.email === 'string' || isObject(authData) && typeof authData.authorization_mode === 'string';
+  const loggedIn = isObject(authData) && (
+    typeof authData.account === 'string' && authData.account.trim() !== '' ||
+    typeof authData.email === 'string' && authData.email.trim() !== '' ||
+    typeof authData.authorization_mode === 'string' && authData.authorization_mode.trim() !== ''
+  );
   const result = {
     installed: true,
     cli_version: isObject(versionData) && typeof versionData.version === 'string' ? versionData.version : String(versionData || 'unknown'),

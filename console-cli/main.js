@@ -40,7 +40,10 @@ async function nodeRequest(method, params, options) {
   try {
     response = await cindy.node.request(request);
   } catch (error) {
-    throw new Error(error && error.message ? error.message : 'Console CLI Worker 调用失败');
+    var wrapped = new Error(error && error.message ? error.message : 'Console CLI Worker 调用失败');
+    if (error && error.execution) wrapped.execution = error.execution;
+    else if (options && options.executionOnError) wrapped.execution = options.executionOnError;
+    throw wrapped;
   }
   if (!response || response.ok !== true) {
     throw errorFromNode(response, 'Console CLI Worker 调用失败');
@@ -108,7 +111,7 @@ async function runResult(args) {
     var input = isObject(args) ? args : {};
     return { ok: true, result: await nodeRequest('console/run', {
       argv: input.argv,
-    }, { timeoutMs: 60000, maxTotalMs: 900000 }) };
+    }, { timeoutMs: 60000, maxTotalMs: 900000, executionOnError: 'unknown' }) };
   } catch (error) {
     return fail(error && error.message ? error.message : 'Console CLI 操作失败', error && error.execution);
   }

@@ -17,7 +17,7 @@ const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'u
 
 test('manifest uses a production-only Node CLI bridge', () => {
   assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.version, '0.1.15');
+  assert.equal(manifest.version, '0.1.16');
   assert.equal(manifest.minCindyVersion, '0.1.72');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
@@ -93,6 +93,7 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.doesNotMatch(settingsScript, /插件正在启动/);
   assert.match(settingsScript, /clearTimeout\(autoStatusTimer\)/);
   assert.match(settingsScript, /async function login\(\) \{[\s\S]*clearTimeout\(autoStatusTimer\)/);
+  assert.match(settingsScript, /statusSequence \+= 1/);
   assert.match(settingsScript, /setTimeout\(function \(\) \{[\s\S]*void checkStatus\(\);[\s\S]*\}, AUTO_STATUS_DELAY_MS\)/);
   assert.match(settingsScript, /setInterval\(send, 400\)/);
   assert.match(settingsScript, /BroadcastChannel 的首条消息会丢失/);
@@ -103,6 +104,8 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.match(source, /console\/status', \{\}, \{ timeoutMs: 8000 \}/);
   assert.match(worker, /STATUS_COMMAND_TIMEOUT_MS = 3_000/);
   assert.match(worker, /runCli\(\['auth', 'status'\], \{ timeoutMs: STATUS_COMMAND_TIMEOUT_MS \}/);
+  assert.match(worker, /authData\.account/);
+  assert.match(worker, /无法连接 Console 服务/);
 });
 
 test('browser entry never calls Console network APIs or handles credentials', () => {
@@ -113,7 +116,7 @@ test('browser entry never calls Console network APIs or handles credentials', ()
 });
 
 test('worker preserves CLI command semantics while protecting agent boundaries', async () => {
-  const { commandParts, installMessage, normalizeLoginArgs, normalizeRunArgs } = await import(path.join(pluginRoot, 'src/worker.cjs'));
+  const { commandParts, installMessage, normalizeLoginArgs, normalizeRunArgs, redactDiagnostic } = await import(path.join(pluginRoot, 'src/worker.cjs'));
   assert.deepEqual(commandParts('deployment.logs', true), ['deployment', 'logs']);
   assert.throws(() => commandParts('Deployment.logs', true), /小写点分/);
   assert.deepEqual(
@@ -121,6 +124,7 @@ test('worker preserves CLI command semantics while protecting agent boundaries',
     ['deploy', 'set-image', '--deployment=my-app', '--cluster=tap-prod-sh-a', '--tag=v1.2.3'],
   );
   assert.throws(() => normalizeRunArgs({ argv: ['--token=secret'] }), /不允许传 --token/);
+  assert.throws(() => normalizeRunArgs({ argv: ['--context=dev'] }), /--context/);
   assert.throws(() => normalizeRunArgs({ argv: ['app', 'list', '--server-endpoint=https://example.test'] }), /不允许传/);
   assert.throws(() => normalizeRunArgs({ argv: [] }), /argv 必须是/);
   assert.deepEqual(normalizeLoginArgs({ permission_level: 'readonly' }), { permission_level: 'readonly' });
@@ -129,6 +133,7 @@ test('worker preserves CLI command semantics while protecting agent boundaries',
   assert.match(installMessage('darwin'), /curl -fsSL https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh \| sh/);
   assert.match(installMessage('win32'), /Windows.*console-cli.*PATH/);
   assert.doesNotMatch(installMessage('win32'), /curl -fsSL/);
+  assert.doesNotMatch(redactDiagnostic('{"access_token":"secret","refresh_token":"refresh"}'), /secret|refresh"/);
 });
 
 async function makeFakeCli(t, mode = 'normal') {
@@ -140,8 +145,8 @@ async function makeFakeCli(t, mode = 'normal') {
 const args = process.argv.slice(2);
 if (args[0] === 'version') {
   process.stdout.write(JSON.stringify({ version: 'v-test', os: 'test', arch: 'arm64' }));
-} else if (args[0] === 'auth' && args[1] === 'status') {
-  process.stdout.write(${mode === 'logged-out' ? JSON.stringify('not logged in') : JSON.stringify(JSON.stringify({ email: 'agent@example.test', authorization_mode: 'grant', permission_level: 'readonly' }))});
+  } else if (args[0] === 'auth' && args[1] === 'status') {
+  process.stdout.write(${mode === 'logged-out' ? JSON.stringify('not logged in') : JSON.stringify(JSON.stringify(mode === 'account-only' ? { account: 'agent-001' } : { email: 'agent@example.test', authorization_mode: 'grant', permission_level: 'readonly' }))});
 } else if (args[0] === 'auth' && args[1] === 'login') {
   process.stdout.write('logged in');
 } else if (args[0] === 'skill' && args[1] === 'show') {
@@ -206,6 +211,10 @@ test('worker proxies CLI discovery, schema, and direct CLI argv', async (t) => {
   assert.equal(status.response.result.ok, true);
   assert.equal(status.response.result.result.logged_in, true);
   assert.equal(status.response.result.result.email, 'agent@example.test');
+
+  const accountOnlyHome = await makeFakeCli(t, 'account-only');
+  const accountOnly = await runWorker(accountOnlyHome, { method: 'console/status', params: {} });
+  assert.equal(accountOnly.response.result.result.logged_in, true);
 
   const overview = await runWorker(home, { method: 'console/discover', params: { mode: 'overview' } });
   assert.equal(overview.response.result.result.content, 'overview skill');
@@ -273,4 +282,20 @@ test('main bridges tool calls to the Node worker methods', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(requests[1].method, 'console/run');
   assert.equal(messages.at(-1).callId, 'run');
+});
+
+test('main preserves unknown execution when the Node request rejects', async () => {
+  let hostHandler;
+  const messages = [];
+  const cindy = {
+    onHostMessage(handler) { hostHandler = handler; },
+    async send(message) { messages.push(message); },
+    node: { async request() { throw new Error('worker unavailable'); } },
+  };
+  const context = createContext({ cindy, BroadcastChannel: undefined, setTimeout });
+  new Script(source, { filename: 'console-cli/main.js' }).runInContext(context);
+  await hostHandler({ type: 'tool-call', tool: 'console_cli_run', args: { argv: ['deploy', 'set-image'] }, callId: 'run-error' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(messages.at(-1).execution, 'unknown');
+  assert.equal(messages.at(-1).callId, 'run-error');
 });

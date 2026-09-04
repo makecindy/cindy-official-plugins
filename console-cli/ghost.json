@@ -4,7 +4,7 @@
   "name": "TapTap Console",
   "description": "通过本机安装的 console-cli 发现并执行 TapTap Infra Console 的 Agent 工作流，覆盖应用交付、集群与工作负载、LightApp、迁移、推理、告警值班等；插件不直接调用 API、不保存 Token、不打包 CLI。",
   "whenToUse": "处理 TapTap Infra Console（console.tapsvc.com）的应用、部署/版本、集群/工作负载/日志、LightApp、迁移、推理、值班或变更任务时使用。先 status；新或不确定领域可读 discover、help、schema，再用 run 传入 CLI argv，变更后回读。命令、flags、schema、权限由 CLI 判断；CLI 不支持的工作流转 Console 控制台。",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "minCindyVersion": "0.1.72",
   "locales": {
     "en": "locales/en.json",
@@ -107,7 +107,7 @@
     },
     {
       "name": "console_cli_run",
-      "description": "直接以 argv 数组调用本机 console-cli；CLI 自己负责命令、flags、schema 和权限校验，支持 manifest 命令与静态工作流（如 deploy）。插件不解析业务参数、不预检 schema、不追加 context；固定执行本机 CLI 且不启用 shell。不得传 --token、--server-endpoint 或 --web-url；涉及登录、升级、发布等副作用的命令仅在用户明确要求后执行。命令未启动时失败为 not_executed，启动后无法确认结果为 unknown。",
+      "description": "直接以 argv 数组调用本机 console-cli；CLI 自己负责命令、flags、schema 和权限校验，支持 manifest 命令与静态工作流（如 deploy）。插件不解析业务参数、不预检 schema、不追加 context；固定执行本机 CLI 且不启用 shell，仅使用生产登录态。不得传 --token、--context、--server-endpoint 或 --web-url；涉及登录、升级、发布等副作用的命令仅在用户明确要求后执行。命令未启动时失败为 not_executed，启动后无法确认结果为 unknown。",
       "parameters": {
         "type": "object",
         "properties": {

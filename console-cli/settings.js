@@ -169,6 +169,8 @@
   }
 
   async function login() {
+    statusSequence += 1;
+    $('status-button').disabled = false;
     if (autoStatusTimer) {
       clearTimeout(autoStatusTimer);
       autoStatusTimer = null;

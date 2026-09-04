@@ -8,6 +8,6 @@
     "console_cli_discover": { "description": "공식 Agent discovery를 읽습니다. 처음이거나 불명확한 영역은 overview, 워크플로를 고를 때는 skills를 사용합니다. 읽기 전용입니다." },
     "console_cli_help": { "description": "CLI 명령 선택을 돕기 위해 루트 또는 소문자 점 구분 명령의 help를 선택적으로 읽습니다. 임의 flags나 shell은 허용하지 않습니다." },
     "console_cli_schema": { "description": "manifest-backed 명령의 구조화된 매개변수, 본문, 응답 및 제약을 확인하려면 console-cli schema를 선택적으로 사용합니다. 실행 시에도 CLI가 직접 검증합니다." },
-    "console_cli_run": { "description": "argv로 로컬 console-cli를 직접 실행합니다. CLI가 명령, flags, schema, 권한을 검증하며 deploy 같은 정적 워크플로도 사용할 수 있습니다. 플러그인은 업무 인자를 해석하거나 schema를 사전 확인하거나 context를 추가하지 않고, 실행 파일 고정과 shell 비활성화만 담당합니다. --token, --server-endpoint, --web-url은 거부합니다. 로그인, upgrade, 배포 변경은 사용자가 명시적으로 요청한 경우에만 실행하고 실패를 not_executed와 unknown으로 구분합니다." }
+    "console_cli_run": { "description": "argv로 로컬 console-cli를 직접 실행합니다. CLI가 명령, flags, schema, 권한을 검증하며 deploy 같은 정적 워크플로도 사용할 수 있습니다. 플러그인은 업무 인자를 해석하거나 schema를 사전 확인하거나 context를 추가하지 않고 production context만 사용하며 실행 파일을 고정하고 shell을 끕니다. --token, --context, --server-endpoint, --web-url은 거부합니다. 부작용은 명시적 요청에만 실행하고 실패를 not_executed와 unknown으로 구분합니다." }
   }
 }
