@@ -17,7 +17,7 @@ const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'u
 
 test('manifest uses a production-only Node CLI bridge', () => {
   assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.version, '0.1.16');
+  assert.equal(manifest.version, '0.1.17');
   assert.equal(manifest.minCindyVersion, '0.1.72');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
@@ -116,7 +116,7 @@ test('browser entry never calls Console network APIs or handles credentials', ()
 });
 
 test('worker preserves CLI command semantics while protecting agent boundaries', async () => {
-  const { commandParts, installMessage, normalizeLoginArgs, normalizeRunArgs, redactDiagnostic } = await import(path.join(pluginRoot, 'src/worker.cjs'));
+  const { commandParts, failureMessage, installMessage, normalizeLoginArgs, normalizeRunArgs, redactDiagnostic } = await import(path.join(pluginRoot, 'src/worker.cjs'));
   assert.deepEqual(commandParts('deployment.logs', true), ['deployment', 'logs']);
   assert.throws(() => commandParts('Deployment.logs', true), /小写点分/);
   assert.deepEqual(
@@ -134,6 +134,18 @@ test('worker preserves CLI command semantics while protecting agent boundaries',
   assert.match(installMessage('win32'), /Windows.*console-cli.*PATH/);
   assert.doesNotMatch(installMessage('win32'), /curl -fsSL/);
   assert.doesNotMatch(redactDiagnostic('{"access_token":"secret","refresh_token":"refresh"}'), /secret|refresh"/);
+  assert.match(
+    failureMessage({ kind: 'output_limit', diagnostic: '' }, 'Console CLI 执行失败', 'unknown'),
+    /核对 Console 远端状态/,
+  );
+  assert.doesNotMatch(
+    failureMessage({ kind: 'output_limit', diagnostic: '' }, 'Console CLI 执行失败', 'unknown'),
+    /缩小查询范围后重试/,
+  );
+  assert.match(
+    failureMessage({ kind: 'exit', diagnostic: 'unexpected failure' }, 'Console CLI 执行失败', 'unknown'),
+    /执行结果无法确认[\s\S]*不要盲目重试/,
+  );
 });
 
 async function makeFakeCli(t, mode = 'normal') {

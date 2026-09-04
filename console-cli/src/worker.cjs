@@ -150,9 +150,18 @@ function parseOutput(stdout) {
   }
 }
 
-function failureMessage(run, fallback) {
+function failureMessage(run, fallback, execution) {
   if (run.kind === 'missing') return installMessage();
   if (run.kind === 'timeout') return 'Console CLI 请求超时，可能是网络不通或仍在等待浏览器授权；请先检查网络并调用 console_cli_status 确认状态，不要盲目重试可能已产生副作用的命令。';
+  if (execution === 'unknown') {
+    if (run.kind === 'output_limit') {
+      return 'Console CLI 已启动但返回内容过大，执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。';
+    }
+    const detail = run.diagnostic;
+    return detail
+      ? `Console CLI 已启动但执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。诊断：${detail}`
+      : 'Console CLI 已启动但执行结果无法确认；请先核对 Console 远端状态，不要盲目重试。';
+  }
   if (run.kind === 'output_limit') return 'Console CLI 返回内容过大，已停止读取；请缩小查询范围后重试。';
   const detail = run.diagnostic;
   const lower = detail.toLowerCase();
@@ -171,7 +180,7 @@ function failureMessage(run, fallback) {
 }
 
 function failureResult(run, fallback, execution) {
-  return fail(failureMessage(run, fallback), execution);
+  return fail(failureMessage(run, fallback, execution), execution);
 }
 
 function classifyExecution(run) {
@@ -364,6 +373,7 @@ if (require.main === module) startStdio();
 module.exports = {
   classifyExecution,
   commandParts,
+  failureMessage,
   handleRequest,
   installMessage,
   normalizeLoginArgs,
