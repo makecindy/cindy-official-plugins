@@ -13,6 +13,8 @@ const source = readFileSync(path.join(pluginRoot, 'main.js'), 'utf8');
 const worker = readFileSync(path.join(pluginRoot, 'src/worker.cjs'), 'utf8');
 const settings = readFileSync(path.join(pluginRoot, 'settings.html'), 'utf8');
 const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8');
+const workerEntry = readFileSync(path.join(pluginRoot, 'src/entry.cjs'), 'utf8');
+const workerArtifact = readFileSync(path.join(pluginRoot, 'node/worker.cjs'), 'utf8');
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
@@ -58,6 +60,12 @@ test('manifest and locales record Console recall boundaries and CLI call order',
     assert.ok(resource.tools.console_cli_status.description.length <= 300, `${locale}.status description exceeds 300 characters`);
     assert.ok(resource.tools.console_cli_login.description.length <= 300, `${locale}.login description exceeds 300 characters`);
   }
+});
+
+test('packaged worker is reproducibly generated from the checked-in entry', () => {
+  assert.equal(workerArtifact, workerEntry);
+  const buildManifest = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
+  assert.match(buildManifest.scripts.build, /copyFileSync\(['"]src\/entry\.cjs['"],\s*['"]node\/worker\.cjs['"]\)/);
 });
 
 test('display name is consistent across the manifest and locales', () => {

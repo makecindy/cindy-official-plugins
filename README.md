@@ -388,6 +388,13 @@ with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly — do not edit the generated
 `dist/maker.js` by hand.
 
+`console-cli/node/worker.cjs` is a plugin-owned, deterministic entry artifact,
+not vendored third-party code. The build in `console-cli/package.json` copies
+`src/entry.cjs` to that declared runtime entry; run `npm ci && npm run build`
+from `console-cli/` and verify the two files are identical before changing the
+worker. PRs changing this artifact must include the source/build provenance,
+external-domain list, and dynamic-code scan results.
+
 ## Community
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR — it covers
