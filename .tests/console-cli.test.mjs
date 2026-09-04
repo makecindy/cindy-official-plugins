@@ -16,7 +16,7 @@ const settingsScript = readFileSync(path.join(pluginRoot, 'settings.js'), 'utf8'
 const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'ghost.json'), 'utf8'));
 
 test('manifest uses a production-only Node CLI bridge', () => {
-  assert.equal(manifest.version, '0.1.13');
+  assert.equal(manifest.version, '0.1.14');
   assert.equal(manifest.id, 'console-cli');
   assert.equal(manifest.name, 'TapTap Console');
   assert.deepEqual(manifest.slots, ['tool', 'node', 'notify']);
@@ -50,6 +50,10 @@ test('manifest and locales record Console recall boundaries and CLI call order',
     }
     assert.match(text, /schema[\s\S]{0,80}run/);
     assert.ok(resource.tools.console_cli_run.description.includes('CLI'));
+    assert.match(resource.tools.console_cli_status.description, /macOS|macOS\/Linux/);
+    assert.match(resource.tools.console_cli_login.description, /macOS|macOS\/Linux/);
+    assert.ok(resource.tools.console_cli_status.description.length <= 300, `${locale}.status description exceeds 300 characters`);
+    assert.ok(resource.tools.console_cli_login.description.length <= 300, `${locale}.login description exceeds 300 characters`);
   }
 });
 
@@ -67,6 +71,8 @@ test('settings provides a manual missing-CLI install guide', () => {
   assert.match(settings, /id="open-install-url"/);
   assert.match(settings, /id="retry-install"/);
   assert.match(settingsScript, /isMissingCliError/);
+  assert.match(settingsScript, /isUnsupportedPlatformError/);
+  assert.match(settingsScript, /isMissingCliError\(error\) && !isUnsupportedPlatformError\(error\)/);
   assert.match(settingsScript, /setInstallGuideVisible\(true\)/);
   assert.match(settingsScript, /setInstallGuideVisible\(false\)/);
   assert.match(settingsScript, /document\.execCommand\('copy'\)/);
@@ -104,7 +110,7 @@ test('browser entry never calls Console network APIs or handles credentials', ()
 });
 
 test('worker preserves CLI command semantics while protecting agent boundaries', async () => {
-  const { commandParts, normalizeLoginArgs, normalizeRunArgs } = await import(path.join(pluginRoot, 'src/worker.cjs'));
+  const { commandParts, installMessage, normalizeLoginArgs, normalizeRunArgs } = await import(path.join(pluginRoot, 'src/worker.cjs'));
   assert.deepEqual(commandParts('deployment.logs', true), ['deployment', 'logs']);
   assert.throws(() => commandParts('Deployment.logs', true), /小写点分/);
   assert.deepEqual(
@@ -117,6 +123,9 @@ test('worker preserves CLI command semantics while protecting agent boundaries',
   assert.deepEqual(normalizeLoginArgs({ permission_level: 'readonly' }), { permission_level: 'readonly' });
   assert.throws(() => normalizeLoginArgs({ permission_level: 'sensitive', permission_profile: 'ops' }), /不能同时/);
   assert.throws(() => normalizeLoginArgs({ permission_level: 'admin' }), /必须是 readonly/);
+  assert.match(installMessage('darwin'), /curl -fsSL https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh \| sh/);
+  assert.match(installMessage('win32'), /Windows.*console-cli.*PATH/);
+  assert.doesNotMatch(installMessage('win32'), /curl -fsSL/);
 });
 
 async function makeFakeCli(t, mode = 'normal') {
@@ -227,6 +236,8 @@ test('worker returns actionable missing-install and login results', async (t) =>
   t.after(() => rm(home, { recursive: true, force: true }));
   const missing = await runWorker(home, { method: 'console/status', params: {} });
   assert.equal(missing.response.result.ok, false);
+  assert.match(missing.response.result.message, /curl -fsSL https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh \| sh/);
+  assert.match(missing.response.result.message, /安装完成后告诉我，我会重新检查/);
   assert.match(missing.response.result.message, /https:\/\/console\.tapsvc\.com\/cli\/console-cli\/install\.sh/);
 
   const loggedOutHome = await makeFakeCli(t, 'logged-out');

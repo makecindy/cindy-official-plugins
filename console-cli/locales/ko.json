@@ -3,8 +3,8 @@
   "description": "설치된 console-cli로 TapTap Infra Console의 에이전트 워크플로를 검색하고 실행합니다. 앱 전달, 클러스터, 워크로드, LightApp, 마이그레이션, 추론, 온콜을 지원하며 API를 직접 호출하거나 Token·CLI 바이너리를 보관하지 않습니다.",
   "whenToUse": "TapTap Infra Console(console.tapsvc.com)의 리소스를 조회하거나 조작할 때 사용합니다. 먼저 status를 확인하고, 불명확한 작업은 필요에 따라 discover, help, schema를 읽은 뒤 run에 CLI argv를 전달하고 변경 후 상태를 확인합니다. 명령, flags, schema, 권한은 CLI가 검증하며 지원하지 않는 작업만 Console 웹으로 안내합니다.",
   "tools": {
-    "console_cli_status": { "description": "모든 Console 작업의 첫 단계로 로컬 CLI 설치 여부, 버전, 프로덕션 로그인 상태를 확인합니다. Token은 반환하지 않고 안전한 계정·권한 요약만 반환하며, 미설치 시 공식 수동 설치 안내를 제공합니다." },
-    "console_cli_login": { "description": "사용자가 명시적으로 로그인을 요청한 경우에만 console-cli auth login을 실행합니다. CLI가 브라우저 OAuth와 로그인 상태 저장을 담당하며 권한 수준과 profile은 동시에 지정할 수 없습니다." },
+    "console_cli_status": { "description": "모든 Console 작업 전에 로컬 CLI 설치, 버전, 프로덕션 로그인 상태를 확인합니다. Token은 반환하지 않습니다. 미설치 시 macOS/Linux에는 공식 명령을, Windows에는 스크립트가 지원되지 않으므로 관리자가 제공한 CLI를 안내하고 다시 확인합니다." },
+    "console_cli_login": { "description": "사용자가 명시적으로 요청한 경우에만 console-cli auth login을 실행하며 CLI가 OAuth와 로그인 상태를 관리합니다. 권한 수준과 profile은 동시에 지정할 수 없습니다. CLI가 없으면 macOS/Linux에는 공식 명령을, Windows에는 관리자 제공 CLI를 안내하고 다시 확인합니다." },
     "console_cli_discover": { "description": "공식 Agent discovery를 읽습니다. 처음이거나 불명확한 영역은 overview, 워크플로를 고를 때는 skills를 사용합니다. 읽기 전용입니다." },
     "console_cli_help": { "description": "CLI 명령 선택을 돕기 위해 루트 또는 소문자 점 구분 명령의 help를 선택적으로 읽습니다. 임의 flags나 shell은 허용하지 않습니다." },
     "console_cli_schema": { "description": "manifest-backed 명령의 구조화된 매개변수, 본문, 응답 및 제약을 확인하려면 console-cli schema를 선택적으로 사용합니다. 실행 시에도 CLI가 직접 검증합니다." },

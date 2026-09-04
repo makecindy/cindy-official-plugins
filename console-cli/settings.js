@@ -26,6 +26,11 @@
     return message.indexOf(INSTALL_URL) !== -1 || message.indexOf('未检测到本机 Console CLI') !== -1;
   }
 
+  function isUnsupportedPlatformError(error) {
+    var message = error && error.message ? String(error.message) : '';
+    return message.indexOf('官方安装脚本目前仅支持 macOS/Linux') !== -1;
+  }
+
   function setInstallGuideVisible(visible) {
     $('install-guide').hidden = !visible;
   }
@@ -151,7 +156,7 @@
     } catch (error) {
       if (requestSequence !== statusSequence) return;
       showAccount(null);
-      if (isMissingCliError(error)) {
+      if (isMissingCliError(error) && !isUnsupportedPlatformError(error)) {
         setInstallGuideVisible(true);
         showMessage('未检测到 Console CLI，请先安装。', true);
       } else {
@@ -176,7 +181,7 @@
       setInstallGuideVisible(false);
       showMessage('Console 已登录');
     } catch (error) {
-      if (isMissingCliError(error)) {
+      if (isMissingCliError(error) && !isUnsupportedPlatformError(error)) {
         setInstallGuideVisible(true);
         showMessage('未检测到 Console CLI，请先安装。', true);
       } else {

@@ -6,6 +6,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const INSTALL_URL = 'https://console.tapsvc.com/cli/console-cli/install.sh';
+const INSTALL_COMMAND = `curl -fsSL ${INSTALL_URL} | sh`;
 const MAX_OUTPUT_BYTES = 768 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 600;
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -26,8 +27,11 @@ function fail(message, execution) {
   return result;
 }
 
-function installMessage() {
-  return `未检测到本机 Console CLI。请先手动安装：${INSTALL_URL}`;
+function installMessage(platform = process.platform) {
+  if (platform === 'win32') {
+    return '未检测到本机 Console CLI。官方安装脚本目前仅支持 macOS/Linux；Windows 请联系 Console 管理员获取 Windows 版 console-cli，并将其加入 PATH。安装完成后告诉我，我会重新检查；确认已登录后才能继续执行 Console 操作。';
+  }
+  return `未检测到本机 Console CLI。请先在本机终端执行：${INSTALL_COMMAND}\n安装完成后告诉我，我会重新检查；确认已登录后才能继续执行 Console 操作。`;
 }
 
 function commandParts(value, required) {
@@ -354,6 +358,7 @@ module.exports = {
   classifyExecution,
   commandParts,
   handleRequest,
+  installMessage,
   normalizeLoginArgs,
   normalizeRunArgs,
   parseOutput,
