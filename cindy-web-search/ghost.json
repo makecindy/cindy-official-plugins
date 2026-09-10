@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "cindy-web-search",
   "name": "Web Search",
   "description": "Cindy 内置的网页搜索插件:默认使用 Cindy AI 搜索,也可用你自己的 Brave / Tavily key 搜索公网;配置 Tavily key 后还能读取经用户明确确认的任意单个公开 HTTP(S) 网页正文。key 在插件详情页填写,加密存本机、只注入声明域名的请求。",
@@ -16,7 +16,6 @@
   "icon": "assets/icon.png",
   "entry": "main.js",
   "settingsHtml": "settings.html",
-  "slots": ["tool", "cindy", "network"],
   "command": "cindy-web-search",
   "cindy": {
     "search": ["web"]
