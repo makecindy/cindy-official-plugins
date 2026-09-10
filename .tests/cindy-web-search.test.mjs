@@ -199,7 +199,8 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.equal(manifest.version, '1.4.0');
   assert.equal(manifest.minCindyVersion, '0.1.37');
   assert.deepEqual(manifest.cindy, { search: ['web'] });
-  assert.ok(manifest.slots.includes('cindy'));
+  // Manifest v3 用顶层直接字段声明能力,不再提供 slots。
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.deepEqual(manifest.setup, { requires: [] });
   const searchTool = manifest.tools.find((tool) => tool.name === 'search_web');
   const fetchTool = manifest.tools.find((tool) => tool.name === 'fetch_page');
