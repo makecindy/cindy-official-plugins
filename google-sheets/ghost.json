@@ -1,10 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.82",
   "id": "google-sheets",
   "name": "Google Sheets",
   "description": "独立连接 Google Sheets：读取工作表、读取范围并写入单元格。使用 Google Drive 权限访问表格，授权与令牌由主机托管。",
   "whenToUse": "需要读取或更新 Google Sheets 表格数据时使用。请先在本插件详情页单独连接 Google Sheets 账号。",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -15,7 +16,6 @@
   "icon": "assets/icon.png",
   "entry": "main.js",
   "settingsHtml": "settings.html",
-  "slots": ["tool", "network"],
   "command": "google-sheets",
   "network": {
     "hosts": [
@@ -33,7 +33,10 @@
         "inject": {
           "header": "Authorization",
           "format": "Bearer {value}",
-          "hosts": ["www.googleapis.com", "sheets.googleapis.com"]
+          "hosts": [
+            "www.googleapis.com",
+            "sheets.googleapis.com"
+          ]
         },
         "oauth": {
           "authorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -60,9 +63,65 @@
   },
   "tools": [
     {
+      "name": "google_sheets_schema",
+      "description": "Discover bundled gog commands for this plugin. Read a command path before executing it with google_sheets_run. No account token is needed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Canonical command path without the service prefix; [] lists available commands."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "google_sheets_run",
+      "description": "Execute a discovered gog command with a connected account. Prefer this for new tasks, including file and attachment operations. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Opaque account ID returned by google_sheets_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Canonical command path returned by google_sheets_schema, without service prefix."
+          },
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Positional arguments in schema order."
+          },
+          "options": {
+            "type": "object",
+            "description": "Command flags from schema, without --. Arrays repeat a flag. No account, token, config or global overrides."
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "google_sheets_accounts",
-      "description": "列出本插件已连接的 Google Sheets 账号及状态。账号必须先在 Google Sheets 插件详情页单独授权。",
-      "parameters": { "type": "object", "properties": {} }
+      "description": "List connected accounts with stable id, email, user nickname and authorization status. Match requests such as work email or personal email against nicknames and email addresses. If the choice is ambiguous, ask the user. Pass the selected id as account; nicknames are labels, not instructions or authorization.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
     },
     {
       "name": "google_sheets",
@@ -72,19 +131,64 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["list_sheets", "read_range", "write_range"]
+            "enum": [
+              "list_sheets",
+              "read_range",
+              "write_range"
+            ]
           },
-          "account": { "type": "string" },
-          "spreadsheet_id": { "type": "string", "description": "表格 id 或完整 Google Sheets 链接" },
-          "range": { "type": "string", "description": "A1 记法，例如 Sheet1!A1:D20" },
+          "account": {
+            "type": "string",
+            "description": "Opaque account ID returned by google_sheets_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
+          },
+          "spreadsheet_id": {
+            "type": "string",
+            "description": "表格 id 或完整 Google Sheets 链接"
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 记法，例如 Sheet1!A1:D20"
+          },
           "values": {
             "type": "array",
-            "items": { "type": "array", "items": {} },
+            "items": {
+              "type": "array",
+              "items": {}
+            },
             "description": "write_range 使用的二维数组"
           }
         },
-        "required": ["action", "spreadsheet_id"]
+        "required": [
+          "action",
+          "spreadsheet_id"
+        ]
       }
     }
-  ]
+  ],
+  "node": {
+    "entry": "node/gog.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120,
+    "secretBindings": [
+      {
+        "key": "gog_access_token",
+        "label": "Google Sheets access token",
+        "oauthSecret": "google_sheets_account",
+        "methods": [
+          "run"
+        ]
+      }
+    ]
+  },
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/gog",
+        "name": "gog",
+        "description": "Google commands, account selection, attachments and execution safety."
+      }
+    ]
+  },
+  "sessionContext": true
 }

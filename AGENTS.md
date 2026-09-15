@@ -74,9 +74,9 @@ vendor/dist changes require itemized evidence, never a bare "looks fine".
   of the PR and must not be flagged.
 - Bundled third-party dependencies changed → update that plugin's
   `THIRD-PARTY-LICENSES.txt`.
-- Every changed plugin package requires the PR's production Cindy verification
+- Every changed plugin package requires the PR's Cindy device verification
   checkbox, attesting that its packaged `.cindy` was installed and exercised on
-  a real device running a stable production Cindy build. If the plugin declares
+  a real device running a stable production or Beta Cindy build. If the plugin declares
   `minCindyVersion`, that Cindy build must be greater than or equal to it.
   Lowering/removing the field requires maintainer review.
 - Paired bilingual docs (`README.md` ↔ `README.zh-CN.md`, etc.) must change in

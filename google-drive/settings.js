@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  var connecting = false;
   var KEY = 'google_drive_account';
   var LABEL = 'Google Drive';
   var $ = function (id) { return document.getElementById(id); };
@@ -48,37 +49,7 @@
     return detail ? message + '（' + detail + '）' : message;
   }
   function render(entry) {
-    var box = $('accounts');
-    box.textContent = '';
-    var accounts = (entry && entry.accounts) || [];
-    $('reauth').hidden = !accounts.some(function (account) { return account.status === 'expired'; });
-    accounts.forEach(function (account) {
-      var row = document.createElement('div');
-      row.className = 'account';
-      var email = document.createElement('span');
-      email.className = 'email';
-      email.textContent = account.label || account.id;
-      row.appendChild(email);
-      var tag = document.createElement('span');
-      tag.className = 'tag' + (account.status === 'expired' ? ' expired' : '');
-      tag.textContent = account.status === 'expired' ? '需重新连接' : account.isDefault ? '默认' : '';
-      row.appendChild(tag);
-      if (!account.isDefault && account.status !== 'expired') {
-        var makeDefault = document.createElement('button');
-        makeDefault.textContent = '设为默认';
-        makeDefault.onclick = function () {
-          void fetch('/oauth/' + KEY + '/default', { method: 'POST', body: JSON.stringify({ accountId: account.id }) }).then(load);
-        };
-        row.appendChild(makeDefault);
-      }
-      var disconnect = document.createElement('button');
-      disconnect.textContent = '断开';
-      disconnect.onclick = function () {
-        void fetch('/oauth/' + KEY + '/accounts/' + encodeURIComponent(account.id), { method: 'DELETE' }).then(load);
-      };
-      row.appendChild(disconnect);
-      box.appendChild(row);
-    });
+    window.renderGoogleAccounts(KEY, (entry && entry.accounts) || [], load, connect);
   }
   async function load() {
     try {
@@ -86,21 +57,29 @@
       if (!response.ok) throw new Error('HTTP ' + response.status);
       var list = await response.json();
       if (!Array.isArray(list)) throw new Error('invalid response');
-      render(list.find(function (item) { return item && item.key === KEY; }));
+      var entry = list.find(function (item) { return item && item.key === KEY; });
+      var accounts = await googleAccountMetadata.list(KEY, (entry && entry.accounts) || []);
+      render({ accounts: accounts });
     } catch (_err) {
       render(null);
       status('账号状态加载失败，请重试');
     }
   }
-  async function connect() {
+  async function connect(target) {
+      if (connecting) return;
+      connecting = true;
     $('connect').disabled = true;
-    status('已打开浏览器，请完成 ' + LABEL + ' 授权…');
+      status(target ? '请在浏览器中选择 ' + (target.label || target.id) + '，重新授权此账号。' : '已打开浏览器，请完成 ' + LABEL + ' 授权…');
     try {
       var response = await fetch('/oauth/' + KEY + '/connect', { method: 'POST' });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       var result = await response.json();
       if (result.ok) {
-        status('已连接 ' + (result.account && result.account.label ? result.account.label : '账号'));
+        if (target && result.account && result.account.id !== target.id) {
+          status('已连接 ' + (result.account.label || result.account.id) + '；这不是所选账号，' + (target.label || target.id) + ' 仍需重新连接。');
+        } else {
+          status('已连接 ' + (result.account && result.account.label ? result.account.label : '账号'));
+        }
       } else {
         status(connectError(result));
       }
@@ -108,6 +87,7 @@
     } catch (_err) {
       status('连接失败，请重试');
     } finally {
+      connecting = false;
       $('connect').disabled = false;
     }
   }

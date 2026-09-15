@@ -86,7 +86,7 @@ cd 163-mail && npm ci && npm run build
    `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。按
    [映射表](docs/plugin-authoring.zh-CN.md#manifest-v2-到-v3保留行为转换表达)
    保留 `card`、`sessionContext` 等纯声明能力；仅删除 `slots` 不算完成迁移。`minCindyVersion`
-   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个 Cindy 正式稳定版本；
+   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）；
    Manifest v3 本身不设置仓库级 Cindy 版本下限。
    未改动的 v2 插件刻意保持原样，禁止批量迁移。
    Plugin Server 按用户当前 Cindy 版本选择最近曾上架的兼容 Release；current 不兼容时
@@ -95,14 +95,14 @@ cd 163-mail && npm ci && npm run build
    因此必须准确填写这个字段。
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
    Agent 行为的影响——这段描述就是 Agent 读到的使用手册。每个改动插件都必须先在
-   运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并验证核心功能，再勾选 PR
-   的生产版 Cindy 验证项；插件声明 `minCindyVersion` 时，验证所用 Cindy 版本必须
+   运行正式稳定版或 Beta 版 Cindy 的实际设备上安装真实 `.cindy` 包并验证核心功能，再勾选 PR
+   的 Cindy 实机验证项；插件声明 `minCindyVersion` 时，验证所用 Cindy 版本必须
    不低于该最低版本。降低或删除该字段会扩大声称支持的范围，必须交维护者人工 review。
 
 每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 Server / Desktop 交付
 契约、localization 与 provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装
 该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。只要 PR 改动了插件
-包，CI 还会要求 PR Body 勾选生产版 Cindy 验证项。真正上传仍只在合入 `main` 后发生。
+包，CI 还会要求 PR Body 勾选 Cindy 实机验证项。真正上传仍只在合入 `main` 后发生。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后区域 Workflow 会把改动包提交

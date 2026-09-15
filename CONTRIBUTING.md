@@ -109,7 +109,7 @@ do not edit the generated `dist/maker.js` by hand.
    [mapping table](docs/plugin-authoring.md#manifest-v2-to-v3-preserve-behavior-change-representation),
    retaining presence-only capabilities such as `card` and `sessionContext`;
    deleting `slots` alone is not a complete migration. Set `minCindyVersion` to the
-   first stable Cindy release that supports the concrete plugin's required Host
+   first published Cindy (stable or Beta) release that supports the concrete plugin's required Host
    capabilities and manifest fields; Manifest v3 has no repository-wide Cindy
    version floor.
    Unchanged v2 plugins are intentionally left alone; do not bulk-migrate them.
@@ -121,9 +121,9 @@ do not edit the generated `dist/maker.js` by hand.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
-   Check the production Cindy verification item only after installing every
-   changed plugin's packaged `.cindy` on a real device running a stable
-   production Cindy build and exercising its core functionality. If a plugin
+   Check the Cindy device verification item only after installing every
+   changed plugin's packaged `.cindy` on a real device running a stable production
+   or Beta Cindy build and exercising its core functionality. If a plugin
    declares `minCindyVersion`, that Cindy build must be greater than or equal to
    it. Lowering or removing the field expands claimed compatibility and
    requires maintainer review.
@@ -133,7 +133,7 @@ workflow: it runs the Server/Desktop delivery contract, localization and
 provisioning gates, runs the `*.test.mjs` tests of every changed plugin
 (installing that plugin's dependencies first), and dry-runs the exact packaging
 step the publish pipeline uses. For every changed plugin package, CI also
-requires the production Cindy verification checkbox in the pull request body.
+requires the Cindy device verification checkbox in the pull request body.
 The actual upload still happens only after merge to `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated

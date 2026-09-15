@@ -12,6 +12,36 @@ publishing requirements. This document adds migration mappings and common runtim
 
 ## Derive changes from the task
 
+### Trusted Node adapters for CLI and MCP
+
+Bundle a third-party CLI or stdio MCP server with a plugin-local Node adapter;
+reuse `cindy.node.request` rather than adding a CLI-specific Cindy API. Pin the
+upstream release, checksums and licenses. The adapter, not a prompt, constrains
+commands, credential forwarding, file paths and side-effect failure semantics.
+Node code is trusted current-user code, not an OS sandbox.
+
+For an existing plugin OAuth account, a `node.secretBindings` entry may declare
+`oauthSecret` referencing its own `network.secrets` OAuth key. The binding's
+method/entry allowlist still applies. `authAccount` selects the opaque account ID
+per request; omission uses that plugin's default. Cindy refreshes tokens and sends
+only the short-lived access token in `message.cindy.secrets[binding.key]`.
+No refresh tokens, global environment writes, token files or credential-returning
+tools. Missing/expired/invalid accounts fail without static-credential fallback.
+Static bindings without `oauthSecret` are unchanged. This new capability requires
+a supporting Cindy release; set `minCindyVersion` only after stable or Beta device validation.
+
+The Google packages use the shared generation sources in `scripts/google-workspace`
+but ship independent copies, not runtime plugin dependencies. Their old tool
+interfaces are frozen compatibility paths; new operations use gog schema/run.
+
+Account nicknames and other plugin-specific preferences belong to the plugin,
+not the Host OAuth account model. Store them through the existing same-origin
+`/kv` interface and join them to Host account IDs in the plugin's settings and
+account tools. Send only the selected ID for credential injection; labels never
+become identities or authorization. See the plugin-local
+[metadata implementation](../scripts/google-workspace/account-metadata.js) and
+[regression tests](../.tests/google-account-metadata.test.mjs).
+
 The author describes the desired functionality. The implementing Agent reads the
 existing `ghost.json`, entry code, and relevant resources, then handles format
 conversion, declarations, versions, localized text, and validation. Do not hand
@@ -84,7 +114,7 @@ registration. An invented field or method cannot create an unimplemented Host AP
 ## Version and installation facts
 
 - Determine `minCindyVersion` from the package's manifest format, required Host
-  interfaces, and stable release evidence. Keeping the old v2 value is not
+  interfaces, and stable or Beta release evidence. Keeping the old v2 value is not
   automatically correct; merged code is not proof of release. The README's
   `1.2.3` is a placeholder, not a repository-wide client floor.
 - Current official CI requires v3 for new plugins and changed package content,
@@ -296,7 +326,7 @@ proof of account connection.
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no
    credentials; production verification must cover the submitted contents.
-4. Install the final package in a production stable Cindy build meeting its real
+4. Install the final package in a stable production or Beta Cindy build meeting its real
    minimum, exercise core tools and failures, and check retained capabilities.
    The Agent does this when authorized operating tools are available; otherwise
    explicitly hand off the unverified steps. Never falsely check the author's
