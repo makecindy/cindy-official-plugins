@@ -48,7 +48,7 @@ First-party JS and Node built-ins only. No runtime dependency installation. `nod
 
 ```sh
 node scripts/validate-plugin-manifest.mjs ./my-browser
-node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs
+node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs
 # macOS build host with Xcode; fresh output directory (existing builds are never overwritten)
 node scripts/build-my-browser.mjs /absolute/output/directory all
@@ -63,5 +63,9 @@ The builder creates Chrome/Edge store ZIPs and a Safari Xcode project/universal 
 - Safari universal Release build succeeded. No Safari signature, notarization, App Store release or real Safari runtime claim.
 - Installed Cindy is 0.1.82; minimum remains 0.1.64 (Manifest v3). Manual support predates that minimum (first containing stable tag v0.1.48).
 - Previous 0.2.0 real Cindy/everyday Chrome checks passed for example.com and the user's X notifications; interactions remained denied. 0.3.0 was subsequently installed in Cindy and reloaded in everyday Chrome: the real signed-in X mentions page returned 5 structured replies in one call (bridge total 4329ms, including 1785ms readiness wait). A second incremental read found its anchor and returned zero preceding rendered rows in 22ms; this is not a fresh-network or all-notifications completeness claim. The installed on-demand manual was also read successfully. Existing site permissions were preserved.
+
+0.3.1 fixes repeated tab creation after redirected load timeouts, lost aliases after focus, and eviction that discarded bookkeeping without closing the actual tab. Protected tabs stay counted; unexpected navigation and exhausted capacity stop with non-retryable errors. Five regression tests plus the real Chromium redirect-retry test cover these paths.
+
+A packaged ZIP can also be dragged onto Chromium's extensions manager as a developer-install alternative to selecting a directory. Browser developer-mode/policy requirements still apply; this is not a store-signed release or an automatic-update promise. Chromium's implementation supports this path; this machine's official Chrome ZIP-drop flow has not yet been verified. A self-packed CRX may be blocked rather than merely showing a dismissible warning.
 
 Provisioning retains an empty staged audience. No marketplace admission, store submission, push, PR or public release is implied. The four HEAD-based package-contract tests also passed against the committed snapshot containing the new plugin and provisioning entry.

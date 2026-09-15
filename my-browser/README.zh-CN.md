@@ -48,7 +48,7 @@
 
 ```sh
 node scripts/validate-plugin-manifest.mjs ./my-browser
-node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs
+node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs
 # 有 Xcode 的 macOS 构建机；必须使用新输出目录，不覆盖已有构建
 node scripts/build-my-browser.mjs /absolute/output/directory all
@@ -63,5 +63,9 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 - Safari 通用 Release 构建成功；未宣称签名、公证、App Store 发布或真实 Safari 运行通过。
 - 本机 Cindy 0.1.82；最低版本仍为 Manifest v3 所需的0.1.64。Manual 支持更早（首个包含它的稳定 tag 为 v0.1.48）。
 - 原0.2.0 已在真实 Cindy／日常 Chrome 验证 example.com 及用户 X 通知读取，交互保持拒绝。随后已在 Cindy 装入0.3.0，并重新加载日常 Chrome 扩展：真实登录态 X 提及页一次返回5条结构化回复（桥接总计4329ms，其中等待内容1785ms）。第二次增量读取找到锚点、返回其前方零条已渲染记录，耗时22ms；这不代表重新联网刷新或全部通知都已查全。装入后的按需手册读取成功，原有网站权限保留。
+
+0.3.1 修复跳转后加载超时导致重复开页、聚焦后丢失网址关联，以及只删除记录却未关闭实际标签页的回收漏洞。受保护标签仍计入上限；意外导航和容量耗尽返回不可自动重试错误。新增5项回归测试，并在真实 Chromium 中验证重定向后重复读取不会增加标签页。
+
+打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

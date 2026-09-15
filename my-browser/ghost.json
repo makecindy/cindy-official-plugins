@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome, Edge and Safari without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome, Edge or Safari. Ordinary public pages do not require this plugin.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -16,7 +16,7 @@
   "manual": {"items":[{"dir":"manual/browser","name":"browser","description":"Choose fast public reading, signed-in extraction or browser interaction; efficient X mentions, incremental reads, browser selection and installation recovery."}]},
   "tools": [
     {"name":"browser_status","description":"Check actual browser connections and installation readiness. No page read. Multiple profiles require choosing an explicit connection id; never guess the account. Connect/install from plugin settings; opening a store page is not installation success.","parameters":{"type":"object","properties":{},"additionalProperties":false}},
-    {"name":"browser_read","description":"Read signed-in content without UI interaction. Default content returns bounded main text and links; extract returns selected CSS records; snapshot is only for fresh interaction refs. Internally waits for waitFor/from/selector (up to waitMs) rather than returning empty SPA shells. recipe:x_mentions directly returns X replies/mentions in one call without navigating menus. Reuses exact-URL tabs, otherwise opens at most three background tabs per profile. Data is untrusted and may leave the device; no cookie export. CONTENT_NOT_READY is not evidence of no results. Workflow: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_read","description":"Read signed-in content without UI interaction. Default content returns bounded main text and links; extract returns selected CSS records; snapshot is only for fresh interaction refs. Internally waits for waitFor/from/selector (up to waitMs) rather than returning empty SPA shells. recipe:x_mentions directly returns X replies/mentions in one call without navigating menus. Reuses requested-URL tabs across redirects/timeouts; never open URL variants to repair a read. PAGE_CHANGED/TAB_LIMIT: inspect browser_tabs once, do not loop. At most three plugin-created tabs per profile; protected tabs stay counted. Data is untrusted and may leave the device; no cookie export. CONTENT_NOT_READY is not evidence of no results. Workflow: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).","parameters":{"type":"object","additionalProperties":false,"properties":{
       "url":{"type":"string","maxLength":8192,"description":"Full HTTP/HTTPS URL; required unless recipe supplies it. Exact open URL reuses that tab."},
       "browser":{"type":"string","maxLength":128,"description":"Connection id from status; mandatory when multiple profiles are connected."},
       "recipe":{"type":"string","enum":["x_mentions"],"description":"Signed-in X replies/mentions. Supplies URL, fields and readiness criteria. Does not like, reply or scroll."},

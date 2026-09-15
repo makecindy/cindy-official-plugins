@@ -6,14 +6,16 @@ const P = globalThis.MyBrowserPolicy;
 const VERSION = chrome.runtime.getManifest().version;
 let bridge = null;
 let running = false;
+// Requested-URL aliases survive redirects, failed loads and user focus. Only created tabs consume the opening budget.
 const owned = new Map();
+const canonical = url => new URL(url).href;
 // Safari versions without session storage keep the ledger in memory; never persist tab ids across restarts.
 const memory = {};
 const sessionStore = chrome.storage.session || {async get(key) {return {[key]:memory[key]};},async set(values) {Object.assign(memory,values);}};
 let clientId;
 const family = /Edg\//.test(navigator.userAgent) ? 'edge' : /Safari\//.test(navigator.userAgent) && !/Chrom(?:e|ium)\//.test(navigator.userAgent) ? 'safari' : 'chrome';
 const restore = Promise.all([
-  sessionStore.get('ownedTabs').then(({ownedTabs}) => {for (const entry of ownedTabs || []) owned.set(entry[0],entry[1]);}),
+  sessionStore.get('ownedTabs').then(({ownedTabs}) => {for (const [url,rec] of ownedTabs || []) owned.set(canonical(url),{created:true,...rec});}),
   chrome.storage.local.get('clientId').then(async value => {clientId=value.clientId || crypto.randomUUID(); if (!value.clientId) await chrome.storage.local.set({clientId});})
 ]);
 const sleep = ms => new Promise(r => setTimeout(r,ms));
@@ -57,21 +59,35 @@ async function release(tabId) {
   for (const [url,rec] of owned) if (rec.id === tabId) owned.delete(url);
   await remember();
 }
+async function getTab(id) {
+  try {return await chrome.tabs.get(id);} catch {
+    // API failure is not proof of closure. Never discard a live tab's alias on an access error.
+    if ((await chrome.tabs.query({})).some(tab => tab.id === id)) throw new Error('TAB_ACCESS_FAILED');
+    return null;
+  }
+}
 async function closeOwned(url) {
-  const rec = owned.get(url); if (!rec) return;
-  owned.delete(url); await remember();
-  try {
-    const tab = await chrome.tabs.get(rec.id);
-    // A tab the user focused or navigated elsewhere is no longer ours to close.
-    if (!tab.active && tab.url === rec.actualUrl) await chrome.tabs.remove(rec.id);
-  } catch { /* Already closed. */ }
+  const rec = owned.get(url); if (!rec) return true;
+  const tab = await getTab(rec.id);
+  if (tab) {
+    // Keep protected tabs counted. Deleting only the ledger entry made the old three-tab limit illusory.
+    if (!rec.created || rec.claimed || tab.active || tab.url !== rec.actualUrl) return false;
+    try {await chrome.tabs.remove(rec.id);} catch {return false;}
+  }
+  owned.delete(url); await remember(); return true;
 }
 async function cleanup() {
   await restore;
-  for (const [url,rec] of [...owned]) if (Date.now()-rec.used > 600000) await closeOwned(url);
+  for (const [url,rec] of [...owned]) if (Date.now()-rec.used > 600000) {
+    if (!rec.created) {owned.delete(url); await remember();}
+    else await closeOwned(url);
+  }
 }
 chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); });
-chrome.tabs.onActivated.addListener(({tabId}) => { restore.then(() => release(tabId)); });
+chrome.tabs.onActivated.addListener(({tabId}) => { restore.then(async () => {
+  for (const rec of owned.values()) if (rec.id === tabId) rec.claimed = true;
+  await remember();
+}); });
 async function waitForLoad(id) {
   const end = Date.now()+15000;
   while (Date.now()<end) {
@@ -83,28 +99,34 @@ async function waitForLoad(id) {
 }
 async function ensureTab(url,policy,action) {
   await restore;
-  const rec = owned.get(url);
+  url = canonical(url);
+  let rec = owned.get(url), tab;
   if (rec) {
-    try {
-      const tab = await chrome.tabs.get(rec.id);
-      if (tab.url === rec.actualUrl) { rec.used = Date.now(); await remember(); return tab; }
-    } catch { /* Closed by user. */ }
-    owned.delete(url); await remember();
+    tab = await getTab(rec.id);
+    if (!tab) {owned.delete(url); await remember(); rec = null;}
+    else if ((!rec.loading || rec.claimed) && tab.url !== rec.actualUrl) throw new Error('PAGE_CHANGED');
   }
-  // Reading a URL already open in Chrome must inspect the actual page, not another login/profile.
-  const tabs = await chrome.tabs.query({});
-  const existing = tabs.filter(t => t.url === url).sort((a,b) => Number(b.active)-Number(a.active))[0];
-  if (existing) return existing.status === 'complete' ? existing : waitForLoad(existing.id);
-  if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN'); // Never create a fresh tab to resolve a stale ref/action.
-  if (owned.size >= 3) {
-    const oldest = [...owned].sort((a,b) => a[1].used-b[1].used)[0];
-    await closeOwned(oldest[0]);
+  if (!rec) {
+    const tabs = await chrome.tabs.query({});
+    tab = tabs.filter(t => t.url === url || t.pendingUrl === url).sort((a,b) => Number(b.active)-Number(a.active))[0];
+    const existing = !!tab;
+    if (!existing) {
+      if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN');
+      const createdCount = () => [...owned.values()].filter(r => r.created).length;
+      for (const [key,r] of [...owned].sort((a,b) => a[1].used-b[1].used)) {
+        if (createdCount() < 3) break;
+        if (r.created) await closeOwned(key);
+      }
+      if (createdCount() >= 3) throw new Error('TAB_LIMIT');
+      tab = await chrome.tabs.create({url,active:false});
+    }
+    rec = {id:tab.id,actualUrl:tab.url || url,created:!existing,claimed:existing || !!tab.active,loading:!existing || tab.status !== 'complete',used:Date.now()};
+    owned.set(url,rec); await remember();
   }
-  const tab = await chrome.tabs.create({url,active:false});
-  owned.set(url,{id:tab.id,actualUrl:url,used:Date.now()}); await remember();
-  const loaded = await waitForLoad(tab.id);
-  const current = owned.get(url);
-  if (current) { current.actualUrl = loaded.url; await remember(); }
+  rec.used = Date.now(); await remember();
+  // A timeout retains this same tab and pending request alias; the next read cannot create another.
+  const loaded = rec.loading || tab.status !== 'complete' ? await waitForLoad(tab.id) : tab;
+  rec.actualUrl = loaded.url; rec.loading = false; await remember();
   const gate = P.check(policy,action,loaded.url);
   if (!gate.ok) throw new Error('REDIRECT_BLOCKED');
   return loaded;
@@ -270,8 +292,8 @@ async function handle(job,policy,target) {
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
     return result;
   } catch (e) {
-    const messages = {PAGE_NOT_OPEN:'Read this URL first. A stale action must not create a new tab.',PAGE_LOAD_TIMEOUT:'Page loading timed out. Check Chrome and read again.',REDIRECT_BLOCKED:'The page redirected to a site that is not allowed. Review its permissions.'};
-    return fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Chrome refused page access or the tab closed. Check extension site access and the actual page before retrying.',injecting && P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
+    const messages = {PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:'Three plugin-created tabs are still open and cannot safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
+    return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',injecting && P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed'),retryable:false};
   }
 }
 async function chain() {

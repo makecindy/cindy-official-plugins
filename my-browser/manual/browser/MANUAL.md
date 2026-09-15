@@ -27,6 +27,7 @@ For a later check, pass the most recent previously returned permalink as `after`
 - `mode:"extract"`: define fields once; combine data and link extraction in one request. Use `selector` for the region and `from` for rows. `waitFor` defaults to the row/region selector, `waitMs` defaults to 10 seconds.
 - `emptySelector` must denote a genuine empty state, never a spinner, sign-in or error screen.
 - `CONTENT_NOT_READY` is a readiness failure, not proof of zero results. Inspect the scoped page or sign-in state; do not run an unbounded identical retry loop.
+- Repeated reads of one URL reuse its tab, including after a redirect or timeout. Focus does not erase this association. A later unexpected navigation returns `PAGE_CHANGED`, not a replacement tab. `TAB_LIMIT` means three created tabs cannot safely be closed. Inspect `browser_tabs` once, use the actual target URL, or ask the user to close unneeded tabs. Never repair a read by changing query strings, cycling URL variants, or repeatedly opening the same page. Three is a real open-tab bound, not permission to open three more per call.
 - Ask for the necessary limit (usually 5–10). `maxChars` budgets extracted values/text; JSON and link overhead are additional. Results include measured timing. No page content is cached to disk.
 
 ## Browser selection
@@ -39,7 +40,7 @@ Plugin settings detects installed browsers and presents browser-specific store i
 
 Chrome/Edge share the packaged WebExtension core. Safari uses an Xcode wrapper produced at build time and must be signed for consumer distribution. Unknown extension identities require a real Cindy confirmation before receiving any page job. The extension keeps a random routing id per browser profile, not account credentials.
 
-Developer directory loading is a separate, clearly labelled fallback. Do not tell ordinary users to change security policy, enable unsigned Safari extensions, expose debugging ports or install Node/Xcode. Version mismatch requires updating the extension; reconnecting cannot fix a mismatched binary. Multiple installed browsers are not the same as multiple connected extensions.
+Developer installation is a separate, clearly labelled fallback. Chromium supports dragging a packaged extension ZIP onto its extensions manager (developer mode / browser policy may apply), avoiding manual directory selection. A ZIP loaded this way is still an unpacked developer installation, not a store-signed release or a guarantee of automatic updates. Self-packed CRX files can be blocked rather than offering a simple risk-confirmation bypass. Directory loading remains a fallback. Do not tell ordinary users to change security policy, enable unsigned Safari extensions, expose debugging ports or install Node/Xcode. Version mismatch requires updating the extension; reconnecting cannot fix a mismatched binary. Multiple installed browsers are not the same as multiple connected extensions.
 
 ## Failure and privacy boundaries
 

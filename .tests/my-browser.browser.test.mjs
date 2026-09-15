@@ -117,10 +117,14 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
   await tool('browser_policy',{action:'block_read',host:'blocked.test'});
   r=await tool('browser_read',{url:'http://redirect.test/',mode:'text'});assert.equal(r.error,'REDIRECT_BLOCKED',JSON.stringify(r));assert.equal(r.text,undefined);
+  const redirectsBefore=await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length);
+  for(let i=0;i<3;i++)assert.equal((await tool('browser_read',{url:'http://redirect.test/',mode:'text'})).error,'REDIRECT_BLOCKED');
+  assert.equal(await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length),redirectsBefore);
   const blocked=await context.newPage();await blocked.goto('http://blocked.test/');
   r=await tool('browser_tabs');assert.equal(r.tabs.some(t=>t.url==='http://blocked.test/'),false);assert.ok(r.tabs.some(t=>t.redacted));
   for(let i=1;i<=5;i++)assert.equal((await tool('browser_read',{url:url+'owned'+i,mode:'text'})).ok,true);
-  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.length<=3);assert.equal(page.isClosed(),false);
+  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
+  assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
   const settings=await context.newPage();await settings.goto(base+'/');await settings.getByText('浏览器已连接',{exact:true}).waitFor();
   assert.equal(await settings.locator('.browser-card').count(),3);
   assert.equal(await settings.locator('#developer').getAttribute('open'),null);
