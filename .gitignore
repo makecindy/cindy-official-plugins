@@ -6,6 +6,7 @@ node_modules/
 
 # Agent / tooling scratch directories
 .cindy-worktrees/
+.build/
 
 # Credentials — never commit these. If you already did, see SECURITY.md:
 # deleting the working-tree file does not invalidate the secret in Git history.
