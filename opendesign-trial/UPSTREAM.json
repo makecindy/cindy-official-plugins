@@ -20,7 +20,8 @@
     "Persisted free-pin and file-comment identifiers use crypto.randomUUID rather than timestamp/Math.random.",
     "UUID utility: preserve cryptographic getRandomValues fallback, remove Math.random fallback; reuse in free-pin sandbox bridge and file-comment creation.",
     "Remove artifact-frame download authority, including thumbnails; srcdoc download links propose bounded blobs to a parent-owned trusted Save file control.",
-    "DownloadGate: accept explicitly marked version/presentation frames and portal trusted save controls into fullscreen/presentation; keep inactive thumbnails outside download authority."
+    "DownloadGate: accept explicitly marked version/presentation frames and portal trusted save controls into fullscreen/presentation; keep inactive thumbnails outside download authority.",
+    "Pod annotation elementId uses the shared cryptographic randomUUID helper instead of a timestamp."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

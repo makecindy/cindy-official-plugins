@@ -11990,7 +11990,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847529,
+      "bytes": 847531,
       "imports": [
         {
           "path": "../latest/apps/web/src/utils/uuid.ts",
@@ -15565,7 +15565,7 @@
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264945
+          "bytesInOutput": 264939
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16309,7 +16309,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312227
+      "bytes": 17312221
     },
     "../../assets/studio.css": {
       "imports": [

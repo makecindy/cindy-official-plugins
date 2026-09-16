@@ -6149,7 +6149,7 @@ function buildPodSnapshot(input: {
     .join(', ');
   return {
     filePath: input.filePath,
-    elementId: `pod-${Date.now()}`,
+    elementId: `pod-${randomUUID()}`,
     selector: combinedSelector || 'body *',
     label: summary || `Pod of ${intersected.length} items`,
     text: intersected

@@ -24,6 +24,12 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   const ids = new Set(Array.from({length:100}, () => randomUUID()));
   assert.equal(ids.size,100);
   for (const id of ids) assert.match(id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  // Exercise the persisted pod initializer with a frozen clock.
+  const viewer=require('node:fs').readFileSync(path.join(root,'apps/web/src/components/FileViewer.tsx'),'utf8');
+  const podExpression=viewer.match(/elementId:\s*(`pod-[^`]+`)/)[1];
+  const podIds=new Set(Array.from({length:100},()=>vm.runInNewContext(podExpression,{randomUUID,Date:{now:()=>1}})));
+  assert.equal(podIds.size,100);
+  for(const id of podIds) assert.match(id,/^pod-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   // The srcdoc bridge embeds this same self-contained function into its realm.
   const embedded = vm.runInNewContext('(' + randomUUID.toString() + ')()', {crypto:sandbox.crypto});
   assert.match(embedded,/^[0-9a-f-]{36}$/);
