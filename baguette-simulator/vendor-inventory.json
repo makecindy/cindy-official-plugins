@@ -316,8 +316,8 @@
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm.html",
-    "bytes": 4000,
-    "sha256": "02b9ec651e3a331cb0ccb696ee1e1497e2df40e9c462139b0ff0df2a9f647397"
+    "bytes": 3698,
+    "sha256": "caee9e8d70032494336e238d9bdda2702017b6abd8315036380c25f06a7e8c4a"
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/frame-decoder.js",

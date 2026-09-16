@@ -1,4 +1,5 @@
 Baguette v0.1.98 https://github.com/tddworks/baguette
+Local farm patch: remove remote font links and use existing system-font fallback.
 Local Web networking patch: OSM tiles/search routed through same-origin fixed-endpoint Node proxy.
 Local keyboard patch: serialize paste/copy with keys; suppress only adjacent identical pending paste; report queue overflow.
 Local Web security patches: toolbar labels rendered as text; CSS selector fallback uses hexadecimal escaping. See vendor-web.patch and VENDOR-REVIEW.md.
