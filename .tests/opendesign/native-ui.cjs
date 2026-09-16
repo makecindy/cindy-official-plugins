@@ -363,6 +363,35 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
         assert.equal(externalRequests,0,kind+' must not send an external navigation');
       }
 
+      const downloads=[];
+      isolated.on('download',d=>downloads.push(d));
+      await w.invoke('draft-write',{sessionId:sid,file:'download-payload.html',expectedRevision:null,html:'download-fixture'});
+      for (const kind of ['data','blob','local']) {
+        await w.invoke('draft-write',{sessionId:sid,file:'download-'+kind+'.html',expectedRevision:null,
+          html:`<h1>Download fixture</h1><script>addEventListener('DOMContentLoaded',()=>{const a=document.createElement('a');a.download='fixture-${kind}.txt';a.href=${kind==='local' ? JSON.stringify(b.previewBase+'download-payload.html?source=1') : kind==='data' ? "'data:text/plain,download-fixture'" : "URL.createObjectURL(new Blob(['download-fixture'],{type:'text/plain'}))"};document.body.append(a);a.click();})</script>`});
+        await isolated.goto(b.url+'?file=download-'+kind+'.html');
+        const proposal=isolated.getByTestId('artifact-download-request');
+        await proposal.waitFor();
+        const count=downloads.length;
+        // Bypass the proposal listener entirely: only the browser sandbox
+        // may enforce this case, not our cooperative click bridge.
+        await isolated.frameLocator('[data-testid=artifact-preview-frame]').locator('body').evaluate(el=>{
+          window.addEventListener('click',e=>e.stopImmediatePropagation(),true);
+          const a=document.createElement('a');a.download='bypass.txt';
+          a.href=URL.createObjectURL(new Blob(['must not save']));el.append(a);a.click();
+        });
+        await isolated.waitForTimeout(250);
+        assert.equal(downloads.length,count,'script must not download automatically');
+        await proposal.getByRole('button',{name:'保存文件',exact:true}).evaluate(el=>el.click());
+        await isolated.waitForTimeout(100);
+        assert.equal(downloads.length,count,'synthetic parent clicks do not authorize saving');
+        const waiting=isolated.waitForEvent('download');
+        await proposal.getByRole('button',{name:'保存文件',exact:true}).click();
+        const downloaded=await waiting;
+        assert.equal(downloaded.suggestedFilename(),'fixture-'+kind+'.txt');
+        assert.equal(await fs.readFile(await downloaded.path(),'utf8'),'download-fixture');
+        await downloaded.delete();
+      }
     } finally { await isolated.close(); await new Promise(resolve => probe.close(resolve)); }
 
   } finally {

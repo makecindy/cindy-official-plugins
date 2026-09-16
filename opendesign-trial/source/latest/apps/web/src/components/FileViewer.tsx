@@ -390,7 +390,7 @@ const MAX_BRIDGE_COORDINATE = 1_000_000;
 // wants, including `cross-origin-isolated` so the isolated document keeps
 // SharedArrayBuffer.
 const POWERED_PREVIEW_SANDBOX =
-  'allow-scripts allow-same-origin allow-downloads allow-popups allow-forms allow-modals allow-pointer-lock';
+  'allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-pointer-lock';
 const POWERED_PREVIEW_ALLOW =
   'accelerometer; autoplay; camera; cross-origin-isolated; fullscreen; gamepad; gyroscope; microphone; xr-spatial-tracking';
 const BASE_PREVIEW_BRIDGE_QUERY = 'odPreviewBridge=scroll&odPreviewBridge=selection&odPreviewBridge=snapshot&odPreviewBridge=observability';
@@ -2499,7 +2499,7 @@ export function LiveArtifactViewer({
                   ref={iframeRef}
                   data-testid="live-artifact-preview-frame"
                   title={liveArtifact.title}
-                  sandbox="allow-scripts allow-popups allow-downloads"
+                  sandbox="allow-scripts allow-popups"
                   src={previewUrl}
                 />
               </PreviewDrawOverlay>
@@ -3990,7 +3990,7 @@ function FileVersionManagerModal({
             <iframe
               ref={versionPreviewIframeRef}
               title={selectedVersion ? `${file.name} v${selectedVersion.version}` : file.name}
-              sandbox="allow-scripts allow-downloads"
+              sandbox="allow-scripts"
               srcDoc={srcDoc}
               onLoad={() => setLoadedSrcDoc(srcDoc)}
             />
@@ -7156,7 +7156,7 @@ function ReactComponentViewer({
             <iframe
               data-testid="react-component-preview-frame"
               title={file.name}
-              sandbox="allow-scripts allow-downloads"
+              sandbox="allow-scripts"
               srcDoc={srcDoc}
               style={{ width: '100%', height: '100%', border: 0 }}
             />
@@ -11685,7 +11685,7 @@ function HtmlViewer({
   lastRenderedUrlFrameSrcRef.current = urlFrameSrc;
   const urlFrameSandbox = usePoweredPreview
     ? POWERED_PREVIEW_SANDBOX
-    : 'allow-scripts allow-downloads';
+    : 'allow-scripts';
   const urlFrameAllow = usePoweredPreview ? POWERED_PREVIEW_ALLOW : undefined;
   // Arm the first-load overlay only for URL-load previews this pane has never
   // painted (per keep-alive key, so tab revisits and pooled re-attaches skip
@@ -17395,7 +17395,7 @@ function HtmlViewer({
                         aria-hidden={workspaceActive && mode === 'preview' && !useUrlLoadPreview ? undefined : true}
                         tabIndex={workspaceActive && mode === 'preview' && !useUrlLoadPreview ? 0 : -1}
                         title={file.name}
-                        sandbox="allow-scripts allow-downloads"
+                        sandbox="allow-scripts"
                         src={srcDocTransportUrl ?? 'about:blank'}
                         srcDoc={srcDocTransportUrl ? undefined : srcDocTransportContent}
                         onLoad={() => {
@@ -17789,14 +17789,14 @@ function HtmlViewer({
           {effectiveDeck || !useUrlLoadPreview ? (
             <iframe
               title="present"
-              sandbox="allow-scripts allow-downloads"
+              sandbox="allow-scripts"
               data-od-render-mode="srcdoc"
               srcDoc={effectiveDeck ? presentationSrcDoc : srcDoc}
             />
           ) : (
             <iframe
               title="present"
-              sandbox="allow-scripts allow-downloads"
+              sandbox="allow-scripts"
               data-od-render-mode="url-load"
               src={activePreviewSrcUrl}
             />

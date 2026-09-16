@@ -100,7 +100,7 @@ function DeckIframeThumbnail({
       <iframe
         ref={frameRef}
         title={label}
-        sandbox="allow-scripts allow-downloads"
+        sandbox="allow-scripts"
         srcDoc={srcDoc}
         tabIndex={-1}
         onLoad={onReady}

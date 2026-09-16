@@ -197,7 +197,7 @@ const preview = http.createServer(async (req, res) => {
       return json(res, 404, { error: "Not found" });
     const readBase = origin(preview) + "/view/" + b.read + "/";
     res.setHeader("Content-Security-Policy",
-      `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${readBase}; style-src 'unsafe-inline' ${readBase}; img-src data: blob: ${readBase}; connect-src ${readBase}; font-src data: ${readBase}; media-src data: blob: ${readBase}; frame-src blob: ${readBase}; object-src 'none'; base-uri ${readBase}; form-action 'none'`);
+      `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${readBase}; style-src 'unsafe-inline' ${readBase}; img-src data: blob: ${readBase}; connect-src blob: data: ${readBase}; font-src data: ${readBase}; media-src data: blob: ${readBase}; frame-src blob: ${readBase}; object-src 'none'; base-uri ${readBase}; form-action 'none'`);
     const name = parts.slice(3).map(decodeURIComponent).join("/");
     if (req.headers.origin === origin(editor))
       res.setHeader("Access-Control-Allow-Origin", origin(editor));
@@ -239,7 +239,7 @@ const editor = http.createServer(async (req, res) => {
       return json(res, 403, { error: "Cross-origin editor access denied" });
     res.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${origin(preview)}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${origin(preview)}; connect-src 'self' ${origin(preview)}; frame-src 'self' ${origin(preview)} blob:; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self' ${origin(preview)}; form-action 'none'`,
+      `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${origin(preview)}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${origin(preview)}; connect-src 'self' blob: data: ${origin(preview)}; frame-src 'self' ${origin(preview)} blob:; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self' ${origin(preview)}; form-action 'none'`,
     );
     const u = new URL(req.url, origin(editor));
     if (u.pathname === "/favicon.ico") {

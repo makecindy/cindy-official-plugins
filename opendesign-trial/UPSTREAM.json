@@ -18,7 +18,8 @@
     "Manual text editing: replace iframe-owned contenteditable/commit messages with the Cindy adapter ManualInlineTextEditor in the editor origin; private one-use authorization on trusted input, active target/original source checks, and fail-closed conflict settlement.",
     "Manual canvas input: capture trusted gestures in the editor origin; iframe hit testing is advisory. Reject iframe selection/text/drag authority; derive text input position and drag displacement from parent pointer coordinates.",
     "Persisted free-pin and file-comment identifiers use crypto.randomUUID rather than timestamp/Math.random.",
-    "UUID utility: preserve cryptographic getRandomValues fallback, remove Math.random fallback; reuse in free-pin sandbox bridge and file-comment creation."
+    "UUID utility: preserve cryptographic getRandomValues fallback, remove Math.random fallback; reuse in free-pin sandbox bridge and file-comment creation.",
+    "Remove artifact-frame download authority, including thumbnails; srcdoc download links propose bounded blobs to a parent-owned trusted Save file control."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

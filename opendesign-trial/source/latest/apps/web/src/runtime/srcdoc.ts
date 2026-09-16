@@ -1,3 +1,4 @@
+import { injectDownloadRequests } from '../../../../../build/DownloadBridge';
 import { randomUUID } from '../utils/uuid';
 /**
  * Wrap an artifact's HTML for a sandboxed iframe. Corresponds to
@@ -349,7 +350,7 @@ export function buildSrcdoc(
   // user prints the preview iframe (Cmd+P → Save as PDF), Chromium uses the
   // sanitized title as the default filename — one that Microsoft Teams will
   // accept. Only the title text changes; visible page content is untouched.
-  const withSafeTitle = sanitizeTitleInDoc(wrapped);
+  const withSafeTitle = injectDownloadRequests(sanitizeTitleInDoc(wrapped));
   const withOdIds = annotateMissingOdIds(withSafeTitle);
   const withSourcePaths = options.editBridge ? annotateManualEditSourcePaths(withOdIds) : withOdIds;
   const withBase = options.baseHref ? injectBaseHref(withSourcePaths, options.baseHref) : withSourcePaths;

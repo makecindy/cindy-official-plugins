@@ -379,15 +379,15 @@
     "path": "source/latest/apps/web/src/components/DeckThumbnailRail.tsx",
     "upstream": "apps/web/src/components/DeckThumbnailRail.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "64dd5397ddaf08ec61353f377d3ab3f327365dd56c80edee920b39e088c94ade",
+    "sha256": "57c7e1c1caeb9772da1af798cba91acf9c4f48c3b6c60bb823524918c59db52a",
     "upstreamSha256": "64dd5397ddaf08ec61353f377d3ab3f327365dd56c80edee920b39e088c94ade",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "b7f362e8195f345d7f9b4f3cce15806637b4886ff059ca84698b4a961521867a",
+    "sha256": "380dba8f7df684c3fde1b1384e629b92257f7cea0c16f1f4ded4bb600972e05e",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },
@@ -947,7 +947,7 @@
     "path": "source/latest/apps/web/src/runtime/srcdoc.ts",
     "upstream": "apps/web/src/runtime/srcdoc.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "c9ee84d8d661a0c391fb414f2072275aaaf7c827aca12d6623ac0bb7c547013d",
+    "sha256": "4ec36386432bcea44c1e0968a4d8a757293a5b7a9275d384c5fb665a18239b0b",
     "upstreamSha256": "538dd4f7ab3aebb0aa90acaa4d34d826de0085de874a49dce0619f1ff65cd199",
     "modified": true
   },

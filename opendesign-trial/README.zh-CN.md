@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.9
+# OpenDesign for Cindy — 本地试用 0.4.10
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -40,3 +40,5 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 0.4.8：持久化 free-pin 和 file-comment 标识改用 crypto.randomUUID；直接文本或根节点属性过大时返回固定小预览，不改原稿。**发布阻断：**实际查看器探测确认 RTCPeerConnection 可绕过 HTTP CSP 发出 STUN UDP。仍需宿主强制隔离 WebRTC，本版本未修复该缺口。
 
 0.4.9：两条持久化批注路径复用既有 UUID 工具；randomUUID 不可用时使用 getRandomValues 生成 v4 UUID，Web Crypto 缺失时失败关闭。移除上游弱随机降级；free-pin 桥在沙盒中嵌入同一独立实现。WebRTC 隔离与最终实机验收仍未完成。
+
+0.4.10：稿件 iframe（含缩略图及演示预览）不再授予 allow-downloads。稿件中的 data/blob 或本项目下载链接向父编辑器提出文件请求，只有真实点击“保存文件”才授权下载；界面显示文件名和字节数，限制 12 MiB，可取消。父页面原有导出入口保留。WebRTC 隔离和实机验收仍阻断。

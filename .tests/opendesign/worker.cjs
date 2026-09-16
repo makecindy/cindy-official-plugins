@@ -122,7 +122,7 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
   assert.equal(racers.filter(Boolean).length, 1);
   const raw = await fetch(one.previewBase + 'index.html');
   const policy = raw.headers.get('Content-Security-Policy');
-  assert.ok(policy.includes('connect-src ' + one.previewBase));
+  assert.deepEqual(policy.split(';').map(x=>x.trim()).find(x=>x.startsWith('connect-src ')).split(/\s+/).slice(1).sort(), [one.previewBase,'blob:','data:'].sort());
   assert.ok(!policy.includes('127.0.0.1:*'));
 
 });

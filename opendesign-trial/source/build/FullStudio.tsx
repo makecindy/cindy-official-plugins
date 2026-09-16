@@ -1,3 +1,4 @@
+import {DownloadGate} from './DownloadGate';
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { FileViewer } from "../latest/apps/web/src/components/FileViewer";
@@ -161,6 +162,7 @@ function Studio() {
   }, [file?.name]);
   return (
     <div className="od-shell">
+      <DownloadGate previewBase={cfg.previewBase} file={active} zh={cfg.locale === "zh-CN"} />
       <header className="od-header">
         <img src="/assets/icon.png" />
         <strong>OpenDesign</strong>
