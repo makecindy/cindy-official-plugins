@@ -178,9 +178,11 @@ async function pageOperation(job,expectedUrl) {
   const ownSuppressed = node => {
     const style = getComputedStyle(node);
     if (style.display === 'none') return true;
-    const cv = style.contentVisibility;
-    if (cv === 'hidden') return true;
-    if (cv === 'auto' && typeof node.checkVisibility === 'function' && !node.checkVisibility({contentVisibilityAuto:true})) return true;
+    if (style.contentVisibility === 'hidden') return true;
+    // content-visibility:auto skips layout for off-screen content. innerText is the browser's own
+    // rendering-aware oracle: content that has text but renders none of it is skipped. Reading it
+    // only for auto/hidden elements keeps the cost bounded, and no newer API is involved.
+    if (style.contentVisibility === 'auto' && !node.innerText && node.textContent) return true;
     return false;
   };
   const notRendered = el => {

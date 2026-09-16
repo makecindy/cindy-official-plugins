@@ -21,7 +21,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // only for named positive fixtures at the browser API boundary; private.test keeps
   // the real loopback address. Production guard and document binding run unchanged.
   const networkShim=`const nativeCompleted=chrome.webRequest.onCompleted.addListener.bind(chrome.webRequest.onCompleted);
-  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
+  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
   const backgroundPath=path.join(extensionDir,'background.js');
   await fs.writeFile(backgroundPath,networkShim+await fs.readFile(backgroundPath,'utf8'));
   const {generateKeyPairSync,createHash}=require('node:crypto');
@@ -37,6 +37,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
+      if(req.headers.host?.startsWith('cv.test')){res.setHeader('Content-Type','text/html');
+        return res.end('<title>Content visibility fixture</title><input type="password" value="x"><div style="content-visibility:auto"><span>CVVISIBLE</span></div><div style="height:8000px">spacer</div><div style="content-visibility:auto"><span>CVOFFSCREEN</span></div>');}
       if(req.headers.host?.startsWith('long.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>Long link fixture</title><a href="/'+'a'.repeat(2500)+'">Long link</a><p>'+'S'.repeat(7000)+'</p>');}
       if(req.headers.host?.startsWith('huge.test')){res.setHeader('Content-Type','text/html');
@@ -229,6 +231,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.ok(contentsText.text.includes('CONTENTSTEXT'),'a display:contents wrapper must still be readable');
   // content-visibility:hidden keeps display:block but does not render its contents.
   assert.ok(!rendered.includes('CVHIDDEN'),'content-visibility:hidden content must stay excluded');
+  // The page carries a password field so the filtered walker path runs; the on-screen
+  // content-visibility:auto element stays readable and the engine-skipped one is excluded.
+  const cv=await tool('browser_read',{url:'http://cv.test/',mode:'text',maxChars:30000});
+  assert.equal(cv.ok,true,JSON.stringify(cv).slice(0,160));
+  assert.ok(cv.text.includes('CVVISIBLE'),'an on-screen content-visibility:auto element must stay readable');
+  assert.ok(!cv.text.includes('CVOFFSCREEN'),'engine-skipped content-visibility:auto content must stay excluded');
   // A read must not mutate the live page: no custom element lifecycle calls, no observer records.
   await page.evaluate(()=>{window.__probe.mutations=0;window.__probe.lifecycle=0;});
   const probeRead=await tool('browser_read',{url,mode:'text'});

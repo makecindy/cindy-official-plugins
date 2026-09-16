@@ -101,6 +101,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.25 用一个统一的保守判定取代逐项补属性。`content-visibility:hidden` 的计算 `display` 仍是 `block`、`visibility` 仍是 `visible`，但其内容并不渲染，因此放在里面的验证码或私有文本仍会被返回。现改为单一 `notRendered` 规则——元素自身或祖先 `display:none`，或 `content-visibility` 为 `hidden`（或 `auto` 且当前被跳过）——用于根节点判定；遍历中只需判定元素自身状态，因为被抑制的祖先早已 `REJECT`。`display:contents` 仍可读，因为它自身无盒但子元素照常渲染。覆盖：夹具新增 `content-visibility:hidden` 探针，必须不出现在正文中；移除该检查即复现 `content-visibility:hidden content must stay excluded`。
 
+0.3.26 去掉该规则对 Chrome 版本的依赖。`auto` 分支原先用 `checkVisibility({contentVisibilityAuto:true})`，而 Chrome 120 会忽略该选项，扩展却仍声明 `minimum_chrome_version: 120`，因此那里被跳过的屏外内容仍可能被返回。现改为问浏览器自己的渲染文本 `innerText`：`auto` 元素若有文本内容却渲染不出任何文本，即视为被跳过。这样不依赖任何随版本新增的选项，也无需提高最低版本，且只在 `auto`／`hidden` 元素上求值，开销有界。覆盖：新增 `cv.test` 页面（带密码字段以进入过滤路径），其中一个屏内 `content-visibility:auto` 元素必须可读、一个屏外元素必须被排除；移除 `auto` 规则即复现 `engine-skipped content-visibility:auto content must stay excluded`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
