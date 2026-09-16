@@ -87,6 +87,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.18 补上该脱敏器的两处缺口。其一，传输上限缩短了链接却未标记录，2049–8192 字符的普通链接会被静默截断，而契约承诺 `truncated:true` 标出所有截断；现在只要上限确实缩短了脱敏后的 URL 就置位。其二，正文清理只看后代，若用 `selector` 直接指向敏感区域本身，其未过滤的 `innerText` 仍会返回；现同时检查根节点，根节点本身敏感时返回空文本。覆盖：`long.test` 页面唯一链接的路径长 2500 字符，必须返回 `truncated:true` 且各链接 URL 在上限内；直接读取 `#otp-region` 必须不返回凭证。移除标志即复现 `a capped link URL must set truncated`；移除根节点检查即复现 `targeting a sensitive region directly must return no credential`。
 
+0.3.19 再修两处输出边界。其一，敏感区域清理原本从脱离文档的克隆节点读取文本，而 detached 元素的 `innerText` 会退化为 textContent，因此只要页面同时存在敏感字段，`display:none` 或脚本内容就会混入正文；现改为在活体 DOM 上做减法：临时移除敏感子树、读取渲染后的文本，再同步按逆序恢复，既保留渲染语义，页面脚本也观察不到中间状态。其二，snapshot 文本在 6000 字符处截断却未置 `truncated`，Agent 会把被裁剪的正文当成完整内容；现在该上限生效时即置位。覆盖：夹具带一个 `display:none` 标记，必须不出现在正文中；`long.test` 的 7000 字符正文在 snapshot 读取时必须返回 `truncated:true`。恢复基于克隆的读法即复现 `hidden content must not be returned when a sensitive region is filtered`；移除标志即复现 `a capped snapshot text must set truncated`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

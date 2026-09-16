@@ -172,13 +172,20 @@ async function pageOperation(job,expectedUrl) {
     // The caller can target the sensitive field itself, in which case the whole region is a
     // credential and nothing from it is readable.
     if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
-    const originals = [...root.querySelectorAll(TEXT_SCOPE)];
-    if (!originals.some(sensitive)) return root.innerText || '';
-    const clone = root.cloneNode(true);
-    // Both queries use the same selector, so index i refers to the same element in either tree.
-    const clones = [...clone.querySelectorAll(TEXT_SCOPE)];
-    originals.forEach((el,i) => { if (sensitive(el)) clones[i]?.remove(); });
-    return clone.innerText || '';
+    const hidden = [...root.querySelectorAll(TEXT_SCOPE)].filter(sensitive);
+    if (!hidden.length) return root.innerText || '';
+    // Read rendered text with the sensitive subtrees briefly detached. A detached clone would fall
+    // back to textContent, exposing display:none or script content that rendered text excludes.
+    // Removal and restoration happen in one synchronous block, so page scripts never observe it;
+    // restoring in reverse order preserves the original sibling order.
+    const saved = hidden.map(el => ({el,parent:el.parentNode,next:el.nextSibling}));
+    for (const {el} of saved) el.remove();
+    try { return root.innerText || ''; }
+    finally {
+      for (const {el,parent,next} of saved.reverse()) {
+        if (parent) parent.insertBefore(el,next && next.parentNode === parent ? next : null);
+      }
+    }
   }
   let started = false;
   try {
@@ -272,7 +279,9 @@ async function pageOperation(job,expectedUrl) {
         if (length+line.length > 14000 || elements.length >= 80) { truncated = true; refs.delete(ref); break; }
         elements.push(line); length += line.length;
       }
-      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:readableText(root).slice(0,6000),truncated:truncated || document.title.length > TITLE_MAX,untrusted_content:true};
+      // The snapshot text has its own cap; a cut there must be reported like any other.
+      const fullText = readableText(root);
+      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,6000),truncated:truncated || fullText.length > 6000 || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
     let el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;

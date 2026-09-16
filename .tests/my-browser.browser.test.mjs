@@ -38,7 +38,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
       if(req.headers.host?.startsWith('long.test')){res.setHeader('Content-Type','text/html');
-        return res.end('<title>Long link fixture</title><a href="/'+'a'.repeat(2500)+'">Long link</a><p>Long body</p>');}
+        return res.end('<title>Long link fixture</title><a href="/'+'a'.repeat(2500)+'">Long link</a><p>'+'S'.repeat(7000)+'</p>');}
       if(req.headers.host?.startsWith('huge.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>'+'T'.repeat(600000)+'</title><a href="https://huge.test/x?pad='+'P'.repeat(120000)+'">Huge link</a><p>Huge fixture body</p>');}
       if(req.headers.host?.startsWith('blocked.test')){res.setHeader('Content-Type','text/html');return res.end('<h1>Blocked fixture</h1>');}
@@ -196,12 +196,18 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('987654'),false,'the text mode must not return it either');
   assert.equal((await tool('browser_read',{url,mode:'snapshot'})).text.includes('987654'),false,'snapshot text must not return it');
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
+  // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
+  // display:none content into the text.
+  assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('HIDDENMARKER'),false,'hidden content must not be returned when a sensitive region is filtered');
   // A URL shortened by the transfer cap must be reported, not silently presented as complete.
   assert.ok((await tool('browser_read',{url,mode:'text',selector:'#otp-region'})).text.includes('987654')===false,'targeting a sensitive region directly must return no credential');
   const long=await tool('browser_read',{url:'http://long.test/',mode:'content',limit:5});
   assert.equal(long.ok,true,JSON.stringify(long).slice(0,160));
   assert.equal(long.truncated,true,'a capped link URL must set truncated');
   assert.ok(long.links.every(l=>l.url.length<=2048),'link URLs stay within the transfer cap');
+  const longSnapshot=await tool('browser_read',{url:'http://long.test/',mode:'snapshot'});
+  assert.equal(longSnapshot.ok,true,JSON.stringify(longSnapshot).slice(0,160));
+  assert.equal(longSnapshot.truncated,true,'a capped snapshot text must set truncated');
   // The naming heuristic must stay scoped to fields: a button that merely mentions a card stays usable.
   assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
   assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');
