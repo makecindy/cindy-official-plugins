@@ -1,0 +1,55 @@
+{
+  "name": "Baguette シミュレーター",
+  "description": "Baguette 専用 iOS 端末を操作し、サイドバーで画面復旧とキー解放を行います。Apple Silicon、Xcode、インストール済み iOS runtime が必要です。",
+  "whenToUse": "ユーザーが Baguette を明示的に選んだ場合のみ使用。最初に environment と devices を実行し、ログイン済み端末を再利用。Cindy 内蔵端末を引き継いだり自動で置き換えたりしないでください。キー固着は press(release-input)。heal は App を終了するためユーザーの了承が必要です。",
+  "tools": {
+    "environment": {
+      "description": "同梱 Baguette、Xcode、利用可能な iOS runtime と機種を読み取ります。最初に実行。依存関係はダウンロードしません。"
+    },
+    "devices": {
+      "description": "本プラグイン専用の端末と状態だけを一覧表示します。最初に実行。Cindy 内蔵端末は操作しません。"
+    },
+    "create_device": {
+      "description": "適切な既存端末がない場合、または並行操作の分離が必要な場合に専用端末を作成します。ディスクを使用します。environment の正確な識別子を指定し、ログイン済み端末を再利用してください。"
+    },
+    "boot": {
+      "description": "専用端末を起動し、初期化を最大約105秒待ちます。タイムアウト後は状態を確認。自動で heal や SpringBoard 再起動は行いません。"
+    },
+    "shutdown": {
+      "description": "専用端末を停止します。実行中の App は終了しますが、端末データは保持します。"
+    },
+    "describe_ui": {
+      "description": "ラベルと論理ポイント座標を含むアクセシビリティツリーを読み取ります。入力前に確認し、空のツリーを成功とみなさないでください。"
+    },
+    "screenshot": {
+      "description": "スクリーンショットを保存し絶対パスを返します。画像表示ツールで確認してください。分析時に画像がモデルへ送られる場合があります。"
+    },
+    "heal": {
+      "description": "iOS 27 の Device Hub 入力障害を明示的に修復します。SpringBoard が再起動し App が終了するため、ユーザーが影響を了承した場合のみ実行。キー固着には先に press(release-input) を使用。"
+    },
+    "tap": {
+      "description": "確認済みの位置をタップまたは長押しします。座標と画面サイズは論理ポイント。操作後に再確認してください。"
+    },
+    "swipe": {
+      "description": "確認済みの座標間をスワイプします。論理ポイントを使用し、操作後に再確認してください。"
+    },
+    "type_text": {
+      "description": "フォーカス済み入力欄に最大8000文字の Unicode を貼り付け、端末のクリップボードを置き換えます。キー送信と解放を待ちますが App の処理完了は保証しません。反復時は press(release-input) を使用し、再実行や heal を自動で行わないでください。"
+    },
+    "press": {
+      "description": "ホーム、ロック、App 切替、通知センターを操作します。release-input は固着キーだけを解放し、端末や App を再起動しません。結果を確認してください。"
+    },
+    "install_app": {
+      "description": "ビルド済みのローカル iOS Simulator .app を専用端末へインストールします。同じ bundle ID の App を更新する場合があります。ビルドや依存関係の取得は行いません。"
+    },
+    "launch_app": {
+      "description": "インストール済み App を起動し、既定でループバック画面サービスと Cindy サイドバープレビューを開きます。viewer.previewOpened を確認。showViewer=false はバックグラウンド起動のみです。"
+    },
+    "open_viewer": {
+      "description": "起動済み専用端末の操作ページとライブ画面をサイドバーに開きます。App は再起動しません。previewOpened を確認。画面復旧とキー解放ボタンを提供。Worker 終了、無効化、ツール1時間未使用でサービスが停止します。"
+    },
+    "close_viewer": {
+      "description": "画面サービスを停止します。ブラウザー接続は切れますが、端末と App は動作を続けます。"
+    }
+  }
+}

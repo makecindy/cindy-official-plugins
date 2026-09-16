@@ -1,0 +1,55 @@
+{
+  "name": "Baguette Simulator",
+  "description": "Operate private iOS simulators with Baguette, sidebar recovery controls and acknowledged keyboard input. Requires Apple Silicon, Xcode and an installed iOS runtime.",
+  "whenToUse": "Use only when the user explicitly selects Baguette. Run environment and devices first; reuse logged-in devices. Never take over Cindy embedded devices or automatically replace the embedded workflow. Use press(release-input) for stuck keys; heal terminates apps and requires user acceptance.",
+  "tools": {
+    "environment": {
+      "description": "Read bundled Baguette, Xcode, available iOS runtimes and device types. Call first. Does not download dependencies."
+    },
+    "devices": {
+      "description": "List only this plugin’s private device set and states. Call first; never control Cindy embedded devices."
+    },
+    "create_device": {
+      "description": "Create a private simulator only when no suitable existing device is available or parallel isolation is needed. Consumes disk. Choose exact runtime and deviceType from environment; reuse logged-in devices across sessions."
+    },
+    "boot": {
+      "description": "Boot the exact private device and wait for initialization, up to about 105 seconds. After timeout inspect state. Does not silently heal or restart SpringBoard."
+    },
+    "shutdown": {
+      "description": "Shut down a private device, terminating running apps but preserving device data."
+    },
+    "describe_ui": {
+      "description": "Read the accessibility tree with labels and logical-point coordinates. Observe before input; an empty tree is not success."
+    },
+    "screenshot": {
+      "description": "Save a screenshot under the plugin screenshots directory and return its absolute path. Open with an image-view tool; analysis may send the image to the model."
+    },
+    "heal": {
+      "description": "Explicitly repair iOS 27 Device Hub input failure on the private device. Restarts SpringBoard and terminates apps. Call only after the user accepts that impact; try press(release-input) for stuck keys first."
+    },
+    "tap": {
+      "description": "Tap or long-press an observed position. Coordinates and screen size are logical points; observe the result afterwards."
+    },
+    "swipe": {
+      "description": "Swipe between observed positions using logical-point coordinates. Observe afterwards."
+    },
+    "type_text": {
+      "description": "Paste up to 8000 Unicode characters into an already focused field, replacing the simulator clipboard. Waits for key delivery and release, not App completion. Observe afterwards; use press(release-input) for repeats, never blindly retry or heal."
+    },
+    "press": {
+      "description": "Press Home, lock, app switcher or notification-center controls. release-input releases stuck keyboard keys without restarting the simulator or terminating apps; observe afterwards."
+    },
+    "install_app": {
+      "description": "Install an already-built local iOS Simulator .app on a private device. May replace an app with the same bundle ID. Does not build projects or download dependencies."
+    },
+    "launch_app": {
+      "description": "Launch an installed app. By default also start a loopback viewer and request the current Cindy sidebar preview. Check viewer.previewOpened, not just process startup; showViewer=false leaves it in the background."
+    },
+    "open_viewer": {
+      "description": "Open the sidebar controller and live view for a booted private device without restarting its app. Check previewOpened. Includes Recover view and Release keys buttons. Loopback only; stops when the worker exits, is disabled or has one hour of tool inactivity."
+    },
+    "close_viewer": {
+      "description": "Stop the plugin viewer service. Browser streams disconnect; the simulator and apps keep running."
+    }
+  }
+}

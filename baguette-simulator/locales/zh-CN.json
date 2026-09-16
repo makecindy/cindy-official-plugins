@@ -1,0 +1,55 @@
+{
+  "name": "Baguette 模拟器",
+  "description": "用 Baguette 操作本机 iOS 模拟器，并在Cindy 侧边栏浏览器显示可交互的实时画面。",
+  "whenToUse": "仅在用户明确选择 Baguette 时使用独立 iOS 模拟器。先 environment 和 devices；复用已登录设备，跨 session 用 open_viewer 恢复预览。只控制本插件设备，不接管 Cindy 内置设备，也不自动替代内置方案。输入异常先 press(release-input)，heal 会终止 App，须用户接受影响。",
+  "tools": {
+    "environment": {
+      "description": "只读检查随包 Baguette、Xcode、可用 iOS runtimes 与设备型号。不下载依赖。首次使用先调用。"
+    },
+    "devices": {
+      "description": "列出 Baguette 插件独立设备集合中的设备和状态，不列出或控制 Cindy 默认设备。首次使用先调用。"
+    },
+    "create_device": {
+      "description": "仅在没有合适已有设备或确需并行隔离时创建独立 iOS 模拟器。先 devices，优先复用已登录设备；不要因为切换 session 自动新建。通过本机 simctl 创建，会占用磁盘。"
+    },
+    "boot": {
+      "description": "用随包 Baguette 启动指定模拟器，并等待此独立设备首次初始化完成，最多约 105 秒；超时后先检查状态。不会自动重启 SpringBoard 修复输入。"
+    },
+    "shutdown": {
+      "description": "关闭指定 Baguette 设备，终止其中运行的 App，但保留设备和数据。"
+    },
+    "describe_ui": {
+      "description": "读取当前无障碍树，返回元素标签和设备逻辑点坐标。点击前观察，不把空树视为成功。"
+    },
+    "screenshot": {
+      "description": "用 Baguette 截取屏幕到插件本地 screenshots 目录，返回绝对文件路径。用图片查看工具打开后分析；图片可能随分析发送给模型。"
+    },
+    "heal": {
+      "description": "按 Baguette 修复流程显式修复 Device Hub 导致的 iOS 27 输入失效；使用 simctl 指定独立设备集合。会重启 SpringBoard、终止设备中运行的 App，仅用户接受影响后调用。"
+    },
+    "tap": {
+      "description": "用 Baguette 点击/长按已观察到的位置。坐标和宽高均为设备逻辑点；操作后重新观察。"
+    },
+    "swipe": {
+      "description": "用 Baguette 滑动设备屏幕。坐标均为逻辑点；操作后重新观察。"
+    },
+    "type_text": {
+      "description": "在已聚焦输入框中粘贴 Unicode 文本，最多 8000 字符；会替换模拟器剪贴板。按键投递和释放完成后返回，仍须观察 App 结果。异常重复输入先用 press(button=release-input)，不要自动重试或 heal。"
+    },
+    "press": {
+      "description": "通过 Baguette 操作模拟器 Home、锁屏、应用切换或通知中心按钮。 button=release-input：仅释放卡住的键盘按键，停止重复输入，不重启系统或关闭 App。"
+    },
+    "install_app": {
+      "description": "通过 simctl 把本机已构建的 iOS Simulator .app 安装到本插件设备，可能更新同 bundle ID 的 App。不会构建项目或下载依赖。"
+    },
+    "launch_app": {
+      "description": "通过 simctl 启动 App，默认同时启动仅监听 127.0.0.1 的 Baguette 实时服务，并请求Cindy 侧边栏浏览器打开可交互画面。返回 viewer.url；检查 viewer.previewOpened，不要把服务启动当成页面已显示。showViewer=false 可仅后台运行。"
+    },
+    "open_viewer": {
+      "description": "为已启动的插件设备打开侧边栏控制页和实时画面，无需重启 App。返回 URL 与 previewOpened；确认后才能说已显示。控制页提供恢复画面和解除卡键。仅监听 127.0.0.1，Worker 停用、退出或工具闲置一小时后停止。"
+    },
+    "close_viewer": {
+      "description": "停止本插件实时画面服务，浏览器页面将断开；模拟器和 App 保持运行。"
+    }
+  }
+}

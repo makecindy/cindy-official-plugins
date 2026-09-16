@@ -70,6 +70,12 @@
         "emails": []
       },
       "tier": "builtin"
+    },
+    "baguette-simulator": {
+      "audience": {
+        "emails": []
+      },
+      "tier": "builtin"
     }
   }
 }
