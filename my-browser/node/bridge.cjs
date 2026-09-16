@@ -26,7 +26,7 @@ function createBridge(options = {}) {
     clearTimeout(job.timer); jobs.delete(job.id);
     job.resolve({...result,browser:job.clientId,timing:{...result.timing,totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
-  const jobFailure = (job,error,message) => failure(error,message,job.state === 'acknowledged' && P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
+  const jobFailure = (job,error,message) => failure(error,message,job.state === 'acknowledged' && job.action !== 'tabs' ? 'unknown' : 'not_executed');
   function take(clientId) {
     for (const job of jobs.values()) {
       if (job.state !== 'queued' || job.clientId !== clientId) continue;
@@ -82,7 +82,7 @@ function createBridge(options = {}) {
     if (!job || job.clientId !== id || job.state !== (req.url === '/ack' ? 'delivered' : 'acknowledged')) return send(res,failure('JOB_EXPIRED','Do not execute this job.'),409);
     if (req.url === '/ack' || req.url === '/authorize') {
       const gate = P.check(policy,job.action,req.url === '/authorize' ? b.url : job.payload.url);
-      if (!gate.ok) { finish(job,gate); return send(res,gate,403); }
+      if (!gate.ok) { const result = jobFailure(job,gate.error,gate.message); finish(job,result); return send(res,result,403); }
       if (req.url === '/ack') job.state = 'acknowledged';
       return send(res,{ok:true,policy});
     }

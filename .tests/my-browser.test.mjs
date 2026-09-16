@@ -159,3 +159,17 @@ test('upgrade preserves ambiguous saved restrictions, while fresh installs have 
   const custom={...policy,read:{block:['mail.google.com','private.example.test']}};
   assert.deepEqual(savedPolicy({policy:custom}),custom);
 });
+
+test('acknowledged reads with lost results or revoked authorization are unknown',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:80});
+  for(const revoke of [false,true]) {
+    const pending=b.request('act',{action:'text',payload:{url:'https://example.test'}});
+    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+    if(revoke) {
+      await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
+      assert.equal((await http('/authorize',{id:job.id,url:'https://example.test'})).data.execution,'unknown');
+    }
+    assert.equal((await pending).execution,'unknown');
+    assert.equal((await http('/poll')).data.job,null);
+  }
+});

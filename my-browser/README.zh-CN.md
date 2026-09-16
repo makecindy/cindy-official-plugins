@@ -78,3 +78,5 @@ provisioning 保持空定向受众。不代表市场准入、商店提交、push
 联网／启动清单：worker 仅创建18810–18819的loopback HTTP监听，扩展只轮询这些固定端口。网站导航为用户请求的浏览器任务所需HTTP(S)。安装仅打开固定扩展管理地址、随包文件，或经校验的 `chromewebstore.google.com`、`microsoftedge.microsoft.com`、`apps.apple.com` 商店URL；当前商店地址均未配置。安装／签名检查采用固定程序和argv，不拼接shell。源码排查未发现eval/Function/字符串代码执行或Math.random；唯一运行时base64解码用于公开的扩展身份公钥。loopback契约确认和桥接认证仍是未解决审查项，这些来源证据不构成豁免。
 
 状态工具只选取连接／安装字段，本地路径、策略及配对来源信息保留在设置页响应。提取属性在派发前限定为href/src/datetime/title/alt/aria-label/role，拒绝任意令牌属性；网站正文和链接仍可能包含私人信息。
+
+读取任务开始导航后失败会报告 `execution: unknown`，因为网站可能已经收到访问。已确认接收的读取任务丢失结果也报告 unknown；确认接收前过期的任务仍为未执行。

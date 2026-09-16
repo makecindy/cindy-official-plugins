@@ -99,7 +99,7 @@ async function waitForLoad(id) {
   }
   throw new Error('PAGE_LOAD_TIMEOUT');
 }
-async function ensureTab(url,policy,action) {
+async function ensureTab(url,policy,action,onNavigate = () => {}) {
   await restore;
   url = canonical(url);
   let rec = owned.get(url), tab;
@@ -120,6 +120,7 @@ async function ensureTab(url,policy,action) {
         if (r.created) await closeOwned(key);
       }
       if (createdCount() >= 3) throw new Error('TAB_LIMIT');
+      onNavigate(); // Even a rejected browser response cannot prove the request never started.
       tab = await chrome.tabs.create({url,active:false});
     }
     rec = {id:tab.id,actualUrl:tab.url || url,created:!existing,claimed:existing || !!tab.active,loading:!existing || tab.status !== 'complete',used:Date.now()};
@@ -284,26 +285,27 @@ async function handle(job,policy,target) {
     }
     return {ok:true,tabs:records,truncated:records.length<tabs.length};
   }
-  let injecting = false;
+  let injecting = false, navigating = false;
+  const failureState = () => navigating || (injecting && P.INTERACT.includes(job.action)) ? 'unknown' : 'not_executed';
   try {
-    const tab = await ensureTab(job.payload.url,policy,job.action);
+    const tab = await ensureTab(job.payload.url,policy,job.action,() => { navigating = true; });
     const actual = await chrome.tabs.get(tab.id);
     // Re-check revocations after page loading, immediately before entering the page.
     const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
-    if (!currentGate.ok) return currentGate;
+    if (!currentGate.ok) return {...currentGate,execution:failureState()};
     const documentId=await network.document(tab.id);
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
     const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});
     const result = out?.[0]?.documentId === documentId ? out[0].result : null;
-    if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
-    if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
-    return result;
+    if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
+    if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',failureState());
+    return result?.error && navigating ? {...result,execution:'unknown'} : result;
   } catch (e) {
     const messages = {ADDRESS_UNVERIFIED:'The browser did not verify a public address for this document. No page content was read. If it is a public page opened before the extension started, refresh that same tab manually once; do not create replacement tabs or retry in a loop.',PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:'Three plugin-created tabs are still open and cannot safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
-    return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',injecting && P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed'),retryable:false};
+    return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),retryable:false};
   }
 }
 async function chain() {
