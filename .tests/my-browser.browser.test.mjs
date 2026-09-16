@@ -38,7 +38,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
       if(req.headers.host?.startsWith('links.test')){res.setHeader('Content-Type','text/html');
-        return res.end('<title>Links fixture</title><p>body</p>'+[1,2,3,4].map(n=>'<a href="/l'+n+'">L'+n+'</a>').join(''));}
+        return res.end('<title>Links fixture</title><p>body</p>'+[1,2,3,4].map(n=>'<a href="/l'+n+'">L'+n+'</a>').join('')+'<a href="mailto:fixture@example.test">Mail</a><a href="tel:+10000000000">Call</a>');}
       if(req.headers.host?.startsWith('cv.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>Content visibility fixture</title><input type="password" value="x"><div style="content-visibility:auto"><span>CVVISIBLE</span></div><div style="height:8000px">spacer</div><div style="content-visibility:auto"><span>CVOFFSCREEN</span></div>');}
       if(req.headers.host?.startsWith('long.test')){res.setHeader('Content-Type','text/html');
@@ -236,15 +236,32 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // extract must not pre-cut a URL before redaction: a budget that leaves only a short token prefix
   // would let the credential through.
   const absolute='http://example.test/reset/12121212-1212-4212-8212-121212121212';
+  // A budget too small for the URL drops it whole rather than cutting it before redaction.
   const cut=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',fields:{label:':self',url:{selector:':self',attr:'href'}},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
   assert.equal(cut.ok,true,JSON.stringify(cut).slice(0,160));
-  assert.equal(JSON.stringify(cut.record).includes('12121212'),false,'a credential URL must be redacted before any budget cut');
-  assert.ok(String(cut.record.url).includes('REDACTED'),'the URL survives as a redacted value');
+  assert.equal(JSON.stringify(cut.record).includes('12121212'),false,'a credential URL must never be returned, cut or not');
+  assert.equal(cut.record.url,null,'a URL that cannot fit the budget is dropped whole');
+  assert.equal(cut.truncated,true,'dropping it is a cut');
+  // With a budget that fits, the URL is returned redacted rather than cut.
+  const fits=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',fields:{label:':self',url:{selector:':self',attr:'href'}}});
+  assert.equal(JSON.stringify(fits.record).includes('12121212'),false);
+  assert.ok(String(fits.record.url).includes('REDACTED'),'the URL survives as a redacted value');
+  assert.equal(fits.truncated,false);
+  // A URL that consumed the budget must not let a later text field escape it: a negative remaining
+  // would make slice(0, negative) return text from the end of the string.
+  const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
+  assert.equal(afterUrl.ok,true,JSON.stringify(afterUrl).slice(0,160));
+  assert.equal(afterUrl.record.url,null,'an over-budget URL is dropped, not kept');
+  assert.ok(String(afterUrl.record.tail).length<=35,'a text field after an over-budget URL must not exceed the remaining budget');
   // Hitting the link-count limit is a cut and must be reported, not look like "the page had these".
   const capped=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:2});
   assert.equal(capped.links.length,2);assert.equal(capped.truncated,true,'a count-limited link list must set truncated');
   const uncapped=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:10});
   assert.equal(uncapped.links.length,4);assert.equal(uncapped.truncated,false,'listing every link is not a truncation');
+  // The page also carries mailto:/tel: links after the http ones; they are never returnable, so
+  // reaching the limit exactly on the last http link is not a cut.
+  const exact=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:4});
+  assert.equal(exact.links.length,4);assert.equal(exact.truncated,false,'trailing non-http links are not a cut');
   // The page carries a password field so the filtered walker path runs; the on-screen
   // content-visibility:auto element stays readable and the engine-skipped one is excluded.
   const cv=await tool('browser_read',{url:'http://cv.test/',mode:'text',maxChars:30000});

@@ -269,11 +269,11 @@ async function pageOperation(job,expectedUrl) {
           links = [];
           let budget = PAGE_LINKS_BUDGET;
           for (const el of [...root.querySelectorAll('a[href]')].filter(visible)) {
-            // Reaching the requested count means the page had more links than returned, which is a cut
-            // the caller must be able to see.
-            if (links.length >= (a.limit || 10)) { linksTruncated = true; break; }
             const url = String(el.href);
+            // Eligibility comes first: a trailing mailto:/tel: link is not something the caller could
+            // have received, so it must not be reported as a cut.
             if (!/^https?:/.test(url)) continue;
+            if (links.length >= (a.limit || 10)) { linksTruncated = true; break; }
             if (url.length > LINK_URL_HARD_MAX || url.length > budget) { linksTruncated = true; continue; }
             budget -= url.length;
             links.push({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url});
@@ -301,15 +301,16 @@ async function pageOperation(job,expectedUrl) {
               if (value && isUrlAttr) { try { value = new URL(value,document.baseURI).href; } catch { value = null; } }
             }
             if (value != null) {
-              // URL values are never cut here: the result exit redacts the whole string first and only
-              // then applies the budget, so a credential can never straddle a cut. An over-long URL is
-              // dropped whole instead.
               if (isUrlAttr) {
-                if (value.length > LINK_URL_HARD_MAX) { value = null; truncated = true; }
+                // A URL is never cut: it either fits the remaining budget whole or is dropped whole, so
+                // redaction always sees the complete string and the declared budget still holds.
+                if (value.length > LINK_URL_HARD_MAX || value.length > remaining) { value = null; truncated = true; }
               } else {
-                const max = Math.min(remaining,4000);
+                // Clamp: a URL may have consumed the whole budget, and slice(0, negative) would return
+                // text from the end of the string instead of nothing.
+                const max = Math.max(0, Math.min(remaining, 4000));
                 if (value.length > max) truncated = true;
-                value = value.slice(0,max);
+                value = value.slice(0, max);
               }
               if (value != null) remaining -= value.length;
             }

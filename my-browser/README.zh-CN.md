@@ -105,6 +105,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.27 把「先脱敏、后裁剪」推到最后两处边界。`extract` 原先按剩余 `maxChars` 裁剪每个值，之后桥接才脱敏，因此当预算只留下重置令牌的很短前缀时，路径脱敏器已不识别它；现 URL 属性值（`href`／`src`）整串传递，仅在超过硬上限时整条丢弃，脱敏始终看到完整字符串，文本值继续按预算裁剪。另外，正文读取在达到请求的链接数量上限时仍返回 `truncated:false`，调用方无法区分「页面只有这些链接」与「列表被裁剪」；现该分支置位。覆盖：一个长标签链接的 extract（其令牌原先会被截短），以及 `links.test` 页面在 `limit:2`（必须报截断）与 `limit:10`（不得报）下的对比。移除 URL 分支即复现 `a credential URL must be redacted before any budget cut`；移除数量标志即复现 `a count-limited link list must set truncated`。
 
+0.3.28 修掉该改动的两个副作用。URL 整串保留后仍会扣减 `remaining` 而无下限，后续文本字段因此拿到负数预算，`slice(0, 负数)` 会从字符串**末尾**取文本——恰与预期相反；现超出预算的 URL 整条丢弃（不消耗预算），文本裁剪上限下限为 0。另外，链接数量检查原在 `http(s)` 资格过滤之前，因此最后一 条 http 链接刚好填满 `limit`、页面仅剩 `mailto:`／`tel:` 链接时会被误报截断；现先判资格。覆盖：extract 依次取「长标签 → 超预算 URL → 文本字段」（后者必须不超过剩余预算），以及 `links.test` 在 `limit:4` 且尾部有非 http 链接时不得报截断。回退任一处即触发对应断言失败。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
