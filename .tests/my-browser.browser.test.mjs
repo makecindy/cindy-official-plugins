@@ -189,6 +189,11 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   r=await tool('browser_act',{url,kind:'type',selector:'#card-region',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
   assert.equal(/Verification region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named contenteditable OTP region must not be exposed as a ref');
   assert.equal(/Payment region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named plaintext-only card region must not be exposed as a ref');
+  // Text dumps must not return a value held in a region that is hidden from refs and extract.
+  assert.equal((await tool('browser_read',{url,mode:'content'})).text.includes('987654'),false,'sensitive contenteditable text must not be returned');
+  assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('987654'),false,'the text mode must not return it either');
+  assert.equal((await tool('browser_read',{url,mode:'snapshot'})).text.includes('987654'),false,'snapshot text must not return it');
+  assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
   // The naming heuristic must stay scoped to fields: a button that merely mentions a card stays usable.
   assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
   assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');

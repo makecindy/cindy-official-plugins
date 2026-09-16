@@ -163,6 +163,20 @@ async function pageOperation(job,expectedUrl) {
   const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
     (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token)) ||
     (isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token)));
+  // A page can hold an OTP, card number or password inside a contenteditable region, and such an
+  // element is excluded from refs and extract. A whole-region text dump must not return it either,
+  // so sensitive descendants are dropped from a clone before the text is read.
+  const TEXT_SCOPE = 'input,textarea,select,[contenteditable],[role=textbox]';
+  function readableText(root) {
+    if (!root.querySelector) return root.innerText || '';
+    const originals = [...root.querySelectorAll(TEXT_SCOPE)];
+    if (!originals.some(sensitive)) return root.innerText || '';
+    const clone = root.cloneNode(true);
+    // Both queries use the same selector, so index i refers to the same element in either tree.
+    const clones = [...clone.querySelectorAll(TEXT_SCOPE)];
+    originals.forEach((el,i) => { if (sensitive(el)) clones[i]?.remove(); });
+    return clone.innerText || '';
+  }
   let started = false;
   try {
     if (['snapshot','text','extract','content'].includes(action)) {
@@ -190,7 +204,7 @@ async function pageOperation(job,expectedUrl) {
       if (!root) return fail('ELEMENT_NOT_FOUND','The CSS selector matched no page region.');
       if (action === 'text' || action === 'content') {
         const max = a.maxChars || 6000;
-        const text = root.innerText || '';
+        const text = readableText(root);
         // Untrusted pages control the title and every href. This stage never cuts a URL: the result
         // exit redacts the whole string first and applies the transfer cap afterwards, so a credential
         // can never straddle a cut. Over-long links are dropped whole, which also bounds the payload.
@@ -255,7 +269,7 @@ async function pageOperation(job,expectedUrl) {
         if (length+line.length > 14000 || elements.length >= 80) { truncated = true; refs.delete(ref); break; }
         elements.push(line); length += line.length;
       }
-      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:(root.innerText || '').slice(0,6000),truncated:truncated || document.title.length > TITLE_MAX,untrusted_content:true};
+      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:readableText(root).slice(0,6000),truncated:truncated || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
     let el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;
