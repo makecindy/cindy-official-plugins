@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.7
+# OpenDesign for Cindy — 本地试用 0.4.8
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -36,3 +36,5 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 0.4.6：外层画布接管选中、双击和拖拽手势。稿件消息不能自行打开文字输入或暂存拖拽写入；输入位置和移动距离来自外层真实鼠标坐标。所有保存仍有源码版本检查。浏览器回归同时覆盖实际 srcdoc 查看器和原始 URL 响应的网络限制。
 
 0.4.7：派发前明确的校验拒绝保留 rejected 和服务端原因；响应丢失、轮询失败及派发后异常仍为 unknown。浏览器回归新增脚本赋值/替换导航、meta 刷新和链接跳转，确认编辑器 frame-src 阻止稿件向外部地址导航。
+
+0.4.8：持久化 free-pin 和 file-comment 标识改用 crypto.randomUUID；直接文本或根节点属性过大时返回固定小预览，不改原稿。**发布阻断：**实际查看器探测确认 RTCPeerConnection 可绕过 HTTP CSP 发出 STUN UDP。仍需宿主强制隔离 WebRTC，本版本未修复该缺口。

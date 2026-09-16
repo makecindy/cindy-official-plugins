@@ -26,3 +26,12 @@ test('preview preserves class-based styling as inline CSS without script executi
   assert.match(html, /预览/);
   assert.doesNotMatch(html, /<script|onclick|data-ghost-action|class=/);
 });
+
+test('preview budget also bounds direct text, entities, multibyte text and root attributes', () => {
+  for (const source of ['x'.repeat(40000),'咖啡'.repeat(20000),'&amp;'.repeat(20000),'<body style="font-family:'+ 'x'.repeat(40000)+'">small</body>','<p>short</p>'+'x'.repeat(40000)]) {
+    const html=preview(source);
+    assert.ok(Buffer.byteLength(html,'utf8') <= 26000);
+    assert.match(html, /^<div[ >]/);
+    assert.match(html, /<\/div>$/);
+  }
+});

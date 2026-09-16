@@ -16,7 +16,8 @@
     "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes.",
     "FileViewer and registry: hash the exact source used for each manual edit, undo/redo, speaker-note or inspect save and supply expectedRevision to the local atomic writer.",
     "Manual text editing: replace iframe-owned contenteditable/commit messages with the Cindy adapter ManualInlineTextEditor in the editor origin; private one-use authorization on trusted input, active target/original source checks, and fail-closed conflict settlement.",
-    "Manual canvas input: capture trusted gestures in the editor origin; iframe hit testing is advisory. Reject iframe selection/text/drag authority; derive text input position and drag displacement from parent pointer coordinates."
+    "Manual canvas input: capture trusted gestures in the editor origin; iframe hit testing is advisory. Reject iframe selection/text/drag authority; derive text input position and drag displacement from parent pointer coordinates.",
+    "Persisted free-pin and file-comment identifiers use crypto.randomUUID rather than timestamp/Math.random."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

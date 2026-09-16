@@ -4461,7 +4461,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/srcdoc.ts": {
-      "bytes": 191478,
+      "bytes": 191421,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/deck-stage-fallback.ts",
@@ -11954,7 +11954,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847561,
+      "bytes": 847482,
       "imports": [
         {
           "path": "ManualCanvasInput.tsx",
@@ -14251,7 +14251,7 @@
       "format": "cjs"
     },
     "card-preview.cjs": {
-      "bytes": 3403,
+      "bytes": 3616,
       "imports": [
         {
           "path": "node_modules/juice/client.js",
@@ -15513,7 +15513,7 @@
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 265026
+          "bytesInOutput": 264970
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16107,7 +16107,7 @@
           "bytesInOutput": 11074
         },
         "../latest/apps/web/src/runtime/srcdoc.ts": {
-          "bytesInOutput": 149959
+          "bytesInOutput": 149902
         },
         "../latest/apps/web/src/edit-mode/bridge.ts": {
           "bytesInOutput": 50862
@@ -16257,7 +16257,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17309477
+      "bytes": 17309364
     },
     "../../assets/studio.css": {
       "imports": [

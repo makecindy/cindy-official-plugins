@@ -2815,7 +2815,7 @@ function meaningfulDomFallbackTarget(el) {
     // element targets; the host overlay renders this position directly.
     var pinX = Math.round(ev.clientX);
     var pinY = Math.round(ev.clientY);
-    var pinId = 'pin-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
+    var pinId = 'pin-' + crypto.randomUUID();
     var pinSlideIndex = deckSlideIndexForPayload();
     var pinPayload = {
       type: 'od:comment-target',

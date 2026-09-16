@@ -387,7 +387,7 @@
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "9e62314e3589e9534f22a0f39e4c5ca5c6fb12300bdc32053aa39b61d4911e3b",
+    "sha256": "43c75872cde7ee7c38b3f76738ff92ff7ea7737cd8cac12db290ba762a5cf274",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },
@@ -947,7 +947,7 @@
     "path": "source/latest/apps/web/src/runtime/srcdoc.ts",
     "upstream": "apps/web/src/runtime/srcdoc.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "d33338cc746f92245cb80125f6f76d49eb33482d870a7bde0c3c050dd5b7a512",
+    "sha256": "c8df2ae0fb0fbceab5ff32bd3622232f5ca8626fc1ef8bb4deeb5f9ebe11d2fa",
     "upstreamSha256": "538dd4f7ab3aebb0aa90acaa4d34d826de0085de874a49dce0619f1ff65cd199",
     "modified": true
   },

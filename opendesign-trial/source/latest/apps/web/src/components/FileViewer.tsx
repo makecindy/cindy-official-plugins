@@ -14752,12 +14752,11 @@ function HtmlViewer({
     if (!onSavePreviewComment) return false;
     const cleanNote = note.trim();
     if (!cleanNote) return false;
-    const idSeed = Date.now().toString(36);
     const target: PreviewCommentTarget = activeCommentTarget
       ? targetFromSnapshot(activeCommentTarget)
       : {
           filePath: file.name,
-          elementId: `file-comment-${idSeed}-${Math.floor(Math.random() * 1e6).toString(36)}`,
+          elementId: `file-comment-${crypto.randomUUID()}`,
           selector: 'html',
           label: file.name,
           text: '',

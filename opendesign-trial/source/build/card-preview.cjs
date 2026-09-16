@@ -81,7 +81,11 @@ module.exports = function preview(html) {
     ) > 26000
   ) {
     const last = wrapper.find("*").last();
-    if (!last.length) break;
+    if (!last.length) {
+      // Root attributes or direct text may themselves exceed the byte budget.
+      // A fixed valid preview also handles entity expansion and multibyte text.
+      return '<div style="padding:24px">…</div>';
+    }
     last.remove();
   }
   return serialize(wrapper.toArray(), { encodeEntities: "utf8" });
