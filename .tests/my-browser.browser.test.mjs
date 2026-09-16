@@ -21,7 +21,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // only for named positive fixtures at the browser API boundary; private.test keeps
   // the real loopback address. Production guard and document binding run unchanged.
   const networkShim=`const nativeCompleted=chrome.webRequest.onCompleted.addListener.bind(chrome.webRequest.onCompleted);
-  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
+  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','links.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
   const backgroundPath=path.join(extensionDir,'background.js');
   await fs.writeFile(backgroundPath,networkShim+await fs.readFile(backgroundPath,'utf8'));
   const {generateKeyPairSync,createHash}=require('node:crypto');
@@ -37,6 +37,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
+      if(req.headers.host?.startsWith('links.test')){res.setHeader('Content-Type','text/html');
+        return res.end('<title>Links fixture</title><p>body</p>'+[1,2,3,4].map(n=>'<a href="/l'+n+'">L'+n+'</a>').join(''));}
       if(req.headers.host?.startsWith('cv.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>Content visibility fixture</title><input type="password" value="x"><div style="content-visibility:auto"><span>CVVISIBLE</span></div><div style="height:8000px">spacer</div><div style="content-visibility:auto"><span>CVOFFSCREEN</span></div>');}
       if(req.headers.host?.startsWith('long.test')){res.setHeader('Content-Type','text/html');
@@ -231,6 +233,18 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.ok(contentsText.text.includes('CONTENTSTEXT'),'a display:contents wrapper must still be readable');
   // content-visibility:hidden keeps display:block but does not render its contents.
   assert.ok(!rendered.includes('CVHIDDEN'),'content-visibility:hidden content must stay excluded');
+  // extract must not pre-cut a URL before redaction: a budget that leaves only a short token prefix
+  // would let the credential through.
+  const absolute='http://example.test/reset/12121212-1212-4212-8212-121212121212';
+  const cut=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',fields:{label:':self',url:{selector:':self',attr:'href'}},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
+  assert.equal(cut.ok,true,JSON.stringify(cut).slice(0,160));
+  assert.equal(JSON.stringify(cut.record).includes('12121212'),false,'a credential URL must be redacted before any budget cut');
+  assert.ok(String(cut.record.url).includes('REDACTED'),'the URL survives as a redacted value');
+  // Hitting the link-count limit is a cut and must be reported, not look like "the page had these".
+  const capped=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:2});
+  assert.equal(capped.links.length,2);assert.equal(capped.truncated,true,'a count-limited link list must set truncated');
+  const uncapped=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:10});
+  assert.equal(uncapped.links.length,4);assert.equal(uncapped.truncated,false,'listing every link is not a truncation');
   // The page carries a password field so the filtered walker path runs; the on-screen
   // content-visibility:auto element stays readable and the engine-skipped one is excluded.
   const cv=await tool('browser_read',{url:'http://cv.test/',mode:'text',maxChars:30000});

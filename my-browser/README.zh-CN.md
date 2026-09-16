@@ -103,6 +103,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.26 去掉该规则对 Chrome 版本的依赖。`auto` 分支原先用 `checkVisibility({contentVisibilityAuto:true})`，而 Chrome 120 会忽略该选项，扩展却仍声明 `minimum_chrome_version: 120`，因此那里被跳过的屏外内容仍可能被返回。现改为问浏览器自己的渲染文本 `innerText`：`auto` 元素若有文本内容却渲染不出任何文本，即视为被跳过。这样不依赖任何随版本新增的选项，也无需提高最低版本，且只在 `auto`／`hidden` 元素上求值，开销有界。覆盖：新增 `cv.test` 页面（带密码字段以进入过滤路径），其中一个屏内 `content-visibility:auto` 元素必须可读、一个屏外元素必须被排除；移除 `auto` 规则即复现 `engine-skipped content-visibility:auto content must stay excluded`。
 
+0.3.27 把「先脱敏、后裁剪」推到最后两处边界。`extract` 原先按剩余 `maxChars` 裁剪每个值，之后桥接才脱敏，因此当预算只留下重置令牌的很短前缀时，路径脱敏器已不识别它；现 URL 属性值（`href`／`src`）整串传递，仅在超过硬上限时整条丢弃，脱敏始终看到完整字符串，文本值继续按预算裁剪。另外，正文读取在达到请求的链接数量上限时仍返回 `truncated:false`，调用方无法区分「页面只有这些链接」与「列表被裁剪」；现该分支置位。覆盖：一个长标签链接的 extract（其令牌原先会被截短），以及 `links.test` 页面在 `limit:2`（必须报截断）与 `limit:10`（不得报）下的对比。移除 URL 分支即复现 `a credential URL must be redacted before any budget cut`；移除数量标志即复现 `a count-limited link list must set truncated`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

@@ -269,7 +269,9 @@ async function pageOperation(job,expectedUrl) {
           links = [];
           let budget = PAGE_LINKS_BUDGET;
           for (const el of [...root.querySelectorAll('a[href]')].filter(visible)) {
-            if (links.length >= (a.limit || 10)) break;
+            // Reaching the requested count means the page had more links than returned, which is a cut
+            // the caller must be able to see.
+            if (links.length >= (a.limit || 10)) { linksTruncated = true; break; }
             const url = String(el.href);
             if (!/^https?:/.test(url)) continue;
             if (url.length > LINK_URL_HARD_MAX || url.length > budget) { linksTruncated = true; continue; }
@@ -291,13 +293,26 @@ async function pageOperation(job,expectedUrl) {
             const attr = typeof spec === 'object' ? spec.attr : null;
             const el = selector === ':self' ? scope : scope.querySelector(selector);
             let value = null;
+            const isUrlAttr = !!attr && ['href','src'].includes(attr);
             if (el && !sensitive(el) && visible(el)) {
               // Same rendered-text rule as content/text: innerText falling back to textContent would
               // return display:none or script content for a visible wrapper with hidden children.
               value = attr ? el.getAttribute(attr) : readableText(el,4000).trim();
-              if (value && ['href','src'].includes(attr)) { try { value = new URL(value,document.baseURI).href; } catch { value = null; } }
+              if (value && isUrlAttr) { try { value = new URL(value,document.baseURI).href; } catch { value = null; } }
             }
-            if (value != null) { const max = Math.min(remaining,4000); if (value.length>max) truncated = true; value = value.slice(0,max); remaining -= value.length; }
+            if (value != null) {
+              // URL values are never cut here: the result exit redacts the whole string first and only
+              // then applies the budget, so a credential can never straddle a cut. An over-long URL is
+              // dropped whole instead.
+              if (isUrlAttr) {
+                if (value.length > LINK_URL_HARD_MAX) { value = null; truncated = true; }
+              } else {
+                const max = Math.min(remaining,4000);
+                if (value.length > max) truncated = true;
+                value = value.slice(0,max);
+              }
+              if (value != null) remaining -= value.length;
+            }
             Object.defineProperty(rec,name,{value,enumerable:true});
           }
           return rec;
