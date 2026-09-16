@@ -1,10 +1,10 @@
 {
   "name": "Baguette Simulator",
-  "description": "Operate private iOS simulators with Baguette, sidebar recovery controls and acknowledged keyboard input. Requires Apple Silicon, Xcode and an installed iOS runtime.",
+  "description": "Operate private iOS simulators with Baguette, sidebar recovery controls and acknowledged keyboard input. Requires Apple Silicon, Xcode and an installed iOS runtime. Requires macOS 15.0 or newer.",
   "whenToUse": "Use only when the user explicitly selects Baguette. Run environment and devices first; reuse logged-in devices. Never take over Cindy embedded devices or automatically replace the embedded workflow. Use press(release-input) for stuck keys; heal terminates apps and requires user acceptance.",
   "tools": {
     "environment": {
-      "description": "Read bundled Baguette, Xcode, available iOS runtimes and device types. Call first. Does not download dependencies."
+      "description": "First reject systems older than macOS 15.0. Read bundled Baguette, Xcode, available iOS runtimes and device types. Call first. Does not download dependencies."
     },
     "devices": {
       "description": "List only this plugin’s private device set and states. Call first; never control Cindy embedded devices."

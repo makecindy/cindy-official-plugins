@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Opt-in Apple Silicon iOS simulator integration using bundled Baguette 0.1.98.
-Requires Cindy 0.1.83+, full Xcode and an installed iOS runtime. No first-run dependency download.
+Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, full Xcode and an installed iOS runtime. No first-run dependency download.
 
 Use only when the user explicitly selects Baguette. Run `environment` and `devices`, reuse a suitable logged-in device, then `boot` if needed. Build the App with the project’s normal Xcode workflow; use `install_app` and `launch_app` for its already-built Simulator `.app`. `launch_app` opens the current session’s sidebar by default. Check `viewer.previewOpened`; a running process does not prove a visible preview. Reopen an existing device with `open_viewer` after changing sessions.
 

@@ -1,10 +1,10 @@
 {
   "name": "Baguette シミュレーター",
-  "description": "Baguette 専用 iOS 端末を操作し、サイドバーで画面復旧とキー解放を行います。Apple Silicon、Xcode、インストール済み iOS runtime が必要です。",
+  "description": "Baguette 専用 iOS 端末を操作し、サイドバーで画面復旧とキー解放を行います。Apple Silicon、Xcode、インストール済み iOS runtime が必要です。 macOS 15.0 以降が必要です。",
   "whenToUse": "ユーザーが Baguette を明示的に選んだ場合のみ使用。最初に environment と devices を実行し、ログイン済み端末を再利用。Cindy 内蔵端末を引き継いだり自動で置き換えたりしないでください。キー固着は press(release-input)。heal は App を終了するためユーザーの了承が必要です。",
   "tools": {
     "environment": {
-      "description": "同梱 Baguette、Xcode、利用可能な iOS runtime と機種を読み取ります。最初に実行。依存関係はダウンロードしません。"
+      "description": "最初に macOS 15.0 以降であることを確認します。同梱 Baguette、Xcode、利用可能な iOS runtime と機種を読み取ります。最初に実行。依存関係はダウンロードしません。"
     },
     "devices": {
       "description": "本プラグイン専用の端末と状態だけを一覧表示します。最初に実行。Cindy 内蔵端末は操作しません。"

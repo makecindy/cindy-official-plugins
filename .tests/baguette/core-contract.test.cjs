@@ -1,14 +1,15 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const dir=path.resolve('baguette-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001';
-function core(output,failAt=Infinity){
- let polls=0,mutations=0;
+function core(output,failAt=Infinity,macOS="15.0"){
+ let polls=0,mutations=0;const commands=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},setTimeout:fn=>fn(),require(name){
   if(name==='./viewer.cjs')return {};
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
   if(name==='node:child_process')return {execFile(file,args,opts,cb){
-   let data='',error=null;
-   if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted'}]}});
+   commands.push(file);let data='',error=null;
+   if(file==='/usr/bin/sw_vers')data=macOS;
+   else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted'}]}});
    else if(args[0]==='describe-ui')data=output;
    else if(args.includes('list')){polls++;if(polls===failAt)error=Error('simctl timeout');data=(polls===1?'100':'200')+' 0 com.apple.SpringBoard';}
    else mutations++;
@@ -17,7 +18,7 @@ function core(output,failAt=Infinity){
   return require(name);
  }};
  vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
- return {dispatch:context.module.exports.dispatch,mutations:()=>mutations};
+ return {dispatch:context.module.exports.dispatch,mutations:()=>mutations,commands};
 }
 test('describe_ui rejects empty/malformed trees and accepts observable descendants',async()=>{
  for(const value of ['[]','null','{}','{"children":[]}','{"role":"AXUnknown"}','invalid']) {
@@ -30,4 +31,16 @@ test('heal distinguishes preflight failure from post-restart polling failure',as
  const before=core('',1);await assert.rejects(before.dispatch('heal',{udid}),e=>e.execution==='not_executed');assert.equal(before.mutations(),0);
  const after=core('',2);await assert.rejects(after.dispatch('heal',{udid}),e=>e.execution==='unknown');assert.equal(after.mutations(),2);
  assert.equal((await core('').dispatch('heal',{udid})).execution,'executed');
+});
+
+test('macOS minimum is checked before any simulator or bundled binary runs',async()=>{
+ for(const version of ['14.7.6','13.6','unknown','']){
+  const c=core('',Infinity,version);
+  await assert.rejects(c.dispatch('devices'),e=>e.code==='UNSUPPORTED_OS'&&e.execution==='not_executed');
+  assert.deepEqual(c.commands,['/usr/bin/sw_vers']);
+ }
+ for(const version of ['15.0','15.7.1','26.0','27.0']){
+  const c=core('',Infinity,version);await c.dispatch('devices');
+  assert.deepEqual(c.commands,['/usr/bin/sw_vers','/usr/bin/xcrun']);
+ }
 });

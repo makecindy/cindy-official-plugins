@@ -3,16 +3,16 @@
   "minCindyVersion": "0.1.83",
   "id": "baguette-simulator",
   "name": "Baguette 模拟器",
-  "description": "用 Baguette 操作本机 iOS 模拟器，并在Cindy 侧边栏浏览器显示可交互的实时画面。",
+  "description": "用 Baguette 操作本机 iOS 模拟器，并在Cindy 侧边栏浏览器显示可交互的实时画面。 需要 macOS 15.0 或更新版本及 Apple Silicon。",
   "whenToUse": "仅在用户明确选择 Baguette 时使用独立 iOS 模拟器。先 environment 和 devices；复用已登录设备，跨 session 用 open_viewer 恢复预览。只控制本插件设备，不接管 Cindy 内置设备，也不自动替代内置方案。输入异常先 press(release-input)，heal 会终止 App，须用户接受影响。",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
   "tools": [
     {
       "name": "environment",
-      "description": "只读检查随包 Baguette、Xcode、可用 iOS runtimes 与设备型号。不下载依赖。首次使用先调用。",
+      "description": "先检查 macOS 15.0+ 和 Apple Silicon，再只读检查随包 Baguette、Xcode、可用 iOS runtimes 与设备型号。不下载依赖。首次使用先调用。",
       "parameters": {
         "type": "object",
         "properties": {},

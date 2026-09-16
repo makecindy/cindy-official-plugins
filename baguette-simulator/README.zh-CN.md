@@ -1,5 +1,7 @@
 # Baguette 模拟器
 
+需要 macOS 15.0 或更新版本；旧系统会在启动随包二进制之前明确返回 UNSUPPORTED_OS。
+
 [English](README.md)
 
 显式选用的 Apple Silicon iOS 模拟器插件，随包带 Baguette 0.1.98。需要 Cindy 0.1.83+、完整 Xcode 和已安装的 iOS runtime，首次运行不下载依赖。

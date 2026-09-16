@@ -1,10 +1,10 @@
 {
   "name": "Baguette 시뮬레이터",
-  "description": "Baguette 독립 iOS 기기를 조작하고 사이드바에서 화면 복구와 키 해제를 수행합니다. Apple Silicon, Xcode 및 설치된 iOS 런타임이 필요합니다.",
+  "description": "Baguette 독립 iOS 기기를 조작하고 사이드바에서 화면 복구와 키 해제를 수행합니다. Apple Silicon, Xcode 및 설치된 iOS 런타임이 필요합니다. macOS 15.0 이상이 필요합니다.",
   "whenToUse": "사용자가 Baguette를 명시적으로 선택한 경우에만 사용하세요. 먼저 environment와 devices를 호출하고 로그인된 기기를 재사용하세요. Cindy 내장 기기를 인계받거나 자동 대체하지 마세요. 키 고착은 press(release-input)을 사용하세요. heal은 앱을 종료하므로 사용자 수락이 필요합니다.",
   "tools": {
     "environment": {
-      "description": "동봉 Baguette, Xcode, 사용 가능한 iOS 런타임과 기종을 읽습니다. 먼저 호출하세요. 의존성을 다운로드하지 않습니다."
+      "description": "먼저 macOS 15.0 이상인지 확인합니다. 동봉 Baguette, Xcode, 사용 가능한 iOS 런타임과 기종을 읽습니다. 먼저 호출하세요. 의존성을 다운로드하지 않습니다."
     },
     "devices": {
       "description": "이 플러그인의 독립 기기와 상태만 나열합니다. 먼저 호출하세요. Cindy 내장 기기는 제어하지 않습니다."
