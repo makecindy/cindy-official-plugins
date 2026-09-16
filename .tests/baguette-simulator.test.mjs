@@ -8,3 +8,4 @@ import './baguette/core-contract.test.cjs';
 import './baguette/map.test.cjs';
 import './baguette/viewer-auth.test.cjs';
 import './baguette/viewer-restart.test.cjs';
+import './baguette/native-release.test.cjs';

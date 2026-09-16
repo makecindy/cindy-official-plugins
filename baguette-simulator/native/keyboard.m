@@ -15,7 +15,7 @@ static BOOL sendEvent(id client, void *message) {
  ((void(*)(id,SEL,void*,BOOL,dispatch_queue_t,id))objc_msgSend)(client,NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:"),message,YES,dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),completion);
  return dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC))==0 && ok;
 }
-static BOOL releaseKeys(id client,HID hid){BOOL ok=YES;for(uint32_t key=4;key<=231;key++)if(!sendEvent(client,hid(0x32,7,key,2)))return NO;return ok;}
+static BOOL releaseKeys(id client,HID hid){BOOL ok=YES;for(uint32_t key=4;key<=231;key++)if(!sendEvent(client,hid(0x32,7,key,2)))ok=NO;return ok;}
 int main(int argc,const char **argv){@autoreleasepool{
  if(argc!=6)return 2; // device set, UDID, developer dir, HID usage (0=release), modifier bitmask
  NSString *setPath=@(argv[1]),*udid=@(argv[2]),*dev=@(argv[3]);int key=atoi(argv[4]),mask=atoi(argv[5]);
