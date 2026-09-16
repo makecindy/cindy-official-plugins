@@ -171,27 +171,36 @@ async function pageOperation(job,expectedUrl) {
   // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
   const NON_RENDERED = new Set(['SCRIPT','STYLE','TEMPLATE','NOSCRIPT','HEAD','TITLE','META','LINK']);
   const BLOCK_TAGS = new Set(['ADDRESS','ARTICLE','ASIDE','BLOCKQUOTE','DD','DIV','DL','DT','FIELDSET','FIGCAPTION','FIGURE','FOOTER','FORM','H1','H2','H3','H4','H5','H6','HEADER','HR','LI','MAIN','NAV','OL','P','PRE','SECTION','TABLE','TBODY','TFOOT','THEAD','TR','UL']);
-  // A non-rendered root means display:none on the element or one of its ancestors. A display:contents
-  // wrapper has no box of its own but its children still render, so it must not be rejected.
-  const isDisplayed = el => {
-    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
-      if (getComputedStyle(node).display === 'none') return false;
-    }
-    return true;
+  // One conservative notion of "not rendered", instead of chasing properties one at a time: a subtree
+  // is not rendered when the element or an ancestor has display:none, or content-visibility hides or
+  // skips its contents. display:contents is deliberately not treated as hidden, because such a
+  // wrapper has no box of its own while its children still render.
+  const ownSuppressed = node => {
+    const style = getComputedStyle(node);
+    if (style.display === 'none') return true;
+    const cv = style.contentVisibility;
+    if (cv === 'hidden') return true;
+    if (cv === 'auto' && typeof node.checkVisibility === 'function' && !node.checkVisibility({contentVisibilityAuto:true})) return true;
+    return false;
+  };
+  const notRendered = el => {
+    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) if (ownSuppressed(node)) return true;
+    return false;
   };
   function readableText(root,limit) {
     if (!root.querySelector) return root.innerText || '';
     if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
     // The walker never runs its filter on the root itself, and innerText on a non-rendered node
     // degrades to textContent, so a hidden root is rejected here instead of leaking hidden data.
-    if (root.nodeType === Node.ELEMENT_NODE && !isDisplayed(root)) return '';
+    if (root.nodeType === Node.ELEMENT_NODE && notRendered(root)) return '';
     // Without a sensitive descendant, innerText is exact, so never approximate it.
     if (![...root.querySelectorAll(TEXT_SCOPE)].some(sensitive)) return root.innerText || '';
     const parts = []; let length = 0, lastBlock = null, lastBreak = false, pendingSpace = false;
     const walker = document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,{acceptNode(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        if (NON_RENDERED.has(node.tagName) || node.hidden || sensitive(node)) return NodeFilter.FILTER_REJECT;
-        if (getComputedStyle(node).display === 'none') return NodeFilter.FILTER_REJECT;
+        // Only the element's own state is needed here: a suppressed ancestor was already rejected, so
+        // its descendants are never visited.
+        if (NON_RENDERED.has(node.tagName) || node.hidden || sensitive(node) || ownSuppressed(node)) return NodeFilter.FILTER_REJECT;
         // visibility is judged per text node instead of rejecting the subtree, because a hidden
         // ancestor may contain a descendant that explicitly restores visibility:visible.
         return NodeFilter.FILTER_ACCEPT;
@@ -406,12 +415,13 @@ async function handle(job,policy,target) {
   try {
     const tab = await ensureTab(job.payload.url,policy,job.action,() => { navigating = true; });
     const actual = await chrome.tabs.get(tab.id);
-    // Re-check revocations after page loading, immediately before entering the page.
+    // Prepare everything asynchronous first, so the authorization re-check below is the last await
+    // before the page is touched: a revocation during preparation must not be bypassed.
+    const documentId=await network.document(tab.id);
     const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
-    const documentId=await network.document(tab.id);
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
     const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});

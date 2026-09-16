@@ -227,6 +227,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const contentsText=await tool('browser_read',{url,mode:'text',selector:'#contents-wrapper',waitFor:'#readable'});
   assert.equal(contentsText.ok,true,JSON.stringify(contentsText).slice(0,160));
   assert.ok(contentsText.text.includes('CONTENTSTEXT'),'a display:contents wrapper must still be readable');
+  // content-visibility:hidden keeps display:block but does not render its contents.
+  assert.ok(!rendered.includes('CVHIDDEN'),'content-visibility:hidden content must stay excluded');
   // A read must not mutate the live page: no custom element lifecycle calls, no observer records.
   await page.evaluate(()=>{window.__probe.mutations=0;window.__probe.lifecycle=0;});
   const probeRead=await tool('browser_read',{url,mode:'text'});
