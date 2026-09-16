@@ -23,17 +23,15 @@ The on-demand workflow manual is `manual/browser/MANUAL.md`. Parameter names and
 | Edge | Shared Chromium extension, separate store artifact and profile routing | Protocol and Windows launcher tests; no real Windows/Edge device verification yet. |
 | Safari | WebExtension adapter + generated macOS container app | Universal arm64/x86_64 Release build and identity-pairing tests; no signed consumer installation or real Safari extension execution yet. |
 
-Settings detects installed browsers, offers the appropriate available store/bundled-app route, and polls the actual handshake. A browser opening is **not** installation success. Unknown extension identities require a real Cindy pairing confirmation. Multiple browser installations are not the same as connected profiles.
+Settings makes ZIP installation the primary Chrome/Edge route: open the extensions manager and ZIP location, enable Developer mode, then drag the ZIP onto the page. No unzip or directory selection is needed. Connection checks are automatic; opening a page is not installation success. Directory loading remains a fallback. Manual ZIP dropping in official Chrome still needs real-device verification and may be blocked by managed browser policy.
 
-**Current external blockers:** `distribution.json` has no approved Chrome/Edge store entries or Safari App Store entry, and no signed/notarized Safari app is bundled. Those install buttons explicitly show publisher release required. Do not mistake this for a finished zero-directory consumer installation.
+Safari still requires a store release or signed/notarized app, neither configured yet. Chrome/Edge ZIP installation does not depend on store publication. Unknown extension identities still require real Cindy pairing confirmation. After updates, drag the new ZIP again; directory installations use Reload. Keep only one copy.
 
-For release, provide approved store ids/URLs in `distribution.json`, or bundle the signed/notarized Safari app at `native/My Browser.app`. The Safari button verifies it with macOS `codesign` and `spctl` before launching. Required browser/user consent is never bypassed. No executable is downloaded at runtime.
-
-Developer directory loading is hidden in **Developer options**. Buttons open the selected browser's extension manager and reveal the packaged directory; this is explicitly a testing fallback, not the consumer flow. Existing local extensions must be reloaded after plugin updates. Do not disable security policies or enable unsigned Safari extensions for ordinary users.
+Installation cards appear only for connected browsers or installed browsers with a deliverable ZIP/store route. Unpublished Safari and browsers absent from this device are hidden, with no coming-soon placeholder.
 
 ## Security and limitations
 
-- Read-default-allow, sensitive-site blocklist (not exhaustive), interaction-default-deny. Domain grants include subdomains; `=host.example.test` is exact-only. New grants/unblocking require real confirmation; cancellation changes nothing.
+- New installations allow reading and interaction on all public websites. The complete legacy built-in read blocklist is retired on upgrade, while additional user blocks and partial custom lists are preserved. Policies saved with the new settings are never treated as legacy defaults; the all-sites switch enables broad interaction, while read blocks and interaction exclusions still take precedence. Domain grants include subdomains; `=host.example.test` is exact-only. New grants/unblocking require real confirmation; cancellation changes nothing.
 - Only `127.0.0.1:18810–18819` is bound. HTTP cannot enqueue work or modify policy. Host, extension origin, profile identity and current bridge session are checked; no CORS. Unknown extension identities get no session/jobs before approval. This is browser-origin protection, not a defense against malicious same-user native software or already-trusted extensions.
 - Jobs and acknowledgments/results are bound to one profile. Delivered actions are never replayed. `execution:executed` proves DOM dispatch, not successful sending/purchase; `unknown` requires checking before repetition.
 - No cookie export, arbitrary JS tool, debugger or credential extraction. Hidden/password/payment-code fields are excluded, but arbitrary page text may still contain private information. AI may receive this data off-device. Visits/reads contact websites and may affect server-side notification read state.
@@ -47,6 +45,7 @@ Developer directory loading is hidden in **Developer options**. Buttons open the
 First-party JS and Node built-ins only. No runtime dependency installation. `node/worker.cjs` activates unconditionally because Cindy requires the entry rather than running it as `require.main`. Runtime subprocesses are restricted to fixed browser/app launchers and Safari signature checks.
 
 ```sh
+python3 scripts/package-my-browser-zip.py
 node scripts/validate-plugin-manifest.mjs ./my-browser
 node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs

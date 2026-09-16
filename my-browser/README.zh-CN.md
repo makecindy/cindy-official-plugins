@@ -23,17 +23,15 @@
 | Edge | 共用 Chromium 扩展，独立商店产物和配置路由 | 协议与 Windows 启动器测试；尚无真实 Windows／Edge 设备验证。 |
 | Safari | WebExtension 适配＋生成的 macOS 宿主应用 | arm64/x86_64 通用 Release 构建及身份配对测试；尚无已签名普通用户安装、真实 Safari 扩展运行验证。 |
 
-设置页检测已安装浏览器，显示对应可用的商店／随包应用入口，自动检查真实握手。**打开浏览器不等于安装成功。** 未知扩展身份必须经过真实 Cindy 配对确认。安装了多个浏览器不等于这些配置都已连接。
+设置页将 Chrome／Edge 的 ZIP 安装作为主入口：点击按钮打开扩展管理页和 ZIP 所在位置，开启开发者模式，将 ZIP 拖入页面，无需解压或选择目录。自动检查连接；打开页面不等于安装成功。目录安装保留为备用方式。当前官方 Chrome 的手动 ZIP 拖入仍待实机验证，受管理策略限制时可能不可用。
 
-**当前外部阻断：** `distribution.json` 尚无 Chrome／Edge 已审核商店条目或 Safari App Store 条目，也未随包附带签名、公证的 Safari 应用。对应按钮明确显示“等待发布方上架”，不能据此宣称普通用户免目录安装已完成。
+Safari 继续使用商店或已签名、公证的应用；该发布渠道尚未配置。Chrome／Edge 的 ZIP 路径不依赖商店条目。未知扩展身份仍须真实 Cindy 配对确认。更新后重新拖入新版 ZIP；目录安装则重新加载扩展，只保留一个副本。
 
-正式分发时填入实际审核通过的商店 id／URL，或在 `native/My Browser.app` 随包提供已签名、公证的 Safari 应用。Safari 按钮启动前使用 macOS `codesign` 与 `spctl` 验证。浏览器必要确认不绕过；运行时不下载可执行代码。
-
-目录加载藏在**开发者选项**。按钮打开对应浏览器扩展管理、显示打包目录，仅是本地测试后备路径，不是普通用户主流程。更新插件后本地扩展仍需重新加载。不要让普通用户关闭安全策略或启用未签名 Safari 扩展。
+安装卡片只展示已连接的浏览器，或本机已安装且有可交付 ZIP／商店入口的浏览器。未发布的 Safari 和本机未安装的浏览器不展示，不放等待上架占位。
 
 ## 安全边界与限制
 
-- 默认允许读取、敏感站点黑名单（并不完整）、默认禁止交互。域名包含子域名；`=host.example.test` 仅精确匹配。新增授权／解除拦截必须真实确认，取消不修改。
+- 新安装默认允许所有公网网站的读取和交互。升级会清除完整的旧版内置读取黑名单，保留额外添加的网站和不完整的自定义清单；新版保存的设置不再按旧默认值处理。全站开关开放交互，读取拦截和交互排除项仍优先。域名包含子域名；`=host.example.test` 仅精确匹配。新增授权／解除拦截必须真实确认，取消不修改。
 - 只监听 `127.0.0.1:18810–18819`。HTTP 不能派发任务或修改策略。校验 Host、扩展来源、配置身份与当前桥接会话，不开放 CORS。未知扩展确认前拿不到会话／任务。这是浏览器来源保护，不防御同用户恶意原生程序或已被信任的恶意扩展。
 - 任务、ACK、结果均绑定单一配置，派发后的动作不自动重投。`execution:executed` 只证明 DOM 动作已派发，不证明发送／购买成功；`unknown` 必须先核对实际页面。
 - 不导出 Cookie，不提供任意 JS、debugger 或凭证提取。排除隐藏／密码／支付验证码字段，但普通页面文字仍可能包含隐私。AI 可能在设备外接收数据。访问／读取会联系目标网站，也可能影响服务端通知已读状态。
@@ -47,6 +45,7 @@
 只使用第一方 JS 和 Node 内置模块，无运行时依赖安装。`node/worker.cjs` 无条件启动，因为 Cindy 通过 require 加载入口。运行时子进程仅用于固定浏览器／应用启动器和 Safari 签名检查。
 
 ```sh
+python3 scripts/package-my-browser-zip.py
 node scripts/validate-plugin-manifest.mjs ./my-browser
 node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs

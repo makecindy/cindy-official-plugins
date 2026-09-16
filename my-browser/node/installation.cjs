@@ -15,6 +15,7 @@ function createInstallation(options = {}) {
     child.once('error',reject); child.once('spawn',() => {child.unref(); resolve();});
   }));
   const directory = path.resolve(__dirname,'../extension');
+  const zipFile = path.resolve(__dirname,'../downloads/my-browser-chromium.zip');
   const safariApp = path.resolve(__dirname,'../native/My Browser.app');
   const verifySafari = options.verifySafari || (async () => {
     await promisify(execFile)('/usr/bin/codesign',['--verify','--deep','--strict',safariApp],{timeout:15000});
@@ -42,11 +43,11 @@ function createInstallation(options = {}) {
   function status() {
     return {platform,browsers:['chrome','edge','safari'].map(browser => {
       const supported = browser !== 'safari' || platform === 'darwin';
-      return {browser,supported,installed:supported && !!app(browser),published:!!storeUrl(browser),bundled:browser === 'safari' && platform === 'darwin' && exists(safariApp)};
+      return {browser,supported,installed:supported && !!app(browser),published:!!storeUrl(browser),zip:browser !== 'safari' && exists(zipFile),bundled:browser === 'safari' && platform === 'darwin' && exists(safariApp)};
     })};
   }
   async function open(browser,mode = 'store') {
-    if (!['chrome','edge','safari'].includes(browser) || !['store','developer','reload'].includes(mode)) return {ok:false,error:'INVALID_INSTALL_TARGET',execution:'not_executed'};
+    if (!['chrome','edge','safari'].includes(browser) || !['store','zip','developer','reload'].includes(mode)) return {ok:false,error:'INVALID_INSTALL_TARGET',execution:'not_executed'};
     const executable = app(browser);
     if (!executable) return {ok:false,error:'BROWSER_NOT_INSTALLED',execution:'not_executed'};
     if (browser === 'safari' && mode === 'store' && exists(safariApp)) {
@@ -54,16 +55,18 @@ function createInstallation(options = {}) {
       try {await run('/usr/bin/open',[safariApp]);return {ok:true,execution:'executed',stage:'awaiting_browser_confirmation',installed:false};}
       catch {return {ok:false,error:'OPEN_OUTCOME_UNKNOWN',execution:'unknown'};}
     }
+    if (mode === 'zip' && (browser === 'safari' || !exists(zipFile))) return {ok:false,error:'ZIP_UNAVAILABLE',execution:'not_executed'};
     const url = mode === 'store' ? storeUrl(browser) : browser === 'safari' ? null : browser+ '://extensions/';
     if (!url) return {ok:false,error:'RELEASE_REQUIRED',message:'The publisher must provide an approved extension store release / signed Safari app. Developer loading is not a finished installation.',execution:'not_executed'};
     try {
       if (platform === 'darwin') await run('/usr/bin/open',['-a',executable,url]);
       else await run(executable,[url]);
       // Reveal only this packaged extension, never a caller-supplied path.
-      if (mode === 'developer') {
-        if (platform === 'darwin') await run('/usr/bin/open',['-R',directory]);
-        else if (platform === 'win32') await run(path.win32.join(env.WINDIR || 'C:\\Windows','explorer.exe'),[directory]);
-        else await run('/usr/bin/xdg-open',[directory]);
+      if (mode === 'developer' || mode === 'zip') {
+        const reveal = mode === 'zip' ? zipFile : directory;
+        if (platform === 'darwin') await run('/usr/bin/open',['-R',reveal]);
+        else if (platform === 'win32') await run(path.win32.join(env.WINDIR || 'C:\\Windows','explorer.exe'),mode === 'zip' ? ['/select,',reveal] : [reveal]);
+        else await run('/usr/bin/xdg-open',[mode === 'zip' ? path.dirname(zipFile) : directory]);
       }
       return {ok:true,execution:'executed',stage:'awaiting_browser_confirmation',installed:false};
     } catch {return {ok:false,error:'OPEN_OUTCOME_UNKNOWN',message:'Check whether the browser or installer opened. No installation success is claimed.',execution:'unknown'};}

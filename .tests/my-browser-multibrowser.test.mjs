@@ -73,3 +73,17 @@ test('verified Safari bundle opens only the fixed packaged app and still require
   const i=createInstallation({platform:'darwin',exists:()=>true,verifySafari:async()=>{verified=true;},run:async(...args)=>{assert.equal(verified,true);calls.push(args);}});
   const r=await i.open('safari');assert.equal(r.installed,false);assert.equal(r.stage,'awaiting_browser_confirmation');assert.equal(calls[0][0],'/usr/bin/open');assert.ok(calls[0][1][0].endsWith('/my-browser/native/My Browser.app'));
 });
+
+test('ZIP installation reveals the bundled archive and opens the chosen extensions manager',async()=>{
+  for(const platform of ['darwin','win32','linux']) {
+    const calls=[];
+    const i=createInstallation({platform,env:{PROGRAMFILES:'C:\\Program Files'},exists:()=>true,run:async(...args)=>calls.push(args)});
+    assert.equal(i.status().browsers.find(b=>b.browser==='chrome').zip,true);
+    const r=await i.open('chrome','zip');assert.equal(r.ok,true);assert.equal(r.installed,false);
+    assert.equal(calls.length,2);assert.ok(calls[0][1].includes('chrome://extensions/'));
+    assert.ok(calls[1][1].some(p=>p.endsWith(platform==='linux'?'downloads':'my-browser-chromium.zip')));
+    assert.equal((await i.open('safari','zip')).ok,false);
+  }
+  const i=createInstallation({platform:'darwin',exists:p=>p.includes('Google Chrome'),run:async()=>assert.fail('missing ZIP must not launch')});
+  assert.equal((await i.open('chrome','zip')).error,'ZIP_UNAVAILABLE');
+});

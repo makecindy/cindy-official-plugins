@@ -22,8 +22,9 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const extensionManifest=JSON.parse(await fs.readFile(path.join(extensionDir,'manifest.json'),'utf8'));
   await fs.writeFile(path.join(extensionDir,'manifest.json'),JSON.stringify({...extensionManifest,key:publicKey.toString('base64')}));
   const bridge=createBridge({ports:[18819],extensionId});t.after(()=>bridge.close());
-  const installation=require('../my-browser/node/installation.cjs').createInstallation({platform:'darwin',exists:p=>p.includes('Chrome') || p.includes('Safari')});
-  let cfg={};const faults={read:false,save:false};
+  const installCalls=[];
+  const installation=require('../my-browser/node/installation.cjs').createInstallation({platform:'darwin',exists:p=>p.includes('Chrome') || p.includes('Safari') || p.endsWith('.zip'),run:async(...args)=>installCalls.push(args)});
+  let cfg={policy:{read:{block:[]},interact:{allow:[],block:[]}}};const faults={read:false,save:false};
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host?.startsWith('example.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
@@ -31,7 +32,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
       if(req.headers.host?.startsWith('redirect.test')){res.writeHead(302,{Location:'http://blocked.test/'});return res.end();}
       let data='';for await(const c of req)data+=c;
       const json=value=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
-      if(req.url==='/node-request'){const v=JSON.parse(data);return json({ok:true,result:v.method==='installation'?{ok:true,...installation.status()}:await bridge.request(v.method,v.params)});}
+      if(req.url==='/node-request'){const v=JSON.parse(data);return json({ok:true,result:v.method==='installation'?{ok:true,...installation.status()}:v.method==='openInstallation'?await installation.open(v.params.browser,v.params.mode):await bridge.request(v.method,v.params)});}
       if(req.url==='/kv'){
         if((req.method==='GET'&&faults.read)||(req.method==='PUT'&&faults.save)){res.statusCode=503;return json({});}
         if(req.method==='PUT'){cfg=JSON.parse(data);res.statusCode=204;return res.end();}return json(cfg);
@@ -62,7 +63,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     const upstream=http.request({hostname:'127.0.0.1',port:fixtureHost?server.address().port:Number(target.port),path:target.pathname+target.search,method:req.method,headers:req.headers},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});
     upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});req.pipe(upstream);
   });
-  proxy.on('connect',(_req,socket)=>socket.end('HTTP/1.1 403 Forbidden\r\n\r\n'));
+  proxy.on('connect',(_req,socket)=>{socket.on('error',()=>{});socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');});
   await new Promise(r=>proxy.listen(0,'127.0.0.1',r));t.after(()=>{proxy.closeAllConnections();proxy.close();});
   const context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,args:['--proxy-server=http://127.0.0.1:'+proxy.address().port,'--proxy-bypass-list=<-loopback>','--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir]});
   t.after(()=>context.close());
@@ -95,6 +96,15 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const url='http://example.test/';
   const page=await context.newPage();await page.goto(url);
   let r=await tool('browser_read',{url,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.text,/Visible fixture text/);
+  const beforeRefreshIds=(await tool('browser_tabs',{host:'example.test',limit:10})).tabs.map(t=>t.id);
+  const beforeRefreshPages=context.pages().length;
+  for(let i=0;i<3;i++) {
+    await page.reload();
+    assert.equal((await tool('browser_read',{url,mode:'text'})).ok,true);
+    assert.deepEqual((await tool('browser_tabs',{host:'example.test',limit:10})).tabs.map(t=>t.id),beforeRefreshIds);
+    assert.equal(context.pages().length,beforeRefreshPages);
+  }
+  t.diagnostic('Three page reload/read cycles: same tab ids, no added pages.');
   r=await tool('browser_read',{url,mode:'extract',multiple:true,from:'.row',fields:{label:'a',link:{selector:'a',attr:'href'}}});
   assert.equal(r.records.length,2);assert.equal(r.records[0].link,url+'one');
   r=await tool('browser_read',{url});assert.equal(r.ok,true);assert.equal(r.elements,undefined,'default reading does not create refs');
@@ -126,9 +136,21 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
   assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
   const settings=await context.newPage();await settings.goto(base+'/');await settings.getByText('浏览器已连接',{exact:true}).waitFor();
-  assert.equal(await settings.locator('.browser-card').count(),3);
+  const beforeSettingsRefresh=context.pages().length;
+  for(let i=0;i<3;i++) {
+    await settings.locator('#refresh').click();
+    await settings.waitForFunction(()=>!document.querySelector('#refresh').disabled);
+  }
+  await settings.reload();await settings.getByText('浏览器已连接',{exact:true}).waitFor();
+  assert.equal(context.pages().length,beforeSettingsRefresh);
+  assert.equal(installCalls.length,0,'status refresh must never launch an installer or browser');
+  t.diagnostic('Three settings refreshes and one reload: no browser launch, no added pages.');
+  assert.equal(await settings.locator('.browser-card').count(),1);
+  assert.equal(await settings.locator('#install').getByText('Safari',{exact:true}).count(),0);
+  assert.equal(await settings.locator('#install').getByText('Edge',{exact:true}).count(),0);
+  assert.doesNotMatch(await settings.locator('#install').textContent(),/等待发布方上架|尚未配置审核通过/);
   assert.equal(await settings.locator('#developer').getAttribute('open'),null);
-  assert.ok(await settings.locator('#extdir').inputValue());assert.match(await settings.locator('#read-list').textContent(),/mail.google.com/);
+  assert.ok(await settings.locator('#extdir').inputValue());assert.match(await settings.locator('#read-list').textContent(),/blocked.test/);
   await settings.getByText('禁止读取的网站',{exact:true}).click();
   await settings.locator('#read-input').fill('new-block.test');await settings.locator('#read-add').click();faults.save=true;
   await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();assert.equal(cfg.policy.read.block.includes('new-block.test'),false);faults.save=false;
@@ -140,5 +162,18 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   await fetch('http://127.0.0.1:'+status.port+'/health',{headers:{'X-My-Browser-Extension':candidate.extensionId,'X-My-Browser-Origin':candidate.origin,'X-My-Browser-Client':candidate.id,'X-My-Browser-Version':status.version,'X-My-Browser-Family':'safari'}});
   await logic.evaluate(()=>window.confirmAllowed=false);await settings.locator('#refresh').click();await settings.getByRole('button',{name:'确认连接',exact:true}).click();await settings.getByText('No browser was authorized.',{exact:true}).waitFor();assert.equal(cfg.pairedClients,undefined);
   await logic.evaluate(()=>window.confirmAllowed=true);await settings.getByRole('button',{name:'确认连接',exact:true}).click();await settings.waitForFunction(()=>!document.querySelector('#profiles button'));assert.equal(cfg.pairedClients[0].id,candidate.id);assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  await settings.locator('.browser-card').filter({has:settings.getByText('Chrome',{exact:true})}).getByRole('button',{name:'打开 ZIP 安装'}).click();
+  await settings.getByText('请把选中的 ZIP 拖入扩展管理页，本页会自动检查连接。',{exact:true}).waitFor();
+  assert.equal(installCalls.length,2);assert.ok(installCalls[1][1][1].endsWith('my-browser-chromium.zip'));
+  await logic.evaluate(()=>window.confirmAllowed=false);
+  await settings.locator('#all-sites').check();await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();
+  assert.equal(cfg.policy.interact.allow.includes('*'),false);
+  await logic.evaluate(()=>window.confirmAllowed=true);await settings.locator('#save').click();await settings.getByText('已保存',{exact:true}).waitFor();
+  assert.equal(cfg.policy.interact.allow.includes('*'),true);assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  assert.equal(await settings.locator('#site-selection').isVisible(),false);
+  assert.equal((await tool('browser_policy',{action:'remove',host:'*'})).ok,true);
+  assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.includes('*'),false);
+  const saved=cfg;cfg={};await settings.locator('#refresh').click();await settings.waitForFunction(()=>document.querySelector('#all-sites').checked);
+  assert.deepEqual((await tool('browser_policy',{action:'get'})).policy,P.defaults());cfg=saved;
   assert.deepEqual(errors,[]);
 });

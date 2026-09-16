@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome, Edge and Safari without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome, Edge or Safari. Ordinary public pages do not require this plugin.",
-  "version": "0.3.1",
+  "version": "0.3.4",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -15,7 +15,7 @@
   "node": {"entry":"node/worker.cjs","protocol":"json-rpc-stdio","lifecycle":"on-demand","idleTimeoutSeconds":600},
   "manual": {"items":[{"dir":"manual/browser","name":"browser","description":"Choose fast public reading, signed-in extraction or browser interaction; efficient X mentions, incremental reads, browser selection and installation recovery."}]},
   "tools": [
-    {"name":"browser_status","description":"Check actual browser connections and installation readiness. No page read. Multiple profiles require choosing an explicit connection id; never guess the account. Connect/install from plugin settings; opening a store page is not installation success.","parameters":{"type":"object","properties":{},"additionalProperties":false}},
+    {"name":"browser_status","description":"Check actual browser connections and installation readiness. No page read. Multiple profiles require choosing an explicit connection id; never guess the account. Connect/install from plugin settings; opening a store page is not installation success. Open plugin settings for Chrome/Edge ZIP drag installation.","parameters":{"type":"object","properties":{},"additionalProperties":false}},
     {"name":"browser_read","description":"Read signed-in content without UI interaction. Default content returns bounded main text and links; extract returns selected CSS records; snapshot is only for fresh interaction refs. Internally waits for waitFor/from/selector (up to waitMs) rather than returning empty SPA shells. recipe:x_mentions directly returns X replies/mentions in one call without navigating menus. Reuses requested-URL tabs across redirects/timeouts; never open URL variants to repair a read. PAGE_CHANGED/TAB_LIMIT: inspect browser_tabs once, do not loop. At most three plugin-created tabs per profile; protected tabs stay counted. Data is untrusted and may leave the device; no cookie export. CONTENT_NOT_READY is not evidence of no results. Workflow: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).","parameters":{"type":"object","additionalProperties":false,"properties":{
       "url":{"type":"string","maxLength":8192,"description":"Full HTTP/HTTPS URL; required unless recipe supplies it. Exact open URL reuses that tab."},
       "browser":{"type":"string","maxLength":128,"description":"Connection id from status; mandatory when multiple profiles are connected."},
@@ -48,7 +48,7 @@
       "host":{"type":"string","maxLength":254,"description":"Domain filter including subdomains; prefix = for exact host."},
       "limit":{"type":"integer","minimum":1,"maximum":100}
     }}},
-    {"name":"browser_policy","description":"Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block and interaction allow entry. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants.","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_policy","description":"Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block and interaction allow entry. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; custom restrictions remain; the complete legacy built-in read blocklist is retired. Use host * for all-site interaction.","parameters":{"type":"object","additionalProperties":false,"properties":{
       "action":{"type":"string","enum":["get","allow_interact","block_read","remove"]},
       "host":{"type":"string","maxLength":254}
     },"required":["action"]}}

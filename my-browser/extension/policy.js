@@ -3,12 +3,7 @@
 (function (root) {
   const READ = ['tabs', 'navigate', 'snapshot', 'extract', 'text', 'content'];
   const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll'];
-  const DEFAULT_BLOCK = ['mail.google.com', 'outlook.com', 'outlook.live.com', 'mail.qq.com', 'mail.163.com',
-    '1password.com', 'lastpass.com', 'bitwarden.com', 'accounts.google.com', 'login.microsoftonline.com',
-    'appleid.apple.com', 'paypal.com', 'stripe.com', 'alipay.com', 'cmbchina.com', 'icbc.com.cn',
-    'bankofamerica.com', 'chase.com', 'coinbase.com', 'binance.com', 'console.aws.amazon.com',
-    'console.cloud.google.com', 'portal.azure.com'];
-  const defaults = () => ({ read: { block: [...DEFAULT_BLOCK] }, interact: { allow: [], block: [] } });
+  const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
     if (typeof value !== 'string') throw new Error('Enter a domain, for example example.test.');
     const text = value.trim().toLowerCase();
@@ -34,15 +29,15 @@
     return false;
   }
   function matches(host, pattern) {
-    return pattern.startsWith('=') ? host === pattern.slice(1) : host === pattern || host.endsWith('.' + pattern);
+    return pattern === '*' || (pattern.startsWith('=') ? host === pattern.slice(1) : host === pattern || host.endsWith('.' + pattern));
   }
   function normalizePolicy(p) {
     if (!p || !p.read || !p.interact) throw new Error('Invalid policy. Reload settings before saving.');
-    const list = (items) => {
+    const list = (items, wildcard = false) => {
       if (!Array.isArray(items) || items.length > 200) throw new Error('Each policy list must contain at most 200 domains.');
-      return [...new Set(items.map(normalizeHost))];
+      return [...new Set(items.map(h => wildcard && h === '*' ? '*' : normalizeHost(h)))];
     };
-    return { read: { block: list(p.read.block) }, interact: { allow: list(p.interact.allow), block: list(p.interact.block || []) } };
+    return { read: { block: list(p.read.block) }, interact: { allow: list(p.interact.allow, true), block: list(p.interact.block || []) } };
   }
   function check(policy, action, url) {
     const deny = (error, message, host) => ({ ok: false, error, message, host, execution: 'not_executed' });

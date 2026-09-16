@@ -1,5 +1,5 @@
 // Sandbox orchestration only; browser access stays in the bundled Node/Chrome bridge.
-const policyReady = import('/extension/policy.js').then(() => globalThis.MyBrowserPolicy);
+const policyReady = Promise.all([import('/extension/policy.js'),import('/saved-policy.js')]).then(() => globalThis.MyBrowserPolicy);
 const channel = new BroadcastChannel('my-browser');
 let writes = Promise.resolve();
 const serialize = fn => { const next = writes.then(fn,fn); writes = next.catch(() => {}); return next; };
@@ -14,7 +14,7 @@ async function load() {
   const r = await fetch('/kv');
   if (!r.ok) throw new Error('Cannot read saved permissions. Reload plugin settings; no browser action was started.');
   const cfg = await r.json();
-  return {cfg,policy:cfg.policy ? P.normalizePolicy(cfg.policy) : P.defaults()};
+  return {cfg,policy:globalThis.myBrowserSavedPolicy(cfg,P)};
 }
 async function sync() {
   await writes;
@@ -42,7 +42,7 @@ async function save(next, base) {
     const fresh = await load();
     if (JSON.stringify(fresh.policy) !== JSON.stringify(current)) return fail('POLICY_CHANGED','Permissions changed during confirmation. Refresh settings.');
   }
-  const r = await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,policy})});
+  const r = await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,policy,siteDefaultsVersion:1})});
   if (!r.ok) return fail('SAVE_FAILED','Permissions could not be saved. Refresh settings before trying again.');
   const applied = await node('setPolicy',{policy});
   if (!applied?.ok) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true};
@@ -55,7 +55,7 @@ async function handleTool(name,args) {
     if (args.action === 'get') { const policy = await sync(); return {ok:true,policy}; }
     return serialize(async () => {
       if (!['allow_interact','block_read','remove'].includes(args.action)) return fail('INVALID_ACTION','Use get, allow_interact, block_read or remove.');
-      const host = P.normalizeHost(args.host);
+      const host = args.host === '*' && args.action !== 'block_read' ? '*' : P.normalizeHost(args.host);
       const {policy} = await load();
       if (args.action === 'allow_interact' && !policy.interact.allow.includes(host)) policy.interact.allow.push(host);
       if (args.action === 'block_read' && !policy.read.block.includes(host)) policy.read.block.push(host);
@@ -68,7 +68,7 @@ async function handleTool(name,args) {
   }
   if (!['browser_status','browser_tabs','browser_read','browser_act'].includes(name)) return fail('UNKNOWN_TOOL','Use a declared My Browser tool.');
   await sync(); // Every call: a restarted on-demand worker must not silently lose stored permissions.
-  if (name === 'browser_status') return {...await node('status'),installation:await node('installation'),how_to_install:'Open My Browser plugin settings and choose your browser. A store page opening does not mean the extension is installed; wait for a live connection.'};
+  if (name === 'browser_status') return {...await node('status'),installation:await node('installation'),how_to_install:'Open My Browser plugin settings and choose your browser. Chrome/Edge: open the ZIP installer, enable Developer mode and drag the ZIP onto the extensions page. Wait for a live connection.'};
   if (name === 'browser_tabs') return node('act',{action:'tabs',payload:P.validate('tabs',args)});
   if (name === 'browser_read') {
     if (args.recipe) {
