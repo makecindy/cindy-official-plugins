@@ -1,3 +1,4 @@
+import { ManualInlineTextEditor, type InlineTextHandle } from '../../../../../build/ManualInlineTextEditor';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
 import { AnchoredMenuShell } from './chat/AnchoredMenuShell';
@@ -8875,13 +8876,21 @@ function HtmlViewer({
   const [manualEditDraftDirty, setManualEditDraftDirty] = useState(false);
   const selectedManualEditTargetIdRef = useRef<string | null>(null);
   const manualEditSelectionDraftRef = useRef<{ id: string; draft: ManualEditDraft } | null>(null);
-  // Tracks the iframe's in-flight inline text edit. `finishManualEditTextSession`
-  // posts the explicit finish and resolves only after the iframe acks AND the
-  // resulting commit has been applied, so exit/dismiss/cancel never tear down
-  // mid-round-trip and drop the final edit (the #3647 exit-path regression).
+  // The editor origin owns the input, authorization and settlement. The
+  // untrusted iframe can suggest a target but never submit a text mutation.
   const manualEditTextSessionIdRef = useRef<string | null>(null);
-  const manualEditTextSessionStartSequenceRef = useRef<number | null>(null);
-  const manualEditTextFinishRef = useRef<((acknowledged?: boolean, sessionId?: string) => void) | null>(null);
+  type InlineCandidate = { target: ManualEditTarget; source: string; originalText: string };
+  const [inlineCandidate, setInlineCandidate] = useState<InlineCandidate | null>(null);
+  const inlineCandidateRef = useRef<InlineCandidate | null>(null);
+  const inlineEditorRef = useRef<InlineTextHandle | null>(null);
+  function closeInlineEditor(candidate?: InlineCandidate) {
+    if (candidate && inlineCandidateRef.current !== candidate) return;
+    if (inlineCandidateRef.current) manualEditTextFailedSessionIdsRef.current.delete(inlineCandidateRef.current.target.id);
+    inlineCandidateRef.current = null;
+    manualEditTextSessionIdRef.current = null;
+    setInlineCandidate(null);
+  }
+
   const manualEditTextCommitInFlightRef = useRef<Promise<unknown> | null>(null);
   const manualEditTextCommitSequenceRef = useRef(0);
   const manualEditTextFailedSessionIdsRef = useRef<Set<string>>(new Set());
@@ -8967,9 +8976,7 @@ function HtmlViewer({
     setManualEditModeRaw(false);
     manualEditLiveStylesRef.current.clear();
     manualEditPendingStyleRef.current = null;
-    manualEditTextSessionIdRef.current = null;
-    manualEditTextSessionStartSequenceRef.current = null;
-    manualEditTextFinishRef.current = null;
+    closeInlineEditor();
     manualEditTextCommitInFlightRef.current = null;
     manualEditTextFailedSessionIdsRef.current.clear();
     manualEditTextLatestCommitRef.current = null;
@@ -12494,9 +12501,7 @@ function HtmlViewer({
       setManualEditDraftDirty(false);
       selectedManualEditTargetIdRef.current = null;
       manualEditSelectionDraftRef.current = null;
-      manualEditTextSessionIdRef.current = null;
-      manualEditTextSessionStartSequenceRef.current = null;
-      manualEditTextFinishRef.current = null;
+      closeInlineEditor();
       manualEditTextCommitInFlightRef.current = null;
       manualEditTextFailedSessionIdsRef.current.clear();
       manualEditTextLatestCommitRef.current = null;
@@ -12512,14 +12517,9 @@ function HtmlViewer({
       if (!isRetainedPreviewIframeSource(ev.source)) return;
       const data = ev.data as ManualEditBridgeMessage | null;
       if (!data?.type) return;
-      // A direct/automatic tab transition may make the viewer inactive before
-      // its inline edit acknowledges the safe-exit request. Keep only those
-      // commit/settlement messages live offscreen; ignore fresh interactions.
-      if (
-        !workspaceActive
-        && data.type !== 'od-edit-text-commit'
-        && data.type !== 'od-edit-text-session'
-      ) return;
+      if (data.type === 'od-edit-text-commit' || data.type === 'od-edit-text-session') return;
+      if (inlineCandidateRef.current && data.type !== 'od-edit-targets') return;
+      if (!workspaceActive) return;
       if (data.type === 'od-edit-targets' && Array.isArray(data.targets)) {
         setManualEditTargets(data.targets);
         // Target broadcasts can be briefly empty while the iframe/save path is
@@ -12560,65 +12560,16 @@ function HtmlViewer({
         }
         return;
       }
-      if (data.type === 'od-edit-text-commit') {
-        // Keep the apply promise reachable so any teardown (host- or
-        // iframe-initiated) can await it and honor a failed save before tearing
-        // down. It self-clears once resolved, keyed to identity so a newer
-        // commit is never clobbered.
-        const sessionId = String(data.id);
-        const sequence = manualEditTextCommitSequenceRef.current + 1;
-        manualEditTextCommitSequenceRef.current = sequence;
-        const commit = applyManualEdit({
-          id: sessionId,
-          kind: 'set-text',
-          value: String(data.value),
-        }, 'Edit text');
-        manualEditTextCommitInFlightRef.current = commit;
-        const record: NonNullable<typeof manualEditTextLatestCommitRef.current> = {
-          promise: commit,
-          result: null,
-          sequence,
-          sessionId,
-        };
-        manualEditTextLatestCommitRef.current = record;
-        void (async () => {
-          try {
-            record.result = (await commit) !== false;
-          } catch {
-            record.result = false;
-          }
-          if (record.result) {
-            manualEditTextFailedSessionIdsRef.current.delete(sessionId);
-          } else {
-            manualEditTextFailedSessionIdsRef.current.add(sessionId);
-          }
-          if (manualEditTextCommitInFlightRef.current === commit) {
-            manualEditTextCommitInFlightRef.current = null;
-          }
-        })();
-        return;
-      }
-      if (data.type === 'od-edit-text-session') {
-        const sessionId = String(data.id || '');
-        if (data.active) {
-          manualEditTextSessionIdRef.current = sessionId;
-          manualEditTextSessionStartSequenceRef.current = manualEditTextCommitSequenceRef.current;
-          return;
-        }
-        if (manualEditTextSessionIdRef.current === sessionId) {
-          manualEditTextSessionIdRef.current = null;
-          manualEditTextSessionStartSequenceRef.current = null;
-        }
-        const pending = manualEditTextFinishRef.current;
-        if (pending) {
-          // settle() awaits the in-flight commit before resolving the caller's
-          // teardown, so the final edit is never dropped.
-          pending(true, sessionId);
-        }
-        // Iframe-driven finishes (Enter / clicking another target) leave the
-        // commit promise in place; it self-clears on resolution, and any later
-        // teardown still awaits it via settlePendingManualEditCommit so a failed
-        // save is never silently torn down.
+      if (data.type === 'od-edit-text-request') {
+        if (inlineCandidateRef.current || !data.target || typeof data.target.id !== 'string') return;
+        const base = sourceRef.current;
+        if (base == null || !readManualEditOuterHtml(base, data.target.id)) return;
+        const originalText = readManualEditFields(base, data.target.id).text;
+        if (originalText === undefined) return;
+        const candidate = { target: data.target, source: base, originalText };
+        inlineCandidateRef.current = candidate;
+        manualEditTextSessionIdRef.current = data.target.id;
+        setInlineCandidate(candidate);
         return;
       }
       if (data.type === 'od-edit-drag-commit') {
@@ -12765,91 +12716,15 @@ function HtmlViewer({
     setManualEditError(null);
   }
 
-  // Ends the iframe's inline text edit and resolves only once it acks (and any
-  // resulting commit has been applied). Callers that tear down edit state must
-  // await this so the final edit is never dropped — the #3647 exit-path bug.
-  // A timeout backstops a detached iframe so teardown can never hang.
-  // Resolves to whether the session ended cleanly: true when there was nothing
-  // to commit or the commit succeeded, false when the pending text commit
-  // failed (applyManualEdit returned false / threw). Callers that tear down
-  // edit state must honor a false result — keep edit mode open and preserve the
-  // error so a failed save never looks like a successful one (#4291 review).
+  // Only the trusted host input can finish an inline edit. No iframe ack or
+  // postMessage is accepted as authorization to persist text.
   function finishManualEditTextSession(commit: boolean): Promise<boolean> {
-    const win = iframeRef.current?.contentWindow;
-    const sessionId = manualEditTextSessionIdRef.current;
-    if (!sessionId) return Promise.resolve(true);
-    if (!win) return Promise.resolve(false);
-    const sessionStartSequence = manualEditTextSessionStartSequenceRef.current
-      ?? manualEditTextCommitSequenceRef.current;
-    const commitSequenceAtFinish = manualEditTextCommitSequenceRef.current;
-    const commitAtFinish = manualEditTextLatestCommitRef.current;
-    const sameSessionCommitAtFinish = commitAtFinish?.sessionId === sessionId
-      && commitAtFinish.sequence > sessionStartSequence
-      ? commitAtFinish
-      : null;
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      const settle = (acknowledged = false, acknowledgedSessionId?: string) => {
-        if (acknowledged && acknowledgedSessionId !== sessionId) return;
-        if (settled) return;
-        settled = true;
-        if (timer) { clearTimeout(timer); timer = null; }
-        if (manualEditTextFinishRef.current === settle) manualEditTextFinishRef.current = null;
-        // Wait out the in-flight commit before resolving, so the final edit is
-        // persisted before teardown even if the timeout backstop won the race
-        // against the iframe's ack. The commit clears its own ref on resolution.
-        const latestCommit = manualEditTextLatestCommitRef.current;
-        const currentSessionCommit = latestCommit
-          && latestCommit.sequence > commitSequenceAtFinish
-          && latestCommit.sessionId === sessionId
-          ? latestCommit
-          : null;
-        const relevantCommit = currentSessionCommit ?? sameSessionCommitAtFinish;
-        void (async () => {
-          let committed = acknowledged;
-          try {
-            // applyManualEdit resolves false when the save fails (or the source
-            // changed externally); surface that so callers can abort teardown.
-            if (relevantCommit) {
-              committed = relevantCommit.result
-                ?? (await relevantCommit.promise) !== false;
-              relevantCommit.result = committed;
-              if (committed) {
-                manualEditTextFailedSessionIdsRef.current.delete(relevantCommit.sessionId);
-              } else {
-                manualEditTextFailedSessionIdsRef.current.add(relevantCommit.sessionId);
-              }
-            }
-          } catch {
-            committed = false;
-          }
-          // A timeout by itself does not prove that the iframe ended the
-          // editing session. Keep the session live so every later teardown
-          // attempt remains fail-closed until the iframe acks or a matching
-          // commit provides a terminal witness. Clearing it on a bare timeout
-          // lets a second navigation destroy the iframe and lose its DOM edit.
-          if ((acknowledged || relevantCommit)
-            && manualEditTextSessionIdRef.current === sessionId) {
-            manualEditTextSessionIdRef.current = null;
-            manualEditTextSessionStartSequenceRef.current = null;
-          }
-          resolve(committed);
-        })();
-      };
-      manualEditTextFinishRef.current = settle;
-      win.postMessage({ type: 'od-edit-text-finish', commit }, '*');
-      // Backstop a detached iframe so teardown can never hang; the ack path
-      // clears this timer when it wins.
-      timer = setTimeout(() => settle(false), 1500);
-    });
+    if (!inlineCandidateRef.current) return Promise.resolve(true);
+    return inlineEditorRef.current?.finish(commit) ?? Promise.resolve(false);
   }
 
-  // Settles whatever inline text edit is still pending before teardown and
-  // reports whether it committed cleanly: the live session if one is active,
-  // otherwise an in-flight commit left by an iframe-driven finish (Enter /
-  // click-another-target). Returns false on a failed commit so callers keep
-  // edit mode open with the error rather than tearing down through it (#4291).
+  // Await host-owned input/save before teardown. Failed saves retain the
+  // draft and keep edit mode open until retry or explicit cancellation.
   async function settlePendingManualEditCommit(commitActiveSession = true): Promise<boolean> {
     if (manualEditTextSessionIdRef.current) {
       return finishManualEditTextSession(commitActiveSession);
@@ -13023,7 +12898,6 @@ function HtmlViewer({
     selectedManualEditTargetIdRef.current = null;
     manualEditSelectionDraftRef.current = null;
     manualEditTextSessionIdRef.current = null;
-    manualEditTextSessionStartSequenceRef.current = null;
     setSelectedManualEditTarget(null);
     setManualEditPanelPosition(null);
     setManualEditDraft(emptyManualEditDraft(sourceRef.current ?? ''));
@@ -17347,6 +17221,45 @@ function HtmlViewer({
             }}
             onMouseLeave={manualEditMode ? clearManualEditHover : undefined}
           >
+            {manualEditMode && inlineCandidate && createPortal(
+              <ManualInlineTextEditor
+                key={inlineCandidate.target.id}
+                ref={inlineEditorRef}
+                originalText={inlineCandidate.originalText}
+                label={t('manualEdit.editParams')}
+                saveLabel={t('common.save')}
+                cancelLabel={t('common.cancel')}
+                style={(() => {
+                  const frame = iframeRef.current?.getBoundingClientRect();
+                  const rect = inlineCandidate.target.rect;
+                  const x = Number.isFinite(rect?.x) ? rect.x : 0;
+                  const y = Number.isFinite(rect?.y) ? rect.y : 0;
+                  return {position:'fixed', left: Math.max(8, Math.min(window.innerWidth - 340, (frame?.left ?? 0) + x * overlayPreviewScale)), top: Math.max(8, Math.min(window.innerHeight - 160, (frame?.top ?? 0) + y * overlayPreviewScale)), width:320};
+                })()}
+                onClose={() => closeInlineEditor(inlineCandidate)}
+                onApply={async value => {
+                  const candidate = inlineCandidate;
+                  if (inlineCandidateRef.current !== candidate || manualEditTextSessionIdRef.current !== candidate.target.id) return false;
+                  if (sourceRef.current !== candidate.source || readManualEditFields(sourceRef.current, candidate.target.id).text !== candidate.originalText) {
+                    setManualEditError('The source changed. Keep this text and reopen the latest target before saving.');
+                    return false;
+                  }
+                  const sessionId = candidate.target.id;
+                  const sequence = ++manualEditTextCommitSequenceRef.current;
+                  const commit = applyManualEdit({kind:'set-text', id:sessionId, value}, 'Edit text');
+                  manualEditTextCommitInFlightRef.current = commit;
+                  const record = {promise:commit, result:null as boolean | null, sequence, sessionId};
+                  manualEditTextLatestCommitRef.current = record;
+                  try {
+                    record.result = await commit;
+                    if (record.result) manualEditTextFailedSessionIdsRef.current.delete(sessionId);
+                    else manualEditTextFailedSessionIdsRef.current.add(sessionId);
+                    return record.result;
+                  } finally {
+                    if (manualEditTextCommitInFlightRef.current === commit) manualEditTextCommitInFlightRef.current = null;
+                  }
+                }}
+              />, document.body)}
             {manualEditPanel}
             {manualEditHoverAffordance}
             {showDeckThumbnailRail && !deckThumbnailsCollapsed ? (

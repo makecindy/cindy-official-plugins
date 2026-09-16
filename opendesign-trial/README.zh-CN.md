@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.4
+# OpenDesign for Cindy — 本地试用 0.4.5
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -30,3 +30,5 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 浏览器回归：安装 Playwright Chromium 后，在仓库根目录运行 `node --test .tests/opendesign/native-ui.cjs .tests/opendesign/source-regressions.cjs`。使用现有浏览器可通过 `OPENDESIGN_CHROMIUM_PATH` 指定可执行文件；测试仅使用隔离无界面窗口。
 
 0.4.4：直接打开稿件也使用限于本项目资源的 CSP，编辑器不再允许任意 loopback 端口。宿主回执会话异常保留未知状态。手动 HTML 编辑、撤销/重做与 AI 更新共用原子版本检查；旧稿保存返回 409，保留新内容。浏览器回归覆盖真实保存竞态及外部图片、脚本、fetch 请求被阻止。
+
+0.4.5：文字输入由外层编辑器持有，显示在画布上方。单击打开属性面板，双击进入原位文字编辑，回车保存、Escape 取消。一次性保存凭据只由外层真实输入产生，不传入稿件 iframe；伪造的提交/会话消息直接忽略。保存校验活动目标、原文和源码版本；冲突保留草稿。

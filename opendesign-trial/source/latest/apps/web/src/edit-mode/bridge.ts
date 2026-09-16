@@ -762,103 +762,11 @@ export function buildManualEditBridge(enabled: boolean): string {
     }
     return null;
   }
-  function caretRangeFromClick(clickEvent){
-    try {
-      if (document.caretPositionFromPoint) {
-        var position = document.caretPositionFromPoint(clickEvent.clientX, clickEvent.clientY);
-        if (!position) return null;
-        var positionRange = document.createRange();
-        positionRange.setStart(position.offsetNode, position.offset);
-        positionRange.collapse(true);
-        return positionRange;
-      }
-      if (document.caretRangeFromPoint) {
-        return document.caretRangeFromPoint(clickEvent.clientX, clickEvent.clientY);
-      }
-    } catch (e) {}
-    return null;
-  }
-  function placeCaretFromClick(clickEvent, el){
-    var range = caretRangeFromClick(clickEvent);
-    if (!range) {
-      range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-    }
-    try {
-      var sel = window.getSelection();
-      if (!sel) return;
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch (e) {}
-  }
-  var guard = window.__odEditGuard || null;
-  // A single in-flight inline text edit. The session is deliberately NOT tied
-  // to iframe blur: moving the pointer to the host's floating inspector blurs
-  // the iframe, and committing/ending on blur is exactly the #3646 focus-loss
-  // bug. The session ends only on an explicit action — Enter, Escape, picking
-  // another target, clicking empty background, leaving edit mode, or an
-  // od-edit-text-finish message from the host.
-  var activeTextEdit = null;
-  function postTextSession(el, active, extra){
-    if (!el) return;
-    window.parent.postMessage(Object.assign({
-      type: 'od-edit-text-session',
-      id: stableId(el),
-      active: !!active
-    }, extra || {}), '*');
-  }
-  function finishActiveTextEdit(commit){
-    if (!activeTextEdit) return false;
-    var session = activeTextEdit;
-    activeTextEdit = null;
-    var el = session.el;
-    el.removeAttribute('contenteditable');
-    el.removeAttribute('data-od-editing');
-    el.removeEventListener('keydown', session.onKey);
-    if (guard) guard.editingEl = null;
-    var value = (el.textContent || '').trim();
-    var changed = value !== session.originalText.trim();
-    if (commit && changed) {
-      window.parent.postMessage({
-        type: 'od-edit-text-commit',
-        id: stableId(el),
-        value: value
-      }, '*');
-    } else if (!commit) {
-      el.textContent = session.originalText;
-    }
-    postTextSession(el, false, { committed: !!commit, changed: changed });
-    return true;
-  }
+  // Authored scripts share this realm. Only request the parent-owned input;
+  // never transmit a value or an authorization credential from this iframe.
   function makeEditable(el, clickEvent){
-    if (!el) return;
-    if (activeTextEdit && activeTextEdit.el === el) {
-      placeCaretFromClick(clickEvent, el);
-      return;
-    }
-    if (activeTextEdit) finishActiveTextEdit(true);
-    if (el.getAttribute('contenteditable') === 'true') return;
-    var originalText = el.textContent || '';
-    clearSelectedTarget();
-    el.setAttribute('contenteditable', 'plaintext-only');
-    el.setAttribute('data-od-editing', 'true');
-    if (guard) guard.editingEl = el;
-    try { el.focus(); } catch (e) {}
-    placeCaretFromClick(clickEvent, el);
-    function onKey(ev){
-      if (ev.key === 'Enter' && !ev.shiftKey) {
-        ev.preventDefault();
-        finishActiveTextEdit(true);
-      }
-      if (ev.key === 'Escape') {
-        ev.preventDefault();
-        finishActiveTextEdit(false);
-      }
-    }
-    activeTextEdit = { el: el, originalText: originalText, onKey: onKey };
-    el.addEventListener('keydown', onKey);
-    postTextSession(el, true);
+    if (!el || !clickEvent.isTrusted || clickEvent.detail < 2) return;
+    window.parent.postMessage({ type: 'od-edit-text-request', target: targetFrom(el, true) }, '*');
   }
   function camelToKebab(name){ return String(name).replace(/[A-Z]/g, function(m){ return '-' + m.toLowerCase(); }); }
   function cssEscapeId(value){ if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value); return String(value).replace(/"/g, '\\\\"'); }
@@ -909,9 +817,7 @@ export function buildManualEditBridge(enabled: boolean): string {
       enabled = !!ev.data.enabled;
       document.documentElement.toggleAttribute('data-od-edit-mode', enabled);
       if (!enabled) {
-        // Leaving edit mode commits the pending inline edit rather than
-        // dropping it (the #3647 exit-path regression).
-        finishActiveTextEdit(true);
+        // The parent settles its input before leaving edit mode.
         clearSelectedTarget();
         clearGuidesLayer();
         // Re-entering Edit must treat the first pointerover as fresh. Keeping
@@ -1004,16 +910,13 @@ export function buildManualEditBridge(enabled: boolean): string {
       }
       return;
     }
-    if (ev.data.type === 'od-edit-text-finish') {
-      finishActiveTextEdit(ev.data.commit !== false);
-      return;
-    }
+
   });
   // pointerdown records a candidate drag; the actual move/commit happens in
   // pointermove/pointerup. We don't preventDefault here so a plain press that
   // never moves still behaves as a normal click (select / enter text-edit).
   document.addEventListener('pointerdown', function(ev){
-    if (!enabled || activeTextEdit) return;
+    if (!enabled) return;
     if (ev.button !== undefined && ev.button !== 0) return;
     if (ev.target && ev.target.closest && ev.target.closest('[data-od-editing="true"]')) return;
     var el = closestTarget(ev);
@@ -1051,17 +954,11 @@ export function buildManualEditBridge(enabled: boolean): string {
     ev.stopPropagation();
     var el = closestTarget(ev);
     if (!el) {
-      // Clicking empty canvas (no source-mapped ancestor) is the gesture for
-      // page-level styles; commit any in-flight edit first so the host and
-      // iframe stay in sync, then let the host decide whether to surface the
-      // page-styles card.
-      if (activeTextEdit) finishActiveTextEdit(true);
+      // Empty canvas requests the parent-owned page-styles panel.
       window.parent.postMessage({ type: 'od-edit-background' }, '*');
       return;
     }
-    // Switching to a different target commits the in-flight edit first, so the
-    // previous edit is never silently dropped.
-    if (activeTextEdit && activeTextEdit.el !== el) finishActiveTextEdit(true);
+    // Selection is advisory; persistence belongs to the parent editor.
     var kind = inferKind(el);
     var selectedTarget = targetFrom(el, true);
     setSelectedTarget(selectedTarget.id);
@@ -1137,19 +1034,7 @@ export function buildManualEditBridge(enabled: boolean): string {
     // A drag in progress owns the overlay (selection chrome only); pointerover
     // must not surface hover reference guides that would clutter the move.
     if (dragPending && dragPending.started) return;
-    // While editing, hovering must not retarget the inspector or surface a new
-    // affordance — that's the other half of the #3646 instability. It should
-    // still draw the selected-vs-hover spacing overlay, though.
-    if (activeTextEdit) {
-      var hoverEditEl = closestTarget(ev);
-      if (!hoverEditEl) {
-        clearHoverTracking();
-        renderSelectedChromeForCurrent();
-        return;
-      }
-      renderHoverRelationOnly(hoverEditEl);
-      return;
-    }
+
     if (ev.target && ev.target.closest && ev.target.closest('[data-od-editing="true"]')) return;
     var el = closestTarget(ev);
     if (!el) return;
@@ -1199,13 +1084,7 @@ export function buildManualEditBridge(enabled: boolean): string {
       return;
     }
     var hoveredEl = closestTarget(ev);
-    if (activeTextEdit) {
-      if (!hoveredEl || (activeTextEdit.el && stableId(activeTextEdit.el) === stableId(hoveredEl))) {
-        clearHoverTracking();
-        renderSelectedChromeForCurrent();
-      }
-      return;
-    }
+
     if (!hoveredEl) {
       clearHoverTracking();
       renderSelectedChromeForCurrent();

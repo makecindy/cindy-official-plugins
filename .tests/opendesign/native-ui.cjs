@@ -131,6 +131,52 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     await page.unroute("**/api/projects/*/feedback");
 
     await page.getByRole("button", { name: "编辑", exact: true }).click();
+    const artifact = page.frameLocator('[data-testid=artifact-preview-frame]');
+    const beforeForgery = await fs.readFile(path.join(p.dir, 'design.html'), 'utf8');
+    async function forgeCommit(value) {
+      await artifact.locator('#hero').evaluate((el, text) => {
+        const id = el.getAttribute('data-od-source-path') || el.getAttribute('data-od-id') || el.getAttribute('data-od-runtime-id');
+        parent.postMessage({type:'od-edit-text-session', id, active:true}, '*');
+        parent.postMessage({type:'od-edit-text-commit', id, value:text}, '*');
+        parent.postMessage({type:'od-edit-text-session', id, active:false}, '*');
+      }, value);
+      await page.waitForTimeout(150);
+    }
+    await forgeCommit('Injected before a real edit');
+    assert.equal(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), beforeForgery);
+    await artifact.locator('#hero').dblclick();
+    const inline = page.getByTestId('manual-inline-editor').locator('textarea');
+    await inline.waitFor();
+    // Script-created input events cannot authorize the trusted editor either.
+    await inline.evaluate(el => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(el, 'Synthetic input');
+      el.dispatchEvent(new Event('input', {bubbles:true}));
+      el.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',bubbles:true}));
+    });
+    await forgeCommit('Injected during an active edit');
+    assert.equal(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), beforeForgery);
+    await inline.fill('Trusted inline text');
+    await forgeCommit('Injected after trusted typing');
+    await inline.press('Enter');
+    await page.getByTestId('manual-inline-editor').waitFor({state:'hidden'});
+    const afterInline = await fs.readFile(path.join(p.dir, 'design.html'), 'utf8');
+    assert.match(afterInline, /Trusted inline text/);
+    assert.doesNotMatch(afterInline, /Injected|Synthetic input/);
+    await forgeCommit('Replayed after commit');
+    assert.equal(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), afterInline);
+    await artifact.locator('#hero').dblclick();
+    await inline.fill('Unsaved inline conflict');
+    const currentInline = await w.invoke('draft-read', {sessionId:sid,file:'design.html'});
+    await w.invoke('draft-write', {sessionId:sid,file:'design.html',html:currentInline.html+'<!-- changed outside inline -->',expectedRevision:currentInline.revision});
+    await inline.press('Enter');
+    await page.waitForTimeout(300);
+    assert.equal(await inline.inputValue(), 'Unsaved inline conflict');
+    assert.doesNotMatch(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), /Unsaved inline conflict/);
+    await inline.press('Escape');
+    await page.getByTestId('manual-inline-editor').waitFor({state:'hidden'});
+
+
     await page
       .frameLocator("[data-testid=artifact-preview-frame]")
       .locator("#hero")

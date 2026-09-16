@@ -387,7 +387,7 @@
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "e534ba7a52a3c45e81ee8e2b8893fc8c10d5f6eed2a9882c9c74d0369348cc5f",
+    "sha256": "8fb452b4398b6c2a6bd572b62d9a61597cac75d777d2450066aaf7aae8fc1f12",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },
@@ -563,9 +563,9 @@
     "path": "source/latest/apps/web/src/edit-mode/bridge.ts",
     "upstream": "apps/web/src/edit-mode/bridge.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "aed1454f4dda8b85d5200c0f52d4efe5a0159c619014ac554840363579d4527c",
+    "sha256": "6655fc2500bce7754b3263bd2cf97fd488fe789a012a5be6ceb3c34de8a08aa2",
     "upstreamSha256": "aed1454f4dda8b85d5200c0f52d4efe5a0159c619014ac554840363579d4527c",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/edit-mode/source-patches.ts",
@@ -579,9 +579,9 @@
     "path": "source/latest/apps/web/src/edit-mode/types.ts",
     "upstream": "apps/web/src/edit-mode/types.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "35706abcab7d8fca94d682d193a1490a4c2f2d44462b2683ba28597dd3b4c412",
+    "sha256": "4052a5bbf9e9594b0da8a3310b8543f9aa40db059b59fa1433b5838bb1b65bdb",
     "upstreamSha256": "35706abcab7d8fca94d682d193a1490a4c2f2d44462b2683ba28597dd3b4c412",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/hooks/useAnchoredPopover.ts",

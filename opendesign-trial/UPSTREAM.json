@@ -14,7 +14,8 @@
     "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion.",
     "CommentSendResult: preserve unknown without treating it as successful submission.",
     "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes.",
-    "FileViewer and registry: hash the exact source used for each manual edit, undo/redo, speaker-note or inspect save and supply expectedRevision to the local atomic writer."
+    "FileViewer and registry: hash the exact source used for each manual edit, undo/redo, speaker-note or inspect save and supply expectedRevision to the local atomic writer.",
+    "Manual text editing: replace iframe-owned contenteditable/commit messages with the Cindy adapter ManualInlineTextEditor in the editor origin; private one-use authorization on trusted input, active target/original source checks, and fail-closed conflict settlement."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

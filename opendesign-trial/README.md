@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.4
+# OpenDesign for Cindy — local trial 0.4.5
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -25,3 +25,5 @@ Build from the plugin directory: `npm ci --prefix source/build && npm run build 
 Browser regressions: install Playwright Chromium, then run `node --test .tests/opendesign/native-ui.cjs .tests/opendesign/source-regressions.cjs` from the repository root. To use an existing browser, set `OPENDESIGN_CHROMIUM_PATH` to its executable. Tests use isolated headless windows only.
 
 0.4.4: URL-load previews carry a project-scoped CSP; editor resources no longer allow arbitrary loopback ports. Unexpected host session receipts remain unknown. Manual HTML edits, undo/redo and Agent writes share an atomic revision check: stale saves return 409 and keep newer content intact. Browser regressions cover a real save race and blocked outbound image/script/fetch requests.
+
+0.4.5: Text editing runs in an editor-owned input over the canvas. Click selects the inspector; double-click opens inline text editing, Enter saves and Escape cancels. Only trusted input in this parent document authorizes a one-use save; the credential never enters the artifact iframe. Forged iframe commit/session messages are ignored. Saving validates the active target, original text and source revision; conflicts retain the draft.

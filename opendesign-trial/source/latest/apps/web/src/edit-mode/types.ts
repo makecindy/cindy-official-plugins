@@ -189,7 +189,13 @@ export interface ManualEditDragCommitMessage {
   display?: string;
 }
 
+export interface ManualEditTextRequestMessage {
+  type: 'od-edit-text-request';
+  target: ManualEditTarget;
+}
+
 export type ManualEditBridgeMessage =
+  | ManualEditTextRequestMessage
   | ManualEditTargetMessage
   | ManualEditSelectMessage
   | ManualEditHoverMessage
