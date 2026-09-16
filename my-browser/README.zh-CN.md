@@ -79,6 +79,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.14 修掉一处百分号编码绕过并给结果加上大小上限。含编码字符的重置／magic-link 令牌（`/reset/Abc%2F1234567890`）其 `%2F` 会保留在 `pathname` 中，段的字符集判定因此把它当成普通路径词，完整凭证被返回；现先解码再做令牌判定（解码后不再要求必须含字母，纯数字令牌同样命中）。另一处，`document.title` 与每个 `links[].url` 都没有上限：夹具页面现返回 60 万字符标题与 12 万字符 href，超过桥接 512000 字节的请求上限，扩展会丢弃结果、调用方等待 45 秒后拿到 `BROWSER_TIMEOUT`。现标题上限 300 字符、单个链接 URL 上限 2048、链接总预算 20000，任一被截断时结果置 `truncated`。覆盖：路径与片段中编码令牌的单元断言，以及真实 Chromium 对超大页面的读取必须返回 `ok`、标题有界且 `truncated:true`。只回退解码即复现编码令牌断言失败；只回退上限即复现 45 秒后的 `BROWSER_TIMEOUT`。
 
+0.3.15 让敏感判定跟随真实可编辑性。命名词表原先以字面量选择器 `[contenteditable=true]` 为门槛，但 `contenteditable=""` 与 `contenteditable="plaintext-only"` 同样可编辑，于是 `<div contenteditable role="textbox" name="otp">` 被判为普通字段：它能通过 `role=textbox` 进入 snapshot，也能被 `type` 分支接受（该分支本就使用 `el.isContentEditable`）。现判定改为 `el.matches('input,textarea,select') || el.isContentEditable`，敏感判定与操作分支口径一致，snapshot 选择器也从字面 `true` 改为 `[contenteditable]`。覆盖：夹具包含空属性 OTP 区域与 `plaintext-only` 卡号区域，二者都必须返回 `SENSITIVE_FIELD` 且不进入 snapshot；把选择器改回字面量即复现 `undefined`（而非 `SENSITIVE_FIELD`）。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

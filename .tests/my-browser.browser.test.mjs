@@ -180,6 +180,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   r=await tool('browser_act',{url,kind:'type',selector:'#card-plain',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
   assert.equal(/Verification digits/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named otp must not be exposed as a ref');
   assert.equal(/Payment card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named card-number must not be exposed as a ref');
+  // Editability must come from the platform, not a literal contenteditable="true": a named OTP
+  // region with an empty attribute or plaintext-only is still typable through the type branch.
+  r=await tool('browser_act',{url,kind:'type',selector:'#otp-region',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
+  r=await tool('browser_act',{url,kind:'type',selector:'#card-region',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
+  assert.equal(/Verification region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named contenteditable OTP region must not be exposed as a ref');
+  assert.equal(/Payment region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named plaintext-only card region must not be exposed as a ref');
   // The naming heuristic must stay scoped to fields: a button that merely mentions a card stays usable.
   assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
   assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');

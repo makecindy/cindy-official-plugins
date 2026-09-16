@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome and Edge without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Safari is not installable from this package yet. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome or Edge. Safari is not installable from this package yet. Ordinary public pages do not require this plugin.",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -32,7 +32,7 @@
       "waitMs":{"type":"integer","minimum":0,"maximum":15000,"description":"Bounded readiness wait, default 10000ms."},
       "after":{"type":"string","maxLength":2000,"description":"Newest-first multiple extraction: return visible rows before this previously seen permalink. cursorFound:false means anchor not reached; not proof of completeness. Does not auto-scroll."}
     }}},
-    {"name":"browser_act","description":"Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported; detection is conservative, covering type, multi-token autocomplete values (section-checkout billing cc-number) and fields named like card-number or otp. Do not bypass a permission denial.","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_act","description":"Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported; detection is conservative, covering type, multi-token autocomplete values (section-checkout billing cc-number) and editable fields named like card-number or otp. Do not bypass a permission denial.","parameters":{"type":"object","additionalProperties":false,"properties":{
       "url":{"type":"string","maxLength":8192,"description":"Exact open page URL; read it first."},
       "browser":{"type":"string","maxLength":128,"description":"Use the same connection as the snapshot; required with multiple profiles."},
       "kind":{"type":"string","enum":["click","type","press","select","hover","scroll"]},

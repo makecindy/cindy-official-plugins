@@ -156,8 +156,10 @@ async function pageOperation(job,expectedUrl) {
   // autocomplete is a space-separated token list (e.g. "section-checkout billing cc-number"), so
   // exact attribute matching would let standard checkout and OTP fields through into refs and acts.
   // Only form-like elements are judged by naming: a link or button labelled "apply gift card" is
-  // not a credential field, and hiding it would break legitimate interaction.
-  const isField = el => el.matches('input,textarea,select,[contenteditable=true]');
+  // not a credential field, and hiding it would break legitimate interaction. Editability is taken
+  // from the platform (contenteditable="", "plaintext-only" and inherited editing all count), not
+  // from a literal attribute value, so the sensitivity check and the type branch agree.
+  const isField = el => el.matches('input,textarea,select') || !!el.isContentEditable;
   const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
     (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token)) ||
     (isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token)));
@@ -236,7 +238,7 @@ async function pageOperation(job,expectedUrl) {
       }
       const refs = new Map();
       globalThis.__myBrowserSnapshot = {url:location.href,refs};
-      const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[contenteditable=true]';
+      const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[contenteditable]';
       const nodes = [...(root.matches(sel) ? [root] : []),...root.querySelectorAll(sel)];
       const elements = []; let length = 0; let truncated = false;
       for (const el of nodes) {
