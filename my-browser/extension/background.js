@@ -166,19 +166,17 @@ async function pageOperation(job) {
   // not a credential field, and hiding it would break legitimate interaction. Editability is taken
   // from the platform (contenteditable="", "plaintext-only" and inherited editing all count), not
   // from a literal attribute value, so the sensitivity check and the type branch agree.
-  const isField = el => el.matches('input,textarea,select') || !!el.isContentEditable;
-  // A nested editable region carries its meaning from the editing host that names it: clicking or
-  // reading a child span of a contenteditable named "otp" must be treated exactly like the host.
-  const editingHost = el => {
-    const host = typeof el.closest === 'function' ? el.closest('[contenteditable]') : null;
-    return host || (el.isContentEditable ? el : null);
-  };
+  // A nested editable region carries its meaning from the editing host that names it. The whole
+  // ancestor chain is walked: stopping at the nearest [contenteditable] would let an inner unnamed
+  // region or a contenteditable="false" node mask an outer host named like a credential.
   const sensitive = el => {
     if (el.matches('input[type=password],input[type=hidden]')) return true;
     if ((el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token))) return true;
-    const host = editingHost(el);
-    if (host && named(host).some(token => SENSITIVE_NAMES.has(token))) return true;
-    return isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token));
+    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
+      const editable = !!node.isContentEditable || node.matches('input,textarea,select');
+      if (editable && named(node).some(token => SENSITIVE_NAMES.has(token))) return true;
+    }
+    return false;
   };
   // A page can hold an OTP, card number or password inside a contenteditable region. Those elements
   // are excluded from refs, extract and text.

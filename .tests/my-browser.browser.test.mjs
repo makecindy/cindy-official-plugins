@@ -219,6 +219,13 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal(nestedRead.ok,true,JSON.stringify(nestedRead).slice(0,160));
   assert.equal(String(nestedRead.record.value||'').includes('987654'),false,'a child of a sensitive editing host must not be readable');
   r=await tool('browser_act',{url,kind:'type',selector:'#otp-digits',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
+  // Neither an inner contenteditable="false" node nor an unnamed inner editable region may mask the
+  // outer sensitive host.
+  for (const sel of ['#otp-frozen','#otp-deep']) {
+    const deep=await tool('browser_read',{url,mode:'extract',selector:sel,waitFor:'#readable',fields:{value:':self'}});
+    assert.equal(String(deep.record?.value||'').match(/111222|333444/),null,sel+' must not be readable');
+    assert.equal((await tool('browser_act',{url,kind:'type',selector:sel,text:'123456'})).error,'SENSITIVE_FIELD',sel+' must not be typable');
+  }
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
   // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
   // display:none content into the text.

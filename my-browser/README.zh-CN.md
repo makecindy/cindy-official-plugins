@@ -117,6 +117,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.33 让敏感判定跟随 editing host。原先只从元素自身属性读取命名，因此 `<div contenteditable name="otp">` 的子 span 被判为普通元素，而宿主却是受保护的：`extract` 能返回其中的验证码，`type` 也会接受该子节点。现解析最近的 `[contenteditable]` 祖先或自身，并对该宿主套用命名规则，使读取、snapshot 与交互共用同一边界。覆盖：夹具的验证码现位于嵌套 span 中，它既不能被 `extract` 读出，也不能被 `type` 接受；恢复仅看自身属性即触发对应断言失败。
 
+0.3.34 让该边界跨越嵌套成立。只解析最近的 `[contenteditable]` 时，内层未命名区域或 `contenteditable="false"` 节点会遮蔽外层带凭证命名的宿主，其后代因此又可被读取与输入。现敏感判定沿整条祖先链检查：任一祖先或自身是可编辑宿主且命名命中凭证语义即视为敏感（同时删掉已无用的 `isField`）。覆盖：夹具的 OTP 宿主内新增一个 `contenteditable="false"` span 与一个未命名的内层可编辑区域并各带一个值，二者都不得被 `extract` 读出或接受 `type`；恢复最近宿主判定即触发对应断言失败。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
