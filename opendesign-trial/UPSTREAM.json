@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/nexu-io/open-design",
+  "tag": "v0.22.1 (apps/web package version)",
+  "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
+  "license": "Apache-2.0",
+  "integration": "Real FileViewer, element comments, manual editor, PreviewDrawOverlay and runtime bridges. Cindy owns conversation/model execution. Local Node routes replace daemon routes.",
+  "patches": [
+    "FileViewer: force native srcdoc interaction path; hide unavailable cloud sharing/handoff.",
+    "registry: scope raw/base URLs to isolated read-only project origin; source fetch omits preview watcher.",
+    "srcdoc snapshot: preserve hidden nodes by computed visibility; avoid index-based pruning after script removal, which incorrectly removed page content.",
+    "index.css: omit unused terminal styles.",
+    "zh-CN: rename composer action to Save feedback because it persists context rather than inserting into Cindy composer.",
+    "FullStudio adapter: same-session feedback, annotation images, manual saves, source refresh, hide unsupported history.",
+    "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion."
+  ],
+  "logo": {
+    "path": "apps/web/public/app-icon.png",
+    "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4"
+  },
+  "legacyComponents": {
+    "SketchEditor": "38bdb59d868831c5c98602da9522acc84cabd97e (v0.1.0)"
+  }
+}

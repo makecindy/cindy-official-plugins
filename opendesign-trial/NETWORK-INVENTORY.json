@@ -1,0 +1,40 @@
+{
+  "note": "Literal domains in vendored source, including documentation/examples and unreachable upstream providers. This is not a network allowlist. The mounted viewer is CSP restricted to local origins and inline data/blob assets; no upstream analytics provider is mounted.",
+  "domains": [
+    "-",
+    "-URL",
+    ".",
+    "127.0.0.1",
+    "192.168.1.10",
+    "api.whatsapp.com",
+    "dash.cloudflare.com",
+    "discord.gg",
+    "evil.example",
+    "figma.com",
+    "github.com",
+    "localhost",
+    "my-resource.openai.azure.com",
+    "od.local",
+    "open-design.ai",
+    "open-design.local",
+    "provider.example",
+    "react.dev",
+    "remixicon.com",
+    "service.weibo.com",
+    "social-plugins.line.me",
+    "t.me",
+    "twitter.com",
+    "unpkg.com",
+    "us.posthog.com",
+    "vercel.com",
+    "www.facebook.com",
+    "www.instagram.com",
+    "www.linkedin.com",
+    "www.reddit.com",
+    "www.w3.org",
+    "www.xiaohongshu.com"
+  ],
+  "dynamicExecutionSourceMatches": [
+    "source/latest/apps/web/src/components/file-viewer-render-mode.ts"
+  ]
+}
