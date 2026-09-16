@@ -56,7 +56,7 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 构建器生成 Chrome／Edge 商店 ZIP、Safari Xcode 项目及通用应用。没有签名配置时明确标记 Safari 产物**不可作为普通用户分发包**。可通过 `MY_BROWSER_SIGN_IDENTITY` 与 `MY_BROWSER_DEVELOPMENT_TEAM` 启用签名；`MY_BROWSER_NOTARY_PROFILE` 指向已配置的 Apple notarytool 钥匙串配置。凭证明文不进入源码、插件设置或产物。仅在公证及系统检查成功后将输出的 `native/` 放入插件打包。本机没有可用签名身份，因此未验证签名／公证执行路径。
 
 2026-09-15 本地验证：
-- 清单校验、57 项 Node／HTTP／本地化／预配置／发布流程测试，加隔离 Chromium 集成套件全部通过（共58项）。
+- 清单校验、58 项 Node／HTTP／本地化／预配置／发布流程测试，加隔离 Chromium 集成套件全部通过（共59项）。
 - 真实 Chromium 集成覆盖读取／提取／交互、水合等待、一次读取 X 结构夹具、增量边界、过期 ref、权限拒绝／撤销、重定向、标签回收、弹出页、配对取消／持久化、设置失败及330px窄屏。
 - X 结构**测试夹具**（不是实际 X 延迟）：一次读取返回5条记录，记录的一轮为714ms、792字节结果 JSON。
 - Safari 通用 Release 构建成功；未宣称签名、公证、App Store 发布或真实 Safari 运行通过。
@@ -70,6 +70,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 0.3.9 处理使用契约上剩余的两条 review 意见。其一，读取时的传输失败（超时或 stdio 断开）原先会绕过 `node()` 落到通用处理分支，而该分支只认得交互类工具，于是 `browser_read` 被报成 `not_executed`，但 worker 可能已经接受任务并访问了页面。现在 `node()` 把被拒的宿主请求转成与 worker 返回错误相同的结构化 `NODE_UNAVAILABLE`，读取因此报 `unknown`。第三项 orchestrator 测试从打桩的宿主请求抛错并断言 `unknown`，在修复前的 `node()` 上失败。其二，面向 Agent 的 `description`／`whenToUse` 与四语言文案不再把 Safari 写成可连接的浏览器：本包不随附已签名的 Safari 应用、也没有商店条目，设置页本就隐藏 Safari 卡片，按旧文案执行的 Agent 会让用户走进无法完成的安装流程。Safari 的实现、配对、构建脚本及 README／Manual 说明均保留，只删除夸大表述；Manual 现明确写出本包无法安装 Safari。
 
 0.3.10 修掉两条凭证泄露问题。其一，标签网址原先原样返回，因此停在 OAuth 回调、密码重置或 magic link 上的标签会把 `?code=…`、`#access_token=…` 直接交给模型；公网地址校验与 host 筛选都不会移除它们。现由一个共享的 `redactUrl` 遮蔽凭证类查询参数与长的不透明 token 值，仅在片段携带 `key=value` 数据时整段遮蔽（`#/home` 这类纯路由片段保留，以免标签不可辨识），并在扩展构造标签行和桥接层最终出口两处应用——读取与导航结果同样处理，不只是标签列表。其二，敏感字段检测原先精确匹配 `autocomplete`，真实结账／验证码标记（`autocomplete="section-checkout billing cc-number"`）因此漏过，仍可作为 ref 被看到与输入；现改为按标准关键字列表做 token 匹配（`cc-number`、`cc-csc`、`cc-exp*`、`one-time-code`、`current-password`、`new-password`、`type=password`、`type=hidden`）。两处工具契约与四语言文案已同步新行为。回归覆盖：`redactUrl` 的 policy 单元测试（遮蔽 code／state／token／片段，保留 `q=cats` 与 `#/home`，不可解析输入原样返回），加两项真实 Chromium 检查——夹具新增多 token 卡号／验证码字段，必须被拒且不出现在 snapshot；带 `code`／`state`／片段 token 的回调标签必须仍被列出但凭证已被移除。两项新 Chromium 检查在修复前均失败（`an OAuth code must never reach the model`）。
+
+0.3.11 补全该脱敏出口。首版出口只覆盖页面 URL 与标签行，但 content 读取还会返回页面链接，含重置令牌或 magic link 的链接仍会进入模型。现覆盖所有携带网址的形态——页面 URL、标签行、`links[].url`，以及提取字段中本身是 http(s) 网址的值（字段名由调用方决定，无法按 key 匹配）。同时把夹具与测试里的占位值统一换成明显的假 UUID，仓库内不再留凭证形态字面量。回归覆盖：夹具带一条 `/reset?token=…` 链接，content 读取必须仍列出它、但令牌不出现且普通链接保持可用；只移除 links 分支即可复现失败（`a magic-link token in a page link must never reach the model`）。
 
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 

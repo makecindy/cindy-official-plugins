@@ -21,13 +21,32 @@ function createBridge(options = {}) {
   const primaryId = options.extensionId || EXT_ID;
   const knownIds = new Set([primaryId,...[distribution.chrome.extensionId,distribution.edge.extensionId].filter(Boolean)]);
   const approved = c => (c.origin === 'chrome-extension://'+c.extensionId && knownIds.has(c.extensionId)) || pins.some(p => p.id === c.id && p.origin === c.origin && p.extensionId === c.extensionId);
+  const isHttp = value => typeof value === 'string' && /^https?:\/\//i.test(value);
+  // Extracted field names are chosen by the caller, so every field value that is itself an http(s)
+  // URL is sanitized too, not just the ones with well-known keys.
+  function redactFields(record) {
+    if (!record || typeof record !== 'object') return record;
+    let out = null;
+    for (const [key,value] of Object.entries(record)) {
+      if (!isHttp(value)) continue;
+      const clean = P.redactUrl(value);
+      if (clean === value) continue;
+      out = out || {...record};
+      out[key] = clean;
+    }
+    return out || record;
+  }
   // Last gate before a result reaches the model: policy checks above still used the real URL, but
-  // nothing leaves with live OAuth/magic-link credentials in a query or fragment.
+  // nothing leaves with live OAuth/magic-link credentials in a query or fragment. Every shape that
+  // carries a URL is covered: the page URL, tab rows, content links and extracted field values.
   function redactResult(result) {
     if (!result || typeof result !== 'object') return result;
     const out = {...result};
     if (typeof out.url === 'string') out.url = P.redactUrl(out.url);
     if (Array.isArray(out.tabs)) out.tabs = out.tabs.map(t => t && !t.redacted && typeof t.url === 'string' ? {...t,url:P.redactUrl(t.url)} : t);
+    if (Array.isArray(out.links)) out.links = out.links.map(l => l && typeof l.url === 'string' ? {...l,url:P.redactUrl(l.url)} : l);
+    if (Array.isArray(out.records)) out.records = out.records.map(redactFields);
+    if (out.record) out.record = redactFields(out.record);
     return out;
   }
   function finish(job,result) {

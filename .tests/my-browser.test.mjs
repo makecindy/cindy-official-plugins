@@ -51,14 +51,17 @@ test('payload validation preserves empty text/selection and rejects malformed ex
 });
 test('tab and result URLs lose credentials but keep their identity',()=>{
   const r=P.redactUrl;
+  // Placeholder shapes only: fake UUIDs and example.test, never real credential values.
+  const code='11111111-1111-4111-8111-111111111111',state='22222222-2222-4222-8222-222222222222',token='33333333-3333-4333-8333-333333333333';
   // OAuth code / state in the query.
-  assert.equal(/SECRET/.test(r('https://example.test/callback?q=cats&code=SECRET&state=SECRET')),false);
-  assert.match(r('https://example.test/callback?q=cats&code=SECRET&state=SECRET'),/q=cats/);
+  assert.equal(r(`https://example.test/callback?q=cats&code=${code}&state=${state}`).includes(code),false);
+  assert.equal(r(`https://example.test/callback?q=cats&code=${code}&state=${state}`).includes(state),false);
+  assert.match(r(`https://example.test/callback?q=cats&code=${code}`),/q=cats/,'innocuous parameters survive');
   // Implicit-flow fragment and password-reset style tokens.
-  assert.equal(/SECRET/.test(r('https://example.test/#access_token=SECRET&token_type=bearer')),false);
-  assert.equal(/SECRET/.test(r('https://example.test/reset?token=SECRET')),false);
+  assert.equal(r(`https://example.test/#access_token=${token}&token_type=bearer`).includes(token),false);
+  assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
   // A long opaque value under an innocuous name is masked too.
-  assert.equal(/eyJhbGciOi/.test(r('https://example.test/p?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig')),false);
+  assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
   // A plain route fragment carries no credential and keeps tabs identifiable.
   assert.equal(r('https://example.test/#/home'),'https://example.test/#/home');
   assert.equal(r('https://example.test/timeline?lang=en'),'https://example.test/timeline?lang=en');
