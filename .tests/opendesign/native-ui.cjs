@@ -378,10 +378,11 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
 
       const downloads=[];
       isolated.on('download',d=>downloads.push(d));
-      await w.invoke('draft-write',{sessionId:sid,file:'download-payload.html',expectedRevision:null,html:'download-fixture'});
+      const rawDownload='<!doctype html><html><body>原始下载<script>window.example=true</script></body></html>';
+      await w.invoke('draft-write',{sessionId:sid,file:'download-payload.html',expectedRevision:null,html:rawDownload});
       for (const kind of ['data','blob','local']) {
         await w.invoke('draft-write',{sessionId:sid,file:'download-'+kind+'.html',expectedRevision:null,
-          html:`<h1>Download fixture</h1><script>addEventListener('DOMContentLoaded',()=>{const a=document.createElement('a');a.download='fixture-${kind}.txt';a.href=${kind==='local' ? JSON.stringify(b.previewBase+'download-payload.html?source=1') : kind==='data' ? "'data:text/plain,download-fixture'" : "URL.createObjectURL(new Blob(['download-fixture'],{type:'text/plain'}))"};document.body.append(a);a.click();})</script>`});
+          html:`<h1>Download fixture</h1><script>addEventListener('DOMContentLoaded',()=>{const a=document.createElement('a');a.download='fixture-${kind}.txt';a.href=${kind==='local' ? JSON.stringify('./download-payload.html') : kind==='data' ? "'data:text/plain,download-fixture'" : "URL.createObjectURL(new Blob(['download-fixture'],{type:'text/plain'}))"};document.body.append(a);a.click();})</script>`});
         await isolated.goto(b.url+'?file=download-'+kind+'.html');
         const proposal=isolated.getByTestId('artifact-download-request');
         await proposal.waitFor();
@@ -402,7 +403,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
         await proposal.getByRole('button',{name:'保存文件',exact:true}).click();
         const downloaded=await waiting;
         assert.equal(downloaded.suggestedFilename(),'fixture-'+kind+'.txt');
-        assert.equal(await fs.readFile(await downloaded.path(),'utf8'),'download-fixture');
+        assert.equal(await fs.readFile(await downloaded.path(),'utf8'),kind==='local' ? rawDownload : 'download-fixture');
         await downloaded.delete();
       }
 

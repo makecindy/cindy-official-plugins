@@ -16,6 +16,7 @@ export function DownloadGate({file,zh,previewBase}:{file:string;zh:boolean;previ
         try {
           const url=new URL(event.data.url),base=new URL(previewBase);
           if(url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.username || url.password) return;
+          url.searchParams.set('source','1');
           busy=true;
           const response=await fetch(url.href,{credentials:'omit',redirect:'error'});
           if(!response.ok) return;

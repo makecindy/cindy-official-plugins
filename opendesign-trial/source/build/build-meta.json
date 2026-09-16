@@ -82,7 +82,7 @@
       "format": "cjs"
     },
     "DownloadGate.tsx": {
-      "bytes": 2838,
+      "bytes": 2884,
       "imports": [
         {
           "path": "node_modules/react-dom/index.js",
@@ -15550,7 +15550,7 @@
           "bytesInOutput": 999
         },
         "DownloadGate.tsx": {
-          "bytesInOutput": 2050
+          "bytesInOutput": 2083
         },
         "FullStudio.tsx": {
           "bytesInOutput": 6039
@@ -16309,7 +16309,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312221
+      "bytes": 17312254
     },
     "../../assets/studio.css": {
       "imports": [
