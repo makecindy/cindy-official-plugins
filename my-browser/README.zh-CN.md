@@ -85,6 +85,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.17 阻止正文导出返回已被视为敏感的区域内所保存的值。密码、`autocomplete` 与命名词表已把这类元素排除在 snapshot refs 与 `extract` 之外，但 `text`、`content` 及 snapshot 的 text 字段仍直接序列化未过滤的 `root.innerText`，因此放在 `contenteditable` 区域里的验证码或卡号虽被隐藏为字段，其内容仍会被返回。现改为在克隆副本中先移除敏感后代再取文本；仅当该区域确实包含敏感元素时才构建副本，普通正文不受影响。覆盖：夹具中被命名的 OTP 区域现携带一个值，断言它不出现在 `content`、`text` 与 snapshot 的文本中，同时普通页面正文仍照常返回。恢复未过滤读取即复现 `sensitive contenteditable text must not be returned`。
 
+0.3.18 补上该脱敏器的两处缺口。其一，传输上限缩短了链接却未标记录，2049–8192 字符的普通链接会被静默截断，而契约承诺 `truncated:true` 标出所有截断；现在只要上限确实缩短了脱敏后的 URL 就置位。其二，正文清理只看后代，若用 `selector` 直接指向敏感区域本身，其未过滤的 `innerText` 仍会返回；现同时检查根节点，根节点本身敏感时返回空文本。覆盖：`long.test` 页面唯一链接的路径长 2500 字符，必须返回 `truncated:true` 且各链接 URL 在上限内；直接读取 `#otp-region` 必须不返回凭证。移除标志即复现 `a capped link URL must set truncated`；移除根节点检查即复现 `targeting a sensitive region directly must return no credential`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

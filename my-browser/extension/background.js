@@ -169,6 +169,9 @@ async function pageOperation(job,expectedUrl) {
   const TEXT_SCOPE = 'input,textarea,select,[contenteditable],[role=textbox]';
   function readableText(root) {
     if (!root.querySelector) return root.innerText || '';
+    // The caller can target the sensitive field itself, in which case the whole region is a
+    // credential and nothing from it is readable.
+    if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
     const originals = [...root.querySelectorAll(TEXT_SCOPE)];
     if (!originals.some(sensitive)) return root.innerText || '';
     const clone = root.cloneNode(true);
@@ -320,7 +323,11 @@ function sanitizeLinks(result) {
   let truncated = !!result.truncated, budget = LINKS_BUDGET;
   const links = [];
   for (const link of result.links) {
-    const url = P.redactUrl(String(link?.url)).slice(0,LINK_URL_MAX);
+    // Redaction runs on the whole URL, the transfer cap on the redacted string, and a cap that
+    // actually shortens a URL is reported: an unmarked cut would look like a complete URL.
+    const redacted = P.redactUrl(String(link?.url));
+    const url = redacted.slice(0,LINK_URL_MAX);
+    if (url.length < redacted.length) truncated = true;
     if (url.length > budget) { truncated = true; continue; }
     budget -= url.length;
     links.push({...link,url});
