@@ -92,6 +92,22 @@
       ],
       "format": "cjs"
     },
+    "ManualCanvasInput.tsx": {
+      "bytes": 4678,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
     "ManualInlineTextEditor.tsx": {
       "bytes": 3018,
       "imports": [
@@ -4403,7 +4419,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/edit-mode/bridge.ts": {
-      "bytes": 54090,
+      "bytes": 54609,
       "imports": [],
       "format": "esm"
     },
@@ -11938,8 +11954,13 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847700,
+      "bytes": 847561,
       "imports": [
+        {
+          "path": "ManualCanvasInput.tsx",
+          "kind": "import-statement",
+          "original": "../../../../../build/ManualCanvasInput"
+        },
         {
           "path": "ManualInlineTextEditor.tsx",
           "kind": "import-statement",
@@ -14838,10 +14859,10 @@
           "bytesInOutput": 262
         },
         "node_modules/core-js/modules/es.string.ends-with.js": {
-          "bytesInOutput": 484
+          "bytesInOutput": 485
         },
         "node_modules/core-js/modules/es.string.split.js": {
-          "bytesInOutput": 1470
+          "bytesInOutput": 1476
         },
         "node_modules/performance-now/lib/performance-now.js": {
           "bytesInOutput": 510
@@ -14886,7 +14907,7 @@
           "bytesInOutput": 4627
         },
         "node_modules/canvg/lib/index.es.js": {
-          "bytesInOutput": 82995
+          "bytesInOutput": 82996
         },
         "node_modules/jspdf/dist/jspdf.es.min.js": {
           "bytesInOutput": 341657
@@ -15485,11 +15506,14 @@
         "FullStudio.tsx": {
           "bytesInOutput": 5771
         },
+        "ManualCanvasInput.tsx": {
+          "bytesInOutput": 2498
+        },
         "ManualInlineTextEditor.tsx": {
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 265102
+          "bytesInOutput": 265026
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16086,7 +16110,7 @@
           "bytesInOutput": 149959
         },
         "../latest/apps/web/src/edit-mode/bridge.ts": {
-          "bytesInOutput": 50343
+          "bytesInOutput": 50862
         },
         "../latest/apps/web/src/runtime/deck-thumbnail-parser.ts": {
           "bytesInOutput": 7291
@@ -16233,7 +16257,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17306370
+      "bytes": 17309319
     },
     "../../assets/studio.css": {
       "imports": [

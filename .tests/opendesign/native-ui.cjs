@@ -85,6 +85,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     const page = await browser.newPage({
       viewport: { width: 1200, height: 900 },
     });
+    page.setDefaultTimeout(10000);
     const errors = [],
       failed = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -132,6 +133,16 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
 
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     const artifact = page.frameLocator('[data-testid=artifact-preview-frame]');
+    async function canvasClick(selector, double = false) {
+      await artifact.locator('html[data-od-edit-mode]').waitFor();
+      await page.getByTestId('manual-canvas-input').waitFor();
+      await page.waitForTimeout(150);
+      const box = await artifact.locator(selector).boundingBox();
+      assert.ok(box);
+      await page.mouse[double ? 'dblclick' : 'click'](box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(100);
+    }
+
     const beforeForgery = await fs.readFile(path.join(p.dir, 'design.html'), 'utf8');
     async function forgeCommit(value) {
       await artifact.locator('#hero').evaluate((el, text) => {
@@ -142,9 +153,20 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       }, value);
       await page.waitForTimeout(150);
     }
+    await artifact.locator('#hero').evaluate(el => {
+      const id=el.getAttribute('data-od-source-path') || el.getAttribute('data-od-id');
+      parent.postMessage({type:'od-edit-text-request',target:{id,rect:{x:0,y:0,width:1000,height:1000}}},'*');
+      parent.postMessage({type:'od-edit-drag-commit',id,transform:'translate(999px,999px)',display:'none'},'*');
+    });
+    await page.waitForTimeout(150);
+    assert.equal(await page.getByTestId('manual-inline-editor').count(),0);
+    console.log('Forgery rejected; leaving edit');
+    await page.getByRole('button',{name:'注释',exact:true}).click();
+    assert.equal(await fs.readFile(path.join(p.dir,'design.html'),'utf8'),beforeForgery);
+    await page.getByRole('button',{name:'编辑',exact:true}).click();
     await forgeCommit('Injected before a real edit');
     assert.equal(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), beforeForgery);
-    await artifact.locator('#hero').dblclick();
+    await canvasClick('#hero', true);
     const inline = page.getByTestId('manual-inline-editor').locator('textarea');
     await inline.waitFor();
     // Script-created input events cannot authorize the trusted editor either.
@@ -165,7 +187,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     assert.doesNotMatch(afterInline, /Injected|Synthetic input/);
     await forgeCommit('Replayed after commit');
     assert.equal(await fs.readFile(path.join(p.dir, 'design.html'), 'utf8'), afterInline);
-    await artifact.locator('#hero').dblclick();
+    await canvasClick('#hero', true);
     await inline.fill('Unsaved inline conflict');
     const currentInline = await w.invoke('draft-read', {sessionId:sid,file:'design.html'});
     await w.invoke('draft-write', {sessionId:sid,file:'design.html',html:currentInline.html+'<!-- changed outside inline -->',expectedRevision:currentInline.revision});
@@ -177,10 +199,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     await page.getByTestId('manual-inline-editor').waitFor({state:'hidden'});
 
 
-    await page
-      .frameLocator("[data-testid=artifact-preview-frame]")
-      .locator("#hero")
-      .click();
+    await canvasClick('#hero');
     await page.waitForTimeout(500);
     await page.locator("textarea").fill("Morning coffee");
     await page
@@ -215,8 +234,27 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     console.log(
       "Native manual edit and exact text/background hex values persisted",
     );
+    // Real parent pointer capture preserves drag editing; forged iframe
+    // commits cannot replace its displacement before exit flushes the edit.
+    const dragBox = await artifact.locator('#hero').boundingBox();
+    await page.mouse.move(dragBox.x+dragBox.width/2,dragBox.y+dragBox.height/2);
+    await page.mouse.down();
+    await page.waitForTimeout(80);
+    await page.mouse.move(dragBox.x+dragBox.width/2+40,dragBox.y+dragBox.height/2+20,{steps:5});
+    await page.mouse.up();
+    await artifact.locator('#hero').evaluate(el => {
+      const id=el.getAttribute('data-od-source-path') || el.getAttribute('data-od-id');
+      parent.postMessage({type:'od-edit-drag-commit',id,transform:'translate(999px,999px)',display:'none'},'*');
+    });
+    await page.getByRole('button',{name:'注释',exact:true}).click();
+    await page.waitForTimeout(200);
+    const dragged = await fs.readFile(path.join(p.dir,'design.html'),'utf8');
+    assert.match(dragged,/translate\(40px, 20px\)/);
+    assert.doesNotMatch(dragged,/999px/);
+    await page.getByRole('button',{name:'编辑',exact:true}).click();
+    console.log('Parent-owned drag persisted; forged iframe drag did not');
     // Interleave an Agent update after the UI checks its source but before POST.
-    await page.frameLocator("[data-testid=artifact-preview-frame]").locator("#hero").click();
+    await canvasClick('#hero');
     await page.locator("textarea").fill("Stale manual edit must not overwrite");
     await page.route("**/api/projects/*/files", async route => {
       if (route.request().method() !== 'POST') return route.continue();
@@ -277,6 +315,20 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       await isolated.waitForFunction(() => window.localScriptWorked && window.fetchBlocked);
       await isolated.waitForTimeout(200);
       assert.equal(externalRequests, 0);
+      // The real editor uses srcdoc (and Electron's blob bootstrap), which
+      // inherits the editor response CSP rather than the raw preview response.
+      await isolated.goto(b.url + '?file=network.html');
+      const networkFrame = isolated.frameLocator('[data-testid=artifact-preview-frame]');
+      await networkFrame.getByText('Network fixture', {exact:true}).waitFor();
+      await networkFrame.locator('body').evaluate(async () => {
+        const deadline = Date.now() + 5000;
+        while (!(window.localScriptWorked && window.fetchBlocked)) {
+          if (Date.now() > deadline) throw new Error('Expected local script and blocked fetch in actual srcdoc');
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+      });
+      assert.equal(externalRequests, 0);
+      console.log('Actual editor srcdoc inherits CSP: local script works, external img/script/fetch blocked');
     } finally { await isolated.close(); await new Promise(resolve => probe.close(resolve)); }
 
   } finally {

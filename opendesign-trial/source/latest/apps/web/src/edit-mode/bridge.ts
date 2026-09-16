@@ -813,6 +813,15 @@ export function buildManualEditBridge(enabled: boolean): string {
   }
   window.addEventListener('message', function(ev){
     if (!ev.data) return;
+    if (ev.source === window.parent && enabled && ev.data.type === 'od-host-hit-test') {
+      var hit = closestTarget({target:document.elementFromPoint(Number(ev.data.x), Number(ev.data.y))});
+      window.parent.postMessage({type:'od-host-hit-result',request:ev.data.request,target:hit ? targetFrom(hit,true) : null}, '*');
+      return;
+    }
+    if (ev.source === window.parent && enabled && ev.data.type === 'od-host-scroll') {
+      window.scrollBy(Number(ev.data.x)||0,Number(ev.data.y)||0);
+      return;
+    }
     if (ev.data.type === 'od-edit-mode') {
       enabled = !!ev.data.enabled;
       document.documentElement.toggleAttribute('data-od-edit-mode', enabled);

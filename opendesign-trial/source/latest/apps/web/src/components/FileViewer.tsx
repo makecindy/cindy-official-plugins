@@ -1,3 +1,4 @@
+import { ManualCanvasInput } from '../../../../../build/ManualCanvasInput';
 import { ManualInlineTextEditor, type InlineTextHandle } from '../../../../../build/ManualInlineTextEditor';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
@@ -8879,7 +8880,7 @@ function HtmlViewer({
   // The editor origin owns the input, authorization and settlement. The
   // untrusted iframe can suggest a target but never submit a text mutation.
   const manualEditTextSessionIdRef = useRef<string | null>(null);
-  type InlineCandidate = { target: ManualEditTarget; source: string; originalText: string };
+  type InlineCandidate = { target: ManualEditTarget; source: string; originalText: string; point: {x:number;y:number} };
   const [inlineCandidate, setInlineCandidate] = useState<InlineCandidate | null>(null);
   const inlineCandidateRef = useRef<InlineCandidate | null>(null);
   const inlineEditorRef = useRef<InlineTextHandle | null>(null);
@@ -12517,7 +12518,7 @@ function HtmlViewer({
       if (!isRetainedPreviewIframeSource(ev.source)) return;
       const data = ev.data as ManualEditBridgeMessage | null;
       if (!data?.type) return;
-      if (data.type === 'od-edit-text-commit' || data.type === 'od-edit-text-session') return;
+      if (['od-edit-text-commit', 'od-edit-text-session', 'od-edit-select', 'od-edit-background', 'od-edit-hover'].includes(data.type)) return;
       if (inlineCandidateRef.current && data.type !== 'od-edit-targets') return;
       if (!workspaceActive) return;
       if (data.type === 'od-edit-targets' && Array.isArray(data.targets)) {
@@ -12532,62 +12533,8 @@ function HtmlViewer({
         if (selectedId) setTimeout(() => postSelectedManualEditTargetToIframe(selectedId), 0);
         return;
       }
-      if (data.type === 'od-edit-select') {
-        setManualEditHoverTarget(null);
-        void selectManualEditTarget(data.target);
-        return;
-      }
-      if (data.type === 'od-edit-hover') {
-        // While an inline text edit is live, hovering must not surface or switch
-        // any affordance — that instability is the other half of #3646.
-        if (manualEditTextSessionIdRef.current) return;
-        // Hover only surfaces a lightweight "edit params" affordance; it must
-        // NOT switch the pinned inspector. The panel changes only when the
-        // user clicks that affordance (or a container/image body), so moving
-        // the cursor across the canvas never yanks the panel away mid-edit.
-        setManualEditHoverTarget(
-          data.target.id === selectedManualEditTargetIdRef.current ? null : data.target,
-        );
-        return;
-      }
-      if (data.type === 'od-edit-background') {
-        // Clicking empty canvas deselects and opens the compact page-styles
-        // card — only meaningful for full HTML documents.
-        setManualEditHoverTarget(null);
-        if (typeof source === 'string' && isManualEditFullHtmlDocument(source)) {
-          void clearManualEditTargetSelection();
-          setManualEditPageStylesOpen(true);
-        }
-        return;
-      }
-      if (data.type === 'od-edit-text-request') {
-        if (inlineCandidateRef.current || !data.target || typeof data.target.id !== 'string') return;
-        const base = sourceRef.current;
-        if (base == null || !readManualEditOuterHtml(base, data.target.id)) return;
-        const originalText = readManualEditFields(base, data.target.id).text;
-        if (originalText === undefined) return;
-        const candidate = { target: data.target, source: base, originalText };
-        inlineCandidateRef.current = candidate;
-        manualEditTextSessionIdRef.current = data.target.id;
-        setInlineCandidate(candidate);
-        return;
-      }
-      if (data.type === 'od-edit-drag-commit') {
-        // Free drag-to-reposition dropped: route the new translate() through
-        // the same pending-style pipeline the inspector uses, so the panel's
-        // Save persists it alongside every other edit in this session.
-        const id = String(data.id || '');
-        if (!id) return;
-        const transform = String(data.transform || '');
-        const dragStyles: Partial<ManualEditStyles> = { transform };
-        if (typeof data.display === 'string' && data.display) dragStyles.display = data.display;
-        void handleManualEditStyleChange(id, dragStyles, 'Move element');
-        if (selectedManualEditTargetIdRef.current === id) {
-          setManualEditDraft((current) => ({ ...current, styles: { ...current.styles, ...dragStyles } }));
-          setManualEditDraftDirty(true);
-        }
-        return;
-      }
+      // Artifact messages cannot open host inputs or stage persistent drag edits.
+      if (data.type === 'od-edit-text-request' || data.type === 'od-edit-drag-commit') return;
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -17230,11 +17177,7 @@ function HtmlViewer({
                 saveLabel={t('common.save')}
                 cancelLabel={t('common.cancel')}
                 style={(() => {
-                  const frame = iframeRef.current?.getBoundingClientRect();
-                  const rect = inlineCandidate.target.rect;
-                  const x = Number.isFinite(rect?.x) ? rect.x : 0;
-                  const y = Number.isFinite(rect?.y) ? rect.y : 0;
-                  return {position:'fixed', left: Math.max(8, Math.min(window.innerWidth - 340, (frame?.left ?? 0) + x * overlayPreviewScale)), top: Math.max(8, Math.min(window.innerHeight - 160, (frame?.top ?? 0) + y * overlayPreviewScale)), width:320};
+                  return {position:'fixed', left: Math.max(8, Math.min(window.innerWidth - 340, inlineCandidate.point.x)), top: Math.max(8, Math.min(window.innerHeight - 160, inlineCandidate.point.y)), width:320};
                 })()}
                 onClose={() => closeInlineEditor(inlineCandidate)}
                 onApply={async value => {
@@ -17305,6 +17248,43 @@ function HtmlViewer({
                     toolbarHost={manualEditMode ? null : commentComposerHost}
                   >
                     <div className="artifact-preview-transport-stack">
+                      {manualEditMode && !inlineCandidate && <ManualCanvasInput
+                        frame={() => iframeRef.current}
+                        source={source}
+                        onHover={target => setManualEditHoverTarget(target?.id === selectedManualEditTargetIdRef.current ? null : target)}
+                        onBackground={() => {
+                          if (sourceRef.current && isManualEditFullHtmlDocument(sourceRef.current)) {
+                            void clearManualEditTargetSelection();
+                            setManualEditPageStylesOpen(true);
+                          }
+                        }}
+                        onSelect={target => {
+                          if (sourceRef.current && readManualEditOuterHtml(sourceRef.current, target.id)) void selectManualEditTarget(target);
+                        }}
+                        onText={(target, point) => {
+                          const base = sourceRef.current;
+                          if (inlineCandidateRef.current || base == null || !readManualEditOuterHtml(base, target.id)) return;
+                          const originalText = readManualEditFields(base,target.id).text;
+                          if (originalText === undefined) return;
+                          const candidate = {target,source:base,originalText,point};
+                          inlineCandidateRef.current=candidate;
+                          manualEditTextSessionIdRef.current=target.id;
+                          setInlineCandidate(candidate);
+                        }}
+                        onMove={(target, dx, dy, commit) => {
+                          const base = sourceRef.current;
+                          if (base == null || !readManualEditOuterHtml(base,target.id)) return;
+                          const original = manualEditLiveStylesRef.current.get(target.id)?.styles.transform || readManualEditStyles(base,target.id).transform || target.styles?.transform || '';
+                          const transform = `translate(${dx}px, ${dy}px) ${original === 'none' ? '' : original}`.trim();
+                          const styles = {transform, ...(target.computedSummary?.display === 'inline' ? {display:'inline-block'} : {})};
+                          if (commit) {
+                            void handleManualEditStyleChange(target.id,styles,'Move element');
+                            setManualEditDraft(current => ({...current,styles:{...current.styles,...styles}}));
+                            setManualEditDraftDirty(true);
+                          } else previewStyleToIframe(target.id,styles,nextManualEditPreviewVersion());
+                        }}
+                      />}
+
                       {OD_PREVIEW_KEEP_ALIVE ? (
                         <PooledIframe
                           ref={urlPreviewIframeRef}
