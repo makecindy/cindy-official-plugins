@@ -658,14 +658,7 @@ function stripHtmlToText(value: string): string {
 }
 
 function decodeBasicHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/gi, "'");
+  return value.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/gi, (_, entity: string) => ({ "quot": "\"", "amp": "&", "lt": "<", "gt": ">", "#39": "'", "apos": "'", "nbsp": " " } as Record<string, string>)[entity.toLowerCase()]!);
 }
 
 function safeJsonForScript(value: unknown): string {

@@ -1572,7 +1572,7 @@ function injectBeforeDocumentEnd(doc: string, payload: string): string {
 
 /** @internal Exported for unit testing; not part of the public API surface. */
 export function injectPrintScript(doc: string, title: string): string {
-  const safeTitle = JSON.stringify(title || 'artifact');
+  const safeTitle = JSON.stringify(title || 'artifact').replace(/</g, '\\u003c');
   // Browser fallback PDF export shares the same print-readiness signal as the
   // desktop native path. When the cache is present, wait for it so the popup
   // prints only after fonts, images, CSS image URLs, and final layout have

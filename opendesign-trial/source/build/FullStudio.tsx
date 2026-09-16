@@ -66,10 +66,16 @@ function Studio() {
   }, []);
   async function send(payload: any, images: File[] = []) {
     setError("");
+    setNotice("");
+    let submitted = false;
+    let outcome: "rejected" | "unknown" = "rejected";
     try {
+      const serialized = await serializeImages(images);
+      submitted = true;
+      outcome = "unknown";
       let result = await request("/feedback", {
         ...payload,
-        images: await serializeImages(images),
+        images: serialized,
         file: active,
       });
       const deadline = Date.now() + 55000;
@@ -91,11 +97,15 @@ function Studio() {
             "Unknown submission outcome. Check this conversation before resending.",
           ),
         );
-      if (result.status === "rejected")
+      if (result.status === "rejected") {
+        outcome = "rejected";
         throw Error(
           result.message ||
             ui("Cindy 未接受本次修改", "Cindy did not accept this revision."),
         );
+      }
+      if (!["accepted", "queued", "draft"].includes(result.status))
+        throw Error("Unknown feedback response");
       setNotice(
         result.status === "draft"
           ? ui(
@@ -110,8 +120,13 @@ function Studio() {
       await refresh();
       return result;
     } catch (e: any) {
-      setError(e.message);
-      throw e;
+      const status = submitted ? outcome : "rejected";
+      const message = status === "unknown" ? ui(
+        "提交结果未确认，请先查看本会话，勿重复发送",
+        "Unknown submission outcome. Check this conversation before resending.",
+      ) : e?.message || ui("提交前处理失败", "Failed before submission.");
+      setError(message);
+      throw Object.assign(new Error(message), { status });
     }
   }
   useEffect(() => {
@@ -254,8 +269,8 @@ function Studio() {
                 status: r.status === "queued" ? "queued" : "accepted",
                 commentIds: attachments.map((a) => a.id),
               };
-            } catch {
-              return { status: "rejected", commentIds: [] };
+            } catch (e: any) {
+              return { status: e.status === "rejected" ? "rejected" : "unknown", commentIds: [] };
             }
           }}
         />

@@ -94,12 +94,7 @@ function normalizeSafeHref(href: string): string | null {
 }
 
 function decodeHref(href: string): string {
-  const htmlDecoded = href
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+  const htmlDecoded = href.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/gi, (_, entity: string) => ({ "quot": "\"", "amp": "&", "lt": "<", "gt": ">", "#39": "'", "apos": "'", "nbsp": " " } as Record<string, string>)[entity.toLowerCase()]!);
   try {
     return decodeURIComponent(htmlDecoded);
   } catch {

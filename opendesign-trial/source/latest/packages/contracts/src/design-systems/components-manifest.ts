@@ -437,12 +437,7 @@ function extractMetaDescription(html: string): string | undefined {
 }
 
 function decodeBasicEntities(value: string): string {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+  return value.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/gi, (_, entity: string) => ({ "quot": "\"", "amp": "&", "lt": "<", "gt": ">", "#39": "'", "apos": "'", "nbsp": " " } as Record<string, string>)[entity.toLowerCase()]!);
 }
 
 function optionalText<Key extends string>(key: Key, value: string | undefined): Record<Key, string> | Record<string, never> {

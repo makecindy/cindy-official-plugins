@@ -962,12 +962,7 @@ function markdownRelativeProjectPath(fromPath: string, targetPath: string): stri
 }
 
 function decodeHtmlAttribute(value: string): string {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+  return value.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/gi, (_, entity: string) => ({ "quot": "\"", "amp": "&", "lt": "<", "gt": ">", "#39": "'", "apos": "'", "nbsp": " " } as Record<string, string>)[entity.toLowerCase()]!);
 }
 
 function escapeHtmlAttribute(value: string): string {

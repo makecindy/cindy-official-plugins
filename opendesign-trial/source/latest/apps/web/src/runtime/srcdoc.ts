@@ -280,19 +280,12 @@ function safeFromCodePoint(cp: number): string {
  * of throwing RangeError.
  */
 function decodeHtmlEntitiesForTitle(encoded: string): string {
-  return encoded
-    // Named non-ASCII entities first — before the standard 5 named entities
-    // below, so &amp; still converts to & (not left as a lookup miss).
-    .replace(/&([A-Za-z]+);/g, (match, name: string) => NAMED_ENTITY_MAP[name] ?? match)
-    // Standard 5 named entities.
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&apos;/gi, "'")
-    // Numeric entities — range-checked to avoid RangeError on huge code points.
-    .replace(/&#(\d+);/g, (_, n: string) => safeFromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeFromCodePoint(parseInt(h, 16)));
+  return encoded.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+    if (/^#x/i.test(entity)) return safeFromCodePoint(parseInt(entity.slice(2), 16));
+    if (entity.startsWith('#')) return safeFromCodePoint(Number(entity.slice(1)));
+    const basic: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+    return basic[entity.toLowerCase()] ?? NAMED_ENTITY_MAP[entity] ?? match;
+  });
 }
 
 

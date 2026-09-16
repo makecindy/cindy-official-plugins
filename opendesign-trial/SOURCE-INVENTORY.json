@@ -203,9 +203,9 @@
     "path": "source/latest/apps/web/src/artifacts/markdown.ts",
     "upstream": "apps/web/src/artifacts/markdown.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "ab7cbba26187289aa1710390802ef12e27351f5944d37435d51b2d7b96c6e041",
+    "sha256": "e40a70e57dfb27a3d057f10d4c8724cced592a354715a91a13d548a65144d9ca",
     "upstreamSha256": "ab7cbba26187289aa1710390802ef12e27351f5944d37435d51b2d7b96c6e041",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/artifacts/renderer-registry.ts",
@@ -387,7 +387,7 @@
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "11b019c2bb91481e0b7aba0714513ff435da038150554ddced245922fc5a0184",
+    "sha256": "29aca0468e755509179612143836887c8592c0901e87d99fa658548a30736f72",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },
@@ -491,9 +491,9 @@
     "path": "source/latest/apps/web/src/components/comment-send-result.ts",
     "upstream": "apps/web/src/components/comment-send-result.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "e2cd3c0e2085035ec768d788908e3981e1b759891ec4a2663dcc322052c8ba83",
+    "sha256": "f4b1b521c553ae191054790519d427f2b3efe5153610d6ecca2e632bd6998eed",
     "upstreamSha256": "e2cd3c0e2085035ec768d788908e3981e1b759891ec4a2663dcc322052c8ba83",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/components/design-browser-storage.ts",
@@ -571,9 +571,9 @@
     "path": "source/latest/apps/web/src/edit-mode/source-patches.ts",
     "upstream": "apps/web/src/edit-mode/source-patches.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "477f2081c9028508a558c63bfb6a4890ba6b222553377b36614165fc7984f45a",
+    "sha256": "802cd57cc06eb0f04a0d99062a9b63777fb6b4c1e4c08c12bbc5ffefc05b625d",
     "upstreamSha256": "477f2081c9028508a558c63bfb6a4890ba6b222553377b36614165fc7984f45a",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/edit-mode/types.ts",
@@ -891,9 +891,9 @@
     "path": "source/latest/apps/web/src/runtime/exports.ts",
     "upstream": "apps/web/src/runtime/exports.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "c20cca9c728cc29d01cf37ee8eb2ff86c1be850b406be5c7728df66bb44aa01c",
+    "sha256": "f490ac58b4ed6f72e6e695d86d27fe061e5baa8821ab72934cb68155682c4a3e",
     "upstreamSha256": "c20cca9c728cc29d01cf37ee8eb2ff86c1be850b406be5c7728df66bb44aa01c",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/runtime/jsx-module-refs.ts",
@@ -939,15 +939,15 @@
     "path": "source/latest/apps/web/src/runtime/speaker-notes.ts",
     "upstream": "apps/web/src/runtime/speaker-notes.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "398815f65035ff37861e84b9c0b99a3295ec2ae86a7d0cab91ea5cefe56cbb5b",
+    "sha256": "8052674fef13631e9bb5406162baf7f4190b387d2fe2001cc7e4582dbeb326f5",
     "upstreamSha256": "398815f65035ff37861e84b9c0b99a3295ec2ae86a7d0cab91ea5cefe56cbb5b",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/runtime/srcdoc.ts",
     "upstream": "apps/web/src/runtime/srcdoc.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "fbdf4a502c780f80249ceac92f86d9d4a497227ff8e58218a155bb43e3165ac4",
+    "sha256": "d33338cc746f92245cb80125f6f76d49eb33482d870a7bde0c3c050dd5b7a512",
     "upstreamSha256": "538dd4f7ab3aebb0aa90acaa4d34d826de0085de874a49dce0619f1ff65cd199",
     "modified": true
   },
@@ -2027,9 +2027,9 @@
     "path": "source/latest/packages/contracts/src/design-systems/components-manifest.ts",
     "upstream": "packages/contracts/src/design-systems/components-manifest.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "b3161dc39e365d45b7adec62f84799da2096af503850fa292a5f265afe41876f",
+    "sha256": "8690aba26f55bab99bd29484cff3d8451d8d2c888d58873f8b8f4b277b38bf50",
     "upstreamSha256": "b3161dc39e365d45b7adec62f84799da2096af503850fa292a5f265afe41876f",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/packages/contracts/src/design-systems/derived-token-outputs.ts",

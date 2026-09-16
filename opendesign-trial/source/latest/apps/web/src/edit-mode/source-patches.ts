@@ -714,7 +714,7 @@ function setCssToken(doc: Document, token: string, value: string): boolean {
 
 function cssEscape(value: string): string {
   if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
-  return value.replace(/"/g, '\\"');
+  return cssStringEscape(value);
 }
 
 function cssStringEscape(value: string): string {

@@ -1,0 +1,4 @@
+# Keep reviewable sources in Git; ship the identical source.zip in the package.
+source export-ignore
+source/** export-ignore
+source.zip binary

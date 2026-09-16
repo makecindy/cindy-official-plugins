@@ -11,7 +11,9 @@
     "index.css: omit unused terminal styles.",
     "zh-CN: rename composer action to Save feedback because it persists context rather than inserting into Cindy composer.",
     "FullStudio adapter: same-session feedback, annotation images, manual saves, source refresh, hide unsupported history.",
-    "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion."
+    "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion.",
+    "CommentSendResult: preserve unknown without treating it as successful submission.",
+    "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

@@ -655,7 +655,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/comment-send-result.ts": {
-      "bytes": 411,
+      "bytes": 453,
       "imports": [],
       "format": "esm"
     },
@@ -1255,7 +1255,7 @@
       "format": "esm"
     },
     "../latest/packages/contracts/src/design-systems/components-manifest.ts": {
-      "bytes": 15130,
+      "bytes": 15201,
       "imports": [],
       "format": "esm"
     },
@@ -3916,7 +3916,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/artifacts/markdown.ts": {
-      "bytes": 3657,
+      "bytes": 3728,
       "imports": [
         {
           "path": "node_modules/micromark/index.js",
@@ -4429,7 +4429,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/srcdoc.ts": {
-      "bytes": 191725,
+      "bytes": 191478,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/deck-stage-fallback.ts",
@@ -8644,7 +8644,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/exports.ts": {
-      "bytes": 86716,
+      "bytes": 86741,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -8793,7 +8793,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/speaker-notes.ts": {
-      "bytes": 28895,
+      "bytes": 28902,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -9100,7 +9100,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/edit-mode/source-patches.ts": {
-      "bytes": 27815,
+      "bytes": 27811,
       "imports": [
         {
           "path": "../latest/apps/web/src/edit-mode/types.ts",
@@ -11922,7 +11922,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 850877,
+      "bytes": 850948,
       "imports": [
         {
           "path": "node_modules/react/index.js",
@@ -12825,7 +12825,7 @@
       "imports": []
     },
     "FullStudio.tsx": {
-      "bytes": 8807,
+      "bytes": 9584,
       "imports": [
         {
           "path": "node_modules/react/index.js",
@@ -14209,7 +14209,7 @@
       "format": "cjs"
     },
     "card-preview.cjs": {
-      "bytes": 2167,
+      "bytes": 3403,
       "imports": [
         {
           "path": "node_modules/juice/client.js",
@@ -15462,10 +15462,10 @@
           "bytesInOutput": 999
         },
         "FullStudio.tsx": {
-          "bytesInOutput": 5211
+          "bytesInOutput": 5771
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264740
+          "bytesInOutput": 264764
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -15594,7 +15594,7 @@
           "bytesInOutput": 88
         },
         "../latest/apps/web/src/components/comment-send-result.ts": {
-          "bytesInOutput": 93
+          "bytesInOutput": 114
         },
         "../latest/packages/contracts/src/index.ts": {
           "bytesInOutput": 0
@@ -15996,7 +15996,7 @@
           "bytesInOutput": 113
         },
         "../latest/apps/web/src/artifacts/markdown.ts": {
-          "bytesInOutput": 1868
+          "bytesInOutput": 1892
         },
         "../latest/apps/web/src/artifacts/renderer-registry.ts": {
           "bytesInOutput": 1177
@@ -16059,7 +16059,7 @@
           "bytesInOutput": 10821
         },
         "../latest/apps/web/src/runtime/srcdoc.ts": {
-          "bytesInOutput": 150012
+          "bytesInOutput": 149959
         },
         "../latest/apps/web/src/edit-mode/bridge.ts": {
           "bytesInOutput": 54810
@@ -16077,7 +16077,7 @@
           "bytesInOutput": 1918
         },
         "../latest/apps/web/src/runtime/exports.ts": {
-          "bytesInOutput": 34963
+          "bytesInOutput": 34987
         },
         "../latest/apps/web/src/lib/copy-to-clipboard.ts": {
           "bytesInOutput": 453
@@ -16101,7 +16101,7 @@
           "bytesInOutput": 3365
         },
         "../latest/apps/web/src/runtime/speaker-notes.ts": {
-          "bytesInOutput": 22689
+          "bytesInOutput": 22661
         },
         "../latest/apps/web/src/components/file-viewer-render-mode.ts": {
           "bytesInOutput": 1632
@@ -16155,7 +16155,7 @@
           "bytesInOutput": 537
         },
         "../latest/apps/web/src/edit-mode/source-patches.ts": {
-          "bytesInOutput": 14096
+          "bytesInOutput": 14081
         },
         "../latest/apps/web/src/components/SketchPreview.tsx": {
           "bytesInOutput": 5710
@@ -16209,7 +16209,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17308099
+      "bytes": 17308656
     },
     "../../assets/studio.css": {
       "imports": [

@@ -80,8 +80,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     );
     browser = await chromium.launch({
       headless: true,
-      executablePath:
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      executablePath: process.env.OPENDESIGN_CHROMIUM_PATH || undefined,
     });
     const page = await browser.newPage({
       viewport: { width: 1200, height: 900 },
@@ -120,6 +119,17 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     assert.match(sent[0].userMessage, /Good morning/);
     assert.ok(sent[0].event.request.attachments[0].selector);
     console.log("Native annotation send passed");
+    await page.route("**/api/projects/*/feedback", route => route.fulfill({
+      contentType: "application/json", body: JSON.stringify({status: "unknown"}),
+    }));
+    await page.frameLocator("[data-testid=artifact-preview-frame]").locator("#hero").click();
+    await page.getByPlaceholder("评论此元素…").fill("Keep uncertain feedback");
+    await page.getByRole("button", {name: "发送到聊天", exact: true}).click();
+    await page.getByRole("alert").filter({hasText: "提交结果未确认"}).waitFor();
+    assert.equal(await page.getByPlaceholder("评论此元素…").inputValue(), "Keep uncertain feedback");
+    assert.equal(sent.length, 1);
+    await page.unroute("**/api/projects/*/feedback");
+
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     await page
       .frameLocator("[data-testid=artifact-preview-frame]")
