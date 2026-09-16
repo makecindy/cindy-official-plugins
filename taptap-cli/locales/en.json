@@ -1,0 +1,26 @@
+{
+  "name": "TapTap CLI",
+  "description": "TapTap developer-operations plugin, running the official taptap-cli you installed on this machine: sign-in, game creation, store-listing edits, package uploads, qualification, review and release, test plans, asset library. Credentials stay in the CLI; writes need confirmation.",
+  "whenToUse": "Work in the TapTap developer backend: sign in, find IDs, create a game, edit store-listing fields and the main package, upload packages, fill qualification gaps, submit or withdraw a review, publish, manage test plans, search the asset library",
+  "tools": {
+    "list_tools": {
+      "description": "List the TapTap business operations this plugin can run. The catalogue is read live from the taptap-cli installed on this machine. Without `category`, returns the top-level commands with their descriptions and the global execution rules; with `category`, drills down one level at a time (for example `category:\"asset-library\"`, then `category:\"asset-library ai-image\"`). When unsure of a command name, pass a prefix to search with (for example `category:\"up\"`). Drilling into a command that has no subcommands returns the flags it accepts; for full parameter detail use `call_tool` with `args._help:true`.Commands this plugin deliberately leaves out: data querying (dashboard-stats and its stats:get alias), CLI self-update (update), and the raw auth login (use auth login-start / login-wait).",
+      "parameters": {
+        "/properties/category": {
+          "description": "Command path or prefix. Takes what the previous listing returned and deepens it (e.g. \"asset-library\", \"asset-library ai-image\"); pass a prefix to search when the name is uncertain (e.g. \"up\"). Omit it for the top level."
+        }
+      }
+    },
+    "call_tool": {
+      "description": "Run one TapTap business operation. `name` comes from list_tools. `developer_id`/`app_id` are scope fields passed directly (mapped to --dev-id/--app-id); every other business field goes into `data` as JSON; any other key is a control flag mirrored as --flag, validated by the CLI against the command's schema; positionals such as file paths go in `_positional`, and local paths must be relative to the session workdir (the CLI rejects absolute paths and ../ escapes). Writes need the user's consent: preview with dry_run:true, then the identical arguments with yes:true; the worker refuses a write carrying neither, and every write in a read-only session. Getting consent is your job; yes is not proof of it. The orchestrated login-start/login-wait pair is the login flow itself — the user authorizes in the browser — so it is exempt. Failures carry execution_state: not_executed = nothing took effect (safe to retry); unknown = a write may have applied — verify before retrying, never re-run.",
+      "parameters": {
+        "/properties/name": {
+          "description": "Operation name from list_tools, for example 'app get-app-module'."
+        },
+        "/properties/args": {
+          "description": "Operation arguments as a JSON object. developer_id/app_id are scope fields passed directly (mapped to --dev-id/--app-id); every other business field must go in `data` (a JSON object); any key other than scope and data is a control flag mirrored as --flag, validated by the CLI against the command's own schema. Keys beginning with `_` are plugin controls and never become flags: `_positional` (array of positional arguments such as file paths, which must be relative to the session workdir), `_help` (show that command's --help), `_timeout_seconds` (per-call timeout in seconds, max 870, for long uploads). When unsure, drill down with list_tools first."
+        }
+      }
+    }
+  }
+}

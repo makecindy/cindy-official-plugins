@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0;padding:12px;font-size:13px;line-height:1.6">
+  <p data-i18n="intro" style="margin:0 0 8px"></p>
+  <pre data-i18n="installCommands" style="margin:0 0 12px;padding:8px;border-radius:6px;background:var(--surface,#f4f4f1);border:1px solid var(--border-default,#e4e4e0);overflow-x:auto;font-size:12px"></pre>
+  <p data-i18n="installNote1" style="margin:0 0 12px;opacity:.7;font-size:12px"></p>
+  <p data-i18n="installNote2" style="margin:0 0 12px;opacity:.7;font-size:12px"></p>
+
+  <label for="cli_path" data-i18n="pathLabel" style="display:block;margin-bottom:4px"></label>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="cli_path" type="text" data-i18n-placeholder="pathPlaceholder"
+      style="flex:1;min-width:220px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-default,#e4e4e0);background:var(--surface,#fff);color:inherit">
+    <button id="save" data-i18n="save" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border-default,#e4e4e0);background:var(--surface,#fff);color:inherit;cursor:pointer"></button>
+  </div>
+  <p data-i18n="pathHint" style="margin:4px 0 0;opacity:.7;font-size:12px"></p>
+  <p id="status" style="margin:8px 0 0;min-height:18px;font-size:12px;opacity:.8"></p>
+
+  <script src="/settings.js"></script>
+</body>
