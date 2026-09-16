@@ -328,6 +328,19 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     const forbidden = 'http://127.0.0.1:' + probe.address().port;
     const isolated = await browser.newPage();
     try {
+      await fs.writeFile(path.join(p.dir,'data.json'),JSON.stringify({value:'project-data'}));
+      await fs.writeFile(path.join(p.dir,'module.js'),"import {value} from './dependency.js'; window.moduleValue=value;");
+      await fs.writeFile(path.join(p.dir,'dependency.js'),"export const value='project-module';");
+      await w.invoke('draft-write',{sessionId:sid,file:'cors.html',expectedRevision:null,
+        html:`<h1>CORS fixture</h1><script type="module" src="./module.js"></script><script>
+        Promise.all([fetch('./data.json').then(r=>r.json()),import('./dependency.js')]).then(([data,module])=>{
+          document.body.dataset.result=data.value+':'+module.value;
+        });</script>`});
+      await isolated.goto(b.url+'?file=cors.html');
+      const cors=isolated.frameLocator('[data-testid=artifact-preview-frame]');
+      await cors.locator('body[data-result="project-data:project-module"]').waitFor();
+      assert.equal(await cors.locator('body').evaluate(()=>window.moduleValue),'project-module');
+      assert.equal(await cors.locator('body').evaluate(()=>self.origin),'null');
       await fs.writeFile(path.join(p.dir, 'allowed.js'), 'window.localScriptWorked = true');
       await w.invoke('draft-write', {sessionId:sid,file:'network.html',expectedRevision:null,
         html: `<h1>Network fixture</h1><img src="${forbidden}/image"><script src="${forbidden}/script"></script><script src="allowed.js"></script><script>fetch('${forbidden}/fetch').catch(()=>window.fetchBlocked=true)</script>`});

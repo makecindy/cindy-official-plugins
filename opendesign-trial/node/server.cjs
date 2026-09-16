@@ -199,8 +199,12 @@ const preview = http.createServer(async (req, res) => {
     res.setHeader("Content-Security-Policy",
       `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${readBase}; style-src 'unsafe-inline' ${readBase}; img-src data: blob: ${readBase}; connect-src blob: data: ${readBase}; font-src data: ${readBase}; media-src data: blob: ${readBase}; frame-src blob: ${readBase}; object-src 'none'; base-uri ${readBase}; form-action 'none'`);
     const name = parts.slice(3).map(decodeURIComponent).join("/");
-    if (req.headers.origin === origin(editor))
-      res.setHeader("Access-Control-Allow-Origin", origin(editor));
+    // Opaque sandbox documents serialize their origin as "null". The random
+    // project read token above is the capability; never enable credentials.
+    if (req.headers.origin === origin(editor) || req.headers.origin === "null") {
+      res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+      res.setHeader("Vary", "Origin");
+    }
     if (name === "__version") {
       return json(res, 200, {
         version: (await files(b.root))

@@ -120,6 +120,18 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
     return (await fetch(api + '/files', {method:'POST',body:JSON.stringify({name:'index.html',content:'<h1>Manual '+i+'</h1>',expectedRevision:fresh.revision})})).ok;
   }));
   assert.equal(racers.filter(Boolean).length, 1);
+  const opaque = await fetch(one.previewBase + 'index.html', {headers:{Origin:'null'}});
+  assert.equal(opaque.headers.get('access-control-allow-origin'),'null');
+  assert.equal(opaque.headers.get('access-control-allow-credentials'),null);
+  assert.equal(opaque.headers.get('vary'),'Origin');
+  const outsider = await fetch(one.previewBase + 'index.html', {headers:{Origin:'https://example.test'}});
+  assert.equal(outsider.headers.get('access-control-allow-origin'),null);
+  const missing = await fetch(new URL('/view/invalid/index.html',one.previewBase), {headers:{Origin:'null'}});
+  assert.equal(missing.status,404);
+  assert.equal(missing.headers.get('access-control-allow-origin'),null);
+  const writeAttempt = await fetch(one.previewBase + 'index.html',{method:'POST',headers:{Origin:'null'},body:'no'});
+  assert.equal(writeAttempt.status,405);
+  assert.equal(writeAttempt.headers.get('access-control-allow-origin'),null);
   const raw = await fetch(one.previewBase + 'index.html');
   const policy = raw.headers.get('Content-Security-Policy');
   assert.deepEqual(policy.split(';').map(x=>x.trim()).find(x=>x.startsWith('connect-src ')).split(/\s+/).slice(1).sort(), [one.previewBase,'blob:','data:'].sort());
