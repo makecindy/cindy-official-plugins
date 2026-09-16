@@ -356,8 +356,8 @@
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-3d.js",
-    "bytes": 40318,
-    "sha256": "f317db33ef9991258b375d950a2344a9b114f621d67f306425db7f75c94ea2c0"
+    "bytes": 40383,
+    "sha256": "fbefc074294fb155c741e168bb5f333594429e629d53cb5878b9d0adb07f0c2e"
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-ax-inspector.js",
@@ -401,8 +401,8 @@
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-native.js",
-    "bytes": 118469,
-    "sha256": "4269d7db8828307c7bef5ab65f9dc227d760d9fff9aa57789f2068a4362591d4"
+    "bytes": 118653,
+    "sha256": "d58687795fe02c5326ea8825b3e4f8c6f9eed9d1c9e6fe688c18972667ef87df"
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-network.js",

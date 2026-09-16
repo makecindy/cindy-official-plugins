@@ -953,7 +953,7 @@
     return escapeHTML(value).replace(/"/g, '&quot;');
   }
   function cssEscape(value) {
-    return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
+    return window.CSS && CSS.escape ? CSS.escape(value) : Array.from(String(value), (char) => '\\' + char.codePointAt(0).toString(16) + ' ').join('');
   }
 
   window.Sim3DPanel = Sim3DPanel;

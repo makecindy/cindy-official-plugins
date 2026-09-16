@@ -1602,8 +1602,9 @@
     if (member.role === 'readout') {
       const row = document.createElement('div');
       row.className = 'tb-read';
-      row.innerHTML = clusterSvg('gauge') + '<span>' + label + '</span>' +
+      row.innerHTML = clusterSvg('gauge') + '<span class="tb-label"></span>' +
           '<span class="tb-val"></span>';
+      row.querySelector('.tb-label').textContent = label;
       row.querySelector('.tb-val').textContent = source.textContent || '—';
       return row;
     }
@@ -1611,7 +1612,8 @@
     if (member.role === 'choice') {
       const row = document.createElement('div');
       row.className = 'tb-choice';
-      row.innerHTML = clusterSvg('codec') + '<span>' + label + '</span>';
+      row.innerHTML = clusterSvg('codec') + '<span class="tb-label"></span>';
+      row.querySelector('.tb-label').textContent = label;
       // The real picker is moved in, not copied: it keeps its handlers,
       // its `.active` pill, and its identity as the one control the
       // rest of the page already talks to.
@@ -1624,8 +1626,9 @@
     row.className = 'tb-row' + (source.classList.contains('active') ? ' on' : '');
     const glyph = source.querySelector('svg');
     row.innerHTML = (glyph ? glyph.outerHTML : clusterSvg('more')) +
-        '<span>' + label + '</span>' +
+        '<span class="tb-label"></span>' +
         (member.role === 'state' ? '<span class="tb-dot"></span>' : '');
+    row.querySelector('.tb-label').textContent = label;
     row.addEventListener('click', () => {
       source.click();
       closeFoldMenus();
