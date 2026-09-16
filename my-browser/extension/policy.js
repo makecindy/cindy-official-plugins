@@ -109,6 +109,9 @@
     let u;
     try { u = new URL(raw); } catch { return raw; }
     let changed = false;
+    // Page-controlled links can carry Basic Auth credentials as URL userinfo, which no policy
+    // check inspects for page-supplied hrefs.
+    if (u.username || u.password) { u.username = ''; u.password = ''; changed = true; }
     for (const [key,value] of [...u.searchParams]) {
       if (SENSITIVE_KEYS.test(key) || opaque(value)) { u.searchParams.set(key,'REDACTED'); changed = true; }
     }

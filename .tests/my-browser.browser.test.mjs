@@ -150,6 +150,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal(JSON.stringify(contentLinks.links).includes('44444444-4444-4444-8444-444444444444'),false,'a magic-link token in a page link must never reach the model');
   assert.ok(contentLinks.links.some(l=>l.url===url+'one'),'ordinary links stay usable');
   assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
+  assert.equal(/66666666-6666-4666-8666-666666666666|77777777-7777-4777-8777-777777777777/.test(JSON.stringify(contentLinks.links)),false,'URL userinfo credentials in a page link must never reach the model');
   r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);assert.equal(r.text.includes('11111111-1111-4111-8111-111111111111'),false);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
   r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'INTERACT_NOT_ALLOWED');
   r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.error,'PERMISSION_NOT_GRANTED');assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.length,0);

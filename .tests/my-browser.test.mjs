@@ -62,6 +62,11 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
   // A long opaque value under an innocuous name is masked too.
   assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
+  // Basic Auth userinfo supplied by page content.
+  const basic=r(`https://${code}:${state}@example.test/private`);
+  assert.equal(basic.includes(code),false,'the username must be removed');
+  assert.equal(basic.includes(state),false,'the password must be removed');
+  assert.equal(basic,'https://example.test/private');
   // Path-embedded credentials: password-reset and magic links put the token in a path segment.
   assert.equal(r(`https://example.test/reset/${code}`).includes(code),false);
   assert.equal(r(`https://example.test/#/verify/${code}`).includes(code),false);

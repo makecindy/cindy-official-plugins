@@ -75,6 +75,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.12 继续收紧两处边界。密码重置与 magic link 的凭证通常放在路径段里（`/reset/<token>`、`#/verify/<token>`），而查询／片段脱敏从不检查路径，这类网址仍会进入模型，与契约里「magic link 会被遮蔽」的说法不符。现按段处理：仅当某个形似 token 的段（长度≥16、无标点、含数字）紧跟 reset／verify／invite／auth 这类凭证语境词时才遮蔽，普通深层路径不受影响——单元测试中 `/commit/<sha>`、`/user/12345`、`/reset-password/success`、`/notifications/mentions` 均保持不变。另一处，敏感字段检测原先依赖标准 `autocomplete`，因此 `<input name="card-number">`、`<input name="otp">` 这类未设置该属性的字段仍会出现在 refs 并可被输入。现改为保守判定：`type`、多 token `autocomplete` 与元素自身命名（name／id／placeholder／aria-label／data-testid，识别 camelCase 与分隔符）共同构成同一个判定，snapshot、extract、act 三处共用。命名规则限定在表单类元素上，因此只是提到 card 的按钮或链接仍可见可点（有断言覆盖）。夹具与断言同时覆盖：`/reset/<假 UUID>` 链接必须仍被列出但令牌不出现；未用 autocomplete 标注的 `otp`／`card-number` 字段必须返回 `SENSITIVE_FIELD` 且不进入 snapshot。只回退命名词表即可复现 `undefined`（而非 `SENSITIVE_FIELD`）；只回退路径规则即可复现路径段断言失败。
 
+0.3.13 清除网址 userinfo。页面提供的链接或提取到的 `href` 可能是 `https://user:password@example.test/`；任务 URL 会被 `check` 拒绝，但页面内容不经过该检查，而 `redactUrl` 只改写查询、片段与路径，于是链接里的 Basic Auth 凭证会进入模型。现由脱敏函数清除 `username`／`password`（已断言结果为 `https://example.test/private`），工具契约也把 userinfo 与其他被遮蔽的形态并列。覆盖：解析结果的单元断言，加夹具中带 userinfo 的链接在 content 读取后必须不出现。两项在修复前的脱敏函数上均失败。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
