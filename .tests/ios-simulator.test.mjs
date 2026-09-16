@@ -50,10 +50,10 @@ test('manifest keeps privileged simulator runtime ownership in Cindy Host', () =
   assert.equal(manifest.id, 'ios-simulator');
   assert.equal(manifest.schemaVersion, 3);
   assert.match(manifest.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
-  const baseVersion = [1n, 1n, 3n];
+  const baseVersion = [1n, 1n, 4n];
   const parts = manifest.version.split('.').map(BigInt);
   const difference = parts.findIndex((part, index) => part !== baseVersion[index]);
-  assert.ok(difference >= 0 && parts[difference] > baseVersion[difference], 'version must exceed main 1.1.3');
+  assert.ok(difference >= 0 && parts[difference] > baseVersion[difference], 'version must exceed main 1.1.4');
   assert.equal(manifest.minCindyVersion, '0.1.83', 'minimum supported Cindy release for Manual-only discovery');
   const validated = validateGhostManifest(manifest);
   assert.equal(validated.ok, true, validated.reason);
@@ -188,8 +188,13 @@ test('Manual retains build boundaries, exact artifacts, and Host recovery', () =
     'do not pass `worktreeRoot`, `projectRoot`, arbitrary build-output paths',
     'does not prove Git checkout identity or sandbox Xcode build scripts',
     'Build only a trusted project',
-    'existing `.xcworkspace` or `.xcodeproj` directory inside the current worktree',
-    'An absolute path is allowed only when its resolved target is still inside that worktree',
+    '`build_app.projectDir` if the Host\'s current tool schema supports that argument',
+    'Use an absolute directory or a path relative to the current task\'s worktree',
+    'Pass `projectDir` on every rebuild of B: omitting it selects A\'s directory again',
+    'The summary\'s fingerprint identifies the directory, not a source revision',
+    'Do not silently build A, copy B into A, or use shell commands to bypass the embedded route',
+    'existing `.xcworkspace` or `.xcodeproj` directory inside the selected project directory',
+    'An absolute path is allowed only when its resolved target is still inside that directory',
     '`..` or symlink traversal must not escape it',
     'Do not guess an external checkout or change the task\'s working directory to bypass a path rejection',
     '`AMBIGUOUS_XCODE_PROJECT`', '`INVALID_ARGS`', '`INVALID_ARGUMENT`', '`PROJECT_NOT_FOUND`',
