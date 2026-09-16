@@ -48,6 +48,7 @@ function Studio() {
   const [files, setFiles] = useState<any[]>([]),
     [comments, setComments] = useState<any[]>([]),
     [error, setError] = useState(""),
+    [loadError, setLoadError] = useState(""),
     [notice, setNotice] = useState(""),
     [active, setActive] = useState(cfg.activeFile || ""),
     [sketch, setSketch] = useState(false),
@@ -57,9 +58,9 @@ function Studio() {
       const r = await request("/files");
       setFiles(r.files);
       setComments((await request("/comments")).comments);
-      setError("");
+      setLoadError("");
     } catch (e: any) {
-      setError(e.message);
+      setLoadError(e.message);
     }
   }
   useEffect(() => {
@@ -197,9 +198,9 @@ function Studio() {
         className="app-chrome-file-actions"
         data-app-chrome-file-actions="true"
       />
-      {error && (
+      {(error || loadError) && (
         <div className="od-hint" role="alert">
-          {error}
+          {error || loadError}
         </div>
       )}
       {notice && (

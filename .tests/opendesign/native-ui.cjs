@@ -145,6 +145,8 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       assert.equal(sent.length,1);
       await page.unroute("**/api/projects/*/feedback");
     }
+    await page.waitForTimeout(2000); // exceed the 1.8s background refresh
+    await page.getByRole('alert').filter({hasText:'提交结果未确认'}).waitFor();
 
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     const artifact = page.frameLocator('[data-testid=artifact-preview-frame]');
@@ -264,7 +266,10 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     await page.getByRole('button',{name:'注释',exact:true}).click();
     await page.waitForTimeout(200);
     const dragged = await fs.readFile(path.join(p.dir,'design.html'),'utf8');
-    assert.match(dragged,/translate\(40px, 20px\)/);
+    const moved = /translate\(([\d.]+)px, ([\d.]+)px\)/.exec(dragged);
+    assert.ok(moved);
+    // The canvas scale can introduce fractional CSS pixels after resizing.
+    assert.ok(Math.abs(Number(moved[1])-40)<0.1 && Math.abs(Number(moved[2])-20)<0.1);
     assert.doesNotMatch(dragged,/999px/);
     await page.getByRole('button',{name:'编辑',exact:true}).click();
     console.log('Parent-owned drag persisted; forged iframe drag did not');

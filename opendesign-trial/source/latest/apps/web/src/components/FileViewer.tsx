@@ -1,3 +1,4 @@
+import { randomUUID } from '../utils/uuid';
 import { ManualCanvasInput } from '../../../../../build/ManualCanvasInput';
 import { ManualInlineTextEditor, type InlineTextHandle } from '../../../../../build/ManualInlineTextEditor';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
@@ -14756,7 +14757,7 @@ function HtmlViewer({
       ? targetFromSnapshot(activeCommentTarget)
       : {
           filePath: file.name,
-          elementId: `file-comment-${crypto.randomUUID()}`,
+          elementId: `file-comment-${randomUUID()}`,
           selector: 'html',
           label: file.name,
           text: '',

@@ -387,7 +387,7 @@
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "43c75872cde7ee7c38b3f76738ff92ff7ea7737cd8cac12db290ba762a5cf274",
+    "sha256": "b7f362e8195f345d7f9b4f3cce15806637b4886ff059ca84698b4a961521867a",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },
@@ -947,7 +947,7 @@
     "path": "source/latest/apps/web/src/runtime/srcdoc.ts",
     "upstream": "apps/web/src/runtime/srcdoc.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "c8df2ae0fb0fbceab5ff32bd3622232f5ca8626fc1ef8bb4deeb5f9ebe11d2fa",
+    "sha256": "c9ee84d8d661a0c391fb414f2072275aaaf7c827aca12d6623ac0bb7c547013d",
     "upstreamSha256": "538dd4f7ab3aebb0aa90acaa4d34d826de0085de874a49dce0619f1ff65cd199",
     "modified": true
   },
@@ -1243,9 +1243,9 @@
     "path": "source/latest/apps/web/src/utils/uuid.ts",
     "upstream": "apps/web/src/utils/uuid.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "f87d4f85c2b30c7a510536c52579e856c03ec473283c74d59143ee7d9a41809b",
+    "sha256": "2418ff442606c18cb8787aab672a7bfff56d798bfc2ff02b12c943894747afe7",
     "upstreamSha256": "f87d4f85c2b30c7a510536c52579e856c03ec473283c74d59143ee7d9a41809b",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/packages/components/src/button.module.css",

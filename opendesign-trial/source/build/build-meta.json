@@ -70,6 +70,11 @@
       ],
       "format": "cjs"
     },
+    "../latest/apps/web/src/utils/uuid.ts": {
+      "bytes": 1110,
+      "imports": [],
+      "format": "esm"
+    },
     "node_modules/react/cjs/react-jsx-runtime.production.min.js": {
       "bytes": 859,
       "imports": [
@@ -2582,11 +2587,6 @@
       "imports": [],
       "format": "esm"
     },
-    "../latest/apps/web/src/utils/uuid.ts": {
-      "bytes": 2604,
-      "imports": [],
-      "format": "esm"
-    },
     "../latest/apps/web/src/analytics/provider.tsx": {
       "bytes": 16406,
       "imports": [
@@ -4461,8 +4461,13 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/srcdoc.ts": {
-      "bytes": 191421,
+      "bytes": 191474,
       "imports": [
+        {
+          "path": "../latest/apps/web/src/utils/uuid.ts",
+          "kind": "import-statement",
+          "original": "../utils/uuid"
+        },
         {
           "path": "../latest/packages/contracts/src/runtime/deck-stage-fallback.ts",
           "kind": "import-statement",
@@ -11954,8 +11959,13 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847482,
+      "bytes": 847519,
       "imports": [
+        {
+          "path": "../latest/apps/web/src/utils/uuid.ts",
+          "kind": "import-statement",
+          "original": "../utils/uuid"
+        },
         {
           "path": "ManualCanvasInput.tsx",
           "kind": "import-statement",
@@ -12867,7 +12877,7 @@
       "imports": []
     },
     "FullStudio.tsx": {
-      "bytes": 9869,
+      "bytes": 9951,
       "imports": [
         {
           "path": "node_modules/react/index.js",
@@ -15504,7 +15514,10 @@
           "bytesInOutput": 999
         },
         "FullStudio.tsx": {
-          "bytesInOutput": 5929
+          "bytesInOutput": 5965
+        },
+        "../latest/apps/web/src/utils/uuid.ts": {
+          "bytesInOutput": 470
         },
         "ManualCanvasInput.tsx": {
           "bytesInOutput": 2498
@@ -15513,7 +15526,7 @@
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264970
+          "bytesInOutput": 264955
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -15799,9 +15812,6 @@
         },
         "../latest/apps/web/src/lib/coalesced-get.ts": {
           "bytesInOutput": 552
-        },
-        "../latest/apps/web/src/utils/uuid.ts": {
-          "bytesInOutput": 533
         },
         "../latest/apps/web/src/analytics/export-error-code.ts": {
           "bytesInOutput": 1389
@@ -16107,7 +16117,7 @@
           "bytesInOutput": 11074
         },
         "../latest/apps/web/src/runtime/srcdoc.ts": {
-          "bytesInOutput": 149902
+          "bytesInOutput": 149903
         },
         "../latest/apps/web/src/edit-mode/bridge.ts": {
           "bytesInOutput": 50862
@@ -16257,7 +16267,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17309364
+      "bytes": 17309323
     },
     "../../assets/studio.css": {
       "imports": [

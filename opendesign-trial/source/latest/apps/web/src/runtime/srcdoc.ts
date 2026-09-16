@@ -1,3 +1,4 @@
+import { randomUUID } from '../utils/uuid';
 /**
  * Wrap an artifact's HTML for a sandboxed iframe. Corresponds to
  * buildSrcdoc in packages/runtime/src/index.ts — the reference version also
@@ -2815,7 +2816,7 @@ function meaningfulDomFallbackTarget(el) {
     // element targets; the host overlay renders this position directly.
     var pinX = Math.round(ev.clientX);
     var pinY = Math.round(ev.clientY);
-    var pinId = 'pin-' + crypto.randomUUID();
+    var pinId = 'pin-' + (${randomUUID.toString()})();
     var pinSlideIndex = deckSlideIndexForPayload();
     var pinPayload = {
       type: 'od:comment-target',
