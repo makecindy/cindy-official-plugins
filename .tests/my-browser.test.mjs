@@ -49,6 +49,24 @@ test('payload validation preserves empty text/selection and rejects malformed ex
   assert.doesNotThrow(()=>P.validate('select',{url:'https://example.test',selector:'select',values:[]}));
   for(const payload of [{},{fields:[]},{fields:{x:4}},{fields:{x:'a'},limit:101},{fields:{x:'a'},limit:NaN}]) assert.throws(()=>P.validate('extract',{url:'https://example.test',...payload}));
 });
+test('tab and result URLs lose credentials but keep their identity',()=>{
+  const r=P.redactUrl;
+  // OAuth code / state in the query.
+  assert.equal(/SECRET/.test(r('https://example.test/callback?q=cats&code=SECRET&state=SECRET')),false);
+  assert.match(r('https://example.test/callback?q=cats&code=SECRET&state=SECRET'),/q=cats/);
+  // Implicit-flow fragment and password-reset style tokens.
+  assert.equal(/SECRET/.test(r('https://example.test/#access_token=SECRET&token_type=bearer')),false);
+  assert.equal(/SECRET/.test(r('https://example.test/reset?token=SECRET')),false);
+  // A long opaque value under an innocuous name is masked too.
+  assert.equal(/eyJhbGciOi/.test(r('https://example.test/p?t=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig')),false);
+  // A plain route fragment carries no credential and keeps tabs identifiable.
+  assert.equal(r('https://example.test/#/home'),'https://example.test/#/home');
+  assert.equal(r('https://example.test/timeline?lang=en'),'https://example.test/timeline?lang=en');
+  // Structurally unusable input is returned unchanged rather than throwing into a browser result.
+  assert.equal(r('not a url'),'not a url');
+  assert.equal(r(undefined),undefined);
+});
+
 test('extract validates a closed attribute set before reaching any browser',()=>{
   for(const attr of ['href','src','datetime','title','alt','aria-label','role'])assert.doesNotThrow(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
   for(const attr of ['data-csrf-token','data-token','nonce','value','outerHTML','onclick','HREF',' href',4])assert.throws(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));

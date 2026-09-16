@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome and Edge without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Safari is not installable from this package yet. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome or Edge. Safari is not installable from this package yet. Ordinary public pages do not require this plugin.",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -32,7 +32,7 @@
       "waitMs":{"type":"integer","minimum":0,"maximum":15000,"description":"Bounded readiness wait, default 10000ms."},
       "after":{"type":"string","maxLength":2000,"description":"Newest-first multiple extraction: return visible rows before this previously seen permalink. cursorFound:false means anchor not reached; not proof of completeness. Does not auto-scroll."}
     }}},
-    {"name":"browser_act","description":"Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password/payment-code fields unsupported. Do not bypass a permission denial.","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_act","description":"Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported, including multi-token autocomplete values such as section-checkout billing cc-number. Do not bypass a permission denial.","parameters":{"type":"object","additionalProperties":false,"properties":{
       "url":{"type":"string","maxLength":8192,"description":"Exact open page URL; read it first."},
       "browser":{"type":"string","maxLength":128,"description":"Use the same connection as the snapshot; required with multiple profiles."},
       "kind":{"type":"string","enum":["click","type","press","select","hover","scroll"]},
@@ -43,7 +43,7 @@
       "key":{"type":"string","maxLength":100},
       "values":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":2000}}
     },"required":["url","kind"]}},
-    {"name":"browser_tabs","description":"List bounded HTTP/HTTPS tabs without navigating. Filter by host rather than dumping all tabs. Default 20, maximum 100. Blocked/local/address-unverified tabs are redacted and excluded from host searches.","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_tabs","description":"List bounded HTTP/HTTPS tabs without navigating. Filter by host rather than dumping all tabs. Default 20, maximum 100. Blocked/local/address-unverified tabs are redacted and excluded from host searches. Credentials in a tab URL (OAuth codes, tokens, magic links) are redacted before returning.","parameters":{"type":"object","additionalProperties":false,"properties":{
       "browser":{"type":"string","maxLength":128},
       "host":{"type":"string","maxLength":254,"description":"Domain filter including subdomains; prefix = for exact host."},
       "limit":{"type":"integer","minimum":1,"maximum":100}

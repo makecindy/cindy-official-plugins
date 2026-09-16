@@ -21,10 +21,20 @@ function createBridge(options = {}) {
   const primaryId = options.extensionId || EXT_ID;
   const knownIds = new Set([primaryId,...[distribution.chrome.extensionId,distribution.edge.extensionId].filter(Boolean)]);
   const approved = c => (c.origin === 'chrome-extension://'+c.extensionId && knownIds.has(c.extensionId)) || pins.some(p => p.id === c.id && p.origin === c.origin && p.extensionId === c.extensionId);
+  // Last gate before a result reaches the model: policy checks above still used the real URL, but
+  // nothing leaves with live OAuth/magic-link credentials in a query or fragment.
+  function redactResult(result) {
+    if (!result || typeof result !== 'object') return result;
+    const out = {...result};
+    if (typeof out.url === 'string') out.url = P.redactUrl(out.url);
+    if (Array.isArray(out.tabs)) out.tabs = out.tabs.map(t => t && !t.redacted && typeof t.url === 'string' ? {...t,url:P.redactUrl(t.url)} : t);
+    return out;
+  }
   function finish(job,result) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
-    job.resolve({...result,browser:job.clientId,timing:{...result.timing,totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
+    const safe = redactResult(result);
+    job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
   const jobFailure = (job,error,message) => failure(error,message,job.state === 'acknowledged' && job.action !== 'tabs' ? 'unknown' : 'not_executed');
   function take(clientId) {

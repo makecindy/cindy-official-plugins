@@ -79,7 +79,26 @@
     }
     return payload;
   }
-  const api = { READ, INTERACT, defaults, normalizeHost, normalizePolicy, matches, check, validate };
+  // Tab and result URLs can carry OAuth codes, reset/magic-link tokens or bearer tokens in the
+  // query or the fragment. Anything handed to the model goes through here first.
+  const SENSITIVE_KEYS = /^(?:code|access_token|id_token|refresh_token|token|auth|authorization|session|sessionid|sid|state|nonce|password|passwd|pwd|secret|client_secret|api_key|apikey|key|signature|sig|otp|pin|ticket|assertion|saml|sso|reset|invite|verifier|challenge)$/i;
+  // Long, whitespace-free, token-shaped values (JWTs, opaque ids) are masked even under an
+  // innocuous parameter name. Masking a rare long id is an acceptable loss; leaking a token is not.
+  const opaque = value => value.length >= 32 && /^[A-Za-z0-9._~+/=-]+$/.test(value);
+  function redactUrl(raw) {
+    if (typeof raw !== 'string') return raw;
+    let u;
+    try { u = new URL(raw); } catch { return raw; }
+    let changed = false;
+    for (const [key,value] of [...u.searchParams]) {
+      if (SENSITIVE_KEYS.test(key) || opaque(value)) { u.searchParams.set(key,'REDACTED'); changed = true; }
+    }
+    // A fragment carrying key=value data is the classic implicit-flow token carrier, so it is
+    // masked whole. A plain route fragment (#/home) carries no credentials and keeps tabs identifiable.
+    if (u.hash.includes('=')) { u.hash = '#REDACTED'; changed = true; }
+    return changed ? u.href : raw;
+  }
+  const api = { READ, INTERACT, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MyBrowserPolicy = api;
 })(globalThis);

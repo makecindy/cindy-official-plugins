@@ -44,7 +44,7 @@ Directory installation is a separate fallback. Chromium supports dragging a pack
 
 ## Failure and privacy boundaries
 
-No exported cookies, hidden/password/payment-code fields, arbitrary JavaScript tool or private API token extraction. Normal reads/visits still contact websites and may affect their server-side read state; “read-only” does not mean zero website side effects. Data passed to AI may leave the device.
+No exported cookies, hidden/password/payment-code fields, arbitrary JavaScript tool or private API token extraction. Password and payment-card inputs are refused by token-matching their `autocomplete` value, so standard checkout and OTP markup (`section-checkout billing cc-number`, `section-login one-time-code`) cannot be read or typed even though it is not a bare `cc-number`. Tab lists and read results are passed through a URL sanitizer that masks credential-bearing query parameters and data-bearing fragments (`?code=`, `#access_token=`) before anything reaches the model; harmless parameters and plain route fragments are kept so tabs stay identifiable. Normal reads/visits still contact websites and may affect their server-side read state; “read-only” does not mean zero website side effects. Data passed to AI may leave the device.
 
 Blocklists and redirects are checked on every request. Browser jobs are bound to one connection. Delivered actions are never automatically replayed. `execution:executed` proves DOM dispatch only; `unknown` requires checking the real page before deciding whether to repeat. Never use another tool or account to bypass a denial.
 

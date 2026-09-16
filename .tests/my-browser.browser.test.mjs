@@ -132,6 +132,18 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   r=await tool('browser_read',{url,mode:'text',selector:'#late',waitMs:3000});assert.equal(r.text,'Ready after hydration');assert.ok(r.timing.waitMs>100);
   r=await tool('browser_read',{url,mode:'extract',multiple:true,from:'.absent',fields:{text:':self'},waitMs:100});assert.equal(r.error,'CONTENT_NOT_READY');
   r=await tool('browser_tabs',{host:'example.test',limit:1});assert.equal(r.tabs.length,1);assert.equal(r.tabs[0].url,url);
+  // OAuth callbacks, magic links and reset links must not hand their credentials to the model.
+  const tokenPage=await context.newPage();
+  await tokenPage.goto('http://example.test/callback?q=cats&code=SECRETCODE123&state=SECRETSTATE#access_token=SECRETFRAGMENT');
+  const tokenTabs=await tool('browser_tabs',{host:'example.test',limit:100});
+  const tokenRow=tokenTabs.tabs.find(t=>/callback/.test(t.url || ''));assert.ok(tokenRow,'the callback tab must still be listed');
+  assert.equal(/SECRETCODE123/.test(tokenRow.url),false,'an OAuth code must never reach the model');
+  assert.equal(/SECRETSTATE/.test(tokenRow.url),false,'an OAuth state must never reach the model');
+  assert.equal(JSON.stringify(tokenTabs).includes('SECRETFRAGMENT'),false,'a fragment token must never reach the model');
+  assert.match(tokenRow.url,/q=cats/,'innocuous query parameters are preserved for identification');
+  const tokenRead=await tool('browser_read',{url:tokenPage.url(),mode:'text'});assert.equal(tokenRead.ok,true);
+  assert.equal(/SECRETCODE123/.test(tokenRead.url),false,'a read result URL must not carry the credential');
+  await tokenPage.close();
   r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);assert.equal(r.text.includes('fixture-secret'),false);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
   r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'INTERACT_NOT_ALLOWED');
   r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.error,'PERMISSION_NOT_GRANTED');assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.length,0);
@@ -142,6 +154,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   await tool('browser_act',{url,kind:'select',selector:'#choice',values:['two']});assert.equal(await page.locator('#choice').inputValue(),'two');
   await tool('browser_act',{url,kind:'type',selector:'#editable',text:'Updated'});assert.equal(await page.locator('#editable').textContent(),'Updated');
   r=await tool('browser_act',{url,kind:'type',selector:'#password',text:'x'});assert.equal(r.error,'SENSITIVE_FIELD');
+  // Standard checkout/OTP markup uses a multi-token autocomplete value; exact attribute matching
+  // would let those fields stay actionable and visible as refs.
+  r=await tool('browser_act',{url,kind:'type',selector:'#card',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
+  r=await tool('browser_act',{url,kind:'type',selector:'#otp',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
+  assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');
+  assert.equal(/One-time code/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'OTP field must not be exposed as an actionable ref');
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
   await tool('browser_policy',{action:'block_read',host:'blocked.test'});
   r=await tool('browser_read',{url:'http://redirect.test/',mode:'text'});assert.equal(r.error,'REDIRECT_BLOCKED',JSON.stringify(r));assert.equal(r.text,undefined);

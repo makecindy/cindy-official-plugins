@@ -146,7 +146,11 @@ async function pageOperation(job,expectedUrl) {
     const style = getComputedStyle(el); const r = el.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && !!(r.width || r.height);
   };
-  const sensitive = el => el.matches('input[type=password],input[type=hidden],input[autocomplete="one-time-code"],input[autocomplete="cc-number"],input[autocomplete="cc-csc"]');
+  const SENSITIVE_AUTOCOMPLETE = new Set(['one-time-code','cc-number','cc-csc','cc-exp','cc-exp-month','cc-exp-year','current-password','new-password']);
+  // autocomplete is a space-separated token list (e.g. "section-checkout billing cc-number"), so
+  // exact attribute matching would let standard checkout and OTP fields through into refs and acts.
+  const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
+    (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token));
   let started = false;
   try {
     if (['snapshot','text','extract','content'].includes(action)) {
@@ -279,7 +283,7 @@ async function handle(job,policy,target) {
         if(out?.[0]?.documentId===documentId && P.check(policy,'text',out[0].result?.url).ok)metadata=out[0].result;
       }catch {}
       if(job.payload.host && (!metadata || !P.matches(new URL(metadata.url).hostname,P.normalizeHost(job.payload.host))))continue;
-      const row=metadata ? {id:t.id,title:metadata.title,...(metadata.url.length<=8192 ? {url:metadata.url} : {url_omitted:true}),active:t.active} : {id:t.id,redacted:true};
+      const row=metadata ? {id:t.id,title:metadata.title,...(metadata.url.length<=8192 ? {url:P.redactUrl(metadata.url)} : {url_omitted:true}),active:t.active} : {id:t.id,redacted:true};
       const size=JSON.stringify(row).length;if (size>remaining) break;
       records.push(row);remaining-=size;
     }
