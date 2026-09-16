@@ -153,6 +153,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const resetLink=contentLinks.links.find(l=>/\/reset/.test(l.url));assert.ok(resetLink,'the credential-bearing link must still be listed');
   assert.equal(JSON.stringify(contentLinks.links).includes('44444444-4444-4444-8444-444444444444'),false,'a magic-link token in a page link must never reach the model');
   assert.ok(contentLinks.links.some(l=>l.url===url+'one'),'ordinary links stay usable');
+  // extract has its own text path; it must not fall back to textContent and return hidden data.
+  const hiddenField=await tool('browser_read',{url,mode:'extract',selector:'#hidden-wrapper',fields:{value:':self'}});
+  assert.equal(hiddenField.ok,true,JSON.stringify(hiddenField).slice(0,160));
+  assert.equal(JSON.stringify(hiddenField.record).includes('CSRFHIDDEN'),false,'extract must not return hidden descendants');
+  const visibleField=await tool('browser_read',{url,mode:'extract',selector:'#readable',fields:{value:':self'}});
+  assert.equal(visibleField.record.value,'Visible fixture text','ordinary extract text is unchanged');
   assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
   assert.equal(/66666666-6666-4666-8666-666666666666|77777777-7777-4777-8777-777777777777/.test(JSON.stringify(contentLinks.links)),false,'URL userinfo credentials in a page link must never reach the model');
   assert.equal(JSON.stringify(contentLinks.links).includes('88888888-8888-4888-8888-888888888888'),false,'a percent-encoded path token must never reach the model');

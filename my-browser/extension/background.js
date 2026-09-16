@@ -252,7 +252,9 @@ async function pageOperation(job,expectedUrl) {
             const el = selector === ':self' ? scope : scope.querySelector(selector);
             let value = null;
             if (el && !sensitive(el) && visible(el)) {
-              value = attr ? el.getAttribute(attr) : (el.innerText || el.textContent || '').trim();
+              // Same rendered-text rule as content/text: innerText falling back to textContent would
+              // return display:none or script content for a visible wrapper with hidden children.
+              value = attr ? el.getAttribute(attr) : readableText(el,4000).trim();
               if (value && ['href','src'].includes(attr)) { try { value = new URL(value,document.baseURI).href; } catch { value = null; } }
             }
             if (value != null) { const max = Math.min(remaining,4000); if (value.length>max) truncated = true; value = value.slice(0,max); remaining -= value.length; }
