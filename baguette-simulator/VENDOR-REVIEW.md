@@ -7,7 +7,7 @@ Upstream: [tddworks/baguette v0.1.98](https://github.com/tddworks/baguette/relea
 `vendor-web.patch` is the complete diff against `Sources/Baguette/Resources/Web` at tag v0.1.98 (commit `5975fa510a5083956f99e25544b6583f296228dd`). Only these eight Web files differ:
 
 - `stream-session.js`: bounded reconnect after unexpected socket close; cancel scheduled reconnect on deliberate stop.
-- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the private-device bridge, suppress OS repeats and duplicate in-flight paste, serialize key bursts, drop unsent keys on blur/hide/detach/release.
+- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the private-device bridge, suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow, drop unsent keys on blur/hide/detach/release.
 - `baguette/parts/bezel.js`, `baguette/carplay/carplay-frame.js`, `sim-native.html`: standard arrow cursor instead of crosshair.
 
 - `sim-location.js`: map tiles/search use same-origin `/map/` routes; the Node worker validates coordinates/query length and sends HTTPS only to fixed OSM hosts, with no redirects or forwarded credentials.
@@ -32,3 +32,5 @@ The plugin declares Node and loopback preview, uses fixed executable paths and a
 ## Known limits and verification boundary
 
 Native WebSocket disconnect SIGABRT remains an upstream issue; recovery is bounded mitigation. Worker shutdown also stops the controller. Browser session ownership is separate from persistent simulator data. Tests cover the bridge and real iOS 27 native input during the local trial, but those tests are not an attestation that this official candidate was installed in Cindy. Record the final package’s installed-client verification separately before submitting a Ready PR.
+
+The proxy bootstraps an HttpOnly SameSite=Strict capability cookie only from a token-authenticated control request. All proxied viewer HTTP, map and WebSocket routes require it; credentials are stripped before HTTP forwarding. The empty controller shell is public so its fragment can authenticate. This protects the proxy, not against same-user processes that can access CoreSimulator or the upstream Baguette loopback listener directly. Manual restart excludes only the retired child from crash accounting.

@@ -125,10 +125,15 @@
 
     async _clipboard(action, text, code, modifiers) {
       if (this._inputPending) {
-        if (action === 'key' && this._inputQueue.length < 32) this._inputQueue.push([action,text,code,modifiers]);
+        const request = [action,text,code,modifiers];
+        const last = this._inputQueue.length ? this._inputQueue[this._inputQueue.length-1] : this._activeInput;
+        if (action === 'paste' && last?.[0] === 'paste' && last[1] === text) return;
+        if (this._inputQueue.length < 32) this._inputQueue.push(request);
+        else window.alert('输入队列已满，请等待当前输入完成后重试。');
         return;
       }
       this._inputPending = true;
+      this._activeInput = [action,text,code,modifiers];
       const capability = new URLSearchParams(location.hash.slice(1)).get('cindyClipboard');
       const match = /^(\d{1,5})\.([a-f0-9]{64})$/.exec(capability || '');
       const udid = /^\/simulators\/([a-f0-9-]{36})\/?$/i.exec(location.pathname)?.[1];
@@ -144,7 +149,7 @@
         // Visible feedback; never print potentially sensitive clipboard contents.
         this._inputQueue.length = 0;
         window.alert('输入未完成：' + error.message);
-      } finally { this._inputPending = false; const next = this._inputQueue.shift(); if (next) this._clipboard(...next); }
+      } finally { this._inputPending = false; this._activeInput = null; const next = this._inputQueue.shift(); if (next) this._clipboard(...next); }
     }
 
     // --- internals ---

@@ -6,3 +6,5 @@ import './baguette/viewer.test.cjs';
 import './baguette/vendor-security.test.cjs';
 import './baguette/core-contract.test.cjs';
 import './baguette/map.test.cjs';
+import './baguette/viewer-auth.test.cjs';
+import './baguette/viewer-restart.test.cjs';

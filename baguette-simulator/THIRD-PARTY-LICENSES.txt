@@ -1,5 +1,6 @@
 Baguette v0.1.98 https://github.com/tddworks/baguette
 Local Web networking patch: OSM tiles/search routed through same-origin fixed-endpoint Node proxy.
+Local keyboard patch: serialize paste/copy with keys; suppress only adjacent identical pending paste; report queue overflow.
 Local Web security patches: toolbar labels rendered as text; CSS selector fallback uses hexadecimal escaping. See vendor-web.patch and VENDOR-REVIEW.md.
 Official release archive SHA-256: f4eafe5a19bde27be192edb17305848f3f8100240f3f55dce07bef5cf0690b14
 

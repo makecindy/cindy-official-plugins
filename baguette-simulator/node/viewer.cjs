@@ -22,7 +22,7 @@ function launch(current){
  child.once('error',error=>{current.error=error;});
  child.once('close',(code,signal)=>{
   current.children.delete(child);
-  if(current.stopped||current.restarting||active!==current)return;
+  if(current.stopped||current.retiring===child||active!==current)return;
   current.lastExit={code,signal,at:new Date().toISOString()};
   current.crashes=current.crashes.filter(t=>Date.now()-t<60000);current.crashes.push(Date.now());
   process.stderr.write('[baguette-viewer] '+JSON.stringify(current.lastExit)+'\n');
@@ -54,13 +54,13 @@ async function startViewer(binary,deviceSet,children){
 async function restartNative(current){
  if(current.restartPromise)return current.restartPromise;
  current.restartPromise=(async()=>{
-  current.restarting=true;clearTimeout(current.restartTimer);
+  clearTimeout(current.restartTimer);
   try{
-   const child=current.child;
+   const child=current.child;current.retiring=child;
    if(child&&child.exitCode===null&&child.signalCode===null)await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),3000);child.once('close',()=>{clearTimeout(timer);resolve();});child.kill('SIGTERM');});
    current.parked=false;current.crashes=[];launch(current);await ready(current);
    return {ready:true,generation:current.generation};
-  }finally{current.restarting=false;current.restartPromise=null;}
+  }finally{current.retiring=null;current.restartPromise=null;}
  })();return current.restartPromise;
 }
 async function viewerStatus(server){
