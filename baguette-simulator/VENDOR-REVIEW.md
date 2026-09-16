@@ -7,7 +7,7 @@ Upstream: [tddworks/baguette v0.1.98](https://github.com/tddworks/baguette/relea
 `vendor-web.patch` is the complete diff against `Sources/Baguette/Resources/Web` at tag v0.1.98 (commit `5975fa510a5083956f99e25544b6583f296228dd`). Only these nine Web files differ:
 
 - `stream-session.js`: bounded reconnect after unexpected socket close; cancel scheduled reconnect on deliberate stop.
-- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the private-device bridge, suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow with English fallback for added input errors, drop unsent keys on blur/hide/detach/release.
+- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the same-origin /clipboard private-device bridge (fragment port never selects a destination), suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow with English fallback for added input errors, drop unsent keys on blur/hide/detach/release.
 - `baguette/parts/bezel.js`, `baguette/carplay/carplay-frame.js`, `sim-native.html`: standard arrow cursor instead of crosshair.
 
 - `farm/farm.html`: remove remote font/preconnect links; keep the existing system-font fallback and all Device Farm controls.
@@ -37,3 +37,5 @@ Native WebSocket disconnect SIGABRT remains an upstream issue; recovery is bound
 The proxy bootstraps an HttpOnly SameSite=Strict capability cookie only from a token-authenticated control request. All proxied viewer HTTP, map and WebSocket routes require it; credentials are stripped before HTTP forwarding. The empty controller shell is public so its fragment can authenticate. This protects the proxy, not against same-user processes that can access CoreSimulator or the upstream Baguette loopback listener directly. Manual restart excludes only the retired child from crash accounting.
 
 Minimum OS evidence: `xcrun vtool -show-build` reports `LC_BUILD_VERSION minos 15.0` for both bundled Baguette and native/keyboard. The worker checks `/usr/bin/sw_vers -productVersion` before launching either binary and rejects older or unrecognized versions with UNSUPPORTED_OS.
+
+Viewer transport boundary: these scripts run in the external page opened by `cindy.preview`, not the plugin sandbox/Panel. Keyboard requests use relative `/clipboard` on that already-open preview origin; no hostname or port is chosen from input. `main.js` uses `cindy.node.request` to start the declared Node runtime and `cindy.preview` to open its declared preview host. The page has no `cindy.fetch` API. External OSM requests remain in fixed-endpoint Node code.

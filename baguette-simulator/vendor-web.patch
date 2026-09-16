@@ -106,7 +106,7 @@
 +      const udid = /^\/simulators\/([a-f0-9-]{36})\/?$/i.exec(location.pathname)?.[1];
 +      try {
 +        if (!match || !udid) throw Error('Reopen the simulator with open_viewer.');
-+        const response = await fetch('http://127.0.0.1:' + match[1] + '/clipboard', {
++        const response = await fetch('/clipboard', {
 +          method: 'POST', headers: {'Content-Type':'application/json','X-Cindy-Clipboard':match[2]},
 +          body: JSON.stringify({action, text, code, modifiers, udid}), signal: AbortSignal.timeout(65000)
 +        });
