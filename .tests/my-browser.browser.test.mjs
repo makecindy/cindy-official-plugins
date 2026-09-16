@@ -14,7 +14,8 @@ const P=require('../my-browser/extension/policy.js');
 const enabled=!!process.env.PLAYWRIGHT_CORE;
 test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negative paths',{skip:!enabled,timeout:120000},async t=>{
   const {chromium}=require(process.env.PLAYWRIGHT_CORE);
-  const profile=await fs.mkdtemp(path.join(os.tmpdir(),'my-browser-test-'));t.after(()=>fs.rm(profile,{recursive:true,force:true}));
+  const profile=await fs.mkdtemp(path.join(os.tmpdir(),'my-browser-test-'));let context;
+  t.after(async()=>{await context?.close();await fs.rm(profile,{recursive:true,force:true,maxRetries:3});});
   const extensionDir=path.join(profile,'unpacked-extension');await fs.cp(path.join(root,'extension'),extensionDir,{recursive:true});
   // Fixture transport uses loopback/proxy interception. Simulate PUBLIC peer evidence
   // only for named positive fixtures at the browser API boundary; private.test keeps
@@ -29,6 +30,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const extensionManifest=JSON.parse(await fs.readFile(path.join(extensionDir,'manifest.json'),'utf8'));
   await fs.writeFile(path.join(extensionDir,'manifest.json'),JSON.stringify({...extensionManifest,key:publicKey.toString('base64')}));
   const bridge=createBridge({ports:[18819],extensionId});t.after(()=>bridge.close());
+  await bridge.request('status'); // Fail before launching Chrome if the isolated test port is occupied.
   const installCalls=[];
   const installation=require('../my-browser/node/installation.cjs').createInstallation({platform:'darwin',exists:p=>p.includes('Chrome') || p.includes('Safari') || p.endsWith('.zip'),run:async(...args)=>installCalls.push(args)});
   let cfg={policy:{read:{block:[]},interact:{allow:[],block:[]}}};const faults={read:false,save:false};
@@ -72,8 +74,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   });
   proxy.on('connect',(_req,socket)=>{socket.on('error',()=>{});socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');});
   await new Promise(r=>proxy.listen(0,'127.0.0.1',r));t.after(()=>{proxy.closeAllConnections();proxy.close();});
-  const context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,args:['--proxy-server=http://127.0.0.1:'+proxy.address().port,'--proxy-bypass-list=<-loopback>','--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir]});
-  t.after(()=>context.close());
+  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,args:['--proxy-server=http://127.0.0.1:'+proxy.address().port,'--proxy-bypass-list=<-loopback>','--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir]});
   const fixture=await fs.readFile(path.join(import.meta.dirname,'fixtures/my-browser-page.html'),'utf8');
   await context.route('http://example.test/**',route=>route.fulfill({status:200,contentType:'text/html',body:fixture}));
   await context.route('http://blocked.test/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<h1>Blocked fixture</h1>'}));
@@ -92,7 +93,10 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const until=Date.now()+15000;let status;
   do{status=await tool('browser_status');if(status.extension_connected)break;await new Promise(r=>setTimeout(r,300));}while(Date.now()<until);
   assert.equal(status.extension_connected,true,'MV3 connected: '+JSON.stringify({status,workers:await Promise.all(context.serviceWorkers().map(sw=>sw.evaluate(async()=>({connection:await chrome.storage.session.get('connection'),id:chrome.runtime.id}))))}));
-  const popup=await context.newPage();await popup.goto('chrome-extension://'+status.extension_id+'/popup.html');await popup.getByText('Ready · chrome connected',{exact:true}).waitFor();await popup.close();
+  assert.equal('policy' in status,false);assert.equal('extension_dir' in status,false);assert.equal('port' in status,false);
+  assert.equal('origin' in status.clients[0],false);assert.equal('extensionId' in status.clients[0],false);
+  assert.ok(status.clients[0].id);assert.equal(status.installation.browsers[0].browser,'chrome');
+  const popup=await context.newPage();await popup.goto('chrome-extension://'+extensionId+'/popup.html');await popup.getByText('Ready · chrome connected',{exact:true}).waitFor();await popup.close();
   // Establish interception before this page's first request (extension-created targets may navigate before Playwright attaches).
   const xPage=await context.newPage();await xPage.goto('https://x.com/notifications/mentions');
   const started=Date.now();const mentions=await tool('browser_read',{recipe:'x_mentions',limit:5,maxChars:2000});
@@ -116,6 +120,9 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     assert.equal(context.pages().length,beforeRefreshPages);
   }
   t.diagnostic('Three page reload/read cycles: same tab ids, no added pages.');
+  r=await tool('browser_read',{url,mode:'extract',fields:{token:{selector:'#readable',attr:'data-csrf-token'}}});
+  assert.equal(r.ok,false);assert.doesNotMatch(JSON.stringify(r),/fixture-not-a-real-token/);
+  r=await tool('browser_read',{url,mode:'extract',fields:{label:{selector:'#readable',attr:'title'}}});assert.equal(r.record.label,'Fixture title');
   r=await tool('browser_read',{url,mode:'extract',multiple:true,from:'.row',fields:{label:'a',link:{selector:'a',attr:'href'}}});
   assert.equal(r.records.length,2);assert.equal(r.records[0].link,url+'one');
   r=await tool('browser_read',{url});assert.equal(r.ok,true);assert.equal(r.elements,undefined,'default reading does not create refs');
@@ -170,7 +177,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   await settings.setViewportSize({width:330,height:740});assert.equal(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if(process.env.MY_BROWSER_SCREENSHOT)await settings.screenshot({path:process.env.MY_BROWSER_SCREENSHOT,fullPage:true});
   const candidate={id:crypto.randomUUID(),origin:'safari-web-extension://'+crypto.randomUUID(),extensionId};
-  await fetch('http://127.0.0.1:'+status.port+'/health',{headers:{'X-My-Browser-Extension':candidate.extensionId,'X-My-Browser-Origin':candidate.origin,'X-My-Browser-Client':candidate.id,'X-My-Browser-Version':status.version,'X-My-Browser-Family':'safari'}});
+  await fetch('http://127.0.0.1:'+(await bridge.request('status')).port+'/health',{headers:{'X-My-Browser-Extension':candidate.extensionId,'X-My-Browser-Origin':candidate.origin,'X-My-Browser-Client':candidate.id,'X-My-Browser-Version':status.version,'X-My-Browser-Family':'safari'}});
   await logic.evaluate(()=>window.confirmAllowed=false);await settings.locator('#refresh').click();await settings.getByRole('button',{name:'确认连接',exact:true}).click();await settings.getByText('No browser was authorized.',{exact:true}).waitFor();assert.equal(cfg.pairedClients,undefined);
   await logic.evaluate(()=>window.confirmAllowed=true);await settings.getByRole('button',{name:'确认连接',exact:true}).click();await settings.waitForFunction(()=>!document.querySelector('#profiles button'));assert.equal(cfg.pairedClients[0].id,candidate.id);assert.ok(cfg.policy.read.block.includes('new-block.test'));
   await settings.locator('.browser-card').filter({has:settings.getByText('Chrome',{exact:true})}).getByRole('button',{name:'打开 ZIP 安装'}).click();

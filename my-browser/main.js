@@ -68,7 +68,16 @@ async function handleTool(name,args) {
   }
   if (!['browser_status','browser_tabs','browser_read','browser_act'].includes(name)) return fail('UNKNOWN_TOOL','Use a declared My Browser tool.');
   await sync(); // Every call: a restarted on-demand worker must not silently lose stored permissions.
-  if (name === 'browser_status') return {...await node('status'),installation:await node('installation'),how_to_install:'Open My Browser plugin settings and choose your browser. Chrome/Edge: open the ZIP installer, enable Developer mode and drag the ZIP onto the extensions page. Wait for a live connection.'};
+  if (name === 'browser_status') {
+    const status=await node('status'), installation=await node('installation');
+    if (!status?.ok) return fail('STATUS_UNAVAILABLE','Cannot check browser connections. Re-enable My Browser and refresh its settings.');
+    // Tool output is an explicit projection. The settings channel below retains
+    // policy, extension_dir and pairing identity details without sending them to AI.
+    return {ok:true,version:status.version,protocol:status.protocol,extension_connected:status.extension_connected,
+      clients:(status.clients || []).map(c=>({id:c.id,browser:c.browser,version:c.version,connected:c.connected,trusted:c.trusted})),
+      installation:{ok:!!installation?.ok,browsers:(installation?.browsers || []).map(b=>({browser:b.browser,supported:b.supported,installed:b.installed,published:b.published,zip:b.zip,bundled:b.bundled}))},
+      how_to_install:'Open My Browser plugin settings. Chrome/Edge: enable Developer mode and drag the bundled ZIP onto the extensions page. Wait for a live connection.'};
+  }
   if (name === 'browser_tabs') return node('act',{action:'tabs',payload:P.validate('tabs',args)});
   if (name === 'browser_read') {
     if (args.recipe) {

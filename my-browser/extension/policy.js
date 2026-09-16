@@ -2,6 +2,7 @@
 // One policy implementation shared by the sandbox, Node bridge and extension.
 (function (root) {
   const READ = ['tabs', 'navigate', 'snapshot', 'extract', 'text', 'content'];
+  const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
   const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll'];
   const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
@@ -72,7 +73,7 @@
       if (!payload.fields || typeof payload.fields !== 'object' || Array.isArray(payload.fields) || !Object.keys(payload.fields).length || Object.keys(payload.fields).length > 30) throw new Error('Extract requires 1–30 fields.');
       if (Object.keys(payload.fields).some(k => !k || k.length > 32 || /[\x00-\x1f]/.test(k))) throw new Error('Field names must contain 1–32 printable characters.');
       for (const spec of Object.values(payload.fields)) {
-        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && (typeof spec.attr !== 'string' || spec.attr.length > 100))) throw new Error('Each field needs a CSS selector and an optional attribute.');
+        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && !EXTRACT_ATTRIBUTES.includes(spec.attr))) throw new Error('Each field needs a CSS selector; attr may only be href, src, datetime, title, alt, aria-label or role.');
       }
       if (payload.after != null && !payload.multiple) throw new Error('after requires multiple records.');
     }

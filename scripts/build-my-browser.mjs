@@ -17,7 +17,7 @@ for(const browser of target==='all'?['chrome','edge','safari']:[target]) {
   const m=structuredClone(manifest);
   if(browser==='safari') {
     delete m.key;delete m.minimum_chrome_version;
-    m.background={scripts:['policy.js','background.js'],persistent:false};
+    m.background={scripts:['policy.js','network-guard.js','background.js'],persistent:false};
   }
   await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify(m,null,2)+'\n');
   if(browser!=='safari') {

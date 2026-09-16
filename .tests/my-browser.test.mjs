@@ -49,6 +49,10 @@ test('payload validation preserves empty text/selection and rejects malformed ex
   assert.doesNotThrow(()=>P.validate('select',{url:'https://example.test',selector:'select',values:[]}));
   for(const payload of [{},{fields:[]},{fields:{x:4}},{fields:{x:'a'},limit:101},{fields:{x:'a'},limit:NaN}]) assert.throws(()=>P.validate('extract',{url:'https://example.test',...payload}));
 });
+test('extract validates a closed attribute set before reaching any browser',()=>{
+  for(const attr of ['href','src','datetime','title','alt','aria-label','role'])assert.doesNotThrow(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+  for(const attr of ['data-csrf-token','data-token','nonce','value','outerHTML','onclick','HREF',' href',4])assert.throws(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+});
 test('cold status starts one listener under concurrency; disconnected actions fail quickly',async t=>{
   const b=createBridge({ports:[0],connectWait:0});t.after(()=>b.close());
   const statuses=await Promise.all(Array.from({length:8},()=>b.request('status')));
