@@ -16,6 +16,13 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const {chromium}=require(process.env.PLAYWRIGHT_CORE);
   const profile=await fs.mkdtemp(path.join(os.tmpdir(),'my-browser-test-'));t.after(()=>fs.rm(profile,{recursive:true,force:true}));
   const extensionDir=path.join(profile,'unpacked-extension');await fs.cp(path.join(root,'extension'),extensionDir,{recursive:true});
+  // Fixture transport uses loopback/proxy interception. Simulate PUBLIC peer evidence
+  // only for named positive fixtures at the browser API boundary; private.test keeps
+  // the real loopback address. Production guard and document binding run unchanged.
+  const networkShim=`const nativeCompleted=chrome.webRequest.onCompleted.addListener.bind(chrome.webRequest.onCompleted);
+  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
+  const backgroundPath=path.join(extensionDir,'background.js');
+  await fs.writeFile(backgroundPath,networkShim+await fs.readFile(backgroundPath,'utf8'));
   const {generateKeyPairSync,createHash}=require('node:crypto');
   const {publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'der'}});
   const extensionId=createHash('sha256').update(publicKey).digest('hex').slice(0,32).replace(/[0-9a-f]/g,c=>String.fromCharCode(97+parseInt(c,16)));
@@ -27,7 +34,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   let cfg={policy:{read:{block:[]},interact:{allow:[],block:[]}}};const faults={read:false,save:false};
   const server=http.createServer(async(req,res)=>{
     try{
-      if(req.headers.host?.startsWith('example.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
+      if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
       if(req.headers.host?.startsWith('blocked.test')){res.setHeader('Content-Type','text/html');return res.end('<h1>Blocked fixture</h1>');}
       if(req.headers.host?.startsWith('redirect.test')){res.writeHead(302,{Location:'http://blocked.test/'});return res.end();}
       let data='';for await(const c of req)data+=c;
@@ -93,6 +100,10 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const bytes=Buffer.byteLength(JSON.stringify(mentions));assert.ok(bytes<3000);
   t.diagnostic('X mentions fixture: '+JSON.stringify({browserReadCalls:1,elapsedMs:Date.now()-started,resultBytes:bytes,records:mentions.count}));
   const incremental=await tool('browser_read',{recipe:'x_mentions',after:'https://example.test/post/2',limit:5});assert.equal(incremental.records.length,2);assert.equal(incremental.cursorFound,true);
+  const privatePage=await context.newPage();await privatePage.goto('http://private.test/');
+  const denied=await tool('browser_read',{url:'http://private.test/',mode:'text'});
+  assert.equal(denied.error,'ADDRESS_UNVERIFIED',JSON.stringify(denied));assert.equal(denied.text,undefined);
+  assert.deepEqual((await tool('browser_tabs',{host:'private.test'})).tabs,[]);await privatePage.close();
   const url='http://example.test/';
   const page=await context.newPage();await page.goto(url);
   let r=await tool('browser_read',{url,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.text,/Visible fixture text/);
@@ -132,7 +143,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal(await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length),redirectsBefore);
   const blocked=await context.newPage();await blocked.goto('http://blocked.test/');
   r=await tool('browser_tabs');assert.equal(r.tabs.some(t=>t.url==='http://blocked.test/'),false);assert.ok(r.tabs.some(t=>t.redacted));
-  for(let i=1;i<=5;i++)assert.equal((await tool('browser_read',{url:url+'owned'+i,mode:'text'})).ok,true);
+  for(let i=1;i<=5;i++){const r=await tool('browser_read',{url:url+'owned'+i,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));}
   const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
   assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
   const settings=await context.newPage();await settings.goto(base+'/');await settings.getByText('浏览器已连接',{exact:true}).waitFor();

@@ -1,8 +1,9 @@
 'use strict';
-if (typeof importScripts === 'function') importScripts('policy.js');
+if (typeof importScripts === 'function') importScripts('policy.js','network-guard.js');
 // A lexical `const chrome` masks Chromium's lazy API initialization; use a var alias.
 var chrome = globalThis.browser || globalThis.chrome;
 const P = globalThis.MyBrowserPolicy;
+const network = globalThis.MyBrowserNetwork.create(chrome);
 const VERSION = chrome.runtime.getManifest().version;
 let bridge = null;
 let running = false;
@@ -40,19 +41,20 @@ async function fetchJSON(base,path,session,body,timeout = 5000) {
 async function discover() {
   await restore;
   if (bridge) return bridge;
+  let diagnostic;
   for (let port = 18810; port <= 18819; port++) {
     const base = 'http://127.0.0.1:'+port;
     try {
       const r = await fetchJSON(base,'/health',null,undefined,450);
       if (r.plugin !== 'my-browser' || r.protocol !== 3 || r.extensionId !== chrome.runtime.id) continue;
-      if (r.version !== VERSION) {await connection({connected:false,message:'Update this browser extension to match Cindy v'+r.version+'.'}); return null;}
-      if (r.pairing_required) {await connection({connected:false,message:'Confirm this browser connection in My Browser settings in Cindy.'}); return null;}
+      if (r.version !== VERSION) {diagnostic='Update this browser extension to match Cindy v'+r.version+'.'; continue;}
+      if (r.pairing_required) {diagnostic='Confirm this browser connection in My Browser settings in Cindy.'; continue;}
       bridge = {base,session:r.session};
       await connection({connected:true,port});
       return bridge;
     } catch { /* Other/closed ports are not our bridge. Never accept a generic 200. */ }
   }
-  await connection({connected:false,message:'Open My Browser settings in Cindy, or call browser_status. Reload this extension after updating Cindy’s plugin.'});
+  await connection({connected:false,message:diagnostic || 'Open My Browser settings in Cindy, or call browser_status. Reload this extension after updating Cindy’s plugin.'});
   return null;
 }
 async function release(tabId) {
@@ -269,7 +271,14 @@ async function handle(job,policy,target) {
     const records=[];let remaining=30000;
     for (const t of tabs) {
       if (records.length>=(job.payload.limit || 20)) break;
-      const row=P.check(policy,'text',t.url).ok ? {id:t.id,title:(t.title || '').slice(0,160),...(t.url.length<=8192 ? {url:t.url} : {url_omitted:true}),active:t.active} : {id:t.id,redacted:true};
+      let metadata;
+      if(P.check(policy,'text',t.url).ok)try {
+        const documentId=await network.document(t.id);
+        const out=await chrome.scripting.executeScript({target:{tabId:t.id,documentIds:[documentId]},world:'ISOLATED',func:()=>({url:location.href,title:document.title.slice(0,160)})});
+        if(out?.[0]?.documentId===documentId && P.check(policy,'text',out[0].result?.url).ok)metadata=out[0].result;
+      }catch {}
+      if(job.payload.host && (!metadata || !P.matches(new URL(metadata.url).hostname,P.normalizeHost(job.payload.host))))continue;
+      const row=metadata ? {id:t.id,title:metadata.title,...(metadata.url.length<=8192 ? {url:metadata.url} : {url_omitted:true}),active:t.active} : {id:t.id,redacted:true};
       const size=JSON.stringify(row).length;if (size>remaining) break;
       records.push(row);remaining-=size;
     }
@@ -284,15 +293,16 @@ async function handle(job,policy,target) {
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return currentGate;
-    if (job.action === 'navigate') return {ok:true,url:actual.url,title:actual.title};
+    const documentId=await network.document(tab.id);
+    if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
-    const out = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});
-    const result = out?.[0]?.result;
+    const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});
+    const result = out?.[0]?.documentId === documentId ? out[0].result : null;
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed');
     return result;
   } catch (e) {
-    const messages = {PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:'Three plugin-created tabs are still open and cannot safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
+    const messages = {ADDRESS_UNVERIFIED:'The browser did not verify a public address for this document. No page content was read. If it is a public page opened before the extension started, refresh that same tab manually once; do not create replacement tabs or retry in a loop.',PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:'Three plugin-created tabs are still open and cannot safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',injecting && P.INTERACT.includes(job.action) ? 'unknown' : 'not_executed'),retryable:false};
   }
 }

@@ -15,7 +15,7 @@ function harness() {
       create:async({url})=>{creates++;const t={id:next++,url:state.redirect?'https://example.test/redirected':url,status:state.loading?'loading':'complete',active:false};tabs.set(t.id,t);return {...t};},
       remove:async id=>{if(state.removeFails)throw new Error('Browser refused');tabs.delete(id);removed(id);},
       onActivated:{addListener(fn){activate=fn;}},onRemoved:{addListener(fn){removed=fn;}}},alarms:{create(){},onAlarm:{addListener(){}}}};
-  const context={chrome,MyBrowserPolicy:P,navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,AbortController,
+  const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,AbortController,
     Date:class extends Date{static now(){return clock;}},setTimeout(fn,ms){clock+=ms;queueMicrotask(fn);return 0;},clearTimeout(){}};
   // Disable only the network bootstrap; execute the actual production tab manager, not a copied implementation.
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={ensureTab,owned,cleanup};',context);

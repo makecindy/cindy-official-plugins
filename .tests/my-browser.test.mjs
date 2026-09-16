@@ -1,3 +1,5 @@
+import './my-browser-network.test.mjs';
+import './my-browser-discovery.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
@@ -133,7 +135,7 @@ test('all-site interaction preserves explicit blocks and old restricted policies
   assert.throws(()=>P.normalizePolicy({read:{block:['*']},interact:{allow:[]}}));
 });
 
-test('upgrade retires the complete legacy preset, preserves custom blocks and never repeats after save',()=>{
+test('upgrade preserves ambiguous saved restrictions, while fresh installs have no preset blocks',()=>{
   const legacy=['mail.google.com','outlook.com','outlook.live.com','mail.qq.com','mail.163.com',
     '1password.com','lastpass.com','bitwarden.com','accounts.google.com','login.microsoftonline.com',
     'appleid.apple.com','paypal.com','stripe.com','alipay.com','cmbchina.com','icbc.com.cn',
@@ -141,8 +143,11 @@ test('upgrade retires the complete legacy preset, preserves custom blocks and ne
     'console.cloud.google.com','portal.azure.com'];
   const policy={read:{block:[...legacy,'private.example.test']},interact:{allow:['example.test'],block:[]}};
   const migrated=savedPolicy({policy});
-  assert.deepEqual(migrated.read.block,['private.example.test']);
-  assert.equal(P.check(migrated,'text','https://mail.google.com').ok,true);
+  assert.deepEqual(migrated,policy);
+  assert.deepEqual(savedPolicy({}),P.defaults());
+  assert.deepEqual(savedPolicy({}).read.block,[]);
+  assert.equal(P.check(migrated,'text','https://mail.google.com').ok,false);
+  assert.deepEqual(savedPolicy({policy:{...policy,read:{block:legacy}}}).read.block,legacy);
   assert.equal(P.check(migrated,'text','https://private.example.test').ok,false);
   assert.deepEqual(migrated.interact,policy.interact);
   assert.equal(policy.read.block.length,legacy.length+1);

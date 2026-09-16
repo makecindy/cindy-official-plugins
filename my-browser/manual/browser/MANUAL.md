@@ -47,3 +47,5 @@ Directory installation is a separate fallback. Chromium supports dragging a pack
 No exported cookies, hidden/password/payment-code fields, arbitrary JavaScript tool or private API token extraction. Normal reads/visits still contact websites and may affect their server-side read state; “read-only” does not mean zero website side effects. Data passed to AI may leave the device.
 
 Blocklists and redirects are checked on every request. Browser jobs are bound to one connection. Delivered actions are never automatically replayed. `execution:executed` proves DOM dispatch only; `unknown` requires checking the real page before deciding whether to repeat. Never use another tool or account to bypass a denial.
+
+`ADDRESS_UNVERIFIED`: the browser has no verified public peer address for this exact document. Do not loop, navigate URL variants, or auto-refresh. For an existing public tab opened before the extension started, ask the user to refresh that same tab once. Private addresses, missing cache/proxy address evidence and unsupported browser APIs cannot authorize extraction. Tab titles/URLs are redacted without verified document evidence.

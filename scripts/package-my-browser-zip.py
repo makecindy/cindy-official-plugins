@@ -3,7 +3,7 @@ from pathlib import Path
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 root = Path(__file__).resolve().parent.parent / 'my-browser'
-files = ['manifest.json', 'background.js', 'policy.js', 'popup.html', 'popup.js',
+files = ['manifest.json', 'background.js', 'policy.js', 'network-guard.js', 'popup.html', 'popup.js',
          'popup.css', 'icons/16.png', 'icons/32.png', 'icons/48.png', 'icons/128.png']
 target = root / 'downloads' / 'my-browser-chromium.zip'
 target.parent.mkdir(exist_ok=True)
