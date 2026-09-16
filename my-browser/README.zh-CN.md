@@ -109,6 +109,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.29 让 extract 的 URL 值落在声明的单值上限内。URL 整串传递后，只剩 8192 硬上限与总预算两道约束，因此 4001–6000 字符的 `href` 会被返回，而 `ghost.json` 声明每个字段值最多 4000 字符。现超过 4000（或超过剩余预算）的 URL 值整条丢弃并置 `truncated:true`，既满足声明的上限，又不在脱敏前切割 URL。覆盖：夹具中一条 4100 字符的 URL 必须返回 `null` 且 `truncated:true`；恢复只查 8192 即可复现 `a URL over the declared 4000-character value limit is dropped`。
 
+0.3.30 让该上限作用在脱敏之后的结果上。扩展在脱敏前检查长度，但把短凭证遮蔽为 `REDACTED` 会**加长**字符串（`code=x` → `code=REDACTED`），因此略低于 4000 的 URL 仍可能超出声明上限返回。现结果出口在脱敏后重新判定，超限值整条丢弃并置 `truncated`。覆盖：夹具中一条填充到略低于上限、且带 `code=x` 的 URL 必须返回 `null` 且 `truncated:true`；移除该后置检查即复现 `a URL that grows past the limit during redaction is dropped`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
