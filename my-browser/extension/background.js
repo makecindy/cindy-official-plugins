@@ -147,10 +147,19 @@ async function pageOperation(job,expectedUrl) {
     return style.display !== 'none' && style.visibility !== 'hidden' && !!(r.width || r.height);
   };
   const SENSITIVE_AUTOCOMPLETE = new Set(['one-time-code','cc-number','cc-csc','cc-exp','cc-exp-month','cc-exp-year','current-password','new-password']);
+  // Checkout and OTP markup often omits standard autocomplete and names the field instead, so the
+  // boundary is enforced conservatively from the element's own naming as well.
+  const SENSITIVE_NAMES = new Set(['password','passwd','pwd','pass','card','cardnumber','ccnumber','ccnum','creditcard','debitcard','cvv','cvv2','cvc','cvc2','csc','cid','securitycode','otp','totp','hotp','mfa','2fa','passcode','pin','verificationcode','verifycode','activationcode','onetimecode']);
+  const named = el => [el.getAttribute('name'),el.id,el.getAttribute('placeholder'),el.getAttribute('aria-label'),el.getAttribute('data-testid')]
+    .filter(Boolean).join(' ').replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   // autocomplete is a space-separated token list (e.g. "section-checkout billing cc-number"), so
   // exact attribute matching would let standard checkout and OTP fields through into refs and acts.
+  // Only form-like elements are judged by naming: a link or button labelled "apply gift card" is
+  // not a credential field, and hiding it would break legitimate interaction.
+  const isField = el => el.matches('input,textarea,select,[contenteditable=true]');
   const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
-    (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token));
+    (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token)) ||
+    (isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token)));
   let started = false;
   try {
     if (['snapshot','text','extract','content'].includes(action)) {

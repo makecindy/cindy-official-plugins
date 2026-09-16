@@ -62,6 +62,14 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
   // A long opaque value under an innocuous name is masked too.
   assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
+  // Path-embedded credentials: password-reset and magic links put the token in a path segment.
+  assert.equal(r(`https://example.test/reset/${code}`).includes(code),false);
+  assert.equal(r(`https://example.test/#/verify/${code}`).includes(code),false);
+  // Ordinary deep paths must keep working: a commit sha, a numeric id and a readable slug.
+  assert.equal(r('https://example.test/commit/'+'a'.repeat(40)),'https://example.test/commit/'+'a'.repeat(40));
+  assert.equal(r('https://example.test/user/12345'),'https://example.test/user/12345');
+  assert.equal(r('https://example.test/reset-password/success'),'https://example.test/reset-password/success');
+  assert.equal(r('https://example.test/notifications/mentions'),'https://example.test/notifications/mentions');
   // A plain route fragment carries no credential and keeps tabs identifiable.
   assert.equal(r('https://example.test/#/home'),'https://example.test/#/home');
   assert.equal(r('https://example.test/timeline?lang=en'),'https://example.test/timeline?lang=en');

@@ -85,6 +85,25 @@
   // Long, whitespace-free, token-shaped values (JWTs, opaque ids) are masked even under an
   // innocuous parameter name. Masking a rare long id is an acceptable loss; leaking a token is not.
   const opaque = value => value.length >= 32 && /^[A-Za-z0-9._~+/=-]+$/.test(value);
+  // Password-reset and magic links commonly embed the credential in a path segment
+  // (/reset/<token>, #/verify/<token>) rather than a query parameter.
+  const CONTEXT_WORDS = new Set(['reset','verify','verification','confirm','confirmation','activate','activation','invite','magic','auth','authenticate','authorize','unlock','recover','recovery','password','passcode','signin','signup','login','callback','redirect','token']);
+  const words = text => text.replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  // A token-like segment is long, punctuation-free and carries a digit, which separates opaque
+  // credentials from ordinary slugs and from long-but-readable path words.
+  const tokenish = segment => segment.length >= 16 && /^[A-Za-z0-9._~-]+$/.test(segment) && /\d/.test(segment);
+  // Only segments following a credential-context word are masked, so ordinary deep paths
+  // (/commit/<sha>, /user/12345, /wiki/long-article-title) keep working.
+  function redactSegments(path) {
+    const segments = path.split('/');
+    let context = false, changed = false;
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      if (words(segment).some(word => CONTEXT_WORDS.has(word))) { context = true; continue; }
+      if (context && tokenish(segment)) { segments[i] = 'REDACTED'; changed = true; }
+    }
+    return changed ? segments.join('/') : path;
+  }
   function redactUrl(raw) {
     if (typeof raw !== 'string') return raw;
     let u;
@@ -94,8 +113,15 @@
       if (SENSITIVE_KEYS.test(key) || opaque(value)) { u.searchParams.set(key,'REDACTED'); changed = true; }
     }
     // A fragment carrying key=value data is the classic implicit-flow token carrier, so it is
-    // masked whole. A plain route fragment (#/home) carries no credentials and keeps tabs identifiable.
+    // masked whole. A route fragment is treated like a path: plain routes (#/home) survive,
+    // while credential segments after a reset/verify word do not.
     if (u.hash.includes('=')) { u.hash = '#REDACTED'; changed = true; }
+    else if (u.hash) {
+      const bare = u.hash.slice(1), redacted = redactSegments(bare);
+      if (redacted !== bare) { u.hash = '#'+redacted; changed = true; }
+    }
+    const redactedPath = redactSegments(u.pathname);
+    if (redactedPath !== u.pathname) { u.pathname = redactedPath; changed = true; }
     return changed ? u.href : raw;
   }
   const api = { READ, INTERACT, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };

@@ -149,6 +149,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const resetLink=contentLinks.links.find(l=>/\/reset/.test(l.url));assert.ok(resetLink,'the credential-bearing link must still be listed');
   assert.equal(JSON.stringify(contentLinks.links).includes('44444444-4444-4444-8444-444444444444'),false,'a magic-link token in a page link must never reach the model');
   assert.ok(contentLinks.links.some(l=>l.url===url+'one'),'ordinary links stay usable');
+  assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
   r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);assert.equal(r.text.includes('11111111-1111-4111-8111-111111111111'),false);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
   r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'INTERACT_NOT_ALLOWED');
   r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.error,'PERMISSION_NOT_GRANTED');assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.length,0);
@@ -163,6 +164,13 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // would let those fields stay actionable and visible as refs.
   r=await tool('browser_act',{url,kind:'type',selector:'#card',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
   r=await tool('browser_act',{url,kind:'type',selector:'#otp',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
+  // Fields that omit standard autocomplete but name themselves must be blocked too.
+  r=await tool('browser_act',{url,kind:'type',selector:'#otp-plain',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
+  r=await tool('browser_act',{url,kind:'type',selector:'#card-plain',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
+  assert.equal(/Verification digits/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named otp must not be exposed as a ref');
+  assert.equal(/Payment card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named card-number must not be exposed as a ref');
+  // The naming heuristic must stay scoped to fields: a button that merely mentions a card stays usable.
+  assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
   assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');
   assert.equal(/One-time code/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'OTP field must not be exposed as an actionable ref');
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
