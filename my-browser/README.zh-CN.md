@@ -47,7 +47,7 @@ Safari 继续使用商店或已签名、公证的应用；该发布渠道尚未�
 ```sh
 python3 scripts/package-my-browser-zip.py
 node scripts/validate-plugin-manifest.mjs ./my-browser
-node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs
+node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs .tests/my-browser-policy-sync.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs
 # 有 Xcode 的 macOS 构建机；必须使用新输出目录，不覆盖已有构建
 node scripts/build-my-browser.mjs /absolute/output/directory all
@@ -56,7 +56,7 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 构建器生成 Chrome／Edge 商店 ZIP、Safari Xcode 项目及通用应用。没有签名配置时明确标记 Safari 产物**不可作为普通用户分发包**。可通过 `MY_BROWSER_SIGN_IDENTITY` 与 `MY_BROWSER_DEVELOPMENT_TEAM` 启用签名；`MY_BROWSER_NOTARY_PROFILE` 指向已配置的 Apple notarytool 钥匙串配置。凭证明文不进入源码、插件设置或产物。仅在公证及系统检查成功后将输出的 `native/` 放入插件打包。本机没有可用签名身份，因此未验证签名／公证执行路径。
 
 2026-09-15 本地验证：
-- 清单校验、30 项 Node／HTTP／本地化／预配置／发布流程测试通过。
+- 清单校验、55 项 Node／HTTP／本地化／预配置／发布流程测试，加隔离 Chromium 集成套件全部通过（共56项）。
 - 真实 Chromium 集成覆盖读取／提取／交互、水合等待、一次读取 X 结构夹具、增量边界、过期 ref、权限拒绝／撤销、重定向、标签回收、弹出页、配对取消／持久化、设置失败及330px窄屏。
 - X 结构**测试夹具**（不是实际 X 延迟）：一次读取返回5条记录，记录的一轮为714ms、792字节结果 JSON。
 - Safari 通用 Release 构建成功；未宣称签名、公证、App Store 发布或真实 Safari 运行通过。
@@ -64,6 +64,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 - 原0.2.0 已在真实 Cindy／日常 Chrome 验证 example.com 及用户 X 通知读取，交互保持拒绝。随后已在 Cindy 装入0.3.0，并重新加载日常 Chrome 扩展：真实登录态 X 提及页一次返回5条结构化回复（桥接总计4329ms，其中等待内容1785ms）。第二次增量读取找到锚点、返回其前方零条已渲染记录，耗时22ms；这不代表重新联网刷新或全部通知都已查全。装入后的按需手册读取成功，原有网站权限保留。
 
 0.3.1 修复跳转后加载超时导致重复开页、聚焦后丢失网址关联，以及只删除记录却未关闭实际标签页的回收漏洞。受保护标签仍计入上限；意外导航和容量耗尽返回不可自动重试错误。新增5项回归测试，并在真实 Chromium 中验证重定向后重复读取不会增加标签页。
+
+0.3.8 修复 review 发现的权限时序竞争：`sync()` 读取已存策略与下发到 worker 是两步，设置页保存若落在中间，旧快照会覆盖用户刚撤销的策略，令该网站在下次同步前仍可操作。现读取与下发与 `save()` 共用同一临界区。两项回归测试以打桩宿主 API 运行真实 `main.js`：一项把 sync 阻在读取与下发之间、让保存超车，断言撤销既保留在存储中，也对后续工具调用保持拒绝；另一项检查并发保存与工具调用既不失败也不死锁。两项在修复前的 `sync()` 上均失败。
 
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 

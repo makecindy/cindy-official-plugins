@@ -16,14 +16,19 @@ async function load() {
   const cfg = await r.json();
   return {cfg,policy:globalThis.myBrowserSavedPolicy(cfg,P)};
 }
-async function sync() {
-  await writes;
-  const {cfg,policy} = await load();
-  const paired = await node('setTrustedClients',{clients:cfg.pairedClients || []});
-  if (!paired?.ok) throw new Error('Cannot synchronize paired browsers.');
-  const r = await node('setPolicy',{policy});
-  if (!r?.ok) throw new Error(r?.message || 'Cannot apply site permissions. Re-enable the plugin.');
-  return policy;
+// Reading stored permissions and applying them to the worker must be one critical section
+// shared with save(). If a settings save lands between the read and the apply, this stale
+// snapshot would overwrite the policy the user just revoked and keep the site actionable
+// until the next sync. Never call sync() from inside a serialized section (that deadlocks).
+function sync() {
+  return serialize(async () => {
+    const {cfg,policy} = await load();
+    const paired = await node('setTrustedClients',{clients:cfg.pairedClients || []});
+    if (!paired?.ok) throw new Error('Cannot synchronize paired browsers.');
+    const r = await node('setPolicy',{policy});
+    if (!r?.ok) throw new Error(r?.message || 'Cannot apply site permissions. Re-enable the plugin.');
+    return policy;
+  });
 }
 async function save(next, base) {
   const P = await policyReady;
