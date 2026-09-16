@@ -80,7 +80,7 @@
     },
     {
       "name": "google_calendar_run",
-      "description": "Execute a discovered gog command with a connected account. Prefer this for new tasks, including file and attachment operations. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -120,75 +120,6 @@
       "parameters": {
         "type": "object",
         "properties": {}
-      }
-    },
-    {
-      "name": "google_calendar",
-      "description": "执行 Google Calendar 操作：list_calendars、list_events、get_event、create_event、update_event、delete_event。创建、修改和删除日程必须有用户明确意图；删除前通常先查询，delete_event 可同时传已知 summary/start/end/location 生成划线回执。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "list_calendars",
-              "list_events",
-              "get_event",
-              "create_event",
-              "update_event",
-              "delete_event"
-            ]
-          },
-          "account": {
-            "type": "string",
-            "description": "Opaque account ID returned by google_calendar_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
-          },
-          "calendar_id": {
-            "type": "string"
-          },
-          "time_min": {
-            "type": "string",
-            "description": "ISO8601"
-          },
-          "time_max": {
-            "type": "string",
-            "description": "ISO8601"
-          },
-          "max_results": {
-            "type": "number"
-          },
-          "event_id": {
-            "type": "string"
-          },
-          "summary": {
-            "type": "string",
-            "description": "create/update:标题；delete:已知标题快照"
-          },
-          "description": {
-            "type": "string"
-          },
-          "location": {
-            "type": "string",
-            "description": "create/update:地点；delete:已知地点快照"
-          },
-          "start": {
-            "type": "string",
-            "description": "create/update:开始时间；delete:已知开始时间快照（ISO8601 或 YYYY-MM-DD）"
-          },
-          "end": {
-            "type": "string",
-            "description": "create/update:结束时间；delete:已知结束时间快照（ISO8601 或 YYYY-MM-DD）"
-          },
-          "attendees": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "action"
-        ]
       }
     }
   ],

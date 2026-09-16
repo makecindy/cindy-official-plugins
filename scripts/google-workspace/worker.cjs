@@ -130,6 +130,16 @@ function localPath(value, directory) {
   if (resolvedRelative === '..' || resolvedRelative.startsWith('..' + path.sep) || path.isAbsolute(resolvedRelative)) throw new Error('File escapes the current workspace');
   return target;
 }
+function optionValue(key, item, directory) {
+  const fileFlag = key === 'attach' || key === 'out' || key === 'out-dir' || key.endsWith('-file');
+  if (fileFlag) return localPath(item, directory);
+  // gog's JSON input resolver trims whitespace and expands @file references.
+  // Validate the referenced path before forwarding it, just like --body-file.
+  if (key.endsWith('-json') && typeof item === 'string' && item.trim().startsWith('@')) {
+    return '@' + localPath(item.trim().slice(1).trim(), directory);
+  }
+  return item;
+}
 async function handle(message, execution) {
   const params = message.params || {};
   const tree = await schema();
@@ -160,8 +170,7 @@ async function handle(message, execution) {
     if (items.length > 100) return failure('Too many flag values');
     for (const item of items) {
       if (!['string', 'number', 'boolean'].includes(typeof item) || String(item).includes('\0')) return failure('Invalid option value');
-      const fileFlag = key === 'attach' || key === 'out' || key === 'out-dir' || key.endsWith('-file');
-      const resolved = fileFlag ? localPath(item, cwd) : item;
+      const resolved = optionValue(key, item, cwd);
       argv.push('--' + key + '=' + String(resolved));
     }
   }

@@ -26,7 +26,7 @@ Node 是可信的当前用户级代码，不是系统沙箱。
 正式稳定版或 Beta 版实机验证后才能填写真实的 `minCindyVersion`。
 
 Google 插件共享 `scripts/google-workspace` 生成源，但各自打包，不存在插件间运行时
-依赖。旧工具仅保留历史接口兼容，新能力通过 gog schema/run 提供。
+依赖。所有 Google 业务操作统一通过 gog schema/run 提供；账号发现与设置界面仍由插件负责。
 
 账号昵称等插件自定义偏好属于插件，不进入 Host 的 OAuth 账号模型。通过已有同源
 `/kv` 保存，由插件设置页和账号工具按 Host 账号 ID 合并；凭据注入仍只传选定的

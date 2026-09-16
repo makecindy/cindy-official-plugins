@@ -40,7 +40,10 @@ var googleAccountMetadata = (function () {
   }
   return {
     list: async function (key, accounts) {
-      var names = labels(await read(), key);
+      var names = {};
+      // Labels are optional; an unavailable KV must not hide OAuth identities.
+      // Writes still require a successful read to avoid overwriting preferences.
+      try { names = labels(await read(), key); } catch (_) { /* show accounts without labels */ }
       return accounts.map(function (account) {
         var nickname = Object.prototype.hasOwnProperty.call(names, account.id) ? names[account.id] : '';
         // Do not accept a Host nickname as a second source of truth.

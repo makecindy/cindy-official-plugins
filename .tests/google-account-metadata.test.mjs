@@ -85,8 +85,25 @@ test('存储读写失败不报告成功，也不使用 Host 昵称兜底', async
       ? Promise.resolve({ ok: false }) : f.env.fetch(url, options) }).googleAccountMetadata;
     await assert.rejects(api.save('gmail_account', 'acc-work', '公司'), /preferences/);
     assert.deepEqual(f.data(), { unrelated: { retained: true } });
-    if (failedMethod === 'GET') await assert.rejects(api.list('gmail_account', f.accounts), /preferences/);
+    if (failedMethod === 'GET') {
+      const accounts = await api.list('gmail_account', f.accounts);
+      assert.equal(accounts.length, 2);
+      assert.equal(accounts[0].id, 'acc-work');
+      assert.equal(accounts[0].nickname, '');
+    }
   }
+});
+
+test('昵称 KV JSON 损坏不影响账号列表，但保存仍拒绝覆盖', async () => {
+  const f = fixture();
+  const api = f.context({ fetch: (url, options = {}) => url === '/kv'
+    ? Promise.resolve({ ok: true, json: async () => { throw new SyntaxError('invalid JSON'); } })
+    : f.env.fetch(url, options) }).googleAccountMetadata;
+  const accounts = await api.list('gmail_account', f.accounts);
+  assert.equal(accounts.length, 2);
+  assert.equal(accounts[0].nickname, '');
+  await assert.rejects(api.save('gmail_account', 'acc-work', '公司'), /invalid JSON/);
+  assert.equal(f.calls.filter(call => call.method === 'PUT').length, 0);
 });
 
 for (const [plugin, prefix] of Object.entries(plugins)) {
@@ -125,6 +142,10 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     assert.equal((await call(prefix + '_run', { account: '公司邮箱', command: ['list'] })).ok, false);
     assert.equal((await call(prefix + '_run', { account: 'acc-personal', command: ['list'] })).ok, false);
     assert.equal(requests.length, 0);
+    f.accounts[0].scopeStale = true;
+    assert.equal((await call(prefix + '_run', { account: 'acc-work', command: ['list'] })).ok, false);
+    assert.equal(requests.length, 0);
+    f.accounts[0].scopeStale = false;
     assert.equal((await call(prefix + '_run', { account: 'acc-work', command: ['list'], session_context: { workdir_is_local: true, workdir_is_read_only: false, workdir: '/test-workdir' } })).ok, true);
     assert.equal(requests[0].authAccount, 'acc-work');
     assert.equal(JSON.stringify(requests[0]).includes('工作'), false);

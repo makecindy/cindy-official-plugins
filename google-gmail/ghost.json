@@ -5,7 +5,7 @@
   "name": "Gmail",
   "description": "独立连接 Gmail：搜索、阅读邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由主机托管。",
   "whenToUse": "需要查 Gmail 邮件、读取邮件正文、列出标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -82,7 +82,7 @@
     },
     {
       "name": "gmail_run",
-      "description": "Execute a discovered gog command with a connected account. Prefer this for new tasks, including file and attachment operations. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -122,66 +122,6 @@
       "parameters": {
         "type": "object",
         "properties": {}
-      }
-    },
-    {
-      "name": "gmail",
-      "description": "执行 Gmail 操作：search 搜索邮件，read 读取正文，send 发送邮件，draft 保存草稿，list_labels 列出标签。modify_labels 暂不可用并返回权限不足。发送动作必须由用户明确表达。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "search",
-              "read",
-              "send",
-              "draft",
-              "modify_labels",
-              "list_labels"
-            ]
-          },
-          "account": {
-            "type": "string",
-            "description": "Opaque account ID returned by gmail_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
-          },
-          "query": {
-            "type": "string",
-            "description": "search 使用 Gmail 搜索语法"
-          },
-          "max_results": {
-            "type": "number",
-            "description": "search 返回条数，默认 5，最大 10"
-          },
-          "message_id": {
-            "type": "string"
-          },
-          "to": {
-            "type": "string",
-            "description": "send/draft 收件人，多个用逗号分隔"
-          },
-          "subject": {
-            "type": "string"
-          },
-          "body_text": {
-            "type": "string"
-          },
-          "add_label_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "remove_label_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "action"
-        ]
       }
     }
   ],

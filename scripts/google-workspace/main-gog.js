@@ -1,5 +1,22 @@
 /* global cindy */
-// Generated plugin-local bridge. Existing named tools remain compatibility-only.
+// Generated plugin-local bridge. Google business operations run only through gog.
+var SECRET_KEY = '__OAUTH_KEY__';
+var PLUGIN_NAME = '__PLUGIN_NAME__';
+function fail(message) { return { ok: false, message: message }; }
+async function listAccounts() {
+  var response = await fetch('/oauth');
+  if (!response.ok) return fail('账号状态查询失败(' + response.status + ')');
+  var entries = await response.json();
+  var entry = entries.find(function (item) { return item && item.key === SECRET_KEY; });
+  if (!entry || !entry.clientConfigured) return fail('内置应用身份缺失，请升级 Cindy 后重试');
+  if (!entry.accounts.length) return fail('尚未连接账号，请到「' + PLUGIN_NAME + '」详情页单独授权');
+  return { ok: true, result: {
+    accounts: (await googleAccountMetadata.list(SECRET_KEY, entry.accounts)).map(function (account) {
+      return { id: account.id, email: account.label, nickname: account.nickname || '',
+        status: account.status, scope_stale: account.scopeStale === true };
+    }),
+  } };
+}
 async function selectGoogleAccount(accountId) {
   var listed = await listAccounts();
   if (!listed.ok) return listed;
@@ -9,7 +26,7 @@ async function selectGoogleAccount(accountId) {
   }
   var account = accountId === undefined ? accounts[0] : accounts.find(function (item) { return item.id === accountId; });
   if (!account) return fail('尚未执行：指定账号不存在，请重新选择账号；不会切换到其他账号。');
-  if (account.status !== 'connected') {
+  if (account.status !== 'connected' || account.scope_stale === true) {
     return fail('尚未执行：账号 ' + (account.email || account.id) + ' 授权已失效或权限不足，请到插件详情页重新连接此账号。');
   }
   return { ok: true, accountId: account.id };
@@ -18,11 +35,20 @@ async function selectGoogleAccount(accountId) {
   var PREFIX = '__TOOL_PREFIX__';
   cindy.onHostMessage(async function (message) {
     if (!message || message.type !== 'tool-call') return;
-    if (message.tool !== PREFIX + '_schema' && message.tool !== PREFIX + '_run') return;
     var args = message.args || {};
     var isSchema = message.tool === PREFIX + '_schema';
     var context = args.session_context;
     try {
+      if (message.tool === PREFIX + '_accounts') {
+        var listed = await listAccounts();
+        await cindy.send(Object.assign({ type: 'tool-result', callId: message.callId }, listed));
+        return;
+      }
+      if (message.tool !== PREFIX + '_schema' && message.tool !== PREFIX + '_run') {
+        await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
+          message: '尚未执行：未知工具，请重新查看当前插件工具列表。' });
+        return;
+      }
       if (!isSchema) {
         var selected = await selectGoogleAccount(args.account);
         if (!selected.ok) {
@@ -49,6 +75,10 @@ async function selectGoogleAccount(accountId) {
         return;
       }
       var result = response.result;
+      if (!isSchema && result.ok && typeof renderGoogleCalendarResult === 'function') {
+        // Presentation is optional and must never change a completed operation's outcome.
+        try { await renderGoogleCalendarResult(message.callId, args.command, result.data); } catch (_) { /* preserve result */ }
+      }
       await cindy.send({ type: 'tool-result', callId: message.callId, ok: !!result.ok,
         ...(result.ok ? { result: result.data } : { message: '[' + result.execution + '] ' + result.message }) });
     } catch (_error) {

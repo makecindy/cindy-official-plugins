@@ -35,8 +35,10 @@ for (const [id, prefix] of Object.entries(plugins)) {
     for (const name of [`${prefix}_schema`, `${prefix}_run`]) {
       assert.equal(Object.hasOwn(manifest.tools.find(tool => tool.name === name), 'inputSchema'), false);
     }
-    assert.equal(tools.find(tool => tool.name === prefix).parameters.properties.account.description,
-      run.parameters.properties.account.description);
+    assert.deepEqual(tools.map(tool => tool.name), [`${prefix}_schema`, `${prefix}_run`, `${prefix}_accounts`]);
+    const main = readFileSync(new URL(`../${id}/main.js`, import.meta.url), 'utf8');
+    assert.doesNotMatch(main, /cindy\.fetch|async function api\(|https:\/\/.*googleapis\.com/);
+    assert.match(main, /cindy\.node\.request/);
     assert.match(run.parameters.properties.account.description, /Multiple accounts require an explicit choice/);
   });
 }

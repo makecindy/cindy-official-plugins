@@ -81,7 +81,7 @@
     },
     {
       "name": "google_sheets_run",
-      "description": "Execute a discovered gog command with a connected account. Prefer this for new tasks, including file and attachment operations. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -121,47 +121,6 @@
       "parameters": {
         "type": "object",
         "properties": {}
-      }
-    },
-    {
-      "name": "google_sheets",
-      "description": "执行 Google Sheets 操作：list_sheets、read_range、write_range。写入单元格必须先向用户展示目标范围与内容并获得确认。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "list_sheets",
-              "read_range",
-              "write_range"
-            ]
-          },
-          "account": {
-            "type": "string",
-            "description": "Opaque account ID returned by google_sheets_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
-          },
-          "spreadsheet_id": {
-            "type": "string",
-            "description": "表格 id 或完整 Google Sheets 链接"
-          },
-          "range": {
-            "type": "string",
-            "description": "A1 记法，例如 Sheet1!A1:D20"
-          },
-          "values": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            },
-            "description": "write_range 使用的二维数组"
-          }
-        },
-        "required": [
-          "action",
-          "spreadsheet_id"
-        ]
       }
     }
   ],

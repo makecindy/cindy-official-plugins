@@ -79,7 +79,7 @@
     },
     {
       "name": "google_drive_run",
-      "description": "Execute a discovered gog command with a connected account. Prefer this for new tasks, including file and attachment operations. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -119,83 +119,6 @@
       "parameters": {
         "type": "object",
         "properties": {}
-      }
-    },
-    {
-      "name": "google_drive",
-      "description": "执行 Google Drive 操作：search、list_folder、get_meta、read、download、upload、move、delete。search 默认把 query 当文件名片段；只有显式传 query_mode=raw 才按 Drive 查询语法发送。download 需要调用方通过 ghost_call 顶层 save_dir 提供落盘目录，主机据此注入 save_deposit。删除、覆盖、移动和上传属于写操作，必须有用户明确意图。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "search",
-              "list_folder",
-              "get_meta",
-              "read",
-              "download",
-              "upload",
-              "move",
-              "delete"
-            ]
-          },
-          "account": {
-            "type": "string",
-            "description": "Opaque account ID returned by google_drive_accounts; may be omitted only with a sole account. Multiple accounts require an explicit choice, including when some are expired."
-          },
-          "query": {
-            "type": "string",
-            "description": "搜索词；默认按文件名片段匹配，query_mode=raw 时按 Drive 查询语法发送"
-          },
-          "query_mode": {
-            "type": "string",
-            "enum": [
-              "name",
-              "raw"
-            ],
-            "description": "search 查询模式，默认 name；raw 表示显式使用 Drive 查询语法"
-          },
-          "max_results": {
-            "type": "number"
-          },
-          "file_id": {
-            "type": "string"
-          },
-          "folder_id": {
-            "type": "string"
-          },
-          "export_mime": {
-            "type": "string"
-          },
-          "filename": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          },
-          "mime_type": {
-            "type": "string"
-          },
-          "parent_folder_id": {
-            "type": "string"
-          },
-          "new_parent_id": {
-            "type": "string"
-          },
-          "new_name": {
-            "type": "string"
-          },
-          "permanent": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "action"
-        ]
       }
     }
   ],

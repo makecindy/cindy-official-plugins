@@ -31,8 +31,8 @@ Static bindings without `oauthSecret` are unchanged. This new capability require
 a supporting Cindy release; set `minCindyVersion` only after stable or Beta device validation.
 
 The Google packages use the shared generation sources in `scripts/google-workspace`
-but ship independent copies, not runtime plugin dependencies. Their old tool
-interfaces are frozen compatibility paths; new operations use gog schema/run.
+but ship independent copies, not runtime plugin dependencies. All Google business
+operations use gog schema/run; account discovery and settings remain plugin-owned.
 
 Account nicknames and other plugin-specific preferences belong to the plugin,
 not the Host OAuth account model. Store them through the existing same-origin

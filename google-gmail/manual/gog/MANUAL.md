@@ -6,10 +6,8 @@ Use gmail_accounts to select an opaque account ID, then gmail_schema to discover
 
 Example: schema command [] lists the service. Request a specific path to inspect its positional arguments and flags. Pass positionals in arguments and flags in options, without --. Account/auth/config overrides, daemons, hooks and additional-provider integrations are intentionally unavailable. Google may reject commands not covered by the account’s existing scopes; do not reauthorize or enlarge scopes automatically.
 
-For Gmail attachments inspect ["attachment"], ["send"] or ["drafts","create"]. Use an explicit output path in the current local workspace for downloads, and existing authorized input files for uploads/attachments. Do not access unrelated local files. Local file operations require a local writable session; readonly sessions block the run entry. Remote workspace paths are not local files.
+For Gmail attachments inspect ["attachment"], ["send"] or ["drafts","create"]. Use an explicit output path in the current local workspace for downloads, and existing authorized input files for uploads/attachments. Do not access unrelated local files. Local file operations require a local session; readonly sessions block writes. Remote workspace paths are not local files.
 
 Cindy owns OAuth and refresh tokens. This trusted plugin Node worker receives only the selected account’s short-lived access token and passes it to an unmodified, checksum-pinned gog child process. It does not use gog login, import accounts or persist tokens. Each call has an isolated config directory and environment.
 
 Obtain clear user intent before sending, modifying or deleting. A timeout, process loss, output limit or nonzero exit after launch is an UNKNOWN outcome: verify the remote state before retrying a write. No automatic write retries.
-
-The pre-existing gmail tool is retained only for existing workflows and their historical result/card/file-ticket contracts. New operations use the gog entry; no fallback from gog failures to the old API path.
