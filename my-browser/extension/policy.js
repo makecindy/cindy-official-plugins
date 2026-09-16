@@ -81,7 +81,15 @@
   }
   // Tab and result URLs can carry OAuth codes, reset/magic-link tokens or bearer tokens in the
   // query or the fragment. Anything handed to the model goes through here first.
-  const SENSITIVE_KEYS = /^(?:code|access_token|id_token|refresh_token|token|auth|authorization|session|sessionid|sid|state|nonce|password|passwd|pwd|secret|client_secret|api_key|apikey|key|signature|sig|otp|pin|ticket|assertion|saml|sso|reset|invite|verifier|challenge)$/i;
+  // Credential semantics are matched per word, not by whole key: composite names such as
+  // reset_token or magic_link_token must not slip through just because the key is longer.
+  const CREDENTIAL_WORDS = new Set(['code','token','secret','key','apikey','password','passwd','pwd','pass','session','sessionid','sid','state','nonce','auth','authorization','signature','sig','otp','pin','ticket','assertion','saml','sso','reset','invite','verifier','challenge','access','refresh','bearer','unlock','recover','recovery','magic','invitation','activation','verification','credential','credentials']);
+  const credentialKey = key => {
+    const decoded = normalizeEncoding(key);
+    // `access_token`, `reset-token` and `magicLinkToken` all end up as separate words here.
+    const parts = words(decoded.replace(/([a-z])([0-9])/g,'$1 $2'));
+    return parts.length > 0 && parts.some(word => CREDENTIAL_WORDS.has(word));
+  };
   // Long, whitespace-free, token-shaped values (JWTs, opaque ids) are masked even under an
   // innocuous parameter name. Masking a rare long id is an acceptable loss; leaking a token is not.
   const opaque = value => value.length >= 32 && /^[A-Za-z0-9._~+/=-]+$/.test(value);
@@ -119,6 +127,14 @@
     }
     return changed ? segments.join('/') : path;
   }
+  // A parameter value can itself be a URL or path pointing at a credential (?next=%2Freset%2Ftoken).
+  // Recursing through the same analysis keeps the two shapes consistent instead of listing key names.
+  function sanitizeNested(decoded) {
+    if (typeof decoded !== 'string') return decoded;
+    if (/^https?:\/\//i.test(decoded)) return redactUrl(decoded);
+    if (decoded.startsWith('/')) return redactSegments(decoded);
+    return decoded;
+  }
   function redactUrl(raw) {
     if (typeof raw !== 'string') return raw;
     let u;
@@ -128,7 +144,10 @@
     // check inspects for page-supplied hrefs.
     if (u.username || u.password) { u.username = ''; u.password = ''; changed = true; }
     for (const [key,value] of [...u.searchParams]) {
-      if (SENSITIVE_KEYS.test(key) || opaque(normalizeEncoding(value))) { u.searchParams.set(key,'REDACTED'); changed = true; }
+      const decoded = normalizeEncoding(value);
+      if (credentialKey(key) || opaque(decoded)) { u.searchParams.set(key,'REDACTED'); changed = true; continue; }
+      const nested = sanitizeNested(decoded);
+      if (nested !== decoded) { u.searchParams.set(key,nested); changed = true; }
     }
     // A fragment carrying key=value data is the classic implicit-flow token carrier, so it is masked
     // whole; the test uses the decoded form so #code%3D... cannot evade it. A route fragment is

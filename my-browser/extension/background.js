@@ -139,7 +139,8 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
 // of real Elements, not attributes a hostile page could overwrite or forge.
 async function pageOperation(job,expectedUrl) {
   const fail = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
-  if (location.href !== expectedUrl) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
+  // The target URL is passed capped, so a page URL longer than the cap is compared by prefix.
+  if (!location.href.startsWith(expectedUrl)) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
   const a = job.payload;
   const action = job.action;
   const TITLE_MAX = 300, LINK_URL_HARD_MAX = 8192, PAGE_LINKS_BUDGET = 200000;
@@ -386,15 +387,24 @@ async function pageOperation(job,expectedUrl) {
     return fail('PAGE_OPERATION_FAILED',started ? 'The page operation was interrupted. Check the actual page before repeating it.' : 'Check the CSS selector and page state, then read again.',started ? 'unknown' : 'not_executed');
   }
 }
-const LINK_URL_MAX = 2048, LINKS_BUDGET = 20000;
-// Page-supplied links arrive whole from the injected function. Redaction runs on the entire URL and
-// the transfer cap only on the redacted result, so a credential can never be cut in half and slip
-// past the sanitizer.
-function sanitizeLinks(result) {
-  if (!result || !Array.isArray(result.links)) return result;
-  let truncated = !!result.truncated, budget = LINKS_BUDGET;
+const LINK_URL_MAX = 2048, LINKS_BUDGET = 20000, PAGE_URL_MAX = 8192;
+// Page-supplied URLs arrive whole from the injected function. Redaction runs on the entire string and
+// the transfer cap only on the redacted result, so a credential can never be cut in half and slip past
+// the sanitizer. A redirect can also stretch the page URL itself far past the request limit, which
+// would make the bridge reject the whole result and time the caller out.
+function sanitizeResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  let truncated = !!result.truncated;
+  const out = {...result};
+  if (typeof out.url === 'string') {
+    const redacted = P.redactUrl(out.url);
+    out.url = redacted.length > PAGE_URL_MAX ? redacted.slice(0,PAGE_URL_MAX) : redacted;
+    if (redacted.length > PAGE_URL_MAX) truncated = true;
+  }
+  if (!Array.isArray(out.links)) { out.truncated = truncated; return out; }
+  let budget = LINKS_BUDGET;
   const links = [];
-  for (const link of result.links) {
+  for (const link of out.links) {
     // Redaction runs on the whole URL, the transfer cap on the redacted string, and a cap that
     // actually shortens a URL is reported: an unmarked cut would look like a complete URL.
     const redacted = P.redactUrl(String(link?.url));
@@ -404,7 +414,7 @@ function sanitizeLinks(result) {
     budget -= url.length;
     links.push({...link,url});
   }
-  return {...result,links,truncated};
+  return {...out,links,truncated};
 }
 async function handle(job,policy,target) {
   P.validate(job.action,job.payload);
@@ -436,15 +446,17 @@ async function handle(job,policy,target) {
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
     // before the page is touched: a revocation during preparation must not be bypassed.
     const documentId=await network.document(tab.id);
-    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url});
+    // A redirect can stretch the tab URL past the bridge's request limit; the authorize call only needs
+    // the scheme and host for its policy check, so a bounded copy is sent instead of the whole string.
+    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX)});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
-    const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});
+    const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url.slice(0,PAGE_URL_MAX)]});
     const raw = out?.[0]?.documentId === documentId ? out[0].result : null;
-    const result = sanitizeLinks(raw);
+    const result = sanitizeResult(raw);
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',failureState());
     return result?.error && navigating ? {...result,execution:'unknown'} : result;

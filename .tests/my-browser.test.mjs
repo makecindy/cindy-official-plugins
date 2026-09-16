@@ -83,6 +83,13 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r('https://example.test/user/12345'),'https://example.test/user/12345');
   assert.equal(r('https://example.test/reset-password/success'),'https://example.test/reset-password/success');
   assert.equal(r('https://example.test/notifications/mentions'),'https://example.test/notifications/mentions');
+  // Credential semantics are matched per word and nested URLs are inspected recursively, so composite
+  // key names and ?next=/reset/<token> cannot smuggle a credential through.
+  assert.equal(r(`https://example.test/cb?reset_token=${code}`).includes(code),false,'a composite key must be masked');
+  assert.equal(r(`https://example.test/cb?magic_link_token=${code}`).includes(code),false,'underscored composite keys must be masked');
+  assert.equal(r(`https://example.test/cb?next=${encodeURIComponent('https://example.test/reset/'+code)}`).includes(code),false,'a nested URL credential must be masked');
+  assert.equal(r(`https://example.test/cb?next=${encodeURIComponent('/reset/'+code)}`).includes(code),false,'a nested path credential must be masked');
+  assert.equal(r('https://example.test/cb?page=2&sort=name'),'https://example.test/cb?page=2&sort=name','ordinary parameters stay untouched');
   // A plain route fragment carries no credential and keeps tabs identifiable.
   assert.equal(r('https://example.test/#/home'),'https://example.test/#/home');
   assert.equal(r('https://example.test/timeline?lang=en'),'https://example.test/timeline?lang=en');

@@ -21,7 +21,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // only for named positive fixtures at the browser API boundary; private.test keeps
   // the real loopback address. Production guard and document binding run unchanged.
   const networkShim=`const nativeCompleted=chrome.webRequest.onCompleted.addListener.bind(chrome.webRequest.onCompleted);
-  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','links.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
+  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','links.test','pageurl.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
   const backgroundPath=path.join(extensionDir,'background.js');
   await fs.writeFile(backgroundPath,networkShim+await fs.readFile(backgroundPath,'utf8'));
   const {generateKeyPairSync,createHash}=require('node:crypto');
@@ -37,6 +37,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
+      if(req.headers.host?.startsWith('pageurl.test')){res.setHeader('Content-Type','text/html');
+        return res.end('<title>Page url fixture</title><script>history.replaceState({},"","/"+"p".repeat(600000));</script><p>Page url body</p>');}
       if(req.headers.host?.startsWith('links.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>Links fixture</title><p>body</p>'+[1,2,3,4].map(n=>'<a href="/l'+n+'">L'+n+'</a>').join('')+'<a href="mailto:fixture@example.test">Mail</a><a href="tel:+10000000000">Call</a>');}
       if(req.headers.host?.startsWith('cv.test')){res.setHeader('Content-Type','text/html');
@@ -273,6 +275,13 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // reaching the limit exactly on the last http link is not a cut.
   const exact=await tool('browser_read',{url:'http://links.test/',mode:'content',limit:4});
   assert.equal(exact.links.length,4);assert.equal(exact.truncated,false,'trailing non-http links are not a cut');
+  // A redirect or replaceState can stretch the page URL itself past the bridge request limit; the
+  // result must stay bounded instead of being rejected and timing the caller out.
+  const pageUrl=await tool('browser_read',{url:'http://pageurl.test/',mode:'text',maxChars:300});
+  assert.equal(pageUrl.ok,true,JSON.stringify(pageUrl).slice(0,160));
+  assert.ok(String(pageUrl.url).length<=8192,'the page URL must be bounded');
+  assert.equal(pageUrl.truncated,true,'bounding the page URL is a cut');
+  assert.ok(pageUrl.text.includes('Page url body'),'the page content is still returned');
   // The page carries a password field so the filtered walker path runs; the on-screen
   // content-visibility:auto element stays readable and the engine-skipped one is excluded.
   const cv=await tool('browser_read',{url:'http://cv.test/',mode:'text',maxChars:30000});

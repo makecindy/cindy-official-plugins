@@ -111,6 +111,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.30 让该上限作用在脱敏之后的结果上。扩展在脱敏前检查长度，但把短凭证遮蔽为 `REDACTED` 会**加长**字符串（`code=x` → `code=REDACTED`），因此略低于 4000 的 URL 仍可能超出声明上限返回。现结果出口在脱敏后重新判定，超限值整条丢弃并置 `truncated`。覆盖：夹具中一条填充到略低于上限、且带 `code=x` 的 URL 必须返回 `null` 且 `truncated:true`；移除该后置检查即复现 `a URL that grows past the limit during redaction is dropped`。
 
+0.3.31 把凭证识别从枚举键名改为按词判定，并给页面 URL 加上边界。查询键现在按词拆分判定，因此 `reset_token`、`magic_link_token` 这类组合键即使值很短也会被遮蔽；值本身是 URL 或路径时递归分析（`?next=%2Freset%2F<token>`）。另外，重定向或 `history.replaceState` 可把页面 URL 拉长到远超桥接请求上限，导致结果根本发不出去：现对三个出口分别限长——发给 `/authorize` 的 URL、传给注入函数的 URL、以及结果里的 URL；注入函数内的导航校验改为比较有界前缀而非整串。覆盖：组合键、嵌套 URL 与 `?page=2&sort=name` 保持不变的单元断言；`pageurl.test` 把自身改写为 60 万字符路径后必须读取成功且 URL 在 8192 以内。回退这些限长即复现该次读取的 `BROWSER_TIMEOUT`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
