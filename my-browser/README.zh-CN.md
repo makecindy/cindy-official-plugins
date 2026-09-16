@@ -97,6 +97,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.23 另外拒绝不渲染的根节点。`TreeWalker` 不会对它收到的 `root` 调用过滤器，所以当 `selector` 命中 `display:none` 的包装元素（或隐藏祖先下的元素）时会落到 `innerText`，而未渲染节点的 `innerText` 会退化为 `textContent`，隐藏值因而返回。现在取文本前先用 `checkVisibility()` 判定根节点（自身或祖先 `display:none`）；`visibility:hidden` 的根节点仍交给 `innerText` 处理，因为这样保留显式恢复可见的后代。覆盖：`display:none` 包装元素经 `text` 与 `extract` 两条路径都必须不返回内容；移除该检查即复现 `a display:none root must not return its text`。
 
+0.3.24 修掉过滤路径上的两处保真回归。其一，纯空白文本节点被直接跳过，导致 `<span>Signed</span> <span>in</span>` 变成 `Signedin`；现把这类空白作为行内分隔保留，并在块级边界处清理，因此 `Signed in` 得以保留、块级换行也不受干扰。其二，根节点检查用的是 `checkVisibility()`，它对 `display:contents` 包装器返回 false（尽管其子元素仍然渲染）；现改为按「元素自身或祖先 `display:none`」判定，`display:contents` 包装器可正常读取。覆盖：夹具新增 `Signed in` 与 `display:contents` 两个探针，后者经 `text` 模式读取。恢复跳过空白的写法即复现 `a visible inline space must be preserved`；恢复 `checkVisibility()` 即复现 `a display:contents wrapper must still be readable`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

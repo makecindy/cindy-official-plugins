@@ -221,6 +221,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.ok(/X\s*\n\s*Y/.test(rendered),'<br> must produce a line break');
   assert.ok(rendered.includes('SHOWN'),'a re-shown descendant of a hidden ancestor must still be readable');
   assert.ok(!rendered.includes('hiddenrun'),'text of a visibility:hidden ancestor must stay excluded');
+  // A visible inline space is part of the rendered text; a display:contents wrapper is still rendered.
+  assert.ok(rendered.includes('Signed in'),'a visible inline space must be preserved');
+  assert.ok(!rendered.includes('Signedin'),'adjacent words separated by a space must not be glued');
+  const contentsText=await tool('browser_read',{url,mode:'text',selector:'#contents-wrapper',waitFor:'#readable'});
+  assert.equal(contentsText.ok,true,JSON.stringify(contentsText).slice(0,160));
+  assert.ok(contentsText.text.includes('CONTENTSTEXT'),'a display:contents wrapper must still be readable');
   // A read must not mutate the live page: no custom element lifecycle calls, no observer records.
   await page.evaluate(()=>{window.__probe.mutations=0;window.__probe.lifecycle=0;});
   const probeRead=await tool('browser_read',{url,mode:'text'});

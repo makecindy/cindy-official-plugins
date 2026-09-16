@@ -171,10 +171,14 @@ async function pageOperation(job,expectedUrl) {
   // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
   const NON_RENDERED = new Set(['SCRIPT','STYLE','TEMPLATE','NOSCRIPT','HEAD','TITLE','META','LINK']);
   const BLOCK_TAGS = new Set(['ADDRESS','ARTICLE','ASIDE','BLOCKQUOTE','DD','DIV','DL','DT','FIELDSET','FIGCAPTION','FIGURE','FOOTER','FORM','H1','H2','H3','H4','H5','H6','HEADER','HR','LI','MAIN','NAV','OL','P','PRE','SECTION','TABLE','TBODY','TFOOT','THEAD','TR','UL']);
-  // checkVisibility() without checkVisibilityCSS reports display:none on the element or an ancestor;
-    // a visibility:hidden root is deliberately left to innerText, which still includes descendants
-    // that restore visibility:visible.
-  const isDisplayed = el => typeof el.checkVisibility === 'function' ? el.checkVisibility() : el.getClientRects().length > 0;
+  // A non-rendered root means display:none on the element or one of its ancestors. A display:contents
+  // wrapper has no box of its own but its children still render, so it must not be rejected.
+  const isDisplayed = el => {
+    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
+      if (getComputedStyle(node).display === 'none') return false;
+    }
+    return true;
+  };
   function readableText(root,limit) {
     if (!root.querySelector) return root.innerText || '';
     if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
@@ -183,7 +187,7 @@ async function pageOperation(job,expectedUrl) {
     if (root.nodeType === Node.ELEMENT_NODE && !isDisplayed(root)) return '';
     // Without a sensitive descendant, innerText is exact, so never approximate it.
     if (![...root.querySelectorAll(TEXT_SCOPE)].some(sensitive)) return root.innerText || '';
-    const parts = []; let length = 0, lastBlock = null, lastBreak = false;
+    const parts = []; let length = 0, lastBlock = null, lastBreak = false, pendingSpace = false;
     const walker = document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,{acceptNode(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
         if (NON_RENDERED.has(node.tagName) || node.hidden || sensitive(node)) return NodeFilter.FILTER_REJECT;
@@ -196,23 +200,26 @@ async function pageOperation(job,expectedUrl) {
     }});
     for (let node = walker.nextNode(); node && length < limit; node = walker.nextNode()) {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName === 'BR') { parts.push('\n'); lastBreak = true; lastBlock = null; }
+        if (node.tagName === 'BR') { parts.push('\n'); lastBreak = true; lastBlock = null; pendingSpace = false; }
         continue;
       }
       const parent = node.parentElement || root;
       const style = getComputedStyle(parent);
       if (style.visibility === 'hidden') continue;
       const pre = (style.whiteSpace || '').startsWith('pre');
-      const value = pre ? node.nodeValue : node.nodeValue.replace(/\s+/g,' ');
-      if (!pre && !value.trim()) continue;
-      // Adjacent inline runs join with nothing; a different nearest block ancestor is a new line.
+      const raw = node.nodeValue;
+      // A whitespace-only run is a real separator between inline content; at a block boundary it is
+      // dropped by the cleanup below instead of inventing a space or gluing words together.
+      if (!pre && !raw.trim()) { if (!lastBreak && parts.length) pendingSpace = true; continue; }
+      const value = pre ? raw : raw.replace(/\s+/g,' ');
       let block = parent;
       while (block && block !== root && !BLOCK_TAGS.has(block.tagName)) block = block.parentElement;
       if (parts.length && !lastBreak && block !== lastBlock) parts.push('\n');
-      lastBlock = block; lastBreak = false;
+      else if (pendingSpace) parts.push(' ');
+      pendingSpace = false; lastBreak = false; lastBlock = block;
       parts.push(value); length += value.length;
     }
-    return parts.join('').replace(/\n{3,}/g,'\n\n').trim();
+    return parts.join('').replace(/[ \t]+/g,' ').replace(/ ?\n ?/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
   }
   let started = false;
   try {
