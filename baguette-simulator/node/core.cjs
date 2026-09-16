@@ -112,8 +112,21 @@ async function dispatch(method,p={}) {
   }
   if(method==='describe_ui') {
     const result=await baguette('describe-ui',device);
-    try { const tree=JSON.parse(result.stdout); const encoded=JSON.stringify(tree); if(encoded.length>180000) return {...result,stdout:undefined,treePreview:encoded.slice(0,180000),truncated:true}; return {...result,stdout:undefined,tree}; }
+    let tree;
+    try { tree=JSON.parse(result.stdout); }
     catch {throw new Failure('INVALID_OUTPUT','Accessibility output was not JSON');}
+    const pending=[tree]; let observed=false;
+    while(pending.length) {
+      const node=pending.pop();
+      if(Array.isArray(node)) {pending.push(...node);continue;}
+      if(!node||typeof node!=='object')continue;
+      if(typeof node.role==='string'&&node.role.trim()&&node.role!=='AXUnknown'&&node.hidden!==true) {observed=true;break;}
+      if(Array.isArray(node.children))pending.push(...node.children);
+    }
+    if(!observed)throw new Failure('EMPTY_UI','No observable accessibility nodes. Take a screenshot, confirm the App is visible and retry describe_ui before acting.');
+    const encoded=JSON.stringify(tree);
+    if(encoded.length>180000)return {...result,stdout:undefined,treePreview:encoded.slice(0,180000),truncated:true};
+    return {...result,stdout:undefined,tree};
   }
   if(method==='tap'||method==='swipe') {
     const width=number(p.width,'width',1,4000),height=number(p.height,'height',1,4000);
@@ -162,7 +175,7 @@ async function dispatch(method,p={}) {
     const deadline=Date.now()+25000;
     while(Date.now()<deadline) {
       await new Promise(r=>setTimeout(r,500));
-      const now=pid((await sim(['spawn',device.udid,'launchctl','list'],{timeout:5000})).stdout);
+      const now=pid((await sim(['spawn',device.udid,'launchctl','list'],{timeout:5000,mutation:true})).stdout);
       if(now&&/^\d+$/.test(now)&&now!==before) return {udid:device.udid,execution:'executed',note:'SpringBoard restarted. Observe UI before continuing.'};
     }
     throw new Failure('HEAL_TIMEOUT','Restart requested but SpringBoard readiness not confirmed','unknown');

@@ -134,6 +134,22 @@
    }
  
    window.Sim3DPanel = Sim3DPanel;
+--- a/sim-location.js
++++ b/sim-location.js
+@@ -46,11 +46,11 @@
+   // Apple Park — a friendly default centre when the device has no pin yet.
+   const DEFAULT_CENTER = [37.3349, -122.0090];
+   const DEFAULT_ZOOM = 13;
+-  const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
++  const TILE_URL = '/map/tiles/{z}/{x}/{y}.png';
+   const TILE_ATTR = '&copy; OpenStreetMap contributors';
+   // OSM geocoder — free, no API key, CORS-enabled. Low-volume dev use
+   // only; respect Nominatim's usage policy (1 req/sec).
+-  const GEOCODE_URL = 'https://nominatim.openstreetmap.org/search';
++  const GEOCODE_URL = '/map/search';
+   const FOUND_ZOOM = 14;
+   const WALK_ZOOM = 17;
+ 
 --- a/sim-native.html
 +++ b/sim-native.html
 @@ -1586,7 +1586,7 @@

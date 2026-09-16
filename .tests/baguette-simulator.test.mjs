@@ -4,3 +4,5 @@ import './baguette/keyboard-events.test.cjs';
 import './baguette/stream-recovery.test.cjs';
 import './baguette/viewer.test.cjs';
 import './baguette/vendor-security.test.cjs';
+import './baguette/core-contract.test.cjs';
+import './baguette/map.test.cjs';

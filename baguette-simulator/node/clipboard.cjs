@@ -11,6 +11,7 @@ async function createClipboard(origin,perform,control){
   const own=`127.0.0.1:${server.address().port}`;
   if(req.headers.host!==own)return reply(403,{error:'Invalid host'});
   if(control&&req.method==='GET'){
+   if(req.url.startsWith('/map/'))return require('./map.cjs').serveMap(req,res,own);
    if(req.url.startsWith('/control?')){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"frame-ancestors 'none'",'Referrer-Policy':'no-referrer'});return res.end(require('./viewer-proxy.cjs')[new URL(req.url,'http://localhost').searchParams.get('lang')==='zh-CN'?'chineseHtml':'html']);}
    return require('./viewer-proxy.cjs').proxyRequest(req,res,control.port);
   }
