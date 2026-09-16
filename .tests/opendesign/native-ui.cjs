@@ -130,6 +130,21 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     assert.equal(await page.getByPlaceholder("评论此元素…").inputValue(), "Keep uncertain feedback");
     assert.equal(sent.length, 1);
     await page.unroute("**/api/projects/*/feedback");
+    await page.route("**/api/projects/*/feedback", route => route.continue({
+      postData: JSON.stringify({...route.request().postDataJSON(), images:[{type:'text/plain',base64:'eA=='}]}),
+    }));
+    await page.getByRole("button", {name: "发送到聊天", exact: true}).click();
+    await page.getByRole('alert').filter({hasText:'Unsupported annotation image'}).waitFor();
+    assert.equal(sent.length,1);
+    assert.equal(await page.getByPlaceholder("评论此元素…").inputValue(), "Keep uncertain feedback");
+    await page.unroute("**/api/projects/*/feedback");
+    for (const response of ['abort','server-error']) {
+      await page.route("**/api/projects/*/feedback", route => response==='abort' ? route.abort() : route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({code:'FEEDBACK_REJECTED',error:'not a reliable rejection'})}));
+      await page.getByRole("button", {name:"发送到聊天",exact:true}).click();
+      await page.getByRole('alert').filter({hasText:'提交结果未确认'}).waitFor();
+      assert.equal(sent.length,1);
+      await page.unroute("**/api/projects/*/feedback");
+    }
 
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     const artifact = page.frameLocator('[data-testid=artifact-preview-frame]');
@@ -329,6 +344,20 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       });
       assert.equal(externalRequests, 0);
       console.log('Actual editor srcdoc inherits CSP: local script works, external img/script/fetch blocked');
+      for (const kind of ['assign','replace','meta','anchor']) {
+        await isolated.goto(b.url + '?file=network.html');
+        const navFrame = isolated.frameLocator('[data-testid=artifact-preview-frame]');
+        await navFrame.getByText('Network fixture',{exact:true}).waitFor();
+        await navFrame.locator('body').evaluate((el, {kind,url}) => {
+          if (kind==='assign') location.href=url;
+          if (kind==='replace') location.replace(url);
+          if (kind==='meta') {const meta=document.createElement('meta');meta.httpEquiv='refresh';meta.content='0;url='+url;document.head.append(meta);}
+          if (kind==='anchor') {const a=document.createElement('a');a.href=url;el.append(a);a.click();}
+        },{kind,url:forbidden+'/navigation?draft=fixture'});
+        await isolated.waitForTimeout(200);
+        assert.equal(externalRequests,0,kind+' must not send an external navigation');
+      }
+
     } finally { await isolated.close(); await new Promise(resolve => probe.close(resolve)); }
 
   } finally {

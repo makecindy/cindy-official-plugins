@@ -12867,7 +12867,7 @@
       "imports": []
     },
     "FullStudio.tsx": {
-      "bytes": 9584,
+      "bytes": 9869,
       "imports": [
         {
           "path": "node_modules/react/index.js",
@@ -15504,7 +15504,7 @@
           "bytesInOutput": 999
         },
         "FullStudio.tsx": {
-          "bytesInOutput": 5771
+          "bytesInOutput": 5929
         },
         "ManualCanvasInput.tsx": {
           "bytesInOutput": 2498
@@ -16257,7 +16257,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17309319
+      "bytes": 17309477
     },
     "../../assets/studio.css": {
       "imports": [

@@ -66,3 +66,20 @@ test("feedback belongs to one session, sends once, stays pending in flight and s
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("attachment validation proves rejection before dispatch; post-dispatch failures do not", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "od-feedback-reject-"));
+  const b = {root,sessionId:"owner-reject",edit:"editor"};
+  let emitted = 0;
+  feedback.setEmitter(() => {emitted++;throw Error("receipt lost after dispatch");});
+  try {
+    for (const images of [Array(13).fill({}),[{type:"text/plain",base64:"eA=="}],[{type:"image/png",base64:Buffer.alloc(8*1024*1024+1).toString("base64")}]]) {
+      await assert.rejects(feedback.handle(b,"feedback","POST",{action:"send",images},async()=>{}),{code:"FEEDBACK_REJECTED",status:400});
+      assert.equal(emitted,0);
+      assert.equal((await feedback.read(b)).requests.length,0);
+    }
+    await assert.rejects(feedback.handle(b,"feedback","POST",{action:"send"},async()=>{}),e=>e.message==="receipt lost after dispatch" && !e.code);
+    assert.equal(emitted,1);
+    assert.equal((await feedback.read(b)).requests.length,1);
+  } finally {feedback.setEmitter(()=>{});await fs.rm(root,{recursive:true,force:true});}
+});

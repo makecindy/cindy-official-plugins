@@ -24,7 +24,10 @@ async function request(route: string, body?: any) {
   );
   const data = await r.json();
   if (!r.ok)
-    throw Error(data.error || data.message || ui("请求失败", "Request failed"));
+    throw Object.assign(new Error(data.error || data.message || ui("请求失败", "Request failed")), {
+      // Only an explicit pre-dispatch validation receipt proves non-execution.
+      disposition: route === "/feedback" && body && r.status === 400 && data.code === "FEEDBACK_REJECTED" ? "rejected" : "unknown",
+    });
   return data;
 }
 async function serializeImages(images: File[] = []) {
@@ -120,7 +123,7 @@ function Studio() {
       await refresh();
       return result;
     } catch (e: any) {
-      const status = submitted ? outcome : "rejected";
+      const status = e?.disposition === "rejected" ? "rejected" : submitted ? outcome : "rejected";
       const message = status === "unknown" ? ui(
         "提交结果未确认，请先查看本会话，勿重复发送",
         "Unknown submission outcome. Check this conversation before resending.",

@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.6
+# OpenDesign for Cindy — local trial 0.4.7
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -29,3 +29,5 @@ Browser regressions: install Playwright Chromium, then run `node --test .tests/o
 0.4.5: Text editing runs in an editor-owned input over the canvas. Click selects the inspector; double-click opens inline text editing, Enter saves and Escape cancels. Only trusted input in this parent document authorizes a one-use save; the credential never enters the artifact iframe. Forged iframe commit/session messages are ignored. Saving validates the active target, original text and source revision; conflicts retain the draft.
 
 0.4.6: The editor-owned canvas captures selection, double-click and drag gestures. Artifact messages cannot open text inputs or stage drag writes; input placement and displacement come from trusted parent pointer coordinates. Source revisions still guard every save. Browser coverage exercises the actual srcdoc viewer network policy as well as the raw URL response.
+
+0.4.7: Explicit pre-dispatch validation failures retain rejected status and the server message. Lost responses, polling errors and post-dispatch exceptions remain unknown. Browser regressions also verify that the editor frame-src policy blocks artifact self-navigation via location assignment/replacement, meta refresh and links.

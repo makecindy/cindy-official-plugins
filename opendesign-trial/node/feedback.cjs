@@ -27,18 +27,19 @@ async function save(b, data) {
   await fs.writeFile(tmp, JSON.stringify(data));
   await fs.rename(tmp, dest);
 }
+function rejected(message) { return Object.assign(new Error(message), {status:400, code:"FEEDBACK_REJECTED"}); }
 async function images(b, input, write) {
   if (!Array.isArray(input) || input.length > 12)
-    throw Error("Too many images");
+    throw rejected("Too many images");
   const out = [];
   for (const image of input) {
     if (
-      !["image/png", "image/jpeg", "image/webp"].includes(image.type) ||
+      !image || !["image/png", "image/jpeg", "image/webp"].includes(image.type) ||
       typeof image.base64 !== "string"
     )
-      throw Error("Unsupported annotation image");
+      throw rejected("Unsupported annotation image");
     const bytes = Buffer.from(image.base64, "base64");
-    if (bytes.length > 8 * 1024 * 1024) throw Error("Image too large");
+    if (bytes.length > 8 * 1024 * 1024) throw rejected("Image too large");
     const name =
       "annotation-" +
       crypto.randomUUID() +
@@ -56,7 +57,7 @@ async function handleUnlocked(b, route, method, body, write) {
   if (route === "comments" && method === "GET")
     return { comments: data.comments };
   if (route === "comments" && method === "POST") {
-    if (b.readOnly) throw Error("Read-only session");
+    if (b.readOnly) throw rejected("Read-only session");
     if (body.remove) {
       data.comments = data.comments.filter((c) => c.id !== body.remove);
       await save(b, data);
@@ -92,9 +93,9 @@ async function handleUnlocked(b, route, method, body, write) {
     return { comment: c };
   }
   if (route === "feedback" && method === "POST") {
-    if (b.readOnly) throw Error("Read-only session");
+    if (b.readOnly) throw rejected("Read-only session");
     if (!["send", "queue", "draft"].includes(body.action))
-      throw Error("Unknown send action");
+      throw rejected("Unknown send action");
     const r = {
       id: crypto.randomUUID(),
       sessionId: b.sessionId,

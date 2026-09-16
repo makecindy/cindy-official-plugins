@@ -293,8 +293,17 @@ const editor = http.createServer(async (req, res) => {
     if (parts[4] === "collab" && parts[5] === "status")
       return json(res, 200, { syncState: "local_only", ownerMemberId: null });
     if (["comments", "feedback"].includes(parts[4])) {
-      const payload =
-        req.method === "POST" ? JSON.parse((await body(req)).toString()) : null;
+      let payload = null;
+      try {
+        payload = req.method === "POST" ? JSON.parse((await body(req)).toString()) : null;
+        if (req.method === "POST" && (!payload || typeof payload !== "object" || Array.isArray(payload)))
+          throw Error("Invalid feedback payload");
+      } catch (e) {
+        // No feedback handler or Agent dispatch has run at this point.
+        if (parts[4] === "feedback" && req.method === "POST")
+          return json(res, 400, {error:e.message, code:"FEEDBACK_REJECTED"});
+        throw e;
+      }
       const result = await feedback.handle(
         b,
         parts.slice(4).join("/"),
