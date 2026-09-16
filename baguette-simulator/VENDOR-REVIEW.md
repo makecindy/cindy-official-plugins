@@ -7,7 +7,7 @@ Upstream: [tddworks/baguette v0.1.98](https://github.com/tddworks/baguette/relea
 `vendor-web.patch` is the complete diff against `Sources/Baguette/Resources/Web` at tag v0.1.98 (commit `5975fa510a5083956f99e25544b6583f296228dd`). Only these nine Web files differ:
 
 - `stream-session.js`: bounded reconnect after unexpected socket close; cancel scheduled reconnect on deliberate stop.
-- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the private-device bridge, suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow, drop unsent keys on blur/hide/detach/release.
+- `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the private-device bridge, suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow with English fallback for added input errors, drop unsent keys on blur/hide/detach/release.
 - `baguette/parts/bezel.js`, `baguette/carplay/carplay-frame.js`, `sim-native.html`: standard arrow cursor instead of crosshair.
 
 - `farm/farm.html`: remove remote font/preconnect links; keep the existing system-font fallback and all Device Farm controls.

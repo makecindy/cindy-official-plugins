@@ -43,10 +43,10 @@
       "description": "通过 simctl 把本机已构建的 iOS Simulator .app 安装到本插件设备，可能更新同 bundle ID 的 App。不会构建项目或下载依赖。"
     },
     "launch_app": {
-      "description": "通过 simctl 启动 App，默认同时启动仅监听 127.0.0.1 的 Baguette 实时服务，并请求Cindy 侧边栏浏览器打开可交互画面。返回 viewer.url；检查 viewer.previewOpened，不要把服务启动当成页面已显示。showViewer=false 可仅后台运行。"
+      "description": "通过 simctl 启动 App，默认同时启动仅监听 127.0.0.1 的 Baguette 实时服务，并请求Cindy 侧边栏浏览器打开可交互画面。返回 viewer.url；检查 viewer.previewOpened，不要把服务启动当成页面已显示。showViewer=false 可仅后台运行。 使用位置面板时，搜索词和地图瓦片请求会经 Node 代理发送到 OpenStreetMap；浏览器 Copy 会覆盖 Mac 剪贴板，粘贴会替换模拟器剪贴板。打开前告知用户这些交互副作用。"
     },
     "open_viewer": {
-      "description": "为已启动的插件设备打开侧边栏控制页和实时画面，无需重启 App。返回 URL 与 previewOpened；确认后才能说已显示。控制页提供恢复画面和解除卡键。仅监听 127.0.0.1，Worker 停用、退出或工具闲置一小时后停止。"
+      "description": "为已启动的插件设备打开侧边栏控制页和实时画面，无需重启 App。返回 URL 与 previewOpened；确认后才能说已显示。控制页提供恢复画面和解除卡键。仅监听 127.0.0.1，Worker 停用、退出或工具闲置一小时后停止。 使用位置面板时，搜索词和地图瓦片请求会经 Node 代理发送到 OpenStreetMap；浏览器 Copy 会覆盖 Mac 剪贴板，粘贴会替换模拟器剪贴板。打开前告知用户这些交互副作用。"
     },
     "close_viewer": {
       "description": "停止本插件实时画面服务，浏览器页面将断开；模拟器和 App 保持运行。"

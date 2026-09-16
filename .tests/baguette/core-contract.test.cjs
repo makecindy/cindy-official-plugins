@@ -2,12 +2,12 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),vm=requir
 const dir=path.resolve('baguette-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001';
 function core(output,failAt=Infinity,macOS="15.0"){
- let polls=0,mutations=0;const commands=[];
+ let polls=0,mutations=0;const commands=[],budgets=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},setTimeout:fn=>fn(),require(name){
   if(name==='./viewer.cjs')return {};
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
   if(name==='node:child_process')return {execFile(file,args,opts,cb){
-   commands.push(file);let data='',error=null;
+   commands.push(file);budgets.push(opts.timeout);let data='',error=null;
    if(file==='/usr/bin/sw_vers')data=macOS;
    else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted'}]}});
    else if(args[0]==='describe-ui')data=output;
@@ -18,7 +18,7 @@ function core(output,failAt=Infinity,macOS="15.0"){
   return require(name);
  }};
  vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
- return {dispatch:context.module.exports.dispatch,mutations:()=>mutations,commands};
+ return {dispatch:context.module.exports.dispatch,mutations:()=>mutations,commands,budgets};
 }
 test('describe_ui rejects empty/malformed trees and accepts observable descendants',async()=>{
  for(const value of ['[]','null','{}','{"children":[]}','{"role":"AXUnknown"}','invalid']) {
@@ -51,4 +51,13 @@ test('invalid paste text never reaches key release or clipboard mutation',async(
   assert.equal(c.mutations(),0);
   assert.ok(c.commands.every(file=>file==='/usr/bin/sw_vers'||file==='/usr/bin/xcrun'));
  }
+});
+
+test('boot and heal complete command budgets fit the Host bridge ceiling',async()=>{
+ const boot=core('');await boot.dispatch('boot',{udid});
+ // Booted fixture skips the optional 15-second cold boot command.
+ assert.equal(boot.budgets.reduce((a,b)=>a+b,0)+15000,113000);
+ const heal=core('');await heal.dispatch('heal',{udid});
+ // The polling window permits up to 25s plus one last 5s command.
+ assert.ok(heal.budgets.slice(0,-1).reduce((a,b)=>a+b,0)+30500<120000);
 });

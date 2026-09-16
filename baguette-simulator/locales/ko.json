@@ -43,10 +43,10 @@
       "description": "이미 빌드된 로컬 iOS Simulator .app을 독립 기기에 설치합니다. 동일 bundle ID 앱을 업데이트할 수 있습니다. 프로젝트 빌드나 의존성 다운로드는 하지 않습니다."
     },
     "launch_app": {
-      "description": "설치된 앱을 실행하고 기본적으로 루프백 화면 서비스와 Cindy 사이드바 미리보기를 엽니다. viewer.previewOpened를 확인하세요. showViewer=false이면 백그라운드로만 실행합니다."
+      "description": "설치된 앱을 실행하고 기본적으로 루프백 화면 서비스와 Cindy 사이드바 미리보기를 엽니다. viewer.previewOpened를 확인하세요. showViewer=false이면 백그라운드로만 실행합니다. 위치 패널을 사용하면 검색어와 지도 타일 요청이 Node 프록시를 통해 OpenStreetMap으로 전송됩니다. 브라우저 Copy는 Mac 클립보드를, 붙여넣기는 시뮬레이터 클립보드를 덮어씁니다. 열기 전에 이러한 조작의 영향을 사용자에게 알리세요."
     },
     "open_viewer": {
-      "description": "부팅된 독립 기기의 제어 페이지와 실시간 화면을 사이드바에 엽니다. 앱은 재시작하지 않습니다. previewOpened를 확인하세요. 화면 복구와 키 해제 버튼을 제공합니다. Worker 종료, 비활성화 또는 도구1시간 미사용 시 서비스가 중단됩니다."
+      "description": "부팅된 독립 기기의 제어 페이지와 실시간 화면을 사이드바에 엽니다. 앱은 재시작하지 않습니다. previewOpened를 확인하세요. 화면 복구와 키 해제 버튼을 제공합니다. Worker 종료, 비활성화 또는 도구1시간 미사용 시 서비스가 중단됩니다. 위치 패널을 사용하면 검색어와 지도 타일 요청이 Node 프록시를 통해 OpenStreetMap으로 전송됩니다. 브라우저 Copy는 Mac 클립보드를, 붙여넣기는 시뮬레이터 클립보드를 덮어씁니다. 열기 전에 이러한 조작의 영향을 사용자에게 알리세요."
     },
     "close_viewer": {
       "description": "화면 서비스를 중지합니다. 브라우저 연결은 끊기지만 시뮬레이터와 앱은 계속 실행됩니다."

@@ -3,6 +3,8 @@ cindy.onHostMessage(async function (msg) {
   try {
     let locale='en';
     try { const context=await cindy.request({kind:'app-context'}); if(context?.context?.locale==='zh-CN')locale='zh-CN'; } catch {}
+    // Host ceiling is 120s; worker preflight is 3s + 5s.
+    // Boot retains 15s start + 90s readiness (113s total).
     const response = await cindy.node.request({method: msg.tool, params: {...msg.args,_locale:locale}, timeoutMs: 120000});
     if (!response.ok) {
       await cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:'NODE_REQUEST_FAILED',message:response.message || 'Worker failed; execution may be unknown. Inspect device before retrying.'});

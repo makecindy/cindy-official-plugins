@@ -18,5 +18,5 @@ test('paste and copy queue behind a key; only identical adjacent paste is suppre
  k.key('KeyA',[]);k.paste('Google');k.paste('Google');k.paste('Other');k.copy();
  for(let i=0;i<4;i++){pending.shift()();await new Promise(r=>setImmediate(r));}
  assert.deepEqual(calls.map(x=>x.action),['key','paste','paste','copy']);assert.deepEqual(calls.filter(x=>x.action==='paste').map(x=>x.text),['Google','Other']);assert.equal(alerts.length,0);
- k.key('KeyA',[]);for(let i=0;i<33;i++)k.copy();assert.equal(alerts.length,1);k._inputQueue.length=0;pending.shift()();await new Promise(r=>setImmediate(r));
+ k.key('KeyA',[]);for(let i=0;i<33;i++)k.copy();assert.equal(alerts.length,1);assert.match(alerts[0],/Input queue is full/);k._inputQueue.length=0;pending.shift()();await new Promise(r=>setImmediate(r));
 });

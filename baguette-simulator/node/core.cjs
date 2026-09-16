@@ -38,7 +38,7 @@ async function sim(args, options) { return run('/usr/bin/xcrun',['simctl','--set
 async function jsonRun(file,args) { const {stdout}=await run(file,args); try{return JSON.parse(stdout);}catch{throw new Failure('INVALID_OUTPUT','Command did not return JSON');} }
 async function listDevices() {
   await fs.mkdir(DEVICE_SET,{recursive:true,mode:0o700});
-  const data=await sim(['list','devices','--json']);
+  const data=await sim(['list','devices','--json'],{timeout:5000});
   return Object.entries(JSON.parse(data.stdout).devices).flatMap(([runtime,devices])=>devices.map(d=>({name:d.name,udid:d.udid,state:d.state,isAvailable:d.isAvailable,runtime})));
 }
 async function target(p, booted=true) {
@@ -57,7 +57,7 @@ async function baguette(command,device,args=[],options={}) {
 let keyboardBusy=false;
 async function nativeKey(device,code,modifiers=[]) {
  const [key,mask]=code?require('./keys.cjs').chord(code,modifiers):[0,0];
- const dev=(await run('/usr/bin/xcode-select',['-p'])).stdout;
+ const dev=(await run('/usr/bin/xcode-select',['-p'],{timeout:5000})).stdout;
  return run(path.join(__dirname,'../native/keyboard'),[DEVICE_SET,device.udid,dev,String(key),String(mask)],{mutation:true,timeout:15000});
 }
 async function clipboardAction(p) {
@@ -83,7 +83,7 @@ async function clipboardAction(p) {
 async function dispatch(method,p={}) {
   if(!methods.has(method)) throw new Failure('UNKNOWN_TOOL','Unknown Baguette operation');
   if(process.platform!=='darwin'||process.arch!=='arm64') throw new Failure('UNSUPPORTED_PLATFORM','This package requires an Apple Silicon Mac');
-  const macOS=(await run('/usr/bin/sw_vers',['-productVersion'])).stdout;
+  const macOS=(await run('/usr/bin/sw_vers',['-productVersion'],{timeout:3000})).stdout;
   if(!/^\d+\.\d+(?:\.\d+)?$/.test(macOS)||Number(macOS.split('.')[0])<15)throw new Failure('UNSUPPORTED_OS',`Requires macOS 15.0 or newer; detected ${macOS || 'unknown'}. Upgrade macOS before using this plugin.`);
   if(method==='environment') {
     const [version,xcode,runtimes,types]=await Promise.all([

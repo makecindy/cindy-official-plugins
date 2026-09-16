@@ -211,8 +211,8 @@
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js",
-    "bytes": 8871,
-    "sha256": "10d2e5dd2a3cdd89df61cb0d90deee9afc6e98d18b83311b41afd9c8a2498dba"
+    "bytes": 8859,
+    "sha256": "682b529200af1fecb12e25264e82385d1450b0c5df7d3a72682735994218cdf9"
   },
   {
     "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/screen.js",
