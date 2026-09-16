@@ -159,6 +159,13 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal(JSON.stringify(hiddenField.record).includes('CSRFHIDDEN'),false,'extract must not return hidden descendants');
   const visibleField=await tool('browser_read',{url,mode:'extract',selector:'#readable',fields:{value:':self'}});
   assert.equal(visibleField.record.value,'Visible fixture text','ordinary extract text is unchanged');
+  // A non-rendered root is never visited by the walker, so it must be rejected explicitly.
+  // Readiness needs a visible anchor; the sensitive subject here is the hidden root itself.
+  const hiddenRootText=await tool('browser_read',{url,mode:'text',selector:'#hidden-root',waitFor:'#readable'});
+  assert.equal(hiddenRootText.ok,true,JSON.stringify(hiddenRootText).slice(0,160));
+  assert.equal(hiddenRootText.text.includes('CSRFROOT'),false,'a display:none root must not return its text');
+  const hiddenRootField=await tool('browser_read',{url,mode:'extract',selector:'#hidden-root',waitFor:'#readable',fields:{value:':self'}});
+  assert.equal(JSON.stringify(hiddenRootField.record).includes('CSRFROOT'),false,'extract must not return a hidden root either');
   assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
   assert.equal(/66666666-6666-4666-8666-666666666666|77777777-7777-4777-8777-777777777777/.test(JSON.stringify(contentLinks.links)),false,'URL userinfo credentials in a page link must never reach the model');
   assert.equal(JSON.stringify(contentLinks.links).includes('88888888-8888-4888-8888-888888888888'),false,'a percent-encoded path token must never reach the model');
