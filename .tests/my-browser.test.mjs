@@ -62,6 +62,10 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
   // A long opaque value under an innocuous name is masked too.
   assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
+  // A percent-encoded token must not slip through the segment charset test.
+  const enc=encodeURIComponent('Abc123456/789012345');
+  assert.equal(r(`https://example.test/reset/${enc}`).includes('Abc123456'),false);
+  assert.equal(r(`https://example.test/#/verify/${enc}`).includes('Abc123456'),false);
   // Basic Auth userinfo supplied by page content.
   const basic=r(`https://${code}:${state}@example.test/private`);
   assert.equal(basic.includes(code),false,'the username must be removed');

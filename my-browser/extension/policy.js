@@ -89,9 +89,17 @@
   // (/reset/<token>, #/verify/<token>) rather than a query parameter.
   const CONTEXT_WORDS = new Set(['reset','verify','verification','confirm','confirmation','activate','activation','invite','magic','auth','authenticate','authorize','unlock','recover','recovery','password','passcode','signin','signup','login','callback','redirect','token']);
   const words = text => text.replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  // A token-like segment is long, punctuation-free and carries a digit, which separates opaque
-  // credentials from ordinary slugs and from long-but-readable path words.
-  const tokenish = segment => segment.length >= 16 && /^[A-Za-z0-9._~-]+$/.test(segment) && /\d/.test(segment);
+  // A token-like segment is long, mostly punctuation-free and carries a digit, which separates
+  // opaque credentials from ordinary slugs and from long-but-readable path words. A letter is not
+  // required: password-reset tokens are sometimes all digits.
+  // Segments are decoded first: a percent-encoded token (/reset/Abc%2F1234567890) keeps its %2F in
+  // pathname, so a raw charset test would let the whole credential through.
+  const decodeSegment = segment => { try { return decodeURIComponent(segment); } catch { return segment; } };
+  const NOT_TOKEN_CHAR = /[^A-Za-z0-9._~+/-]/;
+  const tokenish = raw => {
+    const segment = decodeSegment(raw);
+    return segment.length >= 16 && !NOT_TOKEN_CHAR.test(segment) && /\d/.test(segment);
+  };
   // Only segments following a credential-context word are masked, so ordinary deep paths
   // (/commit/<sha>, /user/12345, /wiki/long-article-title) keep working.
   function redactSegments(path) {

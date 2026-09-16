@@ -77,6 +77,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.13 清除网址 userinfo。页面提供的链接或提取到的 `href` 可能是 `https://user:password@example.test/`；任务 URL 会被 `check` 拒绝，但页面内容不经过该检查，而 `redactUrl` 只改写查询、片段与路径，于是链接里的 Basic Auth 凭证会进入模型。现由脱敏函数清除 `username`／`password`（已断言结果为 `https://example.test/private`），工具契约也把 userinfo 与其他被遮蔽的形态并列。覆盖：解析结果的单元断言，加夹具中带 userinfo 的链接在 content 读取后必须不出现。两项在修复前的脱敏函数上均失败。
 
+0.3.14 修掉一处百分号编码绕过并给结果加上大小上限。含编码字符的重置／magic-link 令牌（`/reset/Abc%2F1234567890`）其 `%2F` 会保留在 `pathname` 中，段的字符集判定因此把它当成普通路径词，完整凭证被返回；现先解码再做令牌判定（解码后不再要求必须含字母，纯数字令牌同样命中）。另一处，`document.title` 与每个 `links[].url` 都没有上限：夹具页面现返回 60 万字符标题与 12 万字符 href，超过桥接 512000 字节的请求上限，扩展会丢弃结果、调用方等待 45 秒后拿到 `BROWSER_TIMEOUT`。现标题上限 300 字符、单个链接 URL 上限 2048、链接总预算 20000，任一被截断时结果置 `truncated`。覆盖：路径与片段中编码令牌的单元断言，以及真实 Chromium 对超大页面的读取必须返回 `ok`、标题有界且 `truncated:true`。只回退解码即复现编码令牌断言失败；只回退上限即复现 45 秒后的 `BROWSER_TIMEOUT`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

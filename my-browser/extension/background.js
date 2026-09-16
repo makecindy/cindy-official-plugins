@@ -142,6 +142,7 @@ async function pageOperation(job,expectedUrl) {
   if (location.href !== expectedUrl) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
   const a = job.payload;
   const action = job.action;
+  const TITLE_MAX = 300, LINK_URL_MAX = 2048, LINKS_BUDGET = 20000;
   const visible = el => {
     const style = getComputedStyle(el); const r = el.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && !!(r.width || r.height);
@@ -188,8 +189,20 @@ async function pageOperation(job,expectedUrl) {
       if (action === 'text' || action === 'content') {
         const max = a.maxChars || 6000;
         const text = root.innerText || '';
-        const links = action === 'content' ? [...root.querySelectorAll('a[href]')].filter(visible).slice(0,a.limit || 10).map(el => ({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url:el.href})).filter(x => /^https?:/.test(x.url)) : undefined;
-        return {ok:true,url:location.href,title:document.title,text:text.slice(0,max),...(links ? {links} : {}),truncated:text.length>max,timing};
+        // Untrusted pages control the title and every href. Without a budget here the serialized
+        // result can exceed the bridge's request limit, which drops the whole read and times the caller out.
+        let linksTruncated = false;
+        let links;
+        if (action === 'content') {
+          let budget = LINKS_BUDGET;
+          links = [...root.querySelectorAll('a[href]')].filter(visible).slice(0,a.limit || 10).map(el => ({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url:String(el.href).slice(0,LINK_URL_MAX)})).filter(x => /^https?:/.test(x.url)).filter(x => {
+            if (x.url.length > budget) { linksTruncated = true; return false; }
+            budget -= x.url.length; return true;
+          });
+        }
+        // Title truncation is reported too, so a caller can tell that page metadata was cut.
+        const titleTruncated = document.title.length > TITLE_MAX;
+        return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),text:text.slice(0,max),...(links ? {links} : {}),truncated:text.length>max || linksTruncated || titleTruncated,timing};
       }
       if (action === 'extract') {
         let remaining = a.maxChars || 6000;
@@ -234,7 +247,7 @@ async function pageOperation(job,expectedUrl) {
         if (length+line.length > 14000 || elements.length >= 80) { truncated = true; refs.delete(ref); break; }
         elements.push(line); length += line.length;
       }
-      return {ok:true,url:location.href,title:document.title,elements:elements.join('\n'),text:(root.innerText || '').slice(0,6000),truncated,untrusted_content:true};
+      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:(root.innerText || '').slice(0,6000),truncated:truncated || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
     let el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;
