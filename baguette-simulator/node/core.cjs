@@ -68,9 +68,10 @@ async function clipboardAction(p) {
   if(p.action==='release')return await nativeKey(device,null);
   if(p.action==='key')return await nativeKey(device,p.code,p.modifiers);
   if(p.action==='paste') {
+    const text=string(p.text,'text',8000);
     // First release any existing repeat before replacing its clipboard payload.
     await nativeKey(device,null);
-    await sim(['pbcopy',device.udid],{input:string(p.text,'text',8000),mutation:true});
+    await sim(['pbcopy',device.udid],{input:text,mutation:true});
     await nativeKey(device,'KeyV',['command']);
   } else if(p.action==='copy') {
     await nativeKey(device,'KeyC',['command']);

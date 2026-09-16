@@ -44,3 +44,11 @@ test('macOS minimum is checked before any simulator or bundled binary runs',asyn
   assert.deepEqual(c.commands,['/usr/bin/sw_vers','/usr/bin/xcrun']);
  }
 });
+
+test('invalid paste text never reaches key release or clipboard mutation',async()=>{
+ for(const text of ['', 'a'.repeat(8001), 'before\0after']) {
+  const c=core('');await assert.rejects(c.dispatch('type_text',{udid,text}),e=>e.code==='INVALID_ARGUMENT'&&e.execution==='not_executed');
+  assert.equal(c.mutations(),0);
+  assert.ok(c.commands.every(file=>file==='/usr/bin/sw_vers'||file==='/usr/bin/xcrun'));
+ }
+});
