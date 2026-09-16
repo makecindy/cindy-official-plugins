@@ -199,6 +199,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
   // display:none content into the text.
   assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('HIDDENMARKER'),false,'hidden content must not be returned when a sensitive region is filtered');
+  // A read must not mutate the live page: no custom element lifecycle calls, no observer records.
+  await page.evaluate(()=>{window.__probe.mutations=0;window.__probe.lifecycle=0;});
+  const probeRead=await tool('browser_read',{url,mode:'text'});
+  assert.equal(probeRead.text.includes('135790'),false,'a sensitive custom element value must not be returned');
+  assert.equal(await page.evaluate(()=>window.__probe.lifecycle),0,'a read must not fire custom element lifecycle callbacks');
+  assert.equal(await page.evaluate(()=>window.__probe.mutations),0,'a read must not mutate the live DOM');
   // A URL shortened by the transfer cap must be reported, not silently presented as complete.
   assert.ok((await tool('browser_read',{url,mode:'text',selector:'#otp-region'})).text.includes('987654')===false,'targeting a sensitive region directly must return no credential');
   const long=await tool('browser_read',{url:'http://long.test/',mode:'content',limit:5});

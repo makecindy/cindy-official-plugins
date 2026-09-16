@@ -89,6 +89,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.19 再修两处输出边界。其一，敏感区域清理原本从脱离文档的克隆节点读取文本，而 detached 元素的 `innerText` 会退化为 textContent，因此只要页面同时存在敏感字段，`display:none` 或脚本内容就会混入正文；现改为在活体 DOM 上做减法：临时移除敏感子树、读取渲染后的文本，再同步按逆序恢复，既保留渲染语义，页面脚本也观察不到中间状态。其二，snapshot 文本在 6000 字符处截断却未置 `truncated`，Agent 会把被裁剪的正文当成完整内容；现在该上限生效时即置位。覆盖：夹具带一个 `display:none` 标记，必须不出现在正文中；`long.test` 的 7000 字符正文在 snapshot 读取时必须返回 `truncated:true`。恢复基于克隆的读法即复现 `hidden content must not be returned when a sensitive region is filtered`；移除标志即复现 `a capped snapshot text must set truncated`。
 
+0.3.20 让读取不再改动页面。临时移除敏感子树虽修好了隐藏内容泄露，但仍然动了活体 DOM：自定义元素会触发 `disconnectedCallback`／`connectedCallback`，页面的 `MutationObserver` 也会记录到变更，于是「读取」在页面看来是一次写操作。现改用 `TreeWalker` 在活体树上提取文本，跳过不渲染的子树（`display:none`、`visibility:hidden`、`hidden`、script／style／template）与敏感元素，且只走到所需长度为止；不插入、不移除、不重排任何节点。覆盖：夹具定义了一个带生命周期计数器的自定义元素与一个 `MutationObserver`，文本读取必须既不返回该敏感值，也把两个计数都留在 0。恢复基于临时移除的实现即复现 `a read must not fire custom element lifecycle callbacks`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

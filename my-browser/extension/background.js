@@ -163,29 +163,34 @@ async function pageOperation(job,expectedUrl) {
   const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
     (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token)) ||
     (isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token)));
-  // A page can hold an OTP, card number or password inside a contenteditable region, and such an
-  // element is excluded from refs and extract. A whole-region text dump must not return it either,
-  // so sensitive descendants are dropped from a clone before the text is read.
+  // A page can hold an OTP, card number or password inside a contenteditable region. Those elements
+  // are excluded from refs, extract and text.
   const TEXT_SCOPE = 'input,textarea,select,[contenteditable],[role=textbox]';
-  function readableText(root) {
+  // Rendered-text extraction that never touches the live DOM: removing and re-inserting nodes fires
+  // custom element lifecycle callbacks and MutationObserver, which would make a plain read mutate the
+  // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
+  const NON_RENDERED = new Set(['SCRIPT','STYLE','TEMPLATE','NOSCRIPT','HEAD','TITLE','META','LINK']);
+  function readableText(root,limit) {
     if (!root.querySelector) return root.innerText || '';
-    // The caller can target the sensitive field itself, in which case the whole region is a
-    // credential and nothing from it is readable.
     if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
-    const hidden = [...root.querySelectorAll(TEXT_SCOPE)].filter(sensitive);
-    if (!hidden.length) return root.innerText || '';
-    // Read rendered text with the sensitive subtrees briefly detached. A detached clone would fall
-    // back to textContent, exposing display:none or script content that rendered text excludes.
-    // Removal and restoration happen in one synchronous block, so page scripts never observe it;
-    // restoring in reverse order preserves the original sibling order.
-    const saved = hidden.map(el => ({el,parent:el.parentNode,next:el.nextSibling}));
-    for (const {el} of saved) el.remove();
-    try { return root.innerText || ''; }
-    finally {
-      for (const {el,parent,next} of saved.reverse()) {
-        if (parent) parent.insertBefore(el,next && next.parentNode === parent ? next : null);
+    const parts = []; let length = 0;
+    const walker = document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,{acceptNode(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (NON_RENDERED.has(node.tagName) || node.hidden || sensitive(node)) return NodeFilter.FILTER_REJECT;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
       }
+      return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }});
+    for (let node = walker.nextNode(); node && length < limit; node = walker.nextNode()) {
+      // Accepted elements are traversed but carry no text of their own.
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      const value = node.nodeValue.replace(/\s+/g,' ').trim();
+      if (!value) continue;
+      parts.push(value); length += value.length + 1;
     }
+    return parts.join(' ');
   }
   let started = false;
   try {
@@ -214,7 +219,7 @@ async function pageOperation(job,expectedUrl) {
       if (!root) return fail('ELEMENT_NOT_FOUND','The CSS selector matched no page region.');
       if (action === 'text' || action === 'content') {
         const max = a.maxChars || 6000;
-        const text = readableText(root);
+        const text = readableText(root,max + 1);
         // Untrusted pages control the title and every href. This stage never cuts a URL: the result
         // exit redacts the whole string first and applies the transfer cap afterwards, so a credential
         // can never straddle a cut. Over-long links are dropped whole, which also bounds the payload.
@@ -280,7 +285,7 @@ async function pageOperation(job,expectedUrl) {
         elements.push(line); length += line.length;
       }
       // The snapshot text has its own cap; a cut there must be reported like any other.
-      const fullText = readableText(root);
+      const fullText = readableText(root,6001);
       return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,6000),truncated:truncated || fullText.length > 6000 || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
