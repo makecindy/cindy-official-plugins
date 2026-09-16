@@ -1,3 +1,4 @@
+import {createPortal} from 'react-dom';
 import React, {useEffect,useRef,useState} from 'react';
 
 export function DownloadGate({file,zh,previewBase}:{file:string;zh:boolean;previewBase:string}) {
@@ -8,7 +9,7 @@ export function DownloadGate({file,zh,previewBase}:{file:string;zh:boolean;previ
     clear();
     let alive=true,busy=false;
     async function receive(event:MessageEvent) {
-      const frame=document.querySelector<HTMLIFrameElement>('[data-testid="artifact-preview-frame"]');
+      const frame=Array.from(document.querySelectorAll<HTMLIFrameElement>('[data-testid="artifact-preview-frame"],iframe[data-od-download-preview="true"]')).find(frame=>frame.contentWindow===event.source);
       if (!frame || event.source !== frame.contentWindow || event.data?.type !== 'od:download-request' || current.current || busy) return;
       let blob=event.data.blob;
       if (typeof event.data.url === 'string') {
@@ -30,7 +31,8 @@ export function DownloadGate({file,zh,previewBase}:{file:string;zh:boolean;previ
     return () => {alive=false;current.current=null;window.removeEventListener('message',receive);};
   },[file,previewBase]);
   if (!pending) return null;
-  return <aside data-testid="artifact-download-request" style={{padding:12,border:'1px solid #ccc',background:'#fff',color:'#222'}}>
+  const container=document.fullscreenElement || document.querySelector('.present-overlay') || document.body;
+  return createPortal(<aside data-testid="artifact-download-request" style={{position:'fixed',top:12,right:12,zIndex:2147483647,maxWidth:'90vw',padding:12,border:'1px solid #ccc',background:'#fff',color:'#222'}}>
     <span>{zh?'稿件请求下载：':'Manuscript requests a download: '}{pending.name} ({pending.blob.size} B)</span>{' '}
     <button onClick={event=>{
       if (!event.nativeEvent.isTrusted || current.current !== pending) return;
@@ -40,5 +42,5 @@ export function DownloadGate({file,zh,previewBase}:{file:string;zh:boolean;previ
       setTimeout(()=>URL.revokeObjectURL(url),1000);
     }}>{zh?'保存文件':'Save file'}</button>{' '}
     <button onClick={event=>{if(event.nativeEvent.isTrusted) clear();}}>{zh?'取消':'Cancel'}</button>
-  </aside>;
+  </aside>,container);
 }

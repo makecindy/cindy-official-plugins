@@ -3988,6 +3988,7 @@ function FileVersionManagerModal({
         <div className="artifact-version-panel__preview">
           {srcDoc ? (
             <iframe
+              data-od-download-preview="true"
               ref={versionPreviewIframeRef}
               title={selectedVersion ? `${file.name} v${selectedVersion.version}` : file.name}
               sandbox="allow-scripts"
@@ -17788,6 +17789,7 @@ function HtmlViewer({
         >
           {effectiveDeck || !useUrlLoadPreview ? (
             <iframe
+              data-od-download-preview="true"
               title="present"
               sandbox="allow-scripts"
               data-od-render-mode="srcdoc"
@@ -17795,6 +17797,7 @@ function HtmlViewer({
             />
           ) : (
             <iframe
+              data-od-download-preview="true"
               title="present"
               sandbox="allow-scripts"
               data-od-render-mode="url-load"

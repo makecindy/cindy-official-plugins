@@ -392,6 +392,21 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
         assert.equal(await fs.readFile(await downloaded.path(),'utf8'),'download-fixture');
         await downloaded.delete();
       }
+
+      // Exercise the actual presentation UI, not a synthetic replacement frame.
+      await isolated.goto(b.url+'?file=download-data.html');
+      await isolated.getByTestId('artifact-download-request').getByRole('button',{name:'取消',exact:true}).click();
+      await isolated.getByRole('button',{name:'演示',exact:true}).click();
+      await isolated.getByText('在当前标签页',{exact:true}).click();
+      const presented=isolated.locator('.present-overlay');
+      await presented.locator('iframe').waitFor();
+      const confirm=presented.getByTestId('artifact-download-request');
+      await confirm.waitFor();
+      const saving=isolated.waitForEvent('download');
+      await confirm.getByRole('button',{name:'保存文件',exact:true}).click();
+      const saved=await saving;
+      assert.equal(await fs.readFile(await saved.path(),'utf8'),'download-fixture');
+      await saved.delete();
     } finally { await isolated.close(); await new Promise(resolve => probe.close(resolve)); }
 
   } finally {

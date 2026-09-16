@@ -16,44 +16,6 @@
       ],
       "format": "cjs"
     },
-    "node_modules/react/cjs/react-jsx-runtime.production.min.js": {
-      "bytes": 859,
-      "imports": [
-        {
-          "path": "node_modules/react/index.js",
-          "kind": "require-call",
-          "original": "react"
-        }
-      ],
-      "format": "cjs"
-    },
-    "node_modules/react/jsx-runtime.js": {
-      "bytes": 214,
-      "imports": [
-        {
-          "path": "node_modules/react/cjs/react-jsx-runtime.production.min.js",
-          "kind": "require-call",
-          "original": "./cjs/react-jsx-runtime.production.min.js"
-        }
-      ],
-      "format": "cjs"
-    },
-    "DownloadGate.tsx": {
-      "bytes": 2495,
-      "imports": [
-        {
-          "path": "node_modules/react/index.js",
-          "kind": "import-statement",
-          "original": "react"
-        },
-        {
-          "path": "node_modules/react/jsx-runtime.js",
-          "kind": "import-statement",
-          "original": "react/jsx-runtime"
-        }
-      ],
-      "format": "esm"
-    },
     "node_modules/scheduler/cjs/scheduler.production.min.js": {
       "bytes": 4235,
       "imports": [],
@@ -96,6 +58,49 @@
         }
       ],
       "format": "cjs"
+    },
+    "node_modules/react/cjs/react-jsx-runtime.production.min.js": {
+      "bytes": 859,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "require-call",
+          "original": "react"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/react/jsx-runtime.js": {
+      "bytes": 214,
+      "imports": [
+        {
+          "path": "node_modules/react/cjs/react-jsx-runtime.production.min.js",
+          "kind": "require-call",
+          "original": "./cjs/react-jsx-runtime.production.min.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "DownloadGate.tsx": {
+      "bytes": 2838,
+      "imports": [
+        {
+          "path": "node_modules/react-dom/index.js",
+          "kind": "import-statement",
+          "original": "react-dom"
+        },
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
     },
     "node_modules/react-dom/client.js": {
       "bytes": 619,
@@ -11985,7 +11990,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847391,
+      "bytes": 847529,
       "imports": [
         {
           "path": "../latest/apps/web/src/utils/uuid.ts",
@@ -14332,12 +14337,6 @@
         "node_modules/react/index.js": {
           "bytesInOutput": 52
         },
-        "node_modules/react/cjs/react-jsx-runtime.production.min.js": {
-          "bytesInOutput": 625
-        },
-        "node_modules/react/jsx-runtime.js": {
-          "bytesInOutput": 52
-        },
         "node_modules/scheduler/cjs/scheduler.production.min.js": {
           "bytesInOutput": 3995
         },
@@ -14349,6 +14348,12 @@
         },
         "node_modules/react-dom/index.js": {
           "bytesInOutput": 254
+        },
+        "node_modules/react/cjs/react-jsx-runtime.production.min.js": {
+          "bytesInOutput": 625
+        },
+        "node_modules/react/jsx-runtime.js": {
+          "bytesInOutput": 52
         },
         "node_modules/react-dom/client.js": {
           "bytesInOutput": 108
@@ -14894,7 +14899,7 @@
           "bytesInOutput": 446
         },
         "node_modules/core-js/internals/array-method-is-strict.js": {
-          "bytesInOutput": 154
+          "bytesInOutput": 156
         },
         "node_modules/core-js/modules/es.array.reduce.js": {
           "bytesInOutput": 266
@@ -15545,7 +15550,7 @@
           "bytesInOutput": 999
         },
         "DownloadGate.tsx": {
-          "bytesInOutput": 1752
+          "bytesInOutput": 2050
         },
         "FullStudio.tsx": {
           "bytesInOutput": 6039
@@ -15560,7 +15565,7 @@
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264843
+          "bytesInOutput": 264945
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16304,7 +16309,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17311825
+      "bytes": 17312227
     },
     "../../assets/studio.css": {
       "imports": [
