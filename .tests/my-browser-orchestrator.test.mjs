@@ -64,7 +64,12 @@ async function sandbox(t) {
       if (method === 'status') return {ok:true,result:{ok:true,version:'fixture',extension_connected:true,clients:[]}};
       if (method === 'installation') return {ok:true,result:{ok:true,browsers:[]}};
       if (method === 'openInstallation') return {ok:true,result:{ok:true}};
-      if (method === 'act') {state.acts.push({action:params.action,policy:state.worker});return {ok:true,result:{ok:true,url:params.payload?.url}};}
+      if (method === 'act') {
+        // Simulates the sandbox transport dying after the worker may already have accepted the job.
+        if (state.rejectNode) throw new Error('worker transport closed');
+        state.acts.push({action:params.action,policy:state.worker});
+        return {ok:true,result:{ok:true,url:params.payload?.url}};
+      }
       return {ok:true,result:{ok:true}};
     }},
   };
@@ -127,4 +132,22 @@ test('permission saves stay ordered against concurrent tool-call synchronization
   assert.deepEqual(state.kv.policy.interact.allow,['example.test']);
   assert.equal(P.check(state.worker,'click','https://'+REVOKED).ok,false,'the last applied policy must be the saved one');
   assert.equal(state.confirmCalls.length,0,'a pure revocation must not require an interaction grant confirmation');
+});
+
+test('a transport failure while reading reports unknown, not not_executed',async t=>{
+  const {state,callTool}=await sandbox(t);
+  state.rejectNode=true;
+  const actsBefore=state.acts.length;
+  await callTool('browser_read',{url:'https://example.test',mode:'content'});
+  assert.equal(state.acts.length,actsBefore,'the read must have been attempted and rejected, not silently skipped');
+  const result=state.sent.at(-1).result;
+  assert.equal(result.ok,false,JSON.stringify(result));
+  assert.equal(result.error,'NODE_UNAVAILABLE');
+  // A read that already reached the browser may have marked notifications as seen, so it
+  // cannot be reported as "nothing happened".
+  assert.equal(result.execution,'unknown');
+  // A status check has no site side effect, so it stays precise rather than unknown.
+  state.rejectNode=false;
+  await callTool('browser_status',{});
+  assert.equal(state.sent.at(-1).result.ok,true);
 });

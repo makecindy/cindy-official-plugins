@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-A local candidate plugin connecting Cindy to your everyday signed-in browser. Version **0.3.0** adds content-first reading, browser/profile-bound routing, a minimal Art-generated icon and browser-specific setup. It is **not yet a publicly distributed consumer release**.
+A local candidate plugin connecting Cindy to your everyday signed-in browser. Version **0.3.x** adds content-first reading, browser/profile-bound routing, a minimal Art-generated icon and browser-specific setup. It is **not yet a publicly distributed consumer release**.
 
 ## Reading vs interaction
 
@@ -47,7 +47,7 @@ First-party JS and Node built-ins only. No runtime dependency installation. `nod
 ```sh
 python3 scripts/package-my-browser-zip.py
 node scripts/validate-plugin-manifest.mjs ./my-browser
-node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs .tests/my-browser-policy-sync.test.mjs
+node --test .tests/my-browser.test.mjs .tests/my-browser-multibrowser.test.mjs .tests/my-browser-tabs.test.mjs .tests/my-browser-orchestrator.test.mjs
 PLAYWRIGHT_CORE=/absolute/path/to/playwright-core node --test .tests/my-browser.browser.test.mjs
 # macOS build host with Xcode; fresh output directory (existing builds are never overwritten)
 node scripts/build-my-browser.mjs /absolute/output/directory all
@@ -56,7 +56,7 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 The builder creates Chrome/Edge store ZIPs and a Safari Xcode project/universal app. Without signing credentials, it clearly labels the Safari artifact **not consumer-ready**. Optional `MY_BROWSER_SIGN_IDENTITY` and `MY_BROWSER_DEVELOPMENT_TEAM` enable signing; `MY_BROWSER_NOTARY_PROFILE` names an existing Apple notarytool keychain profile for notarization. No credential values belong in source, plugin settings or artifacts. Only after successful notarization/assessment copy the output `native/` into the plugin for packaging. Signing/notarization paths are not verified on this machine because it has zero available signing identities.
 
 2026-09-15 local evidence:
-- Manifest, 55 Node/HTTP/localization/provisioning/workflow tests plus the isolated Chromium integration suite passed (56 total).
+- Manifest, 56 Node/HTTP/localization/provisioning/workflow tests plus the isolated Chromium integration suite passed (57 total).
 - Real Chromium suite covers read/extract/interaction, waiting for hydration, one-call X-shaped fixture extraction, cursor bounds, stale refs, denial/revocation, redirects, tab cleanup, popup, pairing cancellation/persistence, settings failures and 330px layout.
 - X-shaped **fixture**, not a real X latency claim: 5 records in 1 read call, 714ms, 792 bytes of result JSON in the recorded run.
 - Safari universal Release build succeeded. No Safari signature, notarization, App Store release or real Safari runtime claim.
@@ -66,6 +66,8 @@ The builder creates Chrome/Edge store ZIPs and a Safari Xcode project/universal 
 0.3.1 fixes repeated tab creation after redirected load timeouts, lost aliases after focus, and eviction that discarded bookkeeping without closing the actual tab. Protected tabs stay counted; unexpected navigation and exhausted capacity stop with non-retryable errors. Five regression tests plus the real Chromium redirect-retry test cover these paths.
 
 0.3.8 closes a permission-ordering race found in review: `sync()` read the stored policy and applied it to the worker in two separate steps, so a settings save landing between them could be overwritten by the stale snapshot, leaving a site the user had just revoked actionable until the next sync. Reading and applying now share one critical section with `save()`. Two regression tests exercise the real `main.js` orchestrator with stubbed host APIs: one stalls a sync between the read and the apply, lets the save overtake it, and asserts the revocation both survives in storage and stays denied for later tool calls; the other checks concurrent saves and tool calls neither fail nor deadlock. Both fail against the pre-fix `sync()`.
+
+0.3.9 covers the two remaining review findings on the declared contract. A transport failure while reading (timeout or broken stdio) used to escape `node()` and land in the generic handler, which only knew about interactions, so `browser_read` claimed `not_executed` even though the worker may already have accepted the job and visited the page. `node()` now converts a rejected host request into the same structured `NODE_UNAVAILABLE` as a returned worker error, so reads report `unknown`. A third orchestrator test throws from the stubbed host request and asserts `unknown`; it fails against the pre-fix `node()`. Second, the agent-facing `description`/`whenToUse` and all four locales no longer claim Safari as a connectable browser: this package ships no signed Safari app and no store entry, the settings page already hides the Safari card, so an agent following the old text would have driven users into an install that cannot complete. Safari implementation, pairing, the build script and the README/Manual notes are unchanged; only the overstatement is removed, and the Manual now says explicitly that Safari cannot be installed from this package.
 
 A packaged ZIP can also be dragged onto Chromium's extensions manager as a developer-install alternative to selecting a directory. Browser developer-mode/policy requirements still apply; this is not a store-signed release or an automatic-update promise. Chromium's implementation supports this path; this machine's official Chrome ZIP-drop flow has not yet been verified. A self-packed CRX may be blocked rather than merely showing a dismissible warning.
 
