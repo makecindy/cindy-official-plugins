@@ -93,6 +93,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.21 让 `extract` 走同一条渲染文本路径。无属性的 extract 字段原先在 `innerText` 为空时回退到 `textContent`，于是「可见外壳 + 隐藏子元素」会把 `display:none` 或脚本里的 CSRF 值返回；现字段统一经与 `content`／`text` 相同的 TreeWalker 提取，隐藏后代同样被跳过。覆盖：夹具中仅含隐藏 span 的外壳经 extract 不得返回任何隐藏数据，而普通元素仍原样返回其渲染文本。恢复 `textContent` 回退即复现 `extract must not return hidden descendants`。
 
+0.3.22 在过滤路径上恢复渲染文本保真度。首版 TreeWalker 对每个文本节点单独折叠空白、再用空格拼接，于是 `<span>A</span><span>B</span>` 变成 `A B`、`<br>` 与块级换行丢失；它还会对整个 `visibility:hidden` 子树 `FILTER_REJECT`，连带丢弃显式恢复 `visibility:visible` 的后代。现改为：区域内若没有敏感后代就原样返回 `innerText`（精确），只有确实包含敏感元素时才走遍历；遍历时相邻行内文本直接相接、最近的块级祖先改变或遇到 `<br>` 才换行、`white-space: pre` 保留空白，并按文本节点判定 visibility，使被重新显示的后代保留、隐藏文本仍被排除。覆盖：夹具新增 `AB`、块级换行、`<br>`、重新显示 span 四个探针；旧实现即复现 `adjacent inline runs must not gain a space`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

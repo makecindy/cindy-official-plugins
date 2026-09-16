@@ -205,6 +205,15 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
   // display:none content into the text.
   assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('HIDDENMARKER'),false,'hidden content must not be returned when a sensitive region is filtered');
+  // Filtering must not invent or lose line structure: adjacent inline runs join, block boundaries
+  // and <br> break, and a hidden ancestor must not swallow a re-shown visible descendant.
+  const rendered=(await tool('browser_read',{url,mode:'text',maxChars:30000})).text;
+  assert.ok(rendered.includes('AB'),'adjacent inline runs must not gain a space');
+  assert.ok(!rendered.includes('A B'),'adjacent inline runs must not gain a space');
+  assert.ok(/L1\s*\n\s*L2/.test(rendered),'block boundaries must produce a line break');
+  assert.ok(/X\s*\n\s*Y/.test(rendered),'<br> must produce a line break');
+  assert.ok(rendered.includes('SHOWN'),'a re-shown descendant of a hidden ancestor must still be readable');
+  assert.ok(!rendered.includes('hiddenrun'),'text of a visibility:hidden ancestor must stay excluded');
   // A read must not mutate the live page: no custom element lifecycle calls, no observer records.
   await page.evaluate(()=>{window.__probe.mutations=0;window.__probe.lifecycle=0;});
   const probeRead=await tool('browser_read',{url,mode:'text'});

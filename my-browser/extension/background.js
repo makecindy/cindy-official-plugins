@@ -170,27 +170,42 @@ async function pageOperation(job,expectedUrl) {
   // custom element lifecycle callbacks and MutationObserver, which would make a plain read mutate the
   // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
   const NON_RENDERED = new Set(['SCRIPT','STYLE','TEMPLATE','NOSCRIPT','HEAD','TITLE','META','LINK']);
+  const BLOCK_TAGS = new Set(['ADDRESS','ARTICLE','ASIDE','BLOCKQUOTE','DD','DIV','DL','DT','FIELDSET','FIGCAPTION','FIGURE','FOOTER','FORM','H1','H2','H3','H4','H5','H6','HEADER','HR','LI','MAIN','NAV','OL','P','PRE','SECTION','TABLE','TBODY','TFOOT','THEAD','TR','UL']);
   function readableText(root,limit) {
     if (!root.querySelector) return root.innerText || '';
     if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
-    const parts = []; let length = 0;
+    // Without a sensitive descendant, innerText is exact, so never approximate it.
+    if (![...root.querySelectorAll(TEXT_SCOPE)].some(sensitive)) return root.innerText || '';
+    const parts = []; let length = 0, lastBlock = null, lastBreak = false;
     const walker = document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,{acceptNode(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
         if (NON_RENDERED.has(node.tagName) || node.hidden || sensitive(node)) return NodeFilter.FILTER_REJECT;
-        const style = getComputedStyle(node);
-        if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+        if (getComputedStyle(node).display === 'none') return NodeFilter.FILTER_REJECT;
+        // visibility is judged per text node instead of rejecting the subtree, because a hidden
+        // ancestor may contain a descendant that explicitly restores visibility:visible.
         return NodeFilter.FILTER_ACCEPT;
       }
-      return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
     }});
     for (let node = walker.nextNode(); node && length < limit; node = walker.nextNode()) {
-      // Accepted elements are traversed but carry no text of their own.
-      if (node.nodeType !== Node.TEXT_NODE) continue;
-      const value = node.nodeValue.replace(/\s+/g,' ').trim();
-      if (!value) continue;
-      parts.push(value); length += value.length + 1;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName === 'BR') { parts.push('\n'); lastBreak = true; lastBlock = null; }
+        continue;
+      }
+      const parent = node.parentElement || root;
+      const style = getComputedStyle(parent);
+      if (style.visibility === 'hidden') continue;
+      const pre = (style.whiteSpace || '').startsWith('pre');
+      const value = pre ? node.nodeValue : node.nodeValue.replace(/\s+/g,' ');
+      if (!pre && !value.trim()) continue;
+      // Adjacent inline runs join with nothing; a different nearest block ancestor is a new line.
+      let block = parent;
+      while (block && block !== root && !BLOCK_TAGS.has(block.tagName)) block = block.parentElement;
+      if (parts.length && !lastBreak && block !== lastBlock) parts.push('\n');
+      lastBlock = block; lastBreak = false;
+      parts.push(value); length += value.length;
     }
-    return parts.join(' ');
+    return parts.join('').replace(/\n{3,}/g,'\n\n').trim();
   }
   let started = false;
   try {
