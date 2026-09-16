@@ -137,10 +137,16 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
 
 // Runs in the extension's ISOLATED world. All data is passed explicitly; refs are a Map
 // of real Elements, not attributes a hostile page could overwrite or forge.
-async function pageOperation(job,expectedUrl) {
+async function pageOperation(job) {
   const fail = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
-  // The target URL is passed capped, so a page URL longer than the cap is compared by prefix.
-  if (!location.href.startsWith(expectedUrl)) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
+  // The exact target URL comes from the worker rather than an executeScript argument: a very long URL
+  // passed that way never settles, while comparing a capped prefix would accept a same-document
+  // navigation to a neighbouring route. Full identity is required here.
+  const expectedUrl = await new Promise(resolve => {
+    try { chrome.runtime.sendMessage({type:'my-browser-target',id:job.id}, value => resolve(typeof value === 'string' ? value : null)); }
+    catch { resolve(null); }
+  });
+  if (typeof expectedUrl !== 'string' || location.href !== expectedUrl) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
   const a = job.payload;
   const action = job.action;
   const TITLE_MAX = 300, LINK_URL_HARD_MAX = 8192, PAGE_LINKS_BUDGET = 200000;
@@ -454,7 +460,11 @@ async function handle(job,policy,target) {
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
-    const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url.slice(0,PAGE_URL_MAX)]});
+    targets.set(job.id,actual.url);
+    let out;
+    try {
+      out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job]});
+    } finally { targets.delete(job.id); }
     const raw = out?.[0]?.documentId === documentId ? out[0].result : null;
     const result = sanitizeResult(raw);
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
@@ -495,7 +505,10 @@ chrome.alarms.create('my-browser-watchdog',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') chain(); });
 chrome.runtime.onStartup.addListener(chain);
 chrome.runtime.onInstalled.addListener(chain);
+// In-flight page targets, keyed by job id. Only the worker can read them, and only while injecting.
+const targets = new Map();
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {
+  if (msg?.type === 'my-browser-target') { sendResponse(targets.get(msg.id) ?? null); return; }
   if (msg.type !== 'connection-status') return;
   discover().then(() => sessionStore.get('connection')).then(sendResponse).catch(() => sendResponse({connection:{connected:false}}));
   return true;

@@ -113,6 +113,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.31 把凭证识别从枚举键名改为按词判定，并给页面 URL 加上边界。查询键现在按词拆分判定，因此 `reset_token`、`magic_link_token` 这类组合键即使值很短也会被遮蔽；值本身是 URL 或路径时递归分析（`?next=%2Freset%2F<token>`）。另外，重定向或 `history.replaceState` 可把页面 URL 拉长到远超桥接请求上限，导致结果根本发不出去：现对三个出口分别限长——发给 `/authorize` 的 URL、传给注入函数的 URL、以及结果里的 URL；注入函数内的导航校验改为比较有界前缀而非整串。覆盖：组合键、嵌套 URL 与 `?page=2&sort=name` 保持不变的单元断言；`pageurl.test` 把自身改写为 60 万字符路径后必须读取成功且 URL 在 8192 以内。回退这些限长即复现该次读取的 `BROWSER_TIMEOUT`。
 
+0.3.32 恢复完整的页面身份校验。先前为了限制传入注入函数的 URL 长度而改用前缀比较，这同时放松了身份判定：同文档导航到共享该前缀的地址也会通过。现由注入代码经消息向 worker 取回精确的目标 URL，并要求 `location.href` 与之完全相等。该 URL 刻意既不作为 `executeScript` 参数传递（超长时会一直不返回），也不使用限长副本。覆盖：整个 Chromium 套件都经过这条路径，包括 URL 长达 60 万字符的 `pageurl.test` 读取，以及依赖身份校验的重定向拒绝用例。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
