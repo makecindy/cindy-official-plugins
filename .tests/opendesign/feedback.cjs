@@ -106,3 +106,30 @@ test("editing annotation text retains persisted images and appends new screensho
     assert.equal(await fs.readFile(path.join(root,first.attachments[0].path),"utf8"),"fixture");
   } finally {await fs.rm(root,{recursive:true,force:true});}
 });
+
+test("invalid trailing images reject the whole batch before any file writes", async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),"od-image-batch-"));
+  const b={root,sessionId:"batch-owner",edit:"editor"};
+  let writes=0,emitted=0;
+  feedback.setEmitter(()=>{emitted++;});
+  const valid={type:"image/png",base64:"eA=="};
+  try {
+    for(const route of ["comments","feedback"]) {
+      for(const invalid of [{type:"text/plain",base64:"eA=="},{type:"image/png",base64:Buffer.alloc(8*1024*1024+1).toString("base64")}]) {
+        await assert.rejects(feedback.handle(b,route,"POST",{
+          target:{selector:"#title"},note:"fixture",action:"send",images:[valid,invalid]
+        },async(binding,name,bytes)=>{writes++;await fs.writeFile(path.join(binding.root,name),bytes);}),
+        {code:"FEEDBACK_REJECTED",status:400});
+        assert.equal(writes,0);
+        assert.equal(emitted,0);
+        assert.deepEqual(await fs.readdir(root),[]);
+        assert.deepEqual(await feedback.read(b),{comments:[],requests:[]});
+      }
+    }
+    const saved=(await feedback.handle(b,"comments","POST",{target:{selector:"#title"},note:"valid",images:[valid,valid]},
+      async(binding,name,bytes)=>{writes++;await fs.writeFile(path.join(binding.root,name),bytes);})).comment;
+    assert.equal(writes,2);
+    assert.equal(saved.attachments.length,2);
+    assert.notEqual(saved.attachments[0].path,saved.attachments[1].path);
+  } finally {feedback.setEmitter(()=>{});await fs.rm(root,{recursive:true,force:true});}
+});

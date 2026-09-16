@@ -31,8 +31,8 @@ function rejected(message) { return Object.assign(new Error(message), {status:40
 async function images(b, input, write) {
   if (!Array.isArray(input) || input.length > 12)
     throw rejected("Too many images");
-  const out = [];
-  for (const image of input) {
+  // Validate the complete batch before creating any project files.
+  const decoded = input.map((image) => {
     if (
       !image || !["image/png", "image/jpeg", "image/webp"].includes(image.type) ||
       typeof image.base64 !== "string"
@@ -40,15 +40,19 @@ async function images(b, input, write) {
       throw rejected("Unsupported annotation image");
     const bytes = Buffer.from(image.base64, "base64");
     if (bytes.length > 8 * 1024 * 1024) throw rejected("Image too large");
+    return {type:image.type,bytes};
+  });
+  const out = [];
+  for (const {type,bytes} of decoded) {
     const name =
       "annotation-" +
       crypto.randomUUID() +
       "." +
       { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[
-        image.type
+        type
       ];
     await write(b, name, bytes);
-    out.push({ name, path: name, mime: image.type });
+    out.push({ name, path: name, mime: type });
   }
   return out;
 }
