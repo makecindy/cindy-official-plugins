@@ -302,9 +302,9 @@ async function pageOperation(job,expectedUrl) {
             }
             if (value != null) {
               if (isUrlAttr) {
-                // A URL is never cut: it either fits the remaining budget whole or is dropped whole, so
-                // redaction always sees the complete string and the declared budget still holds.
-                if (value.length > LINK_URL_HARD_MAX || value.length > remaining) { value = null; truncated = true; }
+                // A URL is never cut: it either fits whole or is dropped whole, so redaction always sees
+                // the complete string and the declared per-value limit (4000) still holds.
+                if (value.length > 4000 || value.length > remaining) { value = null; truncated = true; }
               } else {
                 // Clamp: a URL may have consumed the whole budget, and slice(0, negative) would return
                 // text from the end of the string instead of nothing.

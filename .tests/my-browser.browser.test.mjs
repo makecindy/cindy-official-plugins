@@ -247,6 +247,11 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal(JSON.stringify(fits.record).includes('12121212'),false);
   assert.ok(String(fits.record.url).includes('REDACTED'),'the URL survives as a redacted value');
   assert.equal(fits.truncated,false);
+  // The declared per-value limit is 4000 characters; an over-long URL is dropped whole, not returned.
+  const over=await tool('browser_read',{url,mode:'extract',selector:'#over-value-limit',waitFor:'#readable',fields:{url:{selector:':self',attr:'href'}}});
+  assert.equal(over.ok,true,JSON.stringify(over).slice(0,160));
+  assert.equal(over.record.url,null,'a URL over the declared 4000-character value limit is dropped');
+  assert.equal(over.truncated,true,'dropping it is a cut');
   // A URL that consumed the budget must not let a later text field escape it: a negative remaining
   // would make slice(0, negative) return text from the end of the string.
   const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+(absolute.indexOf('/reset/')+7+9)});

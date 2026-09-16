@@ -107,6 +107,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.28 修掉该改动的两个副作用。URL 整串保留后仍会扣减 `remaining` 而无下限，后续文本字段因此拿到负数预算，`slice(0, 负数)` 会从字符串**末尾**取文本——恰与预期相反；现超出预算的 URL 整条丢弃（不消耗预算），文本裁剪上限下限为 0。另外，链接数量检查原在 `http(s)` 资格过滤之前，因此最后一 条 http 链接刚好填满 `limit`、页面仅剩 `mailto:`／`tel:` 链接时会被误报截断；现先判资格。覆盖：extract 依次取「长标签 → 超预算 URL → 文本字段」（后者必须不超过剩余预算），以及 `links.test` 在 `limit:4` 且尾部有非 http 链接时不得报截断。回退任一处即触发对应断言失败。
 
+0.3.29 让 extract 的 URL 值落在声明的单值上限内。URL 整串传递后，只剩 8192 硬上限与总预算两道约束，因此 4001–6000 字符的 `href` 会被返回，而 `ghost.json` 声明每个字段值最多 4000 字符。现超过 4000（或超过剩余预算）的 URL 值整条丢弃并置 `truncated:true`，既满足声明的上限，又不在脱敏前切割 URL。覆盖：夹具中一条 4100 字符的 URL 必须返回 `null` 且 `truncated:true`；恢复只查 8192 即可复现 `a URL over the declared 4000-character value limit is dropped`。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。
