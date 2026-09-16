@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,21 +79,49 @@ test('changed-plugin detection uses the merge parents even when event base is st
   assert.doesNotMatch(prWorkflow, /github\.event\.pull_request\.base\.sha/);
 });
 
-test('pull request verification requires the production Cindy attestation', () => {
+test('pull request verification requires the Cindy device attestation', () => {
   assert.match(prWorkflow, /^      - edited$/m);
   assert.match(
     prWorkflow,
-    /name: Require production Cindy verification attestation\n        if: \$\{\{ steps\.changes\.outputs\.plugins != '\[\]' \}\}/,
+    /name: Require Cindy device verification attestation\n        if: \$\{\{ steps\.changes\.outputs\.plugins != '\[\]' \}\}/,
   );
-  assert.match(prWorkflow, /Production Cindy verification \/ 生产版 Cindy 验证/);
+  assert.match(prWorkflow, /Cindy device verification \/ Cindy 实机验证/);
   assert.match(prWorkflow, /\.pull_request\.body/);
   assert.match(prWorkflow, /GITHUB_EVENT_PATH/);
   assert.doesNotMatch(prWorkflow, /github\.event\.pull_request\.body/);
   assert.ok(
     prWorkflow.indexOf('name: Dry-run plugin packaging') <
-      prWorkflow.indexOf('name: Require production Cindy verification attestation'),
+      prWorkflow.indexOf('name: Require Cindy device verification attestation'),
     'package validation must run before a pending manual attestation blocks the job',
   );
+});
+
+test('device attestation accepts current and legacy checked labels, but not unchecked claims', (t) => {
+  const step = prWorkflow.match(/      - name: Require Cindy device verification attestation\n([\s\S]*?)(?=\n      - name:|$)/)?.[1];
+  assert.ok(step, 'workflow must contain the device attestation gate');
+  const source = step.split('        run: |\n')[1];
+  assert.ok(source, 'attestation gate must contain an executable shell script');
+  const script = source.split('\n').map((line) => line.replace(/^          /, '')).join('\n');
+  const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-attestation-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const event = path.join(fixture, 'event.json');
+  const template = readFileSync(new URL('../.github/PULL_REQUEST_TEMPLATE.md', import.meta.url), 'utf8');
+  assert.match(template, /or Beta Cindy build/);
+  assert.match(template, /Either channel is sufficient/);
+  assert.match(template, /Dev\/local builds do not qualify/);
+  for (const [body, expected] of [
+    ['- [x] **Cindy device verification / Cindy 实机验证** — stable 0.1.82', 0],
+    ['- [X] **Cindy device verification / Cindy 实机验证** — Beta 0.1.82', 0],
+    ['- [x] **Production Cindy verification / 生产版 Cindy 验证**', 0],
+    ['- [ ] **Cindy device verification / Cindy 实机验证**', 1],
+    ['- [ ] **Production Cindy verification / 生产版 Cindy 验证**', 1],
+    ['Beta 0.1.82 verified, without checking the attestation', 1],
+    ['', 1],
+  ]) {
+    writeFileSync(event, JSON.stringify({ pull_request: { body } }));
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_PATH: event } });
+    assert.equal(result.status, expected, result.stderr || result.stdout);
+  }
 });
 
 test('CN and Global plugin publishers are operationally independent', () => {

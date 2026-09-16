@@ -147,13 +147,14 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Require production Cindy verification attestation
+      - name: Require Cindy device verification attestation
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         run: |
           set -euo pipefail
           pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
-          if ! grep -Eq '^- \[[xX]\] \*\*Production Cindy verification / 生产版 Cindy 验证\*\*' \
+          # Keep accepting the stricter stable-only attestation on existing PRs.
+          if ! grep -Eq '^- \[[xX]\] \*\*(Cindy device verification / Cindy 实机验证|Production Cindy verification / 生产版 Cindy 验证)\*\*' \
             <<<"${pr_body}"; then
-            echo "::error::Check the Production Cindy verification / 生产版 Cindy 验证 box in the PR body after installing and exercising every changed plugin on a real device with a stable production Cindy build. If a plugin declares minCindyVersion, the verified Cindy version must be greater than or equal to it."
+            echo "::error::Check the Cindy device verification / Cindy 实机验证 box in the PR body after installing and exercising every changed plugin on a real device with a stable production or Beta Cindy build. If a plugin declares minCindyVersion, the verified Cindy version must be greater than or equal to it."
             exit 1
           fi

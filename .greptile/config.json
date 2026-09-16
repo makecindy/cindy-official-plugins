@@ -74,7 +74,7 @@
     {
       "id": "capability-minimization",
       "severity": "high",
-      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、按该插件实际依赖填写首个稳定版 minCindyVersion、移除 slots；仓库不设置统一 Cindy 版本下限，未触及的 v2 插件不得被要求批量迁移。"
+      "rule": "ghost.json 变更时：所有直接能力字段、node/network.hosts 只能最小化声明，新增任何能力（新顶层能力字段、新域名、新 secret、新 tool）必须在 PR 描述中有对应必要性说明。声明 node 的插件必须固定 entry/entries 入口；childSpawn 产生的子进程边界必须最小——固定命令、参数不可注入外部输入。任何 spawn/exec 调用路径的变更（包括从受控封装改回原生 spawn）都必须分析新的参数注入面并在评论中给出结论。新插件和实际打包内容有变化的现有插件必须使用 schemaVersion 3、按该插件实际依赖填写首个已发布版本（正式稳定版或 Beta 版） minCindyVersion、移除 slots；仓库不设置统一 Cindy 版本下限，未触及的 v2 插件不得被要求批量迁移。"
     },
     {
       "id": "irreversible-side-effect-tri-state",
@@ -115,7 +115,7 @@
     {
       "id": "minimum-client-version-evidence",
       "severity": "high",
-      "rule": "每个改动插件包的 PR Body 都必须勾选生产版 Cindy 验证项，确认真实打包 .cindy 已在运行正式稳定版 Cindy 的实际设备上安装并验证核心功能；CI 会确定性检查该勾选项。插件声明 minCindyVersion 时，验证所用 Cindy 版本必须不低于它。降低或删除 minCindyVersion 会扩大支持范围，必须转维护者人工 review，不能只凭静态 CI 放行。"
+      "rule": "每个改动插件包的 PR Body 都必须勾选 Cindy 实机验证项，确认真实打包 .cindy 已在运行正式稳定版或 Beta 版 Cindy 的实际设备上安装并验证核心功能；任一渠道验收通过即可，不要求两种渠道都验收，Dev/本地构建不能替代。CI 会确定性检查该勾选项。插件声明 minCindyVersion 时，验证所用 Cindy 版本必须不低于它。降低或删除 minCindyVersion 会扩大支持范围，必须转维护者人工 review，不能只凭静态 CI 放行。"
     }
   ]
 }

@@ -84,7 +84,7 @@ registration. An invented field or method cannot create an unimplemented Host AP
 ## Version and installation facts
 
 - Determine `minCindyVersion` from the package's manifest format, required Host
-  interfaces, and stable release evidence. Keeping the old v2 value is not
+  interfaces, and stable or Beta release evidence. Keeping the old v2 value is not
   automatically correct; merged code is not proof of release. The README's
   `1.2.3` is a placeholder, not a repository-wide client floor.
 - Current official CI requires v3 for new plugins and changed package content,
@@ -295,8 +295,8 @@ proof of account connection.
    ZIP a working directory: a local credential file can enter the archive. A harness
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no
-   credentials; production verification must cover the submitted contents.
-4. Install the final package in a production stable Cindy build meeting its real
+   credentials; device verification must cover the submitted contents.
+4. Install the final package in a stable production or Beta Cindy build meeting its real
    minimum, exercise core tools and failures, and check retained capabilities.
    The Agent does this when authorized operating tools are available; otherwise
    explicitly hand off the unverified steps. Never falsely check the author's
