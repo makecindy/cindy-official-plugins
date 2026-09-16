@@ -121,7 +121,7 @@
 - [ ] 每个 tool 的 `description` 与实际行为一致——能力、限制、返回值、副作用
 - [ ] 面向用户的报错可行动；无裸状态码、无英文堆栈
 - [ ] 四语言 locale 齐全；`node --test .tests/localization.test.mjs` 通过
-- [ ] 每个改动插件都已在运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并
+- [ ] 每个改动插件都已在运行正式稳定版或 Beta 版 Cindy 的实际设备上安装真实 `.cindy` 包并
       验证核心功能，且已勾选 PR 验证项；插件声明 `minCindyVersion` 时，验证所用
       Cindy 版本不低于该最低版本
 - [ ] `ghost.json.version` 已 bump；`provisioning.json` 有对应条目且 PR 描述里
@@ -204,7 +204,7 @@ cindy-art/
 新插件使用 `schemaVersion: 3`，并通过 `tools`、`network`、`node`、`notify: true`
 等顶层字段直接声明能力；v3 不得再有 `slots`。每个 v3 插件包都必须独立填写
 `minCindyVersion`：它应是同时支持这个具体插件所依赖的全部 Host 能力和 Manifest 字段的
-第一个 Cindy 正式稳定版本。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
+第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
 保持原样，直到该插件的实际打包内容发生变化；改动它的 PR
 必须同时迁移到 v3。本仓不会只为 schema 变化批量迁移、批量发布现有插件。
 
@@ -240,7 +240,7 @@ my-plugin/
 
 `ghost.json` 从下面这份最小可运行 Manifest v3 开始：
 
-下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个 Cindy 正式稳定版本。
+下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）。
 
 ```json
 {
@@ -316,7 +316,7 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
 `zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
 按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查，并在符合最低版本要求的
-Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
+Cindy 正式稳定版或 Beta 版实机上安装真实 `.cindy` 包完成验证。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
 `@taptap/maker@0.0.33`。升级时应整体替换 npm 包发布内容并同步更新插件版本，

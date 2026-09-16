@@ -43,13 +43,16 @@ review contract is .greptile/rules.md. 质量与安全项来自 README 审查标
       changed; the new SemVer is greater than the version on `main`.
       每个打包内容发生变化的插件都已 bump `ghost.json` 的 `version`，且新 SemVer
       大于 `main` 上的当前版本。
-- [ ] **Production Cindy verification / 生产版 Cindy 验证** — Installed every
-      changed plugin's packaged `.cindy` on a real device running a stable
-      production Cindy build and verified its core functionality. When a plugin
+- [ ] **Cindy device verification / Cindy 实机验证** — Installed every
+      changed plugin's packaged `.cindy` on a real device running a stable production
+      or Beta Cindy build and verified its core functionality. When a plugin
       declares `minCindyVersion`, the verified Cindy version was greater than or
-      equal to it. 已在运行正式稳定版 Cindy 的实际设备上安装每个改动插件的真实
+      equal to it. 已在运行正式稳定版或 Beta 版 Cindy 的实际设备上安装每个改动插件的真实
       `.cindy` 包并验证核心功能；插件声明 `minCindyVersion` 时，验证所用 Cindy
       版本不低于该最低版本。
+      Either channel is sufficient. Record the verified version and channel below;
+      Dev/local builds do not qualify.
+      任一渠道验收通过即可。请在下方记录验证版本和渠道；Dev/本地构建不能替代此项验证。
 - [ ] Lowering or removing `minCindyVersion` is explicitly called out for
       maintainer review. 降低或删除 `minCindyVersion` 已明确标注交维护者人工 review。
 - [ ] For a new plugin, linked the acknowledged proposal issue and recorded the

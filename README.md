@@ -149,7 +149,7 @@ experience risk, so review is strict by design. Four hard principles:
 - [ ] Four-language locales complete; `node --test .tests/localization.test.mjs`
       passes
 - [ ] Every changed plugin's packaged `.cindy` was installed and exercised on a
-      real device running a stable production Cindy build, and the PR
+      real device running a stable production or Beta Cindy build, and the PR
       verification box is checked; when the plugin declares `minCindyVersion`,
       the verified Cindy build is greater than or equal to it
 - [ ] `ghost.json.version` bumped; `provisioning.json` entry present with an
@@ -249,7 +249,7 @@ authors do not need to perform a separate migration checklist.
 New plugins use `schemaVersion: 3` and declare capabilities directly through
 fields such as `tools`, `network`, `node`, or `notify: true`; v3 must not contain
 `slots`. Every v3 package declares its own `minCindyVersion`: use the first
-stable Cindy version that supports every Host capability and manifest field
+published Cindy version (stable or Beta) that supports every Host capability and manifest field
 the concrete plugin actually depends on. Manifest v3 itself does not impose a
 repository-wide Cindy version floor. Existing v2 manifests stay untouched until
 that plugin's packaged content actually changes. The PR that changes it must
@@ -295,7 +295,7 @@ source may be consulted only for implementation patterns.
 
 Start `ghost.json` from this minimal runnable Manifest-v3 shape:
 
-The `1.2.3` below is only an example. Replace it with the first stable Cindy
+The `1.2.3` below is only an example. Replace it with the first published Cindy (stable or Beta)
 version that supports the concrete plugin you are building.
 
 ```json
@@ -381,7 +381,7 @@ Before submitting to this official repository, add a `provisioning.json` entry
 and declare locale files for exactly `zh-CN`, `en`, `ja`, and `ko`, covering the
 plugin text and every tool description. Then follow
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) and install the exact packaged `.cindy` on
-a real device running an eligible stable production Cindy build.
+a real device running an eligible stable production or Beta Cindy build.
 
 `taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.33`
 with the plugin. When upgrading, replace the published npm package content
