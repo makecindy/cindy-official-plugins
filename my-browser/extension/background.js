@@ -142,7 +142,7 @@ async function pageOperation(job,expectedUrl) {
   if (location.href !== expectedUrl) return fail('PAGE_CHANGED','The page navigated. Read it again before acting.');
   const a = job.payload;
   const action = job.action;
-  const TITLE_MAX = 300, LINK_URL_MAX = 2048, LINKS_BUDGET = 20000;
+  const TITLE_MAX = 300, LINK_URL_HARD_MAX = 8192, PAGE_LINKS_BUDGET = 200000;
   const visible = el => {
     const style = getComputedStyle(el); const r = el.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && !!(r.width || r.height);
@@ -191,16 +191,22 @@ async function pageOperation(job,expectedUrl) {
       if (action === 'text' || action === 'content') {
         const max = a.maxChars || 6000;
         const text = root.innerText || '';
-        // Untrusted pages control the title and every href. Without a budget here the serialized
-        // result can exceed the bridge's request limit, which drops the whole read and times the caller out.
+        // Untrusted pages control the title and every href. This stage never cuts a URL: the result
+        // exit redacts the whole string first and applies the transfer cap afterwards, so a credential
+        // can never straddle a cut. Over-long links are dropped whole, which also bounds the payload.
         let linksTruncated = false;
         let links;
         if (action === 'content') {
-          let budget = LINKS_BUDGET;
-          links = [...root.querySelectorAll('a[href]')].filter(visible).slice(0,a.limit || 10).map(el => ({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url:String(el.href).slice(0,LINK_URL_MAX)})).filter(x => /^https?:/.test(x.url)).filter(x => {
-            if (x.url.length > budget) { linksTruncated = true; return false; }
-            budget -= x.url.length; return true;
-          });
+          links = [];
+          let budget = PAGE_LINKS_BUDGET;
+          for (const el of [...root.querySelectorAll('a[href]')].filter(visible)) {
+            if (links.length >= (a.limit || 10)) break;
+            const url = String(el.href);
+            if (!/^https?:/.test(url)) continue;
+            if (url.length > LINK_URL_HARD_MAX || url.length > budget) { linksTruncated = true; continue; }
+            budget -= url.length;
+            links.push({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url});
+          }
         }
         // Title truncation is reported too, so a caller can tell that page metadata was cut.
         const titleTruncated = document.title.length > TITLE_MAX;
@@ -291,6 +297,22 @@ async function pageOperation(job,expectedUrl) {
     return fail('PAGE_OPERATION_FAILED',started ? 'The page operation was interrupted. Check the actual page before repeating it.' : 'Check the CSS selector and page state, then read again.',started ? 'unknown' : 'not_executed');
   }
 }
+const LINK_URL_MAX = 2048, LINKS_BUDGET = 20000;
+// Page-supplied links arrive whole from the injected function. Redaction runs on the entire URL and
+// the transfer cap only on the redacted result, so a credential can never be cut in half and slip
+// past the sanitizer.
+function sanitizeLinks(result) {
+  if (!result || !Array.isArray(result.links)) return result;
+  let truncated = !!result.truncated, budget = LINKS_BUDGET;
+  const links = [];
+  for (const link of result.links) {
+    const url = P.redactUrl(String(link?.url)).slice(0,LINK_URL_MAX);
+    if (url.length > budget) { truncated = true; continue; }
+    budget -= url.length;
+    links.push({...link,url});
+  }
+  return {...result,links,truncated};
+}
 async function handle(job,policy,target) {
   P.validate(job.action,job.payload);
   const gate = P.check(policy,job.action,job.payload.url);
@@ -327,7 +349,8 @@ async function handle(job,policy,target) {
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
     const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job,actual.url]});
-    const result = out?.[0]?.documentId === documentId ? out[0].result : null;
+    const raw = out?.[0]?.documentId === documentId ? out[0].result : null;
+    const result = sanitizeLinks(raw);
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',failureState());
     return result?.error && navigating ? {...result,execution:'unknown'} : result;

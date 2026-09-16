@@ -88,27 +88,34 @@
   // Password-reset and magic links commonly embed the credential in a path segment
   // (/reset/<token>, #/verify/<token>) rather than a query parameter.
   const CONTEXT_WORDS = new Set(['reset','verify','verification','confirm','confirmation','activate','activation','invite','magic','auth','authenticate','authorize','unlock','recover','recovery','password','passcode','signin','signup','login','callback','redirect','token']);
+  // Pages can percent-encode once or repeatedly to shift a credential past an analysis pass, so every
+  // judgement below runs on a bounded, repeatedly decoded form instead of the raw string.
+  const MAX_DECODE_PASSES = 4;
+  function normalizeEncoding(text) {
+    let current = text;
+    for (let i = 0; i < MAX_DECODE_PASSES; i++) {
+      let next;
+      try { next = decodeURIComponent(current); } catch { break; }
+      if (next === current) break;
+      current = next;
+    }
+    return current;
+  }
   const words = text => text.replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  // A token-like segment is long, mostly punctuation-free and carries a digit, which separates
-  // opaque credentials from ordinary slugs and from long-but-readable path words. A letter is not
-  // required: password-reset tokens are sometimes all digits.
-  // Segments are decoded first: a percent-encoded token (/reset/Abc%2F1234567890) keeps its %2F in
-  // pathname, so a raw charset test would let the whole credential through.
-  const decodeSegment = segment => { try { return decodeURIComponent(segment); } catch { return segment; } };
-  const NOT_TOKEN_CHAR = /[^A-Za-z0-9._~+/-]/;
-  const tokenish = raw => {
-    const segment = decodeSegment(raw);
-    return segment.length >= 16 && !NOT_TOKEN_CHAR.test(segment) && /\d/.test(segment);
-  };
   // Only segments following a credential-context word are masked, so ordinary deep paths
   // (/commit/<sha>, /user/12345, /wiki/long-article-title) keep working.
+  const isContext = segment => words(normalizeEncoding(segment)).some(word => CONTEXT_WORDS.has(word));
+  // A credential is judged by length alone, on the decoded segment. Charset heuristics are exactly
+  // what repeated percent-encoding kept defeating, so a long segment after reset/verify is treated
+  // as the credential rather than being pattern-matched.
+  const CREDENTIAL_MIN_LENGTH = 16;
   function redactSegments(path) {
     const segments = path.split('/');
     let context = false, changed = false;
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
-      if (words(segment).some(word => CONTEXT_WORDS.has(word))) { context = true; continue; }
-      if (context && tokenish(segment)) { segments[i] = 'REDACTED'; changed = true; }
+      if (isContext(segment)) { context = true; continue; }
+      if (context && normalizeEncoding(segment).length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }
     }
     return changed ? segments.join('/') : path;
   }
@@ -121,15 +128,17 @@
     // check inspects for page-supplied hrefs.
     if (u.username || u.password) { u.username = ''; u.password = ''; changed = true; }
     for (const [key,value] of [...u.searchParams]) {
-      if (SENSITIVE_KEYS.test(key) || opaque(value)) { u.searchParams.set(key,'REDACTED'); changed = true; }
+      if (SENSITIVE_KEYS.test(key) || opaque(normalizeEncoding(value))) { u.searchParams.set(key,'REDACTED'); changed = true; }
     }
-    // A fragment carrying key=value data is the classic implicit-flow token carrier, so it is
-    // masked whole. A route fragment is treated like a path: plain routes (#/home) survive,
-    // while credential segments after a reset/verify word do not.
-    if (u.hash.includes('=')) { u.hash = '#REDACTED'; changed = true; }
-    else if (u.hash) {
-      const bare = u.hash.slice(1), redacted = redactSegments(bare);
-      if (redacted !== bare) { u.hash = '#'+redacted; changed = true; }
+    // A fragment carrying key=value data is the classic implicit-flow token carrier, so it is masked
+    // whole; the test uses the decoded form so #code%3D... cannot evade it. A route fragment is
+    // treated like a path: plain routes (#/home) survive, credential segments after a reset/verify
+    // word do not.
+    const fragment = u.hash ? u.hash.slice(1) : '';
+    if (fragment && normalizeEncoding(fragment).includes('=')) { u.hash = '#REDACTED'; changed = true; }
+    else if (fragment) {
+      const redacted = redactSegments(fragment);
+      if (redacted !== fragment) { u.hash = '#'+redacted; changed = true; }
     }
     const redactedPath = redactSegments(u.pathname);
     if (redactedPath !== u.pathname) { u.pathname = redactedPath; changed = true; }

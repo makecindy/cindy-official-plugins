@@ -62,10 +62,14 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
   // A long opaque value under an innocuous name is masked too.
   assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
-  // A percent-encoded token must not slip through the segment charset test.
-  const enc=encodeURIComponent('Abc123456/789012345');
-  assert.equal(r(`https://example.test/reset/${enc}`).includes('Abc123456'),false);
-  assert.equal(r(`https://example.test/#/verify/${enc}`).includes('Abc123456'),false);
+  // Encoding must not shift the analysis: the context word and the credential are both judged on the
+  // decoded form, repeatedly, and the credential test no longer depends on a character set.
+  const enc=encodeURIComponent(code+'/'+state), dbl=encodeURIComponent(encodeURIComponent(code+'/'+state));
+  assert.equal(r(`https://example.test/reset/${enc}`).includes(code),false,'a percent-encoded token must be masked');
+  assert.equal(r(`https://example.test/#/verify/${enc}`).includes(code),false,'an encoded token in a route fragment must be masked');
+  assert.equal(r(`https://example.test/%72eset/${code}`).includes(code),false,'an encoded context word must still be recognized');
+  assert.equal(r(`https://example.test/reset/${dbl}`).includes(code),false,'a double-encoded token must be masked');
+  assert.equal(r(`https://example.test/reset/x#code%3D${code}`).includes(code),false,'an encoded fragment key/value must be masked');
   // Basic Auth userinfo supplied by page content.
   const basic=r(`https://${code}:${state}@example.test/private`);
   assert.equal(basic.includes(code),false,'the username must be removed');

@@ -81,6 +81,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.15 让敏感判定跟随真实可编辑性。命名词表原先以字面量选择器 `[contenteditable=true]` 为门槛，但 `contenteditable=""` 与 `contenteditable="plaintext-only"` 同样可编辑，于是 `<div contenteditable role="textbox" name="otp">` 被判为普通字段：它能通过 `role=textbox` 进入 snapshot，也能被 `type` 分支接受（该分支本就使用 `el.isContentEditable`）。现判定改为 `el.matches('input,textarea,select') || el.isContentEditable`，敏感判定与操作分支口径一致，snapshot 选择器也从字面 `true` 改为 `[contenteditable]`。覆盖：夹具包含空属性 OTP 区域与 `plaintext-only` 卡号区域，二者都必须返回 `SENSITIVE_FIELD` 且不进入 snapshot；把选择器改回字面量即复现 `undefined`（而非 `SENSITIVE_FIELD`）。
 
+0.3.16 修正脱敏与截断的先后顺序，并用一条规范化规则取代逐个编码形态的猜测。链接原先在注入函数中被截到 2048 字符，之后桥接才脱敏，页面可把凭证放在截断处从而泄露前缀；现传输上限施加在脱敏结果上，且由能拿到 policy 模块的 service worker 执行。注入函数完全不再切割网址：超过 8192 字符或超出 20 万字符页面上限的链接整条丢弃，既约束载荷又绝不切断凭证。脱敏侧，编码后的语境词、双重编码的令牌、片段中编码的 `=` 都能绕过原先单次、基于字符集的判定；现所有判断都在有界、可重复解码（最多四轮）的形式上进行，且凭证在语境词之后仅按长度识别——反复编码之所以屡次得手，正是因为依赖了字符集。覆盖：夹具中一条链接的凭证恰好落在 2048 截断处的前 12 个字符，断言其不出现；单元断言覆盖编码令牌、编码语境词、双重编码令牌与编码片段键值。先截断后脱敏即复现 `truncation must not expose a credential prefix`；关闭规范化则编码令牌断言失败。测试占位值一律为假 UUID，符合夹具规则。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

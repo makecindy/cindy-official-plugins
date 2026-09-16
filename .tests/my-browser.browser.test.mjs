@@ -153,7 +153,10 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.ok(contentLinks.links.some(l=>l.url===url+'one'),'ordinary links stay usable');
   assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
   assert.equal(/66666666-6666-4666-8666-666666666666|77777777-7777-4777-8777-777777777777/.test(JSON.stringify(contentLinks.links)),false,'URL userinfo credentials in a page link must never reach the model');
-  assert.equal(JSON.stringify(contentLinks.links).includes('Abc123456'),false,'a percent-encoded path token must never reach the model');
+  assert.equal(JSON.stringify(contentLinks.links).includes('88888888-8888-4888-8888-888888888888'),false,'a percent-encoded path token must never reach the model');
+  // The transfer cap must be applied to the redacted string, never before redaction: here a cut at
+  // 2048 characters would retain only a short fragment of the trailing credential.
+  assert.equal(JSON.stringify(contentLinks.links).includes('aaaaaaaa'),false,'truncation must not expose a credential prefix');
   // An untrusted page can inflate the title and hrefs past the bridge request limit; the read must
   // still complete with a bounded payload instead of failing and timing the caller out.
   const huge=await tool('browser_read',{url:'http://huge.test/big',mode:'content',limit:20,maxChars:500});
