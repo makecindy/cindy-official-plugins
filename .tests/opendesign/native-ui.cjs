@@ -169,6 +169,21 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     console.log(
       "Native manual edit and exact text/background hex values persisted",
     );
+    // Interleave an Agent update after the UI checks its source but before POST.
+    await page.frameLocator("[data-testid=artifact-preview-frame]").locator("#hero").click();
+    await page.locator("textarea").fill("Stale manual edit must not overwrite");
+    await page.route("**/api/projects/*/files", async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const current = await w.invoke('draft-read', {sessionId:sid,file:'design.html'});
+      await w.invoke('draft-write', {sessionId:sid,file:'design.html',html:current.html + '<!-- agent won -->',expectedRevision:current.revision});
+      await route.continue();
+    });
+    await page.getByRole("button", {name:"保存",exact:true}).click();
+    await page.getByText(/Could not save the edited file.*409/).waitFor();
+    const afterRace = await fs.readFile(path.join(p.dir, 'design.html'), 'utf8');
+    assert.match(afterRace, /agent won/);
+    assert.doesNotMatch(afterRace, /Stale manual edit must not overwrite/);
+    await page.unroute("**/api/projects/*/files");
     await page.getByRole("button", { name: "标记", exact: true }).click();
     await page.waitForTimeout(300);
     const box = await page.locator("canvas").boundingBox();
@@ -202,6 +217,22 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       .getByText("Updated by Cindy")
       .waitFor();
     assert.deepEqual(errors, []);
+    // Exercise the actual URL-load response, not only a policy string assertion.
+    let externalRequests = 0;
+    const probe = require('node:http').createServer((req,res) => { externalRequests++; res.end('probe'); });
+    await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+    const forbidden = 'http://127.0.0.1:' + probe.address().port;
+    const isolated = await browser.newPage();
+    try {
+      await fs.writeFile(path.join(p.dir, 'allowed.js'), 'window.localScriptWorked = true');
+      await w.invoke('draft-write', {sessionId:sid,file:'network.html',expectedRevision:null,
+        html: `<h1>Network fixture</h1><img src="${forbidden}/image"><script src="${forbidden}/script"></script><script src="allowed.js"></script><script>fetch('${forbidden}/fetch').catch(()=>window.fetchBlocked=true)</script>`});
+      await isolated.goto(b.previewBase + 'network.html');
+      await isolated.waitForFunction(() => window.localScriptWorked && window.fetchBlocked);
+      await isolated.waitForTimeout(200);
+      assert.equal(externalRequests, 0);
+    } finally { await isolated.close(); await new Promise(resolve => probe.close(resolve)); }
+
   } finally {
     await browser?.close();
     await w.close();

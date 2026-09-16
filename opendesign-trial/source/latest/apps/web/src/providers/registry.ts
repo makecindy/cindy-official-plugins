@@ -3007,6 +3007,7 @@ export async function writeProjectTextFile(
   name: string,
   content: string,
   options?: {
+    expectedContent?: string | null;
     artifactManifest?: ArtifactManifest;
     versionSource?: ProjectFileVersionSource;
     versionLabel?: string;
@@ -3028,6 +3029,7 @@ export async function writeProjectTextFileDetailed(
   name: string,
   content: string,
   options?: {
+    expectedContent?: string | null;
     artifactManifest?: ArtifactManifest;
     versionSource?: ProjectFileVersionSource;
     versionLabel?: string;
@@ -3037,6 +3039,11 @@ export async function writeProjectTextFileDetailed(
   workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WriteProjectTextFileResult> {
   try {
+    const expectedRevision = options?.expectedContent === null ? null
+      : typeof options?.expectedContent === 'string'
+        ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(options.expectedContent))))
+            .map(byte => byte.toString(16).padStart(2, '0')).join('')
+        : undefined;
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`, {
       method: 'POST',
       headers: {
@@ -3046,6 +3053,7 @@ export async function writeProjectTextFileDetailed(
       body: JSON.stringify({
         name,
         content,
+        expectedRevision,
         artifactManifest: options?.artifactManifest,
         versionSource: options?.versionSource,
         versionLabel: options?.versionLabel,

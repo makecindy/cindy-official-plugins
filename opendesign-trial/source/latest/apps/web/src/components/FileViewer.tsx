@@ -13250,6 +13250,7 @@ function HtmlViewer({
         await capturePreviewScrollPosition();
       }
       const saved = await writeProjectTextFileDetailed(projectId, file.name, result.source, {
+        expectedContent: baseSource,
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: label,
@@ -13398,6 +13399,7 @@ function HtmlViewer({
       }
       const parentVersionId = await resolveManualEditParentVersionId(latest.afterSource);
       const saved = await writeProjectTextFileDetailed(projectId, file.name, latest.beforeSource, {
+        expectedContent: latest.afterSource,
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: `Undo ${latest.label}`,
@@ -13462,6 +13464,7 @@ function HtmlViewer({
       }
       const parentVersionId = await resolveManualEditParentVersionId(latest.beforeSource);
       const saved = await writeProjectTextFileDetailed(projectId, file.name, latest.afterSource, {
+        expectedContent: latest.beforeSource,
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: `Redo ${latest.label}`,
@@ -13622,6 +13625,7 @@ function HtmlViewer({
     setSpeakerNotesStatus(null);
     try {
       const saved = await writeProjectTextFile(projectId, file.name, nextSource, {
+        expectedContent: currentSource,
         artifactManifest: file.artifactManifest,
       }, workspaceContext);
       if (!saved) throw new Error('speaker_notes_save_failed');
@@ -13776,6 +13780,7 @@ function HtmlViewer({
       const css = serializeInspectOverrides(inspectOverrides).trim();
       const next = applyInspectOverridesToSource(source, css);
       const saved = await writeProjectTextFileDetailed(projectId, file.name, next, {
+        expectedContent: source,
         versionSource: 'manual',
         versionLabel: t('fileViewer.edit'),
       }, workspaceContext);
@@ -19408,7 +19413,7 @@ function MarkdownViewer({
         const showSaving = saveOptions.showSaving !== false;
         if (showSaving) setSaveState('saving');
         try {
-          const saved = await writeProjectTextFile(projectId, file.name, nextValue, undefined, workspaceContext);
+          const saved = await writeProjectTextFile(projectId, file.name, nextValue, { expectedContent: lastSavedTextRef.current }, workspaceContext);
           if (!saved) throw new Error('write failed');
           // A successful write remains a write when autosave deliberately
           // avoids refreshing the file list. No-op saves emit no receipt.

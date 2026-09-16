@@ -4331,7 +4331,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/providers/registry.ts": {
-      "bytes": 143338,
+      "bytes": 143779,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/index.ts",
@@ -11922,7 +11922,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 850948,
+      "bytes": 851185,
       "imports": [
         {
           "path": "node_modules/react/index.js",
@@ -15465,7 +15465,7 @@
           "bytesInOutput": 5771
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264764
+          "bytesInOutput": 264904
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16056,7 +16056,7 @@
           "bytesInOutput": 1273
         },
         "../latest/apps/web/src/providers/registry.ts": {
-          "bytesInOutput": 10821
+          "bytesInOutput": 11074
         },
         "../latest/apps/web/src/runtime/srcdoc.ts": {
           "bytesInOutput": 149959
@@ -16209,7 +16209,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17308656
+      "bytes": 17309049
     },
     "../../assets/studio.css": {
       "imports": [

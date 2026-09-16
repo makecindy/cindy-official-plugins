@@ -38,7 +38,7 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
   let r = await fetch(api + "/files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "index.html", content }),
+    body: JSON.stringify({ name: "index.html", content, expectedRevision: null }),
   });
   assert.equal(r.status, 200);
   console.log("read");
@@ -108,4 +108,21 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
   });
   assert.notEqual(fresh.revision, first.revision);
   assert.equal(fresh.sketches[0].file, "test.sketch.json");
+  const stale = await fetch(api + '/files', {method:'POST',body:JSON.stringify({name:'index.html',content:'stale manual',expectedRevision:first.revision})});
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, 'REVISION_CONFLICT');
+  assert.equal((await fetch(api + '/files', {method:'POST',body:JSON.stringify({name:'index.html',content:'missing revision'})})).status, 409);
+  const racers = await Promise.all(Array.from({length:8}, async (_, i) => {
+    if (i % 2) {
+      try { await w.invoke('draft-write', {sessionId:sid,file:'index.html',html:'<h1>Agent '+i+'</h1>',expectedRevision:fresh.revision}); return true; }
+      catch (e) { assert.match(e.message, /Draft changed/); return false; }
+    }
+    return (await fetch(api + '/files', {method:'POST',body:JSON.stringify({name:'index.html',content:'<h1>Manual '+i+'</h1>',expectedRevision:fresh.revision})})).ok;
+  }));
+  assert.equal(racers.filter(Boolean).length, 1);
+  const raw = await fetch(one.previewBase + 'index.html');
+  const policy = raw.headers.get('Content-Security-Policy');
+  assert.ok(policy.includes('connect-src ' + one.previewBase));
+  assert.ok(!policy.includes('127.0.0.1:*'));
+
 });

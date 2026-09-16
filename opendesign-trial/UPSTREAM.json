@@ -13,7 +13,8 @@
     "FullStudio adapter: same-session feedback, annotation images, manual saves, source refresh, hide unsupported history.",
     "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion.",
     "CommentSendResult: preserve unknown without treating it as successful submission.",
-    "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes."
+    "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes.",
+    "FileViewer and registry: hash the exact source used for each manual edit, undo/redo, speaker-note or inspect save and supply expectedRevision to the local atomic writer."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

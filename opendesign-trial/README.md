@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.3
+# OpenDesign for Cindy — local trial 0.4.4
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -23,3 +23,5 @@ Build from the plugin directory: `npm ci --prefix source/build && npm run build 
 0.4.3: Installed packages carry all tracked `source/` files in `source.zip` to meet the platform’s 256-entry limit; the repository keeps them as reviewable text. Extract `source.zip` in the plugin directory before building an installed package. Repository maintainers regenerate the archive with `python3 .github/scripts/package-opendesign-source.py` after source changes (stage new source files first); `--check` verifies every archived path and byte against Git-tracked sources. Runtime capabilities remain unchanged. Card previews now block external resources while preserving inline layout/colors and embedded raster images; uncertain submissions remain unknown.
 
 Browser regressions: install Playwright Chromium, then run `node --test .tests/opendesign/native-ui.cjs .tests/opendesign/source-regressions.cjs` from the repository root. To use an existing browser, set `OPENDESIGN_CHROMIUM_PATH` to its executable. Tests use isolated headless windows only.
+
+0.4.4: URL-load previews carry a project-scoped CSP; editor resources no longer allow arbitrary loopback ports. Unexpected host session receipts remain unknown. Manual HTML edits, undo/redo and Agent writes share an atomic revision check: stale saves return 409 and keep newer content intact. Browser regressions cover a real save race and blocked outbound image/script/fetch requests.

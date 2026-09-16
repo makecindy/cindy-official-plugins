@@ -15,19 +15,22 @@ const ctx = {
   workdir_is_local: true,
   workdir_is_read_only: false,
 };
-function runtime(disk = new Map()) {
+function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }) {
   let handler;
   const calls = [],
     sent = [];
   const cindy = {
     onHostMessage: (h) => (handler = h),
+    agent: { run: async (args) => { calls.push({ agent: args }); return reply; } },
     node: {
       request: async (x) => {
         calls.push(x);
         return {
           ok: true,
           result:
-            x.method === "prepare"
+            x.method === "feedback-claim"
+              ? { projectDir: "/project/new", file: "design.html", note: "change", attachments: [] }
+              : x.method === "prepare"
               ? { dir: "/project/new" }
               : x.method === "bind"
                 ? {
@@ -134,5 +137,16 @@ test("untrusted, remote and readonly contexts do nothing", async () => {
     await r.tool("opendesign_open", { session_context: context });
     assert.equal(r.calls.length, 0);
     assert.equal(r.sent.at(-1).ok, false);
+  }
+});
+
+test("accepted dispatch to a different session stays unknown without retry", async () => {
+  for (const [reply, expected] of [[{ok:true,sessionId:other}, 'unknown'], [null, 'unknown'], [{ok:false,message:'denied'}, 'rejected']]) {
+    const r = runtime(new Map(), reply);
+    await r.tool('opendesign_new', {html:'<h1>Example</h1>'});
+    await r.run({type:'event',name:'node-notification',method:'opendesign-feedback',params:{requestId:'request-one',sessionId:sid}});
+    assert.equal(r.calls.findLast(x => x.method === 'feedback-result').params.status, expected);
+    assert.equal(r.calls.filter(x => x.agent).length, 1);
+    assert.equal(r.calls.find(x => x.agent).agent.sessionId, sid);
   }
 });

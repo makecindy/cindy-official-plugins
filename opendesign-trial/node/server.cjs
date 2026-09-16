@@ -115,11 +115,30 @@ async function files(root, dir = "") {
   }
   return result.slice(0, 500);
 }
-async function write(b, name, data) {
+const writes = new Map();
+async function serializeWrite(key, action) {
+  const previous = writes.get(key) || Promise.resolve();
+  const next = previous.catch(() => {}).then(action);
+  writes.set(key, next);
+  try { return await next; }
+  finally { if (writes.get(key) === next) writes.delete(key); }
+}
+async function write(b, name, data, expectedRevision) {
+  validName(name);
+  return serializeWrite(path.join(b.root, name), () => writeLocked(b, name, data, expectedRevision));
+}
+async function writeLocked(b, name, data, expectedRevision) {
   if (b.readOnly) throw Error("Read-only session");
   if (data.length > LIMIT) throw Error("File too large");
   const dest = await safe(b.root, name, true);
-  if (/\.html?$/.test(name) && !name.startsWith("revision-")) {
+  if (/\.html?$/i.test(name)) {
+    let current = null;
+    try { current = revision(await fs.readFile(dest)); }
+    catch (e) { if (e.code !== "ENOENT") throw e; }
+    if (expectedRevision !== current)
+      throw Object.assign(new Error("Draft changed. Read opendesign_context or refresh the viewer and reapply to its latest revision."), { status: 409, code: "REVISION_CONFLICT" });
+  }
+  if (/\.html?$/i.test(name) && !/^revision-[0-9a-f]{64}\.html$/.test(name)) {
     try {
       const old = await fs.readFile(dest);
       const backup = await safe(
@@ -168,6 +187,7 @@ function headers(req, res, server) {
 const preview = http.createServer(async (req, res) => {
   try {
     headers(req, res, preview);
+    res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'none'");
     if (!["GET", "HEAD"].includes(req.method))
       return json(res, 405, { error: "Read-only preview" });
     const u = new URL(req.url, origin(preview));
@@ -175,6 +195,9 @@ const preview = http.createServer(async (req, res) => {
     const b = readers.get(parts[2]);
     if (parts[1] !== "view" || !b)
       return json(res, 404, { error: "Not found" });
+    const readBase = origin(preview) + "/view/" + b.read + "/";
+    res.setHeader("Content-Security-Policy",
+      `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${readBase}; style-src 'unsafe-inline' ${readBase}; img-src data: blob: ${readBase}; connect-src ${readBase}; font-src data: ${readBase}; media-src data: blob: ${readBase}; frame-src blob: ${readBase}; object-src 'none'; base-uri ${readBase}; form-action 'none'`);
     const name = parts.slice(3).map(decodeURIComponent).join("/");
     if (req.headers.origin === origin(editor))
       res.setHeader("Access-Control-Allow-Origin", origin(editor));
@@ -206,7 +229,7 @@ const preview = http.createServer(async (req, res) => {
       ]);
     res.end(req.method === "HEAD" ? undefined : data);
   } catch (e) {
-    json(res, 400, { error: e.message });
+    json(res, e.status || 400, { error: e.message, message: e.message, code: e.code });
   }
 });
 const editor = http.createServer(async (req, res) => {
@@ -216,7 +239,7 @@ const editor = http.createServer(async (req, res) => {
       return json(res, 403, { error: "Cross-origin editor access denied" });
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:*; frame-src 'self' http://127.0.0.1:* blob:; worker-src 'self' blob:; font-src 'self' data:",
+      `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: ${origin(preview)}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${origin(preview)}; connect-src 'self' ${origin(preview)}; frame-src 'self' ${origin(preview)} blob:; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self' ${origin(preview)}; form-action 'none'`,
     );
     const u = new URL(req.url, origin(editor));
     if (u.pathname === "/favicon.ico") {
@@ -296,6 +319,7 @@ const editor = http.createServer(async (req, res) => {
             data.content,
             data.encoding === "base64" ? "base64" : "utf8",
           ),
+          data.expectedRevision,
         ),
       });
     }
@@ -316,7 +340,7 @@ const editor = http.createServer(async (req, res) => {
           if (e.code !== "ENOENT") throw e;
         }
         output.push(
-          await write(b, name, Buffer.from(await file.arrayBuffer())),
+          await write(b, name, Buffer.from(await file.arrayBuffer()), null),
         );
       }
       return json(res, 200, { files: output });
@@ -330,7 +354,7 @@ const editor = http.createServer(async (req, res) => {
     }
     json(res, 404, { error: "Unsupported operation" });
   } catch (e) {
-    json(res, 400, { error: e.message });
+    json(res, e.status || 400, { error: e.message, message: e.message, code: e.code });
   }
 });
 const listen = (s) =>
@@ -387,23 +411,7 @@ async function invoke(method, p) {
       Buffer.byteLength(p.html) > 1024 * 1024
     )
       throw Error("Provide 1–1048576 bytes of complete HTML");
-    let previous = null;
-    try {
-      previous = await fs.readFile(await safe(b.root, p.file), "utf8");
-    } catch (e) {
-      if (e.code !== "ENOENT") throw e;
-    }
-    if (p.expectedRevision !== (previous === null ? null : revision(previous)))
-      throw Error(
-        "Draft changed. Read opendesign_context and reapply your change to its latest revision.",
-      );
-    if (previous !== null)
-      await write(
-        b,
-        "revision-" + revision(previous) + ".html",
-        Buffer.from(previous),
-      );
-    await write(b, p.file, Buffer.from(p.html));
+    await write(b, p.file, Buffer.from(p.html), p.expectedRevision);
     return draftRead(b, p.file);
   }
   if (method === "prepare") {

@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.3
+# OpenDesign for Cindy — 本地试用 0.4.4
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -28,3 +28,5 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 0.4.3：安装包将全部 Git 跟踪的 `source/` 文件收进 `source.zip`，满足平台 256 条目上限；仓库仍保留逐文件可审查源码。从安装包构建时，先在插件目录解压 `source.zip`。维护者修改源码后运行 `python3 .github/scripts/package-opendesign-source.py` 更新源码档案（新增源码需先暂存）；加 `--check` 可逐路径、逐字节核对档案与 Git 跟踪源码一致。原有交互能力不变；卡片阻止外部资源加载，保留内联布局、色值和内嵌位图；提交结果未确认时保留 unknown。
 
 浏览器回归：安装 Playwright Chromium 后，在仓库根目录运行 `node --test .tests/opendesign/native-ui.cjs .tests/opendesign/source-regressions.cjs`。使用现有浏览器可通过 `OPENDESIGN_CHROMIUM_PATH` 指定可执行文件；测试仅使用隔离无界面窗口。
+
+0.4.4：直接打开稿件也使用限于本项目资源的 CSP，编辑器不再允许任意 loopback 端口。宿主回执会话异常保留未知状态。手动 HTML 编辑、撤销/重做与 AI 更新共用原子版本检查；旧稿保存返回 409，保留新内容。浏览器回归覆盖真实保存竞态及外部图片、脚本、fetch 请求被阻止。

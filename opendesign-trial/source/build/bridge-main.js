@@ -277,20 +277,24 @@
       });
       return;
     }
-    const matching = !result.sessionId || result.sessionId === d.sessionId;
+    const matching = !result?.sessionId || result.sessionId === d.sessionId;
     await node("feedback-result", {
       requestId,
       sessionId,
       status:
-        result.ok && matching
+        result?.ok === true && matching
           ? result.disposition === "queued"
             ? "queued"
             : "accepted"
-          : "rejected",
+          : result?.ok === false
+            ? "rejected"
+            : "unknown",
       message:
-        result.ok && matching
+        result?.ok === true && matching
           ? undefined
-          : result.message || "会话绑定不一致，未确认发送",
+          : result?.ok !== false
+            ? "宿主返回未确认结果或会话不一致；请先核对相关会话，勿重复发送"
+            : result.message || "宿主未接受本次提交",
     });
   }
   cindy.onHostMessage((msg) => {
