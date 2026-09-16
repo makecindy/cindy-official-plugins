@@ -1,13 +1,12 @@
----
-name: cindy-ios-simulator
-description: Use Cindy's Host-owned embedded iOS Simulator for app build, launch, inspection, and interaction; use external Xcode/Simulator/simctl only on a Host-authorized fallback route when no Cindy-owned runtime is active.
----
-
 # Cindy iOS Simulator
 
-> This skill belongs to the Cindy `ios-simulator` plugin. Prefer the Host-provided `cindy_ios_simulator` MCP. Do not reproduce the embedded workflow with shell commands, `cindy_computer`, or an external Simulator.app. The only exception is the Host-authorized fallback below; if the Host cannot establish the required state, stop and diagnose.
+Prefer the Host-provided `cindy_ios_simulator` MCP. Do not reproduce the embedded workflow with shell commands, `cindy_computer`, or an external Simulator.app. The only exception is the Host-authorized fallback below; if the Host cannot establish the required state, stop and diagnose.
 
 Use Cindy's Host-owned simulator runtime for iOS app development and testing. The Host owns Simulator lifecycle, viewer UI, WDA, Native Sidecar, H.264, Native HID, capability admission, ownership, lease/generation freshness, recovery, and compatibility fallback. The plugin contributes this workflow and makes the Host viewer available in the task's right sidebar.
+
+This Manual is workflow guidance, not user authorization or a substitute for the
+Host's runtime gates. Tool names, parameters, and current availability come from
+the live `cindy_ios_simulator` catalog. This plugin declares no `ghost_call` tools.
 
 ## Workflow
 
@@ -21,29 +20,27 @@ Use Cindy's Host-owned simulator runtime for iOS app development and testing. Th
 8. Treat Native H.264 and Native HID as accelerators. If the Host reports a WDA/JPEG fallback, continue in compatibility mode unless the user asks for diagnosis.
 9. Stop or detach only when the user requests it or the workflow owns that cleanup. Do not shut down unrelated external devices.
 
-## Host-authorized external fallback
+Before building in step 6, read the build, path, artifact, and failure workflow:
+`ghost_manual({ ghost_id: "ios-simulator", path: "ios-simulator/build-and-run.md" })`.
 
-Use this route only when the Host explicitly reports one of the following: the
-plugin is not installed, the plugin is disabled, or Host capability admission
-failed. Before falling back, the same Host response must establish that
-`runningInstanceCount` is zero and that no Cindy-owned runtime, cleanup task,
-lease, or generation transition is active. A missing response, an unknown
-ownership state, or an unavailable status probe is not confirmation; stop and
-ask for the Host/plugin to be restored.
+Before any external fallback, read every admission and handoff condition:
+`ghost_manual({ ghost_id: "ios-simulator", path: "ios-simulator/external-fallback.md" })`.
+An unavailable tool or failed build alone never authorizes that handoff.
 
-When those conditions are satisfied, perform a strict handoff: pass the
-Host-provided workflow name, exact device identity/UDID, and the user's
-original task unchanged to that named external Xcode, Simulator, or `simctl`
-workflow. Use only the entry point and arguments supplied by the Host; never
-translate the request into guessed shell commands. If the Host does not return
-all three handoff fields, stop. Do not use the fallback to reach a Cindy-owned
-instance, select an arbitrary booted device, or clean up resources that the
-Host may still own. This fallback is a routing decision, not permission for
-the plugin to inspect Host internals.
-
-## Safety Boundaries
+## Safety boundaries
 
 - Never call `cindy_computer` to control the external Simulator window when the user asked for Cindy's embedded simulator.
 - Never use shell commands to launch Simulator.app, boot an implicit device, inject input, or bypass Host admission on the embedded route. Only the Host-authorized external fallback above may hand off to a named Xcode/Simulator/simctl workflow.
 - Never ask plugin code for frame bytes, Sidecar paths, process handles, viewer leases, or arbitrary session IDs; those capabilities intentionally remain inside the Host.
-- Honor an explicit user request for a different named workflow. This skill only governs Cindy's embedded simulator path.
+- Honor an explicit user request for a different named workflow. This Manual only governs Cindy's embedded simulator path.
+
+## Recover through the Host
+
+After a stale generation, expired lease, ownership conflict, or Host restart,
+stop mutations and inspect `list_instances` and `check_environment` or `doctor`.
+Use only the fresh route returned for this session. Refresh `get_screen_map`
+before using old snapshot or element identifiers again. If ownership or route
+freshness remains unknown, stop and report the Host error; do not probe Host
+internals or attempt shell cleanup. Report what actually completed and what
+remains unverified, and inspect current state before repeating an action with
+an uncertain outcome.

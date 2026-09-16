@@ -1,13 +1,13 @@
 {
   "name": "Gmail",
-  "description": "独立连接 Gmail：搜索、阅读邮件并生成草稿或发送邮件。只申请 Gmail 所需权限，授权与令牌由宿主管理。",
-  "whenToUse": "需要查 Gmail 邮件、读取邮件正文、列出标签、生成草稿或发送邮件时使用。请先在本插件详情页单独连接 Gmail 账号。",
+  "description": "搜索和阅读 Gmail、下载附件到当前任务、创建草稿和发送邮件。账号授权由 Cindy 托管。",
+  "whenToUse": "查 Gmail 邮件及附件日志、文件时使用。分析附件时，read 传 download_attachments=true，再读取返回的文件。请先在插件详情连接账号。",
   "tools": {
     "gmail_accounts": {
       "description": "列出本插件已连接的 Gmail 账号及状态。账号必须先在 Gmail 插件详情页单独授权。"
     },
     "gmail": {
-      "description": "执行 Gmail 操作：search 搜索邮件、read 读取正文、send 发送邮件、draft 保存草稿、list_labels 列出标签。modify_labels 暂不可用并返回权限不足。发送操作必须有用户明确意图。"
+      "description": "search 按 query 搜索 Gmail 邮件；read 返回正文与附件清单；list_labels 列出标签。draft 在 Gmail 创建远端草稿，send 发送邮件，两者须有用户意图。modify_labels 暂不可用。download_attachments 按 attachment_ids 下载附件，省略则下载全部；read 传 download_attachments=true 也会保存附件。指定目录须将 save_dir 放在 ghost_call 顶层，不能放入 args；省略则保存到任务目录。错误或错放的保存参数直接报错，不回退到其他目录。每文件最多16 MiB，每次最多16个。检查 complete、remaining_attachment_ids 及逐文件 status/error，剩余ID需继续调用。body_error 表示正文未完整读取。unknown 表示文件可能已存在，须先核实 root/attempted_path 再决定是否重试；仅读取已确认 downloaded 的文件。发送或草稿结果未知时先查 Gmail，避免重复提交。"
     }
   }
 }

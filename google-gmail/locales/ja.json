@@ -1,13 +1,13 @@
 {
   "name": "Gmail",
-  "description": "Gmail を個別に接続し、メールの検索、閲覧、下書き作成、送信を行います。Gmail に必要な権限だけを要求し、認証とトークンはホストが管理します。",
-  "whenToUse": "Gmail の検索、本文の閲覧、ラベル一覧、下書き作成、メール送信に使用します。先にこのプラグインの詳細画面で Gmail アカウントを個別に接続してください。",
+  "description": "Gmail の検索・閲覧、現在のタスクへの添付ファイルの保存、下書き作成、メール送信。アカウント認証は Cindy が管理します。",
+  "whenToUse": "Gmail と添付ログ・ファイルの確認に使用。添付を分析する場合は read に download_attachments=true を指定し、返されたファイルを読みます。先にプラグイン詳細でアカウントを接続してください。",
   "tools": {
     "gmail_accounts": {
       "description": "このプラグインに接続済みの Gmail アカウントと状態を一覧表示します。アカウントは Gmail プラグインの詳細画面で個別に認証する必要があります。"
     },
     "gmail": {
-      "description": "Gmail の操作として、メール検索、本文閲覧、送信、下書き保存、ラベル一覧を実行します。modify_labels は一時的に利用できず、権限不足エラーを返します。送信にはユーザーの明確な意図が必要です。"
+      "description": "searchはqueryでGmailを検索、readは本文と添付一覧を取得、list_labelsはラベルを一覧表示します。draftはGmail上に下書きを作成し、sendはメールを送信します。両方ともユーザーの意図が必要です。modify_labelsは未対応。download_attachmentsはattachment_idsで選択した添付を保存（省略時は全件）。readのdownload_attachments=trueでも保存します。save_dirはargsではなくghost_call最上位に指定し、省略時はタスク作業ディレクトリに保存。不正な保存指定はエラーとなり、別の場所には保存しません。1件16 MiB、1回16件まで。complete、remaining_attachment_ids、各ファイルのstatus/errorを確認し、残りIDは明示的に続行。body_errorは本文が完全に読めなかったことを示します。unknownはファイルが既に存在する可能性があるため、root/attempted_pathを確認してから再試行を判断。downloadedと確認できたファイルのみ開いてください。送信・下書きの結果が不明なら、重複を避けるためGmailを確認してから再試行してください。"
     }
   }
 }

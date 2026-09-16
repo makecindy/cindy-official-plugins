@@ -47,6 +47,11 @@
         "emails": []
       }
     },
+    "taptap-cli": {
+      "audience": {
+        "emails": []
+      }
+    },
     "cindy-notion": {
       "audience": "all"
     },

@@ -1,0 +1,26 @@
+{
+  "name": "TapTap CLI",
+  "description": "TapTap 開発者向け業務プラグイン。インストール済みの公式 taptap-cli を呼び出し、ログインと ID、ゲーム作成、掲載情報の編集、パッケージのアップロード、公開資格、審査とリリース、テスト計画、素材ライブラリを扱います。認証情報は CLI 側に留まり、書き込みには確認が必要です。",
+  "whenToUse": "TapTap 開発者向け業務の操作:ログイン、developerId/appId の確認、ゲーム作成、掲載情報とメインパッケージの編集、画像/動画/APK/Windows/H5 のアップロード、公開資格の補完、審査の提出・取り下げ、リリース、テスト計画とアクティベーションコードの管理、素材ライブラリの検索",
+  "tools": {
+    "list_tools": {
+      "description": "このプラグインで使える TapTap 業務操作を一覧します。カタログは本機にインストールされた taptap-cli からリアルタイムに読み取ります。category を省略するとトップレベルのコマンド(名前・説明・グローバル実行ルール)を返し、category を渡すと一段ずつ下へ掘れます(例: category:\"asset-library\"、次に category:\"asset-library ai-image\")。コマンド名が不確かなときは接頭辞で検索できます(例: category:\"up\")。サブコマンドを持たないコマンドのパスを渡すと、そのコマンドが受け付けるフラグを返します。詳細は call_tool の args._help:true で確認してください。このプラグインが意図的に除外するコマンド:データ照会(dashboard-stats とその stats:get 別名)、CLI 自身の更新(update)、生の auth login(auth login-start / login-wait を使用)。ダウンロード数・PV・評価・注文などの運用データはカタログにありません。",
+      "parameters": {
+        "/properties/category": {
+          "description": "コマンドのパスまたは接頭辞。直前の一覧が返した値をそのまま深掘りできます(例 \"asset-library\"、\"asset-library ai-image\")。名前が不確かなときは接頭辞で検索(例 \"up\")。省略するとトップレベルを返します。"
+        }
+      }
+    },
+    "call_tool": {
+      "description": "TapTap 業務操作を 1 つ実行します。name は list_tools の戻り値から取ります(例: 'app get-app-module'、サブコマンドの 'app +list'、'asset-library ai-image +plan'、'upload-apk'、'auth login-start')。developer_id と app_id は scope フィールドとして直接渡します(--dev-id / --app-id にマップ)。それ以外の業務フィールドはすべて data に JSON オブジェクトとして入れ、scope と data 以外のキーは制御フラグとして --flag に渡します(合法性は各コマンド自身の schema に基づき CLI が検証し、未知のフラグは CLI が拒否します)。ファイルパスなどの位置引数は _positional 配列に入れます。ローカルファイルのパスはセッション作業ディレクトリからの相対パスにしてください:CLI はそのディレクトリを基準に検証し、絶対パスと ../ による逸脱を拒否します。_ で始まるキーはプラグインの制御用です(_help でそのコマンドの完全なヘルプ、_timeout_seconds でタイムアウト秒数)。書き込み操作は必ずユーザーの確認を得てから、まず dry_run:true でプレビューし、同一の引数に yes:true を付けて実行してください。dry_run も yes も無い書き込みは拒否され、読み取り専用セッションではすべての書き込みが拒否されます。同意の取得はあなたの責務で、yes は実行スイッチであり同意そのものではありません。例外:プラグインが編成する auth login-start / auth login-wait はログインフローそのもの(ユーザーがブラウザで認可する)ため、この確認ゲートを通りません。読み取り専用セッションでは引き続き拒否されます。失敗結果には execution_state フィールドが付きます:not_executed は未実行で修正後の再試行が安全、unknown は書き込みが既に反映された可能性があるため、実際の状態を確認してから再試行するか判断し、そのまま再実行しないでください。",
+      "parameters": {
+        "/properties/name": {
+          "description": "list_tools が返す操作名(例: 'app get-app-module')。"
+        },
+        "/properties/args": {
+          "description": "操作引数の JSON オブジェクト。developer_id/app_id は scope フィールドとして直接渡し(--dev-id/--app-id にマップ)、それ以外の業務フィールドは data(JSON オブジェクト)に入れます。scope と data 以外のキーは制御フラグとして --flag に渡し、合法性は各コマンド自身の schema に基づき CLI が検証します。_ で始まるキーはプラグインの制御用で、フラグにはなりません:_positional(ファイルパスなどの位置引数の配列。セッション作業ディレクトリからの相対パスであること)、_help(そのコマンドの --help を表示)、_timeout_seconds(1 回のタイムアウト秒数、最大 870、大きなアップロード向け)。不明な場合は先に list_tools で絞り込んでください。"
+        }
+      }
+    }
+  }
+}

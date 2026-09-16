@@ -1,0 +1,26 @@
+{
+  "name": "TapTap CLI",
+  "description": "TapTap 개발자 업무 플러그인입니다. 설치된 공식 taptap-cli 를 호출해 로그인과 ID, 게임 생성, 스토어 정보 편집, 패키지 업로드, 출시 자격, 심사와 릴리스, 테스트 플랜, 소재 라이브러리를 다룹니다. 자격 증명은 CLI 에 남고 쓰기에는 확인이 필요합니다.",
+  "whenToUse": "TapTap 개발자 업무 처리: 로그인, developerId/appId 확인, 게임 생성, 스토어 정보와 메인 패키지 편집, 이미지/동영상/APK/Windows/H5 업로드, 출시 자격 보완, 심사 제출·철회, 게임 출시, 테스트 플랜과 활성화 코드 관리, 소재 라이브러리 검색",
+  "tools": {
+    "list_tools": {
+      "description": "이 플러그인에서 실행할 수 있는 TapTap 업무 작업을 나열합니다. 목록은 이 컴퓨터에 설치된 taptap-cli 에서 실시간으로 읽습니다. category 를 생략하면 최상위 명령(이름·설명·전역 실행 규칙)을 반환하고, category 를 넘기면 한 단계씩 내려갑니다(예: category:\"asset-library\", 다음 category:\"asset-library ai-image\"). 명령 이름이 불확실하면 접두사로 검색할 수 있습니다(예: category:\"up\"). 하위 명령이 없는 명령 경로를 넘기면 그 명령이 받는 플래그를 반환합니다. 자세한 내용은 call_tool 의 args._help:true 로 확인하세요.이 플러그인이 의도적으로 제외하는 명령: 데이터 조회(dashboard-stats 와 그 stats:get 별칭), CLI 자체 업데이트(update), 원시 auth login(auth login-start / login-wait 사용). 다운로드 수·PV·평점·주문 같은 운영 데이터는 목록에 없습니다.",
+      "parameters": {
+        "/properties/category": {
+          "description": "명령 경로 또는 접두사. 직전 목록이 돌려준 값을 그대로 이어서 내려갑니다(예 \"asset-library\", \"asset-library ai-image\"). 이름이 불확실하면 접두사로 검색합니다(예 \"up\"). 생략하면 최상위를 반환합니다."
+        }
+      }
+    },
+    "call_tool": {
+      "description": "TapTap 업무 작업을 하나 실행합니다. name 은 list_tools 의 반환값에서 가져옵니다(예: 'app get-app-module', 하위 명령 'app +list', 'asset-library ai-image +plan', 'upload-apk', 'auth login-start'). developer_id 와 app_id 는 scope 필드로 직접 전달합니다(--dev-id / --app-id 로 매핑). 그 외 업무 필드는 모두 data 에 JSON 객체로 넣고, scope 와 data 외의 키는 제어 플래그로 --flag 에 전달합니다(정당성은 각 명령 자체의 schema 에 따라 CLI 가 검증하며, 알 수 없는 플래그는 CLI 가 거부합니다). 파일 경로 같은 위치 인수는 _positional 배열에 넣습니다. 로컬 파일 경로는 세션 작업 디렉터리 기준 상대 경로여야 합니다: CLI 가 그 디렉터리를 기준으로 검증하며 절대 경로와 ../ 이탈을 거부합니다. _ 로 시작하는 키는 플러그인 제어용입니다(_help 는 해당 명령의 전체 도움말, _timeout_seconds 는 타임아웃 초). 쓰기 작업은 반드시 사용자 확인을 받은 뒤 dry_run:true 로 먼저 미리보기하고, 동일한 인수에 yes:true 를 붙여 실행하세요. dry_run 도 yes 도 없는 쓰기는 거부되며, 읽기 전용 세션에서는 모든 쓰기가 거부됩니다. 동의를 얻는 것은 당신의 책임이고, yes 는 실행 스위치일 뿐 동의 자체가 아닙니다. 예외: 플러그인이 구성하는 auth login-start / login-wait 는 로그인 흐름 자체(사용자가 브라우저에서 승인)라 이 게이트를 거치지 않습니다. 읽기 전용 세션은 여전히 거부합니다. 실패 결과에는 execution_state 필드가 붙습니다: not_executed 는 실행되지 않아 수정 후 재시도가 안전하고, unknown 은 쓰기가 이미 반영되었을 수 있으므로 실제 상태를 확인한 뒤 재시도 여부를 판단하고 그대로 다시 실행하지 마세요.",
+      "parameters": {
+        "/properties/name": {
+          "description": "list_tools 가 반환하는 작업 이름입니다(예: 'app get-app-module')."
+        },
+        "/properties/args": {
+          "description": "작업 인수 JSON 객체입니다. developer_id/app_id 는 scope 필드로 직접 전달하고(--dev-id/--app-id 로 매핑), 그 외 업무 필드는 data(JSON 객체)에 넣습니다. scope 와 data 외의 키는 제어 플래그로 --flag 에 전달하며, 정당성은 각 명령 자체의 schema 에 따라 CLI 가 검증합니다. _ 로 시작하는 키는 플러그인 제어용이며 플래그가 되지 않습니다: _positional(파일 경로 등 위치 인수 배열, 세션 작업 디렉터리 기준 상대 경로여야 함), _help(해당 명령의 --help 표시), _timeout_seconds(호출 타임아웃 초, 최대 870, 대용량 업로드용). 확실하지 않으면 먼저 list_tools 로 내려가 확인하세요."
+        }
+      }
+    }
+  }
+}

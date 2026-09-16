@@ -1,13 +1,13 @@
 {
   "name": "Gmail",
-  "description": "Connect Gmail independently to search and read email or create drafts and send messages. Only Gmail permissions are requested; authorization and tokens are managed by the host.",
-  "whenToUse": "Use this plugin to search Gmail, read message bodies, list labels, create drafts, or send email. Connect a Gmail account separately in this plugin's details first.",
+  "description": "Search and read Gmail, download attachments to the current task, create drafts, and send messages. Account authorization is managed by Cindy.",
+  "whenToUse": "Use for Gmail messages and attached logs/files. To analyze an attachment, read with download_attachments=true, then open the returned files. Connect an account in plugin details first.",
   "tools": {
     "gmail_accounts": {
       "description": "List the Gmail accounts connected to this plugin and their status. Accounts must be authorized separately in the Gmail plugin details."
     },
     "gmail": {
-      "description": "Run a Gmail operation: search messages, read message bodies, send email, save a draft, or list labels. modify_labels is temporarily unavailable and returns an insufficient-permissions error. Sending requires clear user intent."
+      "description": "search finds Gmail messages by query; read returns body and attachment metadata; list_labels lists labels. draft creates a remote Gmail draft; send sends email—both require user intent. modify_labels is unavailable. download_attachments saves selected attachment_ids (all if omitted); read with download_attachments=true also saves attachments. Pass save_dir at ghost_call top level, never in args; omit it to save in the task workdir. Invalid/misplaced save targets fail without fallback. Max 16 MiB/file and 16 files/call. Inspect complete, remaining_attachment_ids and each file status/error; continue remaining IDs explicitly. body_error means the body could not be read completely. unknown means a file may already exist: inspect root/attempted_path before deciding to retry. Open only confirmed downloaded files. For unknown send/draft outcomes, check Gmail before retrying to avoid duplicates."
     }
   }
 }
