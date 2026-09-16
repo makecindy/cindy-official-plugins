@@ -91,7 +91,7 @@ async function handleTool(name,args) {
     return {ok:true,version:status.version,protocol:status.protocol,extension_connected:status.extension_connected,
       clients:(status.clients || []).map(c=>({id:c.id,browser:c.browser,version:c.version,connected:c.connected,trusted:c.trusted})),
       installation:{ok:!!installation?.ok,browsers:(installation?.browsers || []).map(b=>({browser:b.browser,supported:b.supported,installed:b.installed,published:b.published,zip:b.zip,bundled:b.bundled}))},
-      how_to_install:'Open My Browser plugin settings. Chrome/Edge: enable Developer mode and drag the bundled ZIP onto the extensions page. Wait for a live connection.'};
+      how_to_install:'Open My Browser plugin settings. Chrome/Edge: enable Developer mode in the extensions manager, then drop the bundled ZIP on that page (Chromium unpacks it there) or use Load unpacked on the bundled directory. A refusal of the dropped ZIP is normal on some builds; fall back to the directory. Wait for a live connection.'};
   }
   if (name === 'browser_tabs') return node('act',{action:'tabs',payload:P.validate('tabs',args)});
   if (name === 'browser_read') {

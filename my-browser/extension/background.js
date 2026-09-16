@@ -206,7 +206,9 @@ async function pageOperation(job) {
   };
   function readableText(root,limit) {
     if (!root.querySelector) return root.innerText || '';
-    if (root.matches?.(TEXT_SCOPE) && sensitive(root)) return '';
+    // Sensitivity is inherited through the ancestor chain, so the guard must not also require the root
+    // itself to look like a field: a plain span inside a sensitive editing host is sensitive too.
+    if (sensitive(root)) return '';
     // The walker never runs its filter on the root itself, and innerText on a non-rendered node
     // degrades to textContent, so a hidden root is rejected here instead of leaking hidden data.
     if (root.nodeType === Node.ELEMENT_NODE && notRendered(root)) return '';

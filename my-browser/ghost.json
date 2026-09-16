@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome and Edge without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Safari is not installable from this package yet. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome or Edge. Safari is not installable from this package yet. Ordinary public pages do not require this plugin.",
-  "version": "0.3.34",
+  "version": "0.3.35",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",

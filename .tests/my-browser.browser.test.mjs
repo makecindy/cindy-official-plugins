@@ -221,6 +221,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   r=await tool('browser_act',{url,kind:'type',selector:'#otp-digits',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
   // Neither an inner contenteditable="false" node nor an unnamed inner editable region may mask the
   // outer sensitive host.
+  // A plain element inside a sensitive host is sensitive by inheritance in every read mode.
+  assert.equal(String((await tool('browser_read',{url,mode:'text',selector:'#otp-digits'})).text||'').includes('987654'),false,'text mode must not return it either');
   for (const sel of ['#otp-frozen','#otp-deep']) {
     const deep=await tool('browser_read',{url,mode:'extract',selector:sel,waitFor:'#readable',fields:{value:':self'}});
     assert.equal(String(deep.record?.value||'').match(/111222|333444/),null,sel+' must not be readable');
