@@ -83,3 +83,26 @@ test("attachment validation proves rejection before dispatch; post-dispatch fail
     assert.equal((await feedback.read(b)).requests.length,1);
   } finally {feedback.setEmitter(()=>{});await fs.rm(root,{recursive:true,force:true});}
 });
+
+test("editing annotation text retains persisted images and appends new screenshots", async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),"od-comment-images-"));
+  const b={root,sessionId:"owner",edit:"editor"};
+  const writes=[];
+  const write=async (binding,name,bytes)=>{writes.push(name);await fs.writeFile(path.join(binding.root,name),bytes);};
+  const image={type:"image/png",base64:Buffer.from("fixture").toString("base64")};
+  try {
+    const first=(await feedback.handle(b,"comments","POST",{target:{selector:"#title"},note:"original",images:[image]},write)).comment;
+    const edit={id:first.id,target:{selector:"#title"},note:"edited"};
+    for(const images of [undefined,[]]) {
+      const result=(await feedback.handle(b,"comments","POST",{...edit,images},write)).comment;
+      assert.deepEqual(result.attachments,first.attachments);
+      assert.deepEqual((await feedback.read(b)).comments[0].attachments,first.attachments);
+      assert.equal(writes.length,1);
+    }
+    const appended=(await feedback.handle(b,"comments","POST",{...edit,images:[image]},write)).comment;
+    assert.equal(appended.attachments.length,2);
+    assert.deepEqual(appended.attachments[0],first.attachments[0]);
+    assert.notEqual(appended.attachments[1].path,first.attachments[0].path);
+    assert.equal(await fs.readFile(path.join(root,first.attachments[0].path),"utf8"),"fixture");
+  } finally {await fs.rm(root,{recursive:true,force:true});}
+});

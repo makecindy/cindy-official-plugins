@@ -141,7 +141,7 @@ test("untrusted, remote and readonly contexts do nothing", async () => {
 });
 
 test("accepted dispatch to a different session stays unknown without retry", async () => {
-  for (const [reply, expected] of [[{ok:true,sessionId:other}, 'unknown'], [null, 'unknown'], [{ok:false,message:'denied'}, 'rejected']]) {
+  for (const [reply, expected] of [[{ok:true}, 'unknown'], [{ok:true,sessionId:''}, 'unknown'], [{ok:true,sessionId:sid}, 'accepted'], [{ok:true,sessionId:sid,disposition:'queued'}, 'queued'], [{ok:true,sessionId:other}, 'unknown'], [null, 'unknown'], [{ok:false,message:'denied'}, 'rejected']]) {
     const r = runtime(new Map(), reply);
     await r.tool('opendesign_new', {html:'<h1>Example</h1>'});
     await r.run({type:'event',name:'node-notification',method:'opendesign-feedback',params:{requestId:'request-one',sessionId:sid}});

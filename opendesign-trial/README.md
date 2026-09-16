@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.11
+# OpenDesign for Cindy — local trial 0.4.12
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -36,6 +36,8 @@ Browser regressions: install Playwright Chromium, then run `node --test .tests/o
 
 0.4.9: Both persisted annotation paths share the existing UUID utility. Where randomUUID is unavailable it uses getRandomValues to construct a v4 UUID; absent Web Crypto fails closed. Removed the upstream weak-random fallback. The free-pin bridge embeds the same self-contained implementation in its sandbox realm. WebRTC isolation and final real-device acceptance remain unresolved.
 
-0.4.11: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. WebRTC isolation and device acceptance remain blocked.
+0.4.12: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. WebRTC isolation and device acceptance remain blocked.
 
 Download confirmations also accept explicitly marked version and presentation previews and appear inside the presentation/fullscreen container. URL-load/powered mode is disabled by this adapter; noninteractive thumbnails cannot request saves.
+
+Editing annotation text retains existing screenshot attachments and appends newly uploaded images. Successful dispatch requires an exact bound session receipt; missing session IDs remain unknown.

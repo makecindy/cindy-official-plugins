@@ -85,7 +85,7 @@ async function handleUnlocked(b, route, method, body, write) {
       createdAt: found?.createdAt || Date.now(),
       updatedAt: Date.now(),
       pinSeq: found?.pinSeq || data.comments.length + 1,
-      attachments: await images(b, body.images || [], write),
+      attachments: [...(found?.attachments || []), ...await images(b, body.images || [], write)],
     };
     data.comments = data.comments.filter((x) => x.id !== c.id);
     data.comments.push(c);

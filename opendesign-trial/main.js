@@ -277,7 +277,7 @@
       });
       return;
     }
-    const matching = !result?.sessionId || result.sessionId === d.sessionId;
+    const matching = result?.sessionId === d.sessionId;
     await node("feedback-result", {
       requestId,
       sessionId,
