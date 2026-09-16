@@ -21,7 +21,7 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   // only for named positive fixtures at the browser API boundary; private.test keeps
   // the real loopback address. Production guard and document binding run unchanged.
   const networkShim=`const nativeCompleted=chrome.webRequest.onCompleted.addListener.bind(chrome.webRequest.onCompleted);
-  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','links.test','pageurl.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
+  chrome.webRequest.onCompleted.addListener=(fn,...args)=>nativeCompleted(d=>fn(['example.test','blocked.test','redirect.test','huge.test','long.test','cv.test','links.test','manylinks.test','pageurl.test','x.com'].includes(new URL(d.url).hostname)?{...d,ip:'8.8.8.8'}:d),...args);\n`;
   const backgroundPath=path.join(extensionDir,'background.js');
   await fs.writeFile(backgroundPath,networkShim+await fs.readFile(backgroundPath,'utf8'));
   const {generateKeyPairSync,createHash}=require('node:crypto');
@@ -37,6 +37,8 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   const server=http.createServer(async(req,res)=>{
     try{
       if(req.headers.host?.startsWith('example.test') || req.headers.host?.startsWith('private.test')){res.setHeader('Content-Type','text/html');return res.end(fixture);}
+      if(req.headers.host?.startsWith('manylinks.test')){res.setHeader('Content-Type','text/html');
+        return res.end('<title>Many links</title><p>body</p>'+Array.from({length:20000},(_,i)=>'<a href="/m'+i+'">M</a>').join(''));}
       if(req.headers.host?.startsWith('pageurl.test')){res.setHeader('Content-Type','text/html');
         return res.end('<title>Page url fixture</title><script>history.replaceState({},"","/"+"p".repeat(600000));</script><p>Page url body</p>');}
       if(req.headers.host?.startsWith('links.test')){res.setHeader('Content-Type','text/html');
@@ -296,6 +298,12 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.ok(String(pageUrl.url).length<=8192,'the page URL must be bounded');
   assert.equal(pageUrl.truncated,true,'bounding the page URL is a cut');
   assert.ok(pageUrl.text.includes('Page url body'),'the page content is still returned');
+  // A count-limited read on a 20000-link page must still return exactly what was asked for. (The
+  // early-exit itself is a structural change: at this size the previous eager scan is not slow enough
+  // to make a timing threshold discriminating, so no such threshold is asserted.)
+  const few=await tool('browser_read',{url:'http://manylinks.test/',mode:'content',limit:1});
+  assert.equal(few.ok,true,JSON.stringify(few).slice(0,160));
+  assert.equal(few.links.length,1);assert.equal(few.truncated,true);
   // The page carries a password field so the filtered walker path runs; the on-screen
   // content-visibility:auto element stays readable and the engine-skipped one is excluded.
   const cv=await tool('browser_read',{url:'http://cv.test/',mode:'text',maxChars:30000});

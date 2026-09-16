@@ -285,11 +285,14 @@ async function pageOperation(job) {
         if (action === 'content') {
           links = [];
           let budget = PAGE_LINKS_BUDGET;
-          for (const el of [...root.querySelectorAll('a[href]')].filter(visible)) {
+          // Consecutive checks, cheapest first: an untrusted page can hold a huge number of links, and
+          // measuring visibility for all of them before applying the limit is a full layout scan.
+          for (const el of root.querySelectorAll('a[href]')) {
             const url = String(el.href);
             // Eligibility comes first: a trailing mailto:/tel: link is not something the caller could
             // have received, so it must not be reported as a cut.
             if (!/^https?:/.test(url)) continue;
+            if (!visible(el)) continue;
             if (links.length >= (a.limit || 10)) { linksTruncated = true; break; }
             if (url.length > LINK_URL_HARD_MAX || url.length > budget) { linksTruncated = true; continue; }
             budget -= url.length;
