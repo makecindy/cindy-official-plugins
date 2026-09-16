@@ -167,9 +167,19 @@ async function pageOperation(job) {
   // from the platform (contenteditable="", "plaintext-only" and inherited editing all count), not
   // from a literal attribute value, so the sensitivity check and the type branch agree.
   const isField = el => el.matches('input,textarea,select') || !!el.isContentEditable;
-  const sensitive = el => el.matches('input[type=password],input[type=hidden]') ||
-    (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token)) ||
-    (isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token)));
+  // A nested editable region carries its meaning from the editing host that names it: clicking or
+  // reading a child span of a contenteditable named "otp" must be treated exactly like the host.
+  const editingHost = el => {
+    const host = typeof el.closest === 'function' ? el.closest('[contenteditable]') : null;
+    return host || (el.isContentEditable ? el : null);
+  };
+  const sensitive = el => {
+    if (el.matches('input[type=password],input[type=hidden]')) return true;
+    if ((el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token))) return true;
+    const host = editingHost(el);
+    if (host && named(host).some(token => SENSITIVE_NAMES.has(token))) return true;
+    return isField(el) && named(el).some(token => SENSITIVE_NAMES.has(token));
+  };
   // A page can hold an OTP, card number or password inside a contenteditable region. Those elements
   // are excluded from refs, extract and text.
   const TEXT_SCOPE = 'input,textarea,select,[contenteditable],[role=textbox]';

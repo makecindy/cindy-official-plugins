@@ -214,6 +214,11 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
   assert.equal((await tool('browser_read',{url,mode:'content'})).text.includes('987654'),false,'sensitive contenteditable text must not be returned');
   assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('987654'),false,'the text mode must not return it either');
   assert.equal((await tool('browser_read',{url,mode:'snapshot'})).text.includes('987654'),false,'snapshot text must not return it');
+  // A child of a sensitive editing host must inherit that sensitivity for extract and interaction.
+  const nestedRead=await tool('browser_read',{url,mode:'extract',selector:'#otp-digits',waitFor:'#readable',fields:{value:':self'}});
+  assert.equal(nestedRead.ok,true,JSON.stringify(nestedRead).slice(0,160));
+  assert.equal(String(nestedRead.record.value||'').includes('987654'),false,'a child of a sensitive editing host must not be readable');
+  r=await tool('browser_act',{url,kind:'type',selector:'#otp-digits',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
   // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
   // display:none content into the text.

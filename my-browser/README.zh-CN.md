@@ -115,6 +115,8 @@ node scripts/build-my-browser.mjs /absolute/output/directory all
 
 0.3.32 恢复完整的页面身份校验。先前为了限制传入注入函数的 URL 长度而改用前缀比较，这同时放松了身份判定：同文档导航到共享该前缀的地址也会通过。现由注入代码经消息向 worker 取回精确的目标 URL，并要求 `location.href` 与之完全相等。该 URL 刻意既不作为 `executeScript` 参数传递（超长时会一直不返回），也不使用限长副本。覆盖：整个 Chromium 套件都经过这条路径，包括 URL 长达 60 万字符的 `pageurl.test` 读取，以及依赖身份校验的重定向拒绝用例。
 
+0.3.33 让敏感判定跟随 editing host。原先只从元素自身属性读取命名，因此 `<div contenteditable name="otp">` 的子 span 被判为普通元素，而宿主却是受保护的：`extract` 能返回其中的验证码，`type` 也会接受该子节点。现解析最近的 `[contenteditable]` 祖先或自身，并对该宿主套用命名规则，使读取、snapshot 与交互共用同一边界。覆盖：夹具的验证码现位于嵌套 span 中，它既不能被 `extract` 读出，也不能被 `type` 接受；恢复仅看自身属性即触发对应断言失败。
+
 打包 ZIP 拖入 Chromium 扩展管理页也是开发者安装方式，可以替代手动选择目录。仍受浏览器开发者模式／管理策略限制，不等同于商店签名发布，也不保证自动更新。Chromium 源码支持这一路径；本机官方 Chrome 的 ZIP 拖入流程尚未实测。自行打包的 CRX 可能被直接拦截，并非只弹出可忽略的风险提示。
 
 provisioning 保持空定向受众。不代表市场准入、商店提交、push、PR 或公开发布。基于 HEAD 的4项包契约测试也已在包含新插件及 provisioning 的已提交快照上通过。

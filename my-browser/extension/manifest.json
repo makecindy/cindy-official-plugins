@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "My Browser · Cindy",
   "description": "Connect your browser to Cindy. Fast signed-in reading; interaction requires site permission in Cindy.",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApzt9+ONWqbyU7rchkOSfCr/LUeEgG+9vbl67c0fEkwKM3h1JsI07wbpOCUh3tMfwcM+eWYjRlh/iVk6Qxl2o5t85EcIQ9iCRkG8Dxwhl6qIkRI9wXrFCMfX536mEcuo08EPGbw38wRJrduAUnfe9iikIIAfIo3BQO4xWqCnXc/EL1zFDj+5IF0iEqrYkZcbQCuRlxgDLQVp3jYpxDHAUCsMSbiM6Q3ytXe5Jnq4SzPUhfSTqc75OxDk36jjZbXVICjD2E89uG7Lb9OZ+IcRRjvBhZlgoI6asW6jbGodRIump6mXTyu4Ei8LHSwJJTgzAQNYcJPfNDHpiqygyWUVT0wIDAQAB",
   "permissions": ["tabs", "scripting", "storage", "alarms", "webRequest", "webNavigation"],
