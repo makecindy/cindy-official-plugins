@@ -12021,7 +12021,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 848673,
+      "bytes": 847423,
       "imports": [
         {
           "path": "../latest/apps/web/src/utils/uuid.ts",
@@ -14395,7 +14395,7 @@
           "bytesInOutput": 108
         },
         "node_modules/dompurify/dist/purify.es.mjs": {
-          "bytesInOutput": 30043
+          "bytesInOutput": 30018
         },
         "node_modules/@babel/runtime/helpers/esm/typeof.js": {
           "bytesInOutput": 277
@@ -14470,7 +14470,7 @@
           "bytesInOutput": 87
         },
         "node_modules/html2canvas/dist/html2canvas.js": {
-          "bytesInOutput": 205588
+          "bytesInOutput": 205587
         },
         "node_modules/core-js/internals/global-this.js": {
           "bytesInOutput": 329
@@ -14926,13 +14926,13 @@
           "bytesInOutput": 277
         },
         "node_modules/@babel/runtime/helpers/esm/toPropertyKey.js": {
-          "bytesInOutput": 94
+          "bytesInOutput": 93
         },
         "node_modules/@babel/runtime/helpers/esm/defineProperty.js": {
-          "bytesInOutput": 151
+          "bytesInOutput": 149
         },
         "node_modules/core-js/internals/array-reduce.js": {
-          "bytesInOutput": 458
+          "bytesInOutput": 455
         },
         "node_modules/core-js/internals/array-method-is-strict.js": {
           "bytesInOutput": 156
@@ -14986,13 +14986,13 @@
           "bytesInOutput": 348
         },
         "node_modules/stackblur-canvas/dist/stackblur-es.js": {
-          "bytesInOutput": 4627
+          "bytesInOutput": 4622
         },
         "node_modules/canvg/lib/index.es.js": {
-          "bytesInOutput": 82998
+          "bytesInOutput": 82997
         },
         "node_modules/jspdf/dist/jspdf.es.min.js": {
-          "bytesInOutput": 341657
+          "bytesInOutput": 341743
         },
         "node_modules/shiki/dist/chunk-D1SwGrFN.mjs": {
           "bytesInOutput": 574
@@ -15604,7 +15604,7 @@
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 265333
+          "bytesInOutput": 265008
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -15940,7 +15940,7 @@
           "bytesInOutput": 686
         },
         "node_modules/micromark/lib/compile.js": {
-          "bytesInOutput": 7266
+          "bytesInOutput": 7264
         },
         "node_modules/micromark-factory-space/index.js": {
           "bytesInOutput": 190
@@ -16261,7 +16261,7 @@
           "bytesInOutput": 1778
         },
         "../latest/apps/web/src/components/PreviewDrawOverlay.tsx": {
-          "bytesInOutput": 30751
+          "bytesInOutput": 30749
         },
         "../latest/apps/web/src/utils/imeComposing.ts": {
           "bytesInOutput": 26
@@ -16282,13 +16282,13 @@
           "bytesInOutput": 1205
         },
         "../latest/apps/web/src/components/BoardComposerPopover.tsx": {
-          "bytesInOutput": 14063
+          "bytesInOutput": 14060
         },
         "../latest/apps/web/src/components/IframeKeepAlivePool.tsx": {
           "bytesInOutput": 3294
         },
         "../latest/apps/web/src/components/ManualEditPanel.tsx": {
-          "bytesInOutput": 28939
+          "bytesInOutput": 28932
         },
         "../latest/apps/web/src/edit-mode/types.ts": {
           "bytesInOutput": 537
@@ -16348,7 +16348,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17315771
+      "bytes": 17315480
     },
     "../../assets/studio.css": {
       "imports": [

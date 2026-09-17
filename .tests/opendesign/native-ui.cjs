@@ -129,6 +129,7 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     await page.getByRole("button", { name: "注释", exact: true }).click();
     async function commentClick(selector) {
       await page.getByTestId('comment-canvas-input').waitFor();
+      await page.frameLocator('[data-testid=artifact-preview-frame]').locator('html[data-od-comment-mode]').waitFor();
       const box = await page.frameLocator('[data-testid=artifact-preview-frame]').locator(selector).boundingBox();
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     }

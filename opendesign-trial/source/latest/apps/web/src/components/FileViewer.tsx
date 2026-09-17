@@ -559,9 +559,6 @@ const PREVIEW_SCOPE_RETRY_MS = 15 * 1000;
 const SRC_DOC_PREVIEW_FRAME_NAME_PREFIX = 'od-artifact-preview-srcdoc-';
 const SRC_DOC_PREVIEW_FAILURE_FRESHNESS_MS = 10_000;
 const MAX_CACHED_SRC_DOC_TRANSPORTS = 128;
-let previewContentMeasurementDocumentEpochSequence = 0;
-let previewContentMeasurementHostInstanceSequence = 0;
-let previewTransportGenerationSequence = 0;
 type SrcDocTransportCacheEntry = {
   sourceFingerprint: string;
   generation: string;
@@ -570,16 +567,13 @@ type SrcDocTransportCacheEntry = {
 const htmlPreviewSrcDocTransportState = new Map<string, SrcDocTransportCacheEntry>();
 const sharedPreviewBootstrapUrls = new WeakMap<typeof URL.createObjectURL, Map<string, string>>();
 function nextPreviewContentMeasurementDocumentEpoch(): string {
-  previewContentMeasurementDocumentEpochSequence += 1;
-  return `preview-document-${previewContentMeasurementDocumentEpochSequence}`;
+  return `preview-document-${randomUUID()}`;
 }
 function nextPreviewContentMeasurementHostInstance(): string {
-  previewContentMeasurementHostInstanceSequence += 1;
-  return `preview-host-${previewContentMeasurementHostInstanceSequence}`;
+  return `preview-host-${randomUUID()}`;
 }
 function nextPreviewTransportGeneration(): string {
-  previewTransportGenerationSequence += 1;
-  return `preview-transport-${previewTransportGenerationSequence}`;
+  return `preview-transport-${randomUUID()}`;
 }
 function previewSourceFingerprint(source: string): string {
   let hash = 2166136261;
@@ -8353,8 +8347,6 @@ function HtmlViewer({
     frame: HTMLIFrameElement;
     generation: string;
   } | null>(null);
-  const previewContentMeasurementSequenceRef = useRef(0);
-  const previewContentMeasurementGenerationSequenceRef = useRef(0);
   const previewContentMeasurementHostInstanceRef = useRef<string | null>(null);
   if (previewContentMeasurementHostInstanceRef.current == null) {
     previewContentMeasurementHostInstanceRef.current =
@@ -8398,14 +8390,12 @@ function HtmlViewer({
   const previewContentMeasurementRevision = `${previewContentWidthCacheKey}:${reloadKey}`;
   if (previewContentMeasurementRevisionRef.current !== previewContentMeasurementRevision) {
     previewContentMeasurementRevisionRef.current = previewContentMeasurementRevision;
-    previewContentMeasurementGenerationSequenceRef.current += 1;
     previewContentMeasurementGenerationRef.current =
-      `${previewContentMeasurementHostInstanceRef.current}:generation-${previewContentMeasurementGenerationSequenceRef.current}`;
+      `${previewContentMeasurementHostInstanceRef.current}:generation-${randomUUID()}`;
     previewContentMeasurementReadyRef.current = null;
     latestPreviewContentMeasurementRef.current = null;
   }
   const previewRuntimeStateRef = useRef<PreviewRuntimeState | null>(null);
-  const previewRuntimeStateRequestSequenceRef = useRef(0);
   const previewRuntimeStateRestoreIdRef = useRef<string | null>(null);
   const previewRuntimeStateRestoreReadyRef = useRef<{
     frame: HTMLIFrameElement;
@@ -8449,8 +8439,7 @@ function HtmlViewer({
     if (!workspaceActive) return Promise.resolve<PreviewRuntimeState | null>(null);
     const source = target?.contentWindow;
     if (!source) return Promise.resolve<PreviewRuntimeState | null>(null);
-    previewRuntimeStateRequestSequenceRef.current += 1;
-    const id = `runtime-state-${Date.now()}-${previewRuntimeStateRequestSequenceRef.current}`;
+    const id = `runtime-state-${randomUUID()}`;
     return new Promise<PreviewRuntimeState | null>((resolve) => {
       let settled = false;
       let retryTimer: number | null = null;
@@ -8502,9 +8491,8 @@ function HtmlViewer({
     // document acknowledges applying it; an older srcDoc generation ignores
     // the message and leaves it available for the replacement frame.
     if (previewRuntimeStateRestoreIdRef.current == null) {
-      previewRuntimeStateRequestSequenceRef.current += 1;
       previewRuntimeStateRestoreIdRef.current =
-        `runtime-restore-${Date.now()}-${previewRuntimeStateRequestSequenceRef.current}`;
+        `runtime-restore-${randomUUID()}`;
     }
     win.postMessage({
       type: 'od:preview-runtime-state-restore',
@@ -8575,7 +8563,7 @@ function HtmlViewer({
     } = previewContentMeasurementContextRef.current;
     if (!eligible || !Number.isFinite(canvasWidth) || canvasWidth <= 0) return;
     const measurementId =
-      `${previewContentMeasurementHostInstanceRef.current}:measurement-${++previewContentMeasurementSequenceRef.current}`;
+      `${previewContentMeasurementHostInstanceRef.current}:measurement-${randomUUID()}`;
     const request: PreviewContentMeasurementRequest = {
       measurementId,
       generation: previewContentMeasurementGenerationRef.current,
@@ -8594,9 +8582,8 @@ function HtmlViewer({
   ) => {
     if (!workspaceActive) return;
     if (!target || target !== iframeRef.current || target.dataset.odActive !== 'true') return;
-    previewContentMeasurementGenerationSequenceRef.current += 1;
     previewContentMeasurementGenerationRef.current =
-      `${previewContentMeasurementHostInstanceRef.current}:generation-${previewContentMeasurementGenerationSequenceRef.current}`;
+      `${previewContentMeasurementHostInstanceRef.current}:generation-${randomUUID()}`;
     latestPreviewContentMeasurementRef.current = null;
     previewContentMeasurementReadyRef.current = {
       frame: target,
@@ -8641,7 +8628,6 @@ function HtmlViewer({
     canvasTop: 0,
   });
   const previewScrollRequestAtRef = useRef(0);
-  const previewScrollCaptureSequenceRef = useRef(0);
   const pendingPreviewScrollCapturesRef = useRef(new Map<string, {
     resolve: (position: {
       frameLeft: number;
@@ -8781,7 +8767,7 @@ function HtmlViewer({
     previewScrollRestoreRef.current = snapshot;
     if (frameReadable || !frame?.contentWindow) return;
 
-    const requestId = `preview-scroll-${previewScrollCaptureSequenceRef.current += 1}`;
+    const requestId = `preview-scroll-${randomUUID()}`;
     const exactPositionPromise = new Promise<typeof position | null>((resolve) => {
       const timeout = window.setTimeout(() => {
         pendingPreviewScrollCapturesRef.current.delete(requestId);
@@ -10279,7 +10265,7 @@ function HtmlViewer({
     return () => window.removeEventListener('message', onMessage);
   }, [projectId, urlPreviewBaseIdentity, workspaceActive]);
   const postPreviewBaseUpdate = useCallback((href: string) => {
-    const requestId = `preview-base-${Date.now()}`;
+    const requestId = `preview-base-${randomUUID()}`;
     const message = { type: 'od:preview-base-update', requestId, href };
     const frames = viewerRootRef.current?.querySelectorAll('iframe') ?? [];
     for (const frame of frames) frame.contentWindow?.postMessage(message, '*');
@@ -10849,7 +10835,6 @@ function HtmlViewer({
     frame: HTMLIFrameElement;
     generation: string;
   } | null>(null);
-  const srcDocTransportProbeSequenceRef = useRef(0);
   const pendingSrcDocTransportProbeRef = useRef<{
     frame: HTMLIFrameElement;
     generation: string;
@@ -11169,8 +11154,7 @@ function HtmlViewer({
     // prewarm probe may target the lazy shell, so the real srcDoc must replace it.
     if (pendingRecoveryProbeMatches) return;
     clearSrcDocTransportTimeouts();
-    srcDocTransportProbeSequenceRef.current += 1;
-    const probeId = `${generation}:probe-${srcDocTransportProbeSequenceRef.current}`;
+    const probeId = `${generation}:probe-${randomUUID()}`;
     pendingSrcDocTransportProbeRef.current = {
       frame,
       generation,

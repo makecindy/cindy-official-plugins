@@ -5,7 +5,7 @@
   "name": "OpenDesign",
   "description": "Cindy 原生对话中的 OpenDesign 稿件：结果预览卡片、固定会话的交互网页和画板，支持连续修改同一稿件。",
   "whenToUse": "用 OpenDesign 创建或继续修改网页稿件、布局、颜色、文字、交互或草图时使用。已有稿件的会话中，“改这里/继续修改”等默认针对当前稿件：先 opendesign_context，再 opendesign_update；不创建新会话。完成返回预览卡片，用户点击后在卡片所属会话右侧打开稿件。 OpenDesign 自身的选区批注、手动编辑和绘制标注位于稿件查看器。用户在查看器点击发送时，只继续绑定的原会话；无 AI 代办。",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",

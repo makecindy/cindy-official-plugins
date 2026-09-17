@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.24
+# OpenDesign for Cindy — 本地试用 0.4.25
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -68,3 +68,5 @@ CodeQL 整理：分析标识改用加密 UUID，忽略标记时避免拼接出�
 普通稿件工具、卡片操作和批注派发统一拒绝未完成的初始化，提示在同一会话调用 opendesign_new 恢复；不会发布空稿件卡片或启动模型。
 
 运行时卡片元数据、默认稿件标题和打开状态跟随宿主语言：zh-CN 使用中文，en/ja/ko 使用英文回退；用户填写的标题保持原样。
+
+运行状态捕获/恢复及关联的预览测量、滚动、地址更新和文档探测标识统一使用共用加密 UUID；缺少 Web Crypto 时拒绝发送。同一请求重试保持原 ID，后续请求生成新 ID。

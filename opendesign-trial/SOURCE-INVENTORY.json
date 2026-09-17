@@ -387,7 +387,7 @@
     "path": "source/latest/apps/web/src/components/FileViewer.tsx",
     "upstream": "apps/web/src/components/FileViewer.tsx",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "a0b48a106651574b911584bb544bd710e6a6af5c284f1293aeba833acb569b80",
+    "sha256": "8f4b647f29e38f7da3b7c5f1621021044dc97533acdea873656cc5140033cd3d",
     "upstreamSha256": "934b46d6d804b8f83bc4c32da0f54764d96f125358a7a0e8ca0f2db48e9beffd",
     "modified": true
   },

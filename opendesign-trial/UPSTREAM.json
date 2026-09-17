@@ -24,7 +24,8 @@
     "Pod annotation elementId uses the shared cryptographic randomUUID helper instead of a timestamp.",
     "Snapshot and export bridge correlation IDs use shared cryptographic randomUUID, removing timestamp/Math.random identifiers.",
     "CodeQL: crypto-only analytics identity/error IDs; markup omission uses separators to avoid manufacturing tags; notes accept whitespace in raw-text closing tags; Markdown table code spans escape backslashes before pipes.",
-    "Parent-owned comment/Inspect/pod gestures authorize selection once; advisory updates retain selected identity. Bound comment target traversal to 1000 nodes and 500 visible candidates with matching parent limits."
+    "Parent-owned comment/Inspect/pod gestures authorize selection once; advisory updates retain selected identity. Bound comment target traversal to 1000 nodes and 500 visible candidates with matching parent limits.",
+    "Use shared fail-closed cryptographic UUIDs for runtime-state capture/restore and preview document, host, generation, measurement, scroll, base-update and transport-probe identifiers; preserve pending retry identity."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",

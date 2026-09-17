@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.24
+# OpenDesign for Cindy — local trial 0.4.25
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -63,3 +63,5 @@ Initial creation reserves a recoverable pending project. A failed first write ca
 All ordinary draft tools, card actions and feedback dispatch reject pending initialization with an explicit same-session opendesign_new recovery instruction; no empty draft card or model run is produced.
 
 Runtime card metadata, unnamed design titles and card-open status use the host language: Chinese for zh-CN and English fallback for en/ja/ko. Explicit user titles remain unchanged.
+
+Runtime-state capture/restore and related preview measurement, scroll, scope and transport correlation IDs now use the shared fail-closed cryptographic UUID helper. Retries retain the same pending request ID; subsequent requests receive a fresh ID.

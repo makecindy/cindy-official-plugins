@@ -68,3 +68,42 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   assert.ok(output.includes('\\u003c/script>'));
   assert.equal(sanitizeTitleInDoc('<title>&amp;lt;</title>'), '<title>-lt;</title>');
 });
+
+test('runtime state bridge correlates concurrent replies and reuses only the pending restore UUID', async () => {
+  const fs = require('node:fs');
+  const {transform} = require('../../opendesign-trial/source/build/node_modules/esbuild');
+  const source = fs.readFileSync(path.resolve(__dirname,'../../opendesign-trial/source/latest/apps/web/src/components/FileViewer.tsx'),'utf8');
+  // Execute the production callbacks with their surrounding React refs supplied.
+  const callbacks = source.slice(source.indexOf('  const capturePreviewRuntimeState = useCallback('), source.indexOf('  const setCommentComposerHostRef = useCallback('));
+  const code = (await transform(callbacks+'\nmodule.exports={capturePreviewRuntimeState,postAndConsumePreviewRuntimeState};',{loader:'ts'})).code;
+  const listeners = new Set(), messages = [];
+  const frame = {contentWindow:{postMessage:data=>messages.push(data)}};
+  const state = {example:'preserved'}, ref={current:null};
+  const sandbox={module:{exports:{}},workspaceActive:true,manualEditMode:true,useCallback:fn=>fn,
+    randomUUID:require('node:crypto').randomUUID,
+    previewRuntimeStateRef:{current:state},srcDocPreviewIframeRef:{current:frame},
+    previewRuntimeStateRestoreIdRef:ref,expectedSrcDocTransportGenerationRef:{current:'generation'},
+    isPreviewRuntimeState:s=>s && typeof s==='object',
+    Date:{now:()=>1},
+    window:{setTimeout:()=>1,clearTimeout:()=>{},setInterval:()=>2,clearInterval:()=>{},
+      addEventListener:(_,fn)=>listeners.add(fn),removeEventListener:(_,fn)=>listeners.delete(fn)}};
+  vm.runInNewContext(code,sandbox);
+  const {capturePreviewRuntimeState:capture,postAndConsumePreviewRuntimeState:restore}=sandbox.module.exports;
+  const a=capture(frame), b=capture(frame);
+  assert.notEqual(messages[0].id,messages[1].id);
+  const uuid=/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  for(const request of messages)assert.match(request.id,uuid);
+  for(const fn of listeners)fn({source:{},data:{type:'od:preview-runtime-state-captured',id:messages[0].id,state:{wrong:true}}});
+  assert.equal(listeners.size,2,'wrong frame cannot settle capture');
+  for(const [index,value] of [[1,'second'],[0,'first']])
+    for(const fn of [...listeners])fn({source:frame.contentWindow,data:{type:'od:preview-runtime-state-captured',id:messages[index].id,state:{value}}});
+  assert.equal((await a).value,'first');assert.equal((await b).value,'second');assert.equal(listeners.size,0);
+  assert.equal(restore(frame),true);const id=messages.at(-1).id;assert.match(id,uuid);
+  restore(frame);assert.equal(messages.at(-1).id,id,'retry preserves one pending restore identity');
+  ref.current=null;restore(frame);assert.notEqual(messages.at(-1).id,id,'next restore gets a fresh identity');
+  sandbox.randomUUID=()=>{throw Error('Web Crypto is required')};
+  const count=messages.length;
+  assert.throws(()=>capture(frame),/Web Crypto/);
+  ref.current=null;assert.throws(()=>restore(frame),/Web Crypto/);
+  assert.equal(messages.length,count,'missing crypto fails before posting');
+});
