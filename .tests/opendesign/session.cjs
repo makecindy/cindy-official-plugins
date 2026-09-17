@@ -183,6 +183,28 @@ test("failed initialization retries the same project and recovers writes with lo
     assert.equal(first.sent.at(-1).ok, false);
     const pending = JSON.parse(disk.get('sessions/'+sid+'.json'));
     assert.equal(pending.initialization, 'pending');
+    // All ordinary entry points fail before reads/writes, preview or model dispatch.
+    for (const tool of ['opendesign_context','opendesign_update','opendesign_open','opendesign_preview']) {
+      const blocked = runtime(disk, undefined, invoke);
+      await blocked.tool(tool, {html:'<h1>Must not write</h1>', expectedRevision:null});
+      assert.equal(blocked.sent.at(-1).ok, false);
+      assert.match(blocked.sent.at(-1).error || blocked.sent.at(-1).message || JSON.stringify(blocked.sent.at(-1)), /opendesign_new/);
+      assert.equal(blocked.calls.length, 0);
+      assert.equal(blocked.sent.filter(x=>x.type==='card-update' && x.state==='done').length, 0);
+    }
+    disk.set('cards/pending-card.json',JSON.stringify({sessionId:sid,draftId:pending.id}));
+    for (const actionId of ['open','canvas']) {
+      const blocked = runtime(disk, undefined, invoke);
+      await blocked.run({type:'event',name:'card-action',callId:'pending-card',sessionId:sid,actionId});
+      assert.equal(blocked.calls.length, 0);
+      assert.match(blocked.sent.at(-1).html, /creation is incomplete.*opendesign_new/);
+      assert.doesNotMatch(blocked.sent.at(-1).html, /data-ghost-action/);
+    }
+    const feedbackRuntime=runtime(disk);
+    await feedbackRuntime.run({type:'event',name:'node-notification',method:'opendesign-feedback',params:{requestId:'pending-feedback',sessionId:sid}});
+    assert.equal(feedbackRuntime.calls.filter(x=>x.agent).length,0);
+    assert.equal(feedbackRuntime.calls.find(x=>x.method==='feedback-result').params.status,'rejected');
+    assert.equal(JSON.parse(disk.get('sessions/'+sid+'.json')).initialization,'pending');
     // A new runtime represents a plugin restart between attempts.
     const recovered = runtime(disk, undefined, invoke);
     await recovered.tool('opendesign_new', {html:'<h1>Corrected attempt</h1>'});

@@ -64,7 +64,12 @@
       locale: await hostLocale(),
     });
   }
+  function requireReady(d) {
+    if (d?.initialization === "pending")
+      throw Error("Draft creation is incomplete. Call opendesign_new in this same session to recover it before using the draft.");
+  }
   async function context(d) {
+    requireReady(d);
     await bind(d);
     return node("draft-read", { sessionId: d.sessionId, file: d.file });
   }
@@ -74,6 +79,7 @@
     return `<div style="border:1px solid #d9ddd3;border-radius:14px;overflow:hidden"><div style="height:220px;overflow:hidden;pointer-events:none;background:#fff"><div style="width:960px;zoom:.46;transform-origin:top left">${body}</div></div><div style="padding:14px;background:#f5f5f1;color:#242b20;font-family:system-ui,sans-serif"><strong style="font:600 15px/1.4 system-ui">${esc(d.title)}</strong><p style="font-size:12px">OpenDesign · 稿件 ${esc(d.id.slice(0, 8))} · ${esc((c.revision || "未保存").slice(0, 8))}</p><button style="border:0;border-radius:8px;background:#252c21;color:white;padding:9px 14px;font:500 12px system-ui" data-ghost-action="open">${locale === "zh-CN" ? "打开稿件" : "Open design"}</button> <button style="border:1px solid #d2d7ca;border-radius:8px;background:transparent;color:#252c21;padding:9px 14px;font:500 12px system-ui" data-ghost-action="canvas">${locale === "zh-CN" ? "选区与画板" : "Annotate / canvas"}</button>${note ? "<p>" + esc(note) + "</p>" : ""}</div></div>`;
   }
   async function publish(msg, d, c) {
+    requireReady(d);
     await save("cards/" + msg.callId + ".json", {
       sessionId: d.sessionId,
       draftId: d.id,
@@ -96,6 +102,7 @@
       throw Error(
         "Draft binding unavailable. Reopen from its original conversation.",
       );
+    requireReady(d);
     if (!["open", "canvas"].includes(msg.actionId))
       throw Error("Unknown card action");
     const b = await bind(d),
@@ -136,6 +143,7 @@
       throw Error("Trusted local session required");
     if (ctx.workdir_is_read_only) throw Error("This session is read-only");
     let d = await read(stateKey(ctx.session_id));
+    if (msg.tool !== "opendesign_new") requireReady(d);
     if (msg.tool === "opendesign_new") {
       if (d && d.initialization !== "pending")
         throw Error(
@@ -250,6 +258,7 @@
     try {
       d = await read(stateKey(sessionId));
       if (!d || d.sessionId !== sessionId) throw Error("稿件尚未绑定此会话");
+      requireReady(d);
     } catch (e) {
       await node("feedback-result", {
         requestId,

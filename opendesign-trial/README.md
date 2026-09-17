@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.22
+# OpenDesign for Cindy — local trial 0.4.23
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -59,3 +59,5 @@ Manual saves and Agent updates share a 1 MiB decoded HTML byte limit; oversized 
 Comment and Inspect picking now require a one-use parent-owned pointer gesture. Artifact messages cannot clear or retarget an unsaved comment. Target broadcasts inspect at most 1,000 nodes and return at most 500 visible candidates; the parent rejects oversized arrays. Direct picking remains available beyond the broadcast budget.
 
 Initial creation reserves a recoverable pending project. A failed first write can be retried in the same session and directory; the binding becomes ready only after writing succeeds. If a write completed but its receipt or final state was lost, recovery preserves the existing manuscript instead of overwriting it.
+
+All ordinary draft tools, card actions and feedback dispatch reject pending initialization with an explicit same-session opendesign_new recovery instruction; no empty draft card or model run is produced.
