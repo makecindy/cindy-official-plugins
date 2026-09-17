@@ -60,9 +60,10 @@ async function save(next, base) {
   const r = await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,policy,siteDefaultsVersion:1})});
   if (!r.ok) return fail('SAVE_FAILED','Permissions could not be saved. Refresh settings before trying again.');
   const applied = await node('setPolicy',{policy});
-  if (!applied?.ok) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true};
+  const uncertain = applied?.error === 'REVOCATION_UNCONFIRMED' && applied.applied === true;
+  if (!applied?.ok && !uncertain) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true};
   channel.postMessage({type:'policy-changed'});
-  return {ok:true,policy};
+  return {ok:true,policy,...(uncertain ? {warning:'REVOCATION_UNCONFIRMED',message:applied.message} : {})};
 }
 async function handleTool(name,args) {
   const P = await policyReady;

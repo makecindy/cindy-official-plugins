@@ -152,13 +152,14 @@ test('a transport failure while reading reports unknown, not not_executed',async
   assert.equal(state.sent.at(-1).result.ok,true);
 });
 
-test('applied policy with historical uncertainty permits new tools but not save success',async t=>{
+test('applied policy with historical uncertainty permits new tools and saves with an explicit warning',async t=>{
   const {state,callTool,save}=await sandbox(t);
   state.policyReply={ok:false,error:'REVOCATION_UNCONFIRMED',applied:true,execution:'unknown'};
   await callTool('browser_read',{url:'https://example.test',mode:'text'});
   assert.equal(state.acts.length,1);
   const update=save(structuredClone(state.kv.policy));await update.done;
-  assert.equal((await update.response).ok,false);
+  const result=await update.response;assert.equal(result.ok,true);assert.equal(result.warning,'REVOCATION_UNCONFIRMED');
+  const again=save(structuredClone(result.policy),result.policy);await again.done;assert.equal((await again.response).ok,true);
   state.policyReply={ok:false,error:'REVOCATION_UNCONFIRMED',applied:false};
   await callTool('browser_read',{url:'https://example.test',mode:'text'});
   assert.equal(state.acts.length,1,'unapplied policy must still stop tools');

@@ -179,8 +179,8 @@ async function pageOperation(job) {
     return false;
   };
   // A page can hold an OTP, card number or password inside a contenteditable region. Those elements
-  // are excluded from refs, extract and text.
-  const TEXT_SCOPE = 'input,textarea,select,[contenteditable],[role=textbox]';
+  // are excluded from refs, extract and text. Field selectors are not a proxy for that check: a named
+  // span inside an unnamed editing host is sensitive even though it does not match a field selector.
   // Rendered-text extraction that never touches the live DOM: removing and re-inserting nodes fires
   // custom element lifecycle callbacks and MutationObserver, which would make a plain read mutate the
   // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
@@ -212,8 +212,10 @@ async function pageOperation(job) {
     // The walker never runs its filter on the root itself, and innerText on a non-rendered node
     // degrades to textContent, so a hidden root is rejected here instead of leaking hidden data.
     if (root.nodeType === Node.ELEMENT_NODE && notRendered(root)) return '';
-    // Without a sensitive descendant, innerText is exact, so never approximate it.
-    if (![...root.querySelectorAll(TEXT_SCOPE)].some(sensitive)) return root.innerText || '';
+    // Without a sensitive descendant, innerText is exact, so never approximate it. Every descendant
+    // is judged with sensitive(): a named credential child of an unnamed host would be missed by a
+    // field-selector fast path and leak through innerText.
+    if (![...root.querySelectorAll('*')].some(sensitive)) return root.innerText || '';
     const parts = []; let length = 0, lastBlock = null, lastBreak = false, pendingSpace = false;
     const walker = document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,{acceptNode(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
@@ -293,10 +295,12 @@ async function pageOperation(job) {
             // have received, so it must not be reported as a cut.
             if (!/^https?:/.test(url)) continue;
             if (!visible(el)) continue;
+            if (sensitive(el)) continue;
             if (links.length >= (a.limit || 10)) { linksTruncated = true; break; }
             if (url.length > LINK_URL_HARD_MAX || url.length > budget) { linksTruncated = true; continue; }
             budget -= url.length;
-            links.push({text:(el.innerText || el.getAttribute('aria-label') || '').trim().slice(0,100),url});
+            // Link text is a text projection: innerText would copy a named credential child.
+            links.push({text:(readableText(el,100) || el.getAttribute('aria-label') || '').trim().slice(0,100),url});
           }
         }
         // Title truncation is reported too, so a caller can tell that page metadata was cut.
@@ -357,7 +361,7 @@ async function pageOperation(job) {
       for (const el of nodes) {
         if (!visible(el) || sensitive(el)) continue;
         const ref = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2,'0')).join(''); refs.set(ref,el);
-        const name = String(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || '').replace(/\s+/g,' ').slice(0,120);
+        const name = String(el.getAttribute('aria-label') || el.getAttribute('placeholder') || readableText(el,120) || el.getAttribute('title') || '').replace(/\s+/g,' ').slice(0,120);
         const line = '['+ref+'] '+(el.getAttribute('role') || el.tagName.toLowerCase())+' '+name;
         if (length+line.length > 14000 || elements.length >= 80) { truncated = true; refs.delete(ref); break; }
         elements.push(line); length += line.length;

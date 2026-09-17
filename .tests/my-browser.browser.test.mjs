@@ -231,6 +231,21 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     assert.equal((await tool('browser_act',{url,kind:'type',selector:sel,text:'123456'})).error,'SENSITIVE_FIELD',sel+' must not be typable');
   }
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
+  // A named credential descendant of an unnamed editing host is still sensitive. Field selectors
+  // would miss that span and the innerText fast path would return the code.
+  const unnamedHost=(await tool('browser_read',{url,mode:'text',selector:'#unnamed-editor'}));
+  assert.equal(String(unnamedHost.text||'').includes('OTPCHILD246801'),false,'unnamed host text must not include a named otp child');
+  assert.ok(String(unnamedHost.text||'').includes('VISIBLEBEFORE') && String(unnamedHost.text||'').includes('VISIBLEAFTER'),'ordinary text around the named child remains');
+  assert.equal((await tool('browser_read',{url,mode:'content'})).text.includes('OTPCHILD246801'),false,'content text must not include it');
+  assert.equal((await tool('browser_read',{url,mode:'snapshot'})).text.includes('OTPCHILD246801'),false,'snapshot text must not include it');
+  assert.equal(String((await tool('browser_read',{url,mode:'snapshot'})).elements||'').includes('OTPCHILD246801'),false,'snapshot refs must not copy the named child');
+  const namedChild=await tool('browser_read',{url,mode:'extract',selector:'#named-otp-child',waitFor:'#readable',fields:{value:':self'}});
+  assert.equal(String(namedChild.record?.value||'').includes('OTPCHILD246801'),false,'extract must not return the named child');
+  const unnamedLinks=(await tool('browser_read',{url,mode:'content',selector:'#unnamed-editor',limit:20})).links||[];
+  assert.equal(unnamedLinks.some(l=>String(l.text||'').includes('OTPCHILD246801')),false,'link text must not copy a named otp child');
+  assert.ok(unnamedLinks.some(l=>/ordinary/i.test(String(l.text||''))),'ordinary link text around the named child remains');
+  const otpHostLinks=(await tool('browser_read',{url,mode:'content',selector:'#otp-region',limit:20})).links||[];
+  assert.equal(otpHostLinks.some(l=>String(l.text||'').includes('987654')),false,'link text inside a sensitive host must not copy the credential');
   // Filtering must keep rendered semantics: detaching the sensitive subtrees must not let
   // display:none content into the text.
   assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('HIDDENMARKER'),false,'hidden content must not be returned when a sensitive region is filtered');
