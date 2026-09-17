@@ -138,3 +138,5 @@ Network/launch inventory: the worker creates only a loopback HTTP listener on 18
 Status tool output explicitly selects connection and installation fields; local paths, policy and pairing-origin details stay in the settings response. Extract attributes are limited to href/src/datetime/title/alt/aria-label/role before dispatch. Arbitrary token attributes are rejected, but site text and links can still contain private information.
 
 Read failures after starting navigation report `execution: unknown`: the website may already have received the visit. A lost acknowledged read also reports unknown; jobs that expire before acknowledgement remain not executed.
+
+0.3.37 applies the extraction character budget at the Node result exit after URL redaction, shared across all fields and records. Over-budget URLs are omitted whole; ordinary text uses the remaining budget. Truncation is reported. HTTP regression tests cover single/multiple records, default/custom budgets and caller-defined field names.

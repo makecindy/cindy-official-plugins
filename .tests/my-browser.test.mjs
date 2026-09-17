@@ -222,3 +222,34 @@ test('acknowledged reads with lost results or revoked authorization are unknown'
     assert.equal((await http('/poll')).data.job,null);
   }
 });
+
+test('extract final budget covers redaction growth across single and multiple records',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:3000});
+  const url='https://example.test/?'+Array.from({length:15},(_,i)=>'token'+i+'=x').join('&');
+  const record=Object.fromEntries(Array.from({length:30},(_,i)=>['field'+i,url]));
+  assert.ok(url.length*30<6000);
+  assert.ok(P.redactUrl(url).length*30>6000);
+  for(const multiple of [false,true]) for(const maxChars of [undefined,256,7000]) {
+    const budget=maxChars ?? 6000;
+    const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{link:'a'},multiple,...(maxChars===undefined?{}:{maxChars})}});
+    await sleep(5);const {job}=(await http('/poll')).data;
+    await http('/ack',{id:job.id});
+    await http('/result',{id:job.id,result:{ok:true,url:'https://example.test',truncated:false,...(multiple?{records:[record,record],count:2}:{record})}});
+    const result=await promise;
+    const rows=multiple?result.records:[result.record];
+    const values=rows.flatMap(row=>Object.values(row));
+    assert.ok(values.reduce((n,v)=>n+(v?.length||0),0)<=budget);
+    assert.equal(result.truncated,true);
+    assert.ok(values.every(v=>v===null || v===P.redactUrl(url)),'URLs are returned whole or omitted');
+    if(multiple) assert.equal(result.count,2);
+  }
+  const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{text:'p'},maxChars:256}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  await http('/result',{id:job.id,result:{ok:true,record:JSON.parse('{"__proto__":"kept","text":"'+ 't'.repeat(300)+'","missing":null}')}});
+  const result=await promise;
+  assert.equal(Object.hasOwn(result.record,'__proto__'),true);
+  assert.equal(result.record.__proto__,'kept');
+  assert.equal(result.record.text.length,252);
+  assert.equal(result.record.missing,null);
+  assert.equal(result.truncated,true);
+});

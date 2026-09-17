@@ -45,24 +45,42 @@ function createBridge(options = {}) {
   // Last gate before a result reaches the model: policy checks above still used the real URL, but
   // nothing leaves with live OAuth/magic-link credentials in a query or fragment. Every shape that
   // carries a URL is covered: the page URL, tab rows, content links and extracted field values.
-  function redactResult(result) {
+  function redactResult(result, maxChars = 6000) {
     if (!result || typeof result !== 'object') return result;
     const out = {...result};
     if (typeof out.url === 'string') out.url = P.redactUrl(out.url);
     if (Array.isArray(out.tabs)) out.tabs = out.tabs.map(t => t && !t.redacted && typeof t.url === 'string' ? {...t,url:P.redactUrl(t.url)} : t);
     if (Array.isArray(out.links)) out.links = out.links.map(l => l && typeof l.url === 'string' ? {...l,url:P.redactUrl(l.url)} : l);
-    if (Array.isArray(out.records)) {
-      let dropped = false;
-      out.records = out.records.map(entry => { const r = redactFields(entry); dropped = dropped || r.dropped; return r.record; });
-      if (dropped) out.truncated = true;
-    }
-    if (out.record) { const r = redactFields(out.record); out.record = r.record; if (r.dropped) out.truncated = true; }
+    // One budget for the entire extraction, measured after URL redaction.
+    let remaining = maxChars;
+    const boundRecord = entry => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const r = redactFields(entry); const record = r.record; let truncated = r.dropped;
+      const bounded = {};
+      for (const [key, value] of Object.entries(record)) {
+        let finalValue = value;
+        if (typeof value === 'string') {
+          const limit = Math.min(remaining, FIELD_VALUE_MAX);
+          if (value.length > limit) {
+            finalValue = isHttp(value) ? null : value.slice(0, limit);
+            truncated = true;
+          }
+          remaining -= finalValue?.length || 0;
+        }
+        // Field names are caller-controlled, including "__proto__".
+        Object.defineProperty(bounded, key, {value:finalValue, enumerable:true});
+      }
+      if (truncated) out.truncated = true;
+      return bounded;
+    };
+    if (Array.isArray(out.records)) out.records = out.records.map(boundRecord);
+    if (out.record) out.record = boundRecord(out.record);
     return out;
   }
   function finish(job,result) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
-    const safe = redactResult(result);
+    const safe = redactResult(result, job.payload.maxChars || 6000);
     job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
   const jobFailure = (job,error,message) => failure(error,message,job.state === 'acknowledged' && job.action !== 'tabs' ? 'unknown' : 'not_executed');
