@@ -164,3 +164,16 @@ test('applied policy with historical uncertainty permits new tools and saves wit
   await callTool('browser_read',{url:'https://example.test',mode:'text'});
   assert.equal(state.acts.length,1,'unapplied policy must still stop tools');
 });
+
+test('remove clears a saved interaction exclusion so the site can be granted again',async t=>{
+  const {state,callTool}=await sandbox(t);
+  state.kv.policy=P.normalizePolicy({read:{block:[]},interact:{allow:['*'],block:[REVOKED]}});
+  await callTool('browser_policy',{action:'get'});
+  assert.equal(P.check(state.worker,'click','https://'+REVOKED).ok,false);
+  await callTool('browser_policy',{action:'remove',host:REVOKED});
+  const result=state.sent.at(-1).result;
+  assert.equal(result.ok,true,JSON.stringify(result));
+  assert.equal(state.confirmCalls.length,1,'removing an exclusion is a grant and needs confirmation');
+  assert.equal(state.kv.policy.interact.block.includes(REVOKED),false);
+  assert.equal(P.check(state.worker,'click','https://'+REVOKED).ok,true,'the exclusion must not keep blocking after remove');
+});

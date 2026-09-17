@@ -4,7 +4,7 @@
   "name": "My Browser",
   "description": "Read signed-in content in Chrome and Edge without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Safari is not installable from this package yet. Page content is sent to your AI model; cookies are not exported.",
   "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome or Edge. Safari is not installable from this package yet. Ordinary public pages do not require this plugin.",
-  "version": "0.3.41",
+  "version": "0.3.42",
   "minCindyVersion": "0.1.64",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -48,7 +48,7 @@
       "host":{"type":"string","maxLength":254,"description":"Domain filter including subdomains; prefix = for exact host."},
       "limit":{"type":"integer","minimum":1,"maximum":100}
     }}},
-    {"name":"browser_policy","description":"Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block and interaction allow entry. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction.","parameters":{"type":"object","additionalProperties":false,"properties":{
+    {"name":"browser_policy","description":"Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block, interaction allow entry and interaction exclusion. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction.","parameters":{"type":"object","additionalProperties":false,"properties":{
       "action":{"type":"string","enum":["get","allow_interact","block_read","remove"]},
       "host":{"type":"string","maxLength":254}
     },"required":["action"]}}

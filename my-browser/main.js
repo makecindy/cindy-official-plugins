@@ -78,6 +78,7 @@ async function handleTool(name,args) {
       if (args.action === 'remove') {
         policy.interact.allow = policy.interact.allow.filter(h => h !== host);
         policy.read.block = policy.read.block.filter(h => h !== host);
+        policy.interact.block = policy.interact.block.filter(h => h !== host);
       }
       return save(policy);
     });
