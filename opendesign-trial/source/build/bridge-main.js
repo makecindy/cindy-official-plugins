@@ -11,6 +11,7 @@
     } catch {}
     return locale;
   }
+  const text = (zh, en) => locale === "zh-CN" ? zh : en;
   const esc = (s) =>
     String(s).replace(
       /[&<>"']/g,
@@ -76,7 +77,7 @@
   function card(d, c, note = "") {
     const body =
       c.cardHtml || '<p style="padding:24px">' + esc(d.title) + "</p>";
-    return `<div style="border:1px solid #d9ddd3;border-radius:14px;overflow:hidden"><div style="height:220px;overflow:hidden;pointer-events:none;background:#fff"><div style="width:960px;zoom:.46;transform-origin:top left">${body}</div></div><div style="padding:14px;background:#f5f5f1;color:#242b20;font-family:system-ui,sans-serif"><strong style="font:600 15px/1.4 system-ui">${esc(d.title)}</strong><p style="font-size:12px">OpenDesign · 稿件 ${esc(d.id.slice(0, 8))} · ${esc((c.revision || "未保存").slice(0, 8))}</p><button style="border:0;border-radius:8px;background:#252c21;color:white;padding:9px 14px;font:500 12px system-ui" data-ghost-action="open">${locale === "zh-CN" ? "打开稿件" : "Open design"}</button> <button style="border:1px solid #d2d7ca;border-radius:8px;background:transparent;color:#252c21;padding:9px 14px;font:500 12px system-ui" data-ghost-action="canvas">${locale === "zh-CN" ? "选区与画板" : "Annotate / canvas"}</button>${note ? "<p>" + esc(note) + "</p>" : ""}</div></div>`;
+    return `<div style="border:1px solid #d9ddd3;border-radius:14px;overflow:hidden"><div style="height:220px;overflow:hidden;pointer-events:none;background:#fff"><div style="width:960px;zoom:.46;transform-origin:top left">${body}</div></div><div style="padding:14px;background:#f5f5f1;color:#242b20;font-family:system-ui,sans-serif"><strong style="font:600 15px/1.4 system-ui">${esc(d.title)}</strong><p style="font-size:12px">OpenDesign · ${text("稿件", "Draft")} ${esc(d.id.slice(0, 8))} · ${esc(c.revision ? c.revision.slice(0, 8) : text("未保存", "Unsaved"))}</p><button style="border:0;border-radius:8px;background:#252c21;color:white;padding:9px 14px;font:500 12px system-ui" data-ghost-action="open">${locale === "zh-CN" ? "打开稿件" : "Open design"}</button> <button style="border:1px solid #d2d7ca;border-radius:8px;background:transparent;color:#252c21;padding:9px 14px;font:500 12px system-ui" data-ghost-action="canvas">${locale === "zh-CN" ? "选区与画板" : "Annotate / canvas"}</button>${note ? "<p>" + esc(note) + "</p>" : ""}</div></div>`;
   }
   async function publish(msg, d, c) {
     requireReady(d);
@@ -115,7 +116,7 @@
       v: 2,
       state: "done",
       height: 330,
-      html: card(d, c, r.ok ? "" : r.message || "打开失败，请稍后点击重试"),
+      html: card(d, c, r.ok ? "" : r.message || text("打开失败，请稍后点击重试", "Could not open. Click to try again.")),
     });
     // Settle the host's spawned activity slot too; no Agent is launched.
     if (msg.spawnCallId)
@@ -127,7 +128,7 @@
         height: 120,
         html:
           "<p>" +
-          esc(r.ok ? "稿件已在所属会话的右侧打开。" : r.message || "打开失败") +
+          esc(r.ok ? text("稿件已在所属会话的右侧打开。", "The design is open in its owning session sidebar.") : r.message || text("打开失败", "Could not open")) +
           "</p>",
       });
   }
@@ -142,6 +143,7 @@
     )
       throw Error("Trusted local session required");
     if (ctx.workdir_is_read_only) throw Error("This session is read-only");
+    await hostLocale();
     let d = await read(stateKey(ctx.session_id));
     if (msg.tool !== "opendesign_new") requireReady(d);
     if (msg.tool === "opendesign_new") {
@@ -159,7 +161,7 @@
           sessionId: ctx.session_id,
           root: p.dir,
           file: "design.html",
-          title: String(a.title || "新设计").slice(0, 100),
+          title: String(a.title || text("新设计", "New design")).slice(0, 100),
           initialization: "pending",
         };
         // Reserve the same project across failures/restarts, without claiming

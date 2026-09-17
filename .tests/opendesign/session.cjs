@@ -15,11 +15,12 @@ const ctx = {
   workdir_is_local: true,
   workdir_is_read_only: false,
 };
-function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOverride) {
+function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOverride, locale = "en") {
   let handler;
   const calls = [],
     sent = [];
   const cindy = {
+    request: async () => ({context: {locale}}),
     onHostMessage: (h) => (handler = h),
     agent: { run: async (args) => { calls.push({ agent: args }); return reply; } },
     node: {
@@ -217,5 +218,25 @@ test("failed initialization retries the same project and recovers writes with lo
     await recovered.tool('opendesign_new', {html:'<h1>Duplicate</h1>'});
     assert.equal(recovered.sent.at(-1).ok, false);
     assert.equal(prepares, 1);
+  }
+});
+
+test("runtime cards use host locale and English fallback without translating user titles", async () => {
+  for (const locale of ['zh-CN','en','ja','ko']) {
+    const r = runtime(new Map(), undefined, undefined, locale);
+    await r.tool('opendesign_new', {html:'<h1>Content</h1>'});
+    assert.equal(r.sent.at(-1).ok,true);
+    assert.equal(r.sent.at(-1).result.title,locale==='zh-CN'?'新设计':'New design');
+    const card=r.sent.find(x=>x.type==='card-update').html;
+    assert.ok(card.includes(locale==='zh-CN'?'· 稿件 ':'· Draft '));
+    await r.run({type:'event',name:'card-action',callId:'call-one',spawnCallId:'opened',actionId:'open',sessionId:sid});
+    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'稿件已在所属会话':'owning session sidebar'));
+    const named=runtime(new Map(),undefined,undefined,locale);
+    await named.tool('opendesign_new',{html:'<h1>Content</h1>',title:'用户自定义标题'});
+    assert.equal(named.sent.at(-1).result.title,'用户自定义标题');
+    const noRevision=runtime(r.disk,undefined,async ({method})=>method==='bind'?{files:[]}:{html:'',cardHtml:'',revision:null},locale);
+    await noRevision.tool('opendesign_open');
+    assert.ok(noRevision.sent.find(x=>x.type==='card-update').html.includes(locale==='zh-CN'?'未保存':'Unsaved'));
+    if(locale!=='zh-CN') assert.doesNotMatch(card,/稿件|未保存|新设计/);
   }
 });
