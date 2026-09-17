@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.20
+# OpenDesign for Cindy — local trial 0.4.21
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -36,7 +36,7 @@ Browser regressions: install Playwright Chromium, then run `node --test .tests/o
 
 0.4.9: Both persisted annotation paths share the existing UUID utility. Where randomUUID is unavailable it uses getRandomValues to construct a v4 UUID; absent Web Crypto fails closed. Removed the upstream weak-random fallback. The free-pin bridge embeds the same self-contained implementation in its sandbox realm. Real-device acceptance was subsequently confirmed by the user; WebRTC remains a host limitation.
 
-0.4.20: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. Device acceptance is confirmed. WebRTC isolation remains outside this plugin change by the user’s scope decision; the risk is not claimed fixed.
+0.4.21: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. Device acceptance is confirmed. WebRTC isolation remains outside this plugin change by the user’s scope decision; the risk is not claimed fixed.
 
 Download confirmations also accept explicitly marked version and presentation previews and appear inside the presentation/fullscreen container. URL-load/powered mode is disabled by this adapter; noninteractive thumbnails cannot request saves.
 
@@ -55,3 +55,5 @@ Snapshot and export bridge request IDs use the shared cryptographic UUID helper;
 CodeQL cleanup: cryptographic analytics IDs, non-concatenating markup masking, whitespace-tolerant script closing tags, and backslash-safe Markdown table code spans. Inert source editing and Blob image rendering retain their behavior.
 
 Manual saves and Agent updates share a 1 MiB decoded HTML byte limit; oversized saves fail before writing, preserving the previous draft. Asset files retain their existing limit.
+
+Comment and Inspect picking now require a one-use parent-owned pointer gesture. Artifact messages cannot clear or retarget an unsaved comment. Target broadcasts inspect at most 1,000 nodes and return at most 500 visible candidates; the parent rejects oversized arrays. Direct picking remains available beyond the broadcast budget.

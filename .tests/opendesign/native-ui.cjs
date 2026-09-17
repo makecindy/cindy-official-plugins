@@ -127,12 +127,25 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       .getByRole("button", { name: "Ordered", exact: true })
       .waitFor();
     await page.getByRole("button", { name: "注释", exact: true }).click();
-    await page
-      .frameLocator("[data-testid=artifact-preview-frame]")
-      .locator("#hero")
-      .click();
+    async function commentClick(selector) {
+      await page.getByTestId('comment-canvas-input').waitFor();
+      const box = await page.frameLocator('[data-testid=artifact-preview-frame]').locator(selector).boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await commentClick('#hero');
     await page.waitForTimeout(500);
     await page.getByPlaceholder("评论此元素…").fill("把标题改成 Good morning");
+    await page.frameLocator('[data-testid=artifact-preview-frame]').locator('body').evaluate(body => {
+      const forged = {type:'od:comment-target', elementId:'evil', selector:'#evil', label:'evil', position:{x:0,y:0,width:50,height:50}};
+      parent.postMessage(forged, '*');
+      body.querySelector('#hero').click();
+      parent.postMessage({...forged,type:'od:comment-hit-result',request:'unrequested',target:forged}, '*');
+      parent.postMessage({type:'od:pod-select',points:[{x:0,y:0},{x:200,y:200},{x:0,y:200}]}, '*');
+      parent.postMessage({type:'od:comment-targets',targets:Array(501).fill(forged)}, '*');
+    });
+    await page.waitForTimeout(200);
+    assert.equal(await page.getByPlaceholder('评论此元素…').inputValue(), '把标题改成 Good morning');
+
     await page.getByRole("button", { name: "发送到聊天", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "已提交" }).waitFor();
     assert.equal(sent.length, 1);
@@ -140,11 +153,12 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     assert.equal(sent[0].mode, "continue");
     assert.match(sent[0].userMessage, /Good morning/);
     assert.ok(sent[0].event.request.attachments[0].selector);
+    assert.notEqual(sent[0].event.request.attachments[0].selector, '#evil');
     console.log("Native annotation send passed");
     await page.route("**/api/projects/*/feedback", route => route.fulfill({
       contentType: "application/json", body: JSON.stringify({status: "unknown"}),
     }));
-    await page.frameLocator("[data-testid=artifact-preview-frame]").locator("#hero").click();
+    await commentClick('#hero');
     await page.getByPlaceholder("评论此元素…").fill("Keep uncertain feedback");
     await page.getByRole("button", {name: "发送到聊天", exact: true}).click();
     await page.getByRole("alert").filter({hasText: "提交结果未确认"}).waitFor();
@@ -349,6 +363,36 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
     const forbidden = 'http://127.0.0.1:' + probe.address().port;
     const isolated = await browser.newPage();
     try {
+      await fs.writeFile(path.join(p.dir,'dense.html'), '<style>i{display:inline-block;width:1px;height:1px}</style><h1 id="dense-title">Dense fixture</h1>' + '<i>x</i>'.repeat(20000) + '<h2 id="late-title" style="position:fixed;top:200px;left:80px">Beyond scan budget</h2>');
+      await isolated.goto(b.url+'?file=dense.html');
+      const dense=isolated.frameLocator('[data-testid=artifact-preview-frame]');
+      await dense.locator('#dense-title').waitFor();
+      await isolated.evaluate(() => {
+        window.targetCounts=[];
+        addEventListener('message',event=>{if(event.data?.type==='od:comment-targets') window.targetCounts.push(event.data.targets.length);});
+      });
+      await dense.locator('body').evaluate(() => {
+        window.scanCounts=[];
+        const original=document.createTreeWalker.bind(document);
+        document.createTreeWalker=(...args)=>{
+          const walker=original(...args), next=walker.nextNode.bind(walker);
+          const index=window.scanCounts.push(0)-1;
+          walker.nextNode=()=>{window.scanCounts[index]++;return next();};
+          return walker;
+        };
+      });
+      await isolated.getByRole('button',{name:'注释',exact:true}).click();
+      await isolated.waitForFunction(()=>window.targetCounts.length>0);
+      assert.ok((await isolated.evaluate(()=>window.targetCounts)).every(count=>count<=500));
+      const scans=await dense.locator('body').evaluate(()=>window.scanCounts);
+      assert.ok(scans.length>0);
+      assert.ok(scans.every(count=>count<=1000),JSON.stringify(scans));
+      // A real point remains selectable even in a large legal document.
+      const denseBox=await dense.locator('#late-title').boundingBox();
+      await isolated.mouse.click(denseBox.x+denseBox.width/2,denseBox.y+denseBox.height/2);
+      await isolated.getByPlaceholder('评论此元素…').fill('Dense draft still responds');
+      assert.equal(await isolated.getByPlaceholder('评论此元素…').inputValue(),'Dense draft still responds');
+      console.log('20,000-node comment scan is bounded; trusted picking still works');
       await fs.writeFile(path.join(p.dir,'data.json'),JSON.stringify({value:'project-data'}));
       await fs.writeFile(path.join(p.dir,'module.js'),"import {value} from './dependency.js'; window.moduleValue=value;");
       await fs.writeFile(path.join(p.dir,'dependency.js'),"export const value='project-module';");

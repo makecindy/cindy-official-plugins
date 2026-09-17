@@ -134,6 +134,27 @@
       ],
       "format": "esm"
     },
+    "CommentCanvasInput.tsx": {
+      "bytes": 4665,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "../latest/apps/web/src/utils/uuid.ts",
+          "kind": "import-statement",
+          "original": "../latest/apps/web/src/utils/uuid"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
     "ManualInlineTextEditor.tsx": {
       "bytes": 3018,
       "imports": [
@@ -4497,7 +4518,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/srcdoc.ts": {
-      "bytes": 191576,
+      "bytes": 192324,
       "imports": [
         {
           "path": "DownloadBridge.ts",
@@ -12000,7 +12021,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/components/FileViewer.tsx": {
-      "bytes": 847531,
+      "bytes": 848673,
       "imports": [
         {
           "path": "../latest/apps/web/src/utils/uuid.ts",
@@ -12011,6 +12032,11 @@
           "path": "ManualCanvasInput.tsx",
           "kind": "import-statement",
           "original": "../../../../../build/ManualCanvasInput"
+        },
+        {
+          "path": "CommentCanvasInput.tsx",
+          "kind": "import-statement",
+          "original": "../../../../../build/CommentCanvasInput"
         },
         {
           "path": "ManualInlineTextEditor.tsx",
@@ -14900,19 +14926,19 @@
           "bytesInOutput": 277
         },
         "node_modules/@babel/runtime/helpers/esm/toPropertyKey.js": {
-          "bytesInOutput": 93
+          "bytesInOutput": 94
         },
         "node_modules/@babel/runtime/helpers/esm/defineProperty.js": {
-          "bytesInOutput": 149
+          "bytesInOutput": 151
         },
         "node_modules/core-js/internals/array-reduce.js": {
-          "bytesInOutput": 446
+          "bytesInOutput": 458
         },
         "node_modules/core-js/internals/array-method-is-strict.js": {
           "bytesInOutput": 156
         },
         "node_modules/core-js/modules/es.array.reduce.js": {
-          "bytesInOutput": 266
+          "bytesInOutput": 267
         },
         "node_modules/core-js/modules/es.string.ends-with.js": {
           "bytesInOutput": 491
@@ -14963,7 +14989,7 @@
           "bytesInOutput": 4627
         },
         "node_modules/canvg/lib/index.es.js": {
-          "bytesInOutput": 82997
+          "bytesInOutput": 82998
         },
         "node_modules/jspdf/dist/jspdf.es.min.js": {
           "bytesInOutput": 341657
@@ -15571,11 +15597,14 @@
         "ManualCanvasInput.tsx": {
           "bytesInOutput": 2498
         },
+        "CommentCanvasInput.tsx": {
+          "bytesInOutput": 2574
+        },
         "ManualInlineTextEditor.tsx": {
           "bytesInOutput": 1577
         },
         "../latest/apps/web/src/components/FileViewer.tsx": {
-          "bytesInOutput": 264939
+          "bytesInOutput": 265333
         },
         "../latest/apps/web/src/components/chat/AnchoredMenuShell.tsx": {
           "bytesInOutput": 2044
@@ -16169,7 +16198,7 @@
           "bytesInOutput": 789
         },
         "../latest/apps/web/src/runtime/srcdoc.ts": {
-          "bytesInOutput": 149907
+          "bytesInOutput": 150655
         },
         "../latest/apps/web/src/edit-mode/bridge.ts": {
           "bytesInOutput": 50862
@@ -16319,7 +16348,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312038
+      "bytes": 17315771
     },
     "../../assets/studio.css": {
       "imports": [

@@ -2145,15 +2145,19 @@ function meaningfulDomFallbackTarget(el) {
     return payload;
   }
   function allTargets(){
-    var annotatedNodes = document.querySelectorAll('[data-od-id], [data-screen-label]');
     var includeDomFallback = canUseDomFallback();
-    var nodes = includeDomFallback
-      ? document.querySelectorAll('body *')
-      : annotatedNodes;
     var items = [];
     var seen = Object.create(null);
-    for (var i = 0; i < nodes.length; i++) {
-      var item = targetFrom(nodes[i], includeDomFallback);
+    if (!document.body) return items;
+    // Bound both traversal and expensive layout/style reads. Direct hit tests
+    // still reach elements beyond this advisory broadcast window.
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    var scanned = 0, node;
+    while (scanned++ < 1000 && items.length < 500 && (node = walker.nextNode())) {
+      if (!includeDomFallback && !node.hasAttribute('data-od-id') && !node.hasAttribute('data-screen-label')) continue;
+      var rect = node.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.right < 0 || rect.top > innerHeight || rect.left > innerWidth || !rect.width || !rect.height) continue;
+      var item = targetFrom(node, includeDomFallback);
       if (item && !seen[item.elementId]) {
         seen[item.elementId] = true;
         items.push(item);
@@ -2657,6 +2661,12 @@ function meaningfulDomFallbackTarget(el) {
       });
       return;
     }
+    if (data.type === 'od:comment-hit-test') {
+      if (ev.source !== window.parent || !pickerActive() || typeof data.request !== 'string' || !Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+      var target = commentHit({target: document.elementFromPoint(data.x, data.y), clientX: data.x, clientY: data.y}, !!data.hover);
+      window.parent.postMessage({type: 'od:comment-hit-result', request: data.request, target: target || null}, '*');
+      return;
+    }
     if (data.type === 'od:preview-scroll-capture') {
       postPreviewScroll(data.requestId);
       return;
@@ -2780,19 +2790,18 @@ function meaningfulDomFallbackTarget(el) {
     hoveredId = null;
     window.parent.postMessage({ type: 'od:comment-leave' }, '*');
   }, true);
-  document.addEventListener('click', function(ev){
-    if (!pickerActive()) return;
+  function commentHit(ev, hover){
     var result = closestTarget(ev);
     if (result) {
-      ev.preventDefault();
-      ev.stopPropagation();
       var commentPickerClick = commentEnabled && mode === 'picker' && !inspectEnabled;
       var clickPoint = commentPickerClick ? { x: ev.clientX, y: ev.clientY } : null;
       var payload = targetFrom(result.target, commentPickerClick, result.clicked, clickPoint);
       if (payload) {
-        activeCommentElementId = payload.elementId || activeCommentElementId;
-        activeCommentSelector = payload.selector || activeCommentSelector;
-        window.parent.postMessage(payload, '*');
+        if (!hover) {
+          activeCommentElementId = payload.elementId || activeCommentElementId;
+          activeCommentSelector = payload.selector || activeCommentSelector;
+        }
+        return payload;
       }
       return;
     }
@@ -2800,7 +2809,7 @@ function meaningfulDomFallbackTarget(el) {
     // at a click location even when the artifact has no data-od-id
     // annotations. Skipped for pod mode (drawing) and inspect mode
     // (needs a real selector for live overrides).
-    if (!canUseDomFallback() || mode === 'pod') return;
+    if (hover || !canUseDomFallback() || mode === 'pod') return;
     // Skip clicks on interactive elements so links / buttons / inputs
     // keep their native behavior; pin only on inert surfaces.
     var t = ev.target;
@@ -2811,8 +2820,6 @@ function meaningfulDomFallbackTarget(el) {
       if (walk.isContentEditable) return;
       walk = walk.parentElement;
     }
-    ev.preventDefault();
-    ev.stopPropagation();
     // Store viewport coordinates to match regular getBoundingClientRect()
     // element targets; the host overlay renders this position directly.
     var pinX = Math.round(ev.clientX);
@@ -2834,8 +2841,8 @@ function meaningfulDomFallbackTarget(el) {
     };
     pinPayload.elementId = pinId;
     if (typeof pinSlideIndex === 'number') pinPayload.slideIndex = pinSlideIndex;
-    window.parent.postMessage(pinPayload, '*');
-  }, true);
+    return pinPayload;
+  }
   // Pod drawing — only active in comment mode with the 'pod' tool.
   document.addEventListener('pointerdown', function(ev){
     if (!commentEnabled || mode !== 'pod' || ev.button !== 0) return;

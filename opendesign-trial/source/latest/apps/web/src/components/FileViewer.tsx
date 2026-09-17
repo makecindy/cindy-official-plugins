@@ -1,5 +1,6 @@
 import { randomUUID } from '../utils/uuid';
 import { ManualCanvasInput } from '../../../../../build/ManualCanvasInput';
+import { CommentCanvasInput, COMMENT_TARGET_LIMIT, isAuthorizedCommentEvent } from '../../../../../build/CommentCanvasInput';
 import { ManualInlineTextEditor, type InlineTextHandle } from '../../../../../build/ManualInlineTextEditor';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { ArtifactExportFormat } from '../runtime/chat/artifact-export';
@@ -12197,7 +12198,7 @@ function HtmlViewer({
             targets?: Array<Partial<PreviewCommentSnapshot>>;
           }
         | null;
-      if (data?.type !== 'od:comment-targets' || !Array.isArray(data.targets)) return;
+      if (data?.type !== 'od:comment-targets' || !Array.isArray(data.targets) || data.targets.length > COMMENT_TARGET_LIMIT) return;
       const next = new Map<string, PreviewCommentSnapshot>();
       data.targets.forEach((item) => {
         const elementId = String(item?.elementId || '');
@@ -12345,8 +12346,10 @@ function HtmlViewer({
       }) | null;
       if (!data?.type) return;
       if (data.type === 'od:comment-targets' && Array.isArray(data.targets)) {
+        if (data.targets.length > COMMENT_TARGET_LIMIT) return;
         const next = new Map<string, PreviewCommentSnapshot>();
         data.targets.forEach((item) => {
+          if (!item || typeof item !== 'object') return;
           const snapshot = snapshotFromData(item);
           if (!snapshot.elementId || !isValidCommentOverlayPosition(snapshot.position)) return;
           next.set(snapshot.elementId, snapshot);
@@ -12358,8 +12361,8 @@ function HtmlViewer({
           if (!current) return null;
           if (current.selectionKind === 'pod') return current;
           const updated = next.get(current.elementId);
-          if (!updated || !isValidCommentOverlayPosition(updated.position)) return null;
-          return commentSnapshotEqual(current, updated) ? current : updated;
+          if (!updated || !isValidCommentOverlayPosition(updated.position)) return current;
+          return commentSnapshotEqual(current, updated) ? current : {...current, position: updated.position};
         });
         setHoveredCommentTarget((current) => {
           if (!current) return null;
@@ -12383,7 +12386,7 @@ function HtmlViewer({
         });
         setActiveCommentTarget((current) =>
           current && current.elementId === snapshot.elementId && !commentSnapshotEqual(current, snapshot)
-            ? snapshot
+            ? {...current, position: snapshot.position}
             : current,
         );
         setHoveredCommentTarget((current) =>
@@ -12394,6 +12397,7 @@ function HtmlViewer({
         return;
       }
       if (data.type === 'od:comment-leave') {
+        if (!isAuthorizedCommentEvent(ev)) return;
         // Already firmly on the card — nothing to dismiss.
         if (hoverCardPinnedRef.current) return;
         // The pointer left the element. It may be sliding onto the floating card
@@ -12405,6 +12409,7 @@ function HtmlViewer({
         return;
       }
       if (data.type === 'od:comment-hover') {
+        if (!isAuthorizedCommentEvent(ev)) return;
         const snapshot = snapshotFromData(data);
         if (!snapshot.elementId || !isValidCommentOverlayPosition(snapshot.position)) return;
         // Pointer landed on an element — cancel any deferred dismiss so moving
@@ -12425,6 +12430,7 @@ function HtmlViewer({
         return;
       }
       if (data.type === 'od:comment-target') {
+        if (!isAuthorizedCommentEvent(ev)) return;
         const snapshot = snapshotFromData(data);
         if (!snapshot.elementId || !isValidCommentOverlayPosition(snapshot.position)) return;
         const shouldOpenComposer = boardMode || commentCreateMode;
@@ -12445,10 +12451,13 @@ function HtmlViewer({
         return;
       }
       if (data.type === 'od:pod-clear') {
+        if (!isAuthorizedCommentEvent(ev)) return;
         setStrokePoints([]);
         return;
       }
       if (data.type === 'od:pod-stroke' && Array.isArray(data.points)) {
+        if (!isAuthorizedCommentEvent(ev)) return;
+        if (data.points.length > 513) return;
         setStrokePoints(
           data.points.map((point) => ({
             x: clampBridgeCoordinate(point.x),
@@ -12458,6 +12467,8 @@ function HtmlViewer({
         return;
       }
       if (data.type === 'od:pod-select' && Array.isArray(data.points)) {
+        if (!isAuthorizedCommentEvent(ev)) return;
+        if (data.points.length > 513) return;
         const points = data.points.map((point) => ({
           x: clampBridgeCoordinate(point.x),
           y: clampBridgeCoordinate(point.y),
@@ -13341,7 +13352,7 @@ function HtmlViewer({
             clickedDescendant?: Partial<InspectClickedDescendant>;
           }
         | null;
-      if (!data || data.type !== 'od:comment-target') return;
+      if (!data || data.type !== 'od:comment-target' || !isAuthorizedCommentEvent(ev)) return;
       if (!data.elementId || !data.selector) return;
       const clickedDescendant =
         data.clickedDescendant && typeof data.clickedDescendant === 'object'
@@ -17249,6 +17260,11 @@ function HtmlViewer({
                     toolbarHost={manualEditMode ? null : commentComposerHost}
                   >
                     <div className="artifact-preview-transport-stack">
+                      {workspaceActive && !manualEditMode && !drawOverlayOpen && (boardMode || inspectMode) && <CommentCanvasInput
+                        frame={() => iframeRef.current}
+                        source={source}
+                        mode={inspectMode ? 'inspect' : boardTool === 'pod' ? 'pod' : 'picker'}
+                      />}
                       {manualEditMode && !inlineCandidate && <ManualCanvasInput
                         frame={() => iframeRef.current}
                         source={source}
