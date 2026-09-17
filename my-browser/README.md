@@ -140,3 +140,5 @@ Status tool output explicitly selects connection and installation fields; local 
 Read failures after starting navigation report `execution: unknown`: the website may already have received the visit. A lost acknowledged read also reports unknown; jobs that expire before acknowledgement remain not executed.
 
 0.3.37 applies the extraction character budget at the Node result exit after URL redaction, shared across all fields and records. Over-budget URLs are omitted whole; ordinary text uses the remaining budget. Truncation is reported. HTTP regression tests cover single/multiple records, default/custom budgets and caller-defined field names.
+
+0.3.38 invalidates affected acknowledged jobs on revocation (unknown outcome), including their authorized redirect destination, and rechecks authorization from the injected document before returning its target. A DOM action already past that final check may still finish; revocation cannot roll back an executed action.

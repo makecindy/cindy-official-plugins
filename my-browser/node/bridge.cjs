@@ -141,6 +141,7 @@ function createBridge(options = {}) {
       const gate = P.check(policy,job.action,req.url === '/authorize' ? b.url : job.payload.url);
       if (!gate.ok) { const result = jobFailure(job,gate.error,gate.message); finish(job,result); return send(res,result,403); }
       if (req.url === '/ack') job.state = 'acknowledged';
+      else job.authorizedUrl = b.url;
       return send(res,{ok:true,policy});
     }
     let result = b.result;
@@ -166,7 +167,10 @@ function createBridge(options = {}) {
   async function request(method,params = {}) {
     if (method === 'setPolicy') {
       policy = P.normalizePolicy(params.policy);
-      for (const job of [...jobs.values()]) if (job.state !== 'acknowledged') { const gate = P.check(policy,job.action,job.payload.url); if (!gate.ok) finish(job,gate); }
+      for (const job of [...jobs.values()]) {
+        const gate = P.check(policy,job.action,job.authorizedUrl || job.payload.url);
+        if (!gate.ok) finish(job,jobFailure(job,gate.error,gate.message));
+      }
       return {ok:true,policy};
     }
     if (method === 'setTrustedClients') {

@@ -1,3 +1,4 @@
+import './my-browser-dispatch.test.mjs';
 import './my-browser-network.test.mjs';
 import './my-browser-discovery.test.mjs';
 import test from 'node:test';
@@ -216,7 +217,7 @@ test('acknowledged reads with lost results or revoked authorization are unknown'
     await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
     if(revoke) {
       await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
-      assert.equal((await http('/authorize',{id:job.id,url:'https://example.test'})).data.execution,'unknown');
+      assert.equal((await http('/authorize',{id:job.id,url:'https://example.test'})).status,409);
     }
     assert.equal((await pending).execution,'unknown');
     assert.equal((await http('/poll')).data.job,null);
@@ -252,4 +253,16 @@ test('extract final budget covers redaction growth across single and multiple re
   assert.equal(result.record.text.length,252);
   assert.equal(result.record.missing,null);
   assert.equal(result.truncated,true);
+});
+
+ test('revocation invalidates an authorized job without falsely claiming no execution',async t=>{
+  const {b,http}=await fixture(t);
+  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).data.ok,true);
+  await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['redirect.test']}}});
+  assert.equal((await pending).execution,'unknown');
+  assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).status,409);
+  assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
+  assert.equal((await b.request('status')).pending,0);
 });

@@ -473,7 +473,7 @@ async function handle(job,policy,target) {
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
     if (job.action === 'navigate') return {ok:true,url:actual.url};
     injecting = true;
-    targets.set(job.id,actual.url);
+    targets.set(job.id,{url:actual.url,target,tabId:tab.id,documentId});
     let out;
     try {
       out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job]});
@@ -521,7 +521,15 @@ chrome.runtime.onInstalled.addListener(chain);
 // In-flight page targets, keyed by job id. Only the worker can read them, and only while injecting.
 const targets = new Map();
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {
-  if (msg?.type === 'my-browser-target') { sendResponse(targets.get(msg.id) ?? null); return; }
+  if (msg?.type === 'my-browser-target') {
+    const entry = targets.get(msg.id);
+    if (!entry || _sender.tab?.id !== entry.tabId || _sender.documentId !== entry.documentId) { sendResponse(null); return; }
+    // Recheck after injection has reached the document, not only before executeScript.
+    fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.url.slice(0,PAGE_URL_MAX)})
+      .then(r => sendResponse(r.ok && targets.get(msg.id) === entry ? entry.url : null))
+      .catch(() => sendResponse(null));
+    return true;
+  }
   if (msg.type !== 'connection-status') return;
   discover().then(() => sessionStore.get('connection')).then(sendResponse).catch(() => sendResponse({connection:{connected:false}}));
   return true;
