@@ -1,0 +1,258 @@
+--- a/baguette/carplay/carplay-frame.js
++++ b/baguette/carplay/carplay-frame.js
+@@ -55,7 +55,7 @@
+       screenArea.className = 'carplay-frame__screen';
+       screenArea.tabIndex = 0;
+       screenArea.style.cssText =
+-        'position:absolute;overflow:hidden;cursor:crosshair;z-index:2;outline:none;';
++        'position:absolute;overflow:hidden;cursor:default;z-index:2;outline:none;';
+       const sp = def.screenRectPct();
+       screenArea.style.left = sp.left + '%';
+       screenArea.style.top = sp.top + '%';
+--- a/baguette/parts/bezel.js
++++ b/baguette/parts/bezel.js
+@@ -46,7 +46,7 @@
+ 
+       const screenArea = document.createElement('div');
+       screenArea.style.cssText =
+-        'position:absolute;overflow:hidden;cursor:crosshair;z-index:2;';
++        'position:absolute;overflow:hidden;cursor:default;z-index:2;';
+       screenArea.tabIndex = 0;
+       screenArea.style.outline = 'none';
+ 
+--- a/baguette/parts/keyboard.js
++++ b/baguette/parts/keyboard.js
+@@ -58,6 +58,10 @@
+     constructor(_def, transport) {
+       this.transport = transport;
+       this._el = null;
++      this._inputQueue = [];
++      this._onBlur = () => { this._inputQueue.length = 0; };
++      this._onVisibility = () => { if (document.hidden) this._onBlur(); };
++      this._onRelease = ev => { if (ev.origin === location.origin && ev.data?.type === 'cindy-release-input') this._onBlur(); };
+       this._onKeyDown = (ev) => this._handle(ev);
+       this._onPaste = (ev) => this._handlePaste(ev);
+     }
+@@ -71,17 +75,24 @@
+       if (el.tabIndex < 0) el.tabIndex = 0;
+       el.addEventListener('mousedown', () => el.focus());
+       el.addEventListener('keydown', this._onKeyDown);
++      el.addEventListener('blur', this._onBlur);
+       // Document-level: Chrome/Firefox target the focused element,
+       // Safari may target <body> when focus is a non-editable div —
+       // document catches both. The focus gate in the handler keeps
+       // sidebar pastes with the browser.
+       document.addEventListener('paste', this._onPaste);
++      document.addEventListener('visibilitychange', this._onVisibility);
++      window.addEventListener('message', this._onRelease);
+     }
+ 
+     detach() {
+       if (!this._el) return;
+       this._el.removeEventListener('keydown', this._onKeyDown);
++      this._el.removeEventListener('blur', this._onBlur);
++      this._inputQueue.length = 0;
+       document.removeEventListener('paste', this._onPaste);
++      document.removeEventListener('visibilitychange', this._onVisibility);
++      window.removeEventListener('message', this._onRelease);
+       this._el = null;
+     }
+ 
+@@ -90,20 +101,18 @@
+     /** Send a single key press. modifiers: array of
+      *  `"shift" | "control" | "option" | "command"`. */
+     key(code, modifiers) {
+-      const env = { type: 'key', code };
+-      if (modifiers && modifiers.length) env.modifiers = modifiers;
+-      this.transport._dispatch(env);
++      this._clipboard('key', undefined, code, modifiers);
+     }
+ 
+     /** Send a string as a sequence of HID keystrokes (server-side). */
+     type(text) {
+-      this.transport._dispatch({ type: 'type', text });
++      this.paste(text);
+     }
+ 
+     /** Paste text via the sim's pasteboard (server: pbcopy + Cmd+V).
+      *  Any unicode — the path around `type`'s US-ASCII limit. */
+     paste(text) {
+-      this.transport._dispatch({ type: 'paste', text });
++      this._clipboard('paste', text);
+     }
+ 
+     /** Copy the focused field's selection out of the sim onto the
+@@ -111,7 +120,36 @@
+      *  <udid> host — images included). Mirror of `paste`; the server
+      *  replies with a `copy_result` frame. */
+     copy() {
+-      this.transport._dispatch({ type: 'copy' });
++      this._clipboard('copy');
++    }
++
++    async _clipboard(action, text, code, modifiers) {
++      if (this._inputPending) {
++        const request = [action,text,code,modifiers];
++        const last = this._inputQueue.length ? this._inputQueue[this._inputQueue.length-1] : this._activeInput;
++        if (action === 'paste' && last?.[0] === 'paste' && last[1] === text) return;
++        if (this._inputQueue.length < 32) this._inputQueue.push(request);
++        else window.alert('Input queue is full. Wait for pending input to finish, then retry.');
++        return;
++      }
++      this._inputPending = true;
++      this._activeInput = [action,text,code,modifiers];
++      const capability = new URLSearchParams(location.hash.slice(1)).get('cindyClipboard');
++      const match = /^(\d{1,5})\.([a-f0-9]{64})$/.exec(capability || '');
++      const udid = /^\/simulators\/([a-f0-9-]{36})\/?$/i.exec(location.pathname)?.[1];
++      try {
++        if (!match || !udid) throw Error('Reopen the simulator with open_viewer.');
++        const response = await fetch('/clipboard', {
++          method: 'POST', headers: {'Content-Type':'application/json','X-Cindy-Clipboard':match[2]},
++          body: JSON.stringify({action, text, code, modifiers, udid}), signal: AbortSignal.timeout(65000)
++        });
++        const result = await response.json();
++        if (!response.ok || !result.ok) throw Error(result.error || 'Clipboard failed');
++      } catch (error) {
++        // Visible feedback; never print potentially sensitive clipboard contents.
++        this._inputQueue.length = 0;
++        window.alert('Input failed: ' + error.message);
++      } finally { this._inputPending = false; this._activeInput = null; const next = this._inputQueue.shift(); if (next) this._clipboard(...next); }
+     }
+ 
+     // --- internals ---
+@@ -120,6 +158,7 @@
+       // Focus gate — only forward when the screen owns focus.
+       if (document.activeElement !== this._el) return;
+       if (!FORWARDED.has(ev.code)) return;
++      if (ev.repeat) { ev.preventDefault(); return; }
+       // Paste carve-out: don't preventDefault the paste chord, or
+       // the browser never fires the `paste` event _handlePaste needs.
+       if ((ev.metaKey || ev.ctrlKey) && ev.code === 'KeyV') return;
+--- a/farm/farm.html
++++ b/farm/farm.html
+@@ -4,9 +4,6 @@
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>Baguette · Device Farm</title>
+-<link rel="preconnect" href="https://fonts.googleapis.com">
+-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
+ <link rel="stylesheet" href="/farm/farm.css">
+ </head>
+ <body>
+--- a/sim-3d.js
++++ b/sim-3d.js
+@@ -953,7 +953,7 @@
+     return escapeHTML(value).replace(/"/g, '&quot;');
+   }
+   function cssEscape(value) {
+-    return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
++    return window.CSS && CSS.escape ? CSS.escape(value) : Array.from(String(value), (char) => '\\' + char.codePointAt(0).toString(16) + ' ').join('');
+   }
+ 
+   window.Sim3DPanel = Sim3DPanel;
+--- a/sim-location.js
++++ b/sim-location.js
+@@ -46,11 +46,11 @@
+   // Apple Park — a friendly default centre when the device has no pin yet.
+   const DEFAULT_CENTER = [37.3349, -122.0090];
+   const DEFAULT_ZOOM = 13;
+-  const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
++  const TILE_URL = '/map/tiles/{z}/{x}/{y}.png';
+   const TILE_ATTR = '&copy; OpenStreetMap contributors';
+   // OSM geocoder — free, no API key, CORS-enabled. Low-volume dev use
+   // only; respect Nominatim's usage policy (1 req/sec).
+-  const GEOCODE_URL = 'https://nominatim.openstreetmap.org/search';
++  const GEOCODE_URL = '/map/search';
+   const FOUND_ZOOM = 14;
+   const WALK_ZOOM = 17;
+ 
+--- a/sim-native.html
++++ b/sim-native.html
+@@ -1586,7 +1586,7 @@
+     cursor: grabbing;
+   }
+   #simNativeView .r3d-live-stage[data-mode="interact"] .r3d-live-canvas {
+-    cursor: crosshair;
++    cursor: default;
+   }
+   #simNativeView .r3d-stage-tools {
+     position: absolute; left: 14px; bottom: 14px; z-index: 3;
+--- a/sim-native.js
++++ b/sim-native.js
+@@ -1602,8 +1602,9 @@
+     if (member.role === 'readout') {
+       const row = document.createElement('div');
+       row.className = 'tb-read';
+-      row.innerHTML = clusterSvg('gauge') + '<span>' + label + '</span>' +
++      row.innerHTML = clusterSvg('gauge') + '<span class="tb-label"></span>' +
+           '<span class="tb-val"></span>';
++      row.querySelector('.tb-label').textContent = label;
+       row.querySelector('.tb-val').textContent = source.textContent || '—';
+       return row;
+     }
+@@ -1611,7 +1612,8 @@
+     if (member.role === 'choice') {
+       const row = document.createElement('div');
+       row.className = 'tb-choice';
+-      row.innerHTML = clusterSvg('codec') + '<span>' + label + '</span>';
++      row.innerHTML = clusterSvg('codec') + '<span class="tb-label"></span>';
++      row.querySelector('.tb-label').textContent = label;
+       // The real picker is moved in, not copied: it keeps its handlers,
+       // its `.active` pill, and its identity as the one control the
+       // rest of the page already talks to.
+@@ -1624,8 +1626,9 @@
+     row.className = 'tb-row' + (source.classList.contains('active') ? ' on' : '');
+     const glyph = source.querySelector('svg');
+     row.innerHTML = (glyph ? glyph.outerHTML : clusterSvg('more')) +
+-        '<span>' + label + '</span>' +
++        '<span class="tb-label"></span>' +
+         (member.role === 'state' ? '<span class="tb-dot"></span>' : '');
++    row.querySelector('.tb-label').textContent = label;
+     row.addEventListener('click', () => {
+       source.click();
+       closeFoldMenus();
+--- a/stream-session.js
++++ b/stream-session.js
+@@ -38,6 +38,7 @@
+       udid, format, version, canvas, url, display,
+       onSize, onFps, onLog, onText, onOpen, onClose, onError, onPaint,
+     } = this.opts;
++    this.stopping = false;
+     const ctx = canvas.getContext('2d');
+     const log = onLog || (() => {});
+ 
+@@ -84,6 +85,7 @@
+         try { env = JSON.parse(e.data); } catch { /* not JSON; let decoder log */ }
+         if (env && onText(env) === true) return;
+       }
++      this.reconnectAttempts = 0;
+       this.decoder.feed(e);
+     };
+     socket.onclose   = () => {
+@@ -91,6 +93,15 @@
+       this.alive = false;
+       this.ws = null;
+       if (onClose) onClose();
++      if (!this.stopping) {
++        const attempts = (this.reconnectAttempts || 0) + 1;
++        this.stop();
++        this.reconnectAttempts = attempts;
++        if (attempts <= 8) {
++          log('Reconnecting simulator stream…');
++          this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.start(); }, 1500);
++        } else { log('Stream disconnected. Reopen the viewer to retry.', true); }
++      }
+     };
+     socket.onerror   = () => {
+       log('WS error', true);
+@@ -125,6 +136,9 @@
+   };
+ 
+   StreamSession.prototype.stop = function () {
++    this.stopping = true;
++    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
++    if (this.ws) { this.ws.onclose = null; this.ws.onmessage = null; this.ws.onerror = null; }
+     this.alive = false;
+     if (this.fpsTimer) { clearInterval(this.fpsTimer); this.fpsTimer = null; }
+     if (this.rafId)    { cancelAnimationFrame(this.rafId); this.rafId = null; }
