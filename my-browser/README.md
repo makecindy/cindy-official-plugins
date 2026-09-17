@@ -144,3 +144,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.38 invalidates affected acknowledged jobs on revocation (unknown outcome), including their authorized redirect destination, and rechecks authorization from the injected document before returning its target. A DOM action already past that final check may still finish; revocation cannot roll back an executed action.
 
 0.3.39 checks both original and redirected URLs on revocation. Once the injected document has obtained its final dispatch permission, saving a revocation waits for completion and discards the result. A disconnected or timed-out dispatch returns an unconfirmed outcome; repeated saves cannot turn that uncertainty into success. Already executed effects cannot be rolled back.
+
+0.3.40 separates uncertain dispatch history from the 16 live-job slots. At most 128 compact records retain authorization metadata, not interaction payloads. Overflow keeps a conservative uncertainty flag. Applied permissions permit fresh authorized work even while an earlier action remains unconfirmed; saving permissions still reports uncertainty.

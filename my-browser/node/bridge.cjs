@@ -13,6 +13,7 @@ function createBridge(options = {}) {
   let policy = P.defaults(), pins = [];
   let server, starting, port = 0;
   const unconfirmedDispatches = new Map();
+  let unconfirmedOverflow = false;
   const jobs = new Map(), clients = new Map(), waiting = new Map();
   const session = crypto.randomUUID();
   const live = c => Date.now()-c.seen < 35000;
@@ -81,7 +82,15 @@ function createBridge(options = {}) {
   function finish(job,result, browserFinished = false) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
-    if (job.dispatchSettled && !browserFinished) unconfirmedDispatches.set(job.id,job);
+    if (job.dispatchSettled && !browserFinished) {
+      // History is not runnable work. Keep only bounded authorization metadata,
+      // never payload text, result promises or task timers.
+      if (unconfirmedDispatches.size >= 128) {
+        unconfirmedDispatches.delete(unconfirmedDispatches.keys().next().value);
+        unconfirmedOverflow = true; // Forgetting identity is not evidence of completion.
+      }
+      unconfirmedDispatches.set(job.id,{clientId:job.clientId,action:job.action,payload:{url:job.payload.url},authorizedUrl:job.authorizedUrl});
+    }
     job.settleDispatch?.(browserFinished);
     const safe = redactResult(result, job.payload.maxChars || 6000);
     job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
@@ -198,8 +207,8 @@ function createBridge(options = {}) {
       }
       const completed = await Promise.all(dispatches);
       const uncertain = [...unconfirmedDispatches.values()].some(job => !P.check(policy,job.action,job.payload.url).ok || (job.authorizedUrl && !P.check(policy,job.action,job.authorizedUrl).ok));
-      if (completed.some(finished => !finished) || uncertain) {
-        return failure('REVOCATION_UNCONFIRMED','Permissions are blocked, but an in-flight browser action did not confirm completion. Check the page before continuing.','unknown');
+      if (completed.some(finished => !finished) || uncertain || unconfirmedOverflow) {
+        return {...failure('REVOCATION_UNCONFIRMED','Permissions are applied, but an earlier browser action did not confirm completion. Check the page before continuing.','unknown'),applied:true};
       }
       return {ok:true,policy};
     }
@@ -219,7 +228,7 @@ function createBridge(options = {}) {
     const candidates = connected();
     const client = payload.browser ? candidates.find(c => c.id === payload.browser) : candidates.length === 1 ? candidates[0] : null;
     if (!client) return {...failure(candidates.length>1 && !payload.browser ? 'BROWSER_REQUIRED' : 'EXTENSION_DISCONNECTED',candidates.length>1 ? 'Choose a browser connection id; never guess the account/profile.' : 'Open My Browser settings to install, enable or reconnect the extension.'),clients:candidates.map(publicClient)};
-    if (jobs.size + unconfirmedDispatches.size >= 16) return failure('BRIDGE_BUSY','Wait for browser tasks to finish.');
+    if (jobs.size >= 16) return failure('BRIDGE_BUSY','Wait for browser tasks to finish.');
     return new Promise(resolve => {
       const job = {id:crypto.randomUUID(),action:params.action,payload,clientId:client.id,state:'queued',resolve,created:Date.now()};
       job.timer = setTimeout(() => finish(job,jobFailure(job,'BROWSER_TIMEOUT','Verify an unknown operation; it will not be replayed.')),options.jobTimeout || 45000);

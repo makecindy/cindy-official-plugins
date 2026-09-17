@@ -304,3 +304,23 @@ test('lost document dispatch cannot be reported as successful revocation',async 
   assert.equal((await pending).execution,'unknown');
   assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,409);
 });
+
+ test('expired dispatch history never consumes live capacity, including bounded-history overflow',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:1000});
+  for(let i=0;i<130;i++) {
+    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+    await sleep(1);const {job}=(await http('/poll')).data;
+    assert.ok(job,'new work must remain deliverable after '+i+' uncertain outcomes');
+    await http('/ack',{id:job.id});await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
+    await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}});
+    assert.equal((await pending).execution,'unknown');
+  }
+  const policy={...P.defaults(),read:{block:['example.test']}};
+  const applied=await b.request('setPolicy',{policy});
+  assert.equal(applied.applied,true);assert.equal(applied.error,'REVOCATION_UNCONFIRMED');
+  const pending=b.request('act',{action:'text',payload:{url:'https://other.test'}});
+  await sleep(1);const {job}=(await http('/poll')).data;assert.ok(job);
+  await http('/ack',{id:job.id});await http('/result',{id:job.id,result:{ok:true,text:'available'}});
+  assert.equal((await pending).text,'available');
+  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
+});

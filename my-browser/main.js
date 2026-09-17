@@ -36,7 +36,7 @@ function sync() {
     const paired = await node('setTrustedClients',{clients:cfg.pairedClients || []});
     if (!paired?.ok) throw new Error('Cannot synchronize paired browsers.');
     const r = await node('setPolicy',{policy});
-    if (!r?.ok) throw new Error(r?.message || 'Cannot apply site permissions. Re-enable the plugin.');
+    if (!r?.ok && !(r?.error === 'REVOCATION_UNCONFIRMED' && r.applied === true)) throw new Error(r?.message || 'Cannot apply site permissions. Re-enable the plugin.');
     return policy;
   });
 }

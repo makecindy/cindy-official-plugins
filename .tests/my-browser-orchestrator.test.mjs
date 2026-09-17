@@ -60,7 +60,7 @@ async function sandbox(t) {
         if (armHold) {armHold=false;reachHold();await new Promise(resolve => {releaseHold=resolve;});}
         return {ok:true,result:{ok:true}};
       }
-      if (method === 'setPolicy') {state.applied.push(params.policy);state.worker=params.policy;return {ok:true,result:{ok:true}};}
+      if (method === 'setPolicy') {state.applied.push(params.policy);state.worker=params.policy;return {ok:true,result:state.policyReply || {ok:true}};}
       if (method === 'status') return {ok:true,result:{ok:true,version:'fixture',extension_connected:true,clients:[]}};
       if (method === 'installation') return {ok:true,result:{ok:true,browsers:[]}};
       if (method === 'openInstallation') return {ok:true,result:{ok:true}};
@@ -150,4 +150,16 @@ test('a transport failure while reading reports unknown, not not_executed',async
   state.rejectNode=false;
   await callTool('browser_status',{});
   assert.equal(state.sent.at(-1).result.ok,true);
+});
+
+test('applied policy with historical uncertainty permits new tools but not save success',async t=>{
+  const {state,callTool,save}=await sandbox(t);
+  state.policyReply={ok:false,error:'REVOCATION_UNCONFIRMED',applied:true,execution:'unknown'};
+  await callTool('browser_read',{url:'https://example.test',mode:'text'});
+  assert.equal(state.acts.length,1);
+  const update=save(structuredClone(state.kv.policy));await update.done;
+  assert.equal((await update.response).ok,false);
+  state.policyReply={ok:false,error:'REVOCATION_UNCONFIRMED',applied:false};
+  await callTool('browser_read',{url:'https://example.test',mode:'text'});
+  assert.equal(state.acts.length,1,'unapplied policy must still stop tools');
 });
