@@ -255,14 +255,52 @@ test('extract final budget covers redaction growth across single and multiple re
   assert.equal(result.truncated,true);
 });
 
- test('revocation invalidates an authorized job without falsely claiming no execution',async t=>{
-  const {b,http}=await fixture(t);
+for (const blocked of ['example.test','redirect.test']) {
+  test('revocation invalidates an authorized job when blocking '+blocked,async t=>{
+    const {b,http}=await fixture(t);
+    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).data.ok,true);
+    await b.request('setPolicy',{policy:{...P.defaults(),read:{block:[blocked]}}});
+    const result=await pending;
+    assert.equal(result.error,'READ_BLOCKED');
+    assert.equal(result.execution,'unknown');
+    // Regranting permission cannot revive the cancelled operation.
+    await b.request('setPolicy',{policy:P.defaults()});
+    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).status,409);
+    assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
+    assert.equal((await b.request('status')).pending,0);
+  });
+}
+
+test('revocation waits for the final document dispatch and discards its result',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:2000});
   const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
   await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
-  assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).data.ok,true);
-  await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['redirect.test']}}});
-  assert.equal((await pending).execution,'unknown');
-  assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).status,409);
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).data.ok,true);
+  let saved=false;
+  const save=b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}}).then(r=>{saved=true;return r;});
+  await sleep(25);assert.equal(saved,false,'must not acknowledge revocation while DOM dispatch can still run');
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,403);
+  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
+  await http('/result',{id:job.id,result:{ok:true,text:'must not escape'}});
+  assert.equal((await save).ok,true);
+  const result=await pending;assert.equal(result.error,'READ_BLOCKED');assert.equal(result.execution,'unknown');assert.equal(result.text,undefined);
+});
+
+test('lost document dispatch cannot be reported as successful revocation',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:100});
+  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
+  const saved=await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
+  assert.equal(saved.ok,false);assert.equal(saved.error,'REVOCATION_UNCONFIRMED');assert.equal(saved.execution,'unknown');
+  const policy={...P.defaults(),read:{block:['example.test']}};
+  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED','a repeated save must not turn uncertainty into success');
+  assert.equal((await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}})).status,409);
+  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED');
   assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
-  assert.equal((await b.request('status')).pending,0);
+  assert.equal((await b.request('setPolicy',{policy})).ok,true);
+  assert.equal((await pending).execution,'unknown');
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,409);
 });

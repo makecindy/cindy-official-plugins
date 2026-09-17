@@ -12,6 +12,7 @@ const failure = (error,message,execution = 'not_executed') => ({ok:false,error,m
 function createBridge(options = {}) {
   let policy = P.defaults(), pins = [];
   let server, starting, port = 0;
+  const unconfirmedDispatches = new Map();
   const jobs = new Map(), clients = new Map(), waiting = new Map();
   const session = crypto.randomUUID();
   const live = c => Date.now()-c.seen < 35000;
@@ -77,9 +78,11 @@ function createBridge(options = {}) {
     if (out.record) out.record = boundRecord(out.record);
     return out;
   }
-  function finish(job,result) {
+  function finish(job,result, browserFinished = false) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
+    if (job.dispatchSettled && !browserFinished) unconfirmedDispatches.set(job.id,job);
+    job.settleDispatch?.(browserFinished);
     const safe = redactResult(result, job.payload.maxChars || 6000);
     job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
@@ -136,20 +139,33 @@ function createBridge(options = {}) {
     }
     if (req.method !== 'POST' || !['/ack','/authorize','/result'].includes(req.url)) return send(res,failure('NOT_FOUND','Unknown endpoint.'),404);
     const b = await body(req), job = jobs.get(b.id);
+    // A late completion closes uncertainty, but never revives or returns the expired result.
+    if (req.url === '/result' && unconfirmedDispatches.get(b.id)?.clientId === id) {
+      if (b.result && typeof b.result === 'object' && !Array.isArray(b.result) && b.result.execution !== 'unknown') unconfirmedDispatches.delete(b.id);
+      return send(res,failure('JOB_EXPIRED','The operation result expired.'),409);
+    }
     if (!job || job.clientId !== id || job.state !== (req.url === '/ack' ? 'delivered' : 'acknowledged')) return send(res,failure('JOB_EXPIRED','Do not execute this job.'),409);
+    if (job.revoked && req.url !== '/result') return send(res,jobFailure(job,job.revoked.error,job.revoked.message),403);
     if (req.url === '/ack' || req.url === '/authorize') {
       const gate = P.check(policy,job.action,req.url === '/authorize' ? b.url : job.payload.url);
       if (!gate.ok) { const result = jobFailure(job,gate.error,gate.message); finish(job,result); return send(res,result,403); }
       if (req.url === '/ack') job.state = 'acknowledged';
-      else job.authorizedUrl = b.url;
+      else {
+        job.authorizedUrl = b.url;
+        // The document is ready to run. A successful revocation must wait for this
+        // dispatch to settle; cancelling its result alone does not stop the DOM.
+        if (b.dispatch === true && !job.dispatchSettled) {
+          job.dispatchSettled = new Promise(resolve => { job.settleDispatch = resolve; });
+        }
+      }
       return send(res,{ok:true,policy});
     }
-    let result = b.result;
+    let result = job.revoked ? jobFailure(job,job.revoked.error,job.revoked.message) : b.result;
     if (!result || typeof result !== 'object' || Array.isArray(result)) result = jobFailure(job,'INVALID_RESULT','Invalid browser result. Verify before retrying.');
     if (job.action === 'tabs' && !result.error) result = {...result,ok:true,tabs:(Array.isArray(result.tabs) ? result.tabs : []).slice(0,100).map(t => P.check(policy,'text',t.url).ok ? t : {id:t.id,redacted:true})};
     else if (!result.error && result.url && !P.check(policy,job.action,result.url).ok) result = jobFailure(job,'REDIRECT_BLOCKED','No content returned from a blocked destination.');
     if (result.error && !['not_executed','executed','unknown'].includes(result.execution)) result = {...result,execution:jobFailure(job,'','').execution};
-    finish(job,result); return send(res,{ok:true});
+    finish(job,result,!!b.result && typeof b.result === 'object' && !Array.isArray(b.result) && b.result.execution !== 'unknown'); return send(res,{ok:true});
   }
   async function start() {
     if (server) return; if (starting) return starting;
@@ -167,9 +183,23 @@ function createBridge(options = {}) {
   async function request(method,params = {}) {
     if (method === 'setPolicy') {
       policy = P.normalizePolicy(params.policy);
+      const dispatches = [];
       for (const job of [...jobs.values()]) {
-        const gate = P.check(policy,job.action,job.authorizedUrl || job.payload.url);
-        if (!gate.ok) finish(job,jobFailure(job,gate.error,gate.message));
+        // Revocation applies to the original request as well as its redirected destination.
+        // Replacing the former with the latter silently kept blocked requests alive.
+        const original = P.check(policy,job.action,job.payload.url);
+        const gate = original.ok && job.authorizedUrl ? P.check(policy,job.action,job.authorizedUrl) : original;
+        if (!gate.ok) {
+          if (job.dispatchSettled) {
+            job.revoked = gate;
+            dispatches.push(job.dispatchSettled);
+          } else finish(job,jobFailure(job,gate.error,gate.message));
+        }
+      }
+      const completed = await Promise.all(dispatches);
+      const uncertain = [...unconfirmedDispatches.values()].some(job => !P.check(policy,job.action,job.payload.url).ok || (job.authorizedUrl && !P.check(policy,job.action,job.authorizedUrl).ok));
+      if (completed.some(finished => !finished) || uncertain) {
+        return failure('REVOCATION_UNCONFIRMED','Permissions are blocked, but an in-flight browser action did not confirm completion. Check the page before continuing.','unknown');
       }
       return {ok:true,policy};
     }
@@ -189,7 +219,7 @@ function createBridge(options = {}) {
     const candidates = connected();
     const client = payload.browser ? candidates.find(c => c.id === payload.browser) : candidates.length === 1 ? candidates[0] : null;
     if (!client) return {...failure(candidates.length>1 && !payload.browser ? 'BROWSER_REQUIRED' : 'EXTENSION_DISCONNECTED',candidates.length>1 ? 'Choose a browser connection id; never guess the account/profile.' : 'Open My Browser settings to install, enable or reconnect the extension.'),clients:candidates.map(publicClient)};
-    if (jobs.size >= 16) return failure('BRIDGE_BUSY','Wait for browser tasks to finish.');
+    if (jobs.size + unconfirmedDispatches.size >= 16) return failure('BRIDGE_BUSY','Wait for browser tasks to finish.');
     return new Promise(resolve => {
       const job = {id:crypto.randomUUID(),action:params.action,payload,clientId:client.id,state:'queued',resolve,created:Date.now()};
       job.timer = setTimeout(() => finish(job,jobFailure(job,'BROWSER_TIMEOUT','Verify an unknown operation; it will not be replayed.')),options.jobTimeout || 45000);

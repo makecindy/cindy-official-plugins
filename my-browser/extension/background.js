@@ -525,7 +525,7 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {
     const entry = targets.get(msg.id);
     if (!entry || _sender.tab?.id !== entry.tabId || _sender.documentId !== entry.documentId) { sendResponse(null); return; }
     // Recheck after injection has reached the document, not only before executeScript.
-    fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.url.slice(0,PAGE_URL_MAX)})
+    fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.url.slice(0,PAGE_URL_MAX),dispatch:true})
       .then(r => sendResponse(r.ok && targets.get(msg.id) === entry ? entry.url : null))
       .catch(() => sendResponse(null));
     return true;

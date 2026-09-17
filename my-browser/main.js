@@ -12,7 +12,7 @@ async function node(method, params = {}) {
   const reach = ['act','openInstallation'].includes(method) ? 'unknown' : 'not_executed';
   let r;
   try {
-    r = await cindy.node.request({method,params,timeoutMs:method === 'act' ? 65000 : method === 'openInstallation' ? 45000 : 10000});
+    r = await cindy.node.request({method,params,timeoutMs:['act','setPolicy'].includes(method) ? 65000 : method === 'openInstallation' ? 45000 : 10000});
   } catch (e) {
     return fail('NODE_UNAVAILABLE',e.message || 'Re-enable My Browser and check its connection.',reach);
   }
