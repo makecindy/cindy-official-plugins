@@ -24,6 +24,7 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   const {injectPrintScript, sanitizeTitleInDoc, commentSendSucceeded, randomUUID} = sandbox.module.exports;
   const {renderMarkdownToSafeHtml,extractSpeakerNotesFromHtml,extractBabelScriptSrcs}=sandbox.module.exports;
   assert.equal(extractSpeakerNotesFromHtml('<aside class="notes">hello<script>bad()</script >world</aside>')[0],'hello world');
+  assert.equal(extractSpeakerNotesFromHtml('<aside class="notes">hello<script>bad()</script\t\n bar>world</aside>')[0],'hello world');
   assert.deepEqual(Array.from(extractBabelScriptSrcs('<scr<!-- gap -->ipt type="text/babel" src="fake.jsx"></script><script type="text/babel" src="real.jsx"></script>')),['real.jsx']);
   const markdown=renderMarkdownToSafeHtml('| Code | Value |\n| --- | --- |\n| \`a\\|b\` | <script>alert(1)</script> |');
   assert.ok(!markdown.includes('<script>'));

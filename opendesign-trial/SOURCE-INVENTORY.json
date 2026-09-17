@@ -939,7 +939,7 @@
     "path": "source/latest/apps/web/src/runtime/speaker-notes.ts",
     "upstream": "apps/web/src/runtime/speaker-notes.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "2c2187de746c9057d1e62ec0e1ef244ff40a59e4222e068ec2bfb52e22e266e5",
+    "sha256": "e84ead0ecd66adaace418b1d5e81b3d0e9fdda2b008ea3a1c18d235cc1a0cb7f",
     "upstreamSha256": "398815f65035ff37861e84b9c0b99a3295ec2ae86a7d0cab91ea5cefe56cbb5b",
     "modified": true
   },

@@ -27,7 +27,7 @@ type ScriptBlock = {
 };
 
 const SCRIPT_OPEN_RE = /<script\b[^>]*>/gi;
-const SCRIPT_CLOSE_RE = /<\/script\s*>/gi;
+const SCRIPT_CLOSE_RE = /<\/script\b[^>]*>/gi;
 const SPEAKER_NOTES_ID_RE = /\bid\s*=\s*(?:"speaker-notes"|'speaker-notes'|speaker-notes)(?=[\s/>])/i;
 
 export function normalizeSpeakerNotes(notes: readonly string[], slideCount = 0): string[] {
@@ -645,8 +645,8 @@ function extractInlineSlideNotes(source: string): string[] {
 function stripHtmlToText(value: string): string {
   return decodeBasicHtmlEntities(
     value
-      .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
+      .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, ' ')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p\s*>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')

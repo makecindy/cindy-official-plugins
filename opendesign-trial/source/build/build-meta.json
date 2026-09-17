@@ -8871,7 +8871,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/speaker-notes.ts": {
-      "bytes": 28911,
+      "bytes": 28923,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -16211,7 +16211,7 @@
           "bytesInOutput": 3365
         },
         "../latest/apps/web/src/runtime/speaker-notes.ts": {
-          "bytesInOutput": 22670
+          "bytesInOutput": 22682
         },
         "../latest/apps/web/src/components/file-viewer-render-mode.ts": {
           "bytesInOutput": 1632
@@ -16319,7 +16319,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312026
+      "bytes": 17312038
     },
     "../../assets/studio.css": {
       "imports": [
