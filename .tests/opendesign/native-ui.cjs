@@ -82,6 +82,27 @@ test("upstream OpenDesign viewer renders and exposes native interaction tools", 
       headless: true,
       executablePath: process.env.OPENDESIGN_CHROMIUM_PATH || undefined,
     });
+    const inert=await browser.newPage();
+    try {
+      const bundled=await require('../../opendesign-trial/source/build/node_modules/esbuild').build({
+        entryPoints:[path.join(__dirname,'../../opendesign-trial/source/latest/apps/web/src/edit-mode/source-patches.ts')],
+        bundle:true,write:false,format:'iife',globalName:'SourcePatch',platform:'browser'
+      });
+      await inert.addScriptTag({content:bundled.outputFiles[0].text});
+      const result=await inert.evaluate(()=>{
+        window.executed=0;
+        const result=SourcePatch.applyManualEditPatch('<div data-od-id="target">before</div>',{
+          kind:'set-outer-html',id:'target',
+          html:'<div><script>window.executed=1</script><img src="data:image/png,broken" onerror="window.executed=2"></div>'
+        });
+        return {ok:result.ok,source:result.source};
+      });
+      await inert.waitForTimeout(100);
+      assert.equal(result.ok,true);
+      assert.ok(result.source.includes('onerror'));
+      assert.equal(await inert.evaluate(()=>window.executed),0,'source patching never attaches draft nodes to host DOM');
+      assert.equal(await inert.locator('[data-od-id="target"]').count(),0);
+    } finally {await inert.close();}
     const page = await browser.newPage({
       viewport: { width: 1200, height: 900 },
     });

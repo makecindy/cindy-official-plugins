@@ -2526,8 +2526,13 @@
       "format": "esm"
     },
     "../latest/apps/web/src/analytics/error-tracking.ts": {
-      "bytes": 23128,
+      "bytes": 22767,
       "imports": [
+        {
+          "path": "../latest/apps/web/src/utils/uuid.ts",
+          "kind": "import-statement",
+          "original": "../utils/uuid"
+        },
         {
           "path": "../latest/packages/contracts/src/analytics/index.ts",
           "kind": "import-statement",
@@ -2542,8 +2547,13 @@
       "format": "esm"
     },
     "../latest/apps/web/src/analytics/identity.ts": {
-      "bytes": 8018,
+      "bytes": 7380,
       "imports": [
+        {
+          "path": "../latest/apps/web/src/utils/uuid.ts",
+          "kind": "import-statement",
+          "original": "../utils/uuid"
+        },
         {
           "path": "../latest/packages/host/src/index.ts",
           "kind": "import-statement",
@@ -3969,7 +3979,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/artifacts/markdown.ts": {
-      "bytes": 3728,
+      "bytes": 3751,
       "imports": [
         {
           "path": "node_modules/micromark/index.js",
@@ -4455,7 +4465,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/deck-slide-structure.ts": {
-      "bytes": 3319,
+      "bytes": 3321,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/deck-stage-fallback.ts",
@@ -8712,7 +8722,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/exports.ts": {
-      "bytes": 86661,
+      "bytes": 86663,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -8793,7 +8803,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/jsx-module-refs.ts": {
-      "bytes": 5824,
+      "bytes": 5825,
       "imports": [],
       "format": "esm"
     },
@@ -8861,7 +8871,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/speaker-notes.ts": {
-      "bytes": 28902,
+      "bytes": 28911,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -15847,7 +15857,7 @@
           "bytesInOutput": 128
         },
         "../latest/apps/web/src/analytics/error-tracking.ts": {
-          "bytesInOutput": 1230
+          "bytesInOutput": 1060
         },
         "../latest/apps/web/src/lib/coalesced-get.ts": {
           "bytesInOutput": 552
@@ -16093,7 +16103,7 @@
           "bytesInOutput": 113
         },
         "../latest/apps/web/src/artifacts/markdown.ts": {
-          "bytesInOutput": 1892
+          "bytesInOutput": 1914
         },
         "../latest/apps/web/src/artifacts/renderer-registry.ts": {
           "bytesInOutput": 1177
@@ -16168,7 +16178,7 @@
           "bytesInOutput": 7291
         },
         "../latest/apps/web/src/runtime/deck-slide-structure.ts": {
-          "bytesInOutput": 1174
+          "bytesInOutput": 1176
         },
         "../latest/apps/web/src/runtime/react-component.ts": {
           "bytesInOutput": 5217
@@ -16177,7 +16187,7 @@
           "bytesInOutput": 1918
         },
         "../latest/apps/web/src/runtime/exports.ts": {
-          "bytesInOutput": 34893
+          "bytesInOutput": 34895
         },
         "../latest/apps/web/src/lib/copy-to-clipboard.ts": {
           "bytesInOutput": 453
@@ -16189,7 +16199,7 @@
           "bytesInOutput": 118
         },
         "../latest/apps/web/src/runtime/jsx-module-refs.ts": {
-          "bytesInOutput": 596
+          "bytesInOutput": 597
         },
         "../latest/apps/web/src/components/DeckThumbnailRail.tsx": {
           "bytesInOutput": 3230
@@ -16201,7 +16211,7 @@
           "bytesInOutput": 3365
         },
         "../latest/apps/web/src/runtime/speaker-notes.ts": {
-          "bytesInOutput": 22661
+          "bytesInOutput": 22670
         },
         "../latest/apps/web/src/components/file-viewer-render-mode.ts": {
           "bytesInOutput": 1632
@@ -16309,7 +16319,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312160
+      "bytes": 17312026
     },
     "../../assets/studio.css": {
       "imports": [

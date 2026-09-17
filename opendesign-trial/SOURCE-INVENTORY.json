@@ -123,9 +123,9 @@
     "path": "source/latest/apps/web/src/analytics/error-tracking.ts",
     "upstream": "apps/web/src/analytics/error-tracking.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "32695a9effe42658d8f0bfd50983ca5ade29367aa949dfd8e55d919c3882db0d",
+    "sha256": "06780cb9155c0d16a0af65d590ad3908081b1c3e033805a020ff6eaf391e6484",
     "upstreamSha256": "32695a9effe42658d8f0bfd50983ca5ade29367aa949dfd8e55d919c3882db0d",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/analytics/events.ts",
@@ -155,9 +155,9 @@
     "path": "source/latest/apps/web/src/analytics/identity.ts",
     "upstream": "apps/web/src/analytics/identity.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "fc8b47e9fa97b2ef050ec2e88bd922a786a6ff235fb2244100ba426a16c76c1f",
+    "sha256": "588a6b1d15bd3ae654fd9a2e6f6abfda6d3bb1af0a16c1f7985887f382ae657e",
     "upstreamSha256": "fc8b47e9fa97b2ef050ec2e88bd922a786a6ff235fb2244100ba426a16c76c1f",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/analytics/provider.tsx",
@@ -203,7 +203,7 @@
     "path": "source/latest/apps/web/src/artifacts/markdown.ts",
     "upstream": "apps/web/src/artifacts/markdown.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "e40a70e57dfb27a3d057f10d4c8724cced592a354715a91a13d548a65144d9ca",
+    "sha256": "e1fcf565bf71e944e7d086bf703c54b292161c0a1c6d55aae2d13fcfda072da8",
     "upstreamSha256": "ab7cbba26187289aa1710390802ef12e27351f5944d37435d51b2d7b96c6e041",
     "modified": true
   },
@@ -875,9 +875,9 @@
     "path": "source/latest/apps/web/src/runtime/deck-slide-structure.ts",
     "upstream": "apps/web/src/runtime/deck-slide-structure.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "89c84f5a98b1b6ab57bee5a73b03b791bc48f2445c8e371d4c6b720d9cd5359b",
+    "sha256": "ec220390fe7f8f009c265e5fa90ccda27a7670aeedf5eafe006bb85732eba5fb",
     "upstreamSha256": "89c84f5a98b1b6ab57bee5a73b03b791bc48f2445c8e371d4c6b720d9cd5359b",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/runtime/deck-thumbnail-parser.ts",
@@ -891,7 +891,7 @@
     "path": "source/latest/apps/web/src/runtime/exports.ts",
     "upstream": "apps/web/src/runtime/exports.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "1d6e118bceac7a2ed0d0cb54bedd04a8b869552312f247bbb3834505e948750a",
+    "sha256": "ee6c809662141378911cc784e87b0516d2518e019224927d43b40fa4947df996",
     "upstreamSha256": "c20cca9c728cc29d01cf37ee8eb2ff86c1be850b406be5c7728df66bb44aa01c",
     "modified": true
   },
@@ -899,9 +899,9 @@
     "path": "source/latest/apps/web/src/runtime/jsx-module-refs.ts",
     "upstream": "apps/web/src/runtime/jsx-module-refs.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "ad537ebe3138c4fb0a2765d980e2c737d92b4288ced62f52f9fcf50d5efbcd3e",
+    "sha256": "ec4b85b135f5f8735c7b89159b459cadb1062c8272a8c5bc12d63f417981bdd5",
     "upstreamSha256": "ad537ebe3138c4fb0a2765d980e2c737d92b4288ced62f52f9fcf50d5efbcd3e",
-    "modified": false
+    "modified": true
   },
   {
     "path": "source/latest/apps/web/src/runtime/powered-preview.ts",
@@ -939,7 +939,7 @@
     "path": "source/latest/apps/web/src/runtime/speaker-notes.ts",
     "upstream": "apps/web/src/runtime/speaker-notes.ts",
     "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
-    "sha256": "8052674fef13631e9bb5406162baf7f4190b387d2fe2001cc7e4582dbeb326f5",
+    "sha256": "2c2187de746c9057d1e62ec0e1ef244ff40a59e4222e068ec2bfb52e22e266e5",
     "upstreamSha256": "398815f65035ff37861e84b9c0b99a3295ec2ae86a7d0cab91ea5cefe56cbb5b",
     "modified": true
   },

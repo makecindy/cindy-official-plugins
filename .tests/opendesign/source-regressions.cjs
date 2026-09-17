@@ -8,6 +8,9 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   const root = path.resolve(__dirname, '../../opendesign-trial/source/latest');
   const result = await build({
     stdin: {contents: `export {injectPrintScript, requestPreviewSnapshotResult} from './apps/web/src/runtime/exports';
+      export {renderMarkdownToSafeHtml} from './apps/web/src/artifacts/markdown';
+      export {extractSpeakerNotesFromHtml} from './apps/web/src/runtime/speaker-notes';
+      export {extractBabelScriptSrcs} from './apps/web/src/runtime/jsx-module-refs';
       export {randomUUID} from './apps/web/src/utils/uuid';
       export {sanitizeTitleInDoc} from './apps/web/src/runtime/srcdoc';
       export {commentSendSucceeded} from './apps/web/src/components/comment-send-result';`, resolveDir: root},
@@ -19,6 +22,12 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   sandbox.exports = sandbox.module.exports;
   vm.runInNewContext(result.outputFiles[0].text, sandbox);
   const {injectPrintScript, sanitizeTitleInDoc, commentSendSucceeded, randomUUID} = sandbox.module.exports;
+  const {renderMarkdownToSafeHtml,extractSpeakerNotesFromHtml,extractBabelScriptSrcs}=sandbox.module.exports;
+  assert.equal(extractSpeakerNotesFromHtml('<aside class="notes">hello<script>bad()</script >world</aside>')[0],'hello world');
+  assert.deepEqual(Array.from(extractBabelScriptSrcs('<scr<!-- gap -->ipt type="text/babel" src="fake.jsx"></script><script type="text/babel" src="real.jsx"></script>')),['real.jsx']);
+  const markdown=renderMarkdownToSafeHtml('| Code | Value |\n| --- | --- |\n| \`a\\|b\` | <script>alert(1)</script> |');
+  assert.ok(!markdown.includes('<script>'));
+  assert.ok(markdown.includes('&lt;script'),markdown);
   const webcrypto = require('node:crypto').webcrypto;
   sandbox.crypto = {getRandomValues: webcrypto.getRandomValues.bind(webcrypto)};
   const ids = new Set(Array.from({length:100}, () => randomUUID()));

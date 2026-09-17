@@ -65,8 +65,8 @@ function screenLabelFromTag(tag: string): string | null {
  */
 export function sourceHasLegacyDeckScreenSlides(source: string): boolean {
   const sanitized = source
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
   const tagPattern = /<\s*(\/?)\s*([a-z][\w:-]*)\b[^>]*>/gi;
   const stack: Array<{ id: number; tag: string }> = [];
   const groups = new Map<number, Set<number>>();

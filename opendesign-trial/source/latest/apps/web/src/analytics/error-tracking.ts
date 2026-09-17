@@ -1,3 +1,4 @@
+import { randomUUID as randomId } from '../utils/uuid';
 // Direct-fetch safety telemetry transport.
 //
 // Why this exists alongside posthog-js's autocapture
@@ -573,15 +574,7 @@ function defaultMessage(error: unknown): string {
   return 'Unknown error';
 }
 
-function randomId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  // Fallback for older browsers / SSR — collision risk is negligible
-  // because $insert_id only needs to dedupe within a single user-session
-  // window on the PostHog ingest side.
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
+
 
 // Re-exported helpers for the file-path scrub so callers that hand-build
 // frames (e.g. legacy code paths) can apply the same redaction without

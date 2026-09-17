@@ -1050,8 +1050,8 @@ function sourceLooksLikeStructuredDeck(source: string): boolean {
   // literals as real elements turns ordinary reports into a one-slide deck and
   // incorrectly mounts navigation and speaker notes.
   const markup = source
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
   return (
     /<deck-stage[\s/>]|class\s*=\s*['"](?:[^'"]*\s)?(?:deck-slide|ppt-slide)(?:\s|['"])/i.test(
       markup,

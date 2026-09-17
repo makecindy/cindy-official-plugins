@@ -55,7 +55,7 @@ function isTableDelimiter(line: string): boolean {
 function escapeCodeSpanPipes(line: string): string {
   if (!line.includes('|') || !line.includes('`')) return line;
   return line.replace(/`([^`]*\|[^`]*)`/g, (_match, code: string) =>
-    `\`${code.replace(/\|/g, '\\|')}\``,
+    `\`${code.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')}\``,
   );
 }
 

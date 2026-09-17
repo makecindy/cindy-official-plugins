@@ -645,11 +645,11 @@ function extractInlineSlideNotes(source: string): string[] {
 function stripHtmlToText(value: string): string {
   return decodeBasicHtmlEntities(
     value
-      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-      .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+      .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p\s*>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
+      .replace(/<[^>]+>/g, ' ')
       .replace(/\r\n?/g, '\n')
       .replace(/[ \t]+\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n')

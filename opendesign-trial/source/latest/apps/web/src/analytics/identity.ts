@@ -1,7 +1,7 @@
+import { randomUUID as randomUuid } from '../utils/uuid';
 // Browser-side identity bookkeeping for PostHog product analytics. Designed
 // so it stays SSR-safe: every entry point guards window/localStorage access
-// and falls back to a deterministic-enough fake id under jsdom and Next.js
-// pre-render. The daemon mirrors these values via the x-od-analytics-*
+// and uses Web Crypto for generated IDs; SSR uses its existing sentinel. The daemon mirrors these values via the x-od-analytics-*
 // headers (see @open-design/contracts/analytics).
 
 import type { AnalyticsClientType } from '@open-design/contracts/analytics';
@@ -13,20 +13,6 @@ const RUN_TURN_INDEX_KEY = 'open-design:analytics.run_turn_index';
 // Per-project counter keys are this prefix + the project id (localStorage).
 const PROJECT_TURN_INDEX_KEY_PREFIX = 'open-design:analytics.project_turn_index:';
 
-function randomUuid(): string {
-  // Prefer the standard crypto.randomUUID — present in every modern browser
-  // and Node 19+. The Math.random fallback is for jsdom builds that ship
-  // without crypto.randomUUID and for very old browsers; it does not need
-  // to be cryptographically strong, only unique-enough for a session id.
-  const c: Crypto | undefined =
-    typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
-  if (c?.randomUUID) return c.randomUUID();
-  return `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`.replace(/[xy]/g, (ch) => {
-    const r = (Math.random() * 16) | 0;
-    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
 
 export function getAnonymousId(): string {
   if (typeof window === 'undefined') return 'ssr';

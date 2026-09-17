@@ -37,7 +37,7 @@ function normalizeScriptRef(src: string): string {
  */
 export function extractBabelScriptSrcs(html: string | null | undefined): string[] {
   if (!html) return [];
-  const scannable = html.replace(/<!--[\s\S]*?-->/g, '');
+  const scannable = html.replace(/<!--[\s\S]*?-->/g, ' ');
   const srcs: string[] = [];
   const scriptOpenTag = /<script\b([^>]*)>/gi;
   let match: RegExpExecArray | null;

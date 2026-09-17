@@ -22,7 +22,8 @@
     "Remove artifact-frame download authority, including thumbnails; srcdoc download links propose bounded blobs to a parent-owned trusted Save file control.",
     "DownloadGate: accept explicitly marked version/presentation frames and portal trusted save controls into fullscreen/presentation; keep inactive thumbnails outside download authority.",
     "Pod annotation elementId uses the shared cryptographic randomUUID helper instead of a timestamp.",
-    "Snapshot and export bridge correlation IDs use shared cryptographic randomUUID, removing timestamp/Math.random identifiers."
+    "Snapshot and export bridge correlation IDs use shared cryptographic randomUUID, removing timestamp/Math.random identifiers.",
+    "CodeQL: crypto-only analytics identity/error IDs; markup omission uses separators to avoid manufacturing tags; notes accept whitespace in raw-text closing tags; Markdown table code spans escape backslashes before pipes."
   ],
   "logo": {
     "path": "apps/web/public/app-icon.png",
