@@ -34,8 +34,8 @@ function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }) {
               ? { dir: "/project/new" }
               : x.method === "bind"
                 ? {
-                    url: "http://127.0.0.1:1234/studio/token/",
-                    previewBase: "http://127.0.0.1:1235/view/read/",
+                    url: "http://editor.example.test:1234/studio/token/",
+                    previewBase: "http://preview.example.test:1235/view/read/",
                     files: [],
                   }
                 : {
