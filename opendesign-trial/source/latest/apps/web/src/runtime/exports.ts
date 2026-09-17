@@ -419,7 +419,7 @@ export function requestPreviewSnapshotResult(
 ): Promise<PreviewSnapshotResult> {
   const win = iframe.contentWindow;
   if (!win) return Promise.resolve({ ok: false, reason: 'loading' });
-  const id = `snap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = `snap-${randomUUID()}`;
   return new Promise((resolve) => {
     let done = false;
     function onMsg(ev: MessageEvent) {
@@ -1838,7 +1838,7 @@ async function captureArtifactSlides(
     await runExportCapture(
       win,
       {
-        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `exp-${randomUUID()}`,
         mode: opts.mode,
         deck: opts.deck,
         delay: 350,

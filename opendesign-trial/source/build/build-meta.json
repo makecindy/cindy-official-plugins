@@ -8712,7 +8712,7 @@
       "format": "esm"
     },
     "../latest/apps/web/src/runtime/exports.ts": {
-      "bytes": 86741,
+      "bytes": 86661,
       "imports": [
         {
           "path": "../latest/packages/contracts/src/runtime/html-injection-points.ts",
@@ -16177,7 +16177,7 @@
           "bytesInOutput": 1918
         },
         "../latest/apps/web/src/runtime/exports.ts": {
-          "bytesInOutput": 34987
+          "bytesInOutput": 34893
         },
         "../latest/apps/web/src/lib/copy-to-clipboard.ts": {
           "bytesInOutput": 453
@@ -16309,7 +16309,7 @@
           "bytesInOutput": 0
         }
       },
-      "bytes": 17312254
+      "bytes": 17312160
     },
     "../../assets/studio.css": {
       "imports": [

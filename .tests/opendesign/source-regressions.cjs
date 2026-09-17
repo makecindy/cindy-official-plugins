@@ -7,7 +7,7 @@ const {build} = require('../../opendesign-trial/source/build/node_modules/esbuil
 test('upstream adapters preserve unknown outcomes and escape titles once', async () => {
   const root = path.resolve(__dirname, '../../opendesign-trial/source/latest');
   const result = await build({
-    stdin: {contents: `export {injectPrintScript} from './apps/web/src/runtime/exports';
+    stdin: {contents: `export {injectPrintScript, requestPreviewSnapshotResult} from './apps/web/src/runtime/exports';
       export {randomUUID} from './apps/web/src/utils/uuid';
       export {sanitizeTitleInDoc} from './apps/web/src/runtime/srcdoc';
       export {commentSendSucceeded} from './apps/web/src/components/comment-send-result';`, resolveDir: root},
@@ -33,7 +33,23 @@ test('upstream adapters preserve unknown outcomes and escape titles once', async
   // The srcdoc bridge embeds this same self-contained function into its realm.
   const embedded = vm.runInNewContext('(' + randomUUID.toString() + ')()', {crypto:sandbox.crypto});
   assert.match(embedded,/^[0-9a-f-]{36}$/);
+  const listeners=new Set(),messages=[];
+  sandbox.window={addEventListener:(_,fn)=>listeners.add(fn),removeEventListener:(_,fn)=>listeners.delete(fn)};
+  sandbox.setTimeout=()=>0;
+  const win={postMessage:m=>messages.push(m)};
+  const first=sandbox.module.exports.requestPreviewSnapshotResult({contentWindow:win});
+  const second=sandbox.module.exports.requestPreviewSnapshotResult({contentWindow:win});
+  assert.notEqual(messages[0].id,messages[1].id);
+  for(const m of messages) assert.match(m.id,/^snap-[0-9a-f-]{36}$/);
+  for(const [index,dataUrl] of [[1,'second'],[0,'first']])
+    for(const listener of [...listeners]) listener({source:win,data:{type:'od:snapshot:result',id:messages[index].id,dataUrl,w:1,h:1}});
+  assert.equal((await first).snapshot.dataUrl,'first');
+  assert.equal((await second).snapshot.dataUrl,'second');
+  assert.equal(listeners.size,0);
   delete sandbox.crypto;
+  const count=messages.length;
+  assert.throws(()=>sandbox.module.exports.requestPreviewSnapshotResult({contentWindow:win}),/Web Crypto is required/);
+  assert.equal(messages.length,count);
   assert.throws(()=>randomUUID(),/Web Crypto is required/);
   assert.equal(commentSendSucceeded({status:'unknown',commentIds:[]}), false);
   assert.equal(commentSendSucceeded({status:'queued',commentIds:['a']}), true);
