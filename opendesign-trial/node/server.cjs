@@ -12,6 +12,7 @@ const pkg = path.resolve(__dirname, ".."),
 const feedback = require("./feedback.cjs");
 const cardPreview = require("./card-preview.cjs");
 const LIMIT = 12 * 1024 * 1024;
+const HTML_LIMIT = 1024 * 1024;
 const mime = {
   ".html": "text/html",
   ".htm": "text/html",
@@ -125,6 +126,8 @@ async function serializeWrite(key, action) {
 }
 async function write(b, name, data, expectedRevision) {
   validName(name);
+  if (/\.html?$/i.test(name) && data.length > HTML_LIMIT)
+    throw Object.assign(new Error(`HTML must not exceed ${HTML_LIMIT} bytes`), {status:413,code:"HTML_TOO_LARGE"});
   return serializeWrite(path.join(b.root, name), () => writeLocked(b, name, data, expectedRevision));
 }
 async function writeLocked(b, name, data, expectedRevision) {
@@ -420,10 +423,9 @@ async function invoke(method, p) {
     if (method === "draft-read") return draftRead(b, p.file);
     if (
       typeof p.html !== "string" ||
-      !p.html.trim() ||
-      Buffer.byteLength(p.html) > 1024 * 1024
+      !p.html.trim()
     )
-      throw Error("Provide 1–1048576 bytes of complete HTML");
+      throw Error("Provide non-empty complete HTML");
     await write(b, p.file, Buffer.from(p.html), p.expectedRevision);
     return draftRead(b, p.file);
   }

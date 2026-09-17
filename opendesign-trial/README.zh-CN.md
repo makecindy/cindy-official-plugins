@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — 本地试用 0.4.19
+# OpenDesign for Cindy — 本地试用 0.4.20
 
 Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。右侧嵌入 OpenDesign v0.22.1 的真实 FileViewer、元素批注、手动编辑、PreviewDrawOverlay；草图使用 v0.1.0 SketchEditor。使用官方 logo，源码随包提供。这是组件集成，不是完整 OpenDesign daemon 或独立聊天应用。
 
@@ -17,7 +17,7 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 
 两个带随机令牌的 localhost 服务分别负责编辑和只读作品。生成网页运行在不含 same-origin 权限的沙盒 iframe，无法读取编辑令牌；编辑接口拒绝其他来源。会话归属持久化，重启后点卡片恢复。无云分享、协作或版本浏览器；这些入口隐藏。
 
-验证：隔离的无界面 Chrome 测试覆盖原生注释、手动保存、绘制截图、交互脚本和刷新；Node 测试覆盖卡片重启恢复、跨会话拒绝、路径与来源隔离、版本冲突、重复发送及未知结果。模型派发使用替身，未在用户真实设计会话中触发付费模型调用；宿主模型执行后的真实回写仍需使用时验收。全程未控制用户桌面。
+验证：隔离的无界面 Chrome 测试覆盖原生注释、手动保存、绘制截图、交互脚本和刷新；Node 测试覆盖卡片重启恢复、跨会话拒绝、路径与来源隔离、版本冲突、重复发送及未知结果。自动化测试中的模型派发使用替身；用户已于 2026-09-17 在开发主会话确认实机验收完成。实机依据是用户确认，不以自动化测试替代。全程未控制用户桌面。
 
 正式仓库提案；audience 为空定向列表，不向全部用户自动分发。源码、上游版本与补丁见 `source/`、`node/`、`UPSTREAM.json`，许可证见 `THIRD-PARTY-LICENSES.txt`。
 
@@ -37,11 +37,11 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 
 0.4.7：派发前明确的校验拒绝保留 rejected 和服务端原因；响应丢失、轮询失败及派发后异常仍为 unknown。浏览器回归新增脚本赋值/替换导航、meta 刷新和链接跳转，确认编辑器 frame-src 阻止稿件向外部地址导航。
 
-0.4.8：持久化 free-pin 和 file-comment 标识改用 crypto.randomUUID；直接文本或根节点属性过大时返回固定小预览，不改原稿。**发布阻断：**实际查看器探测确认 RTCPeerConnection 可绕过 HTTP CSP 发出 STUN UDP。仍需宿主强制隔离 WebRTC，本版本未修复该缺口。
+0.4.8：持久化 free-pin 和 file-comment 标识改用 crypto.randomUUID；直接文本或根节点属性过大时返回固定小预览，不改原稿。**已知宿主限制：**实际查看器探测确认 RTCPeerConnection 可绕过 HTTP CSP 发出 STUN UDP。仍需宿主强制隔离 WebRTC，本版本未修复该缺口。
 
-0.4.9：两条持久化批注路径复用既有 UUID 工具；randomUUID 不可用时使用 getRandomValues 生成 v4 UUID，Web Crypto 缺失时失败关闭。移除上游弱随机降级；free-pin 桥在沙盒中嵌入同一独立实现。WebRTC 隔离与最终实机验收仍未完成。
+0.4.9：两条持久化批注路径复用既有 UUID 工具；randomUUID 不可用时使用 getRandomValues 生成 v4 UUID，Web Crypto 缺失时失败关闭。移除上游弱随机降级；free-pin 桥在沙盒中嵌入同一独立实现。后续实机验收已由用户确认；WebRTC 仍是宿主限制。
 
-0.4.19：稿件 iframe（含缩略图及演示预览）不再授予 allow-downloads。稿件中的 data/blob 或本项目下载链接向父编辑器提出文件请求，只有真实点击“保存文件”才授权下载；界面显示文件名和字节数，限制 12 MiB，可取消。父页面原有导出入口保留。WebRTC 隔离和实机验收仍阻断。
+0.4.20：稿件 iframe（含缩略图及演示预览）不再授予 allow-downloads。稿件中的 data/blob 或本项目下载链接向父编辑器提出文件请求，只有真实点击“保存文件”才授权下载；界面显示文件名和字节数，限制 12 MiB，可取消。父页面原有导出入口保留。实机验收已确认；按用户范围决定，WebRTC 隔离不在本插件改动中处理，不宣称风险已修复。
 
 下载确认同时接受明确标记的版本与演示预览，控件在演示/全屏容器内显示。当前适配器禁用 URL-load/powered 模式；非交互缩略图不授权下载请求。
 
@@ -58,3 +58,5 @@ Cindy 原生对话、Harness 和当前会话模型负责设计与继续修改。
 截图与导出桥接请求 ID 使用共用加密 UUID；缺少 Web Crypto 时失败关闭。
 
 CodeQL 整理：分析标识改用加密 UUID，忽略标记时避免拼接出新标签，兼容脚本结束标签空白，并正确转义 Markdown 表格代码的反斜杠。保留离线源码编辑与 Blob 图片预览。
+
+手动保存和 Agent 更新共用 1 MiB 的解码后 HTML 字节上限；超限在写入前拒绝并保留原稿，资源文件维持原有上限。

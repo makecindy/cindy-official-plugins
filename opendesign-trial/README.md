@@ -1,4 +1,4 @@
-# OpenDesign for Cindy — local trial 0.4.19
+# OpenDesign for Cindy — local trial 0.4.20
 
 Cindy's native conversation, Harness and current session model generate and revise designs. The sidebar embeds the real OpenDesign v0.22.1 FileViewer, element comments, manual editing and PreviewDrawOverlay, plus the v0.1.0 SketchEditor. The official logo and bundled source are included. This is a component integration, not the full OpenDesign daemon or a separate chat application.
 
@@ -12,7 +12,7 @@ Follow-up conversation calls `opendesign_context` for current HTML, revision, sk
 
 Separate random-token localhost origins serve the editor and read-only artifact. Authored HTML runs in an opaque sandboxed iframe; editor requests reject foreign origins. Session ownership is persisted and restored on card clicks after restart. Unsupported cloud sharing, collaboration and version browsing are hidden.
 
-Validation uses isolated headless Chrome for real upstream comments, manual edits, annotation screenshots, JavaScript interaction and refresh. Node tests cover card restoration, session isolation, filesystem/origin boundaries, revision conflicts, duplicate submission and unknown outcomes. Model dispatch is mocked: no paid run was started in the user's real design session, so the installed host/model/write-back round trip still needs use-time acceptance. No user desktop automation was used.
+Validation uses isolated headless Chrome for real upstream comments, manual edits, annotation screenshots, JavaScript interaction and refresh. Node tests cover card restoration, session isolation, filesystem/origin boundaries, revision conflicts, duplicate submission and unknown outcomes. Automated tests mock model dispatch; separately, the user confirmed real-device acceptance in the development session on 2026-09-17. That confirmation is the device-verification evidence, not the automated tests. No user desktop automation was used.
 
 Official repository proposal; provisioning is an empty targeted audience, not automatic distribution. See `source/`, `node/`, `UPSTREAM.json` and `THIRD-PARTY-LICENSES.txt` for sources, provenance, patches and licenses.
 
@@ -32,11 +32,11 @@ Browser regressions: install Playwright Chromium, then run `node --test .tests/o
 
 0.4.7: Explicit pre-dispatch validation failures retain rejected status and the server message. Lost responses, polling errors and post-dispatch exceptions remain unknown. Browser regressions also verify that the editor frame-src policy blocks artifact self-navigation via location assignment/replacement, meta refresh and links.
 
-0.4.8: Persisted free-pin and file-comment identifiers use crypto.randomUUID. Cards with oversized direct text or root attributes fall back to a fixed small preview without changing the manuscript. **Release blocker:** a real viewer probe confirmed RTCPeerConnection can send STUN UDP outside the HTTP CSP boundary. Host-enforced WebRTC isolation is still required; this version does not claim that gap is fixed.
+0.4.8: Persisted free-pin and file-comment identifiers use crypto.randomUUID. Cards with oversized direct text or root attributes fall back to a fixed small preview without changing the manuscript. **Known host limitation:** a real viewer probe confirmed RTCPeerConnection can send STUN UDP outside the HTTP CSP boundary. Host-enforced WebRTC isolation is still required; this version does not claim that gap is fixed.
 
-0.4.9: Both persisted annotation paths share the existing UUID utility. Where randomUUID is unavailable it uses getRandomValues to construct a v4 UUID; absent Web Crypto fails closed. Removed the upstream weak-random fallback. The free-pin bridge embeds the same self-contained implementation in its sandbox realm. WebRTC isolation and final real-device acceptance remain unresolved.
+0.4.9: Both persisted annotation paths share the existing UUID utility. Where randomUUID is unavailable it uses getRandomValues to construct a v4 UUID; absent Web Crypto fails closed. Removed the upstream weak-random fallback. The free-pin bridge embeds the same self-contained implementation in its sandbox realm. Real-device acceptance was subsequently confirmed by the user; WebRTC remains a host limitation.
 
-0.4.19: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. WebRTC isolation and device acceptance remain blocked.
+0.4.20: Artifact frames (including thumbnails and presentation previews) no longer grant allow-downloads. Authored data/blob or local-project download links propose a file to the parent editor; only a trusted click on Save file authorizes the download. The proposal shows the filename and byte size, accepts at most 12 MiB, and can be cancelled. Existing parent-owned export controls remain available. Device acceptance is confirmed. WebRTC isolation remains outside this plugin change by the user’s scope decision; the risk is not claimed fixed.
 
 Download confirmations also accept explicitly marked version and presentation previews and appear inside the presentation/fullscreen container. URL-load/powered mode is disabled by this adapter; noninteractive thumbnails cannot request saves.
 
@@ -53,3 +53,5 @@ Project-file downloads request raw source so saved HTML exactly matches the orig
 Snapshot and export bridge request IDs use the shared cryptographic UUID helper; missing Web Crypto fails closed.
 
 CodeQL cleanup: cryptographic analytics IDs, non-concatenating markup masking, whitespace-tolerant script closing tags, and backslash-safe Markdown table code spans. Inert source editing and Blob image rendering retain their behavior.
+
+Manual saves and Agent updates share a 1 MiB decoded HTML byte limit; oversized saves fail before writing, preserving the previous draft. Asset files retain their existing limit.

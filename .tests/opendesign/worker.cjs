@@ -41,6 +41,24 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
     body: JSON.stringify({ name: "index.html", content, expectedRevision: null }),
   });
   assert.equal(r.status, 200);
+
+  // Both entry points use decoded UTF-8 bytes, including base64 HTTP saves.
+  const atLimit='<p>'+ '中'.repeat(349523) + '</p>';
+  assert.equal(Buffer.byteLength(atLimit),1048576);
+  const boundary=await fetch(api+'/files',{method:'POST',body:JSON.stringify({name:'boundary.HTML',content:atLimit,expectedRevision:null})});
+  assert.equal(boundary.status,200);
+  const bound=await w.invoke('draft-read',{sessionId:sid,file:'boundary.HTML'});
+  const updated=await w.invoke('draft-write',{sessionId:sid,file:'boundary.HTML',html:atLimit,expectedRevision:bound.revision});
+  for(const encoding of ['utf8','base64']) {
+    const oversized=await fetch(api+'/files',{method:'POST',body:JSON.stringify({
+      name:'boundary.HTML',content:encoding==='base64'?Buffer.from(atLimit+'!').toString('base64'):atLimit+'!',encoding,expectedRevision:updated.revision
+    })});
+    assert.equal(oversized.status,413);
+    assert.equal((await oversized.json()).code,'HTML_TOO_LARGE');
+  }
+  await assert.rejects(w.invoke('draft-write',{sessionId:sid,file:'boundary.HTML',html:atLimit+'!',expectedRevision:updated.revision}),{code:'HTML_TOO_LARGE'});
+  assert.equal((await w.invoke('draft-read',{sessionId:sid,file:'boundary.HTML'})).revision,updated.revision);
+  assert.equal(await fs.readFile(path.join(a.dir,'boundary.HTML'),'utf8'),atLimit);
   console.log("read");
   assert.match(
     await (await fetch(one.previewBase + "index.html")).text(),
