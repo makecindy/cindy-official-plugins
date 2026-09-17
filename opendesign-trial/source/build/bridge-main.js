@@ -137,29 +137,46 @@
     if (ctx.workdir_is_read_only) throw Error("This session is read-only");
     let d = await read(stateKey(ctx.session_id));
     if (msg.tool === "opendesign_new") {
-      if (d)
+      if (d && d.initialization !== "pending")
         throw Error(
           "This session already owns a draft. Call opendesign_context, then opendesign_update to continue it.",
         );
       if (typeof a.html !== "string" || !a.html.trim())
         throw Error("Provide generated HTML to create a draft card.");
-      const p = await node("prepare", { workdir: ctx.workdir });
-      d = {
-        id: crypto.randomUUID(),
-        sessionId: ctx.session_id,
-        root: p.dir,
-        file: "design.html",
-        title: String(a.title || "新设计").slice(0, 100),
-      };
-      // Save binding before writing: interruptions cannot silently create a second draft.
-      await save(stateKey(d.sessionId), d);
+      const recovering = !!d;
+      if (!d) {
+        const p = await node("prepare", { workdir: ctx.workdir });
+        d = {
+          id: crypto.randomUUID(),
+          sessionId: ctx.session_id,
+          root: p.dir,
+          file: "design.html",
+          title: String(a.title || "新设计").slice(0, 100),
+          initialization: "pending",
+        };
+        // Reserve the same project across failures/restarts, without claiming
+        // that a manuscript already exists. Recovery never allocates another.
+        await save(stateKey(d.sessionId), d);
+      }
+      if (d.sessionId !== ctx.session_id) throw Error("Session binding mismatch");
       await bind(d);
-      await node("draft-write", {
-        sessionId: d.sessionId,
-        file: d.file,
-        html: a.html,
-        expectedRevision: null,
-      });
+      const existing = recovering
+        ? await node("draft-read", { sessionId: d.sessionId, file: d.file })
+        : null;
+      // A write may have completed before its receipt/final state was saved.
+      // Preserve that file; only create if the server proves it is absent.
+      if (!recovering || existing?.revision === null) {
+        await node("draft-write", {
+          sessionId: d.sessionId,
+          file: d.file,
+          html: a.html,
+          expectedRevision: null,
+        });
+      } else if (typeof existing?.revision !== "string" || !existing.revision) {
+        throw Error("Draft initialization result is unknown; inspect the existing project before continuing.");
+      }
+      d = { ...d, initialization: "ready" };
+      await save(stateKey(d.sessionId), d);
     } else if (
       ![
         "opendesign_context",

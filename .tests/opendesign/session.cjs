@@ -15,7 +15,7 @@ const ctx = {
   workdir_is_local: true,
   workdir_is_read_only: false,
 };
-function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }) {
+function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOverride) {
   let handler;
   const calls = [],
     sent = [];
@@ -25,6 +25,7 @@ function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }) {
     node: {
       request: async (x) => {
         calls.push(x);
+        if (nodeOverride) return {ok: true, result: await nodeOverride(x)};
         return {
           ok: true,
           result:
@@ -148,5 +149,51 @@ test("accepted dispatch to a different session stays unknown without retry", asy
     assert.equal(r.calls.findLast(x => x.method === 'feedback-result').params.status, expected);
     assert.equal(r.calls.filter(x => x.agent).length, 1);
     assert.equal(r.calls.find(x => x.agent).agent.sessionId, sid);
+  }
+});
+
+test("failed initialization retries the same project and recovers writes with lost receipts", async () => {
+  for (const failure of ['validation', 'disk', 'lost-receipt', 'final-state']) {
+    let html = null, prepares = 0, writes = 0, fail = true;
+    class Store extends Map {
+      set(key, value) {
+        if (failure === 'final-state' && fail && key.startsWith('sessions/') && JSON.parse(value).initialization === 'ready') {
+          fail = false;
+          throw Error('state disk unavailable');
+        }
+        return super.set(key, value);
+      }
+    }
+    const disk = new Store();
+    const invoke = async ({method, params}) => {
+      if (method === 'prepare') { prepares++; return {dir:'/project/reserved'}; }
+      if (method === 'bind') return {files:[]};
+      if (method === 'draft-write') {
+        writes++;
+        assert.equal(params.expectedRevision, null);
+        if (fail && (failure === 'validation' || failure === 'disk')) { fail=false; throw Error(failure === 'validation' ? 'HTML_TOO_LARGE' : 'disk unavailable'); }
+        assert.equal(html, null, 'recovery must never overwrite an existing manuscript');
+        html = params.html;
+        if (fail && failure === 'lost-receipt') { fail=false; throw Error('receipt lost'); }
+      }
+      return {html:html || '', revision:html === null ? null : 'saved-revision', cardHtml:'<p>Saved</p>', sketches:[]};
+    };
+    const first = runtime(disk, undefined, invoke);
+    await first.tool('opendesign_new', {html:'<h1>First attempt</h1>'});
+    assert.equal(first.sent.at(-1).ok, false);
+    const pending = JSON.parse(disk.get('sessions/'+sid+'.json'));
+    assert.equal(pending.initialization, 'pending');
+    // A new runtime represents a plugin restart between attempts.
+    const recovered = runtime(disk, undefined, invoke);
+    await recovered.tool('opendesign_new', {html:'<h1>Corrected attempt</h1>'});
+    assert.equal(recovered.sent.at(-1).ok, true);
+    assert.equal(recovered.sent.at(-1).result.draftId, pending.id);
+    assert.equal(prepares, 1);
+    assert.equal(JSON.parse(disk.get('sessions/'+sid+'.json')).initialization, 'ready');
+    assert.equal(html, failure === 'validation' || failure === 'disk' ? '<h1>Corrected attempt</h1>' : '<h1>First attempt</h1>');
+    assert.equal(writes, failure === 'validation' || failure === 'disk' ? 2 : 1);
+    await recovered.tool('opendesign_new', {html:'<h1>Duplicate</h1>'});
+    assert.equal(recovered.sent.at(-1).ok, false);
+    assert.equal(prepares, 1);
   }
 });
