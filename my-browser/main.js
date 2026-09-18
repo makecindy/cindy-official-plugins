@@ -116,7 +116,12 @@ cindy.onHostMessage(async msg => {
   if (msg.type !== 'tool-call') return;
   let result;
   try { result = await handleTool(msg.tool,msg.args || {}); }
-  catch (e) { result = fail('PLUGIN_ERROR',e.message || 'Reload My Browser settings and check the connection.',msg.tool === 'browser_act' ? 'unknown' : 'not_executed'); }
+  catch (e) {
+    // Throws here are local validation or orchestration failures. Worker transport
+    // already maps in-flight act failures to unknown inside node(); do not upgrade a
+    // pre-dispatch error into an unknown side effect.
+    result = fail('PLUGIN_ERROR',e.message || 'Reload My Browser settings and check the connection.','not_executed');
+  }
   // Business errors stay structured so an unknown side-effect outcome is never lost in prose.
   await cindy.send({type:'tool-result',callId:msg.callId,ok:true,result});
 });

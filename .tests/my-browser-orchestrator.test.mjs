@@ -152,6 +152,18 @@ test('a transport failure while reading reports unknown, not not_executed',async
   assert.equal(state.sent.at(-1).result.ok,true);
 });
 
+test('browser_act validation failures before dispatch are not_executed',async t=>{
+  const {state,callTool}=await sandbox(t);
+  await callTool('browser_act',{url:'https://example.test',kind:'type',selector:'#query'});
+  const missingText=state.sent.at(-1).result;
+  assert.equal(missingText.ok,false,JSON.stringify(missingText));
+  assert.equal(missingText.execution,'not_executed');
+  assert.equal(state.acts.length,0,'the worker must not receive an invalid type call');
+  await callTool('browser_act',{url:'https://example.test',kind:'click'});
+  assert.equal(state.sent.at(-1).result.execution,'not_executed');
+  assert.equal(state.acts.length,0);
+});
+
 test('applied policy with historical uncertainty permits new tools and saves with an explicit warning',async t=>{
   const {state,callTool,save}=await sandbox(t);
   state.policyReply={ok:false,error:'REVOCATION_UNCONFIRMED',applied:true,execution:'unknown'};

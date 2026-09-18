@@ -160,3 +160,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.46 also masks a long alphabetic token sharing a context segment (`/verify-abcdefghijklmnop`) while keeping multi-word descriptive slugs.
 
 0.3.47 treats the leftover after a same-segment context word as one credential string, so hyphenated alphabetic tokens (`/verify-abcdefghijkl-mnopqrstuv`) are masked without enumerating shapes.
+
+0.3.48 reports local `browser_act` validation failures as `not_executed`. Only worker transport failures after an act request remain `unknown`.
