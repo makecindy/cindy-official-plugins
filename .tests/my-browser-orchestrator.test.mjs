@@ -191,3 +191,16 @@ test('a saved policy with unconfirmed worker apply updates the settings baseline
   const next=await again.response;
   assert.equal(next.ok,true,JSON.stringify(next));
 });
+
+test('a single saved long-domain read block can still be removed',async t=>{
+  const {state,callTool}=await sandbox(t);
+  const host=['a'.repeat(63),'b'.repeat(63),'c'.repeat(63),'example.test'].join('.');
+  assert.ok(('+ read: '+host).length>190);
+  state.kv.policy=P.normalizePolicy({read:{block:[host]},interact:{allow:['*'],block:[]}});
+  await callTool('browser_policy',{action:'get'});
+  await callTool('browser_policy',{action:'remove',host});
+  const result=state.sent.at(-1).result;
+  assert.equal(result.ok,true,JSON.stringify(result));
+  assert.equal(state.kv.policy.read.block.includes(host),false);
+  assert.equal(state.confirmCalls.length,1);
+});

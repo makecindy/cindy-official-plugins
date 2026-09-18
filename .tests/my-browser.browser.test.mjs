@@ -231,6 +231,11 @@ test('real Chrome: sandbox messages → Node → MV3 → DOM, settings and negat
     assert.equal((await tool('browser_act',{url,kind:'type',selector:sel,text:'123456'})).error,'SENSITIVE_FIELD',sel+' must not be typable');
   }
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
+  const snapBudget=await tool('browser_read',{url,mode:'snapshot',maxChars:256,waitFor:'#readable'});
+  assert.ok(snapBudget.text.length<=256,'snapshot must honor maxChars');
+  assert.equal(snapBudget.truncated,true,'a cut snapshot text must set truncated');
+  const scopedEmpty=await tool('browser_read',{url,mode:'extract',selector:'#target-empty',multiple:true,from:'.row',waitMs:200,fields:{text:'a'}});
+  assert.equal(scopedEmpty.error,'CONTENT_NOT_READY','from readiness must not use matches outside the selected region');
   // A named credential descendant of an unnamed editing host is still sensitive. Field selectors
   // would miss that span and the innerText fast path would return the code.
   const unnamedHost=(await tool('browser_read',{url,mode:'text',selector:'#unnamed-editor'}));

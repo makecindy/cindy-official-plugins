@@ -256,7 +256,19 @@ async function pageOperation(job) {
     if (['snapshot','text','extract','content'].includes(action)) {
       const begin = performance.now();
       const waitSelector = a.waitFor || (action === 'extract' && a.multiple ? a.from : a.selector);
-      const ready = () => waitSelector && [...document.querySelectorAll(waitSelector)].some(visible);
+      // A derived `from` readiness check must look inside the selected region. A global match
+      // elsewhere would report ready, then extract zero rows from an empty target.
+      const waitScope = () => {
+        if (action === 'extract' && a.multiple && a.from && !a.waitFor && a.selector) return document.querySelector(a.selector);
+        return document;
+      };
+      const ready = () => {
+        if (!waitSelector) return false;
+        const scope = waitScope();
+        if (!scope) return false;
+        const nodes = scope === document ? document.querySelectorAll(waitSelector) : [...(scope.matches?.(waitSelector) ? [scope] : []), ...scope.querySelectorAll(waitSelector)];
+        return [...nodes].some(visible);
+      };
       if (waitSelector && !ready()) {
         const empty = () => a.emptySelector && [...document.querySelectorAll(a.emptySelector)].some(visible);
         if (!empty()) await new Promise(resolve => {
@@ -367,8 +379,9 @@ async function pageOperation(job) {
         elements.push(line); length += line.length;
       }
       // The snapshot text has its own cap; a cut there must be reported like any other.
-      const fullText = readableText(root,6001);
-      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,6000),truncated:truncated || fullText.length > 6000 || document.title.length > TITLE_MAX,untrusted_content:true};
+      const max = a.maxChars || 6000;
+      const fullText = readableText(root,max + 1);
+      return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,max),truncated:truncated || fullText.length > max || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
     let el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;

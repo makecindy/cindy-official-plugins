@@ -50,8 +50,10 @@ async function save(next, base) {
   const exclusions = current.interact.block.filter(h => !policy.interact.block.includes(h));
   if (added.length || unblocked.length || exclusions.length) {
     const detail = [...added.map(h => '+ interact: '+h),...unblocked.map(h => '+ read: '+h),...exclusions.map(h => '+ excluded interaction: '+h)].join('\n');
-    // Never truncate a grant list: the confirmation must show every affected site.
-    if (detail.length > 190) return fail('TOO_MANY_GRANTS','Grant fewer sites at a time so the confirmation can show every domain.');
+    const grants = added.length + unblocked.length + exclusions.length;
+    // Bound a batch of new grants, not a single already-saved host. A long but valid domain
+    // can be blocked without confirmation, so the same host must remain removable.
+    if (grants > 1 && detail.length > 190) return fail('TOO_MANY_GRANTS','Grant fewer sites at a time so the confirmation can show every domain.');
     const r = await cindy.confirm({body:detail+'\nInteraction allows any button/form, including send, delete and pay. Allow these sites?',confirmText:'Allow',cancelText:'Cancel',danger:true});
     if (!r.ok || !r.confirmed) return fail('PERMISSION_NOT_GRANTED','No permissions were changed. The user cancelled or confirmation was unavailable.');
     const fresh = await load();

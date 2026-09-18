@@ -154,3 +154,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.43 redacts a credential that shares a path segment with a reset/verify context word (`/verify-<token>`, `/reset-token-<id>`). Ordinary context-only segments such as `/reset-password/success` stay intact. A KV save that the worker does not confirm still updates the settings baseline so the next save is not blocked by `POLICY_CHANGED`.
 
 0.3.44 keeps descriptive same-segment paths. A remainder sharing a context word is masked only when it is long and contains a digit, so `/login-account-settings-tab-details` stays identifiable while UUID/reset tokens are still redacted.
+
+0.3.45 honors `maxChars` on snapshot text, scopes default `from` readiness to the selected extract region, and lets a single already-saved long domain be unblocked instead of failing `TOO_MANY_GRANTS`.
