@@ -152,3 +152,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.42 lets `remove` and the settings chips delete a saved `interact.block` exclusion. Upgrade leftovers could not be cleared before: `P.check` still denied the site, and the settings page only rendered the list as text. Removing an exclusion still requires confirmation.
 
 0.3.43 redacts a credential that shares a path segment with a reset/verify context word (`/verify-<token>`, `/reset-token-<id>`). Ordinary context-only segments such as `/reset-password/success` stay intact. A KV save that the worker does not confirm still updates the settings baseline so the next save is not blocked by `POLICY_CHANGED`.
+
+0.3.44 keeps descriptive same-segment paths. A remainder sharing a context word is masked only when it is long and contains a digit, so `/login-account-settings-tab-details` stays identifiable while UUID/reset tokens are still redacted.
