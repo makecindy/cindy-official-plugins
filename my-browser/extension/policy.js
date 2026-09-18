@@ -126,13 +126,11 @@
       const parts = words(decoded);
       if (parts.some(word => CONTEXT_WORDS.has(word))) {
         context = true;
-        // Ordinary slugs such as /login-account-settings-tab-details share a context word but
-        // are not opaque tokens. A same-segment remainder is masked only when it is long and
-        // contains a digit, which covers UUID/reset tokens without dropping descriptive paths.
-        const rest = parts.filter(word => !CONTEXT_WORDS.has(word));
-        const remainder = rest.join('');
-        const opaquePart = rest.length === 1 && rest[0].length >= CREDENTIAL_MIN_LENGTH;
-        if (remainder.length >= CREDENTIAL_MIN_LENGTH && (/\d/.test(remainder) || opaquePart)) { segments[i] = 'REDACTED'; changed = true; }
+        // Remainder is judged as one string, not per hyphenated piece. Split tokens such as
+        // /verify-abcdefghijkl-mnopqrstuv would otherwise leak. Short leftovers (/verify-email)
+        // stay; a long leftover is treated as the credential.
+        const remainder = parts.filter(word => !CONTEXT_WORDS.has(word)).join('');
+        if (remainder.length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }
         continue;
       }
       if (context && decoded.length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }

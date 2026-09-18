@@ -158,3 +158,5 @@ provisioning 保持空定向受众。不代表市场准入、商店提交、push
 0.3.45 让 snapshot 遵守 `maxChars`，将默认 `from` 就绪检查限制在选中的 extract 区域内，并允许解除单个已保存的超长域名拦截，而不再误报 `TOO_MANY_GRANTS`。
 
 0.3.46 同时遮蔽与上下文同段的纯字母长令牌（`/verify-abcdefghijklmnop`），多词描述性路径仍保留。
+
+0.3.47 把同段上下文词之后的剩余部分当作一整段凭证，因此带连字符的字母令牌（`/verify-abcdefghijkl-mnopqrstuv`）也会被遮蔽，不再按字符形状逐项判断。

@@ -158,3 +158,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.45 honors `maxChars` on snapshot text, scopes default `from` readiness to the selected extract region, and lets a single already-saved long domain be unblocked instead of failing `TOO_MANY_GRANTS`.
 
 0.3.46 also masks a long alphabetic token sharing a context segment (`/verify-abcdefghijklmnop`) while keeping multi-word descriptive slugs.
+
+0.3.47 treats the leftover after a same-segment context word as one credential string, so hyphenated alphabetic tokens (`/verify-abcdefghijkl-mnopqrstuv`) are masked without enumerating shapes.
