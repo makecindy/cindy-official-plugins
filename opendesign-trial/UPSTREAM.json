@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/nexu-io/open-design",
+  "tag": "v0.22.1 (apps/web package version)",
+  "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
+  "license": "Apache-2.0",
+  "integration": "Real FileViewer, element comments, manual editor, PreviewDrawOverlay and runtime bridges. Cindy owns conversation/model execution. Local Node routes replace daemon routes.",
+  "patches": [
+    "FileViewer: force native srcdoc interaction path; hide unavailable cloud sharing/handoff.",
+    "registry: scope raw/base URLs to isolated read-only project origin; source fetch omits preview watcher.",
+    "srcdoc snapshot: preserve hidden nodes by computed visibility; avoid index-based pruning after script removal, which incorrectly removed page content.",
+    "index.css: omit unused terminal styles.",
+    "zh-CN: rename composer action to Save feedback because it persists context rather than inserting into Cindy composer.",
+    "FullStudio adapter: same-session feedback, annotation images, manual saves, source refresh, hide unsupported history.",
+    "Both i18n providers: use host-injected locale with English fallback, omit OS/browser/localStorage preference discovery. Draft feedback labels reflect persistence rather than composer insertion.",
+    "CommentSendResult: preserve unknown without treating it as successful submission.",
+    "Entity decoders: decode once rather than reinterpreting newly decoded ampersands. PDF print title escapes script terminators; CSS selector fallback escapes backslashes.",
+    "FileViewer and registry: hash the exact source used for each manual edit, undo/redo, speaker-note or inspect save and supply expectedRevision to the local atomic writer.",
+    "Manual text editing: replace iframe-owned contenteditable/commit messages with the Cindy adapter ManualInlineTextEditor in the editor origin; private one-use authorization on trusted input, active target/original source checks, and fail-closed conflict settlement.",
+    "Manual canvas input: capture trusted gestures in the editor origin; iframe hit testing is advisory. Reject iframe selection/text/drag authority; derive text input position and drag displacement from parent pointer coordinates.",
+    "Persisted free-pin and file-comment identifiers use crypto.randomUUID rather than timestamp/Math.random.",
+    "UUID utility: preserve cryptographic getRandomValues fallback, remove Math.random fallback; reuse in free-pin sandbox bridge and file-comment creation.",
+    "Remove artifact-frame download authority, including thumbnails; srcdoc download links propose bounded blobs to a parent-owned trusted Save file control.",
+    "DownloadGate: accept explicitly marked version/presentation frames and portal trusted save controls into fullscreen/presentation; keep inactive thumbnails outside download authority.",
+    "Pod annotation elementId uses the shared cryptographic randomUUID helper instead of a timestamp.",
+    "Snapshot and export bridge correlation IDs use shared cryptographic randomUUID, removing timestamp/Math.random identifiers.",
+    "CodeQL: crypto-only analytics identity/error IDs; markup omission uses separators to avoid manufacturing tags; notes accept whitespace in raw-text closing tags; Markdown table code spans escape backslashes before pipes.",
+    "Parent-owned comment/Inspect/pod gestures authorize selection once; advisory updates retain selected identity. Bound comment target traversal to 1000 nodes and 500 visible candidates with matching parent limits.",
+    "Use shared fail-closed cryptographic UUIDs for runtime-state capture/restore and preview document, host, generation, measurement, scroll, base-update and transport-probe identifiers; preserve pending retry identity."
+  ],
+  "logo": {
+    "path": "apps/web/public/app-icon.png",
+    "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4"
+  },
+  "legacyComponents": {
+    "SketchEditor": "38bdb59d868831c5c98602da9522acc84cabd97e (v0.1.0)"
+  }
+}

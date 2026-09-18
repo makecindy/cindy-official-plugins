@@ -1,0 +1,442 @@
+{
+  "note": "Literal http(s) domains scanned in vendored .ts/.tsx/.js/.css, generated assets/studio.js and node/*.cjs; excludes dependency installation/build metadata. Includes inert documentation, namespaces and placeholders. Not a network allowlist. Domain evidence and reachability are recorded below. Runtime CSP restricts requests to loopback/self/data/blob.",
+  "domains": [
+    "127.0.0.1",
+    "192.168.1.10",
+    "_od_deck_base",
+    "api.whatsapp.com",
+    "cdnjs.cloudflare.com",
+    "dash.cloudflare.com",
+    "discord.gg",
+    "evil.example",
+    "figma.com",
+    "github.com",
+    "hertzen.com",
+    "html2canvas.hertzen.com",
+    "jspdf.default.namespaceuri",
+    "localhost",
+    "my-resource.openai.azure.com",
+    "od.local",
+    "open-design.ai",
+    "open-design.local",
+    "opensource.org",
+    "provider.example",
+    "react.dev",
+    "reactjs.org",
+    "remixicon.com",
+    "service.weibo.com",
+    "social-plugins.line.me",
+    "t.me",
+    "twitter.com",
+    "unpkg.com",
+    "us.posthog.com",
+    "vercel.com",
+    "www.cs.cmu.edu",
+    "www.facebook.com",
+    "www.fpdf.org",
+    "www.instagram.com",
+    "www.linkedin.com",
+    "www.myersdaily.org",
+    "www.phpied.com",
+    "www.reddit.com",
+    "www.w3.org",
+    "www.xiaohongshu.com",
+    "www.yworks.com"
+  ],
+  "dynamicExecutionSourceMatches": [
+    "source/latest/apps/web/src/components/file-viewer-render-mode.ts"
+  ],
+  "evidence": [
+    {
+      "domain": "127.0.0.1",
+      "paths": [
+        "assets/studio.js",
+        "node/server.cjs",
+        "source/latest/apps/web/src/i18n/locales/ar.ts",
+        "source/latest/apps/web/src/i18n/locales/de.ts",
+        "source/latest/apps/web/src/i18n/locales/en.ts",
+        "source/latest/apps/web/src/i18n/locales/es-ES.ts",
+        "source/latest/apps/web/src/i18n/locales/fa.ts",
+        "source/latest/apps/web/src/i18n/locales/fr.ts",
+        "source/latest/apps/web/src/i18n/locales/hu.ts",
+        "source/latest/apps/web/src/i18n/locales/id.ts",
+        "source/latest/apps/web/src/i18n/locales/it.ts",
+        "source/latest/apps/web/src/i18n/locales/ja.ts",
+        "source/latest/apps/web/src/i18n/locales/ko.ts",
+        "source/latest/apps/web/src/i18n/locales/pl.ts",
+        "source/latest/apps/web/src/i18n/locales/pt-BR.ts",
+        "source/latest/apps/web/src/i18n/locales/ru.ts",
+        "source/latest/apps/web/src/i18n/locales/th.ts",
+        "source/latest/apps/web/src/i18n/locales/tr.ts",
+        "source/latest/apps/web/src/i18n/locales/uk.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-CN.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-TW.ts",
+        "source/latest/packages/contracts/src/examples.ts"
+      ],
+      "conclusion": "Loopback runtime/project URLs; only fixed token-scoped local endpoints are used by the Cindy adapter."
+    },
+    {
+      "domain": "192.168.1.10",
+      "paths": [
+        "source/latest/apps/web/src/utils/uuid.ts"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "_od_deck_base",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/runtime/deck-thumbnail-parser.ts"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "api.whatsapp.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "cdnjs.cloudflare.com",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Bundled jsPDF 4.2.1 legacy PDFObject output branch dynamically loads pdfobject.min.js. No adapter call to pdfobjectnewwindow; editor script-src CSP rejects this origin. Upstream existing URL, no allowlist expansion."
+    },
+    {
+      "domain": "dash.cloudflare.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/components/FileViewer.tsx"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "discord.gg",
+      "paths": [
+        "source/latest/packages/contracts/src/prompts/system.ts"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "evil.example",
+      "paths": [
+        "source/latest/apps/web/src/runtime/deck-thumbnail-parser.ts"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "figma.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/i18n/locales/ar.ts",
+        "source/latest/apps/web/src/i18n/locales/de.ts",
+        "source/latest/apps/web/src/i18n/locales/en.ts",
+        "source/latest/apps/web/src/i18n/locales/es-ES.ts",
+        "source/latest/apps/web/src/i18n/locales/fa.ts",
+        "source/latest/apps/web/src/i18n/locales/fr.ts",
+        "source/latest/apps/web/src/i18n/locales/hu.ts",
+        "source/latest/apps/web/src/i18n/locales/id.ts",
+        "source/latest/apps/web/src/i18n/locales/it.ts",
+        "source/latest/apps/web/src/i18n/locales/ja.ts",
+        "source/latest/apps/web/src/i18n/locales/ko.ts",
+        "source/latest/apps/web/src/i18n/locales/pl.ts",
+        "source/latest/apps/web/src/i18n/locales/pt-BR.ts",
+        "source/latest/apps/web/src/i18n/locales/ru.ts",
+        "source/latest/apps/web/src/i18n/locales/th.ts",
+        "source/latest/apps/web/src/i18n/locales/tr.ts",
+        "source/latest/apps/web/src/i18n/locales/uk.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-CN.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-TW.ts",
+        "source/latest/packages/contracts/src/api/figma.ts"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "github.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/i18n/locales/ar.ts",
+        "source/latest/apps/web/src/i18n/locales/de.ts",
+        "source/latest/apps/web/src/i18n/locales/en.ts",
+        "source/latest/apps/web/src/i18n/locales/es-ES.ts",
+        "source/latest/apps/web/src/i18n/locales/fa.ts",
+        "source/latest/apps/web/src/i18n/locales/fr.ts",
+        "source/latest/apps/web/src/i18n/locales/hu.ts",
+        "source/latest/apps/web/src/i18n/locales/id.ts",
+        "source/latest/apps/web/src/i18n/locales/it.ts",
+        "source/latest/apps/web/src/i18n/locales/ja.ts",
+        "source/latest/apps/web/src/i18n/locales/ko.ts",
+        "source/latest/apps/web/src/i18n/locales/pl.ts",
+        "source/latest/apps/web/src/i18n/locales/pt-BR.ts",
+        "source/latest/apps/web/src/i18n/locales/ru.ts",
+        "source/latest/apps/web/src/i18n/locales/th.ts",
+        "source/latest/apps/web/src/i18n/locales/tr.ts",
+        "source/latest/apps/web/src/i18n/locales/uk.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-CN.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-TW.ts",
+        "source/latest/apps/web/src/styles/remixicon/remixicon.css",
+        "source/latest/packages/contracts/src/api/registry.ts",
+        "source/latest/packages/contracts/src/api/social-share.ts",
+        "source/latest/packages/contracts/src/examples.ts",
+        "source/latest/packages/contracts/src/prompts/system.ts"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "hertzen.com",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "html2canvas.hertzen.com",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "jspdf.default.namespaceuri",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "localhost",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/observability/iframe-error.ts"
+      ],
+      "conclusion": "Loopback runtime/project URLs; only fixed token-scoped local endpoints are used by the Cindy adapter."
+    },
+    {
+      "domain": "my-resource.openai.azure.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/i18n/locales/de.ts",
+        "source/latest/apps/web/src/i18n/locales/es-ES.ts",
+        "source/latest/apps/web/src/i18n/locales/hu.ts",
+        "source/latest/apps/web/src/i18n/locales/it.ts",
+        "source/latest/apps/web/src/i18n/locales/pl.ts",
+        "source/latest/apps/web/src/i18n/locales/pt-BR.ts",
+        "source/latest/apps/web/src/i18n/locales/tr.ts",
+        "source/latest/apps/web/src/i18n/locales/zh-TW.ts"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "od.local",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/components/FileViewer.tsx"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "open-design.ai",
+      "paths": [
+        "source/latest/apps/web/src/components/sketch-model.ts",
+        "source/latest/packages/contracts/src/analytics/events/ui-click.ts",
+        "source/latest/packages/contracts/src/plugins/plugin-url.ts",
+        "source/latest/packages/contracts/src/prompts/system.ts"
+      ],
+      "conclusion": "Upstream analytics or sketch metadata. Analytics provider is not mounted; no autonomous request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "open-design.local",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/components/FileViewer.tsx",
+        "source/latest/apps/web/src/providers/registry.ts"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "opensource.org",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "provider.example",
+      "paths": [
+        "source/latest/apps/web/src/analytics/provider.tsx"
+      ],
+      "conclusion": "Upstream examples, parsing base or XML namespace; not an adapter request target. CSP rejects non-loopback network origins."
+    },
+    {
+      "domain": "react.dev",
+      "paths": [
+        "source/latest/apps/web/src/components/FileViewer.tsx"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "reactjs.org",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "remixicon.com",
+      "paths": [
+        "source/latest/apps/web/src/styles/remixicon/remixicon.css"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "service.weibo.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "social-plugins.line.me",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "t.me",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "twitter.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "unpkg.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/runtime/react-component.ts",
+        "source/latest/packages/contracts/src/prompts/official-system.ts"
+      ],
+      "conclusion": "Upstream React-component srcdoc bootstrap CDN templates. Cindy forces native HTML srcdoc; inherited CSP rejects this remote script origin. Upstream existing URL, no allowlist expansion."
+    },
+    {
+      "domain": "us.posthog.com",
+      "paths": [
+        "source/latest/apps/web/src/analytics/experience-survey-contract.ts"
+      ],
+      "conclusion": "Upstream analytics or sketch metadata. Analytics provider is not mounted; no autonomous request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "vercel.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/components/FileViewer.tsx"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.cs.cmu.edu",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "www.facebook.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.fpdf.org",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "www.instagram.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.linkedin.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.myersdaily.org",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "www.phpied.com",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "www.reddit.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.w3.org",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/apps/web/src/runtime/srcdoc.ts",
+        "source/latest/apps/web/src/styles/chat.css",
+        "source/latest/apps/web/src/styles/primitives.css",
+        "source/latest/apps/web/src/styles/viewer/plugin-rail.css",
+        "source/latest/apps/web/src/styles/viewer/routines.css",
+        "source/latest/apps/web/src/styles/workspace/artifacts.css",
+        "source/latest/packages/components/src/form-controls.module.css",
+        "source/latest/packages/components/src/styles.css",
+        "source/latest/packages/contracts/src/runtime/html-injection-points.ts"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    },
+    {
+      "domain": "www.xiaohongshu.com",
+      "paths": [
+        "assets/studio.js",
+        "source/latest/packages/contracts/src/api/social-share.ts"
+      ],
+      "conclusion": "Upstream share/deploy provider URL. Share/handoff UI is hidden in this integration; no adapter request. CSP excludes remote network requests."
+    },
+    {
+      "domain": "www.yworks.com",
+      "paths": [
+        "assets/studio.js"
+      ],
+      "conclusion": "Upstream attribution, documentation, license, namespace or UI link literal; not an adapter fetch endpoint. CSP excludes remote resource loading."
+    }
+  ]
+}

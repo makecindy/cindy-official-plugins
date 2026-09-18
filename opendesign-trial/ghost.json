@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.83",
+  "id": "opendesign-trial",
+  "name": "OpenDesign",
+  "description": "Cindy 原生对话中的 OpenDesign 稿件：结果预览卡片、固定会话的交互网页和画板，支持连续修改同一稿件。",
+  "whenToUse": "用 OpenDesign 创建或继续修改网页稿件、布局、颜色、文字、交互或草图时使用。已有稿件的会话中，“改这里/继续修改”等默认针对当前稿件：先 opendesign_context，再 opendesign_update；不创建新会话。完成返回预览卡片，用户点击后在卡片所属会话右侧打开稿件。 OpenDesign 自身的选区批注、手动编辑和绘制标注位于稿件查看器。用户在查看器点击发送时，只继续绑定的原会话；无 AI 代办。",
+  "version": "0.4.25",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "opendesign_new",
+      "description": "在本次调用所属 session 创建第一份 OpenDesign 稿件，写入专用项目目录并返回可点击的静态预览卡片。不创建/切换会话、不打开目录、不调用模型。仅初次创建使用；已有稿件请先 context 再 update。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string",
+            "description": "由当前 Cindy 模型生成的完整交互 HTML。最大 1MiB。"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "opendesign_context",
+      "description": "继续修改前读取本 session 当前稿件全文、revision、草图、元素批注和绘制截图路径。结合本轮请求处理新的修改意见，历史意见仅作上下文；不打开窗口。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "opendesign_update",
+      "description": "将完整 HTML 写回本 session 的同一稿件，保留旧版本并返回新预览卡片。必须使用 context 返回的 expectedRevision；冲突时重新读取，避免覆盖用户修改。不会创建会话或打开窗口。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "由当前 Cindy 模型生成的完整交互 HTML。最大 1MiB。"
+          },
+          "expectedRevision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "html",
+          "expectedRevision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "opendesign_open",
+      "description": "读取当前稿件并在本次对话返回可点击的预览卡片；用户点击后才打开此 session 的右侧稿件。file 仅用于首次选定旧版项目中的 HTML 文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "opendesign_preview",
+      "description": "同 opendesign_open：发布当前稿件预览卡片，不自动打开窗口。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "command": "opendesign",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "sessionContext": true,
+  "preview": {
+    "hosts": [
+      "127.0.0.1"
+    ]
+  },
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "resident"
+  },
+  "card": {},
+  "fs": true,
+  "agent": {
+    "background": true
+  }
+}
