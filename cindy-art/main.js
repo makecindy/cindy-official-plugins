@@ -204,12 +204,12 @@ async function returnArtRequest(msg, capability, options) {
   if (aspectRatio) request.aspectRatioIntent = aspectRatio;
   if (qualityIntent) request.qualityIntent = qualityIntent;
   if (capability === 'image.generate' || capability === 'image.edit') {
-    for (const key of ['size', 'resolution', 'quality']) {
+    for (const key of ['aspectRatio', 'size', 'resolution', 'quality']) {
       if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) {
         return failCall(msg.callId, key + ' 必须是非空字符串');
       }
       const value = optionalString(args, key);
-      if (value) request[key] = value;
+      if (value) request[key === 'aspectRatio' ? 'aspectRatioIntent' : key] = value;
     }
   }
   if (references) request.referenceMedia = references;

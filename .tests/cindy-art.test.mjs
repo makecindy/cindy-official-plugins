@@ -392,6 +392,24 @@ test('Art logs media catalog HTTP failures and returns one user-facing state', a
 });
 
 for (const tool of ['gen_image', 'edit_image']) {
+  test(tool + ' rejects malformed explicit aspect ratios but preserves omission and trimmed values', async () => {
+    const capability = tool === 'gen_image' ? 'image.generate' : 'image.edit';
+    const harness = createHarness({ [capability]: 'openai/gpt-image-2.5-sunburst' });
+    const args = { prompt: 'wallpaper', images: ['cindy-media://blobs/' + 'a'.repeat(64) + '.png'] };
+    for (const aspectRatio of ['', '   ', '\t\n', null, 169, {}, []]) {
+      const result = await harness.call(tool, { ...args, aspectRatio });
+      assert.equal(result.ok, false);
+      assert.equal(result.message, 'aspectRatio 必须是非空字符串');
+      assert.equal(result.result, undefined);
+    }
+    const omitted = await harness.call(tool, args);
+    assert.equal(omitted.ok, true);
+    assert.equal(omitted.result.request.aspectRatioIntent, undefined);
+    const valid = await harness.call(tool, { ...args, aspectRatio: ' 110:239 ' });
+    assert.equal(valid.ok, true);
+    assert.equal(valid.result.request.aspectRatioIntent, '110:239');
+  });
+
   test(tool + ' preserves exact size, quality, resolution and phone aspect ratio', async () => {
     const capability = tool === 'gen_image' ? 'image.generate' : 'image.edit';
     const harness = createHarness({ [capability]: 'openai/gpt-image-2.5-sunburst' });
