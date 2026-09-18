@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "cindy-art",
   "name": "Art",
   "description": "用 Cindy 的图像与视频能力画图、改图、生成短视频,支持 $cindy-art 直接召唤。",
   "whenToUse": "需要生成或编辑图片、画画、插画、配图、头像、海报、P 图、加元素、换风格,或生成短视频、让图片动起来时使用；用户未明确指定其它媒体生成渠道时,优先使用 Art。",
-  "version": "1.13.5",
+  "version": "1.14.0",
   "minCindyVersion": "0.1.68",
   "locales": {
     "en": "locales/en.json",
@@ -15,10 +15,6 @@
   "author": "Cindy",
   "icon": "assets/icon.png",
   "entry": "main.js",
-  "slots": [
-    "cindy",
-    "tool"
-  ],
   "cindy": {
     "image": [
       "generate",
@@ -57,12 +53,7 @@
           },
           "aspectRatio": {
             "type": "string",
-            "enum": [
-              "1:1",
-              "3:2",
-              "2:3"
-            ],
-            "description": "可选。默认不传(跟随模型自动画幅);仅当用户明确要方图(1:1)/横图(3:2)/竖图(2:3)时才传。"
+            "description": "可选画幅，如 1:1、16:9、9:16、9:19.5。保留用户要求，由当前 Agent 按所选模型 Guide 转换；不要把横图或竖图强制改成 3:2 或 2:3。"
           },
           "tier": {
             "type": "string",
@@ -72,6 +63,18 @@
               "best"
             ],
             "description": "可选的质量意图。用户说草稿/快速出一版传 draft，明确要标准/普通质量传 standard，说要最好的/精修传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
+          },
+          "size": {
+            "type": "string",
+            "description": "可选像素尺寸，如 1760x3824，或 auto。保留用户期望的成品尺寸；生成前按 Guide 核对尺寸约束，必要时先生成合法尺寸再单独缩放成品，不要把成品尺寸直接当成模型一定支持的尺寸。"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "可选分辨率，如 1K、2K、4K、512。由当前 Agent 根据 Guide 映射，不能静默降到默认分辨率。"
+          },
+          "quality": {
+            "type": "string",
+            "description": "可选原生质量参数，如 high、xhigh、max、auto。用户明确指定时优先于 tier；按所选模型 Guide 校验，不能静默改为 medium。"
           }
         },
         "required": [
@@ -104,12 +107,7 @@
           },
           "aspectRatio": {
             "type": "string",
-            "enum": [
-              "1:1",
-              "3:2",
-              "2:3"
-            ],
-            "description": "可选。默认不传(跟随模型自动画幅);仅当用户明确要方图(1:1)/横图(3:2)/竖图(2:3)时才传。"
+            "description": "可选画幅，如 1:1、16:9、9:16、9:19.5。保留用户要求，由当前 Agent 按所选模型 Guide 转换；不要把横图或竖图强制改成 3:2 或 2:3。"
           },
           "tier": {
             "type": "string",
@@ -119,6 +117,18 @@
               "best"
             ],
             "description": "可选的质量意图。用户说草稿/快速出一版传 draft，明确要标准/普通质量传 standard，说要最好的/精修传 best；由当前 Agent 结合所选模型 Guide 映射成实际请求字段。"
+          },
+          "size": {
+            "type": "string",
+            "description": "可选像素尺寸，如 1760x3824，或 auto。保留用户期望的成品尺寸；生成前按 Guide 核对尺寸约束，必要时先生成合法尺寸再单独缩放成品，不要把成品尺寸直接当成模型一定支持的尺寸。"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "可选分辨率，如 1K、2K、4K、512。由当前 Agent 根据 Guide 映射，不能静默降到默认分辨率。"
+          },
+          "quality": {
+            "type": "string",
+            "description": "可选原生质量参数，如 high、xhigh、max、auto。用户明确指定时优先于 tier；按所选模型 Guide 校验，不能静默改为 medium。"
           }
         },
         "required": [

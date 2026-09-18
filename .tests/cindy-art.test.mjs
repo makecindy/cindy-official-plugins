@@ -139,10 +139,12 @@ function createHarness(
 }
 
 test('manifest exposes only the four media preparation tools', () => {
-  assert.equal(manifest.version, '1.13.5');
+  assert.equal(manifest.version, '1.14.0');
   assert.equal(manifest.minCindyVersion, '0.1.68');
   assert.match(manifest.whenToUse, /未明确指定其它媒体生成渠道时,优先使用 Art/);
-  assert.equal(manifest.slots.includes('card'), false);
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(manifest.card, undefined);
+  assert.equal(manifest.slots, undefined);
   assert.deepEqual(
     manifest.tools.map(({ name }) => name),
     ['gen_image', 'edit_image', 'gen_video', 'edit_video'],
@@ -387,4 +389,30 @@ test('Art logs media catalog HTTP failures and returns one user-facing state', a
       ],
     ]);
   }
+});
+
+for (const tool of ['gen_image', 'edit_image']) {
+  test(tool + ' preserves exact size, quality, resolution and phone aspect ratio', async () => {
+    const capability = tool === 'gen_image' ? 'image.generate' : 'image.edit';
+    const harness = createHarness({ [capability]: 'openai/gpt-image-2.5-sunburst' });
+    const result = await harness.call(tool, { prompt: 'wallpaper', images: ['cindy-media://blobs/' + 'a'.repeat(64) + '.png'],
+      size: '1320x2868', aspectRatio: '110:239', resolution: '4K', quality: 'max', tier: 'best' });
+    assert.equal(result.ok, true);
+    assert.equal(result.result.request.size, '1320x2868');
+    assert.equal(result.result.request.aspectRatioIntent, '110:239');
+    assert.equal(result.result.request.resolution, '4K');
+    assert.equal(result.result.request.quality, 'max');
+    assert.equal(result.result.request.qualityIntent, 'best');
+    assert.match(result.result.parameterGuidance, /invocation_id/);
+    const properties = manifest.tools.find((entry) => entry.name === tool).parameters.properties;
+    assert.equal(properties.aspectRatio.enum, undefined);
+    for (const key of ['size', 'resolution', 'quality']) assert.equal(properties[key].type, 'string');
+  });
+}
+
+test('omitted native parameters remain unspecified; malformed explicit values fail', async () => {
+  const harness = createHarness({ 'image.generate': 'openai/gpt-image-2' });
+  const result = await harness.call('gen_image', { prompt: 'cat' });
+  for (const key of ['size', 'resolution', 'quality', 'aspectRatioIntent']) assert.equal(result.result.request[key], undefined);
+  assert.equal((await harness.call('gen_image', { prompt: 'cat', size: 2048 })).ok, false);
 });

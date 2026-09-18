@@ -203,11 +203,23 @@ async function returnArtRequest(msg, capability, options) {
   };
   if (aspectRatio) request.aspectRatioIntent = aspectRatio;
   if (qualityIntent) request.qualityIntent = qualityIntent;
+  if (capability === 'image.generate' || capability === 'image.edit') {
+    for (const key of ['size', 'resolution', 'quality']) {
+      if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) {
+        return failCall(msg.callId, key + ' 必须是非空字符串');
+      }
+      const value = optionalString(args, key);
+      if (value) request[key] = value;
+    }
+  }
   if (references) request.referenceMedia = references;
 
   await finishCall(msg.callId, {
     note:
       'Art 已整理创作参数。除非用户在本次对话明确点名模型，request.modelId/request.providerId 就是 Art 详情页「Cindy 能力」为当前操作配置的精确模型来源；调用 Cindy Core media（完整工具名 mcp__cindy__media）prepare 时必须分别原样作为 model_id/provider_id，不要另行选型。referenceMedia.managedMediaUrls 是 Core 可读取的受管地址；attachedMediaCount 对应用户随当前消息交出的媒体，调用 Core 时继续使用对话中的原始媒体地址。Core 成功返回的 cindy-media:// 或历史 xdt-*:// 地址是可直接展示、复用和通过 attachments 交接的受管地址，不需要本地路径；图片结果请在最终回复中使用返回地址只嵌入展示一次。仅当用户明确询问文件存储位置或本地路径时，调用 mcp__cindy__media 的 resolve_local_path，并把 cindy-media://、xdt-image:// 或 xdt-video:// 地址原样放进 url。不要寻找或猜测路径，也不要扫描本地磁盘。',
+    parameterGuidance: capability.indexOf('image.') === 0
+      ? '调用 Core prepare 后按 input_schema 与 instructions 组装请求。保留 size、resolution、quality 和 aspectRatioIntent，不要把一个来源的枚举硬套给另一来源。明确 quality 优先于 qualityIntent；未指定时省略，让模型自行决定。qualityIntent=best 使用 Guide 支持的最高质量；没有质量字段时结合其分辨率能力，但不得覆盖用户明确分辨率。GPT Image 的 size 是生成尺寸；先核对边长步长、总像素、比例和边长上限。成品尺寸不符合生成约束时，选择合法生成尺寸，再按用户要求单独缩放成品并核对最终像素。不要把像素尺寸和 1K/2K/4K 分辨率档混作同一个参数。旧客户端 Guide 不支持某个明确要求时说明限制，不假称参数已生效。生成成功但保存失败时复用 Core 返回的 invocation_id 恢复已有结果，不要重新 prepare 付费生成。'
+      : undefined,
     request: request,
   });
 }
