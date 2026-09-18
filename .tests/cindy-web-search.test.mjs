@@ -183,13 +183,14 @@ function createSettingsHarness(options = {}) {
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.3.2');
-  assert.equal(manifest.minCindyVersion, '0.1.37');
+  assert.equal(manifest.version, '1.4.0');
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(manifest.minCindyVersion, '0.1.64');
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.deepEqual(manifest.cindy, { search: ['web'] });
-  assert.ok(manifest.slots.includes('cindy'));
   assert.deepEqual(manifest.setup, { requires: [] });
   const provider = manifest.tools[0].parameters.properties.provider;
-  assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily']);
+  assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily', 'search1api']);
   assert.equal(provider.enum.includes('auto'), false);
   const query = manifest.tools[0].parameters.properties.query;
   assert.equal(query.maxLength, 2000);
@@ -314,6 +315,178 @@ test('explicit provider wins over settings and provider failures never fall back
   assert.equal(failedCindy.networkCalls.length, 0);
   assert.equal(failedResult.ok, false);
   assert.equal(failedResult.message, 'Cindy AI quota exhausted');
+});
+
+test('manifest scopes the Search1API credential to its own host only', () => {
+  const secret = manifest.network.secrets.find((item) => item.key === 'search1api_api_key');
+  assert.ok(secret);
+  assert.deepEqual(secret.inject, {
+    header: 'Authorization',
+    format: 'Bearer {value}',
+    hosts: ['api.search1api.com'],
+  });
+  assert.ok(manifest.network.hosts.includes('api.search1api.com'));
+  assert.equal(manifest.network.hosts.includes('dashboard.search1api.com'), false);
+  assert.ok(settingsHtml.includes(`href="${secret.url}"`));
+  assert.match(settingsHtml, /<option value="search1api">/);
+});
+
+test('Search1API keeps the shared tool contract and maps link to url', async () => {
+  const harness = createHarness({
+    kvFetch: async () => {
+      throw new Error('explicit provider must not read kv');
+    },
+    networkResult(request) {
+      return {
+        ok: true,
+        status: 200,
+        body: JSON.stringify({
+          results: [
+            {
+              title: 'Search1API',
+              link: 'https://example.test/search1api',
+              snippet: 'BYO result',
+            },
+          ],
+        }),
+      };
+    },
+  });
+  const result = await harness.search({ provider: 'search1api', limit: 3 });
+
+  assert.equal(harness.cindyRequests.length, 0);
+  assert.equal(harness.networkCalls.length, 1);
+  const request = harness.networkCalls[0];
+  assert.equal(request.url, 'https://api.search1api.com/search');
+  assert.equal(request.method, 'POST');
+  // 凭证由主机按声明注入，插件自己不得写 Authorization。
+  assert.equal(request.headers.Authorization, undefined);
+  const body = JSON.parse(request.body);
+  assert.equal(body.query, 'Cindy');
+  assert.equal(body.max_results, 3);
+  assert.equal(body.crawl_results, 0);
+  assert.equal(body.search_service, undefined);
+  assert.equal(result.ok, true);
+  assert.equal(result.result.provider, 'search1api');
+  assert.equal(result.result.results.length, 1);
+  assert.equal(result.result.results[0].title, 'Search1API');
+  assert.equal(result.result.results[0].url, 'https://example.test/search1api');
+  assert.equal(result.result.results[0].snippet, 'BYO result');
+});
+
+test('disabled Cindy AI honours Search1API as the BYO default', async () => {
+  const harness = createHarness({
+    kv: { cindyAiEnabled: false, byoDefaultProvider: 'search1api' },
+    networkResult() {
+      return { ok: true, status: 200, body: JSON.stringify({ results: [] }) };
+    },
+  });
+  const result = await harness.search();
+
+  assert.equal(harness.cindyRequests.length, 0);
+  assert.equal(harness.networkCalls[0].url, 'https://api.search1api.com/search');
+  assert.equal(result.result.provider, 'search1api');
+});
+
+test('Search1API zero results arrive as an empty 200 result set', async () => {
+  const harness = createHarness({
+    networkResult() {
+      return { ok: true, status: 200, body: JSON.stringify({ results: [] }) };
+    },
+  });
+  const result = await harness.search({ provider: 'search1api' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result.provider, 'search1api');
+  assert.equal(result.result.results.length, 0);
+});
+
+for (const status of [400, 401, 402, 403, 404, 409, 422, 429, 500, 502, 503, 302]) {
+  test(`Search1API ${status} returns an actionable error without a raw status code`, async () => {
+    const harness = createHarness({
+      networkResult() {
+        return { ok: true, status, body: 'upstream secret detail' };
+      },
+    });
+    const result = await harness.search({ provider: 'search1api' });
+
+    assert.equal(result.ok, false);
+    assert.match(result.message, /Search1API/);
+    assert.doesNotMatch(result.message, /HTTP\s*\d{3}|\(\d{3}\)/);
+    assert.doesNotMatch(result.message, /upstream/);
+    assert.doesNotMatch(result.message, /secret detail/);
+  });
+}
+
+test('Search1API transport failures return an actionable network error', async () => {
+  const thrown = createHarness({
+    networkResult() {
+      throw new Error('getaddrinfo ENOTFOUND api.search1api.com');
+    },
+  });
+  const thrownResult = await thrown.search({ provider: 'search1api' });
+  assert.equal(thrownResult.ok, false);
+  assert.match(thrownResult.message, /Search1API/);
+  assert.doesNotMatch(thrownResult.message, /ENOTFOUND|搜索失败/);
+
+  const network = createHarness({
+    networkResult() {
+      return { ok: false, errorCode: 'NETWORK_UNREACHABLE', message: 'connect ETIMEDOUT 1.2.3.4:443' };
+    },
+  });
+  const networkResult = await network.search({ provider: 'search1api' });
+  assert.equal(networkResult.ok, false);
+  assert.match(networkResult.message, /检查网络/);
+  assert.doesNotMatch(networkResult.message, /ETIMEDOUT|1\.2\.3\.4/);
+});
+
+test('Search1API host credential failures point at the key, not the network', async () => {
+  const harness = createHarness({
+    networkResult() {
+      return { ok: false, errorCode: 'SECRET_MISSING', message: 'secret search1api_api_key is not configured' };
+    },
+  });
+  const result = await harness.search({ provider: 'search1api' });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Key/);
+  assert.match(result.message, /插件详情页/);
+  assert.doesNotMatch(result.message, /检查网络/);
+  assert.doesNotMatch(result.message, /search1api_api_key/);
+});
+
+test('Search1API unclassifiable host failures give both remedies and leak no diagnostics', async () => {
+  const harness = createHarness({
+    networkResult() {
+      return { ok: false, message: 'HostFetchError: proxy pipeline aborted (trace 0xdeadbeef)' };
+    },
+  });
+  const result = await harness.search({ provider: 'search1api' });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Key/);
+  assert.match(result.message, /网络/);
+  assert.doesNotMatch(result.message, /HostFetchError|proxy pipeline|0xdeadbeef|搜索失败/);
+});
+
+test('Search1API malformed responses fail without leaking raw bodies', async () => {
+  const badJson = createHarness({
+    networkResult() {
+      return { ok: true, status: 200, body: 'upstream secret detail' };
+    },
+  });
+  const badJsonResult = await badJson.search({ provider: 'search1api' });
+  assert.equal(badJsonResult.ok, false);
+  assert.doesNotMatch(badJsonResult.message, /upstream/);
+
+  const badShape = createHarness({
+    networkResult() {
+      return { ok: true, status: 200, body: JSON.stringify({ results: 'nope' }) };
+    },
+  });
+  const badShapeResult = await badShape.search({ provider: 'search1api' });
+  assert.equal(badShapeResult.ok, false);
+  assert.doesNotMatch(badShapeResult.message, /nope/);
 });
 
 test('settings controls stay disabled until initial preferences load', async () => {

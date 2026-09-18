@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy 内蔵のウェブ検索プラグインです。既定では Cindy AI を使い、自分の Brave または Tavily API キーでも公開ウェブを検索できます。キーはプラグイン詳細で設定し、ローカルで暗号化され、宣言済みホストへのリクエストにだけ注入されます。",
-  "whenToUse": "公開ウェブの検索、調査、ウェブページの発見、最新情報の確認に使用します。既定では Cindy AI を使い、Web Search プラグイン詳細で Brave または Tavily のキーも設定できます。",
+  "description": "Cindy 内蔵のウェブ検索プラグインです。既定では Cindy AI を使い、自分の Brave、Tavily、Search1API の API キーでも公開ウェブを検索できます。キーはプラグイン詳細で設定し、ローカルで暗号化され、宣言済みホストへのリクエストにだけ注入されます。",
+  "whenToUse": "公開ウェブの検索、調査、ウェブページの発見、最新情報の確認に使用します。既定では Cindy AI を使い、Web Search プラグイン詳細で Brave、Tavily、Search1API のキーも設定できます。",
   "tools": {
     "search_web": {
-      "description": "最大 2000 文字のクエリで公開ウェブを検索し、{ title, url, snippet } の結果一覧を返します。既定では Cindy AI を使い、Brave または Tavily も指定できます。{ provider, results } を返します。指定した Brave または Tavily のキーが未設定の場合は、返された message を変更せずユーザーに伝えてください。"
+      "description": "最大 2000 文字のクエリで公開ウェブを検索し、{ title, url, snippet } の結果一覧を返します。既定では Cindy AI を使い、Brave、Tavily、Search1API も指定できます。{ provider, results } を返します。指定した検索元のキーが未設定の場合は、返された message を変更せずユーザーに伝えてください。"
     }
   }
 }

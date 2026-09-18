@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy's built-in web search plugin. It uses Cindy AI by default, or searches the public web with your own Brave or Tavily API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
-  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Cindy AI is used by default; you can also configure a Brave or Tavily key in the Web Search plugin details.",
+  "description": "Cindy's built-in web search plugin. It uses Cindy AI by default, or searches the public web with your own Brave, Tavily, or Search1API API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
+  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Cindy AI is used by default; you can also configure a Brave, Tavily, or Search1API key in the Web Search plugin details.",
   "tools": {
     "search_web": {
-      "description": "Search the public web with a query of at most 2000 characters and return a list of { title, url, snippet } results. Cindy AI is used by default; Brave or Tavily may also be selected. Returns { provider, results }. If the selected Brave or Tavily key is not configured, return the provided message to the user unchanged."
+      "description": "Search the public web with a query of at most 2000 characters and return a list of { title, url, snippet } results. Cindy AI is used by default; Brave, Tavily, or Search1API may also be selected. Returns { provider, results }. If the selected provider's key is not configured, return the provided message to the user unchanged."
     }
   }
 }
