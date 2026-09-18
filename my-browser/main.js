@@ -61,7 +61,7 @@ async function save(next, base) {
   if (!r.ok) return fail('SAVE_FAILED','Permissions could not be saved. Refresh settings before trying again.');
   const applied = await node('setPolicy',{policy});
   const uncertain = applied?.error === 'REVOCATION_UNCONFIRMED' && applied.applied === true;
-  if (!applied?.ok && !uncertain) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true};
+  if (!applied?.ok && !uncertain) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true,policy};
   channel.postMessage({type:'policy-changed'});
   return {ok:true,policy,...(uncertain ? {warning:'REVOCATION_UNCONFIRMED',message:applied.message} : {})};
 }

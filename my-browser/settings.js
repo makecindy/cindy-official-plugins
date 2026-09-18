@@ -83,8 +83,11 @@ $('#save').onclick = async () => {
   busy=true;render();hint(T.saving);
   try {
     const result = await rpc('save-request',{policy:state,base});
-    if (!result.ok) throw new Error(result.message || T.failed);
-    state=P.normalizePolicy(result.policy);base=structuredClone(state);dirty=false;hint(result.warning === 'REVOCATION_UNCONFIRMED' ? T.savedUncertain : T.saved);
+    if (result.ok) {
+      state=P.normalizePolicy(result.policy);base=structuredClone(state);dirty=false;hint(result.warning === 'REVOCATION_UNCONFIRMED' ? T.savedUncertain : T.saved);
+    } else if (result.saved && result.policy) {
+      state=P.normalizePolicy(result.policy);base=structuredClone(state);dirty=false;hint(result.message || T.failed,true);
+    } else throw new Error(result.message || T.failed);
   } catch(e) {hint(e.message,true);}
   finally {busy=false;render();}
 };

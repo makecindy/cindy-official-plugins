@@ -150,3 +150,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.41 distinguishes applied permissions from uncertain earlier actions: saving an applied policy succeeds with an explicit warning, updates the settings baseline and clears unsaved changes. It does not claim the earlier action completed. Text, content, snapshot and link projections share one sensitive-subtree walk, so a named credential descendant inside an unnamed editing host is not returned via innerText.
 
 0.3.42 lets `remove` and the settings chips delete a saved `interact.block` exclusion. Upgrade leftovers could not be cleared before: `P.check` still denied the site, and the settings page only rendered the list as text. Removing an exclusion still requires confirmation.
+
+0.3.43 redacts a credential that shares a path segment with a reset/verify context word (`/verify-<token>`, `/reset-token-<id>`). Ordinary context-only segments such as `/reset-password/success` stay intact. A KV save that the worker does not confirm still updates the settings baseline so the next save is not blocked by `POLICY_CHANGED`.

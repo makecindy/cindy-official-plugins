@@ -111,8 +111,8 @@
   }
   const words = text => text.replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   // Only segments following a credential-context word are masked, so ordinary deep paths
-  // (/commit/<sha>, /user/12345, /wiki/long-article-title) keep working.
-  const isContext = segment => words(normalizeEncoding(segment)).some(word => CONTEXT_WORDS.has(word));
+  // (/commit/<sha>, /user/12345, /wiki/long-article-title) keep working. A context word and a
+  // long remainder in the same segment (/verify-<token>, /reset-token-<id>) is also a credential.
   // A credential is judged by length alone, on the decoded segment. Charset heuristics are exactly
   // what repeated percent-encoding kept defeating, so a long segment after reset/verify is treated
   // as the credential rather than being pattern-matched.
@@ -122,8 +122,15 @@
     let context = false, changed = false;
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
-      if (isContext(segment)) { context = true; continue; }
-      if (context && normalizeEncoding(segment).length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }
+      const decoded = normalizeEncoding(segment);
+      const parts = words(decoded);
+      if (parts.some(word => CONTEXT_WORDS.has(word))) {
+        context = true;
+        const remainder = parts.filter(word => !CONTEXT_WORDS.has(word)).join('');
+        if (remainder.length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }
+        continue;
+      }
+      if (context && decoded.length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }
     }
     return changed ? segments.join('/') : path;
   }

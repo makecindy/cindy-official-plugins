@@ -84,6 +84,9 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r('https://example.test/user/12345'),'https://example.test/user/12345');
   assert.equal(r('https://example.test/reset-password/success'),'https://example.test/reset-password/success');
   assert.equal(r('https://example.test/notifications/mentions'),'https://example.test/notifications/mentions');
+  assert.equal(r(`https://example.test/verify-${code}`).includes(code),false,'a verify- prefix and token in one segment must be masked');
+  assert.equal(r(`https://example.test/reset-token-${code}`).includes(code),false,'a reset-token- prefix and token in one segment must be masked');
+  assert.equal(r('https://example.test/verify-email'),'https://example.test/verify-email');
   // Credential semantics are matched per word and nested URLs are inspected recursively, so composite
   // key names and ?next=/reset/<token> cannot smuggle a credential through.
   assert.equal(r(`https://example.test/cb?reset_token=${code}`).includes(code),false,'a composite key must be masked');

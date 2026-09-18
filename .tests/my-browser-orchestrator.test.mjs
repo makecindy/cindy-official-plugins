@@ -177,3 +177,17 @@ test('remove clears a saved interaction exclusion so the site can be granted aga
   assert.equal(state.kv.policy.interact.block.includes(REVOKED),false);
   assert.equal(P.check(state.worker,'click','https://'+REVOKED).ok,true,'the exclusion must not keep blocking after remove');
 });
+
+test('a saved policy with unconfirmed worker apply updates the settings baseline',async t=>{
+  const {state,save}=await sandbox(t);
+  state.policyReply={ok:false,error:'NODE_UNAVAILABLE'};
+  const update=save(REVOKING,structuredClone(INITIAL));await update.done;
+  const result=await update.response;
+  assert.equal(result.ok,false);
+  assert.equal(result.saved,true);
+  assert.deepEqual(result.policy.interact.allow,['example.test']);
+  state.policyReply={ok:true};
+  const again=save(structuredClone(result.policy),result.policy);await again.done;
+  const next=await again.response;
+  assert.equal(next.ok,true,JSON.stringify(next));
+});
