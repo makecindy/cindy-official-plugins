@@ -129,8 +129,10 @@
         // Ordinary slugs such as /login-account-settings-tab-details share a context word but
         // are not opaque tokens. A same-segment remainder is masked only when it is long and
         // contains a digit, which covers UUID/reset tokens without dropping descriptive paths.
-        const remainder = parts.filter(word => !CONTEXT_WORDS.has(word)).join('');
-        if (remainder.length >= CREDENTIAL_MIN_LENGTH && /\d/.test(remainder)) { segments[i] = 'REDACTED'; changed = true; }
+        const rest = parts.filter(word => !CONTEXT_WORDS.has(word));
+        const remainder = rest.join('');
+        const opaquePart = rest.length === 1 && rest[0].length >= CREDENTIAL_MIN_LENGTH;
+        if (remainder.length >= CREDENTIAL_MIN_LENGTH && (/\d/.test(remainder) || opaquePart)) { segments[i] = 'REDACTED'; changed = true; }
         continue;
       }
       if (context && decoded.length >= CREDENTIAL_MIN_LENGTH) { segments[i] = 'REDACTED'; changed = true; }

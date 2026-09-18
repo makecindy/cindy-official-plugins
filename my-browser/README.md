@@ -156,3 +156,5 @@ Read failures after starting navigation report `execution: unknown`: the website
 0.3.44 keeps descriptive same-segment paths. A remainder sharing a context word is masked only when it is long and contains a digit, so `/login-account-settings-tab-details` stays identifiable while UUID/reset tokens are still redacted.
 
 0.3.45 honors `maxChars` on snapshot text, scopes default `from` readiness to the selected extract region, and lets a single already-saved long domain be unblocked instead of failing `TOO_MANY_GRANTS`.
+
+0.3.46 also masks a long alphabetic token sharing a context segment (`/verify-abcdefghijklmnop`) while keeping multi-word descriptive slugs.

@@ -156,3 +156,5 @@ provisioning 保持空定向受众。不代表市场准入、商店提交、push
 0.3.44 保留描述性同段路径：与上下文词同段的剩余部分仅在足够长且含数字时遮蔽，因此 `/login-account-settings-tab-details` 仍可辨认，UUID／重置令牌继续被遮蔽。
 
 0.3.45 让 snapshot 遵守 `maxChars`，将默认 `from` 就绪检查限制在选中的 extract 区域内，并允许解除单个已保存的超长域名拦截，而不再误报 `TOO_MANY_GRANTS`。
+
+0.3.46 同时遮蔽与上下文同段的纯字母长令牌（`/verify-abcdefghijklmnop`），多词描述性路径仍保留。
