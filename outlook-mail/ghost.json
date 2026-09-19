@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.75",
+  "id": "outlook-mail",
+  "name": "Outlook 邮箱",
+  "description": "搜索、阅读、发送、起草和整理 Outlook 与 Microsoft 365 邮件。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
+  "whenToUse": "需要连接 Outlook、Hotmail、Live 或 Microsoft 365 企业邮箱，查询、阅读、发送、起草或整理邮件时使用，包括世纪互联中国区微软托管邮箱。",
+  "version": "2.1.0",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "outlook_accounts",
+      "description": "同时列出全球版和世纪互联中国区的全部已连接账号、各区默认账号及应用配置状态。支持同区多个账号和两区同时登录；不读取邮件或返回令牌。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "outlook_mail",
+      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "search",
+              "read",
+              "send",
+              "draft",
+              "list_folders",
+              "mark_read",
+              "mark_unread",
+              "move"
+            ]
+          },
+          "account": {
+            "type": "string",
+            "description": "outlook_accounts 返回的账号 ID。发信前核对发件账号；省略则用选定区域的默认账号。"
+          },
+          "cloud": {
+            "type": "string",
+            "enum": [
+              "global",
+              "china"
+            ],
+            "description": "全球版／世纪互联中国区。明确 account 时自动识别区域；都不传使用设置页默认区域（初始 global）。"
+          },
+          "query": {
+            "type": "string",
+            "description": "search：Microsoft KQL 全文搜索，可写 from:person@example.test。不能与 from/subject/unread/since/before 混用；微软全文搜索最多返回 1000 封。",
+            "maxLength": 1000
+          },
+          "from": {
+            "type": "string",
+            "description": "search：精确匹配发件邮箱。"
+          },
+          "subject": {
+            "type": "string",
+            "description": "search：主题包含文字；send/draft：主题，允许空字符串。",
+            "maxLength": 998
+          },
+          "unread": {
+            "type": "boolean",
+            "description": "search：true 未读，false 已读，省略不限制。"
+          },
+          "since": {
+            "type": "string",
+            "description": "search：包含起始时间，ISO 日期按 UTC，时间需含时区。"
+          },
+          "before": {
+            "type": "string",
+            "description": "search：不包含结束时间，ISO 日期按 UTC，时间需含时区。"
+          },
+          "folder": {
+            "type": "string",
+            "description": "search：指定文件夹；list_folders：列其子文件夹。省略分别为全部邮件／根文件夹。使用查询得到的 ID，或 inbox、sentitems、drafts 等微软固定名。"
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "每页条数，默认 10，最多 50。"
+          },
+          "page_token": {
+            "type": "string",
+            "description": "上一页返回的 next_page_token，原样传回。同一 action、account、cloud；翻页时不要同时传筛选条件或 max_results。"
+          },
+          "message_id": {
+            "type": "string",
+            "description": "read/mark_read/mark_unread/move：原始邮件 ID。移动后使用返回的新 ID。"
+          },
+          "target_folder": {
+            "type": "string",
+            "description": "move：目标文件夹 ID 或微软固定名。自定义文件夹先用 list_folders 查到 ID。"
+          },
+          "body_text": {
+            "type": "string",
+            "description": "send/draft：纯文本正文，允许空字符串。请求总大小不超过 250 KB。",
+            "maxLength": 200000
+          },
+          "to": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100
+              }
+            ],
+            "description": "send/draft：to 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+          },
+          "cc": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100
+              }
+            ],
+            "description": "send/draft：cc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+          },
+          "bcc": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100
+              }
+            ],
+            "description": "send/draft：bcc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "command": "outlook-mail",
+  "launch": "on-demand",
+  "settingsHtml": "settings.html",
+  "author": "Cindy plugin contributor",
+  "network": {
+    "hosts": [
+      "login.microsoftonline.com",
+      "graph.microsoft.com",
+      "login.chinacloudapi.cn",
+      "microsoftgraph.chinacloudapi.cn"
+    ],
+    "secrets": [
+      {
+        "key": "outlook_global",
+        "label": "微软账号（全球版）",
+        "source": "oauth",
+        "hint": "在插件详情页连接账号；企业是否需要管理员批准取决于租户策略。",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "graph.microsoft.com"
+          ]
+        },
+        "oauth": {
+          "authorizeUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+          "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+          "scopes": [
+            "openid",
+            "offline_access",
+            "https://graph.microsoft.com/User.Read",
+            "https://graph.microsoft.com/Mail.ReadWrite",
+            "https://graph.microsoft.com/Mail.Send"
+          ],
+          "pkce": true,
+          "redirectPort": 53687,
+          "extraAuthorizeParams": {
+            "prompt": "select_account"
+          },
+          "identity": {
+            "url": "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
+            "labelPath": "id",
+            "displayTemplate": "{displayName} · {userPrincipalName}"
+          },
+          "clientId": "de0423c6-9670-4774-bdfd-47d6912a4781"
+        }
+      },
+      {
+        "key": "outlook_china",
+        "label": "微软账号（世纪互联中国区）",
+        "source": "oauth",
+        "hint": "在插件详情页连接账号；企业是否需要管理员批准取决于租户策略。",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "microsoftgraph.chinacloudapi.cn"
+          ]
+        },
+        "oauth": {
+          "authorizeUrl": "https://login.chinacloudapi.cn/organizations/oauth2/v2.0/authorize",
+          "tokenUrl": "https://login.chinacloudapi.cn/organizations/oauth2/v2.0/token",
+          "scopes": [
+            "openid",
+            "offline_access",
+            "https://microsoftgraph.chinacloudapi.cn/User.Read",
+            "https://microsoftgraph.chinacloudapi.cn/Mail.ReadWrite",
+            "https://microsoftgraph.chinacloudapi.cn/Mail.Send"
+          ],
+          "pkce": true,
+          "redirectPort": 53688,
+          "extraAuthorizeParams": {
+            "prompt": "select_account"
+          },
+          "identity": {
+            "url": "https://microsoftgraph.chinacloudapi.cn/v1.0/me?$select=id,displayName,mail,userPrincipalName",
+            "labelPath": "id",
+            "displayTemplate": "{displayName} · {userPrincipalName}"
+          }
+        }
+      }
+    ]
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "setup": {
+    "requires": []
+  }
+}

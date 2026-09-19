@@ -1,0 +1,4 @@
+Outlook Mail 2.1.0 includes no bundled third-party libraries or executable runtime.
+PowerShell, Microsoft Graph SDK and their dependencies are no longer distributed.
+Plugin source is covered by the repository Apache-2.0 LICENSE and NOTICE.
+Microsoft Graph is accessed as a remote service through Cindy Host-managed OAuth.

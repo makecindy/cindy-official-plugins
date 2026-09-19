@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/settings.css"></head>
+<body>
+  <h1 data-i18n="title">Connect your mailbox</h1>
+  <p class="hint" data-i18n="intro">Sign in with Microsoft. Cindy manages authorization and tokens.</p>
+  <label for="cloud" data-i18n="region">Email service</label>
+  <select id="cloud"><option value="global" data-i18n="global">Outlook / Microsoft 365</option><option value="china" data-i18n="china">Microsoft 365 China (21Vianet)</option></select>
+  <p class="hint" data-i18n="boundary">The region belongs to your email service, independently of your Cindy region. Other providers and on-premises Exchange are not supported.</p>
+  <p id="default-label" class="hint"></p>
+  <button id="default-cloud" type="button" data-i18n="defaultCloud">Use this service by default</button>
+  <button id="connect" class="primary" type="button" data-i18n="connect" disabled>Connect account</button>
+  <p id="setup-note" class="hint"></p>
+  <details id="advanced"><summary data-i18n="advanced">Application setup</summary>
+    <p class="hint" data-i18n="setupHelp">For plugin maintainers or your IT administrator: register a public desktop application and supply its Client ID. No client secret is needed. Changing it requires reconnecting existing accounts.</p>
+    <p class="hint"><span data-i18n="redirect">Registered redirect URI</span><br><code id="redirect"></code></p>
+    <label for="client-id">Client ID</label><input id="client-id" type="text" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    <div class="actions"><button id="save-client" type="button" data-i18n="save">Save application</button><button id="reset-client" type="button" data-i18n="reset">Clear custom application</button></div>
+    <p class="hint"><a id="portal" href="https://portal.azure.com" data-i18n="portal">Microsoft application registration</a></p>
+  </details>
+  <h2 class="accounts-title" data-i18n="accountsTitle">All mail accounts</h2>
+  <p class="hint" data-i18n="multiAccountHelp">Global and China accounts stay connected together. Choose a service above to add another account.</p>
+  <div id="accounts" aria-live="polite"></div>
+  <p class="hint" data-i18n="permissions">Permissions: account identity, email read/write and sending, and offline access. Enterprise policies may require administrator approval.</p>
+  <p id="status" role="status" aria-live="polite"></p>
+  <script src="/settings.js"></script>
+</body></html>
