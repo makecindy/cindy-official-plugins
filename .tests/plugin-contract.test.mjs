@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { validateGhostManifest } from './contracts/plugin-manifest.dae1c66.mjs';
@@ -8,7 +9,7 @@ import { validateGhostManifest } from './contracts/plugin-manifest.dae1c66.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 
 const MAX_BASIC_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
-const MAX_SERVER_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_SERVER_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ICON_BYTES = 512 * 1024;
 const MAX_LOCALE_BYTES = 64 * 1024;
@@ -329,8 +330,18 @@ function validateSetup(pluginDir, raw, manifest) {
   return { requires: groups };
 }
 
-function validatePluginSource(pluginDir, manifest) {
-  const files = trackedFiles(pluginDir);
+function validatePluginSource(pluginDir, manifest, files = trackedFiles(pluginDir)) {
+  // Only exact declared outputs may defer entry/resource existence to packaging.
+  // The collector validates the complete declaration and all final references;
+  // locale/Skill/Manual contents still receive the existing source validation.
+  const dependencyConfig = files.get('binary-dependencies.json');
+  const collectedTargets = dependencyConfig
+    ? new Set(readJson(dependencyConfig.absolutePath, 256 * 1024).dependencies.flatMap(
+      (dependency) => dependency.assets.flatMap(
+        (asset) => asset.files.map((file) => file.target),
+      ),
+    ))
+    : new Set();
   assert.ok(files.size > 0, `${pluginDir}: no tracked package files`);
   const seenFolded = new Map();
   let totalBytes = 0;
@@ -371,9 +382,10 @@ function validatePluginSource(pluginDir, manifest) {
     .filter(Boolean);
   if (manifest.node) declaredFiles.push(manifest.node.entry, ...(manifest.node.entries ?? []));
   for (const relativePath of declaredFiles) {
+    if (!files.has(relativePath) && collectedTargets.has(relativePath)) continue;
     requireTrackedFile(files, pluginDir, relativePath, relativePath === manifest.icon ? MAX_ICON_BYTES : undefined);
   }
-  if (manifest.icon) {
+  if (manifest.icon && files.has(manifest.icon)) {
     assert.ok(fs.statSync(files.get(manifest.icon).absolutePath).size > 0, `${pluginDir}: icon is empty`);
   }
 
@@ -542,6 +554,29 @@ test('mainView HTML must exist among tracked package files', () => {
     /declared file is not tracked: missing-main-view\.html/,
     'package validation must reject a missing mainView HTML file',
   );
+});
+
+test('source checks defer only exact declared dependency outputs to final packaging', (t) => {
+  const pluginDir = 'cindy-github';
+  const fixture = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-source-dependencies-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const configPath = path.join(temp, 'binary-dependencies.json');
+  fs.writeFileSync(configPath, JSON.stringify({ schemaVersion: 1, dependencies: [{
+    name: 'fixture', version: '1.0.0', license: 'LICENSE',
+    assets: [{
+        url: 'https://downloads.example.com/v1.0.0/fixture.zip', sha256: '0'.repeat(64), format: 'zip',
+        files: [{ source: 'view.html', target: 'vendor/fixture/view.html' }],
+    }],
+  }] }));
+  const files = trackedFiles(pluginDir);
+  files.set('binary-dependencies.json', { mode: '100644', absolutePath: configPath });
+  const collected = { ...fixture, mainView: { html: 'vendor/fixture/view.html' } };
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, collected, files));
+  assert.throws(() => validatePluginSource(pluginDir, collected), /declared file is not tracked/);
+  assert.throws(() => validatePluginSource(pluginDir, {
+    ...fixture, mainView: { html: 'vendor/fixture/linux-x64/undeclared.html' },
+  }, files), /declared file is not tracked/);
 });
 
 test('authoring docs provide a harness-independent Manifest-v3 path', () => {

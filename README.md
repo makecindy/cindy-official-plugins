@@ -359,13 +359,22 @@ and the declared resources—do not wrap them in an extra `my-plugin/` directory
 After reviewing and committing the plugin files, create the exact archive from
 Git-tracked `HEAD` content with the repository packager:
 
+Small binaries (up to 10 MiB combined per plugin, across all platforms) may stay in Git under the existing
+license/review/package-size rules. To keep larger prebuilt dependencies out of
+Git, opt into the declarative
+[build-time dependency mechanism](docs/binary-dependencies.md). It collects all
+platforms into the same package and requires Python 3.11+ only for plugins that
+declare dependencies. Legacy plugins keep the original toolchain; there is no
+client-side dependency download.
+
 ```bash
 .github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
 unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
 
 The script uses `git archive` for the plugin directory, adds the fixed repository
-legal files, and validates the result. It intentionally excludes uncommitted and
+legal files, collects declared binary dependencies when present, and validates
+the result. It intentionally excludes uncommitted and
 untracked files from the plugin directory. Never
 recursively ZIP a plugin working directory: local `.env`, `.npmrc`, private keys,
 or other credentials may be included. If a harness packages an uncommitted

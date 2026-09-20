@@ -218,6 +218,21 @@ every time or install your own `prepare-commit-msg` hook.
 
 ## Security issues
 
+### Prebuilt dependencies
+
+Use [binary-dependencies.json](docs/binary-dependencies.md) for build-time
+collection of large dependencies; small binaries may still be committed directly.
+CI caps directly tracked binaries at 10 MiB combined per plugin, across all
+platforms. New plugins and binary additions/modifications trigger the check;
+source/docs-only edits and binary deletions do not force legacy migrations.
+Both paths retain license/review/package-size requirements.
+Custom build hooks are not accepted.
+Dependency declaration changes require a plugin version bump and maintainer
+review of provenance, hashes and redistribution licenses.
+`node --test .tests/binary-dependencies.test.mjs` runs the offline packaging
+regressions; PR CI also dry-runs the actual changed packages. Downloads and
+packaging run separately from the OIDC publishing job.
+
 Do not disclose vulnerabilities, credentials, or exploitable details in public
 issues, pull requests, or discussions. Follow the private reporting process in
 [`SECURITY.md`](SECURITY.md).

@@ -28,6 +28,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check per-plugin tracked binary totals
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
+          node .github/scripts/check-source-size.mjs "$(git rev-parse HEAD^1)"
 
       - name: Validate official plugin publish contract
         env:
@@ -47,15 +55,20 @@ jobs:
       - name: Validate publish workflows
         run: node --test .tests/publish-workflows.test.mjs
 
+      - name: Validate binary dependency packaging
+        run: node --test .tests/binary-dependencies.test.mjs
+
   changed-plugins:
     name: Test and dry-run packaging for changed plugins
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event.pull_request.draft == false
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect changed plugin directories
         id: changes

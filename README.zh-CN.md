@@ -299,12 +299,18 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 不能在外层再套一层 `my-plugin/`。审查并提交插件文件后，用仓库打包脚本从 Git 已跟踪的
 `HEAD` 内容生成确切产物：
 
+小二进制（每个插件所有平台合计不超过 10 MiB）可以直接入仓，沿用许可证、人工审查和总包大小规则。
+大依赖按需使用[打包时依赖声明机制](docs/binary-dependencies.zh-CN.md)，不提交到 Git。
+只有声明依赖的插件打包需要 Python 3.11+；旧插件保持原工具链。
+所有平台进入同一个包，不增加客户端侧依赖下载。
+
 ```bash
 .github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
 unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
 
-该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件并校验产物，刻意不包含
+该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件、收集已声明的二进制
+依赖并校验产物，刻意不包含
 插件目录中未提交和未跟踪的文件。
 不要递归压缩插件工作目录，否则本地 `.env`、`.npmrc`、私钥或其他凭证可能进入包中。
 若 harness 要打包尚未提交的工作区，必须使用经过审查的显式文件清单。安装或分享前，

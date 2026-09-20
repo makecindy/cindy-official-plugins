@@ -291,7 +291,9 @@ proof of account connection.
 3. Run the repository gates and relevant plugin tests from Contributing. The
    official `.github/scripts/package-plugin.sh <directory> <output.cindy>`
    archives that plugin's committed **HEAD** content and adds fixed repository
-   legal files; it does not include uncommitted plugin changes. Never recursively
+   legal files; it does not include uncommitted plugin changes. It also collects
+   [declared binary dependencies](binary-dependencies.md) into the same package
+   (Python 3.11+; no plugin build hooks). Never recursively
    ZIP a working directory: a local credential file can enter the archive. A harness
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no

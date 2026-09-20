@@ -171,6 +171,17 @@ Signed-off-by: 你的名字 <你的邮箱>
 
 ## 安全问题
 
+### 预编译依赖
+
+使用 [binary-dependencies.json](docs/binary-dependencies.zh-CN.md) 按需收集大依赖，
+小二进制仍可直接入仓，不接受自定义构建钩子。每个插件直接入仓的二进制按所有平台
+合计，上限 10 MiB。新插件或新增/修改二进制时触发检查；仅改代码/文档或删除二进制
+不强制迁移存量文件。两条路径均保留许可证、人工审查和总包
+大小要求。依赖声明变化必须提升插件版本，
+由维护者人工核对来源、哈希和再分发许可证。
+`node --test .tests/binary-dependencies.test.mjs` 运行离线打包回归；
+PR CI 还会对实际改动的插件试打包。下载、打包与 OIDC 发布分属不同 job。
+
 不要在公开 issue、PR 或讨论中披露漏洞、凭证或可利用细节。请按
 [SECURITY.zh-CN.md](SECURITY.zh-CN.md) 的流程私下报告。英文版见
 [SECURITY.md](SECURITY.md)。

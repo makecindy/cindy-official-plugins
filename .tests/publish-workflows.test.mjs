@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -172,5 +172,107 @@ test('both regional publishers pin actions in the OIDC publishing chain', () => 
       new RegExp(`actions/github-script@${githubScriptRef}`),
     );
     assert.doesNotMatch(workflow, /actions\/github-script@v\d+/);
+  }
+});
+
+test('dependency collection cannot use the publishing job credentials', () => {
+  for (const workflow of [cnWorkflow, globalWorkflow]) {
+    const packaging = workflow.split('\n  package:\n')[1]?.split('\n  publish:\n')[0];
+    const publishing = workflow.split('\n  publish:\n')[1];
+    assert.ok(packaging && publishing);
+    assert.match(packaging, /contents: read/);
+    assert.match(packaging, /persist-credentials: false/);
+    assert.match(packaging, /package-plugin\.sh/);
+    assert.match(packaging, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+    assert.doesNotMatch(packaging, /id-token: write|secrets\./);
+    assert.match(publishing, /needs: \[detect, package\]/);
+    assert.match(publishing, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/);
+    assert.match(publishing, /sha256sum plugin\.cindy/);
+    assert.match(publishing, /cat commit\.txt/);
+    assert.match(publishing, /cat plugin\.txt/);
+    assert.doesNotMatch(publishing, /actions\/checkout@|package-plugin\.sh|binary-dependencies\.py/);
+    assert.ok(publishing.indexOf('name: Verify package identity') < publishing.indexOf('name: Publish plugin'));
+  }
+  assert.match(prWorkflow, /node --test \.tests\/binary-dependencies\.test\.mjs/);
+  assert.match(prWorkflow, /node \.github\/scripts\/check-source-size\.mjs/);
+});
+
+test('regional workflow scripts package, transfer, verify and publish the same bytes locally', (t) => {
+  const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-publish-local-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const build = path.join(fixture, 'build');
+  mkdirSync(path.join(build, 'fixture'), { recursive: true });
+  cpSync(new URL('../.github/scripts', import.meta.url), path.join(build, '.github/scripts'), { recursive: true });
+  writeFileSync(path.join(build, 'fixture/ghost.json'), JSON.stringify({ id: 'fixture', entry: 'main.js' }));
+  writeFileSync(path.join(build, 'fixture/main.js'), '// fixture');
+  for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md']) {
+    writeFileSync(path.join(build, name), 'fixture legal text');
+  }
+  const git = (...args) => execFileSync('git', args, { cwd: build, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('add', '.');
+  git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'core.hooksPath=/dev/null',
+    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture');
+  const sha = git('rev-parse', 'HEAD');
+  const bin = path.join(fixture, 'bin');
+  mkdirSync(bin);
+  // Replace only network calls; execute the actual YAML run scripts with real
+  // git/archive/hash tools. No external endpoint or real credential is used.
+  writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const args = process.argv.slice(2);
+const url = args.at(-1);
+if (url === 'https://oidc.example.test/token?request=1&audience=cindy-plugin') {
+  assert.ok(args.includes('Authorization: bearer fixture-request-token'));
+  process.stdout.write(JSON.stringify({ value: 'fixture-oidc-token' }));
+} else {
+  assert.equal(url, 'https://platform.example.test/publish');
+  assert.ok(args.includes('Authorization: Bearer fixture-oidc-token'));
+  const file = args[args.indexOf('--data-binary') + 1];
+  assert.equal(file, '@' + process.env.RUNNER_TEMP + '/plugin.cindy');
+  fs.copyFileSync(file.slice(1), process.env.DELIVERED_PACKAGE);
+  process.stdout.write('{}');
+}
+`, { mode: 0o755 });
+  const script = (workflow, name) => {
+    const step = workflow.split('      - name: ' + name + '\n')[1]?.split('\n      - name: ')[0];
+    const run = step?.split('        run: |\n')[1];
+    assert.ok(run, 'missing workflow script: ' + name);
+    return run.split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  };
+  for (const [region, workflow] of [['CN', cnWorkflow], ['GLOBAL', globalWorkflow]]) {
+    const built = path.join(fixture, region + '-built');
+    const publish = path.join(fixture, region + '-publish');
+    mkdirSync(built);
+    mkdirSync(publish);
+    const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH,
+      GITHUB_SHA: sha, PLUGIN_DIRECTORY: 'fixture', RUNNER_TEMP: built,
+      GITHUB_OUTPUT: path.join(built, 'output'), ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'fixture-request-token',
+      ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.test/token?request=1',
+      ['CINDY_PLUGIN_PLATFORM_URL_' + region]: 'https://platform.example.test/publish',
+      DELIVERED_PACKAGE: path.join(fixture, region + '-delivered.cindy') };
+    const run = (name, cwd = build) => execFileSync('bash', ['-e', '-o', 'pipefail', '-c', script(workflow, name)], { cwd, env, encoding: 'utf8', stdio: 'pipe' });
+    run('Package plugin');
+    run('Record package identity');
+    const recorded = readFileSync(env.GITHUB_OUTPUT, 'utf8');
+    // Model upload/download artifact hand-off into a job without a checkout.
+    for (const name of ['plugin.cindy', 'plugin.cindy.sha256', 'commit.txt', 'plugin.txt']) {
+      cpSync(path.join(built, name), path.join(publish, name));
+    }
+    env.RUNNER_TEMP = publish;
+    env.GITHUB_OUTPUT = path.join(publish, 'output');
+    run("Select this run's package", publish);
+    assert.equal(readFileSync(env.GITHUB_OUTPUT, 'utf8'), recorded);
+    run('Verify package identity', publish);
+    run('Publish plugin', publish);
+    assert.deepEqual(readFileSync(env.DELIVERED_PACKAGE), readFileSync(path.join(built, 'plugin.cindy')));
+    for (const [file, bad] of [['commit.txt', 'wrong-commit'], ['plugin.txt', 'wrong-plugin'], ['plugin.cindy', 'corrupt-package'], ['plugin.cindy.sha256', 'invalid-digest']]) {
+      const target = path.join(publish, file);
+      const original = readFileSync(target);
+      writeFileSync(target, bad);
+      assert.throws(() => run('Verify package identity', publish), undefined, file + ' must reject mismatches');
+      writeFileSync(target, original);
+    }
   }
 });
