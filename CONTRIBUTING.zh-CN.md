@@ -43,6 +43,13 @@
 6. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
    `ja`、`ko` 四份 locale 资源。
 
+大型预编译依赖按[依赖接入指南](docs/binary-dependencies.zh-CN.md)迁移：本地保留输出
+调试，Git 只提交源码、声明和许可证，CI 下载并打包。Python 不是本地开发前置条件。
+可以先提交 Ready PR，实机验证项保持未勾选，从 **Verify pull request** 的 Artifacts
+下载测试包，完成正式稳定版/Beta 实机验证后再勾选。上传发生在该勾选检查之前，
+因此最后一项未通过仍可下载；更早的测试/打包失败则需先修复。包保留 7 天，未审核，
+不进入 Platform/OSS。记录具体构建来源和包哈希，不能只凭 CI 绿灯宣称已实机验证。
+
 `.tests/` 下的 `*.test.mjs` 用 Node 内置 test runner 运行，例如：
 
 ```bash

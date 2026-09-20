@@ -23,16 +23,88 @@ Python。未触及的存量大文件也不会被强制迁移。
    覆盖的目标，合起来须支持 macOS、Linux、Windows 各自的 x64/arm64。
    全部资源进入同一个发行包，需要时由插件适配代码在运行时选用平台版本。
    打包器检查声明的平台覆盖，不证明二进制能运行。
-4. 提交源码后在仓库根目录执行（需要 Git、Bash 和 Python 3.11+）：
-   ```bash
-   .github/scripts/package-plugin.sh my-plugin /tmp/my-plugin.cindy
-   unzip -l /tmp/my-plugin.cindy
-   ```
-5. 在受支持的 Cindy 正式稳定版或 Beta 版实机验证确切产物，提升插件版本，按现有
-   贡献与审核流程提交。修改 URL、哈希或选取文件也属于包内容变化。
+4. 本地开发时按声明准备依赖文件，使用 Cindy Forge 或经审查的显式文件清单打包调试，
+   见下方迁移步骤。此路径不要求 Python；Forge 不会替你下载依赖。
+5. 提升插件版本，按现有贡献规则提交源码、声明和许可证，创建 Ready PR。
+   尚未验收时保持实机验证项未勾选；这时对应 CI 检查失败是预期，不代表不能取得测试包。
+6. 从 PR workflow 下载验证包，在满足最低版本的正式稳定版或 Beta Cindy 上验证后，
+   记录产物、版本、渠道和验证结果，再勾选实机验证项。修改 URL、哈希或选取文件也属于
+   包内容变化；更新后须确认验收仍覆盖最新内容。
 
 不增加客户端安装时或首次使用时下载。用户依然从现有 OSS/CDN 渠道下载最终包，
 无需连接依赖的上游下载站点。
+
+## 从已内嵌二进制迁移
+
+以下以 `my-plugin/vendor/example-cli/` 为例，命令仅针对这个示例目录，使用前替换成
+实际目标；不要删除整个 vendor 或无关依赖。
+
+1. 盘点旧包的文件、平台、版本、许可证和执行权限。选择与旧文件一致的上游发行版本；
+   获取原始下载归档的 SHA-256（不是解包后文件的哈希）。可用系统工具：macOS
+   `shasum -a 256 archive.zip`、Linux `sha256sum archive.zip`、PowerShell
+   `Get-FileHash archive.zip -Algorithm SHA256`；声明中使用小写哈希。
+   哈希须与可信上游发布信息核对，不能仅因下载成功就认为来源可信。
+2. 新建声明，将每个归档内的 `source` 映射到旧包对应的 `target`。
+   target 必须在 `vendor/<依赖名称>/` 内；旧路径符合时保持原路径，否则同步修改适配代码
+   并验证调用路径。可执行文件设置 `executable: true`。保留完整许可证为已跟踪文件。
+3. 从 Git 索引移除将由 CI 生成的文件，但保留工作区副本供本地开发。例如：
+   ```bash
+   git rm -r --cached -- my-plugin/vendor/example-cli/
+   ```
+   在本机 `.git/info/exclude` 加入 `/my-plugin/vendor/example-cli/`，避免误加回 Git。
+   若该目录包含需要提交的适配源码或许可证，应只移除/忽略具体二进制文件，不能整目录处理。
+   不改写 Git 历史；此操作不会缩小过去提交的体积。
+4. 本地工作区保留全部六平台输出，路径、字节、权限与声明相符。检查上游归档后仅复制
+   选中的普通文件，不把归档、下载临时文件或额外内容放入插件目录。Brotli 仅是可选编码，
+   若启用，本地输出也须一致编码，不能把原始可执行文件当成编码数据来验收。
+5. 用 `ghost_forge_pack` 对准备好的目录打包调试，或使用明确且经审查的文件清单；
+   打包目录须包含 `ghost.json`、代码、资源、依赖声明、许可证和全部依赖输出，补齐仓库
+   `LICENSE`、`NOTICE`、`TRADEMARKS.md`、`TRADEMARKS.zh-CN.md`。不要递归压缩带凭证的工作区。
+   Git 忽略只控制提交，不保证 Forge 排除文件；检查最终归档。现有 Host 限额仍适用，
+   本地调试包不替代下方 CI 最终包验收。
+6. 检查 staged diff：应只有源码、声明、许可证、版本等必要修改及旧二进制删除，
+   不含新下载二进制。**已跟踪文件不会因被忽略而自动停止入包**；若仍跟踪同一 target，
+   CI 会因覆盖冲突失败。提交后由 CI 按声明重新生成文件。
+
+后续升级依赖时一起修改版本、URL、原始归档哈希、文件映射（如需）、许可证和插件版本，
+本地副本同步替换，重验最新 CI 包。源码/声明由作者维护，下载收集由仓库构建器负责；
+不让用户设备在安装或运行时补依赖。
+
+## 下载 PR 验证包（无需本地 Python）
+
+1. 在 Ready PR 的 Checks 中打开 **Verify pull request** 的具体运行页面（Details）。
+   Fork PR 可能先需要维护者批准 workflow；不要靠提前勾选实机验证来触发。
+2. 等 **Test and dry-run packaging for changed plugins** 中的
+   **Upload PR verification packages** 成功，在运行页面的 Artifacts 下载
+   `pr-plugins-<PR号>-<head SHA>-<run id>-<attempt>`。需要登录且有仓库读取权限。
+   测试或打包前序失败不会上传；仅最后的实机验证勾选失败时，已经上传的包仍可下载。
+3. 解开 GitHub 外层 artifact ZIP；每个改动插件目录包含 `plugin.cindy`、
+   `plugin.cindy.sha256` 和 `source.json`。安装内部 `.cindy`，不要把外层 artifact 当插件安装。
+   `source.json` 记录插件目录、PR head、base 和实际构建的临时 merge commit。
+   核对它属于要验收的最新提交，并核对 `.cindy` 的 SHA-256；这是来源定位与完整性检查，
+   **不是签名或安全认证**。PR 包含尚未审核代码，只在明确接受风险时安装，不自动执行。
+4. 实机验证后，在 PR 验证栏记录 artifact/run 链接、`buildCommit`、包 SHA-256、Cindy
+   版本/渠道和验证项，再勾选原有实机验证项。编辑 PR body 会重新运行检查；若只是重跑且
+   源码和依赖输出不变，可以引用之前的记录，不因 ZIP 时间戳导致哈希变化机械重验。
+   若 head/base 更新影响了包内容，应下载对应新包重新验证；CI 不自动证明两次产物等价。
+5. 产物保留 7 天；过期后由有权限者重新运行 workflow。文档-only PR 不生成插件包。
+   验证包不会上传 Platform/OSS；合并后 CN/Global 发布工作流独立重建并走既有审核。
+
+## 可选：本地复现仓库构建
+
+只有选择在本地复现 CI 才需要 Git、Bash、jq、unzip 与 Python 3.11+；使用 Brotli
+编码时还需要 Node。现有 Node 校验/测试命令仍有各自的 Node 环境要求，Python 不是
+所有插件作者的开发前置条件。Cindy 内置插件运行时不等于系统已安装 Node/npm 或 Python。
+
+提交源码后在仓库根目录执行（只读已提交的 HEAD，不包含未提交的插件修改）：
+
+```bash
+.github/scripts/package-plugin.sh my-plugin /tmp/my-plugin.cindy
+unzip -l /tmp/my-plugin.cindy
+```
+
+本地 packager 使用本地 HEAD；PR CI 使用 head 与当时 base 的临时 merge commit，
+发布使用 main 的合并结果。判断一致性要核对实际来源、文件内容和权限，不能只看文件名。
 
 ## 声明格式
 
@@ -93,10 +165,82 @@ Python。未触及的存量大文件也不会被强制迁移。
 - 路径必须相对且跨平台安全。拒绝路径穿越、链接、特殊文件、重复/大小写冲突条目
   和加密 ZIP；不会按归档提供的路径解压到工作区。
 - 声明保留在最终包中作为构建来源记录，客户端安装时不处理。
-  Forge 尚不执行这一步依赖收集；有该声明的插件须使用仓库打包器。
+  Forge 尚不执行依赖收集；本地须先准备好输出文件。仓库发布由 CI 打包器收集。
 - Manifest 入口/资源引用可以对应确切的依赖输出，先不要求该文件存在于 Git；
   最终包必须包含它，不能仅凭声明绕过缺文件检查。Locale、Skill、Manual 的内容
   仍沿用原有已跟踪源码校验。
+
+## ZIP / tar.gz 与多平台示例
+
+下面是完整的全平台 ZIP 声明结构（同样是占位示例，不可原样下载）。一个上游归档已包含
+六平台时只填一个 URL，使用六条文件映射；许可证内容仍需另外提交。
+
+```json
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "name": "example-cli",
+      "version": "1.2.3",
+      "license": "THIRD-PARTY-LICENSES.txt",
+      "assets": [
+        {
+          "url": "https://downloads.example.com/example-cli/v1.2.3/all-platforms.zip",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "format": "zip",
+          "files": [
+            {
+              "source": "release/darwin-x64/example-cli",
+              "target": "vendor/example-cli/darwin-x64/example-cli",
+              "executable": true
+            },
+            {
+              "source": "release/darwin-arm64/example-cli",
+              "target": "vendor/example-cli/darwin-arm64/example-cli",
+              "executable": true
+            },
+            {
+              "source": "release/linux-x64/example-cli",
+              "target": "vendor/example-cli/linux-x64/example-cli",
+              "executable": true
+            },
+            {
+              "source": "release/linux-arm64/example-cli",
+              "target": "vendor/example-cli/linux-arm64/example-cli",
+              "executable": true
+            },
+            {
+              "source": "release/windows-x64/example-cli.exe",
+              "target": "vendor/example-cli/windows-x64/example-cli.exe",
+              "executable": true
+            },
+            {
+              "source": "release/windows-arm64/example-cli.exe",
+              "target": "vendor/example-cli/windows-arm64/example-cli.exe",
+              "executable": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+若上游提供同内容的 `.tar.gz`，将 URL 改为真实 tar.gz 地址、`format` 改成
+`tar.gz`、SHA 改成该归档的真实哈希，`source` 按实际成员路径填写。
+若上游按平台分发，则将一个 asset 拆成多个，每个填写自己的 URL、SHA、format、files
+和 `platforms`（如 `["darwin-x64", "darwin-arm64"]`），合起来覆盖六平台。
+不需要重复声明同一个下载；不能用省略 platforms 来假装单平台二进制支持所有平台。
+插件代码根据操作系统/架构选择上述包内路径，不需要修改 Cindy 注册表。
+
+常见失败：
+
+- target 已存在：检查 Git 是否仍跟踪旧二进制；不会由收集器覆盖源码。
+- 缺少平台：核对每项依赖覆盖全集，不能只填写开发机平台。
+- SHA 不符：核对是不是原始下载文件的哈希；不要不核实来源就接受新的字节。
+- 找不到 source：查看实际归档成员，不能猜测文件名或使用通配符。
+- 本地可用而 CI 失败：检查未提交源码/许可证、仅存本地的依赖、路径大小写与执行权限。
 
 ## 限额与失败行为
 
@@ -142,6 +286,21 @@ CINDY_BINARY_LIVE_SMOKE=1 node --test .tests/binary-dependencies.test.mjs
 CC0 许可证，将通用资源下载并入包一次，检查最终归档，结束后清理。不安装插件、不执行
 依赖、不修改真实插件，也不发布。这验证的是打包链路，不是六种系统/架构上的
 原生程序运行能力。
+
+## 实现选型与边界
+
+保留 Python 是当前仓库构建步骤的维护成本选择，不是语言优劣结论：
+
+- Python 标准库已支持下载、SHA、ZIP/tar；现有实现及回归验证可复用，仓库此前也有
+  Python 打包脚本。可选 Brotli 仍使用固定 Node 内置模块，不开放作者脚本。
+- Node 更统一 JS 技术栈，但按当前版本和需求要补解包依赖或系统工具；npm/pnpm
+  是依赖/脚本管理器，不直接替代收集逻辑，也不能假定每位作者已安装。
+- Rust 适合独立分发 CLI，但本次会增加编译、缓存或预编译制品维护。
+- 仅 CI 使用时，开发者不必配置该解释器；本地复现才需要。最终用户无新增工具要求。
+
+保留 HTTPS、公网地址检查（含重定向）、超时/体积限制和 SHA 校验；暂不建立独立域名
+白名单体系。公共托管域名不代表其中每个项目可信，具体来源、版本、哈希与许可证仍由
+维护者审核。这些构建检查不增加插件运行期权限机制，也不证明二进制行为安全。
 
 ## CI 与信任边界
 

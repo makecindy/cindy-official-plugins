@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -122,6 +123,86 @@ test('device attestation accepts current and legacy checked labels, but not unch
     const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_PATH: event } });
     assert.equal(result.status, expected, result.stderr || result.stdout);
   }
+});
+
+test('PR verification artifacts are scoped, pinned and uploaded before attestation', () => {
+  const upload = prWorkflow.split('      - name: Upload PR verification packages\n')[1]?.split('\n      - name: ')[0];
+  assert.ok(upload);
+  assert.match(upload, /if: \$\{\{ steps\.changes\.outputs\.plugins != '\[\]' \}\}/);
+  assert.match(upload, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+  assert.match(upload, /path: \$\{\{ steps\.packages\.outputs\.directory \}\}\//);
+  assert.match(upload, /name: pr-plugins-.*pull_request\.number.*pull_request\.head\.sha.*github\.run_id.*github\.run_attempt/);
+  assert.match(upload, /if-no-files-found: error/);
+  assert.match(upload, /retention-days: 7/);
+  assert.match(upload, /compression-level: 0/);
+  assert.doesNotMatch(upload, /always\(|continue-on-error/);
+  assert.ok(prWorkflow.indexOf('name: Dry-run plugin packaging') < prWorkflow.indexOf('name: Upload PR verification packages'));
+  assert.ok(prWorkflow.indexOf('name: Upload PR verification packages') < prWorkflow.indexOf('name: Require Cindy device verification attestation'));
+  assert.doesNotMatch(prWorkflow, /pull_request_target|id-token: write|secrets\./);
+  for (const publisher of [cnWorkflow, globalWorkflow]) {
+    assert.doesNotMatch(publisher, /pr-plugins-|workflow_run:/);
+  }
+});
+
+test('PR packaging stages only complete packages with matching hash and merge identity', (t) => {
+  const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-pr-artifact-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const build = path.join(fixture, 'build');
+  mkdirSync(build);
+  cpSync(new URL('../.github/scripts', import.meta.url), path.join(build, '.github/scripts'), { recursive: true });
+  for (const name of ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh-CN.md']) {
+    writeFileSync(path.join(build, name), 'fixture legal text');
+  }
+  for (const directory of ['first-plugin', 'second-plugin']) {
+    mkdirSync(path.join(build, directory));
+    writeFileSync(path.join(build, directory, 'ghost.json'), JSON.stringify({ id: directory, entry: 'main.js' }));
+    writeFileSync(path.join(build, directory, 'main.js'), '// base');
+  }
+  const git = (...args) => execFileSync('git', args, { cwd: build, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.test');
+  const commit = () => {
+    git('add', '.');
+    git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture');
+    return git('rev-parse', 'HEAD');
+  };
+  const base = commit();
+  git('checkout', '-qb', 'feature');
+  writeFileSync(path.join(build, 'first-plugin/main.js'), '// changed');
+  const head = commit();
+  git('checkout', '-q', 'main');
+  git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'merge', '--no-ff', '-qm', 'merge fixture', head);
+  const merge = git('rev-parse', 'HEAD');
+  const step = prWorkflow.split('      - name: Dry-run plugin packaging\n')[1].split('\n      - name: ')[0];
+  const script = step.split('        run: |\n')[1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  // A similarly named unrelated temp file must never be included in the upload root.
+  writeFileSync(path.join(fixture, 'unrelated.cindy'), 'unrelated');
+  const output = path.join(fixture, 'output');
+  const env = { ...process.env, RUNNER_TEMP: fixture, GITHUB_OUTPUT: output, HEAD_SHA: head,
+    PLUGINS: JSON.stringify([{ directory: 'first-plugin' }, { directory: 'second-plugin' }]) };
+  const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd: build, env, encoding: 'utf8' });
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  const staged = readFileSync(output, 'utf8').trim().replace(/^directory=/, '');
+  assert.deepEqual(readdirSync(staged).sort(), ['first-plugin', 'second-plugin']);
+  for (const directory of ['first-plugin', 'second-plugin']) {
+    const dir = path.join(staged, directory);
+    assert.deepEqual(readdirSync(dir).sort(), ['plugin.cindy', 'plugin.cindy.sha256', 'source.json']);
+    const hash = createHash('sha256').update(readFileSync(path.join(dir, 'plugin.cindy'))).digest('hex');
+    assert.equal(readFileSync(path.join(dir, 'plugin.cindy.sha256'), 'utf8'), `${hash}  plugin.cindy\n`);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'source.json'), 'utf8')), {
+      pluginDirectory: directory, prHeadSha: head, baseSha: base, buildCommit: merge,
+    });
+    const packed = execFileSync('unzip', ['-p', path.join(dir, 'plugin.cindy'), 'main.js'], { encoding: 'utf8' });
+    assert.equal(packed, directory === 'first-plugin' ? '// changed' : '// base');
+  }
+  env.GITHUB_OUTPUT = path.join(fixture, 'failed-output');
+  env.PLUGINS = JSON.stringify([{ directory: 'first-plugin' }, { directory: 'missing-plugin' }]);
+  assert.notEqual(run().status, 0);
+  assert.equal(existsSync(env.GITHUB_OUTPUT), false, 'partial packaging must not expose an upload directory');
+  env.HEAD_SHA = base;
+  assert.notEqual(run().status, 0, 'wrong PR head must be rejected');
 });
 
 test('CN and Global plugin publishers are operationally independent', () => {

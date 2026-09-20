@@ -80,6 +80,11 @@ Agent behaviour — that description is the manual the Agent reads.
 
 <!--
 Commands actually run and their results. / 实际执行的命令和结果。
+For a changed plugin, record the verification artifact/run URL, buildCommit,
+package SHA-256, Cindy version/channel and exercised behavior. PR test packages
+are uploaded before the device-attestation gate; leave it unchecked until verified.
+改动插件时记录验证包/run 链接、buildCommit、包 SHA-256、Cindy 版本/渠道与验证项。
+PR 测试包在实机验证勾选检查前上传；完成真实验证后再勾选。
 -->
 
 ## Sensitive changes / 敏感变更

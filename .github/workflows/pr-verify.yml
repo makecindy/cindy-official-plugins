@@ -135,14 +135,20 @@ jobs:
           exit "${failed}"
 
       - name: Dry-run plugin packaging
+        id: packages
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         env:
           PLUGINS: ${{ steps.changes.outputs.plugins }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          artifact_dir="$(mktemp -d "${RUNNER_TEMP}/pr-plugins.XXXXXX")"
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
           for directory in $(jq -r '.[].directory' <<<"${PLUGINS}"); do
             echo "::group::Package ${directory}"
-            package="${RUNNER_TEMP}/${directory//\//_}.cindy"
+            package_dir="${artifact_dir}/${directory}"
+            mkdir -p "${package_dir}"
+            package="${package_dir}/plugin.cindy"
             .github/scripts/package-plugin.sh "${directory}" "${package}"
             unzip -l "${package}"
             # git archive places the plugin directory's contents at the zip
@@ -157,8 +163,26 @@ jobs:
                 exit 1
               }
             done
+            (cd "${package_dir}" && sha256sum plugin.cindy > plugin.cindy.sha256)
+            jq -n --arg directory "${directory}" --arg head "${HEAD_SHA}" \
+              --arg base "$(git rev-parse HEAD^1)" --arg merge "$(git rev-parse HEAD)" \
+              '{pluginDirectory: $directory, prHeadSha: $head, baseSha: $base, buildCommit: $merge}' \
+              > "${package_dir}/source.json"
             echo "::endgroup::"
           done
+          echo "directory=${artifact_dir}" >> "${GITHUB_OUTPUT}"
+
+      # Available even when the following manual-attestation gate is pending.
+      # Test artifacts are never consumed by the production publishers.
+      - name: Upload PR verification packages
+        if: ${{ steps.changes.outputs.plugins != '[]' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr-plugins-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.packages.outputs.directory }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
       - name: Require Cindy device verification attestation
         if: ${{ steps.changes.outputs.plugins != '[]' }}

@@ -296,12 +296,13 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 ```
 
 `.cindy` 是普通 ZIP：压缩包根目录必须直接包含 `ghost.json`、`main.js` 和声明的资源，
-不能在外层再套一层 `my-plugin/`。审查并提交插件文件后，用仓库打包脚本从 Git 已跟踪的
-`HEAD` 内容生成确切产物：
+不能在外层再套一层 `my-plugin/`。本地开发可用下方 Forge 入口或经审查的显式文件清单
+打包。提交源码后，PR CI 会提供可下载的验证包；本地复现仓库构建是可选路径：
 
 小二进制（每个插件所有平台合计不超过 10 MiB）可以直接入仓，沿用许可证、人工审查和总包大小规则。
 大依赖按需使用[打包时依赖声明机制](docs/binary-dependencies.zh-CN.md)，不提交到 Git。
-只有声明依赖的插件打包需要 Python 3.11+；旧插件保持原工具链。
+Python 3.11+ 仅是依赖收集器的构建环境要求，本地复现该步骤才需安装；
+不要求作者为了开发插件配置 Python。旧插件保持原工具链。
 所有平台进入同一个包，不增加客户端侧依赖下载。
 
 ```bash
@@ -319,12 +320,14 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 用户可以从 Cindy 的本地插件入口导入这个包。如果当前 harness 恰好提供 Cindy Forge
 工具，`ghost_forge_scaffold` 可以生成同样的 v3 基线，`ghost_forge_pack` 可以校验并
 打包，`ghost_forge_install` 可以在用户明确要求后安装。它们只是可选加速器；源码与
-`.cindy` 格式完全相同。
+`.cindy` 格式完全相同。Forge 不解析依赖声明，本地需先准备好声明对应的文件。
+迁移步骤、完整声明示例与 PR 验证包下载见[依赖接入指南](docs/binary-dependencies.zh-CN.md)。
 
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
 `zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
-按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查，并在符合最低版本要求的
-Cindy 正式稳定版或 Beta 版实机上安装真实 `.cindy` 包完成验证。
+按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 取得验证包，
+但合并前必须在符合最低版本要求的 Cindy 正式稳定版或 Beta 版实机上安装真实
+`.cindy` 包完成验证，再勾选实机验证项。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
 `@taptap/maker@0.0.33`。升级时应整体替换 npm 包发布内容并同步更新插件版本，

@@ -288,12 +288,16 @@ proof of account connection.
 2. `node scripts/validate-plugin-manifest.mjs ./<directory>` checks JSON/Manifest
    shape only, not file existence, package contents, actual client support, or
    every official publishing rule.
-3. Run the repository gates and relevant plugin tests from Contributing. The
-   official `.github/scripts/package-plugin.sh <directory> <output.cindy>`
+3. Run the repository gates and relevant plugin tests from Contributing. You can
+   use PR CI verification artifacts directly; the [dependency guide](binary-dependencies.md)
+   covers local development, migration and downloading packages. For optional
+   local CI reproduction, `.github/scripts/package-plugin.sh <directory> <output.cindy>`
    archives that plugin's committed **HEAD** content and adds fixed repository
    legal files; it does not include uncommitted plugin changes. It also collects
    [declared binary dependencies](binary-dependencies.md) into the same package
-   (Python 3.11+; no plugin build hooks). Never recursively
+   (Python 3.11+ for local collector reproduction; no plugin build hooks).
+   Local Forge packaging instead requires prepared dependency outputs; it does
+   not download them. Never recursively
    ZIP a working directory: a local credential file can enter the archive. A harness
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no

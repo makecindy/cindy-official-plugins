@@ -55,6 +55,16 @@ Start with the
 6. Before opening an official-plugin PR, add the `provisioning.json` entry and
    complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 
+For large prebuilt dependencies, follow the [dependency guide](docs/binary-dependencies.md):
+retain local outputs for debugging, commit only source/declarations/licenses,
+and let CI download and package. Python is not a local development prerequisite.
+You may open a Ready PR with device verification unchecked, download a test package
+from **Verify pull request** Artifacts, verify it on stable/Beta Cindy, then check
+the attestation. Upload runs before that gate, so a failure of only the final
+attestation still leaves the artifact available; fix earlier test/build failures
+first. Packages expire after 7 days, are unreviewed, and never go to Platform/OSS.
+Record source identity and package hash; green CI alone is not device verification.
+
 The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 
 ```bash
