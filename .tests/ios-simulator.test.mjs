@@ -54,7 +54,7 @@ test('manifest keeps privileged simulator runtime ownership in Cindy Host', () =
   const parts = manifest.version.split('.').map(BigInt);
   const difference = parts.findIndex((part, index) => part !== baseVersion[index]);
   assert.ok(difference >= 0 && parts[difference] > baseVersion[difference], 'version must exceed main 1.1.4');
-  assert.equal(manifest.minCindyVersion, '0.1.83', 'minimum supported Cindy release for Manual-only discovery');
+  assert.equal(manifest.minCindyVersion, '0.1.88', 'minimum supported Cindy release: first stable release with build_app.projectDir');
   const validated = validateGhostManifest(manifest);
   assert.equal(validated.ok, true, validated.reason);
   assert.equal(validated.manifest.kind, 'chip', 'preserve the legacy default kind');

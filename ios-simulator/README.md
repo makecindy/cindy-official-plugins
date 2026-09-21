@@ -8,9 +8,21 @@ mode, and four-language catalog copy are preserved.
 
 ## Minimum Cindy version
 
-`minCindyVersion: 0.1.83` is the minimum supported Cindy version for this
-Manual-only release. It prevents older clients from receiving a package that
-requires the no-tools Manual discovery and reading support described below.
+`minCindyVersion: 0.1.88` is the minimum supported Cindy version for package
+`1.2.0`. This package documents `build_app.projectDir` in
+`manual/ios-simulator/build-and-run.md`, and 0.1.88 is the first published
+release that provides it: it was published as a stable release on 2026-09-20,
+while `v0.1.86` — released on 2026-09-18, after the client change merged to
+`main` — does not contain the capability.
+
+The earlier `0.1.83` floor came from the `1.1.4` Manual-only migration described
+below. That requirement still holds; `0.1.88` is now the binding floor because it
+covers both.
+
+### Why `0.1.83` was the `1.1.4` floor
+
+The Manual-only release needed no-tools Manual discovery and reading support, so
+older clients must not receive it:
 
 - [Cindy v0.1.64](https://github.com/makecindy/cindy/releases/tag/v0.1.64) is
   the first stable release with Manifest-v3 support. Its manifest contract
@@ -23,10 +35,11 @@ requires the no-tools Manual discovery and reading support described below.
   `ghost_manual` access.
 
 Clients below the declared minimum continue receiving the newest compatible
-historical release from the marketplace. That historical release retains the
-Skill, so this package does not need a transition copy. This package removes
-the `skill` declaration and `skills/` directory and exposes only the Manual on
-compatible Hosts.
+historical release from the marketplace: clients below `0.1.88` keep `1.1.4`,
+which already carries the Manual, and clients below `0.1.83` keep the historical
+release that retains the Skill, so this package still needs no transition copy.
+This package removes the `skill` declaration and `skills/` directory and exposes
+only the Manual on compatible Hosts.
 
 ## Manual layout
 

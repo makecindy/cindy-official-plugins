@@ -7,8 +7,17 @@
 
 ## 最低 Cindy 版本
 
-`minCindyVersion: 0.1.83` 是这个仅含 Manual 的 release 支持的最低 Cindy 版本，
-用于阻止旧客户端收到依赖下述无 tools Manual 发现和读取能力的包。
+`minCindyVersion: 0.1.88` 是包 `1.2.0` 支持的最低 Cindy 版本。本包在
+`manual/ios-simulator/build-and-run.md` 中说明 `build_app.projectDir`，而 0.1.88 是首个
+提供该能力的已发布版本：它于 2026-09-20 作为正式稳定版发布，而 `v0.1.86`（2026-09-18
+发布，晚于客户端改动合入 `main`）不含该能力。
+
+此前的 `0.1.83` 下限来自下面描述的 `1.1.4` Manual 迁移。该要求仍然成立；`0.1.88`
+现在同时覆盖两者，是当前生效的下限。
+
+### `0.1.83` 为何是 `1.1.4` 的下限
+
+仅含 Manual 的 release 依赖无 tools Manual 的发现和读取能力，因此旧客户端不能收到它：
 
 - [Cindy v0.1.64](https://github.com/makecindy/cindy/releases/tag/v0.1.64) 是首个支持
   Manifest v3 的稳定版；其 manifest 契约支持 `iosSimulator` 与 `manual`，但这本身
@@ -18,9 +27,10 @@
   `b201f1f663a1199c1e296ee0b6ddca7d465d4e9d` 合入 `main`。它允许花名册、
   `ghost_info` 和 `ghost_manual` 访问，同时仍拒绝对无 tools 插件执行 `ghost_call`。
 
-低于声明最低版本的客户端会继续从市场获得最新兼容的历史 release；该历史 release
-仍包含 Skill，因此新包不需要保留过渡副本。本包删除 `skill` 声明和 `skills/` 目录，
-在兼容 Host 上只通过 Manual 提供说明。
+低于声明最低版本的客户端会继续从市场获得最新兼容的历史 release：低于 `0.1.88` 的客户端
+保留 `1.1.4`（已含 Manual），低于 `0.1.83` 的客户端保留仍包含 Skill 的历史 release，
+因此新包仍不需要保留过渡副本。本包删除 `skill` 声明和 `skills/` 目录，在兼容 Host 上
+只通过 Manual 提供说明。
 
 ## Manual 结构
 
