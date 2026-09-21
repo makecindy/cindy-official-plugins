@@ -170,6 +170,37 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     }
   });
 
+  test(`${plugin}: 账号服务失败保留可操作提示，执行前失败不调用 worker`, async () => {
+    const cases = [
+      [async () => { throw new Error('transport details'); }, /无法连接.*重新打开/],
+      [async () => undefined, /未返回结果.*稍后重试/],
+      ...[401, 403].map(status => [async () => ({ ok: false, status }), /拒绝访问.*检查连接状态/]),
+      [async () => ({ ok: false, status: 503 }), /暂时不可用.*重新打开/],
+      [async () => ({ ok: true, json: async () => { throw new Error('parse details'); } }), /无法解析.*重新打开/],
+      ...[{}, [{ key: 'gmail_account', clientConfigured: true }],
+        [{ key: 'gmail_account', clientConfigured: true, accounts: [null] }]].map(data =>
+        [async () => ({ ok: true, json: async () => data }), /格式异常.*重新打开/]),
+    ];
+    for (const [fetch, expected] of cases) {
+      let handler;
+      const replies = [];
+      let requested = false;
+      const ctx = fixture().context({ fetch, cindy: {
+        onHostMessage: value => { handler = value; }, send: async reply => replies.push(copy(reply)),
+        node: { request: async () => { requested = true; } },
+      } });
+      runInContext(read(plugin + '/main.js'), ctx);
+      for (const tool of [prefix + '_accounts', prefix + '_run']) {
+        await handler({ type: 'tool-call', tool, callId: 'bad-accounts', args: { session_context: {} } });
+        assert.equal(replies.at(-1).ok, false);
+        assert.match(replies.at(-1).message, expected);
+      }
+      assert.match(replies.at(-1).message, /^尚未执行/);
+      assert.equal(requested, false);
+      assert.equal(replies.length, 2);
+    }
+  });
+
   test(`${plugin}: 设置页先合并插件昵称再渲染，保存后重新读取`, async () => {
     const key = prefix + '_account';
     const f = fixture(key);
