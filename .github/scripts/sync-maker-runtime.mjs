@@ -41,6 +41,17 @@ export function verifyVendor(directory, recipe) {
   }
 }
 
+export function validateArchiveEntries(pathListing, detailListing) {
+  const entries = pathListing.trim().split(/\r?\n/).filter(Boolean);
+  if (entries.some((entry) => !entry.startsWith('package/') || entry.includes('..') || entry.includes('\\'))) {
+    throw new Error('Unsafe archive path');
+  }
+  const details = detailListing.trim().split(/\r?\n/).filter(Boolean);
+  if (details.some((entry) => !['-', 'd'].includes(entry[0]))) {
+    throw new Error('Unsafe archive entry');
+  }
+}
+
 async function main() {
   const [version, mode] = process.argv.slice(2);
   if (!/^\d+\.\d+\.\d+$/.test(version || '') || !['--check', undefined].includes(mode) || process.argv.length > 4) {
@@ -66,10 +77,9 @@ async function main() {
     if ('sha512-' + createHash('sha512').update(bytes).digest('base64') !== recipe.integrity) throw new Error('Package integrity mismatch');
     const archive = path.join(staging, 'maker.tgz');
     writeFileSync(archive, bytes);
-    const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split(/\r?\n/);
-    if (entries.some((entry) => !entry.startsWith('package/') || entry.includes('..') || entry.includes('\\'))) {
-      throw new Error('Unsafe archive path');
-    }
+    const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' });
+    const details = execFileSync('tar', ['-tvzf', archive], { encoding: 'utf8' });
+    validateArchiveEntries(entries, details);
     execFileSync('tar', ['-xzf', archive, '-C', staging]);
     const next = path.join(staging, 'package');
     const metadata = JSON.parse(readFileSync(path.join(next, 'package.json'), 'utf8'));

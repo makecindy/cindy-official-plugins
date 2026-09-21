@@ -84,7 +84,7 @@
       }
     },
     "maker_console": {
-      "description": "Open Maker console. Opens a local service; does not build or install a game runtime. Closing the page does not stop the service; stop it in the console. Media switches apply to Agent tools, not manual console actions."
+      "description": "Open Maker console. Starts a local service; does not build, submit, or install a game runtime. Closing the page does not stop the service; stop it in the console. Media switches apply to Agent tools, not manual console actions."
     }
   }
 }
