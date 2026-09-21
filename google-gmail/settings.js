@@ -10,6 +10,12 @@
     ja: 'Google の認証が期限切れです。アカウントを再接続してください。',
     ko: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
   };
+  var CONNECT_UNKNOWN_MESSAGES = {
+    'zh-CN': '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。',
+    en: 'Connection outcome is unknown. Reopen plugin details and check the account status before deciding whether to retry.',
+    ja: '接続結果を確認できません。プラグインの詳細を開き直してアカウントの状態を確認してから、再試行するか判断してください。',
+    ko: '연결 결과를 확인할 수 없습니다. 플러그인 상세 페이지를 다시 열어 계정 상태를 확인한 후 재시도 여부를 결정하세요.',
+  };
   async function loadLocale() {
     var locale = 'en';
     var controller = new AbortController();
@@ -31,6 +37,9 @@
     $('reauth').textContent = REAUTH_MESSAGES[locale];
   }
   function status(text) { $('status').textContent = text; }
+  function connectionUnknownMessage() {
+    return CONNECT_UNKNOWN_MESSAGES[document.documentElement.lang] || CONNECT_UNKNOWN_MESSAGES.en;
+  }
   function connectError(result) {
     var labels = {
       NO_CLIENT_CONFIG: '插件缺少 OAuth 客户端配置，请更新插件',
@@ -44,7 +53,7 @@
       VAULT_WRITE_FAILED: '账号保存失败，请重试',
     };
     var code = result && result.error ? String(result.error) : '';
-    var message = labels[code] || '连接失败，请重试';
+    var message = labels[code] || connectionUnknownMessage();
     var detail = result && result.detail ? String(result.detail).trim() : '';
     return detail ? message + '（' + detail + '）' : message;
   }
@@ -85,7 +94,7 @@
       }
       await load();
     } catch (_err) {
-      status('连接失败，请重试');
+      status(connectionUnknownMessage());
     } finally {
       connecting = false;
       $('connect').disabled = false;

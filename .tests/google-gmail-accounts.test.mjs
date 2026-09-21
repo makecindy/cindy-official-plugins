@@ -2,11 +2,59 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import test from 'node:test';
+import { setImmediate as flush } from 'node:timers/promises';
 
 const read = (file) => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
 const source = read('google-gmail/account-metadata.js');
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const plugins = { 'google-gmail': 'gmail' };
+
+async function connectSettings(reply, locale = 'zh-CN') {
+  const elements = Object.fromEntries(['connect', 'status', 'reauth'].map(id => [id, { disabled: false, textContent: '' }]));
+  const calls = [];
+  const ctx = createContext({
+    AbortController, setTimeout, clearTimeout,
+    document: { documentElement: {}, getElementById: id => elements[id] },
+    window: { renderGoogleAccounts() {} },
+    googleAccountMetadata: { list: async (_key, accounts) => accounts },
+    fetch: async (url, options = {}) => {
+      calls.push({ url, ...options });
+      if (url === '/app-context') return { ok: true, json: async () => ({ context: { locale } }) };
+      if (url === '/oauth') return { ok: true, json: async () => [{ key: 'gmail_account', accounts: [] }] };
+      assert.equal(url, '/oauth/gmail_account/connect');
+      assert.equal(options.method, 'POST');
+      return reply();
+    },
+  });
+  runInContext(read('google-gmail/settings.js'), ctx);
+  await flush();
+  elements.connect.onclick();
+  await flush();
+  assert.equal(elements.connect.disabled, false, 'every outcome releases the connect button');
+  assert.equal(calls.filter(call => call.method === 'POST').length, 1, 'never retry automatically');
+  return elements.status.textContent;
+}
+
+test('连接结果未知时先核对账号状态，覆盖响应丢失、HTTP 错误和解析失败', async () => {
+  const failures = [
+    async () => { throw new Error('response lost'); },
+    async () => ({ ok: false, status: 503 }),
+    async () => ({ ok: true, json: async () => { throw new SyntaxError('invalid JSON'); } }),
+    async () => ({ ok: true, json: async () => null }),
+    async () => ({ ok: true, json: async () => ({ ok: false, error: 'UNKNOWN' }) }),
+  ];
+  for (const reply of failures) {
+    assert.equal(await connectSettings(reply), '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。');
+  }
+  for (const [locale, expected] of [['en', /Connection outcome is unknown.*check the account status before deciding/], ['ja', /アカウントの状態を確認/], ['ko', /계정 상태를 확인/], ['fr', /Connection outcome is unknown/]]) {
+    assert.match(await connectSettings(failures[0], locale), expected);
+  }
+});
+
+test('连接成功及明确取消仍显示原有结果', async () => {
+  assert.equal(await connectSettings(async () => ({ ok: true, json: async () => ({ ok: true, account: { id: 'account-test', label: 'work@example.test' } }) })), '已连接 work@example.test');
+  assert.equal(await connectSettings(async () => ({ ok: true, json: async () => ({ ok: false, error: 'CANCELLED' }) })), '授权已取消');
+});
 
 function fixture(key = 'gmail_account') {
   let data = { unrelated: { retained: true } };
