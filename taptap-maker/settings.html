@@ -107,6 +107,13 @@
 
   <p id="message" class="hint"></p>
 
+  <section class="option">
+    <button id="open-console" class="btn" type="button" data-i18n="openConsole">Open Maker console</button>
+    <p class="hint" data-i18n="consoleHint">Opens a local service; does not build or install a game runtime. Close the service from the console. Media switches below apply to Agent tools, not manual console actions.</p>
+    <p id="console-message" class="hint" role="status"></p>
+    <a id="console-link" hidden target="_blank" rel="noopener noreferrer" data-i18n="openConsole">Open Maker console</a>
+  </section>
+
   <section class="option project-section">
     <label class="option-row">
       <input id="maker-image-enabled" type="checkbox" role="switch" disabled aria-describedby="maker-image-hint">

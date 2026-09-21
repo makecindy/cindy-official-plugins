@@ -4,7 +4,7 @@
   "name": "TapTap Maker",
   "description": "使用插件随附的官方 TapTap Maker Runtime 连接账号、同步或初始化项目、构建游戏并打开官方预览；无需自行安装 CLI 或配置 MCP。",
   "whenToUse": "仅用于明确的 TapTap Maker 游戏项目操作：账号连接、项目初始化/检查、构建/运行/预览，或 Maker 专属素材、广告与调试。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时不适用。",
-  "version": "2.1.13",
+  "version": "2.1.15",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -34,7 +34,8 @@
   },
   "preview": {
     "hosts": [
-      "maker.taptap.cn"
+      "maker.taptap.cn",
+      "127.0.0.1"
     ]
   },
   "manual": {
@@ -169,6 +170,10 @@
           "name"
         ]
       }
+    },
+    {
+      "name": "maker_console",
+      "description": "打开 TapTap Maker 本地控制台。仅启动官方本地服务并在 Cindy 右侧打开页面，不自动构建、提交或安装游戏运行环境；媒体开关只限制 Agent 工具，不限制控制台中的手动操作。"
     }
   ]
 }

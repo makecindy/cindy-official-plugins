@@ -27,6 +27,12 @@ do not require authors to perform the migration checklist themselves.
 
 ## Review contract / 审查契约
 
+Before upgrading or refactoring Maker, read the
+[maintenance checklist](./docs/taptap-maker-maintenance.md)
+([中文](./docs/taptap-maker-maintenance.zh-CN.md)). Preserve the documented
+Runtime patches and host safeguards until equivalent behavior is verified.
+升级或重构 Maker 前必读避坑清单；不得因追求原样 vendor 丢失历史兼容保护。
+
 - **Authoritative ruleset: [`.greptile/rules.md`](./.greptile/rules.md)** plus
   the structured security rules in
   [`.greptile/config.json`](./.greptile/config.json). Written for Greptile but

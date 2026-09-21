@@ -504,7 +504,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.13');
+  assert.equal(manifest.version, '2.1.15');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -545,10 +545,13 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.node.entries, ['node/account.cjs', 'node/maker-child.cjs']);
   assert.equal(manifest.node.childSpawn, true);
-  assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn']);
+  assert.deepEqual(manifest.preview.hosts, ['maker.taptap.cn', '127.0.0.1']);
+  const consoleTool = manifest.tools.find((tool) => tool.name === 'maker_console');
+  assert.ok(consoleTool);
+  assert.match(consoleTool.description, /不自动构建、提交或安装游戏运行环境/);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.33');
+  assert.equal(vendorPackage.version, '0.0.34');
   assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
@@ -679,9 +682,9 @@ test('Runtime user-skills pull 拒绝写入根路径中的符号链接', () => {
   assert.ok(match);
   const calls = [];
   const context = createContext({
-    path26: { join: (...parts) => parts.join('/') },
+    [match[0].match(/current = (path\d*)\.join/)[1]]: { join: (...parts) => parts.join('/') },
     pathExists: (value) => value.endsWith('/.codex'),
-    fs25: { lstatSync: () => ({ isSymbolicLink: () => true }) },
+    [match[0].match(/(fs\d*)\.lstatSync/)[1]]: { lstatSync: () => ({ isSymbolicLink: () => true }) },
   });
   new Script(match[0]).runInContext(context);
   assert.throws(() => context.assertSafeUserSkillRoots('/example-project'), /符号链接/);
@@ -745,7 +748,7 @@ test('Runtime 仅在落后远端时快进，冲突或不安全状态在提交前
   for (const status of ['needs_pull', 'conflict', 'diverged', 'branch_not_allowed', 'remote_unavailable']) {
     const calls = [];
     const context = createContext({
-      path8: { resolve: (value) => value },
+      [match[0].match(/const requestedCwd = (path\d*)\.resolve/)[1]]: { resolve: (value) => value },
       ensureGitAvailable() {},
       resolveUsableMakerGitWorkspace: (cwd) => ({ projectRoot: cwd }),
       loadProjectConfig: () => ({ project_id: 'example-project' }),
@@ -806,6 +809,8 @@ test('设置页跟随宿主四语言并以英文回退', () => {
     assert.deepEqual(Object.keys(messages[locale]).sort(), englishKeys, locale);
   }
   assert.match(settingsHtml, /<html lang="en">/);
+  assert.match(settingsHtml, /id="open-console"/);
+  assert.match(settingsHtml, /<script src="\/settings\.js"><\/script>/);
   assert.match(settingsSource, /fetch\('\/app-context', \{ signal: controller\.signal \}\)/);
   assert.match(settingsSource, /new AbortController\(\)/);
   assert.match(settingsSource, /signal: controller\.signal/);
@@ -820,6 +825,55 @@ test('设置页跟随宿主四语言并以英文回退', () => {
   assert.match(settingsSource, /GIT_REQUIRED: 'syncGitMissing'/);
   assert.doesNotMatch(settingsSource, /response\.message\s*\|\|/);
   assert.doesNotMatch(settingsSource, /item\.message/);
+  assert.match(settingsSource, /request\('console_open', \{\}, true\)/);
+  for (const key of ['openConsole', 'consoleHint', 'consoleReady', 'consoleFailed']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(messages.en, key), key);
+  }
+});
+
+test('maker_console 只打开已校验的 loopback 控制台地址', async () => {
+  const harness = createMainHarness(async (request) => {
+    assert.equal(request.params.name, 'cindy_maker_account');
+    return {
+      ok: true,
+      result: {
+        structuredContent: {
+          ok: true,
+          url: 'http://127.0.0.1:43123/?projectid=app-1&checkout=checkout-1',
+        },
+      },
+    };
+  });
+  const result = await harness.call('maker_console', {
+    session_context: {
+      workdir_is_local: true,
+      workdir: '/tmp/trusted-maker',
+      session_id: 'session-console',
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.execution_state, 'executed');
+  assert.equal(result.result.opened, true);
+  assert.equal(result.result.url, 'http://127.0.0.1:43123/?projectid=app-1&checkout=checkout-1');
+  assert.equal(harness.previewRequests.length, 1);
+  assert.equal(harness.previewRequests[0].url, result.result.url);
+  assert.equal(harness.previewRequests[0].sessionId, 'session-console');
+});
+
+test('maker_console 拒绝非 loopback 地址并报告不确定执行状态', async () => {
+  const harness = createMainHarness(async () => ({
+    ok: true,
+    result: {
+      structuredContent: { ok: true, url: 'https://example.test/console' },
+    },
+  }));
+  const result = await harness.call('maker_console', {
+    session_context: { workdir_is_local: true, workdir: '/tmp/trusted-maker' },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.execution_state, 'unknown');
+  assert.match(result.message, /Invalid Maker console URL/);
+  assert.equal(harness.previewRequests.length, 0);
 });
 
 test('项目目录名跨批次稳定，并用 project id 区分清洗后同名项目', () => {
