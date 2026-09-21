@@ -2,8 +2,8 @@
 (function () {
   'use strict';
   var MESSAGES = {
-    'zh-CN': { edit: '重命名账户', title: '重命名账户', nickname: '昵称', hint: '添加昵称', save: '保存', cancel: '取消', close: '关闭', more: '账号操作', reconnect: '重新连接', disconnect: '断开连接', add: '连接另一个账户', first: '连接账户', expired: '授权已失效', scopes: '需补充授权', failed: '昵称保存失败，请重试', disconnectFailed: '断开连接失败，请重试', cleanupFailed: '账号已断开，但昵称清理失败。' },
-    en: { edit: 'Rename account', title: 'Rename account', nickname: 'Nickname', hint: 'Add nickname', save: 'Save', cancel: 'Cancel', close: 'Close', more: 'Account actions', reconnect: 'Reconnect', disconnect: 'Disconnect', add: 'Connect another account', first: 'Connect account', expired: 'Authorization expired', scopes: 'Additional authorization needed', failed: 'Unable to save nickname. Please try again.', disconnectFailed: 'Unable to disconnect. Please try again.', cleanupFailed: 'Account disconnected, but its nickname could not be removed.' },
+    'zh-CN': { edit: '重命名账户', title: '重命名账户', nickname: '昵称', hint: '添加昵称', save: '保存', cancel: '取消', close: '关闭', more: '账号操作', reconnect: '重新连接', disconnect: '断开连接', add: '连接另一个账户', first: '连接账户', expired: '授权已失效', scopes: '需补充授权', failed: '昵称保存失败，请重试', disconnectFailed: '无法确认是否已断开连接，请重新打开插件详情核对账号状态，再决定是否重试。', cleanupFailed: '账号已断开，但昵称清理失败。' },
+    en: { edit: 'Rename account', title: 'Rename account', nickname: 'Nickname', hint: 'Add nickname', save: 'Save', cancel: 'Cancel', close: 'Close', more: 'Account actions', reconnect: 'Reconnect', disconnect: 'Disconnect', add: 'Connect another account', first: 'Connect account', expired: 'Authorization expired', scopes: 'Additional authorization needed', failed: 'Unable to save nickname. Please try again.', disconnectFailed: 'Disconnect outcome is unknown. Reopen plugin details and check the account status before deciding whether to retry.', cleanupFailed: 'Account disconnected, but its nickname could not be removed.' },
     ja: { hint: 'ニックネームを追加' },
     ko: { hint: '닉네임 추가' },
   };

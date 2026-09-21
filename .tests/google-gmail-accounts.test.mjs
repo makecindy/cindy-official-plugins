@@ -115,6 +115,8 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     assert.match(editor, /googleAccountMetadata\.save\(key, account\.id,/);
     assert.match(editor, /googleAccountMetadata\.remove\(key, account\.id\)/);
     assert.doesNotMatch(editor, /\/nickname|unsupported/);
+    assert.match(editor, /disconnectFailed: '无法确认.*核对账号状态.*再决定是否重试/);
+    assert.match(editor, /disconnectFailed: 'Disconnect outcome is unknown\..*check the account status before deciding whether to retry/);
   });
 
   test(`${plugin}: 模型读取插件昵称，执行仍用账号 ID，不默选其他账号`, async () => {
