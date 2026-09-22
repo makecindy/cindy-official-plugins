@@ -39,6 +39,10 @@
       enterPat: 'Enter a TapTap Maker PAT.', savingPat: 'Validating and saving PAT...',
       patSaved: 'The TapTap Maker Runtime validated and saved the PAT.',
       patSaveFailed: 'Could not save the TapTap Maker PAT. Try again.',
+      openConsole: 'Open Maker console',
+      consoleHint: 'Starts a local service; does not build, submit, or install a game runtime. Closing the page does not stop the service; stop it in the console. Media switches apply to Agent tools, not manual console actions.',
+      consoleReady: 'Console ready. Use the link if it did not open.',
+      consoleFailed: 'Startup could not be confirmed. Check the existing console and system Node.js; do not automatically retry.',
       chooseParent: 'Choose a parent folder. The selected projects will then sync one by one.',
       syncCanceled: 'Sync canceled.', unknownProject: 'Unknown project',
       syncFailure: 'Sync failed. Try again.', syncSuccess: 'Synced {count} projects to {path}',
@@ -82,6 +86,10 @@
       patPageFailed: '无法打开 TapTap Maker PAT 页面，请重试', enterPat: '请输入 TapTap Maker PAT',
       savingPat: '正在验证并保存 PAT…', patSaved: 'PAT 已由 TapTap Maker Runtime 验证并保存',
       patSaveFailed: 'TapTap Maker PAT 保存失败，请重试',
+      openConsole: '打开 Maker 控制台',
+      consoleHint: '启动本地服务，不自动构建或安装游戏运行环境。关闭页面不会停止服务，请在控制台停止。媒体开关只限制 Agent 工具，不限制控制台中的手动操作。',
+      consoleReady: '控制台已就绪，未自动打开时请点击链接。',
+      consoleFailed: '无法确认启动结果。请检查已有控制台及系统 Node.js，不要自动重试。',
       chooseParent: '请选择父目录，随后将逐个同步所选项目…', syncCanceled: '已取消同步',
       unknownProject: '未知项目', syncFailure: '同步失败，请重试',
       syncSuccess: '已同步 {count} 个项目到 {path}',
@@ -124,6 +132,10 @@
       patPageFailed: 'PAT ページを開けませんでした。再試行してください。', enterPat: 'TapTap Maker PAT を入力してください。',
       savingPat: 'PAT を検証して保存しています…', patSaved: 'Runtime が PAT を検証して保存しました。',
       patSaveFailed: 'PAT を保存できませんでした。再試行してください。',
+      openConsole: 'Maker コンソールを開く',
+      consoleHint: 'ローカルサービスを起動します。ビルド、提出、ゲームランタイムのインストールは行いません。ページを閉じても停止しません。サービスはコンソールで停止してください。メディア設定は Agent ツールのみ対象で、手動操作には適用されません。',
+      consoleReady: 'コンソールの準備ができました。開かない場合はリンクを使用してください。',
+      consoleFailed: '起動を確認できません。既存のコンソールとシステム Node.js を確認し、自動再試行しないでください。',
       chooseParent: '親フォルダを選択すると、選択したプロジェクトを順番に同期します。',
       syncCanceled: '同期をキャンセルしました。', unknownProject: '不明なプロジェクト',
       syncFailure: '同期に失敗しました。再試行してください。', syncSuccess: '{count} 件を {path} に同期しました',
@@ -166,6 +178,10 @@
       patPageFailed: 'PAT 페이지를 열 수 없습니다. 다시 시도하세요.', enterPat: 'TapTap Maker PAT를 입력하세요.',
       savingPat: 'PAT를 검증하고 저장하는 중...', patSaved: 'Runtime이 PAT를 검증하고 저장했습니다.',
       patSaveFailed: 'PAT를 저장하지 못했습니다. 다시 시도하세요.',
+      openConsole: 'Maker 콘솔 열기',
+      consoleHint: '로컬 서비스를 엽니다. 빌드하거나 게임 런타임을 설치하지 않습니다. 페이지를 닫아도 서비스는 계속됩니다. 콘솔에서 서비스를 중지하세요. 미디어 설정은 Agent 도구에만 적용되며 수동 콘솔 작업에는 적용되지 않습니다.',
+      consoleReady: '콘솔이 준비되었습니다. 열리지 않으면 링크를 사용하세요.',
+      consoleFailed: '시작 여부를 확인할 수 없습니다. 기존 콘솔과 시스템 Node.js를 확인하고 자동으로 재시도하지 마세요.',
       chooseParent: '상위 폴더를 선택하면 선택한 프로젝트를 하나씩 동기화합니다.',
       syncCanceled: '동기화를 취소했습니다.', unknownProject: '알 수 없는 프로젝트',
       syncFailure: '동기화에 실패했습니다. 다시 시도하세요.', syncSuccess: '{count}개 프로젝트를 {path}에 동기화했습니다',
@@ -195,6 +211,9 @@
   var syncProjectsButton = document.getElementById('sync-projects');
   var message = document.getElementById('message');
   var projectMessage = document.getElementById('project-message');
+  var openConsoleButton = document.getElementById('open-console');
+  var consoleMessage = document.getElementById('console-message');
+  var consoleLink = document.getElementById('console-link');
 
   var busy = false;
   var accountConnected = false;
@@ -559,6 +578,22 @@
       message.textContent = error.message || t('patPageFailed');
     } finally {
       setBusy(false);
+    }
+  });
+
+  openConsoleButton.addEventListener('click', async function openConsole() {
+    openConsoleButton.disabled = true;
+    consoleLink.hidden = true;
+    consoleMessage.textContent = '';
+    try {
+      var result = await request('console_open', {}, true);
+      consoleLink.href = result.url;
+      consoleLink.hidden = false;
+      consoleMessage.textContent = t('consoleReady');
+    } catch (_error) {
+      consoleMessage.textContent = t('consoleFailed');
+    } finally {
+      openConsoleButton.disabled = false;
     }
   });
 

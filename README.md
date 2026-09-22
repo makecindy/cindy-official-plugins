@@ -405,7 +405,7 @@ plugin text and every tool description. Then follow
 package; before merging, install and verify the exact `.cindy` on a real device
 running an eligible stable production or Beta Cindy build, then check the attestation.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.33`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.34`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:
@@ -427,6 +427,9 @@ compatibility patches until the official package includes equivalent fixes:
 Apart from these patches and the retained `LICENSE`, vendor files must match the
 official npm package. Recheck the patch list and regression tests on every upgrade;
 do not add unrelated manual bundle edits.
+
+Historical failures, superseded fixes and upgrade checks are recorded in the
+[Maker maintenance checklist](./docs/taptap-maker-maintenance.md).
 
 ## Community
 
