@@ -48,13 +48,80 @@ function readSettings() {
   return settingsPromise;
 }
 
-// settings.js rewrites /kv and pings us on the shared channel so the next call
-// picks the new path up without a reload.
+// The settings page talks to us over one shared channel: it announces a saved
+// path so the next call picks it up without a reload, and it asks for a status
+// probe. Requests are deduped by reqId because the page resends until it sees
+// a reply — the channel drops the first message while the brain is still
+// waking.
+var SETTINGS_CHANNEL = 'taptap-cli';
+var SETTINGS_RESULT_TTL_MS = 60000;
+var settingsRequests = new Map();
+
+function statusProbe(cliPath) {
+  return cindy.node.request({
+    method: 'taptap/cli_status',
+    params: { cli_path: cliPath },
+    timeoutMs: 60000
+  }).then(function (resp) {
+    var result = resp && resp.ok ? resp.result : null;
+    if (result && result.ok === true) return result.data;
+    throw new Error((result && result.message) || (resp && resp.message) || '无法读取 taptap-cli 状态');
+  });
+}
+
+var settingsChannel = null;
 try {
-  new BroadcastChannel('taptap-cli').onmessage = function () { settingsPromise = null; };
+  settingsChannel = new BroadcastChannel(SETTINGS_CHANNEL);
 } catch (_) {
-  // Older hosts may not expose BroadcastChannel; the setting still applies on
-  // the next plugin wake.
+  // Older hosts may not expose BroadcastChannel; a saved path still applies on
+  // the next plugin wake, and the settings page falls back to its own timeout.
+}
+
+if (settingsChannel) {
+  settingsChannel.onmessage = function (msg) {
+    var message = msg && msg.data;
+    if (!message || typeof message !== 'object') return;
+
+    if (message.type === 'settings-changed') {
+      settingsPromise = null;
+      return;
+    }
+    if (message.type !== 'settings-request' || typeof message.reqId !== 'string') return;
+
+    var existing = settingsRequests.get(message.reqId);
+    if (existing) {
+      if (existing.response) settingsChannel.postMessage(existing.response);
+      return;
+    }
+
+    var entry = { response: null };
+    settingsRequests.set(message.reqId, entry);
+    (message.action === 'status'
+      ? readSettings().then(function (settings) {
+        return statusProbe(settings && typeof settings.cli_path === 'string' ? settings.cli_path : undefined);
+      })
+      : Promise.reject(new Error('未知的设置操作:' + String(message.action)))
+    )
+      .then(function (data) {
+        entry.response = { type: 'settings-result', reqId: message.reqId, ok: true, result: data };
+      })
+      .catch(function (error) {
+        entry.response = {
+          type: 'settings-result',
+          reqId: message.reqId,
+          ok: false,
+          message: (error && error.message) || String(error)
+        };
+      })
+      .then(function () {
+        settingsChannel.postMessage(entry.response);
+        // Keep the reply for the page's resend loop, which can outlive this
+        // promise by a few hundred milliseconds.
+        setTimeout(function () {
+          if (settingsRequests.get(message.reqId) === entry) settingsRequests.delete(message.reqId);
+        }, SETTINGS_RESULT_TTL_MS);
+      });
+  };
 }
 
 function reply(callId, payload) {

@@ -1,10 +1,10 @@
 {
   "name": "TapTap CLI",
-  "description": "TapTap 開発者向け業務プラグイン。インストール済みの公式 taptap-cli を呼び出し、ログインと ID、ゲーム作成、掲載情報の編集、パッケージのアップロード、公開資格、審査とリリース、テスト計画、素材ライブラリを扱います。認証情報は CLI 側に留まり、書き込みには確認が必要です。",
-  "whenToUse": "TapTap 開発者向け業務の操作:ログイン、developerId/appId の確認、ゲーム作成、掲載情報とメインパッケージの編集、画像/動画/APK/Windows/H5 のアップロード、公開資格の補完、審査の提出・取り下げ、リリース、テスト計画とアクティベーションコードの管理、素材ライブラリの検索",
+  "description": "TapTap 開発者向け業務プラグイン。インストール済みの公式 taptap-cli を呼び出し、ログインと ID、ゲーム作成、掲載情報の編集、パッケージのアップロード、公開資格、審査とリリース、テスト計画、素材ライブラリ、データ指標とプレイヤー評価を扱います。認証情報は CLI 側に留まり、書き込みには確認が必要です。",
+  "whenToUse": "TapTap 開発者向け業務の操作:ログイン、developerId/appId の確認、ゲーム作成、掲載情報とメインパッケージの編集、画像/動画/APK/Windows/H5 のアップロード、公開資格の補完、審査の提出・取り下げ、リリース、テスト計画とアクティベーションコードの管理、素材ライブラリの検索、データ指標の照会とプレイヤー評価の閲覧",
   "tools": {
     "list_tools": {
-      "description": "このプラグインで使える TapTap 業務操作を一覧します。カタログは本機にインストールされた taptap-cli からリアルタイムに読み取ります。category を省略するとトップレベルのコマンド(名前・説明・グローバル実行ルール)を返し、category を渡すと一段ずつ下へ掘れます(例: category:\"asset-library\"、次に category:\"asset-library ai-image\")。コマンド名が不確かなときは接頭辞で検索できます(例: category:\"up\")。サブコマンドを持たないコマンドのパスを渡すと、そのコマンドが受け付けるフラグを返します。詳細は call_tool の args._help:true で確認してください。このプラグインが意図的に除外するコマンド:データ照会(dashboard-stats とその stats:get 別名)、CLI 自身の更新(update)、生の auth login(auth login-start / login-wait を使用)。ダウンロード数・PV・評価・注文などの運用データはカタログにありません。",
+      "description": "このプラグインで使える TapTap 業務操作を一覧します。カタログは本機にインストールされた taptap-cli からリアルタイムに読み取ります。category を省略するとトップレベルのコマンド(名前・説明・グローバル実行ルール)を返し、category を渡すと一段ずつ下へ掘れます(例: category:\"asset-library\"、次に category:\"asset-library ai-image\")。コマンド名が不確かなときは接頭辞で検索できます(例: category:\"up\")。サブコマンドを持たないコマンドのパスを渡すと、そのコマンドが受け付けるフラグを返します。詳細は call_tool の args._help:true で確認してください。このプラグインが意図的に除外するコマンド:CLI 自身の更新(update)、生の auth login(auth login-start / login-wait を使用)。",
       "parameters": {
         "/properties/category": {
           "description": "コマンドのパスまたは接頭辞。直前の一覧が返した値をそのまま深掘りできます(例 \"asset-library\"、\"asset-library ai-image\")。名前が不確かなときは接頭辞で検索(例 \"up\")。省略するとトップレベルを返します。"

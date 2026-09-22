@@ -4,90 +4,83 @@
 
 用户问“还缺哪些资质”“资质齐不齐”“能不能上架”，或纠正游戏的联网、内购、AI、IP、文字剧情等事实时使用本 reference。
 
+## 核心原则
+
+`qualification get-qualification-status` 只返回 8 类资质的**客观状态登记表**（`qualifications[]`），**不做必须性判断**。
+
+- 8 项 `pending_upload` 只表示“8 个资质槽位当前都没有材料”，**不等于 8 项都必须交**。
+- “哪些资质是必须的”由 app-edit 手册的 `app analyze-app-status` 按游戏事实（联网 / 内购 / 文字剧情 / AI / IP + 包体类型）计算，本 reference 不做这个判断。
+- 离线、无内购、无 AI、无 IP 的游戏，必须资质集合可能为空——此时 8 项 `pending_upload` 也不阻断上架。
+- 不要把 `pending_upload` 直接读成“必须补齐”。那是把客观登记表误读成了必须性判断。
+
 ## 输入判断
 
 1. 缺 `developerId` / `appId` 时先转 `taptap-identity`。
-2. 先读取 `app list-packages`；`data.result.current_bindings` 中存在
-   `slot=windows` 时，确认当前草稿已绑定 Windows 包体。它是只读展示事实，
-   不能作为 `select-package` / `clear-package` 的写入快照。
-3. 先读取当前 `analyze-qualification-status` schema。Catalog `1.0.29+` 可接收
-   `release_intent`、`is_online`、`has_iap`、`has_text_story_simulation`、
-   `has_ai_content`、`involves_ip`；只传用户明确确认的事实。旧 schema 只有
-   `app_id` 和 `developer_id` 时，用户补充的信息不能包装成已提交给服务端的
-   `user_override`，应报告当前 catalog 的契约缺口。
-4. 发布意图取值为预约=`pre_registration`、测试=`testing`、正式上线或发布=
-   `launch`。只有本次输出明确表明服务端已确认时才能据此给最终结论；
-   `requires_release_intent_confirmation=true` 或对应
-   `judgement_basis_items[].source=default_assumption` 时标记“无法确认”。
-5. 其它判断事实也读取 `judgement_facts` 与 `judgement_basis_items[].source`。
-   `source=default_assumption` 只能作为服务端本次计算所用假设，不能表述为用户或
-   App 已确认事实。
-6. Catalog `1.0.33+` 会把尚未确认的联网、内购、文字剧情、AI 和 IP 事实返回为
-   `null`，并通过 `requires_judgement_facts_confirmation` 与
-   `unconfirmed_fact_keys` 列出缺口。`null` 不能解释成 `false`。
+2. 先读取 `app list-packages`；`data.result.current_bindings` 中存在 `slot=windows` 时，确认当前草稿已绑定 Windows 包体。它是只读事实，不能作为 `select-package` / `clear-package` 的写入快照。
+3. 读取当前 `qualification get-qualification-status` 结果。该 operation 只接受 `app_id` / `developer_id`，资质事实一律来自它的返回，不要臆造或补造输入字段。
 
 ## 命令
 
 ```text
-call_tool(name:"schema", args:{_positional:["qualification","analyze-qualification-status"]})
-call_tool(name:"app list-packages", args:{app_id:"<appId>", developer_id:"<developerId>"})
-call_tool(name:"qualification analyze-qualification-status", args:{app_id:"<appId>", developer_id:"<developerId>", data:<confirmed-analysis-input-json>})
+call_tool(name:"schema", args:{_positional:["qualification","get-qualification-status"]})
+call_tool(name:"app list-packages", args:{developer_id:"<developerId>", app_id:"<appId>"})
+call_tool(name:"qualification get-qualification-status", args:{developer_id:"<developerId>", app_id:"<appId>"})
 ```
 
-当前 schema 确认支持下列字段时，`<confirmed-analysis-input-json>` 的类型示例：
+## 资质类型与状态
 
-```json
-{"release_intent":"launch","is_online":false,"has_iap":false,"has_text_story_simulation":false,"has_ai_content":true,"involves_ip":false}
-```
+8 类资质（`qualification_type`）：
 
-Catalog `1.0.29+` 下，按当前 schema 将用户已确认的
-`release_intent`、`is_online`、`has_iap`、`has_text_story_simulation`、
-`has_ai_content`、`involves_ip` 作为同名 JSON 字段放入 `--data`；字段较多时可改用
-`data:"@qualification-analysis.json"`(相对会话工作目录的文件)。未确认字段直接省略，不能默认填成 `false`。
-`app_id` 和 `developer_id` 继续作为 scope 字段直接传;只有命令 `--help`(经 `args._help:true`)
-实际列出的参数才作为控制 flag 使用。不要在旧 schema 下提前传入这些字段。
+| 业务名称 | `qualification_type` |
+| --- | --- |
+| 游戏版号 | `game-license` |
+| ICP 备案 | `icp-filing` |
+| 隐私合规 | `privacy-compliance` |
+| 防沉迷 | `anti-addiction` |
+| AI 内容声明 | `ai-declaration` |
+| 软件著作权 | `software-copyright` |
+| IP 授权书 | `authorization-letters` |
+| 安全评估 | `security-assessment` |
+
+5 种状态（`status`）：
+
+| 值 | 面向用户的含义 | 处理 |
+| --- | --- | --- |
+| `pending_upload` | 该槽位暂无材料（不一定必须） | 是否为缺口取决于必须性判断；非必须项不要称为“缺口”，改为询问是否需要补充 |
+| `uploaded` | 已保存草稿、未提交 | 待提交审核 |
+| `reviewing` | 审核中 | 等待结果 |
+| `rejected` | 已驳回 | 读取 `reason` 与 `field_reject_reasons` 后重新处理 |
+| `approved` | 已通过 | 完成 |
+
+## 判断“必须资质”（哪些真的缺）
+
+如果要回答“还缺哪些资质”“能否上架”，必须资质由 app-edit 手册的 `app analyze-app-status` 计算，不在这里判断：
+
+1. 先转 app-edit 手册走 `app analyze-app-status`，看 `warnings[]` 里的 `QUALIFICATION_INCOMPLETE`。
+2. `QUALIFICATION_INCOMPLETE` 的 message 里列出的才是“按游戏事实算出的必须资质缺口”。
+3. 没有 `QUALIFICATION_INCOMPLETE` → 必须资质集合为空（或已满足），资质维度不阻断。
+4. 拿到必须资质清单后，再回到本手册用 `qualification get-qualification-status` 看这些资质的客观状态和下一步。
 
 ## 执行步骤
 
-1. 调用 `app list-packages`，记录 `current_bindings` 中的已绑定槽位。读取失败时，
-   包体类型标记“无法确认”，不能把候选包体或上传记录当作已绑定。
-2. 调用 `analyze-qualification-status` 获取当前判断依据、资质要求和状态。
-3. 对照包体事实与 `judgement_facts.package_types`。已绑定 Windows 包体但结果
-   不含 `windows` 时，报告“服务端资质分析未识别已绑定 Windows 包体”，并把
-   Windows 场景结论标记为不完整；不要用本地规则修补 `required_qualifications`。
-4. 把工具实际使用的判断依据及来源复述给用户。当前 schema 支持显式事实时，
-   使用参数重新分析并确认对应 `source=user_override`；不支持时先更新对应的真实
-   资料来源后重新分析，没有可写入口时报告契约缺口。
-5. 先判断结论是否仍待确认。出现以下任一条件时，输出“当前不能确认满足上架条件”，
-   并列出待确认事实或规则：
-   - `qualification_progress_status=待确认`
-   - `requires_judgement_facts_confirmation=true`
-   - `submit_eligibility.can_submit=false`
-   - `blockers[].code=judgement_facts_unconfirmed`
-   - `blockers[].code=qualification_rule_unconfirmed`
-6. 按“资质材料”和“合规检测”分组列出全部非 `approved` 项，并说明这些项目只
-   覆盖服务端本次实际识别的包体和判断事实。
-7. 对每项说明当前状态和下一步：待上传、已上传、审核中、已通过或需要人工填写。
-8. 如果用户的目标是完整发布，说明资质通过不等于资料、包体和版本发布条件全部
-   通过，并转 `taptap-app-edit`。
+0. **先确认「资质判断事实」**：用 `save-qualification-draft` 的 `app_features`（`is_internet_required` / `has_in_app_purchase` / `has_ai_content` / `has_ip_authorization` / `has_text_story_simulation` 及包体类型）逐项向用户确认（是否联网 / 内购 / AI / IP / 文字剧情），不确定时必须询问，不默认、不跳过；确认后写入 `app_features`。这些事实决定“哪些资质必须”，是后续判断的输入，不能跳过直接列 8 项。
+1. 走 app-edit 手册的 `app analyze-app-status`，取 `warnings[]` 里的 `QUALIFICATION_INCOMPLETE`；它 message 里列出的才是“按游戏事实算出的必须资质缺口”。没有它 = 资质维度不阻断。
+2. 调用 `qualification get-qualification-status`，记录 `version` 与 `qualifications[]`；该接口只是客观槽位登记表，不做必须性判断。
+3. 报告客观状态：逐项列出 8 类资质的 `status`，但必须按“必须性”分层：
+   - **必须资质**（来自 `QUALIFICATION_INCOMPLETE`）：`pending_upload` / `rejected` 才是“缺口 / 待补 / 待重提”，要说明对提交的影响。
+   - **非必须资质**（其余 `pending_upload`）：只说明“该槽位暂无材料、按当前游戏事实非必须”，**不要称为缺口，不要并入待补清单**；主动询问用户是否需要补充其中某项，并说明补充价值（例如版号决定能否从“开放试玩”升级为“正式上线”）。
+   - `rejected` 项单独列出 `reason` 与 `field_reject_reasons`；`submitted_fields` 用于说明“审核中已提交了哪些字段”。
+4. 结论：
+   - 必须资质里存在 `pending_upload` 或 `rejected` 时，明确表述“当前不能确认满足上架条件”，并列出这些必须项的待补 / 待重提。
+   - 必须资质为空（或已满足）时，表述“按当前游戏事实无必须资质缺口”，不要用 8 项客观状态否定它。
+   - 全部 `approved` 时表述“资质状态均为已通过”。
+5. 输出不要平铺“资质 8 项全部未提交”这类全量缺口清单：先给必须缺口，再把非必须空槽作为可选项 + 一个询问。
+6. 如果用户目标是完整发布，说明资质通过不等于资料、包体和版本发布条件全部通过，并转 app-edit 手册。
 
 ## 输出边界
 
-- 结论必须以本次工具结果为准，不引用旧分析替代当前结果。
-- Windows 联网场景是否要求 ICP、隐私合规或其它材料，当前没有已确认规则。
-  只能展示服务端本次明确返回的要求；包体识别不一致时需产品或服务端确认，
-  不能由 Skill 推断、补齐或删除资质项。
-- 返回 `warnings[].code=windows_online_rule_confirmation_required` 时，当前结果
-  必须同时按 `blockers[].code=qualification_rule_unconfirmed` 处理，结论保持
-  `待确认`，且 `submit_eligibility.can_submit=false`。不能声称 Windows 联网场景
-  已最终满足全部资质。
-- `blockers[].code=judgement_facts_unconfirmed` 表示联网、内购、文字剧情、AI、IP
-  或包体等判断事实尚未确认；列出 `unconfirmed_fact_keys`，但不要自行猜测值。
-- 业务结论必须联合读取状态、确认标记、提交资格和 blockers。即使异常旧响应中的
-  `meets_listing_requirements=true` 与这些阻塞字段冲突，也必须按阻塞处理并报告
-  服务端契约不一致。
-- 不默认输出 raw schema、接口路径、审核单 ID 或完整内部字段。
+- 结论必须以本次 `qualification get-qualification-status` 结果为准，不引用旧结果。
+- agent 只报告服务端返回的客观状态，不自行追加或删除资质项，也不臆断“某场景必须某资质”。Windows 联网场景是否要求 ICP、隐私合规或其它材料，以服务端当前返回为准；需要规则确认时标注“需产品/服务端确认”。
 - 不把测试玩家资格、激活码资格或普通资料缺口混入上架资质结论。
-- 顶层 `ok=false` 时按 `error.type` / `error.subtype` 处理；当前
-  `analyzeQualificationStatus` schema 没有 `data.result.ok`。缺少预期结果字段时
-  按异常处理，不能当成“没有资质要求”。
+- 不默认输出 raw schema、接口路径、审核单 ID 或完整内部字段。
+- 顶层 `ok=false` 时按 `error.type` / `error.subtype` 处理；缺少预期结果字段按异常处理，不能当成“没有资质要求”。

@@ -500,12 +500,14 @@ async function helpRisk(runOpts, tokens) {
 // ---------------------------------------------------------------------------
 // static surface: descriptions, rules
 
-// Data-query operations are deliberately not offered by this plugin. The
-// exclusion is a single denylist entry: the catalog filter drops the service
-// before it is listed, the alias filter drops `stats:get` (its canonical target
-// is dashboard-stats), the tree filter drops it from discovery, and call_tool
-// rejects it outright rather than relying on the listing to hide it.
-const EXCLUDED_SERVICES = new Set(['dashboard-stats']);
+// Services this plugin refuses to offer. It is currently empty: data querying
+// (dashboard-stats) used to be denied here and is now served like any other read
+// domain. The denylist stays as the single entry point so a future exclusion
+// still lands in one place: the catalog filter drops the service before it is
+// listed, the alias filter drops its aliases, the tree filter drops it from
+// discovery, and call_tool rejects it outright rather than relying on the
+// listing to hide it.
+const EXCLUDED_SERVICES = new Set([]);
 
 // Commands the agent must not run through the plugin: updating the user's own
 // installation is a machine-level action the user performs in a terminal, not
@@ -515,6 +517,7 @@ const EXCLUDED_COMMANDS = new Set(['update']);
 const SERVICE_DESCRIPTIONS = {
   app: '游戏资料、包体槽位、版本生命周期、审核与发布',
   'asset-library': '图片/视频素材库检索、收录与上传',
+  'dashboard-stats': '下载、曝光、转化、预约、订单、评分等数据表现查询',
   developer: '开发者账号与厂商列表',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',
   qualification: '上架资质分析、非敏感材料草稿、资质增量审核',
@@ -553,7 +556,7 @@ const DESCRIPTION_OVERLAY = {
 const TOKEN_RE = /^[a-z0-9+][a-z0-9+._:-]*$/i;
 
 const GLOBAL_RULES = [
-  '写门禁:risk 为 write / high-risk-write 的操作,必须先向用户说明参数与影响并取得明确同意;先用 dry_run:true 预览,再用完全相同的参数加 yes:true 执行。既没有 dry_run 也没有 yes 的写调用会被拒绝,只读会话里的写调用一律拒绝;取得用户同意是你的职责,yes 是执行开关而不是同意本身。例外:插件编排的 auth login-start / auth login-wait 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁,但只读会话仍然拒绝。--yes 不代表用户同意协议;遇到服务端 required_consents 只展示 agreement.name 与 agreement.url。',
+  '写门禁:risk 为 write / high-risk-write 的操作,必须先向用户说明参数与影响并取得明确同意;先用 dry_run:true 预览,再用完全相同的参数加 yes:true 执行。既没有 dry_run 也没有 yes 的写调用会被拒绝,只读会话里的写调用一律拒绝;取得用户同意是你的职责,yes 是执行开关而不是同意本身。例外:插件编排的 auth login-start / auth login-wait 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁,但只读会话仍然拒绝。--yes 不代表用户同意协议;遇到服务端要求额外确认时只展示响应实际返回的 blockers / warnings,协议签署走独立的 agree-sce-agreement(先展示协议名称与 URL,用户明确同意后加 yes:true 执行,再重查确认 blocker 消失)。',
   '参数:scope 字段(developer_id / app_id)直接传,worker 映射成 --dev-id / --app-id;其余业务字段必须放进 args.data(JSON 对象);除 scope 和 data 外的键都是控制 flag,透传成 --flag,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);位置参数(如文件路径)放 args._positional 数组。本地文件路径必须是相对会话工作目录的路径:CLI 以会话工作目录为基准校验并拒绝绝对路径与 ../ 越界。',
   '发现命令:list_tools() 给顶层命令;list_tools(category:"<命令路径>") 逐层下钻(如 category:"asset-library",再 category:"asset-library ai-image");不确定命令名时直接传前缀搜索(如 category:"up")。某命令的完整帮助(含全部 flag)用 call_tool(name:"<命令>", args:{_help:true}),也可以用 call_tool(name:"help", args:{_positional:["<命令>"]})。list_tools 下钻不含 outputSchema,需要某操作的输出结构时用 call_tool(name:"schema", args:{_positional:[service, method]}) 查完整输入输出。',
   '调用示例:先 list_tools(category) 看该域操作与参数(enum=可选值、pattern=格式、required=true=必填),再 call_tool。例——创建冒险游戏:call_tool(name:"app create-app", args:{developer_id:"1001", data:{title:"我的游戏", category:"adventure", package_type:"apk", developer_role:"developer"}, dry_run:true});用户确认后同参数加 yes:true。务必按 inputSchema 的 enum 取值、按 pattern 校验格式,不要猜值。',
@@ -1382,6 +1385,71 @@ async function callTool(params) {
 }
 
 // ---------------------------------------------------------------------------
+// settings-page status probe
+//
+// The settings page shows whether the CLI is installed, which version it is,
+// and whether the user is logged in. This function is the only place that
+// decides those three, so main.js relays and settings.js renders without
+// re-deriving any of them.
+//
+// `auth status --offline --json` reads the local credential store without
+// network access, which is what a panel that runs on page load needs — the
+// online form would make the panel fail whenever the machine is offline.
+
+function envelopeData(res) {
+  if (res.cliUnavailable) return { error: res.message || 'taptap-cli 不可用。' };
+  const env = parseEnvelope(res.stdout, res.stderr);
+  if (!env) return { error: 'CLI 返回了无法解析的输出。' };
+  if (env.ok !== true) {
+    return { error: (env.error && (env.error.message || env.error.type)) || 'CLI 返回了失败结果。' };
+  }
+  return { data: env.data };
+}
+
+async function cliStatus(params) {
+  const cliPath = (params || {}).cli_path;
+  const resolved = resolveCli(cliPath);
+  if (!resolved.cmd) {
+    const err = resolved.error || {};
+    return {
+      ok: true,
+      data: {
+        installed: false,
+        errorCode: err.code || 'CLI_NOT_INSTALLED',
+        message: err.message || 'taptap-cli 不可用。',
+      },
+    };
+  }
+
+  // Both probes must run the same binary the check above resolved, so a
+  // configured path cannot report "installed" while the version and sign-in
+  // rows are read from a different taptap-cli on PATH.
+  const [versionRes, authRes] = await Promise.all([
+    runBinary(['version'], { timeoutMs: 30000, label: '读取 CLI 版本', cliPath: cliPath }),
+    runBinary(['auth', 'status', '--offline', '--json'], { timeoutMs: 30000, label: '读取登录态', cliPath: cliPath }),
+  ]);
+
+  // A field that cannot be read is reported as null plus its own reason, so a
+  // failing version probe never blanks out the login row.
+  const result = { installed: true, version: null, logged_in: null };
+
+  const version = envelopeData(versionRes);
+  if (version.data && typeof version.data.version === 'string') result.version = version.data.version;
+  else result.version_error = version.error || 'CLI 未返回版本号。';
+
+  const auth = envelopeData(authRes);
+  if (auth.data && typeof auth.data === 'object') {
+    // Offline status describes the local credential store: a token that exists
+    // and has not expired is what the panel means by "logged in".
+    result.logged_in = auth.data.hasAccessToken === true && auth.data.accessTokenExpired === false;
+  } else {
+    result.login_error = auth.error || 'CLI 未返回登录态。';
+  }
+
+  return { ok: true, data: result };
+}
+
+// ---------------------------------------------------------------------------
 // main loop
 
 function handle(req, fn) {
@@ -1415,6 +1483,7 @@ readline.createInterface({ input: process.stdin, terminal: false }).on('line', (
   if (!req || typeof req.method !== 'string') return;
   if (req.method === 'taptap/list_tools') return handle(req, listTools);
   if (req.method === 'taptap/call_tool') return handle(req, callTool);
+  if (req.method === 'taptap/cli_status') return handle(req, cliStatus);
   if (req.method === 'ping') return reply(req.id, { ok: true, pong: true });
   reply(req.id, { ok: false, errorCode: 'METHOD_NOT_FOUND', message: '未知方法 ' + req.method });
 });

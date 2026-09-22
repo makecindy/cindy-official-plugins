@@ -51,7 +51,7 @@
 | 上传包体 | 创建方向 | 后续说明 |
 | --- | --- | --- |
 | APK 包 | APK | 适用于 Android 游戏；创建后继续上传或关联包体，并完善资料和合规认证 |
-| 小游戏包 | 小游戏 | Tap 小游戏包需包含 `game.json`；创建后前往开发者中心上传和完成分包测试，再回 CLI 查询状态或关联已有包体 |
+| 小游戏包 | 小游戏 | Tap 小游戏包需包含 `game.json`；创建后用 `upload-mini-app-package` 上传；分包测试不在 CLI 进行，上传后回 CLI 查询状态或关联已有包体 |
 | PC / Windows 包 | PC | 适用于 Windows 游戏；创建后继续关联包体并完善 Windows 专属信息（转 `taptap-app-edit`） |
 | H5 包 | H5 | H5 包需包含 `index.html`；主要在个人主页曝光，创建后继续上传包体并完善资料 |
 
@@ -119,7 +119,7 @@ H5 路径说明：
 
 ### 5. 创建后推进方式
 
-推进方式是创建成功后的问题，不再作为创建前必填项。创建前只收集游戏名称、游戏类型、包体类型和轻量素材说明；创建成功后只展示创建接口真实返回的 `intent_options`，这些后续任务不得反向影响创建判断。
+推进方式是创建成功后的问题，不再作为创建前必填项。创建前只收集游戏名称、游戏类型、包体类型和轻量素材说明；创建成功后由 CLI 固定提供三个推进方式（开预约 / 测试 / 正式上线）供用户选择，这些后续任务不得反向影响创建判断。
 
 | 推进方式 | 含义 | 创建后的引导路径 |
 | --- | --- | --- |
@@ -129,9 +129,8 @@ H5 路径说明：
 
 选项展示规则：
 
-- 只展示当次创建结果的 `intent_question` 和 `intent_options`，不得自行补造“正式上线 / 测试 / 开预约”等固定选项。
-- 服务端未返回 `intent_options` 时，明确说明暂未返回后续推进选项，并让用户先确认创建结果；不要根据包体类型生成替代列表。
-- 服务端返回的选项也要保持原始标题和描述，不做业务改写或重新排序。
+- 服务端不再返回 `intent_options`，CLI 在创建成功后固定提供上表三个推进方式：开预约 / 测试 / 正式上线。
+- 三个推进方式是固定的，不依赖服务端返回，也不根据包体类型生成替代列表；标题和描述保持上表口径，不做业务改写或重新排序。
 - 无论选择哪种推进方式，正式发布前都要单独确认工具返回且可见的 `region_flag_*` 分发状态；不要把“发布版本”和“调整分发状态”合并成一个隐含动作。
 - “正式上线”选项只记录后续目标；未再次取得用户明确的“提交审核 / 提审”确认前，不得调用 `precheck-app-review`、`prepare-review-snapshot` 或 `submit-app-review`。
 - 推进方式只影响创建后的任务清单，不改变创建游戏最小条件：游戏名称、游戏类型、包体类型。
@@ -159,7 +158,7 @@ H5 路径说明：
 - 当前还没有 appId 时，不能直接判断物料是否满足资料审核条件；若开发者问「物料是否符合条件 / 下一步怎么做」，第一步应引导先完成创建游戏。
 - 只有开发者明确说明游戏已创建，或已经拿到 appId 时，才按创建后物料检查路径说明；仍不得伪造或猜测页面链接。
 - 创建游戏后的物料盘点与上传统一转 `taptap-materials`，按其盘点和逐项上传流程执行；文案文件由 Agent 直接读取，字段回填交 `taptap-app-edit`。
-- APK、Windows、H5 上传统一走 `taptap-materials`；上传成功不代表已绑定，资料页绑定由 `taptap-app-edit` 按包体槽位契约确认式执行。Tap 小游戏不在 CLI 上传；由 `taptap-package-management` 读取 overview 并按实际返回的 `page_path` 引导到开发者中心。
+- APK、Windows、H5、Tap 小游戏 上传统一走 `taptap-materials`；上传成功不代表已绑定，资料页绑定由 `taptap-app-edit` 按包体槽位契约确认式执行。
 - CLI 写入后重新读取资料草稿和包体槽位，说明哪些信息已回写、哪些仍需用户补充，并给出下一条 CLI 命令。
 - `TOOL_NOT_IN_SCOPE` 必须停止当前流程，不得据此推断网页入口；页面入口规范按 shared execution「人工页面交接」执行。
 
@@ -197,7 +196,7 @@ H5 路径说明：
 6. icon 未提供时不在创建预览中展示；创建成功后再说明系统默认图标仅用于完成游戏创建，不代表已通过素材审核，并建议替换为符合要求的正式图标。截图、简介等其他资料缺口也在创建成功后交接。
 7. 用户明确确认后，第二次命令复用完全相同的 `--data`，追加稳定的 `--idempotency-key` 和 `--yes`；标准流程只能是“预览一次 → 确认后创建一次”，不得省略 `--yes` 后再进行第三次重试。
 8. 命中同名游戏时停止，不重复创建。
-9. 创建成功拿到 appId 后，进入创建后 handoff：先交接创建信息和首批物料，再转 `taptap-app-edit` 读取并报告实际可见的 `region_flag_*` 状态，然后按当前包体能力过滤并展示推进方式；不要把回答停在“去编辑资料”链接。
+9. 创建成功拿到 appId 后，进入创建后 handoff：先交接创建信息和首批物料，再转 `taptap-app-edit` 先 `analyze-app-status` 总体体检（blockers / warnings / suggestions），并读取实际可见的 `region_flag_*` 状态，然后按当前包体能力过滤并展示推进方式；不要把回答停在“去编辑资料”链接。
 10. `create-app` 返回 `TOOL_NOT_IN_SCOPE` 时立即停止。只说明当前 CLI 服务执行范围未开放创建能力并保留已确认的创建摘要；不要继续尝试直接工具、Raw API、网页或浏览器自动化。
 
 ### 8. 创建后下一步
@@ -234,7 +233,7 @@ appId：<appId>
 游戏类型与分发：<转 `taptap-app-edit` 后由其读取 platform-status 并报告实际可见的分发状态>
 
 下一步：
-<原样展示创建接口真实返回的 intent_options；没有返回时说明暂未提供选项，不补造列表。>
+<固定列出三个推进方式：开预约 / 测试 / 正式上线，让用户选择；不要根据包体类型生成替代列表。>
 
 确认后，我会按该方向生成准备清单，再继续处理资料、素材、包体、资质和提审。
 当前缺少图片素材时，我会先确认你是否有可用的本地素材或真实游戏截图。若没有本地素材，可以在你确认后为图标、宣传图或 Windows 素材生成本地候选图；游戏截图必须来自真实游戏画面。
@@ -245,7 +244,7 @@ appId：<appId>
 
 ### H5 创建的返回边界
 
-以下示例区分“本地 dry-run”和“真实创建成功”；占位符不能作为真实请求参数。不得把已有游戏的 appId 填入模拟回包冒充创建结果；`intent_question` / `intent_options` 也只有服务端本次真实返回时才出现。`--dry-run` 返回的请求详情是内部执行信息，不回显给用户，面向用户只做业务抽象。
+以下示例区分“本地 dry-run”和“真实创建成功”；占位符不能作为真实请求参数。不得把已有游戏的 appId 填入模拟回包冒充创建结果；推进方式由 CLI 固定提供，不依赖服务端返回的 `intent_question` / `intent_options`。`--dry-run` 返回的请求详情是内部执行信息，不回显给用户，面向用户只做业务抽象。
 
 ```text
 call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:{title:"<gameTitle>", category:"<category>", developer_role:"<developer|author|publisher>", package_type:"h5"}, idempotency_key:"<create-key>", dry_run:true})
@@ -291,6 +290,6 @@ call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:"@crea
 
 创建成功只证明拿到新 appId，不代表包体、资料或提审已经完成。随后必须读取该新游戏的实际包体槽位和资料状态；不能拿其他已有游戏或历史执行记录代替本次读回。
 
-如果创建接口本次返回 `intent_question` / `intent_options`，CLI 原样保留；Skill 不改写服务端字段。
+推进方式由 CLI 固定提供（开预约 / 测试 / 正式上线），不再依赖服务端返回的 `intent_question` / `intent_options`。
 
-H5 包体、完整物料包或目录的上传统一转 `taptap-materials`。Tap 小游戏 zip 不执行 CLI 上传；由 `taptap-package-management` 读取小游戏 overview，并按本次实际返回的非空 `page_path` 引导到开发者中心，本次无值时不生成页面入口。
+H5 包体、完整物料包或目录的上传统一转 `taptap-materials`。Tap 小游戏 zip 同样走 `upload-mini-app-package`，上传产出 `miniAppArtifactId` 但不创建包体记录；分包测试不在 CLI 进行。

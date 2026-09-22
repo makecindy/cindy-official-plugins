@@ -1,10 +1,10 @@
 {
   "name": "TapTap CLI",
-  "description": "TapTap 개발자 업무 플러그인입니다. 설치된 공식 taptap-cli 를 호출해 로그인과 ID, 게임 생성, 스토어 정보 편집, 패키지 업로드, 출시 자격, 심사와 릴리스, 테스트 플랜, 소재 라이브러리를 다룹니다. 자격 증명은 CLI 에 남고 쓰기에는 확인이 필요합니다.",
-  "whenToUse": "TapTap 개발자 업무 처리: 로그인, developerId/appId 확인, 게임 생성, 스토어 정보와 메인 패키지 편집, 이미지/동영상/APK/Windows/H5 업로드, 출시 자격 보완, 심사 제출·철회, 게임 출시, 테스트 플랜과 활성화 코드 관리, 소재 라이브러리 검색",
+  "description": "TapTap 개발자 업무 플러그인입니다. 설치된 공식 taptap-cli 를 호출해 로그인과 ID, 게임 생성, 스토어 정보 편집, 패키지 업로드, 출시 자격, 심사와 릴리스, 테스트 플랜, 소재 라이브러리, 데이터 지표와 플레이어 리뷰를 다룹니다. 자격 증명은 CLI 에 남고 쓰기에는 확인이 필요합니다.",
+  "whenToUse": "TapTap 개발자 업무 처리: 로그인, developerId/appId 확인, 게임 생성, 스토어 정보와 메인 패키지 편집, 이미지/동영상/APK/Windows/H5 업로드, 출시 자격 보완, 심사 제출·철회, 게임 출시, 테스트 플랜과 활성화 코드 관리, 소재 라이브러리 검색, 데이터 지표 조회와 플레이어 리뷰 열람",
   "tools": {
     "list_tools": {
-      "description": "이 플러그인에서 실행할 수 있는 TapTap 업무 작업을 나열합니다. 목록은 이 컴퓨터에 설치된 taptap-cli 에서 실시간으로 읽습니다. category 를 생략하면 최상위 명령(이름·설명·전역 실행 규칙)을 반환하고, category 를 넘기면 한 단계씩 내려갑니다(예: category:\"asset-library\", 다음 category:\"asset-library ai-image\"). 명령 이름이 불확실하면 접두사로 검색할 수 있습니다(예: category:\"up\"). 하위 명령이 없는 명령 경로를 넘기면 그 명령이 받는 플래그를 반환합니다. 자세한 내용은 call_tool 의 args._help:true 로 확인하세요.이 플러그인이 의도적으로 제외하는 명령: 데이터 조회(dashboard-stats 와 그 stats:get 별칭), CLI 자체 업데이트(update), 원시 auth login(auth login-start / login-wait 사용). 다운로드 수·PV·평점·주문 같은 운영 데이터는 목록에 없습니다.",
+      "description": "이 플러그인에서 실행할 수 있는 TapTap 업무 작업을 나열합니다. 목록은 이 컴퓨터에 설치된 taptap-cli 에서 실시간으로 읽습니다. category 를 생략하면 최상위 명령(이름·설명·전역 실행 규칙)을 반환하고, category 를 넘기면 한 단계씩 내려갑니다(예: category:\"asset-library\", 다음 category:\"asset-library ai-image\"). 명령 이름이 불확실하면 접두사로 검색할 수 있습니다(예: category:\"up\"). 하위 명령이 없는 명령 경로를 넘기면 그 명령이 받는 플래그를 반환합니다. 자세한 내용은 call_tool 의 args._help:true 로 확인하세요.이 플러그인이 의도적으로 제외하는 명령: CLI 자체 업데이트(update), 원시 auth login(auth login-start / login-wait 사용).",
       "parameters": {
         "/properties/category": {
           "description": "명령 경로 또는 접두사. 직전 목록이 돌려준 값을 그대로 이어서 내려갑니다(예 \"asset-library\", \"asset-library ai-image\"). 이름이 불확실하면 접두사로 검색합니다(예 \"up\"). 생략하면 최상위를 반환합니다."

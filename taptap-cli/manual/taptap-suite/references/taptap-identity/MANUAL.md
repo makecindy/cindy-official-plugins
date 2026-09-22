@@ -6,11 +6,11 @@ identity 是所有业务手册的前置定位能力。它只确认登录态、�
 
 **CRITICAL — `app +list --kw` 返回候选后只允许做目标确认,不得把第一个或唯一候选自动当成写入目标。必须展示开发者、游戏名、appId、状态和页面入口,并明确询问"更新已有游戏"还是"创建新游戏";在用户明确选择前不得交给资料、包体、审核或发布写操作。**
 
-**CRITICAL — `overview` 是账号范围与游戏样例总览,只允许可选的 `dev_id` 和 `page_size`。不要对它使用 `page_all`、`page_limit` 或 `page_delay`;需要完整游戏列表时,先标准调用一次 `overview`,再对返回的明确 developerId 调用 `app +list`(page_all:true, page_size:50)。**
+**总览范围 — `overview` 是账号范围与游戏样例总览,只允许可选的 `dev_id` 和 `page_size`。不要对它使用 `page_all`、`page_limit` 或 `page_delay`;需要完整游戏列表时,先标准调用一次 `overview`,再对返回的明确 developerId 调用 `app +list`(page_all:true, page_size:50)。**
 
-**CRITICAL — `app +list` / `overview` 会返回服务端提供的每个游戏状态标签。直接使用 `review_status_label` 展示的原始标签,例如"已上线""审核中"或"已上线(素材待优化)";不要自行改写或把多个游戏归为同一状态。单个游戏状态缺失时显示"未知"。如果用户需要版本、包体或更细的发布信息,再转 app-edit 手册。**
+**CRITICAL — 未登录时按插件登录编排执行:先 `call_tool(name:"auth login-start")`,再用返回的完整恢复参数(`login_handle`)继续轮询,不要从中截取单个标识重建登录状态。不要输出、记录或上报 access token——token 只由 CLI 保存在本机凭证存储,不进入日志、埋点或错误上报。**
 
-**CRITICAL — 未登录时按插件登录编排执行:先 `call_tool(name:"auth login-start")`,把 `verification_url` 按两行原样提供给用户(第一行仅写"请完成授权:",第二行仅写 URL;不要 Markdown 链接,不重复);随后立即 `call_tool(name:"auth login-wait", args:{login_handle})` 持续轮询,不要等待用户回复;只有运行环境无法保活轮询进程时,才请用户完成授权后通知你。不要输出/记录/上报 access token——token 只由 CLI 保存在本机凭证存储,不进入日志、埋点或错误上报;登录成功后向用户只回复"登录成功"。**
+**登录链接交接 — 把 `verification_url` 按两行原样提供给用户:第一行仅写"请完成授权:",第二行仅写 URL(不要 Markdown 链接,不重复);随后立即 `call_tool(name:"auth login-wait", args:{login_handle})` 持续轮询,不要等待用户回复;只有运行环境无法保活轮询进程时,才请用户完成授权后通知你。登录成功后向用户只回复"登录成功"。**
 
 身份发现中的页面入口优先使用本次 `app +list` / `overview` 每个游戏返回的 `page_url`;接口缺失时,可用本次已确认的 `developerId`、`appId` 和当前环境 `serverUrl` 推导规范资料页 `https://<current-server-host>/v3/<developerId>/app/<appId>/store/update`。推导入口必须标记为非服务端返回,不得使用 Capability API 域名 `api.tapapis.cn`。
 
@@ -37,7 +37,7 @@ identity 是所有业务手册的前置定位能力。它只确认登录态、�
 - 用户泛问"当前账号能做什么 / 给我一个总览"时优先用 `overview`,不要手工串联 `auth status`、`developer +list`、`app +list` 和 `developer +suggest`。
 - `overview` 只返回各厂商的游戏样例和总数,不做自动翻页;不要先尝试通用连续分页参数。用户明确需要完整列表时,再按它返回的 developerId 分别调用 `app +list`(page_all:true, page_size:50)。
 - `app +list` 的标量查询条件必须使用 `kw`、`page`、`page_size`、`page_all`;不要把关键词和分页字段包进 `data`。
-- `app +list` 的游戏条目包含 `review_status_label` 和状态可用性;按服务端标签原样回答状态,缺失时按条目显示"未知"。
+- `app +list` / `overview` 的游戏条目包含 `review_status_label` 和状态可用性;按服务端返回的标签原样回答状态,不自行改写,也不把多个游戏归为同一状态;缺失时按条目显示"未知"。需要版本、包体或更细的发布信息时转 app-edit 手册。
 - 显式传入 `dev_id` 时,CLI 会先确认该厂商属于当前账号可见范围;不可见的 DevID 直接报错,不再把权限 / scope 错误误报成"关键词无匹配"。
 - 常规身份发现统一使用 `app +list`,不要退回内部 tool 入口。
 - 多候选必须让用户选择,不自动取第一个,也不复用历史对话里的旧 ID。

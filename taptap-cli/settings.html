@@ -1,7 +1,25 @@
 <!doctype html>
 <meta charset="utf-8">
 <body style="margin:0;padding:12px;font-size:13px;line-height:1.6">
-  <p data-i18n="intro" style="margin:0 0 8px"></p>
+  <p data-i18n="intro" style="margin:0 0 10px"></p>
+
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
+    <button id="check" data-i18n="check"
+      style="padding:6px 14px;border-radius:999px;border:1px solid var(--border-default,#e4e4e0);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:500"></button>
+  </div>
+
+  <div style="margin:0 0 10px;padding:10px 12px;border:1px solid var(--border-default,#e4e4e0);border-radius:10px;background:var(--surface,#fff)">
+    <div style="display:flex;gap:8px;justify-content:space-between">
+      <span data-i18n="cliLabel" style="opacity:.7"></span>
+      <span id="cliValue" style="text-align:right;word-break:break-word"></span>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:space-between;margin-top:4px">
+      <span data-i18n="loginLabel" style="opacity:.7"></span>
+      <span id="loginValue" style="text-align:right;word-break:break-word"></span>
+    </div>
+  </div>
+  <p id="probeStatus" role="status" style="margin:0 0 12px;min-height:18px;font-size:12px;opacity:.8"></p>
+
   <pre data-i18n="installCommands" style="margin:0 0 12px;padding:8px;border-radius:6px;background:var(--surface,#f4f4f1);border:1px solid var(--border-default,#e4e4e0);overflow-x:auto;font-size:12px"></pre>
   <p data-i18n="installNote1" style="margin:0 0 12px;opacity:.7;font-size:12px"></p>
   <p data-i18n="installNote2" style="margin:0 0 12px;opacity:.7;font-size:12px"></p>

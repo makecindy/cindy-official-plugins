@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "taptap-cli",
   "name": "TapTap CLI",
-  "description": "TapTap 开发者业务插件:调用你本机已安装的官方 taptap-cli。可做:登录与身份(查 developerId/appId)、创建游戏、读写游戏资料与主包体、上传图片/视频/APK/Windows/H5 包体、分析并补上架资质、提审与撤审、发布与版本生命周期、CBT/OBT 测试计划与激活码、游戏素材库检索与收录。认证复用 CLI 自己的本机登录态,插件不读取、不保存你的凭证;写操作带确认门禁。操作清单以 list_tools 的实时目录为准。",
-  "whenToUse": "需要操作 TapTap 开发者业务时找我:登录开发者账号、查 developerId/appId、创建新游戏、查看或修改游戏资料与主包体、上传图片/视频/APK/Windows/H5 包体、补上架资质、提交或撤销审核、发布游戏、管理 CBT/OBT 测试计划与激活码、检索游戏素材库",
-  "version": "1.0.7",
+  "description": "TapTap 开发者业务插件:调用你本机已安装的官方 taptap-cli。可做:登录与身份(查 developerId/appId)、创建游戏、读写游戏资料与主包体、上传图片/视频/APK/Windows/H5 包体、分析并补上架资质、提审与撤审、发布与版本生命周期、CBT/OBT 测试计划与激活码、游戏素材库检索与收录、数据表现与玩家评价查询。认证复用 CLI 自己的本机登录态,插件不读取、不保存你的凭证;写操作带确认门禁。操作清单以 list_tools 的实时目录为准。",
+  "whenToUse": "需要操作 TapTap 开发者业务时找我:登录开发者账号、查 developerId/appId、创建新游戏、查看或修改游戏资料与主包体、上传图片/视频/APK/Windows/H5 包体、补上架资质、提交或撤销审核、发布游戏、管理 CBT/OBT 测试计划与激活码、检索游戏素材库、查数据表现与玩家评价",
+  "version": "1.0.8",
   "minCindyVersion": "0.1.73",
   "author": "Cindy",
   "entry": "main.js",
@@ -13,6 +13,7 @@
   "icon": "assets/icon.png",
   "sessionContext": true,
   "settingsHtml": "settings.html",
+  "settingsHeight": 480,
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -22,7 +23,7 @@
   "tools": [
     {
       "name": "list_tools",
-      "description": "列出 TapTap 插件可用的业务操作,目录直接从本机 taptap-cli 实时读取。不传 category 返回顶层命令(名称+说明+全局执行规则);传 category 逐层下钻:先给一层命令,再给更深一层(如 category:\"asset-library\",然后 category:\"asset-library ai-image\")。不确定命令名时可直接传前缀搜索(如 category:\"up\")。传一个没有子命令的命令路径会返回它接受的 flag;参数细节用 call_tool 的 args._help:true 看完整帮助。本插件不提供数据查询,下载/PV/评分/订单等经营数据不在目录中。第一次做某域业务前先下钻对应目录。本插件不提供的命令:数据查询(dashboard-stats 及其 stats:get 别名)、CLI 自更新(update)、原始 auth login(改用 auth login-start / login-wait)。数据查询、下载/PV/评分/订单等经营数据不在目录中。",
+      "description": "列出 TapTap 插件可用的业务操作,目录直接从本机 taptap-cli 实时读取。不传 category 返回顶层命令(名称+说明+全局执行规则);传 category 逐层下钻:先给一层命令,再给更深一层(如 category:\"asset-library\",然后 category:\"asset-library ai-image\")。不确定命令名时可直接传前缀搜索(如 category:\"up\")。传一个没有子命令的命令路径会返回它接受的 flag;参数细节用 call_tool 的 args._help:true 看完整帮助。第一次做某域业务前先下钻对应目录。本插件不提供的命令:CLI 自更新(update)、原始 auth login(改用 auth login-start / login-wait)。",
       "parameters": {
         "type": "object",
         "properties": {

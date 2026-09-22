@@ -45,13 +45,13 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 | 高影响写 | 提审、撤审、定时、修改测试配额 | 先 `--dry-run` 或展示预览；用户确认后 `--yes` |
 | 不可逆写 | 立即上线、结束测试、重置草稿、删除批次 | 必须展示动作、对象、范围、后果；确认后执行 |
 | 风险核对 | 提审复核返回风险数据不可用且要求确认 | 展示对应 warning；`--yes` 不代表已核对；仅传当前 schema 声明的确认字段 |
-| 协议同意 | 预检返回 `required_consents` | 只展示 `required_consents[].agreement.name` / `agreement.url`；任一字段缺失时停止并报告契约缺口，不请求同意或回传 token |
+| 协议同意 | `analyze-app-status` 返回 SCE 类 blocker | 先展示协议名称与 URL（如《创意工坊内容授权协议》 `https://www.taptap.cn/doc/ugcgame-agreement`）；用户明确同意后按 `agree-sce-agreement` 签署，再重查确认 blocker 消失；`--yes` 不代表用户已同意协议 |
 
 ### 提审意图门禁
 
 - “上传包体”“补资料”“绑定包体”“查询准备度”“处理这个版本”“更新版本”“帮我上架”等泛化请求，不包含提交审核意图；不得调用 `precheck-app-review`、`prepare-review-snapshot` 或 `submit-app-review`。本节词表是唯一口径，各业务 skill 不得另立清单。
 - “正式上线”“发新版”或创建后选择“正式上线”只表示目标方向，不等于“提交审核”确认。只能提示准备状态和提审选项；调用 `precheck-app-review` 前仍要取得用户明确说出“提交审核”或“提审”。
-- 明确提审后按当前 schema 固定走 `prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --yes`。后两步必须复用第一步返回的 `review_fingerprint`，并让同一个 `release_schedule` 原样贯穿三步。前两步为 `read`，无需 `--yes`；`submit-app-review` 为 `write`，需 `--yes` 与稳定幂等键。
+- 明确提审后按当前 schema 固定走 `prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --yes`。三步必须使用同一个 scope，并用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回，仅用于日志）；`submit-app-review` 只传 `release_schedule`。前两步为 `read`，无需 `--yes`；`submit-app-review` 为 `write`，需 `--yes` 与稳定幂等键。
 
 `--dry-run` 只打印请求，不访问服务端。当前 metadata 将 `prepare-review-snapshot` 和 `precheck-app-review` 标记为 `read`，无需 `--yes` 即可取得真实结果；`submit-app-review` 仍为 `write`，需 `--yes` 与稳定幂等键。CLI 不在本地覆盖这个风险分类。
 
@@ -61,9 +61,9 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 如果用户已在当前对话明确确认，首个真实写命令必须直接追加 `--yes`；不要故意先省略 `--yes` 来触发 `confirmation_required`。创建游戏的标准流程是先用 `--dry-run` 预览，用户确认后用相同 `--data` 追加 `--idempotency-key` 和 `--yes` 创建一次。
 
-`prepare-review-snapshot` 返回 `data_state='partial'` 或 warning 的 `requires_acknowledgement=true` 时，先展示无法确认的事实并让用户自行核对。当前 `submit-app-review` schema 未声明风险确认字段时停止并报告契约缺口；不要伪造请求字段。
+`prepare-review-snapshot` 返回的 `warnings` 非空时，先展示无法确认的事实并让用户自行核对。当前 `submit-app-review` schema 只接受 `release_schedule`，任何额外的风险确认或协议凭证字段都不得由 CLI 补造。
 
-`precheck-app-review` 返回 `required_consents` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。只展示每项 `agreement.name` 和 `agreement.url`；任一字段缺失时停止并报告契约缺口，不得请求用户同意或回传 `consent_token`。只有详情齐全且用户在当前对话明确同意后，才把全部未过期的 token 原样放入 `submit-app-review` 的 `consent_tokens`，并保持原 `review_fingerprint` 和 `release_schedule` 不变。不能补造其它本地 flag 或请求字段。
+`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。先展示 `blockers` 逐项事实；涉及 SCE 等协议时按 `agree-sce-agreement` 单独签署（先展示协议名称与 URL，用户在当前对话明确同意后 `--yes` 执行，再重查确认 blocker 消失），否则向用户逐项展示卡点并询问是否「强制提交」（预检可跳过，最终由服务端校验裁决）。不得请求同意或回传任何 token，也不能补造其它本地 flag 或请求字段。
 
 ## JSON 输出外壳和错误类型
 
@@ -89,7 +89,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 ### 上传 shortcut 约定
 
-`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package` 是当前唯一面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用动态 OpenAPI 的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。Tap 小游戏不在 CLI 上传；只按包体管理 overview 实际返回的 `page_path` 引导到开发者中心。
+`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是当前唯一面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用动态 OpenAPI 的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
 
 - 默认输出 JSON，支持的 `--format` 只有 `json` 和 `pretty`；普通 Agent 调用不追加冗余的 `--format json`。
 - 上传 preview 使用 `--dry-run`；用户确认后用相同文件与 scope 追加 `--yes`。省略 `--yes` 的确认门禁是 exit code `10`。
@@ -104,7 +104,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 1. 先说明用户现在要做的动作，再给入口；不要只说“CLI 暂不支持”并等待用户追问链接。
 2. URL 单独占一行且只展示一次。不要使用 `[名称](URL)`、`URL (URL)` 等 Markdown 或括号包装，也不要在同一回复的标题、正文和列表中重复同一 URL。
 3. URL 使用 CLI 当前环境或本次服务端响应提供的原始地址；不要追加 `utm_*` 等追踪参数，也不要为了找已知官方入口调用网页搜索。当前环境未知时，可用 `call_tool(name:"auth status", args:{offline:true})` 只读取得 `data.serverUrl`，不要为解析入口验证 Token 或访问网络。
-4. 服务端本次返回完整 `page_url` 时原样使用。只返回非空 `page_path` 时，按当前开发者中心 `serverUrl` 补全域名并保持路径不变。
+4. 服务端本次返回完整 `page_url` 时原样使用。当前 DC 契约不返回 `page_path`，不要自行补全或拼接页面路径。
 5. 固定且已确认的官方入口可以直接提供；没有可靠入口时明确说明“当前没有可确认的页面链接”，不要猜路径、搜索替代入口或把内部 API 地址当成用户页面。
 6. 提供入口不等于已经打开页面、切换网页 scope 或获得浏览器自动化授权；只有用户明确要求时才执行页面操作。
 
@@ -125,7 +125,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 游戏资料编辑页可在 `developerId` / `appId` 已明确时使用 CLI 的规范地址推导：
 `https://<current-server-host>/v3/{developerId}/app/{appId}/store/update`。公开商店页
-`https://www.taptap.cn/app/{appId}` 只有在审核通过且已确认上线后才输出；未确认上线前不要展示、预测或描述该入口。推导地址必须标记为 `derived_from_ids`。其它业务页面仍优先使用本次工具返回的 `page_path`；不要拼旧路径。
+`https://www.taptap.cn/app/{appId}` 只有在审核通过且已确认上线后才输出；未确认上线前不要展示、预测或描述该入口。推导地址必须标记为 `derived_from_ids`。其它业务页面不由 CLI 承诺入口地址；不要拼旧路径。
 
 ## 素材候选和本地文件输出
 

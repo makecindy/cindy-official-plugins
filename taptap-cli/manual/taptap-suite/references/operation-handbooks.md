@@ -15,9 +15,9 @@ call_tool(name:"skills", args:{_positional:["read","taptap-cli","references/sour
 | 阶段 ID | 充分证据 | 明确排除 |
 | --- | --- | --- |
 | `reservation` | 用户当前目标是首曝/开放预约，且写后读回的可见 `region_flag_*` 使用 `value_labels[String(current_value)]` 得到的状态文案明确包含“预约”；纯咨询尚未写入时可使用用户明确目标，但要表述为目标阶段 | 只有“敬请期待”、字段不可见、仅凭游戏尚未上线 |
-| `testing` | `get-test-plan-overview.result.test_plan` 非空，且 `status` 精确为 `not_started` 或 `running`；创建或 `reopen=true` 后必须重新读取 overview 再判断 | `status=ended`、`test_plan=null`、仅创建结果 `status=created` 或修改结果 `status=updated` |
-| `first_launch` | 提审前用 `list-app-versions --page-all` 取得完整历史，确认不存在任何 `status=online`、`status=offline` 或 `logs[].event=published` 的版本；当前目标明确为首次正式上线。发布完成后还要读回当前版本为 `online` | 只看到当前 `status=online/status_value=4`、版本列表未读全、已有任一发布历史 |
-| `long_term` | 完整版本历史中已存在任一 `status=online`、`status=offline` 或 `logs[].event=published` 的版本，且当前是版本更新、再次提审、活动或上线后的日常运营 | 没有完整历史、尚不能证明曾经发布 |
+| `testing` | `list-test-plans.result.list` 非空，且存在 `status` 精确为 `new` 或 `published` 的计划；创建或 `reopen=true` 后必须重新读取计划列表再判断 | `status=ended`、`list` 为空、仅创建结果 `status=created` |
+| `first_launch` | 提审前用 `list-app-versions --page-all` 取得完整历史，确认不存在任何 `status=online`、`status=offline` 或 `last_event=published` 的版本；当前目标明确为首次正式上线。发布完成后还要读回当前版本为 `online` | 只看到当前 `status=online/status_value=4`、版本列表未读全、已有任一发布历史 |
+| `long_term` | 完整版本历史中已存在任一 `status=online`、`status=offline` 或 `last_event=published` 的版本，且当前是版本更新、再次提审、活动或上线后的日常运营 | 没有完整历史、尚不能证明曾经发布 |
 | `unknown` | 当前业务阶段无法由以上证据唯一确认，或不同证据互相冲突 | 不得猜测或同时输出多个阶段手册 |
 
 ## 完整历史门禁
@@ -28,7 +28,7 @@ call_tool(name:"skills", args:{_positional:["read","taptap-cli","references/sour
 call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<developerId>", page_all:true})
 ```
 
-若分页被 `--page-limit` 截断、返回条目数无法覆盖 `result.total`、任一 item 的 `status` 为 `unknown` 且没有可解释日志，均视为历史不完整，阶段回退 `unknown`。统计发布历史时按 `version` 去重：同一版本同时出现 `status=online` 和 `logs[].event=published` 只算一个已发布版本。
+若分页被 `page_limit` 截断、返回条目数无法覆盖 `result.total`、任一 item 的 `status` 为空或超出 `draft/reviewing/scheduled/online/offline/rejected`，且没有可解释的 `last_event`，均视为历史不完整，阶段回退 `unknown`。统计发布历史时按 `version` 去重：同一版本同时出现 `status=online` 和 `last_event=published` 只算一个已发布版本。
 
 ## 输出格式
 

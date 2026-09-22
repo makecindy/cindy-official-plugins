@@ -60,6 +60,10 @@ const FIXTURE_TREE = {
     ['+rules', 'Show the generation rules'],
     ['+validate', 'Validate generated files'],
   ],
+  'dashboard-stats': [
+    ['get-dashboard-stats', 'Query dashboard stats metrics'],
+    ['get-dashboard-position-options', 'List the positions a metric accepts'],
+  ],
   materials: [['+inspect', 'Inspect a local directory or archive']],
   skills: [
     ['list', 'List the embedded manuals'],
@@ -159,6 +163,21 @@ if (args[1] === 'fail-op') {
 if (args[1] === 'partial-op') {
   process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'partial_failure', message: '2 of 3 uploaded' }, data: { uploaded: [{ handle: 'h1' }, { handle: 'h2' }] } }));
   process.exit(2);
+}
+// Bare \`version\` is the settings status probe. With flags it is just an
+// arbitrary command to the control-flag test, which expects the echo below.
+if (args.length === 1 && args[0] === 'version') {
+  write(JSON.stringify({ ok: true, data: { name: '@taptap/cli', version: '1.2.3', contract: '3' } }));
+  process.exit(0);
+}
+if (args[0] === 'auth' && args[1] === 'status') {
+  write(JSON.stringify({
+    ok: true,
+    data: process.env.FIXTURE_AUTH_LOGGED_OUT
+      ? { hasAccessToken: false, accessTokenExpired: false, offline: true }
+      : { hasAccessToken: true, accessTokenExpired: false, offline: true },
+  }));
+  process.exit(0);
 }
 write(JSON.stringify({ ok: true, data: { echo: args, workdir: process.cwd() } }));
 `;
@@ -379,8 +398,8 @@ test('an internal crash still reports whether the CLI may have run', async () =>
 
 test('an unreadable alias list closes the alias route', async () => {
   // An alias is classified by its canonical target (`stats:get` ->
-  // dashboard-stats, which is excluded). Without the mapping it cannot be
-  // classified at all, so the call must fail closed rather than run.
+  // dashboard-stats), and that risk decides the write gate. Without the mapping
+  // it cannot be classified at all, so the call must fail closed rather than run.
   const [reply] = await callWorker(
     [callTool('stats:get', { cli_path: fakeCli })],
     { env: { FIXTURE_ALIASES_FAIL: '1' } },
@@ -493,8 +512,8 @@ test('the listing is read from the CLI, so nothing is missing from a table', asy
 
   const topNames = top.result.data.categories.map((entry) => entry.category);
   assert.ok(topNames.includes('app'), 'top level lists the services');
-  assert.ok(!topNames.includes('dashboard-stats'), 'the data-query service stays out of the listing');
-  assert.ok(!topNames.includes('stats:get'), 'the data-query alias stays out of the listing');
+  assert.ok(topNames.includes('dashboard-stats'), 'the data-query service is listed');
+  assert.ok(topNames.includes('stats:get'), 'the data-query alias is listed');
   assert.ok(!topNames.includes('update'), 'updating the user’s CLI is not a plugin operation');
 
   const libraryNames = library.result.data.operations.map((op) => op.name);
@@ -625,31 +644,32 @@ test('every manual link is addressable through ghost_manual', () => {
   assert.deepEqual(broken, [], 'manuals contain links the agent cannot follow');
 });
 
-test('the data-query domain is excluded from every surface', async () => {
-  // Data querying is deliberately out of scope for this plugin. It must stay
-  // gone from the catalog, the manuals, and the manifest — the catalog is read
-  // live from the CLI, so the worker filter is what actually enforces it.
-  assert.match(workerSource, /EXCLUDED_SERVICES = new Set\(\['dashboard-stats'\]\)/);
-  assert.match(workerSource, /if \(EXCLUDED_SERVICES\.has\(service\)\) continue;/);
-  assert.match(workerSource, /excluded\.push/, 'the alias route into the service must be filtered too');
-  assert.match(workerSource, /function isExcluded/, 'every listing path must consult the exclusion');
-  assert.doesNotMatch(workerSource, /'dashboard-stats':/, 'the service must not have a description entry');
+test('the data-query domain is served like any other read domain', async () => {
+  // Data querying used to be denied at this layer. It is now offered, so the
+  // denylist is empty — but it survives as the single entry point a future
+  // exclusion would use, and this pins that the capability really is reachable
+  // rather than merely absent from the denylist.
+  assert.match(workerSource, /EXCLUDED_SERVICES = new Set\(\[\]\)/);
+  assert.match(workerSource, /function isExcluded/, 'every listing path must consult the denylist');
+  assert.match(workerSource, /'dashboard-stats':/, 'the service has a display description');
 
   const manualNames = manifest.manual.items.map((item) => item.name).sort();
-  assert.ok(!manualNames.includes('data-stats'), 'the data-stats manual must be gone');
   const manualDirs = fs.readdirSync(path.join(root, 'taptap-cli', 'manual')).sort();
   assert.deepEqual(manualNames, manualDirs, 'manual items must match the manual directories');
 
-  assert.doesNotMatch(
-    manifest.description,
-    /数据表现|dashboard|analytics/i,
-    'the plugin description must not advertise data querying',
+  // The service is listed, its alias resolves, and a read operation runs.
+  const [top, aliased, reply] = await callWorker([
+    listTools('dashboard-stats', { cli_path: fakeCli }),
+    callTool('stats:get', { cli_path: fakeCli }),
+    callTool('dashboard-stats get-dashboard-stats', { cli_path: fakeCli }),
+  ]);
+  assert.equal(top.result.ok, true);
+  assert.ok(
+    top.result.data.operations.some((op) => op.name === 'dashboard-stats get-dashboard-stats'),
+    'the data-query operation is listed',
   );
-
-  // A denied operation must be rejected outright, not merely hidden from the list.
-  const [reply] = await callWorker([callTool('dashboard-stats get-dashboard-stats')]);
-  assert.equal(reply.result.ok, false);
-  assert.equal(reply.result.errorCode, 'UNKNOWN_TOOL');
+  assert.equal(aliased.result.ok, true, 'the stats:get alias resolves to the service');
+  assert.equal(reply.result.ok, true, `a read data-query operation executes: ${JSON.stringify(reply.result.echo || reply.result).slice(0, 300)}`);
 });
 
 test('nothing shipped points at the internal taptap/cli repository', () => {
@@ -681,13 +701,11 @@ test('the install guidance lists commands that actually work', () => {
 
 test('the manuals never tell the agent to call a command the plugin refuses', () => {
   // A `call_tool` name in the manual is an instruction to the agent; naming a
-  // command the worker rejects (data querying, CLI self-update) or redirects
-  // (raw `auth login`, which would hand the device code to the model) sends it
-  // into a guaranteed failure. Bash examples are addressed to the user and are
-  // deliberately not checked here.
+  // command the worker rejects (CLI self-update) or redirects (raw `auth login`,
+  // which would hand the device code to the model) sends it into a guaranteed
+  // failure. Bash examples are addressed to the user and are deliberately not
+  // checked here.
   const refused = [
-    { name: 'dashboard-stats', why: 'data querying is out of scope' },
-    { name: 'stats:get', why: 'data querying is out of scope' },
     { name: 'update', why: 'updating the CLI is the user\'s own action' },
     { name: 'auth login', why: 'the worker redirects it to auth login-start' },
   ];
@@ -777,10 +795,10 @@ test('every carrier of the contract states the same guarantees', () => {
       name: 'the catalogue names what it leaves out',
       carriers: ['list_tools'],
       text: {
-        'zh-CN': /dashboard-stats/,
-        en: /dashboard-stats/,
-        ja: /dashboard-stats/,
-        ko: /dashboard-stats/,
+        'zh-CN': /update[\s\S]*auth login/,
+        en: /update[\s\S]*auth login/,
+        ja: /update[\s\S]*auth login/,
+        ko: /update[\s\S]*auth login/,
       },
     },
     {
@@ -839,7 +857,7 @@ test('every locale discloses what the catalogue leaves out', () => {
   // language sees. If they promise "whatever the CLI has" without naming the
   // exclusions, that agent looks for — and calls — operations the worker
   // refuses.
-  const EXCLUDED = /dashboard-stats|update|auth login/i;
+  const EXCLUDED = /update|auth login/i;
   for (const loc of ['zh-CN', 'en', 'ja', 'ko']) {
     const resource = JSON.parse(
       fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${loc}.json`), 'utf8'));
@@ -850,19 +868,20 @@ test('every locale discloses what the catalogue leaves out', () => {
   }
 });
 
-test('discovery text never advertises the data-query domain', () => {
+test('discovery text covers every domain the catalogue now serves', () => {
   // whenToUse is what the agent uses to decide whether this plugin answers a
-  // question. It kept advertising download/rating/order data after that domain
-  // was removed, so the agent routed data questions here and found nothing.
-  const ADVERTISES = /查下载|下载\/浏览|下载、PV|download\/impression|query metrics|数据表现|データ照会|데이터 조회/;
+  // question. Data querying and player reviews are served now, so a whenToUse
+  // that stays silent about them routes those questions to another tool and the
+  // user is told the plugin cannot help — the same defect as the opposite one.
+  const ADVERTISES = /数据表现|query data metrics|データ指標|데이터 지표/;
 
-  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'taptap-cli', 'ghost.json'), 'utf8'));
-  assert.ok(!ADVERTISES.test(manifest.whenToUse), 'manifest whenToUse must not advertise data querying');
+  const manifestFile = JSON.parse(fs.readFileSync(path.join(root, 'taptap-cli', 'ghost.json'), 'utf8'));
+  assert.ok(ADVERTISES.test(manifestFile.whenToUse), 'manifest whenToUse must cover data querying');
 
   for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
     const resource = JSON.parse(
       fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'));
-    assert.ok(!ADVERTISES.test(resource.whenToUse), `${locale} whenToUse must not advertise data querying`);
+    assert.ok(ADVERTISES.test(resource.whenToUse), `${locale} whenToUse must cover data querying`);
   }
 });
 
@@ -1040,4 +1059,60 @@ test('the brain forwards the session workdir and the configured CLI path', () =>
   assert.match(mainSource, /workdir_is_local/);
   assert.match(mainSource, /workdir_is_read_only/);
   assert.doesNotMatch(mainSource, /navigator\.language/);
+});
+
+test('the settings status probe reports install, version and sign-in from one place', async () => {
+  // The panel renders these rows but decides none of them: the worker is the
+  // only place that resolves the CLI and reads its state, so the settings page
+  // and the agent cannot disagree about what "installed" means.
+  const [installed] = await callWorker([
+    { jsonrpc: '2.0', id: 1, method: 'taptap/cli_status', params: { cli_path: fakeCli } },
+  ]);
+  assert.equal(installed.result.ok, true);
+  assert.deepEqual(installed.result.data, { installed: true, version: '1.2.3', logged_in: true });
+
+  const [signedOut] = await callWorker(
+    [{ jsonrpc: '2.0', id: 1, method: 'taptap/cli_status', params: { cli_path: fakeCli } }],
+    { env: { FIXTURE_AUTH_LOGGED_OUT: '1' } },
+  );
+  assert.equal(signedOut.result.data.installed, true);
+  assert.equal(signedOut.result.data.logged_in, false);
+
+  // A configured path that is not an executable taptap-cli is reported as not
+  // installed, with its own reason, rather than silently falling back to PATH.
+  const absent = path.join(path.dirname(fakeCli), 'absent', 'taptap-cli');
+  const [missing] = await callWorker([
+    { jsonrpc: '2.0', id: 1, method: 'taptap/cli_status', params: { cli_path: absent } },
+  ]);
+  assert.equal(missing.result.ok, true);
+  assert.equal(missing.result.data.installed, false);
+  assert.equal(missing.result.data.errorCode, 'CLI_PATH_INVALID');
+});
+
+test('the settings page asks the brain for status instead of judging it', () => {
+  assert.match(mainSource, /settings-request/);
+  assert.match(mainSource, /settings-result/);
+  assert.match(mainSource, /taptap\/cli_status/);
+  assert.match(settingsSource, /settings-request/);
+  assert.match(settingsSource, /action: 'status'/);
+  assert.doesNotMatch(settingsSource, /navigator\.language/);
+});
+
+test('lifecycle decisions key off the normalized status, never the raw code', () => {
+  // `status_value` is the raw AppApproveStatus code; `status` is the normalized
+  // string the CLI actually returns (draft / reviewing / scheduled / online /
+  // offline / rejected). A branch that tests the number can never match what
+  // the CLI sends, so the lifecycle manuals must not narrate one as the other.
+  // The raw codes stay documented once, in the enum table at the top.
+  const appEdit = path.join(
+    root, 'taptap-cli', 'manual', 'taptap-suite', 'references', 'taptap-app-edit', 'references');
+  for (const name of ['app-edit-version-lifecycle.md', 'app-edit-audit-and-history.md']) {
+    const text = fs.readFileSync(path.join(appEdit, name), 'utf8');
+    assert.doesNotMatch(
+      text, /`[0-5]\s?(?:待上线|已上线|定时上线|审核中|审核失败|已下架)`/,
+      `${name}: a lifecycle branch keys off the raw status code`);
+    assert.doesNotMatch(
+      text, /(?:回到|仍是|已经是|进入)\s?`[0-5]`/,
+      `${name}: a lifecycle narration keys off the raw status code`);
+  }
 });

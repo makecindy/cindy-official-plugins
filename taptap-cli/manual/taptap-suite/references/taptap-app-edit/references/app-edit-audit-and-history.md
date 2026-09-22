@@ -16,13 +16,13 @@
 
 哪些请求算提审意图、哪些只算目标方向，以 [shared execution](taptap-suite/references/shared-execution.md)「提审意图门禁」的唯一词表为准，本文件不另立清单；本节流程从“用户已明确提审”开始。
 
-标准流程固定为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。第一步返回的 `review_snapshot.fingerprint` 和本次 `release_schedule` 必须原样贯穿三步。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。
+标准流程固定为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。
 
 发布前必须把“版本发布”和“平台分发状态”拆开处理：
 
 - 调 `get-app-module` 并传 `{"module_id":"platform-status"}`，只筛选接口当次实际返回且可见的 `region_flag_*` 字段，读取各字段的 `current_value`、`value_labels` 和 `options`。
 - 不要把同模块的 `app_platforms`、`itunes_id`、`steam_id` 当成分发状态入口，也不要预设游戏类型、包体方向与状态枚举之间的映射；工具未返回的入口不要猜测或补写。
-- 使用 `value_labels[String(current_value)]` 逐项解释当前状态；不要把字段自身的 `label` 当成状态文案。若任一可见分发状态入口是“敬请期待”，说明版本发布后分发入口会保持当前设置；如需开放下载或游玩，要单独调整对应状态，并询问保留当前值还是改为该字段当前 options 中的其他可用状态。
+- 使用 `value_labels[String(current_value)]` 逐项解释当前状态；不要把字段自身的 `label` 当成状态文案。若任一可见分发状态入口是“敬请期待”，说明发布版本不会自动改变该入口；如需开放下载或游玩，应在提审前把该入口改为当前 options 中的可用值、随本次版本一起审核生效，并询问保留当前值还是调整。
 - 用户选择修改时，先展示当前状态、目标状态、该字段动态 `options` 和影响，并执行带最新 `expected`、稳定 `--idempotency-key` 的 `save-changes --dry-run`。用户明确确认后复用同一个 key，去掉 `--dry-run` 并追加 `--yes` 写入；成功后重新读取 `platform-status`。
 - 用户不修改时保留原值。执行 `submit-app-review --yes` 前必须再次读取 `platform-status`；若可见字段、当前值或 options 变化，废弃旧摘要并按最新结果重新确认。
 
@@ -30,61 +30,66 @@
 
 #### 步骤 ① `prepare-review-snapshot`
 
-进入步骤 ① 前，先按 [review risk checklist](taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md) 输出本地风险清单，分开列出官方规则、当前事实、历史审核、测试证据和无法验证项。该清单不替代服务端 blocker，也不能把历史拒审写成官方规则。
+进入步骤 ① 前，先按 [review risk checklist](taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md) 输出本地风险清单，分开列出官方规则、当前事实、历史审核、测试证据和无法验证项；其中**资质确认**转 qualification 手册（见其「提审前资质确认」执行规则）。该清单不替代服务端 blocker，也不能把历史拒审写成官方规则。
 
-然后确定本次上线方式，只允许 `{"kind":"immediate"}` 或 `{"kind":"scheduled_exact","release_time":<Unix秒>}`；不传时沿用草稿设置。把它放入 `release_schedule`。调用后：
+然后确定本次上线方式，只允许 `{"kind":"immediate"}` 或 `{"kind":"scheduled_exact","release_time":<Unix秒>}`；不传时沿用草稿设置。**步骤 ① 的 operation 只接受 scope，不接受这个字段**，所以此处只确定取值，到步骤 ② 才作为 `release_schedule` 传入。调用后：
 
-- 用 `review_snapshot.review` 向用户复核资料、包体、资质和风险提示；未填写与不适用要明确区分。
+- 用 `prepare-review-snapshot` 返回的 `changes` 和 `warnings` 向用户复核资料、包体、资质和风险提示；未填写与不适用要明确区分。
 - 合并展示本地风险清单与服务端结果时保留来源；服务端结果优先，不能静默删除其 blocker 或 warning。
-- `data_state='partial'` 或 warning 要求确认时，说明当前无法确认的风险事实，不能把它们当作已通过。
-- 若 `local_readiness.can_submit === false`，展示 `blockers` / `missing_required_fields` / `package_requirement_messages` 并停止。
-- 保存 `review_snapshot.fingerprint`，后续作为 `review_fingerprint` 原样传递，禁止自行生成或修改。
+- `prepare-review-snapshot` 返回的 `warnings` 非空时，说明当前无法确认的风险事实，不能把它们当作已通过。
+- 保存本次返回的 `revision` 和 `version_id`，后续两步用它校验复核对象未漂移；禁止自行生成或修改。（`preaudit_passed` / `blockers` 不在本步的返回里，属于步骤 ②。）
 
 #### 步骤 ② `precheck-app-review`
 
-传入步骤 ①的 `review_fingerprint` 和完全相同的 `release_schedule`。如果 `local_readiness.can_submit === false`，即使 `precheck_exempt` 或 `preaudit.status` 显示可继续，也要展示阻断项并停止提审。
+传入完全相同的 `release_schedule`。`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，向用户逐项展示 `blockers`（阻塞，提交会被服务端拒绝）与 `warnings`（风险提示），并询问是否继续。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
 
-向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过、`local_readiness.can_submit === true` 且没有阻断项时，固定输出：
+向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过（`preaudit_passed === true`）、且没有阻断项（`blockers` 为空）时，固定输出：
 
 - 阻塞项：无
 - 提交状态：可提交审核
 
-`can_submit` 只用于内部流程判断，不得向用户原样输出 `Blocker`、`can_submit=true` 等机器字段。存在阻断项时，逐项展示服务端返回的阻断原因并停止提审，不得输出“可提交审核”。
+`preaudit_passed === false`（机审未通过）时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
+
+`preaudit_passed` 只用于内部流程判断，不得向用户原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。存在阻断项时，逐项展示服务端返回的阻断原因，不得输出“可提交审核”；用户明确「强制提交」时说明提交可能被服务端拒绝，允许继续。
 
 | 返回 | 含义 | 处理 |
 | --- | --- | --- |
-| `precheck_exempt: true` | 该应用免预审 | 若 `local_readiness.can_submit !== false`，告知用户并等待最终提交确认 |
-| `preaudit.status: 'skipped'` 或 `skipped_by_user: true` | 跳过预审 | 若 `local_readiness.can_submit !== false`，等待最终提交确认 |
-| `preaudit.status: 'pass'` | 预审通过 | 若 `local_readiness.can_submit !== false`，等待最终提交确认 |
-| `preaudit.status: 'warning'` | 有风险 | 展示 `preaudit.risks`，询问"是否继续提交？" |
-| `preaudit.status: 'error'` | 预审错误 | 展示 `preaudit.risks`，询问"是否忽略并强行提交？" |
-| `SUBMIT_REVIEW_REQUIRED` / `SUBMIT_REVIEW_STALE` | 缺少复核或复核后事实变化 | 回到步骤 ①重新生成快照并复核，禁止复用旧指纹 |
+| `blockers` 非空 | 存在阻断项 | 逐项展示阻断原因（提交会被服务端拒绝），询问是否「强制提交」；用户确认时允许进入步骤 ③ |
+| `preaudit_passed === false` | 机审未通过 | 展示 `PREAUDIT` warnings，说明「不阻断提交，但提交后可能被审核驳回」；询问是否继续 |
+| `warnings` 非空 | 有风险提示 | 展示 `warnings`，询问"是否继续提交？" |
+| `preaudit_passed === true` 且 `blockers` 为空 | 可提交 | 等待最终提交确认 |
+| `version_id` 与步骤 ① 不一致 | 复核后版本已变化 | 回到步骤 ①重新生成快照并复核，禁止沿用旧快照 |
 | 顶层 `ok: false` | 工具失败 | 按 `error.type` / `error.subtype` 告知失败，停止；业务成功或状态读取当前 operation 已声明字段 |
 
 #### 步骤 ③ `submit-app-review`
 
+步骤 ② 预检是**可跳过**的：`preaudit_passed === true` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由服务端校验（`blockers` 拒绝 / `warnings` 不拒）裁决。
+
 参数：
 
-- 传步骤 ①返回的 `review_fingerprint`。
+- 复用步骤 ②的同一个 `release_schedule`；`version_id` 与第一步不一致时回到步骤 ①。
 - 传与前两步一致的 `release_schedule`；精确定时的 `release_time` 必须是 Unix 秒。
 - 精确定时上线时间必须 **≥ 当前时间 + 6 小时**（这是 taptap-cli 与 tds-dc 共同遵循的**前端校验**约定，不是后端硬约束；BFF 在 `submit-core` 自校验后再调后端）。
-- 若步骤 ①返回 `data_state='partial'` 或 warning 的 `requires_acknowledgement=true`，必须展示无法确认的事实。当前 `submit-app-review` schema 未声明风险确认输入时停止并报告契约缺口；`--yes` 不代表已核对，不能补造本地 flag 或请求字段。
+- 若步骤 ①返回的 `warnings` 非空，必须展示无法确认的事实。`submit-app-review` 只接受 `release_schedule`，不能补造本地 flag 或请求字段；`--yes` 不代表已核对。
 
-《创意工坊内容授权协议》由正式预检按需返回，**不要主动查询协议状态，也不要自行判断当前游戏是否需要协议**：
+《创意工坊内容授权协议》由 `analyze-app-status` 提前暴露，**不要在 precheck 时才处理**：
 
-- 首次按 schema 普通提审，不补确认参数。
-- 若 `precheck-app-review` 返回 `required_consents`，保持原 `review_fingerprint` 和 `release_schedule` 不变，只展示每项 `agreement.name` 和 `agreement.url`。任一字段缺失时停止并报告契约缺口，不得请求用户同意或回传 `consent_token`；`--yes` 只确认提交审核，不代表协议同意。
-- 只有协议详情齐全且用户在当前对话明确同意后，才把全部未过期的 `required_consents[].consent_token` 原样放入 `submit-app-review` 的 `consent_tokens`；不得遗漏、改写或复用过期 token，也不能补造 `--agree-*` flag、`cliConsent` 或其他字段。
-- 协议状态查询或签署失败时停止，不继续调用提审；向用户说明工具返回的错误。
-- 若返回 `SUBMIT_REVIEW_STALE`，回到步骤 ①，不得用旧指纹重试。
+- 关卡 / TapTap 制造游戏（`isLevel || isTapMaker`）未签署时，`analyze-app-status` 返回 `SCE_AGREEMENT_REQUIRED` blocker（含协议 url）。体检阶段就要引导签约，不要等到提审卡控。
+- 展示协议：名称《创意工坊内容授权协议》，url `https://www.taptap.cn/doc/ugcgame-agreement`。
+- 用户在当前对话明确同意后，调 `call_tool(name:"app agree-sce-agreement", args:{app_id:"<appId>", developer_id:"<developerId>", yes:true})` 签署，再重查 `analyze-app-status` 确认 blocker 消失。
+- 用户不愿用 CLI 签时，给协议 url 引导去开发者后台签约，签完回来重查。
+- `--yes` 只确认签署动作，不代表用户已同意协议；签署前必须用户明确同意，不得自行声称已同意。
+- 签署失败或协议状态无法确认时停止，不继续调用提审；向用户说明工具返回的错误。
+- `submit-app-review` 仍会做最终卡控（未签署 → 拒绝提交）；签约后该卡控自动通过。
+- 若 `version_id` 与步骤 ① 不一致，回到步骤 ①，不得用旧快照重试。
 
 询问上线方式："立即上线"还是"精确定时上线"。**草稿已有受支持的上线方式设置时优先沿用，不要重复询问**（从 `release-settings` 模块读取当前 `release_schedule`）。
 
-**用户说"今晚 10 点发布 / 帮我定到明早 9 点 / X 时间上线"**——把换算后的 `release_schedule={"kind":"scheduled_exact","release_time":<Unix秒>}` 从步骤 ①开始贯穿三步，不要先提审通过再去单独设时间。用户说"2026 年 Q4 / 暑期 / 春节前后"这类非精确档期时，说明当前链路只支持精确时间或立即上线，要求补充具体时间或选择立即上线。
+**用户说"今晚 10 点发布 / 帮我定到明早 9 点 / X 时间上线"**——把换算后的 `release_schedule={"kind":"scheduled_exact","release_time":<Unix秒>}` 从步骤 ② 开始传入两步，不要先提审通过再去单独设时间。用户说"2026 年 Q4 / 暑期 / 春节前后"这类非精确档期时，说明当前链路只支持精确时间或立即上线，要求补充具体时间或选择立即上线。
 
 **相对时间表达必须先取精确时间再换算**：当用户说"5 小时后 / N 小时后 / 明早 9 点 / 今晚 10 点"等相对时间或仅含时分的表达时，使用本地系统时间（Asia/Shanghai）换算成 Unix 秒传给 `submit-app-review`；如果无法可靠取得当前时分秒，就要求用户给绝对时间。不要凭空估算时分。
 
-成功后告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：版本发布后分发入口会保持当前设置；如需开放下载或游玩，请单独调整对应的分发状态。这不代表发布失败。
+成功后告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：本次提交未调整该入口，发布后它仍会保持“敬请期待”；如需开放下载或游玩，请在下一轮提审前先调整对应分发状态。这不代表发布失败。
 
 最后按 shared execution 的“运营阶段手册交接”补充一个后续运营入口和一句官方描述摘要；进入提审链路时先用 `list-app-versions --page-all` 读取完整发布历史并保存本次证据，作为后续阶段判定的输入。提审成功本身不能证明运营阶段，历史不完整或证据冲突时只给快速入门总入口。
 
@@ -102,29 +107,29 @@
 
 #### G-1. 撤销审核 → `withdraw-app-review`
 
-用户场景："撤回审核 / 不上了 / 改一下再提"——当前 `status=1 审核中` 时。
+用户场景："撤回审核 / 不上了 / 改一下再提"——当前 `status="reviewing"`（审核中）时。
 
-先 `withdraw-app-review --dry-run` 或展示动作影响；用户明确确认后追加 `--yes` 执行。成功后版本回到 `0 草稿`，可继续 `save-changes`。
+先 `withdraw-app-review --dry-run` 或展示动作影响；用户明确确认后追加 `--yes` 执行。成功后版本回到 `status="draft"`（草稿），可继续 `save-changes`。
 
 #### G-2. 撤销定时上线 → `cancel-scheduled-release` ⚠️ 文案陷阱
 
-用户场景："撤销定时 / 不定时了"——当前 `status=3 待上线` 时。
+用户场景："撤销定时 / 不定时了"——当前 `status="scheduled"`（待上线）时。
 
 先 `cancel-scheduled-release --dry-run` 或展示动作影响；用户明确确认后追加 `--yes` 执行。成功后**后端 status 会变成 `2`（与"审核失败"复用同一状态值）**，但业务事件是"撤销定时"。
 
 <critical>
-告知用户时**禁止**复述"已变更为审核失败 / status=2"。统一说"已撤销定时上线，可以修改后重新提审"。
+告知用户时**禁止**复述"已变更为审核失败 / status=2"（原始值 2 与"审核失败"复用，归一化后表现为 `status="rejected"`）。统一说"已撤销定时上线，可以修改后重新提审"。
 工具返回 `last_event='schedule_cancelled'`、归一化的 `status`、`version_id`、`revision` 和已清除的 `release_time`；业务文案以 `last_event` 为准，不把 `status='rejected'` 误报成审核失败。
 通过当前版本的 `logs` 区分 `schedule_cancelled` 与 `review_rejected`；日志缺失或事件为 `unknown` 时才报告“审核历史无法确认”。
 </critical>
 
 #### G-3. 修改定时时间 → `reschedule-release`
 
-用户场景："改一下上线时间 / 推迟 2 天 / 提前到明早"——**当前 `status=3 待上线` 时**。
+用户场景："改一下上线时间 / 推迟 2 天 / 提前到明早"——**当前 `status="scheduled"`（待上线）时**。
 
 参数与 `submit-app-review` 的定时分支同构：只传 Unix 秒形式的 `release_time`；必须 ≥ 当前+6 小时。用户给的是绝对或相对时间表达（如「N 小时后」）时，使用本地系统时间换算为 Unix 秒；无法可靠换算时要求用户给绝对时间。
 
-成功后状态仍是 `3`，仅 `release_time` 更新。
+成功后状态仍是 `status="scheduled"`，仅 `release_time` 更新。
 
 ⚠️ **不要用本工具处理"草稿首次定时发布"的诉求**——草稿状态下 `reschedule-release` 会直接返回前置不满足。草稿首次定时发布走 `submit-app-review` 一次性指定 `release_schedule`，或先写草稿 `release_schedule` 后提审沿用。
 
@@ -132,8 +137,8 @@
 
 用户报告“定时到了还没上线”时：
 
-1. 用 `list-app-versions` 重新读取当前版本；状态已经是 `4` 时说明平台已发布，再读取 `platform-status` 报告分发入口状态。
-2. 只有当前仍为 `status=3` 且 `release_time <= 当前时间` 时，才可展示“将立即把待上线版本发布为线上版本”的影响，并用稳定 key 执行 `publish-scheduled-release --dry-run`。
+1. 用 `list-app-versions` 重新读取当前版本；状态已经是 `status="online"` 时说明平台已发布，再读取 `platform-status` 报告分发入口状态。
+2. 只有当前仍为 `status="scheduled"` 且 `release_time <= 当前时间` 时，才可展示“将立即把待上线版本发布为线上版本”的影响，并用稳定 key 执行 `publish-scheduled-release --dry-run`。
 3. 用户明确确认后复用同一 key，加 `--yes` 执行；成功后重新读取版本和 `platform-status`，确认状态为已上线并报告各分发入口。
    - 按 shared execution「运营阶段手册交接」用提审前保存的历史证据判定运营阶段；缺少前置快照时使用快速入门总入口。
 4. `release_time` 尚未到、状态已变化或无法确认时间时停止；如需改变计划，按前置使用 `reschedule-release` 或 `cancel-scheduled-release`，不得绕过状态门禁。
@@ -142,7 +147,7 @@
 
 #### G-5. 重置为线上版本 → `reset-draft` ⚠️ 不可逆
 
-用户场景："这一版改乱了 / 重来 / 回到线上那一版重新改"——当前 `status ∈ {0, 2}` 且**存在线上版本**。
+用户场景："这一版改乱了 / 重来 / 回到线上那一版重新改"——当前 `status` 为 `"draft"` 或 `"rejected"` 且**存在线上版本**。
 
 ⚠️ **不可逆**：当前 draft 相对线上版本的所有未发布改动都会丢失（包括已保存到草稿但尚未发布的内容；用户的"草稿里改了一半"不会被保留）。底层实现是 `delete + create` 两步组合，**非原子**——第二步失败会留下无 unpublished 的中间态，由下方「失败恢复」段的重试 + `create-draft` 兜底。
 
@@ -208,7 +213,7 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
 
 1. 按 [skill analysis](taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md) 读取当前状态与阻断项
 2. 只处理当前可填字段（按 `get-app-module` 的 visibility 过滤）
-3. 能批量的尽量一次 `save-changes`（每批 ≤5 字段）
+3. 能批量的尽量一次 `save-changes`（每批 ≤10 字段）
 4. 修改后重新读取受影响模块，并按 skill analysis 确认进度
 5. 满足条件再进入预审
 
@@ -257,5 +262,5 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
 - **"发布资料" ≠ "直接提交审核"**
 - **“正式上线” ≠ “提交审核”**：正式上线只确认目标阶段，不授权调用提审工具
 - 先判断目标阶段，再决定要补哪些资料、是否需要调整 `release_schedule`
-- 版本发布后，分发入口会保持当前设置；用户确认前和发布结果中都要逐项说明工具返回且可见的 `region_flag_*` 实际状态
+- 发布版本不会自动改变分发入口状态；用户确认前和发布结果中都要逐项说明工具返回且可见的 `region_flag_*` 实际状态
 - 用户未明确目标时，先做意图采集；不要让用户在不知道差异和目标的情况下直接过 approval

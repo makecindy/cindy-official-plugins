@@ -17,6 +17,8 @@
 > | `taptap-qualification` | `taptap-suite/references/taptap-qualification` |
 > | `taptap-package-management` | `taptap-suite/references/taptap-package-management` |
 > | `taptap-test-plan` | `taptap-suite/references/taptap-test-plan` |
+| `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
+| `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
 >
 > **两层手册**:本插件的手册是**执行纪律层**——它规定怎么经 `call_tool` 调、写门禁怎么走、失败三态怎么读,冲突时一律以它为准。
 > 需要 CLI 自带的官方原文(安装 CLI 时内置,随 CLI 版本更新)作为**深入参考**时,用:
@@ -28,10 +30,10 @@
 > **在 Cindy 里处理 TapTap 业务,一律以本插件的手册为准。**
 >
 > 本机可能因为安装 CLI 而存在官方 Skill,形态取决于 CLI 的 skills 布局:
-> - **separate 布局**(默认):10 个独立 skill,名字是 `taptap-app-edit`、`taptap-test-plan` 等;
+> - **separate 布局**(默认):11 个独立 skill,名字是 `taptap-app-edit`、`taptap-test-plan` 等;
 > - **suite 布局**:只有 1 个 `taptap-suite`,子能力收在它的 `references/taptap-xxx/SKILL.md`。
 >
-> 两种布局描述的都是同一套流程,但其中的命令示例必须按上方映射表经 `call_tool` 执行,**不要照着它用 Bash 直接跑 taptap-cli**——那会绕过本插件的写门禁、只读限制和失败三态,也会绕过本插件不提供的数据查询。遇到正文里的 `taptap-xxx` 名称时,一律按本表转成本插件手册,不要去查找或改读这些 Skill。
+> 两种布局描述的都是同一套流程,但其中的命令示例必须按上方映射表经 `call_tool` 执行,**不要照着它用 Bash 直接跑 taptap-cli**——那会绕过本插件的写门禁、只读限制和失败三态。遇到正文里的 `taptap-xxx` 名称时,一律按本表转成本插件手册,不要去查找或改读这些 Skill。
 
 > **命令行示例映射(所有手册通用)**
 > 各业务手册中保留的 `taptap-cli ...` 命令行示例,一律按下面映射转成 `call_tool` 调用,不要在终端运行:
@@ -52,7 +54,7 @@
 
 **CRITICAL — 不可逆写和高影响写必须先 `dry_run: true` 预览或拿到用户明确确认,再以相同参数加 `yes: true` 执行。插件对 write / high-risk-write 操作内置了门禁:既没有 `dry_run` 也没有 `yes` 的写调用会被拒绝(CONFIRM_REQUIRED),只读会话里的写操作一律拒绝。是否已取得用户同意由你负责,`yes` 是执行开关而不是同意本身。例外:`auth login-start` / `auth login-wait` 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁;只读会话仍然拒绝它们。**
 
-**CRITICAL — `yes: true` 不代表用户同意协议,也不代表用户已核对提审风险。遇到服务端要求额外确认时只展示响应实际返回的 warning,以及 `required_consents[].agreement.name` / `agreement.url`;任一字段缺失时必须停止并报告契约缺口,不得请求同意或回传 `consent_token`,也不能补造本地参数。**
+**CRITICAL — `yes: true` 不代表用户同意协议,也不代表用户已核对提审风险。遇到服务端要求额外确认时只展示响应实际返回的 `blockers` / `warnings`;协议签署走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户明确同意后加 `yes: true` 执行,再重查确认 blocker 消失)。不得补造本地参数或请求字段。**
 
 **CRITICAL — 登录必须使用插件编排:未登录时先 `call_tool(name:"auth login-start")`,把返回的 `verification_url` 按两行原样提供给用户:第一行仅写"请完成授权:",第二行仅写 URL。不要使用 Markdown 链接语法,也不要重复展示 URL。随后立即执行 `call_tool(name:"auth login-wait", args:{login_handle:"..."})` 持续轮询,不要等待用户回复。不要输出/记录/上报 access token。登录成功后向用户只回复"登录成功"。**
 
@@ -68,7 +70,8 @@
 | 查资质缺口、补资质材料、资质增量提审/撤回 | `qualification` | 先确认发布意图,再分析 |
 | 检索、生成或收录游戏图片素材 | `materials`(第二部分) | 先本地素材后生图;上传执行在第一部分 |
 | 查包体库、线上/待处理包、自测入口 | `packages` | 先读 overview |
-| 查下载、PV、转化、订单、评分等数据 | 无 | 本插件不提供数据查询,说明后引导用户到开发者后台查看 |
+| 查下载、PV、转化、订单、评分统计等数据 | `dashboard-stats` | 先确认指标、维度和时间范围 |
+| 查玩家评价正文、差评、官方回复 | `player-feedback` | 先确认时间范围和评分口径 |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
 
 ## call_tool 返回解读
@@ -91,7 +94,7 @@
 - 业务字段统一放 `args.data`,只有 `developer_id` / `app_id` 是独立 scope 字段(映射为 `--dev-id` / `--app-id`)。除 scope 和 `data` 外的键都是控制 flag,透传成 `--flag`,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);不确定可用 flag 时先对目标命令传 `args._help:true` 看完整帮助。typed 命令的 `data` 是完整 tool input。
 - 默认输出就是 JSON,不要追加冗余的 `--format json`。
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
-- `precheck-app-review` 返回 `required_consents` 时,只展示每项 `agreement.name` 和 `agreement.url`。任一字段缺失时停止并报告契约缺口,不得请求用户同意或回传 `consent_token`;只有详情齐全且用户在当前对话明确同意后,才把全部未过期的 token 原样放入 `submit-app-review` 的 `consent_tokens`,并保持原 `review_fingerprint` 和 `release_schedule` 不变。
+- `precheck-app-review` 返回 `blockers` 非空或 `preaudit_passed === false` 时,只展示 `blockers` 逐项事实;涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则向用户逐项展示卡点并询问是否强制提交(预检可跳过,最终由服务端校验裁决)。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。
 
