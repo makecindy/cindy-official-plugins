@@ -48,7 +48,7 @@
     {
       "id": "vendor-dist-evidence",
       "severity": "high",
-      "rule": "vendor/、dist/、node/worker.cjs 等第三方或生成物不得被单独篡改。除 README 声明的整体升级（如 taptap-maker/vendor 随 @taptap/maker 官方包整体替换、mail 插件 worker 随 src/ 重建）外，其中任何文件的新增、修改或删除都按 P1 高危审查。官方整包升级须确认包名、版本和官方来源，并审查实际新增的外联、下载、动态执行或凭证处理是否扩大风险；不得仅因未逐项罗列全部既有域名、函数或编码内容而阻断。单独篡改、来源无法对应官方包，或新增未说明的高风险执行/外联行为，仍须按 P1 处理。"
+      "rule": "vendor/、dist/、node/worker.cjs 等第三方或生成物不得被单独篡改。除 README 声明的整体升级（如 taptap-maker/vendor 随 @taptap/maker 官方包整体替换、mail 插件 worker 随 src/ 重建）外，其中任何文件的新增、修改或删除都按 P1 高危审查。官方整包升级须确认包名、版本和官方来源，并审查新增行为，以及既有函数、端点或编码内容变更所引入的外联、下载、动态执行或凭证风险；未发生变化的既有内容无需逐项罗列。单独篡改、来源无法对应官方包，或出现未说明的高风险执行/外联行为，仍须按 P1 处理。"
     },
     {
       "id": "provisioning-audience",

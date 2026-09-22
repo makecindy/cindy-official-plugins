@@ -36,7 +36,7 @@ network targets ⊆ `ghost.json` allowlist (Node
 workers reviewed against their fixed endpoints instead); tools with
 irreversible external side effects must distinguish "not executed / executed /
 unknown" on every failure path; no `Math.random` for externally-visible ids;
-vendor/dist whole-package upgrades require a verified official source and review of newly introduced network, download, dynamic-execution, or credential risk; do not block only because every pre-existing symbol was not itemized.
+vendor/dist whole-package upgrades require a verified official source and review of network, download, dynamic-execution, or credential risks introduced by new behavior or changes to existing functions, endpoints, or encoded content; unchanged content does not need itemized listing.
 
 ## Hard gates before any commit / 提交硬门禁
 
