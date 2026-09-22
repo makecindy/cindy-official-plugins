@@ -4,7 +4,7 @@
   "whenToUse": "需要搜索公网信息、查资料、找网页或查看最新动态时使用。默认使用 Cindy AI 搜索，也可在 Web Search 插件详情页配置 Brave 或 Tavily Key。",
   "tools": {
     "search_web": {
-      "description": "使用最多 2000 字符的查询搜索公网，并返回 { title, url, snippet } 结果列表。默认使用 Cindy AI 搜索，也可指定 Brave 或 Tavily。返回 { provider, results }。使用 Brave 或 Tavily 但对应 Key 未配置时，把返回的 message 原样告诉用户。"
+      "description": "使用最多 2000 字符的查询搜索公网，并返回 { title, url, snippet } 结果列表。默认使用 Cindy AI 搜索，也可指定 Brave 或 Tavily。返回 { provider, results }。失败时保留宿主返回的 errorCode；使用 Brave 或 Tavily 但对应 Key 未配置时，把返回的 message 原样告诉用户。"
     }
   }
 }

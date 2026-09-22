@@ -4,7 +4,7 @@
   "whenToUse": "공개 웹 검색, 자료 조사, 웹페이지 찾기, 최신 정보 확인에 사용합니다. 기본적으로 Cindy AI를 사용하며 Web Search 플러그인 상세 화면에서 Brave 또는 Tavily 키도 설정할 수 있습니다.",
   "tools": {
     "search_web": {
-      "description": "최대 2000자의 검색어로 공개 웹을 검색해 { title, url, snippet } 결과 목록을 반환합니다. 기본적으로 Cindy AI를 사용하며 Brave 또는 Tavily도 지정할 수 있습니다. { provider, results }를 반환합니다. 지정한 Brave 또는 Tavily 키가 설정되지 않았다면 반환된 message를 그대로 사용자에게 전달하세요."
+      "description": "최대 2000자의 검색어로 공개 웹을 검색해 { title, url, snippet } 결과 목록을 반환합니다. 기본적으로 Cindy AI를 사용하며 Brave 또는 Tavily도 지정할 수 있습니다. { provider, results }를 반환합니다. 실패 시 호스트가 반환한 errorCode를 유지합니다. 지정한 Brave 또는 Tavily 키가 설정되지 않았다면 반환된 message를 그대로 사용자에게 전달하세요."
     }
   }
 }

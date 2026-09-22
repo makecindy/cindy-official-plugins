@@ -183,10 +183,12 @@ function createSettingsHarness(options = {}) {
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.3.2');
-  assert.equal(manifest.minCindyVersion, '0.1.37');
+  assert.equal(manifest.version, '1.3.3');
+  assert.equal(manifest.minCindyVersion, '0.1.64');
+  assert.equal(manifest.schemaVersion, 3);
   assert.deepEqual(manifest.cindy, { search: ['web'] });
-  assert.ok(manifest.slots.includes('cindy'));
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
+  assert.deepEqual(manifest.network.hosts, ['api.search.brave.com', 'api.tavily.com']);
   assert.deepEqual(manifest.setup, { requires: [] });
   const provider = manifest.tools[0].parameters.properties.provider;
   assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily']);
@@ -270,6 +272,7 @@ test('Cindy transport failures return an actionable service error', async () => 
   assert.equal(harness.networkCalls.length, 0);
   assert.equal(result.ok, false);
   assert.equal(result.message, 'Cindy AI 搜索服务暂时不可用，请稍后再试');
+  assert.equal(result.errorCode, 'INTERNAL');
   assert.doesNotMatch(result.message, /Failed to fetch/);
 });
 
@@ -314,6 +317,64 @@ test('explicit provider wins over settings and provider failures never fall back
   assert.equal(failedCindy.networkCalls.length, 0);
   assert.equal(failedResult.ok, false);
   assert.equal(failedResult.message, 'Cindy AI quota exhausted');
+  assert.equal(failedResult.errorCode, 'QUOTA_EXHAUSTED');
+});
+
+for (const provider of ['cindy', 'brave', 'tavily']) {
+  for (const errorCode of ['RATE_LIMITED', 'QUOTA_EXHAUSTED', 'INVALID_INPUT', 'PERMISSION_DENIED']) {
+    test(`${provider} preserves Host error ${errorCode} without retry or fallback`, async () => {
+      const failure = { ok: false, errorCode, message: 'Host failure details' };
+      const harness = createHarness({ cindyResult: failure, networkResult: () => failure });
+      const result = await harness.search({ provider });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.errorCode, errorCode);
+      assert.equal(result.message, failure.message);
+      assert.equal(result.callId, 'call-1');
+      assert.equal(harness.toolResults.length, 1);
+      assert.equal(harness.cindyRequests.length, provider === 'cindy' ? 1 : 0);
+      assert.equal(harness.networkCalls.length, provider === 'cindy' ? 0 : 1);
+    });
+  }
+
+  test(`${provider} preserves structured exceptions`, async () => {
+    const failure = Object.assign(new Error('Search quota exhausted; check your balance'), {
+      errorCode: 'QUOTA_EXHAUSTED',
+    });
+    const harness = createHarness({
+      cindyError: failure,
+      networkResult: () => { throw failure; },
+    });
+    const result = await harness.search({ provider });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'QUOTA_EXHAUSTED');
+    assert.ok(result.message.includes(failure.message));
+    assert.equal(harness.toolResults.length, 1);
+    assert.equal(harness.cindyRequests.length, provider === 'cindy' ? 1 : 0);
+    assert.equal(harness.networkCalls.length, provider === 'cindy' ? 0 : 1);
+  });
+
+  test(`${provider} classifies unstructured exceptions as INTERNAL`, async () => {
+    const failure = new Error('Unexpected failure');
+    const harness = createHarness({
+      cindyError: failure,
+      networkResult: () => { throw failure; },
+    });
+    const result = await harness.search({ provider });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'INTERNAL');
+    assert.equal(harness.toolResults.length, 1);
+  });
+}
+
+test('legacy failures without errorCode remain failures without guessing their category', async () => {
+  const harness = createHarness({ cindyResult: { ok: false, message: 'Legacy failure' } });
+  const result = await harness.search({ provider: 'cindy' });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, undefined);
+  assert.equal(result.message, 'Legacy failure');
 });
 
 test('settings controls stay disabled until initial preferences load', async () => {
