@@ -4,45 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createContext, runInContext } from 'node:vm';
-import { createHash } from 'node:crypto';
-import { brotliCompressSync, constants } from 'node:zlib';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL('../google-gmail/node/gog.cjs', import.meta.url), 'utf8');
-
-test('runtime pins executable bytes independently of Brotli quality and rejects changed code', () => {
-  const executable = Buffer.from('fixture executable bytes, never executed');
-  const sha256 = createHash('sha256').update(executable).digest('hex');
-  for (const quality of [6, 9, 11]) {
-    for (const changed of [false, true]) {
-      const payload = brotliCompressSync(changed ? Buffer.from('changed executable') : executable,
-        { params: { [constants.BROTLI_PARAM_QUALITY]: quality } });
-      const writes = [];
-      const ctx = createContext({
-        __dirname: '/fixture/node', process: { platform: 'linux', arch: 'x64' },
-        require: name => {
-          if (name === '../vendor/gog/binaries.json') return { 'linux-amd64': { sha256 } };
-          if (name === 'node:fs') return {
-            readFileSync: () => payload,
-            mkdtempSync: () => '/fixture/runtime', chmodSync: () => {},
-            writeFileSync: (_path, bytes) => writes.push(bytes),
-          };
-          return require(name);
-        },
-      });
-      runInContext(source.split('const input = readline.createInterface')[0], ctx);
-      if (changed) {
-        assert.throws(() => ctx.initialize(), /executable checksum mismatch/);
-        assert.equal(writes.length, 0);
-      } else {
-        ctx.initialize();
-        assert.equal(writes.length, 1);
-        assert.deepEqual(writes[0], executable);
-      }
-    }
-  }
-});
 
 function workerFixture() {
   const calls = [];

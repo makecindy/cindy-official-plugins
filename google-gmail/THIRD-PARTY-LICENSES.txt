@@ -2,7 +2,7 @@ gogcli v0.39.1 (unmodified official release executables)
 Source: https://github.com/openclaw/gogcli/tree/v0.39.1
 Build-time download URLs and archive SHA-256: binary-dependencies.json
 Release archive SHA-256: vendor/gog/release.json
-Executable SHA-256: vendor/gog/binaries.json
+Executable and Brotli payload SHA-256: vendor/gog/binaries.json
 Brotli is a reversible distribution encoding, not a source modification.
 Release executables are collected and encoded by the repository packager;
 the source checkout does not contain the binary payloads.

@@ -7,5 +7,5 @@ if (!source || !destination) throw new Error('Expected input and output paths');
 if (statSync(source).size > 256 * 1024 * 1024) throw new Error('Input exceeds 256 MiB');
 const input = readFileSync(source);
 writeFileSync(destination, brotliCompressSync(input, {
-  params: { [constants.BROTLI_PARAM_QUALITY]: 9 },
+  params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
 }), { flag: 'wx' });

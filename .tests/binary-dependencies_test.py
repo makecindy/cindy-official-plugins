@@ -237,7 +237,7 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("https://", logs.getvalue())
         expected = subprocess.check_output(["node", "-e",
             "const z=require('node:zlib');process.stdout.write(z.brotliCompressSync(require('node:fs').readFileSync(0),"
-            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:9}}))"], input=CONTENT)
+            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:11}}))"], input=CONTENT)
         with zipfile.ZipFile(output) as bundle:
             for platform in packager.PLATFORMS:
                 name = f"vendor/example-cli/{platform}.br"

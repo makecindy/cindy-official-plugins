@@ -199,14 +199,19 @@ templates, shell expansions or glob patterns; single-platform plugins remain uns
   or another output. `executable: true` writes mode 0755; otherwise 0644.
   The adapter must handle the client's existing extraction/execution behavior.
 - Optional `encoding: "brotli"` encodes the selected file using the repository's
-  Node built-in Brotli encoder (quality 9, a five-minute limit per file).
+  Node built-in Brotli encoder (quality 11, a five-minute limit per file).
   Omit it or use `"identity"` to copy bytes unchanged. Encoded output is data,
   cannot be marked executable, and must be decoded by the plugin at runtime.
   This is a fixed data transformation, not an author script or build hook.
   Input bounds remain in force; package limits count the encoded files actually shipped.
-  Compression parameters belong to the packager, not the plugin contract. If a
-  plugin checks its bundled executable, pin the decoded bytes rather than the
-  compressed representation; tuning compression must not require new runtime hashes.
+  Compression parameters belong to the packager, not the plugin contract.
+  The shared collector verifies upstream downloads against the declared `sha256`;
+  package integrity verification belongs to the shared distribution and client
+  installation flow. Plugins should not add duplicate runtime hash checks for
+  bundled binaries, whether compressed or decoded. The adapter selects the platform,
+  decodes when needed and invokes the binary; compression tuning must not require
+  changes to plugin verification data. This does not remove the shared download
+  checks, package checks or runtime decoding limits.
 - Paths are relative and cross-platform safe. Traversal, links, special files,
   duplicate/case-conflicting entries and encrypted ZIPs are rejected. Archives
   are inspected without extracting their supplied paths into the workspace.

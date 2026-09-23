@@ -55,7 +55,7 @@ test('Gmail source → real downloads → package → native worker schema', {
   }
   git('add', '.'); commit();
   execFileSync('node', [path.join(root, '.github/scripts/check-source-size.mjs'), base], { cwd: fixture, stdio: 'inherit' });
-  const output = path.join(directory, 'google-gmail.cindy');
+  const output = path.join(directory, 'google-gmail-1.3.1.cindy');
   console.log(`Gmail smoke output: ${output}`);
   execFileSync('bash', [path.join(root, '.github/scripts/package-plugin.sh'), 'google-gmail', output], {
     cwd: fixture, stdio: 'inherit', timeout: 1_700_000,
@@ -64,6 +64,7 @@ test('Gmail source → real downloads → package → native worker schema', {
   execFileSync('unzip', ['-q', output, '-d', unzipped]);
   for (const [key, expected] of Object.entries(binaries)) {
     const compressed = fs.readFileSync(path.join(unzipped, 'vendor/gog', `${key}.br`));
+    assert.equal(digest(compressed), expected.compressedSha256, key);
     assert.equal(digest(brotliDecompressSync(compressed)), expected.sha256, key);
   }
   const worker = spawn(process.execPath, [path.join(unzipped, 'node/gog.cjs')], { stdio: ['pipe', 'pipe', 'pipe'] });
