@@ -8,7 +8,7 @@ for (const [id, prefix] of Object.entries(plugins)) {
   test(`${id}: gog parameters are visible through the Cindy tool contract`, () => {
     const manifest = JSON.parse(readFileSync(new URL(`../${id}/ghost.json`, import.meta.url), 'utf8'));
     assert.equal(manifest.schemaVersion, 3);
-    assert.equal(manifest.minCindyVersion, '0.1.82');
+    assert.equal(manifest.minCindyVersion, '0.1.92');
     assert.equal(Object.hasOwn(manifest, 'slots'), false);
     assert.equal(manifest.sessionContext, true);
     const secret = manifest.network.secrets.find(secret => secret.source === 'oauth');
