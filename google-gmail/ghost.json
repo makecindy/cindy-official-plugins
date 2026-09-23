@@ -5,7 +5,7 @@
   "name": "Gmail",
   "description": "搜索和阅读 Gmail、下载附件到当前任务、创建草稿和发送邮件。账号授权由 Cindy 托管。",
   "whenToUse": "用于 Gmail 邮件、附件、草稿和发送。先用 gmail_accounts 选择账号，再用 gmail_schema 查询命令、gmail_run 执行。分析附件前，先下载到明确指定的本地任务目录路径。",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",

@@ -26,7 +26,7 @@ function initialize() {
   const expected = binaries[key];
   if (!expected) throw new Error('Unsupported operating system or architecture');
   const compressed = fs.readFileSync(path.join(root, 'vendor/gog', key + '.br'));
-  if (digest(compressed) !== expected.compressedSha256) throw new Error('Bundled gog checksum mismatch');
+  // Pin the executable, not the packager's choice of compression parameters.
   const bytes = zlib.brotliDecompressSync(compressed, { maxOutputLength: 128 * 1024 * 1024 });
   if (digest(bytes) !== expected.sha256) throw new Error('Bundled gog executable checksum mismatch');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-gog-'));

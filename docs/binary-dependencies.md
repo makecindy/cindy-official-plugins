@@ -199,11 +199,14 @@ templates, shell expansions or glob patterns; single-platform plugins remain uns
   or another output. `executable: true` writes mode 0755; otherwise 0644.
   The adapter must handle the client's existing extraction/execution behavior.
 - Optional `encoding: "brotli"` encodes the selected file using the repository's
-  Node built-in Brotli encoder (quality 11, a five-minute limit per file).
+  Node built-in Brotli encoder (quality 9, a five-minute limit per file).
   Omit it or use `"identity"` to copy bytes unchanged. Encoded output is data,
   cannot be marked executable, and must be decoded by the plugin at runtime.
   This is a fixed data transformation, not an author script or build hook.
   Input bounds remain in force; package limits count the encoded files actually shipped.
+  Compression parameters belong to the packager, not the plugin contract. If a
+  plugin checks its bundled executable, pin the decoded bytes rather than the
+  compressed representation; tuning compression must not require new runtime hashes.
 - Paths are relative and cross-platform safe. Traversal, links, special files,
   duplicate/case-conflicting entries and encrypted ZIPs are rejected. Archives
   are inspected without extracting their supplied paths into the workspace.
@@ -290,6 +293,14 @@ Common failures:
 - Works locally, fails CI: check uncommitted source/licenses, local-only dependencies, path case and modes.
 
 ## Limits and failure behavior
+
+The collector prints `[timing]` JSON lines for `source_archive`, `download_verify`
+(network transfer and SHA-256 verification), `extract`, `brotli`, `zip_source`,
+`zip_dependency`, `validate_package`, `assemble_total` and `package_total`.
+Each record includes monotonic `elapsed_s` and `status` (`ok` / `failed`), plus
+dependency/asset/file identifiers where applicable; URLs and response bodies are
+not logged. Total stages include their child stages: do not add totals to the
+per-stage durations. Timings are logs only and do not enter the package.
 
 Delivery limits: up to 256 ZIP entries; Node packages
 up to 128 MiB compressed and 256 MiB expanded, other packages up to 8 MiB compressed and 32 MiB

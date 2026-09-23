@@ -1,5 +1,6 @@
 """Offline fixtures plus an opt-in live download; never execute dependencies."""
 import hashlib
+from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
@@ -222,11 +223,25 @@ class PackagingTests(unittest.TestCase):
         self.validate(declaration)
         source = self.source(declaration)
         output = self.directory / "encoded.cindy"
-        with patch.object(packager, "download", side_effect=lambda _, dest: dest.write_bytes(CONTENT)):
+        logs = io.StringIO()
+        with redirect_stdout(logs), patch.object(packager, "download", side_effect=lambda _, dest: dest.write_bytes(CONTENT)):
             packager.assemble(source, output)
+        events = [json.loads(line.removeprefix("[timing] ")) for line in logs.getvalue().splitlines()
+                  if line.startswith("[timing] ")]
+        for stage in ("download_verify", "extract", "brotli", "zip_dependency"):
+            stages = [event for event in events if event["stage"] == stage]
+            self.assertEqual(len(stages), 6)
+            self.assertEqual([event["asset"] for event in stages], list(range(1, 7)))
+        self.assertEqual(events[-1]["stage"], "assemble_total")
+        self.assertTrue(all(event["status"] == "ok" and event["elapsed_s"] >= 0 for event in events))
+        self.assertNotIn("https://", logs.getvalue())
+        expected = subprocess.check_output(["node", "-e",
+            "const z=require('node:zlib');process.stdout.write(z.brotliCompressSync(require('node:fs').readFileSync(0),"
+            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:9}}))"], input=CONTENT)
         with zipfile.ZipFile(output) as bundle:
             for platform in packager.PLATFORMS:
                 name = f"vendor/example-cli/{platform}.br"
+                self.assertEqual(bundle.read(name), expected)
                 decoded = subprocess.check_output(["node", "-e",
                     "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(0)))"],
                     input=bundle.read(name))
@@ -243,6 +258,17 @@ class PackagingTests(unittest.TestCase):
         item["target"] = "vendor/example-cli/darwin-x64.br"
         with self.assertRaisesRegex(ValueError, "conflicting"):
             self.validate(declaration)
+
+    def test_timing_uses_monotonic_clock_and_reports_failure_without_exception_details(self):
+        logs = io.StringIO()
+        with redirect_stdout(logs), patch.object(packager.time, "monotonic", side_effect=[10, 12.5]):
+            with self.assertRaisesRegex(ValueError, "private detail"):
+                with packager.timed_stage("download_verify", dependency="fixture", asset=1):
+                    raise ValueError("private detail")
+        event = json.loads(logs.getvalue().removeprefix("[timing] "))
+        self.assertEqual(event, {"stage": "download_verify", "dependency": "fixture", "asset": 1,
+                                 "status": "failed", "elapsed_s": 2.5})
+        self.assertNotIn("private detail", logs.getvalue())
 
     def test_final_package_resolves_collected_manifest_reference(self):
         source = self.source(config())

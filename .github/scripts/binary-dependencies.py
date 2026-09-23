@@ -6,6 +6,7 @@ archive as the plugin, not from the working tree. See docs/binary-dependencies.m
 """
 
 import argparse
+from contextlib import contextmanager
 import gzip
 import hashlib
 import http.client
@@ -36,6 +37,19 @@ MAX_EXPANDED = 256 * MIB
 MAX_MEMBERS = 4096
 MAX_CONFIG = 256 * 1024
 TIMEOUT = 120
+
+
+@contextmanager
+def timed_stage(stage, **context):
+    started = time.monotonic()
+    status = "failed"
+    try:
+        yield
+        status = "ok"
+    finally:
+        # Identifiers only: never print URLs, response bodies or exception text.
+        print("[timing] " + json.dumps({"stage": stage, **context, "status": status,
+                                       "elapsed_s": round(time.monotonic() - started, 3)}), flush=True)
 
 
 def require(condition, message):
@@ -317,7 +331,7 @@ def inspect_package(bundle, *, final=False):
 
 
 def assemble(source, destination):
-    with zipfile.ZipFile(source) as bundle:
+    with timed_stage("assemble_total"), zipfile.ZipFile(source) as bundle:
         paths, node, total = inspect_package(bundle)
         require(source.stat().st_size <= (128 if node else 8) * MIB, "Plugin archive exceeds size limit")
         if CONFIG not in bundle.namelist():
@@ -331,20 +345,26 @@ def assemble(source, destination):
         count = len(bundle.infolist())
         timestamp = bundle.getinfo("ghost.json").date_time
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
-            for info in bundle.infolist():
-                output.writestr(info, bundle.read(info))
+            with timed_stage("zip_source"):
+                for info in bundle.infolist():
+                    output.writestr(info, bundle.read(info))
             for dependency in dependencies:
                 for index, asset in enumerate(dependency["assets"], start=1):
                     print(f"Collecting {dependency['name']} {dependency['version']} (asset {index})", flush=True)
                     with tempfile.TemporaryDirectory(prefix="cindy-binary-") as temp:
                         temp_path = Path(temp)
                         archive = temp_path / "download"
-                        download(asset, archive)
-                        for item, file in selected_files(asset, archive, temp_path):
+                        context = {"dependency": dependency["name"], "asset": index}
+                        with timed_stage("download_verify", **context):
+                            download(asset, archive)
+                        with timed_stage("extract", **context):
+                            files = selected_files(asset, archive, temp_path)
+                        for item, file in files:
                             if item.get("encoding") == "brotli":
                                 encoded = temp_path / (file.name + ".br")
-                                subprocess.run(["node", str(Path(__file__).with_name("brotli-file.mjs")),
-                                                str(file), str(encoded)], check=True, timeout=300)
+                                with timed_stage("brotli", **context, target=item["target"]):
+                                    subprocess.run(["node", str(Path(__file__).with_name("brotli-file.mjs")),
+                                                    str(file), str(encoded)], check=True, timeout=300)
                                 file = encoded
                             total += file.stat().st_size
                             count += 1
@@ -353,10 +373,11 @@ def assemble(source, destination):
                             info.create_system = 3
                             info.compress_type = zipfile.ZIP_DEFLATED
                             info.external_attr = (stat.S_IFREG | (0o755 if item.get("executable") else 0o644)) << 16
-                            with file.open("rb") as content, output.open(info, "w") as member:
+                            with timed_stage("zip_dependency", **context, target=item["target"]), \
+                                    file.open("rb") as content, output.open(info, "w") as member:
                                 shutil.copyfileobj(content, member)
         require(destination.stat().st_size <= (128 if node else 8) * MIB, "Collected archive exceeds package size limit")
-        with zipfile.ZipFile(destination) as output:
+        with timed_stage("validate_package"), zipfile.ZipFile(destination) as output:
             inspect_package(output, final=True)
 
 
@@ -367,11 +388,13 @@ def package_plugin(plugin, output):
     require(output.suffix == ".cindy", "Output must end in .cindy")
     # TemporaryDirectory removes partial downloads/archives on any failure;
     # an existing output is replaced only after the complete package passes.
-    with tempfile.TemporaryDirectory(prefix=".cindy-package-", dir=output.parent) as temp:
+    with timed_stage("package_total", plugin=plugin), \
+            tempfile.TemporaryDirectory(prefix=".cindy-package-", dir=output.parent) as temp:
         temp_path = Path(temp)
         source = temp_path / "source.zip"
-        subprocess.run(["git", "-c", "core.autocrlf=false", "archive", "--format=zip", f"--output={source}",
-                        *(f"--add-file={name}" for name in LEGAL_FILES), f"HEAD:{plugin}"], check=True)
+        with timed_stage("source_archive", plugin=plugin):
+            subprocess.run(["git", "-c", "core.autocrlf=false", "archive", "--format=zip", f"--output={source}",
+                            *(f"--add-file={name}" for name in LEGAL_FILES), f"HEAD:{plugin}"], check=True)
         assembled = temp_path / "plugin.cindy"
         assemble(source, assembled)
         os.replace(assembled, output)
