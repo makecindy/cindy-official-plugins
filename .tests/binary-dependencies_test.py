@@ -215,49 +215,48 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), b"previous good package")
         self.assertEqual(list(self.directory.glob(".cindy-package-*")), [])
 
-    def test_optional_brotli_encoding_and_flat_output_paths(self):
+    def test_raw_bytes_flat_output_paths_and_stage_timings(self):
         declaration = config()
         for asset in declaration["dependencies"][0]["assets"]:
             platform = asset["platforms"][0]
-            asset["files"][0] = {"target": f"vendor/example-cli/{platform}.br", "encoding": "brotli"}
+            asset["files"][0] = {"target": f"vendor/example-cli/{platform}"}
         self.validate(declaration)
         source = self.source(declaration)
-        output = self.directory / "encoded.cindy"
+        output = self.directory / "raw.cindy"
         logs = io.StringIO()
-        with redirect_stdout(logs), patch.object(packager, "download", side_effect=lambda _, dest: dest.write_bytes(CONTENT)):
+        with redirect_stdout(logs), patch.object(packager, "download", side_effect=lambda _, dest: dest.write_bytes(CONTENT)), \
+                patch.object(packager.subprocess, "run", side_effect=AssertionError("Assembly must not invoke an encoder")):
             packager.assemble(source, output)
         events = [json.loads(line.removeprefix("[timing] ")) for line in logs.getvalue().splitlines()
                   if line.startswith("[timing] ")]
-        for stage in ("download_verify", "extract", "brotli", "zip_dependency"):
+        for stage in ("download_verify", "extract", "zip_dependency"):
             stages = [event for event in events if event["stage"] == stage]
             self.assertEqual(len(stages), 6)
             self.assertEqual([event["asset"] for event in stages], list(range(1, 7)))
         self.assertEqual(events[-1]["stage"], "assemble_total")
         self.assertTrue(all(event["status"] == "ok" and event["elapsed_s"] >= 0 for event in events))
         self.assertNotIn("https://", logs.getvalue())
-        expected = subprocess.check_output(["node", "-e",
-            "const z=require('node:zlib');process.stdout.write(z.brotliCompressSync(require('node:fs').readFileSync(0),"
-            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:9}}))"], input=CONTENT)
+        self.assertNotIn("brotli", {event["stage"] for event in events})
         with zipfile.ZipFile(output) as bundle:
             for platform in packager.PLATFORMS:
-                name = f"vendor/example-cli/{platform}.br"
-                self.assertEqual(bundle.read(name), expected)
-                decoded = subprocess.check_output(["node", "-e",
-                    "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(0)))"],
-                    input=bundle.read(name))
-                self.assertEqual(decoded, CONTENT)
+                name = f"vendor/example-cli/{platform}"
+                self.assertEqual(bundle.read(name), CONTENT)
+                self.assertEqual(bundle.getinfo(name).compress_type, zipfile.ZIP_DEFLATED)
                 self.assertEqual((bundle.getinfo(name).external_attr >> 16) & 0o777, 0o644)
         item = declaration["dependencies"][0]["assets"][0]["files"][0]
-        item["encoding"] = "shell"
-        with self.assertRaisesRegex(ValueError, "encodings"):
-            self.validate(declaration)
-        item.update(encoding="brotli", executable=True)
-        with self.assertRaisesRegex(ValueError, "not be marked executable"):
-            self.validate(declaration)
-        item.pop("executable")
-        item["target"] = "vendor/example-cli/darwin-x64.br"
+        item["target"] = "vendor/example-cli/darwin-x64"
         with self.assertRaisesRegex(ValueError, "conflicting"):
             self.validate(declaration)
+
+    def test_removed_encoding_is_rejected_before_download(self):
+        for encoding in ("brotli", "identity", "shell"):
+            with self.subTest(encoding=encoding):
+                declaration = config()
+                declaration["dependencies"][0]["assets"][0]["files"][0]["encoding"] = encoding
+                source = self.source(declaration)
+                with patch.object(packager, "download") as download, self.assertRaisesRegex(ValueError, "Expected fields"):
+                    packager.assemble(source, self.directory / "invalid.cindy")
+                download.assert_not_called()
 
     def test_timing_uses_monotonic_clock_and_reports_failure_without_exception_details(self):
         logs = io.StringIO()

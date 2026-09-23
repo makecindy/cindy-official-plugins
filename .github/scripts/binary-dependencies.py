@@ -148,10 +148,8 @@ def validate_config(raw, package_paths):
             require(asset["format"] != "file" or len(files) == 1, "A raw file has exactly one destination")
             sources = set()
             for item in files:
-                exact_keys(item, ("target",) if asset["format"] == "file" else ("source", "target"), ("executable", "encoding"))
+                exact_keys(item, ("target",) if asset["format"] == "file" else ("source", "target"), ("executable",))
                 require(type(item.get("executable", False)) is bool, "executable must be a boolean")
-                require(item.get("encoding", "identity") in ("identity", "brotli"), "Supported output encodings: identity, brotli")
-                require(item.get("encoding") != "brotli" or not item.get("executable", False), "Encoded data must not be marked executable")
                 target = safe_path(item["target"])
                 require(target.startswith(f"vendor/{name}/"), f"Dependency output must stay under vendor/{name}/")
                 add_path(destinations, target)
@@ -364,12 +362,6 @@ def assemble(source, destination):
                         with timed_stage("extract", **context):
                             files = selected_files(asset, archive, temp_path)
                         for item, file in files:
-                            if item.get("encoding") == "brotli":
-                                encoded = temp_path / (file.name + ".br")
-                                with timed_stage("brotli", **context, target=item["target"]):
-                                    subprocess.run(["node", str(Path(__file__).with_name("brotli-file.mjs")),
-                                                    str(file), str(encoded)], check=True, timeout=300)
-                                file = encoded
                             total += file.stat().st_size
                             count += 1
                             require(total <= (256 if node else 32) * MIB and count <= 256, "Collected files exceed plugin package limits")
