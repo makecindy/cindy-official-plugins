@@ -48,8 +48,12 @@ def timed_stage(stage, **context):
         status = "ok"
     finally:
         # Identifiers only: never print URLs, response bodies or exception text.
-        print("[timing] " + json.dumps({"stage": stage, **context, "status": status,
-                                       "elapsed_s": round(time.monotonic() - started, 3)}), flush=True)
+        try:
+            print("[timing] " + json.dumps({"stage": stage, **context, "status": status,
+                                           "elapsed_s": round(time.monotonic() - started, 3)}), flush=True)
+        except OSError:
+            # Optional timing output must not replace a stage's result or error.
+            pass
 
 
 def require(condition, message):

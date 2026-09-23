@@ -237,7 +237,7 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("https://", logs.getvalue())
         expected = subprocess.check_output(["node", "-e",
             "const z=require('node:zlib');process.stdout.write(z.brotliCompressSync(require('node:fs').readFileSync(0),"
-            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:11}}))"], input=CONTENT)
+            "{params:{[z.constants.BROTLI_PARAM_QUALITY]:9}}))"], input=CONTENT)
         with zipfile.ZipFile(output) as bundle:
             for platform in packager.PLATFORMS:
                 name = f"vendor/example-cli/{platform}.br"
@@ -269,6 +269,18 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(event, {"stage": "download_verify", "dependency": "fixture", "asset": 1,
                                  "status": "failed", "elapsed_s": 2.5})
         self.assertNotIn("private detail", logs.getvalue())
+
+    def test_timing_output_failure_preserves_stage_result_and_original_error(self):
+        for output_error in (BrokenPipeError("closed pipe"), OSError("output unavailable")):
+            with self.subTest(error=type(output_error).__name__), \
+                    patch("builtins.print", side_effect=output_error):
+                with packager.timed_stage("fixture"):
+                    pass
+                original = ValueError("original failure")
+                with self.assertRaises(ValueError) as raised:
+                    with packager.timed_stage("fixture"):
+                        raise original
+                self.assertIs(raised.exception, original)
 
     def test_final_package_resolves_collected_manifest_reference(self):
         source = self.source(config())
