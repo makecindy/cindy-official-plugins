@@ -1050,6 +1050,8 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     harness.nodeRequests[0].params.arguments.workdir,
     '/tmp/trusted-maker',
   );
+  assert.equal(harness.nodeRequests[0].timeoutMs, 120_000);
+  assert.equal(harness.nodeRequests[0].maxTotalMs, 900_000);
 
   const build = await harness.call('maker_build', {
     session_context: {
