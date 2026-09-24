@@ -26,6 +26,14 @@
 - 用户选择修改时，先展示当前状态、目标状态、该字段动态 `options` 和影响，并执行带最新 `expected`、稳定 `--idempotency-key` 的 `save-changes --dry-run`。用户明确确认后复用同一个 key，去掉 `--dry-run` 并追加 `--yes` 写入；成功后重新读取 `platform-status`。
 - 用户不修改时保留原值。执行 `submit-app-review --yes` 前必须再次读取 `platform-status`；若可见字段、当前值或 options 变化，废弃旧摘要并按最新结果重新确认。
 
+#### H5 开通 PC 分发入口
+
+H5 开通 PC 分发入口时按两阶段执行：
+
+1. 读取 `platform-status`。若 `app_platforms.current_value` 尚无 `PC_OFFICIAL`，构造新值时保留其中全部现有平台并追加 `PC_OFFICIAL`；不得替换成仅 PC，也不得加入 `PC_STEAM`。按普通字段流程 dry-run、确认、写入并立即重读。
+2. 只使用重读结果继续。仅当 `region_flag_pc` 已实际返回且其 `options` 包含 `4` 时，才以最新 `current_value` 作为 `expected` 写 `region_flag_pc=4`，完成后再次重读。若首次读取已经包含 `PC_OFFICIAL` 且 `region_flag_pc.options` 已含 `4`，可以直接执行本步骤。
+3. 不把 `app_platforms` 与尚不可见的 `region_flag_pc` 放在同一批写入，不硬编码 `4`；任一步返回的字段或 options 不符合上述条件都停止并报告。此流程只开启 PC 分发入口，不创建 Windows 包体槽；H5 包体继续使用 `package_slots.main`。
+
 三步：
 
 #### 步骤 ① `prepare-review-snapshot`

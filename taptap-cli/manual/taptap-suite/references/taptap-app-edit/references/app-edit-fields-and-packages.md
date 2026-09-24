@@ -97,7 +97,7 @@ payload 和 idempotency key，用户确认后必须原样执行该命令。apply
 - Tap 小游戏主包体使用 `slot:"main"` + `package.type:"mini_app"`；只有 APK 附加游玩方式使用 `apk_mini_game_play`。
 - TapTap 制造 / Spark 主包体使用 `slot:"main"` + `package.type:"spark"`；`+bind-spark-version` 只接受同次 Spark 候选的 `package_id` 作为 `version_code`，并在写前再次验证。Tap 小游戏使用独立 package ID，两者不能互换。
 - TapTap 制造 / Spark 包体由 [TapTap 制造](https://maker.taptap.cn/) 传入，CLI 不支持上传或更新；CLI 可把已存在且 ready 的 Spark 版本绑定到资料页主槽位。
-- H5 使用 `slot:"main"` + `package.type:"h5"`；ID 取 H5 版本 ID，`select-package` 的 package 严格只传 `type` 和 `id`，不得带入返回项中的 `h5Package`。H5 元数据仅用于本地 pending state / 提审 override。是否已绑定以 `package_slots.main.expected`（`kind:"h5"` + `h5_version_id`）为准，不要靠 form_data 里的判别字段推断。
+- H5 使用 `slot:"main"` + `package.type:"h5"`；即使开启 `PC_OFFICIAL` 也不得使用 `windows` 槽或调用 `upload-pc-package`。ID 取 H5 版本 ID，`select-package` 的 package 严格只传 `type` 和 `id`，不得带入返回项中的 `h5Package`。H5 元数据仅用于本地 pending state / 提审 override。是否已绑定以 `package_slots.main.expected`（`kind:"h5"` + `h5_version_id`）为准，不要靠 form_data 里的判别字段推断；若 `package_slots.windows` 带有历史绑定，只能按最新 `expected` 调 `clear-package` 清理。
 - Windows 使用 `select-package` / `clear-package`，不写 `save-changes.pc_package_id`。同时设置启动器包和游戏本体包时，每写一个 branch 后重新读取，再用最新 `expected` 写下一个。
 - APK 内部配置仍用 `save-changes`：先读 package 模块，再修改防沉迷、TapPlay 授权、更新日志、更新模式和活动关联等当前可见字段；支持语言当前不可编辑，默认 `zh_CN`。
 - 用户选择“未接入防沉迷”时写 `apk_anti_addiction_status=not-integrated`；工具会同步 `apk_sandbox_authorized=true`，回复中说明这是提审要求。

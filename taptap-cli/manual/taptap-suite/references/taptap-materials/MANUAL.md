@@ -55,7 +55,7 @@ game.zip
 1. 对图片、视频、APK、Windows、H5、Tap 小游戏,显式缺 `developerId` / `appId` 且当前 profile 也没有可用 saved scope 时,先转 identity 手册;六个 upload shortcut 都是 app-scope 写操作。
 2. 用 `materials +inspect` 的 manifest 或用户明确提供的单文件路径建立计划。目录或 zip 中的未知项、歧义项、多个视频和 Windows branch 先让用户确认。
 3. 对图片、视频、APK、Windows、H5、Tap 小游戏文件先执行同一 shortcut 的 dry-run。用户确认后,以同一文件、scope 和业务意图执行 `yes:true`,两次调用复用同一个 `idempotency_key`。六个 shortcut 都接受该 flag(省略时由 CLI 自动派生),但图片上传必须显式提供稳定 key。
-4. 图片、视频、APK、Windows、H5、Tap 小游戏只调用本部分的六个端到端 upload shortcut,不直接调用动态 OpenAPI 的 upload/complete/submit operation。单文件 shortcut 的输入是位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag;**不要传 `data`,不要手写 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete request body。**`file_size` 是字节大小,H5 的 `screen_orientation` 也是协议字段;这些字段由 CLI workflow 按当前 schema 生成和校验。
+4. 图片、视频、APK、Windows、H5、Tap 小游戏只调用本部分的六个端到端 upload shortcut,不直接调用动态 OpenAPI 的 upload/complete/submit operation。单文件 shortcut 的输入是位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag;**不要传 `data`,不要手写 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete request body。**`file_size` 是字节大小,H5 的 `screen_orientation` 也是协议字段;这些字段由 CLI workflow 按当前 schema 生成和校验。`<file>` 解析后必须落在当前工作目录内(相对路径或目录内绝对路径均可),目录外路径会被拒绝,此时先 `cd` 到素材所在目录再传相对路径。
 5. 成功以顶层 `ok=true` 或 exit code 0 判断;缺少 `yes` 的确认门禁是 exit code 10(插件返回 `CONFIRM_REQUIRED`);其它失败按返回的 error 停止和恢复,不把业务内字段当作成功。
 6. 单项部分失败时保留已返回的远端句柄,按文件记录结果。只重试没有远端句柄的失败项,不能整批重跑。H5 和 Tap 小游戏可用 `task +list|get|resume` 恢复已有任务;其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。不得重构 upload token。
 7. 大文件上传超时返回 `TIMEOUT` 时,加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令恢复;不要盲目重发完整上传。
@@ -80,7 +80,7 @@ dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5�
 
 **图片收录路径 — 本地图片走第一部分顶层 `upload` shortcut,成功即自动收录;服务端不再提供 URL 下载收录,已有 HTTPS 图片先由客户端下载到本地,再走 `upload`。**
 
-**视频收录路径 — `call_tool(name:"asset-library upload-video", …)` 一次完成「取上传 token → 直传 → 登记视频资源 → 登记应用素材」;上传后视频仍在转码/审核,用 `call_tool(name:"asset-library get-video-detail", …)` 轮询状态。**
+**视频收录路径 — `call_tool(name:"asset-library +upload-video", …)` 一次完成「取上传 token → 直传 → 登记视频资源 → 登记应用素材」;上传后视频仍在转码/审核,用 `call_tool(name:"asset-library get-video-detail", …)` 轮询状态。**
 
 **CRITICAL — 只有当前 `get-video-detail` 返回非空 `play_url` 才能证明视频可播;上传成功、转码中或审核中都不能表述为可播放。**
 
@@ -96,8 +96,8 @@ dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5�
 
 开始补充素材前,先询问用户是否有可用的本地素材或真实游戏截图;在用户回答前,不要调用生图计划或扫描未指定的本地目录。
 
-- 用户有本地素材时,优先使用用户提供的文件。按目标场景执行本地校验,需要整理时只做该场景允许的裁剪、缩放、格式转换或压缩,不调用 `+plan` 替换原始素材。校验通过后仍须询问用户是否上传。
-- 用户没有本地素材时,图标、宣传图和 Windows 素材才进入模型生图流程:先调用 `asset-library ai-image +rules`,再根据规则调用 `+plan`,由模型生成实际本地图片文件并执行 `+validate`。
+- 用户有本地素材时,优先使用用户提供的文件。按目标场景执行本地校验,需要整理时只做该场景允许的裁剪、缩放、格式转换或压缩,不调用 `+ai-image-plan` 替换原始素材。校验通过后仍须询问用户是否上传。
+- 用户没有本地素材时,图标、宣传图和 Windows 素材才进入模型生图流程:先调用 `asset-library +ai-image-rules`,再根据规则调用 `+ai-image-plan`,由模型生成实际本地图片文件并执行 `+ai-image-validate`。
 - 用户没有本地截图时,不得调用模型生成截图;应要求用户提供真实运行中的游戏画面或真实截图。
 
 可向用户询问:
@@ -110,11 +110,11 @@ dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5�
 | --- | --- |
 | 为一个或多个场景找参考图 | `asset-library search-assets`(`target_scenes` 数组) |
 | "换一张参考图" | `asset-library search-assets` 并传 `exclude_asset_ids` |
-| 使用模型生成新图 | `asset-library ai-image +rules/+plan/+validate`(不含截图) |
-| 整理真实游戏截图 | 模型处理用户/游戏提供的原图,再用 `+validate --rule screenshot` |
+| 使用模型生成新图 | `asset-library +ai-image-rules/+ai-image-plan/+ai-image-validate`(不含截图) |
+| 整理真实游戏截图 | 模型处理用户/游戏提供的原图,再用 `+ai-image-validate --rule screenshot` |
 | 收录本地图片 | 第一部分顶层 `upload` shortcut |
 | 收录已有 HTTPS 图片 | 先由客户端下载到本地,再走第一部分 `upload` |
-| 收录本地视频 | `asset-library upload-video`(上传+登记一步完成) |
+| 收录本地视频 | `asset-library +upload-video`(上传+登记一步完成) |
 | 查视频转码/审核状态 | `asset-library get-video-detail` |
 | 把图片写入资料字段 | 先收录,再转 app-edit 手册 |
 
@@ -122,11 +122,11 @@ dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5�
 
 ```text
 call_tool(name:"asset-library search-assets", args:{dev_id, app_id, data:{target_scenes:["icon"]}})
-call_tool(name:"asset-library upload-video", args:{_positional:["./trailer.mp4"], dev_id, app_id, idempotency_key, yes:true})
+call_tool(name:"asset-library +upload-video", args:{_positional:["./trailer.mp4"], dev_id, app_id, idempotency_key, yes:true})
 call_tool(name:"asset-library get-video-detail", args:{dev_id, app_id, data:{video_id:<videoId>}})
-call_tool(name:"asset-library ai-image +rules", args:{dev_id, app_id})
-call_tool(name:"asset-library ai-image +plan", args:{dev_id, app_id, rule:"<rule>", prompt:"<creative brief>", context:"<game context>", count:3})
-call_tool(name:"asset-library ai-image +validate", args:{dev_id, app_id, _positional:["<output-dir>"], rule:"<rule>"})
+call_tool(name:"asset-library +ai-image-rules", args:{dev_id, app_id})
+call_tool(name:"asset-library +ai-image-plan", args:{dev_id, app_id, rule:"<rule>", prompt:"<creative brief>", context:"<game context>", count:3})
+call_tool(name:"asset-library +ai-image-validate", args:{dev_id, app_id, _positional:["<output-dir>"], rule:"<rule>"})
 ```
 
 ### 视频收录
@@ -134,7 +134,7 @@ call_tool(name:"asset-library ai-image +validate", args:{dev_id, app_id, _positi
 视频进素材库分两步(建「视频资源」+ 建「应用素材」),`upload-video` 一次跑完:
 
 ```text
-call_tool(name:"asset-library upload-video", args:{_positional:["./trailer.mp4"], dev_id, app_id, idempotency_key, yes:true})
+call_tool(name:"asset-library +upload-video", args:{_positional:["./trailer.mp4"], dev_id, app_id, idempotency_key, yes:true})
 ```
 
 返回 `data.videoId` 与 `data.assetId`。同一 `videoId` 重复执行返回既有 `assetId`,不会重复登记;不传 `idempotency_key` 时 CLI 按文件 SHA256 派生,重跑不会重复上传。
@@ -151,10 +151,10 @@ call_tool(name:"asset-library get-video-detail", args:{dev_id, app_id, data:{vid
 
 确认用户没有可用本地素材后,模型生成真实图片文件,CLI 负责读取规则并校验产物。
 
-只对图标、宣传图和 Windows 素材生图;截图不得由模型生成。规则读取、`+plan` 输出目录约定、`+validate` 和 `manifest.json` 语义见 [asset library ingest](taptap-suite/references/taptap-materials/references/asset-library-ingest.md),本手册不重复。开始生成前第一步是读取当前内置规则:
+只对图标、宣传图和 Windows 素材生图;截图不得由模型生成。规则读取、`+ai-image-plan` 输出目录约定、`+ai-image-validate` 和 `manifest.json` 语义见 [asset library ingest](taptap-suite/references/taptap-materials/references/asset-library-ingest.md),本手册不重复。开始生成前第一步是读取当前内置规则:
 
 ```text
-call_tool(name:"asset-library ai-image +rules", args:{dev_id, app_id})
+call_tool(name:"asset-library +ai-image-rules", args:{dev_id, app_id})
 ```
 
 校验通过只代表本地文件合格,仍须用户确认后才转第一部分 `upload` 上传。
@@ -168,7 +168,7 @@ call_tool(name:"asset-library ai-image +rules", args:{dev_id, app_id})
 - 业务结果按 `results[]` / `missing[]` 解释;某场景无候选出现在 `missing[]` 不是工具失败。顶层 `ok=false` 时按 `error.type` / `error.subtype` 处理。`searchAssets` 没有通用的 `data.result.ok`;缺少预期结果字段按异常处理。
 - 上游返回 `recoverable=true` 时,使用 `reason` 解释原因,并按 `guidance` 给出重试、调整参数或刷新登录等下一步。
 - 面向用户说明可用性、匹配结果和下一步,不默认输出 raw JSON、候选评分、内部 ID 或状态数字。
-- `+validate` 成功只代表本地文件通过机器校验,不代表已上传、已写入资料字段或已通过审核。用户未明确确认上传时,必须保留"待确认上传"提示。
+- `+ai-image-validate` 成功只代表本地文件通过机器校验,不代表已上传、已写入资料字段或已通过审核。用户未明确确认上传时,必须保留"待确认上传"提示。
 - 上传出现未知结果、响应结构错误或请求已发出但客户端未确认时,先用相同幂等键回读素材库状态,再决定是否重试;不得直接换新幂等键重放。
 - 素材收录完成后,若用户意图是更新资料字段,转 app-edit 手册,按目标字段规格 read-before-write。
 
