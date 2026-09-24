@@ -27,19 +27,19 @@
 - 不得根据文字描述生成新的游戏截图。
 - 截图源必须是实际运行中的游戏画面或用户提供的真实游戏截图。
 - 模型只能进行裁剪、缩放、格式转换和压缩等整理操作。
-- 截图整理使用 `+validate --rule screenshot`，不得使用 `+plan --rule screenshot`。
+- 截图整理使用 `+ai-image-validate --rule screenshot`，不得使用 `+ai-image-plan --rule screenshot`。
 
 先读取规则并生成计划：
 
 ```text
-call_tool(name:"asset-library ai-image +rules")
-call_tool(name:"asset-library ai-image +plan", args:{rule:"<rule>", prompt:"<creative brief>", context:"<game context>", count:3})
+call_tool(name:"asset-library +ai-image-rules")
+call_tool(name:"asset-library +ai-image-plan", args:{rule:"<rule>", prompt:"<creative brief>", context:"<game context>", count:3})
 ```
 
-默认输出根目录为 `.taptap/ai-image/<run-id>`，`candidates/` 是 CLI 约定的本地候选文件子目录，不是 TapTap 官方目录，也不是素材库接口要求。模型必须把实际 PNG/JPEG 文件写入计划指定的 `<output-dir>/candidates/` 目录。可用 `+plan --output-dir <directory>` 定制输出根目录；该目录须通过 CLI 的本地安全路径校验，不能借此写入工作目录之外的路径。生成后对同一个输出根目录执行：
+默认输出根目录为 `.taptap/ai-image/<run-id>`，`candidates/` 是 CLI 约定的本地候选文件子目录，不是 TapTap 官方目录，也不是素材库接口要求。模型必须把实际 PNG/JPEG 文件写入计划指定的 `<output-dir>/candidates/` 目录。可用 `+ai-image-plan --output-dir <directory>` 定制输出根目录；该目录须通过 CLI 的本地安全路径校验，不能借此写入工作目录之外的路径。生成后对同一个输出根目录执行：
 
 ```text
-call_tool(name:"asset-library ai-image +validate", args:{_positional:[".taptap/ai-image/<run-id>"], rule:"<rule>"})
+call_tool(name:"asset-library +ai-image-validate", args:{_positional:[".taptap/ai-image/<run-id>"], rule:"<rule>"})
 ```
 
 校验成功会写出本地 `manifest.json`，其中包含候选文件、规则结果、`upload_pending=true` 和完整的 `upload` 调用参数。校验失败返回验证失败退出码，不写 manifest，不上传；必须先让用户确认候选图和上传意图，确认后转 materials 手册第一部分执行上传。校验结果中的候选路径、尺寸、格式、文件大小和 `upload_command` 是后续交接依据；CLI 只提示上传命令，不自动上传、不写入资料字段、不绑定字段、不提审。

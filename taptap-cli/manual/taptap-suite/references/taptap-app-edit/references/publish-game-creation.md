@@ -181,7 +181,7 @@ H5 路径说明：
 创建前判断和候选整理由当前 Agent 与剩余确定性读取能力共同完成：
 
 - 有旧入口参数或用户目标不清时，忽略入口 ID 的历史语义，按“游戏名称 → 游戏类型 → 包体方向”逐项向用户确认，不猜发布意图。
-- 有上传包体时可用 `app check-package-metadata` 辅助判断包体方向；有图片时先用宿主视觉判断用途，再用 `app check-image-spec` 推荐字段并查看规格提示。模糊或低置信度候选必须让用户确认。
+- 有上传包体时先用 `call_tool(name:"materials +inspect", args:{_positional:["<目录或压缩包>"]})` 盘点并判断包体方向；有图片时只做宿主视觉用途判断。创建前还没有 `appId`，不得读取字段级动态规格（`app get-app-module` 是 app-scoped 的）：按[游戏物料要求](taptap-suite/references/material-requirements.md)「没有 `appId`」口径只说明通常需要的素材并提供官方指南，不给固定尺寸表；逐项 `image_spec` / `video_spec` 核对放到创建成功后的 `taptap-app-edit` handoff。模糊或低置信度候选必须让用户确认。
 - 对补充说明或文案文件，只生成 `title`、`description`、`developer_message`、`promotion_text`、`category`、`age_grade`、`developer_type` 候选，并说明来源和置信度。创建所需的名称、类型和包体方向仍要逐项确认；一句话推荐语最终由 `taptap-app-edit` 写入「首页推荐语」。
 - Agent 直接对照当前创建目标、包体、图片和文案清单报告材料缺口；候选不代表已经创建游戏。只有用户确认的创建字段可以写入请求，创建后的资料字段补全统一转入 `taptap-app-edit`。
 - 当前 metadata 已禁用 `get-compliance-status`；真实资质检查在创建后转 `taptap-qualification`。

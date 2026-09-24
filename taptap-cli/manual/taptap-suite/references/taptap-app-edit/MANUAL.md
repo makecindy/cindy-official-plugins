@@ -79,6 +79,7 @@
 | --- | --- |
 | "还差什么 / 能不能提审" | 读取模块、包体、版本、资质和历史审核后生成分层风险清单(读 skill analysis 与 review risk checklist) |
 | 查字段、选项、图片/视频规格 | `call_tool(name:"app get-app-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
+| 为 H5 开启 PC 分发(`platform-status`、`region_flag_pc`) | 读模块 → 保留全部现有平台并追加 `PC_OFFICIAL` → 写后立即重读 → 仅当 `region_flag_pc` 已实际返回且 `options` 含 `4` 时才按最新 `expected` 写入;H5 不得使用 `windows` 槽 |
 | 改文字、图片、视频等普通字段 | 读模块详情,带最新 `expected` 调 `app save-changes` |
 | 切换或清空主包体 / Windows 包体 | `app list-packages` → `app select-package` / `app clear-package` |
 | 按 Spark version_code 绑定资料页主包体 | `app list-packages` → `app +bind-spark-version` dry-run → 确认后 apply |

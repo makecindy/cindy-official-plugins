@@ -22,7 +22,7 @@
 - `AppEditSnapshot.latestTwo`（只含最新 published + unpublished 两条用于编辑现场）正交：历史查询是**回溯**视角，lifecycle 写动作面向**当前 unpublished**，字段编辑工具读写的是当前 unpublished 上的字段。
 
 ### Module / Field
-资料按 9 个 module 分组（中文标题与 taptap-cli `MODULE_TITLES` 真值对齐，也是 save-changes 确认摘要标题）。每个 module 有若干 field：
+资料按 9 个 module 分组。每个 module 有若干 field：
 
 | module_id | 中文 | 主要 field |
 |---|---|---|
@@ -45,16 +45,16 @@
 - **分发状态（`region_flag_*`）**：可选值由「分发类型 × 平台 × 门槛」决定，一律以字段当次返回的 `options` / `value_labels` 为准，不要硬套「0=正式上线 / 4=开放试玩」。`app_platforms` / `itunes_id` / `steam_id` 不是分发状态入口。
   - **可见性**：含移动端平台才见 `region_flag_android` / `region_flag_ios`；含 Windows 包体槽才见 `region_flag_pc`。
   - **普通游戏**：android / pc 需已通过版号（`game-license` approved）或非游戏应用才可选「0 正式上线」，否则只能「4 开放试玩」；iOS 需 Apple ID 且 AppStore 已开放才可选 0（小游戏包豁免 Apple ID）。
-  - **关卡（H5 / spark）**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。
+  - **H5 / Spark**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。H5 完成备案、`isLevel` 状态变化后仍保持此规则；H5 的 PC 平台只允许 `PC_OFFICIAL`，不允许 `PC_STEAM`，PC 状态不允许 `0`。
   - **应用拉起型关卡**：仅 `[1,0]`（PC 不支持时无选项）；**未知分发类型**：仅 `[1]`。
   - 用户说「正式上线」但无版号时，落到「开放试玩」或提示不可选，先引导补版号，不要硬写 0。
-- **游戏类型维度**：关卡游戏（TapTap 制造）的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏豁免 Windows 包体与 PC 系统配置，但选择 PC 平台后仍展示 Windows 图片素材，其中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填；且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
+- **游戏类型维度**：关卡游戏（TapTap 制造）的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏和 H5 PC 分发豁免 Windows EXE、启动器、PC 防沉迷、Windows 更新日志与 PC 系统配置；选择 PC 平台后仍以接口返回为准处理 Windows 图片素材。TapMaker / urhox 中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填，且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
   - 「关卡游戏」与「TapMaker / urhox」可能同时成立并驱动不同豁免——不要自己给游戏归类，以各模块当次返回的字段 `visible` / `required` 为准。
 - **包体状态维度**：PC 防沉迷状态 / PC 更新日志仅在已选 PC（EXE）包体时可见；根级上线方式优先读写 `release_schedule`，旧 `release_time` 仅 `release_method=1`（定时上线）时可见。
 
 **Windows 系统配置要求**（`windows-exclusive` 的 `min_*` / `rec_*` 系列，共 16 个字段）：
 - 分「最低配置」（`min_*`）与「推荐配置」（`rec_*`）两组，各 8 个字段：`os`（操作系统，select）、`processor`（处理器，text）、`memory`（内存，size）、`graphics`（显卡，text）、`storage`（存储空间，size）、`directx`（DirectX 版本，select）、`sound_card`（声卡，text）、`notes`（备注，textarea）。
-- 可见性：非 TapMaker、非关卡、有 Windows 包体槽时才展示。必填：最低配置前 5 项（`min_os`/`min_processor`/`min_memory`/`min_graphics`/`min_storage`）在「有 PC 包体」时 required，其余（最低配置的 directx/声卡/备注 + 全部推荐配置）选填。
+- 可见性：非 TapMaker、非关卡、非 H5 PC 分发且有 Windows 包体槽时才展示。必填：最低配置前 5 项（`min_os`/`min_processor`/`min_memory`/`min_graphics`/`min_storage`）在「有 PC 包体」时 required，其余（最低配置的 directx/声卡/备注 + 全部推荐配置）选填。
 - 写入用 `save-changes`（字段名 `min_os` / `rec_os` 等）；`os` / `directx` 的可选值以字段返回的 `options` / `value_labels` 为准。`memory` / `storage` 是 size，value 是字符串如 `4GB` / `512MB`（数字 + 单位 KB/MB/GB/TB，1~2048，单位大小写不敏感、会规范化为大写）；`processor` / `graphics` / `sound_card` 是文本型号；`notes` 是多行备注。
 - **预设模板（web 端同款，用户没给具体型号时可直接套用）**：
   - **独立游戏**：最低 Win10 64位 / Intel i5-4460 / 8GB / GTX 750 Ti / 10GB / DX11；推荐 i5-8400 / 16GB / GTX 1060 / 20GB / DX11。
@@ -121,10 +121,10 @@ Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是
 - Android APK：`{"slot":"main","package":{"type":"apk","id":"<apk-id>"},"expected":<current-main>}`
 - Tap 小游戏主包体：`{"slot":"main","package":{"type":"mini_app","id":"<mini-app-package-id>"},"expected":<current-main>}`
 - TapTap 制造 / Spark：`{"slot":"main","package":{"type":"spark","id":"<spark-version-code>"},"expected":<current-main>}`。`<spark-version-code>` 取同次 `list-packages(["spark"])` 中 `status=ready` 候选的 `package_id`，并由 `+bind-spark-version` 在写前重查。
-- H5：`{"slot":"main","package":{"type":"h5","id":"<h5-version-id>"},"expected":<current-main>}`
+- H5：`{"slot":"main","package":{"type":"h5","id":"<h5-version-id>"},"expected":<current-main>}`；即使已开启 `PC_OFFICIAL` 也不得改用 `windows` 槽。
 - Windows：`{"slot":"windows","package":{"type":"windows","id":"<package-id>","branch":<optional-branch>},"expected":<current-windows>}`
 
-主包体的 APK、Tap 小游戏、Spark 和 H5 四选一；写入任一主包体会清空其它主包体判别字段。当前 schema 声明 `package_slots` 时，APK、Tap 小游戏、Spark、H5 和 Windows 可按该契约执行；未声明时停止绑定（契约见 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)）。Spark 额外要求同次 ready 候选、稳定 idempotency key 和写后读回。`package` 中不要使用旧的 `kind`、`apkId`、`miniAppPackageId`、`spark_version_code`、`h5VersionId` 或 `h5Package` 字段。APK 的「提供 Tap 小游戏游玩方式」使用独立 `slot:"apk_mini_game_play"`，不能混入 `slot:"main"` 的 package。
+主包体的 APK、Tap 小游戏、Spark 和 H5 四选一；写入任一主包体会清空其它主包体判别字段。当前 schema 声明 `package_slots` 时，按各槽位当次返回的 `available` 执行；H5 的 `package_slots.windows.available=false`，只使用 `main/h5`，如存在历史 Windows 绑定只允许通过 `clear-package` 清理。未声明槽位时停止绑定（契约见 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)）。Spark 额外要求同次 ready 候选、稳定 idempotency key 和写后读回。`package` 中不要使用旧的 `kind`、`apkId`、`miniAppPackageId`、`spark_version_code`、`h5VersionId` 或 `h5Package` 字段。APK 的「提供 Tap 小游戏游玩方式」使用独立 `slot:"apk_mini_game_play"`，不能混入 `slot:"main"` 的 package。
 
 Windows 包体候选可通过 `list-packages` 的 `list` 读取，类型值为 `windows`，候选项可包含 `branch`。当前 schema 声明 `package_slots.windows` 时，写入前原样回传其中的 `expected`；字段未声明时按包体槽位契约停止。不要把候选 `package_id` 当作槽位当前值，也不要自行补 branch。
 
