@@ -68,9 +68,8 @@ target before running a command. Do not delete all of vendor or unrelated depend
    Do not rewrite Git history; this does not shrink past commits.
 4. Keep all six platform outputs locally, matching declared paths, bytes and modes.
    Inspect upstream archives and copy only selected regular files; keep downloads,
-   temporary archives and unrelated files outside the plugin directory. Brotli
-   encoding is optional; if selected, local outputs must use the same encoding,
-   not raw executable bytes masquerading as encoded data.
+   temporary archives and unrelated files outside the plugin directory. Selected
+   files retain their original bytes; only the final `.cindy` ZIP compresses them.
 5. Use `ghost_forge_pack` on the prepared directory, or a reviewed explicit file
    list, for local debugging. Include `ghost.json`, code, resources, dependency
    declaration, licenses and all outputs, plus the repository's `LICENSE`, `NOTICE`,
@@ -121,8 +120,8 @@ dependencies into the package. User devices never fill in missing dependencies.
 
 ## Optional: reproduce the repository build locally
 
-Only local CI reproduction needs Git, Bash, jq, unzip and Python 3.11+; Brotli
-encoding also needs Node. Existing Node validation/test commands retain their own
+Only local CI reproduction needs Git, Bash, jq, unzip and Python 3.11+.
+Existing Node validation/test commands retain their own
 Node requirements; Python is not a prerequisite for every author's development.
 Cindy's bundled plugin runtime does not mean system Node/npm or Python is installed.
 
@@ -198,12 +197,15 @@ templates, shell expansions or glob patterns; single-platform plugins remain uns
   Nothing may overwrite committed files
   or another output. `executable: true` writes mode 0755; otherwise 0644.
   The adapter must handle the client's existing extraction/execution behavior.
-- Optional `encoding: "brotli"` encodes the selected file using the repository's
-  Node built-in Brotli encoder (quality 11, a five-minute limit per file).
-  Omit it or use `"identity"` to copy bytes unchanged. Encoded output is data,
-  cannot be marked executable, and must be decoded by the plugin at runtime.
-  This is a fixed data transformation, not an author script or build hook.
-  Input bounds remain in force; package limits count the encoded files actually shipped.
+- Selected files retain their original bytes inside the `.cindy` ZIP. The
+  collector performs no additional encoding and does not accept an `encoding`
+  field. Compression belongs to the installation archive, not the plugin adapter.
+  The shared collector verifies upstream downloads against the declared `sha256`;
+  package integrity verification belongs to the shared distribution and client
+  installation flow. Plugins should not add duplicate runtime hash checks for
+  bundled binaries. The adapter selects and invokes the platform binary, handling
+  the client's existing execution behavior. Shared download and package checks
+  remain in place; expanded limits count the original selected files.
 - Paths are relative and cross-platform safe. Traversal, links, special files,
   duplicate/case-conflicting entries and encrypted ZIPs are rejected. Archives
   are inspected without extracting their supplied paths into the workspace.
@@ -291,6 +293,14 @@ Common failures:
 
 ## Limits and failure behavior
 
+The collector prints `[timing]` JSON lines for `source_archive`, `download_verify`
+(network transfer and SHA-256 verification), `extract`, `zip_source`,
+`zip_dependency`, `validate_package`, `assemble_total` and `package_total`.
+Each record includes monotonic `elapsed_s` and `status` (`ok` / `failed`), plus
+dependency/asset/file identifiers where applicable; URLs and response bodies are
+not logged. Total stages include their child stages: do not add totals to the
+per-stage durations. Timings are logs only and do not enter the package.
+
 Delivery limits: up to 256 ZIP entries; Node packages
 up to 128 MiB compressed and 256 MiB expanded, other packages up to 8 MiB compressed and 32 MiB
 expanded. These limits include all platforms and existing plugin contents. A
@@ -313,6 +323,14 @@ up, and an existing output is replaced only after successful assembly.
 Plugins without a declaration do not download anything and retain the original
 `git archive` bytes. Plugin source and dependency declarations come from committed
 `HEAD`; fixed repository legal documents are added as before.
+
+Previously published packages are self-contained and remain usable; removing
+Brotli from the collector does not rewrite packages in OSS or on user devices.
+Historical source declaring `encoding` cannot be rebuilt with this collector.
+If that source is ever updated and repackaged, remove the field and update its
+output paths and adapter to consume raw files in the same plugin release. Do not
+silently copy raw bytes to paths whose adapter expects Brotli, or mass-repackage
+unmigrated historical source.
 
 PR CI limits directly tracked binary content to **10 MiB combined per plugin**:
 - Count every tracked binary path in that plugin, including unchanged files,
@@ -350,7 +368,7 @@ claim of universal language superiority:
 
 - Python's standard library covers downloading, SHA and ZIP/tar; reuse the existing
   implementation and regression coverage. The repository already had Python
-  packaging scripts. Optional Brotli uses a fixed Node built-in module, not author hooks.
+  packaging scripts. No additional encoder or author hooks are needed.
 - Node aligns with JS code, but under the current version/requirements needs archive
   dependencies or system tools. npm/pnpm manage dependencies/scripts, not the
   collector itself; not every author can be assumed to have them installed.
