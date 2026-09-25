@@ -110,6 +110,9 @@ async function prepareMailAttachments(args, callId) {
     // The grant protocol omits extensions. A supplied media URL avoids probing;
     // otherwise look up this granted hash in the Host's supported media types.
     for (var ext of preferred[hash] ? [preferred[hash]] : extensions) {
+      // Same-origin Host protocol, not an external network request.
+      // serveGhostMedia checks ghostCanRead (including ghost-tool-grant) before
+      // reading bytes. The HTTPS bridge is not used for this local protocol.
       response = await fetch('/media/' + hash + '.' + ext);
       if (response.ok) { extension = ext; break; }
       if (response.status !== 404) throw new Error('Unable to read chat attachment; check the plugin media service.');

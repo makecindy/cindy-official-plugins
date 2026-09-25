@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { brotliDecompressSync } from 'node:zlib';
 import test from 'node:test';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -29,8 +28,8 @@ test('Gmail declares all pinned gog assets without tracking payloads', () => {
     const key = platform.replace('x64', 'amd64');
     assert.equal(asset.sha256, release.assets[key]);
     assert.equal(asset.sha256, binaries[key].releaseSha256);
-    assert.equal(asset.files[0].target, `vendor/gog/${key}.br`);
-    assert.equal(asset.files[0].encoding, 'brotli');
+    assert.equal(asset.files[0].target, `vendor/gog/${key}${key.startsWith('windows-') ? '.exe' : ''}`);
+    assert.equal(Object.hasOwn(asset.files[0], 'encoding'), false);
   }
 });
 
@@ -55,7 +54,7 @@ test('Gmail source → real downloads → package → native worker schema', {
   }
   git('add', '.'); commit();
   execFileSync('node', [path.join(root, '.github/scripts/check-source-size.mjs'), base], { cwd: fixture, stdio: 'inherit' });
-  const output = path.join(directory, 'google-gmail-1.3.1.cindy');
+  const output = path.join(directory, 'google-gmail-' + json('ghost.json').version + '.cindy');
   console.log(`Gmail smoke output: ${output}`);
   execFileSync('bash', [path.join(root, '.github/scripts/package-plugin.sh'), 'google-gmail', output], {
     cwd: fixture, stdio: 'inherit', timeout: 1_700_000,
@@ -63,9 +62,8 @@ test('Gmail source → real downloads → package → native worker schema', {
   const unzipped = path.join(directory, 'unpacked');
   execFileSync('unzip', ['-q', output, '-d', unzipped]);
   for (const [key, expected] of Object.entries(binaries)) {
-    const compressed = fs.readFileSync(path.join(unzipped, 'vendor/gog', `${key}.br`));
-    assert.equal(digest(compressed), expected.compressedSha256, key);
-    assert.equal(digest(brotliDecompressSync(compressed)), expected.sha256, key);
+    const bytes = fs.readFileSync(path.join(unzipped, 'vendor/gog', key + (key.startsWith('windows-') ? '.exe' : '')));
+    assert.equal(digest(bytes), expected.sha256, key);
   }
   const worker = spawn(process.execPath, [path.join(unzipped, 'node/gog.cjs')], { stdio: ['pipe', 'pipe', 'pipe'] });
   const closed = once(worker, 'close');

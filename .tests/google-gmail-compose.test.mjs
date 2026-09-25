@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createContext, runInContext } from 'node:vm';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -134,6 +135,55 @@ test('explicit inline send builds one raw RFC822 message and keeps the thread id
   assert.ok(raw.includes(image.toString('base64')));
   assert.ok(argv.includes('--thread-id=thread-original'));
   assert.equal(argv.some(arg => arg.startsWith('--body')), false);
+});
+
+test('mixed inline send round-trips international headers and every attachment through an independent MIME parser', async t => {
+  const other = Buffer.from('second granted image');
+  const otherHash = createHash('sha256').update(other).digest('hex');
+  const f = fixture(t, { media: async resource => {
+    const bytes = resource === `/media/${hash}.jpg` ? image : resource === `/media/${otherHash}.jpg` ? other : null;
+    return new Response(bytes, { status: bytes ? 200 : 404, headers: { 'Content-Type': 'image/jpeg' } });
+  } });
+  const invoice = Buffer.from('synthetic invoice');
+  fs.writeFileSync(path.join(f.workdir, '账单.pdf'), invoice);
+  const subject = '中文日本語한국어照片😀'.repeat(12);
+  const result = await f.run({ command: ['send'], arguments: [], attachments: [hash, otherHash], options: {
+    from: '发送人 <self@example.test>', to: '"王, 小明" <recipient@example.test>, Second <second@example.test>',
+    cc: '抄送 <cc@example.test>', bcc: '密送 <bcc@example.test>', 'reply-to': '回复 <reply@example.test>',
+    subject, body: '请看附件', 'body-html': '<p>请看附件</p><img src="cid:img1@cindy.local">',
+    attach: ['账单.pdf'], 'inline-images': [hash],
+  } });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const filename = f.calls[0][0].find(arg => arg.startsWith('--raw-file=')).slice('--raw-file='.length);
+  const parsed = JSON.parse(execFileSync('python3', ['-c', `
+import email, email.policy, json, sys, base64
+with open(sys.argv[1], 'rb') as f: msg = email.message_from_binary_file(f, policy=email.policy.default)
+print(json.dumps({'subject': str(msg['Subject']), 'headers': {k: str(msg[k]) for k in ['From','To','Cc','Bcc','Reply-To']},
+ 'parts': [{'type': p.get_content_type(), 'name': p.get_filename(), 'cid': p['Content-ID'], 'data': base64.b64encode(p.get_payload(decode=True)).decode()} for p in msg.walk() if not p.is_multipart()],
+ 'defects': [str(d) for p in msg.walk() for d in p.defects]}))
+`, filename], { encoding: 'utf8' }));
+  assert.equal(parsed.subject, subject);
+  assert.match(parsed.headers.From, /发送人 <self@example.test>/);
+  assert.match(parsed.headers.To, /王, 小明/);
+  assert.match(parsed.headers.To, /second@example.test/);
+  for (const [key, name] of [['Cc', '抄送'], ['Bcc', '密送'], ['Reply-To', '回复']]) assert.ok(parsed.headers[key].includes(name));
+  assert.deepEqual(parsed.defects, []);
+  assert.equal(parsed.parts.length, 5);
+  assert.equal(parsed.parts.find(p => p.name === '账单.pdf').data, invoice.toString('base64'));
+  assert.equal(parsed.parts.find(p => p.cid === '<img1@cindy.local>').data, image.toString('base64'));
+  assert.ok(parsed.parts.some(p => p.data === other.toString('base64')));
+});
+
+test('inline sends reject unsupported flags, header injection and invalid attachment paths before sending', async t => {
+  for (const extra of [{ quote: true }, { 'raw-file': 'other.eml' }, { subject: 'Subject\r\nBcc: extra@example.test' }, { attach: ['../outside.pdf'] }]) {
+    const f = fixture(t);
+    const result = await f.run({ command: ['send'], arguments: [], attachments: [hash], options: {
+      from: 'self@example.test', to: 'recipient@example.test', subject: 'Photo', body: 'See image',
+      'body-html': '<img src="cid:img1@cindy.local">', 'inline-images': [hash], ...extra,
+    } });
+    assert.equal(result.ok, false);
+    assert.equal(f.calls.length, 0);
+  }
 });
 
 test('draft commands reject new inline images before any Gmail write', async t => {

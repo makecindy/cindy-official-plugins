@@ -31,6 +31,14 @@ Optionally also put the exact cindy-media://blobs/<hash>.<ext> URL in options.at
 
 An image ATTACHMENT is not an INLINE image. This bridge adds normal file attachments. Existing quoted/forwarded inline resources are handled by bundled gog; readBack reports Content-ID and disposition when present. Draft commands still cannot create a new CID image. For an explicitly authorized immediate send, pass inline-images with the same granted hashes, body-html referencing cid:img1@cindy.local in that order, and thread-id when replying. The worker builds one RFC822 message and uses send --raw-file. This path sends immediately and cannot save a preview draft. Do not claim a new image is embedded because HTML contains an img tag or the attachment exists, and do not send local cindy-media URLs as HTML image sources. Preserve both body and body-html when formatting matters; a body summary alone loses original invoice links and layout.
 
+Inline sends require explicit from, to, subject, body and body-html. Headers support
+international subjects and display names (including quoted names containing commas);
+use ASCII mailbox addresses, optionally as Name <address>, separated by commas.
+Optional cc, bcc, reply-to, in-reply-to, references, thread-id and attach are preserved.
+Regular local files and other granted chat attachments are included alongside inline
+images. Other options are rejected before sending instead of being silently discarded;
+for quoting, provide the complete intended body and reply headers yourself.
+
 ## Forward originals and send the approved draft
 
 For invoices use ["drafts","forward"] with the original message ID and the user's recipients; its note flag adds an introduction while gog keeps original content and attachments. Do not use skip-attachments unless requested. Do not reconstruct a forward from a summary, stripped text or a Fwd: subject. If there are several recipient rules, apply them per message and check To/Cc/Bcc in each saved draft.

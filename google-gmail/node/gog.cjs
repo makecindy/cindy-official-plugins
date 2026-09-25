@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const zlib = require('node:zlib');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const SERVICE = 'gmail';
@@ -25,9 +24,7 @@ function initialize() {
   const key = platform + '-' + arch;
   const expected = binaries[key];
   if (!expected) throw new Error('Unsupported operating system or architecture');
-  const compressed = fs.readFileSync(path.join(root, 'vendor/gog', key + '.br'));
-  if (digest(compressed) !== expected.compressedSha256) throw new Error('Bundled gog checksum mismatch');
-  const bytes = zlib.brotliDecompressSync(compressed, { maxOutputLength: 128 * 1024 * 1024 });
+  const bytes = fs.readFileSync(path.join(root, 'vendor/gog', key + (platform === 'windows' ? '.exe' : '')));
   if (digest(bytes) !== expected.sha256) throw new Error('Bundled gog executable checksum mismatch');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-gog-'));
   fs.chmodSync(directory, 0o700);
@@ -185,29 +182,76 @@ async function readSavedDraft(result, command, token, cwd) {
 }
 
 function encodeHeader(value) {
-  const text = String(value || '').split(String.fromCharCode(13)).join(' ').split(String.fromCharCode(10)).join(' ').trim();
-  if ([...text].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) > 126)) throw new Error('Inline mail headers must already be ASCII-safe');
-  return text;
+  const text = String(value || '');
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw new Error('Mail headers cannot contain control characters');
+  return text.trim();
+}
+// RFC 2047 words stay below 75 bytes and never split a UTF-8 character.
+function encodeWords(value) {
+  const text = encodeHeader(value);
+  if (!/[^\x20-\x7e]/.test(text) && text.length <= 60) return text;
+  const chunks = [];
+  let chunk = '';
+  for (const character of text) {
+    if (Buffer.byteLength(chunk + character) > 42) { chunks.push(chunk); chunk = ''; }
+    chunk += character;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map(item => '=?UTF-8?B?' + Buffer.from(item).toString('base64') + '?=').join('\r\n ');
+}
+function addressHeader(value) {
+  const text = encodeHeader(value);
+  const addresses = [];
+  let start = 0, quoted = false, escaped = false;
+  for (let i = 0; i <= text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (quoted && ch === '\\') { escaped = true; continue; }
+    if (ch === '"') quoted = !quoted;
+    if ((ch === ',' && !quoted) || i === text.length) {
+      const item = text.slice(start, i).trim();
+      const match = /^(.*?)<([^<>]+)>$/.exec(item);
+      const address = match ? match[2].trim() : item;
+      // Display names can be international; mailbox syntax remains unambiguous.
+      if (!/^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(address)) {
+        throw new Error('Use comma-separated mailboxes, optionally Name <address>');
+      }
+      let name = match ? match[1].trim() : '';
+      if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1).replace(/\\(.)/g, '$1');
+      const phrase = /[^\x20-\x7e]/.test(name) || name.length > 60 ? encodeWords(name) : '"' + name.replace(/["\\]/g, '\\$&') + '"';
+      addresses.push(name ? phrase + ' <' + address + '>' : address);
+      start = i + 1;
+    }
+  }
+  if (quoted || escaped) throw new Error('Unclosed recipient display name');
+  return addresses.join(',\r\n ');
 }
 function wrap(value) { const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8"); return bytes.toString("base64").replace(/(.{76})/g, "$1" + String.fromCharCode(13,10)); }
 function buildInlineMessage(options, cwd) {
   const images = options['inline-images'];
   if (!Array.isArray(images) || !images.length) return null;
-  const from = encodeHeader(options.from);
-  const to = encodeHeader(options.to);
-  const subject = encodeHeader(options.subject);
+  const supported = new Set(['inline-images', 'from', 'to', 'cc', 'bcc', 'reply-to', 'subject', 'body', 'body-html', 'in-reply-to', 'references', 'thread-id', 'attach']);
+  for (const key of Object.keys(options)) {
+    if (!supported.has(key)) throw new Error('Unsupported inline-send option: ' + key);
+  }
+  const from = addressHeader(options.from);
+  const to = addressHeader(options.to);
+  const subject = encodeWords(options.subject);
   const html = String(options['body-html'] || '');
   const body = String(options.body || '');
   if (!from || !to || !subject || !html || !body) throw new Error('Inline send requires from, to, subject, body and body-html');
   const boundary = 'cindy-' + crypto.randomUUID();
   const lines = ['From: ' + from, 'To: ' + to];
   for (const [name, header] of [['cc', 'Cc'], ['bcc', 'Bcc'], ['reply-to', 'Reply-To']]) {
-    if (options[name]) lines.push(header + ': ' + encodeHeader(options[name]));
+    if (options[name]) lines.push(header + ': ' + addressHeader(options[name]));
   }
   lines.push('Subject: ' + subject);
   if (options['in-reply-to']) lines.push('In-Reply-To: ' + encodeHeader(options['in-reply-to']));
   if (options.references) lines.push('References: ' + encodeHeader(options.references));
-  lines.push('MIME-Version: 1.0', 'Content-Type: multipart/related; boundary="' + boundary + '"', '');
+  const attachments = options.attach === undefined ? [] : Array.isArray(options.attach) ? options.attach : [options.attach];
+  lines.push('MIME-Version: 1.0');
+  if (attachments.length) lines.push('Content-Type: multipart/mixed; boundary="mixed-' + boundary + '"', '', '--mixed-' + boundary);
+  lines.push('Content-Type: multipart/related; boundary="' + boundary + '"', '');
   lines.push('--' + boundary, 'Content-Type: multipart/alternative; boundary="alt-' + boundary + '"', '',
     '--alt-' + boundary, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(body,'utf8')), '',
     '--alt-' + boundary, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(html,'utf8')), '',
@@ -219,11 +263,18 @@ function buildInlineMessage(options, cwd) {
     const file = localPath(image.path, cwd);
     const bytes = fs.readFileSync(file);
     if (digest(bytes) !== image.hash) throw new Error('Inline image changed before send');
-    const type = typeof image.contentType === 'string' && image.contentType.startsWith('image/') ? image.contentType : 'application/octet-stream';
+    const type = typeof image.contentType === 'string' && /^image\/[a-z0-9.+-]+$/i.test(image.contentType) ? image.contentType : 'application/octet-stream';
     lines.push('', '--' + boundary, 'Content-Type: ' + type, 'Content-Transfer-Encoding: base64',
-      'Content-ID: <' + cid + '>', 'Content-Disposition: inline; filename="' + path.basename(file) + '"', '', wrap(bytes));
+      'Content-ID: <' + cid + '>', 'Content-Disposition: inline; filename="image-' + (index + 1) + '"', '', wrap(bytes));
   });
   lines.push('', '--' + boundary + '--', '');
+  for (const attachment of attachments) {
+    const file = localPath(attachment, cwd);
+    const filename = encodeURIComponent(path.basename(file)).replace(/['()*]/g, ch => '%' + ch.charCodeAt(0).toString(16));
+    lines.push('--mixed-' + boundary, 'Content-Type: application/octet-stream', 'Content-Transfer-Encoding: base64',
+      "Content-Disposition: attachment; filename*=UTF-8''" + filename, '', wrap(fs.readFileSync(file)), '');
+  }
+  if (attachments.length) lines.push('--mixed-' + boundary + '--', '');
   const target = path.join(path.dirname(localPath(images[0].path, cwd)), 'inline-message.eml');
   fs.writeFileSync(target, lines.join(String.fromCharCode(13,10)), { flag: 'wx' });
   return { 'raw-file': path.relative(cwd, target), 'thread-id': options['thread-id'] };

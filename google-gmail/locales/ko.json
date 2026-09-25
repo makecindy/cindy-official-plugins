@@ -10,7 +10,7 @@
       "description": "Discover bundled gog commands for this plugin. Read a command path before executing it with gmail_run. No account token is needed."
     },
     "gmail_run": {
-      "description": "Execute discovered Gmail commands. Read the gog manual for replies, forwarding and draft verification. Chat media via ghost_call top-level attachments is imported to the writable local task directory and attached (16 MiB/file). Saved drafts include readBack facts or an explicit unavailable status. Send an approved draft with drafts send + its draft ID, never reconstruct it. Writes need user intent; never retry unknown outcomes automatically."
+      "description": "Execute discovered Gmail commands; read the gog manual for composition. Chat media via ghost_call top-level attachments is imported to the writable local task directory (16 MiB/file). Saved drafts include readBack facts or unavailable status; send an approved draft by ID, never reconstruct it. Exception: send with inline-images uses raw MIME and sends IMMEDIATELY, cannot save a preview draft, and requires explicit send authorization. Never retry unknown outcomes automatically."
     }
   }
 }
