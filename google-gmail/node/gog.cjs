@@ -275,9 +275,7 @@ function buildInlineMessage(options, cwd) {
       "Content-Disposition: attachment; filename*=UTF-8''" + filename, '', wrap(fs.readFileSync(file)), '');
   }
   if (attachments.length) lines.push('--mixed-' + boundary + '--', '');
-  const target = path.join(path.dirname(localPath(images[0].path, cwd)), 'inline-message.eml');
-  fs.writeFileSync(target, lines.join(String.fromCharCode(13,10)), { flag: 'wx' });
-  return { 'raw-file': path.relative(cwd, target), 'thread-id': options['thread-id'] };
+  return lines.join(String.fromCharCode(13,10));
 }
 
 async function handle(message, execution) {
@@ -295,10 +293,11 @@ async function handle(message, execution) {
   let options = params.options || {};
   if (!options || typeof options !== 'object' || Array.isArray(options)) return failure('Invalid options');
   const cwd = typeof params.workdir === 'string' && path.isAbsolute(params.workdir) ? params.workdir : undefined;
+  let inlineMessage;
   if (options['inline-images']) {
     if (command.join(' ') !== 'send' || params.readOnly !== false) return failure('Inline images require an explicitly writable send');
-    const raw = buildInlineMessage(options, cwd);
-    options = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== undefined));
+    inlineMessage = buildInlineMessage(options, cwd);
+    options = options['thread-id'] === undefined ? {} : { 'thread-id': options['thread-id'] };
   }
   const positionals = [...values];
   if ((SERVICE === 'drive' && command[0] === 'upload') || (SERVICE === 'gmail' && command[0] === 'import')) positionals[0] = localPath(positionals[0], cwd);
@@ -322,8 +321,29 @@ async function handle(message, execution) {
   // Native --force only after the Agent's invocation is approved by Cindy.
   argv.push('--force');
   if (params.readOnly !== false) argv.push('--readonly');
-  const result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
-  return readSavedDraft(result, command, token, cwd);
+  // gog requires the selected mailbox identity for raw mail with direct tokens.
+  // This comes from the same Host OAuth account used by authAccount, not From
+  // or caller options (which cannot override account/global flags).
+  if (inlineMessage !== undefined || options['raw-file'] !== undefined) {
+    if (typeof params.accountEmail !== 'string' || !/^[^\s<>@]+@[^\s<>@]+$/.test(params.accountEmail)) {
+      return failure('Selected account email unavailable; reconnect this Gmail account');
+    }
+    argv.push('--account=' + params.accountEmail);
+  }
+  let temporaryDirectory;
+  try {
+    if (inlineMessage !== undefined) {
+      // The existing runtime directory also has a process-exit cleanup handler.
+      temporaryDirectory = fs.mkdtempSync(path.join(initialize().directory, 'inline-'));
+      const rawPath = path.join(temporaryDirectory, 'message.eml');
+      fs.writeFileSync(rawPath, inlineMessage, { mode: 0o600, flag: 'wx' });
+      argv.push('--raw-file=' + rawPath);
+    }
+    const result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
+    return readSavedDraft(result, command, token, cwd);
+  } finally {
+    if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 }
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {

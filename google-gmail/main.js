@@ -135,8 +135,8 @@ async function prepareMailAttachments(args, callId) {
     files.push({ path: relativePath, bytes: bytes.length, hash: hash, contentType: blob.type || 'application/octet-stream' });
   }
   var inlineSet = new Set(inline || []);
-  var embedded = files.filter(function (file) { return inlineSet.has(file.hash); });
-  if (inline && embedded.length !== inline.length) throw new Error('Every inline image must also be a granted chat attachment.');
+  var embedded = (inline || []).map(function (hash) { return files.find(function (file) { return file.hash === hash; }); });
+  if (embedded.some(function (file) { return !file; })) throw new Error('Every inline image must also be a granted chat attachment.');
   var regular = files.filter(function (file) { return !inlineSet.has(file.hash); });
   options.attach = inputs.filter(function (item) { return !refs.includes(item); }).concat(regular.map(function (file) { return file.path; }));
   delete options['inline-images'];
@@ -186,7 +186,7 @@ async function selectGoogleAccount(accountId) {
   if (account.status !== 'connected' || account.scope_stale === true) {
     return fail('尚未执行：账号 ' + (account.email || account.id) + ' 授权已失效或权限不足，请到插件详情页重新连接此账号。');
   }
-  return { ok: true, accountId: account.id };
+  return { ok: true, accountId: account.id, accountEmail: account.email };
 }
 (function () {
   var PREFIX = 'gmail';
@@ -230,6 +230,7 @@ async function selectGoogleAccount(accountId) {
         authAccount: args.account,
         params: {
           command: args.command || [], arguments: args.arguments || [], options: prepared.options,
+          accountEmail: !isSchema ? selected.accountEmail : undefined,
           workdir: context && context.workdir_is_local === true ? context.workdir : undefined,
           readOnly: !context || context.workdir_is_read_only !== false,
         },

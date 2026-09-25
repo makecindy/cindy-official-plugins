@@ -30,16 +30,19 @@ const payload = {
 function fixture(t, overrides = {}) {
   const workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-compose-test-')));
   t.after(() => fs.rmSync(workdir, { recursive: true, force: true }));
-  const calls = [], writes = [], requests = [], fetches = [], replies = [];
+  const calls = [], writes = [], requests = [], fetches = [], replies = [], rawMessages = [];
   const ctx = createContext({ __dirname: '/fixture', Buffer,
     require: name => name === '../vendor/gog/binaries.json' ? {} : require(name) });
   runInContext(worker, ctx);
+  ctx.initialize = () => ({ directory: workdir });
   const leaf = (name, flags = []) => ({ name, flags: flags.map(name => ({ name, type: name === 'quote' ? 'bool' : 'string' })), subcommands: [] });
   const composeFlags = ['attach', 'to', 'body', 'reply-to-message-id', 'quote', 'raw-file', 'thread-id'];
   ctx.schema = async () => ({ name: 'gmail', flags: [], subcommands: [leaf('send', composeFlags), leaf('search', ['page', 'max', 'all']),
     { name: 'drafts', flags: [], subcommands: ['create', 'update', 'reply', 'reply-all', 'forward', 'get', 'send'].map(name => leaf(name, composeFlags)) }] });
   ctx.execute = async (...args) => {
     calls.push(args);
+    const rawFile = args[0].find(arg => arg.startsWith('--raw-file='));
+    if (rawFile) rawMessages.push(fs.readFileSync(rawFile.slice('--raw-file='.length)));
     if (overrides.execute) return overrides.execute(...args);
     const argv = args[0];
     if (argv[1] === 'drafts' && argv[2] === 'get') return { ok: true, data: { draft: { id: 'draft-test', message: { id: 'message-test', threadId: 'thread-original', payload: copy(payload) } } } };
@@ -79,7 +82,7 @@ function fixture(t, overrides = {}) {
     } });
     return replies.at(-1);
   }
-  return { run, calls, writes, requests, fetches, ctx, workdir };
+  return { run, calls, writes, requests, fetches, ctx, workdir, rawMessages };
 }
 
 test('chat image → reply draft → read-back retains source thread, original quote and attachment bytes', async t => {
@@ -129,7 +132,9 @@ test('explicit inline send builds one raw RFC822 message and keeps the thread id
   assert.equal(argv.some(arg => arg.startsWith('--attach=')), false);
   const rawArg = argv.find(arg => arg.startsWith('--raw-file='));
   assert.ok(rawArg);
-  const raw = fs.readFileSync(rawArg.slice('--raw-file='.length));
+  const raw = f.rawMessages[0];
+  assert.equal(fs.existsSync(rawArg.slice('--raw-file='.length)), false);
+  assert.ok(argv.includes('--account=self@example.test'));
   assert.ok(raw.includes(Buffer.from('Content-ID: <img1@cindy.local>')));
   assert.ok(raw.includes(Buffer.from('Content-Disposition: inline')));
   assert.ok(raw.includes(image.toString('base64')));
@@ -154,14 +159,13 @@ test('mixed inline send round-trips international headers and every attachment t
     attach: ['账单.pdf'], 'inline-images': [hash],
   } });
   assert.equal(result.ok, true, JSON.stringify(result));
-  const filename = f.calls[0][0].find(arg => arg.startsWith('--raw-file=')).slice('--raw-file='.length);
   const parsed = JSON.parse(execFileSync('python3', ['-c', `
 import email, email.policy, json, sys, base64
-with open(sys.argv[1], 'rb') as f: msg = email.message_from_binary_file(f, policy=email.policy.default)
+msg = email.message_from_binary_file(sys.stdin.buffer, policy=email.policy.default)
 print(json.dumps({'subject': str(msg['Subject']), 'headers': {k: str(msg[k]) for k in ['From','To','Cc','Bcc','Reply-To']},
  'parts': [{'type': p.get_content_type(), 'name': p.get_filename(), 'cid': p['Content-ID'], 'data': base64.b64encode(p.get_payload(decode=True)).decode()} for p in msg.walk() if not p.is_multipart()],
  'defects': [str(d) for p in msg.walk() for d in p.defects]}))
-`, filename], { encoding: 'utf8' }));
+`], { encoding: 'utf8', input: f.rawMessages[0] }));
   assert.equal(parsed.subject, subject);
   assert.match(parsed.headers.From, /发送人 <self@example.test>/);
   assert.match(parsed.headers.To, /王, 小明/);
@@ -281,6 +285,40 @@ test('read-back reports CID resources separately from text and ordinary attachme
   assert.equal(result.attachments[1].contentId, '<logo@example.test>');
   assert.equal(result.attachments[1].disposition, 'inline');
   assert.equal(result.bodyText, body);
+});
+
+test('inline CIDs follow requested order, including repeated hashes, rather than grant order', async t => {
+  const other = Buffer.from('second image');
+  const otherHash = createHash('sha256').update(other).digest('hex');
+  const f = fixture(t, { media: async resource => {
+    const bytes = resource === `/media/${hash}.jpg` ? image : resource === `/media/${otherHash}.jpg` ? other : null;
+    return new Response(bytes, { status: bytes ? 200 : 404, headers: { 'Content-Type': 'image/jpeg' } });
+  } });
+  const result = await f.run({ command: ['send'], arguments: [], attachments: [hash, otherHash], options: {
+    from: 'self@example.test', to: 'self@example.test', subject: 'Order', body: 'Order',
+    'body-html': '<img src="cid:img1@cindy.local"><img src="cid:img2@cindy.local"><img src="cid:img3@cindy.local">',
+    'inline-images': [otherHash, hash, otherHash],
+  } });
+  assert.equal(result.ok, true);
+  const raw = f.rawMessages[0].toString();
+  for (const [i, bytes] of [other, image, other].entries()) {
+    const part = raw.split('Content-ID: <img' + (i + 1) + '@cindy.local>')[1].split('--cindy-')[0];
+    assert.ok(part.includes(bytes.toString('base64')));
+  }
+});
+
+test('temporary raw mail is removed after failures and throws; account identity is Host-selected', async t => {
+  for (const execute of [async () => ({ ok: false, execution: 'unknown', message: 'lost' }), async () => { throw new Error('lost'); }]) {
+    const f = fixture(t, { execute });
+    const result = await f.run({ accountEmail: 'forged@example.test', account_email: 'forged@example.test', command: ['send'], arguments: [], attachments: [hash], options: {
+      from: 'alias@example.test', to: 'self@example.test', subject: 'Cleanup', body: 'Test',
+      'body-html': '<img src="cid:img1@cindy.local">', 'inline-images': [hash],
+    } });
+    assert.equal(result.ok, false);
+    const argv = f.calls[0][0];
+    assert.ok(argv.includes('--account=self@example.test'));
+    assert.equal(fs.existsSync(argv.find(a => a.startsWith('--raw-file=')).slice(11)), false);
+  }
 });
 
 test('pagination and all-results flags pass through without a ten-message cap', async t => {
