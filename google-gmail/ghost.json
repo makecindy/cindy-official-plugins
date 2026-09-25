@@ -5,7 +5,7 @@
   "name": "Gmail",
   "description": "搜索和阅读 Gmail、下载附件到当前任务、创建草稿和发送邮件。账号授权由 Cindy 托管。",
   "whenToUse": "用于 Gmail 邮件、附件、草稿和发送。先用 gmail_accounts 选择账号，再用 gmail_schema 查询命令、gmail_run 执行。分析附件前，先下载到明确指定的本地任务目录路径。",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -82,7 +82,7 @@
     },
     {
       "name": "gmail_run",
-      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically.",
+      "description": "Execute discovered Gmail commands. Read the gog manual for replies, forwarding and draft verification. Chat media via ghost_call top-level attachments is imported to the writable local task directory and attached (16 MiB/file). Saved drafts include readBack facts or an explicit unavailable status. Send an approved draft with drafts send + its draft ID, never reconstruct it. Writes need user intent; never retry unknown outcomes automatically.",
       "parameters": {
         "type": "object",
         "properties": {

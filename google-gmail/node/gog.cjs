@@ -48,7 +48,7 @@ function environment(home, token) {
   return env;
 }
 
-async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution) {
+async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution, timeoutMs = 100000) {
   const state = initialize();
   const home = fs.mkdtempSync(path.join(state.directory, 'call-'));
   return new Promise((resolve) => {
@@ -65,7 +65,7 @@ async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution) {
     } catch (_) { fs.rmSync(home, { recursive: true, force: true }); resolve(failure('Unable to start gog')); return; }
     children.add(child);
     child.once('spawn', () => { started = true; if (execution) execution.started = true; });
-    const timer = setTimeout(() => { reason = 'gog timed out; do not retry a write without checking its result'; child.kill('SIGKILL'); }, 100000);
+    const timer = setTimeout(() => { reason = 'gog timed out; do not retry a write without checking its result'; child.kill('SIGKILL'); }, timeoutMs);
     function read(chunk, error) {
       size += Buffer.byteLength(chunk);
       if (size > maxOutput) { reason = 'Result too large; narrow the query. A write may already have completed.'; child.kill('SIGKILL'); return; }
@@ -140,6 +140,95 @@ function optionValue(key, item, directory) {
   }
   return item;
 }
+
+function draftReadBack(data, draftId) {
+  const draft = data && data.draft;
+  const message = draft && draft.message;
+  if (!draft || draft.id !== draftId || !message || !message.id || !message.payload) throw new Error('Incomplete draft read-back');
+  const header = (part, name) => (part.headers || []).filter(h => h.name.toLowerCase() === name).map(h => h.value).join('\n');
+  const headers = {};
+  for (const name of ['from', 'to', 'cc', 'bcc', 'subject', 'message-id', 'in-reply-to', 'references']) headers[name] = header(message.payload, name);
+  const bodies = { 'text/plain': [], 'text/html': [] };
+  const attachments = [];
+  function walk(part) {
+    const body = part.body || {};
+    const disposition = header(part, 'content-disposition');
+    const contentId = header(part, 'content-id');
+    if (part.filename || /^(attachment|inline)\b/i.test(disposition) || contentId) {
+      attachments.push({ filename: part.filename || '', mimeType: part.mimeType, bytes: body.size,
+        attachmentId: body.attachmentId || null, disposition, contentId });
+    } else if (bodies[part.mimeType] && typeof body.data === 'string') {
+      bodies[part.mimeType].push(Buffer.from(body.data, 'base64url').toString('utf8'));
+    }
+    for (const child of part.parts || []) walk(child);
+  }
+  walk(message.payload);
+  return { status: 'read_back', draftId, messageId: message.id, threadId: message.threadId || null,
+    headers, bodyText: bodies['text/plain'].join('\n'), bodyHtml: bodies['text/html'].join('\n'), attachments };
+}
+
+async function readSavedDraft(result, command, token, cwd) {
+  if (!result.ok || command.length !== 2 || command[0] !== 'drafts' ||
+      !['create', 'update', 'reply', 'reply-all', 'forward'].includes(command[1])) return result;
+  const data = result.data;
+  const draftId = data && data.draftId;
+  // Preserve the successful write receipt even when its subsequent read fails.
+  // Never rerun a mutation to recover a missing/oversized read-back.
+  let readBack = { status: 'unavailable', message: 'Draft saved, but read-back unavailable. Read drafts get before reporting it verified; do not recreate it.' };
+  try {
+    if (typeof draftId === 'string' && draftId && !draftId.startsWith('-') && !draftId.includes('\0')) {
+      const fetched = await execute([SERVICE, 'drafts', 'get', draftId, '--readonly'], token, cwd, MAX_OUTPUT, undefined, 10000);
+      if (fetched.ok) readBack = draftReadBack(fetched.data, draftId);
+    }
+  } catch (_) { /* The write already succeeded; retain its receipt. */ }
+  return { ...result, data: { ...data, readBack } };
+}
+
+function encodeHeader(value) {
+  const text = String(value || '').split(String.fromCharCode(13)).join(' ').split(String.fromCharCode(10)).join(' ').trim();
+  if ([...text].some(ch => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) > 126)) throw new Error('Inline mail headers must already be ASCII-safe');
+  return text;
+}
+function wrap(value) { const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8"); return bytes.toString("base64").replace(/(.{76})/g, "$1" + String.fromCharCode(13,10)); }
+function buildInlineMessage(options, cwd) {
+  const images = options['inline-images'];
+  if (!Array.isArray(images) || !images.length) return null;
+  const from = encodeHeader(options.from);
+  const to = encodeHeader(options.to);
+  const subject = encodeHeader(options.subject);
+  const html = String(options['body-html'] || '');
+  const body = String(options.body || '');
+  if (!from || !to || !subject || !html || !body) throw new Error('Inline send requires from, to, subject, body and body-html');
+  const boundary = 'cindy-' + crypto.randomUUID();
+  const lines = ['From: ' + from, 'To: ' + to];
+  for (const [name, header] of [['cc', 'Cc'], ['bcc', 'Bcc'], ['reply-to', 'Reply-To']]) {
+    if (options[name]) lines.push(header + ': ' + encodeHeader(options[name]));
+  }
+  lines.push('Subject: ' + subject);
+  if (options['in-reply-to']) lines.push('In-Reply-To: ' + encodeHeader(options['in-reply-to']));
+  if (options.references) lines.push('References: ' + encodeHeader(options.references));
+  lines.push('MIME-Version: 1.0', 'Content-Type: multipart/related; boundary="' + boundary + '"', '');
+  lines.push('--' + boundary, 'Content-Type: multipart/alternative; boundary="alt-' + boundary + '"', '',
+    '--alt-' + boundary, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(body,'utf8')), '',
+    '--alt-' + boundary, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(html,'utf8')), '',
+    '--alt-' + boundary + '--');
+  images.forEach((image, index) => {
+    if (!image || typeof image.path !== 'string' || typeof image.hash !== 'string') throw new Error('Invalid inline image');
+    const cid = 'img' + (index + 1) + '@cindy.local';
+    if (!html.includes('cid:' + cid)) throw new Error('body-html must reference cid:' + cid + ' in inline-images order');
+    const file = localPath(image.path, cwd);
+    const bytes = fs.readFileSync(file);
+    if (digest(bytes) !== image.hash) throw new Error('Inline image changed before send');
+    const type = typeof image.contentType === 'string' && image.contentType.startsWith('image/') ? image.contentType : 'application/octet-stream';
+    lines.push('', '--' + boundary, 'Content-Type: ' + type, 'Content-Transfer-Encoding: base64',
+      'Content-ID: <' + cid + '>', 'Content-Disposition: inline; filename="' + path.basename(file) + '"', '', wrap(bytes));
+  });
+  lines.push('', '--' + boundary + '--', '');
+  const target = path.join(path.dirname(localPath(images[0].path, cwd)), 'inline-message.eml');
+  fs.writeFileSync(target, lines.join(String.fromCharCode(13,10)), { flag: 'wx' });
+  return { 'raw-file': path.relative(cwd, target), 'thread-id': options['thread-id'] };
+}
+
 async function handle(message, execution) {
   const params = message.params || {};
   const tree = await schema();
@@ -152,9 +241,14 @@ async function handle(message, execution) {
   if (typeof token !== 'string' || !token) return failure('No Host-issued account token');
   const values = params.arguments || [];
   if (!Array.isArray(values) || values.length > 100 || values.some((value) => typeof value !== 'string' || value.startsWith('-') || value.includes('\0'))) return failure('Invalid positional arguments');
-  const options = params.options || {};
+  let options = params.options || {};
   if (!options || typeof options !== 'object' || Array.isArray(options)) return failure('Invalid options');
   const cwd = typeof params.workdir === 'string' && path.isAbsolute(params.workdir) ? params.workdir : undefined;
+  if (options['inline-images']) {
+    if (command.join(' ') !== 'send' || params.readOnly !== false) return failure('Inline images require an explicitly writable send');
+    const raw = buildInlineMessage(options, cwd);
+    options = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== undefined));
+  }
   const positionals = [...values];
   if ((SERVICE === 'drive' && command[0] === 'upload') || (SERVICE === 'gmail' && command[0] === 'import')) positionals[0] = localPath(positionals[0], cwd);
   const needsOutput = (SERVICE === 'drive' && command[0] === 'download') || (SERVICE === 'sheets' && command[0] === 'export') || (SERVICE === 'gmail' && command[0] === 'attachment' && options.inline !== true);
@@ -177,7 +271,8 @@ async function handle(message, execution) {
   // Native --force only after the Agent's invocation is approved by Cindy.
   argv.push('--force');
   if (params.readOnly !== false) argv.push('--readonly');
-  return execute(argv, token, cwd, MAX_OUTPUT, execution);
+  const result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
+  return readSavedDraft(result, command, token, cwd);
 }
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {

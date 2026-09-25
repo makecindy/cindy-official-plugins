@@ -40,3 +40,4 @@ for (const [id, prefix] of Object.entries(plugins)) {
 import './google-gmail-accounts.test.mjs';
 import './google-gmail-worker.test.mjs';
 import './google-gmail-packaging.test.mjs';
+import './google-gmail-compose.test.mjs';

@@ -213,7 +213,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
       await handler({ type: 'tool-call', tool: prefix + '_run', callId: 'old-host', args: {} });
       assert.equal(replies.length, 1);
       assert.equal(replies[0].ok, false);
-      assert.match(replies[0].message, /尚未执行.*0\.1\.82/);
+      assert.match(replies[0].message, /尚未执行.*0\.1\.92/);
       await handler({ type: 'tool-call', tool: prefix + '_accounts', callId: 'accounts', args: {} });
       assert.equal(replies[1].ok, true);
       assert.equal(replies[1].result.accounts.length, 2);

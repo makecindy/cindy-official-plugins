@@ -10,7 +10,7 @@
       "description": "Discover bundled gog commands for this plugin. Read a command path before executing it with gmail_run. No account token is needed."
     },
     "gmail_run": {
-      "description": "Execute a discovered gog command with a connected account. Use this for all Google business operations, including files and attachments. Writes require explicit user intent; never retry an unknown write outcome automatically."
+      "description": "Execute discovered Gmail commands. Read the gog manual for replies, forwarding and draft verification. Chat media via ghost_call top-level attachments is imported to the writable local task directory and attached (16 MiB/file). Saved drafts include readBack facts or an explicit unavailable status. Send an approved draft with drafts send + its draft ID, never reconstruct it. Writes need user intent; never retry unknown outcomes automatically."
     }
   }
 }
