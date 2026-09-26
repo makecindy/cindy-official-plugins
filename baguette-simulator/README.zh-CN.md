@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-显式选用的 Apple Silicon iOS 模拟器插件，随包带 Baguette 0.2.0。需要 Cindy 0.1.83+、完整 Xcode 和已安装的 iOS runtime，首次运行不下载依赖。
+显式选用的 Apple Silicon iOS 模拟器插件，随包带 Baguette 0.2.0。需要 Cindy 0.1.83+、完整 Xcode 和已安装的 iOS runtime，首次运行不下载依赖。打包时通过 binary-dependencies.json 从固定哈希的官方归档收集九个可移植 USDZ 模型；原生可执行文件仍保留在 Git，仅支持 macOS。
 
 仅在用户明确选择 Baguette 时使用。先 environment、devices，复用适合的已登录设备，必要时 boot。App 仍由项目正常 Xcode 流程构建，再用 install_app、launch_app 安装和启动模拟器 .app。launch_app 默认打开当前 session 侧边栏；检查 viewer.previewOpened，不能把服务启动成功说成页面已显示。切换 session 后通过 open_viewer 打开已有设备。
 
@@ -23,6 +23,8 @@ Node Worker 有当前用户级本机权限。只调用固定可执行文件和�
 已知限制：iOS 27 上断开视频连接可能触发上游 SIGABRT。服务每分钟最多自动重启五次，独立控制页可手动恢复；这是缓解，不是原生崩溃根治。Worker 停用、退出或工具闲置一小时后控制页也会停止，需要 Cindy 再次启动。设备数据跨 session 保留，但浏览器标签属于当前 session。
 
 ## 构建与验证
+
+原生 release 构建使用 Swift -Osize、移除符号并临时签名，确保 Git 中二进制总量符合仓库限制。
 
 在装有 Xcode 的 Apple Silicon Mac 上运行 sh native/build.sh，编译随包 Objective-C 源码并临时签名，不下载依赖；Baguette 和 HingeControl 基于 v0.2.0 加上 vendor-native.patch 重新编译；运行 sh native/build-baguette.sh <已验证的源码压缩包> 可重建。补丁让屏幕枚举与折叠控制使用独立设备目录、读取设备内真实折叠角度，并让改名后的设备仍匹配原型号。
 

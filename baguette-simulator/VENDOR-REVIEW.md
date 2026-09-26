@@ -4,7 +4,7 @@ Upstream: [tddworks/baguette v0.2.0](https://github.com/tddworks/baguette/releas
 
 ## Exact source modifications
 
-`vendor-web.patch` is the complete diff against `Sources/Baguette/Resources/Web` at tag v0.2.0 (official release archive Web resources). Only these nine Web files differ:
+`vendor-web.patch` is the complete diff against `Sources/Baguette/Resources/Web` at tag v0.2.0 (official release archive Web resources). These ten Web files differ (nine carried-forward patches and the reviewed Duo edge-drag fix):
 
 - `stream-session.js`: bounded reconnect after unexpected socket close; cancel scheduled reconnect on deliberate stop.
 - `baguette/parts/keyboard.js`: delegate key/text/clipboard actions to the same-origin /clipboard private-device bridge (fragment port never selects a destination), suppress OS repeats and duplicate in-flight paste, serialize keys/paste/copy, report queue overflow with English fallback for added input errors, drop unsent keys on blur/hide/detach/release.
@@ -26,7 +26,7 @@ Source URL scan of all vendor JS/HTML/CSS/JSON identified:
 - `leafletjs.com`: library attribution; `bugs.chromium.org`, `bugzilla.mozilla.org`: CSS comment references; `www.w3.org`: SVG namespace constant. These are not added runtime API clients.
 - `127.0.0.1`: the added clipboard bridge; exact Origin and random capability required, request body capped at 40 KB, no clipboard content logging.
 
-No eval/new Function calls or added executable base64 blobs were found in the nine modified upstream files or first-party Node/native code. Leaflet contains its upstream embedded transparent GIF and CSS assets; no executable payload was added. The full Baguette binary includes more upstream capabilities than the 16 exposed Agent tools: this PR does not claim to audit every native feature by reading JavaScript. Native binary and new plugin admission require maintainer review; the runtime’s own private-framework ABI is not a stable Apple API.
+No eval/new Function calls or added executable base64 blobs were found in the ten modified upstream files or first-party Node/native code. Leaflet contains its upstream embedded transparent GIF and CSS assets; no executable payload was added. The full Baguette binary includes more upstream capabilities than the 16 exposed Agent tools: this PR does not claim to audit every native feature by reading JavaScript. Native binary and new plugin admission require maintainer review; the runtime’s own private-framework ABI is not a stable Apple API.
 
 The plugin declares Node and loopback preview, uses fixed executable paths and argument arrays (never shell interpolation), no managed credentials, and launches Baguette with `--no-plugins`. Simulator apps retain their own network/auth state; App input may still trigger external actions. No command download occurs at runtime. Dependency licenses from the upstream tag’s Package.resolved (including build/test-only packages) and Leaflet 1.9.4 are reproduced in THIRD-PARTY-LICENSES.txt.
 
@@ -55,3 +55,13 @@ Native helper update: releaseKeys submits HID usages 4–231 before waiting once
 - simctl clipboard fallback explicitly uses UTF-8 locale. The installed worker otherwise inherited an ASCII locale and rejected Chinese stdin; the fixed path was checked against guest pasteboard and visible Settings search.
 - Official source archive SHA-256: `5414809d0217a128a99508f7d9a36e8ab5da524125c3180e86bdc509cf948559` (`https://api.github.com/repos/tddworks/baguette/tarball/v0.2.0`). `native/build-baguette.sh` verifies this archive, applies the shipped patch, builds with pinned Package.resolved, and copies only the two rebuilt executables. Full inventory records the packaged bytes. The native patch includes motor routing and renamed-model regressions.
 - Installed-client checks: Cindy 0.1.93 Beta, Xcode 27.1 beta (27A9269), iOS 27.1 (24A94401), private Duo. Actual sidebar pixels confirmed 0° and 130° pose rendering. Touch navigated Settings; Unicode input rendered Duo测试 once. Xcode 26 integration and exhaustive viewer features are not claimed.
+
+## Repository binary-size gate
+
+The unchanged nine USDZ files are portable model data, selected by exact path from the same SHA-pinned official archive through `binary-dependencies.json`. Only these resources use the shared-platform declaration; no native executable or dylib is declared portable. All model bytes remain in the self-contained package, with no runtime download. Native code remains explicitly macOS arm64-only. The stable `vendor/baguette/` path avoids version-directory churn.
+
+The host release binary is built with Swift `-Osize`, stripped with the standard Xcode tool and ad-hoc signed; no feature is removed. `native/build-baguette.sh` records these exact steps. The source tag retains a stale `baguetteVersion` constant (0.1.61); the shipped source patch stamps 0.2.0 so `environment` reports the actual upstream version. The 10 MiB repository gate and six-platform dependency rule are unchanged.
+
+## Review follow-up
+
+`screen-pieces.js` chooses the closest rendered quad for off-screen drag coordinates, preserving the appropriate Duo half instead of always using piece zero. Tests exercise both halves, reversed piece order, single-screen and empty-screen input. The private-set clipboard fallback reads back exact UTF-8 bytes with `simctl pbpaste` before Command-V; mismatch or unreadable contents return `unknown` without pasting. Readback preserves whitespace and never includes clipboard contents in failure messages.

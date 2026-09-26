@@ -1,3 +1,8 @@
+--- a/Sources/Baguette/App/Version.swift
++++ b/Sources/Baguette/App/Version.swift
+@@ -6 +6 @@
+-let baguetteVersion = "0.1.61"
++let baguetteVersion = "0.2.0"
 --- a/Injected/HingeControl/Sources/HingeControl.m
 +++ b/Injected/HingeControl/Sources/HingeControl.m
 @@ -106,0 +107,21 @@

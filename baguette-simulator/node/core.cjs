@@ -6,7 +6,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const readline = require('node:readline');
 const {openViewer,stopViewer}=require('./viewer.cjs');
-const BINARY = path.join(__dirname, '../vendor/baguette-v0.2.0-macOS-arm64/Baguette');
+const BINARY = path.join(__dirname, '../vendor/baguette/Baguette');
 const ROOT = path.join(os.homedir(), 'Library/Application Support/BaguetteCindy');
 const DEVICE_SET = path.join(ROOT, 'devices');
 const children = new Set();
@@ -22,12 +22,12 @@ function number(value,name,min,max) {
   if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max) throw new Failure('INVALID_ARGUMENT',`${name} must be ${min}..${max}`);
   return value;
 }
-function run(file,args,{timeout=30000,mutation=false,input,env}={}) {
+function run(file,args,{timeout=30000,mutation=false,input,env,trimOutput=true}={}) {
   return new Promise((resolve,reject)=>{
     const child=execFile(file,args,{timeout,maxBuffer:4*1024*1024,encoding:'utf8',killSignal:'SIGKILL',shell:false,env},(err,stdout,stderr)=>{
       children.delete(child);
       if(err) return reject(new Failure('COMMAND_FAILED',`${path.basename(file)}: ${(stderr||err.message).slice(-5000)}`,mutation?'unknown':'not_executed'));
-      resolve({stdout:stdout.trim(),warnings:stderr.trim().slice(-3000)});
+      resolve({stdout:trimOutput?stdout.trim():stdout,warnings:stderr.trim().slice(-3000)});
     });
     children.add(child);
     child.stdin.on('error',()=>{});
@@ -79,6 +79,15 @@ async function clipboardAction(p) {
     } catch(error) {
       if(error.code!=='COMMAND_FAILED')throw error;
       await sim(['pbcopy',device.udid],{input:text,mutation:true,env:{...process.env,LC_ALL:'en_US.UTF-8',LANG:'en_US.UTF-8'}});
+      // A successful exit alone does not prove the guest clipboard changed.
+      // Preserve whitespace and compare exact UTF-8 text before issuing paste.
+      let actual;
+      try {
+        actual=await sim(['pbpaste',device.udid],{trimOutput:false,env:{...process.env,LC_ALL:'en_US.UTF-8',LANG:'en_US.UTF-8'}});
+      } catch {
+        throw new Failure('CLIPBOARD_UNVERIFIED','Could not confirm guest clipboard contents; paste was not sent','unknown');
+      }
+      if(actual.stdout!==text)throw new Failure('CLIPBOARD_UNVERIFIED','Guest clipboard did not match requested text; paste was not sent','unknown');
     }
     await nativeKey(device,'KeyV',['command']);
   } else if(p.action==='copy') {

@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 Opt-in Apple Silicon iOS simulator integration using bundled Baguette 0.2.0.
-Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, full Xcode and an installed iOS runtime. No first-run dependency download.
+Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, full Xcode and an installed iOS runtime. No first-run dependency download. Packaging collects nine portable USDZ model assets from the hash-pinned official release via `binary-dependencies.json`; the native executables remain tracked and macOS-only.
 
 Use only when the user explicitly selects Baguette. Run `environment` and `devices`, reuse a suitable logged-in device, then `boot` if needed. Build the App with the project’s normal Xcode workflow; use `install_app` and `launch_app` for its already-built Simulator `.app`. `launch_app` opens the current session’s sidebar by default. Check `viewer.previewOpened`; a running process does not prove a visible preview. Reopen an existing device with `open_viewer` after changing sessions.
 
@@ -23,7 +23,7 @@ Known upstream limitation: stream disconnects can SIGABRT on iOS 27. The supervi
 
 ## Build and verification
 
-Run `sh native/build.sh` on an Apple Silicon Mac with Xcode. This compiles the included Objective-C source and ad-hoc signs the helper. No dependency download. Baguette and HingeControl are rebuilt from v0.2.0 with `vendor-native.patch`; use `sh native/build-baguette.sh <verified-source-archive>` to reproduce the build. The patch preserves the private device set for screen enumeration and hinge control, reads actual guest hinge angles, and matches renamed devices to their original model.
+Run `sh native/build.sh` on an Apple Silicon Mac with Xcode. This compiles the included Objective-C source and ad-hoc signs the helper. No dependency download. Baguette and HingeControl are rebuilt from v0.2.0 with `vendor-native.patch`; use `sh native/build-baguette.sh <verified-source-archive>` to reproduce the build. The release build uses Swift `-Osize`, strips symbols and ad-hoc signs the host executable to keep tracked binary content below the repository limit. The patch preserves the private device set for screen enumeration and hinge control, reads actual guest hinge angles, and matches renamed devices to their original model.
 
 Run the repository contracts and `.tests/baguette-simulator.test.mjs`. Review VENDOR-REVIEW.md, THIRD-PARTY-LICENSES.txt and the proposal [#119](https://github.com/makecindy/cindy-official-plugins/issues/119). Initial provisioning is an empty targeted audience, not all users. Final package installation in eligible Cindy must be recorded separately from direct Node/native tests.
 

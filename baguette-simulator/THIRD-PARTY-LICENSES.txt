@@ -1,5 +1,5 @@
 Baguette v0.2.0 https://github.com/tddworks/baguette
-Local native changes: custom-set screen enumeration and hinge transport; guest CoreMotion angle monitoring; stable model matching after device rename. Source patch and rebuild instructions accompany the rebuilt Baguette and HingeControl binaries.
+Local native changes: custom-set screen enumeration and hinge transport; guest CoreMotion angle monitoring; stable model matching after device rename. Source patch and rebuild instructions accompany the rebuilt Baguette and HingeControl binaries. The host binary uses size optimization, symbol stripping and ad-hoc signing; its version constant is stamped from the 0.2.0 source tag. Nine unchanged portable USDZ resources are collected from the same pinned official archive at packaging time.
 Local farm patch: remove remote font links and use existing system-font fallback.
 Local Web networking patch: OSM tiles/search routed through same-origin fixed-endpoint Node proxy.
 Local keyboard transport: use same-origin /clipboard; never select host or port from fragment data.

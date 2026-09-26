@@ -5,8 +5,8 @@ const fs=require('node:fs');
 const path=require('node:path');
 const udid='00000000-0000-4000-8000-000000000001';
 
-function harness({coreDeviceFails=false,simctlFails=false,owned=true}={}) {
- const calls=[];
+function harness({coreDeviceFails=false,simctlFails=false,readFails=false,stale=false,owned=true}={}) {
+ const calls=[];let clipboard="";
  const context={module:{exports:{}},__dirname:path.resolve('baguette-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
   if(name==='./viewer.cjs')return {};
   if(name==='./keys.cjs')return require('../../baguette-simulator/node/keys.cjs');
@@ -18,7 +18,11 @@ function harness({coreDeviceFails=false,simctlFails=false,owned=true}={}) {
    if(file==='/usr/bin/xcode-select')output='/Applications/Xcode.app/Contents/Developer';
    if(args.includes('--json'))output=JSON.stringify({devices:{runtime:owned?[{udid,state:'Booted'}]:[]}});
    if((args[0]==='devicectl'&&coreDeviceFails)||(args.includes('pbcopy')&&simctlFails))error=Error('unsupported command');
-   queueMicrotask(()=>callback(error,output,''));
+   queueMicrotask(()=>{
+    if(args.includes('pbcopy')&&!error&&!stale)clipboard=call.input;
+    if(args.includes('pbpaste')){output=clipboard;if(readFails)error=Error('read failed');}
+    callback(error,output,'');
+   });
    return {stdin:{on(){},end(input){call.input=input;}}};
   }};
   return require(name);
@@ -55,4 +59,16 @@ test('failed clipboard writes never paste stale text, and foreign devices never 
  const foreign=harness({owned:false});
  await assert.rejects(foreign.dispatch('type_text',{udid,text:'new'}),e=>e.code==='DEVICE_NOT_OWNED');
  assert.ok(!foreign.calls.some(c=>c.args[0]==='devicectl'||c.args.includes('pbcopy')||c.file.endsWith('/native/keyboard')));
+});
+
+for(const behavior of [{stale:true},{readFails:true}])test('unconfirmed fallback never sends Command-V '+JSON.stringify(behavior),async()=>{
+ const h=harness({coreDeviceFails:true,...behavior});
+ await assert.rejects(h.dispatch('type_text',{udid,text:'new'}),e=>e.code==='CLIPBOARD_UNVERIFIED'&&e.execution==='unknown');
+ assert.equal(h.calls.filter(c=>c.file.endsWith('/native/keyboard')).length,1);
+});
+test('clipboard verification preserves leading/trailing whitespace and Unicode',async()=>{
+ const h=harness({coreDeviceFails:true});await h.dispatch('type_text',{udid,text:' 你好 🥖\n'});
+ const read=h.calls.find(c=>c.args.includes('pbpaste'));
+ assert.deepEqual(Array.from(read.args.slice(0,3)),Array.from(h.calls.find(c=>c.args.includes('pbcopy')).args.slice(0,3)));
+ assert.ok(h.calls.at(-1).file.endsWith('/native/keyboard'));
 });

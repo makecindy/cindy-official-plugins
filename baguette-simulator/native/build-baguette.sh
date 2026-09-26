@@ -12,8 +12,10 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 cd "$BUILD_DIR"
 /usr/bin/patch -p1 < "$PLUGIN_DIR/vendor-native.patch"
 BAGUETTE_INJECTED_ARCHS=arm64 /bin/bash Injected/HingeControl/build.sh
-swift build -c release -j 6 --force-resolved-versions
-DEST="$PLUGIN_DIR/vendor/baguette-v0.2.0-macOS-arm64"
+swift build -c release -j 6 --force-resolved-versions -Xswiftc -Osize
+/usr/bin/strip .build/release/Baguette
+/usr/bin/codesign --force --sign - --timestamp=none .build/release/Baguette
+DEST="$PLUGIN_DIR/vendor/baguette"
 cp .build/release/Baguette "$DEST/Baguette"
 cp Injected/HingeControl/HingeControl "$DEST/Baguette_Baguette.bundle/HingeControl/HingeControl"
 echo 'Rebuilt Baguette and HingeControl; regenerate vendor-inventory.json before packaging.'
