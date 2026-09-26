@@ -1,5 +1,14 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),cp=require('node:child_process');
 const {service,source,validate}=require('../node/online.cjs');const {files,within,runCommand}=require('../node/engine.cjs');
+test('connection failures are actionable without replacing HTTP or validation errors',async()=>{
+ const https=require('node:https'),{EventEmitter}=require('node:events'),original=https.get;
+ try{
+  for(const code of ['ENOTFOUND','ECONNRESET','CERT_HAS_EXPIRED']){
+   https.get=()=>{const r=new EventEmitter();r.setTimeout=()=>{};process.nextTick(()=>r.emit('error',Object.assign(Error('raw connection diagnostic'),{code})));return r;};
+   await assert.rejects(require('../node/online.cjs').download('https://github.com/makecindy/eval-bank/releases/download/test/index.json','unused',100),/连接失败.*网络.*重试/);
+  }
+ }finally{https.get=original;}
+});
 test('download failures explain the next action without asking for credentials',()=>{
  const {downloadError}=require('../node/online.cjs');
  assert.match(downloadError(403),/限制.*稍后/);assert.match(downloadError(429),/不需要/);

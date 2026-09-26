@@ -13,6 +13,40 @@ function bridge(initial={root:'/selected'},catalog={ok:true,models:[{id:'test-mo
  return {calls,replies,runs,get config(){return cfg;},tool:m=>onMessage(m),ui:(id,action,args={})=>bc.onmessage({data:{type:'request',id,action,args}}),cindy};
 }
 const args={questions:['audio@v2'],configurations:[configuration]};
+test('prepare tool rejects every invalid model dimension before preparing or downloading',async()=>{
+ for(const key of ['model','provider','harness','effort']){
+  const b=bridge();await b.tool({type:'tool-call',tool:'prepare_run',callId:'invalid',args:{question:'audio@v2',...configuration,[key]:'unknown'}});
+  assert.equal(b.calls.some(x=>['prepare','online_inspect','online_plan'].includes(x.method)),false);
+  assert.match(JSON.stringify(b.calls.at(-1)),/模型目录已变化/);
+ }
+});
+test('stopping grades completed submissions before cancellation, including archived lost receipts',async()=>{
+ for(const archived of [false,true]){
+  const b=bridge(),get=b.cindy.tasks.get;await b.ui('start','start',args);
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b)]});
+  if(archived){b.cindy.tasks.get=async x=>({...await get(x),status:'archived'});b.cindy.tasks.listRuns=async()=>({items:[{status:'completed'}]});}
+  await b.ui('stop','cancel');await b.ui('stopping','query');b.runs.get('r1').status='completed';await b.ui('poll','query');
+  assert.equal(b.config.batch.status,'cancelled');assert.equal(b.config.batch.items[0].status,'graded');
+  assert.equal(b.calls.filter(x=>x.method==='grade').length,1);assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);
+  await b.ui('again','query');assert.equal(b.calls.filter(x=>x.method==='grade').length,1);
+ }
+});
+test('diagnostic errors do not block saved grades from releasing their worker',async()=>{
+ const b=bridge();await b.ui('start','start',args);const request=b.cindy.node.request;
+ b.cindy.node.request=async x=>{if(x.method==='reconcile_result')throw Error('source unavailable');return request(x);};
+ b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b)]});
+ await b.ui('poll','query');assert.equal(b.config.batch.items[0].status,'graded');assert.equal(b.config.batch.items[0].released,true);
+ assert.match(b.config.batch.items[0].qualityReviewError,/source unavailable/);assert.equal(b.config.batch.items[0].qualityReviewed,undefined);
+ assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);
+});
+test('failed scoring during stop keeps the completed submission recoverable',async()=>{
+ const b=bridge();await b.ui('start','start',args);const request=b.cindy.node.request;let fail=true;
+ b.cindy.node.request=async x=>{if(fail&&x.method==='grade')throw Error('disk unavailable');return request(x);};
+ b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b)]});
+ await b.ui('stop','cancel');await b.ui('stopping','query');b.runs.get('r1').status='completed';await b.ui('poll','query');
+ assert.equal(b.config.batch.status,'stopping');assert.equal(b.calls.some(x=>x.releaseWorker||x.method==='record_failure'),false);
+ fail=false;await b.ui('recover','query');assert.equal(b.config.batch.status,'cancelled');assert.equal(b.config.batch.items[0].status,'graded');
+});
 test('paused queues and confirmation prompts keep stopping pending until cleared',async()=>{
  for(const flag of ['queue_paused','waitingForUser']){
   const b=bridge();await b.ui('start','start',args);await b.ui('stop','cancel');await b.ui('stopping','query');

@@ -1,3 +1,38 @@
+async function settleWorkers(j,team){
+  for(const item of j.items){const w=team.workers.find(w=>w.label===workerLabel(item.runId));if(w)item.telemetry={acceptedAt:w.acceptedAt,startedAt:w.startedAt,completedAt:workerCompletedAt(w),timingBasis:w.timingBasis,usage:w.usage};}
+  for(const item of j.items.filter(x=>!doneItem(x))){
+   const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
+   if(matches.length>1){item.status='blocked';item.error='同一作答出现多个 Worker，需主任务核对，不自动计分';continue;}
+   const w=matches[0];if(!w)continue;
+   item.workerId=w.worker_id;item.taskId=w.session_id;
+   const cfg=taskRoute(item.config);
+   if(w.model!==cfg.model||w.agent_kind!==cfg.agentKind||(w.effort||'default')!==cfg.effort||w.providerId!==cfg.providerId||w.fastMode!==false||w.working_dir!==item.prepared.workspace){
+    item.status='blocked';item.error='Worker 实际配置或目录不匹配，未计分';continue;
+   }
+   if(workerCompletedAt(w)&&w.status==='done'&&!workerPending(w)){
+    j.phase='grading';j.currentRunId=item.runId;await saveBatch(j);channel.postMessage({type:'job-progress',job:jobView(j)});
+    try{item.result=await node('grade',{runId:item.runId,receipt:{channel:'Orca Worker',sessionId:w.session_id,workerId:w.worker_id,...item.telemetry,completedAt:item.telemetry.completedAt,acceptedConfig:cfg,provenance:'host-team-observed'}});item.status=item.result.status==='environment_invalid'?'environment_invalid':'graded';item.error=item.result.reason||undefined;}
+    catch(e){if(isTransientReadError(e))throw e;item.status='blocked';item.error='评分受阻：'+e.message;}
+   }else if(w.status==='error'){item.status='blocked';item.error='Worker 异常结束，保留作答，未计分';}
+   else {item.status=w.waitingForUser?'awaiting_confirmation':w.queue_paused?'queue_paused':w.is_working?'running':w.queued_count?'queued':'pending';item.waitReason=w.waitingForUser?'等待自动审批或用户确认':w.queue_paused?'队列已暂停':w.is_working?'模型正在执行':w.queued_count?'宿主排队中':'等待终态核对';}
+  }
+  delete j.currentRunId;
+  // Reconcile historical assessments before releasing their sessions; never delete raw grades.
+  for(const item of j.items.filter(x=>doneItem(x)||x.status==='blocked')){
+   if(item.result&&!item.qualityReviewed){try{item.result=await node('reconcile_result',{runId:item.runId,receipt:item.telemetry});item.status=item.result.status==='environment_invalid'?'environment_invalid':item.status;item.error=item.result.reason||undefined;item.qualityReviewed=true;delete item.qualityReviewError;}catch(e){item.qualityReviewError='诊断复核暂未完成：'+e.message;}await saveBatch(j);}
+   const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
+   const w=matches.length===1?matches[0]:null;
+   if(j.status==='stopping'&&w?.status==='done'&&!item.result)continue;
+   if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&workerCompletedAt(w)&&!workerPending(w)){
+    // Persist the failure and exact observed terminal before freeing its slot.
+    item.terminalReceipt={...item.telemetry,workerId:w.worker_id,sessionId:w.session_id,completedAt:workerCompletedAt(w),status:w.status,provenance:'host-team-observed'};
+    if(!item.result)await node('record_failure',{runId:item.runId,reason:item.error,receipt:item.terminalReceipt});
+    await saveBatch(j);
+    const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:workerCompletedAt(w)});
+    if(release.ok){item.released=true;await saveBatch(j);}else item.releaseReason=release.message;
+   }
+  }
+}
 const workerLabel=runId=>'eval-'+runId.replaceAll('-','').slice(0,27);
 const workerPending=w=>!!(w.is_working||w.queued_count||w.queue_paused||w.waitingForUser);
 const workerCompletedAt=w=>w.lastTurnEndedAt||w.completedAt;
@@ -58,40 +93,9 @@ async function advanceCoordinator(j){
   const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
   if(!team.ok)throw Error('无法核对协同状态');
   j.capacity=team.capacity;j.coordinatorUsage=team.coordinatorUsage;
-  for(const item of j.items){const w=team.workers.find(w=>w.label===workerLabel(item.runId));if(w)item.telemetry={acceptedAt:w.acceptedAt,startedAt:w.startedAt,completedAt:workerCompletedAt(w),timingBasis:w.timingBasis,usage:w.usage};}
   if(team.waitingForUser){j.phase='awaiting_confirmation';j.message='评测主任务正在等待你的确认。请在侧栏打开评测主任务处理确认；插件不会代替你批准或自动催办。';await saveBatch(j);return jobView(j);}
   if(j.status!=='stopping'&&await coordinatorApprovalBlocked(j))return jobView(j);
-  for(const item of j.items.filter(x=>!doneItem(x))){
-   const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
-   if(matches.length>1){item.status='blocked';item.error='同一作答出现多个 Worker，需主任务核对，不自动计分';continue;}
-   const w=matches[0];if(!w)continue;
-   item.workerId=w.worker_id;item.taskId=w.session_id;
-   const cfg=taskRoute(item.config);
-   if(w.model!==cfg.model||w.agent_kind!==cfg.agentKind||(w.effort||'default')!==cfg.effort||w.providerId!==cfg.providerId||w.fastMode!==false||w.working_dir!==item.prepared.workspace){
-    item.status='blocked';item.error='Worker 实际配置或目录不匹配，未计分';continue;
-   }
-   if(workerCompletedAt(w)&&w.status==='done'&&!workerPending(w)){
-    j.phase='grading';j.currentRunId=item.runId;await saveBatch(j);channel.postMessage({type:'job-progress',job:jobView(j)});
-    try{item.result=await node('grade',{runId:item.runId,receipt:{channel:'Orca Worker',sessionId:w.session_id,workerId:w.worker_id,...item.telemetry,completedAt:item.telemetry.completedAt,acceptedConfig:cfg,provenance:'host-team-observed'}});item.status=item.result.status==='environment_invalid'?'environment_invalid':'graded';item.error=item.result.reason||undefined;}
-    catch(e){if(isTransientReadError(e))throw e;item.status='blocked';item.error='评分受阻：'+e.message;}
-   }else if(w.status==='error'){item.status='blocked';item.error='Worker 异常结束，保留作答，未计分';}
-   else {item.status=w.waitingForUser?'awaiting_confirmation':w.queue_paused?'queue_paused':w.is_working?'running':w.queued_count?'queued':'pending';item.waitReason=w.waitingForUser?'等待自动审批或用户确认':w.queue_paused?'队列已暂停':w.is_working?'模型正在执行':w.queued_count?'宿主排队中':'等待终态核对';}
-  }
-  delete j.currentRunId;
-  // Reconcile historical assessments before releasing their sessions; never delete raw grades.
-  for(const item of j.items.filter(x=>doneItem(x)||x.status==='blocked')){
-   if(item.result&&!item.qualityReviewed){item.result=await node('reconcile_result',{runId:item.runId,receipt:item.telemetry});item.status=item.result.status==='environment_invalid'?'environment_invalid':item.status;item.error=item.result.reason||undefined;item.qualityReviewed=true;await saveBatch(j);}
-   const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
-   const w=matches.length===1?matches[0]:null;
-   if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&workerCompletedAt(w)&&!workerPending(w)){
-    // Persist the failure and exact observed terminal before freeing its slot.
-    item.terminalReceipt={...item.telemetry,workerId:w.worker_id,sessionId:w.session_id,completedAt:workerCompletedAt(w),status:w.status,provenance:'host-team-observed'};
-    if(!item.result)await node('record_failure',{runId:item.runId,reason:item.error,receipt:item.terminalReceipt});
-    await saveBatch(j);
-    const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:workerCompletedAt(w)});
-    if(release.ok){item.released=true;await saveBatch(j);}else item.releaseReason=release.message;
-   }
-  }
+  await settleWorkers(j,team);
   const activeWorkers=team.workers.filter(workerPending);
   const pending=j.items.filter(x=>!doneItem(x)&&x.prepared&&x.status!=='blocked'&&!team.workers.some(w=>w.label===workerLabel(x.runId)));
   const limit=j.concurrency??team.capacity?.hardLimit??1;
@@ -195,6 +199,11 @@ async function readModels(){
  const data=await r.json();if(!data.ok||!Array.isArray(data.models))throw Error('模型目录暂时不可用，请刷新重试。');
  return data.models.map(m=>({model:m.id,label:m.name,visible:m.visible!==false,harness:m.agent,provider:m.providerId,providerLabel:m.providerName,efforts:m.efforts.length?m.efforts:['default'],defaultEffort:m.defaultEffort}));
 }
+function verifiedConfiguration(x,models){
+ const row=models.find(m=>m.model===x.model&&m.harness===x.harness&&m.provider===x.provider&&m.efforts.includes(x.effort));
+ if(!row)throw Error('模型目录已变化，请重新读取并选择');
+ return {model:row.model,harness:row.harness,provider:row.provider,effort:x.effort};
+}
 async function taskCapability(){
  if(!cindy.tasks?.create)throw Error('当前 Cindy 不支持普通任务接口，请使用配套开发版。');
  const cap=await cindy.tasks.capabilities();
@@ -235,6 +244,9 @@ async function stopBatch(j){
  }
  const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
  if(!team.ok)throw Error('无法核对协同状态');
+ await settleWorkers(j,team);
+ const ungradedCompleted=j.items.some(item=>!doneItem(item)&&team.workers.some(w=>w.label===workerLabel(item.runId)&&w.status==='done'&&workerCompletedAt(w)&&!workerPending(w)));
+ if(ungradedCompleted){j.phase='blocked';j.message='已停止派发，已交卷作答的评分尚未完成；文件保留，请处理评分错误后重试。';await saveBatch(j);return jobView(j);}
  if(ended&&!team.leadWorking&&!team.waitingForUser&&!team.workers.some(workerPending)){j.status='cancelled';j.phase='cancelled';j.message='评测已停止，已完成成绩保留。';for(const item of j.items.filter(x=>!doneItem(x)))item.status='cancelled';}
  else j.message='等待主任务停止回执；未确认前不会开始新批次。';
  await saveBatch(j);return jobView(j);
@@ -319,7 +331,7 @@ async function action(name,args={},callId){
    if(!Array.isArray(args.questions)||!args.questions.length)throw Error('至少选择一道题');
    const models=await readModels();const configurations=args.configurations;
    if(!Array.isArray(configurations)||!configurations.length)throw Error('请选择模型和强度');
-   const chosen=[...new Map(configurations.map(x=>{const row=models.find(m=>m.model===x.model&&m.harness===x.harness&&m.provider===x.provider&&m.efforts.includes(x.effort));if(!row)throw Error('模型目录已变化，请重新读取并选择');const c={model:row.model,harness:row.harness,provider:row.provider,effort:x.effort};return [JSON.stringify(c),c];})).values()];
+   const chosen=[...new Map(configurations.map(x=>{const c=verifiedConfiguration(x,models);return [JSON.stringify(c),c];})).values()];
    const questions=await resolveQuestions([...new Set(args.questions)],true);if(questions.length*chosen.length>200)throw Error('单批最多 200 份作答，请分批运行');
    const concurrency=args.concurrency??null;if(concurrency!==null&&(!Number.isInteger(concurrency)||concurrency<1))throw Error('同时作答数必须为正整数');
    if(launchCancelled)return {id:'preparation',status:'cancelled',phase:'cancelled',total:0,finished:0,items:[],message:'已停止准备。'};
@@ -372,7 +384,7 @@ async function action(name,args={},callId){
   }finally{authorStarting=false;}
  }
  if(name==='list_questions'){const {defaults,availableQuestions,...catalog}=await questionCatalog();return {...catalog,questions:availableQuestions};}
- if(name==='prepare_run')return node('prepare',{...args,question:(await resolveQuestions([args.question]))[0]},callId);
+ if(name==='prepare_run'){const config=verifiedConfiguration(args,await readModels());return node('prepare',{...args,...config,question:(await resolveQuestions([args.question]))[0]},callId);}
  const map={list_runs:'runs',export_report:'export',create_question_draft:'draft',calibrate_question:'calibrate'};
  if(!map[name])throw Error('Unknown action');return node(map[name],args,callId);
 }
