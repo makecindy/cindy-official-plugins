@@ -1,5 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),cp=require('node:child_process');
 const {service,source,validate}=require('../node/online.cjs');const {files,within,runCommand}=require('../node/engine.cjs');
+test('download failures explain the next action without asking for credentials',()=>{
+ const {downloadError}=require('../node/online.cjs');
+ assert.match(downloadError(403),/限制.*稍后/);assert.match(downloadError(429),/不需要/);
+ assert.match(downloadError(404),/发布源.*维护者/);assert.match(downloadError(503),/暂时不可用.*稍后/);
+});
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const url='https://github.com/makecindy/eval-bank/releases/download/test/index.json';
 test('only explicit public makecindy Release sources accepted',()=>{assert.equal(source(url).hostname,'github.com');for(const u of ['http://github.com/makecindy/cindy/releases/download/a/b','https://127.0.0.1/index','https://github.com/evil/cindy/releases/download/a/b','https://github.com/makecindy/cindy/blob/main/index.json',url+'?token=secret'])assert.throws(()=>source(u));});

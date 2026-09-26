@@ -13,6 +13,50 @@ function bridge(initial={root:'/selected'},catalog={ok:true,models:[{id:'test-mo
  return {calls,replies,runs,get config(){return cfg;},tool:m=>onMessage(m),ui:(id,action,args={})=>bc.onmessage({data:{type:'request',id,action,args}}),cindy};
 }
 const args={questions:['audio@v2'],configurations:[configuration]};
+test('paused queues and confirmation prompts keep stopping pending until cleared',async()=>{
+ for(const flag of ['queue_paused','waitingForUser']){
+  const b=bridge();await b.ui('start','start',args);await b.ui('stop','cancel');await b.ui('stopping','query');
+  b.runs.get('r1').status='completed';let pending=true;
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b,{[flag]:pending})]});
+  await b.ui('paused','query');assert.equal(b.config.batch.status,'stopping');
+  assert.equal(b.calls.filter(x=>x.method==='grade').length,0);
+  await b.ui('another','start',args);assert.equal(b.replies.at(-1).ok,false);
+  pending=false;await b.ui('cleared','query');assert.equal(b.config.batch.status,'cancelled');
+ }
+});
+test('authoring is single flight and uses a random draft identity',async()=>{
+ const b=bridge(),source={records:[{sessionId:'fixture',text:'selected material'}]};
+ await Promise.all([b.ui('author-a','author',source),b.ui('author-b','author',source)]);
+ assert.equal(b.calls.filter(x=>x.create).length,1);assert.equal(b.calls.filter(x=>x.send).length,1);
+ assert.match(b.config.author.id,/^question-[a-f0-9-]{36}$/);
+ const original=b.config.author.id;await b.ui('author-c','author',source);
+ assert.equal(b.replies.at(-1).ok,false);assert.equal(b.config.author.id,original);
+ assert.equal(b.calls.filter(x=>x.method==='draft').length,1);
+});
+test('ambiguous cached versions resolve through the configured index before any paid task',async()=>{
+ for(const offline of [true,false]){
+  const b=bridge(),request=b.cindy.node.request;let installed=false,inspected=0;
+  const keys=['a','b'].map(c=>'online:'+c.repeat(64)+':audio@v2');
+  b.cindy.node.request=async x=>{
+   if(x.method==='bank')return {ok:true,result:{questions:keys.map((key,i)=>({key,distributionHash:String(i)}))}};
+   if(x.method==='online_inspect'){inspected++;assert.equal(b.calls.filter(x=>x.create).length,0);if(offline)throw Error('Offline');return {ok:true,result:{indexId:'current'}};}
+   if(x.method==='online_plan')return {ok:true,result:{artifacts:[]}};
+   if(x.method==='online_install'){installed=true;assert.equal(x.params.indexId,'current');return {ok:true,result:{bank:'/bank/'+'b'.repeat(64),key:'audio@v2'}};}
+   return request(x);
+  };
+  b.cindy.downloads={start:async()=>({ok:true,token:'unused'})};
+  await b.ui('start','start',args);assert.equal(inspected,1);
+  if(offline){assert.equal(b.replies.at(-1).ok,false);assert.equal(b.calls.filter(x=>x.create).length,0);}
+  else {assert.equal(installed,true);assert.equal(b.config.batch.items[0].question,keys[1]);}
+ }
+});
+test('imported suffix cannot replace a default question and missing qualified keys fail closed',async()=>{
+ for(const key of ['audio@v2','online:missing:audio@v2']){
+  const b=bridge(),request=b.cindy.node.request;let inspected=0;
+  b.cindy.node.request=async x=>{if(x.method==='bank')return {ok:true,result:{questions:[{key:'imported:other:audio@v2'}]}};if(x.method==='online_inspect'){inspected++;throw Error('Offline');}return request(x);};
+  await b.ui('start','start',{...args,questions:[key]});assert.equal(b.calls.filter(x=>x.create).length,0);assert.equal(b.replies.at(-1).ok,false);assert.equal(inspected,key.includes(':')?0:1);
+ }
+});
 test('online install forwards opaque receipts and rejects an old path-only host',async()=>{
  for(const modern of [true,false]){
   const b=bridge(),hash='a'.repeat(64),request=b.cindy.node.request;
