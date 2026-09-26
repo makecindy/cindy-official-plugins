@@ -6,7 +6,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const readline = require('node:readline');
 const {openViewer,stopViewer}=require('./viewer.cjs');
-const BINARY = path.join(__dirname, '../vendor/baguette-v0.1.98-macOS-arm64/Baguette');
+const BINARY = path.join(__dirname, '../vendor/baguette-v0.2.0-macOS-arm64/Baguette');
 const ROOT = path.join(os.homedir(), 'Library/Application Support/BaguetteCindy');
 const DEVICE_SET = path.join(ROOT, 'devices');
 const children = new Set();
@@ -22,9 +22,9 @@ function number(value,name,min,max) {
   if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max) throw new Failure('INVALID_ARGUMENT',`${name} must be ${min}..${max}`);
   return value;
 }
-function run(file,args,{timeout=30000,mutation=false,input}={}) {
+function run(file,args,{timeout=30000,mutation=false,input,env}={}) {
   return new Promise((resolve,reject)=>{
-    const child=execFile(file,args,{timeout,maxBuffer:4*1024*1024,encoding:'utf8',killSignal:'SIGKILL',shell:false},(err,stdout,stderr)=>{
+    const child=execFile(file,args,{timeout,maxBuffer:4*1024*1024,encoding:'utf8',killSignal:'SIGKILL',shell:false,env},(err,stdout,stderr)=>{
       children.delete(child);
       if(err) return reject(new Failure('COMMAND_FAILED',`${path.basename(file)}: ${(stderr||err.message).slice(-5000)}`,mutation?'unknown':'not_executed'));
       resolve({stdout:stdout.trim(),warnings:stderr.trim().slice(-3000)});
@@ -71,7 +71,15 @@ async function clipboardAction(p) {
     const text=string(p.text,'text',8000);
     // First release any existing repeat before replacing its clipboard payload.
     await nativeKey(device,null);
-    await sim(['pbcopy',device.udid],{input:text,mutation:true});
+    // Xcode 27 simctl pbcopy can report success without changing the guest
+    // clipboard. Match Baguette 0.2.0: prefer CoreDevice, retaining the private
+    // device-set fallback for Xcode 26 or devices CoreDevice does not know.
+    try {
+      await run('/usr/bin/xcrun',['devicectl','device','pasteboard','copy','--device',device.udid],{input:text,mutation:true});
+    } catch(error) {
+      if(error.code!=='COMMAND_FAILED')throw error;
+      await sim(['pbcopy',device.udid],{input:text,mutation:true,env:{...process.env,LC_ALL:'en_US.UTF-8',LANG:'en_US.UTF-8'}});
+    }
     await nativeKey(device,'KeyV',['command']);
   } else if(p.action==='copy') {
     await nativeKey(device,'KeyC',['command']);
@@ -89,7 +97,7 @@ async function dispatch(method,p={}) {
     const [version,xcode,runtimes,types]=await Promise.all([
       run(BINARY,['--version']),run('/usr/bin/xcodebuild',['-version']),
       jsonRun('/usr/bin/xcrun',['simctl','list','runtimes','--json']),jsonRun('/usr/bin/xcrun',['simctl','list','devicetypes','--json'])]);
-    return {macOS,baguette:version.stdout,xcode:xcode.stdout,deviceSet:DEVICE_SET,runtimes:runtimes.runtimes.filter(x=>x.isAvailable&&x.identifier.includes('.iOS-')).map(x=>({name:x.name,identifier:x.identifier,version:x.version})),deviceTypes:types.devicetypes.filter(x=>x.productFamily==='iPhone'||x.productFamily==='iPad').map(x=>({name:x.name,identifier:x.identifier})),note:'Baguette 0.1.98 includes Xcode 27 / iOS 27 compatibility fixes. Use dedicated devices, observe UI before acting, and verify actions afterwards.'};
+    return {macOS,baguette:version.stdout,xcode:xcode.stdout,deviceSet:DEVICE_SET,runtimes:runtimes.runtimes.filter(x=>x.isAvailable&&x.identifier.includes('.iOS-')).map(x=>({name:x.name,identifier:x.identifier,version:x.version})),deviceTypes:types.devicetypes.filter(x=>x.productFamily==='iPhone'||x.productFamily==='iPad').map(x=>({name:x.name,identifier:x.identifier})),note:'Baguette 0.2.0 supports Xcode 26/27; iPhone Duo requires Xcode 27.1 and iOS 27.1. Use dedicated devices, observe UI before acting, and verify actions afterwards.'};
   }
   if(method==='close_viewer') return {...await stopViewer(),execution:'executed',note:'Viewer server stopped; simulator and App remain running.'};
   if(method==='devices') return {deviceSet:DEVICE_SET,devices:await listDevices()};

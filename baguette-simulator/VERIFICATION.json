@@ -1,37 +1,65 @@
 {
-  "date": "2026-09-16",
-  "xcode": "27.0 27A266a",
-  "runtime": "iOS 27.0",
-  "baguette": "0.1.98",
+  "date": "2026-09-26",
+  "baguette": "0.2.0",
+  "status": "installed-beta-duo-core-verified",
   "passed": [
-    "environment",
-    "create_device",
-    "boot",
-    "launch Settings",
-    "describe_ui",
-    "tap General",
-    "screenshot",
-    "Unicode paste",
-    "Home",
-    "shutdown",
-    "reboot",
-    "Cindy-style require bootstrap",
-    "JSON-RPC environment",
-    "5 isolation and error-handling tests",
-    "0.1.1 viewer HTTP page and JPEG screenshot",
-    "0.1.1 viewer shutdown closes port",
-    "4 sidebar bridge tests",
-    "0.1.3: three real H264 connect/disconnect cycles each caused native SIGABRT; supervisor recovered on same URL each time",
-    "0.1.3: stream reconnect and deliberate stop cancellation test"
+    "Official release SHA-256 matches GitHub asset digest",
+    "Version and hinge help run with Xcode 27.0",
+    "Nine existing Web patches migrated without rejected hunks",
+    "Packaged candidate installed with Cindy forge installer on a real Apple Silicon Mac",
+    "Actual Cindy sidebar renders Duo closed at 0 degrees and unfolded at 130 degrees",
+    "Guest sensor reports actual hinge angles; screen and app layout switch",
+    "Touch navigates Settings and focuses its search field",
+    "Unicode paste renders Duo测试 once in the Settings search field",
+    "Keyboard release completes without restarting the app",
+    "44 targeted upstream Swift tests including custom-set subprocess and renamed-model regressions",
+    "25 plugin tests"
   ],
   "notVerified": [
-    "installed Cindy ghost_call end-to-end",
-    "install_app on a newly built project",
-    "heal and swipe integration",
-    "0.1.1 installed plugin sidebar render"
+    "Xcode 26 integration regression",
+    "Exhaustive optional viewer features and prolonged disconnect recovery"
   ],
-  "knownIssues": [
-    "Baguette 0.1.98 native serve still SIGABRTs on stream disconnect in this Xcode 27 environment; bounded restart mitigates this rather than fixing upstream.",
-    "Sidebar preview is session-scoped; call open_viewer in a new session."
-  ]
+  "previousReleaseVerification": {
+    "date": "2026-09-16",
+    "xcode": "27.0 27A266a",
+    "runtime": "iOS 27.0",
+    "baguette": "0.1.98",
+    "passed": [
+      "environment",
+      "create_device",
+      "boot",
+      "launch Settings",
+      "describe_ui",
+      "tap General",
+      "screenshot",
+      "Unicode paste",
+      "Home",
+      "shutdown",
+      "reboot",
+      "Cindy-style require bootstrap",
+      "JSON-RPC environment",
+      "5 isolation and error-handling tests",
+      "0.1.1 viewer HTTP page and JPEG screenshot",
+      "0.1.1 viewer shutdown closes port",
+      "4 sidebar bridge tests",
+      "0.1.3: three real H264 connect/disconnect cycles each caused native SIGABRT; supervisor recovered on same URL each time",
+      "0.1.3: stream reconnect and deliberate stop cancellation test"
+    ],
+    "notVerified": [
+      "installed Cindy ghost_call end-to-end",
+      "install_app on a newly built project",
+      "heal and swipe integration",
+      "0.1.1 installed plugin sidebar render"
+    ],
+    "knownIssues": [
+      "Baguette 0.1.98 native serve still SIGABRTs on stream disconnect in this Xcode 27 environment; bounded restart mitigates this rather than fixing upstream.",
+      "Sidebar preview is session-scoped; call open_viewer in a new session."
+    ]
+  },
+  "cindy": {
+    "version": "0.1.93",
+    "channel": "Beta"
+  },
+  "xcode": "27.1 beta (27A9269)",
+  "runtime": "iOS 27.1 (24A94401)"
 }

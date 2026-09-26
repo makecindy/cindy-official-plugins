@@ -142,7 +142,7 @@
  <body>
 --- a/sim-3d.js
 +++ b/sim-3d.js
-@@ -953,7 +953,7 @@
+@@ -1160,7 +1160,7 @@
      return escapeHTML(value).replace(/"/g, '&quot;');
    }
    function cssEscape(value) {
@@ -176,11 +176,11 @@
 -    cursor: crosshair;
 +    cursor: default;
    }
-   #simNativeView .r3d-stage-tools {
-     position: absolute; left: 14px; bottom: 14px; z-index: 3;
+   /* The model's hardware buttons, placed by the server over the stage;
+      shown while the pointer is on the stage, as Device Hub shows them:
 --- a/sim-native.js
 +++ b/sim-native.js
-@@ -1602,8 +1602,9 @@
+@@ -1692,8 +1692,9 @@
      if (member.role === 'readout') {
        const row = document.createElement('div');
        row.className = 'tb-read';
@@ -191,7 +191,7 @@
        row.querySelector('.tb-val').textContent = source.textContent || '—';
        return row;
      }
-@@ -1611,7 +1612,8 @@
+@@ -1701,7 +1702,8 @@
      if (member.role === 'choice') {
        const row = document.createElement('div');
        row.className = 'tb-choice';
@@ -201,7 +201,7 @@
        // The real picker is moved in, not copied: it keeps its handlers,
        // its `.active` pill, and its identity as the one control the
        // rest of the page already talks to.
-@@ -1624,8 +1626,9 @@
+@@ -1714,8 +1716,9 @@
      row.className = 'tb-row' + (source.classList.contains('active') ? ' on' : '');
      const glyph = source.querySelector('svg');
      row.innerHTML = (glyph ? glyph.outerHTML : clusterSvg('more')) +

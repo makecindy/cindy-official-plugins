@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const web = path.resolve(__dirname, '../../baguette-simulator/vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web');
+const web = path.resolve(__dirname, '../../baguette-simulator/vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web');
 
 test('toolbar roles keep untrusted titles out of HTML and retain their controls', () => {
   const sourceCode = fs.readFileSync(path.join(web, 'sim-native.js'), 'utf8');

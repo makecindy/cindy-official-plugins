@@ -1,471 +1,486 @@
 [
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette",
-    "bytes": 11169896,
-    "sha256": "1ddd845b44ef062ab2bd2b8a5a30e1bce4a835367da8d8e92532da5133abf335"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette",
+    "bytes": 26257000,
+    "sha256": "d68fe9063ed9ec1bd742fb35debeb4ec199e03cc26ece5c49d4e454e93ddf3fb"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-42mm/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/HingeControl/HingeControl",
+    "bytes": 57056,
+    "sha256": "8c066348936e5194b4d62cfbb1ab7ac553764bd8c66da6cab22ffee992dd8797"
+  },
+  {
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-42mm/definition.json",
     "bytes": 611,
     "sha256": "6e8c4fa684c817564b0d6ecd6afa081aac411453142c0eca9c27c15aca298a0b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-42mm/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-42mm/device.usdz",
     "bytes": 5103948,
     "sha256": "c852f23c573afc40fee2a9d8cf0d2733dec18e74a2db1ba237136c60a0d52174"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-46mm/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-46mm/definition.json",
     "bytes": 611,
     "sha256": "1614b25e028b09d648fb6418e8c3d4936fd6a1db88ff8d5b50d8911667aa7998"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-46mm/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-series-11-46mm/device.usdz",
     "bytes": 5103948,
     "sha256": "c852f23c573afc40fee2a9d8cf0d2733dec18e74a2db1ba237136c60a0d52174"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-ultra-3/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-ultra-3/definition.json",
     "bytes": 598,
     "sha256": "3a102fe3027df22a0f63046ad7249248e05c40a0169f3afc49e5a72d56634db0"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-ultra-3/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/apple-watch-ultra-3/device.usdz",
     "bytes": 5935910,
     "sha256": "1f2d11390b4537f888e7879ed0c51fa0839813bd18024204a4218def93d046b9"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-11-m4/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-11-m4/definition.json",
     "bytes": 668,
     "sha256": "42af0691e122144d3fc96f407c7330167b2a1d736bb327138bcc63689ed0039a"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-11-m4/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-11-m4/device.usdz",
     "bytes": 5372303,
     "sha256": "afcff034727f00c52491ac489535055eebc1280455542bc758487a3bc129933c"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-13-m4/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-13-m4/definition.json",
     "bytes": 668,
     "sha256": "884c3dc19e6266446c3faddfbb2968f549da54cb222387304c1ad4206607fb0b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-13-m4/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/ipad-pro-13-m4/device.usdz",
     "bytes": 5372303,
     "sha256": "afcff034727f00c52491ac489535055eebc1280455542bc758487a3bc129933c"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17/definition.json",
     "bytes": 541,
     "sha256": "c49d4c219da38fefdc40f51095068cecc40e1331d4842132aec051e5307de296"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17/device.usdz",
     "bytes": 2662557,
     "sha256": "2d0eb39e8b60405577a8add689717be4b97e3766aed81d30fb2c84365793fb42"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro/definition.json",
     "bytes": 2341,
     "sha256": "74df7bcfca8fe7317fdb03513be66f27b10b55f1858bb057dac77004552040c3"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro/device.usdz",
     "bytes": 3157819,
     "sha256": "eb22bf605aaded77b65dc632f2da0f3daedec98af3aa5cd4c45795788fdc07c7"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro-max/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro-max/definition.json",
     "bytes": 2357,
     "sha256": "d1fa1a9f53bb365cd3b7f9a9097a005e26e9ed1b8d893e4d429ebac59d19fa15"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro-max/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-17-pro-max/device.usdz",
     "bytes": 3119968,
     "sha256": "0edb3a4a51a7dcb777234f50dcce532758349ed8fe70ee5fd17709f225c8f81b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-air/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-air/definition.json",
     "bytes": 545,
     "sha256": "8cf5b8111e672bf7df5d38919af3a8d03536081869833d8ae59a8ec6d97a3b3f"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-air/device.usdz",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-air/device.usdz",
     "bytes": 2668503,
     "sha256": "c83c704a1be59141b68b55a6f1a27c817068d845424454c301a8ce9dcec43c65"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/baguette-plugin.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Models3D/iphone-duo/definition.json",
+    "bytes": 1245,
+    "sha256": "25cd9fcc33a7842d5fa5b03d87c96c0be463515f91d879386dadec46cf72be81"
+  },
+  {
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/baguette-plugin.json",
     "bytes": 1084,
     "sha256": "e10f03aa4e36120b3149974dde466f0878b7c757aae64bbc28a43c96aca7c9d5"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/bin/audit.py",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/bin/audit.py",
     "bytes": 5758,
     "sha256": "8ee041deb32f357c7061d7310df420e8149806101d5d14cff40668bcbf229cb8"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/bin/display.py",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Plugins/a11y/bin/display.py",
     "bytes": 6627,
     "sha256": "dc33cff815323a41aec73d02e6b9dfd60a1fe7bb6c179e5ad528e778093d8b3b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/VirtualCamera/VirtualCamera.dylib",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/VirtualCamera/VirtualCamera.dylib",
     "bytes": 242048,
     "sha256": "eb3490321e1a1b4a75c69eed55eaeaeaca80e064cfbaf3fa28a0dd53306230d6"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/VirtualMotion/VirtualMotion.dylib",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/VirtualMotion/VirtualMotion.dylib",
     "bytes": 162096,
     "sha256": "2fe08787bbcae3c1a2a79140aac858b112ad08bbcf4cb9ce9b0012821d0d2cea"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/VirtualNetwork/VirtualNetwork.dylib",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/VirtualNetwork/VirtualNetwork.dylib",
     "bytes": 165192,
     "sha256": "c145c82deb00d3c736ba583582a527e045427378459f7843f4d6dae48701c934"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/baguette.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/baguette.js",
     "bytes": 2396,
     "sha256": "af9abe6e4013c5db51a68e1fee1afe00a7b8261d354bd199bbd7284292a060b3"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/carplay-frame.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/carplay-frame.js",
     "bytes": 5066,
     "sha256": "376caab87f0b958e62aa950e48e3a60303dfc9e69ad32c1f51515345eaeeda68"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/frame-definition.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/frame-definition.js",
     "bytes": 6159,
     "sha256": "a75a8f30db9e8c597f0863ad2c21f36d98e75831d9d4cf5a959940e82beb0456"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/frame-registry.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/carplay/frame-registry.js",
     "bytes": 2735,
     "sha256": "953214b345b6b0338ff49d190b889a717d66dd04b569ea37eca9e2d7a7213ac1"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/attachable-event-source.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/attachable-event-source.js",
     "bytes": 2233,
     "sha256": "91400b2286e76cedcf986a3b28ccbc3456dcf762e865d64d00bf665a7e7e4f97"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/edge-bands.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/edge-bands.js",
     "bytes": 1381,
     "sha256": "1651a63d9707d8c2152050edb1f74d2c91edd19ab851491512dc526a48114368"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/gesture-envelope.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/gesture-envelope.js",
     "bytes": 2077,
     "sha256": "c4a2324d1651892f6e1b430bbb4f10edb6c243e6ceb68ca15605a2c6c2bb3f8f"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/mouse-gesture-source.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/mouse-gesture-source.js",
     "bytes": 13477,
     "sha256": "45b150215c8b3a154ab774fc8edf391d00258b564b1462c7deee67f9754da4af"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/option-hover-preview.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/option-hover-preview.js",
     "bytes": 3702,
     "sha256": "472eeec509d587f228ffa56b2e213651d058b8f32464a775785e3fa347b10628"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/pinch-overlay.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/pinch-overlay.js",
     "bytes": 1746,
     "sha256": "2121a1b8f4933b64f5f0f0844649cc6b831a21200c3d8f46fe832de229e98fe0"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/pointer-interpreter.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/pointer-interpreter.js",
     "bytes": 3133,
     "sha256": "51b2a50de23f679cacd6de7737933684b2352d787cafc99f996e4e55579c8ad5"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/safari-gesture-event-source.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/safari-gesture-event-source.js",
     "bytes": 4316,
     "sha256": "6e6987492ed4b6159e2ed8d8d577077880818945adf800581aba81ecf21de273"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/screen-quad.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/screen-pieces.js",
+    "bytes": 2262,
+    "sha256": "0f793e733e38fae77d019482fe3d8f753ba570140723987f86d78c8643685a64"
+  },
+  {
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/screen-quad.js",
     "bytes": 4745,
     "sha256": "2e971391b15c633d3f37c9656a0aa1f6e49abe1902bed4b4f7cc888bac507212"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/touch-gesture-source.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/touch-gesture-source.js",
     "bytes": 7308,
     "sha256": "3445c717bcedd908849e10e1f6d442cf03d80a5af11aa631b212a578ee1e7337"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/wheel-gesture-source.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/gestures/wheel-gesture-source.js",
     "bytes": 3161,
     "sha256": "ebd227df67218c3a56816f7c79564f9c11aad85c0c8981d03e3cbae9de702c72"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js",
-    "bytes": 3614,
-    "sha256": "3beb3c1332925e27c86bc71da58c98d1e38e6b48919c684dec31f82bb061cddc"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js",
+    "bytes": 5312,
+    "sha256": "991125a7342491e58571d0cafc476673fd7670b93832fa1b629d9cba0d4b1039"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/button.js",
-    "bytes": 4485,
-    "sha256": "85ff9150e81241458433b4a83e9e563dd60522944a047854c02816b3d52b1483"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/button.js",
+    "bytes": 6430,
+    "sha256": "c2b2f7ba88bf18241da836862486461a5a8e978d309f9fa149e61288434dd2c7"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js",
     "bytes": 8826,
     "sha256": "19c4e763e2b00171b54170618dfb5ad92e0db71e259a5fb2c809dd7c5cd2564e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/screen.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/screen.js",
     "bytes": 3701,
     "sha256": "573c92c3bcae390aa46a1c536c896dd8de29dc987bfdd610e98a068d0144593e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/simulator.js",
-    "bytes": 3713,
-    "sha256": "148af89b6f21c2d54c7d3eb1cd8c20bb1e2ce5941bade104019cdaa12f1af95d"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/simulator.js",
+    "bytes": 4061,
+    "sha256": "eb34ad9a8239dbaa0da246881e324bcd430f94fbd0d1f4767d246192ebca1f82"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/transport.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/transport.js",
     "bytes": 2578,
     "sha256": "605d9a180e2daaa8840de5560a52c459e20f18f709698a2b2bdea13c10139c6f"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette-demo.html",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/baguette-demo.html",
     "bytes": 3567,
     "sha256": "58a6565a542f0ba88d4eede5c5d755250b6b392be59dcd5e9b120a75fe24975d"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-composer.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-composer.js",
     "bytes": 8498,
     "sha256": "eaaa60803240f4c26ed9c9139b8955eb3a201a8933bfe250e38b497d18a7c0dd"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-settings.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-settings.js",
     "bytes": 4411,
     "sha256": "08b48e2de6d4e67d62e9747a67a59ce78a92992f688c4cd33bf9818da1472a43"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-size-menu.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-size-menu.js",
     "bytes": 16569,
     "sha256": "02c00604dbeaddde68599c132c252ed7bac8c6fe6475654ab4c1426fd08a9bdd"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-size.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/capture/capture-size.js",
     "bytes": 8876,
     "sha256": "8551a1d7a8b7cdd42e60a099b2a9393d88a576899011e307511d1538e0a554c4"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/capture-gallery.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/capture-gallery.js",
     "bytes": 13896,
     "sha256": "711756bc802919b3f75f343252d5202c18c5cc44b2dd137e3a67c4ff3a915d2b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/cupra/climate-bar.png",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/cupra/climate-bar.png",
     "bytes": 22812,
     "sha256": "dc8466d2a4b6589273c115c2d777c615e84fa63a1c3f21fa00aeec805fb855e4"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/cupra/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/cupra/definition.json",
     "bytes": 459,
     "sha256": "a95cd6850a52e3b55d1300f47341c687888afeb84e9a975871ee6fae10b32e21"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/plain/definition.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/plain/definition.json",
     "bytes": 303,
     "sha256": "66a4f2fec5fe61c301256f160938853d3408af94f8d9199ab33ca139bc55d8dd"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/registry.json",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/carplay-frames/registry.json",
     "bytes": 199,
     "sha256": "caeb31e6869b73095f9e09e261b96a6648f8367b3873c8dc52ae468f0aed212d"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-app.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-app.js",
     "bytes": 18336,
     "sha256": "2355b88accf832aed4be68e379a4f51d622b41dbf0ea2a08dca90b5382653dc3"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-filter.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-filter.js",
     "bytes": 1937,
     "sha256": "097eea8fece19be427ae54f05caacad0228a0886a5b464b99ae694b913082b0e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-focus-width.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-focus-width.js",
     "bytes": 3517,
     "sha256": "ee5cc49f692927b8c2c06a953eeeeb142861b6f264391dfbdc12c1a8854c33b6"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-focus.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-focus.js",
     "bytes": 21968,
     "sha256": "8507ce1901d2f4fe0acceb86e0f8b34a8cf524dea95d2809b1dede9758146375"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-tile.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-tile.js",
     "bytes": 15780,
     "sha256": "e569bf3db7bb4cb0afa9a3dc89da643e1693efd2f4d197c7ccc25792c5fbb82c"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-views.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm-views.js",
     "bytes": 13637,
     "sha256": "b874afd26b20e4798c0497629164283937a99fbb28e0f2fc569395acccb6f00e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm.css",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm.css",
     "bytes": 31695,
     "sha256": "1a9fbbd6c3b5ff91aeccde11ca71093dd250e13f9815ea0c2d486b530a483769"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm.html",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/farm/farm.html",
     "bytes": 3698,
     "sha256": "caee9e8d70032494336e238d9bdda2702017b6abd8315036380c25f06a7e8c4a"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/frame-decoder.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/frame-decoder.js",
     "bytes": 5067,
     "sha256": "6947cc5ab74f71755d18ac7f4d091f268d438d32184a73c2106326c1b40dfa3f"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/network/network-condition-form.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/network/network-condition-form.js",
     "bytes": 4140,
     "sha256": "22d269554b32e2535b2d8973e05cae2125f7b42ab56bdd8ccabf1f0adc0e7685"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-control.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-control.js",
     "bytes": 7385,
     "sha256": "2622228ab07c7c57b5e4d9da8a56de0bc85cc2800ae0b7c78705739faa9eec4e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-prompt.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-prompt.js",
     "bytes": 7308,
     "sha256": "f08d8fd0e0af3a440a1eb89884e6741ec9c2a3266c34c6b2288cdf66379b6b4a"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-row-action.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/plugin-row-action.js",
     "bytes": 3298,
     "sha256": "eb7fb1d9f4ab454b118bb0f0bb60eac084ede5a488c402ff3e038cd637603acb"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/recorder.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/recorder.js",
     "bytes": 20950,
     "sha256": "520910175c066fb47c50996349dd20435578bfccfb75034e205913fd8a6486d2"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/screens/companion-screens.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/screens/companion-screens.js",
     "bytes": 8029,
     "sha256": "184bf41bd3493b5c4822642184dfbe6c5ed9928e95bedc36057baace321433c2"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-3d.js",
-    "bytes": 40383,
-    "sha256": "fbefc074294fb155c741e168bb5f333594429e629d53cb5878b9d0adb07f0c2e"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-3d.js",
+    "bytes": 49391,
+    "sha256": "ab04898e7c81be99988d87691dfa0d7919fa68ede51117f031e94af2fef1b2b3"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-ax-inspector.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-ax-inspector.js",
     "bytes": 14556,
     "sha256": "c1c3fe007bf3e55383633cac4a8d3fbd18deddf67b33f1bf3b197824832866df"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-camera.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-camera.js",
     "bytes": 17335,
     "sha256": "a13440c4f7d9b9120d17719251c17224be38c171cfd9a1f56660c050a33b8437"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-file-drop.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-file-drop.js",
     "bytes": 14776,
     "sha256": "e3f8398341765be1b10a98f77917ab15cdc2db1614b05681e9ea290eb71a9199"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-list/device-filter.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-list/device-filter.js",
     "bytes": 2680,
     "sha256": "2a0e5856dbce36eae86d1af7b45a4c167c420e0bc039631dc152baa7386cf27b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-list.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-list.js",
     "bytes": 17626,
     "sha256": "8c420ce56a71ee6df41155c69c323af5610704faebc6b8cb1b08c59addf7ca3d"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-location.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-location.js",
     "bytes": 50913,
     "sha256": "d6b136e9c4a5b11edd6719560dc1002cc65279456d140cc4178a45b8bdf2ab02"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-logs.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-logs.js",
     "bytes": 13752,
     "sha256": "f52104e5f8aa6b8fc5515b88eb718903448d40027f74caa38440b545a6e9ee7e"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-native.html",
-    "bytes": 144323,
-    "sha256": "764396cdb593ad39670df8273c4555b11197057eab99d946790e17b8e1e50a65"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-native.html",
+    "bytes": 147338,
+    "sha256": "015ab141009cb9eded47c816c59b7898393687f49aaa976a1ea182b80b0dfe71"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-native.js",
-    "bytes": 118653,
-    "sha256": "d58687795fe02c5326ea8825b3e4f8c6f9eed9d1c9e6fe688c18972667ef87df"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-native.js",
+    "bytes": 123840,
+    "sha256": "d032f9287bfee7a134e72a9d45fa0bde6ddf4cb0f062063c696c0728cfa80f94"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-network.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-network.js",
     "bytes": 12261,
     "sha256": "85109ab74f765af2dae69b5166702753714e6d89846eb306292ba2121f2df859"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-plugins.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-plugins.js",
     "bytes": 55688,
     "sha256": "bdc1478d35b0a9e91ee2cd8deacf213c7b2f5df79cb2bb695a6a537dbac3b064"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-screens.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-screens.js",
     "bytes": 19514,
     "sha256": "f7e966d1bc106e851f4b7439cb8629cc4e7840a7d96771167eb7c39f1cfcb988"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-status-bar.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-status-bar.js",
     "bytes": 11823,
     "sha256": "0b1c965e6d448da1d07aa6efcdc97b1e887496d6481828cfa9a655a168f282c1"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-stream.html",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-stream.html",
     "bytes": 22208,
     "sha256": "67bb9e91d8b9aa5f906397559d86689c83e6ee97e561ce6797bfd9ca419738af"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim-stream.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim-stream.js",
     "bytes": 30066,
     "sha256": "4bd273e595bc13f3a900c816ff616258cd7b8c0682d42b76f65af85ee50c1c8a"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/sim.html",
-    "bytes": 7415,
-    "sha256": "82d746c1795f7737fa2a3b46ef4b2b95884c3a5281cac40309e26d7ff516af14"
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/sim.html",
+    "bytes": 7475,
+    "sha256": "e95a5d36418a4c8f99cbd1813318a66be5392dbe16c508731a46ee6ba2b6331b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/stream-format.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/stream-format.js",
     "bytes": 2328,
     "sha256": "daa50a16f64d8d5ed301cd4ad88d06dd0f2f42f99d69b71aadc1e75c6dca61c9"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/stream-session.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/stream-session.js",
     "bytes": 6081,
     "sha256": "5d5d8459f64a44e45734799ae711e76b4469148010060a1058f7e75747d02077"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/target.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/target.js",
     "bytes": 855,
     "sha256": "0f34e3eed1db782be214af7230ddbc4a55b398e32dabfc8f1bb56bbbbd87f09b"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/toolbar/toolbar-fold.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/toolbar/toolbar-fold.js",
     "bytes": 3760,
     "sha256": "ff1eb35fb9d267aa548bdd85ac423682638b122d913a2b5a11865a7c85cbcbe5"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/vendor/leaflet/leaflet.css",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/vendor/leaflet/leaflet.css",
     "bytes": 14145,
     "sha256": "337bfca5cabd03b39815b2700febe2b3b7edf55921c59cd49f88ecb328212303"
   },
   {
-    "path": "vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/vendor/leaflet/leaflet.js",
+    "path": "vendor/baguette-v0.2.0-macOS-arm64/Baguette_Baguette.bundle/Web/vendor/leaflet/leaflet.js",
     "bytes": 147552,
     "sha256": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a"
   }
