@@ -6,7 +6,7 @@ function timing(receipt,gradingStartedAt,gradingEndedAt){
  const start=ms(receipt.startedAt),end=ms(receipt.completedAt),accepted=ms(receipt.acceptedAt);
  return {durationSeconds:Number.isFinite(start)&&Number.isFinite(end)&&end>=start?(end-start)/1000:null,queueSeconds:Number.isFinite(accepted)&&Number.isFinite(start)&&start>=accepted?(start-accepted)/1000:null,gradingSeconds:Number.isFinite(gradingStartedAt)&&Number.isFinite(gradingEndedAt)?Math.max(0,gradingEndedAt-gradingStartedAt)/1000:null,timingBasis:receipt.timingBasis||'unavailable',costUSD:Number.isFinite(receipt.usage?.costUSD)&&receipt.usage.costUSD>=0?receipt.usage.costUSD:null,costBasis:receipt.usage?.costUSD!=null?(receipt.usage.approximate?'host-session-estimate':'host-session-total'):'unknown'};
 }
-// Evidence is produced by the unchanged supplied harness. A report sentence alone is not a verdict.
+// Worker-writable diagnostic only. Matching harness bytes does not authenticate a receipt.
 async function environmentEvidence(workspace,candidate){
  const dir=path.join(workspace,'tests/environment-preflight');let names;
  try{names=await fs.readdir(dir);}catch(e){if(e.code==='ENOENT')return null;throw e;}
@@ -21,6 +21,6 @@ async function environmentEvidence(workspace,candidate){
  for(const rel of ['lab/preflight.cjs','lab/browser-console.cjs']){
   try{const [a,b]=await Promise.all([fs.readFile(path.join(workspace,rel)),fs.readFile(path.join(candidate,rel))]);if(digest(a)!==digest(b))return null;}catch(e){if(rel==='lab/preflight.cjs'||e.code!=='ENOENT')return null;}
  }
- return {status:'environment_invalid',reason:'运行环境禁止回环监听，浏览器预检失败；本次不计入正式总分。',evidence:'tests/environment-preflight/'+entry.name,verifiedAt:entry.r.verifiedAt};
+ return {status:'environment_invalid',reason:'作答目录报告回环监听失败；此记录未经宿主认证，仅作诊断。',evidence:'tests/environment-preflight/'+entry.name,verifiedAt:entry.r.verifiedAt};
 }
 module.exports={environmentEvidence,timing,ms};

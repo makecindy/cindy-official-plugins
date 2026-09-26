@@ -9,9 +9,6 @@
     "prepare_run": {
       "description": "Prepare an isolated answer workspace for a verified model configuration without starting a model."
     },
-    "grade_run": {
-      "description": "Snapshot a completed answer and run local grader code supplied by a trusted bank; the plugin invokes this after validating the host execution receipt."
-    },
     "list_runs": {
       "description": "Read local execution states and independently graded results."
     },

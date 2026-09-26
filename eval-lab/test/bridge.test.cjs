@@ -138,3 +138,22 @@ test('read races during preparation and grading stay retryable, never turn into 
   fail=false;b.config.batch.retryAt=0;await b.ui('recover','query');assert.equal(b.config.batch.phase,method==='grade'?'completed':'coordinating');assert.equal(b.calls.filter(x=>x.send).length,1);
  }
 });
+
+test('public tools cannot grade a caller-supplied terminal receipt',async()=>{
+ const b=bridge();await b.tool({type:'tool-call',tool:'grade_run',callId:'forged',args:{runId:'fake',receipt:{channel:'Orca Worker',sessionId:'fake',completedAt:2000}}});assert.equal(b.calls.filter(x=>x.method==='grade').length,0);
+});
+test('failed terminal releases a single occupied slot and schedules the next sample',async()=>{
+ for(const failure of ['error','grade','config']){
+  const b=bridge();await b.ui('start','start',{...args,configurations:[configuration,{...configuration,effort:'low'}],concurrency:1});
+  const request=b.cindy.node.request;if(failure==='grade')b.cindy.node.request=async x=>{if(x.method==='grade')throw Error('grader failed');return request(x);};
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,capacity:{hardLimit:1,remainingSlots:0},workers:[worker(b,{lastTurnEndedAt:2000,...(failure==='error'?{status:'error'}:failure==='config'?{model:'wrong'}:{})})]});
+  await b.ui('poll','query');assert.equal(b.config.batch.items[0].status,'blocked');assert.ok(b.config.batch.items[0].terminalReceipt);assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);assert.equal(b.calls.filter(x=>x.method==='coordinator_state').at(-1).params.assignments.length,1);
+  await b.ui('again','query');assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);
+ }
+});
+test('ambiguous or active failed workers never release slots',async()=>{
+ for(const flags of [{is_working:true},{queued_count:1},{queue_paused:true},{waitingForUser:true},{duplicate:true}]){
+  const b=bridge();await b.ui('start','start',args);const w=worker(b,{status:'error',lastTurnEndedAt:2000,...flags});
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:flags.duplicate?[w,{...w,worker_id:'other'}]:[w]});await b.ui('poll','query');assert.equal(b.calls.filter(x=>x.releaseWorker).length,0);assert.equal(b.calls.filter(x=>x.method==='grade').length,0);
+ }
+});

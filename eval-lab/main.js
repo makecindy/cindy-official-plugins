@@ -73,7 +73,7 @@ async function advanceCoordinator(j){
    if(w.model!==cfg.model||w.agent_kind!==cfg.agentKind||(w.effort||'default')!==cfg.effort||w.providerId!==cfg.providerId||w.fastMode!==false||w.working_dir!==item.prepared.workspace){
     item.status='blocked';item.error='Worker 实际配置或目录不匹配，未计分';continue;
    }
-   if(w.completedAt&&w.status==='done'&&!w.is_working&&!w.queued_count){
+   if(w.completedAt&&w.status==='done'&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
     j.phase='grading';j.currentRunId=item.runId;await saveBatch(j);channel.postMessage({type:'job-progress',job:jobView(j)});
     try{item.result=await node('grade',{runId:item.runId,receipt:{channel:'Orca Worker',sessionId:w.session_id,workerId:w.worker_id,...item.telemetry,completedAt:item.telemetry.completedAt,acceptedConfig:cfg,provenance:'host-team-observed'}});item.status=item.result.status==='environment_invalid'?'environment_invalid':'graded';item.error=item.result.reason||undefined;}
     catch(e){if(isTransientReadError(e))throw e;item.status='blocked';item.error='评分受阻：'+e.message;}
@@ -82,10 +82,13 @@ async function advanceCoordinator(j){
   }
   delete j.currentRunId;
   // Reconcile historical assessments before releasing their sessions; never delete raw grades.
-  for(const item of j.items.filter(doneItem)){
+  for(const item of j.items.filter(x=>doneItem(x)||x.status==='blocked')){
    if(item.result&&!item.qualityReviewed){item.result=await node('reconcile_result',{runId:item.runId,receipt:item.telemetry});item.status=item.result.status==='environment_invalid'?'environment_invalid':item.status;item.error=item.result.reason||undefined;item.qualityReviewed=true;await saveBatch(j);}
-   const w=team.workers.find(w=>w.label===workerLabel(item.runId));
-   if(w&&item.result&&!item.released&&w.lastTurnEndedAt&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
+   const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
+   const w=matches.length===1?matches[0]:null;
+   if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&w.lastTurnEndedAt&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
+    // Persist the failure and exact observed terminal before freeing its slot.
+    item.terminalReceipt={workerId:w.worker_id,sessionId:w.session_id,completedAt:w.lastTurnEndedAt,status:w.status};await saveBatch(j);
     const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:w.lastTurnEndedAt});
     if(release.ok){item.released=true;await saveBatch(j);}else item.releaseReason=release.message;
    }
@@ -299,7 +302,7 @@ async function action(name,args={},callId){
   const run=await cindy.tasks.send({taskId:task.taskId,requestKey:'author-send:'+draftId+':'+revision,expectedRevision:task.revision,text:'仅处理 '+JSON.stringify(d.directory)+' 中用户选定的记录，按 AUTHOR_TASK.md 创建题包。完成后运行验证并报告。不运行待测模型，不把聊天私密数据放进公开候选题。'});
   await updateConfig(c=>({...c,author:{id:draftId,revision,taskId:task.taskId,runId:run.runId,status:run.status}}));return {taskId:task.taskId,status:run.status};
  }
- const map={list_questions:'bank',prepare_run:'prepare',grade_run:'grade',list_runs:'runs',export_report:'export',create_question_draft:'draft',calibrate_question:'calibrate'};
+ const map={list_questions:'bank',prepare_run:'prepare',list_runs:'runs',export_report:'export',create_question_draft:'draft',calibrate_question:'calibrate'};
  if(!map[name])throw Error('Unknown action');return node(map[name],args,callId);
 }
 channel.onmessage=async({data:m})=>{if(m?.type!=='request'||typeof m.id!=='string')return;if(!inflight.has(m.id)){inflight.set(m.id,action(m.action,m.args).then(result=>({ok:true,result}),e=>({ok:false,message:e.message})));if(inflight.size>200)inflight.delete(inflight.keys().next().value);}channel.postMessage({type:'response',id:m.id,...await inflight.get(m.id)});};

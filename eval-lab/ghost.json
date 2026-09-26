@@ -58,45 +58,6 @@
       }
     },
     {
-      "name": "grade_run",
-      "description": "交卷后快照并独立评分；新评测由插件根据宿主任务回执自动调用。 执行题包提供的本地评分程序；仅使用可信题包。",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "runId": {
-            "type": "string",
-            "description": "prepare_run 返回编号"
-          },
-          "receipt": {
-            "type": "object",
-            "properties": {
-              "channel": {
-                "const": "Orca Worker"
-              },
-              "sessionId": {
-                "type": "string",
-                "description": "执行样本的 Orca 任务 ID"
-              },
-              "completedAt": {
-                "type": "string",
-                "description": "终态报告 UTC 时间"
-              }
-            },
-            "required": [
-              "channel",
-              "sessionId",
-              "completedAt"
-            ]
-          }
-        },
-        "required": [
-          "runId",
-          "receipt"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
       "name": "list_runs",
       "description": "读取本地运行状态与正式评分结果。",
       "parameters": {
