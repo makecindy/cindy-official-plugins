@@ -7,7 +7,7 @@
       "description": "List frozen default and personal questions without starting a model."
     },
     "prepare_run": {
-      "description": "Prepare an isolated answer workspace for a verified model configuration without starting a model."
+      "description": "Prepare an isolated answer workspace for a verified model configuration without starting a model. Default questions are downloaded and verified when needed; installed version-qualified keys can be prepared offline."
     },
     "list_runs": {
       "description": "Read local execution states and independently graded results."

@@ -1,4 +1,6 @@
 const english={
+'出题请求未被受理，请检查任务配置和插件权限后重新创建。':'The authoring request was not accepted. Check the task configuration and plugin permissions before creating it again.',
+'出题未完成，请查看出题任务并检查草稿；已有成绩保留。':'Authoring did not finish. Open the authoring task and check its draft; existing scores are preserved.',
 '题库索引损坏或不兼容，请检查发布源并重新获取；仍失败请联系题库维护者。':'The bank index is damaged or incompatible. Check the release source and fetch it again; contact the bank maintainer if it still fails.',
 '导入题库不可用，请重新连接存储设备或在高级设置中重新导入。':'Imported bank unavailable. Reconnect its storage or import it again in Advanced settings.',
 '题库版本无法核对，请检查网络后重试；不会自动选择其他缓存版本。':'Cannot verify the bank version. Check the network and try again; no other cached version will be selected.',

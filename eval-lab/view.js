@@ -77,6 +77,7 @@ async function refresh(){if(refreshing)return;refreshing=true;try{const s=await 
  $('#setup-state').textContent=tr(s.automaticRoot?'资料保存在插件默认位置，无需选择目录。':'正在使用你选择的保存位置。');if(!$('#bank-url').value)$('#bank-url').value=s.indexUrl||'';
  $('#check-id').innerHTML=state.drafts.map(d=>`<option value="${esc(d.checkId)}" ${d.passed?'':'disabled'}>${esc(d.id)} · ${esc(d.revision)} ${d.passed?'✓':tr('校准未通过')}</option>`).join('');$('#freeze-section').hidden=!state.drafts.length;$('#freeze').disabled=!state.drafts.some(d=>d.passed);const passed=state.drafts.find(d=>d.passed);if(passed)$('#check-id').value=passed.checkId;
  $('#sync-state').textContent=tr('进度自动更新');
+ if(state.author?.error)message(tr('出题未完成，请查看出题任务并检查草稿；已有成绩保留。')+' '+tr(state.author.error));
  }finally{refreshing=false;}}
 function bind(selector,fn){$(selector).onclick=async()=>{const b=$(selector);b.disabled=true;try{await fn();}catch(e){message(e.message);const dialog=b.closest('dialog');if(dialog)dialog.querySelector('[role=status]')?.replaceChildren(document.createTextNode(e.message));}finally{b.disabled=false;summary();if(selector==='#export')b.disabled=!standingsRows.some(r=>r.answered);}};}
 function tab(id){for(const b of document.querySelectorAll('[role=tab]')){const yes=b.id===id;b.setAttribute('aria-selected',yes);b.tabIndex=yes?0:-1;$('#'+b.getAttribute('aria-controls')).hidden=!yes;}}

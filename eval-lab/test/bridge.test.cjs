@@ -267,3 +267,46 @@ test('explicit cached online key works offline without querying the default inde
  b.cindy.node.request=async x=>{if(x.method==='bank')return {ok:true,result:{questions:[{key,distributionHash:'a'}]}};if(x.method==='online_inspect')throw Error('must not fetch');return request(x);};
  await b.ui('start','start',{...args,questions:[key]});assert.equal(b.replies.at(-1).ok,true);assert.equal(b.config.batch.items[0].question,key);
 });
+test('default catalog is shared by status and tools, retaining exact score identity',async()=>{
+ const standings=require('../standings.js');
+ for(const versions of [0,1,2]){
+  const b=bridge(),request=b.cindy.node.request;
+  const qs=Array.from({length:versions},(_,i)=>({key:'online:release'+i+':audio@v2',questionId:'audio',revision:'v2',releaseHash:'release'+i,distributionHash:'same-files'}));
+  b.cindy.node.request=async x=>x.method==='bank'?{ok:true,result:{questions:qs}}:request(x);
+  await b.ui('catalog','status');const q=b.replies.at(-1).result.banks[0].questions[0];
+  assert.equal(q.key,'audio@v2');assert.equal(q.unresolved,versions>1);
+  if(versions===1){assert.equal(standings.questionKey(q),standings.questionKey(qs[0]));assert.equal(standings.aggregate([{...qs[0],model:'m',status:'graded',scoreExact:'1'}],[q]).length,1);}
+  else assert.equal(q.releaseHash,undefined);
+  await b.tool({type:'tool-call',tool:'list_questions',callId:'catalog'});
+  const result=b.calls.find(x=>x.type==='tool-result').result;assert.equal(result.questions.length,versions||1);
+  if(versions)assert.equal(JSON.stringify(result.questions),JSON.stringify(qs));else assert.equal(result.questions[0].key,q.key);
+  assert.equal(b.calls.some(x=>x.create||x.send||x.method==='online_inspect'),false);
+ }
+});
+test('prepare tool resolves an uninstalled default but retains offline installed keys',async()=>{
+ for(const question of ['audio@v2','online:fixture:audio@v2']){
+  const b=bridge();await b.tool({type:'tool-call',tool:'prepare_run',callId:'p',args:{question,...configuration}});
+  assert.equal(b.calls.find(x=>x.method==='prepare').params.question,'online:fixture:audio@v2');
+  assert.equal(b.calls.some(x=>x.method==='online_inspect'),question==='audio@v2');
+  assert.equal(b.calls.some(x=>x.create||x.send),false);
+ }
+});
+test('author rejection ends only definitely unaccepted requests; uncertain failures keep the same request',async()=>{
+ for(const code of ['REVISION_CONFLICT','TASK_BUSY','PERMISSION_DENIED',undefined]){
+  const b=bridge(),send=b.cindy.tasks.send;let first=true,request;
+  b.cindy.tasks.send=async x=>{if(first){first=false;request=JSON.stringify(x);throw Object.assign(Error('failed'),{code});}return send(x);};
+  await b.ui('a','author',{records:[]});const id=b.config.author.id;
+  const definite=['REVISION_CONFLICT','TASK_BUSY'].includes(code);
+  assert.equal(b.config.author.status,definite?'failed':'sending');assert.equal(!!b.config.author.pendingSend,!definite);
+  await b.ui('b','author',{records:[]});assert.equal(b.replies.at(-1).ok,true);
+  assert.equal(b.config.author.id===id,!definite);
+  if(!definite)assert.equal(JSON.stringify(b.calls.find(x=>x.send).send),request);
+ }
+});
+test('failed calibration is terminal, visible, and does not run again on polling',async()=>{
+ const b=bridge(),request=b.cindy.node.request;let count=0;
+ await b.ui('a','author',{records:[]});b.runs.get('r1').status='completed';
+ b.cindy.node.request=async x=>{if(x.method==='calibrate'){count++;throw Error('invalid draft');}return request(x);};
+ for(const id of ['s1','s2']){await b.ui(id,'status');assert.equal(b.replies.at(-1).result.author.status,'failed');assert.equal(b.replies.at(-1).result.author.error,'invalid draft');}
+ assert.equal(count,1);await b.ui('new','author',{records:[]});assert.equal(b.replies.at(-1).ok,true);
+});
