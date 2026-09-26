@@ -62,7 +62,7 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.2.7');
+  assert.equal(manifest.version, '1.2.8');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -90,3 +90,21 @@ test('settings show only host availability and fallback-token storage state', ()
   assert.match(settingsSource, /检查当前 GitHub 连接/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
 });
+
+for (const [managed, available, saved] of [[true, true, true], [true, false, true], [false, true, false]]) {
+  test(`settings adapt to host account UI: managed=${managed}, gh=${available}, fallback=${saved}`, async () => {
+    const elements = new Map();
+    const element = () => ({ value: '', textContent: '', hidden: false, open: false,
+      classList: { toggle() {}, remove() {} }, appendChild() {}, addEventListener() {} });
+    const document = { getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }, createElement: element };
+    new Script(settingsSource).runInContext(createContext({
+      document, BroadcastChannel: class {}, setTimeout: () => 0, clearTimeout() {},
+      fetch: async () => ({ json: async () => [{ key: 'github_pat', saved,
+        hostSource: 'gh-cli', hostAvailable: available, ...(managed ? { hostManagedSetup: true } : {}) }] }),
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(elements.get('legacy-account').hidden, managed);
+    assert.equal(elements.get('test').hidden, managed);
+    assert.equal(elements.get('other-methods')?.open ?? false, !available && saved);
+  });
+}

@@ -22,6 +22,8 @@
   .label-row .name { font-weight: 500; }
   .hint { margin: 7px 2px 0; font-size: 12px; color: var(--text-tertiary, #8a8a86); }
   .subhead { margin: 14px 2px 0; font-size: 12px; font-weight: 500; }
+  summary.subhead { margin-top: 0; padding: 8px 0; cursor: pointer; }
+  summary:focus-visible { outline: 2px solid var(--focus-ring, #4c8dff); outline-offset: 2px; border-radius: 4px; }
   .badge {
     padding: 1px 8px; border-radius: 6px; font-size: 11px;
     background: var(--surface-chip, #efefec); color: var(--text-tertiary, #8a8a86);
@@ -86,13 +88,17 @@
 </style>
 </head>
 <body>
+  <div id="legacy-account" hidden>
   <div class="label-row">
     <span class="name">GitHub 账号</span>
     <span class="badge">github.com</span>
   </div>
-  <p class="hint">Cindy 会优先使用本机 GitHub 登录；如果尚未连接，可以让 Agent 帮你完成登录，也可以使用下方备用 Token。</p>
+  <p class="hint">优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。</p>
   <div id="host-account"></div>
-  <div class="subhead">备用 Token</div>
+  </div>
+  <details id="other-methods">
+  <summary class="subhead">其他连接方式</summary>
+  <p class="hint">备用 Token 仅在本机 GitHub 登录不可用时使用。</p>
   <div id="fallback-account"></div>
   <div class="input-row" id="token-row">
     <div class="pill">
@@ -109,6 +115,7 @@
     <button id="clear" class="btn" type="button">清除</button>
   </div>
   <a class="console-link" href="https://github.com/settings/tokens">获取备用 Token ↗</a>
+  </details>
   <p id="status"></p>
   <script src="/settings.js"></script>
 </body>

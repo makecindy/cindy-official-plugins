@@ -16,6 +16,7 @@
   var KEY = 'github_pat';
   var bc = new BroadcastChannel('cindy-github');
   var ghAvailable = false;
+  var hostManagedSetup = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -66,15 +67,21 @@
       var saved = false;
       var tail = '';
       var hostAvailable = false;
+      var managedSetup = false;
       var list = await (await fetch('/secrets')).json();
       for (var i = 0; i < list.length; i++) {
         if (list[i] && list[i].key === KEY) {
           saved = Boolean(list[i].saved);
           tail = list[i].tail || '';
           hostAvailable = list[i].hostSource === 'gh-cli' && Boolean(list[i].hostAvailable);
+          managedSetup = Boolean(list[i].hostManagedSetup);
         }
       }
       ghAvailable = hostAvailable;
+      hostManagedSetup = managedSetup;
+      $('legacy-account').hidden = managedSetup;
+      $('test').hidden = managedSetup;
+      if (!hostAvailable && saved) $('other-methods').open = true;
       renderHostAccount(hostAvailable);
       renderFallbackAccount(saved, tail);
       // 单凭证语义要在输入行上说破:已保存时空输入框容易被误读成"还能再绑
@@ -118,6 +125,7 @@
       // 保存只确认凭证已写入；认证来源可能在异步窗口内切换，不能把
       // 「当前连接」的成功误报成刚保存的备用 Token 已验证。
       if (ghAvailable) showStatus('备用 Token 已保存；当前仍优先使用本机 GitHub 登录');
+      else if (hostManagedSetup) showStatus('备用 Token 已保存，连接状态见上方。');
       else showStatus('备用 Token 已保存；点击“测试连接”可检查当前 GitHub 连接');
     } catch (e) {
       showStatus('保存失败,请重试', true);
@@ -173,7 +181,8 @@
   async function clearToken() {
     $('clear').disabled = true;
     try {
-      await fetch('/secrets/' + KEY, { method: 'DELETE' });
+      var response = await fetch('/secrets/' + KEY, { method: 'DELETE' });
+      if (response.status !== 204) throw new Error('clear-failed');
       showStatus('已清除');
     } catch (e) {
       showStatus('清除失败,请重试');

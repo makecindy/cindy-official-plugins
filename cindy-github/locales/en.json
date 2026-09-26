@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "Built-in GitHub service plugin for issues, pull requests, reviews, repositories, Actions, releases, search, and 117 catalogued operations. It supports github.com only, prefers your computer's GitHub login, and falls back to an optional Personal Access Token injected only by the host.",
-  "whenToUse": "Use for github.com repositories and links; use GitLab for GitLab instances. Handles issues, pull requests, reviews, merges, repositories, Actions, releases, search, and logs. The host prefers your GitHub login; if unavailable, sign in or configure a fallback token in plugin details.",
+  "description": "Manage GitHub repositories, issues, pull requests, and Actions in Cindy. Supports github.com.",
+  "whenToUse": "Use for github.com repositories and links; use GitLab for GitLab instances. Handles issues, pull requests, reviews, merges, repositories, Actions, releases, search, and logs. Use the computer’s GitHub login first. Connect your account or configure a fallback token in plugin details.",
   "tools": {
     "list_tools": {
       "description": "List this plugin's 117 GitHub operations across issues, pulls, repo, commits, actions, releases, search, users, orgs, events, notifications, gists, git_data, reactions, and meta. With no category, return category names, counts, and descriptions; with a category, return every operation in that category with its description and parameters."

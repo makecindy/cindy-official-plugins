@@ -63,10 +63,10 @@ function encPath(p) {
 
 /** HTTP 状态 → 人话(401 到这里 = token 没填或已失效)。 */
 function classifyStatus(status, bodySnippet) {
-  if (status === 401) return 'GitHub token 未配置或已失效,请用户到主界面侧边栏「插件」→「GitHub」详情页填入 Personal Access Token';
+  if (status === 401) return 'GitHub 授权未配置或已失效，请到「插件」→「GitHub」详情页重新连接账号，或更换备用 Token';
   if (status === 403) {
     if (bodySnippet && bodySnippet.indexOf('rate limit') >= 0) return 'GitHub 接口限流(HTTP 403 rate limit),请稍后重试';
-    return '没有权限(HTTP 403,token scope 不够或无该仓库权限):' + bodySnippet;
+    return '此操作没有权限(HTTP 403)，请检查仓库访问权及授权范围；账号的其他功能可能仍可使用：' + bodySnippet;
   }
   if (status === 404) return '对象不存在或无访问权(HTTP 404)';
   if (status === 422) return 'GitHub 拒绝了请求参数(HTTP 422):' + bodySnippet;
