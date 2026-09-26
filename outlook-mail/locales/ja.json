@@ -1,0 +1,13 @@
+{
+  "name": "Outlook メール",
+  "description": "Cindy が管理する OAuth と Microsoft Graph を通じて、Outlook と Microsoft 365 メールを検索、閲覧、送信、下書き、整理します。先にプラグイン設定でアカウントを接続してください。",
+  "whenToUse": "Outlook、Hotmail、Live、Microsoft 365（中国 21Vianet を含む）のアカウント接続、メールの検索・閲覧・送信・下書き・整理に使用。",
+  "tools": {
+    "outlook_accounts": {
+      "description": "グローバル版と中国版の接続済みアカウント、地域別の既定アカウントとアプリ設定を一覧表示します。複数アカウントを同時接続できます。profile_account を指定すると、Graph からそのアカウントの mail と user_principal_name を読み取ります。サインイン名は受信アドレスとは限りません。mail が null の場合は推測しないでください。メール本文やトークンは取得しません。"
+    },
+    "outlook_mail": {
+      "description": "検索、閲覧、送信、下書き、フォルダー一覧、既読／未読、移動。書き込みはユーザーの明確な指示が必要。送信前に送信元・宛先・本文を確認。成功は受付のみで配達確認ではありません。結果が unknown の場合は再実行前にメールボックスを確認。閲覧で既読にはしません。ページ情報はアカウントと操作に紐付きます。Microsoft クラウド専用。他社やオンプレミス Exchange は非対応。"
+    }
+  }
+}

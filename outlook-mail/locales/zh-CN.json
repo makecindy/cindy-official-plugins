@@ -1,0 +1,13 @@
+{
+  "name": "Outlook 邮箱",
+  "description": "搜索、阅读、发送、起草和整理 Outlook 与 Microsoft 365 邮件。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
+  "whenToUse": "需要连接 Outlook、Hotmail、Live 或 Microsoft 365 企业邮箱，查询、阅读、发送、起草或整理邮件时使用，包括世纪互联中国区微软托管邮箱。",
+  "tools": {
+    "outlook_accounts": {
+      "description": "同时列出全球版和世纪互联中国区的已连接账号、各区默认账号及应用配置状态。支持多账号同时登录；可传 profile_account，通过只读 Graph 查询该账号的 mail 与 user_principal_name。登录名不一定是收信地址，mail 为空时不要猜测。不读取邮件、不返回令牌。"
+    },
+    "outlook_mail": {
+      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Outlook Mail",
+  "description": "Search, read, send, draft and organize Outlook and Microsoft 365 email through Cindy Host-managed OAuth and Microsoft Graph. Connect an account in plugin settings first.",
+  "whenToUse": "Use for Outlook, Hotmail, Live and Microsoft 365 email, including 21Vianet China: connect accounts, find, read, send, draft and organize mail.",
+  "tools": {
+    "outlook_accounts": {
+      "description": "List connected accounts, per-cloud defaults and application setup for global and China services. Multiple accounts can stay signed in. Optionally pass profile_account to read that account’s mail and user_principal_name from Graph. A sign-in name is not necessarily a receiving address; do not guess when mail is null. No mail is read and no tokens are returned."
+    },
+    "outlook_mail": {
+      "description": "Search, read, send, draft, list folders, mark read/unread or move messages. Writes require explicit user intent; verify sender, recipients and content before sending. Send success means accepted, not delivered. If execution_status is unknown, inspect the mailbox before retrying. Reading does not mark read. Pagination binds to account/action. Microsoft cloud mailboxes only; no other providers or on-premises Exchange."
+    }
+  }
+}
