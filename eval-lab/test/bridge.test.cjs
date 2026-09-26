@@ -13,6 +13,17 @@ function bridge(initial={root:'/selected'},catalog={ok:true,models:[{id:'test-mo
  return {calls,replies,runs,get config(){return cfg;},tool:m=>onMessage(m),ui:(id,action,args={})=>bc.onmessage({data:{type:'request',id,action,args}}),cindy};
 }
 const args={questions:['audio@v2'],configurations:[configuration]};
+test('online install forwards opaque receipts and rejects an old path-only host',async()=>{
+ for(const modern of [true,false]){
+  const b=bridge(),hash='a'.repeat(64),request=b.cindy.node.request;
+  b.cindy.node.request=async x=>x.method==='online_plan'?{ok:true,result:{artifacts:[{sha256:hash,bytes:6,url:'https://github.com/file'}]}}:request(x);
+  b.cindy.downloads={start:async()=>modern?{ok:true,token:'host-receipt'}:{ok:true,path:'/private/host/file'},cancel:async()=>({ok:true})};
+  await b.ui('download','online_install',{indexId:'index',question:'audio@v2'});
+  const call=b.calls.find(x=>x.method==='online_install');
+  if(modern){assert.deepEqual({...call.downloadTokens},{['artifact_'+hash]:'host-receipt'});assert.equal(call.params.requireHostDownloads,true);assert.equal(call.params.hostArtifacts,undefined);}
+  else {assert.equal(call,undefined);assert.equal(b.replies.at(-1).ok,false);}
+ }
+});
 test('one coordinator uses exact route, isolated workspace and stable keys; duplicate clicks do not pay twice',async()=>{
  const b=bridge();await Promise.all([b.ui('same','start',args),b.ui('same','start',args)]);assert.equal(b.calls.filter(x=>x.send).length,1);assert.equal(b.calls.filter(x=>x.create).length,1);assert.equal(b.calls.find(x=>x.create).create.isolatedWorkspace,true);assert.equal(b.calls.find(x=>x.create).create.route.providerId,'own-account');assert.equal(b.calls.find(x=>x.method==='prepare').params.executionChannel,'Orca Worker');assert.equal(b.calls.filter(x=>x.task).length,0);
  await b.ui('newclick','start',args);assert.equal(b.replies.at(-1).ok,false);assert.equal(b.calls.filter(x=>x.send).length,1);

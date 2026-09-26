@@ -15,9 +15,10 @@ test('download verifies, deduplicates runtimes, freezes versions, works offline;
  await fs.unlink(path.join(root,'online/artifacts',h+'.zip'));index.questions[0].title='New';indexText=JSON.stringify(index);const last=await svc.inspect({root,url});corrupt=true;await assert.rejects(svc.install({...p,indexId:last.indexId}),/integrity/);assert.equal((await svc.banks({root})).length,2);
  index.questions[0].title='Host downloaded';indexText=JSON.stringify(index);const hostIndex=await svc.inspect({root,url});
  const planned=await svc.plan({root,indexId:hostIndex.indexId,question:q.key});assert.equal(planned.artifacts[0].sha256,h);
- const hostArgs={root,indexId:hostIndex.indexId,question:q.key,hostArtifacts:{}};
- await assert.rejects(svc.install(hostArgs),/Host artifact/);
- const hostResult=await svc.install({...hostArgs,hostArtifacts:{[h]:archive}});assert.ok(await fs.stat(hostResult.bank));
+ const hostArgs={root,indexId:hostIndex.indexId,question:q.key,requireHostDownloads:true};
+ await assert.rejects(svc.install(hostArgs),/更新 Cindy/);
+ await assert.rejects(svc.install({...hostArgs,downloads:{}}),/Host artifact/);
+ const hostResult=await svc.install({...hostArgs,downloads:{['artifact_'+h]:archive}});assert.ok(await fs.stat(hostResult.bank));
  const invalid=structuredClone(index);invalid.questions[0].layers[0].mount='../escape';assert.throws(()=>validate(invalid,url));
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });

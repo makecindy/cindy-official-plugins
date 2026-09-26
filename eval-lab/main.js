@@ -144,7 +144,7 @@ async function recordBatchError(j,e){
  await saveBatch(j);
 }
 async function readyConfig(){const c=await config();if(c.root)return c;const saved=await updateConfig(c=>c.root||c.profile?c:{...c,profile:crypto.randomUUID()});if(saved.root)return saved;const r=await checked(cindy.node.request({method:'defaults',params:{profile:saved.profile},timeoutMs:30000}));return {...saved,root:r.result.root,automaticRoot:true};}
-async function node(method,args={},callId){const c=await readyConfig();const r=await checked(cindy.node.request({method,params:{...args,root:c.root,bank:c.bank,importedBanks:c.importedBanks||[]},...(callId?{callId}:{}),timeoutMs:120000,maxTotalMs:900000}));return r.result;}
+async function node(method,args={},callId,downloadTokens){const c=await readyConfig();const r=await checked(cindy.node.request({method,params:{...args,root:c.root,bank:c.bank,importedBanks:c.importedBanks||[]},...(callId?{callId}:{}),...(downloadTokens?{downloadTokens}:{}),timeoutMs:120000,maxTotalMs:900000}));return r.result;}
 const DEFAULT_INDEX='https://github.com/makecindy/eval-bank/releases/download/eval-bank-20260925/index.json';
 const defaultCatalog=fetch('bank/catalog.json').then(r=>{if(!r.ok)throw Error('Default catalog unavailable');return r.json();});
 function progress(message){channel.postMessage({type:'progress',message});}
@@ -154,16 +154,17 @@ async function installQuestion(args){
  if(!cindy.downloads?.start)throw Error('请更新 Cindy 开发版以使用题库下载');
  downloadBusy=true;downloadCancelled=false;
  try{
- const plan=await node('online_plan',args),hostArtifacts={};
+ const plan=await node('online_plan',args),downloadTokens={};
  for(const a of plan.artifacts){
   if(downloadCancelled)throw Error('下载已取消');
   activeDownload='bank-'+a.sha256;
   const r=await checked(cindy.downloads.start({id:activeDownload,url:a.url,sha256:a.sha256,bytes:a.bytes}));
-  hostArtifacts[a.sha256]=r.path;
+  if(typeof r.token!=='string')throw Error('请更新 Cindy 以使用受管下载');
+  downloadTokens['artifact_'+a.sha256]=r.token;
  }
  if(downloadCancelled)throw Error('下载已取消');
  channel.postMessage({type:'download-progress',phase:'unpacking'});
- const result=await node('online_install',{...args,hostArtifacts});
+ const result=await node('online_install',{...args,requireHostDownloads:true},undefined,downloadTokens);
  if(downloadCancelled)throw Error('下载已取消');
  channel.postMessage({type:'download-progress',phase:'ready'});
  return result;
