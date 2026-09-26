@@ -61,6 +61,11 @@ async function testConnection() {
 }
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(manifest.minCindyVersion, '0.1.64');
+  assert.equal('slots' in manifest, false);
+  assert.equal(manifest.notify, true);
+  assert.equal(manifest.fs, true);
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
   assert.equal(manifest.version, '1.2.8');
   assert.deepEqual(auth, {
