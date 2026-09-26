@@ -89,7 +89,9 @@ async function advanceCoordinator(j){
    const w=matches.length===1?matches[0]:null;
    if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&w.lastTurnEndedAt&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
     // Persist the failure and exact observed terminal before freeing its slot.
-    item.terminalReceipt={workerId:w.worker_id,sessionId:w.session_id,completedAt:w.lastTurnEndedAt,status:w.status};await saveBatch(j);
+    item.terminalReceipt={...item.telemetry,workerId:w.worker_id,sessionId:w.session_id,completedAt:w.lastTurnEndedAt,status:w.status,provenance:'host-team-observed'};
+    if(!item.result)await node('record_failure',{runId:item.runId,reason:item.error,receipt:item.terminalReceipt});
+    await saveBatch(j);
     const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:w.lastTurnEndedAt});
     if(release.ok){item.released=true;await saveBatch(j);}else item.releaseReason=release.message;
    }
@@ -150,10 +152,11 @@ const DEFAULT_INDEX='https://github.com/makecindy/eval-bank/releases/download/ev
 const defaultCatalog=fetch('bank/catalog.json').then(r=>{if(!r.ok)throw Error('Default catalog unavailable');return r.json();});
 function progress(message){channel.postMessage({type:'progress',message});}
 let downloadCancelled=false,downloadBusy=false,activeDownload=null;
-async function installQuestion(args){
+async function installQuestion(args,fromLaunch=false){
+ if(fromLaunch&&launchCancelled)throw Error('已停止准备。');
  if(downloadBusy)throw Error('题库正在准备，请稍候');
  if(!cindy.downloads?.start)throw Error('请更新 Cindy 开发版以使用题库下载');
- downloadBusy=true;downloadCancelled=false;
+ downloadBusy=true;if(!fromLaunch)downloadCancelled=false;
  try{
  const plan=await node('online_plan',args),downloadTokens={};
  for(const a of plan.artifacts){
@@ -181,8 +184,9 @@ async function resolveQuestions(wanted){
   if(matches.length&&identities.size===1){resolved.push(matches[0].key);continue;}
   if(key.includes(':'))throw Error('所选题库版本不可用，请重新选择题库。');
   if(!remote){progress('正在准备默认题库…');try{remote=await node('online_inspect',{url:c.indexUrl||DEFAULT_INDEX});}catch(e){throw Error('题库版本无法核对，请检查网络后重试；不会自动选择其他缓存版本。');}}
+  if(launchCancelled&&launching)throw Error('已停止准备。');
   progress('正在下载并校验：'+key);
-  const installed=await installQuestion({indexId:remote.indexId,question:key});
+  const installed=await installQuestion({indexId:remote.indexId,question:key},true);
   const after=(await node('bank')).questions,q=after.find(q=>q.key==='online:'+installed.bank.split(/[\\/]/).pop()+':'+installed.key);
   if(!q)throw Error('下载的题目不可用，请检查题库后重试。');resolved.push(q.key);
  }
@@ -268,7 +272,7 @@ async function action(name,args={},callId){
  if(name==='status'){await checkAuthor();let models=[],modelError=null;try{models=await readModels();}catch(e){modelError=e.message;}void advanceBatch().catch(()=>{});const c=await readyConfig();const job=jobView(c.batch);const bank=await node('bank');const defaults=(await defaultCatalog).map(d=>{const matches=bank.questions.filter(q=>q.key===d.key||(q.key.startsWith('online:')&&q.key.endsWith(':'+d.key)));const identities=new Set(matches.map(q=>q.distributionHash));return {...d,...(identities.size===1?matches[0]:{}),key:d.key,unresolved:identities.size>1};});const extra=bank.questions.filter(q=>!defaults.some(d=>q.key===d.key||(q.key.startsWith('online:')&&q.key.endsWith(':'+d.key))));return {configured:true,models,modelError,modelsUpdatedAt:modelError?null:new Date().toISOString(),automaticRoot:!c.root||c.automaticRoot,bank:{questions:[...defaults,...extra]},banks:[{id:'default',name:'Cindy 实战题库',questions:defaults},...(c.importedBanks||[]).map(b=>({id:'imported:'+b.id,name:b.name,error:bank.errors?.find(e=>e.id===b.id)?.message,questions:bank.questions.filter(q=>q.key.startsWith('imported:'+b.id+':'))})),...extra.filter(q=>!q.key.startsWith('imported:')).map(q=>({id:q.key,name:(c.draftNames||{})[q.key.split('@')[0].replace('custom:','')]||q.title,questions:[q]}))],runs:await node('runs'),drafts:await node('drafts'),job:job||c.job||null,indexUrl:c.indexUrl||DEFAULT_INDEX};}
  if(name==='save_source'){await updateConfig(c=>({...c,indexUrl:args.url}));return {ok:true};}
  if(name==='start'){
-  if(launching)throw Error('评测正在准备，请勿重复启动');launching=true;launchCancelled=false;
+  if(launching)throw Error('评测正在准备，请勿重复启动');launching=true;launchCancelled=false;downloadCancelled=false;
   try{
    await taskCapability();const current=await config();if(['running','stopping'].includes(current.batch?.status))throw Error('已有评测正在运行，请先等待或停止。');
    if(!Array.isArray(args.questions)||!args.questions.length)throw Error('至少选择一道题');

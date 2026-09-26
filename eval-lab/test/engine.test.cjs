@@ -34,3 +34,19 @@ test('coordinator parallel capacity and explicit concurrency are frozen in plan'
   await assert.rejects(dispatch('coordinator_plan',{root,id:'invalid',items:[],concurrency:0}),/正整数/);
  }finally{await fs.rm(root,{recursive:true});}
 });
+
+test('ungraded terminal failures survive reload without replacing existing scores',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-failed-run-'));
+ try{
+  const dir=path.join(root,'eval-lab-data/runs/failed-run');await fs.mkdir(dir,{recursive:true});
+  const run={runId:'failed-run',batchId:'old-batch',title:'Fixture',status:'prepared',questionId:'fixture',revision:'v1',model:'model',provider:'fixture',harness:'codex',effort:'high'};
+  await fs.writeFile(path.join(dir,'run.json'),JSON.stringify(run));
+  const p={root,runId:run.runId,reason:'private diagnostic /local/path',receipt:{workerId:'w',sessionId:'s',completedAt:2000,status:'error'}};
+  await dispatch('record_failure',p);await dispatch('record_failure',p);await dispatch('record_failure',{...p,receipt:{...p.receipt,usage:{costUSD:1}}});
+  const rows=await dispatch('runs',{root});assert.equal(rows[0].status,'failed');assert.equal(rows[0].score,null);assert.equal(rows[0].batchId,'old-batch');assert.ok(!JSON.stringify(rows).includes('/local/path'));
+  const stored=JSON.parse(await fs.readFile(path.join(dir,'run.json')));assert.equal(stored.reason,p.reason);assert.deepEqual(stored.terminalReceipt,p.receipt);
+  await assert.rejects(dispatch('record_failure',{...p,receipt:{...p.receipt,sessionId:'other'}}),/conflict/);
+  const result={...run,status:'graded',score:0.5,scoreExact:'1/2'};await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(result));
+  await dispatch('record_failure',p);assert.equal((await dispatch('runs',{root}))[0].scoreExact,'1/2');assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir,'result.json'))),result);
+ }finally{await fs.rm(root,{recursive:true,force:true});}
+});

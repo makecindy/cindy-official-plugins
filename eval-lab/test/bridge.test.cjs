@@ -212,3 +212,30 @@ test('ambiguous or active failed workers never release slots',async()=>{
   b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:flags.duplicate?[w,{...w,worker_id:'other'}]:[w]});await b.ui('poll','query');assert.equal(b.calls.filter(x=>x.releaseWorker).length,0);assert.equal(b.calls.filter(x=>x.method==='grade').length,0);
  }
 });
+
+test('stop while inspecting the index prevents all later download and task work',async()=>{
+ const b=bridge(),request=b.cindy.node.request;let finish,entered;
+ const waiting=new Promise(r=>entered=r),inspect=new Promise(r=>finish=r);
+ b.cindy.node.request=async x=>{
+  if(x.method==='bank')return {ok:true,result:{questions:[]}};
+  if(x.method==='online_inspect'){entered();await inspect;return {ok:true,result:{indexId:'index'}};}
+  return request(x);
+ };
+ b.cindy.downloads={start:async()=>{b.calls.push({download:true});return {ok:true,token:'receipt'};}};
+ const start=b.ui('start','start',args);await waiting;
+ await b.ui('stop','cancel');finish();await start;
+ assert.equal(b.calls.filter(x=>x.download||x.create||['online_plan','online_install'].includes(x.method)).length,0);
+ assert.equal(b.config.batch,undefined);
+});
+test('failure persistence precedes release and a write failure keeps the slot',async()=>{
+ for(const reject of [false,true]){
+  const b=bridge();await b.ui('start','start',args);const request=b.cindy.node.request;
+  b.cindy.node.request=async x=>{if(x.method==='record_failure'&&reject){b.calls.push(x);throw Error('disk unavailable');}return request(x);};
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b,{status:'error',lastTurnEndedAt:2000})]});
+  await b.ui('poll','query');
+  const saved=b.calls.findIndex(x=>x.method==='record_failure'),released=b.calls.findIndex(x=>x.releaseWorker);
+  assert.ok(saved>=0);assert.equal(b.calls[saved].params.receipt.status,'error');
+  if(reject){assert.equal(released,-1);assert.match(b.config.batch.message,/disk unavailable/);}
+  else {assert.ok(released>saved);await b.ui('again','query');assert.equal(b.calls.filter(x=>x.method==='record_failure').length,1);}
+ }
+});
