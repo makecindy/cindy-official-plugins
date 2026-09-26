@@ -14,7 +14,7 @@ test('browser paste/copy reach scoped bridge; focus and capability checks preven
   const el={},document={activeElement:el},alerts=[],requests=[];
   const context={window:{alert:m=>alerts.push(m)},document,location:{hash:'#'+bridge.fragment.replace(/=\d+\./,'=1.'),pathname:'/simulators/'+udid},URLSearchParams,AbortSignal,
    fetch:(url,options)=>{assert.equal(url,'/clipboard','fragment port must never select a network destination');const promise=fetch(new URL(url,bridge.base),{...options,headers:{...options.headers,Origin:origin}});requests.push(promise);return promise;}};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../../baguette-simulator/vendor/baguette-v0.1.98-macOS-arm64/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js'),'utf8'),context);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js'),'utf8'),context);
   const keyboard=new context.window.Baguette._Keyboard({}, {_dispatch(){throw Error('Must not reach broken upstream path');}});keyboard._el=el;
   let prevented=false;keyboard._handlePaste({clipboardData:{getData:()=> '测试 clipboard 🙂\nsecond line'},preventDefault(){prevented=true;}});
   await requests[0];while(keyboard._inputPending)await new Promise(r=>setImmediate(r));assert.equal(prevented,true);assert.deepEqual(actions[0],{action:'paste',text:'测试 clipboard 🙂\nsecond line',udid});
