@@ -26,6 +26,14 @@ async function coordinatorApprovalBlocked(j){
 async function advanceCoordinator(j){
  try{
   if(j.stopRequestedAt&&(!j.controlRun||!j.stopSent))return await stopBatch(j);
+  if(j.status==='stopping'){
+   const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
+   if(!team.ok)throw Error('无法核对协同状态');
+   const stopRun=await cindy.tasks.getRun({runId:j.controlRun.runId});
+   if(terminalRun(stopRun)&&!team.leadWorking&&!team.waitingForUser&&!team.workers.some(workerPending)){j.status='cancelled';j.phase='cancelled';j.message='评测已停止，已完成成绩保留。';for(const item of j.items.filter(x=>!doneItem(x)))item.status='cancelled';}
+   else {j.phase='stopping';j.message='等待主任务停止回执；未确认前不会开始新批次。';}
+   await saveBatch(j);return jobView(j);
+  }
   if(!cindy.tasks.startTeam||!cindy.tasks.getTeam)throw Error('请更新 Cindy 以使用主任务协调评测');
   if(!j.coordinator){
    j.coordinator=await cindy.tasks.create({requestKey:j.id+':coordinator',title:'评测主任务 · '+j.items.length+' 份作答',route:taskRoute(j.items[0].config),isolatedWorkspace:true});
@@ -60,12 +68,6 @@ async function advanceCoordinator(j){
   for(const item of j.items){const w=team.workers.find(w=>w.label===workerLabel(item.runId));if(w)item.telemetry={acceptedAt:w.acceptedAt,startedAt:w.startedAt,completedAt:w.lastTurnEndedAt||w.completedAt,timingBasis:w.timingBasis,usage:w.usage};}
   if(team.waitingForUser){j.phase='awaiting_confirmation';j.message='评测主任务正在等待你的确认。请在侧栏打开评测主任务处理确认；插件不会代替你批准或自动催办。';await saveBatch(j);return jobView(j);}
   if(j.status!=='stopping'&&await coordinatorApprovalBlocked(j))return jobView(j);
-  if(j.status==='stopping'){
-   const stopRun=await cindy.tasks.getRun({runId:j.controlRun.runId});
-   if(terminalRun(stopRun)&&!team.leadWorking&&!team.workers.some(workerPending)){j.status='cancelled';j.phase='cancelled';j.message='评测已停止，已完成成绩保留。';for(const item of j.items.filter(x=>!doneItem(x)))item.status='cancelled';}
-   else {j.phase='stopping';j.message='等待主任务停止回执；未确认前不会开始新批次。';}
-   await saveBatch(j);return jobView(j);
-  }
   for(const item of j.items.filter(x=>!doneItem(x))){
    const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
    if(matches.length>1){item.status='blocked';item.error='同一作答出现多个 Worker，需主任务核对，不自动计分';continue;}
@@ -176,18 +178,18 @@ async function installQuestion(args,fromLaunch=false){
  }catch(e){channel.postMessage({type:'download-progress',phase:downloadCancelled?'cancelled':'failed'});throw e;}
  finally{downloadBusy=false;activeDownload=null;}
 }
-async function resolveQuestions(wanted){
+async function resolveQuestions(wanted,fromLaunch=false){
  const c=await readyConfig(),available=(await node('bank')).questions,resolved=[];let remote;
  for(const key of wanted){
-  if(launchCancelled&&launching)throw Error('已停止准备。');
+  if(fromLaunch&&launchCancelled)throw Error('已停止准备。');
   const matches=available.filter(q=>q.key===key||(!key.includes(':')&&q.key.startsWith('online:')&&q.key.endsWith(':'+key)));
   const identities=new Set(matches.map(q=>q.distributionHash));
   if(key.includes(':')&&matches.length&&identities.size===1&&matches.every(q=>q.key===key)){resolved.push(matches[0].key);continue;}
   if(key.includes(':'))throw Error('所选题库版本不可用，请重新选择题库。');
   if(!remote){progress('正在准备默认题库…');try{remote=await node('online_inspect',{url:c.indexUrl||DEFAULT_INDEX});}catch(e){throw Error('题库版本无法核对，请检查网络后重试；不会自动选择其他缓存版本。');}}
-  if(launchCancelled&&launching)throw Error('已停止准备。');
+  if(fromLaunch&&launchCancelled)throw Error('已停止准备。');
   progress('正在下载并校验：'+key);
-  const installed=await installQuestion({indexId:remote.indexId,question:key},true);
+  const installed=await installQuestion({indexId:remote.indexId,question:key},fromLaunch);
   const after=(await node('bank')).questions,q=after.find(q=>q.key==='online:'+installed.bank.split(/[\\/]/).pop()+':'+installed.key);
   if(!q)throw Error('下载的题目不可用，请检查题库后重试。');resolved.push(q.key);
  }
@@ -218,7 +220,7 @@ async function stopBatch(j){
   }
   j.status=pending?'stopping':'cancelled';j.phase=j.status;j.message=pending?'等待任务停止回执；已完成成绩保留。':'评测已停止，已完成成绩保留。';await saveBatch(j);return jobView(j);
  }
- if(!j.controlRun){j.status='cancelled';j.phase='cancelled';j.message='已停止准备，没有派发新的作答。';for(const i of j.items.filter(x=>!doneItem(x)))i.status='cancelled';await saveBatch(j);return jobView(j);}
+ if(!j.controlRun&&!j.plan){j.status='cancelled';j.phase='cancelled';j.message='已停止准备，没有派发新的作答。';for(const i of j.items.filter(x=>!doneItem(x)))i.status='cancelled';await saveBatch(j);return jobView(j);}
  j.status='stopping';j.phase='stopping';j.message='正在停止评测，已完成的作答和成绩保留。';await saveBatch(j);
  if(!j.stopSent){await coordinatorMessage(j,'用户要求停止本批评测。停止派发新题；通过 Orca 停止本批仍在执行的 Worker，保留已完成结果与文件，并报告停止结果。','stop');j.stopSent=true;await saveBatch(j);}
  return jobView(j);
@@ -304,7 +306,7 @@ async function action(name,args={},callId){
    const models=await readModels();const configurations=args.configurations;
    if(!Array.isArray(configurations)||!configurations.length)throw Error('请选择模型和强度');
    const chosen=[...new Map(configurations.map(x=>{const row=models.find(m=>m.model===x.model&&m.harness===x.harness&&m.provider===x.provider&&m.efforts.includes(x.effort));if(!row)throw Error('模型目录已变化，请重新读取并选择');const c={model:row.model,harness:row.harness,provider:row.provider,effort:x.effort};return [JSON.stringify(c),c];})).values()];
-   const questions=await resolveQuestions([...new Set(args.questions)]);if(questions.length*chosen.length>200)throw Error('单批最多 200 份作答，请分批运行');
+   const questions=await resolveQuestions([...new Set(args.questions)],true);if(questions.length*chosen.length>200)throw Error('单批最多 200 份作答，请分批运行');
    const concurrency=args.concurrency??null;if(concurrency!==null&&(!Number.isInteger(concurrency)||concurrency<1))throw Error('同时作答数必须为正整数');
    if(launchCancelled)return {id:'preparation',status:'cancelled',phase:'cancelled',total:0,finished:0,items:[],message:'已停止准备。'};
    const batch={concurrency,id:crypto.randomUUID(),mode:'coordinator',status:'running',createdAt:new Date().toISOString(),items:questions.flatMap(question=>chosen.map(config=>({runId:crypto.randomUUID(),question,config,status:'pending'})))};
@@ -331,7 +333,7 @@ async function action(name,args={},callId){
   if(!current||!['running','stopping','needs_attention'].includes(current.status))return launching?{id:'preparation',status:'cancelled',phase:'cancelled',total:0,finished:0,items:[],message:'已停止准备。'}:jobView(current);
   const saved=await updateConfig(c=>{if(c.batch?.id!==current.id)throw Error('评测批次已变化');return {...c,batch:{...c.batch,stopRequestedAt:Date.now(),status:'stopping',phase:'stopping',message:'已收到停止请求，正在结束当前操作；不再准备后续题目。'}};});
   const job=jobView(saved.batch);channel.postMessage({type:'job-progress',job});
-  if(!advancing)void stopBatch(saved.batch).catch(e=>progress('停止未完成：'+e.message));return job;
+  if(!advancing)void advanceBatch().catch(e=>progress('停止未完成：'+e.message));return job;
  }
  if(name==='cancel_download'){downloadCancelled=true;if(activeDownload)await cindy.downloads.cancel({id:activeDownload});return {ok:true};}
  if(name==='online_install')return installQuestion(args);

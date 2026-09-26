@@ -310,3 +310,37 @@ test('failed calibration is terminal, visible, and does not run again on polling
  for(const id of ['s1','s2']){await b.ui(id,'status');assert.equal(b.replies.at(-1).result.author.status,'failed');assert.equal(b.replies.at(-1).result.author.error,'invalid draft');}
  assert.equal(count,1);await b.ui('new','author',{records:[]});assert.equal(b.replies.at(-1).ok,true);
 });
+
+test('independent prepare ignores a previous page cancellation',async()=>{
+ for(const action of ['cancel','cancel_download']){
+  const b=bridge();await b.ui('cancel',action);
+  await b.tool({type:'tool-call',tool:'prepare_run',callId:'prepare',args:{question:'audio@v2',...configuration}});
+  assert.equal(b.calls.at(-1).ok,true);assert.ok(b.calls.some(x=>x.method==='prepare'));
+ }
+});
+test('lost start receipt is not proof of no dispatch: stop waits for host terminal and team idle',async()=>{
+ const b=bridge(),send=b.cindy.tasks.send;let first=true;
+ b.cindy.tasks.send=async x=>{const result=await send(x);if(first){first=false;throw Error('transport lost after acceptance');}return result;};
+ await b.ui('start','start',args);assert.ok(b.config.batch.plan);assert.equal(b.config.batch.controlRun,undefined);
+ await b.ui('cancel','cancel');await b.ui('observe','query');
+ assert.equal(b.config.batch.status,'stopping');assert.ok(b.config.batch.controlRun);assert.equal(b.config.batch.stopSent,true);
+ const sends=b.calls.filter(x=>x.send);assert.equal(sends.length,2);assert.match(sends[1].send.text,/停止本批评测/);
+ b.runs.get(b.config.batch.controlRun.runId).status='completed';
+ await b.ui('still-active','query');assert.equal(b.config.batch.status,'stopping');
+ b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[]});
+ await b.ui('idle','query');assert.equal(b.config.batch.status,'cancelled');assert.equal(b.calls.filter(x=>x.send).length,2);
+});
+test('failed automatic calibration leaves the same draft available to the explicit calibration tool',async()=>{
+ const b=bridge({root:'/selected',author:{id:'existing-draft',revision:'v1',runId:'done',status:'running'}}),request=b.cindy.node.request;
+ b.runs.set('done',{status:'completed'});let failed=true;
+ b.cindy.node.request=async x=>{if(x.method==='calibrate'){if(failed)throw Error('temporary disk failure');assert.equal(x.params.id,'existing-draft');return {ok:true,result:{checkId:'retry-check',ok:true}};}return request(x);};
+ await b.ui('status','status');assert.equal(b.config.author.status,'failed');failed=false;
+ await b.tool({type:'tool-call',tool:'calibrate_question',callId:'retry',args:{id:'existing-draft',revision:'v1'}});
+ assert.equal(b.calls.at(-1).ok,true);assert.equal(b.calls.at(-1).result.checkId,'retry-check');assert.equal(b.calls.filter(x=>x.send||x.method==='draft').length,0);
+});
+test('a lead awaiting confirmation is not a quiescent stopped team',async()=>{
+ const b=bridge();await b.ui('start','start',args);await b.ui('stop','cancel');await b.ui('observe','query');
+ b.runs.get(b.config.batch.controlRun.runId).status='completed';
+ b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,waitingForUser:true,workers:[]});
+ await b.ui('waiting','query');assert.equal(b.config.batch.status,'stopping');
+});
