@@ -5,7 +5,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const zlib = require('node:zlib');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const SERVICE = 'gmail';
@@ -17,6 +16,18 @@ let runtime;
 let schemaPromise;
 
 function failure(message, execution = 'not_executed') { return { ok: false, execution, message }; }
+function cleanup(directory, result) {
+  try { fs.rmSync(directory, { recursive: true, force: true }); }
+  catch (_) {
+    const warning = 'Temporary mail files could not be removed; they remain in the private worker directory until cleanup succeeds. Do not repeat a write to clean up files.';
+    // Housekeeping must never replace the known business-operation receipt.
+    if (result.ok) {
+      const data = result.data;
+      result = { ...result, data: { ...(data && typeof data === 'object' && !Array.isArray(data) ? data : { output: data }), cleanupWarning: warning } };
+    } else result = { ...result, message: result.message + ' ' + warning };
+  }
+  return result;
+}
 function digest(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 function initialize() {
   if (runtime) return runtime;
@@ -25,9 +36,7 @@ function initialize() {
   const key = platform + '-' + arch;
   const expected = binaries[key];
   if (!expected) throw new Error('Unsupported operating system or architecture');
-  const compressed = fs.readFileSync(path.join(root, 'vendor/gog', key + '.br'));
-  if (digest(compressed) !== expected.compressedSha256) throw new Error('Bundled gog checksum mismatch');
-  const bytes = zlib.brotliDecompressSync(compressed, { maxOutputLength: 128 * 1024 * 1024 });
+  const bytes = fs.readFileSync(path.join(root, 'vendor/gog', key + (platform === 'windows' ? '.exe' : '')));
   if (digest(bytes) !== expected.sha256) throw new Error('Bundled gog executable checksum mismatch');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-gog-'));
   fs.chmodSync(directory, 0o700);
@@ -48,7 +57,7 @@ function environment(home, token) {
   return env;
 }
 
-async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution) {
+async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution, timeoutMs = 100000) {
   const state = initialize();
   const home = fs.mkdtempSync(path.join(state.directory, 'call-'));
   return new Promise((resolve) => {
@@ -62,10 +71,10 @@ async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution) {
       child = spawn(state.binary, ['--home', home, '--json', '--no-input', ...argv], {
         cwd: cwd || home, env: environment(home, token), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       });
-    } catch (_) { fs.rmSync(home, { recursive: true, force: true }); resolve(failure('Unable to start gog')); return; }
+    } catch (_) { resolve(cleanup(home, failure('Unable to start gog'))); return; }
     children.add(child);
     child.once('spawn', () => { started = true; if (execution) execution.started = true; });
-    const timer = setTimeout(() => { reason = 'gog timed out; do not retry a write without checking its result'; child.kill('SIGKILL'); }, 100000);
+    const timer = setTimeout(() => { reason = 'gog timed out; do not retry a write without checking its result'; child.kill('SIGKILL'); }, timeoutMs);
     function read(chunk, error) {
       size += Buffer.byteLength(chunk);
       if (size > maxOutput) { reason = 'Result too large; narrow the query. A write may already have completed.'; child.kill('SIGKILL'); return; }
@@ -77,13 +86,14 @@ async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution) {
     child.once('error', () => { reason = 'Unable to run gog'; });
     child.once('close', (code) => {
       clearTimeout(timer); children.delete(child);
-      fs.rmSync(home, { recursive: true, force: true });
       const redact = (value) => token ? value.split(token).join('[REDACTED]') : value;
       if (reason || code !== 0) {
-        resolve(failure(redact(reason || stderr || 'gog failed'), started ? 'unknown' : 'not_executed')); return;
+        resolve(cleanup(home, failure(redact(reason || stderr || 'gog failed'), started ? 'unknown' : 'not_executed'))); return;
       }
-      try { resolve({ ok: true, execution: 'executed', data: JSON.parse(redact(stdout)) }); }
-      catch (_) { resolve({ ok: true, execution: 'executed', data: redact(stdout) }); }
+      let data;
+      try { data = JSON.parse(redact(stdout)); }
+      catch (_) { data = redact(stdout); }
+      resolve(cleanup(home, { ok: true, execution: 'executed', data }));
     });
   });
 }
@@ -140,6 +150,147 @@ function optionValue(key, item, directory) {
   }
   return item;
 }
+
+function draftReadBack(data, draftId) {
+  const draft = data && data.draft;
+  const message = draft && draft.message;
+  if (!draft || draft.id !== draftId || !message || !message.id || !message.payload) throw new Error('Incomplete draft read-back');
+  const header = (part, name) => (part.headers || []).filter(h => h.name.toLowerCase() === name).map(h => h.value).join('\n');
+  const headers = {};
+  for (const name of ['from', 'to', 'cc', 'bcc', 'subject', 'message-id', 'in-reply-to', 'references']) headers[name] = header(message.payload, name);
+  const bodies = { 'text/plain': [], 'text/html': [] };
+  const attachments = [];
+  function walk(part) {
+    const body = part.body || {};
+    const disposition = header(part, 'content-disposition');
+    const contentId = header(part, 'content-id');
+    if (part.filename || /^(attachment|inline)\b/i.test(disposition) || contentId) {
+      attachments.push({ filename: part.filename || '', mimeType: part.mimeType, bytes: body.size,
+        attachmentId: body.attachmentId || null, disposition, contentId });
+    } else if (bodies[part.mimeType] && typeof body.data === 'string') {
+      bodies[part.mimeType].push(Buffer.from(body.data, 'base64url').toString('utf8'));
+    }
+    for (const child of part.parts || []) walk(child);
+  }
+  walk(message.payload);
+  return { status: 'read_back', draftId, messageId: message.id, threadId: message.threadId || null,
+    headers, bodyText: bodies['text/plain'].join('\n'), bodyHtml: bodies['text/html'].join('\n'), attachments };
+}
+
+async function readSavedDraft(result, command, token, cwd) {
+  if (!result.ok || command.length !== 2 || command[0] !== 'drafts' ||
+      !['create', 'update', 'reply', 'reply-all', 'forward'].includes(command[1])) return result;
+  const data = result.data;
+  const draftId = data && data.draftId;
+  // Preserve the successful write receipt even when its subsequent read fails.
+  // Never rerun a mutation to recover a missing/oversized read-back.
+  let readBack = { status: 'unavailable', message: 'Draft saved, but read-back unavailable. Read drafts get before reporting it verified; do not recreate it.' };
+  try {
+    if (typeof draftId === 'string' && draftId && !draftId.startsWith('-') && !draftId.includes('\0')) {
+      const fetched = await execute([SERVICE, 'drafts', 'get', draftId, '--readonly'], token, cwd, MAX_OUTPUT, undefined, 10000);
+      if (fetched.ok) readBack = draftReadBack(fetched.data, draftId);
+    }
+  } catch (_) { /* The write already succeeded; retain its receipt. */ }
+  return { ...result, data: { ...data, readBack } };
+}
+
+function encodeHeader(value) {
+  const text = String(value || '');
+  if (/[\u0000-\u001f\u007f]/.test(text)) throw new Error('Mail headers cannot contain control characters');
+  return text.trim();
+}
+// RFC 2047 words stay below 75 bytes and never split a UTF-8 character.
+function encodeWords(value) {
+  const text = encodeHeader(value);
+  if (!/[^\x20-\x7e]/.test(text) && text.length <= 60) return text;
+  const chunks = [];
+  let chunk = '';
+  for (const character of text) {
+    if (Buffer.byteLength(chunk + character) > 42) { chunks.push(chunk); chunk = ''; }
+    chunk += character;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map(item => '=?UTF-8?B?' + Buffer.from(item).toString('base64') + '?=').join('\r\n ');
+}
+function addressHeader(value) {
+  const text = encodeHeader(value);
+  const addresses = [];
+  let start = 0, quoted = false, escaped = false;
+  for (let i = 0; i <= text.length; i++) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (quoted && ch === '\\') { escaped = true; continue; }
+    if (ch === '"') quoted = !quoted;
+    if ((ch === ',' && !quoted) || i === text.length) {
+      const item = text.slice(start, i).trim();
+      const match = /^(.*?)<([^<>]+)>$/.exec(item);
+      const address = match ? match[2].trim() : item;
+      // Display names can be international; mailbox syntax remains unambiguous.
+      if (!/^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(address)) {
+        throw new Error('Use comma-separated mailboxes, optionally Name <address>');
+      }
+      let name = match ? match[1].trim() : '';
+      if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1).replace(/\\(.)/g, '$1');
+      const phrase = /[^\x20-\x7e]/.test(name) || name.length > 60 ? encodeWords(name) : '"' + name.replace(/["\\]/g, '\\$&') + '"';
+      addresses.push(name ? phrase + ' <' + address + '>' : address);
+      start = i + 1;
+    }
+  }
+  if (quoted || escaped) throw new Error('Unclosed recipient display name');
+  return addresses.join(',\r\n ');
+}
+function wrap(value) { const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8"); return bytes.toString("base64").replace(/(.{76})/g, "$1" + String.fromCharCode(13,10)); }
+function buildInlineMessage(options, cwd) {
+  const images = options['inline-images'];
+  if (!Array.isArray(images) || !images.length) return null;
+  const supported = new Set(['inline-images', 'from', 'to', 'cc', 'bcc', 'reply-to', 'subject', 'body', 'body-html', 'in-reply-to', 'references', 'thread-id', 'attach']);
+  for (const key of Object.keys(options)) {
+    if (!supported.has(key)) throw new Error('Unsupported inline-send option: ' + key);
+  }
+  const from = addressHeader(options.from);
+  const to = addressHeader(options.to);
+  const subject = encodeWords(options.subject);
+  const html = String(options['body-html'] || '');
+  const body = String(options.body || '');
+  if (!from || !to || !subject || !html || !body) throw new Error('Inline send requires from, to, subject, body and body-html');
+  const boundary = 'cindy-' + crypto.randomUUID();
+  const lines = ['From: ' + from, 'To: ' + to];
+  for (const [name, header] of [['cc', 'Cc'], ['bcc', 'Bcc'], ['reply-to', 'Reply-To']]) {
+    if (options[name]) lines.push(header + ': ' + addressHeader(options[name]));
+  }
+  lines.push('Subject: ' + subject);
+  if (options['in-reply-to']) lines.push('In-Reply-To: ' + encodeHeader(options['in-reply-to']));
+  if (options.references) lines.push('References: ' + encodeHeader(options.references));
+  const attachments = options.attach === undefined ? [] : Array.isArray(options.attach) ? options.attach : [options.attach];
+  lines.push('MIME-Version: 1.0');
+  if (attachments.length) lines.push('Content-Type: multipart/mixed; boundary="mixed-' + boundary + '"', '', '--mixed-' + boundary);
+  lines.push('Content-Type: multipart/related; boundary="' + boundary + '"', '');
+  lines.push('--' + boundary, 'Content-Type: multipart/alternative; boundary="alt-' + boundary + '"', '',
+    '--alt-' + boundary, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(body,'utf8')), '',
+    '--alt-' + boundary, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap(Buffer.from(html,'utf8')), '',
+    '--alt-' + boundary + '--');
+  images.forEach((image, index) => {
+    if (!image || typeof image.path !== 'string' || typeof image.hash !== 'string') throw new Error('Invalid inline image');
+    const cid = 'img' + (index + 1) + '@cindy.local';
+    if (!html.includes('cid:' + cid)) throw new Error('body-html must reference cid:' + cid + ' in inline-images order');
+    const file = localPath(image.path, cwd);
+    const bytes = fs.readFileSync(file);
+    if (digest(bytes) !== image.hash) throw new Error('Inline image changed before send');
+    const type = typeof image.contentType === 'string' && /^image\/[a-z0-9.+-]+$/i.test(image.contentType) ? image.contentType : 'application/octet-stream';
+    lines.push('', '--' + boundary, 'Content-Type: ' + type, 'Content-Transfer-Encoding: base64',
+      'Content-ID: <' + cid + '>', 'Content-Disposition: inline; filename="image-' + (index + 1) + '"', '', wrap(bytes));
+  });
+  lines.push('', '--' + boundary + '--', '');
+  for (const attachment of attachments) {
+    const file = localPath(attachment, cwd);
+    const filename = encodeURIComponent(path.basename(file)).replace(/['()*]/g, ch => '%' + ch.charCodeAt(0).toString(16));
+    lines.push('--mixed-' + boundary, 'Content-Type: application/octet-stream', 'Content-Transfer-Encoding: base64',
+      "Content-Disposition: attachment; filename*=UTF-8''" + filename, '', wrap(fs.readFileSync(file)), '');
+  }
+  if (attachments.length) lines.push('--mixed-' + boundary + '--', '');
+  return lines.join(String.fromCharCode(13,10));
+}
+
 async function handle(message, execution) {
   const params = message.params || {};
   const tree = await schema();
@@ -152,9 +303,15 @@ async function handle(message, execution) {
   if (typeof token !== 'string' || !token) return failure('No Host-issued account token');
   const values = params.arguments || [];
   if (!Array.isArray(values) || values.length > 100 || values.some((value) => typeof value !== 'string' || value.startsWith('-') || value.includes('\0'))) return failure('Invalid positional arguments');
-  const options = params.options || {};
+  let options = params.options || {};
   if (!options || typeof options !== 'object' || Array.isArray(options)) return failure('Invalid options');
   const cwd = typeof params.workdir === 'string' && path.isAbsolute(params.workdir) ? params.workdir : undefined;
+  let inlineMessage;
+  if (options['inline-images']) {
+    if (command.join(' ') !== 'send' || params.readOnly !== false) return failure('Inline images require an explicitly writable send');
+    inlineMessage = buildInlineMessage(options, cwd);
+    options = options['thread-id'] === undefined ? {} : { 'thread-id': options['thread-id'] };
+  }
   const positionals = [...values];
   if ((SERVICE === 'drive' && command[0] === 'upload') || (SERVICE === 'gmail' && command[0] === 'import')) positionals[0] = localPath(positionals[0], cwd);
   const needsOutput = (SERVICE === 'drive' && command[0] === 'download') || (SERVICE === 'sheets' && command[0] === 'export') || (SERVICE === 'gmail' && command[0] === 'attachment' && options.inline !== true);
@@ -177,7 +334,32 @@ async function handle(message, execution) {
   // Native --force only after the Agent's invocation is approved by Cindy.
   argv.push('--force');
   if (params.readOnly !== false) argv.push('--readonly');
-  return execute(argv, token, cwd, MAX_OUTPUT, execution);
+  // gog requires the selected mailbox identity for raw mail with direct tokens.
+  // This comes from the same Host OAuth account used by authAccount, not From
+  // or caller options (which cannot override account/global flags).
+  if (inlineMessage !== undefined || options['raw-file'] !== undefined) {
+    if (typeof params.accountEmail !== 'string' || !/^[^\s<>@]+@[^\s<>@]+$/.test(params.accountEmail)) {
+      return failure('Selected account email unavailable; reconnect this Gmail account');
+    }
+    argv.push('--account=' + params.accountEmail);
+  }
+  let temporaryDirectory;
+  let result;
+  try {
+    if (inlineMessage !== undefined) {
+      // The existing runtime directory also has a process-exit cleanup handler.
+      temporaryDirectory = fs.mkdtempSync(path.join(initialize().directory, 'inline-'));
+      const rawPath = path.join(temporaryDirectory, 'message.eml');
+      fs.writeFileSync(rawPath, inlineMessage, { mode: 0o600, flag: 'wx' });
+      argv.push('--raw-file=' + rawPath);
+    }
+    result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
+  } catch (_) {
+    result = failure('Unable to execute command; check its schema and workspace paths', execution && execution.started ? 'unknown' : 'not_executed');
+  } finally {
+    if (temporaryDirectory) result = cleanup(temporaryDirectory, result);
+  }
+  return readSavedDraft(result, command, token, cwd);
 }
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {

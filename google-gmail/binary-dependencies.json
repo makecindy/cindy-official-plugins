@@ -13,8 +13,7 @@
           "files": [
             {
               "source": "gog",
-              "target": "vendor/gog/darwin-amd64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/darwin-amd64"
             }
           ],
           "platforms": [
@@ -28,8 +27,7 @@
           "files": [
             {
               "source": "gog",
-              "target": "vendor/gog/darwin-arm64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/darwin-arm64"
             }
           ],
           "platforms": [
@@ -43,8 +41,7 @@
           "files": [
             {
               "source": "gog",
-              "target": "vendor/gog/linux-amd64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/linux-amd64"
             }
           ],
           "platforms": [
@@ -58,8 +55,7 @@
           "files": [
             {
               "source": "gog",
-              "target": "vendor/gog/linux-arm64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/linux-arm64"
             }
           ],
           "platforms": [
@@ -73,8 +69,7 @@
           "files": [
             {
               "source": "gog.exe",
-              "target": "vendor/gog/windows-amd64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/windows-amd64.exe"
             }
           ],
           "platforms": [
@@ -88,8 +83,7 @@
           "files": [
             {
               "source": "gog.exe",
-              "target": "vendor/gog/windows-arm64.br",
-              "encoding": "brotli"
+              "target": "vendor/gog/windows-arm64.exe"
             }
           ],
           "platforms": [

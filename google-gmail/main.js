@@ -66,6 +66,82 @@ var googleAccountMetadata = (function () {
 var SECRET_KEY = 'gmail_account';
 var PLUGIN_NAME = 'Gmail';
 function fail(message) { return { ok: false, message: message }; }
+// Host grants contain hashes, not filesystem paths. Read only those grants
+// through the plugin media protocol, then use the existing workdir file bridge.
+async function prepareMailAttachments(args, callId) {
+  var options = Object.assign({}, args.options || {});
+  var hashes = args.attachments || [];
+  var inputs = options.attach === undefined ? [] : Array.isArray(options.attach) ? options.attach.slice() : [options.attach];
+  var refs = inputs.filter(function (item) { return typeof item === 'string' && item.startsWith('cindy-media:'); });
+  if (!hashes.length && !refs.length) return { options: options, files: [] };
+  if (!Array.isArray(hashes) || hashes.some(function (hash) { return typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash); })) {
+    throw new Error('Invalid media grant; pass attachments through ghost_call.');
+  }
+  var command = (args.command || []).join(' ');
+  if (!['send', 'reply', 'reply-all', 'drafts create', 'drafts update', 'drafts reply', 'drafts reply-all'].includes(command)) {
+    throw new Error('This command cannot add chat attachments. Use drafts create/update/reply, then send the saved draft.');
+  }
+  var context = args.session_context;
+  if (!context || context.workdir_is_local !== true || context.workdir_is_read_only !== false || !context.workdir || typeof cindy.fs !== 'function') {
+    throw new Error('Chat attachments need a writable local task directory and Cindy 0.1.92 or newer.');
+  }
+  var extensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'm4a', 'ogg', 'glb'];
+  var preferred = {};
+  refs.forEach(function (ref) {
+    var match = /^cindy-media:\/\/blobs\/([a-f0-9]{64})\.([a-z0-9]+)$/.exec(ref);
+    if (!match || !hashes.includes(match[1]) || !extensions.includes(match[2])) {
+      throw new Error('Media URL has no matching Host grant; pass it in ghost_call attachments too.');
+    }
+    preferred[match[1]] = match[2];
+  });
+  if (options['clear-attachments']) throw new Error('Chat attachments cannot be combined with clear-attachments.');
+  var inline = options['inline-images'];
+  if (inline !== undefined && (!Array.isArray(inline) || !inline.length || inline.some(function (item) { return typeof item !== 'string'; }))) {
+    throw new Error('inline-images must be a non-empty list of granted image hashes.');
+  }
+  if (inline && command !== 'send') throw new Error('Draft commands cannot embed new images. Save them as normal attachments, or send only after explicit permission.');
+  if (inline && options['raw-file']) throw new Error('Do not combine inline-images with a caller-supplied raw-file.');
+  var directory = 'gmail-attachments/' + crypto.randomUUID();
+  var files = [];
+  var total = 0;
+  for (var hash of new Set(hashes)) {
+    var response;
+    var extension = undefined;
+    // The grant protocol omits extensions. A supplied media URL avoids probing;
+    // otherwise look up this granted hash in the Host's supported media types.
+    for (var ext of preferred[hash] ? [preferred[hash]] : extensions) {
+      // Same-origin Host protocol, not an external network request.
+      // serveGhostMedia checks ghostCanRead (including ghost-tool-grant) before
+      // reading bytes. The HTTPS bridge is not used for this local protocol.
+      response = await fetch('/media/' + hash + '.' + ext);
+      if (response.ok) { extension = ext; break; }
+      if (response.status !== 404) throw new Error('Unable to read chat attachment; check the plugin media service.');
+    }
+    if (!extension) throw new Error('Chat attachment unavailable; attach the file again before retrying.');
+    var blob = await response.blob();
+    total += blob.size;
+    if (!blob.size || blob.size > 16 * 1024 * 1024 || total > 25 * 1024 * 1024) {
+      throw new Error('Chat attachment exceeds import limits (16 MiB per file, 25 MiB total); use a smaller file or a cloud link.');
+    }
+    var bytes = new Uint8Array(await blob.arrayBuffer());
+    var digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    if (digest !== hash) throw new Error('Chat attachment integrity check failed; attach the file again.');
+    var chunks = [];
+    for (var i = 0; i < bytes.length; i += 32768) chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)));
+    var relativePath = directory + '/attachment-' + (files.length + 1) + '.' + extension;
+    var saved = await cindy.fs({ op: 'write', root: 'workdir', path: relativePath,
+      encoding: 'base64', content: btoa(chunks.join('')), callId: callId });
+    if (!saved || !saved.ok) throw new Error('Unable to import chat attachment into the task directory; check file permissions.');
+    files.push({ path: relativePath, bytes: bytes.length, hash: hash, contentType: blob.type || 'application/octet-stream' });
+  }
+  var inlineSet = new Set(inline || []);
+  var embedded = (inline || []).map(function (hash) { return files.find(function (file) { return file.hash === hash; }); });
+  if (embedded.some(function (file) { return !file; })) throw new Error('Every inline image must also be a granted chat attachment.');
+  var regular = files.filter(function (file) { return !inlineSet.has(file.hash); });
+  options.attach = inputs.filter(function (item) { return !refs.includes(item); }).concat(regular.map(function (file) { return file.path; }));
+  delete options['inline-images'];
+  return { options: options, files: files, inline: embedded };
+}
 async function listAccounts() {
   var response;
   try {
@@ -110,7 +186,7 @@ async function selectGoogleAccount(accountId) {
   if (account.status !== 'connected' || account.scope_stale === true) {
     return fail('尚未执行：账号 ' + (account.email || account.id) + ' 授权已失效或权限不足，请到插件详情页重新连接此账号。');
   }
-  return { ok: true, accountId: account.id };
+  return { ok: true, accountId: account.id, accountEmail: account.email };
 }
 (function () {
   var PREFIX = 'gmail';
@@ -119,6 +195,7 @@ async function selectGoogleAccount(accountId) {
     var args = message.args || {};
     var isSchema = message.tool === PREFIX + '_schema';
     var context = args.session_context;
+    var workerRequested = false;
     try {
       if (message.tool === PREFIX + '_accounts') {
         var listed = await listAccounts();
@@ -132,7 +209,7 @@ async function selectGoogleAccount(accountId) {
       }
       if (!cindy.node || typeof cindy.node.request !== 'function' || (!isSchema && !context)) {
         await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
-          message: '尚未执行：当前 Cindy 缺少此功能所需的插件运行接口，请升级至 0.1.82 或更新版本。账号列表仍可使用。' });
+          message: '尚未执行：当前 Cindy 缺少此功能所需的插件运行接口，请升级至 0.1.92 或更新版本。账号列表仍可使用。' });
         return;
       }
       if (!isSchema) {
@@ -143,11 +220,17 @@ async function selectGoogleAccount(accountId) {
         }
         args = Object.assign({}, args, { account: selected.accountId });
       }
+      var prepared = isSchema ? { options: args.options || {}, files: [], inline: [] } : await prepareMailAttachments(args, message.callId);
+      if (prepared.inline && prepared.inline.length) {
+        prepared.options = Object.assign({}, prepared.options, { 'inline-images': prepared.inline });
+      }
+      workerRequested = true;
       var response = await cindy.node.request({
         method: isSchema ? 'schema' : 'run',
         authAccount: args.account,
         params: {
-          command: args.command || [], arguments: args.arguments || [], options: args.options || {},
+          command: args.command || [], arguments: args.arguments || [], options: prepared.options,
+          accountEmail: !isSchema ? selected.accountEmail : undefined,
           workdir: context && context.workdir_is_local === true ? context.workdir : undefined,
           readOnly: !context || context.workdir_is_read_only !== false,
         },
@@ -160,11 +243,15 @@ async function selectGoogleAccount(accountId) {
         return;
       }
       var result = response.result;
+      if (result.ok && prepared.files.length && result.data && typeof result.data === 'object') {
+        result.data.importedAttachments = prepared.files;
+      }
       await cindy.send({ type: 'tool-result', callId: message.callId, ok: !!result.ok,
         ...(result.ok ? { result: result.data } : { message: '[' + result.execution + '] ' + result.message }) });
-    } catch (_error) {
+    } catch (error) {
       await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
-        message: 'Unable to complete Google operation. If execution started, check the result before retrying.' });
+        message: workerRequested ? '[unknown] Unable to complete Google operation; check its result before retrying a write.'
+          : '[not_executed] ' + (error.message || 'Unable to prepare Gmail operation; check account and attachment inputs.') });
     }
   });
 })();
