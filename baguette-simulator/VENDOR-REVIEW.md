@@ -65,3 +65,5 @@ The host release binary is built with Swift `-Osize`, stripped with the standard
 ## Review follow-up
 
 `screen-pieces.js` chooses the closest rendered quad for off-screen drag coordinates, preserving the appropriate Duo half instead of always using piece zero. Tests exercise both halves, reversed piece order, single-screen and empty-screen input. The private-set clipboard fallback reads back exact UTF-8 bytes with `simctl pbpaste` before Command-V; mismatch or unreadable contents return `unknown` without pasting. Readback preserves whitespace and never includes clipboard contents in failure messages.
+
+Live `screen_quad.litPanel` changes now notify the page input mapper, synchronizing primary/portrait and secondary/landscape-left before subsequent taps or drags. Duplicate metadata preserves manual rotation; obsolete stream callbacks are rejected. The callback survives model/retry attachment. A production-stream/page-mapper regression covers opening, closing, manual rotation, invalid panel names and stale streams.

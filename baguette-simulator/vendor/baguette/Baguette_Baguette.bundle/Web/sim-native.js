@@ -490,6 +490,13 @@
   let foldable = false;
   let currentLitPanel = 'primary';
 
+  function syncLitPanel(panel) {
+    if (!foldable || (panel !== 'primary' && panel !== 'secondary') || panel === currentLitPanel) return;
+    currentLitPanel = panel;
+    currentOrientation = panel === 'secondary' ? 'landscape-left' : 'portrait';
+    orientationIndex = Math.max(0, orientationCycle().indexOf(currentOrientation));
+  }
+
   function resetToPortrait() {
     if (deviceMode) return; // a physical phone rotates itself
     fetch('/simulators/' + encodeURIComponent(udid) + '/orientation?value=portrait',
@@ -2254,6 +2261,7 @@
           format: currentFormat(),
           background: live3DBackground(),
           fixed,
+          onLitPanelChange: syncLitPanel,
           onFps: (fps) => {
             const status = document.getElementById('nativeStatus');
             if (status) status.textContent = fps + ' fps · 3D';

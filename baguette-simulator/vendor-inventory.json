@@ -371,8 +371,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-3d.js",
-    "bytes": 49391,
-    "sha256": "ab04898e7c81be99988d87691dfa0d7919fa68ede51117f031e94af2fef1b2b3"
+    "bytes": 49713,
+    "sha256": "b897372c29685bed3c1b0e003215af29df7381eea606360f503f5ee300b15b25"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-ax-inspector.js",
@@ -416,8 +416,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-native.js",
-    "bytes": 123840,
-    "sha256": "d032f9287bfee7a134e72a9d45fa0bde6ddf4cb0f062063c696c0728cfa80f94"
+    "bytes": 124219,
+    "sha256": "2d45bde13522ea0e780efa1db10aefa65077ef87e0b3cc6e908b9e5ae5afcc4f"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-network.js",

@@ -34,6 +34,7 @@
     this.saving = false;
     this.deviceSize = { width: 1, height: 1 };
     this.onFps = null;
+    this.onLitPanelChange = null;
     this.pointer = null;
     this.interactiveScreen = null;
     // Where the screen mesh currently lands in the rendered image
@@ -61,6 +62,7 @@
     options = options || {};
     this.deviceSize = options.deviceSize || this.deviceSize;
     this.onFps = options.onFps || null;
+    this.onLitPanelChange = options.onLitPanelChange || this.onLitPanelChange;
     this.format = options.format === 'avcc' ? 'avcc' : 'mjpeg';
     this.background = options.background || this.background;
     if (options.fixed) this.setFixed(true, { silent: true });
@@ -402,7 +404,11 @@
           // One quad for a phone; a foldable's lit screen in pieces.
           const pieces = window.Baguette._ScreenPieces.fromMessage(envelope);
           this.screenQuad = pieces.length ? pieces : null;
-          if (envelope.litPanel) this.litPanel = envelope.litPanel;
+          if ((envelope.litPanel === 'primary' || envelope.litPanel === 'secondary') &&
+              envelope.litPanel !== this.litPanel) {
+            this.litPanel = envelope.litPanel;
+            if (this.onLitPanelChange) this.onLitPanelChange(this.litPanel);
+          }
           this.placeButtons(Array.isArray(envelope.buttons) ? envelope.buttons : []);
           this.placePosePicker(envelope.pose || null);
           return true;

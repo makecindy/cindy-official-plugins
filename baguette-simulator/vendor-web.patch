@@ -102,7 +102,18 @@
 -<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
 --- a/sim-3d.js
 +++ b/sim-3d.js
-@@ -1163 +1163 @@
+@@ -36,0 +37 @@
++    this.onLitPanelChange = null;
+@@ -63,0 +65 @@
++    this.onLitPanelChange = options.onLitPanelChange || this.onLitPanelChange;
+@@ -405 +407,5 @@
+-          if (envelope.litPanel) this.litPanel = envelope.litPanel;
++          if ((envelope.litPanel === 'primary' || envelope.litPanel === 'secondary') &&
++              envelope.litPanel !== this.litPanel) {
++            this.litPanel = envelope.litPanel;
++            if (this.onLitPanelChange) this.onLitPanelChange(this.litPanel);
++          }
+@@ -1163 +1169 @@
 -    return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
 +    return window.CSS && CSS.escape ? CSS.escape(value) : Array.from(String(value), (char) => '\\' + char.codePointAt(0).toString(16) + ' ').join('');
 --- a/sim-location.js
@@ -120,20 +131,30 @@
 +    cursor: default;
 --- a/sim-native.js
 +++ b/sim-native.js
-@@ -1695 +1695 @@
+@@ -491,0 +492,7 @@
++
++  function syncLitPanel(panel) {
++    if (!foldable || (panel !== 'primary' && panel !== 'secondary') || panel === currentLitPanel) return;
++    currentLitPanel = panel;
++    currentOrientation = panel === 'secondary' ? 'landscape-left' : 'portrait';
++    orientationIndex = Math.max(0, orientationCycle().indexOf(currentOrientation));
++  }
+@@ -1695 +1702 @@
 -      row.innerHTML = clusterSvg('gauge') + '<span>' + label + '</span>' +
 +      row.innerHTML = clusterSvg('gauge') + '<span class="tb-label"></span>' +
-@@ -1696,0 +1697 @@
+@@ -1696,0 +1704 @@
 +      row.querySelector('.tb-label').textContent = label;
-@@ -1704 +1705,2 @@
+@@ -1704 +1712,2 @@
 -      row.innerHTML = clusterSvg('codec') + '<span>' + label + '</span>';
 +      row.innerHTML = clusterSvg('codec') + '<span class="tb-label"></span>';
 +      row.querySelector('.tb-label').textContent = label;
-@@ -1717 +1719 @@
+@@ -1717 +1726 @@
 -        '<span>' + label + '</span>' +
 +        '<span class="tb-label"></span>' +
-@@ -1718,0 +1721 @@
+@@ -1718,0 +1728 @@
 +    row.querySelector('.tb-label').textContent = label;
+@@ -2253,0 +2264 @@
++          onLitPanelChange: syncLitPanel,
 --- a/stream-session.js
 +++ b/stream-session.js
 @@ -40,0 +41 @@
