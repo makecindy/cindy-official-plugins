@@ -495,6 +495,7 @@
     currentLitPanel = panel;
     currentOrientation = panel === 'secondary' ? 'landscape-left' : 'portrait';
     orientationIndex = Math.max(0, orientationCycle().indexOf(currentOrientation));
+    if (render3DPanel) render3DPanel.setInterfaceOrientation(currentOrientation);
   }
 
   function resetToPortrait() {

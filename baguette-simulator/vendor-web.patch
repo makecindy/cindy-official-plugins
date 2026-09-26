@@ -131,29 +131,30 @@
 +    cursor: default;
 --- a/sim-native.js
 +++ b/sim-native.js
-@@ -491,0 +492,7 @@
+@@ -491,0 +492,8 @@
 +
 +  function syncLitPanel(panel) {
 +    if (!foldable || (panel !== 'primary' && panel !== 'secondary') || panel === currentLitPanel) return;
 +    currentLitPanel = panel;
 +    currentOrientation = panel === 'secondary' ? 'landscape-left' : 'portrait';
 +    orientationIndex = Math.max(0, orientationCycle().indexOf(currentOrientation));
++    if (render3DPanel) render3DPanel.setInterfaceOrientation(currentOrientation);
 +  }
-@@ -1695 +1702 @@
+@@ -1695 +1703 @@
 -      row.innerHTML = clusterSvg('gauge') + '<span>' + label + '</span>' +
 +      row.innerHTML = clusterSvg('gauge') + '<span class="tb-label"></span>' +
-@@ -1696,0 +1704 @@
+@@ -1696,0 +1705 @@
 +      row.querySelector('.tb-label').textContent = label;
-@@ -1704 +1712,2 @@
+@@ -1704 +1713,2 @@
 -      row.innerHTML = clusterSvg('codec') + '<span>' + label + '</span>';
 +      row.innerHTML = clusterSvg('codec') + '<span class="tb-label"></span>';
 +      row.querySelector('.tb-label').textContent = label;
-@@ -1717 +1726 @@
+@@ -1717 +1727 @@
 -        '<span>' + label + '</span>' +
 +        '<span class="tb-label"></span>' +
-@@ -1718,0 +1728 @@
+@@ -1718,0 +1729 @@
 +    row.querySelector('.tb-label').textContent = label;
-@@ -2253,0 +2264 @@
+@@ -2253,0 +2265 @@
 +          onLitPanelChange: syncLitPanel,
 --- a/stream-session.js
 +++ b/stream-session.js
