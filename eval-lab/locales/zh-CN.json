@@ -1,0 +1,25 @@
+{
+  "name": "评测工坊",
+  "description": "运行真实项目评测，从选定任务记录出题，导出可分享成绩。",
+  "whenToUse": "运行真实项目评测，从选定任务记录出题，导出可分享成绩。",
+  "tools": {
+    "list_questions": {
+      "description": "列出默认和个人冻结题目，不启动模型。"
+    },
+    "prepare_run": {
+      "description": "为已核验配置创建独立作答目录，不启动模型。默认题目按需下载并校验；带完整版本的已安装 key 可离线准备。"
+    },
+    "list_runs": {
+      "description": "读取本地运行状态与正式评分结果。"
+    },
+    "export_report": {
+      "description": "为用户选定结果生成自包含 HTML，不含聊天、源码、路径。返回 HTML，供保存。"
+    },
+    "create_question_draft": {
+      "description": "仅根据用户明确选定的任务记录建立私人草稿，返回出题目录与规则，不自动运行模型。"
+    },
+    "calibrate_question": {
+      "description": "执行原版、参考与不完整修复三组校准；返回编号，待用户在主页面冻结。 执行题包提供的本地评分程序；仅使用可信题包。"
+    }
+  }
+}

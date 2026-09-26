@@ -2,7 +2,9 @@
   "//": "内置意识受众配置(随包分发;本仓 = cindy-official-plugin 种子根,由主仓 submodule 挂载)。种子不在 ghosts 里 = 默认 all(人人都装)。audience 取值:'all',或 { userIds: [...], emails: [...] } 任一维度命中即装;登录后才有身份,定向种子登录时装上、登出/不命中时回收。tier 取值:'builtin'(缺省,官方内置)或 'enterprise'(企业意识,设置页单列一组)——只影响分组与标签,不改变播种行为。配置解析失败 = 本种子根整轮跳过(fail-closed)。",
   "ghosts": {
     "my-browser": {
-      "audience": { "emails": [] }
+      "audience": {
+        "emails": []
+      }
     },
     "cindy-art": {
       "audience": "all"
@@ -84,6 +86,11 @@
         "emails": []
       },
       "tier": "builtin"
+    },
+    "eval-lab": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }
