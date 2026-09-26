@@ -28,3 +28,13 @@ test('download verifies, deduplicates runtimes, freezes versions, works offline;
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
 test('extractor rejects zip traversal and symlinks, enforces expanded size and executable modes',async()=>{const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'online-zip-')));try{for(const kind of ['traversal','symlink','size','normal']){const zip=path.join(root,kind+'.zip');cp.execFileSync('python3',['-c',"import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');i=zipfile.ZipInfo('../escape' if sys.argv[2]=='traversal' else 'node');i.external_attr=(0o120777 if sys.argv[2]=='symlink' else 0o100755)<<16;z.writestr(i,'data');z.close()",zip,kind]);const r=await runCommand('python3',[path.join(__dirname,'../node/unpack.py'),zip,path.join(root,kind),kind==='size'?'3':'4']);if(kind==='normal'){assert.equal(r.code,0);assert.ok((await fs.stat(path.join(root,kind,'node'))).mode&0o111);}else assert.notEqual(r.code,0);}await assert.rejects(fs.access(path.join(root,'escape')));}finally{await fs.rm(root,{recursive:true,force:true});}});
+
+test('malformed and incompatible indices show actionable errors and remove temporary downloads',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'invalid-index-'));try{
+  for(const text of ['{broken','null',JSON.stringify({format:'future'}),JSON.stringify({format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[null],artifacts:{}})]){
+   const svc=service({base:async()=>root,within,files,runCommand,fetchFile:async(u,d)=>{await fs.writeFile(d,text);return {sha256:hash(text)};}});
+   await assert.rejects(svc.inspect({root,url}),/索引损坏或不兼容.*发布源.*维护者/);
+   assert.deepEqual(await fs.readdir(path.join(root,'online')),[]);
+  }
+ }finally{await fs.rm(root,{recursive:true,force:true});}
+});

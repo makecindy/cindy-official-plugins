@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),vm=requir
 const configuration={model:'test-model',harness:'codex',provider:'own-account',effort:'high'};
 function bridge(initial={root:'/selected'},catalog={ok:true,models:[{id:'test-model',name:'Model',agent:'codex',providerId:'own-account',providerName:'My account',efforts:['low','high'],defaultEffort:'low'}]}){
  let onMessage,bc,cfg=structuredClone(initial);const calls=[],replies=[],runs=new Map(),tasks=new Map();let sequence=0;
- const cindy={library:async x=>{if(x.op==='write'){cfg=JSON.parse(x.content);return {ok:true};}return {ok:true,content:JSON.stringify(cfg)};},node:{request:async x=>{calls.push(x);let result={ok:true};if(x.method==='defaults')result={root:'/automatic'};if(x.method==='bank')result={questions:[{key:'audio@v2'}]};if(x.method==='grade'||x.method==='reconcile_result')result={status:'graded',scoreExact:'1'};if(x.method==='coordinator_state')result={path:'/state.json'};if(x.method==='coordinator_plan')result={path:'/plan.json',prompt:'Coordinate the plan.'};if(['runs','drafts'].includes(x.method))result=[];if(x.method==='prepare')result={runId:x.params.runId,workspace:x.params.workspace||'/answers/'+x.params.runId,prompt:'Read TASK.md and verify.'};return {ok:true,result};}},tasks:{
+ const cindy={downloads:{start:async()=>({ok:true,token:'fixture'})},library:async x=>{if(x.op==='write'){cfg=JSON.parse(x.content);return {ok:true};}return {ok:true,content:JSON.stringify(cfg)};},node:{request:async x=>{calls.push(x);let result={ok:true};if(x.method==='defaults')result={root:'/automatic'};if(x.method==='bank')result={questions:[{key:'online:fixture:audio@v2'}]};if(x.method==='online_inspect')result={indexId:'fixture'};if(x.method==='online_plan')result={artifacts:[]};if(x.method==='online_install')result={bank:'/bank/fixture',key:'audio@v2'};if(x.method==='grade'||x.method==='reconcile_result')result={status:'graded',scoreExact:'1'};if(x.method==='coordinator_state')result={path:'/state.json'};if(x.method==='coordinator_plan')result={path:'/plan.json',prompt:'Coordinate the plan.'};if(['runs','drafts'].includes(x.method))result=[];if(x.method==='prepare')result={runId:x.params.runId,workspace:x.params.workspace||'/answers/'+x.params.runId,prompt:'Read TASK.md and verify.'};return {ok:true,result};}},tasks:{
  capabilities:async()=>({operations:['create','send','getRun']}),
  create:async x=>{calls.push({create:x});const task={taskId:'t'+(++sequence),revision:1,resolvedConfig:x.route,workingDir:'/isolated/'+sequence,permissionMode:'auto'};tasks.set(task.taskId,task);return task;},
  setTeamPlan:async x=>{calls.push({setTeamPlan:x});return {ok:true};},releaseWorker:async x=>{calls.push({releaseWorker:x});return {ok:true};},get:async x=>tasks.get(x.taskId),startTeam:async()=>({ok:true,teamId:'team'}),getTeam:async()=>({ok:true,leadWorking:true,workers:[]}),
@@ -33,12 +33,12 @@ test('authoring is single flight and uses a random draft identity',async()=>{
  assert.equal(b.replies.at(-1).ok,false);assert.equal(b.config.author.id,original);
  assert.equal(b.calls.filter(x=>x.method==='draft').length,1);
 });
-test('ambiguous cached versions resolve through the configured index before any paid task',async()=>{
- for(const offline of [true,false]){
+test('one or multiple cached online versions resolve through the configured index before any paid task',async()=>{
+ for(const count of [1,2])for(const offline of [true,false]){
   const b=bridge(),request=b.cindy.node.request;let installed=false,inspected=0;
   const keys=['a','b'].map(c=>'online:'+c.repeat(64)+':audio@v2');
   b.cindy.node.request=async x=>{
-   if(x.method==='bank')return {ok:true,result:{questions:keys.map((key,i)=>({key,distributionHash:String(i)}))}};
+   if(x.method==='bank')return {ok:true,result:{questions:(installed?keys:keys.slice(0,count)).map((key,i)=>({key,distributionHash:String(i)}))}};
    if(x.method==='online_inspect'){inspected++;assert.equal(b.calls.filter(x=>x.create).length,0);if(offline)throw Error('Offline');return {ok:true,result:{indexId:'current'}};}
    if(x.method==='online_plan')return {ok:true,result:{artifacts:[]}};
    if(x.method==='online_install'){installed=true;assert.equal(x.params.indexId,'current');return {ok:true,result:{bank:'/bank/'+'b'.repeat(64),key:'audio@v2'}};}
@@ -238,4 +238,32 @@ test('failure persistence precedes release and a write failure keeps the slot',a
   if(reject){assert.equal(released,-1);assert.match(b.config.batch.message,/disk unavailable/);}
   else {assert.ok(released>saved);await b.ui('again','query');assert.equal(b.calls.filter(x=>x.method==='record_failure').length,1);}
  }
+});
+
+test('all stop terminal statuses settle only after the whole team is inactive',async()=>{
+ for(const status of ['completed','failed','cancelled','interrupted']){
+  const b=bridge();await b.ui('start','start',args);await b.ui('stop','cancel');await b.ui('query','query');b.runs.get('r1').status=status;
+  let active=true;b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:active,workers:[]});
+  await b.ui('active','query');assert.equal(b.config.batch.status,'stopping');
+  active=false;await b.ui('inactive','query');assert.equal(b.config.batch.status,'cancelled');
+  assert.equal(b.calls.filter(x=>x.method==='grade').length,0);
+ }
+});
+test('author records the exact request before paid dispatch and reuses it after receipt persistence fails',async()=>{
+ const b=bridge(),library=b.cindy.library,send=b.cindy.tasks.send;let fail=true;const requests=[];
+ b.cindy.library=async x=>{if(x.op==='write'&&JSON.parse(x.content).author?.runId&&fail)return {ok:false,message:'write failed'};return library(x);};
+ b.cindy.tasks.send=async x=>{assert.deepEqual(JSON.parse(JSON.stringify(b.config.author.pendingSend)),JSON.parse(JSON.stringify(x)));requests.push(x);return send(x);};
+ await b.ui('first','author',{records:[]});assert.equal(b.replies.at(-1).ok,false);assert.equal(b.config.author.status,'sending');
+ const id=b.config.author.id;fail=false;await b.ui('retry','author',{id:'different',records:[]});
+ assert.equal(b.replies.at(-1).ok,true);assert.equal(b.config.author.id,id);assert.equal(b.calls.filter(x=>x.create).length,1);
+ assert.equal(JSON.stringify(requests[0]),JSON.stringify(requests[1]));assert.ok(b.config.author.runId);assert.equal(b.config.author.pendingSend,undefined);
+});
+test('failure to persist author request prevents paid dispatch',async()=>{
+ const b=bridge(),library=b.cindy.library;b.cindy.library=async x=>x.op==='write'&&JSON.parse(x.content).author?{ok:false,message:'write failed'}:library(x);
+ await b.ui('author','author',{records:[]});assert.equal(b.replies.at(-1).ok,false);assert.equal(b.calls.filter(x=>x.send).length,0);
+});
+test('explicit cached online key works offline without querying the default index',async()=>{
+ const b=bridge(),request=b.cindy.node.request,key='online:'+ 'a'.repeat(64)+':audio@v2';
+ b.cindy.node.request=async x=>{if(x.method==='bank')return {ok:true,result:{questions:[{key,distributionHash:'a'}]}};if(x.method==='online_inspect')throw Error('must not fetch');return request(x);};
+ await b.ui('start','start',{...args,questions:[key]});assert.equal(b.replies.at(-1).ok,true);assert.equal(b.config.batch.items[0].question,key);
 });
