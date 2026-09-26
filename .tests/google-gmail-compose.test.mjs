@@ -32,7 +32,7 @@ function fixture(t, overrides = {}) {
   t.after(() => fs.rmSync(workdir, { recursive: true, force: true }));
   const calls = [], writes = [], requests = [], fetches = [], replies = [], rawMessages = [];
   const ctx = createContext({ __dirname: '/fixture', Buffer,
-    require: name => name === '../vendor/gog/binaries.json' ? {} : require(name) });
+    require: name => name === '../vendor/gog/binaries.json' ? {} : name === 'node:fs' && overrides.workerFs ? overrides.workerFs : require(name) });
   runInContext(worker, ctx);
   ctx.initialize = () => ({ directory: workdir });
   const leaf = (name, flags = []) => ({ name, flags: flags.map(name => ({ name, type: name === 'quote' ? 'bool' : 'string' })), subcommands: [] });
@@ -318,6 +318,23 @@ test('temporary raw mail is removed after failures and throws; account identity 
     const argv = f.calls[0][0];
     assert.ok(argv.includes('--account=self@example.test'));
     assert.equal(fs.existsSync(argv.find(a => a.startsWith('--raw-file=')).slice(11)), false);
+  }
+});
+
+test('raw-mail cleanup failure preserves successful receipts and unknown failures without retrying', async t => {
+  for (const receipt of [{ ok: true, execution: 'executed', data: { messageId: 'sent-test' } },
+    { ok: false, execution: 'unknown', message: 'lost receipt' }]) {
+    const f = fixture(t, { execute: async () => copy(receipt), workerFs: { ...fs, rmSync() { throw new Error('locked'); } } });
+    const result = await f.run({ command: ['send'], arguments: [], attachments: [hash], options: {
+      from: 'self@example.test', to: 'self@example.test', subject: 'Cleanup', body: 'Test',
+      'body-html': '<img src="cid:img1@cindy.local">', 'inline-images': [hash],
+    } });
+    assert.equal(result.ok, receipt.ok);
+    if (receipt.ok) {
+      assert.equal(result.result.messageId, 'sent-test');
+      assert.match(result.result.cleanupWarning, /could not be removed/);
+    } else assert.match(result.message, /^\[unknown\] lost receipt.*could not be removed/);
+    assert.equal(f.calls.length, 1);
   }
 });
 

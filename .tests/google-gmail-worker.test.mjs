@@ -5,9 +5,47 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createContext, runInContext } from 'node:vm';
 import test from 'node:test';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL('../google-gmail/node/gog.cjs', import.meta.url), 'utf8');
+
+test('child-home cleanup errors preserve every execution outcome and redact secrets', async () => {
+  for (const mode of ['success', 'text', 'nonzero', 'spawn-error', 'spawn-throw']) {
+    let launches = 0;
+    const child = new EventEmitter();
+    child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    const ctx = createContext({ __dirname: '/fixture', Buffer, process: { env: {} }, setTimeout, clearTimeout,
+      require: name => name === '../vendor/gog/binaries.json' ? {} : name === 'node:fs' ? {
+        ...fs, mkdtempSync: () => '/private/call-test', rmSync() { throw new Error('private path and secret'); },
+      } : name === 'node:child_process' ? { spawn() {
+        launches++;
+        if (mode === 'spawn-throw') throw new Error('spawn failed');
+        queueMicrotask(() => {
+          if (mode === 'spawn-error') child.emit('error', new Error('unavailable'));
+          else {
+            child.emit('spawn');
+            child.stdout.write(mode === 'text' ? 'sent token' : '{"messageId":"sent-test"}');
+            child.stderr.write('failed token');
+          }
+          child.emit('close', mode === 'nonzero' || mode === 'spawn-error' ? 1 : 0);
+        });
+        return child;
+      } } : require(name),
+    });
+    runInContext(source.split('const input = readline.createInterface')[0], ctx);
+    ctx.initialize = () => ({ directory: '/private', binary: '/gog' });
+    const result = await ctx.execute(['gmail', 'send'], 'token');
+    assert.equal(result.execution, mode.startsWith('spawn-') ? 'not_executed' : mode === 'nonzero' ? 'unknown' : 'executed');
+    assert.equal(result.ok, mode === 'success' || mode === 'text');
+    assert.match(result.ok ? result.data.cleanupWarning : result.message, /could not be removed/);
+    if (mode === 'success') assert.equal(result.data.messageId, 'sent-test');
+    if (mode === 'text') assert.equal(result.data.output, 'sent [REDACTED]');
+    assert.doesNotMatch(JSON.stringify(result), /private path|token/);
+    assert.equal(launches, 1);
+  }
+});
 
 function workerFixture() {
   const calls = [];

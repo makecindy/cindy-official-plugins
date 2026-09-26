@@ -16,6 +16,18 @@ let runtime;
 let schemaPromise;
 
 function failure(message, execution = 'not_executed') { return { ok: false, execution, message }; }
+function cleanup(directory, result) {
+  try { fs.rmSync(directory, { recursive: true, force: true }); }
+  catch (_) {
+    const warning = 'Temporary mail files could not be removed; they remain in the private worker directory until cleanup succeeds. Do not repeat a write to clean up files.';
+    // Housekeeping must never replace the known business-operation receipt.
+    if (result.ok) {
+      const data = result.data;
+      result = { ...result, data: { ...(data && typeof data === 'object' && !Array.isArray(data) ? data : { output: data }), cleanupWarning: warning } };
+    } else result = { ...result, message: result.message + ' ' + warning };
+  }
+  return result;
+}
 function digest(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 function initialize() {
   if (runtime) return runtime;
@@ -59,7 +71,7 @@ async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution, time
       child = spawn(state.binary, ['--home', home, '--json', '--no-input', ...argv], {
         cwd: cwd || home, env: environment(home, token), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       });
-    } catch (_) { fs.rmSync(home, { recursive: true, force: true }); resolve(failure('Unable to start gog')); return; }
+    } catch (_) { resolve(cleanup(home, failure('Unable to start gog'))); return; }
     children.add(child);
     child.once('spawn', () => { started = true; if (execution) execution.started = true; });
     const timer = setTimeout(() => { reason = 'gog timed out; do not retry a write without checking its result'; child.kill('SIGKILL'); }, timeoutMs);
@@ -74,13 +86,14 @@ async function execute(argv, token, cwd, maxOutput = MAX_OUTPUT, execution, time
     child.once('error', () => { reason = 'Unable to run gog'; });
     child.once('close', (code) => {
       clearTimeout(timer); children.delete(child);
-      fs.rmSync(home, { recursive: true, force: true });
       const redact = (value) => token ? value.split(token).join('[REDACTED]') : value;
       if (reason || code !== 0) {
-        resolve(failure(redact(reason || stderr || 'gog failed'), started ? 'unknown' : 'not_executed')); return;
+        resolve(cleanup(home, failure(redact(reason || stderr || 'gog failed'), started ? 'unknown' : 'not_executed'))); return;
       }
-      try { resolve({ ok: true, execution: 'executed', data: JSON.parse(redact(stdout)) }); }
-      catch (_) { resolve({ ok: true, execution: 'executed', data: redact(stdout) }); }
+      let data;
+      try { data = JSON.parse(redact(stdout)); }
+      catch (_) { data = redact(stdout); }
+      resolve(cleanup(home, { ok: true, execution: 'executed', data }));
     });
   });
 }
@@ -331,6 +344,7 @@ async function handle(message, execution) {
     argv.push('--account=' + params.accountEmail);
   }
   let temporaryDirectory;
+  let result;
   try {
     if (inlineMessage !== undefined) {
       // The existing runtime directory also has a process-exit cleanup handler.
@@ -339,11 +353,13 @@ async function handle(message, execution) {
       fs.writeFileSync(rawPath, inlineMessage, { mode: 0o600, flag: 'wx' });
       argv.push('--raw-file=' + rawPath);
     }
-    const result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
-    return readSavedDraft(result, command, token, cwd);
+    result = await execute(argv, token, cwd, MAX_OUTPUT, execution);
+  } catch (_) {
+    result = failure('Unable to execute command; check its schema and workspace paths', execution && execution.started ? 'unknown' : 'not_executed');
   } finally {
-    if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    if (temporaryDirectory) result = cleanup(temporaryDirectory, result);
   }
+  return readSavedDraft(result, command, token, cwd);
 }
 const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 input.on('line', (line) => {
