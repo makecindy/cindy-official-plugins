@@ -51,6 +51,7 @@ permission gate.
 | <img src="./cindy-notion/assets/icon.png" width="22" alt=""> | Notion | [`cindy-notion`](./cindy-notion) | Read/write Notion pages, databases, and knowledge bases |
 | <img src="./cindy-web-search/assets/icon.png" width="22" alt=""> | Web Search | [`cindy-web-search`](./cindy-web-search) | Public web search (Cindy AI by default; optional user-provided Brave / Tavily key) |
 | <img src="./world-bank-open-data/assets/icon.png" width="22" alt=""> | World Bank Open Data | [`world-bank-open-data`](./world-bank-open-data) | Public country, economic, social, and development indicators with no API key; staged rollout |
+| <img src="./eval-lab/assets/icon.png" width="22" alt=""> | Evaluation Lab | [`eval-lab`](./eval-lab) | Real-project model evaluation, personal banks and local HTML reports; staged, awaiting companion Host APIs |
 | <img src="./google-gmail/assets/icon.png" width="22" alt=""> | Gmail | [`google-gmail`](./google-gmail) | Search, read, and organize Gmail, create drafts, and send messages; host-managed OAuth |
 | <img src="./google-drive/assets/icon.png" width="22" alt=""> | Google Drive | [`google-drive`](./google-drive) | Search, read, download, upload, move, and delete Drive files |
 | <img src="./google-calendar/assets/icon.png" width="22" alt=""> | Google Calendar | [`google-calendar`](./google-calendar) | View schedules and availability; create and update meetings |

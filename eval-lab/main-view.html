@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>评测工坊</title><link rel="stylesheet" href="view.css"></head><body><main>
+<header><div><h1>评测工坊</h1><p>用真实工作，找到适合自己的模型。</p></div></header>
+<nav role="tablist" aria-label="评测页面"><button id="tab-run" role="tab" aria-selected="true" aria-controls="run-page">开始评测</button><button id="tab-history" role="tab" aria-selected="false" aria-controls="history-page">历史成绩 <span id="history-count" class="hint">0</span></button></nav><div id="status" role="status" aria-live="polite"></div>
+<section id="run-page" role="tabpanel" aria-labelledby="tab-run">
+<fieldset id="setup"><div class="field-title"><label for="bank">题库</label><button class="quiet hint" id="import">导入题库</button></div>
+<div class="bank-line"><select id="bank" aria-label="选择题库"></select></div>
+<div class="bank-info"><p class="hint" id="bank-description"></p><button id="view-bank" class="quiet">查看题目 ↗</button></div>
+<div id="freeze-section" hidden><h3>待加入的题目</h3><select id="check-id"></select><button id="freeze">加入我的题库</button></div><div class="models-section"><div class="field-title"><span id="models-label">模型</span><div class="toolbar"><button id="all-models" class="quiet">全选</button><button id="clear-models" class="quiet">清空</button></div></div>
+<p class="hint" id="model-note">正在读取已连接的模型…</p><div class="model-list" id="models" aria-labelledby="models-label"></div>
+<button id="toggle-hidden" class="quiet hint" aria-expanded="false" hidden>展开隐藏模型</button><div class="bulk"><label for="bulk-effort">批量设置思考强度</label><select id="bulk-effort"><option value="">保持各自选择</option><option value="all">所有可用强度</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Xhigh</option><option value="max">Max</option></select></div><p id="effort-note" class="note">每个模型可以选择多个强度，分别计分。</p></div>
+<div class="launch"><div><strong id="summary"></strong><p class="hint">主任务默认使用首个所选模型；协调与作答均按账号实际用量计费。</p></div><button class="primary" id="start">开始测试</button></div>
+<p id="launch-hint" class="hint"></p></fieldset><p id="launch-status" role="status" aria-live="polite"></p><button id="cancel-preparation" hidden type="button">停止准备</button>
+<div id="download-panel" hidden role="status"><p id="download-label"></p><progress id="download-meter" max="100" aria-label="题库下载进度"></progress><p id="download-detail"></p><button id="download-cancel" class="quiet" type="button">取消下载</button></div>
+
+<section id="execution" hidden aria-labelledby="job-state">
+<div class="progress-heading"><div><p id="job-config" class="hint"></p><h2 id="job-state" role="status"></h2></div><span id="job-count"></span></div>
+<progress id="job-meter" max="1" value="0" aria-label="评测完成进度"></progress>
+<div id="current-test"><p id="current-stage" class="hint"></p><h3 id="current-question"></h3><p id="current-model"></p></div>
+<div id="active-tests"></div><p id="job-usage" class="hint"></p><p id="job-note" class="hint"></p><p id="sync-state" class="hint" role="status">进度自动更新</p>
+<div class="execution-actions"><button id="allow-write" hidden class="primary">启用 Auto 并继续</button><button id="job" hidden class="primary">恢复评测</button><button id="view-results" hidden class="primary">查看成绩</button><button id="new-run" hidden>再测一轮</button><button id="cancel" class="quiet">停止评测</button></div>
+<ol id="job-items" aria-label="各份作答进度"></ol>
+
+</section>
+</section>
+<section id="history-page" role="tabpanel" aria-labelledby="tab-history" hidden>
+<div class="history-head"><div><h2>模型成绩</h2><p class="hint">选一个题库，看看谁更适合你的工作。</p></div><button id="export" class="primary">分享成绩</button></div>
+<div class="standings-controls"><select id="history-filter" aria-label="筛选历史题库"></select><div class="score-modes" role="group" aria-label="成绩统计方式"><button data-score-mode="latest" aria-pressed="true">最新成绩</button><button data-score-mode="average" aria-pressed="false">历次平均</button></div></div>
+<p id="standings-note" class="hint"></p><details id="history-advanced"><summary>高级筛选</summary><div class="history-filters"><label>题目与版本<select id="history-question"><option value="">全部现行题目</option></select></label><label>测试批次<select id="history-batch"><option value="">全部测试</option></select></label></div><p class="hint">旧版题目单独查看，不与现行题库混算。</p></details>
+<div id="history"></div><p class="hint">分享当前榜单，自动汇总有效成绩；不附聊天、源码与本机路径。</p></section>
+<footer><details id="advanced"><summary>高级设置</summary><label for="concurrency">同时作答数</label><input id="concurrency" type="number" min="1" step="1" placeholder="自动：使用全部可用 Worker 槽位"><p class="hint">留空自动使用可用并发能力；填写数字可降低并发。每完成一份，主任务自动安排下一份。</p><p id="setup-state"></p><div class="actions"><button id="pick-root">更换保存位置</button><button id="pick-bank">导入离线题库</button></div><p class="hint">更换位置不搬移或删除旧数据。默认题库支持 macOS Apple Silicon，需要 Python 3。</p><label for="bank-url">题库发布源</label><input id="bank-url" type="url"><button id="online-check">检查题库</button><div id="online-questions"></div><button id="online-download">提前下载所选题目</button><p class="hint">只接受 makecindy 的公开 GitHub Release。旧版本保留，正在进行的评测不随更新改变。</p></details></footer></main>
+<dialog id="author-dialog" aria-labelledby="author-title"><div class="dialog-head"><h2 id="author-title">创建自己的题库</h2><button class="quiet" data-close aria-label="关闭">×</button></div><p class="muted">从你做过的工作里，提取值得考模型的问题。</p><label class="form-label" for="bank-name">题库名称</label><input id="bank-name" placeholder="例如：我的前端开发日常" maxlength="60"><label class="form-label" for="source">选定的任务记录</label><textarea id="source" placeholder="粘贴或引用需求、排查过程、反复修改的片段……"></textarea><p class="hint">只使用你选定的内容。先生成草稿、校准评分，再由你加入题库。请先移除凭证与个人信息。</p><div class="dialog-actions"><button data-close>取消</button><button id="create-bank" class="primary">生成并校准题目</button></div><p class="hint" id="author-error" role="status"></p></dialog>
+<dialog id="bank-dialog" aria-labelledby="bank-title"><div class="dialog-head"><h2 id="bank-title"></h2><button class="quiet" data-close aria-label="关闭">×</button></div><p id="bank-modal-note" class="hint"></p><div id="bank-questions"></div><div class="dialog-actions"><button id="confirm-bank" class="primary">完成</button></div></dialog>
+<dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-head"><h2 id="detail-title"></h2><button class="quiet" data-close aria-label="关闭">×</button></div><p id="detail-note" class="hint"></p><div id="detail-items"></div></dialog>
+
+<script src="i18n.js"></script><script src="standings.js"></script><script src="view.js"></script></body></html>

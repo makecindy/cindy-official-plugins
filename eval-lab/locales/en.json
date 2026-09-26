@@ -1,0 +1,28 @@
+{
+  "name": "Evaluation Lab",
+  "description": "Evaluate real projects, author questions from selected task records, and export shareable results.",
+  "whenToUse": "Run model benchmarks, create personal evaluation questions from selected task records, or share evaluation results.",
+  "tools": {
+    "list_questions": {
+      "description": "List frozen default and personal questions without starting a model."
+    },
+    "prepare_run": {
+      "description": "Prepare an isolated answer workspace for a verified model configuration without starting a model."
+    },
+    "grade_run": {
+      "description": "Snapshot a completed answer and run local grader code supplied by a trusted bank; the plugin invokes this after validating the host execution receipt."
+    },
+    "list_runs": {
+      "description": "Read local execution states and independently graded results."
+    },
+    "export_report": {
+      "description": "Export selected results as standalone HTML without raw chats, source files or local paths."
+    },
+    "create_question_draft": {
+      "description": "Create a private draft from task excerpts explicitly selected by the user; do not scan other history or start a model."
+    },
+    "calibrate_question": {
+      "description": "Execute local grader code from the trusted draft against original, reference and incomplete controls; return a check ID for user freezing in the main page."
+    }
+  }
+}

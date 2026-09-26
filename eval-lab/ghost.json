@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.93",
+  "id": "eval-lab",
+  "name": "评测工坊",
+  "description": "运行真实项目评测，从自己的任务记录创建题目，导出可分享成绩。",
+  "whenToUse": "运行真实项目评测，从自己的任务记录创建题目，导出可分享成绩。",
+  "version": "1.0.0",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "list_questions",
+      "description": "列出默认和个人冻结题目，不启动模型。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "prepare_run",
+      "description": "为已核验配置创建独立作答目录，不启动模型。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "list_questions 返回的 key"
+          },
+          "model": {
+            "type": "string",
+            "description": "已核验的实际模型 ID"
+          },
+          "harness": {
+            "type": "string",
+            "description": "实际框架"
+          },
+          "effort": {
+            "type": "string",
+            "description": "实际思考强度；默认写 default"
+          },
+          "provider": {
+            "type": "string",
+            "description": "实际账号来源标签；不填凭证"
+          }
+        },
+        "required": [
+          "question",
+          "model",
+          "harness",
+          "effort",
+          "provider"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "grade_run",
+      "description": "交卷后快照并独立评分；新评测由插件根据宿主任务回执自动调用。 执行题包提供的本地评分程序；仅使用可信题包。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "prepare_run 返回编号"
+          },
+          "receipt": {
+            "type": "object",
+            "properties": {
+              "channel": {
+                "const": "Orca Worker"
+              },
+              "sessionId": {
+                "type": "string",
+                "description": "执行样本的 Orca 任务 ID"
+              },
+              "completedAt": {
+                "type": "string",
+                "description": "终态报告 UTC 时间"
+              }
+            },
+            "required": [
+              "channel",
+              "sessionId",
+              "completedAt"
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "receipt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_runs",
+      "description": "读取本地运行状态与正式评分结果。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "export_report",
+      "description": "为用户选定结果生成自包含 HTML，不含聊天、源码、路径。返回 HTML，供保存。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "runIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "runId"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "runIds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_question_draft",
+      "description": "仅根据用户明确选定的任务记录建立私人草稿，返回出题目录与规则，不自动运行模型。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "题目标识"
+          },
+          "revision": {
+            "type": "string",
+            "description": "新版本"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "description": "用户选择的任务标识"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "用户选定片段，不含凭证"
+                }
+              },
+              "required": [
+                "sessionId",
+                "text"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "records"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "calibrate_question",
+      "description": "执行原版、参考与不完整修复三组校准；返回编号，待用户在主页面冻结。 执行题包提供的本地评分程序；仅使用可信题包。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "题目标识"
+          },
+          "revision": {
+            "type": "string",
+            "description": "草稿版本"
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120
+  },
+  "command": "评测",
+  "mainView": {
+    "title": "评测工坊",
+    "icon": "chart-column",
+    "html": "main-view.html"
+  },
+  "library": true,
+  "pick": true,
+  "agent": {
+    "tasks": true
+  },
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/workflows",
+        "name": "workflows",
+        "description": "运行评测、独立评分、从选定任务出题及冻结规则"
+      }
+    ]
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "network": {
+    "hosts": [
+      "github.com",
+      "release-assets.githubusercontent.com",
+      "objects.githubusercontent.com"
+    ]
+  }
+}
