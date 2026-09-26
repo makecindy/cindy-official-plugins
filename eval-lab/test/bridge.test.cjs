@@ -344,3 +344,43 @@ test('a lead awaiting confirmation is not a quiescent stopped team',async()=>{
  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,waitingForUser:true,workers:[]});
  await b.ui('waiting','query');assert.equal(b.config.batch.status,'stopping');
 });
+
+test('one terminal timestamp drives scoring, failure persistence and slot release',async()=>{
+ for(const status of ['done','error'])for(const timestamps of [{completedAt:2000},{completedAt:null,lastTurnEndedAt:3000},{completedAt:2000,lastTurnEndedAt:3000}]){
+  const b=bridge();await b.ui('start','start',args);
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b,{status,...timestamps})]});
+  await b.ui('observe','query');const at=timestamps.lastTurnEndedAt||timestamps.completedAt;
+  const receipt=b.calls.find(x=>x.method===(status==='done'?'grade':'record_failure')).params.receipt;
+  assert.equal(receipt.completedAt,at);assert.equal(b.calls.find(x=>x.releaseWorker).releaseWorker.completedAt,at);
+  await b.ui('repeat','query');assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);
+ }
+});
+test('start preserves actionable index errors without dispatching or choosing old cache',async()=>{
+ const {downloadError}=require('../node/online.cjs');
+ for(const message of [downloadError(403),downloadError(404),'题库索引损坏或不兼容，请检查发布源并重新获取；仍失败请联系题库维护者。','请使用 makecindy GitHub Release 的 HTTPS 附件地址']){
+  const b=bridge(),request=b.cindy.node.request;
+  b.cindy.node.request=async x=>x.method==='online_inspect'?{ok:false,message}:request(x);
+  await b.ui('start','start',args);assert.equal(b.replies.at(-1).ok,false);assert.equal(b.replies.at(-1).message,message);
+  assert.equal(b.calls.some(x=>x.create||x.send||x.method==='online_install'),false);
+ }
+});
+test('archived coordinator with lost start response is observed without repeated stop sends',async()=>{
+ const b=bridge(),send=b.cindy.tasks.send,get=b.cindy.tasks.get;let archived=false,ended=false,active=true;
+ b.cindy.tasks.send=async x=>{if(x.requestKey.endsWith(':stop')){archived=true;throw Object.assign(Error('Archived tasks cannot accept input'),{code:'TASK_BUSY'});}await send(x);throw Error('lost receipt');};
+ b.cindy.tasks.get=async x=>({...await get(x),status:archived?'archived':'active'});
+ b.cindy.tasks.listRuns=async x=>x.after?{items:[{status:ended?'completed':'running'}],nextCursor:null}:{items:[{status:'completed'}],nextCursor:'second'};
+ b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:active,workers:[]});
+ await b.ui('start','start',args);assert.equal(b.config.batch.controlRun,undefined);
+ await b.ui('stop','cancel');await b.ui('poll','query');assert.equal(b.config.batch.status,'stopping');
+ ended=true;await b.ui('ended','query');assert.equal(b.config.batch.status,'stopping');
+ active=false;await b.ui('idle','query');assert.equal(b.config.batch.status,'cancelled');assert.equal(b.calls.filter(x=>x.send).length,1);
+});
+test('empty or incomplete archived receipts do not prove cancellation',async()=>{
+ for(const kind of ['empty','cycle','error']){
+  const b=bridge(),get=b.cindy.tasks.get;await b.ui('start','start',args);
+  b.cindy.tasks.get=async x=>({...await get(x),status:'archived'});
+  b.cindy.tasks.listRuns=async()=>{if(kind==='error')throw Error('read failed');return {items:kind==='empty'?[]:[{status:'completed'}],nextCursor:kind==='cycle'?'same':null};};
+  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[]});
+  await b.ui('stop','cancel');await b.ui('poll','query');assert.equal(b.config.batch.status,'stopping');assert.equal(b.calls.filter(x=>x.send).length,1);
+ }
+});

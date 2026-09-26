@@ -1,5 +1,6 @@
 const workerLabel=runId=>'eval-'+runId.replaceAll('-','').slice(0,27);
 const workerPending=w=>!!(w.is_working||w.queued_count||w.queue_paused||w.waitingForUser);
+const workerCompletedAt=w=>w.lastTurnEndedAt||w.completedAt;
 const terminalRun=r=>['completed','failed','cancelled','interrupted'].includes(r.status);
 // Coordinator owns Orca dispatch. The plugin only prepares, observes and grades.
 async function coordinatorMessage(j,text,key){
@@ -25,15 +26,7 @@ async function coordinatorApprovalBlocked(j){
 }
 async function advanceCoordinator(j){
  try{
-  if(j.stopRequestedAt&&(!j.controlRun||!j.stopSent))return await stopBatch(j);
-  if(j.status==='stopping'){
-   const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
-   if(!team.ok)throw Error('无法核对协同状态');
-   const stopRun=await cindy.tasks.getRun({runId:j.controlRun.runId});
-   if(terminalRun(stopRun)&&!team.leadWorking&&!team.waitingForUser&&!team.workers.some(workerPending)){j.status='cancelled';j.phase='cancelled';j.message='评测已停止，已完成成绩保留。';for(const item of j.items.filter(x=>!doneItem(x)))item.status='cancelled';}
-   else {j.phase='stopping';j.message='等待主任务停止回执；未确认前不会开始新批次。';}
-   await saveBatch(j);return jobView(j);
-  }
+  if(j.stopRequestedAt||j.status==='stopping')return await stopBatch(j);
   if(!cindy.tasks.startTeam||!cindy.tasks.getTeam)throw Error('请更新 Cindy 以使用主任务协调评测');
   if(!j.coordinator){
    j.coordinator=await cindy.tasks.create({requestKey:j.id+':coordinator',title:'评测主任务 · '+j.items.length+' 份作答',route:taskRoute(j.items[0].config),isolatedWorkspace:true});
@@ -65,7 +58,7 @@ async function advanceCoordinator(j){
   const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
   if(!team.ok)throw Error('无法核对协同状态');
   j.capacity=team.capacity;j.coordinatorUsage=team.coordinatorUsage;
-  for(const item of j.items){const w=team.workers.find(w=>w.label===workerLabel(item.runId));if(w)item.telemetry={acceptedAt:w.acceptedAt,startedAt:w.startedAt,completedAt:w.lastTurnEndedAt||w.completedAt,timingBasis:w.timingBasis,usage:w.usage};}
+  for(const item of j.items){const w=team.workers.find(w=>w.label===workerLabel(item.runId));if(w)item.telemetry={acceptedAt:w.acceptedAt,startedAt:w.startedAt,completedAt:workerCompletedAt(w),timingBasis:w.timingBasis,usage:w.usage};}
   if(team.waitingForUser){j.phase='awaiting_confirmation';j.message='评测主任务正在等待你的确认。请在侧栏打开评测主任务处理确认；插件不会代替你批准或自动催办。';await saveBatch(j);return jobView(j);}
   if(j.status!=='stopping'&&await coordinatorApprovalBlocked(j))return jobView(j);
   for(const item of j.items.filter(x=>!doneItem(x))){
@@ -77,7 +70,7 @@ async function advanceCoordinator(j){
    if(w.model!==cfg.model||w.agent_kind!==cfg.agentKind||(w.effort||'default')!==cfg.effort||w.providerId!==cfg.providerId||w.fastMode!==false||w.working_dir!==item.prepared.workspace){
     item.status='blocked';item.error='Worker 实际配置或目录不匹配，未计分';continue;
    }
-   if(w.completedAt&&w.status==='done'&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
+   if(workerCompletedAt(w)&&w.status==='done'&&!workerPending(w)){
     j.phase='grading';j.currentRunId=item.runId;await saveBatch(j);channel.postMessage({type:'job-progress',job:jobView(j)});
     try{item.result=await node('grade',{runId:item.runId,receipt:{channel:'Orca Worker',sessionId:w.session_id,workerId:w.worker_id,...item.telemetry,completedAt:item.telemetry.completedAt,acceptedConfig:cfg,provenance:'host-team-observed'}});item.status=item.result.status==='environment_invalid'?'environment_invalid':'graded';item.error=item.result.reason||undefined;}
     catch(e){if(isTransientReadError(e))throw e;item.status='blocked';item.error='评分受阻：'+e.message;}
@@ -90,12 +83,12 @@ async function advanceCoordinator(j){
    if(item.result&&!item.qualityReviewed){item.result=await node('reconcile_result',{runId:item.runId,receipt:item.telemetry});item.status=item.result.status==='environment_invalid'?'environment_invalid':item.status;item.error=item.result.reason||undefined;item.qualityReviewed=true;await saveBatch(j);}
    const matches=team.workers.filter(w=>w.label===workerLabel(item.runId));
    const w=matches.length===1?matches[0]:null;
-   if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&w.lastTurnEndedAt&&!w.is_working&&!w.queued_count&&!w.queue_paused&&!w.waitingForUser){
+   if(w&&(item.result||item.status==='blocked')&&!item.released&&w.worker_id===item.workerId&&w.session_id===item.taskId&&workerCompletedAt(w)&&!workerPending(w)){
     // Persist the failure and exact observed terminal before freeing its slot.
-    item.terminalReceipt={...item.telemetry,workerId:w.worker_id,sessionId:w.session_id,completedAt:w.lastTurnEndedAt,status:w.status,provenance:'host-team-observed'};
+    item.terminalReceipt={...item.telemetry,workerId:w.worker_id,sessionId:w.session_id,completedAt:workerCompletedAt(w),status:w.status,provenance:'host-team-observed'};
     if(!item.result)await node('record_failure',{runId:item.runId,reason:item.error,receipt:item.terminalReceipt});
     await saveBatch(j);
-    const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:w.lastTurnEndedAt});
+    const release=await cindy.tasks.releaseWorker({taskId:j.coordinator.taskId,workerId:w.worker_id,completedAt:workerCompletedAt(w)});
     if(release.ok){item.released=true;await saveBatch(j);}else item.releaseReason=release.message;
    }
   }
@@ -186,7 +179,7 @@ async function resolveQuestions(wanted,fromLaunch=false){
   const identities=new Set(matches.map(q=>q.distributionHash));
   if(key.includes(':')&&matches.length&&identities.size===1&&matches.every(q=>q.key===key)){resolved.push(matches[0].key);continue;}
   if(key.includes(':'))throw Error('所选题库版本不可用，请重新选择题库。');
-  if(!remote){progress('正在准备默认题库…');try{remote=await node('online_inspect',{url:c.indexUrl||DEFAULT_INDEX});}catch(e){throw Error('题库版本无法核对，请检查网络后重试；不会自动选择其他缓存版本。');}}
+  if(!remote){progress('正在准备默认题库…');remote=await node('online_inspect',{url:c.indexUrl||DEFAULT_INDEX});}
   if(fromLaunch&&launchCancelled)throw Error('已停止准备。');
   progress('正在下载并校验：'+key);
   const installed=await installQuestion({indexId:remote.indexId,question:key},fromLaunch);
@@ -222,8 +215,29 @@ async function stopBatch(j){
  }
  if(!j.controlRun&&!j.plan){j.status='cancelled';j.phase='cancelled';j.message='已停止准备，没有派发新的作答。';for(const i of j.items.filter(x=>!doneItem(x)))i.status='cancelled';await saveBatch(j);return jobView(j);}
  j.status='stopping';j.phase='stopping';j.message='正在停止评测，已完成的作答和成绩保留。';await saveBatch(j);
- if(!j.stopSent){await coordinatorMessage(j,'用户要求停止本批评测。停止派发新题；通过 Orca 停止本批仍在执行的 Worker，保留已完成结果与文件，并报告停止结果。','stop');j.stopSent=true;await saveBatch(j);}
- return jobView(j);
+ let task=await cindy.tasks.get({taskId:j.coordinator.taskId});
+ if(!j.stopSent&&task.status!=='archived'){
+  try{await coordinatorMessage(j,'用户要求停止本批评测。停止派发新题；通过 Orca 停止本批仍在执行的 Worker，保留已完成结果与文件，并报告停止结果。','stop');j.stopSent=true;await saveBatch(j);}
+  catch(e){if(e.code!=='TASK_BUSY')throw e;task=await cindy.tasks.get({taskId:j.coordinator.taskId});if(task.status!=='archived')throw e;}
+ }
+ let ended=false;
+ if(j.stopSent)ended=terminalRun(await cindy.tasks.getRun({runId:j.controlRun.runId}));
+ else if(task.status==='archived'){
+  // An archived task cannot accept stop input. Observe all accepted receipts,
+  // including a start whose response was lost; never replay start to discover it.
+  let after,count=0;const cursors=new Set();ended=true;
+  do{const page=await cindy.tasks.listRuns({taskId:j.coordinator.taskId,...(after?{after}:{})});
+   if(!Array.isArray(page.items))throw Error('无法核对主任务执行回执');
+   count+=page.items.length;ended=ended&&page.items.every(terminalRun);after=page.nextCursor;
+   if(after&&cursors.has(after))throw Error('主任务回执分页未完成');if(after)cursors.add(after);
+  }while(after);
+  ended=ended&&count>0;
+ }
+ const team=await cindy.tasks.getTeam({taskId:j.coordinator.taskId});
+ if(!team.ok)throw Error('无法核对协同状态');
+ if(ended&&!team.leadWorking&&!team.waitingForUser&&!team.workers.some(workerPending)){j.status='cancelled';j.phase='cancelled';j.message='评测已停止，已完成成绩保留。';for(const item of j.items.filter(x=>!doneItem(x)))item.status='cancelled';}
+ else j.message='等待主任务停止回执；未确认前不会开始新批次。';
+ await saveBatch(j);return jobView(j);
 }
 let advancing=null;
 function advanceBatch(){if(advancing)return advancing;advancing=advanceBatchOnce().finally(()=>{advancing=null;});return advancing;}
