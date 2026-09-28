@@ -55,7 +55,7 @@ game.zip
 1. 对图片、视频、APK、Windows、H5、Tap 小游戏,显式缺 `developerId` / `appId` 且当前 profile 也没有可用 saved scope 时,先转 identity 手册;六个 upload shortcut 都是 app-scope 写操作。
 2. 用 `materials +inspect` 的 manifest 或用户明确提供的单文件路径建立计划。目录或 zip 中的未知项、歧义项、多个视频和 Windows branch 先让用户确认。
 3. 对图片、视频、APK、Windows、H5、Tap 小游戏文件先执行同一 shortcut 的 dry-run。用户确认后,以同一文件、scope 和业务意图执行 `yes:true`,两次调用复用同一个 `idempotency_key`。六个 shortcut 都接受该 flag(省略时由 CLI 自动派生),但图片上传必须显式提供稳定 key。
-4. 图片、视频、APK、Windows、H5、Tap 小游戏只调用本部分的六个端到端 upload shortcut,不直接调用动态 OpenAPI 的 upload/complete/submit operation。单文件 shortcut 的输入是位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag;**不要传 `data`,不要手写 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete request body。**`file_size` 是字节大小,H5 的 `screen_orientation` 也是协议字段;这些字段由 CLI workflow 按当前 schema 生成和校验。`<file>` 解析后必须落在当前工作目录内(相对路径或目录内绝对路径均可),目录外路径会被拒绝,此时先 `cd` 到素材所在目录再传相对路径。
+4. 图片、视频、APK、Windows、H5、Tap 小游戏只调用本部分的六个端到端 upload shortcut,不直接调用动态 OpenAPI 的 upload/complete/submit operation。单文件 shortcut 的输入是位置参数(`<file>` 放 `_positional`)、`app_id`、`dev_id` 和各自 flag;**不要传 `data`,不要手写 `file_name`、`file_size`、`sha256`、`upload_token` 或 complete request body。**`file_size` 是字节大小,H5 的 `screen_orientation` 也是协议字段;这些字段由 CLI workflow 按当前 schema 生成和校验。`<file>` 必须是**相对会话工作目录**的路径,且解析后落在该目录内;绝对路径与越出目录的路径都会被拒绝。素材不在会话工作目录时,先把文件复制进去,再传相对路径——`call_tool` 每次都按会话工作目录启动 CLI,在终端里 `cd` 不会改变下一次调用的路径基准。
 5. 成功以顶层 `ok=true` 或 exit code 0 判断;缺少 `yes` 的确认门禁是 exit code 10(插件返回 `CONFIRM_REQUIRED`);其它失败按返回的 error 停止和恢复,不把业务内字段当作成功。
 6. 单项部分失败时保留已返回的远端句柄,按文件记录结果。只重试没有远端句柄的失败项,不能整批重跑。H5 和 Tap 小游戏可用 `task +list|get|resume` 恢复已有任务;其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。不得重构 upload token。
 7. 大文件上传超时返回 `TIMEOUT` 时,加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令恢复;不要盲目重发完整上传。
