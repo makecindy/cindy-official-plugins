@@ -82,6 +82,9 @@
           "description": "The dynamic tool's argument object; pass {} when it has no arguments."
         }
       }
+    },
+    "maker_console": {
+      "description": "Open Maker console. Starts a local service; does not build, submit, or install a game runtime. Closing the page does not stop the service; stop it in the console. Media switches apply to Agent tools, not manual console actions."
     }
   }
 }

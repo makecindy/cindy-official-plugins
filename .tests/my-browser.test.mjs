@@ -1,0 +1,332 @@
+import './my-browser-dispatch.test.mjs';
+import './my-browser-network.test.mjs';
+import './my-browser-discovery.test.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import readline from 'node:readline';
+import path from 'node:path';
+const require = createRequire(import.meta.url);
+const {createBridge,EXT_ID} = require('../my-browser/node/bridge.cjs');
+const P = require('../my-browser/extension/policy.js');
+const savedPolicy = cfg => require('../my-browser/saved-policy.js')(cfg,P);
+const sleep = ms => new Promise(r => setTimeout(r,ms));
+async function fixture(t,options = {}) {
+  const b=createBridge({ports:[0],pollTimeout:20,connectWait:0,jobTimeout:200,...options});
+  t.after(()=>b.close());
+  const s=await b.request('status'); const url='http://127.0.0.1:'+s.port;
+  let session;
+  const clientId=crypto.randomUUID();
+  const version=require('../my-browser/extension/manifest.json').version;
+  async function http(route,body,headers = {}) {
+    const r=await fetch(url+route,{method:body===undefined?'GET':'POST',headers:{'X-My-Browser-Extension':EXT_ID,'X-My-Browser-Client':clientId,'X-My-Browser-Version':version,'X-My-Browser-Family':'chrome',...(session?{'X-My-Browser-Session':session}:{}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    return {status:r.status,data:await r.json()};
+  }
+  session=(await http('/health')).data.session;
+  await http('/poll');
+  return {b,http,url,clientId};
+}
+test('default policy and one normalization path protect both reads and interactions',()=>{
+  const p=P.defaults();
+  assert.equal(P.check(p,'text','https://example.test').ok,true);
+  assert.equal(P.check(p,'click','https://example.test').ok,true);
+  assert.deepEqual(P.normalizePolicy(p),p);
+  p.read.block=['blocked.test'];
+  for(const url of ['https://blocked.test','https://child.blocked.test','http://127.0.0.2','http://2130706433','http://[::1]','http://[::ffff:127.0.0.1]','http://10.2.3.4','http://192.168.1.2','http://localhost.','file:///etc/passwd','https://a:b@example.test']) assert.equal(P.check(p,'text',url).ok,false,url);
+  p.interact.allow=['example.test','blocked.test'];
+  assert.equal(P.check(p,'click','https://sub.example.test').ok,true);
+  assert.equal(P.check(p,'click','https://example.test.evil.test').ok,false);
+  assert.equal(P.check(p,'click','https://blocked.test').error,'READ_BLOCKED');
+  assert.equal(P.normalizeHost(' WWW.Example.test '),'www.example.test');
+  assert.equal(P.normalizeHost('*.example.test'),'example.test');
+  assert.equal(P.normalizeHost('=example.test'),'=example.test');
+  for(const bad of ['com','https://example.test','example.test/path','example.test:443','example.test@evil.test','*','127.0.0.1']) assert.throws(()=>P.normalizeHost(bad));
+  assert.throws(()=>P.normalizePolicy({read:{block:'example.test'},interact:{allow:[]}}));
+});
+test('payload validation preserves empty text/selection and rejects malformed extraction',()=>{
+  assert.doesNotThrow(()=>P.validate('type',{url:'https://example.test',selector:'input',text:''}));
+  assert.doesNotThrow(()=>P.validate('select',{url:'https://example.test',selector:'select',values:[]}));
+  for(const payload of [{},{fields:[]},{fields:{x:4}},{fields:{x:'a'},limit:101},{fields:{x:'a'},limit:NaN}]) assert.throws(()=>P.validate('extract',{url:'https://example.test',...payload}));
+});
+test('tab and result URLs lose credentials but keep their identity',()=>{
+  const r=P.redactUrl;
+  // Placeholder shapes only: fake UUIDs and example.test, never real credential values.
+  const code='11111111-1111-4111-8111-111111111111',state='22222222-2222-4222-8222-222222222222',token='33333333-3333-4333-8333-333333333333';
+  // OAuth code / state in the query.
+  assert.equal(r(`https://example.test/callback?q=cats&code=${code}&state=${state}`).includes(code),false);
+  assert.equal(r(`https://example.test/callback?q=cats&code=${code}&state=${state}`).includes(state),false);
+  assert.match(r(`https://example.test/callback?q=cats&code=${code}`),/q=cats/,'innocuous parameters survive');
+  // Implicit-flow fragment and password-reset style tokens.
+  assert.equal(r(`https://example.test/#access_token=${token}&token_type=bearer`).includes(token),false);
+  assert.equal(r(`https://example.test/reset?token=${token}`).includes(token),false);
+  // A long opaque value under an innocuous name is masked too.
+  assert.equal(r(`https://example.test/p?t=${code}`).includes(code),false);
+  // Encoding must not shift the analysis: the context word and the credential are both judged on the
+  // decoded form, repeatedly, and the credential test no longer depends on a character set.
+  const enc=encodeURIComponent(code+'/'+state), dbl=encodeURIComponent(encodeURIComponent(code+'/'+state));
+  assert.equal(r(`https://example.test/reset/${enc}`).includes(code),false,'a percent-encoded token must be masked');
+  assert.equal(r(`https://example.test/#/verify/${enc}`).includes(code),false,'an encoded token in a route fragment must be masked');
+  assert.equal(r(`https://example.test/%72eset/${code}`).includes(code),false,'an encoded context word must still be recognized');
+  assert.equal(r(`https://example.test/reset/${dbl}`).includes(code),false,'a double-encoded token must be masked');
+  assert.equal(r(`https://example.test/reset/x#code%3D${code}`).includes(code),false,'an encoded fragment key/value must be masked');
+  // Basic Auth userinfo supplied by page content.
+  const basic=r(`https://${code}:${state}@example.test/private`);
+  assert.equal(basic.includes(code),false,'the username must be removed');
+  assert.equal(basic.includes(state),false,'the password must be removed');
+  assert.equal(basic,'https://example.test/private');
+  // Path-embedded credentials: password-reset and magic links put the token in a path segment.
+  assert.equal(r(`https://example.test/reset/${code}`).includes(code),false);
+  assert.equal(r(`https://example.test/#/verify/${code}`).includes(code),false);
+  // Ordinary deep paths must keep working: a commit sha, a numeric id and a readable slug.
+  assert.equal(r('https://example.test/commit/'+'a'.repeat(40)),'https://example.test/commit/'+'a'.repeat(40));
+  assert.equal(r('https://example.test/user/12345'),'https://example.test/user/12345');
+  assert.equal(r('https://example.test/reset-password/success'),'https://example.test/reset-password/success');
+  assert.equal(r('https://example.test/notifications/mentions'),'https://example.test/notifications/mentions');
+  assert.equal(r(`https://example.test/verify-${code}`).includes(code),false,'a verify- prefix and token in one segment must be masked');
+  assert.equal(r(`https://example.test/reset-token-${code}`).includes(code),false,'a reset-token- prefix and token in one segment must be masked');
+  assert.equal(r('https://example.test/verify-email'),'https://example.test/verify-email');
+  assert.equal(r('https://example.test/verify-abcdefghijklmnop').includes('abcdefghijklmnop'),false,'a long alphabetic token in the same segment must be masked');
+  assert.equal(r('https://example.test/verify-abcdefghijkl-mnopqrstuv').includes('abcdefghijkl'),false,'a hyphenated alphabetic token in the same segment must be masked');
+  assert.match(r('https://example.test/login-account-settings-tab-details'),/REDACTED/,'a long leftover after a context word is masked whole');
+  // Credential semantics are matched per word and nested URLs are inspected recursively, so composite
+  // key names and ?next=/reset/<token> cannot smuggle a credential through.
+  assert.equal(r(`https://example.test/cb?reset_token=${code}`).includes(code),false,'a composite key must be masked');
+  assert.equal(r(`https://example.test/cb?magic_link_token=${code}`).includes(code),false,'underscored composite keys must be masked');
+  assert.equal(r(`https://example.test/cb?next=${encodeURIComponent('https://example.test/reset/'+code)}`).includes(code),false,'a nested URL credential must be masked');
+  assert.equal(r(`https://example.test/cb?next=${encodeURIComponent('/reset/'+code)}`).includes(code),false,'a nested path credential must be masked');
+  assert.equal(r('https://example.test/cb?page=2&sort=name'),'https://example.test/cb?page=2&sort=name','ordinary parameters stay untouched');
+  // A plain route fragment carries no credential and keeps tabs identifiable.
+  assert.equal(r('https://example.test/#/home'),'https://example.test/#/home');
+  assert.equal(r('https://example.test/timeline?lang=en'),'https://example.test/timeline?lang=en');
+  // Structurally unusable input is returned unchanged rather than throwing into a browser result.
+  assert.equal(r('not a url'),'not a url');
+  assert.equal(r(undefined),undefined);
+});
+
+test('extract validates a closed attribute set before reaching any browser',()=>{
+  for(const attr of ['href','src','datetime','title','alt','aria-label','role'])assert.doesNotThrow(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+  for(const attr of ['data-csrf-token','data-token','nonce','value','outerHTML','onclick','HREF',' href',4])assert.throws(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+});
+test('cold status starts one listener under concurrency; disconnected actions fail quickly',async t=>{
+  const b=createBridge({ports:[0],connectWait:0});t.after(()=>b.close());
+  const statuses=await Promise.all(Array.from({length:8},()=>b.request('status')));
+  assert.equal(new Set(statuses.map(s=>s.port)).size,1);
+  assert.equal(statuses[0].extension_connected,false);
+  const result=await b.request('act',{action:'text',payload:{url:'https://example.test'}});
+  assert.equal(result.error,'EXTENSION_DISCONNECTED');assert.equal(result.execution,'not_executed');
+});
+test('loopback HTTP rejects websites, preflights, rebinding, old sessions and arbitrary job submission',async t=>{
+  const {http,url}=await fixture(t);
+  assert.equal((await fetch(url+'/health')).status,403);
+  assert.equal((await http('/health',undefined,{Origin:'https://example.test'})).status,403);
+  const rebound = await new Promise(resolve => {
+    const req = require('node:http').get(url+'/health',{headers:{Host:'example.test','X-My-Browser-Extension':EXT_ID}},res => {res.resume();resolve(res.statusCode);});
+    req.on('error',()=>resolve(0));
+  });
+  assert.equal(rebound,403);
+  assert.equal((await fetch(url+'/health',{method:'OPTIONS',headers:{'X-My-Browser-Extension':EXT_ID}})).status,403);
+  assert.equal((await http('/poll',undefined,{'X-My-Browser-Session':'old'})).status,409);
+  assert.equal((await http('/act',{action:'click'})).status,404);
+});
+test('real HTTP poll/ack/result round trip and duplicate ACK rejection',async t=>{
+  const {b,http}=await fixture(t);
+  const promise=b.request('act',{action:'text',payload:{url:'https://example.test'}});
+  await sleep(5);
+  const {job}=(await http('/poll')).data;
+  assert.match(job.id,/^[0-9a-f-]{36}$/);assert.equal(job.action,'text');
+  const ack=await http('/ack',{id:job.id});assert.equal(ack.data.ok,true);
+  assert.equal((await http('/ack',{id:job.id})).status,409);
+  await http('/result',{id:job.id,result:{ok:true,url:'https://example.test',text:'Hello'}});
+  assert.equal((await promise).text,'Hello');assert.equal((await b.request('status')).pending,0);
+});
+test('acknowledged interaction timeouts are unknown and NEVER redelivered',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:80});const p=P.defaults();p.interact.allow=['example.test'];await b.request('setPolicy',{policy:p});
+  const resultPromise=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  const result=await resultPromise;assert.equal(result.execution,'unknown');
+  assert.equal((await http('/poll')).data.job,null);
+  assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
+});
+test('queued and unacknowledged expired jobs cannot execute later',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:60});
+  const queued=await b.request('act',{action:'text',payload:{url:'https://example.test'}});
+  assert.equal(queued.execution,'not_executed');assert.equal((await http('/poll')).data.job,null);
+  const promise=b.request('act',{action:'text',payload:{url:'https://example.test'}});
+  await sleep(5);const {job}=(await http('/poll')).data;
+  assert.equal((await promise).execution,'not_executed');assert.equal((await http('/ack',{id:job.id})).status,409);
+});
+test('permission revoked after delivery blocks ACK and leaves no queued operation',async t=>{
+  const {b,http}=await fixture(t);const p=P.defaults();p.interact.allow=['example.test'];await b.request('setPolicy',{policy:p});
+  const promise=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;
+  await b.request('setPolicy',{policy:{read:{block:[]},interact:{allow:[],block:[]}}});assert.equal((await promise).execution,'not_executed');
+  assert.equal((await http('/ack',{id:job.id})).status,409);
+});
+test('explicitly blocked tabs and redirected content are redacted by bridge even if extension omits filtering',async t=>{
+  const {b,http}=await fixture(t);
+  const policy=P.defaults();policy.read.block=['blocked.test'];await b.request('setPolicy',{policy});
+  async function roundtrip(action,result){
+    const p=b.request('act',{action,payload:action==='tabs'?{}:{url:'https://example.test'}});await sleep(5);
+    const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});await http('/result',{id:job.id,result});return p;
+  }
+  const r=await roundtrip('tabs',{tabs:[{id:1,url:'https://blocked.test',title:'private'},{id:2,url:'https://example.test',title:'public'}]});
+  assert.deepEqual(r.tabs[0],{id:1,redacted:true});assert.equal(r.tabs[1].title,'public');
+  const redirected=await roundtrip('text',{ok:true,url:'https://blocked.test',text:'private'});assert.equal(redirected.error,'REDIRECT_BLOCKED');assert.equal(redirected.text,undefined);
+});
+test('production stdio worker returns JSON-RPC and exits when host closes stdin',async t=>{
+  const child=spawn(process.execPath,['-e','require(process.argv[1])',path.resolve(import.meta.dirname,'../my-browser/node/worker.cjs')],{stdio:['pipe','pipe','pipe']});
+  t.after(()=>child.kill());
+  const lines=readline.createInterface({input:child.stdout});
+  const answer=once(lines,'line');child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:'fixture-id',method:'status',params:{}})+'\n');
+  const [line]=await answer;const message=JSON.parse(line);assert.equal(message.id,'fixture-id');assert.equal(message.result.ok,true);
+  child.stdin.end();await once(child,'exit');lines.close();
+});
+
+test('all-site interaction preserves explicit blocks and old restricted policies',()=>{
+  const p=P.defaults();p.interact.block=['blocked.test'];p.read.block=['private.test'];
+  assert.equal(P.check(p,'click','https://other.test').ok,true);
+  assert.equal(P.check(p,'click','https://child.blocked.test').ok,false);
+  assert.equal(P.check(p,'text','https://private.test').ok,false);
+  const old={read:{block:[]},interact:{allow:['example.test'],block:[]}};
+  assert.deepEqual(P.normalizePolicy(old),old);
+  assert.equal(P.check(P.normalizePolicy(old),'click','https://other.test').ok,false);
+  assert.throws(()=>P.normalizePolicy({read:{block:['*']},interact:{allow:[]}}));
+});
+
+test('upgrade preserves ambiguous saved restrictions, while fresh installs have no preset blocks',()=>{
+  const legacy=['mail.google.com','outlook.com','outlook.live.com','mail.qq.com','mail.163.com',
+    '1password.com','lastpass.com','bitwarden.com','accounts.google.com','login.microsoftonline.com',
+    'appleid.apple.com','paypal.com','stripe.com','alipay.com','cmbchina.com','icbc.com.cn',
+    'bankofamerica.com','chase.com','coinbase.com','binance.com','console.aws.amazon.com',
+    'console.cloud.google.com','portal.azure.com'];
+  const policy={read:{block:[...legacy,'private.example.test']},interact:{allow:['example.test'],block:[]}};
+  const migrated=savedPolicy({policy});
+  assert.deepEqual(migrated,policy);
+  assert.deepEqual(savedPolicy({}),P.defaults());
+  assert.deepEqual(savedPolicy({}).read.block,[]);
+  assert.equal(P.check(migrated,'text','https://mail.google.com').ok,false);
+  assert.deepEqual(savedPolicy({policy:{...policy,read:{block:legacy}}}).read.block,legacy);
+  assert.equal(P.check(migrated,'text','https://private.example.test').ok,false);
+  assert.deepEqual(migrated.interact,policy.interact);
+  assert.equal(policy.read.block.length,legacy.length+1);
+  assert.deepEqual(savedPolicy({policy,siteDefaultsVersion:1}),policy);
+  const custom={...policy,read:{block:['mail.google.com','private.example.test']}};
+  assert.deepEqual(savedPolicy({policy:custom}),custom);
+});
+
+test('acknowledged reads with lost results or revoked authorization are unknown',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:80});
+  for(const revoke of [false,true]) {
+    const pending=b.request('act',{action:'text',payload:{url:'https://example.test'}});
+    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+    if(revoke) {
+      await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
+      assert.equal((await http('/authorize',{id:job.id,url:'https://example.test'})).status,409);
+    }
+    assert.equal((await pending).execution,'unknown');
+    assert.equal((await http('/poll')).data.job,null);
+  }
+});
+
+test('extract final budget covers redaction growth across single and multiple records',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:3000});
+  const url='https://example.test/?'+Array.from({length:15},(_,i)=>'token'+i+'=x').join('&');
+  const record=Object.fromEntries(Array.from({length:30},(_,i)=>['field'+i,url]));
+  assert.ok(url.length*30<6000);
+  assert.ok(P.redactUrl(url).length*30>6000);
+  for(const multiple of [false,true]) for(const maxChars of [undefined,256,7000]) {
+    const budget=maxChars ?? 6000;
+    const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{link:'a'},multiple,...(maxChars===undefined?{}:{maxChars})}});
+    await sleep(5);const {job}=(await http('/poll')).data;
+    await http('/ack',{id:job.id});
+    await http('/result',{id:job.id,result:{ok:true,url:'https://example.test',truncated:false,...(multiple?{records:[record,record],count:2}:{record})}});
+    const result=await promise;
+    const rows=multiple?result.records:[result.record];
+    const values=rows.flatMap(row=>Object.values(row));
+    assert.ok(values.reduce((n,v)=>n+(v?.length||0),0)<=budget);
+    assert.equal(result.truncated,true);
+    assert.ok(values.every(v=>v===null || v===P.redactUrl(url)),'URLs are returned whole or omitted');
+    if(multiple) assert.equal(result.count,2);
+  }
+  const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{text:'p'},maxChars:256}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  await http('/result',{id:job.id,result:{ok:true,record:JSON.parse('{"__proto__":"kept","text":"'+ 't'.repeat(300)+'","missing":null}')}});
+  const result=await promise;
+  assert.equal(Object.hasOwn(result.record,'__proto__'),true);
+  assert.equal(result.record.__proto__,'kept');
+  assert.equal(result.record.text.length,252);
+  assert.equal(result.record.missing,null);
+  assert.equal(result.truncated,true);
+});
+
+for (const blocked of ['example.test','redirect.test']) {
+  test('revocation invalidates an authorized job when blocking '+blocked,async t=>{
+    const {b,http}=await fixture(t);
+    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).data.ok,true);
+    await b.request('setPolicy',{policy:{...P.defaults(),read:{block:[blocked]}}});
+    const result=await pending;
+    assert.equal(result.error,'READ_BLOCKED');
+    assert.equal(result.execution,'unknown');
+    // Regranting permission cannot revive the cancelled operation.
+    await b.request('setPolicy',{policy:P.defaults()});
+    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).status,409);
+    assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
+    assert.equal((await b.request('status')).pending,0);
+  });
+}
+
+test('revocation waits for the final document dispatch and discards its result',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:2000});
+  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).data.ok,true);
+  let saved=false;
+  const save=b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}}).then(r=>{saved=true;return r;});
+  await sleep(25);assert.equal(saved,false,'must not acknowledge revocation while DOM dispatch can still run');
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,403);
+  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
+  await http('/result',{id:job.id,result:{ok:true,text:'must not escape'}});
+  assert.equal((await save).ok,true);
+  const result=await pending;assert.equal(result.error,'READ_BLOCKED');assert.equal(result.execution,'unknown');assert.equal(result.text,undefined);
+});
+
+test('lost document dispatch cannot be reported as successful revocation',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:100});
+  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
+  const saved=await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
+  assert.equal(saved.ok,false);assert.equal(saved.error,'REVOCATION_UNCONFIRMED');assert.equal(saved.execution,'unknown');
+  const policy={...P.defaults(),read:{block:['example.test']}};
+  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED','a repeated save must not turn uncertainty into success');
+  assert.equal((await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}})).status,409);
+  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED');
+  assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
+  assert.equal((await b.request('setPolicy',{policy})).ok,true);
+  assert.equal((await pending).execution,'unknown');
+  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,409);
+});
+
+ test('expired dispatch history never consumes live capacity, including bounded-history overflow',async t=>{
+  const {b,http}=await fixture(t,{jobTimeout:1000});
+  for(let i=0;i<130;i++) {
+    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
+    await sleep(1);const {job}=(await http('/poll')).data;
+    assert.ok(job,'new work must remain deliverable after '+i+' uncertain outcomes');
+    await http('/ack',{id:job.id});await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
+    await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}});
+    assert.equal((await pending).execution,'unknown');
+  }
+  const policy={...P.defaults(),read:{block:['example.test']}};
+  const applied=await b.request('setPolicy',{policy});
+  assert.equal(applied.applied,true);assert.equal(applied.error,'REVOCATION_UNCONFIRMED');
+  const pending=b.request('act',{action:'text',payload:{url:'https://other.test'}});
+  await sleep(1);const {job}=(await http('/poll')).data;assert.ok(job);
+  await http('/ack',{id:job.id});await http('/result',{id:job.id,result:{ok:true,text:'available'}});
+  assert.equal((await pending).text,'available');
+  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
+});

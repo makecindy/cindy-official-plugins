@@ -43,6 +43,13 @@
 6. 提交官方插件 PR 前，补充 `provisioning.json` 条目，并完成恰好 `zh-CN`、`en`、
    `ja`、`ko` 四份 locale 资源。
 
+大型预编译依赖按[依赖接入指南](docs/binary-dependencies.zh-CN.md)迁移：本地保留输出
+调试，Git 只提交源码、声明和许可证，CI 下载并打包。Python 不是本地开发前置条件。
+可以先提交 Ready PR，实机验证项保持未勾选，从 **Verify pull request** 的 Artifacts
+下载测试包，完成正式稳定版/Beta 实机验证后再勾选。上传发生在该勾选检查之前，
+因此最后一项未通过仍可下载；更早的测试/打包失败则需先修复。包保留 7 天，未审核，
+不进入 Platform/OSS。记录具体构建来源和包哈希，不能只凭 CI 绿灯宣称已实机验证。
+
 `.tests/` 下的 `*.test.mjs` 用 Node 内置 test runner 运行，例如：
 
 ```bash
@@ -86,7 +93,7 @@ cd 163-mail && npm ci && npm run build
    `minCindyVersion`、移除 `slots`，并用对应顶层字段表达等价能力。按
    [映射表](docs/plugin-authoring.zh-CN.md#manifest-v2-到-v3保留行为转换表达)
    保留 `card`、`sessionContext` 等纯声明能力；仅删除 `slots` 不算完成迁移。`minCindyVersion`
-   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个 Cindy 正式稳定版本；
+   应填写支持这个具体插件所需 Host 能力与 Manifest 字段的第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）；
    Manifest v3 本身不设置仓库级 Cindy 版本下限。
    未改动的 v2 插件刻意保持原样，禁止批量迁移。
    Plugin Server 按用户当前 Cindy 版本选择最近曾上架的兼容 Release；current 不兼容时
@@ -95,14 +102,14 @@ cd 163-mail && npm ci && npm run build
    因此必须准确填写这个字段。
 4. 改动 `ghost.json` 的工具声明（`tools[].description` / 参数）时，在 PR 描述里说明对
    Agent 行为的影响——这段描述就是 Agent 读到的使用手册。每个改动插件都必须先在
-   运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并验证核心功能，再勾选 PR
-   的生产版 Cindy 验证项；插件声明 `minCindyVersion` 时，验证所用 Cindy 版本必须
+   运行正式稳定版或 Beta 版 Cindy 的实际设备上安装真实 `.cindy` 包并验证核心功能，再勾选 PR
+   的 Cindy 实机验证项；插件声明 `minCindyVersion` 时，验证所用 Cindy 版本必须
    不低于该最低版本。降低或删除该字段会扩大声称支持的范围，必须交维护者人工 review。
 
 每个非草稿 PR 都会由 `Verify pull request` workflow 验证：跑 Server / Desktop 交付
 契约、localization 与 provisioning 门禁、跑每个被改动插件的 `*.test.mjs` 测试（先装
 该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。只要 PR 改动了插件
-包，CI 还会要求 PR Body 勾选生产版 Cindy 验证项。真正上传仍只在合入 `main` 后发生。
+包，CI 还会要求 PR Body 勾选 Cindy 实机验证项。真正上传仍只在合入 `main` 后发生。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
 6. 等待 review；不要直接向 `main` 推送。合并到 `main` 后区域 Workflow 会把改动包提交
@@ -170,6 +177,17 @@ Signed-off-by: 你的名字 <你的邮箱>
 `prepare-commit-msg` hook。
 
 ## 安全问题
+
+### 预编译依赖
+
+使用 [binary-dependencies.json](docs/binary-dependencies.zh-CN.md) 按需收集大依赖，
+小二进制仍可直接入仓，不接受自定义构建钩子。每个插件直接入仓的二进制按所有平台
+合计，上限 10 MiB。新插件或新增/修改二进制时触发检查；仅改代码/文档或删除二进制
+不强制迁移存量文件。两条路径均保留许可证、人工审查和总包
+大小要求。依赖声明变化必须提升插件版本，
+由维护者人工核对来源、哈希和再分发许可证。
+`node --test .tests/binary-dependencies.test.mjs` 运行离线打包回归；
+PR CI 还会对实际改动的插件试打包。下载、打包与 OIDC 发布分属不同 job。
 
 不要在公开 issue、PR 或讨论中披露漏洞、凭证或可利用细节。请按
 [SECURITY.zh-CN.md](SECURITY.zh-CN.md) 的流程私下报告。英文版见

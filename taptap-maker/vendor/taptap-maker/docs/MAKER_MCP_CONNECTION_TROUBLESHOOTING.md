@@ -160,7 +160,7 @@ macOS/Linux：
 
 ```text
 command: npx
-args: ["-y", "-p", "@taptap/maker@0.0.33", "taptap-maker"]
+args: ["-y", "-p", "@taptap/maker@0.0.34", "taptap-maker"]
 ```
 
 上面的 macOS/Linux npx 形式只是显式兼容模式；默认同样是绝对 Node + 版本化 self runtime。
@@ -265,7 +265,7 @@ stderr、尝试的编码和解码错误，不能把解码异常直接当成 Make
 例如，配置使用 Windows 绝对 Node/npm CLI 时，按相同顺序复现：
 
 ```bat
-"<绝对 node.exe>" "<绝对 npm-cli.js>" exec --yes --package @taptap/maker@0.0.33 -- taptap-maker
+"<绝对 node.exe>" "<绝对 npm-cli.js>" exec --yes --package @taptap/maker@0.0.34 -- taptap-maker
 ```
 
 然后用该 CLI 执行 `mcp verify --json`；不要只用 `help` 代替 MCP 协议握手。
@@ -273,7 +273,7 @@ stderr、尝试的编码和解码错误，不能把解码异常直接当成 Make
 配置使用 macOS/Linux 标准 argv 时：
 
 ```bash
-npx -y -p @taptap/maker@0.0.33 taptap-maker help
+npx -y -p @taptap/maker@0.0.34 taptap-maker help
 ```
 
 如果终端成功而客户端失败，应继续排查客户端读取的配置、信任状态、PATH、cwd 和子进程启动方式，
@@ -296,7 +296,7 @@ npx -y -p @taptap/maker@0.0.33 taptap-maker help
 作为可选恢复方式，并先备份实际生效的配置：
 
 ```bash
-npx -y -p @taptap/maker@0.0.33 taptap-maker mcp install --launcher self
+npx -y -p @taptap/maker@0.0.34 taptap-maker mcp install --launcher self
 ```
 
 Windows 如无法从 PATH 运行上述恢复命令，应使用当前可用 npm 的绝对路径启动这一次 CLI；安装器
@@ -328,7 +328,7 @@ Windows 如无法从 PATH 运行上述恢复命令，应使用当前可用 npm �
 指纹打扰。用户明确同意后无需第二次确认，AI 将已脱敏的当前会话错误 JSON 通过 stdin 传入：
 
 ```text
-npx -y --package @taptap/maker@0.0.33 taptap-maker mcp report --ide <client> --target-dir <project> --context-stdin --consent --json
+npx -y --package @taptap/maker@0.0.34 taptap-maker mcp report --ide <client> --target-dir <project> --context-stdin --consent --json
 ```
 
 优先原样复用当前客户端 Maker MCP 配置中的 command 和有序 args，再追加上述 `mcp report`

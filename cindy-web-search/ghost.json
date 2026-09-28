@@ -5,7 +5,7 @@
   "description": "Cindy 内置的网页搜索插件:默认使用 Cindy AI 搜索,也可用你自己的 Brave / Tavily key 搜索公网;配置 Tavily key 后还能读取经用户明确确认的任意单个公开 HTTP(S) 网页正文。key 在插件详情页填写,加密存本机、只注入声明域名的请求。",
   "whenToUse": "需要搜索公网信息、查资料、找网页、看最新动态，或在用户明确确认 URL 可完整发送给 Tavily 后读取任意公开 HTTP(S) 页面的正文时找我，包括但不限于搜索结果页。默认使用 Cindy AI 搜索；正文读取需要在 Web Search 插件详情页配置 Tavily Key。",
   "version": "1.4.0",
-  "minCindyVersion": "0.1.37",
+  "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -53,7 +53,7 @@
   "tools": [
     {
       "name": "search_web",
-      "description": "搜索公网并返回结果列表(标题/链接/摘要)，查询最多 2000 字符。默认使用 Cindy AI 搜索;也可指定 Brave 或 Tavily。返回 JSON:{ provider, results: [{ title, url, snippet }] }。使用 Brave / Tavily 但对应 key 未配置时会返回指引,把 message 原样告诉用户即可。",
+      "description": "搜索公网并返回结果列表(标题/链接/摘要)，查询最多 2000 字符。默认使用 Cindy AI 搜索;也可指定 Brave 或 Tavily。返回 JSON:{ provider, results: [{ title, url, snippet }] }。失败时保留宿主返回的 errorCode；使用 Brave / Tavily 但对应 key 未配置时会返回指引,把 message 原样告诉用户即可。",
       "parameters": {
         "type": "object",
         "properties": {

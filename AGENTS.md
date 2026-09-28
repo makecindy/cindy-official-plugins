@@ -27,6 +27,12 @@ do not require authors to perform the migration checklist themselves.
 
 ## Review contract / 审查契约
 
+Before upgrading or refactoring Maker, read the
+[maintenance checklist](./docs/taptap-maker-maintenance.md)
+([中文](./docs/taptap-maker-maintenance.zh-CN.md)). Preserve the documented
+Runtime patches and host safeguards until equivalent behavior is verified.
+升级或重构 Maker 前必读避坑清单；不得因追求原样 vendor 丢失历史兼容保护。
+
 - **Authoritative ruleset: [`.greptile/rules.md`](./.greptile/rules.md)** plus
   the structured security rules in
   [`.greptile/config.json`](./.greptile/config.json). Written for Greptile but
@@ -52,7 +58,7 @@ declaration and matching host); plugins declaring the top-level `node` field
 have their autonomous workers reviewed against fixed endpoints instead; tools with
 irreversible external side effects must distinguish "not executed / executed /
 unknown" on every failure path; no `Math.random` for externally-visible ids;
-vendor/dist changes require itemized evidence, never a bare "looks fine".
+vendor/dist whole-package upgrades require a verified official source and review of network, download, dynamic-execution, or credential risks introduced by new behavior or changes to existing functions, endpoints, or encoded content; unchanged content does not need itemized listing.
 
 ## Hard gates before any commit / 提交硬门禁
 
@@ -74,9 +80,10 @@ vendor/dist changes require itemized evidence, never a bare "looks fine".
   of the PR and must not be flagged.
 - Bundled third-party dependencies changed → update that plugin's
   `THIRD-PARTY-LICENSES.txt`.
-- Every changed plugin package requires the PR's production Cindy verification
+- Every changed plugin package requires the PR's Cindy device verification
   checkbox, attesting that its packaged `.cindy` was installed and exercised on
-  a real device running a stable production Cindy build. If the plugin declares
+  a real device running a stable production or Beta Cindy build. Either channel
+  is sufficient; Dev/local builds do not qualify. If the plugin declares
   `minCindyVersion`, that Cindy build must be greater than or equal to it.
   Lowering/removing the field requires maintainer review.
 - Paired bilingual docs (`README.md` ↔ `README.zh-CN.md`, etc.) must change in

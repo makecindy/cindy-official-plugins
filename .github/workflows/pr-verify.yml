@@ -28,6 +28,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check per-plugin tracked binary totals
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
+          node .github/scripts/check-source-size.mjs "$(git rev-parse HEAD^1)"
 
       - name: Validate official plugin publish contract
         env:
@@ -47,15 +55,20 @@ jobs:
       - name: Validate publish workflows
         run: node --test .tests/publish-workflows.test.mjs
 
+      - name: Validate binary dependency packaging
+        run: node --test .tests/binary-dependencies.test.mjs
+
   changed-plugins:
     name: Test and dry-run packaging for changed plugins
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event.pull_request.draft == false
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect changed plugin directories
         id: changes
@@ -122,14 +135,20 @@ jobs:
           exit "${failed}"
 
       - name: Dry-run plugin packaging
+        id: packages
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         env:
           PLUGINS: ${{ steps.changes.outputs.plugins }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          artifact_dir="$(mktemp -d "${RUNNER_TEMP}/pr-plugins.XXXXXX")"
+          test "$(git rev-parse HEAD^2)" = "${HEAD_SHA}"
           for directory in $(jq -r '.[].directory' <<<"${PLUGINS}"); do
             echo "::group::Package ${directory}"
-            package="${RUNNER_TEMP}/${directory//\//_}.cindy"
+            package_dir="${artifact_dir}/${directory}"
+            mkdir -p "${package_dir}"
+            package="${package_dir}/plugin.cindy"
             .github/scripts/package-plugin.sh "${directory}" "${package}"
             unzip -l "${package}"
             # git archive places the plugin directory's contents at the zip
@@ -144,16 +163,35 @@ jobs:
                 exit 1
               }
             done
+            (cd "${package_dir}" && sha256sum plugin.cindy > plugin.cindy.sha256)
+            jq -n --arg directory "${directory}" --arg head "${HEAD_SHA}" \
+              --arg base "$(git rev-parse HEAD^1)" --arg merge "$(git rev-parse HEAD)" \
+              '{pluginDirectory: $directory, prHeadSha: $head, baseSha: $base, buildCommit: $merge}' \
+              > "${package_dir}/source.json"
             echo "::endgroup::"
           done
+          echo "directory=${artifact_dir}" >> "${GITHUB_OUTPUT}"
 
-      - name: Require production Cindy verification attestation
+      # Available even when the following manual-attestation gate is pending.
+      # Test artifacts are never consumed by the production publishers.
+      - name: Upload PR verification packages
+        if: ${{ steps.changes.outputs.plugins != '[]' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pr-plugins-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.packages.outputs.directory }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Require Cindy device verification attestation
         if: ${{ steps.changes.outputs.plugins != '[]' }}
         run: |
           set -euo pipefail
           pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}")"
-          if ! grep -Eq '^- \[[xX]\] \*\*Production Cindy verification / 生产版 Cindy 验证\*\*' \
+          # Keep accepting the stricter stable-only attestation on existing PRs.
+          if ! grep -Eq '^- \[[xX]\] \*\*(Cindy device verification / Cindy 实机验证|Production Cindy verification / 生产版 Cindy 验证)\*\*' \
             <<<"${pr_body}"; then
-            echo "::error::Check the Production Cindy verification / 生产版 Cindy 验证 box in the PR body after installing and exercising every changed plugin on a real device with a stable production Cindy build. If a plugin declares minCindyVersion, the verified Cindy version must be greater than or equal to it."
+            echo "::error::Check the Cindy device verification / Cindy 实机验证 box in the PR body after installing and exercising every changed plugin on a real device with a stable production or Beta Cindy build. If a plugin declares minCindyVersion, the verified Cindy version must be greater than or equal to it."
             exit 1
           fi

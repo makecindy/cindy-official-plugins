@@ -88,8 +88,40 @@ async function accountRequest(action, payload, longRunning) {
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
   var parsed = parseAccountResult(result);
-  if (parsed.ok === false) throw new Error(parsed.message || 'TapTap Maker 账号操作失败');
+  if (parsed.ok === false) {
+    var failure = new Error(parsed.message || 'TapTap Maker 账号操作失败');
+    if (['not_executed', 'executed', 'unknown'].includes(parsed.execution_state)) {
+      failure.execution_state = parsed.execution_state;
+    }
+    throw failure;
+  }
   return parsed;
+}
+
+async function openMakerConsole(context) {
+  var result;
+  try {
+    result = await accountRequest('console_open', context ? { workdir: context.workdir } : {}, true);
+    var url = new URL(result.url);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port
+      || url.username || url.password || url.pathname !== '/' || url.hash
+      || Array.from(url.searchParams.keys()).some(function (key) { return key !== 'projectid' && key !== 'checkout'; })) {
+      throw new Error('Invalid Maker console URL');
+    }
+  } catch (error) {
+    if (!error.execution_state) error.execution_state = 'unknown';
+    throw error;
+  }
+  var preview;
+  try {
+    preview = await cindy.preview({ url: url.href,
+      ...(context && typeof context.session_id === 'string' ? { sessionId: context.session_id } : {}) });
+  } catch (_error) {
+    preview = { ok: false };
+  }
+  return { ok: true, url: url.href, execution_state: 'executed', automatic_retry: false,
+    opened: Boolean(preview && preview.ok === true),
+    user_facing_markdown: '[Maker Console](' + url.href + ')' };
 }
 
 function requireLocalContext(message) {
@@ -632,6 +664,9 @@ function previewUrlFromResult(result) {
 
 async function handleTool(message) {
   var args = withoutSessionContext(message.args);
+  if (message.tool === 'maker_console') {
+    return openMakerConsole(requireWritableContext(requireLocalContext(message)));
+  }
   if (message.tool === 'maker_login') {
     return publicAccountResult(await accountRequest('login', {}, true));
   }
@@ -823,6 +858,7 @@ function settingsErrorCode(action, error) {
 }
 
 async function handleSettingsRequest(action, payload, locale) {
+  if (action === 'console_open') return openMakerConsole(null);
   if (action === 'status') return accountRequest('status', {}, false);
   if (action === 'login') return accountRequest('login', {}, true);
   if (action === 'open_pat_page') return accountRequest('open_pat_page', {}, false);

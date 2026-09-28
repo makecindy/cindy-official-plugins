@@ -145,14 +145,14 @@ jobs:
             );
             return plugins;
 
-  publish:
-    name: Publish ${{ matrix.plugin.directory }} to CN prod
+  package:
+    name: Package ${{ matrix.plugin.directory }} for CN
     needs: detect
     if: ${{ needs.detect.outputs.plugins != '[]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
-      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -160,6 +160,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Package plugin
         env:
@@ -168,6 +170,73 @@ jobs:
           .github/scripts/package-plugin.sh \
             "${PLUGIN_DIRECTORY}" \
             "$RUNNER_TEMP/plugin.cindy"
+
+      - name: Record package identity
+        id: artifact
+        env:
+          PLUGIN_DIRECTORY: ${{ matrix.plugin.directory }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          sha256sum plugin.cindy > plugin.cindy.sha256
+          printf '%s' "$GITHUB_SHA" > commit.txt
+          printf '%s' "$PLUGIN_DIRECTORY" > plugin.txt
+          printf 'name=package-%s\n' "$(printf '%s' "$PLUGIN_DIRECTORY" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Store complete package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            ${{ runner.temp }}/plugin.cindy
+            ${{ runner.temp }}/plugin.cindy.sha256
+            ${{ runner.temp }}/commit.txt
+            ${{ runner.temp }}/plugin.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish ${{ matrix.plugin.directory }} to CN prod
+    needs: [detect, package]
+    # Keep successful plugins publishable when another matrix build fails.
+    # A failed package has no artifact, so its own upload cannot proceed.
+    if: ${{ !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.plugins != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJSON(needs.detect.outputs.plugins) }}
+    steps:
+      # No checkout, dependency download, plugin code or build scripts in this job.
+      - name: Select this run's package
+        id: artifact
+        env:
+          PLUGIN_DIRECTORY: ${{ matrix.plugin.directory }}
+        run: |
+          printf 'name=package-%s\n' "$(printf '%s' "$PLUGIN_DIRECTORY" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Download complete package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ runner.temp }}
+
+      - name: Verify package identity
+        env:
+          PLUGIN_DIRECTORY: ${{ matrix.plugin.directory }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          test "$(cat commit.txt)" = "$GITHUB_SHA"
+          test "$(cat plugin.txt)" = "$PLUGIN_DIRECTORY"
+          # Do not interpret artifact contents as shell or checksum file paths.
+          expected="$(cat plugin.cindy.sha256)"
+          actual="$(sha256sum plugin.cindy)"
+          test "$expected" = "$actual"
 
       - name: Publish plugin
         env:

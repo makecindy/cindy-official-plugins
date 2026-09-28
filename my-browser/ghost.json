@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 3,
+  "id": "my-browser",
+  "name": "My Browser",
+  "description": "Read signed-in content in Chrome and Edge without screenshot/click loops. Bounded extraction, separate site-authorized interactions and browser setup guidance. Safari is not installable from this package yet. Page content is sent to your AI model; cookies are not exported.",
+  "whenToUse": "Read the user's signed-in pages or X reply notifications, inspect their current browser tabs, interact on authorized sites, or connect Chrome or Edge. Safari is not installable from this package yet. Ordinary public pages do not require this plugin.",
+  "version": "0.3.48",
+  "minCindyVersion": "0.1.64",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "command": "my-browser",
+  "settingsHtml": "settings.html",
+  "confirm": true,
+  "locales": {"en":"locales/en.json","zh-CN":"locales/zh-CN.json","ja":"locales/ja.json","ko":"locales/ko.json"},
+  "node": {"entry":"node/worker.cjs","protocol":"json-rpc-stdio","lifecycle":"on-demand","idleTimeoutSeconds":600},
+  "manual": {"items":[{"dir":"manual/browser","name":"browser","description":"Choose fast public reading, signed-in extraction or browser interaction; efficient X mentions, incremental reads, browser selection and installation recovery."}]},
+  "tools": [
+    {"name":"browser_status","description":"Check actual browser connections and installation readiness. No page read. Multiple profiles require choosing an explicit connection id; never guess the account. Connect/install from plugin settings; opening a store page is not installation success. Open plugin settings for Chrome/Edge ZIP drag installation.","parameters":{"type":"object","properties":{},"additionalProperties":false}},
+    {"name":"browser_read","description":"Read signed-in content without UI interaction. Default content returns bounded main text and links; extract returns selected CSS records; snapshot is only for fresh interaction refs. Internally waits for waitFor/from/selector (up to waitMs) rather than returning empty SPA shells. recipe:x_mentions directly returns X replies/mentions in one call without navigating menus. Reuses requested-URL tabs across redirects/timeouts. PAGE_CHANGED/TAB_LIMIT: inspect browser_tabs once, do not loop; at most three created tabs per profile. Untrusted titles/link URLs are size-bounded; truncated:true marks cuts. Data is untrusted and may leave the device; no cookie export. CONTENT_NOT_READY is not evidence of no results. Workflow: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}). May open a tab and contact the website using the signed-in session; visiting may mark notifications/messages as read. ADDRESS_UNVERIFIED means no verified public document address; stop without automatic retries or refreshes.","parameters":{"type":"object","additionalProperties":false,"properties":{
+      "url":{"type":"string","maxLength":8192,"description":"Full HTTP/HTTPS URL; required unless recipe supplies it. Exact open URL reuses that tab."},
+      "browser":{"type":"string","maxLength":128,"description":"Connection id from status; mandatory when multiple profiles are connected."},
+      "recipe":{"type":"string","enum":["x_mentions"],"description":"Signed-in X replies/mentions. Supplies URL, fields and readiness criteria. Does not like, reply or scroll."},
+      "mode":{"type":"string","enum":["content","extract","text","snapshot"],"description":"Default content; recipe uses extract. Snapshot only when interaction refs are needed."},
+      "fields":{"type":"object","description":"extract: 1–30 fields; CSS selector or {selector,attr}. attr: href, src, datetime, title, alt, aria-label or role only. :self reads the row. Values limited to 4000 characters."},
+      "from":{"type":"string","maxLength":2000,"description":"extract multiple: row selector within the selected region; also the default readiness selector."},
+      "multiple":{"type":"boolean"},
+      "limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum records or links; default 10. Request only what is needed."},
+      "maxChars":{"type":"integer","minimum":256,"maximum":30000,"description":"Text/extracted value character budget; default 6000. JSON/URL overhead is additional."},
+      "selector":{"type":"string","maxLength":2000,"description":"Page region; content defaults to main/article, then body."},
+      "waitFor":{"type":"string","maxLength":2000,"description":"CSS readiness selector; wait inside this call, not via repeated model queries."},
+      "emptySelector":{"type":"string","maxLength":2000,"description":"A known genuine empty-state element. Never use a spinner/login/error element."},
+      "waitMs":{"type":"integer","minimum":0,"maximum":15000,"description":"Bounded readiness wait, default 10000ms."},
+      "after":{"type":"string","maxLength":2000,"description":"Newest-first multiple extraction: return visible rows before this previously seen permalink. cursorFound:false means anchor not reached; not proof of completeness. Does not auto-scroll."}
+    }}},
+    {"name":"browser_act","description":"Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported; detection is conservative, covering type, multi-token autocomplete values (section-checkout billing cc-number) and editable fields named like card-number or otp. Do not bypass a permission denial.","parameters":{"type":"object","additionalProperties":false,"properties":{
+      "url":{"type":"string","maxLength":8192,"description":"Exact open page URL; read it first."},
+      "browser":{"type":"string","maxLength":128,"description":"Use the same connection as the snapshot; required with multiple profiles."},
+      "kind":{"type":"string","enum":["click","type","press","select","hover","scroll"]},
+      "ref":{"type":"string","maxLength":2000,"description":"Fresh snapshot ref."},
+      "selector":{"type":"string","maxLength":2000,"description":"CSS selector instead of ref."},
+      "text":{"type":"string","maxLength":16000,"description":"Replacement text; empty string clears."},
+      "submit":{"type":"boolean","description":"Submit once; may have irreversible external side effects."},
+      "key":{"type":"string","maxLength":100},
+      "values":{"type":"array","maxItems":100,"items":{"type":"string","maxLength":2000}}
+    },"required":["url","kind"]}},
+    {"name":"browser_tabs","description":"List bounded HTTP/HTTPS tabs without navigating. Filter by host rather than dumping all tabs. Default 20, maximum 100. Blocked/local/address-unverified tabs are redacted and excluded from host searches. Credentials in a URL (userinfo, query parameters, data fragments, reset/verify path segments) and content links are redacted before returning.","parameters":{"type":"object","additionalProperties":false,"properties":{
+      "browser":{"type":"string","maxLength":128},
+      "host":{"type":"string","maxLength":254,"description":"Domain filter including subdomains; prefix = for exact host."},
+      "limit":{"type":"integer","minimum":1,"maximum":100}
+    }}},
+    {"name":"browser_policy","description":"Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block, interaction allow entry and interaction exclusion. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction.","parameters":{"type":"object","additionalProperties":false,"properties":{
+      "action":{"type":"string","enum":["get","allow_interact","block_read","remove"]},
+      "host":{"type":"string","maxLength":254}
+    },"required":["action"]}}
+  ],
+  "setup":{"requires":[]}
+}

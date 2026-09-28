@@ -1,0 +1,242 @@
+const { test } = require("node:test"),
+  assert = require("node:assert/strict"),
+  vm = require("node:vm"),
+  fs = require("node:fs"),
+  crypto = require("node:crypto");
+const source = fs.readFileSync(
+  __dirname + "/../../opendesign-trial/main.js",
+  "utf8",
+);
+const sid = "11111111-1111-4111-8111-111111111111",
+  other = "22222222-2222-4222-8222-222222222222";
+const ctx = {
+  session_id: sid,
+  workdir: "/project",
+  workdir_is_local: true,
+  workdir_is_read_only: false,
+};
+function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOverride, locale = "en") {
+  let handler;
+  const calls = [],
+    sent = [];
+  const cindy = {
+    request: async () => ({context: {locale}}),
+    onHostMessage: (h) => (handler = h),
+    agent: { run: async (args) => { calls.push({ agent: args }); return reply; } },
+    node: {
+      request: async (x) => {
+        calls.push(x);
+        if (nodeOverride) return {ok: true, result: await nodeOverride(x)};
+        return {
+          ok: true,
+          result:
+            x.method === "feedback-claim"
+              ? { projectDir: "/project/new", file: "design.html", note: "change", attachments: [] }
+              : x.method === "prepare"
+              ? { dir: "/project/new" }
+              : x.method === "bind"
+                ? {
+                    url: "http://editor.example.test:1234/studio/token/",
+                    previewBase: "http://preview.example.test:1235/view/read/",
+                    files: [],
+                  }
+                : {
+                    cardHtml: "<h1>Actual draft</h1>",
+                    html: "<html><body><h1>Actual draft</h1></body></html>",
+                    revision: "abc123456",
+                    sketches: [],
+                  },
+        };
+      },
+    },
+    preview: async (x) => {
+      calls.push({ preview: x });
+      return { ok: true };
+    },
+    send: async (x) => {
+      sent.push(x);
+      if (x.type === "fs-request") {
+        if (x.op === "read")
+          return disk.has(x.path)
+            ? { ok: true, content: disk.get(x.path) }
+            : { ok: false, errorCode: "NOT_FOUND" };
+        disk.set(x.path, x.content);
+      }
+      return { ok: true };
+    },
+  };
+  vm.runInNewContext(source, { cindy, crypto: crypto.webcrypto });
+  return {
+    calls,
+    sent,
+    disk,
+    run: (m) => handler(m),
+    tool: (tool, args = {}, callId = "call-one") =>
+      handler({
+        type: "tool-call",
+        tool,
+        callId,
+        args: { session_context: ctx, ...args },
+      }),
+  };
+}
+test("create publishes actual markup card, no auto preview or workspace API", async () => {
+  const r = runtime();
+  await r.tool("opendesign_new", { html: "<h1>draft</h1>" });
+  assert.equal(r.sent.at(-1).ok, true);
+  assert.match(
+    r.sent.find((x) => x.type === "card-update").html,
+    /Actual draft/,
+  );
+  assert.equal(r.calls.filter((x) => x.preview).length, 0);
+});
+test("persisted card opens fixed session HTML after restart; wrong/missing session rejected", async () => {
+  const r = runtime();
+  await r.tool("opendesign_new", { html: "x" });
+  for (const sessionId of [sid, other, undefined]) {
+    const q = runtime(r.disk);
+    await q.run({
+      type: "event",
+      name: "card-action",
+      callId: "call-one",
+      actionId: "open",
+      sessionId,
+    });
+    const p = q.calls.find((x) => x.preview)?.preview;
+    if (sessionId === sid) {
+      assert.equal(p.sessionId, sid);
+      assert.match(p.url, /\/studio\/token\/\?file=design.html$/);
+    } else assert.equal(p, undefined);
+  }
+});
+test("follow-up keeps draft and file, duplicate creation rejected", async () => {
+  const r = runtime();
+  await r.tool("opendesign_new", { html: "x" });
+  const id = r.sent.at(-1).result.draftId;
+  await r.tool("opendesign_context", {}, "read");
+  assert.match(r.sent.at(-1).result.html, /Actual draft/);
+  await r.tool(
+    "opendesign_update",
+    { html: "changed", expectedRevision: "abc123456" },
+    "update",
+  );
+  assert.equal(r.sent.at(-1).result.draftId, id);
+  assert.equal(
+    r.calls.findLast((x) => x.method === "draft-write").params.file,
+    "design.html",
+  );
+  await r.tool("opendesign_new", { html: "new" }, "duplicate");
+  assert.equal(r.sent.at(-1).ok, false);
+  assert.equal(r.calls.filter((x) => x.method === "prepare").length, 1);
+});
+test("untrusted, remote and readonly contexts do nothing", async () => {
+  for (const context of [
+    undefined,
+    { ...ctx, workdir_is_local: false },
+    { ...ctx, workdir_is_read_only: true },
+  ]) {
+    const r = runtime();
+    await r.tool("opendesign_open", { session_context: context });
+    assert.equal(r.calls.length, 0);
+    assert.equal(r.sent.at(-1).ok, false);
+  }
+});
+
+test("accepted dispatch to a different session stays unknown without retry", async () => {
+  for (const [reply, expected] of [[{ok:true}, 'unknown'], [{ok:true,sessionId:''}, 'unknown'], [{ok:true,sessionId:sid}, 'accepted'], [{ok:true,sessionId:sid,disposition:'queued'}, 'queued'], [{ok:true,sessionId:other}, 'unknown'], [null, 'unknown'], [{ok:false,message:'denied'}, 'rejected']]) {
+    const r = runtime(new Map(), reply);
+    await r.tool('opendesign_new', {html:'<h1>Example</h1>'});
+    await r.run({type:'event',name:'node-notification',method:'opendesign-feedback',params:{requestId:'request-one',sessionId:sid}});
+    assert.equal(r.calls.findLast(x => x.method === 'feedback-result').params.status, expected);
+    assert.equal(r.calls.filter(x => x.agent).length, 1);
+    assert.equal(r.calls.find(x => x.agent).agent.sessionId, sid);
+  }
+});
+
+test("failed initialization retries the same project and recovers writes with lost receipts", async () => {
+  for (const failure of ['validation', 'disk', 'lost-receipt', 'final-state']) {
+    let html = null, prepares = 0, writes = 0, fail = true;
+    class Store extends Map {
+      set(key, value) {
+        if (failure === 'final-state' && fail && key.startsWith('sessions/') && JSON.parse(value).initialization === 'ready') {
+          fail = false;
+          throw Error('state disk unavailable');
+        }
+        return super.set(key, value);
+      }
+    }
+    const disk = new Store();
+    const invoke = async ({method, params}) => {
+      if (method === 'prepare') { prepares++; return {dir:'/project/reserved'}; }
+      if (method === 'bind') return {files:[]};
+      if (method === 'draft-write') {
+        writes++;
+        assert.equal(params.expectedRevision, null);
+        if (fail && (failure === 'validation' || failure === 'disk')) { fail=false; throw Error(failure === 'validation' ? 'HTML_TOO_LARGE' : 'disk unavailable'); }
+        assert.equal(html, null, 'recovery must never overwrite an existing manuscript');
+        html = params.html;
+        if (fail && failure === 'lost-receipt') { fail=false; throw Error('receipt lost'); }
+      }
+      return {html:html || '', revision:html === null ? null : 'saved-revision', cardHtml:'<p>Saved</p>', sketches:[]};
+    };
+    const first = runtime(disk, undefined, invoke);
+    await first.tool('opendesign_new', {html:'<h1>First attempt</h1>'});
+    assert.equal(first.sent.at(-1).ok, false);
+    const pending = JSON.parse(disk.get('sessions/'+sid+'.json'));
+    assert.equal(pending.initialization, 'pending');
+    // All ordinary entry points fail before reads/writes, preview or model dispatch.
+    for (const tool of ['opendesign_context','opendesign_update','opendesign_open','opendesign_preview']) {
+      const blocked = runtime(disk, undefined, invoke);
+      await blocked.tool(tool, {html:'<h1>Must not write</h1>', expectedRevision:null});
+      assert.equal(blocked.sent.at(-1).ok, false);
+      assert.match(blocked.sent.at(-1).error || blocked.sent.at(-1).message || JSON.stringify(blocked.sent.at(-1)), /opendesign_new/);
+      assert.equal(blocked.calls.length, 0);
+      assert.equal(blocked.sent.filter(x=>x.type==='card-update' && x.state==='done').length, 0);
+    }
+    disk.set('cards/pending-card.json',JSON.stringify({sessionId:sid,draftId:pending.id}));
+    for (const actionId of ['open','canvas']) {
+      const blocked = runtime(disk, undefined, invoke);
+      await blocked.run({type:'event',name:'card-action',callId:'pending-card',sessionId:sid,actionId});
+      assert.equal(blocked.calls.length, 0);
+      assert.match(blocked.sent.at(-1).html, /creation is incomplete.*opendesign_new/);
+      assert.doesNotMatch(blocked.sent.at(-1).html, /data-ghost-action/);
+    }
+    const feedbackRuntime=runtime(disk);
+    await feedbackRuntime.run({type:'event',name:'node-notification',method:'opendesign-feedback',params:{requestId:'pending-feedback',sessionId:sid}});
+    assert.equal(feedbackRuntime.calls.filter(x=>x.agent).length,0);
+    assert.equal(feedbackRuntime.calls.find(x=>x.method==='feedback-result').params.status,'rejected');
+    assert.equal(JSON.parse(disk.get('sessions/'+sid+'.json')).initialization,'pending');
+    // A new runtime represents a plugin restart between attempts.
+    const recovered = runtime(disk, undefined, invoke);
+    await recovered.tool('opendesign_new', {html:'<h1>Corrected attempt</h1>'});
+    assert.equal(recovered.sent.at(-1).ok, true);
+    assert.equal(recovered.sent.at(-1).result.draftId, pending.id);
+    assert.equal(prepares, 1);
+    assert.equal(JSON.parse(disk.get('sessions/'+sid+'.json')).initialization, 'ready');
+    assert.equal(html, failure === 'validation' || failure === 'disk' ? '<h1>Corrected attempt</h1>' : '<h1>First attempt</h1>');
+    assert.equal(writes, failure === 'validation' || failure === 'disk' ? 2 : 1);
+    await recovered.tool('opendesign_new', {html:'<h1>Duplicate</h1>'});
+    assert.equal(recovered.sent.at(-1).ok, false);
+    assert.equal(prepares, 1);
+  }
+});
+
+test("runtime cards use host locale and English fallback without translating user titles", async () => {
+  for (const locale of ['zh-CN','en','ja','ko']) {
+    const r = runtime(new Map(), undefined, undefined, locale);
+    await r.tool('opendesign_new', {html:'<h1>Content</h1>'});
+    assert.equal(r.sent.at(-1).ok,true);
+    assert.equal(r.sent.at(-1).result.title,locale==='zh-CN'?'新设计':'New design');
+    const card=r.sent.find(x=>x.type==='card-update').html;
+    assert.ok(card.includes(locale==='zh-CN'?'· 稿件 ':'· Draft '));
+    await r.run({type:'event',name:'card-action',callId:'call-one',spawnCallId:'opened',actionId:'open',sessionId:sid});
+    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'稿件已在所属会话':'owning session sidebar'));
+    const named=runtime(new Map(),undefined,undefined,locale);
+    await named.tool('opendesign_new',{html:'<h1>Content</h1>',title:'用户自定义标题'});
+    assert.equal(named.sent.at(-1).result.title,'用户自定义标题');
+    const noRevision=runtime(r.disk,undefined,async ({method})=>method==='bind'?{files:[]}:{html:'',cardHtml:'',revision:null},locale);
+    await noRevision.tool('opendesign_open');
+    assert.ok(noRevision.sent.find(x=>x.type==='card-update').html.includes(locale==='zh-CN'?'未保存':'Unsaved'));
+    if(locale!=='zh-CN') assert.doesNotMatch(card,/稿件|未保存|新设计/);
+  }
+});

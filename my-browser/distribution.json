@@ -1,0 +1,5 @@
+{
+  "chrome": {"extensionId": null, "storeUrl": null},
+  "edge": {"extensionId": null, "storeUrl": null},
+  "safari": {"appStoreUrl": null, "bundleIdentifier": "com.makecindy.mybrowser"}
+}

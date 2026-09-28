@@ -1,0 +1,178 @@
+--- a/baguette/carplay/carplay-frame.js
++++ b/baguette/carplay/carplay-frame.js
+@@ -58 +58 @@
+-        'position:absolute;overflow:hidden;cursor:crosshair;z-index:2;outline:none;';
++        'position:absolute;overflow:hidden;cursor:default;z-index:2;outline:none;';
+--- a/baguette/gestures/screen-pieces.js
++++ b/baguette/gestures/screen-pieces.js
+@@ -35 +35 @@
+-     *  every piece, the point is still placed — clamped onto the first
++     *  every piece, the point is still placed — clamped onto the nearest
+@@ -39 +39,2 @@
+-      for (const [index, piece] of this.pieces.entries()) {
++      let nearest = Infinity;
++      for (const piece of this.pieces) {
+@@ -47 +48,12 @@
+-        if (index === 0) fallback = placed;
++        // Compare distances in rendered-frame space, not local UV space:
++        // folded pieces can have different sizes and perspective transforms.
++        const q = piece.quad;
++        const corners = [q.topLeft, q.topRight, q.bottomRight, q.bottomLeft];
++        for (let i = 0; i < corners.length; i++) {
++          const a = corners[i], b = corners[(i + 1) % corners.length];
++          const dx = b.u - a.u, dy = b.v - a.v;
++          const length2 = dx * dx + dy * dy;
++          const t = length2 ? Math.max(0, Math.min(1, ((px - a.u) * dx + (py - a.v) * dy) / length2)) : 0;
++          const distance = (px - a.u - t * dx) ** 2 + (py - a.v - t * dy) ** 2;
++          if (distance < nearest) { nearest = distance; fallback = placed; }
++        }
+--- a/baguette/parts/bezel.js
++++ b/baguette/parts/bezel.js
+@@ -49 +49 @@
+-        'position:absolute;overflow:hidden;cursor:crosshair;z-index:2;';
++        'position:absolute;overflow:hidden;cursor:default;z-index:2;';
+--- a/baguette/parts/keyboard.js
++++ b/baguette/parts/keyboard.js
+@@ -60,0 +61,4 @@
++      this._inputQueue = [];
++      this._onBlur = () => { this._inputQueue.length = 0; };
++      this._onVisibility = () => { if (document.hidden) this._onBlur(); };
++      this._onRelease = ev => { if (ev.origin === location.origin && ev.data?.type === 'cindy-release-input') this._onBlur(); };
+@@ -73,0 +78 @@
++      el.addEventListener('blur', this._onBlur);
+@@ -78,0 +84,2 @@
++      document.addEventListener('visibilitychange', this._onVisibility);
++      window.addEventListener('message', this._onRelease);
+@@ -83,0 +91,2 @@
++      this._el.removeEventListener('blur', this._onBlur);
++      this._inputQueue.length = 0;
+@@ -84,0 +94,2 @@
++      document.removeEventListener('visibilitychange', this._onVisibility);
++      window.removeEventListener('message', this._onRelease);
+@@ -93,3 +104 @@
+-      const env = { type: 'key', code };
+-      if (modifiers && modifiers.length) env.modifiers = modifiers;
+-      this.transport._dispatch(env);
++      this._clipboard('key', undefined, code, modifiers);
+@@ -100 +109 @@
+-      this.transport._dispatch({ type: 'type', text });
++      this.paste(text);
+@@ -106 +115 @@
+-      this.transport._dispatch({ type: 'paste', text });
++      this._clipboard('paste', text);
+@@ -114 +123,30 @@
+-      this.transport._dispatch({ type: 'copy' });
++      this._clipboard('copy');
++    }
++
++    async _clipboard(action, text, code, modifiers) {
++      if (this._inputPending) {
++        const request = [action,text,code,modifiers];
++        const last = this._inputQueue.length ? this._inputQueue[this._inputQueue.length-1] : this._activeInput;
++        if (action === 'paste' && last?.[0] === 'paste' && last[1] === text) return;
++        if (this._inputQueue.length < 32) this._inputQueue.push(request);
++        else window.alert('Input queue is full. Wait for pending input to finish, then retry.');
++        return;
++      }
++      this._inputPending = true;
++      this._activeInput = [action,text,code,modifiers];
++      const capability = new URLSearchParams(location.hash.slice(1)).get('cindyClipboard');
++      const match = /^(\d{1,5})\.([a-f0-9]{64})$/.exec(capability || '');
++      const udid = /^\/simulators\/([a-f0-9-]{36})\/?$/i.exec(location.pathname)?.[1];
++      try {
++        if (!match || !udid) throw Error('Reopen the simulator with open_viewer.');
++        const response = await fetch('/clipboard', {
++          method: 'POST', headers: {'Content-Type':'application/json','X-Cindy-Clipboard':match[2]},
++          body: JSON.stringify({action, text, code, modifiers, udid}), signal: AbortSignal.timeout(65000)
++        });
++        const result = await response.json();
++        if (!response.ok || !result.ok) throw Error(result.error || 'Clipboard failed');
++      } catch (error) {
++        // Visible feedback; never print potentially sensitive clipboard contents.
++        this._inputQueue.length = 0;
++        window.alert('Input failed: ' + error.message);
++      } finally { this._inputPending = false; this._activeInput = null; const next = this._inputQueue.shift(); if (next) this._clipboard(...next); }
+@@ -122,0 +161 @@
++      if (ev.repeat) { ev.preventDefault(); return; }
+--- a/farm/farm.html
++++ b/farm/farm.html
+@@ -7,3 +6,0 @@
+-<link rel="preconnect" href="https://fonts.googleapis.com">
+-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
+--- a/sim-3d.js
++++ b/sim-3d.js
+@@ -36,0 +37 @@
++    this.onLitPanelChange = null;
+@@ -63,0 +65 @@
++    this.onLitPanelChange = options.onLitPanelChange || this.onLitPanelChange;
+@@ -405 +407,5 @@
+-          if (envelope.litPanel) this.litPanel = envelope.litPanel;
++          if ((envelope.litPanel === 'primary' || envelope.litPanel === 'secondary') &&
++              envelope.litPanel !== this.litPanel) {
++            this.litPanel = envelope.litPanel;
++            if (this.onLitPanelChange) this.onLitPanelChange(this.litPanel);
++          }
+@@ -1163 +1169 @@
+-    return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
++    return window.CSS && CSS.escape ? CSS.escape(value) : Array.from(String(value), (char) => '\\' + char.codePointAt(0).toString(16) + ' ').join('');
+--- a/sim-location.js
++++ b/sim-location.js
+@@ -49 +49 @@
+-  const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
++  const TILE_URL = '/map/tiles/{z}/{x}/{y}.png';
+@@ -53 +53 @@
+-  const GEOCODE_URL = 'https://nominatim.openstreetmap.org/search';
++  const GEOCODE_URL = '/map/search';
+--- a/sim-native.html
++++ b/sim-native.html
+@@ -1589 +1589 @@
+-    cursor: crosshair;
++    cursor: default;
+--- a/sim-native.js
++++ b/sim-native.js
+@@ -491,0 +492,8 @@
++
++  function syncLitPanel(panel) {
++    if (!foldable || (panel !== 'primary' && panel !== 'secondary') || panel === currentLitPanel) return;
++    currentLitPanel = panel;
++    currentOrientation = panel === 'secondary' ? 'landscape-left' : 'portrait';
++    orientationIndex = Math.max(0, orientationCycle().indexOf(currentOrientation));
++    if (render3DPanel) render3DPanel.setInterfaceOrientation(currentOrientation);
++  }
+@@ -1695 +1703 @@
+-      row.innerHTML = clusterSvg('gauge') + '<span>' + label + '</span>' +
++      row.innerHTML = clusterSvg('gauge') + '<span class="tb-label"></span>' +
+@@ -1696,0 +1705 @@
++      row.querySelector('.tb-label').textContent = label;
+@@ -1704 +1713,2 @@
+-      row.innerHTML = clusterSvg('codec') + '<span>' + label + '</span>';
++      row.innerHTML = clusterSvg('codec') + '<span class="tb-label"></span>';
++      row.querySelector('.tb-label').textContent = label;
+@@ -1717 +1727 @@
+-        '<span>' + label + '</span>' +
++        '<span class="tb-label"></span>' +
+@@ -1718,0 +1729 @@
++    row.querySelector('.tb-label').textContent = label;
+@@ -2253,0 +2265 @@
++          onLitPanelChange: syncLitPanel,
+--- a/stream-session.js
++++ b/stream-session.js
+@@ -40,0 +41 @@
++    this.stopping = false;
+@@ -86,0 +88 @@
++      this.reconnectAttempts = 0;
+@@ -93,0 +96,9 @@
++      if (!this.stopping) {
++        const attempts = (this.reconnectAttempts || 0) + 1;
++        this.stop();
++        this.reconnectAttempts = attempts;
++        if (attempts <= 8) {
++          log('Reconnecting simulator stream…');
++          this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.start(); }, 1500);
++        } else { log('Stream disconnected. Reopen the viewer to retry.', true); }
++      }
+@@ -127,0 +139,3 @@
++    this.stopping = true;
++    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
++    if (this.ws) { this.ws.onclose = null; this.ws.onmessage = null; this.ws.onerror = null; }

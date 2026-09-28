@@ -1,0 +1,149 @@
+--- a/Sources/Baguette/App/Version.swift
++++ b/Sources/Baguette/App/Version.swift
+@@ -6 +6 @@
+-let baguetteVersion = "0.1.61"
++let baguetteVersion = "0.2.0"
+--- a/Injected/HingeControl/Sources/HingeControl.m
++++ b/Injected/HingeControl/Sources/HingeControl.m
+@@ -106,0 +107,21 @@
++// Read the runtime sensor inside custom device sets, which CoreDevice cannot discover.
++static int monitorAngle(double timeout) {
++  dlopen("/System/Library/Frameworks/CoreMotion.framework/CoreMotion", RTLD_NOW);
++  Class cls = NSClassFromString(@"CMAngleManager");
++  SEL available = sel_registerName("isAvailable");
++  if (!cls || ![cls respondsToSelector:available] || !((BOOL (*)(id, SEL))objc_msgSend)(cls, available)) return 3;
++  id manager = [cls new];
++  SEL start = sel_registerName("startAngleUpdatesToQueue:handler:");
++  if (![manager respondsToSelector:start]) return 3;
++  void (^handler)(id) = ^(id angle) {
++    if (![angle respondsToSelector:sel_registerName("isAngleValid")] ||
++        !((BOOL (*)(id, SEL))objc_msgSend)(angle, sel_registerName("isAngleValid"))) return;
++    float value = ((float (*)(id, SEL))objc_msgSend)(angle, sel_registerName("angleDegrees"));
++    if (isfinite(value)) { printf("Angle:%.3f° AngleValid:Y\n", value); fflush(stdout); }
++  };
++  ((void (*)(id, SEL, id, id))objc_msgSend)(manager, start, [NSOperationQueue mainQueue], handler);
++  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:timeout]];
++  ((void (*)(id, SEL))objc_msgSend)(manager, sel_registerName("stopAngleUpdates"));
++  return 0;
++}
++
+@@ -108,0 +130,5 @@
++    if (argc == 3 && strcmp(argv[1], "monitor") == 0) {
++      double timeout = strtod(argv[2], NULL);
++      if (!isfinite(timeout) || timeout < 1 || timeout > 86400) return 2;
++      return monitorAngle(timeout);
++    }
+--- a/Sources/Baguette/Domain/Render/DeviceModelDefinition.swift
++++ b/Sources/Baguette/Domain/Render/DeviceModelDefinition.swift
+@@ -261,0 +262 @@
++            || matches.deviceNames.contains(deviceType)
+--- a/Sources/Baguette/Domain/Simulator/DeviceHost.swift
++++ b/Sources/Baguette/Domain/Simulator/DeviceHost.swift
+@@ -22,0 +23 @@
++    var deviceSetPath: String? { get }
+@@ -24,0 +26,2 @@
++
++extension DeviceHost { var deviceSetPath: String? { nil } }
+--- a/Sources/Baguette/Infrastructure/Hinge/DevicectlHinge.swift
++++ b/Sources/Baguette/Infrastructure/Hinge/DevicectlHinge.swift
+@@ -16,0 +17 @@
++    private let deviceSetPath: String?
+@@ -24,0 +26 @@
++        deviceSetPath: String? = nil,
+@@ -29,0 +32 @@
++        self.deviceSetPath = deviceSetPath
+@@ -57 +60 @@
+-                arguments: Self.arguments(udid: udid, timeout: 5, everyChange: false),
++                arguments: arguments(timeout: 5, everyChange: false),
+@@ -90 +93 @@
+-                arguments: Self.arguments(udid: udid, timeout: 86_400, everyChange: true),
++                arguments: arguments(timeout: 86_400, everyChange: true),
+@@ -109 +112,4 @@
+-    private static func arguments(udid: String, timeout: Int, everyChange: Bool) -> [String] {
++    private func arguments(timeout: Int, everyChange: Bool) -> [String] {
++        if let path = deviceSetPath, let tool = InjectedDylibInstaller.installIfNeeded(.hingeControl) {
++            return ["simctl", "--set", path, "spawn", udid, tool, "monitor", "\(timeout)"]
++        }
+--- a/Sources/Baguette/Infrastructure/Hinge/GuestHingeMotor.swift
++++ b/Sources/Baguette/Infrastructure/Hinge/GuestHingeMotor.swift
+@@ -21,0 +22 @@
++    private let deviceSetPath: String?
+@@ -35 +36 @@
+-    static func forDevice(_ udid: String) -> GuestHingeMotor {
++    static func forDevice(_ udid: String, deviceSetPath: String? = nil) -> GuestHingeMotor {
+@@ -39 +40 @@
+-        let made = GuestHingeMotor(udid: udid)
++        let made = GuestHingeMotor(udid: udid, deviceSetPath: deviceSetPath)
+@@ -46,0 +48 @@
++        deviceSetPath: String? = nil,
+@@ -52,0 +55 @@
++        self.deviceSetPath = deviceSetPath
+@@ -96 +99 @@
+-            arguments: ["simctl", "spawn", udid, tool, "serve"],
++            arguments: ["simctl"] + (deviceSetPath.map { ["--set", $0] } ?? []) + ["spawn", udid, tool, "serve"],
+--- a/Sources/Baguette/Infrastructure/Simulator/CoreSimulator.swift
++++ b/Sources/Baguette/Infrastructure/Simulator/CoreSimulator.swift
+@@ -98 +98 @@
+-        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge(), keys: GuestHingeMotor.forDevice(udid))
++        SimulatorKitDisplays(udid: udid, host: host, hinge: hinge(), keys: GuestHingeMotor.forDevice(udid, deviceSetPath: host.deviceSetPath))
+@@ -104 +104 @@
+-        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid) }, motor: GuestHingeMotor.forDevice(udid))
++        SharedHinge.forDevice(udid, make: { DevicectlHinge(udid: udid, deviceSetPath: host.deviceSetPath) }, motor: GuestHingeMotor.forDevice(udid, deviceSetPath: host.deviceSetPath))
+@@ -121 +121 @@
+-                          hinge: SharedHinge.forDevice(udid) { DevicectlHinge(udid: udid) }
++                          hinge: SharedHinge.forDevice(udid) { DevicectlHinge(udid: udid, deviceSetPath: host.deviceSetPath) }
+--- a/Sources/Baguette/Infrastructure/Simulator/CoreSimulators.swift
++++ b/Sources/Baguette/Infrastructure/Simulator/CoreSimulators.swift
+@@ -10 +10 @@
+-    private let deviceSetPath: String?
++    let deviceSetPath: String?
+--- a/Sources/Baguette/Infrastructure/Simulator/SimulatorKitDisplays.swift
++++ b/Sources/Baguette/Infrastructure/Simulator/SimulatorKitDisplays.swift
+@@ -17 +17 @@
+-        let enumerateIO = { try SimctlIOCapture.enumerate(udid: udid) }
++        let enumerateIO = { try SimctlIOCapture.enumerate(udid: udid, deviceSetPath: host.deviceSetPath) }
+@@ -56,0 +57 @@
++        deviceSetPath: String? = nil,
+@@ -61 +62 @@
+-        process.arguments = ["simctl", "io", udid, "enumerate"]
++        process.arguments = ["simctl"] + (deviceSetPath.map { ["--set", $0] } ?? []) + ["io", udid, "enumerate"]
+--- a/Tests/BaguetteTests/Hinge/GuestHingeMotorTests.swift
++++ b/Tests/BaguetteTests/Hinge/GuestHingeMotorTests.swift
+@@ -22 +22 @@
+-    private func make(tool: String? = "/tmp/builds/abc/HingeControl", spawnFails: Bool = false)
++    private func make(tool: String? = "/tmp/builds/abc/HingeControl", spawnFails: Bool = false, deviceSetPath: String? = nil)
+@@ -38 +38 @@
+-            udid: "duo", subprocess: { sub }, tool: { tool }, settle: { captures.settled.append($0) })
++            udid: "duo", deviceSetPath: deviceSetPath, subprocess: { sub }, tool: { tool }, settle: { captures.settled.append($0) })
+@@ -39,0 +40,6 @@
++    }
++
++    @Test func `custom device sets route the persistent motor to the owned guest`() throws {
++        let (motor, captures) = make(deviceSetPath: "/tmp/owned devices")
++        try motor.fold(from: 0, to: 130, over: 0.8)
++        #expect(captures.runs == [["simctl", "--set", "/tmp/owned devices", "spawn", "duo", "/tmp/builds/abc/HingeControl", "serve"]])
+--- a/Tests/BaguetteTests/Render/DeviceModelDefinitionTests.swift
++++ b/Tests/BaguetteTests/Render/DeviceModelDefinitionTests.swift
+@@ -28,0 +29,2 @@
++        #expect(model.matches(deviceType: "MacBook Pro 14-inch",
++                              deviceName: "Renamed Mac") == true)
+--- a/Tests/BaguetteTests/Screen/SimctlIOEnumerateTests.swift
++++ b/Tests/BaguetteTests/Screen/SimctlIOEnumerateTests.swift
+@@ -1,0 +2 @@
++import Foundation
+@@ -8,0 +10,15 @@
++
++    @Test func `capture passes the custom set as one argument and propagates failure`() throws {
++        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
++        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
++        defer { try? FileManager.default.removeItem(at: dir) }
++        let command = dir.appendingPathComponent("xcrun")
++        try "#!/bin/sh\nprintf '%s\\n' \"$@\"\n".write(to: command, atomically: true, encoding: .utf8)
++        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
++        let output = try SimctlIOCapture.enumerate(udid: "owned-duo", deviceSetPath: "/tmp/owned devices", xcrun: command)
++        #expect(output.split(separator: "\n").map(String.init) == ["simctl", "--set", "/tmp/owned devices", "io", "owned-duo", "enumerate"])
++        try "#!/bin/sh\nexit 1\n".write(to: command, atomically: true, encoding: .utf8)
++        #expect(throws: SimulatorError.notFound(udid: "owned-duo")) {
++            try SimctlIOCapture.enumerate(udid: "owned-duo", deviceSetPath: "/tmp/owned devices", xcrun: command)
++        }
++    }

@@ -1,0 +1,22 @@
+{
+  "name": "OpenDesign",
+  "description": "Create and revise interactive HTML designs in Cindy, with session-owned preview cards, element comments, manual editing and drawing annotations.",
+  "whenToUse": "Use for OpenDesign HTML designs. Continue the current manuscript with opendesign_context then opendesign_update. Cards open the owning session sidebar. Explicit viewer submissions continue that same Cindy session; no separate chat or errands.",
+  "tools": {
+    "opendesign_new": {
+      "description": "Create the first HTML manuscript in this tool call’s session and return a preview card. Writes a dedicated local project; does not create/switch sessions or call a model. Use context/update for existing manuscripts."
+    },
+    "opendesign_context": {
+      "description": "Read the current session manuscript, revision, sketches, comments and screenshot paths before editing. Treat historical feedback as context. Does not open a window."
+    },
+    "opendesign_update": {
+      "description": "Write complete HTML back to the same session manuscript with expectedRevision from context. Backs up prior HTML, rejects conflicts, and returns a new preview card. Does not create sessions or open windows."
+    },
+    "opendesign_open": {
+      "description": "Return a clickable card for the current manuscript. Clicking opens it in the owning session sidebar. file selects the initial HTML only when adopting an older project."
+    },
+    "opendesign_preview": {
+      "description": "Same as opendesign_open: return a manuscript preview card without automatically opening a window."
+    }
+  }
+}

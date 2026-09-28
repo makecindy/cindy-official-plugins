@@ -10,6 +10,30 @@ Forge and a particular harness are not prerequisites. See the
 Manifest, and package format, and [Contributing](../CONTRIBUTING.md) for official
 publishing requirements. This document adds migration mappings and common runtime calls.
 
+## Capability declarations are not a client support gate
+
+Plugin development must not wait for Cindy client capability releases. Within a
+supported manifest format, unfamiliar declarations are data, not a reason to
+reject publication or installation. The validator preserves unknown top-level
+fields, extension fields in capability objects (mainView, panel, card, agent,
+node and secret bindings, preview, skill/manual and their items, subscribe),
+Cindy categories/actions, and subscription topics/hooks. Legacy v2 slot names
+are not checked against a repository-specific capability allowlist.
+
+This does not implement an API or grant permission. Known-field types, safe
+package paths, format constraints, and runtime account/credential/session
+authorization remain enforced. Unknown declarations stay inert until a Host
+implements them; an unresolved credential reference must fail at use time,
+never fall back to another credential or account.
+
+Authors must detect unavailable APIs or handle unsupported-operation results,
+disable only the affected functionality, and offer a clear upgrade prompt or
+a supported fallback. Never bypass a permission denial or silently claim success.
+`minCindyVersion` remains required where applicable for distribution/version
+selection, but is not proof of runtime support: users may directly install a
+package on an incompatible client. Test that case and keep the remaining
+supported functionality usable.
+
 ## Derive changes from the task
 
 The author describes the desired functionality. The implementing Agent reads the
@@ -84,7 +108,7 @@ registration. An invented field or method cannot create an unimplemented Host AP
 ## Version and installation facts
 
 - Determine `minCindyVersion` from the package's manifest format, required Host
-  interfaces, and stable release evidence. Keeping the old v2 value is not
+  interfaces, and stable or Beta release evidence. Keeping the old v2 value is not
   automatically correct; merged code is not proof of release. The README's
   `1.2.3` is a placeholder, not a repository-wide client floor.
 - Current official CI requires v3 for new plugins and changed package content,
@@ -288,15 +312,21 @@ proof of account connection.
 2. `node scripts/validate-plugin-manifest.mjs ./<directory>` checks JSON/Manifest
    shape only, not file existence, package contents, actual client support, or
    every official publishing rule.
-3. Run the repository gates and relevant plugin tests from Contributing. The
-   official `.github/scripts/package-plugin.sh <directory> <output.cindy>`
+3. Run the repository gates and relevant plugin tests from Contributing. You can
+   use PR CI verification artifacts directly; the [dependency guide](binary-dependencies.md)
+   covers local development, migration and downloading packages. For optional
+   local CI reproduction, `.github/scripts/package-plugin.sh <directory> <output.cindy>`
    archives that plugin's committed **HEAD** content and adds fixed repository
-   legal files; it does not include uncommitted plugin changes. Never recursively
+   legal files; it does not include uncommitted plugin changes. It also collects
+   [declared binary dependencies](binary-dependencies.md) into the same package
+   (Python 3.11+ for local collector reproduction; no plugin build hooks).
+   Local Forge packaging instead requires prepared dependency outputs; it does
+   not download them. Never recursively
    ZIP a working directory: a local credential file can enter the archive. A harness
    packaging uncommitted work must use an explicit reviewed file list. Inspect
    every final archive for expected files, no outer plugin directory, and no
-   credentials; production verification must cover the submitted contents.
-4. Install the final package in a production stable Cindy build meeting its real
+   credentials; device verification must cover the submitted contents.
+4. Install the final package in a stable production or Beta Cindy build meeting its real
    minimum, exercise core tools and failures, and check retained capabilities.
    The Agent does this when authorized operating tools are available; otherwise
    explicitly hand off the unverified steps. Never falsely check the author's

@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Baguette 模拟器</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#f5f5f2;color:#232323;font:14px system-ui;height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #ddd;flex-wrap:wrap}strong{font-size:15px}#status{flex:1;color:#666}button{border:1px solid #ccc;background:white;border-radius:8px;padding:8px 14px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}iframe{flex:1;width:100%;border:0;background:#f5f5f2}#notice{padding:10px 16px;background:#fff3d6;display:none}small{color:#777}</style>
+<header><strong>Baguette</strong><span id="status">正在连接…</span><button id="release">解除卡键</button><button id="recover">恢复画面</button><small>保留 App 和登录态</small></header><div id="notice" role="status"></div><iframe id="screen" title="iOS 模拟器" allow="clipboard-read; clipboard-write"></iframe>
+<script>
+const udid=new URLSearchParams(location.search).get('udid');
+const cap=new URLSearchParams(location.hash.slice(1)).get('cindyClipboard');
+const token=cap?.split('.')[1];const screen=document.getElementById('screen'),status=document.getElementById('status'),button=document.getElementById('recover'),notice=document.getElementById('notice');
+let generation=null,checking=false,recovering=false;
+function message(text){notice.textContent=text;notice.style.display=text?'block':'none';}
+function load(){screen.src='/simulators/'+encodeURIComponent(udid)+location.hash;}
+async function api(action){const r=await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action,udid}),signal:AbortSignal.timeout(20000)});const p=await r.json();if(!r.ok)throw Error(p.error||'连接失败');return p;}
+async function check(){if(checking||recovering)return;checking=true;try{const s=await api('status');if(recovering)return;status.textContent=s.ready?'画面服务已连接':s.parked?'画面服务已停止':'正在恢复连接…';message(s.parked?'自动恢复未成功，请点“恢复画面”。':'');if(s.ready&&(generation===null||screen.contentDocument?.querySelector('[data-viewer-unavailable]'))){generation=s.generation;load();}}catch{status.textContent='插件连接已断开';message('请先刷新此页。如果仍无法连接，请到 Cindy 插件页重新启用 Baguette，再打开画面。');}finally{checking=false;}}
+button.onclick=async()=>{if(recovering)return;recovering=true;button.disabled=true;status.textContent='正在恢复画面…';message('');screen.src='about:blank';try{const s=await api('restart');generation=s.generation;load();status.textContent='画面服务已连接';}catch{message('恢复未成功，可以再次点击重试。若插件已停用，请到 Cindy 插件页重新启用。');status.textContent='连接失败';}finally{button.disabled=false;recovering=false;}};
+document.getElementById('release').onclick=async function(){this.disabled=true;screen.contentWindow?.postMessage({type:'cindy-release-input'},location.origin);try{await api('release');message('按键已释放，可以重新点击输入框。');}catch{message('未能确认按键释放，请重试。');}finally{this.disabled=false;}};
+document.addEventListener('visibilitychange' ,()=>{if(!document.hidden)check();});check();setInterval(check,3000);
+</script></html>

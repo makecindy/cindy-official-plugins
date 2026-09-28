@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.dae1c66.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.20ab276de16e.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
 const MAX_BASIC_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
-const MAX_SERVER_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_SERVER_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ICON_BYTES = 512 * 1024;
 const MAX_LOCALE_BYTES = 64 * 1024;
@@ -18,11 +19,6 @@ const ROOT_PACKAGE_FILES = ['LICENSE', 'NOTICE', 'TRADEMARKS.md', 'TRADEMARKS.zh
 const RESERVED_CLIENT_FILES = new Set(['.disabled', '.cindy-trust.json']);
 const RESERVED_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const PUBLIC_SKILL_EXEMPTIONS = new Set(['ios-simulator', 'x-manager']);
-const OFFICIAL_SLOTS = new Set([
-  'subscribe', 'tool', 'card', 'panel', 'cindy', 'agent', 'node', 'network',
-  'notify', 'badge', 'confirm', 'fs', 'session-context', 'pick', 'preview',
-  'library', 'skill', 'workspace', 'ios-simulator',
-]);
 
 const pluginDirs = pluginRootsAt('HEAD');
 const provisioning = readJson(path.join(root, 'provisioning.json'));
@@ -134,7 +130,7 @@ function validateOfficialManifest(pluginDir, manifest) {
   if (manifest.schemaVersion === 2) {
     assert.ok(Array.isArray(manifest.slots), `${pluginDir}.slots must be an array`);
     assert.equal(new Set(manifest.slots).size, manifest.slots.length, `${pluginDir}.slots contains duplicates`);
-    for (const slot of manifest.slots) assert.ok(OFFICIAL_SLOTS.has(slot), `${pluginDir}: unknown slot ${JSON.stringify(slot)}`);
+    // Identifier syntax belongs to the protocol; this repository is not a Host capability allowlist.
   } else {
     assert.equal(Object.hasOwn(manifest, 'slots'), false, `${pluginDir}: Manifest v3 must not contain slots`);
     assertManifestV3MinCindyVersion(pluginDir, manifest);
@@ -329,8 +325,18 @@ function validateSetup(pluginDir, raw, manifest) {
   return { requires: groups };
 }
 
-function validatePluginSource(pluginDir, manifest) {
-  const files = trackedFiles(pluginDir);
+function validatePluginSource(pluginDir, manifest, files = trackedFiles(pluginDir)) {
+  // Only exact declared outputs may defer entry/resource existence to packaging.
+  // The collector validates the complete declaration and all final references;
+  // locale/Skill/Manual contents still receive the existing source validation.
+  const dependencyConfig = files.get('binary-dependencies.json');
+  const collectedTargets = dependencyConfig
+    ? new Set(readJson(dependencyConfig.absolutePath, 256 * 1024).dependencies.flatMap(
+      (dependency) => dependency.assets.flatMap(
+        (asset) => asset.files.map((file) => file.target),
+      ),
+    ))
+    : new Set();
   assert.ok(files.size > 0, `${pluginDir}: no tracked package files`);
   const seenFolded = new Map();
   let totalBytes = 0;
@@ -371,9 +377,10 @@ function validatePluginSource(pluginDir, manifest) {
     .filter(Boolean);
   if (manifest.node) declaredFiles.push(manifest.node.entry, ...(manifest.node.entries ?? []));
   for (const relativePath of declaredFiles) {
+    if (!files.has(relativePath) && collectedTargets.has(relativePath)) continue;
     requireTrackedFile(files, pluginDir, relativePath, relativePath === manifest.icon ? MAX_ICON_BYTES : undefined);
   }
-  if (manifest.icon) {
+  if (manifest.icon && files.has(manifest.icon)) {
     assert.ok(fs.statSync(files.get(manifest.icon).absolutePath).size > 0, `${pluginDir}: icon is empty`);
   }
 
@@ -475,7 +482,7 @@ function validateReleaseDiff() {
   }
 }
 
-test('the pinned Cindy manifest contract rejects client-incompatible shapes', () => {
+test('the pinned Cindy manifest contract rejects invalid manifest shapes', () => {
   const legacy = {
     schemaVersion: 2,
     id: 'legacy-contract-fixture',
@@ -521,6 +528,48 @@ test('the pinned Cindy manifest contract rejects client-incompatible shapes', ()
   );
 });
 
+test('repository admission does not depend on the current Host capability catalog', () => {
+  const base = { schemaVersion: 3, minCindyVersion: '0.1.0', id: 'future-contract',
+    name: 'Future', version: '1.0.0', entry: 'main.js', description: 'Fixture', whenToUse: 'Fixture' };
+  const extension = { mode: 'future', options: [1, null, { enabled: true }] };
+  const declarations = {
+    futureCapability: extension,
+    mainView: { html: 'view.html', future: { enabled: true } },
+    panel: { html: 'panel.html', future: extension },
+    card: { future: extension },
+    agent: { future: extension },
+    preview: { hosts: ['example.test'], future: extension },
+    skill: { items: [{ dir: 'skills/demo', name: 'demo', description: 'Demo', future: extension }], future: extension },
+    manual: { items: [{ dir: 'manual/demo', name: 'demo', description: 'Demo', future: extension }], future: extension },
+    node: { entry: 'worker.cjs', protocol: 'json-rpc-stdio', future: true,
+      secretBindings: [{ key: 'token', label: 'Token', methods: ['run'], oauthSecret: 'future_account', future: true }] },
+    cindy: { image: ['future-action'], future: { enabled: true } },
+    subscribe: { topics: ['future-topic'], hooks: ['future-hook'], future: true },
+    settingsHtml: 'settings.html',
+  };
+  const manifest = { ...base, ...declarations };
+  assert.doesNotThrow(() => validateOfficialManifest('future-contract', manifest));
+  const result = validateGhostManifest(manifest);
+  assert.equal(result.ok, true);
+  for (const [key, value] of Object.entries(declarations)) assert.deepEqual(result.manifest[key], value);
+  assert.deepEqual(validateGhostManifest(result.manifest), result, 'repeated normalization must preserve extensions');
+  assert.doesNotThrow(() => validateOfficialManifest('future-contract', {
+    ...base, schemaVersion: 2, slots: ['future-slot', 'main-view'], mainView: { html: 'view.html' },
+  }));
+  assert.equal(validateGhostManifest({ ...manifest, node: { ...manifest.node, entry: '../escape.cjs' } }).ok, false);
+  assert.equal(validateGhostManifest({ ...manifest, cindy: { image: [42] } }).ok, false);
+  for (const invalid of [
+    { panel: { html: '../escape.html', future: extension } },
+    { card: { externalLinks: 'yes', future: extension } },
+    { agent: { background: 'yes', future: extension } },
+    { preview: { hosts: ['https://example.test/path'], future: extension } },
+    { skill: { items: [{ dir: '../escape', name: 'demo', description: 'Demo' }], future: extension } },
+    { manual: { items: [{ dir: '../escape', name: 'demo', description: 'Demo' }], future: extension } },
+  ]) {
+    assert.equal(validateGhostManifest({ ...base, ...invalid }).ok, false, JSON.stringify(invalid));
+  }
+});
+
 test('mainView HTML must exist among tracked package files', () => {
   const pluginDir = 'cindy-github';
   const fixture = {
@@ -542,6 +591,29 @@ test('mainView HTML must exist among tracked package files', () => {
     /declared file is not tracked: missing-main-view\.html/,
     'package validation must reject a missing mainView HTML file',
   );
+});
+
+test('source checks defer only exact declared dependency outputs to final packaging', (t) => {
+  const pluginDir = 'cindy-github';
+  const fixture = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-source-dependencies-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const configPath = path.join(temp, 'binary-dependencies.json');
+  fs.writeFileSync(configPath, JSON.stringify({ schemaVersion: 1, dependencies: [{
+    name: 'fixture', version: '1.0.0', license: 'LICENSE',
+    assets: [{
+        url: 'https://downloads.example.com/v1.0.0/fixture.zip', sha256: '0'.repeat(64), format: 'zip',
+        files: [{ source: 'view.html', target: 'vendor/fixture/view.html' }],
+    }],
+  }] }));
+  const files = trackedFiles(pluginDir);
+  files.set('binary-dependencies.json', { mode: '100644', absolutePath: configPath });
+  const collected = { ...fixture, mainView: { html: 'vendor/fixture/view.html' } };
+  assert.doesNotThrow(() => validatePluginSource(pluginDir, collected, files));
+  assert.throws(() => validatePluginSource(pluginDir, collected), /declared file is not tracked/);
+  assert.throws(() => validatePluginSource(pluginDir, {
+    ...fixture, mainView: { html: 'vendor/fixture/linux-x64/undeclared.html' },
+  }, files), /declared file is not tracked/);
 });
 
 test('authoring docs provide a harness-independent Manifest-v3 path', () => {

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "name": "gog",
+      "version": "0.39.1",
+      "license": "THIRD-PARTY-LICENSES.txt",
+      "assets": [
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_darwin_amd64.tar.gz",
+          "sha256": "e927ddf46cbee95fd4f1cb0946458fcbfff68fe68754121c310cd3aa5aca286c",
+          "format": "tar.gz",
+          "files": [
+            {
+              "source": "gog",
+              "target": "vendor/gog/darwin-amd64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "darwin-x64"
+          ]
+        },
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_darwin_arm64.tar.gz",
+          "sha256": "387062a590d470d0b13b1c79cab72c5908bfc42abc5cf68243bf3f12fc30acda",
+          "format": "tar.gz",
+          "files": [
+            {
+              "source": "gog",
+              "target": "vendor/gog/darwin-arm64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "darwin-arm64"
+          ]
+        },
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_linux_amd64.tar.gz",
+          "sha256": "438efa460b8291f023299ad2ed5610701cad7508db88392039c0891e2175e3b1",
+          "format": "tar.gz",
+          "files": [
+            {
+              "source": "gog",
+              "target": "vendor/gog/linux-amd64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "linux-x64"
+          ]
+        },
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_linux_arm64.tar.gz",
+          "sha256": "7c23b402c9234ba476e84b39ac6d875444b47ec516312a99e877e1386ba28295",
+          "format": "tar.gz",
+          "files": [
+            {
+              "source": "gog",
+              "target": "vendor/gog/linux-arm64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "linux-arm64"
+          ]
+        },
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_windows_amd64.zip",
+          "sha256": "d37aca030dd51102404d063995bcff23b31d5e0d08027bba89b8f3dea93cdacd",
+          "format": "zip",
+          "files": [
+            {
+              "source": "gog.exe",
+              "target": "vendor/gog/windows-amd64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "windows-x64"
+          ]
+        },
+        {
+          "url": "https://github.com/openclaw/gogcli/releases/download/v0.39.1/gogcli_0.39.1_windows_arm64.zip",
+          "sha256": "68577591836479717cef6e6f80124b41c7f3cc402da2e8026cc09b183106c077",
+          "format": "zip",
+          "files": [
+            {
+              "source": "gog.exe",
+              "target": "vendor/gog/windows-arm64.br",
+              "encoding": "brotli"
+            }
+          ],
+          "platforms": [
+            "windows-arm64"
+          ]
+        }
+      ]
+    }
+  ]
+}

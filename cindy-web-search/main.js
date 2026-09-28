@@ -63,7 +63,13 @@ async function searchCindy(query, limit, callId, callerTool) {
       callerTool: callerTool,
     });
   } catch (e) {
-    return { ok: false, message: 'Cindy AI 搜索服务暂时不可用，请稍后再试' };
+    return {
+      ok: false,
+      errorCode: e && e.errorCode ? e.errorCode : 'INTERNAL',
+      message: e && e.errorCode && typeof e.message === 'string'
+        ? e.message
+        : 'Cindy AI 搜索服务暂时不可用，请稍后再试',
+    };
   }
 }
 
@@ -332,13 +338,20 @@ cindy.onHostMessage(async function (msg) {
         },
       });
     } else {
-      cindy.send({ type: 'tool-result', callId: msg.callId, ok: false, message: r.message });
+      cindy.send({
+        type: 'tool-result',
+        callId: msg.callId,
+        ok: false,
+        errorCode: r.errorCode,
+        message: r.message,
+      });
     }
   } catch (err) {
     cindy.send({
       type: 'tool-result',
       callId: msg.callId,
       ok: false,
+      errorCode: err && err.errorCode ? err.errorCode : 'INTERNAL',
       message:
         msg.tool === 'fetch_page'
           ? '网页正文读取失败，请稍后重试'

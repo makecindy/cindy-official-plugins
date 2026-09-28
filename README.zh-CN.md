@@ -38,6 +38,7 @@
 |  | 插件 | 目录 | 说明 |
 | --- | --- | --- | --- |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | 图片 / 短视频生成，支持基于已生成图片的改图与风格化 |
+| <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | GitHub issue / PR / code review / Actions / release 全流程操作 |
 | <img src="./cindy-gitlab/assets/icon.png" width="22" alt=""> | GitLab | [`cindy-gitlab`](./cindy-gitlab) | GitLab（gitlab.com 及自建实例）issue / MR / 仓库操作 |
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid 图表源码规范化与常见语法修复 |
@@ -53,6 +54,7 @@
 | <img src="./qq-mail/assets/icon.png" width="22" alt=""> | QQ 邮箱 | [`qq-mail`](./qq-mail) | Cindy 安全保存授权码，按需通过 IMAP/SMTP 搜索、阅读、整理和发送 |
 | <img src="./yahoo-mail/assets/icon.png" width="22" alt=""> | Yahoo Mail | [`yahoo-mail`](./yahoo-mail) | Cindy 安全保存应用密码，按需通过 IMAP/SMTP 管理和发送邮件 |
 | <img src="./taptap-maker/assets/icon.png" width="22" alt=""> | TapTap Maker | [`taptap-maker`](./taptap-maker) | 账号连接、项目同步、构建与官方动态工具 |
+| <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | Baguette | [`baguette-simulator`](./baguette-simulator) | 显式选用 Baguette 的独立 iOS 模拟器、侧边栏恢复与按键释放；定向发布 |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS 模拟器 | [`ios-simulator`](./ios-simulator) | Cindy 主机托管的内嵌工作流；主机授权回退时将原始任务和精确设备交给指定外部工作流；定向灰度 |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | 在 X（Twitter）上搜舆情、发帖——xAI x_search，Grok 订阅 / API key 双通道降级，发帖走 X 官方 API v2；目前定向灰度中 |
 
@@ -121,7 +123,7 @@
 - [ ] 每个 tool 的 `description` 与实际行为一致——能力、限制、返回值、副作用
 - [ ] 面向用户的报错可行动；无裸状态码、无英文堆栈
 - [ ] 四语言 locale 齐全；`node --test .tests/localization.test.mjs` 通过
-- [ ] 每个改动插件都已在运行正式稳定版 Cindy 的实际设备上安装真实 `.cindy` 包并
+- [ ] 每个改动插件都已在运行正式稳定版或 Beta 版 Cindy 的实际设备上安装真实 `.cindy` 包并
       验证核心功能，且已勾选 PR 验证项；插件声明 `minCindyVersion` 时，验证所用
       Cindy 版本不低于该最低版本
 - [ ] `ghost.json.version` 已 bump；`provisioning.json` 有对应条目且 PR 描述里
@@ -200,11 +202,14 @@ cindy-art/
 维护已有插件、v2/v3 字段映射、HTTPS、文件和 Node/CLI 的具体调用见
 [插件编写与迁移参考](./docs/plugin-authoring.zh-CN.md)。Agent 可依据这些事实和
 现有代码自行完成必要适配，作者不需要另外手工执行迁移清单。
+未知能力声明不应阻断插件开发与发布；接受声明不等于运行时授权。即使声明了
+`minCindyVersion`，用户仍可能在不适配的客户端直接安装，插件须处理缺失 API，
+提供安全降级或明确升级提示，详见参考文档中的能力兼容章节。
 
 新插件使用 `schemaVersion: 3`，并通过 `tools`、`network`、`node`、`notify: true`
 等顶层字段直接声明能力；v3 不得再有 `slots`。每个 v3 插件包都必须独立填写
 `minCindyVersion`：它应是同时支持这个具体插件所依赖的全部 Host 能力和 Manifest 字段的
-第一个 Cindy 正式稳定版本。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
+第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）。Manifest v3 本身不设置仓库级 Cindy 版本下限。现有 v2 清单
 保持原样，直到该插件的实际打包内容发生变化；改动它的 PR
 必须同时迁移到 v3。本仓不会只为 schema 变化批量迁移、批量发布现有插件。
 
@@ -240,7 +245,7 @@ my-plugin/
 
 `ghost.json` 从下面这份最小可运行 Manifest v3 开始：
 
-下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个 Cindy 正式稳定版本。
+下面的 `1.2.3` 只是示例；请替换成实际支持当前插件的第一个已发布的 Cindy 版本（正式稳定版或 Beta 版）。
 
 ```json
 {
@@ -294,15 +299,22 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 ```
 
 `.cindy` 是普通 ZIP：压缩包根目录必须直接包含 `ghost.json`、`main.js` 和声明的资源，
-不能在外层再套一层 `my-plugin/`。审查并提交插件文件后，用仓库打包脚本从 Git 已跟踪的
-`HEAD` 内容生成确切产物：
+不能在外层再套一层 `my-plugin/`。本地开发可用下方 Forge 入口或经审查的显式文件清单
+打包。提交源码后，PR CI 会提供可下载的验证包；本地复现仓库构建是可选路径：
+
+小二进制（每个插件所有平台合计不超过 10 MiB）可以直接入仓，沿用许可证、人工审查和总包大小规则。
+大依赖按需使用[打包时依赖声明机制](docs/binary-dependencies.zh-CN.md)，不提交到 Git。
+Python 3.11+ 仅是依赖收集器的构建环境要求，本地复现该步骤才需安装；
+不要求作者为了开发插件配置 Python。旧插件保持原工具链。
+所有平台进入同一个包，不增加客户端侧依赖下载。
 
 ```bash
 .github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
 unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
 
-该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件并校验产物，刻意不包含
+该脚本使用 `git archive` 归档插件目录、补入固定的仓库法律文件、收集已声明的二进制
+依赖并校验产物，刻意不包含
 插件目录中未提交和未跟踪的文件。
 不要递归压缩插件工作目录，否则本地 `.env`、`.npmrc`、私钥或其他凭证可能进入包中。
 若 harness 要打包尚未提交的工作区，必须使用经过审查的显式文件清单。安装或分享前，
@@ -311,15 +323,17 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 用户可以从 Cindy 的本地插件入口导入这个包。如果当前 harness 恰好提供 Cindy Forge
 工具，`ghost_forge_scaffold` 可以生成同样的 v3 基线，`ghost_forge_pack` 可以校验并
 打包，`ghost_forge_install` 可以在用户明确要求后安装。它们只是可选加速器；源码与
-`.cindy` 格式完全相同。
+`.cindy` 格式完全相同。Forge 不解析依赖声明，本地需先准备好声明对应的文件。
+迁移步骤、完整声明示例与 PR 验证包下载见[依赖接入指南](docs/binary-dependencies.zh-CN.md)。
 
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
 `zh-CN`、`en`、`ja`、`ko` 四份 locale 文件，完整覆盖插件文案和全部工具描述；随后
-按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查，并在符合最低版本要求的
-Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
+按 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md) 自查。可以先开 PR 取得验证包，
+但合并前必须在符合最低版本要求的 Cindy 正式稳定版或 Beta 版实机上安装真实
+`.cindy` 包完成验证，再勾选实机验证项。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
-`@taptap/maker@0.0.33`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
+`@taptap/maker@0.0.34`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 在官方包包含等价修复前，保留以下经审查的 Cindy 兼容补丁：
 
 - `normalizeRemoteProxyExecutionState` 接受 `executed`，保留确定已执行状态
@@ -337,6 +351,9 @@ Cindy 正式稳定版实机上安装真实 `.cindy` 包完成验证。
 
 除以上补丁和保留的 `LICENSE` 外，vendor 文件必须与官方 npm 包一致。
 每次升级都需核对补丁清单和回归测试，不要增加无关的 bundle 手工修改。
+
+历史故障、已被替换的修复及升级验收要求见
+[Maker 维护避坑清单](./docs/taptap-maker-maintenance.zh-CN.md)。
 
 ## 社区
 

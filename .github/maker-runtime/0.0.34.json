@@ -1,0 +1,92 @@
+{
+  "package": "@taptap/maker",
+  "version": "0.0.34",
+  "integrity": "sha512-VZ8cTE6fZL8C5tqagswJe02azWq9v7NfVdFCDJgltWEpFRJWE3ZH7oJGCUCK5pIK1NBeuiXL15s3muVzcyN6uw==",
+  "originalSha256": "a9923d3f37787d8e92c11fc2acff9a5886bddce02c79d283de2ba896e73e81c6",
+  "patchedSha256": "153ff8211e9ced79e99386ebff7cd6565ebf8be661bb711b82ef4c1153b9cc14",
+  "patches": [
+    {
+      "id": "V1-executed-state",
+      "edits": [
+        {
+          "before": "return value === \"not_executed\" || value === \"unknown\" ? value : void 0;",
+          "after": "return value === \"not_executed\" || value === \"executed\" || value === \"unknown\" ? value : void 0;",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "V2-blocked-call-state",
+      "edits": [
+        {
+          "before": "        content: [{ type: \"text\", text: accessState.message }]\n      };",
+          "after": "        content: [{ type: \"text\", text: accessState.message }],\n        structuredContent: {\n          success: false,\n          message: accessState.message,\n          execution_state: \"not_executed\"\n        }\n      };",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "V3-access-cache",
+      "edits": [
+        {
+          "before": "  const accessStatePromise = resolveMakerMcpAccessState(getMakerEnvironment());\n",
+          "after": "",
+          "count": 1
+        },
+        {
+          "before": "const accessState = await accessStatePromise;",
+          "after": "const accessState = await resolveMakerMcpAccessState(getMakerEnvironment());",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "id": "V4-blocked-list-reason",
+      "edits": [
+        {
+          "before": "      return { tools: [tools[0]] };",
+          "after": "      return {\n        tools: [tools[0]],\n        _meta: { maker_access: { code: \"BLACKLISTED\", message: accessState.message } }\n      };",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "V5-skill-root-safety",
+      "edits": [
+        {
+          "before": "  const sourceDir = path53.join(project.projectRoot, \".installer\", \"skills\");",
+          "after": "  const sourceDir = path53.join(project.projectRoot, \".installer\", \"skills\");\n  assertSafeUserSkillRoots(project.projectRoot);",
+          "count": 1
+        },
+        {
+          "before": "function installUserSkills(projectRoot, stagingDir, skillNames) {",
+          "after": "function assertSafeUserSkillRoots(projectRoot) {\n  for (const relative of [\".installer/skills\", \".codex/skills\", \".cursor/skills\", \".workbuddy/skills\"]) {\n    let current = projectRoot;\n    for (const segment of relative.split(\"/\")) {\n      current = path53.join(current, segment);\n      if (pathExists(current) && fs51.lstatSync(current).isSymbolicLink()) {\n        throw new Error(\"Maker user Skill 安装目标包含符号链接，为安全起见已停止。\");\n      }\n    }\n  }\n}\nfunction installUserSkills(projectRoot, stagingDir, skillNames) {",
+          "count": 1
+        },
+        {
+          "before": "function installUserSkills(projectRoot, stagingDir, skillNames) {\n  if (skillNames.length === 0) {\n    return;\n  }",
+          "after": "function installUserSkills(projectRoot, stagingDir, skillNames) {\n  if (skillNames.length === 0) {\n    return;\n  }\n  assertSafeUserSkillRoots(projectRoot);",
+          "count": 1
+        },
+        {
+          "before": "function installUserSkillsForClients(projectRoot, skillNames) {\n  if (skillNames.length === 0) {\n    return;\n  }",
+          "after": "function installUserSkillsForClients(projectRoot, skillNames) {\n  if (skillNames.length === 0) {\n    return;\n  }\n  assertSafeUserSkillRoots(projectRoot);",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "vendorHashes": {
+    "README.md": "8c72f5c52e92ab1a26385cfc3b287a480b8229a6e8d61d69e4d2e8a9ab763d74",
+    "bin/taptap-maker": "d3cd496fb6cdf9606a809570de2920b7e40101939bc1cb6841f4ae7cda97c718",
+    "dist/maker.js": "153ff8211e9ced79e99386ebff7cd6565ebf8be661bb711b82ef4c1153b9cc14",
+    "docs/MAKER_CONSOLE.md": "84bb7dfd269a9414524806e777976be1a89a8dbfb4f47ed2ccf523b53ab53606",
+    "docs/MAKER_LOCAL_PREVIEW.md": "f7bc160b451cb78f8589cca1f5a2c1e26348bcfc7e2772b9db868ffa6c195195",
+    "docs/MAKER_MCP_CONNECTION_TROUBLESHOOTING.md": "90a7455ee2e15f8ae167e8f40963b3a7f55825bdc77526a4f8a0b8403011dd4b",
+    "package.json": "6adbef9a58518886c612b2882833c454d26f1f0e427cae7a703d41b82bde7fb1",
+    "skills/taptap-maker-dev-kit-guide/SKILL.md": "2dd74a9182ed64af3012b2c5f349002d887bbeecc8c49eebb6c7da604d54cc46",
+    "skills/taptap-maker-local/SKILL.md": "a50f35258b0929e6d5256a807d4ae780916ca4d59de1703180964a11cc4efb1e",
+    "skills/update-taptap-mcp/SKILL.md": "8afaa0dd6780bf26fbd9505f8340eead1317e968aa3dd4a47d2bfcf267cddc5e",
+    "LICENSE": "3a6ed4d91c318ec454c98c8290bc02706d2f87fd922ef9944c1604cd0b718738"
+  }
+}

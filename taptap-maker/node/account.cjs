@@ -433,6 +433,7 @@ function openPatPage() {
 
 async function executeAction(args) {
   const action = args.action;
+  if (action === 'console_open') return require('./console.cjs').openConsole(args.workdir);
   if (action === 'status') {
     if (!(await credentialExists())) return { ok: true, state: 'disconnected' };
     try {

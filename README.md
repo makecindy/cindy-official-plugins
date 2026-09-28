@@ -44,6 +44,7 @@ permission gate.
 |  | Plugin | Directory | Description |
 | --- | --- | --- | --- |
 | <img src="./cindy-art/assets/icon.png" width="22" alt=""> | Art | [`cindy-art`](./cindy-art) | Image / short-video generation, with edits and restyling based on previously generated images |
+| <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | Full GitHub workflow: issues / PRs / code review / Actions / releases |
 | <img src="./cindy-gitlab/assets/icon.png" width="22" alt=""> | GitLab | [`cindy-gitlab`](./cindy-gitlab) | GitLab (gitlab.com and self-hosted) issues / MRs / repository operations |
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid diagram source normalization and common syntax fixes |
@@ -59,6 +60,7 @@ permission gate.
 | <img src="./qq-mail/assets/icon.png" width="22" alt=""> | QQ Mail | [`qq-mail`](./qq-mail) | Cindy stores the authorization code securely; search, read, organize, and send via IMAP/SMTP on demand |
 | <img src="./yahoo-mail/assets/icon.png" width="22" alt=""> | Yahoo Mail | [`yahoo-mail`](./yahoo-mail) | Cindy stores the app password securely; manage and send Yahoo Mail via IMAP/SMTP on demand |
 | <img src="./taptap-maker/assets/icon.png" width="22" alt=""> | TapTap Maker | [`taptap-maker`](./taptap-maker) | Account connection, project sync, builds, and official news tools |
+| <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | Baguette | [`baguette-simulator`](./baguette-simulator) | Opt-in Baguette iOS simulator with a private device set, sidebar controls, and acknowledged keyboard input; targeted rollout |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS Simulator | [`ios-simulator`](./ios-simulator) | Host-owned embedded workflow; Host-authorized fallback hands off the exact task and device to a named external workflow; staged rollout |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
 
@@ -149,7 +151,7 @@ experience risk, so review is strict by design. Four hard principles:
 - [ ] Four-language locales complete; `node --test .tests/localization.test.mjs`
       passes
 - [ ] Every changed plugin's packaged `.cindy` was installed and exercised on a
-      real device running a stable production Cindy build, and the PR
+      real device running a stable production or Beta Cindy build, and the PR
       verification box is checked; when the plugin declares `minCindyVersion`,
       the verified Cindy build is greater than or equal to it
 - [ ] `ghost.json.version` bumped; `provisioning.json` entry present with an
@@ -245,11 +247,16 @@ file, and Node/CLI calls, use the
 [authoring and migration reference](./docs/plugin-authoring.md). An Agent can
 derive the required adaptations from this reference and the existing code;
 authors do not need to perform a separate migration checklist.
+Unknown capability declarations must not block plugin development or publication.
+Acceptance does not grant runtime permissions. Even with `minCindyVersion`, users
+may directly install on unsupported clients; plugins must handle missing APIs
+with a supported fallback or an upgrade prompt. See the reference's capability
+compatibility section.
 
 New plugins use `schemaVersion: 3` and declare capabilities directly through
 fields such as `tools`, `network`, `node`, or `notify: true`; v3 must not contain
 `slots`. Every v3 package declares its own `minCindyVersion`: use the first
-stable Cindy version that supports every Host capability and manifest field
+published Cindy version (stable or Beta) that supports every Host capability and manifest field
 the concrete plugin actually depends on. Manifest v3 itself does not impose a
 repository-wide Cindy version floor. Existing v2 manifests stay untouched until
 that plugin's packaged content actually changes. The PR that changes it must
@@ -295,7 +302,7 @@ source may be consulted only for implementation patterns.
 
 Start `ghost.json` from this minimal runnable Manifest-v3 shape:
 
-The `1.2.3` below is only an example. Replace it with the first stable Cindy
+The `1.2.3` below is only an example. Replace it with the first published Cindy (stable or Beta)
 version that supports the concrete plugin you are building.
 
 ```json
@@ -354,8 +361,18 @@ node scripts/validate-plugin-manifest.mjs ./my-plugin
 
 A `.cindy` file is a ZIP archive whose root contains `ghost.json`, `main.js`,
 and the declared resources—do not wrap them in an extra `my-plugin/` directory.
-After reviewing and committing the plugin files, create the exact archive from
-Git-tracked `HEAD` content with the repository packager:
+For local development, use Forge below or a reviewed explicit file list. After
+source submission, PR CI provides downloadable verification packages; reproducing
+the repository build locally is optional:
+
+Small binaries (up to 10 MiB combined per plugin, across all platforms) may stay in Git under the existing
+license/review/package-size rules. To keep larger prebuilt dependencies out of
+Git, opt into the declarative
+[build-time dependency mechanism](docs/binary-dependencies.md). It collects all
+platforms into the same package. Python 3.11+ is a collector build-environment
+requirement only when reproducing that step locally, not a prerequisite for
+plugin development. Legacy plugins keep the original toolchain; there is no
+client-side dependency download.
 
 ```bash
 .github/scripts/package-plugin.sh my-plugin /tmp/my-plugin-1.0.0.cindy
@@ -363,7 +380,8 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 ```
 
 The script uses `git archive` for the plugin directory, adds the fixed repository
-legal files, and validates the result. It intentionally excludes uncommitted and
+legal files, collects declared binary dependencies when present, and validates
+the result. It intentionally excludes uncommitted and
 untracked files from the plugin directory. Never
 recursively ZIP a plugin working directory: local `.env`, `.npmrc`, private keys,
 or other credentials may be included. If a harness packages an uncommitted
@@ -375,15 +393,19 @@ The user can import that file through Cindy's local plugin entry. If the chosen
 harness exposes Cindy Forge tools, `ghost_forge_scaffold` can create the same v3
 baseline, `ghost_forge_pack` can validate and package it, and
 `ghost_forge_install` can install it after an explicit user request. These are
-optional accelerators; the source and `.cindy` format are identical.
+optional accelerators; the source and `.cindy` format are identical. Forge does
+not interpret dependency declarations; prepare the output files locally first.
+See the [dependency guide](docs/binary-dependencies.md) for migration steps,
+complete declaration examples and downloading PR verification packages.
 
 Before submitting to this official repository, add a `provisioning.json` entry
 and declare locale files for exactly `zh-CN`, `en`, `ja`, and `ko`, covering the
 plugin text and every tool description. Then follow
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) and install the exact packaged `.cindy` on
-a real device running an eligible stable production Cindy build.
+[`CONTRIBUTING.md`](./CONTRIBUTING.md). You may first open a PR to obtain its test
+package; before merging, install and verify the exact `.cindy` on a real device
+running an eligible stable production or Beta Cindy build, then check the attestation.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.33`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.34`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:
@@ -405,6 +427,9 @@ compatibility patches until the official package includes equivalent fixes:
 Apart from these patches and the retained `LICENSE`, vendor files must match the
 official npm package. Recheck the patch list and regression tests on every upgrade;
 do not add unrelated manual bundle edits.
+
+Historical failures, superseded fixes and upgrade checks are recorded in the
+[Maker maintenance checklist](./docs/taptap-maker-maintenance.md).
 
 ## Community
 

@@ -55,6 +55,16 @@ Start with the
 6. Before opening an official-plugin PR, add the `provisioning.json` entry and
    complete exactly four locale resources: `zh-CN`, `en`, `ja`, and `ko`.
 
+For large prebuilt dependencies, follow the [dependency guide](docs/binary-dependencies.md):
+retain local outputs for debugging, commit only source/declarations/licenses,
+and let CI download and package. Python is not a local development prerequisite.
+You may open a Ready PR with device verification unchecked, download a test package
+from **Verify pull request** Artifacts, verify it on stable/Beta Cindy, then check
+the attestation. Upload runs before that gate, so a failure of only the final
+attestation still leaves the artifact available; fix earlier test/build failures
+first. Packages expire after 7 days, are unreviewed, and never go to Platform/OSS.
+Record source identity and package hash; green CI alone is not device verification.
+
 The `*.test.mjs` files under `.tests/` run on Node's built-in test runner:
 
 ```bash
@@ -109,7 +119,7 @@ do not edit the generated `dist/maker.js` by hand.
    [mapping table](docs/plugin-authoring.md#manifest-v2-to-v3-preserve-behavior-change-representation),
    retaining presence-only capabilities such as `card` and `sessionContext`;
    deleting `slots` alone is not a complete migration. Set `minCindyVersion` to the
-   first stable Cindy release that supports the concrete plugin's required Host
+   first published Cindy (stable or Beta) release that supports the concrete plugin's required Host
    capabilities and manifest fields; Manifest v3 has no repository-wide Cindy
    version floor.
    Unchanged v2 plugins are intentionally left alone; do not bulk-migrate them.
@@ -121,9 +131,9 @@ do not edit the generated `dist/maker.js` by hand.
 4. When changing `ghost.json` tool declarations (`tools[].description` or
    parameters), explain the impact on Agent behaviour in the pull request
    description — that description is the usage manual the Agent reads.
-   Check the production Cindy verification item only after installing every
-   changed plugin's packaged `.cindy` on a real device running a stable
-   production Cindy build and exercising its core functionality. If a plugin
+   Check the Cindy device verification item only after installing every
+   changed plugin's packaged `.cindy` on a real device running a stable production
+   or Beta Cindy build and exercising its core functionality. If a plugin
    declares `minCindyVersion`, that Cindy build must be greater than or equal to
    it. Lowering or removing the field expands claimed compatibility and
    requires maintainer review.
@@ -133,7 +143,7 @@ workflow: it runs the Server/Desktop delivery contract, localization and
 provisioning gates, runs the `*.test.mjs` tests of every changed plugin
 (installing that plugin's dependencies first), and dry-runs the exact packaging
 step the publish pipeline uses. For every changed plugin package, CI also
-requires the production Cindy verification checkbox in the pull request body.
+requires the Cindy device verification checkbox in the pull request body.
 The actual upload still happens only after merge to `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
@@ -217,6 +227,21 @@ Git has no configuration option that signs commits off automatically
 every time or install your own `prepare-commit-msg` hook.
 
 ## Security issues
+
+### Prebuilt dependencies
+
+Use [binary-dependencies.json](docs/binary-dependencies.md) for build-time
+collection of large dependencies; small binaries may still be committed directly.
+CI caps directly tracked binaries at 10 MiB combined per plugin, across all
+platforms. New plugins and binary additions/modifications trigger the check;
+source/docs-only edits and binary deletions do not force legacy migrations.
+Both paths retain license/review/package-size requirements.
+Custom build hooks are not accepted.
+Dependency declaration changes require a plugin version bump and maintainer
+review of provenance, hashes and redistribution licenses.
+`node --test .tests/binary-dependencies.test.mjs` runs the offline packaging
+regressions; PR CI also dry-runs the actual changed packages. Downloads and
+packaging run separately from the OIDC publishing job.
 
 Do not disclose vulnerabilities, credentials, or exploitable details in public
 issues, pull requests, or discussions. Follow the private reporting process in

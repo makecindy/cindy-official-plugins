@@ -17,6 +17,10 @@ set -euo pipefail
 
 plugin_directory="${1:?usage: package-plugin.sh <plugin-directory> <output-file>}"
 output_file="${2:?usage: package-plugin.sh <plugin-directory> <output-file>}"
+# Opt-in only. Legacy plugins keep the original toolchain and archive bytes.
+if git cat-file -e "HEAD:${plugin_directory}/binary-dependencies.json" 2>/dev/null; then
+  exec python3 "$(dirname "$0")/binary-dependencies.py" "${plugin_directory}" "${output_file}"
+fi
 
 git -c core.autocrlf=false archive \
   --format=zip \
@@ -28,14 +32,14 @@ git -c core.autocrlf=false archive \
   "HEAD:${plugin_directory}"
 
 # Enforce the intersection of the Server acceptance limits and Desktop install
-# limits on the exact archive that will be uploaded. Server is stricter for
-# Node packages; Desktop is stricter for regular sandbox packages.
+# limits on the exact archive that will be uploaded. Regular sandbox packages
+# retain their smaller Desktop limits.
 archive_bytes="$(wc -c < "${output_file}" | tr -d '[:space:]')"
 uncompressed_bytes="$(unzip -l "${output_file}" | awk 'END { print $1 }')"
 entry_count="$(unzip -Z1 "${output_file}" | wc -l | tr -d '[:space:]')"
 if jq -e '.node != null' "${plugin_directory}/ghost.json" >/dev/null; then
-  max_archive_bytes=$((64 * 1024 * 1024))
-  max_uncompressed_bytes=$((64 * 1024 * 1024))
+  max_archive_bytes=$((128 * 1024 * 1024))
+  max_uncompressed_bytes=$((256 * 1024 * 1024))
 else
   max_archive_bytes=$((8 * 1024 * 1024))
   max_uncompressed_bytes=$((32 * 1024 * 1024))

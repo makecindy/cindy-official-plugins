@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  var connecting = false;
   var KEY = 'gmail_account';
   var LABEL = 'Gmail';
   var $ = function (id) { return document.getElementById(id); };
@@ -8,6 +9,12 @@
     en: 'Your Google authorization has expired. Please reconnect your account.',
     ja: 'Google の認証が期限切れです。アカウントを再接続してください。',
     ko: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
+  };
+  var CONNECT_UNKNOWN_MESSAGES = {
+    'zh-CN': '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。',
+    en: 'Connection outcome is unknown. Reopen plugin details and check the account status before deciding whether to retry.',
+    ja: '接続結果を確認できません。プラグインの詳細を開き直してアカウントの状態を確認してから、再試行するか判断してください。',
+    ko: '연결 결과를 확인할 수 없습니다. 플러그인 상세 페이지를 다시 열어 계정 상태를 확인한 후 재시도 여부를 결정하세요.',
   };
   async function loadLocale() {
     var locale = 'en';
@@ -30,6 +37,9 @@
     $('reauth').textContent = REAUTH_MESSAGES[locale];
   }
   function status(text) { $('status').textContent = text; }
+  function connectionUnknownMessage() {
+    return CONNECT_UNKNOWN_MESSAGES[document.documentElement.lang] || CONNECT_UNKNOWN_MESSAGES.en;
+  }
   function connectError(result) {
     var labels = {
       NO_CLIENT_CONFIG: '插件缺少 OAuth 客户端配置，请更新插件',
@@ -43,47 +53,12 @@
       VAULT_WRITE_FAILED: '账号保存失败，请重试',
     };
     var code = result && result.error ? String(result.error) : '';
-    var message = labels[code] || '连接失败，请重试';
+    var message = labels[code] || connectionUnknownMessage();
     var detail = result && result.detail ? String(result.detail).trim() : '';
     return detail ? message + '（' + detail + '）' : message;
   }
   function render(entry) {
-    var box = $('accounts');
-    box.textContent = '';
-    var accounts = (entry && entry.accounts) || [];
-    $('reauth').hidden = !accounts.some(function (account) { return account.status === 'expired'; });
-    accounts.forEach(function (account) {
-      var row = document.createElement('div');
-      row.className = 'account';
-      var email = document.createElement('span');
-      email.className = 'email';
-      email.textContent = account.label || account.id;
-      row.appendChild(email);
-      var tag = document.createElement('span');
-      tag.className = 'tag' + (account.status === 'expired' ? ' expired' : '');
-      tag.textContent = account.status === 'expired' ? '需重新连接' : account.isDefault ? '默认' : '';
-      row.appendChild(tag);
-      if (!account.isDefault && account.status !== 'expired') {
-        var makeDefault = document.createElement('button');
-        makeDefault.textContent = '设为默认';
-        makeDefault.onclick = function () {
-          void fetch('/oauth/' + KEY + '/default', {
-            method: 'POST',
-            body: JSON.stringify({ accountId: account.id }),
-          }).then(load);
-        };
-        row.appendChild(makeDefault);
-      }
-      var disconnect = document.createElement('button');
-      disconnect.textContent = '断开';
-      disconnect.onclick = function () {
-        void fetch('/oauth/' + KEY + '/accounts/' + encodeURIComponent(account.id), {
-          method: 'DELETE',
-        }).then(load);
-      };
-      row.appendChild(disconnect);
-      box.appendChild(row);
-    });
+    window.renderGoogleAccounts(KEY, (entry && entry.accounts) || [], load, connect);
   }
   async function load() {
     try {
@@ -91,28 +66,37 @@
       if (!response.ok) throw new Error('HTTP ' + response.status);
       var list = await response.json();
       if (!Array.isArray(list)) throw new Error('invalid response');
-      render(list.find(function (item) { return item && item.key === KEY; }));
+      var entry = list.find(function (item) { return item && item.key === KEY; });
+      var accounts = await googleAccountMetadata.list(KEY, (entry && entry.accounts) || []);
+      render({ accounts: accounts });
     } catch (_err) {
       render(null);
       status('账号状态加载失败，请重试');
     }
   }
-  async function connect() {
+  async function connect(target) {
+      if (connecting) return;
+      connecting = true;
       $('connect').disabled = true;
-      status('已打开浏览器，请完成 ' + LABEL + ' 授权…');
+      status(target ? '请在浏览器中选择 ' + (target.label || target.id) + '，重新授权此账号。' : '已打开浏览器，请完成 ' + LABEL + ' 授权…');
       try {
         var response = await fetch('/oauth/' + KEY + '/connect', { method: 'POST' });
         if (!response.ok) throw new Error('HTTP ' + response.status);
         var result = await response.json();
       if (result.ok) {
-        status('已连接 ' + (result.account && result.account.label ? result.account.label : '账号'));
+        if (target && result.account && result.account.id !== target.id) {
+          status('已连接 ' + (result.account.label || result.account.id) + '；这不是所选账号，' + (target.label || target.id) + ' 仍需重新连接。');
+        } else {
+          status('已连接 ' + (result.account && result.account.label ? result.account.label : '账号'));
+        }
       } else {
         status(connectError(result));
       }
       await load();
     } catch (_err) {
-      status('连接失败，请重试');
+      status(connectionUnknownMessage());
     } finally {
+      connecting = false;
       $('connect').disabled = false;
     }
   }
