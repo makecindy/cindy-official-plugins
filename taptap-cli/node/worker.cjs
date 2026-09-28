@@ -558,7 +558,7 @@ const TOKEN_RE = /^[a-z0-9+][a-z0-9+._:-]*$/i;
 const GLOBAL_RULES = [
   '写门禁:risk 为 write / high-risk-write 的操作,必须先向用户说明参数与影响并取得明确同意;先用 dry_run:true 预览,再用完全相同的参数加 yes:true 执行。既没有 dry_run 也没有 yes 的写调用会被拒绝,只读会话里的写调用一律拒绝;取得用户同意是你的职责,yes 是执行开关而不是同意本身。例外:插件编排的 auth login-start / auth login-wait 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁,但只读会话仍然拒绝。--yes 不代表用户同意协议;遇到服务端要求额外确认时只展示响应实际返回的 blockers / warnings,协议签署走独立的 agree-sce-agreement(先展示协议名称与 URL,用户明确同意后加 yes:true 执行,再重查确认 blocker 消失)。',
   '参数:scope 字段(developer_id / app_id)直接传,worker 映射成 --dev-id / --app-id;其余业务字段必须放进 args.data(JSON 对象);除 scope 和 data 外的键都是控制 flag,透传成 --flag,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);位置参数(如文件路径)放 args._positional 数组。本地文件路径必须是相对会话工作目录的路径:CLI 以会话工作目录为基准校验并拒绝绝对路径与 ../ 越界。',
-  '发现命令:list_tools() 给顶层命令;list_tools(category:"<命令路径>") 逐层下钻(如 category:"asset-library",再 category:"asset-library +ai-image");不确定命令名时直接传前缀搜索(如 category:"up")。某命令的完整帮助(含全部 flag)用 call_tool(name:"<命令>", args:{_help:true}),也可以用 call_tool(name:"help", args:{_positional:["<命令>"]})。list_tools 下钻不含 outputSchema,需要某操作的输出结构时用 call_tool(name:"schema", args:{_positional:[service, method]}) 查完整输入输出。',
+  '发现命令:list_tools() 给顶层命令;list_tools(category:"<命令路径>") 下钻某个服务的操作(如 category:"asset-library");不确定命令名时直接传前缀搜索(如 category:"up")。某命令的完整帮助(含全部 flag)用 call_tool(name:"<命令>", args:{_help:true}),也可以用 call_tool(name:"help", args:{_positional:["<命令>"]})。list_tools 下钻不含 outputSchema,需要某操作的输出结构时用 call_tool(name:"schema", args:{_positional:[service, method]}) 查完整输入输出。',
   '调用示例:先 list_tools(category) 看该域操作与参数(enum=可选值、pattern=格式、required=true=必填),再 call_tool。例——创建冒险游戏:call_tool(name:"app create-app", args:{developer_id:"1001", data:{title:"我的游戏", category:"adventure", package_type:"apk", developer_role:"developer"}, dry_run:true});用户确认后同参数加 yes:true。务必按 inputSchema 的 enum 取值、按 pattern 校验格式,不要猜值。',
   '输出:成功返回的 data 是 CLI 的 JSON envelope(顶层 ok / data / error)。业务失败以 ok:false 返回,message 含 error.type / error.message / error.hint。不要手动传 json / format flag,输出已默认结构化(默认文本的命令如 auth status 由插件自动补 --json)。',
   '失败三态:失败结果带 `execution_state` 字段,只有两个取值。`not_executed` 表示操作没有生效,可按 message 修正参数后重试;`unknown` 表示写操作可能已经在服务端生效,必须先核对实际状态(上传类用 task +list 查看已有任务)再决定是否重试,禁止直接重跑。',
@@ -695,7 +695,7 @@ async function listTools(params) {
             return entry;
           }),
         rules,
-        hint: '传 category 下钻:先看子命令,再逐层深入(如 category:"asset-library",然后 category:"asset-library +ai-image")。' +
+        hint: '传 category 下钻某个服务的操作(如 category:"asset-library")。' +
           '不确定命令名时可直接传前缀搜索(如 category:"up")。' +
           '某命令的完整帮助用 call_tool(name:"<命令>", args:{_help:true})。',
       },
@@ -1168,7 +1168,7 @@ async function callTool(params) {
       return {
         ok: false,
         errorCode: 'UNKNOWN_TOOL',
-        message: '未知操作 "' + name + '";先用 list_tools() 看顶层命令,或传 category 逐层下钻(如 category:"asset-library +ai-image")。',
+        message: '未知操作 "' + name + '";先用 list_tools() 看顶层命令,或传 category 下钻某个服务(如 category:"asset-library")。',
       };
     }
   }

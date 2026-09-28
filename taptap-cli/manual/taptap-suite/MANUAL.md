@@ -85,7 +85,7 @@
 
 - 判断请求是否属于 TapTap 开发者后台;不是就不要强行套插件。复杂流程和写操作先读 references 里的 shared execution。
 - 缺 `developerId` / `appId` 时转 `identity` 手册;多候选让用户选择,不猜 ID,也不复用可能过期的历史 ID。交接调用显式带 `dev_id` 和 `app_id`。
-- 发现命令:`list_tools()` 给顶层命令;`list_tools(category:"<命令路径>")` 逐层下钻(如 `"asset-library"`,再 `"asset-library +ai-image"`);传一个没有子命令的命令路径会返回它接受的 flag。不确定命令名时直接传前缀搜索(如 `category:"up"`)。
+- 发现命令:`list_tools()` 给顶层命令;`list_tools(category:"<命令路径>")` 下钻某个服务的操作(如 `"asset-library"`);传一个没有子命令的命令路径会返回它接受的 flag。不确定命令名时直接传前缀搜索(如 `category:"up"`)。
 - 参数不确定时先查目录:`list_tools` 下钻返回 schema 操作的参数 schema 与 use_when/avoid_when;也可以 `call_tool(name:"schema", args:{_positional:["<service>","<method>"]})` 查单个操作的完整输入输出,或对任意命令传 `args._help:true` 查看完整帮助。不猜字段或枚举。
 - 优先使用目录已列出的操作;当前能力缺失时说明 CLI 暂不支持,并给可执行替代路径。
 - 需要用户转到网页继续时,遵循 shared execution 的人工页面交接规范:已知可靠入口必须首轮提供,URL 单独占一行且只展示一次;不要使用 Markdown 链接包装、追加追踪参数或猜测页面路径。

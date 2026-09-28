@@ -23,13 +23,13 @@
   "tools": [
     {
       "name": "list_tools",
-      "description": "列出 TapTap 插件可用的业务操作,目录直接从本机 taptap-cli 实时读取。不传 category 返回顶层命令(名称+说明+全局执行规则);传 category 逐层下钻:先给一层命令,再给更深一层(如 category:\"asset-library\",然后 category:\"asset-library +ai-image\")。不确定命令名时可直接传前缀搜索(如 category:\"up\")。传一个没有子命令的命令路径会返回它接受的 flag;参数细节用 call_tool 的 args._help:true 看完整帮助。第一次做某域业务前先下钻对应目录。本插件不提供的命令:CLI 自更新(update)、原始 auth login(改用 auth login-start / login-wait)。",
+      "description": "列出 TapTap 插件可用的业务操作,目录直接从本机 taptap-cli 实时读取。不传 category 返回顶层命令(名称+说明+全局执行规则);传 category 下钻某个服务的操作(如 category:\"asset-library\")。不确定命令名时可直接传前缀搜索(如 category:\"up\")。传一个没有子命令的命令路径会返回它接受的 flag;参数细节用 call_tool 的 args._help:true 看完整帮助。第一次做某域业务前先下钻对应目录。本插件不提供的命令:CLI 自更新(update)、原始 auth login(改用 auth login-start / login-wait)。",
       "parameters": {
         "type": "object",
         "properties": {
           "category": {
             "type": "string",
-            "description": "命令路径或前缀。来自 list_tools 概览的返回,可逐层加深(如 \"asset-library\"、\"asset-library +ai-image\");不确定命令名时传前缀做搜索(如 \"up\")。缺省返回顶层命令。"
+            "description": "命令路径或前缀。传服务名可下钻该服务的操作(如 \"asset-library\");不确定命令名时传前缀做搜索(如 \"up\")。缺省返回顶层命令。"
           }
         }
       }
