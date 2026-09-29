@@ -42,7 +42,7 @@ module.exports=function installSteps({home,within,validate,checkPlatform,verifyS
   p.on('error',e=>{failure=require('./python-runtime.cjs').startupError(e.code);if(pending){pending.reject(failure);pending=null;}});
   p.stdin.on('error',()=>{});
   const lines=readline.createInterface({input:p.stdout});
-  lines.on('line',line=>{if(!pending)return;const r=pending;pending=null;try{const value=JSON.parse(line);if(value.error||typeof value.done!=='boolean')throw invalid();r.resolve(value);}catch(e){r.reject(e);}});
+  lines.on('line',line=>{if(!pending)return;const r=pending;pending=null;try{const value=JSON.parse(line);if(value.error&&['ENOSPC','EDQUOT','EACCES','EPERM','EROFS','EIO','EMFILE','ENFILE','ENOENT'].includes(value.code))throw Object.assign(Error('Archive storage unavailable'),{code:value.code});if(value.error||typeof value.done!=='boolean')throw invalid();r.resolve(value);}catch(e){r.reject(e);}});
   return {async step(){if(ended||failure)throw failure||invalid();let timer;try{return await new Promise((resolve,reject)=>{pending={resolve,reject};timer=setTimeout(()=>{failure=Object.assign(Error('Extraction timed out'),{code:'EXTRACTION_TIMEOUT'});p.kill('SIGKILL');},30000);p.stdin.write(JSON.stringify({bytes:limit})+'\n');});}finally{clearTimeout(timer);}},async stop(){p.kill('SIGKILL');await closed;lines.close();},closed};
  }
  async function initialize(op,p){

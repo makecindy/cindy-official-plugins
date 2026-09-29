@@ -82,17 +82,18 @@ test('known missing draft input releases authoring without creating a task or re
 });
 test('download cancellation failure still reaches the registered installer',async()=>{
  for(const failure of ['reject','non-ok']){
- const b=bridge(),request=b.cindy.node.request;let enter,release,cancelled=0,prepared=false;
+ const b=bridge(),request=b.cindy.node.request;let enter,release,prepared=false,begins=0;const cancelled=[];
  const ready=new Promise(r=>enter=r),pending=new Promise(r=>release=r);
  b.cindy.downloads.cancel=async()=>{if(failure==='non-ok')return {ok:false,message:'download transport lost'};throw Error('download transport lost');};
  b.cindy.node.request=async x=>{
+  if(x.method==='online_begin')return {ok:true,result:{operationId:'install-'+(++begins)}};
   if(x.method==='online_plan')return {ok:true,result:{artifacts:[{sha256:'fixture',url:'https://example.test/a',bytes:1}]}};
   if(x.method==='online_step'){if(!prepared){prepared=true;return {ok:true,result:{done:false,phase:'copy'}};}enter();await pending;return {ok:true,result:{done:true,result:{}}};}
-  if(x.method==='online_cancel'){cancelled++;return {ok:true,result:{}};}
+  if(x.method==='online_cancel'){cancelled.push(x.params.operationId);return {ok:true,result:{}};}
   return request(x);
  };
  const install=b.ui('install','online_install',{});await ready;
- await b.ui('cancel','cancel_download');assert.equal(cancelled,1);release();await install;assert.equal(b.replies.find(r=>r.id==='cancel').ok,false);
+ await b.ui('cancel','cancel_download');assert.deepEqual(cancelled,['install-1','install-2']);release();await install;assert.equal(b.replies.find(r=>r.id==='cancel').ok,false);
  }
 });
 test('independent inspect and install pin the selected root until settled',async()=>{
@@ -966,5 +967,24 @@ test('released mismatched workers never enter local regrading on resume',async()
   await b.ui('mismatch','query');assert.equal(b.config.batch.items[0].released,true);
   b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[]});
   await b.ui('resume','resume_coordination');assert.equal(grades,0);assert.equal(b.config.batch.items[0].status,'blocked');assert.equal(b.config.batch.items[0].result.score,null);
+ }
+});
+
+test('Host download outlives the Node operation map without losing installation or cancellation',async()=>{
+ for(const cancel of [false,true]){
+  const b=bridge(),request=b.cindy.node.request,ops=new Set(),cancelled=[];let begins=0,downloaded=false;
+  b.cindy.node.request=async x=>{
+   if(x.method==='online_begin'){const operationId='op-'+(++begins);ops.add(operationId);return {ok:true,result:{operationId}};}
+   if(x.method==='online_cancel'){cancelled.push(x.params.operationId);ops.delete(x.params.operationId);return {ok:true,result:{}};}
+   if(x.method==='online_plan')return {ok:true,result:{artifacts:[{sha256:'a'.repeat(64),url:'https://example.test/a',bytes:1}]}};
+   if(x.method==='online_step'){assert.ok(ops.has(x.params.operationId),'operation must belong to the current Node process');return {ok:true,result:downloaded?{done:true,result:{bank:'/bank'}}:{done:false,phase:'copy'}};}
+   return request(x);
+  };
+  b.cindy.downloads.cancel=async()=>({ok:true});
+  b.cindy.downloads.start=async()=>{assert.deepEqual([...ops],[],'probe must be cleaned before the Host wait');ops.clear();downloaded=true;if(cancel)await b.ui('stop-download','cancel_download');return {ok:true,token:'opaque'};};
+  await b.ui('install-after-idle','online_install',{});
+  assert.equal(b.replies.find(x=>x.id==='install-after-idle').ok,!cancel);
+  if(cancel)assert.equal(b.replies.find(x=>x.id==='stop-download').ok,true);
+  assert.equal(begins,cancel?1:2);assert.deepEqual(cancelled,cancel?['op-1']:['op-1','op-2']);
  }
 });

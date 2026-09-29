@@ -295,3 +295,11 @@ test('calibration rejects a swapped grader before executing it under the earlier
  try{const result=await dispatch('calibrate_step',{root,checkId,step:0});assert.equal(result.status,'environment_invalid');assert.equal(result.scoreExact,null);}
  finally{cp.spawn=spawn;await fs.writeFile(grader,original);}
 }));
+
+test('oversized valid calibration output becomes an unscored receipt',()=>fixture(async(root,directory)=>{
+ await fs.writeFile(path.join(directory,'author/grade.py'),"import pathlib,sys\npathlib.Path(sys.argv[2]).write_text('{\"status\":\"graded\",\"items\":{\"a\":true}}'+' '*(17*1024*1024))\n");
+ const {checkId}=await dispatch('calibrate_begin',{root,id:'sample',revision:'v1'}),p={root,checkId,step:0};
+ const result=await dispatch('calibrate_step',p);assert.equal(result.status,'environment_invalid');assert.equal(result.scoreExact,null);
+ const receipt=JSON.parse(await fs.readFile(path.join(root,'eval-lab-data/calibrations',checkId,'step-0.json')));assert.match(receipt.raw.reason,/16 MiB/);
+ assert.deepEqual(await dispatch('calibrate_step',p),result);
+}));

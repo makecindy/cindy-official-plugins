@@ -47,7 +47,7 @@ function installError(e){
  else if(/更新 Cindy/.test(e.message)){code='HOST_UPDATE_REQUIRED';message='请更新 Cindy 以使用受管下载';}
  else if(/Cached question changed/.test(e.message)){code='CACHE_DAMAGED';message='已安装题库校验失败，请在高级设置中重新导入可信题库或联系维护者；已有成绩保留。';}
  else if(e.code==='PACKAGE_INVALID'||/integrity|content mismatch|identity mismatch|解压失败/i.test(e.message)){code='PACKAGE_INVALID';message='题包校验或解压失败，请重新下载；仍失败请联系题库维护者。';}
- else if(['ENOSPC','EACCES','EPERM'].includes(e.code)){code='STORAGE_UNAVAILABLE';message='题库无法写入，请检查可用磁盘空间和插件存储权限后重试。';}
+ else if(['ENOSPC','EDQUOT','EACCES','EPERM','EROFS','EIO','EMFILE','ENFILE','ENOENT'].includes(e.code)){code='STORAGE_UNAVAILABLE';message='题库无法写入，请检查可用磁盘空间和插件存储权限后重试。';}
  return Object.assign(Error(message),{code});
 }
 function service({base,within,files,runCommand,fetchFile=download,platform=process.platform,arch=process.arch,stepBytes}){

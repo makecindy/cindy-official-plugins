@@ -226,6 +226,8 @@ async function installQuestion(args,fromLaunch=false){
  let current;
  do{if(downloadCancelled)throw Error('下载已取消');current=await node('online_step',{...args,operationId:activeInstall,requireHostDownloads:true});}while(!current.done&&current.phase==='cached');
  if(!current.done){
+ // Host downloads may outlive the Node process. Finish this cache probe first.
+ await node('online_cancel',{operationId:activeInstall});activeInstall=null;
  if(!cindy.downloads?.start)throw Error('请更新 Cindy 开发版以使用题库下载');
  const plan=await node('online_plan',args),downloadTokens={};
  for(const a of plan.artifacts){
@@ -236,6 +238,8 @@ async function installQuestion(args,fromLaunch=false){
   downloadTokens['artifact_'+a.sha256]=r.token;
  }
  if(downloadCancelled)throw Error('下载已取消');
+ activeInstall=(await node('online_begin')).operationId;
+ if(typeof activeInstall!=='string')throw Error('Install cancellation unavailable');
  channel.postMessage({type:'download-progress',phase:'unpacking'});
  do{if(downloadCancelled)throw Error('下载已取消');current=await node('online_step',{...args,operationId:activeInstall,requireHostDownloads:true},undefined,downloadTokens);}while(!current.done);
  }

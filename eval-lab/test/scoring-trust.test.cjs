@@ -86,3 +86,17 @@ test('grading executes the verified bytes after a later replacement with normal 
   assert.match(await fs.readFile(grader,'utf8'),/answer = True/);
  }finally{cp.spawn=spawn;await fs.rm(root,{recursive:true,force:true});}
 });
+
+test('oversized valid grader JSON settles unscored and reuses the receipt',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-output-budget-'));
+ try{
+  const bank=path.join(root,'bank'),q=path.join(bank,'q');await fs.mkdir(path.join(q,'candidate'),{recursive:true});await fs.mkdir(path.join(q,'author'));
+  await fs.writeFile(path.join(q,'candidate/TASK.md'),'Saved answer');
+  await fs.writeFile(path.join(q,'question.json'),JSON.stringify({id:'q',revision:'v1',title:'Q',scoringVersion:'v1',groups:[{id:'g',weight:'1',mode:'all',items:['a']}]}));
+  await fs.writeFile(path.join(q,'author/grade.py'),"import pathlib,sys\npathlib.Path(sys.argv[2]).write_text('{\"status\":\"graded\",\"items\":{\"a\":true}}'+' '*(17*1024*1024))\n");
+  await fs.writeFile(path.join(bank,'distribution.json'),JSON.stringify({format:'eval-lab-bank-v1',questions:[{key:'q@v1',path:'q',files:await files(q)}]}));
+  const r=await dispatch('prepare',{root,bank,question:'q@v1',model:'fixture',provider:'fixture',harness:'fixture',effort:'default'}),before=await files(r.workspace),p={root,runId:r.runId,receipt:{channel:'Orca Worker',sessionId:'fixture',completedAt:2000}};
+  const result=await dispatch('grade',p);assert.equal(result.status,'environment_invalid');assert.equal(result.score,null);assert.match(JSON.parse(await fs.readFile(path.join(path.dirname(r.workspace),'result.json'))).reason,/16 MiB/);
+  assert.equal((await dispatch('grade',p)).status,'environment_invalid');assert.deepEqual(await files(r.workspace),before);
+ }finally{await fs.rm(root,{recursive:true,force:true});}
+});

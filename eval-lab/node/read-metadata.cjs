@@ -2,8 +2,8 @@
 const fs=require('node:fs/promises'),crypto=require('node:crypto');
 // Match the online index budget; archive/workspace limits do not apply to JSON metadata.
 const limit=16*1024*1024;
-const invalid=()=>Object.assign(Error('Question metadata exceeds 16 MiB; reduce the metadata file.'),{code:'PACKAGE_INVALID'});
-module.exports=async function readMetadata(file,expectedHash){
+module.exports=async function readMetadata(file,expectedHash,oversizeMessage='Question metadata exceeds 16 MiB; reduce the metadata file.'){
+ const invalid=()=>Object.assign(Error(oversizeMessage),{code:'PACKAGE_INVALID'});
  const handle=await fs.open(file,'r');
  try{
   if((await handle.stat()).size>limit)throw invalid();

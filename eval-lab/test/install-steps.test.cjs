@@ -55,3 +55,18 @@ test('cancelling any stage preserves the installed bank and removes only operati
   assert.deepEqual(await svc.banks(p),[]);
  }
 }));
+
+test('Python extraction preserves storage failures without exposing paths or blaming archives',()=>fixture(async({root,svc,p})=>{
+ const spawn=cp.spawn;
+ for(const code of ['ENOSPC','EDQUOT','EACCES','EPERM','EROFS','EIO','NO_ERRNO']){
+  const op=svc.begin(p);let result;do{result=await svc.step({...p,...op});}while(result.phase!=='extract');
+  cp.spawn=(command,args,options)=>{
+   if(args[1]?.endsWith('unpack-step.py')){
+    const script="import errno,pathlib,runpy,sys\nscript=sys.argv.pop(1);code=sys.argv.pop()\ndef broken(self,*a,**k): raise (OSError('Invalid data stream') if code=='NO_ERRNO' else OSError(getattr(errno,code),'secret storage path'))\npathlib.Path.open=broken\nrunpy.run_path(script,run_name='__main__')";
+    return spawn(command,['-I','-c',script,args[1],...args.slice(2),code],options);
+   }return spawn(command,args,options);
+  };
+  try{await assert.rejects(svc.step({...p,...op}),e=>code==='NO_ERRNO'?e.code==='PACKAGE_INVALID':e.code==='STORAGE_UNAVAILABLE'&&/磁盘空间/.test(e.message)&&!e.message.includes(root)&&!e.message.includes('secret')&&!/重新下载/.test(e.message));}
+  finally{cp.spawn=spawn;await svc.cancel({...p,...op});}
+ }
+}));

@@ -5,7 +5,7 @@ const {validateStorage,link}=require('./storage.cjs');
 const inputError=require('./input-error.cjs');
 const {sha,id,validateSpec,score,report,publicResult}=require('../lib/core.cjs');
 const readMetadata=require('./read-metadata.cjs');
-const read=async(p,expectedHash)=>['distribution.json','question.json'].includes(path.basename(p))?readMetadata(p,expectedHash):JSON.parse(await fs.readFile(p,'utf8'));
+const read=async(p,expectedHash)=>['distribution.json','question.json'].includes(path.basename(p))?readMetadata(p,expectedHash):['external-grade.json','grade.json'].includes(path.basename(p))?readMetadata(p,undefined,'Grader output exceeds 16 MiB; reduce the result file and recalibrate the question.'):JSON.parse(await fs.readFile(p,'utf8'));
 // Immutable JSON becomes visible only after the complete file is closed; never replace a winner.
 const write=async(p,x)=>{
  await fs.mkdir(path.dirname(p),{recursive:true});
@@ -89,7 +89,7 @@ async function grade(p){
  if(!expected||Object.keys(expected).length!==Object.keys(actual).length||Object.entries(expected).some(([name,hash])=>actual[name]!==hash))throw Error('Submission changed; existing evidence preserved');
  const context=await read(path.join(attempt,'grading-context.json'));
  if(!context.receipt||context.receipt.sessionId!==p.receipt.sessionId||context.receipt.completedAt!==p.receipt.completedAt)throw Error('Terminal receipt conflict');
- let raw;try{raw=await read(output);}catch{raw={status:'environment_invalid',reason:'Grader produced no result'};}
+ let raw;try{raw=await read(output);}catch(e){raw={status:'environment_invalid',reason:e.code==='PACKAGE_INVALID'?e.message:'Grader produced no result'};}
  const environmentDiagnostic=await environmentEvidence(r.workspace,path.join(questionDir,'candidate'));
  if(execution.code!==0||execution.timedOut)raw={status:'environment_invalid',reason:'Grader process failed or timed out'};
  let calculated=null;if(raw?.status==='graded'){try{calculated=score(spec,raw.items);}catch(e){raw={status:'environment_invalid',reason:e.message};}}

@@ -1,5 +1,5 @@
 """Advance extraction by bounded bytes; input archives belong to this operation."""
-import json, pathlib, stat, sys, time, zipfile
+import errno, json, pathlib, stat, sys, time, zipfile
 archive, target, budget = sys.argv[1:]
 target = pathlib.Path(target)
 source = output = None
@@ -47,9 +47,10 @@ try:
             print(json.dumps({'done': index == len(entries), 'bytes': used}), flush=True)
             if index == len(entries):
                 break
-except Exception:
-    # Never print local archive/member paths from filesystem exceptions.
-    print(json.dumps({'error': 'Invalid archive or unavailable storage'}), flush=True)
+except Exception as error:
+    # Preserve only a bounded errno name, never local archive/member paths.
+    code = errno.errorcode.get(error.errno, 'PACKAGE_INVALID') if isinstance(error, OSError) else 'PACKAGE_INVALID'
+    print(json.dumps({'error': 'Extraction failed', 'code': code}), flush=True)
     sys.exit(1)
 finally:
     if source is not None:
