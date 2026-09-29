@@ -66109,6 +66109,7 @@ var require_worker = __commonJS({
     });
     var MAX_BODY_CHARS = 2e4;
     var MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+    var MAX_SEND_BODY_CHARS = 5e5;
     var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     var SECRET_KEY = "qq_mail_authorization_code";
     function normalizeCredentials(value) {
@@ -66324,6 +66325,55 @@ var require_worker = __commonJS({
         };
       }));
     }
+    var HTML_ENTITIES = Object.freeze({
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: " ",
+      ensp: " ",
+      emsp: " ",
+      thinsp: " ",
+      shy: "",
+      middot: "\xB7",
+      hellip: "\u2026",
+      mdash: "\u2014",
+      ndash: "\u2013",
+      laquo: "\xAB",
+      raquo: "\xBB",
+      ldquo: "\u201C",
+      rdquo: "\u201D",
+      lsquo: "\u2018",
+      rsquo: "\u2019",
+      copy: "\xA9",
+      reg: "\xAE",
+      trade: "\u2122",
+      times: "\xD7",
+      divide: "\xF7",
+      deg: "\xB0",
+      sect: "\xA7",
+      yen: "\xA5",
+      euro: "\u20AC",
+      pound: "\xA3"
+    });
+    function decodeHtmlEntities(text) {
+      return text.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]{1,31});/g, (match, body) => {
+        if (body.charAt(0) === "#") {
+          const hex = body.charAt(1) === "x" || body.charAt(1) === "X";
+          const code = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+          return Number.isInteger(code) && code > 0 && code <= 1114111 ? String.fromCodePoint(code) : match;
+        }
+        const name = body.toLowerCase();
+        return Object.hasOwn(HTML_ENTITIES, name) ? HTML_ENTITIES[name] : match;
+      });
+    }
+    function htmlToPlainText(html) {
+      if (typeof html !== "string") return "";
+      return decodeHtmlEntities(
+        html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]+>/g, " ")
+      ).replace(/\s+/g, " ").trim();
+    }
     async function readMessage(credentials, action, deps) {
       const folder = action.folder || "INBOX";
       return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
@@ -66357,7 +66407,7 @@ var require_worker = __commonJS({
           chunks.push(chunk);
         }
         const parsed = await deps.parseMessage(Buffer.concat(chunks, sourceBytes));
-        const text = typeof parsed.text === "string" && parsed.text.trim() ? parsed.text : typeof parsed.html === "string" ? parsed.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
+        const text = typeof parsed.text === "string" && parsed.text.trim() ? parsed.text : htmlToPlainText(parsed.html);
         return {
           ...summaryFromMessage(message, folder),
           cc: parsed.cc && parsed.cc.text ? parsed.cc.text : "",
@@ -66380,17 +66430,26 @@ var require_worker = __commonJS({
       if (typeof action.subject !== "string" || /[\r\n\0]/.test(action.subject)) {
         throw new Error("INVALID_SUBJECT");
       }
-      if (typeof action.body_text !== "string") throw new Error("INVALID_BODY");
-      if (action.subject.length > 998 || action.body_text.length > 5e5) {
+      const hasText = action.body_text !== void 0;
+      const hasHtml = action.body_html !== void 0;
+      if (hasText && typeof action.body_text !== "string") throw new Error("INVALID_BODY");
+      if (hasHtml && (typeof action.body_html !== "string" || action.body_html.includes("\0"))) {
+        throw new Error("INVALID_BODY");
+      }
+      if (!hasText && !hasHtml) throw new Error("INVALID_BODY");
+      if (action.subject.length > 998 || hasText && action.body_text.length > MAX_SEND_BODY_CHARS || hasHtml && action.body_html.length > MAX_SEND_BODY_CHARS) {
         throw new Error("MESSAGE_TOO_LARGE");
       }
+      const plainText = hasText ? action.body_text : htmlToPlainText(action.body_html);
+      const includeText = hasText || plainText.length > 0;
       return {
         from: credentials.email,
         to,
         ...cc.length ? { cc } : {},
         ...bcc.length ? { bcc } : {},
         subject: action.subject,
-        text: action.body_text,
+        ...includeText ? { text: plainText } : {},
+        ...hasHtml ? { html: action.body_html } : {},
         disableFileAccess: true,
         disableUrlAccess: true
       };
@@ -66557,7 +66616,9 @@ var require_worker = __commonJS({
       if (message === "RECIPIENT_REQUIRED") return "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA";
       if (message === "INVALID_RECIPIENT") return "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u6216\u5BC6\u9001\u5730\u5740\u683C\u5F0F\u4E0D\u6B63\u786E";
       if (message === "INVALID_SUBJECT") return "\u90AE\u4EF6\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E";
-      if (message === "INVALID_BODY") return "\u90AE\u4EF6\u6B63\u6587\u683C\u5F0F\u4E0D\u6B63\u786E";
+      if (message === "INVALID_BODY") {
+        return "\u90AE\u4EF6\u6B63\u6587\u683C\u5F0F\u4E0D\u6B63\u786E\uFF0C\u8BF7\u5728 body_text \u6216 body_html \u4E2D\u81F3\u5C11\u63D0\u4F9B\u4E00\u4E2A\u5B57\u7B26\u4E32";
+      }
       if (message.startsWith("INVALID_SINCE") || message.startsWith("INVALID_BEFORE")) {
         return "\u641C\u7D22\u65E5\u671F\u683C\u5F0F\u65E0\u6548\uFF0C\u8BF7\u4F7F\u7528 ISO \u65E5\u671F\u6216\u65E5\u671F\u65F6\u95F4";
       }

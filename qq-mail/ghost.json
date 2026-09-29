@@ -1,10 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.64",
   "id": "qq-mail",
   "name": "QQ 邮箱",
   "description": "通过 QQ 邮箱 IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。授权码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
   "whenToUse": "需要查找、阅读或整理 QQ 邮箱邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入 QQ 邮箱地址和 IMAP/SMTP 授权码并完成连接测试。",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -15,10 +16,6 @@
   "icon": "assets/icon.png",
   "entry": "main.js",
   "settingsHtml": "settings.html",
-  "slots": [
-    "tool",
-    "node"
-  ],
   "node": {
     "entry": "node/worker.cjs",
     "protocol": "json-rpc-stdio",
@@ -45,7 +42,7 @@
     },
     {
       "name": "qq_mail",
-      "description": "执行 QQ 邮箱操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。",
+      "description": "执行 QQ 邮箱操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。发送和草稿的正文可用 body_text（纯文本）或 body_html（HTML），两者至少提供一个。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -97,7 +94,11 @@
           },
           "body_text": {
             "type": "string",
-            "description": "send/draft 的纯文本正文。"
+            "description": "send/draft 的纯文本正文，与 body_html 至少提供一个。"
+          },
+          "body_html": {
+            "type": "string",
+            "description": "send/draft 的 HTML 正文，与 body_text 至少提供一个。同时提供时按 multipart/alternative 发送；只提供本字段时插件会另附一份纯文本备选（剔除 script/style、剥离标签并还原常见实体）。例外：正文剥离后没有文字（例如只有图片）时不带纯文本部分，此时非 HTML 客户端看不到正文。"
           },
           "unread": {
             "type": "boolean",
