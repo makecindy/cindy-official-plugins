@@ -1,0 +1,25 @@
+* { box-sizing: border-box; }
+body { margin: 0; padding: 4px 0; color: var(--text-primary); font: 13px/1.55 system-ui, sans-serif; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+p { margin: 8px 0; }
+.hint { color: var(--text-secondary); font-size: 12px; }
+label { display: block; margin: 12px 0 4px; font-weight: 500; }
+select, input { width: 100%; padding: 8px 10px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface); color: var(--text-primary); font: inherit; }
+button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-default); background: transparent; color: inherit; cursor: pointer; font: inherit; }
+button.primary { margin-top: 12px; background: var(--accent-cta-bg); color: var(--accent-pure-cta-fg); border-color: transparent; }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.account { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px; margin-top: 10px; border: 1px solid var(--border-default); border-radius: 10px; }
+.identity { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.tag { display: block; font-size: 11px; color: var(--text-secondary); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+details { margin-top: 16px; border-top: 1px solid var(--border-default); padding-top: 12px; }
+summary { cursor: pointer; font-weight: 500; }
+a { color: var(--text-primary); text-underline-offset: 3px; }
+code { overflow-wrap: anywhere; font-size: 11px; }
+#status { overflow-wrap: anywhere; }
+#status:empty { display: none; }
+
+.accounts-title { margin: 20px 0 4px; font-size: 14px; font-weight: 600; }
+.account-group { margin-top: 14px; }
+.account-group h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
