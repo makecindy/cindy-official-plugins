@@ -68,12 +68,13 @@ test('default bank display and export title follow locale without translating us
  const fs=require('node:fs'),vm=require('node:vm'),code=fs.readFileSync(require('node:path').join(__dirname,'../view.js'),'utf8');
  for(const locale of ['zh-CN','en','ja','ko']){
   const elements=new Map(),calls=[],$=id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);};let exportAction;
-  const context={$,refreshing:false,state:{models:[]},bankId:'default',modelStamp:'[]',picks:new Map(),tr:t=>translate(locale,t),esc:String,summary(){},history(){},renderJob(){},message(){},renderModels(){},historyBankId:'default',standingsRows:[],standingsQuestions:[],scoreMode:'latest',bind:(id,fn)=>{exportAction=fn;},rpc:async(action,args)=>{calls.push({action,args});return action==='status'?{banks:[{id:'default',name:'Cindy 实战题库',questions:[]},{id:'imported:user',name:'Cindy 实战题库',questions:[]}],models:[],drafts:[],runs:[]}:{saved:true};}};
+  const context={$,refreshing:false,state:{models:[]},bankId:'default',modelStamp:'[]',picks:new Map(),tr:t=>translate(locale,t),esc:String,summary(){},history(){},renderJob(){},message(){},renderModels(){},historyBankId:'default',standingsRows:[],standingsQuestions:[],scoreMode:'latest',bind:(id,fn)=>{exportAction=fn;},rpc:async(action,args)=>{calls.push({action,args});return action==='status'?{banks:[{id:'default',name:'Cindy 实战题库',questions:[]},{id:'imported:user',name:'Cindy 实战题库',questions:[]},{id:'custom',name:'私人题库',error:'私人题库清单损坏，请恢复题库清单或联系维护者；已有题目和成绩保留。',questions:[]}],models:[],drafts:[],runs:[]}:{saved:true};}};
   context.bank=()=>context.state.banks.find(b=>b.id===context.bankId);
   vm.runInNewContext(code.slice(code.indexOf('async function refresh(){'),code.indexOf('\nfunction bind(')),context);await context.refresh();
   const expected=locale==='zh-CN'?'Cindy 实战题库':'Cindy Practical Evaluation Bank';
   assert.equal(context.state.banks[0].name,expected);assert.equal(context.state.banks[1].name,'Cindy 实战题库');
   assert.ok($('#bank').innerHTML.includes(expected));
+  const privateName=translate(locale,'私人题库');assert.equal(context.state.banks[2].name,privateName);assert.ok($('#bank').innerHTML.includes(privateName));
   vm.runInNewContext(code.match(/^bind\('#export'.*$/m)[0],context);await exportAction();
   assert.equal(calls.at(-1).args.standings.title,expected);
  }
@@ -137,4 +138,8 @@ test('runtime admission and receipt errors keep Chinese and use English fallback
   assert.equal(translate(locale,'正在下载并校验：Fixture'),'Downloading and verifying: Fixture');
   assert.equal(translate(locale,'未知 external diagnostic'),'未知 external diagnostic');
  }
+});
+
+test('bank manifest and redirect diagnostics use English fallback',()=>{
+ for(const text of ['私人题库','私人题库清单损坏，请恢复题库清单或联系维护者；已有题目和成绩保留。','题库下载重定向无效或不受支持，请联系题库维护者检查发布源。']){assert.equal(translate('zh-CN',text),text);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,text),/[\u3400-\u9fff]/);}
 });

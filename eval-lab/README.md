@@ -30,7 +30,7 @@ Only selected questions/runtimes are downloaded. Archives have byte/hash/path ch
 
 Grading and calibration **execute local code supplied by the bank**, including candidate programs, with local user permissions. The first release is for trusted banks only: official banks are supplied and reviewed by maintainers; other banks are generated at the user’s request for their own use or reviewed by maintainers. User-initiated authoring includes automatic calibration, without a separate post-generation approval step. Generation and calibration are not security reviews. Do not use it to execute unknown or untrusted packages. This release adds no OS sandbox or Host isolation API. Hashes prove integrity, not safety. Keeping graders/reference files outside answer directories is workflow separation, not an OS sandbox.
 
-Bank `distribution.json` and question `question.json` metadata are each limited to 16 MiB and read with a byte bound before JSON parsing. Bank-relative paths use forward slashes on all platforms; backslashes are rejected. This metadata limit does not reduce the approved archive or expanded-workspace limits.
+Bank `distribution.json` and question `question.json` metadata are each limited to 16 MiB and read with a byte bound before JSON parsing. Bank-relative paths use forward slashes on all platforms; backslashes are rejected. This metadata limit does not reduce the approved archive or expanded-workspace limits. Online index downloads and their saved `{url,index}` cache wrappers are separately limited to 16 MiB; a near-limit source must leave room for the wrapper to be published.
 
 ## Personal banks and privacy
 

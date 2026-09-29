@@ -988,3 +988,9 @@ test('Host download outlives the Node operation map without losing installation 
   assert.equal(begins,cancel?1:2);assert.deepEqual(cancelled,cancel?['op-1']:['op-1','op-2']);
  }
 });
+
+test('status exposes damaged custom bank as an actionable row and keeps history',async()=>{
+ const b=bridge(),request=b.cindy.node.request;
+ b.cindy.node.request=async x=>x.method==='bank'?{ok:true,result:{questions:[],errors:[{id:'custom',message:'Custom manifest damaged'}]}}:x.method==='runs'?{ok:true,result:[{runId:'saved',score:1}]}:request(x);
+ await b.ui('damaged-custom','status');const reply=b.replies.find(x=>x.id==='damaged-custom');assert.equal(reply.ok,true);assert.equal(reply.result.banks.find(x=>x.id==='custom').error,'Custom manifest damaged');assert.equal(reply.result.runs[0].runId,'saved');
+});

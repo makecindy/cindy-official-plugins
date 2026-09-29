@@ -88,10 +88,10 @@ test('oversized stored indices are isolated before whole-file reads at every ent
 test('inspection applies the stored wrapper budget before publishing its index',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-index-wrapper-')),id='d'.repeat(64);
  try{
-  for(const size of [16*1024*1024-1024,16*1024*1024]){
-   const index=fixture();index.padding='';index.padding=' '.repeat(size-Buffer.byteLength(JSON.stringify(index)));const text=JSON.stringify(index);assert.equal(Buffer.byteLength(text),size);
+  for(const size of [16*1024*1024,16*1024*1024+1]){
+   const index=fixture();index.padding='';index.padding=' '.repeat(size-Buffer.byteLength(JSON.stringify({url,index})));const text=JSON.stringify(index);assert.equal(Buffer.byteLength(JSON.stringify({url,index})),size);
    const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',runCommand:async()=>({code:0}),fetchFile:async(u,d)=>{await fs.writeFile(d,text);return {sha256:id};}});
-   if(size===16*1024*1024){await assert.rejects(svc.inspect({root,url}),{code:'PACKAGE_INVALID'});assert.equal((await svc.cached({root,url})).indexId,id);}
+   if(size>16*1024*1024){await assert.rejects(svc.inspect({root,url}),{code:'PACKAGE_INVALID'});assert.equal((await svc.cached({root,url})).indexId,id);}
    else{const found=await svc.inspect({root,url});assert.equal(found.indexId,id);assert.equal((await svc.cached({root,url})).indexId,id);assert.equal((await svc.plan({root,indexId:id,question:'fixture@v1'})).artifacts.length,1);}
    assert.deepEqual(await fs.readdir(path.join(root,'online/indices',id)),['index.json']);
   }

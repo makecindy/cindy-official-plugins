@@ -24,7 +24,7 @@ test('damaged installed metadata does not prevent the page from loading or start
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'bank-catalog-'));try{
   const dir=path.join(root,'eval-lab-data/online/banks','a'.repeat(64));await fs.mkdir(dir,{recursive:true});
   const healthy=path.join(path.dirname(dir),'b'.repeat(64));await fs.mkdir(healthy);await fs.writeFile(path.join(healthy,'distribution.json'),JSON.stringify({format:'eval-lab-bank-v1',questions:[{key:'healthy@v1',title:'Healthy'}]}));
-  for(const text of ['null','{broken',JSON.stringify({format:'eval-lab-bank-v1',questions:null}),'oversized']){await fs.writeFile(path.join(dir,'distribution.json'),text);if(text==='oversized')await fs.truncate(path.join(dir,'distribution.json'),16*1024*1024+1);const result=await require('../node/engine.cjs').dispatch('bank',{root});assert.equal(result.questions.length,1);assert.equal(result.questions[0].title,'Healthy');assert.equal(result.errors.length,1);}
+  for(const text of ['null','{broken',JSON.stringify({format:'eval-lab-bank-v1',questions:null}),JSON.stringify({format:'eval-lab-bank-v1',questions:[null]}),'oversized']){await fs.writeFile(path.join(dir,'distribution.json'),text);if(text==='oversized')await fs.truncate(path.join(dir,'distribution.json'),16*1024*1024+1);const result=await require('../node/engine.cjs').dispatch('bank',{root});assert.equal(result.questions.length,1);assert.equal(result.questions[0].title,'Healthy');assert.equal(result.errors.length,1);}
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
 function fixture(root){const name='a'.repeat(64)+'.zip',index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[{key:'fixture@v1',path:'questions/fixture',files:{},layers:[{artifact:name,mount:''}]}],artifacts:{[name]:{url:url.replace('index.json',name),bytes:1,expandedBytes:1,sha256:'a'.repeat(64)}}},text=JSON.stringify(index);return {id:digest(text),svc:service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,runCommand,fetchFile:async(u,d)=>{await fs.writeFile(d,text);return {sha256:digest(text)};}})};}
@@ -98,4 +98,22 @@ test('all dynamic evaluation phases have English fallback text',async()=>{
  const labels=vm.runInNewContext('('+view.match(/,labels=(\{[^\n]+?\});/)[1]+')');
  const {translate}=require('../i18n.js');
  for(const text of Object.values(labels)){assert.notEqual(translate('en',text),text);assert.doesNotMatch(translate('en',text),/[\u3400-\u9fff]/);}
+});
+
+test('damaged custom manifests leave healthy banks and read-only history reachable',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'custom-bank-recovery-'));
+ try{
+  const dir=path.join(root,'eval-lab-data/custom-bank'),healthy=path.join(root,'healthy');await fs.mkdir(dir,{recursive:true});await fs.mkdir(healthy);
+  await fs.mkdir(path.join(root,'eval-lab-data/calibrations','snapshot-'+'a'.repeat(64)),{recursive:true});
+  await fs.writeFile(path.join(root,'eval-lab-data/calibrations','snapshot-'+'a'.repeat(64),'calibration.json'),JSON.stringify({id:'q',revision:'v1',checkId:'old',ok:true}));
+  const saved=path.join(root,'eval-lab-data/runs/saved');await fs.mkdir(saved,{recursive:true});const history=JSON.stringify({runId:'saved',bank:dir,status:'graded',score:1,questionId:'q',revision:'v1'});await fs.writeFile(path.join(saved,'result.json'),history);
+  const good={format:'eval-lab-bank-v1',questions:[{key:'q@v1',title:'Healthy',files:{}}]};await fs.writeFile(path.join(healthy,'distribution.json'),JSON.stringify(good));
+  const engine=require('../node/engine.cjs'),file=path.join(dir,'distribution.json');
+  for(const value of ['{broken','null',JSON.stringify({format:'eval-lab-bank-v1',questions:null}),JSON.stringify({format:'eval-lab-bank-v1',questions:[null]}),'missing','oversized']){
+   await fs.writeFile(file,value);if(value==='oversized')await fs.truncate(file,16*1024*1024+1);if(value==='missing')await fs.unlink(file);const size=value==='missing'?null:(await fs.stat(file)).size;
+   const bank=await engine.dispatch('bank',{root,bank:healthy});assert.equal(bank.questions[0].title,'Healthy');assert.equal(bank.errors[0].id,'custom');assert.match(bank.errors[0].message,/清单.*恢复/);
+   assert.deepEqual(await engine.dispatch('drafts',{root}),[]);assert.equal((await engine.dispatch('runs',{root}))[0].score,1);assert.equal(await fs.readFile(path.join(saved,'result.json'),'utf8'),history);if(size===null)await assert.rejects(fs.stat(file),{code:'ENOENT'});else assert.equal((await fs.stat(file)).size,size);
+  }
+  await fs.writeFile(file,JSON.stringify(good));assert.equal((await engine.dispatch('bank',{root})).questions[0].key,'custom:q@v1');assert.deepEqual(await engine.dispatch('drafts',{root}),[]);
+ }finally{await fs.rm(root,{recursive:true,force:true});}
 });

@@ -16,7 +16,7 @@ const write=async(p,x)=>{
 async function within(root,rel){if(typeof rel!=='string'||rel.includes('\\')||path.isAbsolute(rel)||rel.split(/[\\/]/).some(s=>!s||s==='.'||s==='..'))throw Error('Unsafe path');const base=await fs.realpath(root),p=path.resolve(base,rel);if(!p.startsWith(base+path.sep))throw Error('Outside root');let cur=base;for(const segment of rel.split('/')){cur=path.join(cur,segment);try{if((await fs.lstat(cur)).isSymbolicLink())throw Error('Symlink refused');}catch(e){if(e.code!=='ENOENT')throw e;}}return p;}
 async function files(root,dir='',signal){signal?.throwIfAborted();const rows={};for(const e of (await fs.readdir(path.join(root,dir),{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){signal?.throwIfAborted();const rel=dir?dir+'/'+e.name:e.name;if(e.isSymbolicLink())throw Object.assign(Error('Symlink refused'),{code:'SYMLINK_REFUSED'});if(e.isDirectory())Object.assign(rows,await files(root,rel,signal));else if(e.isFile()){const hash=crypto.createHash('sha256');for await(const chunk of createReadStream(path.join(root,rel),{signal}))hash.update(chunk);rows[rel]=hash.digest('hex');}}return rows;}
 async function base(root){if(!path.isAbsolute(root))throw Error('Choose an absolute storage directory');root=await fs.realpath(root);const out=await within(root,'eval-lab-data');await fs.mkdir(out,{recursive:true});return out;}
-async function bankInfo(bank){const root=await fs.realpath(bank);const manifest=await read(path.join(root,'distribution.json'));if(!manifest||manifest.format!=='eval-lab-bank-v1')throw Error('Not an Eval Lab bank');return {root,manifest};}
+async function bankInfo(bank){const root=await fs.realpath(bank);const manifest=await read(path.join(root,'distribution.json'));if(!manifest||manifest.format!=='eval-lab-bank-v1'||!Array.isArray(manifest.questions)||manifest.questions.some(q=>!q||typeof q.key!=='string'||!q.key))throw Error('Not an Eval Lab bank');return {root,manifest};}
 async function verifyQuestion(bank,key){const {root,manifest}=await bankInfo(bank);const q=manifest.questions.find(q=>q.key===key);if(!q)throw Error('Question not found');const dir=await within(root,q.path);const actual=await files(dir);if(Object.keys(actual).length!==Object.keys(q.files).length)throw Error('Question package has unregistered or missing files');for(const [rel,h] of Object.entries(q.files)){if(actual[rel]!==h)throw Error('Question package changed: '+rel);}const spec=await read(path.join(dir,'question.json'),q.files['question.json']||'');validateSpec(spec);if(q.key!==spec.id+'@'+spec.revision||(q.revision!==undefined&&q.revision!==spec.revision))throw Error('Question identity mismatch');return {q,dir,spec};}
 async function runCommand(command,args,{cwd,timeout=840000,signal,input}={}){
  signal?.throwIfAborted();
@@ -162,17 +162,26 @@ async function freezeUnlocked(p){
  finally{if(!published)try{await fs.rm(staging,{recursive:true,force:true});}catch(error){if(!confirmed)throw inputError(error,true,'冻结材料');}}
 }
 async function freeze(p){return freezeUnlocked(p);}
+async function customBankInfo(home){
+ const dir=path.join(home,'custom-bank');
+ try{return await bankInfo(dir);}catch(e){
+  if(e.code!=='ENOENT')throw e;
+  try{await fs.lstat(dir);}catch(missing){if(missing.code==='ENOENT')return null;throw missing;}
+  throw Object.assign(Error('Not an Eval Lab bank'),{code:'PACKAGE_INVALID'});
+ }
+}
+const corruptBank=e=>e instanceof SyntaxError||e.code==='PACKAGE_INVALID'||e.message==='Not an Eval Lab bank';
 async function catalog(p){
  const questions=[],errors=[],home=await base(p.root);
  const append=(info,prefix='',onlineSource=false)=>{for(const q of info.manifest.questions)questions.push({...q,key:prefix+q.key,sourceKey:sha(info.root),...(onlineSource&&typeof info.manifest.online?.url==='string'?{sourceIndexUrl:info.manifest.online.url}:{})});};
  if(p.bank)append(await bankInfo(p.bank));
  for(const b of await online.banks(p)){try{const m=await bankInfo(b.path);if(!Array.isArray(m.manifest.questions))throw Error('Invalid online manifest');append(m,'online:'+b.id+':',true);}catch(e){if(!['ENOENT','PACKAGE_INVALID'].includes(e.code)&&!(e instanceof SyntaxError)&&!['Not an Eval Lab bank','Invalid online manifest'].includes(e.message))throw e;errors.push({id:'online:'+b.id,message:'已安装题库损坏，请重新运行默认题库以下载修复；已有成绩保留。'});}}
- try{append(await bankInfo(path.join(home,'custom-bank')),'custom:');}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{const custom=await customBankInfo(home);if(custom)append(custom,'custom:');}catch(e){if(corruptBank(e))errors.push({id:'custom',message:'私人题库清单损坏，请恢复题库清单或联系维护者；已有题目和成绩保留。'});else if(e.code!=='ENOENT')throw e;}
  for(const b of p.importedBanks||[]){try{append(await bankInfo(b.path),'imported:'+b.id+':');}catch{errors.push({id:b.id,message:'导入题库不可用，请重新连接存储设备或在高级设置中重新导入。'});}}
  return {errors,questions:questions.map(({key,title,revision,environment,sourceManifestSha256,files,sourceKey,sourceIndexUrl})=>({key,title,revision,environment,sourceKey,...(sourceIndexUrl?{sourceIndexUrl}:{}),questionId:key.split(':').pop().split('@')[0],releaseHash:sourceManifestSha256,distributionHash:files?sha(JSON.stringify(files)):undefined}))};
 }
 
-async function drafts(p){const home=await base(p.root);let dirs;try{dirs=await fs.readdir(path.join(home,'calibrations'),{withFileTypes:true});}catch(e){if(e.code==='ENOENT')return [];throw e;}let published=[];try{published=(await bankInfo(path.join(home,'custom-bank'))).manifest.questions;}catch(e){if(e.code!=='ENOENT')throw e;}const out=[];for(const entry of dirs){if(!entry.isDirectory()||!/^(snapshot|retry)-[a-f0-9]{64}$/.test(entry.name))continue;const x=entry.name;try{const c=await read(await within(home,'calibrations/'+id(x)+'/calibration.json'));if(published.some(q=>q.key===c.id+'@'+c.revision))continue;out.push({checkId:c.checkId,id:c.id,revision:c.revision,passed:c.ok});}catch(e){if(e.code!=='ENOENT')throw e;}}return out;}
+async function drafts(p){const home=await base(p.root);let dirs;try{dirs=await fs.readdir(path.join(home,'calibrations'),{withFileTypes:true});}catch(e){if(e.code==='ENOENT')return [];throw e;}let published=[];try{published=(await customBankInfo(home))?.manifest.questions||[];}catch(e){if(corruptBank(e))return [];if(e.code!=='ENOENT')throw e;}const out=[];for(const entry of dirs){if(!entry.isDirectory()||!/^(snapshot|retry)-[a-f0-9]{64}$/.test(entry.name))continue;const x=entry.name;try{const c=await read(await within(home,'calibrations/'+id(x)+'/calibration.json'));if(published.some(q=>q.key===c.id+'@'+c.revision))continue;out.push({checkId:c.checkId,id:c.id,revision:c.revision,passed:c.ok});}catch(e){if(e.code!=='ENOENT')throw e;}}return out;}
 
 async function coordinatorWorkspace(p){
  if(typeof p.workspace!=='string'||!path.isAbsolute(p.workspace)||(await fs.lstat(p.workspace)).isSymbolicLink())throw Error('评测主任务目录不可用，请检查任务目录后重试；已有作答保留。');
