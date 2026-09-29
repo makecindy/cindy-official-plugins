@@ -127,3 +127,14 @@ test('download cancellation messages use the shared locale fallback',()=>{
 test('download capability upgrade prompt falls back to English',()=>{
  for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,'请更新 Cindy 开发版以使用题库下载'),/[\u3400-\u9fff]/);
 });
+
+test('runtime admission and receipt errors keep Chinese and use English fallback',()=>{
+ const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../main.js'),'utf8');
+ const messages=['协同模式尚未就绪','没有可开始的作答，请检查题包准备错误','无法核对协同状态','模型目录已变化，请重新读取并选择','至少选择一道题','请选择模型和强度','无法核对主任务执行回执','主任务回执分页未完成','执行回执与任务不匹配','实际执行配置与所选模型不一致，未计分','完成回执缺少执行身份，暂不评分','宿主未返回独立作答目录','题库正在准备，请稍候','评测批次已变化','评测正在准备，完成后可更改设置','评测正在准备，请勿重复启动','已有评测正在运行，请先等待或停止。','当前批次已变化，请刷新','读取身份校验失败(目标 identity 不一致)','题库已就绪，正在创建独立任务…'];
+ for(const text of messages){assert.ok(source.includes(text));assert.equal(translate('zh-CN',text),text);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,text),/[\u3400-\u9fff]/,text);}
+ for(const locale of ['en','ja','ko']){
+  assert.equal(translate(locale,'停止未完成：无法核对协同状态'),'Stop incomplete: Unable to verify the team state');
+  assert.equal(translate(locale,'正在下载并校验：Fixture'),'Downloading and verifying: Fixture');
+  assert.equal(translate(locale,'未知 external diagnostic'),'未知 external diagnostic');
+ }
+});

@@ -186,6 +186,28 @@ Object.assign(english,{
  "启用 Auto 自动审批后，主任务和 Worker 将按此权限继续评测。": "After Auto approval is enabled, the coordinator and Workers will continue with that permission.",
  "评测主任务正在等待你的确认。请在侧栏打开评测主任务处理确认；插件不会代替你批准或自动催办。": "The coordinator is waiting for your confirmation. Open it in the sidebar; this plugin will not approve or follow up automatically.",
  "已收到停止请求，正在结束当前操作；不再准备后续题目。": "Stop requested. Finishing the current operation; no further questions will be prepared.",
+ "协同模式尚未就绪": "Team mode is not ready yet",
+ "没有可开始的作答，请检查题包准备错误": "No answers are ready to start. Check the question preparation errors.",
+ "无法核对协同状态": "Unable to verify the team state",
+ "模型目录已变化，请重新读取并选择": "The model catalog has changed. Reload it and select a model again.",
+ "至少选择一道题": "Select at least one question",
+ "请选择模型和强度": "Select a model and reasoning effort",
+ "无法核对主任务执行回执": "Unable to verify the coordinator execution receipt",
+ "主任务回执分页未完成": "Coordinator receipt pagination is incomplete",
+ "执行回执与任务不匹配": "The execution receipt does not match the task",
+ "实际执行配置与所选模型不一致，未计分": "The actual execution configuration differs from the selected model. This answer was not scored.",
+ "完成回执缺少执行身份，暂不评分": "The completion receipt lacks execution identity. Grading is on hold.",
+ "宿主未返回独立作答目录": "Cindy did not return an isolated answer directory",
+ "题库正在准备，请稍候": "The question bank is being prepared. Please wait.",
+ "评测批次已变化": "The evaluation batch has changed",
+ "评测正在准备，完成后可更改设置": "Evaluation is being prepared. Settings can be changed when preparation finishes.",
+ "评测正在准备，请勿重复启动": "Evaluation is being prepared. Do not start it again.",
+ "已有评测正在运行，请先等待或停止。": "An evaluation is already running. Wait for it to finish or stop it first.",
+ "当前批次已变化，请刷新": "The current batch has changed. Refresh to continue.",
+ "读取身份校验失败(目标 identity 不一致)": "Read identity verification failed (target identity mismatch)",
+ "停止未完成：": "Stop incomplete: ",
+ "正在下载并校验：": "Downloading and verifying: ",
+ "题库已就绪，正在创建独立任务…": "The question bank is ready. Creating an isolated task…",
  "执行归属校验失败(目标 identity 不一致)": "Execution ownership verification failed (target identity mismatch)",
  "正在准备题目": "Preparing question",
  "正在准备评测": "Preparing evaluation",
@@ -212,7 +234,7 @@ function translate(locale,text,params={}){
   result=english[text]||text;
   const startup=text.match(/^Python 无法启动（([^）]+)）。(.*)已有作答和成绩保留。$/);
   if(startup)result=`Python could not start (${startup[1]}). ${english[startup[2]]||startup[2]} Existing answers and results are preserved.`;
-  if(result===text)for(const prefix of ['作答准备失败：','评分受阻：','诊断复核暂未完成：'])if(text.startsWith(prefix)){result=english[prefix]+translate(locale,text.slice(prefix.length));break;}
+  if(result===text)for(const prefix of ['作答准备失败：','评分受阻：','诊断复核暂未完成：','停止未完成：','正在下载并校验：'])if(text.startsWith(prefix)){result=english[prefix]+translate(locale,text.slice(prefix.length));break;}
  }
  return result.replace(/\{(\w+)\}/g,(match,key)=>Object.hasOwn(params,key)?String(params[key]):match);
 }

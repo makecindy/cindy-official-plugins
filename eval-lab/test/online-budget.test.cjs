@@ -69,3 +69,31 @@ test('cached oversized index cannot bypass planning or installation and triggers
   assert.deepEqual((await fs.readdir(path.join(root,'online'))).sort(),['indices']);
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
+
+test('oversized stored indices are isolated before whole-file reads at every entry',async()=>{
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'eval-stored-index-'))),id='b'.repeat(64),healthy='c'.repeat(64),readFile=fs.readFile;
+ try{
+  const dir=path.join(root,'online/indices',id),good=path.join(root,'online/indices',healthy);await fs.mkdir(dir,{recursive:true});await fs.mkdir(good,{recursive:true});
+  const target=path.join(dir,'index.json');await fs.writeFile(target,'');await fs.truncate(target,64*1024*1024);await fs.writeFile(path.join(good,'index.json'),JSON.stringify({url,index:fixture()}));
+  fs.readFile=async function(file,...args){if(String(file)===target)throw Error('unbounded cached index read');return readFile.call(this,file,...args);};
+  const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',runCommand:async()=>{throw Error('must reject before Python');}}),p={root,indexId:id,question:'fixture@v1'};
+  assert.equal((await svc.cached({root,url})).indexId,healthy);
+  for(const action of ['plan','install','step']){
+   const op=action==='step'?svc.begin(p):{};
+   try{await assert.rejects(svc[action]({...p,...op}),{code:'PACKAGE_INVALID'});}finally{if(op.operationId)await svc.cancel({...p,...op});}
+  }
+  assert.deepEqual(await fs.readdir(path.join(root,'online')),['indices']);
+ }finally{fs.readFile=readFile;await fs.rm(root,{recursive:true,force:true});}
+});
+test('inspection applies the stored wrapper budget before publishing its index',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-index-wrapper-')),id='d'.repeat(64);
+ try{
+  for(const size of [16*1024*1024-1024,16*1024*1024]){
+   const index=fixture();index.padding='';index.padding=' '.repeat(size-Buffer.byteLength(JSON.stringify(index)));const text=JSON.stringify(index);assert.equal(Buffer.byteLength(text),size);
+   const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',runCommand:async()=>({code:0}),fetchFile:async(u,d)=>{await fs.writeFile(d,text);return {sha256:id};}});
+   if(size===16*1024*1024){await assert.rejects(svc.inspect({root,url}),{code:'PACKAGE_INVALID'});assert.equal((await svc.cached({root,url})).indexId,id);}
+   else{const found=await svc.inspect({root,url});assert.equal(found.indexId,id);assert.equal((await svc.cached({root,url})).indexId,id);assert.equal((await svc.plan({root,indexId:id,question:'fixture@v1'})).artifacts.length,1);}
+   assert.deepEqual(await fs.readdir(path.join(root,'online/indices',id)),['index.json']);
+  }
+ }finally{await fs.rm(root,{recursive:true,force:true});}
+});

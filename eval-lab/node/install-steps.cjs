@@ -47,7 +47,7 @@ module.exports=function installSteps({home,within,validate,checkPlatform,verifyS
  }
  async function initialize(op,p){
   if(!/^[a-f0-9]{64}$/.test(p.indexId))throw invalid();
-  const h=await home(p.root),saved=JSON.parse(await fs.readFile(path.join(h,'indices',p.indexId,'index.json'),'utf8'));
+  const h=await home(p.root),saved=await readMetadata(path.join(h,'indices',p.indexId,'index.json'));
   const index=validate(saved.index,saved.url),q=index.questions.find(q=>q.key===p.question);
   if(!q)throw invalid();checkPlatform(index.platform,platform,arch);
   const release=digest(JSON.stringify(q)),dest=await within(h,'banks/'+release);

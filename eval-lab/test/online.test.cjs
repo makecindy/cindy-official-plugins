@@ -84,3 +84,10 @@ test('installation normalizes native abort errors without losing cancellation se
  const svc=service({base:async()=>{throw Error('must not reach storage');},within,files,runCommand});
  await assert.rejects(svc.install({signal:controller.signal}),e=>e.name==='AbortError'&&e.code==='ABORT_ERR'&&e.message==='下载已取消');
 });
+
+test('malformed redirect rejects normally and preserves Worker cleanup',()=>{
+ const script=`const assert=require('node:assert/strict'),https=require('node:https'),{EventEmitter}=require('node:events'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+ https.get=(url,options,callback)=>{const req=new EventEmitter();req.setTimeout=()=>{};process.nextTick(()=>callback({statusCode:302,headers:{location:'http://['},resume(){}}));return req;};
+ (async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-redirect-'));try{const {service}=require('./eval-lab/node/online.cjs'),{within}=require('./eval-lab/node/engine.cjs'),svc=service({base:async()=>root,within});await assert.rejects(svc.inspect({root,url:'https://github.com/makecindy/eval-bank/releases/download/test/index.json'}),/连接失败.*重试/);assert.deepEqual(await fs.readdir(path.join(root,'online')),[]);}finally{await fs.rm(root,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});`;
+ const result=cp.spawnSync(process.execPath,['-e',script],{cwd:path.join(__dirname,'../..'),encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+});
