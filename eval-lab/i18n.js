@@ -1,4 +1,5 @@
 const english={
+'题库清单超过16 MiB，请减少题库元数据后重试；已有题目与材料保留。':'The bank manifest exceeds 16 MiB. Reduce the metadata and retry; existing questions and materials are preserved.',
 '请更新 Cindy 以使用页面内授权':'Please update Cindy to authorize access from this page.',
 '请更新 Cindy 以使用受管下载':'Please update Cindy to use managed downloads.',
 '请更新 Cindy 以使用带并发保护的评测':'Please update Cindy to run evaluations with concurrency protection.',

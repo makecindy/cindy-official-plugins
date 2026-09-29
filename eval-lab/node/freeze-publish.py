@@ -2,6 +2,7 @@
 import json, os, pathlib, sys, tempfile
 bank = pathlib.Path(sys.argv[1])
 entry = json.loads(pathlib.Path(sys.argv[2]).read_text())
+limit = int(sys.argv[3])
 manifest_path = bank / 'distribution.json'
 lock_path = bank / 'publication.guard'
 if lock_path.is_symlink() or manifest_path.is_symlink():
@@ -18,7 +19,11 @@ with lock_path.open('a+b') as lock:
         import fcntl
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text())
+        with manifest_path.open('rb') as source:
+            raw = source.read(limit + 1)
+        if len(raw) > limit:
+            sys.exit(65)
+        manifest = json.loads(raw.decode('utf-8'))
         if manifest.get('format') != 'eval-lab-bank-v1' or not isinstance(manifest.get('questions'), list):
             raise ValueError('Invalid manifest')
     else:
@@ -29,10 +34,13 @@ with lock_path.open('a+b') as lock:
             raise ValueError('Frozen version conflict')
     else:
         manifest['questions'].append(entry)
+        encoded = json.dumps(manifest, ensure_ascii=False).encode('utf-8')
+        if len(encoded) > limit:
+            sys.exit(65)
         fd, temporary = tempfile.mkstemp(prefix='distribution-', suffix='.tmp', dir=bank)
         try:
-            with os.fdopen(fd, 'w') as out:
-                json.dump(manifest, out, ensure_ascii=False)
+            with os.fdopen(fd, 'wb') as out:
+                out.write(encoded)
                 out.flush()
                 os.fsync(out.fileno())
             os.replace(temporary, manifest_path)

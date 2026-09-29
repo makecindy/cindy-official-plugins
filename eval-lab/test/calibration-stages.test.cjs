@@ -303,3 +303,11 @@ test('oversized valid calibration output becomes an unscored receipt',()=>fixtur
  const receipt=JSON.parse(await fs.readFile(path.join(root,'eval-lab-data/calibrations',checkId,'step-0.json')));assert.match(receipt.raw.reason,/16 MiB/);
  assert.deepEqual(await dispatch('calibrate_step',p),result);
 }));
+
+test('freeze reports manifest budget failure without replacing the bank or losing calibration',()=>fixture(async(root)=>{
+ const cal=await dispatch('calibrate',{root,id:'sample',revision:'v1'}),bank=path.join(root,'eval-lab-data/custom-bank'),manifest=path.join(bank,'distribution.json');await fs.mkdir(bank);
+ const old=JSON.stringify({format:'eval-lab-bank-v1',questions:[],padding:'x'.repeat(16*1024*1024-150)});await fs.writeFile(manifest,old);
+ await assert.rejects(dispatch('freeze',{root,checkId:cal.checkId}),/题库清单超过16 MiB/);assert.equal(await fs.readFile(manifest,'utf8'),old);
+ const report=path.join(root,'eval-lab-data/calibrations',cal.checkId,'calibration.json');assert.equal(JSON.parse(await fs.readFile(report)).ok,true);
+ await fs.writeFile(manifest,JSON.stringify({format:'eval-lab-bank-v1',questions:[]}));assert.equal((await dispatch('freeze',{root,checkId:cal.checkId})).status,'frozen');
+}));

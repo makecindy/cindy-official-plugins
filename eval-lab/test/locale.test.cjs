@@ -143,3 +143,5 @@ test('runtime admission and receipt errors keep Chinese and use English fallback
 test('bank manifest and redirect diagnostics use English fallback',()=>{
  for(const text of ['私人题库','私人题库清单损坏，请恢复题库清单或联系维护者；已有题目和成绩保留。','题库下载重定向无效或不受支持，请联系题库维护者检查发布源。']){assert.equal(translate('zh-CN',text),text);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,text),/[\u3400-\u9fff]/);}
 });
+
+test('frozen manifest budget diagnostic keeps all locale fallbacks',()=>{const message='题库清单超过16 MiB，请减少题库元数据后重试；已有题目与材料保留。';assert.equal(translate('zh-CN',message),message);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,message),/[\u3400-\u9fff]/);});

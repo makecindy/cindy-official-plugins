@@ -99,14 +99,15 @@ async function grade(p){
  return publish(result);
 }
 // Review sidecars may add timing and diagnostics, never overwrite independent scores.
-function reviewMetadata(review){const out={};for(const k of ['qualityVersion','environmentDiagnostic','durationSeconds','queueSeconds','gradingSeconds','timingBasis','costUSD','costBasis'])if(review[k]!==undefined)out[k]=review[k];return out;}
-async function effectiveResult(dir){const result=await read(path.join(dir,'result.json'));try{return {...result,...reviewMetadata(await read(path.join(dir,'assessment-review.json')))};}catch(e){if(e.code!=='ENOENT')throw e;return result;}}
+function reviewMetadata(review){const out={};if(!review||typeof review!=='object'||Array.isArray(review))return out;for(const k of ['qualityVersion','environmentDiagnostic','durationSeconds','queueSeconds','gradingSeconds','timingBasis','costUSD','costBasis'])if(review[k]!==undefined)out[k]=review[k];return out;}
+async function readReview(file){try{const review=await readMetadata(file);return review&&typeof review==='object'&&!Array.isArray(review)?review:null;}catch(e){if(e.code==='ENOENT')return {};if(e.code==='PACKAGE_INVALID'||e instanceof SyntaxError)return null;throw e;}}
+async function effectiveResult(dir){const result=await read(path.join(dir,'result.json'));return {...result,...reviewMetadata(await readReview(path.join(dir,'assessment-review.json')))};}
 async function reconcileResult(p){
- const {dir,r}=await loadRun(p),old=await effectiveResult(dir),bank=await bankInfo(r.bank),questionDir=await within(bank.root,bank.manifest.questions.find(q=>q.key===r.question).path);
+ const {dir,r}=await loadRun(p),old=await effectiveResult(dir),prior=await readReview(path.join(dir,'assessment-review.json'));if(prior===null)return {...publicResult(old),runId:r.runId};const bank=await bankInfo(r.bank),questionDir=await within(bank.root,bank.manifest.questions.find(q=>q.key===r.question).path);
  const environmentDiagnostic=await environmentEvidence(r.workspace,path.join(questionDir,'candidate'));
  const updates={qualityVersion:2,environmentDiagnostic};
  if(p.receipt){const t=timing(p.receipt);for(const [k,v] of Object.entries(t))if(v!=null&&v!=='unavailable'&&v!=='unknown')updates[k]=v;}
- const target=path.join(dir,'assessment-review.json'),tmp=target+'.'+crypto.randomUUID()+'.tmp';let prior={};try{prior=await read(target);}catch(e){if(e.code!=='ENOENT')throw e;}
+ const target=path.join(dir,'assessment-review.json'),tmp=target+'.'+crypto.randomUUID()+'.tmp';
  // Keep old review records for audit, but retire their untrusted score overrides.
  if(prior.qualityVersion===1)await fs.copyFile(target,path.join(dir,'assessment-review-v1.json'),require('node:fs').constants.COPYFILE_EXCL).catch(e=>{if(e.code!=='EEXIST')throw e;});
  await write(tmp,{...reviewMetadata(prior),...updates});await fs.rename(tmp,target);
@@ -156,7 +157,7 @@ async function freezeUnlocked(p){
   try{await fs.rename(staging,dest);published=true;}catch(e){if(!['EEXIST','ENOTEMPTY'].includes(e.code))throw e;if(JSON.stringify(await files(dest))!==JSON.stringify(hashes))throw Error('Unregistered release conflicts');}
   const entry={key,title:spec.title,revision:spec.revision,environment:spec.environment,path:rel,sourceManifestSha256:hash,files:hashes};
   const request=path.join(bank,'freeze-'+crypto.randomUUID()+'.json');
-  try{await write(request,entry);const execution=await runCommand('python3',['-I',path.join(__dirname,'freeze-publish.py'),bank,request],{timeout:30000});if(execution.errorCode)throw require('./python-runtime.cjs').startupError(execution.errorCode);if(execution.code!==0||execution.timedOut)throw Error('题库发布尚未确认，请重试核对；已有题目与材料保留。');}finally{await fs.unlink(request).catch(()=>{});}
+  try{await write(request,entry);const execution=await runCommand('python3',['-I',path.join(__dirname,'freeze-publish.py'),bank,request,String(readMetadata.limit)],{timeout:30000});if(execution.errorCode)throw require('./python-runtime.cjs').startupError(execution.errorCode);if(execution.code===65)throw Error('题库清单超过16 MiB，请减少题库元数据后重试；已有题目与材料保留。');if(execution.code!==0||execution.timedOut)throw Error('题库发布尚未确认，请重试核对；已有题目与材料保留。');}finally{await fs.unlink(request).catch(()=>{});}
   confirmed=true;return {key:'custom:'+key,status:'frozen'};
  }catch(error){if(error.pythonStartup||error.code==='PYTHON_UNAVAILABLE')throw error;if(error.code)throw inputError(error,false,'冻结材料');throw error;}
  finally{if(!published)try{await fs.rm(staging,{recursive:true,force:true});}catch(error){if(!confirmed)throw inputError(error,true,'冻结材料');}}

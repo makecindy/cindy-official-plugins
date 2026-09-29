@@ -19,3 +19,4 @@ module.exports=async function readMetadata(file,expectedHash,oversizeMessage='Qu
   return JSON.parse(bytes.toString('utf8'));
  }finally{await handle.close();}
 };
+module.exports.limit=limit;

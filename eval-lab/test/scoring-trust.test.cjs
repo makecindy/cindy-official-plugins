@@ -39,7 +39,17 @@ test('writable environment receipts and old review sidecars cannot replace indep
   const beforeList=await files(dir);await fs.rename(bank,bank+'-offline');
   const rows=await dispatch('runs',{root});assert.equal(rows[0].score,1);assert.equal(rows[0].status,'graded');await assert.rejects(fs.access(path.join(dir,'assessment-review-v1.json')),{code:'ENOENT'});
   assert.deepEqual(await files(dir),beforeList);await fs.rename(bank+'-offline',bank);
+  const sidecar=path.join(dir,'assessment-review.json'),originalReview=await fs.readFile(sidecar),saved=await fs.readFile(path.join(dir,'result.json')),expectedExport=(await dispatch('export',{root,runIds:[r.runId],locale:'en'})).html;
+  for(const content of ['{','null','[]',JSON.stringify({padding:'x'.repeat(16*1024*1024)})]){
+   await fs.writeFile(sidecar,content);const rows=await dispatch('runs',{root});assert.equal(rows[0].score,1);assert.equal(rows[0].status,'graded');
+   assert.equal((await dispatch('export',{root,runIds:[r.runId],locale:'en'})).html,expectedExport);
+   assert.equal((await dispatch('grade',{root,runId:r.runId,receipt:{channel:'Orca Worker',sessionId:'fixture',completedAt:2000}})).score,1);
+   assert.deepEqual(await fs.readFile(path.join(dir,'result.json')),saved);assert.equal(await fs.readFile(sidecar,'utf8'),content);
+  }
+  await fs.writeFile(sidecar,'{');assert.equal((await dispatch('reconcile_result',{root,runId:r.runId})).score,1);assert.equal(await fs.readFile(sidecar,'utf8'),'{');
+  await fs.writeFile(sidecar,originalReview);
   const again=await dispatch('reconcile_result',{root,runId:r.runId});assert.equal(again.score,1);await fs.access(path.join(dir,'assessment-review-v1.json'));
+  await fs.writeFile(path.join(dir,'result.json'),'{');await assert.rejects(dispatch('runs',{root}),SyntaxError);await fs.writeFile(path.join(dir,'result.json'),saved);
   const raw=JSON.parse(await fs.readFile(path.join(dir,'result.json')));raw.status='environment_invalid';raw.score=null;raw.scoreExact=null;await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(raw));assert.equal((await dispatch('runs',{root}))[0].status,'environment_invalid');
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
