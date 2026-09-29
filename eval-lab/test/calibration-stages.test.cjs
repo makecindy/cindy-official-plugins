@@ -264,7 +264,7 @@ test('freeze rejects edits made while copying the calibrated draft',()=>fixture(
  const cal=await dispatch('calibrate',{root,id:'sample',revision:'v1'}),copy=fs.cp;let edited=false;
  fs.cp=async function(source,...args){if(!edited&&source===path.join(directory,'candidate')){edited=true;await fs.writeFile(path.join(source,'answer'),'changed during copy');}return copy.call(this,source,...args);};
  try{await assert.rejects(dispatch('freeze',{root,checkId:cal.checkId}),/Draft changed/);}finally{fs.cp=copy;}
- await assert.rejects(fs.access(path.join(root,'eval-lab-data/custom-bank/distribution.json')));
+ assert.deepEqual(JSON.parse(await fs.readFile(path.join(root,'eval-lab-data/custom-bank/distribution.json'))).questions,[]);
 }));
 
 test('calibration discovery ignores Finder metadata and non-snapshot entries',()=>fixture(async(root)=>{
@@ -310,4 +310,11 @@ test('freeze reports manifest budget failure without replacing the bank or losin
  await assert.rejects(dispatch('freeze',{root,checkId:cal.checkId}),/题库清单超过16 MiB/);assert.equal(await fs.readFile(manifest,'utf8'),old);
  const report=path.join(root,'eval-lab-data/calibrations',cal.checkId,'calibration.json');assert.equal(JSON.parse(await fs.readFile(report)).ok,true);
  await fs.writeFile(manifest,JSON.stringify({format:'eval-lab-bank-v1',questions:[]}));assert.equal((await dispatch('freeze',{root,checkId:cal.checkId})).status,'frozen');
+}));
+
+test('first oversized publication keeps the calibrated draft visible through an initialized bank',()=>fixture(async(root)=>{
+ const cal=await dispatch('calibrate',{root,id:'sample',revision:'v1'}),metadata=require('../node/read-metadata.cjs'),limit=metadata.limit;
+ try{metadata.limit=200;await assert.rejects(dispatch('freeze',{root,checkId:cal.checkId}),/题库清单超过16 MiB/);}finally{metadata.limit=limit;}
+ const catalog=await dispatch('bank',{root});assert.deepEqual(catalog.errors,[]);assert.ok((await dispatch('drafts',{root})).some(d=>d.checkId===cal.checkId&&d.passed));
+ assert.equal((await dispatch('freeze',{root,checkId:cal.checkId})).status,'frozen');
 }));

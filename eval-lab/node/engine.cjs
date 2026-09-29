@@ -60,7 +60,7 @@ async function grade(p){
  const {dir,r}=await loadRun(p);
  if(!['Orca Worker','Cindy task'].includes(p.receipt?.channel)||!p.receipt.sessionId||!p.receipt.completedAt)throw Error('Terminal receipt required');
  if(p.receipt.channel==='Cindy task'&&(!p.receipt.runId||!p.receipt.execution||p.receipt.acceptedConfig?.model!==r.model||p.receipt.acceptedConfig?.providerId!==r.provider||p.receipt.acceptedConfig?.effort!==r.effort))throw Error('Host execution receipt mismatch');
- try{await read(path.join(dir,'result.json'));return reconcileResult(p);}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{return publicResult(await effectiveResult(dir));}catch(e){if(e.code!=='ENOENT')throw e;}
  const resultPath=path.join(dir,'result.json'),completionPath=path.join(dir,'grading-completion.json');
  async function publish(result){
   if(result.runId!==r.runId||result.distributionHash!==r.distributionHash||!['graded','environment_invalid'].includes(result.status))throw Error('Grading receipt mismatch');
@@ -103,7 +103,7 @@ function reviewMetadata(review){const out={};if(!review||typeof review!=='object
 async function readReview(file){try{const review=await readMetadata(file);return review&&typeof review==='object'&&!Array.isArray(review)?review:null;}catch(e){if(e.code==='ENOENT')return {};if(e.code==='PACKAGE_INVALID'||e instanceof SyntaxError)return null;throw e;}}
 async function effectiveResult(dir){const result=await read(path.join(dir,'result.json'));return {...result,...reviewMetadata(await readReview(path.join(dir,'assessment-review.json')))};}
 async function reconcileResult(p){
- const {dir,r}=await loadRun(p),old=await effectiveResult(dir),prior=await readReview(path.join(dir,'assessment-review.json'));if(prior===null)return {...publicResult(old),runId:r.runId};const bank=await bankInfo(r.bank),questionDir=await within(bank.root,bank.manifest.questions.find(q=>q.key===r.question).path);
+ const {dir,r}=await loadRun(p),old=await effectiveResult(dir),prior=await readReview(path.join(dir,'assessment-review.json'));if(prior===null)throw Error('评分诊断损坏，请恢复诊断文件后重试费用复核；原成绩保留。');const bank=await bankInfo(r.bank),questionDir=await within(bank.root,bank.manifest.questions.find(q=>q.key===r.question).path);
  const environmentDiagnostic=await environmentEvidence(r.workspace,path.join(questionDir,'candidate'));
  const updates={qualityVersion:2,environmentDiagnostic};
  if(p.receipt){const t=timing(p.receipt);for(const [k,v] of Object.entries(t))if(v!=null&&v!=='unavailable'&&v!=='unknown')updates[k]=v;}
@@ -113,7 +113,7 @@ async function reconcileResult(p){
  await write(tmp,{...reviewMetadata(prior),...updates});await fs.rename(tmp,target);
  return {...publicResult({...old,...updates}),runId:r.runId};
 }
-async function list(p){const home=await base(p.root);let names;try{names=await fs.readdir(path.join(home,'runs'),{withFileTypes:true});}catch(e){if(e.code==='ENOENT')return [];throw e;}const batches=new Map();try{for(const f of await fs.readdir(path.join(home,'coordination'))){if(!f.endsWith('.json')||f.endsWith('-state.json'))continue;try{const plan=await read(path.join(home,'coordination',f));for(const item of plan.items||[])if(item.runId)batches.set(item.runId,f.slice(0,-5));}catch{}}}catch(e){if(e.code!=='ENOENT')throw e;}const out=[];for(const entry of names){if(!entry.isDirectory()||!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/.test(entry.name))continue;const name=entry.name;const dir=await within(home,'runs/'+id(name));let r;try{r=await effectiveResult(dir);}catch(e){if(e.code!=='ENOENT')throw e;try{r=await read(path.join(dir,'run.json'));}catch(missing){if(missing.code==='ENOENT')continue;throw missing;}}out.push({...publicResult(r),runId:r.runId,batchId:r.batchId||batches.get(r.runId)||null});}return out;}
+async function list(p){const home=await base(p.root);let names;try{names=await fs.readdir(path.join(home,'runs'),{withFileTypes:true});}catch(e){if(e.code==='ENOENT')return [];throw e;}const batches=new Map();try{for(const f of await fs.readdir(path.join(home,'coordination'))){if(!f.endsWith('.json')||f.endsWith('-state.json'))continue;try{const plan=await read(path.join(home,'coordination',f));for(const item of plan.items||[])if(item.runId)batches.set(item.runId,f.slice(0,-5));}catch{}}}catch(e){if(e.code!=='ENOENT')throw e;}const out=[];for(const entry of names){if(!entry.isDirectory()||!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/.test(entry.name))continue;const name=entry.name;const dir=await within(home,'runs/'+id(name));try{let r;try{r=await effectiveResult(dir);}catch(e){if(e.code!=='ENOENT')throw e;r=await read(path.join(dir,'run.json'));}if(!r||Array.isArray(r)||typeof r.runId!=='string'||typeof r.status!=='string')throw SyntaxError('Invalid run record');out.push({...publicResult(r),runId:r.runId,batchId:r.batchId||batches.get(r.runId)||null});}catch(e){if(e.code==='ENOENT')continue;if(!(e instanceof SyntaxError))throw e;out.push({runId:name,recordError:'评测记录损坏，请恢复该记录文件后刷新；原文件保留，未计分。'});}}return out;}
 async function exportReport(p){if(!Array.isArray(p.runIds)||!p.runIds.length)throw Error('Select results');const selected=[];for(const runId of [...new Set(p.runIds)]){const {dir}=await loadRun({...p,runId});try{selected.push(await effectiveResult(dir));}catch(e){if(e.code!=='ENOENT')throw e;selected.push(await read(path.join(dir,'run.json')));}}return {html:p.standings?require('../lib/standings-report.cjs')(selected.map(publicResult),{...p.standings,locale:p.locale}):report(selected,p.locale),name:'evaluation-'+new Date().toISOString().slice(0,10)+'.html'};}
 async function draft(p){
  const home=await base(p.root);id(p.id);id(p.revision);
@@ -139,7 +139,7 @@ const authorHandoff=require('./author-handoff.cjs')({base,within,files,read,writ
 const calibration=require('./calibration.cjs')({base,within,files,read,write,id,validateSpec,score,runCommand,draftDirectory:authorHandoff.directory});
 async function freezeUnlocked(p){
  const home=await base(p.root),cal=await read(await within(home,'calibrations/'+id(p.checkId)+'/calibration.json'));if(!cal.ok)throw Error('Calibration did not pass');const dir=await authorHandoff.directory({...p,id:cal.id,revision:cal.revision});if(JSON.stringify(cal.hashes)!==JSON.stringify(await files(dir)))throw Error('Draft changed; recalibrate');
- const bank=path.join(home,'custom-bank');await fs.mkdir(bank,{recursive:true});
+ const bank=path.join(home,'custom-bank');if(await fs.mkdir(bank,{recursive:true})){try{await write(path.join(bank,'distribution.json'),{format:'eval-lab-bank-v1',questions:[]});}catch(e){if(e.code!=='EEXIST')throw e;}}
  const key=cal.id+'@'+cal.revision;
  const expected=Object.fromEntries(Object.entries(cal.hashes).filter(([name])=>name==='question.json'||/^(candidate|reference|author)\//.test(name)));
  let existing;try{existing=(await read(path.join(bank,'distribution.json'))).questions.find(q=>q.key===key);}catch(e){if(e.code!=='ENOENT')throw e;}

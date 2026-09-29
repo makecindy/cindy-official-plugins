@@ -21,7 +21,7 @@ test('history and export exclude another source even for identical question vers
  const run=(id,sourceKey,revision='v2')=>({...q,runId:id,sourceKey,revision,releaseHash:revision==='v2'?'r2':'r1',distributionHash:revision==='v2'?'d2':'d1',model:'m',provider:'p',harness:'h',effort:'medium',status:'graded',scoreExact:'1',gradedAt:'2026-01-01'});
  let exported,click;const context={$,window:{evalRunStatus:s=>require('../i18n.js').runStatus('zh-CN',s)},document:{querySelectorAll:()=>[]},state:{banks:[{id:'one',name:'One',questions:[q]}],runs:[run('own','one'),run('old','one','v1'),run('foreign','two'),run('foreign-old','two','v0'),run('unknown',undefined)],models:[]},bankId:'one',historyBankId:'one',historyQuestion:'',historyBatch:'',scoreMode:'latest',standingsRows:[],standingsQuestions:[],EvalStandings:require('../standings.js'),esc:String,tr:t=>t,dateText:()=>'',scoreText:String,bind:(_,fn)=>{click=fn;},message(){},rpc:async(_,args)=>{exported=args;return {saved:true};}};
  vm.runInNewContext(code.slice(code.indexOf('function history(){'),code.indexOf('\nfunction ',code.indexOf('function history(){')+1)),context);
- context.history();vm.runInNewContext(code.match(/^bind\('#export'.*$/m)[0],context);await click();assert.deepEqual(Array.from(exported.runIds),['own']);assert.match($('#history-question').innerHTML,/v1/);assert.doesNotMatch($('#history-question').innerHTML,/v0/);
+ context.state.runs.push({runId:'damaged',recordError:'评测记录损坏，请恢复该记录文件后刷新；原文件保留，未计分。'});context.history();assert.match($('#standings-note').textContent,/damaged/);vm.runInNewContext(code.match(/^bind\('#export'.*$/m)[0],context);await click();assert.deepEqual(Array.from(exported.runIds),['own']);assert.match($('#history-question').innerHTML,/v1/);assert.doesNotMatch($('#history-question').innerHTML,/v0/);
  context.historyQuestion=context.EvalStandings.questionKey(run('old','one','v1'));context.history();await click();assert.deepEqual(Array.from(exported.runIds),['old']);
  assert.match($('#history-filter').innerHTML,/history-source:two/);context.historyBankId='history-source:two';context.historyQuestion='';context.history();await click();assert.deepEqual(Array.from(exported.runIds),['foreign']);assert.match(exported.standings.title,/未关联题库/);assert.equal(exported.standings.questions.length,1);
  context.historyQuestion=context.EvalStandings.questionKey(run('foreign-old','two','v0'));context.history();await click();assert.deepEqual(Array.from(exported.runIds),['foreign-old']);assert.equal(exported.standings.questions.length,1);
@@ -37,5 +37,19 @@ test('draft listing excludes published versions while preserving later drafts an
   const cal=path.join(root,'eval-lab-data/calibrations',old,'calibration.json'),before=await fs.readFile(cal,'utf8');
   const bank=path.join(root,'eval-lab-data/custom-bank');await fs.mkdir(bank);await fs.writeFile(path.join(bank,'distribution.json'),JSON.stringify({format:'eval-lab-bank-v1',questions:[{key:'same@v1'}]}));
   assert.deepEqual((await dispatch('drafts',{root})).map(d=>d.checkId),[next]);assert.equal(await fs.readFile(cal,'utf8'),before);
+ }finally{await fs.rm(root,{recursive:true,force:true});}
+});
+
+test('listing isolates damaged required records without losing healthy results or modifying bytes',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-corrupt-run-'));
+ try{
+  const home=path.join(root,'eval-lab-data/runs');
+  for(const [id,file,body]of [['healthy','result.json',JSON.stringify({runId:'healthy',status:'graded',score:1})],['broken-result','result.json','{'],['broken-run','run.json','{'],['null-result','result.json','null'],['array-run','run.json','[]']]){
+   const dir=path.join(home,id);await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,file),body);
+  }
+  const rows=await dispatch('runs',{root});assert.equal(rows.find(r=>r.runId==='healthy').score,1);
+  assert.equal(rows.filter(r=>r.recordError).length,4);for(const r of rows.filter(r=>r.recordError)){assert.match(r.recordError,/恢复.*记录/);assert.equal(r.score,undefined);}
+  assert.equal(await fs.readFile(path.join(home,'broken-result/result.json'),'utf8'),'{');
+  await fs.writeFile(path.join(home,'broken-result/result.json'),JSON.stringify({runId:'broken-result',status:'graded',score:1}));assert.equal((await dispatch('runs',{root})).find(r=>r.runId==='broken-result').score,1);
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });

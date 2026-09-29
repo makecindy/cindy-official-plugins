@@ -1,4 +1,6 @@
 const english={
+'评分诊断损坏，请恢复诊断文件后重试费用复核；原成绩保留。':'Assessment diagnostics are damaged. Restore the diagnostic file and retry the cost review; the original score is preserved.',
+'评测记录损坏，请恢复该记录文件后刷新；原文件保留，未计分。':'Evaluation record is damaged. Restore this record file and refresh; the original file is preserved and not scored.',
 '题库清单超过16 MiB，请减少题库元数据后重试；已有题目与材料保留。':'The bank manifest exceeds 16 MiB. Reduce the metadata and retry; existing questions and materials are preserved.',
 '请更新 Cindy 以使用页面内授权':'Please update Cindy to authorize access from this page.',
 '请更新 Cindy 以使用受管下载':'Please update Cindy to use managed downloads.',

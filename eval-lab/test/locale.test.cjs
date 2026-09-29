@@ -47,10 +47,10 @@ test('both report formats localize labels while preserving scores, escaping and 
 test('production job rendering translates persisted batch messages and every active answer',()=>{
  const fs=require('node:fs'),vm=require('node:vm');const code=fs.readFileSync(require('node:path').join(__dirname,'../view.js'),'utf8');const elements=new Map();
  const $=id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);};
- const item={question:'custom',model:'Model',status:'running',waitReason:'等待自动审批或用户确认',error:'评分受阻：<diagnostic>'};
+ const item={question:'custom',model:'Model',status:'running',waitReason:'等待自动审批或用户确认',error:'评分受阻：<diagnostic>',qualityReviewError:'诊断复核暂未完成：评分诊断损坏，请恢复诊断文件后重试费用复核；原成绩保留。'};
  vm.runInNewContext(code.slice(code.indexOf('function renderJob(){'),code.indexOf('\nasync function refresh()'))+';renderJob();',{$,state:{banks:[],job:{status:'running',phase:'answering',message:'部分作答受阻，已有成绩已保存。',items:[item,{...item}]}},dismissedJobId:null,busy:false,tr:(text,params)=>translate('en',text,params),esc:x=>String(x).replaceAll('<','&lt;').replaceAll('>','&gt;'),settledStatus:()=>false,questionTitle:()=> 'User question',modelTitle:()=> 'Model',elapsed:()=> 'Waiting'});
  assert.match($('#current-stage').textContent,/2 concurrent answers/);assert.match($('#job-note').textContent,/Some answers are blocked/);
- assert.match($('#job-items').innerHTML,/Grading blocked: &lt;diagnostic&gt;/);assert.match($('#active-tests').innerHTML,/Waiting for automatic review/);
+ assert.match($('#job-items').innerHTML,/Grading blocked: &lt;diagnostic&gt;/);assert.match($('#job-items').innerHTML,/Assessment diagnostics are damaged/);assert.match($('#active-tests').innerHTML,/Waiting for automatic review/);
  for(const value of elements.values())assert.doesNotMatch((value.textContent||'')+(value.innerHTML||''),/[\u3400-\u9fff]/);
 });
 test('Node export dispatch passes the requested locale to both actual report formats',async()=>{
@@ -145,3 +145,5 @@ test('bank manifest and redirect diagnostics use English fallback',()=>{
 });
 
 test('frozen manifest budget diagnostic keeps all locale fallbacks',()=>{const message='题库清单超过16 MiB，请减少题库元数据后重试；已有题目与材料保留。';assert.equal(translate('zh-CN',message),message);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,message),/[\u3400-\u9fff]/);});
+
+test('damaged run and assessment diagnostics retain locale fallback',()=>{for(const message of ['评分诊断损坏，请恢复诊断文件后重试费用复核；原成绩保留。','评测记录损坏，请恢复该记录文件后刷新；原文件保留，未计分。']){assert.equal(translate('zh-CN',message),message);for(const locale of ['en','ja','ko'])assert.doesNotMatch(translate(locale,message),/[\u3400-\u9fff]/);}});

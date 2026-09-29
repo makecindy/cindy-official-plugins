@@ -46,10 +46,10 @@ test('writable environment receipts and old review sidecars cannot replace indep
    assert.equal((await dispatch('grade',{root,runId:r.runId,receipt:{channel:'Orca Worker',sessionId:'fixture',completedAt:2000}})).score,1);
    assert.deepEqual(await fs.readFile(path.join(dir,'result.json')),saved);assert.equal(await fs.readFile(sidecar,'utf8'),content);
   }
-  await fs.writeFile(sidecar,'{');assert.equal((await dispatch('reconcile_result',{root,runId:r.runId})).score,1);assert.equal(await fs.readFile(sidecar,'utf8'),'{');
+  await fs.writeFile(sidecar,'{');await assert.rejects(dispatch('reconcile_result',{root,runId:r.runId}),/评分诊断损坏/);assert.equal(await fs.readFile(sidecar,'utf8'),'{');
   await fs.writeFile(sidecar,originalReview);
-  const again=await dispatch('reconcile_result',{root,runId:r.runId});assert.equal(again.score,1);await fs.access(path.join(dir,'assessment-review-v1.json'));
-  await fs.writeFile(path.join(dir,'result.json'),'{');await assert.rejects(dispatch('runs',{root}),SyntaxError);await fs.writeFile(path.join(dir,'result.json'),saved);
+  const again=await dispatch('reconcile_result',{root,runId:r.runId,receipt:{usage:{costUSD:0.25},acceptedAt:1000,startedAt:2000,completedAt:5000}});assert.equal(again.score,1);assert.equal(again.costUSD,0.25);assert.equal(again.durationSeconds,3);assert.equal((await dispatch('runs',{root}))[0].costUSD,0.25);await fs.access(path.join(dir,'assessment-review-v1.json'));
+  await fs.writeFile(path.join(dir,'result.json'),'{');assert.match((await dispatch('runs',{root}))[0].recordError,/记录损坏/);await assert.rejects(dispatch('export',{root,runIds:[r.runId]}),SyntaxError);await fs.writeFile(path.join(dir,'result.json'),saved);
   const raw=JSON.parse(await fs.readFile(path.join(dir,'result.json')));raw.status='environment_invalid';raw.score=null;raw.scoreExact=null;await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(raw));assert.equal((await dispatch('runs',{root}))[0].status,'environment_invalid');
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });

@@ -242,7 +242,7 @@ test('diagnostic errors do not block saved grades from releasing their worker',a
  b.cindy.node.request=async x=>{if(x.method==='reconcile_result')throw Error('source unavailable');return request(x);};
  b.cindy.tasks.getTeam=async()=>({ok:true,leadWorking:false,workers:[worker(b)]});
  await b.ui('poll','query');assert.equal(b.config.batch.items[0].status,'graded');assert.equal(b.config.batch.items[0].released,true);
- assert.match(b.config.batch.items[0].qualityReviewError,/source unavailable/);assert.equal(b.config.batch.items[0].qualityReviewed,undefined);
+ assert.match(b.config.batch.items[0].qualityReviewError,/source unavailable/);assert.equal(b.config.batch.items[0].qualityReviewed,undefined);assert.match(b.replies.find(x=>x.id==='poll').result.items[0].qualityReviewError,/source unavailable/);
  assert.equal(b.calls.filter(x=>x.releaseWorker).length,1);
 });
 test('failed scoring during stop keeps the completed submission recoverable',async()=>{
