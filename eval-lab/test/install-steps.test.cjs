@@ -1,3 +1,4 @@
+const {install}=require('./online-fixture.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),cp=require('node:child_process');
 const {service}=require('../node/online.cjs'),{files,within,runCommand}=require('../node/engine.cjs');
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -26,13 +27,32 @@ test('one compressed large entry advances across requests and never reads borrow
  await svc.cancel({...p,...op});assert.deepEqual((await fs.readdir(path.join(root,'online'))).filter(x=>/staging-|archive-copy-/.test(x)),[]);
  // Installed cache verification itself is also bounded and needs no borrowed file.
  const oldPath=process.env.PATH;process.env.PATH=root;
- try{const cached=svc.begin(p);let n=0;do{result=await svc.step({...p,...cached});n++;}while(!result.done);assert.ok(n>10);await svc.cancel({...p,...cached});assert.deepEqual(await svc.install(p),result.result);}finally{process.env.PATH=oldPath;}
+ try{const cached=svc.begin(p);let n=0;do{result=await svc.step({...p,...cached});n++;}while(!result.done);assert.ok(n>10);await svc.cancel({...p,...cached});assert.deepEqual(await install(svc,p),result.result);}finally{process.env.PATH=oldPath;}
 }));
 test('extractor startup failure retains the Python diagnostic and cleans owned staging',()=>fixture(async({root,svc,p})=>{
  const op=svc.begin(p);let result;
  do{result=await svc.step({...p,...op});}while(result.phase!=='extract');
  const oldPath=process.env.PATH;process.env.PATH=root;
  try{await assert.rejects(svc.step({...p,...op}),{code:'PYTHON_UNAVAILABLE'});}finally{process.env.PATH=oldPath;await svc.cancel({...p,...op});}
+ assert.deepEqual((await fs.readdir(path.join(root,'online'))).filter(x=>/staging-|archive-copy-/.test(x)),[]);
+}));
+test('a second operation cannot install the same question while the first owns staging',()=>fixture(async({root,svc,p})=>{
+ const first=svc.begin(p),second=svc.begin(p);
+ try{
+  await svc.step({...p,...first});
+  await assert.rejects(svc.step({...p,...second}),/正在安装/);
+  await svc.cancel({...p,...second});
+  assert.ok((await fs.readdir(path.join(root,'online'))).some(x=>x.startsWith('staging-')));
+  assert.ok((await install(svc,{...p,...first})).bank);
+ }finally{await svc.cancel({...p,...first});await svc.cancel({...p,...second});}
+}));
+test('a stalled extraction step stops its child and reports timeout without blaming the package',()=>fixture(async({root,svc,p})=>{
+ const op=svc.begin(p);let value;do{value=await svc.step({...p,...op});}while(value.phase!=='extract');
+ const spawn=cp.spawn,timer=global.setTimeout;let child,closed=false,budget;
+ cp.spawn=(command,args,options)=>{child=spawn(command,['-I','-c',"import sys,time;sys.stdin.readline();time.sleep(30)"],options);child.once('close',()=>closed=true);return child;};
+ global.setTimeout=(fn,ms,...args)=>{budget=ms;return timer(fn,10,...args);};
+ try{await assert.rejects(svc.step({...p,...op}),e=>e.code==='EXTRACTION_TIMEOUT'&&!e.message.includes(root));assert.equal(budget,30000);assert.equal(closed,true);}
+ finally{cp.spawn=spawn;global.setTimeout=timer;await svc.cancel({...p,...op});}
  assert.deepEqual((await fs.readdir(path.join(root,'online'))).filter(x=>/staging-|archive-copy-/.test(x)),[]);
 }));
 test('extractor resource and permission failures retain their cause instead of suggesting installation',()=>fixture(async({root,svc,p})=>{

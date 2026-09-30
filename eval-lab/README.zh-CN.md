@@ -50,6 +50,8 @@
 
 损坏的在线题库先重新构建并校验，再替换；原题库保留在本地 `online/backups`。发布前校验失败或取消时原件不动，发布失败会尝试恢复原件。这不是跨进程事务或崩溃恢复保证，备份不自动删除，作答和成绩不变。
 
+安装只保留 `online_begin` / `online_step` / `online_cancel` 一套实现；测试与本地资产验证脚本也借入归档文件、驱动同一路径。题包下载及下载缓存复用由宿主负责，插件自身仅获取小型索引。
+
 - `node --test test/core.test.cjs test/bridge.test.cjs test/online.test.cjs test/defaults.test.cjs test/standings.test.cjs test/execution-quality.test.cjs test/task-scope.test.cjs test/engine.test.cjs`
 - `EVAL_BROWSER_RUNTIME=<composer candidate/runtime> node --test test/view.test.cjs`
 - 可选真实题库验证：`EVAL_TEST_BANK=<已还原题库> node --test test/engine.test.cjs`

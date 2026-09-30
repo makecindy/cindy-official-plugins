@@ -50,6 +50,8 @@ Authoring copies selected inputs into the host task's own directory. After the h
 
 Damaged online banks are rebuilt and verified before replacement. The old bank is retained under local `online/backups`; verification failures or cancellation before publication leave it in place. Publication failures attempt to restore it. This is not a cross-process transaction or crash-recovery guarantee; backups are not automatically deleted. Answers and scores are untouched.
 
+Installation has one implementation: `online_begin` / `online_step` / `online_cancel`. Tests and the local asset verifier drive that same path with borrowed archive files. Artifact downloading and download-cache reuse belong to the Host; the plugin fetches only the small index itself.
+
 - `node --test test/core.test.cjs test/bridge.test.cjs test/online.test.cjs test/defaults.test.cjs test/standings.test.cjs test/execution-quality.test.cjs test/task-scope.test.cjs test/engine.test.cjs`
 - `EVAL_BROWSER_RUNTIME=<composer candidate/runtime> node --test test/view.test.cjs`
 - Optional real bank test: `EVAL_TEST_BANK=<restored bank> node --test test/engine.test.cjs`

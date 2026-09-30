@@ -1,3 +1,4 @@
+const {install,zipSpec}=require('./online-fixture.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),vm=require('node:vm');
 const {service}=require('../node/online.cjs'),{within,files,runCommand}=require('../node/engine.cjs');
 const url='https://github.com/makecindy/eval-bank/releases/download/test/index.json';
@@ -5,18 +6,24 @@ const digest=s=>crypto.createHash('sha256').update(s).digest('hex');
 for(const oversized of [false,true])test('corrupt bank replacement preserves the old tree on failures; oversized='+oversized,async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'bank-repair-')),rename=fs.rename;
  try{
-  const spec=JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}]}),archive=path.join(root,'archive'),bytes=Buffer.from('fake archive');await fs.writeFile(archive,bytes);
+  const spec=JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}]}),archive=path.join(root,'archive');zipSpec(archive,spec);const bytes=await fs.readFile(archive);
   const sha=digest(bytes),name=sha+'.zip',q={key:'fixture@v1',revision:'v1',path:'question',files:{'question.json':digest(spec)},layers:[{artifact:name,mount:''}]};
   const index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[q],artifacts:{[name]:{url:url.replace('index.json',name),sha256:sha,bytes:bytes.length,expandedBytes:spec.length}}};
-  let mode='normal',ready,release;const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,fetchFile:async(u,d)=>{const b=JSON.stringify(index);await fs.writeFile(d,b);return {sha256:digest(b)};},runCommand:async(c,args)=>{if(args[0]==='-I')return {code:0};await fs.writeFile(path.join(args[2],'question.json'),mode==='invalid'?'bad':spec);if(mode==='cancel'){ready();await new Promise(r=>release=r);}return {code:0};}});
-  const inspected=await svc.inspect({root,url}),p={root,indexId:inspected.indexId,question:q.key,hostArtifacts:{[sha]:archive}};
-  const installed=await svc.install(p),manifest=path.join(installed.bank,'distribution.json');await fs.writeFile(manifest,'broken');if(oversized)await fs.truncate(manifest,16*1024*1024+1);
+  const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,runCommand,fetchFile:async(u,d)=>{const b=JSON.stringify(index);await fs.writeFile(d,b);return {sha256:digest(b)};}});
+  const inspected=await svc.inspect({root,url}),p={root,indexId:inspected.indexId,question:q.key,downloads:{['artifact_'+sha]:archive}};
+  const installed=await install(svc,p),manifest=path.join(installed.bank,'distribution.json');await fs.writeFile(manifest,'broken');if(oversized)await fs.truncate(manifest,16*1024*1024+1);
   const checkOld=async file=>{assert.equal((await fs.stat(file)).size,oversized?16*1024*1024+1:6);assert.equal((await fs.readFile(file)).subarray(0,6).toString(),'broken');};
-  mode='invalid';await assert.rejects(svc.install(p),/校验/);await checkOld(manifest);
-  mode='cancel';const started=new Promise(r=>ready=r),op=svc.begin({root}),run=svc.install({...p,...op}),rejected=assert.rejects(run,/取消/);await started;const stop=svc.cancel({root,...op});release();await stop;await rejected;await checkOld(manifest);
-  mode='normal';fs.rename=async(a,b)=>{if(String(a).includes('/staging-')&&b===installed.bank)throw Object.assign(Error('publish failed'),{code:'EIO'});return rename(a,b);};
-  await assert.rejects(svc.install(p));await checkOld(manifest);fs.rename=rename;
-  await svc.install(p);assert.equal(JSON.parse(await fs.readFile(manifest)).format,'eval-lab-bank-v1');
+  await fs.writeFile(archive,Buffer.alloc(bytes.length));await assert.rejects(install(svc,p),/校验/);await checkOld(manifest);await fs.writeFile(archive,bytes);
+  const invalid=svc.begin(p);let unpacked;do{unpacked=await svc.step({...p,...invalid});}while(unpacked.phase!=='verify');
+  const staging=(await fs.readdir(path.join(root,'online'))).find(x=>x.startsWith('staging-'));
+  await fs.writeFile(path.join(root,'online',staging,q.path,'question.json'),'bad');
+  try{await assert.rejects(svc.step({...p,...invalid}),{code:'PACKAGE_INVALID'});await checkOld(manifest);}finally{await svc.cancel({...p,...invalid});}
+  assert.ok(!(await fs.readdir(path.join(root,'online'))).some(x=>/staging-|archive-copy-/.test(x)));
+  const op=svc.begin(p);let progress;do{progress=await svc.step({...p,...op});}while(progress.phase!=='verify');
+  await svc.cancel({...p,...op});await assert.rejects(svc.step({...p,...op}),/取消/);await checkOld(manifest);
+  fs.rename=async(a,b)=>{if(String(a).includes('/staging-')&&b===installed.bank)throw Object.assign(Error('publish failed'),{code:'EIO'});return rename(a,b);};
+  await assert.rejects(install(svc,p));await checkOld(manifest);fs.rename=rename;
+  await install(svc,p);assert.equal(JSON.parse(await fs.readFile(manifest)).format,'eval-lab-bank-v1');
   const backups=await fs.readdir(path.join(root,'online/backups'));assert.equal(backups.length,1);await checkOld(path.join(root,'online/backups',backups[0],'distribution.json'));
  }finally{fs.rename=rename;await fs.rm(root,{recursive:true,force:true});}
 });
@@ -60,22 +67,12 @@ test('download sink errors retain actionable storage diagnostics',async()=>{
 });
 test('Node operations heartbeat until resolve or reject and never emit heartbeat on stdout',async()=>{
  const source=await fs.readFile(path.join(__dirname,'../node/worker.cjs'),'utf8');
- for(const method of ['grade','calibrate','online_install','prepare'])for(const fail of [false,true]){
+ for(const method of ['grade','calibrate','online_step','prepare'])for(const fail of [false,true]){
   let line,tick,resolve,reject,cleared=false;const stderr=[],stdout=[],pending=new Promise((a,b)=>{resolve=a;reject=b;});
   vm.runInNewContext(source,{require:id=>id==='node:readline'?{createInterface:()=>({on:(name,fn)=>{line=fn;}})}:{dispatch:()=>pending},process:{stdin:{},stderr:{write:s=>stderr.push(s)},stdout:{write:s=>stdout.push(s)}},setInterval:(fn,ms)=>{assert.equal(ms,10000);tick=fn;return 1;},clearInterval:()=>{cleared=true;}});
   const running=line(JSON.stringify({id:1,method}));tick();assert.equal(stderr.length,1);assert.equal(stdout.length,0);assert.equal(cleared,false);
   fail?reject(Error('failed')):resolve({ok:true});await running;assert.equal(cleared,true);assert.equal(stdout.length,1);assert.equal(JSON.parse(stdout[0]).id,1);
  }
-});
-test('extraction budgets scale to the maximum declared size and timeout is not package corruption',async()=>{
- const {unpackTimeout}=require('../node/online.cjs');assert.equal(unpackTimeout(1024),120000);assert.equal(unpackTimeout(8*2**30),840000);
- const root=await fs.mkdtemp(path.join(os.tmpdir(),'unpack-budget-'));try{
-  const spec=JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}]}),bytes=Buffer.from('archive'),sha=digest(bytes),name=sha+'.zip',archive=path.join(root,'archive');await fs.writeFile(archive,bytes);
-  const index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[{key:'fixture@v1',path:'question',files:{'question.json':digest(spec)},layers:[{artifact:name,mount:''}]}],artifacts:{[name]:{url:url.replace('index.json',name),bytes:bytes.length,expandedBytes:8*2**30,sha256:sha}}};
-  const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,fetchFile:async(u,d)=>{const text=JSON.stringify(index);await fs.writeFile(d,text);return {sha256:digest(text)};},runCommand:async(c,a,options)=>{if(a[0]==='-I')return {code:0};assert.equal(options.timeout,840000);return {code:null,timedOut:true,stderr:'private'};}});
-  const {indexId}=await svc.inspect({root,url});await assert.rejects(svc.install({root,indexId,question:'fixture@v1',hostArtifacts:{[sha]:archive}}),e=>e.code==='EXTRACTION_TIMEOUT'&&!e.message.includes('private'));
-  assert.equal((await fs.readdir(path.join(root,'online'))).some(x=>x.startsWith('staging-')),false);
- }finally{await fs.rm(root,{recursive:true,force:true});}
 });
 test('unsupported platforms can browse but reject planning and installation before artifacts or staging',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'bank-platform-'));
@@ -86,7 +83,7 @@ test('unsupported platforms can browse but reject planning and installation befo
    const unsupported=service({base:async()=>root,within,files,platform,arch,fetchFile:async()=>downloads++,runCommand:async()=>unpacks++});
    assert.equal((await unsupported.cached({root,url})).questions.length,1);
    await assert.rejects(unsupported.plan(p),e=>e.code==='UNSUPPORTED_PLATFORM');
-   await assert.rejects(unsupported.install(p),e=>e.code==='UNSUPPORTED_PLATFORM');
+   await assert.rejects(install(unsupported,p),e=>e.code==='UNSUPPORTED_PLATFORM');
    assert.equal(downloads,0);assert.equal(unpacks,0);
    assert.equal((await fs.readdir(path.join(root,'online'))).some(x=>/staging|banks|artifacts/.test(x)),false);
   }

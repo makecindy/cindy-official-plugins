@@ -1,10 +1,11 @@
+const {install}=require('./online-fixture.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
 const {validate,service}=require('../node/online.cjs');
 const {within}=require('../node/engine.cjs');
 const GiB=2**30,url='https://github.com/makecindy/eval-bank/releases/download/test/index.json';
-test('missing Python rejects planning and both installers before artifact work',async()=>{
+test('missing Python rejects planning and installation before artifact work',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-python-install-')),id='c'.repeat(64),old=process.env.PATH;
  try{
   const dir=path.join(root,'online/indices',id);await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'index.json'),JSON.stringify({url,index:fixture()}));
@@ -13,8 +14,7 @@ test('missing Python rejects planning and both installers before artifact work',
   process.env.PATH=root;
   const missing=e=>e.code==='PYTHON_UNAVAILABLE'&&/Python 3.*PATH/.test(e.message);
   await assert.rejects(svc.plan(p),missing);
-  await assert.rejects(svc.install(p),missing);
-  await assert.rejects(svc.step({...p,...svc.begin(p)}),missing);
+  await assert.rejects(install(svc,p),missing);
   assert.equal(downloads,0);assert.deepEqual(await fs.readdir(path.join(root,'online')),['indices']);
  }finally{process.env.PATH=old;await fs.rm(root,{recursive:true,force:true});}
 });
@@ -43,7 +43,7 @@ test('artifact references must name a validated own entry, including cached indi
    const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',fetchFile:async(u,d)=>{await fs.writeFile(d,text);return {sha256:id};}});
    await assert.rejects(svc.inspect({root,url}),/索引损坏/);
    await assert.rejects(svc.plan({root,indexId:id,question:'fixture@v1'}),/索引损坏/);
-   await assert.rejects(svc.install({root,indexId:id,question:'fixture@v1'}));
+   await assert.rejects(install(svc,{root,indexId:id,question:'fixture@v1'}));
    assert.deepEqual(await svc.cached({root,url}),{questions:[]});
   }
  }finally{await fs.rm(root,{recursive:true,force:true});}
@@ -64,7 +64,7 @@ test('cached oversized index cannot bypass planning or installation and triggers
   const dir=path.join(root,'online/indices',id);await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'index.json'),JSON.stringify({url,index}));
   const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',files:async()=>{work++;return {};},runCommand:async()=>{work++;},fetchFile:async()=>{work++;}});
   const args={root,indexId:id,question:'fixture@v1'};
-  await assert.rejects(svc.plan(args));await assert.rejects(svc.install(args));
+  await assert.rejects(svc.plan(args));await assert.rejects(install(svc,args));
   assert.deepEqual(await svc.cached({root,url}),{questions:[]});assert.equal(work,0);
   assert.deepEqual((await fs.readdir(path.join(root,'online'))).sort(),['indices']);
  }finally{await fs.rm(root,{recursive:true,force:true});}
@@ -78,7 +78,7 @@ test('oversized stored indices are isolated before whole-file reads at every ent
   fs.readFile=async function(file,...args){if(String(file)===target)throw Error('unbounded cached index read');return readFile.call(this,file,...args);};
   const svc=service({base:async()=>root,within,platform:'darwin',arch:'arm64',runCommand:async()=>{throw Error('must reject before Python');}}),p={root,indexId:id,question:'fixture@v1'};
   assert.equal((await svc.cached({root,url})).indexId,healthy);
-  for(const action of ['plan','install','step']){
+  for(const action of ['plan','step']){
    const op=action==='step'?svc.begin(p):{};
    try{await assert.rejects(svc[action]({...p,...op}),{code:'PACKAGE_INVALID'});}finally{if(op.operationId)await svc.cancel({...p,...op});}
   }

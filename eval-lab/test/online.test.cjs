@@ -1,3 +1,4 @@
+const {install,zipSpec}=require('./online-fixture.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto'),cp=require('node:child_process');
 const {service,source,validate}=require('../node/online.cjs');const {files,within,runCommand}=require('../node/engine.cjs');
 test('connection failures are actionable without replacing HTTP or validation errors',async()=>{
@@ -17,32 +18,32 @@ test('download failures explain the next action without asking for credentials',
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const url='https://github.com/makecindy/eval-bank/releases/download/test/index.json';
 test('only explicit public makecindy Release sources accepted',()=>{assert.equal(source(url).hostname,'github.com');for(const u of ['http://github.com/makecindy/cindy/releases/download/a/b','https://127.0.0.1/index','https://github.com/evil/cindy/releases/download/a/b','https://github.com/makecindy/cindy/blob/main/index.json',url+'?token=secret'])assert.throws(()=>source(u));});
-test('download verifies, deduplicates runtimes, freezes versions, works offline; corruption rejected',async()=>{
+test('borrowed archives install through steps, freeze versions, work offline and preserve damaged banks',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'online-bank-'));try{
  const src=path.join(root,'source');await fs.mkdir(src);await fs.writeFile(path.join(src,'question.json'),JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}]}));await fs.mkdir(path.join(src,'candidate'));await fs.writeFile(path.join(src,'candidate','hello.js'),'hello');
  const archive=path.join(root,'fixture.zip');cp.execFileSync('python3',['-c',"import zipfile,sys,pathlib;z=zipfile.ZipFile(sys.argv[2],'w');[(z.write(p,p.relative_to(sys.argv[1]))) for p in pathlib.Path(sys.argv[1]).rglob('*') if p.is_file()];z.close()",src,archive]);const bytes=await fs.readFile(archive),h=hash(bytes),name=h+'.zip';const q={key:'fixture@v1',revision:'v1',path:'questions/fixture/v1',files:await files(src),layers:[{artifact:name,mount:''}]};
- const index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[q],artifacts:{[name]:{url:url.replace('index.json',name),sha256:h,bytes:bytes.length,expandedBytes:(await fs.readFile(path.join(src,'question.json'))).length+5}}};let indexText=JSON.stringify(index),offline=false,calls=0,corrupt=false;
- const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,runCommand,fetchFile:async(u,d)=>{if(offline)throw Error('Offline');const b=u.endsWith('index.json')?Buffer.from(indexText):corrupt?Buffer.from('bad'):bytes;await fs.writeFile(d,b,{flag:'wx'});calls++;return {sha256:hash(b),bytes:b.length};}});
- const discovered=await svc.inspect({root,url});const p={root,indexId:discovered.indexId,question:q.key};const [a,b]=await Promise.all([svc.install(p),svc.install(p)]);assert.equal(a.bank,b.bank);assert.equal(calls,2);offline=true;assert.deepEqual((await svc.cached({root,url})).questions,discovered.questions);assert.deepEqual(await svc.install(p),a);assert.equal(calls,2);
- offline=false;index.questions[0].title='Updated index';indexText=JSON.stringify(index);const next=await svc.inspect({root,url});assert.deepEqual((await svc.cached({root,url})).questions,next.questions);const v2=await svc.install({...p,indexId:next.indexId});assert.notEqual(v2.bank,a.bank);assert.equal(calls,3);assert.equal((await svc.banks({root})).length,2);assert.ok(await fs.stat(a.bank));
- await fs.writeFile(path.join(a.bank,q.path,'candidate/hello.js'),'tampered');await svc.install(p);assert.equal(await fs.readFile(path.join(a.bank,q.path,'candidate/hello.js'),'utf8'),'hello');const backups=await fs.readdir(path.join(root,'online/backups'));assert.equal(backups.length,1);assert.equal(await fs.readFile(path.join(root,'online/backups',backups[0],q.path,'candidate/hello.js'),'utf8'),'tampered');
+ const index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[q],artifacts:{[name]:{url:url.replace('index.json',name),sha256:h,bytes:bytes.length,expandedBytes:(await fs.readFile(path.join(src,'question.json'))).length+5}}};let indexText=JSON.stringify(index),offline=false,calls=0;
+ const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,runCommand,fetchFile:async(u,d)=>{if(offline)throw Error('Offline');assert.equal(u,url);const b=Buffer.from(indexText);await fs.writeFile(d,b,{flag:'wx'});calls++;return {sha256:hash(b),bytes:b.length};}});
+ const discovered=await svc.inspect({root,url});const p={root,indexId:discovered.indexId,question:q.key,downloads:{['artifact_'+h]:archive}};const a=await install(svc,p);assert.equal(calls,1);offline=true;assert.deepEqual((await svc.cached({root,url})).questions,discovered.questions);assert.deepEqual(await install(svc,p),a);assert.equal(calls,1);
+ offline=false;index.questions[0].title='Updated index';indexText=JSON.stringify(index);const next=await svc.inspect({root,url});assert.deepEqual((await svc.cached({root,url})).questions,next.questions);const v2=await install(svc,{...p,indexId:next.indexId});assert.notEqual(v2.bank,a.bank);assert.equal(calls,2);assert.equal((await svc.banks({root})).length,2);assert.ok(await fs.stat(a.bank));
+ await fs.writeFile(path.join(a.bank,q.path,'candidate/hello.js'),'tampered');await install(svc,p);assert.equal(await fs.readFile(path.join(a.bank,q.path,'candidate/hello.js'),'utf8'),'hello');const backups=await fs.readdir(path.join(root,'online/backups'));assert.equal(backups.length,1);assert.equal(await fs.readFile(path.join(root,'online/backups',backups[0],q.path,'candidate/hello.js'),'utf8'),'tampered');
  const rename=fs.rename,operation=svc.begin({root});let cancellation;
  await fs.writeFile(path.join(a.bank,q.path,'candidate/hello.js'),'cancelled-original');
  fs.rename=async(from,to)=>{const value=await rename(from,to);if(from===a.bank&&to.includes(path.sep+'backups'+path.sep))cancellation=svc.cancel({root,...operation});return value;};
- try{await assert.rejects(svc.install({...p,...operation}),/下载已取消/);assert.deepEqual(await cancellation,{ok:true});}finally{fs.rename=rename;}
+ try{await assert.rejects(install(svc,{...p,...operation}),/下载已取消/);assert.deepEqual(await cancellation,{ok:true});}finally{fs.rename=rename;}
  assert.equal(await fs.readFile(path.join(a.bank,q.path,'candidate/hello.js'),'utf8'),'cancelled-original');
- await fs.unlink(path.join(a.bank,'distribution.json'));await svc.install(p);assert.equal((await fs.readdir(path.join(root,'online/backups'))).length,2);
- await fs.unlink(path.join(root,'online/artifacts',h+'.zip'));index.questions[0].title='New';indexText=JSON.stringify(index);const last=await svc.inspect({root,url});corrupt=true;await assert.rejects(svc.install({...p,indexId:last.indexId}),/题包校验或解压失败/);assert.equal((await svc.banks({root})).length,2);
+ await fs.unlink(path.join(a.bank,'distribution.json'));await install(svc,p);assert.equal((await fs.readdir(path.join(root,'online/backups'))).length,2);
+ index.questions[0].title='New';indexText=JSON.stringify(index);const last=await svc.inspect({root,url});const bad=path.join(root,'bad.zip');await fs.writeFile(bad,Buffer.alloc(bytes.length));await assert.rejects(install(svc,{...p,indexId:last.indexId,downloads:{['artifact_'+h]:bad}}),/题包校验或解压失败/);assert.equal((await svc.banks({root})).length,2);
  index.questions[0].title='Host downloaded';indexText=JSON.stringify(index);const hostIndex=await svc.inspect({root,url});
  const planned=await svc.plan({root,indexId:hostIndex.indexId,question:q.key});assert.equal(planned.artifacts[0].sha256,h);
  const hostArgs={root,indexId:hostIndex.indexId,question:q.key,requireHostDownloads:true};
- await assert.rejects(svc.install(hostArgs),/更新 Cindy/);
- await assert.rejects(svc.install({...hostArgs,downloads:{}}),/题包校验或解压失败/);
- const hostResult=await svc.install({...hostArgs,downloads:{['artifact_'+h]:archive}});assert.ok(await fs.stat(hostResult.bank));
+ await assert.rejects(install(svc,hostArgs),/题包校验或解压失败/);
+ await assert.rejects(install(svc,{...hostArgs,downloads:{}}),/题包校验或解压失败/);
+ const hostResult=await install(svc,{...hostArgs,downloads:{['artifact_'+h]:archive}});assert.ok(await fs.stat(hostResult.bank));
  const invalid=structuredClone(index);invalid.questions[0].layers[0].mount='../escape';assert.throws(()=>validate(invalid,url));
  }finally{await fs.rm(root,{recursive:true,force:true});}
 });
-test('extractor rejects zip traversal and symlinks, enforces expanded size and executable modes',async()=>{const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'online-zip-')));try{for(const kind of ['traversal','symlink','size','normal']){const zip=path.join(root,kind+'.zip');cp.execFileSync('python3',['-c',"import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');i=zipfile.ZipInfo('../escape' if sys.argv[2]=='traversal' else 'node');i.external_attr=(0o120777 if sys.argv[2]=='symlink' else 0o100755)<<16;z.writestr(i,'data');z.close()",zip,kind]);const r=await runCommand('python3',[path.join(__dirname,'../node/unpack.py'),zip,path.join(root,kind),kind==='size'?'3':'4']);if(kind==='normal'){assert.equal(r.code,0);assert.ok((await fs.stat(path.join(root,kind,'node'))).mode&0o111);}else assert.notEqual(r.code,0);}await assert.rejects(fs.access(path.join(root,'escape')));}finally{await fs.rm(root,{recursive:true,force:true});}});
+test('extractor rejects zip traversal and symlinks, enforces expanded size and executable modes',async()=>{const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'online-zip-')));try{for(const kind of ['traversal','symlink','size','normal']){const zip=path.join(root,kind+'.zip');cp.execFileSync('python3',['-c',"import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],'w');i=zipfile.ZipInfo('../escape' if sys.argv[2]=='traversal' else 'node');i.external_attr=(0o120777 if sys.argv[2]=='symlink' else 0o100755)<<16;z.writestr(i,'data');z.close()",zip,kind]);const r=await runCommand('python3',['-I',path.join(__dirname,'../node/unpack-step.py'),zip,path.join(root,kind),kind==='size'?'3':'4'],{input:JSON.stringify({bytes:32*1024*1024})+'\n'});if(kind==='normal'){assert.equal(r.code,0);assert.ok((await fs.stat(path.join(root,kind,'node'))).mode&0o111);}else assert.notEqual(r.code,0);}await assert.rejects(fs.access(path.join(root,'escape')));}finally{await fs.rm(root,{recursive:true,force:true});}});
 
 test('malformed and incompatible indices show actionable errors and remove temporary downloads',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'invalid-index-'));try{
@@ -66,13 +67,12 @@ test('fresh and cached installs reject hash-correct invalid question specificati
  for(const invalid of [{groups:[]},{scoringVersion:undefined},{groups:[{id:'core',weight:'2',mode:'all',items:['a']}]}])for(const cached of [false,true]){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'invalid-question-'));
   try{
-   const spec=JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}],...invalid}),bytes=Buffer.from('fixture archive'),sha=hash(bytes),name=sha+'.zip';
+   const spec=JSON.stringify({id:'fixture',revision:'v1',scoringVersion:'v1',title:'Fixture',groups:[{id:'core',weight:'1',mode:'all',items:['a']}],...invalid}),archive=path.join(root,'archive');zipSpec(archive,spec);const bytes=await fs.readFile(archive),sha=hash(bytes),name=sha+'.zip';
    const q={key:'fixture@v1',revision:'v1',path:'question',files:{'question.json':hash(spec)},layers:[{artifact:name,mount:''}]},index={format:'eval-lab-online-v1',platform:'darwin-arm64',questions:[q],artifacts:{[name]:{url:url.replace('index.json',name),bytes:bytes.length,expandedBytes:spec.length,sha256:sha}}};
-   const archive=path.join(root,'archive');await fs.writeFile(archive,bytes);
-   const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,fetchFile:async(u,d)=>{const b=JSON.stringify(index);await fs.writeFile(d,b);return {sha256:hash(b)};},runCommand:async(c,args)=>{if(args[0]==='-I')return {code:0};await fs.writeFile(path.join(args[2],'question.json'),spec);return {code:0};}});
+   const svc=service({platform:'darwin',arch:'arm64',base:async()=>root,within,files,fetchFile:async(u,d)=>{const b=JSON.stringify(index);await fs.writeFile(d,b);return {sha256:hash(b)};},runCommand});
    const {indexId}=await svc.inspect({root,url}),dest=path.join(root,'online/banks',hash(JSON.stringify(q)));
    if(cached){await fs.mkdir(path.join(dest,q.path),{recursive:true});await fs.writeFile(path.join(dest,q.path,'question.json'),spec);await fs.writeFile(path.join(dest,'distribution.json'),JSON.stringify({format:'eval-lab-bank-v1',questions:[q]}));}
-   await assert.rejects(svc.install({root,indexId,question:q.key,hostArtifacts:{[sha]:archive}}),e=>e.code==='PACKAGE_INVALID'&&!e.message.includes(root));
+   await assert.rejects(install(svc,{root,indexId,question:q.key,downloads:{['artifact_'+sha]:archive}}),e=>e.code==='PACKAGE_INVALID'&&!e.message.includes(root));
    if(cached)assert.equal(await fs.readFile(path.join(dest,q.path,'question.json'),'utf8'),spec);else await assert.rejects(fs.access(dest),{code:'ENOENT'});
    assert.ok(!(await fs.readdir(path.join(root,'online'))).some(x=>x.startsWith('staging-')));
   }finally{await fs.rm(root,{recursive:true,force:true});}
@@ -80,9 +80,8 @@ test('fresh and cached installs reject hash-correct invalid question specificati
 });
 
 test('installation normalizes native abort errors without losing cancellation semantics',async()=>{
- const controller=new AbortController();controller.abort();
- const svc=service({base:async()=>{throw Error('must not reach storage');},within,files,runCommand});
- await assert.rejects(svc.install({signal:controller.signal}),e=>e.name==='AbortError'&&e.code==='ABORT_ERR'&&e.message==='下载已取消');
+ const svc=service({base:async()=>{throw new DOMException('aborted','AbortError');},within,runCommand});
+ await assert.rejects(install(svc,{root:'/unused',indexId:'a'.repeat(64)}),e=>e.name==='AbortError'&&e.code==='ABORT_ERR'&&e.message==='下载已取消');
 });
 
 test('malformed redirect rejects normally and preserves Worker cleanup',()=>{
