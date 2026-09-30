@@ -191,8 +191,6 @@ async function coordinatorWorkspace(p){
 async function coordinatorState(p){const dest=await within(await coordinatorWorkspace(p),'eval-coordination/'+id(p.id)+'-state.json');const tmp=dest+'.'+crypto.randomUUID()+'.tmp';await write(tmp,{assignments:p.assignments,active:p.active,settled:p.settled,capacity:p.capacity});await fs.rename(tmp,dest);return {path:dest};}
 async function coordinatorPlan(p){
  const workspace=await coordinatorWorkspace(p),dest=await within(workspace,'eval-coordination/'+id(p.id)+'.json');
- // Recover the exact frozen membership, never reconstruct it from unfinished items.
- if(p.legacy){const old=await read(await within(await base(p.root),'coordination/'+id(p.id)+'.json'));p={...p,items:old.items,concurrency:old.concurrency};}
  const concurrency=p.concurrency??null;if(concurrency!==null&&(!Number.isInteger(concurrency)||concurrency<1))throw Error('同时作答数必须为正整数');
  const data={concurrency,items:p.items};
  try{await write(dest,data);}catch(e){if(e.code!=='EEXIST')throw e;if(JSON.stringify(await read(dest))!==JSON.stringify(data))throw Error('Coordinator plan changed');}

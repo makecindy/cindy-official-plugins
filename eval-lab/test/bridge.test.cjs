@@ -450,10 +450,11 @@ test('exhausted transient reads back off then recover without duplicate dispatch
  const calls=b.calls.length;await b.ui('backoff','query');assert.equal(b.calls.length,calls);
  b.cindy.tasks.get=get;b.config.batch.retryAt=0;await b.ui('recover','query');assert.equal(b.config.batch.phase,'coordinating');assert.equal(b.calls.filter(x=>x.send).length,1);assert.equal(b.config.batch.readRetryCount,undefined);
 });
-test('old identity-error pause resumes automatically but other blocked reasons remain paused',async()=>{
- const b=bridge();await b.ui('start','start',args);b.config.batch.phase='blocked';b.config.batch.message='读取身份校验失败(目标 identity 不一致)';
- await b.ui('migrate','query');assert.equal(b.config.batch.phase,'coordinating');assert.equal(b.calls.filter(x=>x.send).length,1);
- b.config.batch.phase='blocked';b.config.batch.message='需要授权';const count=b.calls.length;await b.ui('permission','query');assert.equal(b.config.batch.phase,'blocked');assert.equal(b.calls.length,count);
+test('blocked batches remain paused regardless of old diagnostic text',async()=>{
+ for(const message of ['读取身份校验失败(目标 identity 不一致)','需要授权']){
+  const b=bridge();await b.ui('start','start',args);b.config.batch.phase='blocked';b.config.batch.message=message;
+  const count=b.calls.length;await b.ui('poll','query');assert.equal(b.config.batch.phase,'blocked');assert.equal(b.calls.length,count);
+ }
 });
 
 test('read races during preparation and grading stay retryable, never turn into sample failures',async()=>{
@@ -703,13 +704,13 @@ test('preflight failure never creates the coordinator or dispatches model work',
  await b.ui('start','start',args);assert.match(b.config.batch.message,/Python 3/);
  assert.equal(b.calls.some(x=>x.create||x.send||x.setTeamPlan||x.method==='prepare'),false);
 });
-test('Host workspace is required for both coordination artifacts; legacy recovery does not register a new plan',async()=>{
+test('Host workspace and interrupted scheduler save preserve the current frozen plan',async()=>{
  const b=bridge();await b.ui('start','start',args);
  for(const method of ['coordinator_plan','coordinator_state'])assert.equal(b.calls.find(x=>x.method===(method==='online_install'?'online_step':method)).params.workspace,'/isolated/1');
- const j=b.config.batch;j.plan={path:'/old/plan.json',prompt:'old'};j.schedulerVersion=2;
+ const j=b.config.batch,plan=JSON.stringify(j.plan);delete j.schedulerVersion;
  await b.ui('poll','query');
  assert.equal(b.calls.filter(x=>x.create).length,1);assert.equal(b.calls.filter(x=>x.setTeamPlan).length,1);
- assert.equal(b.calls.filter(x=>x.method==='coordinator_plan').at(-1).params.legacy,true);
+ assert.equal(JSON.stringify(b.config.batch.plan),plan);assert.equal(b.calls.filter(x=>x.method==='coordinator_plan').length,1);
  assert.match(b.calls.filter(x=>x.send).at(-1).send.text,/isolated\/1\/plan.json/);
  const sends=b.calls.filter(x=>x.send).length;await b.ui('poll2','query');assert.equal(b.calls.filter(x=>x.send).length,sends);
  const bad=bridge(),get=bad.cindy.tasks.get;bad.cindy.tasks.get=async x=>({...await get(x),workingDir:undefined});
@@ -769,6 +770,20 @@ test('legacy lost send receipt is read without Python or replay, including stop'
   if(stop){await b.ui('stop','cancel');await b.ui('query','query');assert.equal(b.config.batch.status,'cancelled');assert.equal(b.calls.filter(x=>x.cancel).length,1);}
   else{await b.ui('query','query');assert.equal(b.config.batch.items[0].hostRun.runId,'accepted');assert.equal(b.config.batch.items[0].status,'running');}
   assert.equal(b.calls.some(x=>x.send),false);
+ }
+});
+test('unstarted single-task development batches cannot create, prepare, grant or send more work',async()=>{
+ for(const phase of ['no task','unprepared','prepared','permission']){
+  const item={runId:'answer',question:'audio@v2',config:configuration,status:'pending'};
+  if(phase!=='no task')item.task={taskId:'old-task',revision:1,permissionMode:phase==='permission'?'plan':'auto',workingDir:'/answer'};
+  if(phase==='prepared')item.prepared={workspace:'/answer',prompt:'old prompt'};
+  const b=bridge({root:'/selected',batch:{id:'old',status:'running',items:[item]}});
+  b.cindy.tasks.get=async()=>item.task;b.cindy.tasks.requestWriteAccess=async x=>{b.calls.push({grant:x});return {granted:true,task:item.task};};
+  await b.ui('poll','query');await b.ui('resume','resume_coordination');await b.ui('grant','allow_write');
+  assert.equal(b.replies.at(-1).ok,false);assert.equal(b.config.batch.mode,undefined);
+  assert.equal(b.calls.some(x=>x.create||x.send||x.grant||x.method==='prepare'),false);
+  assert.equal(JSON.stringify(b.config.batch.items[0]),JSON.stringify(item));
+  await b.ui('stop','cancel');await b.ui('stopped','query');assert.equal(b.config.batch.status,'cancelled');
  }
 });
 test('standalone author calls release the in-flight guard but retain unfinished draft ownership',async()=>{

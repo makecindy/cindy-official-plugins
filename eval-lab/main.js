@@ -101,11 +101,6 @@ async function advanceCoordinator(j){
    j.plan=await node('coordinator_plan',{id:j.id,workspace:j.coordinator.workingDir,capacity:j.capacity,coordinatorUsage:j.coordinatorUsage,concurrency:j.concurrency??null,items:j.items.filter(x=>!doneItem(x)&&x.prepared).map(x=>({label:workerLabel(x.runId),runId:x.runId,config:x.config,workspace:x.prepared.workspace,prompt:x.prepared.prompt}))});
    await saveBatch(j);
   }
-  if(!j.plan.workspace){
-   j.plan=await node('coordinator_plan',{id:j.id,workspace:j.coordinator.workingDir,legacy:true});
-   if(j.controlRun)j.schedulerVersion=1;
-   await saveBatch(j);
-  }
   if(j.registeredPlan!==2){
    if(j.items.some(x=>x.prepared&&!x.prepared.authorizationScope))await evaluationPreflight();
    for(const item of j.items.filter(x=>x.prepared&&!x.prepared.authorizationScope)){item.prepared=await node('prepare',{question:item.question,...item.config,batchId:j.id,runId:item.runId,executionChannel:'Orca Worker'});}
@@ -352,8 +347,6 @@ function advanceBatch(){if(advancing)return advancing;advancing=advanceBatchOnce
 async function advanceBatchOnce(){
  const j=(await config()).batch;if(!j||(!['running','stopping'].includes(j.status)&&!(j.mode==='coordinator'&&j.status==='completed'&&!j.qualityVersion)))return jobView(j);
  if(j.mode==='coordinator'){
-  // Recover only the known read race from older installed versions; permission pauses stay paused.
-  if(j.phase==='blocked'&&isTransientReadError({message:j.message})){j.phase='recovering';j.retryAt=0;j.message='正在自动恢复进度核对，已有作答和成绩保留。';}
   if(j.phase==='recovering'&&j.status!=='stopping'&&Date.now()<(j.retryAt||0))return jobView(j);
   if(j.phase==='blocked'&&j.status!=='stopping')return jobView(j);
   return advanceCoordinator(j);
@@ -362,14 +355,9 @@ async function advanceBatchOnce(){
  if(j.phase==='recovering'&&Date.now()<(j.retryAt||0))return jobView(j);
  const item=j.items.find(x=>!doneItem(x));if(!item){j.status='completed';await saveBatch(j);return jobView(j);}
  try{
-  await taskCapability();
-  if(!item.task){j.mode='coordinator';await saveBatch(j);return advanceCoordinator(j);}
+  // Unpublished single-task batches may settle existing work, but never dispatch more.
   await recoverLegacyRun(j,item);
-  if(!item.hostRun&&cindy.tasks.get)item.task=await cindy.tasks.get({taskId:item.task.taskId});
-  if(!item.hostRun&&item.task.permissionMode==='plan'){j.phase='permission';j.message='需要允许 AI 修改作答文件。确认后继续这一批，无需重新开始。';await saveBatch(j);return jobView(j);}
-  j.message='';j.phase='preparing';await saveBatch(j);
-  if(!item.hostRun&&!item.prepared){if(!item.task.workingDir)throw Error('宿主未返回独立作答目录');item.prepared=await node('prepare',{question:item.question,...item.config,batchId:j.id,runId:item.runId,workspace:item.task.workingDir,executionChannel:'Cindy task'});await saveBatch(j);}
-  if(!item.hostRun){await evaluationPreflight();item.hostRun=await cindy.tasks.send({taskId:item.task.taskId,requestKey:j.id+':send:'+item.runId,expectedRevision:item.task.revision,text:item.prepared.prompt});item.status=item.hostRun.status;await saveBatch(j);}
+  if(!item.task||!item.hostRun)return jobView(j);
   const run=await cindy.tasks.getRun({runId:item.hostRun.runId});
   if(run.taskId!==item.task.taskId)throw Error('执行回执与任务不匹配');
   const route=taskRoute(item.config);if(Object.keys(route).some(k=>run.acceptedConfig?.[k]!==route[k]))throw Error('实际执行配置与所选模型不一致，未计分');
@@ -522,12 +510,12 @@ async function action(name,args={},callId){
  }
  if(name==='allow_write'){
   if(advancing)await advancing;
-  const j=(await config()).batch,item=j?.mode==='coordinator'?{task:j.coordinator}:j?.items.find(x=>!doneItem(x));
-  if(j?.status!=='running'||!item?.task||item.hostRun)throw Error('当前批次已变化，请刷新');
+  const j=(await config()).batch;
+  if(j?.mode!=='coordinator'||j.status!=='running'||!j.coordinator)throw Error('当前批次已变化，请刷新');
   if(!cindy.tasks.requestWriteAccess)throw Error('请更新 Cindy 以使用页面内授权');
-  const result=await cindy.tasks.requestWriteAccess({taskId:item.task.taskId,...(j.mode==='coordinator'?{mode:'auto'}:{})});
+  const result=await cindy.tasks.requestWriteAccess({taskId:j.coordinator.taskId,mode:'auto'});
   if(!result.granted)return jobView(j);
-  item.task=result.task;if(j.mode==='coordinator')j.coordinator=result.task;j.phase='preparing';j.message='';await saveBatch(j);
+  j.coordinator=result.task;j.phase='preparing';j.message='';await saveBatch(j);
   return advanceBatch();
  }
  if(name==='resume_coordination'){

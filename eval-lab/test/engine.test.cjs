@@ -127,18 +127,17 @@ test('prepare preserves verified copies and recovers the same unpublished run',a
  }
 });
 
-test('coordinator handoff preserves exact legacy membership and writes state inside Host workspace',async()=>{
+test('coordinator handoff freezes membership and writes state inside Host workspace',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'eval-coordinator-'));
  try{
   const workspace=path.join(root,'host');await fs.mkdir(workspace);
-  const old=path.join(root,'eval-lab-data/coordination/batch.json'),data={concurrency:2,items:[{runId:'already-done'},{runId:'still-pending'}]};await fs.mkdir(path.dirname(old),{recursive:true});await fs.writeFile(old,JSON.stringify(data));
-  const p={root,workspace,id:'batch',legacy:true,items:[]},plan=await dispatch('coordinator_plan',p);
+  const data={concurrency:2,items:[{runId:'already-done'},{runId:'still-pending'}]};
+  const p={root,workspace,id:'batch',...data},plan=await dispatch('coordinator_plan',p);
   assert.equal(path.dirname(plan.path),path.join(await fs.realpath(workspace),'eval-coordination'));
   assert.deepEqual(JSON.parse(await fs.readFile(plan.path)),data);assert.deepEqual(await dispatch('coordinator_plan',p),plan);
   const state=await dispatch('coordinator_state',{root,workspace,id:'batch',assignments:[],settled:['already-done']});
   assert.equal(path.dirname(state.path),path.dirname(plan.path));assert.match(plan.prompt,new RegExp('batch-state.json'));
   await dispatch('coordinator_state',{root,workspace,id:'batch',assignments:['still-pending']});assert.deepEqual(JSON.parse(await fs.readFile(state.path)).assignments,['still-pending']);
-  assert.deepEqual(JSON.parse(await fs.readFile(old)),data);
   await assert.rejects(dispatch('coordinator_plan',{root,workspace,id:'batch',items:[]}),/changed/);
   for(const method of ['coordinator_plan','coordinator_state'])await assert.rejects(dispatch(method,{root,id:'batch'}),/主任务目录/);
   const alias=path.join(root,'alias');await fs.symlink(workspace,alias,'junction');
