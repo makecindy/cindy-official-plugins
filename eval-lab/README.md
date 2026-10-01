@@ -6,7 +6,7 @@ Compare your models on real project tasks, create private questions from selecte
 
 ## Release status
 
-This is the first publication candidate, **1.0.0**. It requires the companion Cindy model-directory, downloads, task/team and delegated Auto-context changes. These changes are not yet verified in a stable/Beta release. The existing manifest floor `0.1.93` is provisional, **not a claim that this release supports the APIs**; maintainers must set the verified minimum and complete real-device package verification before merging. Initial provisioning has an empty staged audience and installs for nobody automatically. Missing APIs display an upgrade/error message rather than falling back to a paid discovery task.
+This is the first publication candidate, **1.0.0**. It requires the companion Cindy model-directory, downloads, task/team and delegated Auto-context changes. The manifest floor is `0.1.95`, the latest stable release when selected on 2026-10-01. **This version selection does not establish API support or completed device verification.** Real-device package verification on a stable/Beta release containing the required Host interfaces remains pending before merging. Initial provisioning has an empty staged audience and installs for nobody automatically. Missing APIs display an upgrade/error message rather than falling back to a paid discovery task.
 
 ## Use
 

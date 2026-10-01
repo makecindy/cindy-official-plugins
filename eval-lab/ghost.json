@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.93",
+  "minCindyVersion": "0.1.95",
   "id": "eval-lab",
   "name": "评测工坊",
   "description": "运行真实项目评测，从自己的任务记录创建题目，导出可分享成绩。",
