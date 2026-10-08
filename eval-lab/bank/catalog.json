@@ -1,0 +1,37 @@
+[
+  {
+    "key": "audio@v2",
+    "title": "连续音频采集与转换：质量与组合场景升级",
+    "revision": "v2"
+  },
+  {
+    "key": "island@v2",
+    "title": "灵动岛通知与窗口交接：质量与组合场景升级",
+    "revision": "v2"
+  },
+  {
+    "key": "recovery@v2",
+    "title": "协作 Worker 生命周期与自动恢复：质量与组合场景升级",
+    "revision": "v2"
+  },
+  {
+    "key": "composer@v2",
+    "title": "输入框发送与草稿生命周期：质量与组合场景升级",
+    "revision": "v2"
+  },
+  {
+    "key": "mobile-stream-order@v3",
+    "title": "手机历史与流式消息交接：质量与组合场景升级",
+    "revision": "v3"
+  },
+  {
+    "key": "remote-files-bughunt@v4",
+    "title": "远程文件工作区：质量与组合场景升级",
+    "revision": "v4"
+  },
+  {
+    "key": "task-switch-cache@v3",
+    "title": "消息投影与多层缓存：质量与组合场景升级",
+    "revision": "v3"
+  }
+]
