@@ -74,6 +74,11 @@
       },
       "tier": "builtin"
     },
+    "outlook-mail": {
+      "audience": {
+        "emails": []
+      }
+    },
     "opendesign-trial": {
       "audience": {
         "emails": []

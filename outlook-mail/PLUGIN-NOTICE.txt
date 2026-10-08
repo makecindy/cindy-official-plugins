@@ -1,0 +1,7 @@
+Outlook Mail for Cindy
+
+Independently authored integration for Microsoft cloud mailboxes.
+Microsoft, Outlook, Hotmail and Microsoft 365 are trademarks of Microsoft.
+This plugin is not endorsed by Microsoft and does not use a Microsoft brand icon.
+OAuth authorization, refresh tokens and request credential injection are managed
+by the Cindy Host; no Microsoft SDK or executable runtime is bundled.
