@@ -5,12 +5,12 @@
 <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
-  <div class="title">已连接的账户</div>
-  <p class="hint">只授权 Google Drive 权限，不会同时取得 Gmail、Calendar 或 Sheets 权限。</p>
+  <div id="settings-title" class="title"></div>
+  <p id="scope-hint" class="hint"></p>
   <p id="reauth" class="hint expired" hidden></p>
   <div class="account-list">
     <div id="accounts"></div>
-    <button id="connect" class="account-connect" type="button">连接账户</button>
+    <button id="connect" class="account-connect" type="button"></button>
   </div>
   <p id="status"></p>
   <script src="/account-metadata.js"></script>

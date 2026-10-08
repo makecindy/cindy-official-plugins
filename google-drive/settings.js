@@ -4,11 +4,11 @@
   var KEY = 'google_drive_account';
   var LABEL = 'Google Drive';
   var $ = function (id) { return document.getElementById(id); };
-  var REAUTH_MESSAGES = {
-    'zh-CN': 'Google 授权已失效，请重新连接账号。',
-    en: 'Your Google authorization has expired. Please reconnect your account.',
-    ja: 'Google の認証が期限切れです。アカウントを再接続してください。',
-    ko: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
+  var MESSAGES = {
+    'zh-CN': { title: '已连接的账户', scopeHint: '只授权 Google Drive 权限，不会同时取得 Gmail、Calendar 或 Sheets 权限。', connect: '连接账户', reauth: 'Google 授权已失效，请重新连接账号。' },
+    en: { title: 'Connected accounts', scopeHint: 'Only Google Drive access is authorized; Gmail, Calendar, and Sheets access is not requested.', connect: 'Connect account', reauth: 'Your Google authorization has expired. Please reconnect your account.' },
+    ja: { title: '接続済みアカウント', scopeHint: 'Google Drive の権限だけを許可し、Gmail、Calendar、Sheets の権限は要求しません。', connect: 'アカウントを接続', reauth: 'Google の認証が期限切れです。アカウントを再接続してください。' },
+    ko: { title: '연결된 계정', scopeHint: 'Google Drive 권한만 승인하며 Gmail, Calendar 또는 Sheets 권한은 요청하지 않습니다.', connect: '계정 연결', reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.' },
   };
   var CONNECT_UNKNOWN_MESSAGES = {
     'zh-CN': '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。',
@@ -27,14 +27,17 @@
       if (!response.ok) throw new Error('HTTP ' + response.status);
       var result = await response.json();
       var requested = result && result.context && result.context.locale;
-      if (Object.prototype.hasOwnProperty.call(REAUTH_MESSAGES, requested)) locale = requested;
+      if (Object.prototype.hasOwnProperty.call(MESSAGES, requested)) locale = requested;
     } catch (_err) {
       locale = 'en';
     } finally {
       clearTimeout(timeout);
     }
     document.documentElement.lang = locale;
-    $('reauth').textContent = REAUTH_MESSAGES[locale];
+    $('settings-title').textContent = MESSAGES[locale].title;
+    $('scope-hint').textContent = MESSAGES[locale].scopeHint;
+    $('connect').textContent = MESSAGES[locale].connect;
+    $('reauth').textContent = MESSAGES[locale].reauth;
   }
   function status(text) { $('status').textContent = text; }
   function connectionUnknownMessage() {

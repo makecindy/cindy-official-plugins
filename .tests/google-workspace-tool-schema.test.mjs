@@ -57,4 +57,20 @@ for (const [id, prefix] of Object.entries(plugins)) {
       assert.match(worker, /vendor\/gog/);
     }
   });
+
+  if (id !== 'google-gmail') test(`${id}: tool descriptions and settings scope notice follow the selected locale`, () => {
+    const english = JSON.parse(readFileSync(new URL(`../${id}/locales/en.json`, import.meta.url), 'utf8'));
+    for (const locale of ['zh-CN', 'ja', 'ko']) {
+      const localized = JSON.parse(readFileSync(new URL(`../${id}/locales/${locale}.json`, import.meta.url), 'utf8'));
+      for (const name of [`${prefix}_schema`, `${prefix}_run`, `${prefix}_accounts`]) {
+        assert.notEqual(localized.tools[name].description, english.tools[name].description);
+      }
+    }
+    const html = readFileSync(new URL(`../${id}/settings.html`, import.meta.url), 'utf8');
+    assert.match(html, /id="settings-title"/);
+    assert.match(html, /id="scope-hint"/);
+    const settings = readFileSync(new URL(`../${id}/settings.js`, import.meta.url), 'utf8');
+    for (const locale of ["'zh-CN'", 'en', 'ja', 'ko']) assert.match(settings, new RegExp(`${locale}: \\{ title:`));
+    assert.match(settings, /\$\('scope-hint'\)\.textContent = MESSAGES\[locale\]\.scopeHint/);
+  });
 }
