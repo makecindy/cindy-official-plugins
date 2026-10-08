@@ -14,6 +14,7 @@ const QQ = Object.freeze({
 
 const MAX_BODY_CHARS = 20000;
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+const MAX_SEND_BODY_CHARS = 500000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SECRET_KEY = 'qq_mail_authorization_code';
 
@@ -262,6 +263,48 @@ async function search(credentials, action, deps) {
   }));
 }
 
+// 常见命名实体：只收录确定可读的字符，未收录的实体原样保留。
+const HTML_ENTITIES = Object.freeze({
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ensp: ' ', emsp: ' ', thinsp: ' ', shy: '', middot: '·', hellip: '…',
+  mdash: '—', ndash: '–', laquo: '«', raquo: '»', ldquo: '“', rdquo: '”',
+  lsquo: '‘', rsquo: '’', copy: '©', reg: '®', trade: '™', times: '×',
+  divide: '÷', deg: '°', sect: '§', yen: '¥', euro: '€', pound: '£',
+});
+
+/** 还原常见 HTML 实体；数字实体按码位解码，无法识别的原样保留。 */
+function decodeHtmlEntities(text) {
+  return text.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]{1,31});/g, (match, body) => {
+    if (body.charAt(0) === '#') {
+      const hex = body.charAt(1) === 'x' || body.charAt(1) === 'X';
+      const code = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+      return Number.isInteger(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : match;
+    }
+    // 用 Object.hasOwn 查表：否则 &constructor; 这类未收录的实体会命中原型链上
+    // 的函数并被写进正文。
+    const name = body.toLowerCase();
+    return Object.hasOwn(HTML_ENTITIES, name) ? HTML_ENTITIES[name] : match;
+  });
+}
+
+/**
+ * 把 HTML 正文降级成可读纯文本：读取邮件与补纯文本备选共用同一套规则。
+ * 先丢弃 script/style 与注释内容（它们不是正文），再剥离标签、还原常见实体，
+ * 最后压缩空白。只用字符串替换，不引入 HTML 解析依赖；残缺 HTML 最多留下
+ * 多余空格，不会抛错。
+ */
+function htmlToPlainText(html) {
+  if (typeof html !== 'string') return '';
+  return decodeHtmlEntities(
+    html
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' '),
+  ).replace(/\s+/g, ' ').trim();
+}
+
 async function readMessage(credentials, action, deps) {
   const folder = action.folder || 'INBOX';
   return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
@@ -303,9 +346,7 @@ async function readMessage(credentials, action, deps) {
     const parsed = await deps.parseMessage(Buffer.concat(chunks, sourceBytes));
     const text = typeof parsed.text === 'string' && parsed.text.trim()
       ? parsed.text
-      : typeof parsed.html === 'string'
-        ? parsed.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-        : '';
+      : htmlToPlainText(parsed.html);
     return {
       ...summaryFromMessage(message, folder),
       cc: parsed.cc && parsed.cc.text ? parsed.cc.text : '',
@@ -325,6 +366,16 @@ async function readMessage(credentials, action, deps) {
   }));
 }
 
+/**
+ * 组装 nodemailer 邮件选项。
+ *
+ * body_text 与 body_html 至少提供一个。两者都按纯数据原样传递，插件不做模板替换：
+ * - 只给 body_text：保持原有纯文本行为，逐字不变。
+ * - 只给 body_html：自动补一份可读的纯文本备选（剔除 script/style、剥离标签、还原常见实体），
+ *   收件端不支持 HTML 时仍可读；备选为空（例如正文只有图片）时不发空的 text 部分。
+ * - 两者都给：发送 multipart/alternative，纯文本在前、HTML 在后。
+ * disableFileAccess / disableUrlAccess 恒为 true，插件不会为正文抓取任何外部资源。
+ */
 function mailOptions(credentials, action) {
   const to = normalizeRecipients(action.to, true);
   const cc = normalizeRecipients(action.cc, false);
@@ -332,17 +383,32 @@ function mailOptions(credentials, action) {
   if (typeof action.subject !== 'string' || /[\r\n\0]/.test(action.subject)) {
     throw new Error('INVALID_SUBJECT');
   }
-  if (typeof action.body_text !== 'string') throw new Error('INVALID_BODY');
-  if (action.subject.length > 998 || action.body_text.length > 500000) {
+  const hasText = action.body_text !== undefined;
+  const hasHtml = action.body_html !== undefined;
+  // body_text 只校验类型，与既有行为一致；body_html 是新增入口，额外拒绝 NUL。
+  if (hasText && typeof action.body_text !== 'string') throw new Error('INVALID_BODY');
+  if (hasHtml && (typeof action.body_html !== 'string' || action.body_html.includes('\u0000'))) {
+    throw new Error('INVALID_BODY');
+  }
+  if (!hasText && !hasHtml) throw new Error('INVALID_BODY');
+  if (
+    action.subject.length > 998
+    || (hasText && action.body_text.length > MAX_SEND_BODY_CHARS)
+    || (hasHtml && action.body_html.length > MAX_SEND_BODY_CHARS)
+  ) {
     throw new Error('MESSAGE_TOO_LARGE');
   }
+  // 只给 HTML 时补纯文本备选；备选为空（例如正文只有图片）时不发空的纯文本部分。
+  const plainText = hasText ? action.body_text : htmlToPlainText(action.body_html);
+  const includeText = hasText || plainText.length > 0;
   return {
     from: credentials.email,
     to,
     ...(cc.length ? { cc } : {}),
     ...(bcc.length ? { bcc } : {}),
     subject: action.subject,
-    text: action.body_text,
+    ...(includeText ? { text: plainText } : {}),
+    ...(hasHtml ? { html: action.body_html } : {}),
     disableFileAccess: true,
     disableUrlAccess: true,
   };
@@ -537,7 +603,9 @@ function humanizeError(error) {
   if (message === 'RECIPIENT_REQUIRED') return '请至少填写一个收件人';
   if (message === 'INVALID_RECIPIENT') return '收件人、抄送或密送地址格式不正确';
   if (message === 'INVALID_SUBJECT') return '邮件主题格式不正确';
-  if (message === 'INVALID_BODY') return '邮件正文格式不正确';
+  if (message === 'INVALID_BODY') {
+    return '邮件正文格式不正确，请在 body_text 或 body_html 中至少提供一个字符串';
+  }
   if (message.startsWith('INVALID_SINCE') || message.startsWith('INVALID_BEFORE')) {
     return '搜索日期格式无效，请使用 ISO 日期或日期时间';
   }
