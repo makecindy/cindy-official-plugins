@@ -112,7 +112,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     assert.ok(read(plugin + '/main.js').includes(source));
     assert.match(read(plugin + '/settings.html'), /account-metadata\.js[\s\S]*account-nickname\.js[\s\S]*settings\.js/);
     const editor = read(plugin + '/account-nickname.js');
-    assert.equal(editor, read('google-gmail/account-nickname.js'));
+    if (plugin !== 'google-gmail') assert.equal(editor, read('google-drive/account-nickname.js'));
     assert.match(editor, /googleAccountMetadata\.save\(key, account\.id,/);
     assert.match(editor, /googleAccountMetadata\.remove\(key, account\.id\)/);
     assert.doesNotMatch(editor, /\/nickname|unsupported/);
@@ -171,4 +171,69 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     await refresh();
     assert.equal(renders.at(-1)[0].nickname, '工作');
   });
+}
+
+const accountCopy = {
+  'zh-CN': { title: '已连接的账户', first: '连接账户', add: '连接另一个账户', sheetsScope: '使用 Google Drive 权限读写 Sheets 文件，不会同时取得 Gmail 或 Calendar 权限。' },
+  en: { title: 'Connected accounts', first: 'Connect account', add: 'Connect another account', sheetsScope: 'Uses Google Drive permission to read and write Sheets files without requesting Gmail or Calendar access.' },
+  ja: { title: '接続済みアカウント', first: 'アカウントを接続', add: '別のアカウントを接続', sheetsScope: 'Google Drive の権限で Sheets ファイルを読み書きします。Gmail や Calendar の権限は要求しません。' },
+  ko: { title: '연결된 계정', first: '계정 연결', add: '다른 계정 연결', sheetsScope: 'Google Drive 권한으로 Sheets 파일을 읽고 씁니다. Gmail 또는 Calendar 권한은 요청하지 않습니다.' },
+};
+
+function element() {
+  return {
+    children: [], dataset: {},
+    get textContent() { return this.children.map(child => child.textContent).join(''); },
+    set textContent(value) { this.children = value ? [{ textContent: value }] : []; },
+    appendChild(child) { this.children.push(child); },
+    replaceChildren(...children) { this.children = children; },
+    setAttribute() {},
+  };
+}
+
+for (const [plugin, prefix] of Object.entries(plugins)) {
+  if (plugin === 'google-gmail') continue;
+  for (const [locale, expected] of Object.entries(accountCopy)) {
+    test(`${plugin}: ${locale} 实际账号渲染和刷新保留本地标题、连接按钮与权限提示`, async () => {
+      const f = fixture(prefix + '_account');
+      f.accounts.length = 0;
+      const nodes = {};
+      const document = {
+        documentElement: { lang: 'en' },
+        createElement: element,
+        createTextNode: text => ({ textContent: text }),
+        getElementById: id => nodes[id] ||= element(),
+        querySelector: selector => {
+          assert.equal(selector, '.title');
+          return document.getElementById('settings-title');
+        },
+      };
+      const ctx = f.context({
+        document, window: {}, AbortController, setTimeout, clearTimeout,
+        fetch: (url, options) => url === '/app-context'
+          ? Promise.resolve({ ok: true, json: async () => ({ context: { locale } }) })
+          : f.env.fetch(url, options),
+      });
+      runInContext(read(plugin + '/account-nickname.js'), ctx);
+      const render = ctx.window.renderGoogleAccounts;
+      let refresh;
+      ctx.window.renderGoogleAccounts = (...args) => { refresh = args[2]; render(...args); };
+      runInContext(read(plugin + '/settings.js'), ctx);
+      await new Promise(setImmediate);
+      const assertCopy = (buttonText) => {
+        assert.equal(nodes['settings-title'].textContent, expected.title);
+        assert.equal(nodes.connect.textContent, buttonText);
+        if (plugin === 'google-sheets') assert.equal(nodes['scope-hint'].textContent, expected.sheetsScope);
+      };
+      assertCopy(expected.first);
+      f.accounts.push({ id: 'acc-work', label: 'work@example.test', status: 'connected' });
+      await refresh();
+      assertCopy(expected.add);
+      await refresh();
+      assertCopy(expected.add);
+      f.accounts.length = 0;
+      await refresh();
+      assertCopy(expected.first);
+    });
+  }
 }

@@ -5,10 +5,10 @@
   var LABEL = 'Google Sheets';
   var $ = function (id) { return document.getElementById(id); };
   var MESSAGES = {
-    'zh-CN': { title: '已连接的账户', scopeHint: '只授权访问表格所需的 Google Drive 权限，不会同时取得 Gmail 或 Calendar 权限。', connect: '连接账户', reauth: 'Google 授权已失效，请重新连接账号。' },
-    en: { title: 'Connected accounts', scopeHint: 'Only the Google Drive access needed for Sheets is authorized; Gmail and Calendar access is not requested.', connect: 'Connect account', reauth: 'Your Google authorization has expired. Please reconnect your account.' },
-    ja: { title: '接続済みアカウント', scopeHint: 'Sheets に必要な Google Drive の権限だけを許可し、Gmail や Calendar の権限は要求しません。', connect: 'アカウントを接続', reauth: 'Google の認証が期限切れです。アカウントを再接続してください。' },
-    ko: { title: '연결된 계정', scopeHint: 'Sheets에 필요한 Google Drive 권한만 승인하며 Gmail 또는 Calendar 권한은 요청하지 않습니다.', connect: '계정 연결', reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.' },
+    'zh-CN': { title: '已连接的账户', scopeHint: '使用 Google Drive 权限读写 Sheets 文件，不会同时取得 Gmail 或 Calendar 权限。', connect: '连接账户', reauth: 'Google 授权已失效，请重新连接账号。' },
+    en: { title: 'Connected accounts', scopeHint: 'Uses Google Drive permission to read and write Sheets files without requesting Gmail or Calendar access.', connect: 'Connect account', reauth: 'Your Google authorization has expired. Please reconnect your account.' },
+    ja: { title: '接続済みアカウント', scopeHint: 'Google Drive の権限で Sheets ファイルを読み書きします。Gmail や Calendar の権限は要求しません。', connect: 'アカウントを接続', reauth: 'Google の認証が期限切れです。アカウントを再接続してください。' },
+    ko: { title: '연결된 계정', scopeHint: 'Google Drive 권한으로 Sheets 파일을 읽고 씁니다. Gmail 또는 Calendar 권한은 요청하지 않습니다.', connect: '계정 연결', reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.' },
   };
   var CONNECT_UNKNOWN_MESSAGES = {
     'zh-CN': '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。',
