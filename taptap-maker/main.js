@@ -84,7 +84,7 @@ async function accountRequest(action, payload, longRunning) {
       name: ACCOUNT_TOOL,
       arguments: args,
     },
-    timeoutMs: longRunning ? 60000 : 30000,
+    timeoutMs: longRunning ? 120000 : 30000,
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
   var parsed = parseAccountResult(result);
