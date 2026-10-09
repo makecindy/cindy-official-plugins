@@ -47,6 +47,9 @@
         "emails": []
       }
     },
+    "tongcheng-chengxin": {
+      "audience": "all"
+    },
     "taptap-cli": {
       "audience": {
         "emails": []
