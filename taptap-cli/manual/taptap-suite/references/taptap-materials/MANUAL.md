@@ -50,6 +50,8 @@ game.zip
 
 `index.html` 必须位于这个游戏文件夹的第一层。以下结构必须在上传前修正:`index.html` 或其它游戏文件直接位于 ZIP 根目录;根目录包含多个游戏文件夹;根目录同时包含游戏文件夹和其它文件;入口文件被放在更深层目录。先执行 `--dry-run`,确认 `data.archive_preflight` 通过(`violations` 为空、`top_level_entries` 只有一个游戏文件夹)后,再使用相同文件和参数加 `yes:true` 上传;预检失败不会创建远端上传任务,修正目录后重新打包并重新预览。`__MACOSX`、`.DS_Store` 和 `._*` 属于可忽略的 macOS 元数据;其它隐藏文件会作为 warning 展示,仍需确认是否应随包分发。
 
+**H5 形态**:上传 H5 包体时,服务端会把非关卡应用自动转换为关卡游戏。转换要求应用未首次发布且有草稿、开发者已签《TapTap 小游戏平台开发者协议》;不满足时上传 422 且不创建上传任务,按错误文案处理后重试。
+
 ### 上传执行规则
 
 1. 对图片、视频、APK、Windows、H5、Tap 小游戏,显式缺 `developerId` / `appId` 且当前 profile 也没有可用 saved scope 时,先转 identity 手册;六个 upload shortcut 都是 app-scope 写操作。

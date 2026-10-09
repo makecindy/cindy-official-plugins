@@ -142,7 +142,7 @@ call_tool(name:"upload-video", args:{_positional:["<path>"], scene:"trailer", ap
 call_tool(name:"upload-pc-package", args:{_positional:["./game.zip"], launch_exe:"game.exe", version:"1.0.0", app_id:"<id>", developer_id:"<id>", dry_run:true})
 # APK → OSS 表单直传，返回 apkId（后台解析包名 / 版本）
 call_tool(name:"upload-apk", args:{_positional:["./game.apk"], app_id:"<id>", developer_id:"<id>", dry_run:true})
-# H5 zip → OSS 表单直传 + 解析 + 创建 H5 version，返回 h5PackageId / h5VersionId
+# H5 zip → OSS 表单直传 + 解析 + 创建 H5 version，返回 h5PackageId / h5VersionId；非关卡应用会先被服务端转为关卡游戏
 call_tool(name:"upload-h5-package", args:{_positional:["<h5_zip>"], app_id:"<id>", developer_id:"<id>", dry_run:true})
 # 竖屏 H5 可加 screen_orientation:1（默认 0 横屏）
 # Tap 小游戏 zip → 上传 + complete + 轮询解析，返回 miniAppArtifactId / taskId
