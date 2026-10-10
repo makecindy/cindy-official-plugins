@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const LF = String.fromCharCode(10);
 const LIMIT = 900000;
@@ -65,7 +66,7 @@ class Router {
   request(method, params, timeout=15000) {
     if (this.closed) return Promise.reject(error('OFFICIAL_EXIT', 'Router 连接已结束，请重新检测连接。'));
     return new Promise((resolve, reject) => {
-      const id = ++this.id;
+      const id = randomUUID();
       const timer = setTimeout(() => this.abort(error('OFFICIAL_WAIT', '等待官方 Router 超时。若已提交操作，其结果未知；请先检查 Rhino 模型，不要自动重试。')), timeout);
       const unknown = method === 'tools/call' && params?.name !== 'list_slots';
       this.lastRequestUnknown = unknown;
@@ -120,7 +121,7 @@ function inspectResult(mcp) {
         if (v && typeof v==='object') {
           if (v.error || v.Error || v.payload?.error || v.payload?.Error || v.isError) failed=true;
           // Router wrappers can return a serialized CallToolResult as a text block.
-          if (depth<3 && Array.isArray(v.content)) { collect(v.content,depth+1); continue; }
+          if (depth<3 && Array.isArray(v.content) && v.content.every(block => block && typeof block === 'object' && typeof block.type === 'string')) { collect(v.content,depth+1); continue; }
         }
       }
       content.push(block);

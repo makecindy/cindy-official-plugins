@@ -49,6 +49,9 @@ test('nested MCP business errors remain structured failures', () => {
   assert.equal(result.ok, false);
   assert.equal(result.code, 'OFFICIAL_TOOL');
   assert.equal(result.mcp.isError, true);
+  const plain = official.inspectResult({ content: [{ type: 'text', text: JSON.stringify({ content: ['a'] }) }] });
+  assert.equal(plain.ok, true);
+  assert.equal(plain.mcp.content[0].type, 'text');
 });
 
 test('official write requests report unknown outcome after invalid Router output', async () => {
@@ -73,7 +76,10 @@ test('official write RPC errors retain the upstream reason', async () => {
   child.stdout = stdout;
   child.stderr = new EventEmitter();
   child.stdin = new EventEmitter();
-  child.stdin.write = () => stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'slot unavailable' } }) + '\n'));
+  child.stdin.write = payload => {
+    const request = JSON.parse(payload);
+    stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { message: 'slot unavailable' } }) + '\n'));
+  };
   child.stdin.end = () => {};
   child.kill = () => {};
   const router = new official.Router(child);
