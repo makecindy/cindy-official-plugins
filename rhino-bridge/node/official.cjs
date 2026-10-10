@@ -52,7 +52,7 @@ class Router {
       const job = this.pending.get(msg.id);
       if (!job) continue;
       this.pending.delete(msg.id); clearTimeout(job.timer);
-      if (msg.error) job.reject(error('OFFICIAL_RPC', '官方工具返回错误：' + String(msg.error.message || '未知错误').slice(0,1200) + '。请核对参数；修改操作勿直接重试。'));
+      if (msg.error) job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_RPC')) : error('OFFICIAL_RPC', '官方工具返回错误：' + String(msg.error.message || '未知错误').slice(0,1200) + '。请核对参数；修改操作勿直接重试。'));
       else if (!Object.prototype.hasOwnProperty.call(msg, 'result')) job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_PROTOCOL')) : error('OFFICIAL_PROTOCOL', '官方响应缺少结果，请核对版本。'));
       else job.resolve(msg.result);
     }
@@ -64,6 +64,7 @@ class Router {
       const id = ++this.id;
       const timer = setTimeout(() => this.abort(error('OFFICIAL_WAIT', '等待官方 Router 超时。若已提交操作，其结果未知；请先检查 Rhino 模型，不要自动重试。')), timeout);
       const unknown = method === 'tools/call' && params?.name !== 'list_slots';
+      this.lastRequestUnknown = unknown;
       this.pending.set(id, {resolve,reject,timer,unknown});
       try { this.send({jsonrpc:'2.0',id,method,params}); }
       catch { this.abort(error('OFFICIAL_PIPE', '无法发送请求；操作结果可能未知，请检查 Rhino。')); }
@@ -156,7 +157,13 @@ async function officialRequest(params) {
     const child=spawn(cfg.file,['--default-version',cfg.version],{shell:false,windowsHide:true,stdio:['pipe','pipe','pipe']});
     router=new Router(child);
     return await execute(router,params.operation,params.args);
-  } catch(e) { return {ok:false,code:e.code?.startsWith('OFFICIAL_')?e.code:'OFFICIAL_CONFIG',message:e.code?.startsWith('OFFICIAL_')?e.message:'官方 Router 未能启动，请安装官方插件并核对 MCPConnect 返回的可执行文件路径。'}; }
+  } catch(e) {
+    if (params?.operation === 'call' && router?.lastRequestUnknown) {
+      const outcome = unknownOutcome(e);
+      return {ok:false,code:outcome.code,message:outcome.message};
+    }
+    return {ok:false,code:e.code?.startsWith('OFFICIAL_')?e.code:'OFFICIAL_CONFIG',message:e.code?.startsWith('OFFICIAL_')?e.message:'官方 Router 未能启动，请安装官方插件并核对 MCPConnect 返回的可执行文件路径。'};
+  }
   finally { router?.close(); }
 }
 module.exports={Router,execute,inspectResult,usable,validateConfig,officialRequest};

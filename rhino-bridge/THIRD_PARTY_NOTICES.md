@@ -9,4 +9,4 @@
 
 研究参考：jingcheng-chen/rhinomcp。本插件未捆绑它的服务端或 Rhino 插件。
 
-插件头像提取自用户本机安装的 Rhino 8 应用程序。Rhino 名称、标志与相关商标归 Robert McNeel & Associates 所有；本插件不是 McNeel 官方发行的 Cindy 插件。
+插件头像是本项目原创的几何 Rhino 主题图标，不使用 McNeel 官方 Rhino 图标或其他第三方图像资源。Rhino 名称与相关商标归 Robert McNeel & Associates 所有；本插件不是 McNeel 官方发行的 Cindy 插件。

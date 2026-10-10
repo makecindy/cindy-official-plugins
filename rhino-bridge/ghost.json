@@ -46,7 +46,7 @@
   "tools": [
     {
       "name": "rhino_status",
-      "description": "检测所选连接模式。官方模式返回 Router 信息和 list_slots 结果；基础模式返回文档、单位和图层。首次使用阅读 usage 手册。",
+      "description": "检测所选连接模式。官方模式返回 Router 信息和 list_slots 结果；基础模式返回文档、单位和图层。result.ok=false 或 mcp.isError 表示检测失败；Router 可达不等于 Rhino 实例确认成功。首次使用阅读 usage 手册。",
       "parameters": {
         "type": "object",
         "properties": {},
@@ -56,7 +56,7 @@
     },
     {
       "name": "rhino_objects",
-      "description": "分页查询当前选中对象或全部对象，返回 ID、名称、类型、图层、包围盒及状态。默认只查询选中对象。",
+      "description": "仅基础连接器（legacy mode）可用。分页查询当前选中对象或全部对象，返回 ID、名称、类型、图层、包围盒及状态。默认只查询选中对象。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -88,7 +88,7 @@
     },
     {
       "name": "rhino_create",
-      "description": "创建一个基础几何对象，返回对象 ID 与撤销记录。point 用 point；line 用 start/end；circle/sphere 用 center/radius；box 用 origin/size。圆位于世界 XY 平面；长方体沿世界 XYZ 正方向。",
+      "description": "仅基础连接器（legacy mode）可用。创建一个基础几何对象，返回对象 ID 与撤销记录。point 用 point；line 用 start/end；circle/sphere 用 center/radius；box 用 origin/size。圆位于世界 XY 平面；长方体沿世界 XYZ 正方向。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -195,7 +195,7 @@
     },
     {
       "name": "rhino_transform",
-      "description": "对明确对象执行移动、旋转或等比缩放，保持对象 ID。move 传 vector；rotate 传 center/axis/angle_degrees；scale 传 center/factor。只传所选模式需要的字段；返回修改对象 ID 与撤销记录。",
+      "description": "仅基础连接器（legacy mode）可用。对明确对象执行移动、旋转或等比缩放，保持对象 ID。move 传 vector；rotate 传 center/axis/angle_degrees；scale 传 center/factor。只传所选模式需要的字段；返回修改对象 ID 与撤销记录。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -274,7 +274,7 @@
     },
     {
       "name": "rhino_create_layer",
-      "description": "创建一个顶层图层，返回图层 ID 与撤销记录；同名图层拒绝创建。",
+      "description": "仅基础连接器（legacy mode）可用。创建一个顶层图层，返回图层 ID 与撤销记录；同名图层拒绝创建。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -317,7 +317,7 @@
     },
     {
       "name": "rhino_assign_layer",
-      "description": "将明确对象分配到已有图层，返回修改对象 ID 与撤销记录。",
+      "description": "仅基础连接器（legacy mode）可用。将明确对象分配到已有图层，返回修改对象 ID 与撤销记录。",
       "parameters": {
         "type": "object",
         "properties": {

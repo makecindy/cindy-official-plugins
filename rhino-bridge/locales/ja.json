@@ -4,22 +4,22 @@
   "whenToUse": "ローカルの Rhino 8/9 の操作、インスタンスやモデルの確認、モデリングや Grasshopper ツールの実行、ビューポート画像の取得、または基本コネクター経由で Rhino 6/7 を操作するときに使用します。",
   "tools": {
     "rhino_status": {
-      "description": "選択した接続モードを確認します。公式モードは Router 情報と list_slots の結果、基本モードはドキュメント、単位、レイヤーを返します。初回は usage マニュアルを読んでください。"
+      "description": "選択した接続モードを確認します。公式モードは Router 情報と list_slots の結果、基本モードはドキュメント、単位、レイヤーを返します。result.ok=false または mcp.isError は検査失敗を示し、Router に到達できても Rhino インスタンスの確認にはなりません。初回は usage マニュアルを読んでください。"
     },
     "rhino_objects": {
-      "description": "選択中またはすべてのオブジェクトをページ単位で取得し、ID、名前、種類、レイヤー、バウンディングボックス、状態を返します。既定では選択中のみです。"
+      "description": "基本コネクター（legacy mode）専用です。選択中またはすべてのオブジェクトをページ単位で取得し、ID、名前、種類、レイヤー、バウンディングボックス、状態を返します。既定では選択中のみです。"
     },
     "rhino_create": {
-      "description": "基本ジオメトリを 1 個作成し、オブジェクト ID と Undo 記録を返します。点、線、円、球、ボックスに対応し、座標はワールド座標系を使います。"
+      "description": "基本コネクター（legacy mode）専用です。基本ジオメトリを 1 個作成し、オブジェクト ID と Undo 記録を返します。点、線、円、球、ボックスに対応し、座標はワールド座標系を使います。"
     },
     "rhino_transform": {
-      "description": "明示したオブジェクト ID を維持したまま、移動、回転、均等スケールを実行します。変更した ID と Undo 記録を返します。"
+      "description": "基本コネクター（legacy mode）専用です。明示したオブジェクト ID を維持したまま、移動、回転、均等スケールを実行します。変更した ID と Undo 記録を返します。"
     },
     "rhino_create_layer": {
-      "description": "最上位レイヤーを作成し、レイヤー ID と Undo 記録を返します。同名レイヤーは拒否されます。"
+      "description": "基本コネクター（legacy mode）専用です。最上位レイヤーを作成し、レイヤー ID と Undo 記録を返します。同名レイヤーは拒否されます。"
     },
     "rhino_assign_layer": {
-      "description": "明示したオブジェクトを既存レイヤーへ割り当て、変更した ID と Undo 記録を返します。"
+      "description": "基本コネクター（legacy mode）専用です。明示したオブジェクトを既存レイヤーへ割り当て、変更した ID と Undo 記録を返します。"
     },
     "rhino_operation_result": {
       "description": "変更操作の実行記録を照会します。state=unknown は未実行を意味しません。コネクターを再起動すると記録は消去されます。"

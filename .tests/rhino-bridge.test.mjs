@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
@@ -74,6 +75,20 @@ test('legacy transport rejects missing credentials and invalid ports before open
   const badPort = await worker.requestRhino({ action: 'status', args: {}, port: 80 }, 'a'.repeat(64), transport);
   assert.equal(badPort.code, 'BRIDGE_PORT');
   assert.equal(opened, false);
+});
+
+test('Python engine regression cases run in the PR gate', () => {
+  const script = path.join(root, '.tests', 'rhino-bridge-engine.test.py');
+  const candidates = process.platform === 'win32'
+    ? [['py', ['-3', script]], ['python', [script]]]
+    : [['python3', [script]], ['python', [script]]];
+  let result;
+  for (const [command, args] of candidates) {
+    const candidate = spawnSync(command, args, { encoding: 'utf8' });
+    if (!candidate.error) { result = candidate; break; }
+  }
+  assert.ok(result, 'Python 3 is required to run the Rhino engine regression tests.');
+  assert.equal(result.status, 0, `${result.stdout || ''}${result.stderr || ''}`);
 });
 
 test('settings localization follows app-context and never reads browser locale', () => {

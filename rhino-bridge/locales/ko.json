@@ -4,22 +4,22 @@
   "whenToUse": "로컬 Rhino 8/9 조작, 인스턴스와 모델 조회, 모델링 또는 Grasshopper 도구 실행, 뷰포트 이미지 가져오기, 기본 커넥터를 통한 Rhino 6/7 조작에 사용합니다.",
   "tools": {
     "rhino_status": {
-      "description": "선택한 연결 모드를 확인합니다. 공식 모드는 Router 정보와 list_slots 결과를, 기본 모드는 문서·단위·레이어 정보를 반환합니다. 처음 사용하기 전에 usage 설명서를 읽으세요."
+      "description": "선택한 연결 모드를 확인합니다. 공식 모드는 Router 정보와 list_slots 결과를, 기본 모드는 문서·단위·레이어 정보를 반환합니다. result.ok=false 또는 mcp.isError는 검사 실패를 뜻하며 Router에 연결된 것만으로 Rhino 인스턴스가 확인되지는 않습니다. 처음 사용하기 전에 usage 설명서를 읽으세요."
     },
     "rhino_objects": {
-      "description": "선택된 객체 또는 모든 객체를 페이지 단위로 조회하고 ID, 이름, 유형, 레이어, 경계 상자와 상태를 반환합니다. 기본값은 선택된 객체만 조회합니다."
+      "description": "기본 커넥터(legacy mode) 전용입니다. 선택된 객체 또는 모든 객체를 페이지 단위로 조회하고 ID, 이름, 유형, 레이어, 경계 상자와 상태를 반환합니다. 기본값은 선택된 객체만 조회합니다."
     },
     "rhino_create": {
-      "description": "기본 형상 하나를 만들고 객체 ID와 실행 취소 기록을 반환합니다. 점, 선, 원, 구와 상자를 지원하며 월드 좌표계를 사용합니다."
+      "description": "기본 커넥터(legacy mode) 전용입니다. 기본 형상 하나를 만들고 객체 ID와 실행 취소 기록을 반환합니다. 점, 선, 원, 구와 상자를 지원하며 월드 좌표계를 사용합니다."
     },
     "rhino_transform": {
-      "description": "명시한 객체 ID를 유지하면서 이동, 회전 또는 균일 배율 변환을 실행합니다. 변경된 ID와 실행 취소 기록을 반환합니다."
+      "description": "기본 커넥터(legacy mode) 전용입니다. 명시한 객체 ID를 유지하면서 이동, 회전 또는 균일 배율 변환을 실행합니다. 변경된 ID와 실행 취소 기록을 반환합니다."
     },
     "rhino_create_layer": {
-      "description": "최상위 레이어를 만들고 레이어 ID와 실행 취소 기록을 반환합니다. 같은 이름의 레이어는 거부됩니다."
+      "description": "기본 커넥터(legacy mode) 전용입니다. 최상위 레이어를 만들고 레이어 ID와 실행 취소 기록을 반환합니다. 같은 이름의 레이어는 거부됩니다."
     },
     "rhino_assign_layer": {
-      "description": "명시한 객체를 기존 레이어에 할당하고 변경된 ID와 실행 취소 기록을 반환합니다."
+      "description": "기본 커넥터(legacy mode) 전용입니다. 명시한 객체를 기존 레이어에 할당하고 변경된 ID와 실행 취소 기록을 반환합니다."
     },
     "rhino_operation_result": {
       "description": "변경 작업의 실행 영수증을 조회합니다. state=unknown은 실행되지 않았다는 뜻이 아닙니다. 커넥터를 다시 시작하면 영수증이 지워집니다."
