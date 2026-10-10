@@ -53,7 +53,10 @@ class Router {
       const job = this.pending.get(msg.id);
       if (!job) continue;
       this.pending.delete(msg.id); clearTimeout(job.timer);
-      if (msg.error) job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_RPC')) : error('OFFICIAL_RPC', '官方工具返回错误：' + String(msg.error.message || '未知错误').slice(0,1200) + '。请核对参数；修改操作勿直接重试。'));
+      if (msg.error) {
+        const message = '官方工具返回错误：' + String(msg.error.message || '未知错误').slice(0,1200) + '。请核对参数；修改操作勿直接重试。';
+        job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_RPC', message)) : error('OFFICIAL_RPC', message));
+      }
       else if (!Object.prototype.hasOwnProperty.call(msg, 'result')) job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_PROTOCOL')) : error('OFFICIAL_PROTOCOL', '官方响应缺少结果，请核对版本。'));
       else job.resolve(msg.result);
     }
