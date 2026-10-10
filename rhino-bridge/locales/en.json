@@ -1,0 +1,34 @@
+{
+  "name": "Cindy Rhino Bridge",
+  "description": "Connect to a Rhino instance already open on this computer. Rhino 8/9 uses the McNeel RhinoAI MCP Router; Rhino 6/7 can use the basic connector.",
+  "whenToUse": "Use to operate local Rhino 8/9, inspect instances and models, run modeling or Grasshopper tools, retrieve viewport images, or control Rhino 6/7 through the basic connector.",
+  "tools": {
+    "rhino_status": {
+      "description": "Check the selected connection mode. Official mode returns Router information and the list_slots result; basic mode returns document, unit, and layer information. Read the usage manual before first use."
+    },
+    "rhino_objects": {
+      "description": "Page through selected objects or all objects in the current document, returning IDs, names, types, layers, bounding boxes, and status. Selected objects are used by default."
+    },
+    "rhino_create": {
+      "description": "Create one basic geometry object and return its object ID and undo record. Use point; start/end for a line; center/radius for a circle or sphere; origin/size for a box. Circles use world XY and boxes extend along positive world XYZ."
+    },
+    "rhino_transform": {
+      "description": "Move, rotate, or uniformly scale explicit object IDs while keeping their IDs. Pass vector for move; center/axis/angle_degrees for rotate; center/factor for scale. Return changed IDs and an undo record."
+    },
+    "rhino_create_layer": {
+      "description": "Create a top-level layer and return its layer ID and undo record. A duplicate layer name is rejected."
+    },
+    "rhino_assign_layer": {
+      "description": "Assign explicit object IDs to an existing layer and return the changed IDs and undo record."
+    },
+    "rhino_operation_result": {
+      "description": "Query the receipt for a modifying operation. state=unknown does not mean the operation was not executed; restarting the connector clears receipts."
+    },
+    "rhino_official_tools": {
+      "description": "Page through the McNeel Router live tool names, descriptions, and complete parameter schemas. Continue with next_offset or query one exact name. A listed tool may still be unsupported by the active Rhino version."
+    },
+    "rhino_official_call": {
+      "description": "Call a tool using its live official schema and return the original MCP content and viewport images. Get an explicit slot from list_slots first. spawn_slot and close_slot are blocked. result.ok=false or mcp.isError means failure; never auto-retry a timed-out write."
+    }
+  }
+}

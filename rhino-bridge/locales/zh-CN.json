@@ -1,0 +1,34 @@
+{
+  "name": "Cindy Rhino Bridge",
+  "description": "连接本机已打开的 Rhino。Rhino 8/9 优先接入 McNeel RhinoAI MCP Router，也保留 Rhino 6/7 基础连接器。",
+  "whenToUse": "需要操作本机 Rhino 8/9、查询实例与模型、运行建模或 Grasshopper 工具、查看视口截图，或通过基础连接器操作 Rhino 6/7 时使用。",
+  "tools": {
+    "rhino_status": {
+      "description": "检测所选连接模式。官方模式返回 Router 信息和 list_slots 结果；基础模式返回文档、单位和图层。首次使用阅读 usage 手册。"
+    },
+    "rhino_objects": {
+      "description": "分页查询当前选中对象或全部对象，返回 ID、名称、类型、图层、包围盒及状态。默认只查询选中对象。"
+    },
+    "rhino_create": {
+      "description": "创建一个基础几何对象，返回对象 ID 与撤销记录。point 用 point；line 用 start/end；circle/sphere 用 center/radius；box 用 origin/size。圆位于世界 XY 平面；长方体沿世界 XYZ 正方向。"
+    },
+    "rhino_transform": {
+      "description": "对明确对象执行移动、旋转或等比缩放，保持对象 ID。move 传 vector；rotate 传 center/axis/angle_degrees；scale 传 center/factor。返回修改对象 ID 与撤销记录。"
+    },
+    "rhino_create_layer": {
+      "description": "创建一个顶层图层，返回图层 ID 与撤销记录；同名图层拒绝创建。"
+    },
+    "rhino_assign_layer": {
+      "description": "将明确对象分配到已有图层，返回修改对象 ID 与撤销记录。"
+    },
+    "rhino_operation_result": {
+      "description": "查询修改操作的执行回执。state=unknown 不代表未执行；连接脚本重启会清空回执。"
+    },
+    "rhino_official_tools": {
+      "description": "分页获取 McNeel 官方 Router 的实时工具名称、描述和完整参数 schema。按 next_offset 继续，或按 name 查单个工具；目录存在不代表当前 Rhino 版本支持。"
+    },
+    "rhino_official_call": {
+      "description": "按实时官方 schema 调用工具，原样返回 MCP 内容及截图。先用 list_slots 获取明确 slot。禁止 spawn_slot/close_slot；result.ok=false 或 mcp.isError 表示失败，超时后不得自动重试写操作。"
+    }
+  }
+}
