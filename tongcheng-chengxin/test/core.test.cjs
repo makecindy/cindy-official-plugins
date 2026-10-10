@@ -245,3 +245,14 @@ test('a date-bearing group does not prove a match after all child resources are 
   } }) });
   assert.equal((await client.call('train_search', query, '')).status, 'date_mismatch');
 });
+
+test('undated resources with nested properties cannot inherit a sibling match', async () => {
+  for (const details of [{ tags: [] }, { tags: ['direct'] }, { price: { amount: 100 } }]) {
+    const client = createTongchengClient({ request: async () => ({ code: 0, data: {
+      trainList: [{ trainNo: 'correct', depDate: query.date }, { trainNo: 'unknown', ...details }]
+    } }) });
+    const result = await client.call('train_search', query, '');
+    assert.equal(result.status, 'date_unverified');
+    assert.equal(result.data.trainList.length, 2);
+  }
+});

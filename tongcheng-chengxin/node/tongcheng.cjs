@@ -111,8 +111,8 @@ function filterDataByDate(value, requestedDate, toolName) {
     if (node === null || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map((item) => {
       if (!inheritedDate && item && typeof item === 'object'
-        && !Array.isArray(item) && !Object.values(item).some((child) => child && typeof child === 'object')
-        && !Object.keys(item).some((key) => dateKeys.has(key) && DATE_VALUE_RE.test(item[key]))) {
+        && !Array.isArray(item) && !Object.keys(item).some((key) => RESOURCE_COLLECTIONS.has(key))
+        && !Object.keys(item).some((key) => dateKeys.has(key) && typeof item[key] === 'string' && DATE_VALUE_RE.test(item[key]))) {
         unverified = true;
       }
       return walk(item, inheritedDate);

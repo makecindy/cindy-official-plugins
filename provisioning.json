@@ -48,7 +48,7 @@
       }
     },
     "tongcheng-chengxin": {
-      "audience": "all"
+      "audience": { "emails": [] }
     },
     "taptap-cli": {
       "audience": {
