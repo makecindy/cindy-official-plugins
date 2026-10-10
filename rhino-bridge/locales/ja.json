@@ -1,0 +1,34 @@
+{
+  "name": "Cindy Rhino Bridge",
+  "description": "このコンピューターで開いている Rhino に接続します。Rhino 8/9/WIP は McNeel RhinoAI MCP Router、Rhino 6/7 は基本コネクターを使用できます。",
+  "whenToUse": "ローカルの Rhino 8/9/WIP の操作、インスタンスやモデルの確認、モデリングや Grasshopper ツールの実行、ビューポート画像の取得、または基本コネクター経由で Rhino 6/7 を操作するときに使用します。",
+  "tools": {
+    "rhino_status": {
+      "description": "選択した接続モードを確認します。公式モードは Router 情報と list_slots の結果、基本モードはドキュメント、単位、レイヤーを返します。result.ok=false または mcp.isError は検査失敗を示し、Router に到達できても Rhino インスタンスの確認にはなりません。初回は usage マニュアルを読んでください。"
+    },
+    "rhino_objects": {
+      "description": "基本コネクター（legacy mode）専用です。選択中またはすべてのオブジェクトをページ単位で取得し、ID、名前、種類、レイヤー、バウンディングボックス、状態を返します。既定では選択中のみです。"
+    },
+    "rhino_create": {
+      "description": "基本コネクター（legacy mode）専用です。基本ジオメトリを 1 個作成し、オブジェクト ID と Undo 記録を返します。点、線、円、球、ボックスに対応し、座標はワールド座標系を使います。"
+    },
+    "rhino_transform": {
+      "description": "基本コネクター（legacy mode）専用です。明示したオブジェクト ID を維持したまま、移動、回転、均等スケールを実行します。変更した ID と Undo 記録を返します。"
+    },
+    "rhino_create_layer": {
+      "description": "基本コネクター（legacy mode）専用です。最上位レイヤーを作成し、レイヤー ID と Undo 記録を返します。同名レイヤーは拒否されます。"
+    },
+    "rhino_assign_layer": {
+      "description": "基本コネクター（legacy mode）専用です。明示したオブジェクトを既存レイヤーへ割り当て、変更した ID と Undo 記録を返します。"
+    },
+    "rhino_operation_result": {
+      "description": "変更操作の実行記録を照会します。state=unknown は未実行を意味しません。コネクターを再起動すると記録は消去されます。"
+    },
+    "rhino_official_tools": {
+      "description": "McNeel Router の現在のツール名、説明、完全なパラメータ schema をページ単位で取得します。一覧にあっても使用中の Rhino バージョンで実行できるとは限りません。"
+    },
+    "rhino_official_call": {
+                                              "description": "取得した公式 schema に従ってツールを呼び出し、MCP 内容と画像をそのまま返します。公式ツールはローカルの Python/C# コードを実行し、Rhino ドキュメントを変更し、Grasshopper やスクリプトを実行し、ローカルファイルの読み取り、書き込み、上書き、削除を行う場合があります。ユーザーが明示的に許可または依頼した場合のみ呼び出してください。先に list_slots で明示的な slot を取得し、以後の呼び出しで渡してください。spawn_slot と close_slot はブロックされています。result.ok=false または mcp.isError は実行失敗を示します。書き込みがタイムアウトまたは結果不明になった場合は、再実行する前に Rhino モデルを確認してください。"
+    }
+  }
+}

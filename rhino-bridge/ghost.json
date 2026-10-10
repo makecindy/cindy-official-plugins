@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.97",
+  "id": "rhino-bridge",
+  "name": "Cindy Rhino Bridge",
+  "description": "连接本机已打开的 Rhino。Rhino 8/9/WIP 优先接入 McNeel RhinoAI MCP Router，也保留 Rhino 6/7 基础连接器。",
+  "whenToUse": "需要操作本机 Rhino 8/9/WIP、查询实例与模型、运行建模或 Grasshopper 工具、查看视口截图，或通过基础连接器操作 Rhino 6/7 时使用。",
+  "version": "0.2.4",
+  "author": "Cindy",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "command": "rhino",
+  "launch": "on-demand",
+  "settingsHtml": "settings.html",
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120,
+    "secretBindings": [
+      {
+        "key": "rhino_token",
+        "label": "Rhino 配对密钥",
+        "hint": "运行随包 Rhino 连接脚本，将弹窗中的密钥复制到这里，不要发送到聊天。",
+        "methods": [
+          "rhino/request"
+        ]
+      }
+    ]
+  },
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/usage",
+        "name": "usage",
+        "description": "配对安装、模型操作顺序、单位换算、超时恢复和兼容限制。"
+      }
+    ]
+  },
+  "locales": {
+    "zh-CN": "locales/zh-CN.json",
+    "en": "locales/en.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "tools": [
+    {
+      "name": "rhino_status",
+      "description": "检测所选连接模式。官方模式返回 Router 信息和 list_slots 结果；基础模式返回文档、单位和图层。result.ok=false 或 mcp.isError 表示检测失败；Router 可达不等于 Rhino 实例确认成功。首次使用阅读 usage 手册。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_objects",
+      "description": "仅基础连接器（legacy mode）可用。分页查询当前选中对象或全部对象，返回 ID、名称、类型、图层、包围盒及状态。默认只查询选中对象。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.id。"
+          },
+          "selected_only": {
+            "type": "boolean",
+            "default": true
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_create",
+      "description": "仅基础连接器（legacy mode）可用。创建一个基础几何对象，返回对象 ID 与撤销记录。point 用 point；line 用 start/end；circle/sphere 用 center/radius；box 用 origin/size。圆位于世界 XY 平面；长方体沿世界 XYZ 正方向。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,80}$",
+            "description": "新操作使用新的唯一编号；超时后保留该编号查询结果。"
+          },
+          "document_id": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.id。"
+          },
+          "units": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.units；坐标和尺寸均使用此模型单位。"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "point",
+              "line",
+              "circle",
+              "sphere",
+              "box"
+            ]
+          },
+          "geometry": {
+            "type": "object",
+            "properties": {
+              "point": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "start": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "end": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "center": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "radius": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "origin": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "size": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "layer_id": {
+            "type": "string",
+            "description": "可选图层 ID；省略使用当前图层。"
+          },
+          "name": {
+            "type": "string",
+            "description": "可选对象名称，最多 160 字符。"
+          }
+        },
+        "required": [
+          "operation_id",
+          "document_id",
+          "units",
+          "kind",
+          "geometry"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_transform",
+      "description": "仅基础连接器（legacy mode）可用。对明确对象执行移动、旋转或等比缩放，保持对象 ID。move 传 vector；rotate 传 center/axis/angle_degrees；scale 传 center/factor。只传所选模式需要的字段；返回修改对象 ID 与撤销记录。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,80}$",
+            "description": "新操作使用新的唯一编号；超时后保留该编号查询结果。"
+          },
+          "document_id": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.id。"
+          },
+          "units": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.units；坐标和尺寸均使用此模型单位。"
+          },
+          "object_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "description": "查询返回的明确对象 ID。"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "move",
+              "rotate",
+              "scale"
+            ]
+          },
+          "vector": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "center": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "axis": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "angle_degrees": {
+            "type": "number"
+          },
+          "factor": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "operation_id",
+          "document_id",
+          "units",
+          "object_ids",
+          "mode"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_create_layer",
+      "description": "仅基础连接器（legacy mode）可用。创建一个顶层图层，返回图层 ID 与撤销记录；同名图层拒绝创建。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,80}$",
+            "description": "新操作使用新的唯一编号；超时后保留该编号查询结果。"
+          },
+          "document_id": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.id。"
+          },
+          "units": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.units；坐标和尺寸均使用此模型单位。"
+          },
+          "name": {
+            "type": "string",
+            "description": "图层名称，最多 160 字符，不含 :: 或换行。"
+          },
+          "color": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "operation_id",
+          "document_id",
+          "units",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_assign_layer",
+      "description": "仅基础连接器（legacy mode）可用。将明确对象分配到已有图层，返回修改对象 ID 与撤销记录。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,80}$",
+            "description": "新操作使用新的唯一编号；超时后保留该编号查询结果。"
+          },
+          "document_id": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.id。"
+          },
+          "units": {
+            "type": "string",
+            "description": "rhino_status 返回的 document.units；坐标和尺寸均使用此模型单位。"
+          },
+          "object_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "description": "查询返回的明确对象 ID。"
+          },
+          "layer_id": {
+            "type": "string",
+            "description": "已有目标图层 ID。"
+          }
+        },
+        "required": [
+          "operation_id",
+          "document_id",
+          "units",
+          "object_ids",
+          "layer_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_operation_result",
+      "description": "查询修改操作的执行回执。state=unknown 不代表未执行；脚本重启会清空回执。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,80}$",
+            "description": "新操作使用新的唯一编号；超时后保留该编号查询结果。"
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_official_tools",
+      "description": "分页获取 McNeel 官方 Router 的实时工具名称、描述和完整参数 schema。按 next_offset 继续，或按 name 查单个工具；目录存在不代表当前 Rhino 版本支持。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "可选，精确工具名。"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 15
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "rhino_official_call",
+      "description": "按已查询的官方 schema 调用工具，原样返回 MCP 内容及截图。官方工具可能执行本机 Python/C# 代码、修改 Rhino 文档、运行 Grasshopper 或脚本，并可能读取、写入、覆盖或删除本机文件；仅在用户明确授权或明确请求时调用。先 list_slots 获取明确 slot，后续调用须传 slot。不开放 spawn_slot/close_slot。result.ok=false 或 mcp.isError 为执行失败；写操作超时或结果未知时先检查 Rhino 模型，不要直接重做。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "rhino_official_tools 返回的工具名。"
+          },
+          "arguments": {
+            "type": "object",
+            "description": "按该工具实时 inputSchema 填写。对模型操作必须包含明确 slot。"
+          }
+        },
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": {
+    "requires": []
+  },
+  "cindy": {
+    "media": [
+      "deposit"
+    ]
+  }
+}
