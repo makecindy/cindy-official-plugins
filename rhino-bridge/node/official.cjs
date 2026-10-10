@@ -48,7 +48,8 @@ class Router {
       try { msg = JSON.parse(line); } catch { this.abort(error('OFFICIAL_PROTOCOL', 'Router 输出不是有效 MCP 消息，请核对官方版本。')); return; }
       if (!msg || msg.jsonrpc !== '2.0') { this.abort(error('OFFICIAL_PROTOCOL', '官方 MCP 协议不匹配，请核对 Router。')); return; }
       if (msg.method) {
-        if (msg.id !== undefined) this.send({ jsonrpc:'2.0', id:msg.id, error:{code:-32601,message:'Client capability not supported'} });
+        if (msg.method === 'ping' && msg.id !== undefined) this.send({ jsonrpc:'2.0', id:msg.id, result:{} });
+        else if (msg.id !== undefined) this.send({ jsonrpc:'2.0', id:msg.id, error:{code:-32601,message:'Client capability not supported'} });
         continue;
       }
       const job = this.pending.get(msg.id);

@@ -1,7 +1,7 @@
 {
   "name": "Cindy Rhino Bridge",
-  "description": "Connect to a Rhino instance already open on this computer. Rhino 8/9 uses the McNeel RhinoAI MCP Router; Rhino 6/7 can use the basic connector.",
-  "whenToUse": "Use to operate local Rhino 8/9, inspect instances and models, run modeling or Grasshopper tools, retrieve viewport images, or control Rhino 6/7 through the basic connector.",
+  "description": "Connect to a Rhino instance already open on this computer. Rhino 8/9/WIP uses the McNeel RhinoAI MCP Router; Rhino 6/7 can use the basic connector.",
+  "whenToUse": "Use to operate local Rhino 8/9/WIP, inspect instances and models, run modeling or Grasshopper tools, retrieve viewport images, or control Rhino 6/7 through the basic connector.",
   "tools": {
     "rhino_status": {
       "description": "Check the selected connection mode. Official mode returns Router information and the list_slots result; basic mode returns document, unit, and layer information. result.ok=false or mcp.isError means the check failed; a reachable Router does not confirm a Rhino instance. Read the usage manual before first use."

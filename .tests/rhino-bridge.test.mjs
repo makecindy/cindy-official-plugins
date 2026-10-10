@@ -89,6 +89,23 @@ test('official write RPC errors retain the upstream reason', async () => {
   );
 });
 
+test('official Router answers MCP ping with an empty success result', async () => {
+  const stdout = new EventEmitter();
+  const child = new EventEmitter();
+  child.stdout = stdout;
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.write = payload => {
+    const request = JSON.parse(payload);
+    stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {} }) + '\n'));
+  };
+  child.stdin.end = () => {};
+  child.kill = () => {};
+  const router = new official.Router(child);
+  assert.deepEqual(await router.request('ping', {}), {});
+  router.close();
+});
+
 test('legacy transport rejects missing credentials and invalid ports before opening a socket', async () => {
   let opened = false;
   const transport = { createConnection() { opened = true; throw new Error('must not open'); } };

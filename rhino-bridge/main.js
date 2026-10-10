@@ -5,6 +5,8 @@ function backendOf(cfg) {
   return Object.prototype.hasOwnProperty.call(cfg,'port') ? 'legacy' : 'official';
 }
 async function invoke(action, args, callId) {
+  let dispatched=false;
+  try {
   const response = await fetch('/kv');
   if (!response.ok) throw new Error('无法读取插件设置，请重新打开设置页。');
   const cfg=await response.json(), backend=backendOf(cfg);
@@ -17,9 +19,14 @@ async function invoke(action, args, callId) {
     request={method:'rhino/request',params:{action,args,port:cfg.port ?? 19986},timeoutMs:22000};
   } else return {ok:false,code:'BRIDGE_MODE',message:'连接模式无效，请在设置页重新选择。'};
   if(callId){request.callId=callId;request.cancelWithCall=true;}
+  dispatched=true;
   const result=await cindy.node.request(request);
   if(!result.ok) return {ok:false,code:'BRIDGE_HOST',operation_id:args.operation_id,message:(result.message || '连接组件调用失败。')+' 若已提交修改，请核对 Rhino 模型，勿直接重试。'};
   return result.result;
+  } catch(error) {
+    error.executionState=dispatched?'unknown':'not_executed';
+    throw error;
+  }
 }
 async function renderOfficial(result,callId){
   if(!result.mcp) return result;
@@ -47,7 +54,9 @@ cindy.onHostMessage(async msg=>{
     if(!action)throw new Error('工具不存在，请重新读取插件工具列表。');
     const result=await renderOfficial(await invoke(action,msg.args||{},msg.callId),msg.callId);
     if(!result.ok && !result.mcp){
-      await cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:result.code||'BRIDGE_FAILED',message:result.message+(result.operation_id?' 操作编号：'+result.operation_id:'')});
+      const executionState=result.executionState||(result.code==='BRIDGE_MODE'?'not_executed':'unknown');
+      await cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:result.code||'BRIDGE_FAILED',executionState,message:result.message+(result.operation_id?' 操作编号：'+result.operation_id:'')});
+      return;
     }else{
       // MCP business failures retain their exact structured details; result.ok remains false.
       await cindy.send({type:'tool-result',callId:msg.callId,ok:true,result});

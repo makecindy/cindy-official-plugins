@@ -1,7 +1,7 @@
 {
   "name": "Cindy Rhino Bridge",
-  "description": "이 컴퓨터에서 열려 있는 Rhino에 연결합니다. Rhino 8/9는 McNeel RhinoAI MCP Router를 사용하며 Rhino 6/7은 기본 커넥터를 사용할 수 있습니다.",
-  "whenToUse": "로컬 Rhino 8/9 조작, 인스턴스와 모델 조회, 모델링 또는 Grasshopper 도구 실행, 뷰포트 이미지 가져오기, 기본 커넥터를 통한 Rhino 6/7 조작에 사용합니다.",
+  "description": "이 컴퓨터에서 열려 있는 Rhino에 연결합니다. Rhino 8/9/WIP는 McNeel RhinoAI MCP Router를 사용하며 Rhino 6/7은 기본 커넥터를 사용할 수 있습니다.",
+  "whenToUse": "로컬 Rhino 8/9/WIP 조작, 인스턴스와 모델 조회, 모델링 또는 Grasshopper 도구 실행, 뷰포트 이미지 가져오기, 기본 커넥터를 통한 Rhino 6/7 조작에 사용합니다.",
   "tools": {
     "rhino_status": {
       "description": "선택한 연결 모드를 확인합니다. 공식 모드는 Router 정보와 list_slots 결과를, 기본 모드는 문서·단위·레이어 정보를 반환합니다. result.ok=false 또는 mcp.isError는 검사 실패를 뜻하며 Router에 연결된 것만으로 Rhino 인스턴스가 확인되지는 않습니다. 처음 사용하기 전에 usage 설명서를 읽으세요."
