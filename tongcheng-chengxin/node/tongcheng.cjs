@@ -83,6 +83,14 @@ function redact(message, secret) {
 
 // Arrival/check-out dates can differ from departure/check-in dates.
 const DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Only resource collections make an object a grouping envelope. Tags, seats,
+// prices and other child properties do not invalidate a resource's own date.
+const RESOURCE_COLLECTIONS = new Set([
+  'flightDataList', 'flightList', 'trainDataList', 'trainList',
+  'hotelDataList', 'hotelList', 'sceneryDataList', 'sceneryList',
+  'busDataList', 'busList', 'tripDataList', 'tripList',
+  'holidayDataList', 'holidayList', 'tripPlanDataList', 'trafficList'
+]);
 const DATE_KEYS_BY_TOOL = {
   flight_search: ['depDate', 'departDate', 'date'],
   train_search: ['depDate', 'departDate', 'date'],
@@ -115,8 +123,8 @@ function filterDataByDate(value, requestedDate, toolName) {
     ownDates.forEach((date) => dates.add(date));
     if (ownDates.some((date) => date !== requestedDate)) return removed;
     const effectiveDate = ownDates[0] || inheritedDate;
-    const hasChildren = Object.values(node).some((item) => item !== null && typeof item === 'object');
-    if (!hasChildren && effectiveDate === requestedDate) matched = true;
+    const isGroup = Object.keys(node).some((key) => RESOURCE_COLLECTIONS.has(key));
+    if (!isGroup && effectiveDate === requestedDate) matched = true;
     const result = {};
     for (const [key, item] of Object.entries(node)) {
       const filtered = walk(item, effectiveDate);

@@ -221,3 +221,27 @@ test('a matching resource does not silently verify undated siblings', async () =
   ] }) });
   assert.equal((await client.call('train_search', query, '')).status, 'date_unverified');
 });
+
+test('matching dated resources remain valid with empty arrays, string arrays and child objects', async () => {
+  for (const extra of [{ tags: [] }, { tags: ['fast', 'direct'] }, { seats: [] }, { price: { amount: 100 }, tags: [] }]) {
+    let calls = 0;
+    const client = createTongchengClient({ request: async () => {
+      calls++;
+      return { code: 0, data: { trainDataList: [{ trainList: [
+        { trainNo: 'example-train', depDate: query.date, ...extra },
+        { trainNo: 'wrong-date', depDate: '2026-10-10', tags: [] }
+      ] }] } };
+    } });
+    const result = await client.call('train_search', query, '');
+    assert.equal(result.status, 'ok');
+    assert.equal(calls, 1);
+    assert.deepEqual(result.data.trainDataList[0].trainList.map((item) => item.trainNo), ['example-train']);
+  }
+});
+
+test('a date-bearing group does not prove a match after all child resources are removed', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: {
+    depDate: query.date, trainList: [{ trainNo: 'wrong', depDate: '2026-10-10' }]
+  } }) });
+  assert.equal((await client.call('train_search', query, '')).status, 'date_mismatch');
+});
