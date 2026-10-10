@@ -28,7 +28,7 @@
       "description": "McNeel Router の現在のツール名、説明、完全なパラメータ schema をページ単位で取得します。一覧にあっても使用中の Rhino バージョンで実行できるとは限りません。"
     },
     "rhino_official_call": {
-      "description": "取得した公式 schema に従ってツールを呼び出し、MCP 内容と画像をそのまま返します。先に list_slots で明示的な slot を取得します。書き込みがタイムアウトしても自動再試行しません。"
+                                              "description": "取得した公式 schema に従ってツールを呼び出し、MCP 内容と画像をそのまま返します。公式ツールはローカルの Python/C# コードを実行し、Rhino ドキュメントを変更し、Grasshopper やスクリプトを実行し、ローカルファイルの読み取り、書き込み、上書き、削除を行う場合があります。ユーザーが明示的に許可または依頼した場合のみ呼び出してください。先に list_slots で明示的な slot を取得し、以後の呼び出しで渡してください。spawn_slot と close_slot はブロックされています。result.ok=false または mcp.isError は実行失敗を示します。書き込みがタイムアウトまたは結果不明になった場合は、再実行する前に Rhino モデルを確認してください。"
     }
   }
 }

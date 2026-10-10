@@ -347,9 +347,13 @@ class Server(object):
     def handle(self, client):
         request = {}; result = None
         try:
-            client.settimeout(3.0)
+            deadline = time.time() + 3.0
             data = b''
             while LF not in data:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise socket.timeout()
+                client.settimeout(remaining)
                 chunk = client.recv(4096)
                 if not chunk: raise ValueError('incomplete')
                 data += chunk

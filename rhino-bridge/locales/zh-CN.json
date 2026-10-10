@@ -28,7 +28,7 @@
       "description": "分页获取 McNeel 官方 Router 的实时工具名称、描述和完整参数 schema。按 next_offset 继续，或按 name 查单个工具；目录存在不代表当前 Rhino 版本支持。"
     },
     "rhino_official_call": {
-      "description": "按实时官方 schema 调用工具，原样返回 MCP 内容及截图。先用 list_slots 获取明确 slot。禁止 spawn_slot/close_slot；result.ok=false 或 mcp.isError 表示失败，超时后不得自动重试写操作。"
+                                              "description": "按已查询的官方 schema 调用工具，原样返回 MCP 内容及截图。官方工具可能执行本机 Python/C# 代码、修改 Rhino 文档、运行 Grasshopper 或脚本操作，并可能读取、写入、覆盖或删除本机文件；仅在用户明确授权或明确请求时调用。先 list_slots 获取明确 slot，后续调用须传 slot。不开放 spawn_slot/close_slot。result.ok=false 或 mcp.isError 为执行失败；写操作超时或结果未知时先检查 Rhino 模型，不要直接重做。"
     }
   }
 }

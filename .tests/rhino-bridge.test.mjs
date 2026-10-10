@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
@@ -47,6 +48,22 @@ test('nested MCP business errors remain structured failures', () => {
   assert.equal(result.ok, false);
   assert.equal(result.code, 'OFFICIAL_TOOL');
   assert.equal(result.mcp.isError, true);
+});
+
+test('official write requests report unknown outcome after invalid Router output', async () => {
+  const stdout = new EventEmitter();
+  const child = new EventEmitter();
+  child.stdout = stdout;
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.write = () => stdout.emit('data', Buffer.from('not-json\n'));
+  child.stdin.end = () => {};
+  child.kill = () => {};
+  const router = new official.Router(child);
+  await assert.rejects(
+    router.request('tools/call', { name: 'make_box', arguments: { slot: 'slot-1' } }),
+    error => error.code === 'OFFICIAL_PROTOCOL' && /结果可能已经执行/.test(error.message) && /不要直接重做/.test(error.message),
+  );
 });
 
 test('legacy transport rejects missing credentials and invalid ports before opening a socket', async () => {

@@ -6,10 +6,13 @@ const LF = String.fromCharCode(10);
 const LIMIT = 900000;
 const BLOCKED = new Set(['spawn_slot', 'close_slot']);
 function error(code, message) { return Object.assign(new Error(message), { code }); }
+function unknownOutcome(reason) {
+  return error(reason.code || 'OFFICIAL_OUTCOME_UNKNOWN', '官方写操作请求已发出，但结果可能已经执行；请先检查 Rhino 模型或原操作结果，不要直接重做。');
+}
 function validateConfig(config) {
   const file = config?.routerPath;
   if (typeof file !== 'string' || file.includes(String.fromCharCode(0)) || !path.isAbsolute(file) || !['rhino-mcp-router', 'rhino-mcp-router.exe'].includes(path.basename(file).toLowerCase())) {
-    throw error('OFFICIAL_PATH', '请在设置中填写官方 MCPConnect 输出的 rhino-mcp-router 可执行文件绝对路径，只填路径，不含引号或参数。');
+    throw error('OFFICIAL_PATH', '请在设置中填写官方 MCPConnect 输出的 Router（MCPConnect 的 rhino-mcp-router）可执行文件绝对路径，只填路径，不含引号或参数。');
   }
   const version = config.version ?? '8';
   if (!['8', '9', 'WIP'].includes(version)) throw error('OFFICIAL_VERSION', '请选择 Rhino 8、9 或 WIP。');
@@ -17,8 +20,9 @@ function validateConfig(config) {
   return { file, version };
 }
 function usable(tool) {
-  return tool && typeof tool.name === 'string' && !BLOCKED.has(tool.name) &&
-    (tool.name === 'list_slots' || tool.inputSchema?.properties?.slot);
+  if (!tool || typeof tool.name !== 'string' || BLOCKED.has(tool.name)) return false;
+  if (tool.name === 'list_slots') return true;
+  return tool.inputSchema?.properties?.slot ? true : undefined;
 }
 class Router {
   constructor(child) {
@@ -49,7 +53,7 @@ class Router {
       if (!job) continue;
       this.pending.delete(msg.id); clearTimeout(job.timer);
       if (msg.error) job.reject(error('OFFICIAL_RPC', '官方工具返回错误：' + String(msg.error.message || '未知错误').slice(0,1200) + '。请核对参数；修改操作勿直接重试。'));
-      else if (!Object.prototype.hasOwnProperty.call(msg, 'result')) job.reject(error('OFFICIAL_PROTOCOL', '官方响应缺少结果，请核对版本。'));
+      else if (!Object.prototype.hasOwnProperty.call(msg, 'result')) job.reject(job.unknown ? unknownOutcome(error('OFFICIAL_PROTOCOL')) : error('OFFICIAL_PROTOCOL', '官方响应缺少结果，请核对版本。'));
       else job.resolve(msg.result);
     }
   }
@@ -59,7 +63,8 @@ class Router {
     return new Promise((resolve, reject) => {
       const id = ++this.id;
       const timer = setTimeout(() => this.abort(error('OFFICIAL_WAIT', '等待官方 Router 超时。若已提交操作，其结果未知；请先检查 Rhino 模型，不要自动重试。')), timeout);
-      this.pending.set(id, {resolve,reject,timer});
+      const unknown = method === 'tools/call' && params?.name !== 'list_slots';
+      this.pending.set(id, {resolve,reject,timer,unknown});
       try { this.send({jsonrpc:'2.0',id,method,params}); }
       catch { this.abort(error('OFFICIAL_PIPE', '无法发送请求；操作结果可能未知，请检查 Rhino。')); }
     });
@@ -67,7 +72,7 @@ class Router {
   abort(reason) {
     if (this.closed) return;
     this.closed = true;
-    for (const job of this.pending.values()) { clearTimeout(job.timer); job.reject(reason); }
+    for (const job of this.pending.values()) { clearTimeout(job.timer); job.reject(job.unknown ? unknownOutcome(reason) : reason); }
     this.pending.clear(); this.child.kill();
   }
   close() {

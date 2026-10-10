@@ -28,7 +28,7 @@
       "description": "Page through the McNeel Router live tool names, descriptions, and complete parameter schemas. Continue with next_offset or query one exact name. A listed tool may still be unsupported by the active Rhino version."
     },
     "rhino_official_call": {
-      "description": "Call a tool using its live official schema and return the original MCP content and viewport images. Get an explicit slot from list_slots first. spawn_slot and close_slot are blocked. result.ok=false or mcp.isError means failure; never auto-retry a timed-out write."
+                                              "description": "Call a tool using its live official schema and return the original MCP content and viewport images. Official tools may execute local Python/C# code, modify the Rhino document, run Grasshopper or scripts, and read, write, overwrite, or delete local files; call them only with explicit user authorization or request. Get an explicit slot from list_slots first and pass it on later calls. spawn_slot and close_slot are blocked. result.ok=false or mcp.isError means failure; after a timed-out or unknown write, check the Rhino model before doing anything again."
     }
   }
 }

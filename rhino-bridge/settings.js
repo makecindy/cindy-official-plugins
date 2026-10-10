@@ -27,6 +27,6 @@ $('check').addEventListener('click',()=>{
  pending=String(Date.now());$('check').disabled=true;show(t('state.checking'));channel.postMessage({type:'check',id:pending});timer=setTimeout(()=>{pending=null;$('check').disabled=false;show(t('error.checkTimeout'));},115000);
 });
 channel.onmessage=({data})=>{if(data?.type!=='checked'||data.id!==pending)return;clearTimeout(timer);pending=null;$('check').disabled=false;const r=data.result;if(!r.ok)return show(r.message);
- if(r.backend==='official'){let slots='';for(const b of r.mcp?.content||[])if(b.type==='text')slots+=b.text;show('官方 Router 已连接：'+(r.server?.version||'未知版本')+'。实例信息：'+slots);}
- else show('已连接 Rhino '+r.rhino_version+(r.document?' · '+(r.document.name||'未命名模型')+' · '+r.document.units:'，请打开模型。'));
+ if(r.backend==='official'){let slots='';for(const b of r.mcp?.content||[])if(b.type==='text')slots+=b.text;show(t('state.official')+': '+(r.server?.version||t('state.unknownVersion'))+' | '+slots);}
+ else show(t('state.legacy')+' '+r.rhino_version+(r.document?' · '+(r.document.name||t('state.unnamed'))+' · '+r.document.units:' · '+t('state.openModel')));
 };

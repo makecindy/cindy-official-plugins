@@ -404,7 +404,7 @@
     },
     {
       "name": "rhino_official_call",
-      "description": "按已查询的官方 schema 调用工具，原样返回 MCP 内容及截图。先 list_slots 获取明确 slot，后续调用须传 slot。不开放 spawn_slot/close_slot。result.ok=false 或 mcp.isError 为执行失败；超时后不得自动重试写操作。",
+      "description": "按已查询的官方 schema 调用工具，原样返回 MCP 内容及截图。官方工具可能执行本机 Python/C# 代码、修改 Rhino 文档、运行 Grasshopper 或脚本，并可能读取、写入、覆盖或删除本机文件；仅在用户明确授权或明确请求时调用。先 list_slots 获取明确 slot，后续调用须传 slot。不开放 spawn_slot/close_slot。result.ok=false 或 mcp.isError 为执行失败；写操作超时或结果未知时先检查 Rhino 模型，不要直接重做。",
       "parameters": {
         "type": "object",
         "properties": {
