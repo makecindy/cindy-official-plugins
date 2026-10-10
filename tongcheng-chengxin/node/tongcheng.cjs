@@ -109,31 +109,34 @@ function filterDataByDate(value, requestedDate, toolName) {
   const removed = Symbol('removed');
   function walk(node, inheritedDate = null, resourceEntry = false) {
     if (node === null || typeof node !== 'object') return node;
-    if (Array.isArray(node)) return node.map((item) => {
-      if (!inheritedDate && item && typeof item === 'object'
-        && !Array.isArray(item) && !Object.keys(item).some((key) => RESOURCE_COLLECTIONS.has(key))
-        && !Object.keys(item).some((key) => dateKeys.has(key) && typeof item[key] === 'string' && DATE_VALUE_RE.test(item[key]))) {
-        unverified = true;
-      }
-      return walk(item, inheritedDate, resourceEntry);
-    }).filter((item) => item !== removed);
+    if (Array.isArray(node)) return node.map((item) => walk(item, inheritedDate, resourceEntry))
+      .filter((item) => item !== removed);
+    const isGroup = Object.keys(node).some((key) => RESOURCE_COLLECTIONS.has(key));
     const ownDates = Object.entries(node)
       .filter(([key, item]) => dateKeys.has(key) && typeof item === 'string' && DATE_VALUE_RE.test(item))
       .map(([, item]) => item);
+    if (resourceEntry && !isGroup) {
+      // Provider date wrappers belong to the whole resource. Do not inspect
+      // itinerary/seat/price dates: they can legitimately describe later days.
+      for (const key of ['schedule', 'departure', 'checkIn', 'start', 'dates']) {
+        const wrapper = node[key];
+        if (wrapper && typeof wrapper === 'object' && !Array.isArray(wrapper)) {
+          for (const [field, date] of Object.entries(wrapper)) {
+            if (dateKeys.has(field) && typeof date === 'string' && DATE_VALUE_RE.test(date)) ownDates.push(date);
+          }
+        }
+      }
+    }
     ownDates.forEach((date) => dates.add(date));
     if (ownDates.some((date) => date !== requestedDate)) return removed;
     const effectiveDate = ownDates[0] || inheritedDate;
-    const isGroup = Object.keys(node).some((key) => RESOURCE_COLLECTIONS.has(key));
-    if (toolName === 'travel_search' && !isGroup && !effectiveDate
-      && (resourceEntry || ['days', 'itinerary', 'dayList'].some((key) => Array.isArray(node[key])))) {
-      // A plan without its own start date cannot be proved by one internal day.
-      unverified = true;
-      return node;
-    }
     if (!isGroup && effectiveDate === requestedDate) {
       matched = true;
-      // Validate the resource's departure/start, not its internal itinerary days,
-      // arrival segments, seat metadata or other nested dates.
+      return node;
+    }
+    if (!isGroup && (resourceEntry || (toolName === 'travel_search'
+      && ['days', 'itinerary', 'dayList'].some((key) => Array.isArray(node[key]))))) {
+      unverified = true;
       return node;
     }
     const result = {};
@@ -143,7 +146,7 @@ function filterDataByDate(value, requestedDate, toolName) {
     }
     return result;
   }
-  const filtered = walk(value);
+  const filtered = walk(value, null, Array.isArray(value));
   return { value: filtered === removed ? null : filtered, dates, matched, unverified };
 }
 
@@ -192,13 +195,30 @@ async function requestGateway({ url, headers, body, timeoutMs = API_TIMEOUT_MS }
       }
     } finally { reader.releaseLock(); }
     const raw = Buffer.concat(chunks).toString('utf8');
-    try { return JSON.parse(raw); } catch { throw new Error('同程网关返回了无法解析的 JSON'); }
+    try { return JSON.parse(raw); } catch { throw new Error('同程网关返回了无法解析的 JSON，请稍后重试；持续失败时请联系同程客服。'); }
   } catch (error) {
     if (error && error.name === 'AbortError') throw new Error('同程网关请求超时，请稍后重试。');
     throw error;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function parseGatewayResponse(response, route, apiKey) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    throw new Error('同程网关响应格式无效，请稍后重试；持续失败时请检查同程服务状态或更新插件。');
+  }
+  if (response.code === 1 || response.code === '1') {
+    return { status: 'no_results', message: redact(response.message || '没有找到符合条件的' + route.label + '资源。', apiKey), data: response.data ?? null };
+  }
+  if (response.code !== 0 && response.code !== '0') {
+    const code = String(response.code ?? 'unknown');
+    const message = ['401', '403'].includes(code) ? 'HTTP ' + code
+      : response.message || '同程业务接口返回错误码 ' + code + '，请核对查询参数或稍后重试。';
+    throw new Error(gatewayError(new Error(message), apiKey));
+  }
+  if (response.data === undefined) throw new Error('同程网关成功响应缺少 data 字段，请稍后重试；持续失败时请更新插件或联系同程客服。');
+  return { status: 'ok', data: response.data };
 }
 
 function createTongchengClient({ request = requestGateway, now = Date.now } = {}) {
@@ -225,14 +245,8 @@ function createTongchengClient({ request = requestGateway, now = Date.now } = {}
       let response;
       try { response = await request({ url, headers, body: requestBody, timeoutMs: API_TIMEOUT_MS }); }
       catch (error) { throw new Error(gatewayError(error, apiKey)); }
-      if (!response || typeof response !== 'object') throw new Error('同程网关响应格式无效');
-      if (response.code === 1 || response.code === '1') {
-        return { status: 'no_results', message: response.message || `没有找到符合条件的${route.label}资源。`, data: response.data ?? null };
-      }
-      if (response.code !== 0 && response.code !== '0') {
-        throw new Error(redact(response.message || `同程业务接口返回错误码 ${String(response.code ?? 'unknown')}`, apiKey));
-      }
-      if (response.data === undefined) throw new Error('同程网关成功响应缺少 data 字段');
+      const parsedResponse = parseGatewayResponse(response, route, apiKey);
+      if (parsedResponse.status === 'no_results') return parsedResponse;
       const requestedDate = typeof requestBody.date === 'string' && DATE_VALUE_RE.test(requestBody.date)
         ? requestBody.date : null;
       if (requestedDate) {
@@ -248,10 +262,10 @@ function createTongchengClient({ request = requestGateway, now = Date.now } = {}
         if (remainingMs > 0) {
           try {
             const retry = await request({ url, headers, body: requestBody, timeoutMs: Math.min(API_TIMEOUT_MS, remainingMs) });
-            if (retry && (retry.code === 0 || retry.code === '0') && retry.data !== undefined) {
-              const retryFiltered = filterDataByDate(retry.data, requestedDate, toolName);
-              if (retryFiltered.matched) return { status: retryFiltered.unverified ? 'date_unverified' : 'ok', message: retryFiltered.unverified ? '已移除日期不符的资源，但部分资源没有可核对的日期，请在预订页面确认。' : '查询成功；已移除日期不符的资源。', data: retryFiltered.value };
-            }
+            const parsedRetry = parseGatewayResponse(retry, route, apiKey);
+            if (parsedRetry.status === 'no_results') return parsedRetry;
+            const retryFiltered = filterDataByDate(parsedRetry.data, requestedDate, toolName);
+            if (retryFiltered.matched) return { status: retryFiltered.unverified ? 'date_unverified' : 'ok', message: retryFiltered.unverified ? '已移除日期不符的资源，但部分资源没有可核对的日期，请在预订页面确认。' : '查询成功；已移除日期不符的资源。', data: retryFiltered.value };
           } catch (error) { retryError = gatewayError(error, apiKey); }
         }
         const returned = [...filtered.dates].sort().join('、');

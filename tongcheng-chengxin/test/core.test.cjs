@@ -295,3 +295,38 @@ test('travel plans without a resource start date retain all days but remain unve
   assert.equal(result.status, 'date_unverified');
   assert.deepEqual(result.data.tripPlanDataList, [plan]);
 });
+
+test('nested schedule dates filter whole resources at the list boundary', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: { trainList: [
+    { trainNo: 'right', schedule: { depDate: query.date } },
+    { trainNo: 'wrong', schedule: { depDate: '2026-10-10' } }
+  ] } }) });
+  const result = await client.call('train_search', query, '');
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.data.trainList.map((item) => item.trainNo), ['right']);
+  assert.equal(result.data.trainList[0].schedule.depDate, query.date);
+});
+
+test('retry propagates no_results instead of preserving the initial date mismatch', async () => {
+  let calls = 0;
+  const client = createTongchengClient({ request: async () => ++calls === 1
+    ? { code: 0, data: [{ depDate: '2026-10-10' }] }
+    : { code: 1, message: 'No matching resources', data: null }
+  });
+  const result = await client.call('train_search', query, '');
+  assert.equal(result.status, 'no_results');
+  assert.equal(result.message, 'No matching resources');
+  assert.equal(result.data, null);
+});
+
+test('initial and retry protocol failures include recovery instructions', async () => {
+  for (const invalid of [null, [], 'invalid', { code: 0 }]) {
+    const client = createTongchengClient({ request: async () => invalid });
+    await assert.rejects(client.call('train_search', query, ''), /重试/);
+    let calls = 0;
+    const retryClient = createTongchengClient({ request: async () => ++calls === 1
+      ? { code: 0, data: [{ depDate: '2026-10-10' }] } : invalid
+    });
+    assert.match((await retryClient.call('train_search', query, '')).retryError, /重试/);
+  }
+});

@@ -4,7 +4,7 @@
   "name": "同程程心",
   "description": "查询同程旅行的机票、火车、酒店、景区、汽车票、度假和综合交通资源。",
   "whenToUse": "查询机票、火车票、酒店、景区门票、汽车票、度假产品、行程规划或综合交通方式时使用。",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "minCindyVersion": "0.1.73",
   "locales": {
     "en": "locales/en.json",

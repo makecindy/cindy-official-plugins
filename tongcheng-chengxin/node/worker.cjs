@@ -22,7 +22,7 @@ async function handle(request) {
   if (request.method === 'initialize') {
     reply({ jsonrpc: '2.0', id: request.id, result: {
       protocolVersion: request.params && request.params.protocolVersion || '2025-03-26',
-      capabilities: { tools: {} }, serverInfo: { name: 'tongcheng-chengxin', version: '0.2.4' }
+      capabilities: { tools: {} }, serverInfo: { name: 'tongcheng-chengxin', version: '0.2.5' }
     } });
     return;
   }
