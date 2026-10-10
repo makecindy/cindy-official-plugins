@@ -4,25 +4,25 @@
   "whenToUse": "Use when the user asks to look up flights, train tickets, hotels, attraction tickets, bus tickets, vacation products, trip planning or multimodal transport options. Prefer the dedicated tools for flights, trains, hotels or attractions; when the travel mode is unclear, use traffic_search.",
   "tools": {
     "flight_search": {
-      "description": "Search Tongcheng flights. Provide departure + destination, a flight number, or departure with the low_price option."
+      "description": "Search Tongcheng flights. Provide departure + destination, a flight number, or departure with the low_price option. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "train_search": {
-      "description": "Search Tongcheng train tickets, including high-speed and express trains."
+      "description": "Search Tongcheng train tickets, including high-speed and express trains. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "hotel_search": {
-      "description": "Search Tongcheng hotels for a given city or destination."
+      "description": "Search Tongcheng hotels for a given city or destination. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "scenery_search": {
-      "description": "Search Tongcheng attractions and admission tickets for a given city or destination."
+      "description": "Search Tongcheng attractions and admission tickets for a given city or destination. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "bus_search": {
-      "description": "Search Tongcheng bus tickets and long-distance coach schedules; requires departure and destination."
+      "description": "Search Tongcheng bus tickets and long-distance coach schedules; requires departure and destination. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "travel_search": {
-      "description": "Query Tongcheng vacation packages and itinerary suggestions in one call; prefer this tool for multi-day trip planning instead of splitting into single-item requests."
+      "description": "Query Tongcheng vacation packages and itinerary suggestions in one call; prefer this tool for multi-day trip planning instead of splitting into single-item requests. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     },
     "traffic_search": {
-      "description": "Query Tongcheng multimodal transport options when the travel mode is unspecified; requires departure and destination."
+      "description": "Query Tongcheng multimodal transport options when the travel mode is unspecified; requires departure and destination. Use YYYY-MM-DD for dates; mismatched resources are filtered and unverifiable dates are reported."
     }
   }
 }

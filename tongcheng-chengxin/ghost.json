@@ -4,7 +4,7 @@
   "name": "同程程心",
   "description": "查询同程旅行的机票、火车、酒店、景区、汽车票、度假和综合交通资源。",
   "whenToUse": "查询机票、火车票、酒店、景区门票、汽车票、度假产品、行程规划或综合交通方式时使用。",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minCindyVersion": "0.1.73",
   "locales": {
     "en": "locales/en.json",
@@ -29,12 +29,12 @@
     }]
   },
   "tools": [
-    { "name": "flight_search", "description": "查询同程机票资源。提供出发地+目的地、航班号，或出发地+低价选项。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "flight_number": { "type": "string" }, "low_price": { "type": "boolean" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "additionalProperties": false } },
-    { "name": "train_search", "description": "查询同程火车票资源，包含高铁与动车。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "departure_station": { "type": "string" }, "arrival_station": { "type": "string" }, "train_number": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } },
-    { "name": "hotel_search", "description": "查询指定城市或目的地的同程酒店资源。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
-    { "name": "scenery_search", "description": "查询指定城市或目的地的同程景区与门票资源。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
-    { "name": "bus_search", "description": "查询同程汽车票与长途班次，需提供出发地和目的地。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } },
-    { "name": "travel_search", "description": "一次查询同程度假资源和行程建议；规划多日游时优先使用此工具，不拆成多个单品请求。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "days": { "type": "integer" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
-    { "name": "traffic_search", "description": "出行方式未指定时查询同程综合交通方案，需提供出发地和目的地。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } }
+    { "name": "flight_search", "description": "查询同程机票资源。提供出发地+目的地、航班号，或出发地+低价选项。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "flight_number": { "type": "string" }, "low_price": { "type": "boolean" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "additionalProperties": false } },
+    { "name": "train_search", "description": "查询同程火车票资源，包含高铁与动车。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "departure_station": { "type": "string" }, "arrival_station": { "type": "string" }, "train_number": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } },
+    { "name": "hotel_search", "description": "查询指定城市或目的地的同程酒店资源。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
+    { "name": "scenery_search", "description": "查询指定城市或目的地的同程景区与门票资源。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
+    { "name": "bus_search", "description": "查询同程汽车票与长途班次，需提供出发地和目的地。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } },
+    { "name": "travel_search", "description": "一次查询同程度假资源和行程建议；规划多日游时优先使用此工具，不拆成多个单品请求。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "destination": { "type": "string" }, "date": { "type": "string" }, "days": { "type": "integer" }, "extra": { "type": "string" } }, "required": ["destination"], "additionalProperties": false } },
+    { "name": "traffic_search", "description": "出行方式未指定时查询同程综合交通方案，需提供出发地和目的地。 日期请使用 YYYY-MM-DD；剔除日期不符的资源，无法核对日期时会明确提示。", "parameters": { "type": "object", "properties": { "departure": { "type": "string" }, "destination": { "type": "string" }, "date": { "type": "string" }, "extra": { "type": "string" } }, "required": ["departure", "destination"], "additionalProperties": false } }
   ]
 }

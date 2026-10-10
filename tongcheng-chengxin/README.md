@@ -38,3 +38,5 @@ A query succeeds only when real gateway data comes back. Always double-check the
 - `npm test` — offline unit tests (node:test).
 - `npm run build` — check + tests + package member check.
 - Package with Cindy's `ghost_forge_pack` from this directory to produce the `.cindy` artifact.
+
+Dates must use YYYY-MM-DD. The plugin filters resources with mismatched departure/check-in dates; an unverified date is explicitly reported. Gateway requests share a 20-second total budget, including any retry. Independent queries run concurrently.

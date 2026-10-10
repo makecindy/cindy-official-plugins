@@ -22,7 +22,7 @@ async function handle(request) {
   if (request.method === 'initialize') {
     reply({ jsonrpc: '2.0', id: request.id, result: {
       protocolVersion: request.params && request.params.protocolVersion || '2025-03-26',
-      capabilities: { tools: {} }, serverInfo: { name: 'tongcheng-chengxin', version: '0.1.0' }
+      capabilities: { tools: {} }, serverInfo: { name: 'tongcheng-chengxin', version: '0.2.1' }
     } });
     return;
   }
@@ -53,15 +53,12 @@ async function handle(request) {
   }
 }
 
-let queue = Promise.resolve();
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
-  queue = queue.then(async () => {
-    let request;
-    try { request = JSON.parse(line); }
-    catch { reply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); return; }
-    await handle(request);
-  }).catch(() => {
+  let request;
+  try { request = JSON.parse(line); }
+  catch { reply({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); return; }
+  // Queries have independent request state and credentials; replies are correlated by id.
+  void handle(request).catch(() => {
     process.stderr.write('Tongcheng MCP worker request failed.\n');
   });
 });
-

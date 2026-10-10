@@ -3,12 +3,13 @@
 const API_BASE = 'https://wx.17u.cn/skills/gateway/api/v1/gateway';
 const API_VERSION = '1.0.0';
 const API_TIMEOUT_MS = 15_000;
+const TOTAL_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 const COMMON = {
   departure: { type: 'string', description: '出发城市或出发地。' },
   destination: { type: 'string', description: '目的城市、目的地或所在城市。' },
-  date: { type: 'string', description: '出发、入住或游玩日期；可使用自然语言。' },
+  date: { type: 'string', description: '出发、入住或游玩日期；请使用 YYYY-MM-DD。' },
   extra: { type: 'string', description: '保留日期、人数、时间、偏好、星级、席别等其它需求。' }
 };
 
@@ -80,24 +81,61 @@ function redact(message, secret) {
   return secret ? text.split(secret).join('[redacted]') : text;
 }
 
-// 同程网关偶发忽略 date 参数、回落返回其它日期的资源且不报错。
-// 这里对成功响应做返回日期与请求日期的一致性校验，不一致时自动重试一次。
+// Arrival/check-out dates can differ from departure/check-in dates.
 const DATE_VALUE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_KEYS = new Set(['depDate', 'arrDate', 'date', 'queryDate', 'checkInDate', 'checkOutDate', 'playDate', 'startDate', 'departDate']);
+const DATE_KEYS_BY_TOOL = {
+  flight_search: ['depDate', 'departDate', 'date'],
+  train_search: ['depDate', 'departDate', 'date'],
+  bus_search: ['depDate', 'departDate', 'date'],
+  hotel_search: ['checkInDate', 'date'],
+  scenery_search: ['playDate', 'startDate', 'date'],
+  travel_search: ['startDate', 'depDate', 'departDate', 'date'],
+  traffic_search: ['depDate', 'departDate', 'startDate', 'date']
+};
 
-function collectReturnedDates(value) {
+function filterDataByDate(value, requestedDate, toolName) {
+  const dateKeys = new Set(DATE_KEYS_BY_TOOL[toolName]);
   const dates = new Set();
-  const budget = { remaining: 20000 };
-  (function walk(node) {
-    if (budget.remaining <= 0 || dates.size > 64 || node === null || typeof node !== 'object') return;
-    budget.remaining -= 1;
-    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+  let matched = false;
+  let unverified = false;
+  const removed = Symbol('removed');
+  function walk(node, inheritedDate = null) {
+    if (node === null || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map((item) => {
+      if (!inheritedDate && item && typeof item === 'object'
+        && !Array.isArray(item) && !Object.values(item).some((child) => child && typeof child === 'object')
+        && !Object.keys(item).some((key) => dateKeys.has(key) && DATE_VALUE_RE.test(item[key]))) {
+        unverified = true;
+      }
+      return walk(item, inheritedDate);
+    }).filter((item) => item !== removed);
+    const ownDates = Object.entries(node)
+      .filter(([key, item]) => dateKeys.has(key) && typeof item === 'string' && DATE_VALUE_RE.test(item))
+      .map(([, item]) => item);
+    ownDates.forEach((date) => dates.add(date));
+    if (ownDates.some((date) => date !== requestedDate)) return removed;
+    const effectiveDate = ownDates[0] || inheritedDate;
+    const hasChildren = Object.values(node).some((item) => item !== null && typeof item === 'object');
+    if (!hasChildren && effectiveDate === requestedDate) matched = true;
+    const result = {};
     for (const [key, item] of Object.entries(node)) {
-      if (DATE_KEYS.has(key) && typeof item === 'string' && DATE_VALUE_RE.test(item)) { dates.add(item); continue; }
-      walk(item);
+      const filtered = walk(item, effectiveDate);
+      if (filtered !== removed) result[key] = filtered;
     }
-  })(value);
-  return dates;
+    return result;
+  }
+  const filtered = walk(value);
+  return { value: filtered === removed ? null : filtered, dates, matched, unverified };
+}
+
+function gatewayError(error, secret) {
+  const message = redact(error && error.message, secret);
+  if (/HTTP 401\b/.test(message)) return '同程授权失败（401），请在插件设置中重新保存有效的程心激活码。';
+  if (/HTTP (?:429|5\d\d)\b/.test(message)) return '同程服务繁忙或暂时不可用，请稍后重试。';
+  if (/HTTP 403\b/.test(message)) return '同程拒绝访问（403），请核对账号权限和激活码状态。';
+  if (/fetch failed|network|ENOTFOUND|ECONN|连接|网络/i.test(message)) return '无法连接同程网关，请检查网络连接后重试。';
+  if (/HTTP \d{3}\b/.test(message)) return '同程网关拒绝了请求，请核对查询参数后重试。';
+  return message;
 }
 
 async function requestGateway({ url, headers, body, timeoutMs = API_TIMEOUT_MS }) {
@@ -113,23 +151,47 @@ async function requestGateway({ url, headers, body, timeoutMs = API_TIMEOUT_MS }
       headers, body: JSON.stringify(body)
     });
     if (response.status >= 300 && response.status < 400) throw new Error('同程网关拒绝重定向');
-    const raw = await response.text();
-    if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('同程网关响应超过 8 MB 上限');
-    if (response.status < 200 || response.status >= 300) throw new Error(`同程网关 HTTP ${response.status}`);
+    if (response.status < 200 || response.status >= 300) {
+      if (response.body) await response.body.cancel().catch(() => {});
+      throw new Error(`同程网关 HTTP ${response.status}`);
+    }
+    const chunks = [];
+    let bytes = 0;
+    if (!response.body) throw new Error('同程网关返回了空响应，请稍后重试。');
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_RESPONSE_BYTES) {
+          controller.abort();
+          await reader.cancel().catch(() => {});
+          throw new Error('同程网关响应超过 8 MB 上限，请缩小查询范围。');
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally { reader.releaseLock(); }
+    const raw = Buffer.concat(chunks).toString('utf8');
     try { return JSON.parse(raw); } catch { throw new Error('同程网关返回了无法解析的 JSON'); }
   } catch (error) {
-    if (error && error.name === 'AbortError') throw new Error('同程网关请求超时（15 秒）');
+    if (error && error.name === 'AbortError') throw new Error('同程网关请求超时，请稍后重试。');
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-function createTongchengClient({ request = requestGateway } = {}) {
+function createTongchengClient({ request = requestGateway, now = Date.now } = {}) {
   return {
     async call(toolName, args, apiKey) {
       const validation = validateQuery(toolName, args);
       if (!validation.ok) throw new Error(validation.message);
+      if (args.date && (typeof args.date !== 'string' || !DATE_VALUE_RE.test(args.date)
+        || !Number.isFinite(Date.parse(args.date)) || new Date(args.date).toISOString().slice(0, 10) !== args.date)) {
+        throw new Error('请将查询日期明确为 YYYY-MM-DD（例如 2026-10-15），以便核对返回资源日期。');
+      }
+      const deadline = now() + TOTAL_TIMEOUT_MS;
       const route = ROUTES[toolName];
       const requestBody = buildRequestParams(args);
       const url = `${API_BASE}${route.path}`;
@@ -143,7 +205,7 @@ function createTongchengClient({ request = requestGateway } = {}) {
       if (apiKey) headers.authorization = `Bearer ${apiKey}`;
       let response;
       try { response = await request({ url, headers, body: requestBody, timeoutMs: API_TIMEOUT_MS }); }
-      catch (error) { throw new Error(redact(error && error.message, apiKey)); }
+      catch (error) { throw new Error(gatewayError(error, apiKey)); }
       if (!response || typeof response !== 'object') throw new Error('同程网关响应格式无效');
       if (response.code === 1 || response.code === '1') {
         return { status: 'no_results', message: response.message || `没有找到符合条件的${route.label}资源。`, data: response.data ?? null };
@@ -155,24 +217,29 @@ function createTongchengClient({ request = requestGateway } = {}) {
       const requestedDate = typeof requestBody.date === 'string' && DATE_VALUE_RE.test(requestBody.date)
         ? requestBody.date : null;
       if (requestedDate) {
-        const dates = collectReturnedDates(response.data);
-        if (dates.size > 0 && !dates.has(requestedDate)) {
-          let retryData = null;
-          try {
-            const retry = await request({ url, headers, body: requestBody, timeoutMs: API_TIMEOUT_MS });
-            if (retry && typeof retry === 'object' && (retry.code === 0 || retry.code === '0') && retry.data !== undefined) {
-              const retryDates = collectReturnedDates(retry.data);
-              if (retryDates.size > 0 && retryDates.has(requestedDate)) retryData = retry.data;
-            }
-          } catch { /* 重试失败时保留首次结果并明确提示 */ }
-          if (retryData) return { status: 'ok', message: '查询成功；以下内容来自同程接口响应。', data: retryData };
-          const returned = [...dates].sort().join('、');
-          return { status: 'date_mismatch', message: `注意：同程接口返回的资源日期（${returned}）与请求的 ${requestedDate} 不一致，已自动重试仍未修正；以下内容仅供参考，请核对日期后再使用。`, data: response.data };
+        const filtered = filterDataByDate(response.data, requestedDate, toolName);
+        if (filtered.matched) {
+          return { status: filtered.unverified ? 'date_unverified' : 'ok', message: filtered.unverified ? '已移除日期不符的资源，但部分资源没有可核对的日期，请在预订页面确认。' : '查询成功；已移除日期不符的资源。', data: filtered.value };
         }
+        if (filtered.dates.size === 0) {
+          return { status: 'date_unverified', message: '同程响应没有可核对的资源日期，请在预订页面确认日期。', data: filtered.value };
+        }
+        const remainingMs = deadline - now();
+        if (remainingMs > 0) {
+          try {
+            const retry = await request({ url, headers, body: requestBody, timeoutMs: Math.min(API_TIMEOUT_MS, remainingMs) });
+            if (retry && (retry.code === 0 || retry.code === '0') && retry.data !== undefined) {
+              const retryFiltered = filterDataByDate(retry.data, requestedDate, toolName);
+              if (retryFiltered.matched) return { status: retryFiltered.unverified ? 'date_unverified' : 'ok', message: retryFiltered.unverified ? '已移除日期不符的资源，但部分资源没有可核对的日期，请在预订页面确认。' : '查询成功；已移除日期不符的资源。', data: retryFiltered.value };
+            }
+          } catch { /* Never expose unchecked retry data. */ }
+        }
+        const returned = [...filtered.dates].sort().join('、');
+        return { status: 'date_mismatch', message: '同程资源日期（' + returned + '）与请求的 ' + requestedDate + ' 不一致；重试未修正或时间预算已耗尽，请核对日期后重试。', data: filtered.value };
       }
       return { status: 'ok', message: '查询成功；以下内容来自同程接口响应。', data: response.data };
     }
   };
 }
 
-module.exports = { API_BASE, API_VERSION, API_TIMEOUT_MS, ROUTES, TOOL_DEFINITIONS, buildRequestParams, validateQuery, createTongchengClient };
+module.exports = { API_BASE, API_VERSION, API_TIMEOUT_MS, TOTAL_TIMEOUT_MS, MAX_RESPONSE_BYTES, requestGateway, ROUTES, TOOL_DEFINITIONS, buildRequestParams, validateQuery, createTongchengClient };

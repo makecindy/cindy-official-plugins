@@ -90,3 +90,134 @@ test('responses honouring the requested date are returned without retry', async 
   assert.equal(calls, 1);
   assert.equal(result.status, 'ok');
 });
+
+const { API_TIMEOUT_MS, TOTAL_TIMEOUT_MS, MAX_RESPONSE_BYTES, requestGateway } = require('../node/tongcheng.cjs');
+const query = { departure: '上海', destination: '北京', date: '2026-10-15' };
+
+test('mixed dates are filtered per resource on both initial and retry responses', async () => {
+  for (const retry of [false, true]) {
+    let calls = 0;
+    const client = createTongchengClient({ request: async () => {
+      calls++;
+      const trainList = [{ trainNo: 'wrong', depDate: '2026-10-10' }];
+      if (!retry || calls > 1) trainList.push({ trainNo: 'correct', depDate: query.date, arrDate: '2026-10-16' });
+      return { code: 0, data: { trainDataList: [{ trainList }] } };
+    } });
+    const result = await client.call('train_search', query, '');
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.data.trainDataList[0].trainList.map((item) => item.trainNo), ['correct']);
+    assert.equal(calls, retry ? 2 : 1);
+  }
+});
+
+test('matching query metadata does not make entirely mismatched resources successful', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: {
+    queryDate: query.date, trainList: [{ depDate: '2026-10-10', trainNo: 'wrong' }]
+  } }) });
+  const result = await client.call('train_search', query, '');
+  assert.equal(result.status, 'date_mismatch');
+  assert.deepEqual(result.data.trainList, []);
+});
+
+test('natural-language and impossible dates cannot bypass date validation', async () => {
+  const client = createTongchengClient({ request: async () => { assert.fail('must not request'); } });
+  for (const date of ['明天', '2026-02-30']) {
+    await assert.rejects(client.call('train_search', { ...query, date }, ''), /YYYY-MM-DD/);
+  }
+});
+
+test('resources without dates are explicitly unverified', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: [{ trainNo: 'G1' }] }) });
+  assert.equal((await client.call('train_search', query, '')).status, 'date_unverified');
+});
+
+test('retry receives only remaining total budget and is skipped when exhausted', async () => {
+  for (const elapsed of [14000, 20001]) {
+    let clock = 100, calls = 0;
+    const timeouts = [];
+    const client = createTongchengClient({ now: () => clock, request: async ({ timeoutMs }) => {
+      calls++;
+      timeouts.push(timeoutMs);
+      clock += elapsed;
+      return { code: 0, data: [{ depDate: '2026-10-10' }] };
+    } });
+    assert.equal((await client.call('train_search', query, '')).status, 'date_mismatch');
+    assert.deepEqual(timeouts, elapsed < TOTAL_TIMEOUT_MS ? [API_TIMEOUT_MS, TOTAL_TIMEOUT_MS - elapsed] : [API_TIMEOUT_MS]);
+    assert.equal(calls, elapsed < TOTAL_TIMEOUT_MS ? 2 : 1);
+  }
+});
+
+test('HTTP authorization and network failures give actionable, redacted errors', async () => {
+  for (const [message, expected] of [['HTTP 401', /重新保存/], ['HTTP 403', /账号权限/], ['fetch failed', /网络连接/]]) {
+    const client = createTongchengClient({ request: async () => { throw new Error(message + ' fake-secret'); } });
+    await assert.rejects(client.call('train_search', query, 'fake-secret'), (error) => {
+      assert.match(error.message, expected);
+      assert.ok(!error.message.includes('fake-secret'));
+      return true;
+    });
+  }
+});
+
+test('gateway streams JSON and cancels oversized responses before reading the rest', async (t) => {
+  let reads = 0, cancelled = false;
+  t.mock.method(globalThis, 'fetch', async () => ({ status: 200, body: new ReadableStream({
+    pull(controller) { reads++; controller.enqueue(new Uint8Array(1024 * 1024)); },
+    cancel() { cancelled = true; }
+  }, { highWaterMark: 0 }) }));
+  await assert.rejects(requestGateway({ url: 'https://wx.17u.cn/test', headers: {}, body: {} }), /8 MB/);
+  assert.equal(reads, MAX_RESPONSE_BYTES / (1024 * 1024) + 1);
+  assert.equal(cancelled, true);
+});
+
+test('gateway decodes UTF-8 split across chunks and respects HTTP errors', async (t) => {
+  const buffer = Buffer.from(JSON.stringify({ code: 0, data: '上海' }));
+  t.mock.method(globalThis, 'fetch', async () => ({ status: 200, body: new ReadableStream({
+    start(controller) { for (const byte of buffer) controller.enqueue(Uint8Array.of(byte)); controller.close(); }
+  }) }));
+  assert.deepEqual(await requestGateway({ url: 'https://wx.17u.cn/test', headers: {}, body: {} }), { code: 0, data: '上海' });
+});
+
+test('queryDate echoes and dates belonging to other resource types are not proof', async () => {
+  for (const data of [
+    { queryDate: query.date, trainList: [{ trainNo: 'G1' }] },
+    { trainList: [{ trainNo: 'G1', checkInDate: query.date, arrDate: query.date }] }
+  ]) {
+    const client = createTongchengClient({ request: async () => ({ code: 0, data }) });
+    assert.equal((await client.call('train_search', query, '')).status, 'date_unverified');
+  }
+});
+
+test('hotel check-out dates do not reject a matching check-in date', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: [
+    { hotelName: 'Example hotel', checkInDate: query.date, checkOutDate: '2026-10-16' },
+    { hotelName: 'Wrong date', checkInDate: '2026-10-10' }
+  ] }) });
+  const result = await client.call('hotel_search', { destination: '上海', date: query.date }, '');
+  assert.equal(result.status, 'ok');
+  assert.equal(result.data.length, 1);
+});
+
+test('gateway checks HTTP authorization before attempting to consume an error body', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => ({ status: 401, body: null }));
+  const client = createTongchengClient();
+  await assert.rejects(client.call('train_search', query, ''), /重新保存/);
+});
+
+test('gateway aborts stalled requests within the supplied remaining budget', async (t) => {
+  let aborted = false;
+  t.mock.method(globalThis, 'fetch', async (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener('abort', () => {
+      aborted = true;
+      reject(new DOMException('aborted', 'AbortError'));
+    });
+  }));
+  await assert.rejects(requestGateway({ url: 'https://wx.17u.cn/test', headers: {}, body: {}, timeoutMs: 15 }), /超时/);
+  assert.equal(aborted, true);
+});
+
+test('a matching resource does not silently verify undated siblings', async () => {
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: [
+    { trainNo: 'correct', depDate: query.date }, { trainNo: 'unknown' }
+  ] }) });
+  assert.equal((await client.call('train_search', query, '')).status, 'date_unverified');
+});
