@@ -1,6 +1,6 @@
 {
   "name": "@cindy-plugin/tc-chengxin",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "commonjs",
   "scripts": { "test": "node --test test/*.cjs", "check": "node scripts/check.cjs", "package:check": "node scripts/package-check.cjs", "build": "node scripts/build.cjs" },

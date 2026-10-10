@@ -330,3 +330,22 @@ test('initial and retry protocol failures include recovery instructions', async 
     assert.match((await retryClient.call('train_search', query, '')).retryError, /重试/);
   }
 });
+
+test('nonempty business error details preserve recovery steps on initial and retry attempts', async () => {
+  const errorResponse = { code: 500, message: '服务异常 fake-secret' };
+  const client = createTongchengClient({ request: async () => errorResponse });
+  await assert.rejects(client.call('train_search', query, 'fake-secret'), (error) => {
+    assert.match(error.message, /服务异常/);
+    assert.match(error.message, /重试.*客服/);
+    assert.ok(!error.message.includes('fake-secret'));
+    return true;
+  });
+  let calls = 0;
+  const retryClient = createTongchengClient({ request: async () => ++calls === 1
+    ? { code: 0, data: [{ depDate: '2026-10-10' }] } : errorResponse
+  });
+  const result = await retryClient.call('train_search', query, 'fake-secret');
+  assert.match(result.message, /服务异常.*重试.*客服/);
+  assert.match(result.retryError, /重试/);
+  assert.ok(!JSON.stringify(result).includes('fake-secret'));
+});

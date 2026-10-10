@@ -213,8 +213,10 @@ function parseGatewayResponse(response, route, apiKey) {
   }
   if (response.code !== 0 && response.code !== '0') {
     const code = String(response.code ?? 'unknown');
+    const detail = typeof response.message === 'string' && response.message.trim()
+      ? response.message : '同程业务接口返回错误码 ' + code;
     const message = ['401', '403'].includes(code) ? 'HTTP ' + code
-      : response.message || '同程业务接口返回错误码 ' + code + '，请核对查询参数或稍后重试。';
+      : detail + '。请核对查询参数后稍后重试；持续失败时请联系同程客服。';
     throw new Error(gatewayError(new Error(message), apiKey));
   }
   if (response.data === undefined) throw new Error('同程网关成功响应缺少 data 字段，请稍后重试；持续失败时请更新插件或联系同程客服。');
