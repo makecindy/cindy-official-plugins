@@ -55,42 +55,56 @@ const statusNode = document.getElementById('status');
 const saveButton = document.getElementById('save');
 const clearButton = document.getElementById('clear');
 const key = 'tongcheng_api_key';
+let busy = true;
+let saved = null;
+
+function updateButtons() {
+  saveButton.disabled = busy;
+  clearButton.disabled = busy || saved === false;
+  keyInput.disabled = busy;
+}
 
 async function refresh(message) {
   try {
     const response = await fetch('/secrets');
     if (!response.ok) throw new Error();
     const list = await response.json();
-    const saved = Array.isArray(list) && list.some((item) => item.key === key && item.saved);
+    saved = Array.isArray(list) && list.some((item) => item.key === key && item.saved);
     statusNode.textContent = message || (saved ? text.saved : text.missing);
-    clearButton.disabled = !saved;
-  } catch { statusNode.textContent = text.readFailed; }
+    updateButtons();
+  } catch { saved = null; statusNode.textContent = text.readFailed; updateButtons(); }
 }
 
 saveButton.addEventListener('click', async () => {
+  if (busy) return;
   const value = keyInput.value;
   if (!value.trim()) { statusNode.textContent = text.empty; return; }
-  saveButton.disabled = true;
+  busy = true;
+  updateButtons();
   try {
     const response = await fetch('/secrets/' + key, { method: 'PUT', body: JSON.stringify({ value }) });
     if (!response.ok) throw new Error();
     keyInput.value = '';
+    saved = true;
     await refresh(text.saveOk);
   } catch { statusNode.textContent = text.saveFailed; }
-  finally { saveButton.disabled = false; }
+  finally { busy = false; updateButtons(); }
 });
 clearButton.addEventListener('click', async () => {
-  clearButton.disabled = true;
+  if (busy) return;
+  busy = true;
+  updateButtons();
   try {
     const response = await fetch('/secrets/' + key, { method: 'DELETE' });
     if (!response.ok) throw new Error();
+    saved = false;
     await refresh(text.clearOk);
-  } catch { statusNode.textContent = text.clearFailed; clearButton.disabled = false; }
+  } catch { statusNode.textContent = text.clearFailed; }
+  finally { busy = false; updateButtons(); }
 });
 
 async function initialize() {
-  saveButton.disabled = true;
-  clearButton.disabled = true;
+  updateButtons();
   try {
     const response = await fetch('/app-context');
     if (!response.ok) throw new Error();
@@ -102,6 +116,7 @@ async function initialize() {
     node.textContent = text[node.dataset.i18n];
   });
   await refresh();
-  saveButton.disabled = false;
+  busy = false;
+  updateButtons();
 }
 initialize();

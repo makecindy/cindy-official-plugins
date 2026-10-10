@@ -256,3 +256,42 @@ test('undated resources with nested properties cannot inherit a sibling match', 
     assert.equal(result.data.trainList.length, 2);
   }
 });
+
+test('multi-day travel verifies the start and preserves later itinerary dates', async () => {
+  const plan = { startDate: query.date, days: [
+    { date: query.date, title: 'Day 1' }, { date: '2026-10-16', title: 'Day 2' }
+  ] };
+  let calls = 0;
+  const client = createTongchengClient({ request: async () => {
+    calls++;
+    return { code: 0, data: { tripPlanDataList: [plan, { ...plan, startDate: '2026-10-10' }] } };
+  } });
+  const result = await client.call('travel_search', { destination: '北京', date: query.date, days: 2 }, '');
+  assert.equal(result.status, 'ok');
+  assert.equal(calls, 1);
+  assert.deepEqual(result.data.tripPlanDataList, [plan]);
+});
+
+test('retry failures preserve actionable, redacted authorization and connection messages', async () => {
+  for (const [message, expected] of [['HTTP 401', /重新保存/], ['HTTP 403', /账号权限/], ['fetch failed', /网络连接/]]) {
+    let calls = 0;
+    const client = createTongchengClient({ request: async () => {
+      if (++calls === 1) return { code: 0, data: [{ depDate: '2026-10-10' }] };
+      throw new Error(message + ' fake-secret');
+    } });
+    const result = await client.call('train_search', query, 'fake-secret');
+    assert.equal(result.status, 'date_mismatch');
+    assert.match(result.message, expected);
+    assert.match(result.retryError, expected);
+    assert.ok(!JSON.stringify(result).includes('fake-secret'));
+    assert.deepEqual(result.data, []);
+  }
+});
+
+test('travel plans without a resource start date retain all days but remain unverified', async () => {
+  const plan = { days: [{ date: query.date }, { date: '2026-10-16' }] };
+  const client = createTongchengClient({ request: async () => ({ code: 0, data: { tripPlanDataList: [plan] } }) });
+  const result = await client.call('travel_search', { destination: '北京', date: query.date, days: 2 }, '');
+  assert.equal(result.status, 'date_unverified');
+  assert.deepEqual(result.data.tripPlanDataList, [plan]);
+});

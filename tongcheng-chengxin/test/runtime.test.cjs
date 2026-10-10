@@ -57,3 +57,55 @@ test('settings follows host locale, falls back to English and localizes status m
     assert.match(nodes.get('status').textContent, locale === 'zh-CN' ? /输入/ : /Enter/);
   }
 });
+
+function loadSettings(fetch) {
+  const nodes = new Map();
+  const document = { documentElement: {}, getElementById(id) {
+    if (!nodes.has(id)) nodes.set(id, { value: '', addEventListener(event, fn) { this.click = fn; } });
+    return nodes.get(id);
+  }, querySelectorAll: () => [] };
+  vm.runInNewContext(source('settings.js'), { document, fetch });
+  return nodes;
+}
+
+test('settings serializes save and clear and restores both buttons', async () => {
+  for (const first of ['save', 'clear']) {
+    let finish, saved = true;
+    const operations = [];
+    const nodes = loadSettings(async (url, options) => {
+      if (url === '/app-context') return { ok: true, json: async () => ({ context: { locale: 'en' } }) };
+      if (url === '/secrets') return { ok: true, json: async () => [{ key: 'tongcheng_api_key', saved }] };
+      operations.push(options.method);
+      await new Promise((resolve) => { finish = resolve; });
+      saved = options.method === 'PUT';
+      return { ok: true };
+    });
+    await new Promise(setImmediate);
+    nodes.get('api-key').value = 'example-key';
+    const operation = nodes.get(first).click();
+    assert.equal(nodes.get('save').disabled, true);
+    assert.equal(nodes.get('clear').disabled, true);
+    await nodes.get(first === 'save' ? 'clear' : 'save').click();
+    assert.equal(operations.length, 1);
+    finish();
+    await operation;
+    assert.equal(nodes.get('save').disabled, false);
+    assert.equal(nodes.get('clear').disabled, !saved);
+  }
+});
+
+test('settings permits clearing after initial state-read failure and restores controls after write failure', async () => {
+  const operations = [];
+  const nodes = loadSettings(async (url, options) => {
+    if (url === '/app-context') return { ok: true, json: async () => ({ context: { locale: 'en' } }) };
+    if (url === '/secrets') throw new Error('network unavailable');
+    operations.push(options.method);
+    return { ok: false };
+  });
+  await new Promise(setImmediate);
+  assert.equal(nodes.get('clear').disabled, false);
+  await nodes.get('clear').click();
+  assert.deepEqual(operations, ['DELETE']);
+  assert.equal(nodes.get('save').disabled, false);
+  assert.equal(nodes.get('clear').disabled, false);
+});

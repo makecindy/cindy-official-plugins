@@ -107,7 +107,7 @@ function filterDataByDate(value, requestedDate, toolName) {
   let matched = false;
   let unverified = false;
   const removed = Symbol('removed');
-  function walk(node, inheritedDate = null) {
+  function walk(node, inheritedDate = null, resourceEntry = false) {
     if (node === null || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map((item) => {
       if (!inheritedDate && item && typeof item === 'object'
@@ -115,7 +115,7 @@ function filterDataByDate(value, requestedDate, toolName) {
         && !Object.keys(item).some((key) => dateKeys.has(key) && typeof item[key] === 'string' && DATE_VALUE_RE.test(item[key]))) {
         unverified = true;
       }
-      return walk(item, inheritedDate);
+      return walk(item, inheritedDate, resourceEntry);
     }).filter((item) => item !== removed);
     const ownDates = Object.entries(node)
       .filter(([key, item]) => dateKeys.has(key) && typeof item === 'string' && DATE_VALUE_RE.test(item))
@@ -124,10 +124,21 @@ function filterDataByDate(value, requestedDate, toolName) {
     if (ownDates.some((date) => date !== requestedDate)) return removed;
     const effectiveDate = ownDates[0] || inheritedDate;
     const isGroup = Object.keys(node).some((key) => RESOURCE_COLLECTIONS.has(key));
-    if (!isGroup && effectiveDate === requestedDate) matched = true;
+    if (toolName === 'travel_search' && !isGroup && !effectiveDate
+      && (resourceEntry || ['days', 'itinerary', 'dayList'].some((key) => Array.isArray(node[key])))) {
+      // A plan without its own start date cannot be proved by one internal day.
+      unverified = true;
+      return node;
+    }
+    if (!isGroup && effectiveDate === requestedDate) {
+      matched = true;
+      // Validate the resource's departure/start, not its internal itinerary days,
+      // arrival segments, seat metadata or other nested dates.
+      return node;
+    }
     const result = {};
     for (const [key, item] of Object.entries(node)) {
-      const filtered = walk(item, effectiveDate);
+      const filtered = walk(item, effectiveDate, RESOURCE_COLLECTIONS.has(key));
       if (filtered !== removed) result[key] = filtered;
     }
     return result;
@@ -233,6 +244,7 @@ function createTongchengClient({ request = requestGateway, now = Date.now } = {}
           return { status: 'date_unverified', message: '同程响应没有可核对的资源日期，请在预订页面确认日期。', data: filtered.value };
         }
         const remainingMs = deadline - now();
+        let retryError = null;
         if (remainingMs > 0) {
           try {
             const retry = await request({ url, headers, body: requestBody, timeoutMs: Math.min(API_TIMEOUT_MS, remainingMs) });
@@ -240,10 +252,10 @@ function createTongchengClient({ request = requestGateway, now = Date.now } = {}
               const retryFiltered = filterDataByDate(retry.data, requestedDate, toolName);
               if (retryFiltered.matched) return { status: retryFiltered.unverified ? 'date_unverified' : 'ok', message: retryFiltered.unverified ? '已移除日期不符的资源，但部分资源没有可核对的日期，请在预订页面确认。' : '查询成功；已移除日期不符的资源。', data: retryFiltered.value };
             }
-          } catch { /* Never expose unchecked retry data. */ }
+          } catch (error) { retryError = gatewayError(error, apiKey); }
         }
         const returned = [...filtered.dates].sort().join('、');
-        return { status: 'date_mismatch', message: '同程资源日期（' + returned + '）与请求的 ' + requestedDate + ' 不一致；重试未修正或时间预算已耗尽，请核对日期后重试。', data: filtered.value };
+        return { status: 'date_mismatch', message: '同程资源日期（' + returned + '）与请求的 ' + requestedDate + ' 不一致。' + (retryError ? '重试失败：' + retryError : '重试未修正或时间预算已耗尽，请核对日期后重试。'), data: filtered.value, ...(retryError ? { retryError } : {}) };
       }
       return { status: 'ok', message: '查询成功；以下内容来自同程接口响应。', data: response.data };
     }
