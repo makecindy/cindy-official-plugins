@@ -67,6 +67,22 @@ test('official write requests report unknown outcome after invalid Router output
   );
 });
 
+test('official write RPC errors retain the upstream reason', async () => {
+  const stdout = new EventEmitter();
+  const child = new EventEmitter();
+  child.stdout = stdout;
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.write = () => stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'slot unavailable' } }) + '\n'));
+  child.stdin.end = () => {};
+  child.kill = () => {};
+  const router = new official.Router(child);
+  await assert.rejects(
+    router.request('tools/call', { name: 'make_box', arguments: { slot: 'slot-1' } }),
+    error => error.code === 'OFFICIAL_RPC' && /slot unavailable/.test(error.message) && /不要直接重做/.test(error.message),
+  );
+});
+
 test('legacy transport rejects missing credentials and invalid ports before opening a socket', async () => {
   let opened = false;
   const transport = { createConnection() { opened = true; throw new Error('must not open'); } };

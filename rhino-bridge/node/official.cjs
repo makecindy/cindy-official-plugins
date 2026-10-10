@@ -7,7 +7,8 @@ const LIMIT = 900000;
 const BLOCKED = new Set(['spawn_slot', 'close_slot']);
 function error(code, message) { return Object.assign(new Error(message), { code }); }
 function unknownOutcome(reason) {
-  return error(reason.code || 'OFFICIAL_OUTCOME_UNKNOWN', '官方写操作请求已发出，但结果可能已经执行；请先检查 Rhino 模型或原操作结果，不要直接重做。');
+  const detail = reason?.message ? '上游原因：' + String(reason.message).slice(0, 1200) + '。' : '';
+  return error(reason.code || 'OFFICIAL_OUTCOME_UNKNOWN', '官方写操作请求已发出，但结果可能已经执行；' + detail + '请先检查 Rhino 模型或原操作结果，不要直接重做。');
 }
 function validateConfig(config) {
   const file = config?.routerPath;
