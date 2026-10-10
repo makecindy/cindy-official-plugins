@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title data-i18n="title">同程程心设置</title><link rel="stylesheet" href="settings.css"><script src="settings.js" defer></script></head>
+<body>
+  <main>
+    <h2 data-i18n="heading">同程程心授权</h2>
+    <p data-i18n="intro">填写你自己的程心激活码，即可查询机票、火车票、酒店等旅行资源。</p>
+    <section class="key-help" aria-labelledby="key-help-title">
+      <h3 id="key-help-title" data-i18n="helpTitle">获取 API Key</h3>
+      <ol>
+        <li data-i18n="step1">打开同程旅行 App 或微信小程序，登录你的同程账号。</li>
+        <li data-i18n="step2">在顶部搜索「程心激活码」，按页面提示申领。</li>
+        <li data-i18n="step3">将领取的激活码粘贴到下方，点击「保存 Key」。</li>
+      </ol>
+      <div class="help-links">
+        <a href="https://www.ly.com/" data-i18n="website">打开同程官网</a>
+        <a href="https://www.ly.com/public/newhelp/CustomerService.html" data-i18n="support">联系同程客服</a>
+      </div>
+      <p data-i18n="helpNote">激活码需在 App 或小程序内申领；官网链接用于访问同程，客服可协助处理申领问题。</p>
+    </section>
+    <label for="api-key" data-i18n="label">API Key（程心激活码）</label>
+    <input id="api-key" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="key-help-title">
+    <div class="actions">
+      <button id="save" type="button" data-i18n="save">保存 Key</button>
+      <button id="clear" type="button" data-i18n="clear">清除</button>
+    </div>
+    <p id="status" role="status" aria-live="polite" data-i18n="loading">正在读取授权状态…</p>
+  </main>
+</body>
+</html>

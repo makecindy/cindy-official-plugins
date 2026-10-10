@@ -1,0 +1,16 @@
+:root { color: var(--text-primary, #262626); font: 14px/1.5 Inter, sans-serif; }
+body { margin: 0; color: var(--text-primary, #262626); background: transparent; }
+main { display: grid; gap: 10px; padding: 4px; }
+h2, p { margin: 0; } h2 { font-size: 16px; line-height: 24px; font-weight: 500; } p { color: var(--text-secondary, #737373); }
+h3 { margin: 0; font-size: 14px; line-height: 21px; font-weight: 500; }
+.key-help { display: grid; gap: 8px; padding-block: 12px; border-block: 1px solid var(--border-default, #d7d7d4); }
+ol { margin: 0; padding-left: 22px; color: var(--text-secondary, #737373); }
+.help-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.help-links a { display: inline-flex; align-items: center; min-height: 36px; color: var(--text-primary, #262626); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.help-links a:hover { color: var(--text-secondary, #737373); }
+.help-links a:focus-visible { outline: 2px solid var(--focus-ring, #737373); outline-offset: 2px; }
+label { font-weight: 500; }
+input { width: 100%; min-height: 36px; box-sizing: border-box; border: 1px solid var(--border-default, #d7d7d4); border-radius: 9999px; padding: 8px 12px; color: var(--text-primary, #262626); background: var(--surface-elevated, #fff); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button { min-height: 36px; border: 1px solid var(--border-default, #d7d7d4); border-radius: 9999px; padding: 7px 14px; color: var(--text-primary, #262626); background: var(--surface-elevated, #fff); cursor: pointer; }
+button:hover:not(:disabled) { background: var(--accent-soft, #e5e5e5); } button:focus-visible, input:focus-visible { outline: 2px solid var(--focus-ring, #737373); outline-offset: 2px; } button:disabled { color: var(--text-tertiary, #a3a3a3); cursor: not-allowed; }
