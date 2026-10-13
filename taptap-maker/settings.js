@@ -4,6 +4,8 @@
   var CHANNEL = 'taptap-maker-settings';
   var MESSAGES = {
     en: {
+      previewEnabled: 'Open the preview in the right sidebar after a build',
+      previewHint: 'On by default. Turning off keeps builds from opening or refreshing the right sidebar; the preview link is still returned so you can open it in your own browser.',
       imageEnabled: 'Allow Maker image generation',
       imageHint: 'On by default. Includes single images, batches and edits; may consume Maker credits. Turning off blocks future requests, not tasks already submitted.',
       videoEnabled: 'Allow Maker video generation',
@@ -57,6 +59,8 @@
       responseTimeout: 'The TapTap Maker plugin timed out. Try again.',
     },
     'zh-CN': {
+      previewEnabled: '构建成功后在右侧边栏打开预览',
+      previewHint: '默认开启。关闭后，构建不会再打开或刷新右侧边栏，仍会返回预览链接，可在自己的浏览器中打开。',
       imageEnabled: '允许 Maker 生图',
       imageHint: '默认开启，包含单张生图、批量生图和改图，可能消耗 Maker 积分。关闭后拦截后续请求，不影响已提交任务。',
       videoEnabled: '允许 Maker 生视频',
@@ -103,6 +107,8 @@
       operationFailed: 'TapTap Maker 设置操作失败', responseTimeout: 'TapTap Maker 插件响应超时，请稍后重试',
     },
     ja: {
+      previewEnabled: 'ビルド成功後に右サイドバーでプレビューを開く',
+      previewHint: '既定ではオンです。オフにすると、ビルドで右サイドバーを開いたり更新したりしません。プレビューのリンクは返されるので、お使いのブラウザで開けます。',
       imageEnabled: 'Maker の画像生成を許可',
       imageHint: '初期設定は有効です。単一・一括生成と画像編集を含み、Maker クレジットを消費する場合があります。無効化は今後のリクエストに適用され、送信済みのタスクには影響しません。',
       videoEnabled: 'Maker の動画生成を許可',
@@ -149,6 +155,8 @@
       operationFailed: 'TapTap Maker の設定操作に失敗しました。', responseTimeout: 'TapTap Maker プラグインがタイムアウトしました。再試行してください。',
     },
     ko: {
+      previewEnabled: '빌드 성공 후 오른쪽 사이드바에서 미리보기 열기',
+      previewHint: '기본적으로 켜져 있습니다. 끄면 빌드가 오른쪽 사이드바를 열거나 새로 고치지 않으며, 미리보기 링크는 그대로 반환되므로 사용 중인 브라우저에서 열 수 있습니다.',
       imageEnabled: 'Maker 이미지 생성 허용',
       imageHint: '기본적으로 켜져 있습니다. 단일·일괄 생성 및 편집을 포함하며 Maker 크레딧이 사용될 수 있습니다. 끄면 이후 요청만 차단되며 이미 제출한 작업에는 영향을 주지 않습니다.',
       videoEnabled: 'Maker 동영상 생성 허용',
@@ -221,6 +229,7 @@
   var selectedProjectIds = new Set();
   var nextRequestId = 1;
   var mediaControls = [
+    { key: 'makerPreviewEnabled', toggle: document.getElementById('maker-preview-enabled') },
     { key: 'makerImageEnabled', toggle: document.getElementById('maker-image-enabled') },
     { key: 'makerVideoEnabled', toggle: document.getElementById('maker-video-enabled') },
     { key: 'makerAudioEnabled', toggle: document.getElementById('maker-audio-enabled') },

@@ -116,6 +116,11 @@
 
   <section class="option project-section">
     <label class="option-row">
+      <input id="maker-preview-enabled" type="checkbox" role="switch" disabled aria-describedby="maker-preview-hint">
+      <span class="option-title" data-i18n="previewEnabled">Open the preview in the right sidebar after a build</span>
+    </label>
+    <p id="maker-preview-hint" class="hint" data-i18n="previewHint">On by default. Turning off keeps builds from opening or refreshing the right sidebar; the preview link is still returned so you can open it in your own browser.</p>
+    <label class="option-row">
       <input id="maker-image-enabled" type="checkbox" role="switch" disabled aria-describedby="maker-image-hint">
       <span class="option-title" data-i18n="imageEnabled">Allow Maker image generation</span>
     </label>
