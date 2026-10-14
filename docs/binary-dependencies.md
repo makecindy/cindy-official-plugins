@@ -115,8 +115,10 @@ dependencies into the package. User devices never fill in missing dependencies.
    automatically prove two packages equivalent.
 5. Artifacts expire after 7 days; an authorized contributor can rerun the workflow.
    Documentation-only PRs produce no plugin artifact. Verification packages never
-   go to Platform/OSS; after merge, CN/Global independently rebuild and use the
-   existing release review flow.
+   go to Platform/OSS. CN publishing has been removed and Global publishing is
+   temporarily paused for service maintenance, so merging currently triggers no
+   production rebuild or upload. Once Global publishing resumes, it will rebuild
+   packages independently of PR artifacts and use the existing release review flow.
 
 ## Optional: reproduce the repository build locally
 
@@ -134,8 +136,8 @@ unzip -l /tmp/my-plugin.cindy
 ```
 
 The local packager uses local HEAD, PR CI uses a temporary head/base merge, and
-publishing uses the merged main commit. Compare actual source, contents and modes,
-not merely filenames, when establishing equivalence.
+Global publishing, once resumed, uses the merged main commit. Compare actual
+source, contents and modes, not merely filenames, when establishing equivalence.
 
 ## Declaration
 
@@ -386,18 +388,22 @@ add runtime permission mechanisms nor prove binary behavior safe.
 ## CI and trust boundary
 
 PR CI runs offline collector regression cases and dry-runs changed plugins using
-the same packager. CN and Global retain independent publishing workflows. Each
-workflow packages in a job with read-only repository access, no persisted checkout
-credentials, no release secrets and no OIDC permission. Its immutable artifact
+the same packager. CN publishing has been removed; Global publishing is temporarily
+paused for service maintenance, including manual dispatches. PR verification and
+its test artifacts remain available.
+
+Once resumed, the retained Global workflow packages in a job with read-only
+repository access, no persisted checkout credentials, no release secrets and no
+OIDC permission. Its immutable artifact
 contains the complete package, SHA-256, source commit and plugin directory.
 
-A separate publishing job obtains that run's artifact, checks its identity and
-digest, and uploads it through the existing Platform/OIDC path. It does not check
+A separate Global publishing job then obtains that run's artifact, checks its
+identity and digest, and uploads it through the existing Platform/OIDC path. It does not check
 out the repository, fetch dependencies or run plugin/build code. A failed package
 has no artifact and cannot publish; other successful plugins can proceed.
 
 This reduces exposure of publishing credentials; it is **not a claim that
 downloaded binaries are safe**. SHA-256 verifies selected bytes, not their
 behavior. Dependency/URL/hash/license changes require maintainer review, and
-regional Platform approval remains in place. Existing PR plugin tests may still
-execute source code; this mechanism adds no author-controlled lifecycle hooks.
+Global Platform approval remains required after publishing resumes. Existing PR
+plugin tests may still execute source code; this mechanism adds no author-controlled lifecycle hooks.
