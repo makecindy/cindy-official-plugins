@@ -19,7 +19,7 @@
 > | `taptap-test-plan` | `taptap-suite/references/taptap-test-plan` |
 > | `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
 > | `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
-> | `taptap-community-management` | `taptap-suite/references/taptap-community-management` |
+> | `taptap-community-management` | `taptap-suite/references/taptap-community-management/MANUAL.md` |
 >
 > **两层手册**:本插件的手册是**执行纪律层**——它规定怎么经 `call_tool` 调、写门禁怎么走、失败三态怎么读,冲突时一律以它为准。
 > 需要 CLI 自带的官方原文(安装 CLI 时内置,随 CLI 版本更新)作为**深入参考**时,用:
