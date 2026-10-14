@@ -7,7 +7,6 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License" /></a>
   <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/pr-verify.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/pr-verify.yml/badge.svg" alt="Verify pull request" /></a>
-  <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins.yml/badge.svg" alt="Publish (CN)" /></a>
   <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins-global.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins-global.yml/badge.svg" alt="Publish (Global)" /></a>
   <a href="CONTRIBUTING.zh-CN.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
 </p>
@@ -24,11 +23,11 @@
 - **正在用 Cindy？** 不需要本仓库——在 Cindy 客户端打开「插件」页，下方已
   全量开放的插件都可以一键安装（标注「定向灰度」的仍在分批放量，暂未对所有
   人开放）。
-- **想给 Cindy 写插件？** 本仓库接受外部贡献：PR 合入 `main` 后，包会自动提交到
-  CN / Global 两区审核队列；只有对应区域审核通过后才会在客户端可见。从
+- **想给 Cindy 写插件？** 本仓库接受外部贡献：国内推包逻辑已移除，海外因服务维护
+  暂停推包，当前 PR 合入 `main` 不会上传新包。从
   [提交你的插件](#提交你的插件)开始。
 
-已安装的市场插件会沿安装时记录的来源静默更新。因此，合入后的版本升级可以在
+已安装的市场插件会沿安装时记录的来源静默更新。发布恢复且审核通过后，版本升级可以在
 用户无需再次点击、也不会出现能力确认弹窗的情况下到达已安装用户。请把能力扩张
 和运行时行为变更视为立即生效的线上变更：包内 `ghost.json` 只声明实际必需的最小能力，
 遵守 Host 授权及凭证边界；市场摘要不是另一套安装权限门禁。
@@ -84,9 +83,9 @@
    自动 review 按
    [`.greptile/rules.md`](./.greptile/rules.md) 的完整规则执行；维护者按同一套
    [审查标准](#审查标准)人工审查。请求 review 前先过一遍下方自查清单。
-6. **提交并上架**——合入 `main` 后 CN / Global Workflow 自动通过 Plugin Platform
-   提交真实包。两区分别审核；只有审核通过的 release 才会下发给兼容客户端，拒绝
-   不会影响此前已通过的版本。审核通过后，绑定该市场来源的已安装客户端会静默更新。
+6. **提交并上架**——国内推包逻辑已移除，海外因服务维护暂时停止推包，当前合入
+   `main` 不会上传新包。海外恢复推包后，仍须经过 Plugin Platform 审核，批准后才会
+   下发给兼容客户端。本次流水线暂停不改变已有的已批准版本。
 
 ## 审查标准
 
@@ -167,25 +166,16 @@ cindy-art/
 
 ## 自动提交与审核
 
-一句话：**合入 `main` 会自动提交到双区；对用户可见仍需每个区域的 Plugin Platform
-分别审核通过。**
+**因服务维护，暂时停止新包推送。** 国内推包逻辑已删除，保留的
+[海外 Workflow](./.github/workflows/publish-cindy-plugins-global.yml)
+在 `main` push 和手动触发时显示维护提示；检测与上传任务均已禁用，因此两种入口都
+不会构建或提交新包。PR 验证和测试包产物仍然可用。
 
-共有两个发布 Workflow，都只允许从 `main` 发布：
-
-- [`publish-cindy-plugins.yml`](./.github/workflows/publish-cindy-plugins.yml) ——
-  `Publish Cindy Plugins (CN)`
-- [`publish-cindy-plugins-global.yml`](./.github/workflows/publish-cindy-plugins-global.yml) ——
-  `Publish Cindy Plugins (Global)`
-
-两者均已启用，使用相同的提交链路：
-
-- `main` 的普通 push 只提交本次发生变化的插件目录；没有触及插件目录的 push 不提交。
-- Actions 页面手动运行会全量提交当前全部插件，供仓库迁移后首次建档或显式重提使用。
-- 各自通过 GitHub Actions OIDC（audience `cindy-plugin`）访问受保护的 Plugin Platform
-  端点。Platform 创建待审核 release 并通知 reviewer，不允许 Workflow 绕过审核直连
-  Plugin Server。
-- 两区独立打包、提交、审核和汇报；一边失败或拒绝不影响另一边。仓库不提供 Dev 发布
-  Workflow。
+服务维护结束后，通过新的审查变更移除海外 `detect` 与 `publish` 任务中注明的 `false` 守卫。
+保留的逻辑在 `main` push 时提交变更插件，手动触发时提交全部当前插件；恢复后应手动
+触发一次，以覆盖维护期间合入的插件。推包仍须使用 GitHub Actions OIDC
+（audience `cindy-plugin`）访问受保护的 Plugin Platform 端点，不允许绕过审核直连
+Plugin Server。本次流水线暂停不改变已有的已批准版本。
 
 审核通过后，兼容客户端会收到该 release；低于 `minCindyVersion` 的客户端会继续收到
 已有的最新兼容旧 release（如果存在）。Desktop 信任该 Server 投影，不再追加版本确认。

@@ -7,10 +7,6 @@ import path from 'node:path';
 import test from 'node:test';
 
 const workflowRoot = new URL('../.github/workflows/', import.meta.url);
-const cnWorkflow = readFileSync(
-  new URL('publish-cindy-plugins.yml', workflowRoot),
-  'utf8',
-);
 const globalWorkflow = readFileSync(
   new URL('publish-cindy-plugins-global.yml', workflowRoot),
   'utf8',
@@ -211,7 +207,7 @@ test('PR verification artifacts are scoped, pinned and uploaded before attestati
   assert.ok(prWorkflow.indexOf('name: Dry-run plugin packaging') < prWorkflow.indexOf('name: Upload PR verification packages'));
   assert.ok(prWorkflow.indexOf('name: Upload PR verification packages') < prWorkflow.indexOf('name: Require Cindy device verification attestation'));
   assert.doesNotMatch(prWorkflow, /pull_request_target|id-token: write|secrets\./);
-  for (const publisher of [cnWorkflow, globalWorkflow]) {
+  for (const publisher of [globalWorkflow]) {
     assert.doesNotMatch(publisher, /pr-plugins-|workflow_run:/);
   }
 });
@@ -277,31 +273,37 @@ test('PR packaging stages only complete packages with matching hash and merge id
   assert.notEqual(run().status, 0, 'wrong PR head must be rejected');
 });
 
-test('CN and Global plugin publishers are operationally independent', () => {
-  assert.match(cnWorkflow, /^name: Publish Cindy Plugins \(CN\)$/m);
-  assert.match(globalWorkflow, /^name: Publish Cindy Plugins \(Global\)$/m);
-  assert.match(cnWorkflow, /group: cindy-plugin-publish-cn-prod-/);
-  assert.match(globalWorkflow, /group: cindy-plugin-publish-global-prod-/);
-
-  assert.match(cnWorkflow, /secrets\.CINDY_PLUGIN_PLATFORM_URL_CN/);
-  assert.doesNotMatch(cnWorkflow, /CINDY_PLUGIN_PLATFORM_URL_GLOBAL/);
+test('CN publishing is removed and Global publishing is paused for service maintenance', () => {
+  assert.equal(existsSync(new URL('publish-cindy-plugins.yml', workflowRoot)), false);
+  for (const file of readdirSync(workflowRoot).filter(name => /\.ya?ml$/.test(name))) {
+    assert.doesNotMatch(readFileSync(new URL(file, workflowRoot), 'utf8'), /CINDY_PLUGIN_(?:PLATFORM|SERVER)_URL_CN|cindy-plugin-publish-cn-prod/);
+  }
+  for (const job of ['detect', 'publish']) {
+    const body = globalWorkflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0];
+    assert.ok(body, `missing ${job} job`);
+    assert.match(body, /^    if: \$\{\{ false && [^\n]+ \}\}$/m, `${job} must be disabled for every trigger`);
+  }
+  const packaging = globalWorkflow.split('\n  package:\n')[1].split('\n  publish:\n')[0];
+  assert.match(packaging, /^    needs: detect$/m);
+  assert.doesNotMatch(packaging, /always\(|!cancelled\(/);
+  assert.match(globalWorkflow, /service maintenance/);
+  assert.match(globalWorkflow, /海外插件服务维护中，暂时停止新包推送/);
   assert.match(globalWorkflow, /secrets\.CINDY_PLUGIN_PLATFORM_URL_GLOBAL/);
-  assert.doesNotMatch(globalWorkflow, /CINDY_PLUGIN_PLATFORM_URL_CN/);
 });
 
-test('both production publishers route through protected Platform endpoints', () => {
-  for (const workflow of [cnWorkflow, globalWorkflow]) {
+test('the retained Global publisher routes through protected Platform endpoints', () => {
+  for (const workflow of [globalWorkflow]) {
     assert.doesNotMatch(workflow, /CINDY_PLUGIN_SERVER_URL_/);
     assert.doesNotMatch(workflow, /api\/publisher\/releases/);
     assert.doesNotMatch(workflow, /https:\/\/(?:plugin|platform)\./);
   }
 });
 
-test('both regional publishers support main pushes and full manual republish', () => {
-  for (const workflow of [cnWorkflow, globalWorkflow]) {
+test('the paused Global publisher retains main and manual publishing logic for resumption', () => {
+  for (const workflow of [globalWorkflow]) {
     assert.match(workflow, /push:\n    branches:\n      - main/);
     assert.match(workflow, /workflow_dispatch:/);
-    assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+    assert.match(workflow, /if: \$\{\{ false && github\.ref == 'refs\/heads\/main' \}\}/);
     assert.match(workflow, /EVENT_NAME === 'workflow_dispatch'/);
     assert.match(workflow, /Publishing all Cindy plugins:/);
     assert.match(workflow, /id-token: write/);
@@ -314,10 +316,10 @@ test('both regional publishers support main pushes and full manual republish', (
   }
 });
 
-test('both regional publishers pin actions in the OIDC publishing chain', () => {
+test('the retained Global publisher pins actions in the OIDC publishing chain', () => {
   const checkoutRef = '3d3c42e5aac5ba805825da76410c181273ba90b1';
   const githubScriptRef = '3a2844b7e9c422d3c10d287c895573f7108da1b3';
-  for (const workflow of [cnWorkflow, globalWorkflow]) {
+  for (const workflow of [globalWorkflow]) {
     assert.match(workflow, new RegExp(`actions/checkout@${checkoutRef}`));
     assert.doesNotMatch(workflow, /actions\/checkout@v\d+/);
     assert.match(
@@ -329,7 +331,7 @@ test('both regional publishers pin actions in the OIDC publishing chain', () => 
 });
 
 test('dependency collection cannot use the publishing job credentials', () => {
-  for (const workflow of [cnWorkflow, globalWorkflow]) {
+  for (const workflow of [globalWorkflow]) {
     const packaging = workflow.split('\n  package:\n')[1]?.split('\n  publish:\n')[0];
     const publishing = workflow.split('\n  publish:\n')[1];
     assert.ok(packaging && publishing);
@@ -350,7 +352,7 @@ test('dependency collection cannot use the publishing job credentials', () => {
   assert.match(prWorkflow, /node \.github\/scripts\/check-source-size\.mjs/);
 });
 
-test('regional workflow scripts package, transfer, verify and publish the same bytes locally', (t) => {
+test('retained Global workflow scripts package, transfer, verify and publish the same bytes locally', (t) => {
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'cindy-publish-local-'));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const build = path.join(fixture, 'build');
@@ -394,7 +396,7 @@ if (url === 'https://oidc.example.test/token?request=1&audience=cindy-plugin') {
     assert.ok(run, 'missing workflow script: ' + name);
     return run.split('\n').map(line => line.replace(/^          /, '')).join('\n');
   };
-  for (const [region, workflow] of [['CN', cnWorkflow], ['GLOBAL', globalWorkflow]]) {
+  for (const [region, workflow] of [['GLOBAL', globalWorkflow]]) {
     const built = path.join(fixture, region + '-built');
     const publish = path.join(fixture, region + '-publish');
     mkdirSync(built);
@@ -552,7 +554,7 @@ test('contributor guidance never checks out PR code and refreshes when Verify co
   assert.match(guidanceWorkflow, /checks: read/);
   assert.match(guidanceWorkflow, /jq -s 'add \/\/ \[\]'/);
   assert.match(guidanceWorkflow, /MUST NEVER check out/);
-  for (const publisher of [cnWorkflow, globalWorkflow]) {
+  for (const publisher of [globalWorkflow]) {
     assert.doesNotMatch(publisher, /pr-guidance|workflow_run:/);
   }
 });

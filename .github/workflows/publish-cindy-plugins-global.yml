@@ -14,9 +14,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  maintenance:
+    name: Publishing paused for service maintenance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain maintenance pause
+        run: echo "::notice::Global plugin package publishing is temporarily paused for service maintenance. / 海外插件服务维护中，暂时停止新包推送。"
+
   detect:
     name: Detect plugins to publish
-    if: github.ref == 'refs/heads/main'
+    # Service maintenance: pause both main pushes and manual dispatches.
+    # Remove the false guard after maintenance.
+    if: ${{ false && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     outputs:
       plugins: ${{ steps.changes.outputs.result }}
@@ -201,7 +210,9 @@ jobs:
     needs: [detect, package]
     # Keep successful plugins publishable when another matrix build fails.
     # A failed package has no artifact, so its own upload cannot proceed.
-    if: ${{ !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.plugins != '[]' }}
+    # Service maintenance: explicitly disable uploads, including manual dispatches.
+    # Remove the false guard after maintenance.
+    if: ${{ false && !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.plugins != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

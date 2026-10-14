@@ -7,7 +7,6 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License" /></a>
   <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/pr-verify.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/pr-verify.yml/badge.svg" alt="Verify pull request" /></a>
-  <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins.yml/badge.svg" alt="Publish (CN)" /></a>
   <a href="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins-global.yml"><img src="https://github.com/makecindy/cindy-official-plugins/actions/workflows/publish-cindy-plugins-global.yml/badge.svg" alt="Publish (Global)" /></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
 </p>
@@ -26,14 +25,14 @@ This is the source for every official plugin (Ghost) in the
   (rows marked "targeted rollout" are still being staged and not yet
   installable for everyone).
 - **Want to build a plugin?** This repository accepts external contributions.
-  Once your PR merges to `main`, the package is submitted automatically to the
-  CN and Global review queues. It becomes visible in a region only after that
-  region approves it. Start at
+  CN package submission has been removed; Global submission is temporarily
+  paused for service maintenance, so merging a PR currently uploads no new
+  package. Start at
   [Submit your plugin](#submit-your-plugin).
 
 Already-installed marketplace plugins follow their recorded source and update
-silently. A merged version bump can therefore reach installed users without
-another click or capability-confirmation dialog. Treat capability expansion and
+silently. After publishing resumes and a release is approved, a version bump can
+reach installed users without another click or capability-confirmation dialog. Treat capability expansion and
 runtime changes as immediate production changes: declare the minimum required
 capabilities in the package's `ghost.json`, and preserve Host authorization and
 credential boundaries. Marketplace summaries are not a separate installation
@@ -96,11 +95,11 @@ The full path from idea to marketplace:
    [`.greptile/rules.md`](./.greptile/rules.md); a maintainer reviews against
    the same [review standards](#review-standards). Walk through the self-check
    list below before requesting review.
-6. **Submit and approve** — after merge to `main`, the CN and Global workflows
-   submit the real package through Plugin Platform. Each region reviews its own
-   pending release; only an approved release becomes available to compatible
-   clients and is then picked up silently by installations following that market
-   source. Rejection leaves the previous approved release in service.
+6. **Submit and approve** — CN submission has been removed and Global submission
+   is temporarily paused for service maintenance. Merging to `main` currently
+   uploads no package. When Global submission resumes, releases must still be
+   approved through Plugin Platform before compatible clients can receive them.
+   Existing approved releases are unaffected by this workflow pause.
 
 ## Review standards
 
@@ -201,30 +200,20 @@ primarily Chinese-only.
 
 ## Automated submission and review
 
-In one sentence: **merging to `main` submits automatically to both regions;
-public availability still requires Plugin Platform approval in each region.**
+**New package uploads are paused for service maintenance.** CN publishing has
+been removed. The retained
+[`Global workflow`](./.github/workflows/publish-cindy-plugins-global.yml)
+displays a maintenance notice on main pushes and manual dispatches; its detection
+and upload jobs are disabled, so neither trigger builds or submits a new package.
+PR verification and its test artifacts remain available.
 
-Two workflows publish, and both only from `main`:
-
-- [`publish-cindy-plugins.yml`](./.github/workflows/publish-cindy-plugins.yml) —
-  `Publish Cindy Plugins (CN)`
-- [`publish-cindy-plugins-global.yml`](./.github/workflows/publish-cindy-plugins-global.yml) —
-  `Publish Cindy Plugins (Global)`
-
-Both are active and use the same submission flow:
-
-- A regular push to `main` submits only the plugin directories changed in that
-  push. A push that touches no plugin directory submits nothing.
-- Manually running a workflow from the Actions page submits all current plugins
-  in full — for initial setup after a repository migration or an explicit
-  re-submission.
-- Each workflow uses GitHub Actions OIDC (audience `cindy-plugin`) to call its
-  protected Plugin Platform endpoint. Platform creates a pending release and
-  notifies reviewers; it does not bypass review by calling Plugin Server
-  directly.
-- The two regions package, submit, review, and report independently. Failure or
-  rejection in one region does not affect the other. There is no development
-  publishing workflow.
+After service maintenance, remove the documented `false` guards from the Global
+`detect` and `publish` jobs in a reviewed change. The retained publishing logic
+submits changed plugins on main pushes and all current plugins on manual dispatch.
+Use a manual dispatch after resumption to include plugins merged during the pause.
+Publishing must still use GitHub Actions OIDC (audience `cindy-plugin`) and the
+protected Plugin Platform endpoint; it must not bypass review by calling Plugin
+Server directly. Existing approved releases are unaffected by this workflow pause.
 
 After approval, compatible clients receive that release; clients below its
 `minCindyVersion` continue to receive the newest older compatible release, when
