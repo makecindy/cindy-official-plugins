@@ -517,6 +517,7 @@ const EXCLUDED_COMMANDS = new Set(['update']);
 const SERVICE_DESCRIPTIONS = {
   app: '游戏资料、包体槽位、版本生命周期、审核与发布',
   'asset-library': '图片/视频素材库检索、收录与上传',
+  'community-management': '论坛社区帖子、子版块、一级回复与子回复(当前只读)',
   'dashboard-stats': '下载、曝光、转化、预约、订单、评分等数据表现查询',
   developer: '开发者账号与厂商列表',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',

@@ -15,7 +15,7 @@ dashboard-stats 是只读数据查询手册,覆盖下载、PV、曝光、转化�
 | 用户问"表现怎么样" | 先按游戏形态选核心指标,再补趋势/异常 |
 | 对比两个时间段/平台/渠道 | 分别查询后汇总差异,不混用口径 |
 | 无数据或指标不适用 | 解释可能原因:时间范围、形态不适用、权限、统计延迟 |
-| 评价正文、社区帖子正文、舆情检索 | 当前 CLI 不覆盖;不要伪造内容检索 |
+| 评价正文、论坛帖子正文 | 转 `taptap-player-feedback` / `taptap-community-management` 手册;跨社区舆情检索不在 CLI 覆盖范围 |
 
 ## 常用调用
 
@@ -60,5 +60,5 @@ call_tool(name:"dashboard-stats get-dashboard-stats", args:{
 ## 不在本手册范围
 
 - 评价正文、单条评价的配图、作者与回复:转 `taptap-player-feedback` 手册。
-- 社区帖子正文、舆情检索不在当前 CLI 范围。
+- 论坛帖子正文、一级回复和子回复:转 `taptap-community-management` 手册;跨社区舆情检索不在当前 CLI 范围。
 - 修改资料、创建活动、提交审核、发版等写操作转对应业务手册。

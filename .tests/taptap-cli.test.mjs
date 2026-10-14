@@ -60,6 +60,10 @@ const FIXTURE_TREE = {
     ['+rules', 'Show the generation rules'],
     ['+validate', 'Validate generated files'],
   ],
+  'community-management': [
+    ['get-community-moment', 'Get one community moment'],
+    ['list-community-moments', 'List community moments'],
+  ],
   'dashboard-stats': [
     ['get-dashboard-stats', 'Query dashboard stats metrics'],
     ['get-dashboard-position-options', 'List the positions a metric accepts'],
@@ -113,6 +117,7 @@ const FIXTURE_SCHEMA = [
   { name: 'app submit-app-review', description: 'Submit review', _meta: { risk: 'high-risk-write' } },
   { name: 'app create-app', description: 'Create', _meta: { risk: 'write' } },
   { name: 'asset-library search-assets', description: 'Search', _meta: { risk: 'read' } },
+  { name: 'community-management list-community-moments', description: 'Community moments', inputSchema: { type: 'object', properties: { moment_intent: { type: 'array', items: { type: 'string' } } } }, _meta: { risk: 'read' } },
   { name: 'dashboard-stats get-dashboard-stats', description: 'Stats', _meta: { risk: 'read' } },
 ];
 
@@ -672,6 +677,24 @@ test('the data-query domain is served like any other read domain', async () => {
   assert.equal(reply.result.ok, true, `a read data-query operation executes: ${JSON.stringify(reply.result.echo || reply.result).slice(0, 300)}`);
 });
 
+test('a new read domain keeps its catalogue schema in the drill-down', async () => {
+  // Services listed in SERVICE_DESCRIPTIONS have the OpenAPI catalogue merged
+  // into their drill-down (inputSchema and risk per operation); a service
+  // missing from it only shows completion children, so the agent cannot see
+  // enum, pattern or required fields without a separate schema call. The forum
+  // domain ships with a bundled manual that routes through
+  // list_tools(category:"community-management"), so it must be listed.
+  assert.match(workerSource, /'community-management':/, 'the forum service has a display description');
+
+  const [reply] = await callWorker([listTools('community-management', { cli_path: fakeCli })]);
+  const operations = reply.result.data.operations;
+  const fromCatalog = operations.find((op) => op.name === 'community-management list-community-moments');
+  assert.ok(fromCatalog, 'the catalogue operation is listed');
+  assert.ok(fromCatalog.inputSchema, 'the catalogue operation keeps its argument schema');
+  const completionOnly = operations.find((op) => op.name === 'community-management get-community-moment');
+  assert.ok(completionOnly, 'completion-only commands stay reachable');
+});
+
 test('nothing shipped points at the internal taptap/cli repository', () => {
   // The GitHub repository is internal; only the npm package is public. Any
   // link to the repository is therefore a dead end for the people who install
@@ -870,18 +893,22 @@ test('every locale discloses what the catalogue leaves out', () => {
 
 test('discovery text covers every domain the catalogue now serves', () => {
   // whenToUse is what the agent uses to decide whether this plugin answers a
-  // question. Data querying and player reviews are served now, so a whenToUse
-  // that stays silent about them routes those questions to another tool and the
-  // user is told the plugin cannot help — the same defect as the opposite one.
+  // question. Data querying, player reviews and forum reading are served now,
+  // so a whenToUse that stays silent about them routes those questions to
+  // another tool and the user is told the plugin cannot help — the same defect
+  // as the opposite one.
   const ADVERTISES = /数据表现|query data metrics|データ指標|데이터 지표/;
+  const ADVERTISES_COMMUNITY = /论坛|forum|フォーラム|포럼/;
 
   const manifestFile = JSON.parse(fs.readFileSync(path.join(root, 'taptap-cli', 'ghost.json'), 'utf8'));
   assert.ok(ADVERTISES.test(manifestFile.whenToUse), 'manifest whenToUse must cover data querying');
+  assert.ok(ADVERTISES_COMMUNITY.test(manifestFile.whenToUse), 'manifest whenToUse must cover forum reading');
 
   for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
     const resource = JSON.parse(
       fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'));
     assert.ok(ADVERTISES.test(resource.whenToUse), `${locale} whenToUse must cover data querying`);
+    assert.ok(ADVERTISES_COMMUNITY.test(resource.whenToUse), `${locale} whenToUse must cover forum reading`);
   }
 });
 

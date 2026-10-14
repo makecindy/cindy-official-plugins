@@ -101,4 +101,4 @@ call_tool(name:"player-feedback list-player-reviews", args:{
 - 回复、处理或删除玩家评价:CLI 不支持写,给开发者中心入口。
 - 资料提审、撤审、发布:转 `taptap-app-edit` 手册。
 - 测试计划资格、激活码:转 `taptap-test-plan` 手册。
-- 社区内容(帖子、动态、评论区的非评价内容):CLI 不支持。
+- 社区帖子、动态和评论区的非评价内容:转 `taptap-community-management` 手册。

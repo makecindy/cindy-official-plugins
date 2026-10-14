@@ -17,8 +17,9 @@
 > | `taptap-qualification` | `taptap-suite/references/taptap-qualification` |
 > | `taptap-package-management` | `taptap-suite/references/taptap-package-management` |
 > | `taptap-test-plan` | `taptap-suite/references/taptap-test-plan` |
-| `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
-| `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
+> | `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
+> | `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
+> | `taptap-community-management` | `taptap-suite/references/taptap-community-management` |
 >
 > **两层手册**:本插件的手册是**执行纪律层**——它规定怎么经 `call_tool` 调、写门禁怎么走、失败三态怎么读,冲突时一律以它为准。
 > 需要 CLI 自带的官方原文(安装 CLI 时内置,随 CLI 版本更新)作为**深入参考**时,用:
@@ -30,7 +31,7 @@
 > **在 Cindy 里处理 TapTap 业务,一律以本插件的手册为准。**
 >
 > 本机可能因为安装 CLI 而存在官方 Skill,形态取决于 CLI 的 skills 布局:
-> - **separate 布局**(默认):11 个独立 skill,名字是 `taptap-app-edit`、`taptap-test-plan` 等;
+> - **separate 布局**(默认):12 个独立 skill,名字是 `taptap-app-edit`、`taptap-test-plan` 等;
 > - **suite 布局**:只有 1 个 `taptap-suite`,子能力收在它的 `references/taptap-xxx/SKILL.md`。
 >
 > 两种布局描述的都是同一套流程,但其中的命令示例必须按上方映射表经 `call_tool` 执行,**不要照着它用 Bash 直接跑 taptap-cli**——那会绕过本插件的写门禁、只读限制和失败三态。遇到正文里的 `taptap-xxx` 名称时,一律按本表转成本插件手册,不要去查找或改读这些 Skill。
@@ -72,6 +73,7 @@
 | 查包体库、线上/待处理包、自测入口 | `packages` | 先读 overview |
 | 查下载、PV、转化、订单、评分统计等数据 | `dashboard-stats` | 先确认指标、维度和时间范围 |
 | 查玩家评价正文、差评、官方回复 | `player-feedback` | 先确认时间范围和评分口径 |
+| 查论坛帖子、子版块、帖子正文、一级回复和子回复 | `community-management` | 先确认帖子意图、子版块和时间范围 |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
 
 ## call_tool 返回解读

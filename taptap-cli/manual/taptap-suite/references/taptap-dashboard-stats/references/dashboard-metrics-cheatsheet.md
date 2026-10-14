@@ -53,16 +53,17 @@
 
 | 值 | 名称 | 说明 |
 |---|---|---|
-| 1 | 计分评价(SCORE_REVIEW) | 查询计分评价时显式传入 |
+| 1 | 计分评价(SCORE_REVIEW) | 上游默认值;省略 `review_type` 时按此值处理 |
 | 2 | 封闭式测试评价(CLOSE_TEST_REVIEW) | 封测期间收集的评价 |
 | 3 | 折叠评价(COLLAPSED_REVIEW) | 被系统折叠的评价 |
 | 4 | 游戏临时故障评价(ACCIDENT_REVIEW) | 故障期间产生的评价 |
 | 5 | 非正式版评价(NONE_RELEASE_REVIEW) | 非正式版本的评价 |
 | 6 | 游戏运营事故评价(OPERATION_ACCIDENT_REVIEW) | 运营事故相关评价 |
 
-**协议补充**:当前 Capability catalog 没有为 `review_type` 声明默认值,动态 CLI
-也不会自动补值。查询 `review` 时先确认评价类型,并显式传入 `review_type`;不要
-假设省略后等价于 `1`。
+**协议补充**:Capability catalog 为 `review_type` 声明了默认值 `1`:省略时上游按
+1(计分评价)处理,显式传 `1` 与省略等价。动态 CLI 不会自动补值。查询非计分评价
+时必须显式传入 `review_type`;查计分评价可以省略,但建议显式传入
+`review_type: "1"`,让请求和回读都自解释。
 
 ### 社区 Tab
 
