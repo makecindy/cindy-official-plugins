@@ -7,7 +7,7 @@
       "description": "Check whether QQ Mail is configured. Returns only the email address and connection status, never the authorization code."
     },
     "qq_mail": {
-      "description": "Perform QQ Mail operations: list folders, search, read, send, save drafts, mark messages read or unread, and move messages. Each operation opens a temporary IMAP/SMTP connection and closes it afterward. Sending, moving, and changing read status require explicit user intent."
+      "description": "Perform QQ Mail operations: list folders, search, read, send, save drafts, mark messages read or unread, and move messages. Each operation opens a temporary IMAP/SMTP connection and closes it afterward. Sending, moving, and changing read status require explicit user intent. Message bodies use body_text (plain text) or body_html (HTML); provide at least one."
     }
   }
 }
