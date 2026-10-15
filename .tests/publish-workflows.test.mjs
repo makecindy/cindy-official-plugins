@@ -273,21 +273,19 @@ test('PR packaging stages only complete packages with matching hash and merge id
   assert.notEqual(run().status, 0, 'wrong PR head must be rejected');
 });
 
-test('CN publishing is removed and Global publishing is paused for service maintenance', () => {
+test('CN publishing stays removed and Global publishing is enabled only from main', () => {
   assert.equal(existsSync(new URL('publish-cindy-plugins.yml', workflowRoot)), false);
   for (const file of readdirSync(workflowRoot).filter(name => /\.ya?ml$/.test(name))) {
     assert.doesNotMatch(readFileSync(new URL(file, workflowRoot), 'utf8'), /CINDY_PLUGIN_(?:PLATFORM|SERVER)_URL_CN|cindy-plugin-publish-cn-prod/);
   }
-  for (const job of ['detect', 'publish']) {
-    const body = globalWorkflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z-]+:\n/)[0];
-    assert.ok(body, `missing ${job} job`);
-    assert.match(body, /^    if: \$\{\{ false && [^\n]+ \}\}$/m, `${job} must be disabled for every trigger`);
-  }
+  const detection = globalWorkflow.split('\n  detect:\n')[1].split('\n  package:\n')[0];
+  const publishing = globalWorkflow.split('\n  publish:\n')[1];
+  assert.match(detection, /^    if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}$/m);
+  assert.match(publishing, /^    if: \$\{\{ !cancelled\(\) && needs\.detect\.result == 'success' && needs\.detect\.outputs\.plugins != '\[\]' \}\}$/m);
+  assert.doesNotMatch(globalWorkflow, /^  maintenance:|false &&/m);
   const packaging = globalWorkflow.split('\n  package:\n')[1].split('\n  publish:\n')[0];
   assert.match(packaging, /^    needs: detect$/m);
   assert.doesNotMatch(packaging, /always\(|!cancelled\(/);
-  assert.match(globalWorkflow, /service maintenance/);
-  assert.match(globalWorkflow, /海外插件服务维护中，暂时停止新包推送/);
   assert.match(globalWorkflow, /secrets\.CINDY_PLUGIN_PLATFORM_URL_GLOBAL/);
 });
 
@@ -299,11 +297,11 @@ test('the retained Global publisher routes through protected Platform endpoints'
   }
 });
 
-test('the paused Global publisher retains main and manual publishing logic for resumption', () => {
+test('the Global publisher supports main pushes and full manual republish', () => {
   for (const workflow of [globalWorkflow]) {
     assert.match(workflow, /push:\n    branches:\n      - main/);
     assert.match(workflow, /workflow_dispatch:/);
-    assert.match(workflow, /if: \$\{\{ false && github\.ref == 'refs\/heads\/main' \}\}/);
+    assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/);
     assert.match(workflow, /EVENT_NAME === 'workflow_dispatch'/);
     assert.match(workflow, /Publishing all Cindy plugins:/);
     assert.match(workflow, /id-token: write/);

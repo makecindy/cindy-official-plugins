@@ -125,13 +125,12 @@ cd 163-mail && npm ci && npm run build
 该插件的依赖），并用与发布流水线完全相同的打包步骤做 dry-run。外部贡献者只要改动
 了插件包，CI 还会要求 PR Body 勾选 Cindy 实机验证项。仓库维护者（`author_association`
 为 OWNER、MEMBER 或 COLLABORATOR，或登录名为 `zqchris`）会跳过该勾选门禁，CI 以
-notice 记录后直接通过。国内上传逻辑已移除；海外因服务维护暂停上传，合入 `main`
-也不会上传新包。
+notice 记录后直接通过。国内上传逻辑已移除；海外在合入 `main` 或从 `main` 手动
+触发时上传。
 
 5. Review 完整 diff，确认没有凭证、无关生成文件或误提交的 `node_modules`。
-6. 等待 review；不要直接向 `main` 推送。当前合入不会上传新包：国内推包逻辑已移除，
-   海外因服务维护暂停推包。海外恢复推包后，仍须经过 Plugin Platform 批准，release
-   才会对兼容客户端可见。
+6. 等待 review；不要直接向 `main` 推送。合入后，变更包会提交到海外 Plugin Platform，
+   批准后的 release 才会对兼容客户端可见。国内推包逻辑保持移除。
 7. 成对的双语文档必须同 PR 同步：改动 `README.md`、`CONTRIBUTING.md` 或任何有
    `.zh-CN` 对应版本的文档时，两份必须在同一个 PR 内一起更新，反之亦然。只改
    一边的 PR 不予合并。

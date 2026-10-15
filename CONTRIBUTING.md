@@ -165,15 +165,14 @@ step the publish pipeline uses. For every changed plugin package from an
 external contributor, CI also requires the Cindy device verification checkbox in
 the pull request body. Repository maintainers (`author_association` OWNER,
 MEMBER, or COLLABORATOR, or login `zqchris`) skip that checkbox gate; CI passes
-with a notice. CN uploads have been removed; Global uploads are temporarily
-paused for service maintenance, including after a merge to `main`.
+with a notice. CN uploads have been removed; Global uploads run after a merge to
+`main` or a manual dispatch from `main`.
 
 5. Review the complete diff and confirm it contains no credentials, unrelated
    generated files, or an accidentally committed `node_modules`.
-6. Wait for review; do not push directly to `main`. Merging currently uploads no
-   package: CN submission has been removed and Global submission is paused for
-   service maintenance. After Global submission resumes, Plugin Platform approval
-   is still required before a release becomes visible to compatible clients.
+6. Wait for review; do not push directly to `main`. After merge, changed packages
+   are submitted to Global Plugin Platform. Approval is required before a release
+   becomes visible to compatible clients. CN submission remains removed.
 7. Paired bilingual documents move together: a pull request that changes
    `README.md`, `CONTRIBUTING.md`, or any other document with a `.zh-CN`
    counterpart must update both files in the same pull request, and vice

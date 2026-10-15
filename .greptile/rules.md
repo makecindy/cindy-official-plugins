@@ -2,8 +2,8 @@
 
 > 本文件供自动 review（Greptile 等）与人工 reviewer 共同使用。安全红线类规则以
 > `.greptile/config.json` 的结构化条目为准（带 severity），本文件补充设计标准、
-> 流程纪律与判定口径。国内推包逻辑已移除，海外因服务维护暂停推包；当前合入
-> `main` 不上传新包，恢复后仍须审核通过才对用户可见——审查从严，宁可误报交人工裁决，
+> 流程纪律与判定口径。国内推包逻辑保持移除，合入 `main` 后自动向海外 Plugin
+> Platform 提交变更包，审核通过后才对用户可见——审查从严，宁可误报交人工裁决，
 > 不可漏报放行。
 
 ## 设计契约
@@ -118,10 +118,10 @@ manifest schema 的猜测替代 CI 的确定性校验结果。
 
 ### 发布与审核链路
 
-国内推包 Workflow 已移除，海外因服务维护暂停自动与手动推包。恢复海外推包后，
+国内推包 Workflow 保持移除，海外支持 `main` push 与从 `main` 手动触发推包。
 Workflow 只能通过受保护的 Plugin Platform endpoint 提交，不得绕过 Platform 直接
 调用 Plugin Server。Platform 负责创建 pending release、通知 reviewer 并记录批准/拒绝；
-只有批准的 release 才能被兼容客户端发现。本次暂停不改变已有的已批准版本。
+只有批准的 release 才能被兼容客户端发现；拒绝不改变已有的已批准版本。
 
 ## 新插件准入
 

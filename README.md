@@ -25,13 +25,13 @@ This is the source for every official plugin (Ghost) in the
   (rows marked "targeted rollout" are still being staged and not yet
   installable for everyone).
 - **Want to build a plugin?** This repository accepts external contributions.
-  CN package submission has been removed; Global submission is temporarily
-  paused for service maintenance, so merging a PR currently uploads no new
-  package. Start at
+  CN package submission has been removed. Merging to `main` automatically submits
+  changed packages to Global Plugin Platform; releases become visible only after
+  approval. Start at
   [Submit your plugin](#submit-your-plugin).
 
 Already-installed marketplace plugins follow their recorded source and update
-silently. After publishing resumes and a release is approved, a version bump can
+silently. After a release is approved, a version bump can
 reach installed users without another click or capability-confirmation dialog. Treat capability expansion and
 runtime changes as immediate production changes: declare the minimum required
 capabilities in the package's `ghost.json`, and preserve Host authorization and
@@ -95,11 +95,10 @@ The full path from idea to marketplace:
    [`.greptile/rules.md`](./.greptile/rules.md); a maintainer reviews against
    the same [review standards](#review-standards). Walk through the self-check
    list below before requesting review.
-6. **Submit and approve** — CN submission has been removed and Global submission
-   is temporarily paused for service maintenance. Merging to `main` currently
-   uploads no package. When Global submission resumes, releases must still be
-   approved through Plugin Platform before compatible clients can receive them.
-   Existing approved releases are unaffected by this workflow pause.
+6. **Submit and approve** — merging to `main` submits changed packages to Global
+   Plugin Platform. Only approved releases become available to compatible clients;
+   rejection leaves the previous approved release in service. CN submission remains
+   removed.
 
 ## Review standards
 
@@ -200,20 +199,18 @@ primarily Chinese-only.
 
 ## Automated submission and review
 
-**New package uploads are paused for service maintenance.** CN publishing has
-been removed. The retained
+**Global package publishing is enabled; CN publishing remains removed.** The
 [`Global workflow`](./.github/workflows/publish-cindy-plugins-global.yml)
-displays a maintenance notice on main pushes and manual dispatches; its detection
-and upload jobs are disabled, so neither trigger builds or submits a new package.
-PR verification and its test artifacts remain available.
+submits changed plugins on pushes to `main` and all current plugins on manual
+dispatch from `main`. PR verification and its test artifacts remain separate from
+production publishing.
 
-After service maintenance, remove the documented `false` guards from the Global
-`detect` and `publish` jobs in a reviewed change. The retained publishing logic
-submits changed plugins on main pushes and all current plugins on manual dispatch.
-Use a manual dispatch after resumption to include plugins merged during the pause.
-Publishing must still use GitHub Actions OIDC (audience `cindy-plugin`) and the
-protected Plugin Platform endpoint; it must not bypass review by calling Plugin
-Server directly. Existing approved releases are unaffected by this workflow pause.
+Restoring the workflow does not automatically publish plugins merged during the
+maintenance pause. After confirming the Global service is ready, manually dispatch
+the workflow from `main` once to include those plugins.
+Publishing uses GitHub Actions OIDC (audience `cindy-plugin`) and the protected
+Plugin Platform endpoint; it must not bypass review by calling Plugin Server
+directly. Platform creates pending releases for review.
 
 After approval, compatible clients receive that release; clients below its
 `minCindyVersion` continue to receive the newest older compatible release, when

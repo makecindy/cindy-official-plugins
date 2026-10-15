@@ -7,12 +7,11 @@ Greptile, etc.). 本文件面向在本仓工作的一切 AI agent：写插件、
 
 ## What this repository is / 仓库性质
 
-Source of Cindy's official plugins (Ghosts). **CN package submission has been
-removed; Global submission is temporarily paused for service maintenance.**
-Merging to `main` currently uploads no new package. After submission resumes,
-only approved releases become visible — review remains strict.
-国内推包逻辑已移除，海外因服务维护暂时停止推包；当前合入 `main` 不会上传新包。
-恢复后仍须审核通过才对用户可见，审查从严。
+Source of Cindy's official plugins (Ghosts). **CN package submission remains
+removed; merging to `main` automatically submits changed packages to Global
+Plugin Platform.** Only approved releases become visible — review remains strict.
+国内推包逻辑保持移除，合入 `main` 后自动将变更包提交到海外 Plugin Platform；
+审核通过后才对用户可见，审查从严。
 
 ## Authoring reference / 编写参考
 
