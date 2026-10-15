@@ -142,7 +142,8 @@ test('manifest 声明 Cindy 持久凭证及其最小 Node 注入范围', () => {
   // Shape, not a pinned value: this test is about the secret bindings, and a
   // hardcoded version goes stale on every release bump.
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  assert.deepEqual(manifest.slots, ['tool', 'node']);
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.equal(manifest.settingsHtml, 'settings.html');
   assert.equal(
     Object.hasOwn(manifest, 'settingsHeight'),

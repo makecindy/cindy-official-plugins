@@ -25,7 +25,8 @@ test('manifest declares one public API host and no credential surface', () => {
   assert.equal(manifest.network.secrets, undefined);
   assert.equal(manifest.network.connections, undefined);
   assert.equal(manifest.settingsHtml, undefined);
-  assert.deepEqual(manifest.slots, ['tool', 'network']);
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
 });
 
 test('common aliases resolve to documented World Bank indicator codes', () => {

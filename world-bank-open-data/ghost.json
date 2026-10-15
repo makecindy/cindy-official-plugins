@@ -1,10 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "world-bank-open-data",
   "name": "World Bank Open Data",
   "description": "查询世界银行公开的全球经济、社会与发展指标，包括 GDP、人口、通胀、就业、教育、健康、环境等数据。数据来自世界银行 Indicators API，无需 API Key；本插件只读，不修改任何外部数据。",
   "whenToUse": "需要查询或比较国家、地区的世界银行发展指标，查看指标定义、国家元数据、历史趋势或最近一期数据时使用。它不是股票或外汇实时行情源；结果可能按年或按其他统计周期发布，并可能晚于当前日期。",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -14,10 +15,6 @@
   "author": "Cindy",
   "icon": "assets/icon.png",
   "entry": "main.js",
-  "slots": [
-    "tool",
-    "network"
-  ],
   "command": "world-bank-data",
   "network": {
     "hosts": [
