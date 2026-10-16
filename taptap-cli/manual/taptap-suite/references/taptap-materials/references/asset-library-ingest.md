@@ -6,7 +6,7 @@
 
 ## 本地图片
 
-本地图片的上传执行归 materials 手册第一部分（即 `call_tool(name:"upload", …)`，支持 `dry_run:true` 预览与 `yes:true` 确认，图片需稳定 `idempotency_key`）。上传成功后使用返回的 `data.url`、`data.assetId` 和完整 `data.info`（含 `width`、`height`、`size`、`format`）继续素材库语境的解读。asset ID 只表示素材库收录结果，不表示图片已写入资料字段。字段写入转 app-edit 手册时必须把 `data.url` 与完整 `data.info` 一起传（值形态 `{"url": ..., "info": ...}`）；只传 URL 会被服务端拒绝。
+本地图片的上传执行归 materials 手册第一部分（即 `call_tool(name:"upload", …)`，支持 `dry_run:true` 预览与 `yes:true` 确认，图片需稳定 `idempotency_key`）。上传成功后使用返回的 `data.url`、`data.assetId` 和完整 `data.info`（含 `width`、`height`、`size`、`format`）继续素材库语境的解读。asset ID 只表示素材库收录结果，不表示图片已写入资料字段。字段写入转 app-edit 手册时必须把 `data.url` 与完整 `data.info` 一起传（值形态 `{"url": ..., "info": ...}`）；不带 info 不会报错，但 C 端拿不到宽高，竖版图会被按 16:9 裁切。
 
 ## HTTPS 图片
 
@@ -50,7 +50,7 @@ call_tool(name:"asset-library +ai-image-validate", args:{_positional:[".taptap/a
 
 ## 边界与结果
 
-- 收录图片不等于已经写入图标、宣传图或截图字段；字段修改转 app-edit 手册，并按目标字段规格 read-before-write；写入时带上 `data.url` 与 `data.info`，不能只传 URL。
+- 收录图片不等于已经写入图标、宣传图或截图字段；字段修改转 app-edit 手册，并按目标字段规格 read-before-write；写入时带上 `data.url` 与 `data.info`，省略 info 会让 C 端按 16:9 回落。
 - 本地模型生图不等于素材库收录；必须先完成本地规则校验，再由用户确认后转 materials 手册第一部分上传。
 - 上游返回 `recoverable=true` 时，使用 `reason` 解释原因并按 `guidance` 给出重试、调整参数或刷新登录等下一步。
 - 上游响应缺少预期结果字段时按异常处理，不把异常当成“收录成功”或“素材库为空”。

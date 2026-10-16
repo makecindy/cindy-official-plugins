@@ -24,7 +24,7 @@ inspect 输出位于成功 envelope 的 `data` 下(`data.materials[]`、`data.su
 
 | 物料 | 上传调用(先 dry_run,确认后同参数加 yes) | 上传后交接 |
 | --- | --- | --- |
-| 本地图片 | `call_tool(name:"upload", args:{_positional:["<image>"], dev_id, app_id, idempotency_key})` | app-edit 手册决定字段用途;`app save-changes` 的图片新值按 `{"url", "info"}` 写入(只传 URL 会被服务端拒绝 400) |
+| 本地图片 | `call_tool(name:"upload", args:{_positional:["<image>"], dev_id, app_id, idempotency_key})` | app-edit 手册决定字段用途;`app save-changes` 的图片新值按 `{"url", "info"}` 写入(不带 info 会回落 16:9) |
 | 本地视频 | `call_tool(name:"upload-video", args:{_positional:["<video>"], dev_id, app_id, scene:"trailer 或 gameplay_demo_video"})` | app-edit 手册用返回的 `videoId` 写入 |
 | APK | `call_tool(name:"upload-apk", args:{_positional:["<apk>"], dev_id, app_id})` | packages 手册查状态,再转 app-edit 手册 |
 | Windows 包 | `call_tool(name:"upload-pc-package", args:{_positional:["<package>"], dev_id, app_id, launch_exe, version, windows_branch})` | packages 手册查状态,再转 app-edit 手册。**包体类别以接口返回为准**:应用没有 PC 包体分支能力时只有本体包(不带 `windows_branch` 或只传 `1`),不存在启动器包,不要主动问用户 |
@@ -59,7 +59,7 @@ game.zip
 5. 成功以顶层 `ok=true` 或 exit code 0 判断;缺少 `yes` 的确认门禁是 exit code 10(插件返回 `CONFIRM_REQUIRED`);其它失败按返回的 error 停止和恢复,不把业务内字段当作成功。
 6. 单项部分失败时保留已返回的远端句柄,按文件记录结果。只重试没有远端句柄的失败项,不能整批重跑。H5 和 Tap 小游戏可用 `task +list|get|resume` 恢复已有任务;其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。不得重构 upload token。
 7. 大文件上传超时返回 `TIMEOUT` 时,加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令恢复;不要盲目重发完整上传。
-8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。图片交接必须同时给到 `upload` 返回的 `data.url` 与 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象(只传 URL 会被服务端拒绝 400),以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
+8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。图片交接必须同时给到 `upload` 返回的 `data.url` 与 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象(省略 info 不报错,但 C 端会按 16:9 回落),以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
 
 ### 上传结果句柄
 

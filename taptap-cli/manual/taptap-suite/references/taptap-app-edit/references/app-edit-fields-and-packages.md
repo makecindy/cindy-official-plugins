@@ -39,7 +39,7 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，以 `pre
 
 ### 图片与视频
 
-写入**新的图片值**时（`app save-changes`），值必须是 `{"url": <完整 HTTPS URL>, "info": <图片元数据>}` 对象：`info` 至少包含正整数 `width`、`height`，可直接原样使用 `call_tool(name:"upload", …)` 返回的 `data.info`（含 `width`、`height`、`size`、`format`）。**新的图片值只传 URL、或 `info` 缺宽高会被服务端拒绝（400）**；禁止使用 `attached://`、`file://`，也不要手写或省略 `info`。清空 iOS 覆盖字段（`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios`）恢复 Android 继承时仍按字段手册传 `value: null`，不受本条约束。
+写入图片值时**必须带上 info**（`app save-changes`）：值为 `{"url": <完整 HTTPS URL>, "info": <图片元数据>}` 对象，`info` 可直接原样使用 `call_tool(name:"upload", …)` 返回的 `data.info`（含 `width`、`height`、`size`、`format`）；`width`/`height` 必须为正整数，否则 400。**不传 info 服务端也会接受**（同 URL 已有存量元数据就沿用，否则只存 URL），但那张图在 C 端拿不到宽高，竖版会按 16:9 回落裁切——这正是本约定要避免的，因此除非确实拿不到 info，不要省略。禁止使用 `attached://`、`file://`，也不要手写错误的尺寸。清空 iOS 覆盖字段（`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios`）恢复 Android 继承时仍按字段手册传 `value: null`。
 
 消息含 `<image-attachment>用户上传了一张图片，URL 为：https://...</image-attachment>` 时，先转 materials 手册的 `upload` 收录并拿到 `data.url` 与 `data.info`，再按上面的对象形态写入。
 
