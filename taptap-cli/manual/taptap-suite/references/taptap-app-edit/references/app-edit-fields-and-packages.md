@@ -39,24 +39,28 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，以 `pre
 
 ### 图片与视频
 
-消息含 `<image-attachment>用户上传了一张图片，URL 为：https://...</image-attachment>` 时，`save-changes.value` 传完整 HTTPS URL。禁止使用 `attached://`、`file://`。
+写入**新的图片值**时（`app save-changes`），值必须是 `{"url": <完整 HTTPS URL>, "info": <图片元数据>}` 对象：`info` 至少包含正整数 `width`、`height`，可直接原样使用 `call_tool(name:"upload", …)` 返回的 `data.info`（含 `width`、`height`、`size`、`format`）。**新的图片值只传 URL、或 `info` 缺宽高会被服务端拒绝（400）**；禁止使用 `attached://`、`file://`，也不要手写或省略 `info`。清空 iOS 覆盖字段（`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios`）恢复 Android 继承时仍按字段手册传 `value: null`，不受本条约束。
+
+消息含 `<image-attachment>用户上传了一张图片，URL 为：https://...</image-attachment>` 时，先转 materials 手册的 `upload` 收录并拿到 `data.url` 与 `data.info`，再按上面的对象形态写入。
 
 写图片前读字段 `image_spec`。多张截图按意图使用：
 
 - 追加：`op: 'append'`
-- 删除：`op: 'remove'`
+- 删除：`op: 'remove'`（`value` 写从最新字段值读取的存量 URL，是选择器，不需要 `info`）
 - 整组重传：`op: 'replace'`
 - 替换一张：`op: 'replace_one'`，并传从最新字段值读取的 `old_value`
 
+数组里每一项都用同一个 `{url, info}` 形态；`op` 与数组语义参照 `save-changes` 的字段说明。
+
 ```text
-call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<developerId>", data:{changes:[{field_id:"screenshots", op:"replace_one", old_value:"https://example.com/old.png", value:"https://example.com/new.png", expected:["https://example.com/old.png","https://example.com/keep.png"]}]}, idempotency_key:"<stable-save-intent-key>", dry_run:true})
+call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<developerId>", data:{changes:[{field_id:"screenshots", op:"replace_one", old_value:"https://example.com/old.png", value:{url:"https://example.com/new.png", info:{width:750, height:1334, size:826326, format:"png"}}, expected:["https://example.com/old.png","https://example.com/keep.png"]}]}, idempotency_key:"<stable-save-intent-key>", dry_run:true})
 ```
 
 资料视频规格必须以 `get-app-module("assets-upload")` 返回的 `video_spec` 为准。用户询问 `trailer` / `gameplay_demo_video` 的格式、大小、时长、分辨率、比例或内容要求时，先读取规格，只做判断，不调用 `save-changes`。
 
 - 不凭记忆复述具体限制；规范来源、动态规格优先级、冲突口径和检查项统一按[游戏物料要求](taptap-suite/references/material-requirements.md)执行。
 - 填写或替换素材时按 [review risk checklist](taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md) 展示当前字段相关的官方规则、确定性检查结果和需要人工判断的内容要求；历史拒审必须单列来源。
-- 已用 `call_tool(name:"upload-video", …)` 上传时，字段值传返回的数字 `videoId`，不是 URL。
+- 已用 `call_tool(name:"upload-video", …)` 上传时，字段值传返回的数字 `videoId`，不是 URL（视频字段不需要 `info`）。
 - 未上传时转 materials 手册执行 `upload-video`（`--scene` 指定资料回填目标；其预览会读取目标字段的实时 `video_spec`，展示目标与规范，不会上传文件），拿到返回的数字 `videoId` 后按本节写入。`scene` 只表示本地资料回填目标，不会发送给上传接口（`getVideoUploadToken` / `completeVideoUpload`）。
 - **拿到 `videoId` 即视为上传完成，直接写字段，不要等待或轮询转码/审核状态**。转码（transcoding）和素材审核是服务端后台异步流程：转码只影响「商店页能否预览」（转码完成前可能无法预览），不影响「字段已写入 videoId」；素材审核是提审后服务端判断，agent 在写字段这一步没有接口确认、也不需要确认。不要把「转码/审核仍在处理」输出成「素材状态未确认/无法验证」——那是 materials 手册的 `get-video-detail` 轮询场景（仅当用户主动要求确认视频可播/素材库收录时才用），不是资料字段回填的必做步骤。
 - `trailer` 与 `gameplay_demo_video` 必须使用不同的 `videoId`。修改任一字段前先读取两者当前值，并校验本批变更后的最终值；若工具返回重复冲突，不要用相同 ID 重试，要求用户选择或上传另一个视频。不同 ID 只表示引用不同对象，不能据此宣称内容不雷同或语义审核通过。

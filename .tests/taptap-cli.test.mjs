@@ -708,6 +708,37 @@ test('nothing shipped points at the internal taptap/cli repository', () => {
   assert.deepEqual(offenders, [], 'the internal repository must not be linked from shipped files');
 });
 
+test('the image handoff carries the upload info the server now requires', () => {
+  // The server rejects a bare URL for image field values (400), so every
+  // manual that hands an uploaded image over to `save-changes` must keep
+  // `data.url` and `data.info` together. A manual that still says "write the
+  // URL" sends the agent into a guaranteed failure.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const appEdit = read(
+    'taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md',
+  );
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const ingest = read(
+    'taptap-suite/references/taptap-materials/references/asset-library-ingest.md',
+  );
+
+  for (const [label, text] of [
+    ['app-edit', appEdit],
+    ['materials', materials],
+    ['asset-library ingest', ingest],
+  ]) {
+    assert.match(text, /data\.info/, `${label} must hand over the upload info`);
+  }
+  assert.match(appEdit, /"info": <图片元数据>/, 'app-edit must state the value shape');
+  assert.match(appEdit, /value:\{url:.*info:\{width:/, 'app-edit must show an info-bearing example');
+  assert.match(appEdit, /remove.*不需要 `info`/, 'remove selectors stay bare URLs');
+  assert.match(appEdit, /value: null/, 'clearing an iOS override keeps its null value');
+  assert.match(materials, /只传 URL 会被服务端拒绝/, 'materials must state the rejection');
+  assert.match(materials, /资质草稿/, 'materials must scope the object shape to app save-changes');
+  assert.match(ingest, /只传 URL 会被服务端拒绝/, 'ingest must state the rejection');
+});
+
 test('the install guidance lists commands that actually work', () => {
   // `npx @taptap/cli install` runs a wizard whose internal `npm install -g` is
   // capped at 120s. The package is ~37MB, so a first run can exceed that and
