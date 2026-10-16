@@ -107,6 +107,8 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 查看之前 `save-changes` 返回的 `changes[].from` 值，再次调 `save-changes` 把字段恢复（`from` 为 `null` 时传 `value: null` 清空）。撤销同样要遵守 read-before-write —— 必须先重新读取该字段最新值（用户可能在中间又改了别的）。
 
+**图片字段的回退要先重新取元数据**：`from` 对图片字段只会给出纯 URL，而图片新值写回时必须是 `{url, info}`（纯 URL 会 400），历史 URL 也没有可读回 info 的接口。回退图标、宣传图、截图等图片字段时，先把 `from` 里的历史 URL 下载到会话工作目录，用 materials 手册的 `upload` 重新收录拿到新的 `data.url` 与 `data.info`，再按 `{url, info}` 写入——图片内容一致、URL 会变；历史值为 `null` 时仍传 `value: null` 清空。
+
 ### G. 版本生命周期（撤审 / 撤定时 / 改时间 / 重置 / 恢复）
 
 > **背景**：unpublished Version 是一个有状态机的对象。除了"改字段 → 提交审核"主流程（上文 B-E），还有以下「状态机分支」需要 agent 介入。下文每个工具的前置/后置状态见 schema 注释，违反前置时工具会返回业务化错误。

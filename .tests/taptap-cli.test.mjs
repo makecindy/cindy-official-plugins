@@ -737,6 +737,14 @@ test('the image handoff carries the upload info the server now requires', () => 
   assert.match(materials, /只传 URL 会被服务端拒绝/, 'materials must state the rejection');
   assert.match(materials, /资质草稿/, 'materials must scope the object shape to app save-changes');
   assert.match(ingest, /只传 URL 会被服务端拒绝/, 'ingest must state the rejection');
+
+  // Rollback: `changes[].from` is a bare URL for image fields, so the manual
+  // must send the agent through a fresh upload instead of a direct restore.
+  const rollback = read(
+    'taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md',
+  );
+  assert.match(rollback, /`from` 对图片字段只会给出纯 URL/);
+  assert.match(rollback, /重新收录/);
 });
 
 test('the install guidance lists commands that actually work', () => {
