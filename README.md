@@ -62,6 +62,7 @@ permission gate.
 | <img src="./taptap-maker/assets/icon.png" width="22" alt=""> | TapTap Maker | [`taptap-maker`](./taptap-maker) | Account connection, project sync, builds, and official news tools |
 | <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | Baguette | [`baguette-simulator`](./baguette-simulator) | Opt-in Baguette iOS simulator with a private device set, sidebar controls, and acknowledged keyboard input; targeted rollout |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS Simulator | [`ios-simulator`](./ios-simulator) | Host-owned embedded workflow; Host-authorized fallback hands off the exact task and device to a named external workflow; staged rollout |
+| <img src="./rhino-bridge/assets/icon.png" width="22" alt=""> | Cindy Rhino Bridge | [`rhino-bridge`](./rhino-bridge) | Connect to a local Rhino instance through McNeel RhinoAI or the bundled basic connector; staged rollout |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
 
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
