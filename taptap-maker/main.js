@@ -53,7 +53,9 @@ function previewCardHtml(url) {
 async function nodeRequest(request) {
   var response = await cindy.node.request(request);
   if (!response || response.ok !== true) {
-    throw new Error(response && response.message ? response.message : 'TapTap Maker Node Runtime 调用失败');
+    var failure = new Error(response && response.message ? response.message : 'TapTap Maker Node Runtime 调用失败');
+    if (response && typeof response.errorCode === 'string') failure.code = response.errorCode;
+    throw failure;
   }
   return response.result;
 }
@@ -208,16 +210,27 @@ async function callMakerTool(name, args, longRunning) {
     }
   }
   var progressToken = longRunning ? 'cindy-maker-' + nextProgressToken++ : null;
-  return nodeRequest({
-    method: 'tools/call',
-    params: {
-      name: name,
-      arguments: args,
-      ...(progressToken ? { _meta: { progressToken: progressToken } } : {}),
-    },
-    timeoutMs: longRunning ? 60000 : 30000,
-    ...(longRunning ? { maxTotalMs: 900000 } : {}),
-  });
+  try {
+    return await nodeRequest({
+      method: 'tools/call',
+      params: {
+        name: name,
+        arguments: args,
+        ...(progressToken ? { _meta: { progressToken: progressToken } } : {}),
+      },
+      timeoutMs: longRunning ? 60000 : 30000,
+      ...(longRunning ? { maxTotalMs: 900000 } : {}),
+    });
+  } catch (error) {
+    if (!longRunning || !error || error.code !== 'TIMEOUT') throw error;
+    // 宿主等待到点只说明本地不再等回执：请求可能已送达 Maker，远端任务与扣点
+    // 都可能已经发生，迟到的回执（含 task_id）会被宿主丢弃。按 Runtime 的
+    // execution_state 契约如实标成未知，交给用户核对，而不是当成普通失败（#5854）。
+    return makerErrorResult(
+      'TapTap Maker 工具 ' + name + ' 等待 Runtime 回执超时，本次未拿到结果或任务编号。',
+      { code: 'TIMEOUT', execution_state: 'unknown', automatic_retry: false },
+    );
+  }
 }
 
 async function readMakerAdsGuide() {
