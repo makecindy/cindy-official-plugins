@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy 内置的网页搜索插件：默认使用 Cindy AI 搜索，也可使用你自己的 Brave 或 Tavily Key 搜索公网。Key 在插件详情页填写，在本机加密保存，并且只注入发往已声明域名的请求。",
-  "whenToUse": "需要搜索公网信息、查资料、找网页或查看最新动态时使用。默认使用 Cindy AI 搜索，也可在 Web Search 插件详情页配置 Brave 或 Tavily Key。",
+  "description": "Cindy 内置的网页搜索插件：默认使用 Cindy AI 搜索，也可使用你自己的 Brave、Tavily 或 DeepSeek Key 搜索公网。Key 在插件详情页填写，在本机加密保存，并且只注入发往已声明域名的请求。",
+  "whenToUse": "需要搜索公网信息、查资料、找网页或查看最新动态时使用。默认使用 Cindy AI 搜索，也可在 Web Search 插件详情页配置 Brave、Tavily 或 DeepSeek Key。",
   "tools": {
     "search_web": {
-      "description": "使用最多 2000 字符的查询搜索公网，并返回 { title, url, snippet } 结果列表。默认使用 Cindy AI 搜索，也可指定 Brave 或 Tavily。返回 { provider, results }。失败时保留宿主返回的 errorCode；使用 Brave 或 Tavily 但对应 Key 未配置时，把返回的 message 原样告诉用户。"
+      "description": "搜索公网，返回 { provider, results: [{ title, url, snippet }] }。默认 Cindy AI，也可指定 Brave / Tavily / DeepSeek。查询最多 2000 字符；DeepSeek 最多 128 个 Unicode 字符（不截断），摘要优先使用 summary，按成功请求计费，不读取全文。失败时保留宿主 errorCode，把 message 告诉用户；缺 Key 时按指引在插件详情页配置。不自动重试或切换搜索源。"
     }
   }
 }

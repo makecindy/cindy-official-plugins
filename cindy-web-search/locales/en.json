@@ -1,10 +1,10 @@
 {
   "name": "Web Search",
-  "description": "Cindy's built-in web search plugin. It uses Cindy AI by default, or searches the public web with your own Brave or Tavily API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
-  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Cindy AI is used by default; you can also configure a Brave or Tavily key in the Web Search plugin details.",
+  "description": "Cindy's built-in web search plugin. It uses Cindy AI by default, or searches the public web with your own Brave, Tavily or DeepSeek API key. Keys are configured in the plugin details, encrypted locally, and injected only into requests to declared hosts.",
+  "whenToUse": "Use this plugin to search the public web, research a topic, find web pages, or check current information. Cindy AI is used by default; you can also configure a Brave, Tavily or DeepSeek key in the Web Search plugin details.",
   "tools": {
     "search_web": {
-      "description": "Search the public web with a query of at most 2000 characters and return a list of { title, url, snippet } results. Cindy AI is used by default; Brave or Tavily may also be selected. Returns { provider, results }. Failures preserve the Host-provided errorCode. If the selected Brave or Tavily key is not configured, return the provided message to the user unchanged."
+      "description": "Search the public web; returns { provider, results: [{ title, url, snippet }] }. Default: Cindy AI; optional Brave, Tavily or DeepSeek. Queries: at most 2000 characters; DeepSeek: 128 Unicode characters, never truncated. DeepSeek prefers summary for snippets, bills successful requests and does not fetch full pages. No automatic retries or provider fallback. Failures preserve Host errorCode; relay message to the user and configure missing keys in plugin details."
     }
   }
 }
