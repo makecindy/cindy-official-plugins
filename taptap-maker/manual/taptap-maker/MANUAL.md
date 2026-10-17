@@ -10,7 +10,7 @@
 2. 其它项目任务先调用 `maker_status`；广告请求在读取指南后调用。需要更完整的环境诊断时调用 `maker_doctor`。
 3. 未连接账号时调用 `maker_login`，等待浏览器授权完成后继续原任务，不要求用户重新发起。
 4. 初始化已有项目时先用 `maker_apps` 获取 `app_id`，再调用 `maker_init`。只有用户明确要求新建项目时才传 `create=true` 和 `name`。
-5. 构建、运行或预览用 `maker_build`。成功结果含 `user_facing_markdown` 时原样引用，不放进代码块；右侧预览由插件打开。
+5. 构建、运行或预览用 `maker_build`。成功结果含 `user_facing_markdown` 时原样引用，不放进代码块；右侧预览默认由插件打开；用户在插件设置中关闭后，结果里 `preview.skipped` 为 `true`，插件不会打开右侧预览，只需把链接给用户，不要再用其它工具替用户打开预览。
 6. 打开本地 Maker 控制台用 `maker_console`，或在插件设置页点击“打开 Maker 控制台”。它只启动官方本地服务并打开页面，不自动构建、提交或安装运行环境；关闭页面不会停止服务，请在控制台中停止。媒体开关只限制 Agent 工具，不限制控制台里的手动操作。
 7. 使用素材、广告、调试或其它 Maker 能力前，先调用 `ghost_call({ ghost_id: "taptap-maker", tool: "maker_list_tools", args: {} })` 获取随包 Runtime 固定发布的工具目录与参数 schema 快照；它不表示当前工作区实时可用。账号受限时可能直接返回账号限制提示而非动态目录，实际可用性以调用结果为准。再通过 `ghost_call({ ghost_id: "taptap-maker", tool: "maker_call_tool", args: { name: "<刚返回的工具名>", args: { ... } } })` 调用，不凭记忆猜工具名。
 

@@ -37,11 +37,11 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function previewCardHtml(url) {
+function previewCardHtml(url, opened) {
   var safeUrl = escapeHtml(url);
   return [
     '<div style="padding:12px;border:1px solid var(--border-default);border-radius:10px;">',
-    '<div style="font-weight:600;">TapTap Maker 预览已在右侧打开</div>',
+    '<div style="font-weight:600;">' + (opened ? 'TapTap Maker 预览已在右侧打开' : 'TapTap Maker 预览地址') + '</div>',
     '<div style="margin-top:6px;color:var(--text-secondary);">如需在浏览器中打开：</div>',
     '<a href="' + safeUrl + '" style="display:block;margin-top:4px;word-break:break-all;">',
     safeUrl,
@@ -171,6 +171,20 @@ async function listMakerTools(workdir) {
   return tools.filter(function visible(tool) {
     return isObject(tool) && typeof tool.name === 'string' && !FIXED_MAKER_TOOLS[tool.name];
   });
+}
+
+// 返回 true / false；缺省视为开启，读取失败或值类型非法返回 null（不打开右侧预览，只返回链接）。
+async function readPreviewSetting() {
+  try {
+    var response = await fetch('/kv');
+    if (!response.ok) return null;
+    var preferences = await response.json();
+    if (!isObject(preferences)) return null;
+    if (!Object.prototype.hasOwnProperty.call(preferences, 'makerPreviewEnabled')) return true;
+    return typeof preferences.makerPreviewEnabled === 'boolean' ? preferences.makerPreviewEnabled : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 async function callMakerTool(name, args, longRunning) {
@@ -711,18 +725,31 @@ async function handleTool(message) {
     var previewUrl = previewUrlFromResult(built);
     if (!previewUrl) return built;
     var preview;
-    try {
-      preview = await cindy.preview({
-        url: previewUrl,
-        ...(typeof buildContext.session_id === 'string' ? { sessionId: buildContext.session_id } : {}),
-      });
-    } catch (error) {
-      preview = { ok: false, message: errorMessage(error) };
+    var previewSetting = await readPreviewSetting();
+    if (previewSetting !== true) {
+      // 用户关闭了右侧预览，或设置读不出来：构建已成功，只返回链接，不打开、不聚焦、不刷新右侧面板。
+      preview = {
+        ok: false,
+        skipped: true,
+        message: previewSetting === false
+          ? '已在插件设置中关闭构建后自动打开右侧预览，请用下面的链接在浏览器中打开'
+          : '右侧预览设置读取失败，本次未打开右侧预览，请用下面的链接在浏览器中打开',
+      };
+    } else {
+      try {
+        preview = await cindy.preview({
+          url: previewUrl,
+          ...(typeof buildContext.session_id === 'string' ? { sessionId: buildContext.session_id } : {}),
+        });
+      } catch (error) {
+        preview = { ok: false, message: errorMessage(error) };
+      }
     }
     return Object.assign({}, built, {
       preview: preview && preview.ok === true
         ? { ok: true, url: previewUrl }
-        : { ok: false, url: previewUrl, message: preview && preview.message ? preview.message : '右侧预览打开失败' },
+        : { ok: false, url: previewUrl, ...(preview && preview.skipped === true ? { skipped: true } : {}),
+          message: preview && preview.message ? preview.message : '右侧预览打开失败' },
       preview_url: previewUrl,
       user_facing_markdown: '[打开 TapTap Maker 预览](' + previewUrl + ')',
     });
@@ -774,7 +801,7 @@ async function sendToolResult(message) {
           callId: message.callId,
           v: 2,
           state: 'done',
-          html: previewCardHtml(result.preview_url),
+          html: previewCardHtml(result.preview_url, isObject(result.preview) && result.preview.ok === true),
         });
       } catch (_error) {
         // 卡片只是可点击地址的补充；右侧预览和构建结果不受影响。

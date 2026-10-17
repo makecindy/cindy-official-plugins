@@ -113,7 +113,7 @@ Skill 写入保护是否有其他等价实现需另做行为核查，不能只�
 | T4 错误三态 | 兼容 structuredContent、remote_result、error_details 和固定错误文本；初始化与重试后 unknown 同样保留并要求先核对远端。 | 891868e、d0b428c、7465ceb；main.js | 脱敏不丢状态、不泄露凭证/路径/堆栈；保留精确积分不足信号，不把普通错误当余额不足。 |
 | T5 状态/目录 | 固定工具映射为 maker_status/maker_build 并从动态入口排除；列表是随包快照。状态摘要有 /tracking 遥测。 | 891868e、bdc6bdd；main.js、manifest、locales | 保留 detail/skip_remote_sync；不宣称零网络，不因列表有工具就跳过账号/项目检查。 |
 | T6 引导 | 独立 CLI/npm/环境变量建议转为 Cindy 入口；区分 Python/LSP 未就绪、已就绪、建议升级；主/子入口设置 cindy_plugin。 | 891868e；main.js、node/maker-mcp.cjs、node/maker-child.cjs | 不误导用户用独立 npm 覆盖随包版本；文字解析是兼容债务，不可直接删除行为。 |
-| U1 构建 UI | 校验官方 maker_url，保留 localDev=1，加 hide_chat=1/sessionId，右侧打开并返回可点击链接。 | 41d53ce、df08857；main.js | 打开预览失败不覆盖构建成功、不重新提交；这是远端预览，不是 UrhoX 本地窗口。 |
+| U1 构建 UI | 校验官方 maker_url，保留 localDev=1，加 hide_chat=1/sessionId，右侧打开（用户关闭 `makerPreviewEnabled` 设置时不打开）并返回可点击链接。 | 41d53ce、df08857；main.js、settings.js | 打开预览失败不覆盖构建成功、不重新提交；设置关闭或读取失败时不打开右侧预览，仍返回链接（`preview.skipped`）；这是远端预览，不是 UrhoX 本地窗口。 |
 | U2 文档/UI | 四语言、错误码映射、Skill 转 Manual、限定 Maker 召回、固定广告指南、UrhoX 标准库限制指引。 | e5e1396、7f00a60、a887ccc、20b0b06 | 不因升级引导 Agent 绕过插件；不是 Runtime 补丁但仍属于交付行为。 |
 
 ## 四、历史分支和已替换方案
