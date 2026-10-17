@@ -7,7 +7,7 @@
       "description": "同时列出全球版和世纪互联中国区的已连接账号、各区默认账号及应用配置状态。支持多账号同时登录；可传 profile_account，通过只读 Graph 查询该账号的 mail 与 user_principal_name。登录名不一定是收信地址，mail 为空时不要猜测。不读取邮件、不返回令牌。"
     },
     "outlook_mail": {
-      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。"
+      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。 附件：list_attachments 列表；download_attachment 下载≤25 MiB常规文件，顶层 save_dir 指定目录。prepare_attachments 用顶层 dir 检查文件交接，不访问邮箱。send/draft 带附件需 with_attachments=true 和顶层 dir（≤10个、合计≤2 MiB）；不把字节传给模型。附件发送依赖后续正式宿主 uploadJson v1，0.1.109尚不支持。嵌套邮件、云引用和大附件上传不支持。"
     }
   }
 }

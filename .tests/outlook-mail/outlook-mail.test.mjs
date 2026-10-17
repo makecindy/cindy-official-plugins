@@ -329,3 +329,54 @@ test('an unconfigured or expired China connection does not block either global a
     assert.deepEqual(h.requests.map(r=>r.authAccount),['g1','g2']);
   }
 });
+
+const ticket={token:'11111111-2222-4333-8444-555555555555',file_count:2,total_bytes:4,rel_paths:['docs/a.txt','b.bin']};
+const capability={ok:true,capabilities:{uploadJson:{version:1,maxFiles:10,maxTotalBytes:2097152,maxRequestBytes:4194304}}};
+const saveTicket={token:ticket.token,dir_name:'downloads'};
+const attachment={id:'att/id',name:'../../private\\report.bin',size:4,contentType:'application/octet-stream','@odata.type':'#microsoft.graph.fileAttachment'};
+test('local file handoff preflight never accesses mailbox and clearly reports old Host',async()=>{
+  for(const reply of [capability,{ok:false,message:'url required'},new Error('old Host')]){
+    const h=harness({reply});const r=await h.call({action:'prepare_attachments',dir_deposit:ticket});assert(r.ok);assert.equal(r.result.ready,reply===capability);assert.equal(h.locals.length,0);assert.equal(h.requests.length,1);assert.equal(h.requests[0].op,'capabilities');assert.equal(JSON.stringify(r).includes(ticket.token),false);
+  }
+});
+test('attachment send/draft uses only template and ticket, preserves cloud and account',async()=>{
+  for(const action of ['send','draft'])for(const account of ['g2','c1']){
+    const h=harness({reply:q=>q.op ? capability : response(action==='send'?null:{id:'draft'},action==='send'?202:201)});
+    const r=await h.call({...send,action,account,with_attachments:true,dir_deposit:ticket});assert(r.ok);assert.equal(h.requests.length,2);
+    const q=h.requests[1];assert.equal(q.authAccount,account);assert(q.url.startsWith(account==='c1'?'https://microsoftgraph.chinacloudapi.cn/':'https://graph.microsoft.com/'));assert.equal(q.body,undefined);assert.equal(q.uploadJson.token,ticket.token);
+    const doc=JSON.parse(q.uploadJson.json),m=action==='send'?doc.message:doc;assert.equal(m.attachments.length,2);assert.equal(m.attachments[0].contentBytes,null);assert.equal(m.attachments[0].name,'a.txt');assert.deepEqual(Array.from(q.uploadJson.files[0].target),action==='send'?['message','attachments',0,'contentBytes']:['attachments',0,'contentBytes']);assert.equal(JSON.stringify(r).includes('contentBytes'),false);
+  }
+});
+test('missing files, oversized handoff, invalid paths and absent Host capability cannot send',async()=>{
+  const invalid=[{with_attachments:true},{dir_deposit:ticket},{with_attachments:false,dir_deposit:ticket},{with_attachments:true,dir_deposit:{...ticket,total_bytes:2097153}},{with_attachments:true,dir_deposit:{...ticket,rel_paths:['../secret','b.bin']}},{with_attachments:true,dir_deposit:{...ticket,file_count:3}}];
+  for(const patch of invalid){const h=harness({reply:capability});const r=await h.call({...send,...patch});assert(!r.ok);assert.match(r.message,/not_executed/);assert.equal(h.requests.length,0);}
+  const h=harness({reply:{ok:false,message:'url required'}});const r=await h.call({...send,with_attachments:true,dir_deposit:ticket});assert(!r.ok);assert.equal(r.errorCode,'HOST_UPGRADE_REQUIRED');assert.equal(h.requests.length,1);
+});
+test('attachment transport failures retain execution state, do not retry or expose detail',async()=>{
+  for(const result of [{ok:false,executionStatus:'not_executed'},{ok:false,executionStatus:'unknown'},new Error('private bytes')]){
+    const h=harness({reply:q=>{if(q.op)return capability;if(result instanceof Error)throw result;return result;}});const r=await h.call({...send,with_attachments:true,dir_deposit:ticket});assert(!r.ok);assert.match(r.message,result.executionStatus==='not_executed'?/not_executed/:/unknown/);assert.doesNotMatch(r.message,/private/);assert.equal(h.requests.length,2);
+  }
+});
+test('attachment listing exposes metadata only, pages bind mailbox, message and cloud',async()=>{
+  const next=ctx.base+'/me/messages/m/attachments?$skip=10';const h=harness({reply:response({value:[{...attachment,contentBytes:'private bytes'}],'@odata.nextLink':next})});
+  const r=await h.call({action:'list_attachments',message_id:'m'});assert(r.ok);assert(!JSON.stringify(r).includes('private bytes'));assert.equal(r.result.attachments[0].downloadable,true);
+  const token=r.result.next_page_token;assert((await h.call({action:'list_attachments',message_id:'m',page_token:token})).ok);
+  for(const patch of [{message_id:'other'},{account:'g2'},{account:'c1'}]){const h2=harness();const result=await h2.call({action:'list_attachments',message_id:'m',page_token:token,...patch});assert(!result.ok);assert.equal(h2.requests.length,0);}
+  for(const url of ['https://evil.example.test/attachments',ctx.base+'/users/other/messages/m/attachments',ctx.base+'/me/messages/other/attachments']){const h2=harness({reply:response({value:[],'@odata.nextLink':url})});assert(!(await h2.call({action:'list_attachments',message_id:'m'})).ok);assert.equal(h2.requests.length,1);}
+});
+test('download uses raw bytes and authorized save ticket, sanitized name, exact receipt',async()=>{
+  for(const account of ['g2','c1']){
+    const h=harness({reply:q=>q.as==='file'?{ok:true,status:200,file:{file_name:'report (2).bin',bytes:4}}:response(attachment)});
+    const r=await h.call({action:'download_attachment',message_id:'m/id',attachment_id:attachment.id,account,save_deposit:saveTicket});assert(r.ok);assert.equal(r.result.file_name,'report (2).bin');assert.equal(r.result.bytes,4);assert.equal(h.requests.length,2);
+    const q=h.requests[1];assert.equal(q.as,'file');assert.equal(q.saveTo.filename,'report.bin');assert.equal(q.saveTo.token,ticket.token);assert.equal(q.authAccount,account);assert(q.url.endsWith('/me/messages/m%2Fid/attachments/att%2Fid/$value'));assert.equal(JSON.stringify(r).includes(ticket.token),false);
+  }
+});
+test('download rejects unsupported types, size, truncation and unsafe receipts',async()=>{
+  for(const change of [{'@odata.type':'#microsoft.graph.itemAttachment'},{'@odata.type':'#microsoft.graph.referenceAttachment'},{size:26214401},{size:-1},{size:null},{id:'other'}]){
+    const h=harness({reply:response({...attachment,...change})});assert(!(await h.call({action:'download_attachment',message_id:'m',attachment_id:attachment.id,save_deposit:saveTicket})).ok);assert.equal(h.requests.length,1);
+  }
+  for(const reply of [{ok:false},{ok:true,status:206,file:{bytes:4,file_name:'a'}},{ok:true,status:200,file:{bytes:3,file_name:'a'}},{ok:true,status:200,truncated:true,file:{bytes:4,file_name:'a'}},{ok:true,status:200,file:{bytes:4,file_name:'../a'}}]){
+    const h=harness({reply:q=>q.as==='file'?reply:response(attachment)});assert(!(await h.call({action:'download_attachment',message_id:'m',attachment_id:attachment.id,save_deposit:saveTicket})).ok);assert.equal(h.requests.length,2);
+  }
+  const h=harness();assert(!(await h.call({action:'download_attachment',message_id:'m',attachment_id:attachment.id})).ok);assert.equal(h.requests.length,0);
+});
