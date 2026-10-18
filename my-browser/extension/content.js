@@ -19,6 +19,7 @@
     if(disposed)return;disposed=true;panelEpoch++;generation++;lifecycle.abort();clearInterval(navigationTimer);
     requests.clear();progressHandlers.clear();stopPage();stopVideo();
     for(const rec of translations.values())rec.host.remove();translations.clear();
+    for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
@@ -192,16 +193,19 @@
   function stopVideo(){if(videoSession)rememberVideo(false);clearTimeout(videoTimer);if(video&&videoSession?.seekHandler)video.removeEventListener('seeked',videoSession.seekHandler);videoSession?.playback?.dispose();videoSession?.overlay?.destroy();videoSession=null;if(video&&videoHandler)video.removeEventListener('timeupdate',videoHandler);videoHandler=null;video=null;activeCue=-1;previousCue=-1;}
   function ensureVideoEntry(){
     if(!runtimeReady())return;
-    const media=document.querySelector('video'),player=media?.closest('#movie_player,.html5-video-player')||media?.parentElement;
-    if(!player)return;
-    let host=player.querySelector('[data-cindy-player-entry]');
+    const media=document.querySelector('video'),player=media?.closest('#movie_player,.html5-video-player');
+    const native=player?.querySelector('.ytp-right-controls');
+    // Only mount in an adapted control bar. A generic video's parent can be
+    // part of the page layout (e.g. a short-video feed), not player controls.
+    for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))if(entry.parentElement!==native)entry.remove();
+    if(!native)return;
+    let host=native.querySelector('[data-cindy-player-entry]');
     if(!host){
       host=el('div');host.setAttribute('data-cindy-player-entry','');isolateHost(host,{display:'inline-flex',height:'100%','vertical-align':'top'});
       const root=host.attachShadow({mode:'closed'});root.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;width:36px;padding:0;font-weight:600;display:inline-flex;align-items:center;justify-content:center}button img{width:20px;height:20px;border-radius:50%;object-fit:cover}'));const control=el('div',undefined,'cindy-root'),entry=button('',()=>open('video'),'quiet');entry.setAttribute('aria-label','Cindy');entry.title='Cindy';const icon=el('img');icon.src=brandURL;icon.alt='';entry.append(icon);control.append(entry);root.append(control);
       for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])host.addEventListener(event,e=>e.stopPropagation());
     }
-    const native=player.querySelector('.ytp-right-controls');
-    if(native){if(host.parentElement!==native)native.prepend(host);}else if(host.parentElement!==player)player.append(host);
+    if(host.parentElement!==native)native.prepend(host);
   }
   function mountVideoCaptions(media){
     const player=media.closest('#movie_player,.html5-video-player')||media.parentElement;
@@ -478,7 +482,7 @@
     try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
   }
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
-  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=/(^|\.)youtube\.com$/.test(location.hostname);if(document.querySelector('video,audio')&&!videoSession)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
+  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=/(^|\.)youtube\.com$/.test(location.hostname);if(!videoSession)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){videoSession?.overlay?.closeSettings();if(!videoSession)hidePanel();selectionButton?.remove();}},{signal:lifecycle.signal});
 })();
