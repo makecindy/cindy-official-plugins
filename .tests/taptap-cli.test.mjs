@@ -695,6 +695,53 @@ test('a new read domain keeps its catalogue schema in the drill-down', async () 
   assert.ok(completionOnly, 'completion-only commands stay reachable');
 });
 
+test('forum data statistics route through the data manual, not the post manual', () => {
+  // `get-forum-stats` is an independent read endpoint under dashboard-stats: it
+  // returns counters (visits, active users, posts/deletes/moves, replies,
+  // follows and content totals), never post bodies. The reply count it returns
+  // and the replies read through community-management are different interfaces
+  // with different definitions, so the routing must not collapse them.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const dashboard = read('taptap-suite/references/taptap-dashboard-stats/MANUAL.md');
+  const cheatsheet = read(
+    'taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md',
+  );
+  const routing = read('taptap-suite/references/business-routing.md');
+  const top = read('taptap-suite/MANUAL.md');
+
+  // The domain manual and the top-level routing table both send forum metrics
+  // to the dedicated reference instead of leaving them to the post manual.
+  assert.match(dashboard, /get-forum-stats/, 'dashboard-stats must name the forum endpoint');
+  assert.match(dashboard, /forum-stats-cheatsheet\.md/, 'dashboard-stats must link the forum reference');
+  assert.match(
+    top,
+    /\| 查论坛[^|]*\| `dashboard-stats`/,
+    'the routing table must send forum metrics to dashboard-stats',
+  );
+  assert.match(
+    routing,
+    /论坛数据统计 ≠ 论坛帖子\/回复内容/,
+    'business routing must separate forum metrics from post content',
+  );
+
+  // The reference has to stay on the plugin path: call_tool, not a shell call.
+  assert.match(cheatsheet, /call_tool\(name:"dashboard-stats get-forum-stats"/);
+  assert.doesNotMatch(cheatsheet, /taptap-cli dashboard-stats/, 'the reference must not hand over a shell command');
+  assert.match(cheatsheet, /data:\{type:/, 'the forum metric dimension travels in args.data');
+
+  // The definitions that make the numbers usable.
+  assert.match(cheatsheet, /最多 8 个/, 'at most eight metric dimensions per call');
+  assert.match(cheatsheet, /366 天/, 'the longest query window must stay stated');
+  assert.match(cheatsheet, /活跃人次/, 'forum_uv is a sum of daily uniques, not a range unique');
+  assert.match(
+    cheatsheet,
+    /content_total[\s\S]*content_create[\s\S]*不是同一口径/,
+    'content_total and content_create are different definitions',
+  );
+  assert.match(cheatsheet, /`columns` 为空数组/, 'no-data must be scoped to the selected range');
+});
+
 test('nothing shipped points at the internal taptap/cli repository', () => {
   // The GitHub repository is internal; only the npm package is public. Any
   // link to the repository is therefore a dead end for the people who install

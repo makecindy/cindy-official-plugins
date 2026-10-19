@@ -1,6 +1,6 @@
 # TapTap CLI 插件:数据表现(dashboard-stats)
 
-dashboard-stats 是只读数据查询手册,覆盖下载、PV、曝光、转化、预约、订单、评分、关注、收藏等指标。核心风险不是写入,而是指标口径混用、时间范围不清、游戏形态不匹配。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理)。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
+dashboard-stats 是只读数据查询手册,覆盖下载、PV、曝光、转化、预约、订单、评分、关注、收藏等指标,以及论坛访问量、活跃用户、内容发布/删除/移动、回复等论坛数据。核心风险不是写入,而是指标口径混用、时间范围不清、游戏形态不匹配。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理)。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
 
 **CRITICAL — 不要把不同游戏形态套同一套口径。指标口径、时间范围或形态不匹配会把数据解释成错误的业务结论;不同形态、平台或渠道分别查询后再汇总。**
 
@@ -9,6 +9,7 @@ dashboard-stats 是只读数据查询手册,覆盖下载、PV、曝光、转化�
 | 用户意图 | 处理 |
 | --- | --- |
 | 下载量、PV、曝光、转化、预约、订单、评分、关注、收藏 | 用本手册查询指标 |
+| 论坛访问量、活跃、内容发布/回复、关注与内容总数 | 用 `get-forum-stats`,见 [forum stats](taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md) |
 | 不确定 metric key | 先查 `call_tool(name:"schema", args:{_positional:["dashboard-stats","get-dashboard-stats"]})` 或 [metrics cheatsheet](taptap-suite/references/taptap-dashboard-stats/references/dashboard-metrics-cheatsheet.md),不要猜 |
 | 查询某个推荐位 / 展示位转化 | 先 `get-dashboard-position-options` 取合法 value,再查 `metric:"position"` |
 | 用户没给时间范围 | 追问;若上下文有"昨天/上周/最近 7 天",转成具体日期 |
@@ -31,6 +32,11 @@ call_tool(name:"dashboard-stats get-dashboard-position-options", args:{
 call_tool(name:"dashboard-stats get-dashboard-stats", args:{
   app_id:"<appId>", dev_id:"<developerId>",
   data:{metric:"<metricKey>", start_date:"YYYY-MM-DD", end_date:"YYYY-MM-DD"}})
+
+# 论坛数据查询(指标维度走 data.type,与 metric 不同)
+call_tool(name:"dashboard-stats get-forum-stats", args:{
+  app_id:"<appId>", developer_id:"<developerId>",
+  data:{type:["forum_pv","forum_uv"], start_date:"YYYY-MM-DD", end_date:"YYYY-MM-DD"}})
 ```
 
 ## 执行规则
@@ -44,6 +50,7 @@ call_tool(name:"dashboard-stats get-dashboard-stats", args:{
 - 买断/付费游戏看订单、收入、支付转化时必须说明统计口径。
 - 评价相关指标只覆盖数据表现页可查的评分/评价统计,不等于评价正文检索;要评价正文转 `taptap-player-feedback` 手册。
 - 社区关注、收藏等是聚合指标,不等于帖子内容分析。
+- 论坛数据指标用 `get-forum-stats`,口径与无数据判读见 [forum stats](taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md)。
 - 查询后先给口径、时间范围、汇总值、趋势和异常解释。
 - 常规 metric 的 `total` 是汇总对象,不是数字;优先读取 `overview.list`,趋势字段按 `key_map` 解读。
 - `version` 是否生效以当前接口结果为准;CLI 不在本地忽略或改写 metadata 已声明的字段。
@@ -56,9 +63,11 @@ call_tool(name:"dashboard-stats get-dashboard-stats", args:{
 | Reference | 什么时候读 | 读取方式 |
 | --- | --- | --- |
 | metrics cheatsheet | 选择 metric、platform、position、review_type 等取值时 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-dashboard-stats/references/dashboard-metrics-cheatsheet.md"})` |
+| forum stats | 查论坛数据指标(访问量、活跃、内容发布/回复、关注与内容总数)时 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md"})` |
 
 ## 不在本手册范围
 
 - 评价正文、单条评价的配图、作者与回复:转 `taptap-player-feedback` 手册。
+- 论坛访问量、活跃、内容发布/删除/移动、回复数等论坛数据由本手册的 `get-forum-stats` 覆盖,不是帖子正文检索。
 - 论坛帖子正文、一级回复和子回复:转 `taptap-community-management` 手册;跨社区舆情检索不在当前 CLI 范围。
 - 修改资料、创建活动、提交审核、发版等写操作转对应业务手册。
