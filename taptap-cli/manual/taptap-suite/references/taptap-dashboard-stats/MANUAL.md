@@ -9,7 +9,7 @@ dashboard-stats 是只读数据查询手册,覆盖下载、PV、曝光、转化�
 | 用户意图 | 处理 |
 | --- | --- |
 | 下载量、PV、曝光、转化、预约、订单、评分、关注、收藏 | 用本手册查询指标 |
-| 论坛访问量、活跃、内容发布/回复、关注与内容总数 | 用 `get-forum-stats`,见 [forum stats](taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md) |
+| 论坛访问量、活跃、内容发布/删除/移动、区间回复新增、关注与内容总数 | 用 `get-forum-stats`,见 [forum stats](taptap-suite/references/taptap-dashboard-stats/references/forum-stats-cheatsheet.md) |
 | 不确定 metric key | 先查 `call_tool(name:"schema", args:{_positional:["dashboard-stats","get-dashboard-stats"]})` 或 [metrics cheatsheet](taptap-suite/references/taptap-dashboard-stats/references/dashboard-metrics-cheatsheet.md),不要猜 |
 | 查询某个推荐位 / 展示位转化 | 先 `get-dashboard-position-options` 取合法 value,再查 `metric:"position"` |
 | 用户没给时间范围 | 追问;若上下文有"昨天/上周/最近 7 天",转成具体日期 |

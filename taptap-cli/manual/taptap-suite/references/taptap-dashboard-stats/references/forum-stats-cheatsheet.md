@@ -2,6 +2,8 @@
 
 `get-forum-stats` 是 `dashboard-stats` 服务下与 `get-dashboard-stats` 相互独立的只读接口，查的是**论坛数据**：论坛访问量、活跃用户、内容发布/删除/移动、回复数，以及论坛关注总数和内容总数。它不是商店/游戏/销售/评价看板指标，也不返回帖子或回复的正文（正文转 `taptap-community-management` 手册）。场景路由和输出边界以 [dashboard-stats 手册](taptap-suite/references/taptap-dashboard-stats/MANUAL.md) 为准。
 
+单帖的当前回复总数（`moment.stat.comments`，含子回复）和分层回复列表不属于本接口：那是 `taptap-community-management` 手册的读取范围；这里的 `comment_create` 只表示所选区间内全论坛的回复新增量，不能用来回答「这个帖子现在有多少回复」。
+
 ## 调用
 
 ```text

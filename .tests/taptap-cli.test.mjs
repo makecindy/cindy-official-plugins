@@ -724,6 +724,11 @@ test('forum data statistics route through the data manual, not the post manual',
     /论坛数据统计 ≠ 论坛帖子\/回复内容/,
     'business routing must separate forum metrics from post content',
   );
+  assert.match(
+    routing,
+    /全论坛回复新增量[\s\S]*moment\.stat\.comments/,
+    'business routing must keep per-post reply totals on community-management',
+  );
 
   // The reference has to stay on the plugin path: call_tool, not a shell call.
   assert.match(cheatsheet, /call_tool\(name:"dashboard-stats get-forum-stats"/);
@@ -740,6 +745,11 @@ test('forum data statistics route through the data manual, not the post manual',
     'content_total and content_create are different definitions',
   );
   assert.match(cheatsheet, /`columns` 为空数组/, 'no-data must be scoped to the selected range');
+  assert.match(
+    cheatsheet,
+    /`moment\.stat\.comments`[\s\S]*community-management/,
+    'the reference must send per-post reply totals to community-management',
+  );
 });
 
 test('nothing shipped points at the internal taptap/cli repository', () => {
