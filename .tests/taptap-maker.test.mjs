@@ -504,7 +504,7 @@ function loadAccountInternals() {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.15');
+  assert.equal(manifest.version, '2.1.16');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -1394,6 +1394,46 @@ test('Maker 明确要求恢复身份时会自动创建身份并重试原调用�
     'get_debug_feedbacks',
   ]);
   assert.equal(result.result.content[0].text, 'feedbacks');
+});
+
+test('长任务等待回执超时按执行状态未知返回，不重试也不当作普通失败（#5854）', async () => {
+  const calledTools = [];
+  const harness = createMainHarness(async (request) => {
+    if (request.method === 'cindy/tools-list') {
+      return { ok: true, result: { tools: [{ name: 'create_video_task' }] } };
+    }
+    calledTools.push(request.params.name);
+    return { ok: false, errorCode: 'TIMEOUT', message: 'Node 请求 tools/call 等待超时' };
+  });
+
+  const result = await harness.call('maker_call_tool', {
+    name: 'create_video_task',
+    args: { model: '2.0', mode: 'first_frame' },
+    session_context: { workdir_is_local: true, workdir: '/tmp/trusted-maker' },
+  });
+
+  assert.deepEqual(calledTools, ['create_video_task']);
+  assert.equal(result.ok, true);
+  assert.equal(result.result.isError, true);
+  assert.equal(result.result.structuredContent.execution_state, 'unknown');
+  assert.equal(result.result.structuredContent.automatic_retry, false);
+  assert.match(result.result.content[0].text, /执行结果不确定/);
+  assert.match(result.result.content[0].text, /未拿到结果或任务编号/);
+  assert.doesNotMatch(JSON.stringify(result.result), /task_id/);
+});
+
+test('短请求超时仍按原失败返回，不标记执行状态未知', async () => {
+  const harness = createMainHarness(async () => (
+    { ok: false, errorCode: 'TIMEOUT', message: 'Node 请求 tools/call 等待超时' }
+  ));
+
+  const result = await harness.call('maker_status', {
+    session_context: { workdir_is_local: true, workdir: '/tmp/trusted-maker' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.message, 'Node 请求 tools/call 等待超时');
+  assert.equal(result.execution_state, undefined);
 });
 
 test('执行状态未知的动态工具不会触发身份恢复自动重试', async () => {
