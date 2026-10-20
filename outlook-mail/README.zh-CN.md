@@ -1,4 +1,4 @@
-# Outlook 邮箱插件 2.1.0
+# Outlook 邮箱插件 2.2.0
 
 搜索、阅读、起草、发送和整理 Outlook、Hotmail、Live 与 Microsoft 365 云端邮件。全球版和世纪互联中国区分别管理多账号及默认账号。不支持其他邮箱服务商或仅使用 Outlook 客户端打开的本地 Exchange 邮箱。
 
@@ -22,12 +22,51 @@
 
 提供账号列表、KQL／结构化搜索、阅读、带 CC/BCC 的纯文本发送、草稿、分页文件夹、已读／未读及移动。读取不标记已读。写操作必须来自明确用户意图，并核对发件账号、收件人和内容。发送成功只表示微软接受，不代表送达。执行状态为 executed 或 unknown 的失败，必须先检查邮箱再决定是否重复。插件不重试邮件请求；OAuth 刷新及相关重试由 Host 决定。
 
-请求上限约 250 KB、100 个收件人、每页 50 条。分页绑定账号、区域与操作。Microsoft KQL 搜索最多返回 1000 封；正文超过 50000 字符明确标记截断；移动后使用返回的新 ID。不包含附件、回复／转发、共享邮箱、分类或删除。
+请求上限约 250 KB、100 个收件人、每页 50 条。分页绑定账号、区域与操作。Microsoft KQL 搜索最多返回 1000 封；正文超过 50000 字符明确标记截断；移动后使用返回的新 ID。不包含回复／转发、共享邮箱、分类或删除；约 250 KB 限制用于文字/模板。
 
 ## 升级和验证
 
 2.0.0 替换 SDK 授权路径，旧 SDK 会话与保存的账号元数据不再使用，需要通过 Host OAuth 重新连接。不会读取或清理其他微软工具的凭据缓存，也不会从旧 KV 自动恢复登录。
 
-运行 `node --test .tests/outlook-mail.test.mjs` 和仓库规定的契约、本地化、provisioning、发布流程检查。提交后使用 `.github/scripts/package-plugin.sh outlook-mail /tmp/outlook-mail-2.1.2.cindy` 打包。浏览器测试使用模拟 Host 接口与虚构账号，不作为真实 OAuth 证据；见 `.tests/outlook-mail/settings-browser.mjs`。
+运行 `node --test .tests/outlook-mail.test.mjs` 和仓库规定的契约、本地化、provisioning、发布流程检查。提交后使用 `.github/scripts/package-plugin.sh outlook-mail /tmp/outlook-mail-2.2.0.cindy` 打包。浏览器测试使用模拟 Host 接口与虚构账号，不作为真实 OAuth 证据；见 `.tests/outlook-mail/settings-browser.mjs`。
 
 管理员于 2026-09-09 提供了全球版公共应用 ID。已在 Cindy Beta 验证真实 Host OAuth 登录及单账号只读操作；确切包、客户端版本和当前覆盖范围记录于 PR。发送、草稿、标记和移动仍需获授权的真实邮箱验收；多账号与中国区保持未验证。早期 SDK 开发包结果不能替代本实现的验收。新插件准入和最终实机验收仍需维护者审查。provisioning 是空定向名单，不自动分发；测试及打包限制不作放宽。
+
+## 文件附件（2.2.0）
+
+下载和授权文件交接要求 Cindy 0.1.109 或更高。**附件发送和草稿还需要包含
+uploadJson v1 的后续正式宿主版本**，目前该宿主接口尚未上线。在 0.1.109
+安装此插件不会开启附件发送；普通邮件行为保留。能力探测不通过会在发信前
+明确拒绝，不会悄悄丢掉附件后发送。
+
+- `outlook_mail(action: "list_attachments", message_id, account)` 列出附件 ID、
+  类型、大小和内嵌标记，不返回 contentBytes。分页绑定账号、区域和原邮件；
+  page_token 必须同时保留原 message_id。
+- `download_attachment` 指定 message_id 和 attachment_id，并在 **ghost_call
+  顶层 save_dir** 指定已存在的授权目录。仅下载不超过 25 MiB 的常规
+  fileAttachment（含内嵌图片）。文件名消毒，宿主保存时不覆盖同名文件。
+  HTTP 200 且保存回执字节数与 Graph 元数据一致才报成功；不一致会报错，
+  目标目录可能已留下文件，不应将它当作验证成功的文件。
+- `prepare_attachments` 通过 **ghost_call 顶层 dir** 交付单文件或只含目标附件
+  的目录，返回文件名、合计大小及宿主能力，不访问邮箱、不发送。此检查不能
+  保证后续文件内容不变；发送或起草时必须重新交付 dir。
+- `send` / `draft` 带附件需 `with_attachments: true` 和新交付的顶层 dir。
+  最多 10 个文件，原始字节合计不超过 2 MiB。宿主凭一次性票据读取文件，
+  在 JSON 的 null 占位填入 base64 并直接发出；本地路径和字节不能放入 args
+  或模型上下文。失败或过期票据需要重新交付；结果未知先核对邮箱，不能直接
+  重发。uploadJson 模式不跟随跳转，也不因 HTTP 401 自动重放请求。
+
+约 250 KB 限制仍用于文字/JSON模板，不包括附件原始字节。2 MiB 合计上限为
+base64 和文字预留空间，使宿主最终请求低于 4 MiB，也低于 Graph 常规附件
+小于 3 MB 的路径限制。不支持嵌套邮件/事件、云引用或大附件上传会话。
+发送使用 application/octet-stream 和原文件名。Graph 202 仅表示接受发送，
+不是收件人收到邮件的证明。
+
+官方依据：[sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0)、
+[添加附件](https://learn.microsoft.com/en-us/graph/api/message-post-attachments?view=graph-rest-1.0)、
+[下载附件](https://learn.microsoft.com/en-us/graph/api/attachment-get?view=graph-rest-1.0)、
+[大附件](https://learn.microsoft.com/en-us/graph/outlook-large-attachments)。
+
+自动测试使用虚构账号和文件。真实发信、附件草稿及邮件附件下载仍需用户指定
+目标后验证；本地文件交接不能替代生产邮箱验收。未新增账号权限、设置、凭据
+存储或 Node 能力。本机回退可使用保留的 2.1.2 包，无需断开账号。

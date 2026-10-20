@@ -1,11 +1,11 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.75",
+  "minCindyVersion": "0.1.109",
   "id": "outlook-mail",
   "name": "Outlook 邮箱",
   "description": "搜索、阅读、发送、起草和整理 Outlook 与 Microsoft 365 邮件。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
   "whenToUse": "需要连接 Outlook、Hotmail、Live 或 Microsoft 365 企业邮箱，查询、阅读、发送、起草或整理邮件时使用，包括世纪互联中国区微软托管邮箱。",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -28,7 +28,7 @@
     },
     {
       "name": "outlook_mail",
-      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。",
+      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。 附件：list_attachments 列出指定邮件附件，download_attachment 下载单个常规文件（≤25 MiB），ghost_call 顶层 save_dir 必填。prepare_attachments 接受顶层 dir 的单文件或目录，仅检查交接与宿主能力，不访问邮箱。send/draft 带附件须 with_attachments=true 并用顶层 dir 重新交付，最多10个文件、原始合计≤2 MiB；附件字节不可放入 args。发送依赖后续正式宿主 uploadJson v1；当前0.1.109不支持，未升级时会明确拒绝。不支持嵌套邮件、云引用和大附件上传。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -42,7 +42,10 @@
               "list_folders",
               "mark_read",
               "mark_unread",
-              "move"
+              "move",
+              "list_attachments",
+              "download_attachment",
+              "prepare_attachments"
             ]
           },
           "account": {
@@ -99,7 +102,7 @@
           },
           "message_id": {
             "type": "string",
-            "description": "read/mark_read/mark_unread/move：原始邮件 ID。移动后使用返回的新 ID。"
+            "description": "read/mark_read/mark_unread/move：原始邮件 ID。移动后使用返回的新 ID。 list_attachments / download_attachment 同样必填；附件分页仍须原邮件 ID。"
           },
           "target_folder": {
             "type": "string",
@@ -154,6 +157,14 @@
               }
             ],
             "description": "send/draft：bcc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+          },
+          "attachment_id": {
+            "type": "string",
+            "description": "download_attachment：list_attachments 返回的附件 ID。"
+          },
+          "with_attachments": {
+            "type": "boolean",
+            "description": "send/draft 带附件必填 true，并通过 ghost_call 顶层 dir 交付单文件或目录。不得把本地路径或 base64 放入 args。"
           }
         },
         "required": [

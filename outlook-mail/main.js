@@ -5,7 +5,7 @@ var OutlookMail = (() => {
     global: { key: 'outlook_global', base: 'https://graph.microsoft.com/v1.0' },
     china: { key: 'outlook_china', base: 'https://microsoftgraph.chinacloudapi.cn/v1.0' },
   });
-  const ACTIONS = ['search', 'read', 'send', 'draft', 'list_folders', 'mark_read', 'mark_unread', 'move'];
+  const ACTIONS = ['search', 'read', 'send', 'draft', 'list_folders', 'mark_read', 'mark_unread', 'move', 'list_attachments', 'download_attachment', 'prepare_attachments'];
   const WRITES = ['send', 'draft', 'mark_read', 'mark_unread', 'move'];
   const SUMMARY = 'id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead,isDraft,hasAttachments,parentFolderId,webLink,internetMessageId';
   class MailError extends Error {
@@ -45,7 +45,8 @@ var OutlookMail = (() => {
     const fields = {
       search: ['query','from','subject','unread','since','before','folder','max_results','page_token'],
       list_folders: ['folder','max_results','page_token'],
-      read: ['message_id'], send: ['to','cc','bcc','subject','body_text'], draft: ['to','cc','bcc','subject','body_text'],
+      read: ['message_id'], send: ['to','cc','bcc','subject','body_text','with_attachments','dir_deposit'], draft: ['to','cc','bcc','subject','body_text','with_attachments','dir_deposit'],
+      list_attachments: ['message_id','max_results','page_token'], download_attachment: ['message_id','attachment_id','save_deposit'], prepare_attachments: ['dir_deposit'],
       mark_read: ['message_id'], mark_unread: ['message_id'], move: ['message_id','target_folder'],
     };
     const allowed = ['action','cloud','account',...fields[a.action]];
@@ -54,11 +55,12 @@ var OutlookMail = (() => {
     if (a.account !== undefined) text(a.account, 'account');
     if (a.max_results !== undefined && (!Number.isInteger(a.max_results) || a.max_results < 1 || a.max_results > 50)) invalid('max_results 必须是 1–50 的整数。');
     if (a.page_token !== undefined) {
-      if (!['search', 'list_folders'].includes(a.action)) invalid('此操作不支持分页。');
+      if (!['search', 'list_folders', 'list_attachments'].includes(a.action)) invalid('此操作不支持分页。');
       text(a.page_token, 'page_token', 24000);
       if (['query','from','subject','unread','since','before','folder','max_results'].some(k => a[k] !== undefined)) invalid('继续分页时只传 action、account、cloud 和 page_token。');
     }
-    if (['read','mark_read','mark_unread','move'].includes(a.action)) segment(a.message_id, 'message_id');
+    if (['read','mark_read','mark_unread','move','list_attachments','download_attachment'].includes(a.action)) segment(a.message_id, 'message_id');
+    if (a.action === 'download_attachment') { segment(a.attachment_id,'attachment_id'); depositToken(a.save_deposit,'save_dir'); }
     if (a.folder !== undefined) segment(a.folder, 'folder');
     if (a.action === 'move') segment(a.target_folder, 'target_folder');
     if (a.action === 'search') {
@@ -72,6 +74,9 @@ var OutlookMail = (() => {
       if (a.since && a.before && date(a.since,'since') >= date(a.before,'before')) invalid('since 必须早于 before。');
     }
     if (['send','draft'].includes(a.action)) {
+      if (a.with_attachments !== undefined && typeof a.with_attachments !== 'boolean') invalid('with_attachments 必须是布尔值。');
+      if (a.dir_deposit && a.with_attachments !== true) invalid('使用本地附件时必须设置 with_attachments=true。');
+      if (a.with_attachments === true) attachmentFiles(a.dir_deposit);
       text(a.subject,'subject',998,true); text(a.body_text,'body_text',200000,true);
       const total = ['to','cc','bcc'].map(k => recipients(a[k],k).length).reduce((x,y) => x+y,0);
       if (a.action === 'send' && total === 0) invalid('发送邮件至少需要一个收件人。');
@@ -130,7 +135,8 @@ var OutlookMail = (() => {
     let u; try { u = new URL(raw); } catch (_) { invalid('分页地址无效，请重新查询。'); }
     // Graph nextLink can use lowercase navigation names and OData key syntax.
     // Accept only the same /me collections; never follow /users or action URLs.
-    const valid = action === 'search' ? /^\/v1\.0\/me\/(?:messages|mailFolders(?:\/[^/]+|\('[^'/]+'\))\/messages)$/i.test(u.pathname)
+    const valid = action.startsWith('attachments:') ? u.pathname === '/v1.0/me/messages/'+segment(action.slice(12),'message_id')+'/attachments'
+      : action === 'search' ? /^\/v1\.0\/me\/(?:messages|mailFolders(?:\/[^/]+|\('[^'/]+'\))\/messages)$/i.test(u.pathname)
       : /^\/v1\.0\/me\/mailFolders(?:(?:\/[^/]+|\('[^'/]+'\))\/childFolders)?$/i.test(u.pathname);
     if (u.origin !== new URL(ctx.base).origin || u.username || u.password || u.hash || !valid) invalid('分页地址不属于当前邮箱区域或操作，请重新查询。');
     return u.href;
@@ -204,10 +210,11 @@ var OutlookMail = (() => {
     try { r = await transport({...request,callId,authAccount:ctx.account,as:'text',timeoutMs:30000,
       headers:{Accept:'application/json',Prefer:'outlook.body-content-type="text"',...(request.body ? {'Content-Type':'application/json'} : {})}}); }
     catch (_) { throw new MailError('REQUEST_FAILED','连接中断；'+(write ? '结果未知，请先检查邮箱，勿直接重复执行。' : '请检查网络后重试。'),write ? 'unknown' : 'not_executed'); }
+    if (!r.ok && request.uploadJson && r.executionStatus === 'not_executed') throw new MailError('ATTACHMENT_NOT_UPLOADED','附件未上传，请重新交付文件并检查账号状态。');
     if (!r.ok) throw new MailError('REQUEST_FAILED','主机未能完成请求；'+(write ? '结果未知，请先检查邮箱，勿直接重复执行。' : '请检查账号授权和网络后重试。'),write ? 'unknown' : 'not_executed');
     if (!Number.isInteger(r.status) || r.status < 100 || r.status > 599) throw new MailError('INVALID_RESPONSE','主机未返回有效的 HTTP 状态，请检查邮箱中的实际状态。',write ? 'unknown' : 'not_executed');
     const success = r.status >= 200 && r.status < 300;
-    const state = success && write ? 'executed' : write && (r.status >= 500 || r.status === 408) ? 'unknown' : 'not_executed';
+    const state = success && write ? 'executed' : write && (r.status >= 500 || r.status === 408 || (r.status >= 300 && r.status < 400)) ? 'unknown' : 'not_executed';
     let data = null;
     if (!r.truncated && r.body) { try { data = JSON.parse(r.body); } catch (_) { /* checked below */ } }
     if (!success) throw new MailError('GRAPH_REQUEST_FAILED',failureMessage(r.status,typeof data?.error?.code === 'string' ? data.error.code : '')
@@ -223,10 +230,77 @@ var OutlookMail = (() => {
       received_at:m.receivedDateTime,preview:m.bodyPreview,is_read:m.isRead,is_draft:m.isDraft,
       has_attachments:m.hasAttachments,folder_id:m.parentFolderId,web_url:m.webLink,internet_message_id:m.internetMessageId};
   }
+
+  const UPLOAD_LIMIT = 2 * 1024 * 1024;
+  const DOWNLOAD_LIMIT = 25 * 1024 * 1024;
+  const ATTACHMENT_SELECT = 'id,name,contentType,size,isInline';
+  function depositToken(deposit, name) {
+    if (!deposit || typeof deposit.token !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deposit.token)) invalid('请通过 ghost_call 顶层 '+name+' 交付文件或目录，不要在 args 中填写本地路径。');
+    return deposit.token;
+  }
+  function safeName(name) {
+    const clean = String(name || 'attachment').split(/[\\/]/).pop().replace(/[\x00-\x1f\x7f<>:"|?*]/g,'_').replace(/^[. ]+|[. ]+$/g,'');
+    return (clean || 'attachment').slice(0,100);
+  }
+  function attachmentFiles(deposit) {
+    depositToken(deposit,'dir');
+    if (!Array.isArray(deposit.rel_paths) || deposit.rel_paths.length < 1 || deposit.rel_paths.length > 10 ||
+        deposit.file_count !== deposit.rel_paths.length || !Number.isSafeInteger(deposit.total_bytes) || deposit.total_bytes < 0 || deposit.total_bytes > UPLOAD_LIMIT) invalid('每封邮件最多 10 个常规文件，原始文件合计不超过 2 MiB；不支持大附件上传。');
+    const paths = deposit.rel_paths;
+    if (new Set(paths).size !== paths.length || paths.some(p => typeof p !== 'string' || p.length > 2048 || p.split('/').some(x => !x || x === '.' || x === '..' || /[\\\x00-\x1f]/.test(x)))) invalid('交付文件清单无效，请重新选择文件。');
+    return paths;
+  }
+  async function attachmentCapability(transport) {
+    let r; try { r = await transport({op:'capabilities'}); } catch (_) { /* old Host */ }
+    const c = r?.ok && r.capabilities?.uploadJson;
+    return !!(c && c.version === 1 && c.maxFiles >= 10 && c.maxTotalBytes >= UPLOAD_LIMIT);
+  }
+  async function prepareAttachments(a,transport) {
+    const paths = attachmentFiles(a.dir_deposit);
+    const ready = await attachmentCapability(transport);
+    return {ready,files:paths.map(p => ({name:safeName(p)})),file_count:paths.length,total_bytes:a.dir_deposit.total_bytes,
+      note:ready ? '文件交接和宿主能力检查通过；未发送邮件。发送时请重新通过 dir 交付同一批文件。' : '文件交接成功；当前 Cindy 尚不支持附件发送，需要包含 uploadJson v1 的后续正式宿主版本。未发送邮件。'};
+  }
+  function attachmentSummary(f) {
+    return {id:f.id,name:f.name,content_type:f.contentType,size:f.size,is_inline:!!f.isInline,type:f['@odata.type'],
+      downloadable:f['@odata.type'] === '#microsoft.graph.fileAttachment' && Number.isSafeInteger(f.size) && f.size >= 0 && f.size <= DOWNLOAD_LIMIT};
+  }
+  async function attachmentAction(a,ctx,callId,transport) {
+    const base = ctx.base+'/me/messages/'+segment(a.message_id,'message_id')+'/attachments';
+    const common = {cloud:ctx.cloud,account:ctx.account,message_id:a.message_id};
+    if (a.action === 'list_attachments') {
+      const scope = 'attachments:'+a.message_id;
+      const url = a.page_token ? decodePage(a.page_token,ctx,scope) : base+'?$select='+ATTACHMENT_SELECT+'&$top='+(a.max_results || 10);
+      const data = await api({url,method:'GET'},ctx,callId,a.action,transport);
+      if (!Array.isArray(data.value)) throw new MailError('INVALID_RESPONSE','附件列表不完整，请重新查询。');
+      return {...common,attachments:data.value.map(attachmentSummary),next_page_token:data['@odata.nextLink'] ? encodePage(data['@odata.nextLink'],ctx,scope) : null};
+    }
+    const url = base+'/'+segment(a.attachment_id,'attachment_id');
+    const f = await api({url:url+'?$select='+ATTACHMENT_SELECT,method:'GET'},ctx,callId,a.action,transport);
+    if (f.id !== a.attachment_id || !attachmentSummary(f).downloadable) throw new MailError('UNSUPPORTED_ATTACHMENT','仅支持下载不超过 25 MiB 的常规文件附件；嵌套邮件、云引用和未知大小附件不受支持。');
+    let r; try { r = await transport({url:url+'/$value',method:'GET',callId,authAccount:ctx.account,as:'file',
+      saveTo:{token:depositToken(a.save_deposit,'save_dir'),filename:safeName(f.name)},timeoutMs:120000}); }
+    catch (_) { throw new MailError('DOWNLOAD_FAILED','附件下载未确认完成，请检查目标目录后重新下载。'); }
+    if (!r.ok || r.status !== 200 || r.truncated || !r.file || !Number.isSafeInteger(r.file.bytes) || r.file.bytes !== f.size || r.file.bytes > DOWNLOAD_LIMIT ||
+        typeof r.file.file_name !== 'string' || /[\\/\x00-\x1f]/.test(r.file.file_name) || r.file.file_name === '.' || r.file.file_name === '..') throw new MailError('DOWNLOAD_FAILED','附件下载未通过完整性检查；目标目录如已有文件，请勿使用该文件，重新下载或检查原附件大小。');
+    return {...common,attachment_id:a.attachment_id,downloaded:true,file_name:r.file.file_name,dir_name:a.save_deposit.dir_name,bytes:r.file.bytes};
+  }
+
   async function run(a,callId,transport) {
     validate(a);
+    if (a.action === 'prepare_attachments') return prepareAttachments(a,transport);
     const ctx = await choose(a);
-    const data = await api(build(a,ctx),ctx,callId,a.action,transport);
+    if (['list_attachments','download_attachment'].includes(a.action)) return attachmentAction(a,ctx,callId,transport);
+    const request = build(a,ctx);
+    if (a.with_attachments === true) {
+      if (!await attachmentCapability(transport)) throw new MailError('HOST_UPGRADE_REQUIRED','当前 Cindy 尚不支持附件发送；需要包含 uploadJson v1 的后续正式宿主版本。邮件未发送，也未创建草稿。');
+      const paths = attachmentFiles(a.dir_deposit), document = JSON.parse(request.body);
+      const prefix = a.action === 'send' ? ['message','attachments'] : ['attachments'];
+      (a.action === 'send' ? document.message : document).attachments = paths.map(p => ({'@odata.type':'#microsoft.graph.fileAttachment',name:safeName(p),contentType:'application/octet-stream',contentBytes:null}));
+      request.uploadJson = {token:a.dir_deposit.token,json:JSON.stringify(document),files:paths.map((p,i) => ({path:p,target:[...prefix,i,'contentBytes']}))};
+      delete request.body;
+    }
+    const data = await api(request,ctx,callId,a.action,transport);
     const common = {cloud:ctx.cloud,account:ctx.account};
     if (['search','list_folders'].includes(a.action)) {
       if (!Array.isArray(data.value)) throw new MailError('INVALID_RESPONSE','微软返回的列表不完整，请重新查询。');
