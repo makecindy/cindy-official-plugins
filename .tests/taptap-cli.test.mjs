@@ -175,6 +175,31 @@ if (args.length === 1 && args[0] === 'version') {
   write(JSON.stringify({ ok: true, data: { name: '@taptap/cli', version: '1.2.3', contract: '3' } }));
   process.exit(0);
 }
+if (args[0] === 'auth' && args[1] === 'login') {
+  const notice = process.env.FIXTURE_NOTICE
+    ? { update: { current: '1.0.0', latest: '9.9.9', command: 'taptap-cli update' } }
+    : null;
+  const isWait = args.includes('--device-code');
+  if (process.env.FIXTURE_LOGIN_FAIL === (isWait ? 'wait' : 'start')) {
+    process.stderr.write(JSON.stringify({
+      ok: false,
+      error: { type: 'auth', subtype: 'failed', message: 'login failed' },
+      ...(notice ? { _notice: notice } : {}),
+    }));
+    process.exit(2);
+  }
+  write(JSON.stringify({
+    ok: true,
+    data: isWait ? {} : {
+      verification_url: 'https://example.test/device',
+      device_code: 'device-secret',
+      expires_at: 1893456000,
+      interval: 1,
+    },
+    ...(notice ? { _notice: notice } : {}),
+  }));
+  process.exit(0);
+}
 if (args[0] === 'auth' && args[1] === 'status') {
   write(JSON.stringify({
     ok: true,
@@ -254,6 +279,59 @@ function callWorker(requests, options) {
       reject(error);
     });
     for (const request of pending) child.stdin.write(JSON.stringify(request) + '\n');
+  });
+}
+
+// Like callWorker, but sends the next request only after the previous reply.
+// Login-wait needs the in-memory handle that login-start just created, so the
+// two calls cannot be in flight together. A request may also be a function of
+// the replies so far, which is how the handle is threaded into the second call.
+function callWorkerSequential(requests, options) {
+  const env = Object.assign({}, process.env, (options && options.env) || {});
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [workerPath], { stdio: ['pipe', 'pipe', 'pipe'], env });
+    const replies = [];
+    let buffer = '';
+    let index = 0;
+    let settled = false;
+    const timer = setTimeout(() => done(new Error('worker did not answer in time')), 20000);
+
+    const done = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      if (error) reject(error);
+      else resolve(replies);
+    };
+
+    const sendNext = () => {
+      const request = typeof requests[index] === 'function' ? requests[index](replies) : requests[index];
+      child.stdin.write(JSON.stringify({ ...request, id: index + 1 }) + '\n');
+    };
+
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let reply;
+        try {
+          reply = JSON.parse(line);
+        } catch (_) {
+          continue;
+        }
+        if (!reply || reply.result === undefined) continue;
+        replies.push(reply);
+        index += 1;
+        if (index >= requests.length) return done();
+        sendNext();
+      }
+    });
+    child.on('error', done);
+    sendNext();
   });
 }
 
@@ -774,6 +852,7 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   // Upgrade notices: both notice kinds, and the upgrade stays the user's job.
   assert.match(shared, /_notice\.update/, 'the manual must handle an upgrade notice');
   assert.match(shared, /_notice\.update_check/, 'the manual must handle a failed automatic check');
+  assert.match(shared, /由插件编排、不返回 CLI envelope/, 'the login tools need their own notice path');
   assert.match(shared, /由用户在终端执行 `taptap-cli update`/, 'the upgrade stays the user\'s action');
   assert.match(shared, /skills", args:\{_positional:\["status"\], json:true\}/, 'the sync check must stay readable JSON');
   assert.doesNotMatch(shared, /call_tool\(name:\s*["']update/, 'the plugin refuses CLI self-update');
@@ -1241,6 +1320,48 @@ test('a read-only session refuses to start a login', async () => {
   const [reply] = await callWorker([callTool('auth login-start', { read_only: true })]);
   assert.equal(reply.result.ok, false);
   assert.equal(reply.result.errorCode, 'SESSION_READ_ONLY');
+});
+
+test('the orchestrated login forwards upgrade notices without the device code', async () => {
+  // The login tools return a whitelisted payload instead of the CLI envelope,
+  // so a notice would be silently dropped — an upgrade that happens to be found
+  // during login would never reach the user. The device code itself must still
+  // never leave the worker.
+  const [start, wait] = await callWorkerSequential([
+    callTool('auth login-start', { cli_path: fakeCli }),
+    (replies) => callTool('auth login-wait', {
+      cli_path: fakeCli,
+      args: { login_handle: replies[0].result.data.login_handle },
+    }),
+  ], { env: { FIXTURE_NOTICE: '1' } });
+
+  assert.equal(start.result.ok, true);
+  assert.equal(start.result.data._notice.update.latest, '9.9.9');
+  assert.doesNotMatch(JSON.stringify(start.result), /device-secret/, 'the device code must not reach the model');
+  assert.equal(wait.result.ok, true);
+  assert.equal(wait.result.data.status, 'authorized');
+  assert.equal(wait.result.data._notice.update.latest, '9.9.9');
+});
+
+test('login failures still carry the upgrade notice', async () => {
+  const [startFailure] = await callWorker(
+    [callTool('auth login-start', { cli_path: fakeCli })],
+    { env: { FIXTURE_NOTICE: '1', FIXTURE_LOGIN_FAIL: 'start' } },
+  );
+  assert.equal(startFailure.result.ok, false);
+  assert.equal(startFailure.result.data._notice.update.latest, '9.9.9');
+
+  const [start, wait] = await callWorkerSequential([
+    callTool('auth login-start', { cli_path: fakeCli }),
+    (replies) => callTool('auth login-wait', {
+      cli_path: fakeCli,
+      args: { login_handle: replies[0].result.data.login_handle },
+    }),
+  ], { env: { FIXTURE_NOTICE: '1', FIXTURE_LOGIN_FAIL: 'wait' } });
+  assert.equal(start.result.ok, true);
+  assert.equal(wait.result.ok, false);
+  assert.equal(wait.result.execution_state, 'unknown');
+  assert.equal(wait.result.data._notice.update.latest, '9.9.9');
 });
 
 test('unknown methods are reported instead of crashing the worker', async () => {

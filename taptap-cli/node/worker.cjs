@@ -235,6 +235,13 @@ function parseEnvelope(primary, fallback) {
   return null;
 }
 
+// Upgrade/skills notices ride on the CLI envelope under `_notice`. Callers that
+// return a whitelisted payload instead of the envelope still need to forward
+// them — dropping the notice would hide a newer version the user should see.
+function noticeOf(env) {
+  return env && env._notice && typeof env._notice === 'object' ? env._notice : null;
+}
+
 // Run the CLI binary with a keep-alive heartbeat. `callId` (when present) is
 // echoed in progress notifications so main.js can keep the host tool-call
 // window alive for long tasks (uploads, login polling).
@@ -846,12 +853,16 @@ async function authLoginStart(params) {
     return { ok: false, errorCode: res.cliErrorCode || 'CLI_NOT_INSTALLED', message: res.message };
   }
   const env = parseEnvelope(res.stdout, res.stderr);
+  // Notices ride on the CLI envelope. The login flow does not hand the envelope
+  // to the agent (it carries the device code), so forward just the notice.
+  const notice = noticeOf(env);
   const data = env && env.ok === true && env.data ? env.data : null;
   if (!data || !data.verification_url || !data.device_code) {
     return {
       ok: false,
       errorCode: 'LOGIN_START_FAILED',
       message: '发起授权失败:' + briefFailure(res, env),
+      data: notice ? { _notice: notice } : undefined,
     };
   }
   const interval = Number(data.interval) > 0 ? Number(data.interval) : 5;
@@ -863,6 +874,7 @@ async function authLoginStart(params) {
       interval_seconds: interval,
       login_handle: newLoginHandle(data.device_code, data.expires_at, interval),
       display_contract: '把 verification_url 按两行原样展示给用户(第一行仅"请完成授权:",第二行仅 URL),然后立即用 login_handle 调用 auth login-wait,不要等待用户回复。',
+      ...(notice ? { _notice: notice } : {}),
     },
   };
 }
@@ -894,16 +906,20 @@ async function authLoginWait(params) {
   if (res.cliUnavailable) {
     return { ok: false, errorCode: res.cliErrorCode || 'CLI_NOT_INSTALLED', message: res.message };
   }
+  const env = parseEnvelope(res.stdout, res.stderr);
+  // The result is a whitelisted login status rather than the CLI envelope, so
+  // carry any upgrade notice across explicitly.
+  const notice = noticeOf(env);
   if (res.killed) {
     return {
       ok: false,
       errorCode: 'LOGIN_PENDING',
       message: '授权仍在等待中(本次轮询已到时限,用户尚未完成)。可用同一个 login_handle 再次调用 auth login-wait 继续等待。',
+      data: notice ? { _notice: notice } : undefined,
     };
   }
-  const env = parseEnvelope(res.stdout, res.stderr);
   if (env && env.ok === true) {
-    return { ok: true, data: { status: 'authorized' } };
+    return { ok: true, data: { status: 'authorized', ...(notice ? { _notice: notice } : {}) } };
   }
   return {
     ok: false,
@@ -915,6 +931,7 @@ async function authLoginWait(params) {
     message: '授权未完成:' + briefFailure(res, env)
       + ';该轮询是否已经换到凭证无法确定:请先 call_tool(name:"auth status") 核对登录态,'
       + '确认未登录后再调用 auth login-start 换新链接。',
+    data: notice ? { _notice: notice } : undefined,
   };
 }
 
