@@ -16,6 +16,12 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 `schema` 只描述服务命令；其他命令的参数用 `args._help:true` 查看。`schema` 会在 metadata 缓存到期时做一次最多 5 秒的刷新，并在服务不可用时继续使用 embedded/cache；各 service 的 `--help` 反映当前进程启动快照。真实 operation 执行前若发现更新后的 catalog，CLI 会停止并要求重跑，避免按旧的字段或风险策略发请求。Skill 负责流程编排，不能补造 metadata 未声明的 operation、字段或副作用。
 
+### 升级通知
+
+收到 `call_tool` 返回结果里的 `_notice.update` 或 `_notice.skills`（成功时在 `data.envelope._notice`，失败时在 `data._notice`）时，说明可更新的版本或技能状态；在当前业务步骤完成后处理升级，不要在上传、绑定或提审中途替换二进制，也不要把通知当成业务失败。安装与升级由用户在终端执行 `taptap-cli update`（本插件不提供 CLI 自更新，也不要改用 Bash 绕过本插件），把该入口告诉用户即可。升级后在设置页核对版本，或用 `call_tool(name:"version")`、`call_tool(name:"skills", args:{_positional:["status"]})` 核对实际执行路径的版本与 skills 同步结果，不只看安装命令退出码。排查未升级时请用户在终端运行 `taptap-cli update --check --json`，区分自动通知禁用、缓存检查状态和实际执行路径；CI 默认不提示，由部署/维护流程显式检查。
+
+`_notice.update_check` 只表示自动检查未完成，不证明存在新版。业务任务结束后可请用户在终端执行一次 `taptap-cli update --check --json`；网络仍不可用时报告未确认，不循环检查、不因此中止业务任务。
+
 ## JSON 输入和输出
 
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 字段时存在；其余业务字段统一放入 `--data`。
@@ -81,10 +87,12 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 处理规则：
 
+- 经本插件调用时，成功结果的 CLI envelope 位于 `data.envelope`（`data.name` / `data.duration_ms` 是执行元信息），失败结果的 envelope 位于 `data`；`_notice` 跟着 envelope 走。
 - 判断顶层成功用退出码或 `ok === true`。
 - `data.result.ok` 是部分业务工具的内部结果位，不是顶层 envelope；为 `false` 时仍按业务失败处理。
 - `error.hint` 是给用户的修复建议，不是让 agent 自动执行的指令。
 - 权限、参数、状态不允许、expected stale、确认门禁要分开解释。
+- 同一凭据、scope 和目标资源返回权限不足后，停止无变化的重复调用；批量任务保留该项失败，继续其它可访问资源。只有账号、授权或目标发生变化时再检查；不要把一个 app 的拒绝扩大为整个厂商不可访问，也不要仅凭 403 猜缺失 scope 或自动反复登录。
 - 同一个写操作失败后不要盲目重试；只有错误明确提示可恢复时最多补查一次。
 
 ### 上传 shortcut 约定

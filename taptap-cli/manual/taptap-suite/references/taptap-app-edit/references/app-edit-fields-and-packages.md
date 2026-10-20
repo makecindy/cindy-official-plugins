@@ -4,6 +4,7 @@
 
 - [提交准备度](#提交准备度)
 - [文字字段](#文字字段)
+- [保存失败与部分完成](#保存失败与部分完成)
 - [图片与视频](#图片与视频)
 - [包体槽位](#包体槽位)
 
@@ -11,7 +12,7 @@
 
 按 [skill analysis](taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md) 读取模块、包体、版本和资质，由 Agent 汇总当前阻断项。只检查当次返回且可见的字段；动态必填、包体限制或资质无法确认时明确标记未知，不能推断为通过。
 
-Skill 分析只用于资料准备建议。用户明确要求提审后，以 `prepare-review-snapshot` 和 `precheck-app-review` 的当前服务端结果作为最终门禁。
+Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `prepare-review-snapshot` 和 `precheck-app-review` 的当前结果；预审不通过不自动禁止提审，用户明确继续时按 [audit and history](taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md) 提交，由提交接口做最终校验。
 
 当前 schema 声明 `list-packages.result.package_slots` 时，该字段固定返回
 `main`、`windows` 和 `apk_mini_game_play`。每个槽位包含 `available` 与可原样
@@ -36,6 +37,14 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，以 `pre
 - 每条 change 先读取最新并发快照：`expected` 直接原样回填该字段读取时的 `current_value`。`current_value` 为 `null`（首次写入）时，`expected` 传 `[]`；其余情况（string / 数组 / 数字 / 布尔）原样回传。除显式 `force=true` 外，每条 change 必须携带 `expected`。
 - `title_ios`、`description_ios`、`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios` 是可选 iOS 覆盖；空值（`current_value` 为 null）表示继承 Android。清空 iOS 覆盖字段恢复继承时，`expected` 使用该 iOS 字段自己的严格 `current_value`。
 - `category` 是可编辑的游戏类型；C 端商店标签当前不能通过本 skill 或 CLI 修改。`age_grade`、`apk_package_name`、`mini_game_play_enabled` 也不能作为普通字段保存。
+
+### 保存失败与部分完成
+
+- 先区分缺少 `expected`、字段值漂移、字段约束不符与草稿不可编辑；不要把所有 conflict 都归因其他人修改。
+- conflict 或响应含 `stale` 时，重新读取受影响字段与当前草稿。目标值已经存在则报告“当前值已符合目标”，不重复写，也不声称刚才失败的请求完成了保存。
+- 仍需修改时，展示新旧差异，按原用户目标重新决定变更，并使用最新 `expected`；不得自动 `force`、撤审或撤销定时。请求内容变化时使用新的意图幂等键，不复用不同 payload 的旧 key。
+- `updated_fields` 与 `stale` 分别核对；批量保存只报告有写入回执或同资源回读证据的字段。只成功部分时保留已完成项，不整批重复保存；只有 dry-run 或后续提审成功不能补足此前字段保存证据。
+- 草稿不可编辑时按实际版本状态解释可选操作；无草稿时先核对 `create-draft` 前置条件，不自动撤审或重置来绕过状态限制。
 
 ### 图片与视频
 
@@ -73,7 +82,7 @@ call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<develo
 2. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。
 3. 把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型。
 4. 使用稳定 `--idempotency-key` 先 `--dry-run`；用户确认后用相同 payload 和 key 加 `--yes`。
-5. 写入成功后重新调用 `list-packages` 验证目标包体和新 `expected`；stale/409 时停止、重读，禁止自动覆盖。
+5. 写入后重新调用 `list-packages`，核对同一 app、slot、包体类型与 ID 和新 `expected`。stale/409 时先重读；若目标已经绑定，只报告当前状态已达成，不归因失败请求，不重复写；否则重新决策，禁止自动覆盖。二维码成功、上传成功或开发包创建成功均不能替代绑定读回；仅上传或自测目标不强加绑定。
 
 Spark 版本有专用编排命令，避免把包体管理概览误当成资料页绑定接口：
 

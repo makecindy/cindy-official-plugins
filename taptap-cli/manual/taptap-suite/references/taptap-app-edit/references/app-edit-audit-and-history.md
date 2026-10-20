@@ -49,20 +49,20 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 #### 步骤 ② `precheck-app-review`
 
-传入完全相同的 `release_schedule`。`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，向用户逐项展示 `blockers`（阻塞，提交会被服务端拒绝）与 `warnings`（风险提示），并询问是否继续。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
+传入完全相同的 `release_schedule`。`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，向用户逐项展示 `blockers`（服务端报告的阻断原因，提交时仍由服务端校验）与 `warnings`（风险提示），并询问是否继续。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
 
 向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过（`preaudit_passed === true`）、且没有阻断项（`blockers` 为空）时，固定输出：
 
 - 阻塞项：无
 - 提交状态：可提交审核
 
-`preaudit_passed === false`（机审未通过）时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
+`preaudit_passed === false`（机审未通过）且本次 `blockers` 明确为空时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
 
 `preaudit_passed` 只用于内部流程判断，不得向用户原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。存在阻断项时，逐项展示服务端返回的阻断原因，不得输出“可提交审核”；用户明确「强制提交」时说明提交可能被服务端拒绝，允许继续。
 
 | 返回 | 含义 | 处理 |
 | --- | --- | --- |
-| `blockers` 非空 | 存在阻断项 | 逐项展示阻断原因（提交会被服务端拒绝），询问是否「强制提交」；用户确认时允许进入步骤 ③ |
+| `blockers` 非空 | 存在阻断项 | 逐项展示阻断原因及提交可能被拒绝的风险，询问是否「强制提交」；用户确认时允许进入步骤 ③ |
 | `preaudit_passed === false` | 机审未通过 | 展示 `PREAUDIT` warnings，说明「不阻断提交，但提交后可能被审核驳回」；询问是否继续 |
 | `warnings` 非空 | 有风险提示 | 展示 `warnings`，询问"是否继续提交？" |
 | `preaudit_passed === true` 且 `blockers` 为空 | 可提交 | 等待最终提交确认 |
@@ -71,7 +71,7 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 #### 步骤 ③ `submit-app-review`
 
-步骤 ② 预检是**可跳过**的：`preaudit_passed === true` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由服务端校验（`blockers` 拒绝 / `warnings` 不拒）裁决。
+步骤 ② 预检是**可跳过**的：`preaudit_passed === true` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由提交接口按当前状态校验裁决。预检调用成功不代表内容通过；字段缺失或预检执行失败时标记未确认，不伪造通过结果。
 
 参数：
 
@@ -191,7 +191,7 @@ call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<d
 ```
 
 - 按返回 `list` 顺序从新到旧扫描每个 item
-- 读取每个版本的 `logs`，在 `event='review_rejected'` 的记录中按非空 `updated_time`
+- 对目标 item 的 `version` 调用 `get-app-version` 读取详情 `logs`，在 `event='review_rejected'` 的记录中按非空 `updated_time`
   取最大值；有 `reason` 或 `note` 时原样解释，没有时明确说明服务端未提供具体原因。
 - 同一版本可能反复提审；不要把 `schedule_cancelled` 当作审核拒绝，也不要用第一条日志替代最近一次事件。
 
@@ -212,7 +212,7 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
 
 - `version` 必须取自 `list-app-versions.result.list[].version`；列表项的 `version_id`
   当前只是兼容别名，不能作为另一个查询键。
-- 读取 `detail.form_data` 作为该历史版本的只读字段快照，并与用户指定的另一个版本或当前模块读取结果做解释性比较。
+- 当前 `get-app-version` 提供状态和日志，契约不承诺 `detail.form_data`；只按实际返回字段回答。用户要求历史资料差异但接口未提供快照时，明确无法确认，不能把缺失内容当作空值或声称已比较完成。
 - 历史快照不是当前 draft 的并发控制值；任何修改仍要重新读取目标模块的最新 `current_value` / `expected`。
 
 ⚠️ 用户**不能**通过 `get-app-version` 修改字段——它是只读快照。要改当前 draft 走 `save-changes`。
@@ -242,7 +242,7 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
    - 截图 / 宣传图 / 视频更新
    - 开放预约 / 开放测试 / 正式上线
 5. 用户补充目标后，再进入对应模块的 read-before-write 修改流
-6. 修改完成后重新读取并分析；用户明确提审后，再由正式预审确认 blocker 清零
+6. 修改完成后重新读取并分析；用户明确提审后，再由正式预审展示当前问题；用户明确继续提交时按步骤 ②、③ 处理
 
 关键约束：
 

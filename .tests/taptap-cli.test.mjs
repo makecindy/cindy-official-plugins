@@ -752,6 +752,59 @@ test('forum data statistics route through the data manual, not the post manual',
   );
 });
 
+test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
+  // CLI 2026.10.20 adds upgrade notices and tightens the app-edit recovery
+  // contract. The bundled manual has to carry both, but the CLI's own text
+  // assumes the agent runs `taptap-cli` directly — which this plugin refuses.
+  // The upgrade guidance must therefore name the user as the executor.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const analysis = read('taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const rules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+
+  // Upgrade notices: both notice kinds, and the upgrade stays the user's job.
+  assert.match(shared, /_notice\.update/, 'the manual must handle an upgrade notice');
+  assert.match(shared, /_notice\.update_check/, 'the manual must handle a failed automatic check');
+  assert.match(shared, /由用户在终端执行 `taptap-cli update`/, 'the upgrade stays the user\'s action');
+  assert.doesNotMatch(shared, /call_tool\(name:\s*["']update/, 'the plugin refuses CLI self-update');
+  assert.match(top, /_notice\.update/, 'the top-level rules must flag notices before business work starts');
+  assert.match(shared, /成功结果的 CLI envelope 位于 `data\.envelope`/);
+  assert.match(workerSource, /data\.envelope 是 CLI 的 JSON envelope/, 'the rule text must name the real result path');
+
+  // A permission failure is scoped to the resource that failed.
+  assert.match(
+    shared,
+    /不要把一个 app 的拒绝扩大为整个厂商不可访问/,
+    'a permission denial must not be repeated for the same resource',
+  );
+
+  // Precheck: HTTP success and a failed content preaudit are separate facts,
+  // and the preaudit alone does not forbid submission.
+  assert.match(appEdit, /预检 HTTP 200 \/ 顶层成功不等于内容预审通过/);
+  assert.match(appEdit, /预审不通过本身不禁止提审/);
+  assert.match(audit, /且本次 `blockers` 明确为空时/);
+  assert.match(rules, /预审不通过本身不禁止提审/);
+  assert.match(rules, /完成判据按用户目标和同一资源核对/);
+
+  // Version detail returns logs; a field snapshot is not part of the contract.
+  assert.match(analysis, /get-app-version\.result\.logs/);
+  assert.doesNotMatch(analysis, /读取只读的 `detail\.form_data`/, 'the detail snapshot is not a promise');
+  assert.match(analysis, /`state="required"`/);
+  assert.match(audit, /对目标 item 的 `version` 调用 `get-app-version` 读取详情 `logs`/);
+  assert.doesNotMatch(audit, /读取 `detail\.form_data` 作为该历史版本的只读字段快照/);
+
+  // Save and binding failures: partial success is reported per field, and a
+  // readback is the only binding evidence.
+  assert.match(fields, /### 保存失败与部分完成/);
+  assert.match(fields, /不得自动 `force`/);
+  assert.match(fields, /二维码成功、上传成功或开发包创建成功均不能替代绑定读回/);
+});
+
 test('nothing shipped points at the internal taptap/cli repository', () => {
   // The GitHub repository is internal; only the npm package is public. Any
   // link to the repository is therefore a dead end for the people who install
