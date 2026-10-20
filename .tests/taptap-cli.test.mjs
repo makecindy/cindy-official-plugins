@@ -414,14 +414,18 @@ test('an unreadable alias list closes the alias route', async () => {
 });
 
 test('only the read-only skills paths skip risk resolution', async () => {
-  // `skills list` / `skills read` print documentation and are read by
-  // definition. Any other subcommand — a future one the CLI may add — goes
-  // through the ordinary lookup, which fails closed when nothing classifies it.
-  const [listed, other] = await callWorker([
+  // `skills list` / `read` / `status` print documentation or local sync state
+  // and are read by definition. Any other subcommand — a future one the CLI may
+  // add — goes through the ordinary lookup, which fails closed when nothing
+  // classifies it.
+  const [listed, status, other] = await callWorker([
     callTool('skills', { cli_path: fakeCli, args: { _positional: ['read', 'taptap-materials'] } }),
     callTool('skills', { cli_path: fakeCli, args: { _positional: ['status'] } }),
+    callTool('skills', { cli_path: fakeCli, args: { _positional: ['install'] } }),
   ]);
   assert.equal(listed.result.ok, true);
+  assert.equal(status.result.ok, true);
+  assert.equal(other.result.ok, false);
   assert.equal(other.result.errorCode, 'CONFIRM_REQUIRED');
 });
 
@@ -771,10 +775,14 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   assert.match(shared, /_notice\.update/, 'the manual must handle an upgrade notice');
   assert.match(shared, /_notice\.update_check/, 'the manual must handle a failed automatic check');
   assert.match(shared, /由用户在终端执行 `taptap-cli update`/, 'the upgrade stays the user\'s action');
+  assert.match(shared, /skills", args:\{_positional:\["status"\], json:true\}/, 'the sync check must stay readable JSON');
   assert.doesNotMatch(shared, /call_tool\(name:\s*["']update/, 'the plugin refuses CLI self-update');
   assert.match(top, /_notice\.update/, 'the top-level rules must flag notices before business work starts');
-  assert.match(shared, /成功结果的 CLI envelope 位于 `data\.envelope`/);
-  assert.match(workerSource, /data\.envelope 是 CLI 的 JSON envelope/, 'the rule text must name the real result path');
+  assert.match(shared, /成功结果的 CLI envelope 位于 `result\.envelope`/);
+  assert.match(workerSource, /result\.envelope 是 CLI 的 JSON envelope/, 'the rule text must name the real result path');
+  // The same document must not hand out a second, wrong path for the envelope.
+  assert.doesNotMatch(shared, /`data\.envelope`/, 'a successful envelope lives under result, not data');
+  assert.doesNotMatch(top, /`data\.envelope`/, 'the top-level manual must agree with the worker');
 
   // A permission failure is scoped to the resource that failed.
   assert.match(
@@ -803,6 +811,16 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   assert.match(fields, /### 保存失败与部分完成/);
   assert.match(fields, /不得自动 `force`/);
   assert.match(fields, /二维码成功、上传成功或开发包创建成功均不能替代绑定读回/);
+
+  // Field-level requiredness has one spelling across the whole app-edit manual.
+  const appEditManual = [
+    appEdit, analysis, audit, rules, fields,
+    read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md'),
+    read('taptap-suite/references/taptap-app-edit/references/review-risk-checklist.md'),
+    read('taptap-suite/references/taptap-app-edit/references/publish-game-creation.md'),
+  ].join('\n');
+  assert.doesNotMatch(appEditManual, /字段 `required`/, 'field requiredness must use state="required"');
+  assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
 });
 
 test('nothing shipped points at the internal taptap/cli repository', () => {

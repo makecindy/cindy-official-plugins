@@ -55,7 +55,7 @@
 
 **CRITICAL — 不可逆写和高影响写必须先 `dry_run: true` 预览或拿到用户明确确认,再以相同参数加 `yes: true` 执行。插件对 write / high-risk-write 操作内置了门禁:既没有 `dry_run` 也没有 `yes` 的写调用会被拒绝(CONFIRM_REQUIRED),只读会话里的写操作一律拒绝。是否已取得用户同意由你负责,`yes` 是执行开关而不是同意本身。例外:`auth login-start` / `auth login-wait` 是登录流程本身(用户在浏览器里完成授权),不走这道确认门禁;只读会话仍然拒绝它们。**
 
-**CRITICAL — 返回结果里的 `_notice.update` / `_notice.skills` / `_notice.update_check`（成功时在 `data.envelope._notice`，失败时在 `data._notice`）是升级提示,不是业务失败:在业务步骤完成后处理,不要在上传、绑定或提审中途更换二进制。升级与 `taptap-cli update --check --json` 由用户在终端执行(本插件不提供 CLI 自更新),不要用 Bash 绕过本插件;完整规则见共享执行规范「升级通知」。**
+**CRITICAL — 返回结果里的 `_notice.update` / `_notice.skills` / `_notice.update_check`（成功时在 `result.envelope._notice`，失败时在 `data._notice`）是升级提示,不是业务失败:在业务步骤完成后处理,不要在上传、绑定或提审中途更换二进制。升级与 `taptap-cli update --check --json` 由用户在终端执行(本插件不提供 CLI 自更新),不要用 Bash 绕过本插件;完整规则见共享执行规范「升级通知」。**
 
 **CRITICAL — `yes: true` 不代表用户同意协议,也不代表用户已核对提审风险。遇到服务端要求额外确认时只展示响应实际返回的 `blockers` / `warnings`;协议签署走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户明确同意后加 `yes: true` 执行,再重查确认 blocker 消失)。不得补造本地参数或请求字段。**
 

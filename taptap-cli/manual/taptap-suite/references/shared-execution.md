@@ -18,7 +18,7 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 ### 升级通知
 
-收到 `call_tool` 返回结果里的 `_notice.update` 或 `_notice.skills`（成功时在 `data.envelope._notice`，失败时在 `data._notice`）时，说明可更新的版本或技能状态；在当前业务步骤完成后处理升级，不要在上传、绑定或提审中途替换二进制，也不要把通知当成业务失败。安装与升级由用户在终端执行 `taptap-cli update`（本插件不提供 CLI 自更新，也不要改用 Bash 绕过本插件），把该入口告诉用户即可。升级后在设置页核对版本，或用 `call_tool(name:"version")`、`call_tool(name:"skills", args:{_positional:["status"]})` 核对实际执行路径的版本与 skills 同步结果，不只看安装命令退出码。排查未升级时请用户在终端运行 `taptap-cli update --check --json`，区分自动通知禁用、缓存检查状态和实际执行路径；CI 默认不提示，由部署/维护流程显式检查。
+收到 `call_tool` 返回结果里的 `_notice.update` 或 `_notice.skills`（成功时在 `result.envelope._notice`，失败时在 `data._notice`）时，说明可更新的版本或技能状态；在当前业务步骤完成后处理升级，不要在上传、绑定或提审中途替换二进制，也不要把通知当成业务失败。安装与升级由用户在终端执行 `taptap-cli update`（本插件不提供 CLI 自更新，也不要改用 Bash 绕过本插件），把该入口告诉用户即可。升级后在设置页核对版本，或用 `call_tool(name:"version")`、`call_tool(name:"skills", args:{_positional:["status"], json:true})` 核对实际执行路径的版本与 skills 同步结果，不只看安装命令退出码。排查未升级时请用户在终端运行 `taptap-cli update --check --json`，区分自动通知禁用、缓存检查状态和实际执行路径；CI 默认不提示，由部署/维护流程显式检查。
 
 `_notice.update_check` 只表示自动检查未完成，不证明存在新版。业务任务结束后可请用户在终端执行一次 `taptap-cli update --check --json`；网络仍不可用时报告未确认，不循环检查、不因此中止业务任务。
 
@@ -87,7 +87,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 处理规则：
 
-- 经本插件调用时，成功结果的 CLI envelope 位于 `data.envelope`（`data.name` / `data.duration_ms` 是执行元信息），失败结果的 envelope 位于 `data`；`_notice` 跟着 envelope 走。
+- 经本插件调用时，成功结果的 CLI envelope 位于 `result.envelope`（`result.name` / `result.duration_ms` 是执行元信息），失败结果的 envelope 位于 `data`；`_notice` 跟着 envelope 走。
 - 判断顶层成功用退出码或 `ok === true`。
 - `data.result.ok` 是部分业务工具的内部结果位，不是顶层 envelope；为 `false` 时仍按业务失败处理。
 - `error.hint` 是给用户的修复建议，不是让 agent 自动执行的指令。
