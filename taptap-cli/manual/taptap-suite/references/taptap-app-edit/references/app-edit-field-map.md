@@ -128,16 +128,16 @@ Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是
 
 Windows 包体候选可通过 `list-packages` 的 `list` 读取，类型值为 `windows`，候选项可包含 `branch`。当前 schema 声明 `package_slots.windows` 时，写入前原样回传其中的 `expected`；字段未声明时按包体槽位契约停止。不要把候选 `package_id` 当作槽位当前值，也不要自行补 branch。
 
-Windows 分支包体语义：**以接口返回为准，不要自己推断、也不要去问用户"要不要传启动器包"**。角色是否存在只看 `get-app-module` 的 `other-settings` **有没有返回 `pc_launcher_package_whatsnew`**：返回了就有启动器包角色（未上传时该候选可能为空，不能因此判断"没有启动器包"）；只返回 `pc_whatsnew`/`pc_game_package_whatsnew` 时该应用就只有一个本体包。`list-packages` / `list-pc-packages` 的候选只用来挑**具体包体**，不用来判定角色。绑定一律走 `branch_pc_packages[<branch>]`；`pc_game_package_id` / `pc_whatsnew` 只作旧数据读兼容，换包体会清 `pc_game_anti_addiction_status`。不要因为当前值暂时为 `{ kind: "none" }` 就判断只能设置一个 Windows 包体槽位。
+Windows 分支包体语义：**以接口返回为准，不要自己推断、也不要去问用户"要不要传启动器包"**。判据只看 `get-app-module` 的 `other-settings` 返回了哪些更新日志字段：返回 `pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型（未上传时启动器包候选可能为空，不能因此判断"没有启动器包"）；只返回 `pc_whatsnew` = legacy 模型（唯一槽位 branch=0）。`list-packages` / `list-pc-packages` 的候选只用来挑**具体包体**，不用来判定角色。绑定一律走 `branch_pc_packages[<branch>]`；`pc_game_package_id` / `pc_whatsnew` 只作旧数据读兼容，换包体会清 `pc_game_anti_addiction_status`。不要因为当前值暂时为 `{ kind: "none" }` 就判断只能设置一个 Windows 包体槽位。
 
 | branch | 角色 | 什么时候存在 | 更新日志字段 |
 | --- | --- | --- | --- |
-| `1` | 游戏本体包 | 接口返回本体包候选时（只有本体包的应用也是它） | 只有本体包：`pc_whatsnew`（读/写都兜底到该分支项）；含启动器包：`pc_game_package_whatsnew` |
-| `2` | 启动器包 | 接口同时返回启动器包候选/字段时 | `pc_launcher_package_whatsnew` |
-| `0` | —（历史存储位） | 无任何入口可选/可传；不再作为候选返回 | — |
+| `0` | 默认包体 | 应用**未命中** `pc_package_branch` 白名单（other-settings 只返回 `pc_whatsnew`） | `pc_whatsnew` |
+| `1` | 游戏本体包 | 命中白名单（other-settings 返回 `pc_game_package_whatsnew`） | `pc_game_package_whatsnew` |
+| `2` | 启动器包 | 命中白名单且存在启动器包角色 | `pc_launcher_package_whatsnew` |
 
-上传侧同样没有 0：`--windows-branch` 只接受 `1` / `2`；只有本体包的应用不用传。
-历史 `DEFAULT(0)` 包已经不再出现在候选与 `list-pc-packages` 里，**无法再被绑定，需要重新上传一次**。
+上传侧同样按模型取值：命中白名单传 `1` / `2`（只有本体包时不用传，默认 1）；未命中的 legacy 应用传 `0`（不传 `windows_branch` 时由上游 CLI 读 `get-app-module` 自动判定，判定失败要求显式传 0/1/2）。分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`）。
+legacy 应用的 `DEFAULT(0)` 包会作为普通候选出现在 `list-packages` / `list-pc-packages` 里，`branch=0` 就是可绑定的正常值（不再是「历史存储位」）。
 
 **包体槽位写入用 metadata operation `select-package` / `clear-package`，不能用 `save-changes`。APK 包体内部配置仍用 `save-changes`。**
 

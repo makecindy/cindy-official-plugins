@@ -27,7 +27,7 @@ inspect 输出位于成功 envelope 的 `data` 下(`data.materials[]`、`data.su
 | 本地图片 | `call_tool(name:"upload", args:{_positional:["<image>"], dev_id, app_id, idempotency_key})` | app-edit 手册决定字段用途;`app save-changes` 的图片新值按 `{"url", "info"}` 写入(不带 info 会回落 16:9) |
 | 本地视频 | `call_tool(name:"upload-video", args:{_positional:["<video>"], dev_id, app_id, scene:"trailer 或 gameplay_demo_video"})` | app-edit 手册用返回的 `videoId` 写入 |
 | APK | `call_tool(name:"upload-apk", args:{_positional:["<apk>"], dev_id, app_id})` | packages 手册查状态,再转 app-edit 手册 |
-| Windows 包 | `call_tool(name:"upload-pc-package", args:{_positional:["<package>"], dev_id, app_id, launch_exe, version, windows_branch})` | packages 手册查状态,再转 app-edit 手册。**包体类别以接口返回为准**:应用没有 PC 包体分支能力时只有本体包(不带 `windows_branch` 或只传 `1`),不存在启动器包,不要主动问用户 |
+| Windows 包 | `call_tool(name:"upload-pc-package", args:{_positional:["<package>"], dev_id, app_id, launch_exe, version, windows_branch})` | packages 手册查状态,再转 app-edit 手册。**包体类别以接口返回为准**:没有 PC 包体分支能力的应用只有默认包体(`windows_branch=0`),有分支能力时才有游戏本体包(1)/启动器包(2);不传 `windows_branch` 时由上游 CLI 读 `get-app-module` 自动判定,判定失败会要求显式传 0/1/2。不要主动问用户要不要启动器包 |
 | H5 zip | `call_tool(name:"upload-h5-package", args:{_positional:["<package>"], dev_id, app_id, screen_orientation})` | packages 手册查状态,再转 app-edit 手册 |
 | Tap 小游戏 zip | `call_tool(name:"upload-mini-app-package", args:{_positional:["<package>"], dev_id, app_id})` | packages 手册用 `list-mini-app-packages` 查状态,再转 app-edit 手册 |
 | 文案、表格或其他非上传文件 | Agent 直接读取并转 app-edit 手册 | 不走上传 shortcut |

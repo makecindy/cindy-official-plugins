@@ -48,7 +48,7 @@ call_tool(name:"schema", args:{_positional:["package-management","get-test-qr-co
 | 类型 | 列表命令 | 本手册能做 | 不能做 / 转交 |
 | --- | --- | --- | --- |
 | APK | `package-management list-apk-packages` | 查包体库、版本、包名、大小、配置状态 | 资料页主包体、提审、上线 |
-| Windows | `package-management list-pc-packages` | 查 PC 包状态、当前默认包体、游戏本体包/启动器包分支 | Windows 包体绑定、资料字段、发布动作 |
+| Windows | `package-management list-pc-packages` | 查 PC 包状态、当前默认包体、分支（0=默认包体/1=游戏本体/2=启动器） | Windows 包体绑定、资料字段、发布动作 |
 | H5 | `package-management list-h5-packages` | 查 H5 版本、屏幕方向、是否发布中 | H5 主包体绑定、审核发布 |
 | 小游戏 | `package-management list-mini-app-packages` | 查开发/审核/线上版本、包体大小与时间 | 上传、分包测试 → 开发者中心 |
 | TapTap 制造 | `package-management list-spark-versions` | 查地图版本、大小、是否为当前线上 | 创建/更新包体 → TapTap 制造(官方入口 `https://maker.taptap.cn/`) |
@@ -63,7 +63,7 @@ call_tool(name:"schema", args:{_positional:["package-management","get-test-qr-co
 - 二维码成功后必须调用顶层 shortcut `test-qr-code`(`args.output` 指定 .png)生成 PNG,并把 `data.file_path` 作为图片附件展示给用户。`package-management get-test-qr-code`(动态命令,JSON)负责拿 `qr_code_url` 和确认目标;`test-qr-code`(顶层 shortcut)负责渲染 PNG。动态命令不在本地补造二维码图片字段。
 - **APK / Windows 没有二维码接口**:`get-test-qr-code` 只服务小游戏、H5 和 TapTap 制造。APK / Windows 想自测时,只说明包体列表状态,并引导用户在开发者中心对应包体页面发起自测;不要调用二维码 operation。
 - **APK 的场景状态不在 CLI 契约内**:云玩 / TapPlay / 云微端 / 模拟器各场景的可用性、授权状态、当前包体、审核状态和不可用原因都不由任何 `package-management` 接口返回。用户问到时,只说明 CLI 只能列出包体本体(`package-management list-apk-packages`),场景维度请到开发者中心包体管理页面查看;不要从包体列表推断场景可用性。
-- **Windows 分支**:`branch=1` 是游戏本体包、`branch=2` 是启动器包。判据是 `pc_package_branch` 权限:**没权限**时上传/绑定的就是本体包(页面没有类别可选),**有权限**时两个角色同时必填。`branch=0` 没有任何入口、也不再作为候选返回(只是历史存储位)。`current_package_id` 是当前默认包体,为 0 表示没有默认包体。
+- **Windows 分支**:合法值与应用的包体模型绑定,判据是 `pc_package_branch` 白名单。命中白名单 → 分支模型,`branch=1` 游戏本体包、`branch=2` 启动器包(两个角色同时必填);未命中 → legacy 模型,`branch=0` 是唯一槽位(默认包体),**不存在启动器包**。判据的接口信号是 `get-app-module` 的 `other-settings` 字段:返回 `pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` 即分支模型,只返回 `pc_whatsnew` 即 legacy。`upload-pc-package` 不传 `windows_branch` 时会按这个信号自动判定(分支→1、legacy→0),判定失败会要求显式传 0/1/2。`current_package_id` 是当前默认包体,为 0 表示没有默认包体。
 - 小游戏能力未开通时,`package-management list-mini-app-packages` 会返回失败或不包含 `mini_app` 类型。用户明确要求开通时,展示影响并等待用户确认后才调用 `package-management get-or-create-mini-app`,成功后重调 `package-management get-available-package-types` 验证。
 - H5 查询失败时不要调用小游戏开通工具;H5 和小游戏是不同能力。
 - TapTap 制造包体全部由 Maker 传入;CLI 不提供 Spark 包体上传或更新能力。用户要创建、构建或更新 Maker 包体时,必须引导到 `https://maker.taptap.cn/`(单独一行输出),完成后再用 CLI 查询已有版本或继续资料编辑。

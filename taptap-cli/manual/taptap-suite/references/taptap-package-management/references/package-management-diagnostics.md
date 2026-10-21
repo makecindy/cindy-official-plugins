@@ -13,7 +13,7 @@
 4. 这些 `list-*` 都声明了分页（OpenAPI 名 `x-pagination`，catalog 里序列化为 `pagination`），且 catalog 声明的 `page_size` 默认值统一是 **20**。可用 `page` / `page_size` 写进 `args.data`，翻全量传分页控制 flag（`page_all:true`，可配 `page_limit` / `page_delay`）；开发者中心各页面自己的分页条数（APK 20、Windows/小游戏 100、H5/TapTap 制造 10）是页面行为，**不是** API 默认值，不要当成默认值转述。
 5. 某类型的列表返回失败时，只说明该类型当前不可用；不要把失败说成“应用不支持该类型”，也不要据此去开通别的能力。
 6. 向用户解释列表时优先说版本名、包名/文件名、更新时间和状态字段；raw ID 只在用户明确要排查 ID 或接口数据时展示。
-7. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：`1` 游戏本体包、`2` 启动器包（判据是 `pc_package_branch` 权限：没权限时上传的就是本体包；有权限时两个角色同时必填）、`0` 无入口、不再作为候选/列表返回（历史存储位，这类老包需重新上传才能绑定）。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
+7. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：命中 `pc_package_branch` 白名单时 `1` 游戏本体包、`2` 启动器包（两个角色同时必填）；未命中时 `0` 是默认包体（legacy 唯一槽位，**没有启动器包**）。判定信号见 `get-app-module` 的 `other-settings` 字段（`pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型，`pc_whatsnew` = legacy）。上传/绑定时分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`，不是参数错误）。`expected` 快照过期是 **409**，插件侧统一呈现为 `conflict`（响应体 `error` 为 `stale_state`，`error_description` 说明槽位已被外部修改），重新读 `list-packages` 后重试，确认覆盖时传 `force: true`。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
 8. APK 条目带 `config_status`：`empty` 所有必填字段为空、`warning` 部分必填字段未填、`configured` 已配置完整；`null` 表示未知。不要把它说成审核状态。
 9. TapTap 制造条目的 `status` 为 0 未上线 / 1 当前线上；发布相关的其它状态字段不准确，必须隐藏，不要据此判断是否已发布。
 10. 小游戏条目按 `stage` 分段：`dev` 开发版本、`audit` 审核版本、`published` 线上版本。
