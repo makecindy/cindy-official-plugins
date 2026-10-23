@@ -1455,11 +1455,11 @@ test('云端工作区脏改动拒绝时附插件内可执行恢复步骤并保�
   assert.equal(build.result.isError, true);
   const text = build.result.content.map((item) => item.text).join('\n');
   assert.match(text, /cloud workspace has uncommitted changes/);
-  assert.match(text, /confirm_remote_build_without_submit=true/);
-  assert.match(text, /sync 提交/);
-  assert.match(text, /fast-forward/);
+  assert.match(text, /征得同意后调用 maker_build 并传 confirm_remote_build_without_submit=true/);
+  assert.match(text, /git fetch origin/);
+  assert.match(text, /origin\/main merge（或 rebase）进本地 main/);
+  assert.match(text, /保留本地未推送提交/);
   assert.match(text, /pull\/rebase 解决不了/);
-  assert.match(text, /不要用通用 git push 绕过/);
   assert.equal(build.result.structuredContent.execution_state, 'executed');
   assert.match(build.result.structuredContent.message, /confirm_remote_build_without_submit=true/);
   // 恢复指引只追加，不改写 Runtime 的失败详情。

@@ -22,7 +22,7 @@
 - 当前会话处于计划或只读模式时，只做广告指南、状态、诊断和工具列表等只读检查；不要尝试初始化、构建或调用动态工具。
 - 如果缺少 `.project/project.json`，且用户已经要求构建、运行或预览，调用 `maker_build` 后重试；否则先说明构建会提交并推送项目，获得确认后再构建。
 - `missing_taptap_identity` 仅在 Runtime 返回可安全恢复结果（`execution_state` 未提供或明确为 `not_executed`）时由插件自动初始化并重试一次；`executed` 或 `unknown` 时不自动重试。仍失败时把插件返回的可操作提示交给用户。
-- `maker_build` 推送被远端以 “cloud workspace has uncommitted changes that this push would overwrite”（如 `.project/settings.json`，常见于 `get_ad_config` 写入的广告配置）拒绝时，本地提交已保留，pull/rebase 无法解决；按插件返回的步骤恢复：先调用 `maker_build` 并传 `confirm_remote_build_without_submit=true` 让云端构建并自动生成 sync 提交入库，再正常重试 `maker_build` 推送本地提交。不要手动复制或猜测云端配置，也不要用通用 git push。
+- `maker_build` 推送被远端以 “cloud workspace has uncommitted changes that this push would overwrite”（如 `.project/settings.json`，常见于 `get_ad_config` 写入的广告配置）拒绝时，本地提交已保留，pull/rebase 无法解决；按插件返回的步骤恢复：先向用户说明并获得确认后，以 `confirm_remote_build_without_submit=true` 调用 `maker_build` 让云端构建并自动生成 sync 提交入库；再让本地 AI `git fetch origin` 并把 `origin/main` merge（或 rebase）进本地 main，保留本地提交；最后正常重试 `maker_build` 推送。不要手动复制或猜测云端配置，也不要用通用 git push。
 - 只有完整错误 `MCP error -32600: INSUFFICIENT_BALANCE` 表示 Maker 积分不足。此时提示用户，并在获得确认后再建议使用 Art 插件替代；其它错误不要按积分不足处理。
 - 不回显 PAT、令牌、本地凭证路径或插件已脱敏掉的内部信息。
 - 生成或修改 UrhoX Lua 代码时，避开沙箱中不可用的标准库（如 `os.clock()`、`io.*`）：这类调用会让预览静默卡死且无错误提示。计时逻辑默认用 Update 事件的 `eventData["TimeStep"]:GetFloat()` 累积；预览「卡住」而无报错时，优先用 Maker 运行日志排查是否命中了沙箱不可用函数。
