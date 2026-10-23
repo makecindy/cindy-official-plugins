@@ -619,7 +619,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.23');
+  assert.equal(manifest.version, '2.1.24');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -1397,6 +1397,90 @@ test('预览开关读取失败或值非法时不打开右侧预览，构建结�
     assert.equal(build.result.user_facing_markdown, `[打开 TapTap Maker 预览](${previewBuildLink})`);
     assert.equal(harness.nodeRequests.length, 1);
   }
+});
+
+const cloudDirtyBuildFailureText = [
+  '✗ Maker project submit failed; remote build was not started',
+  '',
+  '- project_root: /tmp/trusted-maker',
+  '- project_id: proj-1',
+  '- failure_stage: code_submit',
+  '- code_submit_status: failed',
+  '- remote_build_status: not_started',
+  '- branch: main',
+  '- status: failed_after_commit',
+  '- committed: yes',
+  '',
+  'note: Maker build was not started because submit did not produce a pushed state.',
+  '',
+  'push_recovery:',
+  '- committed_but_unpushed: yes',
+  '- retry_tool: maker_build_current_directory',
+  '- do_not_use_generic_git_push: yes',
+  '- user_message: 本地提交已经保留，但还没推送到 Maker 远端；请先按 failure.next_action 修复原因，再重试 Maker 提交/构建工具。',
+  '',
+  'failure:',
+  '- stage: push',
+  '- classification: remote_rejected',
+  '- retryable: no',
+  '- exit_code: 1',
+  '- stderr:',
+  '    remote: [pre-receive] cloud workspace has uncommitted changes that this push would overwrite:',
+  '    remote:   .project/settings.json',
+  '    remote: [pre-receive] commit them in the cloud (or via the Git commit API), pull, then push again',
+  '    To https://maker.example.test/git/project.git',
+  '   ! [remote rejected] HEAD -> main (pre-receive hook declined)',
+  '    error: failed to push some refs',
+  '- next_action: 远端已有新提交。不要新建分支、不要手动执行通用 git push；先询问用户是否 pull/rebase 当前 Maker 远端变更，再重试 maker_build_current_directory。',
+].join('\n');
+
+function buildFailureResponder(resultText, structuredContent = { success: false }) {
+  return async () => ({
+    ok: true,
+    result: {
+      isError: true,
+      structuredContent,
+      content: [{ type: 'text', text: resultText }],
+    },
+  });
+}
+
+test('云端工作区脏改动拒绝时附插件内可执行恢复步骤并保留执行态', async () => {
+  const harness = createMainHarness(buildFailureResponder(cloudDirtyBuildFailureText, {
+    success: false,
+    execution_state: 'executed',
+  }));
+  const build = await harness.call('maker_build', { session_context: previewBuildSession });
+  assert.equal(build.ok, true);
+  assert.equal(build.result.isError, true);
+  const text = build.result.content.map((item) => item.text).join('\n');
+  assert.match(text, /cloud workspace has uncommitted changes/);
+  assert.match(text, /confirm_remote_build_without_submit=true/);
+  assert.match(text, /sync 提交/);
+  assert.match(text, /fast-forward/);
+  assert.match(text, /pull\/rebase 解决不了/);
+  assert.match(text, /不要用通用 git push 绕过/);
+  assert.equal(build.result.structuredContent.execution_state, 'executed');
+  assert.match(build.result.structuredContent.message, /confirm_remote_build_without_submit=true/);
+  // 恢复指引只追加，不改写 Runtime 的失败详情。
+  assert.match(text, /- status: failed_after_commit/);
+});
+
+test('普通 remote_rejected 失败不附加云端脏工作区恢复步骤', async () => {
+  const plainRejectedText = cloudDirtyBuildFailureText.replace(
+    /remote: \[pre-receive\] cloud workspace[^\n]*\n[\s\S]*?error: failed to push some refs/,
+    '    To https://maker.example.test/git/project.git\n   ! [remote rejected] HEAD -> main (non-fast-forward)\n    error: failed to push some refs',
+  );
+  assert.doesNotMatch(plainRejectedText, /cloud workspace/);
+  const harness = createMainHarness(buildFailureResponder(plainRejectedText));
+  const build = await harness.call('maker_build', { session_context: previewBuildSession });
+  assert.equal(build.ok, true);
+  assert.equal(build.result.isError, true);
+  const text = build.result.content.map((item) => item.text).join('\n');
+  assert.doesNotMatch(text, /confirm_remote_build_without_submit/);
+  assert.doesNotMatch(text, /sync 提交/);
+  assert.match(build.result.structuredContent.message, /push_recovery/);
+  assert.doesNotMatch(build.result.structuredContent.message, /confirm_remote_build_without_submit/);
 });
 
 for (const stalledStage of ['fetch', 'json']) {
