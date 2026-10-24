@@ -22,11 +22,14 @@ let controls=null;
 // Keep a short grace after opening, polling or stream disconnection.
 const VIEWER_GRACE_MS=60000;
 let lastViewerSeen=0;
+// Live Screen streams (live-screen.cjs) read the same server and count too.
+let liveViewers=()=>0;
 function viewing(now=Date.now()){
- if((active?.clipboard?.viewers?.()||0)>0)lastViewerSeen=now;
+ if((active?.clipboard?.viewers?.()||0)+liveViewers()>0)lastViewerSeen=now;
  return now-lastViewerSeen<=VIEWER_GRACE_MS;
 }
 function configureControls(value){controls=value;}
+function configureLive(count){liveViewers=count;}
 function freePort(){return new Promise((resolve,reject)=>{const server=net.createServer();server.once('error',reject);server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(error=>error?reject(error):resolve(port));});});}
 function probe(url){return new Promise((resolve,reject)=>{const request=http.get(url,{timeout:1500},response=>{response.resume();response.on('end',()=>response.statusCode===200?resolve():reject(Error('Viewer HTTP '+response.statusCode)));});request.once('timeout',()=>request.destroy(Error('Viewer timed out')));request.once('error',reject);});}
 async function stopViewer(){
@@ -195,6 +198,9 @@ async function openViewer(binary,deviceSet,children,udid,clipboardAction,locale)
  const url=server.clipboard.base+'/control?udid='+encodeURIComponent(udid)+'&lang='+(locale==='zh-CN'?'zh-CN':'en')+'#'+server.clipboard.fragment;
  return {url,ready:true,recentRestarts:server.crashes.length,lastExit:server.lastExit,note:'Live viewer ready with zoom and device shutdown controls. Simulator data is preserved. Devices are not shut down for idleness while a viewer window is open or another tool or script is operating them; otherwise idle shutdown follows plugin settings (15 minutes by default). close_viewer only stops streaming. Use shutdown when finished.'};
 }
+// The native server's own loopback address (no capability: it is never handed
+// out); Live Screen connects its device stream there.
+async function nativeBase(binary,deviceSet,children,clipboardAction){return (await startViewer(binary,deviceSet,children,clipboardAction)).base;}
 // The controller address for a device while the viewer already runs, without
 // starting anything; null when it is not running.
 function existingViewerUrl(udid,locale){
@@ -202,4 +208,4 @@ function existingViewerUrl(udid,locale){
  active.clipboard.devices.add(udid);
  return active.clipboard.base+'/control?udid='+encodeURIComponent(udid)+'&lang='+(locale==='zh-CN'?'zh-CN':'en')+'#'+active.clipboard.fragment;
 }
-module.exports={openViewer,stopViewer,abandonViewer,reapOrphans,recycleIfBloated,configureControls,viewing,VIEWER_GRACE_MS,forgetSession,hasSession,existingViewerUrl};
+module.exports={openViewer,nativeBase,configureLive,stopViewer,abandonViewer,reapOrphans,recycleIfBloated,configureControls,viewing,VIEWER_GRACE_MS,forgetSession,hasSession,existingViewerUrl};

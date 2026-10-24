@@ -568,18 +568,24 @@ function reply(value){process.stdout.write(JSON.stringify(value)+'\n');}
 function shutdown(){ for(const child of children) child.kill('SIGKILL'); process.exit(0); }
 function startWorker() {
   if(appleHost)require('./viewer.cjs').reapOrphans(BINARY,DEVICE_SET);
-  // In use = a viewer window is open, or another process names a running device.
+  const tasks=require('./tasks.cjs').createTaskBindings(path.join(ROOT,'task-bindings.json'));
+  let runtime;
+  // Cindy's phone view of a device (not an Agent tool; see live-screen.cjs).
+  const live=require('./live-screen.cjs').createLiveScreen({devices:async()=>(await dispatch('devices')).devices,tasks,controls:()=>runtime,
+    appleBase:()=>require('./viewer.cjs').nativeBase(BINARY,DEVICE_SET,children,clipboardAction),android,appleHost});
+  require('./viewer.cjs').configureLive(()=>live.viewing()?1:0);
+  // In use = a viewer window or phone screen is open, or another process names a running device.
   const inUse=async()=>{
-    if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing())return true;
+    if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing()||live.viewing())return true;
     if(appsImpl?.installing()||android().installing())return true;
     const running=(await dispatch('devices')).devices.filter(d=>d.kind!=='physical'&&d.state!=='Shutdown').map(d=>d.udid);
     return process.platform==='win32'?false:(await require('./activity.cjs').externalUse(running)).length>0;
   };
-  const runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing()||physical().viewer.viewing()||!!physical().pending(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
+  runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing()||live.viewing()||physical().viewer.viewing()||!!physical().pending(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
     pendingOperation:udid=>physical().pending(udid)||android().pending(udid)||appsImpl?.pending(udid),
     pendingJob:udid=>android().runningFor(udid)||appsImpl?.runningFor(udid),
     viewerWanted:()=>require('./viewer.cjs').hasSession(DEVICE_SET)||android().viewer.wanted(),
-    tasks:require('./tasks.cjs').createTaskBindings(path.join(ROOT,'task-bindings.json')),
+    tasks,
     existingViewerUrl:async(udid,locale)=>physical().viewer.existing(udid,locale)||(await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale))});
   configureControls(runtime);
   android().configure(runtime);
@@ -590,7 +596,7 @@ function startWorker() {
   recycle.unref();
   let stopping=false;
   const stop=async()=>{
-    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);
+    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);live.stop();
     await trackpadImpl?.stop();
     await spatialImpl?.stop();
     // Host may force termination before this completes. User-facing stop
@@ -603,6 +609,12 @@ function startWorker() {
   input.on('line',async line=>{
     let request;try{request=JSON.parse(line);}catch{return reply({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Invalid JSON'}});}
     if(request.id===undefined)return;
+    // Cindy calls liveScreen.* itself; they bypass Agent routing and never renew use by listing.
+    if(typeof request.method==='string'&&request.method.startsWith('liveScreen.')){
+      try{reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await live.request(request.method,request.params)}});}
+      catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(Number.isInteger(e.completed)?{completed:e.completed}:{})}});}
+      return;
+    }
       try {reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await runtime.request(request.method,request.params)}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(e.busy?{busy:e.busy}:{})}});}
   });

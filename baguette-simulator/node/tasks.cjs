@@ -43,6 +43,13 @@ function createTaskBindings(file){
   try{await fs.writeFile(temporary,JSON.stringify({version:1,bindings:next}),{mode:0o600});await fs.rename(temporary,file);cache=next;}
   finally{await fs.rm(temporary,{force:true}).catch(()=>{});}
  }
+ // Tasks bound to a device, most recent first.
+ async function forDevice(udid,limit=MAX_BINDINGS){
+  if(typeof udid!=='string'||!UDID.test(udid))return [];
+  const matches=Object.entries(await read()).filter(([,b])=>deviceId(b.udid)===deviceId(udid));
+  matches.sort((a,b)=>b[1].at-a[1].at||a[0].localeCompare(b[0]));
+  return matches.slice(0,limit).map(([session])=>session);
+ }
  // Serialize writes so concurrent binds never drop one another.
  const serial=fn=>{const run=queue.then(fn,fn);queue=run.catch(()=>{});return run;};
  return {
@@ -74,12 +81,8 @@ function createTaskBindings(file){
    });
   },
   async counts(){const out={};for(const b of Object.values(await read()))if(b&&UDID.test(b.udid)){const id=deviceId(b.udid);out[id]=(out[id]||0)+1;}return out;},
-  async latestForDevice(udid){
-   if(typeof udid!=='string'||!UDID.test(udid))return null;
-   const matches=Object.entries(await read()).filter(([,b])=>deviceId(b.udid)===deviceId(udid));
-   matches.sort((a,b)=>b[1].at-a[1].at||a[0].localeCompare(b[0]));
-   return matches[0]?.[0]||null;
-  },
+  async latestForDevice(udid){return (await forDevice(udid))[0]||null;},
+  forDevice,
  };
 }
 module.exports={createTaskBindings,validSession};

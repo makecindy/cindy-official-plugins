@@ -914,6 +914,25 @@ test('Android H.264 stream corrects a default rotation once the first failed pol
   assert.deepEqual(f.messages().slice(-2).map(m=>[m[0],m[1],m[2]]),[[3,1,1],[3,1,2]]);
   abort.abort();await done;
 });
+test('Android H.264 stream feeds a Live Screen sink and honours its rate and keyframe requests',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,encoder=fakeEncoder(),abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};let type=null;
+  const sink={begin:value=>{type=value;},frame:(pose,payload)=>frames.push([pose.width,pose.height,pose.device,payload[0]])};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'avcc',spawnEncoder:encoder.spawn,sink,control}).catch(e=>e);
+  await until(()=>f.live());assert.equal(type,'application/x-cindy-android-avcc');
+  control.fps(5);
+  f.push({format:{width:1080,height:2400,rotation:{rotation:0}}});
+  await until(()=>encoder.lines.length===2);encoder.reply(1,Buffer.from([1,0x64,0,0x33]));encoder.reply(2);
+  const at=Date.now();f.push({format:{width:1080,height:2400,rotation:{rotation:0}}});
+  await until(()=>encoder.lines.length===3,1000);assert.ok(Date.now()-at>=150,'5 fps spaces encodes about 200 ms apart');
+  assert.equal(encoder.lines[2],'frame 1080 2400 0');encoder.reply(3);
+  control.keyframe();await until(()=>encoder.lines.length===4,1000);assert.equal(encoder.lines[3],'frame 1080 2400 1');encoder.reply(2);
+  await until(()=>frames.length===5);
+  assert.deepEqual(frames,[[1080,2400,0,1],[1080,2400,0,2],[1080,2400,0,3],[1080,2400,0,1],[1080,2400,0,2]]);
+  assert.equal(f.messages().length,0,'the viewer framing is not written');
+  abort.abort();await done;
+});
 test('Android H.264 stream re-sends a still frame as a keyframe when display rotation turns',async t=>{
   const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
   const f=streamFixture(t),endpoint=await f.ready,encoder=fakeEncoder(),abort=new AbortController();t.after(()=>abort.abort());

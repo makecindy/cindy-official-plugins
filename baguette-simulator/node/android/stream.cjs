@@ -10,7 +10,8 @@
 // last picture is re-sent once as a keyframe, then nothing is sent.
 //
 // PNG remains for pages without WebCodecs and Macs without the helper, with
-// the same framing around each PNG.
+// the same framing around each PNG. Live Screen passes its own sink with the
+// same frames and pose (live-screen.cjs).
 //
 // Neither path runs adb per frame: display rotation (an activity may lock it)
 // is polled about once a second; the device pose comes with each frame.
@@ -46,24 +47,30 @@ function rotations({d,agent,signal}){
   return state;
 }
 
-async function streamPng({d,res,signal,rotation}){
-  res.writeHead(200,{'Content-Type':'application/octet-stream'});
+// The viewer page's framing around each payload.
+function poseSink(res){
+  return {begin:type=>res.writeHead(200,{'Content-Type':type}),frame:(pose,payload)=>{
+    const head=Buffer.alloc(6);head.writeUInt32BE(payload.length+2);head[4]=pose.display;head[5]=pose.device;res.write(head);res.write(payload);
+  }};
+}
+
+async function streamPng({d,res,signal,rotation,sink}){
+  sink.begin('application/octet-stream');
   await rpc(d.endpoint,'streamScreenshot',{format:0,width:720,height:1600},{unbounded:true,signal,onData:image=>{
     if(!image.image.length||res.destroyed||res.writableLength>2e6)return;
-    const header=Buffer.alloc(6);header.writeUInt32BE(image.image.length+2);header[4]=rotation.display??0;header[5]=image.format.rotation?.rotation||0;
-    res.write(header);res.write(image.image);
+    sink.frame({display:rotation.display??0,device:image.format.rotation?.rotation||0,png:true},image.image);
   }});
 }
 
-async function streamAvcc({d,res,signal,rotation,spawnEncoder=spawn}){
+async function streamAvcc({d,res,signal,rotation,sink,control,spawnEncoder=spawn}){
   const dir=await fsp.mkdtemp(path.join(os.tmpdir(),'cindy-android-frames-')),file=path.join(dir,'screen.raw');
   // Emulator 37.1.11 writes pixels to the file only for an explicit size; a
   // square box of the longer edge keeps both orientations at native
   // resolution. The file covers the whole box so no write can pass its end.
   const box=Math.max(d.model.width,d.model.height),bytes=box*box*4;
   const encoder=spawnEncoder(ENCODER,[],{stdio:['pipe','pipe','ignore']});
-  let latest=null,inflight=null,waiting=false,forceKey=true,lastKey=false,settle=null,output=Buffer.alloc(0),description=null,failed=null;
-  const stop=()=>{clearTimeout(settle);encoder.stdin.end();};
+  let latest=null,inflight=null,waiting=false,forceKey=true,lastKey=false,settle=null,output=Buffer.alloc(0),description=null,failed=null,gap=0,started=0,pacing=null;
+  const stop=()=>{clearTimeout(settle);clearTimeout(pacing);encoder.stdin.end();};
   signal.addEventListener('abort',stop,{once:true});
   // A helper that keeps running but cannot encode (for example no hardware
   // session) counts as a failure, like one that exits.
@@ -80,7 +87,10 @@ async function streamAvcc({d,res,signal,rotation,spawnEncoder=spawn}){
         // Encoded deltas cannot be dropped; skip encoding and restart from a keyframe.
         forceKey=true;if(!waiting){waiting=true;res.once('drain',()=>{waiting=false;send();});}return;
       }
-      clearTimeout(settle);
+      // A requested rate (Live Screen) spaces encodes; the newest frame waits.
+      const wait=started+gap-Date.now();
+      if(wait>0){if(!pacing)pacing=setTimeout(()=>{pacing=null;send();},wait);return;}
+      clearTimeout(settle);started=Date.now();
       inflight={...latest,key:forceKey};forceKey=false;latest.fresh=false;
       command(`frame ${inflight.width} ${inflight.height} ${inflight.key?1:0}`);
     };
@@ -91,7 +101,7 @@ async function streamAvcc({d,res,signal,rotation,spawnEncoder=spawn}){
       if(type===2||type===3){
         lastKey=type===2;
         const parts=type===2&&description?[description,payload]:[payload];
-        for(const part of parts){const head=Buffer.alloc(6);head.writeUInt32BE(part.length+2);head[4]=frame.display;head[5]=frame.device;res.write(head);res.write(part);}
+        for(const part of parts)sink.frame(frame,part);
       }
       if(latest?.fresh)return send();
       // Quiet screen: make the last picture exact once, then stay silent.
@@ -107,9 +117,13 @@ async function streamAvcc({d,res,signal,rotation,spawnEncoder=spawn}){
       }
     });
     rotation.onChange=()=>{if(!latest)return;latest.display=rotation.display;latest.fresh=true;forceKey=true;send();};
+    if(control){
+      control.keyframe=()=>{forceKey=true;if(latest){latest.fresh=true;send();}};
+      control.fps=fps=>{gap=1000/fps;};
+    }
     command(`open ${bytes} ${file}`);
     await rotation.ready;
-    res.writeHead(200,{'Content-Type':'application/x-cindy-android-avcc'});
+    sink.begin('application/x-cindy-android-avcc');
     const frames=rpc(d.endpoint,'streamScreenshot',{format:2,width:box,height:box,transport:{channel:1,handle:'file://'+file}},{unbounded:true,signal,onData:image=>{
       const width=image.format.width||image.width,height=image.format.height||image.height;
       if(!width||!height||width*height*3>bytes||res.destroyed)return;
@@ -123,11 +137,11 @@ async function streamAvcc({d,res,signal,rotation,spawnEncoder=spawn}){
 }
 
 // Serve one viewer connection until it closes or the emulator stream ends.
-async function serve({d,agent,res,signal,format,spawnEncoder}){
+async function serve({d,agent,res,signal,format,spawnEncoder,sink=poseSink(res),control}){
   const rotation=rotations({d,agent,signal});
   // Tests inject the encoder process; the platform check is for the shipped binary.
-  if(format==='avcc'&&(spawnEncoder?healthy():encoderAvailable()))return streamAvcc({d,res,signal,rotation,spawnEncoder});
-  await rotation.ready;return streamPng({d,res,signal,rotation});
+  if(format==='avcc'&&(spawnEncoder?healthy():encoderAvailable()))return streamAvcc({d,res,signal,rotation,sink,control,spawnEncoder});
+  await rotation.ready;return streamPng({d,res,signal,rotation,sink});
 }
 // Tests start each case with a clean failure history.
 const resetFailures=()=>{failures=[];};

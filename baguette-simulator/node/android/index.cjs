@@ -67,6 +67,6 @@ function createAndroid({root,run,children}){
     }});
     throw fail('UNKNOWN_TOOL','Unknown Android operation.');
   }
-  return {dispatch,owns:devices.owns,viewer,pending:id=>apps.pending(id),runningFor:id=>apps.runningFor(id),installing:()=>!!sdk.pending()||!!apps.pending(),configure:c=>viewer.configure(c)};
+  return {dispatch,owns:devices.owns,viewer,devices,agent,pending:id=>apps.pending(id),runningFor:id=>apps.runningFor(id),installing:()=>!!sdk.pending()||!!apps.pending(),configure:c=>viewer.configure(c)};
 }
 module.exports={createAndroid};
