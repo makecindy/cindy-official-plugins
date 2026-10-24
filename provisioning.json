@@ -93,6 +93,11 @@
         "emails": []
       }
     },
+    "rhino-bridge": {
+      "audience": {
+        "emails": []
+      }
+    },
     "baguette-simulator": {
       "audience": {
         "emails": []

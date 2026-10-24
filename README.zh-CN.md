@@ -57,6 +57,7 @@
 | <img src="./taptap-maker/assets/icon.png" width="22" alt=""> | TapTap Maker | [`taptap-maker`](./taptap-maker) | 账号连接、项目同步、构建与官方动态工具 |
 | <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | 设备模拟器 | [`baguette-simulator`](./baguette-simulator) | Cindy 官方设备模拟器（基于开源 Baguette），独立设备、侧边栏实时画面与操作；替代已下线的内置模拟器，市场安装 |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS 模拟器 | [`ios-simulator`](./ios-simulator) | Cindy 主机托管的内嵌工作流；主机授权回退时将原始任务和精确设备交给指定外部工作流；定向灰度 |
+| <img src="./rhino-bridge/assets/icon.png" width="22" alt=""> | Cindy Rhino Bridge | [`rhino-bridge`](./rhino-bridge) | 通过 McNeel RhinoAI 或随包基础连接器操作本机 Rhino；定向灰度 |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | 在 X（Twitter）上搜舆情、发帖——xAI x_search，Grok 订阅 / API key 双通道降级，发帖走 X 官方 API v2；目前定向灰度中 |
 
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
