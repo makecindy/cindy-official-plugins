@@ -1,0 +1,31 @@
+{
+  "name": "Evaluation Lab",
+  "description": "Evaluate real projects, author questions from selected task records, and export shareable results.",
+  "whenToUse": "Run model benchmarks, create personal evaluation questions from selected task records, or share evaluation results.",
+  "tools": {
+    "list_questions": {
+      "description": "List default questions, imported banks and frozen personal questions without starting a model."
+    },
+    "prepare_run": {
+      "description": "Prepare an isolated answer workspace for a verified model configuration without starting a model. Default questions are downloaded and verified when needed; installed version-qualified keys can be prepared offline. Returns runId, workspace, the answering prompt, authorizationScope and question-version metadata; pass the returned directory and instructions to the executor to continue answering. Preparation itself does not run a model."
+    },
+    "list_runs": {
+      "description": "Read local execution states and independently graded results."
+    },
+    "export_report": {
+      "description": "Export selected results as standalone HTML without raw chats, source files or local paths."
+    },
+    "create_question_draft": {
+      "description": "Create a private draft from task excerpts explicitly selected by the user and return its authoring directory, rules and status; do not scan other history or start a model."
+    },
+    "calibrate_question": {
+      "description": "Execute local grader code from the trusted draft against original, reference and incomplete controls. For page-authored drafts, first confirm task completion and import verified materials, retrying an unfinished handoff if needed. Return a check ID for user freezing in the main page."
+    },
+    "retry_calibration": {
+      "description": "Execute local grading code from the trusted question package as the current OS user against original, reference and incomplete controls. Explicitly retry the latest completed failed calibration while preserving its report. Repeating the same request recovers the same retry; unknown executions are never replayed."
+    },
+    "end_author": {
+      "description": "Explicitly end current authoring while preserving its tasks, materials and reports. A new question is allowed only after execution and calibration finish with no unknown dispatch."
+    }
+  }
+}

@@ -5,7 +5,9 @@
       "audience": { "emails": [] }
     },
     "my-browser": {
-      "audience": { "emails": [] }
+      "audience": {
+        "emails": []
+      }
     },
     "cindy-contacts": {
       "audience": { "emails": [] }
@@ -98,6 +100,11 @@
         "emails": []
       },
       "tier": "builtin"
+    },
+    "eval-lab": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }
