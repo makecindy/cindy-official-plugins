@@ -1,9 +1,9 @@
 {
   "date": "2026-10-24",
-  "pluginVersion": "0.2.23",
+  "pluginVersion": "0.2.25",
   "baguette": "0.2.10",
-  "status": "streaming-performance-source-verified-package-acceptance-pending",
-  "baseCommit": "24feb3861bc04d2a186876434cbe588858d95b58",
+  "status": "identity-rename-rebased-runtime-evidence-retained-release-migration-pending",
+  "baseCommit": "64bbaf3f253b3f118c2a0a40ee67020d945d94dd",
   "passed": [
     "Same Mac before/after (M5 Ultra, Xcode 27.1, iOS/tvOS/visionOS 27.0, Emulator 37.1.11 API 36 arm64), isolated device sets and a temporary-HOME plugin worker; at least two runs per figure.",
     "iPhone H.264 at a requested 60 fps: 58.1–58.5 fps while scrolling (was 44.9–45.2); idle sends no frames, Baguette CPU 0.5–0.8% (was 45 fps, 10.5–11.3%). Touch-to-frame-ready p50 39–42 ms with sub-second pauses (was 51–55); after 5 s idle 63–73 ms (was 50–56): encode and decode are unchanged after idle (measured), the remainder is the simulator rendering its first frame without a continuously loaded GPU.",
@@ -15,6 +15,7 @@
     "Baguette full upstream suite 2555 tests in 306 suites pass with the patch; real-simulator smoke 17/17 (iPhone and Duo, flat and 3D streams). Repository gates 615/615 (plugin contract, localization, provisioning, publish workflows, baguette-simulator), binary-dependencies 1/1; Android suite 256/256. vendor inventory check passes."
   ],
   "notVerified": [
+    "The rebased 0.2.25 package has not been installed or exercised in Cindy. Prior acceptance applies only to the recorded versions and unaffected paths; identity transition requires explicit Server migration and maintainer review before release.",
     "Packaged .cindy installation and the same walkthrough inside Cindy (Beta/production) for this version.",
     "Android H.264 on Intel Macs, Windows and Linux (these use unthrottled PNG by design) and `-gpu host` behaviour on other Mac models.",
     "Upstream submission of the Baguette frame-pacing and idle-stop patch."
@@ -501,5 +502,19 @@
       "acceptance": "Not confirmed; superseded by 0.2.16 after technical review.",
       "ciPackaging": "Failed because directory entries were counted before collection (258 raw entries, 211 regular files)."
     }
+  },
+  "identityRename": {
+    "previousId": "baguette-simulator",
+    "id": "cindy-simulator",
+    "command": "cindy-simulator",
+    "dataDirectory": "BaguetteCindy (unchanged)",
+    "priorTestedPackage": {
+      "pluginVersion": "0.1.68",
+      "sha256": "10be515325dfde7cc40a03c36a2a7804fe49ea1312afe5261c3ba961ad891aec",
+      "confirmedBy": "Dash",
+      "date": "2026-10-24",
+      "scope": "User confirmed testing the original rename package. This does not attest to subsequent rebased packages; Cindy version/channel were not supplied."
+    },
+    "scope": "Rebased after #206, #212 and #221 merged. Native/vendor bytes, dependencies, capabilities and device data paths match main. H.264/GPU changes and their recorded evidence are retained. Android control-page frame-ancestors permits the renamed plugin, matching both Apple routes. Marketplace and installed-identity migration have not been executed."
   }
 }

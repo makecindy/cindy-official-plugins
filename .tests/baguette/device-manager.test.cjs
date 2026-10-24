@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
 const a='00000000-0000-4000-8000-00000000000A',b='00000000-0000-4000-8000-00000000000B';
 async function fixture(t){
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'baguette-switch-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));

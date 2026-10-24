@@ -72,7 +72,7 @@ async function target(p, booted=true) {
   const udid=string(p.udid,'udid',36);
   if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(udid)) throw new Failure('INVALID_DEVICE','Use an exact UDID returned by this plugin');
   const device=(await listDevices(p._deadline)).find(d=>deviceId(d.udid)===deviceId(udid));
-  if(!device) throw new Failure('DEVICE_NOT_OWNED','Device is not in the Baguette plugin device set. Create a dedicated device first.');
+  if(!device) throw new Failure('DEVICE_NOT_OWNED','Device is not in the Device Simulator device set. Create a dedicated device first.');
   if(booted&&device.state!=='Booted') throw new Failure('DEVICE_NOT_BOOTED','Boot this device first');
   return device;
 }
@@ -206,7 +206,7 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
   const simCommand=(args,options)=>runCommand('/usr/bin/xcrun',['simctl','--set',DEVICE_SET,...args],options);
   const bagCommand=async(command,device,args=[],options={})=>({udid:device.udid,execution:options.mutation?'executed':'not_applicable',...await runCommand(BINARY,[command,...deviceArgs(device),...args],options)});
   const jsonCommand=async(file,args)=>{const {stdout}=await runCommand(file,args);try{return JSON.parse(stdout);}catch{throw new Failure('INVALID_OUTPUT','Command did not return JSON');}};
-  if(!methods.has(method)) throw new Failure('UNKNOWN_TOOL','Unknown Baguette operation');
+  if(!methods.has(method)) throw new Failure('UNKNOWN_TOOL','Unknown Device Simulator operation');
   if(process.platform!=='darwin'||process.arch!=='arm64') throw new Failure('UNSUPPORTED_PLATFORM','This package requires an Apple Silicon Mac');
   // The native connection was bound to an owned, booted tvOS device on opening.
   // Further samples must match its live gesture; rediscovering the device with

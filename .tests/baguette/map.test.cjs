@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),{EventEmitter}=require('node:events');
-const {endpoint,serveMap}=require('../../baguette-simulator/node/map.cjs');
+const {endpoint,serveMap}=require('../../cindy-simulator/node/map.cjs');
 test('map only permits bounded tiles and encoded search on fixed providers',()=>{
  assert.equal(endpoint('/map/tiles/2/1/3.png').host,'tile.openstreetmap.org');
  const search=endpoint('/map/search?q='+encodeURIComponent('x&url=https://example.test'));

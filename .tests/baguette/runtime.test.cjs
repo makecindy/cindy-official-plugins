@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
 async function fixture(t){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'baguette-runtime-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
@@ -23,7 +23,7 @@ test('destructive results never start an optional device-list read or lose compl
   const paths=[['erase_device',{}],['delete_device',{}],['device',{action:'erase'}],['device',{action:'delete'}],['app_uninstall',{bundleId:'test.example.app'}]];
   for(const [method,extra] of paths)for(const elapsed of [1,109999]){
     const root=await fs.mkdtemp(path.join(os.tmpdir(),'bag-destroy-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
-    const tasks=require('../../baguette-simulator/node/tasks.cjs').createTaskBindings(path.join(root,'tasks.json'));
+    const tasks=require('../../cindy-simulator/node/tasks.cjs').createTaskBindings(path.join(root,'tasks.json'));
     const coreResult={ok:true,udid,execution:'executed',evidence:'original operation result'};
     let clock=0,reads=0,removed=false;
     const runtime=createRuntime({tasks,now:()=>clock,settingsFile:path.join(root,'settings.json'),dispatch:async(m)=>{
@@ -122,7 +122,7 @@ test('damaged settings preserve incomplete shutdown evidence and recover after f
 
 test('all shutdown entry points share one deadline and retain completed, failed and unprocessed devices',async t=>{
   const ids=[udid,'00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003'];
-  const {commandBudget}=require('../../baguette-simulator/node/budget.cjs');
+  const {commandBudget}=require('../../cindy-simulator/node/budget.cjs');
   for(const entry of ['manual','disable','idle','exit'])for(const phase of ['success','slow','failed','viewer','status']){
     const root=await fs.mkdtemp(path.join(os.tmpdir(),'bag-stop-budget-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
     let clock=0,reads=0;const states=new Map(ids.map(id=>[id,'Booted'])),calls=[];

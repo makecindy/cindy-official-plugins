@@ -23,15 +23,15 @@ function fixture(page,{steps=1}={}){
   };
   const context={...clock,BroadcastChannel,crypto:require('node:crypto').webcrypto,AbortSignal,
     document:{documentElement:{},body:element('body'),createElement:element,getElementById:id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);}},
-    CindySimModel:require('../../baguette-simulator/node/control-model.js'),fetch:async url=>url==='/app-context'?new Promise(()=>{}):{ok:true,json:async()=>({state:'on'})}};
+    CindySimModel:require('../../cindy-simulator/node/control-model.js'),fetch:async url=>url==='/app-context'?new Promise(()=>{}):{ok:true,json:async()=>({state:'on'})}};
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(`baguette-simulator/${page}.js`,'utf8'),context);
+  vm.runInContext(fs.readFileSync(`cindy-simulator/${page}.js`,'utf8'),context);
   return {messages,calls,nodes,create:options=>context.CindySimPages.createDevice(options),finish:(value,index=0)=>results[index].finish(value),fail:(error,index)=>results[index].fail(error),intervals,timers,
     advance:async ms=>{now+=ms;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();},
     rpc:action=>page==='pages'?context.CindySimPages.rpc(action,{sessionId:'task-1',udid:'device-1'}):vm.runInContext(`rpc(${JSON.stringify(action)})`,context),
     tick:()=>{for(const {fn,ms} of [...intervals.values()])if(ms===500)fn();},
     ready:id=>{for(const p of buses.get(page==='pages'?'baguette-pages':'baguette-settings'))queueMicrotask(()=>p.onmessage?.({data:{type:'ready',id}}));},
-    start:()=>vm.runInNewContext(fs.readFileSync('baguette-simulator/main.js','utf8'),{...clock,BroadcastChannel,
+    start:()=>vm.runInNewContext(fs.readFileSync('cindy-simulator/main.js','utf8'),{...clock,BroadcastChannel,
       cindy:{onHostMessage(){},request:async()=>({context:{locale:'en'}}),node:{request:async r=>{
         if(r.method==='device_hold')return {ok:true,result:{running:false}};
         calls.push(r);return {ok:true,result:await results[calls.length-1].result};

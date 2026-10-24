@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
-const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '../../baguette-simulator');
+const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '../../cindy-simulator');
 const BAGUETTE = join(PLUGIN, 'vendor/baguette/Baguette');
 const KEYBOARD = join(PLUGIN, 'native/keyboard');
 const args = new Set(process.argv.slice(2));

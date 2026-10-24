@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{execFileSync}=require('node:child_process');
 test('native release submits all usages before one shared timeout, including absent and late callbacks',{skip:process.platform!=='darwin'},()=>{
- const source=fs.readFileSync('baguette-simulator/native/keyboard.m','utf8');
+ const source=fs.readFileSync('cindy-simulator/native/keyboard.m','utf8');
  const production=source.slice(0,source.indexOf('\nint main('));
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'baguette-release-'));
  try{

@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),net=require('node:net');
-const {createClipboard}=require('../../baguette-simulator/node/clipboard.cjs');
+const {createClipboard}=require('../../cindy-simulator/node/clipboard.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
 test('viewer HTTP and WebSocket require authenticated capability session',async()=>{
  let reads=0,upgrades=0;
@@ -127,7 +127,7 @@ test('the 3D stage backdrop follows a light/dark change that arrives after it at
  const window={matchMedia:()=>({matches:false,addEventListener:(type,fn)=>listeners.push(fn)})};
  const document={getElementById:id=>id==='simNativeView'?{}:null,addEventListener(){},visibilityState:'visible'};
  const context=vm.createContext({window,document,getComputedStyle:()=>({getPropertyValue:()=>pageBg}),Promise});
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../../baguette-simulator/node/viewer-stage.js'),'utf8'),context);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
  // The upstream class is defined after the helper, as sim-3d.js loads later.
  const sent=[];
  function Sim3DPanel(){}
@@ -153,7 +153,7 @@ test('a hidden viewer throttles its stream sockets and restores them when shown 
  const docListeners=[];
  const document={visibilityState:'hidden',getElementById:()=>null,addEventListener:(type,fn)=>{if(type==='visibilitychange')docListeners.push(fn);}};
  const window={WebSocket:FakeSocket,matchMedia:()=>null};
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../../baguette-simulator/node/viewer-stage.js'),'utf8'),vm.createContext({window,document,location:{href:'http://127.0.0.1:5/simulators/x?handheld=1',host:'127.0.0.1:5'},getComputedStyle:()=>({getPropertyValue:()=>''}),Promise,URL,JSON}));
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),vm.createContext({window,document,location:{href:'http://127.0.0.1:5/simulators/x?handheld=1',host:'127.0.0.1:5'},getComputedStyle:()=>({getPropertyValue:()=>''}),Promise,URL,JSON}));
  const flat=new window.WebSocket('ws://127.0.0.1:5/simulators/'+udid+'/stream?format=avcc');
  const three=new window.WebSocket('/simulators/'+udid+'/stream.3d.avcc?width=960');
  const atomic=new window.WebSocket('/simulators/'+udid+'/stream.3d.avcc?frameMetadata=1');

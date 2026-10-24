@@ -1,8 +1,8 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
-const {createTaskBindings}=require('../../baguette-simulator/node/tasks.cjs');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
-const {createApps}=require('../../baguette-simulator/node/apps.cjs');
+const {createTaskBindings}=require('../../cindy-simulator/node/tasks.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
+const {createApps}=require('../../cindy-simulator/node/apps.cjs');
 const A='ABCDEF12-3456-4ABC-8DEF-1234567890AB',B='ABCDEF12-3456-4ABC-8DEF-1234567890AC';
 const variants=id=>[id,id.toLowerCase(),id.slice(0,18)+id.slice(18).toLowerCase()];
 const tmp=async t=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),'bag-id-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));return root;};

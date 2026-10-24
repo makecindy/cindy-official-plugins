@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream');
-const {createTrackpad}=require('../../baguette-simulator/node/trackpad.cjs');
+const {createTrackpad}=require('../../cindy-simulator/node/trackpad.cjs');
 const gesture='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const sample=(phase,extra={})=>({gesture,phase,x:.5,y:.5,...extra});

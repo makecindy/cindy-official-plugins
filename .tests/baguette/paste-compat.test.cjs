@@ -7,9 +7,9 @@ const udid='00000000-0000-4000-8000-000000000001';
 
 function harness({simctlFails=false,readFails=false,stale=false,owned=true,runtime='runtime'}={}) {
  const calls=[];let clipboard="";
- const context={module:{exports:{}},setTimeout,clearTimeout,__dirname:path.resolve('baguette-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
+ const context={module:{exports:{}},setTimeout,clearTimeout,__dirname:path.resolve('cindy-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
   if(name==='./viewer.cjs')return {};
-  if(name==='./keys.cjs')return require('../../baguette-simulator/node/keys.cjs');
+  if(name==='./keys.cjs')return require('../../cindy-simulator/node/keys.cjs');
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
   if(name==='node:child_process')return {execFile(file,args,options,callback){
    const call={file,args,options,input:undefined};calls.push(call);
@@ -25,9 +25,9 @@ function harness({simctlFails=false,readFails=false,stale=false,owned=true,runti
    });
    return {stdin:{on(){},end(input){call.input=input;}}};
   }};
-  return require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name);
+  return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
  }};
- vm.runInNewContext(fs.readFileSync(path.resolve('baguette-simulator/node/core.cjs'),'utf8'),context);
+ vm.runInNewContext(fs.readFileSync(path.resolve('cindy-simulator/node/core.cjs'),'utf8'),context);
  return {calls,dispatch:context.module.exports.dispatch};
 }
 
@@ -73,8 +73,8 @@ test('input tri-state follows completed steps, preserving busy and preflight rej
   // run() uses the existing commandBudget helper; replace only the executor
   // through a fresh core VM so failures remain in the production input path.
   let keyboardCalls=0,queries=0,clipboard='',clock=0;
-  const context={module:{exports:{}},__dirname:path.resolve('baguette-simulator/node'),setTimeout,clearTimeout,Date:{now:()=>clock},process:{platform:'darwin',arch:'arm64',env:{}},require(name){
-   if(name==='./budget.cjs')return {commandBudget:(ms,deadline)=>require('../../baguette-simulator/node/budget.cjs').commandBudget(ms,deadline,()=>clock)};
+  const context={module:{exports:{}},__dirname:path.resolve('cindy-simulator/node'),setTimeout,clearTimeout,Date:{now:()=>clock},process:{platform:'darwin',arch:'arm64',env:{}},require(name){
+   if(name==='./budget.cjs')return {commandBudget:(ms,deadline)=>require('../../cindy-simulator/node/budget.cjs').commandBudget(ms,deadline,()=>clock)};
    if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,_options,callback){
@@ -87,9 +87,9 @@ test('input tri-state follows completed steps, preserving busy and preflight rej
     else queueMicrotask(()=>callback(error,args.includes('pbpaste')?clipboard:stdout,''));
     return {stdin:{on(){},end(text){if(args.includes('pbcopy'))clipboard=text;}}};
    }};
-   return require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name);
+   return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
   }};
-  vm.runInNewContext(fs.readFileSync(path.resolve('baguette-simulator/node/core.cjs'),'utf8'),context);
+  vm.runInNewContext(fs.readFileSync(path.resolve('cindy-simulator/node/core.cjs'),'utf8'),context);
   let other;
   if(mode==='busy'){
    other=vm.runInContext('clipboardAction',context)({udid,action:'key',code:'KeyA'});
@@ -108,7 +108,7 @@ test('tool and viewer keyboard input excludes only the same normalized device an
  const a='AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',b='BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB';
  for(const action of ['key','paste','copy','release','tool-keys','tool-release'])for(const failed of [false,true]){
   let finish,started;const entered=new Promise(resolve=>started=resolve),held=new Promise(resolve=>finish=resolve),calls=[],clipboards=new Map();let heldOnce=false;
-  const context={module:{exports:{}},__dirname:path.resolve('baguette-simulator/node'),setTimeout,clearTimeout,process:{platform:'darwin',arch:'arm64',env:{}},require(name){
+  const context={module:{exports:{}},__dirname:path.resolve('cindy-simulator/node'),setTimeout,clearTimeout,process:{platform:'darwin',arch:'arm64',env:{}},require(name){
    if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,options,callback){
@@ -121,9 +121,9 @@ test('tool and viewer keyboard input excludes only the same normalized device an
     else queueMicrotask(()=>{if(args.includes('pbcopy'))clipboards.set(device,call.input);callback(null,args.includes('pbpaste')?clipboards.get(device):output,'');});
     return {stdin:{on(){},end(value){call.input=value;}}};
    }};
-   return require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name);
+   return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
   }};
-  vm.runInNewContext(fs.readFileSync(path.resolve('baguette-simulator/node/core.cjs'),'utf8'),context);
+  vm.runInNewContext(fs.readFileSync(path.resolve('cindy-simulator/node/core.cjs'),'utf8'),context);
   const input=vm.runInContext('clipboardAction',context),dispatch=context.module.exports.dispatch;
   const first=action==='tool-keys'?dispatch('type_text',{udid:a,keys:['a']}):action==='tool-release'?dispatch('press',{udid:a,button:'release-input'}):input({udid:a,action,code:'KeyA',text:'test'});
   const settled=first.then(value=>({value}),error=>({error}));await entered;

@@ -1,10 +1,10 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),http2=require('node:http2');
-const A=path.resolve('baguette-simulator/node/android');
-const {PNG}=require('../../baguette-simulator/vendor/android/deps.cjs');
+const A=path.resolve('cindy-simulator/node/android');
+const {PNG}=require('../../cindy-simulator/vendor/android/deps.cjs');
 const {host,repository,packageArchive,createSdk,extract}=require(path.join(A,'sdk.cjs'));
 const {rpc,schema}=require(path.join(A,'grpc.cjs'));
-const M=require('../../baguette-simulator/node/control-model.js');
+const M=require('../../cindy-simulator/node/control-model.js');
 const id='00000000-0000-4000-8000-000000000001';
 async function temp(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cindy-android-test-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
 function catalog(){return {license:[{'@_id':'license','#text':'SDK terms'}],remotePackage:[{'@_path':'emulator',channelRef:{'@_ref':'channel-0'},'display-name':'Emulator','uses-license':{'@_ref':'license'},archives:{archive:[['macosx','aarch64'],['macosx','x64'],['windows','x64'],['linux','x64']].map(([os,arch])=>({'host-os':os,'host-arch':arch,complete:{url:`emulator-${os}-${arch}.zip`,size:'100',checksum:{'@_type':'sha256','#text':'a'.repeat(64)}}}))}}]};}
@@ -39,7 +39,7 @@ test('Android press dispatches the complete shared contract and rejects iOS-only
     inputs.push(method==='sendKey'?schema.lookupType('KeyboardEvent').decode(body.subarray(5)).key:method);send(s,'Empty',{});
   });
   const agent=require(path.join(A,'agent.cjs')).createAgent({root:await temp(t),devices:{adb:async(d,args)=>commands.push(args)}});
-  const manifest=JSON.parse(await fs.readFile('baguette-simulator/ghost.json','utf8'));
+  const manifest=JSON.parse(await fs.readFile('cindy-simulator/ghost.json','utf8'));
   const buttons=manifest.tools.find(t=>t.name==='press').parameters.properties.button.enum;
   for(const button of ['up','down','left','right','select','menu','play-pause','digital-crown','back','shake'])assert.ok(buttons.includes(button),`retained Apple/Android button: ${button}`);
   const keys={home:'GoHome',back:'GoBack',lock:'Power',power:'Power','volume-up':'AudioVolumeUp','volume-down':'AudioVolumeDown','app-switcher':'AppSwitch','swipe-to-app-switcher':'AppSwitch','swipe-to-home':'GoHome'};
@@ -56,7 +56,7 @@ test('Android press dispatches the complete shared contract and rejects iOS-only
     else {assert.equal(button,'shake');assert.deepEqual(inputs,[...Array(7).fill('setSensor'),'setPhysicalModel']);}
   }
   for(const locale of ['zh-CN','en','ja','ko']){
-    const d=JSON.parse(await fs.readFile(`baguette-simulator/locales/${locale}.json`,'utf8')).tools.press.description;
+    const d=JSON.parse(await fs.readFile(`cindy-simulator/locales/${locale}.json`,'utf8')).tools.press.description;
     assert.match(d,/iOS/);assert.match(d,/Android|安卓/);
     for(const button of buttons)assert.ok(d.includes(button),`${locale}: ${button}`);
   }
@@ -401,7 +401,7 @@ test('Android log defaults, explicit filters and crash buffers share one bounded
   const agent=require(path.join(A,'agent.cjs')).createAgent({devices:{adb:async()=>({stdout:Array(3000).fill('1999 7 7 W app: warning').join('\n')})}});
   const capped=await agent.logs(d,{});assert.equal(capped.lines.length,150);assert.equal(capped.truncated,true);
   for(const locale of ['zh-CN','en','ja','ko']){
-    const desc=JSON.parse(await fs.readFile(`baguette-simulator/locales/${locale}.json`,'utf8')).tools.logs.description;
+    const desc=JSON.parse(await fs.readFile(`cindy-simulator/locales/${locale}.json`,'utf8')).tools.logs.description;
     for(const term of ['120','150','3000','PID','processRunning=false','crashes=false','Default'])assert.ok(desc.includes(term),`${locale}: ${term}`);
   }
 });
@@ -460,7 +460,7 @@ test('capture rechecks the display after its first stream frame before executing
 });
 
 test('every Android gesture shares the RPC dispatch boundary and skips cleanup before its first request',async t=>{
-  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../baguette-simulator/node/budget.cjs').commandBudget;
+  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../cindy-simulator/node/budget.cjs').commandBudget;
   for(const p of [{kind:'tap',x:30,y:30},{kind:'tap',x:30,y:30,count:2},{kind:'swipe',from:[20,20],to:[40,40]},{kind:'drag',from:[20,20],to:[40,40]},{kind:'edge'},{kind:'pinch',center:[50,50],from_spread:10,to_spread:20},{kind:'pan',from:[40,40],by:[10,10]}])for(const phase of ['preflight','first-send','connection','after-send','success'])await t.test(JSON.stringify(p)+' '+phase,async t=>{
     let clock=100,reads=0;const deadline=10000,events=[];t.mock.method(Date,'now',()=>clock);
     const rpc=(_d,method,value,options)=>{
@@ -486,7 +486,7 @@ test('every Android gesture shares the RPC dispatch boundary and skips cleanup b
   });
 });
 test('Android hardware, release and shake distinguish preflight rejection from a started mutation',async t=>{
-  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../baguette-simulator/node/budget.cjs').commandBudget;
+  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../cindy-simulator/node/budget.cjs').commandBudget;
   for(const p of [{button:'home'},{button:'home',duration:.01},{button:'release-input'},{button:'shake'},{button:'pull-down-to-notification-center'}])for(const phase of ['preflight','first-send','connection','after-send','success'].filter(v=>v!=='after-send'||p.button!=='home'||p.duration))await t.test(JSON.stringify(p)+' '+phase,async t=>{
     let clock=100;const deadline=10000,events=[];t.mock.method(Date,'now',()=>clock);
     const rpc=(_d,method,value,options)=>{
@@ -517,7 +517,7 @@ test('Android hardware, release and shake distinguish preflight rejection from a
   });
 });
 test('Android text input owns dispatch evidence across preflight, first-send and later failures',async t=>{
-  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../baguette-simulator/node/budget.cjs').commandBudget;
+  const source=await fs.readFile(path.join(A,'agent.cjs'),'utf8'),budget=require('../../cindy-simulator/node/budget.cjs').commandBudget;
   for(const request of [{text:'AB'},{method:'touch',text:'AB'},{method:'type',text:'AB'},{method:'paste',text:'你好'},{method:'type',clear:true},{method:'type',keys:['ctrl+shift+x']}])for(const phase of ['preflight','first-send','after-send','connection',...(request.method==='touch'?[]:['success'])])await t.test(JSON.stringify(request)+' '+phase,async t=>{
     let clock=100,writes=0;const events=[],deadline=200,screen=image();t.mock.method(Date,'now',()=>clock);
     const rpc=(_endpoint,method,value={},options={})=>{
@@ -631,7 +631,7 @@ test('Android discovery tolerates only real absence and rejects unreadable post-
   });
 });
 test('unreadable private Android inventory makes every stop-all entry incomplete',async t=>{
-  const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
+  const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
   for(const entry of ['manual','disable','idle','exit'])for(const phase of ['before','after'])await t.test(entry+' '+phase,async t=>{
     const {root,devices}=await privateAndroid(t),list=fs.readdir;let reads=0,clock=0;
     t.mock.method(fs,'readdir',async(dir,...args)=>{
@@ -699,7 +699,7 @@ test('partial launch and destruction do not change successful App records or tas
   const root=await temp(t),file=path.join(root,'settings.json'),record=file+'.apps.json';let binds=0,forgets=0;
   await fs.writeFile(record,JSON.stringify({[id]:'test.previous'}));
   const partial={udid:id,execution:'unknown',outcome:'partial',appLaunched:false,appTerminated:true,launchError:{code:'TIME_BUDGET_EXHAUSTED'}};
-  const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:file,dispatch:async()=>partial,tasks:{bind:async()=>{binds++;},forgetDevice:async()=>{forgets++;},activity(){}}});
+  const runtime=require('../../cindy-simulator/node/runtime.cjs').createRuntime({settingsFile:file,dispatch:async()=>partial,tasks:{bind:async()=>{binds++;},forgetDevice:async()=>{forgets++;},activity(){}}});
   for(const method of ['launch_app','delete_device','erase_device'])assert.equal((await runtime.request(method,{udid:id,bundleId:'test.next',session_context:{session_id:id}})).outcome,'partial');
   assert.equal(binds,0);assert.equal(forgets,0);assert.deepEqual(JSON.parse(await fs.readFile(record)),{[id]:'test.previous'});
 });

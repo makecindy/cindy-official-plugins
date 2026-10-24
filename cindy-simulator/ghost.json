@@ -1,11 +1,11 @@
 {
   "schemaVersion": 3,
   "minCindyVersion": "0.1.116",
-  "id": "baguette-simulator",
+  "id": "cindy-simulator",
   "name": "设备模拟器",
   "description": "独立的 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，共用任务画面、设备管理和操作工具。默认闲置 15 分钟关机并保留数据。Apple 平台需要 macOS 15+、Apple Silicon、完整 Xcode 与对应运行时；安卓支持 Mac、Windows x64、Linux x64，确认下载大小和许可后安装环境。Apple 后端基于 Baguette（Apache-2.0）。",
   "whenToUse": "iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器；App 安装启动、真实输入、TV 遥控、Vision 空间手势、截图、界面检查、状态和日志排查。先 devices 选择设备，按手册验证结果。",
-  "version": "0.2.23",
+  "version": "0.2.25",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -980,7 +980,7 @@
     "lifecycle": "on-demand",
     "idleTimeoutSeconds": 3600
   },
-  "command": "baguette",
+  "command": "cindy-simulator",
   "preview": {
     "hosts": [
       "127.0.0.1"

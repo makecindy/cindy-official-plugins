@@ -1,8 +1,8 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),http=require('node:http'),net=require('node:net'),vm=require('node:vm');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
-const {externalUse,names}=require('../../baguette-simulator/node/activity.cjs');
-const {createClipboard}=require('../../baguette-simulator/node/clipboard.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
+const {externalUse,names}=require('../../cindy-simulator/node/activity.cjs');
+const {createClipboard}=require('../../cindy-simulator/node/clipboard.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
 
 async function fixture(t,{inUse=async()=>false,viewing=()=>false}={}){
@@ -86,7 +86,7 @@ test('the viewer server counts open windows by their live stream and forgets the
 });
 
 test('the logic page keeps one hold in flight while devices run and stops when none does',async()=>{
- const code=await fs.readFile('baguette-simulator/main.js','utf8');
+ const code=await fs.readFile('cindy-simulator/main.js','utf8');
  let handler;const holds=[];const answers=[true,true,false];
  vm.runInNewContext(code,{Object,String,Promise,setTimeout,cindy:{onHostMessage:fn=>handler=fn,request:async()=>({ok:true,context:{locale:'en'}}),
   preview:async()=>({ok:true}),send:async()=>{},
@@ -108,8 +108,8 @@ test('the logic page keeps one hold in flight while devices run and stops when n
 test('an open page without a stream prevents idle shutdown, including during status errors',async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'baguette-viewing-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  let clock=120000,failStatus=false;
- const context={module:{exports:{}},process,Date:class extends Date{static now(){return clock;}},require:name=>require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name)};
- vm.runInNewContext(await fs.readFile('baguette-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.bridgeForTest=initializeBridge;',context);
+ const context={module:{exports:{}},process,Date:class extends Date{static now(){return clock;}},require:name=>require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name)};
+ vm.runInNewContext(await fs.readFile('cindy-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.bridgeForTest=initializeBridge;',context);
  const viewer=context.module.exports;
  const f=await fixture(t,{inUse:async()=>viewer.viewing()});
  viewer.configureControls({status:async()=>{if(failStatus)throw Error('temporarily unavailable');return {devices:[]};}});

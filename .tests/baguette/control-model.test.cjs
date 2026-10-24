@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const M=require('../../baguette-simulator/node/control-model.js');
+const M=require('../../cindy-simulator/node/control-model.js');
 const udid='00000000-0000-4000-8000-000000000001';
 const booted={ready:true,parked:false,generation:1,device:{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-1',deviceType:'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro'},settings:{enabled:true,idleMinutes:15},idleDeadline:0};
 

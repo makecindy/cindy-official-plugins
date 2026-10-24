@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
-const node=path.join(__dirname,'../../baguette-simulator/node');
+const node=path.join(__dirname,'../../cindy-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002';
 const IDS='screen stage frame overlay dock chip-dot chip-name status btn-home btn-rotl btn-rotr btn-shot btn-shot-menu btn-more scroll title title-dot title-name title-sub zoom zoom-out zoom-label zoom-in tools posture tv-remote device-chip confirm-title confirm-body confirm-cancel confirm-ok confirm-dialog device-dialog device-form dialog-title dialog-hint f-name-text f-model-text f-runtime-text dialog-cancel dialog-save f-model-label f-runtime-label dialog-error f-name f-model f-runtime'.split(' ');
 

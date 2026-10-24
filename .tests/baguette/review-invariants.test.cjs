@@ -6,7 +6,7 @@ const {EventEmitter} = require('node:events');
 const {PassThrough} = require('node:stream');
 const {execFile} = require('node:child_process');
 const exec = require('node:util').promisify(execFile);
-const dir = path.resolve('baguette-simulator/node');
+const dir = path.resolve('cindy-simulator/node');
 const A = '00000000-0000-4000-8000-000000000001', B = '00000000-0000-4000-8000-000000000002';
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => {resolve=a;reject=b;}); return {promise,resolve,reject}; };
 class Failure extends Error { constructor(code,message,execution='not_executed') {super(message);Object.assign(this,{code,execution});} }
@@ -816,7 +816,7 @@ test('management view ignores late viewer successes and failures, including retu
     const get=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){}});return nodes.get(id);};
     const context={document:{getElementById:get,addEventListener(){}},localStorage:{getItem:()=>null},
       CindySimPages:{locale:()=>new Promise(()=>{}),rpc:()=>{const d=deferred();requests.push(d);return d.promise;},h:()=>({}),GLYPH:{}},CindySimModel:{}};
-    vm.runInNewContext(syncFs.readFileSync(path.resolve('baguette-simulator/manage.js'),'utf8')+'\nglobalThis.page={showScreen,hero};',context);
+    vm.runInNewContext(syncFs.readFileSync(path.resolve('cindy-simulator/manage.js'),'utf8')+'\nglobalThis.page={showScreen,hero};',context);
     const old=context.page.showScreen({udid:A});
     await context.page.showScreen({udid:A});await context.page.showScreen({udid:A});
     assert.equal(requests.length,1,'same-device pending render reuses its owner instead of causing BUSY');
@@ -944,7 +944,7 @@ function pageFixture(kind) {
   const expose=kind==='task'
     ? 'globalThis.page={refresh,act,createDevice,state:()=>state,note:()=>note,seed:r=>{state=r;show(r.viewer?.url);}};'
     : 'globalThis.page={refresh,act,showScreen,hero,state:()=>state,seed:r=>{state=r;selected=r.devices[0]?.udid;}};';
-  vm.runInNewContext(syncFs.readFileSync(path.resolve(`baguette-simulator/${kind}.js`),'utf8')+'\n'+expose,context);
+  vm.runInNewContext(syncFs.readFileSync(path.resolve(`cindy-simulator/${kind}.js`),'utf8')+'\n'+expose,context);
   return {page:context.page,get,requests,push:m=>push(m)};
 }
 const taskState=udid=>({ok:true,settings:{enabled:true},devices:[],device:{udid,state:'Booted'},viewer:{url:`http://127.0.0.1:1/control?udid=${udid}`}});

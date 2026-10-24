@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {plan,sample,perform}=require('../../baguette-simulator/node/spatial.cjs');
+const {plan,sample,perform}=require('../../cindy-simulator/node/spatial.cjs');
 const screen={width:1920,height:1080};
 class Failure extends Error{constructor(code,message){super(message);this.code=code;}}
 test('spatial planning validates the entire gesture before input and converts screenshot points',()=>{
@@ -21,7 +21,7 @@ test('insufficient time sends nothing; uncertain delivery releases without repla
 });
 
 const fs=require('node:fs'),vm=require('node:vm');
-const source=fs.readFileSync(require('node:path').join(__dirname,'../../baguette-simulator/node/vision-stage.js'),'utf8');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../../cindy-simulator/node/vision-stage.js'),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
 function stage(respond=async()=>{}){
  const events={},windowEvents={},docEvents={},calls=[],timers=new Map();let timer=0,focused=true,pads=[];

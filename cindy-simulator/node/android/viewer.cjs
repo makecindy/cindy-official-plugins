@@ -27,7 +27,7 @@ function createViewer({devices,agent,root}){
       try{
         if(req.method==='GET'&&assets[u.pathname]){const [name,type]=assets[u.pathname];res.writeHead(200,{'Content-Type':type});return res.end(await fs.readFile(path.join(__dirname,name)));}
         if(req.method==='GET'&&u.pathname==='/control'){
-          res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"frame-ancestors 'self' cindy-ghost://baguette-simulator",'Referrer-Policy':'no-referrer'});
+          res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"frame-ancestors 'self' cindy-ghost://cindy-simulator",'Referrer-Policy':'no-referrer'});
           return res.end(await fs.readFile(path.join(__dirname,u.searchParams.get('lang')==='zh-CN'?'../control.zh-CN.html':'../control.html')));
         }
         if(!authorized)return reply(403,{error:'Viewer expired. Reopen the device from the plugin.'});
