@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 3,
+  "id": "todo-scan",
+  "name": "Todo Scan",
+  "description": "Finds TODO / FIXME / HACK / XXX markers in text the Agent already has, shows them in a dockable panel for triage, and returns what is still open as items or a markdown checklist. Read-only: no file edits, no network.",
+  "whenToUse": "Use when the user asks to find explicit TODO, FIXME, HACK or XXX markers in code, a diff or notes — \"collect the FIXMEs from this PR\", \"list every HACK before we ship\" — or wants to review and tick off marker items in a panel. Matches literal markers only, not plain task lists.",
+  "version": "1.1.0",
+  "minCindyVersion": "0.1.64",
+  "author": "chanolan20",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "launch": "on-demand",
+  "command": "todo-scan",
+  "panel": {
+    "title": "Todo Scan",
+    "html": "panel.html",
+    "position": "left",
+    "minWidth": 240,
+    "defaultFraction": 0.24
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "tools": [
+    {
+      "name": "scan_todos",
+      "description": "Scan text for TODO, FIXME, HACK and XXX markers. Pass the exact text to inspect as `text` (file contents, a diff, or notes); pass `tag` to keep a single marker type. A line may hold several markers: each is reported separately with its 1-based `column`. Returns JSON { total, truncated, scannedLines, byTag, items } where each item is { key, line, column, tag, text }, `line` and `column` being 1-based positions inside the supplied text and `text` the remainder of that line after the marker. The same results are pushed to the plugin's panel, where the user can filter and tick items off. `truncated: true` means more than 200 matches exist and only the first 200 are returned; `total` then equals the number returned, not the true count. An empty match list is a successful result, not an error. This tool only reads the string it is given: it does not open files, does not modify anything, and makes no network requests.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The exact text to scan, including newlines. Pass file contents, a diff body or notes verbatim; do not summarise them first, because line numbers are reported relative to this string."
+          },
+          "tag": {
+            "type": "string",
+            "enum": ["TODO", "FIXME", "HACK", "XXX"],
+            "description": "Optional. Keep only this marker type. Omit it to scan all four."
+          }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "get_selection",
+      "description": "Read the panel's state as structured data after the user has triaged it. Returns JSON { hasScan, lastScanAt, filter, total, truncated, visibleCount, unresolvedCount, resolvedCount, byTag, items, markdown, note } where `items` are the still-unresolved markers the panel shows, each { key, line, column, tag, text }, and `markdown` is that list as a `- [ ]` checklist ready to paste. `items` and `markdown` follow the active `filter`, as do `visibleCount`, `unresolvedCount` and `resolvedCount`: `visibleCount` is what the panel shows, `resolvedCount` counts items the user actually ticked, and markers hidden by the filter are never counted as resolved. `total` and `byTag` describe the whole scan, not the filtered view. If `truncated` is true the scan stopped at the 200-marker cap and the list is incomplete — `note` says so. Call this when the user refers to what they ticked or filtered in the panel. It performs no I/O: it reads the last scan held in memory. If hasScan is false, ask the user to run a scan first.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  ]
+}

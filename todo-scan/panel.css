@@ -1,0 +1,175 @@
+/*
+ * Panel styling rules from the authoring reference:
+ *  - use Host-injected CSS variables with fallbacks, never hard-code a theme
+ *  - never declare color-scheme (the Host injects it so native controls follow)
+ *  - no title bar; the Host draws the standard header above this document
+ */
+:root {
+  --ts-gap: 8px;
+  --ts-radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ts-gap);
+  padding: 10px;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--text-primary, #1a1a1a);
+  background: var(--panel-bg, #f7f7f5);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ts-gap);
+}
+
+.summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #6b6b66);
+  font-size: 12px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip,
+.ghost-button {
+  font: inherit;
+  color: var(--text-primary, #1a1a1a);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.chip:hover,
+.ghost-button:hover {
+  border-color: var(--border-strong, #cfcfc8);
+}
+
+.chip.is-active {
+  background: var(--accent-soft, #eef2e4);
+  border-color: var(--accent, #93a26a);
+}
+
+.chip:focus-visible,
+.ghost-button:focus-visible,
+.item input:focus-visible {
+  outline: 2px solid var(--accent, #93a26a);
+  outline-offset: 2px;
+}
+
+.ghost-button {
+  border-radius: var(--ts-radius);
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border-default, #e4e4e0);
+  /* Scrollbar convention from the reference: 12px track, 6px rounded thumb. */
+  scrollbar-width: thin;
+}
+
+.list::-webkit-scrollbar { width: 12px; }
+.list::-webkit-scrollbar-thumb {
+  background: var(--msg-scrollbar, #cfcfc8);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+.list::-webkit-scrollbar-thumb:hover { background-color: var(--msg-scrollbar-hover, #b4b4ac); }
+
+.item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--border-subtle, #ecece7);
+}
+
+.item input {
+  margin: 2px 0 0;
+}
+
+.item.is-resolved .text {
+  text-decoration: line-through;
+  color: var(--text-secondary, #6b6b66);
+}
+
+.tag {
+  align-self: start;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tag-bg, #ecece7);
+  color: var(--tag-fg, #4a4a45);
+  white-space: nowrap;
+}
+
+.tag[data-tag="FIXME"] { background: var(--tag-fixme-bg, #fdecec); color: var(--tag-fixme-fg, #a3403f); }
+.tag[data-tag="HACK"]  { background: var(--tag-hack-bg, #fdf3e2); color: var(--tag-hack-fg, #8a5b18); }
+.tag[data-tag="XXX"]   { background: var(--tag-xxx-bg, #eef0fd); color: var(--tag-xxx-fg, #3f4a91); }
+
+.text { display: block; overflow-wrap: anywhere; }
+
+.meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary, #6b6b66);
+}
+
+.empty {
+  padding: 14px 4px;
+  margin: 0;
+  color: var(--text-secondary, #6b6b66);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ts-gap);
+  font-size: 12px;
+  color: var(--text-secondary, #6b6b66);
+}
+
+.markdown {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-primary, #1a1a1a);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-default, #e4e4e0);
+  border-radius: var(--ts-radius);
+  padding: 8px;
+}
