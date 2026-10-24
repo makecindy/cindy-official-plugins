@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Headline Digest settings</title>
+  <style>
+    :root { --gap: 10px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 14px;
+      font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      color: var(--text-primary, #1a1a1a);
+      background: transparent;
+    }
+    h2 { margin: 0 0 4px; font-size: 14px; }
+    p { margin: 0 0 var(--gap); color: var(--text-secondary, #6b6b66); }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    input {
+      flex: 1 1 220px;
+      min-width: 160px;
+      padding: 6px 8px;
+      font: inherit;
+      color: var(--text-primary, #1a1a1a);
+      background: var(--surface, #fff);
+      border: 1px solid var(--border-default, #e4e4e0);
+      border-radius: 8px;
+    }
+    button {
+      font: inherit;
+      padding: 6px 11px;
+      border-radius: 8px;
+      border: 1px solid var(--border-default, #e4e4e0);
+      background: var(--surface, #fff);
+      color: var(--text-primary, #1a1a1a);
+      cursor: pointer;
+    }
+    button.primary { border-color: var(--accent, #93a26a); background: var(--accent-soft, #eef2e4); }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .status { font-weight: 600; }
+    .status[data-state="saved"] { color: var(--ok, #3f7d3f); }
+    .status[data-state="missing"] { color: var(--warn, #8a5b18); }
+    .message { min-height: 1.4em; color: var(--danger, #a3403f); }
+    .hint { font-size: 12px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <h2>NewsAPI key</h2>
+  <p class="hint">
+    Headline Digest calls <code>newsapi.org</code> with a key Cindy injects for you. The value is
+    stored write-only: this page can confirm that a key exists and show its last characters, but it
+    can never read the key back, and the plugin never receives it.
+  </p>
+
+  <p>
+    Status: <span class="status" id="status" data-state="unknown" aria-live="polite">Checking…</span>
+  </p>
+
+  <div class="row">
+    <label for="key" class="visually-hidden">NewsAPI key</label>
+    <input id="key" type="password" autocomplete="off" spellcheck="false"
+           placeholder="Paste your NewsAPI key">
+    <button type="button" class="primary" id="save" disabled>Save key</button>
+    <button type="button" id="remove">Remove</button>
+  </div>
+
+  <p class="message" id="message" role="status" aria-live="polite"></p>
+  <p class="hint">
+    Keys are free at newsapi.org/register, but NewsAPI's free Developer plan covers development only —
+    for everyday use you need one of their paid plans. After saving, return to the chat and ask for
+    headlines.
+  </p>
+
+  <script src="settings.js"></script>
+</body>
+</html>
