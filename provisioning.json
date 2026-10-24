@@ -5,7 +5,9 @@
       "audience": { "emails": [] }
     },
     "my-browser": {
-      "audience": { "emails": [] }
+      "audience": {
+        "emails": []
+      }
     },
     "cindy-contacts": {
       "audience": { "emails": [] }
@@ -54,7 +56,9 @@
       }
     },
     "tongcheng-chengxin": {
-      "audience": { "emails": [] }
+      "audience": {
+        "emails": []
+      }
     },
     "taptap-cli": {
       "audience": {
@@ -98,6 +102,11 @@
         "emails": []
       },
       "tier": "builtin"
+    },
+    "podcast-insights": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }
