@@ -18,7 +18,11 @@ for (const [id, prefix] of Object.entries(plugins)) {
     assert.equal(manifest.node.secretBindings[0].oauthSecret, secret.key);
     assert.deepEqual(secret.oauth.scopes, ['openid', 'https://www.googleapis.com/auth/userinfo.email',
       ...(id === 'google-gmail' ? ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.modify']
-        : ['https://www.googleapis.com/auth/' + (id === 'google-calendar' ? 'calendar' : 'drive')])]);
+        : ['https://www.googleapis.com/auth/' + (id === 'google-calendar' ? 'calendar' : 'drive')]),
+      'https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/contacts',
+      'https://www.googleapis.com/auth/contacts.other.readonly', 'https://www.googleapis.com/auth/directory.readonly']);
+    assert.equal(secret.oauth.identity.avatarPath, 'picture');
+    assert.ok(secret.inject.hosts.includes('people.googleapis.com'));
     // ghost_info projects only name, description and parameters to the model.
     const tools = manifest.tools.map(({ name, description, parameters }) => ({ name, description, parameters }));
     const schema = tools.find(tool => tool.name === `${prefix}_schema`);
@@ -31,7 +35,7 @@ for (const [id, prefix] of Object.entries(plugins)) {
     for (const name of [`${prefix}_schema`, `${prefix}_run`]) {
       assert.equal(Object.hasOwn(manifest.tools.find(tool => tool.name === name), 'inputSchema'), false);
     }
-    assert.deepEqual(tools.map(tool => tool.name), [`${prefix}_read_message`, `${prefix}_schema`, `${prefix}_run`, `${prefix}_accounts`]);
+    assert.deepEqual(tools.map(tool => tool.name), [`${prefix}_read_message`, `${prefix}_schema`, `${prefix}_run`, `${prefix}_accounts`, `${prefix}_contacts`]);
     const reader = tools.find(tool => tool.name === manifest.mailReader.tool);
     assert.equal(reader.parameters.properties.url.type, 'string');
     assert.deepEqual(reader.parameters.required, ['url']);
@@ -49,3 +53,4 @@ import './google-gmail-accounts.test.mjs';
 import './google-gmail-worker.test.mjs';
 import './google-gmail-packaging.test.mjs';
 import './google-gmail-compose.test.mjs';
+import './google-gmail-contacts.test.mjs';

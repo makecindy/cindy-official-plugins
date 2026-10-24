@@ -278,6 +278,69 @@ function assertMailReadResponse(response, fallback) {
   if (response.status === 403) throw new Error('Gmail 拒绝读取，请检查此账号的邮件读取权限，并到插件详情页重新连接或授权。');
   if (!response.ok || response.status !== 200 || response.truncated) throw new Error(fallback);
 }
+// Optional read-only enrichment. Account-scoped, bounded, in-memory only; a
+// missing new OAuth scope or an unavailable People API never prevents reading.
+var mailPhotoCache = new Map();
+async function lookupMailParticipantPhotos(accountId, headers) {
+  var emails = [], pieces = [], start = 0, quoted = false, escaped = false, angle = 0;
+  var input = headers.join(', ');
+  for (var i = 0; i <= input.length; i++) {
+    var char = input[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\' && quoted) { escaped = true; continue; }
+    if (char === '"') quoted = !quoted;
+    if (!quoted && char === '<') angle++;
+    if (!quoted && char === '>') angle = Math.max(0, angle - 1);
+    if (i === input.length || (!quoted && !angle && (char === ',' || char === ';'))) { pieces.push(input.slice(start, i)); start = i + 1; }
+  }
+  for (var piece of pieces) {
+    var email = (/<([^<>]+)>\s*$/.exec(piece.trim())?.[1] || piece).trim().toLowerCase();
+    if (email.length <= 320 && /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$/.test(email) && !emails.includes(email)) emails.push(email);
+  }
+  // Large mailing lists use public/initial fallbacks beyond the first 12 people.
+  emails = emails.slice(0, 12);
+  var deadline = Date.now() + 2000;
+  async function search(query) {
+    var remaining = deadline - Date.now();
+    if (remaining < 100) return null;
+    var response = await cindy.fetch({ url: 'https://people.googleapis.com/v1/people:searchContacts?readMask=emailAddresses%2Cphotos&pageSize=30&query=' + encodeURIComponent(query),
+      authAccount: accountId, timeoutMs: Math.min(1000, remaining) });
+    if (!response.ok || response.status !== 200 || response.truncated) return null;
+    var data = JSON.parse(response.body);
+    return Array.isArray(data.results) ? data.results : [];
+  }
+  var warmup;
+  var photos = await Promise.all(emails.map(async function (email) {
+    var key = JSON.stringify([accountId, email]);
+    var cached = mailPhotoCache.get(key);
+    if (cached && cached.until > Date.now()) return cached.value;
+    // One warmup per batch; parallel readers share in-flight email lookups.
+    if (!warmup) warmup = search('').catch(function () { return null; });
+    var value = (async function () {
+      try {
+        if (await warmup === null) return null;
+        var results = await search(email);
+        for (var result of results || []) {
+          var person = result.person;
+          if (!person || !Array.isArray(person.emailAddresses) || !person.emailAddresses.some(function (a) { return typeof a.value === 'string' && a.value.trim().toLowerCase() === email; })) continue;
+          for (var photo of Array.isArray(person.photos) ? person.photos : []) {
+            if (photo.default === true || typeof photo.url !== 'string' || photo.url.length > 2048) continue;
+            var url = new URL(photo.url);
+            if (url.protocol === 'https:' && !url.username && !url.password && !url.port &&
+                (url.hostname === 'googleusercontent.com' || url.hostname.endsWith('.googleusercontent.com'))) return { email: email, url: url.href };
+          }
+        }
+      } catch (_) { /* Best effort: keep mail and public avatar fallbacks available. */ }
+      return null;
+    })();
+    mailPhotoCache.delete(key);
+    mailPhotoCache.set(key, { until: Date.now() + 60000, value: value });
+    while (mailPhotoCache.size > 256) mailPhotoCache.delete(mailPhotoCache.keys().next().value);
+    return value;
+  }));
+  return photos.filter(Boolean);
+}
+
 async function readMailMessageLink(args, beginOperation) {
   if (args.markRead !== undefined && typeof args.markRead !== 'boolean') throw new Error('Invalid markRead flag');
   var url = new URL(args.url);
@@ -315,6 +378,7 @@ async function readMailMessageLink(args, beginOperation) {
   assertMailReadResponse(response, '无法读取 Gmail 邮件，请检查网络连接和邮件是否仍在邮箱中后重新打开。');
   var message = parseMailReadJson(response.body);
   if (!/^[a-f0-9]{8,32}$/i.test(message.id || '') || !message.payload) throw new Error('Incomplete Gmail message');
+  var photos = lookupMailParticipantPhotos(selected.accountId, ['from', 'to', 'cc', 'bcc'].map(function (name) { return header(message.payload, name); })).catch(function () { return []; });
   var conversation, conversationUnavailable = false;
   // Read only metadata for the surrounding messages. Cindy requests a body
   // through the same reader when the user expands that message.
@@ -395,7 +459,9 @@ async function readMailMessageLink(args, beginOperation) {
     } catch (_) { markReadResult = { execution: 'unknown', message: '无法确认已读状态，请先在邮箱中核对，不要盲目重试。' }; }
     finishMarkRead?.(markReadResult.execution);
   }
+  var participantPhotos = await photos;
   return { accountId: selected.accountId, messageId: message.id, from: header(message.payload, 'from'),
+    ...(participantPhotos.length ? { participantPhotos: participantPhotos } : {}),
     to: header(message.payload, 'to'), cc: header(message.payload, 'cc'), bcc: header(message.payload, 'bcc'),
     subject: header(message.payload, 'subject'), date: header(message.payload, 'date'),
     bodyText: bodies['text/plain'].join('\n'), bodyHtml: bodies['text/html'].join('\n'),
@@ -430,6 +496,128 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
   return result;
 }
 
+// Google People operations share the selected Gmail account. Credentials stay
+// in the Host; no contact data is persisted in plugin KV or sent to other APIs.
+async function googleContacts(args, callId, beginOperation) {
+  var action = args.action;
+  var writes = ['create', 'update', 'delete'];
+  var write = writes.includes(action);
+  var fields = 'names,emailAddresses,phoneNumbers,organizations,photos,metadata';
+  var execution = 'not_executed';
+  function error(message) { throw new Error(message); }
+  function text(value, name, max = 1000) {
+    if (typeof value !== 'string' || !value.trim() || value.length > max) error(name + ' 必须是非空文本，且不能过长。');
+    return value;
+  }
+  try {
+    if (!['list', 'search', 'get', 'other_contacts', 'directory', ...writes].includes(action)) error('未知联系人操作，请查看 gmail_contacts 的参数说明。');
+    if (write && args.session_context?.workdir_is_read_only !== false) error('当前任务为只读，未修改 Google 通讯录。');
+    if (typeof cindy.fetch !== 'function') error('当前 Cindy 不支持联系人网络接口，请更新 Cindy。');
+    var selected = await selectGoogleAccount(args.account);
+    if (!selected.ok) error(selected.message);
+    var resource;
+    if (['get', 'update', 'delete'].includes(action)) {
+      resource = text(args.resourceName, 'resourceName', 200);
+      if (!/^people\/[A-Za-z0-9_-]+$/.test(resource) || resource === 'people/me') error('请使用查询返回的联系人 resourceName，不能使用 people/me 或自行拼接路径。');
+    }
+    var pageSize = args.pageSize === undefined ? 50 : args.pageSize;
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) error('pageSize 必须是 1–100 的整数。');
+    var page = { pageSize: String(pageSize) };
+    if (args.pageToken !== undefined) page.pageToken = text(args.pageToken, 'pageToken', 4096);
+    var person;
+    if (['create', 'update'].includes(action)) {
+      var allowed = { names: ['givenName', 'familyName', 'middleName', 'unstructuredName'],
+        emailAddresses: ['value', 'type'], phoneNumbers: ['value', 'type'], organizations: ['name', 'title', 'department', 'type'] };
+      if (!args.person || typeof args.person !== 'object' || Array.isArray(args.person) || !Object.keys(args.person).length) error('person 至少需要一个要写入的联系人字段。');
+      person = {};
+      for (var key of Object.keys(args.person)) {
+        var values = args.person[key];
+        if (!Object.hasOwn(allowed, key) || !Array.isArray(values) || values.length > (key === 'names' ? 1 : 20)) error('联系人字段不支持或条目过多：' + key);
+        person[key] = values.map(function (item) {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || !Object.keys(item).length) error('联系人字段条目必须是非空对象。');
+          var result = {};
+          for (var name of Object.keys(item)) {
+            if (!allowed[key].includes(name)) error('不支持的联系人字段：' + key + '.' + name);
+            result[name] = text(item[name], key + '.' + name);
+          }
+          if (['emailAddresses', 'phoneNumbers'].includes(key) && !result.value) error(key + ' 需要 value。');
+          return result;
+        });
+      }
+      if (action === 'create' && !Object.values(person).some(function (items) { return items.length; })) error('不能创建空联系人。');
+      if (action === 'update') text(args.etag, 'etag', 1000);
+    }
+    async function request(path, query = {}, method = 'GET', body) {
+      var url = 'https://people.googleapis.com/v1/' + path;
+      var params = new URLSearchParams();
+      for (var key of Object.keys(query)) {
+        for (var value of Array.isArray(query[key]) ? query[key] : [query[key]]) params.append(key, value);
+      }
+      var qs = params.toString();
+      if (qs) url += '?' + qs;
+      // Serialize before entering the uncertain write phase.
+      var options = { url, method, callId, authAccount: selected.accountId, timeoutMs: 20000,
+        ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) };
+      var mutating = method !== 'GET';
+      var finish;
+      if (mutating) { execution = 'unknown'; finish = beginOperation(); }
+      var response;
+      try { response = await cindy.fetch(options); }
+      catch (_) { error(mutating ? '无法确认联系人操作结果，请先核对 Google 通讯录，不要直接重试。' : '读取联系人失败，请检查网络连接后重试。'); }
+      if (mutating) {
+        if (response?.ok && response.status >= 200 && response.status < 300) execution = 'executed';
+        else if ([400, 401, 403, 404, 405, 409, 412, 413, 415, 422, 429].includes(response?.status)) execution = 'not_executed';
+        finish(execution);
+      }
+      if (!response?.ok || response.status < 200 || response.status >= 300) {
+        if (execution === 'unknown') error('无法确认联系人操作结果，请先核对 Google 通讯录，不要直接重试。');
+        if ([401, 403].includes(response?.status)) error('联系人权限不足或账号已失效，请到 Gmail 插件详情重新连接此账号并授权；企业目录还需组织允许访问。现有邮件功能可继续使用已获授权。');
+        if ([400, 409, 412].includes(response?.status)) error('Google 拒绝了联系人操作，请重新读取联系人并核对字段和 etag；资料可能已经更新。');
+        if (response?.status === 404) error('联系人不存在，请重新查询并核对 resourceName。');
+        error('Google 联系人服务暂时不可用，请检查网络或稍后重新读取。');
+      }
+      if (method === 'DELETE') return { resourceName: resource, deleted: true };
+      try {
+        if (response.truncated) throw new Error('truncated');
+        var data = JSON.parse(response.body);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('invalid');
+        // Linking or unlinking a Google Profile can change a contact's name.
+        // Return the new server identifier so later operations use it.
+        if (mutating && !/^people\/[A-Za-z0-9_-]+$/.test(data.resourceName || '')) throw new Error('invalid receipt');
+        return data;
+      } catch (_) {
+        error(execution === 'executed' ? '联系人操作已执行，但回执不完整。请先到 Google 通讯录核对，不要重复创建或修改。' : '联系人响应不完整，请缩小查询范围后重新读取。');
+      }
+    }
+    var data;
+    if (action === 'list') data = await request('people/me/connections', { ...page, personFields: fields });
+    else if (action === 'get') data = await request(resource, { personFields: fields });
+    else if (action === 'search') {
+      var query = text(args.query, 'query');
+      if (args.pageToken !== undefined) error('联系人搜索不支持 pageToken；需要分页遍历时使用 list。');
+      // People search requires an empty-query warmup before the real query.
+      await request('people:searchContacts', { query: '', readMask: fields, pageSize: '1' });
+      data = await request('people:searchContacts', { query, readMask: fields, pageSize: String(Math.min(pageSize, 30)) });
+    } else if (action === 'other_contacts') data = await request('otherContacts', { ...page, readMask: 'names,emailAddresses,phoneNumbers,photos,metadata' });
+    else if (action === 'directory') data = await request('people:searchDirectoryPeople', {
+      ...page, query: text(args.query, 'query'), readMask: fields,
+      sources: ['DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE', 'DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT'],
+    });
+    else if (action === 'create') data = await request('people:createContact', { personFields: fields }, 'POST', person);
+    else if (action === 'update') {
+      var current = await request(resource, { personFields: fields, sources: 'READ_SOURCE_TYPE_CONTACT' });
+      var source = current.metadata?.sources?.find(function (s) { return s.type === 'CONTACT'; });
+      if (!source || source.etag !== args.etag) error('联系人已变化或不是可编辑的个人联系人，请重新读取并核对修改内容。未写入任何修改。');
+      data = await request(resource + ':updateContact', { updatePersonFields: Object.keys(person).join(','), personFields: fields }, 'PATCH', {
+        ...person, resourceName: resource, metadata: { sources: [source] },
+      });
+    } else if (action === 'delete') data = await request(resource + ':deleteContact', {}, 'DELETE');
+    return { ok: true, result: { accountId: selected.accountId, action, execution, data } };
+  } catch (err) {
+    return { ok: false, message: '[' + execution + '] ' + (err.message || '联系人操作失败，请核对 Google 通讯录中的实际状态。') };
+  }
+}
+
 (function () {
   var PREFIX = 'gmail';
   cindy.onHostMessage(async function (message) {
@@ -450,6 +638,11 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
       };
     }
     try {
+      if (message.tool === 'gmail_contacts') {
+        var contacts = await googleContacts(args, message.callId, beginOperation);
+        await cindy.send({ type: 'tool-result', callId: message.callId, ...contacts });
+        return;
+      }
       if (message.tool === 'gmail_read_message') {
         var mail = await readMailMessageLink(args, beginOperation);
         await cindy.send({ type: 'tool-result', callId: message.callId, ok: true, result: mail });
@@ -525,6 +718,11 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
         ...(result.ok ? { result: result.data } : { message: '[' + execution + '] ' + (execution === result.execution
           ? result.message : '此前的草稿操作结果尚未完全确认，请先核对邮箱中的实际状态，不要重复发送、保存或删除。') }) });
     } catch (error) {
+      if (message.tool === 'gmail_contacts') {
+        await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
+          message: '[' + execution + '] 联系人结果未能完整返回，请先核对 Google 通讯录中的实际状态，不要重复创建、修改或删除。' });
+        return;
+      }
       await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
         message: execution === 'executed' ? '[executed] 邮箱操作已执行，但结果未能完整返回。请先核对邮箱中的实际状态，不要重复发送、保存或删除。'
           : execution === 'unknown' ? '[unknown] 无法确认邮箱操作结果，请先核对邮箱中的实际状态，不要重复发送、保存或删除。'

@@ -3,10 +3,14 @@
   "minCindyVersion": "0.1.112",
   "id": "google-gmail",
   "name": "Gmail",
-  "description": "搜索和阅读 Gmail、下载附件到当前任务、创建草稿和发送邮件。账号授权由 Cindy 托管。",
-  "whenToUse": "用于 Gmail 邮件、附件、草稿和发送。先用 gmail_accounts 选择账号，再用 gmail_schema 查询命令、gmail_run 执行。分析附件前，先下载到明确指定的本地任务目录路径。",
-  "version": "1.5.24",
-  "cindy": { "media": ["deposit"] },
+  "description": "搜索和阅读 Gmail、下载附件、创建草稿和发送邮件；查询联系人头像并管理 Google 通讯录。账号授权由 Cindy 托管。",
+  "whenToUse": "用于 Gmail 邮件、附件、草稿、发送及 Google 通讯录。先用 gmail_accounts 选择账号；邮件用 gmail_schema 查询命令后通过 gmail_run 执行；联系人查询、头像及增删改用 gmail_contacts。分析附件前先下载到明确指定的本地任务路径。",
+  "version": "1.6.0",
+  "cindy": {
+    "media": [
+      "deposit"
+    ]
+  },
   "agent": {},
   "locales": {
     "en": "locales/en.json",
@@ -24,20 +28,22 @@
       "accounts.google.com",
       "oauth2.googleapis.com",
       "www.googleapis.com",
-      "gmail.googleapis.com"
+      "gmail.googleapis.com",
+      "people.googleapis.com"
     ],
     "secrets": [
       {
         "key": "gmail_account",
         "label": "Gmail 账号",
         "source": "oauth",
-        "hint": "只授权 Gmail 权限；到本插件详情页点「连接账号」完成授权",
+        "hint": "授权 Gmail、账号基本资料、Google 通讯录读写、其他联系人和企业目录只读；到本插件详情页连接账号。",
         "inject": {
           "header": "Authorization",
           "format": "Bearer {value}",
           "hosts": [
             "www.googleapis.com",
-            "gmail.googleapis.com"
+            "gmail.googleapis.com",
+            "people.googleapis.com"
           ]
         },
         "oauth": {
@@ -50,7 +56,11 @@
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.compose",
-            "https://www.googleapis.com/auth/gmail.modify"
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/userinfo.profile",
+            "https://www.googleapis.com/auth/contacts",
+            "https://www.googleapis.com/auth/contacts.other.readonly",
+            "https://www.googleapis.com/auth/directory.readonly"
           ],
           "pkce": true,
           "extraAuthorizeParams": {
@@ -59,7 +69,8 @@
           },
           "identity": {
             "url": "https://www.googleapis.com/oauth2/v3/userinfo",
-            "labelPath": "email"
+            "labelPath": "email",
+            "avatarPath": "picture"
           }
         }
       }
@@ -72,11 +83,22 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "url": { "type": "string", "description": "https://mail.google.com/mail/?authuser=email#all/messageOrThreadId" },
-          "account": { "type": "string", "description": "Optional opaque connected account ID; otherwise derived from authuser=email or a sole account." },
-            "markRead": { "type": "boolean", "description": "Only true for a user's explicit opening or mark-read request. Omit for AI reads and neighboring preloads. After a successful read, marks only the selected message. Returns markReadResult.execution: not_executed/executed/unknown. Rejections also set markReadFailed:true; unknown outcomes retain the body and require checking the mailbox, never a blind retry." }
+          "url": {
+            "type": "string",
+            "description": "https://mail.google.com/mail/?authuser=email#all/messageOrThreadId"
+          },
+          "account": {
+            "type": "string",
+            "description": "Optional opaque connected account ID; otherwise derived from authuser=email or a sole account."
+          },
+          "markRead": {
+            "type": "boolean",
+            "description": "Only true for a user's explicit opening or mark-read request. Omit for AI reads and neighboring preloads. After a successful read, marks only the selected message. Returns markReadResult.execution: not_executed/executed/unknown. Rejections also set markReadFailed:true; unknown outcomes retain the body and require checking the mailbox, never a blind retry."
+          }
         },
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": false
       }
     },
@@ -140,6 +162,167 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "gmail_contacts",
+      "description": "Query Google contacts, photos, other contacts and the visible Workspace directory using a selected gmail_accounts account. Actions: list/search/get/other_contacts/directory are read-only; create/update/delete change Google Contacts and require user intent. Read the contacts manual first. Search is prefix matching; verify exact email before attributing a photo. For update, first get the contact and pass its CONTACT source etag; supplied person arrays replace those fields, omitted fields are preserved and [] clears a field. Delete only a specifically identified contact. Directory and other contacts are read-only. Writes return execution and failures distinguish not_executed/executed/unknown; never blindly retry a write, including an incomplete successful receipt. Mutate sequentially per account. Missing scopes require reconnecting that account; never switch accounts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Opaque gmail_accounts ID. Required when multiple accounts exist."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "search",
+              "get",
+              "other_contacts",
+              "directory",
+              "create",
+              "update",
+              "delete"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Required for search and directory. Prefix search, not exact email matching."
+          },
+          "resourceName": {
+            "type": "string",
+            "description": "people/... returned by Google; required for get/update/delete. Never infer it from a name."
+          },
+          "etag": {
+            "type": "string",
+            "description": "For update: latest get response metadata.sources entry with type CONTACT, its etag (not the top-level etag)."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Default 50; search capped at 30."
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Continue list, other_contacts or directory with returned nextPageToken and the same query."
+          },
+          "person": {
+            "type": "object",
+            "description": "For create/update: supported Google Person fields. Arrays replace entire fields; omitted fields are retained. Photos are read-only.",
+            "properties": {
+              "names": {
+                "type": "array",
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "givenName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "familyName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "middleName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "unstructuredName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "emailAddresses": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "phoneNumbers": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "organizations": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "department": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
     }
   ],
   "node": {
@@ -165,10 +348,21 @@
         "dir": "manual/gog",
         "name": "gog",
         "description": "Google commands, account selection, attachments and execution safety."
+      },
+      {
+        "dir": "manual/contacts",
+        "name": "contacts",
+        "description": "Google contact lookup, photos, personal contact management, account permissions and write receipts."
       }
     ]
   },
   "sessionContext": true,
   "mail": true,
-  "mailReader": { "tool": "gmail_read_message", "hosts": ["mail.google.com"], "markRead": true }
+  "mailReader": {
+    "tool": "gmail_read_message",
+    "hosts": [
+      "mail.google.com"
+    ],
+    "markRead": true
+  }
 }

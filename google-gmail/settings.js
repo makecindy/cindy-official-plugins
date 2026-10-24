@@ -16,6 +16,12 @@
     ja: '接続結果を確認できません。プラグインの詳細を開き直してアカウントの状態を確認してから、再試行するか判断してください。',
     ko: '연결 결과를 확인할 수 없습니다. 플러그인 상세 페이지를 다시 열어 계정 상태를 확인한 후 재시도 여부를 결정하세요.',
   };
+  var PERMISSION_MESSAGES = {
+    'zh-CN': '连接 Gmail 和 Google 通讯录：读写个人联系人，读取账号资料、其他联系人及可见的企业目录。已有账号需重新连接补充授权；未补充时原邮件功能仍可使用。',
+    en: 'Connect Gmail and Google Contacts: manage personal contacts and read your profile, other contacts and visible Workspace directory. Reconnect existing accounts to grant the new permissions; existing mail access remains usable.',
+    ja: 'Gmail と Google コンタクトを接続：個人の連絡先を管理し、プロフィール、その他の連絡先、閲覧可能な組織ディレクトリを読み取ります。既存アカウントは再接続で権限を追加できます。追加前も既存のメール権限は使用できます。',
+    ko: 'Gmail 및 Google 연락처 연결: 개인 연락처를 관리하고 프로필, 기타 연락처 및 열람 가능한 조직 디렉터리를 읽습니다. 기존 계정은 재연결하여 권한을 추가하세요. 추가 전에도 기존 메일 권한은 사용할 수 있습니다.',
+  };
   async function loadLocale() {
     var locale = 'en';
     var controller = new AbortController();
@@ -35,6 +41,7 @@
     }
     document.documentElement.lang = locale;
     $('reauth').textContent = REAUTH_MESSAGES[locale];
+    if ($('permissions')) $('permissions').textContent = PERMISSION_MESSAGES[locale];
   }
   function status(text) { $('status').textContent = text; }
   function connectionUnknownMessage() {
