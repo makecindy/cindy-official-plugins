@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.8f84016fdcd9.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -538,6 +538,52 @@ test('the pinned Cindy manifest contract rejects invalid manifest shapes', () =>
     /released stable Cindy version/,
     'official releases must not use the versionless development sentinel',
   );
+});
+
+test('releaseNotes remains optional and preserves complete text in both manifest formats', () => {
+  for (const schemaVersion of [2, 3]) {
+    const base = { schemaVersion, id: 'release-notes-fixture', name: 'Release notes',
+      version: '1.0.0', entry: 'main.js', description: 'Fixture', whenToUse: 'Fixture',
+      ...(schemaVersion === 2 ? { slots: [] } : { minCindyVersion: '0.1.0' }) };
+    assert.doesNotThrow(() => validateOfficialManifest('release-notes-fixture', base));
+    const omitted = validateGhostManifest(base);
+    assert.equal(omitted.ok, true);
+    assert.equal(Object.hasOwn(omitted.manifest, 'releaseNotes'), false,
+      'omission must not create a summary or block an existing manifest');
+    for (const releaseNotes of ['', '  ', '新增功能。\n修复问题。\n<script>plain text</script>', '完整说明。'.repeat(1200)]) {
+      const manifest = { ...base, releaseNotes };
+      assert.doesNotThrow(() => validateOfficialManifest('release-notes-fixture', manifest));
+      const result = validateGhostManifest(manifest);
+      assert.equal(result.ok, true);
+      assert.equal(result.manifest.releaseNotes, releaseNotes, 'normalization must not trim or truncate text');
+      assert.deepEqual(validateGhostManifest(result.manifest), result,
+        'repeated normalization must preserve the same release notes');
+    }
+    for (const releaseNotes of [null, false, 42, [], { text: 'summary' }]) {
+      const manifest = { ...base, releaseNotes };
+      const result = validateGhostManifest(manifest);
+      assert.equal(result.ok, false, `invalid releaseNotes: ${JSON.stringify(releaseNotes)}`);
+      assert.match(result.reason, /releaseNotes/);
+      assert.throws(() => validateOfficialManifest('release-notes-fixture', manifest), /releaseNotes/);
+    }
+  }
+});
+
+test('releaseNotes is optional in the standalone validator and invalid types fail early', (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-release-notes-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const manifestPath = path.join(temp, 'ghost.json');
+  const base = { schemaVersion: 3, minCindyVersion: '0.1.0', id: 'release-notes-fixture',
+    name: 'Release notes', version: '1.0.0', entry: 'main.js' };
+  const validate = () => execFileSync(process.execPath,
+    [path.join(root, 'scripts', 'validate-plugin-manifest.mjs'), manifestPath],
+    { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  for (const fields of [{}, { releaseNotes: '' }, { releaseNotes: '新增功能。\n修复问题。' }]) {
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...base, ...fields }));
+    assert.match(validate(), /valid Cindy plugin manifest/);
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify({ ...base, releaseNotes: 42 }));
+  assert.throws(validate, (error) => error.status === 1 && /releaseNotes/.test(error.stderr));
 });
 
 test('showTaskPreferences is an optional card visibility flag in both manifest formats', () => {

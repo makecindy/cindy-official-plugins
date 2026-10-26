@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.8f84016fdcd9.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const pluginRoot = path.join(root, 'ios-simulator');

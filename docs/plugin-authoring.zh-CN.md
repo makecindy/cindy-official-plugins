@@ -72,7 +72,7 @@ subscribe）、Cindy 类目/动作与订阅 topics/hooks；旧 v2 slot 名称也
 | `ios-simulator` | `iosSimulator: true` | 已下线的 Host 内嵌模拟器；当前 Host 拒绝新装声明它的插件，仅用于读取旧清单 |
 
 布尔能力出现时必须为 `true`，不用时省略，不能写 `false` 或 `null`。
-`manual`、`setup`、`locales`、`settingsHtml`、`showTaskPreferences`、`command`、`keywords` 等独立字段继续保留；
+`manual`、`setup`、`locales`、`settingsHtml`、`showTaskPreferences`、`releaseNotes`、`command`、`keywords` 等独立字段继续保留；
 不能因为它们不在 `slots` 中就删除。只做格式迁移时，不应改动工具行为或源码执行路径。
 旧清单中只有名字、没有详单的历史空声明不应被补成新增权限；结合实际代码判断。
 不认识的声明不能凭名称猜测映射或静默删除，应依据目标 Host 的真实契约确认。
@@ -84,6 +84,20 @@ subscribe）、Cindy 类目/动作与订阅 topics/hooks；旧 v2 slot 名称也
 未知 v3 顶层字段会由校验器保留；这既不等于自动授权，也不证明 Host 已实现该能力。
 新业务若能由现有网络、文件或 Node 接口完成，无需客户端增加具体业务能力注册。
 真正没有 Host 实现的接口，不能通过自造字段或方法名获得。
+
+## 更新摘要（可选，推荐填写）
+
+本官方插件仓的 `ghost.json.releaseNotes` 是可选字段，v2 和 v3 均支持。
+推荐在版本更新时填写面向使用者的变化，包括新增功能、问题修复和兼容性变化。
+插件用途继续写在 `description` 中，更新摘要说明本版本具体改了什么。
+
+```json
+{ "releaseNotes": "新增批量处理。\n修复空输入时的结果显示。" }
+```
+
+填写时必须是纯文本字符串，校验会原样保留换行，不裁剪或截断内容，也不把它作为
+HTML 或 Markdown 执行。省略或留空不会阻止仓库校验与发布。已有插件不需要补写
+历史摘要，也不需要只为补字段单独升版；随下一次实际更新填写，沿用原有包版本规则。
 
 ## 宿主默认配置卡
 

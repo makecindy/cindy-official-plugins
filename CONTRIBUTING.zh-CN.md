@@ -120,6 +120,9 @@ cd 163-mail && npm ci && npm run build
    回退到兼容历史版本，没有兼容历史版本时不展示该插件。
    Desktop 以该 Server 选择为准，不再追加 `minCindyVersion` 二次筛选或安装确认，
    因此必须准确填写这个字段。
+   `ghost.json.releaseNotes` 更新摘要**可选，推荐在版本更新时填写**。
+   填写时使用描述本版变化的纯文本字符串；缺失或留空不阻止校验与发布。
+   详见[更新摘要说明](docs/plugin-authoring.zh-CN.md#更新摘要可选推荐填写)。
 4. 改动工具声明时说明对 Agent 行为的影响。按审查规则提供受影响路径的真实验证，
    未受影响路径可沿用有效证据；准确标注环境与兼容限制。降低/删除 `minCindyVersion`
    仍需维护者审查扩大的支持范围及相关旧版本证据。
