@@ -338,3 +338,15 @@ test('same-language detection compares primary language tags only',()=>{
   assert.equal(core.sameLanguage(undefined,'zh-CN'),false);
   assert.equal(core.sameLanguage('zh','custom:中文'),false);
 });
+
+test('subtitle cache paths satisfy the host library path rule',async()=>{
+  // Bug regression: the cache file name was a full SHA-256 + ".json" (69 chars); the host rejects
+  // segments over 64 characters with PATH_INVALID, so no subtitle translation was ever cached.
+  const {createSubtitleCache}=await import('../my-browser/subtitle-cache.js');
+  const paths=[];
+  const cache=createSubtitleCache({core,library:async r=>{if(r.path)paths.push(r.path);return r.op==='read'?{ok:false,errorCode:'NOT_FOUND'}:{ok:true};}});
+  await cache.open('d188826c-c250-4cf0-84e9-a64409dd5204',{source:{url:'https://www.youtube.com/watch?v=GoE7NbnBllE'},target:'zh-CN'});
+  assert.ok(paths.length>0);
+  const segment=/^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
+  for(const p of paths)for(const seg of p.split('/'))assert.match(seg,segment,p);
+});

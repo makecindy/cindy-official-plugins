@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## Subtitle cache file names (host package 0.4.37)
+
+Subtitle cache files are now named with a 48-character digest. The previous 64-character digest plus `.json` exceeded the host Library's 64-character segment limit, so every cache write was rejected with `PATH_INVALID` and translations were never reused. Existing videos translate once more and are cached from then on.
+
 ## 0.4.24 connection guide (host package 0.4.37)
 
 When Cindy is not reachable, the panel shows a short guide in the browser's own language instead of one red sentence: what to do, an "Open Cindy" button (`cindy://focus`), "Open plugin settings" (`cindy://plugins/my-browser`, handled by Cindy hosts that ship this deep link; older hosts ignore it), "Check connection again", and a download link for people who have not installed Cindy yet. Nothing from the page is sent while disconnected.

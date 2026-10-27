@@ -9,7 +9,8 @@ export function createSubtitleCache({library,core}) {
     const url=new URL(req.source.url);
     let identity=url.href;
     if(/(^|\.)youtube\.com$/.test(url.hostname)&&url.searchParams.get('v'))identity='youtube:'+url.searchParams.get('v');
-    return `browser/${client}/subtitles/${await hash([1,identity,req.target||'zh-CN'])}.json`;
+    // Library path segments are capped at 64 characters by the host; a full SHA-256 plus ".json" is 69.
+    return `browser/${client}/subtitles/${(await hash([1,identity,req.target||'zh-CN'])).slice(0,48)}.json`;
   }
   const key=(words,nextStart)=>hash([1,words,nextStart]);
   function lock(path,fn){const promise=(queues.get(path)||Promise.resolve()).then(fn,fn);queues.set(path,promise);promise.finally(()=>{if(queues.get(path)===promise)queues.delete(path);}).catch(()=>{});return promise;}
