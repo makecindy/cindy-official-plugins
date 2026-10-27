@@ -270,7 +270,7 @@
       if(!ready)toggle.title=t.video+' · '+(noticeError?st.needsRetry:session.paused?st.paused:st.preparingShort);
       const stageText=st.stages[phase]||st.preparing;
       detail.textContent=empty||sourceProblem?t.captionsUnavailableBody:session.paused?st.stages.paused:ready?(buffer.complete?st.stages.prepared:st.preparedTo.replace('{time}',until)):p.stage==='failed'?st.stages.failed:(session.words?.length&&until?st.preparingTo.replace('{time}',until):st.preparingStart)+' · '+stageText;
-      cacheDetail.textContent=empty||sourceProblem?'':p.cacheError?st.cacheFailed:p.saved?st.saved+(p.cached?' · '+st.cacheHit+' '+p.cached:''):p.complete?st.temporary:'';
+      cacheDetail.textContent=empty||sourceProblem?'':p.cacheError?st.cacheFailed+' · '+t.errorDetails+' '+U.errorDetail(p.cacheError):p.saved?st.saved+(p.cached?' · '+st.cacheHit+' '+p.cached:''):p.complete?st.temporary:'';
       cacheDetail.classList.toggle('warning',!!p.cacheError);
       notice.dataset.complete=String(p.complete&&!noticeError&&!p.cacheError);
       const chunkError=session.chunks?.some(c=>c.error);
@@ -422,25 +422,31 @@
     }catch(e){if(session===videoSession){session.readBlocked=e.message!=='SUBTITLE_UNAVAILABLE';session.noCaptions=session.readBlocked||session.attempts>=3;session.playback?.update();session.retryButton.hidden=false;report(e);}}
     finally{session.reading=false;if(session===videoSession)videoTimer=setTimeout(()=>readCues(session),1200);}
   }
+  let videoTab='subtitles';
   function videoSettings(){
     const session=videoSession;if(!session)return;body.replaceChildren();
-    // Modes are grouped by cost: the first pair asks the model, the second never does.
-    const group=(label,entries)=>{const wrap=el('div',undefined,'mode-group'),row=el('div',undefined,'segmented');wrap.append(el('small',label),row);for(const [mode,text]of entries){const b=button(text,()=>{applyVideoMode(mode);videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoMode===mode));row.append(b);}return wrap;};
-    const modes=el('div',undefined,'stack');modes.append(group(t.translateGroup,[['both',t.both],['translation',t.translationOnly]]),group(t.noTranslateGroup,[['original',t.originalOnly],['off',t.off]]));body.append(modes);
-    if(session.sameLanguage){const same=el('div',undefined,'card stack');same.append(el('p',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'quiet'));body.append(same);}
-    const picker=languageControl(true);picker.querySelector('button').disabled=!needsTranslation();body.append(field(t.videoLanguage,picker),el('small',prefs.videoMode==='off'?t.offHint:prefs.videoMode==='original'?t.originalHint:t.videoLanguageHint));
-    const sizes=el('div',undefined,'segmented');for(const size of ['small','medium','large']){const b=button(t[size],()=>{prefs.videoSize=size;savePreferences({videoSize:size}).catch(report);session.overlay?.update();videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoSize===size));sizes.append(b);}
-    const themes=el('div',undefined,'segmented');for(const [value,label]of [['dark',t.dark],['light',t.light]]){const b=button(label,()=>{prefs.captionTheme=value;savePreferences({captionTheme:value}).catch(report);session.overlay?.update();videoSettings();});b.setAttribute('aria-pressed',String((prefs.captionTheme||'dark')===value));themes.append(b);}
-    body.append(field(t.subtitleSize,sizes),field(t.captionTheme,themes),field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;session.playback?.update();return savePreferences({bufferPause:v});})),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
-    // Learning tools are what YouTube's own translation cannot offer; they stay one level deep at most.
-    const tools=el('div',undefined,'stack');tools.append(el('h3',t.learningTools,'section-title'));
-    const keyed=(text,key,fn)=>{const b=button(text,fn);b.append(el('kbd',key));b.setAttribute('aria-keyshortcuts',key);return b;};
-    const controls=el('div',undefined,'tool-row');controls.append(keyed(t.previous,'A',()=>jump(Math.max(0,activeCue-1))),keyed(t.replay,'S',()=>jump(Math.max(0,activeCue))),keyed(t.next,'D',()=>jump(Math.min(cues.length-1,activeCue+1))));tools.append(controls);
-    const speed=el('select');speed.setAttribute('aria-label',t.playbackSpeed);for(const n of [.5,.75,1,1.25,1.5,2]){const o=el('option',n+'×');o.value=n;speed.append(o);}speed.value=video.playbackRate;speed.onchange=()=>video.playbackRate=Number(speed.value);
-    tools.append(field(t.playbackSpeed,speed),field(t.repeat+' · R',switchControl(t.repeat,repeat,v=>repeat=v)),field(t.pause+' · Q',switchControl(t.pause,autoPause,v=>autoPause=v)),el('small',t.shortcutsHint));
-    const more=el('details'),documentView=el('details');documentView.append(el('summary',t.readTranscript),el('article',undefined,'subtitle-document'));more.append(el('summary',t.more),documentView,el('div',undefined,'list video-list'));tools.append(more);body.append(tools);
-    const files=el('div',undefined,'stack');files.append(el('h3',t.subtitleFiles,'section-title'));const fileRow=el('div',undefined,'row');fileRow.append(button(t.subtitles,importSubtitleFile),button(t.export,()=>download(L.exportSubtitles(cues),'subtitles.srt')),...(subtitleCacheSupported?[button(U.subtitleStatusCopy(locale).retranslate,async()=>{cancel();session.paused=true;session.playback?.update();await request({op:'subtitle-cache-clear',target:prefs.videoTarget});if(session!==videoSession)return;resetSubtitleTranslation();})]:[]),session.retryButton);files.append(fileRow);body.append(files);
-    body.append(button(t.modelSettings,showSettings,'text-link'));cueList();
+    // Three short pages instead of one long scroll: what to show, how to learn, how it behaves.
+    const tabs=el('div',undefined,'tabs');for(const [id,label]of [['subtitles',t.video],['learning',t.learning],['options',t.options]]){const b=button(label,()=>{videoTab=id;videoSettings();});b.setAttribute('aria-pressed',String(videoTab===id));tabs.append(b);}body.append(tabs);
+    const segmented=(entries,current,pick)=>{const row=el('div',undefined,'segmented');for(const [value,label]of entries){const b=button(label,()=>pick(value));b.setAttribute('aria-pressed',String(current===value));row.append(b);}return row;};
+    if(videoTab==='subtitles'){
+      // Modes are grouped by cost: the first pair asks the model, the second never does.
+      body.append(field(t.translateShort,segmented([['both',t.both],['translation',t.translationOnly]],prefs.videoMode,mode=>{applyVideoMode(mode);videoSettings();})),field(t.noTranslateShort,segmented([['original',t.originalOnly],['off',t.off]],prefs.videoMode,mode=>{applyVideoMode(mode);videoSettings();})));
+      if(session.sameLanguage){const same=el('div',undefined,'card stack');same.append(el('p',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'quiet'));body.append(same);}
+      const picker=languageControl(true);picker.querySelector('button').disabled=!needsTranslation();body.append(field(t.videoLanguage,picker));
+      if(prefs.videoMode==='off'||prefs.videoMode==='original')body.append(el('small',prefs.videoMode==='off'?t.offHint:t.originalHint));
+      body.append(field(t.subtitleSize,segmented([['small',t.small],['medium',t.medium],['large',t.large]],prefs.videoSize,size=>{prefs.videoSize=size;savePreferences({videoSize:size}).catch(report);session.overlay?.update();videoSettings();})),field(t.captionTheme,segmented([['dark',t.dark],['light',t.light]],prefs.captionTheme||'dark',value=>{prefs.captionTheme=value;savePreferences({captionTheme:value}).catch(report);session.overlay?.update();videoSettings();})));
+    }else if(videoTab==='learning'){
+      const keyed=(text,key,fn)=>{const b=button(text,fn);b.append(el('kbd',key));b.setAttribute('aria-keyshortcuts',key);return b;};
+      const controls=el('div',undefined,'tool-row');controls.append(keyed(t.previous,'A',()=>jump(Math.max(0,activeCue-1))),keyed(t.replay,'S',()=>jump(Math.max(0,activeCue))),keyed(t.next,'D',()=>jump(Math.min(cues.length-1,activeCue+1))));body.append(controls);
+      const speed=el('select');speed.setAttribute('aria-label',t.playbackSpeed);for(const n of [.5,.75,1,1.25,1.5,2]){const o=el('option',n+'×');o.value=n;speed.append(o);}speed.value=video.playbackRate;speed.onchange=()=>video.playbackRate=Number(speed.value);
+      body.append(field(t.playbackSpeed,speed),field(t.repeat+' · R',switchControl(t.repeat,repeat,v=>repeat=v)),field(t.pause+' · Q',switchControl(t.pause,autoPause,v=>autoPause=v)),el('small',t.shortcutsHint));
+      const documentView=el('details');documentView.append(el('summary',t.readTranscript),el('article',undefined,'subtitle-document'));body.append(documentView,el('div',undefined,'list video-list'));
+    }else{
+      body.append(field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;session.playback?.update();return savePreferences({bufferPause:v});})),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})),el('small',t.videoLanguageHint));
+      const files=el('div',undefined,'stack');files.append(el('h3',t.subtitleFiles,'section-title'));const fileRow=el('div',undefined,'row');fileRow.append(button(t.subtitles,importSubtitleFile),button(t.export,()=>download(L.exportSubtitles(cues),'subtitles.srt')),...(subtitleCacheSupported?[button(U.subtitleStatusCopy(locale).retranslate,async()=>{cancel();session.paused=true;session.playback?.update();await request({op:'subtitle-cache-clear',target:prefs.videoTarget});if(session!==videoSession)return;resetSubtitleTranslation();})]:[]),session.retryButton);files.append(fileRow);body.append(files);
+      body.append(button(t.modelSettings,showSettings,'text-link'));
+    }
+    cueList();
   }
   function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
   async function showVideo(){

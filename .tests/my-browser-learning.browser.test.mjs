@@ -172,7 +172,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  const beforeMenu=modelCalls.length;await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'open'}),tabId);assert.equal((await captions()).settingsHidden,false);assert.equal(modelCalls.length,beforeMenu,'opening player settings keeps prepared subtitles');await click('字幕设置');
  await click('字幕设置');await click('仅原文');const beforeOriginal=modelCalls.length;
  await page.evaluate(()=>{history.pushState({},'', '/watch?v=second');document.dispatchEvent(new Event('yt-navigate-finish'))});await page.waitForTimeout(2500);assert.equal(modelCalls.length,beforeOriginal);assert.equal((await captions()).translationHidden,true);assert.equal((await captions()).settingsHidden,true);
- await click('字幕设置');await click('双语');await click('自动应用到 YouTube');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','自动应用到 YouTube','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
+ await click('字幕设置');await click('双语');await click('选项');await click('自动应用到 YouTube');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','自动应用到 YouTube','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
  await page.goto('http://www.youtube.com/watch?v=third');await page.waitForTimeout(800);assert.equal(await page.locator('[data-cindy-captions]').count(),0,'auto preference survives navigation');
  // Slow requests: play current prepared window, prefetch next; seeking prioritizes the new place.
  await page.goto('http://example.test/buffer');await page.waitForTimeout(100);
@@ -180,7 +180,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await page.evaluate(async data=>{const v=document.querySelector('video');v.src='data:audio/wav;base64,'+data;v.muted=true;await new Promise(r=>v.onloadedmetadata=r);const track=v.addTextTrack('captions','English','en');track.mode='showing';for(let i=0;i<72;i++)track.addCue(new VTTCue(i*2,(i+1)*2,Array.from({length:10},(_,j)=>'Buffer'+(i*10+j)).join(' ')));await v.play()},longWav.toString('base64'));
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'video'}),tabId);
  // Waiting for subtitles before playback is opt-in: turn it on for the buffering checks below.
- await click('字幕准备好再播放');assert.equal(await readNode('BUTTON','字幕准备好再播放','function(){return this.getAttribute("aria-checked")}'),'true');
+ await click('选项');await click('字幕准备好再播放');assert.equal(await readNode('BUTTON','字幕准备好再播放','function(){return this.getAttribute("aria-checked")}'),'true');
  for(let i=0;i<60&&prefetchStarted.length<2;i++)await page.waitForTimeout(100);
  await waitText('翻译任务执行中');assert.equal(await readNode('DIV','preparation-track','function(){return this.getAttribute("aria-valuenow")}'),'0');
  if(screenshots){
@@ -205,7 +205,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await waitText('等待先前模型请求结束');assert.equal(prefetchStarted.includes('Buffer540'),false,'seeking cannot bypass occupied provider slots');
  if(screenshots)await page.screenshot({path:path.join(screenshots,'subtitle-progress-previous.png')});
  prefetchGates.get('Buffer180')();for(let i=0;i<40&&!prefetchStarted.includes('Buffer540');i++)await page.waitForTimeout(100);assert.ok(prefetchStarted.includes('Buffer540'));
- await click('仅原文');for(let i=0;i<30&&await page.locator('video').evaluate(v=>v.paused);i++)await page.waitForTimeout(100);assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'original mode releases Cindy-owned buffer pause');
+ await click('字幕');await click('仅原文');for(let i=0;i<30&&await page.locator('video').evaluate(v=>v.paused);i++)await page.waitForTimeout(100);assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'original mode releases Cindy-owned buffer pause');
  assert.equal(modelCalls.some(r=>JSON.parse(r.prompt.split('\n').at(-1)).transcript),false);
  for(const release of prefetchGates.values())release();await page.waitForTimeout(100);
  // Recover one model timeout on a smaller passage; a permanent failure must

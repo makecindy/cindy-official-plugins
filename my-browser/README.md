@@ -354,7 +354,7 @@ YouTube's timedtext endpoint now answers an extension's direct request with an e
 - Status lines are sentences, not counters: "Prepared to 3:20. Safe to keep watching.", a one-line cache warning, and error codes moved to a separate "Details" line.
 - When YouTube provides no captions, the panel explains it and offers "Turn on site captions, then retry" and "Import SRT / VTT" directly. Pages without any caption track reach the same state instead of waiting forever.
 - Automatically opened sessions whose captions already match the target language skip the model; "Translate anyway" is one click.
-- Modes are grouped by cost (translate with the model / no translation); learning tools (previous, replay, next, speed, repeat, pause after line) are one level deep with their keyboard shortcuts shown, and the shortcuts work while the video is on screen.
+- The panel is three short pages (Subtitles / Learning / Options) instead of one long scroll. Modes are grouped by cost (translate with the model / no translation); learning tools (previous, replay, next, speed, repeat, pause after line) are one level deep with their keyboard shortcuts shown, and the shortcuts work while the video is on screen.
 - The player entry is a caption glyph instead of an avatar; captions stay visible while the panel is open on wide players; the panel becomes a bottom drawer on narrow players; a light caption style is available.
 ## 0.4.24 single player icon (host package 0.4.37)
 
