@@ -369,7 +369,7 @@
   function jump(i){if(!video||!cues[i])return;video.currentTime=cues[i].start;activeCue=i;previousCue=i;video.play().catch(report);}
   async function translateCues(){
     const session=videoSession;if(!needsTranslation()||!session||session.running||session.paused||session.failed)return;
-    if(!L.pendingSubtitleChunks(session.chunks,video.currentTime,video.playbackRate).length&&!(prefs.backgroundFill&&L.backgroundSubtitleChunk(session.chunks,video.currentTime)))return;
+    if(!L.pendingSubtitleChunks(session.chunks,video.currentTime,video.playbackRate).length&&!(prefs.backgroundFill&&L.backgroundSubtitleChunk(session.chunks,video.currentTime,Date.now(),1800)))return;
     if(!subtitleSegmentation||!subtitleEditorial){session.failed=true;session.retryButton.hidden=false;report('UPDATE_CINDY_CHROME');session.playback?.update();return;}
     session.running=true;const g=generation,revision=session.revision;
     const current=()=>session===videoSession&&g===generation&&revision===session.revision&&!session.paused;
@@ -379,14 +379,14 @@
         while(current()&&!session.failed){
           const pending=L.pendingSubtitleChunks(session.chunks,video.currentTime,video.playbackRate);
           // Near the playhead both workers run; beyond the window only one continues, so a seek never queues behind background work.
-          let chunk=pending[0]||(index===0&&prefs.backgroundFill?L.backgroundSubtitleChunk(session.chunks,video.currentTime):null);
-          if(!chunk){if(!prefs.backgroundFill||!session.chunks.some(c=>!c.done&&!c.error))return;await sleep(1000);continue;}chunk.busy=true;chunk.progress={stage:'accepted',updatedAt:Date.now(),attempt:1};session.overlay?.progress();
-          const nearby=L.joinWords(session.words.slice(Math.max(0,chunk.start-120),Math.min(session.words.length,chunk.end+120)));
-          const previous=session.chunks.filter(c=>c.done&&c.end<=chunk.start).slice(-2).flatMap(c=>c.cues).slice(-6).map(c=>c.text+' → '+c.translation).join('\n');
-          const context=chunk.context||=('Video title: '+document.title.slice(0,500)+(session.brief?'\nEditorial brief for the whole video: '+session.brief:'\nTranscript opening: '+L.joinWords(session.words.slice(0,100)))+'\nPreviously prepared wording: '+previous+'\nSurrounding transcript: '+nearby).slice(0,8000);
+          let chunk=pending[0]||(index===0&&prefs.backgroundFill?L.backgroundSubtitleChunk(session.chunks,video.currentTime,Date.now(),1800):null);
+          if(!chunk){if(!prefs.backgroundFill||!L.backgroundSubtitleChunk(session.chunks,video.currentTime,Date.now(),1800))return;await sleep(1000);continue;}chunk.busy=true;chunk.progress={stage:'accepted',updatedAt:Date.now(),attempt:1};session.overlay?.progress();
+          // The translation runs in one persistent task, so earlier passages and their wording are already in the model's context; send only what it cannot know: the title and the words right before this passage.
+          const lead=L.joinWords(session.words.slice(Math.max(0,chunk.start-40),chunk.start));
+          const context=chunk.context||=('Video title: '+document.title.slice(0,300)+(lead?'\nWords just before this passage: '+lead:'')).slice(0,2000);
           try{
             const r=await request({op:'subtitles',target:prefs.videoTarget,editorial:true,words:chunk.words,nextStart:chunk.nextStart,context},progress=>{if(current()){chunk.progress=progress;session.overlay?.progress();}});if(!current())return;
-            chunk.done=true;chunk.cues=r.cues;chunk.cache=r.cache;session.overlay?.progress();if(!session.brief&&!session.briefing&&session.words.length>300)prepareBrief(session);cues=session.chunks.flatMap(c=>c.done?c.cues:[]).sort((a,b)=>a.start-b.start);previousCue=-1;activeCue=-1;cueList();videoHandler?.();
+            chunk.done=true;chunk.cues=r.cues;chunk.cache=r.cache;session.overlay?.progress();cues=session.chunks.flatMap(c=>c.done?c.cues:[]).sort((a,b)=>a.start-b.start);previousCue=-1;activeCue=-1;cueList();videoHandler?.();
             if(!session.playback?.buffering)note(`${t.progress} ${session.chunks.filter(c=>c.done).length} / ${session.chunks.length}`);
           }catch(e){
             if(!current())return;
@@ -418,19 +418,11 @@
   }
   // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
   function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
-  // Whole-video context: the transcript is read in slices into one compact brief, reused by every passage.
-  async function prepareBrief(session){
-    if(session.briefing||session.brief||!session.words?.length)return;session.briefing=true;
-    const transcript=L.joinWords(session.words),slices=[];for(let at=0;at<transcript.length&&slices.length<6;at+=14000)slices.push(transcript.slice(at,at+14000));
-    try{let brief='';for(const text of slices){if(session!==videoSession)return;const r=await request({op:'subtitle-document',target:prefs.videoTarget,text,context:brief});brief=r.guide||brief;}if(session===videoSession&&brief){session.brief=brief;for(const chunk of session.chunks||[])if(!chunk.done&&!chunk.busy)delete chunk.context;}}
-    catch{/* the brief is an enhancement; passages still translate with local context */}
-    finally{session.briefing=false;}
-  }
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
     // Build the entire transcript timeline before asking for semantic grouping and translation.
-    const words=L.subtitleWords(next,true);session.transcript=signature;session.originalCues=next;session.failed=false;session.words=words;session.chunks=L.subtitleChunks(words,true);session.revision=(session.revision||0)+1;session.brief=null;session.briefing=false;
+    const words=L.subtitleWords(next,true);session.transcript=signature;session.originalCues=next;session.failed=false;session.words=words;session.chunks=L.subtitleChunks(words,true);session.revision=(session.revision||0)+1;
     cancel();cues=[];cueList();videoHandler?.();note(words.length?t.organizingSubtitles:t.waitSubtitles);
   }
   async function readCues(session){

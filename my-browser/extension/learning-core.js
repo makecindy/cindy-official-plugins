@@ -19,7 +19,8 @@
   // YouTube's own translation track (tlang) names Chinese by script; custom names have no track.
   function youtubeTranslationLanguage(target){if(typeof target!=='string'||target.startsWith('custom:'))return null;const map={'zh-CN':'zh-Hans','zh-SG':'zh-Hans','zh-TW':'zh-Hant','zh-HK':'zh-Hant','zh':'zh-Hans'};if(map[target])return map[target];return /^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(target)?target:null;}
   // After the look-ahead window is satisfied, keep going: next passage after the playhead first, then anything earlier.
-  function backgroundSubtitleChunk(chunks,time,now=Date.now()){const open=(chunks||[]).filter(c=>!c.done&&!c.error&&!c.busy&&!(c.retryAt>now)).sort((a,b)=>a.words[0].start-b.words[0].start);return open.find(c=>c.words.at(-1).end>time)||open[0]||null;}
+  // `ahead` caps how far past the playhead background work reaches (seconds); earlier passages are always eligible.
+  function backgroundSubtitleChunk(chunks,time,now=Date.now(),ahead=Infinity){const open=(chunks||[]).filter(c=>!c.done&&!c.error&&!c.busy&&!(c.retryAt>now)).sort((a,b)=>a.words[0].start-b.words[0].start);return open.find(c=>c.words.at(-1).end>time&&c.words[0].start<=time+ahead)||open.find(c=>c.words.at(-1).end<=time)||null;}
   function sameLanguage(a,b){const base=v=>typeof v==='string'&&!v.startsWith('custom:')?v.toLowerCase().split(/[-_]/)[0]:'';const x=base(a),y=base(b);return !!x&&x===y;}
   function languageName(value){return Object.hasOwn(languages,value)?languages[value]:validTarget(value)?value.slice(7):'';}
   const operations = new Set(['translate','explain','summary','conversation','save','list','remove','review','import','preferences','config','task','subtitles','subtitle-document','subtitle-cache-clear']);

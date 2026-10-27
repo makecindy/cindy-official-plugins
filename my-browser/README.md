@@ -359,8 +359,8 @@ When Cindy is not reachable, the panel shows a short guide in the browser's own 
 ## 0.4.24 instant layer, background completion and whole-video brief (host package 0.4.37)
 
 - **Instant layer.** The caption read also fetches YouTube's own translation of the same track (`tlang=`, through the player's request). It is shown immediately, slightly lighter, wherever Cindy's translation is not ready yet, so playback never waits; each passage is replaced as Cindy's translation lands. Custom language names have no YouTube track and keep the previous behaviour.
-- **Background completion.** Once the look-ahead window is satisfied, one worker keeps translating the rest of the video (next passage after the playhead first, then earlier ones) and caches it, so seeking, rewatching and export are complete. Switch: Options → "Keep translating the whole video in the background" (on by default).
-- **Whole-video brief.** The editorial brief (`subtitle-document`) is now actually produced, once per transcript after the first passage is on screen, and passed to every later passage as context (names, terminology, argument flow). Up to six transcript slices; failures fall back to local context.
+- **Background completion.** Once the look-ahead window is satisfied, one worker keeps translating ahead (next passage after the playhead first, then earlier ones, up to 30 minutes past the playhead) and caches it. Switch: Options → "Keep translating ahead in the background" (on by default).
+- **Lean requests.** Translation runs in one persistent Cindy task, so earlier passages and their wording are already in the model's context. Each passage now sends only the title and the few words before it (previously ±120 surrounding words, six earlier captions and the transcript opening). Background completion reaches at most 30 minutes past the playhead. The task follows the system auxiliary model at low reasoning effort on hosts that ship that default.
 
 ## 0.4.24 subtitle experience (host package 0.4.37)
 

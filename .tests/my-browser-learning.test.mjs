@@ -364,5 +364,9 @@ test('background fill picks the next open passage after the playhead, then earli
   const chunks=[chunk(0,30,{done:true}),chunk(30,60),chunk(60,90,{busy:true}),chunk(90,120),chunk(120,150,{error:'X'})];
   assert.equal(core.backgroundSubtitleChunk(chunks,70),chunks[3]);
   assert.equal(core.backgroundSubtitleChunk(chunks,200),chunks[1],'nothing ahead: earlier open passage');
+  // The cap keeps background work within reach of the playhead; earlier passages stay eligible.
+  assert.equal(core.backgroundSubtitleChunk(chunks,70,Date.now(),10),chunks[1],'beyond the cap: fall back to an earlier passage');
+  assert.equal(core.backgroundSubtitleChunk(chunks,70,Date.now(),30),chunks[3]);
+  assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[3]],10,Date.now(),5),null,'nothing within reach and nothing earlier');
   assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[4]],10),null);
 });
