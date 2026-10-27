@@ -257,7 +257,8 @@
   "launch": "resident",
   "library": true,
   "agent": {
-    "tasks": true
+    "tasks": true,
+    "hiddenTasks": true
   },
   "network": {
     "hosts": [

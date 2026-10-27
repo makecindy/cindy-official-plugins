@@ -275,3 +275,81 @@ test('a run the user cancelled from the task is not resent even if the model cha
     assert.equal(f.sends.length,1,status);assert.equal(f.stats().state.pending,undefined,status);
   }
 });
+
+// Hosts that grant background tasks: one hidden task per video, archived on switch.
+function perVideoFixture({archiveOp=true}={}){
+  let state,seq=0;const created=[],archived=[],tasksById=new Map(),runs=new Map(),keys=new Map(),sends=[],messages=[];
+  const ops=['create','get','send','getRun','readMessages','cancel',...(archiveOp?['archive']:[])];
+  const tasks={capabilities:async()=>({operations:ops,hiddenTasks:true}),
+    create:async input=>{let task=created.find(t=>t.requestKey===input.requestKey)?.task;if(!task){task={taskId:'t'+(created.length+1),title:input.title,status:'active',revision:1,hidden:input.hidden===true};tasksById.set(task.taskId,task);}created.push({requestKey:input.requestKey,title:input.title,hidden:input.hidden,task});return structuredClone(task);},
+    get:async({taskId})=>{const t=tasksById.get(taskId);if(!t)throw Object.assign(Error('missing'),{code:'TASK_NOT_FOUND'});return structuredClone(t);},
+    send:async input=>{if(keys.has(input.requestKey))return structuredClone(runs.get(keys.get(input.requestKey)));sends.push(input);const n=++seq,run={runId:'r'+n,taskId:input.taskId,status:'completed',outputMessageId:'a'+n};runs.set(run.runId,run);keys.set(input.requestKey,run.runId);messages.push({id:'a'+n,role:'assistant',content:'result '+n});return structuredClone(run);},
+    getRun:async({runId})=>structuredClone(runs.get(runId)),
+    cancel:async({runId})=>{runs.get(runId).status='cancelled';return structuredClone(runs.get(runId));},
+    readMessages:async()=>({items:messages,nextCursor:null}),
+    archive:async({taskId})=>{const t=tasksById.get(taskId);if(!t)throw Object.assign(Error('missing'),{code:'TASK_NOT_FOUND'});if(t.busy)throw Object.assign(Error('busy'),{code:'TASK_BUSY'});t.status='archived';archived.push(taskId);return structuredClone(t);}};
+  const options={tasks,load:async()=>structuredClone(state),save:async v=>{state=structuredClone(v);},interval:1,timeout:500,locale:()=> 'zh-CN'};
+  return {make:()=>createTranslationTask(options),options,tasks,created,archived,tasksById,sends,state:()=>state};
+}
+const yt=(id,title)=>({url:'https://www.youtube.com/watch?v='+id,title,time:3});
+test('per-video mode: each video gets its own hidden task titled after it; switching archives the previous one',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  const a=await model({prompt:'p1',scope:'browser-a',source:yt('aaa','First video - YouTube')});
+  await model({prompt:'p2',scope:'browser-a',source:yt('aaa','First video - YouTube',9)});
+  assert.equal(a.taskId,'t1');assert.equal(f.created.length,1);assert.equal(f.created[0].hidden,true);assert.equal(f.created[0].title,'字幕翻译 · First video');
+  assert.deepEqual(f.archived,[]);
+  const b=await model({prompt:'p3',scope:'browser-a',source:yt('bbb','Second video')});
+  assert.equal(b.taskId,'t2');assert.deepEqual(f.archived,['t1'],'the previous video task is archived once its run settled');
+  // Returning to the first video reuses its binding; the host refuses input to an archived task, so the plugin opens a fresh one.
+  await assert.rejects(model({prompt:'p4',scope:'browser-a',source:yt('aaa','First video')}),/TASK_BUSY/);
+  assert.ok(f.sends.every(s=>['t1','t2'].includes(s.taskId)));
+  assert.equal(f.state().videos['browser-a|youtube:aaa'].sends,2);
+});
+test('per-video mode: the same video id with a different page URL shape maps to one task',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  await model({prompt:'a',scope:'s',source:{url:'https://www.youtube.com/watch?v=xyz&t=12s',title:'V'}});
+  await model({prompt:'b',scope:'s',source:{url:'https://m.youtube.com/watch?v=xyz#top',title:'V'}});
+  assert.equal(f.created.length,1);assert.equal(f.sends.length,2);
+});
+test('per-video mode: only the most recent bindings are kept; the forgotten ones are archived',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  for(let i=0;i<22;i++)await model({prompt:'p'+i,scope:'s',source:yt('v'+i,'Video '+i)});
+  const state=f.state();
+  assert.equal(Object.keys(state.videos).length,20);assert.equal(state.recent.length,20);
+  assert.equal(state.videos['s|youtube:v0'],undefined);assert.equal(state.videos['s|youtube:v1'],undefined);
+  assert.equal(f.archived.length,21,'every earlier video task is archived exactly once');
+});
+test('per-video mode: a long video rolls to a fresh task after the send budget',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  const state0=await f.options.load();
+  for(let i=0;i<61;i++)await model({prompt:'p'+i,scope:'s',source:yt('long','Long')});
+  assert.equal(f.created.length,2);assert.notEqual(f.created[0].requestKey,f.created[1].requestKey);
+  assert.deepEqual(f.archived,['t1']);assert.equal(f.state().videos['s|youtube:long'].taskId,'t2');assert.equal(f.sends.length,61);
+  assert.equal(state0,undefined);
+});
+test('per-video mode: archive refusals and hosts without archive never block translation',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  await model({prompt:'a',scope:'s',source:yt('one','One')});f.tasksById.get('t1').busy=true;
+  const r=await model({prompt:'b',scope:'s',source:yt('two','Two')});
+  assert.equal(r.taskId,'t2');assert.deepEqual(f.archived,[]);
+  const g=perVideoFixture({archiveOp:false}),m2=g.make();
+  await m2({prompt:'a',scope:'s',source:yt('one','One')});await m2({prompt:'b',scope:'s',source:yt('two','Two')});
+  assert.equal(g.created.length,2);assert.deepEqual(g.archived,[]);
+});
+test('per-video mode: the legacy shared task is archived once after its pending run is settled',async()=>{
+  const f=perVideoFixture();
+  f.tasksById.set('legacy',{taskId:'legacy',title:'浏览器翻译',status:'active',revision:2});
+  await f.options.save({requestKey:'browser-translation-v1',title:'浏览器翻译',taskId:'legacy'});
+  const model=f.make();
+  const r=await model({prompt:'a',scope:'s',source:yt('one','One')});
+  assert.equal(r.taskId,'t1');assert.deepEqual(f.archived,['legacy']);assert.equal(f.state().legacyArchived,true);
+  await model({prompt:'b',scope:'s',source:yt('one','One')});assert.deepEqual(f.archived,['legacy']);
+});
+test('per-video mode: a pending receipt replays to its own task even after another video is opened',async()=>{
+  const f=perVideoFixture();const send=f.tasks.send;let failOnce=true;
+  f.tasks.send=async input=>{if(failOnce){failOnce=false;await send(input);throw Object.assign(Error('lost'),{code:'HOST_NOT_READY'});}return send(input);};
+  await assert.rejects(f.make()({prompt:'a',scope:'s',source:yt('one','One')}),/HOST_NOT_READY/);
+  assert.equal(f.state().pending.taskId,'t1');
+  const r=await f.make()({prompt:'b',scope:'s',source:yt('two','Two')});
+  assert.equal(r.taskId,'t2');assert.equal(f.sends.length,2);assert.equal(f.sends[0].taskId,'t1');assert.equal(f.tasksById.get('t1').status,'archived');
+});
