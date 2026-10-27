@@ -359,7 +359,7 @@ When Cindy is not reachable, the panel shows a short guide in the browser's own 
 ## 0.4.24 subtitle experience (host package 0.4.37)
 
 - Playback is no longer paused by default while subtitles are prepared. "Wait for subtitles before playing" is an explicit switch in the subtitle panel; when it holds playback, the player shows what it is waiting for.
-- Status lines are sentences, not counters: "Prepared to 3:20. Safe to keep watching.", a one-line cache warning, and error codes moved to a separate "Details" line.
+- The preparation card is quiet by default: one muted line ("Preparing subtitles, ready to 1:46" / "Prepared to 3:20. Safe to keep watching."). Click it to expand the progress bar, stage, cache state and codes; problems expand it automatically. Status lines are sentences, not counters: "Prepared to 3:20. Safe to keep watching.", a one-line cache warning, and error codes moved to a separate "Details" line.
 - When YouTube provides no captions, the panel explains it and offers "Turn on site captions, then retry" and "Import SRT / VTT" directly. Pages without any caption track reach the same state instead of waiting forever.
 - Automatically opened sessions whose captions already match the target language skip the model; "Translate anyway" is one click.
 - The panel is three short pages (Subtitles / Learning / Options) instead of one long scroll. Modes are grouped by cost (translate with the model / no translation); learning tools (previous, replay, next, speed, repeat, pause after line) are one level deep with their keyboard shortcuts shown, and the shortcuts work while the video is on screen.
