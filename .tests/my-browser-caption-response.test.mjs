@@ -48,7 +48,7 @@ test('valid timed captions preserve timestamps without sending cookies or follow
 
 // Exercise the shipped message handler as well as its parser: an empty
 // timedtext response must reach the transcript fallback and return usable cues.
-async function captions({body='',fallbackError,changed=false,configError,playerText,playerError}={}){
+async function captions({body='',fallbackError,changed=false,configError,playerText,playerError,machineText}={}){
  const start=source.indexOf("chrome.runtime.onMessage.addListener((m,sender,reply)=>{",source.indexOf('async function fetchYoutubeCaptions('));
  const end=source.indexOf('// Resume only',start);
  let handler,reads=0,checks=0;
@@ -70,15 +70,15 @@ async function captions({body='',fallbackError,changed=false,configError,playerT
      return [{documentId:'fixture-document',result:fallbackError?{ok:false,error:fallbackError}:{ok:true,cues}}];
     }
     if(args.func.name==='readPlayerTimedtext'){
-     assert.deepEqual([...args.args],['en']);
-     return [{documentId:'fixture-document',result:playerError?{ok:false,error:playerError}:playerText===undefined?{ok:false,error:'SUBTITLE_UNAVAILABLE'}:{ok:true,text:playerText}}];
+     assert.deepEqual([...args.args],['en','zh-Hans']);
+     return [{documentId:'fixture-document',result:playerError?{ok:false,error:playerError}:playerText===undefined?{ok:false,error:'SUBTITLE_UNAVAILABLE'}:{ok:true,text:playerText,...(machineText!==undefined?{machineText}:{})}}];
     }
     return [{documentId:'fixture-document',result:[{url:'https://www.youtube.com/api/timedtext?v=fixture',language:'en'}]}];
    }},
   },
  };
  vm.runInNewContext(helper+'\n'+source.slice(start,end),context);
- const result=await new Promise(resolve=>handler({type:'cindy-captions'},{id:'fixture',tab:{id:7},documentId:'fixture-document'},resolve));
+ const result=await new Promise(resolve=>handler({type:'cindy-captions',target:'zh-CN'},{id:'fixture',tab:{id:7},documentId:'fixture-document'},resolve));
  return {result,reads,checks};
 }
 test('empty YouTube response automatically returns native transcript cues',async()=>{
@@ -106,4 +106,15 @@ test('caption fallback preserves authorization and document checks',async()=>{
 
 test('caption handler preserves document failure reason for the panel',async()=>{
  const {result}=await captions({configError:'ADDRESS_UNVERIFIED'});assert.equal(result.reason,'DOCUMENT_UNAVAILABLE');
+});
+// The instant layer: YouTube's own translation track rides along with the source cues and is
+// optional; an unreadable translation never fails the caption read.
+test('caption handler returns YouTube machine translation cues alongside the source',async()=>{
+ const timed=JSON.stringify({events:[{tStartMs:500,dDurationMs:1500,segs:[{utf8:'From the player.'}]}]});
+ const machine=JSON.stringify({events:[{tStartMs:500,dDurationMs:1500,segs:[{utf8:'来自播放器。'}]}]});
+ const {result}=await captions({playerText:timed,machineText:machine});
+ assert.equal(result.ok,true);assert.equal(result.machine.length,1);assert.equal(result.machine[0].text,'来自播放器。');assert.equal(result.machine[0].start,0.5);
+ const broken=await captions({playerText:timed,machineText:'<html>'});
+ assert.equal(broken.result.ok,true);assert.equal(broken.result.machine.length,0);
+ assert.equal((await captions()).result.machine.length,0,'transcript fallback has no machine layer');
 });

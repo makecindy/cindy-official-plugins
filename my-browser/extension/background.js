@@ -773,7 +773,7 @@ function parseYoutubeCaptions(text) {
 // verified video document: ask the player for the wanted track, read the URL of the request the
 // player itself makes, fetch that same-origin URL with fmt=json3 and no cookies, then restore the
 // player's caption state. Fixed function, no page code is evaluated.
-function readPlayerTimedtext(languageCode) {
+function readPlayerTimedtext(languageCode,tlang) {
   return (async()=>{
     const player=document.querySelector('#movie_player');
     if(!player||typeof player.setOption!=='function'||typeof player.getOption!=='function')return {ok:false,error:'PLAYER_API_UNAVAILABLE'};
@@ -811,7 +811,10 @@ function readPlayerTimedtext(languageCode) {
       text=await response.text();
     }catch(e){return {ok:false,error:['TimeoutError','AbortError'].includes(e.name)?'SUBTITLE_TIMEOUT':'SUBTITLE_FETCH_FAILED'};}
     if(text.length>2000000)return {ok:false,error:'SUBTITLE_TOO_LARGE'};
-    return {ok:true,text};
+    // YouTube's machine translation of the same track: shown instantly until Cindy's translation lands.
+    let machineText=null;
+    if(tlang&&/^[A-Za-z-]{2,12}$/.test(tlang)){try{url.searchParams.set('tlang',tlang);const r=await fetch(url.href,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(15000)});if(r.ok){const t=await r.text();if(t.length<=2000000)machineText=t;}}catch{}}
+    return {ok:true,text,machineText};
   })();
 }
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
@@ -827,21 +830,23 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
     }});
     const tracks=result?.[0]?.documentId===documentId?result[0].result:[];
     const track=tracks.find(t=>t.language===m.language)||tracks.find(t=>t.kind!=='asr')||tracks[0];
-    let cues=[],sourceError;
+    let cues=[],sourceError,machine=[];
+    const tlang=globalThis.CindyLearning.youtubeTranslationLanguage(m.target);
     if(track){
       const url=new URL(track.url);
       if(url.protocol!=='https:'||!/(^|\.)youtube\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)throw Error('INVALID_SUBTITLE_SOURCE');
       url.searchParams.set('fmt','json3');
-      try{cues=await fetchYoutubeCaptions(url.href);}catch(e){
+      try{cues=await fetchYoutubeCaptions(url.href);if(tlang){try{const u=new URL(url.href);u.searchParams.set('tlang',tlang);machine=await fetchYoutubeCaptions(u.href);}catch{}}}catch(e){
         if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID','SUBTITLE_UNAVAILABLE','SUBTITLE_TIMEOUT','SUBTITLE_FETCH_FAILED'].includes(e.message))throw e;
         sourceError=e;
       }
     }
     if(!cues.length&&track){
-      const viaPlayer=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:readPlayerTimedtext,args:[track.language]});
+      const viaPlayer=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:readPlayerTimedtext,args:[track.language,tlang]});
       if(viaPlayer?.[0]?.documentId!==documentId)throw Error('PAGE_CHANGED');
       const read=viaPlayer[0].result;
       if(read?.ok===true&&typeof read.text==='string'){
+        if(typeof read.machineText==='string'){try{machine=parseYoutubeCaptions(read.machineText);}catch{machine=[];}}
         try{cues=parseYoutubeCaptions(read.text);}catch(e){
           if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID'].includes(e.message))throw e;
           sourceError=e;
@@ -858,7 +863,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
     }
     await learningRequest({id:crypto.randomUUID(),request:{op:'config'}},sender);
     if((await chrome.tabs.get(tab.id)).url!==tab.url)throw Error('PAGE_CHANGED');
-    return {ok:true,cues,language:track?.language};
+    return {ok:true,cues,language:track?.language,machine:cues.length?machine:[]};
   })().then(reply).catch(e=>reply({ok:false,error:e.message,...(e.message==='ADDRESS_UNVERIFIED'?{reason:e.reason}: {})}));return true;
 });
 

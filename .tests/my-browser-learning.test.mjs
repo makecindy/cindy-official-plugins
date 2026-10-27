@@ -350,3 +350,19 @@ test('subtitle cache paths satisfy the host library path rule',async()=>{
   const segment=/^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
   for(const p of paths)for(const seg of p.split('/'))assert.match(seg,segment,p);
 });
+
+test('YouTube translation language maps Chinese targets to script tags and rejects custom names',()=>{
+  assert.equal(core.youtubeTranslationLanguage('zh-CN'),'zh-Hans');
+  assert.equal(core.youtubeTranslationLanguage('zh-TW'),'zh-Hant');
+  assert.equal(core.youtubeTranslationLanguage('ja'),'ja');
+  assert.equal(core.youtubeTranslationLanguage('pt-BR'),'pt-BR');
+  assert.equal(core.youtubeTranslationLanguage('custom:Klingon'),null);
+  assert.equal(core.youtubeTranslationLanguage('x y'),null);
+});
+test('background fill picks the next open passage after the playhead, then earlier ones',()=>{
+  const chunk=(start,end,extra={})=>({words:[{start,end:start+1},{start:end-1,end}],...extra});
+  const chunks=[chunk(0,30,{done:true}),chunk(30,60),chunk(60,90,{busy:true}),chunk(90,120),chunk(120,150,{error:'X'})];
+  assert.equal(core.backgroundSubtitleChunk(chunks,70),chunks[3]);
+  assert.equal(core.backgroundSubtitleChunk(chunks,200),chunks[1],'nothing ahead: earlier open passage');
+  assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[4]],10),null);
+});
