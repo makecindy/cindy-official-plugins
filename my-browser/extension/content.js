@@ -193,6 +193,10 @@
   function stopVideo(){if(videoSession)rememberVideo(false);clearTimeout(videoTimer);if(video&&videoSession?.seekHandler)video.removeEventListener('seeked',videoSession.seekHandler);videoSession?.playback?.dispose();videoSession?.overlay?.destroy();videoSession=null;if(video&&videoHandler)video.removeEventListener('timeupdate',videoHandler);videoHandler=null;video=null;activeCue=-1;previousCue=-1;}
   function ensureVideoEntry(){
     if(!runtimeReady())return;
+    // A running subtitle session mounts its own settings toggle in the control
+    // bar; the entry must never sit beside it. YouTube fires yt-navigate-finish
+    // after the session may already have auto-started, so remove, don't add.
+    if(videoSession){for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();return;}
     const media=document.querySelector('video'),player=media?.closest('#movie_player,.html5-video-player');
     const native=player?.querySelector('.ytp-right-controls');
     // Only mount in an adapted control bar. A generic video's parent can be
