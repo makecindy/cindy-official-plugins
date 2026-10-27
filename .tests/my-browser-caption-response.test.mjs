@@ -48,7 +48,7 @@ test('valid timed captions preserve timestamps without sending cookies or follow
 
 // Exercise the shipped message handler as well as its parser: an empty
 // timedtext response must reach the transcript fallback and return usable cues.
-async function captions({body='',fallbackError,changed=false,configError}={}){
+async function captions({body='',fallbackError,changed=false,configError,playerText,playerError}={}){
  const start=source.indexOf("chrome.runtime.onMessage.addListener((m,sender,reply)=>{",source.indexOf('async function fetchYoutubeCaptions('));
  const end=source.indexOf('// Resume only',start);
  let handler,reads=0,checks=0;
@@ -69,6 +69,10 @@ async function captions({body='',fallbackError,changed=false,configError}={}){
      assert.equal(args.args[0],pageURL);
      return [{documentId:'fixture-document',result:fallbackError?{ok:false,error:fallbackError}:{ok:true,cues}}];
     }
+    if(args.func.name==='readPlayerTimedtext'){
+     assert.deepEqual([...args.args],['en']);
+     return [{documentId:'fixture-document',result:playerError?{ok:false,error:playerError}:playerText===undefined?{ok:false,error:'SUBTITLE_UNAVAILABLE'}:{ok:true,text:playerText}}];
+    }
     return [{documentId:'fixture-document',result:[{url:'https://www.youtube.com/api/timedtext?v=fixture',language:'en'}]}];
    }},
   },
@@ -79,7 +83,19 @@ async function captions({body='',fallbackError,changed=false,configError}={}){
 }
 test('empty YouTube response automatically returns native transcript cues',async()=>{
  const {result,reads,checks}=await captions();
- assert.equal(result.ok,true);assert.equal(result.cues[0].text,'Hello world.');assert.equal(reads,2);assert.equal(checks,2);
+ assert.equal(result.ok,true);assert.equal(result.cues[0].text,'Hello world.');assert.equal(reads,3);assert.equal(checks,2);
+});
+// Bug regression: timedtext now answers extension requests with an empty 200 because the
+// player's proof-of-origin token is missing. The player-assisted read must serve the cues
+// before the transcript panel is touched, and its own failures still fall through to it.
+test('empty YouTube response is retried through the player request before the transcript panel',async()=>{
+ const timed=JSON.stringify({events:[{tStartMs:500,dDurationMs:1500,segs:[{utf8:'From the player.'}]}]});
+ const {result,reads}=await captions({playerText:timed});
+ assert.equal(result.ok,true);assert.equal(result.cues[0].text,'From the player.');assert.equal(result.cues[0].start,0.5);assert.equal(reads,2);
+ const invalid=await captions({playerText:'<html>login</html>'});
+ assert.equal(invalid.result.ok,true);assert.equal(invalid.result.cues[0].text,'Hello world.');assert.equal(invalid.reads,3);
+ assert.equal((await captions({playerText:'<html>login</html>',fallbackError:'SUBTITLE_UNAVAILABLE'})).result.error,'SUBTITLE_RESPONSE_INVALID');
+ assert.equal((await captions({playerError:'SUBTITLE_TOO_LARGE'})).result.error,'SUBTITLE_TOO_LARGE');
 });
 test('caption fallback preserves authorization and document checks',async()=>{
  const denied=await captions({configError:'PAIRING_REQUIRED'});

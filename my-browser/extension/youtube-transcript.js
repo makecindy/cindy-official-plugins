@@ -3,14 +3,17 @@
   // Runs in the verified video document. Use YouTube's own transcript UI when
   // timedtext returns an empty response; no tokens, cookies or private APIs.
   async function read(expectedURL) {
-    const panelSelector='ytd-engagement-panel-section-list-renderer[target-id*="transcript"]';
+    // The transcript may render in the dedicated panel or inside the newer "In this video"
+    // panel, which carries no target-id: identify panels by their segments, never by id.
+    const panelSelector='ytd-engagement-panel-section-list-renderer';
     // YouTube serves either the classic transcript renderer or the modern
     // view-model panel (target-id PAmodern_transcript_view). Chapter headers in
     // the modern panel are separate elements and never match these rows.
     const segmentSelector='ytd-transcript-segment-renderer, transcript-segment-view-model';
     const expanded=p=>p?.getAttribute('visibility')==='ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
     const visible=selector=>[...document.querySelectorAll(selector)].find(n=>n.getClientRects().length);
-    const existing=[...document.querySelectorAll(panelSelector)].find(expanded);
+    const transcriptPanel=()=>[...document.querySelectorAll(panelSelector)].find(p=>expanded(p)&&p.querySelector(segmentSelector));
+    const existing=transcriptPanel();
     let opened=false,expandedDescription=false,interacted=false;
     const interaction=e=>{if(e.isTrusted)interacted=true;};
     const current=()=>{
@@ -43,7 +46,7 @@
       const deadline=Date.now()+12000;let signature='',stable=0;
       while(Date.now()<deadline){
         current();
-        const panel=[...document.querySelectorAll(panelSelector)].find(p=>expanded(p)&&p.querySelector(segmentSelector));
+        const panel=transcriptPanel();
         const nodes=[...(panel?.querySelectorAll(segmentSelector)||[])];
         if(nodes.length>10000)throw Error('SUBTITLE_TOO_LARGE');
         const next=nodes.length+':'+nodes.at(-1)?.textContent;
@@ -85,7 +88,7 @@
       document.removeEventListener('wheel',interaction,{capture:true});
       // Close only the panel we opened, and only if the user has not taken over.
       if(opened&&!interacted&&location.href===expectedURL)
-        [...document.querySelectorAll(panelSelector)].find(expanded)?.querySelector('#visibility-button button')?.click();
+        transcriptPanel()?.querySelector('#visibility-button button')?.click();
       if(expandedDescription&&!interacted&&location.href===expectedURL)
         visible('ytd-watch-metadata tp-yt-paper-button#collapse, #description-inline-expander #collapse')?.click();
     }

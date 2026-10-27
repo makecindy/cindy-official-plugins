@@ -757,7 +757,9 @@ async function fetchYoutubeCaptions(url) {
     if(['SUBTITLE_UNAVAILABLE','SUBTITLE_EMPTY','SUBTITLE_TOO_LARGE'].includes(e.message))throw e;
     throw Error(['TimeoutError','AbortError'].includes(e.name)?'SUBTITLE_TIMEOUT':'SUBTITLE_FETCH_FAILED');
   }
-  const text=new TextDecoder().decode(data);
+  return parseYoutubeCaptions(new TextDecoder().decode(data));
+}
+function parseYoutubeCaptions(text) {
   if(!text.trim())throw Error('SUBTITLE_EMPTY');
   let parsed;
   try{parsed=JSON.parse(text);}catch{throw Error('SUBTITLE_RESPONSE_INVALID');}
@@ -765,6 +767,52 @@ async function fetchYoutubeCaptions(url) {
   const cues=globalThis.CindyLearning.youtubeSubtitles(parsed);
   if(!cues.length)throw Error('SUBTITLE_EMPTY');
   return cues;
+}
+// YouTube's timedtext endpoint answers an extension's own request with an empty 200: it now
+// requires the proof-of-origin token (`pot`) that only the page's player attaches. Runs in the
+// verified video document: ask the player for the wanted track, read the URL of the request the
+// player itself makes, fetch that same-origin URL with fmt=json3 and no cookies, then restore the
+// player's caption state. Fixed function, no page code is evaluated.
+function readPlayerTimedtext(languageCode) {
+  return (async()=>{
+    const player=document.querySelector('#movie_player');
+    if(!player||typeof player.setOption!=='function'||typeof player.getOption!=='function')return {ok:false,error:'PLAYER_API_UNAVAILABLE'};
+    let before=null,loaded=true;
+    try{before=player.getOption('captions','track');}catch{loaded=false;}
+    if(!loaded){try{player.loadModule('captions');}catch{return {ok:false,error:'PLAYER_API_UNAVAILABLE'};}}
+    const request=new Promise(resolve=>{
+      const observer=new PerformanceObserver(list=>{
+        for(const entry of list.getEntries())if(entry.name.includes('/api/timedtext')&&/[?&]pot=/.test(entry.name)){observer.disconnect();resolve(entry.name);return;}
+      });
+      observer.observe({type:'resource',buffered:false});
+      setTimeout(()=>{observer.disconnect();resolve(null);},6000);
+    });
+    try{
+      // The same track is served from cache without a new request: switch it off first.
+      if(before?.languageCode===languageCode)player.setOption('captions','track',{});
+      player.setOption('captions','track',{languageCode});
+    }catch{return {ok:false,error:'PLAYER_API_UNAVAILABLE'};}
+    const name=await request;
+    try{
+      if(before?.languageCode)player.setOption('captions','track',{languageCode:before.languageCode,...(before.kind?{kind:before.kind}:{})});
+      else player.setOption('captions','track',{});
+      if(!loaded)player.unloadModule?.('captions');
+    }catch{}
+    if(!name)return {ok:false,error:'SUBTITLE_UNAVAILABLE'};
+    let url;
+    try{url=new URL(name);}catch{return {ok:false,error:'INVALID_SUBTITLE_SOURCE'};}
+    if(url.protocol!=='https:'||!/(^|\.)youtube\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)return {ok:false,error:'INVALID_SUBTITLE_SOURCE'};
+    url.searchParams.set('fmt','json3');
+    url.searchParams.delete('tlang'); // the user's auto-translate setting must not replace the source language
+    let text;
+    try{
+      const response=await fetch(url.href,{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(15000)});
+      if(!response.ok)return {ok:false,error:'SUBTITLE_UNAVAILABLE'};
+      text=await response.text();
+    }catch(e){return {ok:false,error:['TimeoutError','AbortError'].includes(e.name)?'SUBTITLE_TIMEOUT':'SUBTITLE_FETCH_FAILED'};}
+    if(text.length>2000000)return {ok:false,error:'SUBTITLE_TOO_LARGE'};
+    return {ok:true,text};
+  })();
 }
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type!=='cindy-captions'||sender.id!==chrome.runtime.id)return;
@@ -788,6 +836,17 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
         if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID','SUBTITLE_UNAVAILABLE','SUBTITLE_TIMEOUT','SUBTITLE_FETCH_FAILED'].includes(e.message))throw e;
         sourceError=e;
       }
+    }
+    if(!cues.length&&track){
+      const viaPlayer=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:readPlayerTimedtext,args:[track.language]});
+      if(viaPlayer?.[0]?.documentId!==documentId)throw Error('PAGE_CHANGED');
+      const read=viaPlayer[0].result;
+      if(read?.ok===true&&typeof read.text==='string'){
+        try{cues=parseYoutubeCaptions(read.text);}catch(e){
+          if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID'].includes(e.message))throw e;
+          sourceError=e;
+        }
+      }else if(read?.error==='SUBTITLE_TOO_LARGE')throw Error('SUBTITLE_TOO_LARGE');
     }
     if(!cues.length){
       const fallback=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:globalThis.CindyYoutubeTranscript.read,args:[tab.url]});
