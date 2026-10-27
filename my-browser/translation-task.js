@@ -18,11 +18,12 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
   const textOf=content=>typeof content==='string'?content:Array.isArray(content)?content.filter(x=>x?.type==='text').map(x=>x.text||'').join(''):content&&typeof content==='object'?JSON.stringify(content):'';
   const zh=()=>locale().startsWith('zh');
   const digestOf=async value=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('');};
-  // A video identity never includes playback time or page title.
-  function videoKey(scope,url){
+  // A video identity never includes playback time, page title or the browser
+  // profile: two extension connections watching the same video share one task.
+  function videoKey(url){
     if(!url)return null;
-    try{const u=new URL(url);if(/(^|\.)youtube\.com$/.test(u.hostname)&&u.searchParams.get('v'))return scope+'|youtube:'+u.searchParams.get('v');u.hash='';return scope+'|'+u.href;}
-    catch{return scope+'|'+url;}
+    try{const u=new URL(url);if(/(^|\.)youtube\.com$/.test(u.hostname)&&u.searchParams.get('v'))return 'youtube:'+u.searchParams.get('v');u.hash='';return u.href;}
+    catch{return url;}
   }
   function videoTitle(source){
     const base=zh()?'字幕翻译':'Subtitles';
@@ -41,7 +42,7 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
       (state.pending.runId!==undefined&&!nonempty(state.pending.runId))))fail('TASK_BINDING_INVALID');
     if(state.videos!==undefined&&(typeof state.videos!=='object'||Array.isArray(state.videos)||Object.values(state.videos).some(e=>!validEntry(e))))fail('TASK_BINDING_INVALID');
     const perVideo=caps.hiddenTasks===true;
-    const key=perVideo?videoKey(args?.scope||'',args?.source?.url||''):null;
+    const key=perVideo?videoKey(args?.source?.url||''):null;
     let entry,task;
     if(key){
       state.videos||={};state.recent=Array.isArray(state.recent)?state.recent.filter(k=>state.videos[k]):[];

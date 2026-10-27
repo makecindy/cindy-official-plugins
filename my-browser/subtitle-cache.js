@@ -1,5 +1,5 @@
 // Persist only validated bilingual captions through the declared Library slot.
-// Files are isolated by browser profile, video identity and target language.
+// Files are keyed by video identity and target language; browser profiles share them.
 export function createSubtitleCache({library,core}) {
   const queues=new Map();
   const hash=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))].map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -10,7 +10,7 @@ export function createSubtitleCache({library,core}) {
     let identity=url.href;
     if(/(^|\.)youtube\.com$/.test(url.hostname)&&url.searchParams.get('v'))identity='youtube:'+url.searchParams.get('v');
     // Library path segments are capped at 64 characters by the host; a full SHA-256 plus ".json" is 69.
-    return `browser/${client}/subtitles/${(await hash([1,identity,req.target||'zh-CN'])).slice(0,48)}.json`;
+    return `browser/subtitles/${(await hash([1,identity,req.target||'zh-CN'])).slice(0,48)}.json`;
   }
   const key=(words,nextStart)=>hash([1,words,nextStart]);
   function lock(path,fn){const promise=(queues.get(path)||Promise.resolve()).then(fn,fn);queues.set(path,promise);promise.finally(()=>{if(queues.get(path)===promise)queues.delete(path);}).catch(()=>{});return promise;}

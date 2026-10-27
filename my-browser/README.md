@@ -271,7 +271,7 @@ Verification uses isolated Chromium with the actual extension, bridge, PDF and O
 
 A compact in-player progress card reports the completed share of source words, completed passages, prepared coverage ahead, active video range, elapsed stage time and processing stage. Cache reads, queueing, waiting for previous model requests, model response, timeline validation and cache writes have distinct states. Elapsed time never invents model-generation percentages. Finished progress follows the player controls; errors keep their stage and retry action visible.
 
-Validated bilingual captions are cached incrementally in the declared plugin Library at `browser/<client-id>/subtitles/<hash>.json`, isolated by browser profile, video and target language. Reopening a video or restarting the plugin can reuse it; changed source text or timing misses the cache. Each file is limited to 8 MB. Unavailable, corrupt or full storage keeps the current translation with an explicit persistence warning; corrupt files are not automatically overwritten. Internal files are JSON, and existing SRT export remains available. More → Clear this video's cache and translate again clears the current video and target language, for example after choosing another model. Already-running writes cannot restore entries from before that clear.
+Validated bilingual captions are cached incrementally in the declared plugin Library at `browser/subtitles/<hash>.json`, keyed by video and target language; browser profiles share them. Reopening a video or restarting the plugin can reuse it; changed source text or timing misses the cache. Each file is limited to 8 MB. Unavailable, corrupt or full storage keeps the current translation with an explicit persistence warning; corrupt files are not automatically overwritten. Internal files are JSON, and existing SRT export remains available. More → Clear this video's cache and translate again clears the current video and target language, for example after choosing another model. Already-running writes cannot restore entries from before that clear.
 
 The former background short-text path could not cancel a dispatched request. It has been replaced by the ordinary task execution path described below.
 
@@ -347,6 +347,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 ## 0.4.24 YouTube captions through the player's own request (host package 0.4.37)
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
+
+## One task and one cache per video, across browser profiles (host package 0.4.38)
+
+A video's background task and its subtitle cache are now keyed by the video alone (`youtube:<id>`, or the page URL without its fragment), no longer by the extension connection. Two connections watching the same video (two Chrome profiles, or a second copy of the extension) share one task and one cache instead of translating twice. Cache files move from `browser/<client-id>/subtitles/` to `browser/subtitles/`; videos cached before translate once more.
 
 ## Subtitle cache file names (host package 0.4.37)
 

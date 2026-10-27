@@ -242,7 +242,8 @@ test('subtitle cache survives service restart, isolates language and transcript,
  await service.handle(client,{...req,words:[{text:'Changed.',start:0,end:2}]});assert.equal(modelCalls,3);
  await service.handle(client,{op:'subtitle-cache-clear',target:req.target,source:req.source});
  await service.handle(client,req);assert.equal(modelCalls,4);
- await service.handle(crypto.randomUUID(),req);assert.equal(modelCalls,5);
+ // Another browser profile watching the same video reuses the shared cache instead of translating again.
+ await service.handle(crypto.randomUUID(),req);assert.equal(modelCalls,4);
 });
 test('subtitle cache failure preserves translation and corrupted cache data is never overwritten',async()=>{
  const req={op:'subtitles',editorial:true,source:{url:'https://example.test/video'},words:[{text:'Hello.',start:0,end:1}]};
@@ -349,6 +350,10 @@ test('subtitle cache paths satisfy the host library path rule',async()=>{
   assert.ok(paths.length>0);
   const segment=/^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
   for(const p of paths)for(const seg of p.split('/'))assert.match(seg,segment,p);
+  // The file is keyed by video and target language only; a second browser profile reads the same file.
+  const other=createSubtitleCache({core,library:async r=>{if(r.path)paths.push(r.path);return r.op==='read'?{ok:false,errorCode:'NOT_FOUND'}:{ok:true};}});
+  await other.open('another-client',{source:{url:'https://m.youtube.com/watch?v=GoE7NbnBllE&t=5s'},target:'zh-CN'});
+  assert.equal(new Set(paths).size,1,paths.join(' '));
 });
 
 test('YouTube translation language maps Chinese targets to script tags and rejects custom names',()=>{

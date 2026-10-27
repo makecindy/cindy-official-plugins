@@ -303,7 +303,14 @@ test('per-video mode: each video gets its own hidden task titled after it; switc
   // Returning to the first video reuses its binding; the host refuses input to an archived task, so the plugin opens a fresh one.
   await assert.rejects(model({prompt:'p4',scope:'browser-a',source:yt('aaa','First video')}),/TASK_BUSY/);
   assert.ok(f.sends.every(s=>['t1','t2'].includes(s.taskId)));
-  assert.equal(f.state().videos['browser-a|youtube:aaa'].sends,2);
+  assert.equal(f.state().videos['youtube:aaa'].sends,2);
+});
+test('per-video mode: a second extension connection watching the same video shares its task',async()=>{
+  // Bug regression (2026-10-28): two extension client ids were briefly online and the same video got two tasks.
+  const f=perVideoFixture(),model=f.make();
+  await model({prompt:'a',scope:'client-1',source:yt('same','Same video')});
+  await model({prompt:'b',scope:'client-2',source:yt('same','Same video')});
+  assert.equal(f.created.length,1);assert.equal(f.sends.length,2);assert.deepEqual(f.archived,[]);
 });
 test('per-video mode: the same video id with a different page URL shape maps to one task',async()=>{
   const f=perVideoFixture(),model=f.make();
@@ -316,7 +323,7 @@ test('per-video mode: only the most recent bindings are kept; the forgotten ones
   for(let i=0;i<22;i++)await model({prompt:'p'+i,scope:'s',source:yt('v'+i,'Video '+i)});
   const state=f.state();
   assert.equal(Object.keys(state.videos).length,20);assert.equal(state.recent.length,20);
-  assert.equal(state.videos['s|youtube:v0'],undefined);assert.equal(state.videos['s|youtube:v1'],undefined);
+  assert.equal(state.videos['youtube:v0'],undefined);assert.equal(state.videos['youtube:v1'],undefined);
   assert.equal(f.archived.length,21,'every earlier video task is archived exactly once');
 });
 test('per-video mode: a long video rolls to a fresh task after the send budget',async()=>{
@@ -324,7 +331,7 @@ test('per-video mode: a long video rolls to a fresh task after the send budget',
   const state0=await f.options.load();
   for(let i=0;i<61;i++)await model({prompt:'p'+i,scope:'s',source:yt('long','Long')});
   assert.equal(f.created.length,2);assert.notEqual(f.created[0].requestKey,f.created[1].requestKey);
-  assert.deepEqual(f.archived,['t1']);assert.equal(f.state().videos['s|youtube:long'].taskId,'t2');assert.equal(f.sends.length,61);
+  assert.deepEqual(f.archived,['t1']);assert.equal(f.state().videos['youtube:long'].taskId,'t2');assert.equal(f.sends.length,61);
   assert.equal(state0,undefined);
 });
 test('per-video mode: archive refusals and hosts without archive never block translation',async()=>{
