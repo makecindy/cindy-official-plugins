@@ -23,7 +23,7 @@
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale='en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -85,6 +85,20 @@
   }
   function clear(mode){if(mode!=='settings'){cancel();stopVideo();}body.onkeydown=null;body.replaceChildren();note('');}
   function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=document.querySelector('video,audio');body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
+  // Connection problems get a guide with ways out, not a red sentence in an empty panel.
+  const CONNECTION_CODES=new Set(['CINDY_DISCONNECTED','UPDATE_CINDY_CHROME','NATIVE_BINDING_UNAVAILABLE','PAIRING_REQUIRED','BRIDGE_REQUEST_FAILED','SESSION_CHANGED']);
+  function isConnectionProblem(e){return CONNECTION_CODES.has(e?.message||e);}
+  function showDisconnected(e){
+    if(!body)return;const code=e?.message||e;body.replaceChildren();note('');
+    const intro=el('p',code==='CINDY_DISCONNECTED'||code==='BRIDGE_REQUEST_FAILED'||code==='SESSION_CHANGED'?t.clientGuideBody:U.error(code,locale),'muted');
+    const steps=el('ol',undefined,'guide-steps');for(const text of [t.clientGuideStep1,t.clientGuideStep2,t.clientGuideStep3])steps.append(el('li',text));
+    const openApp=el('a',t.openCindy,'button-link primary');openApp.href='cindy://focus';
+    const openPlugins=el('a',t.openPluginSettings,'button-link');openPlugins.href='cindy://plugins/my-browser';
+    const recheck=button(t.recheck,async()=>{recheck.disabled=true;note(t.checking);try{const r=await sendMessage({type:'connection-status'});if(r?.connection?.connected){note('');await open('open');return;}if(status){status.textContent=t.stillDisconnected;status.className='status error';updateFooter();}}catch(err){report(err);}finally{recheck.disabled=false;}},'quiet');
+    const actions=el('div',undefined,'row');actions.append(openApp,openPlugins,recheck);
+    const download=el('a',t.downloadCindy,'text-link');download.href='https://cindy.app/download/';download.target='_blank';download.rel='noopener';
+    body.append(el('h2',t.clientGuideTitle),intro,steps,actions,el('small',t.clientGuideNote),download);
+  }
   function showSettings(){clear('settings');body.append(button(t.back,()=>videoSession?videoSettings():showPageHome(),'quiet'),el('h2',t.settings),field(t.webLanguage,languageControl()));
     body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
     const theme=el('select');theme.setAttribute('aria-label',t.appearance);for(const [value,label]of [['light',t.light],['dark',t.dark]]){const o=el('option',label);o.value=value;theme.append(o);}theme.value=prefs.theme||pageTheme();theme.onchange=()=>{prefs.theme=theme.value;shadow.querySelector('.cindy-root').dataset.theme=prefs.theme;videoSession?.overlay?.update();savePreferences({theme:prefs.theme}).catch(report);};body.append(field(t.appearance,theme),el('h2',t.modelSettings),el('p',t.modelHint,'muted'));
@@ -127,7 +141,7 @@
     const openingPanel=host;
     const setup={epoch};
     setup.promise=(async()=>{
-      try{await configure();}catch(e){if(!disposed&&epoch===panelEpoch)report(e);return false;}
+      try{await configure();}catch(e){if(!disposed&&epoch===panelEpoch){if(isConnectionProblem(e))showDisconnected(e);else report(e);}return false;}
       if(!runtimeReady()||epoch!==panelEpoch||host!==openingPanel||host.style.getPropertyValue('display')==='none')return false;
       if(openingNewPanel){host.remove();host=null;}
       makePanel();return true;

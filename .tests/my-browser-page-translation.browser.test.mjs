@@ -164,7 +164,7 @@ test('pending setup closes permanently and pending model never blocks restore or
   for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
   await page.evaluate(()=>{sendAction('open','open');sendAction('translate-page','discarded');});
   await page.waitForFunction(()=>typeof resolveConfig==='function');
-  const point=await page.evaluate(()=>{const b=roots.flatMap(r=>[...r.querySelectorAll('button')]).find(b=>b.getAttribute('aria-label')==='Close');const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
+  const point=await page.evaluate(()=>{const b=roots.flatMap(r=>[...r.querySelectorAll('button')]).find(b=>['Close','关闭'].includes(b.getAttribute('aria-label')));const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
   await page.mouse.click(point.x,point.y);
   await page.evaluate(()=>{pendingConfig=false;resolveConfig({ok:true,locale:'en'});});
   await page.waitForFunction(()=>replies.length===2);

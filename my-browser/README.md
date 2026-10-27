@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.24 connection guide (host package 0.4.37)
+
+When Cindy is not reachable, the panel shows a short guide in the browser's own language instead of one red sentence: what to do, an "Open Cindy" button (`cindy://focus`), "Open plugin settings" (`cindy://plugins/my-browser`, handled by Cindy hosts that ship this deep link; older hosts ignore it), "Check connection again", and a download link for people who have not installed Cindy yet. Nothing from the page is sent while disconnected.
+
 ## 0.4.24 subtitle experience (host package 0.4.37)
 
 - Playback is no longer paused by default while subtitles are prepared. "Wait for subtitles before playing" is an explicit switch in the subtitle panel; when it holds playback, the player shows what it is waiting for.
