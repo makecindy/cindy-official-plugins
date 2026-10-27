@@ -339,3 +339,7 @@ Allowed-site tab failures stay visible as redacted diagnostic rows. Page loading
 ## 0.4.23 toolbar badge recovery (host package 0.4.36)
 
 A failed panel-open click now marks only the affected tab. Opening the panel successfully, refreshing or navigating clears that document's warning and restores the shared connection badge. A disconnected Cindy still shows its warning; page recovery does not pretend to reconnect it. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.
+
+## Host-owned bridge (host package 0.4.37)
+
+Cindy hosts that implement the `browserExtension` plugin capability now own the extension bridge: pairing, native binding, job dispatch, site-policy enforcement, result redaction and the learning relay (translation, subtitles) all run in Cindy, and the bundled worker no longer binds a loopback port on those hosts. The signed wire protocol stays `0.4.13` / protocol 3, so installed extensions keep connecting without an update, and `/health` still reports `plugin: "my-browser"`. On those hosts the extension also becomes the "My browser" target of Cindy's `browser` tool: the agent can read and operate the pages you are using, within the same site permissions this plugin keeps. Older hosts reject the pipe type and the bundled worker bridge keeps serving exactly as before; a refusal is never reported as a connection. Permissions of the extension are unchanged.

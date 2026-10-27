@@ -4,7 +4,46 @@ const channel = new BroadcastChannel('my-browser');
 let writes = Promise.resolve();
 const serialize = fn => { const next = writes.then(fn,fn); writes = next.catch(() => {}); return next; };
 const fail = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
+// Cindy hosts that implement the browserExtension slot own the extension bridge: jobs, site policy,
+// paired identities and learning relays travel over the plugin pipe and the bundled worker never
+// binds a loopback port. Older hosts reject the pipe type, so the worker bridge stays the fallback;
+// a refusal is never treated as a connection.
+const HOST_KINDS={status:'status',act:'act',setPolicy:'setPolicy',setTrustedClients:'setTrustedClients',learningActive:'relayActive',learningProgress:'relayProgress',learningResult:'relayResult'};
+let hostBridge=null;
+async function hostRequest(kind,params = {},reach = 'not_executed') {
+  let r;
+  try { r=await cindy.send({type:'browser-extension-request',kind,...params}); }
+  catch (e) { return fail('HOST_BRIDGE_UNAVAILABLE',e?.message || 'Cindy did not accept the browser extension request.',reach); }
+  if (r && typeof r === 'object' && r.ok === false && r.errorCode) return {...fail(r.errorCode,r.message || 'Cindy refused the browser extension request.',reach),hostRefused:true};
+  if (!r || typeof r !== 'object') return fail('HOST_BRIDGE_UNAVAILABLE','Cindy returned no browser extension result.',reach);
+  return r;
+}
+async function detectHostBridge() {
+  if (hostBridge !== null) return hostBridge;
+  const r=await hostRequest('status');
+  // HOST_NOT_READY still proves the slot exists (the bridge is starting); any other refusal or a
+  // rejected pipe type means an older host, so the bundled worker keeps serving.
+  hostBridge=r.ok === true || r.error === 'HOST_NOT_READY';
+  return hostBridge;
+}
+function hostParams(method,params) {
+  if (method === 'act') return {action:params.action,payload:params.payload || {}};
+  if (method === 'setPolicy') return {policy:params.policy};
+  if (method === 'setTrustedClients') return {clients:params.clients || []};
+  if (method === 'learningProgress') return {id:params.id,progress:params.progress};
+  if (method === 'learningResult') return {id:params.id,result:params.result};
+  if (method === 'learningActive') return {id:params.id};
+  return {};
+}
 async function node(method, params = {}) {
+  const kind=HOST_KINDS[method];
+  if (kind && await detectHostBridge()) {
+    const r=await hostRequest(kind,hostParams(method,params),method === 'act' ? 'unknown' : 'not_executed');
+    if (method !== 'status' || !r.ok) return r;
+    // The settings page shows where the developer-loadable extension lives; only the worker knows.
+    const described=await node('describe');
+    return {...r,...(described?.ok ? {extension_dir:described.extension_dir} : {})};
+  }
   // A transport rejection (timeout, refused/broken stdio) can arrive after the worker already
   // accepted an act job, so it must not be reported as "not executed". This mirrors the
   // structured NODE_UNAVAILABLE path below instead of letting the exception escape to the
@@ -162,8 +201,10 @@ async function getLearningService() {
 }
 async function handleLearningHostMessage(msg){
   if(msg.type==='host-context-changed'){hostLocale=msg.context?.locale||hostLocale;return;}
-  if(msg.type!=='event'||msg.name!=='node-notification'||msg.method!=='learning-request')return;
-  const {id,clientId,request}=msg.params||{};
+  // Host-owned bridge delivers relays as its own event; the bundled worker uses a node notification.
+  const relay=msg.type==='event'&&msg.name==='browser-extension-relay'?msg:msg.type==='event'&&msg.name==='node-notification'&&msg.method==='learning-request'?msg.params:null;
+  if(!relay)return;
+  const {id,clientId,request}=relay||{};
   let result,stage='accepted';
   try {
     await sync();
