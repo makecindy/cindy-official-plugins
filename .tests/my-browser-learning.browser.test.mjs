@@ -179,6 +179,8 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  const longWav=Buffer.alloc(44+8000*2*150);wav.copy(longWav,0,0,44);longWav.writeUInt32LE(longWav.length-8,4);longWav.writeUInt32LE(longWav.length-44,40);
  await page.evaluate(async data=>{const v=document.querySelector('video');v.src='data:audio/wav;base64,'+data;v.muted=true;await new Promise(r=>v.onloadedmetadata=r);const track=v.addTextTrack('captions','English','en');track.mode='showing';for(let i=0;i<72;i++)track.addCue(new VTTCue(i*2,(i+1)*2,Array.from({length:10},(_,j)=>'Buffer'+(i*10+j)).join(' ')));await v.play()},longWav.toString('base64'));
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'video'}),tabId);
+ // Waiting for subtitles before playback is opt-in: turn it on for the buffering checks below.
+ await click('字幕准备好再播放');assert.equal(await readNode('BUTTON','字幕准备好再播放','function(){return this.getAttribute("aria-checked")}'),'true');
  for(let i=0;i<60&&prefetchStarted.length<2;i++)await page.waitForTimeout(100);
  await waitText('翻译任务执行中');assert.equal(await readNode('DIV','preparation-track','function(){return this.getAttribute("aria-valuenow")}'),'0');
  if(screenshots){

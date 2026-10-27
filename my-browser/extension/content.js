@@ -23,16 +23,17 @@
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:true,autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale='en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale='en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
   function button(text,fn,cls=''){const b=el('button',text,cls);b.type='button';b.addEventListener('click',e=>{if(e.isTrusted&&runtimeReady())Promise.resolve().then(fn).catch(report);});return b;}
-  function report(e){if(disposed)return;const code=e?.message||e,message=code==='TIMEOUT'&&videoSession&&!cues.some(c=>c.translation)?U.subtitleStatusCopy(locale).emptyTimeout:U.error(code,locale,e?.reason);videoSession?.overlay?.notify(message,true);if(status){status.textContent=message;status.className='status error';updateFooter();}}
+  function report(e){if(disposed)return;const code=e?.message||e,message=code==='TIMEOUT'&&videoSession&&!cues.some(c=>c.translation)?U.subtitleStatusCopy(locale).emptyTimeout:U.error(code,locale,e?.reason),detail=U.errorDetail(code,e?.reason);videoSession?.overlay?.notify(message,true,detail);if(status){status.textContent=message;status.title=detail;status.className='status error';updateFooter();}}
   function note(text){if(disposed)return;const failed=videoSession?.chunks?.find(c=>c.error);videoSession?.overlay?.notify(failed?U.error(failed.error,locale):text,!!failed);if(!status)return;status.textContent=text;status.className='status';updateFooter();}
   function updateFooter(){if(!footer)return;cancelButton.hidden=!requests.size;footer.hidden=!requests.size&&!status.textContent;}
   function pageTheme(){for(const node of [document.body,document.documentElement]){if(!node)continue;const c=getComputedStyle(node).backgroundColor.match(/[\d.]+/g)?.map(Number);if(c&&c.length>=3&&(c.length===3||c[3]>=0.5))return (c[0]*.2126+c[1]*.7152+c[2]*.0722)<128?'dark':'light';}return getComputedStyle(document.documentElement).colorScheme==='dark'?'dark':'light';}
   function isolateHost(node,layout){node.style.setProperty('all','initial','important');for(const [key,value]of Object.entries(layout))node.style.setProperty(key,value,'important');}
+  function captionIcon(active){const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const box=document.createElementNS(ns,'rect');box.setAttribute('x','2.5');box.setAttribute('y','5.5');box.setAttribute('width','19');box.setAttribute('height','13');box.setAttribute('rx','3');box.setAttribute('fill',active?'currentColor':'none');box.setAttribute('stroke','currentColor');box.setAttribute('stroke-width','1.7');const text=document.createElementNS(ns,'text');text.setAttribute('x','12');text.setAttribute('y','15.6');text.setAttribute('text-anchor','middle');text.setAttribute('font-size',locale==='zh-CN'?'9.5':'8');text.setAttribute('font-weight','700');text.setAttribute('font-family','Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif');text.setAttribute('fill',active?'#111':'currentColor');text.textContent=locale==='zh-CN'?'译':'CC';svg.append(box,text);return svg;}
   function iconButton(label,path,fn){const b=button('',fn,'quiet icon');b.setAttribute('aria-label',label);b.title=label;const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const shape=document.createElementNS(svg.namespaceURI,'path');shape.setAttribute('d',path);svg.append(shape);b.append(svg);return b;}
   function source(){return {url:location.href,title:document.title.slice(0,500),...(video?{time:video.currentTime}:{})};}
   async function request(req,onProgress){
@@ -48,7 +49,7 @@
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:['both','translation','original','off'].includes(stored.videoMode)?stored.videoMode:'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause!==false,autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:['both','translation','original','off'].includes(stored.videoMode)?stored.videoMode:'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -62,7 +63,7 @@
     });
     return preferenceSave;
   }
-  function needsTranslation(){return prefs.videoMode==='both'||prefs.videoMode==='translation';}
+  function needsTranslation(){if(videoSession?.sameLanguage)return false;return prefs.videoMode==='both'||prefs.videoMode==='translation';}
   function field(label,control){const row=el('div',undefined,'field');row.append(el('span',label),control);return row;}
   function switchControl(label,value,change){const b=button('',()=>{const next=b.getAttribute('aria-checked')!=='true';b.setAttribute('aria-checked',String(next));return change(next);},'switch');b.setAttribute('role','switch');b.setAttribute('aria-label',label);b.setAttribute('aria-checked',String(value));return b;}
   function languageControl(videoLanguage=false){return U.languagePicker({locale,value:videoLanguage?prefs.videoTarget:target,expanded:expandedLanguages,onchange:value=>{
@@ -85,7 +86,7 @@
   function clear(mode){if(mode!=='settings'){cancel();stopVideo();}body.onkeydown=null;body.replaceChildren();note('');}
   function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=document.querySelector('video,audio');body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
   function showSettings(){clear('settings');body.append(button(t.back,()=>videoSession?videoSettings():showPageHome(),'quiet'),el('h2',t.settings),field(t.webLanguage,languageControl()));
-    body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})),field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;videoSession?.playback?.update();return savePreferences({bufferPause:v});})));
+    body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
     const theme=el('select');theme.setAttribute('aria-label',t.appearance);for(const [value,label]of [['light',t.light],['dark',t.dark]]){const o=el('option',label);o.value=value;theme.append(o);}theme.value=prefs.theme||pageTheme();theme.onchange=()=>{prefs.theme=theme.value;shadow.querySelector('.cindy-root').dataset.theme=prefs.theme;videoSession?.overlay?.update();savePreferences({theme:prefs.theme}).catch(report);};body.append(field(t.appearance,theme),el('h2',t.modelSettings),el('p',t.modelHint,'muted'));
     const link=el('a',t.open);link.href='cindy://focus';body.append(link);
   }
@@ -206,7 +207,7 @@
     let host=native.querySelector('[data-cindy-player-entry]');
     if(!host){
       host=el('div');host.setAttribute('data-cindy-player-entry','');isolateHost(host,{display:'inline-flex',height:'100%','vertical-align':'top'});
-      const root=host.attachShadow({mode:'closed'});root.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;width:36px;padding:0;font-weight:600;display:inline-flex;align-items:center;justify-content:center}button img{width:20px;height:20px;border-radius:50%;object-fit:cover}'));const control=el('div',undefined,'cindy-root'),entry=button('',()=>open('video'),'quiet');entry.setAttribute('aria-label','Cindy');entry.title='Cindy';const icon=el('img');icon.src=brandURL;icon.alt='';entry.append(icon);control.append(entry);root.append(control);
+      const root=host.attachShadow({mode:'closed'});root.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;width:36px;padding:0;font-weight:600;display:inline-flex;align-items:center;justify-content:center}button svg{width:24px;height:24px;display:block}'));const control=el('div',undefined,'cindy-root'),entry=button('',()=>open('video'),'quiet');entry.setAttribute('aria-label','Cindy · '+t.video);entry.title='Cindy · '+t.video;entry.append(captionIcon(false));control.append(entry);root.append(control);
       for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])host.addEventListener(event,e=>e.stopPropagation());
     }
     if(host.parentElement!==native)native.prepend(host);
@@ -221,54 +222,63 @@
     const root=overlayHost.attachShadow({mode:'closed'});
     const css=U.css+`
       .captions-root{position:absolute;inset:0;pointer-events:none}
-      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:88%;padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.5);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.9);line-height:1.28;overflow-wrap:anywhere}
-      .caption-original{font-size:calc(var(--caption-size)*.76);color:rgba(255,255,255,.94);white-space:pre-line}
-      .caption-translation{font-size:var(--caption-size);margin-top:3px;white-space:pre-line}
+      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out,left .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:min(70%,900px);padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.55);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:600;text-shadow:0 0 2px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.9);line-height:1.3;overflow-wrap:anywhere}.caption-box[data-caption-theme=light]{background:rgba(255,255,255,.8);color:#1a1a1a;text-shadow:none}.caption-hint{position:absolute;bottom:var(--caption-bottom,16px);left:50%;transform:translateX(-50%);max-width:88%;padding:6px 14px;border-radius:9999px;background:rgba(18,18,17,.6);color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;line-height:18px;text-align:center}
+      .caption-original{font-size:calc(var(--caption-size)*.78);font-weight:400;opacity:.86;white-space:pre-line}
+      .caption-translation{font-size:var(--caption-size);margin-top:5px;white-space:pre-line}
       @media(prefers-reduced-motion:reduce){.caption-box{transition:none}}
       .caption-bar{position:absolute;bottom:8px;right:70px;display:flex;gap:4px;align-items:center;padding:3px;border:1px solid var(--board);border-radius:9999px;background:var(--surface);pointer-events:auto;opacity:0;transition:opacity .15s}
       .captions-root[data-controls=true] .caption-bar,.caption-bar:hover,.caption-bar:focus-within{opacity:1}.caption-bar .label{font-size:12px;padding:0 8px}.caption-bar button{padding:4px 10px}
       .caption-settings{position:absolute;bottom:56px;right:12px;width:min(292px,calc(100% - 24px));max-height:calc(100% - 68px);overflow:auto;overscroll-behavior:contain;pointer-events:auto;background:var(--card);border:1px solid var(--board);border-radius:12px}
-      .caption-heading{position:sticky;top:0;z-index:1;background:var(--card);padding:10px 12px;border-bottom:1px solid var(--board);flex-wrap:nowrap}.caption-settings .status{display:none}.caption-settings footer:has(button[hidden]){display:none}.captions-root:has(.caption-settings:not([hidden])) .caption-box{visibility:hidden}main{padding:12px}footer{padding:8px 12px;border-top:1px solid var(--board)}.video-list{max-height:180px;overflow:auto}.cue small{display:block}.status.error{color:var(--danger)}
+      .caption-heading{position:sticky;top:0;z-index:1;background:var(--card);padding:10px 12px;border-bottom:1px solid var(--board);flex-wrap:nowrap}.caption-settings .status{display:none}.caption-settings footer:has(button[hidden]){display:none}.captions-root:not([data-wide=true]):has(.caption-settings:not([hidden])) .caption-box{visibility:hidden}.captions-root[data-wide=true]:has(.caption-settings:not([hidden])) .caption-box{left:calc((100% - 316px)/2);max-width:calc(100% - 340px)}.captions-root[data-compact=true] .caption-settings{left:0;right:0;width:auto;border-radius:12px 12px 0 0}.caption-notice[data-ready=true]:not(.error) .preparation-track{display:none}main{padding:12px}footer{padding:8px 12px;border-top:1px solid var(--board)}.video-list{max-height:180px;overflow:auto}.cue small{display:block}.status.error{color:var(--danger)}
       .caption-notice{padding:12px;border-bottom:1px solid var(--board);background:var(--surface);color:var(--text);font-size:12px;line-height:18px;pointer-events:auto}.preparation-heading{display:flex;justify-content:space-between;gap:8px;font-weight:500}.preparation-track{height:4px;background:var(--board);border-radius:2px;overflow:hidden;margin:8px 0}.preparation-fill{height:100%;background:var(--text);width:0}.preparation-detail,.preparation-cache{color:var(--muted);margin-top:4px}.preparation-error{color:var(--danger);margin-top:6px;overflow-wrap:anywhere}.preparation-error:empty{display:none}.caption-notice button{margin-top:8px}
-      .caption-notice.error{color:var(--danger)}
+      .caption-notice.error .preparation-heading{color:var(--danger)}.caption-notice .preparation-error{color:var(--text)}.preparation-cache.warning{color:var(--danger)}.detail-code{font-size:11px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.detail-code:empty{display:none}.caption-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.caption-actions:not(:has(button:not([hidden]))){display:none}.caption-notice button{margin-top:0}
     `;
     root.append(el('style',css));const surface=el('div',undefined,'cindy-root captions-root');surface.dataset.theme=prefs.theme||pageTheme();
     const box=el('div',undefined,'caption-box');box.setAttribute('aria-label',t.bilingualSubtitles);box.hidden=true;
     const original=el('div','', 'caption-original'),translation=el('div','', 'caption-translation');box.append(original,translation);
     const settings=el('section',undefined,'caption-settings');settings.setAttribute('aria-label',t.subtitleSettings);settings.hidden=true;
     const originalParent=body.parentElement;const settingsHeader=el('div',undefined,'row caption-heading');settingsHeader.append(el('h2','Cindy · '+t.video,'grow'),iconButton(t.closeSettings,'M6 6l12 12M18 6 6 18',()=>{settings.hidden=true;toggle.setAttribute('aria-expanded','false');}));settings.append(settingsHeader,body,footer);
-    const bar=el('div',undefined,'caption-bar'),toggle=button('',()=>{settings.hidden=!settings.hidden;if(!settings.hidden)videoSettings();toggle.setAttribute('aria-expanded',String(!settings.hidden));surface.dataset.controls='true';});toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label',t.subtitleSettings);toggle.title=t.subtitleSettings;const toggleIcon=el('img');toggleIcon.src=brandURL;toggleIcon.alt='';toggleIcon.style.cssText='width:20px;height:20px;border-radius:50%;object-fit:cover';toggle.append(toggleIcon);
+    const bar=el('div',undefined,'caption-bar'),toggle=button('',()=>{settings.hidden=!settings.hidden;if(!settings.hidden)videoSettings();toggle.setAttribute('aria-expanded',String(!settings.hidden));surface.dataset.controls='true';});toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label',t.subtitleSettings);toggle.title=t.subtitleSettings;toggle.append(captionIcon(true));
     bar.append(toggle);
     const controlHost=el('div');controlHost.setAttribute('data-cindy-player-control','');isolateHost(controlHost,{display:'inline-flex',height:'100%','vertical-align':'top'});
-    const cr=controlHost.attachShadow({mode:'closed'});cr.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;padding:0 10px}'));const control=el('div',undefined,'cindy-root');cr.append(control);
+    const cr=controlHost.attachShadow({mode:'closed'});cr.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;padding:0 10px}button svg{width:24px;height:24px;display:block}'));const control=el('div',undefined,'cindy-root');cr.append(control);
     const placeControl=()=>{const native=player.querySelector('.ytp-right-controls');if(native){if(controlHost.parentElement!==native)native.prepend(controlHost);if(toggle.parentElement!==control)control.append(toggle);bar.hidden=true;}else{if(toggle.parentElement!==bar)bar.append(toggle);controlHost.remove();bar.hidden=false;}};placeControl();
     for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])controlHost.addEventListener(event,e=>e.stopPropagation());
-    const st=U.subtitleStatusCopy(locale),notice=el('div','', 'caption-notice'),noticeText=el('div','','preparation-error'),retry=button(t.retrySubtitles,()=>videoSession?.retry(),'quiet');retry.hidden=true;
+    const st=U.subtitleStatusCopy(locale),notice=el('div','', 'caption-notice'),noticeText=el('div','','preparation-error'),codeText=el('div','','detail-code'),retry=button(t.retrySubtitles,()=>videoSession?.retry(),'quiet');retry.hidden=true;const useSite=button(t.useSiteCaptions,()=>videoSession?.retry(),'quiet'),importBtn=button(t.subtitles,importSubtitleFile,'quiet'),actions=el('div',undefined,'caption-actions'),hint=el('div','','caption-hint');hint.hidden=true;useSite.hidden=true;importBtn.hidden=true;let noticeCode='';
     const heading=el('div',undefined,'preparation-heading'),percent=el('span','0%'),track=el('div',undefined,'preparation-track'),fill=el('div',undefined,'preparation-fill'),detail=el('div','','preparation-detail'),cacheDetail=el('div','','preparation-cache');
-    heading.append(el('span',st.title),percent);track.append(fill);track.setAttribute('role','progressbar');track.setAttribute('aria-label',st.title);track.setAttribute('aria-valuemin','0');track.setAttribute('aria-valuemax','100');notice.append(heading,track,detail,cacheDetail,noticeText,retry);
+    const title=el('span',st.title);heading.append(title,percent);track.append(fill);track.setAttribute('role','progressbar');track.setAttribute('aria-label',st.title);track.setAttribute('aria-valuemin','0');track.setAttribute('aria-valuemax','100');actions.append(useSite,importBtn,retry);notice.append(heading,track,detail,cacheDetail,noticeText,codeText,actions);
     const clock=seconds=>{if(!Number.isFinite(seconds))return '—';const value=Math.max(0,Math.floor(seconds));return Math.floor(value/60)+':'+String(value%60).padStart(2,'0');};
     let noticeError=false;
     const progress=()=>{
-      const session=videoSession;if(!session)return;notice.hidden=!needsTranslation();const label=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));toggle.title=label;if(notice.hidden)return;
-      const p=L.subtitlePreparation(session.chunks,media.currentTime),phase=session.paused?'paused':p.stage;
-      // Preparation is a rolling playback buffer, not a whole-video download.
-      const buffer=L.subtitleBuffer(session.chunks,media.currentTime,media.playbackRate),ready=buffer.ready;
-      const value=ready?100:Math.min(99,Math.floor(buffer.ahead/15*100));
+      const session=videoSession;if(!session)return;
       const empty=session.noCaptions&&!noticeError;
+      // A missing caption source is a page problem with its own next steps, not a translation failure.
+      const sourceProblem=noticeError&&/^(SUBTITLE_|INVALID_SUBTITLE)/.test(noticeCode)&&!session.words?.length;
+      notice.hidden=!needsTranslation()&&!empty&&!sourceProblem;
+      const label=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));toggle.title=label;
+      const buffer=L.subtitleBuffer(session.chunks,media.currentTime,media.playbackRate),ready=buffer.ready&&!empty&&!noticeError;
+      const until=Number.isFinite(buffer.ahead)?clock(media.currentTime+buffer.ahead):null;
+      const buffering=!!session.playback?.buffering;
+      hint.hidden=!buffering;if(buffering)hint.textContent=t.waitingPlayback+' '+st.preparingTo.replace('{time}',until||clock(media.currentTime));
+      if(notice.hidden)return;
+      const p=L.subtitlePreparation(session.chunks,media.currentTime),phase=session.paused?'paused':p.stage;
+      const value=ready?100:Math.min(99,Math.floor(buffer.ahead/15*100));
       percent.textContent=noticeError?st.needsRetry:empty?'—':ready?st.ready:session.paused?st.stages.paused:st.preparingShort;
+      title.textContent=empty||sourceProblem?t.captionsUnavailableTitle:st.title;
       fill.style.width=value+'%';if(p.total)track.setAttribute('aria-valuenow',String(value));else track.removeAttribute('aria-valuenow');
-      track.setAttribute('aria-valuetext',percent.textContent);notice.dataset.ready=String(ready);
+      track.setAttribute('aria-valuetext',percent.textContent);notice.dataset.ready=String(ready);notice.classList.toggle('error',noticeError);
       if(!ready)toggle.title=t.video+' · '+(noticeError?st.needsRetry:session.paused?st.paused:st.preparingShort);
-      const pending=['connecting','accepted','opening-task','submitting-task','stopping','cache','queued','waiting-previous','model','generating','validating','saving'].includes(phase)||!!p.errorStage;
-      const timing=p.range?' · '+clock(p.range[0])+'–'+clock(p.range[1]):'';
-      detail.textContent=empty?t.noCaptions+' '+t.noSubtitles:(st.stages[phase]||st.preparing)+(p.errorStage?' · '+(st.stages[p.errorStage]||st.preparing):'')+(pending?' · '+p.elapsed+st.seconds:'')+(p.receivedChars?' · '+p.receivedChars+st.characters:'')+timing+(p.attempt>1?' · '+st.attempt+p.attempt+st.attemptEnd:'');
-      const prepared=p.total?st.done+' '+p.done+'/'+p.total+' · '+st.ahead+' '+(p.complete?'✓':clock(p.ahead)):'';
-      const saved=p.cacheError?st.cacheFailed:p.saved?st.saved+(p.cached?' · '+st.cacheHit+' '+p.cached:''):p.done?st.temporary:'';
-      cacheDetail.textContent=[prepared,saved].filter(Boolean).join('\n');cacheDetail.style.whiteSpace='pre-line';
-      notice.dataset.complete=String(p.complete&&!noticeError&&!p.cacheError);retry.hidden=!noticeError&&!session.chunks?.some(c=>c.error);
+      const stageText=st.stages[phase]||st.preparing;
+      detail.textContent=empty||sourceProblem?t.captionsUnavailableBody:session.paused?st.stages.paused:ready?(buffer.complete?st.stages.prepared:st.preparedTo.replace('{time}',until)):p.stage==='failed'?st.stages.failed:(session.words?.length&&until?st.preparingTo.replace('{time}',until):st.preparingStart)+' · '+stageText;
+      cacheDetail.textContent=empty||sourceProblem?'':p.cacheError?st.cacheFailed:p.saved?st.saved+(p.cached?' · '+st.cacheHit+' '+p.cached:''):p.complete?st.temporary:'';
+      cacheDetail.classList.toggle('warning',!!p.cacheError);
+      notice.dataset.complete=String(p.complete&&!noticeError&&!p.cacheError);
+      const chunkError=session.chunks?.some(c=>c.error);
+      retry.hidden=!(noticeError&&!sourceProblem)&&!chunkError;useSite.hidden=!(empty||sourceProblem);importBtn.hidden=!(empty||sourceProblem);
+      noticeText.hidden=sourceProblem;codeText.hidden=!noticeError;
     };
     const progressTimer=setInterval(progress,1000);progress();
-    settings.insertBefore(notice,body);surface.append(box,bar,settings);root.append(surface);player.append(overlayHost);host.style.setProperty('display','none','important');
+    settings.insertBefore(notice,body);surface.append(box,hint,bar,settings);root.append(surface);player.append(overlayHost);host.style.setProperty('display','none','important');
     const nativeNodes=new Map(),nativeTracks=new Map();let currentText='',frame=0,lastFrame=0,controlsTimer,captionSize=16,fitKey='';
     const fitCaption=()=>{
       if(box.hidden)return;
@@ -315,6 +325,7 @@
       const bounds=playerFrame?{left:'0px',top:'0px',width:'100%',height:'100%'}:{left:(r.left-p.left+player.scrollLeft)+'px',top:(r.top-p.top+player.scrollTop)+'px',width:r.width+'px',height:r.height+'px'};
       for(const [key,value]of Object.entries(bounds))overlayHost.style.setProperty(key,value,'important');
       syncControls();
+      surface.dataset.wide=String(r.width>=640);surface.dataset.compact=String(r.width<480);
       captionSize=Math.max(16,Math.min(40,r.width*.027))*({small:.85,medium:1,large:1.18}[prefs.videoSize]||1);fitCaption();
     };
     const resize=new ResizeObserver(position);resize.observe(media);resize.observe(player);position();
@@ -322,14 +333,14 @@
     const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
     const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
-    const update=()=>{surface.dataset.theme=prefs.theme||pageTheme();toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
+    const update=()=>{surface.dataset.theme=prefs.theme||pageTheme();box.dataset.captionTheme=prefs.captionTheme||'dark';toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
     overlayHost.addEventListener('keydown',e=>{if(e.key==='Escape'){settings.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
     const outside=e=>{if(!e.composedPath().includes(overlayHost)&&!e.composedPath().includes(controlHost)){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}};document.addEventListener('pointerdown',outside);
     return {
       update,progress,openSettings(render=true){if(render)videoSettings();settings.hidden=false;toggle.setAttribute('aria-expanded','true');surface.dataset.controls='true';},closeSettings(){settings.hidden=true;toggle.setAttribute('aria-expanded','false');},
       track(track){if(!nativeTracks.has(track))nativeTracks.set(track,track.mode);if(track.mode!=='hidden')track.mode='hidden';},
       render(cue){const text=cue?.text||'',translated=cue?.translation||'';currentText=text;box.hidden=!text||prefs.videoMode==='off';original.hidden=prefs.videoMode==='translation'&&!!translated;translation.hidden=!translated||prefs.videoMode==='original';if(original.textContent!==text)original.textContent=text;if(translation.textContent!==translated)translation.textContent=translated;if(text||prefs.videoMode==='off')suppressNative();else restoreNodes();if(!needsTranslation())notice.hidden=true;fitCaption();},
-      notify(text,error=false){noticeError=error;noticeText.textContent=error?text:'';progress();},
+      notify(text,error=false,detail=''){noticeError=error;noticeCode=error?detail:'';noticeText.textContent=error?text:'';codeText.textContent=error&&detail?t.errorDetails+' · '+detail:'';progress();},
       destroy(){clearInterval(progressTimer);document.removeEventListener('pointerdown',outside);controlHost.remove();clearTimeout(controlsTimer);player.removeEventListener('pointermove',showControls);cancelAnimationFrame(frame);resize.disconnect();observer.disconnect();controlsObserver.disconnect();media.removeEventListener('play',play);media.removeEventListener('seeked',sync);media.removeEventListener('loadedmetadata',sync);document.removeEventListener('fullscreenchange',sync);window.removeEventListener('scroll',position);window.removeEventListener('resize',position);restoreNodes();for(const [track,mode]of nativeTracks)if(track.mode==='hidden')track.mode=mode;originalParent.append(body,footer);overlayHost.remove();host?.style.setProperty('display','block','important');if(positioned&&player.style.position==='relative'){if(oldPosition)player.style.setProperty('position',oldPosition,oldPriority);else player.style.removeProperty('position');}}
     };
   }
@@ -380,6 +391,8 @@
     }catch(e){if(current()){session.failed=true;session.retryButton.hidden=false;report(e);}}
     finally{session.running=false;if(session===videoSession&&(g!==generation||revision!==session.revision)&&!session.paused&&!session.failed)translateCues();}
   }
+  // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
+  function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
@@ -392,32 +405,44 @@
     session.reading=true;clearTimeout(videoTimer);
     try {
       if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){showVideo();return;}
+      const youtube=/(^|\.)youtube\.com$/.test(location.hostname);
       if(!session.imported){
-        const youtube=/(^|\.)youtube\.com$/.test(location.hostname);
         const tracks=[...video.textTracks],track=tracks.find(x=>x.mode==='showing')||tracks.find(x=>x===session.nativeTrack)||tracks.find(x=>x.kind==='subtitles'||x.kind==='captions');
-        if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube)mergeCues(next);}
+        if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){checkSameLanguage(session,track.language);mergeCues(next);}}
         if(youtube&&!session.fullTranscript&&!session.readBlocked&&Date.now()>=session.nextRead){
           session.attempts++;session.nextRead=Date.now()+Math.min(30000,3000*session.attempts);
           const result=await sendMessage({type:'cindy-captions',language:'auto'});
           if(session!==videoSession)return;
-          if(result?.ok){if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}}else throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
+          if(result?.ok){if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}}else throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         }
       }
-      if(session.words?.length){session.noCaptions=false;translateCues();}else if(!session.readBlocked){session.noCaptions=session.attempts>=3;note(session.noCaptions?t.noCaptions:t.waitSubtitles);session.playback?.update();}
+      // A page without any caption track also deserves a clear answer instead of an endless wait.
+      if(!youtube&&!session.imported&&!session.words?.length)session.attempts++;
+      if(session.words?.length){session.noCaptions=false;translateCues();}else if(!session.readBlocked){session.noCaptions=session.attempts>=(youtube?3:8);note(session.noCaptions?t.noCaptions:t.waitSubtitles);session.playback?.update();}
     }catch(e){if(session===videoSession){session.readBlocked=e.message!=='SUBTITLE_UNAVAILABLE';session.noCaptions=session.readBlocked||session.attempts>=3;session.playback?.update();session.retryButton.hidden=false;report(e);}}
     finally{session.reading=false;if(session===videoSession)videoTimer=setTimeout(()=>readCues(session),1200);}
   }
   function videoSettings(){
-    const session=videoSession;if(!session)return;body.replaceChildren();const modes=el('div',undefined,'mode-grid');
-    for(const [mode,label]of [['both',t.both],['translation',t.translationOnly],['original',t.originalOnly],['off',t.off]]){const b=button(label,()=>{applyVideoMode(mode);videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoMode===mode));modes.append(b);}body.append(modes);
+    const session=videoSession;if(!session)return;body.replaceChildren();
+    // Modes are grouped by cost: the first pair asks the model, the second never does.
+    const group=(label,entries)=>{const wrap=el('div',undefined,'mode-group'),row=el('div',undefined,'segmented');wrap.append(el('small',label),row);for(const [mode,text]of entries){const b=button(text,()=>{applyVideoMode(mode);videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoMode===mode));row.append(b);}return wrap;};
+    const modes=el('div',undefined,'stack');modes.append(group(t.translateGroup,[['both',t.both],['translation',t.translationOnly]]),group(t.noTranslateGroup,[['original',t.originalOnly],['off',t.off]]));body.append(modes);
+    if(session.sameLanguage){const same=el('div',undefined,'card stack');same.append(el('p',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'quiet'));body.append(same);}
     const picker=languageControl(true);picker.querySelector('button').disabled=!needsTranslation();body.append(field(t.videoLanguage,picker),el('small',prefs.videoMode==='off'?t.offHint:prefs.videoMode==='original'?t.originalHint:t.videoLanguageHint));
-    const sizes=el('div',undefined,'segmented');for(const size of ['small','medium','large']){const b=button(t[size],()=>{prefs.videoSize=size;savePreferences({videoSize:size}).catch(report);session.overlay?.update();videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoSize===size));sizes.append(b);}body.append(field(t.subtitleSize,sizes),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})),button(t.modelSettings,showSettings,'text-link'));
-    const more=el('details'),tools=el('div',undefined,'stack'),file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;mergeCues(next);translateCues();}catch(e){report(e);}};
-    more.append(el('summary',t.more),tools);tools.append(session.retryButton,...(subtitleCacheSupported?[button(U.subtitleStatusCopy(locale).retranslate,async()=>{cancel();session.paused=true;session.playback?.update();await request({op:'subtitle-cache-clear',target:prefs.videoTarget});if(session!==videoSession)return;resetSubtitleTranslation();})]:[]),button(t.subtitles,()=>file.click()),file,button(t.export,()=>download(L.exportSubtitles(cues),'subtitles.srt')));
-    const controls=el('div',undefined,'row');controls.append(button(t.previous,()=>jump(Math.max(0,activeCue-1))),button(t.replay,()=>jump(Math.max(0,activeCue))),button(t.next,()=>jump(Math.min(cues.length-1,activeCue+1))));const speed=el('select');speed.setAttribute('aria-label',t.playbackSpeed);for(const n of [.5,.75,1,1.25,1.5,2]){const o=el('option',n+'×');o.value=n;speed.append(o);}speed.value=video.playbackRate;speed.onchange=()=>video.playbackRate=Number(speed.value);controls.append(speed);tools.append(controls);
-    tools.append(field(t.repeat,switchControl(t.repeat,repeat,v=>repeat=v)),field(t.pause,switchControl(t.pause,autoPause,v=>autoPause=v)));
-    const documentView=el('details');documentView.append(el('summary',t.readTranscript),el('article',undefined,'subtitle-document'));tools.append(documentView,el('div',undefined,'list video-list'));body.append(more);cueList();
+    const sizes=el('div',undefined,'segmented');for(const size of ['small','medium','large']){const b=button(t[size],()=>{prefs.videoSize=size;savePreferences({videoSize:size}).catch(report);session.overlay?.update();videoSettings();});b.setAttribute('aria-pressed',String(prefs.videoSize===size));sizes.append(b);}
+    const themes=el('div',undefined,'segmented');for(const [value,label]of [['dark',t.dark],['light',t.light]]){const b=button(label,()=>{prefs.captionTheme=value;savePreferences({captionTheme:value}).catch(report);session.overlay?.update();videoSettings();});b.setAttribute('aria-pressed',String((prefs.captionTheme||'dark')===value));themes.append(b);}
+    body.append(field(t.subtitleSize,sizes),field(t.captionTheme,themes),field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;session.playback?.update();return savePreferences({bufferPause:v});})),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
+    // Learning tools are what YouTube's own translation cannot offer; they stay one level deep at most.
+    const tools=el('div',undefined,'stack');tools.append(el('h3',t.learningTools,'section-title'));
+    const keyed=(text,key,fn)=>{const b=button(text,fn);b.append(el('kbd',key));b.setAttribute('aria-keyshortcuts',key);return b;};
+    const controls=el('div',undefined,'tool-row');controls.append(keyed(t.previous,'A',()=>jump(Math.max(0,activeCue-1))),keyed(t.replay,'S',()=>jump(Math.max(0,activeCue))),keyed(t.next,'D',()=>jump(Math.min(cues.length-1,activeCue+1))));tools.append(controls);
+    const speed=el('select');speed.setAttribute('aria-label',t.playbackSpeed);for(const n of [.5,.75,1,1.25,1.5,2]){const o=el('option',n+'×');o.value=n;speed.append(o);}speed.value=video.playbackRate;speed.onchange=()=>video.playbackRate=Number(speed.value);
+    tools.append(field(t.playbackSpeed,speed),field(t.repeat+' · R',switchControl(t.repeat,repeat,v=>repeat=v)),field(t.pause+' · Q',switchControl(t.pause,autoPause,v=>autoPause=v)),el('small',t.shortcutsHint));
+    const more=el('details'),documentView=el('details');documentView.append(el('summary',t.readTranscript),el('article',undefined,'subtitle-document'));more.append(el('summary',t.more),documentView,el('div',undefined,'list video-list'));tools.append(more);body.append(tools);
+    const files=el('div',undefined,'stack');files.append(el('h3',t.subtitleFiles,'section-title'));const fileRow=el('div',undefined,'row');fileRow.append(button(t.subtitles,importSubtitleFile),button(t.export,()=>download(L.exportSubtitles(cues),'subtitles.srt')),...(subtitleCacheSupported?[button(U.subtitleStatusCopy(locale).retranslate,async()=>{cancel();session.paused=true;session.playback?.update();await request({op:'subtitle-cache-clear',target:prefs.videoTarget});if(session!==videoSession)return;resetSubtitleTranslation();})]:[]),session.retryButton);files.append(fileRow);body.append(files);
+    body.append(button(t.modelSettings,showSettings,'text-link'));cueList();
   }
+  function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
   async function showVideo(){
     clear('video');video=[...document.querySelectorAll('video,audio')].find(v=>v.getClientRects().length)||document.querySelector('video,audio');
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
@@ -437,7 +462,6 @@
       if(changed)for(const b of body.querySelectorAll('[data-index]'))b.classList.toggle('active',Number(b.dataset.index)===i);
     };media.addEventListener('timeupdate',videoHandler);session.playback=globalThis.CindySubtitlePlayback.create(media,{state:()=>!needsTranslation()||!prefs.bufferPause||session.paused||session.noCaptions?{ready:true,ahead:Infinity}:session.failed||session.chunks?.some(c=>c.error&&c.words.at(-1).end>media.currentTime&&c.words[0].start<=media.currentTime+15*media.playbackRate)?{blocked:true}:!session.words?.length?{ahead:0,ready:false}:L.subtitleBuffer(session.chunks,media.currentTime,media.playbackRate),waiting:()=>note(t.bufferingSubtitles),ready:()=>{if(!session.failed)note(t.subtitlesReady);},error:report});
     session.seekHandler=()=>{const time=media.currentTime,until=time+90*media.playbackRate,busy=(session.chunks||[]).filter(c=>c.busy);if(busy.length&&!busy.some(c=>c.words.at(-1).end>time&&c.words[0].start<=until))cancel();if(L.pendingSubtitleChunks(session.chunks,time,media.playbackRate).length)session.failed=false;translateCues();};media.addEventListener('seeked',session.seekHandler);videoHandler();readCues(session);
-    body.onkeydown=e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;const actions={a:()=>jump(Math.max(0,activeCue-1)),s:()=>jump(Math.max(0,activeCue)),d:()=>jump(Math.min(cues.length-1,activeCue+1)),q:()=>autoPause=!autoPause,r:()=>repeat=!repeat};if(actions[e.key]&&e.isTrusted){e.preventDefault();actions[e.key]();}};
   }
   function download(text,name){const u=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),a=el('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
   let selectionButton, selectionStart, selectionDragged=false;
@@ -483,10 +507,13 @@
       return;
     }
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
-    try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
+    try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
   }
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=/(^|\.)youtube\.com$/.test(location.hostname);if(!videoSession)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){videoSession?.overlay?.closeSettings();if(!videoSession)hidePanel();selectionButton?.remove();}},{signal:lifecycle.signal});
+  // Learning shortcuts follow the video, not the panel: they are only skipped inside editable fields and Cindy's own surfaces.
+  function videoShortcut(e){if(!videoSession||!e.isTrusted||e.metaKey||e.ctrlKey||e.altKey||e.shiftKey||prefs.videoMode==='off')return;const path=e.composedPath(),target=path[0];if(target instanceof Element&&(/INPUT|TEXTAREA|SELECT/.test(target.tagName)||target.isContentEditable))return;if(path.some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-panel')||n.hasAttribute('data-cindy-captions'))))return;const actions={a:()=>jump(Math.max(0,activeCue-1)),s:()=>jump(Math.max(0,activeCue)),d:()=>jump(Math.min(cues.length-1,activeCue+1)),q:()=>{autoPause=!autoPause;videoSettings();},r:()=>{repeat=!repeat;videoSettings();}};const run=actions[e.key];if(!run)return;e.preventDefault();e.stopPropagation();run();}
+  document.addEventListener('keydown',videoShortcut,{capture:true,signal:lifecycle.signal});
 })();

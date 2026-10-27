@@ -168,13 +168,16 @@ test('model failures retain their code and do not falsely diagnose a disconnecte
     const s=createLearningService({core,model:async()=>({ok:false,errorCode:code}),library:async()=>({ok:true})});
     await assert.rejects(s.handle(crypto.randomUUID(),{op:'translate',text:'Hello',target:'en'}),e=>{
       assert.equal(e.message,code);
-      for(const locale of ['zh-CN','en']){const message=ui.error(e.message,locale);assert.ok(message.endsWith('('+code+')'));assert.doesNotMatch(message,/检查.*连接|Check.*connection/i);}
+      // The sentence a person reads carries no code; the code stays available as a separate detail.
+      assert.equal(ui.errorDetail(e.message),code);
+      for(const locale of ['zh-CN','en']){const message=ui.error(e.message,locale);assert.doesNotMatch(message,/\(([A-Z_]+)\)$/);assert.doesNotMatch(message,/检查.*连接|Check.*connection/i);}
       return true;
     });
   }
-  assert.match(ui.error('SOME_NEW_FAILURE','zh-CN'),/尚无法确定具体原因.*SOME_NEW_FAILURE/);
+  assert.match(ui.error('SOME_NEW_FAILURE','zh-CN'),/尚无法确定具体原因/);assert.equal(ui.errorDetail('SOME_NEW_FAILURE'),'SOME_NEW_FAILURE');
   assert.doesNotMatch(ui.error('Error: token=private-value https:\/\/example.test','zh-CN'),/private-value|example.test/);
-  assert.match(ui.error('Error: token=private-value','zh-CN'),/UNKNOWN_ERROR/);
+  assert.doesNotMatch(ui.errorDetail('Error: token=private-value https:\/\/example.test'),/private-value|example.test/);
+  assert.equal(ui.errorDetail('Error: token=private-value'),'UNKNOWN_ERROR');
   for(const code of ['PAIRING_REQUIRED','SESSION_CHANGED'])for(const locale of ['en','zh-CN']) {
     const message=ui.error(code,locale).replace(' ('+code+')','');assert.doesNotMatch(message,/confirm|pairing|配对|确认此浏览器/i);assert.match(message,/automatically|自动重连/);
   }
@@ -320,7 +323,18 @@ test('bridge keeps a slow prefetched subtitle request active for the shared requ
 test('document errors show a bounded reason without echoing arbitrary exception data',()=>{
   const context={};vm.runInNewContext(fs.readFileSync(new URL('../my-browser/extension/ui.js',import.meta.url),'utf8'),context);
   for(const locale of ['en','zh-CN']){
-    assert.match(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'DOCUMENT_UNAVAILABLE'),/DOCUMENT_UNAVAILABLE/);
+    assert.match(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'DOCUMENT_UNAVAILABLE'),/document|文档/i);
+    assert.equal(context.CindyUI.errorDetail('ADDRESS_UNVERIFIED','DOCUMENT_UNAVAILABLE'),'ADDRESS_UNVERIFIED / DOCUMENT_UNAVAILABLE');
     assert.doesNotMatch(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'token=secret'),/token=secret/);
+    assert.doesNotMatch(context.CindyUI.errorDetail('ADDRESS_UNVERIFIED','token=secret'),/token=secret/);
   }
+});
+
+test('same-language detection compares primary language tags only',()=>{
+  // Automatic sessions skip the model when captions already match the target.
+  assert.equal(core.sameLanguage('en','en-US'),true);
+  assert.equal(core.sameLanguage('zh-Hans','zh-CN'),true);
+  assert.equal(core.sameLanguage('en','zh-CN'),false);
+  assert.equal(core.sameLanguage(undefined,'zh-CN'),false);
+  assert.equal(core.sameLanguage('zh','custom:中文'),false);
 });

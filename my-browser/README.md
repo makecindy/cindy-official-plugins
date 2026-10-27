@@ -348,6 +348,14 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.24 subtitle experience (host package 0.4.37)
+
+- Playback is no longer paused by default while subtitles are prepared. "Wait for subtitles before playing" is an explicit switch in the subtitle panel; when it holds playback, the player shows what it is waiting for.
+- Status lines are sentences, not counters: "Prepared to 3:20. Safe to keep watching.", a one-line cache warning, and error codes moved to a separate "Details" line.
+- When YouTube provides no captions, the panel explains it and offers "Turn on site captions, then retry" and "Import SRT / VTT" directly. Pages without any caption track reach the same state instead of waiting forever.
+- Automatically opened sessions whose captions already match the target language skip the model; "Translate anyway" is one click.
+- Modes are grouped by cost (translate with the model / no translation); learning tools (previous, replay, next, speed, repeat, pause after line) are one level deep with their keyboard shortcuts shown, and the shortcuts work while the video is on screen.
+- The player entry is a caption glyph instead of an avatar; captions stay visible while the panel is open on wide players; the panel becomes a bottom drawer on narrow players; a light caption style is available.
 ## 0.4.24 single player icon (host package 0.4.37)
 
 A running subtitle session owns the YouTube control bar: its settings toggle is the only Cindy icon there. YouTube fires `yt-navigate-finish` after an auto-started session may already be running; that event no longer re-inserts the separate entry icon beside the toggle. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.
