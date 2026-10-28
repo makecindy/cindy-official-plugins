@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.33 subtitle language as a second-level page (host package 0.4.50)
+
+The subtitle language is a row showing the current choice; it opens a full page with search, the common languages, all languages and a custom name, and returns to the subtitle tab after a choice. The "already in this language" notice is one line with an inline "Translate anyway".
+
 ## 0.4.32 the caption list is no longer cut at twenty tracks (host package 0.4.49)
 
 With a Chinese interface YouTube orders an auto-dubbed video's 21 caption tracks so that English comes last, and the reader kept only the first 20 tracks. The default caption index then pointed past the list and the first track, Arabic, was read and translated (watch?v=JjbWhEVfOvA). Up to 60 tracks are kept now. When the default caption index is missing, the language of the original audio track (marked default in the streaming formats, e.g. "en-US.4") decides, then the caption track the player is showing.

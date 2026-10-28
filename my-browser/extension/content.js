@@ -69,8 +69,9 @@
   function needsTranslation(){if(videoSession?.sameLanguage)return false;return prefs.videoMode==='both'||prefs.videoMode==='translation';}
   function field(label,control){const row=el('div',undefined,'field');row.append(el('span',label),control);return row;}
   function switchControl(label,value,change){const b=button('',()=>{const next=b.getAttribute('aria-checked')!=='true';b.setAttribute('aria-checked',String(next));return change(next);},'switch');b.setAttribute('role','switch');b.setAttribute('aria-label',label);b.setAttribute('aria-checked',String(value));return b;}
+  function setVideoTarget(value){prefs.videoTarget=value;if(videoSession){videoSession.machineCues=[];videoSession.fullTranscript=false;videoSession.nextRead=0;videoSession.sameLanguage=!!(videoSession.language&&L.sameLanguage(videoSession.language,value));}resetSubtitleTranslation();videoSession?.overlay?.update();savePreferences({videoTarget:value}).catch(report);}
   function languageControl(videoLanguage=false){return U.languagePicker({locale,value:videoLanguage?prefs.videoTarget:target,expanded:expandedLanguages,onchange:value=>{
-    if(videoLanguage){prefs.videoTarget=value;if(videoSession){videoSession.machineCues=[];videoSession.fullTranscript=false;videoSession.nextRead=0;videoSession.sameLanguage=!!(videoSession.language&&L.sameLanguage(videoSession.language,value));}resetSubtitleTranslation();videoSession?.overlay?.update();savePreferences({videoTarget:value}).catch(report);if(videoSession)videoSettings();}else{target=value;prefs.webTarget=value;request({op:'preferences',target:value}).catch(report);if(translated){restorePage();togglePage();}savePreferences({webTarget:value}).catch(report);}
+    if(videoLanguage){setVideoTarget(value);if(videoSession)videoSettings();}else{target=value;prefs.webTarget=value;request({op:'preferences',target:value}).catch(report);if(translated){restorePage();togglePage();}savePreferences({webTarget:value}).catch(report);}
   }});}
   function resetSubtitleTranslation(){if(!videoSession)return;cancel();for(const chunk of videoSession.chunks||[]){chunk.done=false;delete chunk.error;delete chunk.recovery;delete chunk.retryAt;delete chunk.retries;delete chunk.cache;delete chunk.context;}cues=[];videoSession.paused=false;videoSession.failed=false;videoHandler?.();translateCues();}
   function applyVideoMode(mode){prefs.videoMode=mode;if(mode==='both'||mode==='translation')prefs.lastVideoMode=mode;savePreferences({videoMode:mode,lastVideoMode:prefs.lastVideoMode}).catch(report);if(!needsTranslation())cancel();else if(videoSession){videoSession.paused=false;videoSession.failed=false;translateCues();}videoSession?.playback?.update();videoHandler?.();videoSession?.overlay?.update();}
@@ -455,11 +456,17 @@
     }catch(e){if(session===videoSession){session.readBlocked=e.message!=='SUBTITLE_UNAVAILABLE';session.noCaptions=session.readBlocked||session.attempts>=3;session.playback?.update();session.retryButton.hidden=false;report(e);}}
     finally{session.reading=false;if(session===videoSession)videoTimer=setTimeout(()=>readCues(session),1200);}
   }
-  let videoTab='subtitles';
+  let videoTab='subtitles',videoSubpage=null;
   function videoSettings(){
     const session=videoSession;if(!session)return;body.replaceChildren();
+    if(videoSubpage==='language'){
+      // Second level: the whole language directory, with a way back.
+      const head=el('div',undefined,'subpage-head');head.append(button('‹ '+t.back,()=>{videoSubpage=null;videoSettings();}),el('strong',t.videoLanguage));
+      body.append(head,U.languageList({locale,value:prefs.videoTarget,onchange:value=>{setVideoTarget(value);videoSubpage=null;videoSettings();}}));
+      body.querySelector('input[type=search]')?.focus();return;
+    }
     // Three short pages instead of one long scroll: what to show, how to learn, how it behaves.
-    const tabs=el('div',undefined,'tabs');for(const [id,label]of [['subtitles',t.video],['learning',t.learning],['options',t.options]]){const b=button(label,()=>{videoTab=id;videoSettings();});b.setAttribute('aria-pressed',String(videoTab===id));tabs.append(b);}body.append(tabs);
+    const tabs=el('div',undefined,'tabs');for(const [id,label]of [['subtitles',t.video],['learning',t.learning],['options',t.options]]){const b=button(label,()=>{videoTab=id;videoSubpage=null;videoSettings();});b.setAttribute('aria-pressed',String(videoTab===id));tabs.append(b);}body.append(tabs);
     const segmented=(entries,current,pick)=>{const row=el('div',undefined,'segmented');for(const [value,label]of entries){const b=button(label,()=>pick(value));b.setAttribute('aria-pressed',String(current===value));row.append(b);}return row;};
     if(videoTab==='subtitles'){
       // One switch for Cindy's subtitles; when on, choose what they show. Turning them off keeps
@@ -467,9 +474,9 @@
       const on=prefs.videoMode!=='off';
       body.append(field(t.cindySubtitles,switchControl(t.cindySubtitles,on,next=>{applyVideoMode(next?(prefs.lastVideoMode||'both'):'off');videoSettings();})));
       if(on)body.append(field(t.show,segmented([['both',t.both],['translation',t.translationShort]],prefs.videoMode,mode=>{applyVideoMode(mode);videoSettings();})));
-      if(on&&session.sameLanguage){const same=el('div',undefined,'card stack');same.append(el('p',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'quiet'));body.append(same);}
       // The target language can be changed at any time, even when the captions already match it.
-      body.append(field(t.videoLanguage,languageControl(true)));
+      const languageRow=button('',()=>{videoSubpage='language';videoSettings();},'nav-row');languageRow.append(el('span',t.videoLanguage),el('span',(L.languageName(prefs.videoTarget)||prefs.videoTarget)+'  ›','nav-value'));body.append(languageRow);
+      if(on&&session.sameLanguage){const same=el('small',undefined,'inline-note');same.append(el('span',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'text-link'));body.append(same);}
       if(!on)body.append(el('small',t.offHint));
       if(on)body.append(field(t.subtitleSize,segmented([['small',t.small],['medium',t.medium],['large',t.large]],prefs.videoSize,size=>{prefs.videoSize=size;savePreferences({videoSize:size}).catch(report);session.overlay?.update();videoSettings();})),field(t.captionTheme,segmented([['dark',t.dark],['light',t.light]],prefs.captionTheme||'dark',value=>{prefs.captionTheme=value;savePreferences({captionTheme:value}).catch(report);session.overlay?.update();videoSettings();})));
     }else if(videoTab==='learning'){
