@@ -348,6 +348,10 @@ Windows/Linux 原机及正式 Cindy 安装尚待补充验证；不把跨平台�
 
 YouTube 的 timedtext 接口现在要求页面播放器附带的来源令牌（`pot`），扩展直接请求只会收到空的 200，于是明明有字幕的视频也报 `SUBTITLE_EMPTY`。直接读取为空时，扩展改为在已核验的视频文档里让播放器切到目标字幕轨，读取播放器自己发出的请求地址，用同源地址加 `fmt=json3`、不带 Cookie 再取一次，随后恢复播放器原来的字幕状态。文字记录面板回退也兼容了没有 `target-id` 的新版「在此视频中」面板。不新增权限，请求仍只发往 youtube.com，签名通信协议不变。
 
+## 浏览器已更新未重启时绑定仍可用（宿主插件包 0.4.41）
+
+Chrome、Edge、Brave 会在运行中直接替换磁盘上的程序包。用户重启浏览器之前，macOS 对正在运行的浏览器进程做动态验签会报「the code on disk does not match what is running」，native host 因此拒绝所有绑定，插件一重启扩展就显示「Cindy 还没有连接」，直到浏览器重启。现在 native host 只对这一种情况放行：运行中的进程签名身份必须是已知浏览器之一（identifier 加 team），且它启动时的可执行文件仍满足完整签名要求。其它任何验签失败照旧拒绝，仍然不信任 argv 或 ps 路径。
+
 ## 0.4.26 页面 UI 扛得住扩展更新（宿主插件包 0.4.40）
 
 扩展更新或重载后，已打开标签页里仍在运行的旧内容脚本会继续挂播放器入口、并从扩展地址加载 Cindy 图标，Chrome 会记成「Unsafe attempt to load URL chrome-extension://…/icons/48.png」。现在新脚本启动时会在页面上通知，旧脚本立刻退出；图标改为内联（不再声明任何 `web_accessible_resources`），页面永远不会加载扩展地址，网站也无法借此探测扩展。扩展页上那条「'dns' requires dev channel」是清单提示而不是错误：该权限只服务于一个可选的 DNS 检查，Chrome 只在 dev 渠道提供这个接口。
