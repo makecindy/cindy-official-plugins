@@ -389,3 +389,27 @@ test('per-video mode: a pending receipt replays to its own task even after anoth
   const r=await f.make()({prompt:'b',scope:'s',source:yt('two','Two')});
   assert.equal(r.taskId,'t2');assert.equal(f.sends.length,2);assert.equal(f.sends[0].taskId,'t1');assert.equal(f.tasksById.get('t1').status,'archived');
 });
+
+test('per-video mode: fixed rules travel once per task; later passages send a reminder',async()=>{
+  // Rule (2026-10-28): the 1.5K-character editing rules were resent with every passage.
+  const f=perVideoFixture(),model=f.make();
+  const rules='RULES: edit and translate.\n',reminder='REMINDER\n';
+  const ask=(n,extra={})=>model({prompt:rules+'{"passage":'+n+'}',rules,reminder,scope:'s',source:yt('one','One'),...extra});
+  for(let i=1;i<=3;i++)await ask(i);
+  const texts=f.sends.map(s=>s.text);
+  assert.ok(texts[0].includes('RULES: edit and translate.'));assert.ok(!texts[0].includes('REMINDER'));
+  for(const text of texts.slice(1)){assert.ok(!text.includes('RULES: edit'));assert.ok(text.includes('REMINDER\n{"passage":'));}
+  // A retry asks for the full rules again; a model change (new revision) resends them once.
+  await ask(4,{fullRules:true});assert.ok(f.sends.at(-1).text.includes('RULES: edit'));
+  await ask(5);assert.ok(!f.sends.at(-1).text.includes('RULES: edit'));
+  f.tasksById.get('t1').revision=2;await ask(6);assert.ok(f.sends.at(-1).text.includes('RULES: edit'),'after a model change');
+  // Different rules (another target language) are sent in full.
+  await model({prompt:'OTHER RULES\n{}',rules:'OTHER RULES\n',reminder,scope:'s',source:yt('one','One')});
+  assert.ok(f.sends.at(-1).text.includes('OTHER RULES'));
+});
+test('per-video mode: the full rules come back periodically so a compacted history regains them',async()=>{
+  const f=perVideoFixture(),model=f.make();const rules='RULES\n';
+  for(let i=0;i<41;i++)await model({prompt:rules+i,rules,reminder:'R\n',scope:'s',source:yt('one','One')});
+  const full=f.sends.map((s,i)=>s.text.includes('RULES\n')?i:-1).filter(i=>i>=0);
+  assert.deepEqual(full,[0,20,40]);
+});

@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## Subtitle rules travel once per task (host package 0.4.44)
+
+The 1.5K-character editing and translation rules were resent with every passage, roughly half of each passage's new input, and piled up in the task's history. They are now sent in full on a task's first passage; later passages carry a one-line reminder plus the passage. The full rules are sent again on a validation retry, after the task's model changes, when the rules themselves change (another target language), and every 20 passages, so a history the host has compacted gets them back. No extension update is needed.
+
 ## 0.4.27 all-auto-generated track lists, and updates reach open pages (host package 0.4.43)
 
 YouTube now auto-generates a caption track per language on many videos, Arabic first, so "the auto-generated track" was Arabic again (watch?v=3pfnSu6HLB8 has twenty auto-generated tracks and no manual one). The default caption index of the video's default audio track is now the first signal; the single auto-generated track is only used when there is exactly one. After an extension update or reload the pages already open kept the previous, dead copy of the content script, so the toolbar button showed "!" and did nothing until the page was refreshed; the new copy is now injected into every open http(s) page on install and update, and the previous copy leaves.
