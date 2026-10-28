@@ -15,10 +15,11 @@ const source=fs.readFileSync(new URL('../my-browser/extension/background.js',imp
 
 function harness() {
   const tabs=new Map(),windows=new Map([[1,{id:1,state:'normal'}]]),data={},calls=[];let next=10,nextWindow=500;
+  const state={closeOnCreate:false};
   const chrome={permissions:{contains:async()=>false},action:{onClicked:{addListener(){}}},runtime:{getURL:path=> 'chrome-extension://fixture/'+(path||''),getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
     storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
     tabs:{get:async id=>{if(!tabs.has(id))throw new Error('No tab');return {...tabs.get(id)};},query:async q=>[...tabs.values()].filter(t=>!q?.windowId || t.windowId===q.windowId).map(t=>({...t})),
-      create:async({url,windowId=1,active=false})=>{const t={id:next++,url,windowId,status:'complete',active};if(active)for(const o of tabs.values())if(o.windowId===windowId)o.active=false;tabs.set(t.id,t);calls.push(['tabs.create',{url,windowId,active}]);return {...t};},
+      create:async({url,windowId=1,active=false})=>{const t={id:next++,url,windowId,status:'complete',active};if(state.closeOnCreate)queueMicrotask(()=>tabs.delete(t.id));if(active)for(const o of tabs.values())if(o.windowId===windowId)o.active=false;tabs.set(t.id,t);calls.push(['tabs.create',{url,windowId,active}]);return {...t};},
       update:async(id,props)=>{calls.push(['tabs.update',id,props]);const t=tabs.get(id);if(props.active)for(const o of tabs.values())if(o.windowId===t.windowId)o.active=false;Object.assign(t,props);return {...t};},
       remove:async id=>{tabs.delete(id);calls.push(['tabs.remove',id]);},
       captureVisibleTab:async(windowId,options)=>{calls.push(['capture',windowId,options]);return 'data:image/'+options.format+';base64,AAAA';},
@@ -32,7 +33,7 @@ function harness() {
   // A tab the user has open in their own window, behind the one they are looking at.
   tabs.set(1,{id:1,url:'https://example.test/user',windowId:1,status:'complete',active:true});
   tabs.set(2,{id:2,url:'https://example.test/behind',windowId:1,status:'complete',active:false});
-  return {run,tabs,windows,calls};
+  return {run,tabs,windows,calls,state};
 }
 
 test('policy: open is a read like navigate; new actions need a tab id and bounded input',()=>{
@@ -107,4 +108,10 @@ test('the first action that needs the debugger opens its page in the user window
   const shot=await h.run('screenshot',{url:'https://example.test/a',tabId:opened.tabId,fullPage:true});
   assert.equal(shot.ok,true,JSON.stringify(shot));assert.match(shot.note,/visible area/);
   assert.equal(h.calls.filter(c=>c[0]==='tabs.create' && String(c[1].url).includes('permissions')).length,1);
+});
+
+test('a new tab closed while it loads is reported as closed, not as an unknown failure',async()=>{
+  const h=harness();h.state.closeOnCreate=true;
+  const opened=await h.run('open',{url:'https://example.test/a'});
+  assert.equal(opened.error,'TAB_CLOSED');assert.equal(opened.execution,'executed');
 });

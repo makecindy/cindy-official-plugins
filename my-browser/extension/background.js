@@ -941,7 +941,9 @@ async function handle(job,policy,target) {
       navigating = true;
       const created = await openInAgentWindow(job.payload.url);
       let loaded = created;
-      try { loaded = await waitForLoad(created.id); } catch { loaded = await chrome.tabs.get(created.id); }
+      try { loaded = await waitForLoad(created.id); } catch { loaded = await chrome.tabs.get(created.id).catch(() => null); }
+      // The tab can be closed while it loads, by the user or the site; say so instead of a generic failure.
+      if (!loaded) return fail('TAB_CLOSED','The new tab was closed before it finished loading, by the user or the site. Ask the user before opening it again.','executed');
       owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
       if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
       return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url ? P.redactUrl(loaded.url) : undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
