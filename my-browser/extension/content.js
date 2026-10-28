@@ -26,7 +26,7 @@
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:true,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -52,7 +52,7 @@
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill!==false,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -123,6 +123,7 @@
     if(['both','translation'].includes(stored.lastVideoMode))prefs.lastVideoMode=stored.lastVideoMode;
     prefs.videoSize=['small','medium','large'].includes(stored.videoSize)?stored.videoSize:prefs.videoSize;
     prefs.bufferPause=stored.bufferPause===true;
+    prefs.backgroundFill=stored.backgroundFill===true;
     prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
@@ -486,7 +487,7 @@
       body.append(field(t.playbackSpeed,speed),field(t.repeat+' · R',switchControl(t.repeat,repeat,v=>repeat=v)),field(t.pause+' · Q',switchControl(t.pause,autoPause,v=>autoPause=v)),el('small',t.shortcutsHint));
       const documentView=el('details');documentView.append(el('summary',t.readTranscript),el('article',undefined,'subtitle-document'));body.append(documentView,el('div',undefined,'list video-list'));
     }else{
-      body.append(field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;session.playback?.update();return savePreferences({bufferPause:v});})),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})),field(t.backgroundFill,switchControl(t.backgroundFill,prefs.backgroundFill,v=>{prefs.backgroundFill=v;if(v)translateCues();return savePreferences({backgroundFill:v});})),el('small',t.videoLanguageHint));
+      body.append(field(t.bufferPause,switchControl(t.bufferPause,prefs.bufferPause,v=>{prefs.bufferPause=v;session.playback?.update();return savePreferences({bufferPause:v});})),field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})),field(t.backgroundFill,switchControl(t.backgroundFill,prefs.backgroundFill,v=>{prefs.backgroundFill=v;if(v)translateCues();return savePreferences({backgroundFill:v});})),el('small',t.backgroundFillHint));
       const files=el('div',undefined,'stack');files.append(el('h3',t.subtitleFiles,'section-title'));const fileRow=el('div',undefined,'row');fileRow.append(button(t.subtitles,importSubtitleFile),button(t.export,()=>download(L.exportSubtitles(cues),'subtitles.srt')),...(subtitleCacheSupported?[button(U.subtitleStatusCopy(locale).retranslate,async()=>{cancel();session.paused=true;session.playback?.update();await request({op:'subtitle-cache-clear',target:prefs.videoTarget});if(session!==videoSession)return;resetSubtitleTranslation();})]:[]),session.retryButton);files.append(fileRow);body.append(files);
       body.append(button(t.modelSettings,showSettings,'text-link'));
     }

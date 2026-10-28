@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.35 "Translate ahead" is off by default (host package 0.4.52)
+
+The background completion switch is renamed "Translate ahead" with a one-line explanation (it translates about the next 30 minutes while you watch, so skipping ahead needs no wait, at the cost of more model quota). It is now off by default and follows preference changes from other tabs; a user who switched it on keeps it on.
+
 ## 0.4.34 "Wait for subtitles before playing" is off by default everywhere (host package 0.4.51)
 
 The first read of the preferences treated a missing value as off, but re-reading them (after a change in another tab or a panel reopen) treated it as on, so the option could appear switched on without the user turning it on. Both paths now default to off; an explicit choice is kept.
@@ -415,7 +419,7 @@ When Cindy is not reachable, the panel shows a short guide in the browser's own 
 ## 0.4.24 instant layer, background completion and whole-video brief (host package 0.4.37)
 
 - **Instant layer.** The caption read also fetches YouTube's own translation of the same track (`tlang=`, through the player's request). It is shown immediately, slightly lighter, wherever Cindy's translation is not ready yet, so playback never waits; each passage is replaced as Cindy's translation lands. Custom language names have no YouTube track and keep the previous behaviour.
-- **Background completion.** Once the look-ahead window is satisfied, one worker keeps translating ahead (next passage after the playhead first, then earlier ones, up to 30 minutes past the playhead) and caches it. Switch: Options → "Keep translating ahead in the background" (on by default).
+- **Background completion.** Once the look-ahead window is satisfied, one worker keeps translating ahead (next passage after the playhead first, then earlier ones, up to 30 minutes past the playhead) and caches it. Switch: Options → "Translate ahead" (off by default since 0.4.35).
 - **One task per video, in the background.** On hosts that grant `agent.hiddenTasks`, every video gets its own hidden translation task ("Subtitles · <video title>"), so a passage never carries another video's history and the task list stays untouched; the plugin page lists them under Background tasks. Switching videos archives the previous task when the host offers `archive`, the plugin keeps the 20 most recent bindings, and a long video rolls to a fresh task after 100 passages. Older hosts keep the single visible task.
 - **Lean requests.** Translation runs in one persistent Cindy task, so earlier passages and their wording are already in the model's context. Each passage now sends only the title and the few words before it (previously ±120 surrounding words, six earlier captions and the transcript opening). Background completion reaches at most 30 minutes past the playhead. On hosts that ship that default, the task follows the system auxiliary model, runs on the Pi harness when the model is offered there, and uses the lightest reasoning effort available.
 
