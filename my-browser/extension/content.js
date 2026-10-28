@@ -3,9 +3,12 @@
   if(globalThis.__cindyReading)return;
   const api=globalThis.browser||globalThis.chrome,L=globalThis.CindyLearning,U=globalThis.CindyUI;
   if(!api?.runtime?.id)return;
-  const brandURL=api.runtime.getURL('icons/48.png'),lifecycle=new AbortController();
+  const brandURL=globalThis.CindyBrandIcon||api.runtime.getURL('icons/48.png'),lifecycle=new AbortController();
   globalThis.__cindyReading=true;
   let disposed=false,navigationTimer;
+  // A fresh copy of this script (extension update or reload) tells the copy still running on the page to leave.
+  document.dispatchEvent(new Event('cindy-content-script-start'));
+  document.addEventListener('cindy-content-script-start',()=>dispose(),{signal:lifecycle.signal});
   function runtimeReady(){if(disposed)return false;if(!api?.runtime?.id||typeof api.runtime.sendMessage!=='function'){dispose();return false;}return true;}
   async function extensionCall(fn){
     // Defer even synchronous API access so callers can catch invalid contexts.
