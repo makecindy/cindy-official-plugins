@@ -64,16 +64,18 @@
       this._onRelease = ev => { if (ev.origin === location.origin && ev.data?.type === 'cindy-release-input') this._onBlur(); };
       this._onKeyDown = (ev) => this._handle(ev);
       this._onPaste = (ev) => this._handlePaste(ev);
+      this._onMouseDown = () => this._el?.focus();
     }
 
     /** Bind keydown to the screen element. Focus-gated. */
     attach(el) {
       if (!el) return;
+      this.detach();
       this._el = el;
       // Make the screen focusable + focus on click so keystrokes
       // routed through this element work without an explicit Tab.
       if (el.tabIndex < 0) el.tabIndex = 0;
-      el.addEventListener('mousedown', () => el.focus());
+      el.addEventListener('mousedown', this._onMouseDown);
       el.addEventListener('keydown', this._onKeyDown);
       el.addEventListener('blur', this._onBlur);
       // Document-level: Chrome/Firefox target the focused element,
@@ -83,16 +85,21 @@
       document.addEventListener('paste', this._onPaste);
       document.addEventListener('visibilitychange', this._onVisibility);
       window.addEventListener('message', this._onRelease);
+      window.addEventListener('blur', this._onBlur);
+      window.addEventListener('pagehide', this._onBlur);
     }
 
     detach() {
       if (!this._el) return;
+      this._el.removeEventListener('mousedown', this._onMouseDown);
       this._el.removeEventListener('keydown', this._onKeyDown);
       this._el.removeEventListener('blur', this._onBlur);
       this._inputQueue.length = 0;
       document.removeEventListener('paste', this._onPaste);
       document.removeEventListener('visibilitychange', this._onVisibility);
       window.removeEventListener('message', this._onRelease);
+      window.removeEventListener('blur', this._onBlur);
+      window.removeEventListener('pagehide', this._onBlur);
       this._el = null;
     }
 

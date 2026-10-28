@@ -1,7 +1,47 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const M=require('../../baguette-simulator/node/control-model.js');
+test('restart submits the exact device and chosen mode in one operation, without retries',async()=>{
+ const device={udid:'target',runtime:'iOS 27.0'};
+ for(const mode of ['saving','standard','minimal']){
+  const calls=[];
+  const result=await M.restartMemoryMode(device,mode,async(action,args)=>{calls.push({action,args});return {ok:true,memoryMode:{mode,verified:true}};});
+  assert.equal(result.memoryMode.mode,mode);
+  assert.deepEqual(calls,[{action:'restart_device',args:{udid:'target',memoryMode:mode}}]);
+ }
+ let writes=0;
+ await assert.rejects(M.restartMemoryMode(device,'custom',()=>{writes++;}),/INVALID_ARGUMENT/);
+ assert.equal(writes,0);
+ const calls=[];
+ await assert.rejects(M.restartMemoryMode(device,'saving',async(action)=>{calls.push(action);return {ok:false};}),/BOOT_UNCONFIRMED/);
+ assert.deepEqual(calls,['restart_device']);
+});
 const udid='00000000-0000-4000-8000-000000000001';
 const booted={ready:true,parked:false,generation:1,device:{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-1',deviceType:'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro'},settings:{enabled:true,idleMinutes:15},idleDeadline:0};
+
+test('memory status never substitutes the default choice for missing live evidence',()=>{
+ const d=booted.device;
+ for(const lang of ['zh-CN','en','ja','ko']){
+  const unknown=M.memoryStatus(d,lang);
+  assert.ok(unknown.includes(M.memoryLabel('unknown',lang)));
+  for(const mode of ['saving','minimal','standard','custom']){
+   assert.ok(M.memoryStatus({...d,memoryMode:{mode,verified:true}},lang).includes(M.memoryLabel(mode,lang)));
+  }
+  assert.notEqual(M.memoryStatus({...d,memoryMode:{mode:'saving',verified:false}},lang),M.memoryStatus({...d,memoryMode:{mode:'saving',verified:true}},lang));
+  assert.equal(M.memoryStatus({...d,state:'Shutdown'},lang),'');
+  assert.equal(M.memoryStatus({...d,state:'Booting',memoryMode:{mode:'saving',verified:true}},lang),unknown);
+  for(const runtime of ['android:36','tvOS-27','xrOS-27'])assert.equal(M.memoryStatus({...d,runtime},lang),'');
+ }
+});
+
+test('memory notice distinguishes unverified, mismatched and warning results from confirmed boots',()=>{
+ for(const lang of ['en','zh-CN','ja','ko']) {
+  assert.equal(M.memoryNotice({},lang,'standard'),'');
+  assert.equal(M.memoryNotice({memoryMode:{mode:'standard',verified:true}},lang,'standard'),'');
+  assert.ok(M.memoryNotice({memoryMode:{mode:'standard',verified:false,warning:'diagnostic'}},lang,'standard').includes('diagnostic'));
+  assert.ok(M.memoryNotice({memoryMode:{mode:'minimal',verified:true,requested:'standard'}},lang));
+  assert.ok(M.memoryNotice({memoryMode:{mode:'custom',verified:true}},lang,'standard'));
+ }
+});
 
 test('presence and overlay reflect device, service and page state in priority order',()=>{
  assert.deepEqual(M.presence(booted),{tone:'on',key:'connected'});assert.equal(M.overlay(booted),null);

@@ -1,5 +1,7 @@
 # Cindy Ping
 
+Give the cat a poke to ping Cindy. What you’re looking at and what you want done go along with it, and Cindy takes it from there. Currently supports macOS 14+ only.
+
 A configurable desktop emote wheel for **macOS 14+ (Apple Silicon and Intel)** and **Cindy 0.1.114 or later**. Hold a shortcut, point at an emote, and release. Start with display-only reactions, then connect individual emotes to projects, conversations or companions. Windows and Linux are not supported. There are no third-party runtime dependencies.
 
 ## Use
@@ -21,7 +23,7 @@ The editor groups actions into Display and Send to. Display also cancels the pre
 
 Selecting an emote with a dynamic destination immediately reveals up to three options inside its wheel sector. Scroll to page through a full list. Cindy supplies the activity order; candidates are queried and frozen for each wheel opening, never reordered in an open wheel or chosen automatically. Fixed and local actions do not expand. Releasing without a required destination, before loading finishes or with no available targets sends nothing. The wheel is about 228 points across, shows only emotes at the first level and keeps the opening pointer as its centre.
 
-New-task models remain configurable per emote. Existing tasks and companions retain their own model, directory and permissions. `showTaskPreferences:false` hides the duplicate host card; the task capability and host-managed defaults remain available, with all permission checks intact.
+New-task models remain configurable per emote. The searchable picker groups models by provider, displays source logos and can filter Claude Code, Codex or Pi, with compact reasoning and Fast controls. Hidden models are collapsed initially, while the current selection stays visible. Selecting the current model again preserves valid tuning; reselecting a model with unsupported settings restores its current defaults. Existing tasks and companions retain their own model, directory and permissions. `showTaskPreferences:false` hides the duplicate host card; the task capability and host-managed defaults remain available, with all permission checks intact.
 
 For task and companion destinations, each emote also chooses **Queue** (the default) or **Insert now**. Queue waits until the recipient is ready; Insert now adds context to its running turn without stopping it. If insertion is unavailable, Cindy queues the input and the status shows the actual delivery mode. When idle, normal queued input can start immediately. Screening rejection never retries through the queue; an uncertain insertion stays paused for inspection rather than sending another copy. Existing emotes without this setting retain queue behavior. Legacy owned-task bindings keep their original API and queue behavior; select a destination mode to use the new delivery setting.
 

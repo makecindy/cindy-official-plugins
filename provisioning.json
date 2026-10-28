@@ -98,6 +98,17 @@
         "emails": []
       },
       "tier": "builtin"
+    },
+    "ntfy": {
+      "audience": { "emails": [] }
+    },
+    "gitea": {
+      "audience": { "emails": [] }
+    },
+    "podcast-insights": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }

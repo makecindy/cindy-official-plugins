@@ -86,6 +86,9 @@
     return new Promise((resolve) => {
       const nameInput = h('input', { maxlength: '64', autocomplete: 'off', spellcheck: 'false' });
       const osSelect = h('select'), modelSelect = h('select');
+      let selectedMode = 'saving';
+      const modeChoice = M.memoryPicker(selectedMode,lang,mode=>{ selectedMode=mode; });
+      modeChoice.hidden = true;
       const error = h('p', { class: 'sheet-error', role: 'alert' });
       const create = h('button', { class: 'btn cta', type: 'submit', text: T.create, disabled: true });
       const cancel = h('button', { class: 'btn quiet', type: 'button', text: T.cancel });
@@ -94,7 +97,7 @@
       const form = h('form', { class: 'sheet', method: 'dialog' }, [
         h('h2', { text: T[family] || T.iphone }),
         h('div', { class: 'sheet-group' }, [row(T.name, nameInput), row(T.os, osSelect), row(T.model, modelSelect)]),
-        error, setup, h('div', { class: 'sheet-actions' }, [cancel, create])]);
+        modeChoice, error, setup, h('div', { class: 'sheet-actions' }, [cancel, create])]);
       const dialog = h('dialog', { class: 'sheet-dialog' }, [form]);
       document.body.append(dialog); dialog.showModal();
       let cat = null, edited = false, done = false;
@@ -109,6 +112,7 @@
         const best = M.defaultChoice({ deviceTypes: usable, runtimes: runtime ? [runtime] : [] });
         modelSelect.replaceChildren(...usable.map((d) => h('option', { value: d.identifier, text: d.name })));
         modelSelect.value = usable.some((d) => d.identifier === keep) ? keep : (best?.deviceType || usable[0]?.identifier || '');
+        modeChoice.hidden = !runtime || M.platform(runtime)!=='iOS';
         syncName(); create.disabled = !modelSelect.value;
       }
       function syncName() { if (!edited) nameInput.value = modelSelect.selectedOptions[0]?.textContent || ''; }
@@ -138,10 +142,12 @@
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = nameInput.value.trim(); if (!name || !modelSelect.value) return;
+        const memoryMode = modeChoice.hidden ? null : selectedMode;
         create.disabled = true; create.textContent = T.creating; error.textContent = '';
         try {
           const r = await rpc('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
           if (!r?.ok) throw r;
+          if (r.udid && memoryMode) memoryChoices.set(r.udid,memoryMode);
           finish({ udid: r.udid, name: r.name || name });
         } catch (e) { showError(e); create.disabled = false; create.textContent = T.create; }
       });
@@ -179,5 +185,38 @@
       })().catch(e=>{status.textContent=e.message||T.failed;button.hidden=true;});
     });
   }
-  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, onPush: (fn) => listeners.add(fn) };
+  const memoryChoices=new Map();
+  function rememberMemoryChoice(udid,mode) {
+    if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(udid,mode);
+  }
+  function memoryArgs(device) {
+    return device && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(device.udid)||'saving'} : {};
+  }
+  function memoryPicker(device,lang,disabled=false) {
+    const M=root.CindySimModel;if(!device||M.platform(device)!=='iOS')return null;
+    return M.memoryPicker(memoryArgs(device).memoryMode,lang,mode=>memoryChoices.set(device.udid,mode),disabled);
+  }
+
+  function memoryBadge(device,lang,disabled=false,compact=false) {
+    const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(device.udid));
+    if (!text) return null;
+    const button=h('button',{class:compact?'memory-badge memory-icon':'memory-badge',type:'button',disabled,'aria-haspopup':'dialog',
+      onclick:()=>M.showMemoryDetails(device,lang,{value:memoryChoices.get(device.udid),onChange:mode=>{
+        memoryChoices.set(device.udid,mode);update(M.memoryStatus(device,lang,mode));
+      },onRestart:device.state==='Booted' ? async mode=>{
+        const result=await M.restartMemoryMode(device,mode,rpc);
+        M.showMemoryNotice(result,lang,mode,device.name);
+      } : undefined})});
+    if(compact)button.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><path d="M10 10h4v4h-4z"/></svg>';
+    function update(label){button.title=label;button.setAttribute('aria-label',label);if(!compact)button.textContent=label;}
+    update(text);
+    return button;
+  }
+  let resources = null;
+  function resourceLabel(device,lang) {
+    resources ||= root.CindySimModel.createResourceSummary(lang,target=>rpc('resources',{udid:target.udid}));
+    return resources.label(device);
+  }
+
+  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, memoryArgs, memoryPicker, memoryBadge, rememberMemoryChoice, resourceLabel, onPush: (fn) => listeners.add(fn) };
 })(globalThis);

@@ -1,6 +1,7 @@
 import './my-browser-dispatch.test.mjs';
 import './my-browser-network.test.mjs';
 import './my-browser-discovery.test.mjs';
+import './my-browser-badge.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';

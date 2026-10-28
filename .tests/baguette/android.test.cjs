@@ -227,7 +227,7 @@ test('capture retains a completed action when the final observation fails',async
 });
 test('Android viewer rotation keeps the portrait body size and caps only a narrow-window overflow',async()=>{
   const listeners={},frame={style:{}},canvas={width:720,height:1600,getContext:()=>({}),addEventListener:()=>{}};
-  const context={URLSearchParams,AbortController,location:{pathname:'/simulators/'+id,search:''},window:{},
+  const context={URLSearchParams,AbortController,location:{pathname:'/simulators/'+id,search:''},window:{Baguette:{_PinchOverlay:class{clear(){}}}},
     parent:{document:{documentElement:{lang:'en'}}},innerWidth:900,innerHeight:800,
     document:{getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:{}},
     matchMedia:()=>({matches:false}),addEventListener:(name,fn)=>{listeners[name]=fn;},fetch:()=>new Promise(()=>{})};
@@ -298,6 +298,29 @@ test('Android scroll_to retains every completed swipe across subsequent observat
   });
   assert.equal(completed,c.n);if(!c.n)assert.equal(writes.length,0);
  }
+});
+
+test('Android until gives subsequent observation twelve seconds inside the original deadline',async t=>{
+  const code=await fs.readFile(path.join(A,'agent.cjs'),'utf8');
+  for(const [waitMs,callDeadline] of [[0,100000],[14000,100000],[1000,5000]])await t.test(`${waitMs}/${callDeadline}`,async()=>{
+    let clock=0,trees=0,observationDeadline;
+    class Clock extends Date{static now(){return clock;}}
+    const context={module:{exports:{}},Buffer,Date:Clock,setTimeout,require:name=>name==='./grpc.cjs'?{rpc:async(_d,method)=>{
+      assert.equal(method,'getScreenshot','observation never dispatches input');return {format:{width:108,height:240},image:image()};
+    }}:require(name.startsWith('.')?path.resolve(A,name):name)};
+    require('node:vm').runInNewContext(code,context);
+    const agent=context.module.exports.createAgent({devices:{adb:async(_d,args,options)=>{
+      if(args.includes('dumpsys'))return {stdout:'Viewport INTERNAL: displayId=0, orientation=0'};
+      if(++trees===1){clock+=waitMs;return {stdout:'<?xml version="1.0"?><hierarchy rotation="0"><node bounds="[1,1][40,30]" text="Ready" enabled="true"/></hierarchy>'};}
+      observationDeadline=options.deadline;clock=options.deadline;
+      throw Object.assign(Error('slow observation'),{code:'TIME_BUDGET_EXHAUSTED'});
+    }}});
+    const result=await agent.after({udid:id,endpoint:{},model:{width:108,height:240,density:160}},
+      {until:'Ready',observe:'both',_deadline:callDeadline},{execution:'executed'});
+    assert.equal(result.wait.met,true);assert.equal(result.execution,'executed');
+    assert.equal(observationDeadline,Math.min(callDeadline,waitMs+12000));
+    assert.equal(result.observationError.code,'TIME_BUDGET_EXHAUSTED');assert.equal(result.timing.observationMs,observationDeadline);
+  });
 });
 for(const mode of ['success','first-sample','last-sample','sensor-restore','pose-restore','both-restore'])test(`Android shake restores acceleration and pose: ${mode}`,async t=>{
   const poses=[],samples=[],endpoint=await emulator(t,(s,h,body)=>{

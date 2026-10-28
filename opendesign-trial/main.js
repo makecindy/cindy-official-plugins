@@ -56,7 +56,7 @@
   }
   const stateKey = (id) => "sessions/" + id + ".json";
   const instructions =
-    "This session is editing the current OpenDesign draft. For follow-up requests such as change this, colors or layout, call opendesign_context first, read its latest html, saved sketches and feedback (including local screenshot paths), then opendesign_update with expectedRevision and the complete revised HTML. Keep the same draft/session/file. Do not start a new session, directory, model or errand. Tool results produce preview cards; only user card clicks open the right sidebar. If editing files with native tools, call opendesign_open afterwards to publish the updated card.";
+    "This session is editing the current OpenDesign draft. For follow-up requests such as change this, colors or layout, call opendesign_context first, read its latest html, saved sketches and feedback (including local screenshot paths), then opendesign_update with expectedRevision and the complete revised HTML. Keep the same draft/session/file. Do not start a new session, directory, model or errand. Always include previewMarkdown from the tool result in your reply as the primary way to open the draft. It links to the actual HTML file through Cindy standard file preview on local desktop, remote desktop and mobile; do not substitute a localhost URL, file:// URL, code block or plugin card. Keep edits in this same task: use the native viewer comments or quoted text when available, then context and update with expectedRevision. The plugin card opens an optional editor/canvas on the computer running the plugin only; it is not the cross-device preview. If editing files with native tools, call opendesign_open afterwards to refresh the file link and card. Do not retry open/preview in a loop when a viewer fails.";
   async function bind(d) {
     return node("bind", {
       sessionId: d.sessionId,
@@ -82,7 +82,7 @@
   function card(d, c, note = "") {
     const body =
       c.cardHtml || '<p style="padding:24px">' + esc(d.title) + "</p>";
-    return `<div style="border:1px solid #d9ddd3;border-radius:14px;overflow:hidden"><div style="height:220px;overflow:hidden;pointer-events:none;background:#fff"><div style="width:960px;zoom:.46;transform-origin:top left">${body}</div></div><div style="padding:14px;background:#f5f5f1;color:#242b20;font-family:system-ui,sans-serif"><strong style="font:600 15px/1.4 system-ui">${esc(d.title)}</strong><p style="font-size:12px">OpenDesign · ${text("稿件", "Draft")} ${esc(d.id.slice(0, 8))} · ${esc(c.revision ? c.revision.slice(0, 8) : text("未保存", "Unsaved"))}</p><button style="border:0;border-radius:8px;background:#252c21;color:white;padding:9px 14px;font:500 12px system-ui" data-ghost-action="open">${locale === "zh-CN" ? "打开稿件" : "Open design"}</button> <button style="border:1px solid #d2d7ca;border-radius:8px;background:transparent;color:#252c21;padding:9px 14px;font:500 12px system-ui" data-ghost-action="canvas">${locale === "zh-CN" ? "选区与画板" : "Annotate / canvas"}</button>${note ? "<p>" + esc(note) + "</p>" : ""}</div></div>`;
+    return `<div style="border:1px solid #d9ddd3;border-radius:14px;overflow:hidden"><div style="height:220px;overflow:hidden;pointer-events:none;background:#fff"><div style="width:960px;zoom:.46;transform-origin:top left">${body}</div></div><div style="padding:14px;background:#f5f5f1;color:#242b20;font-family:system-ui,sans-serif"><strong style="font:600 15px/1.4 system-ui">${esc(d.title)}</strong><p style="font-size:12px">OpenDesign · ${text("稿件", "Draft")} ${esc(d.id.slice(0, 8))} · ${esc(c.revision ? c.revision.slice(0, 8) : text("未保存", "Unsaved"))}</p><button style="border:0;border-radius:8px;background:#252c21;color:white;padding:9px 14px;font:500 12px system-ui" data-ghost-action="open">${locale === "zh-CN" ? "本机编辑器" : "Local editor"}</button> <button style="border:1px solid #d2d7ca;border-radius:8px;background:transparent;color:#252c21;padding:9px 14px;font:500 12px system-ui" data-ghost-action="canvas">${locale === "zh-CN" ? "本机画板" : "Local canvas"}</button>${note ? "<p>" + esc(note) + "</p>" : ""}</div></div>`;
   }
   async function publish(msg, d, c) {
     requireReady(d);
@@ -114,7 +114,11 @@
     const b = await bind(d),
       c = await context(d);
     const url = b.url + "?file=" + encodeURIComponent(d.file);
-    const r = await cindy.preview({ url, sessionId: d.sessionId });
+    // The standard file link in the tool result is the cross-device entry.
+    // A mobile page cannot run this two-origin editor or its POST/save APIs.
+    const r = msg.mobilePageId
+      ? { ok: false, message: text("请打开回复中的 HTML 文件查看稿件。如果旧回复没有链接，请在原任务说“重新打开稿件，给我 HTML 文件链接”。本机编辑器在运行插件的电脑上使用。", "Open the HTML file in the reply to view the design. If an older reply has no link, ask in the original task: “Please reopen this draft and give me its HTML file link.” The local editor runs on the computer hosting the plugin.") }
+      : await cindy.preview({ url, sessionId: d.sessionId });
     await cindy.send({
       type: "card-update",
       callId: msg.callId,
@@ -133,7 +137,7 @@
         height: 120,
         html:
           "<p>" +
-          esc(r.ok ? text("稿件已在所属会话的右侧打开。", "The design is open in its owning session sidebar.") : r.message || text("打开失败", "Could not open")) +
+          esc(r.ok ? text("已发送稿件打开请求。", "The request to open the design has been sent.") : r.message || text("打开失败", "Could not open")) +
           "</p>",
       });
   }
@@ -249,11 +253,17 @@
         file: d.file,
         projectDir: d.root,
         revision: c.revision,
+        ...(c.previewPath ? {
+          previewPath: c.previewPath,
+          // Encode path delimiters that Markdown/URL parsers would interpret.
+          // The destination stays an absolute task file path, not a server URL.
+          previewMarkdown: `[${text("查看稿件", "View design")}](<${encodeURI(c.previewPath).replace(/[?#<>]/g, encodeURIComponent)}>)`,
+        } : {}),
         ...(msg.tool === "opendesign_context"
           ? { html: c.html, sketches: c.sketches, feedback: c.feedback }
           : {}),
         entry:
-          "Click the artifact card to open this draft in its fixed session sidebar.",
+          "Include previewMarkdown in your reply to open the actual HTML through Cindy standard file preview on the viewing device. The plugin card is an optional editor on the execution computer.",
         instructions,
       },
     });

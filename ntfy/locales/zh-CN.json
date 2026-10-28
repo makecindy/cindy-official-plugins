@@ -1,0 +1,21 @@
+{
+  "name": "ntfy",
+  "description": "通过你自建的 ntfy 服务器发送推送通知。在插件设置中添加一个或多个服务器及其访问令牌；Cindy 会加密保存每个令牌，并且只把它发送给对应的服务器。",
+  "whenToUse": "当用户希望通过自己的 ntfy 服务器向手机或电脑发送推送通知时使用，例如在任务完成时提醒用户。需要先在插件设置中添加服务器和访问令牌。",
+  "tools": {
+    "ntfy_send": {
+      "description": "向已配置的 ntfy 服务器上的某个主题发布一条推送通知，返回 ntfy 消息 id 和时间。未传 topic 时使用该服务器的默认主题。配置了多个服务器时必须传 server（取自 ntfy_servers 的 id 或主机名），不确定时先询问用户。message 上限为 4096 个 UTF-8 字节，超出时直接拒绝，不会截断。出现结果未知的错误（超时、网络故障、HTTP 5xx）后不要重新发送：通知可能已经送达，应先询问用户。"
+    },
+    "ntfy_servers": {
+      "description": "列出已配置的 ntfy 服务器，包括 id、主机名、URL 和默认主题，从不返回访问令牌。用于为 ntfy_send 选择 server 参数。"
+    }
+  },
+  "network": {
+    "connections": {
+      "ntfy_conn": {
+        "label": "ntfy 服务器",
+        "hint": "填写服务器地址（仅支持 https、默认端口 443，且部署在域名根路径）以及对主题有写权限的 ntfy 访问令牌（tk_...）。"
+      }
+    }
+  }
+}

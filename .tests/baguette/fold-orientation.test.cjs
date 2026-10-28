@@ -4,7 +4,59 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const web=path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
-test('opening and reconnecting the flat viewer reads the guest orientation without writing it',()=>{
+test('a recreated flat view keeps its saved pose when a portrait-only app reports a different orientation',()=>{
+ const source=fs.readFileSync(path.join(web,'sim-native.js'),'utf8');
+ const storage=source.slice(source.indexOf('  const ORIENTATION_KEY'),source.indexOf('  // Debug knobs'));
+ const snap=source.slice(source.indexOf('  function snapOrientation('),source.indexOf('  // Map a normalized coord'));
+ const callbacks=source.slice(source.indexOf('  function sessionCallbacks('),source.indexOf('  function startSession('));
+ const values=new Map(),key='baguette.native.orientation.phone-a';
+ const make=({udid='phone-a',blocked=false}={})=>{
+  const wrapper={style:{transition:'transform .32s',transform:'rotate(0deg)'},offsetWidth:300},attrs={};
+  const root={setAttribute:(k,v)=>attrs[k]=v,removeAttribute:k=>delete attrs[k],querySelectorAll:()=>[wrapper]};
+  const context=vm.createContext({udid,document:{getElementById:()=>root},
+   localStorage:{getItem:k=>{if(blocked)throw Error('denied');return values.get(k);},setItem:(k,v)=>{if(blocked)throw Error('denied');values.set(k,v);}},
+   layoutHandheld(){},fitRotatedFrame(){},routeStreamText:()=>false,fetch:()=>assert.fail('restoring a visual pose must not send a rotation')});
+  vm.runInContext("let deviceMode=false,foldable=false,currentOrientation='portrait',orientationIndex=0,rotationDegrees=0;const ORIENTATION_CYCLE=['portrait','landscape-left','portrait-upside-down','landscape-right'];function orientationCycle(){return ORIENTATION_CYCLE;}let session={send(){}};"+storage+snap+callbacks,context);
+  vm.runInContext('if(viewerOrientation)snapOrientation(viewerOrientation)',context);
+  return {context,wrapper,attrs};
+ };
+ for(const [orientation,degrees] of [['portrait',0],['landscape-left',90],['portrait-upside-down',180],['landscape-right',270]]){
+  values.set(key,orientation);
+  const f=make();assert.equal(f.wrapper.style.transform,`rotate(${degrees}deg)`);assert.equal(f.wrapper.style.transition,'transform .32s');
+  assert.equal(vm.runInContext('orientationIndex',f.context),degrees/90);
+  const callback=f.context.sessionCallbacks();callback.onOpen();
+  callback.onText({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'portrait'}}});
+  assert.equal(f.wrapper.style.transform,`rotate(${degrees}deg)`);assert.equal(values.get(key),orientation);
+  assert.equal(make().wrapper.style.transform,`rotate(${degrees}deg)`,'new page keeps the selected pose');
+  assert.equal(make({udid:'phone-b'}).wrapper.style.transform,'rotate(0deg)','devices do not share the hint');
+ }
+ for(const invalid of [undefined,'invalid','{"orientation":"landscape-left"}']){values.set(key,invalid);assert.equal(make().wrapper.style.transform,'rotate(0deg)');}
+ values.set(key,'landscape-left');assert.equal(make({blocked:true}).wrapper.style.transform,'rotate(0deg)');
+ for(const mode of ['deviceMode','foldable']){
+  const f=make();vm.runInContext(`${mode}=true;rememberOrientation('portrait')`,f.context);assert.equal(values.get(key),'landscape-left');
+ }
+});
+
+test('viewer bootstrap overlaps independent reads and restores pose before starting the stream',async()=>{
+ const source=fs.readFileSync(path.join(web,'sim-native.js'),'utf8');
+ const boot=source.slice(source.indexOf('  async function boot()'),source.indexOf('    // 4. Companion-screens rail.'))+'\n}';
+ for(const foldable of [false,true])for(const deviceMode of [false,true]){
+  const pending={},calls=[];
+  const read=name=>{calls.push(name);return new Promise(resolve=>pending[name]=resolve);};
+  const context=vm.createContext({deviceMode,udid:'phone',localStorage:{getItem:()=>null},
+   document:{body:{style:{},insertAdjacentHTML(){}},getElementById:()=>({setAttribute(){}})},console,
+   window:{BaguetteTarget:{path:()=>'/definition.json'}},fetchTemplate:()=>read('template'),fetchDeviceMeta:()=>read('meta'),readHinge:()=>read('hinge'),
+   isBooted:state=>state==='Booted',useSimulator:async()=>({mount(){calls.push('mount');}}),viewerOrientation:'landscape-left',snapOrientation:value=>calls.push(value)});
+  vm.runInContext('let deviceName,foldable,currentLitPanel,foldOrientation,sim;'+boot,context);
+  const loading=context.boot();
+  assert.deepEqual(calls,deviceMode?['template','meta']:['template','meta','hinge']);
+  pending.template('<div/>');pending.meta({name:'Phone',runtime:'iOS',state:'Booted'});pending.hinge?.({foldable,litPanel:'primary',orientation:'portrait'});
+  await loading;
+  assert.deepEqual(calls.slice(deviceMode?2:3),!deviceMode&&!foldable?['mount','landscape-left']:['mount']);
+ }
+});
+
+test('an unknown flat pose is seeded once; reconnects and late replies cannot undo the chosen pose',()=>{
  const source=fs.readFileSync(path.join(web,'sim-native.js'),'utf8');
  assert.ok(!source.includes('resetToPortrait'));
  assert.ok(!source.includes('cindyOrientation'));
@@ -13,7 +65,7 @@ test('opening and reconnecting the flat viewer reads the guest orientation witho
  const make=()=>{
   const sent=[],context={document:{getElementById:()=>null},routeStreamText:()=>false,fetch:()=>assert.fail('viewer initialization must not write orientation')};
   vm.createContext(context);
-  vm.runInContext("let deviceMode=false,foldable=false,currentOrientation='portrait',orientationIndex=0,rotationDegrees=0;const ORIENTATION_CYCLE=['portrait','landscape-left','portrait-upside-down','landscape-right'];function orientationCycle(){return ORIENTATION_CYCLE;}"+snap+callbacks,context);
+  vm.runInContext("let deviceMode=false,foldable=false,currentOrientation='portrait',orientationIndex=0,rotationDegrees=0,viewerOrientation=null;const ORIENTATION_CYCLE=['portrait','landscape-left','portrait-upside-down','landscape-right'];function orientationCycle(){return ORIENTATION_CYCLE;}function rememberOrientation(value){viewerOrientation=value;}"+snap+callbacks,context);
   context.active={send:p=>sent.push(p)};vm.runInContext('let session=active',context);
   return {context,sent,callbacks:context.sessionCallbacks(),orientation:()=>vm.runInContext('currentOrientation',context)};
  };
@@ -21,14 +73,17 @@ test('opening and reconnecting the flat viewer reads the guest orientation witho
  for(const orientation of ['portrait','landscape-left','portrait-upside-down','landscape-right']){
   const f=make();f.callbacks.onOpen();assert.deepEqual(JSON.parse(JSON.stringify(f.sent)),[{type:'describe_ui',x:1,y:1}]);
   assert.equal(f.callbacks.onText(reply(orientation)),true);assert.equal(f.orientation(),orientation);
-  // A format swap or reload uses a fresh callback and observes the device again.
-  const next=f.context.sessionCallbacks();next.onOpen();next.onText(reply('landscape-right'));assert.equal(f.orientation(),'landscape-right');
+  // Reconnecting keeps the viewer pose, even when AX reports a portrait-only app.
+  const next=f.context.sessionCallbacks();next.onOpen();next.onText(reply('portrait'));assert.equal(f.orientation(),orientation);
+  assert.equal(f.sent.length,1);
  }
  for(const failure of [{type:'describe_ui_result',ok:false},{type:'describe_ui_result',ok:true,tree:{}},reply('invalid')]){
   const f=make();f.callbacks.onOpen();f.callbacks.onText(failure);assert.equal(f.orientation(),'portrait');
  }
  const manual=make();manual.callbacks.onOpen();vm.runInContext("currentOrientation='landscape-right'",manual.context);
  manual.callbacks.onText(reply('landscape-left'));assert.equal(manual.orientation(),'landscape-right','late read cannot undo explicit rotation');
+ const fullTurn=make();fullTurn.callbacks.onOpen();vm.runInContext("snapOrientation('landscape-left');snapOrientation('portrait')",fullTurn.context);
+ fullTurn.callbacks.onText(reply('landscape-left'));assert.equal(fullTurn.orientation(),'portrait','a turn back to the starting pose still supersedes an in-flight read');
  const old=make();old.callbacks.onOpen();old.context.active={send:p=>old.sent.push(p)};vm.runInContext('session=active',old.context);
  old.callbacks.onText(reply('landscape-left'));assert.equal(old.orientation(),'portrait','retired streams cannot change a newer view');
  for(const mode of ['deviceMode','foldable']){

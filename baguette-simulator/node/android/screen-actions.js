@@ -1,44 +1,90 @@
 'use strict';
-window.androidScreenActions=({canvas,frame,input,pointers,flush,zh})=>{
+window.androidScreenActions=({canvas,frame,input,pointers,flush,screenSize,zh})=>{
   const status=document.getElementById('action-status'),recordButton=document.getElementById('recording');
   const say=(text)=>{status.hidden=false;status.textContent=text;};
   let wheel=null,wheelTimer,uploading=false,recorder=null,recordingTimer,paintTimer;
   function endWheel(){clearTimeout(wheelTimer);if(wheel)wheel.ending=true;}
+  function cancelWheel(){clearTimeout(wheelTimer);wheel=null;}
+  function closeWheel(){
+    const previous=wheel;cancelWheel();
+    for(const touch of previous.touches)touch.pressure=0;
+    flush();
+  }
+  const clamp=n=>Math.max(0,Math.min(1,n));
+  let nativeContacts=null;
+  canvas.addEventListener('cindy-trackpad',e=>{
+    const sample=e.detail,bounds=canvas.getBoundingClientRect();
+    if(sample.phase==='begin'){
+      if(pointers.size||frame.getAnimations().some(a=>a.playState==='running'))return;
+      nativeContacts=new Map();
+    }
+    if(!nativeContacts)return;
+    const touches=sample.phase==='cancel'?[]:sample.touches;
+    for(const [id,t] of nativeContacts)if(!touches.some(p=>p.id===id))t.pressure=0;
+    for(const p of touches){
+      let touch=nativeContacts.get(p.id);
+      if(!touch){touch={identifier:p.id,pressure:1024};nativeContacts.set(p.id,touch);pointers.set(`native-${p.id}`,touch);}
+      Object.assign(touch,{x:clamp((p.x-bounds.left)/bounds.width),y:clamp((p.y-bounds.top)/bounds.height)});
+    }
+    // Existing flush coalesces slow input and always drains releases. Both
+    // fingers are updated before flushing, including the initial down.
+    flush(sample.phase==='begin');
+    if(sample.phase==='end'||sample.phase==='cancel')nativeContacts=null;
+  });
   async function moveWheel(current){
     await flush(true);
-    while(wheel===current&&pointers.has('wheel')){
-      const touch=pointers.get('wheel'),dx=current.x-touch.x,dy=current.y-touch.y;
-      if(Math.abs(dx)+Math.abs(dy)<.001){if(current.ending)break;await new Promise(r=>setTimeout(r,16));continue;}
+    while(wheel===current&&current.touches.every((t,i)=>pointers.get(i?'wheel-mirror':'wheel')===t)){
+      const deltas=current.points.map((p,i)=>({x:clamp(p.x)-current.touches[i].x,y:clamp(p.y)-current.touches[i].y}));
+      const distance=Math.max(...deltas.flatMap(p=>[Math.abs(p.x),Math.abs(p.y)]));
+      if(distance<.00001){if(current.ending)break;await new Promise(r=>setTimeout(r,16));continue;}
       // Android starts scrolling after touch slop; a single jump followed by
       // up can be consumed entirely by interception. Send intermediate moves.
-      const steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy))/.04));
-      touch.x+=dx/steps;touch.y+=dy/steps;
-      if(current.pinch)Object.assign(pointers.get('wheel-mirror'),{x:1-touch.x,y:touch.y});
+      // Pinch needs initial moves for interception and gesture slop, then
+      // follows the latest fingers directly instead of easing behind them.
+      const steps=current.pinch&&current.moves>=2?1:Math.max(1,Math.ceil(distance/.04));
+      current.touches.forEach((touch,i)=>{touch.x+=deltas[i].x/steps;touch.y+=deltas[i].y/steps;});
+      current.moves=(current.moves||0)+1;
       await flush();await new Promise(r=>setTimeout(r,16));
     }
-    for(const key of ['wheel','wheel-mirror']){const p=pointers.get(key);if(p)p.pressure=0;}
+    if(wheel!==current)return;
+    for(const touch of current.touches)touch.pressure=0;
     await flush();if(wheel===current)wheel=null;
   }
   canvas.addEventListener('wheel',e=>{
     e.preventDefault();e.stopPropagation();canvas.focus();
     if(frame.getAnimations().some(a=>a.playState==='running')||(!wheel&&pointers.size))return;
-    const bounds=canvas.getBoundingClientRect(),pinch=e.ctrlKey;
-    if(wheel&&wheel.pinch!==pinch){endWheel();return;}
+    const bounds=canvas.getBoundingClientRect(),size=screenSize(),pinch=e.ctrlKey;
+    if(!size?.width||!size.height||!bounds.width||!bounds.height)return;
+    const centre={x:(e.clientX-bounds.left)/bounds.width,y:(e.clientY-bounds.top)/bounds.height};
+    if(wheel&&wheel.pinch!==pinch)closeWheel();
     if(!wheel){
-      wheel={pinch,x:pinch?.35:.5,y:.5,ending:false};
-      pointers.set('wheel',{identifier:0,pressure:1024,x:wheel.x,y:.5});
-      if(pinch)pointers.set('wheel-mirror',{identifier:1,pressure:1024,x:.65,y:.5});
-      moveWheel(wheel).catch(()=>{wheel=null;input('release').catch(()=>{});});
+      // Match iPhone: two contacts, 80 device points either side of the cursor.
+      const spread=80/size.width;
+      wheel={pinch,scale:1,points:[{x:centre.x+spread,y:centre.y},{x:centre.x-spread,y:centre.y}],ending:false};
+      wheel.touches=wheel.points.map((p,identifier)=>({identifier,pressure:1024,x:clamp(p.x),y:clamp(p.y)}));
+      wheel.touches.forEach((p,i)=>pointers.set(i?'wheel-mirror':'wheel',p));
+      const current=wheel;
+      moveWheel(current).catch(()=>{if(wheel===current){cancelWheel();pointers.clear();flush();input('release').catch(()=>{});}});
     }
     wheel.ending=false;
     const factor=e.deltaMode===1?16:e.deltaMode===2?bounds.height:1;
-    if(pinch)wheel.x=Math.max(.05,Math.min(.48,wheel.x+e.deltaY*factor/bounds.height));
+    if(pinch){
+      // Once both contacts reach the edges, extra scale is invisible. Do not
+      // accumulate it: reversing the pinch must move the contacts immediately.
+      const maxScale=Math.min(6,Math.max(centre.x,1-centre.x)*size.width/80);
+      wheel.scale=Math.max(.25,Math.min(maxScale,wheel.scale*Math.exp(-e.deltaY*factor/200)));
+      const spread=80/size.width*wheel.scale;
+      wheel.points=[{x:centre.x+spread,y:centre.y},{x:centre.x-spread,y:centre.y}];
+    }
     else{
-      wheel.x=Math.max(.03,Math.min(.97,wheel.x-e.deltaX*factor/bounds.width));
-      wheel.y=Math.max(.03,Math.min(.97,wheel.y-e.deltaY*factor/bounds.height));
+      // Move the visible pair together, consuming travel past either edge.
+      // A small reversal then moves immediately without changing its spacing.
+      const points=wheel.points.map(p=>({x:clamp(p.x),y:clamp(p.y)}));
+      const dx=Math.max(-Math.min(...points.map(p=>p.x)),Math.min(1-Math.max(...points.map(p=>p.x)),-e.deltaX*factor/bounds.width));
+      const dy=Math.max(-Math.min(...points.map(p=>p.y)),Math.min(1-Math.max(...points.map(p=>p.y)),-e.deltaY*factor/bounds.height));
+      wheel.points=points.map(p=>({x:p.x+dx,y:p.y+dy}));
     }
     clearTimeout(wheelTimer);wheelTimer=setTimeout(endWheel,120);
-    if(!pinch&&(wheel.x===.03||wheel.x===.97||wheel.y===.03||wheel.y===.97))endWheel();
   },{passive:false});
   async function copy(selection=false){
     canvas.focus();
@@ -101,7 +147,7 @@ window.androidScreenActions=({canvas,frame,input,pointers,flush,zh})=>{
   }
   recordButton.onclick=stopRecording;
   addEventListener('beforeunload',e=>{if(recorder){e.preventDefault();e.returnValue='';}});
-  addEventListener('pagehide',()=>{endWheel();stopRecording();});
+  addEventListener('pagehide',()=>{cancelWheel();stopRecording();});
   window.__nativeCopy=()=>copy(false);window.__nativeImport=()=>document.getElementById('file-input').click();window.__nativeRecord=record;window.__nativeRecording=()=>!!recorder;
-  return {release:endWheel};
+  return {release(){cancelWheel();nativeContacts=null;}};
 };

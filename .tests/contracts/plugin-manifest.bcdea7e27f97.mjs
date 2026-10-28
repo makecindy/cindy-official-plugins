@@ -1,5 +1,6 @@
 // Generated from Cindy packages/plugin-protocol/src/manifest.ts (bundled with routineEvents.ts)
-// source sha256: 8f84016fdcd94b7de8f364267841df74c589ca4ec34215d6c0a988b4f6a24f87
+// Base: makecindy/cindy@b32efed5b642625140d49f5bf08e9839b78ca39d; releaseNotes-only backport from 60110fa67313dba59a0738dec9da70db7cfadf22
+// source sha256: bcdea7e27f971be5d2dc106553d02fd88dd34101dfdf4200d0b989d015fe3a02
 // Do not edit by hand. Licensed under Apache-2.0; see NOTICE.
 
 // packages/plugin-protocol/src/routineEvents.ts
@@ -273,6 +274,7 @@ var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
   "id",
   "name",
   "version",
+  "releaseNotes",
   "minCindyVersion",
   "author",
   "locales",
@@ -437,6 +439,9 @@ function validateGhostManifest(value) {
   }
   if (typeof raw.version !== "string" || raw.version.trim().length === 0 || raw.version.length > 32) {
     return { ok: false, reason: "version \u5FC5\u987B\u662F 1\u201332 \u5B57\u7B26\u7684\u975E\u7A7A\u5B57\u7B26\u4E32" };
+  }
+  if (raw.releaseNotes !== void 0 && typeof raw.releaseNotes !== "string") {
+    return { ok: false, reason: "releaseNotes \u5FC5\u987B\u662F\u7EAF\u6587\u672C\u5B57\u7B26\u4E32" };
   }
   if (raw.minCindyVersion !== void 0 && (typeof raw.minCindyVersion !== "string" || !isValidCindyVersion(raw.minCindyVersion))) {
     return { ok: false, reason: "minCindyVersion \u5FC5\u987B\u662F\u5408\u6CD5\u7684 SemVer \u5B57\u7B26\u4E32" };
@@ -2396,6 +2401,7 @@ function validateGhostManifest(value) {
       id: raw.id,
       name: raw.name,
       version: raw.version,
+      ...raw.releaseNotes !== void 0 ? { releaseNotes: raw.releaseNotes } : {},
       ...raw.minCindyVersion !== void 0 ? { minCindyVersion: raw.minCindyVersion } : {},
       kind: "chip",
       ...raw.author !== void 0 ? { author: raw.author } : {},

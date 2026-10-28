@@ -1,0 +1,21 @@
+{
+  "name": "Gitea",
+  "description": "Work with self-hosted Gitea instances: repositories, files, commits, issues, pull requests, labels, milestones, Actions runs and logs, releases and notifications. Add each instance URL and access token in settings; the host encrypts the token and sends it only to that instance.",
+  "whenToUse": "Use for a self-hosted Gitea server (not github.com or GitLab): read repos, files, commits, issues, PRs, diffs, Actions runs and job logs, releases and notifications; create or comment on issues, change state or labels, open or merge PRs, create releases (each write asks the user).",
+  "tools": {
+    "list_tools": {
+      "description": "List the Gitea operations this plugin can run (about 30, in categories user, repos, code, issues, pulls, labels, actions, releases, notifications). Without category, return each category with its operation count and summary. With category, return every operation in it with its description, parameters, required token scope and whether it is a write. Writes always ask the user to confirm in Cindy before anything is sent."
+    },
+    "call_tool": {
+      "description": "Run one Gitea operation returned by list_tools. Pass its parameters in args. Repository operations need owner and repo (or repo as \"owner/name\"), which can be derived from git remote get-url origin. With several Gitea instances configured, set args.instance to the connection id or host; reads fall back to the default connection, writes never do. Lists accept page and limit (default 20, max 50). Results are trimmed to useful fields; file, diff and log text is capped by max_chars. Write operations show a confirmation dialog first; a declined dialog sends nothing. If a write reports an unknown outcome, check the current state before retrying."
+    }
+  },
+  "network": {
+    "connections": {
+      "gitea_conn": {
+        "label": "Gitea instance",
+        "hint": "Create a token in Gitea under Settings > Applications. Only https instances on the default port 443 are supported."
+      }
+    }
+  }
+}

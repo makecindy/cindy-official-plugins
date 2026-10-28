@@ -105,6 +105,23 @@
   let orientationIndex = 0;
   let currentOrientation = 'portrait';
 
+  // Cindy: the bezel pose belongs to the viewer. An app/AX orientation may
+  // stay portrait on a sideways phone and must not undo the user's rotation.
+  const ORIENTATION_KEY = 'baguette.native.orientation.' + udid;
+  function storedOrientation() {
+    try {
+      const value = localStorage.getItem(ORIENTATION_KEY);
+      if (ORIENTATION_CYCLE.includes(value)) return value;
+    } catch (_) { /* storage may be unavailable in an embedded page */ }
+    return null;
+  }
+  let viewerOrientation = storedOrientation();
+  function rememberOrientation(value) {
+    if (deviceMode || foldable) return;
+    viewerOrientation = value;
+    try { localStorage.setItem(ORIENTATION_KEY, value); } catch (_) { /* optional visual hint */ }
+  }
+
   // Debug knobs for landscape-right edge-gesture exploration —
   // iOS in raw=3 doesn't fire the home recognizer on any of the
   // recipes that work for landscape-left / upside-down, so we
@@ -146,6 +163,7 @@
   function applyOrientation(value, step = 1) {
     const previous = currentOrientation;
     currentOrientation = value;
+    rememberOrientation(value);
     const root = document.getElementById('nativeDeviceFrame');
     if (root) {
       if (value === 'portrait') root.removeAttribute('data-orientation');
@@ -203,6 +221,7 @@
   function snapOrientation(value) {
     const canonical = { 'portrait': 0, 'landscape-left': 90, 'portrait-upside-down': 180, 'landscape-right': 270 };
     currentOrientation = value;
+    rememberOrientation(value);
     rotationDegrees = canonical[value] || 0;
     orientationIndex = Math.max(0, orientationCycle().indexOf(value));
     const root = document.getElementById('nativeDeviceFrame');
@@ -353,8 +372,11 @@
     // before the template paints.
     document.body.style.background = 'var(--nv-page-bg, #1a1a1f)';
 
+    // Independent reads overlap when a task recreates its viewer page.
+    const [html, meta, hinge] = await Promise.all([
+      fetchTemplate(), fetchDeviceMeta(udid), deviceMode ? null : readHinge(),
+    ]);
     // 1. Load template + inline styles from sim-native.html.
-    const html = await fetchTemplate();
     if (!html) {
       document.body.innerHTML =
           '<pre style="color:#f87171;padding:24px;font-family:ui-monospace">sim-native.html not found</pre>';
@@ -365,7 +387,6 @@
     // 2. Resolve device name + iOS runtime from the list endpoint.
     //    The SDK definition gives us the bezel; /simulators.json gives
     //    us the human-readable identity that sits above it.
-    const meta = await fetchDeviceMeta(udid);
     deviceName = meta.name;
     const nameEl = document.getElementById('nativeDeviceName');
     const osEl = document.getElementById('nativeDeviceOS');
@@ -403,7 +424,6 @@
     // flat chrome never shows for it while the guest is up — the cube
     // button turns the book instead of leaving 3D. The flat chrome
     // still carries the power card for a device that is not booted.
-    const hinge = deviceMode ? null : await readHinge();
     foldable = !!(hinge && hinge.foldable);
     if (foldable) currentLitPanel = hinge.litPanel || 'primary';
     // Cindy: the guest's own orientation, so a book left turned opens turned.
@@ -414,6 +434,7 @@
     try {
       sim = await useSimulator(deviceDefinitionURL);
       sim.mount(document.getElementById('nativeDeviceFrame'));
+      if (!deviceMode && !foldable && viewerOrientation) snapOrientation(viewerOrientation);
     } catch (e) {
       console.warn('[native] no device definition:', (e && e.message) || e);
       sim = null;
@@ -492,7 +513,7 @@
     }
 
     // Cindy: observe the guest orientation when the stream opens. Opening a
-    // viewer must never rotate the device or restore a browser's stale value.
+    // viewer must never write its initial visual hint back to the device.
 
     // Start watching for network conditioning immediately, before the card
     // has ever been opened. A throttle armed from the CLI in another
@@ -943,7 +964,7 @@
     let painted = false, orientationRead = null;
     return {
       onOpen: () => {
-        if (deviceMode || foldable) return;
+        if (deviceMode || foldable || viewerOrientation) return;
         orientationRead = { session, orientation: currentOrientation };
         session.send({ type: 'describe_ui', x: 1, y: 1 });
       },
@@ -963,8 +984,9 @@
         if (orientationRead && env?.type === 'describe_ui_result') {
           const read = orientationRead; orientationRead = null;
           const orientation = env.ok && env.tree?.screen?.orientation;
-          // A retired stream or a manual rotation owns the newer view.
-          if (read.session === session && read.orientation === currentOrientation && ORIENTATION_CYCLE.includes(orientation)) snapOrientation(orientation);
+          // Only seed a view with no known pose. A saved/manual pose wins,
+          // including a full turn back to the value present when reading began.
+          if (!viewerOrientation && read.session === session && read.orientation === currentOrientation && ORIENTATION_CYCLE.includes(orientation)) snapOrientation(orientation);
           return true;
         }
         return routeStreamText(env);

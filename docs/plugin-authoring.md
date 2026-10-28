@@ -92,7 +92,7 @@ existing capabilities, not a requirement to add capabilities the plugin never ha
 
 Boolean capabilities must be literal `true` when present; omit unused ones rather
 than setting `false` or `null`. Keep independent fields such as `manual`, `setup`,
-`locales`, `settingsHtml`, `showTaskPreferences`, `command`, and `keywords`; their absence from `slots`
+`locales`, `settingsHtml`, `showTaskPreferences`, `releaseNotes`, `command`, and `keywords`; their absence from `slots`
 does not make them disposable. A format-only migration does not change tool
 behavior or execution paths. Historical empty slot names without declarations
 should not be filled with new permissions; inspect their actual usage. Do not
@@ -108,6 +108,24 @@ The validator preserves unknown v3 top-level fields. Preservation neither grants
 permission nor proves Host implementation. Business functionality built on
 existing network, file, or Node interfaces does not require client-side business
 registration. An invented field or method cannot create an unimplemented Host API.
+
+## Release notes (optional, recommended)
+
+In this official repository, `ghost.json.releaseNotes` is optional in both v2
+and v3. For a version update, include a user-facing summary of the changes when
+possible: new features, fixes, and compatibility changes. Keep the plugin's
+purpose in `description`; release notes describe this particular version.
+
+```json
+{ "releaseNotes": "Added batch processing.\nFixed result display for empty input." }
+```
+
+When present, the value must be a plain-text string. Validation preserves it
+verbatim, including line breaks, without trimming or truncation. It is not an
+HTML or Markdown execution surface. Omitting it or leaving it empty does not
+block repository validation or publication. Existing plugins need no historical
+backfill or separate version bump just to add release notes; include them with
+the next actual update, following the existing package-version rules.
 
 ## Host default settings card
 

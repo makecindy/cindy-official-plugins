@@ -59,7 +59,7 @@
 
 --- a/baguette/parts/keyboard.js
 +++ b/baguette/parts/keyboard.js
-@@ -58,6 +58,10 @@
+@@ -58,30 +58,48 @@
      constructor(_def, transport) {
        this.transport = transport;
        this._el = null;
@@ -69,10 +69,19 @@
 +      this._onRelease = ev => { if (ev.origin === location.origin && ev.data?.type === 'cindy-release-input') this._onBlur(); };
        this._onKeyDown = (ev) => this._handle(ev);
        this._onPaste = (ev) => this._handlePaste(ev);
++      this._onMouseDown = () => this._el?.focus();
      }
-@@ -71,17 +75,24 @@
+
+     /** Bind keydown to the screen element. Focus-gated. */
+     attach(el) {
+       if (!el) return;
++      this.detach();
+       this._el = el;
+       // Make the screen focusable + focus on click so keystrokes
+       // routed through this element work without an explicit Tab.
        if (el.tabIndex < 0) el.tabIndex = 0;
-       el.addEventListener('mousedown', () => el.focus());
+-      el.addEventListener('mousedown', () => el.focus());
++      el.addEventListener('mousedown', this._onMouseDown);
        el.addEventListener('keydown', this._onKeyDown);
 +      el.addEventListener('blur', this._onBlur);
        // Document-level: Chrome/Firefox target the focused element,
@@ -82,20 +91,25 @@
        document.addEventListener('paste', this._onPaste);
 +      document.addEventListener('visibilitychange', this._onVisibility);
 +      window.addEventListener('message', this._onRelease);
++      window.addEventListener('blur', this._onBlur);
++      window.addEventListener('pagehide', this._onBlur);
      }
 
      detach() {
        if (!this._el) return;
++      this._el.removeEventListener('mousedown', this._onMouseDown);
        this._el.removeEventListener('keydown', this._onKeyDown);
 +      this._el.removeEventListener('blur', this._onBlur);
 +      this._inputQueue.length = 0;
        document.removeEventListener('paste', this._onPaste);
 +      document.removeEventListener('visibilitychange', this._onVisibility);
 +      window.removeEventListener('message', this._onRelease);
++      window.removeEventListener('blur', this._onBlur);
++      window.removeEventListener('pagehide', this._onBlur);
        this._el = null;
      }
 
-@@ -90,20 +101,18 @@
+@@ -90,20 +108,18 @@
      /** Send a single key press. modifiers: array of
       *  `"shift" | "control" | "option" | "command"`. */
      key(code, modifiers) {
@@ -119,7 +133,7 @@
      }
 
      /** Copy the focused field's selection out of the sim onto the
-@@ -111,7 +120,36 @@
+@@ -111,7 +127,36 @@
       *  <udid> host — images included). Mirror of `paste`; the server
       *  replies with a `copy_result` frame. */
      copy() {
@@ -157,7 +171,7 @@
      }
 
      // --- internals ---
-@@ -120,6 +158,7 @@
+@@ -120,6 +165,7 @@
        // Focus gate — only forward when the screen owns focus.
        if (document.activeElement !== this._el) return;
        if (!FORWARDED.has(ev.code)) return;
@@ -267,7 +281,31 @@
                title="Simulated location"
 --- a/sim-native.js
 +++ b/sim-native.js
-@@ -143,7 +143,7 @@
+@@ -105,6 +105,23 @@
+   let orientationIndex = 0;
+   let currentOrientation = 'portrait';
+
++  // Cindy: the bezel pose belongs to the viewer. An app/AX orientation may
++  // stay portrait on a sideways phone and must not undo the user's rotation.
++  const ORIENTATION_KEY = 'baguette.native.orientation.' + udid;
++  function storedOrientation() {
++    try {
++      const value = localStorage.getItem(ORIENTATION_KEY);
++      if (ORIENTATION_CYCLE.includes(value)) return value;
++    } catch (_) { /* storage may be unavailable in an embedded page */ }
++    return null;
++  }
++  let viewerOrientation = storedOrientation();
++  function rememberOrientation(value) {
++    if (deviceMode || foldable) return;
++    viewerOrientation = value;
++    try { localStorage.setItem(ORIENTATION_KEY, value); } catch (_) { /* optional visual hint */ }
++  }
++
+   // Debug knobs for landscape-right edge-gesture exploration —
+   // iOS in raw=3 doesn't fire the home recognizer on any of the
+   // recipes that work for landscape-left / upside-down, so we
+@@ -143,9 +160,10 @@
    // the container so non-rotation CSS (max-height caps in
    // landscape) and the input/overlay coord transforms can read
    // `currentOrientation`.
@@ -275,8 +313,11 @@
 +  function applyOrientation(value, step = 1) {
      const previous = currentOrientation;
      currentOrientation = value;
++    rememberOrientation(value);
      const root = document.getElementById('nativeDeviceFrame');
-@@ -156,13 +156,45 @@
+     if (root) {
+       if (value === 'portrait') root.removeAttribute('data-orientation');
+@@ -156,13 +174,45 @@
        // after format swap), keep the existing degrees so the
        // bezel doesn't re-animate.
        if (value !== previous) {
@@ -323,7 +364,15 @@
    }
 
    // Set an orientation outright, no cycle step and no animation —
-@@ -185,6 +217,7 @@
+@@ -171,6 +221,7 @@
+   function snapOrientation(value) {
+     const canonical = { 'portrait': 0, 'landscape-left': 90, 'portrait-upside-down': 180, 'landscape-right': 270 };
+     currentOrientation = value;
++    rememberOrientation(value);
+     rotationDegrees = canonical[value] || 0;
+     orientationIndex = Math.max(0, orientationCycle().indexOf(value));
+     const root = document.getElementById('nativeDeviceFrame');
+@@ -185,6 +236,7 @@
        wrapper.style.transition = t;
      }
      layoutHandheld();
@@ -331,8 +380,32 @@
    }
 
    // Map a normalized coord [0, 1]² from the rotated visual frame
-@@ -373,6 +406,8 @@
-     const hinge = deviceMode ? null : await readHinge();
+@@ -320,8 +372,11 @@
+     // before the template paints.
+     document.body.style.background = 'var(--nv-page-bg, #1a1a1f)';
+
++    // Independent reads overlap when a task recreates its viewer page.
++    const [html, meta, hinge] = await Promise.all([
++      fetchTemplate(), fetchDeviceMeta(udid), deviceMode ? null : readHinge(),
++    ]);
+     // 1. Load template + inline styles from sim-native.html.
+-    const html = await fetchTemplate();
+     if (!html) {
+       document.body.innerHTML =
+           '<pre style="color:#f87171;padding:24px;font-family:ui-monospace">sim-native.html not found</pre>';
+@@ -332,7 +387,6 @@
+     // 2. Resolve device name + iOS runtime from the list endpoint.
+     //    The SDK definition gives us the bezel; /simulators.json gives
+     //    us the human-readable identity that sits above it.
+-    const meta = await fetchDeviceMeta(udid);
+     deviceName = meta.name;
+     const nameEl = document.getElementById('nativeDeviceName');
+     const osEl = document.getElementById('nativeDeviceOS');
+@@ -370,15 +424,17 @@
+     // flat chrome never shows for it while the guest is up — the cube
+     // button turns the book instead of leaving 3D. The flat chrome
+     // still carries the power card for a device that is not booted.
+-    const hinge = deviceMode ? null : await readHinge();
      foldable = !!(hinge && hinge.foldable);
      if (foldable) currentLitPanel = hinge.litPanel || 'primary';
 +    // Cindy: the guest's own orientation, so a book left turned opens turned.
@@ -340,7 +413,14 @@
      if (foldable && isBooted(meta.state)) {
        document.getElementById('nativeDeviceFrame').setAttribute('data-foldable', '');
      }
-@@ -456,26 +491,8 @@
+     try {
+       sim = await useSimulator(deviceDefinitionURL);
+       sim.mount(document.getElementById('nativeDeviceFrame'));
++      if (!deviceMode && !foldable && viewerOrientation) snapOrientation(viewerOrientation);
+     } catch (e) {
+       console.warn('[native] no device definition:', (e && e.message) || e);
+       sim = null;
+@@ -456,26 +512,8 @@
            window.SimFileDrop.attach(document.getElementById('nativeDeviceFrame'), { udid });
      }
 
@@ -365,20 +445,21 @@
 -      resetToPortrait();
 -    }
 +    // Cindy: observe the guest orientation when the stream opens. Opening a
-+    // viewer must never rotate the device or restore a browser's stale value.
++    // viewer must never write its initial visual hint back to the device.
 
      // Start watching for network conditioning immediately, before the card
      // has ever been opened. A throttle armed from the CLI in another
-@@ -836,11 +853,19 @@
+@@ -836,11 +874,19 @@
     *  screens — so nothing here follows the hinge; the 3D scene does. */
    let foldable = false;
    let currentLitPanel = 'primary';
-+  let foldOrientation = null;
-
+-
 -  function resetToPortrait() {
 -    if (deviceMode) return; // a physical phone rotates itself
 -    fetch('/simulators/' + encodeURIComponent(udid) + '/orientation?value=portrait',
 -        { method: 'POST' }).catch(() => { /* best-effort */ });
++  let foldOrientation = null;
++
 +  function syncLitPanel(panel) {
 +    if (!foldable || (panel !== 'primary' && panel !== 'secondary') || panel === currentLitPanel) return;
 +    currentLitPanel = panel;
@@ -393,7 +474,7 @@
    }
 
    // Theme toggle. Three logical states — "auto" (no manual pin,
-@@ -915,8 +940,13 @@
+@@ -915,8 +961,13 @@
    }
 
    function sessionCallbacks(onFirstPaint) {
@@ -401,14 +482,14 @@
 +    let painted = false, orientationRead = null;
      return {
 +      onOpen: () => {
-+        if (deviceMode || foldable) return;
++        if (deviceMode || foldable || viewerOrientation) return;
 +        orientationRead = { session, orientation: currentOrientation };
 +        session.send({ type: 'describe_ui', x: 1, y: 1 });
 +      },
        onSize: (w, h) => {
          lastPaintedSize = { w, h };
          // First frame after a boot — the guest is genuinely up, so
-@@ -929,7 +959,16 @@
+@@ -929,7 +980,17 @@
          if (el) el.textContent = fps + ' fps';
        },
        onLog: (msg) => console.log('[native]', msg),
@@ -417,8 +498,9 @@
 +        if (orientationRead && env?.type === 'describe_ui_result') {
 +          const read = orientationRead; orientationRead = null;
 +          const orientation = env.ok && env.tree?.screen?.orientation;
-+          // A retired stream or a manual rotation owns the newer view.
-+          if (read.session === session && read.orientation === currentOrientation && ORIENTATION_CYCLE.includes(orientation)) snapOrientation(orientation);
++          // Only seed a view with no known pose. A saved/manual pose wins,
++          // including a full turn back to the value present when reading began.
++          if (!viewerOrientation && read.session === session && read.orientation === currentOrientation && ORIENTATION_CYCLE.includes(orientation)) snapOrientation(orientation);
 +          return true;
 +        }
 +        return routeStreamText(env);
@@ -426,7 +508,7 @@
      };
    }
 
-@@ -1480,7 +1519,6 @@
+@@ -1480,7 +1541,6 @@
    function onBooted() {
      renderPowerCard('starting');
      startMainView();
@@ -434,7 +516,7 @@
      firstFrameTimer = setTimeout(hidePowerCard, FIRST_FRAME_TIMEOUT_MS);
    }
 
-@@ -1491,11 +1529,15 @@
+@@ -1491,11 +1551,15 @@
        const frame = document.getElementById('nativeDeviceFrame');
        if (frame) frame.setAttribute('data-foldable', '');
        toggle3D({ fixed: true });
@@ -453,7 +535,7 @@
        return;
      }
      startSession(currentFormat());
-@@ -1784,7 +1826,6 @@
+@@ -1784,7 +1848,6 @@
        members: [
          { id: 'nativeAxToggle', label: 'Accessibility', role: 'state' },
          { id: 'nativeLogsToggle', label: 'Logs', role: 'state' },
@@ -461,7 +543,7 @@
        ],
      },
      {
-@@ -2044,8 +2085,9 @@
+@@ -2044,8 +2107,9 @@
      if (member.role === 'readout') {
        const row = document.createElement('div');
        row.className = 'tb-read';
@@ -472,7 +554,7 @@
        row.querySelector('.tb-val').textContent = source.textContent || '—';
        return row;
      }
-@@ -2053,7 +2095,8 @@
+@@ -2053,7 +2117,8 @@
      if (member.role === 'choice') {
        const row = document.createElement('div');
        row.className = 'tb-choice';
@@ -482,7 +564,7 @@
        // The real picker is moved in, not copied: it keeps its handlers,
        // its `.active` pill, and its identity as the one control the
        // rest of the page already talks to.
-@@ -2066,8 +2109,9 @@
+@@ -2066,8 +2131,9 @@
      row.className = 'tb-row' + (source.classList.contains('active') ? ' on' : '');
      const glyph = source.querySelector('svg');
      row.innerHTML = (glyph ? glyph.outerHTML : clusterSvg('more')) +
@@ -493,7 +575,7 @@
      row.addEventListener('click', () => {
        source.click();
        closeFoldMenus();
-@@ -2334,16 +2378,27 @@
+@@ -2334,16 +2400,27 @@
      // through the `/simulators/<udid>/orientation?value=...` route;
      // server delegates to `simulator.orientation().set(...)`, which
      // dispatches a device orientation change through the appropriate backend.
@@ -524,7 +606,7 @@
          fetch(url, { method: 'POST' }).catch(() => { /* best-effort */ });
          return;
        }
-@@ -2352,7 +2407,7 @@
+@@ -2352,7 +2429,7 @@
        // + canvas as one unit, while the input + overlay wrappers
        // remap coords back to portrait so taps still land on the
        // iOS element under the cursor.
@@ -533,7 +615,7 @@
        const url = '/simulators/' + encodeURIComponent(udid)
            + '/orientation?value=' + encodeURIComponent(value);
        fetch(url, { method: 'POST' }).catch(() => { /* best-effort */ });
-@@ -2696,6 +2751,7 @@
+@@ -2696,6 +2773,7 @@
            format: currentFormat(),
            background: live3DBackground(),
            fixed,
@@ -585,3 +667,172 @@
      this.alive = false;
      if (this.fpsTimer) { clearInterval(this.fpsTimer); this.fpsTimer = null; }
      if (this.rafId)    { cancelAnimationFrame(this.rafId); this.rafId = null; }
+--- a/baguette/gestures/wheel-gesture-source.js
++++ b/baguette/gestures/wheel-gesture-source.js
+@@ -18,6 +18,7 @@
+
+       const close = () => {
+         if (!state) return;
++        clearTimeout(state.idleTimer);
+         this.screen.touchUp([state.f1, state.f2]);
+         if (this.overlay) this.overlay.clear();
+         state = null;
+@@ -38,9 +39,7 @@
+         if (!state || state.kind !== wantKind) {
+           if (state) close();
+           state = {
+-            kind: wantKind, centre,
+-            viewCx: vx, viewCy: vy,
+-            viewR: (BASE_SPREAD_PT / width) * r.width,
++            kind: wantKind,
+             f1: { x: centre.x + BASE_SPREAD_PT, y: centre.y },
+             f2: { x: centre.x - BASE_SPREAD_PT, y: centre.y },
+             scale: 1, idleTimer: null,
+@@ -54,29 +53,35 @@
+           state.f1 = { x: centre.x + rr, y: centre.y };
+           state.f2 = { x: centre.x - rr, y: centre.y };
+         } else {
+-          const shiftX = (-e.deltaX / r.width) * width;
+-          const shiftY = (-e.deltaY / r.height) * height;
++          // Keep the visible pair together and consume offscreen travel, just
++          // like Android. Reversing at an edge must not repay hidden distance.
++          for (const finger of [state.f1, state.f2]) {
++            finger.x = Math.max(0, Math.min(width, finger.x));
++            finger.y = Math.max(0, Math.min(height, finger.y));
++          }
++          const shiftX = Math.max(-Math.min(state.f1.x, state.f2.x),
++            Math.min(width - Math.max(state.f1.x, state.f2.x), (-e.deltaX / r.width) * width));
++          const shiftY = Math.max(-Math.min(state.f1.y, state.f2.y),
++            Math.min(height - Math.max(state.f1.y, state.f2.y), (-e.deltaY / r.height) * height));
+           state.f1.x += shiftX; state.f1.y += shiftY;
+           state.f2.x += shiftX; state.f2.y += shiftY;
+         }
+
+-        this.screen.touchMove([state.f1, state.f2]);
++        // Use the backend's bounded positions for both dispatch and display;
++        // a pinch near an edge can keep its raw pair outside the screen.
++        const points = [state.f1, state.f2].map(finger => ({
++          x: Math.max(0, Math.min(width, finger.x)),
++          y: Math.max(0, Math.min(height, finger.y)),
++        }));
++        this.screen.touchMove(points);
+
+         if (this.overlay) {
+-          if (state.kind === 'pinch') {
+-            const vr = state.viewR * state.scale;
+-            this.overlay.setFingers([
+-              { x: state.viewCx + vr, y: state.viewCy },
+-              { x: state.viewCx - vr, y: state.viewCy },
+-            ]);
+-          } else {
+-            const dxPx = (state.f1.x - centre.x) / width * r.width;
+-            const dyPx = (state.f1.y - centre.y) / height * r.height;
+-            this.overlay.setFingers([
+-              { x: vx + dxPx, y: vy + dyPx },
+-              { x: vx - dxPx, y: vy - dyPx },
+-            ]);
+-          }
++          // Draw the actual contacts for both pan and pinch; mirroring the
++          // first contact makes a parallel pan look like fingers spreading.
++          this.overlay.setFingers(points.map((finger) => ({
++            x: finger.x / width * r.width,
++            y: finger.y / height * r.height,
++          })));
+         }
+
+         clearTimeout(state.idleTimer);
+--- a/baguette/parts/screen.js
++++ b/baguette/parts/screen.js
+@@ -40,6 +40,7 @@
+           root.Baguette._ScreenQuad.mapClientPointFromContain(
+               canvas, clientX, clientY, this.size);
+       }
++      screenArea.setAttribute('data-cindy-trackpad', '');
+       this.bindInteraction({ element: screenArea, overlayHost: screenArea, mapClientPoint });
+     }
+
+--- a/baguette/gestures/touch-gesture-source.js
++++ b/baguette/gestures/touch-gesture-source.js
+@@ -22,6 +22,9 @@
+     }
+
+     _bind() {
++      // Chromium receives real contacts from Cindy's AppKit input adapter.
++      // It has no Safari gesture* stream to defer to.
++      if (typeof root.GestureEvent !== 'function') return this._bindContacts();
+       const opts = { passive: false };
+       let state = null;
+       let lastMs = 0;
+@@ -164,6 +167,62 @@
+       this._on(this._el, 'touchend', endTouch, opts);
+       this._on(this._el, 'touchcancel', endTouch, opts);
+     }
++
++    _bindContacts() {
++      let contacts = [];
++      let contactOptions;
++      const release = () => {
++        if (contacts.length) this.screen.touchUp(contacts.map(t => t.point), contactOptions);
++        contacts = [];
++        contactOptions = undefined;
++        this.overlay?.clear();
++      };
++      this._releaseContacts = release;
++      const update = (e) => {
++        e.preventDefault();
++        if (e.type === 'touchcancel' || e.touches.length > 2) { release(); return; }
++        const next = Array.from(e.touches).sort((a,b) => a.identifier-b.identifier)
++          .map(t => ({ id:t.identifier, point:this._screenPoint(t.clientX,t.clientY), x:t.clientX,y:t.clientY }));
++        if (next.some(t => !t.point.inside)) { release(); return; }
++        const same = next.length === contacts.length && next.every((t,i) => t.id === contacts[i].id);
++        if (!same) {
++          // The simulator's wire format separates single- and two-contact
++          // streams. Close the old stream when the number of fingers changes.
++          const singleStart = next.length === 1 && !contacts.some(t => t.id === next[0].id);
++          release();
++          if (next.length) {
++            // Preserve the legacy edge hint for a newly-down single finger;
++            // lifting one finger of a pair must not invent a new edge gesture.
++            const edge = singleStart ? new root.Baguette._EdgeBands(0.85, 0.15)
++              .classify(next[0].point, this.getOrientation()) : null;
++            contactOptions = edge ? { edge } : undefined;
++            this.screen.touchDown(next.map(t => t.point), contactOptions);
++          }
++        } else if (next.length) {
++          this.screen.touchMove(next.map(t => t.point), contactOptions);
++        }
++        contacts = next;
++        const r = this._el.getBoundingClientRect();
++        if (next.length === 2) this.overlay?.setFingers(next.map(t => ({x:t.x-r.left,y:t.y-r.top})));
++        else this.overlay?.clear();
++      };
++      for (const name of ['touchstart','touchmove','touchend','touchcancel']) this._on(this._el,name,update,{passive:false});
++      // A whole native sample is atomic: do not create a single-finger stream
++      // before the second finger arrives through Chromium's input synthesizer.
++      this._on(this._el,'cindy-trackpad',e=>{
++        const frame=e.detail;
++        update({type:frame.phase==='cancel'?'touchcancel':'touchmove',
++          touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
++      });
++      this._on(root,'blur',release);
++      this._on(root,'pagehide',release);
++    }
++
++    detach() {
++      this._releaseContacts?.();
++      this._releaseContacts = null;
++      super.detach();
++    }
+   }
+
+   root.Baguette = root.Baguette || {};
+--- a/baguette/parts/screen.js
++++ b/baguette/parts/screen.js
+@@ -40,7 +40,7 @@
+           root.Baguette._ScreenQuad.mapClientPointFromContain(
+               canvas, clientX, clientY, this.size);
+       }
+-      screenArea.setAttribute('data-cindy-trackpad', '');
++      screenArea.setAttribute('data-cindy-trackpad', 'contacts');
+       this.bindInteraction({ element: screenArea, overlayHost: screenArea, mapClientPoint });
+     }

@@ -52,22 +52,117 @@ test('bundle comparison detects equal-size equal-time resource changes; registra
   assert.equal((await apps.status({udid:A,wait:0})).job,job.job);
 });
 
-test('foreground App info bounds comparison and hashing without imposing its deadline on install jobs',async t=>{
+test('lightweight info stays bounded; full comparison uses a reusable job and preserves inconclusive failure',async t=>{
   const root=await temporary(t),source=path.join(root,'Game.app');await fs.mkdir(source);
   const plist={CFBundleSupportedPlatforms:['iPhoneSimulator'],CFBundleIdentifier:'test.example.game',CFBundleExecutable:'Game'};
   await fs.writeFile(path.join(source,'Game'),Buffer.alloc(256*1024));
-  for(const phase of ['compare','hash']){
-    let clock=0,comparing=false;
-    const apps=require(path.join(dir,'apps.cjs')).createApps({Failure,now:()=>phase==='hash'?(clock+=100):clock,
+    let comparing=false;const gate=deferred();
+    const apps=require(path.join(dir,'apps.cjs')).createApps({Failure,
       run:async(file,args,options)=>{
-        assert.ok(options.timeout<=1000-clock);
-        if(file.endsWith('plutil')){if(phase==='hash')clock=700;else clock+=100;return {stdout:JSON.stringify(plist)};}
-        comparing=true;assert.equal(options.timeout,700);clock+=options.timeout;
+        if(file.endsWith('plutil'))return {stdout:JSON.stringify(plist)};
+        comparing=true;assert.equal(options.timeout,1800000);await gate.promise;
         throw new Failure('COMMAND_FAILED','checksum comparison timed out');
-      },sim:async(_args,options)=>{assert.ok(options.timeout<=1000-clock);clock+=100;return {stdout:source};}});
-    if(phase==='hash')await assert.rejects(apps.info({udid:A},{appPath:source,_deadline:1000}),e=>e.code==='TIME_BUDGET_EXHAUSTED'&&e.execution==='not_executed');
-    else {const result=await apps.info({udid:A},{appPath:source,_deadline:1000});assert.equal(result.matchesLocal,false);assert.equal(result.verification,'unconfirmed');assert.equal(result.comparisonError.code,'COMMAND_FAILED');assert.match(result.note,/does not prove a different build/);assert.equal(comparing,true);assert.equal(clock,1000);}
+      },sim:async()=>({stdout:source})});
+    const light=await apps.info({udid:A},{appPath:source,verify:'none'});
+    assert.equal(light.matchesLocal,null);assert.equal(light.verification,'not_requested');assert.equal(comparing,false);
+    const job=await apps.info({udid:A},{appPath:source,wait:0});assert.equal(job.state,'running');
+    assert.equal((await apps.info({udid:A},{appPath:source,wait:0})).job,job.job);
+    gate.resolve();const result=await apps.status({udid:A,job:job.job,wait:85});
+    assert.equal(result.matchesLocal,null);assert.equal(result.verification,'unconfirmed');assert.equal(result.comparisonError.code,'COMMAND_FAILED');assert.equal(comparing,true);
+});
+
+test('whole-bundle receipts invalidate on preserved-time resource edits, additions, removals, container changes and expiry',async t=>{
+  const root=await temporary(t),source=path.join(root,'Build.app'),installed=path.join(root,'Installed.app');
+  const metadata={CFBundleSupportedPlatforms:['iPhoneSimulator'],CFBundleIdentifier:'test.example.game',CFBundleExecutable:'Game'};
+  for(const folder of [source,installed]){await fs.mkdir(folder);await fs.writeFile(path.join(folder,'Info.plist'),JSON.stringify(metadata));await fs.writeFile(path.join(folder,'Game'),'exe');await fs.writeFile(path.join(folder,'asset'),'old');}
+  let compares=0,clock=Date.now(),container=installed;
+  const apps=require(path.join(dir,'apps.cjs')).createApps({Failure,now:()=>clock,
+    sim:async()=>({stdout:container}),run:async(file,args)=>{if(file.endsWith('plutil'))return {stdout:await fs.readFile(args.at(-1),'utf8')};compares++;return exec(file,args);}});
+  const info=()=>apps.info({udid:A},{appPath:source,wait:85});
+  assert.equal((await info()).matchesLocal,true);assert.equal(compares,1);
+  assert.equal((await info()).verificationReused,true);assert.equal(compares,1);
+  const stamp=await fs.stat(path.join(installed,'asset'));
+  await fs.writeFile(path.join(installed,'asset'),'new');await fs.utimes(path.join(installed,'asset'),stamp.atime,stamp.mtime);
+  assert.equal((await info()).matchesLocal,false);assert.equal(compares,2,'ctime detects equal size and restored mtime');
+  await fs.writeFile(path.join(installed,'asset'),'old');assert.equal((await info()).matchesLocal,true);
+  await fs.writeFile(path.join(source,'added'),'resource');assert.equal((await info()).matchesLocal,false);
+  await fs.unlink(path.join(source,'added'));assert.equal((await info()).matchesLocal,true);
+  await fs.unlink(path.join(installed,'asset'));assert.equal((await info()).matchesLocal,false);
+  await fs.writeFile(path.join(installed,'asset'),'old');assert.equal((await info()).matchesLocal,true);
+  const before=compares;clock+=3600001;assert.equal((await info()).matchesLocal,true);assert.equal(compares,before+1);
+  const replacement=path.join(root,'Replacement.app');await fs.cp(installed,replacement,{recursive:true});container=replacement;
+  assert.equal((await info()).matchesLocal,true);assert.equal(compares,before+2);
+  assert.equal((await apps.info({udid:A},{appPath:source,verify:'full',wait:85})).verificationReused,undefined);assert.equal(compares,before+3);
+});
+
+test('a resource change during full comparison cannot create a reusable receipt',async t=>{
+  const root=await temporary(t),source=path.join(root,'Build.app');await fs.mkdir(source);await fs.writeFile(path.join(source,'Game'),'same');
+  let mutate=true;
+  const apps=require(path.join(dir,'apps.cjs')).createApps({Failure,sim:async()=>({stdout:source}),run:async(file)=>{
+    if(file.endsWith('plutil'))return {stdout:JSON.stringify({CFBundleIdentifier:'test.example.game',CFBundleExecutable:'Game'})};
+    if(mutate)await fs.writeFile(path.join(source,'asset'),'changed');return {stdout:''};
+  }});
+  const first=await apps.info({udid:A},{appPath:source,wait:85});
+  assert.equal(first.matchesLocal,null);assert.equal(first.comparisonError.code,'BUILD_CHANGED');
+  mutate=false;assert.equal((await apps.info({udid:A},{appPath:source,wait:85})).verificationReused,undefined);
+});
+
+test('receipt reuse revisits files changed after their first scan, for info and install on either tree',async t=>{
+  const code=await fs.readFile(path.join(dir,'apps.cjs'),'utf8');
+  for(const side of ['source','installed'])for(const action of ['info','install'])await t.test(`${side} ${action}`,async t=>{
+    const root=await temporary(t),source=path.join(root,'Build.app'),installed=path.join(root,'Installed.app');
+    const metadata={CFBundleSupportedPlatforms:['iPhoneSimulator'],CFBundleIdentifier:'test.example.game',CFBundleExecutable:'Game'};
+    for(const folder of [source,installed]){
+      await fs.mkdir(folder);await fs.writeFile(path.join(folder,'Info.plist'),JSON.stringify(metadata));
+      await fs.writeFile(path.join(folder,'Game'),'exe');await fs.writeFile(path.join(folder,'asset'),'old');
+      await fs.writeFile(path.join(folder,'z-last'),'last');
+    }
+    const target=side==='source'?await fs.realpath(source):installed;let armed=false,mutations=0;
+    const context={module:{exports:{}},setImmediate,clearTimeout,setTimeout,require:name=>{
+      if(name==='node:fs')return {...syncFs,lstatSync(file,options){
+        const stat=syncFs.lstatSync(file,options);
+        if(armed&&file===path.join(target,'z-last')){
+          armed=false;mutations++;const asset=path.join(target,'asset'),old=syncFs.statSync(asset);
+          syncFs.writeFileSync(asset,'new');syncFs.utimesSync(asset,old.atime,old.mtime);
+        }
+        return stat;
+      }};
+      return require(name.startsWith('.')?path.resolve(dir,name):name);
+    }};
+    vm.runInNewContext(code,context);
+    const apps=context.module.exports.createApps({Failure,sim:async args=>{assert.equal(args[0],'get_app_container');return {stdout:installed};},
+      run:async(file,args)=>file.endsWith('plutil')?{stdout:await fs.readFile(args.at(-1),'utf8')}:exec(file,args)});
+    assert.equal((await apps.info({udid:A},{appPath:source,wait:85})).matchesLocal,true);
+    armed=true;
+    if(action==='info'){
+      const result=await apps.info({udid:A},{appPath:source,wait:85});
+      assert.equal(result.verificationReused,undefined);assert.equal(result.matchesLocal,false);
+    }else{
+      const result=await apps.install({udid:A},{appPath:source},{terminate:async()=>{}});
+      assert.equal(result.mode,'sync');assert.equal(result.execution,'executed');assert.equal(result.matchesLocal,true);
+      assert.equal(await fs.readFile(path.join(installed,'asset'),'utf8'),await fs.readFile(path.join(source,'asset'),'utf8'));
+    }
+    assert.equal(mutations,1);
+  });
+});
+
+test('missing optional platform metadata still permits verified unchanged installs; symlink edits invalidate receipts',async t=>{
+  const root=await temporary(t),source=path.join(root,'Build.app'),installed=path.join(root,'Installed.app');
+  const metadata={CFBundleIdentifier:'test.example.game',CFBundleExecutable:'Game'};
+  for(const folder of [source,installed]){
+    await fs.mkdir(folder);await fs.writeFile(path.join(folder,'Info.plist'),JSON.stringify(metadata));
+    await fs.writeFile(path.join(folder,'Game'),'exe');await fs.writeFile(path.join(folder,'asset'),'bytes');
+    await fs.symlink('asset',path.join(folder,'link'));
   }
+  let comparisons=0;
+  const apps=require(path.join(dir,'apps.cjs')).createApps({Failure,
+    sim:async args=>{assert.equal(args[0],'get_app_container','no reinstall');return {stdout:installed};},
+    run:async(file,args)=>{if(file.endsWith('plutil'))return {stdout:await fs.readFile(args.at(-1),'utf8')};comparisons++;return exec(file,args);}});
+  const unchanged=await apps.install({udid:A},{appPath:source},{terminate:async()=>assert.fail('no termination')});
+  assert.equal(unchanged.mode,'unchanged');assert.equal(unchanged.matchesLocal,true);
+  assert.equal((await apps.info({udid:A},{appPath:source})).verificationReused,true);assert.equal(comparisons,1);
+  await fs.unlink(path.join(installed,'link'));await fs.symlink('Game',path.join(installed,'link'));
+  assert.equal((await apps.info({udid:A},{appPath:source})).matchesLocal,false);assert.equal(comparisons,2);
 });
 
 test('installation comparison is already a pollable locked job, then settles as unchanged, sync or full',async t=>{
@@ -166,7 +261,11 @@ function agentFixture({frames=[],streamError=false,streamEvents=[],onDelay,onCom
     if(file.endsWith('plutil'))return {stdout:'测试 Game'};
     if(file.endsWith('osascript')) {
       if(args[2].endsWith('ocr.jxa.js')) {if(state.ocr===null)throw Error('OCR unavailable');return {stdout:JSON.stringify(state.ocr)};}
-      if(state.failRender)throw new Failure('RENDER_FAILED','image conversion failed');
+      if(state.failRender)throw new Failure('RENDER_FAILED','image conversion failed',options.mutation?'unknown':'not_executed');
+      if(args[2].endsWith('image.jxa.js')&&JSON.parse(args.at(-1)).clipboard){
+        state.copied=true;
+        return {stdout:state.renderReceipt??JSON.stringify({width:874,height:402,bytes:state.imageBytes,copied:true})};
+      }
       const script=args[2];state.files.set(args[script.endsWith('image.jxa.js')?4:3],Buffer.alloc(state.imageBytes,1));
       return {stdout:JSON.stringify({width:402,height:874})};
     }
@@ -411,6 +510,120 @@ test('screenshots reject a rotation during capture and refresh a rotation inside
   await assert.rejects(agent.screenshot(device,{corners:false}),e=>e.code==='SCREEN_CHANGED');
 });
 
+test('viewer exports use live orientation and full resolution after an Agent screenshot warmed the density cache',async()=>{
+  for(const [orientation,rotation] of Object.entries({'portrait':0,'landscape-left':90,'portrait-upside-down':180,'landscape-right':270})) {
+    const {agent,state,device}=agentFixture();
+    await agent.screenshot(device,{corners:false});
+    state.orientation=orientation;state.calls.length=0;
+    const shot=await agent.nativeScreenshot(device,10000);
+    assert.equal(shot._screen.orientation,orientation);
+    const capture=state.calls.find(([,args])=>args[0]==='screenshot')[1];
+    assert.equal(capture[capture.indexOf('--scale')+1],'1');
+    const render=state.calls.find(([,args])=>args[2]?.endsWith('image.jxa.js'));
+    const options=JSON.parse(render[1].at(-1));
+    assert.equal(options.rotate,rotation);assert.equal(options.nativeResolution,true);
+    assert.equal(options.radius,0);assert.equal(options.grid,0);assert.equal(options.format,'png');
+    assert.equal(options.view.width,rotation%180?874:402);
+    assert.ok(!state.calls.some(([,args])=>args[0]==='chrome'));
+    assert.ok([...state.files.keys()].every(file=>!file.endsWith('.raw.png')));
+  }
+  const {agent,state,device}=agentFixture();
+  state.turnOnShot=true;
+  await assert.rejects(agent.nativeScreenshot(device,10000),e=>e.code==='SCREEN_CHANGED');
+  assert.equal(state.files.size,0);
+});
+
+test('Agent and native fallback screenshots remove temporary and partial output files on every capture stage failure',async()=>{
+  for(const native of [false,true])for(const phase of ['capture','geometry','stale','render']){
+    let f,captures=0;
+    f=agentFixture({onCommand(_file,args,_options,state){
+      if(args[0]==='screenshot'){
+        captures++;
+        if(phase==='capture'){
+          state.files.set(args[args.indexOf('--output')+1],Buffer.from('partial'));
+          throw new Failure('CAPTURE_FAILED','original capture failure');
+        }
+        if(phase==='geometry'){f.agent.forget(f.device.udid);state.failTree=true;}
+        if(phase==='stale'){state.failConfirm=true;state.failTree=true;}
+      }
+      if(args[2]?.endsWith('image.jxa.js')&&phase==='render'){
+        state.files.set(args[4],Buffer.from('partial output'));
+        throw new Failure('RENDER_FAILED','original render failure');
+      }
+    }});
+    const expected={capture:'CAPTURE_FAILED',geometry:'SCREEN_UNAVAILABLE',stale:'SCREEN_CHANGED',render:'RENDER_FAILED'}[phase];
+    const task=native?f.agent.nativeScreenshot(f.device,10000):f.agent.screenshot(f.device,{corners:false,_deadline:10000});
+    await assert.rejects(task,e=>e.code===expected);
+    assert.equal(captures,phase==='capture'?2:1);
+    assert.equal(f.state.files.size,0,`${native?'native fallback':'Agent'} ${phase} leaves no private image files`);
+  }
+});
+
+test('flat viewer exports capture native pixels at the visible pose without AX or input probes',async()=>{
+  for(const [orientation,rotation] of Object.entries({'portrait':0,'landscape-left':90,'portrait-upside-down':180,'landscape-right':270})) {
+    const {agent,state,device}=agentFixture();
+    await agent.screenshot(device,{corners:false}); // populate a lower-density Agent cache
+    state.calls.length=0;state.orientation='portrait';state.failTree=true;state.failConfirm=true;
+    const shot=await agent.nativeScreenshot(device,10000,orientation);
+    assert.ok(state.files.has(shot.path));
+    assert.deepEqual(state.calls.map(([,args])=>args[0]),['screenshot','-l']);
+    const capture=state.calls[0][1];assert.equal(capture[capture.indexOf('--scale')+1],'1');
+    const options=JSON.parse(state.calls.find(([,args])=>args[2]?.endsWith('image.jxa.js'))[1].at(-1));
+    assert.equal(options.rotate,rotation);assert.equal(options.view,undefined,'renderer derives dimensions from the captured PNG');
+    assert.equal(options.nativeResolution,true);
+    assert.ok([...state.files.keys()].every(file=>!file.endsWith('.raw.png')));
+  }
+  const invalid=agentFixture();
+  await assert.rejects(invalid.agent.nativeScreenshot(invalid.device,10000,'bogus'),e=>e.code==='INVALID_ARGUMENT');
+  assert.equal(invalid.state.calls.length,0);
+});
+
+test('flat exports clean partial files and do not restart an expired capture budget',async()=>{
+  for(const phase of ['capture','render','expired','transient']){
+    let captures=0;
+    const f=agentFixture({clockStep:0,onCommand(_file,args,_options,state){
+      if(args[0]==='screenshot'){
+        captures++;
+        if(phase==='capture'||(phase==='transient'&&captures===1)){
+          state.files.set(args[args.indexOf('--output')+1],Buffer.from('partial'));
+          throw new Failure('CAPTURE_FAILED','capture failed');
+        }
+      }
+      if(args[0]==='-l'&&phase==='render'){
+        state.files.set(args[4],Buffer.from('partial'));
+        throw new Failure('RENDER_FAILED','render failed');
+      }
+    }});
+    const task=f.agent.nativeScreenshot(f.device,phase==='expired'?0:10000,'landscape-left');
+    if(phase==='transient'){const result=await task;assert.equal(captures,2);assert.deepEqual([...f.state.files.keys()],[result.path]);}
+    else{await assert.rejects(task);assert.equal(f.state.files.size,0);}
+    if(phase==='expired')assert.equal(f.state.calls.length,0);
+  }
+});
+
+test('flat clipboard exports render and copy once without a second PNG file, and never retry uncertain writes',async()=>{
+  for(const orientation of ['portrait','landscape-left','landscape-right','portrait-upside-down']){
+    const f=agentFixture();f.state.failTree=true;
+    const shot=await f.agent.nativeScreenshot(f.device,10000,orientation,true);
+    assert.equal(shot.copied,true);assert.equal(shot.bytes,f.state.imageBytes);assert.equal(shot.path,undefined);
+    assert.equal(f.state.files.size,0);
+    assert.deepEqual(f.state.calls.map(([,args])=>args[0]),['screenshot','-l']);
+    assert.equal(f.state.calls.at(-1)[2].mutation,true);
+  }
+  for(const receipt of ['invalid','{}','null','{"copied":true,"bytes":0}']){
+    const f=agentFixture();f.state.renderReceipt=receipt;
+    await assert.rejects(f.agent.nativeScreenshot(f.device,10000,'landscape-left',true),e=>e.execution==='unknown');
+    assert.equal(f.state.calls.filter(([,args])=>args[0]==='-l').length,1);
+    assert.equal(f.state.files.size,0);
+  }
+  const failed=agentFixture();failed.state.failRender=true;
+  await assert.rejects(failed.agent.nativeScreenshot(failed.device,10000,'portrait',true),e=>e.execution==='unknown');
+  assert.equal(failed.state.calls.filter(([,args])=>args[0]==='-l').length,1);
+  const expired=agentFixture({clockStep:0,onCommand(_file,args,_opts,state){if(args[0]==='screenshot')state.advance(1000);}});
+  await assert.rejects(expired.agent.nativeScreenshot(expired.device,1000,'portrait',true),e=>e.execution==='not_executed');
+  assert.equal(expired.state.copied,undefined);assert.equal(expired.state.files.size,0);
+});
+
 test('a log wait timeout includes the current screenshot without a separate request',async()=>{
   const {agent,device}=agentFixture();
   const result=await agent.waitFor(device,{log:'never printed',timeout:1});
@@ -482,6 +695,19 @@ test('after/until/both and settling inherit the original request deadline',async
     assert.ok(f.state.time()<=100400);
     assert.ok(f.state.calls.every(([, ,options])=>options.timeout<=1000));
   }
+});
+
+test('slow capture after a real input acknowledgement consumes only observation budget and never repeats input',async()=>{
+  const f=agentFixture({clockStep:0,onDelay:(ms,s)=>s.advance(ms),onCommand:(_file,args,options,s)=>{
+    if(args[0]==='screenshot'){s.advance(options.timeout);throw new Failure('COMMAND_TIMEOUT','capture stalled');}
+  }});
+  const result=await f.agent.tap(f.device,{x:50,y:50,observe:'screenshot',settle:0,_deadline:110000});
+  assert.equal(result.execution,'executed');assert.ok(result.screenshot.error);assert.equal(result.observation,'unconfirmed');
+  assert.ok(result.timing.observationMs<=12000);assert.ok(f.state.time()<=12000);
+  assert.equal(f.state.inputs.filter(i=>i.type==='tap').length,1);
+  const count=f.state.inputs.length;
+  await assert.rejects(f.agent.screenshot(f.device,{_deadline:f.state.time()+1000}));
+  assert.equal(f.state.inputs.length,count,'independent observation cannot send input');
 });
 
 test('an exhausted corner lookup never poisons later independent screenshot geometry',async()=>{
@@ -708,6 +934,7 @@ test('all six capture actions inherit the outer deadline, including nested scree
   }});
   const {commandBudget}=require(path.join(dir,'budget.cjs'));
   const context={module:{exports:{}},__dirname:dir,Date:{now:f.state.time},process:{platform:'darwin',arch:'arm64',env:{}},
+    setTimeout:()=>({unref(){}}),clearTimeout(){},
     require(name){
       if(name==='./budget.cjs')return {commandBudget:(ms,deadline)=>commandBudget(ms,deadline,f.state.time)};
       if(name==='./viewer.cjs')return {};
@@ -931,23 +1158,43 @@ test('launches on different devices run independently and retain both shared App
 });
 
 function pageFixture(kind) {
-  const nodes=new Map(),requests=[];let push;
+  const nodes=new Map(),requests=[],memoryNotices=[];let push;
   const get=id=>{
-    if(!nodes.has(id))nodes.set(id,{replaceChildren(){},append(){},querySelector(){return null;},classList:{contains:()=>false,toggle(){}}});
+    if(!nodes.has(id))nodes.set(id,{dataset:{},setAttribute(){},replaceChildren(){},append(){},querySelector(){return null;},querySelectorAll(){return [];},classList:{contains:()=>false,toggle(){}}});
     return nodes.get(id);
   };
-  const context={URLSearchParams,location:{search:'?session=task-1'},document:{getElementById:get,addEventListener(){},hidden:false},
+  const context={URLSearchParams,addEventListener(){},location:{search:'?session=task-1'},document:{getElementById:get,addEventListener(){},hidden:false},
     localStorage:{getItem:()=>null},clearTimeout(){},setTimeout:()=>0,
-    CindySimPages:{locale:()=>new Promise(()=>{}),onPush:fn=>{push=fn;},createDevice:async()=>({udid:B}),
+    CindySimPages:{locale:()=>new Promise(()=>{}),onPush:fn=>{push=fn;},createDevice:async()=>({udid:B}),memoryArgs:()=>({memoryMode:'saving'}),memoryPicker:()=>null,memoryBadge:()=>null,resourceButton:()=>({}),
       rpc:(action,params)=>{const d=deferred();requests.push({...d,action,params});return d.promise;},
-      h:()=>({}),GLYPH:{iphone:'',big:'',pause:''}},CindySimModel:{runtimeLabel:()=>'',deviceRows:()=>[]}};
+      h:()=>({}),GLYPH:{iphone:'',big:'',pause:''}},CindySimModel:{runtimeLabel:()=>'',deviceRows:()=>[],showMemoryNotice:(...args)=>memoryNotices.push(args)}};
   const expose=kind==='task'
     ? 'globalThis.page={refresh,act,createDevice,state:()=>state,note:()=>note,seed:r=>{state=r;show(r.viewer?.url);}};'
     : 'globalThis.page={refresh,act,showScreen,hero,state:()=>state,seed:r=>{state=r;selected=r.devices[0]?.udid;}};';
   vm.runInNewContext(syncFs.readFileSync(path.resolve(`baguette-simulator/${kind}.js`),'utf8')+'\n'+expose,context);
-  return {page:context.page,get,requests,push:m=>push(m)};
+  return {page:context.page,get,requests,memoryNotices,push:m=>push(m)};
 }
 const taskState=udid=>({ok:true,settings:{enabled:true},devices:[],device:{udid,state:'Booted'},viewer:{url:`http://127.0.0.1:1/control?udid=${udid}`}});
+
+test('task, management and settings boot surfaces retain the result for the common memory warning',async()=>{
+ const result={...taskState(A),memoryMode:{mode:'minimal',verified:false,warning:'verification failed'}};
+ const task=pageFixture('task');task.page.seed(taskState(A));
+ const pending=task.page.act('task_boot',{udid:A},A);task.requests[0].resolve(result);await pending;
+ assert.equal(task.memoryNotices[0][0],result);assert.equal(task.memoryNotices[0][2],'saving');
+ assert.equal(task.get('screen').hidden,false,'a warning does not undo the completed boot');
+ const hub=pageFixture('manage'),device={udid:A,name:'Phone',state:'Shutdown'};
+ hub.page.seed({ok:true,settings:{enabled:true},devices:[device]});
+ const boot=hub.page.act('boot',device);hub.requests[0].resolve(result);await new Promise(r=>setImmediate(r));
+ assert.equal(hub.memoryNotices[0][0],result);assert.equal(hub.memoryNotices[0][2],'saving');
+ hub.requests[1].resolve({ok:true,settings:{enabled:true},devices:[{...device,state:'Booted'}]});await boot;
+ const notices=[],nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,{textContent:'',replaceChildren(){},classList:{toggle(){}}});return nodes.get(id);};
+ const context={BroadcastChannel:class{},document:{documentElement:{lang:'zh-CN'},getElementById:get},
+  CindySimModel:{deviceRows:()=>[],showMemoryNotice:(...args)=>notices.push(args)},CindySimPages:{memoryArgs:()=>({memoryMode:'standard'})},
+  fetch:()=>new Promise(()=>{}),result,device};
+ vm.createContext(context);vm.runInContext(syncFs.readFileSync(path.resolve('baguette-simulator/settings.js'),'utf8'),context);
+ await vm.runInContext("state={settings:{enabled:true},devices:[device]};rpc=async()=>result;refresh=async()=>{};render=()=>{};perform('boot',{udid:device.udid})",context);
+ assert.equal(notices[0][0],result);assert.equal(notices[0][1],'zh-CN');assert.equal(notices[0][2],'standard');
+});
 
 test('task and management pages report saved bindings with failed status without showing old task screens or claiming opened',async()=>{
   const result={ok:true,execution:'executed',sessionId:'task-1',boundUdid:B,taskStateError:{code:'STATUS_FAILED'}};

@@ -40,6 +40,7 @@
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | 复用 Cindy 会话模型的 HTML 设计稿、固定会话预览、元素批注和手动编辑 |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | GitHub issue / PR / code review / Actions / release 全流程操作 |
 | <img src="./cindy-gitlab/assets/icon.png" width="22" alt=""> | GitLab | [`cindy-gitlab`](./cindy-gitlab) | GitLab（gitlab.com 及自建实例）issue / MR / 仓库操作 |
+| <img src="./gitea/assets/icon.png" width="22" alt=""> | Gitea | [`gitea`](./gitea) | 自建 Gitea 的仓库、文件、issue、PR、Actions 运行与日志、release；写操作需确认；自选安装，需自备实例与 token |
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid 图表源码规范化与常见语法修复 |
 | <img src="./cindy-ping/assets/icon.png" width="22" alt=""> | Cindy Ping | [`cindy-ping`](./cindy-ping) | 可配置桌面表情轮盘，向项目、会话或伙伴投递；仅 macOS 14+；手动安装 |
 | <img src="./cindy-notion/assets/icon.png" width="22" alt=""> | Notion | [`cindy-notion`](./cindy-notion) | Notion 页面、数据库与知识库读写 |
@@ -58,6 +59,7 @@
 | <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | 设备模拟器 | [`baguette-simulator`](./baguette-simulator) | Cindy 官方设备模拟器（基于开源 Baguette），独立设备、侧边栏实时画面与操作；替代已下线的内置模拟器，市场安装 |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS 模拟器 | [`ios-simulator`](./ios-simulator) | Cindy 主机托管的内嵌工作流；主机授权回退时将原始任务和精确设备交给指定外部工作流；定向灰度 |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | 在 X（Twitter）上搜舆情、发帖——xAI x_search，Grok 订阅 / API key 双通道降级，发帖走 X 官方 API v2；目前定向灰度中 |
+| <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | 通过你自己的 ntfy 服务器向手机或电脑发送推送通知；访问令牌由 Cindy 保管，只发送给对应服务器；自选安装 |
 
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
 
@@ -98,6 +100,10 @@
    后才会下发给兼容客户端；拒绝不会影响此前已批准的版本。国内推包逻辑保持移除。
 
 ## 审查标准
+
+已发布插件的 ID 变更需要先单独审查
+[迁移登记](./docs/plugin-id-migrations.zh-CN.md)，并在改名包发布前完成 Server
+与客户端的配套上线。
 
 每个官方插件都会被真实用户安装，审查按实际行为、影响与证据判断。普通打包修复、
 依赖维护、可追溯生成物与静态图片不因路径转人工。符合标准的准入与受众不另要
@@ -342,7 +348,7 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 沿用有效记录，不要求每次改措辞都重新安装整个插件。
 
 `taptap-maker/vendor/taptap-maker/` 固定随插件分发官方
-`@taptap/maker@0.0.37`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
+`@taptap/maker@0.0.39`。升级时应整体替换 npm 包发布内容并同步更新插件版本，
 在官方包包含等价修复前，保留以下经审查的 Cindy 兼容补丁：
 
 - `normalizeRemoteProxyExecutionState` 接受 `executed`，保留确定已执行状态
@@ -362,11 +368,18 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 - Cindy 分发隐藏控制台模型设置入口，不支持自定义 API 配置；识图仅用 Server API，
   服务不可用时直接报错，不回退到其他识图方式。
 
+- 云端 Git 提交超时且无法核实时保留 unknown，禁用盲目重试提示；兼容新旧云端阻塞文本，准确区分云端已提交与本地尚未完成的步骤。
+- 画布结果未知的请求保留重发保护，015 自动流程等待超限后暂停；准备及恢复等待阶段也可停止后续，不取消已经提交的远端任务。
+
 除以上补丁和保留的 `LICENSE` 外，vendor 文件必须与官方 npm 包一致。
 每次升级都需核对补丁清单和回归测试，不要增加无关的 bundle 手工修改。
 
 历史故障、已被替换的修复及升级验收要求见
 [Maker 维护避坑清单](./docs/taptap-maker-maintenance.zh-CN.md)。
+
+插件 2.1.25 将所有动态 Maker 工具、工具发现及长耗时账号操作的请求窗口从 60 秒
+调至 120 秒，沿用已有的进度续期及 15 分钟总上限，不新增定时心跳。没有进度的
+请求仍可能在 120 秒超时；这不等于无限等待，也不保证大图生成一定能在窗口内完成。
 
 插件 2.1.17 新增 `maker_validate`，通过当前可信工作区和随包 Runtime 做本地 Lua
 验证/截图；Cindy Manual 提供流程，不依赖项目 Skill 安装，不自动安装 Runtime、

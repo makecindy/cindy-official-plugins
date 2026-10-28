@@ -335,3 +335,7 @@ Panel actions wait in order for config, so a full-page translate issued while th
 Removes the public-peer IP gate, including its stored receipts and `webRequest` permission: normal browser proxies, cached documents and restored pages use the current browser document identity. Local/private IP URLs, site restrictions and protected Chrome pages remain blocked. Destination DNS public-address checking lands in 0.4.16. No proxy settings are added.
 
 Allowed-site tab failures stay visible as redacted diagnostic rows. Page loading accepts current-document DOM readiness without waiting for stalled images, waits up to 25 seconds otherwise, and retains the tab on timeout. Document error reasons reach the panel. The 0.4.14 named-slot translation, responsive opening and YouTube transcript fixes are retained; the signed wire protocol remains 0.4.13 for existing hosts.
+
+## 0.4.23 toolbar badge recovery (host package 0.4.36)
+
+A failed panel-open click now marks only the affected tab. Opening the panel successfully, refreshing or navigating clears that document's warning and restores the shared connection badge. A disconnected Cindy still shows its warning; page recovery does not pretend to reconnect it. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.

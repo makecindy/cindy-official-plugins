@@ -40,6 +40,7 @@
           root.Baguette._ScreenQuad.mapClientPointFromContain(
               canvas, clientX, clientY, this.size);
       }
+      screenArea.setAttribute('data-cindy-trackpad', 'contacts');
       this.bindInteraction({ element: screenArea, overlayHost: screenArea, mapClientPoint });
     }
 

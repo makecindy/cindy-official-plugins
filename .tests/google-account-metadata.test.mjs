@@ -112,7 +112,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     assert.ok(read(plugin + '/main.js').includes(source));
     assert.match(read(plugin + '/settings.html'), /account-metadata\.js[\s\S]*account-nickname\.js[\s\S]*settings\.js/);
     const editor = read(plugin + '/account-nickname.js');
-    if (plugin !== 'google-gmail') assert.equal(editor, read('google-drive/account-nickname.js'));
+    assert.equal(editor, read('google-drive/account-nickname.js'));
     assert.match(editor, /googleAccountMetadata\.save\(key, account\.id,/);
     assert.match(editor, /googleAccountMetadata\.remove\(key, account\.id\)/);
     assert.doesNotMatch(editor, /\/nickname|unsupported/);
@@ -192,7 +192,6 @@ function element() {
 }
 
 for (const [plugin, prefix] of Object.entries(plugins)) {
-  if (plugin === 'google-gmail') continue;
   for (const [locale, expected] of Object.entries(accountCopy)) {
     test(`${plugin}: ${locale} 实际账号渲染和刷新保留本地标题、连接按钮与权限提示`, async () => {
       const f = fixture(prefix + '_account');

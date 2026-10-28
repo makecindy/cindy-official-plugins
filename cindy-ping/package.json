@@ -1,9 +1,9 @@
 {
   "name": "cindy-ping",
-  "version": "0.3.8",
+  "version": "0.3.10",
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node --check main.js && node --check shortcuts.js && node --check wheel-layout.js && node --check emote-library.js && node --check settings.js && node --check node/worker.cjs && node --check node/config.cjs && node --check node/scheduler.cjs"
+    "check": "node --check main.js && node --check shortcuts.js && node --check wheel-layout.js && node --check emote-library.js && node --check assets/provider-marks.js && node --check settings.js && node --check node/worker.cjs && node --check node/config.cjs && node --check node/scheduler.cjs"
   }
 }

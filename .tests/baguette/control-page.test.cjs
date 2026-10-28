@@ -1,15 +1,16 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
 const node=path.join(__dirname,'../../baguette-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002';
-const IDS='screen stage frame overlay dock chip-dot chip-name status btn-home btn-rotl btn-rotr btn-shot btn-shot-menu btn-more scroll title title-dot title-name title-sub zoom zoom-out zoom-label zoom-in tools posture tv-remote device-chip confirm-title confirm-body confirm-cancel confirm-ok confirm-dialog device-dialog device-form dialog-title dialog-hint f-name-text f-model-text f-runtime-text dialog-cancel dialog-save f-model-label f-runtime-label dialog-error f-name f-model f-runtime'.split(' ');
 
 // A deliberately small DOM: enough for control.js to render and for the test to read back.
-function fakeDocument(){
+function fakeDocument(template='control.html'){
+ const html=fs.readFileSync(path.join(node,template),'utf8');
+ const IDS=[...html.matchAll(/\bid="([^"]+)"/g)].map(match=>match[1]);
  const byId={};
  function el(tag){
   const n={tag,children:[],style:{},dataset:{},attrs:{},listeners:{},textContent:'',innerHTML:'',className:'',hidden:false,disabled:false,value:'',parent:null,
-   append(...kids){for(const k of kids){if(k==null)continue;if(typeof k==='string'){n.textContent+=k;continue;}k.parent=n;n.children.push(k);}},
-   appendChild(k){n.append(k);return k;},replaceChildren(...kids){n.children=[];n.append(...kids);},
+   append(...kids){for(let k of kids){if(k==null)continue;if(typeof k==='string'){const text=el('#text');text.textContent=k;k=text;}k.parent=n;n.children.push(k);}},
+   appendChild(k){n.append(k);return k;},replaceChildren(...kids){n.textContent='';n.append(...kids);},
    remove(){if(n.parent){n.parent.children=n.parent.children.filter(c=>c!==n);n.parent=null;}},
    setAttribute(k,v){n.attrs[k]=String(v);if(k==='disabled'||k==='hidden')n[k]=true;},getAttribute(k){return n.attrs[k]??null;},removeAttribute(k){delete n.attrs[k];if(k==='disabled'||k==='hidden')n[k]=false;},
    addEventListener(name,fn){(n.listeners[name]=n.listeners[name]||[]).push(fn);},
@@ -18,6 +19,8 @@ function fakeDocument(){
    showModal(){n.open=true;},close(){n.open=false;},focus(){},
    querySelector(sel){return all(n).find(c=>matches(c,sel))||null;},querySelectorAll(sel){return all(n).filter(c=>matches(c,sel));},
   };
+  let ownText='';
+  Object.defineProperty(n,'textContent',{get:()=>ownText+n.children.map(c=>c.textContent).join(''),set:value=>{ownText=String(value);n.children=[];}});
   Object.defineProperty(n,'classList',{value:{contains:c=>n.className.split(' ').includes(c)}});
   return n;
  }
@@ -28,12 +31,12 @@ function fakeDocument(){
  Object.defineProperty(screen,'src',{get:()=>src,set:v=>{src=v;screen.loads.push(v);}});
  screen.contentDocument={querySelector:()=>null,getElementById:()=>null,addEventListener(){},documentElement:null};screen.contentWindow={};
  const body=el('body');
- const document={documentElement:{lang:'zh-CN',clientWidth:400,style:{}},body,hidden:false,getElementById:id=>byId[id]||null,querySelector:sel=>sel==='dialog[open]'?body.children.find(n=>n.tag==='dialog'&&n.open)||null:null,createElement:el,addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},listeners:{}};
- return {document,byId,body,text:n=>[n.textContent,...all(n).map(c=>c.textContent)].join(' ')};
+ const document={documentElement:{lang:'zh-CN',clientWidth:400,style:{}},body,hidden:false,getElementById:id=>byId[id]||all(body).find(n=>n.id===id)||null,querySelector:sel=>sel==='dialog[open]'?body.children.find(n=>n.tag==='dialog'&&n.open)||null:null,createElement:el,addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},listeners:{}};
+ return {document,byId,body,text:n=>n.textContent};
 }
 
-async function boot({respond,abortSignal=AbortSignal,query=''}){
- const dom=fakeDocument();const calls=[];let intervals=[];
+async function boot({respond,abortSignal=AbortSignal,query='',template='control.html'}){
+ const dom=fakeDocument(template);const calls=[];let intervals=[];
  const context={
   document:dom.document,URLSearchParams,URL,AbortSignal:abortSignal,Error,Object,JSON,Math,Date,String,Array,Number,Promise,console,parseFloat,clearTimeout,setTimeout,
   location:{search:'?udid='+udid+query,hash:'#cindyClipboard=123.token',href:'http://127.0.0.1:1/control?udid='+udid+'&lang=zh-CN'+query+'#cindyClipboard=123.token',origin:'http://127.0.0.1:1'},
@@ -49,6 +52,48 @@ async function boot({respond,abortSignal=AbortSignal,query=''}){
  return {dom,calls,context,poll:()=>intervals[0](),tick:()=>intervals[1](),sim:context.cindySim};
 }
 const status=(over={})=>({ready:true,parked:false,generation:1,device:{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-1',deviceType:'x.iPhone-17-Pro'},devices:[{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'iOS 27.1',deviceType:'x.iPhone-17-Pro'},{udid:other,name:'iPad',state:'Shutdown',runtime:'iOS 27.0',deviceType:'x.iPad'}],settings:{enabled:true,idleMinutes:15},idleDeadline:Date.now()+15*60000,...over});
+
+test('explicit restart applies selection once, locks the dialog and restores the viewer',async()=>{
+ let mode='standard',finishStop;
+ const f=await boot({respond:p=>{
+  if(p.action==='restart_device')return new Promise(resolve=>{finishStop=()=>{mode=p.memoryMode;resolve({ok:true,memoryMode:{mode,verified:true}});};});
+  return status({device:{...status().device,memoryMode:{mode,verified:true}}});
+ }});
+ f.dom.byId['memory-mode'].dispatch('click');
+ const dialog=f.dom.body.querySelector('.memory-dialog'),restart=dialog.querySelector('.memory-restart');
+ assert.equal(restart.textContent,'重启模拟器');
+ dialog.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='saving').dispatch('click');
+ assert.equal(restart.textContent,'重启并应用');
+ assert.equal(f.calls.filter(p=>['boot','shutdown','restart_device'].includes(p.action)).length,0);
+ restart.dispatch('click');restart.dispatch('click');
+ assert.equal(f.calls.filter(p=>p.action==='restart_device').length,1);
+ assert.ok(dialog.querySelectorAll('.memory-option').every(n=>n.disabled));
+ dialog.dispatch('cancel',{preventDefault(){}});assert.equal(dialog.open,true);
+ finishStop();await new Promise(r=>setImmediate(r));
+ assert.equal(f.calls.filter(p=>['boot','shutdown'].includes(p.action)).length,0);
+ assert.equal(f.calls.find(p=>p.action==='restart_device').memoryMode,'saving');
+ assert.equal(dialog.open,false);
+ assert.match(f.dom.byId['memory-mode'].textContent,/节省/);
+ assert.ok(f.dom.byId.screen.src.includes('/simulators/'+udid));
+});
+test('unconfirmed shutdown keeps restart error visible and never boots',async()=>{
+ const f=await boot({respond:p=>p.action==='restart_device'?{ok:false,errorCode:'STOP_UNCONFIRMED'}:status({device:{...status().device,memoryMode:{mode:'standard',verified:true}}})});
+ f.dom.byId['memory-mode'].dispatch('click');
+ const dialog=f.dom.body.querySelector('.memory-dialog');
+ dialog.querySelector('.memory-restart').dispatch('click');await new Promise(r=>setImmediate(r));
+ assert.equal(dialog.open,true);
+ assert.equal(dialog.querySelector('.memory-restart-error').hidden,false);
+ assert.equal(f.calls.some(p=>p.action==='boot'),false);
+ const done=dialog.querySelector('.memory-actions').children[0];assert.equal(done.disabled,false);done.dispatch('click');assert.equal(dialog.open,false);
+});
+test('both shipped controller templates initialize and load the running device',async()=>{
+ for(const template of ['control.html','control.zh-CN.html'])for(const query of ['', '&embed=hub']){
+  const f=await boot({template,query,respond:p=>p.action==='status'?status():{}});
+  assert.ok(f.calls.some(p=>p.action==='status'),template+' reads status');
+  assert.ok(f.dom.byId.screen.loads.some(url=>url.includes('/simulators/'+udid)),template+' loads screen');
+  assert.equal(f.dom.byId['chip-name'].textContent,'iPhone 17 Pro');
+ }
+});
 
 // Run the real parent capture listener before the real device canvas handler.
 // Unit tests of either page alone cannot detect a parent bypassing its child.
@@ -189,6 +234,17 @@ test('shared help follows the device, opens without device input and action butt
  }
 });
 
+test('flat screenshot buttons pass the visible pose, while foldable and TV captures keep native geometry',async()=>{
+ for(const kind of ['flat','folded','unfolded','tv']){
+  const f=await boot({respond:({action})=>action==='status'?status({device:{udid,state:'Booted',runtime:kind==='tv'?'tvOS-27':'iOS-27'}}):{}});
+  f.dom.byId.screen.contentWindow={__nativeOrientation:()=> 'landscape-right',__cindyPose:{get:()=>kind==='folded'?0:kind==='unfolded'?180:null}};
+  f.dom.byId.posture.style.setProperty=()=>{};
+  await f.dom.byId['btn-shot'].listeners.click[0]();
+  const request=f.calls.find(p=>p.action==='screenshot');assert.ok(request);
+  assert.equal(request.orientation,kind==='flat'?'landscape-right':undefined);
+ }
+});
+
 test('status refresh keeps an in-flight screenshot disabled on every platform',async()=>{
  for(const runtime of ['iOS-27','tvOS-27','xrOS-27']){
   let finish;
@@ -215,6 +271,30 @@ test('slow desktop and clipboard screenshots finish before the viewer HTTP budge
  }
 });
 
+test('screenshot destination restores without browser storage, saves before switching and ignores stale status',async()=>{
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ for(const fail of [false,true]){
+  let finishSave,finishStatus,delayStatus=false;
+  const saved=status({settings:{enabled:true,idleMinutes:15,screenshotDestination:'clipboard'}});
+  const f=await boot({respond:p=>{
+   if(p.action==='status')return delayStatus?new Promise(resolve=>finishStatus=resolve):saved;
+   assert.equal(p.action,'screenshot_destination');assert.equal(p.destination,'desktop');
+   return new Promise(resolve=>finishSave=resolve);
+  }});
+  assert.match(f.dom.byId['btn-shot'].title,/剪贴板/,'restored with no localStorage');
+  delayStatus=true;const pending=f.poll();
+  f.dom.byId['btn-shot-menu'].dispatch('click');
+  const rows=f.dom.body.querySelectorAll('button').filter(b=>b.attrs.role==='menuitemradio');
+  rows[0].dispatch('click');await tick();
+  assert.equal(f.dom.byId['btn-shot'].disabled,true);assert.match(f.dom.byId['btn-shot'].title,/剪贴板/);
+  finishSave(fail?{httpStatus:503}:{ok:true,destination:'desktop'});await tick();
+  finishStatus(saved);await pending;
+  assert.equal(f.dom.byId['btn-shot'].disabled,false);
+  assert.match(f.dom.byId['btn-shot'].title,fail?/剪贴板/:/桌面/);
+  if(fail)assert.ok(f.dom.text(f.dom.byId.dock).trim());
+ }
+});
+
 test('live device loads the handheld screen once; a service generation change alone does not reload it',async()=>{
  let generation=1;
  const {dom,poll,calls}=await boot({respond:({action})=>action==='status'?status({generation}):{ok:true}});
@@ -223,6 +303,56 @@ test('live device loads the handheld screen once; a service generation change al
  assert.equal(dom.byId.overlay.hidden,true);assert.equal(dom.byId['btn-home'].disabled,false);
  generation++;await poll();assert.equal(dom.byId.screen.loads.length,1);
  assert.equal(calls.filter(c=>c.action==='status').length,2);
+});
+
+test('toolbar presentation changes preserve the iframe and its recording owner',async()=>{
+ const f=await boot({respond:()=>status()});
+ const attrs=new Map(),recordingOwner={},sheet={disabled:false};let resizes=0;
+ f.dom.byId.screen.contentDocument.documentElement={setAttribute:(k,v)=>attrs.set(k,v),removeAttribute:k=>attrs.delete(k)};
+ f.dom.byId.screen.contentDocument.getElementById=id=>id==='cindy-stage-style'?{sheet}:null;
+ f.dom.byId.screen.contentWindow={recordingOwner,dispatchEvent:()=>resizes++};f.context.Event=class{};
+ for(const full of [true,false,true]){
+  f.dom.byId['btn-more'].dispatch('click');
+  const item=f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).trim()==='Baguette 高级工具');
+  assert.ok(item);item.dispatch('click');
+  assert.equal(attrs.has('data-cindy-full'),full);
+  assert.equal(sheet.disabled,full,'advanced panels are restored without navigation');
+  assert.equal(f.dom.byId.screen.contentWindow.recordingOwner,recordingOwner);
+  assert.equal(f.dom.byId.screen.loads.length,1);
+ }
+ assert.equal(resizes,3);
+ assert.deepEqual(f.calls.map(c=>c.action),['status','resources']);
+});
+
+test('iOS and Android keyboard switches gate guest input, preserve workbench editing and cancel queued input',async()=>{
+ for(const platform of ['ios','android']){
+  const f=await boot({respond:()=>status({device:{...status().device,platform}})});
+  const events={},released=[];
+  f.dom.byId.screen.contentDocument.defaultView={addEventListener:(name,fn)=>(events[name]??=[]).push(fn)};
+  f.dom.byId.screen.contentWindow.postMessage=(message,origin)=>released.push({message,origin});
+  f.dom.byId.screen.dispatch('load');
+  const toggle=()=>{
+   f.dom.byId['btn-more'].dispatch('click');
+   const item=f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).includes('电脑键盘输入'));
+   assert.ok(item);const checked=item.attrs['aria-checked'];item.dispatch('click');return checked;
+  };
+  assert.equal(toggle(),'true');
+  assert.equal(released.length,1);assert.equal(released[0].message.type,'cindy-release-input');
+  // Each gate is the last capture handler for its event. Simulator toolbar
+  // shortcuts get first refusal, but ordinary keys/pastes cannot reach guests.
+  for(const name of ['keydown','keyup','paste']){
+   const event={target:{tagName:'CANVAS'},preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}};
+   events[name].at(-1)(event);assert.equal(event.prevented,true);assert.equal(event.stopped,true);
+   for(const tagName of ['INPUT','BUTTON','A']){
+    const field={...event,target:{tagName},prevented:false,stopped:false};
+    events[name].at(-1)(field);assert.equal(field.stopped,false);
+   }
+  }
+  assert.equal(toggle(),'false','choice works even when localStorage is unavailable');
+  const allowed={target:{tagName:'CANVAS'},stopImmediatePropagation(){assert.fail('enabled input blocked');}};
+  events.keydown.at(-1)(allowed);
+  assert.equal(f.dom.byId.screen.loads.length,1);
+ }
 });
 
 test('unreadable App records do not block device selection or live controls',async()=>{
@@ -236,7 +366,7 @@ test('unreadable App records do not block device selection or live controls',asy
  damaged=false;await poll();dom.byId['device-chip'].dispatch('click');
  rows=dom.body.querySelectorAll('button').filter(b=>b.attrs.role==='menuitemradio');assert.equal(rows[1].disabled,false);
  assert.equal(dom.byId.screen.loads.length,1,'record repair never restarts or reloads the view');
- assert.ok(calls.every(c=>c.action==='status'));
+ assert.ok(calls.every(c=>['status','resources'].includes(c.action)));
 });
 
 test('a service that answers but cannot reach the view shows the recovery card; recover restarts once and reloads',async()=>{
@@ -255,9 +385,114 @@ test('a shut-down device shows a start button in place of the screen; starting b
  const {dom,calls}=await boot({respond:({action})=>{if(action==='boot'){state='Booted';return {ok:true};}return status({device:{udid,name:'iPhone 17 Pro',state}});}});
  assert.deepEqual(dom.byId.screen.loads,[],'no stream is loaded for a shut-down device');
  assert.match(dom.text(dom.byId.overlay),/iPhone 17 Pro 已关闭/);assert.equal(dom.byId['btn-home'].disabled,true);
- const start=dom.byId.overlay.querySelector('button');assert.equal(start.textContent,'打开');
+ const start=dom.byId.overlay.querySelector('.cta');assert.equal(start.textContent,'打开');
  await start.listeners.click[0]();
  assert.equal(calls.filter(c=>c.action==='boot').length,1);assert.equal(dom.byId.overlay.hidden,true);assert.equal(dom.byId.screen.loads.length,1);
+ assert.equal(calls.find(c=>c.action==='boot').memoryMode,'saving');
+});
+
+test('controller preserves a chosen memory mode through polling and sends it on explicit boot only',async()=>{
+ const f=await boot({respond:()=>status({device:{udid,name:'Phone',state:'Shutdown',runtime:'iOS-27'}})});
+ const choice=f.dom.byId.overlay.querySelector('.memory-choice');
+ choice.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='standard').dispatch('click');
+ await f.poll();assert.ok(!f.calls.some(c=>c.action==='boot'));
+ const rerendered=f.dom.byId.overlay.querySelectorAll('.memory-option');
+ assert.equal(rerendered.find(c=>c.attrs['aria-pressed']==='true').attrs['data-mode'],'standard');
+ await f.dom.byId.overlay.querySelector('.cta').listeners.click[0]();
+ assert.equal(f.calls.find(c=>c.action==='boot').memoryMode,'standard');
+});
+
+test('running controller accepts a future mode without stopping or reloading; next boot applies it',async()=>{
+ let power='Booted',mode='saving';
+ const f=await boot({respond:p=>{
+  if(p.action==='boot'){mode=p.memoryMode;power='Booted';return {ok:true,memoryMode:{mode,verified:true}};}
+  return status({device:{udid,name:'Phone',runtime:'iOS-27',state:power,memoryMode:{mode,verified:true}}});
+ }});
+ const loads=f.dom.byId.screen.loads.length;
+ f.dom.byId['memory-mode'].dispatch('click');
+ let dialog=f.dom.body.children.find(n=>n.className==='memory-dialog');
+ assert.equal(dialog.querySelector('.memory-pending').hidden,true);
+ dialog.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='standard').dispatch('click');
+ assert.match(f.dom.text(dialog),/已选择标准，重启模拟器后生效/);
+ assert.match(f.dom.byId['memory-mode'].textContent,/（节省.*重启后：标准）/);
+ await f.poll();assert.equal(f.dom.byId.screen.loads.length,loads);
+ assert.ok(f.calls.every(p=>['status','resources'].includes(p.action)));
+ dialog.querySelector('.secondary').dispatch('click');
+ power='Shutdown';await f.poll();
+ assert.equal(f.dom.byId.overlay.querySelectorAll('.memory-option').find(n=>n.attrs['aria-pressed']==='true').attrs['data-mode'],'standard');
+ await f.dom.byId.overlay.querySelector('.cta').listeners.click[0]();
+ assert.equal(f.calls.find(p=>p.action==='boot').memoryMode,'standard');
+ assert.equal(f.dom.byId['memory-mode'].textContent,'（标准）');
+ assert.doesNotMatch(f.dom.byId['memory-mode'].textContent,/重启后/);
+});
+
+test('resource readings are inline, cached across status polls, and have no refresh control',async()=>{
+ const f=await boot({respond:({action})=>action==='resources'?{udid,sampledAt:'2026-10-27T00:00:00Z',memory:{bytes:1024**3,status:'ok'},disk:{bytes:5*1024**3,status:'ok'}}:status()});
+ const loads=f.dom.byId.screen.loads.length,resources=f.dom.byId.resources;
+ assert.match(f.dom.text(resources),/1.00 GiB/);assert.match(f.dom.text(resources),/5.00 GiB/);
+ assert.equal(f.calls.filter(c=>c.action==='resources').length,1);
+ await f.poll();assert.equal(f.calls.filter(c=>c.action==='resources').length,1,'a status poll reuses the reading');
+ assert.equal(resources.children.at(-1),f.dom.byId['memory-mode'],'the inline mode control follows the readings');
+ assert.equal(f.dom.byId.screen.loads.length,loads);
+ assert.ok(f.calls.every(c=>['status','resources'].includes(c.action)));
+});
+test('live memory mode follows Agent changes; choices preserve the frame until the user explicitly stops and boots',async()=>{
+ let mode='saving',deviceState='Booted';
+ const f=await boot({respond:({action,memoryMode})=>{
+  if(action==='shutdown'){deviceState='Shutdown';return {devices:[{udid,state:deviceState}]};}
+  if(action==='boot'){mode=memoryMode;deviceState='Booted';return {ok:true,memoryMode:{mode,verified:true}};}
+  return status({device:{...status().device,state:deviceState,memoryMode:{mode,verified:mode!=='unknown'}}});
+ }});
+ const badge=f.dom.byId['memory-mode'],loads=f.dom.byId.screen.loads.length;
+ assert.match(badge.textContent,/节省/);
+ mode='minimal';await f.poll();assert.match(badge.textContent,/极简/);
+ badge.dispatch('click');
+ let dialog=f.dom.body.querySelector('.memory-dialog');
+ assert.equal(dialog.querySelector('.memory-pending').hidden,true);
+ assert.equal(f.dom.byId.screen.loads.length,loads);
+ dialog.querySelector('.secondary').dispatch('click');
+ assert.equal(f.calls.filter(c=>!['status','resources'].includes(c.action)).length,0);
+ badge.dispatch('click');dialog=f.dom.body.querySelector('.memory-dialog');
+ dialog.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='standard').dispatch('click');
+ assert.match(f.dom.text(dialog),/重启模拟器后生效/);
+ dialog.querySelector('.secondary').dispatch('click');
+ assert.ok(!f.calls.some(c=>c.action==='shutdown'));
+ f.dom.byId['confirm-ok'].dispatch('click');
+ await new Promise(r=>setImmediate(r));
+ assert.equal(f.calls.filter(c=>c.action==='shutdown').length,1);
+ assert.ok(!f.calls.some(c=>c.action==='boot'));
+ assert.equal(f.dom.byId['memory-mode'].hidden,true);
+ assert.equal(f.dom.byId['memory-strip'],undefined,'there is no separate mode strip');
+ assert.equal(f.dom.byId.resources.hidden,false,'disk usage remains available outside the mode strip');
+ assert.match(f.dom.text(f.dom.byId.resources),/磁盘/);assert.doesNotMatch(f.dom.text(f.dom.byId.resources),/内存/);
+ f.dom.byId.overlay.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='standard').dispatch('click');
+ await f.dom.byId.overlay.querySelector('.cta').listeners.click[0]();
+ assert.match(badge.textContent,/标准/);
+ mode='unknown';await f.poll();assert.match(badge.textContent,/待确认/);
+});
+
+test('boot warnings remain visible over the live viewer through polling until explicitly dismissed',async()=>{
+ for(const memoryMode of [
+  {mode:'standard',verified:false,warning:'verification timed out'},
+  {mode:'minimal',verified:true},
+  {mode:'custom',verified:true,warning:'<img src=x onerror=alert(1)>'},
+ ]) {
+  let deviceState='Shutdown';
+  const f=await boot({respond:({action})=>{
+   if(action==='boot'){deviceState='Booted';return {ok:true,memoryMode};}
+   return status({device:{udid,name:'Phone',state:deviceState,runtime:'iOS-27'}});
+  }});
+  f.dom.byId.overlay.querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']==='standard').dispatch('click');
+  await f.dom.byId.overlay.querySelector('.cta').listeners.click[0]();
+  assert.equal(f.dom.byId.overlay.hidden,true);assert.equal(f.dom.byId.screen.loads.length,1);
+  const notices=f.dom.document.getElementById('memory-results'),card=notices.children[0];
+  assert.match(f.dom.text(card),/实际内存模式/);
+  if(memoryMode.verified===false)assert.match(f.dom.text(card),/未能核验/);
+  if(memoryMode.mode!=='standard')assert.match(f.dom.text(card),/与所选/);
+  if(memoryMode.warning){assert.ok(f.dom.text(card).includes(memoryMode.warning));assert.equal(card.children[0].innerHTML,'','diagnostics are text only');}
+  await f.poll();assert.equal(notices.children[0],card,'refresh does not hide an unconfirmed configuration');
+  await card.querySelector('button').listeners.click[0]();assert.equal(notices.children.length,0);
+ }
 });
 
 test('idle countdown card appears only in the last minute and keeps the device alive on request',async()=>{
@@ -268,6 +503,78 @@ test('idle countdown card appears only in the last minute and keeps the device a
  const card=dom.byId.dock.querySelector('.idle');assert.ok(card);assert.match(card.querySelector('strong').textContent,/0:4\d 后自动关闭/);
  await card.querySelector('button').listeners.click[0]();
  assert.equal(calls.filter(c=>c.action==='activity').length,1);assert.equal(dom.byId.dock.querySelector('.idle'),null);
+});
+
+test('sidebar creation offers modes and selects the new off device without booting or stopping either device',async()=>{
+ for(const template of ['control.html','control.zh-CN.html'])for(const mode of ['saving','standard','minimal']){
+  const created={udid:other,name:'New phone',state:'Shutdown',runtime:'r.iOS-27',deviceType:'t.iPhone'};
+  const f=await boot({template,query:'&task=task-1',respond:({action,udid:id})=>{
+   if(action==='catalog')return {deviceTypes:[{identifier:'t.iPhone',name:'iPhone'}],runtimes:[{identifier:'r.iOS-27',name:'iOS 27',version:'27',supportedDeviceTypes:['t.iPhone']}]};
+   if(action==='create')return {ok:true,created};
+   if(action==='switch')return {ok:true,job:{state:'done',activeUdid:other}};
+   return status({device:id===other?created:status().device,devices:[status().device,created]});
+  }});
+  const handed=[];f.context.parent={postMessage:m=>handed.push(m)};
+  f.dom.byId['device-chip'].dispatch('click');
+  f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).includes('添加设备')).dispatch('click');await new Promise(r=>setImmediate(r));
+  assert.equal(f.dom.byId['f-memory'].hidden,false);
+  f.dom.byId['f-memory'].querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']===mode).dispatch('click');
+  f.dom.byId['f-name'].value=created.name;
+  await f.dom.byId['device-form'].listeners.submit[0]({preventDefault(){}});
+  assert.equal(f.dom.byId['device-dialog'].open,false);
+  assert.equal(new URL(f.context.location.href).searchParams.get('udid'),other);
+  assert.equal(f.dom.byId['chip-name'].textContent,created.name);
+  assert.equal(f.calls.find(c=>c.action==='switch').task,'task-1');
+  assert.equal(f.calls.filter(c=>['boot','shutdown'].includes(c.action)).length,0);
+  const choice=f.dom.byId.overlay.querySelectorAll('.memory-option').find(n=>n.attrs['aria-pressed']==='true');
+  assert.equal(choice.attrs['data-mode'],mode);
+  assert.deepEqual(JSON.parse(JSON.stringify(handed)),[{type:'cindy-simulator-created',sessionId:'task-1',udid:other,memoryMode:mode}]);
+ }
+});
+
+test('Android controller creation preserves iOS modes through the authenticated bridge and next boot',async t=>{
+ const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'cross-platform-create-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const native={...status().device,runtime:'android:36',deviceType:'android:pixel',platform:'android'}, created={udid:other,name:'New iPhone',state:'Shutdown',runtime:'r.iOS-27',deviceType:'t.iPhone',platform:'ios'};
+ const viewer=require(path.join(node,'android/viewer.cjs')).createViewer({root,devices:{target:async()=>({udid})},agent:{}});
+ t.after(()=>viewer.close());
+ const requests=[];let currentDevice=udid,mode;
+ viewer.configure({status:async()=>status({device:currentDevice===other?created:native,devices:[native,created],viewerPlatform:'android'}),request:async(method,p={})=>{
+  requests.push({method,p});
+  if(method==='viewer_catalog')return {deviceTypes:[{identifier:'t.iPhone',name:'iPhone'}],runtimes:[{identifier:'r.iOS-27',name:'iOS 27',version:'27',supportedDeviceTypes:['t.iPhone']}]};
+  if(method==='create_device')return {ok:true,...created};
+  if(method==='viewer_switch'){currentDevice=p.targetUdid;return {state:'done',activeUdid:currentDevice};}
+  if(method==='settings_boot'){mode=p.memoryMode;return {ok:true,memoryMode:{mode,verified:true}};}
+  throw Error('Unexpected method '+method);
+ }});
+ const u=new URL((await viewer.open(udid)).url),token=new URLSearchParams(u.hash.slice(1)).get('cindyClipboard').split('.')[1];
+ for(const chosen of ['saving','standard','minimal']){
+  currentDevice=udid;
+  const f=await boot({respond:async p=>(await fetch(u.origin+'/control-api',{method:'POST',headers:{Origin:u.origin,'X-Cindy-Clipboard':token},body:JSON.stringify(p)})).json()});
+  f.dom.byId['device-chip'].dispatch('click');f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).includes('添加设备')).dispatch('click');
+  for(let i=0;i<100&&!f.dom.byId['f-memory'].querySelector('.memory-option');i++)await new Promise(r=>setTimeout(r,5));
+  f.dom.byId['f-memory'].querySelectorAll('.memory-option').find(n=>n.attrs['data-mode']===chosen).dispatch('click');f.dom.byId['f-name'].value=created.name;
+  await f.dom.byId['device-form'].listeners.submit[0]({preventDefault(){}});
+  assert.equal(f.dom.byId['chip-name'].textContent,created.name);
+  await f.sim.boot();
+  assert.equal(mode,chosen);
+  const forwarded=requests.filter(r=>r.method==='settings_boot').at(-1);assert.equal(forwarded.p.udid,other);assert.equal(forwarded.p.memoryMode,chosen);
+ }
+});
+
+test('sidebar create hides unsupported modes and a failed selection never reopens the successful create form',async()=>{
+ const f=await boot({respond:({action})=>{
+  if(action==='catalog')return {deviceTypes:[{identifier:'t.Apple-TV',name:'Apple TV'}],runtimes:[{identifier:'r.tvOS-27',name:'tvOS 27',version:'27',supportedDeviceTypes:['t.Apple-TV']}]};
+  if(action==='create')return {ok:true,created:{udid:other}};
+  if(action==='switch')return {ok:false,errorCode:'BUSY'};
+  return status();
+ }});
+ f.dom.byId['device-chip'].dispatch('click');f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).includes('添加设备')).dispatch('click');await new Promise(r=>setImmediate(r));
+ assert.equal(f.dom.byId['f-memory'].hidden,true);f.dom.byId['f-name'].value='New TV';
+ await f.dom.byId['device-form'].listeners.submit[0]({preventDefault(){}});
+ assert.equal(f.dom.byId['device-dialog'].open,false);assert.equal(f.calls.filter(c=>c.action==='create').length,1);
+ assert.equal(new URL(f.context.location.href).searchParams.get('udid'),udid);
+ assert.match(f.dom.text(f.dom.byId.dock),/BUSY/);
 });
 
 test('switching waits for its response, then adopts the new device without exposing a UDID in the chip',async()=>{
@@ -360,7 +667,7 @@ test('selecting a stopped device never loads its stream or boots until Open is c
  assert.match(dom.text(dom.byId.overlay),/iPad 已关闭/);
  assert.ok(!dom.byId.screen.loads.some(src=>src.includes(other)),'source status must not load a stopped target');
  await poll();assert.ok(!calls.some(c=>c.action==='boot'),'polling never starts the target');
- const open=dom.byId.overlay.querySelector('button');assert.equal(open.textContent,'打开');
+ const open=dom.byId.overlay.querySelector('.cta');assert.equal(open.textContent,'打开');
  await open.listeners.click[0]();
  assert.equal(calls.filter(c=>c.action==='boot').length,1);
  assert.equal(dom.byId.screen.loads.at(-1),`/simulators/${other}?handheld=0&cindyViewer=token#cindyClipboard=123.token`);
@@ -418,4 +725,42 @@ test('Android keeps handheld screen, Home and rotation while TV/Vision retain th
   assert.equal(!!key.prevented,handheld);
   if(handheld)assert.ok(!f.calls.some(p=>p.action==='viewport'),'handheld geometry comes from its own device page');
  }
+});
+
+
+test('resource summary ignores late selections, retains previous readings on failure, and pauses while hidden',async()=>{
+ const M=require('../../baguette-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=1000;
+ const view=M.createResourceSummary('zh-CN',(device,force)=>new Promise((resolve,reject)=>pending.push({device,force,resolve,reject})),dom.document,()=>now);
+ const a={udid:'a',state:'Booted'},b={udid:'b',state:'Booted'};
+ const sample=(id,bytes)=>({udid:id,memory:{status:'ok',bytes},disk:{status:'ok',bytes},sampledAt:new Date(now).toISOString()});
+ const first=view.update(a);await Promise.resolve();const second=view.update(b);await Promise.resolve();
+ pending[1].resolve(sample('b',2*1024**3));await second;assert.match(dom.text(view.node),/2.00 GiB/);
+ pending[0].resolve(sample('a',1024**3));await first;assert.doesNotMatch(dom.text(view.node),/1.00 GiB/);
+ await view.update(a);assert.match(dom.text(view.node),/1.00 GiB/);assert.equal(pending.length,2);
+ now+=16000;const failed=view.update(a);await Promise.resolve();assert.match(dom.text(view.node),/1.00 GiB/);
+ pending[2].reject(Error('offline'));await failed;assert.match(view.node.children[0].title,/上次读数/);assert.match(dom.text(view.node),/1.00 GiB/);
+ await view.update(a);assert.equal(pending.length,3);
+ dom.document.hidden=true;now+=31000;await view.update(a);assert.equal(pending.length,3);
+ dom.document.hidden=false;const off=view.update({...a,state:'Shutdown'});await Promise.resolve();assert.doesNotMatch(dom.text(view.node),/内存/);assert.match(dom.text(view.node),/磁盘 1.00 GiB/);
+ pending[3].resolve(sample('a',0));await off;assert.match(dom.text(view.node),/0.0 MiB/);
+});
+
+
+test('visible rows share the selected reading, off devices wait five minutes, and old boot results cannot leak',async()=>{
+ const M=require('../../baguette-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=0,observe;
+ dom.document.defaultView={IntersectionObserver:class{constructor(fn){observe=fn;}observe(){}unobserve(){}}};
+ const view=M.createResourceSummary('zh-CN',device=>new Promise(resolve=>pending.push({device,resolve})),dom.document,()=>now);
+ const off={udid:'a',state:'Shutdown'},on={...off,state:'Booted'};
+ const sample=(memory,disk)=>({udid:'a',memory:{status:'ok',bytes:memory},disk:{status:'ok',bytes:disk}});
+ const row=view.label(off);await Promise.resolve();assert.equal(pending.length,0,'offscreen rows do not measure');
+ observe([{target:row,isIntersecting:true}]);const first=view.update(off);await Promise.resolve();assert.equal(pending.length,1,'selection and list join one request');
+ pending[0].resolve(sample(0,5*1024**3));await first;
+ assert.match(dom.text(row),/磁盘 5.00 GiB/);assert.doesNotMatch(dom.text(row),/内存/);
+ now=299999;await view.update(off);assert.equal(pending.length,1);
+ now=300001;const refresh=view.update(off);await Promise.resolve();pending[1].resolve(sample(0,6*1024**3));await refresh;
+ row.isConnected=false;view.prune();
+ const boot=view.update(on);await Promise.resolve();const stop=view.update(off);await Promise.resolve();
+ pending[3].resolve(sample(0,7*1024**3));await stop;
+ pending[2].resolve(sample(3*1024**3,6*1024**3));await boot;
+ assert.match(dom.text(view.node),/磁盘 7.00 GiB/);assert.doesNotMatch(dom.text(view.node),/内存|6.00 GiB/);
 });

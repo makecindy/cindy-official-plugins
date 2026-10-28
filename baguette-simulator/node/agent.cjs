@@ -229,37 +229,39 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
     return dir;
   }
 
-  async function screenshot(device, p = {}) {
+  async function captureFrame(device, raw, divisor, deadline) {
+    // Capture is read-only; retry the backend's occasional transient failure once.
+    await bag(['screenshot'], device, ['--format', 'png', '--output', raw, '--scale', String(divisor)], budget(20000, deadline))
+      .catch(() => pause(300, deadline).then(() => bag(['screenshot'], device, ['--format', 'png', '--output', raw, '--scale', String(divisor)], budget(20000, deadline))));
+  }
+
+  async function screenshot(device, p = {}, {nativeResolution = false} = {}) {
     const scale = number(p.scale, 'scale', 1, 3, 1);
     const dir = await shotsDir();
     const id = crypto.randomUUID(), raw = path.join(dir, `${id}.raw.png`), file = path.join(dir, `${id}.${p.format === 'png' ? 'png' : 'jpg'}`);
-    // Confirm live geometry on both sides of capture; cached age alone cannot
-    // establish which orientation and panel these pixels belong to.
-    const known = densities.get(device.udid);
-    const divisor = known ? Math.max(1, Math.floor(known / scale)) : 1;
-    const before = await geometry(device, {maxAge: 0, deadline: p._deadline});
-    if (before.stale) throw failure('SCREEN_UNAVAILABLE', 'Current screen geometry could not be confirmed.');
-    const screen = before.screen;
-    // Baguette's capture occasionally fails once with an internal error; the next frame is fine.
-    await bag(['screenshot'], device, ['--format', 'png', '--output', raw, '--scale', String(divisor)], budget(20000, p._deadline))
-      .catch(() => pause(300, p._deadline).then(() => bag(['screenshot'], device, ['--format', 'png', '--output', raw, '--scale', String(divisor)], budget(20000, p._deadline))));
-    const afterFrame = await geometry(device, {maxAge: 0, deadline: p._deadline});
-    if (afterFrame.stale || !sameScreen(afterFrame.screen, screen)) {
-      await fs.rm(raw, {force: true});
-      throw failure('SCREEN_CHANGED', 'The screen turned or folded while capturing. Take a new screenshot.');
-    }
-    if (screen.target?.pixelSize?.width) densities.set(device.udid, screen.target.pixelSize.width / screen.width);
-    const view = G.viewSize(screen);
-    let region = null;
-    if (p.region) {
-      const r = p.region;
-      const x = number(r.x, 'region.x', 0, view.width), y = number(r.y, 'region.y', 0, view.height);
-      region = {x, y, width: number(r.width, 'region.width', 1, view.width - x), height: number(r.height, 'region.height', 1, view.height - y)};
-    }
-    const grid = p.grid === true ? (region ? 25 : 100) : number(p.grid, 'grid', 0, 1000, 0);
     try {
+      // Start cleanup before capture: failed captures and geometry reads can
+      // leave a partial framebuffer even when rendering never starts.
+      const known = densities.get(device.udid);
+      const divisor = !nativeResolution && known ? Math.max(1, Math.floor(known / scale)) : 1;
+      const before = await geometry(device, {maxAge: 0, deadline: p._deadline});
+      if (before.stale) throw failure('SCREEN_UNAVAILABLE', 'Current screen geometry could not be confirmed.');
+      const screen = before.screen;
+      await captureFrame(device, raw, divisor, p._deadline);
+      const afterFrame = await geometry(device, {maxAge: 0, deadline: p._deadline});
+      if (afterFrame.stale || !sameScreen(afterFrame.screen, screen))
+        throw failure('SCREEN_CHANGED', 'The screen turned or folded while capturing. Take a new screenshot.');
+      if (screen.target?.pixelSize?.width) densities.set(device.udid, screen.target.pixelSize.width / screen.width);
+      const view = G.viewSize(screen);
+      let region = null;
+      if (p.region) {
+        const r = p.region;
+        const x = number(r.x, 'region.x', 0, view.width), y = number(r.y, 'region.y', 0, view.height);
+        region = {x, y, width: number(r.width, 'region.width', 1, view.width - x), height: number(r.height, 'region.height', 1, view.height - y)};
+      }
+      const grid = p.grid === true ? (region ? 25 : 100) : number(p.grid, 'grid', 0, 1000, 0);
       const radius = p.corners === false ? 0 : await cornerRadius(device, screen, p._deadline);
-      const options = {rotate: G.rotation(screen), view, scale, region, radius, grid, format: p.format === 'png' ? 'png' : 'jpeg', quality: 0.82};
+      const options = {rotate: G.rotation(screen), view, scale, nativeResolution, region, radius, grid, format: p.format === 'png' ? 'png' : 'jpeg', quality: 0.82};
       const render = async (out, extra) => JSON.parse((await run('/usr/bin/osascript', ['-l', 'JavaScript', path.join(__dirname, 'image.jxa.js'), raw, out, JSON.stringify({...options, ...extra})], budget(20000, p._deadline))).stdout);
       const size = await render(file, {});
       if (p._internal) return {path: file, _screen: screen};
@@ -278,10 +280,40 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
           }
         } finally { await fs.rm(copy, {force: true}); }
       }
-      return {udid: device.udid, path: file, mimeType: p.format === 'png' ? 'image/png' : 'image/jpeg', pixels: size, scale, screen: viewInfo(screen),
+      return {udid: device.udid, path: file, mimeType: p.format === 'png' ? 'image/png' : 'image/jpeg', pixels: size, scale, screen: viewInfo(screen), capturedAt: new Date(now()).toISOString(), screenshotAttached: !!inline,
         ...(inline ? {_modelImages: inline} : {}),
         ...(region ? {region} : {}), note: `${inline ? 'The screenshot is attached to this result and the user sees it in this tool step; do not import or re-embed it (the file at path is the same image).' : 'Open the file at path with your image tool.'} ${scale === 1 ? 'Image pixels are view points' : `Divide pixels by ${scale} for view points`}${region ? ` and add the region origin (${region.x}, ${region.y})` : ''}; ${platform(device) === 'tvOS' ? 'use press to navigate and select' : platform(device) === 'visionOS' ? 'pass view points to tap (spatial pinch)' : 'pass view points to tap and gesture'}.`};
-    } finally { await fs.rm(raw, {force: true}); }
+    } catch (error) {
+      await fs.rm(file, {force: true}).catch(() => {});
+      throw error;
+    } finally { await fs.rm(raw, {force: true}).catch(() => {}); }
+  }
+
+  // A flat viewer already supplies its pose. Its export needs one coherent
+  // framebuffer, not AX geometry for planning later coordinate input. Read
+  // dimensions from that PNG so portrait-only apps and rotations stay intact.
+  // Other views retain live panel checks through the Agent capture path.
+  async function nativeScreenshot(device, deadline, orientation, clipboard = false) {
+    if (orientation === undefined) return screenshot(device, {format: 'png', corners: false, _internal: true, _deadline: deadline}, {nativeResolution: true});
+    if (!Object.keys(G.ROTATION).includes(orientation)) throw failure('INVALID_ARGUMENT', 'Invalid viewer orientation');
+    const dir = await shotsDir(), id = crypto.randomUUID();
+    const raw = path.join(dir, `${id}.raw.png`), file = path.join(dir, `${id}.png`);
+    try {
+      await captureFrame(device, raw, 1, deadline);
+      const {stdout} = await run('/usr/bin/osascript', ['-l', 'JavaScript', path.join(__dirname, 'image.jxa.js'), raw, file,
+        JSON.stringify({rotate: G.ROTATION[orientation], nativeResolution: true, format: 'png', clipboard})], {...budget(20000, deadline), mutation: clipboard});
+      if (clipboard) {
+        let receipt;
+        try { receipt = JSON.parse(stdout); } catch {}
+        if (receipt?.copied !== true || !Number.isSafeInteger(receipt.bytes) || receipt.bytes <= 0)
+          throw failure('SCREENSHOT_EXPORT_FAILED', 'Could not confirm the clipboard write; check the clipboard before retrying.', 'unknown');
+        return {copied: true, bytes: receipt.bytes};
+      }
+      return {path: file};
+    } catch (error) {
+      await fs.rm(file, {force: true}).catch(() => {});
+      throw error;
+    } finally { await fs.rm(raw, {force: true}).catch(() => {}); }
   }
 
   // ---- acting ----
@@ -350,23 +382,37 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
   }
 
   async function after(device, p, result) {
+    const started = now(), inputMs = p._startedAt === undefined ? undefined : started - p._startedAt;
+    // Input has already settled. Observation gets its own short budget inside
+    // the original call deadline; no failure here can resend that input.
+    const callDeadline = p._deadline ?? Infinity;
+    p = {...p, _deadline: Math.min(callDeadline, started + (p.until ? 27000 : 12000))};
+    const finish = out => {
+      const failed = out.observationError || out.ui?.error || out.screenshot?.error || out.until?.met === false;
+      return {...out, timing: {...(inputMs === undefined ? {} : {inputMs}), observationMs: now() - started},
+        observation: failed ? 'unconfirmed' : out.screenshot?.path || out.ui || out.until?.met ? 'available' : 'not_requested',
+        ...(failed ? {nextAction: 'Observe with screenshot or wait_for; do not repeat the delivered input. Check the target before continuing.'} : {})};
+    };
     // `until`: the text the action should bring up; waiting for it replaces a guessed settle time.
     const until = typeof p.until === 'string' && p.until.trim() ? p.until.trim() : null;
     const observeMode = p.observe ?? (until ? 'none' : 'ui');
     let out = {...result};
     if (until) {
       forgetTree(device.udid);
-      const waited = await waitFor(device, {text: until, timeout: 15, _inline: p._inline, _deadline: p._deadline});
+      let waited;
+      try { waited = await waitFor(device, {text: until, timeout: 15, _inline: p._inline, _deadline: p._deadline}); }
+      catch (error) { return finish({...out, observationError: error.message}); }
       const {_modelImages, ...rest} = waited;
       out.until = rest;
       if (_modelImages) out._modelImages = _modelImages;
       // Not there: the wait already attached the screen; do not take another.
-      if (!waited.met) return out;
+      if (!waited.met) return finish(out);
+      p._deadline = Math.min(callDeadline, now() + 12000);
     }
-    if (observeMode === 'none') return out;
+    if (observeMode === 'none') return finish(out);
     if (!until) {
       try { await pause(number(p.settle, 'settle', 0, 5, 0.6) * 1000, p._deadline); }
-      catch (error) { return {...out, observationError: error.message}; }
+      catch (error) { return finish({...out, observationError: error.message}); }
     }
     forgetTree(device.udid);
     if (observeMode === 'ui' || observeMode === 'both') {
@@ -377,10 +423,11 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
       try { const {_modelImages, ...shot} = await screenshot(device, {_inline: p._inline, _deadline: p._deadline}); out.screenshot = shot; if (_modelImages) out._modelImages = _modelImages; }
       catch (error) { out.screenshot = {error: error.message}; }
     }
-    return out;
+    return finish(out);
   }
 
   async function tap(device, p) {
+    p = {...p, _startedAt: p._startedAt ?? now()};
     const target = await resolveTarget(device, p);
     const count = number(p.count, 'count', 1, 3, 1), duration = number(p.duration, 'duration', 0.02, 10, undefined);
     if (!Number.isInteger(count)) throw failure('INVALID_ARGUMENT', 'count must be an integer');
@@ -399,6 +446,7 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
   }
 
   async function gesture(device, p) {
+    p = {...p, _startedAt: p._startedAt ?? now()};
     const kind = p.kind;
     if (kind === 'scroll_to') {
       if(platform(device)!=='iOS')throw failure('UNSUPPORTED_INPUT','scroll_to requires an iOS accessibility tree. Use spatial dragging on Vision Pro or remote buttons on Apple TV.');
@@ -987,7 +1035,7 @@ function createAgent({binary, deviceSet, root, run, sim, Failure, spatialAction,
     return reports.sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, 5);
   }
 
-  return {observe, geometry, forget, forgetTree, describe, readText, screenshot, tap, gesture, waitFor, settle, capture, setState, logs, executableOf, typeText, pasteByTouch, hasAccessibility, after};
+  return {observe, geometry, forget, forgetTree, describe, readText, screenshot, nativeScreenshot, tap, gesture, waitFor, settle, capture, setState, logs, executableOf, typeText, pasteByTouch, hasAccessibility, after};
 }
 
 const SOI = Buffer.from([0xff, 0xd8]), EOI = Buffer.from([0xff, 0xd9]);

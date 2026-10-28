@@ -1,0 +1,21 @@
+{
+  "name": "ntfy",
+  "description": "Send push notifications through your own self-hosted ntfy server. Add one or more servers with an access token in the plugin settings; Cindy encrypts each token and sends it only to its own server.",
+  "whenToUse": "Use when the user wants a push notification sent to their phone or desktop through their own ntfy server, for example to be alerted when a task finishes. Requires a server and access token added in the plugin settings.",
+  "tools": {
+    "ntfy_send": {
+      "description": "Publish one push notification to a topic on a configured ntfy server. Returns the ntfy message id and time. topic defaults to the server's default topic. With several servers configured, pass server (id or host from ntfy_servers); ask the user if unsure. message is limited to 4096 UTF-8 bytes and is rejected, never truncated, when longer. Never resend after an outcome-unknown error (timeout, network failure, HTTP 5xx): the notification may already have been delivered, so ask the user first."
+    },
+    "ntfy_servers": {
+      "description": "List the configured ntfy servers with their id, host, URL and default topic. Access tokens are never returned. Use it to choose the server argument for ntfy_send."
+    }
+  },
+  "network": {
+    "connections": {
+      "ntfy_conn": {
+        "label": "ntfy server",
+        "hint": "Enter the server URL (https only, default port 443, served at the domain root) and an ntfy access token (tk_...) with write access to your topics."
+      }
+    }
+  }
+}

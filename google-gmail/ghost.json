@@ -5,7 +5,7 @@
   "name": "Gmail",
   "description": "搜索和阅读 Gmail、下载附件、创建草稿和发送邮件；查询联系人头像并管理 Google 通讯录。账号授权由 Cindy 托管。",
   "whenToUse": "用于 Gmail 邮件、附件、草稿、发送及 Google 通讯录。先用 gmail_accounts 选择账号；邮件用 gmail_schema 查询命令后通过 gmail_run 执行；联系人查询、头像及增删改用 gmail_contacts。分析附件前先下载到明确指定的本地任务路径。",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "cindy": {
     "media": [
       "deposit"

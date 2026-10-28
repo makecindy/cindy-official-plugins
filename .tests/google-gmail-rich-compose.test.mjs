@@ -28,11 +28,11 @@ function fixture(t, inline = true) {
     { mimeType: 'text/html', body: { data: Buffer.from('<p>Original</p>' + (inline ? '<img src="cid:photo@example.test">' : '')).toString('base64url') } }, part,
   ] };
   const draft = { id: 'draft-test', message: { id: 'message-test', threadId: 'thread-test', payload } };
-  const before = ctx.draftReadBack({ draft }, draft.id);
+  const before = ctx.draftReadBack({ draft }, draft.id, 'zh-CN');
   const fields = { to: before.headers.to, cc: '', bcc: '', subject: '中文 subject', body: 'Edited\nMore', quote: '',
     bodyHtml: '<p><strong>Edited</strong></p><p>More</p><img src="cid:photo@example.test">', quoteHtml: '',
     attachmentItems: JSON.stringify([{ key: keyFor(part), filename: part.filename }]) };
-  const p = { draftId: draft.id, fields, attachments: [] };
+  const p = { draftId: draft.id, fields, attachments: [], locale: 'zh-CN' };
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push({ url, init });
@@ -40,12 +40,19 @@ function fixture(t, inline = true) {
     assert.equal(init.redirect, 'error');
     return new Response(JSON.stringify(draft), { headers: { 'Content-Type': 'application/json' } });
   });
+  // The Chinese assertions describe the zh-CN copy that main.js requests with
+  // params.locale. Test entry points pin it; worker-internal calls stay real.
+  const zh = message => ({ ...message, params: { locale: 'zh-CN', ...message.params } });
   return { ctx, before, draft, fields, p, calls, dir, image,
+    handle: (message, execution) => ctx.handle(zh(message), execution),
+    draftReadBack: (data, draftId) => ctx.draftReadBack(data, draftId, 'zh-CN'),
+    readDraft: (data, draftId, token) => ctx.readDraft(data, draftId, token, 'zh-CN'),
+    readSavedDraft: (result, command, token, cwd) => ctx.readSavedDraft(result, command, token, cwd, 'zh-CN'),
     rpc(message) {
       if (!listening) { runInContext(source.slice(source.indexOf('const input = readline.createInterface')), ctx); listening = true; }
       return new Promise(resolve => {
         receive = response => { assert.equal(response.id, 'encoding-test'); resolve(response.result); };
-        input.emit('line', JSON.stringify({ ...message, id: 'encoding-test' }));
+        input.emit('line', JSON.stringify({ ...zh(message), id: 'encoding-test' }));
       });
     },
     run: (execution = {}) => updateRichDraft(p, 'fixture-token', before, ctx, execution) };
@@ -78,13 +85,13 @@ test('rich quote edits and removals supersede stale HTML while untouched quotes 
     const quoteHtml = '<br><br><div class="gmail_quote"><a href="https://example.test">Older</a></div>';
     f.draft.message.payload.parts[0].body.data = Buffer.from('Original\n\nOn Monday, sender wrote:\n> Older').toString('base64url');
     f.draft.message.payload.parts[1].body.data = Buffer.from('<p>Original</p>' + quoteHtml).toString('base64url');
-    const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+    const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
     const fields = { to: before.headers.to, cc: '', bcc: '', subject: before.headers.subject,
       body: before.editor.body, quote: mode === 'removed' ? '' : mode === 'edited' ? '\n\nOn Monday, sender wrote:\n> Changed quote' : before.editor.quote,
       bodyHtml: before.editor.bodyHtml, quoteHtml, attachmentItems: JSON.stringify(before.attachments) };
     fields.to = 'other@example.test'; // Exercise preservation during other edits.
     if (mode === 'html-edited') fields.quoteHtml = quoteHtml.replace('Older', 'New HTML');
-    const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
       params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
     assert.equal(result.ok, true, result.message);
     const saved = result.data.readBack;
@@ -111,16 +118,16 @@ test('removing an attachment preserves the body and removes its bytes', async t 
 test('preview metadata and empty recipients do not rewrite an unchanged draft', async t => {
   const f = workerFixture(t);
   f.draft.message.payload.headers.find(h => h.name === 'To').value = '';
-  const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
   const fields = { to: '', cc: '', bcc: '', subject: before.headers.subject, body: before.editor.body, quote: before.editor.quote,
     bodyHtml: before.editor.bodyHtml, quoteHtml: before.editor.quoteHtml,
     attachmentItems: JSON.stringify(before.attachments.map(a => ({ ...a, previewUrl: `cindy-media://blobs/${'a'.repeat(64)}.png` }))) };
   const message = { method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } };
-  assert.equal((await f.ctx.handle(message, {})).ok, true);
+  assert.equal((await f.handle(message, {})).ok, true);
   assert.equal(f.calls.length, 0);
   message.params.send = true;
-  assert.equal((await f.ctx.handle(message, {})).execution, 'not_executed');
+  assert.equal((await f.handle(message, {})).execution, 'not_executed');
   assert.equal(f.calls.length, 0);
 });
 test('a stale server draft is not overwritten', async t => {
@@ -223,12 +230,12 @@ test('draft writes distinguish rejection, successful unusable receipts and trans
           'body-html': '<img src="cid:img1@cindy.local">', 'inline-images': [{ path: 'photo.png',
             hash: createHash('sha256').update(f.image).digest('hex'), contentType: 'image/png' }] } } };
     } else {
-      const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+      const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
       request = { method: 'compose', params: { draftId: f.draft.id, fingerprint: before.fingerprint,
         fields: { ...f.fields, subject: 'Hello' }, send: true } };
     }
     request.cindy = { secrets: { gog_access_token: 'fixture-token' } };
-    const result = await f.ctx.handle(request, {});
+    const result = await f.handle(request, {});
     assert.equal(result.ok, false, operation + JSON.stringify(responseCase));
     assert.equal(result.execution, responseCase.execution, operation + JSON.stringify(responseCase));
     if (result.execution === 'executed') assert.match(result.message, /已保存.*(?:未发送|尚未发送)/);
@@ -242,11 +249,11 @@ test('Host attachment rename is saved and read back without changing image bytes
   const f = workerFixture(t);
   const part = f.draft.message.payload.parts.find(p => p.filename);
   part.filename = 'image-1';
-  const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
   const fields = { to: before.headers.to, cc: '', bcc: '', subject: before.headers.subject,
     body: before.editor.body, quote: before.editor.quote, bodyHtml: before.editor.bodyHtml, quoteHtml: before.editor.quoteHtml,
     attachmentItems: JSON.stringify(before.attachments.map(a => ({ ...a, filename: 'image-1.png' }))) };
-  const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(result.data.readBack.attachments[0].filename, 'image-1.png');
@@ -258,12 +265,12 @@ test('Host attachment rename is saved and read back without changing image bytes
 });
 test('a regular image attachment becomes a CID part in the same draft without uploading another file', async t => {
   const f = workerFixture(t, false);
-  const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
   const cid = 'image-1@cindy.local';
   const fields = { to: before.headers.to, cc: '', bcc: '', subject: before.headers.subject,
     body: before.editor.body, quote: '', bodyHtml: '<p>Original</p><img src="cid:' + cid + '" style="width:240px">', quoteHtml: '',
     attachmentItems: JSON.stringify(before.attachments.map(a => ({ key: a.key, filename: a.filename, contentId: cid }))) };
-  const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(result.data.readBack.attachments.length, 1);
@@ -278,7 +285,7 @@ test('a regular image attachment becomes a CID part in the same draft without up
 test('forged image CID metadata cannot turn non-image bytes into an embedded image', async t => {
   const f = fixture(t, false), part = f.draft.message.payload.parts.find(p => p.filename);
   part.body.data = Buffer.from('not-an-image').toString('base64url'); part.body.size = 12;
-  Object.assign(f.before, f.ctx.draftReadBack({ draft: f.draft }, f.draft.id));
+  Object.assign(f.before, f.draftReadBack({ draft: f.draft }, f.draft.id));
   f.fields.attachmentItems = JSON.stringify([{ key: keyFor(part), contentId: 'image-1@cindy.local' }]);
   await assert.rejects(f.run(), /只能将图片/);
   assert.equal(f.calls.some(c => c.init.method === 'PUT'), false);
@@ -286,7 +293,7 @@ test('forged image CID metadata cannot turn non-image bytes into an embedded ima
 test('AI updates HTML through drafts update while preserving CID bytes and never sending', async t => {
   const f = workerFixture(t);
   const html = '<p><b>AI edited</b></p><img src="cid:photo@example.test">';
-  const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { command: ['drafts', 'update'], arguments: ['draft-test'], readOnly: false, options: { body: 'AI edited', 'body-html': html } } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(result.data.readBack.editor.bodyHtml, html);
@@ -302,15 +309,15 @@ test('rotating attachment fetch IDs do not create a draft conflict, while real e
   let sequence = 0;
   const rotate = () => { part.body.attachmentId = 'download-' + ++sequence; };
   rotate();
-  const first = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const first = f.draftReadBack({ draft: f.draft }, f.draft.id);
   rotate();
-  const second = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const second = f.draftReadBack({ draft: f.draft }, f.draft.id);
   assert.notEqual(first.attachments[0].attachmentId, second.attachments[0].attachmentId);
   assert.equal(first.fingerprint, second.fingerprint);
   const execute = f.ctx.execute, fetch = globalThis.fetch;
   f.ctx.execute = async (...args) => { rotate(); return execute(...args); };
   t.mock.method(globalThis, 'fetch', async (...args) => { rotate(); return fetch(...args); });
-  const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { command: ['drafts', 'update'], arguments: [f.draft.id], readOnly: false, options: { to: 'self@example.test' } } }, {});
   assert.equal(result.ok, true, result.message);
   const writes = f.calls.filter(c => c.init.method === 'PUT');
@@ -319,7 +326,7 @@ test('rotating attachment fetch IDs do not create a draft conflict, while real e
   assert.match(raw, /To: self@example.test/);
   assert.match(raw, /Content-ID: <photo@example.test>/);
   assert.equal(f.calls.some(c => /send/.test(c.url)), false);
-  const baseline = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id).fingerprint;
+  const baseline = f.draftReadBack({ draft: f.draft }, f.draft.id).fingerprint;
   for (const change of [
     draft => { draft.message.id = 'changed-message'; },
     draft => { draft.message.payload.headers.find(h => h.name === 'To').value = 'other@example.test'; },
@@ -327,18 +334,18 @@ test('rotating attachment fetch IDs do not create a draft conflict, while real e
     draft => { draft.message.payload.parts.at(-1).body.size++; },
   ]) {
     const changed = structuredClone(f.draft); change(changed);
-    assert.notEqual(f.ctx.draftReadBack({ draft: changed }, changed.id).fingerprint, baseline);
+    assert.notEqual(f.draftReadBack({ draft: changed }, changed.id).fingerprint, baseline);
   }
 });
 test('plain card edits regenerate the HTML alternative instead of sending stale text', async t => {
   const f = workerFixture(t);
   f.draft.message.payload.parts = f.draft.message.payload.parts.filter(p => /^text\//.test(p.mimeType));
   f.draft.message.payload.parts[1].body.data = Buffer.from(f.ctx.mailBodyHtml('Original')).toString('base64url');
-  const before = f.ctx.draftReadBack({ draft: f.draft }, 'draft-test');
+  const before = f.draftReadBack({ draft: f.draft }, 'draft-test');
   assert.equal(before.editor.format, 'text');
   const fields = { to: before.headers.to, cc: '', bcc: '', subject: 'Hello', body: 'User edited', quote: '',
     bodyHtml: before.editor.bodyHtml, quoteHtml: '', attachmentItems: '[]' };
-  const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { draftId: 'draft-test', fingerprint: before.fingerprint, fields, send: false } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(result.data.readBack.bodyText, 'User edited');
@@ -358,7 +365,7 @@ test('a successful rich save survives read-back failure without reporting not_ex
       }
       return execute(...args);
     };
-    const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
       params: { command: ['drafts', 'update'], arguments: ['draft-test'], readOnly: false, options: { body: 'Edited', 'body-html': '<p>Edited</p><img src="cid:photo@example.test">' } } }, {});
     assert.equal(result.ok, false);
     assert.equal(result.execution, 'executed');
@@ -371,7 +378,7 @@ test('AI attach replaces ordinary files while preserving only CID images still r
   const f = workerFixture(t), file = path.join(f.dir, 'new.pdf');
   fs.writeFileSync(file, 'new-file');
   f.draft.message.payload.parts.push({ partId: 'old', filename: 'old.pdf', mimeType: 'application/pdf', body: { size: 8, data: Buffer.from('old-file').toString('base64url') } });
-  const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { command: ['drafts', 'update'], arguments: [f.draft.id], workdir: f.dir, readOnly: false, options: { attach: ['new.pdf'] } } }, {});
   assert.equal(result.ok, true, result.message);
   assert.deepEqual(Array.from(result.data.readBack.attachments, a => a.filename), ['图.png', 'new.pdf']);
@@ -390,8 +397,8 @@ test('same-length changed attachment bytes after PUT prevent sending or claiming
     }
     return execute(...args);
   };
-  const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
-  const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } }, params: {
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } }, params: {
     draftId: f.draft.id, fingerprint: before.fingerprint, fields: { ...f.fields, subject: 'Hello' }, send: true,
   } }, {});
   assert.equal(result.ok, false);
@@ -422,7 +429,7 @@ test('attachment read-back downloads server-only bytes and treats missing or cha
       }
       return fetch(url, init);
     });
-    const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
       params: { command: ['drafts', 'update'], arguments: ['draft-test'], readOnly: false,
         options: { body: 'Edited', 'body-html': '<p>Edited</p><img src="cid:photo@example.test">' } } }, {});
     assert.equal(downloads, 1);
@@ -439,7 +446,7 @@ test('draft read-back decodes the declared charset before editing either body al
   text.body.data = Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString('base64url');
   html.headers = [{ name: 'Content-Type', value: 'text/html; charset="Shift_JIS"' }];
   html.body.data = Buffer.from([0x3c, 0x70, 0x3e, 0x93, 0xfa, 0x96, 0x7b, 0x3c, 0x2f, 0x70, 0x3e]).toString('base64url');
-  const saved = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const saved = f.draftReadBack({ draft: f.draft }, f.draft.id);
   assert.equal(saved.bodyText, 'café');
   assert.equal(saved.editor.bodyHtml, '<p>日本</p>');
 });
@@ -450,7 +457,7 @@ test('external draft body bytes are loaded before read-back and the second write
   const f = workerFixture(t), bytes = Buffer.from([0x63, 0x61, 0x66, 0xe9]);
   f.draft.message.payload.parts[0].headers = [{ name: 'Content-Type', value: 'text/plain; charset=ISO-8859-1' }];
   f.draft.message.payload.parts[0].body = { attachmentId: 'text-body', size: bytes.length };
-  assert.throws(() => f.ctx.draftReadBack({ draft: f.draft }, f.draft.id), /正文/);
+  assert.throws(() => f.draftReadBack({ draft: f.draft }, f.draft.id), /正文/);
   const fetch = globalThis.fetch; let downloads = 0;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (url.endsWith('/attachments/text-body')) {
@@ -462,14 +469,14 @@ test('external draft body bytes are loaded before read-back and the second write
   });
   f.ctx.execute = async () => ({ ok: true, data: { draft: structuredClone(f.draft) } });
   const auth = { secrets: { gog_access_token: 'fixture-token' } };
-  const read = await f.ctx.handle({ method: 'run', cindy: auth,
+  const read = await f.handle({ method: 'run', cindy: auth,
     params: { command: ['drafts', 'get'], arguments: [f.draft.id] } }, {});
   const before = read.data.readBack;
   assert.equal(before.bodyText, 'café');
   const fields = { to: 'self@example.test', cc: '', bcc: '', subject: before.headers.subject,
     body: before.editor.body, quote: before.editor.quote, bodyHtml: before.editor.bodyHtml, quoteHtml: before.editor.quoteHtml,
     attachmentItems: JSON.stringify(before.attachments) };
-  const result = await f.ctx.handle({ method: 'compose', cindy: auth,
+  const result = await f.handle({ method: 'compose', cindy: auth,
     params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(downloads, 3); // get, compose get, direct-API precondition
@@ -482,11 +489,11 @@ test('unreadable external draft bodies prevent updates and preserve successful s
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ size: 8, data: 'AQI' })));
   const auth = { secrets: { gog_access_token: 'fixture-token' } };
   for (const command of ['get', 'update']) {
-    await assert.rejects(f.ctx.handle({ method: 'run', cindy: auth,
+    await assert.rejects(f.handle({ method: 'run', cindy: auth,
       params: { command: ['drafts', command], arguments: [f.draft.id], readOnly: false, options: command === 'get' ? {} : { body: 'Replacement' } } }, {}), /正文/);
   }
   assert.equal(f.calls.some(c => c.init.method === 'PUT'), false);
-  const receipt = await f.ctx.readSavedDraft({ ok: true, data: { draftId: f.draft.id } }, ['drafts', 'create'], 'fixture-token');
+  const receipt = await f.readSavedDraft({ ok: true, data: { draftId: f.draft.id } }, ['drafts', 'create'], 'fixture-token');
   assert.equal(receipt.ok, true); assert.equal(receipt.data.readBack.status, 'unavailable');
   assert.equal(receipt.data.draftId, f.draft.id);
 });
@@ -495,11 +502,11 @@ test('Host-generated plain alternative preserves authored HTML-only styling, lin
   const html = '<div style="color:#123456"><a href="https://example.test">Hello</a><img src="cid:photo@example.test" width="240"></div>';
   f.draft.message.payload.parts[0].body.data = '';
   f.draft.message.payload.parts[1].body.data = Buffer.from(html).toString('base64url');
-  const before = f.ctx.draftReadBack({ draft: f.draft }, f.draft.id);
+  const before = f.draftReadBack({ draft: f.draft }, f.draft.id);
   assert.equal(before.editor.format, 'html');
   const fields = { to: before.headers.to, cc: '', bcc: '', subject: before.headers.subject,
     body: 'Hello', quote: '', bodyHtml: html, quoteHtml: '', attachmentItems: JSON.stringify(before.attachments) };
-  const result = await f.ctx.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+  const result = await f.handle({ method: 'compose', cindy: { secrets: { gog_access_token: 'fixture-token' } },
     params: { draftId: f.draft.id, fingerprint: before.fingerprint, fields, send: false } }, {});
   assert.equal(result.ok, true, result.message);
   assert.equal(result.data.readBack.bodyText, 'Hello');
@@ -537,7 +544,7 @@ test('inline and CID containers retain external bodies and real attachments thro
       }
       return fetch(url, init);
     });
-    const saved = await f.ctx.readDraft({ draft: f.draft }, f.draft.id, 'fixture-token');
+    const saved = await f.readDraft({ draft: f.draft }, f.draft.id, 'fixture-token');
     assert.equal(saved.bodyText, 'Original'); assert.equal(saved.bodyHtml, bytes.toString());
     assert.deepEqual(Array.from(saved.attachments, a => a.mimeType), ['image/png', 'message/rfc822', 'multipart/mixed']);
     Object.assign(f.before, saved);
@@ -567,7 +574,7 @@ test('unnamed non-body MIME parts preserve their own bytes instead of flattening
       if (url.endsWith('/attachments/opaque-bytes')) return new Response(JSON.stringify({ data: bytes.toString('base64url'), size: bytes.length }));
       return fetch(url, init);
     });
-    const before = await f.ctx.readDraft({ draft: f.draft }, f.draft.id, 'fixture-token');
+    const before = await f.readDraft({ draft: f.draft }, f.draft.id, 'fixture-token');
     assert.equal(before.bodyText, 'Original'); assert.equal(before.attachments.length, 2);
     Object.assign(f.before, before);
     f.fields.attachmentItems = JSON.stringify(before.attachments);
@@ -587,11 +594,11 @@ test('unsupported or malformed body encodings cannot produce editable snapshots 
     const f = workerFixture(t), part = f.draft.message.payload.parts.find(p => p.mimeType === mimeType);
     part.headers = [{ name: 'Content-Type', value: mimeType + '; charset="' + charset + '"' }];
     part.body = { data: Buffer.from([0xff]).toString('base64url'), size: 1 };
-    assert.throws(() => f.ctx.draftReadBack({ draft: f.draft }, f.draft.id), /字符编码|无损解码/);
+    assert.throws(() => f.draftReadBack({ draft: f.draft }, f.draft.id), /字符编码|无损解码/);
     const cindy = { secrets: { gog_access_token: 'fixture-token' } };
-    for (const operation of ['get', 'update']) await assert.rejects(f.ctx.handle({ method: 'run', cindy,
+    for (const operation of ['get', 'update']) await assert.rejects(f.handle({ method: 'run', cindy,
       params: { command: ['drafts', operation], arguments: [f.draft.id], readOnly: false, options: {} } }, {}), /字符编码|无损解码/);
-    for (const send of [false, true]) await assert.rejects(f.ctx.handle({ method: 'compose', cindy,
+    for (const send of [false, true]) await assert.rejects(f.handle({ method: 'compose', cindy,
       params: { draftId: f.draft.id, fingerprint: f.before.fingerprint, fields: f.fields, send } }, {}), /字符编码|无损解码/);
     assert.equal(f.calls.some(c => ['PUT', 'POST'].includes(c.init.method)), false);
   }
@@ -674,7 +681,7 @@ test('AI attachment replacement retains CID scheme variants and percent-encoded 
     const f = workerFixture(t), file = path.join(f.dir, 'new.pdf');
     fs.writeFileSync(file, 'new-file');
     f.draft.message.payload.parts[1].body.data = Buffer.from('<img src="' + reference + '">').toString('base64url');
-    const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
       params: { command: ['drafts', 'update'], arguments: [f.draft.id], workdir: f.dir, readOnly: false, options: { attach: ['new.pdf'] } } }, {});
     assert.equal(result.ok, true, result.message);
     assert.deepEqual(Array.from(result.data.readBack.attachments, a => a.filename), ['图.png', 'new.pdf']);
@@ -729,7 +736,7 @@ test('all supported URL locations retain inline bytes while attachment lists are
     const f = workerFixture(t), file = path.join(f.dir, 'new.pdf');
     fs.writeFileSync(file, 'new-file');
     f.draft.message.payload.parts[1].body.data = Buffer.from(markup).toString('base64url');
-    const result = await f.ctx.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
+    const result = await f.handle({ method: 'run', cindy: { secrets: { gog_access_token: 'fixture-token' } },
       params: { command: ['drafts', 'update'], arguments: [f.draft.id], workdir: f.dir, readOnly: false, options: { attach: ['new.pdf'] } } }, {});
     assert.equal(result.ok, true, markup + ': ' + result.message);
     assert.deepEqual(Array.from(result.data.readBack.attachments, a => a.filename), ['图.png', 'new.pdf']);

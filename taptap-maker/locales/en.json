@@ -41,7 +41,7 @@
       "description": "Diagnose the TapTap Maker local development environment and project configuration in the current session work directory."
     },
     "maker_build": {
-      "description": "Use the bundled official Runtime to sync, submit, and build the current session workspace only when explicitly requested. Open successful previews in Cindy's right-side browser by default (when the user turns this off in plugin settings, only the link is returned and the sidebar is not opened) and quote user_facing_markdown verbatim. Do not use the system browser, an external CLI, direct MCP, or the internal build tool. Before committing for a build, the Runtime fast-forwards main when it is only behind remote; it stops on divergence or if local changes would be overwritten.",
+      "description": "Use the bundled official Runtime to sync, submit, and build the current session workspace only when explicitly requested. Open successful previews in Cindy's right-side browser by default (when the user turns this off in plugin settings, only the link is returned and the sidebar is not opened) and quote user_facing_markdown verbatim. Do not use the system browser, an external CLI, direct MCP, or the internal build tool. The Runtime fast-forwards behind main, merges divergence, and commits blocking cloud changes before merging and pushing again. Conflicts abort the merge; non-main, unverifiable remote state, or a fast-forward overwriting local edits stops the workflow.",
       "parameters": {
         "/properties/entry": {
           "description": "Optional single-player Lua entry file, relative to scriptsPath."

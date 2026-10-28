@@ -8,9 +8,11 @@ const read = (file) => readFileSync(new URL('../' + file, import.meta.url), 'utf
 const source = read('google-gmail/account-metadata.js');
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const plugins = { 'google-gmail': 'gmail' };
+// The Chinese assertions below describe the zh-CN copy; pin the Host locale.
+const hostLocale = (locale = 'zh-CN') => ({ request: async request => (request.kind === 'app-context' ? { ok: true, context: { locale } } : { ok: false }) });
 
 async function connectSettings(reply, locale = 'zh-CN') {
-  const elements = Object.fromEntries(['connect', 'status', 'reauth'].map(id => [id, { disabled: false, textContent: '' }]));
+  const elements = Object.fromEntries(['settings-title', 'scope-hint', 'connect', 'status', 'reauth'].map(id => [id, { disabled: false, textContent: '' }]));
   const calls = [];
   const ctx = createContext({
     AbortController, setTimeout, clearTimeout,
@@ -70,7 +72,7 @@ function fixture(key = 'gmail_account') {
     return pending;
   } };
   const env = {
-    navigator: { locks },
+    navigator: { locks }, setTimeout, clearTimeout,
     fetch: async (url, options = {}) => {
       calls.push({ url, ...options });
       if (url === '/oauth') return { ok: true, json: async () => [{ key, clientConfigured: true, accounts: copy(accounts) }] };
@@ -172,7 +174,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
     const f = fixture(key);
     await f.context().googleAccountMetadata.save(key, 'acc-work', '公司邮箱');
     const handlers = [], replies = [], requests = [];
-    const ctx = f.context({ cindy: {
+    const ctx = f.context({ cindy: { ...hostLocale(),
       onHostMessage: handler => handlers.push(handler),
       send: async reply => replies.push(copy(reply)),
       node: { request: async request => { requests.push(copy(request)); return { ok: true, result: { ok: true, data: {} } }; } },
@@ -206,7 +208,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
       const f = fixture(prefix + '_account');
       let handler;
       const replies = [];
-      const ctx = f.context({ cindy: {
+      const ctx = f.context({ cindy: { ...hostLocale(),
         onHostMessage: value => { handler = value; },
         send: async reply => replies.push(copy(reply)), node,
       } });
@@ -236,7 +238,7 @@ for (const [plugin, prefix] of Object.entries(plugins)) {
       let handler;
       const replies = [];
       let requested = false;
-      const ctx = fixture().context({ fetch, cindy: {
+      const ctx = fixture().context({ fetch, cindy: { ...hostLocale(),
         onHostMessage: value => { handler = value; }, send: async reply => replies.push(copy(reply)),
         node: { request: async () => { requested = true; } },
       } });

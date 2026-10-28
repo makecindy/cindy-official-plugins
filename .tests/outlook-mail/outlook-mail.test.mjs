@@ -12,16 +12,22 @@ const fixture=[
   {key:'outlook_global',clientConfigured:true,accounts:[{id:'g1',label:'Global',status:'connected',isDefault:true},{id:'g2',label:'Second',status:'connected',isDefault:false}]},
   {key:'outlook_china',clientConfigured:true,accounts:[{id:'c1',label:'China',status:'connected',isDefault:true}]},
 ];
-function harness({accounts=structuredClone(fixture),config={},localFailure=false,reply=response({value:[]})}={}) {
-  const requests=[],results=[],locals=[];let listener;
-  const context=vm.createContext({URL,URLSearchParams,TextEncoder,TextDecoder,btoa,atob,
+// Existing Chinese assertions run with the zh-CN host locale; other locales are opted in per test.
+// request:null removes cindy.request; timers lets a test fire the 3 second locale timeout at once.
+function harness({accounts=structuredClone(fixture),config={},localFailure=false,reply=response({value:[]}),locale='zh-CN',request,timers}={}) {
+  const requests=[],results=[],locals=[],contexts=[];let listener;
+  const host={onHostMessage:fn=>listener=fn,send:r=>results.push(r),fetch:async req=>{requests.push(req);if(reply instanceof Error)throw reply;return typeof reply==='function'?reply(req):reply;}};
+  if(request!==null)host.request=async req=>{contexts.push(req);if(request)return request(req);return req.kind==='app-context'?{ok:true,context:{region:'cn',locale}}:{ok:false};};
+  const context=vm.createContext({URL,URLSearchParams,TextEncoder,TextDecoder,btoa,atob,setTimeout:timers?.setTimeout||setTimeout,clearTimeout:timers?.clearTimeout||clearTimeout,
     fetch:async path=>{locals.push(path);if(localFailure)throw new Error('private local failure');return {ok:true,json:async()=>path==='/oauth'?accounts:config};},
-    cindy:{onHostMessage:fn=>listener=fn,send:r=>results.push(r),fetch:async req=>{requests.push(req);if(reply instanceof Error)throw reply;return typeof reply==='function'?reply(req):reply;}},
+    cindy:host,
   });
   vm.runInContext(source,context);
   const M=context.OutlookMail;
-  return {M,requests,results,locals,call:async args=>{await listener({type:'tool-call',tool:'outlook_mail',args,callId:'test-call'});return results.at(-1);},
-    accounts:async(args={})=>{await listener({type:'tool-call',tool:'outlook_accounts',args,callId:'list-call'});return results.at(-1);}};
+  return {M,requests,results,locals,contexts,call:async args=>{await listener({type:'tool-call',tool:'outlook_mail',args,callId:'test-call'});return results.at(-1);},
+    accounts:async(args={})=>{await listener({type:'tool-call',tool:'outlook_accounts',args,callId:'list-call'});return results.at(-1);},
+    tool:async(tool,args={})=>{await listener({type:'tool-call',tool,args,callId:'tool-call'});return results.at(-1);},
+    hostMessage:msg=>listener(msg)};
 }
 const send={action:'send',to:'reader@example.test',subject:'Test',body_text:'Hello'};
 const mutation=(action)=> ['send','draft'].includes(action) ? {...send,action} : action === 'move' ? {action,message_id:'old/id+=',target_folder:'target/id'} : {action,message_id:'old/id+='};
@@ -327,5 +333,206 @@ test('an unconfigured or expired China connection does not block either global a
     assert(!(await h.call({...send,account:'c1'})).ok);assert.equal(h.requests.length,0);
     for(const account of ['g1','g2'])assert((await h.call({action:'search',account})).ok);
     assert.deepEqual(h.requests.map(r=>r.authAccount),['g1','g2']);
+  }
+});
+
+
+// Runtime copy localization (docs/localization.md): host locale only, English fallback.
+const HOST_LOCALES=['zh-CN','en','ja','ko'];
+const HAN=/[一-鿿]/;
+const placeholders=s=>(s.match(/\{\w+\}/g)||[]).sort();
+const expiredAccounts=()=>{const a=structuredClone(fixture);a[0].accounts[0].status='expired';return a;};
+const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+const flush=()=>new Promise(r=>setImmediate(r));
+const notExecuted=text=>'[execution_status=not_executed] '+text;
+test('four runtime locales cover identical message keys and placeholders',()=>{
+  const {MESSAGES}=harness().M;
+  assert.deepEqual(Object.keys(MESSAGES).sort(),Object.keys(manifest.locales).sort());
+  assert.deepEqual(Object.keys(MESSAGES).sort(),[...HOST_LOCALES].sort());
+  const keys=Object.keys(MESSAGES.en).sort();
+  for(const lang of HOST_LOCALES){
+    assert.deepEqual(Object.keys(MESSAGES[lang]).sort(),keys,lang);
+    for(const key of keys){
+      const value=MESSAGES[lang][key];
+      assert(typeof value==='string'&&value.trim().length>0,lang+'.'+key);
+      assert.deepEqual(placeholders(value),placeholders(MESSAGES.en[key]),lang+'.'+key);
+      if(lang!=='en')assert.notEqual(value,MESSAGES.en[key],lang+'.'+key+' is untranslated');
+      if(lang!=='zh-CN')assert.notEqual(value,MESSAGES['zh-CN'][key],lang+'.'+key+' copied from zh-CN');
+      if(lang==='en'||lang==='ko')assert.doesNotMatch(value,HAN,lang+'.'+key+' still contains Chinese');
+    }
+  }
+});
+test('every message key used by main.js exists, and every table key is used',()=>{
+  const {MESSAGES}=harness().M;
+  const used=new Set([
+    ...[...source.matchAll(/\b(?:invalid|t)\('(\w+)'/g)].map(m=>m[1]),
+    ...[...source.matchAll(/MailError\('\w+',\s*(?:write \? )?'(\w+)'(?: : '(\w+)')?/g)].flatMap(m=>m.slice(1).filter(Boolean)),
+    ...[...source.matchAll(/return '(\w+)';/g)].map(m=>m[1]),
+    ...[...source.matchAll(/'(\w+)' : undefined/g)].map(m=>m[1]),
+  ]);
+  assert(used.size>=40,String(used.size));
+  for(const key of used)assert(Object.hasOwn(MESSAGES.en,key),key);
+  for(const key of Object.keys(MESSAGES.en))assert(used.has(key),'unused key '+key);
+});
+test('runtime copy never reads browser or operating system language',()=>{
+  assert.doesNotMatch(source,/navigator\.(language|languages)|Intl\.DateTimeFormat\(\)\.resolvedOptions/);
+});
+test('no hardcoded Chinese copy remains outside comments and the message tables',()=>{
+  const stripped=source.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');
+  // Only the zh-CN and ja tables may contain Han characters (Japanese shares kanji).
+  const outside=stripped.replace(/\n {4}(?:'zh-CN'|ja): \{[\s\S]*?\n {4}\},(?=\n)/g,'');
+  assert.notEqual(outside,stripped);
+  assert.deepEqual(outside.split('\n').filter(line=>HAN.test(line)),[]);
+});
+test('zh-CN runtime output is byte-identical to the previous hardcoded strings',async()=>{
+  const unconfigured=structuredClone(fixture);unconfigured[0].clientConfigured=false;
+  const cases=[
+    [{},{action:'nope'},notExecuted('请选择支持的邮件操作。')],
+    [{},{action:'search',bogus:1},notExecuted('此操作包含不适用的参数，请按工具说明调整；指定发件账号请使用 account。')],
+    [{},{action:'search',cloud:'x'},notExecuted('cloud 仅支持 global 或 china。')],
+    [{},{action:'search',max_results:0},notExecuted('max_results 必须是 1–50 的整数。')],
+    [{},{action:'search',page_token:btoa(JSON.stringify({url:ctx.base+'/me/messages',cloud:'global',account:'g2',action:'search'}))},notExecuted('分页凭据与账号或操作不匹配，请重新查询。')],
+    [{},{action:'search',page_token:'!!'},notExecuted('分页凭据无效，请重新查询。')],
+    [{},{action:'search',query:'q',from:'a'},notExecuted('query 与结构化筛选请分开使用，可将条件写入 Microsoft KQL query。')],
+    [{},{action:'search',since:'2020-02-30'},notExecuted('since 日期无效。')],
+    [{},{action:'search',since:'yesterday'},notExecuted('since 请使用 ISO 日期或含时区的时间。')],
+    [{},{action:'search',since:'2021-01-02',before:'2021-01-01'},notExecuted('since 必须早于 before。')],
+    [{},{action:'read',message_id:''},notExecuted('message_id 必须是有效文本，请检查参数。')],
+    [{},{action:'read',message_id:'..'},notExecuted('message_id 无效，请使用插件返回的原始 ID。')],
+    [{},{...send,to:'Name <a@b.cd>'},notExecuted('to 请填写完整邮箱地址，不带姓名或换行。')],
+    [{},{...send,to:Array(101).fill('a@b.cd')},notExecuted('to 最多支持 100 个地址。')],
+    [{},{...send,to:undefined},notExecuted('发送邮件至少需要一个收件人。')],
+    [{localFailure:true},send,notExecuted('无法读取插件配置，请重新打开插件详情页后重试。')],
+    [{accounts:unconfigured},send,notExecuted('此区域尚未配置微软应用身份，请在插件详情页配置 Client ID，再连接账号。')],
+    [{accounts:expiredAccounts()},send,notExecuted('账号授权已失效，请在插件详情页重新连接同一账号。')],
+    [{reply:response({error:{code:'E'}},418)},{action:'search'},notExecuted('微软拒绝了请求（HTTP 418），请检查参数、服务区域及邮箱权限。')],
+    [{reply:response({error:{code:'E'}},403)},{action:'search'},notExecuted('微软拒绝此操作，请重新连接以授权邮件读写／发送权限；若仍失败，请让企业管理员检查应用访问策略。')],
+    [{reply:new Error('x')},{action:'search'},notExecuted('连接中断；请检查网络后重试。')],
+    [{reply:{ok:false}},{action:'search'},notExecuted('主机未能完成请求；请检查账号授权和网络后重试。')],
+    [{reply:response({x:1})},{action:'search'},notExecuted('微软返回的列表不完整，请重新查询。')],
+    [{reply:new Error('x')},send,'[execution_status=unknown] 操作结果不确定；请先检查邮箱中的实际状态，不要直接重复执行。'],
+    [{reply:{ok:true,status:201,body:'bad'}},{action:'draft',subject:'',body_text:''},'[execution_status=executed] 服务已接受操作，但结果未能完整返回；请先检查邮箱中的实际状态，不要直接重复执行。'],
+  ];
+  for(const [options,args,expected] of cases){
+    const r=await harness(options).call(args);assert.equal(r.message,expected,JSON.stringify(args).slice(0,80));
+  }
+  assert.equal((await harness().tool('outlook_unknown')).message,notExecuted('未知邮件工具，请重新获取插件工具清单。'));
+  assert.equal((await harness({reply:response(null,202)}).call(send)).result.note,'微软已接受发送请求；不代表收件人已收到邮件。');
+  assert.equal((await harness({reply:response({id:'new'},201)}).call({action:'move',message_id:'old',target_folder:'t'})).result.note,'后续操作请使用返回的新 ID。');
+});
+test('English is used for unsupported, missing or failed host locales',async()=>{
+  const en=harness().M.MESSAGES.en;
+  const instant={setTimeout:fn=>{setImmediate(fn);return 1;},clearTimeout:()=>{}};
+  const cases={en:{locale:'en'},fr:{locale:'fr'},zh:{locale:'zh'},zhTW:{locale:'zh-TW'},proto:{locale:'__proto__'},nullLocale:{locale:null},empty:{locale:''},number:{locale:42},
+    noRequestApi:{request:null},throws:{request:async()=>{throw new Error('private host failure');}},
+    notOk:{request:async()=>({ok:false,context:{locale:'zh-CN'}})},nullReply:{request:async()=>null},
+    hangs:{request:()=>new Promise(()=>{}),timers:instant}};
+  for(const [label,options] of Object.entries(cases)){
+    const h=harness({...options,accounts:expiredAccounts()});const r=await h.call(send);
+    assert.equal(r.errorCode,'ACCOUNT_EXPIRED',label);assert.equal(r.message,notExecuted(en.accountExpired),label);
+    assert.doesNotMatch(r.message,/private/);assert.equal(h.requests.length,0);
+  }
+});
+test('an unanswered locale request gives up after 3 seconds instead of blocking the result',async()=>{
+  const delays=[];
+  const timers={setTimeout:(fn,ms)=>{delays.push(ms);setImmediate(fn);return 7;},clearTimeout:()=>{}};
+  const h=harness({request:()=>new Promise(()=>{}),timers,accounts:expiredAccounts()});
+  assert.equal((await h.call(send)).message,notExecuted(h.M.MESSAGES.en.accountExpired));
+  assert.deepEqual(delays,[3000]);
+});
+test('only the host app-context is read, and a successful locale is cached',async()=>{
+  const h=harness({accounts:expiredAccounts()});await h.call(send);await h.accounts();await h.call(send);
+  assert.deepEqual(h.contexts.map(c=>JSON.stringify(c)),['{"kind":"app-context"}']);
+  assert(h.locals.every(p=>p==='/oauth'||p==='/kv'));
+});
+test('concurrent tool calls share one app-context request and all use the host locale',async()=>{
+  const pending=deferred();const h=harness({request:()=>pending.promise,accounts:expiredAccounts()});
+  const calls=[1,2,3].map(()=>h.call(send));
+  await flush();
+  assert.equal(h.contexts.length,1);assert.equal(h.locals.length,0,'no mail work before the locale is known');
+  pending.resolve({ok:true,context:{locale:'ko'}});await Promise.all(calls);
+  assert.equal(h.results.length,3);
+  for(const r of h.results)assert.equal(r.message,notExecuted(h.M.MESSAGES.ko.accountExpired));
+});
+test('a failed app-context lookup is retried on the next call instead of pinning English',async()=>{
+  let attempts=0;
+  const h=harness({accounts:expiredAccounts(),request:async()=>{attempts++;if(attempts===1)throw new Error('host busy');return {ok:true,context:{locale:'ja'}};}});
+  assert.equal((await h.call(send)).message,notExecuted(h.M.MESSAGES.en.accountExpired));
+  assert.equal((await h.call(send)).message,notExecuted(h.M.MESSAGES.ja.accountExpired));
+  assert.equal((await h.call(send)).message,notExecuted(h.M.MESSAGES.ja.accountExpired));
+  assert.equal(attempts,2);
+});
+test('host-context-changed switches runtime copy without another app-context request',async()=>{
+  const h=harness({accounts:expiredAccounts()});const T=h.M.MESSAGES;
+  assert.equal((await h.call(send)).message,notExecuted(T['zh-CN'].accountExpired));
+  for(const [context,lang] of [[{region:'global',locale:'ko'},'ko'],[{locale:'ja'},'ja'],[{locale:'en'},'en'],[{locale:'xx'},'en'],[undefined,'en'],[{locale:'zh-CN'},'zh-CN']]){
+    await h.hostMessage({type:'host-context-changed',context});
+    assert.equal((await h.call(send)).message,notExecuted(T[lang].accountExpired),JSON.stringify(context));
+  }
+  assert.equal(h.contexts.length,1);assert.equal(h.requests.length,0);assert.equal(h.results.length,7);
+});
+test('a locale change that arrives during the app-context request wins over the stale reply',async()=>{
+  const pending=deferred();const h=harness({request:()=>pending.promise,accounts:expiredAccounts()});
+  const calling=h.call(send);await flush();
+  await h.hostMessage({type:'host-context-changed',context:{locale:'ja'}});
+  pending.resolve({ok:true,context:{locale:'zh-CN'}});
+  assert.equal((await calling).message,notExecuted(h.M.MESSAGES.ja.accountExpired));
+  assert.equal((await h.call(send)).message,notExecuted(h.M.MESSAGES.ja.accountExpired));
+  assert.equal(h.contexts.length,1);
+});
+test('Japanese and Korean hosts receive their own validation, account and Graph copy',async()=>{
+  for(const lang of ['ja','ko']){
+    const T=harness().M.MESSAGES[lang];
+    let h=harness({locale:lang});let r=await h.call({action:'read',message_id:''});
+    assert.equal(r.message,notExecuted(T.invalidText.replace('{name}','message_id')));
+    h=harness({locale:lang,accounts:expiredAccounts()});r=await h.call(send);
+    assert.equal(r.message,notExecuted(T.accountExpired));
+    const unconfigured=structuredClone(fixture);unconfigured[1].clientConfigured=false;
+    h=harness({locale:lang,accounts:unconfigured});r=await h.call({...send,cloud:'china'});assert.equal(r.message,notExecuted(T.clientNotConfigured));
+    h=harness({locale:lang});r=await h.call({action:'search',cloud:'other'});assert.equal(r.message,notExecuted(T.invalidCloud));
+    assert.match(r.message,/global/);assert.match(r.message,/china/);
+    h=harness({locale:lang,reply:response({error:{code:'Teapot',message:'private'}},418)});r=await h.call({action:'search'});
+    assert.equal(r.errorCode,'GRAPH_REQUEST_FAILED');assert.equal(r.message,notExecuted(T.httpOther.replace('{status}','418')));
+    h=harness({locale:lang,reply:response({error:{code:'MailboxNotEnabledForRESTAPI'}},404)});r=await h.call({action:'search'});
+    assert.equal(r.message,notExecuted(T.mailboxNotEnabled));
+    h=harness({locale:lang,reply:response(null,202)});r=await h.call(send);assert(r.ok);assert.equal(r.result.note,T.sendAccepted);
+    assert.equal(r.result.execution_status,'executed');assert.equal(r.result.delivery_confirmed,false);
+    h=harness({locale:lang,reply:response({id:'new'},201)});r=await h.call({action:'move',message_id:'old',target_folder:'t'});assert.equal(r.result.note,T.moveNote);
+  }
+});
+test('unknown tool copy is localized and still known not executed',async()=>{
+  for(const lang of HOST_LOCALES){
+    const h=harness({locale:lang});const r=await h.tool('outlook_unknown');
+    assert.equal(r.errorCode,'UNKNOWN_MAIL_TOOL');assert.equal(r.message,notExecuted(h.M.MESSAGES[lang].unknownTool));
+    assert.equal(h.requests.length,0);
+  }
+});
+test('Graph failures keep the HTTP status and stable error codes in every locale',async()=>{
+  for(const lang of HOST_LOCALES){
+    const r=await harness({locale:lang,reply:response({error:{code:'E'}},418)}).call({action:'search'});
+    assert.equal(r.errorCode,'GRAPH_REQUEST_FAILED');assert.match(r.message,/^\[execution_status=not_executed\] .*HTTP 418/);
+  }
+});
+const SAFETY={
+  'zh-CN':{check:/先检查邮箱/,noRepeat:/勿直接重复|不要直接重复/,retry:/重试/},
+  en:{check:/check the mailbox first/i,noRepeat:/do not repeat/i,retry:/retry/i},
+  ja:{check:/まずメールボックス/,noRepeat:/繰り返さないでください/,retry:/再試行/},
+  ko:{check:/먼저 메일함/,noRepeat:/반복하지 마세요/,retry:/다시 시도/},
+};
+test('uncertain write outcomes say check the mailbox first and never retry, in every locale',async()=>{
+  for(const [lang,rule] of Object.entries(SAFETY)){
+    const T=harness().M.MESSAGES[lang];
+    for(const key of ['interruptedWrite','hostFailedWrite','unknownSuffix','incompleteWrite','outcomeUnknown','outcomeExecuted']){
+      assert.match(T[key],rule.check,lang+'.'+key);assert.match(T[key],rule.noRepeat,lang+'.'+key);assert.doesNotMatch(T[key],rule.retry,lang+'.'+key);
+    }
+    assert.doesNotMatch(T.unexpectedSend,rule.retry,lang);
+    for(const action of ['send','draft','mark_read','mark_unread','move'])for(const reply of [new Error('private'),{ok:false},response({},503)]){
+      const h=harness({locale:lang,reply});const r=await h.call(mutation(action));
+      assert.equal(r.message,'[execution_status=unknown] '+T.outcomeUnknown);assert.equal(h.requests.length,1);
+    }
+    for(const reply of [{ok:true,status:201,body:'bad json'},response({},200)]){
+      const h=harness({locale:lang,reply});const r=await h.call(mutation('draft'));
+      assert.equal(r.message,'[execution_status=executed] '+T.outcomeExecuted);assert.equal(h.requests.length,1);
+    }
   }
 });

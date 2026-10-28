@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve(root, 'build/package');
 if (!existsSync(resolve(root, 'native/Cindy Ping.app/Contents/MacOS/Cindy Ping'))) throw new Error('Run the native build first.');
 mkdirSync(target, { recursive: true });
-for (const entry of ['ghost.json', 'main.js', 'shortcuts.js', 'wheel-layout.js', 'emote-library.js', 'settings.html', 'settings.js', 'settings.css', 'node', 'assets', 'locales']) {
+for (const entry of ['ghost.json', 'main.js', 'shortcuts.js', 'wheel-layout.js', 'emote-library.js', 'settings.html', 'settings.js', 'settings.css', 'THIRD-PARTY-LICENSES.txt', 'node', 'assets', 'locales']) {
   cpSync(resolve(root, entry), resolve(target, entry), { recursive: true });
 }
 mkdirSync(resolve(target, 'native'), { recursive: true });

@@ -105,6 +105,8 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
     sessionId: sid,
     file: "index.html",
   });
+  assert.equal(first.previewPath, path.join(a.dir, "index.html"));
+  assert.equal(await fs.readFile(first.previewPath, "utf8"), first.html);
   await w.invoke("draft-write", {
     sessionId: sid,
     file: "index.html",
@@ -125,6 +127,8 @@ test("session roots, editor/read isolation, traversal, saves and live JS", async
     file: "index.html",
   });
   assert.notEqual(fresh.revision, first.revision);
+  assert.equal(fresh.previewPath, first.previewPath);
+  assert.equal(await fs.readFile(fresh.previewPath, "utf8"), fresh.html);
   assert.equal(fresh.sketches[0].file, "test.sketch.json");
   const stale = await fetch(api + '/files', {method:'POST',body:JSON.stringify({name:'index.html',content:'stale manual',expectedRevision:first.revision})});
   assert.equal(stale.status, 409);

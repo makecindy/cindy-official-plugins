@@ -2120,12 +2120,15 @@ var require_png = __commonJS({
 });
 
 // skills/maker-ui-workflow/scripts/assemble-ui.mjs
+import fs2 from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// skills/maker-ui-workflow/scripts/assemble-ui-lib.mjs
 var import_pngjs = __toESM(require_png(), 1);
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 var digest = (value) => createHash("sha256").update(value).digest("hex");
 var layoutDigest = (layout) => digest(JSON.stringify(layout));
 var geometryFields = [
@@ -2397,6 +2400,20 @@ function layoutFromBbox(input) {
     );
     bindings.set(binding.elementId, binding);
   }
+  const artTextBindings = /* @__PURE__ */ new Map();
+  for (const binding of input.artTextBindings || []) {
+    assert(
+      binding && typeof binding.textId === "string" && !artTextBindings.has(binding.textId) && typeof binding.assetId === "string" && texts.has(binding.textId),
+      "Unknown or duplicate art text binding"
+    );
+    artTextBindings.set(binding.textId, binding);
+  }
+  for (const binding of artTextBindings.values()) {
+    assert(
+      input.assets.some((asset) => asset.id === binding.assetId && asset.role === "bound"),
+      "Missing explicit art text asset binding: " + binding.textId
+    );
+  }
   const checkRect = (value, id) => {
     rect(value, id);
     assert(
@@ -2445,6 +2462,18 @@ function layoutFromBbox(input) {
         (line) => Array.from(line).reduce((sum, char) => sum + (char.codePointAt(0) < 128 ? 0.6 : 1), 0)
       )
     );
+    const artText = artTextBindings.get(text.id);
+    if (artText) {
+      return {
+        id: text.id,
+        parentId: text.parentId || "root",
+        type: "Panel",
+        render: "image",
+        rect: [...text.bbox],
+        props: { backgroundFit: "contain" },
+        assetId: artText.assetId
+      };
+    }
     return {
       id: text.id,
       parentId: text.parentId || "root",
@@ -2483,7 +2512,7 @@ function layoutFromBbox(input) {
         {
           id: "background",
           parentId: "root",
-          type: "Image",
+          type: "Panel",
           render: "image",
           rect: [...root.rect],
           props: {},
@@ -2496,7 +2525,14 @@ function layoutFromBbox(input) {
   };
 }
 function run(project, layoutFile, outputDirectory, correctionFile) {
-  const input = JSON.parse(fs.readFileSync(layoutFile, "utf8"));
+  return assembleUiInput(
+    project,
+    JSON.parse(fs.readFileSync(layoutFile, "utf8")),
+    outputDirectory,
+    correctionFile ? JSON.parse(fs.readFileSync(correctionFile, "utf8")) : null
+  );
+}
+function assembleUiInput(project, input, outputDirectory, correction = null) {
   const cropped = [];
   if (input.bbox) {
     for (const asset of input.assets || []) {
@@ -2541,7 +2577,6 @@ function run(project, layoutFile, outputDirectory, correctionFile) {
   }
   const layout = input.bbox ? layoutFromBbox(input) : input;
   if (input.bbox) verifyImage(project, input.bbox.cutSource);
-  const correction = correctionFile ? JSON.parse(fs.readFileSync(correctionFile, "utf8")) : null;
   const result = assemble(layout, correction);
   for (const item of [layout.design, ...layout.assets])
     if (!cropped.some((crop) => crop.relative === item.path)) verifyImage(project, item);
@@ -2563,22 +2598,22 @@ function run(project, layoutFile, outputDirectory, correctionFile) {
     path.join(outputDirectory, "assembled.reference.png"),
     fs.constants.COPYFILE_EXCL
   );
-  console.log(
-    JSON.stringify({
-      outputDirectory,
-      elements: layout.elements.length,
-      reserveAssets: result.report.reserveAssets.length,
-      visualReview: correction ? "recorded-agent-review" : "pending"
-    })
-  );
+  return {
+    outputDirectory,
+    elements: layout.elements.length,
+    reserveAssets: result.report.reserveAssets.length,
+    visualReview: correction ? "recorded-agent-review" : "pending"
+  };
 }
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+
+// skills/maker-ui-workflow/scripts/assemble-ui.mjs
+if (process.argv[1] && fs2.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    assert(
-      process.argv.length === 5 || process.argv.length === 6,
-      "Usage: node <skill>/scripts/assemble-ui.mjs <project> <layout.json> <new-output-dir> [corrections.json]"
-    );
-    run(...process.argv.slice(2));
+    if (process.argv.length !== 5 && process.argv.length !== 6)
+      throw new Error(
+        "Usage: node <skill>/scripts/assemble-ui.mjs <project> <layout.json> <new-output-dir> [corrections.json]"
+      );
+    console.log(JSON.stringify(run(...process.argv.slice(2))));
   } catch (error) {
     console.error("UI \u7EC4\u88C5\u672A\u5B8C\u6210\uFF1A" + error.message);
     process.exitCode = 1;
@@ -2586,6 +2621,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
 }
 export {
   assemble,
+  assembleUiInput,
   digest,
   layoutDigest,
   layoutFromBbox,

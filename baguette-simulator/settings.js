@@ -60,7 +60,7 @@ function render(){
     const actions=raw.state==='Shutdown'?['boot']:raw.state==='Booted'?['viewer','shutdown']:['shutdown'];
     list.append(h('div',{class:'device'},[
       h('span',{class:'glyph',html:GLYPH[device.family]}),
-      h('div',{class:'text'},[h('div',{class:'name',text:device.name}),h('div',{class:'meta'},[h('span',{class:'dot','data-tone':device.tone}),h('span',{text:device.meta})])]),
+      h('div',{class:'text'},[h('div',{class:'name',text:device.name}),h('div',{class:'meta'},[h('span',{class:'dot','data-tone':device.tone}),h('span',{text:device.meta})]),raw.state==='Shutdown'?globalThis.CindySimPages.memoryPicker(raw,document.documentElement.lang,locked):globalThis.CindySimPages.memoryBadge(raw,document.documentElement.lang,locked),globalThis.CindySimPages.resourceLabel(raw,document.documentElement.lang)]),
       h('div',{class:'actions'},actions.map(action=>h('button',{class:'btn sm'+(action==='shutdown'?' danger':action==='viewer'?'':' quiet'),text:T[action],disabled:locked||(action!=='shutdown'&&!enabled),onclick:()=>perform(action,{udid:device.udid})}))),
     ]));
   }
@@ -75,7 +75,8 @@ async function refresh(){
 }
 async function perform(action,params={}){
   if(busy)return;busy=true;render();message(T.working);
-  try{const result=await rpc(action,params);if(result.settings&&result.devices)state=result;if(!result.ok)throw Error(errorText(result));message(action==='shutdown'||action==='stopAll'?T.shutdownDone:action==='create'?T.created:T.saved);}
+  if(action==='boot')params={...params,...globalThis.CindySimPages.memoryArgs(state?.devices?.find(d=>d.udid===params.udid))};
+  try{const result=await rpc(action,params);if(result.settings&&result.devices)state=result;if(!result.ok)throw Error(errorText(result));if(action==='boot')M.showMemoryNotice(result,document.documentElement.lang,params.memoryMode,state?.devices?.find(d=>d.udid===params.udid)?.name);message(action==='shutdown'||action==='stopAll'?T.shutdownDone:action==='create'?T.created:T.saved);}
   catch(e){message(e.message,true);}
   finally{busy=false;await refresh();render();}
 }

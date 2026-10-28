@@ -22,6 +22,9 @@
     }
 
     _bind() {
+      // Chromium receives real contacts from Cindy's AppKit input adapter.
+      // It has no Safari gesture* stream to defer to.
+      if (typeof root.GestureEvent !== 'function') return this._bindContacts();
       const opts = { passive: false };
       let state = null;
       let lastMs = 0;
@@ -163,6 +166,62 @@
       };
       this._on(this._el, 'touchend', endTouch, opts);
       this._on(this._el, 'touchcancel', endTouch, opts);
+    }
+
+    _bindContacts() {
+      let contacts = [];
+      let contactOptions;
+      const release = () => {
+        if (contacts.length) this.screen.touchUp(contacts.map(t => t.point), contactOptions);
+        contacts = [];
+        contactOptions = undefined;
+        this.overlay?.clear();
+      };
+      this._releaseContacts = release;
+      const update = (e) => {
+        e.preventDefault();
+        if (e.type === 'touchcancel' || e.touches.length > 2) { release(); return; }
+        const next = Array.from(e.touches).sort((a,b) => a.identifier-b.identifier)
+          .map(t => ({ id:t.identifier, point:this._screenPoint(t.clientX,t.clientY), x:t.clientX,y:t.clientY }));
+        if (next.some(t => !t.point.inside)) { release(); return; }
+        const same = next.length === contacts.length && next.every((t,i) => t.id === contacts[i].id);
+        if (!same) {
+          // The simulator's wire format separates single- and two-contact
+          // streams. Close the old stream when the number of fingers changes.
+          const singleStart = next.length === 1 && !contacts.some(t => t.id === next[0].id);
+          release();
+          if (next.length) {
+            // Preserve the legacy edge hint for a newly-down single finger;
+            // lifting one finger of a pair must not invent a new edge gesture.
+            const edge = singleStart ? new root.Baguette._EdgeBands(0.85, 0.15)
+              .classify(next[0].point, this.getOrientation()) : null;
+            contactOptions = edge ? { edge } : undefined;
+            this.screen.touchDown(next.map(t => t.point), contactOptions);
+          }
+        } else if (next.length) {
+          this.screen.touchMove(next.map(t => t.point), contactOptions);
+        }
+        contacts = next;
+        const r = this._el.getBoundingClientRect();
+        if (next.length === 2) this.overlay?.setFingers(next.map(t => ({x:t.x-r.left,y:t.y-r.top})));
+        else this.overlay?.clear();
+      };
+      for (const name of ['touchstart','touchmove','touchend','touchcancel']) this._on(this._el,name,update,{passive:false});
+      // A whole native sample is atomic: do not create a single-finger stream
+      // before the second finger arrives through Chromium's input synthesizer.
+      this._on(this._el,'cindy-trackpad',e=>{
+        const frame=e.detail;
+        update({type:frame.phase==='cancel'?'touchcancel':'touchmove',
+          touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
+      });
+      this._on(root,'blur',release);
+      this._on(root,'pagehide',release);
+    }
+
+    detach() {
+      this._releaseContacts?.();
+      this._releaseContacts = null;
+      super.detach();
     }
   }
 

@@ -54,6 +54,7 @@ async function showViewer(url, udid, sessionId, locale) {
 
 cindy.onHostMessage(async function (msg) {
   if (msg.type !== 'tool-call') return;
+  const started = Date.now();
   try {
     const locale = await hostLocale();
     // Host ceiling is 120s; worker preflight is 3s + 5s.
@@ -69,7 +70,7 @@ cindy.onHostMessage(async function (msg) {
     const opening = msg.tool === 'open_viewer' || (msg.tool === 'viewer' && msg.args?.action === 'open');
     const viewer = result.viewer || (opening ? result : null);
     if (result.ok && viewer && viewer.ready && viewer.url) {
-      const shown = await showViewer(viewer.url, msg.args?.udid, msg.args?.session_context?.session_id, locale);
+      const shown = await showViewer(viewer.url, result.udid ?? msg.args?.udid, msg.args?.session_context?.session_id, locale);
       viewer.previewOpened = shown.previewOpened;
       if (shown.location) viewer.location = shown.location;
       if (shown.previewError) viewer.previewError = shown.previewError;
@@ -77,6 +78,19 @@ cindy.onHostMessage(async function (msg) {
     if (result.ok && viewer?.previewOpened === false) {
       result.outcome = 'partial';
       result.nextAction = 'Retry viewer action=open for this device. Do not repeat an App launch that already succeeded.';
+      // A Host page failure is separate from launch. Observe once, within the
+      // original Host budget, retaining the already completed device result.
+      const left = Math.min(12000, 110000 - (Date.now() - started));
+      if (!result.screenshot && left >= 1000) {
+        try {
+          const shot = await cindy.node.request({method:'screenshot',params:{udid:result.udid ?? msg.args?.udid,session_context:msg.args?.session_context,_inline:true,_observationBudgetMs:left},timeoutMs:left+1000});
+          if (shot.ok && shot.result?.ok !== false) {
+            const {ok, _modelImages, ...screen} = shot.result;
+            result.screenshot = screen;
+            if (_modelImages) result._modelImages = _modelImages;
+          } else result.screenshot = {error:shot.message || shot.result?.message || 'Observation unavailable; retry screenshot only.'};
+        } catch (error) { result.screenshot = {error:String(error.message || error)}; }
+      }
     }
     if (typeof result.met === 'boolean') result.goalMet = result.met;
     // Images go next to `result` (hosts without the field ignore them; the path stays in `result`).
@@ -136,7 +150,7 @@ const PAGE_ACTIONS = {
   task_bind: (m, l) => SESSION.test(m.sessionId) && str(m.udid) && worker('task_bind', {_task:m.sessionId, udid:m.udid, _locale:l}),
   task_boot: async (m, l) => {
     if (!SESSION.test(m.sessionId) || !str(m.udid)) return false;
-    const booted = await worker('boot', {udid:m.udid, _task:m.sessionId, _locale:l});
+    const booted = await worker('boot', {udid:m.udid, memoryMode:m.memoryMode, _task:m.sessionId, _locale:l});
     return booted.ok && !booted.taskBindingError ? afterTaskOperation(booted, 'task_state', {_task:m.sessionId, _locale:l}) : booted;
   },
   task_create: async (m, l) => {
@@ -151,10 +165,12 @@ const PAGE_ACTIONS = {
     return worker('manage_state', front?.ok && SESSION.test(front.sessionId) ? {_task:front.sessionId} : {});
   },
   catalog: () => worker('viewer_catalog', {}),
+  resources: (m) => str(m.udid) && worker('resource_usage', {udid:m.udid,refresh:m.refresh===true}),
   android_plan: () => worker('android_setup_plan', {}),
   android_status: () => worker('android_setup_status', {}),
   android_install: (m) => str(m.planId) && m.acceptLicenses === true && worker('android_setup_install', {planId:m.planId, acceptLicenses:true}),
-  boot: (m) => str(m.udid) && worker('settings_boot', {udid:m.udid}),
+  boot: (m) => str(m.udid) && worker('settings_boot', {udid:m.udid, memoryMode:m.memoryMode}),
+  restart_device: (m) => str(m.udid) && worker('settings_restart', {udid:m.udid, memoryMode:m.memoryMode}),
   shutdown: (m) => str(m.udid) && worker('settings_shutdown', {udid:m.udid}),
   rename: (m) => str(m.udid) && str(m.name, 64) && worker('rename_device', {udid:m.udid, name:m.name}),
   erase: (m) => str(m.udid) && worker('erase_device', {udid:m.udid}),
@@ -176,7 +192,7 @@ const PAGE_ACTIONS = {
     return opened;
   },
 };
-const KEEPS_RUNNING = new Set(['task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'open_in_task', 'viewer_url', 'android_install']);
+const KEEPS_RUNNING = new Set(['task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'restart_device', 'open_in_task', 'viewer_url', 'android_install']);
 if (pages) pages.onmessage = async ({data: msg}) => {
   if (msg?.type === 'ping' && typeof msg.id === 'string') { pages.postMessage({type:'ready', id:msg.id}); return; }
   if (msg?.type !== 'request' || typeof msg.id !== 'string' || !Object.hasOwn(PAGE_ACTIONS, msg.action)) return;
@@ -195,7 +211,7 @@ if (typeof BroadcastChannel !== 'undefined') {
   const settings = new BroadcastChannel('baguette-settings');
   settings.onmessage = async ({data: msg}) => {
     if (msg?.type === 'ping' && typeof msg.id === 'string') { settings.postMessage({type:'ready', id:msg.id}); return; }
-    const methods = {status:'settings_status',save:'settings_save',shutdown:'settings_shutdown',stopAll:'settings_stop_all',boot:'settings_boot',catalog:'viewer_catalog',create:'create_device'};
+    const methods = {status:'settings_status',resources:'resource_usage',save:'settings_save',shutdown:'settings_shutdown',stopAll:'settings_stop_all',boot:'settings_boot',catalog:'viewer_catalog',create:'create_device'};
     if (msg?.type !== 'request' || typeof msg.id !== 'string' || !(Object.hasOwn(methods, msg.action) || msg.action === 'viewer')) return;
     let result;
     try {
@@ -204,7 +220,7 @@ if (typeof BroadcastChannel !== 'undefined') {
       else {
         const params = msg.action === 'save' ? {enabled:msg.enabled,idleMinutes:msg.idleMinutes}
           : msg.action === 'create' ? {name:msg.name,deviceType:msg.deviceType,runtime:msg.runtime}
-          : {udid:msg.udid,_locale:locale};
+          : {udid:msg.udid,_locale:locale,...(msg.action==='boot'?{memoryMode:msg.memoryMode}:msg.action==='resources'?{refresh:msg.refresh===true}:{})};
         result = await worker(methods[msg.action], params);
       }
     } catch { result = {ok:false,errorCode:'SETTINGS_UNAVAILABLE',execution:'unknown'}; }

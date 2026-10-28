@@ -46,6 +46,7 @@ permission gate.
 | <img src="./opendesign-trial/assets/icon.png" width="22" alt=""> | OpenDesign | [`opendesign-trial`](./opendesign-trial) | Session-owned HTML design previews, element annotations and manual editing using Cindy’s conversation model |
 | <img src="./cindy-github/assets/icon.png" width="22" alt=""> | GitHub | [`cindy-github`](./cindy-github) | Full GitHub workflow: issues / PRs / code review / Actions / releases |
 | <img src="./cindy-gitlab/assets/icon.png" width="22" alt=""> | GitLab | [`cindy-gitlab`](./cindy-gitlab) | GitLab (gitlab.com and self-hosted) issues / MRs / repository operations |
+| <img src="./gitea/assets/icon.png" width="22" alt=""> | Gitea | [`gitea`](./gitea) | Self-hosted Gitea repos, files, issues, PRs, Actions runs and logs, releases; writes ask for confirmation; opt-in, needs your own instance and token |
 | <img src="./cindy-mermaid/assets/icon.jpg" width="22" alt=""> | Mermaid | [`cindy-mermaid`](./cindy-mermaid) | Mermaid diagram source normalization and common syntax fixes |
 | <img src="./cindy-ping/assets/icon.png" width="22" alt=""> | Cindy Ping | [`cindy-ping`](./cindy-ping) | Configurable desktop emote wheel and project, conversation or companion delivery; macOS 14+; manual install |
 | <img src="./cindy-notion/assets/icon.png" width="22" alt=""> | Notion | [`cindy-notion`](./cindy-notion) | Read/write Notion pages, databases, and knowledge bases |
@@ -64,6 +65,7 @@ permission gate.
 | <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | Device Simulator | [`baguette-simulator`](./baguette-simulator) | Cindy's official Device Simulator (built on open-source Baguette) with a private device set and live sidebar control; replaces the retired embedded simulator; marketplace install |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS Simulator | [`ios-simulator`](./ios-simulator) | Host-owned embedded workflow; Host-authorized fallback hands off the exact task and device to a named external workflow; staged rollout |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
+| <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | Push notifications to your phone or desktop through your own ntfy server; the access token is stored by Cindy and sent only to that server; opt-in |
 
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
@@ -114,6 +116,10 @@ The full path from idea to marketplace:
    removed.
 
 ## Review standards
+
+Published plugin ID changes require a separately reviewed
+[migration registration](./docs/plugin-id-migrations.md) and coordinated Server
+and client rollout before the renamed package is released.
 
 Every official plugin is installed by real users who carry its security and
 experience risk. Review actual behavior, impact and evidence: routine packaging
@@ -423,7 +429,7 @@ test package; authors or maintainers supply runtime and compatibility evidence
 appropriate to the affected behavior before merge. Valid evidence for unaffected
 paths can be reused without reinstalling after every wording change.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.37`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.39`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:
@@ -448,12 +454,25 @@ compatibility patches until the official package includes equivalent fixes:
 - In Cindy distribution, the console hides model settings, rejects custom API
   configuration and uses Server API recognition only; unavailable service reports an error without provider fallback.
 
+- Preserve unknown cloud Git commit outcomes when verification fails, suppress
+  blind retry guidance, recognize both cloud-blocking messages, and distinguish
+  completed cloud commits from unfinished local steps.
+- Keep uncertain canvas requests protected from automatic resubmission; waiting
+  limits pause the 015 workflow, whose stop control also covers preparation and
+  recovery waits without cancelling submitted remote tasks.
+
 Apart from these patches and the retained `LICENSE`, vendor files must match the
 official npm package. Recheck the patch list and regression tests on every upgrade;
 do not add unrelated manual bundle edits.
 
 Historical failures, superseded fixes and upgrade checks are recorded in the
 [Maker maintenance checklist](./docs/taptap-maker-maintenance.md).
+
+Plugin 2.1.25 raises the request window for all dynamic Maker tools, tool discovery
+and long-running account operations from 60 to 120 seconds. Existing progress-based
+renewal and the 15-minute total ceiling remain unchanged; no periodic heartbeat is
+added. Requests without progress can still time out after 120 seconds, so this is
+not an unlimited wait or a guarantee that large generation requests will finish.
 
 Plugin 2.1.17 adds `maker_validate` for local Lua checks/screenshots through the
 trusted current workspace and bundled Runtime. Cindy's Manual supplies the workflow

@@ -1,6 +1,6 @@
 {
   "name": "Cindy Ping",
-  "description": "Show desktop emotes. Display-only also cancels the previous pending action. Configure your own instructions and project, task or companion destinations. This version supports macOS 14+ devices only.",
+  "description": "Give the cat a poke to ping Cindy. What you’re looking at and what you want done go along with it, and Cindy takes it from there. Currently supports macOS 14+ only.",
   "whenToUse": "Desktop emotes, configurable reactions, window context collection, and tasks triggered by an emote.",
   "tools": {
     "status": {

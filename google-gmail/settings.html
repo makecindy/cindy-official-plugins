@@ -5,12 +5,12 @@
 <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
-  <div class="title">已连接的账户</div>
-  <p id="permissions" class="hint">连接 Gmail 和 Google 通讯录：读写个人联系人，读取账号资料、其他联系人及可见的企业目录。</p>
+  <div id="settings-title" class="title"></div>
+  <p id="scope-hint" class="hint"></p>
   <p id="reauth" class="hint expired" hidden></p>
   <div class="account-list">
     <div id="accounts"></div>
-    <button id="connect" class="account-connect" type="button">连接账户</button>
+    <button id="connect" class="account-connect" type="button"></button>
   </div>
   <p id="status"></p>
   <script src="/account-metadata.js"></script>

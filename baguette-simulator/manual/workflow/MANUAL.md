@@ -1,5 +1,16 @@
 # 设备模拟器：完整工作流
 
+## iOS 启动内存模式
+
+device action=boot memoryMode=saving|standard|minimal。关机设备未指定时默认 saving；运行中未指定时保持当前模式，不重启。需要切换时先正常 shutdown（会退出 App，保留数据），再带模式 boot；不适用于安卓、tvOS 或 visionOS。
+
+- saving：日常 UI/交互测试。关闭 Spotlight、家庭/屏幕时间、健康/HomeKit、部分系统 App/地图、游戏存档/手柄、信息/FaceTime、诊断与 DeviceCheck 服务。
+- standard：恢复本插件内存配置管理的服务，不碰其它服务开关。完整验收、性能基准、上述系统集成和游戏手柄/存档测试选此档。
+- minimal：只在用户或任务明确限定为核心玩法/UI时选；还关闭账号/iCloud、StoreKit/推送、照片、实时活动、语音、网页后台与设备互联等服务。不是“游戏就无风险”，不用于完整登录、支付、广告、分享或验收流程。
+
+检查启动返回的 memoryMode.mode、verified、limitations 与可能的 warning。verified 仅验证 launchd 服务开关，不证明业务功能正常或内存节省幅度。未验证、模式不匹配或启动超时先检查设备，不盲目重启。覆盖值跨关机/抹除保留；下一次未指定的冷启动仍应用 saving，极简不会成为默认。服务配置来自固定的 SimSlim 0.12.2 目录，不下载或运行外部工具。
+
+
 本插件在独立设备集合里运行 iPhone/iPad、Apple TV、Vision Pro 和安卓模拟器：设备只属于本插件，不碰 Xcode 默认设备，也不碰 Cindy 内置设备。所有观察与操作都走模拟器自身的通道（截图、无障碍树、系统触摸），不依赖任何窗口，Mac 锁屏时也能用。画面实时显示在当前任务的侧栏页签，用户可以随时看着你操作或亲自接管。
 
 ## Apple TV / Vision Pro
@@ -92,13 +103,16 @@ xcodebuild -scheme <Scheme> -sdk iphonesimulator \
 CMake、Unity、游戏引擎等用项目已有的脚本，找到输出的模拟器 `.app`。
 
 - `app action=install appPath=<绝对路径>`：与已装内容完全相同时直接跳过（`mode: unchanged`）；只改了少量文件时增量同步（`mode: sync`，保留 App 数据）；否则整包安装（`mode: full`）。哈希、构建比较和写入属于同一个 job；`mode: checking` 表示还在比较。`modeReason` 说明安装选择原因；比较完成时可带 `changedFiles`。整个流程默认等待约 80 秒，未完成会返回 `state: running` 与 `job`，用 `app action=install_status job=<job>` 继续等，不要重复发起安装。
-- `app action=info appPath=<同一路径>`：`matchesLocal: true` 才说明设备上装的就是这次构建。版本号相同不代表是同一次构建，以可执行文件指纹为准。测试前、向用户报告“已修复”前都应确认。
+- Apple `app action=info bundleId=…` 只读轻量元数据；加 `appPath` 时，默认 `verify=auto` 复核既有全包验证，未有有效结果则返回校验 `job`。默认最多等 5 秒，继续用 `install_status` 等同一个 job。`verify=full` 强制重新校验全部内容，`verify=none` 只查元数据。只有 `matchesLocal: true` 才确认构建；版本号或可执行文件指纹都不能代替资源一致性，`null`/`unconfirmed` 不能作为重装依据。
+- Apple 安装 job 包含安装后全包校验，成功结果可直接作为本次构建证据。重复 `info` 仍检查源包和已装包的完整文件清单（路径、设备/inode、类型/权限、大小、纳秒 mtime/ctime 和符号链接目标）；任一变化、容器或源路径变化、超过一小时、worker 重启均不复用。恢复原大小与 mtime 的资源修改仍由 ctime 检出。完整校验另行比较符号链接目标，避免系统 rsync 漏报；`symlinkTargetsChanged` 独立于 rsync 报告的 `changedFiles`。复用仅适用于本机文件系统的正常变更语义；不证明 App 数据、运行进程或外部下载内容一致。`verifiedAt` 是全包校验时间，`checkedAt` 是复核时间；没有持续监控后续变化。校验前后清单变化会报告未确认，不保存有效证明。
+- 安装和校验均用 `install_status job=…`；通常省略 `wait`（默认85秒，完成立即返回）。`wait=1` 适合明确需要立即返回的脚本，不必让模型每秒查询。可用并行工具调用同时等待不同设备。`phase`/`phaseElapsedSeconds`/`phaseMs` 是真实阶段及耗时；未提供百分比时不能估算进度。校验 job 不会安装、结束或启动 App。
 - 容器查询只有明确的 App 缺失才视为未安装；超时、设备服务故障或空响应会报错，自动安装在写入前停止。日志与日志等待也保留查询错误，不扩大到全设备。
 - `app action=launch`：默认先结束旧进程再启动；需要启动参数或环境变量时传 `arguments`、`env`。
 
 ## 3. 坐标：一律用视图点
 
 - `screenshot`、`tap`/`gesture` 的 `observe=screenshot`、`screenshot: true` 以及没等到的 `wait_for` 会在支持内联图片的 Cindy 中附图。旧版 Cindy，或压缩后图片仍超过 130 KB 时，只给 `path`：必须用读图工具打开后再选坐标，不要把文件路径当成已经看过画面。
+- `capturedAt` 标注画面时刻，`screenshotAttached` 明确是否附图。已返回的画面足以验证目标就复用；动画未完成、画面过期或附图失败才继续观察。游戏可以直接截图选点，不强制读无障碍树。
 - 截图已按用户看到的方向摆正（横屏、折叠屏内屏都一样），默认 1 像素 = 1 视图点。图上读到的坐标就是 `tap`、`gesture` 要的坐标，不要自己旋转图片、不要换算像素。
 - `scale=2` 或 `3` 的截图更清晰，坐标要除以 scale；`region` 截取的局部图，坐标要加上 region 的起点。
 - `describe_ui` 的 `frame` 与 `center` 也是视图点，`center` 可直接点击。
@@ -121,6 +135,10 @@ CMake、Unity、游戏引擎等用项目已有的脚本，找到输出的模拟�
 6. 长列表找目标：`gesture kind=scroll_to text=…`，到底仍没有会报告并列出当时可见的文字，可据此修正文字（例如 iOS 27 的“隐私与安全”没有“性”字）。
 
 ## 5. 等待，而不是 sleep
+
+输入执行和观察分别计时：普通附带观察最多12秒；`until` 先等目标文字最多15秒，再在剩余调用预算内观察。失败保留 `execution`、`timing` 和可用结果；`execution=executed` 只确认输入已投递。若附图失败，只调 `screenshot` / `wait_for`，不重发点击或文字。状态未知先观察；转向/折叠后重新确认几何与坐标。
+
+App 已启动但 viewer 失败时，沿用已有服务恢复后尝试独立截图，最多12秒；宿主任务页打开失败也只补观察。保留 `appLaunched`、`outcome=partial`、错误及 `nextAction`。不能因无画面自动 terminate/relaunch；明确请求再次 launch 仍按 relaunch 参数执行。
 
 - 等某个元素出现：`wait_for text=… timeout=…`；等它消失：加 `gone=true`。
 - 等加载或动画结束：`wait_for stable=1`（画面变化低于 `tolerance`，默认 0.5% 像素，持续 1 秒）。游戏启动、场景切换用 `stable=2` 和较长的 `timeout`。

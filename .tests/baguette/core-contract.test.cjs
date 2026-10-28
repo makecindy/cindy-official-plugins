@@ -1,6 +1,31 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const dir=path.resolve('baguette-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001';
+test('environment reports keyboard ABI failures separately from usable device catalogs',async()=>{
+ for(const ready of [true,false]){
+  const commands=[],context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64',env:{DEVELOPER_DIR:'/Selected/Xcode/Contents/Developer'}},require(name){
+   if(name==='./viewer.cjs')return {};
+   if(name==='./android/index.cjs')return {createAndroid:()=>({dispatch:async()=>({ready:false,runtimes:[],deviceTypes:[]})})};
+   if(name==='node:child_process')return {execFile(file,args,_options,cb){
+    commands.push({file,args});let output='',error=null;
+    if(file.endsWith('sw_vers'))output='27.0';
+    if(file.endsWith('xcodebuild'))output='Xcode fixture';
+    if(args.includes('runtimes'))output=JSON.stringify({runtimes:[{isAvailable:true,name:'iOS',identifier:'com.apple.CoreSimulator.SimRuntime.iOS-27-0',version:'27.0'}]});
+    if(args.includes('devicetypes'))output=JSON.stringify({devicetypes:[{name:'iPhone',identifier:'phone',productFamily:'iPhone'}]});
+    if(args[0]==='--check'){output=JSON.stringify({ready,scope:'keyboard-abi'});if(!ready)error=Error('missing keyboard interface');}
+    queueMicrotask(()=>cb(error,output,''));return {stdin:{on(){},end(){}}};
+   }};
+   return require(name.startsWith('./')?path.join(dir,name):name);
+  }};
+  vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
+  const result=await context.module.exports.dispatch('environment');
+  assert.equal(result.platforms.ios.ready,true);assert.equal(result.runtimes.length,1);assert.equal(result.deviceTypes.length,1);
+  assert.equal(result.diagnostics.keyboard.ready,ready);
+  assert.equal(result.diagnostics.keyboard.developerDir,'/Selected/Xcode/Contents/Developer');
+  assert.deepEqual(Array.from(commands.find(c=>c.args[0]==='--check').args),['--check','/Selected/Xcode/Contents/Developer']);
+  assert.ok(!commands.some(c=>c.args.includes('boot')||c.args.includes('spawn')||c.args.includes('--set')));
+ }
+});
 function core(output,failAt=Infinity,macOS="15.0",catalog=[]){
  let polls=0,mutations=0;const commands=[],budgets=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},setTimeout:fn=>fn(),require(name){
@@ -41,27 +66,32 @@ test('screenshot exports distinguish unstarted writes, uncertain writes and comp
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
    if(name==='./viewer.cjs')return {};
    if(name==='./budget.cjs')return {commandBudget:(timeout,deadline)=>require(path.join(dir,'budget.cjs')).commandBudget(timeout,deadline,()=>clock)};
-   if(name==='node:fs/promises')return {mkdir:async()=>{},access:async()=>{throw Error('absent');},stat:async()=>({size:10}),rm:async()=>{if(cleanupFails)throw Error('cleanup failed');}};
+   if(name==='./agent.cjs')return {createAgent:({Failure})=>({nativeScreenshot:async(device,deadline,orientation)=>{
+    assert.equal(device.udid,udid);assert.equal(deadline,1000);
+    assert.equal(orientation,'landscape-left');
+    if(phase==='capture')throw new Failure('SCREEN_CHANGED','Screen turned during capture');
+    if(phase==='budget')clock=1000;
+    return {path:'/upright.png'};
+   }})};
+   if(name==='node:fs/promises')return {mkdir:async()=>{},access:async()=>{throw Error('absent');},stat:async()=>({size:10}),
+    copyFile:async source=>{assert.equal(source,'/upright.png');desktop=true;if(phase==='export')throw Error('copy failed');},
+    rm:async()=>{if(cleanupFails)throw Error('cleanup failed');}};
    if(name==='node:child_process')return {execFile(file,args,_options,callback){
     commands.push({file,args});let data='',error=null;
     if(file==='/usr/bin/sw_vers'){data='27.0';if(phase==='preflight')error=Error('preflight failed');}
     else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,name:'Phone',state:'Booted'}]}});
-    else if(args[0]==='screenshot'){
-     if(destination==='desktop')desktop=true;
-     if(phase==='capture'||(phase==='export'&&destination==='desktop'))error=Error('capture timed out');
-     if(phase==='budget')clock=1000;
-    }else if(file==='/usr/bin/osascript'){clipboard='new';if(phase==='export')error=Error('clipboard write timed out');}
+    else if(file==='/usr/bin/osascript'){assert.equal(args.at(-1),'/upright.png');clipboard='new';if(phase==='export')error=Error('clipboard write timed out');}
     queueMicrotask(()=>callback(error,data,''));return {stdin:{on(){},end(){}}};
    }};
    return require(name.startsWith('./')?path.join(dir,name):name);
   }};
   vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
-  const pending=context.module.exports.dispatch('screenshot',{udid,destination},1000);
-  const succeeds=phase==='success'||(phase==='budget'&&destination==='desktop');
+  const pending=context.module.exports.dispatch('screenshot',{udid,destination,orientation:'landscape-left'},1000);
+  const succeeds=phase==='success';
   if(succeeds){const result=await pending;assert.equal(result.execution,'executed');if(destination==='clipboard')assert.equal(result.copied,true);}
-  else await assert.rejects(pending,error=>error.execution===(phase==='preflight'||(destination==='clipboard'&&['capture','budget'].includes(phase))?'not_executed':'unknown'));
+  else await assert.rejects(pending,error=>error.execution===(phase==='export'?'unknown':'not_executed'));
   assert.equal(clipboard, destination==='clipboard'&&['export','success'].includes(phase)?'new':'old');
-  assert.equal(desktop,destination==='desktop'&&phase!=='preflight');
+  assert.equal(desktop,destination==='desktop'&&['export','success'].includes(phase));
   assert.ok(commands.filter(c=>c.file==='/usr/bin/osascript').length<=1,'cleanup failure never repeats the export');
  }
 });
@@ -203,8 +233,10 @@ test('device management: unique names, delete and erase stop the device first, r
 });
 test('a clipboard screenshot puts the PNG on the pasteboard by path argument and keeps no file',async()=>{
  const calls=[],removed=[];
+ const file='/screenshots/upright.png';
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
   if(name==='./viewer.cjs')return {};
+  if(name==='./agent.cjs')return {createAgent:()=>({nativeScreenshot:async()=>({path:file})})};
   if(name==='node:fs/promises')return {mkdir:async()=>{},stat:async()=>({size:1234}),rm:async(f)=>{removed.push(f);}};
   if(name==='node:child_process')return {execFile(file,args,opts,cb){calls.push([file.split('/').pop(),...args]);let data='';
    if(file==='/usr/bin/sw_vers')data='27.0';else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted',name:'Phone'}]}});
@@ -214,12 +246,30 @@ test('a clipboard screenshot puts the PNG on the pasteboard by path argument and
  vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
  const r=await context.module.exports.dispatch('screenshot',{udid,destination:'clipboard'});
  assert.equal(r.copied,true);assert.equal(r.path,undefined);
- const shot=calls.find(c=>c[0]==='Baguette'&&c[1]==='screenshot'),osa=calls.find(c=>c[0]==='osascript');
- const file=shot[shot.indexOf('--output')+1];
- assert.match(file,/\/screenshots\/[0-9a-f-]+\.png$/);
+ const osa=calls.find(c=>c[0]==='osascript');
  assert.equal(osa.at(-1),file,'the path is passed as an argument, never spliced into the script');
  assert.ok(!osa.slice(1,-1).some(a=>a.includes(file)));
  assert.deepEqual(removed,[file]);
+});
+
+test('a flat clipboard export consumes the renderer receipt without another command or file read',async()=>{
+ const calls=[];
+ const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./viewer.cjs')return {};
+  if(name==='./agent.cjs')return {createAgent:()=>({nativeScreenshot:async(device,_deadline,orientation,clipboard)=>{
+   assert.equal(device.udid,udid);assert.equal(orientation,'landscape-left');assert.equal(clipboard,true);
+   return {copied:true,bytes:1234};
+  }})};
+  if(name==='node:fs/promises')return {mkdir:async()=>{}};
+  if(name==='node:child_process')return {execFile(file,args,_opts,cb){calls.push(file);let data='';
+   if(file==='/usr/bin/sw_vers')data='27.0';else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted'}]}});
+   queueMicrotask(()=>cb(null,data,''));return {stdin:{on(){},end(){}}};}};
+  return require(name.startsWith('./')?path.join(dir,name):name);
+ }};
+ vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
+ const r=await context.module.exports.dispatch('screenshot',{udid,destination:'clipboard',orientation:'landscape-left'});
+ assert.equal(r.copied,true);assert.equal(r.bytes,1234);assert.equal(r.execution,'executed');assert.equal(r.path,undefined);
+ assert.deepEqual(calls,['/usr/bin/sw_vers','/usr/bin/xcrun']);
 });
 
 test('erase and delete share preflight and shutdown time, never start a late mutation, and retain shutdown evidence',async()=>{

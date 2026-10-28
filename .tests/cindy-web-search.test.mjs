@@ -29,14 +29,23 @@ async function flushAsync() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+// Existing assertions check the original Simplified Chinese copy, so the
+// harness host reports zh-CN unless a test picks another locale explicitly.
 function createHarness(options = {}) {
   const kv = options.kv ?? {};
   const networkCalls = [];
   const cindyRequests = [];
+  const appContextRequests = [];
   const toolResults = [];
   let handler = null;
 
   const cindy = {
+    async request(message) {
+      assert.deepEqual(JSON.parse(JSON.stringify(message)), { kind: 'app-context' });
+      appContextRequests.push(message);
+      if (options.appContext) return options.appContext();
+      return { ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } };
+    },
     onHostMessage(fn) {
       handler = fn;
     },
@@ -69,7 +78,8 @@ function createHarness(options = {}) {
     },
   };
 
-  vm.runInNewContext(source, {
+  if (options.withoutRequest) delete cindy.request;
+  const context = {
     cindy,
     fetch: async (url, init) => {
       if (options.kvFetch) return options.kvFetch(url, init);
@@ -86,13 +96,21 @@ function createHarness(options = {}) {
     JSON,
     String,
     Error,
-  });
+    setTimeout: options.setTimeout ?? setTimeout,
+    clearTimeout,
+  };
+  vm.runInNewContext(source, context);
   assert.equal(typeof handler, 'function');
 
   return {
     networkCalls,
     cindyRequests,
+    appContextRequests,
     toolResults,
+    messages: context.MESSAGES,
+    async hostMessage(message) {
+      await handler(message);
+    },
     async search(args = {}) {
       await handler({
         type: 'tool-call',
@@ -133,20 +151,34 @@ function createSettingsHarness(options = {}) {
     ['status', status],
   ]);
   const fetchCalls = [];
+  const copyNodes = options.copyNodes ?? {};
   const document = {
+    documentElement: { lang: 'zh-CN' },
     getElementById(id) {
       return elements.get(id);
     },
     querySelectorAll(selector) {
-      assert.equal(selector, '.secret');
-      return [];
+      if (selector === '.secret') return options.secretNodes ?? [];
+      const match = /^\[(data-i18n(?:-title|-aria-label)?)\]$/.exec(selector);
+      assert.ok(match, `unexpected selector ${selector}`);
+      return copyNodes[match[1]] ?? [];
     },
   };
 
-  vm.runInNewContext(settingsSource, {
+  const context = {
     document,
+    AbortController,
     fetch: async (url, init = {}) => {
       fetchCalls.push({ url, init });
+      if (url === '/app-context') {
+        if (options.appContext) return options.appContext(init);
+        return {
+          ok: true,
+          async json() {
+            return { ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } };
+          },
+        };
+      }
       if (url === '/secrets') {
         return {
           ok: true,
@@ -172,18 +204,21 @@ function createSettingsHarness(options = {}) {
     clearTimeout: () => {},
     JSON,
     Error,
-  });
+  };
+  vm.runInNewContext(settingsSource, context);
 
   return {
     cindyAiEnabled,
     byoDefaultProvider,
     status,
     fetchCalls,
+    document,
+    messages: context.MESSAGES,
   };
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.4.0');
+  assert.equal(manifest.version, '1.5.0');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.equal(manifest.schemaVersion, 3);
   assert.deepEqual(manifest.cindy, { search: ['web'] });
@@ -532,15 +567,18 @@ for (const [status, code, guidance] of [
   [302, 'UPSTREAM_REJECTED', /账号权限/], [422, 'UPSTREAM_REJECTED', /账号权限/],
 ]) {
   test(`DeepSeek HTTP ${status} gives actionable ${code} without retry, fallback or body disclosure`, async () => {
-    const harness = createHarness({ networkResult: () => ({ ok: true, status, body: 'upstream-private-detail' }) });
-    const result = await harness.search({ provider: 'deepseek' });
-    assert.equal(result.ok, false);
-    assert.equal(result.errorCode, code);
-    assert.match(result.message, guidance);
-    assert.doesNotMatch(result.message, /upstream-private-detail|HTTP|\b[345]\d\d\b/);
-    assert.equal(harness.networkCalls.length, 1);
-    assert.equal(harness.cindyRequests.length, 0);
-    assert.equal(harness.toolResults.length, 1);
+    for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+      const harness = createHarness({ locale, networkResult: () => ({ ok: true, status, body: 'upstream-private-detail' }) });
+      const result = await harness.search({ provider: 'deepseek' });
+      assert.equal(result.ok, false);
+      assert.equal(result.errorCode, code);
+      if (locale === 'zh-CN') assert.match(result.message, guidance);
+      assert.equal(result.message, harness.messages[locale][`deepSeek_${code}`], locale);
+      assert.doesNotMatch(result.message, /upstream-private-detail|HTTP|\b[345]\d\d\b/, locale);
+      assert.equal(harness.networkCalls.length, 1);
+      assert.equal(harness.cindyRequests.length, 0);
+      assert.equal(harness.toolResults.length, 1);
+    }
   });
 }
 
@@ -630,4 +668,344 @@ test('settings load and persist DeepSeek as the BYO default without losing other
   const write = harness.fetchCalls.find(call => call.init.method === 'PUT');
   assert.deepEqual(JSON.parse(write.init.body), original);
   assert.match(harness.status.textContent, /已保存/);
+});
+
+// ── Runtime and settings localization ──────────────────────────────────────
+
+const hostLocales = ['zh-CN', 'en', 'ja', 'ko'];
+const placeholdersOf = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+const hanRe = /[\u4e00-\u9fff]/;
+// Japanese legitimately shares a few kanji words with Chinese.
+const sharedWithZh = new Set(['settings.js ja.save']);
+
+function assertParity(messages, label) {
+  assert.deepEqual(Object.keys(messages).sort(), [...hostLocales].sort(), `${label} locales`);
+  const keys = Object.keys(messages.en).sort();
+  for (const locale of hostLocales) {
+    assert.deepEqual(Object.keys(messages[locale]).sort(), keys, `${label} ${locale} keys`);
+    for (const key of keys) {
+      const text = messages[locale][key];
+      assert.equal(typeof text, 'string', `${label} ${locale}.${key}`);
+      assert.ok(text.trim(), `${label} ${locale}.${key} is empty`);
+      assert.deepEqual(placeholdersOf(text), placeholdersOf(messages.en[key]), `${label} ${locale}.${key} placeholders`);
+      if (locale !== 'zh-CN' && locale !== 'ja') {
+        assert.doesNotMatch(text, hanRe, `${label} ${locale}.${key} still contains Chinese`);
+      }
+      if (locale !== 'zh-CN' && !sharedWithZh.has(`${label} ${locale}.${key}`)) {
+        assert.notEqual(text, messages['zh-CN'][key], `${label} ${locale}.${key} copied from zh-CN`);
+      }
+    }
+  }
+}
+
+test('runtime and settings message tables have identical keys and placeholders in all four locales', () => {
+  assertParity(createHarness().messages, 'main.js');
+  assertParity(createSettingsHarness().messages, 'settings.js');
+});
+
+test('every message key referenced by code or settings.html exists in the tables', () => {
+  const mainMessages = createHarness().messages;
+  const settingsMessages = createSettingsHarness().messages;
+  const mainKeys = [...source.matchAll(/\bt\('(\w+)'/g)].map((m) => m[1]);
+  assert.ok(mainKeys.length >= 10);
+  for (const key of mainKeys) assert.ok(Object.hasOwn(mainMessages.en, key), `main.js ${key}`);
+  // Codes deepSeekFailure maps from HTTP status or structured Host errors.
+  for (const code of ['NOT_CONFIGURED', 'AUTH_REJECTED', 'PERMISSION_DENIED', 'QUOTA_EXHAUSTED',
+    'RATE_LIMITED', 'INVALID_INPUT', 'UPSTREAM_UNAVAILABLE', 'UPSTREAM_REJECTED', 'RESPONSE_INVALID']) {
+    assert.ok(Object.hasOwn(mainMessages.en, `deepSeek_${code}`), code);
+  }
+  const settingsKeys = [
+    ...settingsSource.matchAll(/\bt\('(\w+)'/g),
+    ...settingsHtml.matchAll(/data-(?:i18n(?:-title|-aria-label)?|empty-ph-key)="(\w+)"/g),
+  ].map((m) => m[1]);
+  assert.ok(settingsKeys.length >= 20);
+  for (const key of settingsKeys) assert.ok(Object.hasOwn(settingsMessages.en, key), `settings ${key}`);
+  const used = new Set([...settingsKeys, 'emptyPhDefault']);
+  for (const key of Object.keys(settingsMessages.en)) assert.ok(used.has(key), `unused settings key ${key}`);
+});
+
+test('no hardcoded Chinese copy remains outside comments and the message tables', () => {
+  const stripComments = (text) => text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  // Only the zh-CN and ja tables may contain Han characters (ja shares kanji).
+  const cjkTables = /\n {2}(?:'zh-CN'|ja): \{[\s\S]*?\n {2}\},(?=\n)/g;
+  for (const [label, text] of [['main.js', source], ['settings.js', settingsSource], ['settings.html', settingsHtml]]) {
+    const outside = stripComments(text).replace(cjkTables, '');
+    const offenders = outside.split('\n').filter((line) => hanRe.test(line));
+    assert.deepEqual(offenders, [], label);
+  }
+});
+
+test('zh-CN copy is the original Simplified Chinese text, unchanged for Chinese users', () => {
+  const main = createHarness().messages['zh-CN'];
+  assert.equal(main.cindyUnavailable, 'Cindy AI 搜索服务暂时不可用，请稍后再试');
+  assert.equal(main.deepSeek_NOT_CONFIGURED, '请在「插件」→「Web Search」详情页配置 DeepSeek API Key。');
+  assert.equal(main.deepSeek_INVALID_INPUT, 'DeepSeek 搜索参数无效，请使用 1–128 个 Unicode 字符的查询后重试。');
+  assert.equal(main.prefsUnavailable, '搜索偏好读取失败，请稍后重试或显式选择搜索源');
+  const settings = createSettingsHarness().messages['zh-CN'];
+  assert.equal(settings.cindyAiTitle, '默认使用 Cindy AI 搜索');
+  assert.equal(settings.deepSeekHint, '查询最多 128 个 Unicode 字符。搜索按成功请求计费，使用你的 DeepSeek 账户余额。');
+  assert.equal(settings.saveFailedStatus, '保存失败({status}),请重试');
+});
+
+test('zh-CN runtime output is byte-identical to the previous hardcoded strings', async () => {
+  const brave = createHarness({ networkResult: () => ({ ok: true, status: 500, body: 'oops' }) });
+  assert.equal((await brave.search({ provider: 'brave' })).message, 'Brave 返回 HTTP 500:oops');
+  const tavily = createHarness({ networkResult: () => ({ ok: true, status: 429, body: 'slow' }) });
+  assert.equal((await tavily.search({ provider: 'tavily' })).message, 'Tavily 返回 HTTP 429:slow');
+  const ok = createHarness();
+  assert.equal((await ok.search()).result.note, '经 cindy 搜索到 1 条结果');
+  assert.equal((await ok.search({ query: '' })).message, 'query 不能为空');
+  assert.equal((await ok.search({ query: 'x'.repeat(2001) })).message, 'query 过长(上限 2000 字符)');
+  assert.equal((await ok.search({ provider: 'bing' })).message, 'provider 只支持 cindy / brave / tavily / deepseek');
+  await ok.hostMessage({ type: 'tool-call', tool: 'nope', callId: 'call-2', args: {} });
+  assert.equal(ok.toolResults.at(-1).message, '未知工具:nope');
+});
+
+test('runtime copy falls back to English for unsupported or unavailable host locales', async () => {
+  const english = 'Configure a DeepSeek API Key in "Plugins" > "Web Search" details.';
+  const variants = {
+    unsupported: { locale: 'fr' },
+    legacyTag: { locale: 'zh-TW' },
+    notOk: { appContext: () => ({ ok: false }) },
+    missingLocale: { appContext: () => ({ ok: true, context: {} }) },
+    throws: { appContext: () => { throw new Error('host unavailable'); } },
+    noRequestApi: { withoutRequest: true },
+    hangs: {
+      appContext: () => new Promise(() => {}),
+      setTimeout: (fn) => { setImmediate(fn); return 1; },
+    },
+  };
+  for (const [label, options] of Object.entries(variants)) {
+    const harness = createHarness({
+      ...options,
+      networkResult: () => ({ ok: false, errorCode: 'NOT_CONFIGURED', message: 'private-host-detail' }),
+    });
+    const result = await harness.search({ provider: 'deepseek' });
+    assert.equal(result.errorCode, 'NOT_CONFIGURED', label);
+    assert.equal(result.message, english, label);
+    assert.doesNotMatch(result.message, hanRe, label);
+  }
+});
+
+test('English runtime copy uses the official plugin name', () => {
+  const en = createHarness().messages.en;
+  for (const text of Object.values(en)) assert.doesNotMatch(text, /\(Rui\)|ruivalim/i);
+  assert.match(en.deepSeek_AUTH_REJECTED, /"Plugins" > "Web Search"/);
+});
+
+for (const locale of ['ja', 'ko']) {
+  test(`${locale} runtime copy is used for tool results and keeps protocol values intact`, async () => {
+    const harness = createHarness({ locale, networkResult: () => deepSeekResponse([deepSeekItem()]) });
+    const messages = harness.messages[locale];
+    const success = await harness.search({ provider: 'deepseek' });
+    assert.equal(success.result.provider, 'deepseek');
+    assert.equal(success.result.note, messages.resultNote.replace('{provider}', 'deepseek').replace('{count}', '1'));
+
+    const invalid = await harness.search({ provider: 'deepseek', query: 'a'.repeat(129) });
+    assert.equal(invalid.errorCode, 'INVALID_INPUT');
+    assert.equal(invalid.message, messages.deepSeek_INVALID_INPUT);
+    assert.match(invalid.message, /128/);
+
+    const unknown = createHarness({
+      locale,
+      networkResult: () => ({ ok: false, errorCode: 'HOST_NETWORK_FAILURE', message: 'private-host-detail' }),
+    });
+    const fallback = await unknown.search({ provider: 'deepseek' });
+    assert.equal(fallback.errorCode, 'HOST_NETWORK_FAILURE');
+    assert.equal(fallback.message, messages.deepSeekFallback);
+    assert.match(fallback.message, /DeepSeek API/);
+
+    const brave = createHarness({ locale, networkResult: () => ({ ok: true, status: 503, body: 'down' }) });
+    const braveResult = await brave.search({ provider: 'brave' });
+    assert.ok(braveResult.message.includes('Brave') && braveResult.message.includes('503') && braveResult.message.includes('down'));
+    assert.doesNotMatch(braveResult.message, /返回/);
+
+    const cindyDown = createHarness({ locale, cindyError: new Error('Failed to fetch') });
+    const cindyResult = await cindyDown.search({ provider: 'cindy' });
+    assert.equal(cindyResult.errorCode, 'INTERNAL');
+    assert.equal(cindyResult.message, messages.cindyUnavailable);
+
+    const structured = createHarness({
+      locale,
+      cindyError: Object.assign(new Error('Host localized detail'), { errorCode: 'QUOTA_EXHAUSTED' }),
+    });
+    const structuredResult = await structured.search({ provider: 'cindy' });
+    assert.equal(structuredResult.errorCode, 'QUOTA_EXHAUSTED');
+    assert.equal(structuredResult.message, 'Host localized detail');
+  });
+}
+
+test('host-context-changed switches runtime copy without another app-context request', async () => {
+  const harness = createHarness({
+    locale: 'zh-CN',
+    networkResult: () => ({ ok: false, errorCode: 'QUOTA_EXHAUSTED', message: 'private-host-detail' }),
+  });
+  assert.match((await harness.search({ provider: 'deepseek' })).message, /充值/);
+  assert.equal(harness.appContextRequests.length, 1);
+
+  await harness.hostMessage({ type: 'host-context-changed', context: { region: 'global', locale: 'ko' } });
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.ko.deepSeek_QUOTA_EXHAUSTED);
+  await harness.hostMessage({ type: 'host-context-changed', context: { locale: 'ja' } });
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.ja.deepSeek_QUOTA_EXHAUSTED);
+  await harness.hostMessage({ type: 'host-context-changed', context: { locale: 'xx' } });
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.en.deepSeek_QUOTA_EXHAUSTED);
+  await harness.hostMessage({ type: 'host-context-changed' });
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.en.deepSeek_QUOTA_EXHAUSTED);
+  assert.equal(harness.appContextRequests.length, 1);
+  assert.equal(harness.toolResults.length, 5);
+});
+
+test('a locale change that arrives during the app-context request wins over the stale reply', async () => {
+  const pending = deferred();
+  const harness = createHarness({
+    appContext: () => pending.promise,
+    networkResult: () => ({ ok: false, errorCode: 'RATE_LIMITED', message: 'private-host-detail' }),
+  });
+  const searching = harness.search({ provider: 'deepseek' });
+  await flushAsync();
+  await harness.hostMessage({ type: 'host-context-changed', context: { locale: 'ja' } });
+  pending.resolve({ ok: true, context: { locale: 'zh-CN' } });
+  assert.equal((await searching).message, harness.messages.ja.deepSeek_RATE_LIMITED);
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.ja.deepSeek_RATE_LIMITED);
+});
+
+test('concurrent tool calls share one app-context request and all use the host locale', async () => {
+  const pending = deferred();
+  const harness = createHarness({
+    appContext: () => pending.promise,
+    networkResult: () => ({ ok: false, errorCode: 'AUTH_REJECTED', message: 'private-host-detail' }),
+  });
+  const calls = [1, 2, 3].map((n) => harness.hostMessage({
+    type: 'tool-call', tool: 'search_web', callId: `call-${n}`, args: { query: 'Cindy', provider: 'deepseek' },
+  }));
+  await flushAsync();
+  assert.equal(harness.appContextRequests.length, 1);
+  assert.equal(harness.networkCalls.length, 0, 'no search before the locale is known');
+  pending.resolve({ ok: true, context: { locale: 'ko' } });
+  await Promise.all(calls);
+  assert.equal(harness.toolResults.length, 3);
+  for (const result of harness.toolResults) {
+    assert.equal(result.message, harness.messages.ko.deepSeek_AUTH_REJECTED);
+  }
+});
+
+test('a failed app-context lookup is retried on the next call instead of pinning English', async () => {
+  let attempts = 0;
+  const harness = createHarness({
+    appContext: () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('host busy');
+      return { ok: true, context: { locale: 'zh-CN' } };
+    },
+    networkResult: () => ({ ok: false, errorCode: 'QUOTA_EXHAUSTED', message: 'private-host-detail' }),
+  });
+  assert.equal((await harness.search({ provider: 'deepseek' })).message, harness.messages.en.deepSeek_QUOTA_EXHAUSTED);
+  assert.match((await harness.search({ provider: 'deepseek' })).message, /充值/);
+  assert.match((await harness.search({ provider: 'deepseek' })).message, /充值/);
+  assert.equal(attempts, 2);
+});
+
+function copyNode(attribute, key) {
+  const attributes = new Map([[attribute, key]]);
+  return {
+    textContent: '',
+    getAttribute(name) {
+      return attributes.has(name) ? attributes.get(name) : null;
+    },
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+  };
+}
+
+function settingsCopyNodes() {
+  const nodes = {};
+  for (const attribute of ['data-i18n', 'data-i18n-title', 'data-i18n-aria-label']) {
+    const re = new RegExp(`\\s${attribute}="(\\w+)"`, 'g');
+    nodes[attribute] = [...settingsHtml.matchAll(re)].map((m) => copyNode(attribute, m[1]));
+  }
+  return nodes;
+}
+
+for (const locale of hostLocales) {
+  test(`settings page renders ${locale} copy from /app-context`, async () => {
+    const copyNodes = settingsCopyNodes();
+    const harness = createSettingsHarness({
+      locale,
+      copyNodes,
+      readKv: async () => { throw new Error('kv unavailable'); },
+    });
+    await flushAsync();
+    const messages = harness.messages[locale];
+    assert.equal(harness.document.documentElement.lang, locale);
+    assert.ok(copyNodes['data-i18n'].length >= 15);
+    for (const node of copyNodes['data-i18n']) {
+      assert.equal(node.textContent, messages[node.getAttribute('data-i18n')]);
+    }
+    for (const node of copyNodes['data-i18n-title']) {
+      assert.equal(node.getAttribute('title'), messages.toggleVisibility);
+    }
+    assert.equal(copyNodes['data-i18n-aria-label'].length, 1);
+    assert.equal(copyNodes['data-i18n-aria-label'][0].getAttribute('aria-label'), messages.cindyAiAria);
+    assert.equal(harness.status.textContent, messages.prefsLoadFailed);
+    assert.equal(harness.fetchCalls[0].url, '/app-context', 'locale is resolved before any status copy');
+  });
+}
+
+test('settings page falls back to English for unknown, failed or malformed app-context', async () => {
+  const variants = [
+    () => ({ ok: true, json: async () => ({ ok: true, context: { locale: 'de' } }) }),
+    () => ({ ok: false, json: async () => ({}) }),
+    () => { throw new Error('offline'); },
+    () => ({ ok: true, json: async () => null }),
+  ];
+  for (const appContext of variants) {
+    const harness = createSettingsHarness({
+      appContext,
+      readKv: async () => { throw new Error('kv unavailable'); },
+    });
+    await flushAsync();
+    assert.equal(harness.document.documentElement.lang, 'en');
+    assert.equal(harness.status.textContent, 'Failed to load search preferences. Please reopen the settings page.');
+  }
+});
+
+test('settings secret rows localize placeholders and status in the host locale', async () => {
+  function element() {
+    const listeners = new Map();
+    return {
+      value: '', type: 'password', placeholder: '', className: '',
+      classList: { toggle() {}, remove() {} },
+      addEventListener(type, listener) { listeners.set(type, listener); },
+      click() { return listeners.get('click')(); },
+    };
+  }
+  function row(dataKey, emptyKey, tailPrefix) {
+    const parts = { '.key-input': element(), '.eye': element(), '.badge': element(), '.save': element(), '.clear': element() };
+    const attrs = { 'data-key': dataKey, 'data-empty-ph-key': emptyKey, 'data-tail-prefix': tailPrefix };
+    return { parts, getAttribute: (name) => attrs[name] ?? null, querySelector: (sel) => parts[sel] };
+  }
+  for (const locale of ['ko', 'en']) {
+    const brave = row('brave_api_key', 'emptyPhBrave', 'BSA…');
+    const deepseek = row('deepseek_api_key', 'emptyPhDeepSeek', '…');
+    const harness = createSettingsHarness({ locale, secretNodes: [brave, deepseek] });
+    await flushAsync();
+    const messages = harness.messages[locale];
+    assert.equal(brave.parts['.key-input'].placeholder, messages.emptyPhBrave);
+    assert.equal(deepseek.parts['.key-input'].placeholder, messages.emptyPhDeepSeek);
+    brave.parts['.save'].click();
+    assert.equal(harness.status.textContent, messages.pasteFirst);
+  }
+  // Every row in the real page names a key that exists in the table.
+  const rowKeys = [...settingsHtml.matchAll(/data-empty-ph-key="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(rowKeys, ['emptyPhBrave', 'emptyPhTavily', 'emptyPhDeepSeek']);
+});
+
+test('settings.html ships no hardcoded copy before the host locale is known', () => {
+  const body = settingsHtml.slice(settingsHtml.indexOf('<body>'));
+  assert.doesNotMatch(body.replace(/<!--[\s\S]*?-->/g, ''), hanRe);
+  assert.doesNotMatch(settingsHtml, /data-empty-ph="/);
 });

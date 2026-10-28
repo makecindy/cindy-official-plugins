@@ -1,5 +1,6 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>设备模拟器</title>
 <link rel="stylesheet" href="/control.css">
+<meta name="cindy-native-trackpad" content="touch">
 <header class="bar" role="toolbar">
   <button class="pill" id="device-chip" aria-haspopup="menu" aria-expanded="false"><span class="dot" id="chip-dot" data-tone="busy"></span><span class="name" id="chip-name">…</span><svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
   <div class="title" id="title" hidden><span class="dot" id="title-dot" data-tone="busy"></span><span class="text"><strong id="title-name"></strong><span id="title-sub"></span></span></div>
@@ -12,6 +13,7 @@
   </div>
   <button class="icon-btn" id="btn-more" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
 </header>
+<span id="resources" class="controller-resources"><button type="button" id="memory-mode" aria-haspopup="dialog" hidden></button></span>
 <main class="stage" id="stage">
   <div class="scroll" id="scroll"><div class="frame" id="frame"><iframe id="screen" title="设备模拟器" allow="clipboard-read; clipboard-write"></iframe></div></div>
   <div class="overlay" id="overlay" hidden></div>
@@ -38,6 +40,7 @@
 <label id="f-name-label"><span id="f-name-text"></span><input id="f-name" maxlength="80" required autocomplete="off"></label>
 <label id="f-model-label"><span id="f-model-text"></span><select id="f-model"></select></label>
 <label id="f-runtime-label"><span id="f-runtime-text"></span><select id="f-runtime"></select></label>
+<div id="f-memory" hidden></div>
 <p class="error" id="dialog-error" role="alert"></p>
 <div class="row"><button type="button" class="btn secondary" id="dialog-cancel"></button><button type="submit" class="btn cta" id="dialog-save"></button></div></form></dialog>
 <dialog id="confirm-dialog"><h2 id="confirm-title"></h2><p class="hint" id="confirm-body"></p><div class="row"><button type="button" class="btn secondary" id="confirm-cancel"></button><button type="button" class="btn danger" id="confirm-ok"></button></div></dialog>

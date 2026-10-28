@@ -2,7 +2,9 @@
 
 本手册只适用于明确的 TapTap Maker 游戏项目操作。仅提到 TapTap、非 Maker 的平台/SDK/上架任务或本插件源码维护时，不调用 Maker Runtime。
 
-下面的 `maker_*` 都通过 `ghost_call({ ghost_id: "taptap-maker", tool: "<maker_* 工具名>", args: { ... } })` 调用；上下文没有工具清单时先调用 `ghost_info({ ghost_id: "taptap-maker" })`。Maker 项目操作不要通过 Shell、`npx`、外部 CLI、直接 MCP、通用浏览器或运行时内部工具绕行；插件会复用随包 Runtime、当前账号和宿主可信工作区。
+下面的 `maker_*` 都通过 `ghost_call({ ghost_id: "taptap-maker", tool: "<maker_* 工具名>", args: { ... } })` 调用；上下文没有工具清单时先调用 `ghost_info({ ghost_id: "taptap-maker" })`。Maker 账号、初始化、构建及素材工具操作不要通过 Shell、`npx`、外部 CLI、直接 MCP、通用浏览器或运行时内部工具绕行；插件会复用随包 Runtime、当前账号和宿主可信工作区。普通 Git 状态、差异和历史检查可继续使用 Cindy 或系统 Git。
+
+用户明确要求同步 Git 时，可通过 Cindy 通用 Git 或系统 Git 执行 fetch 并合并 origin/main；先检查本地改动，冲突时停止并保留现场。普通 Git 不替代 Maker 的账号、云端工作区提交或构建入口；提交、推送和构建仍使用 maker_build。云端工作区结果不明时，先通过 Maker 项目页面核对提交记录，不自动重试。
 
 ## 基本流程
 
@@ -16,13 +18,13 @@
 
 ## 约束与恢复
 
-- 构建提交前，本地 main 仅落后 Maker 远端时，Runtime 自动执行 fast-forward；历史分叉、非 main 分支、同步状态无法确认或会覆盖本地修改时停止，不提交或推送。
+- 构建提交沿用 Runtime 0.0.39：main 仅落后时自动 fast-forward；分叉时先保留本地提交再自动合并 origin/main。云端未提交改动阻塞推送时，Runtime 自动提交云端改动、合并并重推。合并冲突时取消合并并返回冲突文件；非 main、远端状态无法确认或快进会覆盖本地修改时停止。
 - 插件设置中的 Maker 生图、生视频、生音频开关默认开启；关闭时不发送对应请求，仅返回“maker 生图/生视频/生音频被禁用，请使用其他生图/生视频/生音频工具”（按实际类别提示）。生图包含单张、批量和改图；生视频仅拦截创建任务，不影响查询；生音频包含音乐、音效、配音、音色试听和确认。开关不取消已提交任务。
 - 所有项目操作只针对当前 Cindy 会话的本地工作区。目标项目在别处时，请用户先在 Cindy 中打开该目录，不要绕过插件。
 - 当前会话处于计划或只读模式时，只做广告指南、状态、诊断和工具列表等只读检查；不要尝试初始化、构建或调用动态工具。
 - 如果缺少 `.project/project.json`，且用户已经要求构建、运行或预览，调用 `maker_build` 后重试；否则先说明构建会提交并推送项目，获得确认后再构建。
 - `missing_taptap_identity` 仅在 Runtime 返回可安全恢复结果（`execution_state` 未提供或明确为 `not_executed`）时由插件自动初始化并重试一次；`executed` 或 `unknown` 时不自动重试。仍失败时把插件返回的可操作提示交给用户。
-- `maker_build` 推送被远端以 “cloud workspace has uncommitted changes that this push would overwrite”（如 `.project/settings.json`，常见于 `get_ad_config` 写入的广告配置）拒绝时，本地提交已保留，pull/rebase 无法解决；按插件返回的步骤恢复：先向用户说明并获得确认后，以 `confirm_remote_build_without_submit=true` 调用 `maker_build` 让云端构建并自动生成 sync 提交入库；再让本地 AI `git fetch origin` 并把 `origin/main` merge（或 rebase）进本地 main，保留本地提交；最后正常重试 `maker_build` 推送。不要手动复制或猜测云端配置，也不要用通用 git push。
+- 云端工作区自动提交失败时，按 Runtime 返回的阶段和原因处理，保留本地提交；不再额外构建云端版本来修复。提交超时且无法核实结果时返回 unknown：先核对 Maker 云端提交记录与工作区状态，确认结果前不要重试提交或构建。
 - 只有完整错误 `MCP error -32600: INSUFFICIENT_BALANCE` 表示 Maker 积分不足。此时提示用户，并在获得确认后再建议使用 Art 插件替代；其它错误不要按积分不足处理。
 - 不回显 PAT、令牌、本地凭证路径或插件已脱敏掉的内部信息。
 - 生成或修改 UrhoX Lua 代码时，避开沙箱中不可用的标准库（如 `os.clock()`、`io.*`）：这类调用会让预览静默卡死且无错误提示。计时逻辑默认用 Update 事件的 `eventData["TimeStep"]:GetFloat()` 累积；预览「卡住」而无报错时，优先用 Maker 运行日志排查是否命中了沙箱不可用函数。

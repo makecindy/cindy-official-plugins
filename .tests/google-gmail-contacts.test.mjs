@@ -37,6 +37,7 @@ function fixture(options = {}) {
     },
   });
   runInContext(source, ctx);
+  handler({ type: 'host-context-changed', context: { locale: options.locale || 'zh-CN' } });
   return { requests, replies, async call(args) {
     await handler({ type: 'tool-call', tool: 'gmail_contacts', callId: 'contacts-call', args: {
       session_context: { workdir_is_read_only: false }, ...args,
@@ -44,6 +45,23 @@ function fixture(options = {}) {
     return replies.at(-1);
   } };
 }
+
+test('contacts: permission failures follow the host locale and retain the write receipt', async () => {
+  for (const [locale, message] of [
+    ['zh-CN', /联系人权限不足/],
+    ['en', /Contact access is missing or expired/],
+    ['ja', /連絡先の権限が不足/],
+    ['ko', /연락처 권한이 없거나/],
+    ['unsupported', /Contact access is missing or expired/],
+  ]) {
+    const f = fixture({ locale, reply: () => json({}, 403) });
+    const result = await f.call({ action: 'create', person: { names: [{ givenName: 'Test' }] } });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /^\[not_executed\]/);
+    assert.match(result.message, message);
+    assert.equal(f.requests.length, 1, 'permission failure must not retry a write');
+  }
+});
 
 test('contacts: search warms cache, retains photos, encodes queries and preserves selected account', async () => {
   const f = fixture({ reply: () => json({ results: [{ person }] }) });

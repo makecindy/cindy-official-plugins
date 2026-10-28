@@ -2,7 +2,7 @@
 
 # Google Contacts and OAuth verification checklist
 
-Date: 2026-10-25. Applies to the Gmail 1.6.0 source proposal. This document does
+Date: 2026-10-28. Applies to the Gmail 1.6.1 source proposal. This document does
 not establish that Google has approved these permissions.
 
 Scope: current-account photos, personal contact lookup and create/update/delete,

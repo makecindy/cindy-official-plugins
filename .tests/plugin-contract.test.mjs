@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.8f84016fdcd9.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -36,8 +36,8 @@ function readJson(file, maxBytes) {
   return JSON.parse(readUtf8(file, maxBytes));
 }
 
-function git(args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+function git(args, cwd = root) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
 
 function trackedFiles(pluginDir) {
@@ -420,8 +420,8 @@ function validatePluginSource(pluginDir, manifest, files = trackedFiles(pluginDi
   }
 }
 
-function pluginRootsAt(revision) {
-  return git(['ls-tree', '-r', '--name-only', revision])
+function pluginRootsAt(revision, cwd = root) {
+  return git(['ls-tree', '-r', '--name-only', revision], cwd)
     .split('\n')
     .filter((name) => name.endsWith('/ghost.json'))
     .map((name) => path.posix.dirname(name))
@@ -458,26 +458,60 @@ function compareStableSemver(left, right, pluginDir) {
   return 0;
 }
 
-function validateReleaseDiff() {
-  const base = process.env.BASE_SHA;
-  const head = process.env.HEAD_SHA;
+function validateIdMigrations(entries) {
+  assert.ok(Array.isArray(entries), 'plugin-id-migrations.json must be an array');
+  const fromIds = new Set();
+  const toIds = new Set();
+  for (const entry of entries) {
+    assert.ok(entry && typeof entry === 'object' && !Array.isArray(entry), 'migration must be an object');
+    assert.deepEqual(Object.keys(entry).sort(), ['from', 'serverPr', 'to'], 'migration needs exactly from, to and serverPr');
+    for (const field of ['from', 'to']) {
+      assert.match(entry[field], /^[a-z0-9][a-z0-9-]{0,31}$/, `migration ${field} must be a plugin id`);
+    }
+    assert.notEqual(entry.from, entry.to, 'migration must change the plugin id');
+    assert.ok(!fromIds.has(entry.from) && !toIds.has(entry.to), 'migration IDs must be one-to-one');
+    assert.match(entry.serverPr, /^https:\/\/github\.com\/xindong\/cindy-server\/pull\/[1-9]\d*$/, 'migration needs a Server PR URL');
+    fromIds.add(entry.from);
+    toIds.add(entry.to);
+  }
+  return entries;
+}
+
+function validateReleaseDiff({ cwd = root, base = process.env.BASE_SHA, head = process.env.HEAD_SHA } = {}) {
+  const gitAt = (args) => git(args, cwd);
   if (!base && !head) return;
   assert.match(base ?? '', /^[0-9a-f]{40}$/i, 'BASE_SHA must be a commit SHA');
   assert.match(head ?? '', /^[0-9a-f]{40}$/i, 'HEAD_SHA must be a commit SHA');
-  const target = git(['rev-parse', 'HEAD']).trim();
-  git(['merge-base', '--is-ancestor', head, target]);
-  const baseRoots = pluginRootsAt(base);
-  const targetRoots = new Set(pluginRootsAt(target));
+  const target = gitAt(['rev-parse', 'HEAD']).trim();
+  gitAt(['merge-base', '--is-ancestor', head, target]);
+  const baseRoots = pluginRootsAt(base, cwd);
+  const targetRoots = new Set(pluginRootsAt(target, cwd));
   const baseRootSet = new Set(baseRoots);
-  const sharedPackageChanged = git([
+  // Only registrations already reviewed into the base may authorize a rename.
+  // Older bases without a registry retain the original deny-all behavior.
+  const registry = 'plugin-id-migrations.json';
+  const migrations = gitAt(['ls-tree', '--name-only', base, '--', registry]).trim()
+    ? validateIdMigrations(JSON.parse(gitAt(['show', `${base}:${registry}`]))) : [];
+  const renamedRoots = new Map();
+  for (const { from, to } of migrations) {
+    if (!baseRootSet.has(from) || !targetRoots.has(to)) continue;
+    assert.ok(!targetRoots.has(from) && !baseRootSet.has(to), `${from} -> ${to}: migration requires paired deletion and addition`);
+    renamedRoots.set(from, to);
+  }
+  const sharedPackageChanged = gitAt([
     'diff', '--name-only', '--no-renames', base, target, '--', ...ROOT_PACKAGE_FILES,
   ]).trim().length > 0;
   for (const pluginDir of baseRoots) {
-    assert.ok(targetRoots.has(pluginDir), `${pluginDir}: deleting or renaming an official plugin requires an explicit Server migration`);
-    const before = JSON.parse(git(['show', `${base}:${pluginDir}/ghost.json`]));
-    const after = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
-    assert.equal(after.id, before.id, `${pluginDir}: changing a published plugin id requires an explicit Server migration`);
-    const changed = git(['diff', '--name-only', '--no-renames', base, target, '--', pluginDir]).trim();
+    const afterDir = renamedRoots.get(pluginDir) ?? pluginDir;
+    assert.ok(targetRoots.has(afterDir), `${pluginDir}: deleting or renaming an official plugin requires an explicit Server migration`);
+    const before = JSON.parse(gitAt(['show', `${base}:${pluginDir}/ghost.json`]));
+    const after = readJson(path.join(cwd, afterDir, 'ghost.json'), MAX_MANIFEST_BYTES);
+    if (renamedRoots.has(pluginDir)) {
+      assert.ok(before.id === pluginDir && after.id === afterDir, `${pluginDir}: migration manifest IDs must match the registered pair`);
+    } else {
+      assert.equal(after.id, before.id, `${pluginDir}: changing a published plugin id requires an explicit Server migration`);
+    }
+    const changed = gitAt(['diff', '--name-only', '--no-renames', base, target, '--', pluginDir]).trim();
     if (changed || sharedPackageChanged) {
       assert.ok(
         compareStableSemver(after.version, before.version, pluginDir) > 0,
@@ -488,11 +522,95 @@ function validateReleaseDiff() {
   }
   for (const pluginDir of targetRoots) {
     if (baseRootSet.has(pluginDir)) continue;
-    const manifest = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
+    const manifest = readJson(path.join(cwd, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
     stableSemver(manifest.version, pluginDir);
     assertChangedPluginUsesManifestV3(pluginDir, manifest);
   }
 }
+
+// Exercise the same Git-tree comparison as CI, without touching this checkout.
+function releaseDiffFixture(t, { before, after, baseMigrations = [], headMigrations = baseMigrations, sharedChange = false }) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-id-migration-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const run = (args) => git(['-c', 'user.name=Contract fixture', '-c', 'user.email=fixture@example.test',
+    '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], cwd).trim();
+  run(['init', '--quiet']);
+  const write = (plugins, migrations) => {
+    for (const [id, overrides] of Object.entries(plugins)) {
+      fs.mkdirSync(path.join(cwd, id), { recursive: true });
+      fs.writeFileSync(path.join(cwd, id, 'ghost.json'), JSON.stringify({
+        id, schemaVersion: 3, minCindyVersion: '0.1.0', version: '1.0.0', ...overrides,
+      }));
+    }
+    if (migrations !== null) fs.writeFileSync(path.join(cwd, 'plugin-id-migrations.json'), JSON.stringify(migrations));
+  };
+  write(before, baseMigrations);
+  run(['add', '.']);
+  run(['commit', '--quiet', '-m', 'Base']);
+  const base = run(['rev-parse', 'HEAD']);
+  for (const id of Object.keys(before)) fs.rmSync(path.join(cwd, id), { recursive: true });
+  fs.rmSync(path.join(cwd, 'plugin-id-migrations.json'), { force: true });
+  write(after, headMigrations);
+  if (sharedChange) fs.writeFileSync(path.join(cwd, 'NOTICE'), 'Updated shared package notice');
+  run(['add', '-A']);
+  run(['commit', '--quiet', '--allow-empty', '-m', 'Target']);
+  return () => validateReleaseDiff({ cwd, base, head: run(['rev-parse', 'HEAD']) });
+}
+
+const fixtureMigration = {
+  from: 'old-plugin', to: 'new-plugin', serverPr: 'https://github.com/xindong/cindy-server/pull/1048',
+};
+
+test('migration registrations require unambiguous IDs and a traceable Server PR', () => {
+  assert.doesNotThrow(() => validateIdMigrations(readJson(path.join(root, 'plugin-id-migrations.json'))));
+  for (const invalid of [
+    {}, [null], [{ ...fixtureMigration, from: '../old-plugin' }],
+    [{ ...fixtureMigration, to: fixtureMigration.from }],
+    [{ ...fixtureMigration, serverPr: 'https://example.test/pull/1048' }],
+    [{ from: fixtureMigration.from, to: fixtureMigration.to }],
+    [fixtureMigration, { ...fixtureMigration, to: 'another-target' }],
+    [fixtureMigration, { ...fixtureMigration, from: 'another-source' }],
+  ]) assert.throws(() => validateIdMigrations(invalid));
+});
+
+test('release diff permits a previously registered paired rename and subsequent updates', async (t) => {
+  for (const [label, before, after] of [
+    ['paired rename', { 'old-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+    ['registration alone', { 'old-plugin': {} }, { 'old-plugin': {} }],
+    ['later update', { 'new-plugin': {} }, { 'new-plugin': { version: '1.0.1' } }],
+  ]) {
+    await t.test(label, (t) => assert.doesNotThrow(releaseDiffFixture(t, {
+      before, after, baseMigrations: [fixtureMigration],
+    })));
+  }
+});
+
+test('release diff rejects unregistered or incomplete migrations and retains package gates', async (t) => {
+  const before = { 'old-plugin': {} };
+  const after = { 'new-plugin': { version: '1.0.1' } };
+  const cases = [
+    ['unregistered rename', { baseMigrations: [] }, /explicit Server migration/],
+    ['registration only in the rename PR', { baseMigrations: null, headMigrations: [fixtureMigration] }, /explicit Server migration/],
+    ['deletion without replacement', { after: {} }, /explicit Server migration/],
+    ['replacement without deletion', { after: { ...before, ...after } }, /paired deletion and addition/],
+    ['target already existed', { before: { ...before, 'new-plugin': {} } }, /paired deletion and addition/],
+    ['different target', { after: { 'other-plugin': { version: '1.0.1' } } }, /explicit Server migration/],
+    ['different manifest id', { after: { 'new-plugin': { id: 'other-plugin', version: '1.0.1' } } }, /migration manifest IDs/],
+    ['same-directory id change', { after: { 'old-plugin': { id: 'new-plugin', version: '1.0.1' } } }, /changing a published plugin id/],
+    ['another plugin deleted alongside rename', { before: { ...before, 'unrelated-plugin': {} } }, /explicit Server migration/],
+    ['same version', { after: { 'new-plugin': {} } }, /version must be greater/],
+    ['lower version', { after: { 'new-plugin': { version: '0.9.0' } } }, /version must be greater/],
+    ['legacy replacement', { after: { 'new-plugin': { version: '1.0.1', schemaVersion: 2 } } }, /schemaVersion 3/],
+    ['invalid minimum client', { after: { 'new-plugin': { version: '1.0.1', minCindyVersion: '0.0.0' } } }, /released stable Cindy version/],
+    ['ordinary update without bump', { after: { 'old-plugin': { name: 'Changed' } } }, /version must be greater/],
+    ['shared package change without bump', { after: before, sharedChange: true }, /version must be greater/],
+  ];
+  for (const [label, overrides, expected] of cases) {
+    await t.test(label, (t) => assert.throws(releaseDiffFixture(t, {
+      before, after, baseMigrations: [fixtureMigration], ...overrides,
+    }), expected));
+  }
+});
 
 test('the pinned Cindy manifest contract rejects invalid manifest shapes', () => {
   const legacy = {
@@ -538,6 +656,52 @@ test('the pinned Cindy manifest contract rejects invalid manifest shapes', () =>
     /released stable Cindy version/,
     'official releases must not use the versionless development sentinel',
   );
+});
+
+test('releaseNotes remains optional and preserves complete text in both manifest formats', () => {
+  for (const schemaVersion of [2, 3]) {
+    const base = { schemaVersion, id: 'release-notes-fixture', name: 'Release notes',
+      version: '1.0.0', entry: 'main.js', description: 'Fixture', whenToUse: 'Fixture',
+      ...(schemaVersion === 2 ? { slots: [] } : { minCindyVersion: '0.1.0' }) };
+    assert.doesNotThrow(() => validateOfficialManifest('release-notes-fixture', base));
+    const omitted = validateGhostManifest(base);
+    assert.equal(omitted.ok, true);
+    assert.equal(Object.hasOwn(omitted.manifest, 'releaseNotes'), false,
+      'omission must not create a summary or block an existing manifest');
+    for (const releaseNotes of ['', '  ', '新增功能。\n修复问题。\n<script>plain text</script>', '完整说明。'.repeat(1200)]) {
+      const manifest = { ...base, releaseNotes };
+      assert.doesNotThrow(() => validateOfficialManifest('release-notes-fixture', manifest));
+      const result = validateGhostManifest(manifest);
+      assert.equal(result.ok, true);
+      assert.equal(result.manifest.releaseNotes, releaseNotes, 'normalization must not trim or truncate text');
+      assert.deepEqual(validateGhostManifest(result.manifest), result,
+        'repeated normalization must preserve the same release notes');
+    }
+    for (const releaseNotes of [null, false, 42, [], { text: 'summary' }]) {
+      const manifest = { ...base, releaseNotes };
+      const result = validateGhostManifest(manifest);
+      assert.equal(result.ok, false, `invalid releaseNotes: ${JSON.stringify(releaseNotes)}`);
+      assert.match(result.reason, /releaseNotes/);
+      assert.throws(() => validateOfficialManifest('release-notes-fixture', manifest), /releaseNotes/);
+    }
+  }
+});
+
+test('releaseNotes is optional in the standalone validator and invalid types fail early', (t) => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-release-notes-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const manifestPath = path.join(temp, 'ghost.json');
+  const base = { schemaVersion: 3, minCindyVersion: '0.1.0', id: 'release-notes-fixture',
+    name: 'Release notes', version: '1.0.0', entry: 'main.js' };
+  const validate = () => execFileSync(process.execPath,
+    [path.join(root, 'scripts', 'validate-plugin-manifest.mjs'), manifestPath],
+    { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  for (const fields of [{}, { releaseNotes: '' }, { releaseNotes: '新增功能。\n修复问题。' }]) {
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...base, ...fields }));
+    assert.match(validate(), /valid Cindy plugin manifest/);
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify({ ...base, releaseNotes: 42 }));
+  assert.throws(validate, (error) => error.status === 1 && /releaseNotes/.test(error.stderr));
 });
 
 test('showTaskPreferences is an optional card visibility flag in both manifest formats', () => {

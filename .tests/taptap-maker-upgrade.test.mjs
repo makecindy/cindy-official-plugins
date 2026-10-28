@@ -6,7 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyPatches, sha256, validateArchiveEntries, verifyVendor, fileHashes } from '../.github/scripts/sync-maker-runtime.mjs';
 
-const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.37.json', import.meta.url)));
+const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.39.json', import.meta.url)));
 const vendor = fileURLToPath(new URL('../taptap-maker/vendor/taptap-maker/', import.meta.url));
 
 test('reviewed upstream can be reconstructed and patched reproducibly', () => {

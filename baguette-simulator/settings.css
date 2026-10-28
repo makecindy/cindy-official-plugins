@@ -62,3 +62,8 @@ input[role=switch]:disabled { opacity: .6; cursor: default; }
 .more p { margin: 8px 0 0; line-height: 1.6; }
 @media (max-width: 420px) { body { padding: 12px; } .device { flex-wrap: wrap; } .device .actions { width: 100%; justify-content: flex-start; padding-left: 36px; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.memory-choice { width: 100%; min-width: 0; margin: 12px 0; text-align: start; }
+.memory-choice label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.memory-choice select { max-width: 100%; font: inherit; }
+.memory-choice small { display: block; margin-top: 8px; font-size: 11px; line-height: 1.5; opacity: .7; white-space: normal; }

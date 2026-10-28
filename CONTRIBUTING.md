@@ -158,6 +158,10 @@ do not edit the generated `dist/maker.js` by hand.
    historical release is delivered instead; without one, the plugin is hidden.
    Desktop treats that Server selection as authoritative and does not add a
    second `minCindyVersion` filter or install confirmation, so keep this field accurate.
+   Release notes in `ghost.json.releaseNotes` are **optional, but recommended**
+   for version updates. If included, use a plain-text string describing the
+   changes; missing or empty notes do not block validation or publication.
+   See the [release-note reference](docs/plugin-authoring.md#release-notes-optional-recommended).
 4. Explain the Agent-facing impact of changed tool declarations. Supply actual
    verification for affected paths; reuse valid evidence for unaffected ones,
    with accurate environments and compatibility limitations. Lowering/removing

@@ -26,6 +26,18 @@ do not require authors to perform the migration checklist themselves.
 
 ## Review contract / 审查契约
 
+### Device Simulator interaction parity / 模拟器交互一致性
+
+For `baguette-simulator`, use iPhone as the reference for equivalent Android
+interactions. Keep gesture meaning, anchors, touch indicators, toolbar actions,
+shortcuts and help consistent whenever platform capabilities permit. Reuse
+components and compare both implementations with the same input cases when
+changing either side. Document genuine platform differences, not accidental drift.
+安卓与 iPhone 同类操作以 iPhone 为准；修改一端时检查另一端，触点提示必须对应实际
+输入。具体手势约定见插件 README 的「安卓交互对齐 / Android interaction parity」。
+原生触控板改动必须在开发版的实际任务侧栏验收，覆盖缩放、连续反向、旋转和平移；
+独立窗口或合成事件回放不能替代本机触控板采集与手感验收，记录时须明确区分。
+
 Before upgrading or refactoring Maker, read the
 [maintenance checklist](./docs/taptap-maker-maintenance.md)
 ([中文](./docs/taptap-maker-maintenance.zh-CN.md)). Preserve the documented

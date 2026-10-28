@@ -6,7 +6,23 @@
 #import <sys/file.h>
 #import <fcntl.h>
 #import <unistd.h>
+#import <string.h>
 typedef void *(*HID)(uint32_t,uint32_t,uint32_t,uint32_t);
+// Check the same ABI used for input, without opening a device or sending HID.
+static void *loadKeyboardKit(NSString *dev) {
+ if(!dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator",RTLD_NOW|RTLD_GLOBAL))return NULL;
+ void *kit=NULL;
+ for(NSString *relative in @[@"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",@"../SharedFrameworks/SimulatorKit.framework/SimulatorKit"]){
+  kit=dlopen([[dev stringByAppendingPathComponent:relative]fileSystemRepresentation],RTLD_NOW|RTLD_GLOBAL);if(kit)break;
+ }
+ Class context=NSClassFromString(@"SimServiceContext"),client=NSClassFromString(@"_TtC12SimulatorKit24SimDeviceLegacyHIDClient");
+ if(!kit||!dlsym(kit,"IndigoHIDMessageForHIDArbitrary")
+   ||![context respondsToSelector:NSSelectorFromString(@"sharedServiceContextForDeveloperDir:error:")]
+   ||![context instancesRespondToSelector:NSSelectorFromString(@"deviceSetWithPath:error:")]
+   ||![client instancesRespondToSelector:NSSelectorFromString(@"initWithDevice:error:")]
+   ||![client instancesRespondToSelector:NSSelectorFromString(@"sendWithMessage:freeWhenDone:completionQueue:completion:")])return NULL;
+ return kit;
+}
 static BOOL sendEvent(id client, void *message) {
  if(!message)return NO;
  dispatch_semaphore_t done=dispatch_semaphore_create(0);
@@ -36,13 +52,17 @@ static BOOL releaseKeys(id client,HID hid){
  return dispatch_group_wait(pending,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC))==0 && created && delivered;
 }
 int main(int argc,const char **argv){@autoreleasepool{
+ if(argc==3&&strcmp(argv[1],"--check")==0){
+  BOOL ready=loadKeyboardKit(@(argv[2]))!=NULL;
+  puts(ready?"{\"ready\":true,\"scope\":\"keyboard-abi\"}":"{\"ready\":false,\"scope\":\"keyboard-abi\",\"errorCode\":\"KEYBOARD_ABI_UNAVAILABLE\"}");
+  return ready?0:4;
+ }
  if(argc!=6)return 2; // device set, UDID, developer dir, HID usage (0=release), modifier bitmask
  NSString *setPath=@(argv[1]),*udid=@(argv[2]),*dev=@(argv[3]);int key=atoi(argv[4]),mask=atoi(argv[5]);
  if(key<0||key>103||mask<0||mask>15||![[NSUUID alloc]initWithUUIDString:udid])return 2;
  int lock=open([[setPath stringByAppendingPathComponent:[NSString stringWithFormat:@".keyboard-%@.lock",udid]]fileSystemRepresentation],O_CREAT|O_RDWR,0600);
  if(lock<0||flock(lock,LOCK_EX|LOCK_NB)!=0)return 3;
- if(!dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator",RTLD_NOW|RTLD_GLOBAL))return 4;
- void *kit=NULL;for(NSString *relative in @[@"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",@"../SharedFrameworks/SimulatorKit.framework/SimulatorKit"]){kit=dlopen([[dev stringByAppendingPathComponent:relative]fileSystemRepresentation],RTLD_NOW|RTLD_GLOBAL);if(kit)break;}if(!kit)return 4;
+ void *kit=loadKeyboardKit(dev);if(!kit){fprintf(stderr,"Keyboard ABI unavailable for the selected Xcode. Run environment diagnostics.\n");return 4;}
  NSError *error=nil;id context=((id(*)(id,SEL,id,NSError**))objc_msgSend)(NSClassFromString(@"SimServiceContext"),NSSelectorFromString(@"sharedServiceContextForDeveloperDir:error:"),dev,&error);
  if(!context)return 4;
  id set=((id(*)(id,SEL,id,NSError**))objc_msgSend)(context,NSSelectorFromString(@"deviceSetWithPath:error:"),setPath,&error);if(!set)return 4;

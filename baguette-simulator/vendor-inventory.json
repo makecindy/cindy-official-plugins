@@ -36,8 +36,8 @@
   },
   {
     "path": "vendor/baguette/Baguette",
-    "bytes": 8005840,
-    "sha256": "09550039ec4e03d300502d705698e0958ed637b605a7423fd8b4f46b8e54ca59"
+    "bytes": 8005824,
+    "sha256": "c713d39ea18266ead96a9f7e4b934868674cdcbf5a900bdbf0e0f109faa2fef0"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/HingeControl/HingeControl",
@@ -251,13 +251,13 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/touch-gesture-source.js",
-    "bytes": 7308,
-    "sha256": "3445c717bcedd908849e10e1f6d442cf03d80a5af11aa631b212a578ee1e7337"
+    "bytes": 10223,
+    "sha256": "ff7ea5bb6cf1588de96891d9644aebdf96fad52b7e441d53ac925be56d91720d"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/wheel-gesture-source.js",
-    "bytes": 3161,
-    "sha256": "ebd227df67218c3a56816f7c79564f9c11aad85c0c8981d03e3cbae9de702c72"
+    "bytes": 3736,
+    "sha256": "42abc8bd9527951dd306dbdf53a05e66a8c73074a4f76b2344519270528bbf7a"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js",
@@ -271,13 +271,13 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/keyboard.js",
-    "bytes": 8826,
-    "sha256": "19c4e763e2b00171b54170618dfb5ad92e0db71e259a5fb2c809dd7c5cd2564e"
+    "bytes": 9193,
+    "sha256": "33fa93b4abb9888d9ab7ac8f4246f49a1cda960c420ce9546f698633ae9c10a9"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/screen.js",
-    "bytes": 3701,
-    "sha256": "573c92c3bcae390aa46a1c536c896dd8de29dc987bfdd610e98a068d0144593e"
+    "bytes": 3767,
+    "sha256": "cea55586bb759eedf4cf568afb1affe9986ec9404c4bf8c6274bc1bbbdd63f98"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/simulator.js",
@@ -476,8 +476,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-native.js",
-    "bytes": 146290,
-    "sha256": "0248b80b75d2fa5cc7f6d4f5defdfb6d2b7768163a03bb6a0e9ff703dd5a2402"
+    "bytes": 147375,
+    "sha256": "9cbdd513af06527531d78c85a31ffbc6c15a575f899551b5fecffc3306fbf458"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-network.js",
@@ -548,5 +548,10 @@
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/vendor/leaflet/leaflet.js",
     "bytes": 147552,
     "sha256": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a"
+  },
+  {
+    "path": "vendor/simslim/profiles.json",
+    "bytes": 6674,
+    "sha256": "8d48dfaddb989b856290a96e527a4bfabe3e1d294d37b466eb6e85ad1e60ae21"
   }
 ]

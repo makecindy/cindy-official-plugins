@@ -4,6 +4,28 @@
 
 ## Read first
 
+### 2.1.25: Runtime 0.0.39 and request windows
+
+Use the official npm release from local cache with a dedicated 0.0.39 recipe,
+preserving V1–V8. Raise the former 60-second window to 120 seconds for all dynamic
+tools, tool discovery and long-running account operations. Short requests remain
+at 30 seconds; existing progress renewal and the 15-minute total ceiling remain
+unchanged, with no new periodic heartbeat. Calls without progress may still time
+out; this does not provide unlimited waiting.
+
+Follow 0.0.39 automatic divergence merging and cloud-workspace commits, with
+matching guidance and regressions. V9 preserves unknown cloud-commit outcomes and
+recovery guidance and recognizes both cloud-blocking messages. It adds no Git
+implementation or retry layer. Ordinary Git and Cindy savepoints continue sharing
+the native repository; see the PR for the actual runtime verification scope.
+V10 retains uncertain canvas requests and recognition pending IDs, pauses recovery
+at its wait limit, and extends the 015 stop control to preparation and recovery
+waits. Late replies after stopping must not start subsequent requests.
+The tools/list root router uses 115 seconds inside the 120-second host window.
+Post-cloud-commit merge/HEAD exceptions retain executed state. Git guidance uses
+authorized host Git sync, maker_build for submission, and the Maker project page
+for checking cloud state; it does not recommend unavailable standalone commands.
+
 ### 2.1.19: validation arguments and evidence boundaries
 
 Validation checks Git ignore rules and the index without changing either. Unignored evidence,
@@ -37,7 +59,7 @@ Pass each valued validation option as a single `--flag=value` argument. Even wit
 all options enabled, argv must fit Cindy childSpawn's 16-entry limit; otherwise
 the host discards the request and spawning times out.
 
-Current upgrade: plugin 2.1.22 / Runtime 0.0.37, with eight bundle patches
+Previous upgrade: plugin 2.1.22 / Runtime 0.0.37, with eight bundle patches
 listed in the repository README and updated child-process compatibility.
 The inventory and device results below describe the historical 0.0.33/0.0.34
 baseline, not device acceptance of 0.0.37.

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.64",
+  "id": "ntfy",
+  "name": "ntfy",
+  "description": "Send push notifications through your own self-hosted ntfy server. Add one or more servers with an access token in the plugin settings; Cindy encrypts each token and sends it only to its own server.",
+  "whenToUse": "Use when the user wants a push notification sent to their phone or desktop through their own ntfy server, for example to be alerted when a task finishes. Requires a server and access token added in the plugin settings.",
+  "version": "1.1.0",
+  "kind": "chip",
+  "author": "Rui Valim",
+  "command": "ntfy",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "settingsHtml": "settings.html",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "network": {
+    "connections": [
+      {
+        "key": "ntfy_conn",
+        "label": "ntfy server",
+        "hint": "Enter the server URL (https only, default port 443, served at the domain root) and an ntfy access token (tk_...) with write access to your topics.",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}"
+        },
+        "maxConnections": 8
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "ntfy_send",
+      "description": "Publish one push notification to a topic on a configured ntfy server. Returns the ntfy message id and time. topic defaults to the server's default topic. With several servers configured, pass server (id or host from ntfy_servers); ask the user if unsure. message is limited to 4096 UTF-8 bytes and is rejected, never truncated, when longer. Never resend after an outcome-unknown error (timeout, network failure, HTTP 5xx): the notification may already have been delivered, so ask the user first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Notification body. Required, non-empty, at most 4096 UTF-8 bytes."
+          },
+          "topic": {
+            "type": "string",
+            "pattern": "^[-_A-Za-z0-9]{1,64}$",
+            "description": "ntfy topic (letters, digits, - and _, up to 64 characters). Omit to use the server's default topic."
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional notification title. Any Unicode text, accents included."
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["1", "2", "3", "4", "5", "min", "low", "default", "high", "urgent"],
+            "description": "Optional priority: 1-5 or min, low, default, high, urgent. Use high or urgent only when the user asked for it."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional tags. Tags matching an ntfy emoji short code (for example warning, white_check_mark) show as emojis."
+          },
+          "click": {
+            "type": "string",
+            "description": "Optional https:// URL opened when the notification is tapped."
+          },
+          "markdown": {
+            "type": "boolean",
+            "description": "Set true to render the message as Markdown in clients that support it."
+          },
+          "server": {
+            "type": "string",
+            "description": "Server id or host from ntfy_servers. Optional when exactly one server is configured; required when there are several."
+          }
+        },
+        "required": ["message"]
+      }
+    },
+    {
+      "name": "ntfy_servers",
+      "description": "List the configured ntfy servers with their id, host, URL and default topic. Access tokens are never returned. Use it to choose the server argument for ntfy_send.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

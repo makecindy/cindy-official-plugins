@@ -1,0 +1,7 @@
+[
+  {
+    "from": "baguette-simulator",
+    "to": "cindy-simulator",
+    "serverPr": "https://github.com/xindong/cindy-server/pull/1048"
+  }
+]

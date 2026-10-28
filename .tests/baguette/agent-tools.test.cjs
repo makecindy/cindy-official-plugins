@@ -74,6 +74,7 @@ test('a rejected touch releases the finger and reports whether anything was deli
 });
 
 function fakeApps({installed,changed=0,platforms=['iPhoneSimulator']}){
+ let copiedFull=false;
  const calls=[];
  const plists={'/build/Game.app':{CFBundleSupportedPlatforms:platforms,CFBundleIdentifier:'com.example.game',CFBundleExecutable:'Game',CFBundleShortVersionString:'1.0',CFBundleVersion:'7'},
   '/sim/Game.app':installed&&{CFBundleSupportedPlatforms:platforms,CFBundleIdentifier:'com.example.game',CFBundleExecutable:'Game',CFBundleShortVersionString:'1.0',CFBundleVersion:installed.build||'7'}};
@@ -83,9 +84,9 @@ function fakeApps({installed,changed=0,platforms=['iPhoneSimulator']}){
  class Failure extends Error{constructor(c,m,e){super(m);this.code=c;this.execution=e;}}
  const run=async(file,args)=>{calls.push([path.basename(file),...args]);
   if(file.endsWith('plutil')){const app=path.dirname(args.at(-1));const key=Object.keys(plists).find(k=>fs.realpathSync(real(k))===fs.realpathSync(app));return {stdout:JSON.stringify(plists[key])};}
-  if(file.endsWith('rsync'))return {stdout:args.includes('--dry-run')?Array.from({length:changed},(_,i)=>`>f.st.... f${i}`).join('\n'):''};
+  if(file.endsWith('rsync'))return {stdout:args.includes('--dry-run')&&!copiedFull?Array.from({length:changed},(_,i)=>`>f.st.... f${i}`).join('\n'):''};
   return {stdout:''};};
- const sim=async args=>{calls.push(['simctl',...args]);if(args[0]==='get_app_container'){if(!installed)throw new Failure('COMMAND_FAILED','An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):\nNo such file or directory');return {stdout:fs.realpathSync(real('/sim/Game.app'))};}return {stdout:''};};
+ const sim=async args=>{calls.push(['simctl',...args]);if(args[0]==='install'){copiedFull=true;installed={same:true};plists['/sim/Game.app']=plists['/build/Game.app'];fs.copyFileSync(real('/build/Game.app/Game'),real('/sim/Game.app/Game'));}if(args[0]==='get_app_container'){if(!installed)throw new Failure('COMMAND_FAILED','An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):\nNo such file or directory');return {stdout:fs.realpathSync(real('/sim/Game.app'))};}return {stdout:''};};
  const apps=require(path.join(node,'apps.cjs')).createApps({sim,run,Failure});
  return {apps,calls,app:real('/build/Game.app')};
 }

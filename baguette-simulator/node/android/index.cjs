@@ -14,6 +14,10 @@ function createAndroid({root,run,children}){
   async function dispatch(method,p={}){
     if(method==='environment')return environment();
     if(method==='devices')return {devices:await devices.devices()};
+    if(method==='resource_usage'){
+      const d=await devices.target(p,false);
+      return require('../resource-usage.cjs').cachedResourceUsage({refresh:p.refresh===true,device:{...d,platform:'android'},directory:d.directory,pid:d.endpoint?.pid,run,deadline:p._deadline});
+    }
     if(method==='android_setup_plan')return sdk.plan();
     if(method==='android_setup_install')return sdk.install(p);
     if(method==='android_setup_status')return sdk.status();
@@ -42,7 +46,7 @@ function createAndroid({root,run,children}){
       const result=await apps.launch(d,p);
       if(!result.appLaunched)return result;
       if(p.showViewer!==false)try{result.viewer=await viewer.open(d.udid,p._locale);}catch(e){result.viewer={ready:false,previewOpened:false,error:e.message};result.outcome='partial';result.nextAction='Retry viewer action=open; do not relaunch the App.';}
-      if(p.screenshot)try{const {_modelImages,...shot}=await agent.screenshot(d,p);result.screenshot=shot;if(_modelImages)result._modelImages=_modelImages;}catch(e){result.screenshot={error:e.message};}
+      if(p.screenshot||result.viewer?.previewOpened===false)try{const {_modelImages,...shot}=await agent.screenshot(d,{...p,_deadline:Math.min(p._deadline??Infinity,Date.now()+12000)});result.screenshot=shot;if(_modelImages)result._modelImages=_modelImages;}catch(e){result.screenshot={error:e.message};}
       return result;
     }
     if(method==='app_terminate'||method==='app_uninstall'){

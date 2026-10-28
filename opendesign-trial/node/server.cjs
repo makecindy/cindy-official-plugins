@@ -474,6 +474,7 @@ async function draftRead(b, file) {
   }
   return {
     html: html ?? "",
+    previewPath: html === null ? null : path.join(b.root, file),
     cardHtml: cardPreview(html ?? ""),
     revision: html === null ? null : revision(html),
     sketches,

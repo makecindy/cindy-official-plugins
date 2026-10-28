@@ -161,6 +161,19 @@ function callImage(harness, name = 'generate_image') {
   });
 }
 
+test('所有动态工具共用 120 秒请求窗口并保留独立进度 token', async () => {
+  const harness = createMainHarness(imageNodeResponder);
+  for (const name of [...imageToolNames, ...videoToolNames, ...audioToolNames, 'query_video_task']) {
+    assert.equal((await callImage(harness, name)).ok, true);
+  }
+  const calls = harness.nodeRequests.filter((request) => request.method === 'tools/call');
+  assert.equal(new Set(calls.map((request) => request.params._meta.progressToken)).size, calls.length);
+  for (const request of harness.nodeRequests) {
+    assert.equal(request.timeoutMs, 120_000);
+    if (request.method === 'tools/call') assert.equal(request.maxTotalMs, 900_000);
+  }
+});
+
 test('生图默认开启或显式开启时保持原请求和结果', async () => {
   for (const preferences of [{}, { makerImageEnabled: true }]) {
     for (const name of imageToolNames) {
@@ -619,7 +632,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.24');
+  assert.equal(manifest.version, '2.1.25');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -666,7 +679,7 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(consoleTool.description, /不自动构建、提交或安装游戏运行环境/);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.37');
+  assert.equal(vendorPackage.version, '0.0.39');
   assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
@@ -938,12 +951,12 @@ test('Runtime BLACKLISTED 列表短路和调用拦截均将未执行状态传给
   }
 });
 
-test('Runtime 仅在落后远端时快进，冲突或不安全状态在提交前停止', async () => {
+test('Runtime 落后时快进，覆盖冲突、非 main 或远端未知在提交前停止', async () => {
   const match = vendorMakerSource.match(/async function pushMakerProject\([^]*?\n\}/);
   assert.ok(match);
   const failureMatch = vendorMakerSource.match(/function getBlockingRemoteSyncFailure\([^]*?\n\}/);
   assert.ok(failureMatch);
-  for (const status of ['needs_pull', 'conflict', 'diverged', 'branch_not_allowed', 'remote_unavailable']) {
+  for (const status of ['needs_pull', 'conflict', 'branch_not_allowed', 'remote_unavailable']) {
     const calls = [];
     const context = createContext({
       [match[0].match(/const requestedCwd = (path\d*)\.resolve/)[1]]: { resolve: (value) => value },
@@ -955,7 +968,7 @@ test('Runtime 仅在落后远端时快进，冲突或不安全状态在提交前
         status: status === 'conflict' ? 'needs_pull' : status,
         branch: 'main', remoteRef: 'origin/main', nextAction: 'Check remote state',
       }),
-      runGit: async (args) => {
+      gitStep: async (args) => {
         calls.push(Array.from(args));
         if (status === 'conflict') throw new Error('would be overwritten');
       },
@@ -1038,7 +1051,7 @@ test('Cindy 控制台不会复用同版本的独立 Runtime 或其他插件入�
     CONSOLE_PROTOCOL_VERSION: 3, process: { env: environment },
   });
   new Script(match[0]).runInContext(context);
-  const identity = (entry) => context.createConsoleLauncherIdentity('0.0.37', { entry, mtimeMs: 1 });
+  const identity = (entry) => context.createConsoleLauncherIdentity('0.0.39', { entry, mtimeMs: 1 });
   const standalone = identity('/example/standalone/maker.js');
   environment.TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin';
   assert.notEqual(identity('/example/standalone/maker.js'), standalone);
@@ -1046,7 +1059,7 @@ test('Cindy 控制台不会复用同版本的独立 Runtime 或其他插件入�
   assert.equal(identity('/example/plugin-a/maker.js'), identity('/example/plugin-a/maker.js'));
 });
 
-test('Cindy 识图固定 Server，服务不可用时报错且独立 Maker 保留原回退', async () => {
+test('Cindy 识图固定 Server，服务不可用时报错且独立 Maker 不恢复已移除的回退', async () => {
   const names = ['emptyModelSettings', 'readModelSettings', 'configuredUiVisionModels',
     'resolvedUiVisionModels', 'resolvedModelSettingsForDisplay'];
   const source = names.map((name) => {
@@ -1072,8 +1085,8 @@ test('Cindy 识图固定 Server，服务不可用时报错且独立 Maker 保留
   await assert.rejects(context.resolvedUiVisionModels(), /Server 识图暂不可用/);
   assert.equal((await context.resolvedModelSettingsForDisplay()).vision.source, 'server');
   environment.TAPTAP_MAKER_DISTRIBUTION = 'standalone';
-  assert.equal((await context.resolvedUiVisionModels())[0].source, 'chatgpt-web');
-  assert.equal((await context.resolvedModelSettingsForDisplay()).vision.source, 'chatgpt-web');
+  assert.equal((await context.resolvedUiVisionModels())[0].source, 'server');
+  assert.equal((await context.resolvedModelSettingsForDisplay()).vision.source, 'server');
 });
 
 test('maker_console 只打开已校验的 loopback 控制台地址', async () => {
@@ -1291,6 +1304,8 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     },
   });
   assert.equal(init.ok, true);
+  assert.equal(harness.nodeRequests[0].timeoutMs, 120_000);
+  assert.equal(harness.nodeRequests[0].maxTotalMs, 900_000);
   assert.equal(
     harness.nodeRequests[0].params.arguments.workdir,
     '/tmp/trusted-maker',
@@ -1304,7 +1319,7 @@ test('主工具只使用宿主注入的本地 workdir，并为长构建开启续
     },
   });
   assert.equal(build.ok, true);
-  assert.equal(harness.nodeRequests[1].timeoutMs, 60_000);
+  assert.equal(harness.nodeRequests[1].timeoutMs, 120_000);
   assert.equal(harness.nodeRequests[1].maxTotalMs, 900_000);
   assert.match(
     harness.nodeRequests[1].params._meta.progressToken,
@@ -1445,7 +1460,7 @@ function buildFailureResponder(resultText, structuredContent = { success: false 
   });
 }
 
-test('云端工作区脏改动拒绝时附插件内可执行恢复步骤并保留执行态', async () => {
+test('云端工作区错误保留执行态，使用插件构建入口且不再附加旧云端构建恢复', async () => {
   const harness = createMainHarness(buildFailureResponder(cloudDirtyBuildFailureText, {
     success: false,
     execution_state: 'executed',
@@ -1455,14 +1470,10 @@ test('云端工作区脏改动拒绝时附插件内可执行恢复步骤并保�
   assert.equal(build.result.isError, true);
   const text = build.result.content.map((item) => item.text).join('\n');
   assert.match(text, /cloud workspace has uncommitted changes/);
-  assert.match(text, /征得同意后调用 maker_build 并传 confirm_remote_build_without_submit=true/);
-  assert.match(text, /git fetch origin/);
-  assert.match(text, /origin\/main merge（或 rebase）进本地 main/);
-  assert.match(text, /保留本地未推送提交/);
-  assert.match(text, /pull\/rebase 解决不了/);
+  assert.match(text, /retry_tool: `maker_build`/);
+  assert.doesNotMatch(text, /maker_build_current_directory|confirm_remote_build_without_submit|sync 提交/);
   assert.equal(build.result.structuredContent.execution_state, 'executed');
-  assert.match(build.result.structuredContent.message, /confirm_remote_build_without_submit=true/);
-  // 恢复指引只追加，不改写 Runtime 的失败详情。
+  assert.match(build.result.structuredContent.message, /retry_tool: `maker_build`/);
   assert.match(text, /- status: failed_after_commit/);
 });
 
@@ -3012,4 +3023,355 @@ test('deferred child 会保留宿主答复前写入 stdin 的 PAT 字节', async
   await once(child, 'spawn');
   await ended;
   assert.equal(Buffer.concat(received).toString('utf8'), 'pat-secret\n');
+});
+
+function makerBundleFunction(name) {
+  const start = vendorMakerSource.search(new RegExp('(?:async )?function ' + name + '[(]'));
+  assert.ok(start >= 0, name);
+  const end = vendorMakerSource.indexOf(String.fromCharCode(10) + '}', start) + 2;
+  return vendorMakerSource.slice(start, end);
+}
+
+test('Runtime 分叉先提交再合并，合并冲突保留提交且不推送', async () => {
+  for (const conflict of [false, true]) {
+    const calls = [];
+    const pushSource = makerBundleFunction('pushMakerProject');
+    const context = createContext({
+      [pushSource.match(/const requestedCwd = (path\d*)[.]resolve/)[1]]: { resolve: value => value },
+      ensureGitAvailable() {},
+      resolveUsableMakerGitWorkspace: cwd => ({ projectRoot: cwd }),
+      loadProjectConfig: () => ({ project_id: 'example-project' }),
+      ensureAuthenticatedOrigin: async () => {},
+      inspectMakerRemoteSyncStatus: async () => ({ status: 'diverged', branch: 'main' }),
+      readGit: async args => args[0] === 'status' ? ' M scripts/main.lua'
+        : args[0] === 'diff' ? 'scripts/main.lua' : 'example-commit',
+      currentBranch: async () => 'main',
+      readUnpushedCommitState: async () => ({ hasUnpushedCommits: true }),
+      gitOperationInProgress: async () => false,
+      createGitRunner: () => {},
+      generateCommitMessage: () => 'test: update project',
+      MAKER_COMMIT_IDENTITY_ARGS: [],
+      gitStep: async args => { calls.push(args[0]); },
+      mergeMakerRemote: async () => {
+        calls.push('merge');
+        return conflict ? { stage: 'merge', classification: 'merge_conflict', conflictFiles: ['scripts/main.lua'] } : undefined;
+      },
+      gitStepWithTransientRetry: async args => { calls.push(args[0]); return 0; },
+      readAheadState: async () => 'ahead',
+    });
+    new Script(pushSource + '\n' + makerBundleFunction('getBlockingRemoteSyncFailure')).runInContext(context);
+    const result = await context.pushMakerProject({ cwd: '/example-project' });
+    assert.equal(result.committed, true);
+    assert.equal(result.pushed, !conflict);
+    assert.deepEqual(calls, conflict ? ['add', 'commit', 'merge'] : ['add', 'commit', 'merge', 'push']);
+    if (conflict) {
+      assert.equal(result.status, 'failed_after_commit');
+      assert.equal(result.failure.classification, 'merge_conflict');
+    }
+  }
+});
+
+test('云端修复提交未知态贯通 Runtime 和插件，复查失败不重放或提示重试', async () => {
+  class CloudGitError extends Error {
+    constructor(unknown) { super('cloud request failed'); this.outcomeUnknown = unknown; }
+  }
+  for (const scenario of ['read-failed', 'clean', 'success', 'forbidden', 'timeout-read-failed', 'timeout-dirty', 'timeout-clean']) {
+    let reads = 0;
+    let commits = 0;
+    const context = createContext({
+      Error, CloudGitError, CLOUD_REPAIR_COMMIT_MESSAGE: 'test cloud repair',
+      getCloudGitStatus: async () => {
+        reads++;
+        if (scenario === 'read-failed' || reads > 1 && scenario === 'timeout-read-failed') throw new Error('lookup unavailable');
+        return { clean: scenario === 'clean' || reads > 1 && scenario === 'timeout-clean', head: reads > 1 ? 'after' : 'before' };
+      },
+      commitCloudGit: async (_id, input) => {
+        commits++;
+        assert.equal(input.all, true);
+        assert.equal(input.expectedHead, 'before');
+        if (scenario === 'success') return { commitSha: 'after', changedFiles: 1 };
+        throw new CloudGitError(scenario !== 'forbidden');
+      },
+      formatProgressSummary: () => [],
+      formatBuildLocalExecutionCheckLines: () => [],
+      indent2: value => value,
+    });
+    const functions = ['repairCloudWorkspace', 'formatBuildResult', 'formatBuildFailureStageLines',
+      'formatCloudRepairLines', 'formatPushRecoveryLines', 'pushRecoveryUserMessage', 'formatMakerFailureLines'];
+    new Script(functions.map(makerBundleFunction).join('\n')).runInContext(context);
+    const repair = await context.repairCloudWorkspace('example-project');
+    const unknown = scenario === 'timeout-read-failed' || scenario === 'timeout-dirty';
+    const expected = unknown ? 'unknown' : ['success', 'timeout-clean'].includes(scenario) ? 'repaired'
+      : scenario === 'clean' ? 'cloud_clean' : 'failed';
+    assert.equal(repair.status, expected, scenario);
+    assert.equal(commits, ['read-failed', 'clean'].includes(scenario) ? 0 : 1, scenario);
+    assert.equal(reads, scenario.startsWith('timeout-') ? 2 : 1, scenario);
+    const formatted = context.formatBuildResult({
+      mode: 'submit_failed_before_build', projectRoot: '/example-project', projectId: 'example-project',
+      submitResult: { status: 'failed_after_commit', branch: 'main', committed: true, pushed: false,
+        cloudRepair: repair, failure: { stage: 'push', classification: 'cloud_workspace_blocked',
+          retryable: false, nextAction: repair.message || 'Check the cloud workspace' } },
+    });
+    assert.doesNotMatch(formatted, /blocked before commit/);
+    const harness = createMainHarness(buildFailureResponder(formatted));
+    const built = await harness.call('maker_build', { session_context: previewBuildSession });
+    const result = built.result;
+    if (unknown) {
+      assert.equal(result.structuredContent.execution_state, 'unknown');
+      assert.equal(result.structuredContent.automatic_retry, false);
+      assert.match(result.structuredContent.message, /先核对/);
+      assert.doesNotMatch(result.structuredContent.message, /retry_tool|再重试|稍后重试/);
+    } else {
+      assert.notEqual(result.structuredContent.execution_state, 'unknown');
+    }
+    if (repair.status === 'repaired') assert.doesNotMatch(formatted, /并已合并到本地/);
+  }
+});
+
+test('新旧云端工作区阻塞消息均进入同一 Runtime 恢复流程', () => {
+  const pattern = vendorMakerSource.match(/CLOUD_WORKSPACE_BLOCKED_PATTERN = ([^\n]+);/)[1];
+  const context = createContext({ getMakerGitRetryDecision: () => ({ retry: false }) });
+  new Script('var CLOUD_WORKSPACE_BLOCKED_PATTERN = ' + pattern + ';\n'
+    + makerBundleFunction('isCloudWorkspaceBlockedMessage') + '\n'
+    + makerBundleFunction('classifyGitFailure')).runInContext(context);
+  for (const message of ['Working directory has unstaged changes', 'Working directory has staged changes',
+    'Could not update working tree to new HEAD', 'cloud workspace has uncommitted changes that this push would overwrite']) {
+    assert.equal(context.classifyGitFailure(message), 'cloud_workspace_blocked');
+  }
+  assert.equal(context.classifyGitFailure('non-fast-forward'), 'remote_rejected');
+});
+
+
+test('画布自动恢复只释放明确未执行的生图，等待超限保留原请求', async () => {
+  const source = makerBundleFunction('createCanvasGenerationUiWithHost');
+  for (const status of ['pending', 'running', 'unknown', 'canceled', 'failed']) {
+    for (const executionState of ['unknown', 'executed', 'not_executed', undefined]) {
+      for (const force of [false, true]) {
+        const attempt = { id: 'attempt', canvasId: 'canvas', targetNodeId: 'image', kind: 'image',
+          createdAt: '2026-10-27T00:00:00Z', status, executionState };
+        const document = { id: 'canvas', nodes: [{ id: 'image', type: 'image' }], edges: [] };
+        const context = createContext({});
+        new Script(source).runInContext(context);
+        const ui = context.createCanvasGenerationUiWithHost({
+          getDocument: () => document, videoPrompts: {}, render() {},
+          store: { listGeneration: async () => [attempt] },
+        });
+        const result = await ui.recoverForRetry('image', force);
+        const explicit = status === 'failed' && executionState === 'not_executed';
+        const live = ['pending', 'running'].includes(status);
+        assert.equal(result, explicit ? 'released' : live && !force ? 'waiting' : 'blocked',
+          [status, executionState, force].join('/'));
+        if (['pending', 'running', 'unknown', 'canceled'].includes(status))
+          assert.equal(ui.hasUnsettledResult('image'), true);
+      }
+    }
+  }
+});
+
+test('识图恢复不因超限、未知或查询失败删除原 pendingId', async () => {
+  for (const status of ['pending', 'running', 'unknown', 'failed', 'succeeded', 'lookup-failed']) {
+    for (const force of [false, true]) {
+      const context = createContext({});
+      new Script(makerBundleFunction('createUiRecognitionUiWithHost')).runInContext(context);
+      const node = { id: 'cut', uiRecognition: { pendingId: 'original-request' } };
+      const document = { id: 'canvas', nodes: [node] };
+      const ui = context.createUiRecognitionUiWithHost({ current: () => document, store: {
+        recognitionStatus: async () => {
+          if (status === 'lookup-failed') throw new Error('disconnected');
+          return { status, executionState: 'unknown' };
+        },
+      } });
+      assert.equal(await ui.recoverForRetry('cut', force), status === 'succeeded' ? 'released'
+        : ['pending', 'running'].includes(status) && !force ? 'waiting' : 'blocked');
+      assert.equal(node.uiRecognition.pendingId, 'original-request');
+    }
+  }
+});
+
+function canvasWorkflowHarness({ preparing = false, runImage, recoverImage } = {}) {
+  const tasks = [];
+  const calls = [];
+  const nodes = [
+    { id: 'group', type: 'section', templateId: '7e1cb6ad-732f-4dc3-a951-000000000015' },
+    { id: 'design', type: 'image', assetPath: 'assets/design.png' },
+    { id: 'input', type: 'image', sectionId: 'group', uiRecognition: { inputRole: 'design' } },
+    { id: 'cut', type: 'image', sectionId: 'group', uiRecognition: { inputRole: 'text-free' } },
+    { id: 'bundle', type: 'resource-bundle', sectionId: 'group' },
+    { id: 'image', type: 'image', sectionId: 'group' },
+  ];
+  const document = { id: 'canvas', nodes, edges: [] };
+  const queue = { phase: 'paused', failures: { image: 'failed' }, retries: {} };
+  const context = createContext({
+    structuredClone, setTimeout: fn => { tasks.push(fn); },
+    canvasReferences: () => [nodes[1]],
+    selectedUiRecognition: () => preparing ? undefined : { bbox: { texts: [], elements: [] } },
+  });
+  new Script(makerBundleFunction('createUi015Workflow')).runInContext(context);
+  const workflow = context.createUi015Workflow({
+    current: () => document, store: {}, needs: id => preparing && id === 'input',
+    runImage: async id => { calls.push('image:' + id); return runImage ? runImage(id) : false; },
+    recoverImage: recoverImage || (async () => 'blocked'),
+    queue: {
+      view: () => queue, remaining: () => 1,
+      start: () => { calls.push('start'); return true; },
+      stop: () => { calls.push('stop'); },
+      spendRetry: () => { calls.push('retry'); return 1; },
+    },
+    sync: () => [], save: async () => true, remember() {}, changed() {}, render() {}, log() {}, error() {},
+  });
+  return { workflow, calls, tasks };
+}
+
+test('015 准备阶段未知结果暂停；停止后不进入下一张卡或队列', async () => {
+  const blocked = canvasWorkflowHarness({ preparing: true });
+  const result = await blocked.workflow.advance('group');
+  assert.equal(result.status, 'failed');
+  assert.match(result.message, /暂停/);
+  assert.deepEqual(blocked.calls, ['image:input']);
+  assert.equal(blocked.tasks.length, 0);
+
+  let finish;
+  const waiting = canvasWorkflowHarness({ preparing: true,
+    runImage: () => new Promise(resolve => { finish = resolve; }) });
+  const pending = waiting.workflow.advance('group');
+  const stop = waiting.workflow.view('group').extra.find(action => action.label === '停止后续');
+  assert.ok(stop);
+  stop.run();
+  finish(true);
+  await pending;
+  assert.deepEqual(waiting.calls, ['image:input', 'stop']);
+  assert.equal(waiting.workflow.active, false);
+});
+
+test('015 队列恢复期间停止后，迟到回包不再次启动队列', async () => {
+  let finish;
+  const harness = canvasWorkflowHarness({
+    recoverImage: () => new Promise(resolve => { finish = resolve; }),
+  });
+  assert.equal((await harness.workflow.advance('group')).status, 'started');
+  harness.workflow.settled('group', 'paused');
+  harness.tasks.shift()();
+  const stop = harness.workflow.view('group').extra.find(action => action.label === '停止后续');
+  assert.ok(stop);
+  stop.run();
+  finish('released');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(harness.calls, ['start', 'stop']);
+  assert.equal(harness.workflow.active, false);
+});
+
+test('015 生成队列遇到未知结果不花费重试次数或再次提交', async () => {
+  const harness = canvasWorkflowHarness();
+  await harness.workflow.advance('group');
+  harness.workflow.settled('group', 'paused');
+  harness.tasks.shift()();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(harness.calls, ['start']);
+  assert.equal(harness.workflow.outcome('group').status, 'waiting');
+  assert.equal(harness.workflow.active, false);
+});
+
+test('015 明确未执行或已取回结果仍可继续原有队列', async () => {
+  for (const result of ['released', 'recovered']) {
+    const harness = canvasWorkflowHarness({ recoverImage: async () => result });
+    await harness.workflow.advance('group');
+    harness.workflow.settled('group', 'paused');
+    harness.tasks.shift()();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(harness.calls, ['start', 'retry', 'start']);
+  }
+});
+
+test('停止去文字后不再启动卡片内的识图请求', async () => {
+  const context = createContext({ selectedUiRecognition: () => undefined });
+  new Script(makerBundleFunction('createUiRecognitionUiWithHost')).runInContext(context);
+  const node = { id: 'cut', templatePending: true, uiRecognition: { enabled: true, inputRole: 'text-free' } };
+  const current = { nodes: [node] };
+  const ui = context.createUiRecognitionUiWithHost({ current: () => current, autoStopped: () => true });
+  assert.equal(await ui.runImage('cut', async () => true, true, true), false);
+});
+
+
+test('云端提交成功后 merge 或 HEAD 异常保留已执行状态', async () => {
+  for (const failurePoint of ['merge', 'head']) {
+    let pushes = 0;
+    let cloudCommits = 0;
+    let headReads = 0;
+    const source = makerBundleFunction('pushMakerProject');
+    const context = createContext({
+      [source.match(/const requestedCwd = (path\d*)[.]resolve/)[1]]: { resolve: value => value },
+      ensureGitAvailable() {}, resolveUsableMakerGitWorkspace: cwd => ({ projectRoot: cwd }),
+      loadProjectConfig: () => ({ project_id: 'example-project' }),
+      ensureAuthenticatedOrigin: async () => {},
+      inspectMakerRemoteSyncStatus: async () => ({ status: 'ahead', branch: 'main' }),
+      readGit: async args => {
+        if (args[0] === 'rev-parse') {
+          if (++headReads > 1 && failurePoint === 'head') throw new Error('HEAD read failed');
+          return 'local-commit';
+        }
+        return '';
+      },
+      currentBranch: async () => 'main',
+      readUnpushedCommitState: async () => ({ hasUnpushedCommits: true }),
+      readAheadState: async () => undefined,
+      gitStepWithTransientRetry: async args => {
+        if (args[0] === 'push') { pushes++; throw new Error('cloud blocked'); }
+        return 0;
+      },
+      toMakerGitFailure: (error, stage) => ({ stage, classification: stage === 'push' ? 'cloud_workspace_blocked' : 'local', stderr: error.message }),
+      repairCloudWorkspace: async () => { cloudCommits++; return { status: 'repaired', cloudCommitSha: 'cloud-commit' }; },
+      mergeMakerRemote: async () => { if (failurePoint === 'merge') throw new Error('merge inspection failed'); },
+      formatProgressSummary: () => [], formatBuildLocalExecutionCheckLines: () => [], indent2: value => value,
+    });
+    const functions = ['pushMakerProject', 'getBlockingRemoteSyncFailure', 'formatBuildResult',
+      'formatBuildFailureStageLines', 'formatCloudRepairLines', 'formatPushRecoveryLines',
+      'pushRecoveryUserMessage', 'formatMakerFailureLines'];
+    new Script(functions.map(makerBundleFunction).join('\n')).runInContext(context);
+    const submitted = await context.pushMakerProject({ cwd: '/example-project' });
+    assert.equal(submitted.cloudRepair.status, 'repaired');
+    assert.equal(submitted.failure.stage, 'merge');
+    assert.equal(submitted.pushed, false);
+    assert.equal(pushes, 1);
+    assert.equal(cloudCommits, 1);
+    const formatted = context.formatBuildResult({ mode: 'submit_failed_before_build',
+      projectRoot: '/example-project', projectId: 'example-project', submitResult: submitted });
+    const harness = createMainHarness(buildFailureResponder(formatted));
+    const result = await harness.call('maker_build', { session_context: previewBuildSession });
+    assert.equal(result.result.structuredContent.execution_state, 'executed');
+    assert.equal(result.result.structuredContent.automatic_retry, false);
+    assert.match(result.result.structuredContent.message, /cloud-commit/);
+  }
+});
+
+test('tools/list 默认路由预算为 115 秒并早于宿主 120 秒结束', () => {
+  const scheduled = [];
+  const context = createContext({ module: { exports: {} }, require: requireFromTest,
+    setTimeout: (fn, ms) => { scheduled.push(ms); return { unref() {} }; }, clearTimeout() {},
+  });
+  new Script(readFileSync(new URL('node/mcp-root-router.cjs', pluginRoot), 'utf8')).runInContext(context);
+  const router = context.module.exports.createMcpRootRouter({ writeHost() {}, writeRuntime() {} });
+  router.handleHostLine(JSON.stringify({ jsonrpc: '2.0', id: 'list', method: 'cindy/tools-list',
+    params: { target_dir: '/tmp/trusted-maker' } }));
+  assert.deepEqual(scheduled, [115_000]);
+  assert.ok(scheduled[0] < 120_000);
+});
+
+test('新版 Git 指引统一转换到获授权的通用 Git 和 Maker 插件入口', async () => {
+  const tick = String.fromCharCode(96);
+  const messages = [
+    'Maker 远端有 2 个新提交，且本地工作区干净。运行 ' + tick + 'taptap-maker git sync' + tick + ' 拉取后再开始修改。',
+    '构建或提交时继续使用 maker_build_current_directory，或运行 ' + tick + 'taptap-maker git push' + tick + '。',
+    '请按 failure 信息处理，或运行 ' + tick + 'taptap-maker git cloud-status --target-dir <项目目录>' + tick + ' 查看云端改动后重试 maker_build_current_directory。',
+  ];
+  for (const message of messages) {
+    const harness = createMainHarness(async () => ({ ok: true, result: { content: [{ type: 'text', text: message }],
+      structuredContent: { success: true, next_action: message } } }));
+    const response = await harness.call('maker_status', { detail: true, session_context: previewBuildSession });
+    assert.doesNotMatch(JSON.stringify(response.result), /taptap-maker git|maker_build_current_directory/);
+    if (message.includes('git sync')) assert.match(response.result.content[0].text, /先取得用户授权/);
+    if (message.includes('cloud-status')) assert.match(response.result.content[0].text, /确认结果前不要重试/);
+    const failure = createMainHarness(buildFailureResponder(message));
+    const failed = await failure.call('maker_build', { session_context: previewBuildSession });
+    assert.doesNotMatch(JSON.stringify(failed.result), /taptap-maker git|maker_build_current_directory/);
+  }
 });

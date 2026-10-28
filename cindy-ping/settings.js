@@ -99,6 +99,17 @@ const strings = {
     CONNECTION_TIMEOUT: 'Could not connect to the plugin. Reopen plugin details and try again.',
   },
 };
+const modelStrings = {
+  'zh-CN': { choose: '选择模型', search: '搜索模型或供应商', all: '全部', inherit: '沿用 Cindy 默认模型', keep: '保持任务当前模型', empty: '没有找到匹配的模型', hidden: '显示隐藏模型', hide: '收起隐藏模型', effort: '推理强度', refresh: '刷新模型', default: '默认', efforts: { none: '无', minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高', ultra: '极高' } },
+  en: { choose: 'Choose a Model', search: 'Search models or providers', all: 'All', inherit: 'Use Cindy Defaults', keep: 'Keep Current Task Model', empty: 'No matching models', hidden: 'Show hidden models', hide: 'Hide hidden models', effort: 'Reasoning', refresh: 'Refresh models', default: 'Default', efforts: { none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Max', ultra: 'Ultra' } },
+  ja: { choose: 'モデルを選択', search: 'モデル・プロバイダーを検索', all: 'すべて', inherit: 'Cindy の既定モデルを使う', keep: 'タスクの現在のモデルを維持', empty: '一致するモデルがありません', hidden: '非表示のモデルを表示', hide: '非表示のモデルを隠す', effort: '推論の強度', refresh: 'モデルを更新', default: '既定', efforts: { none: 'なし', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '非常に高い', max: '最大', ultra: '最高' } },
+  ko: { choose: '모델 선택', search: '모델 또는 공급자 검색', all: '전체', inherit: 'Cindy 기본 모델 사용', keep: '작업의 현재 모델 유지', empty: '일치하는 모델이 없어요', hidden: '숨긴 모델 표시', hide: '숨긴 모델 접기', effort: '추론 강도', refresh: '모델 새로고침', default: '기본값', efforts: { none: '없음', minimal: '최소', low: '낮음', medium: '중간', high: '높음', xhigh: '매우 높음', max: '최대', ultra: '최고' } },
+};
+const M = key => (modelStrings[document.documentElement.lang] || modelStrings.en)[key];
+const modelPicker = { open: false, query: '', engine: 'all', hidden: false, active: 0 };
+const modelIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>';
+const chevronIcon = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
+const modelCheck = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>';
 const pinIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-5 1-4 4v4l-2 2-5-5 2-2h4l4-4zM5 19l-3 3"/></svg>';
 const deleteIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>';
 function escapeText(value) {
@@ -526,6 +537,7 @@ async function pickFixedTarget(emote, action = emote.action) {
   } catch (error) { if (revision === targetSelectionRevision) { destinationPicker = null; renderEditor(); report(error); } }
 }
 function renderEditor() {
+  closeModelPicker();
   const emote = slots[selected];
   if (!emote) return;
   if (destinationPicker && destinationPicker.emote !== emote) { destinationPicker = null; targetSelectionRevision++; }
@@ -574,11 +586,120 @@ function renderEditor() {
   renderValidation();
 }
 const sameModel = (a, b) => a?.agentKind === b?.agentKind && a?.providerId === b?.providerId && a?.model === b?.model;
+const modelEngineName = kind => ({ cc: 'Claude Code', codex: 'Codex', pi: 'Pi' }[kind] || kind);
 function modelLabel(route, details) {
   const agent = { cc: 'Claude Code', codex: 'Codex', pi: 'Pi' }[route.agentKind] || route.agentKind;
   return `${details?.name || route.model} · ${agent} · ${details?.providerName || route.providerId}`;
 }
-function renderModels() {
+function modelProviderMark(route, details) {
+  if (!route) return modelIcon;
+  const kind = Object.hasOwn(CindyPingProviderMarks.byId, route.providerId)
+    ? CindyPingProviderMarks.byId[route.providerId] : null;
+  if (kind) {
+    const logo = CindyPingProviderMarks.logos[kind];
+    return `<svg viewBox="${logo.viewBox}" fill="currentColor" aria-hidden="true">${logo.paths.map(path => `<path d="${path}"/>`).join('')}</svg>`;
+  }
+  const name = (details?.providerName || route.providerId).trim();
+  return `<span class="provider-monogram" aria-hidden="true">${escapeText([...name][0]?.toUpperCase() || '?')}</span>`;
+}
+function filterModelOptions(options, state, currentRoute) {
+  const words = state.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return options.filter(item => {
+    if (item.details?.visible === false && !state.hidden && !sameModel(item.route, currentRoute)) return false;
+    if (!words.length && state.engine !== 'all' && item.route.agentKind !== state.engine) return false;
+    const text = [item.details?.name, item.route.model, item.details?.providerName,
+      item.route.providerId, modelEngineName(item.route.agentKind)].join(' ').toLowerCase();
+    return words.every(word => text.includes(word));
+  });
+}
+function modelRouteUnavailable(route, option) {
+  return Boolean(route && (!option ||
+    (route.effort !== option.route.effort && !option.efforts.includes(route.effort)) ||
+    (route.fastMode && !option.supportsFastMode)));
+}
+function chooseModel(emote, option) {
+  if (slots[selected] !== emote) return;
+  modelPicker.open = false;
+  const route = option?.route ?? null;
+  if (!sameModel(emote.route, route) || (option && modelRouteUnavailable(emote.route, option))) {
+    emote.route = route ? { ...route } : null;
+    change();
+  }
+  renderModels();
+  $('#emote-model')?.focus({ preventScroll: true });
+}
+function closeModelPicker(focus = false) {
+  modelPicker.open = false;
+  if ($('#model-picker-panel')) $('#model-picker-panel').hidden = true;
+  $('#emote-model')?.setAttribute('aria-expanded', 'false');
+  if (focus) $('#emote-model')?.focus({ preventScroll: true });
+}
+function positionModelPicker() {
+  const panel = $('#model-picker-panel'), trigger = $('#emote-model');
+  if (!modelPicker.open || !panel || !trigger) return;
+  const rect = trigger.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) { closeModelPicker(); return; }
+  const width = Math.min(380, window.innerWidth - 16);
+  const above = rect.top - 16, below = window.innerHeight - rect.bottom - 16;
+  const upwards = below < 260 && above > below;
+  panel.style.width = `${width}px`;
+  panel.style.maxHeight = `${Math.max(80, Math.min(380, upwards ? above : below))}px`;
+  panel.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  const height = panel.getBoundingClientRect().height;
+  panel.style.top = `${Math.max(8, upwards ? rect.top - height - 8 : rect.bottom + 8)}px`;
+}
+function highlightModel(index, scroll = false) {
+  const rows = [...document.querySelectorAll('#model-options [role="option"]')];
+  if (!rows.length) { $('#model-search')?.removeAttribute('aria-activedescendant'); return; }
+  modelPicker.active = (index + rows.length) % rows.length;
+  rows.forEach((row, i) => row.classList.toggle('is-active', i === modelPicker.active));
+  $('#model-search')?.setAttribute('aria-activedescendant', rows[modelPicker.active].id);
+  if (scroll) rows[modelPicker.active].scrollIntoView({ block: 'nearest' });
+}
+function renderModelOptions() {
+  const list = $('#model-options'); if (!list) return;
+  const emote = slots[selected], route = emote.route;
+  list.replaceChildren();
+  const addRow = (name, detail, option) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'model-option'; button.tabIndex = -1;
+    button.id = `model-option-${list.querySelectorAll('[role="option"]').length}`;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(sameModel(route, option?.route)));
+    button.title = option ? modelLabel(option.route, option.details) : name;
+    button.setAttribute('aria-label', button.title);
+    button.innerHTML = `<span class="model-option-icon">${modelProviderMark(option?.route, option?.details)}</span><span class="model-option-text"><span>${escapeText(name)}</span>${detail ? `<small>${escapeText(detail)}</small>` : ''}</span><span class="model-option-check">${sameModel(route, option?.route) ? modelCheck : ''}</span>`;
+    button.onclick = () => chooseModel(emote, option);
+    button.onpointerenter = () => highlightModel([...list.querySelectorAll('[role="option"]')].indexOf(button));
+    list.append(button);
+  };
+  const inherit = M(emote.action === 'existing' ? 'keep' : 'inherit');
+  if (!modelPicker.query.trim() || inherit.toLowerCase().includes(modelPicker.query.trim().toLowerCase())) addRow(inherit, '', null);
+  const groups = new Map();
+  for (const option of filterModelOptions(modelList, modelPicker, route)) {
+    const key = option.route.providerId;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(option);
+  }
+  for (const options of groups.values()) {
+    const heading = document.createElement('div'); heading.className = 'model-source';
+    heading.innerHTML = `<span class="model-source-icon">${modelProviderMark(options[0].route, options[0].details)}</span><span>${escapeText(options[0].details?.providerName || options[0].route.providerId)}</span>`;
+    heading.setAttribute('aria-hidden', 'true');
+    list.append(heading);
+    for (const option of options) addRow(option.details?.name || option.route.model, modelEngineName(option.route.agentKind), option);
+  }
+  if (!list.querySelector('[role="option"]')) {
+    const empty = document.createElement('div'); empty.className = 'model-empty';
+    empty.textContent = modelsLoading ? L('正在获取可用模型…', 'Loading models…') : M('empty'); list.append(empty);
+  }
+  document.querySelectorAll('[data-model-engine]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.modelEngine === (modelPicker.query.trim() ? 'all' : modelPicker.engine)));
+  });
+  const rows = [...list.querySelectorAll('[role="option"]')];
+  highlightModel(Math.max(0, rows.findIndex(row => row.getAttribute('aria-selected') === 'true')));
+  positionModelPicker();
+}
+function renderModels(focusId) {
   const container = $('#model-settings'); if (!container) return;
   const emote = slots[selected], route = emote.route;
   if (emote.target && emote.action !== 'new') {
@@ -587,20 +708,32 @@ function renderModels() {
   }
   const index = route ? modelList.findIndex(item => sameModel(item.route, route)) : -1;
   const option = index >= 0 ? modelList[index] : null;
-  const invalid = modelsLoaded && route && (!option ||
-    (route.effort !== option.route.effort && !option.efforts.includes(route.effort)) ||
-    (route.fastMode && !option.supportsFastMode));
-  container.innerHTML = `<label for="emote-model">${L('此表情的模型', 'Model for this emote')}</label>
-    <div class="model-row"><select id="emote-model"></select><button id="refresh-models" class="subtle" ${modelsLoading ? 'disabled' : ''}>${T.refresh}</button></div>
+  const invalid = modelsLoaded && modelRouteUnavailable(route, option);
+  const name = route ? option?.details?.name || route.model : M(emote.action === 'existing' ? 'keep' : 'inherit');
+  const detail = route ? `${option?.details?.providerName || route.providerId} · ${modelEngineName(route.agentKind)}` : '';
+  const engines = ['all', ...new Set(modelList.map(item => item.route.agentKind))];
+  container.innerHTML = `<label id="emote-model-label">${L('此表情的模型', 'Model for this emote')}</label>
+    <button id="emote-model" type="button" class="model-trigger" aria-haspopup="dialog" aria-controls="model-picker-panel" aria-expanded="${modelPicker.open}" aria-labelledby="emote-model-label model-current-name"><span class="model-trigger-icon">${modelProviderMark(route, option?.details)}</span><span class="model-trigger-text"><span id="model-current-name">${escapeText(name)}</span>${detail ? `<small>${escapeText(detail)}</small>` : ''}</span>${chevronIcon}</button>
+    <div id="model-picker-panel" class="model-picker-panel" role="dialog" aria-label="${M('choose')}" ${modelPicker.open ? '' : 'hidden'}>
+      <div class="model-search-row"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input id="model-search" type="search" role="combobox" aria-label="${M('search')}" placeholder="${M('search')}" aria-controls="model-options" aria-expanded="true" autocomplete="off" value="${escapeText(modelPicker.query)}"><button id="refresh-models" type="button" class="model-refresh" aria-label="${M('refresh')}" title="${M('refresh')}" ${modelsLoading ? 'disabled' : ''}>↻</button></div>
+      <div class="model-filters" role="group" aria-label="${M('choose')}">${engines.map(engine => `<button type="button" data-model-engine="${escapeText(engine)}" aria-pressed="false">${escapeText(engine === 'all' ? M('all') : modelEngineName(engine))}</button>`).join('')}</div>
+      <div id="model-options" class="model-options" role="listbox" aria-label="${M('choose')}"></div>
+      ${modelList.some(item => item.details?.visible === false) ? `<button id="model-hidden" type="button" class="model-hidden">${M(modelPicker.hidden ? 'hide' : 'hidden')}</button>` : ''}
+    </div>
     <div id="model-tuning" class="model-tuning"></div><p id="model-scope"></p><p id="model-message" role="status"></p>`;
-  const select = $('#emote-model');
-  select.add(new Option(emote.action === 'existing' ? L('保持目标任务当前模型', 'Keep target task model') : L('沿用 Cindy 默认配置', 'Use Cindy Defaults'), ''));
-  modelList.forEach((item, i) => select.add(new Option(modelLabel(item.route, item.details), String(i))));
-  if (route && !option) { const missing = new Option(modelLabel(route), 'missing'); missing.disabled = true; select.add(missing); }
-  select.value = route ? option ? String(index) : 'missing' : '';
-  select.onchange = () => {
-    emote.route = select.value === '' ? null : { ...modelList[Number(select.value)].route };
-    renderModels(); change();
+  $('#emote-model').onclick = () => {
+    if (modelPicker.open) { closeModelPicker(); return; }
+    Object.assign(modelPicker, { open: true, query: '', engine: 'all', hidden: false, active: 0 });
+    renderModels();
+  };
+  $('#model-search').oninput = event => { modelPicker.query = event.target.value; renderModelOptions(); };
+  document.querySelectorAll('[data-model-engine]').forEach(button => button.onclick = () => {
+    modelPicker.engine = button.dataset.modelEngine; modelPicker.query = '';
+    $('#model-search').value = ''; renderModelOptions(); $('#model-search').focus();
+  });
+  if ($('#model-hidden')) $('#model-hidden').onclick = () => {
+    modelPicker.hidden = !modelPicker.hidden;
+    $('#model-hidden').textContent = M(modelPicker.hidden ? 'hide' : 'hidden'); renderModelOptions();
   };
   $('#refresh-models').onclick = () => void loadModels();
   $('#model-scope').textContent = emote.action === 'existing'
@@ -610,28 +743,46 @@ function renderModels() {
   message.textContent = modelsLoading ? L('正在获取可用模型…', 'Loading models…') : modelsError ? T[modelsError] || T.OPERATION_FAILED :
     invalid ? T.MODEL_UNAVAILABLE : modelsLoaded && !modelList.length ? L('没有可单独选择的模型，请检查 Cindy 的模型设置。', 'No models available. Check Cindy model settings.') : '';
   message.classList.toggle('error', Boolean(modelsError || invalid));
-  if (!route || !option) return;
   const tuning = $('#model-tuning');
-  if (option.efforts.length) {
-    const label = document.createElement('label'); label.textContent = L('推理强度', 'Reasoning effort');
+  if (route && option?.efforts.length) {
+    const label = document.createElement('label'); label.textContent = M('effort');
     const effort = document.createElement('select'); effort.id = 'model-effort';
-    const names = { none: '无', minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高', ultra: '极高' };
-    for (const value of option.efforts) effort.add(new Option(T === strings['zh-CN'] ? names[value] || value : value, value));
+    for (const value of option.efforts) effort.add(new Option(M('efforts')[value] || value || M('default'), value));
     if (!option.efforts.includes(route.effort)) {
       const current = new Option(route.effort || L('默认', 'Default'), route.effort);
       current.disabled = route.effort !== option.route.effort; effort.add(current);
     }
     effort.value = route.effort;
-    effort.onchange = () => { emote.route = { ...emote.route, effort: effort.value }; renderModels(); change(); };
+    effort.onchange = () => { emote.route = { ...emote.route, effort: effort.value }; renderModels('model-effort'); change(); };
     label.append(effort); tuning.append(label);
   }
-  if (option.supportsFastMode || route.fastMode) {
+  if (route && option && (option.supportsFastMode || route.fastMode)) {
     const label = document.createElement('label'); label.className = 'check';
     const fast = document.createElement('input'); fast.type = 'checkbox'; fast.id = 'model-fast'; fast.checked = route.fastMode;
-    fast.onchange = () => { emote.route = { ...emote.route, fastMode: fast.checked }; renderModels(); change(); };
+    fast.onchange = () => { emote.route = { ...emote.route, fastMode: fast.checked }; renderModels('model-fast'); change(); };
     label.append(fast, route.fastMode === 'ultrafast' ? L('Fast · 超快', 'Fast · Ultrafast') : 'Fast'); tuning.append(label);
   }
+  if (modelPicker.open) {
+    renderModelOptions(); $('#model-search').focus({ preventScroll: true });
+  } else if (focusId) $(`#${focusId}`)?.focus({ preventScroll: true });
 }
+document.addEventListener('pointerdown', event => {
+  if (modelPicker.open && !event.target.closest('#model-picker-panel, #emote-model')) closeModelPicker();
+});
+document.addEventListener('focusin', event => {
+  if (modelPicker.open && !event.target.closest('#model-picker-panel, #emote-model')) closeModelPicker();
+});
+document.addEventListener('keydown', event => {
+  if (!modelPicker.open || event.isComposing) return;
+  if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeModelPicker(true); }
+  else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault(); highlightModel(modelPicker.active + (event.key === 'ArrowDown' ? 1 : -1), true);
+  } else if (event.key === 'Enter' && event.target.id === 'model-search') {
+    event.preventDefault(); document.querySelectorAll('#model-options [role="option"]')[modelPicker.active]?.click();
+  }
+});
+window.addEventListener('resize', positionModelPicker);
+window.addEventListener('scroll', positionModelPicker, true);
 async function loadModels() {
   if (modelsLoading) return;
   modelsLoading = true; modelsError = ''; renderModels();

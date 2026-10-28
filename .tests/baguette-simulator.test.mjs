@@ -1,4 +1,8 @@
 import './baguette/clipboard.test.cjs';
+import './baguette/memory-mode.test.cjs';
+import './baguette/resource-usage.test.cjs';
+import './baguette/manage-selection.test.cjs';
+import './baguette/manage-splitter.test.cjs';
 import './baguette/control-page.test.cjs';
 import './baguette/keyboard-events.test.cjs';
 import './baguette/stream-recovery.test.cjs';
@@ -11,6 +15,8 @@ import './baguette/viewer-restart.test.cjs';
 import './baguette/native-release.test.cjs';
 import './baguette/paste-compat.test.cjs';
 import './baguette/screen-pieces.test.cjs';
+import './baguette/wheel-overlay.test.cjs';
+import './baguette/native-contacts.test.cjs';
 import './baguette/fold-orientation.test.cjs';
 import './baguette/runtime.test.cjs';
 import './baguette/device-manager.test.cjs';
@@ -34,3 +40,4 @@ import './baguette/agent-health.test.cjs';
 import './baguette/android.test.cjs';
 
 import './baguette/android-parity.test.cjs';
+import './baguette/android-gestures.test.cjs';

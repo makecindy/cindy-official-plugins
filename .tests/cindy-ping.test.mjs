@@ -392,3 +392,67 @@ test('settings adopt normalized saves without overwriting a newer incomplete dra
     assert.equal(result.config.emotes[0].action, 'none');
   }
 });
+
+// Production picker filtering and click handler: the old native select had no search
+// or hidden-model policy. Keep source identity and per-emote tuning across selections.
+function modelPickerFixture(emotes = []) {
+  const settings = source('settings.js');
+  const filter = settings.slice(settings.indexOf('function filterModelOptions('), settings.indexOf('function closeModelPicker('));
+  const same = settings.match(/^const sameModel = .*$/m)[0];
+  const engine = settings.match(/^const modelEngineName = .*$/m)[0];
+  let writes = 0;
+  const context = vm.createContext({ slots: emotes, selected: 0, modelPicker: { open: true },
+    renderModels: () => {}, change: () => { writes++; }, $: () => ({ focus() {} }) });
+  vm.runInContext(`${same}\n${engine}\n${filter}\nglobalThis.api={filterModelOptions,chooseModel};`, context);
+  return { ...context.api, writes: () => writes };
+}
+test('model picker searches every source and keeps hidden current routes visible', () => {
+  const f = modelPickerFixture();
+  const model = (agentKind, providerId, visible = true) => ({
+    route: { agentKind, providerId, model: 'example-model', effort: 'medium', fastMode: false },
+    details: { name: 'Example Model', providerName: providerId, visible },
+  });
+  const items = [model('cc', 'Primary'), model('codex', 'Secondary'), model('pi', 'Hidden', false)];
+  const state = { query: '', engine: 'cc', hidden: false };
+  assert.deepEqual(f.filterModelOptions(items, state), [items[0]]);
+  assert.deepEqual(f.filterModelOptions(items, { ...state, query: 'MODEL secondary' }), [items[1]]);
+  assert.deepEqual(f.filterModelOptions(items, { ...state, engine: 'all' }), items.slice(0, 2));
+  assert.deepEqual(f.filterModelOptions(items, { ...state, engine: 'all' }, items[2].route), items);
+  assert.deepEqual(f.filterModelOptions(items, { ...state, engine: 'all', hidden: true }), items);
+  assert.deepEqual(f.filterModelOptions(items, { ...state, query: 'missing' }), []);
+});
+test('model picker preserves tuning on reselection and changes only the selected emote', () => {
+  const route = { agentKind: 'codex', providerId: 'primary', model: 'example', effort: 'high', fastMode: 'ultrafast' };
+  const emotes = [{ route: clone(route) }, { route: null }];
+  const f = modelPickerFixture(emotes);
+  f.chooseModel(emotes[0], { route: { ...route, effort: 'medium', fastMode: false },
+    efforts: ['medium', 'high'], supportsFastMode: true });
+  assert.deepEqual(emotes[0].route, route);
+  assert.equal(f.writes(), 0);
+  const option = { route: { ...route, providerId: 'secondary', effort: 'low', fastMode: false } };
+  f.chooseModel(emotes[0], option);
+  assert.deepEqual(clone(emotes[0].route), option.route);
+  assert.notEqual(emotes[0].route, option.route);
+  assert.equal(emotes[1].route, null);
+  assert.equal(f.writes(), 1);
+  f.chooseModel(emotes[1], { route });
+  assert.equal(emotes[1].route, null);
+  assert.equal(f.writes(), 1);
+  f.chooseModel(emotes[0], null);
+  assert.equal(emotes[0].route, null);
+  assert.equal(f.writes(), 2);
+});
+
+test('reselecting a model repairs tuning that its provider no longer supports', () => {
+  const route = { agentKind: 'codex', providerId: 'primary', model: 'example', effort: 'medium', fastMode: false };
+  const option = { route, efforts: ['low', 'medium', 'high'], supportsFastMode: false };
+  for (const changed of [{ effort: 'retired' }, { fastMode: true }]) {
+    const emotes = [{ route: { ...route, ...changed } }];
+    const f = modelPickerFixture(emotes);
+    f.chooseModel(emotes[0], option);
+    assert.deepEqual(clone(emotes[0].route), route);
+    assert.equal(f.writes(), 1);
+    f.chooseModel(emotes[0], option);
+    assert.equal(f.writes(), 1, 'valid defaults stay unchanged on the next selection');
+  }
+});

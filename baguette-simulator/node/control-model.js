@@ -1,6 +1,5 @@
 'use strict';
-// Pure view logic for the controller page. No DOM, no network: control.js
-// renders what these functions return, and the unit tests exercise them directly.
+// Shared view logic and small UI controls. No network access.
 (function (root) {
   const STRINGS = {
     'zh-CN': {
@@ -54,6 +53,271 @@
   };
 
   const strings = (lang) => STRINGS[lang] || STRINGS.en;
+  function memoryOptions(lang) {
+    return (lang==='zh-CN'
+      ? [['saving','节省（默认）'],['standard','标准'],['minimal','极简（高级）']]
+      : [['saving','Save memory (default)'],['standard','Standard'],['minimal','Minimal (advanced)']])
+      .map(([value,label])=>({value,label}));
+  }
+  function memoryHelp(lang) {
+    return lang==='zh-CN'
+      ? '节省模式关闭搜索、健康、部分游戏与诊断服务。极简还影响登录、支付、照片、推送等，仅用于限定范围的玩法或界面测试。完整验收选标准。'
+      : 'Saving disables search, health and some game/diagnostic services. Minimal also affects login, purchases, photos and push; use only for scoped gameplay/UI tests. Use Standard for full acceptance tests.';
+  }
+
+  function memoryPicker(value, lang, onChange, disabled = false, doc = globalThis.document) {
+    const zh = lang === 'zh-CN';
+    const hints = zh ? {
+      saving: '默认选择，减少后台内存占用；停用搜索、健康及部分游戏与诊断服务，相关功能测试可能受影响。',
+      standard: '保留完整系统服务，适合完整验收；内存占用通常更高。',
+      minimal: '进一步节省内存，但可能影响登录、支付、照片、推送及部分游戏服务。仅用于明确范围的核心玩法或 UI 测试。',
+    } : {
+      saving: 'Default. Reduces background memory use by disabling search, health and some game/diagnostic services. Tests of those features may be affected.',
+      standard: 'Full system services for complete acceptance testing; typically uses more memory.',
+      minimal: 'Saves more memory, but may affect login, purchases, photos, push and some game services. Only for clearly scoped gameplay or UI tests.',
+    };
+    const wrap = doc.createElement('div'); wrap.className = 'memory-choice';
+    const title = doc.createElement('div'); title.className = 'memory-heading'; title.textContent = zh ? '启动模式' : 'Startup mode';
+    const group = doc.createElement('div'); group.className = 'memory-options';
+    group.setAttribute('role', 'group'); group.setAttribute('aria-label', title.textContent);
+    const hint = doc.createElement('p'); hint.className = 'memory-hint'; hint.setAttribute('aria-live', 'polite');
+    const options = memoryOptions(lang);
+    const buttons = options.map(({value: mode}) => {
+      const button = doc.createElement('button'); button.type = 'button'; button.className = 'memory-option';
+      button.setAttribute('data-mode', mode); button.disabled = disabled;
+      button.textContent = memoryLabel(mode, lang);
+      button.addEventListener('click', () => { if (!button.disabled) { select(mode); onChange(mode); } });
+      group.append(button); return button;
+    });
+    function select(mode) {
+      buttons.forEach((button, i) => button.setAttribute('aria-pressed', String(options[i].value === mode)));
+      hint.textContent = hints[mode] || hints.saving;
+    }
+    select(value);
+    const details = iconButton(zh ? '模式区别与注意事项' : 'Compare modes', doc); details.className += ' memory-help';
+    details.setAttribute('aria-haspopup', 'dialog');
+    details.addEventListener('click', () => {
+      const dialog = doc.createElement('dialog'); dialog.className = 'memory-dialog'; dialog.setAttribute('aria-label', details.title);
+      const heading = doc.createElement('h2'); heading.textContent = details.title;
+      const help = doc.createElement('p'); help.textContent = memoryHelp(lang);
+      const actions = doc.createElement('div'); actions.className = 'memory-actions';
+      const close = doc.createElement('button'); close.type = 'button'; close.className = 'btn secondary'; close.textContent = zh ? '关闭说明' : 'Close';
+      const dismiss = () => { dialog.close(); dialog.remove(); };
+      close.addEventListener('click', dismiss); dialog.addEventListener('cancel', dismiss);
+      actions.append(close); dialog.append(heading, help, actions); doc.body.append(dialog); dialog.showModal(); close.focus();
+    });
+    title.append(details); wrap.append(title, group, hint); return wrap;
+  }
+
+  function memoryLabel(mode, lang) {
+    const labels = lang === 'zh-CN'
+      ? {saving:'节省', standard:'标准', minimal:'极简', custom:'自定义', unknown:'待确认'}
+      : {saving:'Save memory', standard:'Standard', minimal:'Minimal', custom:'Custom', unknown:'Unconfirmed'};
+    return labels[mode] || labels.unknown;
+  }
+  // Always derive the visible value from fresh device evidence, never the boot
+  // picker or a previous page's choice. Shutdown has no active memory profile.
+  function memoryStatus(device, lang, requested) {
+    if (!device || platform(device) !== 'iOS' || device.state === 'Shutdown') return '';
+    const mode = device.state === 'Booted' ? device.memoryMode : null;
+    return (lang === 'zh-CN' ? '内存模式：' : 'Memory mode: ') + memoryLabel(mode?.mode, lang)
+      + (mode?.mode && mode.mode !== 'unknown' && mode.verified !== true ? (lang === 'zh-CN' ? '（未核验）' : ' (unverified)') : '')
+      + (requested && (requested !== mode?.mode || mode?.verified !== true)
+        ? (lang === 'zh-CN' ? ` · 重启后：${memoryLabel(requested,lang)}` : ` · After restart: ${memoryLabel(requested,lang)}`) : '');
+  }
+  function showMemoryDetails(device, lang, choice = {}, doc = globalThis.document) {
+    const zh = lang === 'zh-CN';
+    const dialog = doc.createElement('dialog'); dialog.className = 'memory-dialog';
+    dialog.setAttribute('aria-label', zh ? '内存模式' : 'Memory mode');
+    const title = doc.createElement('h2'); title.textContent = memoryStatus(device, lang);
+    const name = doc.createElement('p'); name.textContent = device.name;
+    const actual = device.state === 'Booted' && device.memoryMode?.verified === true ? device.memoryMode.mode : null;
+    const hint = doc.createElement('p'); hint.className = 'memory-pending'; hint.setAttribute('role','status');
+    let selected = choice.value || actual || '', busy = false;
+    const restart = doc.createElement('button'); restart.type = 'button'; restart.className = 'btn primary memory-restart';
+    function update(mode) {
+      selected = mode || actual || '';
+      restart.disabled = !memoryOptions(lang).some(option => option.value === selected);
+      restart.textContent = selected !== actual ? (zh ? '重启并应用' : 'Restart & apply') : (zh ? '重启模拟器' : 'Restart simulator');
+      hint.hidden = !mode || mode === actual;
+      hint.textContent = hint.hidden ? '' : (zh
+        ? `已选择${memoryLabel(mode,lang)}，重启模拟器后生效。当前 App 继续运行。`
+        : `${memoryLabel(mode,lang)} selected. Takes effect after restarting the simulator. Current apps keep running.`);
+    }
+    const picker = memoryPicker(choice.value || actual || '',lang,mode=>{choice.onChange?.(mode);update(mode);},false,doc);
+    update(choice.value);
+    const actions = doc.createElement('div'); actions.className = 'memory-actions';
+    const close = doc.createElement('button'); close.className = 'btn secondary'; close.type = 'button'; close.textContent = zh ? '完成' : 'Done';
+    const dismiss = () => { if (!busy) { dialog.close(); dialog.remove(); } };
+    close.addEventListener('click', dismiss); dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); }); actions.append(close);
+    const warning = doc.createElement('p'); warning.className = 'memory-restart-note';
+    warning.hidden = typeof choice.onRestart !== 'function';
+    warning.textContent = zh ? '重启会退出当前 App，保留 App 和数据。' : 'Restarting closes current apps. Apps and data are kept.';
+    const error = doc.createElement('p'); error.className = 'memory-restart-error'; error.setAttribute('role','alert'); error.hidden = true;
+    if (typeof choice.onRestart === 'function') {
+      actions.append(restart);
+      restart.addEventListener('click', async () => {
+        if (busy || restart.disabled) return;
+        busy = true; close.disabled = true; restart.disabled = true;
+        picker.querySelectorAll('button').forEach(button => { button.disabled = true; });
+        restart.textContent = zh ? '正在重启…' : 'Restarting…';
+        try { await choice.onRestart(selected); busy = false; dismiss(); }
+        catch {
+          busy = false; close.disabled = false;
+          restart.textContent = zh ? '重启未完成' : 'Restart incomplete';
+          error.hidden = false;
+          error.textContent = zh ? '未能确认重启完成。请关闭此窗口，查看设备状态后再操作。' : 'Could not confirm the restart completed. Close this dialog and check the device status before trying again.';
+        }
+      });
+    }
+    dialog.append(title, name, picker, hint, warning, error, actions); doc.body.append(dialog); dialog.showModal(); close.focus();
+  }
+
+  async function restartMemoryMode(device, mode, request) {
+    if (!device?.udid || platform(device) !== 'iOS' || !memoryOptions('en').some(option => option.value === mode)) throw Error('INVALID_ARGUMENT');
+    // One worker-owned operation survives page navigation during shutdown.
+    const started = await request('restart_device', {udid:device.udid,memoryMode:mode});
+    if (!started || started.ok === false) throw Error('BOOT_UNCONFIRMED');
+    return started;
+  }
+
+  function memoryNotice(result, lang, requested) {
+    const mode = result?.memoryMode;
+    if (!mode) return '';
+    requested ??= mode.requested;
+    const mismatch = requested && mode.mode !== requested;
+    if (mode.verified === true && !mismatch && !mode.warning) return '';
+    const zh = lang === 'zh-CN';
+    const label = (value) => memoryOptions(lang).find(o => o.value === value)?.label
+      || (zh ? '自定义或未知' : 'Custom or unknown');
+    return [zh ? `实际内存模式：${label(mode.mode)}。` : `Actual memory mode: ${label(mode.mode)}.`,
+      mismatch ? (zh ? `与所选的${label(requested)}模式不符。` : `Does not match the selected ${label(requested)} mode.`) : '',
+      mode.verified !== true ? (zh ? '未能核验服务配置。' : 'Service configuration could not be verified.') : '',
+      zh ? '设备已启动，请先核对配置再开始测试。' : 'The device has started. Check its configuration before testing.',
+      mode.warning || ''].filter(Boolean).join(' ');
+  }
+
+  function resourceValue(metric, lang) {
+    if (metric?.status !== 'ok' || !Number.isFinite(metric.bytes) || metric.bytes < 0) {
+      return metric?.status === 'unsupported' ? (lang === 'zh-CN' ? '此系统暂不支持' : 'Unavailable on this OS')
+        : metric?.status === 'unattributed' ? (lang === 'zh-CN' ? '未找到可确认归属的进程' : 'No attributable process found')
+        : (lang === 'zh-CN' ? '暂不可用' : 'Unavailable');
+    }
+    return metric.bytes >= 1024**3 ? (metric.bytes/1024**3).toFixed(2)+' GiB' : (metric.bytes/1024**2).toFixed(1)+' MiB';
+  }
+  function iconButton(label, doc) {
+    const button = doc.createElement('button'); button.type = 'button'; button.className = 'info-button';
+    button.title = label; button.setAttribute('aria-label', label);
+    button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+      + '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>';
+    return button;
+  }
+  function resourceStamp(result, lang) {
+    const zh = lang === 'zh-CN';
+    const time = metric => {
+      const value = new Date(metric?.sampledAt || result?.sampledAt);
+      return Number.isFinite(value.getTime()) ? value.toLocaleTimeString(zh?'zh-CN':'en', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}) : '—';
+    };
+    return (zh?'内存 ':'Memory ') + time(result?.memory) + ' · ' + (zh?'磁盘 ':'Disk ') + time(result?.disk);
+  }
+  // One page-level cache serves the selected device and visible list rows.
+  // The worker separately caches memory for 15 s and disk for 5 min.
+  function createResourceSummary(lang, read, doc = globalThis.document, now = Date.now) {
+    const zh = lang === 'zh-CN', cache = new Map(), bindings = new Map();
+    const node = doc.createElement('span'); node.className = 'resource-summary';
+    let active = null, slot = 0;
+    const lanes = [Promise.resolve(), Promise.resolve()];
+    const Observer = doc.defaultView?.IntersectionObserver;
+    const observer = Observer ? new Observer(entries => {
+      prune();
+      for (const event of entries) {
+        const binding = bindings.get(event.target);
+        if (binding) { binding.visible = event.isIntersecting; if (binding.visible) load(binding.device); }
+      }
+    }) : null;
+    function entryFor(device) {
+      let entry = cache.get(device.udid);
+      if (!entry || entry.state !== device.state) {
+        const disk = entry?.result?.disk;
+        entry = {state:device.state, checkedAt:-Infinity, result:disk ? {disk} : null};
+        cache.set(device.udid,entry);
+      }
+      return entry;
+    }
+    function paint(target, device) {
+      target.hidden = !device;
+      if (!device) { target.textContent = ''; return; }
+      const entry = entryFor(device), result = entry.result;
+      const keys = device.state === 'Booted' ? ['disk','memory'] : ['disk'];
+      target.replaceChildren(...keys.map(key => {
+        const part = doc.createElement('span'); part.className = 'resource-metric';
+        const metric = result?.[key], name = key === 'disk' ? (zh?'磁盘':'Disk') : (zh?'内存':'Memory');
+        const valid = metric?.status === 'ok' && Number.isFinite(metric.bytes) && metric.bytes >= 0;
+        part.textContent = name + ' ' + (valid ? resourceValue(metric,lang) : '—');
+        part.title = (key === 'disk'
+          ? (zh?'设备数据占用，不含共享系统镜像。':'Device data, excluding shared OS images.')
+          : (zh?'设备进程内存估算，不含共享服务和画面服务。':'Estimated device process memory, excluding shared services and the viewer.'))
+          + (valid ? ' ' + resourceStamp({[key]:metric,sampledAt:result?.sampledAt},lang).split(' · ')[key==='disk'?1:0] : ' ' + resourceValue(metric,lang))
+          + (entry.failed || metric?.stale ? (zh?' · 上次读数，稍后自动更新':' · Previous reading; retrying automatically') : '');
+        return part;
+      }));
+    }
+    function paintDevice(device) {
+      if (active?.udid === device.udid && active.state === device.state) paint(node,active);
+      for (const [target,binding] of bindings) if (binding.device.udid === device.udid && binding.device.state === device.state) paint(target,binding.device);
+    }
+    function prune() {
+      for (const [target] of bindings) if (target.isConnected === false) { observer?.unobserve(target); bindings.delete(target); }
+      const used = new Set([active?.udid,...[...bindings.values()].map(b=>b.device.udid)]);
+      for (const [id,entry] of cache) if (cache.size > 64 && !used.has(id) && !entry.pending) cache.delete(id);
+    }
+    async function load(device) {
+      if (!device || doc.hidden) return;
+      const entry = entryFor(device);
+      if (entry.pending) return entry.pending;
+      const ttl = entry.failed ? 30000 : device.state === 'Booted' ? 15000 : 300000;
+      if (now() - entry.checkedAt < ttl) return;
+      const lane = slot++ % lanes.length;
+      entry.pending = lanes[lane].then(async () => {
+        if (doc.hidden || cache.get(device.udid) !== entry) return;
+        const wanted = active?.udid === device.udid || [...bindings.values()].some(b=>b.visible && b.device.udid===device.udid);
+        if (!wanted) return;
+        try {
+          const result = await read(device,false);
+          if (result?.ok === false || result?.udid !== device.udid) throw Error('RESOURCE_UNAVAILABLE');
+          entry.result = result;
+          entry.failed = (device.state === 'Booted' ? ['memory','disk'] : ['disk']).some(key=>result[key]?.status!=='ok' || result[key]?.stale);
+        } catch { entry.failed = true; }
+        finally { entry.checkedAt = now(); }
+      }).finally(() => { entry.pending = null; if (cache.get(device.udid) === entry) paintDevice(device); });
+      lanes[lane] = entry.pending;
+      return entry.pending;
+    }
+    function update(device) { active = device; prune(); paint(node,device); return load(device); }
+    function label(device) {
+      const target = doc.createElement('span'); target.className = 'resource-summary';
+      bindings.set(target,{device,visible:!observer}); paint(target,device);
+      if (observer) observer.observe(target); else load(device);
+      return target;
+    }
+    return {node,update,label,prune};
+  }
+
+  // A persistent result stays above an opened viewer on every boot surface.
+  // Text nodes keep backend diagnostics inert; only explicit dismissal hides it.
+  function showMemoryNotice(result, lang, requested, name = '', doc = globalThis.document) {
+    const text = memoryNotice(result, lang, requested);
+    if (!text) return;
+    let notices = doc.getElementById('memory-results');
+    if (!notices) {
+      notices = doc.createElement('div'); notices.id = 'memory-results'; notices.className = 'memory-results';
+      doc.body.append(notices);
+    }
+    const notice = doc.createElement('div'); notice.className = 'memory-result'; notice.setAttribute('role', 'status');
+    const body = doc.createElement('span'); body.textContent = (name ? name + ' · ' : '') + text;
+    const close = doc.createElement('button'); close.type = 'button'; close.textContent = lang === 'zh-CN' ? '关闭' : 'Dismiss';
+    close.addEventListener('click', () => notice.remove()); notice.append(body, close); notices.append(notice);
+  }
 
   // One interaction vocabulary for every device, with platform-specific input.
   function controlHelp(lang, device) {
@@ -85,9 +349,13 @@
       'Click anywhere in the view to confirm the focused item; right-click goes back. Two-finger scrolling simulates Siri Remote swipes. Click position does not select a TV element.',
     ]) : (zh ? [
       '在画面中点击、长按和拖动，操作对应位置的 App 内容。',
+      '触控板双指滚动模拟双指平移；捏合或 Ctrl＋滚轮以鼠标位置为中心缩放 App 内容。两个圆点表示实际触点。',
+      'Option/Alt 拖动模拟双指缩放，Option/Alt＋Shift 拖动模拟双指平移。',
       '旋转按钮每次转动 90°（⌘← / ⌘→）。折叠设备的姿态按钮选择合上、半展开或展开，高亮表示当前姿态。',
     ] : [
       'Click, hold and drag in the view to interact with app content at that position.',
+      'Two-finger trackpad scrolling pans with two touches; pinch or Ctrl+wheel zooms app content around the cursor. The two dots show the touch positions.',
+      'Option/Alt-drag pinches; Option/Alt+Shift-drag pans with two fingers.',
       'Rotation buttons turn the device 90° (⌘← / ⌘→). Foldable posture buttons select closed, half-open or flat; the current posture is highlighted.',
     ]);
     return {title:zh?'操作说明':'Controls help',close:zh?'关闭':'Close',common,specific};
@@ -226,7 +494,7 @@
   /** The percentage the zoom state shows, given the fitted percentage. */
   const zoomPct = (zoom, fitPct) => Math.round(zoom?.mode === 'pct' ? zoom.pct : (fitPct > 0 ? fitPct : 100));
 
-  const api = { STRINGS, strings, controlHelp, runtimeLabel, family, platform, handheld, screenRadius, presence, overlay, idleLeft, clock, deviceRows, runtimesFor, defaultChoice, ZOOM_STEPS, zoomStep, zoomFactor, zoomPct };
+  const api = { STRINGS, strings, memoryOptions, memoryPicker, memoryHelp, memoryLabel, memoryStatus, showMemoryDetails, restartMemoryMode, memoryNotice, showMemoryNotice, resourceValue, resourceStamp, createResourceSummary, controlHelp, runtimeLabel, family, platform, handheld, screenRadius, presence, overlay, idleLeft, clock, deviceRows, runtimesFor, defaultChoice, ZOOM_STEPS, zoomStep, zoomFactor, zoomPct };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CindySimModel = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

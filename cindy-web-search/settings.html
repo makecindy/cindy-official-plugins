@@ -112,18 +112,18 @@
   <section class="preferences">
     <div class="preference-row">
       <div class="preference-copy">
-        <div class="preference-title">默认使用 Cindy AI 搜索</div>
-        <p class="hint">也可关闭并使用自己的 Brave / Tavily / DeepSeek Key。</p>
+        <div class="preference-title" data-i18n="cindyAiTitle"></div>
+        <p class="hint" data-i18n="cindyAiHint"></p>
       </div>
       <label class="switch">
-        <input id="cindy-ai-enabled" type="checkbox" checked disabled aria-label="使用 Cindy AI 搜索">
+        <input id="cindy-ai-enabled" type="checkbox" checked disabled data-i18n-aria-label="cindyAiAria">
         <span class="switch-track"></span>
       </label>
     </div>
     <div class="preference-row">
       <div class="preference-copy">
-        <label class="preference-title" for="byo-default-provider">自备搜索渠道</label>
-        <p class="hint">关闭 Cindy AI 搜索后使用。</p>
+        <label class="preference-title" for="byo-default-provider" data-i18n="byoTitle"></label>
+        <p class="hint" data-i18n="byoHint"></p>
       </div>
       <select id="byo-default-provider" class="provider-select" disabled>
         <option value="brave">Brave</option>
@@ -133,62 +133,62 @@
     </div>
   </section>
 
-  <div class="secret" data-key="brave_api_key" data-tail-prefix="BSA…" data-empty-ph="粘贴 BSA 开头的 key">
+  <div class="secret" data-key="brave_api_key" data-tail-prefix="BSA…" data-empty-ph-key="emptyPhBrave">
     <div class="label-row">
       <span class="name">Brave Search API Key</span>
-      <span class="badge">✓ 已保存</span>
+      <span class="badge" data-i18n="badgeSaved"></span>
     </div>
     <div class="input-row">
       <div class="pill">
         <input class="key-input" type="password" autocomplete="off" spellcheck="false">
-        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+        <button class="icon-btn eye hidden" type="button" data-i18n-title="toggleVisibility">
           <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         </button>
       </div>
-      <button class="btn save" type="button">保存</button>
-      <button class="btn clear" type="button">清除</button>
+      <button class="btn save" type="button" data-i18n="save"></button>
+      <button class="btn clear" type="button" data-i18n="clear"></button>
     </div>
-    <a class="console-link" href="https://api-dashboard.search.brave.com/app/keys">前往控制台获取 ↗</a>
+    <a class="console-link" href="https://api-dashboard.search.brave.com/app/keys" data-i18n="consoleLink"></a>
   </div>
 
-  <div class="secret" data-key="tavily_api_key" data-tail-prefix="tvly-…" data-empty-ph="粘贴 tvly- 开头的 key">
+  <div class="secret" data-key="tavily_api_key" data-tail-prefix="tvly-…" data-empty-ph-key="emptyPhTavily">
     <div class="label-row">
       <span class="name">Tavily API Key</span>
-      <span class="badge">✓ 已保存</span>
+      <span class="badge" data-i18n="badgeSaved"></span>
     </div>
     <div class="input-row">
       <div class="pill">
         <input class="key-input" type="password" autocomplete="off" spellcheck="false">
-        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+        <button class="icon-btn eye hidden" type="button" data-i18n-title="toggleVisibility">
           <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         </button>
       </div>
-      <button class="btn save" type="button">保存</button>
-      <button class="btn clear" type="button">清除</button>
+      <button class="btn save" type="button" data-i18n="save"></button>
+      <button class="btn clear" type="button" data-i18n="clear"></button>
     </div>
-    <a class="console-link" href="https://app.tavily.com/home">前往控制台获取 ↗</a>
+    <a class="console-link" href="https://app.tavily.com/home" data-i18n="consoleLink"></a>
   </div>
 
-  <div class="secret" data-key="deepseek_api_key" data-tail-prefix="…" data-empty-ph="粘贴 DeepSeek API Key">
+  <div class="secret" data-key="deepseek_api_key" data-tail-prefix="…" data-empty-ph-key="emptyPhDeepSeek">
     <div class="label-row">
       <span class="name">DeepSeek API Key</span>
-      <span class="badge">✓ 已保存</span>
+      <span class="badge" data-i18n="badgeSaved"></span>
     </div>
-    <p class="hint">查询最多 128 个 Unicode 字符。搜索按成功请求计费，使用你的 DeepSeek 账户余额。</p>
+    <p class="hint" data-i18n="deepSeekHint"></p>
     <div class="input-row">
       <div class="pill">
         <input class="key-input" type="password" autocomplete="off" spellcheck="false">
-        <button class="icon-btn eye hidden" type="button" title="显示或隐藏">
+        <button class="icon-btn eye hidden" type="button" data-i18n-title="toggleVisibility">
           <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
         </button>
       </div>
-      <button class="btn save" type="button">保存</button>
-      <button class="btn clear" type="button">清除</button>
+      <button class="btn save" type="button" data-i18n="save"></button>
+      <button class="btn clear" type="button" data-i18n="clear"></button>
     </div>
-    <a class="console-link" href="https://platform.deepseek.com/api_keys">前往控制台获取 ↗</a>
+    <a class="console-link" href="https://platform.deepseek.com/api_keys" data-i18n="consoleLink"></a>
   </div>
 
   <p id="status"></p>

@@ -53,6 +53,9 @@ test('rich card edits and host-picked attachments reach the same adapter before 
   assert.deepEqual(writes.at(-1).params.attachments, []);
   assert.ok(JSON.parse(writes.at(-1).params.fields.attachmentItems).some(a => a.key === 'new-file'));
   assert.ok(f.replies.some(r => r.statusOnly?.pendingSend));
+  // Tool runs and card writes both hand the Host locale to the worker.
+  assert.ok(writes.length >= 2);
+  assert.deepEqual([...new Set(f.requests.map(r => r.params.locale))], ['zh-CN']);
 });
 
 function fixture(t, overrides = {}) {
@@ -106,7 +109,9 @@ function fixture(t, overrides = {}) {
       if (overrides.media) return overrides.media(resource);
       return new Response(resource === `/media/${hash}.jpg` ? image : null, { status: resource === `/media/${hash}.jpg` ? 200 : 404 });
     },
+    // The Chinese assertions describe the zh-CN copy; pin the Host locale.
     cindy: { onHostMessage: fn => { handlers.push(fn); }, fetch: overrides.previewFetch,
+      request: async request => (request.kind === 'app-context' ? { ok: true, context: { locale: overrides.locale || 'zh-CN' } } : { ok: false }),
       send: async result => { replies.push(copy(result)); return result.kind === 'deposit_media' ? { ok: true, url } : { ok: true }; },
       agent: { run: async request => { continuations.push(copy(request)); return overrides.continueResult || { ok: true }; } },
       fs: async request => {

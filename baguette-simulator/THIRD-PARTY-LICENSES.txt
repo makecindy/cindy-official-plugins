@@ -6,7 +6,10 @@ Local keyboard transport: use same-origin /clipboard; never select host or port 
 Local keyboard localization: added input errors use English fallback.
 Local keyboard patch: serialize paste/copy with keys; suppress only adjacent identical pending paste; report queue overflow.
 Local Web security patches: toolbar labels rendered as text; CSS selector fallback uses hexadecimal escaping.
-Local Web orientation patch: opening a view observes the guest through the existing describe_ui socket message; it never restores a cached orientation or sends an implicit rotation.
+Local Web orientation patch: opening a view restores its per-device bezel pose; only an unknown pose is seeded from the existing describe_ui socket message. App orientation cannot override a known viewer pose, and no implicit rotation is sent. Independent bootstrap reads run concurrently.
+
+Local Web gesture overlay patch: wheel pan/pinch indicators project both actual touch contacts into view coordinates, keeping parallel pans parallel. Version 0.2.59 bounds wheel-move contacts before dispatch and display, matching native backend clipping at screen edges; no upstream version, binary, permission or network change.
+Local Web native contact patch: flat screens opt into host trackpad input; Chromium TouchEvents preserve independent contact positions and release on cancellation. Version 0.2.60 restores the existing orientation-aware single-touch edge hint through move/release and clears it at pair/cancel boundaries. Safari retains its existing gesture stream. No upstream version change.
 Local Web patch: the Defaults card toggle is removed; the plugin proxy blocks its routes. See vendor-web.patch and VENDOR-REVIEW.md.
 Official release archive SHA-256: af95902bd11eb1e81309a697c863b5b25698aae480da1d67b8e9db178343b8c3
 Official source archive SHA-256: c7a3003515af13c752af5cdbb8846cbf6dc0b819c3645f6b98e17951a4927771
@@ -6434,3 +6437,39 @@ Android backend (0.2.0)
 =======================
 Bundled JavaScript, Tesseract WASM and local OCR models are listed in vendor/android/packages.json. Full third-party notices are reproduced in vendor/android/LICENSES.txt, included in this package. Exact npm artifact integrities are pinned in native/android-deps-lock.json; build instructions are in native/build-android.cjs. Tesseract model data is Apache-2.0 (https://github.com/naptha/tessdata/blob/gh-pages/LICENSE); npm wrapper metadata lists MIT. The Apache-2.0 license text above applies to the model data.
 Android Emulator and SDK/system images are not redistributed in the plugin; setup fetches official Google packages only after user license acceptance. The gRPC subset follows emulator_controller.proto (Android Open Source Project, Apache-2.0).
+
+SimSlim 0.12.2 service catalog
+=============================
+Only category IDs and service labels from profiles.go are redistributed as vendor/simslim/profiles.json. No executable, network client, watcher or cleanup code is included.
+Source: https://github.com/MobAI-App/simslim/tree/v0.12.2
+profiles.go SHA-256: 289a52ba2b906f40e6980c966c8b236ab8dc0c12a0b101d84af996c55a0580eb
+
+MIT License
+
+Copyright (c) 2026 Interlap
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Native contacts follow-up (2026-10-27): opt-in atomic cindy-trackpad DOM events avoid Chromium touch ACK delay and single-finger prelude. The existing standard-touch fallback and backend permissions are unchanged. Both Android and iPhone update a complete contact sample before transport.
+
+Native two-contact dispatch (2026-10-27): touch2 and canned two-finger paths now use one IOHID digitizer hand collection with two stable child identities. The wrapper header bounds routing/edge patches for all contact records. Single-touch target and edge behavior remain covered by native regression tests. No new capability, entitlement, endpoint, network host or injected dylib. Rebuilt from the SHA-pinned v0.2.10 archive with the existing LTO build flags. Baguette SHA-256 ed41535347ff763f702b2eee17f11b6e6823b39249cc2c5958bebbc19362df77, 8005808 bytes. UIKit acceptance: 157 pinch updates with two contacts, immediate reversal; this does not establish physical trackpad or end-to-end video latency.
+
+Interactive transport (2026-10-27): disable TCP Nagle batching on accepted native HTTP/WebSocket connections and both ends of the existing Node WebSocket proxy. Authentication, origins, opened-device checks, and framing are unchanged. The real-socket regression observed TCP_NODELAY=0 before and 1 after. Native Baguette SHA-256 c713d39ea18266ead96a9f7e4b934868674cdcbf5a900bdbf0e0f109faa2fef0, 8005824 bytes; source and tests included in vendor-native.patch.
+
+Local Web gesture-boundary patch 0.2.58 (2026-10-28): wheel pans consume offscreen travel with one translation for both visible contacts, preserving spacing and immediate reversal. A superseded wheel idle timer is cleared before starting a different kind. No upstream version, native binary, endpoint or permission change.

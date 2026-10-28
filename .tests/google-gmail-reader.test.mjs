@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import test from 'node:test';
 const source = readFileSync(new URL('../google-gmail/main.js', import.meta.url), 'utf8');
-function fixture(accounts = [{ id: 'a', email: 'a@example.com', status: 'connected' }]) {
+function fixture(accounts = [{ id: 'a', email: 'a@example.com', status: 'connected' }], locale = 'zh-CN') {
   const calls = [];
   let handler;
   const part = (type, text) => ({ mimeType: type, body: { data: Buffer.from(text).toString('base64url') } });
@@ -15,6 +15,8 @@ function fixture(accounts = [{ id: 'a', email: 'a@example.com', status: 'connect
     send: async r => { assert.equal(r.kind, 'deposit_media'); return { ok: true, url: 'cindy-media://blobs/' + 'a'.repeat(64) + '.png' }; },
   }});
   runInContext(source, ctx);
+  // The Chinese assertions describe the zh-CN copy; the Host announces it.
+  void handler({ type: 'host-context-changed', context: { locale } });
   ctx.listAccounts = async () => ({ ok: true, result: { accounts } });
   const lookupPhotos = ctx.lookupMailParticipantPhotos;
   // Most tests isolate MIME/mark-read behavior from optional People enrichment.

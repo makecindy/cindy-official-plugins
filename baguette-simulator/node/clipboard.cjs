@@ -69,7 +69,7 @@ async function createClipboard(origin,perform,control,preferred={}){
    p.udid=deviceId(p.udid);
    if(req.url==='/control-api'){
     res.setHeader('Set-Cookie',`cindy_viewer_${server.address().port}=${token}; HttpOnly; SameSite=Strict; Path=/`);
-    if(!['status','open','restart','release','shutdown','boot','screenshot','activity','catalog','create','rename','switch','reveal','press','tap','trackpad','spatial','viewport'].includes(p.action))return reply(400,{error:'Invalid action'});
+    if(!['status','open','restart','restart_device','release','shutdown','boot','screenshot','screenshot_destination','activity','catalog','resources','create','rename','switch','reveal','press','tap','trackpad','spatial','viewport'].includes(p.action))return reply(400,{error:'Invalid action'});
     try{const result=await control[p.action](p);return reply(result?.ok===false?409:200,result);}
     catch(error){return reply(503,{errorCode:error.code||'CONTROL_FAILED',error:'Operation not confirmed. Refresh the device status in Baguette settings.',execution:error.execution||'unknown'});}
    }

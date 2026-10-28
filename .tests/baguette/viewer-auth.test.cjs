@@ -1,6 +1,16 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),net=require('node:net');
 const {createClipboard}=require('../../baguette-simulator/node/clipboard.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
+test('an accepted restart completes after its requesting viewer disconnects',async()=>{
+ let begin,finish,complete;const entered=new Promise(r=>begin=r),held=new Promise(r=>finish=r),completed=new Promise(r=>complete=r),calls=[];
+ const bridge=await createClipboard('http://127.0.0.1:1',async()=>{}, {port:1,restart_device:async p=>{calls.push(p);begin();await held;complete();return {ok:true,memoryMode:{mode:p.memoryMode,verified:true}};}});bridge.devices.add(udid);
+ const abort=new AbortController();
+ try{
+  const pending=fetch(bridge.base+'/control-api',{method:'POST',headers:{Origin:bridge.base,'X-Cindy-Clipboard':bridge.fragment.split('.')[1]},body:JSON.stringify({action:'restart_device',udid,memoryMode:'standard'}),signal:abort.signal}).catch(e=>e);
+  await entered;abort.abort();await pending;finish();await completed;
+  assert.equal(calls.length,1);assert.equal(calls[0].memoryMode,'standard');assert.equal(calls[0].udid,udid);
+ }finally{finish();bridge.close();}
+});
 test('viewer HTTP and WebSocket require authenticated capability session',async()=>{
  let reads=0,upgrades=0;
  const upstream=http.createServer((req,res)=>{reads++;assert.equal(req.headers.cookie,undefined);res.end('viewer');});
@@ -67,10 +77,10 @@ test('WebSocket keepalive traffic does not renew idle; authenticated user activi
 
 test('create, rename, switch, trackpad and viewport retain origin, capability and opened-device authentication',async()=>{
  let mutations=0;const run=async()=>{mutations++;return {ok:true};};
- const bridge=await createClipboard('http://127.0.0.1:1',async()=>{}, {port:1,create:run,rename:run,switch:run,trackpad:run,viewport:run});bridge.devices.add(udid);
+ const bridge=await createClipboard('http://127.0.0.1:1',async()=>{}, {port:1,create:run,rename:run,switch:run,trackpad:run,viewport:run,restart_device:run});bridge.devices.add(udid);
  try{
   const token=bridge.fragment.split('.')[1];
-  for(const action of ['create','rename','switch','trackpad','viewport']){
+  for(const action of ['create','rename','switch','trackpad','viewport','restart_device']){
    const request=(origin,key,id)=>fetch(bridge.base+'/control-api',{method:'POST',headers:{Origin:origin,'X-Cindy-Clipboard':key},body:JSON.stringify({action,udid:id,targetUdid:'foreign',name:'Test'})});
    assert.equal((await request('https://example.test',token,udid)).status,403);assert.equal((await request(bridge.base,'invalid',udid)).status,403);assert.equal((await request(bridge.base,token,'foreign')).status,400);
   }

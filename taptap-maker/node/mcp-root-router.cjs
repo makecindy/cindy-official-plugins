@@ -26,7 +26,7 @@ function createMcpRootRouter(options) {
   let activeList = null;
   let activeTimer = null;
   let failed = false;
-  const listTimeoutMs = options.listTimeoutMs || 55_000;
+  const listTimeoutMs = options.listTimeoutMs || 115_000;
   const staleResponseIds = new Set();
 
   function writeRuntime(message) {

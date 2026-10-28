@@ -9,6 +9,7 @@ function createViewer({devices,agent,root}){
   const forget=()=>{try{require('node:fs').rmSync(intent,{force:true});}catch{}};
   let server=null,token=null,controls=null,base=null,starting=null,lastSeen=0;const opened=new Set(),streams=new Set();
   const assets={'/android-screen-actions.js':['screen-actions.js','text/javascript'],'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],'/android-screen.js':['screen.js','text/javascript'],'/android-screen.css':['screen.css','text/css']};
+  assets['/gesture-overlay.js']=['../../vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/pinch-overlay.js','text/javascript'];
   const url=(id,locale)=>base+'/control?udid='+encodeURIComponent(id)+'&lang='+(locale==='zh-CN'?'zh-CN':'en')+'#cindyClipboard='+new URL(base).port+'.'+token;
   function start(){
     if(starting)return starting;
@@ -105,14 +106,16 @@ function createViewer({devices,agent,root}){
           case 'install_status':result=await controls.request('app_install_status',{udid:p.udid,job:p.job,wait:0});break;
           case 'open':result=await controls.request('open_viewer',{udid:p.udid,_locale:p.locale});break;
           case 'catalog':result=await controls.request('viewer_catalog');break;
-          case 'create':{const created=await controls.request('create_device',{name:p.name,deviceType:p.deviceType,runtime:p.runtime});result={created,devices:(await controls.status()).devices};break;}
+          case 'resources':result=await controls.request('resource_usage',{udid:p.udid,refresh:p.refresh===true});break;
+          case 'create':{const created=await controls.request('create_device',{name:p.name,deviceType:p.deviceType,runtime:p.runtime});result={ok:created.ok!==false,created};break;}
           case 'rename':await controls.request('rename_device',{udid:p.targetUdid,name:p.name});result={devices:(await controls.status()).devices};break;
           case 'switch':result={job:await controls.request('viewer_switch',{udid:p.udid,targetUdid:p.targetUdid,_locale:p.locale,task:p.task})};if(result.job.activeUdid)opened.add(result.job.activeUdid);break;
-          case 'boot':result=await controls.request('settings_boot',{udid:p.udid});break;
+          case 'boot':result=await controls.request('settings_boot',{udid:p.udid,memoryMode:p.memoryMode});break;
           case 'shutdown':result=await controls.request('settings_shutdown',{udid:p.udid});break;
           case 'release':result=await controls.request('press',{udid:p.udid,button:'release-input'});break;
           case 'restart':await controls.assertEnabled();result={ready:true,generation:Date.now()};break;
           case 'screenshot':result=await controls.request('screenshot',{udid:p.udid,destination:p.to==='clipboard'?'clipboard':'desktop'});break;
+          case 'screenshot_destination':result=await controls.request('screenshot_destination',{destination:p.destination});break;
           case 'reveal':result=await controls.request('reveal_screenshot',{path:p.path,platform:'android'});break;
           default:return reply(400,{error:'Unknown action'});
         }

@@ -44,6 +44,7 @@ function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOve
                     cardHtml: "<h1>Actual draft</h1>",
                     html: "<html><body><h1>Actual draft</h1></body></html>",
                     revision: "abc123456",
+                    previewPath: "/project/new/design.html",
                     sketches: [],
                   },
         };
@@ -132,6 +133,56 @@ test("follow-up keeps draft and file, duplicate creation rejected", async () => 
   await r.tool("opendesign_new", { html: "new" }, "duplicate");
   assert.equal(r.sent.at(-1).ok, false);
   assert.equal(r.calls.filter((x) => x.method === "prepare").length, 1);
+});
+// Unit regression: an upgraded plugin can receive cards persisted by 0.4.26,
+// whose original replies contain no file link. Start from only old Host records;
+// a mobile click must explain how to obtain the link in the original task.
+test("pre-upgrade mobile cards explain recovery and reopen the same draft with a standard link", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const legacyDraft = {id:"legacy-draft",sessionId:sid,root:"/project/new",file:"design.html",title:"Existing design"};
+    const disk = new Map([
+      ["sessions/" + sid + ".json", JSON.stringify(legacyDraft)],
+      ["cards/legacy-call.json", JSON.stringify({sessionId:sid,draftId:legacyDraft.id})],
+    ]);
+    const r = runtime(disk, undefined, undefined, locale);
+    for (const actionId of ["open", "canvas"]) {
+      await r.run({
+        type: "event", name: "card-action", callId: "legacy-call", spawnCallId: "clicked",
+        actionId, sessionId: sid, mobilePageId: "phone-source",
+      });
+      assert.equal(r.calls.filter(x => x.preview || x.agent || x.method === "draft-write").length, 0);
+      const recovery = locale === "zh-CN" ? /原任务.*重新打开稿件.*HTML 文件链接/ : /original task.*reopen.*HTML file link/;
+      assert.match(r.sent.findLast(x => x.callId === "legacy-call").html, recovery);
+      assert.match(r.sent.at(-1).html, recovery);
+    }
+    // Following the recovery instruction must only publish a link to this draft.
+    await r.tool("opendesign_open", {}, "reopened");
+    assert.equal(r.sent.at(-1).ok, true);
+    assert.equal(r.sent.at(-1).result.draftId, legacyDraft.id);
+    assert.equal(r.sent.at(-1).result.previewPath, "/project/new/design.html");
+    assert.match(r.sent.at(-1).result.previewMarkdown, /design\.html/);
+    assert.equal(r.calls.filter(x => x.method === "prepare" || x.method === "draft-write").length, 0);
+    await r.run({type:"event",name:"card-action",callId:"legacy-call",actionId:"open",sessionId:sid});
+    assert.equal(r.calls.filter(x => x.preview).length, 1);
+  }
+});
+// Unit: create/read/update/reopen must all expose the same existing file, so
+// remote users do not depend on a card's execution-computer-local editor URL.
+test("every draft entry returns a stable standard file link including escaped paths", async () => {
+  const filePath = "/project/design #1/稿件 ?100%<final>.html";
+  const r = runtime(new Map(), undefined, async ({method}) => method === "prepare"
+    ? {dir:"/project/design #1"} : method === "bind" ? {files:[]}
+    : {html:"<h1>Draft</h1>",revision:"r1",previewPath:filePath,sketches:[]});
+  for (const tool of ["opendesign_new","opendesign_context","opendesign_update","opendesign_open","opendesign_preview"]) {
+    await r.tool(tool, {html:"<h1>Draft</h1>",expectedRevision:"r1",title:"[Do not use as markup](bad)"});
+    const result = r.sent.at(-1).result;
+    assert.equal(r.sent.at(-1).ok,true);
+    assert.equal(result.previewPath,filePath);
+    const target = /^\[View design\]\(<([^>]+)>\)$/.exec(result.previewMarkdown)[1];
+    assert.equal(decodeURIComponent(target),filePath);
+    assert.doesNotMatch(target,/[?#<>\s]/);
+    assert.equal(r.calls.filter(x => x.preview).length,0);
+  }
 });
 test("untrusted, remote and readonly contexts do nothing", async () => {
   for (const context of [
@@ -234,7 +285,7 @@ test("runtime cards use host locale and English fallback without translating use
     const card=r.sent.find(x=>x.type==='card-update').html;
     assert.ok(card.includes(locale==='zh-CN'?'· 稿件 ':'· Draft '));
     await r.run({type:'event',name:'card-action',callId:'call-one',spawnCallId:'opened',actionId:'open',sessionId:sid});
-    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'稿件已在所属会话':'owning session sidebar'));
+    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'已发送稿件打开请求':'request to open the design has been sent'));
     const named=runtime(new Map(),undefined,undefined,locale);
     await named.tool('opendesign_new',{html:'<h1>Content</h1>',title:'用户自定义标题'});
     assert.equal(named.sent.at(-1).result.title,'用户自定义标题');

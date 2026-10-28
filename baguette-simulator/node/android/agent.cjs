@@ -80,15 +80,18 @@ function createAgent({root,devices,run}){
       // bytes only to the trusted viewer request; Agent screenshots use files.
       return {udid:d.udid,path:file,mimeType:'image/png',clipboardPng:bytes.toString('base64'),execution:'executed'};
     }
-    return {udid:d.udid,path:file,mimeType:png?'image/png':'image/jpeg',pixels:{width,height},screen:f.screen,scale,...(p.region?{region:r}:{}),... (inline?{_modelImages:inline}:{}),note:'Android rectangular framebuffer, without an added corner or cutout mask; this does not verify physical screen occlusion. Image pixels divided by scale are view points; add the region origin when cropped. Use those coordinates for tap and gesture.'};
+    return {udid:d.udid,path:file,mimeType:png?'image/png':'image/jpeg',pixels:{width,height},screen:f.screen,scale,capturedAt:new Date().toISOString(),screenshotAttached:!!inline,...(p.region?{region:r}:{}),... (inline?{_modelImages:inline}:{}),note:'Android rectangular framebuffer, without an added corner or cutout mask; this does not verify physical screen occlusion. Image pixels divided by scale are view points; add the region origin when cropped. Use those coordinates for tap and gesture.'};
   }
   async function after(d,p,result){
+    const started=Date.now(),callDeadline=p._deadline??Infinity;
+    p={...p,_deadline:Math.min(callDeadline,started+(p.until?27000:12000))};
     try{
-      if(p.until)result.wait=await waitFor(d,{text:p.until,timeout:15,_deadline:p._deadline});
+      if(p.until){result.wait=await waitFor(d,{text:p.until,timeout:15,_deadline:p._deadline});p._deadline=Math.min(callDeadline,Date.now()+12000);}
       else if(p.observe!=='none')await sleep(number(p.settle,'settle',0,5,0.6)*1000,p._deadline);
       if(['ui','both'].includes(p.observe??'ui'))result.ui=await describe(d,p);
       if(['screenshot','both'].includes(p.observe)){const {_modelImages,...shot}=await screenshot(d,p);result.screenshot=shot;if(_modelImages)result._modelImages=_modelImages;}
-    }catch(e){result.observationError={code:e.code,message:e.message};}
+    }catch(e){result.observationError={code:e.code,message:e.message};result.nextAction='Observe with screenshot or wait_for; do not repeat delivered input.';}
+    result.timing={...(p._startedAt===undefined?{}:{inputMs:started-p._startedAt}),observationMs:Date.now()-started};
     return result;
   }
   const releasedTouches=()=>Array.from({length:10},(_,identifier)=>({identifier,pressure:0}));

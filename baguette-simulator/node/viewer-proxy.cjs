@@ -97,6 +97,8 @@ function attachUpgrade(server,port,sockets,authorized=()=>false,clients=new Set(
   // Native HTTP/1 upgrade requires a fresh connection, never a pooled HTTP socket.
   const request=http.request({agent:false,hostname:'127.0.0.1',port,path:req.url,headers:{host:`127.0.0.1:${port}`,connection:'upgrade',upgrade:'websocket','sec-websocket-key':req.headers['sec-websocket-key'],'sec-websocket-version':'13','sec-fetch-mode':'websocket'}});
   request.on('upgrade',(response,upstream,upHead)=>{
+   // Gesture samples and small delta frames must not wait for TCP packet batching.
+   socket.setNoDelay(true);upstream.setNoDelay(true);
    sockets.add(upstream);sockets.add(socket);clients.add(socket);
    socket.write('HTTP/1.1 101 Switching Protocols\r\n'+Object.entries(response.headers).map(([k,v])=>`${k}: ${v}`).join('\r\n')+'\r\n\r\n');
    if(head.length)upstream.write(head);if(upHead.length)socket.write(upHead);

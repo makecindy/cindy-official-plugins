@@ -86,12 +86,13 @@ test('viewer upload requires origin, capability, opened device and a supported f
 });
 test('wheel motion survives a slow initial touch and releases after intermediate moves',async()=>{
  const handlers={},nodes={},pointers=new Map(),sent=[];
- const node=()=>({hidden:true,addEventListener(){},getBoundingClientRect:()=>({width:400,height:800}),getAnimations:()=>[],focus(){}});
+ const node=()=>({hidden:true,addEventListener(){},getBoundingClientRect:()=>({left:0,top:0,width:400,height:800}),getAnimations:()=>[],focus(){}});
  const canvas=node();canvas.addEventListener=(name,fn)=>{handlers[name]=fn;};
  const context={window:{},document:{getElementById:id=>nodes[id]||(nodes[id]=node()),addEventListener(){}},location:{pathname:'/simulators/'+id,search:'?cindyViewer=test'},URLSearchParams,setTimeout,clearTimeout,setInterval,clearInterval,addEventListener(){}};
  vm.runInNewContext(await fs.readFile(path.join(base,'screen-actions.js'),'utf8'),context);
- context.window.androidScreenActions({canvas,frame:node(),pointers,zh:false,input:async()=>{},flush:async start=>{sent.push([...pointers.values()].map(p=>({...p})));await new Promise(r=>setTimeout(r,start?180:5));for(const [key,p] of pointers)if(p.pressure===0)pointers.delete(key);}});
- handlers.wheel({preventDefault(){},stopPropagation(){},deltaY:160,deltaX:0,deltaMode:0,ctrlKey:false});
+ context.window.androidScreenActions({canvas,frame:node(),pointers,screenSize:()=>({width:400,height:800}),zh:false,input:async()=>{},flush:async start=>{sent.push([...pointers.values()].map(p=>({...p})));await new Promise(r=>setTimeout(r,start?180:5));for(const [key,p] of pointers)if(p.pressure===0)pointers.delete(key);}});
+ handlers.wheel({preventDefault(){},stopPropagation(){},clientX:200,clientY:400,deltaY:160,deltaX:0,deltaMode:0,ctrlKey:false});
  for(let i=0;i<100&&(!sent.length||pointers.size);i++)await new Promise(r=>setTimeout(r,20));
  assert.ok(sent.length>=5);assert.equal(sent[0][0].y,.5);assert.ok(sent.some(t=>t[0]?.pressure===1024&&t[0].y<.5&&t[0].y>.3));assert.equal(sent.at(-1)[0].pressure,0);assert.equal(pointers.size,0);
+ for(const touches of sent){assert.equal(touches.length,2);assert.equal(touches[0].y,touches[1].y);assert.ok(Math.abs(touches[0].x-touches[1].x-.4)<1e-9);}
 });

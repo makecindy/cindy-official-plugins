@@ -21,6 +21,29 @@
     set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} } };
   const zoomKey = () => `cindy.zoom.${udid}`;
   state.zoom = store.get(zoomKey())?.mode === 'pct' ? store.get(zoomKey()) : { mode: 'fit' };
+  const keyboardChoices = new Map();
+  const memoryChoices = new Map();
+  function memoryPicker() {
+    if(M.platform(state.status?.device)!=='iOS')return null;
+    return M.memoryPicker(memoryChoices.get(udid)||'saving',lang,mode=>memoryChoices.set(udid,mode));
+  }
+
+  const resourceView = M.createResourceSummary(lang,(device,refresh)=>device.udid===udid ? api('resources',{refresh}) : Promise.reject(Error('DEVICE_CHANGED')));
+
+  const keyboardEnabled = () => keyboardChoices.get(udid) ?? (store.get(`cindy.keyboard.${udid}`) !== false);
+  function keyboardGate(event) {
+    // Workbench fields belong to the browser. This only gates guest keyboard
+    // input from this view; touch and Agent tools retain their own controls.
+    if (keyboardEnabled() || event.target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'SUMMARY'].includes(event.target?.tagName)) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+  }
+  function toggleKeyboard() {
+    const enabled = !keyboardEnabled();
+    keyboardChoices.set(udid, enabled); store.set(`cindy.keyboard.${udid}`, enabled);
+    if (!enabled) {
+      try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
+    }
+  }
 
   const ICON = {
     phone: '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2.5"/><path d="M12 18h.01"/></svg>',
@@ -83,7 +106,7 @@
     // The device with its bezel, like Simulator; the guest owns its orientation.
     screen.src = !M.handheld(state.status?.device)
       ? `/platform-stage.html?udid=${encodeURIComponent(udid)}&lang=${lang}&platform=${M.platform(state.status?.device)}&cindyViewer=${encodeURIComponent(token || '')}`
-      : `/simulators/${encodeURIComponent(udid)}?handheld=0${state.fullToolbar ? '&cindyFull=1' : ''}${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
+      : `/simulators/${encodeURIComponent(udid)}?handheld=0${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
     state.viewport = null; state.fitPct = 0; state.pose = null;
   }
   function blank() { state.generation = null; screen.src = 'about:blank'; }
@@ -162,6 +185,10 @@
     let doc; try { doc = screen.contentDocument; } catch { return; }
     if (!doc?.documentElement || doc.location?.href === 'about:blank') return;
     if (state.fullToolbar) { doc.documentElement.setAttribute('data-cindy-full', ''); stage.setAttribute('data-full', ''); } else { doc.documentElement.removeAttribute('data-cindy-full'); stage.removeAttribute('data-full'); }
+    // The full workbench previously loaded without the embedding stylesheet.
+    // Toggle that stylesheet in place so its panels remain available too.
+    const sheet = doc.getElementById('cindy-stage-style')?.sheet;
+    if (sheet) sheet.disabled = state.fullToolbar;
     const view = doc.getElementById('simNativeView');
     const width = view ? parseFloat(doc.defaultView.getComputedStyle(view).getPropertyValue('--nv-hh-w')) : 0;
     if (width && width !== state.screenWidth) {
@@ -182,6 +209,7 @@
       for (const name of ['pointerdown', 'keydown', 'wheel']) doc?.addEventListener(name, activity, { passive: true, capture: true });
       // Before the device page forwards keys to the simulator.
       doc?.defaultView?.addEventListener('keydown', shortcut, true);
+      for (const name of ['keydown', 'keyup', 'paste']) doc?.defaultView?.addEventListener(name, keyboardGate, true);
       doc?.defaultView?.addEventListener('resize', () => { setTimeout(decorate, 50); setTimeout(measure, 120); });
     } catch {}
     setTimeout(decorate, 300); setTimeout(decorate, 1500); setTimeout(measure, 800); setTimeout(measure, 2500);
@@ -198,8 +226,22 @@
     $('device-chip').hidden = hub; $('title').hidden = !hub;
     $('chip-dot').dataset.tone = $('title-dot').dataset.tone = p.tone;
     $('chip-name').textContent = $('title-name').textContent = device?.name || '…';
-    $('title-sub').textContent = [M.runtimeLabel(device?.runtime), t[p.key]].filter(Boolean).join(' · ');
+    const resources = $('resources'), modeButton = $('memory-mode');
+    resources.replaceChildren(resourceView.node,modeButton);
+    $('title-sub').replaceChildren(h('span',{text:[M.runtimeLabel(device?.runtime), t[p.key]].filter(Boolean).join(' · ')}), ...(hub ? [resources] : []));
+    resources.hidden = !device || state.lost || state.switching;
     $('status').textContent = t[p.key];
+    const memoryText = device?.state === 'Booted' ? M.memoryStatus(state.lost ? {...device,memoryMode:null} : device, lang,memoryChoices.get(udid)) : '';
+    modeButton.hidden = !memoryText;
+    const modeText = memoryText.replace(/^(内存模式：|Memory mode: )/,'');
+    modeButton.replaceChildren(
+      h('span',{text:lang === 'zh-CN' ? '（' : ' ('}),
+      h('span',{class:'memory-mode-label',text:modeText}),
+      h('span',{text:lang === 'zh-CN' ? '）' : ')'})
+    );
+    label(modeButton,memoryText + (lang === 'zh-CN' ? ' · 查看与更改' : ' · View / change'));
+    modeButton.disabled = state.lost || state.stopping || state.switching;
+    resourceView.update(state.lost || state.switching ? null : device);
     const on = live();
     const handheld = M.handheld(device);
     $('tools').hidden = !on;
@@ -208,16 +250,21 @@
     visionBar.hidden = !on || M.platform(device) !== 'visionOS';
     stage.dataset.vision = M.platform(device) === 'visionOS' ? 'true' : 'false';
     for (const id of ['btn-home', 'btn-shot', 'btn-shot-menu', 'btn-rotl', 'btn-rotr']) $(id).disabled = !on;
-    $('btn-shot').disabled = !on || !!$('btn-shot').dataset.busy;
+    $('btn-shot').disabled = !on || savingShotTo || !!$('btn-shot').dataset.busy;
+    $('btn-shot-menu').disabled = !on || savingShotTo;
     label($('btn-home'), M.platform(device)==='visionOS'?(lang==='zh-CN'?'主屏幕（数码旋钮）':'Home (Digital Crown)'):t.home, '⇧⌘H'); label($('btn-shot'), `${t.screenshot} · ${shotTo() === 'clipboard' ? t.shotToClipboard : t.shotToDesktop}`, '⌘S'); label($('btn-shot-menu'), t.shotTo);
     label($('btn-rotl'), t.rotateLeft, '⌘←'); label($('btn-rotr'), t.rotateRight, '⌘→');
     label($('zoom-out'), t.zoomOut, '⌘−'); label($('zoom-in'), t.zoomIn, '⌘+'); label($('btn-more'), t.more);
     $('device-chip').title = t.devices;
     renderPosture();
   }
+  let offOverlayKey = null;
   function renderOverlay() {
     const s = state.lost ? null : state.status;
     const o = M.overlay(s, state);
+    const key = o?.kind === 'off' ? JSON.stringify([udid,s?.device?.name]) : null;
+    if (key && key === offOverlayKey && !overlay.hidden) return;
+    offOverlayKey = key;
     overlay.replaceChildren();
     overlay.hidden = !o;
     if (o) stage.setAttribute('data-dim', ''); else stage.removeAttribute('data-dim');
@@ -230,7 +277,7 @@
     if (o.kind === 'offline') overlay.append(card(ICON.unplug, t.offlineTitle, t.offlineBody, [h('button', { class: 'btn primary', text: t.recover, onclick: recover })]));
     else if (o.kind === 'serviceOff') overlay.append(card(ICON.unplug, t.serviceOffTitle, t.serviceOffBody, [h('button', { class: 'btn', text: t.retry, onclick: check })]));
     else if (o.kind === 'expired') overlay.append(card(ICON.unplug, t.expiredTitle, t.expiredBody));
-    else if (o.kind === 'off') overlay.append(card(ICON.off, t.offTitle(name), t.offBody, [h('button', { class: 'btn cta', text: t.boot, onclick: boot })]));
+    else if (o.kind === 'off') overlay.append(card(ICON.off, t.offTitle(name), null, [memoryPicker(),h('button', { class: 'btn cta', text: t.boot, onclick: boot })]));
     else if (o.kind === 'paused') overlay.append(card(ICON.pause, t.pausedTitle, t.pausedBody));
     else if (o.kind === 'switching') {
       const target = state.status?.devices?.find((d) => d.udid === state.switchTarget)?.name || '';
@@ -258,19 +305,24 @@
 
   // ---- status loop ----
   let checking = false;
+  let savingShotTo = false, shotPreferenceRevision = 0;
   async function check() {
     if (checking) return; checking = true;
     try {
+      const preferenceRevision = shotPreferenceRevision;
       const s = await api('status');
+      // An older status response must not undo a choice saved while it was in flight.
+      if (savingShotTo || preferenceRevision !== shotPreferenceRevision)
+        s.settings = {...s.settings, screenshotDestination:state.status?.settings?.screenshotDestination};
       state.status = s; state.lost = false;
       // A completed selection may point at a stopped device. Use its own
       // state immediately, never load its stream using the source's state.
       if (s.device?.udid !== udid) s.device = s.devices?.find((d) => d.udid === udid);
-      if (!state.switching && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
+      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
         const opened=await api('open');
         if(opened.url){const next=new URL(opened.url);for(const key of ['task','embed'])if(params.get(key))next.searchParams.set(key,params.get(key));location.replace(next.href);return;}
       }
-      if (!state.switching && s.device?.state === 'Booted' && s.ready) {
+      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.ready) {
         let unavailable = false; try { unavailable = !!screen.contentDocument?.querySelector('[data-viewer-unavailable]'); } catch {}
         if (state.generation === null || screen.src === 'about:blank' || unavailable) load();
         else decorate();
@@ -300,7 +352,12 @@
   async function boot() {
     if (state.stopping || state.switching) return;
     state.status = { ...state.status, device: { ...state.status?.device, state: 'Booting' } }; render();
-    try { await api('boot'); state.generation = null; } catch (error) { toast(error.code === 'RUNTIME_DISABLED' ? t.pausedTitle : t.actionFailed, 'error'); }
+    const requested = M.platform(state.status?.device)==='iOS' ? memoryChoices.get(udid)||'saving' : undefined;
+    try {
+      const result = await api('boot', requested ? {memoryMode:requested} : {});
+      M.showMemoryNotice(result, lang, requested, state.status?.device?.name);
+      state.generation = null;
+    } catch (error) { toast(error.code === 'RUNTIME_DISABLED' ? t.pausedTitle : t.actionFailed, 'error'); }
     await check();
   }
   function confirmShutdown() {
@@ -310,9 +367,8 @@
     $('confirm-dialog').showModal();
   }
   $('confirm-cancel').addEventListener('click', () => $('confirm-dialog').close());
-  $('confirm-ok').addEventListener('click', async () => {
-    $('confirm-dialog').close();
-    if (state.stopping || state.switching) return;
+  async function shutdown() {
+    if (state.stopping || state.switching || state.status?.device?.state !== 'Booted') return;
     state.stopping = true; blank(); render();
     try {
       const result = await api('shutdown');
@@ -320,18 +376,43 @@
       toast(t.stopped, 'ok');
     } catch { toast(t.actionFailed, 'error'); }
     finally { state.stopping = false; await check(); }
+  }
+  $('confirm-ok').addEventListener('click', () => { $('confirm-dialog').close(); shutdown(); });
+  $('memory-mode').addEventListener('click', () => {
+    if (state.lost || state.stopping || state.switching) return;
+    const target = udid;
+    M.showMemoryDetails(state.status.device, lang, {value:memoryChoices.get(target),onChange:mode=>{
+      memoryChoices.set(target,mode);if (udid === target) render();
+    },onRestart:state.status.device.state==='Booted' ? async mode=>{
+      if (udid !== target || state.stopping || state.switching || state.lost) throw Error('DEVICE_UNAVAILABLE');
+      const device = state.status.device;
+      state.stopping = true; blank(); render();
+      try {
+        const result = await M.restartMemoryMode(device, mode, (action,args)=>{
+          if (udid !== target) throw Error('DEVICE_CHANGED');
+          return api(action,args);
+        });
+        M.showMemoryNotice(result,lang,mode,device.name);
+        state.generation = null;
+      } finally { state.stopping = false; await check(); }
+    } : undefined});
   });
   async function release() {
     try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
     try { await api('release'); toast(t.released, 'ok'); } catch { toast(t.actionFailed, 'error'); }
   }
   async function screenshot() {
-    if (!live() || $('btn-shot').dataset.busy) return;
+    if (!live() || savingShotTo || $('btn-shot').dataset.busy) return;
     $('btn-shot').dataset.busy = '1'; $('btn-shot').disabled = true;
     flash();
     const to = shotTo();
     try {
-      const r = await api('screenshot', { to });
+      // Flat viewers can be held sideways while an app still reports portrait.
+      // Foldable/3D captures retain their existing panel geometry.
+      const view = screen.contentWindow;
+      const orientation = M.handheld(state.status?.device) && view?.__cindyPose?.get?.() == null
+        ? view?.__nativeOrientation?.() : undefined;
+      const r = await api('screenshot', { to, orientation });
       if(to==='clipboard'&&r.clipboardPng){const bytes=Uint8Array.from(atob(r.clipboardPng),c=>c.charCodeAt(0));await navigator.clipboard.write([new ClipboardItem({'image/png':new Blob([bytes],{type:'image/png'})})]);}
       if (to === 'clipboard') toast(t.shotCopied, 'ok');
       else toast(t.shotDesktop, 'ok', r.path && { label: t.reveal, run: () => api('reveal', { path: r.path }).catch(() => {}) });
@@ -341,9 +422,19 @@
   }
   // Where the screenshot button puts the image: the Desktop (as Simulator
   // does) or the clipboard. One choice for every device, picked from the caret.
-  const shotTo = () => store.get('cindy.shotTo') === 'clipboard' ? 'clipboard' : 'desktop';
+  const shotTo = () => (state.status?.settings?.screenshotDestination ?? store.get('cindy.shotTo')) === 'clipboard' ? 'clipboard' : 'desktop';
+  async function saveShotTo(to) {
+    if (savingShotTo) return;
+    savingShotTo = true; shotPreferenceRevision++; renderBar();
+    try {
+      const result = await api('screenshot_destination', {destination:to});
+      state.status = {...state.status, settings:{...state.status?.settings, screenshotDestination:result.destination}};
+      store.set('cindy.shotTo', result.destination);
+    } catch { toast(t.actionFailed, 'error'); }
+    finally { savingShotTo = false; shotPreferenceRevision++; renderBar(); }
+  }
   $('btn-shot-menu').addEventListener('click', () => {
-    const choice = (to, text) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(shotTo() === to), onclick: () => { closeMenu(); store.set('cindy.shotTo', to); renderBar(); } },
+    const choice = (to, text) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(shotTo() === to), onclick: () => { closeMenu(); saveShotTo(to); } },
       [h('span', { class: 'label', text }), h('span', { html: shotTo() === to ? ICON.check : '' })]);
     showMenu($('btn-shot-menu'), [h('div', { class: 'menu-title', text: t.shotTo }), choice('desktop', t.shotToDesktop), choice('clipboard', t.shotToClipboard)]);
   });
@@ -551,6 +642,7 @@
       ...(state.status?.device?.platform === 'android' ? [item(ICON.key, lang === 'zh-CN' ? '返回' : 'Back', () => native('__nativeBack'), { disabled: !on })] : []),
       ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
       ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.grid, t.appSwitcher, () => native('__nativeAppSwitcher'), { disabled: !on }) : null,
+      ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.key, lang === 'zh-CN' ? '电脑键盘输入' : 'Computer keyboard input', toggleKeyboard, { disabled: !on, role: 'menuitemcheckbox', 'aria-checked': String(keyboardEnabled()) }) : null,
       ...(state.status?.device?.platform === 'android' ? [
         item(ICON.key, lang === 'zh-CN' ? '复制设备剪贴板' : 'Copy device clipboard', () => native('__nativeCopy'), {disabled:!on}),
         item(ICON.plus, lang === 'zh-CN' ? '导入 APK、图片或视频…' : 'Import APK, image or video…', () => native('__nativeImport'), {disabled:!on}),
@@ -559,7 +651,10 @@
       item(ICON.key, t.releaseKeys, release, { disabled: !on }),
       h('div', { class: 'sep' }),
       item(ICON.refresh, t.recover, recover, { disabled: state.recovering || state.switching }),
-      M.platform(state.status?.device) === 'iOS' ? item(ICON.bar, t.advanced, () => { state.fullToolbar = !state.fullToolbar; load(); }, { role: 'menuitemcheckbox', 'aria-checked': String(state.fullToolbar) }) : null,
+      M.platform(state.status?.device) === 'iOS' ? item(ICON.bar, t.advanced, () => {
+        state.fullToolbar = !state.fullToolbar; decorate(); applyZoom();
+        screen.contentWindow?.dispatchEvent?.(new Event('resize'));
+      }, { role: 'menuitemcheckbox', 'aria-checked': String(state.fullToolbar) }) : null,
       h('div', { class: 'sep' }),
       item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }),
     ]);
@@ -581,7 +676,7 @@
     ]);
   });
   async function switchTo(targetUdid) {
-    if (state.switching) return;
+    if (state.switching || state.stopping) return;
     state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
     // Inside a task page the switch also moves that task to the new device.
     try {
@@ -599,16 +694,23 @@
   }
 
   // ---- add / rename dialog ----
-  let catalog = null, mode = 'add';
+  let catalog = null, mode = 'add', creationMemory = 'saving';
+  function fillCreationMemory() {
+    const runtime = catalog?.runtimes?.find(r=>r.identifier===$('f-runtime').value);
+    $('f-memory').hidden = mode!=='add' || !runtime || M.platform(runtime)!=='iOS';
+    $('f-memory').replaceChildren(...($('f-memory').hidden ? [] : [M.memoryPicker(creationMemory,lang,value=>{creationMemory=value;})]));
+  }
   function fillRuntimes() {
     const runtime = $('f-runtime'), options = M.runtimesFor(catalog, $('f-model').value), previous = runtime.value;
     runtime.replaceChildren(...options.map((r) => h('option', { value: r.identifier, text: r.name })));
     runtime.value = options.some((r) => r.identifier === previous) ? previous : (options.at(-1)?.identifier || '');
     $('dialog-error').textContent = options.length ? '' : t.noRuntime;
     $('dialog-save').disabled = !options.length;
+    fillCreationMemory();
   }
   async function openDialog(kind) {
     mode = kind;
+    creationMemory = 'saving'; $('f-memory').hidden = true; $('f-memory').replaceChildren();
     const current = state.status?.devices?.find((d) => d.udid === udid);
     $('dialog-title').textContent = kind === 'add' ? t.dialogAdd : t.dialogRename;
     $('dialog-hint').textContent = kind === 'add' ? t.addHint : t.renameHint;
@@ -628,23 +730,44 @@
       const choice = M.defaultChoice(catalog);
       if (choice) { model.value = choice.deviceType; fillRuntimes(); $('f-runtime').value = choice.runtime; $('f-name').value = choice.name; }
       else fillRuntimes();
+      fillCreationMemory();
       $('dialog-error').textContent = $('dialog-save').disabled ? t.noRuntime : '';
       $('f-name').focus();
     } catch (error) { $('dialog-error').textContent = `${t.actionFailed} (${error.code || 'CATALOG_FAILED'})`; }
   }
   $('f-model').addEventListener('change', () => { fillRuntimes(); if (!$('f-name').dataset.edited) $('f-name').value = catalog?.deviceTypes.find((d) => d.identifier === $('f-model').value)?.name || ''; });
   $('f-name').addEventListener('input', () => { $('f-name').dataset.edited = 'true'; });
+  $('f-runtime').addEventListener('change',fillCreationMemory);
   $('dialog-cancel').addEventListener('click', () => $('device-dialog').close());
+  $('device-dialog').addEventListener('cancel',event=>{if($('dialog-cancel').disabled)event.preventDefault();});
   $('device-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const name = $('f-name').value.trim(); if (!name) return;
+    const name = $('f-name').value.trim(); if (!name || $('dialog-save').disabled) return;
+    const requested = $('f-memory').hidden ? null : creationMemory;
     $('dialog-save').disabled = true; $('dialog-error').textContent = '';
+    const inputs = [$('dialog-cancel'),$('f-name'),$('f-model'),$('f-runtime'),...$('f-memory').querySelectorAll('button')];
+    inputs.forEach(node=>{node.disabled=true;});
     try {
-      if (mode === 'add') await api('create', { name, deviceType: $('f-model').value, runtime: $('f-runtime').value });
-      else await api('rename', { name, targetUdid: udid });
-      $('device-dialog').close(); toast(mode === 'add' ? t.created : t.saved, 'ok'); await check();
+      if (mode === 'add') {
+        const result = await api('create', { name, deviceType: $('f-model').value, runtime: $('f-runtime').value });
+        const created = result.created;
+        if (!created?.udid || created.ok === false) throw Object.assign(Error('CREATE_UNCONFIRMED'),{code:created?.errorCode || 'CREATE_UNCONFIRMED'});
+        if (requested) memoryChoices.set(created.udid,requested);
+        // The task page takes over for an off device on its next status poll.
+        // Hand it the creation choice before switching the task binding.
+        if (requested && params.get('task') && window.parent && window.parent!==window) {
+          window.parent.postMessage({type:'cindy-simulator-created',sessionId:params.get('task'),udid:created.udid,memoryMode:requested},'*');
+        }
+        // Creation is complete. Close before switching so a selection failure
+        // cannot leave a Create button that duplicates the successful device.
+        $('device-dialog').close(); toast(t.created,'ok');
+        await switchTo(created.udid);
+      } else {
+        await api('rename', { name, targetUdid: udid });
+        $('device-dialog').close(); toast(t.saved,'ok'); await check();
+      }
     } catch (error) { $('dialog-error').textContent = `${t.actionFailed} (${error.code || 'FAILED'})`; }
-    finally { $('dialog-save').disabled = false; }
+    finally { $('dialog-save').disabled = false; inputs.forEach(node=>{node.disabled=false;}); }
   });
 
   // ---- boot ----

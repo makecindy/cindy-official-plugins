@@ -5,9 +5,9 @@ const fs=require('node:fs');
 const path=require('node:path');
 const udid='00000000-0000-4000-8000-000000000001';
 
-function harness({simctlFails=false,readFails=false,stale=false,owned=true,runtime='runtime'}={}) {
+function harness({simctlFails=false,readFails=false,stale=false,owned=true,runtime='runtime',timers}={}) {
  const calls=[];let clipboard="";
- const context={module:{exports:{}},setTimeout,clearTimeout,__dirname:path.resolve('baguette-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
+ const context={module:{exports:{}},setTimeout:timers?fn=>{const timer={fn};timers.add(timer);return timer;}:setTimeout,clearTimeout:timers?t=>timers.delete(t):clearTimeout,__dirname:path.resolve('baguette-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
   if(name==='./viewer.cjs')return {};
   if(name==='./keys.cjs')return require('../../baguette-simulator/node/keys.cjs');
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
@@ -28,8 +28,20 @@ function harness({simctlFails=false,readFails=false,stale=false,owned=true,runti
   return require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name);
  }};
  vm.runInNewContext(fs.readFileSync(path.resolve('baguette-simulator/node/core.cjs'),'utf8'),context);
- return {calls,dispatch:context.module.exports.dispatch};
+ return {calls,dispatch:context.module.exports.dispatch,clipboard:vm.runInContext('clipboardAction',context)};
 }
+
+test('viewer key input restores the soft-keyboard record after the last chord; touch paste does not',async()=>{
+ const timers=new Set(),h=harness({timers,runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-0'});
+ await h.clipboard({udid,action:'key',code:'KeyA'});
+ const first=[...timers][0];assert.ok(first);
+ await h.clipboard({udid,action:'key',code:'KeyB'});
+ assert.equal(timers.size,1);assert.ok(!timers.has(first),'new input replaces the pending restoration');
+ [...timers][0].fn();timers.clear();await new Promise(r=>setImmediate(r));
+ const cleanup=h.calls.find(c=>c.args.includes('HardwareKeyboardLastSeen'));
+ assert.ok(cleanup);assert.ok(cleanup.args.includes(udid));assert.ok(cleanup.args.includes('--set'));
+ await h.clipboard({udid,action:'paste',text:'hello',touch:true});assert.equal(timers.size,0);
+});
 
 test('paste writes the private device set with simctl and keeps Unicode text out of command arguments',async()=>{
  // CoreDevice cannot see a private device set (devicectl: "device was not found"), so it is never tried.

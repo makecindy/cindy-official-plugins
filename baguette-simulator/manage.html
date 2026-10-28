@@ -3,17 +3,18 @@
 <link rel="stylesheet" href="/pages.css">
 <body class="hub-body">
 <main class="hub" id="hub">
-  <aside class="hub-list" aria-label="Simulators">
+  <aside id="device-list" class="hub-list" aria-label="Simulators">
     <header class="hub-head">
       <h1 id="title">Simulators</h1>
       <button class="icon-btn hub-add" id="add" type="button" aria-haspopup="menu" aria-expanded="false"></button>
     </header>
     <label class="hub-search" id="search-box"><span id="search-glyph"></span><input id="search" type="search" autocomplete="off" spellcheck="false"></label>
     <div class="notice" id="notice" hidden></div>
-    <nav class="hub-rows" id="list" aria-live="polite"></nav>
+    <div class="hub-rows" id="list" role="listbox" aria-label="Simulators" aria-multiselectable="true" tabindex="0"></div>
     <p class="status" id="message" role="status" aria-live="polite"></p>
     <p class="hub-foot" id="foot"></p>
   </aside>
+  <div id="splitter" class="hub-splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="device-list" aria-label="Resize device list"></div>
   <section class="hub-detail" id="detail" aria-live="polite">
     <iframe class="hub-screen" id="screen" title="Device Simulator" allow="clipboard-read; clipboard-write" hidden></iframe>
     <div class="hub-hero" id="hero" hidden></div>

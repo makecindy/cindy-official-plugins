@@ -1,0 +1,21 @@
+{
+  "name": "Gitea",
+  "description": "자체 호스팅 Gitea 인스턴스에 연결합니다. 저장소, 파일, 커밋, 이슈, 풀 리퀘스트, 라벨, 마일스톤, Actions 실행과 로그, 릴리스, 알림을 다룹니다. 설정에서 인스턴스마다 URL과 액세스 토큰을 추가하면 호스트가 토큰을 암호화해 해당 인스턴스로만 보냅니다.",
+  "whenToUse": "자체 호스팅 Gitea 서버(github.com이나 GitLab이 아님)에 사용합니다. 저장소, 파일, 커밋, 이슈, PR, diff, Actions 실행과 작업 로그, 릴리스, 알림을 조회하고, 이슈 생성과 댓글, 상태나 라벨 변경, PR 생성과 병합, 릴리스 생성을 합니다(쓰기 작업은 매번 사용자에게 확인합니다).",
+  "tools": {
+    "list_tools": {
+      "description": "이 플러그인이 실행할 수 있는 Gitea 작업(약 30개, user, repos, code, issues, pulls, labels, actions, releases, notifications 카테고리)을 나열합니다. category를 생략하면 카테고리별 작업 수와 요약을, category를 지정하면 해당 카테고리의 각 작업에 대한 설명, 매개변수, 필요한 토큰 범위, 쓰기 작업 여부를 반환합니다. 쓰기 작업은 무엇이든 보내기 전에 항상 Cindy에서 사용자에게 확인을 받습니다."
+    },
+    "call_tool": {
+      "description": "list_tools가 반환한 Gitea 작업 하나를 실행합니다. 매개변수는 args에 전달합니다. 저장소 작업에는 owner와 repo(또는 repo를 \"owner/name\" 형식으로)가 필요하며 git remote get-url origin에서 알아낼 수 있습니다. Gitea 인스턴스가 여러 개 설정되어 있으면 args.instance에 연결 ID나 호스트를 지정합니다. 읽기 작업은 기본 연결로 대체되지만 쓰기 작업은 그렇지 않습니다. 목록은 page와 limit(기본 20, 최대 50)을 지원합니다. 결과는 유용한 필드만 남기며 파일, diff, 로그 텍스트는 max_chars로 제한됩니다. 쓰기 작업은 먼저 확인 대화상자를 띄우고, 사용자가 거부하면 아무것도 보내지 않습니다. 쓰기 결과가 알 수 없음으로 보고되면 다시 시도하기 전에 현재 상태를 확인하세요."
+    }
+  },
+  "network": {
+    "connections": {
+      "gitea_conn": {
+        "label": "Gitea 인스턴스",
+        "hint": "Gitea의 설정 > 애플리케이션에서 토큰을 만드세요. 기본 포트 443의 https 인스턴스만 지원합니다."
+      }
+    }
+  }
+}

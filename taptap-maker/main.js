@@ -84,7 +84,7 @@ async function accountRequest(action, payload, longRunning, preserveFailure) {
       name: ACCOUNT_TOOL,
       arguments: args,
     },
-    timeoutMs: longRunning ? 60000 : 30000,
+    timeoutMs: longRunning ? 120000 : 30000,
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
   var parsed = parseAccountResult(result);
@@ -156,7 +156,7 @@ async function listMakerTools(workdir) {
   var result = await nodeRequest({
     method: 'cindy/tools-list',
     params: { target_dir: workdir },
-    timeoutMs: 60000,
+    timeoutMs: 120000,
   });
   var access = isObject(result) && isObject(result._meta) ? result._meta.maker_access : null;
   if (isObject(access) && access.code === 'BLACKLISTED') {
@@ -233,7 +233,7 @@ async function callMakerTool(name, args, longRunning) {
       arguments: args,
       ...(progressToken ? { _meta: { progressToken: progressToken } } : {}),
     },
-    timeoutMs: longRunning ? 60000 : 30000,
+    timeoutMs: longRunning ? 120000 : 30000,
     ...(longRunning ? { maxTotalMs: 900000 } : {}),
   });
 }
@@ -377,26 +377,10 @@ function makerFailureDetails(message) {
   return details;
 }
 
-// 远端 pre-receive 以「云端工作区有未提交改动」拒绝推送（如 get_ad_config 写入的
-// .project/settings.json）。Runtime 的 next_action 会误导为 pull/rebase，但插件外没有
-// 提交云端工作区的入口；这里换成已验证可行的插件内恢复步骤（makecindy/cindy#7001）。
-var MAKER_CLOUD_DIRTY_REJECTION = /cloud workspace has uncommitted changes that this push would overwrite/i;
-var MAKER_CLOUD_DIRTY_RECOVERY = [
-  '推送被拒的原因是云端工作区存在未提交改动（常见来源是 get_ad_config 把广告配置写入 .project/settings.json），不是远端有新提交；pull/rebase 解决不了，本地提交已保留。插件内已验证的恢复步骤：',
-  '1. 先向用户说明：下一步只构建云端现有版本、不包含本地改动，目的是让云端把未提交改动生成 sync 提交；征得同意后调用 maker_build 并传 confirm_remote_build_without_submit=true。云端构建完成后会自动生成 sync 提交，把 .project/settings.json 等未提交改动入库。',
-  '2. 让本地 AI 执行 git fetch origin，再把 origin/main merge（或 rebase）进本地 main，保留本地未推送提交；不要用无参数 git pull，也不要手动执行通用 git push。',
-  '3. 重新正常调用 maker_build（不传该参数）：此时本地 main 仅领先远端，会推送本地提交并完成构建。',
-  '不要手动复制或猜测云端配置。',
-].join('\n');
-
-function makerResultMentionsCloudDirtyRejection(result) {
-  return MAKER_CLOUD_DIRTY_REJECTION.test(makerResultText(result));
-}
-
 function makerBuildFailureResult(result) {
   var sanitized = sanitizeMakerFailure(result);
-  if (!isObject(sanitized) || !makerResultMentionsCloudDirtyRejection(result)) return sanitized;
-  var message = makerResultText(sanitized) + '\n\n' + MAKER_CLOUD_DIRTY_RECOVERY;
+  if (!isObject(sanitized)) return sanitized;
+  var message = normalizeMakerPluginGuidance(makerResultText(sanitized));
   var details = Object.assign({}, sanitized.structuredContent);
   delete details.success;
   delete details.message;
@@ -554,6 +538,12 @@ function normalizeMakerPluginGuidance(value) {
         return '- 本地诊断环境未就绪；Cindy 插件暂不提供 Python 或 Lua LSP 自动安装入口，不影响远端构建。';
       }
       var normalized = line
+        .replace(/运行\s*\x60?taptap-maker git sync(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
+          '如需同步，先取得用户授权后通过 Cindy 通用 Git 拉取并合并 origin/main；提交或构建使用 maker_build（会提交并推送）')
+        .replace(/或运行\s*\x60?taptap-maker git push\x60?/g,
+          '经用户明确要求提交或构建后调用 maker_build（会提交并推送）')
+        .replace(/(?:或)?运行\s*\x60?taptap-maker git cloud-status(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
+          '通过 Maker 项目页面核对云端改动与提交记录，确认结果前不要重试提交或构建')
         .replace(/`?maker_status_lite`?/g, '`maker_status`')
         .replace(/`?maker_build_current_directory`?/g, '`maker_build`')
         .replace(/`?taptap-maker login`?/g, '`maker_login`')
@@ -569,6 +559,15 @@ function normalizeMakerPluginGuidance(value) {
     .trim();
 }
 
+function normalizeMakerGuidanceValue(value) {
+  if (typeof value === 'string') return normalizeMakerPluginGuidance(value);
+  if (Array.isArray(value)) return value.map(normalizeMakerGuidanceValue);
+  if (!isObject(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(function (entry) {
+    return [entry[0], normalizeMakerGuidanceValue(entry[1])];
+  }));
+}
+
 function sanitizeMakerStatus(result) {
   if (!isObject(result) || !Array.isArray(result.content)) return result;
   return Object.assign({}, result, {
@@ -579,7 +578,7 @@ function sanitizeMakerStatus(result) {
       });
     }),
     ...(result.structuredContent !== undefined
-      ? { structuredContent: redactLocalPathsInValue(result.structuredContent) }
+      ? { structuredContent: normalizeMakerGuidanceValue(redactLocalPathsInValue(result.structuredContent)) }
       : {}),
   });
 }

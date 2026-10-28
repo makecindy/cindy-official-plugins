@@ -9,7 +9,9 @@
      不回账号或 token。
      「测试连接」只检查当前生效的 GitHub 连接,由电子脑代跑:本页 fetch('/wake') 叫醒电子脑,经 BroadcastChannel
      递活,电子脑 cindy.fetch GET /user(PAT 由主机注入)后把用户名广播回来——
-     本页零网络直连,token 字节不经过任何可读回的地方。 -->
+     本页零网络直连,token 字节不经过任何可读回的地方。
+     页面文案按宿主语言(GET /app-context)由 settings.js 经 data-i18n* 属性填入,
+     不支持的语言回退英文。 -->
 <style>
   * { box-sizing: border-box; margin: 0; }
   body {
@@ -90,31 +92,31 @@
 <body>
   <div id="legacy-account" hidden>
   <div class="label-row">
-    <span class="name">GitHub 账号</span>
+    <span class="name" data-i18n="accountTitle"></span>
     <span class="badge">github.com</span>
   </div>
-  <p class="hint">优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。</p>
+  <p class="hint" data-i18n="accountHint"></p>
   <div id="host-account"></div>
   </div>
   <details id="other-methods">
-  <summary class="subhead">其他连接方式</summary>
-  <p class="hint">备用 Token 仅在本机 GitHub 登录不可用时使用。</p>
+  <summary class="subhead" data-i18n="otherMethods"></summary>
+  <p class="hint" data-i18n="fallbackHint"></p>
   <div id="fallback-account"></div>
   <div class="input-row" id="token-row">
     <div class="pill">
-      <input id="token" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false">
-      <button id="eye" class="icon-btn" type="button" title="显示或隐藏">
+      <input id="token" type="password" data-i18n-placeholder="tokenFormat" autocomplete="off" spellcheck="false">
+      <button id="eye" class="icon-btn" type="button" data-i18n-title="eyeTitle">
         <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
         <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
       </button>
     </div>
-    <button id="save" class="btn" type="button">保存</button>
+    <button id="save" class="btn" type="button" data-i18n="save"></button>
   </div>
   <div class="input-row">
-    <button id="test" class="btn" type="button">测试当前连接</button>
-    <button id="clear" class="btn" type="button">清除</button>
+    <button id="test" class="btn" type="button" data-i18n="test"></button>
+    <button id="clear" class="btn" type="button" data-i18n="clear"></button>
   </div>
-  <a class="console-link" href="https://github.com/settings/tokens">获取备用 Token ↗</a>
+  <a class="console-link" href="https://github.com/settings/tokens" data-i18n="tokenLink"></a>
   </details>
   <p id="status"></p>
   <script src="/settings.js"></script>

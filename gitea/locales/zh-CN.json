@@ -1,0 +1,21 @@
+{
+  "name": "Gitea",
+  "description": "连接自建 Gitea 实例：仓库、文件、提交、Issue、合并请求、标签、里程碑、Actions 运行与日志、发布和通知。在设置中为每个实例添加地址和访问令牌；令牌由主机加密保存，只发送给对应实例。",
+  "whenToUse": "用于自建 Gitea 服务器（不是 github.com 或 GitLab）：读取仓库、文件、提交、Issue、PR、diff、Actions 运行与 job 日志、发布和通知；创建或评论 Issue，修改状态或标签，创建或合并 PR，创建发布（每个写操作都会请用户确认）。",
+  "tools": {
+    "list_tools": {
+      "description": "列出本插件可执行的 Gitea 操作（约 30 个，分为 user、repos、code、issues、pulls、labels、actions、releases、notifications 类目）。不传 category 时返回每个类目的操作数量与简介；传 category 时返回该类目下每个操作的说明、参数、所需令牌权限范围以及是否为写操作。写操作在发送任何请求前都会先在 Cindy 中请用户确认。"
+    },
+    "call_tool": {
+      "description": "执行 list_tools 返回的某个 Gitea 操作，参数放在 args 中。仓库级操作需要 owner 和 repo（或 repo 写成 \"owner/name\"），可从 git remote get-url origin 推导。配置了多个 Gitea 实例时，用 args.instance 指定连接 id 或主机名；读操作会回退到默认连接，写操作不会。列表支持 page 和 limit（默认 20，最大 50）。结果只保留有用字段；文件、diff 和日志文本按 max_chars 截取。写操作会先弹出确认框，用户拒绝则不发送任何请求。如果写操作报告结果未知，请先检查当前状态再决定是否重试。"
+    }
+  },
+  "network": {
+    "connections": {
+      "gitea_conn": {
+        "label": "Gitea 实例",
+        "hint": "在 Gitea 的 设置 > 应用 中创建令牌。仅支持默认端口 443 的 https 实例。"
+      }
+    }
+  }
+}

@@ -1,7 +1,8 @@
-// Screenshot post-processing for the Agent, run with `osascript -l JavaScript`.
+// Screenshot post-processing for Agent and viewer exports, run with `osascript -l JavaScript`.
 // argv: <in.png> <out> <json options>
 // options: {rotate: 0|90|180|270 (clockwise, native → view),
-//           view: {width, height} (view points), scale (output pixels per point),
+//           view: {width, height} (view points; omit for native framebuffer size), scale (output pixels per point),
+//           nativeResolution (retain source pixel density instead of scale), clipboard (PNG to pasteboard instead of file),
 //           region: {x, y, width, height} (view points; default whole screen),
 //           radius (screen corner radius in points, 0 = none),
 //           grid (spacing in points, 0 = none), format: 'jpeg'|'png', quality}
@@ -15,7 +16,10 @@ function run(argv) {
   if (!source || source.isNil()) throw new Error('Cannot read screenshot');
   const rep = source.representations.objectAtIndex(0);
   const sw = rep.pixelsWide, sh = rep.pixelsHigh;
-  const s = o.scale || 1, vw = o.view.width, vh = o.view.height;
+  const quarter = (o.rotate || 0) % 180 !== 0;
+  const vw = o.view ? o.view.width : (quarter ? sh : sw);
+  const vh = o.view ? o.view.height : (quarter ? sw : sh);
+  const s = o.nativeResolution ? sw / (quarter ? vh : vw) : o.scale || 1;
   const r = o.region || {x: 0, y: 0, width: vw, height: vh};
   const W = Math.max(1, Math.round(r.width * s)), H = Math.max(1, Math.round(r.height * s));
   const FW = vw * s, FH = vh * s;
@@ -37,7 +41,6 @@ function run(argv) {
   turn.translateXByYBy(FW / 2, FH / 2);
   turn.rotateByDegrees(-(o.rotate || 0)); // AppKit turns counter-clockwise; ours is clockwise
   turn.concat;
-  const quarter = (o.rotate || 0) % 180 !== 0;
   const dw = quarter ? FH : FW, dh = quarter ? FW : FH;
   rep.drawInRectFromRectOperationFractionRespectFlippedHints($.NSMakeRect(-dw / 2, -dh / 2, dw, dh), $.NSMakeRect(0, 0, sw, sh), $.NSCompositingOperationCopy, 1, true, $());
   ctx.restoreGraphicsState;
@@ -67,6 +70,16 @@ function run(argv) {
   const png = o.format === 'png';
   const props = png ? $({}) : $.NSDictionary.dictionaryWithObjectForKey($(o.quality || 0.8), $.NSImageCompressionFactor);
   const data = out.representationUsingTypeProperties(png ? $.NSBitmapImageFileTypePNG : $.NSBitmapImageFileTypeJPEG, props);
+  if (!data || data.isNil() || !(Number(data.length) > 0)) throw new Error('Cannot encode screenshot');
+  if (o.clipboard) {
+    if (!png) throw new Error('Clipboard export requires PNG');
+    // Finish encoding before touching the pasteboard. Avoid another process and
+    // a write/read round trip for an image that only needs to live in memory.
+    const pasteboard = $.NSPasteboard.generalPasteboard;
+    pasteboard.clearContents;
+    if (!pasteboard.setDataForType(data, $.NSPasteboardTypePNG)) throw new Error('Cannot copy screenshot');
+    return JSON.stringify({width: W, height: H, bytes: Number(data.length), copied: true});
+  }
   if (!data.writeToFileAtomically(output, true)) throw new Error('Cannot write screenshot');
   return JSON.stringify({width: W, height: H});
 }

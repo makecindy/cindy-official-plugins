@@ -18,6 +18,7 @@
 
       const close = () => {
         if (!state) return;
+        clearTimeout(state.idleTimer);
         this.screen.touchUp([state.f1, state.f2]);
         if (this.overlay) this.overlay.clear();
         state = null;
@@ -38,9 +39,7 @@
         if (!state || state.kind !== wantKind) {
           if (state) close();
           state = {
-            kind: wantKind, centre,
-            viewCx: vx, viewCy: vy,
-            viewR: (BASE_SPREAD_PT / width) * r.width,
+            kind: wantKind,
             f1: { x: centre.x + BASE_SPREAD_PT, y: centre.y },
             f2: { x: centre.x - BASE_SPREAD_PT, y: centre.y },
             scale: 1, idleTimer: null,
@@ -54,29 +53,35 @@
           state.f1 = { x: centre.x + rr, y: centre.y };
           state.f2 = { x: centre.x - rr, y: centre.y };
         } else {
-          const shiftX = (-e.deltaX / r.width) * width;
-          const shiftY = (-e.deltaY / r.height) * height;
+          // Keep the visible pair together and consume offscreen travel, just
+          // like Android. Reversing at an edge must not repay hidden distance.
+          for (const finger of [state.f1, state.f2]) {
+            finger.x = Math.max(0, Math.min(width, finger.x));
+            finger.y = Math.max(0, Math.min(height, finger.y));
+          }
+          const shiftX = Math.max(-Math.min(state.f1.x, state.f2.x),
+            Math.min(width - Math.max(state.f1.x, state.f2.x), (-e.deltaX / r.width) * width));
+          const shiftY = Math.max(-Math.min(state.f1.y, state.f2.y),
+            Math.min(height - Math.max(state.f1.y, state.f2.y), (-e.deltaY / r.height) * height));
           state.f1.x += shiftX; state.f1.y += shiftY;
           state.f2.x += shiftX; state.f2.y += shiftY;
         }
 
-        this.screen.touchMove([state.f1, state.f2]);
+        // Use the backend's bounded positions for both dispatch and display;
+        // a pinch near an edge can keep its raw pair outside the screen.
+        const points = [state.f1, state.f2].map(finger => ({
+          x: Math.max(0, Math.min(width, finger.x)),
+          y: Math.max(0, Math.min(height, finger.y)),
+        }));
+        this.screen.touchMove(points);
 
         if (this.overlay) {
-          if (state.kind === 'pinch') {
-            const vr = state.viewR * state.scale;
-            this.overlay.setFingers([
-              { x: state.viewCx + vr, y: state.viewCy },
-              { x: state.viewCx - vr, y: state.viewCy },
-            ]);
-          } else {
-            const dxPx = (state.f1.x - centre.x) / width * r.width;
-            const dyPx = (state.f1.y - centre.y) / height * r.height;
-            this.overlay.setFingers([
-              { x: vx + dxPx, y: vy + dyPx },
-              { x: vx - dxPx, y: vy - dyPx },
-            ]);
-          }
+          // Draw the actual contacts for both pan and pinch; mirroring the
+          // first contact makes a parallel pan look like fingers spreading.
+          this.overlay.setFingers(points.map((finger) => ({
+            x: finger.x / width * r.width,
+            y: finger.y / height * r.height,
+          })));
         }
 
         clearTimeout(state.idleTimer);
