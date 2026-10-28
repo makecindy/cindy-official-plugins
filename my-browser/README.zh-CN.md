@@ -356,6 +356,8 @@ YouTube 的 timedtext 接口现在要求页面播放器附带的来源令牌（`
 
 少数动作需要 Chrome 的调试接口：导出 PDF、整页和元素截图、不切换标签页截取你窗口里的后台标签页，以及需要读取 Cookie 或网络请求的网站配方。调试接口是可选权限，默认关闭。PDF 或这类配方第一次需要它时，扩展会在你当前的窗口打开一个说明页，上面有「开启」按钮（Chrome 会请你确认）；十分钟内最多打开一次，Agent 会被告知等你确认。开启后，调试只在执行那个动作时接上、做完马上断开，所以 Chrome 的「正在调试此浏览器」提示只出现那几秒；配方会话闲置两分钟会自动断开。未开启时，截图退回可视区域并附上说明。以后想关闭，在工具栏右键 Cindy 图标，选「选项」。
 
+在这些 Cindy 宿主上，操作你的浏览器只有一条路：Cindy 的 `browser` 工具，目标选「我的浏览器」。插件声明自己的 `browser_status`、`browser_read`、`browser_act`、`browser_tabs` 工具及其手册已被取代（`browserExtension.pageControlReplaces`），宿主在提供「我的浏览器」期间对 Agent 隐藏它们；管理网站权限的 `browser_policy` 保留。宿主桥接没有运行时，以及旧版 Cindy 上，插件工具照旧可用。
+
 权限：因为 Chrome 截取可视标签页要求 `<all_urls>`，所以在 http/https 主机权限旁加了它；`debugger` 是可选权限。Chrome 显示的安装提示与之前完全相同（用 `getPermissionWarningsByManifest` 核对过），更新后扩展不会被停用。旧版 Cindy 和旧版扩展保持原有行为，某个动作需要新版扩展时 Cindy 会提示更新。
 
 ## 0.4.41 播放器按钮换成 Cindy 标志（宿主插件包 0.4.58）
