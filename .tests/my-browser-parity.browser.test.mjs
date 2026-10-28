@@ -175,8 +175,8 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const userShot=await act('screenshot',{tabId:userTab.id,url:'http://parity.test/user'});
   check('visible user tab can be captured',userShot.ok,userShot.error||'');
   const fc=await act('focus',{tabId:userBehind,url:'http://parity.test/two'});
-  const nowActive=await worker.evaluate(async id=>(await chrome.tabs.get(id)).active,userBehind);
-  check('focus switches tab within its window',fc.ok && nowActive);
+  const stillBehind=await worker.evaluate(async id=>!(await chrome.tabs.get(id)).active,userBehind);
+  check('focus never switches a tab in the user window',fc.error==='USER_WINDOW' && stillBehind,JSON.stringify(fc));
   const cl=await act('close',T);
   const gone=await act('text',T);
   check('close then TAB_CLOSED',cl.ok && gone.error==='TAB_CLOSED',gone.error);
@@ -237,7 +237,7 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     const cspEval=await act('evaluate',{tabId:csp.tabId,url:'http://csp.test/',fn:'() => document.title + 1'});
     check('CSP page evaluates through the debugger',cspEval.ok && cspEval.result==='CSP1' && cspEval.viaDebugger===true,JSON.stringify(cspEval));
     const handoff=await act('focus',{tabId:csp.tabId,url:'http://csp.test/'});
-    check('focus in Cindy window brings it to the user',handoff.ok && handoff.broughtToFront===true,JSON.stringify(handoff));
+    check('focus in Cindy window hands the page over without taking focus',handoff.ok && handoff.handoff===true,JSON.stringify(handoff));
     const pdf=await act('pdf',T);
     check('pdf export',pdf.ok && Buffer.from(pdf.data,'base64').subarray(0,4).toString()==='%PDF',pdf.error||pdf.message||'');
     check('one-shot actions detach right after',(await act('debuggerAccess',{})).attachedTabs===0);

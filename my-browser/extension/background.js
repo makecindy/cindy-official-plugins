@@ -61,10 +61,15 @@ async function remember() { await sessionStore.set({ownedTabs:[...owned]}); }
 // Pages the agent opens live in one separate window of the user's browser, created without focus, so
 // the user's own windows never gain tabs, switch tabs or lose focus. Remembered for the session.
 let agentWindowId = null;
+// Cindy's window must survive an extension reload or update (session storage does not), but window and
+// group ids are reused after the browser restarts, so they are forgotten when the browser starts.
+const agentStore = chrome.storage.local;
+chrome.runtime.onStartup?.addListener(() => { agentWindowId = null; agentGroupId = null; quietlyForget(); });
+function quietlyForget() { agentStore.remove?.(['agentWindow','agentGroup'])?.catch?.(() => {}); }
 async function agentWindow() {
-  if (agentWindowId == null) agentWindowId = (await sessionStore.get('agentWindow')).agentWindow ?? null;
+  if (agentWindowId == null) agentWindowId = (await agentStore.get('agentWindow')).agentWindow ?? null;
   if (agentWindowId != null) {
-    try { await chrome.windows.get(agentWindowId); return agentWindowId; } catch { agentWindowId = null; await sessionStore.set({agentWindow:null}); }
+    try { await chrome.windows.get(agentWindowId); return agentWindowId; } catch { agentWindowId = null; await agentStore.set({agentWindow:null}); }
   }
   return null;
 }
@@ -74,7 +79,7 @@ async function openInAgentWindow(url) {
   if (windowId != null) tab = await chrome.tabs.create({windowId,url,active:true});
   else {
     const created = await chrome.windows.create({url,focused:false,type:'normal'});
-    agentWindowId = created.id; await sessionStore.set({agentWindow:created.id});
+    agentWindowId = created.id; await agentStore.set({agentWindow:created.id});
     tab = created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
   }
   await groupAgentTab(tab);
@@ -97,12 +102,12 @@ chrome.permissions?.onAdded?.addListener(async added => {
 async function groupAgentTab(tab) {
   if (!chrome.tabGroups || !chrome.tabs.group || !tab?.id) return;
   try {
-    if (agentGroupId == null) agentGroupId = (await sessionStore.get('agentGroup')).agentGroup ?? null;
+    if (agentGroupId == null) agentGroupId = (await agentStore.get('agentGroup')).agentGroup ?? null;
     let groupId = agentGroupId;
     if (groupId != null) { try { if ((await chrome.tabGroups.get(groupId)).windowId !== tab.windowId) groupId = null; } catch { groupId = null; } }
     groupId = await chrome.tabs.group({tabIds:[tab.id],...(groupId != null ? {groupId} : {createProperties:{windowId:tab.windowId}})});
     if (groupId !== agentGroupId) {
-      agentGroupId = groupId; await sessionStore.set({agentGroup:groupId});
+      agentGroupId = groupId; await agentStore.set({agentGroup:groupId});
       await chrome.tabGroups.update(groupId,{title:groupTitle(),color:'red'});
     }
   } catch {}
@@ -788,14 +793,13 @@ function sanitizeResult(result) {
 async function tabAction(job,tab,policy) {
   const a = job.payload;
   if (job.action === 'focus') {
+    // Nothing the agent does may change what the user is looking at: no tab switch in the user's
+    // windows and no window brought to the front. In Cindy's own window, focus shows the page there and
+    // asks for attention (the browser icon flashes) so the user can find it for a sign-in.
+    if (tab.windowId !== await agentWindow()) return fail('USER_WINDOW',"This tab is in a window the user is using; switching to it would change what they see. Ask the user to look at it, or open the page with open (it goes to Cindy's own window).");
     await chrome.tabs.update(tab.id,{active:true});
-    // In Cindy's own window, focus hands the page to the user (to sign in, solve a check): that window
-    // comes to the front. A tab in one of the user's windows only comes forward inside its window.
-    if (tab.windowId === await agentWindow()) {
-      await chrome.windows.update(tab.windowId,{focused:true,drawAttention:true,...((await chrome.windows.get(tab.windowId)).state === 'minimized' ? {state:'normal'} : {})});
-      return {ok:true,execution:'executed',tabId:tab.id,broughtToFront:true};
-    }
-    return {ok:true,execution:'executed',tabId:tab.id};
+    await chrome.windows.update(tab.windowId,{drawAttention:true}).catch(() => {});
+    return {ok:true,execution:'executed',tabId:tab.id,handoff:true};
   }
   if (job.action === 'close') {
     await chrome.tabs.remove(tab.id); await release(tab.id);
