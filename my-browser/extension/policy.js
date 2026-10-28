@@ -4,9 +4,11 @@
   // Parity with Cindy's dedicated browser: the user picks which browser the agent uses, so the
   // user's own browser offers the same actions. What it must not do is disturb the user's own
   // browsing: new pages open in a separate background window and nothing steals focus.
-  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait'];
+  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait', 'pdf', 'debuggerAccess'];
   const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
-  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize'];
+  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize', 'cdp'];
+  // Actions that address no page: listing tabs, and checking or granting the on-demand debugger.
+  const UNADDRESSED = ['tabs', 'debuggerAccess'];
   const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
     if (typeof value !== 'string') throw new Error('Enter a domain, for example example.test.');
@@ -62,7 +64,7 @@
   function check(policy, action, url) {
     const deny = (error, message, host) => ({ ok: false, error, message, host, execution: 'not_executed' });
     if (!READ.includes(action) && !INTERACT.includes(action)) return deny('INVALID_ACTION', 'Choose a supported browser action.');
-    if (action === 'tabs') return { ok: true };
+    if (UNADDRESSED.includes(action)) return { ok: true };
     let u;
     try { u = new URL(url); } catch { return deny('INVALID_URL', 'Provide a full HTTP or HTTPS URL.'); }
     if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) {
@@ -77,7 +79,7 @@
   }
   function validate(action, payload = {}) {
     if (!READ.includes(action) && !INTERACT.includes(action)) throw new Error('Unsupported browser action.');
-    if (action !== 'tabs' && (typeof payload.url !== 'string' || payload.url.length > 8192)) throw new Error('Provide a full URL of at most 8192 characters.');
+    if (!UNADDRESSED.includes(action) && (typeof payload.url !== 'string' || payload.url.length > 8192)) throw new Error('Provide a full URL of at most 8192 characters.');
     if (payload.browser != null && (typeof payload.browser !== 'string' || payload.browser.length > 128)) throw new Error('Invalid browser connection id.');
     if (payload.limit != null && (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100)) throw new Error('Limit must be 1–100.');
     if (payload.maxChars != null && (!Number.isInteger(payload.maxChars) || payload.maxChars < 256 || payload.maxChars > 30000)) throw new Error('maxChars must be 256–30000.');
@@ -86,7 +88,7 @@
     for (const key of ['selector', 'from', 'ref', 'text', 'key', 'waitFor', 'emptySelector', 'after']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > (key === 'text' ? 16000 : 2000))) throw new Error('Invalid ' + key + '.');
     if (payload.tabId != null && (!Number.isInteger(payload.tabId) || payload.tabId < 0)) throw new Error('Invalid tab id.');
     if (['click','type','select','hover','upload'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
-    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
+    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait','pdf','cdp'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
     const finite = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
     if (action === 'clickCoords' && !payload.ref && !payload.selector && (!finite(payload.x, 0, 100000) || !finite(payload.y, 0, 100000))) throw new Error('clickCoords needs x and y in CSS pixels, or a ref or selector.');
     if (payload.modifiers != null && (!Array.isArray(payload.modifiers) || payload.modifiers.length > 4 || payload.modifiers.some(m => !['Alt','Control','ControlOrMeta','Meta','Shift'].includes(m)))) throw new Error('modifiers must be Alt, Control, ControlOrMeta, Meta or Shift.');
@@ -99,6 +101,9 @@
     if (action === 'upload' && (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 20 || payload.files.some(f => !f || typeof f.name !== 'string' || !f.name || f.name.length > 255 || typeof f.data !== 'string' || (f.mimeType != null && (typeof f.mimeType !== 'string' || f.mimeType.length > 200))))) throw new Error('upload needs 1–20 files with name and base64 data.');
     if (action === 'upload' && payload.files.reduce((n, f) => n + f.data.length, 0) > 40000000) throw new Error('Upload files must total at most about 30 MB.');
     for (const key of ['timeMs','timeoutMs']) if (payload[key] != null && !finite(payload[key], 0, 120000)) throw new Error(key + ' must be 0–120000.');
+    if (action === 'cdp' && !['begin','end','events','command'].includes(payload.op)) throw new Error('cdp op must be begin, end, events or command.');
+    if (action === 'cdp' && payload.op === 'command' && (typeof payload.method !== 'string' || !/^[A-Za-z]+\.[A-Za-z]+$/.test(payload.method))) throw new Error('cdp command needs a protocol method such as Network.getCookies.');
+    if (action === 'cdp' && payload.params != null && (typeof payload.params !== 'object' || Array.isArray(payload.params) || JSON.stringify(payload.params).length > 1000000)) throw new Error('cdp params must be an object of at most 1 MB.');
     if (payload.loadState != null && !['load','domcontentloaded','networkidle'].includes(payload.loadState)) throw new Error('loadState must be load, domcontentloaded or networkidle.');
     for (const key of ['textGone','urlIncludes','filter','startRef','endRef','startSelector','endSelector','button']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > 8192)) throw new Error('Invalid ' + key + '.');
     if (action === 'type' && typeof payload.text !== 'string') throw new Error('Typing requires text (an empty string clears the field).');
@@ -208,7 +213,7 @@
     if (redactedPath !== u.pathname) { u.pathname = redactedPath; changed = true; }
     return changed ? u.href : raw;
   }
-  const api = { READ, INTERACT, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
+  const api = { READ, INTERACT, UNADDRESSED, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MyBrowserPolicy = api;
 })(globalThis);

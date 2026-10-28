@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cindy</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--muted:#6e6e73;--bg:#fff;--line:#d2d2d7;--accent:#d93a3a}
+@media (prefers-color-scheme:dark){:root{--fg:#f5f5f7;--muted:#a1a1a6;--bg:#1c1c1e;--line:#3a3a3c}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:520px;margin:64px auto;padding:0 24px}
+h1{font-size:22px;margin:0 0 12px}p{margin:0 0 12px;color:var(--muted)}ul{margin:0 0 16px;padding-left:20px;color:var(--muted)}
+.status{margin:20px 0;padding:12px 14px;border:1px solid var(--line);border-radius:10px;color:var(--fg)}
+button{font:inherit;border-radius:8px;padding:8px 16px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button[hidden]{display:none}
+</style></head><body><main>
+<h1 id="title"></h1><p id="intro"></p><ul id="uses"></ul><p id="bar"></p>
+<div class="status" id="status" role="status" aria-live="polite"></div>
+<button class="primary" id="allow" hidden></button> <button id="revoke" hidden></button>
+</main><script src="permissions.js"></script></body></html>

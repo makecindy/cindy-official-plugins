@@ -15,7 +15,7 @@ const source=fs.readFileSync(new URL('../my-browser/extension/background.js',imp
 
 function harness() {
   const tabs=new Map(),windows=new Map([[1,{id:1,state:'normal'}]]),data={},calls=[];let next=10,nextWindow=500;
-  const chrome={action:{onClicked:{addListener(){}}},runtime:{getURL:()=> 'chrome-extension://fixture/',getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
+  const chrome={permissions:{contains:async()=>false},action:{onClicked:{addListener(){}}},runtime:{getURL:path=> 'chrome-extension://fixture/'+(path||''),getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
     storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
     tabs:{get:async id=>{if(!tabs.has(id))throw new Error('No tab');return {...tabs.get(id)};},query:async q=>[...tabs.values()].filter(t=>!q?.windowId || t.windowId===q.windowId).map(t=>({...t})),
       create:async({url,windowId=1,active=false})=>{const t={id:next++,url,windowId,status:'complete',active};if(active)for(const o of tabs.values())if(o.windowId===windowId)o.active=false;tabs.set(t.id,t);calls.push(['tabs.create',{url,windowId,active}]);return {...t};},
@@ -24,7 +24,7 @@ function harness() {
       captureVisibleTab:async(windowId,options)=>{calls.push(['capture',windowId,options]);return 'data:image/'+options.format+';base64,AAAA';},
       onActivated:{addListener(){}},onRemoved:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
     windows:{create:async options=>{calls.push(['windows.create',options]);const w={id:nextWindow++,state:'normal'};windows.set(w.id,w);const t=await chrome.tabs.create({url:options.url,windowId:w.id,active:true});return {id:w.id,tabs:[t]};},
-      get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
+      get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     setTimeout(fn){queueMicrotask(fn);return 0;},clearTimeout(){}};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
@@ -42,6 +42,13 @@ test('policy: open is a read like navigate; new actions need a tab id and bounde
   assert.throws(()=>P.validate('screenshot',{url:'https://example.test/'}),/tab id/);
   P.validate('clickCoords',{url:'https://example.test/',tabId:1,ref:'r1',modifiers:['Shift','ControlOrMeta']});
   P.validate('clickCoords',{url:'https://example.test/',tabId:1,x:3,y:4});
+  // On-demand debugger: pdf reads, raw protocol interacts, the access check addresses no page.
+  assert.ok(P.READ.includes('pdf'));assert.ok(P.INTERACT.includes('cdp'));
+  P.validate('debuggerAccess',{});assert.equal(P.check(P.defaults(),'debuggerAccess').ok,true);
+  P.validate('cdp',{url:'https://example.test/',tabId:1,op:'command',method:'Network.getCookies',params:{}});
+  assert.throws(()=>P.validate('cdp',{url:'https://example.test/',tabId:1,op:'command',method:'eval(1)'}),/protocol method/);
+  assert.throws(()=>P.validate('cdp',{url:'https://example.test/',tabId:1,op:'attach'}),/op/);
+  assert.throws(()=>P.validate('pdf',{url:'https://example.test/'}),/tab id/);
   assert.throws(()=>P.validate('clickCoords',{url:'https://example.test/',tabId:1}),/x and y/);
   assert.throws(()=>P.validate('clickCoords',{url:'https://example.test/',tabId:1,x:1,y:1,modifiers:['Hyper']}),/modifiers/);
   assert.throws(()=>P.validate('resize',{url:'https://example.test/',tabId:1,width:50,height:600}),/200/);
@@ -84,4 +91,20 @@ test('resize only touches the Cindy window; focus and close act on the addressed
   assert.equal((await h.run('close',{url:'https://example.test/a',tabId:opened.tabId})).ok,true);
   assert.equal(h.tabs.has(opened.tabId),false);
   assert.equal((await h.run('snapshot',{url:'https://example.test/a',tabId:opened.tabId})).error,'TAB_CLOSED');
+});
+
+test('the first action that needs the debugger opens its page in the user window, once',async()=>{
+  const h=harness();
+  const first=await h.run('pdf',{url:'https://example.test/user',tabId:1});
+  assert.equal(first.error,'DEBUGGER_NOT_ALLOWED');assert.equal(first.grantPageOpened,true);
+  const created=h.calls.filter(c=>c[0]==='tabs.create');
+  same(created,[['tabs.create',{url:'chrome-extension://fixture/permissions.html?needed=1',windowId:1,active:true}]]);
+  const again=await h.run('cdp',{url:'https://example.test/user',tabId:1,op:'begin'});
+  assert.equal(again.error,'DEBUGGER_NOT_ALLOWED');assert.equal(again.grantPageOpened,false);
+  assert.equal(h.calls.filter(c=>c[0]==='tabs.create').length,1);
+  // A screenshot never prompts: it falls back to the visible area and says so.
+  const opened=await h.run('open',{url:'https://example.test/a'});
+  const shot=await h.run('screenshot',{url:'https://example.test/a',tabId:opened.tabId,fullPage:true});
+  assert.equal(shot.ok,true,JSON.stringify(shot));assert.match(shot.note,/visible area/);
+  assert.equal(h.calls.filter(c=>c[0]==='tabs.create' && String(c[1].url).includes('permissions')).length,1);
 });

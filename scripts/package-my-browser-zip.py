@@ -6,8 +6,9 @@ import tempfile
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 root = Path(__file__).resolve().parent.parent / 'my-browser'
-files = ['manifest.json', 'background.js', 'policy.js', 'network-guard.js',
-         'ui.js', 'reading-ui.js', 'learning-core.js', 'subtitle-playback.js', 'content.js', 'library.html', 'library.js', 'reader-pdf.js', 'pdf-cmap-bundle.js', 'ocr.js', 'icons/16.png', 'icons/32.png', 'icons/48.png', 'icons/128.png']
+files = ['manifest.json', 'background.js', 'policy.js', 'network-guard.js', 'youtube-transcript.js', 'brand-icon.js',
+         'ui.js', 'reading-ui.js', 'learning-core.js', 'subtitle-playback.js', 'content.js', 'library.html', 'library.js', 'permissions.html', 'permissions.js', 'reader-pdf.js', 'pdf-cmap-bundle.js', 'ocr.js', 'icons/16.png', 'icons/32.png', 'icons/48.png', 'icons/128.png']
+files += [f'icons/{name}' for name in sorted(p.name for p in (root / 'extension/icons').glob('*.png')) if f'icons/{name}' not in files]
 files += json.loads((root / 'extension/vendor-files.json').read_text())
 manifest = json.loads((root / 'extension/manifest.json').read_text())
 for content_script in manifest.get('content_scripts', []):

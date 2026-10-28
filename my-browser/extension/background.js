@@ -76,6 +76,137 @@ async function openInAgentWindow(url) {
   return created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
 }
 const PAGE_ACCESS = {allowLocal:true};
+
+// ── Chrome's debugger, on demand ───────────────────────────────────────────────────────────
+// An optional permission. Chrome lets the user grant it only by a click on the extension's own
+// page, so the first action that needs it opens that page in the user's window. While attached,
+// Chrome shows a notice bar in every window, so it is attached only for the action that needs
+// it (PDF, full-page/element/background screenshots, recipe protocol sessions) and detached
+// right after; a recipe session that goes quiet is detached by an idle timer.
+const DEBUGGER_ACCESS = {permissions:['debugger']};
+const DEBUGGER_IDLE_MS = 120000, DEBUGGER_EVENT_MAX = 5000;
+const debugged = new Map();
+let debuggerHooked = false;
+async function debuggerAllowed() {
+  try { return await chrome.permissions.contains(DEBUGGER_ACCESS); } catch { return false; }
+}
+const DEBUGGER_PROMPT_INTERVAL_MS = 10*60000;
+// Opens the grant page at most once per interval, so a retrying agent cannot keep popping tabs.
+async function debuggerDenied() {
+  const last = (await sessionStore.get('debuggerPrompted')).debuggerPrompted || 0;
+  let opened = false;
+  if (Date.now()-last >= DEBUGGER_PROMPT_INTERVAL_MS) {
+    await sessionStore.set({debuggerPrompted:Date.now()});
+    opened = await openDebuggerPage().then(() => true,() => false);
+  }
+  return {...fail('DEBUGGER_NOT_ALLOWED',opened
+    ? "This needs Chrome's debugger, which the user has not allowed yet. A page explaining it has just opened in the user's Chrome. Ask the user to click Turn on there (Chrome asks them to confirm), then retry. If they decline, do not retry."
+    : "This needs Chrome's debugger, which the user has not allowed. The page to allow it was opened recently; ask the user to confirm it there before retrying. If they decline, do not retry."),grantPageOpened:opened};
+}
+async function openDebuggerPage() {
+  const win = await chrome.windows.getLastFocused({windowTypes:['normal']}).catch(() => null);
+  await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win?.id != null && win.id !== agentWindowId ? {windowId:win.id} : {})});
+}
+function hookDebugger() {
+  if (debuggerHooked || !chrome.debugger) return;
+  debuggerHooked = true;
+  chrome.debugger.onEvent.addListener((source,method,params) => {
+    const state = debugged.get(source.tabId);
+    if (!state?.recording || !method.startsWith('Network.')) return;
+    if (state.events.length >= DEBUGGER_EVENT_MAX) { state.dropped++; return; }
+    const request = params?.request;
+    state.events.push([method,request?.postData?.length > 256000 ? {...params,request:{...request,postData:request.postData.slice(0,256000)}} : params]);
+  });
+  // The user can end a session from Chrome's notice bar; the next command then reports it.
+  chrome.debugger.onDetach.addListener(source => { const state = debugged.get(source.tabId); if (state) { clearTimeout(state.timer); debugged.delete(source.tabId); } });
+}
+async function debuggerAttach(tabId) {
+  if (!chrome.debugger) throw Object.assign(new Error('DEBUGGER_UNAVAILABLE'),{detail:'Reload the Cindy extension once after allowing the debugging feature.'});
+  hookDebugger();
+  let state = debugged.get(tabId);
+  if (!state) {
+    try { await chrome.debugger.attach({tabId},'1.3'); }
+    catch (e) { if (!/already attached/i.test(e.message)) throw Object.assign(new Error('DEBUGGER_ATTACH_FAILED'),{detail:e.message}); }
+    state = {holds:0,events:[],dropped:0,recording:false,timer:null};
+    debugged.set(tabId,state);
+  }
+  state.holds++; clearTimeout(state.timer);
+  return state;
+}
+async function debuggerDetach(tabId,all = false) {
+  const state = debugged.get(tabId);
+  if (!state) return;
+  state.holds = all ? 0 : Math.max(0,state.holds-1);
+  if (state.holds) return;
+  clearTimeout(state.timer); debugged.delete(tabId);
+  try { await chrome.debugger.detach({tabId}); } catch {}
+}
+async function withDebugger(tabId,fn) {
+  await debuggerAttach(tabId);
+  try { return await fn((method,params = {}) => chrome.debugger.sendCommand({tabId},method,params)); }
+  catch (e) { throw Object.assign(new Error('DEBUGGER_COMMAND_FAILED'),{detail:e.message}); }
+  finally { await debuggerDetach(tabId); }
+}
+function debuggerFailure(e) {
+  if (e.message === 'DEBUGGER_ATTACH_FAILED') return fail('DEBUGGER_ATTACH_FAILED','Chrome refused to attach the debugger to this tab (DevTools or another debugger may be attached): '+String(e.detail || '').slice(0,300));
+  if (e.message === 'DEBUGGER_UNAVAILABLE') return fail('DEBUGGER_UNAVAILABLE',e.detail);
+  if (e.message === 'DEBUGGER_COMMAND_FAILED') return fail('DEBUGGER_COMMAND_FAILED','Chrome could not complete this through the debugger: '+String(e.detail || '').slice(0,300));
+  return null;
+}
+// Recipe protocol sessions: one attachment per tab, events buffered between commands.
+async function cdpAction(tab,a) {
+  const tabId = tab.id;
+  if (a.op === 'begin') {
+    const state = await debuggerAttach(tabId);
+    state.recording = true;
+    state.timer = setTimeout(() => debuggerDetach(tabId,true),DEBUGGER_IDLE_MS);
+    return {ok:true,execution:'executed',tabId};
+  }
+  const state = debugged.get(tabId);
+  if (a.op === 'end') { await debuggerDetach(tabId,true); return {ok:true,execution:'executed',tabId}; }
+  if (!state) return fail('DEBUGGER_DETACHED','The debugging session ended (idle, closed tab, or the user stopped it from Chrome\'s notice bar). Start the recipe again.');
+  clearTimeout(state.timer);
+  state.timer = setTimeout(() => debuggerDetach(tabId,true),DEBUGGER_IDLE_MS);
+  let result;
+  if (a.op === 'command') {
+    try { result = await chrome.debugger.sendCommand({tabId},a.method,a.params || {}); }
+    catch (e) { return {...fail('CDP_COMMAND_FAILED',String(e.message || e).slice(0,500),'unknown'),events:state.events.splice(0)}; }
+  }
+  const events = state.events.splice(0), dropped = state.dropped; state.dropped = 0;
+  return {ok:true,execution:'executed',tabId,...(a.op === 'command' ? {result: result ?? {}} : {}),events,...(dropped ? {droppedEvents:dropped} : {})};
+}
+async function debuggerAccess(a) {
+  if (a.open) await openDebuggerPage();
+  return {ok:true,execution:a.open ? 'executed' : 'not_executed',granted:await debuggerAllowed(),attachedTabs:debugged.size};
+}
+// Element or full-page screenshot, or a tab that is not visible: rendered by the debugger.
+async function debuggerScreenshot(tab,a) {
+  let clip;
+  if (a.ref || a.selector) {
+    const documentId = await network.document(tab.id,PAGE_ACCESS);
+    const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:(ref,selector) => {
+      const snapshot = globalThis.__myBrowserSnapshot;
+      const el = ref ? (snapshot?.url === location.href ? snapshot.refs.get(ref) : null) : document.querySelector(selector);
+      if (!el || !el.isConnected) return null;
+      const r = el.getBoundingClientRect();
+      return {x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height};
+    },args:[a.ref || null,a.selector || null]});
+    const rect = out?.[0]?.documentId === documentId ? out[0].result : null;
+    if (!rect) return fail('STALE_REF','The element is gone. Take a new snapshot.');
+    if (rect.width < 1 || rect.height < 1) return fail('ELEMENT_NOT_VISIBLE','The element has no visible size.');
+    clip = {x:rect.x,y:rect.y,width:Math.min(rect.width,16384),height:Math.min(rect.height,16384),scale:1};
+  }
+  const format = a.type === 'jpeg' ? 'jpeg' : 'png';
+  const shot = await withDebugger(tab.id,async send => {
+    if (a.fullPage && !clip) {
+      const metrics = await send('Page.getLayoutMetrics');
+      const size = metrics.cssContentSize || metrics.contentSize;
+      clip = {x:0,y:0,width:Math.min(Math.ceil(size.width),16384),height:Math.min(Math.ceil(size.height),16384),scale:1};
+    }
+    return send('Page.captureScreenshot',{format,...(format === 'jpeg' ? {quality:85} : {}),...(clip ? {clip,captureBeyondViewport:true} : {}),fromSurface:true});
+  });
+  return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
+}
 async function connection(state) {
   await sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}});
   await chrome.action.setBadgeText({text:state.connected ? '' : '!'});
@@ -611,11 +742,23 @@ async function tabAction(job,tab,policy) {
     await chrome.windows.update(tab.windowId,{width:Math.round(a.width),height:Math.round(a.height),state:'normal'});
     return {ok:true,execution:'executed',tabId:tab.id,width:Math.round(a.width),height:Math.round(a.height)};
   }
+  if (job.action === 'pdf') {
+    if (!await debuggerAllowed()) return await debuggerDenied();
+    const printed = await withDebugger(tab.id,send => send('Page.printToPDF',{printBackground:true}));
+    return {ok:true,execution:'executed',tabId:tab.id,mimeType:'application/pdf',data:printed.data,bytes:Math.floor(printed.data.length*3/4)};
+  }
+  if (job.action === 'cdp') {
+    if (!await debuggerAllowed()) return await debuggerDenied();
+    return cdpAction(tab,a);
+  }
   if (job.action === 'screenshot') {
+    const userWindowBackground = !tab.active && tab.windowId !== await agentWindow();
+    const allowed = (a.fullPage || a.ref || a.selector || userWindowBackground) && await debuggerAllowed();
+    if (allowed) return debuggerScreenshot(tab,a);
     // Chrome captures the visible tab of a window. Tabs in Cindy's own window are brought to the front
     // there; a background tab in one of the user's windows is not, because that would change their view.
     if (!tab.active) {
-      if (tab.windowId !== await agentWindow()) return fail('TAB_NOT_VISIBLE',"This tab is behind another tab in a window the user is using. Capturing it would switch the user's view: use focus first only if the user agrees, or open the page with open (it goes to Cindy's own window).");
+      if (userWindowBackground) return fail('TAB_NOT_VISIBLE',"This tab is behind another tab in a window the user is using. Capturing it would switch the user's view. Open the page with open (it goes to Cindy's own window). Once the user has allowed Chrome's debugger for Cindy (it is requested when PDF or a recipe first needs it), background tabs are captured without switching.");
       await chrome.tabs.update(tab.id,{active:true}); await sleep(300);
     }
     const win = await chrome.windows.get(tab.windowId);
@@ -631,7 +774,9 @@ async function tabAction(job,tab,policy) {
       catch (e) { if (attempt >= 3 || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message)) throw e; await sleep(550); }
     }
     const data = dataUrl.slice(dataUrl.indexOf(',')+1);
-    return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4)};
+    const partial = a.fullPage || a.ref || a.selector;
+    return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4),
+      ...(partial ? {note:"Only the visible area was captured. Full-page and element screenshots use Chrome's debugger, which the user has not allowed; scroll and capture again, or use pdf for the whole page (it asks the user to allow the debugger)."} : {})};
   }
   if (job.action === 'wait') {
     const deadline = Date.now()+Math.min(a.timeoutMs ?? 30000,120000);
@@ -766,6 +911,7 @@ async function handle(job,policy,target) {
   P.validate(job.action,job.payload);
   const gate = P.check(policy,job.action,job.payload.url);
   if (!gate.ok) return gate;
+  if (job.action === 'debuggerAccess') return debuggerAccess(job.payload);
   if (job.action === 'tabs') {
     const tabs = (await chrome.tabs.query({})).filter(t => /^https?:/.test(t.url || '') && (!job.payload.host || (P.check(policy,'text',t.url).ok && P.matches(new URL(t.url).hostname,P.normalizeHost(job.payload.host)))));
     const records=[];let remaining=30000,truncated=false;
@@ -848,6 +994,8 @@ async function handle(job,policy,target) {
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',failureState());
     return result?.error && navigating ? {...result,execution:'unknown'} : result;
   } catch (e) {
+    const debuggerError = debuggerFailure(e);
+    if (debuggerError) return debuggerError;
     const messages = {BROWSER_PAGE_RESTRICTED:'Chrome protects this Web Store domain from extension access, including the legacy developer console. Store-installed extensions have the same restriction. Refreshing or granting site access will not help; no page content was read or modified.',ADDRESS_UNVERIFIED:'The browser could not identify an accessible current document. See reason for the document or local-URL restriction. No page content was read. Inspect the retained tab; do not open replacements or retry in a loop.',PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:'Three plugin-created tabs are still open and cannot safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),...(e.message==='ADDRESS_UNVERIFIED' ? {reason:e.reason || 'UNKNOWN'} : {}),...(e.message==='PAGE_LOAD_TIMEOUT'?{tabId:e.tabId,status:e.tabStatus}:{}),retryable:false};
   }

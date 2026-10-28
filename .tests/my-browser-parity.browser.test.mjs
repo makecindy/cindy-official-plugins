@@ -12,17 +12,20 @@ import http from 'node:http';
 import {generateKeyPairSync,createHash} from 'node:crypto';
 const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'../my-browser');
 const {createBridge}=require('../my-browser/node/bridge.cjs');
-test('real Chrome: agent actions match the dedicated browser without disturbing the user',{skip:!process.env.PLAYWRIGHT_CORE,timeout:120000},async()=>{
-const {chromium}=require(process.env.PLAYWRIGHT_CORE);
-const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
-const profile=await fs.mkdtemp(path.join(os.tmpdir(),'parity-e2e-'));
-const cleanup=[];
-try{
+async function launch(grantDebugger){
+  const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+  const profile=await fs.mkdtemp(path.join(os.tmpdir(),'parity-e2e-'));
+  const cleanup=[];
+  const close=async()=>{for(const fn of cleanup){try{await fn();}catch{}}await fs.rm(profile,{recursive:true,force:true,maxRetries:3});};
+  try{
   const extensionDir=path.join(profile,'unpacked-extension');await fs.cp(path.join(root,'extension'),extensionDir,{recursive:true});
   const {publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'der'}});
   const extensionId=createHash('sha256').update(publicKey).digest('hex').slice(0,32).replace(/[0-9a-f]/g,c=>String.fromCharCode(97+parseInt(c,16)));
   const manifest=JSON.parse(await fs.readFile(path.join(extensionDir,'manifest.json'),'utf8'));
-  await fs.writeFile(path.join(extensionDir,'manifest.json'),JSON.stringify({...manifest,key:publicKey.toString('base64')}));
+  await fs.writeFile(path.join(extensionDir,'manifest.json'),JSON.stringify({...manifest,key:publicKey.toString('base64'),
+    // The debugger is an optional permission the user grants by a click on a Chrome prompt; the
+    // granted variant declares it up front so the debugger paths run without that prompt.
+    ...(grantDebugger?{permissions:[...manifest.permissions,'debugger'],optional_permissions:[]}:{})}));
   const nativeProfiles=[profile,...['Google/Chrome','Google/Chrome for Testing'].map(p=>path.join(profile,'Library/Application Support',p))];
   for(const p of nativeProfiles)await fs.mkdir(p,{recursive:true});
   const native=require(root+'/node/native-binding.cjs').createNativeBinding({root:path.join(profile,'native'),profiles:nativeProfiles,binary:process.env.CINDY_NATIVE_TEST_BINARY});
@@ -50,6 +53,7 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
     if(host==='127.0.0.1')return res.end('<title>Local</title><p>Local service page</p>');
     if(req.url==='/user')return res.end('<title>User page</title><p>The user is reading this.</p>');
     if(req.url==='/two')return res.end('<title>Two</title><p>Second page</p>');
+    if(req.url==='/tall'){res.setHeader('Set-Cookie','visit=1; Path=/');return res.end('<title>Tall</title><button id=small style="width:80px;height:24px">Small</button><div style="height:3000px">tall</div><p>End</p>');}
     res.end(page);
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));cleanup.push(()=>{server.closeAllConnections();server.close();});
@@ -77,6 +81,14 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
   }
   assert.equal((await bridge.request('status')).extension_connected,true,'extension connected');
   const act=(action,payload)=>bridge.request('act',{action,payload});
+    return {act,worker,bridge,server,user,context,manifest,close};
+  }catch(e){await close();throw e;}
+}
+const enabled={skip:!process.env.PLAYWRIGHT_CORE,timeout:120000};
+test('real Chrome: agent actions match the dedicated browser without disturbing the user',enabled,async()=>{
+  const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
+  const {act,worker,server,context,manifest,close}=await launch(false);
+  try{
   const userTab=await worker.evaluate(async()=>(await chrome.tabs.query({url:'http://parity.test/user'}))[0]);
   const focusedBefore=await worker.evaluate(async()=>(await chrome.windows.getLastFocused()).id);
 
@@ -159,10 +171,68 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
   check('close then TAB_CLOSED',cl.ok && gone.error==='TAB_CLOSED',gone.error);
   const tabsList=await act('tabs',{});
   check('tabs list marks Cindy window',tabsList.ok && tabsList.tabs.some(t=>t.cindyWindow),JSON.stringify(tabsList.tabs.map(t=>[t.id,t.window,t.cindyWindow||false,t.url])));
-}finally{
-  for(const fn of cleanup){try{await fn();}catch{}}
-  await fs.rm(profile,{recursive:true,force:true,maxRetries:3});
-}
-assert.deepEqual(results.filter(r=>!r.ok),[]);
-assert.equal(results.length,27);
+    // Without the on-demand debugger: explicit refusal or a visible-area fallback, never a prompt loop.
+    const access=await act('debuggerAccess',{});
+    check('debugger reported off',access.ok && access.granted===false,JSON.stringify(access));
+    const pdf=await act('pdf',{tabId:local.tabId,url:'http://127.0.0.1:'+server.address().port+'/'});
+    check('pdf needs the debugger and opens its page',pdf.error==='DEBUGGER_NOT_ALLOWED' && pdf.grantPageOpened===true,JSON.stringify(pdf));
+    await new Promise(r=>setTimeout(r,800));
+    const grantTabs=await worker.evaluate(async()=>(await chrome.tabs.query({})).filter(t=>(t.url||'').includes('permissions.html')).map(t=>({windowId:t.windowId,active:t.active})));
+    check('grant page opens in the user window, in front',grantTabs.length===1 && grantTabs[0].windowId===userTab.windowId && grantTabs[0].active,JSON.stringify(grantTabs));
+    const grantPage=context.pages().find(p=>p.url().includes('permissions.html'));
+    if(grantPage && process.env.CINDY_SCREENSHOTS)await grantPage.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'debugger-grant.png')});
+    const pdfAgain=await act('pdf',{tabId:local.tabId,url:'http://127.0.0.1:'+server.address().port+'/'});
+    const grantTabsAgain=await worker.evaluate(async()=>(await chrome.tabs.query({})).filter(t=>(t.url||'').includes('permissions.html')).length);
+    check('a retry does not open the page again',pdfAgain.error==='DEBUGGER_NOT_ALLOWED' && pdfAgain.grantPageOpened===false && grantTabsAgain===1,JSON.stringify({pdfAgain,grantTabsAgain}));
+    // Install-time warnings must match the previous release, so an update never disables the extension.
+    const warnings=await worker.evaluate(async m=>{const now=JSON.parse(m);const before={...now,host_permissions:['http://*/*','https://*/*']};delete before.optional_permissions;delete before.options_ui;
+      return {now:await chrome.management.getPermissionWarningsByManifest(JSON.stringify(now)),before:await chrome.management.getPermissionWarningsByManifest(JSON.stringify(before))};},JSON.stringify(manifest));
+    check('install warnings unchanged',JSON.stringify(warnings.now)===JSON.stringify(warnings.before),JSON.stringify(warnings));
+    const full=await act('screenshot',{tabId:local.tabId,url:'http://127.0.0.1:'+server.address().port+'/',fullPage:true});
+    check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
+  }finally{await close();}
+  assert.deepEqual(results.filter(r=>!r.ok),[]);
+  assert.equal(results.length,33);
+});
+
+const pngSize=b64=>{const b=Buffer.from(b64,'base64');return {png:b.subarray(0,8).toString('hex')==='89504e470d0a1a0a',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};};
+test('real Chrome: debugger-only actions run on demand and detach right after',enabled,async()=>{
+  const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
+  const {act,worker,close}=await launch(true);
+  try{
+    const access=await act('debuggerAccess',{});
+    check('debugger reported on',access.ok && access.granted===true,JSON.stringify(access));
+    const userTab=await worker.evaluate(async()=>(await chrome.tabs.query({url:'http://parity.test/user'}))[0]);
+    const opened=await act('open',{url:'http://parity.test/tall'});
+    const T={tabId:opened.tabId,url:'http://parity.test/tall'};
+    const viewport=await act('evaluate',{...T,fn:'() => innerHeight'});
+    const full=await act('screenshot',{...T,fullPage:true});
+    const fullSize=full.ok && pngSize(full.data);
+    check('full-page screenshot is taller than the viewport',full.ok && full.viaDebugger && fullSize.png && fullSize.height>viewport.result+1000,JSON.stringify({error:full.error,message:full.message,fullSize,viewport:viewport.result}));
+    const snap=await act('snapshot',{...T,maxChars:6000});
+    const ref=/^\[([a-f0-9]{32})\] button Small/m.exec(String(snap.elements||''))?.[1];
+    const element=await act('screenshot',{...T,ref});
+    const elementSize=element.ok && pngSize(element.data);
+    check('element screenshot is the element only',element.ok && elementSize.width<200 && elementSize.height<100,JSON.stringify({error:element.error,message:element.message,elementSize}));
+    const behind=await worker.evaluate(async id=>(await chrome.tabs.create({windowId:(await chrome.tabs.get(id)).windowId,url:'http://parity.test/two',active:false})).id,userTab.id);
+    await new Promise(r=>setTimeout(r,800));
+    const behindShot=await act('screenshot',{tabId:behind,url:'http://parity.test/two'});
+    const userStill=await worker.evaluate(async id=>(await chrome.tabs.get(id)).active,userTab.id);
+    check('background tab captured without switching the user view',behindShot.ok && behindShot.viaDebugger && userStill,JSON.stringify({error:behindShot.error,message:behindShot.message,userStill}));
+    const pdf=await act('pdf',T);
+    check('pdf export',pdf.ok && Buffer.from(pdf.data,'base64').subarray(0,4).toString()==='%PDF',pdf.error||pdf.message||'');
+    check('one-shot actions detach right after',(await act('debuggerAccess',{})).attachedTabs===0);
+    const begun=await act('cdp',{...T,op:'begin'});
+    const enabledNet=await act('cdp',{...T,op:'command',method:'Network.enable',params:{}});
+    await act('evaluate',{...T,fn:"() => fetch('/api/data?probe=1').then(r => r.text())"});
+    const cookies=await act('cdp',{...T,op:'command',method:'Network.getCookies',params:{urls:['http://parity.test/tall']}});
+    const events=[...(cookies.events||[]),...((await act('cdp',{...T,op:'events'})).events||[])];
+    check('protocol session: commands, cookies and network events',begun.ok && enabledNet.ok && cookies.ok && cookies.result.cookies.some(c=>c.name==='visit') && events.some(([m,p])=>m==='Network.requestWillBeSent' && p.request.url.includes('probe=1')),JSON.stringify({begun:begun.error,net:enabledNet.error,cookies:cookies.error||cookies.result,events:events.map(e=>e[0]).slice(0,10)}));
+    await act('cdp',{...T,op:'end'});
+    check('session end detaches',(await act('debuggerAccess',{})).attachedTabs===0);
+    const after=await act('cdp',{...T,op:'command',method:'Network.getCookies',params:{}});
+    check('commands after the session ends are refused',after.error==='DEBUGGER_DETACHED',after.error);
+  }finally{await close();}
+  assert.deepEqual(results.filter(r=>!r.ok),[]);
+  assert.equal(results.length,9);
 });
