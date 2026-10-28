@@ -386,4 +386,11 @@ test('youtubeCaptionTrack picks the spoken language, not the alphabetically firs
   assert.equal(core.youtubeCaptionTrack(tracks,'de').language,'de','an explicit language is honoured');
   assert.equal(core.youtubeCaptionTrack([t('ar'),t('de')],'auto').language,'ar','no signal keeps the first manual track');
   assert.equal(core.youtubeCaptionTrack([],'auto'),undefined);
+  // Bug regression (2026-10-28, watch?v=3pfnSu6HLB8): YouTube auto-generated a track per language, Arabic first;
+  // "the auto-generated track" picked Arabic. The default audio track's default caption (index 3, English) decides.
+  const generated=["ar", "bn", "nl", "en", "de", "iw", "hi", "id", "it", "ja", "ko", "ml", "pl", "pt", "pa", "ru", "es", "ta", "te", "uk"].map(l=>t(l,'asr'));
+  assert.equal(core.youtubeCaptionTrack(generated,'auto',3).language,'en');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),...generated],'auto',4).language,'en','manual track in the spoken language is still preferred when it exists');
+  assert.equal(core.youtubeCaptionTrack([t('en'),...generated],'auto',4).language,'en');
+  assert.equal(core.youtubeCaptionTrack(generated,'auto').language,'ar','without the default caption signal nothing better than the first track is known');
 });

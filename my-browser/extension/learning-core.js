@@ -223,20 +223,25 @@
     }
     return subtitleSegments(words,groups,nextStart,true);
   }
-  // YouTube lists caption tracks alphabetically by language, so "the first manual track" is
-  // often Arabic on an English video. The spoken language is whatever the auto-generated (asr)
-  // track is in, or what the audio track's default caption points at; prefer a manual track in
-  // that language, then the asr track itself.
+  // YouTube lists caption tracks alphabetically by language, so "the first track" is often
+  // Arabic on an English video; it may even auto-generate a track per language, so "the
+  // auto-generated track" is ambiguous too. The spoken language is what the video's default
+  // audio track points at as its default caption (that index is the only authoritative
+  // signal), else the single auto-generated track. Prefer a manual track in that language,
+  // then the auto-generated one in it.
   function youtubeCaptionTrack(tracks,wanted,defaultIndex) {
     const list=Array.isArray(tracks)?tracks.filter(t=>t&&typeof t.language==='string'):[];
     if(!list.length)return undefined;
     const base=code=>String(code||'').toLowerCase().split(/[-_]/)[0];
     if(wanted&&wanted!=='auto'){const exact=list.find(t=>t.language===wanted)||list.find(t=>base(t.language)===base(wanted));if(exact)return exact;}
-    const asr=list.find(t=>t.kind==='asr');
-    const preset=Number.isInteger(defaultIndex)?tracks[defaultIndex]:undefined;
-    const spoken=base(asr?.language||preset?.language);
-    if(spoken){const manual=list.find(t=>t.kind!=='asr'&&base(t.language)===spoken);if(manual)return manual;}
-    return asr||(preset&&list.includes(preset)?preset:undefined)||list.find(t=>t.kind!=='asr')||list[0];
+    const auto=list.filter(t=>t.kind==='asr');
+    const preset=Number.isInteger(defaultIndex)&&list.includes(tracks[defaultIndex])?tracks[defaultIndex]:undefined;
+    const spoken=base(preset?.language||(auto.length===1?auto[0].language:''));
+    if(spoken){
+      const manual=list.find(t=>t.kind!=='asr'&&base(t.language)===spoken);if(manual)return manual;
+      const generated=auto.find(t=>base(t.language)===spoken);if(generated)return generated;
+    }
+    return preset||(auto.length===1?auto[0]:undefined)||list.find(t=>t.kind!=='asr')||list[0];
   }
   function subtitleDocument(cues) {
     const paragraphs=[];let text=[],translation=[];

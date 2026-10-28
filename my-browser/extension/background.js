@@ -603,6 +603,17 @@ chrome.alarms.create('my-browser-watchdog',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') chain(); });
 chrome.runtime.onStartup.addListener(chain);
 chrome.runtime.onInstalled.addListener(chain);
+// An update or reload leaves the pages already open with the previous copy of the content
+// script, which can no longer reach this worker. Inject the new copy into every open page; the
+// copy announces itself and the previous one leaves, so nothing runs twice.
+chrome.runtime.onInstalled.addListener(details => {
+  if (!['install', 'update'].includes(details?.reason)) return;
+  const files = chrome.runtime.getManifest().content_scripts?.[0]?.js || [];
+  if (!files.length) return;
+  chrome.tabs.query({url: ['http://*/*', 'https://*/*']}).then(tabs => {
+    for (const tab of tabs) if (tab.id !== undefined) chrome.scripting.executeScript({target: {tabId: tab.id}, files}).catch(() => {});
+  }).catch(() => {});
+});
 // In-flight page targets, keyed by job id. Only the worker can read them, and only while injecting.
 const targets = new Map();
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {

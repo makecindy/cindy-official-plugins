@@ -71,3 +71,23 @@ test('unrelated navigation and title changes do not discard a current click fail
   deferred.reject(Error('No receiver'));await click;
   assert.equal(h.badge(1),'!');assert.equal(h.listeners(),1);
 });
+
+test('an update injects the new content script into pages that are already open',async()=>{
+  // Bug regression (2026-10-28): after a reload the open YouTube tab kept the dead previous copy; clicking the icon did nothing.
+  const noop={addListener(){}};const installed=[],injected=[];
+  const chrome={
+    runtime:{getManifest:()=>({version:'0.4.27',content_scripts:[{js:['brand-icon.js','content.js']}]}),onStartup:noop,onInstalled:{addListener:fn=>installed.push(fn)},onMessage:noop},
+    storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async()=>({}),set:async()=>{}}},
+    tabs:{onRemoved:noop,onActivated:noop,onUpdated:noop,query:async({url}={})=>{if(url)assert.deepEqual([...url],['http://*/*','https://*/*']);return [{id:4,url:'https://www.youtube.com/watch?v=x'},{id:9,url:'https://example.test/'}];}},
+    scripting:{executeScript:async({target,files})=>{injected.push({tabId:target.tabId,files});if(target.tabId===9)throw Error('Cannot access contents of the page');}},
+    alarms:{create(){},onAlarm:noop},action:{async setBadgeText(){},async setBadgeBackgroundColor(){}},
+  };
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,''),{chrome,MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout});
+  // The worker's own watchdog (chain) is also an onInstalled listener; only the injector is under test.
+  const injectors=installed.filter(fn=>fn.name!=='chain');assert.equal(injectors.length,1);
+  for(const fn of injectors)fn({reason:'update'});
+  await new Promise(r=>setTimeout(r,10));
+  assert.deepEqual(injected,[{tabId:4,files:['brand-icon.js','content.js']},{tabId:9,files:['brand-icon.js','content.js']}],'every open http(s) page, failures ignored');
+  injected.length=0;for(const fn of injectors)fn({reason:'chrome_update'});await new Promise(r=>setTimeout(r,10));
+  assert.deepEqual(injected,[],'browser updates do not re-inject');
+});
