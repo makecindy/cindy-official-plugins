@@ -429,3 +429,13 @@ test('youtubeCaptionTrack: Chinese-ordered list with English last, and pages wit
   assert.equal(core.youtubeCaptionTrack(zh,'auto',undefined,{current:{language:'en',kind:'asr'}}).language,'en');
   assert.equal(core.youtubeCaptionTrack(zh,'auto',20,{current:{language:'ar',kind:'asr'}}).language,'en','a remembered caption choice never beats the default index');
 });
+
+test('Chinese variants are named by script, never by region',()=>{
+  // Product rule (2026-10-28): the browser's own names "中文（中国）/中文（台湾）" must not appear.
+  const ctx={Intl};ctx.globalThis=ctx;ctx.CindyLearning=core;vm.createContext(ctx);
+  for(const file of ['ui.js','reading-ui.js'])vm.runInContext(fs.readFileSync(new URL('../my-browser/extension/'+file,import.meta.url),'utf8'),ctx);
+  const name=(code,locale)=>ctx.CindyUI.languageDisplayName(new Intl.DisplayNames([locale],{type:'language'}),code,core.languages[code],locale);
+  assert.equal(name('zh-CN','zh-CN'),'简体中文');assert.equal(name('zh-TW','zh-CN'),'繁体中文');
+  assert.equal(name('zh-CN','en'),'Simplified Chinese');assert.equal(name('zh-TW','en'),'Traditional Chinese');
+  for(const code of core.commonLanguages)assert.doesNotMatch(name(code,'zh-CN'),/中国|台湾|台灣/,code);
+});
