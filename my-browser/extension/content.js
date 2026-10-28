@@ -122,7 +122,7 @@
     prefs.videoMode=stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
     if(['both','translation'].includes(stored.lastVideoMode))prefs.lastVideoMode=stored.lastVideoMode;
     prefs.videoSize=['small','medium','large'].includes(stored.videoSize)?stored.videoSize:prefs.videoSize;
-    prefs.bufferPause=stored.bufferPause!==false;
+    prefs.bufferPause=stored.bufferPause===true;
     prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};

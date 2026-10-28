@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.34 "Wait for subtitles before playing" is off by default everywhere (host package 0.4.51)
+
+The first read of the preferences treated a missing value as off, but re-reading them (after a change in another tab or a panel reopen) treated it as on, so the option could appear switched on without the user turning it on. Both paths now default to off; an explicit choice is kept.
+
 ## 0.4.33 subtitle language as a second-level page (host package 0.4.50)
 
 The subtitle language is a row showing the current choice; it opens a full page with search, the common languages, all languages and a custom name, and returns to the subtitle tab after a choice. The "already in this language" notice is one line with an inline "Translate anyway".
