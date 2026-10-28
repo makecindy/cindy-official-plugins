@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.37 lighter caption text (host package 0.4.54)
+
+Captions used a semibold weight plus an extra outline shadow, so Chinese translations (PingFang SC Semibold on macOS) looked heavy and blurred. They now use the regular weight with a single soft drop shadow over the existing background, matching the source line.
+
 ## 0.4.36 Chinese is named by script in language lists (host package 0.4.53)
 
 Language lists no longer use the browser's region-based names for Chinese ("Chinese (China)" / "Chinese (Taiwan)"); they show Simplified Chinese and Traditional Chinese.
