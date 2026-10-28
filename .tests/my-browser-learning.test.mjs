@@ -394,3 +394,12 @@ test('youtubeCaptionTrack picks the spoken language, not the alphabetically firs
   assert.equal(core.youtubeCaptionTrack([t('en'),...generated],'auto',4).language,'en');
   assert.equal(core.youtubeCaptionTrack(generated,'auto').language,'ar','without the default caption signal nothing better than the first track is known');
 });
+
+test('subtitle requests accept a bounded reference of earlier translated captions',()=>{
+  const words=[{text:'Hi.',start:0,end:1}];
+  const ok=core.validate({op:'subtitles',editorial:true,words,reference:[...Array(20)].map((_,i)=>({text:'line '+i,translation:'译文 '+i})).concat([{text:'',translation:'x'},{bad:1}])});
+  assert.equal(ok.reference.length,12);assert.equal(ok.reference.at(-1).text,'line 19');
+  const long=core.validate({op:'subtitles',editorial:true,words,reference:[...Array(12)].map(()=>({text:'x'.repeat(300),translation:'y'.repeat(300)}))});
+  assert.ok(JSON.stringify(long.reference).length<=2000);
+  assert.equal(core.validate({op:'subtitles',words,reference:[{text:'a',translation:'b'}]}).reference,undefined,'only the editorial path uses it');
+});

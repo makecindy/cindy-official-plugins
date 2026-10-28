@@ -61,6 +61,13 @@
       out.words=input.words.map((w,i)=>{const text=string(w.text,500,true);if(!Number.isFinite(w.start)||!Number.isFinite(w.end)||w.start<0||w.end<=w.start||w.end>864000||(i&&w.start<input.words[i-1].end-.001))throw Error('INVALID_TIME');return {text,start:w.start,end:w.end,breakBefore:w.breakBefore===true};});
       if(out.words.map(w=>w.text).join('').length>12000)throw Error('BATCH_TOO_LARGE');
       if(input.nextStart!==undefined){if(!Number.isFinite(input.nextStart)||input.nextStart<out.words.at(-1).end||input.nextStart>864000)throw Error('INVALID_TIME');out.nextStart=input.nextStart;}
+      // Earlier captions of the same video already translated: a reference for names and terms
+      // when a fresh task starts mid-video. Malformed items are dropped, never rejected.
+      if(out.editorial&&Array.isArray(input.reference)){
+        const items=input.reference.filter(r=>r&&typeof r.text==='string'&&typeof r.translation==='string'&&r.text.trim()&&r.translation.trim()).slice(-12).map(r=>({text:r.text.trim().slice(0,300),translation:r.translation.trim().slice(0,300)}));
+        while(items.length&&JSON.stringify(items).length>2000)items.shift();
+        if(items.length)out.reference=items;
+      }
     }
     if (input.id!==undefined) out.id=string(input.id,100,true);
     if (['remove','review','task'].includes(out.op) && !out.id) throw Error('INVALID_ID');

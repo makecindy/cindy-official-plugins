@@ -358,9 +358,9 @@ test('per-video mode: only the most recent bindings are kept; the forgotten ones
 test('per-video mode: a long video rolls to a fresh task after the send budget',async()=>{
   const f=perVideoFixture(),model=f.make();
   const state0=await f.options.load();
-  for(let i=0;i<61;i++)await model({prompt:'p'+i,scope:'s',source:yt('long','Long')});
+  for(let i=0;i<101;i++)await model({prompt:'p'+i,scope:'s',source:yt('long','Long')});
   assert.equal(f.created.length,2);assert.notEqual(f.created[0].requestKey,f.created[1].requestKey);
-  assert.deepEqual(f.archived,['t1']);assert.equal(f.state().videos['youtube:long'].taskId,'t2');assert.equal(f.sends.length,61);
+  assert.deepEqual(f.archived,['t1']);assert.equal(f.state().videos['youtube:long'].taskId,'t2');assert.equal(f.sends.length,101);
   assert.equal(state0,undefined);
 });
 test('per-video mode: archive refusals and hosts without archive never block translation',async()=>{
@@ -412,4 +412,15 @@ test('per-video mode: the full rules come back periodically so a compacted histo
   for(let i=0;i<41;i++)await model({prompt:rules+i,rules,reminder:'R\n',scope:'s',source:yt('one','One')});
   const full=f.sends.map((s,i)=>s.text.includes('RULES\n')?i:-1).filter(i=>i>=0);
   assert.deepEqual(full,[0,20,40]);
+});
+
+test('per-video mode: earlier translated captions ride with the full rules, so a fresh task keeps names and terms',async()=>{
+  const f=perVideoFixture(),model=f.make();const rules='RULES\n',reference='REFERENCE: Rosalyn = 罗莎琳\n';
+  const ask=(n,extra={})=>model({prompt:rules+'{"p":'+n+'}',rules,reminder:'R\n',reference,scope:'s',source:yt('one','One'),...extra});
+  await ask(1);await ask(2);
+  assert.ok(f.sends[0].text.includes('RULES\nREFERENCE: Rosalyn = 罗莎琳\n{"p":1}'),'reference sits between the rules and the passage');
+  assert.ok(!f.sends[1].text.includes('REFERENCE'),'within a task the history already has it');
+  // A new task for the video (here: the user archived the old one) starts with the reference again.
+  f.tasksById.get('t1').status='archived';await ask(3);
+  assert.equal(f.sends.at(-1).taskId,'t2');assert.ok(f.sends.at(-1).text.includes('REFERENCE'));
 });

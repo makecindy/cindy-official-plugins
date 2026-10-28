@@ -388,7 +388,10 @@
           const lead=L.joinWords(session.words.slice(Math.max(0,chunk.start-40),chunk.start));
           const context=chunk.context||=('Video title: '+document.title.slice(0,300)+(lead?'\nWords just before this passage: '+lead:'')).slice(0,2000);
           try{
-            const r=await request({op:'subtitles',target:prefs.videoTarget,editorial:true,words:chunk.words,nextStart:chunk.nextStart,context},progress=>{if(current()){chunk.progress=progress;session.overlay?.progress();}});if(!current())return;
+            // The last captions already translated before this passage. The plugin only shows them to a
+            // fresh task (rollover, revisit, restart) so names and terms keep the wording used so far.
+            const reference=cues.filter(c=>c.end<=chunk.words[0].start&&c.translation&&!c.provisional).slice(-12).map(c=>({text:c.text,translation:c.translation}));
+            const r=await request({op:'subtitles',target:prefs.videoTarget,editorial:true,words:chunk.words,nextStart:chunk.nextStart,context,...(reference.length?{reference}:{})},progress=>{if(current()){chunk.progress=progress;session.overlay?.progress();}});if(!current())return;
             chunk.done=true;chunk.cues=r.cues;chunk.cache=r.cache;session.overlay?.progress();cues=session.chunks.flatMap(c=>c.done?c.cues:[]).sort((a,b)=>a.start-b.start);previousCue=-1;activeCue=-1;cueList();videoHandler?.();
             if(!session.playback?.buffering)note(`${t.progress} ${session.chunks.filter(c=>c.done).length} / ${session.chunks.length}`);
           }catch(e){
