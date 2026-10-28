@@ -5,10 +5,13 @@ const timing=globalThis.CindyLearning.learningTiming;
 //
 // Session shape: on hosts that grant background tasks (agent.hiddenTasks) every
 // video gets its own hidden task, so a passage never pays for another video's
-// history and nothing piles up in the user's task list. Switching videos
-// archives the previous task when the host offers `archive`; the plugin keeps
-// the most recent bindings only. Older hosts keep the single visible task.
-const RECENT_VIDEOS=20,SENDS_PER_TASK=60;
+// history and nothing piles up in the user's task list. A browser that moves to
+// another video archives the task it left (when the host offers `archive` and no
+// other browser is still on that video) and forgets the binding; coming back, or
+// finding the task archived or gone for any other reason, simply opens a fresh
+// task under a new creation key. The plugin keeps the most recent bindings only.
+// Older hosts keep the single visible task.
+const RECENT_VIDEOS=20,SENDS_PER_TASK=60,RECENT_SCOPES=8;
 export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval=700,timeout=timing.model,now=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),maxConfigRetries=2}) {
   let tail=Promise.resolve();
   const terminal=new Set(['completed','failed','cancelled','interrupted']);
@@ -31,6 +34,9 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
     return title?`${base} · ${title}`.slice(0,100):base;
   }
   const validEntry=e=>e&&typeof e==='object'&&!Array.isArray(e)&&nonempty(e.taskId)&&nonempty(e.requestKey)&&nonempty(e.title)&&(e.messageCursor===undefined||nonempty(e.messageCursor));
+  // Archive a video's task and forget its binding; a later request for the video starts over.
+  async function retire(state,key){const entry=state.videos[key];if(!entry)return;if(state.pending&&state.pending.taskId===entry.taskId)return;delete state.videos[key];state.recent=(state.recent||[]).filter(k=>k!==key);await archive(state,entry);}
+  const watchedElsewhere=(state,scope,key)=>Object.entries(state.current||{}).some(([s,k])=>s!==scope&&k===key);
   async function binding(args){
     const caps=await tasks?.capabilities?.();
     if(!['create','get','send','getRun','readMessages','cancel'].every(op=>caps?.operations?.includes(op)))fail('TASKS_UNAVAILABLE');
@@ -45,25 +51,38 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
     const key=perVideo?videoKey(args?.source?.url||''):null;
     let entry,task;
     if(key){
+      const scope=args?.scope||'';
       state.videos||={};state.recent=Array.isArray(state.recent)?state.recent.filter(k=>state.videos[k]):[];
+      if(!state.current||typeof state.current!=='object'||Array.isArray(state.current))state.current={};
       entry=state.videos[key];
       if(entry&&entry.sends>=SENDS_PER_TASK&&!(state.pending&&state.pending.taskId===entry.taskId)){
         // A long video rolls to a fresh task; the retired one is archived like a finished video.
-        await archive(state,entry);delete state.videos[key];entry=undefined;state.roll=(state.roll||0)+1;
+        await retire(state,key);entry=undefined;
+      }
+      if(entry){
+        task=await tasks.get({taskId:entry.taskId}).catch(e=>{if(['TASK_NOT_FOUND','TASK_DELETED','TASK_ARCHIVED'].includes(e?.code))return null;throw e;});
+        if(task&&(!nonempty(task.taskId)||task.taskId!==entry.taskId||!Number.isSafeInteger(task.revision)))fail('TASK_BINDING_INVALID');
+        // Archived (by this plugin on a switch, or by the user) or gone: it is not resumed, the
+        // video simply gets a new task. Only a task that is otherwise unavailable is reported.
+        if(!task||['archived','deleted'].includes(task.status)){delete state.videos[key];entry=undefined;task=undefined;}
       }
       if(!entry){
-        const requestKey='browser-translation-v2:'+(await digestOf(key)).slice(0,24)+(state.roll?':'+state.roll:'');
+        // Every creation uses a fresh key, persisted before the call so a lost receipt replays
+        // the same creation instead of minting a second task for the video.
+        if(!(state.creating&&state.creating.key===key&&nonempty(state.creating.requestKey))){
+          state.serial=(state.serial||0)+1;
+          state.creating={key,requestKey:'browser-translation-v2:'+(await digestOf(key)).slice(0,24)+':'+state.serial};
+          await save(state);
+        }
+        const {requestKey}=state.creating;
         task=await tasks.create({requestKey,title:videoTitle(args?.source),isolatedWorkspace:true,hidden:true});
         if(!nonempty(task?.taskId)||!Number.isSafeInteger(task.revision))fail('TASK_BINDING_INVALID');
         entry={taskId:task.taskId,requestKey,title:videoTitle(args?.source),sends:0};
-        state.videos[key]=entry;
-      }else{
-        task=await tasks.get({taskId:entry.taskId});
-        if(!nonempty(task?.taskId)||task.taskId!==entry.taskId||!Number.isSafeInteger(task.revision))fail('TASK_BINDING_INVALID');
+        state.videos[key]=entry;delete state.creating;
       }
       state.recent=[key,...state.recent.filter(k=>k!==key)];
       // Forget the oldest bindings; their tasks are archived when the host allows it.
-      while(state.recent.length>RECENT_VIDEOS){const old=state.recent.pop();const stale=state.videos[old];delete state.videos[old];if(stale&&!(state.pending&&state.pending.taskId===stale.taskId))await archive(state,stale);}
+      while(state.recent.length>RECENT_VIDEOS)await retire(state,state.recent.pop());
       await save(state);
     }else{
       entry=state;
@@ -186,11 +205,20 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
           await waitForRun(state,await submitted(state),active,progress);await clearPending(state);
         }
       }
-      // The previous video's task (or the legacy shared task) is idle now: archive it.
       if(key){
-        if(state.current&&state.current!==key){await archive(state,state.videos[state.current]);state.current=key;await save(state);}
-        else if(state.current!==key){state.current=key;await save(state);}
-        if(state.taskId&&!state.legacyArchived){await archive(state,{taskId:state.taskId});state.legacyArchived=true;await save(state);}
+        // This browser moved on from its previous video and that task is idle now: archive it
+        // unless another browser is still watching it. Positions are tracked per browser, so two
+        // browsers on two videos never retire each other's task; the position only advances once
+        // the old task is retired, so a failed request leaves it to be retired next time.
+        const previous=state.current[scope];
+        if(previous&&previous!==key&&!watchedElsewhere(state,scope,previous))await retire(state,previous);
+        if(state.current[scope]!==key){
+          state.current[scope]=key;
+          for(const s of Object.keys(state.current).filter(s=>s!==scope).slice(0,-RECENT_SCOPES+1))delete state.current[s];
+        }
+        // The legacy shared task is idle now too: archive it once.
+        if(state.taskId&&!state.legacyArchived){await archive(state,{taskId:state.taskId});state.legacyArchived=true;}
+        await save(state);
       }
       // A model change while this passage is in flight (plugin setting or the
       // task's own model menu) must not stop the whole video. Resubmit only

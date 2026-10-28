@@ -300,10 +300,37 @@ test('per-video mode: each video gets its own hidden task titled after it; switc
   assert.deepEqual(f.archived,[]);
   const b=await model({prompt:'p3',scope:'browser-a',source:yt('bbb','Second video')});
   assert.equal(b.taskId,'t2');assert.deepEqual(f.archived,['t1'],'the previous video task is archived once its run settled');
-  // Returning to the first video reuses its binding; the host refuses input to an archived task, so the plugin opens a fresh one.
-  await assert.rejects(model({prompt:'p4',scope:'browser-a',source:yt('aaa','First video')}),/TASK_BUSY/);
-  assert.ok(f.sends.every(s=>['t1','t2'].includes(s.taskId)));
-  assert.equal(f.state().videos['youtube:aaa'].sends,2);
+  // Bug regression (handoff 2026-10-28): returning to the first video used to find its archived task and fail with TASK_BUSY.
+  const back=await model({prompt:'p4',scope:'browser-a',source:yt('aaa','First video')});
+  assert.equal(back.taskId,'t3','a fresh task under a new creation key');assert.notEqual(f.created[2].requestKey,f.created[0].requestKey);
+  assert.deepEqual(f.archived,['t1','t2']);assert.equal(f.state().videos['youtube:aaa'].sends,1);
+});
+test('per-video mode: a second browser on another video does not retire the first browser\'s task',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  await model({prompt:'a1',scope:'browser-a',source:yt('aaa','A')});
+  await model({prompt:'b1',scope:'browser-b',source:yt('bbb','B')});
+  const again=await model({prompt:'a2',scope:'browser-a',source:yt('aaa','A')});
+  assert.equal(again.taskId,'t1');assert.deepEqual(f.archived,[]);assert.equal(f.created.length,2);
+  // Only when no browser is left on a video does moving away archive it.
+  await model({prompt:'b2',scope:'browser-b',source:yt('ccc','C')});assert.deepEqual(f.archived,['t2']);
+  await model({prompt:'a3',scope:'browser-a',source:yt('ccc','C')});assert.deepEqual(f.archived,['t2','t1']);
+});
+test('per-video mode: a task the user archived or deleted is replaced, never resumed',async()=>{
+  const f=perVideoFixture(),model=f.make();
+  await model({prompt:'a',scope:'s',source:yt('one','One')});
+  f.tasksById.get('t1').status='archived';
+  assert.equal((await model({prompt:'b',scope:'s',source:yt('one','One')})).taskId,'t2');
+  f.tasksById.delete('t2');
+  assert.equal((await model({prompt:'c',scope:'s',source:yt('one','One')})).taskId,'t3');
+  assert.deepEqual(f.archived,[],'nothing is archived or unarchived on the user\'s behalf');
+});
+test('per-video mode: a lost creation receipt replays the same creation key instead of minting a second task',async()=>{
+  const f=perVideoFixture(),create=f.tasks.create;let lose=1;
+  f.tasks.create=async input=>{const task=await create(input);if(lose-->0)throw Object.assign(Error('socket hang up'),{code:'TRANSPORT'});return task;};
+  const model=f.make();
+  await assert.rejects(model({prompt:'a',scope:'s',source:yt('one','One')}),/TRANSPORT/);
+  const r=await model({prompt:'b',scope:'s',source:yt('one','One')});
+  assert.equal(r.taskId,'t1');assert.equal(f.created.length,2);assert.equal(f.created[0].requestKey,f.created[1].requestKey);assert.equal(f.tasksById.size,1);
 });
 test('per-video mode: a second extension connection watching the same video shares its task',async()=>{
   // Bug regression (2026-10-28): two extension client ids were briefly online and the same video got two tasks.
@@ -321,10 +348,12 @@ test('per-video mode: the same video id with a different page URL shape maps to 
 test('per-video mode: only the most recent bindings are kept; the forgotten ones are archived',async()=>{
   const f=perVideoFixture(),model=f.make();
   for(let i=0;i<22;i++)await model({prompt:'p'+i,scope:'s',source:yt('v'+i,'Video '+i)});
+  // Coming back to an evicted video starts a new task; the archived one is not handed back by the host's idempotent create.
+  assert.equal((await model({prompt:'back',scope:'s',source:yt('v0','Video 0')})).taskId,'t23');
   const state=f.state();
-  assert.equal(Object.keys(state.videos).length,20);assert.equal(state.recent.length,20);
-  assert.equal(state.videos['youtube:v0'],undefined);assert.equal(state.videos['youtube:v1'],undefined);
-  assert.equal(f.archived.length,21,'every earlier video task is archived exactly once');
+  // One browser watching videos in turn leaves only its current binding; every task it left is archived exactly once.
+  assert.deepEqual(Object.keys(state.videos),['youtube:v0']);assert.deepEqual(state.recent,['youtube:v0']);
+  assert.equal(f.archived.length,22);assert.equal(new Set(f.archived).size,22);
 });
 test('per-video mode: a long video rolls to a fresh task after the send budget',async()=>{
   const f=perVideoFixture(),model=f.make();
