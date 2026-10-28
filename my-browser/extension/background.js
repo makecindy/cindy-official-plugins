@@ -115,7 +115,7 @@ function markAgentTab(tabId,hidden = false) {
   if (!hidden) {
     quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
     clearTimeout(agentMarkTimers.get(tabId));
-    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:null})); },4000));
+    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:null})); },20000));
   }
   return sent;
 }

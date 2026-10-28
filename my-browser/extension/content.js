@@ -547,7 +547,9 @@
   },{signal:lifecycle.signal});
   // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.
   // It never takes clicks, lives in a closed shadow root (so page reads do not see it) and fades a few
-  // seconds after the last action. Screenshots hide it first.
+  // seconds after the last action (long enough to bridge the agent's thinking between steps).
+  // Screenshots hide it first.
+  const AGENT_MARK_MS=20000;
   let agentMark,agentMarkTimer,agentCopy;
   async function markAgent(hidden){
     if(hidden){agentMark?.style.setProperty('display','none','important');return;}
@@ -557,7 +559,8 @@
       agentMark=el('div');agentMark.setAttribute('data-cindy-agent-mark','');
       isolateHost(agentMark,{position:'fixed',inset:'0',display:'block','z-index':'2147483645','pointer-events':'none'});
       const root=agentMark.attachShadow({mode:'closed'});
-      root.append(el('style',`.frame{position:fixed;inset:0;box-shadow:inset 0 0 0 2px rgba(217,58,58,.85),inset 0 0 22px rgba(217,58,58,.35);animation:glow 1.6s ease-in-out infinite alternate}
+      root.append(el('style',`@keyframes fade{to{opacity:0}}:host(.leaving) .frame,:host(.leaving) .label{animation:fade .8s ease forwards}
+.frame{position:fixed;inset:0;box-shadow:inset 0 0 0 2px rgba(217,58,58,.85),inset 0 0 22px rgba(217,58,58,.35);animation:glow 1.6s ease-in-out infinite alternate}
 .label{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:7px;padding:6px 12px 6px 8px;border-radius:999px;background:#d93a3a;color:#fff;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap}
 .label img{width:16px;height:16px;border-radius:50%;background:#fff}
 @keyframes glow{from{opacity:.65}to{opacity:1}}@media (prefers-reduced-motion:reduce){.frame{animation:none}}`));
@@ -565,8 +568,9 @@
       root.append(el('div',undefined,'frame'),label);
       document.documentElement.append(agentMark);
     }
-    agentMark.style.setProperty('display','block','important');
-    clearTimeout(agentMarkTimer);agentMarkTimer=setTimeout(()=>{agentMark?.remove();agentMark=null;},4000);
+    agentMark.style.setProperty('display','block','important');agentMark.classList.remove('leaving');
+    clearTimeout(agentMarkTimer);
+    agentMarkTimer=setTimeout(()=>{const leaving=agentMark;if(!leaving)return;leaving.classList.add('leaving');agentMarkTimer=setTimeout(()=>{leaving.remove();if(agentMark===leaving)agentMark=null;},800);},AGENT_MARK_MS);
   }
   function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);

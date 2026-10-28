@@ -358,7 +358,7 @@ YouTube 的 timedtext 接口现在要求页面播放器附带的来源令牌（`
 
 在这些 Cindy 宿主上，操作你的浏览器只有一条路：Cindy 的 `browser` 工具，目标选「我的浏览器」。插件声明自己的 `browser_status`、`browser_read`、`browser_act`、`browser_tabs` 工具及其手册已被取代（`browserExtension.pageControlReplaces`），宿主在提供「我的浏览器」期间对 Agent 隐藏它们；管理网站权限的 `browser_policy` 保留。宿主桥接没有运行时，以及旧版 Cindy 上，插件工具照旧可用。
 
-你能看出 Agent 在操作什么。Agent 正在操作的页面（包括你自己的标签页），每次动作后几秒内会在页面四周显示一圈细细的 Cindy 红光，顶部有一个小标签「Cindy 正在自动操作此页面」，工具栏上的 Cindy 图标在这个标签页上显示 AI 角标。标记不挡点击，放在封闭的 shadow root 里，读取页面时看不到它，截图时会先隐藏。Cindy 打开的页面还可以归入 Cindy 窗口里一个红色的「Cindy 自动操作」标签组：标签组会让 Chrome 多出一条安装提示，所以它是可选权限，在扩展的「选项」页里开启；你自己的标签页不会被移动。
+你能看出 Agent 在操作什么。Agent 正在操作的页面（包括你自己的标签页），会在页面四周显示一圈细细的 Cindy 红光，顶部有一个小标签「Cindy 正在自动操作此页面」，一直保持到最后一次动作后约 20 秒（足以覆盖 Agent 两步之间的思考时间）再淡出；同一时间里，工具栏上的 Cindy 图标在这个标签页上显示 AI 角标。标记不挡点击，放在封闭的 shadow root 里，读取页面时看不到它，截图时会先隐藏。Cindy 打开的页面还可以归入 Cindy 窗口里一个红色的「Cindy 自动操作」标签组：标签组会让 Chrome 多出一条安装提示，所以它是可选权限，在扩展的「选项」页里开启；你自己的标签页不会被移动。
 
 权限：因为 Chrome 截取可视标签页要求 `<all_urls>`，所以在 http/https 主机权限旁加了它；`debugger` 是可选权限。Chrome 显示的安装提示与之前完全相同（用 `getPermissionWarningsByManifest` 核对过），更新后扩展不会被停用。旧版 Cindy 和旧版扩展保持原有行为，某个动作需要新版扩展时 Cindy 会提示更新。
 
