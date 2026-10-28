@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.41 player button shows Cindy (host package 0.4.58)
+
+The subtitle button in the player's control bar is no longer a box with "译" or "CC". It is Cindy's silhouette with a caption bubble, the same mark as the toolbar icon, and it works in any interface language. The bubble is white while Cindy subtitles are off and Cindy red while they are on, and it now follows the on/off switch (it used to look active after subtitles were turned off).
+
 ## 0.4.40 bare toolbar icon that follows light and dark (host package 0.4.57)
 
 The toolbar icon drops the white tile and the silhouette fills the icon. It comes in two versions, near-black for light toolbars and near-white for dark ones, both with the Cindy-red earring. Open pages report the browser's appearance (`prefers-color-scheme`) to the background, which switches the icon; no permission is added. The extensions page and store keep the white-tile icon.

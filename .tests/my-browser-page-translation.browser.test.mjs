@@ -39,7 +39,7 @@ test('page translations are visible in named slots and restore cleanly',{
       storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}},
     };
   });
-  for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
     await page.addScriptTag({path:path.join(extension,file)});
   const command=action=>page.evaluate(action=>new Promise(resolve=>command({type:'cindy-ui',action},{id:'fixture'},resolve)),action);
   await command('translate-page');
@@ -106,7 +106,7 @@ test('YouTube opens while config is pending and reports denied pages and missing
         throw Error('Unexpected request '+m.request.op);
       }},storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}}};
   });
-  for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
     await page.addScriptTag({path:path.join(extension,file)});
   const cdp=await page.context().newCDPSession(page);
   const tree=async()=>JSON.stringify((await cdp.send('DOM.getDocument',{depth:-1,pierce:true})).root);
@@ -161,7 +161,7 @@ test('pending setup closes permanently and pending model never blocks restore or
       }},storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}}};
     globalThis.sendAction=(action,label)=>command({type:'cindy-ui',action},{id:'fixture'},r=>replies.push({label,...r}));
   });
-  for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
   await page.evaluate(()=>{sendAction('open','open');sendAction('translate-page','discarded');});
   await page.waitForFunction(()=>typeof resolveConfig==='function');
   const point=await page.evaluate(()=>{const b=roots.flatMap(r=>[...r.querySelectorAll('button')]).find(b=>['Close','关闭'].includes(b.getAttribute('aria-label')));const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
@@ -206,7 +206,7 @@ test('translation restart and mode switches discard stale work without blocking 
       }},storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}}};
     globalThis.sendAction=(action,label)=>command({type:'cindy-ui',action},{id:'fixture'},r=>replies.push({label,...r}));
   });
-  for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
+  for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])await page.addScriptTag({path:path.join(extension,file)});
   await t.test('restart sends new work before the cancelled model settles',async()=>{
     await page.evaluate(()=>sendAction('translate-page','first'));
     await page.waitForFunction(()=>models.length===1);

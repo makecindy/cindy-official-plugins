@@ -33,7 +33,7 @@ test('automatic video entries stay inside adapted controls',{
           onChanged:{addListener(){},removeListener(){}}}};
     },brandURL);
     const bounds=await page.locator('video').boundingBox();
-    for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+    for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
       await page.addScriptTag({path:path.join(extension,file)});
     return {page,bounds};
   }
