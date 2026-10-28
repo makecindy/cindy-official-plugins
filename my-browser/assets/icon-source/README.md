@@ -11,3 +11,8 @@ drawn in `#15161c` on a white rounded tile with a light border, with the earring
 Render the PNGs at their exact pixel size (device scale 1) into
 `extension/icons/mark-{16,24,32,48,128}.png`. The illustrated `16/32/48/128.png`
 remain only for the in-page brand image and tests.
+
+Toolbar (0.4.40): `action-light.svg` / `action-dark.svg` (and `-small` for 16 px)
+draw the silhouette without a tile, filling the canvas, near-black or near-white
+with the Cindy-red earring. They render to `extension/icons/action-{light,dark}-{16,24,32}.png`;
+the background switches between them from the appearance pages report.

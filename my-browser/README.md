@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.40 bare toolbar icon that follows light and dark (host package 0.4.57)
+
+The toolbar icon drops the white tile and the silhouette fills the icon. It comes in two versions, near-black for light toolbars and near-white for dark ones, both with the Cindy-red earring. Open pages report the browser's appearance (`prefers-color-scheme`) to the background, which switches the icon; no permission is added. The extensions page and store keep the white-tile icon.
+
 ## 0.4.39 white icon everywhere, and the learning list no longer overlaps (host package 0.4.56)
 
 The mark moves to a white rounded tile with a light border, the silhouette in near-black and the earring in Cindy red; the full red tile was too loud. Every extension icon now uses it, including the extensions page and store sizes (128 px with the store's 16 px margin). In the learning tab the subtitle list had a fixed 180 px scroll box whose items were squeezed below their text height, so entries overlapped; items keep their height now and the whole panel scrolls, so the controls above scroll away and leave room for the list.

@@ -743,6 +743,13 @@ if(chrome.contextMenus) {
   chrome.contextMenus.onClicked.addListener((info,tab)=>{if(tab?.id)openOnTab(tab.id,info.menuItemId==='cindy-selection'?'selection':'translate-page');});
 }
 chrome.action.onClicked?.addListener(tab=>{if(tab?.id)openOnTab(tab.id);});
+// Toolbar icon follows the browser's light or dark appearance, reported by open pages.
+let actionScheme=null; // unknown after a worker restart: the first report always applies
+chrome.runtime.onMessage.addListener((m,sender)=>{
+  if(m?.type!=='cindy-color-scheme'||sender.id!==chrome.runtime.id||typeof m.dark!=='boolean')return;
+  const scheme=m.dark?'dark':'light';if(scheme===actionScheme)return;actionScheme=scheme;
+  chrome.action.setIcon?.({path:{16:`icons/action-${scheme}-16.png`,24:`icons/action-${scheme}-24.png`,32:`icons/action-${scheme}-32.png`}})?.catch?.(()=>{});
+});
 chrome.commands?.onCommand.addListener(async command=>{
   const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
   if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');

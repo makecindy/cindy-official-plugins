@@ -91,3 +91,16 @@ test('an update injects the new content script into pages that are already open'
   injected.length=0;for(const fn of injectors)fn({reason:'chrome_update'});await new Promise(r=>setTimeout(r,10));
   assert.deepEqual(injected,[],'browser updates do not re-inject');
 });
+
+test('the toolbar icon follows the light or dark appearance reported by pages',async()=>{
+  const noop={addListener(){}};const listeners=[],icons=[];
+  const chrome={runtime:{id:'fixture',getManifest:()=>({version:'0.4.40'}),onStartup:noop,onInstalled:noop,onMessage:{addListener:fn=>listeners.push(fn)}},
+    storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async()=>({}),set:async()=>{}}},
+    tabs:{onRemoved:noop,onActivated:noop,onUpdated:noop},alarms:{create(){},onAlarm:noop},
+    action:{async setBadgeText(){},async setBadgeBackgroundColor(){},async setIcon({path}){icons.push(path[16]);}}};
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,''),{chrome,MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout});
+  const send=(m,id='fixture')=>{for(const fn of listeners)fn(m,{id},()=>{});};
+  send({type:'cindy-color-scheme',dark:false});send({type:'cindy-color-scheme',dark:true});send({type:'cindy-color-scheme',dark:true});
+  send({type:'cindy-color-scheme',dark:'yes'});send({type:'cindy-color-scheme',dark:false},'other-extension');
+  assert.deepEqual(icons,['icons/action-light-16.png','icons/action-dark-16.png'],'first report applies, repeats and invalid or foreign messages do not');
+});
