@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.30 captions are checked against the chosen language (host package 0.4.47)
+
+On a signed-in account the English track of watch?v=OVwWsdZ-fg8 still came back empty and the transcript-panel fallback returned Arabic, which was then translated. Every caption source (direct read, player-assisted read, transcript panel) is now checked against the chosen track's writing system; a mismatch moves on to the next source, and if all of them disagree the panel reports that YouTube returned captions in another language instead of translating them. The transcript panel is also pointed at the chosen track while it is read, and the player's own choice is restored afterwards.
+
 ## 0.4.29 the player-assisted read only takes the track it asked for (host package 0.4.46)
 
 The track was chosen correctly (English), but the player-assisted read captured the first caption request the player made. YouTube remembers the last caption language per account, so a player that had been switched to Arabic requested Arabic first, and the English video was read and translated from Arabic (watch?v=OVwWsdZ-fg8). Only a request whose `lang` and `kind` match the chosen track is taken now. The player's own caption choice is still restored afterwards and never changed by Cindy.

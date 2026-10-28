@@ -403,3 +403,17 @@ test('subtitle requests accept a bounded reference of earlier translated caption
   assert.ok(JSON.stringify(long.reference).length<=2000);
   assert.equal(core.validate({op:'subtitles',words,reference:[{text:'a',translation:'b'}]}).reference,undefined,'only the editorial path uses it');
 });
+
+test('captionsMatchLanguage compares writing systems and stays silent when unsure',()=>{
+  // Bug regression (2026-10-28, watch?v=OVwWsdZ-fg8): an Arabic transcript was translated as the English track.
+  const cue=text=>({text});
+  const arabic=[cue('٨٠ ٪ ، هذه هي النتيجة التي حصل عليها مرطبان مايونيز من وولورثز هذا الشهر')];
+  const english=[cue("80%. That's the score a Woolworth's jar of mayonnaise got this month from Choice")];
+  assert.equal(core.captionsMatchLanguage(arabic,'en'),false);
+  assert.equal(core.captionsMatchLanguage(english,'en'),true);
+  assert.equal(core.captionsMatchLanguage(arabic,'ar'),true);
+  assert.equal(core.captionsMatchLanguage([cue('これはテストです。日本語の字幕を確認しています。')],'ja'),true);
+  assert.equal(core.captionsMatchLanguage([cue('这是一个测试，用来确认中文字幕的语言判断是否正确。')],'zh-Hans'),true);
+  assert.equal(core.captionsMatchLanguage([cue('[Music]')],'en'),true,'too little text decides nothing');
+  assert.equal(core.captionsMatchLanguage(english,'xx'),true,'unknown languages are not judged');
+});

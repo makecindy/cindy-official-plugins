@@ -48,7 +48,7 @@ test('valid timed captions preserve timestamps without sending cookies or follow
 
 // Exercise the shipped message handler as well as its parser: an empty
 // timedtext response must reach the transcript fallback and return usable cues.
-async function captions({body='',fallbackError,changed=false,configError,playerText,playerError,machineText,tracks}={}){
+async function captions({body='',fallbackError,changed=false,configError,playerText,playerError,machineText,tracks,fallbackCues}={}){
  const start=source.indexOf("chrome.runtime.onMessage.addListener((m,sender,reply)=>{",source.indexOf('async function fetchYoutubeCaptions('));
  const end=source.indexOf('// Resume only',start);
  let handler,reads=0,checks=0;
@@ -66,8 +66,8 @@ async function captions({body='',fallbackError,changed=false,configError,playerT
    scripting:{executeScript:async args=>{
     assert.equal(args.target.tabId,7);assert.deepEqual([...args.target.documentIds],['fixture-document']);assert.equal(args.world,'MAIN');reads++;
     if(args.func===fallback){
-     assert.equal(args.args[0],pageURL);
-     return [{documentId:'fixture-document',result:fallbackError?{ok:false,error:fallbackError}:{ok:true,cues}}];
+     assert.equal(args.args[0],pageURL);assert.equal(args.args[1]?.languageCode,'en','the panel is pointed at the chosen track');
+     return [{documentId:'fixture-document',result:fallbackError?{ok:false,error:fallbackError}:{ok:true,cues:fallbackCues||cues}}];
     }
     if(args.func.name==='readPlayerTimedtext'){
      assert.deepEqual([...args.args].slice(0,2),['en','zh-Hans']);
@@ -143,4 +143,16 @@ test('the player-assisted read takes only the request for the wanted track, not 
   const result=await vm.runInNewContext('readPlayerTimedtext("en",null,"asr")',context);
   assert.equal(result.ok,true);assert.equal(result.text,'en|asr');
   assert.equal(JSON.stringify(options.at(-1)),JSON.stringify({languageCode:'ar',kind:'asr'}),'the player gets its own track back');
+});
+
+test('captions in another language than the chosen track are never translated',async()=>{
+  const arabic=JSON.stringify({events:[{tStartMs:0,dDurationMs:4000,segs:[{utf8:'٨٠ ٪ ، هذه هي النتيجة التي حصل عليها مرطبان مايونيز من وولورثز هذا الشهر'}]}]});
+  const english=JSON.stringify({events:[{tStartMs:0,dDurationMs:4000,segs:[{utf8:"80%. That's the score a Woolworth's jar of mayonnaise got this month from Choice"}]}]});
+  // The player read hands back Arabic, the transcript panel English: the English transcript wins.
+  const viaPanel=await captions({playerText:arabic,fallbackCues:[{start:0,end:4,text:"80%. That's the score a Woolworth's jar of mayonnaise got this month from Choice"}]});
+  assert.equal(viaPanel.result.ok,true);assert.match(viaPanel.result.cues[0].text,/mayonnaise/);
+  // Every source in the wrong language: a clear error instead of an Arabic translation.
+  const none=await captions({playerText:arabic,fallbackCues:[{start:0,end:4,text:'٨٠ ٪ ، هذه هي النتيجة التي حصل عليها مرطبان مايونيز من وولورثز هذا الشهر'}]});
+  assert.equal(none.result.ok,false);assert.equal(none.result.error,'SUBTITLE_LANGUAGE_MISMATCH');
+  assert.equal((await captions({playerText:english})).result.ok,true);
 });

@@ -2,7 +2,7 @@
 (function(root) {
   // Runs in the verified video document. Use YouTube's own transcript UI when
   // timedtext returns an empty response; no tokens, cookies or private APIs.
-  async function read(expectedURL) {
+  async function read(expectedURL,wanted) {
     // The transcript may render in the dedicated panel or inside the newer "In this video"
     // panel, which carries no target-id: identify panels by their segments, never by id.
     const panelSelector='ytd-engagement-panel-section-list-renderer';
@@ -22,6 +22,11 @@
       const playing=document.querySelector('ytd-watch-flexy')?.getAttribute('video-id');
       if(id&&playing&&id!==playing)throw Error('PAGE_CHANGED');
     };
+    // The panel can follow the player's caption choice; point it at the chosen track while reading.
+    const player=document.querySelector('#movie_player');let restore=null;
+    if(wanted?.languageCode&&typeof player?.setOption==='function'){
+      try{const before=player.getOption('captions','track');if(before?.languageCode!==wanted.languageCode||(before?.kind||null)!==(wanted.kind||null)){player.setOption('captions','track',{languageCode:wanted.languageCode,...(wanted.kind?{kind:wanted.kind}:{})});restore=before||{};}}catch{}
+    }
     document.addEventListener('pointerdown',interaction,true);
     document.addEventListener('keydown',interaction,true);
     document.addEventListener('wheel',interaction,{capture:true,passive:true});
@@ -83,6 +88,7 @@
       throw Error('SUBTITLE_UNAVAILABLE');
     }catch(e){return {ok:false,error:['PAGE_CHANGED','SUBTITLE_TOO_LARGE','SUBTITLE_RESPONSE_INVALID'].includes(e.message)?e.message:'SUBTITLE_UNAVAILABLE'};}
     finally{
+      if(restore)try{player.setOption('captions','track',restore.languageCode?{languageCode:restore.languageCode,...(restore.kind?{kind:restore.kind}:{})}:{});}catch{}
       document.removeEventListener('pointerdown',interaction,true);
       document.removeEventListener('keydown',interaction,true);
       document.removeEventListener('wheel',interaction,{capture:true});

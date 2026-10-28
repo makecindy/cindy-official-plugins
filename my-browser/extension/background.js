@@ -854,8 +854,8 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       const url=new URL(track.url);
       if(url.protocol!=='https:'||!/(^|\.)youtube\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)throw Error('INVALID_SUBTITLE_SOURCE');
       url.searchParams.set('fmt','json3');
-      try{cues=await fetchYoutubeCaptions(url.href);if(tlang){try{const u=new URL(url.href);u.searchParams.set('tlang',tlang);machine=await fetchYoutubeCaptions(u.href);}catch{}}}catch(e){
-        if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID','SUBTITLE_UNAVAILABLE','SUBTITLE_TIMEOUT','SUBTITLE_FETCH_FAILED'].includes(e.message))throw e;
+      try{cues=await fetchYoutubeCaptions(url.href);if(cues.length&&!globalThis.CindyLearning.captionsMatchLanguage(cues,track.language)){cues=[];throw Error('SUBTITLE_LANGUAGE_MISMATCH');}if(tlang){try{const u=new URL(url.href);u.searchParams.set('tlang',tlang);machine=await fetchYoutubeCaptions(u.href);}catch{}}}catch(e){
+        if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID','SUBTITLE_UNAVAILABLE','SUBTITLE_TIMEOUT','SUBTITLE_FETCH_FAILED','SUBTITLE_LANGUAGE_MISMATCH'].includes(e.message))throw e;
         sourceError=e;
       }
     }
@@ -865,18 +865,20 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       const read=viaPlayer[0].result;
       if(read?.ok===true&&typeof read.text==='string'){
         if(typeof read.machineText==='string'){try{machine=parseYoutubeCaptions(read.machineText);}catch{machine=[];}}
-        try{cues=parseYoutubeCaptions(read.text);}catch(e){
+        try{cues=parseYoutubeCaptions(read.text);if(cues.length&&!globalThis.CindyLearning.captionsMatchLanguage(cues,track.language)){cues=[];machine=[];sourceError=Error('SUBTITLE_LANGUAGE_MISMATCH');}}catch(e){
           if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID'].includes(e.message))throw e;
           sourceError=e;
         }
       }else if(read?.error==='SUBTITLE_TOO_LARGE')throw Error('SUBTITLE_TOO_LARGE');
     }
     if(!cues.length){
-      const fallback=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:globalThis.CindyYoutubeTranscript.read,args:[tab.url]});
+      const fallback=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:globalThis.CindyYoutubeTranscript.read,args:[tab.url,track?{languageCode:track.language,kind:track.kind||null}:null]});
       if(fallback?.[0]?.documentId!==documentId)throw Error('PAGE_CHANGED');
       const transcript=fallback[0].result;
       if(!transcript?.ok)throw Error(transcript?.error==='SUBTITLE_UNAVAILABLE'?sourceError?.message||'SUBTITLE_UNAVAILABLE':transcript?.error||'SUBTITLE_UNAVAILABLE');
       cues=transcript.cues;
+      // Never translate a transcript in another language than the chosen track.
+      if(track&&cues.length&&!globalThis.CindyLearning.captionsMatchLanguage(cues,track.language))throw Error('SUBTITLE_LANGUAGE_MISMATCH');
       if(!cues.length&&sourceError)throw sourceError;
     }
     await learningRequest({id:crypto.randomUUID(),request:{op:'config'}},sender);
