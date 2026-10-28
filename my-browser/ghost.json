@@ -4,7 +4,7 @@
   "name": "Cindy Chrome",
   "description": "Cindy’s browser companion: bilingual webpages, contextual explanations, automatic in-player subtitles, PDF/OCR and browser control. Page text goes to your configured AI; cookies are not exported.",
   "whenToUse": "Use Cindy Chrome for translation, in-player subtitles, PDF reading and site permissions in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.61",
+  "version": "0.4.62",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",

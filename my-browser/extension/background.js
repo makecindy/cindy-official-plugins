@@ -70,12 +70,55 @@ async function agentWindow() {
 }
 async function openInAgentWindow(url) {
   const windowId = await agentWindow();
-  if (windowId != null) return chrome.tabs.create({windowId,url,active:true});
-  const created = await chrome.windows.create({url,focused:false,type:'normal'});
-  agentWindowId = created.id; await sessionStore.set({agentWindow:created.id});
-  return created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
+  let tab;
+  if (windowId != null) tab = await chrome.tabs.create({windowId,url,active:true});
+  else {
+    const created = await chrome.windows.create({url,focused:false,type:'normal'});
+    agentWindowId = created.id; await sessionStore.set({agentWindow:created.id});
+    tab = created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
+  }
+  await groupAgentTab(tab);
+  return tab;
 }
 const PAGE_ACCESS = {allowLocal:true};
+
+// ── Showing the user what the agent works on ─────────────────────────────────────────────────
+// Pages the agent opens sit in a "Cindy" tab group in Cindy's window. Any page the agent acts on,
+// including the user's own tabs, shows a glow and label for a few seconds (drawn by the content
+// script) and a badge on the toolbar icon for that tab.
+let agentGroupId = null, uiLocale = null;
+const groupTitle = () => uiLocale === 'zh-CN' ? 'Cindy 自动操作' : uiLocale === 'zh-TW' ? 'Cindy 自動操作' : 'Cindy automation';
+// Turning tab groups on from the options page groups the pages already in Cindy's window too.
+chrome.permissions?.onAdded?.addListener(async added => {
+  if (!added.permissions?.includes('tabGroups')) return;
+  const windowId = await agentWindow();
+  if (windowId != null) for (const tab of await chrome.tabs.query({windowId})) await groupAgentTab(tab);
+});
+async function groupAgentTab(tab) {
+  if (!chrome.tabGroups || !chrome.tabs.group || !tab?.id) return;
+  try {
+    if (agentGroupId == null) agentGroupId = (await sessionStore.get('agentGroup')).agentGroup ?? null;
+    let groupId = agentGroupId;
+    if (groupId != null) { try { if ((await chrome.tabGroups.get(groupId)).windowId !== tab.windowId) groupId = null; } catch { groupId = null; } }
+    groupId = await chrome.tabs.group({tabIds:[tab.id],...(groupId != null ? {groupId} : {createProperties:{windowId:tab.windowId}})});
+    if (groupId !== agentGroupId) {
+      agentGroupId = groupId; await sessionStore.set({agentGroup:groupId});
+      await chrome.tabGroups.update(groupId,{title:groupTitle(),color:'red'});
+    }
+  } catch {}
+}
+const agentMarkTimers = new Map();
+// Marks are a courtesy: a page without the content script, or a browser without these APIs, just goes unmarked.
+const quietly = fn => Promise.resolve().then(fn).catch(() => {});
+function markAgentTab(tabId,hidden = false) {
+  const sent = quietly(() => chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(hidden ? {hidden:true} : {})}));
+  if (!hidden) {
+    quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
+    clearTimeout(agentMarkTimers.get(tabId));
+    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:null})); },4000));
+  }
+  return sent;
+}
 
 // ── Chrome's debugger, on demand ───────────────────────────────────────────────────────────
 // An optional permission. Chrome lets the user grant it only by a click on the extension's own
@@ -197,6 +240,7 @@ async function debuggerScreenshot(tab,a) {
     clip = {x:rect.x,y:rect.y,width:Math.min(rect.width,16384),height:Math.min(rect.height,16384),scale:1};
   }
   const format = a.type === 'jpeg' ? 'jpeg' : 'png';
+  await markAgentTab(tab.id,true);
   const shot = await withDebugger(tab.id,async send => {
     if (a.fullPage && !clip) {
       const metrics = await send('Page.getLayoutMetrics');
@@ -205,6 +249,7 @@ async function debuggerScreenshot(tab,a) {
     }
     return send('Page.captureScreenshot',{format,...(format === 'jpeg' ? {quality:85} : {}),...(clip ? {clip,captureBeyondViewport:true} : {}),fromSurface:true});
   });
+  markAgentTab(tab.id);
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
 }
 async function connection(state) {
@@ -768,11 +813,14 @@ async function tabAction(job,tab,policy) {
     }
     const format = a.type === 'jpeg' ? 'jpeg' : 'png';
     // Chrome allows two captures per second; a quick follow-up waits for the next slot instead of failing.
+    // Cindy's own activity mark is hidden for the capture so the agent sees the page as it is.
+    await markAgentTab(tab.id,true);
     let dataUrl;
     for (let attempt = 0; ; attempt++) {
       try { dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId,{format,...(format === 'jpeg' ? {quality:85} : {})}); break; }
       catch (e) { if (attempt >= 3 || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message)) throw e; await sleep(550); }
     }
+    markAgentTab(tab.id);
     const data = dataUrl.slice(dataUrl.indexOf(',')+1);
     const partial = a.fullPage || a.ref || a.selector;
     return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4),
@@ -946,6 +994,7 @@ async function handle(job,policy,target) {
       if (!loaded) return fail('TAB_CLOSED','The new tab was closed before it finished loading, by the user or the site. Ask the user before opening it again.','executed');
       owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
       if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
+      markAgentTab(created.id);
       return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url ? P.redactUrl(loaded.url) : undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
     }
     let tab;
@@ -959,6 +1008,7 @@ async function handle(job,policy,target) {
         await chrome.tabs.update(tab.id,{url:job.payload.url});
         try { tab = await waitForLoad(tab.id); } catch { tab = await chrome.tabs.get(tab.id); }
         if (!P.check(policy,'navigate',tab.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
+        markAgentTab(tab.id);
         return {ok:true,execution:'executed',tabId:tab.id,url:P.redactUrl(tab.url),title:(tab.title || '').slice(0,300)};
       }
     } else {
@@ -966,6 +1016,7 @@ async function handle(job,policy,target) {
       tab = await ensureTab(job.payload.url,policy,job.action,() => { navigating = true; });
     }
     const actual = await chrome.tabs.get(tab.id);
+    if (!['close','screenshot','pdf'].includes(job.action)) markAgentTab(actual.id);
     // Tab-level actions need no page script: answer them before injecting anything.
     const direct = await tabAction(job,actual,policy);
     if (direct) return direct;
@@ -1131,6 +1182,12 @@ async function learningRequest(message,sender) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  if(message?.type==='cindy-ui-locale'&&typeof message.locale==='string') {
+    // Cindy's interface language, reported by a content script: names the agent's tab group.
+    uiLocale=message.locale.slice(0,20);
+    if(agentGroupId!=null)chrome.tabGroups?.update(agentGroupId,{title:groupTitle()}).catch(()=>{});
+    reply({ok:true});return;
+  }
   if(message?.type==='cindy-learning') {
     learningRequest(message,sender).then(reply).catch(e=>reply({ok:false,error:e.message,...(e.message==='ADDRESS_UNVERIFIED'?{reason:e.reason}: {})}));return true;
   }

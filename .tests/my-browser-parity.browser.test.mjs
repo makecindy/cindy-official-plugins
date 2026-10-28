@@ -25,7 +25,7 @@ async function launch(grantDebugger){
   await fs.writeFile(path.join(extensionDir,'manifest.json'),JSON.stringify({...manifest,key:publicKey.toString('base64'),
     // The debugger is an optional permission the user grants by a click on a Chrome prompt; the
     // granted variant declares it up front so the debugger paths run without that prompt.
-    ...(grantDebugger?{permissions:[...manifest.permissions,'debugger'],optional_permissions:[]}:{})}));
+    ...(grantDebugger?{permissions:[...manifest.permissions,'debugger','tabGroups'],optional_permissions:[]}:{})}));
   const nativeProfiles=[profile,...['Google/Chrome','Google/Chrome for Testing'].map(p=>path.join(profile,'Library/Application Support',p))];
   for(const p of nativeProfiles)await fs.mkdir(p,{recursive:true});
   const native=require(root+'/node/native-binding.cjs').createNativeBinding({root:path.join(profile,'native'),profiles:nativeProfiles,binary:process.env.CINDY_NATIVE_TEST_BINARY});
@@ -95,6 +95,9 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const opened=await act('open',{url:'http://parity.test/'});
   check('open returns a tab in a separate window',opened.ok && opened.window!==userTab.windowId,JSON.stringify({tab:opened.tabId,window:opened.window,user:userTab.windowId}));
   const T={tabId:opened.tabId,url:'http://parity.test/'};
+  // Tab groups need an optional permission (it adds an install warning); without it the tab is simply not grouped.
+  const ungrouped=await worker.evaluate(async id=>(await chrome.tabs.get(id)).groupId,opened.tabId);
+  check('no tab group without the optional permission',ungrouped===-1,String(ungrouped));
   const winInfo=await worker.evaluate(async id=>{const w=await chrome.windows.get(id);return {focused:w.focused,state:w.state};},opened.window);
   const focusedAfter=await worker.evaluate(async()=>(await chrome.windows.getLastFocused()).id);
   check('agent window does not take focus',!winInfo.focused && focusedAfter===focusedBefore,JSON.stringify({winInfo,focusedBefore,focusedAfter}));
@@ -104,6 +107,10 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const snap=await act('snapshot',{...T,maxChars:6000});
   const ref=name=>{const line=String(snap.elements||'').split('\n').find(l=>l.includes(name));return line && /^\[([a-f0-9]{32})\]/.exec(line)?.[1];};
   check('snapshot by tabId',snap.ok && !!ref('Click me'),snap.error||'');
+  const marked=await worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result,opened.tabId);
+  const markedPage=context.pages().find(p=>p.url()==='http://parity.test/');
+  if(markedPage && process.env.CINDY_SCREENSHOTS)await markedPage.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'agent-mark.png')});
+  check('acting on a page shows the Cindy mark, which page reads do not see',marked && !/working on this page|正在自动操作/.test(String(snap.text)+String(snap.elements)),JSON.stringify({marked}));
   const clicked=await act('click',{...T,ref:ref('Click me')});
   const ev=await act('evaluate',{...T,fn:'() => document.title'});
   check('click + evaluate',clicked.ok && ev.ok && ev.result==='clicked',JSON.stringify(ev));
@@ -185,14 +192,14 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
     const grantTabsAgain=await worker.evaluate(async()=>(await chrome.tabs.query({})).filter(t=>(t.url||'').includes('permissions.html')).length);
     check('a retry does not open the page again',pdfAgain.error==='DEBUGGER_NOT_ALLOWED' && pdfAgain.grantPageOpened===false && grantTabsAgain===1,JSON.stringify({pdfAgain,grantTabsAgain}));
     // Install-time warnings must match the previous release, so an update never disables the extension.
-    const warnings=await worker.evaluate(async m=>{const now=JSON.parse(m);const before={...now,host_permissions:['http://*/*','https://*/*']};delete before.optional_permissions;delete before.options_ui;
+    const warnings=await worker.evaluate(async m=>{const now=JSON.parse(m);const before={...now,host_permissions:['http://*/*','https://*/*'],permissions:now.permissions};delete before.optional_permissions;delete before.options_ui;
       return {now:await chrome.management.getPermissionWarningsByManifest(JSON.stringify(now)),before:await chrome.management.getPermissionWarningsByManifest(JSON.stringify(before))};},JSON.stringify(manifest));
     check('install warnings unchanged',JSON.stringify(warnings.now)===JSON.stringify(warnings.before),JSON.stringify(warnings));
     const full=await act('screenshot',{tabId:local.tabId,url:'http://127.0.0.1:'+server.address().port+'/',fullPage:true});
     check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,33);
+  assert.equal(results.length,35);
 });
 
 const pngSize=b64=>{const b=Buffer.from(b64,'base64');return {png:b.subarray(0,8).toString('hex')==='89504e470d0a1a0a',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};};
@@ -205,6 +212,8 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     const userTab=await worker.evaluate(async()=>(await chrome.tabs.query({url:'http://parity.test/user'}))[0]);
     const opened=await act('open',{url:'http://parity.test/tall'});
     const T={tabId:opened.tabId,url:'http://parity.test/tall'};
+    const group=await worker.evaluate(async id=>{const t=await chrome.tabs.get(id);return t.groupId>=0?await chrome.tabGroups.get(t.groupId):null;},opened.tabId);
+    check('with the permission, agent tabs carry a red Cindy tab group',group && /^Cindy/.test(group.title) && group.color==='red',JSON.stringify(group));
     const viewport=await act('evaluate',{...T,fn:'() => innerHeight'});
     const full=await act('screenshot',{...T,fullPage:true});
     const fullSize=full.ok && pngSize(full.data);
@@ -234,5 +243,5 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     check('commands after the session ends are refused',after.error==='DEBUGGER_DETACHED',after.error);
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,9);
+  assert.equal(results.length,10);
 });

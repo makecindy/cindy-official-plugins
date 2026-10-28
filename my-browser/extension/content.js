@@ -24,6 +24,7 @@
     for(const rec of translations.values())rec.host.remove();translations.clear();
     for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
+    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
   let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
@@ -544,7 +545,30 @@
     if(!dragged||!window.getSelection()?.toString().trim()||!selected)return;
     if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.dataset.theme=pageTheme();root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
   },{signal:lifecycle.signal});
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.
+  // It never takes clicks, lives in a closed shadow root (so page reads do not see it) and fades a few
+  // seconds after the last action. Screenshots hide it first.
+  let agentMark,agentMarkTimer,agentCopy;
+  async function markAgent(hidden){
+    if(hidden){agentMark?.style.setProperty('display','none','important');return;}
+    if(!agentCopy){agentCopy=t;try{const r=await request({op:'config'});agentCopy=U.copy(r.locale||'en');sendMessage({type:'cindy-ui-locale',locale:r.locale||'en'}).catch(()=>{});}catch{}}
+    if(disposed)return;
+    if(!agentMark?.isConnected){
+      agentMark=el('div');agentMark.setAttribute('data-cindy-agent-mark','');
+      isolateHost(agentMark,{position:'fixed',inset:'0',display:'block','z-index':'2147483645','pointer-events':'none'});
+      const root=agentMark.attachShadow({mode:'closed'});
+      root.append(el('style',`.frame{position:fixed;inset:0;box-shadow:inset 0 0 0 2px rgba(217,58,58,.85),inset 0 0 22px rgba(217,58,58,.35);animation:glow 1.6s ease-in-out infinite alternate}
+.label{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:7px;padding:6px 12px 6px 8px;border-radius:999px;background:#d93a3a;color:#fff;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap}
+.label img{width:16px;height:16px;border-radius:50%;background:#fff}
+@keyframes glow{from{opacity:.65}to{opacity:1}}@media (prefers-reduced-motion:reduce){.frame{animation:none}}`));
+      const label=el('div',undefined,'label');const icon=el('img');icon.src=brandURL;icon.alt='';label.append(icon,el('span',agentCopy.agentWorking));
+      root.append(el('div',undefined,'frame'),label);
+      document.documentElement.append(agentMark);
+    }
+    agentMark.style.setProperty('display','block','important');
+    clearTimeout(agentMarkTimer);agentMarkTimer=setTimeout(()=>{agentMark?.remove();agentMark=null;},4000);
+  }
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0;
   async function autoOpen(){

@@ -20,7 +20,8 @@
     "open_in_tab": true
   },
   "optional_permissions": [
-    "debugger"
+    "debugger",
+    "tabGroups"
   ],
   "host_permissions": [
     "http://*/*",
