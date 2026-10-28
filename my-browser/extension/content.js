@@ -551,7 +551,9 @@
   // Screenshots hide it first.
   const AGENT_MARK_MS=20000;
   let agentMark,agentMarkTimer,agentCopy;
-  async function markAgent(hidden){
+  function endAgentMark(){clearTimeout(agentMarkTimer);const leaving=agentMark;if(!leaving)return;leaving.classList.add('leaving');agentMarkTimer=setTimeout(()=>{leaving.remove();if(agentMark===leaving)agentMark=null;},800);}
+  async function markAgent(hidden,clear){
+    if(clear){endAgentMark();return;}
     if(hidden){agentMark?.style.setProperty('display','none','important');return;}
     if(!agentCopy){agentCopy=t;try{const r=await request({op:'config'});agentCopy=U.copy(r.locale||'en');sendMessage({type:'cindy-ui-locale',locale:r.locale||'en'}).catch(()=>{});}catch{}}
     if(disposed)return;
@@ -570,9 +572,9 @@
     }
     agentMark.style.setProperty('display','block','important');agentMark.classList.remove('leaving');
     clearTimeout(agentMarkTimer);
-    agentMarkTimer=setTimeout(()=>{const leaving=agentMark;if(!leaving)return;leaving.classList.add('leaving');agentMarkTimer=setTimeout(()=>{leaving.remove();if(agentMark===leaving)agentMark=null;},800);},AGENT_MARK_MS);
+    agentMarkTimer=setTimeout(endAgentMark,AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0;
   async function autoOpen(){

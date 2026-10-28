@@ -110,6 +110,10 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const marked=await worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result,opened.tabId);
   const markedPage=context.pages().find(p=>p.url()==='http://parity.test/');
   if(markedPage && process.env.CINDY_SCREENSHOTS)await markedPage.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'agent-mark.png')});
+  const unmarked=await act('unmark',{tabId:opened.tabId});
+  await new Promise(r=>setTimeout(r,1200));
+  const markGone=await worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result,opened.tabId);
+  check('unmark ends the mark right away',unmarked.ok && !markGone,JSON.stringify({unmarked,markGone}));
   check('acting on a page shows the Cindy mark, which page reads do not see',marked && !/working on this page|正在自动操作/.test(String(snap.text)+String(snap.elements)),JSON.stringify({marked}));
   const clicked=await act('click',{...T,ref:ref('Click me')});
   const ev=await act('evaluate',{...T,fn:'() => document.title'});
@@ -199,7 +203,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
     check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,35);
+  assert.equal(results.length,36);
 });
 
 const pngSize=b64=>{const b=Buffer.from(b64,'base64');return {png:b.subarray(0,8).toString('hex')==='89504e470d0a1a0a',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};};
@@ -228,6 +232,12 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     const behindShot=await act('screenshot',{tabId:behind,url:'http://parity.test/two'});
     const userStill=await worker.evaluate(async id=>(await chrome.tabs.get(id)).active,userTab.id);
     check('background tab captured without switching the user view',behindShot.ok && behindShot.viaDebugger && userStill,JSON.stringify({error:behindShot.error,message:behindShot.message,userStill}));
+    // A page whose CSP forbids Cindy's scripts still runs evaluate through the allowed debugger.
+    const csp=await act('open',{url:'http://csp.test/'});
+    const cspEval=await act('evaluate',{tabId:csp.tabId,url:'http://csp.test/',fn:'() => document.title + 1'});
+    check('CSP page evaluates through the debugger',cspEval.ok && cspEval.result==='CSP1' && cspEval.viaDebugger===true,JSON.stringify(cspEval));
+    const handoff=await act('focus',{tabId:csp.tabId,url:'http://csp.test/'});
+    check('focus in Cindy window brings it to the user',handoff.ok && handoff.broughtToFront===true,JSON.stringify(handoff));
     const pdf=await act('pdf',T);
     check('pdf export',pdf.ok && Buffer.from(pdf.data,'base64').subarray(0,4).toString()==='%PDF',pdf.error||pdf.message||'');
     check('one-shot actions detach right after',(await act('debuggerAccess',{})).attachedTabs===0);
@@ -243,5 +253,5 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     check('commands after the session ends are refused',after.error==='DEBUGGER_DETACHED',after.error);
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,10);
+  assert.equal(results.length,12);
 });

@@ -4,11 +4,11 @@
   // Parity with Cindy's dedicated browser: the user picks which browser the agent uses, so the
   // user's own browser offers the same actions. What it must not do is disturb the user's own
   // browsing: new pages open in a separate background window and nothing steals focus.
-  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait', 'pdf', 'debuggerAccess'];
+  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait', 'pdf', 'debuggerAccess', 'unmark'];
   const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
   const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize', 'cdp'];
   // Actions that address no page: listing tabs, and checking or granting the on-demand debugger.
-  const UNADDRESSED = ['tabs', 'debuggerAccess'];
+  const UNADDRESSED = ['tabs', 'debuggerAccess', 'unmark'];
   const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
     if (typeof value !== 'string') throw new Error('Enter a domain, for example example.test.');
@@ -88,7 +88,7 @@
     for (const key of ['selector', 'from', 'ref', 'text', 'key', 'waitFor', 'emptySelector', 'after']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > (key === 'text' ? 16000 : 2000))) throw new Error('Invalid ' + key + '.');
     if (payload.tabId != null && (!Number.isInteger(payload.tabId) || payload.tabId < 0)) throw new Error('Invalid tab id.');
     if (['click','type','select','hover','upload'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
-    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait','pdf','cdp'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
+    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait','pdf','cdp','unmark'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
     const finite = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
     if (action === 'clickCoords' && !payload.ref && !payload.selector && (!finite(payload.x, 0, 100000) || !finite(payload.y, 0, 100000))) throw new Error('clickCoords needs x and y in CSS pixels, or a ref or selector.');
     if (payload.modifiers != null && (!Array.isArray(payload.modifiers) || payload.modifiers.length > 4 || payload.modifiers.some(m => !['Alt','Control','ControlOrMeta','Meta','Shift'].includes(m)))) throw new Error('modifiers must be Alt, Control, ControlOrMeta, Meta or Shift.');

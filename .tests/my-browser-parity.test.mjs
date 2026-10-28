@@ -115,3 +115,20 @@ test('a new tab closed while it loads is reported as closed, not as an unknown f
   const opened=await h.run('open',{url:'https://example.test/a'});
   assert.equal(opened.error,'TAB_CLOSED');assert.equal(opened.execution,'executed');
 });
+
+test("focus brings Cindy's window to the user for a handoff, but never the user's own window",async()=>{
+  const h=harness();
+  const opened=await h.run('open',{url:'https://example.test/login'});
+  const handoff=await h.run('focus',{url:'https://example.test/login',tabId:opened.tabId});
+  assert.equal(handoff.broughtToFront,true);
+  same(h.calls.filter(c=>c[0]==='windows.update').at(-1),['windows.update',500,{focused:true,drawAttention:true}]);
+  const user=await h.run('focus',{url:'https://example.test/behind',tabId:2});
+  assert.equal(user.broughtToFront,undefined);
+  assert.equal(h.calls.some(c=>c[0]==='windows.update' && c[1]===1),false);
+});
+test('unmark ends the mark on a tab without addressing a page',async()=>{
+  const h=harness();
+  P.validate('unmark',{tabId:2});assert.throws(()=>P.validate('unmark',{}),/tab id/);
+  const done=await h.run('unmark',{tabId:2});
+  assert.equal(done.ok,true);assert.equal(done.tabId,2);
+});

@@ -110,9 +110,13 @@ async function groupAgentTab(tab) {
 const agentMarkTimers = new Map();
 // Marks are a courtesy: a page without the content script, or a browser without these APIs, just goes unmarked.
 const quietly = fn => Promise.resolve().then(fn).catch(() => {});
-function markAgentTab(tabId,hidden = false) {
-  const sent = quietly(() => chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(hidden ? {hidden:true} : {})}));
-  if (!hidden) {
+// mode: undefined shows (or extends) the mark, 'hidden' hides it for a capture, 'clear' ends it now.
+function markAgentTab(tabId,mode) {
+  const sent = quietly(() => chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}));
+  if (mode === 'clear') {
+    clearTimeout(agentMarkTimers.get(tabId)); agentMarkTimers.delete(tabId);
+    quietly(() => chrome.action.setBadgeText({tabId,text:null}));
+  } else if (!mode) {
     quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
     clearTimeout(agentMarkTimers.get(tabId));
     agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:null})); },20000));
@@ -196,6 +200,16 @@ function debuggerFailure(e) {
   if (e.message === 'DEBUGGER_COMMAND_FAILED') return fail('DEBUGGER_COMMAND_FAILED','Chrome could not complete this through the debugger: '+String(e.detail || '').slice(0,300));
   return null;
 }
+// evaluate on a page whose Content Security Policy blocks Cindy's scripts: the debugger is not subject to it.
+async function debuggerEvaluate(tabId,a) {
+  const expression = '(async () => { let value = ('+a.fn+'); if (typeof value === "function") value = await value('+JSON.stringify(a.arg ?? null)+'); else if (value && typeof value.then === "function") value = await value; return value; })()';
+  const out = await withDebugger(tabId,send => send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true}));
+  if (out.exceptionDetails) return fail('EVAL_FAILED',String(out.exceptionDetails.exception?.description || out.exceptionDetails.text || 'Script failed').slice(0,2000),'unknown');
+  let result = out.result?.value ?? null, json;
+  try { json = JSON.stringify(result); } catch { json = null; }
+  if (json && json.length > 200000) result = {truncated:true,json:json.slice(0,200000)};
+  return {ok:true,execution:'executed',tabId,result,viaDebugger:true};
+}
 // Recipe protocol sessions: one attachment per tab, events buffered between commands.
 async function cdpAction(tab,a) {
   const tabId = tab.id;
@@ -240,7 +254,7 @@ async function debuggerScreenshot(tab,a) {
     clip = {x:rect.x,y:rect.y,width:Math.min(rect.width,16384),height:Math.min(rect.height,16384),scale:1};
   }
   const format = a.type === 'jpeg' ? 'jpeg' : 'png';
-  await markAgentTab(tab.id,true);
+  await markAgentTab(tab.id,'hidden');
   const shot = await withDebugger(tab.id,async send => {
     if (a.fullPage && !clip) {
       const metrics = await send('Page.getLayoutMetrics');
@@ -774,8 +788,13 @@ function sanitizeResult(result) {
 async function tabAction(job,tab,policy) {
   const a = job.payload;
   if (job.action === 'focus') {
-    // Brings the tab to the front of its own window only; the window itself does not take focus.
     await chrome.tabs.update(tab.id,{active:true});
+    // In Cindy's own window, focus hands the page to the user (to sign in, solve a check): that window
+    // comes to the front. A tab in one of the user's windows only comes forward inside its window.
+    if (tab.windowId === await agentWindow()) {
+      await chrome.windows.update(tab.windowId,{focused:true,drawAttention:true,...((await chrome.windows.get(tab.windowId)).state === 'minimized' ? {state:'normal'} : {})});
+      return {ok:true,execution:'executed',tabId:tab.id,broughtToFront:true};
+    }
     return {ok:true,execution:'executed',tabId:tab.id};
   }
   if (job.action === 'close') {
@@ -814,7 +833,7 @@ async function tabAction(job,tab,policy) {
     const format = a.type === 'jpeg' ? 'jpeg' : 'png';
     // Chrome allows two captures per second; a quick follow-up waits for the next slot instead of failing.
     // Cindy's own activity mark is hidden for the capture so the agent sees the page as it is.
-    await markAgentTab(tab.id,true);
+    await markAgentTab(tab.id,'hidden');
     let dataUrl;
     for (let attempt = 0; ; attempt++) {
       try { dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId,{format,...(format === 'jpeg' ? {quality:85} : {})}); break; }
@@ -960,6 +979,8 @@ async function handle(job,policy,target) {
   const gate = P.check(policy,job.action,job.payload.url);
   if (!gate.ok) return gate;
   if (job.action === 'debuggerAccess') return debuggerAccess(job.payload);
+  // The agent's task stopped: end its mark on this tab now instead of waiting for it to fade.
+  if (job.action === 'unmark') { await markAgentTab(job.payload.tabId,'clear'); return {ok:true,execution:'executed',tabId:job.payload.tabId}; }
   if (job.action === 'tabs') {
     const tabs = (await chrome.tabs.query({})).filter(t => /^https?:/.test(t.url || '') && (!job.payload.host || (P.check(policy,'text',t.url).ok && P.matches(new URL(t.url).hostname,P.normalizeHost(job.payload.host)))));
     const records=[];let remaining=30000,truncated=false;
@@ -1033,7 +1054,10 @@ async function handle(job,policy,target) {
     // Main-world reads and scripts run in the page's own JavaScript context.
     if (['evaluate','console','requests','responseBody','dialog'].includes(job.action)) {
       injecting = true;
-      return await mainWorldAction(job,tab.id,documentId);
+      const done = await mainWorldAction(job,tab.id,documentId);
+      // A page that forbids scripts (CSP) cannot stop the debugger: when the user has allowed it, evaluate there.
+      if (done.error === 'EVAL_BLOCKED_BY_PAGE') return await debuggerAllowed() ? debuggerEvaluate(tab.id,job.payload) : {...done,message:done.message+" If the user turns on Cindy's on-demand debugging feature (extension Options), such pages run scripts through it."};
+      return done;
     }
     injecting = true;
     targets.set(job.id,{url:actual.url,target,tabId:tab.id,documentId});
