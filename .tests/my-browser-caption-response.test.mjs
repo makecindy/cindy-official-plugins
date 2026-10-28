@@ -48,7 +48,7 @@ test('valid timed captions preserve timestamps without sending cookies or follow
 
 // Exercise the shipped message handler as well as its parser: an empty
 // timedtext response must reach the transcript fallback and return usable cues.
-async function captions({body='',fallbackError,changed=false,configError,playerText,playerError,machineText}={}){
+async function captions({body='',fallbackError,changed=false,configError,playerText,playerError,machineText,tracks}={}){
  const start=source.indexOf("chrome.runtime.onMessage.addListener((m,sender,reply)=>{",source.indexOf('async function fetchYoutubeCaptions('));
  const end=source.indexOf('// Resume only',start);
  let handler,reads=0,checks=0;
@@ -70,10 +70,10 @@ async function captions({body='',fallbackError,changed=false,configError,playerT
      return [{documentId:'fixture-document',result:fallbackError?{ok:false,error:fallbackError}:{ok:true,cues}}];
     }
     if(args.func.name==='readPlayerTimedtext'){
-     assert.deepEqual([...args.args],['en','zh-Hans']);
+     assert.deepEqual([...args.args].slice(0,2),['en','zh-Hans']);
      return [{documentId:'fixture-document',result:playerError?{ok:false,error:playerError}:playerText===undefined?{ok:false,error:'SUBTITLE_UNAVAILABLE'}:{ok:true,text:playerText,...(machineText!==undefined?{machineText}:{})}}];
     }
-    return [{documentId:'fixture-document',result:[{url:'https://www.youtube.com/api/timedtext?v=fixture',language:'en'}]}];
+    return [{documentId:'fixture-document',result:tracks||[{url:'https://www.youtube.com/api/timedtext?v=fixture',language:'en'}]}];
    }},
   },
  };
@@ -107,6 +107,16 @@ test('caption fallback preserves authorization and document checks',async()=>{
 test('caption handler preserves document failure reason for the panel',async()=>{
  const {result}=await captions({configError:'ADDRESS_UNVERIFIED'});assert.equal(result.reason,'DOCUMENT_UNAVAILABLE');
 });
+test('an English video whose track list starts with Arabic still reads the English captions',async()=>{
+ // Bug regression (2026-10-28): "first manual track" picked Arabic because YouTube sorts tracks by language.
+ const timed=JSON.stringify({events:[{tStartMs:0,dDurationMs:2000,segs:[{utf8:'Hello'}]}]});
+ const list=lang=>({url:'https://www.youtube.com/api/timedtext?v=fixture&lang='+lang,language:lang});
+ const {result}=await captions({playerText:timed,tracks:{tracks:[list('ar'),list('de'),{...list('en'),kind:'asr'}],defaultIndex:2}});
+ assert.equal(result.language,'en');
+ const legacy=await captions({playerText:timed,tracks:[list('ar'),{...list('en'),kind:'asr'}]});
+ assert.equal(legacy.result.language,'en','older array-shaped reads still work');
+});
+
 // The instant layer: YouTube's own translation track rides along with the source cues and is
 // optional; an unreadable translation never fails the caption read.
 test('caption handler returns YouTube machine translation cues alongside the source',async()=>{

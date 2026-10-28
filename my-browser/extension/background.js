@@ -773,7 +773,7 @@ function parseYoutubeCaptions(text) {
 // verified video document: ask the player for the wanted track, read the URL of the request the
 // player itself makes, fetch that same-origin URL with fmt=json3 and no cookies, then restore the
 // player's caption state. Fixed function, no page code is evaluated.
-function readPlayerTimedtext(languageCode,tlang) {
+function readPlayerTimedtext(languageCode,tlang,kind) {
   return (async()=>{
     const player=document.querySelector('#movie_player');
     if(!player||typeof player.setOption!=='function'||typeof player.getOption!=='function')return {ok:false,error:'PLAYER_API_UNAVAILABLE'};
@@ -790,7 +790,8 @@ function readPlayerTimedtext(languageCode,tlang) {
     try{
       // The same track is served from cache without a new request: switch it off first.
       if(before?.languageCode===languageCode)player.setOption('captions','track',{});
-      player.setOption('captions','track',{languageCode});
+      // kind distinguishes the manual track from the auto-generated one in the same language.
+      player.setOption('captions','track',{languageCode,...(kind?{kind}:{})});
     }catch{return {ok:false,error:'PLAYER_API_UNAVAILABLE'};}
     const name=await request;
     try{
@@ -826,10 +827,13 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
     const result=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:()=>{
       const p=document.querySelector('#movie_player');
       const response=p?.getPlayerResponse?.()||globalThis.ytInitialPlayerResponse;
-      return (response?.captions?.playerCaptionsTracklistRenderer?.captionTracks||[]).slice(0,20).map(t=>({url:t.baseUrl,language:t.languageCode,kind:t.kind}));
+      const renderer=response?.captions?.playerCaptionsTracklistRenderer;
+      const audio=(renderer?.audioTracks||[])[renderer?.defaultAudioTrackIndex||0];
+      return {tracks:(renderer?.captionTracks||[]).slice(0,20).map(t=>({url:t.baseUrl,language:t.languageCode,kind:t.kind})),defaultIndex:audio?.defaultCaptionTrackIndex};
     }});
-    const tracks=result?.[0]?.documentId===documentId?result[0].result:[];
-    const track=tracks.find(t=>t.language===m.language)||tracks.find(t=>t.kind!=='asr')||tracks[0];
+    const read=result?.[0]?.documentId===documentId?result[0].result:null;
+    const tracks=Array.isArray(read)?read:read?.tracks||[];
+    const track=globalThis.CindyLearning.youtubeCaptionTrack(tracks,m.language,Array.isArray(read)?undefined:read?.defaultIndex);
     let cues=[],sourceError,machine=[];
     const tlang=globalThis.CindyLearning.youtubeTranslationLanguage(m.target);
     if(track){
@@ -842,7 +846,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       }
     }
     if(!cues.length&&track){
-      const viaPlayer=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:readPlayerTimedtext,args:[track.language,tlang]});
+      const viaPlayer=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:readPlayerTimedtext,args:[track.language,tlang,track.kind||null]});
       if(viaPlayer?.[0]?.documentId!==documentId)throw Error('PAGE_CHANGED');
       const read=viaPlayer[0].result;
       if(read?.ok===true&&typeof read.text==='string'){

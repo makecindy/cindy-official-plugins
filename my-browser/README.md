@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.25 caption track follows the spoken language (host package 0.4.39)
+
+English videos were sometimes read, and translated, from their Arabic captions. The reader asked for language `auto`, no track matched, and the fallback took "the first manual track"; YouTube lists tracks alphabetically by language, so that was often `ar`. The track is now chosen by the spoken language: the language of the auto-generated track, or of the caption the video's audio track points at by default. A manual track in that language wins, then the auto-generated one; an explicit language request is still honoured, and only a video with neither signal falls back to the first manual track. The player-assisted read also passes the track kind, so the manual and auto-generated tracks of one language are no longer confused.
+
 ## One task and one cache per video, across browser profiles (host package 0.4.38)
 
 A video's background task and its subtitle cache are now keyed by the video alone (`youtube:<id>`, or the page URL without its fragment), no longer by the extension connection. Two connections watching the same video (two Chrome profiles, or a second copy of the extension) share one task and one cache instead of translating twice. Cache files move from `browser/<client-id>/subtitles/` to `browser/subtitles/`; videos cached before translate once more.

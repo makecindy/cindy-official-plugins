@@ -375,3 +375,15 @@ test('background fill picks the next open passage after the playhead, then earli
   assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[3]],10,Date.now(),5),null,'nothing within reach and nothing earlier');
   assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[4]],10),null);
 });
+
+test('youtubeCaptionTrack picks the spoken language, not the alphabetically first track',()=>{
+  // Bug regression (2026-10-28): English videos were read as Arabic because "ar" sorts first.
+  const t=(language,kind)=>({url:'u',language,...(kind?{kind}:{})});
+  const tracks=[t('ar'),t('de'),t('en'),t('en','asr'),t('fr')];
+  assert.equal(core.youtubeCaptionTrack(tracks,'auto'),tracks[2],'manual track in the asr language wins');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('en','asr')],'auto').language,'en','asr itself when no manual track matches');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('en-GB')],'auto',1).language,'en-GB','default caption index decides without an asr track');
+  assert.equal(core.youtubeCaptionTrack(tracks,'de').language,'de','an explicit language is honoured');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('de')],'auto').language,'ar','no signal keeps the first manual track');
+  assert.equal(core.youtubeCaptionTrack([],'auto'),undefined);
+});

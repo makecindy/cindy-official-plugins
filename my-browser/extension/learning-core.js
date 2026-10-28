@@ -223,6 +223,21 @@
     }
     return subtitleSegments(words,groups,nextStart,true);
   }
+  // YouTube lists caption tracks alphabetically by language, so "the first manual track" is
+  // often Arabic on an English video. The spoken language is whatever the auto-generated (asr)
+  // track is in, or what the audio track's default caption points at; prefer a manual track in
+  // that language, then the asr track itself.
+  function youtubeCaptionTrack(tracks,wanted,defaultIndex) {
+    const list=Array.isArray(tracks)?tracks.filter(t=>t&&typeof t.language==='string'):[];
+    if(!list.length)return undefined;
+    const base=code=>String(code||'').toLowerCase().split(/[-_]/)[0];
+    if(wanted&&wanted!=='auto'){const exact=list.find(t=>t.language===wanted)||list.find(t=>base(t.language)===base(wanted));if(exact)return exact;}
+    const asr=list.find(t=>t.kind==='asr');
+    const preset=Number.isInteger(defaultIndex)?tracks[defaultIndex]:undefined;
+    const spoken=base(asr?.language||preset?.language);
+    if(spoken){const manual=list.find(t=>t.kind!=='asr'&&base(t.language)===spoken);if(manual)return manual;}
+    return asr||(preset&&list.includes(preset)?preset:undefined)||list.find(t=>t.kind!=='asr')||list[0];
+  }
   function subtitleDocument(cues) {
     const paragraphs=[];let text=[],translation=[];
     const flush=()=>{if(text.length)paragraphs.push({text:joinWords(text.map(text=>({text}))),translation:joinWords(translation.map(text=>({text})))});text=[];translation=[];};
@@ -273,7 +288,7 @@
     return {...entry,interval:days,due:now+(days?days*86400000:600000),reviews:(entry.reviews||0)+1,updated:now};
   }
   function uuid(){if(globalThis.crypto.randomUUID)return globalThis.crypto.randomUUID();const bytes=globalThis.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;return Array.from(bytes,(v,i)=>([4,6,8,10].includes(i)?'-':'')+v.toString(16).padStart(2,'0')).join('');}
-  const api={youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
+  const api={youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
   if(typeof module==='object'&&module.exports)module.exports=api;
   root.CindyLearning=api;
 })(globalThis);
