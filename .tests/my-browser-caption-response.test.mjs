@@ -128,3 +128,19 @@ test('caption handler returns YouTube machine translation cues alongside the sou
  assert.equal(broken.result.ok,true);assert.equal(broken.result.machine.length,0);
  assert.equal((await captions()).result.machine.length,0,'transcript fallback has no machine layer');
 });
+
+test('the player-assisted read takes only the request for the wanted track, not the one the player shows',async()=>{
+  // Bug regression (2026-10-28, watch?v=OVwWsdZ-fg8): YouTube remembered Arabic captions and requested
+  // them first; the read captured that request and the English video was translated from Arabic.
+  const start=source.indexOf('function readPlayerTimedtext(');
+  const body=source.slice(start,source.indexOf('\n}\n',start)+3);
+  const base='https://www.youtube.com/api/timedtext?v=x&pot=p&';
+  let observer,options=[];
+  class PerformanceObserver{constructor(fn){observer=fn;}observe(){}disconnect(){}}
+  const player={getOption:()=>({languageCode:'ar',kind:'asr'}),setOption:(m,k,v)=>{options.push(v);if(v.languageCode==='en')setTimeout(()=>observer({getEntries:()=>[{name:base+'lang=ar&kind=asr'},{name:base+'lang=en'},{name:base+'lang=en&kind=asr'}]}),0);}};
+  const context={document:{querySelector:()=>player},PerformanceObserver,URL,AbortSignal,setTimeout,fetch:async url=>new Response(new URL(url).searchParams.get('lang')+'|'+(new URL(url).searchParams.get('kind')||''))};
+  vm.runInNewContext(body,context);
+  const result=await vm.runInNewContext('readPlayerTimedtext("en",null,"asr")',context);
+  assert.equal(result.ok,true);assert.equal(result.text,'en|asr');
+  assert.equal(JSON.stringify(options.at(-1)),JSON.stringify({languageCode:'ar',kind:'asr'}),'the player gets its own track back');
+});

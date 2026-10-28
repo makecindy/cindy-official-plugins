@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.29 the player-assisted read only takes the track it asked for (host package 0.4.46)
+
+The track was chosen correctly (English), but the player-assisted read captured the first caption request the player made. YouTube remembers the last caption language per account, so a player that had been switched to Arabic requested Arabic first, and the English video was read and translated from Arabic (watch?v=OVwWsdZ-fg8). Only a request whose `lang` and `kind` match the chosen track is taken now. The player's own caption choice is still restored afterwards and never changed by Cindy.
+
 ## 0.4.28 longer tasks, and a fresh task sees earlier wording (host package 0.4.45)
 
 A video's task now holds 100 passages (about 75 minutes of speech, roughly 150K tokens of history) instead of 60, which stays below the compaction threshold of any model with a 200K window or more; most videos fit in one task. When a task starts mid-video (a rollover, returning to a video whose task was archived, a plugin restart or model change), the full rules are accompanied by the last twelve captions already translated before the passage, so names and terms keep the wording used so far. Within a task they are not repeated. Needs extension 0.4.28; older extensions simply send no reference.

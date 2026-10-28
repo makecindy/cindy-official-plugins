@@ -793,7 +793,10 @@ function readPlayerTimedtext(languageCode,tlang,kind) {
     if(!loaded){try{player.loadModule('captions');}catch{return {ok:false,error:'PLAYER_API_UNAVAILABLE'};}}
     const request=new Promise(resolve=>{
       const observer=new PerformanceObserver(list=>{
-        for(const entry of list.getEntries())if(entry.name.includes('/api/timedtext')&&/[?&]pot=/.test(entry.name)){observer.disconnect();resolve(entry.name);return;}
+        // The player may also be fetching the track it shows on its own (YouTube remembers the last
+        // caption language), so only the request for the track asked for counts.
+        const wanted=name=>{try{const u=new URL(name);return u.pathname==='/api/timedtext'&&u.searchParams.has('pot')&&u.searchParams.get('lang')===languageCode&&(kind?u.searchParams.get('kind')===kind:!u.searchParams.get('kind'));}catch{return false;}};
+        for(const entry of list.getEntries())if(wanted(entry.name)){observer.disconnect();resolve(entry.name);return;}
       });
       observer.observe({type:'resource',buffered:false});
       setTimeout(()=>{observer.disconnect();resolve(null);},6000);
