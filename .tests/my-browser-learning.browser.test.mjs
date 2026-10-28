@@ -82,8 +82,8 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'video'}),tabId);await waitText('而且我觉得你也能对此产生共鸣，');
  async function captions(){return readNode('DIV','caption-box','function(){const r=this.getBoundingClientRect();return {original:this.querySelector(".caption-original").textContent,translation:this.querySelector(".caption-translation").textContent,originalHidden:this.querySelector(".caption-original").hidden,translationHidden:this.querySelector(".caption-translation").hidden,hidden:this.hidden,bottom:r.bottom,x:r.x,width:r.width,settingsHidden:this.getRootNode().querySelector(".caption-settings").hidden}}');}
  assert.equal((await captions()).original,'and I think you can relate to this,');assert.equal(await page.locator('.ytp-caption-window-container').evaluate(n=>getComputedStyle(n).visibility),'hidden');
- await click('仅译文');assert.equal((await captions()).originalHidden,true);await click('仅原文');assert.equal((await captions()).translationHidden,true);const count=modelCalls.length;await page.waitForTimeout(1300);assert.equal(modelCalls.length,count,'original-only does not call translation');
- await click('关闭字幕');assert.equal((await captions()).hidden,true);await click('双语');await click('大');
+ await click('译文');assert.equal((await captions()).originalHidden,true);const count=modelCalls.length;await page.waitForTimeout(1300);assert.equal(modelCalls.length,count,'original-only does not call translation');
+ await page.getByRole('switch',{name:'Cindy 字幕'}).click();assert.equal((await captions()).hidden,true);await page.getByRole('switch',{name:'Cindy 字幕'}).click();await click('双语');await click('大');
  // Extra languages require explicit expansion and are not labeled supported.
  await click('翻译为');await click('尝试其他语言');await waitText('语言目录不代表所选模型已验证支持。');
  await readNode('INPUT','搜索语言名称或代码','function(){this.value="fr";this.dispatchEvent(new Event("input"))}');await click('法语');
@@ -170,9 +170,9 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await click('关闭设置');
  assert.equal(await page.locator('.ytp-right-controls [data-cindy-player-control]').count(),1);
  const beforeMenu=modelCalls.length;await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'open'}),tabId);assert.equal((await captions()).settingsHidden,false);assert.equal(modelCalls.length,beforeMenu,'opening player settings keeps prepared subtitles');await click('字幕设置');
- await click('字幕设置');await click('仅原文');const beforeOriginal=modelCalls.length;
- await page.evaluate(()=>{history.pushState({},'', '/watch?v=second');document.dispatchEvent(new Event('yt-navigate-finish'))});await page.waitForTimeout(2500);assert.equal(modelCalls.length,beforeOriginal);assert.equal((await captions()).translationHidden,true);assert.equal((await captions()).settingsHidden,true);
- await click('字幕设置');await click('双语');await click('选项');await click('自动应用到 YouTube');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','自动应用到 YouTube','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
+ await click('字幕设置');await page.getByRole('switch',{name:'Cindy 字幕'}).click();const beforeOriginal=modelCalls.length;
+ await page.evaluate(()=>{history.pushState({},'', '/watch?v=second');document.dispatchEvent(new Event('yt-navigate-finish'))});await page.waitForTimeout(2500);assert.equal(modelCalls.length,beforeOriginal);assert.equal((await captions()).hidden,true);assert.equal((await captions()).settingsHidden,true);
+ await click('字幕设置');await page.getByRole('switch',{name:'Cindy 字幕'}).click();await click('选项');await click('自动应用到 YouTube');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','自动应用到 YouTube','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
  await page.goto('http://www.youtube.com/watch?v=third');await page.waitForTimeout(800);assert.equal(await page.locator('[data-cindy-captions]').count(),0,'auto preference survives navigation');
  // Slow requests: play current prepared window, prefetch next; seeking prioritizes the new place.
  await page.goto('http://example.test/buffer');await page.waitForTimeout(100);
@@ -205,7 +205,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await waitText('等待先前模型请求结束');assert.equal(prefetchStarted.includes('Buffer540'),false,'seeking cannot bypass occupied provider slots');
  if(screenshots)await page.screenshot({path:path.join(screenshots,'subtitle-progress-previous.png')});
  prefetchGates.get('Buffer180')();for(let i=0;i<40&&!prefetchStarted.includes('Buffer540');i++)await page.waitForTimeout(100);assert.ok(prefetchStarted.includes('Buffer540'));
- await click('字幕');await click('仅原文');for(let i=0;i<30&&await page.locator('video').evaluate(v=>v.paused);i++)await page.waitForTimeout(100);assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'original mode releases Cindy-owned buffer pause');
+ await click('字幕');await page.getByRole('switch',{name:'Cindy 字幕'}).click();for(let i=0;i<30&&await page.locator('video').evaluate(v=>v.paused);i++)await page.waitForTimeout(100);assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'original mode releases Cindy-owned buffer pause');
  assert.equal(modelCalls.some(r=>JSON.parse(r.prompt.split('\n').at(-1)).transcript),false);
  for(const release of prefetchGates.values())release();await page.waitForTimeout(100);
  // Recover one model timeout on a smaller passage; a permanent failure must
