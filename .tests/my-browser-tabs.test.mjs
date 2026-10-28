@@ -15,7 +15,9 @@ function harness(documentReason=()=>'NAVIGATION_UNOBSERVED') {
     tabs:{get:async id=>{if(!tabs.has(id))throw new Error('No tab');if(clock>=state.completeAt)tabs.get(id).status='complete';return {...tabs.get(id)};},query:async()=>[...tabs.values()].map(t=>({...t})),
       create:async({url})=>{creates++;const t={id:next++,url:state.redirect?'https://example.test/redirected':url,status:state.loading?'loading':'complete',active:false};tabs.set(t.id,t);return {...t};},
       remove:async id=>{if(state.removeFails)throw new Error('Browser refused');tabs.delete(id);removed(id);},
-      onActivated:{addListener(fn){activate=fn;}},onRemoved:{addListener(fn){removed=fn;}}},alarms:{create(){},onAlarm:{addListener(){}}}};
+      onActivated:{addListener(fn){activate=fn;}},onRemoved:{addListener(fn){removed=fn;}}},alarms:{create(){},onAlarm:{addListener(){}}},
+    // Agent pages open in Cindy's own background window (one window, created on first need).
+    windows:{create:async({url})=>{const t=await chrome.tabs.create({url});return {id:500,tabs:[t]};},get:async id=>{if(id!==500)throw new Error('No window');return {id,state:'normal'};},update:async()=>({})}};
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>state.domReady,document:async id=>{throw Object.assign(new Error('ADDRESS_UNVERIFIED'),{reason:documentReason(id)});}})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     Date:class extends Date{static now(){return clock;}},setTimeout(fn,ms){clock+=ms;queueMicrotask(fn);return 0;},clearTimeout(){}};
   // Disable only the network bootstrap; execute the actual production tab manager, not a copied implementation.
@@ -40,12 +42,12 @@ test('a navigated tab produces PAGE_CHANGED rather than a stream of replacements
 });
 test('unclosable or user-claimed tabs remain counted against the real opening limit',async()=>{
   for(const reason of ['claimed','navigated','remove-failure']){
-    const h=harness();for(let i=0;i<3;i++)await h.read('https://example.test/'+i);
+    const h=harness();for(let i=0;i<12;i++)await h.read('https://example.test/'+i);
     if(reason==='claimed')for(const id of h.tabs.keys())await h.focus(id);
     if(reason==='navigated')for(const t of h.tabs.values())t.url+='?changed=1';
     if(reason==='remove-failure')h.state.removeFails=true;
     for(let i=0;i<5;i++)await assert.rejects(h.read('https://example.test/new'),/TAB_LIMIT/);
-    assert.equal(h.tabs.size,3);assert.equal(h.creates(),3);
+    assert.equal(h.tabs.size,12);assert.equal(h.creates(),12);
   }
 });
 test('canonical URLs and already-open user tabs are reused without creating a replacement',async()=>{

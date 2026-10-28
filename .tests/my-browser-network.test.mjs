@@ -131,8 +131,13 @@ test('public IPv6 passes shared read/interaction policy and current-document gua
     const policy=P.normalizePolicy({read:{block:['['+ip+']']},interact:{allow:['*'],block:[]}});
     assert.equal(P.check(policy,'text',url).error,'READ_BLOCKED');
   }
+  // Decision (2026-10-28): page control in the user's own browser reaches local and private addresses,
+  // as the user's browser does; the learning features' guard keeps refusing them by default.
+  const {assertSupported}=createRequire(import.meta.url)('../my-browser/extension/network-guard.js');
   for(const ip of ['::1','fc00::1','fe80::1','::ffff:7f00:1','2001:db8::1','2002::1']){
-    assert.equal(P.check(P.defaults(),'text','http://['+ip+']/').error,'URL_NOT_ALLOWED');
+    assert.equal(P.check(P.defaults(),'text','http://['+ip+']/').ok,true);
+    assert.throws(()=>assertSupported('http://['+ip+']/'),/ADDRESS_UNVERIFIED/);
+    assert.doesNotThrow(()=>assertSupported('http://['+ip+']/',{allowLocal:true}));
   }
 });
 

@@ -139,14 +139,14 @@ function createBridge(options = {}) {
     const data = JSON.stringify(value);
     res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Length':Buffer.byteLength(data)}); res.end(data);
   }
-  async function readBody(req) {
+  async function readBody(req,max = 512000) {
     const chunks = []; let bytes = 0;
-    for await (const c of req) { bytes += c.length; if (bytes > 512000) throw new Error('Too large'); chunks.push(c); }
+    for await (const c of req) { bytes += c.length; if (bytes > max) throw new Error('Too large'); chunks.push(c); }
     const raw=Buffer.concat(chunks).toString('utf8');
     return {raw,value:JSON.parse(raw || '{}')};
   }
-  async function body(req) {
-    return (await readBody(req)).value;
+  async function body(req,max) {
+    return (await readBody(req,max)).value;
   }
   async function route(req,res) {
     // Custom headers require preflight on websites. Never enable CORS, including on /health.
@@ -255,7 +255,8 @@ function createBridge(options = {}) {
       waiting.set(id,waiter); res.on('close',cleanup); return;
     }
     if (req.method !== 'POST' || !['/ack','/authorize','/result'].includes(req.url)) return send(res,failure('NOT_FOUND','Unknown endpoint.'),404);
-    const b = await body(req), job = jobs.get(b.id);
+    // Screenshots and uploads come back as base64; a result may be far larger than a request.
+    const b = await body(req,req.url === '/result' ? 32000000 : 512000), job = jobs.get(b.id);
     // A late completion closes uncertainty, but never revives or returns the expired result.
     if (req.url === '/result' && unconfirmedDispatches.get(b.id)?.clientId === id) {
       if (b.result && typeof b.result === 'object' && !Array.isArray(b.result) && b.result.execution !== 'unknown') unconfirmedDispatches.delete(b.id);
@@ -364,7 +365,7 @@ function createBridge(options = {}) {
     if (jobs.size >= 16) return failure('BRIDGE_BUSY','Wait for browser tasks to finish.');
     return new Promise(resolve => {
       const job = {id:crypto.randomUUID(),action:params.action,payload,clientId:client.id,state:'queued',resolve,created:Date.now()};
-      job.timer = setTimeout(() => finish(job,jobFailure(job,'BROWSER_TIMEOUT','Verify an unknown operation; it will not be replayed.')),options.jobTimeout || 45000);
+      job.timer = setTimeout(() => finish(job,jobFailure(job,'BROWSER_TIMEOUT','Verify an unknown operation; it will not be replayed.')),Math.max(options.jobTimeout || 45000,params.action === 'wait' ? (payload.timeMs || 0)+(payload.timeoutMs ?? 30000)+15000 : 0));
       jobs.set(job.id,job); waiting.get(client.id)?.();
     });
   }

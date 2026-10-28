@@ -26,11 +26,16 @@
     if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
     return null;
   }
-  function assertSupported(value) {
+  // allowLocal: page control in the user's own browser may reach local and private addresses, as the
+  // user's browser does anyway. Learning features keep the public-address rule.
+  function assertSupported(value,{allowLocal=false}={}) {
     let u;try{u=new URL(value);}catch{throw unverified('DOCUMENT_UNAVAILABLE');}
     const host=u.hostname.toLowerCase().replace(/\.$/,'');
     if(!['https:','http:'].includes(u.protocol) || u.username || u.password)
       throw unverified('LOCAL_ADDRESS');
+    if(['chrome.google.com','chromewebstore.google.com'].some(h=>host===h || host.endsWith('.'+h)))
+      throw new Error('BROWSER_PAGE_RESTRICTED');
+    if(allowLocal)return;
     const ip=hostAddress(host);
     if(ip){
       if(!publicAddress(ip))throw unverified('LOCAL_ADDRESS');
@@ -38,8 +43,6 @@
              host.endsWith('.internal') || !host.includes('.')){
       throw unverified('LOCAL_ADDRESS');
     }
-    if(['chrome.google.com','chromewebstore.google.com'].some(h=>host===h || host.endsWith('.'+h)))
-      throw new Error('BROWSER_PAGE_RESTRICTED');
   }
   function create(chrome) {
     const readyDocuments=new Map();
@@ -72,20 +75,20 @@
       const ok=typeof address==='string' && publicAddress(address);
       if(!ok)throw unverified('LOCAL_ADDRESS');
     }
-    async function document(tabId) {
+    async function document(tabId,options={}) {
       // Browser-owned document identity is the authority. Connection IP is the
       // proxy's endpoint for proxied traffic, and can be absent on cache hits.
       // Do not turn the connection peer into a refusal. Destination DNS, when
       // the browser reports it, must still be public.
       let frame;try{frame=await chrome.webNavigation?.getFrame({tabId,frameId:0});}catch{}
       if(!frame?.documentId || !frame.url || frame.errorOccurred)throw unverified('DOCUMENT_UNAVAILABLE');
-      assertSupported(frame.url);
-      await destinationAllowed(frame.url);
+      assertSupported(frame.url,options);
+      if(!options.allowLocal)await destinationAllowed(frame.url);
       return frame.documentId;
     }
     async function isReady(tabId) {
       try{
-        const documentId=await document(tabId);
+        const documentId=await document(tabId,{allowLocal:true});
         if(readyDocuments.get(tabId)===documentId)return true;
         // DOMContentLoaded may predate this worker (restart / late install).
         // Ask the exact current document; ignore a reply from any other id.

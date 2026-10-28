@@ -49,9 +49,11 @@ test('default policy and one normalization path protect both reads and interacti
   assert.equal(P.check(p,'click','https://example.test').ok,true);
   assert.deepEqual(P.normalizePolicy(p),p);
   p.read.block=['blocked.test'];
-  for(const url of ['https://blocked.test','https://child.blocked.test','http://127.0.0.2','http://2130706433','http://[::1]','http://[::ffff:127.0.0.1]','http://[fc00::1]','http://[fe80::1]','http://10.2.3.4','http://192.168.1.2','http://localhost.','file:///etc/passwd','https://a:b@example.test']) assert.equal(P.check(p,'text',url).ok,false,url);
+  for(const url of ['https://blocked.test','https://child.blocked.test','file:///etc/passwd','https://a:b@example.test']) assert.equal(P.check(p,'text',url).ok,false,url);
   assert.equal(P.check(p,'text','https://[2606:4700:4700::1111]/').ok,true);
   assert.equal(P.check(p,'text','https://[2001:4860:4860::8888]/').ok,true);
+  // Agent jobs reach local and private pages like Cindy's dedicated browser; translation keeps its own guard.
+  for(const url of ['http://127.0.0.2','http://[::1]','http://10.2.3.4','http://192.168.1.2','http://localhost.'])assert.equal(P.check(p,'text',url).ok,true,url);
   p.interact.allow=['example.test','blocked.test'];
   assert.equal(P.check(p,'click','https://sub.example.test').ok,true);
   assert.equal(P.check(p,'click','https://example.test.evil.test').ok,false);

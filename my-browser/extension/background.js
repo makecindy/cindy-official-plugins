@@ -58,6 +58,24 @@ const restore = Promise.all([
 const sleep = ms => new Promise(r => setTimeout(r,ms));
 const fail = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
 async function remember() { await sessionStore.set({ownedTabs:[...owned]}); }
+// Pages the agent opens live in one separate window of the user's browser, created without focus, so
+// the user's own windows never gain tabs, switch tabs or lose focus. Remembered for the session.
+let agentWindowId = null;
+async function agentWindow() {
+  if (agentWindowId == null) agentWindowId = (await sessionStore.get('agentWindow')).agentWindow ?? null;
+  if (agentWindowId != null) {
+    try { await chrome.windows.get(agentWindowId); return agentWindowId; } catch { agentWindowId = null; await sessionStore.set({agentWindow:null}); }
+  }
+  return null;
+}
+async function openInAgentWindow(url) {
+  const windowId = await agentWindow();
+  if (windowId != null) return chrome.tabs.create({windowId,url,active:true});
+  const created = await chrome.windows.create({url,focused:false,type:'normal'});
+  agentWindowId = created.id; await sessionStore.set({agentWindow:created.id});
+  return created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
+}
+const PAGE_ACCESS = {allowLocal:true};
 async function connection(state) {
   await sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}});
   await chrome.action.setBadgeText({text:state.connected ? '' : '!'});
@@ -146,7 +164,9 @@ async function cleanup() {
   }
 }
 chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); });
-chrome.tabs.onActivated.addListener(({tabId}) => { restore.then(async () => {
+chrome.tabs.onActivated.addListener(({tabId,windowId}) => { restore.then(async () => {
+  // Switching tabs inside Cindy's own window is the agent's doing, not the user claiming a page.
+  if (windowId != null && windowId === agentWindowId) return;
   for (const rec of owned.values()) if (rec.id === tabId) rec.claimed = true;
   await remember();
 }); });
@@ -163,6 +183,7 @@ async function waitForLoad(id) {
   if(latest.status==='complete' || await network.isReady?.(id))return latest;
   throw Object.assign(new Error('PAGE_LOAD_TIMEOUT'),{tabId:id,tabStatus:latest.status});
 }
+const TAB_BUDGET = 12;
 async function ensureTab(url,policy,action,onNavigate = () => {}) {
   await restore;
   url = canonical(url);
@@ -180,14 +201,14 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
       if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN');
       const createdCount = () => [...owned.values()].filter(r => r.created).length;
       for (const [key,r] of [...owned].sort((a,b) => a[1].used-b[1].used)) {
-        if (createdCount() < 3) break;
+        if (createdCount() < TAB_BUDGET) break;
         if (r.created) await closeOwned(key);
       }
-      if (createdCount() >= 3) throw new Error('TAB_LIMIT');
+      if (createdCount() >= TAB_BUDGET) throw new Error('TAB_LIMIT');
       onNavigate(); // Even a rejected browser response cannot prove the request never started.
-      tab = await chrome.tabs.create({url,active:false});
+      tab = await openInAgentWindow(url);
     }
-    rec = {id:tab.id,actualUrl:tab.url || url,created:!existing,claimed:existing || !!tab.active,loading:!existing || tab.status !== 'complete',used:Date.now()};
+    rec = {id:tab.id,actualUrl:tab.url || url,created:!existing,claimed:existing,loading:!existing || tab.status !== 'complete',used:Date.now()};
     owned.set(url,rec); await remember();
   }
   rec.used = Date.now(); await remember();
@@ -450,6 +471,63 @@ async function pageOperation(job) {
     const snapshot = globalThis.__myBrowserSnapshot;
     let el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;
     if (a.ref && (!el || !el.isConnected)) return fail('STALE_REF','This ref is stale. Take a new snapshot; do not reuse old refs.');
+    if (action === 'upload') {
+      // File inputs are often hidden behind a styled button: accept the input, a control containing it,
+      // or the page's only file input.
+      const only = document.querySelectorAll('input[type=file]');
+      const input = el && el.matches('input[type=file]') ? el : el?.querySelector('input[type=file]') || el?.closest('form')?.querySelector('input[type=file]') || (only.length === 1 ? only[0] : null);
+      if (!input) return fail('INVALID_ELEMENT','Choose the file input or a control that contains it.');
+      if (!input.multiple && a.files.length > 1) return fail('SINGLE_FILE_INPUT','This file input accepts one file.');
+      const transfer = new DataTransfer();
+      for (const f of a.files) {
+        const binary = atob(f.data), bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        transfer.items.add(new File([bytes],f.name,{type:f.mimeType || ''}));
+      }
+      started = true; input.files = transfer.files;
+      input.dispatchEvent(new Event('input',{bubbles:true})); input.dispatchEvent(new Event('change',{bubbles:true}));
+      return {ok:true,execution:'executed',url:location.href,kind:'upload',files:[...input.files].map(f => ({name:f.name,size:f.size}))};
+    }
+    if (action === 'clickCoords' || action === 'drag') {
+      const button = a.button === 'right' ? 2 : a.button === 'middle' ? 1 : 0;
+      const mods = new Set(a.modifiers || []), mac = /Mac/.test(navigator.platform);
+      const keys = {altKey:mods.has('Alt'),shiftKey:mods.has('Shift'),ctrlKey:mods.has('Control') || (!mac && mods.has('ControlOrMeta')),metaKey:mods.has('Meta') || (mac && mods.has('ControlOrMeta'))};
+      const fire = (type,p,target,extra = {}) => {
+        const Ctor = type.startsWith('pointer') ? PointerEvent : type.startsWith('drag') || type === 'drop' ? DragEvent : MouseEvent;
+        target.dispatchEvent(new Ctor(type,{bubbles:true,cancelable:true,composed:true,clientX:p.x,clientY:p.y,button,buttons:type.endsWith('up') ? 0 : 1,view:window,...keys,...extra}));
+      };
+      const point = (ref,selector,x,y) => {
+        const node = ref ? (snapshot?.url === location.href ? snapshot.refs.get(ref) : null) : selector ? document.querySelector(selector) : null;
+        if ((ref || selector) && (!node || !node.isConnected)) return null;
+        if (!node) return {x,y};
+        node.scrollIntoView?.({block:'center',inline:'center'});
+        const r = node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2};
+      };
+      if (action === 'clickCoords') {
+        // A ref or selector clicks the element's centre (double, right and modified clicks on elements).
+        const p = el ? point(a.ref,a.selector) : {x:a.x,y:a.y}, target = document.elementFromPoint(p.x,p.y);
+        if (!target) return fail('ELEMENT_NOT_FOUND','Nothing is at those coordinates in the visible viewport.');
+        started = true;
+        for (const type of ['pointerdown','mousedown','pointerup','mouseup']) fire(type,p,target);
+        if (button === 2) fire('contextmenu',p,target);
+        else { fire('click',p,target); if (a.doubleClick) { fire('click',p,target); fire('dblclick',p,target); } }
+        target.focus?.();
+        return {ok:true,execution:'executed',url:location.href,kind:'clickCoords',target:(target.tagName || '').toLowerCase(),note:'Synthetic pointer events; sites that require trusted input may ignore them.'};
+      }
+      const from = point(a.startRef,a.startSelector,a.startX,a.startY), to = point(a.endRef,a.endSelector,a.endX,a.endY);
+      if (!from || !to) return fail('STALE_REF','A drag endpoint is stale. Take a new snapshot.');
+      const source = document.elementFromPoint(from.x,from.y), dest = document.elementFromPoint(to.x,to.y);
+      if (!source || !dest) return fail('ELEMENT_NOT_FOUND','A drag endpoint is outside the visible viewport.');
+      started = true;
+      const data = new DataTransfer();
+      fire('pointerdown',from,source); fire('mousedown',from,source); fire('dragstart',from,source,{dataTransfer:data});
+      for (let i = 1; i <= 8; i++) {
+        const p = {x:from.x+(to.x-from.x)*i/8,y:from.y+(to.y-from.y)*i/8}, over = document.elementFromPoint(p.x,p.y) || dest;
+        fire('pointermove',p,over); fire('mousemove',p,over); fire('dragover',p,over,{dataTransfer:data});
+      }
+      fire('drop',to,dest,{dataTransfer:data}); fire('dragend',to,source,{dataTransfer:data}); fire('pointerup',to,dest); fire('mouseup',to,dest);
+      return {ok:true,execution:'executed',url:location.href,kind:'drag',note:'Synthetic pointer and drag events; sites that require trusted input may ignore them.'};
+    }
     if (action === 'scroll') {
       started = true; (el || window).scrollBy(0,600);
     } else {
@@ -516,6 +594,174 @@ function sanitizeResult(result) {
   }
   return {...out,links,truncated};
 }
+// Tab-level actions: no page script. Returns null for actions that run inside the page.
+async function tabAction(job,tab,policy) {
+  const a = job.payload;
+  if (job.action === 'focus') {
+    // Brings the tab to the front of its own window only; the window itself does not take focus.
+    await chrome.tabs.update(tab.id,{active:true});
+    return {ok:true,execution:'executed',tabId:tab.id};
+  }
+  if (job.action === 'close') {
+    await chrome.tabs.remove(tab.id); await release(tab.id);
+    return {ok:true,execution:'executed',tabId:tab.id};
+  }
+  if (job.action === 'resize') {
+    if (tab.windowId !== await agentWindow()) return fail('USER_WINDOW',"Resizing would change a window the user is using. Open the page with open; it goes to Cindy's own window, which can be resized.");
+    await chrome.windows.update(tab.windowId,{width:Math.round(a.width),height:Math.round(a.height),state:'normal'});
+    return {ok:true,execution:'executed',tabId:tab.id,width:Math.round(a.width),height:Math.round(a.height)};
+  }
+  if (job.action === 'screenshot') {
+    // Chrome captures the visible tab of a window. Tabs in Cindy's own window are brought to the front
+    // there; a background tab in one of the user's windows is not, because that would change their view.
+    if (!tab.active) {
+      if (tab.windowId !== await agentWindow()) return fail('TAB_NOT_VISIBLE',"This tab is behind another tab in a window the user is using. Capturing it would switch the user's view: use focus first only if the user agrees, or open the page with open (it goes to Cindy's own window).");
+      await chrome.tabs.update(tab.id,{active:true}); await sleep(300);
+    }
+    const win = await chrome.windows.get(tab.windowId);
+    if (win.state === 'minimized') {
+      if (tab.windowId !== agentWindowId) return fail('TAB_NOT_VISIBLE','The window is minimized. Restore it first if the user agrees.');
+      await chrome.windows.update(tab.windowId,{state:'normal',focused:false}); await sleep(300);
+    }
+    const format = a.type === 'jpeg' ? 'jpeg' : 'png';
+    // Chrome allows two captures per second; a quick follow-up waits for the next slot instead of failing.
+    let dataUrl;
+    for (let attempt = 0; ; attempt++) {
+      try { dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId,{format,...(format === 'jpeg' ? {quality:85} : {})}); break; }
+      catch (e) { if (attempt >= 3 || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message)) throw e; await sleep(550); }
+    }
+    const data = dataUrl.slice(dataUrl.indexOf(',')+1);
+    return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4)};
+  }
+  if (job.action === 'wait') {
+    const deadline = Date.now()+Math.min(a.timeoutMs ?? 30000,120000);
+    if (a.timeMs) await sleep(Math.min(a.timeMs,120000));
+    const probe = {selector:a.selector,text:a.text,textGone:a.textGone,loadState:a.loadState};
+    const needsPage = probe.selector || probe.text || probe.textGone || probe.loadState;
+    for (;;) {
+      const current = await chrome.tabs.get(tab.id);
+      let met = !a.urlIncludes || (current.url || '').includes(a.urlIncludes);
+      if (met && needsPage) {
+        try {
+          const documentId = await network.document(current.id,PAGE_ACCESS);
+          const out = await chrome.scripting.executeScript({target:{tabId:current.id,documentIds:[documentId]},world:'ISOLATED',func:waitProbe,args:[probe]});
+          met = out?.[0]?.documentId === documentId && out[0].result === true;
+        } catch { met = false; }
+      }
+      if (met) return {ok:true,execution:'executed',tabId:current.id,url:P.redactUrl(current.url)};
+      if (Date.now() >= deadline) return fail('WAIT_TIMEOUT','The condition was not met before the timeout.','executed');
+      await sleep(250);
+    }
+  }
+  return null;
+}
+// Runs in the page (ISOLATED world) for each wait poll; serialized by executeScript.
+function waitProbe(c) {
+  if (c.loadState === 'domcontentloaded' && document.readyState === 'loading') return false;
+  if (c.loadState === 'load' && document.readyState !== 'complete') return false;
+  if (c.loadState === 'networkidle') {
+    if (document.readyState !== 'complete') return false;
+    const ends = performance.getEntriesByType('resource').map(e => e.responseEnd || e.startTime);
+    if (ends.length && performance.now()-Math.max(...ends) < 500) return false;
+  }
+  if (c.selector) {
+    const el = document.querySelector(c.selector); if (!el) return false;
+    const style = getComputedStyle(el), r = el.getBoundingClientRect();
+    if (style.display === 'none' || style.visibility === 'hidden' || !(r.width || r.height)) return false;
+  }
+  const text = document.body ? document.body.innerText : '';
+  if (c.text && !text.includes(c.text)) return false;
+  if (c.textGone && text.includes(c.textGone)) return false;
+  return true;
+}
+async function mainWorldAction(job,tabId,documentId) {
+  const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'MAIN',func:mainWorldOperation,args:[job.action,job.payload]});
+  const result = out?.[0]?.documentId === documentId ? out[0].result : null;
+  if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating it.','unknown');
+  if (Array.isArray(result.requests)) result.requests = result.requests.map(r => ({...r,url:P.redactUrl(String(r.url)).slice(0,LINK_URL_MAX)}));
+  if (result.response?.url) result.response.url = P.redactUrl(result.response.url);
+  return {...result,tabId};
+}
+// Runs in the page's own JavaScript context (MAIN world). Page tools are kept on a symbol so a second
+// call finds the hooks the first one installed. Everything returned must be JSON-serializable.
+async function mainWorldOperation(action,a) {
+  const KEY = Symbol.for('cindy.pageTools');
+  const tools = window[KEY] || (window[KEY] = {console:[],dialogs:[],dialogMode:null,consoleHooked:false,dialogHooked:false});
+  const plain = (value,max) => {
+    let json; try { json = JSON.stringify(value === undefined ? null : value); } catch { return {unserializable:true,text:String(value).slice(0,max)}; }
+    if (json === undefined) return null;
+    return json.length > max ? {truncated:true,json:json.slice(0,max)} : JSON.parse(json);
+  };
+  if (action === 'evaluate') {
+    try {
+      let value = (0,eval)('('+a.fn+')');
+      if (typeof value === 'function') value = await value(a.arg);
+      else if (value && typeof value.then === 'function') value = await value;
+      return {ok:true,execution:'executed',result:plain(value,200000)};
+    } catch (e) {
+      const blocked = e instanceof EvalError || /Content Security Policy|unsafe-eval/i.test(String(e && e.message));
+      return blocked
+        ? {ok:false,error:'EVAL_BLOCKED_BY_PAGE',message:"This page's Content Security Policy blocks scripts from Cindy. Use snapshot, extract and the other actions on this page.",execution:'not_executed'}
+        : {ok:false,error:'EVAL_FAILED',message:String(e && e.message || e).slice(0,2000),execution:'unknown'};
+    }
+  }
+  if (action === 'console') {
+    if (!tools.consoleHooked) {
+      tools.consoleHooked = true;
+      const push = (type,text) => { tools.console.push({type,text:String(text).slice(0,2000),time:Date.now()}); if (tools.console.length > 500) tools.console.shift(); };
+      for (const level of ['log','info','warn','error','debug']) {
+        const original = console[level];
+        console[level] = function(...args) {
+          try { push(level,args.map(x => { try { return typeof x === 'string' ? x : JSON.stringify(x); } catch { return String(x); } }).join(' ')); } catch {}
+          return original.apply(this,args);
+        };
+      }
+      addEventListener('error',e => push('pageerror',e.message || e.error));
+      addEventListener('unhandledrejection',e => push('pageerror','Unhandled rejection: '+(e.reason && e.reason.message || e.reason)));
+      return {ok:true,execution:'executed',messages:[],note:'Console capture started now; messages logged before this call are not available. Call console again to read new messages.'};
+    }
+    return {ok:true,execution:'executed',messages:tools.console.splice(0)};
+  }
+  if (action === 'requests') {
+    const entries = [...performance.getEntriesByType('navigation'),...performance.getEntriesByType('resource')];
+    let rows = entries.map(e => ({url:e.name,type:e.initiatorType || 'navigation',...(e.responseStatus ? {status:e.responseStatus} : {}),durationMs:Math.round(e.duration),...(e.transferSize ? {bytes:e.transferSize} : {}),startMs:Math.round(e.startTime)}));
+    if (a.filter) rows = rows.filter(r => r.url.includes(a.filter));
+    if (a.clear) performance.clearResourceTimings();
+    const limited = rows.slice(-300);
+    return {ok:true,execution:'executed',requests:limited,truncated:rows.length > limited.length,note:"From the page's resource timing; methods and headers are not available in the user's browser."};
+  }
+  if (action === 'responseBody') {
+    try {
+      const response = await fetch(a.requestUrl,{credentials:'include'});
+      const text = await response.text(), max = a.maxChars || 30000;
+      return {ok:true,execution:'executed',response:{url:a.requestUrl,status:response.status,mimeType:response.headers.get('content-type') || '',body:text.slice(0,max),truncated:text.length > max,refetched:true}};
+    } catch (e) {
+      return {ok:false,error:'FETCH_FAILED',message:String(e && e.message || e).slice(0,500),execution:'unknown'};
+    }
+  }
+  if (action === 'dialog') {
+    if (!tools.dialogHooked) {
+      tools.dialogHooked = true;
+      const native = {alert:window.alert,confirm:window.confirm,prompt:window.prompt};
+      const answer = (type,message,fallback) => {
+        const mode = tools.dialogMode;
+        tools.dialogs.push({type,message:String(message ?? '').slice(0,4000),time:Date.now(),answered:!!mode});
+        if (tools.dialogs.length > 50) tools.dialogs.shift();
+        if (!mode) return native[type].call(window,message,fallback);
+        tools.dialogMode = null;
+        if (type === 'alert') return undefined;
+        if (type === 'confirm') return !!mode.accept;
+        return mode.accept ? (mode.promptText ?? fallback ?? '') : null;
+      };
+      window.alert = message => answer('alert',message);
+      window.confirm = message => answer('confirm',message);
+      window.prompt = (message,fallback) => answer('prompt',message,fallback);
+    }
+    if (typeof a.accept === 'boolean') tools.dialogMode = {accept:a.accept,promptText:a.promptText};
+    return {ok:true,execution:'executed',armed:typeof a.accept === 'boolean',recent:tools.dialogs.slice(-10),note:'The next alert, confirm or prompt from this page is answered as requested. A dialog that is already open must be answered by the user.'};
+  }
+  return {ok:false,error:'INVALID_ACTION',message:'Unsupported page action.',execution:'not_executed'};
+}
 async function handle(job,policy,target) {
   P.validate(job.action,job.payload);
   const gate = P.check(policy,job.action,job.payload.url);
@@ -526,7 +772,7 @@ async function handle(job,policy,target) {
     for (const t of tabs) {
       let metadata,diagnostic;
       if(P.check(policy,'text',t.url).ok)try {
-        const documentId=await network.document(t.id);
+        const documentId=await network.document(t.id,PAGE_ACCESS);
         const out=await chrome.scripting.executeScript({target:{tabId:t.id,documentIds:[documentId]},world:'ISOLATED',func:()=>({url:location.href,title:document.title.slice(0,160)})});
         if(out?.[0]?.documentId===documentId && P.check(policy,'text',out[0].result?.url).ok)metadata=out[0].result;
       }catch(e){diagnostic={error:e.message==='ADDRESS_UNVERIFIED'?'ADDRESS_UNVERIFIED':'TAB_ACCESS_FAILED',...(e.message==='ADDRESS_UNVERIFIED'?{reason:e.reason}: {})};}
@@ -535,7 +781,7 @@ async function handle(job,policy,target) {
       if (records.length>=(job.payload.limit || 20)) {truncated=true;break;}
       // Keep denied/unobserved tabs visible as bounded diagnostics. Never read
       // their title or expose their URL merely to make the list look complete.
-      const row=metadata ? {id:t.id,title:metadata.title,...(metadata.url.length<=8192 ? {url:P.redactUrl(metadata.url)} : {url_omitted:true}),active:t.active,status:t.status} : {id:t.id,redacted:true,status:t.status,...diagnostic};
+      const row=metadata ? {id:t.id,window:t.windowId,...(t.windowId===agentWindowId?{cindyWindow:true}:{}),title:metadata.title,...(metadata.url.length<=8192 ? {url:P.redactUrl(metadata.url)} : {url_omitted:true}),active:t.active,status:t.status} : {id:t.id,redacted:true,status:t.status,...diagnostic};
       const size=JSON.stringify(row).length;if (size>remaining) {truncated=true;break;}
       records.push(row);remaining-=size;
     }
@@ -544,19 +790,52 @@ async function handle(job,policy,target) {
   let injecting = false, navigating = false;
   const failureState = () => navigating || (injecting && P.INTERACT.includes(job.action)) ? 'unknown' : 'not_executed';
   try {
-    network.assertSupported?.(job.payload.url);
-    const tab = await ensureTab(job.payload.url,policy,job.action,() => { navigating = true; });
+    if (job.action === 'open') {
+      // A new page always goes to Cindy's own background window, never into the user's windows.
+      navigating = true;
+      const created = await openInAgentWindow(job.payload.url);
+      let loaded = created;
+      try { loaded = await waitForLoad(created.id); } catch { loaded = await chrome.tabs.get(created.id); }
+      owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
+      if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
+      return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url ? P.redactUrl(loaded.url) : undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
+    }
+    let tab;
+    if (Number.isInteger(job.payload.tabId)) {
+      // Addressed by tab id (tabs/open): any tab of the user's browser, including local pages.
+      tab = await getTab(job.payload.tabId);
+      if (!tab) return fail('TAB_CLOSED','The tab is closed. List tabs again.');
+      if (!P.check(policy,job.action,tab.url).ok) return P.check(policy,job.action,tab.url);
+      if (job.action === 'navigate') {
+        navigating = true;
+        await chrome.tabs.update(tab.id,{url:job.payload.url});
+        try { tab = await waitForLoad(tab.id); } catch { tab = await chrome.tabs.get(tab.id); }
+        if (!P.check(policy,'navigate',tab.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
+        return {ok:true,execution:'executed',tabId:tab.id,url:P.redactUrl(tab.url),title:(tab.title || '').slice(0,300)};
+      }
+    } else {
+      network.assertSupported?.(job.payload.url,PAGE_ACCESS);
+      tab = await ensureTab(job.payload.url,policy,job.action,() => { navigating = true; });
+    }
     const actual = await chrome.tabs.get(tab.id);
+    // Tab-level actions need no page script: answer them before injecting anything.
+    const direct = await tabAction(job,actual,policy);
+    if (direct) return direct;
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
     // before the page is touched: a revocation during preparation must not be bypassed.
-    const documentId=await network.document(tab.id);
+    const documentId=await network.document(tab.id,PAGE_ACCESS);
     // A redirect can stretch the tab URL past the bridge's request limit; the authorize call only needs
     // the scheme and host for its policy check, so a bounded copy is sent instead of the whole string.
     const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX)});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
-    if (job.action === 'navigate') return {ok:true,url:actual.url};
+    if (job.action === 'navigate') return {ok:true,url:actual.url,tabId:tab.id};
+    // Main-world reads and scripts run in the page's own JavaScript context.
+    if (['evaluate','console','requests','responseBody','dialog'].includes(job.action)) {
+      injecting = true;
+      return await mainWorldAction(job,tab.id,documentId);
+    }
     injecting = true;
     targets.set(job.id,{url:actual.url,target,tabId:tab.id,documentId});
     let out;

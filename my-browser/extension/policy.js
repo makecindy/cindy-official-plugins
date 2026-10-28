@@ -1,9 +1,12 @@
 'use strict';
 // One policy implementation shared by the sandbox, Node bridge and extension.
 (function (root) {
-  const READ = ['tabs', 'navigate', 'snapshot', 'extract', 'text', 'content'];
+  // Parity with Cindy's dedicated browser: the user picks which browser the agent uses, so the
+  // user's own browser offers the same actions. What it must not do is disturb the user's own
+  // browsing: new pages open in a separate background window and nothing steals focus.
+  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait'];
   const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
-  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll'];
+  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize'];
   const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
     if (typeof value !== 'string') throw new Error('Enter a domain, for example example.test.');
@@ -62,8 +65,8 @@
     if (action === 'tabs') return { ok: true };
     let u;
     try { u = new URL(url); } catch { return deny('INVALID_URL', 'Provide a full HTTP or HTTPS URL.'); }
-    if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || isLocal(u.hostname.replace(/\.$/, ''))) {
-      return deny('URL_NOT_ALLOWED', 'Only public HTTP/HTTPS URLs without embedded credentials are supported.');
+    if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) {
+      return deny('URL_NOT_ALLOWED', 'Only HTTP/HTTPS URLs without embedded credentials are supported.');
     }
     const host = u.hostname.toLowerCase().replace(/\.$/, '');
     if (policy.read.block.some(p => matches(host, p))) return deny('READ_BLOCKED', 'This site is on the read block list. Review the site policy in plugin settings.', host);
@@ -81,7 +84,23 @@
     if (payload.waitMs != null && (!Number.isInteger(payload.waitMs) || payload.waitMs < 0 || payload.waitMs > 15000)) throw new Error('waitMs must be 0–15000.');
     if (payload.host != null) normalizeHost(payload.host);
     for (const key of ['selector', 'from', 'ref', 'text', 'key', 'waitFor', 'emptySelector', 'after']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > (key === 'text' ? 16000 : 2000))) throw new Error('Invalid ' + key + '.');
-    if (['click','type','select','hover'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
+    if (payload.tabId != null && (!Number.isInteger(payload.tabId) || payload.tabId < 0)) throw new Error('Invalid tab id.');
+    if (['click','type','select','hover','upload'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
+    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
+    const finite = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+    if (action === 'clickCoords' && !payload.ref && !payload.selector && (!finite(payload.x, 0, 100000) || !finite(payload.y, 0, 100000))) throw new Error('clickCoords needs x and y in CSS pixels, or a ref or selector.');
+    if (payload.modifiers != null && (!Array.isArray(payload.modifiers) || payload.modifiers.length > 4 || payload.modifiers.some(m => !['Alt','Control','ControlOrMeta','Meta','Shift'].includes(m)))) throw new Error('modifiers must be Alt, Control, ControlOrMeta, Meta or Shift.');
+    if (action === 'drag' && !(payload.startRef || payload.startSelector || (finite(payload.startX, 0, 100000) && finite(payload.startY, 0, 100000)))) throw new Error('drag needs a start ref, selector or coordinates.');
+    if (action === 'drag' && !(payload.endRef || payload.endSelector || (finite(payload.endX, 0, 100000) && finite(payload.endY, 0, 100000)))) throw new Error('drag needs an end ref, selector or coordinates.');
+    if (action === 'resize' && (!finite(payload.width, 200, 10000) || !finite(payload.height, 200, 10000))) throw new Error('resize needs width and height of 200–10000.');
+    if (action === 'evaluate' && (typeof payload.fn !== 'string' || !payload.fn.trim() || payload.fn.length > 200000)) throw new Error('evaluate needs fn source of at most 200000 characters.');
+    if (action === 'responseBody' && (typeof payload.requestUrl !== 'string' || payload.requestUrl.length > 8192)) throw new Error('responseBody needs the request URL.');
+    if (action === 'dialog' && payload.promptText != null && (typeof payload.promptText !== 'string' || payload.promptText.length > 16000)) throw new Error('Invalid promptText.');
+    if (action === 'upload' && (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 20 || payload.files.some(f => !f || typeof f.name !== 'string' || !f.name || f.name.length > 255 || typeof f.data !== 'string' || (f.mimeType != null && (typeof f.mimeType !== 'string' || f.mimeType.length > 200))))) throw new Error('upload needs 1–20 files with name and base64 data.');
+    if (action === 'upload' && payload.files.reduce((n, f) => n + f.data.length, 0) > 40000000) throw new Error('Upload files must total at most about 30 MB.');
+    for (const key of ['timeMs','timeoutMs']) if (payload[key] != null && !finite(payload[key], 0, 120000)) throw new Error(key + ' must be 0–120000.');
+    if (payload.loadState != null && !['load','domcontentloaded','networkidle'].includes(payload.loadState)) throw new Error('loadState must be load, domcontentloaded or networkidle.');
+    for (const key of ['textGone','urlIncludes','filter','startRef','endRef','startSelector','endSelector','button']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > 8192)) throw new Error('Invalid ' + key + '.');
     if (action === 'type' && typeof payload.text !== 'string') throw new Error('Typing requires text (an empty string clears the field).');
     if (action === 'press' && !payload.key) throw new Error('Provide the key to press.');
     if (action === 'select' && (!Array.isArray(payload.values) || payload.values.length > 100 || payload.values.some(v => typeof v !== 'string' || v.length > 2000))) throw new Error('Provide an array of option values.');
