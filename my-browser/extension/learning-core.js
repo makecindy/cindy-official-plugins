@@ -236,19 +236,23 @@
   // audio track points at as its default caption (that index is the only authoritative
   // signal), else the single auto-generated track. Prefer a manual track in that language,
   // then the auto-generated one in it.
-  function youtubeCaptionTrack(tracks,wanted,defaultIndex) {
+  // hints.audioLanguage: the language of the video's default (original) audio track;
+  // hints.current: the caption track the player is showing right now. Both stand in when the
+  // default caption index is missing, which happens on signed-in pages.
+  function youtubeCaptionTrack(tracks,wanted,defaultIndex,hints={}) {
     const list=Array.isArray(tracks)?tracks.filter(t=>t&&typeof t.language==='string'):[];
     if(!list.length)return undefined;
     const base=code=>String(code||'').toLowerCase().split(/[-_]/)[0];
     if(wanted&&wanted!=='auto'){const exact=list.find(t=>t.language===wanted)||list.find(t=>base(t.language)===base(wanted));if(exact)return exact;}
     const auto=list.filter(t=>t.kind==='asr');
     const preset=Number.isInteger(defaultIndex)&&list.includes(tracks[defaultIndex])?tracks[defaultIndex]:undefined;
-    const spoken=base(preset?.language||(auto.length===1?auto[0].language:''));
+    const current=hints?.current?.language?list.find(t=>t.language===hints.current.language&&(t.kind||null)===(hints.current.kind||null)):undefined;
+    const spoken=base(preset?.language||hints?.audioLanguage||(auto.length===1?auto[0].language:'')||current?.language);
     if(spoken){
       const manual=list.find(t=>t.kind!=='asr'&&base(t.language)===spoken);if(manual)return manual;
       const generated=auto.find(t=>base(t.language)===spoken);if(generated)return generated;
     }
-    return preset||(auto.length===1?auto[0]:undefined)||list.find(t=>t.kind!=='asr')||list[0];
+    return preset||(auto.length===1?auto[0]:undefined)||current||list.find(t=>t.kind!=='asr')||list[0];
   }
   // A caption source can hand back another language than the track asked for (a remembered
   // caption choice, a transcript panel following the account). Compare writing systems only:

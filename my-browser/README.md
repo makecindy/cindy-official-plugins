@@ -348,6 +348,10 @@ Cindy hosts that implement the `browserExtension` plugin capability now own the 
 
 YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
 
+## 0.4.32 the caption list is no longer cut at twenty tracks (host package 0.4.49)
+
+With a Chinese interface YouTube orders an auto-dubbed video's 21 caption tracks so that English comes last, and the reader kept only the first 20 tracks. The default caption index then pointed past the list and the first track, Arabic, was read and translated (watch?v=JjbWhEVfOvA). Up to 60 tracks are kept now. When the default caption index is missing, the language of the original audio track (marked default in the streaming formats, e.g. "en-US.4") decides, then the caption track the player is showing.
+
 ## 0.4.31 simpler subtitle controls (host package 0.4.48)
 
 The subtitle tab now starts with one switch, "Cindy subtitles". When it is on, "Show" offers Bilingual or Translation; turning it off remembers that choice for next time. Turning Cindy subtitles off no longer hides YouTube's own captions, and caption size and background are hidden while off. The subtitle language can be changed at any time, also when the captions are already in the chosen language; changing it re-checks whether translation is needed. The separate "Original only" mode is retired: a saved "original only" preference becomes off.

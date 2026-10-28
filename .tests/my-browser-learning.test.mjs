@@ -417,3 +417,15 @@ test('captionsMatchLanguage compares writing systems and stays silent when unsur
   assert.equal(core.captionsMatchLanguage([cue('[Music]')],'en'),true,'too little text decides nothing');
   assert.equal(core.captionsMatchLanguage(english,'xx'),true,'unknown languages are not judged');
 });
+
+test('youtubeCaptionTrack: Chinese-ordered list with English last, and pages without the default caption index',()=>{
+  // Bug regression (2026-10-28, watch?v=JjbWhEVfOvA, zh-CN UI): English was the 21st track and the reader kept only 20,
+  // so the default caption index pointed past the list and the first track, Arabic, was chosen.
+  const t=(language,kind)=>({url:'u',language,...(kind?{kind}:{})});
+  const zh=["ar", "pl", "de-DE", "ru", "fr-FR", "ko", "nl-NL", "ml", "bn", "pa", "pt-BR", "ja", "te", "ta", "uk", "es-US", "iw", "it", "hi", "id", "en"].map(l=>t(l,'asr'));
+  assert.equal(zh.length,21);assert.equal(core.youtubeCaptionTrack(zh,'auto',20).language,'en');
+  // No default caption index: the original audio's language decides, then the track the player shows.
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',undefined,{audioLanguage:'en-US'}).language,'en');
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',undefined,{current:{language:'en',kind:'asr'}}).language,'en');
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',20,{current:{language:'ar',kind:'asr'}}).language,'en','a remembered caption choice never beats the default index');
+});

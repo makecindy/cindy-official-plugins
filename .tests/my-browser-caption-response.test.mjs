@@ -156,3 +156,4 @@ test('captions in another language than the chosen track are never translated',a
   assert.equal(none.result.ok,false);assert.equal(none.result.error,'SUBTITLE_LANGUAGE_MISMATCH');
   assert.equal((await captions({playerText:english})).result.ok,true);
 });
+

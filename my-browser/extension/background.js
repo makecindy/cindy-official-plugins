@@ -843,11 +843,15 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       const response=p?.getPlayerResponse?.()||globalThis.ytInitialPlayerResponse;
       const renderer=response?.captions?.playerCaptionsTracklistRenderer;
       const audio=(renderer?.audioTracks||[])[renderer?.defaultAudioTrackIndex||0];
-      return {tracks:(renderer?.captionTracks||[]).slice(0,20).map(t=>({url:t.baseUrl,language:t.languageCode,kind:t.kind})),defaultIndex:audio?.defaultCaptionTrackIndex};
+      // The original audio is marked audioIsDefault in the streaming formats (e.g. "en-US.4").
+      const original=(response?.streamingData?.adaptiveFormats||[]).find(f=>f?.audioTrack?.audioIsDefault)?.audioTrack?.id;
+      let current=null;try{const c=p?.getOption?.('captions','track');if(c?.languageCode&&!c.translationLanguage)current={language:c.languageCode,kind:c.kind||null};}catch{}
+      return {tracks:(renderer?.captionTracks||[]).slice(0,60).map(t=>({url:t.baseUrl,language:t.languageCode,kind:t.kind})),defaultIndex:audio?.defaultCaptionTrackIndex,
+        audioLanguage:typeof original==='string'?original.split('.')[0]:null,current};
     }});
     const read=result?.[0]?.documentId===documentId?result[0].result:null;
     const tracks=Array.isArray(read)?read:read?.tracks||[];
-    const track=globalThis.CindyLearning.youtubeCaptionTrack(tracks,m.language,Array.isArray(read)?undefined:read?.defaultIndex);
+    const track=globalThis.CindyLearning.youtubeCaptionTrack(tracks,m.language,Array.isArray(read)?undefined:read?.defaultIndex,Array.isArray(read)?{}:{audioLanguage:read?.audioLanguage,current:read?.current});
     let cues=[],sourceError,machine=[];
     const tlang=globalThis.CindyLearning.youtubeTranslationLanguage(m.target);
     if(track){
