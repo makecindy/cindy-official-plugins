@@ -42,3 +42,6 @@ import './baguette/android.test.cjs';
 
 import './baguette/android-parity.test.cjs';
 import './baguette/android-gestures.test.cjs';
+import './baguette/physical.test.cjs';
+import './baguette/physical-live.test.cjs';
+import './baguette/physical-agent-live.test.cjs';

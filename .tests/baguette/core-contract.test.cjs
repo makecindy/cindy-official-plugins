@@ -4,6 +4,7 @@ const udid='00000000-0000-4000-8000-000000000001';
 test('environment reports keyboard ABI failures separately from usable device catalogs',async()=>{
  for(const ready of [true,false]){
   const commands=[],context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64',env:{DEVELOPER_DIR:'/Selected/Xcode/Contents/Developer'}},require(name){
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='./android/index.cjs')return {createAndroid:()=>({dispatch:async()=>({ready:false,runtimes:[],deviceTypes:[]})})};
    if(name==='node:child_process')return {execFile(file,args,_options,cb){
@@ -29,6 +30,7 @@ test('environment reports keyboard ABI failures separately from usable device ca
 function core(output,failAt=Infinity,macOS="15.0",catalog=[]){
  let polls=0,mutations=0;const commands=[],budgets=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},setTimeout:fn=>fn(),require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
   // These are Apple host fixtures. Never discover the developer's real AVDs.
@@ -65,6 +67,7 @@ test('screenshot exports distinguish unstarted writes, uncertain writes and comp
  for(const destination of ['desktop','clipboard'])for(const phase of ['preflight','capture','export','budget','success'])for(const cleanupFails of [false,true]){
   let clock=0,clipboard='old',desktop=false;const commands=[];
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='./budget.cjs')return {commandBudget:(timeout,deadline)=>require(path.join(dir,'budget.cjs')).commandBudget(timeout,deadline,()=>clock)};
    if(name==='./agent.cjs')return {createAgent:({Failure})=>({nativeScreenshot:async(device,deadline,orientation)=>{
@@ -148,6 +151,7 @@ test('boot and launch retain completed results when settling and screenshots con
    require(name){
     if(name==='./budget.cjs')return {commandBudget:(timeout,deadline)=>commandBudget(timeout,deadline,()=>clock)};
     if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
+    if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
     if(name==='./viewer.cjs')return {openViewer:async()=>{if(slow)clock+=15000;return {ready:true};}};
     if(name==='./apps.cjs')return {createApps:()=>({runningFor:()=>null})};
     if(name==='./agent.cjs')return {createAgent:()=>({forget(){},
@@ -187,6 +191,7 @@ test('app reuse obtains only an owned app container, never a data container or r
  for(const appPath of [path.join(set,udid,'data/Containers/Bundle/Application/test/App.app'),'/RuntimeRoot/Applications/Settings.app']){
   const calls=[];
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{},realpath:async p=>p,stat:async()=>({isDirectory:()=>true})};
    if(name==='node:child_process')return {execFile(file,args,opts,cb){calls.push(args);let data='';if(file==='/usr/bin/sw_vers')data='27.0';else if(args.includes('--json'))data=JSON.stringify({devices:{runtime:[{udid,state:'Booted'}]}});else if(args.includes('get_app_container'))data=appPath;queueMicrotask(()=>cb(null,data,''));return {stdin:{on(){},end(){}}};}};
@@ -216,6 +221,7 @@ test('device management: unique names, delete and erase stop the device first, r
  for(const method of ['delete_device','erase_device']){
   const calls=[];
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,opts,cb){calls.push([file.split('/').pop(),...args]);let data='';
@@ -237,6 +243,7 @@ test('a clipboard screenshot puts the PNG on the pasteboard by path argument and
  const calls=[],removed=[];
  const file='/screenshots/upright.png';
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='./agent.cjs')return {createAgent:()=>({nativeScreenshot:async()=>({path:file})})};
   if(name==='node:fs/promises')return {mkdir:async()=>{},stat:async()=>({size:1234}),rm:async(f)=>{removed.push(f);}};
@@ -257,6 +264,7 @@ test('a clipboard screenshot puts the PNG on the pasteboard by path argument and
 test('a flat clipboard export consumes the renderer receipt without another command or file read',async()=>{
  const calls=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='./agent.cjs')return {createAgent:()=>({nativeScreenshot:async(device,_deadline,orientation,clipboard)=>{
    assert.equal(device.udid,udid);assert.equal(orientation,'landscape-left');assert.equal(clipboard,true);
@@ -281,6 +289,7 @@ test('erase and delete share preflight and shutdown time, never start a late mut
   const {commandBudget}=require(path.join(dir,'budget.cjs'));
   const context={module:{exports:{}},__dirname:dir,Date:{now:()=>clock},process:{platform:'darwin',arch:'arm64'},require(name){
    if(name==='./budget.cjs')return {commandBudget:(timeout,limit)=>commandBudget(timeout,limit,()=>clock)};
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,options,cb){
@@ -322,6 +331,7 @@ test('remote trackpad rejects iOS and unowned devices before native input',async
 test('native hold timeouts request release and retain unknown outcome, without changing unrelated command termination',async()=>{
  const calls=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='node:child_process')return {execFile(file,args,options,cb){calls.push({file,options});queueMicrotask(()=>cb(Error('timed out'),'',''));return {stdin:{on(){},end(){}}};}};
   return require(name.startsWith('./')?path.join(dir,name):name);
@@ -332,4 +342,20 @@ test('native hold timeouts request release and retain unknown outcome, without c
   await assert.rejects(run(file,[],{timeout:500,mutation:true}),e=>e.execution==='unknown');
   assert.equal(calls.at(-1).options.killSignal,signal);assert.equal(calls.at(-1).options.timeout,500);
  }
+});
+
+test('physical viewer touch reaches the physical adapter through the real core dispatcher',async()=>{
+ const calls=[];
+ const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({dispatch:async(method,params)=>{calls.push({method,params});return {execution:'executed'};}})};
+  if(name==='./viewer.cjs')return {};
+  if(name==='node:child_process')throw Error('must not invoke a simulator binary');
+  return require(name.startsWith('./')?path.join(dir,name):name);
+ }};
+ // core needs the child_process export at module initialization, but no child may run.
+ const original=context.require;context.require=name=>name==='node:child_process'?{execFile(){throw Error('unexpected subprocess');}}:original(name);
+ vm.runInNewContext(fs.readFileSync(path.join(dir,'core.cjs'),'utf8'),context);
+ const params={udid,paths:[[[120,230]]],duration:0,hold:50,expectedScreen:{width:400,height:800,displayId:2,rotation:'rot0'}};
+ assert.equal((await context.module.exports.dispatch('physical_touch',params)).execution,'executed');
+ assert.equal(calls.length,1);assert.equal(calls[0].method,'physical_touch');assert.equal(calls[0].params.udid,udid);assert.equal(calls[0].params.paths,params.paths);
 });

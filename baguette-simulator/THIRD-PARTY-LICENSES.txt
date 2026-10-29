@@ -6473,3 +6473,123 @@ Native two-contact dispatch (2026-10-27): touch2 and canned two-finger paths now
 Interactive transport (2026-10-27): disable TCP Nagle batching on accepted native HTTP/WebSocket connections and both ends of the existing Node WebSocket proxy. Authentication, origins, opened-device checks, and framing are unchanged. The real-socket regression observed TCP_NODELAY=0 before and 1 after. Native Baguette SHA-256 c713d39ea18266ead96a9f7e4b934868674cdcbf5a900bdbf0e0f109faa2fef0, 8005824 bytes; source and tests included in vendor-native.patch.
 
 Local Web gesture-boundary patch 0.2.58 (2026-10-28): wheel pans consume offscreen travel with one translation for both visible contacts, preserving spacing and immediate reversal. A superseded wheel idle timer is cleared before starting a different kind. No upstream version, native binary, endpoint or permission change.
+
+
+WebDriverAgent v15.1.6 — original source archive plus native/wda-network.patch
+Source: https://github.com/appium/WebDriverAgent/tree/v15.1.6
+
+WebDriverAgent (BSD-3-Clause)
+BSD License
+
+For WebDriverAgent software
+
+Copyright (c) 2015-present, Facebook, Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook nor the names of its contributors may be used to
+   endorse or promote products derived from this software without specific
+   prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+RoutingHTTPServer (MIT)
+Copyright (c) 2011 Matt Stevens
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+CocoaHTTPServer (BSD)
+Software License Agreement (BSD License)
+
+Copyright (c) 2011, Deusty, LLC
+All rights reserved.
+
+Redistribution and use of this software in source and binary forms,
+with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above
+  copyright notice, this list of conditions and the
+  following disclaimer.
+
+* Neither the name of Deusty nor the names of its
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of Deusty, LLC.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+CocoaAsyncSocket: public domain. Originally created by Robbie Hanson in Q3 2010; updated and maintained by Deusty LLC and the Apple development community. Source headers retained inside the archive.
+
+Local WebDriverAgent preview patch (0.3.2): read-only JPEG preview on the existing paired-device listener, bounded dimensions and capture time; see native/wda-network.patch. Upstream source and licenses unchanged.
+
+Local WebDriverAgent keyboard-readiness patch (0.3.3): bounded read-only check using upstream FBKeyboard before text synthesis; see native/wda-network.patch. Upstream source and licenses unchanged.
+
+Real-time physical-device helper (0.3.10): pymobiledevice3 11.47.0, GPL-3.0-or-later,
+https://github.com/doronz88/pymobiledevice3 (doronz88, matan1008 and contributors).
+Downloaded as exact, SHA-256 checked PyPI wheels into a private runtime, not bundled
+as an executable. Installed distributions retain their license texts. The separate
+stdio helper node/physical/realtime.py is GPL-3.0-or-later; complete corresponding
+helper source is shipped in the package, with GPL v3 at
+node/physical/realtime-LICENSE.GPL3.txt. Requirements record all exact versions and
+wheel hashes. No upstream viewer or HTTP server is served.
+
+PyAV 15.1.0 (BSD-3-Clause), https://github.com/PyAV-Org/PyAV
+Official PyPI wheels (including their FFmpeg libraries) are downloaded into the
+private runtime, with exact SHA-256 hashes in realtime-requirements.txt.
+Wheel license files remain in the installed distribution.
+
+Copyright retained by original committers. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the project nor the names of its contributors may be
+      used to endorse or promote products derived from this software without
+      specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

@@ -82,6 +82,9 @@ function render() {
       h('button', { class: 'btn cta', text: busy === d.udid ? T.opening : T.open, disabled: !!busy, onclick: () => act('task_bind', { udid: d.udid }, d.udid) }),
     ]));
     else if (d.state === 'Booted') inner.append(hero(GLYPH.big, d.name, state.busy ? T.busy : T.connecting, [h('span', { class: 'spinner' })]));
+    else if(d.kind==='physical')inner.append(hero(GLYPH.big,d.name,lang==='zh-CN'?'手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。':'Phone disconnected. Connect by USB or a paired network, unlock and trust this Mac.',[
+      h('button',{class:'link',text:T.change,onclick:()=>{choosing=true;render();}}),
+    ]));
     else inner.append(hero(GLYPH.big, T.offTitle(d.name), null, [
       globalThis.CindySimPages.memoryPicker(d,lang,!!busy),
       h('button', { class: 'btn cta', text: busy === d.udid ? T.starting : T.start, disabled: !!busy, onclick: () => act('task_boot', { udid: d.udid }, d.udid) }),

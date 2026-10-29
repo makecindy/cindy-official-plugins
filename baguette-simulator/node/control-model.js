@@ -118,7 +118,7 @@
   // Always derive the visible value from fresh device evidence, never the boot
   // picker or a previous page's choice. Shutdown has no active memory profile.
   function memoryStatus(device, lang, requested) {
-    if (!device || platform(device) !== 'iOS' || device.state === 'Shutdown') return '';
+    if (!device || device.kind==='physical' || platform(device) !== 'iOS' || device.state === 'Shutdown') return '';
     const mode = device.state === 'Booted' ? device.memoryMode : null;
     return (lang === 'zh-CN' ? '内存模式：' : 'Memory mode: ') + memoryLabel(mode?.mode, lang)
       + (mode?.mode && mode.mode !== 'unknown' && mode.verified !== true ? (lang === 'zh-CN' ? '（未核验）' : ' (unverified)') : '')
@@ -245,8 +245,8 @@
       return entry;
     }
     function paint(target, device) {
-      target.hidden = !device;
-      if (!device) { target.textContent = ''; return; }
+      target.hidden = !device || device.kind==='physical';
+      if (!device || device.kind==='physical') { target.textContent = ''; return; }
       const entry = entryFor(device), result = entry.result;
       const keys = device.state === 'Booted' ? ['disk','memory'] : ['disk'];
       target.replaceChildren(...keys.map(key => {
@@ -272,7 +272,7 @@
       for (const [id,entry] of cache) if (cache.size > 64 && !used.has(id) && !entry.pending) cache.delete(id);
     }
     async function load(device) {
-      if (!device || doc.hidden) return;
+      if (!device || device.kind==='physical' || doc.hidden) return;
       const entry = entryFor(device);
       if (entry.pending) return entry.pending;
       const ttl = entry.failed ? 30000 : device.state === 'Booted' ? 15000 : 300000;
@@ -358,6 +358,11 @@
       'Option/Alt-drag pinches; Option/Alt+Shift-drag pans with two fingers.',
       'Rotation buttons turn the device 90° (⌘← / ⌘→). Foldable posture buttons select closed, half-open or flat; the current posture is highlighted.',
     ]);
+    if(device?.kind==='physical'){
+      specific[1]=zh?'触控板双指滚动模拟双指平移；捏合或 Ctrl＋滚轮缩放。触点随按下、移动和松开实时发送。':'Two-finger scrolling pans; pinch or Ctrl+wheel zooms. Contacts stream on down, move and release.';
+      specific[specific.length-1]=zh?'旋转和折叠跟随实体手机。画面使用实时视频，拖动中可以直接反向。':'Rotation and folding follow the phone. Video streams live; reverse direction while dragging.';
+      specific.push(zh?'选中后自动连接实时画面和触摸，无需团队 ID。电脑键盘输入和粘贴文字需先准备签名组件；准备期间不会补发输入。':'Selection connects live video and touch without a team ID. Keyboard typing/pasting requires the signed component; preparation never replays input.');
+    }
     return {title:zh?'操作说明':'Controls help',close:zh?'关闭':'Close',common,specific};
   }
 
@@ -400,6 +405,7 @@
     if (!s) return { tone: 'off', key: 'offline' };
     if (s.settings && s.settings.enabled === false) return { tone: 'off', key: 'paused' };
     if (state === 'Shutdown') return { tone: 'off', key: 'off' };
+    if (state === 'Disconnected') return { tone: 'off', key: 'offline' };
     if (state && state !== 'Booted') return { tone: 'busy', key: state === 'Booting' ? 'booting' : 'stopping' };
     if (s.ready) return { tone: 'on', key: 'connected' };
     if (s.parked) return { tone: 'warn', key: 'offline' };
@@ -418,6 +424,7 @@
     if (!s) return { kind: 'offline' };
     if (s.settings && s.settings.enabled === false) return { kind: 'paused' };
     if (s.device?.state === 'Shutdown') return { kind: 'off' };
+    if (s.device?.state === 'Disconnected') return { kind: 'disconnected' };
     if (s.device && s.device.state !== 'Booted') return { kind: 'booting' };
     if (s.parked) return { kind: 'offline' };
     if (!s.ready) return { kind: 'connecting' };
@@ -426,7 +433,7 @@
 
   /** Seconds left before idle shutdown, or null when none is due within `window` ms. */
   function idleLeft(s, now, window = 60000) {
-    if (!s?.idleDeadline || !s.settings?.enabled || s.device?.state !== 'Booted') return null;
+    if (!s?.idleDeadline || !s.settings?.enabled || s.device?.kind==='physical' || s.device?.state !== 'Booted') return null;
     const left = s.idleDeadline - now;
     if (left > window) return null;
     return Math.max(0, Math.ceil(left / 1000));
@@ -441,7 +448,7 @@
       .map((d) => ({
         udid: d.udid, name: d.name, current: d.udid === currentUdid, family: family(d),
         tone: d.state === 'Booted' ? 'on' : d.state === 'Shutdown' ? 'off' : 'busy',
-        meta: [runtimeLabel(d.runtime), d.state === 'Booted' ? t.runningMeta : d.state === 'Shutdown' ? t.offMeta : t.busyMeta].filter(Boolean).join(' · '),
+        meta: [d.kind==='physical'?(lang==='zh-CN'?'真机':'Physical'):null,runtimeLabel(d.runtime), d.state === 'Booted' ? t.runningMeta : d.state === 'Shutdown' ? t.offMeta : d.state==='Disconnected'?(lang==='zh-CN'?'未连接':'Disconnected'):t.busyMeta].filter(Boolean).join(' · '),
         available: d.isAvailable !== false,
       }))
       .sort((a, b) => (b.current - a.current) || ((b.tone === 'on') - (a.tone === 'on')) || a.name.localeCompare(b.name));

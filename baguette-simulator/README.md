@@ -1,5 +1,26 @@
 # Device Simulator
 
+## Physical iPhone / iPad (0.3.21)
+
+Xcode-paired phones share the device list, task bindings, toolbar, zoom and device body. HEVC video runs independently of continuous touch input: down, move and up are sent separately. Dragging and reversing no longer wait for release. Unsent moves coalesce to the latest position. Blur, cancellation, closing and disconnect release contacts; uncertain input is never replayed.
+
+First open prepares a private Python environment with exact versions and SHA-256-checked wheels for pymobiledevice3 11.47.0 and PyAV 15.1.0 from pypi.org / files.pythonhosted.org. No global package installation. Live video and touch need no team ID or test App, but require a Mac, Xcode 27+, Developer Mode, pairing and an unlocked phone. Only the selected device's system debugging tunnel is used. Audio, clipboard synchronization and the upstream HTTP server are not started. The existing authenticated viewer listens only on 127.0.0.1.
+
+Device bodies and screen masks come from Xcode's matching hardware resources, loaded separately and cached. Zoom measures the whole body; touch maps only to the screen. Percentage zoom stays fixed, Fit to Window adapts to space. Orientation/panel changes cancel input and reconnect without replay. Missing artwork still allows viewing.
+
+Screen-off, disconnection and unavailable video retry automatically. Touch is unavailable until video returns. Closing releases the viewer's contacts, preserving the shared connection while an Agent is active; otherwise it stops this plugin's receiver/control without stopping other mirror clients; the phone expires the video session on its negotiated approximately 20-second timeout. Older systems, Duo panel switching and physical trackpad feel in the actual sidebar require separate acceptance; synthetic browser events are not a substitute.
+
+Agent coordinate taps, gestures, Home and screenshots now share the viewer's live connection. Screenshots report source=live-video, capturedAt and frameAgeMs. Times describe receiver-side frame processing, not device capture time or end-to-end latency; idle frames may be reused, while post-input observation waits for a newer frame. Observation failure never repeats input. Physical tap/gesture default to a screenshot; explicit ui/both retains accessibility.
+
+For incremental interaction use gesture(kind=drag, phase=begin, points=[[x,y]]), then pass the returned gestureId with move/end/cancel. One or two fixed contacts can be observed and reversed while held. begin/move grants a 30-second lease; end/cancel promptly. Expired gestures are never replayed. Agent input does not steal an existing viewer contact. Closing the viewer preserves an active Agent gesture; unused live connections expire after a short idle period.
+
+Text/id lookup still uses XCTest, followed by a live tap. Unicode input, accessibility and App control retain the signed runner. Select the exact physical UDID with devices; only these XCTest capabilities require device connect/connect_status until ready. Existing/unique teams are selected automatically, ambiguity uses team names. control.ready describes XCTest, not the prerequisite for live coordinate input.
+
+The viewer retains iPhone click/drag, Option two-finger zoom/rotation, Option+Shift pan, wheel and native trackpad entry points with touch indicators. Text waits for the phone keyboard and coalesces adjacent unsent characters. External keyboard compatibility is unverified. Orientation/folding follow the phone; simulator rotation/shake/shutdown are hidden. Screenshots default to one pixel per view point. App installation accepts signed iphoneos .app only; info.matchesLocal=null does not establish file equality with a local build.
+
+Physical phones are excluded from idle/batch shutdown, erase, delete and memory modes. Closing preserves the phone, business Apps and installed runner. Android hardware, IPA, simulated location/permissions/network, contact-sheet capture, OCR fallback and long hardware-button holds remain unsupported.
+## Simulator computer sound
+
 Cold boots start muted. The speaker button in the viewer controls this device's computer playback; it does not change the computer's volume or enable microphone input. Apple changes apply immediately. Android currently requires a restart: the button asks first, explains that apps exit, and keeps device data. Later cold boots default to muted again.
 
 Apple restores the last nonzero volume remembered by the current worker. After the worker restarts, enabling a muted device uses the default volume of 60/100; the previous volume is not persisted.
@@ -175,7 +196,7 @@ Installation compares bundle content checksums, including resources whose timest
 
 Cindy's official Device Simulator for Apple Silicon Macs, using bundled Baguette 0.2.10. It replaces the retired embedded simulator; Cindy shows previous users a one-time migration notice pointing here (plugin id `baguette-simulator`).
 The name leaves room for future devices and platforms; it does not add platform support.
-Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, full Xcode and an installed iOS runtime. No first-run dependency download. Packaging collects nine portable USDZ model assets from the hash-pinned official release via `binary-dependencies.json`; the native executables remain tracked and macOS-only.
+Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, Xcode 27 or newer and an installed iOS runtime. No first-run dependency download. Packaging collects nine portable USDZ model assets from the hash-pinned official release via `binary-dependencies.json`; the native executables remain tracked and macOS-only.
 
 Use it by default for iOS Simulator tasks. Run `environment` and `devices`, reuse a suitable logged-in device, then `device action=boot` if needed. Build the App with the project's normal workflow (for a private device use `-destination 'generic/platform=iOS Simulator'`), then `app action=install` and `app action=launch` its Simulator `.app`. Launching opens the current task's simulator tab by default. Check `viewer.previewOpened`; a running process does not prove a visible preview. Reopen an existing device with `viewer action=open` after changing sessions.
 

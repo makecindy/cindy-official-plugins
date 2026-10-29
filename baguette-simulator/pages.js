@@ -190,14 +190,15 @@
     if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(udid,mode);
   }
   function memoryArgs(device) {
-    return device && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(device.udid)||'saving'} : {};
+    return device && device.kind!=='physical' && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(device.udid)||'saving'} : {};
   }
   function memoryPicker(device,lang,disabled=false) {
-    const M=root.CindySimModel;if(!device||M.platform(device)!=='iOS')return null;
+    const M=root.CindySimModel;if(!device||device.kind==='physical'||M.platform(device)!=='iOS')return null;
     return M.memoryPicker(memoryArgs(device).memoryMode,lang,mode=>memoryChoices.set(device.udid,mode),disabled);
   }
 
   function memoryBadge(device,lang,disabled=false,compact=false) {
+    if(device?.kind==='physical')return null;
     const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(device.udid));
     if (!text) return null;
     const button=h('button',{class:compact?'memory-badge memory-icon':'memory-badge',type:'button',disabled,'aria-haspopup':'dialog',

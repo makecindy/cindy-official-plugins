@@ -69,7 +69,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     const before = await run('devices');
     const outcomes = [];
     // Enumerate exact private-set UDIDs; never use simctl shutdown all.
-    for (const device of before.devices.filter(d => d.state !== 'Shutdown')) {
+    for (const device of before.devices.filter(d => d.kind !== 'physical' && d.state !== 'Shutdown')) {
       try { await run('shutdown', {udid:device.udid}); outcomes.push({udid:device.udid, execution:'executed'}); }
       catch (error) { outcomes.push({udid:device.udid, errorCode:error.code || 'STOP_FAILED', message:error.message, execution:error.execution || 'unknown'}); }
     }
@@ -83,12 +83,12 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       result = {...await status(deadline, before), devicesError:{code:error.code || 'STATUS_FAILED', message:error.message}};
     }
     const after = result.devices;
-    const remaining = after.filter(d => d.state !== 'Shutdown').map(d => d.udid);
+    const remaining = after.filter(d => d.kind !== 'physical' && d.state !== 'Shutdown').map(d => d.udid);
     const completed = outcomes.filter(o => o.execution === 'executed').map(o => o.udid);
     const unprocessed = outcomes.filter(o => o.execution === 'not_executed').map(o => o.udid);
     lastStop = {reason, at:now(), remaining, completed, unprocessed};
     const evidence = {remaining, completed, unprocessed, outcomes, ...(viewerError ? {viewerError} : {}), lastStop};
-    if (remaining.length || before.platformErrors?.length || result.platformErrors?.length || result.devicesError || viewerError) return {...result, ...evidence, ok:false, errorCode:'STOP_INCOMPLETE', execution:'unknown'};
+    if (remaining.length || before.platformErrors?.some(e=>e.platform!=='physical') || result.platformErrors?.some(e=>e.platform!=='physical') || result.devicesError || viewerError) return {...result, ...evidence, ok:false, errorCode:'STOP_INCOMPLETE', execution:'unknown'};
     return {...result, ...evidence, ok:true, execution:'executed'};
   }
   async function stopOne(udid, deadline) {
@@ -172,12 +172,12 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   }
   // Agent tools grouped by intent → the worker's own operations.
   const ROUTES = {
-    device: {create: 'create_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media', audio:'audio'},
+    device: {create: 'create_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media',audio:'audio',connect:'physical_connect',connect_status:'physical_status',disconnect:'physical_disconnect'},
     app: {install: 'app_install', install_status: 'app_install_status', info: 'app_info', launch: 'launch_app', terminate: 'app_terminate', uninstall: 'app_uninstall', open_url: 'open_url'},
     viewer: {open: 'open_viewer', close: 'close_viewer'},
   };
   // Reading a device never changes it, so it does not wait for (or block) input.
-  const READ_ONLY = new Set(['describe_ui', 'wait_for', 'logs', 'app_info', 'app_install_status', 'viewer_screen']);
+  const READ_ONLY = new Set(['describe_ui', 'wait_for', 'logs', 'app_info', 'app_install_status', 'viewer_screen', 'physical_status']);
   async function request(method, params = {}, deadline = now() + 110000) {
     // Normalize before routing, locks, lookups and binding writes. Do not mutate
     // the caller's object or bypass the existing device validation/ownership checks.
@@ -200,6 +200,9 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         note:method==='device_release'?'Task activity released; device and App keep running.':'Task activity recorded for 15 minutes. Renew during a long script; release when finished. This is not an exclusive reservation.'};
     }
     if(method==='audio'&&params.audioEnabled===undefined)return dispatch(method,params,deadline);
+    // Cancelling this device's owned setup job must remain possible while that
+    // job holds its operation lock, and while plugin operation is paused.
+    if (method === 'physical_disconnect') return dispatch(method, params, deadline);
     if (READ_ONLY.has(method) || (method === 'screenshot' && !params?.destination)) {
       if (!(await load()).enabled) throw failure('RUNTIME_DISABLED', 'Baguette is paused. Enable simulator operation in Plugins → Baguette settings.');
       touch();
@@ -328,7 +331,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     const deadline = now() + holdMs;
     for (;;) {
       let running = false;
-      try { running = viewing() || (await dispatch('devices')).devices.some(d => d.state !== 'Shutdown'); } catch {}
+      try { running = viewing() || (await dispatch('devices')).devices.some(d => d.kind === 'physical' ? d.control?.ready || d.control?.state==='running' : d.state !== 'Shutdown'); } catch {}
       if (!running || closing) return {running:false};
       if (now() >= deadline) return {running:true};
       await sleep(Math.min(holdPollMs, deadline - now()));

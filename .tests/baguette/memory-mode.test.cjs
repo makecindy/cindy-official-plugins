@@ -55,6 +55,7 @@ test('device reads opt into fresh memory evidence without mutating devices; a fa
  const dir=path.resolve('baguette-simulator/node'),calls=[];
  let mode='saving',fail=false;
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='./android/index.cjs')return {createAndroid:()=>({dispatch:async()=>({devices:[]})})};
   if(name==='./memory-mode.cjs')return {createMemoryModes:()=>({verify:async(d,timeout)=>{
@@ -89,6 +90,7 @@ test('core boot owns mode application, preserves partial evidence and rejects un
   const calls=[];let state='Shutdown';
   const runtime=outcome==='unsupported'?'com.apple.CoreSimulator.SimRuntime.tvOS-27-0':'com.apple.CoreSimulator.SimRuntime.iOS-27-0';
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
    if(name==='./viewer.cjs')return {};
    if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
    if(name==='./android/index.cjs')return {createAndroid:()=>({owns:async()=>false})};

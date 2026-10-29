@@ -8,6 +8,7 @@ const udid='00000000-0000-4000-8000-000000000001';
 function harness({simctlFails=false,readFails=false,stale=false,owned=true,runtime='runtime',timers}={}) {
  const calls=[];let clipboard="";
  const context={module:{exports:{}},setTimeout:timers?fn=>{const timer={fn};timers.add(timer);return timer;}:setTimeout,clearTimeout:timers?t=>timers.delete(t):clearTimeout,__dirname:path.resolve('baguette-simulator/node'),process:{platform:'darwin',arch:'arm64'},require(name){
+  if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='./viewer.cjs')return {};
   if(name==='./keys.cjs')return require('../../baguette-simulator/node/keys.cjs');
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
@@ -87,7 +88,8 @@ test('input tri-state follows completed steps, preserving busy and preflight rej
   let keyboardCalls=0,queries=0,clipboard='',clock=0;
   const context={module:{exports:{}},__dirname:path.resolve('baguette-simulator/node'),setTimeout,clearTimeout,Date:{now:()=>clock},process:{platform:'darwin',arch:'arm64',env:{}},require(name){
    if(name==='./budget.cjs')return {commandBudget:(ms,deadline)=>require('../../baguette-simulator/node/budget.cjs').commandBudget(ms,deadline,()=>clock)};
-   if(name==='./viewer.cjs')return {};
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
+  if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,_options,callback){
     let stdout='',error=null;
@@ -121,7 +123,8 @@ test('tool and viewer keyboard input excludes only the same normalized device an
  for(const action of ['key','paste','copy','release','tool-keys','tool-release'])for(const failed of [false,true]){
   let finish,started;const entered=new Promise(resolve=>started=resolve),held=new Promise(resolve=>finish=resolve),calls=[],clipboards=new Map();let heldOnce=false;
   const context={module:{exports:{}},__dirname:path.resolve('baguette-simulator/node'),setTimeout,clearTimeout,process:{platform:'darwin',arch:'arm64',env:{}},require(name){
-   if(name==='./viewer.cjs')return {};
+   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
+  if(name==='./viewer.cjs')return {};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='node:child_process')return {execFile(file,args,options,callback){
     const call={file,args,input:''};calls.push(call);let output='';

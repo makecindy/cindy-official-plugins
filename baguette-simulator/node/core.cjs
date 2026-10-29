@@ -187,10 +187,13 @@ async function clipboardAction(p) {
 }
 let androidImpl;
 function android(){return androidImpl||(androidImpl=require('./android/index.cjs').createAndroid({root:ROOT,run,children}));}
+let physicalImpl;
+function physical(){return physicalImpl||(physicalImpl=require('./physical/index.cjs').createPhysical({root:ROOT,run,children}));}
 const appleHost=process.platform==='darwin'&&process.arch==='arm64';
 async function dispatch(method,p={},deadline=Date.now()+110000) {
   if (method === 'screenshot' && Number.isFinite(p._observationBudgetMs)) deadline=Math.min(deadline,Date.now()+Math.max(1,Math.min(12000,p._observationBudgetMs)));
   p={...p,_deadline:deadline,_startedAt:Date.now()};
+  if(['physical_connect','physical_status','physical_disconnect','physical_touch'].includes(method))return physical().dispatch(method,p);
   if(method.startsWith('android_setup_'))return android().dispatch(method,p);
   if(!methods.has(method))throw new Failure('UNKNOWN_TOOL','Unknown simulator operation');
   if(method==='environment'){
@@ -200,16 +203,20 @@ async function dispatch(method,p={},deadline=Date.now()+110000) {
       runtimes:[...(apple?.runtimes||[]).map(r=>({...r,platform:'ios'})),...(other?.runtimes||[])],deviceTypes:[...(apple?.deviceTypes||[]).map(d=>({...d,platform:'ios'})),...(other?.deviceTypes||[])],note:'Choose an installed runtime and model from this catalog. Android setup is available in the plugin; iOS runtimes are installed through Xcode.'};
   }
   if(method==='devices'){
-    const results=await Promise.allSettled([appleHost?appleDispatch('devices',p,deadline):Promise.resolve({devices:[]}),android().dispatch('devices',p)]);
-    const errors=results.flatMap((r,i)=>r.status==='rejected'?[{platform:i?'android':'ios',code:r.reason.code,message:r.reason.message}]:[]);
-    return {deviceSet:DEVICE_SET,devices:[...(results[0].status==='fulfilled'?results[0].value.devices.map(d=>({...d,platform:'ios'})):[]),...(results[1].status==='fulfilled'?results[1].value.devices:[])],...(errors.length?{platformErrors:errors}:{})};
+    const results=await Promise.allSettled([appleHost?appleDispatch('devices',p,deadline):Promise.resolve({devices:[]}),android().dispatch('devices',p),physical().dispatch('devices',p)]);
+    const errors=results.flatMap((r,i)=>r.status==='rejected'?[{platform:['ios','android','physical'][i],code:r.reason.code,message:r.reason.message}]:[]);
+    return {deviceSet:DEVICE_SET,devices:[...(results[0].status==='fulfilled'?results[0].value.devices.map(d=>({...d,platform:'ios'})):[]),...(results[1].status==='fulfilled'?results[1].value.devices:[]),...(results[2].status==='fulfilled'?results[2].value.devices:[])],...(errors.length?{platformErrors:errors}:{})};
   }
-  if(method==='close_viewer'){await Promise.all([stopViewer(),android().viewer.close()]);return {execution:'executed'};}
+  if(method==='close_viewer'){await Promise.all([stopViewer(),android().viewer.close(),physical().dispatch('close_viewer')]);return {execution:'executed'};}
+  if(method==='reveal_screenshot'&&p.platform==='physical')return physical().dispatch(method,p);
   if(method==='reveal_screenshot'&&p.platform==='android')return android().dispatch(method,p);
   if((method==='create_device'&&p.runtime?.startsWith('android:'))||await android().owns(p.udid)){
+    if(method==='gesture'&&p.phase)throw new Failure('UNSUPPORTED_GESTURE','Phased touch currently requires a physical iPhone/iPad.');
     if(method==='boot'&&p.memoryMode!==undefined)throw new Failure('UNSUPPORTED_MEMORY_MODE','Memory modes are only supported for iOS simulators. Omit memoryMode for Android.');
     return android().dispatch(method,p);
   }
+  if(await physical().owns(p.udid,p).catch(()=>false))return physical().dispatch(method,p);
+  if(method==='gesture'&&p.phase)throw new Failure('UNSUPPORTED_GESTURE','Phased touch currently requires a physical iPhone/iPad.');
   return appleDispatch(method,p,deadline);
 }
 async function appleDispatch(method,p={},deadline=Date.now()+110000) {
@@ -563,19 +570,20 @@ function startWorker() {
   if(appleHost)require('./viewer.cjs').reapOrphans(BINARY,DEVICE_SET);
   // In use = a viewer window is open, or another process names a running device.
   const inUse=async()=>{
-    if(require('./viewer.cjs').viewing()||android().viewer.viewing())return true;
+    if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing())return true;
     if(appsImpl?.installing()||android().installing())return true;
-    const running=(await dispatch('devices')).devices.filter(d=>d.state!=='Shutdown').map(d=>d.udid);
+    const running=(await dispatch('devices')).devices.filter(d=>d.kind!=='physical'&&d.state!=='Shutdown').map(d=>d.udid);
     return process.platform==='win32'?false:(await require('./activity.cjs').externalUse(running)).length>0;
   };
-  const runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
-    pendingOperation:udid=>android().pending(udid)||appsImpl?.pending(udid),
+  const runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing()||physical().viewer.viewing()||!!physical().pending(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
+    pendingOperation:udid=>physical().pending(udid)||android().pending(udid)||appsImpl?.pending(udid),
     pendingJob:udid=>android().runningFor(udid)||appsImpl?.runningFor(udid),
     viewerWanted:()=>require('./viewer.cjs').hasSession(DEVICE_SET)||android().viewer.wanted(),
     tasks:require('./tasks.cjs').createTaskBindings(path.join(ROOT,'task-bindings.json')),
-    existingViewerUrl:async(udid,locale)=>await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale)});
+    existingViewerUrl:async(udid,locale)=>physical().viewer.existing(udid,locale)||(await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale))});
   configureControls(runtime);
   android().configure(runtime);
+  physical().configure(runtime);
   const timer=setInterval(()=>runtime.checkIdle().catch(error=>process.stderr.write('[baguette-idle] '+(error.code||'FAILED')+'\n')),15000);
   timer.unref();
   const recycle=setInterval(()=>require('./viewer.cjs').recycleIfBloated().catch(()=>{}),60000);

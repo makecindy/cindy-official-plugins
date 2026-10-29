@@ -1,0 +1,296 @@
+--- a/WebDriverAgentLib/Routing/FBWebServer.m
++++ b/WebDriverAgentLib/Routing/FBWebServer.m
+@@ -82,7 +82,7 @@
+   [FBLogger logFmt:@"Built at %s %s", __DATE__, __TIME__];
+   self.exceptionHandler = [FBExceptionHandler new];
+   [self startHTTPServer];
+-  [self initScreenshotsBroadcaster];
++  // Cindy uses bounded screenshots; do not expose an unauthenticated MJPEG listener.
+ 
+   self.keepAlive = YES;
+   NSRunLoop *runLoop = [NSRunLoop mainRunLoop];
+--- a/WebDriverAgentLib/Vendor/CocoaAsyncSocket/GCDAsyncSocket.m
++++ b/WebDriverAgentLib/Vendor/CocoaAsyncSocket/GCDAsyncSocket.m
+@@ -4199,6 +4199,12 @@
+     }
+   }
+ 
++  // USE_IP supplies a bare IPv6 address and the port separately. Preserve
++  // its colons instead of interpreting the first segment as an interface.
++  if ([components count] > 2)
++  {
++    interface = interfaceDescription;
++  }
+   if (interface == nil)
+   {
+     // ANY address
+--- a/WebDriverAgentLib/Utilities/FBConfiguration.h
++++ b/WebDriverAgentLib/Utilities/FBConfiguration.h
+@@ -17,6 +17,9 @@
+  Accessors for Global Constants.
+  */
+ @interface FBConfiguration : NSObject
++
+++ (long long)cindyDisplayID;
+++ (void)setCindyDisplayID:(long long)value;
+ 
+ /*! If set to YES will use compact (standards-compliant) & faster responses */
+ + (void)setShouldUseCompactResponses:(BOOL)value;
+--- a/WebDriverAgentLib/Utilities/FBConfiguration.m
++++ b/WebDriverAgentLib/Utilities/FBConfiguration.m
+@@ -67,7 +67,12 @@
+ static BOOL FBShouldIncludeCustomActionsInPageSource = NO;
+ static BOOL FBShouldEnforceCustomSnapshots = NO;
+ 
++static long long FBCindyDisplayID = 0;
++
+ @implementation FBConfiguration
++
+++ (long long)cindyDisplayID { return FBCindyDisplayID; }
+++ (void)setCindyDisplayID:(long long)value { FBCindyDisplayID = value; }
+ 
+ + (NSUInteger)defaultTypingFrequency
+ {
+--- a/WebDriverAgentLib/Utilities/FBSettingsHandler.m
++++ b/WebDriverAgentLib/Utilities/FBSettingsHandler.m
+@@ -46,6 +46,13 @@
+   static dispatch_once_t onceToken;
+   dispatch_once(&onceToken, ^{
+     NSMutableDictionary<NSString *, FBSettingApplyBlock> *map = [NSMutableDictionary dictionary];
++    map[@"cindyDisplayId"] = ^FBCommandStatus *(FBSession *session, id value) {
++      if (![value isKindOfClass:NSNumber.class] || [value longLongValue] < 1 || [value longLongValue] > 1024) {
++        return [FBCommandStatus invalidArgumentErrorWithMessage:@"Invalid display ID" traceback:nil];
++      }
++      [FBConfiguration setCindyDisplayID:[value longLongValue]];
++      return nil;
++    };
+     map[FB_SETTING_USE_COMPACT_RESPONSES] = ^FBCommandStatus *(FBSession *session, id value) {
+       [FBConfiguration setShouldUseCompactResponses:[value boolValue]];
+       return nil;
+--- a/WebDriverAgentLib/Utilities/FBScreenshot.m
++++ b/WebDriverAgentLib/Utilities/FBScreenshot.m
+@@ -61,7 +61,8 @@
+                                           error:(NSError **)error
+ {
+   XCUIScreen *mainScreen = XCUIScreen.mainScreen;
+-  return [self.class takeWithScreenID:mainScreen.displayID
++  long long displayID = [FBConfiguration cindyDisplayID] ?: mainScreen.displayID;
++  return [self.class takeWithScreenID:displayID
+                                 scale:SCREENSHOT_SCALE
+                    compressionQuality:[self.class compressionQualityWithQuality:quality]
+                             sourceUTI:[self.class imageUtiWithQuality:quality]
+--- a/PrivateHeaders/XCTest/XCSynthesizedEventRecord.h
++++ b/PrivateHeaders/XCTest/XCSynthesizedEventRecord.h
+@@ -26,6 +26,10 @@
+ - (id)initWithName:(NSString *)arg1 interfaceOrientation:(UIInterfaceOrientation)arg2;
+ #endif
+ - (id)initWithName:(id)arg1;
++- (id)initWithName:(NSString *)name displayID:(long long)displayID;
++#if !TARGET_OS_TV
++- (id)initWithName:(NSString *)name displayID:(long long)displayID interfaceOrientation:(UIInterfaceOrientation)orientation;
++#endif
+ - (id)init;
+ - (BOOL)synthesizeWithError:(NSError **)arg1;
+ 
+--- a/WebDriverAgentLib/Utilities/FBW3CActionsSynthesizer.m
++++ b/WebDriverAgentLib/Utilities/FBW3CActionsSynthesizer.m
+@@ -68,6 +68,7 @@
+ 
+ @property (nullable, readonly, nonatomic) FBBaseGestureItem *previousItem;
+ 
++- (CGPoint)cindyScreenPoint;
+ @end
+ 
+ @interface FBPointerDownItem : FBW3CGestureItem
+@@ -115,6 +116,25 @@
+ 
+ @implementation FBW3CGestureItem
+ 
++- (CGPoint)cindyScreenPoint
++{
++  // Cindy validates whole-display coordinates before sending the action.
++  // Resolving XCUICoordinate.screenPoint for every sample snapshots the app
++  // repeatedly, blocking preview for seconds during even a short swipe.
++  FBW3CGestureItem *position = self;
++  while (![position.actionItem[FB_ACTION_ITEM_KEY_TYPE] isEqual:FB_ACTION_ITEM_TYPE_POINTER_MOVE]
++         && [position.previousItem isKindOfClass:FBW3CGestureItem.class]) {
++    position = (FBW3CGestureItem *)position.previousItem;
++  }
++  id x = position.actionItem[FB_ACTION_ITEM_KEY_X], y = position.actionItem[FB_ACTION_ITEM_KEY_Y];
++  if ([FBConfiguration cindyDisplayID] > 0
++      && [position.actionItem[FB_ACTION_ITEM_KEY_ORIGIN] isEqual:FB_ORIGIN_TYPE_VIEWPORT]
++      && [x isKindOfClass:NSNumber.class] && [y isKindOfClass:NSNumber.class]) {
++    return CGPointMake([x doubleValue], [y doubleValue]);
++  }
++  return self.atPosition.screenPoint;
++}
++
+ - (nullable instancetype)initWithActionItem:(NSDictionary<NSString *, id> *)actionItem
+                                 application:(XCUIApplication *)application
+                                previousItem:(nullable FBBaseGestureItem *)previousItem
+@@ -212,6 +232,6 @@
+   }
+   if (nil == self.pressure) {
+-    XCPointerEventPath *result = [[XCPointerEventPath alloc] initForTouchAtPoint:self.atPosition.screenPoint
++    XCPointerEventPath *result = [[XCPointerEventPath alloc] initForTouchAtPoint:[self cindyScreenPoint]
+                                                                           offset:FBMillisToSeconds(self.offset)];
+     return @[result];
+   }
+@@ -303,9 +323,9 @@
+ {
+   if (nil == eventPath) {
+-    return @[[[XCPointerEventPath alloc] initForTouchAtPoint:self.atPosition.screenPoint
++    return @[[[XCPointerEventPath alloc] initForTouchAtPoint:[self cindyScreenPoint]
+                                                       offset:FBMillisToSeconds(self.offset + self.duration)]];
+   }
+-  [eventPath moveToPoint:self.atPosition.screenPoint
++  [eventPath moveToPoint:[self cindyScreenPoint]
+                 atOffset:FBMillisToSeconds(self.offset + self.duration)];
+   return @[];
+ }
+@@ -831,9 +831,15 @@
+ 
+ - (nullable XCSynthesizedEventRecord *)synthesizeWithError:(NSError **)error
+ {
+-  XCSynthesizedEventRecord *eventRecord = [[XCSynthesizedEventRecord alloc]
+-                                           initWithName:@"W3C Touch Action"
+-                                           interfaceOrientation:self.application.interfaceOrientation];
++  long long displayID = [FBConfiguration cindyDisplayID];
++  XCSynthesizedEventRecord *allocated = [XCSynthesizedEventRecord alloc];
++  if (displayID > 1 && ![allocated respondsToSelector:@selector(initWithName:displayID:interfaceOrientation:)]) {
++    if (error) *error = [[FBErrorBuilder.builder withDescription:@"XCTest cannot target this display"] build];
++    return nil;
++  }
++  XCSynthesizedEventRecord *eventRecord = displayID && [allocated respondsToSelector:@selector(initWithName:displayID:interfaceOrientation:)]
++    ? [allocated initWithName:@"W3C Touch Action" displayID:displayID interfaceOrientation:self.application.interfaceOrientation]
++    : [allocated initWithName:@"W3C Touch Action" interfaceOrientation:self.application.interfaceOrientation];
+   NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *actionsMapping = [NSMutableDictionary new];
+   NSMutableArray<NSString *> *actionIds = [NSMutableArray new];
+   for (NSDictionary<NSString *, id> *action in self.actions) {
+--- a/WebDriverAgentLib/Categories/XCUIElement+FBTyping.m
++++ b/WebDriverAgentLib/Categories/XCUIElement+FBTyping.m
+@@ -26,15 +26,21 @@
+ 
+ BOOL FBTypeText(NSString *text, NSUInteger typingSpeed, NSError **error)
+ {
+-  NSString *name = text.length <= MAX_TEXT_ABBR_LEN
+-    ? [NSString stringWithFormat:@"Type '%@'", text]
+-    : [NSString stringWithFormat:@"Type '%@…'", [text substringToIndex:MAX_TEXT_ABBR_LEN]];
+-  XCSynthesizedEventRecord *eventRecord = [[XCSynthesizedEventRecord alloc] initWithName:name];
++  NSString *name = @"Cindy text input";
++  long long displayID = [FBConfiguration cindyDisplayID];
++  XCSynthesizedEventRecord *allocated = [XCSynthesizedEventRecord alloc];
++  if (displayID > 1 && ![allocated respondsToSelector:@selector(initWithName:displayID:)]) {
++    if (error) *error = [[FBErrorBuilder.builder withDescription:@"XCTest cannot type on this display"] build];
++    return NO;
++  }
++  XCSynthesizedEventRecord *eventRecord = displayID && [allocated respondsToSelector:@selector(initWithName:displayID:)]
++    ? [allocated initWithName:name displayID:displayID]
++    : [allocated initWithName:name];
+   XCPointerEventPath *ep = [[XCPointerEventPath alloc] initForTextInput];
+   [ep typeText:text
+       atOffset:0.0
+    typingSpeed:typingSpeed
+-  shouldRedact:NO];
++  shouldRedact:YES];
+   [eventRecord addPointerEventPath:ep];
+   return [FBXCTestDaemonsProxy synthesizeEventWithRecord:eventRecord error:error];
+ }
+--- a/WebDriverAgentLib/Commands/FBScreenshotCommands.m
++++ b/WebDriverAgentLib/Commands/FBScreenshotCommands.m
+@@ -9,6 +9,11 @@
+ #import "FBScreenshotCommands.h"
+ 
+ #import "XCUIDevice+FBHelpers.h"
++#import "FBScreenshot.h"
++#import "FBImageProcessor.h"
++#import "FBRouteRequest.h"
++@import UniformTypeIdentifiers;
++@import ImageIO;
+ 
+ @implementation FBScreenshotCommands
+ 
+@@ -18,6 +23,7 @@
+ {
+   return
+   @[
++    [[FBRoute GET:@"/cindy/frame/:displayID"] respondWithTarget:self action:@selector(handleCindyFrame:)],
+     [[FBRoute GET:@"/screenshot"].withoutSession respondWithTarget:self action:@selector(handleGetScreenshot:)],
+     [[FBRoute GET:@"/screenshot"] respondWithTarget:self action:@selector(handleGetScreenshot:)],
+   ];
+@@ -25,6 +31,42 @@
+ 
+ 
+ #pragma mark - Commands
++
++// Read-only preview over the existing paired-device listener. Encode once on
++// the phone instead of PNG transfer plus synchronous JavaScript JPEG encoding.
+++ (id<FBResponsePayload>)handleCindyFrame:(FBRouteRequest *)request
++{
++  long long displayID = [request.parameters[@"displayID"] longLongValue];
++  if (displayID < 1 || displayID > 1024) {
++    return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"Invalid display ID" traceback:nil]);
++  }
++  NSError *error = nil;
++  NSData *data = [FBScreenshot takeInOriginalResolutionWithScreenID:displayID
++                                              compressionQuality:0.65
++                                                             uti:UTTypeJPEG
++                                                         timeout:5.0
++                                                           error:&error];
++  if (data == nil) {
++    return FBResponseWithStatus([FBCommandStatus unableToCaptureScreenErrorWithMessage:error.description traceback:nil]);
++  }
++  CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
++  NSDictionary *properties = source ? CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL)) : nil;
++  if (source) CFRelease(source);
++  CGFloat width = [properties[(__bridge NSString *)kCGImagePropertyPixelWidth] doubleValue];
++  CGFloat height = [properties[(__bridge NSString *)kCGImagePropertyPixelHeight] doubleValue];
++  if (width <= 0 || height <= 0) {
++    return FBResponseWithStatus([FBCommandStatus unableToCaptureScreenErrorWithMessage:@"Invalid preview dimensions" traceback:nil]);
++  }
++  CGFloat factor = MIN(1.0, 1280.0 / MAX(width, height));
++  data = [[FBImageProcessor new] scaledImageWithData:data uti:UTTypeJPEG
++                                     scalingFactor:factor compressionQuality:0.65 error:&error];
++  if (data == nil) {
++    return FBResponseWithStatus([FBCommandStatus unableToCaptureScreenErrorWithMessage:error.description traceback:nil]);
++  }
++  return FBResponseWithObject(@{@"image": [data base64EncodedStringWithOptions:(NSDataBase64EncodingOptions)0],
++                                @"width": @(width), @"height": @(height)});
++}
++
+ 
+ + (id<FBResponsePayload>)handleGetScreenshot:(FBRouteRequest *)request
+ {
+--- a/WebDriverAgentLib/Commands/FBElementCommands.m
++++ b/WebDriverAgentLib/Commands/FBElementCommands.m
+@@ -116,6 +116,7 @@
+ 
+     [[FBRoute POST:@"/wda/pickerwheel/:uuid/select"] respondWithTarget:self action:@selector(handleWheelSelect:)],
+ #endif
++    [[FBRoute GET:@"/cindy/keyboard-ready"] respondWithTarget:self action:@selector(handleCindyKeyboardReady:)],
+     [[FBRoute POST:@"/wda/keys"] respondWithTarget:self action:@selector(handleKeys:)],
+   ];
+ }
+@@ -512,6 +513,22 @@
+ }
+ #endif
+ 
++// Keyboard extensions may expose Key elements without a Keyboard container.
++// Text injection needs a visible key, not a coordinate suitable for tapping it.
++// This route only observes; timeout explicitly means no text has been sent.
+++ (id<FBResponsePayload>)handleCindyKeyboardReady:(FBRouteRequest *)request
++{
++  NSError *error = nil;
++  BOOL ready = [[[FBRunLoopSpinner new] timeout:2.0] spinUntilTrue:^BOOL {
++    XCUIElement *key = [[[request.session.activeApplication descendantsMatchingType:XCUIElementTypeKey]
++      matchingPredicate:[NSPredicate predicateWithBlock:^BOOL(id<FBXCElementSnapshot> snapshot, NSDictionary *bindings) {
++        return snapshot.label.length > 0 && !CGRectIsEmpty(snapshot.frame);
++      }]] fb_firstMatch];
++    return key.exists && key.fb_isVisible;
++  } error:&error];
++  return FBResponseWithObject(@{@"ready": @(ready)});
++}
++
+ + (id<FBResponsePayload>)handleKeys:(FBRouteRequest *)request
+ {
+   NSString *textToType = [request.arguments[@"value"] componentsJoinedByString:@""];

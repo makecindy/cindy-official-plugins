@@ -90,7 +90,7 @@ function renderSelection() {
 function confirmBatch(action) {
   if (batch || Object.keys(busy).length || !['shutdown','delete'].includes(action)) return;
   // Capture the exact identities shown in this confirmation, not a mutable selection.
-  const targets=selectedDevices().filter(d=>action==='delete' || d.state!=='Shutdown').map(d=>({...d}));
+  const targets=selectedDevices().filter(d=>d.kind!=='physical' && (action==='delete' || d.state!=='Shutdown')).map(d=>({...d}));
   if (!targets.length) return;
   const text=BT(), ok=h('button',{class:'btn '+(action==='delete'?'danger':'cta'),text:action==='delete'?T.deleteOk:T.stop,type:'button'});
   const cancel=h('button',{class:'btn quiet',text:T.cancel,type:'button'});
@@ -182,16 +182,20 @@ function selectionMenu(d, anchor, at) {
   const devices=selectedDevices();
   if (devices.length<2) return deviceMenu(d,anchor,at);
   const text=BT(), visible=new Set(filteredDevices().map(x=>x.udid));
-  const hidden=devices.filter(x=>!visible.has(x.udid)).length, running=devices.filter(x=>x.state!=='Shutdown').length;
+  const hidden=devices.filter(x=>!visible.has(x.udid)).length, running=devices.filter(x=>x.kind!=='physical'&&x.state!=='Shutdown').length,removable=devices.filter(x=>x.kind!=='physical').length;
   showMenu(anchor,[
     h('div',{class:'menu-summary',text:text.count(devices.length)+(hidden?' · '+text.hidden(hidden):'')}),
     item(text.stop(running),()=>confirmBatch('shutdown'),{disabled:!running || !!Object.keys(busy).length}),
-    item(text.remove(devices.length),()=>confirmBatch('delete'),{'data-danger':true,disabled:!!Object.keys(busy).length}),
+    item(text.remove(removable),()=>confirmBatch('delete'),{'data-danger':true,disabled:!removable||!!Object.keys(busy).length}),
   ],at);
 }
 
 function deviceMenu(d, anchor, at) {
   if (batch) return;
+  if(d.kind==='physical')return showMenu(anchor,[
+    item(T.open,()=>act('open_in_task',d,T.opened),{disabled:!enabled()||!d.isAvailable}),
+    d.tasks?item(T.goToTask,()=>goToTask(d),{title:T.latestTask}):null,
+  ],at);
   const on = d.state === 'Booted';
   showMenu(anchor, [
     on ? item(T.stop, () => act('shutdown', d)) : item(T.start, () => act('boot', d), { disabled: !enabled() }),
@@ -239,6 +243,7 @@ function row(d) {
     ]), h('span', { class: 'row-sub', title:[modelName(d),osVersion(d),working || usage(d),d.renderer === 'software' ? T.software : null].filter(Boolean).join(' · ') }, [
       h('span', { class:'row-model', text:working || modelName(d) }),
       h('span', { text:osVersion(d) }),
+      d.kind==='physical'?h('span',{text:lang==='zh-CN'?'真机':'Physical'}):null,
       d.renderer === 'software' ? h('span', { text:T.software }) : null,
     ]), resourceView?.label(d)]),
   ]);
@@ -295,6 +300,9 @@ function hero(d, note) {
   else if (!state.devices.length) children = [big(GLYPH.iphone), h('h2', { text: T.emptyTitle }), h('p', { text: T.emptyBody }),
     h('div', { class: 'hero-actions' }, [h('button', { class: 'btn cta', text: T.createIphone, disabled: !enabled(), onclick: () => newDevice('any') })])];
   else if (!d) children = [big(GLYPH.iphone), h('h2', { text: T.pickTitle }), h('p', { text: T.pickBody })];
+  else if(d.kind==='physical')children=[big(glyphFor(d)),h('h2',{text:d.name}),h('p',{text:!d.isAvailable?(lang==='zh-CN'?'手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。':'Phone disconnected. Connect by USB or a paired network, unlock and trust this Mac.'):note||T.screenLost}),h('div',{class:'hero-actions'},[
+    h('button',{class:'btn cta',text:T.open,disabled:!d.isAvailable||!enabled(),onclick:()=>showScreen(d)}),
+  ])];
   else {
     const working = busy[d.udid], running = d.state !== 'Shutdown' && enabled();
     children = [big(glyphFor(d)), h('h2', { text: d.state === 'Shutdown' ? T.offTitle(d.name) : d.name }),

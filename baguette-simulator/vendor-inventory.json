@@ -553,5 +553,10 @@
     "path": "vendor/simslim/profiles.json",
     "bytes": 6674,
     "sha256": "8d48dfaddb989b856290a96e527a4bfabe3e1d294d37b466eb6e85ad1e60ae21"
+  },
+  {
+    "path": "vendor/wda/source.tar.gz",
+    "bytes": 545079,
+    "sha256": "98c8f7102768aa10530c9b124be39d66a06a146631708416348b88f2db1a56c3"
   }
 ]

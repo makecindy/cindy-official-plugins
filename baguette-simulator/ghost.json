@@ -3,9 +3,9 @@
   "minCindyVersion": "0.1.116",
   "id": "baguette-simulator",
   "name": "设备模拟器",
-  "description": "独立的 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，共用任务画面、设备管理和操作工具。默认闲置 15 分钟关机并保留数据。Apple 平台需要 macOS 15+、Apple Silicon、完整 Xcode 与对应运行时；安卓支持 Mac、Windows x64、Linux x64，确认下载大小和许可后安装环境。Apple 后端基于 Baguette（Apache-2.0）。",
-  "whenToUse": "iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器；App 安装启动、真实输入、TV 遥控、Vision 空间手势、截图、界面检查、状态和日志排查。先 devices 选择设备，按手册验证结果。",
-  "version": "0.2.61",
+  "description": "在统一设备列表和任务侧栏中查看、操作 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，以及 USB 或网络配对的 iPhone/iPad 真机。支持输入、截图、App 管理和日志；真机需要 Mac、Xcode 27+ 和开发者模式；文字定位与输入需要签名组件。真机不参与模拟器自动关机。",
+  "whenToUse": "连接、查看和操作 iPhone/iPad 真机；使用 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器。App 安装启动、触摸输入、截图、界面检查和日志排查。先 devices 选择精确设备，再按手册验证结果。",
+  "version": "0.3.23",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -22,7 +22,7 @@
     },
     {
       "name": "devices",
-      "description": "先调用它：列出本插件独立设备。tasks/thisTask 仅表示当前选择；activeTasks/thisTaskActive 表示最近 15 分钟内的任务活动，usage 为 active/idle/unknown，operation 为正在执行的操作。优先本任务近期使用的设备；tasks=0 不代表空闲，运行中且活动不明的设备先确认。状态查询不续期。",
+      "description": "真机坐标点击、手势和截图自动准备实时连接；control.ready 仅表示文字定位、输入等 XCTest 能力。 先调用它：列出本插件独立设备。tasks/thisTask 仅表示当前选择；activeTasks/thisTaskActive 表示最近 15 分钟内的任务活动，usage 为 active/idle/unknown，operation 为正在执行的操作。优先本任务近期使用的设备；tasks=0 不代表空闲，运行中且活动不明的设备先确认。状态查询不续期。",
       "parameters": {
         "type": "object",
         "properties": {},
@@ -32,7 +32,7 @@
     },
     {
       "name": "device",
-      "description": "冷启动默认静音；boot audioEnabled=true 可显式开启电脑声音。audio 查询当前输出；audioEnabled=true/false 切换，Apple 即时生效，安卓须用户同意退出 App 后传 restart=true 重启。只影响该设备，不改变电脑音量或开启麦克风。 管理独立设备。create 用 environment 的 runtime/deviceType（每台约7–12GB），优先复用；boot 等初始化，超时先查状态，screenshot=true 可附图。仅 iOS boot 支持 memoryMode：saving（关机时默认）关闭搜索、健康、部分游戏服务及诊断/DeviceCheck；standard 恢复受管理服务，完整验收或手柄/存档测试用此档；minimal 还影响登录、支付、照片、推送等，仅限明确范围的核心玩法/UI测试。运行中保持模式，切换先 shutdown 再 boot；检查 memoryMode.mode/verified/limitations，verified 只证明服务开关。shutdown 保留数据；rename 改名；erase 清空App/数据；delete 删除设备，后两项仅用户要求时用。activity 登记本任务使用15分钟，release 结束登记但不停止设备；需任务上下文，不是独占，worker重启后失效。受运行开关及默认15分钟闲置关机限制，画面/工具使用中不关。安卓 import_media 从本机绝对path复制图片/视频到Downloads（≤128MiB）；检查 copied/scanRequested/path。screenshot.error、taskBindingError/appContextError 保留操作结果；安卓部分失败含 completedSteps/failedStep/deviceError，检查实际状态，不重复已完成操作。",
+      "description": "真机：connect（自动识别签名团队，teamId 可选）异步构建、签名并安装测试控制组件；connect_status 读取 building/connecting/ready/failed，文字定位/输入、无障碍和 App 控制等待 ready；坐标触摸和截图自动使用实时连接；disconnect 只停止控制，手机与 App 保持运行。真机拒绝 boot/shutdown/erase/delete/rename/heal，不参与闲置回收。 模拟器冷启动静音；boot audioEnabled=true 开声音。audio 查询，audioEnabled 切换；Apple 即时生效，安卓须用户同意退出 App 后传 restart=true。不改电脑音量/麦克风。模拟器：create 用 environment 的 runtime/deviceType（每台约7–12GB），优先复用；boot 等初始化，超时先查状态，screenshot=true 可附图。仅 iOS boot 支持 memoryMode：saving（关机时默认）关闭搜索、健康、部分游戏服务及诊断/DeviceCheck；standard 恢复受管理服务，完整验收或手柄/存档测试用此档；minimal 还影响登录、支付、照片、推送等，仅限明确范围的核心玩法/UI测试。运行中保持模式，切换先 shutdown 再 boot；检查 memoryMode.mode/verified/limitations，verified 只证明服务开关。shutdown 保留数据；rename 改名；erase 清空App/数据；delete 删除设备，后两项仅用户要求时用。activity 登记本任务使用15分钟，release 结束登记但不停止设备；需任务上下文，不是独占，worker重启后失效。受运行开关及默认15分钟闲置关机限制，画面/工具使用中不关。安卓 import_media 从本机绝对path复制图片/视频到Downloads（≤128MiB）；检查 copied/scanRequested/path。screenshot.error、taskBindingError/appContextError 保留操作结果；安卓部分失败含 completedSteps/failedStep/deviceError，检查实际状态，不重复已完成操作。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -48,7 +48,10 @@
               "activity",
               "release",
               "import_media",
-              "audio"
+              "audio",
+              "connect",
+              "connect_status",
+              "disconnect"
             ]
           },
           "udid": {
@@ -91,6 +94,11 @@
           "restart": {
             "type": "boolean",
             "description": "仅 audio：安卓切换需重启退出 App，获得用户同意后才传 true。"
+          },
+          "teamId": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{10}$",
+            "description": "真机 connect：可选的 10 位开发团队 ID；省略时自动选择唯一团队或设备已有组件的团队。"
           }
         },
         "required": [
@@ -101,7 +109,7 @@
     },
     {
       "name": "app",
-      "description": "install：模拟器 .app/安卓单 APK 的绝对 appPath；相同内容跳过，Apple 少量修改可同步，登记/签名修改整包安装。安卓不支持 AAB/split APK。info：Apple 默认轻量元数据；带 appPath 时 verify=auto 复核全文件清单后复用整包验证，否则返回校验 job；verify=full 强制全包比较，none 只查信息。仅 matchesLocal=true 可确认构建；null/verification=unconfirmed 不得据此重装。install_status 等安装或校验 job，默认 wait=85，完成即返回；不同设备可并行等待，phase 是实际阶段，无百分比估算。launch 默认结束旧进程后启动，arguments/env 仅 Apple；screenshot=true 附图；检查 appLaunched 和 viewer.previewOpened。画面失败有限截图兜底，只恢复观察，不重启 App；安卓启动失败检查 launchError/appTerminated/execution。terminate 结束；uninstall 删除 App/数据；open_url 打开深链，观察系统确认。容器查询故障不等于未安装；screenshot.error、taskBindingError、appContextError 保留已完成结果，先检查再处理。BUSY 提示操作/设备/job；短暂冲突最多等1秒。Apple 包须匹配平台，Vision Pro兼容iPad包仍整包安装。切换不搬运或启动 App。画面能力与副作用见 viewer。",
+      "description": "真机 install 仅接受已签名的 iphoneos .app，不支持模拟器包/IPA；同步返回 done。info 的 matchesLocal=null，不验证完整本地构建。launch/terminate/open_url 需要控制已就绪。 install：模拟器 .app/安卓单 APK 的绝对 appPath；相同内容跳过，Apple 少量修改可同步，登记/签名修改整包安装。安卓不支持 AAB/split APK。info：Apple 默认轻量元数据；带 appPath 时 verify=auto 复核全文件清单后复用整包验证，否则返回校验 job；verify=full 强制全包比较，none 只查信息。仅 matchesLocal=true 可确认构建；null/verification=unconfirmed 不得据此重装。install_status 等安装或校验 job，默认 wait=85，完成即返回；不同设备可并行等待，phase 是实际阶段，无百分比估算。launch 默认结束旧进程后启动，arguments/env 仅 Apple；screenshot=true 附图；检查 appLaunched 和 viewer.previewOpened。画面失败有限截图兜底，只恢复观察，不重启 App；安卓启动失败检查 launchError/appTerminated/execution。terminate 结束；uninstall 删除 App/数据；open_url 打开深链，观察系统确认。容器查询故障不等于未安装；screenshot.error、taskBindingError、appContextError 保留已完成结果，先检查再处理。BUSY 提示操作/设备/job；短暂冲突最多等1秒。Apple 包须匹配平台，Vision Pro兼容iPad包仍整包安装。切换不搬运或启动 App。画面能力与副作用见 viewer。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -123,7 +131,7 @@
           },
           "appPath": {
             "type": "string",
-            "description": "install/info：本机已构建的 iOS 模拟器 .app 或单个 Android .apk 的绝对路径（不支持 AAB/split APK）"
+            "description": "本机已构建 App 的绝对路径：模拟器 .app、真机已签名 iphoneos .app 或安卓单 APK（不支持 IPA/AAB/split APK）"
           },
           "bundleId": {
             "type": "string",
@@ -196,7 +204,7 @@
     },
     {
       "name": "screenshot",
-      "description": "截取当前画面：支持附图的 Cindy 返回图片；旧版或压缩后仍超过 130 KB 时仅返回 path，必须用读图工具打开。按用户看到的方向摆正，默认 1 像素=1 视图点；grid=true 叠加带刻度网格，region 截取局部，scale 2–3 放大细节（坐标除以 scale 并加 region 原点）。iOS 默认绘制屏幕圆角/灵动岛遮罩；安卓返回矩形 framebuffer，不添加物理圆角或挖孔遮罩，不能据此证明物理遮挡/安全区。corners 仅 iOS；安卓只接受省略或 false，显式 true 在读屏前拒绝。 capturedAt 标注画面时间；screenshotAttached=false 时打开 path；有足够画面就直接验证目标。",
+      "description": "真机从共享实时视频取得最新帧，无需签名；source=live-video、capturedAt、frameAgeMs 标明来源及画面年龄，静止时可复用上一帧。不添加模拟器遮罩。 截取当前画面：支持附图的 Cindy 返回图片；旧版或压缩后仍超过 130 KB 时仅返回 path，必须用读图工具打开。按用户看到的方向摆正，默认 1 像素=1 视图点；grid=true 叠加带刻度网格，region 截取局部，scale 2–3 放大细节（坐标除以 scale 并加 region 原点）。iOS 默认绘制屏幕圆角/灵动岛遮罩；安卓返回矩形 framebuffer，不添加物理圆角或挖孔遮罩，不能据此证明物理遮挡/安全区。corners 仅 iOS；安卓只接受省略或 false，显式 true 在读屏前拒绝。 capturedAt 标注画面时间；screenshotAttached=false 时打开 path；有足够画面就直接验证目标。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -260,7 +268,7 @@
     },
     {
       "name": "describe_ui",
-      "description": "读取当前界面元素（无障碍树）。默认返回精简列表：角色、文字、id、frame 与 center（视图点，可直接点击），按阅读顺序排列。query/role 过滤；x、y 查询某一点下的元素；mode=full 返回完整树。游戏或自绘界面没有无障碍元素时，自动改为识别画面上的文字（source=ocr），同样带坐标；没有文字的图标用 screenshot 看。识别失败会报错，不表示画面没有文字。 tvOS/visionOS 的所有模式（含 full 和 x,y 点位查询）均返回 OCR 文本列表，不提供无障碍树或元素 ID。Apple TV 文字坐标仅用于观察，操作用遥控。",
+      "description": "真机通过 XCTest 返回无障碍元素；自绘界面没有元素时使用截图坐标，不承诺 OCR。 读取当前界面元素（无障碍树）。默认返回精简列表：角色、文字、id、frame 与 center（视图点，可直接点击），按阅读顺序排列。query/role 过滤；x、y 查询某一点下的元素；mode=full 返回完整树。游戏或自绘界面没有无障碍元素时，自动改为识别画面上的文字（source=ocr），同样带坐标；没有文字的图标用 screenshot 看。识别失败会报错，不表示画面没有文字。 tvOS/visionOS 的所有模式（含 full 和 x,y 点位查询）均返回 OCR 文本列表，不提供无障碍树或元素 ID。Apple TV 文字坐标仅用于观察，操作用遥控。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -303,7 +311,7 @@
     },
     {
       "name": "tap",
-      "description": "真实触摸点击：走模拟器的系统触摸通道，不依赖窗口，Mac 锁屏也能用，App 收到的就是手指触摸。按 text 或 id（可加 role、nth）点元素，游戏里 text 按画面上识别出的文字点；或按 x、y 视图点点击（屏幕转向后会要求重新看图，不会点错位置）。count=2 双击；duration≥0.5 长按。默认点击后约 0.6 秒返回新的界面元素（observe=ui），observe=screenshot 直接附上截图。验证交互要用它，不要往 App 进程里注入事件。 until=文字：点完等这段文字出现再返回（翻页、弹窗），比猜 settle 准。 settle 为 0–5 秒，默认 0.6；较长转场用 until 或 wait_for。 Vision Pro：把画面坐标投射为单手捏合点击/长按；Apple TV 请用 press 遥控。 输入后观察最多12秒（until另等最多15秒），保留 execution 与 timing；截图失败只重试观察。游戏可按截图操作，无需强制读树。先复用已返回画面。",
+      "description": "真机坐标点击使用实时触点；text/id 仍通过 XCTest 定位后实时点击。默认返回操作后的新视频帧，observe=ui/both 可读元素。未知结果不重发。 真实触摸点击：走模拟器的系统触摸通道，不依赖窗口，Mac 锁屏也能用，App 收到的就是手指触摸。按 text 或 id（可加 role、nth）点元素，游戏里 text 按画面上识别出的文字点；或按 x、y 视图点点击（屏幕转向后会要求重新看图，不会点错位置）。count=2 双击；duration≥0.5 长按。默认点击后约 0.6 秒返回新的界面元素（observe=ui），observe=screenshot 直接附上截图。验证交互要用它，不要往 App 进程里注入事件。 until=文字：点完等这段文字出现再返回（翻页、弹窗），比猜 settle 准。 settle 为 0–5 秒，默认 0.6；较长转场用 until 或 wait_for。 Vision Pro：把画面坐标投射为单手捏合点击/长按；Apple TV 请用 press 遥控。 输入后观察最多12秒（until另等最多15秒），保留 execution 与 timing；截图失败只重试观察。游戏可按截图操作，无需强制读树。先复用已返回画面。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -351,7 +359,7 @@
               "both",
               "none"
             ],
-            "description": "操作后返回什么：ui（默认，新的界面元素）、screenshot（附截图）、both、none"
+            "description": "操作后返回 ui、screenshot、both 或 none；真机默认 screenshot，其它设备默认 ui。"
           },
           "settle": {
             "type": "number",
@@ -372,7 +380,7 @@
     },
     {
       "name": "gesture",
-      "description": "滑动与多指手势，坐标为截图视图点。swipe：from→to 或 direction；drag：按住 hold 秒后拖动；pinch：center、from_spread→to_spread；pan：从 from 平移 by。iOS 另支持 edge 系统边缘、scroll_to 查找元素。Vision 支持 swipe/drag/pinch/pan；前后拖动、旋转和相机控制用 kind=spatial。Apple TV 用 press。observe/until 同 tap。 Vision Pro 空间操作：gaze 注视；drag 捏合拖动（depth 前后移动）；pinch 双手缩放；rotate 双手旋转；tilt 转向、pan 平移、orbit 环绕、dolly 前后移动、move 三轴移动、reset 复位视角。from/to/center 使用截图视图点。spatial pan 的 by 为 [右,上] 米（仅二维），move 为 [右,上,后] 米；前后移动用 move 或 dolly。相机移动后重新截图再选坐标。observe/until 同 tap；操作通过模拟器系统输入，不注入 App。 settle 为 0–5 秒，默认 0.6；较长转场用 until 或 wait_for。 输入后观察预算同 tap，失败只重试观察。",
+      "description": "真机 swipe/drag/pinch/pan 使用实时触点，默认返回操作后的新视频帧。分阶段触摸用 kind=drag、phase=begin/move/end/cancel、points=[[x,y]]（可两个触点）；begin 返回 gestureId，后续阶段必须携带。同一次触摸可边观察边反向，begin/move 后最多按住30秒，及时 end/cancel。不支持 edge/scroll_to/spatial。 滑动与多指手势，坐标为截图视图点。swipe：from→to 或 direction；drag：按住 hold 秒后拖动；pinch：center、from_spread→to_spread；pan：从 from 平移 by。iOS 另支持 edge 系统边缘、scroll_to 查找元素。Vision 支持 swipe/drag/pinch/pan；前后拖动、旋转和相机控制用 kind=spatial。Apple TV 用 press。observe/until 同 tap。 Vision Pro 空间操作：gaze 注视；drag 捏合拖动（depth 前后移动）；pinch 双手缩放；rotate 双手旋转；tilt 转向、pan 平移、orbit 环绕、dolly 前后移动、move 三轴移动、reset 复位视角。from/to/center 使用截图视图点。spatial pan 的 by 为 [右,上] 米（仅二维），move 为 [右,上,后] 米；前后移动用 move 或 dolly。相机移动后重新截图再选坐标。observe/until 同 tap；操作通过模拟器系统输入，不注入 App。 settle 为 0–5 秒，默认 0.6；较长转场用 until 或 wait_for。 输入后观察预算同 tap，失败只重试观察。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -498,7 +506,7 @@
               "both",
               "none"
             ],
-            "description": "操作后返回什么：ui（默认，新的界面元素）、screenshot（附截图）、both、none"
+            "description": "操作后返回 ui、screenshot、both 或 none；真机默认 screenshot，其它设备默认 ui。"
           },
           "settle": {
             "type": "number",
@@ -543,6 +551,34 @@
             "minimum": -360,
             "maximum": 360,
             "description": "rotate 旋转角度，默认 45 度"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "begin",
+              "move",
+              "end",
+              "cancel"
+            ],
+            "description": "仅真机：分阶段触摸。省略时执行完整手势；begin/move 需 points，后续需 gestureId。"
+          },
+          "gestureId": {
+            "type": "string",
+            "description": "真机 phase=begin 返回的触摸 ID；移动、松开和取消时原样传回。"
+          },
+          "points": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number"
+              }
+            },
+            "description": "真机分阶段触摸的完整触点列表，视图点坐标；同一次触摸触点数量固定。"
           }
         },
         "required": [
@@ -554,7 +590,7 @@
     },
     {
       "name": "type_text",
-      "description": "向当前聚焦的输入框输入。text 任意文字：method=auto（默认）在普通 App 里粘贴（精确，支持中文），在没有无障碍元素的游戏里逐键输入英文、数字与符号（拼音等输入法会自动切到英文）；也可指定 paste 或 type。keys 发送按键，如 Enter、Escape、Backspace、Tab、up、a、cmd+A、shift+Tab；clear=true 先全选删除。输入前确认焦点，之后观察结果。 逐键输入时屏幕键盘不会出现；游戏里 Enter 可能直接提交，只想结束编辑就点空白处。observe、until 同 tap。 iOS 按键输入期间隐藏屏幕键盘；最后输入后约 3 秒尝试清除硬件键盘记录，重新聚焦后观察是否恢复，不保证自动弹出。检查键盘遮挡用 method=touch，无需重启。 method=touch 不可与 clear=true 或 keys 同用。 安卓 Unicode 使用剪贴板，type 限 ASCII；cmd 映射 Ctrl。 Vision Pro auto 使用粘贴；tvOS auto/type 使用 US 键盘事件，每次最多 300 字符，需英文输入法，不支持 Unicode 或剪贴板粘贴。两者支持 keys，不支持 touch。touch 支持 iOS/安卓，需已聚焦输入框及可用粘贴菜单；软键盘恢复仅 iOS。 输入后观察预算同 tap，失败只重试观察，不重发输入。",
+      "description": "真机支持 text（含中文）及 Enter/Backspace/Tab，使用 XCTest 输入；不支持 clear、快捷键或剪贴板模式。 向当前聚焦的输入框输入。text 任意文字：method=auto（默认）在普通 App 里粘贴（精确，支持中文），在没有无障碍元素的游戏里逐键输入英文、数字与符号（拼音等输入法会自动切到英文）；也可指定 paste 或 type。keys 发送按键，如 Enter、Escape、Backspace、Tab、up、a、cmd+A、shift+Tab；clear=true 先全选删除。输入前确认焦点，之后观察结果。 逐键输入时屏幕键盘不会出现；游戏里 Enter 可能直接提交，只想结束编辑就点空白处。observe、until 同 tap。 iOS 按键输入期间隐藏屏幕键盘；最后输入后约 3 秒尝试清除硬件键盘记录，重新聚焦后观察是否恢复，不保证自动弹出。检查键盘遮挡用 method=touch，无需重启。 method=touch 不可与 clear=true 或 keys 同用。 安卓 Unicode 使用剪贴板，type 限 ASCII；cmd 映射 Ctrl。 Vision Pro auto 使用粘贴；tvOS auto/type 使用 US 键盘事件，每次最多 300 字符，需英文输入法，不支持 Unicode 或剪贴板粘贴。两者支持 keys，不支持 touch。touch 支持 iOS/安卓，需已聚焦输入框及可用粘贴菜单；软键盘恢复仅 iOS。 输入后观察预算同 tap，失败只重试观察，不重发输入。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -613,7 +649,7 @@
     },
     {
       "name": "press",
-      "description": "iOS 与安卓共有：home、lock、power、volume-up、volume-down、app-switcher、swipe-to-app-switcher、swipe-to-home、pull-down-to-notification-center、release-input。iOS 专有：action、pull-down-to-lock-screen。安卓专有：back、shake；通知栏按钮展开通知，不是锁屏。未支持的按钮在投递前拒绝。duration（0–10 秒）仅用于按住硬件按键。release-input 只释放卡键并停止重复，不重启系统或关闭 App。 Apple TV：up/down/left/right/select/back/menu/home/play-pause/volume-up/volume-down；Vision Pro：digital-crown（home 同义）。两者支持 release-input。",
+      "description": "真机 home 使用实时通道；release-input 释放 Agent 持有的触点；音量键仍用 XCTest，不支持持续按住。 iOS 与安卓共有：home、lock、power、volume-up、volume-down、app-switcher、swipe-to-app-switcher、swipe-to-home、pull-down-to-notification-center、release-input。iOS 专有：action、pull-down-to-lock-screen。安卓专有：back、shake；通知栏按钮展开通知，不是锁屏。未支持的按钮在投递前拒绝。duration（0–10 秒）仅用于按住硬件按键。release-input 只释放卡键并停止重复，不重启系统或关闭 App。 Apple TV：up/down/left/right/select/back/menu/home/play-pause/volume-up/volume-down；Vision Pro：digital-crown（home 同义）。两者支持 release-input。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -662,7 +698,7 @@
     },
     {
       "name": "wait_for",
-      "description": "等条件成立再返回（最长 90 秒），代替固定 sleep 加反复截图。text 或 id 出现（gone=true 时等它消失；游戏里按识别出的文字判断）；stable=秒数：画面变化低于 tolerance（像素百分比，默认 0.5）持续这么久，可用 region 只看局部；log=正则：App 日志出现匹配行（配合 bundleId）。screenshot=true 附上成立时的截图。没等到返回 met=false、原因与当时截图，游戏动画会给出建议的 tolerance。 附图受本次调用剩余预算限制；失败或预算不足时保留等待结果并返回 screenshot.error，需要画面时另调 screenshot。 goalMet 与 met 同义，false 表示目标条件未满足，不能作为验收通过。",
+      "description": "真机仅支持 text/id 出现或消失，最多 30 秒；不支持 stable/log。 等条件成立再返回（最长 90 秒），代替固定 sleep 加反复截图。text 或 id 出现（gone=true 时等它消失；游戏里按识别出的文字判断）；stable=秒数：画面变化低于 tolerance（像素百分比，默认 0.5）持续这么久，可用 region 只看局部；log=正则：App 日志出现匹配行（配合 bundleId）。screenshot=true 附上成立时的截图。没等到返回 met=false、原因与当时截图，游戏动画会给出建议的 tolerance。 附图受本次调用剩余预算限制；失败或预算不足时保留等待结果并返回 screenshot.error，需要画面时另调 screenshot。 goalMet 与 met 同义，false 表示目标条件未满足，不能作为验收通过。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -741,7 +777,7 @@
     },
     {
       "name": "capture",
-      "description": "抓取一段画面变化：先开始录帧，再执行 action（tool 为 tap、gesture、press、type_text、open_url 或 app_launch，args 为该工具的参数），持续 seconds 秒（≤15），去掉重复帧后拼成一张按时间排列、标注毫秒的联系表图片，并返回各帧文件。用于转场、动画、一闪而过的提示、加载与骨架屏。不带 action 时只录当前的画面变化。支持内联图片的 Cindy 会附上联系表；旧版 Cindy 或联系表超过 130 KB 时只返回 sheet 路径，须用读图工具打开。 execution 保留动作执行状态；动作失败时 actionError 含 code、message、execution，不据此盲目重试。 仅支持录制期间方向、尺寸与面板不变；在动作后和录制结束核验，变化或无法确认时不生成联系表并保留 execution。不提供逐帧转向证据。 动作、录制、核验与渲染共用本次调用截止时间；预算不足或录制失败返回 captureError（code、message），仍保留 action 或 actionError 与 execution，不盲重试动作。 等到完整首帧并确认画面后才执行动作；此前无帧、流故障或预算耗尽时返回 captureError、execution=not_executed。",
+      "description": "真机暂不支持联系表录制。 抓取一段画面变化：先开始录帧，再执行 action（tool 为 tap、gesture、press、type_text、open_url 或 app_launch，args 为该工具的参数），持续 seconds 秒（≤15），去掉重复帧后拼成一张按时间排列、标注毫秒的联系表图片，并返回各帧文件。用于转场、动画、一闪而过的提示、加载与骨架屏。不带 action 时只录当前的画面变化。支持内联图片的 Cindy 会附上联系表；旧版 Cindy 或联系表超过 130 KB 时只返回 sheet 路径，须用读图工具打开。 execution 保留动作执行状态；动作失败时 actionError 含 code、message、execution，不据此盲目重试。 仅支持录制期间方向、尺寸与面板不变；在动作后和录制结束核验，变化或无法确认时不生成联系表并保留 execution。不提供逐帧转向证据。 动作、录制、核验与渲染共用本次调用截止时间；预算不足或录制失败返回 captureError（code、message），仍保留 action 或 actionError 与 execution，不盲重试动作。 等到完整首帧并确认画面后才执行动作；此前无帧、流故障或预算耗尽时返回 captureError、execution=not_executed。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -794,7 +830,7 @@
     },
     {
       "name": "set_state",
-      "description": "改变设备状态，可一次改多项：orientation 方向；posture 折叠姿态；appearance light/dark；contrast 增强对比度；text_size 字号；network 档位/offline/clear 或 {latency,bandwidth,loss}；location 坐标；status_bar clean/clear；privacy {action,service,bundleId}。iOS 专有：posture 铰链、location=clear 清除模拟位置、privacy reset；iOS 改权限会结束 App，启动前设置。安卓无铰链或任意丢包率；location 仅 {lat,lon} 且会启用定位服务，clear 在任何批量修改前拒绝；offline/100-loss 关闭 Wi-Fi/移动数据，其余档位开启两者，network=clear 恢复全带宽/无延迟。安卓权限仅具体 service 的 grant/revoke，要求 API23+ 与 App 声明；photos/media-library 在 API33 前为共享存储 READ_EXTERNAL_STORAGE，33+ 为 READ_MEDIA_*，motion 要求 API29+。权限 API 预检失败在所有批量写入前拒绝。全部步骤与读回共享截止时间；失败后停止，applied 列完整字段，安卓 appliedSteps 记录成功的 field/step，stateError 含 field/step/code/message/execution；部分执行不能当未执行，不整批重试。转向后屏幕仅确认成功才返回，current 的 null 表示未确认。 Apple TV/Vision Pro 不支持 orientation、posture、status_bar，其他设置依赖运行时。",
+      "description": "真机暂不支持模拟状态设置。 改变设备状态，可一次改多项：orientation 方向；posture 折叠姿态；appearance light/dark；contrast 增强对比度；text_size 字号；network 档位/offline/clear 或 {latency,bandwidth,loss}；location 坐标；status_bar clean/clear；privacy {action,service,bundleId}。iOS 专有：posture 铰链、location=clear 清除模拟位置、privacy reset；iOS 改权限会结束 App，启动前设置。安卓无铰链或任意丢包率；location 仅 {lat,lon} 且会启用定位服务，clear 在任何批量修改前拒绝；offline/100-loss 关闭 Wi-Fi/移动数据，其余档位开启两者，network=clear 恢复全带宽/无延迟。安卓权限仅具体 service 的 grant/revoke，要求 API23+ 与 App 声明；photos/media-library 在 API33 前为共享存储 READ_EXTERNAL_STORAGE，33+ 为 READ_MEDIA_*，motion 要求 API29+。权限 API 预检失败在所有批量写入前拒绝。全部步骤与读回共享截止时间；失败后停止，applied 列完整字段，安卓 appliedSteps 记录成功的 field/step，stateError 含 field/step/code/message/execution；部分执行不能当未执行，不整批重试。转向后屏幕仅确认成功才返回，current 的 null 表示未确认。 Apple TV/Vision Pro 不支持 orientation、posture、status_bar，其他设置依赖运行时。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -915,7 +951,7 @@
     },
     {
       "name": "logs",
-      "description": "读取最近日志，last_seconds 默认 120 秒，limit 默认 150 行，level 默认 default，另支持 error/info/debug；match 为正则。iOS 的 default 包含普通 Default 消息，不是警告阈值；默认附带本设备该进程的崩溃摘要；诊断失败保留日志并返回 crashesError，crashes=false 跳过诊断。安卓的 default 才表示警告及以上；仅返回最多最新 3000 条 logcat 记录中过滤出的原始行，默认 main+crash buffer，crashes=false 只读 main；不生成 iOS 崩溃摘要。安卓 bundleId/process 只筛选当前精确 PID，退出/重启前的历史日志及崩溃不在检查范围；进程不存在时 processRunning=false。空日志不能证明没有崩溃；需历史证据时显式不指定进程读取设备日志再检查。",
+      "description": "真机通过 macOS log collect 读取最近最多 600 秒统一日志；可指定 process/match/limit，不支持 bundleId 或崩溃摘要，可能需要系统日志访问权限。 读取最近日志，last_seconds 默认 120 秒，limit 默认 150 行，level 默认 default，另支持 error/info/debug；match 为正则。iOS 的 default 包含普通 Default 消息，不是警告阈值；默认附带本设备该进程的崩溃摘要；诊断失败保留日志并返回 crashesError，crashes=false 跳过诊断。安卓的 default 才表示警告及以上；仅返回最多最新 3000 条 logcat 记录中过滤出的原始行，默认 main+crash buffer，crashes=false 只读 main；不生成 iOS 崩溃摘要。安卓 bundleId/process 只筛选当前精确 PID，退出/重启前的历史日志及崩溃不在检查范围；进程不存在时 processRunning=false。空日志不能证明没有崩溃；需历史证据时显式不指定进程读取设备日志再检查。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -963,7 +999,7 @@
     },
     {
       "name": "heal",
-      "description": "修复前须让用户接受影响：iOS 按 Baguette 流程在独立设备集合重启 SpringBoard，终止运行中的 App；安卓会重启整个模拟器并结束所有 App，等待 devices 再次报告 Booted 后继续。仅用户接受相应平台的重启影响后调用。卡键先用 press(release-input)。",
+      "description": "真机不支持此操作。 修复前须让用户接受影响：iOS 按 Baguette 流程在独立设备集合重启 SpringBoard，终止运行中的 App；安卓会重启整个模拟器并结束所有 App，等待 devices 再次报告 Booted 后继续。仅用户接受相应平台的重启影响后调用。卡键先用 press(release-input)。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -980,7 +1016,7 @@
     },
     {
       "name": "viewer",
-      "description": "在当前任务侧栏打开（open）或关闭（close）设备的实时画面。open 返回 previewOpened，确认后才能说已显示；close 只停止画面服务，设备与 App 继续运行。画面页由用户操作，开放输入、文件与 App 安装（可能覆盖已有 App）、复制粘贴（替换 Mac 或模拟器剪贴板）、旋转、摇一摇、截图（存桌面或剪贴板）、设备切换与启停（关机终止 App），以及 Baguette 高级工具：位置与运动模拟、状态栏与持续生效的网络条件、摄像头输入、远程通知注入（可能触发 App 行为）、无障碍树、日志、录屏导出（可能含 App 隐私数据）；地图搜索与瓦片经插件代理发往 OpenStreetMap。打开前告知这些能力；打开页面不会自动执行它们。仅监听 127.0.0.1。 任务绑定或近期 App 记录保存失败时返回 taskBindingError/appContextError，设备结果保留；先检查记录和存储，不要重复设备操作。 画面未打开时 outcome=partial，按 nextAction 重试画面，不重启已启动的 App。切换只选择设备，不关机、不自动启动或搬运 App；已关闭的设备需点击「打开」。 安卓：滚轮滚动、触控板捏合，双向文本剪贴板，拖入 APK/图片/视频（≤128 MiB）；录像为无音频 WebM（≤5 分钟或128 MiB），旋转保留完整画面并留边。高级工作台仅 iOS。 画面服务仍失败时尝试独立截图，保留 App；宿主页失败也仅观察，不重复启动。",
+      "description": "真机使用共享连续视频和实时触点，Agent 同样复用；无需团队 ID，首次准备固定校验的 Python 组件。按文字定位、输入与无障碍读取仍需 XCTest 签名组件。共用手机外壳、工具栏及缩放。 在当前任务侧栏打开（open）或关闭（close）设备的实时画面。open 返回 previewOpened，确认后才能说已显示；close 只停止画面服务，设备与 App 继续运行。画面页由用户操作，开放输入、文件与 App 安装（可能覆盖已有 App）、复制粘贴（替换 Mac 或模拟器剪贴板）、旋转、摇一摇、截图（存桌面或剪贴板）、设备切换与启停（关机终止 App），以及 Baguette 高级工具：位置与运动模拟、状态栏与持续生效的网络条件、摄像头输入、远程通知注入（可能触发 App 行为）、无障碍树、日志、录屏导出（可能含 App 隐私数据）；地图搜索与瓦片经插件代理发往 OpenStreetMap。打开前告知这些能力；打开页面不会自动执行它们。仅监听 127.0.0.1。 任务绑定或近期 App 记录保存失败时返回 taskBindingError/appContextError，设备结果保留；先检查记录和存储，不要重复设备操作。 画面未打开时 outcome=partial，按 nextAction 重试画面，不重启已启动的 App。切换只选择设备，不关机、不自动启动或搬运 App；已关闭的设备需点击「打开」。 安卓：滚轮滚动、触控板捏合，双向文本剪贴板，拖入 APK/图片/视频（≤128 MiB）；录像为无音频 WebM（≤5 分钟或128 MiB），旋转保留完整画面并留边。高级工作台仅 iOS。 画面服务仍失败时尝试独立截图，保留 App；宿主页失败也仅观察，不重复启动。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1041,5 +1077,5 @@
       }
     ]
   },
-  "releaseNotes": "模拟器默认静音，画面工具栏新增电脑声音开关，Agent 可读取和切换同一状态。Apple 即时切换；安卓切换前确认重启，保留设备数据。"
+  "releaseNotes": "Agent 与画面共用实时触摸和视频帧，支持按住观察后继续移动；保留文字定位和输入。"
 }

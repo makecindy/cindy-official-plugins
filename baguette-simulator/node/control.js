@@ -34,7 +34,7 @@
   function keyboardGate(event) {
     // Workbench fields belong to the browser. This only gates guest keyboard
     // input from this view; touch and Agent tools retain their own controls.
-    if (keyboardEnabled() || event.target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'SUMMARY'].includes(event.target?.tagName)) return;
+    if (keyboardEnabled() || (!event.target?.dataset?.cindyDeviceInput && (event.target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'SUMMARY'].includes(event.target?.tagName)))) return;
     event.preventDefault(); event.stopImmediatePropagation();
   }
   function toggleKeyboard() {
@@ -113,11 +113,15 @@
   // ---- zoom ----
   // The device page fits the device into its frame; zoom resizes that frame.
   // Percentages are of actual size (one device point per CSS pixel).
-  function stageSize() {
-    const bounds = stage.getBoundingClientRect();
-    const css = M.handheld(state.status?.device) ? null : globalThis.getComputedStyle?.(frame);
+  function framePadding() {
+    const css = globalThis.getComputedStyle?.(frame);
     const insetX = parseFloat(css?.paddingLeft || 0) + parseFloat(css?.paddingRight || 0);
     const insetY = parseFloat(css?.paddingTop || 0) + parseFloat(css?.paddingBottom || 0);
+    return {insetX,insetY};
+  }
+  function stageSize() {
+    const bounds = stage.getBoundingClientRect();
+    const {insetX,insetY} = M.handheld(state.status?.device) ? {insetX:0,insetY:0} : framePadding();
     return {width: Math.max(0,bounds.width - insetX),height: Math.max(0,bounds.height - insetY),insetX,insetY};
   }
   function applyZoom() {
@@ -127,8 +131,17 @@
     // Keep the point at the centre of the view in place while the frame grows or shrinks.
     const cx = scroll.scrollWidth > scroll.clientWidth ? (scroll.scrollLeft + scroll.clientWidth / 2) / scroll.scrollWidth : 0.5;
     const cy = scroll.scrollHeight > scroll.clientHeight ? (scroll.scrollTop + scroll.clientHeight / 2) / scroll.scrollHeight : 0.5;
-    frame.style.width = Math.round(width * factor + insetX) + 'px';
-    frame.style.height = Math.round(height * factor + insetY) + 'px';
+    const physical = state.status?.device?.kind === 'physical' && state.viewport;
+    if (physical && state.zoom.mode === 'pct') {
+      // Physical viewers fit a known body into a 12px inset. Percentage zoom
+      // sizes that body directly, independent of earlier measurements/zoom.
+      const padding = framePadding(), scale = state.zoom.pct / 100;
+      frame.style.width = (state.viewport.width * scale + 24 + padding.insetX) + 'px';
+      frame.style.height = (state.viewport.height * scale + 24 + padding.insetY) + 'px';
+    } else {
+      frame.style.width = Math.round(width * factor + insetX) + 'px';
+      frame.style.height = Math.round(height * factor + insetY) + 'px';
+    }
     if (factor > 1.001) stage.setAttribute('data-zoomed', ''); else stage.removeAttribute('data-zoomed');
     scroll.scrollLeft = cx * scroll.scrollWidth - scroll.clientWidth / 2;
     scroll.scrollTop = cy * scroll.scrollHeight - scroll.clientHeight / 2;
@@ -143,9 +156,9 @@
         return state.viewport;
       }
       const w = screen.contentWindow;
-      const def = await (await w.fetch(`/simulators/${encodeURIComponent(udid)}/definition.json`)).json();
+      const def = await (await w.fetch(`/simulators/${encodeURIComponent(udid)}/definition.json?cindyViewer=${encodeURIComponent(token || '')}`)).json();
       const v = def?.screen?.viewport;
-      if (v?.width > 0 && v?.height > 0) state.viewport = { width: v.width, height: v.height };
+      if (!state.viewport && v?.width > 0 && v?.height > 0) state.viewport = { width: v.width, height: v.height };
     } catch {}
     return state.viewport;
   }
@@ -154,6 +167,15 @@
   async function measure() {
     let doc; try { doc = screen.contentDocument; } catch { return; }
     const v = await viewport();
+    if (state.status?.device?.kind === 'physical') {
+      const {width,height} = stageSize(), padding = framePadding();
+      if (!v || !(width > 0 && height > 0)) return;
+      const fit = Math.max(0, Math.min((width - 24 - padding.insetX) / v.width,
+        (height - 24 - padding.insetY) / v.height)) * 100;
+      state.fitPct = fit;
+      applyZoom();
+      return;
+    }
     if (!M.handheld(state.status?.device)) {
       const {width,height} = stageSize();
       if (!v || !(width > 0 && height > 0)) return;
@@ -166,7 +188,12 @@
     const rect = device?.getBoundingClientRect();
     if (!v || !rect?.width || doc.getElementById('simNativeView')?.getAttribute('data-render3d') === 'open') { state.fitPct = 0; renderZoom(); return; }
     const shown = Math.max(rect.width, rect.height) / Math.max(v.width, v.height) * 100;
-    state.fitPct = shown / M.zoomFactor(state.zoom, state.fitPct || shown);
+    // Measure against the frame actually laid out, not a factor recalculated
+    // from the previous measurement. Multiple resize/load callbacks otherwise
+    // feed each other's result back and make even an unchanged 67% drift.
+    const bounds = frame.getBoundingClientRect(), stageBounds = stageSize();
+    const applied = Math.min(bounds.width / stageBounds.width, bounds.height / stageBounds.height);
+    if (applied > 0 && Number.isFinite(applied)) state.fitPct = shown / applied;
     renderZoom();
   }
   function setZoom(zoom) {
@@ -209,7 +236,7 @@
       for (const name of ['pointerdown', 'keydown', 'wheel']) doc?.addEventListener(name, activity, { passive: true, capture: true });
       // Before the device page forwards keys to the simulator.
       doc?.defaultView?.addEventListener('keydown', shortcut, true);
-      for (const name of ['keydown', 'keyup', 'paste']) doc?.defaultView?.addEventListener(name, keyboardGate, true);
+      for (const name of ['keydown', 'keyup', 'paste', 'beforeinput', 'compositionend']) doc?.defaultView?.addEventListener(name, keyboardGate, true);
       doc?.defaultView?.addEventListener('resize', () => { setTimeout(decorate, 50); setTimeout(measure, 120); });
     } catch {}
     setTimeout(decorate, 300); setTimeout(decorate, 1500); setTimeout(measure, 800); setTimeout(measure, 2500);
@@ -244,6 +271,7 @@
     resourceView.update(state.lost || state.switching ? null : device);
     const on = live();
     const sound=s?.audio,playing=sound?.enabled===true;
+    $('btn-audio').hidden=device?.kind==='physical';
     $('btn-audio').disabled=!on||typeof sound?.enabled!=='boolean'||state.audioBusy;
     $('btn-audio').setAttribute('aria-pressed',String(playing));
     label($('btn-audio'),typeof sound?.enabled!=='boolean'?(lang==='zh-CN'?'声音状态待确认':'Sound status unavailable'):(playing?(lang==='zh-CN'?'静音':'Mute'):(lang==='zh-CN'?'在电脑上播放声音':'Play sound on computer')));
@@ -252,7 +280,7 @@
     $('audio-playing').removeAttribute('hidden');
     const handheld = M.handheld(device);
     $('tools').hidden = !on;
-    $('btn-rotl').hidden = $('btn-rotr').hidden = !handheld;
+    $('btn-rotl').hidden = $('btn-rotr').hidden = !handheld || device?.kind==='physical';
     $('tv-remote').hidden = !on || M.platform(device) !== 'tvOS';
     visionBar.hidden = !on || M.platform(device) !== 'visionOS';
     stage.dataset.vision = M.platform(device) === 'visionOS' ? 'true' : 'false';
@@ -284,6 +312,7 @@
     if (o.kind === 'offline') overlay.append(card(ICON.unplug, t.offlineTitle, t.offlineBody, [h('button', { class: 'btn primary', text: t.recover, onclick: recover })]));
     else if (o.kind === 'serviceOff') overlay.append(card(ICON.unplug, t.serviceOffTitle, t.serviceOffBody, [h('button', { class: 'btn', text: t.retry, onclick: check })]));
     else if (o.kind === 'expired') overlay.append(card(ICON.unplug, t.expiredTitle, t.expiredBody));
+    else if (o.kind === 'disconnected') overlay.append(card(ICON.unplug, lang==='zh-CN'?'手机未连接':'Phone disconnected',lang==='zh-CN'?'连接 USB 或已配对的网络，解锁并信任这台 Mac 后，画面会自动恢复。':'Connect by USB or a paired network, unlock and trust this Mac. The view will resume automatically.'));
     else if (o.kind === 'off') overlay.append(card(ICON.off, t.offTitle(name), null, [memoryPicker(),h('button', { class: 'btn cta', text: t.boot, onclick: boot })]));
     else if (o.kind === 'paused') overlay.append(card(ICON.pause, t.pausedTitle, t.pausedBody));
     else if (o.kind === 'switching') {
@@ -325,7 +354,7 @@
       // A completed selection may point at a stopped device. Use its own
       // state immediately, never load its stream using the source's state.
       if (s.device?.udid !== udid) s.device = s.devices?.find((d) => d.udid === udid);
-      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
+      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.kind==='physical'?'physical':s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
         const opened=await api('open');
         if(opened.url){const next=new URL(opened.url);for(const key of ['task','embed'])if(params.get(key))next.searchParams.set(key,params.get(key));location.replace(next.href);return;}
       }
@@ -424,6 +453,7 @@
     } : undefined});
   });
   async function release() {
+    native('__nativeRelease');
     try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
     try { await api('release'); toast(t.released, 'ok'); } catch { toast(t.actionFailed, 'error'); }
   }
@@ -560,7 +590,7 @@
   const remoteKeys={up:'↑',down:'↓',left:'←',right:'→',select:'Enter',back:'Esc','play-pause':'Space'};
   for(const b of $('tv-remote').querySelectorAll('[data-remote]'))label(b,b.getAttribute('aria-label'),remoteKeys[b.dataset.remote]);
   function rotate(step) {
-    if (!live() || !M.handheld(state.status?.device)) return;
+    if (!live() || !M.handheld(state.status?.device) || state.status?.device?.kind==='physical') return;
     // A foldable turns through viewer-stage.js, which animates the 3D book.
     let turned = false; try { turned = screen.contentWindow?.__cindyPose?.turn?.(step) === true; } catch {}
     const fn = screen.contentWindow?.__nativeRotateBy ? '__nativeRotateBy' : '__nativeRotate';
@@ -666,8 +696,8 @@
     const on = live();
     showMenu($('btn-more'), [
       ...(state.status?.device?.platform === 'android' ? [item(ICON.key, lang === 'zh-CN' ? '返回' : 'Back', () => native('__nativeBack'), { disabled: !on })] : []),
-      ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
-      ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.grid, t.appSwitcher, () => native('__nativeAppSwitcher'), { disabled: !on }) : null,
+      state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
+      state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.grid, t.appSwitcher, () => native('__nativeAppSwitcher'), { disabled: !on }) : null,
       ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.key, lang === 'zh-CN' ? '电脑键盘输入' : 'Computer keyboard input', toggleKeyboard, { disabled: !on, role: 'menuitemcheckbox', 'aria-checked': String(keyboardEnabled()) }) : null,
       ...(state.status?.device?.platform === 'android' ? [
         item(ICON.key, lang === 'zh-CN' ? '复制设备剪贴板' : 'Copy device clipboard', () => native('__nativeCopy'), {disabled:!on}),
@@ -677,12 +707,12 @@
       item(ICON.key, t.releaseKeys, release, { disabled: !on }),
       h('div', { class: 'sep' }),
       item(ICON.refresh, t.recover, recover, { disabled: state.recovering || state.switching }),
-      M.platform(state.status?.device) === 'iOS' ? item(ICON.bar, t.advanced, () => {
+      M.platform(state.status?.device) === 'iOS' && state.status?.device?.kind!=='physical' ? item(ICON.bar, t.advanced, () => {
         state.fullToolbar = !state.fullToolbar; decorate(); applyZoom();
         screen.contentWindow?.dispatchEvent?.(new Event('resize'));
       }, { role: 'menuitemcheckbox', 'aria-checked': String(state.fullToolbar) }) : null,
       h('div', { class: 'sep' }),
-      item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }),
+      state.status?.device?.kind!=='physical' ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
     ]);
   });
 
@@ -698,7 +728,7 @@
         d.current ? h('span', { html: ICON.check }) : null])),
       h('div', { class: 'sep' }),
       item(ICON.plus, t.addDevice, () => openDialog('add'), { disabled: paused }),
-      item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }),
+      state.status?.device?.kind!=='physical' ? item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }) : null,
     ]);
   });
   async function switchTo(targetUdid) {

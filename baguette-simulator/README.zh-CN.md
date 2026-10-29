@@ -1,5 +1,26 @@
 # 设备模拟器
 
+## iPhone / iPad 真机（0.3.21）
+
+已在 Xcode 配对的真机与模拟器共用设备列表、任务绑定、工具栏、缩放和手机外壳。实时画面使用 HEVC 视频，触点按下、移动、松开分别发送，不再等松手后执行整段手势。拖动途中可以反向；移动仅保留最新位置，视频与输入独立运行。失焦、取消、关闭和断线会释放触点，未知结果不重发。
+
+首次打开会在插件私有目录准备固定版本、SHA-256 校验的 pymobiledevice3 11.47.0 与 PyAV 15.1.0 Python 运行环境，从 pypi.org / files.pythonhosted.org 下载预编译 wheel，不安装全局包。实时画面和触摸无需开发团队 ID 或测试 App；仍需要 Mac、Xcode 27+、手机开发者模式、配对和解锁。只通过选中设备的系统调试隧道连接；不启动音频采集、剪贴板同步或额外 HTTP 服务。前端仅监听 127.0.0.1，沿用现有授权。
+
+真机按硬件型号复用 Xcode 手机外壳及屏幕遮罩；外壳独立加载并缓存。缩放按整个机身计算，触摸只映射屏幕区域；百分比大小固定，「适合窗口」随空间调整。屏幕方向或活动面板变化会取消当前触摸并重连，不回放旧输入。本机没有匹配外壳时仍显示画面。
+
+熄屏、断线或暂时无画面会自动重试；恢复前不接收触摸。关闭画面后释放该画面的触点；若 Agent 仍在操作则保留共享连接，否则停止本插件的接收和控制。不停止其它镜像工具；手机端视频会话按协商的约 20 秒超时回收。旧系统、Duo 切屏及实际侧栏触控板手感仍须分别验收，不以浏览器合成事件代替。
+
+Agent 的坐标点击、完整手势、Home 和截图与画面页共用实时连接，不再通过 XCTest 回放手势或单独调用 Xcode 截图。截图返回 source=live-video、capturedAt、frameAgeMs；时间按接收端处理视频帧记录，不代表手机端采集时间或端到端延迟。静止画面可以复用最后一帧，操作后的附图等待输入之后的新帧，观察失败不重发操作。默认附图，可显式 observe=ui/both 读元素。
+
+需要边按住边观察时，使用 gesture(kind=drag, phase=begin, points=[[x,y]])；返回 gestureId 后，move/end/cancel 原样带回。支持一到两个固定触点；move 可以反向。begin/move 后最多保持 30 秒，随后自动释放；应尽快 end/cancel，不把超时后的旧动作重新发送。真人已有触点时 Agent 不抢占；关闭画面不打断 Agent 正在执行的手势。无使用者时实时连接在短暂空闲后回收，不改变手机设置。
+
+按 text/id 找按钮仍通过 XCTest 定位，再发送实时点击；中文输入和无障碍读取也保留 XCTest。先 devices 选择 kind=physical 的精确 udid；仅这些文字/无障碍功能以及 App 控制需要 device action=connect / connect_status 等到 ready。签名优先自动选已有或唯一团队，歧义时按名称选择。control.ready 表示 XCTest 状态，不是实时触摸的前提。
+
+交互继续使用 iPhone 点击/拖动、Option 双指缩放旋转、Option+Shift 平移、滚轮与原生触控板入口及触点提示。文字输入等待手机键盘就绪，合并相邻尚未发送的文字；外接键盘兼容性未验证。旋转和折叠跟随实体手机，不显示模拟旋转、摇一摇或关机操作。截图默认 1 像素对应 1 视图点。App 安装只支持已签名 iphoneos .app，info.matchesLocal 为 null，不证明与本地构建逐文件一致。
+
+真机不参与闲置/批量关机、抹除、删除及内存模式。关闭插件保留手机、业务 App 和已安装的测试组件。暂不支持安卓真机、IPA、模拟定位/权限/网络、录制联系表、OCR 回退或硬件按键长按。
+## 模拟器电脑声音
+
 冷启动默认静音。画面工具栏的喇叭按钮控制该设备是否在电脑上播放声音，不改变整台电脑的音量，也不开启麦克风。Apple 即时切换；安卓目前需要重启，点击后先提示 App 会退出、数据保留，确认后才执行。下一次普通冷启动仍默认静音。
 
 Apple 恢复当前 worker 记住的上次非零音量。worker 重启后，开启静音设备使用默认音量 60/100，不持久化之前的音量。
@@ -159,7 +180,7 @@ tvOS/visionOS 所有查询模式均使用 OCR 文本列表（含 `mode=full` 和
 
 安装按包内容校验和比较，资源保留时间戳也不会漏过；安装登记或签名信息变化时整包安装。容器查询故障会报错，不作为 App 未安装的依据；自动安装会在写入前停止，日志查询也不扩大范围。后台安装完成写入前，设备保持占用。`method=touch` 拒绝搭配 `clear=true` 或 `keys`，以保留屏幕键盘；录帧会保留动作真实的执行状态。
 
-Cindy 官方设备模拟器，适用于 Apple Silicon Mac，随包带 Baguette 0.2.10。它替代已下线的内置模拟器；原内置模拟器用户会在 Cindy 中看到一次指向这里的迁移提示（插件 ID 为 `baguette-simulator`）。名称为后续设备和平台扩展留出空间，不代表新增平台支持。需要 Cindy 0.1.83+、完整 Xcode 和已安装的 iOS runtime，首次运行不下载依赖。打包时通过 binary-dependencies.json 从固定哈希的官方归档收集九个可移植 USDZ 模型；原生可执行文件仍保留在 Git，仅支持 macOS。
+Cindy 官方设备模拟器，适用于 Apple Silicon Mac，随包带 Baguette 0.2.10。它替代已下线的内置模拟器；原内置模拟器用户会在 Cindy 中看到一次指向这里的迁移提示（插件 ID 为 `baguette-simulator`）。名称为后续设备和平台扩展留出空间，不代表新增平台支持。需要 Cindy 0.1.83+、Xcode 27 或更新版本和已安装的 iOS runtime，首次运行不下载依赖。打包时通过 binary-dependencies.json 从固定哈希的官方归档收集九个可移植 USDZ 模型；原生可执行文件仍保留在 Git，仅支持 macOS。
 
 iOS 模拟器任务默认使用。先 environment、devices，复用适合的已登录设备，必要时 `device action=boot`。App 仍由项目正常流程构建（独立设备用 `-destination 'generic/platform=iOS Simulator'`），再用 `app action=install`、`app action=launch` 安装和启动模拟器 .app。启动默认打开当前任务的模拟器页签；检查 viewer.previewOpened，不能把服务启动成功说成页面已显示。切换 session 后通过 `viewer action=open` 打开已有设备。
 

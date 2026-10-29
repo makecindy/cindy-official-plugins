@@ -1,5 +1,51 @@
 # Vendored runtime evidence
 
+## Interactive animation wait 0.3.9 (2026-10-29)
+
+New control sessions set the existing WDA animationCoolOffTimeout setting to zero before reporting ready. The default post-gesture quiescence wait blocks the main route queue also serving screenshots. Cindy's display-targeted viewport points now go directly into the existing synthesized touch path, avoiding an accessibility snapshot for each XCUICoordinate.screenPoint resolution. Other origins retain upstream resolution. This retains input completion/error handling, fresh display/bounds checks, gesture duration and explicit observation waits for Agent tools. The native source patch changes; the pinned archive is unchanged. No new endpoint, polling, cache or permission.
+
+## Third-party keyboard readiness 0.3.8 (2026-10-29)
+
+The existing read-only `/cindy/keyboard-ready` route now checks visible Key descendants rather than requiring a Keyboard container and a hittable key. Live Air evidence exposes third-party keyboard keys without that container; the former check prevented text from being sent. The two-second bound and no-send-on-timeout behavior remain. Only `native/wda-network.patch` changes; the pinned upstream archive and licenses remain unchanged. No new route, listener or permission.
+
+## Visible control status 0.3.7 (2026-10-29)
+
+The physical body establishes its own stacking context so its screen/mask cannot cover control notices or team buttons. During the existing bounded startup loop, the last 16 KiB of the owned runner log is checked for Xcode's locked-device diagnostic; the viewer reports waiting for unlock and a specific timeout reason. No extra background polling, input replay, credential access, vendor bytes or native build changes.
+
+## Stable viewer zoom 0.3.6 (2026-10-29)
+
+Physical percentage zoom now sizes the original body directly, including the viewer's fixed padding. Body/artwork changes notify the parent to remeasure. Shared handheld measurement uses the frame actually laid out instead of feeding a previously inferred zoom factor back into itself. No vendor bytes, dependencies, endpoints or permissions changed. Regression evidence covers repeated percentage measurements, resize, reopen and fit; see `.tests/baguette/physical-verification.md`.
+
+## Physical screen availability 0.3.5 (2026-10-29)
+
+Live CoreDevice evidence from iPhone Air omits both active and uniqueId even with backlightState=activeOn. A sole integrated display may omit active; explicit false and ambiguous multi-panel records still reject. Without uniqueId, capture uses devicectl’s documented default only for the selected primary display. Before/after geometry checks remain. The existing preview loop continues after temporary failures with a one-second interval, without a second blocking status request. No input replay, signing, new listener, endpoint or dependency. Screen-off/connection hints replace raw capture diagnostics and stale frames cannot accept user input.
+
+## Physical device shell 0.3.4 (2026-10-29)
+
+Reuses the unchanged Baguette v0.2.10 `chrome layout/composite --device-name --panel` CLI and `_Bezel` DOM component. Matches CoreDevice hardware models against the local `simctl list devicetypes` catalog; panel selection uses integrated-display sizes from Xcode capabilities. Fixed local `plutil`/`sips` commands read and rasterize DeviceKit masks; temporary raster files are removed. Assets remain on the user’s Mac and are not redistributed. Capability-protected definition responses contain in-memory artwork; no new listener, remote endpoint, credential, native patch, signing requirement or vendor bytes. Frame polling and input routing remain separate from artwork lookup. Rotated body/cutout/mask geometry is shared and live canvas listeners survive panel changes.
+
+## Physical preview scheduling and keyboard readiness 0.3.3 (2026-10-28)
+
+Preview reuses paired-device/display metadata for at most two seconds and refreshes it without blocking fresh frame delivery. Reads from multiple open views share the current in-flight capture; no old-frame queue, persistent cache, new listener or timer is added. Inputs and exports retain fresh discovery/geometry. The existing paired WDA listener adds a read-only `/cindy/keyboard-ready` endpoint using upstream FBKeyboard readiness polling bounded to two seconds. The caller sends text only after ready=true; timeout is not_executed. Adjacent unsent text batches preserve operation boundaries and never retry sent input. WDA application errors no longer falsely mark the transport disconnected. Source archive, credentials, dependencies and permissions are unchanged.
+
+
+## Physical preview and touch dispatch 0.3.2 (2026-10-28)
+
+Adds a read-only `/session/:sessionId/cindy/frame/:displayID` route to the existing paired-tunnel WDA listener. Display IDs are bounded to 1–1024; first-party callers derive them from CoreDevice. Screenshots time out at five seconds, encode JPEG on the phone and scale to a maximum 1280-pixel long edge. No second listener, LAN binding, download, credential or new Host permission. The complete source change remains in `native/wda-network.patch`; the pinned upstream archive and licenses are unchanged. The loopback viewer preserves its origin/capability checks, and input still validates current display geometry. Native screenshot exports and unsigned viewing retain CoreDevice capture. The shared core dispatcher now admits the viewer’s physical_touch operation, with regression coverage through core (the previous isolated viewer test omitted that layer).
+
+
+## Physical control 0.3.1 (2026-10-28)
+
+Viewing uses fixed CoreDevice display/capture commands, independent of signing or runner state, and deletes temporary frame files after each capture. The viewer now serves the existing simulator controller and shared touch overlay. First user input prepares control; it never replays that input after setup. Signing discovery uses `security find-identity -v -p codesigning` and public `security find-certificate -a -p` metadata, matches valid development identities by certificate fingerprint, and reads the certificate OU (not the CN suffix) as team ID. No private keys or account credentials are exported. A unique team or the installed runner's team is selected automatically; ambiguity requires a named choice. Choices remain in memory and the installed runner provides the next-session preference. No new vendor bytes, dependency, third-party endpoint or host permission is introduced by this follow-up.
+
+Added Appium WebDriverAgent v15.1.6, revision `5f8280e761dc0b5b9b28368e63a8f0cc8d868346`, BSD-3-Clause. Official source: https://codeload.github.com/appium/WebDriverAgent/tar.gz/refs/tags/v15.1.6 . `vendor/wda/source.tar.gz` is the original archive, SHA-256 `98c8f7102768aa10530c9b124be39d66a06a146631708416348b88f2db1a56c3`, checked before every extraction. The original licenses and source remain inside; combined notices include CocoaHTTPServer, RoutingHTTPServer and CocoaAsyncSocket.
+
+`native/wda-network.patch` is the complete local source diff: disable the unused MJPEG listener, preserve a bare IPv6 interface address in CocoaAsyncSocket, and add an explicitly selected display ID to screenshots and XCTest touch/text event records. A bounded custom setting accepts only numeric display IDs 1–1024; the host selects a currently active integrated display from CoreDevice, never a caller-selected screen. Text synthesis uses a generic event name and requests redaction. Older XCTest runtimes reject secondary-display input instead of silently sending it to the primary panel. The runner's HTTP listener binds only to the paired device's current CoreDevice IPv6 tunnel address. No caller-selected host, remote download or arbitrary shell command is accepted. Physical discovery uses exact CoreDevice identifiers, with hardware UDIDs retained internally. There is no new third-party account storage: explicit Connect delegates signing/provisioning to the installed Xcode and the user's selected development team. Xcode may contact Apple's provisioning services through its existing account; credentials are not read, copied or logged by the plugin.
+
+The worker runs fixed `xcrun devicectl`, `xcodebuild`, archive extraction/patching, codesign verification, and device-scoped log commands. Xcode build/test processes are owned, bounded and cancelled on disconnect. Builds omit host compiler include variables, disable explicit Clang modules, and keep compiler warnings nonfatal for upstream optional/generated include paths on Xcode 27; actual compiler errors still fail. A source/patch digest preserves extraction timestamps between reconnects; Xcode still checks and signs on every connection. The user-facing viewer binds loopback, requires exact host/origin and a per-process capability, validates opened devices, bounds requests and never accepts arbitrary WDA routes. Physical input errors retain executed/unknown outcomes and are never automatically retried. Read-only screen polling is independent of input locks. Screenshot/log artifacts and runner build files stay in the plugin's local data directory; tests use isolated temporary data.
+
+Baguette and Android vendor assets remain unchanged. Test and runtime evidence: `VERIFICATION-physical.md`.
+
 ## Input and presentation lifecycle 0.2.32 (2026-10-27)
 
 The design references NeoSimulator's keyboard ownership and presentation separation; no NeoSimulator source or dependency is bundled. Existing Baguette/runtime versions, network destinations, permissions and Xcode preferences are unchanged. The local keyboard Web patch now drops unsent requests on window blur/pagehide and removes its named mouse/focus listeners on detach; queued requests are not replayed after late completion. `vendor-web.patch` is regenerated against its existing verified upstream baseline and the keyboard inventory hash is updated.
@@ -226,3 +272,56 @@ Native two-contact dispatch (2026-10-27): touch2 and canned two-finger paths now
 Interactive transport (2026-10-27): disable TCP Nagle batching on accepted native HTTP/WebSocket connections and both ends of the existing Node WebSocket proxy. Authentication, origins, opened-device checks, and framing are unchanged. The real-socket regression observed TCP_NODELAY=0 before and 1 after. Native Baguette SHA-256 c713d39ea18266ead96a9f7e4b934868674cdcbf5a900bdbf0e0f109faa2fef0, 8005824 bytes; source and tests included in vendor-native.patch.
 
 Gesture-boundary follow-up 0.2.58 (2026-10-28): the iPhone wheel source bounds pan translation for both visible contacts together, consumes offscreen travel, and clears a superseded idle timer on kind changes. Android applies the same edge rule and preserves start/release snapshots in its existing input queue. No new executable, endpoint, permission, credential or autonomous access. Vendor-web patch and inventory updated; source regressions and real Electron DOM/HTTP backpressure checks pass. This follow-up did not rerun physical trackpad/device acceptance; see docs/simulator-gesture-verification.md.
+
+## Physical continuous input/video 0.3.10 (2026-10-29)
+
+pymobiledevice3 11.47.0 official PyPI release, project source
+https://github.com/doronz88/pymobiledevice3. Exact transitive versions and official
+PyPI wheel SHA-256 values are in node/physical/realtime-requirements.txt. Runtime
+installation uses Xcode/system Python in a private venv, pip --isolated, explicit
+https://pypi.org/simple, --only-binary=:all: and --require-hashes. Only PyPI/index
+and files.pythonhosted.org wheel downloads; no unpinned updates, sdist build
+scripts, user pip configuration, global packages, shell commands or credentials.
+Source imports reviewed: native_tunnel.py, remotexpc.py, core_device/display_service.py,
+screen_stream.py and hid_service.py. Native tunnel uses the selected paired serial,
+macOS libxpc and fixed local system inspection commands; no privilege escalation,
+remoted suspension or new pairing. Upstream native-tunnel/remoted coexistence is a
+known compatibility boundary; outages retire the generation and never replay input.
+
+The separate GPL-3.0-or-later Python helper reuses RTP depacketization, hvcC framing
+and RTCP receiver reports only; it does not invoke the upstream serve() entry.
+No upstream UI, audio capture, clipboard, accessibility settings, HTTP server or
+queued HID worker is started. Node authenticates the existing loopback viewer,
+selects CoreDevice identities, and passes a fixed configuration over stdin. Video
+and command acknowledgements are bounded binary stdout messages. Pointer moves
+coalesce on the client; the helper directly awaits HID sends. Dispatched means
+transport delivery, not independently observed UI success. On lost acknowledgements
+release/cancel and retire the connection, never resend the user action. A 1.5-second
+contact lease covers dead viewers; closing stdin also releases. Screen changes
+retire the generation. Only owned sockets/services are closed; the negotiated
+20-second RTCP timeout expires device media, avoiding global stop of other clients.
+No screen recordings or text-input content are written to runtime logs.
+
+Integration follow-up 0.3.20: Xcode Python 3.9 lacks asyncio.sock_sendto;
+the helper supplies a nonblocking IPv6 datagram adapter for the pinned
+_KernelUdp implementation. This keeps RTCP receiver reports and RCTL feedback
+working on the runtime actually installed by the plugin. The helper monitors
+both media receiver and feedback task completion. Short, owned device power
+assertions keep an unlocked display awake; no unlock or Auto-Lock setting is
+changed. At most the final 4 KiB of helper stderr is retained per device in the
+private runtime directory for connection diagnostics, without input content.
+Concurrent startup is shared per device. Exit retires readiness immediately,
+even if inherited pipes remain open, and late packets cannot resurrect it.
+Quiet video gets a longer idle budget; the first input starts its own bounded
+response budget, which repeated input cannot extend. No gesture is replayed.
+
+Agent integration 0.3.21: PyAV 15.1.0, official PyPI macOS CPython 3.9 wheels,
+BSD-3-Clause (https://pypi.org/project/av/15.1.0/). Exact wheel hashes are pinned
+in realtime-requirements.txt; no source builds or additional package hooks.
+The isolated helper decodes the already-owned HEVC stream using CodecContext,
+retains only the latest decoded frame, and encodes JPEG on snapshot requests.
+It never opens URLs/files through FFmpeg or starts audio/recording. PyAV and its
+bundled native libraries stay in the private runtime; no binary is vendored.
+Agent contact ownership shares viewer exclusion and releases after 30 seconds
+without a further touch phase; helper heartbeats preserve the live contact only
+within that lease. Disconnection/uncertain sends never replay user input.

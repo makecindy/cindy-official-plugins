@@ -118,6 +118,25 @@ test('both shipped controller templates initialize and load the running device',
  }
 });
 
+test('physical phones use the shared screen, screenshot and keyboard controls without simulator lifecycle actions',async()=>{
+ const device={...status().device,kind:'physical',platform:'ios',runtime:'iOS 27.2',control:{ready:false}};
+ const f=await boot({respond:()=>status({device,devices:[device],viewerPlatform:'physical'})});
+ assert.match(f.dom.byId.screen.src,/\/simulators\//);
+ assert.equal(f.dom.byId['btn-home'].disabled,false);
+ assert.equal(f.dom.byId['btn-shot'].disabled,false);
+ assert.equal(f.dom.byId['btn-rotl'].hidden,true);
+ assert.equal(f.dom.byId['btn-audio'].hidden,true);
+ f.dom.byId['btn-more'].dispatch('click');const menu=f.dom.body.querySelector('.menu');
+ assert.match(menu.textContent,/电脑键盘输入/);assert.doesNotMatch(menu.textContent,/关闭设备|摇一摇|完整工具/);
+ assert.equal(f.calls.some(p=>p.action==='connect'),false);
+});
+test('a disconnected physical phone requests reconnection rather than simulator startup',async()=>{
+ const device={...status().device,kind:'physical',state:'Disconnected'};
+ const f=await boot({respond:()=>status({device,devices:[device],ready:false,viewerPlatform:'physical'})});
+ assert.match(f.dom.byId.overlay.textContent,/手机未连接/);assert.doesNotMatch(f.dom.byId.overlay.textContent,/打开设备|启动设备/);
+ assert.equal(f.calls.some(p=>p.action==='boot'),false);
+});
+
 // Run the real parent capture listener before the real device canvas handler.
 // Unit tests of either page alone cannot detect a parent bypassing its child.
 function attachPlatform(f,platform){
@@ -727,6 +746,30 @@ test('rectangular TV and Vision zoom uses view points, preserves actual size and
   f.sim.setZoom({mode:'pct',pct:100});await f.sim.measure();
   assert.equal(f.sim.state.fitPct,30);assert.equal(f.dom.byId.frame.style.width,'1944px','screen points exclude the fixed frame padding');
  }
+});
+
+test('physical percentages remain absolute through repeated measurements, resize and panel changes',async()=>{
+ const device={...status().device,kind:'physical',platform:'ios'};
+ const f=await boot({respond:()=>status({device})});
+ f.context.getComputedStyle=()=>({paddingLeft:'12px',paddingRight:'12px',paddingTop:'12px',paddingBottom:'64px'});
+ f.sim.state.viewport={width:500,height:1000};
+ f.dom.byId.stage.getBoundingClientRect=()=>({width:400,height:800});
+ f.sim.setZoom({mode:'pct',pct:67});
+ for(let i=0;i<8;i++){await f.sim.measure();assert.equal(f.sim.state.fitPct,70);assert.equal(f.dom.byId.frame.style.width,'383px');assert.equal(f.dom.byId.frame.style.height,'770px');}
+ f.dom.byId.stage.getBoundingClientRect=()=>({width:800,height:1000});await f.sim.measure();
+ assert.equal(f.sim.state.fitPct,90);assert.equal(f.dom.byId.frame.style.height,'770px');
+ f.sim.setZoom({mode:'pct',pct:50});assert.equal(f.dom.byId.frame.style.height,'600px');
+ f.sim.state.viewport={width:1000,height:500};await f.sim.measure();
+ assert.equal(f.dom.byId.frame.style.width,'548px');assert.equal(f.dom.byId.frame.style.height,'350px');
+ f.sim.setZoom({mode:'fit'});assert.equal(f.dom.byId.frame.style.width,'800px');assert.equal(f.dom.byId.frame.style.height,'1000px');
+});
+
+test('handheld simulator repeated measurements use the applied frame size, not prior fit estimates',async()=>{
+ const f=await boot({respond:()=>status()});f.sim.state.viewport={width:400,height:800};f.sim.state.zoom={mode:'pct',pct:67};f.sim.state.fitPct=20;
+ f.dom.byId.stage.getBoundingClientRect=()=>({width:400,height:800});
+ f.dom.byId.frame.getBoundingClientRect=()=>({width:200,height:400});
+ f.dom.byId.screen.contentDocument.getElementById=id=>id==='nativeDeviceFrame'?{getBoundingClientRect:()=>({width:180,height:360})}:null;
+ for(let i=0;i<8;i++){await f.sim.measure();assert.equal(f.sim.state.fitPct,90);}
 });
 
 test('Android keeps handheld screen, Home and rotation while TV/Vision retain their stage and input',async()=>{
