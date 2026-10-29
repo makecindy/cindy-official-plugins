@@ -7,24 +7,36 @@ const fail = (error,message,execution = 'not_executed') => ({ok:false,error,mess
 // Cindy hosts that implement the browserExtension slot own the extension bridge: jobs, site policy,
 // paired identities and learning relays travel over the plugin pipe and the bundled worker never
 // binds a loopback port. Older hosts reject the pipe type, so the worker bridge stays the fallback;
-// a refusal is never treated as a connection.
+// a refusal is never treated as a connection. Only that rejection marks a host as older: the host's
+// pipe throws INVALID_PARAMS ("未知的管子消息类型") for a message type it does not know (or, older
+// still, answers with nothing). Any other failure (HOST_NOT_READY while the bridge starts,
+// PERMISSION_DENIED while the plugin is being enabled, a pipe timeout) is not remembered, so the next
+// call asks again instead of starting the worker bridge and competing with the host for its ports.
 const HOST_KINDS={status:'status',act:'act',setPolicy:'setPolicy',setTrustedClients:'setTrustedClients',learningActive:'relayActive',learningProgress:'relayProgress',learningResult:'relayResult'};
 let hostBridge=null;
 async function hostRequest(kind,params = {},reach = 'not_executed') {
   let r;
   try { r=await cindy.send({type:'browser-extension-request',kind,...params}); }
-  catch (e) { return fail('HOST_BRIDGE_UNAVAILABLE',e?.message || 'Cindy did not accept the browser extension request.',reach); }
+  catch (e) {
+    // Electron keeps only the message of a rejected pipe call: "… Error: [INVALID_PARAMS] …".
+    const code=e?.code || /\[([A-Z][A-Z_]+)\]/.exec(e?.message || '')?.[1];
+    return {...fail('HOST_BRIDGE_UNAVAILABLE',e?.message || 'Cindy did not accept the browser extension request.',reach),...(code ? {hostCode:code} : {}),...(/未知的管子消息类型|unknown (?:pipe )?message type/i.test(e?.message || '') ? {unknownPipeType:true} : {})};
+  }
   if (r && typeof r === 'object' && r.ok === false && r.errorCode) return {...fail(r.errorCode,r.message || 'Cindy refused the browser extension request.',reach),hostRefused:true};
-  if (!r || typeof r !== 'object') return fail('HOST_BRIDGE_UNAVAILABLE','Cindy returned no browser extension result.',reach);
+  // A host with the slot always answers with an object; no answer at all is an older host's pipe.
+  if (!r || typeof r !== 'object') return {...fail('HOST_BRIDGE_UNAVAILABLE','Cindy returned no browser extension result.',reach),unknownPipeType:true};
   return r;
 }
 async function detectHostBridge() {
   if (hostBridge !== null) return hostBridge;
   const r=await hostRequest('status');
-  // HOST_NOT_READY still proves the slot exists (the bridge is starting); any other refusal or a
-  // rejected pipe type means an older host, so the bundled worker keeps serving.
-  hostBridge=r.ok === true || r.error === 'HOST_NOT_READY';
-  return hostBridge;
+  // A host that answers (even HOST_NOT_READY while its bridge starts) has the slot.
+  if (r.ok === true || r.error === 'HOST_NOT_READY') return hostBridge=true;
+  // Only an older host's rejection of the unknown pipe type selects the bundled worker for good.
+  if (r.hostCode === 'INVALID_PARAMS' || r.error === 'INVALID_PARAMS' || r.unknownPipeType) return hostBridge=false;
+  // Anything else is transient and not remembered: this call goes to the host, which reports its own
+  // error, and the next call probes again. The worker never starts a competing bridge on a guess.
+  return true;
 }
 function hostParams(method,params) {
   if (method === 'act') return {action:params.action,payload:params.payload || {}};

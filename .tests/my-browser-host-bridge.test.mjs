@@ -18,7 +18,7 @@ class FakeChannel {
 // (replies to `browser-extension-request` on the pipe) or predates it (rejects the pipe type).
 // Only the sandbox-absolute import specifiers are rewritten to local shims; no bridge, browser or
 // model is involved. The test observes which transport each tool call and learning relay takes.
-async function sandbox(t,{hostSlot}) {
+async function sandbox(t,{hostSlot,statusFailures=[]}) {
   const dir=await fs.promises.mkdtemp(path.join(os.tmpdir(),'my-browser-host-bridge-'));
   const shim=async(name,file,global)=>{const target=path.join(dir,name+'.shim.mjs');await fs.promises.writeFile(target,`import {createRequire} from 'node:module';globalThis.${global}=createRequire(import.meta.url)(${JSON.stringify(path.join(root,file))});\n`);return pathToFileURL(target).href;};
   const policyShim=await shim('policy','my-browser/extension/policy.js','MyBrowserPolicy');
@@ -44,7 +44,14 @@ async function sandbox(t,{hostSlot}) {
     send:async message => {
       if (message.type !== 'browser-extension-request') return {ok:true};
       state.pipe.push(message);
-      if (!hostSlot) throw new Error('未知的管子消息类型');
+      // What an older host's pipe actually rejects with once it crosses Electron IPC.
+      if (!hostSlot) throw new Error("Error invoking remote method 'ghost-pipe:send': Error: [INVALID_PARAMS] 未知的管子消息类型");
+      // A host with the slot that is not ready yet: the first probes fail transiently.
+      if (message.kind === 'status' && statusFailures.length) {
+        const failure=statusFailures.shift();
+        if (failure.throws) throw new Error(failure.throws);
+        return {ok:false,errorCode:failure.errorCode,message:'fixture'};
+      }
       if (message.kind === 'status') return {ok:true,version:'0.4.37',protocol:3,port:18810,extension_connected:true,clients:[{id:'c1',connected:true}],policy:state.kv.policy,pending:0,host:true,nativeBinding:'ready'};
       if (message.kind === 'act') return {ok:true,url:message.payload.url,text:'from host',browser:'c1',untrusted_content:true};
       if (message.kind === 'setPolicy') return {ok:true,policy:message.policy};
@@ -118,4 +125,16 @@ test('learning relays from the host bridge are handled by the plugin and answere
   assert.ok(result,'the relay must be answered through the host pipe');
   assert.equal(result.result.ok,true,JSON.stringify(result.result));
   assert.equal(state.node.some(c => c.method === 'learningResult'),false,'the worker must not receive relay answers on a host with the slot');
+});
+
+// Bug regression (review 2026-10-29): any failed probe marked the host as older for the plugin's
+// lifetime, so a transient refusal made the bundled worker start its own bridge and compete with
+// the host for the bridge ports.
+test('a transient host refusal is not remembered as an older host; the next call probes again',async t=>{
+  const {state,callTool}=await sandbox(t,{hostSlot:true,statusFailures:[{errorCode:'PERMISSION_DENIED'},{throws:"Error invoking remote method 'ghost-pipe:send': Error: [HOST_NOT_READY] timeout"}]});
+  await callTool('browser_read',{url:'https://example.test',mode:'content'});
+  const read=await callTool('browser_read',{url:'https://example.test',mode:'content'});
+  assert.equal(read.text,'from host');
+  assert.ok(state.pipe.filter(m => m.kind === 'status').length>=3,'each transient failure is probed again');
+  assert.equal(state.node.filter(c => ['act','status','setPolicy','setTrustedClients'].includes(c.method)).length,0,'the bundled worker never serves the bridge on a guess');
 });
