@@ -265,7 +265,7 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     check('protocol session: commands, cookies and network events',begun.ok && enabledNet.ok && cookies.ok && cookies.result.cookies.some(c=>c.name==='visit') && events.some(([m,p])=>m==='Network.requestWillBeSent' && p.request.url.includes('probe=1')),JSON.stringify({begun:begun.error,net:enabledNet.error,cookies:cookies.error||cookies.result,events:events.map(e=>e[0]).slice(0,10)}));
     await act('cdp',{...T,op:'end'});
     check('session end detaches',(await act('debuggerAccess',{})).attachedTabs===0);
-    const after=await act('cdp',{...T,op:'command',method:'Network.getCookies',params:{}});
+    const after=await act('cdp',{...T,op:'command',method:'Network.getCookies',params:{urls:['http://parity.test/tall']}});
     check('commands after the session ends are refused',after.error==='DEBUGGER_DETACHED',after.error);
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);

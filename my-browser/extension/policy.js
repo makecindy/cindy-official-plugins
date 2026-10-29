@@ -53,6 +53,38 @@
   function matches(host, pattern) {
     return pattern === '*' || (pattern.startsWith('=') ? host === pattern.slice(1) : host === pattern || host.endsWith('.' + pattern));
   }
+  // DevTools methods a site recipe may send with `cdp op:"command"`: exactly what Cindy's recipe
+  // runtime uses. Everything else (Network.getAllCookies, Runtime.evaluate, Target.*, …) is refused.
+  const CDP_METHODS = ['Accessibility.enable','Accessibility.getFullAXTree','DOM.enable','DOM.focus','DOM.getDocument','DOM.querySelector','DOM.querySelectorAll','DOM.describeNode','DOM.resolveNode','DOM.getContentQuads','DOM.getBoxModel','DOM.scrollIntoViewIfNeeded','Input.dispatchKeyEvent','Input.dispatchMouseEvent','Input.insertText','Network.enable','Network.getResponseBody','Network.getCookies','Storage.getCookies','Page.captureScreenshot','Page.getLayoutMetrics','Page.getFrameTree','Page.handleJavaScriptDialog','Runtime.callFunctionOn','Runtime.releaseObject'];
+  // Cookie reads through the debugger are limited to the site of the tab it is attached to.
+  // "Site" approximates the registrable domain without a public-suffix list: the last two labels,
+  // or the last three when the last two are a public second level (a two-letter country code under
+  // ac/co/com/edu/gov/mil/net/org/ne/or/go/gob, e.g. co.uk, com.cn, com.au, co.jp, com.br, co.nz)
+  // or a shared hosting suffix below. IP literals and single-label hosts are their own site.
+  // Where the approximation is wrong it errs towards a narrower site, never a wider one.
+  const PUBLIC_SECOND_LEVELS = new Set(['ac','co','com','edu','gov','mil','net','org','ne','or','go','gob']);
+  const SHARED_SUFFIXES = new Set(['github.io','gitlab.io','blogspot.com','herokuapp.com','appspot.com','vercel.app','netlify.app','pages.dev','workers.dev','web.app','firebaseapp.com','azurewebsites.net','cloudfront.net']);
+  function site(host) {
+    const h = String(host || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+    if (!h || h.startsWith('[') || h.includes(':') || /^\d+(?:\.\d+){3}$/.test(h)) return h;
+    const labels = h.split('.');
+    if (labels.length <= 2) return h;
+    const three = SHARED_SUFFIXES.has(labels.slice(-2).join('.')) || (labels.at(-1).length === 2 && PUBLIC_SECOND_LEVELS.has(labels.at(-2)));
+    return labels.slice(three ? -3 : -2).join('.');
+  }
+  // A cookie host (".example.test" or "example.test") the debugger may return for a tab at tabUrl:
+  // same site as the tab, and never a site on the user's read block list.
+  function cookieHostAllowed(policy, tabUrl, host) {
+    let tabHost;
+    try { tabHost = new URL(tabUrl).hostname.toLowerCase().replace(/\.$/, ''); } catch { return false; }
+    const h = String(host || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+    return !!h && site(h) === site(tabHost) && !policy.read.block.some(p => matches(h, p));
+  }
+  function cookieUrlAllowed(policy, tabUrl, url) {
+    let u;
+    try { u = new URL(url); } catch { return false; }
+    return ['http:', 'https:'].includes(u.protocol) && cookieHostAllowed(policy, tabUrl, u.hostname);
+  }
   function normalizePolicy(p) {
     if (!p || !p.read || !p.interact) throw new Error('Invalid policy. Reload settings before saving.');
     const list = (items, wildcard = false) => {
@@ -103,6 +135,13 @@
     for (const key of ['timeMs','timeoutMs']) if (payload[key] != null && !finite(payload[key], 0, 120000)) throw new Error(key + ' must be 0–120000.');
     if (action === 'cdp' && !['begin','end','events','command'].includes(payload.op)) throw new Error('cdp op must be begin, end, events or command.');
     if (action === 'cdp' && payload.op === 'command' && (typeof payload.method !== 'string' || !/^[A-Za-z]+\.[A-Za-z]+$/.test(payload.method))) throw new Error('cdp command needs a protocol method such as Network.getCookies.');
+    if (action === 'cdp' && payload.op === 'command' && !CDP_METHODS.includes(payload.method)) throw new Error('cdp command ' + payload.method + ' is not available to site recipes.');
+    // Cookies are read for named pages of the operated site only; the site itself is checked against the
+    // tab the debugger is attached to, where the tab's live URL is known.
+    if (action === 'cdp' && payload.op === 'command' && payload.method === 'Network.getCookies') {
+      const urls = payload.params?.urls;
+      if (!Array.isArray(urls) || !urls.length || urls.length > 50 || urls.some(u => typeof u !== 'string' || u.length > 8192 || !/^https?:\/\//i.test(u))) throw new Error('Network.getCookies needs params.urls: 1–50 HTTP(S) URLs of the site being operated on.');
+    }
     if (action === 'cdp' && payload.params != null && (typeof payload.params !== 'object' || Array.isArray(payload.params) || JSON.stringify(payload.params).length > 1000000)) throw new Error('cdp params must be an object of at most 1 MB.');
     if (payload.loadState != null && !['load','domcontentloaded','networkidle'].includes(payload.loadState)) throw new Error('loadState must be load, domcontentloaded or networkidle.');
     for (const key of ['textGone','urlIncludes','filter','startRef','endRef','startSelector','endSelector','button']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > 8192)) throw new Error('Invalid ' + key + '.');
@@ -213,7 +252,7 @@
     if (redactedPath !== u.pathname) { u.pathname = redactedPath; changed = true; }
     return changed ? u.href : raw;
   }
-  const api = { READ, INTERACT, UNADDRESSED, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
+  const api = { READ, INTERACT, UNADDRESSED, CDP_METHODS, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl, site, cookieHostAllowed, cookieUrlAllowed };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MyBrowserPolicy = api;
 })(globalThis);

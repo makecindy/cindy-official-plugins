@@ -13,7 +13,7 @@ const {assertSupported}=require('../my-browser/extension/network-guard.js');
 const same=(actual,expected)=>assert.deepEqual(JSON.parse(JSON.stringify(actual)),expected);
 const source=fs.readFileSync(new URL('../my-browser/extension/background.js',import.meta.url),'utf8');
 
-function harness(local={clientId:'fixture'},shared) {
+function harness(local={clientId:'fixture'},shared,options={}) {
   const tabs=shared?.tabs||new Map(),windows=shared?.windows||new Map([[1,{id:1,state:'normal'}]]),data={},calls=[];let next=10,nextWindow=500;
   const state={closeOnCreate:false};
   const chrome={permissions:{contains:async()=>false},action:{onClicked:{addListener(){}}},runtime:{getURL:path=> 'chrome-extension://fixture/'+(path||''),getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
@@ -27,13 +27,14 @@ function harness(local={clientId:'fixture'},shared) {
     windows:{create:async options=>{calls.push(['windows.create',options]);const w={id:nextWindow++,state:'normal'};windows.set(w.id,w);const t=await chrome.tabs.create({url:options.url,windowId:w.id,active:true});return {id:w.id,tabs:[t]};},
       get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),getAll:async()=>[...windows.values()].map(w=>({...w,focused:w.id===1})),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
-    setTimeout(fn){queueMicrotask(fn);return 0;},clearTimeout(){}};
+    // Timers fire at once by default; 'never' keeps idle timers and deadlines from firing.
+    setTimeout(fn){if(options.timers!=='never')queueMicrotask(fn);return 0;},clearTimeout(){}};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
-  const run=(action,payload)=>context.tabTest.handle({id:'job',action,payload},P.defaults(),{base:'http://fixture',session:'fixture'});
+  const run=(action,payload,policy=P.defaults())=>context.tabTest.handle({id:'job',action,payload},policy,{base:'http://fixture',session:'fixture'});
   // A tab the user has open in their own window, behind the one they are looking at.
   if(!shared)tabs.set(1,{id:1,url:'https://example.test/user',windowId:1,status:'complete',active:true});
   if(!shared)tabs.set(2,{id:2,url:'https://example.test/behind',windowId:1,status:'complete',active:false});
-  return {run,tabs,windows,calls,state};
+  return {run,tabs,windows,calls,state,chrome};
 }
 
 test('policy: open is a read like navigate; new actions need a tab id and bounded input',()=>{
@@ -46,7 +47,7 @@ test('policy: open is a read like navigate; new actions need a tab id and bounde
   // On-demand debugger: pdf reads, raw protocol interacts, the access check addresses no page.
   assert.ok(P.READ.includes('pdf'));assert.ok(P.INTERACT.includes('cdp'));
   P.validate('debuggerAccess',{});assert.equal(P.check(P.defaults(),'debuggerAccess').ok,true);
-  P.validate('cdp',{url:'https://example.test/',tabId:1,op:'command',method:'Network.getCookies',params:{}});
+  P.validate('cdp',{url:'https://example.test/',tabId:1,op:'command',method:'Network.getCookies',params:{urls:['https://example.test/']}});
   assert.throws(()=>P.validate('cdp',{url:'https://example.test/',tabId:1,op:'command',method:'eval(1)'}),/protocol method/);
   assert.throws(()=>P.validate('cdp',{url:'https://example.test/',tabId:1,op:'attach'}),/op/);
   assert.throws(()=>P.validate('pdf',{url:'https://example.test/'}),/tab id/);
@@ -154,4 +155,56 @@ test('a new page never jumps in front in Cindy\'s window while the user has it o
   h.windows.get(500).state='minimized';
   await h.run('open',{url:'https://example.test/c'});
   same(h.calls.filter(c=>c[0]==='tabs.create').at(-1),['tabs.create',{url:'https://example.test/c',windowId:500,active:true}]);
+});
+
+// Site recipes drive the page through the debugger. They may send only the methods Cindy's recipe
+// runtime uses, and cookies come back for the site of the tab being operated on only: the profile's
+// other cookies (Network.getAllCookies, Storage.getCookies unfiltered) are never exported.
+test('recipe protocol sessions: listed methods only, cookies of the tab\'s own site only',async()=>{
+  const h=harness(undefined,undefined,{timers:'never'});
+  const sent=[];let event;
+  h.chrome.permissions.contains=async()=>true;
+  h.chrome.debugger={attach:async()=>{},detach:async()=>{},onEvent:{addListener(fn){event=fn;}},onDetach:{addListener(){}},
+    sendCommand:async(_target,method,params)=>{sent.push([method,params]);
+      if(method==='Storage.getCookies')return {cookies:[{name:'a',domain:'.example.test'},{name:'b',domain:'www.example.test'},{name:'c',domain:'.other.test'},{name:'d',domain:'mail.example.test'},{name:'e',domain:'example.test.evil.test'}]};
+      if(method==='Network.getCookies')return {cookies:[{name:'a',domain:'.example.test'},{name:'x',domain:'.tracker.test'}]};
+      return {};}};
+  const tab={url:'https://example.test/user',tabId:1};
+  const policy={...P.defaults(),read:{block:['mail.example.test']}};
+  assert.equal((await h.run('cdp',{...tab,op:'begin'},policy)).ok,true);
+  // Not on the list: refused before anything reaches the browser.
+  for(const method of ['Network.getAllCookies','Runtime.evaluate','Target.createTarget','Storage.setCookies']){
+    assert.throws(()=>P.validate('cdp',{...tab,op:'command',method}),/not available to site recipes/);
+    const refused=await h.run('cdp',{...tab,op:'command',method},policy);
+    assert.equal(refused.error,'INVALID_JOB',method);assert.match(refused.message,/not available to site recipes/);assert.equal(refused.execution,'not_executed');
+  }
+  for(const method of P.CDP_METHODS)if(method!=='Network.getCookies')P.validate('cdp',{...tab,op:'command',method,params:{}});
+  // Network.getCookies must name pages of the tab's site.
+  assert.throws(()=>P.validate('cdp',{...tab,op:'command',method:'Network.getCookies',params:{}}),/params\.urls/);
+  assert.throws(()=>P.validate('cdp',{...tab,op:'command',method:'Network.getCookies',params:{urls:[]}}),/params\.urls/);
+  assert.equal((await h.run('cdp',{...tab,op:'command',method:'Network.getCookies'},policy)).error,'INVALID_JOB');
+  for(const urls of [['https://other.test/'],['https://www.example.test/','https://other.test/'],['https://mail.example.test/inbox']]){
+    const refused=await h.run('cdp',{...tab,op:'command',method:'Network.getCookies',params:{urls}},policy);
+    assert.equal(refused.error,'COOKIES_NOT_ALLOWED',JSON.stringify(urls));assert.equal(refused.execution,'not_executed');
+  }
+  const own=await h.run('cdp',{...tab,op:'command',method:'Network.getCookies',params:{urls:['https://www.example.test/a']}},policy);
+  assert.equal(own.ok,true,JSON.stringify(own));same(own.result.cookies.map(c=>c.name),['a']);
+  // Storage.getCookies reads the whole profile; only the tab's site comes back, minus blocked sites.
+  const all=await h.run('cdp',{...tab,op:'command',method:'Storage.getCookies',params:{browserContextId:'other'}},policy);
+  assert.equal(all.ok,true);same(all.result.cookies.map(c=>c.name),['a','b']);
+  same(sent.filter(([m])=>/Cookies$/.test(m)),[['Network.getCookies',{urls:['https://www.example.test/a']}],['Storage.getCookies',{}]]);
+  // Recorded network events never carry cookie headers.
+  event({tabId:1},'Network.requestWillBeSentExtraInfo',{headers:{Cookie:'sid=1'}});
+  event({tabId:1},'Network.responseReceived',{requestId:'r',response:{url:'https://www.example.test/api',headers:{'Set-Cookie':'sid=2','content-type':'application/json'}}});
+  const events=await h.run('cdp',{...tab,op:'events'},policy);
+  same(events.events,[['Network.responseReceived',{requestId:'r',response:{url:'https://www.example.test/api',headers:{'content-type':'application/json'}}}]]);
+});
+
+test('site approximates the registrable domain and errs narrow',()=>{
+  for(const [host,expected] of [['www.example.test','example.test'],['a.b.example.co.uk','example.co.uk'],['shop.example.com.cn','example.com.cn'],['x.example.com.au','example.com.au'],['m.example.co.jp','example.co.jp'],['example.com.br','example.com.br'],['a.example.co.nz','example.co.nz'],['me.github.io','me.github.io'],['.Example.Test.','example.test'],['93.184.216.34','93.184.216.34'],['[2001:db8::1]','[2001:db8::1]'],['www.example.io','example.io']])assert.equal(P.site(host),expected,host);
+  const policy={...P.defaults(),read:{block:['=secure.example.test']}};
+  assert.equal(P.cookieHostAllowed(policy,'https://www.example.test/','.example.test'),true);
+  assert.equal(P.cookieHostAllowed(policy,'https://www.example.test/','secure.example.test'),false);
+  assert.equal(P.cookieHostAllowed(policy,'https://me.github.io/','you.github.io'),false);
+  assert.equal(P.cookieUrlAllowed(policy,'https://www.example.test/','ftp://example.test/'),false);
 });

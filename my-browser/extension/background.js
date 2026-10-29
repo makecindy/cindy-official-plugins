@@ -200,15 +200,28 @@ async function openDebuggerPage() {
   const win = windows.find(w => w.focused) || windows[0];
   await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win ? {windowId:win.id} : {})});
 }
+const COOKIE_HEADER = /^(?:cookie|set-cookie2?)$/i;
+const stripCookies = headers => headers && typeof headers === 'object' && !Array.isArray(headers) ? Object.fromEntries(Object.entries(headers).filter(([k]) => !COOKIE_HEADER.test(k))) : headers;
+function withoutCookieHeaders(params) {
+  if (!params || typeof params !== 'object') return params;
+  const out = {...params};
+  if (out.request && typeof out.request === 'object') {
+    out.request = {...out.request,headers:stripCookies(out.request.headers)};
+    if (out.request.postData?.length > 256000) out.request.postData = out.request.postData.slice(0,256000);
+  }
+  for (const key of ['response','redirectResponse']) if (out[key] && typeof out[key] === 'object') out[key] = {...out[key],headers:stripCookies(out[key].headers),requestHeaders:stripCookies(out[key].requestHeaders)};
+  return out;
+}
 function hookDebugger() {
   if (debuggerHooked || !chrome.debugger) return;
   debuggerHooked = true;
   chrome.debugger.onEvent.addListener((source,method,params) => {
     const state = debugged.get(source.tabId);
-    if (!state?.recording || !method.startsWith('Network.')) return;
+    // *ExtraInfo events exist only to carry raw Cookie / Set-Cookie headers, including those of other
+    // sites the page talks to; recipes never need them.
+    if (!state?.recording || !method.startsWith('Network.') || method.endsWith('ExtraInfo')) return;
     if (state.events.length >= DEBUGGER_EVENT_MAX) { state.dropped++; return; }
-    const request = params?.request;
-    state.events.push([method,request?.postData?.length > 256000 ? {...params,request:{...request,postData:request.postData.slice(0,256000)}} : params]);
+    state.events.push([method,withoutCookieHeaders(params)]);
   });
   // The user can end a session from Chrome's notice bar; the next command then reports it.
   chrome.debugger.onDetach.addListener(source => { const state = debugged.get(source.tabId); if (state) { clearTimeout(state.timer); debugged.delete(source.tabId); } });
@@ -257,7 +270,11 @@ async function debuggerEvaluate(tabId,a) {
   return {ok:true,execution:'executed',tabId,result,viaDebugger:true};
 }
 // Recipe protocol sessions: one attachment per tab, events buffered between commands.
-async function cdpAction(tab,a) {
+// Cookie commands read only the site of the tab being operated on (see policy.js `site`), and never a
+// site on the user's read block list: Network.getCookies must name pages of that site, and both
+// results are filtered to it. Storage.getCookies would otherwise return every cookie of the profile.
+const COOKIE_METHODS = ['Network.getCookies','Storage.getCookies'];
+async function cdpAction(tab,a,policy) {
   const tabId = tab.id;
   if (a.op === 'begin') {
     const state = await debuggerAttach(tabId);
@@ -272,8 +289,15 @@ async function cdpAction(tab,a) {
   state.timer = setTimeout(() => debuggerDetach(tabId,true),DEBUGGER_IDLE_MS);
   let result;
   if (a.op === 'command') {
-    try { result = await withDeadline(chrome.debugger.sendCommand({tabId},a.method,a.params || {}),30000,Error('The browser did not answer '+a.method+' within 30 s.')); }
+    if (!P.CDP_METHODS.includes(a.method)) return fail('CDP_METHOD_NOT_ALLOWED','cdp command '+String(a.method).slice(0,100)+' is not available to site recipes.');
+    let params = a.params || {};
+    if (a.method === 'Network.getCookies') {
+      if (!Array.isArray(params.urls) || !params.urls.length || !params.urls.every(url => P.cookieUrlAllowed(policy,tab.url,url))) return fail('COOKIES_NOT_ALLOWED','Network.getCookies reads only cookies of the site of this tab: pass params.urls with pages of that site. Cookies of other sites, or of sites blocked from reading, are not available.');
+      params = {urls:params.urls};
+    } else if (a.method === 'Storage.getCookies') params = {};
+    try { result = await withDeadline(chrome.debugger.sendCommand({tabId},a.method,params),30000,Error('The browser did not answer '+a.method+' within 30 s.')); }
     catch (e) { return {...fail('CDP_COMMAND_FAILED',String(e.message || e).slice(0,500),'unknown'),events:state.events.splice(0)}; }
+    if (COOKIE_METHODS.includes(a.method)) result = {cookies:(Array.isArray(result?.cookies) ? result.cookies : []).filter(c => P.cookieHostAllowed(policy,tab.url,c?.domain))};
   }
   const events = state.events.splice(0), dropped = state.dropped; state.dropped = 0;
   return {ok:true,execution:'executed',tabId,...(a.op === 'command' ? {result: result ?? {}} : {}),events,...(dropped ? {droppedEvents:dropped} : {})};
@@ -863,7 +887,7 @@ async function tabAction(job,tab,policy) {
   }
   if (job.action === 'cdp') {
     if (!await debuggerAllowed()) return await debuggerDenied();
-    return cdpAction(tab,a);
+    return cdpAction(tab,a,policy);
   }
   if (job.action === 'screenshot') {
     const inCindyWindow = tab.windowId === await agentWindow();
@@ -1034,7 +1058,8 @@ async function mainWorldOperation(action,a) {
   return {ok:false,error:'INVALID_ACTION',message:'Unsupported page action.',execution:'not_executed'};
 }
 async function handle(job,policy,target) {
-  P.validate(job.action,job.payload);
+  // Validation messages are fixed policy text; say which rule refused the job.
+  try { P.validate(job.action,job.payload); } catch (e) { return fail('INVALID_JOB',String(e.message || 'The browser job was invalid.').slice(0,300)+' No action was executed.'); }
   const gate = P.check(policy,job.action,job.payload.url);
   if (!gate.ok) return gate;
   if (job.action === 'debuggerAccess') return debuggerAccess(job.payload);
