@@ -61,7 +61,8 @@
   // or the last three when the last two are a public second level (a two-letter country code under
   // ac/co/com/edu/gov/mil/net/org/ne/or/go/gob, e.g. co.uk, com.cn, com.au, co.jp, com.br, co.nz)
   // or a shared hosting suffix below. IP literals and single-label hosts are their own site.
-  // Where the approximation is wrong it errs towards a narrower site, never a wider one.
+  // Without a public-suffix list it can be wrong both ways: hosted suffixes not listed above
+  // (myshopify.com and the like) count as one site, and some country second levels as two.
   const PUBLIC_SECOND_LEVELS = new Set(['ac','co','com','edu','gov','mil','net','org','ne','or','go','gob']);
   const SHARED_SUFFIXES = new Set(['github.io','gitlab.io','blogspot.com','herokuapp.com','appspot.com','vercel.app','netlify.app','pages.dev','workers.dev','web.app','firebaseapp.com','azurewebsites.net','cloudfront.net']);
   function site(host) {
