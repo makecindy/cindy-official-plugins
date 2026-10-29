@@ -37,6 +37,7 @@ const FIXTURE_TREE = {
     ['help', 'Help about any command'],
     ['profile', 'Manage TapTap server profiles'],
     ['skills', 'List and read the manuals embedded in the CLI'],
+    ['feedback', 'Report a CLI problem to the team'],
     ['overview', 'Summarize login, visible developers, and visible games'],
     ['update', 'Update taptap-cli to the latest version'],
     ['upload', 'Upload an image and ingest it into the app asset library'],
@@ -107,6 +108,7 @@ const FIXTURE_RISK = {
   auth: 'write',
   'auth status': 'read',
   overview: 'read',
+  feedback: 'write',
   version: 'read',
   'task +get': 'read',
   'profile use': 'write',
@@ -582,14 +584,24 @@ test('an identifier operand is not mistaken for a local file', async () => {
   // `task +get <id>`, `profile use <name>`, `schema <service> <method>` and the
   // like take identifiers. Demanding a workdir for them would block a call that
   // reads no file at all.
-  const [task, profile] = await callWorker([
+  const [task, profile, feedback] = await callWorker([
     callTool('task', { cli_path: fakeCli, args: { _positional: ['+get', 'task-1'] } }),
     callTool('profile', { cli_path: fakeCli, args: { _positional: ['use', 'default'] } }),
+    // `feedback` takes the user's own words. Treating that prose as a path
+    // would answer WORKDIR_REQUIRED and leave a blocked user with no way to
+    // report the problem at all.
+    callTool('feedback', {
+      cli_path: fakeCli,
+      args: { _positional: ['app get-app-module 报错看不懂'], dry_run: true },
+    }),
   ]);
   assert.equal(task.result.ok, true);
   assert.deepEqual(task.result.data.envelope.data.echo, ['task', '+get', 'task-1']);
   // …and the write gate still applies where the command is a write.
   assert.equal(profile.result.errorCode, 'CONFIRM_REQUIRED');
+  assert.equal(feedback.result.ok, true, 'a feedback description is prose, not a file');
+  assert.deepEqual(feedback.result.data.envelope.data.echo,
+    ['feedback', 'app get-app-module 报错看不懂', '--dry-run']);
 });
 
 test('a local file operand is refused before the confirmation gate', async () => {
@@ -1170,6 +1182,10 @@ test('the manuals carry the 2026.10.29 upstream sync', () => {
   assert.match(feedback, /call_tool\(name:"feedback"/, 'feedback must be shown as a call_tool write');
   assert.match(feedback, /dry_run: true/, 'feedback is a write, so it goes through the preview gate');
   assert.match(feedback, /QQ 群 1127966239/, 'the receipt must point at the support group');
+  // A submission is externally visible: the manual may not turn an unknown
+  // outcome into a retry, or one complaint lands twice.
+  assert.match(feedback, /`unknown`/, 'an unknown outcome must be named');
+  assert.doesNotMatch(feedback, /最多重试一次/, 'an unknown submission is not a free retry');
   assert.match(
     read('taptap-suite/MANUAL.md'),
     /taptap-suite\/references\/feedback\.md/,
@@ -1181,7 +1197,20 @@ test('the manuals carry the 2026.10.29 upstream sync', () => {
   assert.doesNotMatch(packages, /output:"test-qr\.png"/, 'a fixed QR file name collides on the second render');
 
   const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
-  assert.match(fields, /`module_id` 只能取上表这 9 个值/, 'the closed module_id enum must be stated;');
+  assert.match(fields, /`module_id` 只能取上表这 9 个值/, 'the closed module_id enum must be stated');
+
+  // The 409 recovery path re-reads a module; without the scope the worker
+  // forwards nothing and the CLI may fall back to whichever app it last saved,
+  // so the manual has to carry the original pair.
+  const packagesManual = read(
+    'taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md',
+  );
+  assert.match(packagesManual, /409 的 `error_description`/);
+  assert.match(
+    packagesManual,
+    /call_tool\(name:"app get-app-module", args:\{developer_id:"<developerId>", app_id:"<appId>"/,
+    'the recovery read must name the conflicting app scope',
+  );
 });
 
 test('the install guidance lists commands that actually work', () => {

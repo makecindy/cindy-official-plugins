@@ -986,7 +986,10 @@ const DOCUMENTATION_PATHS = new Set(['help', 'skills list', 'skills read', 'skil
 // list has not met. This is separate from the risk exemption above: a `skills`
 // subcommand still goes through the ordinary risk lookup.
 const IDENTIFIER_OPERAND_HEADS = new Set([
-  'auth', 'event', 'help', 'profile', 'schema', 'skills', 'task',
+  // `feedback <description>` takes prose, not a path: refusing it for a
+  // missing workdir would make the one command a blocked user needs the
+  // hardest one to run.
+  'auth', 'event', 'feedback', 'help', 'profile', 'schema', 'skills', 'task',
 ]);
 
 // The command a call actually names. Container commands (`materials`, `task`,
