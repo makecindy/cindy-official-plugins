@@ -83,7 +83,11 @@
   function needsTranslation(){if(videoSession?.sameLanguage)return false;return prefs.videoMode==='both'||prefs.videoMode==='translation';}
   function field(label,control){const row=el('div',undefined,'field');row.append(el('span',label),control);return row;}
   function switchControl(label,value,change){const b=button('',()=>{const next=b.getAttribute('aria-checked')!=='true';b.setAttribute('aria-checked',String(next));return change(next);},'switch');b.setAttribute('role','switch');b.setAttribute('aria-label',label);b.setAttribute('aria-checked',String(value));return b;}
-  function setVideoTarget(value){prefs.videoTarget=value;if(videoSession){videoSession.machineCues=[];videoSession.fullTranscript=false;videoSession.nextRead=0;videoSession.sameLanguage=!!(videoSession.language&&L.sameLanguage(videoSession.language,value));}resetSubtitleTranslation();videoSession?.overlay?.update();savePreferences({videoTarget:value}).catch(report);}
+  // One switch for a new subtitle language, whether chosen here or in another tab: forget the old machine
+  // translation and re-judge whether the captions are already in that language, or a page that skipped
+  // translation would never start it.
+  function reapplyVideoTarget(value){if(!videoSession)return;videoSession.machineCues=[];videoSession.fullTranscript=false;videoSession.nextRead=0;videoSession.sameLanguage=!!(videoSession.language&&L.sameLanguage(videoSession.language,value));resetSubtitleTranslation();videoSession.overlay?.update();}
+  function setVideoTarget(value){prefs.videoTarget=value;reapplyVideoTarget(value);savePreferences({videoTarget:value}).catch(report);}
   function languageControl(videoLanguage=false){return U.languagePicker({locale,value:videoLanguage?prefs.videoTarget:target,expanded:expandedLanguages,onchange:value=>{
     if(videoLanguage){setVideoTarget(value);if(videoSession)videoSettings();}else{target=value;prefs.webTarget=value;request({op:'preferences',target:value}).catch(report);if(translated){restorePage();togglePage();}savePreferences({webTarget:value}).catch(report);}
   }});}
@@ -152,7 +156,7 @@
     prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
-    if(videoTargetChanged&&videoSession){resetSubtitleTranslation();videoSession.overlay?.update();}
+    if(videoTargetChanged&&videoSession)reapplyVideoTarget(nextVideoTarget);
     const youtube=/(^|\.)youtube\.com$/.test(location.hostname);
     const relevantEnable=youtube?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled;
     if(relevantEnable){nextAutoAttempt=0;if(!videoSession)autoOpen();}

@@ -504,6 +504,9 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
       if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN');
       onNavigate(); // Even a rejected browser response cannot prove the request never started.
       tab = await openInAgentWindow(url);
+      // Same registration as open: the tab joins the agent set, so a user who takes it over claims it
+      // and it is not reclaimed as idle while they work in it.
+      await markAgentOpened(tab.id);
     }
     rec = {id:tab.id,actualUrl:tab.url || url,created:!existing,claimed:existing,loading:!existing || tab.status !== 'complete',used:Date.now()};
     owned.set(url,rec); await remember();

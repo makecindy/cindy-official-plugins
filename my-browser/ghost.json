@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "my-browser",
   "name": "Cindy Chrome",
-  "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI; cookies and passwords are not exported.",
+  "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI.",
   "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.79",
+  "version": "0.4.80",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -53,7 +53,7 @@
     },
     {
       "name": "browser_read",
-      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED: inspect browser_tabs once, stop retrying. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI; no cookie export. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Local/intranet pages read like any site. ADDRESS_UNVERIFIED includes a document reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
+      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED: inspect browser_tabs once, stop retrying. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Local/intranet pages read like any site. ADDRESS_UNVERIFIED includes a document reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -140,7 +140,7 @@
     },
     {
       "name": "browser_act",
-      "description": "Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported; detection is conservative, covering type, multi-token autocomplete values (section-checkout billing cc-number) and editable fields named like card-number or otp. Do not bypass a permission denial.",
+      "description": "Click/type/press/select/hover/scroll an already-open site. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password, payment and one-time-code fields work like any field.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,

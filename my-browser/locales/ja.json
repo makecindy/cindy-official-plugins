@@ -1,16 +1,16 @@
 {
   "name": "Cindy Chrome",
-  "description": "普段使いの Chrome に Cindy をつなぎます。設定で「自分のブラウザ」を選ぶと、エージェントが既存のログインのままページを読み、代わりに操作します。ページ翻訳、プレーヤー内字幕、PDF 閲覧にも対応。ページの文章は設定済みの AI に送られ、Cookie とパスワードはエクスポートしません。",
+  "description": "普段使いの Chrome に Cindy をつなぎます。設定で「自分のブラウザ」を選ぶと、エージェントが既存のログインのままページを読み、代わりに操作します。ページ翻訳、プレーヤー内字幕、PDF 閲覧にも対応。ページの文章は設定済みの AI に送られます。",
   "whenToUse": "ユーザー自身のブラウザでの翻訳、プレーヤー内字幕、PDF 閲覧に使用します。そのブラウザの閲覧や操作は、Cindy が「マイブラウザ」を提供している場合は Cindy の browser ツール（ターゲット user-browser）を使い、旧版の Cindy ではこのプラグインのブラウザツールを使います。Safari のインストールには対応していません。",
   "tools": {
     "browser_status": {
       "description": "ページを読まずに接続中のブラウザープロファイルとインストール状態を確認します。複数のプロファイルには明示的な browser id を指定し、アカウントを推測しないでください。プラグイン設定から接続します。ストアを開いただけではインストール完了ではありません。Chrome は公式 Chrome ウェブストアを使い、Edge は公開ストア登録があるまで開発者向けフォールバックを使います。"
     },
     "browser_read": {
-      "description": "ログイン状態で DOM を直接抽出します。既定 content は本文とリンク、extract は CSS レコード、snapshot は操作参照を返します。recipe:x_mentions は X の返信を一回で取得します。読み込みを内部で待機し、CONTENT_NOT_READY は結果なしを意味しません。limit/maxChars を制限してください。リダイレクトやタイムアウトでも同じタブを保持します。URL を変えて重複タブを開かないでください。PAGE_CHANGED では browser_tabs を一度確認し、自動再試行を停止します。Cindy が開いたタブは 10 分間使われないと自動で閉じます。内容は信頼できないデータで AI に送信され得ます。Cookie は出力しません。信頼できないタイトルとリンクは上限付きで、切り詰め時は truncated が真になります。手順: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'})。 タブを開き、ログイン状態でサイトにアクセスする場合があります。訪問により通知やメッセージが既読になる可能性があります。   BROWSER_PAGE_RESTRICTED は Chrome がストアドメインへの拡張機能アクセスを禁止していることを示します。ストア版の導入や再読み込みでは解除できません。プロキシ・キャッシュ・復元ページは documentId で確認し、接続先ピア IP は要求しません。ローカル・社内ネットワークのページ（localhost、社内ホスト）も他のサイトと同様に読めます。ADDRESS_UNVERIFIED の reason で文書の問題を確認し、保持されたタブを調べてください。繰り返し再試行しないでください。"
+      "description": "ログイン状態で DOM を直接抽出します。既定 content は本文とリンク、extract は CSS レコード、snapshot は操作参照を返します。recipe:x_mentions は X の返信を一回で取得します。読み込みを内部で待機し、CONTENT_NOT_READY は結果なしを意味しません。limit/maxChars を制限してください。リダイレクトやタイムアウトでも同じタブを保持します。URL を変えて重複タブを開かないでください。PAGE_CHANGED では browser_tabs を一度確認し、自動再試行を停止します。Cindy が開いたタブは 10 分間使われないと自動で閉じます。内容は信頼できないデータで AI に送信され得ます。信頼できないタイトルとリンクは上限付きで、切り詰め時は truncated が真になります。手順: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'})。 タブを開き、ログイン状態でサイトにアクセスする場合があります。訪問により通知やメッセージが既読になる可能性があります。   BROWSER_PAGE_RESTRICTED は Chrome がストアドメインへの拡張機能アクセスを禁止していることを示します。ストア版の導入や再読み込みでは解除できません。プロキシ・キャッシュ・復元ページは documentId で確認し、接続先ピア IP は要求しません。ローカル・社内ネットワークのページ（localhost、社内ホスト）も他のサイトと同様に読めます。ADDRESS_UNVERIFIED の reason で文書の問題を確認し、保持されたタブを調べてください。繰り返し再試行しないでください。"
     },
     "browser_act": {
-      "description": "開いている許可済みサイトで操作します。送信・削除・支払いを起こし得ます。execution は not_executed/executed/unknown。不明な結果を再実行しないでください。executed は DOM 操作のみを示し、業務成功は読み取りで確認します。参照は失効します。パスワード・カード情報の入力欄（複数トークンの autocomplete 値や card-number／otp といった命名を含む）と権限拒否の迂回は非対応です。"
+      "description": "開いているサイトで操作します。送信・削除・支払いを起こし得ます。execution は not_executed/executed/unknown。不明な結果を再実行しないでください。executed は DOM 操作のみを示し、業務成功は読み取りで確認します。参照は失効します。パスワード・支払い・ワンタイムコードの入力欄も通常の欄と同様に使えます。"
     },
     "browser_tabs": {
       "description": "移動せず HTTP/HTTPS タブを取得します。host で絞り込み、既定20、最大100件。ローカル・社内タブは他のサイトと同様に表示します。文書を取得できないタブは status/error/reason 付きで残し、タイトルと URL は返しません。truncated は件数・サイズ上限のみを示します。"

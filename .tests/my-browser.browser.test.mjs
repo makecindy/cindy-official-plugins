@@ -301,7 +301,7 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(over.truncated,true,'dropping it is a cut');
   // A URL that consumed the budget must not let a later text field escape it: a negative remaining
   // would make slice(0, negative) return text from the end of the string.
-  const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
+  const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+('http://example.test/reset/'.length+9)});
   assert.equal(afterUrl.ok,true,JSON.stringify(afterUrl).slice(0,160));
   assert.equal(afterUrl.record.url,null,'an over-budget URL is dropped, not kept');
   assert.ok(String(afterUrl.record.tail).length<=35,'a text field after an over-budget URL must not exceed the remaining budget');
@@ -352,8 +352,8 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
   for(let i=1;i<=5;i++){const r=await tool('browser_read',{url:url+'owned'+i,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));}
-  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
-  assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
+  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.equal(owned.filter(([,r])=>r.created).length,5,'no fixed tab limit (2026-10-30)');assert.equal(page.isClosed(),false);
+  assert.equal(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length),5);
   const settings=await context.newPage();await settings.goto(base+'/');await settings.getByText('浏览器已连接',{exact:true}).waitFor();
   faults.wake=true;await settings.locator('#refresh').click();await settings.getByText('插件未响应。请重新启用「Cindy Chrome」后刷新。',{exact:true}).waitFor();assert.equal(await settings.locator('#client-guide').isVisible(),true);
   faults.wake=false;await settings.locator('#refresh').click();await settings.getByText('浏览器已连接',{exact:true}).waitFor();assert.equal(await settings.locator('#client-guide').isVisible(),false);
