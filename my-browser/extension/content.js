@@ -472,9 +472,11 @@
         if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){checkSameLanguage(session,track.language);mergeCues(next);}}
         if(youtube&&!session.fullTranscript&&!session.readBlocked&&Date.now()>=session.nextRead){
           session.attempts++;session.nextRead=Date.now()+Math.min(30000,3000*session.attempts);
-          const result=await sendMessage({type:'cindy-captions',language:'auto',target:prefs.videoTarget});
+          const requestedTarget=prefs.videoTarget,result=await sendMessage({type:'cindy-captions',language:'auto',target:requestedTarget});
           if(session!==videoSession)return;
-          if(result?.ok){session.machineCues=Array.isArray(result.machine)?result.machine:[];session.machineTarget=prefs.videoTarget;if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}}else throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
+          // The language was changed while the request was out: its machine translation is for the old target, so it is dropped and read again.
+          if(result?.ok&&prefs.videoTarget!==requestedTarget){session.nextRead=0;return;}
+          if(result?.ok){session.machineCues=Array.isArray(result.machine)?result.machine:[];session.machineTarget=requestedTarget;if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}}else throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         }
       }
       // A page without any caption track also deserves a clear answer instead of an endless wait.

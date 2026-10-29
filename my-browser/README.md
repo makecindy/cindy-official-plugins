@@ -503,3 +503,7 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 - **Revoked permissions stop the remaining actions.** Opening a page, navigating by tab, closing, resizing, focusing, waiting, screenshots, PDF, recipe commands and the main-world actions (`evaluate`, `console`, `requests`, `responseBody`, `dialog`) now take the last authorization check and register as a dispatch, so a site permission revoked after the acknowledgement refuses them or waits for the one already started.
 - **`open` shares the 12-tab budget** with page reads, and opening an address again no longer overwrites the record of the earlier tab, so idle tabs can still be reclaimed.
 - **Turning Cindy subtitles off restores the site's own caption track** instead of keeping it hidden.
+
+## 0.4.51 changing the subtitle language mid-request (host package 0.4.72)
+
+- A caption reply that arrives after the subtitle language was changed is dropped and read again for the new language, instead of being shown (and cached as complete) under the new language.
