@@ -223,7 +223,9 @@ async function debuggerAttach(tabId) {
   let state = debugged.get(tabId);
   if (!state) {
     try { await chrome.debugger.attach({tabId},'1.3'); }
-    catch (e) { if (!/already attached/i.test(e.message)) throw Object.assign(new Error('DEBUGGER_ATTACH_FAILED'),{detail:e.message}); }
+    // Chrome words our own leftover attachment (the worker restarted) as "Debugger is already attached";
+    // DevTools or another extension holding the tab is "Another debugger is already attached" and fails.
+    catch (e) { if (!/^debugger is already attached/i.test(String(e.message).trim())) throw Object.assign(new Error('DEBUGGER_ATTACH_FAILED'),{detail:e.message}); }
     state = {holds:0,events:[],dropped:0,recording:false,timer:null};
     debugged.set(tabId,state);
   }

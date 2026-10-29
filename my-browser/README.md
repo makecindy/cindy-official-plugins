@@ -545,3 +545,7 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 - Tool descriptions, the plugin description and the settings privacy note no longer say that password/payment fields are unsupported, that interaction needs a site grant, or that cookies cannot be read; they state what the plugin does now.
 - A page opened by a read (older Cindy) joins the agent's tabs like one opened with `open`, so a user who takes it over keeps it instead of having it reclaimed as idle.
 - Changing the subtitle language in another tab re-judges "already in this language" on this one, so a page that skipped translation starts translating.
+
+## 0.4.60 another debugger holding the tab fails the attach (host package 0.4.81)
+
+- When DevTools or another extension already holds a tab's debugger, attaching now fails with the usual "Chrome refused to attach" message instead of pretending to be attached. Only the extension's own leftover attachment (after the worker restarted) is accepted.

@@ -224,3 +224,16 @@ test('upload paths accept POSIX, drive and UNC absolute paths and reject relativ
   for(const p of ['/a/b.txt','C:\\x\\y.txt','C:/x/y.txt','\\\\server\\share\\r.pdf'])P.validate('upload',{url:'https://example.test',tabId:1,selector:'i',paths:[p]});
   assert.throws(()=>P.validate('upload',{url:'https://example.test',tabId:1,selector:'i',paths:['rel/x.txt']}),/absolute file paths/);
 });
+
+// Review 2026-10-30 (Codex P2): another debugger holding the tab is a failure, not a successful attach.
+test('another debugger holding the tab fails the attach; our own leftover is accepted',async()=>{
+  const h=harness(undefined,undefined,{timers:'never'});
+  h.chrome.permissions.contains=async()=>true;
+  let message='Another debugger is already attached to the tab with id: 1.';
+  h.chrome.debugger={attach:async()=>{throw new Error(message);},detach:async()=>{},onEvent:{addListener(){}},onDetach:{addListener(){}},sendCommand:async()=>({})};
+  const tab={url:'https://example.test/user',tabId:1};
+  const foreign=await h.run('cdp',{...tab,op:'begin'});
+  assert.equal(foreign.ok,false);assert.equal(foreign.error,'DEBUGGER_ATTACH_FAILED');
+  message='Debugger is already attached to the tab with id: 1.';
+  assert.equal((await h.run('cdp',{...tab,op:'begin'})).ok,true);
+});
