@@ -64,8 +64,8 @@ let agentWindowId = null;
 // Cindy's window must survive an extension reload or update (session storage does not), but window and
 // group ids are reused after the browser restarts, so they are forgotten when the browser starts.
 const agentStore = chrome.storage.local;
-chrome.runtime.onStartup?.addListener(() => { agentWindowId = null; agentGroupId = null; quietlyForget(); });
-function quietlyForget() { agentStore.remove?.(['agentWindow','agentGroup'])?.catch?.(() => {}); }
+chrome.runtime.onStartup?.addListener(() => { agentWindowId = null; agentGroupId = null; agentTabs = null; quietlyForget(); });
+function quietlyForget() { agentStore.remove?.(['agentWindow','agentGroup','agentTabs'])?.catch?.(() => {}); }
 async function agentWindow() {
   if (agentWindowId == null) agentWindowId = (await agentStore.get('agentWindow')).agentWindow ?? null;
   if (agentWindowId != null) {
@@ -122,6 +122,27 @@ async function groupAgentTab(tab) {
   } catch {}
 }
 const agentMarkTimers = new Map();
+// Pages Browser Use opened carry "Opened by Cindy" (in the page and as a toolbar badge) until the user
+// acts on them with real input; then they are the user's tab and no longer reclaimed as idle.
+let agentTabs = null;
+async function loadAgentTabs() {
+  if (!agentTabs) agentTabs = new Set((await agentStore.get('agentTabs')).agentTabs || []);
+  return agentTabs;
+}
+const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs].slice(-200)});
+async function markAgentOpened(tabId) {
+  (await loadAgentTabs()).add(tabId); await saveAgentTabs();
+  quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
+  quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',opened:true}),1500,Error('MARK_TIMEOUT')));
+}
+async function userTookOver(tabId) {
+  if (!(await loadAgentTabs()).delete(tabId)) return;
+  await saveAgentTabs();
+  for (const rec of owned.values()) if (rec.id === tabId) rec.claimed = true;
+  await remember();
+  quietly(() => chrome.action.setBadgeText({tabId,text:null}));
+}
+const restingBadge = tabId => agentTabs?.has(tabId) ? 'AI' : null;
 // Marks are a courtesy: a page without the content script, or a browser without these APIs, just goes unmarked.
 const quietly = fn => Promise.resolve().then(fn).catch(() => {});
 // Never wait forever on the browser: a stuck call would hold up every later job (the bridge then sees
@@ -135,11 +156,11 @@ function markAgentTab(tabId,mode) {
   const sent = quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}),1500,Error('MARK_TIMEOUT')));
   if (mode === 'clear') {
     clearTimeout(agentMarkTimers.get(tabId)); agentMarkTimers.delete(tabId);
-    quietly(() => chrome.action.setBadgeText({tabId,text:null}));
+    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
   } else if (!mode) {
     quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
     clearTimeout(agentMarkTimers.get(tabId));
-    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:null})); },20000));
+    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)})); },20000));
   }
   return sent;
 }
@@ -381,7 +402,7 @@ async function cleanup() {
     else await closeOwned(url);
   }
 }
-chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); });
+chrome.tabs.onRemoved.addListener(id => { restore.then(() => release(id)); if (agentTabs?.delete(id)) saveAgentTabs().catch(() => {}); });
 chrome.tabs.onActivated.addListener(({tabId,windowId}) => { restore.then(async () => {
   // Switching tabs inside Cindy's own window is the agent's doing, not the user claiming a page.
   if (windowId != null && windowId === agentWindowId) return;
@@ -1051,7 +1072,7 @@ async function handle(job,policy,target) {
       if (!loaded) return fail('TAB_CLOSED','The new tab was closed before it finished loading, by the user or the site. Ask the user before opening it again.','executed');
       owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
       if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
-      markAgentTab(created.id);
+      markAgentTab(created.id); await markAgentOpened(created.id);
       return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url ? P.redactUrl(loaded.url) : undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
     }
     let tab;
@@ -1243,6 +1264,12 @@ async function learningRequest(message,sender) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  if(message?.type==='cindy-agent-tab'&&sender.tab?.id!=null) {
+    loadAgentTabs().then(set=>reply({opened:set.has(sender.tab.id)}),()=>reply({opened:false}));return true;
+  }
+  if(message?.type==='cindy-user-took-over'&&sender.tab?.id!=null) {
+    userTookOver(sender.tab.id).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;
+  }
   if(message?.type==='cindy-ui-locale'&&typeof message.locale==='string') {
     // Cindy's interface language, reported by a content script: names the agent's tab group.
     uiLocale=message.locale.slice(0,20);

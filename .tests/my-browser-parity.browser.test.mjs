@@ -111,11 +111,17 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   check('snapshot by tabId',snap.ok && !!ref('Click me'),snap.error||'');
   const marked=await worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result,opened.tabId);
   const markedPage=context.pages().find(p=>p.url()==='http://parity.test/');
-  if(markedPage && process.env.CINDY_SCREENSHOTS)await markedPage.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'agent-mark.png')});
+  if(markedPage && process.env.CINDY_SCREENSHOTS){await markedPage.bringToFront();await new Promise(r=>setTimeout(r,400));await markedPage.screenshot({path:path.join(process.env.CINDY_SCREENSHOTS,'agent-mark.png')});}
   const unmarked=await act('unmark',{tabId:opened.tabId});
   await new Promise(r=>setTimeout(r,1200));
   const markGone=await worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result,opened.tabId);
   check('unmark ends the mark right away',unmarked.ok && !markGone,JSON.stringify({unmarked,markGone}));
+  // "Opened by Cindy" stays on a page Browser Use opened until the user acts on it with real input.
+  const openedMarkOn=()=>worker.evaluate(async id=>(await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-tab]')}))[0].result,opened.tabId);
+  const openedBefore=await openedMarkOn();
+  await act('click',{...T,ref:ref('Click me')});
+  const openedAfterAgent=await openedMarkOn();
+  check('opened-by-Cindy label stays through agent actions',openedBefore && openedAfterAgent,JSON.stringify({openedBefore,openedAfterAgent}));
   check('acting on a page shows the Cindy mark, which page reads do not see',marked && !/working on this page|正在自动操作/.test(String(snap.text)+String(snap.elements)),JSON.stringify({marked}));
   const clicked=await act('click',{...T,ref:ref('Click me')});
   const ev=await act('evaluate',{...T,fn:'() => document.title'});
@@ -179,6 +185,10 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const fc=await act('focus',{tabId:userBehind,url:'http://parity.test/two'});
   const stillBehind=await worker.evaluate(async id=>!(await chrome.tabs.get(id)).active,userBehind);
   check('focus never switches a tab in the user window',fc.error==='USER_WINDOW' && stillBehind,JSON.stringify(fc));
+  const takeoverPage=context.pages().find(p=>p.url().startsWith('http://parity.test/two'));
+  if(takeoverPage){await takeoverPage.bringToFront();await takeoverPage.mouse.click(300,300);await new Promise(r=>setTimeout(r,500));}
+  const openedGone=!(await openedMarkOn());
+  check('a real click by the user removes the label',!!takeoverPage && openedGone,JSON.stringify({found:!!takeoverPage,openedGone}));
   const cl=await act('close',T);
   const gone=await act('text',T);
   check('close then TAB_CLOSED',cl.ok && gone.error==='TAB_CLOSED',gone.error);
@@ -205,7 +215,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
     check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,36);
+  assert.equal(results.length,38);
 });
 
 const pngSize=b64=>{const b=Buffer.from(b64,'base64');return {png:b.subarray(0,8).toString('hex')==='89504e470d0a1a0a',width:b.readUInt32BE(16),height:b.readUInt32BE(20)};};

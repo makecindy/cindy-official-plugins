@@ -24,7 +24,7 @@
     for(const rec of translations.values())rec.host.remove();translations.clear();
     for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
-    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;
+    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
   let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
@@ -552,10 +552,36 @@
   const AGENT_MARK_MS=20000;
   let agentMark,agentMarkTimer,agentCopy;
   function endAgentMark(){clearTimeout(agentMarkTimer);const leaving=agentMark;if(!leaving)return;leaving.classList.add('leaving');agentMarkTimer=setTimeout(()=>{leaving.remove();if(agentMark===leaving)agentMark=null;},800);}
-  async function markAgent(hidden,clear){
-    if(clear){endAgentMark();return;}
-    if(hidden){agentMark?.style.setProperty('display','none','important');return;}
+  async function agentStrings(){
     if(!agentCopy){agentCopy=t;try{const r=await request({op:'config'});agentCopy=U.copy(r.locale||'en');sendMessage({type:'cindy-ui-locale',locale:r.locale||'en'}).catch(()=>{});}catch{}}
+    return agentCopy;
+  }
+  // A page Browser Use opened says so until the user acts on it with real input (agent events are not trusted).
+  let openedMark;
+  function tookOver(e){
+    if(!e.isTrusted||!openedMark)return;
+    openedMark.remove();openedMark=null;
+    for(const type of ['pointerdown','keydown'])document.removeEventListener(type,tookOver,true);
+    sendMessage({type:'cindy-user-took-over'}).catch(()=>{});
+  }
+  async function showOpenedMark(){
+    const copy=await agentStrings();
+    if(disposed||openedMark?.isConnected)return;
+    openedMark=el('div');openedMark.setAttribute('data-cindy-agent-tab','');
+    isolateHost(openedMark,{position:'fixed',right:'12px',bottom:'12px',display:'block','z-index':'2147483644','pointer-events':'none'});
+    const root=openedMark.attachShadow({mode:'closed'});
+    root.append(el('style',`.pill{display:flex;align-items:center;gap:6px;padding:5px 11px 5px 6px;border-radius:999px;background:rgba(32,32,32,.86);color:#fff;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;box-shadow:0 3px 12px rgba(0,0,0,.2);white-space:nowrap}
+.pill img{width:15px;height:15px;border-radius:50%;background:#fff}.dot{width:6px;height:6px;border-radius:50%;background:#d93a3a}`));
+    const pill=el('div',undefined,'pill');const icon=el('img');icon.src=brandURL;icon.alt='';pill.append(icon,el('span',copy.agentOpened),el('span',undefined,'dot'));
+    root.append(pill);document.documentElement.append(openedMark);
+    for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
+  }
+  async function markAgent(hidden,clear,opened){
+    if(opened){await showOpenedMark();return;}
+    if(clear){endAgentMark();return;}
+    if(hidden){agentMark?.style.setProperty('display','none','important');openedMark?.style.setProperty('display','none','important');return;}
+    openedMark?.style.setProperty('display','block','important');
+    await agentStrings();
     if(disposed)return;
     if(!agentMark?.isConnected){
       agentMark=el('div');agentMark.setAttribute('data-cindy-agent-mark','');
@@ -574,7 +600,7 @@
     clearTimeout(agentMarkTimer);
     agentMarkTimer=setTimeout(endAgentMark,AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0;
   async function autoOpen(){
@@ -599,6 +625,7 @@
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
     try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
   }
+  sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   // The toolbar icon has a light and a dark version; the page knows the browser's appearance.
   {const scheme=globalThis.matchMedia?.('(prefers-color-scheme: dark)');const tell=()=>{if(runtimeReady())sendMessage({type:'cindy-color-scheme',dark:!!scheme.matches}).catch(()=>{});};if(scheme&&window===window.top){tell();scheme.addEventListener?.('change',tell,{signal:lifecycle.signal});}}
