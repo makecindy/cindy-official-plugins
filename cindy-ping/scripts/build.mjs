@@ -21,7 +21,7 @@ writeFileSync(resolve(app, 'Contents/Info.plist'), `<?xml version="1.0" encoding
 <key>CFBundleVersion</key><string>10</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
-<key>NSScreenCaptureUsageDescription</key><string>Capture the window under your emote only when its configured task runs.</string>
+<key>NSScreenCaptureUsageDescription</key><string>Capture the original window when you send a configured emote, before delivery or per-use input.</string>
 </dict></plist>\n`);
 for (const arch of ['arm64', 'x86_64']) {
   execFileSync('xcrun', ['swiftc', '-swift-version', '5', '-O', '-target', `${arch}-apple-macosx14.0`,

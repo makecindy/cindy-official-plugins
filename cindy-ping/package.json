@@ -1,6 +1,6 @@
 {
   "name": "cindy-ping",
-  "version": "0.3.10",
+  "version": "0.3.18",
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",

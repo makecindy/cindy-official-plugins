@@ -5,17 +5,18 @@ let pointer = { x: 0, y: 0 }, hintTimer;
 const { layout, geometry, slicePath, polar, normalizedAngle } = EmoteWheel;
 const strings = {
   'zh-CN': {
-    title: 'Cindy Ping', enable: '启用', intro: '每次表情立即出现。绑定任务后，最后一次触发满 2 秒才开始取材和执行。',
+    title: 'Cindy Ping', enable: '启用', intro: '表情立即出现。发送消息时先采集原窗口，2 秒后投递；仅“每次输入”需要确认内容。',
     palette: '轮盘快捷键', refresh: '刷新', record: '录制快捷键', recording: '请按下组合键…', preparing: '准备录制…',
     shortcutHint: '可录制单键、修饰键或组合键，选择后立即生效。Esc 取消录制。',
     gesture: '按住快捷键，移向表情，松键发送',
     SHORTCUT_INVALID: '请选择单键、修饰键或组合键；Esc 用于取消。',
-    scope: '支持 macOS 14+。每个表情可独立选择模型、新建任务或绑定本插件已有任务；项目与权限沿用插件任务设置。',
+    scope: '支持 macOS 14+。仅新建会话可逐表情选择模型和动手权限；已有会话与伙伴保留自身配置。',
     recovery: '上一条任务的结果尚未确认，自动投递已暂停。请到 Cindy 查看下方任务；确认后可恢复。不会自动重发旧内容。',
     reviewed: '已检查旧任务，恢复', emotes: '轮盘表情 · 从上方顺时针', add: '＋ 添加', permissions: '输入与窗口取材权限',
     permissionHint: '使用 Cindy 已有的系统权限，不单独申请授权。辅助功能用于全局快捷键和读取窗口文本；屏幕录制仅用于任务截图。只展示不会取材。',
     INPUT_ACCESS_REQUIRED: '暂时无法使用 Cindy 的辅助功能权限。请确认 Cindy 版本支持权限复用，在插件详情停用后重新启用，再刷新状态。本插件不会另行申请授权。',
     INPUT_HOOK_FAILED: '轮盘输入未能启动。请在插件详情停用后重新启用，再刷新状态。',
+    INPUT_UNAVAILABLE: '输入条未能打开，本次没有发送。请重新发表情。',
     accessibility: '辅助功能', screen: '屏幕录制', tasks: '刷新可选任务', save: '保存并应用',
     none: '只展示表情', undo: '撤销', new: '新建任务', existing: '继续本插件的任务', remove: '移除', image: '选择图片', clearImage: '使用 emoji',
     imageHint: '引用本地图片，请保留原文件', name: '表情名称', prompt: '固定指令', promptPlaceholder: '填写你自己的指令',
@@ -32,8 +33,10 @@ const strings = {
     DELIVERY_UNCERTAIN: '上次投递结果未知，请先到 Cindy 检查，不会自动重发。',
     DELIVERY_REJECTED: 'Cindy 拒绝了本次输入，没有排队或自动重试。',
     ATTACHMENTS_UNSUPPORTED: '当前 Cindy 不支持消息图片附件，请更新支持此能力的客户端后再试。',
+    MESSAGE_CONTEXT_UNSUPPORTED: '当前 Cindy 不支持独立附带资料，请更新后再发送；本次没有投递。',
+    AUTO_TITLE_UNSUPPORTED: '当前 Cindy 不支持新会话自动标题，请更新后再发送；本次没有创建会话。',
     INVALID_ATTACHMENTS: '截图格式或大小不符合要求，本次没有投递。',
-    CONTEXT_TOO_LARGE: '指令与窗口来源信息过长，本次没有投递。请缩短表情指令后再试。',
+    CONTEXT_TOO_LARGE: '窗口来源信息过长，本次没有投递。',
     REQUEST_KEY_CONFLICT: '本次投递参数已改变，请重新发出表情。',
     CONFIG_INVALID: '请补全表情名称、内容，以及任务的固定指令和目标。', MACOS_REQUIRED: '第一版仅支持 macOS 14+。',
     HELPER_START_FAILED: '桌面进程未能启动。请确认系统为 macOS 14+，重新保存设置。', HELPER_STOPPED: '桌面进程已停止，请重新保存设置启动。',
@@ -42,6 +45,7 @@ const strings = {
     SUPERSEDED: '已丢弃，新的表情操作已取代这次操作。', PERMISSION_DENIED: 'Cindy 未允许任务操作，请检查插件任务权限。表情展示仍可使用。',
     TASK_UNAVAILABLE: '绑定任务已不可用，请选择仍活跃的本插件任务。', TASKS_UNSUPPORTED: '当前客户端未提供可用的普通任务接口；请先使用「只展示表情」。',
     MODELS_UNSUPPORTED: '当前客户端不支持单独选择任务模型。请更新 Cindy，或选择沿用默认模型。',
+    PERMISSION_MODE_UNSUPPORTED: '当前 Cindy 不支持逐表情指定新会话权限，请更新至支持此功能的版本；不会静默降级。',
     MODEL_UNAVAILABLE: '所选模型、推理强度或 Fast 已不可用。请刷新模型列表并重新选择，不会自动切换到其他模型。',
     TASK_BUSY: '任务或附件服务正忙，本次投递尚未确认。请先检查 Cindy 中的任务状态。',
     STALE_REVISION: '任务配置已变化，本次未投递。请检查任务后重新发表情。',
@@ -52,17 +56,18 @@ const strings = {
     CONNECTION_TIMEOUT: '未能连接插件后台，请重新打开插件详情页再试。',
   },
   en: {
-    title: 'Cindy Ping', enable: 'Enable', intro: 'Every emote appears immediately. A bound task starts capturing and processing 2 seconds after the last trigger.',
+    title: 'Cindy Ping', enable: 'Enable', intro: 'Emotes appear immediately. Sending captures the original window first, then waits 2 seconds and any required input before delivery.',
     palette: 'Wheel shortcut', refresh: 'Refresh', record: 'Record shortcut', recording: 'Press a shortcut…', preparing: 'Preparing…',
     shortcutHint: 'Record a single key, modifier or combination. Changes apply immediately. Esc cancels recording.',
     gesture: 'Hold shortcut, move to an emote, release to send',
     SHORTCUT_INVALID: 'Choose a single key, modifier or combination. Esc is reserved for cancelling.',
-    scope: 'macOS 14+. Choose a model and a new or existing plugin task for each emote. Project and permissions follow plugin Task settings.',
+    scope: 'macOS 14+. Choose a model and permissions only for new conversations. Existing conversations and companions retain their own settings.',
     recovery: 'The previous task has an unconfirmed outcome. Automatic delivery is paused. Inspect the task in Cindy, then resume. Old content is never automatically resent.',
     reviewed: 'I checked the task — resume', emotes: 'Wheel · clockwise from top', add: '+ Add', permissions: 'Input and window capture permissions',
     permissionHint: 'Uses Cindy\'s existing system permissions without requesting separate access. Accessibility handles wheel drags and window text; screen recording is only for task screenshots. Display-only never captures content.',
     INPUT_ACCESS_REQUIRED: 'Cindy\'s Accessibility access is unavailable. Check that Cindy supports permission sharing, disable and re-enable this plugin in its details, then refresh. This plugin will not request separate access.',
     INPUT_HOOK_FAILED: 'Wheel input could not start. Disable and re-enable the plugin in its details, then refresh.',
+    INPUT_UNAVAILABLE: 'The input bar could not open. Nothing was sent; trigger the emote again.',
     accessibility: 'Accessibility', screen: 'Screen recording', tasks: 'Refresh tasks', save: 'Save and apply',
     none: 'Display only', undo: 'Undo', new: 'Create task', existing: 'Continue a plugin task', remove: 'Remove', image: 'Choose image', clearImage: 'Use emoji',
     imageHint: 'References a local image; keep the original file', name: 'Emote name', prompt: 'Fixed prompt', promptPlaceholder: 'Write your own instructions',
@@ -79,8 +84,10 @@ const strings = {
     DELIVERY_UNCERTAIN: 'Previous delivery is uncertain. Check Cindy before trying again.',
     DELIVERY_REJECTED: 'Cindy declined this input; it was not queued or retried.',
     ATTACHMENTS_UNSUPPORTED: 'This Cindy version does not support message images. Update to a client with attachment support.',
+    MESSAGE_CONTEXT_UNSUPPORTED: 'Update Cindy to support separate attached context. Nothing was delivered.',
+    AUTO_TITLE_UNSUPPORTED: 'Update Cindy to support automatic conversation titles. No conversation was created.',
     INVALID_ATTACHMENTS: 'The screenshot format or size is unsupported. Nothing was delivered.',
-    CONTEXT_TOO_LARGE: 'The instruction and window metadata are too long. Shorten the emote instruction and retry.',
+    CONTEXT_TOO_LARGE: 'Window metadata is too long. Nothing was delivered.',
     REQUEST_KEY_CONFLICT: 'Delivery parameters changed. Send the emote again.',
     CONFIG_INVALID: 'Complete the name, emote, task prompt and target.', MACOS_REQUIRED: 'This version requires macOS 14+.',
     HELPER_START_FAILED: 'Desktop helper could not start. Check macOS 14+ and save again.', HELPER_STOPPED: 'Desktop helper stopped. Save settings to restart it.',
@@ -89,6 +96,7 @@ const strings = {
     SUPERSEDED: 'Discarded because a newer emote replaced this action.', PERMISSION_DENIED: 'Cindy did not allow task access. Check plugin task permissions; display-only still works.',
     TASK_UNAVAILABLE: 'The task is unavailable. Select an active task created by this plugin.', TASKS_UNSUPPORTED: 'This client does not offer the required task API. Use display-only for now.',
     MODELS_UNSUPPORTED: 'This client does not support per-task model selection. Update Cindy or inherit the default model.',
+    PERMISSION_MODE_UNSUPPORTED: 'This Cindy version cannot select permissions for new conversations per emote. Update to a supported version; permissions will not silently fall back.',
     MODEL_UNAVAILABLE: 'The model, effort or Fast option is unavailable. Refresh and choose again; models are never switched automatically.',
     TASK_BUSY: 'The task or attachment service is busy. Delivery is unconfirmed; check the task in Cindy first.',
     STALE_REVISION: 'Task settings changed; nothing was sent. Inspect the task before triggering again.',
@@ -373,7 +381,7 @@ function emoteErrors(item) {
   const errors = {};
   if (!item.label.trim()) errors['emote-name'] = L('请填写名称', 'Enter a name');
   if (!(item.emoji.trim() || item.imagePath)) errors['change-emote'] = L('请选择表情', 'Choose an emote');
-  if (!['none', 'undo'].includes(item.action) && !item.prompt.trim()) errors.prompt = L('填写指令后生效', 'Add a prompt to apply');
+  if (!['none', 'undo'].includes(item.action) && item.promptMode !== 'input' && !item.prompt.trim()) errors.prompt = L('填写指令后生效', 'Add a prompt to apply');
   if (item.action === 'existing' && !item.target && !item.taskId) errors['task-target'] = L('请选择任务', 'Choose a task');
   if (item.target && !(['pick', 'recent'].includes(item.target.mode) || item.target.ref?.id || item.target.bindingId)) {
     errors['destination-preset'] = L('请选择目标', 'Choose a destination');
@@ -484,25 +492,114 @@ function applyStatus(value) {
   $('#recovery').hidden = !value.needsReview;
   $('#pending-id').textContent = value.pending?.taskId || '';
 }
+let fieldMenu = null, permissionModesSupported = null;
+const targetNoun = action => ({ new: L('项目', 'Project'), existing: L('会话', 'Conversation'), bot: L('伙伴', 'Companion') }[action]);
+function destinationIcon(action) {
+  const path = { new: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>', existing: '<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/>', bot: '<rect x="4" y="6" width="16" height="14" rx="4"/><path d="M12 2v4M8 11v2m8-2v2m-7 3h6"/>' }[action];
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+function settingRow(label, content, extra = '') {
+  return `<div class="setting-row ${extra}"><span class="setting-label">${label}</span><div class="setting-control">${content}</div></div>`;
+}
 function destinationPresets() {
   return [
-    ['existing', 'recent', L('最近活跃的三个会话', 'Three recent conversations')],
-    ['existing', 'pick', L('每次选择会话', 'Choose a conversation each time')],
-    ['existing', 'fixed', L('指定会话', 'A specific conversation')],
-    ['bot', 'recent', L('最近活跃的三个伙伴', 'Three recent companions')],
-    ['bot', 'pick', L('每次选择伙伴', 'Choose a companion each time')],
-    ['bot', 'fixed', L('指定伙伴', 'A specific companion')],
-    ['new', 'pick', L('每次选择项目，新建会话', 'Choose a project for a new conversation')],
-    ['new', 'fixed', L('指定项目，新建会话', 'A specific project for a new conversation')],
+    ['new', 'fixed', L('固定项目，新建会话', 'New conversation in a fixed project')],
+    ['new', 'recent', L('每次选择项目，新建会话', 'Choose a project for a new conversation')],
+    ['existing', 'fixed', L('固定会话', 'Fixed conversation')],
+    ['existing', 'recent', L('每次选择会话', 'Choose a conversation each time')],
+    ['bot', 'fixed', L('固定伙伴', 'Fixed companion')],
+    ['bot', 'recent', L('每次选择伙伴', 'Choose a companion each time')],
   ];
 }
+function closeFieldMenu(focus = false) {
+  if (!fieldMenu) return;
+  const { anchor } = fieldMenu;
+  fieldMenu = null; $('#field-menu').hidden = true;
+  anchor.setAttribute('aria-expanded', 'false');
+  if (focus && anchor.isConnected) anchor.focus({ preventScroll: true });
+}
+function positionFieldMenu() {
+  if (!fieldMenu) return;
+  const panel = $('#field-menu'), box = fieldMenu.anchor.getBoundingClientRect();
+  if (!fieldMenu.anchor.isConnected || box.bottom < 0 || box.top > innerHeight) { closeFieldMenu(); return; }
+  const width = Math.min(Math.max(box.width, 260), innerWidth - 16);
+  const below = innerHeight - box.bottom - 12, above = box.top - 12, upwards = below < 260 && above > below;
+  panel.style.width = `${width}px`;
+  panel.style.maxHeight = `${Math.max(80, Math.min(360, upwards ? above : below))}px`;
+  panel.style.left = `${Math.max(8, Math.min(box.right - width, innerWidth - width - 8))}px`;
+  panel.style.top = `${Math.max(8, upwards ? box.top - panel.offsetHeight - 4 : box.bottom + 4)}px`;
+}
+function openFieldMenu(anchor, rows, choose) {
+  if (fieldMenu?.anchor === anchor) { closeFieldMenu(true); return; }
+  closeFieldMenu(); closeModelPicker();
+  fieldMenu = { anchor };
+  const panel = $('#field-menu');
+  panel.setAttribute('aria-label', anchor.getAttribute('aria-label') || anchor.textContent);
+  panel.innerHTML = rows.map((item, index) => item.heading ? `<div class="menu-heading">${escapeText(item.heading)}</div>` :
+    `<button type="button" class="field-option" role="option" data-field-index="${index}" aria-selected="${Boolean(item.selected)}" ${item.disabled ? 'disabled' : ''}><span class="field-icon">${item.icon || ''}</span><span class="field-option-text"><b>${escapeText(item.label)}</b>${item.detail ? `<small>${escapeText(item.detail)}</small>` : ''}</span><span class="field-check">${item.selected ? modelCheck : ''}</span></button>`).join('');
+  panel.querySelectorAll('[data-field-index]').forEach(button => button.onclick = () => {
+    const item = rows[Number(button.dataset.fieldIndex)];
+    closeFieldMenu(); choose(item.value);
+  });
+  panel.hidden = false; anchor.setAttribute('aria-expanded', 'true'); positionFieldMenu();
+  (panel.querySelector('[aria-selected="true"]:not(:disabled)') || panel.querySelector('button:not(:disabled)'))?.focus({ preventScroll: true });
+}
+document.addEventListener('pointerdown', event => {
+  if (fieldMenu && !$('#field-menu').contains(event.target) && !fieldMenu.anchor.contains(event.target)) closeFieldMenu();
+});
+document.addEventListener('keydown', event => {
+  if (!fieldMenu || event.isComposing) return;
+  if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeFieldMenu(true); return; }
+  if (event.key === 'Tab') { closeFieldMenu(true); return; }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const buttons = [...$('#field-menu').querySelectorAll('button:not(:disabled)')], current = buttons.indexOf(document.activeElement);
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+  buttons[index]?.focus({ preventScroll: true }); buttons[index]?.scrollIntoView({ block: 'nearest' });
+});
+window.addEventListener('resize', positionFieldMenu);
+window.addEventListener('scroll', positionFieldMenu, true);
 function targetFields(emote) {
-  const value = destinationPicker?.emote === emote ? `${destinationPicker.action}:fixed` : `${emote.action}:${emote.target?.mode || 'legacy'}`;
-  const options = destinationPresets();
-  return `<div class="target-field"><label>${L('发送到', 'Send to')}<select id="destination-preset">${!emote.target ? `<option value="${emote.action}:legacy">${L('保留原有任务绑定', 'Keep the existing task binding')}</option>` : ''}${options.map(([action, mode, label]) => `<option value="${action}:${mode}" ${value === `${action}:${mode}` ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-    ${emote.target?.mode === 'fixed' ? `<div class="target-binding"><span>${escapeText(emote.target.label || L('尚未选择', 'No destination'))}</span><button id="change-target" class="subtle">${L('更换', 'Change')}</button></div>` : ''}
-    <span id="destination-preset-error" class="field-error" data-field-error="destination-preset" hidden></span>
+  const action = destinationPicker?.emote === emote ? destinationPicker.action : emote.action;
+  const mode = destinationPicker?.emote === emote ? 'fixed' : emote.target?.mode === 'pick' ? 'recent' : emote.target?.mode;
+  const label = destinationPresets().find(item => item[0] === action && item[1] === mode)?.[2] || L('保留原有任务绑定', 'Keep the existing task binding');
+  return `<div class="target-field">${settingRow(L('发送到', 'Send to'), `<button id="destination-preset" type="button" class="field-trigger destination-trigger" aria-label="${L('发送到', 'Send to')}" aria-haspopup="listbox" aria-controls="field-menu" aria-expanded="false">${destinationIcon(action)}<span>${label}</span>${chevronIcon}</button><span id="destination-preset-error" class="field-error" data-field-error="destination-preset" hidden></span>`)}
+    ${emote.target?.mode === 'fixed' ? settingRow(targetNoun(emote.action), `<button id="change-target" type="button" class="field-trigger"><span>${escapeText(emote.target.label || L('尚未选择', 'No destination'))}</span>${chevronIcon}</button>`) : ''}
     <section id="target-chooser" class="target-chooser" aria-label="${L('选择目标', 'Choose destination')}" hidden></section></div>`;
+}
+function openDestinationMenu(emote) {
+  const rows = []; let group;
+  if (!emote.target) rows.push({ value: `${emote.action}:legacy`, label: L('保留原有任务绑定', 'Keep the existing task binding'), selected: true });
+  for (const [action, mode, label] of destinationPresets()) {
+    if (action !== group) { rows.push({ heading: action === 'new' ? L('新建会话', 'New conversation') : targetNoun(action) }); group = action; }
+    rows.push({ value: `${action}:${mode}`, label, icon: destinationIcon(action), detail: mode === 'recent' ? L('最近活跃，最多 3 个，单选', 'Recently active · up to 3 · choose one') : '', selected: emote.action === action && (emote.target?.mode === 'pick' ? 'recent' : emote.target?.mode) === mode });
+  }
+  openFieldMenu($('#destination-preset'), rows, value => {
+    const [action, mode] = value.split(':');
+    if (mode === 'legacy') { $('#destination-preset')?.focus(); return; }
+    if (mode === 'fixed') { void pickFixedTarget(emote, action); return; }
+    targetSelectionRevision++; destinationPicker = null;
+    const wasNew = emote.action === 'new';
+    emote.action = action; emote.target = { mode };
+    if (action === 'new') {
+      emote.delivery = 'queue';
+      if (!wasNew && permissionModesSupported === true) emote.permissionMode = 'ask';
+    }
+    else { emote.route = null; delete emote.permissionMode; }
+    renderEditor(); change(); $('#destination-preset')?.focus({ preventScroll: true });
+  });
+}
+function permissionOptions() {
+  return [
+    ['', L('沿用 Cindy 默认权限', 'Use Cindy defaults'), L('保留已有配置，不覆盖新会话权限', 'Keep the existing defaults for new conversations')],
+    ['ask', L('询问', 'Ask'), L('动手前按 Cindy 的审批流程确认', 'Confirm actions through Cindy’s approval flow')],
+    ['auto', L('自动审阅', 'Auto-review'), L('由 Cindy 自动审阅操作', 'Let Cindy review actions automatically')],
+    ['bypassPermissions', L('完全访问', 'Full access'), L('仅用于信任的任务和项目', 'Use only for trusted tasks and projects')],
+  ];
+}
+function permissionField(emote) {
+  const label = permissionOptions().find(item => item[0] === (emote.permissionMode || ''))?.[1];
+  return settingRow(L('动手权限', 'Permissions'), `<button id="emote-permission" type="button" class="field-trigger" aria-label="${L('动手权限', 'Permissions')}" aria-haspopup="listbox" aria-controls="field-menu" aria-expanded="false"><span>${label}</span>${chevronIcon}</button>${permissionModesSupported === false ? `<p class="setting-note">${T.PERMISSION_MODE_UNSUPPORTED}</p>` : ''}`);
 }
 function renderTargetPicker() {
   const pane = $('#target-chooser'), picker = destinationPicker;
@@ -519,9 +616,14 @@ function renderTargetPicker() {
     pane.querySelectorAll('[data-target-index]').forEach(button => button.onclick = () => {
       if (destinationPicker !== picker || picker.emote !== slots[selected]) return;
       const target = picker.rows[Number(button.dataset.targetIndex)];
+      const wasNew = picker.emote.action === 'new';
       picker.emote.action = picker.action;
       picker.emote.target = { mode: 'fixed', ref: { kind: target.kind, id: target.id }, label: target.label.slice(0, 200) };
-      if (picker.action === 'new') picker.emote.delivery = 'queue';
+      if (picker.action === 'new') {
+        picker.emote.delivery = 'queue';
+        if (!wasNew && permissionModesSupported === true) picker.emote.permissionMode = 'ask';
+      }
+      else { picker.emote.route = null; delete picker.emote.permissionMode; }
       destinationPicker = null; targetSelectionRevision++; renderEditor(); change();
     });
   };
@@ -537,43 +639,49 @@ async function pickFixedTarget(emote, action = emote.action) {
   } catch (error) { if (revision === targetSelectionRevision) { destinationPicker = null; renderEditor(); report(error); } }
 }
 function renderEditor() {
-  closeModelPicker();
+  closeModelPicker(); closeFieldMenu();
   const emote = slots[selected];
   if (!emote) return;
   if (destinationPicker && destinationPicker.emote !== emote) { destinationPicker = null; targetSelectionRevision++; }
   $('#editor').innerHTML = `
-    <div class="editor-head"><span class="editor-icon ${['?', '❓', '？'].includes(emote.emoji) ? 'question' : ''}">${icon(emote)}</span><div class="editor-name"><input id="emote-name" class="editor-title" aria-label="${T.name}" value="${escapeText(emote.label)}" maxlength="40"><span id="emote-name-error" class="field-error" data-field-error="emote-name" hidden></span></div><div><button id="change-emote" class="subtle">${L('更换表情', 'Change')}</button><span id="change-emote-error" class="field-error" data-field-error="change-emote" hidden></span></div></div>
-    <p class="field-caption">${L('发出后', 'After sending')}</p><div class="modes" aria-label="${L('表情行为', 'Action')}">${[['none', L('只展示','Display')], ['send', L('发送到…','Send to…')]].map(([mode, name]) => { const active = mode === emote.action || (mode === 'send' && emote.action !== 'none'); return `<button data-mode="${mode}" aria-pressed="${active}" class="${active ? 'active' : ''}">${name}</button>`; }).join('')}</div>
-    ${emote.action === 'none' ? `<p class="editor-help">${L('只发表情，同时撤销上一个尚未生效的动作（2 秒内）。', 'Displays the emote and cancels the previous action during its 2-second wait.')}</p>` : `
-    <div class="fields">${targetFields(emote)}${emote.action === 'existing' && !emote.target ? `<label>${T.target}<select id="task-target"></select><span id="task-target-error" class="field-error" data-field-error="task-target" hidden></span></label><button id="tasks" class="subtle task-refresh">${T.tasks}</button>` : ''}
-    <div id="model-settings"></div>
-    ${emote.target && ['existing', 'bot'].includes(emote.action) ? `<label>${L('补充方式', 'Delivery')}<select id="emote-delivery"><option value="queue" ${(emote.delivery ?? 'queue') === 'queue' ? 'selected' : ''}>${L('排队发送', 'Queue')}</option><option value="steer" ${emote.delivery === 'steer' ? 'selected' : ''}>${L('立即插话', 'Insert now')}</option></select></label><p>${L('空闲时直接处理。忙碌时按所选方式投递；暂时无法插话时会排队，并显示实际结果。', 'Processed immediately when idle. While busy, follows this setting; if insertion is unavailable, queues the input and shows the actual result.')}</p>` : ''}
-    <label><span class="field-label">${L('给 Cindy 的指令', 'Prompt for Cindy')}<span id="prompt-error" class="field-error" data-field-error="prompt" hidden></span></span><textarea id="prompt" maxlength="8000" placeholder="${T.promptPlaceholder}">${escapeText(emote.prompt)}</textarea></label>
-    <label class="check"><input id="capture" type="checkbox" ${emote.screenshot ? 'checked' : ''}>${T.screenshot}</label>
-    <div class="delay-note">${L('表情立即显示；满 2 秒且目标选定后执行。连续操作只保留最后一次。', 'Displays immediately; runs after 2 seconds and target selection. Only the last action takes effect.')}</div></div>
-    <p class="editor-help">${emote.target ? (emote.action === 'new' ? L('在选定项目中新建任务，模型按此表情配置；任务权限由 Cindy 管理。', 'Creates a task in the chosen project with this emote’s model. Cindy manages task permissions.') : L('保留接收任务或伙伴的模型、工作目录和权限。', 'Keeps the recipient’s model, directory and permissions.')) : emote.action === 'existing' ? L('原有绑定继续使用本插件任务，工作目录和权限保持不变。', 'The saved binding continues to use its plugin task, with the same directory and permissions.') : L('沿用此前的任务目录及权限；可选择项目作为新的目标。', 'Keeps the saved task directory and permissions. Choose a project to change the destination.')}</p>`}`;
+    <div class="editor-head"><button id="change-emote" type="button" class="editor-icon ${['?', '❓', '？'].includes(emote.emoji) ? 'question' : ''}" aria-label="${L('更换表情', 'Change emote')}" title="${L('更换表情', 'Change emote')}">${icon(emote)}</button><div class="editor-name"><input id="emote-name" class="editor-title" aria-label="${T.name}" value="${escapeText(emote.label)}" maxlength="40"><span id="emote-name-error" class="field-error" data-field-error="emote-name" hidden></span></div><button id="remove-emote" type="button" class="editor-remove" aria-label="${L('移除表情', 'Remove emote')}" title="${L('移除表情', 'Remove emote')}">${deleteIcon}</button></div><span id="change-emote-error" class="field-error" data-field-error="change-emote" hidden></span>
+    ${settingRow(L('触发后', 'After triggering'), `<div class="modes" role="group" aria-label="${L('表情行为', 'Action')}">${[['none', L('只展示', 'Display')], ['send', L('发送消息', 'Send a message')]].map(([mode, name]) => { const active = mode === emote.action || (mode === 'send' && emote.action !== 'none'); return `<button type="button" data-mode="${mode}" aria-pressed="${active}" class="${active ? 'active' : ''}">${name}</button>`; }).join('')}</div>${emote.action === 'none' ? `<p class="setting-note">${L('只发表情，同时撤销上一个尚未生效的动作（2 秒内）。', 'Displays the emote and cancels the previous action during its 2-second wait.')}</p>` : ''}`, 'top-segment')}
+    ${emote.action === 'none' ? '' : `<div class="fields">${targetFields(emote)}${emote.action === 'existing' && !emote.target ? settingRow(T.target, `<select id="task-target"></select><button id="tasks" class="subtle task-refresh">${T.tasks}</button><span id="task-target-error" class="field-error" data-field-error="task-target" hidden></span>`) : ''}
+    ${emote.target && ['existing', 'bot'].includes(emote.action) ? settingRow(L('忙碌时', 'While busy'), `<div class="modes" role="group" aria-label="${L('忙碌时', 'While busy')}">${[['queue', L('排队发送', 'Queue')], ['steer', L('立即插话', 'Insert now')]].map(([value, label]) => `<button type="button" data-delivery="${value}" aria-pressed="${(emote.delivery ?? 'queue') === value}" class="${(emote.delivery ?? 'queue') === value ? 'active' : ''}">${label}</button>`).join('')}</div><p class="setting-note">${L('空闲时直接处理。忙碌时按所选方式投递；暂时无法插话时会排队，并显示实际结果。', 'Processed immediately when idle. If insertion is unavailable while busy, queues the input and shows the actual result.')}</p>`, 'top-segment') : ''}
+    <div id="model-settings"></div>${emote.action === 'new' ? permissionField(emote) : ''}
+    ${settingRow(L('指令方式', 'Prompt mode'), `<div class="modes" role="group" aria-label="${L('指令方式', 'Prompt mode')}">${[['preset', L('预置', 'Preset')], ['input', L('每次输入', 'Type each time')]].map(([value, label]) => `<button type="button" data-prompt-mode="${value}" aria-pressed="${(emote.promptMode ?? 'preset') === value}" class="${(emote.promptMode ?? 'preset') === value ? 'active' : ''}">${label}</button>`).join('')}</div>`, 'top-segment')}
+    ${emote.promptMode === 'input' ? '' : settingRow(`<label for="prompt">${L('指令', 'Prompt')}</label>`, `<textarea id="prompt" maxlength="8000" placeholder="${T.promptPlaceholder}">${escapeText(emote.prompt)}</textarea><span id="prompt-error" class="field-error" data-field-error="prompt" hidden></span>`, 'top-field')}
+    ${settingRow(L('截图', 'Screenshot'), `<label class="check"><input id="capture" class="setting-switch" type="checkbox" ${emote.screenshot ? 'checked' : ''}>${T.screenshot}</label>`)}
+    <div class="delay-note">${emote.promptMode === 'input' ? L('取材后输入，确认发送；Esc 取消。', 'Type after capture, then confirm to send. Esc cancels.') : L('立即取材，2 秒后发送；Esc 可取消。', 'Captures immediately, sends after 2 seconds. Esc cancels.')}</div></div>`}`;
   $('#emote-name').oninput = event => { emote.label = event.target.value; renderWheel(); change(); };
   $('#change-emote').onclick = () => openAssets(emote);
+  $('#remove-emote').onclick = () => $('#wheel [data-wheel-action="delete"]')?.click();
   document.querySelectorAll('[data-mode]').forEach(button => button.onclick = () => {
     const mode = button.dataset.mode;
     if (mode === emote.action || (mode === 'send' && emote.action !== 'none')) return;
     targetSelectionRevision++; destinationPicker = null;
     emote.action = mode === 'send' ? 'existing' : mode;
+    emote.route = null; delete emote.permissionMode;
     if (mode === 'send') emote.target = { mode: 'recent' }; else delete emote.target;
     renderEditor(); change();
   });
-  if ($('#destination-preset')) $('#destination-preset').onchange = event => {
-    const [action, mode] = event.target.value.split(':');
-    if (mode === 'legacy') return;
-    if (mode === 'fixed') { void pickFixedTarget(emote, action); return; }
-    targetSelectionRevision++; destinationPicker = null;
-    emote.action = action; emote.target = { mode };
-    if (action === 'new') emote.delivery = 'queue';
-    renderEditor(); change();
-  };
+  if ($('#destination-preset')) $('#destination-preset').onclick = () => openDestinationMenu(emote);
+  if ($('#emote-permission')) $('#emote-permission').onclick = () => openFieldMenu($('#emote-permission'), permissionOptions().map(([value, label, detail]) => ({ value, label, detail, selected: value === (emote.permissionMode || ''), disabled: Boolean(value) && permissionModesSupported === false })), value => {
+    if (value) emote.permissionMode = value; else delete emote.permissionMode;
+    renderEditor(); change(); $('#emote-permission')?.focus({ preventScroll: true });
+  });
   if ($('#prompt')) $('#prompt').oninput = event => { emote.prompt = event.target.value; change(); };
+  document.querySelectorAll('[data-prompt-mode]').forEach(button => button.onclick = () => {
+    emote.promptMode = button.dataset.promptMode;
+    renderEditor(); change();
+    document.querySelector(`[data-prompt-mode="${emote.promptMode}"]`)?.focus({ preventScroll: true });
+  });
   if ($('#capture')) $('#capture').onchange = event => { emote.screenshot = event.target.checked; change(); };
-  if ($('#emote-delivery')) $('#emote-delivery').onchange = event => { emote.delivery = event.target.value; change(); };
+  document.querySelectorAll('[data-delivery]').forEach(button => button.onclick = () => {
+    const value = button.dataset.delivery;
+    emote.delivery = value; renderEditor(); change();
+    document.querySelector(`[data-delivery="${value}"]`)?.focus({ preventScroll: true });
+  });
   if ($('#change-target')) $('#change-target').onclick = () => void pickFixedTarget(emote);
   renderTargetPicker();
   renderModels();
@@ -628,7 +736,40 @@ function chooseModel(emote, option) {
   renderModels();
   $('#emote-model')?.focus({ preventScroll: true });
 }
+let modelFlyout = null;
+function closeModelFlyout() {
+  modelFlyout = null; $('#model-flyout').hidden = true;
+}
+function openModelFlyout(row, option) {
+  if (!option || (!option.efforts.length && !option.supportsFastMode)) { closeModelFlyout(); return; }
+  if (modelFlyout?.row === row) return;
+  const emote = slots[selected], panel = $('#model-flyout');
+  const route = sameModel(emote.route, option.route) && !modelRouteUnavailable(emote.route, option) ? emote.route : option.route;
+  modelFlyout = { row, option };
+  panel.setAttribute('aria-label', `${option.details?.name || option.route.model} · ${M('effort')}`);
+  panel.innerHTML = `${option.supportsFastMode ? `<label class="fast-row"><span>Fast</span><input id="model-fast" class="setting-switch" type="checkbox" ${route.fastMode ? 'checked' : ''}></label>` : ''}${option.efforts.length ? `<div class="menu-heading">${M('effort')}</div>${option.efforts.map(value => `<button type="button" class="field-option" role="option" data-effort="${escapeText(value)}" aria-selected="${value === route.effort}"><span class="field-option-text">${escapeText(M('efforts')[value] || value || M('default'))}</span><span class="field-check">${value === route.effort ? modelCheck : ''}</span></button>`).join('')}` : ''}`;
+  const apply = (patch, keepOpen = false) => {
+    if (slots[selected] !== emote || emote.action !== 'new') return;
+    emote.route = { ...route, ...patch }; change();
+    if (!keepOpen) closeModelPicker();
+    renderModels();
+    if (keepOpen) {
+      const nextRow = [...document.querySelectorAll('#model-options [role="option"]')].find(item => item.modelOption === option);
+      if (nextRow) { openModelFlyout(nextRow, option); $('#model-fast')?.focus({ preventScroll: true }); }
+    } else $('#emote-model')?.focus({ preventScroll: true });
+  };
+  panel.querySelectorAll('[data-effort]').forEach(button => button.onclick = () => apply({ effort: button.dataset.effort }));
+  if ($('#model-fast')) $('#model-fast').onchange = event => apply({ fastMode: event.target.checked }, true);
+  panel.hidden = false;
+  const main = $('#model-picker-panel').getBoundingClientRect(), box = row.getBoundingClientRect();
+  const width = Math.min(200, innerWidth - 16);
+  panel.style.width = `${width}px`; panel.style.maxHeight = `${innerHeight - 16}px`;
+  const left = main.right + width + 4 <= innerWidth - 8 ? main.right + 4 : main.left - width - 4;
+  panel.style.left = `${Math.max(8, left)}px`;
+  panel.style.top = `${Math.max(8, Math.min(box.top - 8, innerHeight - panel.offsetHeight - 8))}px`;
+}
 function closeModelPicker(focus = false) {
+  closeModelFlyout();
   modelPicker.open = false;
   if ($('#model-picker-panel')) $('#model-picker-panel').hidden = true;
   $('#emote-model')?.setAttribute('aria-expanded', 'false');
@@ -659,7 +800,7 @@ function highlightModel(index, scroll = false) {
 function renderModelOptions() {
   const list = $('#model-options'); if (!list) return;
   const emote = slots[selected], route = emote.route;
-  list.replaceChildren();
+  closeModelFlyout(); list.replaceChildren();
   const addRow = (name, detail, option) => {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'model-option'; button.tabIndex = -1;
@@ -668,25 +809,25 @@ function renderModelOptions() {
     button.setAttribute('aria-selected', String(sameModel(route, option?.route)));
     button.title = option ? modelLabel(option.route, option.details) : name;
     button.setAttribute('aria-label', button.title);
-    button.innerHTML = `<span class="model-option-icon">${modelProviderMark(option?.route, option?.details)}</span><span class="model-option-text"><span>${escapeText(name)}</span>${detail ? `<small>${escapeText(detail)}</small>` : ''}</span><span class="model-option-check">${sameModel(route, option?.route) ? modelCheck : ''}</span>`;
+    button.modelOption = option;
+    button.innerHTML = `<span class="model-option-icon">${modelProviderMark(option?.route, option?.details)}</span><span class="model-option-text"><span>${escapeText(name)}</span>${detail ? `<small>${escapeText(detail)}</small>` : ''}</span><span class="model-option-check">${sameModel(route, option?.route) ? modelCheck : ''}</span>${option && (option.efforts.length || option.supportsFastMode) ? `<span class="model-more">${chevronIcon}</span>` : ''}`;
     button.onclick = () => chooseModel(emote, option);
-    button.onpointerenter = () => highlightModel([...list.querySelectorAll('[role="option"]')].indexOf(button));
+    button.onpointerenter = () => { highlightModel([...list.querySelectorAll('[role="option"]')].indexOf(button)); openModelFlyout(button, option); };
     list.append(button);
   };
-  const inherit = M(emote.action === 'existing' ? 'keep' : 'inherit');
+  const inherit = M('inherit');
   if (!modelPicker.query.trim() || inherit.toLowerCase().includes(modelPicker.query.trim().toLowerCase())) addRow(inherit, '', null);
   const groups = new Map();
   for (const option of filterModelOptions(modelList, modelPicker, route)) {
-    const key = option.route.providerId;
+    const key = option.route.agentKind;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(option);
   }
-  for (const options of groups.values()) {
+  for (const [engine, options] of groups) {
     const heading = document.createElement('div'); heading.className = 'model-source';
-    heading.innerHTML = `<span class="model-source-icon">${modelProviderMark(options[0].route, options[0].details)}</span><span>${escapeText(options[0].details?.providerName || options[0].route.providerId)}</span>`;
-    heading.setAttribute('aria-hidden', 'true');
+    heading.textContent = modelEngineName(engine); heading.setAttribute('aria-hidden', 'true');
     list.append(heading);
-    for (const option of options) addRow(option.details?.name || option.route.model, modelEngineName(option.route.agentKind), option);
+    for (const option of options) addRow(option.details?.name || option.route.model, option.details?.providerName || option.route.providerId, option);
   }
   if (!list.querySelector('[role="option"]')) {
     const empty = document.createElement('div'); empty.className = 'model-empty';
@@ -699,86 +840,75 @@ function renderModelOptions() {
   highlightModel(Math.max(0, rows.findIndex(row => row.getAttribute('aria-selected') === 'true')));
   positionModelPicker();
 }
-function renderModels(focusId) {
+function renderModels() {
+  closeModelFlyout();
   const container = $('#model-settings'); if (!container) return;
   const emote = slots[selected], route = emote.route;
-  if (emote.target && emote.action !== 'new') {
-    container.innerHTML = `<p>${L('沿用接收方当前模型，不会因这次 Ping 改变。', 'Uses the recipient’s current model without changing it.')}</p>`;
+  if (emote.action !== 'new') {
+    container.innerHTML = settingRow(L('模型', 'Model'), `<p class="setting-note">${L('沿用接收方当前模型、权限和工作目录，不会因这次 Ping 改变。', 'Keeps the recipient’s current model, permissions and directory.')}</p>`);
     return;
   }
-  const index = route ? modelList.findIndex(item => sameModel(item.route, route)) : -1;
-  const option = index >= 0 ? modelList[index] : null;
+  const option = route ? modelList.find(item => sameModel(item.route, route)) : null;
   const invalid = modelsLoaded && modelRouteUnavailable(route, option);
-  const name = route ? option?.details?.name || route.model : M(emote.action === 'existing' ? 'keep' : 'inherit');
-  const detail = route ? `${option?.details?.providerName || route.providerId} · ${modelEngineName(route.agentKind)}` : '';
-  const engines = ['all', ...new Set(modelList.map(item => item.route.agentKind))];
-  container.innerHTML = `<label id="emote-model-label">${L('此表情的模型', 'Model for this emote')}</label>
-    <button id="emote-model" type="button" class="model-trigger" aria-haspopup="dialog" aria-controls="model-picker-panel" aria-expanded="${modelPicker.open}" aria-labelledby="emote-model-label model-current-name"><span class="model-trigger-icon">${modelProviderMark(route, option?.details)}</span><span class="model-trigger-text"><span id="model-current-name">${escapeText(name)}</span>${detail ? `<small>${escapeText(detail)}</small>` : ''}</span>${chevronIcon}</button>
+  const name = route ? option?.details?.name || route.model : M('inherit');
+  const detail = route ? modelLabel(route, option?.details) : name;
+  const tuning = route ? [M('efforts')[route.effort] || route.effort, route.fastMode === 'ultrafast' ? 'Ultrafast' : route.fastMode ? 'Fast' : ''].filter(Boolean).join(' · ') : '';
+  container.innerHTML = settingRow(`<span id="emote-model-label">${L('模型', 'Model')}</span>`, `
+    <button id="emote-model" type="button" class="model-trigger" title="${escapeText(detail)}" aria-haspopup="dialog" aria-controls="model-picker-panel" aria-expanded="${modelPicker.open}" aria-labelledby="emote-model-label model-current-name"><span class="model-trigger-icon">${modelProviderMark(route, option?.details)}</span><span class="model-trigger-text"><span id="model-current-name">${escapeText(name)}</span></span>${tuning ? `<span class="model-current-params">${escapeText(tuning)}</span>` : ''}${chevronIcon}</button>
     <div id="model-picker-panel" class="model-picker-panel" role="dialog" aria-label="${M('choose')}" ${modelPicker.open ? '' : 'hidden'}>
       <div class="model-search-row"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><input id="model-search" type="search" role="combobox" aria-label="${M('search')}" placeholder="${M('search')}" aria-controls="model-options" aria-expanded="true" autocomplete="off" value="${escapeText(modelPicker.query)}"><button id="refresh-models" type="button" class="model-refresh" aria-label="${M('refresh')}" title="${M('refresh')}" ${modelsLoading ? 'disabled' : ''}>↻</button></div>
-      <div class="model-filters" role="group" aria-label="${M('choose')}">${engines.map(engine => `<button type="button" data-model-engine="${escapeText(engine)}" aria-pressed="false">${escapeText(engine === 'all' ? M('all') : modelEngineName(engine))}</button>`).join('')}</div>
       <div id="model-options" class="model-options" role="listbox" aria-label="${M('choose')}"></div>
       ${modelList.some(item => item.details?.visible === false) ? `<button id="model-hidden" type="button" class="model-hidden">${M(modelPicker.hidden ? 'hide' : 'hidden')}</button>` : ''}
-    </div>
-    <div id="model-tuning" class="model-tuning"></div><p id="model-scope"></p><p id="model-message" role="status"></p>`;
+    </div><p id="model-message" role="status"></p>`);
   $('#emote-model').onclick = () => {
     if (modelPicker.open) { closeModelPicker(); return; }
+    closeFieldMenu();
     Object.assign(modelPicker, { open: true, query: '', engine: 'all', hidden: false, active: 0 });
     renderModels();
   };
   $('#model-search').oninput = event => { modelPicker.query = event.target.value; renderModelOptions(); };
-  document.querySelectorAll('[data-model-engine]').forEach(button => button.onclick = () => {
-    modelPicker.engine = button.dataset.modelEngine; modelPicker.query = '';
-    $('#model-search').value = ''; renderModelOptions(); $('#model-search').focus();
-  });
   if ($('#model-hidden')) $('#model-hidden').onclick = () => {
     modelPicker.hidden = !modelPicker.hidden;
     $('#model-hidden').textContent = M(modelPicker.hidden ? 'hide' : 'hidden'); renderModelOptions();
   };
   $('#refresh-models').onclick = () => void loadModels();
-  $('#model-scope').textContent = emote.action === 'existing'
-    ? route ? L('触发时将原绑定任务切换到此模型，再发送指令。', 'Applies this model to the saved plugin task before sending.') : L('保持原绑定任务自身的模型。', 'Keeps the saved task’s model.')
-    : route ? L('此模型只用于这个表情新建的任务。', 'This model applies to tasks created by this emote.') : L('沿用 Cindy 为插件保存的默认配置；可在这里单独选择。', 'Uses Cindy’s saved defaults for this plugin. Choose a model here to override them for this emote.');
   const message = $('#model-message');
   message.textContent = modelsLoading ? L('正在获取可用模型…', 'Loading models…') : modelsError ? T[modelsError] || T.OPERATION_FAILED :
     invalid ? T.MODEL_UNAVAILABLE : modelsLoaded && !modelList.length ? L('没有可单独选择的模型，请检查 Cindy 的模型设置。', 'No models available. Check Cindy model settings.') : '';
   message.classList.toggle('error', Boolean(modelsError || invalid));
-  const tuning = $('#model-tuning');
-  if (route && option?.efforts.length) {
-    const label = document.createElement('label'); label.textContent = M('effort');
-    const effort = document.createElement('select'); effort.id = 'model-effort';
-    for (const value of option.efforts) effort.add(new Option(M('efforts')[value] || value || M('default'), value));
-    if (!option.efforts.includes(route.effort)) {
-      const current = new Option(route.effort || L('默认', 'Default'), route.effort);
-      current.disabled = route.effort !== option.route.effort; effort.add(current);
-    }
-    effort.value = route.effort;
-    effort.onchange = () => { emote.route = { ...emote.route, effort: effort.value }; renderModels('model-effort'); change(); };
-    label.append(effort); tuning.append(label);
-  }
-  if (route && option && (option.supportsFastMode || route.fastMode)) {
-    const label = document.createElement('label'); label.className = 'check';
-    const fast = document.createElement('input'); fast.type = 'checkbox'; fast.id = 'model-fast'; fast.checked = route.fastMode;
-    fast.onchange = () => { emote.route = { ...emote.route, fastMode: fast.checked }; renderModels('model-fast'); change(); };
-    label.append(fast, route.fastMode === 'ultrafast' ? L('Fast · 超快', 'Fast · Ultrafast') : 'Fast'); tuning.append(label);
-  }
-  if (modelPicker.open) {
-    renderModelOptions(); $('#model-search').focus({ preventScroll: true });
-  } else if (focusId) $(`#${focusId}`)?.focus({ preventScroll: true });
+  if (modelPicker.open) { renderModelOptions(); $('#model-search').focus({ preventScroll: true }); }
 }
 document.addEventListener('pointerdown', event => {
-  if (modelPicker.open && !event.target.closest('#model-picker-panel, #emote-model')) closeModelPicker();
+  if (modelPicker.open && !event.target.closest('#model-picker-panel, #model-flyout, #emote-model')) closeModelPicker();
 });
 document.addEventListener('focusin', event => {
-  if (modelPicker.open && !event.target.closest('#model-picker-panel, #emote-model')) closeModelPicker();
+  if (modelPicker.open && !event.target.closest('#model-picker-panel, #model-flyout, #emote-model')) closeModelPicker();
 });
 document.addEventListener('keydown', event => {
   if (!modelPicker.open || event.isComposing) return;
-  if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeModelPicker(true); }
-  else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    event.preventDefault(); highlightModel(modelPicker.active + (event.key === 'ArrowDown' ? 1 : -1), true);
+  if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeModelPicker(true); return; }
+  if (event.target.closest('#model-flyout')) {
+    if (event.key === 'ArrowLeft') { event.preventDefault(); closeModelFlyout(); $('#model-search')?.focus(); return; }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const rows = [...$('#model-flyout').querySelectorAll('input, button')], current = rows.indexOf(event.target);
+      const index = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+      rows[index]?.focus(); rows[index]?.scrollIntoView({ block: 'nearest' });
+    }
+    return;
+  }
+  const rows = [...document.querySelectorAll('#model-options [role="option"]')];
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault(); closeModelFlyout();
+    highlightModel(event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : modelPicker.active + (event.key === 'ArrowDown' ? 1 : -1), true);
+  } else if (event.key === 'ArrowRight') {
+    const row = rows[modelPicker.active];
+    if (row?.modelOption) {
+      event.preventDefault(); openModelFlyout(row, row.modelOption);
+      $('#model-flyout [aria-selected="true"], #model-flyout button, #model-fast')?.focus({ preventScroll: true });
+    }
   } else if (event.key === 'Enter' && event.target.id === 'model-search') {
-    event.preventDefault(); document.querySelectorAll('#model-options [role="option"]')[modelPicker.active]?.click();
+    event.preventDefault(); rows[modelPicker.active]?.click();
   }
 });
 window.addEventListener('resize', positionModelPicker);
@@ -903,6 +1033,10 @@ new MutationObserver(syncTheme).observe(document.head, { subtree: true, childLis
     $('#shortcut-label').textContent = EmoteShortcuts.label(shortcut);
     syncTheme();
     void loadModels();
+    void rpc('capabilities').then(info => {
+      permissionModesSupported = info.createPermissionMode === true;
+      if (slots[selected]?.action === 'new' && !modelPicker.open && !fieldMenu) renderEditor();
+    }).catch(() => { permissionModesSupported = false; if (slots[selected]?.action === 'new') renderEditor(); });
     const images = await rpc('previewImages'); previews = images.images || {}; renderWheel(); renderEditor();
   } catch (error) { report(error); }
   finally { $('#prototype').inert = !config; }

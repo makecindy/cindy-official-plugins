@@ -19,8 +19,30 @@ let child = null;
 let starting = null;
 let configRevision = '';
 let wheelSession = null;
+let locale = 'en';
+let nativeOperation = null;
 const pending = new Map();
-const scheduler = new LatestAction({ notify, capture: operation => nativeRequest('capture', {
+function actionEvent(kind, data) {
+  if (kind === 'trigger') {
+    if (nativeOperation && child && (data.action === 'none' || data.emote.promptMode !== 'input'))
+      void nativeRequest('closeInput', nativeOperation).catch(() => {});
+    nativeOperation = { id: data.id, gestureId: data.gestureId };
+  } else if (['invalidate', 'complete'].includes(kind)) {
+    if (data.id && child) void nativeRequest('closeInput', { id: data.id, gestureId: data.gestureId }).catch(() => {});
+    if (nativeOperation?.id === data.id) nativeOperation = null;
+  }
+  notify(kind, data);
+  if (kind === 'input-required') {
+    void nativeRequest('openInput', { ...data, locale }).then(result => {
+      if (!result.current) scheduler.cancel(data.id);
+    }, () => {
+      if (!scheduler.isCurrent(data.id)) return;
+      notify('input-error', { id: data.id, code: 'INPUT_UNAVAILABLE' });
+      scheduler.complete(data.id);
+    });
+  } else if (kind === 'capture-error') scheduler.complete(data.id);
+}
+const scheduler = new LatestAction({ notify: actionEvent, capture: operation => nativeRequest('capture', {
   event: operation.event, screenshot: operation.emote.screenshot,
 }) });
 
@@ -63,6 +85,13 @@ async function startNative() {
               selected = { ...emote, target: { mode: 'fixed', ref: { kind: target.kind, id: target.id }, label: target.label } };
             }
             scheduler.trigger(event, selected);
+          } else if (event.kind === 'input-submit') {
+            if (scheduler.submitInput(event.id, event.text).current)
+              void nativeRequest('closeInput', { id: event.id, keepPending: true }).catch(() => {});
+          } else if (event.kind === 'input-cancel') {
+            scheduler.cancel(event.id);
+          } else if (event.kind === 'cancel-action' && scheduler.current?.event.gestureId === event.gestureId) {
+            scheduler.cancel(scheduler.current.id);
           } else if (event.id && pending.has(event.id)) {
             const request = pending.get(event.id);
             pending.delete(event.id);
@@ -124,13 +153,14 @@ async function execute(method, params) {
         scheduler.invalidate();
         wheelSession = null;
         config = next;
+        locale = params.locale || 'en';
         runtimeEnabled = params.runtimeEnabled !== false;
         configRevision = randomUUID();
         if (!runtimeEnabled && !child) return { enabled: false };
         await startNative();
         return nativeRequest('configure', { enabled: runtimeEnabled, locale: params.locale, configRevision,
           wheelShortcut: shortcuts.native(config.wheelShortcut),
-          emotes: config.emotes.map(({ id, label, emoji, imagePath, action, angle, target }) => ({ id, label, emoji, action, angle,
+          emotes: config.emotes.map(({ id, label, emoji, imagePath, action, angle, target, promptMode }) => ({ id, label, emoji, action, angle, promptMode,
             targetMode: !['none', 'undo'].includes(action) ? target?.mode || '' : '',
             targetKind: { new: 'project', existing: 'task', bot: 'bot' }[action] || '',
             imagePath: bundledImages.has(imagePath) ? path.resolve(__dirname, '..', imagePath) : imagePath })) });
@@ -157,21 +187,26 @@ async function execute(method, params) {
         const rows = params.catalogs?.[kind];
         if (!Array.isArray(rows) || rows.some(row => row.kind !== kind || typeof row.id !== 'string' ||
             !row.id || typeof row.label !== 'string' || typeof row.detail !== 'string')) throw new Error('CONFIG_INVALID');
-        if (!catalogs[kind]) {
-          const full = config.emotes.some(item => item.action === emote.action && item.target?.mode === 'pick');
-          catalogs[kind] = rows.slice(0, full ? undefined : 3);
-        }
-        choices[emote.id] = emote.target.mode === 'recent' ? catalogs[kind].slice(0, 3) : catalogs[kind];
+        if (!catalogs[kind]) catalogs[kind] = rows.slice(0, 3);
+        choices[emote.id] = catalogs[kind];
       }
       wheelSession.choices = choices; wheelSession.ready = true;
       return nativeRequest('wheelTargets', { gestureId: params.gestureId, choices: Object.fromEntries(
         Object.entries(catalogs).map(([kind, rows]) => [kind, rows.map(({ label, detail }) => ({ label: label.slice(0, 160), detail: detail.slice(0, 400) }))])) });
     }
     case 'shortcutRecording':
+      if (params.active === true) scheduler.invalidate();
       await startNative();
       return nativeRequest('shortcutRecording', { active: params.active === true });
     case 'current': return { current: scheduler.isCurrent(params.id) };
     case 'resolveTarget': return scheduler.resolveTarget(params.id, params.target);
+    case 'beginDispatch': {
+      const result = scheduler.beginDispatch(params.id);
+      if (result.current && child)
+        await nativeRequest('closeInput', { id: params.id, gestureId: scheduler.current.event.gestureId });
+      return result;
+    }
+    case 'complete': return scheduler.complete(params.id);
     case 'readSnapshot': return readSnapshot(params);
     case 'wait': await new Promise(resolve => setTimeout(resolve, 500)); return {};
     default: throw new Error('METHOD_UNKNOWN');

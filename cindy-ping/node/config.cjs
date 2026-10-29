@@ -47,17 +47,19 @@ function validateConfig(input) {
       throw new Error('CONFIG_INVALID');
     ids.add(item.id);
     const string = (value, limit) => typeof value === 'string' && value.length <= limit && !value.includes('\0');
+    const promptMode = item.promptMode ?? 'preset';
     if (!string(item.label, 40) || !item.label.trim() || !string(item.emoji, 32) ||
         !string(item.imagePath || '', 4096) || (!item.emoji.trim() && !item.imagePath) ||
         !['none', 'undo', 'new', 'existing', 'bot'].includes(item.action) || !string(item.prompt || '', 8000) ||
-        (!['none', 'undo'].includes(item.action) && !item.prompt?.trim()) ||
+        !['preset', 'input'].includes(promptMode) ||
+        (!['none', 'undo'].includes(item.action) && promptMode === 'preset' && !item.prompt?.trim()) ||
         (item.action === 'existing' && !item.target && !string(item.taskId, 200)) ||
         (item.action === 'existing' && !item.target && !item.taskId?.trim())) throw new Error('CONFIG_INVALID');
     let target;
     if (item.target != null) {
       const value = item.target;
       if (!['pick', 'recent', 'fixed'].includes(value.mode)) throw new Error('CONFIG_INVALID');
-      target = { mode: value.mode };
+      target = { mode: value.mode === 'pick' ? 'recent' : value.mode };
       if (value.mode === 'fixed') {
         const kind = { new: 'project', existing: 'task', bot: 'bot' }[item.action];
         if (!string(value.label || '', 200)) throw new Error('CONFIG_INVALID');
@@ -76,14 +78,18 @@ function validateConfig(input) {
     }
     if (item.action === 'bot' && !target) throw new Error('CONFIG_INVALID');
     if (item.delivery !== undefined && !['queue', 'steer'].includes(item.delivery)) throw new Error('CONFIG_INVALID');
+    if (item.action === 'new' && item.permissionMode !== undefined &&
+        !['ask', 'auto', 'bypassPermissions'].includes(item.permissionMode)) throw new Error('CONFIG_INVALID');
     const angle = item.angle === undefined ? index * 360 / input.emotes.length : item.angle;
     const pinAngle = item.pinAngle ?? null;
     if (!Number.isFinite(angle) || angle < 0 || angle >= 360 ||
         (pinAngle !== null && (!Number.isFinite(pinAngle) || pinAngle !== angle))) throw new Error('CONFIG_INVALID');
     return { angle, pinAngle, id: item.id, label: item.label.trim(), emoji: item.emoji, imagePath: library.imagePath(item.imagePath || ''),
-      action: item.action === 'undo' ? 'none' : item.action, prompt: ['none', 'undo'].includes(item.action) ? '' : item.prompt,
+      action: item.action === 'undo' ? 'none' : item.action, promptMode,
+      prompt: ['none', 'undo'].includes(item.action) ? '' : item.prompt || '',
       taskId: item.action === 'existing' ? item.taskId : '', screenshot: item.screenshot !== false,
-      route: validateRoute(item.route), ...(target ? { target } : {}),
+      route: item.action === 'new' ? validateRoute(item.route) : null, ...(target ? { target } : {}),
+      ...(item.action === 'new' && item.permissionMode !== undefined ? { permissionMode: item.permissionMode } : {}),
       ...(item.delivery !== undefined ? { delivery: item.delivery } : {}) };
   });
   emotes.sort((a, b) => a.angle - b.angle);

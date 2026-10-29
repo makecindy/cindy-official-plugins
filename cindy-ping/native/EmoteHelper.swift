@@ -32,14 +32,88 @@ final class Overlay: NSPanel {
     }
 }
 
+final class PromptPanel: NSPanel, NSTextFieldDelegate {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    var operationId: String?
+    let input = NSTextField()
+    let sendButton = NSButton()
+    var submitted: ((String) -> Void)?
+    var cancelled: (() -> Void)?
+    init(id: String, label: String, prompt: String, locale: String, frame: NSRect) {
+        operationId = id
+        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false; backgroundColor = .clear; hasShadow = true
+        level = .popUpMenu; hidesOnDeactivate = false; isReleasedWhenClosed = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        let names = ["zh-CN": ["发送", "输入指令…"], "en": ["Send", "Type a message…"],
+                     "ja": ["送信", "メッセージを入力…"], "ko": ["보내기", "메시지 입력…"]]
+        let words = names[locale] ?? names["en"]!
+        let surface = NSVisualEffectView(frame: NSRect(origin: .zero, size: frame.size))
+        surface.material = .popover; surface.blendingMode = .withinWindow; surface.state = .active
+        surface.wantsLayer = true; surface.layer?.cornerRadius = 12; surface.layer?.masksToBounds = true
+        contentView = surface
+        input.isBezeled = false; input.drawsBackground = false; input.focusRingType = .none
+        input.usesSingleLineMode = true; input.cell?.isScrollable = true
+        input.font = .systemFont(ofSize: 14); input.textColor = .labelColor
+        input.placeholderString = words[1]; input.stringValue = prompt
+        input.setAccessibilityLabel(label); input.delegate = self
+        input.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        sendButton.title = words[0]; sendButton.bezelStyle = .rounded
+        sendButton.font = .systemFont(ofSize: 13, weight: .medium)
+        sendButton.isBordered = true; sendButton.toolTip = words[0]; sendButton.setAccessibilityLabel(words[0])
+        sendButton.target = self; sendButton.action = #selector(sendInput)
+        let stack = NSStackView(views: [input, sendButton]); stack.orientation = .horizontal
+        stack.alignment = .centerY; stack.distribution = .fill; stack.spacing = 8; stack.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: surface.centerYAnchor),
+            sendButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
+            sendButton.heightAnchor.constraint(equalToConstant: 28)
+        ])
+        updateSendButton()
+    }
+    var isComposing: Bool { (input.currentEditor() as? NSTextView)?.hasMarkedText() == true }
+    var text: String { input.currentEditor()?.string ?? input.stringValue }
+    var validText: Bool {
+        !isComposing && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            text.utf16.count <= 8000 && !text.contains("\0")
+    }
+    func retarget(_ id: String?, label: String) {
+        operationId = id; input.setAccessibilityLabel(label); updateSendButton()
+    }
+    override func resignKey() {
+        super.resignKey()
+        cancelled?()
+    }
+    func updateSendButton() { sendButton.isEnabled = operationId != nil && validText }
+    func controlTextDidChange(_ notification: Notification) { updateSendButton() }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        // The native field editor owns composition and single-line text handling.
+        guard control === input, !textView.hasMarkedText() else { return false }
+        if selector == #selector(NSResponder.insertNewline(_:)) { sendInput(); return true }
+        if selector == #selector(NSResponder.cancelOperation(_:)) { cancelInput(); return true }
+        return false
+    }
+    @objc func sendInput() { if operationId != nil && validText { submitted?(text) } }
+    @objc func cancelInput() { if !isComposing { cancelled?() } }
+    func clearInput() {
+        submitted = nil; cancelled = nil
+        input.currentEditor()?.string = ""; input.currentEditor()?.undoManager?.removeAllActions()
+        input.stringValue = ""
+        orderOut(nil); close()
+    }
+}
+
 final class WheelView: NSView {
     let emotes: [[String: Any]]
     let images: [String: NSImage]
     let center = NSPoint(x: 124, y: 124)
     var choices: [String: [[String: Any]]] = [:]
-    var selected: Int? { didSet { if oldValue != selected { page = 0; optionIndex = nil }; needsDisplay = true } }
+    var selected: Int? { didSet { if oldValue != selected { optionIndex = nil }; needsDisplay = true } }
     var optionIndex: Int? { didSet { needsDisplay = true } }
-    var page = 0
     var cancel: (() -> Void)?
     init(emotes: [[String: Any]], images: [String: NSImage]) {
         self.emotes = emotes; self.images = images
@@ -51,12 +125,11 @@ final class WheelView: NSView {
     func angle(_ index: Int) -> CGFloat { CGFloat(emotes[index]["angle"] as? Double ?? 0) }
     func needsTarget(_ index: Int) -> Bool { ["pick", "recent"].contains(emotes[index]["targetMode"] as? String ?? "") }
     func rows(_ index: Int) -> [[String: Any]] {
-        let values = choices[emotes[index]["targetKind"] as? String ?? ""] ?? []
-        return emotes[index]["targetMode"] as? String == "recent" ? Array(values.prefix(3)) : values
+        choices[emotes[index]["targetKind"] as? String ?? ""] ?? []
     }
     func distance(_ a: CGFloat, _ b: CGFloat) -> CGFloat { abs((a - b + 540).truncatingRemainder(dividingBy: 360) - 180) }
     func branch(_ index: Int) -> (start: CGFloat, step: CGFloat, count: Int) {
-        let count = min(3, max(0, rows(index).count - page * 3))
+        let count = rows(index).count
         let previous = index > 0 ? angle(index - 1) : angle(emotes.count - 1) - 360
         let next = index + 1 < emotes.count ? angle(index + 1) : angle(0) + 360
         let span = min(84, max(48, (next - previous) / 2 - 6))
@@ -71,9 +144,9 @@ final class WheelView: NSView {
             let b = branch(index)
             let offset = (at - b.start + 720).truncatingRemainder(dividingBy: 360)
             if b.count > 0 && offset <= b.step * CGFloat(b.count) {
-                let candidate = min(b.count - 1, Int(offset / b.step)) + page * 3
-                if let old = optionIndex, old / 3 == page {
-                    let midpoint = b.start + (CGFloat(old % 3) + 0.5) * b.step
+                let candidate = min(b.count - 1, Int(offset / b.step))
+                if let old = optionIndex {
+                    let midpoint = b.start + (CGFloat(old) + 0.5) * b.step
                     if distance(at, midpoint) <= b.step / 2 + 2 { return }
                 }
                 optionIndex = candidate; return
@@ -82,11 +155,6 @@ final class WheelView: NSView {
         if radius > 114, selected != nil { return }
         let index = emotes.indices.min { distance(at, angle($0)) < distance(at, angle($1)) }
         if selected != index { selected = index } else { optionIndex = nil }
-    }
-    func turnPage(_ delta: Int) {
-        guard let selected = selected, needsTarget(selected), rows(selected).count > 3 else { return }
-        page = min(max(0, page + delta), (rows(selected).count - 1) / 3)
-        optionIndex = nil; needsDisplay = true
     }
     func sector(inner: CGFloat, outer: CGFloat, start: CGFloat, end: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
@@ -120,8 +188,8 @@ final class WheelView: NSView {
             .font: NSFont.systemFont(ofSize: 24, weight: .light), .foregroundColor: color(0.55, 0.55), .paragraphStyle: paragraph])
         guard let index = selected, needsTarget(index) else { return }
         let b = branch(index)
-        for local in 0..<b.count {
-            let row = local + page * 3, start = b.start + CGFloat(local) * b.step
+        for row in 0..<b.count {
+            let start = b.start + CGFloat(row) * b.step
             let path = sector(inner: 87, outer: 111, start: start + 0.5, end: start + b.step - 0.5)
             (optionIndex == row ? color(0.80, 0.35) : color(0.95, 0.19)).setFill(); path.fill()
             border.setStroke(); path.lineWidth = 0.7; path.stroke()
@@ -131,13 +199,6 @@ final class WheelView: NSView {
             let label = rows(index)[row]["label"] as? String ?? ""
             paragraph.lineBreakMode = .byCharWrapping
             String(label.prefix(12)).draw(in: frame, withAttributes: [.font: NSFont.systemFont(ofSize: 9), .foregroundColor: text, .paragraphStyle: paragraph])
-        }
-        if rows(index).count > 3 {
-            let count = (rows(index).count + 2) / 3
-            for i in 0..<min(count, 7) {
-                let dot = NSBezierPath(ovalIn: NSRect(x: center.x + CGFloat(i) * 5 - CGFloat(min(count, 7) - 1) * 2.5 - 1, y: center.y - 23, width: 2, height: 2))
-                (i == page ? text : border).setFill(); dot.fill()
-            }
         }
     }
 }
@@ -299,6 +360,9 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
     var captureBusy = false
     var locale = "en"
     var configRevision = ""
+    var promptPanel: PromptPanel?
+    // Projection of Node's current unsent operation, never an authorization source.
+    var pendingGestureId: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         emit(["kind": "ready", "permissions": permissions()])
@@ -310,6 +374,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func configure(_ params: [String: Any]) -> [String: Any] {
         unregisterWheel()
         closePicker()
+        closeInput()
         recordingTimer?.invalidate()
         recordingTimer = nil
         recordingShortcut = false
@@ -361,7 +426,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         guard AXIsProcessTrusted() else { return false }
         if inputTap == nil {
             let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .leftMouseUp,
-                                       .rightMouseDown, .rightMouseUp, .mouseMoved, .leftMouseDragged, .scrollWheel]
+                                       .rightMouseDown, .rightMouseUp, .mouseMoved, .leftMouseDragged]
             let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
             guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                 options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, context in
@@ -434,7 +499,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         }
         let flags = event.flags.intersection(modifierMask)
         let key = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        if [.leftMouseDown, .leftMouseUp, .leftMouseDragged, .mouseMoved, .scrollWheel].contains(type) {
+        if [.leftMouseDown, .leftMouseUp, .leftMouseDragged, .mouseMoved].contains(type) {
             lastMouseActivity = ProcessInfo.processInfo.systemUptime
         }
         if type == .keyUp {
@@ -449,7 +514,22 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         if type == .keyDown {
             if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { swallowedKeys.remove(key) }
             if key == CGKeyCode(kVK_Escape), gesture == .wheel {
-                swallowedKeys.insert(key); foreignKey = true; cancelPickerGesture(); return true
+                swallowedKeys.insert(key); foreignKey = true; cancelPickerGesture()
+                if let id = pendingGestureId {
+                    closeInput()
+                    emit(["kind": "cancel-action", "gestureId": id])
+                }
+                return true
+            }
+            if key == CGKeyCode(kVK_Escape), flags.isEmpty, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                if let panel = promptPanel {
+                    if !panel.isKeyWindow && !panel.isComposing {
+                        swallowedKeys.insert(key); panel.cancelInput(); return true
+                    }
+                } else if let id = pendingGestureId {
+                    swallowedKeys.insert(key); pendingGestureId = nil
+                    emit(["kind": "cancel-action", "gestureId": id]); return true
+                }
             }
             heldKeys.insert(key); updateTrigger(flags, at: event.location)
             if swallowedKeys.contains(key) { return true }
@@ -463,11 +543,6 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
             swallowRightUp = true; foreignKey = true; cancelPickerGesture(); return true
         }
         if type == .leftMouseDown && gesture == .wheel { swallowLeftUp = true; return true }
-        if type == .scrollWheel && gesture == .wheel {
-            let delta = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
-            if delta != 0 { wheel?.turnPage(delta < 0 ? 1 : -1) }
-            return true
-        }
         if (type == .mouseMoved || type == .leftMouseDragged) && gesture == .wheel { updatePicker(at: event.location) }
         return false
     }
@@ -476,6 +551,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         recordingTimer = nil
         closePicker()
         unregisterWheel()
+        closeInput()
         recordingShortcut = active
         var issues: [String] = []
         if active {
@@ -515,6 +591,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         guard enabled, emotes.indices.contains(index) else { return }
         let emote = emotes[index]
         closePicker()
+        prepareInput(for: emote, gestureId: gestureId)
         // No accessibility queries, capture, IPC or model work precedes display.
         // Extra transparent room keeps the spring overshoot and ripple unclipped.
         let overlay = Overlay(frame: NSRect(x: point.x - 72, y: point.y - 36, width: 144, height: 144), interactive: false)
@@ -609,6 +686,50 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         if let id = wheelGestureId { emit(["kind": "wheel-closed", "gestureId": id]) }
         picker?.close(); picker = nil; wheel = nil; wheelGestureId = nil
     }
+    func closeInput() {
+        promptPanel?.clearInput(); promptPanel = nil; pendingGestureId = nil
+    }
+    func prepareInput(for emote: [String: Any], gestureId: String) {
+        let sending = !["none", "undo"].contains(emote["action"] as? String ?? "")
+        if sending && emote["promptMode"] as? String == "input" {
+            // Keep the same editor and draft, but never submit against the old capture.
+            promptPanel?.retarget(nil, label: emote["label"] as? String ?? "Cindy Ping")
+        } else { closeInput() }
+        pendingGestureId = sending ? gestureId : nil
+    }
+    func openInput(_ params: [String: Any]) -> [String: Any] {
+        guard enabled, !recordingShortcut, let id = params["id"] as? String,
+              let gestureId = params["gestureId"] as? String, gestureId == pendingGestureId,
+              let prompt = params["prompt"] as? String, prompt.utf16.count <= 8000 else { return ["current": false] }
+        if let panel = promptPanel {
+            panel.retarget(id, label: params["label"] as? String ?? "Cindy Ping")
+            return ["current": true]
+        }
+        let point = params["point"] as? [String: Double] ?? [:]
+        let at = NSPoint(x: point["x"] ?? 0, y: (NSScreen.screens.first?.frame.maxY ?? 0) - (point["y"] ?? 0))
+        let screen = (NSScreen.screens.first { $0.frame.contains(at) } ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        let width = min(360, screen.width - 24), height: CGFloat = 44
+        let origin = NSPoint(x: min(max(at.x - width / 2, screen.minX + 12), screen.maxX - width - 12),
+                             y: min(max(at.y - height - 48, screen.minY + 12), screen.maxY - height - 12))
+        let panel = PromptPanel(id: id, label: params["label"] as? String ?? "Cindy Ping", prompt: prompt,
+                                locale: locale, frame: NSRect(origin: origin, size: NSSize(width: width, height: height)))
+        promptPanel = panel
+        panel.submitted = { [weak self, weak panel] text in
+            guard let self = self, let panel = panel, self.promptPanel === panel,
+                  let id = panel.operationId else { return }
+            emit(["kind": "input-submit", "id": id, "text": text])
+            panel.clearInput(); self.promptPanel = nil
+        }
+        panel.cancelled = { [weak self, weak panel] in
+            guard let self = self, let panel = panel, self.promptPanel === panel else { return }
+            let gestureId = self.pendingGestureId
+            self.closeInput()
+            if let gestureId = gestureId { emit(["kind": "cancel-action", "gestureId": gestureId]) }
+        }
+        panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(panel.input)
+        (panel.input.currentEditor() as? NSTextView)?.setSelectedRange(NSRange(location: prompt.utf16.count, length: 0))
+        return ["current": true]
+    }
     func thumbnail(_ image: NSImage) -> String? {
         guard image.size.width > 0, image.size.height > 0,
               let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64,
@@ -628,6 +749,16 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         let params = request["params"] as? [String: Any] ?? [:]
         switch method {
         case "configure": answer(id, configure(params))
+        case "openInput": answer(id, openInput(params))
+        case "closeInput":
+            let closesOperation = (params["id"] as? String).map { $0 == promptPanel?.operationId } ?? false
+            let closesGesture = params["keepPending"] as? Bool != true &&
+                (params["gestureId"] as? String).map { $0 == pendingGestureId } == true
+            if closesOperation || closesGesture {
+                promptPanel?.clearInput(); promptPanel = nil
+            }
+            if closesGesture { pendingGestureId = nil }
+            answer(id, [:])
         case "status":
             // Recheck Cindy's existing access without requesting OS authorization.
             if enabled && !recordingShortcut && inputTap == nil && AXIsProcessTrusted() { _ = registerWheel() }
@@ -652,7 +783,7 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
         case "wheelTargets":
             guard params["gestureId"] as? String == wheelGestureId, let wheel = wheel,
                   let choices = params["choices"] as? [String: [[String: Any]]] else { answer(id, ["current": false]); return }
-            wheel.choices = choices; wheel.needsDisplay = true
+            wheel.choices = choices.mapValues { Array($0.prefix(3)) }; wheel.needsDisplay = true
             answer(id, ["current": true])
         case "pickImage":
             let panel = NSOpenPanel()
@@ -673,14 +804,18 @@ final class Controller: NSObject, NSApplicationDelegate, @unchecked Sendable {
             captureBusy = true
             let event = params["event"] as? [String: Any] ?? [:]
             let wantsScreenshot = params["screenshot"] as? Bool ?? true
+            let capturedAt = Date().timeIntervalSince1970 * 1000
             Task.detached { [weak self] in
+                async let image = wantsScreenshot ? screenshot(event) : (nil, [])
                 let (text, textIssues) = textAt(event)
-                let (jpeg, screenshotIssues) = wantsScreenshot ? await screenshot(event) : (nil, [])
+                let (jpeg, screenshotIssues) = await image
                 var result: [String: Any] = ["text": text, "issues": textIssues + screenshotIssues,
-                                             "capturedAt": Date().timeIntervalSince1970 * 1000, "source": event]
+                                             "capturedAt": capturedAt, "source": event]
                 if let jpeg = jpeg { result["jpeg"] = jpeg }
-                answer(id, result)
-                DispatchQueue.main.async { self?.captureBusy = false }
+                DispatchQueue.main.async {
+                    self?.captureBusy = false
+                    answer(id, result)
+                }
             }
         case "shutdown": answer(id, [:]); NSApp.terminate(nil)
         default: failure(id, "METHOD_UNKNOWN")
