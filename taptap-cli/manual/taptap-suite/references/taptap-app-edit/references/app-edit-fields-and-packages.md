@@ -42,6 +42,7 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `
 
 - 先区分缺少 `expected`、字段值漂移、字段约束不符与草稿不可编辑；不要把所有 conflict 都归因其他人修改。
 - conflict 或响应含 `stale` 时，重新读取受影响字段与当前草稿。目标值已经存在则报告“当前值已符合目标”，不重复写，也不声称刚才失败的请求完成了保存。
+- 409 的 `error_description` 会点名漂移字段的中文名；按 [field map](taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md) 把它对到 `field_id` 与所属 `module_id`，再用 `call_tool(name:"app get-app-module", args:{data:{module_id:"..."}})` 读该模块的 `current_value`，原样回填到对应 change 的 `expected`。同一目标再冲突一次就停止重试，报告观察到的状态，不要原样重发。
 - 仍需修改时，展示新旧差异，按原用户目标重新决定变更，并使用最新 `expected`；不得自动 `force`、撤审或撤销定时。请求内容变化时使用新的意图幂等键，不复用不同 payload 的旧 key。
 - `updated_fields` 与 `stale` 分别核对；批量保存只报告有写入回执或同资源回读证据的字段。只成功部分时保留已完成项，不整批重复保存；只有 dry-run 或后续提审成功不能补足此前字段保存证据。
 - 草稿不可编辑时按实际版本状态解释可选操作；无草稿时先核对 `create-draft` 前置条件，不自动撤审或重置来绕过状态限制。

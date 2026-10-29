@@ -36,6 +36,8 @@
 | `developer-info` | 开发者信息 | `developer_type`(厂商类型)、`author_name`、`publisher_name`、`developer_message` |
 | `other-settings` | 其他设置 | `download_site`(官网)、`chatting_*`(社群信息)、`is_proxy_required`(需网络工具)、`is_google_play_required`、`supported_vr`、`android_version`(Android 系统版本)、`pc_game_anti_addiction_status`(PC 防沉迷)、`pc_whatsnew`(Windows 包体更新日志) |
 
+`module_id` 只能取上表这 9 个值，服务端不接受缩写或翻译：`other`、`others`、`settings`、`basic`、`store`、`assets`、`platform` 都会返回 400 `invalid_parameters`。「其他设置」的 id 是 `other-settings`，不是 `other`。
+
 **重点**：游戏名 field_id 是 `title`，不是 `name`。简介 field_id 是 `description`。
 
 ### 字段可见性与按平台 / 类型的条件渲染

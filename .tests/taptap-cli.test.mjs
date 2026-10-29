@@ -1155,6 +1155,35 @@ test('the image handoff always carries the upload info on field writes', () => {
   assert.match(rollback, /重新收录/);
 });
 
+test('the manuals carry the 2026.10.29 upstream sync', () => {
+  // Three upstream additions reach the agent only through the plugin manuals:
+  // `taptap-cli feedback` (self-service problem reporting), the target-specific
+  // self-test QR file name, and the closed `module_id` enum. Each one is
+  // mentioned here because the failure it prevents is silent: without the
+  // feedback route a blocked user's complaint is never filed, a fixed
+  // `test-qr.png` turns a second render into a "bad argument" error, and a
+  // translated `module_id` reads back as an empty module.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+
+  const feedback = read('taptap-suite/references/feedback.md');
+  assert.match(feedback, /call_tool\(name:"feedback"/, 'feedback must be shown as a call_tool write');
+  assert.match(feedback, /dry_run: true/, 'feedback is a write, so it goes through the preview gate');
+  assert.match(feedback, /QQ 群 1127966239/, 'the receipt must point at the support group');
+  assert.match(
+    read('taptap-suite/MANUAL.md'),
+    /taptap-suite\/references\/feedback\.md/,
+    'the suite entry must route to the feedback manual',
+  );
+
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  assert.match(packages, /artifacts\/test-qr-<packageId>\.png/, 'the QR example must name a target-specific file');
+  assert.doesNotMatch(packages, /output:"test-qr\.png"/, 'a fixed QR file name collides on the second render');
+
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
+  assert.match(fields, /`module_id` 只能取上表这 9 个值/, 'the closed module_id enum must be stated;');
+});
+
 test('the install guidance lists commands that actually work', () => {
   // `npx @taptap/cli install` runs a wizard whose internal `npm install -g` is
   // capped at 120s. The package is ~37MB, so a first run can exceed that and

@@ -42,6 +42,9 @@
    - TapTap 制造：从 `package-management list-spark-versions` 里选目标版本，取它的 `version_code`。
 7. 调 `package-management get-test-qr-code` 时，`package_id` 和 `version_code` **互斥，只能传其中一个**。多个候选时先让用户按版本/时间选择，再传选中的 ID。
 8. `package-management get-test-qr-code`（动态命令，JSON）负责拿 `qr_code_url`；拿到后必须调用 `call_tool(name:"test-qr-code", args:{data:{package_id:"<packageId>"}, output:"<file>.png"})`（TapTap 制造传 `data:{version_code:"<sparkVersionCode>"}`）生成 PNG 二维码（`output` 是相对会话工作目录的文件路径），并把返回的 `data.file_path` 作为图片附件展示给用户扫码。
+   - `<file>` 必须按目标区分（例如 `artifacts/test-qr-<packageId>.png`），**不要复用固定名字**（如 `test-qr.png`）：同一目录下重名文件会让命令以 `validation/invalid_argument`、`param=--output` 失败。
+   - 同一个包只渲染一次；不要对同一 `package_id` + 同一 `output` 并行重发。文件已存在且内容相同会被判为幂等成功，内容不同才需要换名字，或显式加 `force: true` 覆盖。
+   - `output` 冲突是文件占用问题，不是参数写错：换路径/加 `force: true`/（内容相同则）直接视为成功，不要原样重试同一命令。
 9. Codex 会折叠命令行输出，不能把命令输出本身当作二维码交付。`view_image`、`Viewed Image`、工具输出里的图片预览都只对 Agent 可见，不算用户收到二维码。不要只输出 `qr_code_url`、只给文件路径或说“二维码已展示”。动态命令不在本地补造二维码图片字段。
 10. 调 `package-management get-test-qr-code` 失败时，只说明失败原因或下一步要求，不要要求用户提供内部参数名。
 

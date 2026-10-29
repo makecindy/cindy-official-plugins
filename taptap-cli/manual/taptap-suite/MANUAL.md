@@ -102,6 +102,7 @@
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
 - `precheck-app-review` 返回 `blockers` 非空或 `preaudit_status === "rejected"` 时,只展示 `blockers` 逐项事实;`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次没审成、可稍后重试预检或直接提交;响应里没有 `preaudit_status` 时退回按 `preaudit_passed` 判断。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则向用户逐项展示卡点并询问是否强制提交(预检可跳过,最终由服务端校验裁决)。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
+- CLI 自身的问题(报错看不懂、行为不合预期)在用户明确受阻或同一 `error.subtype` 连续失败 2 次时用 `feedback` 上报,条件与话术见 [feedback](taptap-suite/references/feedback.md);它是写操作,同样先 `dry_run: true` 预览再 `yes: true`。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。
 
 ## References
@@ -110,6 +111,7 @@
 | --- | --- | --- |
 | shared execution | 复杂流程、写操作、确认门禁、错误处理和输出边界 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/shared-execution.md"})` |
 | CLI command patterns | 命令树、上传命令与快捷命令的具体形态 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/cli-command-patterns.md"})` |
+| feedback | CLI 问题反馈的触发条件、脱敏和回执话术 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/feedback.md"})` |
 | business routing | 请求横跨多个业务域或路由不确定 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/business-routing.md"})` |
 | 运营阶段识别与官方手册 | 提审、测试、首次上线或版本更新完成后的状态识别与运营手册交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/operation-handbooks.md"})` |
 | 游戏物料要求 | 回答图片、视频、Windows 素材规格或判断素材是否合规 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/material-requirements.md"})` |

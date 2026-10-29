@@ -34,7 +34,7 @@ call_tool(name:"package-management list-pc-packages", args:{developer_id:"<devel
 call_tool(name:"package-management get-test-qr-code", args:{developer_id:"<developerId>", app_id:"<appId>", data:{package_id:"<packageId>"}})
 
 # 渲染自测二维码 PNG(顶层 shortcut,data 同样是扁平目标)
-call_tool(name:"test-qr-code", args:{developer_id:"<developerId>", app_id:"<appId>", data:{package_id:"<packageId>"}, output:"test-qr.png"})
+call_tool(name:"test-qr-code", args:{developer_id:"<developerId>", app_id:"<appId>", data:{package_id:"<packageId>"}, output:"artifacts/test-qr-<packageId>.png"})
 
 # 读取当前 schema
 call_tool(name:"schema", args:{_positional:["package-management","get-available-package-types"]})
@@ -60,7 +60,7 @@ call_tool(name:"schema", args:{_positional:["package-management","get-test-qr-co
 - 先调 `package-management get-available-package-types` 拿 `available_package_types`;只用其中实际返回的类型,不要补充不可见类型。
 - 用户泛说"我要自测"时,先列出实际可用类型让用户选,不要把"自测"直接等同为"自测二维码"。
 - **自测二维码**:从对应 `list-*` 里确定目标版本后,把它的 `package_id` 传给 `package-management get-test-qr-code`(TapTap 制造传 `version_code`)。`package_id` 和 `version_code` 互斥,只能传其中一个。TapTap 制造只有当前线上之外的候选也能取二维码;接口返回目标不可用时按工具结果提示用户重新选择版本。
-- 二维码成功后必须调用顶层 shortcut `test-qr-code`(`args.output` 指定 .png)生成 PNG,并把 `data.file_path` 作为图片附件展示给用户。`package-management get-test-qr-code`(动态命令,JSON)负责拿 `qr_code_url` 和确认目标;`test-qr-code`(顶层 shortcut)负责渲染 PNG。动态命令不在本地补造二维码图片字段。
+- 二维码成功后必须调用顶层 shortcut `test-qr-code`(`args.output` 指定 .png)生成 PNG,并把 `data.file_path` 作为图片附件展示给用户。`output` 文件名按目标区分(如 `artifacts/test-qr-<packageId>.png`),不要复用固定名字;重名冲突是文件占用问题,换路径或加 `force: true`,不要原样重试。`package-management get-test-qr-code`(动态命令,JSON)负责拿 `qr_code_url` 和确认目标;`test-qr-code`(顶层 shortcut)负责渲染 PNG。动态命令不在本地补造二维码图片字段。
 - **APK / Windows 没有二维码接口**:`get-test-qr-code` 只服务小游戏、H5 和 TapTap 制造。APK / Windows 想自测时,只说明包体列表状态,并引导用户在开发者中心对应包体页面发起自测;不要调用二维码 operation。
 - **APK 的场景状态不在 CLI 契约内**:云玩 / TapPlay / 云微端 / 模拟器各场景的可用性、授权状态、当前包体、审核状态和不可用原因都不由任何 `package-management` 接口返回。用户问到时,只说明 CLI 只能列出包体本体(`package-management list-apk-packages`),场景维度请到开发者中心包体管理页面查看;不要从包体列表推断场景可用性。
 - **Windows 分支**:合法值与应用的包体模型绑定,判据是 `pc_package_branch` 白名单。命中白名单 → 分支模型,`branch=1` 游戏本体包、`branch=2` 启动器包(两个角色同时必填);未命中 → legacy 模型,`branch=0` 是唯一槽位(默认包体),**不存在启动器包**。判据的接口信号是 `get-app-module` 的 `other-settings` 字段:返回 `pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` 即分支模型,只返回 `pc_whatsnew` 即 legacy。`upload-pc-package` 不传 `windows_branch` 时会按这个信号自动判定(分支→1、legacy→0),判定失败会要求显式传 0/1/2。`current_package_id` 是当前默认包体,为 0 表示没有默认包体。
