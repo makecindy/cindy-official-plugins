@@ -416,6 +416,13 @@ test('captionsMatchLanguage compares writing systems and stays silent when unsur
   assert.equal(core.captionsMatchLanguage([cue('这是一个测试，用来确认中文字幕的语言判断是否正确。')],'zh-Hans'),true);
   assert.equal(core.captionsMatchLanguage([cue('[Music]')],'en'),true,'too little text decides nothing');
   assert.equal(core.captionsMatchLanguage(english,'xx'),true,'unknown languages are not judged');
+  // Serbian and Kazakh subtitles come in either script; Latin-script tracks were refused as a mismatch.
+  const serbianLatin=[cue('Dobro veče, ovo je test da proverimo da li se titlovi na srpskom latinici prihvataju.')];
+  const serbianCyrillic=[cue('Добро вече, ово је тест да проверимо да ли се титлови на српском ћирилици прихватају.')];
+  const kazakhLatin=[cue('Bul synaq: qazaq tilindegi latyn jazuyndagy subtitrler qabyldanuy kerek.')];
+  for(const [cues,language] of [[serbianLatin,'sr'],[serbianCyrillic,'sr'],[serbianLatin,'sr-Latn'],[kazakhLatin,'kk'],[serbianCyrillic,'kk']])assert.equal(core.captionsMatchLanguage(cues,language),true,language);
+  assert.equal(core.captionsMatchLanguage(arabic,'sr'),false);
+  assert.equal(core.captionsMatchLanguage(serbianCyrillic,'en'),false);
 });
 
 test('youtubeCaptionTrack: Chinese-ordered list with English last, and pages without the default caption index',()=>{

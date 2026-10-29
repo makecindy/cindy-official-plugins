@@ -73,7 +73,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'selection'}),tabId);await waitText('译文：Hello world');assert.doesNotMatch(await panelText(),/"nodeValue":"收藏"/);
  await click('解释');await waitText('这是结合上下文的解释。');await click('关闭');
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'settings'}),tabId);
- await waitText('在 Cindy 的「浏览器翻译」任务中选择模型和思考强度');
+ await waitText('在「模型与任务」中修改');
  await readNode('SELECT','外观','function(){this.value="dark";this.dispatchEvent(new Event("change"))}');assert.equal((await appearance()).theme,'dark');
  if(screenshots)await page.screenshot({path:path.join(screenshots,'settings-dark.png')});
  await readNode('SELECT','外观','function(){this.value="light";this.dispatchEvent(new Event("change"))}');await click('返回');

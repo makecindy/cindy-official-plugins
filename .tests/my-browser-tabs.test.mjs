@@ -49,6 +49,10 @@ test('unclosable or user-claimed tabs remain counted against the real opening li
     for(let i=0;i<5;i++)await assert.rejects(h.read('https://example.test/new'),/TAB_LIMIT/);
     assert.equal(h.tabs.size,12);assert.equal(h.creates(),12);
   }
+  // The message names the real limit (it said "Three" long after the limit became 12).
+  const h=harness();h.state.removeFails=true;for(let i=0;i<12;i++)await h.read('https://example.test/'+i);
+  const refused=await h.handle('https://example.test/new');
+  assert.equal(refused.error,'TAB_LIMIT');assert.match(refused.message,/^12 tabs Cindy opened/);
 });
 test('canonical URLs and already-open user tabs are reused without creating a replacement',async()=>{
   const h=harness();await h.read('https://example.test');await h.read('https://example.test/');assert.equal(h.creates(),1);

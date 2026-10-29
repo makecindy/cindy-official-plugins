@@ -264,7 +264,8 @@
   // caption choice, a transcript panel following the account). Compare writing systems only:
   // reliable enough to catch Arabic for English, and silent when either side is unknown.
   const SCRIPTS=[['arabic',/[\u0600-\u06ff\u0750-\u077f]/g],['hebrew',/[\u0590-\u05ff]/g],['cyrillic',/[\u0400-\u04ff]/g],['greek',/[\u0370-\u03ff]/g],['devanagari',/[\u0900-\u097f]/g],['bengali',/[\u0980-\u09ff]/g],['gurmukhi',/[\u0a00-\u0a7f]/g],['tamil',/[\u0b80-\u0bff]/g],['telugu',/[\u0c00-\u0c7f]/g],['malayalam',/[\u0d00-\u0d7f]/g],['thai',/[\u0e00-\u0e7f]/g],['hangul',/[\uac00-\ud7af\u1100-\u11ff]/g],['kana',/[\u3040-\u30ff]/g],['han',/[\u4e00-\u9fff]/g],['latin',/[A-Za-z\u00c0-\u024f]/g]];
-  const LANGUAGE_SCRIPTS={ar:'arabic',fa:'arabic',ur:'arabic',ps:'arabic',iw:'hebrew',he:'hebrew',yi:'hebrew',ru:'cyrillic',uk:'cyrillic',bg:'cyrillic',sr:'cyrillic',mk:'cyrillic',be:'cyrillic',kk:'cyrillic',mn:'cyrillic',el:'greek',hi:'devanagari',mr:'devanagari',ne:'devanagari',bn:'bengali',pa:'gurmukhi',ta:'tamil',te:'telugu',ml:'malayalam',th:'thai',ko:'hangul',ja:'kana',zh:'han',en:'latin',fr:'latin',de:'latin',es:'latin',pt:'latin',it:'latin',nl:'latin',pl:'latin',id:'latin',ms:'latin',vi:'latin',tr:'latin',sv:'latin',da:'latin',no:'latin',fi:'latin',cs:'latin',ro:'latin',hu:'latin',tl:'latin',fil:'latin'};
+  // Serbian and Kazakh are written in both Cyrillic and Latin script; either one matches.
+  const LANGUAGE_SCRIPTS={ar:'arabic',fa:'arabic',ur:'arabic',ps:'arabic',iw:'hebrew',he:'hebrew',yi:'hebrew',ru:'cyrillic',uk:'cyrillic',bg:'cyrillic',sr:['cyrillic','latin'],mk:'cyrillic',be:'cyrillic',kk:['cyrillic','latin'],mn:'cyrillic',el:'greek',hi:'devanagari',mr:'devanagari',ne:'devanagari',bn:'bengali',pa:'gurmukhi',ta:'tamil',te:'telugu',ml:'malayalam',th:'thai',ko:'hangul',ja:'kana',zh:'han',en:'latin',fr:'latin',de:'latin',es:'latin',pt:'latin',it:'latin',nl:'latin',pl:'latin',id:'latin',ms:'latin',vi:'latin',tr:'latin',sv:'latin',da:'latin',no:'latin',fi:'latin',cs:'latin',ro:'latin',hu:'latin',tl:'latin',fil:'latin'};
   function dominantScript(cues) {
     const sample=(cues||[]).slice(0,60).map(c=>c.text||'').join(' ');const counts={};
     for(const [name,re] of SCRIPTS)counts[name]=(sample.match(re)||[]).length;
@@ -273,9 +274,9 @@
     return n>=20?best:null;
   }
   function captionsMatchLanguage(cues,language) {
-    const expected=LANGUAGE_SCRIPTS[String(language||'').toLowerCase().split(/[-_]/)[0]];
+    const expected=[].concat(LANGUAGE_SCRIPTS[String(language||'').toLowerCase().split(/[-_]/)[0]]||[]);
     const actual=dominantScript(cues);
-    return !expected||!actual||expected===actual;
+    return !expected.length||!actual||expected.includes(actual);
   }
   function subtitleDocument(cues) {
     const paragraphs=[];let text=[],translation=[];
