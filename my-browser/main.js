@@ -1,10 +1,10 @@
 // Sandbox orchestration only; browser access stays in the bundled Node/Chrome bridge.
-const policyReady = Promise.all([import('/extension/policy.js'),import('/saved-policy.js')]).then(() => globalThis.MyBrowserPolicy);
+const policyReady = import('/extension/policy.js').then(() => globalThis.MyBrowserPolicy);
 const channel = new BroadcastChannel('my-browser');
 let writes = Promise.resolve();
 const serialize = fn => { const next = writes.then(fn,fn); writes = next.catch(() => {}); return next; };
 const fail = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
-// Cindy hosts that implement the browserExtension slot own the extension bridge: jobs, site policy,
+// Cindy hosts that implement the browserExtension slot own the extension bridge: jobs,
 // paired identities and learning relays travel over the plugin pipe and the bundled worker never
 // binds a loopback port. Older hosts reject the pipe type, so the worker bridge stays the fallback;
 // a refusal is never treated as a connection. Only that rejection marks a host as older: the host's
@@ -12,7 +12,7 @@ const fail = (error,message,execution = 'not_executed') => ({ok:false,error,mess
 // still, answers with nothing). Any other failure (HOST_NOT_READY while the bridge starts,
 // PERMISSION_DENIED while the plugin is being enabled, a pipe timeout) is not remembered, so the next
 // call asks again instead of starting the worker bridge and competing with the host for its ports.
-const HOST_KINDS={status:'status',act:'act',setPolicy:'setPolicy',setTrustedClients:'setTrustedClients',learningActive:'relayActive',learningProgress:'relayProgress',learningResult:'relayResult'};
+const HOST_KINDS={status:'status',act:'act',setTrustedClients:'setTrustedClients',learningActive:'relayActive',learningProgress:'relayProgress',learningResult:'relayResult'};
 let hostBridge=null;
 async function hostRequest(kind,params = {},reach = 'not_executed') {
   let r;
@@ -40,7 +40,6 @@ async function detectHostBridge() {
 }
 function hostParams(method,params) {
   if (method === 'act') return {action:params.action,payload:params.payload || {}};
-  if (method === 'setPolicy') return {policy:params.policy};
   if (method === 'setTrustedClients') return {clients:params.clients || []};
   if (method === 'learningProgress') return {id:params.id,progress:params.progress};
   if (method === 'learningResult') return {id:params.id,result:params.result};
@@ -63,7 +62,7 @@ async function node(method, params = {}) {
   const reach = ['act','openInstallation'].includes(method) ? 'unknown' : 'not_executed';
   let r;
   try {
-    r = await cindy.node.request({method,params,timeoutMs:['act','setPolicy'].includes(method) ? 65000 : method === 'openInstallation' ? 45000 : 10000});
+    r = await cindy.node.request({method,params,timeoutMs:method === 'act' ? 65000 : method === 'openInstallation' ? 45000 : 10000});
   } catch (e) {
     return fail('NODE_UNAVAILABLE',e.message || 'Re-enable Cindy Chrome and check its connection.',reach);
   }
@@ -71,19 +70,16 @@ async function node(method, params = {}) {
   return r.result;
 }
 async function load() {
-  const P = await policyReady;
   const r = await fetch('/kv');
-  if (!r.ok) throw new Error('Cannot read saved permissions. Reload plugin settings; no browser action was started.');
-  const cfg = await r.json();
-  return {cfg,policy:globalThis.myBrowserSavedPolicy(cfg,P)};
+  if (!r.ok) throw new Error('Cannot read saved settings. Reload plugin settings; no browser action was started.');
+  return {cfg:await r.json()};
 }
-// Reading stored permissions and applying them to the worker must be one critical section
-// shared with save(). If a settings save lands between the read and the apply, this stale
-// snapshot would overwrite the policy the user just revoked and keep the site actionable
-// until the next sync. Never call sync() from inside a serialized section (that deadlocks).
+// Pushes the paired browsers to the bridge (Cindy's, or the bundled worker on older Cindy). There are no
+// site lists (2026-10-30): safety is the task's permission mode and review, as in Cindy's own browser;
+// lists saved by older versions stay in storage unused.
 function sync() {
   return serialize(async () => {
-    const {cfg,policy} = await load();
+    const {cfg} = await load();
     const paired = await node('setTrustedClients',{clients:cfg.pairedClients || []});
     if (!paired?.ok) {
       const error = new Error(paired.message || 'Cannot synchronize paired browsers.');
@@ -91,68 +87,17 @@ function sync() {
       error.execution = paired.execution || 'not_executed';
       throw error;
     }
-    const r = await node('setPolicy',{policy});
-    if (!r?.ok && !(r?.error === 'REVOCATION_UNCONFIRMED' && r.applied === true)) {
-      const error = new Error(r?.message || 'Cannot apply site permissions. Re-enable the plugin.');
-      error.code = r?.error || 'SETTINGS_ERROR';
-      error.execution = r?.execution || 'not_executed';
-      throw error;
-    }
-    return policy;
   });
-}
-async function save(next, base) {
-  const P = await policyReady;
-  const {cfg,policy:current} = await load();
-  const policy = P.normalizePolicy(next);
-  if (base && JSON.stringify(P.normalizePolicy(base)) !== JSON.stringify(current)) return fail('POLICY_CHANGED','Permissions changed elsewhere. Refresh settings before editing again.');
-  const added = policy.interact.allow.filter(h => !current.interact.allow.includes(h));
-  const unblocked = current.read.block.filter(h => !policy.read.block.includes(h));
-  const exclusions = current.interact.block.filter(h => !policy.interact.block.includes(h));
-  if (added.length || unblocked.length || exclusions.length) {
-    const detail = [...added.map(h => '+ interact: '+h),...unblocked.map(h => '+ read: '+h),...exclusions.map(h => '+ excluded interaction: '+h)].join('\n');
-    const grants = added.length + unblocked.length + exclusions.length;
-    // Bound a batch of new grants, not a single already-saved host. A long but valid domain
-    // can be blocked without confirmation, so the same host must remain removable.
-    if (grants > 1 && detail.length > 190) return fail('TOO_MANY_GRANTS','Grant fewer sites at a time so the confirmation can show every domain.');
-    const r = await cindy.confirm({body:detail+'\nInteraction allows any button/form, including send, delete and pay. Allow these sites?',confirmText:'Allow',cancelText:'Cancel',danger:true});
-    if (!r.ok || !r.confirmed) return fail('PERMISSION_NOT_GRANTED','No permissions were changed. The user cancelled or confirmation was unavailable.');
-    const fresh = await load();
-    if (JSON.stringify(fresh.policy) !== JSON.stringify(current)) return fail('POLICY_CHANGED','Permissions changed during confirmation. Refresh settings.');
-  }
-  const r = await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,policy,siteDefaultsVersion:1})});
-  if (!r.ok) return fail('SAVE_FAILED','Permissions could not be saved. Refresh settings before trying again.');
-  const applied = await node('setPolicy',{policy});
-  const uncertain = applied?.error === 'REVOCATION_UNCONFIRMED' && applied.applied === true;
-  if (!applied?.ok && !uncertain) return {...fail('POLICY_SYNC_FAILED','Permissions were saved but the worker did not confirm them. No success is claimed; re-enable the plugin and check its status.'),saved:true,policy};
-  channel.postMessage({type:'policy-changed'});
-  return {ok:true,policy,...(uncertain ? {warning:'REVOCATION_UNCONFIRMED',message:applied.message} : {})};
 }
 async function handleTool(name,args) {
   const P = await policyReady;
-  if (name === 'browser_policy') {
-    if (args.action === 'get') { const policy = await sync(); return {ok:true,policy}; }
-    return serialize(async () => {
-      if (!['allow_interact','block_read','remove'].includes(args.action)) return fail('INVALID_ACTION','Use get, allow_interact, block_read or remove.');
-      const host = args.host === '*' && args.action !== 'block_read' ? '*' : P.normalizeHost(args.host);
-      const {policy} = await load();
-      if (args.action === 'allow_interact' && !policy.interact.allow.includes(host)) policy.interact.allow.push(host);
-      if (args.action === 'block_read' && !policy.read.block.includes(host)) policy.read.block.push(host);
-      if (args.action === 'remove') {
-        policy.interact.allow = policy.interact.allow.filter(h => h !== host);
-        policy.read.block = policy.read.block.filter(h => h !== host);
-        policy.interact.block = policy.interact.block.filter(h => h !== host);
-      }
-      return save(policy);
-    });
-  }
   if (!['browser_status','browser_tabs','browser_read','browser_act'].includes(name)) return fail('UNKNOWN_TOOL','Use a declared Cindy Chrome tool.');
-  await sync(); // Every call: a restarted worker must not silently lose stored permissions.
+  await sync(); // Every call: a restarted worker must not silently lose paired browsers.
   if (name === 'browser_status') {
     const status=await node('status'), installation=await node('installation');
     if (!status?.ok) return status||fail('STATUS_UNAVAILABLE','Cannot check browser connections. Re-enable Cindy Chrome and refresh its settings.');
     // Tool output is an explicit projection. The settings channel below retains
-    // policy, extension_dir and pairing identity details without sending them to AI.
+    // extension_dir and pairing identity details without sending them to AI.
     return {ok:true,version:status.version,protocol:status.protocol,extension_connected:status.extension_connected,nativeBinding:status.nativeBinding,
       clients:(status.clients || []).map(c=>({id:c.id,browser:c.browser,version:c.version,protocolVersion:c.protocolVersion,connected:c.connected,trusted:c.trusted,identitySupported:c.identitySupported,nativeBindingRequired:c.nativeBindingRequired})),
       installation:{ok:!!installation?.ok,browsers:(installation?.browsers || []).map(b=>({browser:b.browser,supported:b.supported,installed:b.installed,published:b.published,bundled:b.bundled}))},
@@ -188,11 +133,10 @@ cindy.onHostMessage(async msg => {
 });
 channel.onmessage = async ev => {
   const m = ev.data || {};
-  if (!['status-request','save-request','install-request'].includes(m.type) || typeof m.id !== 'string') return;
+  if (!['status-request','install-request'].includes(m.type) || typeof m.id !== 'string') return;
   let result;
   try {
-    if (m.type === 'save-request') result = await serialize(() => save(m.policy,m.base));
-    else if (m.type === 'install-request') result = await node('openInstallation',{browser:m.browser,mode:m.mode});
+    if (m.type === 'install-request') result = await node('openInstallation',{browser:m.browser,mode:m.mode});
     else { await sync(); result = {...await node('status'),installation:await node('installation')}; }
   } catch (e) { result = fail(e?.code || 'SETTINGS_ERROR',e.message || 'Reload plugin settings.',e?.execution || 'not_executed'); }
   channel.postMessage({type:'response',id:m.id,result});
@@ -213,7 +157,7 @@ async function getLearningService() {
 }
 async function handleLearningHostMessage(msg){
   if(msg.type==='host-context-changed'){hostLocale=msg.context?.locale||hostLocale;return;}
-  // The host bridge has no cached copy of the site permissions and refuses page jobs until we push them.
+  // The host has no saved copy of the paired browsers and asks for them (the event keeps its published name).
   if(msg.type==='event'&&msg.name==='browser-extension-policy-request'){sync().catch(()=>{});return;}
   // Host-owned bridge delivers relays as its own event; the bundled worker uses a node notification.
   const relay=msg.type==='event'&&msg.name==='browser-extension-relay'?msg:msg.type==='event'&&msg.name==='node-notification'&&msg.method==='learning-request'?msg.params:null;
@@ -227,7 +171,7 @@ async function handleLearningHostMessage(msg){
   }catch(e){result={ok:false,error:e.message||'LEARNING_UNAVAILABLE',stage};}
   await node('learningResult',{id,result});
 }
-// Resident logic establishes the bridge after saved permissions are loaded.
+// Resident logic establishes the bridge after paired browsers are loaded.
 if(typeof document!=='undefined') {
   fetch('/app-context').then(r=>r.json()).then(r=>{hostLocale=r.context?.locale||'en';}).catch(()=>{});
   sync().then(()=>node('status')).catch(()=>{});

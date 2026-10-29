@@ -15,7 +15,6 @@ import {webcrypto} from 'node:crypto';
 const require = createRequire(import.meta.url);
 const {createBridge,EXT_ID} = require('../my-browser/node/bridge.cjs');
 const P = require('../my-browser/extension/policy.js');
-const savedPolicy = cfg => require('../my-browser/saved-policy.js')(cfg,P);
 const sleep = ms => new Promise(r => setTimeout(r,ms));
 async function fixture(t,options = {}) {
   const b=createBridge({ports:[0],pollTimeout:20,connectWait:0,jobTimeout:200,...options});
@@ -43,28 +42,14 @@ async function fixture(t,options = {}) {
   await http('/poll');
   return {b,http,url,clientId};
 }
-test('default policy and one normalization path protect both reads and interactions',()=>{
-  const p=P.defaults();
-  assert.equal(P.check(p,'text','https://example.test').ok,true);
-  assert.equal(P.check(p,'click','https://example.test').ok,true);
-  assert.deepEqual(P.normalizePolicy(p),p);
-  p.read.block=['blocked.test'];
-  for(const url of ['https://blocked.test','https://child.blocked.test','file:///etc/passwd','https://a:b@example.test']) assert.equal(P.check(p,'text',url).ok,false,url);
-  assert.equal(P.check(p,'text','https://[2606:4700:4700::1111]/').ok,true);
-  assert.equal(P.check(p,'text','https://[2001:4860:4860::8888]/').ok,true);
-  // Agent jobs reach local and private pages like Cindy's dedicated browser; translation keeps its own guard.
-  for(const url of ['http://127.0.0.2','http://[::1]','http://10.2.3.4','http://192.168.1.2','http://localhost.'])assert.equal(P.check(p,'text',url).ok,true,url);
-  p.interact.allow=['example.test','blocked.test'];
-  assert.equal(P.check(p,'click','https://sub.example.test').ok,true);
-  assert.equal(P.check(p,'click','https://example.test.evil.test').ok,false);
-  assert.equal(P.check(p,'click','https://blocked.test').error,'READ_BLOCKED');
-  assert.equal(P.normalizeHost(' WWW.Example.test '),'www.example.test');
-  assert.equal(P.normalizeHost('*.example.test'),'example.test');
-  assert.equal(P.normalizeHost('=example.test'),'=example.test');
-  for(const bad of ['https://example.test','example.test/path','example.test:443','example.test@evil.test','*']) assert.throws(()=>P.normalizeHost(bad));
-  // Local, private and single-label intranet hosts can be listed, so they can be blocked alone.
-  for(const host of ['127.0.0.1','192.168.1.2','[::1]','localhost','jira','nas.local']) assert.doesNotThrow(()=>P.normalizeHost(host),host);
-  assert.throws(()=>P.normalizePolicy({read:{block:'example.test'},interact:{allow:[]}}));
+// 2026-10-30: no site lists. check() keeps the address rules only; a policy saved by older versions is
+// still parsed (so it cannot break a job) and changes nothing.
+test('jobs only need a plain HTTP(S) address; saved site lists change nothing',()=>{
+  const p=P.normalizePolicy({read:{block:['blocked.test']},interact:{allow:['example.test'],block:['other.test']}});
+  for(const url of ['https://blocked.test','https://other.test','https://[2606:4700:4700::1111]/','http://127.0.0.2','http://[::1]','http://10.2.3.4','http://localhost.'])
+    for(const action of ['text','click']) assert.equal(P.check(p,action,url).ok,true,action+' '+url);
+  for(const url of ['file:///etc/passwd','https://a:b@example.test','chrome://settings']) assert.equal(P.check(p,'text',url).ok,false,url);
+  assert.equal(P.check(p,'nope','https://example.test').error,'INVALID_ACTION');
 });
 test('payload validation preserves empty text/selection and rejects malformed extraction',()=>{
   assert.doesNotThrow(()=>P.validate('type',{url:'https://example.test',selector:'input',text:''}));
@@ -185,16 +170,13 @@ test('permission revoked after delivery blocks ACK and leaves no queued operatio
   await b.request('setPolicy',{policy:{read:{block:[]},interact:{allow:[],block:[]}}});assert.equal((await promise).execution,'not_executed');
   assert.equal((await http('/ack',{id:job.id})).status,409);
 });
-test('explicitly blocked tabs and redirected content are redacted by bridge even if extension omits filtering',async t=>{
+test('a site list pushed by an older plugin is acknowledged and blocks nothing in the bundled bridge',async t=>{
   const {b,http}=await fixture(t);
-  const policy=P.defaults();policy.read.block=['blocked.test'];await b.request('setPolicy',{policy});
-  async function roundtrip(action,result){
-    const p=b.request('act',{action,payload:action==='tabs'?{}:{url:'https://example.test'}});await sleep(5);
-    const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});await http('/result',{id:job.id,result});return p;
-  }
-  const r=await roundtrip('tabs',{tabs:[{id:1,url:'https://blocked.test',title:'private'},{id:2,url:'https://example.test',title:'public'}]});
-  assert.deepEqual(r.tabs[0],{id:1,redacted:true});assert.equal(r.tabs[1].title,'public');
-  const redirected=await roundtrip('text',{ok:true,url:'https://blocked.test',text:'private'});assert.equal(redirected.error,'REDIRECT_BLOCKED');assert.equal(redirected.text,undefined);
+  assert.deepEqual(await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}}),{ok:true,policy:P.defaults()});
+  const p=b.request('act',{action:'tabs',payload:{}});await sleep(5);
+  const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  await http('/result',{id:job.id,result:{tabs:[{id:1,url:'https://example.test',title:'public'},{id:2,url:'chrome://settings',title:'settings'}]}});
+  const r=await p;assert.equal(r.tabs[0].title,'public');assert.deepEqual(r.tabs[1],{id:2,redacted:true});
 });
 test('production stdio worker returns JSON-RPC and exits when host closes stdin',async t=>{
   const home=await fs.mkdtemp(path.join(os.tmpdir(),'cindy-worker-test-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
@@ -206,50 +188,14 @@ test('production stdio worker returns JSON-RPC and exits when host closes stdin'
   child.stdin.end();await once(child,'exit');lines.close();
 });
 
-test('all-site interaction preserves explicit blocks and old restricted policies',()=>{
-  const p=P.defaults();p.interact.block=['blocked.test'];p.read.block=['private.test'];
-  assert.equal(P.check(p,'click','https://other.test').ok,true);
-  assert.equal(P.check(p,'click','https://child.blocked.test').ok,false);
-  assert.equal(P.check(p,'text','https://private.test').ok,false);
-  const old={read:{block:[]},interact:{allow:['example.test'],block:[]}};
-  assert.deepEqual(P.normalizePolicy(old),old);
-  assert.equal(P.check(P.normalizePolicy(old),'click','https://other.test').ok,false);
-  assert.throws(()=>P.normalizePolicy({read:{block:['*']},interact:{allow:[]}}));
-});
 
-test('upgrade preserves ambiguous saved restrictions, while fresh installs have no preset blocks',()=>{
-  const legacy=['mail.google.com','outlook.com','outlook.live.com','mail.qq.com','mail.163.com',
-    '1password.com','lastpass.com','bitwarden.com','accounts.google.com','login.microsoftonline.com',
-    'appleid.apple.com','paypal.com','stripe.com','alipay.com','cmbchina.com','icbc.com.cn',
-    'bankofamerica.com','chase.com','coinbase.com','binance.com','console.aws.amazon.com',
-    'console.cloud.google.com','portal.azure.com'];
-  const policy={read:{block:[...legacy,'private.example.test']},interact:{allow:['example.test'],block:[]}};
-  const migrated=savedPolicy({policy});
-  assert.deepEqual(migrated,policy);
-  assert.deepEqual(savedPolicy({}),P.defaults());
-  assert.deepEqual(savedPolicy({}).read.block,[]);
-  assert.equal(P.check(migrated,'text','https://mail.google.com').ok,false);
-  assert.deepEqual(savedPolicy({policy:{...policy,read:{block:legacy}}}).read.block,legacy);
-  assert.equal(P.check(migrated,'text','https://private.example.test').ok,false);
-  assert.deepEqual(migrated.interact,policy.interact);
-  assert.equal(policy.read.block.length,legacy.length+1);
-  assert.deepEqual(savedPolicy({policy,siteDefaultsVersion:1}),policy);
-  const custom={...policy,read:{block:['mail.google.com','private.example.test']}};
-  assert.deepEqual(savedPolicy({policy:custom}),custom);
-});
 
-test('acknowledged reads with lost results or revoked authorization are unknown',async t=>{
+test('acknowledged reads with lost results are unknown',async t=>{
   const {b,http}=await fixture(t,{jobTimeout:80});
-  for(const revoke of [false,true]) {
-    const pending=b.request('act',{action:'text',payload:{url:'https://example.test'}});
-    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
-    if(revoke) {
-      await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
-      assert.equal((await http('/authorize',{id:job.id,url:'https://example.test'})).status,409);
-    }
-    assert.equal((await pending).execution,'unknown');
-    assert.equal((await http('/poll')).data.job,null);
-  }
+  const pending=b.request('act',{action:'text',payload:{url:'https://example.test'}});
+  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
+  assert.equal((await pending).execution,'unknown');
+  assert.equal((await http('/poll')).data.job,null);
 });
 
 test('extract final budget covers redaction growth across single and multiple records',async t=>{
@@ -283,72 +229,6 @@ test('extract final budget covers redaction growth across single and multiple re
   assert.equal(result.truncated,true);
 });
 
-for (const blocked of ['example.test','redirect.test']) {
-  test('revocation invalidates an authorized job when blocking '+blocked,async t=>{
-    const {b,http}=await fixture(t);
-    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
-    await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
-    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).data.ok,true);
-    await b.request('setPolicy',{policy:{...P.defaults(),read:{block:[blocked]}}});
-    const result=await pending;
-    assert.equal(result.error,'READ_BLOCKED');
-    assert.equal(result.execution,'unknown');
-    // Regranting permission cannot revive the cancelled operation.
-    await b.request('setPolicy',{policy:P.defaults()});
-    assert.equal((await http('/authorize',{id:job.id,url:'https://redirect.test'})).status,409);
-    assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
-    assert.equal((await b.request('status')).pending,0);
-  });
-}
 
-test('revocation waits for the final document dispatch and discards its result',async t=>{
-  const {b,http}=await fixture(t,{jobTimeout:2000});
-  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
-  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
-  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).data.ok,true);
-  let saved=false;
-  const save=b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}}).then(r=>{saved=true;return r;});
-  await sleep(25);assert.equal(saved,false,'must not acknowledge revocation while DOM dispatch can still run');
-  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,403);
-  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
-  await http('/result',{id:job.id,result:{ok:true,text:'must not escape'}});
-  assert.equal((await save).ok,true);
-  const result=await pending;assert.equal(result.error,'READ_BLOCKED');assert.equal(result.execution,'unknown');assert.equal(result.text,undefined);
-});
 
-test('lost document dispatch cannot be reported as successful revocation',async t=>{
-  const {b,http}=await fixture(t,{jobTimeout:100});
-  const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
-  await sleep(5);const {job}=(await http('/poll')).data;await http('/ack',{id:job.id});
-  await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
-  const saved=await b.request('setPolicy',{policy:{...P.defaults(),read:{block:['example.test']}}});
-  assert.equal(saved.ok,false);assert.equal(saved.error,'REVOCATION_UNCONFIRMED');assert.equal(saved.execution,'unknown');
-  const policy={...P.defaults(),read:{block:['example.test']}};
-  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED','a repeated save must not turn uncertainty into success');
-  assert.equal((await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}})).status,409);
-  assert.equal((await b.request('setPolicy',{policy})).error,'REVOCATION_UNCONFIRMED');
-  assert.equal((await http('/result',{id:job.id,result:{ok:true}})).status,409);
-  assert.equal((await b.request('setPolicy',{policy})).ok,true);
-  assert.equal((await pending).execution,'unknown');
-  assert.equal((await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true})).status,409);
-});
 
- test('expired dispatch history never consumes live capacity, including bounded-history overflow',async t=>{
-  const {b,http}=await fixture(t,{jobTimeout:1000});
-  for(let i=0;i<130;i++) {
-    const pending=b.request('act',{action:'click',payload:{url:'https://example.test',selector:'button'}});
-    await sleep(1);const {job}=(await http('/poll')).data;
-    assert.ok(job,'new work must remain deliverable after '+i+' uncertain outcomes');
-    await http('/ack',{id:job.id});await http('/authorize',{id:job.id,url:'https://example.test',dispatch:true});
-    await http('/result',{id:job.id,result:{ok:false,execution:'unknown'}});
-    assert.equal((await pending).execution,'unknown');
-  }
-  const policy={...P.defaults(),read:{block:['example.test']}};
-  const applied=await b.request('setPolicy',{policy});
-  assert.equal(applied.applied,true);assert.equal(applied.error,'REVOCATION_UNCONFIRMED');
-  const pending=b.request('act',{action:'text',payload:{url:'https://other.test'}});
-  await sleep(1);const {job}=(await http('/poll')).data;assert.ok(job);
-  await http('/ack',{id:job.id});await http('/result',{id:job.id,result:{ok:true,text:'available'}});
-  assert.equal((await pending).text,'available');
-  assert.equal((await b.request('act',{action:'text',payload:{url:'https://example.test'}})).error,'READ_BLOCKED');
-});

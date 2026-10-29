@@ -130,7 +130,6 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
     await settings.reload();await settings.getByText('浏览器已连接',{exact:true}).waitFor();
     assert.equal(await logic.evaluate(()=>window.confirmCount),0);
     assert.equal(cfg.pairedClients,undefined);assert.equal(installCalls.length,0);
-    assert.deepEqual(cfg.policy,{read:{block:[]},interact:{allow:[],block:[]}});
     for(const supported of [true,false]) {
       const candidate={id:crypto.randomUUID(),origin:supported?'chrome-extension://'+extensionId:'safari-web-extension://'+crypto.randomUUID()};
       await fetch('http://127.0.0.1:'+(await bridge.request('status')).port+'/health',{headers:{'X-My-Browser-Extension':extensionId,'X-My-Browser-Origin':candidate.origin,'X-My-Browser-Client':candidate.id,'X-My-Browser-Version':'0.4.13','X-My-Browser-Installed-Version':'0.4.16'}});
@@ -268,10 +267,6 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(huge.truncated,true);
   assert.ok(JSON.stringify(huge).length<60000,'the whole result must stay well inside the transport limit');
   r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);assert.equal(r.text.includes('11111111-1111-4111-8111-111111111111'),false);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
-  r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'INTERACT_NOT_ALLOWED');
-  r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.error,'PERMISSION_NOT_GRANTED');assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.length,0);
-  await logic.evaluate(()=>window.confirmAllowed=true);
-  r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.ok,true);
   r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.execution,'executed');assert.equal(await page.locator('#count').textContent(),'1');
   r=await tool('browser_act',{url,kind:'type',selector:'#query',text:'',submit:true});assert.equal(r.execution,'executed');assert.equal(await page.locator('#query').inputValue(),'');assert.equal(await page.locator('#submits').textContent(),'1');
   await tool('browser_act',{url,kind:'select',selector:'#choice',values:['two']});assert.equal(await page.locator('#choice').inputValue(),'two');
@@ -430,13 +425,6 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');
   assert.equal(/One-time code/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'OTP field must not be exposed as an actionable ref');
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
-  await tool('browser_policy',{action:'block_read',host:'blocked.test'});
-  r=await tool('browser_read',{url:'http://redirect.test/',mode:'text'});assert.equal(r.error,'REDIRECT_BLOCKED',JSON.stringify(r));assert.equal(r.text,undefined);
-  const redirectsBefore=await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length);
-  for(let i=0;i<3;i++)assert.equal((await tool('browser_read',{url:'http://redirect.test/',mode:'text'})).error,'REDIRECT_BLOCKED');
-  assert.equal(await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length),redirectsBefore);
-  const blocked=await context.newPage();await blocked.goto('http://blocked.test/');
-  r=await tool('browser_tabs');assert.equal(r.tabs.some(t=>t.url==='http://blocked.test/'),false);assert.ok(r.tabs.some(t=>t.redacted));
   for(let i=1;i<=5;i++){const r=await tool('browser_read',{url:url+'owned'+i,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));}
   const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
   assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
@@ -457,11 +445,7 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(await settings.locator('#install').getByText('Edge',{exact:true}).count(),0);
   assert.doesNotMatch(await settings.locator('#install').textContent(),/等待发布方上架|尚未配置审核通过/);
   assert.equal(await settings.locator('#developer').getAttribute('open'),null);
-  assert.ok(await settings.locator('#extdir').inputValue());assert.match(await settings.locator('#read-list').textContent(),/blocked.test/);
-  await settings.getByText('禁止读取的网站',{exact:true}).click();
-  await settings.locator('#read-input').fill('new-block.test');await settings.locator('#read-add').click();faults.save=true;
-  await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();assert.equal(cfg.policy.read.block.includes('new-block.test'),false);faults.save=false;
-  await settings.locator('#save').click();await settings.getByText('已保存',{exact:true}).waitFor();assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  assert.ok(await settings.locator('#extdir').inputValue());
   const before=(await page.locator('#count').textContent());faults.read=true;r=await tool('browser_act',{url,kind:'click',selector:'#increment'});assert.equal(r.ok,false);assert.equal(await page.locator('#count').textContent(),before);faults.read=false;
   await settings.setViewportSize({width:330,height:740});assert.equal(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if(process.env.MY_BROWSER_SCREENSHOT)await settings.screenshot({path:process.env.MY_BROWSER_SCREENSHOT,fullPage:true});
@@ -473,22 +457,12 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(await settings.locator('#profiles button').count(),0);
   assert.equal(await settings.getByRole('button',{name:'确认连接',exact:true}).count(),0);
   assert.equal(await logic.evaluate(()=>window.confirmCount),confirmations);
-  assert.equal(cfg.pairedClients,undefined);assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  assert.equal(cfg.pairedClients,undefined);
   assert.equal((await bridge.request('status')).clients.find(c=>c.id===candidate.id).connected,false);
   faults.disconnected=true;await settings.locator('#refresh').click();
   await settings.locator('.browser-card').filter({has:settings.getByText('Chrome',{exact:true})}).getByRole('button',{name:'安装浏览器扩展'}).click();
   await settings.getByText('请在浏览器完成扩展安装，随后会自动连接。',{exact:true}).waitFor();
   faults.disconnected=false;
   assert.equal(installCalls.length,1);assert.equal(installCalls[0][1][2],'https://chromewebstore.google.com/detail/cindy/dmbhhhdijpeaibfeocdcjhfefkgpkeef');
-  await logic.evaluate(()=>window.confirmAllowed=false);
-  await settings.locator('#all-sites').check();await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();
-  assert.equal(cfg.policy.interact.allow.includes('*'),false);
-  await logic.evaluate(()=>window.confirmAllowed=true);await settings.locator('#save').click();await settings.getByText('已保存',{exact:true}).waitFor();
-  assert.equal(cfg.policy.interact.allow.includes('*'),true);assert.ok(cfg.policy.read.block.includes('new-block.test'));
-  assert.equal(await settings.locator('#site-selection').isVisible(),false);
-  assert.equal((await tool('browser_policy',{action:'remove',host:'*'})).ok,true);
-  assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.includes('*'),false);
-  const saved=cfg;cfg={};await settings.locator('#refresh').click();await settings.waitForFunction(()=>document.querySelector('#all-sites').checked);
-  assert.deepEqual((await tool('browser_policy',{action:'get'})).policy,P.defaults());cfg=saved;
   assert.deepEqual(errors,[]);
 });

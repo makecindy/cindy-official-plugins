@@ -66,7 +66,7 @@ test('subtitle import keeps timing, strips markup and preserves literal comparis
   assert.throws(()=>core.validate({op:'save',text:'x',source:{url:'javascript:alert(1)'}}));
   assert.throws(()=>core.validate({op:'translate',texts:Array(25).fill('x')}));
 });
-test('learning requests are authenticated, deduplicated, cancellable and revoked with site policy',async t=>{
+test('learning requests are authenticated, deduplicated and cancellable',async t=>{
   const notices=[],bridge=createBridge({ports:[0],notify:(method,params)=>notices.push({method,params})});t.after(()=>bridge.close());
   const {port}=await bridge.request('status'),id=crypto.randomUUID();let session;
   const baseHeaders={'X-My-Browser-Extension':EXT_ID,'X-My-Browser-Client':id,'X-My-Browser-Version':version};
@@ -101,9 +101,6 @@ test('learning requests are authenticated, deduplicated, cancellable and revoked
   assert.equal(progress.stage,'model');assert.equal(progress.attempt,2);assert.equal(progress.prompt,undefined);
   await bridge.request('learningProgress',{id:job.id,progress:{stage:'untrusted arbitrary text'}});
   assert.equal((await signed('/learning/result',{id:job.id})).progress.stage,'model');
-  await bridge.request('setPolicy',{policy:{read:{block:['example.test']},interact:{allow:[]}}});
-  assert.equal((await bridge.request('learningActive',{id:job.id})).active,false);
-  assert.equal((await signed('/learning/result',{id:job.id})).status,403);
   const config={id:crypto.randomUUID(),request:{op:'config'}};await signed('/learning/start',config);await signed('/learning/cancel',{id:config.id});
   assert.equal((await bridge.request('learningResult',{id:config.id,result:{ok:true}})).ok,false);
 });

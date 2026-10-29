@@ -13,11 +13,11 @@ const PROTOCOL = 3;
 const WIRE_VERSION = '0.4.13';
 const failure = (error,message,execution = 'not_executed') => ({ok:false,error,message,execution});
 function createBridge(options = {}) {
-  let policy = P.defaults(), pins = [];
+  // No site lists (2026-10-30): jobs only get the address check; policy is sent for older extensions.
+  const policy = P.defaults();
+  let pins = [];
   const nativeBindings=new Map();
   let server, starting, port = 0;
-  const unconfirmedDispatches = new Map();
-  let unconfirmedOverflow = false;
   const jobs = new Map(), clients = new Map(), waiting = new Map();
   const learning = new Map(), learningChallenges = new Map();
   const compatible = version => version === WIRE_VERSION || ['0.4.0','0.4.1','0.4.2','0.4.3','0.4.4','0.4.5','0.4.6','0.4.7','0.4.8','0.4.9','0.4.10','0.4.11','0.4.12'].includes(version) || /^0\.3\.\d+$/.test(version);
@@ -107,19 +107,9 @@ function createBridge(options = {}) {
     if (out.record) out.record = boundRecord(out.record);
     return out;
   }
-  function finish(job,result, browserFinished = false) {
+  function finish(job,result) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
-    if (job.dispatchSettled && !browserFinished) {
-      // History is not runnable work. Keep only bounded authorization metadata,
-      // never payload text, result promises or task timers.
-      if (unconfirmedDispatches.size >= 128) {
-        unconfirmedDispatches.delete(unconfirmedDispatches.keys().next().value);
-        unconfirmedOverflow = true; // Forgetting identity is not evidence of completion.
-      }
-      unconfirmedDispatches.set(job.id,{clientId:job.clientId,action:job.action,payload:{url:job.payload.url},authorizedUrl:job.authorizedUrl});
-    }
-    job.settleDispatch?.(browserFinished);
     const safe = redactResult(result, job.payload.maxChars || 6000);
     job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
@@ -257,28 +247,14 @@ function createBridge(options = {}) {
     if (req.method !== 'POST' || !['/ack','/authorize','/result'].includes(req.url)) return send(res,failure('NOT_FOUND','Unknown endpoint.'),404);
     // Screenshots and uploads come back as base64; a result may be far larger than a request.
     const b = await body(req,req.url === '/result' ? 32000000 : 512000), job = jobs.get(b.id);
-    // A late completion closes uncertainty, but never revives or returns the expired result.
-    if (req.url === '/result' && unconfirmedDispatches.get(b.id)?.clientId === id) {
-      if (b.result && typeof b.result === 'object' && !Array.isArray(b.result) && b.result.execution !== 'unknown') unconfirmedDispatches.delete(b.id);
-      return send(res,failure('JOB_EXPIRED','The operation result expired.'),409);
-    }
     if (!job || job.clientId !== id || job.state !== (req.url === '/ack' ? 'delivered' : 'acknowledged')) return send(res,failure('JOB_EXPIRED','Do not execute this job.'),409);
-    if (job.revoked && req.url !== '/result') return send(res,jobFailure(job,job.revoked.error,job.revoked.message),403);
     if (req.url === '/ack' || req.url === '/authorize') {
       const gate = P.check(policy,job.action,req.url === '/authorize' ? b.url : job.payload.url);
       if (!gate.ok) { const result = jobFailure(job,gate.error,gate.message); finish(job,result); return send(res,result,403); }
       if (req.url === '/ack') job.state = 'acknowledged';
-      else {
-        job.authorizedUrl = b.url;
-        // The document is ready to run. A successful revocation must wait for this
-        // dispatch to settle; cancelling its result alone does not stop the DOM.
-        if (b.dispatch === true && !job.dispatchSettled) {
-          job.dispatchSettled = new Promise(resolve => { job.settleDispatch = resolve; });
-        }
-      }
       return send(res,{ok:true,policy});
     }
-    let result = job.revoked ? jobFailure(job,job.revoked.error,job.revoked.message) : b.result;
+    let result = b.result;
     if (!result || typeof result !== 'object' || Array.isArray(result)) result = jobFailure(job,'INVALID_RESULT','Invalid browser result. Verify before retrying.');
     if (job.action === 'tabs' && !result.error) result = {...result,ok:true,tabs:(Array.isArray(result.tabs) ? result.tabs : []).slice(0,100).map(t => {
       if(P.check(policy,'text',t.url).ok)return t;
@@ -290,7 +266,7 @@ function createBridge(options = {}) {
     })};
     else if (!result.error && result.url && !P.check(policy,job.action,result.url).ok) result = jobFailure(job,'REDIRECT_BLOCKED','No content returned from a blocked destination.');
     if (result.error && !['not_executed','executed','unknown'].includes(result.execution)) result = {...result,execution:jobFailure(job,'','').execution};
-    finish(job,result,!!b.result && typeof b.result === 'object' && !Array.isArray(b.result) && b.result.execution !== 'unknown'); return send(res,{ok:true});
+    finish(job,result); return send(res,{ok:true});
   }
   async function start() {
     if (server) return; if (starting) return starting;
@@ -309,28 +285,8 @@ function createBridge(options = {}) {
     try { await starting; } finally { starting = null; }
   }
   async function request(method,params = {}) {
-    if (method === 'setPolicy') {
-      policy = P.normalizePolicy(params.policy);
-      const dispatches = [];
-      for (const job of [...jobs.values()]) {
-        // Revocation applies to the original request as well as its redirected destination.
-        // Replacing the former with the latter silently kept blocked requests alive.
-        const original = P.check(policy,job.action,job.payload.url);
-        const gate = original.ok && job.authorizedUrl ? P.check(policy,job.action,job.authorizedUrl) : original;
-        if (!gate.ok) {
-          if (job.dispatchSettled) {
-            job.revoked = gate;
-            dispatches.push(job.dispatchSettled);
-          } else finish(job,jobFailure(job,gate.error,gate.message));
-        }
-      }
-      const completed = await Promise.all(dispatches);
-      const uncertain = [...unconfirmedDispatches.values()].some(job => !P.check(policy,job.action,job.payload.url).ok || (job.authorizedUrl && !P.check(policy,job.action,job.authorizedUrl).ok));
-      if (completed.some(finished => !finished) || uncertain || unconfirmedOverflow) {
-        return {...failure('REVOCATION_UNCONFIRMED','Permissions are applied, but an earlier browser action did not confirm completion. Check the page before continuing.','unknown'),applied:true};
-      }
-      return {ok:true,policy};
-    }
+    // Plugins of the site-list era still push their lists; acknowledged, nothing changes.
+    if (method === 'setPolicy') return {ok:true,policy};
     if(method==='learningActive'||method==='learningResult'||method==='learningProgress') {
       const item=learning.get(params.id),client=item&&clients.get(item.clientId);
       const valid=!!item && !!client?.trusted && Date.now()<=item.expiresAt && (!item.payload.source.url||P.check(policy,'text',item.payload.source.url).ok);

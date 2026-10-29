@@ -3,8 +3,8 @@
   "id": "my-browser",
   "name": "Cindy Chrome",
   "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI; cookies and passwords are not exported.",
-  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles, PDF reading and site permissions in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.74",
+  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
+  "version": "0.4.75",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -206,7 +206,7 @@
     },
     {
       "name": "browser_tabs",
-      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Blocked tabs are redacted and excluded from host searches; local and intranet tabs are listed like any site. Allowed-site tabs with document failures remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted.",
+      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Local and intranet tabs are listed like any site. Tabs whose document cannot be read remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -226,32 +226,6 @@
             "maximum": 100
           }
         }
-      }
-    },
-    {
-      "name": "browser_policy",
-      "description": "Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block, interaction allow entry and interaction exclusion. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction.",
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "get",
-              "allow_interact",
-              "block_read",
-              "remove"
-            ]
-          },
-          "host": {
-            "type": "string",
-            "maxLength": 254
-          }
-        },
-        "required": [
-          "action"
-        ]
       }
     }
   ],

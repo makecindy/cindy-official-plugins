@@ -1,7 +1,7 @@
 {
   "name": "Cindy Chrome",
   "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI; cookies and passwords are not exported.",
-  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles, PDF reading and site permissions in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
+  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
   "tools": {
     "browser_status": {
       "description": "Check live browser profiles and installation readiness without reading pages. Multiple profiles require an explicit browser id; do not guess the account. Use plugin settings to install/connect. A store page opening is not installation success. Chrome uses the official Chrome Web Store route; Edge uses the developer fallback until a published store route exists."
@@ -13,10 +13,7 @@
       "description": "Act on an already-open site with an interaction grant. Click/type/submit may send, delete or pay. Never replay unknown results. execution is not_executed/executed/unknown; executed proves DOM dispatch, not business success. Verify by reading. Refs expire; password and payment-card fields are unsupported, detected from type, multi-token autocomplete values and editable field naming such as card-number or otp. Never bypass permission denial."
     },
     "browser_tabs": {
-      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Blocked tabs are redacted and excluded from host searches; local and intranet tabs are listed like any site. Allowed-site tabs with document failures remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted."
-    },
-    "browser_policy": {
-      "description": "Get/update permissions. allow_interact grants site clicks/forms, block_read blocks both reading and interaction, remove removes the read block, interaction allow entry and interaction exclusion. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing and must not be retried. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction."
+      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Local and intranet tabs are listed like any site. Tabs whose document cannot be read remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted."
     }
   }
 }

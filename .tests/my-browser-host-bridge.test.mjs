@@ -22,11 +22,9 @@ async function sandbox(t,{hostSlot,statusFailures=[]}) {
   const dir=await fs.promises.mkdtemp(path.join(os.tmpdir(),'my-browser-host-bridge-'));
   const shim=async(name,file,global)=>{const target=path.join(dir,name+'.shim.mjs');await fs.promises.writeFile(target,`import {createRequire} from 'node:module';globalThis.${global}=createRequire(import.meta.url)(${JSON.stringify(path.join(root,file))});\n`);return pathToFileURL(target).href;};
   const policyShim=await shim('policy','my-browser/extension/policy.js','MyBrowserPolicy');
-  const savedShim=await shim('saved-policy','my-browser/saved-policy.js','myBrowserSavedPolicy');
   const coreShim=await shim('learning-core','my-browser/extension/learning-core.js','CindyLearning');
   const source=fs.readFileSync(path.join(root,'my-browser/main.js'),'utf8')
     .replace("import('/extension/policy.js')",`import(${JSON.stringify(policyShim)})`)
-    .replace("import('/saved-policy.js')",`import(${JSON.stringify(savedShim)})`)
     .replace("import('/extension/learning-core.js')",`import(${JSON.stringify(coreShim)})`)
     .replace("import('/learning-service.js')",`import(${JSON.stringify(pathToFileURL(path.join(root,'my-browser/learning-service.js')).href)})`)
     .replace("import('/translation-task.js')",`import(${JSON.stringify(pathToFileURL(path.join(root,'my-browser/translation-task.js')).href)})`);
@@ -92,14 +90,14 @@ async function sandbox(t,{hostSlot,statusFailures=[]}) {
   return {state,callTool,hosts:state.hosts};
 }
 
-test('a host with the browserExtension slot carries jobs, policy and status; the worker never serves the bridge',async t=>{
+test('a host with the browserExtension slot carries jobs, pairings and status; the worker never serves the bridge',async t=>{
   const {state,callTool}=await sandbox(t,{hostSlot:true});
   const read=await callTool('browser_read',{url:'https://example.test',mode:'content'});
   assert.equal(read.text,'from host');
   assert.equal(read.untrusted_content,true);
   const act=state.pipe.find(m => m.kind === 'act');
   assert.deepEqual({action:act.action,url:act.payload.url},{action:'content',url:'https://example.test'});
-  assert.ok(state.pipe.some(m => m.kind === 'setPolicy'),'the saved site policy must be pushed to the host bridge');
+  assert.equal(state.pipe.some(m => m.kind === 'setPolicy'),false,'there are no site lists to push (2026-10-30)');
   assert.ok(state.pipe.some(m => m.kind === 'setTrustedClients'),'paired identities must be pushed to the host bridge');
   assert.equal(state.node.filter(c => c.method === 'act' || c.method === 'status' || c.method === 'setPolicy').length,0,'the bundled worker must not receive bridge traffic');
   const status=await callTool('browser_status',{});
@@ -115,7 +113,7 @@ test('an older host rejects the pipe type and the bundled worker bridge keeps se
   assert.equal(read.text,'from worker');
   assert.equal(state.pipe.filter(m => m.kind === 'status').length,1,'capability is probed once, then remembered');
   assert.ok(state.node.some(c => c.method === 'act'));
-  assert.ok(state.node.some(c => c.method === 'setPolicy'));
+  assert.ok(state.node.some(c => c.method === 'setTrustedClients'));
 });
 
 test('learning relays from the host bridge are handled by the plugin and answered on the pipe',async t=>{
@@ -139,14 +137,12 @@ test('a transient host refusal is not remembered as an older host; the next call
   assert.equal(state.node.filter(c => ['act','status','setPolicy','setTrustedClients'].includes(c.method)).length,0,'the bundled worker never serves the bridge on a guess');
 });
 
-// Review 2026-10-29: a host bridge without a cached copy of the site permissions refuses page jobs
-// and asks the plugin for them; the plugin must push its stored policy and pairings right away.
-test('a host policy request makes the plugin push its stored permissions and pairings',async t=>{
+// A host without saved pairings asks for them with the published event name; the plugin pushes them at once.
+test('a host pairing request makes the plugin push its paired browsers',async t=>{
   const {state,hosts}=await sandbox(t,{hostSlot:true});
   await new Promise(resolve => setTimeout(resolve,20));
   state.pipe.length=0;
   await hosts[0]({type:'event',name:'browser-extension-policy-request'});
-  for (let i=0;i<50 && !state.pipe.some(m => m.kind === 'setPolicy');i++) await new Promise(resolve => setTimeout(resolve,5));
+  for (let i=0;i<50 && !state.pipe.some(m => m.kind === 'setTrustedClients');i++) await new Promise(resolve => setTimeout(resolve,5));
   assert.ok(state.pipe.some(m => m.kind === 'setTrustedClients'),'paired identities must be pushed');
-  assert.ok(state.pipe.some(m => m.kind === 'setPolicy'),'the stored policy must be pushed');
 });

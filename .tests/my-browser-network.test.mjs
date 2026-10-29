@@ -121,15 +121,13 @@ test('each access rechecks DNS after public answers, failures and private answer
   }
 });
 
-test('public IPv6 passes shared read/interaction policy and current-document guard',async()=>{
+test('public IPv6 passes the shared address check and current-document guard',async()=>{
   const P=createRequire(import.meta.url)('../my-browser/extension/policy.js');
   const h=fixture();
   for(const ip of ['2606:4700:4700::1111','2001:4860:4860::8888']){
     const url='https://['+ip+']/';h.frames.set(1,{documentId:'v6',url});
     for(const action of ['text','snapshot','click'])assert.equal(P.check(P.defaults(),action,url).ok,true);
     assert.equal(await h.guard.document(1),'v6');
-    const policy=P.normalizePolicy({read:{block:['['+ip+']']},interact:{allow:['*'],block:[]}});
-    assert.equal(P.check(policy,'text',url).error,'READ_BLOCKED');
   }
   // Decision (2026-10-28): page control in the user's own browser reaches local and private addresses,
   // as the user's browser does; the learning features' guard keeps refusing them by default.

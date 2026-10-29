@@ -269,12 +269,10 @@ async function debuggerEvaluate(tabId,a) {
   if (json && json.length > 200000) result = {truncated:true,json:json.slice(0,200000)};
   return {ok:true,execution:'executed',tabId,result,viaDebugger:true};
 }
-// Recipe protocol sessions: one attachment per tab, events buffered between commands.
-// Cookie commands read only the site of the tab being operated on (see policy.js `site`), and never a
-// site on the user's read block list: Network.getCookies must name pages of that site, and both
-// results are filtered to it. Storage.getCookies would otherwise return every cookie of the profile.
-const COOKIE_METHODS = ['Network.getCookies','Storage.getCookies'];
-async function cdpAction(tab,a,policy) {
+// Recipe protocol sessions: one attachment per tab, events buffered between commands. Commands are not
+// limited to a list or to the tab's site (2026-10-30: no site restrictions of our own; safety is the
+// task's permission mode and review). Recorded events still drop raw Cookie / Set-Cookie headers.
+async function cdpAction(tab,a) {
   const tabId = tab.id;
   if (a.op === 'begin') {
     const state = await debuggerAttach(tabId);
@@ -289,15 +287,9 @@ async function cdpAction(tab,a,policy) {
   state.timer = setTimeout(() => debuggerDetach(tabId,true),DEBUGGER_IDLE_MS);
   let result;
   if (a.op === 'command') {
-    if (!P.CDP_METHODS.includes(a.method)) return fail('CDP_METHOD_NOT_ALLOWED','cdp command '+String(a.method).slice(0,100)+' is not available to site recipes.');
-    let params = a.params || {};
-    if (a.method === 'Network.getCookies') {
-      if (!Array.isArray(params.urls) || !params.urls.length || !params.urls.every(url => P.cookieUrlAllowed(policy,tab.url,url))) return fail('COOKIES_NOT_ALLOWED','Network.getCookies reads only cookies of the site of this tab: pass params.urls with pages of that site. Cookies of other sites, or of sites blocked from reading, are not available.');
-      params = {urls:params.urls};
-    } else if (a.method === 'Storage.getCookies') params = {};
+    const params = a.params || {};
     try { result = await withDeadline(chrome.debugger.sendCommand({tabId},a.method,params),30000,Error('The browser did not answer '+a.method+' within 30 s.')); }
     catch (e) { return {...fail('CDP_COMMAND_FAILED',String(e.message || e).slice(0,500),'unknown'),events:state.events.splice(0)}; }
-    if (COOKIE_METHODS.includes(a.method)) result = {cookies:(Array.isArray(result?.cookies) ? result.cookies : []).filter(c => P.cookieHostAllowed(policy,tab.url,c?.domain))};
   }
   const events = state.events.splice(0), dropped = state.dropped; state.dropped = 0;
   return {ok:true,execution:'executed',tabId,...(a.op === 'command' ? {result: result ?? {}} : {}),events,...(dropped ? {droppedEvents:dropped} : {})};
@@ -867,7 +859,6 @@ function sanitizeResult(result) {
   return {...out,links,truncated};
 }
 // Tab-level actions: no page script. Returns null for actions that run inside the page.
-const TAB_ACTIONS = new Set(['focus','close','resize','pdf','cdp','screenshot','wait']);
 const MAIN_WORLD_ACTIONS = new Set(['evaluate','console','requests','responseBody','dialog']);
 async function tabAction(job,tab,policy) {
   const a = job.payload;
@@ -896,7 +887,7 @@ async function tabAction(job,tab,policy) {
   }
   if (job.action === 'cdp') {
     if (!await debuggerAllowed()) return await debuggerDenied();
-    return cdpAction(tab,a,policy);
+    return cdpAction(tab,a);
   }
   if (job.action === 'screenshot') {
     const inCindyWindow = tab.windowId === await agentWindow();
@@ -1103,18 +1094,9 @@ async function handle(job,policy,target) {
   }
   let injecting = false, navigating = false;
   const failureState = () => navigating || (injecting && P.INTERACT.includes(job.action)) ? 'unknown' : 'not_executed';
-  // The last authorization check before the browser is touched, registered as a dispatch: a permission
-  // revoked after the acknowledgement refuses the action here, and a revocation that arrives later waits for it.
-  const authorizeDispatch = async url => {
-    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:String(url).slice(0,PAGE_URL_MAX),dispatch:true});
-    policy = P.normalizePolicy(authorization.policy);
-    return P.check(policy,job.action,url);
-  };
   try {
     if (job.action === 'open') {
       // A new page always goes to Cindy's own background window, never into the user's windows.
-      const openGate = await authorizeDispatch(job.payload.url);
-      if (!openGate.ok) return {...openGate,execution:'not_executed'};
       navigating = true;
       const created = await openInAgentWindow(job.payload.url);
       let loaded = created;
@@ -1137,9 +1119,6 @@ async function handle(job,policy,target) {
       if (!tab) return fail('TAB_CLOSED','The tab is closed. List tabs again.');
       if (!P.check(policy,job.action,tab.url).ok) return P.check(policy,job.action,tab.url);
       if (job.action === 'navigate') {
-        // The final check covers the address about to be loaded; the current page was checked above.
-        const navigateGate = await authorizeDispatch(job.payload.url);
-        if (!navigateGate.ok) return {...navigateGate,execution:'not_executed'};
         navigating = true;
         await chrome.tabs.update(tab.id,{url:job.payload.url});
         try { tab = await waitForLoad(tab.id); } catch { tab = await chrome.tabs.get(tab.id); }
@@ -1154,10 +1133,6 @@ async function handle(job,policy,target) {
     const actual = await chrome.tabs.get(tab.id);
     if (!['close','screenshot','pdf'].includes(job.action)) markAgentTab(actual.id);
     // Tab-level actions need no page script: answer them before injecting anything.
-    if (TAB_ACTIONS.has(job.action)) {
-      const tabGate = await authorizeDispatch(actual.url);
-      if (!tabGate.ok) return {...tabGate,execution:'not_executed'};
-    }
     const direct = await tabAction(job,actual,policy);
     if (direct) return direct;
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
@@ -1165,7 +1140,7 @@ async function handle(job,policy,target) {
     const documentId=await network.document(tab.id,PAGE_ACCESS);
     // A redirect can stretch the tab URL past the bridge's request limit; the authorize call only needs
     // the scheme and host for its policy check, so a bounded copy is sent instead of the whole string.
-    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX),...(MAIN_WORLD_ACTIONS.has(job.action) ? {dispatch:true} : {})});
+    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX)});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
