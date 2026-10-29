@@ -1264,6 +1264,8 @@ async function learningRequest(message,sender) {
     if(!target.learning)throw Error('UPDATE_CINDY_CHROME');
     const internal=sender.url?.startsWith(chrome.runtime.getURL(''));
     const request=globalThis.CindyLearning.validate(message.request);
+    // Which tab asked: translation tasks follow the video per tab, not per browser.
+    if(Number.isInteger(sender.tab?.id))request.view='tab:'+sender.tab.id;else delete request.view;
     if(!internal) {
       if(!sender.tab?.id || sender.frameId!==0)throw Error('INVALID_SOURCE');
       page=await chrome.tabs.get(sender.tab.id);

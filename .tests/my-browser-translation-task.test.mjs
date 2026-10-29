@@ -424,3 +424,21 @@ test('per-video mode: earlier translated captions ride with the full rules, so a
   f.tasksById.get('t1').status='archived';await ask(3);
   assert.equal(f.sends.at(-1).taskId,'t2');assert.ok(f.sends.at(-1).text.includes('REFERENCE'));
 });
+// Bug regression (review 2026-10-29): the current video was tracked per browser connection, so two
+// tabs of one browser on two videos archived each other's task on every passage (and each fresh task
+// was sent the full rules again). The extension now names the tab, and positions are kept per tab.
+test('per-video mode: two tabs of one browser on two videos keep their own tasks',async()=>{
+  const core=createRequire(import.meta.url)('../my-browser/extension/learning-core.js');
+  const f=perVideoFixture();
+  const service=createLearningService({core,model:f.make(),library:async()=>({ok:true})});
+  const profile='11111111-1111-4111-8111-111111111111';
+  const part=(id,view,n)=>({op:'subtitle-document',target:'zh-CN',text:'part '+n,source:yt(id,id.toUpperCase()),...(view?{view}:{})});
+  for(let n=0;n<4;n++){const r=await service.handle(profile,part(n%2?'bbb':'aaa',n%2?'tab:2':'tab:1',n));assert.equal(r.ok,true);}
+  assert.deepEqual(f.archived,[]);assert.equal(f.created.length,2);
+  assert.ok(f.sends.every(s=>!s.text.includes('tab:')),'the tab is never shown to the model');
+  // A tab that moves on still archives the video it left; the other tab keeps its own.
+  await service.handle(profile,part('ccc','tab:1',4));assert.deepEqual(f.archived,['t1']);
+  await service.handle(profile,part('bbb','tab:2',5));assert.deepEqual(f.archived,['t1']);
+  assert.throws(()=>core.validate({op:'config',view:'tab:1 <x>'}),/INVALID_INPUT/);
+  assert.equal(core.validate({op:'config',view:'tab:12'}).view,'tab:12');
+});

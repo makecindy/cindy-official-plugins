@@ -69,6 +69,12 @@
         if(items.length)out.reference=items;
       }
     }
+    // The tab a page request came from, set by the extension's worker (never by the page). It only
+    // keeps two tabs' videos apart; it is not shown to the model.
+    if (input.view!==undefined) {
+      if (typeof input.view!=='string' || !/^[A-Za-z0-9:_-]{1,64}$/.test(input.view)) throw Error('INVALID_INPUT');
+      out.view=input.view;
+    }
     if (input.id!==undefined) out.id=string(input.id,100,true);
     if (['remove','review','task'].includes(out.op) && !out.id) throw Error('INVALID_ID');
     if(out.op==='task'&&!/^[a-f0-9-]{36}$/.test(out.id))throw Error('INVALID_ID');

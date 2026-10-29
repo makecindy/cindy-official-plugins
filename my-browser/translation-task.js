@@ -5,9 +5,10 @@ const timing=globalThis.CindyLearning.learningTiming;
 //
 // Session shape: on hosts that grant background tasks (agent.hiddenTasks) every
 // video gets its own hidden task, so a passage never pays for another video's
-// history and nothing piles up in the user's task list. A browser that moves to
-// another video archives the task it left (when the host offers `archive` and no
-// other browser is still on that video) and forgets the binding; coming back, or
+// history and nothing piles up in the user's task list. A tab (scope: browser
+// profile plus tab) that moves to another video archives the task it left (when
+// the host offers `archive` and no other tab or browser is still on that video)
+// and forgets the binding; coming back, or
 // finding the task archived or gone for any other reason, simply opens a fresh
 // task under a new creation key. The plugin keeps the most recent bindings only.
 // Older hosts keep the single visible task.
@@ -223,10 +224,10 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
         }
       }
       if(key){
-        // This browser moved on from its previous video and that task is idle now: archive it
-        // unless another browser is still watching it. Positions are tracked per browser, so two
-        // browsers on two videos never retire each other's task; the position only advances once
-        // the old task is retired, so a failed request leaves it to be retired next time.
+        // This tab moved on from its previous video and that task is idle now: archive it unless
+        // another tab or browser is still watching it. Positions are tracked per scope (one tab of
+        // one browser), so two tabs on two videos never retire each other's task; the position only
+        // advances once the old task is retired, so a failed request leaves it to be retired next time.
         const previous=state.current[scope];
         if(previous&&previous!==key&&!watchedElsewhere(state,scope,previous))await retire(state,previous);
         if(state.current[scope]!==key){
