@@ -25,7 +25,7 @@ function harness(local={clientId:'fixture'},shared) {
       captureVisibleTab:async(windowId,options)=>{calls.push(['capture',windowId,options]);return 'data:image/'+options.format+';base64,AAAA';},
       onActivated:{addListener(){}},onRemoved:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
     windows:{create:async options=>{calls.push(['windows.create',options]);const w={id:nextWindow++,state:'normal'};windows.set(w.id,w);const t=await chrome.tabs.create({url:options.url,windowId:w.id,active:true});return {id:w.id,tabs:[t]};},
-      get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
+      get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),getAll:async()=>[...windows.values()].map(w=>({...w,focused:w.id===1})),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     setTimeout(fn){queueMicrotask(fn);return 0;},clearTimeout(){}};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
@@ -61,7 +61,7 @@ test('open goes to an unfocused Cindy window and reuses it; the user window is u
   const h=harness();
   const first=await h.run('open',{url:'https://example.test/a'});
   assert.equal(first.ok,true);assert.equal(first.window,500);
-  same(h.calls.find(c=>c[0]==='windows.create')[1],{url:'https://example.test/a',focused:false,type:'normal'});
+  same(h.calls.find(c=>c[0]==='windows.create')[1],{url:'https://example.test/a',state:'minimized',focused:false,type:'normal'});
   const second=await h.run('open',{url:'https://example.test/b'});
   assert.equal(second.window,500);assert.equal(h.calls.filter(c=>c[0]==='windows.create').length,1);
   assert.equal(h.tabs.get(1).active,true);

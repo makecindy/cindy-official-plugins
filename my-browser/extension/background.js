@@ -78,8 +78,17 @@ async function openInAgentWindow(url) {
   let tab;
   if (windowId != null) tab = await chrome.tabs.create({windowId,url,active:true});
   else {
-    const created = await chrome.windows.create({url,focused:false,type:'normal'});
+    // Minimized: the window never appears over what the user is doing; it waits in the Dock / taskbar.
+    const lastFocused = () => Promise.resolve().then(() => chrome.windows.getLastFocused({windowTypes:['normal']})).catch(() => null);
+    const before = await lastFocused();
+    const created = await chrome.windows.create({url,state:'minimized',focused:false,type:'normal'});
     agentWindowId = created.id; await agentStore.set({agentWindow:created.id});
+    // Some window managers (and headless Chrome) ignore minimized or focused:false: minimize again and give
+    // the focus straight back to the window the user was in.
+    await sleep(200);
+    const now = await chrome.windows.get(created.id).catch(() => null);
+    if (now && now.state !== 'minimized') await chrome.windows.update(created.id,{state:'minimized'}).catch(() => {});
+    if (before && before.id !== created.id && (await lastFocused())?.id === created.id) await chrome.windows.update(before.id,{focused:true}).catch(() => {});
     tab = created.tabs?.[0] || (await chrome.tabs.query({windowId:created.id}))[0];
   }
   await groupAgentTab(tab);
@@ -115,9 +124,15 @@ async function groupAgentTab(tab) {
 const agentMarkTimers = new Map();
 // Marks are a courtesy: a page without the content script, or a browser without these APIs, just goes unmarked.
 const quietly = fn => Promise.resolve().then(fn).catch(() => {});
+// Never wait forever on the browser: a stuck call would hold up every later job (the bridge then sees
+// the extension as disconnected). The underlying call may still finish; its result is then dropped.
+function withDeadline(promise,ms,error) {
+  let timer;
+  return Promise.race([promise,new Promise((_,reject) => { timer = setTimeout(() => reject(error),ms); })]).finally(() => clearTimeout(timer));
+}
 // mode: undefined shows (or extends) the mark, 'hidden' hides it for a capture, 'clear' ends it now.
 function markAgentTab(tabId,mode) {
-  const sent = quietly(() => chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}));
+  const sent = quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}),1500,Error('MARK_TIMEOUT')));
   if (mode === 'clear') {
     clearTimeout(agentMarkTimers.get(tabId)); agentMarkTimers.delete(tabId);
     quietly(() => chrome.action.setBadgeText({tabId,text:null}));
@@ -156,8 +171,11 @@ async function debuggerDenied() {
     : "This needs Chrome's debugger, which the user has not allowed. The page to allow it was opened recently; ask the user to confirm it there before retrying. If they decline, do not retry."),grantPageOpened:opened};
 }
 async function openDebuggerPage() {
-  const win = await chrome.windows.getLastFocused({windowTypes:['normal']}).catch(() => null);
-  await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win?.id != null && win.id !== agentWindowId ? {windowId:win.id} : {})});
+  // One of the user's own shown windows, never Cindy's (minimized) window.
+  const agent = await agentWindow();
+  const windows = (await chrome.windows.getAll({windowTypes:['normal']})).filter(w => w.id !== agent && w.state !== 'minimized');
+  const win = windows.find(w => w.focused) || windows[0];
+  await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win ? {windowId:win.id} : {})});
 }
 function hookDebugger() {
   if (debuggerHooked || !chrome.debugger) return;
@@ -195,7 +213,7 @@ async function debuggerDetach(tabId,all = false) {
 }
 async function withDebugger(tabId,fn) {
   await debuggerAttach(tabId);
-  try { return await fn((method,params = {}) => chrome.debugger.sendCommand({tabId},method,params)); }
+  try { return await fn((method,params = {}) => withDeadline(chrome.debugger.sendCommand({tabId},method,params),20000,Error('The browser did not answer '+method+' within 20 s (the page may not be rendering).'))); }
   catch (e) { throw Object.assign(new Error('DEBUGGER_COMMAND_FAILED'),{detail:e.message}); }
   finally { await debuggerDetach(tabId); }
 }
@@ -231,7 +249,7 @@ async function cdpAction(tab,a) {
   state.timer = setTimeout(() => debuggerDetach(tabId,true),DEBUGGER_IDLE_MS);
   let result;
   if (a.op === 'command') {
-    try { result = await chrome.debugger.sendCommand({tabId},a.method,a.params || {}); }
+    try { result = await withDeadline(chrome.debugger.sendCommand({tabId},a.method,a.params || {}),30000,Error('The browser did not answer '+a.method+' within 30 s.')); }
     catch (e) { return {...fail('CDP_COMMAND_FAILED',String(e.message || e).slice(0,500),'unknown'),events:state.events.splice(0)}; }
   }
   const events = state.events.splice(0), dropped = state.dropped; state.dropped = 0;
@@ -260,6 +278,11 @@ async function debuggerScreenshot(tab,a) {
   }
   const format = a.type === 'jpeg' ? 'jpeg' : 'png';
   await markAgentTab(tab.id,'hidden');
+  // A minimized window renders nothing, so even the debugger cannot capture it: show Cindy's window
+  // unfocused for the capture only.
+  const win = await chrome.windows.get(tab.windowId);
+  const reminimize = win.state === 'minimized' && tab.windowId === agentWindowId;
+  if (reminimize) { await chrome.windows.update(tab.windowId,{state:'normal',focused:false}); await sleep(300); }
   const shot = await withDebugger(tab.id,async send => {
     if (a.fullPage && !clip) {
       const metrics = await send('Page.getLayoutMetrics');
@@ -267,7 +290,7 @@ async function debuggerScreenshot(tab,a) {
       clip = {x:0,y:0,width:Math.min(Math.ceil(size.width),16384),height:Math.min(Math.ceil(size.height),16384),scale:1};
     }
     return send('Page.captureScreenshot',{format,...(format === 'jpeg' ? {quality:85} : {}),...(clip ? {clip,captureBeyondViewport:true} : {}),fromSurface:true});
-  });
+  }).finally(() => reminimize && chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {}));
   markAgentTab(tab.id);
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
 }
@@ -820,8 +843,10 @@ async function tabAction(job,tab,policy) {
     return cdpAction(tab,a);
   }
   if (job.action === 'screenshot') {
-    const userWindowBackground = !tab.active && tab.windowId !== await agentWindow();
-    const allowed = (a.fullPage || a.ref || a.selector || userWindowBackground) && await debuggerAllowed();
+    const inCindyWindow = tab.windowId === await agentWindow();
+    const userWindowBackground = !tab.active && !inCindyWindow;
+    const hiddenInCindyWindow = inCindyWindow && (!tab.active || (await chrome.windows.get(tab.windowId)).state === 'minimized');
+    const allowed = (a.fullPage || a.ref || a.selector || userWindowBackground || hiddenInCindyWindow) && await debuggerAllowed();
     if (allowed) return debuggerScreenshot(tab,a);
     // Chrome captures the visible tab of a window. Tabs in Cindy's own window are brought to the front
     // there; a background tab in one of the user's windows is not, because that would change their view.
@@ -830,18 +855,25 @@ async function tabAction(job,tab,policy) {
       await chrome.tabs.update(tab.id,{active:true}); await sleep(300);
     }
     const win = await chrome.windows.get(tab.windowId);
+    // Without the debugger, Chrome can only capture a shown window: Cindy's minimized window is shown
+    // unfocused just for the capture and minimized again right after.
+    let reminimize = false;
     if (win.state === 'minimized') {
       if (tab.windowId !== agentWindowId) return fail('TAB_NOT_VISIBLE','The window is minimized. Restore it first if the user agrees.');
-      await chrome.windows.update(tab.windowId,{state:'normal',focused:false}); await sleep(300);
+      await chrome.windows.update(tab.windowId,{state:'normal',focused:false}); await sleep(300); reminimize = true;
     }
     const format = a.type === 'jpeg' ? 'jpeg' : 'png';
     // Chrome allows two captures per second; a quick follow-up waits for the next slot instead of failing.
     // Cindy's own activity mark is hidden for the capture so the agent sees the page as it is.
     await markAgentTab(tab.id,'hidden');
     let dataUrl;
-    for (let attempt = 0; ; attempt++) {
-      try { dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId,{format,...(format === 'jpeg' ? {quality:85} : {})}); break; }
-      catch (e) { if (attempt >= 3 || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message)) throw e; await sleep(550); }
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try { dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId,{format,...(format === 'jpeg' ? {quality:85} : {})}); break; }
+        catch (e) { if (attempt >= 3 || !/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message)) throw e; await sleep(550); }
+      }
+    } finally {
+      if (reminimize) await chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {});
     }
     markAgentTab(tab.id);
     const data = dataUrl.slice(dataUrl.indexOf(',')+1);
@@ -1096,8 +1128,9 @@ async function chain() {
         const ack = await fetchJSON(target.base,'/ack',target.session,{id:job.id});
         if (!ack.ok) continue;
         let result;
-        try { result = await handle(job,P.normalizePolicy(ack.policy),target); }
-        catch { result = fail('INVALID_JOB','The browser job was invalid. No action was executed.'); }
+        const deadline = job.action === 'wait' ? Math.min(Number(job.payload?.timeMs) || 0,120000)+Math.min(Number(job.payload?.timeoutMs) || 30000,120000)+10000 : job.action === 'cdp' ? 45000 : 40000;
+        try { result = await withDeadline(handle(job,P.normalizePolicy(ack.policy),target),deadline,Object.assign(Error('JOB_DEADLINE'),{deadline:true})); }
+        catch (e) { result = e?.deadline ? fail('EXTENSION_TIMEOUT','The browser did not finish this action in time; it may still complete. Check the page before repeating it.','unknown') : fail('INVALID_JOB','The browser job was invalid. No action was executed.'); }
         await fetchJSON(target.base,'/result',target.session,{id:job.id,result});
       } catch {
         // Never retry the browser operation after losing its response.
