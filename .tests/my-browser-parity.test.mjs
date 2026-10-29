@@ -14,6 +14,7 @@ const same=(actual,expected)=>assert.deepEqual(JSON.parse(JSON.stringify(actual)
 const source=fs.readFileSync(new URL('../my-browser/extension/background.js',import.meta.url),'utf8');
 
 function harness(local={clientId:'fixture'},shared,options={}) {
+  let authorizePolicy=P.defaults();const authorizations=[];
   const tabs=shared?.tabs||new Map(),windows=shared?.windows||new Map([[1,{id:1,state:'normal'}]]),data={},calls=[];let next=10,nextWindow=500;
   const state={closeOnCreate:false};
   const chrome={permissions:{contains:async()=>false},action:{onClicked:{addListener(){}}},runtime:{getURL:path=> 'chrome-extension://fixture/'+(path||''),getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
@@ -26,15 +27,15 @@ function harness(local={clientId:'fixture'},shared,options={}) {
       onActivated:{addListener(){}},onRemoved:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
     windows:{create:async options=>{calls.push(['windows.create',options]);const w={id:nextWindow++,state:'normal'};windows.set(w.id,w);const t=await chrome.tabs.create({url:options.url,windowId:w.id,active:true});return {id:w.id,tabs:[t]};},
       get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),getAll:async()=>[...windows.values()].map(w=>({...w,focused:w.id===1})),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
-  const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
+  const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async(url,init)=>{if(/authorize/.test(String(url)))authorizations.push(JSON.parse(init.body));return {ok:true,json:async()=>({policy:authorizePolicy})};},navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     // Timers fire at once by default; 'never' keeps idle timers and deadlines from firing.
     setTimeout(fn){if(options.timers!=='never')queueMicrotask(fn);return 0;},clearTimeout(){}};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
-  const run=(action,payload,policy=P.defaults())=>context.tabTest.handle({id:'job',action,payload},policy,{base:'http://fixture',session:'fixture'});
+  const run=(action,payload,policy=P.defaults())=>(authorizePolicy=policy,context.tabTest.handle({id:'job',action,payload},policy,{base:'http://fixture',session:'fixture'}));
   // A tab the user has open in their own window, behind the one they are looking at.
   if(!shared)tabs.set(1,{id:1,url:'https://example.test/user',windowId:1,status:'complete',active:true});
   if(!shared)tabs.set(2,{id:2,url:'https://example.test/behind',windowId:1,status:'complete',active:false});
-  return {run,tabs,windows,calls,state,chrome};
+  return {run,tabs,windows,calls,state,chrome,authorizations};
 }
 
 test('policy: open is a read like navigate; new actions need a tab id and bounded input',()=>{
@@ -207,4 +208,30 @@ test('site approximates the registrable domain and errs narrow',()=>{
   assert.equal(P.cookieHostAllowed(policy,'https://www.example.test/','secure.example.test'),false);
   assert.equal(P.cookieHostAllowed(policy,'https://me.github.io/','you.github.io'),false);
   assert.equal(P.cookieUrlAllowed(policy,'https://www.example.test/','ftp://example.test/'),false);
+});
+
+// A permission revoked after the acknowledgement must stop the browser actions that return before any page
+// script runs, and the host must wait for the ones already started: each registers as a dispatch.
+test('tab-level actions and open take the last authorization check as a dispatch',async()=>{
+  const h=harness();
+  assert.equal((await h.run('close',{url:'https://example.test/behind',tabId:2})).ok,true);
+  assert.equal(h.authorizations.at(-1).dispatch,true);
+  const before=h.calls.length;
+  const revoked=await h.run('close',{url:'https://example.test/user',tabId:1},{...P.defaults(),site:{block:['example.test']},read:{block:['example.test']}});
+  assert.equal(revoked.ok,false);assert.equal(revoked.execution,'not_executed');
+  assert.equal(h.calls.slice(before).some(([name])=>name==='tabs.remove'),false);
+  await h.run('open',{url:'https://example.test/new'});
+  assert.equal(h.authorizations.at(-1).dispatch,true);
+});
+
+// open shares the 12-tab budget with page reads, and opening an address again keeps the earlier tab in the ledger.
+test('open respects the tab budget and keeps earlier tabs of the same address',async()=>{
+  const h=harness();
+  const first=await h.run('open',{url:'https://example.test/same'}),second=await h.run('open',{url:'https://example.test/same'});
+  assert.equal(first.ok,true);assert.equal(second.ok,true);assert.notEqual(first.tabId,second.tabId);
+  const results=[];
+  for(let i=0;i<14;i++)results.push(await h.run('open',{url:'https://example.test/p'+i}));
+  const open=[...h.tabs.values()].filter(t=>t.id>=10);
+  assert.ok(open.length<=12,String(open.length));
+  assert.ok(results.some(r=>r.error==='TAB_LIMIT')||open.length<=12);
 });

@@ -247,22 +247,22 @@ async function debuggerDetach(tabId,all = false) {
   clearTimeout(state.timer); debugged.delete(tabId);
   try { await chrome.debugger.detach({tabId}); } catch {}
 }
-async function withDebugger(tabId,fn) {
+async function withDebugger(tabId,fn,effects = false) {
   await debuggerAttach(tabId);
   try { return await fn((method,params = {}) => withDeadline(chrome.debugger.sendCommand({tabId},method,params),20000,Error('The browser did not answer '+method+' within 20 s (the page may not be rendering).'))); }
-  catch (e) { throw Object.assign(new Error('DEBUGGER_COMMAND_FAILED'),{detail:e.message}); }
+  catch (e) { throw Object.assign(new Error('DEBUGGER_COMMAND_FAILED'),{detail:e.message,execution:effects ? 'unknown' : 'not_executed'}); }
   finally { await debuggerDetach(tabId); }
 }
 function debuggerFailure(e) {
   if (e.message === 'DEBUGGER_ATTACH_FAILED') return fail('DEBUGGER_ATTACH_FAILED','Chrome refused to attach the debugger to this tab (DevTools or another debugger may be attached): '+String(e.detail || '').slice(0,300));
   if (e.message === 'DEBUGGER_UNAVAILABLE') return fail('DEBUGGER_UNAVAILABLE',e.detail);
-  if (e.message === 'DEBUGGER_COMMAND_FAILED') return fail('DEBUGGER_COMMAND_FAILED','Chrome could not complete this through the debugger: '+String(e.detail || '').slice(0,300));
+  if (e.message === 'DEBUGGER_COMMAND_FAILED') return e.execution === 'unknown' ? fail('DEBUGGER_COMMAND_FAILED','Chrome could not confirm this through the debugger, so it may have run. Check the page before repeating it: '+String(e.detail || '').slice(0,300),'unknown') : fail('DEBUGGER_COMMAND_FAILED','Chrome could not complete this through the debugger: '+String(e.detail || '').slice(0,300));
   return null;
 }
 // evaluate on a page whose Content Security Policy blocks Cindy's scripts: the debugger is not subject to it.
 async function debuggerEvaluate(tabId,a) {
   const expression = '(async () => { let value = ('+a.fn+'); if (typeof value === "function") value = await value('+JSON.stringify(a.arg ?? null)+'); else if (value && typeof value.then === "function") value = await value; return value; })()';
-  const out = await withDebugger(tabId,send => send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true}));
+  const out = await withDebugger(tabId,send => send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true}),true);
   if (out.exceptionDetails) return fail('EVAL_FAILED',String(out.exceptionDetails.exception?.description || out.exceptionDetails.text || 'Script failed').slice(0,2000),'unknown');
   let result = out.result?.value ?? null, json;
   try { json = JSON.stringify(result); } catch { json = null; }
@@ -463,6 +463,15 @@ async function waitForLoad(id) {
   throw Object.assign(new Error('PAGE_LOAD_TIMEOUT'),{tabId:id,tabStatus:latest.status});
 }
 const TAB_BUDGET = 12;
+// Cindy-created tabs stay within TAB_BUDGET: the least recently used idle ones are closed to make room.
+async function makeRoomForTab() {
+  const createdCount = () => [...owned.values()].filter(r => r.created).length;
+  for (const [key,r] of [...owned].sort((a,b) => a[1].used-b[1].used)) {
+    if (createdCount() < TAB_BUDGET) break;
+    if (r.created) await closeOwned(key);
+  }
+  if (createdCount() >= TAB_BUDGET) throw new Error('TAB_LIMIT');
+}
 async function ensureTab(url,policy,action,onNavigate = () => {}) {
   await restore;
   url = canonical(url);
@@ -478,12 +487,7 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
     const existing = !!tab;
     if (!existing) {
       if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN');
-      const createdCount = () => [...owned.values()].filter(r => r.created).length;
-      for (const [key,r] of [...owned].sort((a,b) => a[1].used-b[1].used)) {
-        if (createdCount() < TAB_BUDGET) break;
-        if (r.created) await closeOwned(key);
-      }
-      if (createdCount() >= TAB_BUDGET) throw new Error('TAB_LIMIT');
+      await makeRoomForTab();
       onNavigate(); // Even a rejected browser response cannot prove the request never started.
       tab = await openInAgentWindow(url);
     }
@@ -874,6 +878,8 @@ function sanitizeResult(result) {
   return {...out,links,truncated};
 }
 // Tab-level actions: no page script. Returns null for actions that run inside the page.
+const TAB_ACTIONS = new Set(['focus','close','resize','pdf','cdp','screenshot','wait']);
+const MAIN_WORLD_ACTIONS = new Set(['evaluate','console','requests','responseBody','dialog']);
 async function tabAction(job,tab,policy) {
   const a = job.payload;
   if (job.action === 'focus') {
@@ -1002,16 +1008,22 @@ async function mainWorldOperation(action,a) {
     return json.length > max ? {truncated:true,json:json.slice(0,max)} : JSON.parse(json);
   };
   if (action === 'evaluate') {
-    try {
-      let value = (0,eval)('('+a.fn+')');
-      if (typeof value === 'function') value = await value(a.arg);
-      else if (value && typeof value.then === 'function') value = await value;
-      return {ok:true,execution:'executed',result:plain(value,200000)};
-    } catch (e) {
+    let value;
+    // Only a refusal while the expression is being compiled means nothing ran (the page's Content Security
+    // Policy rejects eval before executing anything). Once the function runs, any failure may follow side effects.
+    try { value = (0,eval)('('+a.fn+')'); }
+    catch (e) {
       const blocked = e instanceof EvalError || /Content Security Policy|unsafe-eval/i.test(String(e && e.message));
       return blocked
         ? {ok:false,error:'EVAL_BLOCKED_BY_PAGE',message:"This page's Content Security Policy blocks scripts from Cindy. Use snapshot, extract and the other actions on this page.",execution:'not_executed'}
         : {ok:false,error:'EVAL_FAILED',message:String(e && e.message || e).slice(0,2000),execution:'unknown'};
+    }
+    try {
+      if (typeof value === 'function') value = await value(a.arg);
+      else if (value && typeof value.then === 'function') value = await value;
+      return {ok:true,execution:'executed',result:plain(value,200000)};
+    } catch (e) {
+      return {ok:false,error:'EVAL_FAILED',message:String(e && e.message || e).slice(0,2000),execution:'unknown'};
     }
   }
   if (action === 'console') {
@@ -1102,15 +1114,29 @@ async function handle(job,policy,target) {
   }
   let injecting = false, navigating = false;
   const failureState = () => navigating || (injecting && P.INTERACT.includes(job.action)) ? 'unknown' : 'not_executed';
+  // The last authorization check before the browser is touched, registered as a dispatch: a permission
+  // revoked after the acknowledgement refuses the action here, and a revocation that arrives later waits for it.
+  const authorizeDispatch = async url => {
+    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:String(url).slice(0,PAGE_URL_MAX),dispatch:true});
+    policy = P.normalizePolicy(authorization.policy);
+    return P.check(policy,job.action,url);
+  };
   try {
     if (job.action === 'open') {
       // A new page always goes to Cindy's own background window, never into the user's windows.
+      const openGate = await authorizeDispatch(job.payload.url);
+      if (!openGate.ok) return {...openGate,execution:'not_executed'};
+      await makeRoomForTab();
       navigating = true;
       const created = await openInAgentWindow(job.payload.url);
       let loaded = created;
       try { loaded = await waitForLoad(created.id); } catch { loaded = await chrome.tabs.get(created.id).catch(() => null); }
       // The tab can be closed while it loads, by the user or the site; say so instead of a generic failure.
       if (!loaded) return fail('TAB_CLOSED','The new tab was closed before it finished loading, by the user or the site. Ask the user before opening it again.','executed');
+      // The ledger is keyed by URL: opening an address again must not drop the record of the earlier tab,
+      // or that tab could never be reclaimed when idle.
+      const ownedKey = canonical(job.payload.url), earlier = owned.get(ownedKey);
+      if (earlier && earlier.id !== created.id) { owned.delete(ownedKey); owned.set(ownedKey+'#cindy-tab-'+earlier.id,earlier); }
       owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
       if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
       markAgentTab(created.id); await markAgentOpened(created.id);
@@ -1123,6 +1149,8 @@ async function handle(job,policy,target) {
       if (!tab) return fail('TAB_CLOSED','The tab is closed. List tabs again.');
       if (!P.check(policy,job.action,tab.url).ok) return P.check(policy,job.action,tab.url);
       if (job.action === 'navigate') {
+        const navigateGate = await authorizeDispatch(tab.url);
+        if (!navigateGate.ok) return {...navigateGate,execution:'not_executed'};
         navigating = true;
         await chrome.tabs.update(tab.id,{url:job.payload.url});
         try { tab = await waitForLoad(tab.id); } catch { tab = await chrome.tabs.get(tab.id); }
@@ -1137,6 +1165,10 @@ async function handle(job,policy,target) {
     const actual = await chrome.tabs.get(tab.id);
     if (!['close','screenshot','pdf'].includes(job.action)) markAgentTab(actual.id);
     // Tab-level actions need no page script: answer them before injecting anything.
+    if (TAB_ACTIONS.has(job.action)) {
+      const tabGate = await authorizeDispatch(actual.url);
+      if (!tabGate.ok) return {...tabGate,execution:'not_executed'};
+    }
     const direct = await tabAction(job,actual,policy);
     if (direct) return direct;
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
@@ -1144,13 +1176,13 @@ async function handle(job,policy,target) {
     const documentId=await network.document(tab.id,PAGE_ACCESS);
     // A redirect can stretch the tab URL past the bridge's request limit; the authorize call only needs
     // the scheme and host for its policy check, so a bounded copy is sent instead of the whole string.
-    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX)});
+    const authorization = await fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:actual.url.slice(0,PAGE_URL_MAX),...(MAIN_WORLD_ACTIONS.has(job.action) ? {dispatch:true} : {})});
     policy = P.normalizePolicy(authorization.policy);
     const currentGate = P.check(policy,job.action,actual.url);
     if (!currentGate.ok) return {...currentGate,execution:failureState()};
     if (job.action === 'navigate') return {ok:true,url:actual.url,tabId:tab.id};
     // Main-world reads and scripts run in the page's own JavaScript context.
-    if (['evaluate','console','requests','responseBody','dialog'].includes(job.action)) {
+    if (MAIN_WORLD_ACTIONS.has(job.action)) {
       injecting = true;
       const done = await mainWorldAction(job,tab.id,documentId);
       // A page that forbids scripts (CSP) cannot stop the debugger: when the user has allowed it, evaluate there.

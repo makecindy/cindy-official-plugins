@@ -366,6 +366,7 @@
     // YouTube owns control visibility, including keyboard, pause and fullscreen.
     const controlsObserver=new MutationObserver(syncControls);controlsObserver.observe(player,{attributes:true,attributeFilter:['class']});
     for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])overlayHost.addEventListener(event,e=>e.stopPropagation());
+    const restoreTracks=()=>{for(const [track,mode]of nativeTracks)if(track.mode==='hidden')track.mode=mode;};
     const restoreNodes=()=>{for(const [node,old]of nativeNodes){if(node.style.getPropertyValue('visibility')==='hidden'){if(old.value)node.style.setProperty('visibility',old.value,old.priority);else node.style.removeProperty('visibility');}}nativeNodes.clear();};
     const suppressNative=()=>{for(const node of player.querySelectorAll('.ytp-caption-window-container')){if(!nativeNodes.has(node))nativeNodes.set(node,{value:node.style.getPropertyValue('visibility'),priority:node.style.getPropertyPriority('visibility')});node.style.setProperty('visibility','hidden','important');}};
     const playerFrame=player.matches('#movie_player,.html5-video-player');
@@ -381,7 +382,7 @@
       captionSize=Math.max(16,Math.min(40,r.width*.027))*({small:.85,medium:1,large:1.18}[prefs.videoSize]||1);fitCaption();
     };
     const resize=new ResizeObserver(position);resize.observe(media);resize.observe(player);position();
-    const observer=new MutationObserver(()=>{placeControl();syncControls();if(currentText&&prefs.videoMode!=='off')suppressNative();else restoreNodes();});observer.observe(player,{childList:true,subtree:true});
+    const observer=new MutationObserver(()=>{placeControl();syncControls();if(currentText&&prefs.videoMode!=='off')suppressNative();else{restoreNodes();if(prefs.videoMode==='off')restoreTracks();}});observer.observe(player,{childList:true,subtree:true});
     const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
     const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
@@ -390,9 +391,9 @@
     const outside=e=>{if(!e.composedPath().includes(overlayHost)&&!e.composedPath().includes(controlHost)){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}};document.addEventListener('pointerdown',outside);
     return {
       update,progress,openSettings(render=true){if(render)videoSettings();settings.hidden=false;toggle.setAttribute('aria-expanded','true');surface.dataset.controls='true';},closeSettings(){settings.hidden=true;toggle.setAttribute('aria-expanded','false');},
-      track(track){if(!nativeTracks.has(track))nativeTracks.set(track,track.mode);if(track.mode!=='hidden')track.mode='hidden';},
+      track(track){if(!nativeTracks.has(track))nativeTracks.set(track,track.mode);if(prefs.videoMode==='off'){restoreTracks();return;}if(track.mode!=='hidden')track.mode='hidden';},
       render(cue){const text=cue?.text||'',translated=cue?.translation||'';box.dataset.provisional=String(!!cue?.provisional);currentText=text;box.hidden=!text||prefs.videoMode==='off';original.hidden=prefs.videoMode==='translation'&&!!translated;translation.hidden=!translated||prefs.videoMode==='original';if(original.textContent!==text)original.textContent=text;if(translation.textContent!==translated)translation.textContent=translated;// With Cindy subtitles off, YouTube's own captions show as usual.
-        if(text&&prefs.videoMode!=='off')suppressNative();else restoreNodes();if(!needsTranslation())notice.hidden=true;fitCaption();},
+        if(text&&prefs.videoMode!=='off')suppressNative();else{restoreNodes();if(prefs.videoMode==='off')restoreTracks();}if(!needsTranslation())notice.hidden=true;fitCaption();},
       notify(text,error=false,detail=''){noticeError=error;noticeCode=error?detail:'';noticeText.textContent=error?text:'';codeText.textContent=error&&detail?t.errorDetails+' · '+detail:'';progress();},
       destroy(){clearInterval(progressTimer);document.removeEventListener('pointerdown',outside);controlHost.remove();clearTimeout(controlsTimer);player.removeEventListener('pointermove',showControls);cancelAnimationFrame(frame);resize.disconnect();observer.disconnect();controlsObserver.disconnect();media.removeEventListener('play',play);media.removeEventListener('seeked',sync);media.removeEventListener('loadedmetadata',sync);document.removeEventListener('fullscreenchange',sync);window.removeEventListener('scroll',position);window.removeEventListener('resize',position);restoreNodes();for(const [track,mode]of nativeTracks)if(track.mode==='hidden')track.mode=mode;originalParent.append(body,footer);overlayHost.remove();host?.style.setProperty('display','block','important');if(positioned&&player.style.position==='relative'){if(oldPosition)player.style.setProperty('position',oldPosition,oldPriority);else player.style.removeProperty('position');}}
     };

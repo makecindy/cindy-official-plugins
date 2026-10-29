@@ -496,3 +496,10 @@ Update both the Cindy plugin and the Chrome extension. Permissions and the signe
 ## 0.4.49 merged with the selection-button option (host package 0.4.70)
 
 Brings in the "Show Cindy button when selecting text" setting (off by default) from the main branch. No other behavior change.
+
+## 0.4.50 review fixes: uncertain results, last authorization check, tab budget (host package 0.4.71)
+
+- **A script that started is never reported as not run.** `evaluate` returns "not executed" only when the page's Content Security Policy rejects the script before anything ran; an error after the function started, or a debugger command that timed out or lost its connection after being sent, now reports an unknown result, so the page is checked before repeating it and the function is not run a second time through the debugger.
+- **Revoked permissions stop the remaining actions.** Opening a page, navigating by tab, closing, resizing, focusing, waiting, screenshots, PDF, recipe commands and the main-world actions (`evaluate`, `console`, `requests`, `responseBody`, `dialog`) now take the last authorization check and register as a dispatch, so a site permission revoked after the acknowledgement refuses them or waits for the one already started.
+- **`open` shares the 12-tab budget** with page reads, and opening an address again no longer overwrites the record of the earlier tab, so idle tabs can still be reclaimed.
+- **Turning Cindy subtitles off restores the site's own caption track** instead of keeping it hidden.
