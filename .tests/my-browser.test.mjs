@@ -61,7 +61,9 @@ test('default policy and one normalization path protect both reads and interacti
   assert.equal(P.normalizeHost(' WWW.Example.test '),'www.example.test');
   assert.equal(P.normalizeHost('*.example.test'),'example.test');
   assert.equal(P.normalizeHost('=example.test'),'=example.test');
-  for(const bad of ['com','https://example.test','example.test/path','example.test:443','example.test@evil.test','*','127.0.0.1']) assert.throws(()=>P.normalizeHost(bad));
+  for(const bad of ['https://example.test','example.test/path','example.test:443','example.test@evil.test','*']) assert.throws(()=>P.normalizeHost(bad));
+  // Local, private and single-label intranet hosts can be listed, so they can be blocked alone.
+  for(const host of ['127.0.0.1','192.168.1.2','[::1]','localhost','jira','nas.local']) assert.doesNotThrow(()=>P.normalizeHost(host),host);
   assert.throws(()=>P.normalizePolicy({read:{block:'example.test'},interact:{allow:[]}}));
 });
 test('payload validation preserves empty text/selection and rejects malformed extraction',()=>{

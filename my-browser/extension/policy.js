@@ -16,16 +16,16 @@
     const exact = text.startsWith('=');
     const raw = exact ? text.slice(1) : text.replace(/^\*\./, '');
     if (/^\[[0-9a-f:.]+\]$/.test(raw)) {
+      // Local and private addresses are allowed like any site (2026-10-28), so they can be listed too.
       const host=new URL('https://'+raw).hostname;
-      if(isLocal(host))throw new Error('Local and private addresses are not supported.');
       return (exact?'=':'')+host;
     }
     if (!raw || /[\s/@:?#\\]/.test(raw)) throw new Error('Enter a domain only, without a URL, port or path.');
     const host = new URL('https://' + raw).hostname;
     if (host !== raw && !/[^\x00-\x7f]/.test(raw)) throw new Error('Invalid domain.');
-    if (host.length > 253 || !host.includes('.') || host.endsWith('.') ||
+    // Single-label intranet names (jira, localhost) are valid entries.
+    if (host.length > 253 || host.endsWith('.') ||
         host.split('.').some(p => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(p))) throw new Error('Invalid domain.');
-    if (isLocal(host)) throw new Error('Local and private addresses are not supported.');
     return (exact ? '=' : '') + host;
   }
   function publicLiteral(ip) {
