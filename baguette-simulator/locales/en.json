@@ -1,6 +1,6 @@
 {
   "name": "Device Simulator",
-  "description": "View and control Apple/Android simulators and paired iPhones/iPads in a shared device list and task sidebar. Input, screenshots, apps and logs. Physical devices need Mac, Xcode 27+ and Developer Mode; text lookup/input also need XCTest signing.",
+  "description": "View/control simulators and paired iPhone/iPad. Apple simulators: macOS 15+, Apple Silicon, full Xcode/runtimes. Android: Mac/Windows x64/Linux x64; confirm downloads/licenses. Physical: Mac, Xcode 27+, Developer Mode; text/AX need signing. Shared sidebar, input, screenshots and apps.",
   "whenToUse": "iPhone/iPad hardware and iPhone, iPad, Apple TV, Vision Pro, Android simulators: connect devices, view/control screens, install/launch apps, input, screenshots, UI inspection and logs. Use devices first and verify outcomes.",
   "tools": {
     "environment": {

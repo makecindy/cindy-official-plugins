@@ -50,13 +50,15 @@ function createWda({root,devices,run,children,spawnImpl=spawn}){
   async function start(d,p={}){
     const existing=entries.get(d.udid);
     if(existing?.state==='running'||existing?.state==='ready')return {udid:d.udid,...state(d.udid)};
-    if(existing)await disconnect(d.udid);
     if(!d.developerMode)throw fail('DEVELOPER_MODE_REQUIRED','请在 iPhone 设置 → 隐私与安全性中开启开发者模式，并在 Xcode 中完成设备准备。');
-    p={...p,teamId:await signing.resolve(d,p)};
     devices.endpoint(d,8100);
-    const e={state:'running',phase:'building',job:randomUUID(),port:randomInt(20000,50000),tunnelAddress:d.tunnelAddress,session:null,process:null,cancelled:false};entries.set(d.udid,e);
-    e.pending=prepare(d,p,e).catch(async error=>{if(!e.cancelled){e.state='failed';e.phase='failed';e.error={code:error.code||'DEVICE_SETUP_FAILED',message:error.message,execution:error.execution||'unknown'};}await stop(e.process);}).finally(()=>{e.pending=null;});
-    return {udid:d.udid,...state(d.udid)};
+    const e={state:'running',phase:'signing',job:randomUUID(),port:randomInt(20000,50000),tunnelAddress:d.tunnelAddress,session:null,process:null,cancelled:false};entries.set(d.udid,e);
+    const team=(async()=>{if(existing)await cancel(existing);if(e.cancelled)return;return signing.resolve(d,p);})();
+    e.pending=team.then(teamId=>{if(e.cancelled)return;e.phase='building';return prepare(d,{...p,teamId},e);}).catch(async error=>{if(!e.cancelled){e.state='failed';e.phase='failed';e.error={code:error.code||'DEVICE_SETUP_FAILED',message:error.message,execution:error.execution||'unknown'};}await stop(e.process);}).finally(()=>{e.pending=null;});
+    // Keep team-choice errors synchronous for the existing selection UI, while
+    // registering cancellation before the first signing lookup.
+    try{await team;}catch(error){if(!e.cancelled)throw error;}
+    return {udid:d.udid,...(e.cancelled?{state:'disconnected',ready:false}:state(d.udid))};
   }
   async function prepare(d,p,e){
     const work=path.join(root,'wda',d.udid),source=path.join(work,'source'),derived=path.join(work,'build');
@@ -86,15 +88,18 @@ function createWda({root,devices,run,children,spawnImpl=spawn}){
     });}finally{await buildLog.close();}
     if(e.cancelled)return;
     e.phase='connecting';const log=await fs.open(e.log,'w',0o600);
-    try{e.process=spawnImpl('/usr/bin/xcodebuild',[...args,`USE_PORT=${e.port}`,`USE_IP=${d.tunnelAddress}`,`WDA_PRODUCT_BUNDLE_IDENTIFIER=${bundle}`,'test-without-building'],{env:buildEnv,detached:true,stdio:['ignore',log.fd,log.fd]});}finally{await log.close();}
+    try{if(e.cancelled)return;e.process=spawnImpl('/usr/bin/xcodebuild',[...args,`USE_PORT=${e.port}`,`USE_IP=${d.tunnelAddress}`,`WDA_PRODUCT_BUNDLE_IDENTIFIER=${bundle}`,'test-without-building'],{env:buildEnv,detached:true,stdio:['ignore',log.fd,log.fd]});}finally{await log.close();}
     children.add(e.process);e.process.on('error',error=>{e.error={code:'RUNNER_FAILED',message:error.message};e.state='failed';});
     e.process.on('exit',()=>{children.delete(e.process);if(e.state!=='disconnected'){e.state='failed';e.error ||= {code:'RUNNER_STOPPED',message:'真机控制组件已停止。请检查 runner.log，解锁手机后重新连接。'};}});
     const deadline=Date.now()+90000;
     while(!e.cancelled&&e.state==='running'&&Date.now()<deadline){
       try{
         const current=await devices.target({udid:d.udid}),base=devices.endpoint(current,e.port);
+        if(e.cancelled)return;
         await request(base,'/status',{deadline:Date.now()+2000});
+        if(e.cancelled)return;
         const session=await request(base,'/session',{body:{capabilities:{alwaysMatch:{shouldUseCompactResponses:false,waitForIdleTimeout:0}}},mutation:true,deadline:Date.now()+15000});
+        if(e.cancelled)return;
         const id=session.sessionId||session.value?.sessionId;
         if(typeof id!=='string'||!/^[a-z0-9-]+$/i.test(id))throw fail('INVALID_SESSION','控制组件未返回有效会话。','unknown');
         // Interactive viewing must not wait for app animations to settle after
@@ -116,8 +121,9 @@ function createWda({root,devices,run,children,spawnImpl=spawn}){
     try{return (await request(base,`/session/${e.session}${route}`,{body,deadline:p._deadline,mutation:body!==undefined})).value;}
     catch(error){if(error.transport){e.state='failed';e.phase='failed';e.error={code:error.code,message:'手机控制连接已中断；画面仍可查看，下次操作会重新准备控制。'};}throw error;}
   }
-  async function disconnect(id){const e=entries.get(id);if(e){e.cancelled=true;e.state='disconnected';e.phase='disconnected';delete e.error;await stop(e.process);await e.pending;}return {udid:id,execution:'executed',control:state(id)};}
-  return {start,state,call,disconnect,pending:id=>id?entries.get(id)?.pending:[...entries.values()].find(e=>e.pending)?.pending,
+  async function cancel(e){const signing=e.phase==='signing'||e.cancelled;e.cancelled=true;e.state='disconnected';e.phase='disconnected';delete e.error;await stop(e.process);if(!signing)await e.pending;}
+  async function disconnect(id){const e=entries.get(id);if(e)await cancel(e);return {udid:id,execution:'executed',control:state(id)};}
+  return {start,state,call,disconnect,pending:id=>id?(entries.get(id)?.cancelled?null:entries.get(id)?.pending):[...entries.values()].find(e=>!e.cancelled&&e.pending)?.pending,
     async close(){await Promise.all([...entries.keys()].map(disconnect));}};
 }
 module.exports={createWda,request,runnerLocked};

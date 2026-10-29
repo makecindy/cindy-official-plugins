@@ -207,7 +207,7 @@ async function dispatch(method,p={},deadline=Date.now()+110000) {
     const errors=results.flatMap((r,i)=>r.status==='rejected'?[{platform:['ios','android','physical'][i],code:r.reason.code,message:r.reason.message}]:[]);
     return {deviceSet:DEVICE_SET,devices:[...(results[0].status==='fulfilled'?results[0].value.devices.map(d=>({...d,platform:'ios'})):[]),...(results[1].status==='fulfilled'?results[1].value.devices:[]),...(results[2].status==='fulfilled'?results[2].value.devices:[])],...(errors.length?{platformErrors:errors}:{})};
   }
-  if(method==='close_viewer'){await Promise.all([stopViewer(),android().viewer.close(),physical().dispatch('close_viewer')]);return {execution:'executed'};}
+  if(method==='close_viewer'){await Promise.all([stopViewer(),android().viewer.close(),physical().dispatch('close_viewer',p)]);return {execution:'executed'};}
   if(method==='reveal_screenshot'&&p.platform==='physical')return physical().dispatch(method,p);
   if(method==='reveal_screenshot'&&p.platform==='android')return android().dispatch(method,p);
   if((method==='create_device'&&p.runtime?.startsWith('android:'))||await android().owns(p.udid)){

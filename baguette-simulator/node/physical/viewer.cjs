@@ -103,6 +103,6 @@ function createViewer({root,run,devices,wda,agent,children,live}){
   return {configure:c=>{controls=c;},viewing:()=>Date.now()-lastSeen<15000,wanted:()=>!!server,forget:()=>{},
     existing:(id,locale)=>server&&opened.has(id)?url(id,locale):null,
     async open(id,locale){await devices.target({udid:id});if(starting)await starting;else if(!server){starting=start().finally(()=>{starting=null;});await starting;}opened.add(id);return {url:url(id,locale),ready:true};},
-    async close(){await starting?.catch(()=>{});if(server){server.close();server.closeAllConnections();}await live.close();server=null;base=null;token=null;opened.clear();preview.clear();chrome.clear();lastSeen=0;}};
+    async close(){await starting?.catch(()=>{});if(server){server.close();server.closeAllConnections();}await live.closeViewers();server=null;base=null;token=null;opened.clear();preview.clear();chrome.clear();lastSeen=0;}};
 }
 module.exports={createViewer};

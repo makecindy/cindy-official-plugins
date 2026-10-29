@@ -74,7 +74,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       catch (error) { outcomes.push({udid:device.udid, errorCode:error.code || 'STOP_FAILED', message:error.message, execution:error.execution || 'unknown'}); }
     }
     let viewerError, result;
-    try { await run('close_viewer'); }
+    try { await run('close_viewer', {_stopControls:true}); }
     catch (error) { viewerError = {code:error.code || 'STOP_FAILED', message:error.message, execution:error.execution || 'unknown'}; }
     try { result = await status(deadline); }
     catch (error) {

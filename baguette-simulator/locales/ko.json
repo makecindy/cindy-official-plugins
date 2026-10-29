@@ -1,6 +1,6 @@
 {
   "name": "기기 시뮬레이터",
-  "description": "iPhone, iPad, Apple TV, Vision Pro, Android 시뮬레이터와 페어링된 iPhone/iPad 실기기를 같은 기기 목록과 작업 사이드바에서 보고 조작합니다. 입력, 스크린샷, 앱 관리, 로그를 지원합니다. 실기기 제어에는 Mac, Xcode 27+와 개발자 모드가 필요합니다. 텍스트 검색 및 입력에는 XCTest 서명도 필요합니다.",
+  "description": "Apple/Android 시뮬레이터와 페어링된 iPhone/iPad를 같은 목록·사이드바에서 보고 조작합니다. Apple 시뮬레이터: macOS 15+, Apple Silicon, 정식 Xcode 및 해당 런타임 필요. Android: Mac, Windows x64, Linux x64 지원; 설치 전에 용량과 라이선스 확인. 실기기: Mac, Xcode 27+, 개발자 모드 필요. 텍스트 검색·입력에는 서명된 XCTest를 사용합니다.",
   "whenToUse": "iPhone/iPad 실기기 및 iPhone, iPad, Apple TV, Vision Pro, Android 시뮬레이터 연결과 화면 제어, 앱 설치·실행, 입력, 스크린샷, UI 검사, 로그 확인. 먼저 devices로 정확한 기기를 선택하고 결과를 검증하세요.",
   "tools": {
     "environment": {

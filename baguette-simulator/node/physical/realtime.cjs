@@ -46,7 +46,8 @@ function createRealtime({root,run,devices,children=new Set(),spawnImpl=spawn}){
     e.stopped=true;e.state='disconnected';clearTimeout(e.idle);rejectPending(e);
     for(const res of e.subscribers.keys())res.destroy();e.subscribers.clear();
     e.stopping=(async()=>{
-      await e.starting?.catch(()=>{});
+      // Shared runtime preparation may continue; the stopped generation checks
+      // its flag after every await and cannot spawn a late helper.
       const child=e.child;if(!child||child.exitCode!==null||child.signalCode)return;
       const closed=new Promise(resolve=>child.once('close',resolve));child.stdin.end();child.kill('SIGTERM');
       let timer;await Promise.race([closed,new Promise(resolve=>{timer=setTimeout(resolve,5000);})]);clearTimeout(timer);
@@ -65,12 +66,13 @@ function createRealtime({root,run,devices,children=new Set(),spawnImpl=spawn}){
   async function startDevice(d){
     let e=entries.get(d.udid);
     if(e&&!e.stopped&&['running','ready'].includes(e.state))return state(d.udid);
-    if(e)await stop(e);
     if(!d.developerMode)throw fail('DEVELOPER_MODE_REQUIRED','请在手机上开启开发者模式，并在 Xcode 中完成设备准备。');
     devices.endpoint(d,1);
-    const screen=await devices.screen(d);
-    e={session:randomUUID(),state:'running',phase:'runtime',screen,pending:new Map(),subscribers:new Map(),stopped:false,gesture:null,agents:0};entries.set(d.udid,e);
+    const previous=e;
+    e={session:randomUUID(),state:'running',phase:'runtime',pending:new Map(),subscribers:new Map(),stopped:false,gesture:null,agents:0};entries.set(d.udid,e);
     e.starting=(async()=>{
+      if(previous)await stop(previous);if(e.stopped)return;
+      const screen=await devices.screen(d);if(e.stopped)return;e.screen=screen;
       const python=await runtime();if(e.stopped)return;e.phase='connecting';
       const child=spawnImpl(python,['-I','-u',path.join(__dirname,'realtime.py')],{stdio:['pipe','pipe','pipe'],env:{PATH:'/usr/bin:/bin:/usr/sbin:/sbin',HOME:process.env.HOME,TMPDIR:process.env.TMPDIR,LANG:'en_US.UTF-8'}});e.child=child;children.add(child);let errors='';
       const decoder=new Packets(packet=>{
@@ -108,7 +110,7 @@ function createRealtime({root,run,devices,children=new Set(),spawnImpl=spawn}){
       child.once('exit',finishedChild);child.once('close',finishedChild);
       child.stdin.write(JSON.stringify({serial:d.hardwareUdid,screen})+'\n');e.state='ready';
       e.idle=setTimeout(()=>{if(!e.subscribers.size&&!e.agents)void stop(e);},35000);
-    })().catch(error=>{e.state='failed';e.error={message:'实时连接准备失败：'+error.message};});
+    })().catch(error=>{if(!e.stopped){e.state='failed';e.error={message:'实时连接准备失败：'+error.message};}});
     return state(d.udid);
   }
   function start(d){
@@ -179,6 +181,8 @@ function createRealtime({root,run,devices,children=new Set(),spawnImpl=spawn}){
     catch(error){void stop(e);throw error;}
     finally{if(['cancel','end'].includes(p.op))e.gesture=null;}
   }
-  return {start,state,pipe,input,acquire,snapshot,async disconnect(id){const e=entries.get(id);if(e)await stop(e);},async close(){await Promise.all([...entries.values()].map(stop));entries.clear();}};
+  return {start,state,pipe,input,acquire,snapshot,async disconnect(id){const e=entries.get(id);if(e)await stop(e);},
+    async closeViewers(){for(const e of entries.values())for(const res of e.subscribers.keys())res.destroy();await Promise.all([...entries.values()].filter(e=>!e.agents).map(stop));},
+    async close(){await Promise.all([...entries.values()].map(stop));entries.clear();}};
 }
 module.exports={createRealtime,Packets,coordinates};

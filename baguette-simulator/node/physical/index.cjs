@@ -40,7 +40,7 @@ function createPhysical({root,run,children}){
   }
   async function dispatch(method,p={}){
     if(method==='devices')return {devices:await list(p)};
-    if(method==='close_viewer'){await interactive.close();await viewer.close();await wda.close();return {execution:'executed'};}
+    if(method==='close_viewer'){await viewer.close();if(p._stopControls){await interactive.close();await live.close();await wda.close();}return {execution:'executed'};}
     if(method==='reveal_screenshot')return agent.reveal(p);
     // The phone may disappear mid-build. Cancellation acts only on a job we
     // already own and must not depend on rediscovering the unplugged device.

@@ -35,6 +35,20 @@ test('video parser handles split headers/access units and rejects oversized pack
  assert.deepEqual(coordinates([[0,0],[400,800]],screen),[[0,0],[65535,65535]]);
  for(const points of [[[401,1]],[[NaN,2]],[],[[1,2],[3,4],[5,6]]])assert.throws(()=>coordinates(points,screen));
 });
+test('live cancellation does not wait for screen discovery or shared runtime installation',async t=>{
+ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+ for(const phase of ['screen','install']){
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'physical-cancel-'));let finish,entered;
+  const waiting=new Promise(resolve=>finish=resolve),atPhase=new Promise(resolve=>entered=resolve),spawned=[];
+  const live=createRealtime({root,devices:{endpoint(){},screen:async()=>{if(phase==='screen'){entered();await waiting;}return screen;}},run:async(_file,args)=>{if(phase==='install'&&args.includes('install')){entered();await waiting;}},spawnImpl:()=>{spawned.push(true);throw Error('late spawn');}});
+  try{
+   const d={udid:'test',hardwareUdid:'hardware',developerMode:true};await live.start(d);await atPhase;
+   await Promise.race([live.disconnect(d.udid),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('cancel blocked')),200);timer.unref();})]);
+   await live.close();finish();await new Promise(r=>setTimeout(r,30));
+   assert.equal(live.state(d.udid).state,'disconnected');assert.deepEqual(spawned,[]);
+  }finally{finish();await live.close();await fs.rm(root,{recursive:true,force:true});}
+ }
+});
 test('live backend binds input to an open video generation and bounds contact ownership',async t=>{
  const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),{EventEmitter}=require('node:events'),{PassThrough,Writable}=require('node:stream');
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'physical-live-')),sent=[];let child;
@@ -66,11 +80,26 @@ test('Agent media works without a viewer and viewer closure preserves held Agent
  }});t.after(async()=>{await live.close();await fs.rm(root,{recursive:true,force:true});});
  const d={udid:'test',hardwareUdid:'hardware',developerMode:true},lease=await live.acquire(d),gesture=crypto.randomUUID();
  await live.input(d.udid,{session:lease.session,op:'begin',gesture,screen,points:[[3,4]]},'agent');
- const res=new EventEmitter();Object.assign(res,{writeHead(){},write(){return true;},writableLength:0,destroy(){this.emit('close');}});live.pipe(d.udid,lease.session,res);res.destroy();await tick();
+ const res=new EventEmitter();Object.assign(res,{writeHead(){},write(){return true;},writableLength:0,destroy(){this.emit('close');}});live.pipe(d.udid,lease.session,res);await live.closeViewers();await tick();
  assert.equal(child.exitCode,null);assert.equal(sent.some(p=>p.op==='cancel'),false);
  const pending=live.snapshot(d,{_frameAfter:200});await new Promise(r=>setTimeout(r,40));assert.equal(sent.some(p=>p.op==='snapshot'),false);
  frame={capturedAt:210,sequence:2};emit({type:'frame',...frame});const shot=await pending;
  assert.equal(shot.source,'live-video');assert.equal(shot.sequence,2);assert.equal(shot.capturedAt,210);
  await live.input(d.udid,{session:lease.session,op:'end',gesture,screen,points:[[3,4]]},'agent');lease.release();
+ // Exercise the public adapter path as well as an individual stream closing.
+ const filename=path.resolve('baguette-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);let wdaClosed=0;
+ const context={module:{exports:{}},require(name){
+  if(name==='./realtime.cjs')return {createRealtime:()=>live};
+  if(name==='./devices.cjs')return {...load(name),createDevices:()=>({target:async()=>d})};
+  if(name==='./wda.cjs')return {createWda:()=>({close:async()=>wdaClosed++})};
+  return load(name);
+ }};
+ require('node:vm').runInNewContext(await fs.readFile(filename,'utf8'),context,{filename});
+ const adapter=context.module.exports.createPhysical({root,run:async()=>{},children:new Set()});
+ const held=await adapter.dispatch('gesture',{udid:d.udid,kind:'drag',phase:'begin',points:[[20,40]],observe:'none'});
+ await adapter.dispatch('close_viewer');assert.equal(wdaClosed,0);assert.equal(child.exitCode,null);
+ await adapter.dispatch('gesture',{udid:d.udid,kind:'drag',phase:'move',gestureId:held.gestureId,points:[[10,40]],observe:'none'});
+ await adapter.dispatch('close_viewer',{_stopControls:true});assert.equal(wdaClosed,1);assert.equal(child.exitCode,0);
+ await assert.rejects(adapter.dispatch('gesture',{udid:d.udid,kind:'drag',phase:'move',gestureId:held.gestureId,points:[[30,40]],observe:'none'}),e=>e.code==='INPUT_EXPIRED');
  await live.disconnect(d.udid);await assert.rejects(live.input(d.udid,{session:lease.session,op:'begin',gesture,screen,points:[[3,4]]},'agent'),e=>e.code==='LIVE_EXPIRED');
 });

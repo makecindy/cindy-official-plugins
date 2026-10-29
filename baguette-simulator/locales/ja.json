@@ -1,6 +1,6 @@
 {
   "name": "デバイスシミュレータ",
-  "description": "iPhone、iPad、Apple TV、Vision Pro、Android シミュレーターと、ペアリング済みの iPhone/iPad 実機を共通のデバイス一覧・タスクサイドバーで表示・操作します。入力、スクリーンショット、App 管理、ログに対応。実機操作には Mac、Xcode 27 以降、デベロッパモードが必要です。文字の検索・入力には XCTest の署名も必要です。",
+  "description": "Apple/Android シミュレーターとペアリング済み iPhone/iPad を共通の一覧・サイドバーで表示・操作します。Apple シミュレーター：macOS 15 以降、Apple Silicon、完全な Xcode と対応ランタイムが必要。Android：Mac、Windows x64、Linux x64 に対応し、導入前に容量とライセンスを確認。実機：Mac、Xcode 27 以降、デベロッパモードが必要。文字検索・入力は署名済み XCTest を使用します。",
   "whenToUse": "iPhone/iPad 実機および iPhone、iPad、Apple TV、Vision Pro、Android シミュレーターの接続・画面操作、App インストール・起動、入力、スクリーンショット、UI 検査、ログ確認。最初に devices で対象を選び、結果を確認してください。",
   "tools": {
     "environment": {

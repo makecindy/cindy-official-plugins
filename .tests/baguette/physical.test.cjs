@@ -37,9 +37,25 @@ test('physical destructive simulator operations reject before any device write',
  for(const method of ['shutdown','boot','erase_device','delete_device','rename_device','heal'])await assert.rejects(adapter.dispatch(method,{udid:id}),e=>e.code==='PHYSICAL_DEVICE_PROTECTED'&&e.execution==='not_executed');
  assert.equal(calls.length,6);
 });
+test('signing cancellation is immediate, repeatable, and late completion cannot launch a runner',async t=>{
+ const root=await temporary(t),filename=path.resolve('baguette-simulator/node/physical/wda.cjs'),load=require('node:module').createRequire(filename);
+ let finish;const signing=new Promise(resolve=>finish=resolve),writes=[];
+ const context={module:{exports:{}},__dirname:path.dirname(filename),process,Buffer,URL,setTimeout,clearTimeout,require(name){return name==='./signing.cjs'?{createSigning:()=>({resolve:()=>signing})}:load(name);}};
+ require('node:vm').runInNewContext(await fs.readFile(filename,'utf8'),context,{filename});
+ const wda=context.module.exports.createWda({root,devices:{endpoint(){}},children:new Set(),run:async()=>writes.push('run'),spawnImpl:()=>{writes.push('spawn');throw Error('must not spawn');}});
+ const pending=wda.start(normalize(row()));assert.equal(wda.state(id).phase,'signing');
+ const within=promise=>Promise.race([promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('cancel waited for signing')),200);timer.unref();})]);
+ await within(wda.disconnect(id));await within(wda.disconnect(id));await within(wda.close());
+ assert.equal(wda.state(id).state,'disconnected');assert.equal(wda.pending(id),null);
+ // A reconnect must be registered before awaiting retirement of the old job.
+ const reconnect=wda.start(normalize(row()));await within(wda.disconnect(id));
+ finish('AAAAAAAAAA');await pending;await reconnect;await new Promise(r=>setImmediate(r));
+ assert.equal(wda.state(id).state,'disconnected');assert.deepEqual(writes,[]);
+});
 test('global stop leaves physical phones running and ignores their discovery errors',async t=>{
  const root=await temporary(t),calls=[];
- const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),dispatch:async method=>{
+ const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),dispatch:async (method,p)=>{
+  if(method==='close_viewer')assert.equal(p._stopControls,true);
   calls.push(method);return method==='devices'?{devices:[normalize(row())],platformErrors:[{platform:'physical',message:'offline'}]}:{ok:true};
  }});
  const result=await runtime.request('settings_stop_all');assert.equal(result.ok,true);assert.equal(calls.includes('shutdown'),false);assert.ok(calls.includes('close_viewer'));

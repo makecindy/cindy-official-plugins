@@ -1,4 +1,31 @@
-# Physical viewer parity — installed 0.3.1
+# Physical device verification
+
+## PR integration — 0.3.23 (2026-10-29)
+
+- Rebased onto the simulator audio release. Simulator audio remains available;
+  physical viewers hide the unsupported audio button. Forge updated/enabled the
+  original xd instance to 0.3.23. Headless Chrome confirmed the button hidden
+  and received 11 live decoded frames from the installed viewer.
+- Actual Agent tools on the paired Air/iOS 27.2 acquired live-video at 420×912.
+  After gesture begin, viewer close succeeded; move still shifted the Home
+  screen before end, with a fresh sequence and receiver-side frameAgeMs=94.
+  End returned executed. This verifies the public close path, not just a closed
+  stream socket. No personal screen content is committed.
+- Signing/runtime cancellation regressions cover late resolution, repeated
+  disconnect, immediate reconnect cancellation, display discovery and download
+  preparation. Cancelled generations cannot spawn. The real adapter test keeps
+  Agent input alive through viewer close, then releases it on global stop.
+  The final installed source auto-selected signing and reached ready on Air.
+- Platform-isolated discovery fixes the Linux protection-test fixture without
+  changing production device routing. All required suites: 794 passed; vendor
+  inventory and whitespace checks pass. Existing 0.3.21 text/input evidence
+  remains applicable: the text lookup and input implementation is unchanged.
+- Relative to 0.3.22: integrated main's simulator audio, hid that control on
+  physical devices, restored manifest host requirements, and corrected setup
+  cancellation and explicit viewer close. Native trackpad feel, USB-only,
+  iPad, Duo panel/rotation and other iOS/Xcode versions remain unverified.
+
+## Historical viewer parity — installed 0.3.1
 
 2026-10-28, local Cindy host, macOS/Xcode 27 and paired iPhone Duo/iOS 27.2.
 Source: `dash/simulator-real-devices`, uncommitted development package.
