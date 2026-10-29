@@ -38,6 +38,13 @@ func verifyParent(pid string) error {
 	// though the running image is the signed browser the kernel started. Accept it only when the
 	// running image carries one of our browser identities and the executable it was started from
 	// still satisfies the full requirement.
+	//
+	// `codesign -d <pid>` reads that identity from the file on disk, not from the running image, so a
+	// same-user process that swaps its own executable for a copy of the browser after launch also
+	// passes here (checked 2026-10-29). That is no wider than what such a process already has: it can
+	// read the bridge token in connections/<port>.json (0600, same user) and call /native/bind itself.
+	// The parent check keeps other callers out; it is not a boundary against same-user code, and the
+	// kernel's team id (csops) would not be one either without validating the certificate chain.
 	if !bytes.Contains(out, []byte("does not match what is running")) {
 		return err
 	}
