@@ -138,3 +138,15 @@ test('a transient host refusal is not remembered as an older host; the next call
   assert.ok(state.pipe.filter(m => m.kind === 'status').length>=3,'each transient failure is probed again');
   assert.equal(state.node.filter(c => ['act','status','setPolicy','setTrustedClients'].includes(c.method)).length,0,'the bundled worker never serves the bridge on a guess');
 });
+
+// Review 2026-10-29: a host bridge without a cached copy of the site permissions refuses page jobs
+// and asks the plugin for them; the plugin must push its stored policy and pairings right away.
+test('a host policy request makes the plugin push its stored permissions and pairings',async t=>{
+  const {state,hosts}=await sandbox(t,{hostSlot:true});
+  await new Promise(resolve => setTimeout(resolve,20));
+  state.pipe.length=0;
+  await hosts[0]({type:'event',name:'browser-extension-policy-request'});
+  for (let i=0;i<50 && !state.pipe.some(m => m.kind === 'setPolicy');i++) await new Promise(resolve => setTimeout(resolve,5));
+  assert.ok(state.pipe.some(m => m.kind === 'setTrustedClients'),'paired identities must be pushed');
+  assert.ok(state.pipe.some(m => m.kind === 'setPolicy'),'the stored policy must be pushed');
+});

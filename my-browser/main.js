@@ -213,6 +213,8 @@ async function getLearningService() {
 }
 async function handleLearningHostMessage(msg){
   if(msg.type==='host-context-changed'){hostLocale=msg.context?.locale||hostLocale;return;}
+  // The host bridge has no cached copy of the site permissions and refuses page jobs until we push them.
+  if(msg.type==='event'&&msg.name==='browser-extension-policy-request'){sync().catch(()=>{});return;}
   // Host-owned bridge delivers relays as its own event; the bundled worker uses a node notification.
   const relay=msg.type==='event'&&msg.name==='browser-extension-relay'?msg:msg.type==='event'&&msg.name==='node-notification'&&msg.method==='learning-request'?msg.params:null;
   if(!relay)return;
