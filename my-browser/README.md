@@ -530,3 +530,7 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 ## 0.4.56 larger uploads through the debugger (host package 0.4.77)
 
 - **Uploads are no longer limited to about 30 MB once the debugger is allowed.** Newer Cindy sends the checked file paths along with the upload, and the extension has Chrome read the files straight from the computer through its debugger, as Cindy's own browser does. Without the debugger, files that fit still go the plain way; a larger batch opens the page to allow the debugger. The debugger explanation page lists this use.
+
+## 0.4.57 no capability limits of our own (host package 0.4.78)
+
+- **The agent can do what it does in Cindy's own browser.** Password, payment and one-time-code fields can be read and filled; links, tab lists and read results keep their URLs whole (magic and signed links work); extract accepts any attribute; recorded network events keep their headers. Safety is the task's permission mode and review in Cindy. Hidden inputs still stay out of reads, and nothing steals focus or switches the tab you are looking at.
