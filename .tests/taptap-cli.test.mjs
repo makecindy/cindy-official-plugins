@@ -1186,6 +1186,12 @@ test('the manuals carry the 2026.10.29 upstream sync', () => {
   // outcome into a retry, or one complaint lands twice.
   assert.match(feedback, /`unknown`/, 'an unknown outcome must be named');
   assert.doesNotMatch(feedback, /最多重试一次/, 'an unknown submission is not a free retry');
+  // Every trigger goes through the same preview: a `command-failure`
+  // example that jumps to `yes:true` teaches the agent to skip the gate.
+  assert.equal((feedback.match(/trigger:"command-failure", dry_run:true/g) || []).length, 1,
+    'the command-failure example must preview first');
+  assert.doesNotMatch(feedback, /trigger:"command-failure", yes:true/,
+    'no trigger may skip the write gate');
   assert.match(
     read('taptap-suite/MANUAL.md'),
     /taptap-suite\/references\/feedback\.md/,

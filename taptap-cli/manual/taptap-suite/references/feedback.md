@@ -26,11 +26,13 @@ call_tool(name:"feedback", args:{
   _positional:["<用户原话摘要>"],
   command:"<失败的命令>", trigger:"user-complaint", yes:true})
 
-# 你自己判断的失败：带上 error 分类与 subtype
+# 你自己判断的失败：同样先预览，再在用户同意后用相同参数改 yes:true
 call_tool(name:"feedback", args:{
   _positional:["<用户原话摘要>"],
-  command:"<失败的命令>", error:"<category>/<subtype>", trigger:"command-failure", yes:true})
+  command:"<失败的命令>", error:"<category>/<subtype>", trigger:"command-failure", dry_run:true})
 ```
+
+三个 trigger 都走同一道写门禁：先 `dry_run: true` 预览 payload，用户同意后再用完全相同的参数（只换 `dry_run` 为 `yes: true`）发送；不要因为 `feedback` 是给团队报问题就跳过确认，`yes: true` 只解除门禁、不代表用户已经看过摘要。
 
 `trigger` 只能是 `user-complaint` / `command-failure` / `agent-request`。用户自己抱怨用第一个，你自己判断的失败用 `command-failure`。
 
