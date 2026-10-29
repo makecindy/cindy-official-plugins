@@ -76,7 +76,9 @@ async function agentWindow() {
 async function openInAgentWindow(url) {
   const windowId = await agentWindow();
   let tab;
-  if (windowId != null) tab = await chrome.tabs.create({windowId,url,active:true});
+  // If the user has Cindy's window open (to watch or to sign in), a new page must not jump in front of
+  // what they are doing there: it opens behind. In the minimized window it simply becomes the shown tab.
+  if (windowId != null) tab = await chrome.tabs.create({windowId,url,active:(await chrome.windows.get(windowId)).state === 'minimized'});
   else {
     // Minimized: the window never appears over what the user is doing; it waits in the Dock / taskbar.
     const lastFocused = () => Promise.resolve().then(() => chrome.windows.getLastFocused({windowTypes:['normal']})).catch(() => null);

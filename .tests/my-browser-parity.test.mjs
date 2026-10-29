@@ -144,3 +144,14 @@ test('after an extension reload Cindy still knows its own window (session storag
   await after.run('open',{url:'https://example.test/b'});
   assert.equal(after.calls.filter(c=>c[0]==='windows.create').length,0);
 });
+
+test('a new page never jumps in front in Cindy\'s window while the user has it open',async()=>{
+  const h=harness();
+  await h.run('open',{url:'https://example.test/a'});
+  h.windows.get(500).state='normal';
+  await h.run('open',{url:'https://example.test/b'});
+  same(h.calls.filter(c=>c[0]==='tabs.create').at(-1),['tabs.create',{url:'https://example.test/b',windowId:500,active:false}]);
+  h.windows.get(500).state='minimized';
+  await h.run('open',{url:'https://example.test/c'});
+  same(h.calls.filter(c=>c[0]==='tabs.create').at(-1),['tabs.create',{url:'https://example.test/c',windowId:500,active:true}]);
+});
