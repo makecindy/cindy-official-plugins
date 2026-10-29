@@ -243,6 +243,13 @@
     modeButton.disabled = state.lost || state.stopping || state.switching;
     resourceView.update(state.lost || state.switching ? null : device);
     const on = live();
+    const sound=s?.audio,playing=sound?.enabled===true;
+    $('btn-audio').disabled=!on||typeof sound?.enabled!=='boolean'||state.audioBusy;
+    $('btn-audio').setAttribute('aria-pressed',String(playing));
+    label($('btn-audio'),typeof sound?.enabled!=='boolean'?(lang==='zh-CN'?'声音状态待确认':'Sound status unavailable'):(playing?(lang==='zh-CN'?'静音':'Mute'):(lang==='zh-CN'?'在电脑上播放声音':'Play sound on computer')));
+    $('audio-muted').style.display=playing?'none':'';
+    $('audio-playing').style.display=playing?'':'none';
+    $('audio-playing').removeAttribute('hidden');
     const handheld = M.handheld(device);
     $('tools').hidden = !on;
     $('btn-rotl').hidden = $('btn-rotr').hidden = !handheld;
@@ -361,6 +368,7 @@
     await check();
   }
   function confirmShutdown() {
+    pendingConfirmation=shutdown;
     const name = state.status?.device?.name || '';
     $('confirm-title').textContent = t.confirmShutdownTitle(name); $('confirm-body').textContent = t.confirmShutdownBody;
     $('confirm-cancel').textContent = t.cancel; $('confirm-ok').textContent = t.confirmShutdown;
@@ -377,7 +385,25 @@
     } catch { toast(t.actionFailed, 'error'); }
     finally { state.stopping = false; await check(); }
   }
-  $('confirm-ok').addEventListener('click', () => { $('confirm-dialog').close(); shutdown(); });
+  let pendingConfirmation=shutdown;
+  $('confirm-ok').addEventListener('click', () => { $('confirm-dialog').close(); pendingConfirmation(); });
+  $('btn-audio').addEventListener('click',()=>{
+    if(!live()||state.audioBusy||typeof state.status?.audio?.enabled!=='boolean')return;
+    const target=udid,enabled=!state.status.audio.enabled,restart=state.status.audio.restartRequired===true;
+    const change=async()=>{
+      if(target!==udid||!live())return;
+      state.audioBusy=true;if(restart){state.stopping=true;blank();}render();
+      try{await api('audio',{audioEnabled:enabled,restart});}
+      catch{toast(lang==='zh-CN'?'声音切换未确认，请查看设备状态后重试。':'Sound change unconfirmed. Check the device before retrying.','error');}
+      finally{state.audioBusy=false;state.stopping=false;await check();}
+    };
+    if(!restart){change();return;}
+    pendingConfirmation=change;
+    $('confirm-title').textContent=lang==='zh-CN'?'重启设备以切换声音？':'Restart to change sound?';
+    $('confirm-body').textContent=lang==='zh-CN'?'安卓需要重启才能改变电脑声音。正在运行的 App 会退出，设备数据保留。':'Android needs a restart to change computer playback. Running apps will exit; device data is kept.';
+    $('confirm-cancel').textContent=t.cancel;$('confirm-ok').textContent=lang==='zh-CN'?'重启并切换':'Restart and change';
+    $('confirm-dialog').showModal();
+  });
   $('memory-mode').addEventListener('click', () => {
     if (state.lost || state.stopping || state.switching) return;
     const target = udid;

@@ -1,5 +1,9 @@
 # 设备模拟器：完整工作流
 
+## 电脑声音
+
+冷启动默认静音。用户可用画面工具栏的喇叭按钮开启该设备的电脑声音；不改变电脑音量、不启用麦克风。`device action=audio udid=…` 只查询，返回 `enabled`；添加 `audioEnabled=true|false` 切换。Apple 即时生效；安卓返回 `restartRequired=true`，切换会退出 App，只有用户接受后才传 `restart=true`。下一次普通冷启动仍静音；需要有声启动须明确 `device action=boot audioEnabled=true`。切换失败先查设备状态，不盲目重复重启。`enabled=null` 表示未确认，不代表静音。
+
 ## iOS 启动内存模式
 
 device action=boot memoryMode=saving|standard|minimal。关机设备未指定时默认 saving；运行中未指定时保持当前模式，不重启。需要切换时先正常 shutdown（会退出 App，保留数据），再带模式 boot；不适用于安卓、tvOS 或 visionOS。

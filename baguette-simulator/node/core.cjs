@@ -14,12 +14,13 @@ const ROOT = process.platform==='darwin'?path.join(os.homedir(), 'Library/Applic
 const DEVICE_SET = path.join(ROOT, 'devices');
 const children = new Set();
 const methods = new Set(['environment','devices','create_device','rename_device','app_bundle','boot','shutdown','describe_ui','tap','viewer_screen','viewer_tap','viewer_trackpad','viewer_spatial','swipe','gesture','type_text','press','screenshot','install_app','launch_app','heal','open_viewer','close_viewer','delete_device','erase_device','reveal_screenshot',
-  'import_media','wait_for','capture','set_state','logs','app_install','app_install_status','app_info','app_terminate','app_uninstall','open_url','resource_usage']);
+  'import_media','wait_for','capture','set_state','logs','app_install','app_install_status','app_info','app_terminate','app_uninstall','open_url','resource_usage','audio']);
 // Agent operations that only read the device; they never change what is on screen.
 const READ_ONLY = new Set(['describe_ui','screenshot','wait_for','logs','app_info','app_install_status','viewer_screen']);
 class Failure extends Error {
   constructor(code, message, execution = 'not_executed') { super(message); this.code=code; this.execution=execution; }
 }
+const audio=require('./audio.cjs').createAudio({deviceSet:DEVICE_SET,run,Failure});
 let trackpadImpl;
 let spatialImpl;
 function spatial(){return spatialImpl||(spatialImpl=require('./spatial.cjs').createSpatial({binary:path.join(__dirname,'../native/spatial'),deviceSet:DEVICE_SET,children,Failure}));}
@@ -282,6 +283,7 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
     return {execution:'executed'};
   }
   const device=await target(p,!['boot','shutdown','rename_device','delete_device','erase_device','resource_usage'].includes(method));
+  if(method==='audio')return {udid:device.udid,...(p.audioEnabled===undefined?await audio.status(device,deadline):await audio.set(device,p.audioEnabled,deadline))};
   if(method==='resource_usage')return require('./resource-usage.cjs').cachedResourceUsage({refresh:p.refresh===true,device,directory:path.join(DEVICE_SET,device.udid),run:runCommand,deadline});
   if(['shutdown','erase_device','delete_device'].includes(method))await trackpadImpl?.stop(device.udid);
   if(['press','type_text','launch_app'].includes(method))await trackpadImpl?.cancel(device.udid);
@@ -335,6 +337,7 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
     catch(error){return viewerFallback(device,p,{udid:device.udid,execution:'unknown'},error);}
   }
   if(method==='boot') {
+    if(p.audioEnabled!==undefined&&typeof p.audioEnabled!=='boolean')throw new Failure('INVALID_ARGUMENT','audioEnabled 必须为 true 或 false。');
     const {createMemoryModes,validateMode}=require('./memory-mode.cjs');
     validateMode(p.memoryMode,Failure);
     const supportsMemory=/\.SimRuntime\.iOS-/.test(device.runtime);
@@ -346,8 +349,13 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
     try {
     // Upstream 0.1.98's automatic heal omits --set in its internal simctl calls.
     // Wait for this exact custom-set device ourselves; do not silently restart apps.
+    if(device.state==='Shutdown')await audio.prepare(device,p.audioEnabled===true,deadline);
     const started=device.state==='Booted'?null:await bagCommand('boot',device,['--no-heal'],{timeout:15000,mutation:true});
     const ready=await simCommand(['bootstatus',device.udid,'-b'],{timeout:90000,mutation:true});
+    // Every cold boot starts muted unless the caller explicitly opts in.
+    let sound;
+    try{sound=await (started||p.audioEnabled!==undefined?audio.set(device,p.audioEnabled===true,deadline):audio.status(device,deadline));}
+    catch(error){sound={enabled:null,errorCode:error.code||'AUDIO_UNCONFIRMED',message:'设备已启动，但声音状态未确认；请检查声音状态，不要重复启动设备。'};}
     // Baguette always warns about Simulator.app's lifetime setting; it does not apply to these headless devices.
     const warnings=(started?.warnings||ready.warnings||'').split('\n').filter(l=>l.trim()&&!/lifetime|^\[baguette\] Booted /.test(l)).join('\n');
     // A fresh device shows the slide-to-type introduction over the keyboard the first time it appears; it is not part of any App.
@@ -356,7 +364,7 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
       try {const actual=await memory.verify(device);memoryMode={...actual,requested:memoryMode.mode,...(actual.mode!==memoryMode.mode?{warning:'Active overrides differ from the requested profile. Check the device before testing.'}:{})};}
       catch(error){memoryMode={...memoryMode,verified:false,warning:'Boot completed, but memory mode verification failed: '+error.message};}
     }
-    return settledShot(device,p,{udid:device.udid,state:'Booted',execution:started?'executed':'not_executed',...(memoryMode?{memoryMode}:{}),...(warnings?{warnings}:{}),note:'Boot completed. If Device Hub has shadowed input, explicitly use heal (terminates running apps).'});
+    return settledShot(device,p,{udid:device.udid,state:'Booted',audio:sound,execution:started?'executed':'not_executed',...(memoryMode?{memoryMode}:{}),...(warnings?{warnings}:{}),note:'Boot completed. If Device Hub has shadowed input, explicitly use heal (terminates running apps).'});
     } catch(error){
       if(memoryMode&&device.state==='Shutdown'){error.execution='unknown';error.message='Memory overrides were configured; inspect device state before continuing. '+error.message;}
       throw error;

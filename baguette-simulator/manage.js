@@ -320,7 +320,7 @@ function renderDetail() {
   const d = devices.find((x) => x.udid === selected);
   // The controller owns the pending dialog; a transient Shutdown during the
   // worker's restart must not destroy its response handler or chosen mode.
-  if (d?.operation?.name === 'settings_restart' && shown.udid === d.udid && shown.url && enabled()) return;
+  if ((d?.operation?.name === 'settings_restart' || (d?.platform==='android'&&d?.operation?.name==='audio')) && shown.udid === d.udid && shown.url && enabled()) return;
   if (d && d.state === 'Booted' && !busy[d.udid] && enabled()) showScreen(d); else hero(d);
 }
 

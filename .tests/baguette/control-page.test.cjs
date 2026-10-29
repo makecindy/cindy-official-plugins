@@ -53,6 +53,29 @@ async function boot({respond,abortSignal=AbortSignal,query='',template='control.
 }
 const status=(over={})=>({ready:true,parked:false,generation:1,device:{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-1',deviceType:'x.iPhone-17-Pro'},devices:[{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'iOS 27.1',deviceType:'x.iPhone-17-Pro'},{udid:other,name:'iPad',state:'Shutdown',runtime:'iOS 27.0',deviceType:'x.iPad'}],settings:{enabled:true,idleMinutes:15},idleDeadline:Date.now()+15*60000,...over});
 
+test('audio button follows backend state; Android asks before restart and cancellation has no side effect',async()=>{
+ for(const restartRequired of [false,true]){
+  let enabled=false;
+  const f=await boot({respond:p=>{if(p.action==='audio'){enabled=p.audioEnabled;return {enabled};}return status({audio:{enabled,restartRequired}});}});
+  const button=f.dom.byId['btn-audio'];
+  assert.equal(button.attrs['aria-pressed'],'false');assert.equal(button.title,'在电脑上播放声音');
+  button.dispatch('click');
+  if(restartRequired){
+   assert.equal(f.calls.filter(p=>p.action==='audio').length,0);
+   assert.equal(f.dom.byId['confirm-dialog'].open,true);
+   f.dom.byId['confirm-cancel'].dispatch('click');
+   assert.equal(f.calls.filter(p=>p.action==='audio').length,0);
+   button.dispatch('click');f.dom.byId['confirm-ok'].dispatch('click');
+  }
+  await new Promise(r=>setImmediate(r));
+  assert.equal(f.calls.filter(p=>p.action==='audio').length,1);
+  assert.equal(f.calls.find(p=>p.action==='audio').restart,restartRequired);
+  assert.equal(button.attrs['aria-pressed'],'true');
+ }
+ const f=await boot({respond:()=>status({audio:{enabled:null}})});
+ assert.equal(f.dom.byId['btn-audio'].disabled,true);
+});
+
 test('explicit restart applies selection once, locks the dialog and restores the viewer',async()=>{
  let mode='standard',finishStop;
  const f=await boot({respond:p=>{

@@ -90,6 +90,7 @@ test('core boot owns mode application, preserves partial evidence and rejects un
   const runtime=outcome==='unsupported'?'com.apple.CoreSimulator.SimRuntime.tvOS-27-0':'com.apple.CoreSimulator.SimRuntime.iOS-27-0';
   const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
    if(name==='./viewer.cjs')return {};
+   if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
    if(name==='./android/index.cjs')return {createAndroid:()=>({owns:async()=>false})};
    if(name==='node:fs/promises')return {mkdir:async()=>{}};
    if(name==='./memory-mode.cjs')return {validateMode,createMemoryModes:()=>({

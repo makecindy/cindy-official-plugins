@@ -752,6 +752,42 @@ test('successful device removal/erase and App launch still produce confirmed out
     assert.equal(calls.some(args=>args.includes('force-stop')),relaunch);
   }
 });
+test('Android audio defaults off and waits for the old process before an explicit restart',async t=>{
+  const root=await temp(t),runtime='android:android-36:google_apis:arm64-v8a',launches=[];
+  const {EventEmitter}=require('node:events');let d,child,running=false,exiting=false;
+  const endpoint=await emulator(t,(s,h)=>{
+    assert.equal(h[':path'].split('/').at(-1),'setVmState');running=false;exiting=true;
+    const old=child;setTimeout(()=>{exiting=false;old.exitCode=0;old.emit('exit',0);},350);
+    send(s,'Empty',{});
+  });
+  const name='pid_'+process.pid+'.ini',list=fs.readdir,read=fs.readFile;
+  t.mock.method(fs,'readdir',async(dir,...args)=>String(dir).endsWith(path.join('avd','running'))?(running?[name]:[]):list(dir,...args));
+  t.mock.method(fs,'readFile',async(file,...args)=>path.basename(String(file))===name?`avd.id=${d.avdName}\navd.dir=${d.directory}\ngrpc.port=${endpoint.port}\ngrpc.token=test-capability\nport.serial=5554\n`:read(file,...args));
+  const sdk={inspect:async()=>({ready:true,emulator:path.join(root,'sdk/emulator/emulator'),adb:path.join(root,'sdk/platform-tools/adb'),images:[{identifier:runtime,directory:path.join(root,'image'),abi:'arm64-v8a',version:'36'}]})};
+  const run=async(_file,args)=>({stdout:args.includes('emu')?d.avdName:'1'});
+  const spawn=(_file,args)=>{
+    assert.equal(exiting,false,'the previous QEMU must release its AVD before another launch');
+    launches.push(args);running=true;child=new EventEmitter();child.exitCode=null;return child;
+  };
+  const devices=require(path.join(A,'devices.cjs')).createDevices({root,sdk,run,children:new Set(),spawn});
+  const {udid}=await devices.create({name:'Audio fixture',runtime,deviceType:'android:phone'});d=await devices.target({udid},false);
+  await devices.boot({udid});assert.equal(launches[0].includes('-no-audio'),true);
+  assert.equal((await devices.audio({udid})).enabled,false);
+  await assert.rejects(devices.audio({udid,audioEnabled:'true'}),e=>e.code==='INVALID_ARGUMENT');
+  await assert.rejects(devices.audio({udid,audioEnabled:true}),e=>e.code==='AUDIO_RESTART_REQUIRED'&&e.execution==='not_executed');
+  assert.equal(launches.length,1,'query and rejected changes never restart');
+  for(const enabled of [true,false]){
+    const result=await devices.audio({udid,audioEnabled:enabled,restart:true});
+    assert.equal(result.enabled,enabled);assert.equal(result.restarted,true);assert.equal(result.appTerminated,true);
+    assert.equal(launches.at(-1).includes('-no-audio'),!enabled);
+    const config=await fs.readFile(path.join(d.directory,'config.ini'),'utf8');
+    assert.match(config,/hw.audioInput=no/);assert.ok(config.includes('hw.audioOutput='+(enabled?'yes':'no')));
+  }
+  assert.equal(launches.length,3);
+  assert.equal((await devices.audio({udid,audioEnabled:false,restart:true})).execution,'not_executed');
+  assert.equal(launches.length,3,'an unchanged setting never restarts');
+  await devices.shutdown({udid});
+});
 test('Android boots on the host GPU, falls back once, and aligns the adb key first',async t=>{
   const root=await temp(t),runtime='android:android-36:google_apis:arm64-v8a',userHome=path.join(root,'user-android'),previous=process.env.ANDROID_USER_HOME;
   process.env.ANDROID_USER_HOME=userHome;t.after(()=>{if(previous===undefined)delete process.env.ANDROID_USER_HOME;else process.env.ANDROID_USER_HOME=previous;});

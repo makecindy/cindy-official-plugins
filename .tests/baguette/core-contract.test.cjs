@@ -30,6 +30,7 @@ function core(output,failAt=Infinity,macOS="15.0",catalog=[]){
  let polls=0,mutations=0;const commands=[],budgets=[];
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},setTimeout:fn=>fn(),require(name){
   if(name==='./viewer.cjs')return {};
+  if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
   // These are Apple host fixtures. Never discover the developer's real AVDs.
   if(name==='./android/index.cjs')return {createAndroid:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
   if(name==='node:fs/promises')return {mkdir:async()=>{}};
@@ -146,6 +147,7 @@ test('boot and launch retain completed results when settling and screenshots con
   const context={module:{exports:{}},__dirname:dir,Date:{now:()=>clock},process:{platform:'darwin',arch:'arm64',env:{}},
    require(name){
     if(name==='./budget.cjs')return {commandBudget:(timeout,deadline)=>commandBudget(timeout,deadline,()=>clock)};
+    if(name==='./audio.cjs')return {createAudio:()=>({prepare:async()=>{},set:async()=>({enabled:false}),status:async()=>({enabled:false})})};
     if(name==='./viewer.cjs')return {openViewer:async()=>{if(slow)clock+=15000;return {ready:true};}};
     if(name==='./apps.cjs')return {createApps:()=>({runningFor:()=>null})};
     if(name==='./agent.cjs')return {createAgent:()=>({forget(){},

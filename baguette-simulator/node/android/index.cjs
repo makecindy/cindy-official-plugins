@@ -22,6 +22,7 @@ function createAndroid({root,run,children}){
     if(method==='android_setup_install')return sdk.install(p);
     if(method==='android_setup_status')return sdk.status();
     if(method==='create_device')return devices.create(p);
+    if(method==='audio')return devices.audio(p);
     if(method==='boot'){
       const result=await devices.boot(p);
       if(p.screenshot)try{const d=await devices.target(p),{_modelImages,...shot}=await agent.screenshot(d,p);result.screenshot=shot;if(_modelImages)result._modelImages=_modelImages;}catch(e){result.screenshot={error:e.message};}

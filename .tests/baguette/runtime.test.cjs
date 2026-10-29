@@ -29,6 +29,24 @@ test('restart owns shutdown and boot together while task refresh retains the sam
  assert.equal((await runtime.request('task_state',{_task:'task-1'})).device.operation,undefined);
 });
 
+test('Android audio restart retains its controller and serializes writes but permits status reads',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'bag-audio-restart-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const tasks=require('../../baguette-simulator/node/tasks.cjs').createTaskBindings(path.join(dir,'tasks.json'));
+ await tasks.bind('task-audio',udid);
+ let state='Booted',release,started;const entered=new Promise(r=>started=r),hold=new Promise(r=>release=r);
+ const runtime=createRuntime({tasks,settingsFile:path.join(dir,'settings.json'),existingViewerUrl:()=>`http://127.0.0.1:9/control?udid=${udid}#token`,dispatch:async(method,p)=>{
+  if(method==='devices')return {devices:[{udid,state,platform:'android',runtime:'android:36'}]};
+  if(method==='audio'&&p.audioEnabled===undefined)return {enabled:false};
+  if(method==='audio'){state='Shutdown';started();await hold;state='Booted';return {enabled:true,execution:'executed'};}
+  throw Error('Unexpected method '+method);
+ }});
+ const pending=runtime.request('device',{action:'audio',udid,audioEnabled:true,restart:true});await entered;
+ const during=await runtime.request('task_state',{_task:'task-audio'});
+ assert.equal(during.device.operation.name,'audio');assert.ok(during.viewer.url.includes('task=task-audio'));
+ assert.equal((await runtime.request('device',{action:'audio',udid})).enabled,false);
+ await assert.rejects(runtime.request('device',{action:'audio',udid,audioEnabled:false}),e=>e.code==='BUSY');
+ release();assert.equal((await pending).enabled,true);
+});
 test('restart validates before stopping and never boots after an unconfirmed stop or retries a failed boot',async t=>{
  for(const phase of ['invalid','missing','foreign','android','paused','stop-error','unconfirmed','boot-error','saving','standard','minimal']){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'bag-restart-fail-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));

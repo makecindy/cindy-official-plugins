@@ -101,7 +101,8 @@ function createViewer({devices,agent,root}){
         }
         let result;
         switch(p.action){
-          case 'status':{lastSeen=Date.now();const s=await controls.status();result={...s,device:s.devices.find(d=>d.udid===p.udid),viewerPlatform:'android',ready:s.devices.some(d=>d.udid===p.udid&&d.state==='Booted'),generation:1};break;}
+          case 'status':{lastSeen=Date.now();const s=await controls.status(),device=s.devices.find(d=>d.udid===p.udid);result={...s,device,audio:await require('../audio.cjs').playbackStatus(controls,device),viewerPlatform:'android',ready:device?.state==='Booted',generation:1};break;}
+          case 'audio':result=await controls.request('audio',{udid:p.udid,audioEnabled:p.audioEnabled,restart:p.restart});break;
           case 'activity':await controls.assertEnabled();controls.touch();result={ok:true};break;
           case 'install_status':result=await controls.request('app_install_status',{udid:p.udid,job:p.job,wait:0});break;
           case 'open':result=await controls.request('open_viewer',{udid:p.udid,_locale:p.locale});break;

@@ -1,4 +1,5 @@
 import './baguette/clipboard.test.cjs';
+import './baguette/audio.test.cjs';
 import './baguette/memory-mode.test.cjs';
 import './baguette/resource-usage.test.cjs';
 import './baguette/manage-selection.test.cjs';

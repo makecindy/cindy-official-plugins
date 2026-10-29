@@ -154,10 +154,12 @@ async function initializeBridge(server,deviceSet,clipboardAction){
     if(error.code!=='APP_CONTEXT_UNREADABLE')throw error;
     currentAppError={code:error.code,message:error.message};
    }
-   return {viewerPlatform:'ios',...await viewerStatus(server),device:state?.devices.find(d=>d.udid===p.udid),devices:state?.devices,deviceJob:state?.deviceJob,
+   const device=state?.devices.find(d=>d.udid===p.udid);
+   return {viewerPlatform:'ios',...await viewerStatus(server),device,audio:await require('./audio.cjs').playbackStatus(controls,device),devices:state?.devices,deviceJob:state?.deviceJob,
     currentApp,...(currentAppError?{currentAppError}:{}),settings:state?.settings,idleDeadline:state?.idleDeadline};
   },
   open:p=>controls.request('open_viewer',{udid:p.udid,_locale:p.locale}),
+  audio:p=>controls.request('audio',{udid:p.udid,audioEnabled:p.audioEnabled,restart:p.restart}),
   catalog:()=>controls.request('viewer_catalog'),
   resources:p=>controls.request('resource_usage',{udid:p.udid,refresh:p.refresh===true}),
   viewport:p=>controls.request('viewer_screen',{udid:p.udid}),

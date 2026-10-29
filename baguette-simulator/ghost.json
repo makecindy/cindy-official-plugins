@@ -5,7 +5,7 @@
   "name": "设备模拟器",
   "description": "独立的 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，共用任务画面、设备管理和操作工具。默认闲置 15 分钟关机并保留数据。Apple 平台需要 macOS 15+、Apple Silicon、完整 Xcode 与对应运行时；安卓支持 Mac、Windows x64、Linux x64，确认下载大小和许可后安装环境。Apple 后端基于 Baguette（Apache-2.0）。",
   "whenToUse": "iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器；App 安装启动、真实输入、TV 遥控、Vision 空间手势、截图、界面检查、状态和日志排查。先 devices 选择设备，按手册验证结果。",
-  "version": "0.2.60",
+  "version": "0.2.61",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -32,7 +32,7 @@
     },
     {
       "name": "device",
-      "description": "管理独立设备。create 用 environment 的 runtime/deviceType（每台约7–12GB），优先复用；boot 等初始化，超时先查状态，screenshot=true 可附图。仅 iOS boot 支持 memoryMode：saving（关机时默认）关闭搜索、健康、部分游戏服务及诊断/DeviceCheck；standard 恢复受管理服务，完整验收或手柄/存档测试用此档；minimal 还影响登录、支付、照片、推送等，仅限明确范围的核心玩法/UI测试。运行中保持模式，切换先 shutdown 再 boot；检查 memoryMode.mode/verified/limitations，verified 只证明服务开关。shutdown 保留数据；rename 改名；erase 清空App/数据；delete 删除设备，后两项仅用户要求时用。activity 登记本任务使用15分钟，release 结束登记但不停止设备；需任务上下文，不是独占，worker重启后失效。受运行开关及默认15分钟闲置关机限制，画面/工具使用中不关。安卓 import_media 从本机绝对path复制图片/视频到Downloads（≤128MiB）；检查 copied/scanRequested/path。screenshot.error、taskBindingError/appContextError 保留操作结果；安卓部分失败含 completedSteps/failedStep/deviceError，检查实际状态，不重复已完成操作。",
+      "description": "冷启动默认静音；boot audioEnabled=true 可显式开启电脑声音。audio 查询当前输出；audioEnabled=true/false 切换，Apple 即时生效，安卓须用户同意退出 App 后传 restart=true 重启。只影响该设备，不改变电脑音量或开启麦克风。 管理独立设备。create 用 environment 的 runtime/deviceType（每台约7–12GB），优先复用；boot 等初始化，超时先查状态，screenshot=true 可附图。仅 iOS boot 支持 memoryMode：saving（关机时默认）关闭搜索、健康、部分游戏服务及诊断/DeviceCheck；standard 恢复受管理服务，完整验收或手柄/存档测试用此档；minimal 还影响登录、支付、照片、推送等，仅限明确范围的核心玩法/UI测试。运行中保持模式，切换先 shutdown 再 boot；检查 memoryMode.mode/verified/limitations，verified 只证明服务开关。shutdown 保留数据；rename 改名；erase 清空App/数据；delete 删除设备，后两项仅用户要求时用。activity 登记本任务使用15分钟，release 结束登记但不停止设备；需任务上下文，不是独占，worker重启后失效。受运行开关及默认15分钟闲置关机限制，画面/工具使用中不关。安卓 import_media 从本机绝对path复制图片/视频到Downloads（≤128MiB）；检查 copied/scanRequested/path。screenshot.error、taskBindingError/appContextError 保留操作结果；安卓部分失败含 completedSteps/failedStep/deviceError，检查实际状态，不重复已完成操作。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -47,7 +47,8 @@
               "delete",
               "activity",
               "release",
-              "import_media"
+              "import_media",
+              "audio"
             ]
           },
           "udid": {
@@ -82,6 +83,14 @@
               "minimal"
             ],
             "description": "仅 iOS boot。关机设备默认 saving；standard 完整验收；minimal 限定范围测试。运行中切换须先 shutdown。"
+          },
+          "audioEnabled": {
+            "type": "boolean",
+            "description": "boot/audio：是否在电脑上播放声音；冷启动默认 false。audio 省略时只查询。"
+          },
+          "restart": {
+            "type": "boolean",
+            "description": "仅 audio：安卓切换需重启退出 App，获得用户同意后才传 true。"
           }
         },
         "required": [
@@ -1032,5 +1041,5 @@
       }
     ]
   },
-  "releaseNotes": "运行中可直接选择内存模式，选择后提示重启生效，并区分当前与待生效模式；选择本身不中断 App。设备列表直接点选、⌘/Ctrl 多选、Shift 连选，取消专门的选择模式和批量操作栏；右键菜单与行内更多统一支持批量关闭、删除。操作前确认具体设备，未完成项保留选择，结果不确定时停止后续处理。模式说明使用 info 图标，用量并入设备信息行和列表并缓存自动更新，关闭设备不显示内存。设备列表左右、上下分栏均可拖动，分别记住宽度和高度，支持对应方向键调整和双击恢复默认，默认启动模式仍为节省内存。"
+  "releaseNotes": "模拟器默认静音，画面工具栏新增电脑声音开关，Agent 可读取和切换同一状态。Apple 即时切换；安卓切换前确认重启，保留设备数据。"
 }

@@ -157,7 +157,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     let settings;
     try { settings = await load(); } catch { settings = {enabled:false, idleMinutes:null}; }
     let viewer = null, waiting = false;
-    const restarting = device?.operation?.name === 'settings_restart';
+    const restarting = device?.operation?.name === 'settings_restart' || (device?.platform==='android'&&device?.operation?.name==='audio');
     if (device && (device.state === 'Booted' || restarting) && settings.enabled && !viewerClosed) {
       // Reuse a running viewer without taking the runtime lock, so a page refresh
       // never makes an Agent tool call fail with BUSY.
@@ -172,7 +172,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   }
   // Agent tools grouped by intent → the worker's own operations.
   const ROUTES = {
-    device: {create: 'create_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media'},
+    device: {create: 'create_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media', audio:'audio'},
     app: {install: 'app_install', install_status: 'app_install_status', info: 'app_info', launch: 'launch_app', terminate: 'app_terminate', uninstall: 'app_uninstall', open_url: 'open_url'},
     viewer: {open: 'open_viewer', close: 'close_viewer'},
   };
@@ -199,6 +199,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       return {ok:true,udid:params.udid,execution:'executed',...tasks.usage(params.udid,session,now()),
         note:method==='device_release'?'Task activity released; device and App keep running.':'Task activity recorded for 15 minutes. Renew during a long script; release when finished. This is not an exclusive reservation.'};
     }
+    if(method==='audio'&&params.audioEnabled===undefined)return dispatch(method,params,deadline);
     if (READ_ONLY.has(method) || (method === 'screenshot' && !params?.destination)) {
       if (!(await load()).enabled) throw failure('RUNTIME_DISABLED', 'Baguette is paused. Enable simulator operation in Plugins → Baguette settings.');
       touch();
