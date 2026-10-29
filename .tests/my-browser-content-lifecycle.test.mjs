@@ -41,6 +41,18 @@ test('a reloaded extension leaves no URL polling or page listeners after runtime
   const count=f.sent.length;f.context.document.dispatchEvent(new Event('yt-navigate-finish'));tick();await settle();
   assert.equal(f.sent.length,count,'invalidated script never sends again');
 });
+// Bug regression (review 2026-10-29): any page script could dispatch the start event and make the
+// live content script tear itself down (the "Cindy is operating this page" mark vanished until reload).
+test('a forged start event cannot retire a live content script; an orphaned copy still leaves',async()=>{
+  const f=fixture();await settle();
+  assert.equal(f.timers.size,1);assert.equal(f.listeners.size,1);
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));await settle();
+  assert.equal(f.timers.size,1,'the live copy keeps polling');assert.equal(f.listeners.size,1,'and keeps its runtime listener');
+  // After an extension reload this copy's context is gone: the new copy's announcement retires it at once.
+  f.chrome.runtime=undefined;
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));
+  assert.equal(f.timers.size,0);
+});
 test('synchronous invalidation during video-state send is caught and disposes the old script',async()=>{
   let invalidate=false;const f=fixture(()=>{if(invalidate)throw Error('Extension context invalidated.');return Promise.resolve({enabled:false});});await settle();
   const tick=[...f.timers.values()][0];invalidate=true;f.context.location.href+='?photo=2';
@@ -235,9 +247,12 @@ test('hiding the panel while config is pending drops queued translate-page',asyn
 
 test('a newer copy of the content script announcing itself disposes the running one',async()=>{
   // Bug regression (2026-10-28): after an extension reload the old copy kept mounting player entries.
+  // The reload invalidates the old copy's extension context; the new copy's announcement then retires it
+  // at once instead of on its next poll.
   const f=fixture();await settle();assert.equal(f.timers.size,1);
-  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));await settle();
-  assert.equal(f.timers.size,0);assert.equal(f.listeners.size,0);
+  f.chrome.runtime=undefined;
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));
+  assert.equal(f.timers.size,0);
 });
 test('the brand icon is inlined and no extension resource is web-accessible',async()=>{
   const manifest=JSON.parse(await fs.readFile(new URL('../my-browser/extension/manifest.json',import.meta.url),'utf8'));

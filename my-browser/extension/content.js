@@ -6,9 +6,13 @@
   const brandURL=globalThis.CindyBrandIcon||api.runtime.getURL('icons/48.png'),lifecycle=new AbortController();
   globalThis.__cindyReading=true;
   let disposed=false,navigationTimer;
-  // A fresh copy of this script (extension update or reload) tells the copy still running on the page to leave.
+  // A fresh copy of this script (extension update or reload) tells the copy still running on the page to
+  // leave. The page shares the DOM and can dispatch the same event, and neither sender's event is trusted,
+  // so the event only asks each copy to check itself: a copy whose extension context is gone (the old one)
+  // leaves; a live copy ignores it, whoever sent it. The old copy cannot read any extension-only token
+  // (its chrome.* APIs are invalidated), so its own liveness is the one signal a page cannot forge.
   document.dispatchEvent(new Event('cindy-content-script-start'));
-  document.addEventListener('cindy-content-script-start',()=>dispose(),{signal:lifecycle.signal});
+  document.addEventListener('cindy-content-script-start',()=>{runtimeReady();},{signal:lifecycle.signal});
   function runtimeReady(){if(disposed)return false;if(!api?.runtime?.id||typeof api.runtime.sendMessage!=='function'){dispose();return false;}return true;}
   async function extensionCall(fn){
     // Defer even synchronous API access so callers can catch invalid contexts.
