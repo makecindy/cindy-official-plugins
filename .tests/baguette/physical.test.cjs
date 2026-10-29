@@ -25,7 +25,12 @@ test('CoreDevice discovery separates paired physical phones, offline devices and
 });
 test('physical destructive simulator operations reject before any device write',async t=>{
  const root=await temporary(t),calls=[];
- const adapter=require('../../baguette-simulator/node/physical/index.cjs').createPhysical({root,children:new Set(),run:async(file,args)=>{
+ // Exercise Mac discovery with mocked commands even on the Linux CI runner.
+ // Do not change the production host guard or consult attached host devices.
+ const filename=path.resolve('baguette-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);
+ const context={module:{exports:{}},require(name){return name==='./devices.cjs'?{...load(name),createDevices:options=>createDevices({...options,host:'darwin'})}:load(name);}};
+ require('node:vm').runInNewContext(await fs.readFile(filename,'utf8'),context,{filename});
+ const adapter=context.module.exports.createPhysical({root,children:new Set(),run:async(file,args)=>{
   calls.push(args);assert.deepEqual(args.slice(0,3),['devicectl','list','devices']);
   await fs.writeFile(args[args.indexOf('--json-output')+1],JSON.stringify({info:{outcome:'success'},result:{devices:[row()]}}));return {stdout:''};
  }});
