@@ -40,19 +40,10 @@ test('a navigated tab produces PAGE_CHANGED rather than a stream of replacements
   for(let i=0;i<5;i++)await assert.rejects(h.read('https://example.test/start'),/PAGE_CHANGED/);
   assert.equal(h.creates(),1);
 });
-test('unclosable or user-claimed tabs remain counted against the real opening limit',async()=>{
-  for(const reason of ['claimed','navigated','remove-failure']){
-    const h=harness();for(let i=0;i<12;i++)await h.read('https://example.test/'+i);
-    if(reason==='claimed')for(const id of h.tabs.keys())await h.focus(id);
-    if(reason==='navigated')for(const t of h.tabs.values())t.url+='?changed=1';
-    if(reason==='remove-failure')h.state.removeFails=true;
-    for(let i=0;i<5;i++)await assert.rejects(h.read('https://example.test/new'),/TAB_LIMIT/);
-    assert.equal(h.tabs.size,12);assert.equal(h.creates(),12);
-  }
-  // The message names the real limit (it said "Three" long after the limit became 12).
-  const h=harness();h.state.removeFails=true;for(let i=0;i<12;i++)await h.read('https://example.test/'+i);
-  const refused=await h.handle('https://example.test/new');
-  assert.equal(refused.error,'TAB_LIMIT');assert.match(refused.message,/^12 tabs Cindy opened/);
+// No fixed tab limit, like Cindy's own browser: idle tabs Cindy opened are closed after 10 minutes instead.
+test('reads of new addresses keep opening tabs past the old twelve-tab limit',async()=>{
+  const h=harness();for(let i=0;i<15;i++)await h.read('https://example.test/'+i);
+  assert.equal(h.creates(),15);
 });
 test('canonical URLs and already-open user tabs are reused without creating a replacement',async()=>{
   const h=harness();await h.read('https://example.test');await h.read('https://example.test/');assert.equal(h.creates(),1);

@@ -507,3 +507,8 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 ## 0.4.51 changing the subtitle language mid-request (host package 0.4.72)
 
 - A caption reply that arrives after the subtitle language was changed is dropped and read again for the new language, instead of being shown (and cached as complete) under the new language.
+
+## 0.4.52 no fixed tab limit, local pages described correctly (host package 0.4.73)
+
+- **No fixed tab limit.** Like Cindy's own browser, pages the agent opens are no longer capped at 12. Tabs Cindy opened still close by themselves after 10 idle minutes.
+- **Tool descriptions match what the tools do.** The `browser_read` and `browser_tabs` descriptions and the manual now say that local and intranet pages are read and listed like any site unless blocked (reachable since October 28), and no longer mention a tab limit.

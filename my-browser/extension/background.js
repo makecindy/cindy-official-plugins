@@ -462,16 +462,6 @@ async function waitForLoad(id) {
   if(latest.status==='complete' || await network.isReady?.(id))return latest;
   throw Object.assign(new Error('PAGE_LOAD_TIMEOUT'),{tabId:id,tabStatus:latest.status});
 }
-const TAB_BUDGET = 12;
-// Cindy-created tabs stay within TAB_BUDGET: the least recently used idle ones are closed to make room.
-async function makeRoomForTab() {
-  const createdCount = () => [...owned.values()].filter(r => r.created).length;
-  for (const [key,r] of [...owned].sort((a,b) => a[1].used-b[1].used)) {
-    if (createdCount() < TAB_BUDGET) break;
-    if (r.created) await closeOwned(key);
-  }
-  if (createdCount() >= TAB_BUDGET) throw new Error('TAB_LIMIT');
-}
 async function ensureTab(url,policy,action,onNavigate = () => {}) {
   await restore;
   url = canonical(url);
@@ -487,7 +477,6 @@ async function ensureTab(url,policy,action,onNavigate = () => {}) {
     const existing = !!tab;
     if (!existing) {
       if (P.INTERACT.includes(action)) throw new Error('PAGE_NOT_OPEN');
-      await makeRoomForTab();
       onNavigate(); // Even a rejected browser response cannot prove the request never started.
       tab = await openInAgentWindow(url);
     }
@@ -1126,7 +1115,6 @@ async function handle(job,policy,target) {
       // A new page always goes to Cindy's own background window, never into the user's windows.
       const openGate = await authorizeDispatch(job.payload.url);
       if (!openGate.ok) return {...openGate,execution:'not_executed'};
-      await makeRoomForTab();
       navigating = true;
       const created = await openInAgentWindow(job.payload.url);
       let loaded = created;
@@ -1203,7 +1191,7 @@ async function handle(job,policy,target) {
   } catch (e) {
     const debuggerError = debuggerFailure(e);
     if (debuggerError) return debuggerError;
-    const messages = {BROWSER_PAGE_RESTRICTED:'Chrome protects this Web Store domain from extension access, including the legacy developer console. Store-installed extensions have the same restriction. Refreshing or granting site access will not help; no page content was read or modified.',ADDRESS_UNVERIFIED:'The browser could not identify an accessible current document. See reason for the document or local-URL restriction. No page content was read. Inspect the retained tab; do not open replacements or retry in a loop.',PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_LIMIT:TAB_BUDGET+' tabs Cindy opened are still open (the limit) and none can safely be closed. No new tab was opened. Use an existing tab or ask the user to close unneeded tabs; do not retry in a loop.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
+    const messages = {BROWSER_PAGE_RESTRICTED:'Chrome protects this Web Store domain from extension access, including the legacy developer console. Store-installed extensions have the same restriction. Refreshing or granting site access will not help; no page content was read or modified.',ADDRESS_UNVERIFIED:'The browser could not identify an accessible current document. See reason for the document or local-URL restriction. No page content was read. Inspect the retained tab; do not open replacements or retry in a loop.',PAGE_NOT_OPEN:'This action has no open target. Inspect browser_tabs once; do not repeatedly open the URL to repair a stale action.',PAGE_CHANGED:'The existing tab navigated. No new tab was opened. Inspect browser_tabs once and use the actual URL; do not retry the old URL or invent URL variants.',TAB_ACCESS_FAILED:'The existing tab is still present but inaccessible. No replacement was opened. Check browser permissions.',PAGE_LOAD_TIMEOUT:'Loading timed out; the same tab was retained. Inspect its state once. Do not loop retries, change query strings, or open duplicate URLs.',REDIRECT_BLOCKED:'The existing tab redirected to a site that is not allowed. No replacement will be opened. Review its permissions; do not bypass the denial.'};
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),...(e.message==='ADDRESS_UNVERIFIED' ? {reason:e.reason || 'UNKNOWN'} : {}),...(e.message==='PAGE_LOAD_TIMEOUT'?{tabId:e.tabId,status:e.tabStatus}:{}),retryable:false};
   }
 }

@@ -224,14 +224,10 @@ test('tab-level actions and open take the last authorization check as a dispatch
   assert.equal(h.authorizations.at(-1).dispatch,true);
 });
 
-// open shares the 12-tab budget with page reads, and opening an address again keeps the earlier tab in the ledger.
-test('open respects the tab budget and keeps earlier tabs of the same address',async()=>{
+// Opening an address again keeps the earlier tab in the ledger, so it is still reclaimed when idle.
+test('open keeps earlier tabs of the same address and has no fixed tab limit',async()=>{
   const h=harness();
   const first=await h.run('open',{url:'https://example.test/same'}),second=await h.run('open',{url:'https://example.test/same'});
   assert.equal(first.ok,true);assert.equal(second.ok,true);assert.notEqual(first.tabId,second.tabId);
-  const results=[];
-  for(let i=0;i<14;i++)results.push(await h.run('open',{url:'https://example.test/p'+i}));
-  const open=[...h.tabs.values()].filter(t=>t.id>=10);
-  assert.ok(open.length<=12,String(open.length));
-  assert.ok(results.some(r=>r.error==='TAB_LIMIT')||open.length<=12);
+  for(let i=0;i<14;i++)assert.equal((await h.run('open',{url:'https://example.test/p'+i})).ok,true);
 });

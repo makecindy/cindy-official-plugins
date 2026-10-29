@@ -4,7 +4,7 @@
   "name": "Cindy Chrome",
   "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI; cookies and passwords are not exported.",
   "whenToUse": "Use Cindy Chrome for translation, in-player subtitles, PDF reading and site permissions in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.72",
+  "version": "0.4.73",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -53,7 +53,7 @@
     },
     {
       "name": "browser_read",
-      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED/TAB_LIMIT: inspect browser_tabs once, stop retrying; at most 3 created tabs. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI; no cookie export. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Reported DNS must be public, including IPv6. ADDRESS_UNVERIFIED includes a document/local-URL reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Extract attr allows only href/src/datetime/title/alt/aria-label/role. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
+      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED: inspect browser_tabs once, stop retrying. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI; no cookie export. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Local/intranet pages read like any site unless blocked. ADDRESS_UNVERIFIED includes a document reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Extract attr allows only href/src/datetime/title/alt/aria-label/role. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -206,7 +206,7 @@
     },
     {
       "name": "browser_tabs",
-      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Blocked/local tabs are redacted and excluded from host searches. Allowed-site tabs with document failures remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted.",
+      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Blocked tabs are redacted and excluded from host searches; local and intranet tabs are listed like any site. Allowed-site tabs with document failures remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
