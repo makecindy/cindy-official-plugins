@@ -196,3 +196,25 @@ test('a failed screenshot shows Cindy\'s mark again',async()=>{
   assert.equal(marks.at(-1),'shown',JSON.stringify(marks));
   assert.ok(marks.includes('hidden'));
 });
+
+// 2026-10-30: uploads with paths go through Chrome's debugger when the user has allowed it, so Chrome
+// reads the files itself and the ~30 MB transfer bound does not apply; without it, bytes take the plain
+// route, and a batch sent without bytes asks the user to allow the debugger.
+test('uploads by path through the debugger when allowed; otherwise falls back or asks for it',async()=>{
+  const h=harness(undefined,undefined,{timers:'never'});
+  const sent=[];let markerSet=false;
+  h.chrome.scripting={executeScript:async({args})=>{
+    if(args.length===4){markerSet=true;return [{documentId:'doc',result:{ok:true}}];}
+    return [{documentId:'doc',result:{url:'https://example.test/user',files:[{name:'big.bin',size:31000000}]}}];
+  }};
+  h.chrome.debugger={attach:async()=>{},detach:async()=>{},onEvent:{addListener(){}},onDetach:{addListener(){}},
+    sendCommand:async(_t,method,params)=>{sent.push([method,params]);return method==='Runtime.evaluate'?{result:{objectId:'obj-1'}}:{};}};
+  const payload={url:'https://example.test/user',tabId:1,selector:'input[type=file]',paths:['/Users/me/big.bin']};
+  h.chrome.permissions.contains=async()=>true;
+  const done=await h.run('upload',payload);
+  assert.equal(done.ok,true,JSON.stringify(done));assert.equal(done.viaDebugger,true);assert.equal(markerSet,true);
+  same(sent.find(([m])=>m==='DOM.setFileInputFiles'),['DOM.setFileInputFiles',{objectId:'obj-1',files:['/Users/me/big.bin']}]);
+  h.chrome.permissions.contains=async()=>false;
+  const denied=await h.run('upload',payload);
+  assert.equal(denied.error,'DEBUGGER_NOT_ALLOWED');assert.equal(denied.execution,'not_executed');
+});

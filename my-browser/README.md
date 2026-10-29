@@ -526,3 +526,7 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 ## 0.4.55 activity mark after a failed screenshot (host package 0.4.76)
 
 - When a screenshot fails, Cindy's "operating this page" mark comes back instead of staying hidden.
+
+## 0.4.56 larger uploads through the debugger (host package 0.4.77)
+
+- **Uploads are no longer limited to about 30 MB once the debugger is allowed.** Newer Cindy sends the checked file paths along with the upload, and the extension has Chrome read the files straight from the computer through its debugger, as Cindy's own browser does. Without the debugger, files that fit still go the plain way; a larger batch opens the page to allow the debugger. The debugger explanation page lists this use.

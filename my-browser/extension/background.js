@@ -269,6 +269,44 @@ async function debuggerEvaluate(tabId,a) {
   if (json && json.length > 200000) result = {truncated:true,json:json.slice(0,200000)};
   return {ok:true,execution:'executed',tabId,result,viaDebugger:true};
 }
+// Upload by path through Chrome's debugger: Chrome reads the files from disk itself, as in Cindy's own
+// browser, so the size is not bounded by what a message can carry. Cindy checked the paths against the
+// task's folders before sending them. The input is found the same way as the plain upload.
+async function debuggerUpload(tab,a) {
+  const documentId = await network.document(tab.id,PAGE_ACCESS);
+  const marker = crypto.randomUUID();
+  const out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:(ref,selector,marker,count) => {
+    const snapshot = globalThis.__myBrowserSnapshot;
+    const el = ref ? (snapshot?.url === location.href ? snapshot.refs.get(ref) : null) : selector ? document.querySelector(selector) : null;
+    if (ref && (!el || !el.isConnected)) return {error:'STALE_REF'};
+    const only = document.querySelectorAll('input[type=file]');
+    const input = el && el.matches('input[type=file]') ? el : el?.querySelector('input[type=file]') || el?.closest('form')?.querySelector('input[type=file]') || (only.length === 1 ? only[0] : null);
+    if (!input) return {error:'INVALID_ELEMENT'};
+    if (!input.multiple && count > 1) return {error:'SINGLE_FILE_INPUT'};
+    input.setAttribute('data-cindy-upload',marker);
+    return {ok:true};
+  },args:[a.ref || null,a.selector || null,marker,a.paths.length]});
+  const found = out?.[0]?.documentId === documentId ? out[0].result : null;
+  const messages = {STALE_REF:'This ref is stale. Take a new snapshot; do not reuse old refs.',INVALID_ELEMENT:'Choose the file input or a control that contains it.',SINGLE_FILE_INPUT:'This file input accepts one file.'};
+  if (!found?.ok) return found?.error ? fail(found.error,messages[found.error]) : fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating it.');
+  const read = () => chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:marker => {
+    const input = document.querySelector('[data-cindy-upload="'+marker+'"]');
+    input?.removeAttribute('data-cindy-upload');
+    return input ? {url:location.href,files:[...input.files].map(f => ({name:f.name,size:f.size}))} : null;
+  },args:[marker]}).then(r => r?.[0]?.result ?? null,() => null);
+  try {
+    await withDebugger(tab.id,async send => {
+      const found = await send('Runtime.evaluate',{expression:'document.querySelector('+JSON.stringify('[data-cindy-upload="'+marker+'"]')+')',returnByValue:false});
+      if (!found?.result?.objectId) throw new Error('The file input is gone.');
+      await send('DOM.setFileInputFiles',{objectId:found.result.objectId,files:a.paths});
+    },true);
+  } catch (e) {
+    await read();
+    throw e;
+  }
+  const done = await read();
+  return {ok:true,execution:'executed',kind:'upload',viaDebugger:true,...(done ? {url:P.redactUrl(done.url),files:done.files} : {})};
+}
 // Recipe protocol sessions: one attachment per tab, events buffered between commands. Commands are not
 // limited to a list or to the tab's site (2026-10-30: no site restrictions of our own; safety is the
 // task's permission mode and review). Recorded events still drop raw Cookie / Set-Cookie headers.
@@ -1138,6 +1176,12 @@ async function handle(job,policy,target) {
     // Tab-level actions need no page script: answer them before injecting anything.
     const direct = await tabAction(job,actual,policy);
     if (direct) return direct;
+    // Uploads that came with paths go through the debugger when the user has allowed it; without it, the
+    // bytes (sent when they fit) take the plain route, and a larger batch asks the user to allow it.
+    if (job.action === 'upload' && job.payload.paths?.length) {
+      if (await debuggerAllowed()) { injecting = true; return await debuggerUpload(actual,job.payload); }
+      if (!job.payload.files?.length) return await debuggerDenied();
+    }
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
     // before the page is touched: a revocation during preparation must not be bypassed.
     const documentId=await network.document(tab.id,PAGE_ACCESS);
