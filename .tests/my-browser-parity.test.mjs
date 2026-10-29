@@ -218,3 +218,9 @@ test('uploads by path through the debugger when allowed; otherwise falls back or
   const denied=await h.run('upload',payload);
   assert.equal(denied.error,'DEBUGGER_NOT_ALLOWED');assert.equal(denied.execution,'not_executed');
 });
+
+// Review 2026-10-30: absolute upload paths include Windows network shares (\\server\share\file).
+test('upload paths accept POSIX, drive and UNC absolute paths and reject relative ones',()=>{
+  for(const p of ['/a/b.txt','C:\\x\\y.txt','C:/x/y.txt','\\\\server\\share\\r.pdf'])P.validate('upload',{url:'https://example.test',tabId:1,selector:'i',paths:[p]});
+  assert.throws(()=>P.validate('upload',{url:'https://example.test',tabId:1,selector:'i',paths:['rel/x.txt']}),/absolute file paths/);
+});

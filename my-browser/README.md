@@ -534,3 +534,8 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 ## 0.4.57 no capability limits of our own (host package 0.4.78)
 
 - **The agent can do what it does in Cindy's own browser.** Password, payment and one-time-code fields can be read and filled; links, tab lists and read results keep their URLs whole (magic and signed links work); extract accepts any attribute; recorded network events keep their headers. Safety is the task's permission mode and review in Cindy. Hidden inputs still stay out of reads, and nothing steals focus or switches the tab you are looking at.
+
+## 0.4.58 upload from network shares, steadier consecutive screenshots (host package 0.4.79)
+
+- Upload paths accept Windows network shares (`\\server\share\file`) as well as drive and POSIX paths.
+- A debugger screenshot waits for Cindy's window to go back to minimized before it finishes, so the next screenshot does not start while the window is still moving.

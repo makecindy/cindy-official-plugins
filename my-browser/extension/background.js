@@ -359,8 +359,9 @@ async function debuggerScreenshot(tab,a) {
       clip = {x:0,y:0,width:Math.min(Math.ceil(size.width),16384),height:Math.min(Math.ceil(size.height),16384),scale:1};
     }
     return send('Page.captureScreenshot',{format,...(format === 'jpeg' ? {quality:85} : {}),...(clip ? {clip,captureBeyondViewport:true} : {}),fromSurface:true});
-  }).finally(() => {
-    if (reminimize) chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {});
+  }).finally(async () => {
+    // Wait for the window to go back to minimized, so the next capture does not start while it is still moving.
+    if (reminimize) await chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {});
     markAgentTab(tab.id);
   });
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
