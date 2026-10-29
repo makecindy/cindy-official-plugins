@@ -478,3 +478,13 @@ A running subtitle session owns the YouTube control bar: its settings toggle is 
 ## New icon and description (host package 0.4.68)
 
 The plugin icon changes from the Cindy portrait to a Cindy-red browser window holding the toolbar's Cindy silhouette on a white tile, in the single-symbol style of the other official plugins, so it reads as the browser plugin in the plugin list. The description now leads with My browser: once it is selected in Cindy's Settings, the agent reads pages and acts for you with your existing sign-ins; translation, subtitles and PDF reading follow. The extension itself is unchanged and needs no update.
+
+## 0.4.48 recipe cookies stay on the operated site, review fixes (host package 0.4.69)
+
+- **Cookies through the debugger.** A site recipe's protocol session accepts only the DevTools methods Cindy's recipe runtime sends; anything else (for example `Network.getAllCookies` or `Runtime.evaluate`) is refused. Cookie reads cover the site of the tab being operated on only: `Network.getCookies` must name pages of that site, `Storage.getCookies` returns that site's cookies, and sites on the "Blocked from reading" list are never returned. Recorded network events no longer carry `Cookie` / `Set-Cookie` headers. "Same site" is the registrable domain, approximated without a public-suffix list (last two labels, or three under common public second levels such as `co.uk`, `com.cn`, `com.au`, `co.jp`); where it is wrong it is narrower, never wider.
+- **Subtitle tasks per tab.** The video a translation task follows is tracked per tab instead of per browser, so two tabs playing different videos no longer archive each other's task (and resend the full rules) on every passage.
+- **The page cannot remove Cindy's mark.** A page script could dispatch the event a reloaded content script uses to retire its predecessor. The event now only retires a copy whose extension context is gone; the live one ignores it.
+- Serbian and Kazakh captions in Latin script are no longer refused as the wrong language. The reading panel's model hint points to the plugin's "Model & tasks" setting in Cindy. The tab-limit message states the real limit (12).
+- The plugin no longer treats a transient refusal from Cindy's browser-extension slot as an older host, so it does not start its own bridge next to Cindy's; only an older host's rejection of the pipe type selects the bundled bridge.
+
+Update both the Cindy plugin and the Chrome extension. Permissions and the signed wire protocol are unchanged.
