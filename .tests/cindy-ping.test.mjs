@@ -460,6 +460,35 @@ test('only explicit cancellation clears the status; other invalidation preserves
   assert.equal(h.api.inspect().outcome.phase, 'idle');
 });
 
+test('captured per-use input reports waiting for confirmation without sending or accepting stale events', async () => {
+  const h = await host();
+  const emote = { ...sendEmote(), promptMode: 'input' };
+  await h.event({ kind: 'trigger', id: 'input', action: emote.action, emote });
+  await h.event({ kind: 'capturing', id: 'input' });
+  await h.event({ kind: 'input-required', id: 'stale' });
+  assert.equal(h.api.inspect().outcome.phase, 'capturing');
+  await h.event({ kind: 'input-required', id: 'input' });
+  assert.equal((await h.api.queueSetting('load')).outcome.phase, 'awaitingInput');
+  assert.deepEqual(h.events.at(-1), { type: 'status', outcome: { phase: 'awaitingInput', id: 'input' } });
+  assert.equal(h.calls.some(call => ['create', 'send', 'taskSend'].includes(call.method)), false);
+  await h.event({ kind: 'invalidate', id: 'input', cancelled: true });
+  await h.event({ kind: 'input-required', id: 'input' });
+  assert.equal(h.api.inspect().outcome.phase, 'idle');
+});
+
+test('settings render waiting for input in the host language with the existing English fallback', () => {
+  const settings = source('settings.js');
+  const strings = settings.slice(settings.indexOf('const strings ='), settings.indexOf('const modelStrings ='));
+  const render = settings.slice(settings.indexOf('function renderOutcome('), settings.indexOf('function applyStatus('));
+  for (const [locale, expected] of [['zh-CN', '等待输入'], ['en', 'Waiting for input'], ['ja', 'Waiting for input'], ['ko', 'Waiting for input']]) {
+    const fields = { '#status-text': {}, '#detail': { classList: { toggle() {} } } };
+    const context = vm.createContext({ locale, $: selector => fields[selector] });
+    vm.runInContext(`${strings}\nconst T = strings[locale] || strings.en;\n${render}\nrenderOutcome({phase:'awaitingInput'});`, context);
+    assert.equal(fields['#status-text'].textContent, expected);
+    assert.equal(fields['#detail'].textContent, '');
+  }
+});
+
 test('settings and Agent accept input mode with an empty draft without changing other emotes', async () => {
   const settings = source('settings.js');
   const context = vm.createContext({ L: (_, en) => en });

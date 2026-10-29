@@ -377,6 +377,7 @@ cindy.onHostMessage(async msg => {
       else if (event.cancelled) publish('idle');
     } else if (event.id === latest) {
       if (event.kind === 'capturing') publish('capturing', { id: event.id });
+      if (event.kind === 'input-required') publish('awaitingInput', { id: event.id });
       if (event.kind === 'capture-error') publish('error', { code: errorCode(event) });
       if (event.kind === 'input-error') publish('error', { code: errorCode(event) });
       if (event.kind === 'prepared') {
