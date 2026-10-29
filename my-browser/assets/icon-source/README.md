@@ -16,3 +16,7 @@ Toolbar (0.4.40): `action-light.svg` / `action-dark.svg` (and `-small` for 16 px
 draw the silhouette without a tile, filling the canvas, near-black or near-white
 with the Cindy-red earring. They render to `extension/icons/action-{light,dark}-{16,24,32}.png`;
 the background switches between them from the appearance pages report.
+
+Plugin icon (host package 0.4.68): `plugin.svg` draws a browser window with a Cindy-red frame and
+title bar holding the same silhouette and red earring on a white tile, matching the other official
+plugins' single-symbol tiles. Render it at 256 px (device scale 1) into `assets/icon.png`.

@@ -474,3 +474,7 @@ When Cindy is not reachable, the panel shows a short guide in the browser's own 
 ## 0.4.24 single player icon (host package 0.4.37)
 
 A running subtitle session owns the YouTube control bar: its settings toggle is the only Cindy icon there. YouTube fires `yt-navigate-finish` after an auto-started session may already be running; that event no longer re-inserts the separate entry icon beside the toggle. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.
+
+## New icon and description (host package 0.4.68)
+
+The plugin icon changes from the Cindy portrait to a Cindy-red browser window holding the toolbar's Cindy silhouette on a white tile, in the single-symbol style of the other official plugins, so it reads as the browser plugin in the plugin list. The description now leads with My browser: once it is selected in Cindy's Settings, the agent reads pages and acts for you with your existing sign-ins; translation, subtitles and PDF reading follow. The extension itself is unchanged and needs no update.
