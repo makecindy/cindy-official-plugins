@@ -226,6 +226,32 @@ class PackagingTests(unittest.TestCase):
                             for platform in packager.PLATFORMS:
                                 self.assertEqual(bundle.read(f"vendor/example-cli/{platform}/tool"), CONTENT)
 
+    def test_git_directory_records_do_not_exhaust_source_entry_limit(self):
+        for files in (250, 251, 257):
+            with self.subTest(files=files):
+                source = self.source(config())
+                with zipfile.ZipFile(source, "a") as bundle:
+                    for index in range(files - 4):
+                        bundle.writestr(f"nested-{index}/", b"")
+                        bundle.writestr(f"nested-{index}/file.txt", b"fixture")
+                source_bytes = source.read_bytes()
+                def archive(command, **_):
+                    filename = next(arg.removeprefix("--output=") for arg in command if arg.startswith("--output="))
+                    Path(filename).write_bytes(source_bytes)
+                output = self.directory / "git.cindy"
+                with patch.object(packager.subprocess, "run", side_effect=archive), patch.object(
+                    packager, "download", side_effect=lambda _, dest: dest.write_bytes(CONTENT)
+                ):
+                    if files > 250:
+                        with self.assertRaisesRegex(ValueError, "(Collected files exceed|package exceeds 256)"):
+                            packager.package_plugin("fixture", output)
+                    else:
+                        packager.package_plugin("fixture", output)
+                        with zipfile.ZipFile(output) as bundle:
+                            self.assertEqual(len(bundle.infolist()), 256)
+                            self.assertTrue(all(not item.is_dir() for item in bundle.infolist()))
+                            self.assertEqual(bundle.read("nested-0/file.txt"), b"fixture")
+
     def test_failure_preserves_existing_output(self):
         source = self.source(config())
         source_bytes = source.read_bytes()

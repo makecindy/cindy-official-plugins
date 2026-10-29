@@ -8,6 +8,7 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 // A bounded held contact permits observe/move calls without replaying a path.
 function createLiveAgent(live){
   const held=new Map();
+  function deadline(p){if(p._deadline&&Date.now()>=p._deadline)throw fail('DEADLINE_EXCEEDED','操作时间已用尽，尚未发送新的触点。');}
   const send=(id,p)=>live.input(id,p,'agent');
   function forget(h){clearInterval(h.timer);if(held.get(h.udid)===h)held.delete(h.udid);h.release();}
   async function cancel(h){
@@ -16,12 +17,13 @@ function createLiveAgent(live){
   }
   function check(h,p){
     if(!h||h.id!==p.gestureId||Date.now()>=h.expiresAt)throw fail('INPUT_EXPIRED','触摸已结束或超时，请重新观察手机；旧动作不会重发。');
-    if(p._deadline&&Date.now()>=p._deadline)throw fail('DEADLINE_EXCEEDED','操作时间已用尽，尚未发送新的触点。');
+    deadline(p);
   }
   async function begin(d,p,points,expected){
     if(held.has(d.udid))throw fail('INPUT_BUSY','Agent 已有按住的触点，请先结束或取消。');
     const lease=await live.acquire(d,p),id=randomUUID();
     try{
+      deadline(p);
       if(expected&&JSON.stringify(expected)!==JSON.stringify(lease.screen))throw fail('SCREEN_CHANGED','屏幕已变化，请重新观察后操作。');
       coordinates(points,lease.screen);
       await send(d.udid,{session:lease.session,op:'begin',gesture:id,screen:lease.screen,points});
@@ -84,7 +86,9 @@ function createLiveAgent(live){
   async function home(d,p){
     const lease=await live.acquire(d,p);
     try{
+      deadline(p);
       if(held.has(d.udid))await cancel(held.get(d.udid));
+      deadline(p);
       await send(d.udid,{session:lease.session,op:'home',exclusive:true});
       return {udid:d.udid,execution:'executed',transport:'continuous',inputFinishedAt:Date.now()};
     }finally{lease.release();}

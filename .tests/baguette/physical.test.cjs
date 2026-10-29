@@ -225,7 +225,7 @@ test('viewer batches only adjacent unsent text and cancellation never replays it
  const element=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:true,style:{},handlers:{},setAttribute(){},addEventListener(n,fn){this.handlers[n]=fn;},getContext(){return {drawImage(){}};},replaceChildren(){},getBoundingClientRect(){return {left:0,top:0,width:400,height:800};},focus(){},append(){}});return nodes.get(id);};
  const context={URLSearchParams,AbortSignal,performance,Image:class{width=400;height=800;async decode(){}},innerWidth:500,innerHeight:900,
   location:{pathname:'/simulators/'+id,search:'?cindyViewer=test',origin:'http://example.test'},
-  document:{hidden:false,getElementById:element,createElement:()=>element('button')},parent:{document:{documentElement:{lang:'en'}},cindySim:{state:{}}},
+  document:{hidden:false,getElementById:element,createElement:()=>element('button'),addEventListener(n,fn){events[n]=fn;}},parent:{document:{documentElement:{lang:'en'}},cindySim:{state:{}}},
   Baguette:{_PinchOverlay:class{clear(){}setFingers(){}}},addEventListener(n,fn){events[n]=fn;},
   setTimeout(fn,ms){const timer=setTimeout(fn,ms);timers.add(timer);return timer;},clearTimeout,
   async fetch(_url,options){const p=JSON.parse(options.body);if(p.action==='frame'){context.document.hidden=true;return {ok:true,json:async()=>({image:'jpeg',screen:{width:400,height:800,displayId:1,rotation:'rot0'},control:{state:'ready',ready:true},fast:true})};}
@@ -238,7 +238,9 @@ test('viewer batches only adjacent unsent text and cancellation never replays it
  assert.equal(calls.length,1);release();await settle();await settle();
  assert.deepEqual(calls.map(c=>[c.action,c.text||c.button]),[['type','a'],['type','你好'],['press','home'],['type','de']]);
  // A new document epoch cancels queued input, rather than submitting it later.
- calls.length=0;text('first');await settle();text('stale');context.__nativeRelease();release();await settle();await settle();assert.equal(calls.length,1);
+ for(const cancel of [()=>context.__nativeRelease(),events.blur,events.visibilitychange,events.pagehide]){
+  calls.length=0;text('first');await settle();text('stale');element('keyboard').value='composing';cancel();release();await settle();await settle();assert.equal(calls.length,1);assert.equal(element('keyboard').value,'');
+ }
 });
 
 test('physical chrome selects the panel by its native size, never the CoreDevice display ID',()=>{

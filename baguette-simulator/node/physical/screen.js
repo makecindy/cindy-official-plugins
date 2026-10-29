@@ -19,6 +19,7 @@
   function notice(message,persistent=false){clearTimeout(noticeTimer);$('notice-text').textContent=message;$('notice').hidden=!message;if(!persistent)noticeTimer=setTimeout(()=>{$('notice').hidden=true;},5000);}
   let live=null;
   function cancel(){live?.input.cancel();gesture=null;wheel=null;clearTimeout(wheelTimer);overlay.clear();}
+  function releaseInput(){epoch++;pendingText=null;keyboard.value='';cancel();}
   function status(c){
     const wasPreparing=preparing;ready=!!c.ready;preparing=c.state==='running';
     if(preparing)notice(c.phase==='waiting_unlock'
@@ -49,10 +50,11 @@
       if(current!==epoch||closed)return;
       const progress=setTimeout(()=>notice(t('正在操作手机…','Sending input to phone…'),true),250);
       let r;try{r=await api(action,args);}finally{clearTimeout(progress);}
+      if(current!==epoch||closed)return;
       if(r.execution==='executed')notice('');
       if(r.control)status(r.control);else if(action==='connect')status(r);
-      if(r.preparing||action==='connect'){epoch++;cancel();}
-    }).catch(e=>{epoch++;preparing=false;cancel();error(e);}).finally(()=>{queued--;});
+      if(r.preparing||action==='connect')releaseInput();
+    }).catch(e=>{if(current===epoch&&!closed){preparing=false;releaseInput();error(e);}}).finally(()=>{queued--;});
     queue=next;if(batch)batch.promise=next;return next;
   }
   function canInput(){
@@ -111,9 +113,9 @@
   keyboard.addEventListener('compositionend',textInput);
   keyboard.addEventListener('paste',e=>{const text=e.clipboardData?.getData('text/plain');if(text){e.preventDefault();if(canInput())perform('type',{text});}});
   canvas.addEventListener('keydown',e=>{if(!e.metaKey&&!e.ctrlKey&&!e.altKey&&e.key.length===1){e.preventDefault();keyboard.focus({preventScroll:true});if(canInput())perform('type',{text:e.key});}});
-  window.__nativeHome=()=>{if(canInput()){if(live){cancel();void live.home().catch(error);}else perform('press',{button:'home'});}};
+  window.__nativeHome=()=>{if(canInput()){if(live){releaseInput();void live.home().catch(error);}else perform('press',{button:'home'});}};
   // Physical orientation/folding follows the phone, never a simulator override.
-  window.__nativeRelease=()=>{epoch++;cancel();keyboard.value='';};
+  window.__nativeRelease=releaseInput;
   function fit(){
     if(!screen)return;
     const viewport=shell?.viewport||screen,scale=Math.min((innerWidth-24)/viewport.width,(innerHeight-24)/viewport.height);
@@ -127,29 +129,29 @@
   async function loop(){
     try{if(!document.hidden){
       const f=await api('frame');if(closed)return;
-      if(JSON.stringify(screen)!==JSON.stringify(f.screen)){epoch++;cancel();}screen=f.screen;shell?.update(screen);fast=!!f.fast;status(f.control);
+      if(JSON.stringify(screen)!==JSON.stringify(f.screen))releaseInput();screen=f.screen;shell?.update(screen);fast=!!f.fast;status(f.control);
       const picture=new Image();picture.src='data:'+(f.mime||'image/jpeg')+';base64,'+f.image;await picture.decode();
       if(canvas.width!==picture.width||canvas.height!==picture.height){canvas.width=picture.width;canvas.height=picture.height;}ctx.drawImage(picture,0,0);available=true;frame.hidden=false;frame.style.opacity='';fit();$('message').hidden=true;
       // Shared zoom measures the complete body; input still uses the canvas.
-    }}catch(e){available=false;connection(e);ready=false;epoch++;cancel();}
+    }}catch(e){available=false;connection(e);ready=false;releaseInput();}
     finally{if(!closed)setTimeout(loop,available?(fast?30:100):1000);}
   }
-  addEventListener('resize',fit);addEventListener('blur',cancel);
+  addEventListener('resize',fit);addEventListener('blur',releaseInput);
   addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='cindy-release-input')window.__nativeRelease();});
-  addEventListener('pagehide',()=>{closed=true;epoch++;cancel();live?.close();});
-  document.addEventListener?.('visibilitychange',()=>{if(document.hidden){cancel();live?.abort?.abort();}});
+  addEventListener('pagehide',()=>{closed=true;releaseInput();live?.close();});
+  document.addEventListener?.('visibilitychange',()=>{if(document.hidden){releaseInput();live?.abort?.abort();}});
   connection();
   if(window.PhysicalLive){
     live=new window.PhysicalLive({udid,token,api,onstate:c=>{
       if(c.state==='running')notice(c.phase==='runtime'?t('首次连接，正在准备实时画面组件…','Preparing live video for the first connection…'):t('正在连接实时画面…','Connecting live video…'),true);
       else if(c.error)notice(c.error.message,true);
     },onframe:(picture,newScreen,count)=>{
-      if(JSON.stringify(screen)!==JSON.stringify(newScreen)){epoch++;cancel();screen=newScreen;shell?.update(screen);}
+      if(JSON.stringify(screen)!==JSON.stringify(newScreen)){releaseInput();screen=newScreen;shell?.update(screen);}
       if(canvas.width!==picture.displayWidth||canvas.height!==picture.displayHeight){canvas.width=picture.displayWidth;canvas.height=picture.displayHeight;}
       ctx.drawImage(picture,0,0);canvas.dataset.frames=String(count);canvas.dataset.transport='continuous';available=true;ready=true;
       frame.hidden=false;frame.style.opacity='';fit();$('message').hidden=true;
       if(count===1)notice('');
-    },onerror:e=>{available=false;ready=false;epoch++;cancel();connection(e);notice(e.message,true);}});
+    },onerror:e=>{available=false;ready=false;releaseInput();connection(e);notice(e.message,true);}});
     void live.run();
   }else loop();
 })();

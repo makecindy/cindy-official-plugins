@@ -127,6 +127,7 @@ function createRealtime({root,run,devices,children=new Set(),spawnImpl=spawn}){
       await new Promise(resolve=>setTimeout(resolve,25));
     }
     if(e.stopped||e.state==='failed')throw fail('LIVE_DISCONNECTED','实时连接已中断，请重新观察手机。');
+    if(Date.now()>=end)throw fail('LIVE_PREPARING','实时画面等待已超时，请重新观察；不要因此重复输入。');
   }
   async function acquire(d,p={}){
     await start(d);const e=entries.get(d.udid);e.agents++;clearTimeout(e.idle);

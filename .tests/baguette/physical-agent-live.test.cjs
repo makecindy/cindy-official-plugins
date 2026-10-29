@@ -5,7 +5,7 @@ const screen={width:400,height:800,displayId:1,rotation:'rot0'},d={udid:'0000000
 function fixture(t){
  const calls=[];let leases=0,failed=false;
  const live={acquire:async()=>{leases++;return {screen,session:'generation',release:()=>leases--};},snapshot:async()=>({source:'live-video'}),input:async(id,p,owner)=>{calls.push({...p,owner});if(failed&&p.op==='move')throw Object.assign(Error('lost response'),{execution:'unknown'});return {execution:'dispatched'};}};
- const agent=createLiveAgent(live);t.after(()=>agent.close());return {agent,calls,leases:()=>leases,fail:()=>failed=true};
+ const agent=createLiveAgent(live);t.after(()=>agent.close());return {agent,live,calls,leases:()=>leases,fail:()=>failed=true};
 }
 test('Agent observes and reverses a held contact across separate tool calls, then releases',async t=>{
  const f=fixture(t),began=await f.agent.touch(d,{phase:'begin',points:[[300,400]]});
@@ -24,6 +24,15 @@ test('full paths preflight every point and deadline before touching; unknown mov
  await assert.rejects(f.agent.actions(d,{_deadline:Date.now()},[[[10,20],[20,20]]],100,0),e=>e.code==='DEADLINE_EXCEEDED');assert.equal(f.calls.length,0);
  f.fail();await assert.rejects(f.agent.actions(d,{},[[[10,20],[20,20]]],100,0),e=>e.execution==='unknown');
  assert.deepEqual(f.calls.map(c=>c.op),['begin','move','cancel']);assert.equal(f.leases(),0);
+});
+test('expired cached or newly acquired frames never permit a new touch or Home action',async t=>{
+ for(const late of [false,true])for(const action of ['begin','home']){
+  const f=fixture(t),acquire=f.live.acquire;
+  f.live.acquire=async(d,p)=>{const lease=await acquire();if(late)p._deadline=Date.now()-1;return lease;};
+  const p={_deadline:Date.now()+(late?10000:-1),phase:'begin',points:[[20,30]]};
+  await assert.rejects(action==='home'?f.agent.home(d,p):f.agent.touch(d,p),e=>e.code==='DEADLINE_EXCEEDED'&&e.execution==='not_executed');
+  assert.deepEqual(f.calls,[]);assert.equal(f.leases(),0);
+ }
 });
 test('text lookup still uses accessibility, input preserves Unicode, and snapshots use live frame provenance',async t=>{
  const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');

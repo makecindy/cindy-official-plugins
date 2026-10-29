@@ -1,5 +1,29 @@
 # Physical device verification
 
+## Input invalidation and package assembly — 0.3.24 (2026-10-29)
+
+- Forge updated the same enabled xd instance to 0.3.24. Actual Agent begin,
+  move with a fresh live screenshot, and reverse/end succeeded on Air. The
+  held screenshot visibly shifted Home; receiver-side frameAgeMs was 51 ms.
+- Installed viewer in headless Chrome retained live frames while a mocked
+  text API delayed the first request. Blur dropped the queued second text and
+  cleared composition text; exactly one request reached the interceptor and
+  no text was sent to the phone. Unit coverage also exercises visibility,
+  pagehide and explicit release, plus stale completions after invalidation.
+- Input invariants: screen/focus/connection loss revokes the pending input
+  epoch; late replies cannot revive it. Agent begin and Home check the same
+  deadline after acquiring media; move checks it before dispatch. Cleanup
+  releases leases even on rejection. No timed-out input is replayed.
+- Required suites plus binary-dependency packaging: 796 passed. The real
+  package script exposed redundant Git ZIP directory records consuming source
+  entry slots; removing those before assembly preserves all files and the
+  existing source/final limits. The actual download/hash/assembly dry run
+  produced 241 files, about 42 MB compressed and 59 MB expanded. Boundary
+  fixtures still reject excess source and collected files.
+- Relative to 0.3.23, only input invalidation/deadline checks and the package
+  version changed in the plugin. Signing, text lookup and text delivery are
+  otherwise unchanged; their prior runtime evidence remains applicable.
+
 ## PR integration — 0.3.23 (2026-10-29)
 
 - Rebased onto the simulator audio release. Simulator audio remains available;

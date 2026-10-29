@@ -395,8 +395,16 @@ def package_plugin(plugin, output):
         temp_path = Path(temp)
         source = temp_path / "source.zip"
         with timed_stage("source_archive", plugin=plugin):
-            subprocess.run(["git", "-c", "core.autocrlf=false", "archive", "--format=zip", f"--output={source}",
+            raw_source = temp_path / "git-source.zip"
+            subprocess.run(["git", "-c", "core.autocrlf=false", "archive", "--format=zip", f"--output={raw_source}",
                             *(f"--add-file={name}" for name in LEGAL_FILES), f"HEAD:{plugin}"], check=True)
+            # Match package-plugin.sh's file-only archive before assembly too.
+            # Git's directory records are redundant; retaining them here can
+            # reject a valid package before the existing final-file count runs.
+            with zipfile.ZipFile(raw_source) as raw, zipfile.ZipFile(source, "w") as clean:
+                for info in raw.infolist():
+                    if not info.is_dir():
+                        clean.writestr(info, raw.read(info))
         assembled = temp_path / "plugin.cindy"
         assemble(source, assembled)
         os.replace(assembled, output)
