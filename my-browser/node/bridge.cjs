@@ -52,40 +52,18 @@ function createBridge(options = {}) {
     } catch { return false; }
   };
   const isHttp = value => typeof value === 'string' && /^https?:\/\//i.test(value);
-  // The declared per-field limit. It is enforced after redaction, because masking a short credential
-  // into REDACTED lengthens the string.
+  // The declared per-field limit; an over-long URL value is dropped whole rather than cut.
   const FIELD_VALUE_MAX = 4000;
-  // Extracted field names are chosen by the caller, so every field value that is itself an http(s)
-  // URL is sanitized too, not just the ones with well-known keys.
-  function redactFields(record) {
-    if (!record || typeof record !== 'object') return {record,dropped:false};
-    let out = null, dropped = false;
-    for (const [key,value] of Object.entries(record)) {
-      if (!isHttp(value)) continue;
-      let clean = P.redactUrl(value);
-      // Redaction can lengthen the value, so the limit is checked on the redacted string; an over-long
-      // value is dropped whole rather than cut.
-      if (clean.length > FIELD_VALUE_MAX) { clean = null; dropped = true; }
-      if (clean === value) continue;
-      out = out || {...record};
-      out[key] = clean;
-    }
-    return {record: out || record,dropped};
-  }
-  // Last gate before a result reaches the model: policy checks above still used the real URL, but
-  // nothing leaves with live OAuth/magic-link credentials in a query or fragment. Every shape that
-  // carries a URL is covered: the page URL, tab rows, content links and extracted field values.
-  function redactResult(result, maxChars = 6000) {
+  // Addresses and links come back whole (2026-10-30: as in Cindy's own browser, so magic and signed
+  // links work); only the budget below applies.
+  function boundResult(result, maxChars = 6000) {
     if (!result || typeof result !== 'object') return result;
     const out = {...result};
-    if (typeof out.url === 'string') out.url = P.redactUrl(out.url);
-    if (Array.isArray(out.tabs)) out.tabs = out.tabs.map(t => t && !t.redacted && typeof t.url === 'string' ? {...t,url:P.redactUrl(t.url)} : t);
-    if (Array.isArray(out.links)) out.links = out.links.map(l => l && typeof l.url === 'string' ? {...l,url:P.redactUrl(l.url)} : l);
-    // One budget for the entire extraction, measured after URL redaction.
+    // One budget for the entire extraction.
     let remaining = maxChars;
     const boundRecord = entry => {
       if (!entry || typeof entry !== 'object') return entry;
-      const r = redactFields(entry); const record = r.record; let truncated = r.dropped;
+      const record = entry; let truncated = false;
       const bounded = {};
       for (const [key, value] of Object.entries(record)) {
         let finalValue = value;
@@ -110,7 +88,7 @@ function createBridge(options = {}) {
   function finish(job,result) {
     if (!jobs.has(job.id)) return;
     clearTimeout(job.timer); jobs.delete(job.id);
-    const safe = redactResult(result, job.payload.maxChars || 6000);
+    const safe = boundResult(result, job.payload.maxChars || 6000);
     job.resolve({...safe,browser:job.clientId,timing:{...(safe.timing || {}),totalMs:Date.now()-job.created},...(P.READ.includes(job.action) && job.action !== 'tabs' ? {untrusted_content:true} : {})});
   }
   const jobFailure = (job,error,message) => failure(error,message,job.state === 'acknowledged' && job.action !== 'tabs' ? 'unknown' : 'not_executed');

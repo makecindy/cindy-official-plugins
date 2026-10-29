@@ -44,7 +44,7 @@ Directory loading is the only developer fallback included in this package. The o
 
 ## Failure and privacy boundaries
 
-No exported cookies, hidden/password/payment-code fields, arbitrary JavaScript tool or private API token extraction. Password and payment-card inputs are refused by token-matching their `autocomplete` value, so standard checkout and OTP markup (`section-checkout billing cc-number`, `section-login one-time-code`) cannot be read or typed even though it is not a bare `cc-number`. Tab lists and read results are passed through a URL sanitizer that masks credential-bearing query parameters and data-bearing fragments (`?code=`, `#access_token=`) before anything reaches the model; harmless parameters and plain route fragments are kept so tabs stay identifiable. Normal reads/visits still contact websites and may affect their server-side read state; “read-only” does not mean zero website side effects. Data passed to AI may leave the device.
+Password, payment and one-time-code fields can be read and filled like any field, and tab lists, links and read results keep their URLs whole, as in Cindy's own browser (2026-10-30: no capability limits of our own; safety is the task's permission mode and review in Cindy). Hidden inputs are not part of the visible page and stay out of reads. Normal reads/visits still contact websites and may affect their server-side read state; “read-only” does not mean zero website side effects. Data passed to AI may leave the device.
 
 Blocklists and redirects are checked on every request. Browser jobs are bound to one connection. Delivered actions are never automatically replayed. `execution:executed` proves DOM dispatch only; `unknown` requires checking the real page before deciding whether to repeat. Never use another tool or account to bypass a denial.
 
@@ -54,7 +54,7 @@ Blocklists and redirects are checked on every request. Browser jobs are bound to
 
 `browser_tabs` keeps allowed-site document failures as redacted rows with `status`, `error` and `reason`; no title or URL is read from inaccessible documents. A failed document is not an absent tab. `truncated` means only a count/size limit. Loading waits up to 25 seconds, but a verified current document that has fired DOMContentLoaded is usable even if images/ads are pending. Timeout returns the retained `tabId` and loading `status`; it never opens a replacement or replays an action.
 
-`extract.fields.*.attr` accepts only `href`, `src`, `datetime`, `title`, `alt`, `aria-label` and `role`. Arbitrary `data-*`, nonce/value and event attributes are rejected before dispatch. This is a bounded extraction schema, not a guarantee that website-provided text or URLs never contain sensitive information. `browser_status` returns connection/install readiness only; use the local settings page for paths and connection diagnostics.
+`extract.fields.*.attr` accepts any attribute name. This is a bounded extraction schema, not a guarantee that website-provided text or URLs never contain sensitive information. `browser_status` returns connection/install readiness only; use the local settings page for paths and connection diagnostics.
 
 ## Browser-initiated learning (0.4.0)
 

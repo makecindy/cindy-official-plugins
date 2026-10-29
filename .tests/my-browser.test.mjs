@@ -111,9 +111,10 @@ test('tab and result URLs lose credentials but keep their identity',()=>{
   assert.equal(r(undefined),undefined);
 });
 
-test('extract validates a closed attribute set before reaching any browser',()=>{
-  for(const attr of ['href','src','datetime','title','alt','aria-label','role'])assert.doesNotThrow(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
-  for(const attr of ['data-csrf-token','data-token','nonce','value','outerHTML','onclick','HREF',' href',4])assert.throws(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+// 2026-10-30: any attribute can be extracted, as in Cindy's own browser; only the name is checked.
+test('extract accepts any attribute name and rejects malformed ones before reaching any browser',()=>{
+  for(const attr of ['href','data-csrf-token','value','xlink:href'])assert.doesNotThrow(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
+  for(const attr of ['',' href','a b','<x>',4])assert.throws(()=>P.validate('extract',{url:'https://example.test',fields:{value:{selector:'p',attr}}}));
 });
 test('cold status starts one listener under concurrency; disconnected actions fail quickly',async t=>{
   const b=createBridge({ports:[0],connectWait:0});t.after(()=>b.close());
@@ -198,12 +199,11 @@ test('acknowledged reads with lost results are unknown',async t=>{
   assert.equal((await http('/poll')).data.job,null);
 });
 
-test('extract final budget covers redaction growth across single and multiple records',async t=>{
+test('extract final budget drops whole URLs and bounds single and multiple records',async t=>{
   const {b,http}=await fixture(t,{jobTimeout:3000});
-  const url='https://example.test/?'+Array.from({length:15},(_,i)=>'token'+i+'=x').join('&');
+  const url='https://example.test/?q='+'x'.repeat(280);
   const record=Object.fromEntries(Array.from({length:30},(_,i)=>['field'+i,url]));
-  assert.ok(url.length*30<6000);
-  assert.ok(P.redactUrl(url).length*30>6000);
+  assert.ok(url.length*30>6000);
   for(const multiple of [false,true]) for(const maxChars of [undefined,256,7000]) {
     const budget=maxChars ?? 6000;
     const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{link:'a'},multiple,...(maxChars===undefined?{}:{maxChars})}});
@@ -215,7 +215,7 @@ test('extract final budget covers redaction growth across single and multiple re
     const values=rows.flatMap(row=>Object.values(row));
     assert.ok(values.reduce((n,v)=>n+(v?.length||0),0)<=budget);
     assert.equal(result.truncated,true);
-    assert.ok(values.every(v=>v===null || v===P.redactUrl(url)),'URLs are returned whole or omitted');
+    assert.ok(values.every(v=>v===null || v===url),'URLs are returned whole or omitted');
     if(multiple) assert.equal(result.count,2);
   }
   const promise=b.request('act',{action:'extract',payload:{url:'https://example.test',fields:{text:'p'},maxChars:256}});

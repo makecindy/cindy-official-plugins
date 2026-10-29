@@ -200,28 +200,19 @@ async function openDebuggerPage() {
   const win = windows.find(w => w.focused) || windows[0];
   await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win ? {windowId:win.id} : {})});
 }
-const COOKIE_HEADER = /^(?:cookie|set-cookie2?)$/i;
-const stripCookies = headers => headers && typeof headers === 'object' && !Array.isArray(headers) ? Object.fromEntries(Object.entries(headers).filter(([k]) => !COOKIE_HEADER.test(k))) : headers;
-function withoutCookieHeaders(params) {
-  if (!params || typeof params !== 'object') return params;
-  const out = {...params};
-  if (out.request && typeof out.request === 'object') {
-    out.request = {...out.request,headers:stripCookies(out.request.headers)};
-    if (out.request.postData?.length > 256000) out.request.postData = out.request.postData.slice(0,256000);
-  }
-  for (const key of ['response','redirectResponse']) if (out[key] && typeof out[key] === 'object') out[key] = {...out[key],headers:stripCookies(out[key].headers),requestHeaders:stripCookies(out[key].requestHeaders)};
-  return out;
+// Large request bodies are cut so one upload cannot fill the event buffer.
+function boundedEvent(params) {
+  if (!params || typeof params !== 'object' || !(params.request?.postData?.length > 256000)) return params;
+  return {...params,request:{...params.request,postData:params.request.postData.slice(0,256000)}};
 }
 function hookDebugger() {
   if (debuggerHooked || !chrome.debugger) return;
   debuggerHooked = true;
   chrome.debugger.onEvent.addListener((source,method,params) => {
     const state = debugged.get(source.tabId);
-    // *ExtraInfo events exist only to carry raw Cookie / Set-Cookie headers, including those of other
-    // sites the page talks to; recipes never need them.
-    if (!state?.recording || !method.startsWith('Network.') || method.endsWith('ExtraInfo')) return;
+    if (!state?.recording || !method.startsWith('Network.')) return;
     if (state.events.length >= DEBUGGER_EVENT_MAX) { state.dropped++; return; }
-    state.events.push([method,withoutCookieHeaders(params)]);
+    state.events.push([method,boundedEvent(params)]);
   });
   // The user can end a session from Chrome's notice bar; the next command then reports it.
   chrome.debugger.onDetach.addListener(source => { const state = debugged.get(source.tabId); if (state) { clearTimeout(state.timer); debugged.delete(source.tabId); } });
@@ -305,11 +296,11 @@ async function debuggerUpload(tab,a) {
     throw e;
   }
   const done = await read();
-  return {ok:true,execution:'executed',kind:'upload',viaDebugger:true,...(done ? {url:P.redactUrl(done.url),files:done.files} : {})};
+  return {ok:true,execution:'executed',kind:'upload',viaDebugger:true,...(done ? {url:done.url,files:done.files} : {})};
 }
 // Recipe protocol sessions: one attachment per tab, events buffered between commands. Commands are not
 // limited to a list or to the tab's site (2026-10-30: no site restrictions of our own; safety is the
-// task's permission mode and review). Recorded events still drop raw Cookie / Set-Cookie headers.
+// task's permission mode and review).
 async function cdpAction(tab,a) {
   const tabId = tab.id;
   if (a.op === 'begin') {
@@ -544,33 +535,10 @@ async function pageOperation(job) {
     const style = getComputedStyle(el); const r = el.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && !!(r.width || r.height);
   };
-  const SENSITIVE_AUTOCOMPLETE = new Set(['one-time-code','cc-number','cc-csc','cc-exp','cc-exp-month','cc-exp-year','current-password','new-password']);
-  // Checkout and OTP markup often omits standard autocomplete and names the field instead, so the
-  // boundary is enforced conservatively from the element's own naming as well.
-  const SENSITIVE_NAMES = new Set(['password','passwd','pwd','pass','card','cardnumber','ccnumber','ccnum','creditcard','debitcard','cvv','cvv2','cvc','cvc2','csc','cid','securitycode','otp','totp','hotp','mfa','2fa','passcode','pin','verificationcode','verifycode','activationcode','onetimecode']);
-  const named = el => [el.getAttribute('name'),el.id,el.getAttribute('placeholder'),el.getAttribute('aria-label'),el.getAttribute('data-testid')]
-    .filter(Boolean).join(' ').replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  // autocomplete is a space-separated token list (e.g. "section-checkout billing cc-number"), so
-  // exact attribute matching would let standard checkout and OTP fields through into refs and acts.
-  // Only form-like elements are judged by naming: a link or button labelled "apply gift card" is
-  // not a credential field, and hiding it would break legitimate interaction. Editability is taken
-  // from the platform (contenteditable="", "plaintext-only" and inherited editing all count), not
-  // from a literal attribute value, so the sensitivity check and the type branch agree.
-  // A nested editable region carries its meaning from the editing host that names it. The whole
-  // ancestor chain is walked: stopping at the nearest [contenteditable] would let an inner unnamed
-  // region or a contenteditable="false" node mask an outer host named like a credential.
-  const sensitive = el => {
-    if (el.matches('input[type=password],input[type=hidden]')) return true;
-    if ((el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).some(token => SENSITIVE_AUTOCOMPLETE.has(token))) return true;
-    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
-      const editable = !!node.isContentEditable || node.matches('input,textarea,select');
-      if (editable && named(node).some(token => SENSITIVE_NAMES.has(token))) return true;
-    }
-    return false;
-  };
-  // A page can hold an OTP, card number or password inside a contenteditable region. Those elements
-  // are excluded from refs, extract and text. Field selectors are not a proxy for that check: a named
-  // span inside an unnamed editing host is sensitive even though it does not match a field selector.
+  // Password, payment and one-time-code fields are usable like any field, as in Cindy's own browser
+  // (2026-10-30: no capability limits of our own; safety is the task's permission mode and review).
+  // Only hidden inputs stay out of refs, extract and text: they are not part of the page a user sees.
+  const sensitive = el => el.matches('input[type=hidden]');
   // Rendered-text extraction that never touches the live DOM: removing and re-inserting nodes fires
   // custom element lifecycle callbacks and MutationObserver, which would make a plain read mutate the
   // page. Rendering is approximated by skipping non-rendered and sensitive subtrees.
@@ -838,7 +806,6 @@ async function pageOperation(job) {
     } else {
       if (action === 'press' && !el) el = document.activeElement;
       if (!el || !el.isConnected || !visible(el)) return fail('ELEMENT_NOT_FOUND','Read the page again and choose a visible element.');
-      if (sensitive(el)) return fail('SENSITIVE_FIELD','Password, hidden, payment and one-time-code fields are not supported.');
       if (el.disabled) return fail('ELEMENT_DISABLED','This element is disabled.');
       if (action === 'click') { started = true; el.click(); }
       else if (action === 'hover') { started = true; el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})); }
@@ -880,7 +847,7 @@ function sanitizeResult(result) {
   let truncated = !!result.truncated;
   const out = {...result};
   if (typeof out.url === 'string') {
-    const redacted = P.redactUrl(out.url);
+    const redacted = out.url;
     out.url = redacted.length > PAGE_URL_MAX ? redacted.slice(0,PAGE_URL_MAX) : redacted;
     if (redacted.length > PAGE_URL_MAX) truncated = true;
   }
@@ -888,9 +855,9 @@ function sanitizeResult(result) {
   let budget = LINKS_BUDGET;
   const links = [];
   for (const link of out.links) {
-    // Redaction runs on the whole URL, the transfer cap on the redacted string, and a cap that
-    // actually shortens a URL is reported: an unmarked cut would look like a complete URL.
-    const redacted = P.redactUrl(String(link?.url));
+    // Links come back whole (2026-10-30: as in Cindy's own browser, so magic and signed links work);
+    // only the transfer cap applies, and a cap that shortens a URL is reported.
+    const redacted = String(link?.url);
     const url = redacted.slice(0,LINK_URL_MAX);
     if (url.length < redacted.length) truncated = true;
     if (url.length > budget) { truncated = true; continue; }
@@ -984,7 +951,7 @@ async function tabAction(job,tab,policy) {
           met = out?.[0]?.documentId === documentId && out[0].result === true;
         } catch { met = false; }
       }
-      if (met) return {ok:true,execution:'executed',tabId:current.id,url:P.redactUrl(current.url)};
+      if (met) return {ok:true,execution:'executed',tabId:current.id,url:current.url};
       if (Date.now() >= deadline) return fail('WAIT_TIMEOUT','The condition was not met before the timeout.','executed');
       await sleep(250);
     }
@@ -1014,8 +981,8 @@ async function mainWorldAction(job,tabId,documentId) {
   const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'MAIN',func:mainWorldOperation,args:[job.action,job.payload]});
   const result = out?.[0]?.documentId === documentId ? out[0].result : null;
   if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating it.','unknown');
-  if (Array.isArray(result.requests)) result.requests = result.requests.map(r => ({...r,url:P.redactUrl(String(r.url)).slice(0,LINK_URL_MAX)}));
-  if (result.response?.url) result.response.url = P.redactUrl(result.response.url);
+  if (Array.isArray(result.requests)) result.requests = result.requests.map(r => ({...r,url:String(r.url).slice(0,LINK_URL_MAX)}));
+  if (result.response?.url) result.response.url = String(result.response.url);
   return {...result,tabId};
 }
 // Runs in the page's own JavaScript context (MAIN world). Page tools are kept on a symbol so a second
@@ -1127,7 +1094,7 @@ async function handle(job,policy,target) {
       if (records.length>=(job.payload.limit || 20)) {truncated=true;break;}
       // Keep denied/unobserved tabs visible as bounded diagnostics. Never read
       // their title or expose their URL merely to make the list look complete.
-      const row=metadata ? {id:t.id,window:t.windowId,...(t.windowId===agentWindowId?{cindyWindow:true}:{}),title:metadata.title,...(metadata.url.length<=8192 ? {url:P.redactUrl(metadata.url)} : {url_omitted:true}),active:t.active,status:t.status} : {id:t.id,redacted:true,status:t.status,...diagnostic};
+      const row=metadata ? {id:t.id,window:t.windowId,...(t.windowId===agentWindowId?{cindyWindow:true}:{}),title:metadata.title,...(metadata.url.length<=8192 ? {url:metadata.url} : {url_omitted:true}),active:t.active,status:t.status} : {id:t.id,redacted:true,status:t.status,...diagnostic};
       const size=JSON.stringify(row).length;if (size>remaining) {truncated=true;break;}
       records.push(row);remaining-=size;
     }
@@ -1151,7 +1118,7 @@ async function handle(job,policy,target) {
       owned.set(canonical(job.payload.url),{id:created.id,actualUrl:loaded.url || job.payload.url,created:true,claimed:false,loading:false,used:Date.now()}); await remember();
       if (loaded.url && !P.check(policy,'open',loaded.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
       markAgentTab(created.id); await markAgentOpened(created.id);
-      return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url ? P.redactUrl(loaded.url) : undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
+      return {ok:true,execution:'executed',tabId:created.id,window:created.windowId,url:loaded.url || undefined,title:(loaded.title || '').slice(0,300),status:loaded.status};
     }
     let tab;
     if (Number.isInteger(job.payload.tabId)) {
@@ -1165,7 +1132,7 @@ async function handle(job,policy,target) {
         try { tab = await waitForLoad(tab.id); } catch { tab = await chrome.tabs.get(tab.id); }
         if (!P.check(policy,'navigate',tab.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site.','executed');
         markAgentTab(tab.id);
-        return {ok:true,execution:'executed',tabId:tab.id,url:P.redactUrl(tab.url),title:(tab.title || '').slice(0,300)};
+        return {ok:true,execution:'executed',tabId:tab.id,url:tab.url,title:(tab.title || '').slice(0,300)};
       }
     } else {
       network.assertSupported?.(job.payload.url,PAGE_ACCESS);

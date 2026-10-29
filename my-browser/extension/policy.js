@@ -5,7 +5,6 @@
   // user's own browser offers the same actions. What it must not do is disturb the user's own
   // browsing: new pages open in a separate background window and nothing steals focus.
   const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait', 'pdf', 'debuggerAccess', 'unmark'];
-  const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
   const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize', 'cdp'];
   // Actions that address no page: listing tabs, and checking or granting the on-demand debugger.
   const UNADDRESSED = ['tabs', 'debuggerAccess', 'unmark'];
@@ -116,7 +115,7 @@
       if (!payload.fields || typeof payload.fields !== 'object' || Array.isArray(payload.fields) || !Object.keys(payload.fields).length || Object.keys(payload.fields).length > 30) throw new Error('Extract requires 1–30 fields.');
       if (Object.keys(payload.fields).some(k => !k || k.length > 32 || /[\x00-\x1f]/.test(k))) throw new Error('Field names must contain 1–32 printable characters.');
       for (const spec of Object.values(payload.fields)) {
-        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && !EXTRACT_ATTRIBUTES.includes(spec.attr))) throw new Error('Each field needs a CSS selector; attr may only be href, src, datetime, title, alt, aria-label or role.');
+        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && (typeof spec.attr !== 'string' || !/^[A-Za-z_:][-A-Za-z0-9_:.]{0,99}$/.test(spec.attr)))) throw new Error('Each field needs a CSS selector; attr must be an attribute name.');
       }
       if (payload.after != null && !payload.multiple) throw new Error('after requires multiple records.');
     }

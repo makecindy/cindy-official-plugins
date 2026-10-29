@@ -157,9 +157,9 @@ test('a new page never jumps in front in Cindy\'s window while the user has it o
   same(h.calls.filter(c=>c[0]==='tabs.create').at(-1),['tabs.create',{url:'https://example.test/c',windowId:500,active:true}]);
 });
 
-// Site recipes drive the page through the debugger. There is no method list or site filter of our own
-// (2026-10-30); recorded network events still drop raw Cookie / Set-Cookie headers.
-test('recipe protocol sessions pass commands through; recorded events drop cookie headers',async()=>{
+// Site recipes drive the page through the debugger. There is no method list, site filter or header
+// stripping of our own (2026-10-30), as in Cindy's own browser.
+test('recipe protocol sessions pass commands and network events through',async()=>{
   const h=harness(undefined,undefined,{timers:'never'});
   const sent=[];let event;
   h.chrome.permissions.contains=async()=>true;
@@ -174,7 +174,7 @@ test('recipe protocol sessions pass commands through; recorded events drop cooki
   event({tabId:1},'Network.requestWillBeSentExtraInfo',{headers:{Cookie:'sid=1'}});
   event({tabId:1},'Network.responseReceived',{requestId:'r',response:{url:'https://www.example.test/api',headers:{'Set-Cookie':'sid=2','content-type':'application/json'}}});
   const events=await h.run('cdp',{...tab,op:'events'});
-  same(events.events,[['Network.responseReceived',{requestId:'r',response:{url:'https://www.example.test/api',headers:{'content-type':'application/json'}}}]]);
+  same(events.events,[['Network.requestWillBeSentExtraInfo',{headers:{Cookie:'sid=1'}}],['Network.responseReceived',{requestId:'r',response:{url:'https://www.example.test/api',headers:{'Set-Cookie':'sid=2','content-type':'application/json'}}}]]);
 });
 
 // Opening an address again keeps the earlier tab in the ledger, so it is still reclaimed when idle.
