@@ -512,3 +512,8 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 
 - **No fixed tab limit.** Like Cindy's own browser, pages the agent opens are no longer capped at 12. Tabs Cindy opened still close by themselves after 10 idle minutes.
 - **Tool descriptions match what the tools do.** The `browser_read` and `browser_tabs` descriptions and the manual now say that local and intranet pages are read and listed like any site unless blocked (reachable since October 28), and no longer mention a tab limit.
+
+## 0.4.53 navigation checks the target address (host package 0.4.74)
+
+- **The last authorization check before navigating covers the address being opened**, not only the page the tab shows now, so a site permission revoked after the acknowledgement stops the navigation itself.
+- Tabs Cindy opened are all remembered for the "user took over" handling; the list is no longer cut to the last 200 now that opening is not capped.

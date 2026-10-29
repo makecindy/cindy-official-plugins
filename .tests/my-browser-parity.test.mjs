@@ -231,3 +231,14 @@ test('open keeps earlier tabs of the same address and has no fixed tab limit',as
   assert.equal(first.ok,true);assert.equal(second.ok,true);assert.notEqual(first.tabId,second.tabId);
   for(let i=0;i<14;i++)assert.equal((await h.run('open',{url:'https://example.test/p'+i})).ok,true);
 });
+
+// The last check before navigating a tab covers the address being opened, not the page the tab shows now.
+test('navigate by tab id is refused when the target was revoked after the acknowledgement',async()=>{
+  const h=harness();
+  const revoked={...P.defaults(),read:{block:['blocked.test']}};
+  // The acknowledgement allowed it; the authorization answer carries the policy after the revocation.
+  const before=h.calls.length;
+  const out=await h.run('navigate',{url:'https://blocked.test/page',tabId:1},revoked);
+  assert.equal(out.ok,false);assert.equal(out.execution,'not_executed');
+  assert.equal(h.calls.slice(before).some(([name])=>name==='tabs.update'),false);
+});

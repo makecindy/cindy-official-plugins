@@ -131,7 +131,7 @@ async function loadAgentTabs() {
   if (!agentTabs) agentTabs = new Set((await agentStore.get('agentTabs')).agentTabs || []);
   return agentTabs;
 }
-const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs].slice(-200)});
+const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs]});
 async function markAgentOpened(tabId) {
   (await loadAgentTabs()).add(tabId); await saveAgentTabs();
   quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
@@ -1137,7 +1137,8 @@ async function handle(job,policy,target) {
       if (!tab) return fail('TAB_CLOSED','The tab is closed. List tabs again.');
       if (!P.check(policy,job.action,tab.url).ok) return P.check(policy,job.action,tab.url);
       if (job.action === 'navigate') {
-        const navigateGate = await authorizeDispatch(tab.url);
+        // The final check covers the address about to be loaded; the current page was checked above.
+        const navigateGate = await authorizeDispatch(job.payload.url);
         if (!navigateGate.ok) return {...navigateGate,execution:'not_executed'};
         navigating = true;
         await chrome.tabs.update(tab.id,{url:job.payload.url});
