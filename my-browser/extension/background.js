@@ -316,12 +316,13 @@ async function debuggerScreenshot(tab,a) {
     clip = {x:rect.x,y:rect.y,width:Math.min(rect.width,16384),height:Math.min(rect.height,16384),scale:1};
   }
   const format = a.type === 'jpeg' ? 'jpeg' : 'png';
-  await markAgentTab(tab.id,'hidden');
   // A minimized window renders nothing, so even the debugger cannot capture it: show Cindy's window
   // unfocused for the capture only.
   const win = await chrome.windows.get(tab.windowId);
   const reminimize = win.state === 'minimized' && tab.windowId === agentWindowId;
   if (reminimize) { await chrome.windows.update(tab.windowId,{state:'normal',focused:false}); await sleep(300); }
+  // Cindy's mark is hidden for the capture only and comes back however the capture ends.
+  await markAgentTab(tab.id,'hidden');
   const shot = await withDebugger(tab.id,async send => {
     if (a.fullPage && !clip) {
       const metrics = await send('Page.getLayoutMetrics');
@@ -329,8 +330,10 @@ async function debuggerScreenshot(tab,a) {
       clip = {x:0,y:0,width:Math.min(Math.ceil(size.width),16384),height:Math.min(Math.ceil(size.height),16384),scale:1};
     }
     return send('Page.captureScreenshot',{format,...(format === 'jpeg' ? {quality:85} : {}),...(clip ? {clip,captureBeyondViewport:true} : {}),fromSurface:true});
-  }).finally(() => reminimize && chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {}));
-  markAgentTab(tab.id);
+  }).finally(() => {
+    if (reminimize) chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {});
+    markAgentTab(tab.id);
+  });
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
 }
 async function connection(state) {
@@ -921,8 +924,8 @@ async function tabAction(job,tab,policy) {
       }
     } finally {
       if (reminimize) await chrome.windows.update(tab.windowId,{state:'minimized'}).catch(() => {});
+      markAgentTab(tab.id);
     }
-    markAgentTab(tab.id);
     const data = dataUrl.slice(dataUrl.indexOf(',')+1);
     const partial = a.fullPage || a.ref || a.selector;
     return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4),

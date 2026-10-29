@@ -185,3 +185,14 @@ test('open keeps earlier tabs of the same address and has no fixed tab limit',as
   for(let i=0;i<14;i++)assert.equal((await h.run('open',{url:'https://example.test/p'+i})).ok,true);
 });
 
+
+// Review 2026-10-29: a failed capture left Cindy's activity mark hidden for the rest of the operation.
+test('a failed screenshot shows Cindy\'s mark again',async()=>{
+  const h=harness();const marks=[];
+  h.chrome.tabs.sendMessage=async(tabId,message)=>{marks.push(message.hidden?'hidden':'shown');};
+  h.chrome.tabs.captureVisibleTab=async()=>{throw new Error('Cannot capture this page');};
+  const shot=await h.run('screenshot',{url:'https://example.test/user',tabId:1});
+  assert.equal(shot.ok,false);
+  assert.equal(marks.at(-1),'shown',JSON.stringify(marks));
+  assert.ok(marks.includes('hidden'));
+});

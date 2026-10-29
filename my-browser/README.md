@@ -522,3 +522,7 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 
 - **No site lists of our own.** The agent already has broad access on the computer, so My browser no longer keeps its own lists: the "Blocked from reading" list, the per-site interaction setting and the `browser_policy` tool are removed, and site recipes may send any DevTools command and read cookies without a per-site filter. Safety is the task's permission mode and review in Cindy, as in Cindy's own browser. Restrictions saved by older versions stay in storage unused; recorded network events still drop raw `Cookie` / `Set-Cookie` headers, and links in results still have their tokens masked.
 - With no lists to revoke, the final authorization checks added in 0.4.50 and 0.4.53 and the bundled bridge's revocation handling are gone too.
+
+## 0.4.55 activity mark after a failed screenshot (host package 0.4.76)
+
+- When a screenshot fails, Cindy's "operating this page" mark comes back instead of staying hidden.
