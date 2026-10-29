@@ -2,6 +2,8 @@
 
 Cold boots start muted. The speaker button in the viewer controls this device's computer playback; it does not change the computer's volume or enable microphone input. Apple changes apply immediately. Android currently requires a restart: the button asks first, explains that apps exit, and keeps device data. Later cold boots default to muted again.
 
+Apple restores the last nonzero volume remembered by the current worker. After the worker restarts, enabling a muted device uses the default volume of 60/100; the previous volume is not persisted.
+
 Agents use `device action=audio udid=…` to read the same state, adding `audioEnabled=true|false` to change it. Android changes require the user's consent to restart and `restart=true`. An explicitly audible cold boot uses `device action=boot audioEnabled=true`. A failed change is unconfirmed; inspect the device before retrying.
 
 The live sidebar's Add Device dialog also offers iOS memory modes. Successful creation selects the new device through the existing switch flow and updates the current task binding, keeping the source device running and the new device off until explicitly started. The selected mode carries into that device's startup picker. A failed selection is reported separately from completed creation; it does not replay creation.

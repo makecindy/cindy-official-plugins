@@ -12,6 +12,7 @@ const MODELS=[
   {identifier:'android:tablet',name:'Android Tablet',platform:'android',width:1600,height:2560,density:320},
 ];
 function ini(raw){return Object.fromEntries(raw.split(/\r?\n/).map(l=>/^\s*([^#;=]+?)\s*=\s*(.*?)\s*$/.exec(l)).filter(Boolean).map(m=>[m[1],m[2]]));}
+function processAlive(pid){try{process.kill(pid,0);return true;}catch(e){if(e.code==='ESRCH')return false;throw e;}}
 async function freePort(){return new Promise((resolve,reject)=>{const s=net.createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});}
 // adb keeps its signing key in the user's Android directory. The emulator
 // injects the key from ANDROID_EMULATOR_HOME, copying the adb key only when
@@ -49,7 +50,7 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
         if(!/^pid_\d+(?:_info)?\.ini$/.test(name))continue;
         const info=ini(await fs.readFile(path.join(directory,name),'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;}));
         if(info['avd.id']!==device.avdName||path.resolve(info['avd.dir']||'')!==path.resolve(device.directory))continue;
-        const pid=Number(name.match(/\d+/)[0]);try{process.kill(pid,0);}catch(e){if(e.code==='ESRCH')continue;throw e;}
+        const pid=Number(name.match(/\d+/)[0]);if(!processAlive(pid))continue;
         const port=Number(info['grpc.port']),serial=Number(info['port.serial']);
         if(!Number.isInteger(port)||port<1024||port>65535||!Number.isInteger(serial)||serial<5554||serial>5682||!info['grpc.token'])throw fail('DEVICE_DISCOVERY_UNCONFIRMED','The running private Android device has an invalid connection record. Inspect its state before changing this device.');
         return {port,token:info['grpc.token'],serial:`emulator-${serial}`,pid};
@@ -161,8 +162,8 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
     }
     try{await rpc(d.endpoint,'setVmState',{state:5},{deadline:Date.now()+10000});}catch{/* Shutdown closes its own connection; confirm below. */}
     // Discovery can disappear before QEMU exits and releases the AVD lock.
-    // A following audio restart must wait for our child to exit as well.
-    const until=Date.now()+30000;while(Date.now()<until){try{if(!await endpoint(d)&&!processes.has(d.udid))return {udid:d.udid,state:'Shutdown',execution:'executed'};}catch(e){e.execution='unknown';throw e;}await sleep(250);}
+    // Also wait for rediscovered processes inherited from a previous worker.
+    const until=Date.now()+30000;while(Date.now()<until){try{if(!await endpoint(d)&&!processes.has(d.udid)&&!processAlive(d.endpoint.pid))return {udid:d.udid,state:'Shutdown',execution:'executed'};}catch(e){e.execution='unknown';throw e;}await sleep(250);}
     throw fail('STOP_UNCONFIRMED','Android shutdown was requested but has not completed. Refresh device state.','unknown');
   }
   async function audioStatus(d){
