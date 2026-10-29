@@ -486,5 +486,8 @@ The plugin icon changes from the Cindy portrait to a Cindy-red browser window ho
 - **The page cannot remove Cindy's mark.** A page script could dispatch the event a reloaded content script uses to retire its predecessor. The event now only retires a copy whose extension context is gone; the live one ignores it.
 - Serbian and Kazakh captions in Latin script are no longer refused as the wrong language. The reading panel's model hint points to the plugin's "Model & tasks" setting in Cindy. The tab-limit message states the real limit (12).
 - The plugin no longer treats a transient refusal from Cindy's browser-extension slot as an older host, so it does not start its own bridge next to Cindy's; only an older host's rejection of the pipe type selects the bundled bridge.
+- **Site lists accept intranet hosts.** Local and private addresses and single-label intranet names such as `jira` or `localhost` can be listed, so an intranet site can be blocked on its own (they have been reachable like any site since October 28).
+- **Cindy asks for permissions when it has none cached.** The host refuses page jobs until it has this plugin's stored site permissions and sends a request event; the plugin pushes its permissions and paired browsers at once.
+- **No acting on the wrong tab after a browser restart.** The extension sends a per-launch id with each connection. Tab numbers start over when the browser restarts, so Cindy forgets the tabs it remembered and never applies an old number to a tab you restored.
 
 Update both the Cindy plugin and the Chrome extension. Permissions and the signed wire protocol are unchanged.

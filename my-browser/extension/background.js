@@ -346,11 +346,25 @@ async function connection(state) {
   await chrome.action.setBadgeText({text:state.connected ? '' : '!'});
   await chrome.action.setBadgeBackgroundColor({color:state.connected ? '#287ad7' : '#b87820'});
 }
+// One id per browser launch: storage.session survives the worker restarting but is cleared when the
+// browser restarts. Cindy drops the tab handles it remembered for this browser when the id changes,
+// because tab ids start over after a restart and an old handle could reach a restored tab.
+let browserBoot;
+function bootId() {
+  try {
+    return browserBoot ??= chrome.storage.session.get('cindyBrowserBoot').then(r => {
+      if (typeof r?.cindyBrowserBoot === 'string') return r.cindyBrowserBoot;
+      const id = crypto.randomUUID();
+      return chrome.storage.session.set({cindyBrowserBoot:id}).then(() => id,() => id);
+    }).catch(() => '');
+  } catch { return Promise.resolve(''); } // No session storage: connect without a launch id.
+}
 async function fetchJSON(base,path,session,body,timeout = 5000,version = wireVersion,auth = {}) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(),timeout);
+  const boot = await bootId();
   try {
     const response = await fetch(base+path,{method:body === undefined ? 'GET' : 'POST',
-      headers:{'X-My-Browser-Extension':chrome.runtime.id,'X-My-Browser-Origin':chrome.runtime.getURL('').replace(/\/$/,''),'X-My-Browser-Client':clientId,'X-My-Browser-Family':family,'X-My-Browser-Version':version,'X-My-Browser-Installed-Version':VERSION,...(auth.publicKey ? {'X-My-Browser-Key':auth.publicKey} : {}),...(auth.learningChallenge ? {'X-My-Browser-Learning-Challenge':auth.learningChallenge} : {}),...(auth.proof ? {'X-My-Browser-Proof':auth.proof} : {}),...(session ? {'X-My-Browser-Session':session} : {}),...(body === undefined ? {} : {'Content-Type':'application/json'})},
+      headers:{...(boot ? {'X-My-Browser-Boot':boot} : {}),'X-My-Browser-Extension':chrome.runtime.id,'X-My-Browser-Origin':chrome.runtime.getURL('').replace(/\/$/,''),'X-My-Browser-Client':clientId,'X-My-Browser-Family':family,'X-My-Browser-Version':version,'X-My-Browser-Installed-Version':VERSION,...(auth.publicKey ? {'X-My-Browser-Key':auth.publicKey} : {}),...(auth.learningChallenge ? {'X-My-Browser-Learning-Challenge':auth.learningChallenge} : {}),...(auth.proof ? {'X-My-Browser-Proof':auth.proof} : {}),...(session ? {'X-My-Browser-Session':session} : {}),...(body === undefined ? {} : {'Content-Type':'application/json'})},
       ...(body === undefined ? {} : {body:JSON.stringify(body)}),signal:controller.signal}).catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     const data = await response.json().catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     if (!response.ok) throw new Error(data.error || 'BRIDGE_REQUEST_FAILED');
