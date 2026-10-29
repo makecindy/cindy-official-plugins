@@ -5,7 +5,7 @@
   if(!api?.runtime?.id)return;
   const brandURL=globalThis.CindyBrandIcon||api.runtime.getURL('icons/48.png'),lifecycle=new AbortController();
   globalThis.__cindyReading=true;
-  let disposed=false,navigationTimer;
+  let disposed=false,navigationTimer,selectionPreferenceRevision=0;
   // A fresh copy of this script (extension update or reload) tells the copy still running on the page to
   // leave. The page shares the DOM and can dispatch the same event, and neither sender's event is trusted,
   // so the event only asks each copy to check itself: a copy whose extension context is gone (the old one)
@@ -31,7 +31,7 @@
     clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -61,10 +61,12 @@
   async function configure(){
     if(configuring)return configuring;
     configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';t=U.copy(locale);
+      const selectionRevision=selectionPreferenceRevision;
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
+      const selectionButtonEnabled=selectionRevision===selectionPreferenceRevision?stored.selectionButton===true:prefs.selectionButton;
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -115,7 +117,14 @@
     const download=el('a',t.downloadCindy,'text-link');download.href='https://cindy.app/download/';download.target='_blank';download.rel='noopener';
     body.append(el('h2',t.clientGuideTitle),intro,steps,actions,el('small',t.clientGuideNote),download);
   }
+  function selectionButtonCheckbox(){
+    const label=el('label',undefined,'row'),input=el('input');input.type='checkbox';input.checked=prefs.selectionButton===true;
+    input.className='selection-button-checkbox';input.style.cssText='width:18px;min-height:18px;flex:none';
+    input.addEventListener('change',()=>{prefs.selectionButton=input.checked;if(!input.checked){selectionButton?.remove();selectionButton=null;}savePreferences({selectionButton:input.checked}).catch(report);});
+    label.append(input,el('span',t.selectionButton));return label;
+  }
   function showSettings(){clear('settings');body.append(button(t.back,()=>videoSession?videoSettings():showPageHome(),'quiet'),el('h2',t.settings),field(t.webLanguage,languageControl()));
+    body.append(selectionButtonCheckbox());
     body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
     const theme=el('select');theme.setAttribute('aria-label',t.appearance);for(const [value,label]of [['light',t.light],['dark',t.dark]]){const o=el('option',label);o.value=value;theme.append(o);}theme.value=prefs.theme||pageTheme();theme.onchange=()=>{prefs.theme=theme.value;shadow.querySelector('.cindy-root').dataset.theme=prefs.theme;videoSession?.overlay?.update();savePreferences({theme:prefs.theme}).catch(report);};body.append(field(t.appearance,theme),el('h2',t.modelSettings),el('p',t.modelHint,'muted'));
     const link=el('a',t.open);link.href='cindy://focus';body.append(link);
@@ -134,6 +143,10 @@
     prefs.videoMode=stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
     if(['both','translation'].includes(stored.lastVideoMode))prefs.lastVideoMode=stored.lastVideoMode;
     prefs.videoSize=['small','medium','large'].includes(stored.videoSize)?stored.videoSize:prefs.videoSize;
+    selectionPreferenceRevision++;
+    prefs.selectionButton=stored.selectionButton===true;
+    if(!prefs.selectionButton){selectionButton?.remove();selectionButton=null;}
+    const checkbox=body?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
     prefs.bufferPause=stored.bufferPause===true;
     prefs.backgroundFill=stored.backgroundFill===true;
     prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
@@ -530,6 +543,8 @@
   }
   function download(text,name){const u=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),a=el('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
   let selectionButton, selectionStart, selectionDragged=false;
+  const selectionStartupRevision=selectionPreferenceRevision;
+  extensionCall(()=>api.storage.local.get('cindyReadingPreferences')).then(data=>{if(selectionStartupRevision===selectionPreferenceRevision)prefs.selectionButton=data.cindyReadingPreferences?.selectionButton===true;}).catch(()=>{});
   const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&n.hasAttribute('data-cindy-captions'));
   document.addEventListener('mousedown',e=>{
     if(!e.isTrusted||e.button!==0||selectionEventIsOurs(e))return;
@@ -546,7 +561,7 @@
     selection();selectionButton?.remove();selectionButton=null;
     // A click or double-click selects text on the page but is not an explicit
     // request for Cindy. Only a real drag may create the contextual entry.
-    if(!dragged||!window.getSelection()?.toString().trim()||!selected)return;
+    if(prefs.selectionButton!==true||!dragged||!window.getSelection()?.toString().trim()||!selected)return;
     if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.dataset.theme=pageTheme();root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
   },{signal:lifecycle.signal});
   // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.

@@ -4,13 +4,13 @@ import vm from 'node:vm';
 import fs from 'node:fs/promises';
 const source=await fs.readFile(new URL('../my-browser/extension/content.js',import.meta.url),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(send=async()=>({enabled:false})){
-  const timers=new Map(),sent=[],listeners=new Set(),nodes=[];let sequence=0;
+function fixture(send=async()=>({enabled:false}),preferences={}){
+  const timers=new Map(),sent=[],listeners=new Set(),nodes=[],storageListeners=new Set(),documentHandlers={};let sequence=0,stored={...preferences};
   class Node extends EventTarget {
     constructor(){super();nodes.push(this);this.handlers={};this.attrs={};this.children=[];this.className='';this.isConnected=true;this.style={props:Object.create(null),setProperty(k,v){this.props[k]=v;},getPropertyValue(k){return this.props[k]||'';},removeProperty(k){delete this.props[k];}};}
     dataset={};textContent='';
     addEventListener(name,fn){this.handlers[name]=fn;super.addEventListener(name,fn);}
-    append(...items){this.children.push(...items);for(const n of items)n.isConnected=true;}
+    append(...items){for(const n of items){if(n.parentNode)n.parentNode.children=n.parentNode.children.filter(child=>child!==n);this.children.push(n);n.parentNode=this;n.isConnected=true;}}
     setAttribute(k,v){this.attrs[k]=v;} remove(){this.isConnected=false;} attachShadow(){return new Node();}
     querySelector(sel){
       if(typeof sel==='string'&&sel.startsWith('.')){
@@ -27,13 +27,98 @@ function fixture(send=async()=>({enabled:false})){
     getBoundingClientRect(){return {top:0,bottom:0,left:0,right:0,width:0,height:0};}
   }
   const document=new EventTarget();document.querySelector=()=>null;document.title='Fixture';
+  const addDocumentListener=document.addEventListener.bind(document);
+  document.addEventListener=(name,fn,options)=>{documentHandlers[name]=fn;addDocumentListener(name,fn,options);};
   document.querySelectorAll=()=>[];
   document.createElement=document.createElementNS=()=>new Node();document.documentElement=new Node();document.body=new Node();
-  const chrome={runtime:{id:'fixture',getURL:p=>'chrome-extension://fixture/'+p,sendMessage:m=>{sent.push(m);return send(m);},onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}},storage:{local:{get:async()=>({})}}};
+  function setPreferences(value){const oldValue=stored;stored={...value};for(const fn of storageListeners)fn({cindyReadingPreferences:{oldValue,newValue:stored}},'local');}
+  const chrome={runtime:{id:'fixture',getURL:p=>'chrome-extension://fixture/'+p,sendMessage:m=>{sent.push(m);return send(m);},onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}},storage:{local:{get:async()=>({cindyReadingPreferences:{...stored}}),set:async data=>setPreferences(data.cindyReadingPreferences)},onChanged:{addListener:fn=>storageListeners.add(fn),removeListener:fn=>storageListeners.delete(fn)}}};
   const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://example.test/start',hostname:'example.test',origin:'https://example.test'},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
   vm.runInNewContext(source,context);
-  return {chrome,context,timers,sent,listeners,nodes};
+  return {chrome,context,timers,sent,listeners,nodes,documentHandlers,setPreferences,preferences:()=>stored};
 }
+
+function dragSelection(f){
+  f.context.window.getSelection=()=>({anchorNode:{parentElement:{closest:()=>null,innerText:'Fixture text'}},toString:()=> 'Fixture text'});
+  f.context.innerWidth=1200;f.context.innerHeight=800;
+  const event={isTrusted:true,button:0,clientX:20,clientY:20,composedPath:()=>[]};
+  f.documentHandlers.mousedown(event);
+  f.documentHandlers.mousemove({...event,clientX:80});
+  f.documentHandlers.mouseup({...event,clientX:80});
+}
+const visibleSelectionButtons=f=>f.nodes.filter(n=>n.dataset.cindySelectionEntry==='true'&&n.isConnected);
+
+test('selection popup is off by default and a saved opt-in is read without opening a panel',async()=>{
+  const disabled=fixture(),enabled=fixture(undefined,{selectionButton:true});await settle();
+  dragSelection(disabled);dragSelection(enabled);
+  assert.equal(visibleSelectionButtons(disabled).length,0);
+  assert.equal(visibleSelectionButtons(enabled).length,1);
+});
+
+test('selection preference changes hide a visible popup and apply to later drags',async()=>{
+  const f=fixture(undefined,{selectionButton:true});await settle();dragSelection(f);
+  assert.equal(visibleSelectionButtons(f).length,1);
+  f.setPreferences({selectionButton:false});
+  assert.equal(visibleSelectionButtons(f).length,0);
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
+  f.setPreferences({selectionButton:true});dragSelection(f);
+  assert.equal(visibleSelectionButtons(f).length,1);
+});
+
+test('selection checkbox persists its value and preserves unrelated preferences',async()=>{
+  const f=fixture(async()=>({ok:true,enabled:false}),{autoVideo:false});await settle();
+  const replies=[];[...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
+  await settle();await settle();
+  assert.equal(replies[0]?.ok,true);
+  const checkbox=f.nodes.find(n=>n.type==='checkbox');assert.ok(checkbox);assert.equal(checkbox.checked,false);
+  checkbox.checked=true;checkbox.handlers.change();await settle();await settle();
+  assert.equal(f.preferences().selectionButton,true);assert.equal(f.preferences().autoVideo,false);
+  const reopened=fixture(undefined,f.preferences());await settle();dragSelection(reopened);
+  assert.equal(visibleSelectionButtons(reopened).length,1);
+  f.setPreferences({...f.preferences(),selectionButton:false});assert.equal(checkbox.checked,false);
+});
+
+test('a late startup preference read cannot undo a newer storage change',async()=>{
+  let resolveRead;const f=fixture();
+  f.chrome.storage.local.get=()=>new Promise(resolve=>{resolveRead=resolve;});await settle();
+  f.setPreferences({selectionButton:false});
+  resolveRead({cindyReadingPreferences:{selectionButton:true}});await settle();
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
+});
+
+test('configure keeps a newer selection setting while legacy preferences are pending',async()=>{
+  let resolveLegacy;
+  const f=fixture(m=>m.request?.op==='preferences'?new Promise(resolve=>{resolveLegacy=resolve;}):Promise.resolve({ok:true,enabled:false}),{selectionButton:true});
+  await settle();const replies=[];
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
+  await settle();assert.equal(typeof resolveLegacy,'function');
+  f.setPreferences({selectionButton:false});
+  resolveLegacy({ok:true,target:'zh-CN'});await settle();await settle();
+  assert.equal(replies[0]?.ok,true);
+  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,false);
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
+});
+
+test('configure preserves a saved selection setting when no update intervenes',async()=>{
+  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:true});await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  await settle();await settle();
+  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,true);
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,1);
+});
+
+test('selection checkbox synchronizes after its settings body moves into the player shadow root',async()=>{
+  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:false});await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  await settle();await settle();
+  const checkbox=f.nodes.findLast(n=>n.type==='checkbox'),settingsBody=checkbox.parentNode.parentNode;
+  const originalParent=settingsBody.parentNode;
+  const playerRoot=f.context.document.createElement('div').attachShadow({mode:'closed'});
+  playerRoot.append(settingsBody);
+  assert.equal(originalParent.querySelector('.selection-button-checkbox'),null);
+  f.setPreferences({selectionButton:true});assert.equal(checkbox.checked,true);
+  f.setPreferences({selectionButton:false});assert.equal(checkbox.checked,false);
+});
 test('a reloaded extension leaves no URL polling or page listeners after runtime disappears',async()=>{
   const f=fixture();await settle();const tick=[...f.timers.values()][0];
   f.chrome.runtime=undefined;f.context.location.href+='?photo=1';
