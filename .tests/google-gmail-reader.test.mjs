@@ -18,8 +18,54 @@ function fixture(accounts = [{ id: 'a', email: 'a@example.com', status: 'connect
   // The Chinese assertions describe the zh-CN copy; the Host announces it.
   void handler({ type: 'host-context-changed', context: { locale } });
   ctx.listAccounts = async () => ({ ok: true, result: { accounts } });
-  return { ctx, calls, msg, invoke: message => handler(message), read: (url, options = {}) => ctx.readMailMessageLink({ url, ...options }) };
+  const lookupPhotos = ctx.lookupMailParticipantPhotos;
+  // Most tests isolate MIME/mark-read behavior from optional People enrichment.
+  ctx.lookupMailParticipantPhotos = async () => [];
+  return { ctx, calls, msg, lookupPhotos, invoke: message => handler(message), read: (url, options = {}) => ctx.readMailMessageLink({ url, ...options }) };
 }
+// Native-reader integration: only an exact email can supply a real photo. New
+// permission failures remain optional and account caches must never cross mailboxes.
+test('reader enriches exact participants, ignores defaults and caches within the selected account', async () => {
+  const f = fixture([{ id: 'a', email: 'a@example.test', status: 'connected' }, { id: 'b', email: 'b@example.test', status: 'connected' }]);
+  f.ctx.lookupMailParticipantPhotos = f.lookupPhotos;
+  f.msg.payload.headers.push({ name: 'To', value: '"Quoted, Name" <recipient@example.test>' });
+  const photo = 'https://lh3.googleusercontent.com/contact-photo';
+  const people = [];
+  f.ctx.cindy.fetch = async request => {
+    const url = new URL(request.url);
+    if (url.hostname !== 'people.googleapis.com') return { ok: true, status: 200, body: JSON.stringify(f.msg) };
+    people.push(request);
+    const email = url.searchParams.get('query');
+    const results = email === 'sender@example.com' ? [
+      { person: { emailAddresses: [{ value: 'sender@example.com.extra' }], photos: [{ url: 'https://lh3.googleusercontent.com/wrong-person' }] } },
+      { person: { emailAddresses: [{ value: 'SENDER@example.com' }], photos: [{ url: photo, default: true }, { url: 'https://tracker.example.test/photo' }, { url: photo }] } },
+    ] : [];
+    return { ok: true, status: 200, body: JSON.stringify({ results }) };
+  };
+  const url = 'https://mail.google.com/mail/#all/12345678';
+  const result = await f.read(url, { account: 'a' });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.participantPhotos)), [{ email: 'sender@example.com', url: photo }]);
+  assert.equal(people.length, 3, 'one warmup and two unique participants');
+  assert.ok(people.every(r => r.authAccount === 'a' && r.timeoutMs <= 1000 && !r.method));
+  await f.read(url, { account: 'a' });
+  assert.equal(people.length, 3, 'same-account repeated read uses bounded memory cache');
+  await f.read(url, { account: 'b' });
+  assert.equal(people.length, 6);
+  assert.ok(people.slice(3).every(r => r.authAccount === 'b'));
+});
+test('reader remains usable without contact permission or during a photo lookup failure', async () => {
+  for (const mode of ['denied', 'timeout', 'malformed']) {
+    const f = fixture(); f.ctx.lookupMailParticipantPhotos = f.lookupPhotos;
+    f.ctx.cindy.fetch = async request => {
+      if (!request.url.startsWith('https://people.googleapis.com/')) return { ok: true, status: 200, body: JSON.stringify(f.msg) };
+      if (mode === 'timeout') throw new Error('timeout');
+      return { ok: mode !== 'denied', status: mode === 'denied' ? 403 : 200, body: 'invalid' };
+    };
+    const result = await f.read('https://mail.google.com/mail/#all/12345678');
+    assert.equal(result.bodyText, '中文');
+    assert.equal(result.participantPhotos, undefined);
+  }
+});
 // Tool-result transport is downstream of Gmail writes. A failed delivery must
 // retain the same receipt across card, worker and mark-read paths, without replay.
 test('result delivery failure preserves card and worker execution receipts', async () => {

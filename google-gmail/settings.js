@@ -7,7 +7,7 @@
   // Copy follows only the host locale from GET /app-context; English is the fallback.
   // The host reloads this page after a language switch, so the locale is read once.
   var MESSAGES = {
-    'zh-CN': { title: '已连接的账户', scopeHint: '只授权 Gmail 权限，不会同时取得 Calendar、Drive 或 Sheets 权限。', connect: '连接账户', reauth: 'Google 授权已失效，请重新连接账号。',
+    'zh-CN': { title: '已连接的账户', scopeHint: '连接 Gmail 和 Google 通讯录：读写个人联系人，读取账号资料、其他联系人及可见的企业目录。已有账号需重新连接补充授权；未补充时原邮件功能仍可使用。', connect: '连接账户', reauth: 'Google 授权已失效，请重新连接账号。',
       connectUnknown: '无法确认连接结果，请重新打开插件详情核对账号状态，再决定是否重试。',
       loadFailed: '账号状态加载失败，请重试',
       reconnectPrompt: '请在浏览器中选择 {account}，重新授权此账号。',
@@ -28,7 +28,7 @@
         VAULT_WRITE_FAILED: '账号保存失败，请重试',
       },
     },
-    en: { title: 'Connected accounts', scopeHint: 'Grants Gmail access only; it does not also grant Calendar, Drive or Sheets access.', connect: 'Connect account', reauth: 'Your Google authorization has expired. Please reconnect your account.',
+    en: { title: 'Connected accounts', scopeHint: 'Connect Gmail and Google Contacts: manage personal contacts and read your profile, other contacts and visible Workspace directory. Reconnect existing accounts to grant the new permissions; existing mail access remains usable.', connect: 'Connect account', reauth: 'Your Google authorization has expired. Please reconnect your account.',
       connectUnknown: 'Connection outcome is unknown. Reopen plugin details and check the account status before deciding whether to retry.',
       loadFailed: 'Could not load the account status. Try again.',
       reconnectPrompt: 'In the browser, select {account} to reauthorize this account.',
@@ -49,7 +49,7 @@
         VAULT_WRITE_FAILED: 'Could not save the account. Try again.',
       },
     },
-    ja: { title: '接続済みアカウント', scopeHint: 'Gmail の権限だけを許可し、Calendar、Drive、Sheets の権限は要求しません。', connect: 'アカウントを接続', reauth: 'Google の認証が期限切れです。アカウントを再接続してください。',
+    ja: { title: '接続済みアカウント', scopeHint: 'Gmail と Google コンタクトを接続：個人の連絡先を管理し、プロフィール、その他の連絡先、閲覧可能な組織ディレクトリを読み取ります。既存アカウントは再接続で権限を追加できます。追加前も既存のメール権限は使用できます。', connect: 'アカウントを接続', reauth: 'Google の認証が期限切れです。アカウントを再接続してください。',
       connectUnknown: '接続結果を確認できません。プラグインの詳細を開き直してアカウントの状態を確認してから、再試行するか判断してください。',
       loadFailed: 'アカウントの状態を読み込めませんでした。再試行してください。',
       reconnectPrompt: 'ブラウザで {account} を選び、このアカウントを再認証してください。',
@@ -70,7 +70,7 @@
         VAULT_WRITE_FAILED: 'アカウントを保存できませんでした。再試行してください。',
       },
     },
-    ko: { title: '연결된 계정', scopeHint: 'Gmail 권한만 승인하며 Calendar, Drive 또는 Sheets 권한은 요청하지 않습니다.', connect: '계정 연결', reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
+    ko: { title: '연결된 계정', scopeHint: 'Gmail 및 Google 연락처 연결: 개인 연락처를 관리하고 프로필, 기타 연락처 및 열람 가능한 조직 디렉터리를 읽습니다. 기존 계정은 재연결하여 권한을 추가하세요. 추가 전에도 기존 메일 권한은 사용할 수 있습니다.', connect: '계정 연결', reauth: 'Google 인증이 만료되었습니다. 계정을 다시 연결하세요.',
       connectUnknown: '연결 결과를 확인할 수 없습니다. 플러그인 상세 페이지를 다시 열어 계정 상태를 확인한 후 재시도 여부를 결정하세요.',
       loadFailed: '계정 상태를 불러오지 못했습니다. 다시 시도하세요.',
       reconnectPrompt: '브라우저에서 {account}을(를) 선택해 이 계정을 다시 승인하세요.',
