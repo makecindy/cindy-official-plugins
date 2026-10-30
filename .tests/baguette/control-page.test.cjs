@@ -574,6 +574,17 @@ test('idle countdown card appears only in the last minute and keeps the device a
  assert.equal(calls.filter(c=>c.action==='activity').length,1);assert.equal(dom.byId.dock.querySelector('.idle'),null);
 });
 
+test('viewer-protected status removes an existing idle warning without a continue click',async()=>{
+ for(const template of ['control.html','control.zh-CN.html'])for(const viewerPlatform of ['ios','android']){
+  let deadline=Date.now()+42_000;
+  const f=await boot({template,respond:()=>status({viewerPlatform,idleDeadline:deadline})});
+  f.tick();assert.ok(f.dom.byId.dock.querySelector('.idle'));
+  deadline=null;await f.poll();f.tick();
+  assert.equal(f.dom.byId.dock.querySelector('.idle'),null);
+  assert.equal(f.calls.filter(c=>c.action==='activity').length,0,'no interaction is required to keep watching');
+ }
+});
+
 test('sidebar creation offers modes and selects the new off device without booting or stopping either device',async()=>{
  for(const template of ['control.html','control.zh-CN.html'])for(const mode of ['saving','standard','minimal']){
   const created={udid:other,name:'New phone',state:'Shutdown',runtime:'r.iOS-27',deviceType:'t.iPhone'};

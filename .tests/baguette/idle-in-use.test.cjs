@@ -29,6 +29,25 @@ test('turning simulators off still stops devices that are in use',async t=>{
  assert.equal(f.state(),'Shutdown');
 });
 
+test('a watched screen has no shutdown countdown before or after the idle deadline',async t=>{
+ let open=true;
+ const f=await fixture(t,{viewing:()=>open});
+ const {idleLeft}=require('../../baguette-simulator/node/control-model.js');
+ // No touch input: enter the warning's final minute, then cross several idle periods.
+ for(const elapsed of [14.5,1,16,16]){
+  f.advance(elapsed*60000);
+  const status=await f.runtime.status();
+  assert.equal(status.idleDeadline,null,'watching must not advertise a shutdown deadline');
+  assert.equal(idleLeft({...status,device:status.devices[0]},0),null);
+  await f.runtime.checkIdle();
+  assert.equal(f.state(),'Booted');
+ }
+ open=false;
+ assert.equal(typeof (await f.runtime.status()).idleDeadline,'number');
+ f.advance(16*60000);await f.runtime.checkIdle();
+ assert.equal(f.state(),'Shutdown','normal idle cleanup still works after the viewer closes');
+});
+
 test('unknown external use defers idle shutdown until a later confirmed idle period, while manual stop still works',async t=>{
  let unavailable=true;
  const f=await fixture(t,{inUse:async()=>{if(unavailable)throw Error('ps timed out');return false;}});
@@ -111,8 +130,8 @@ test('an open page without a stream prevents idle shutdown, including during sta
  const context={module:{exports:{}},process,Date:class extends Date{static now(){return clock;}},require:name=>require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name)};
  vm.runInNewContext(await fs.readFile('baguette-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.bridgeForTest=initializeBridge;',context);
  const viewer=context.module.exports;
- const f=await fixture(t,{inUse:async()=>viewer.viewing()});
- viewer.configureControls({status:async()=>{if(failStatus)throw Error('temporarily unavailable');return {devices:[]};}});
+ const f=await fixture(t,{inUse:async()=>viewer.viewing(),viewing:()=>viewer.viewing()});
+ viewer.configureControls({status:async()=>{if(failStatus)throw Error('temporarily unavailable');return f.runtime.status();}});
  const server={base:'http://127.0.0.1:1',port:1};
  t.after(()=>server.clipboard?.close());
  await viewer.bridgeForTest(server,path.join(dir,'devices'),async()=>{});
@@ -124,7 +143,9 @@ test('an open page without a stream prevents idle shutdown, including during sta
  const token=bridge.fragment.split('.')[1];
  for(const unavailable of [false,true]){
   failStatus=unavailable;clock+=16*60000;
-  assert.equal((await poll(token)).status,unavailable?503:200);
+  const response=await poll(token);
+  assert.equal(response.status,unavailable?503:200);
+  if(!unavailable)assert.equal((await response.json()).idleDeadline,null,'authenticated viewer status suppresses the countdown');
   f.advance(16*60000);await f.runtime.checkIdle();
   assert.equal(f.state(),'Booted','an open page protects the device');
  }
