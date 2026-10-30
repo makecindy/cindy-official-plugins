@@ -1,0 +1,109 @@
+{
+  "date": "2026-10-30",
+  "revision": "space-breakfast-video",
+  "assets": [
+    {
+      "file": "assets/icon-original-256.png",
+      "width": 256,
+      "height": 256,
+      "sha256": "87db34c24ddc0154a7d67ee0f54c5b487aa64118b3bd50092035bab4112932a6"
+    },
+    {
+      "file": "assets/promo-marquee.png",
+      "width": 1400,
+      "height": 560,
+      "sha256": "1551ae1301e710e7c624f80a64f452ce3919b776a037e39bf7acf9b67b9b86c4"
+    },
+    {
+      "file": "assets/promo-small.png",
+      "width": 440,
+      "height": 280,
+      "sha256": "d10666608fde98d9b86bba3b8de623d80f10412c201acec5a91a4ca49b0d34dc"
+    },
+    {
+      "file": "assets/store-icon-128.png",
+      "width": 128,
+      "height": 128,
+      "sha256": "0de148e43a744209d7146ed7911be6fac3625ced6c965711e098cbe4575d1442"
+    },
+    {
+      "file": "assets/video-space-breakfast.png",
+      "width": 1672,
+      "height": 941,
+      "sha256": "e99d8f347bf1ee3189788045e17137da4176caa7971053e828d30b92edae6f38"
+    },
+    {
+      "file": "screenshots/en-1.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "eaadb0e25ceeda9ee6754eac25e887f77467697c6d283c3b8146039bbc37e662"
+    },
+    {
+      "file": "screenshots/en-2.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "680ebd2da2f7ef8988a92126912b0533e4f0dcbcdb02ba950cb59727cf15a037"
+    },
+    {
+      "file": "screenshots/en-3.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "4634407f42be02a01bfaa2bf31b10630ae24c771b8faf5c62dcbb27c5186ba92"
+    },
+    {
+      "file": "screenshots/en-4.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "e5ec4cef939c173753d7ad1e54d871a8493950dbd6356aa4d8e3aaa03e0c55f3"
+    },
+    {
+      "file": "screenshots/en-5.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "217687147d71fc30c8b1cb03c512959e7765be3e5717d4a5c22d46ab6e1c7060"
+    },
+    {
+      "file": "screenshots/zh-CN-1.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "1f88044ede9b59632e6f523ce053adccb57e8f677d343c82e9d0796bb048210b"
+    },
+    {
+      "file": "screenshots/zh-CN-2.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "51e59a7d6d2a143feea4a0408357cefda59138cb51f7030fefc2d220e68e27bc"
+    },
+    {
+      "file": "screenshots/zh-CN-3.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "3ac220c96612d2794806c766b2c0ad58ff9d2258ef67c085eead7c267b3d7bbd"
+    },
+    {
+      "file": "screenshots/zh-CN-4.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "d4f9c440e6910ed82e7ac94218da2b531f5f685bd5d644271b206dd116dc2485"
+    },
+    {
+      "file": "screenshots/zh-CN-5.png",
+      "width": 1280,
+      "height": 800,
+      "sha256": "555a4a3f2ff4e0f406a59d516e2d42a630d0a46e343d4951687847e63642fd7d"
+    }
+  ],
+  "submittedAt": "2026-10-30T07:25:21Z",
+  "autoPublish": true,
+  "uploadedAssets": [
+    "assets/store-icon-128.png",
+    "screenshots/en-1.png",
+    "screenshots/en-2.png",
+    "screenshots/en-3.png",
+    "screenshots/en-4.png",
+    "screenshots/en-5.png",
+    "assets/promo-small.png",
+    "assets/promo-marquee.png"
+  ],
+  "description": "PNG assets archived from the 2026-10-30 Chrome Web Store submission; uploadedAssets lists only the selected global set."
+}

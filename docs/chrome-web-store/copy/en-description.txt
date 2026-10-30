@@ -1,0 +1,22 @@
+Bring Cindy into the Chrome you use every day. Give your AI assistant the context of the current page to research, organize information, and help with tasks on the web.
+
+Your browser. Your AI assistant.
+• Use your existing website sign-ins to let Cindy read pages and act on your requests.
+• Compare information across pages and collect key points with source links, with less copying around.
+• Select text to translate or explain it, or bring it into a new Cindy task.
+• Pages opened by Cindy for a task appear in a separate window, apart from your everyday browsing.
+
+Read the web. Follow the video.
+• Read webpages with inline bilingual translation, keeping the original in context.
+• Watch YouTube with subtitles inside the player. Choose bilingual, original-only, or translation-only display and select your target language.
+• Prepare video translations in sections, with progress information and reusable translations.
+• Read PDF documents and import subtitle files.
+
+Enable more when you need it
+With Chrome's optional debugging permission enabled in extension Options, Cindy can export webpages as PDF, capture full-page or background-tab screenshots, upload files, and run browser tasks that need debugging or network access. Optional tab grouping helps identify Cindy's pages.
+
+Getting started
+Requires a current Cindy desktop application and a configured AI text model. Enable the Cindy Chrome plugin for reading and translation, and keep Cindy running while using these features. To let Cindy work in your Chrome, select My browser in Cindy's browser settings. This extension does not include an AI subscription. Model availability, translation quality, and response time depend on your selected provider and settings. Some browser-protected pages cannot be accessed.
+
+How data is processed
+When you request translation or browser assistance, relevant page text, subtitles, documents, images, form values, URLs, and task results may be sent to Cindy on your computer and processed by your configured AI provider. Depending on your task, this may include personal communications, health or financial information, location information, and authentication data. With optional debugging permission, browser tasks can also access site cookies and network information. Cindy can execute task-specific JavaScript in a webpage's context. Review the task and permission settings in Cindy before granting access to sensitive pages.

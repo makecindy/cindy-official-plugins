@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Cindy Chrome · 商店装修预览</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f4f0;
+        --fg: #22252a;
+        --muted: #77736e;
+        --panel: #fff;
+        --line: #dedbd4;
+        --accent: #e51935;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.7 -apple-system,
+          BlinkMacSystemFont,
+          "PingFang SC",
+          sans-serif;
+      }
+      main {
+        max-width: 1320px;
+        margin: auto;
+        padding: 48px 32px 80px;
+      }
+      header {
+        max-width: 800px;
+        margin-bottom: 32px;
+      }
+      .brand {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        font-weight: 600;
+      }
+      .brand img {
+        width: 48px;
+        height: 48px;
+      }
+      h1 {
+        font-size: clamp(28px, 4vw, 48px);
+        letter-spacing: -1.5px;
+        line-height: 1.2;
+        margin: 24px 0 16px;
+      }
+      h2 {
+        font-size: 24px;
+        line-height: 1.3;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      a {
+        color: inherit;
+        text-underline-offset: 4px;
+      }
+      nav {
+        display: flex;
+        gap: 10px;
+        position: sticky;
+        top: 0;
+        padding: 12px 0;
+        background: var(--bg);
+        z-index: 2;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        padding: 8px 22px;
+        background: var(--panel);
+        color: var(--fg);
+      }
+      button[aria-pressed="true"] {
+        background: var(--fg);
+        color: var(--bg);
+      }
+      .shots {
+        display: grid;
+        gap: 32px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      figure {
+        margin: 0;
+        min-width: 0;
+      }
+      figure:first-child {
+        grid-column: 1/-1;
+      }
+      figcaption {
+        margin: 12px 0;
+        font-weight: 500;
+      }
+      figcaption span {
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: 8px;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+      figure img {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      .download {
+        font-size: 12px;
+        color: var(--muted);
+        display: inline-block;
+        margin-top: 8px;
+      }
+      .copy,
+      .assets {
+        margin-top: 48px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: inherit;
+        line-height: 1.85;
+        max-width: 850px;
+      }
+      .assetgrid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      .icon {
+        padding: 24px;
+        background: var(--panel);
+        width: 176px;
+        border-radius: 16px;
+      }
+      .marquee {
+        grid-column: 1/-1;
+      }
+      .note {
+        margin-top: 48px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 24px 16px 48px;
+        }
+        .shots,
+        .assetgrid {
+          grid-template-columns: 1fr;
+        }
+        .shots {
+          gap: 24px;
+        }
+        h1 {
+          letter-spacing: -0.7px;
+        }
+        .copy,
+        .assets {
+          margin-top: 32px;
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #18191c;
+          --fg: #f2f0ed;
+          --muted: #aba8a2;
+          --panel: #24262a;
+          --line: #3b3c41;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand">
+          <img
+            src="assets/icon-original-256.png"
+            alt="现有 Cindy Chrome 插件图标"
+          />Cindy for Chrome
+        </div>
+        <h1>你的浏览器。<br />你的 AI 助手。</h1>
+        <p class="muted">
+          商店装修首版 · 沿用现有插件图标<br />中英文各 5
+          张截图、宣传图与商店介绍。已上传英文版 5
+          张截图、图标、宣传图及中英文介绍；2026-10-30 已重新提交
+          0.4.60，提交时为待审核、通过后自动发布。中文截图保留为备用。
+        </p>
+      </header>
+      <nav aria-label="截图语言">
+        <button type="button" data-locale="zh-CN" aria-pressed="true">
+          简体中文</button
+        ><button type="button" data-locale="en" aria-pressed="false">
+          English
+        </button>
+      </nav>
+      <section id="zh-CN" class="locale">
+        <div class="shots">
+          <figure>
+            <figcaption><span>01</span> 把当前网页交给 Cindy</figcaption>
+            <a href="screenshots/zh-CN-1.png" target="_blank"
+              ><img
+                src="screenshots/zh-CN-1.png"
+                alt="把当前网页交给 Cindy"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/zh-CN-1.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>02</span> 在浏览器里处理任务</figcaption>
+            <a href="screenshots/zh-CN-2.png" target="_blank"
+              ><img
+                src="screenshots/zh-CN-2.png"
+                alt="在浏览器里处理任务"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/zh-CN-2.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>03</span> 双语网页阅读</figcaption>
+            <a href="screenshots/zh-CN-3.png" target="_blank"
+              ><img
+                src="screenshots/zh-CN-3.png"
+                alt="双语网页阅读"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/zh-CN-3.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>04</span> 视频双语字幕</figcaption>
+            <a href="screenshots/zh-CN-4.png" target="_blank"
+              ><img
+                src="screenshots/zh-CN-4.png"
+                alt="视频双语字幕"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/zh-CN-4.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>05</span> 按需开启可选能力</figcaption>
+            <a href="screenshots/zh-CN-5.png" target="_blank"
+              ><img
+                src="screenshots/zh-CN-5.png"
+                alt="按需开启可选能力"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/zh-CN-5.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+        </div>
+        <section class="copy">
+          <h2>商店介绍 · 简体中文</h2>
+          <p class="muted">短介绍建议稿</p>
+          <p>
+            连接 Cindy 与你的
+            Chrome：使用已有登录状态查资料、处理网页任务，支持双语阅读、视频字幕与
+            PDF 阅读。
+          </p>
+          <p class="muted">详细介绍</p>
+          <pre>
+把 Cindy 带进你每天使用的 Chrome。带上当前网页的上下文，让 AI 助手接着查资料、整理信息、处理网页上的任务。
+
+你的浏览器，你的 AI 助手
+• 沿用已有的网站登录状态，让 Cindy 读取网页并按任务要求操作。
+• 对比多页资料、整理要点和来源，减少来回复制粘贴。
+• 选中一段文字，翻译、解释，或带着它新建 Cindy 任务。
+• Cindy 为任务打开的页面位于单独窗口，方便与日常浏览区分。
+
+读懂网页，也跟上视频
+• 双语网页阅读：在原文旁保留译文，连同上下文一起理解。
+• YouTube 播放器内字幕：选择双语、仅原文或仅译文，并设置目标语言。
+• 视频翻译分段准备，显示处理进度并复用已有译文。
+• 支持 PDF 阅读和字幕文件导入。
+
+需要时，再开启更多能力
+在 Chrome 扩展选项中开启可选调试权限后，Cindy 可按任务需要导出网页 PDF、截取完整页面或后台标签页、上传文件，以及处理需要调试或网络访问的浏览器任务。可选标签分组帮助你识别 Cindy 打开的页面。
+
+开始使用
+需要当前版本的 Cindy 桌面应用，以及已配置的 AI 文本模型。阅读与翻译功能还需启用 Cindy Chrome 插件。使用时请保持 Cindy 运行；让助手操作你的 Chrome 时，在 Cindy 的浏览器选择中选用“我的浏览器”。本扩展不包含 AI 订阅。模型可用性、翻译质量和响应速度取决于所选服务商与设置；部分受 Chrome 保护的页面无法访问。
+
+数据如何处理
+当你请求翻译或浏览器协助时，相关网页文字、字幕、文档、图片、表单内容、网址与任务结果可能发送到本机 Cindy，并由你配置的 AI 服务商处理。随任务内容不同，这些数据可能包括个人通信、健康或财务信息、位置信息及身份验证数据。开启可选调试权限后，浏览器任务还可访问网站 Cookie 和网络信息。Cindy 可在网页环境中执行与任务有关的 JavaScript。访问敏感页面前，请检查 Cindy 中的任务与权限设置。
+</pre>
+          <a href="copy/zh-CN-description.txt" download>下载详细介绍 TXT</a> ·
+          <a href="copy/zh-CN-summary.txt" download>下载短介绍 TXT</a>
+        </section>
+      </section>
+      <section id="en" class="locale" hidden>
+        <div class="shots">
+          <figure>
+            <figcaption><span>01</span> Start with the current page</figcaption>
+            <a href="screenshots/en-1.png" target="_blank"
+              ><img
+                src="screenshots/en-1.png"
+                alt="Start with the current page"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/en-1.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>02</span> Work in your browser</figcaption>
+            <a href="screenshots/en-2.png" target="_blank"
+              ><img
+                src="screenshots/en-2.png"
+                alt="Work in your browser"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/en-2.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>03</span> Bilingual web reading</figcaption>
+            <a href="screenshots/en-3.png" target="_blank"
+              ><img
+                src="screenshots/en-3.png"
+                alt="Bilingual web reading"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/en-3.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>04</span> Bilingual video subtitles</figcaption>
+            <a href="screenshots/en-4.png" target="_blank"
+              ><img
+                src="screenshots/en-4.png"
+                alt="Bilingual video subtitles"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/en-4.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+          <figure>
+            <figcaption><span>05</span> Optional capabilities</figcaption>
+            <a href="screenshots/en-5.png" target="_blank"
+              ><img
+                src="screenshots/en-5.png"
+                alt="Optional capabilities"
+                width="1280"
+                height="800"
+                loading="lazy" /></a
+            ><a class="download" href="screenshots/en-5.png" download
+              >下载 PNG · 1280 × 800</a
+            >
+          </figure>
+        </div>
+        <section class="copy">
+          <h2>商店介绍 · English</h2>
+          <p class="muted">短介绍建议稿</p>
+          <p>
+            Connect Cindy to your Chrome for browser tasks, bilingual webpages,
+            video subtitles, and PDF reading.
+          </p>
+          <p class="muted">详细介绍</p>
+          <pre>
+Bring Cindy into the Chrome you use every day. Give your AI assistant the context of the current page to research, organize information, and help with tasks on the web.
+
+Your browser. Your AI assistant.
+• Use your existing website sign-ins to let Cindy read pages and act on your requests.
+• Compare information across pages and collect key points with source links, with less copying around.
+• Select text to translate or explain it, or bring it into a new Cindy task.
+• Pages opened by Cindy for a task appear in a separate window, apart from your everyday browsing.
+
+Read the web. Follow the video.
+• Read webpages with inline bilingual translation, keeping the original in context.
+• Watch YouTube with subtitles inside the player. Choose bilingual, original-only, or translation-only display and select your target language.
+• Prepare video translations in sections, with progress information and reusable translations.
+• Read PDF documents and import subtitle files.
+
+Enable more when you need it
+With Chrome&#x27;s optional debugging permission enabled in extension Options, Cindy can export webpages as PDF, capture full-page or background-tab screenshots, upload files, and run browser tasks that need debugging or network access. Optional tab grouping helps identify Cindy&#x27;s pages.
+
+Getting started
+Requires a current Cindy desktop application and a configured AI text model. Enable the Cindy Chrome plugin for reading and translation, and keep Cindy running while using these features. To let Cindy work in your Chrome, select My browser in Cindy&#x27;s browser settings. This extension does not include an AI subscription. Model availability, translation quality, and response time depend on your selected provider and settings. Some browser-protected pages cannot be accessed.
+
+How data is processed
+When you request translation or browser assistance, relevant page text, subtitles, documents, images, form values, URLs, and task results may be sent to Cindy on your computer and processed by your configured AI provider. Depending on your task, this may include personal communications, health or financial information, location information, and authentication data. With optional debugging permission, browser tasks can also access site cookies and network information. Cindy can execute task-specific JavaScript in a webpage&#x27;s context. Review the task and permission settings in Cindy before granting access to sensitive pages.
+</pre>
+          <a href="copy/en-description.txt" download>下载详细介绍 TXT</a> ·
+          <a href="copy/en-summary.txt" download>下载短介绍 TXT</a>
+        </section>
+      </section>
+      <section class="assets">
+        <h2>图标与宣传图</h2>
+        <div class="assetgrid">
+          <figure>
+            <figcaption>商店图标 · 128 × 128</figcaption>
+            <div class="icon">
+              <img
+                src="assets/store-icon-128.png"
+                alt="商店图标"
+                width="128"
+                height="128"
+              />
+            </div>
+            <a class="download" href="assets/store-icon-128.png" download
+              >下载 PNG</a
+            >
+          </figure>
+          <figure>
+            <figcaption>小型宣传图 · 440 × 280</figcaption>
+            <img
+              src="assets/promo-small.png"
+              alt="Cindy 小型宣传图"
+              width="440"
+              height="280"
+            /><a class="download" href="assets/promo-small.png" download
+              >下载 PNG</a
+            >
+          </figure>
+          <figure class="marquee">
+            <figcaption>大型宣传图 · 1400 × 560</figcaption>
+            <img
+              src="assets/promo-marquee.png"
+              alt="Cindy 大型宣传图"
+              width="1400"
+              height="560"
+            /><a class="download" href="assets/promo-marquee.png" download
+              >下载 PNG</a
+            >
+          </figure>
+        </div>
+      </section>
+      <p class="note">
+        界面图使用 0.4.60 原扩展 UI 与示例内容；任务指令为示例，视频画面为 AI
+        生成的原创场景与双语字幕示意。<a href="README.md">素材来源与上传说明</a>
+      </p>
+    </main>
+    <script>
+      document.querySelectorAll("[data-locale]").forEach((b) =>
+        b.addEventListener("click", () => {
+          document
+            .querySelectorAll(".locale")
+            .forEach((s) => (s.hidden = s.id !== b.dataset.locale));
+          document
+            .querySelectorAll("[data-locale]")
+            .forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        }),
+      );
+    </script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "cindy-chrome-store-assets",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "render": "node build.mjs",
+    "verify": "node verify.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.60.0"
+  }
+}

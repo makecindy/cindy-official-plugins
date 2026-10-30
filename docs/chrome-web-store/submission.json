@@ -1,0 +1,24 @@
+{
+  "submittedAt": "2026-10-30T07:25:21Z",
+  "extensionId": "dmbhhhdijpeaibfeocdcjhfefkgpkeef",
+  "version": "0.4.60",
+  "liveVersionAtSubmission": "0.4.22",
+  "autoPublish": true,
+  "listingScope": "global",
+  "screenshotLocale": "en",
+  "descriptionLanguages": ["en", "zh-CN"],
+  "assets": [
+    "assets/store-icon-128.png",
+    "screenshots/en-1.png",
+    "screenshots/en-2.png",
+    "screenshots/en-3.png",
+    "screenshots/en-4.png",
+    "screenshots/en-5.png",
+    "assets/promo-small.png",
+    "assets/promo-marquee.png"
+  ],
+  "statusAtSubmission": "pending_review",
+  "sourceCommit": "2bf3f8227d5dbfde81788424ab1a1d09dbf91aeb",
+  "descriptionFile": "copy/global-description.txt",
+  "note": "Historical submission record, not a live status feed. Chinese screenshots are alternatives, not part of the uploaded global set. Account identifiers, dashboard snapshots and private upload receipts are not included."
+}
