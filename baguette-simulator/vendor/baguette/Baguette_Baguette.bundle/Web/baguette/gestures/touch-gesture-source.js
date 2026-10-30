@@ -181,6 +181,9 @@
       const update = (e) => {
         e.preventDefault();
         if (e.type === 'touchcancel' || e.touches.length > 2) { release(); return; }
+        // A hidden/disabled view can still receive the tail of the old host
+        // gesture. Only a fresh begin may create contacts after cancellation.
+        if (e.type !== 'touchstart' && !contacts.length) return;
         const next = Array.from(e.touches).sort((a,b) => a.identifier-b.identifier)
           .map(t => ({ id:t.identifier, point:this._screenPoint(t.clientX,t.clientY), x:t.clientX,y:t.clientY }));
         if (next.some(t => !t.point.inside)) { release(); return; }
@@ -211,11 +214,15 @@
       // before the second finger arrives through Chromium's input synthesizer.
       this._on(this._el,'cindy-trackpad',e=>{
         const frame=e.detail;
-        update({type:frame.phase==='cancel'?'touchcancel':'touchmove',
+        update({type:frame.phase==='cancel'?'touchcancel':frame.phase==='begin'?'touchstart':'touchmove',
           touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
       });
       this._on(root,'blur',release);
       this._on(root,'pagehide',release);
+      this._on(root,'message',e=>{
+        if(e.origin===root.location.origin&&e.source===root.parent&&e.data?.type==='cindy-release-input')release();
+      });
+      this._on(root.document,'visibilitychange',()=>{if(root.document.hidden)release();});
     }
 
     detach() {
