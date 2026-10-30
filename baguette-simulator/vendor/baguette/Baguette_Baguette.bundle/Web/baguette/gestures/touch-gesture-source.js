@@ -28,6 +28,14 @@
       const opts = { passive: false };
       let state = null;
       let lastMs = 0;
+      let lastPoint;
+      this._cancel = () => {
+        if (state?.mode === 'single' || state?.mode === 'edge-stream') {
+          this.screen.touchUp([lastPoint], state.mode === 'edge-stream' ? { edge: state.edge } : undefined);
+        }
+        state = null;
+        this.overlay?.clear();
+      };
 
       const relFingers = (touches) => {
         const r = this._el.getBoundingClientRect();
@@ -62,8 +70,8 @@
           // If we'd already shipped a touch1-down, lift it cleanly
           // before bowing out — otherwise the simulator holds a
           // phantom touch1 while `gesturestart` opens its own pinch.
-          if (state && state.mode === 'single') {
-            this.screen.touchUp([{ x: all[0].x, y: all[0].y }]);
+          if (state && (state.mode === 'single' || state.mode === 'edge-stream')) {
+            this._cancel();
           }
           state = { mode: 'multi-deferred' };  // gesture* will handle it
           // Paint the two real finger positions so the HUD lights up
@@ -82,6 +90,7 @@
           const touch = e.touches[0];
           const point = this._screenPoint(touch.clientX, touch.clientY);
           if (point.inside) {
+            lastPoint = point;
             // Tag the wire envelope with `edge:"bottom"` (or "top")
             // using the touch's REAL coords; no clamp. iOS treats the
             // flag as a swipe HINT — it commits to the home-indicator
@@ -123,6 +132,7 @@
         const now = performance.now();
         if (now - lastMs < MOVE_FLUSH_MS) return;
         lastMs = now;
+        if (all.length === 1) lastPoint = this._screenPoint(e.touches[0].clientX, e.touches[0].clientY);
         if (state.mode === 'edge-stream' && all.length === 1) {
           this.screen.touchMove(
               [this._screenPoint(e.touches[0].clientX, e.touches[0].clientY)],
@@ -177,7 +187,7 @@
         contactOptions = undefined;
         this.overlay?.clear();
       };
-      this._releaseContacts = release;
+      this._cancel = release;
       const update = (e) => {
         e.preventDefault();
         if (e.type === 'touchcancel' || e.touches.length > 2) { release(); return; }
@@ -217,18 +227,6 @@
         update({type:frame.phase==='cancel'?'touchcancel':frame.phase==='begin'?'touchstart':'touchmove',
           touches:frame.touches.map(t=>({identifier:t.id,clientX:t.x,clientY:t.y})),preventDefault(){}});
       });
-      this._on(root,'blur',release);
-      this._on(root,'pagehide',release);
-      this._on(root,'message',e=>{
-        if(e.origin===root.location.origin&&e.source===root.parent&&e.data?.type==='cindy-release-input')release();
-      });
-      this._on(root.document,'visibilitychange',()=>{if(root.document.hidden)release();});
-    }
-
-    detach() {
-      this._releaseContacts?.();
-      this._releaseContacts = null;
-      super.detach();
     }
   }
 

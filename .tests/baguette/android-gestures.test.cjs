@@ -68,7 +68,7 @@ test('Android wheel gestures match iPhone contacts at the same cursor, scale and
     vm.runInNewContext(read(android,'screen-actions.js'),context);
     context.window.androidScreenActions({canvas,frame:node(),pointers,screenSize:()=>size,input:async()=>{},flush:async()=>{sent.push(copy([...pointers.values()]));for(const [key,p] of pointers)if(!p.pressure)pointers.delete(key);}});
     let iosWheel,expected;
-    const ios={window:{},setTimeout:()=>1,clearTimeout(){}};
+    const ios={window:{addEventListener(){},document:{addEventListener(){}}},setTimeout:()=>1,clearTimeout(){}};
     for(const name of ['attachable-event-source.js','wheel-gesture-source.js'])vm.runInNewContext(read(gestures,name),ios);
     new ios.window.Baguette._WheelGestureSource({size,touchDown(){},touchUp(){},touchMove:p=>expected=copy(p)}).attach({getBoundingClientRect:()=>bounds,addEventListener:(name,fn)=>{iosWheel=fn;}});
     for(const delta of [{deltaY:10},{deltaX:-8,deltaY:-15}]){
@@ -179,7 +179,7 @@ test('Android and iPhone wheel pan consume edge travel and reverse with the pair
   vm.runInNewContext(read(android,'screen-actions.js'),context);
   const actions=context.window.androidScreenActions({canvas,frame:node(),pointers,screenSize:()=>({width:400,height:800}),input:async()=>{},flush:async()=>{sent.push(copy([...pointers.values()]));for(const [key,p]of pointers)if(!p.pressure)pointers.delete(key);}});t.after(actions.release);
   let iosWheel,iosLast;
-  const ios={window:{},setTimeout:()=>1,clearTimeout(){}};
+  const ios={window:{addEventListener(){},document:{addEventListener(){}}},setTimeout:()=>1,clearTimeout(){}};
   for(const name of ['attachable-event-source.js','wheel-gesture-source.js'])vm.runInNewContext(read(gestures,name),ios);
   new ios.window.Baguette._WheelGestureSource({size:{width:400,height:800},touchDown(){},touchUp(){},touchMove:p=>iosLast=copy(p)}).attach({getBoundingClientRect:()=>({left:0,top:0,width:400,height:800}),addEventListener:(_name,fn)=>iosWheel=fn});
   const pan=(deltaX,deltaY)=>{const e=event({clientX:200,clientY:400,deltaX,deltaY});handlers.wheel(e);iosWheel(e);};

@@ -52,6 +52,11 @@
     }
 
     _bind() {
+      this._cancel = () => {
+        this._optionHeld = false; this._shiftHeld = false;
+        this._cursorInside = false; this._dragActive = false;
+        this.overlay?.clear();
+      };
       const updateCursor = (e) => {
         const r = this._el.getBoundingClientRect();
         this._cursorVx = e.clientX - r.left;
@@ -87,12 +92,6 @@
           if (this._shiftHeld) { this._shiftHeld = false; changed = true; }
         }
         if (changed) this._updatePreview();
-      });
-      this._on(window, 'blur', () => {
-        if (this._optionHeld || this._shiftHeld) {
-          this._optionHeld = false; this._shiftHeld = false;
-          this._updatePreview();
-        }
       });
     }
   }

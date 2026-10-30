@@ -11,9 +11,27 @@
 - 控制器失焦、页面隐藏时发出已有释放通知；安卓补齐通知及隐藏事件处理，丢弃待发输入、释放触点。iOS 原有按键配对释放及错误清理保持不变。
 - iOS Chromium 触点源收到同源父页面释放通知或自身隐藏事件时，释放单指、双指和原生触控板触点并清除提示；取消后遗留的移动、松手不重新开始输入，新手势仍可正常启动。
 
+## 输入取消检查点
+
+不变量：离开或隐藏画面后，各输入源清空自己的按住状态、定时器和提示；同一输入最多释放一次，取消未完成点击不产生 tap，旧 move/end 不重启输入。
+
+事件入口由既有 `AttachableEventSource` 统一管理：失焦、pagehide、同源父页面释放消息、隐藏事件、detach。各来源通过自己的 `_cancel` 回调独占清理闭包状态；不新增队列、重试或跨来源状态。
+
+| 来源／状态 | 正常结束 | 统一取消／重复取消 | 取消后的旧事件 | 新开始 |
+| --- | --- | --- | --- | --- |
+| 鼠标等待点击 | tap | 清除长按定时器，不 tap | 不发送 | mousedown |
+| 鼠标拖动／长按／边缘 | touch-up | touch-up 一次、清除状态 | move/up 不发送 | mousedown |
+| Option 缩放／平移 | 双指 touch-up | 双指 touch-up 一次、清除提示 | move/up 不发送 | mousedown |
+| Chromium 单指／双指／原生触控板 | touch-up | touch-up 一次、清除提示 | move/end 不发送 | touchstart／begin |
+| Safari 单指／边缘／gesture 双指 | touch-up | touch-up 一次、清除提示 | move/end 不发送 | touchstart／gesturestart |
+| 滚轮缩放／平移 | 空闲定时器 touch-up | touch-up、清除定时器 | 已取消定时器不执行 | 下一次 wheel（协议没有 begin） |
+| Option 悬停预览 | 松键清除 | 清除按键、光标、拖动标记及提示 | mousemove 不重画旧预览 | 新按键／鼠标进入 |
+
+直接运行全部实际来源与 `PointerInterpreter`，覆盖 15 种来源／状态 × 5 类取消事件共 75 组；重复取消、迟到移动／松手、长按定时器、重新开始、detach 解绑均有断言。另验证正常鼠标结束、消息来源与 Safari 触摸到双指的交接，避免只修触点源而遗漏鼠标等同族路径。该证据仍是合成事件，不代替真实侧栏输入验收。
+
 ## 自动化与浏览器验证
 
-`node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/baguette-simulator.test.mjs`：审核补充修复后 798 项通过，无失败或跳过；vendor 校验清单同步且验证通过。
+`node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/baguette-simulator.test.mjs`：统一取消路径后 802 项通过，无失败或跳过；vendor 校验清单同步且验证通过。全部手势取消与现有 iOS／安卓手势回归合跑 24 项通过。
 
 针对性控制页与模型测试 54 项通过。回归覆盖安卓请求未完成时关闭输入／隐藏页面：旧队列不继续发送，原请求结束后释放，新输入仍可正常执行；非父页面消息不触发释放。控制器覆盖文字动作与输入门控一致、手动释放入口、无画面时仍可关闭高级工具。
 

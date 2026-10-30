@@ -23,6 +23,7 @@
         if (this.overlay) this.overlay.clear();
         state = null;
       };
+      this._cancel = close;
 
       this._on(this._el, 'wheel', (e) => {
         e.preventDefault();
