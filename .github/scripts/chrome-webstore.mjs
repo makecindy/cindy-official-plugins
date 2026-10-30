@@ -19,6 +19,7 @@ export function compareVersions(a, b) {
 export function validateVersionChange(before, after, files) {
   const packageChanged = files.some(file => file.startsWith('my-browser/extension/') || [
     'my-browser/binary-dependencies.json', 'my-browser/THIRD-PARTY-LICENSES.txt', 'scripts/build-my-browser.mjs',
+    '.github/scripts/package-plugin.sh', '.github/scripts/binary-dependencies.py',
   ].includes(file));
   if (packageChanged && compareVersions(after, before) <= 0) {
     throw new Error('Chrome package changed: bump my-browser/extension/manifest.json version above the base branch');

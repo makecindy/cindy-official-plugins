@@ -58,6 +58,7 @@ bash .github/scripts/setup-chrome-webstore.sh YOUR_PROJECT_ID \
 
 商店包变化时提高扩展 manifest 版本；插件包内容变化时也提高插件版本。
 PR 检查会要求扩展源文件、依赖配置、许可证或 Chrome 打包脚本变更时同步提高扩展版本。
+这也包括生成内置 vendor 资源的共享 `package-plugin.sh` 和 `binary-dependencies.py` 打包脚本。
 商店描述、截图、隐私声明和新增权限说明仍需在后台维护，自动提交前应保持最新。
 工作流不修改这些信息，不取消审核，也不自动发布刻意暂存的版本。
 

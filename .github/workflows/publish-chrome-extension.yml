@@ -9,6 +9,8 @@ on:
       - 'my-browser/binary-dependencies.json'
       - 'my-browser/THIRD-PARTY-LICENSES.txt'
       - 'scripts/build-my-browser.mjs'
+      - '.github/scripts/package-plugin.sh'
+      - '.github/scripts/binary-dependencies.py'
       - '.github/scripts/chrome-webstore.mjs'
       - '.github/workflows/publish-chrome-extension.yml'
   workflow_dispatch:

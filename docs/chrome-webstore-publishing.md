@@ -68,7 +68,8 @@ that live Google authorization works.
 Bump the extension manifest version whenever its store package changes; bump the
 plugin version too when packaged plugin content changes. PR verification enforces
 the Chrome version bump for extension source, dependency configuration, license,
-and Chrome build-script changes. Store description,
+and Chrome build-script changes, including the shared `package-plugin.sh` and
+`binary-dependencies.py` packagers that generate bundled vendor resources. Store description,
 screenshots, privacy declarations, and new permission justifications still need
 the developer dashboard. Keep these current before automatic submission. The
 workflow does not edit them, cancel a review, or release a deliberately staged item.
