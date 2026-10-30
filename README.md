@@ -236,6 +236,9 @@ primarily Chinese-only.
 
 ## Automated submission and review
 
+The Chrome extension has a separate [automatic store publishing workflow](./docs/chrome-webstore-publishing.md):
+merge a higher extension version to `main` to submit it for Google review and publish after approval.
+
 **Global package publishing is enabled; CN publishing remains removed.** The
 [`Global workflow`](./.github/workflows/publish-cindy-plugins-global.yml)
 submits changed plugins on pushes to `main` and all current plugins on manual

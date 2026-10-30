@@ -191,6 +191,9 @@ cindy-art/
 
 ## 自动提交与审核
 
+Chrome 扩展使用独立的[商店自动发布流程](./docs/chrome-webstore-publishing.zh-CN.md)：
+将更高的扩展版本合入 `main` 后自动提交 Google 审核，通过后自动发布。
+
 **海外推包已启用，国内推包逻辑保持移除。**
 [海外 Workflow](./.github/workflows/publish-cindy-plugins-global.yml)
 在 `main` push 时提交变更插件，从 `main` 手动触发时提交全部当前插件。
