@@ -160,7 +160,10 @@
   window.__nativeRotateBy=step=>{lastRotationStep=step;deviceRotation=(deviceRotation-step+4)%4;input('rotate',{orientation:['portrait','landscape-left','portrait-upside-down','landscape-right'][deviceRotation]}).catch(error);};
   window.__nativeOrientation=()=>['portrait','landscape-left','portrait-upside-down','landscape-right'][deviceRotation];
   const extras=window.androidScreenActions?.({canvas,frame,input,pointers,flush,screenSize,zh});
-  addEventListener('resize',fit);addEventListener('blur',()=>{extras?.release();epoch++;pointers.clear();modifierDrag=null;drawTouches();dirty=false;input('release').catch(()=>{});});
+  function releaseInput(){extras?.release();epoch++;pointers.clear();modifierDrag=null;drawTouches();dirty=false;input('release').catch(()=>{});}
+  addEventListener('resize',fit);addEventListener('blur',releaseInput);
+  addEventListener('message',e=>{if(e.origin===location.origin&&e.source===parent&&e.data?.type==='cindy-release-input')releaseInput();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseInput();});
   addEventListener('pagehide',()=>{closed=true;epoch++;pointers.clear();modifierDrag=null;overlay.clear();fetch('/android-input',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({udid,action:'release'}),keepalive:true}).catch(()=>{});});
   stream();
 })();

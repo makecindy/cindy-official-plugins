@@ -229,7 +229,7 @@ test('Android viewer rotation keeps the portrait body size and caps only a narro
   const listeners={},frame={style:{}},canvas={width:720,height:1600,getContext:()=>({}),addEventListener:()=>{}};
   const context={URLSearchParams,AbortController,location:{pathname:'/simulators/'+id,search:''},window:{Baguette:{_PinchOverlay:class{clear(){}}}},
     parent:{document:{documentElement:{lang:'en'}}},innerWidth:900,innerHeight:800,
-    document:{getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:{}},
+    document:{addEventListener(){},getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:{}},
     matchMedia:()=>({matches:false}),addEventListener:(name,fn)=>{listeners[name]=fn;},fetch:()=>new Promise(()=>{})};
   require('node:vm').runInNewContext(await fs.readFile(path.join(A,'screen.js'),'utf8'),context);
   const size=(width,height)=>{Object.assign(canvas,{width,height});listeners.resize();return [parseFloat(frame.style.width),parseFloat(frame.style.height)];};

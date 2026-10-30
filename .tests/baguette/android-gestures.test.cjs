@@ -91,22 +91,40 @@ test('Android wheel gestures match iPhone contacts at the same cursor, scale and
 });
 
 function pointerHarness({withActions=false,holdInput=false}={}){
-  const handlers={},globalHandlers={},sent=[];let dots=[];
+  const handlers={},globalHandlers={},documentHandlers={},sent=[];let dots=[];
   const pending=[];
   const node=()=>({hidden:true,addEventListener(){}}),nodes={};
   const frame={style:{},getAnimations:()=>[]};
   const canvas={width:800,height:1600,getContext:()=>({}),focus(){},setPointerCapture(){},
     getBoundingClientRect:()=>({left:20,top:40,width:200,height:400}),addEventListener:(name,fn)=>handlers[name]=fn};
-  const context={URLSearchParams,AbortController,AbortSignal,setTimeout,clearTimeout,location:{pathname:'/simulators/test',search:''},
+  const context={URLSearchParams,AbortController,AbortSignal,setTimeout,clearTimeout,location:{pathname:'/simulators/test',search:'',origin:'http://example.test'},
     window:{Baguette:{_PinchOverlay:class{clear(){dots=[];}setFingers(p){dots=copy(p);}}}},
     parent:{document:{documentElement:{lang:'en'}},cindySim:{state:{viewport:{width:400,height:800}}}},
-    document:{addEventListener(){},getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:nodes[name]||(nodes[name]=node())},
+    document:{addEventListener:(name,fn)=>documentHandlers[name]=fn,getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:nodes[name]||(nodes[name]=node())},
     matchMedia:()=>({matches:false}),addEventListener:(name,fn)=>globalHandlers[name]=fn,
     fetch:(url,options)=>{if(url!=='/android-input')return new Promise(()=>{});sent.push(JSON.parse(options.body));const response={ok:true,json:async()=>({ok:true})};return holdInput?new Promise(resolve=>pending.push(()=>resolve(response))):Promise.resolve(response);}};
   if(withActions)vm.runInNewContext(read(android,'screen-actions.js'),context);
   vm.runInNewContext(read(android,'screen.js'),context);
-  return {handlers,globalHandlers,sent,pending,dots:()=>dots,native:(phase,touches)=>handlers['cindy-trackpad']({detail:{phase,touches}})};
+  return {handlers,globalHandlers,documentHandlers,context,sent,pending,dots:()=>dots,native:(phase,touches)=>handlers['cindy-trackpad']({detail:{phase,touches}})};
 }
+
+test('Android keyboard disable and hidden page discard queued typing before releasing input',async()=>{
+ for(const reason of ['disable','hidden']){
+  const h=pointerHarness({holdInput:true});
+  h.handlers.keydown({key:'a',preventDefault(){}});await pause(0);
+  h.handlers.keydown({key:'b',preventDefault(){}});
+  if(reason==='disable'){
+   const message={source:h.context.parent,origin:h.context.location.origin,data:{type:'cindy-release-input'}};
+   h.globalHandlers.message({...message,source:{}}); // other frames cannot cancel input
+   assert.equal(h.sent.length,1);
+   h.globalHandlers.message(message);
+  }else{h.context.document.hidden=true;h.documentHandlers.visibilitychange();}
+  for(let i=0;i<6;i++){h.pending.shift()?.();await pause(0);}
+  assert.deepEqual(h.sent.map(p=>[p.action,p.keys]),[['type','a'],['release',undefined]]);
+  h.handlers.keydown({key:'c',preventDefault(){}});await pause(0);
+  assert.equal(h.sent.at(-1).keys,'c');h.pending.shift()?.();await pause(0);
+ }
+});
 
 test('Android queues native release and next begin while the previous request is pending',async()=>{
   const h=pointerHarness({withActions:true,holdInput:true});
