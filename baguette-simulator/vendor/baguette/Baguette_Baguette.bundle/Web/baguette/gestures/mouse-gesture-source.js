@@ -89,6 +89,7 @@
     _bind() {
       let state = null;
       let lastMoveMs = 0;
+      let lastPoint;
 
       // Disarm the pending press's long-press timer. Safe to call in
       // any state — only `pending` ever carries a timer.
@@ -122,6 +123,7 @@
         // maps outside the screen quad and starts nothing.
         const point = this._screenPoint(e.clientX, e.clientY);
         if (!point.inside) return;
+        lastPoint = point;
         const r = this._el.getBoundingClientRect();
         const vx = e.clientX - r.left, vy = e.clientY - r.top;
         const mode = modeOf(e);
@@ -198,6 +200,7 @@
 
       this._on(this._el, 'mousemove', (e) => {
         if (!state) return;
+        lastPoint = this._screenPoint(e.clientX, e.clientY);
         const r = this._el.getBoundingClientRect();
         const vx = e.clientX - r.left, vy = e.clientY - r.top;
 
@@ -284,6 +287,19 @@
 
       this._on(this._el, 'mouseup', end);
       this._on(this._el, 'mouseleave', end);
+      this._cancel = () => {
+        cancelHold();
+        if (state?.mode === 'pinch' || state?.mode === 'pan') {
+          sendTouch2('up', state.f1, state.f2);
+        } else if (state?.mode === 'edge-stream' || state?.mode === 'drag-stream') {
+          this.screen.touchUp([lastPoint], state.mode === 'edge-stream' ? { edge: state.edge } : undefined);
+        }
+        // Cancelling a pending click must neither tap nor let its hold timer
+        // create a new touch after focus loss or teardown.
+        state = null;
+        this._onDragChange(false);
+        this.overlay?.clear();
+      };
     }
   }
 

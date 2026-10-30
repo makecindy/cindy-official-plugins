@@ -127,7 +127,7 @@ test('physical phones use the shared screen, screenshot and keyboard controls wi
  assert.equal(f.dom.byId['btn-rotl'].hidden,true);
  assert.equal(f.dom.byId['btn-audio'].hidden,true);
  f.dom.byId['btn-more'].dispatch('click');const menu=f.dom.body.querySelector('.menu');
- assert.match(menu.textContent,/电脑键盘输入/);assert.doesNotMatch(menu.textContent,/关闭设备|摇一摇|完整工具/);
+ assert.match(menu.textContent,/使用手机键盘/);assert.doesNotMatch(menu.textContent,/关闭设备|摇一摇|完整工具/);
  assert.equal(f.calls.some(p=>p.action==='connect'),false);
 });
 test('a disconnected physical phone requests reconnection rather than simulator startup',async()=>{
@@ -353,16 +353,20 @@ test('toolbar presentation changes preserve the iframe and its recording owner',
  f.dom.byId.screen.contentDocument.documentElement={setAttribute:(k,v)=>attrs.set(k,v),removeAttribute:k=>attrs.delete(k)};
  f.dom.byId.screen.contentDocument.getElementById=id=>id==='cindy-stage-style'?{sheet}:null;
  f.dom.byId.screen.contentWindow={recordingOwner,dispatchEvent:()=>resizes++};f.context.Event=class{};
- for(const full of [true,false,true]){
+ for(const full of [true,false,true,false]){
   f.dom.byId['btn-more'].dispatch('click');
-  const item=f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).trim()==='Baguette 高级工具');
+  const item=f.dom.body.querySelector('.menu').querySelectorAll('button').find(n=>f.dom.text(n).trim()===(full?'高级工具':'关闭高级工具'));
   assert.ok(item);item.dispatch('click');
   assert.equal(attrs.has('data-cindy-full'),full);
   assert.equal(sheet.disabled,full,'advanced panels are restored without navigation');
+  assert.equal(f.sim.state.fullToolbar,full);
   assert.equal(f.dom.byId.screen.contentWindow.recordingOwner,recordingOwner);
   assert.equal(f.dom.byId.screen.loads.length,1);
  }
- assert.equal(resizes,3);
+ assert.equal(resizes,4);
+ assert.equal(sheet.disabled,false);
+ assert.equal(attrs.has('data-cindy-full'),false);
+ assert.equal(f.dom.byId.screen.loads.length,1);
  assert.deepEqual(f.calls.map(c=>c.action),['status','resources']);
 });
 
@@ -375,10 +379,14 @@ test('iOS and Android keyboard switches gate guest input, preserve workbench edi
   f.dom.byId.screen.dispatch('load');
   const toggle=()=>{
    f.dom.byId['btn-more'].dispatch('click');
-   const item=f.dom.body.querySelectorAll('button').find(n=>f.dom.text(n).includes('电脑键盘输入'));
-   assert.ok(item);const checked=item.attrs['aria-checked'];item.dispatch('click');return checked;
+   const menu=f.dom.body.querySelector('.menu');
+   assert.doesNotMatch(menu.textContent,/释放所有按键|解除卡键/);
+   const item=menu.querySelectorAll('button').find(n=>/使用(电脑|手机)键盘/.test(n.textContent));
+   assert.ok(item);const label=item.textContent;
+   assert.equal(item.attrs.role,'menuitem');
+   item.dispatch('click');return label;
   };
-  assert.equal(toggle(),'true');
+  assert.equal(toggle(),'使用手机键盘');
   assert.equal(released.length,1);assert.equal(released[0].message.type,'cindy-release-input');
   // Each gate is the last capture handler for its event. Simulator toolbar
   // shortcuts get first refusal, but ordinary keys/pastes cannot reach guests.
@@ -390,11 +398,30 @@ test('iOS and Android keyboard switches gate guest input, preserve workbench edi
     events[name].at(-1)(field);assert.equal(field.stopped,false);
    }
   }
-  assert.equal(toggle(),'false','choice works even when localStorage is unavailable');
+  assert.equal(toggle(),'使用电脑键盘','choice works even when localStorage is unavailable');
   const allowed={target:{tagName:'CANVAS'},stopImmediatePropagation(){assert.fail('enabled input blocked');}};
   events.keydown.at(-1)(allowed);
   assert.equal(f.dom.byId.screen.loads.length,1);
  }
+});
+
+test('hidden controller cancels input; advanced recovery is tucked into More and closes without a live stream',async()=>{
+ const f=await boot({respond:()=>status()});const messages=[];
+ f.dom.byId.screen.contentWindow.postMessage=message=>messages.push(message);
+ f.dom.document.hidden=true;
+ for(const listener of f.dom.document.listeners.visibilitychange)listener();
+ assert.equal(messages.length,1);assert.equal(messages[0].type,'cindy-release-input');
+ f.dom.byId['btn-more'].dispatch('click');
+ f.dom.body.querySelector('.menu').querySelectorAll('button').find(n=>n.textContent==='高级工具').dispatch('click');
+ assert.equal(f.sim.state.fullToolbar,true);
+ f.dom.byId['btn-more'].dispatch('click');
+ const recovery=f.dom.body.querySelector('.menu').querySelectorAll('button').find(n=>n.textContent==='释放所有按键');
+ assert.ok(recovery);recovery.dispatch('click');
+ assert.ok(f.calls.some(c=>c.action==='release'));
+ f.sim.state.lost=true;
+ f.dom.byId['btn-more'].dispatch('click');
+ f.dom.body.querySelector('.menu').querySelectorAll('button').find(n=>n.textContent==='关闭高级工具').dispatch('click');
+ assert.equal(f.sim.state.fullToolbar,false);
 });
 
 test('unreadable App records do not block device selection or live controls',async()=>{

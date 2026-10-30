@@ -201,8 +201,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/attachable-event-source.js",
-    "bytes": 2233,
-    "sha256": "91400b2286e76cedcf986a3b28ccbc3456dcf762e865d64d00bf665a7e7e4f97"
+    "bytes": 2874,
+    "sha256": "f40ea1ee9d7d51087e140235f1618dbc849640dd415d86a70ee7e534da5ee791"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/edge-bands.js",
@@ -216,13 +216,13 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/mouse-gesture-source.js",
-    "bytes": 13477,
-    "sha256": "45b150215c8b3a154ab774fc8edf391d00258b564b1462c7deee67f9754da4af"
+    "bytes": 14188,
+    "sha256": "4656d00afb825d755f35bb790729231f026fe50944aa4fd23be0b2b8ca13751f"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/option-hover-preview.js",
-    "bytes": 3702,
-    "sha256": "472eeec509d587f228ffa56b2e213651d058b8f32464a775785e3fa347b10628"
+    "bytes": 3688,
+    "sha256": "8aecfd8fdba288990c82fbfcda8aafdf014f2d3ccccefe93e68ce9a0aa75d668"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/pinch-overlay.js",
@@ -236,8 +236,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/safari-gesture-event-source.js",
-    "bytes": 4316,
-    "sha256": "6e6987492ed4b6159e2ed8d8d577077880818945adf800581aba81ecf21de273"
+    "bytes": 4534,
+    "sha256": "53893df9a946af25355f94a72b34b76ec4563949ba637b6f2ea16b870c5f3a71"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/screen-pieces.js",
@@ -251,13 +251,13 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/touch-gesture-source.js",
-    "bytes": 10223,
-    "sha256": "ff7ea5bb6cf1588de96891d9644aebdf96fad52b7e441d53ac925be56d91720d"
+    "bytes": 10716,
+    "sha256": "3079d3006341e3cb176b3cd1d3d2ce17c8359c0591668310337e33ba26e3e9ee"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/wheel-gesture-source.js",
-    "bytes": 3736,
-    "sha256": "42abc8bd9527951dd306dbdf53a05e66a8c73074a4f76b2344519270528bbf7a"
+    "bytes": 3764,
+    "sha256": "c132470902a3c1a1505a4aa410fbacc90a465f70d9b31837cf57ca0f7fa1d5a2"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js",

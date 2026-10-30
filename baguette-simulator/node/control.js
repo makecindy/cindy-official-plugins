@@ -31,6 +31,9 @@
   const resourceView = M.createResourceSummary(lang,(device,refresh)=>device.udid===udid ? api('resources',{refresh}) : Promise.reject(Error('DEVICE_CHANGED')));
 
   const keyboardEnabled = () => keyboardChoices.get(udid) ?? (store.get(`cindy.keyboard.${udid}`) !== false);
+  function releaseViewInput() {
+    try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
+  }
   function keyboardGate(event) {
     // Workbench fields belong to the browser. This only gates guest keyboard
     // input from this view; touch and Agent tools retain their own controls.
@@ -40,9 +43,7 @@
   function toggleKeyboard() {
     const enabled = !keyboardEnabled();
     keyboardChoices.set(udid, enabled); store.set(`cindy.keyboard.${udid}`, enabled);
-    if (!enabled) {
-      try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
-    }
+    if (!enabled) releaseViewInput();
   }
 
   const ICON = {
@@ -211,11 +212,12 @@
   function decorate() {
     let doc; try { doc = screen.contentDocument; } catch { return; }
     if (!doc?.documentElement || doc.location?.href === 'about:blank') return;
-    if (state.fullToolbar) { doc.documentElement.setAttribute('data-cindy-full', ''); stage.setAttribute('data-full', ''); } else { doc.documentElement.removeAttribute('data-cindy-full'); stage.removeAttribute('data-full'); }
+    const workbench = state.fullToolbar && M.platform(state.status?.device) === 'iOS' && state.status?.device?.kind !== 'physical';
+    if (workbench) { doc.documentElement.setAttribute('data-cindy-full', ''); stage.setAttribute('data-full', ''); } else { doc.documentElement.removeAttribute('data-cindy-full'); stage.removeAttribute('data-full'); }
     // The full workbench previously loaded without the embedding stylesheet.
     // Toggle that stylesheet in place so its panels remain available too.
     const sheet = doc.getElementById('cindy-stage-style')?.sheet;
-    if (sheet) sheet.disabled = state.fullToolbar;
+    if (sheet) sheet.disabled = workbench;
     const view = doc.getElementById('simNativeView');
     const width = view ? parseFloat(doc.defaultView.getComputedStyle(view).getPropertyValue('--nv-hh-w')) : 0;
     if (width && width !== state.screenWidth) {
@@ -453,10 +455,17 @@
     } : undefined});
   });
   async function release() {
-    native('__nativeRelease');
-    try { screen.contentWindow?.postMessage({ type: 'cindy-release-input' }, location.origin); } catch {}
+    releaseViewInput();
     try { await api('release'); toast(t.released, 'ok'); } catch { toast(t.actionFailed, 'error'); }
   }
+  function setAdvanced(open) {
+    releaseViewInput();
+    state.fullToolbar = open; decorate(); applyZoom();
+    screen.contentWindow?.dispatchEvent?.(new Event('resize'));
+  }
+  window.addEventListener?.('blur', () => { if (!document.hasFocus?.()) releaseViewInput(); });
+  window.addEventListener?.('pagehide', releaseViewInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseViewInput(); });
   async function screenshot() {
     if (!live() || savingShotTo || $('btn-shot').dataset.busy) return;
     $('btn-shot').dataset.busy = '1'; $('btn-shot').disabled = true;
@@ -698,19 +707,16 @@
       ...(state.status?.device?.platform === 'android' ? [item(ICON.key, lang === 'zh-CN' ? '返回' : 'Back', () => native('__nativeBack'), { disabled: !on })] : []),
       state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
       state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.grid, t.appSwitcher, () => native('__nativeAppSwitcher'), { disabled: !on }) : null,
-      ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.key, lang === 'zh-CN' ? '电脑键盘输入' : 'Computer keyboard input', toggleKeyboard, { disabled: !on, role: 'menuitemcheckbox', 'aria-checked': String(keyboardEnabled()) }) : null,
+      ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.key, keyboardEnabled() ? t.phoneKeyboard : t.computerKeyboard, toggleKeyboard, { disabled: !on }) : null,
       ...(state.status?.device?.platform === 'android' ? [
         item(ICON.key, lang === 'zh-CN' ? '复制设备剪贴板' : 'Copy device clipboard', () => native('__nativeCopy'), {disabled:!on}),
         item(ICON.plus, lang === 'zh-CN' ? '导入 APK、图片或视频…' : 'Import APK, image or video…', () => native('__nativeImport'), {disabled:!on}),
         item(ICON.camera, screen.contentWindow?.__nativeRecording?.() ? (lang === 'zh-CN' ? '停止录像并保存' : 'Stop recording & save') : (lang === 'zh-CN' ? '开始录像' : 'Start recording'), () => native('__nativeRecord'), {disabled:!on}),
       ] : []),
-      item(ICON.key, t.releaseKeys, release, { disabled: !on }),
       h('div', { class: 'sep' }),
       item(ICON.refresh, t.recover, recover, { disabled: state.recovering || state.switching }),
-      M.platform(state.status?.device) === 'iOS' && state.status?.device?.kind!=='physical' ? item(ICON.bar, t.advanced, () => {
-        state.fullToolbar = !state.fullToolbar; decorate(); applyZoom();
-        screen.contentWindow?.dispatchEvent?.(new Event('resize'));
-      }, { role: 'menuitemcheckbox', 'aria-checked': String(state.fullToolbar) }) : null,
+      item(ICON.bar, state.fullToolbar ? t.closeAdvanced : t.advanced, () => setAdvanced(!state.fullToolbar), { 'aria-expanded': String(state.fullToolbar), 'aria-controls': 'stage' }),
+      state.fullToolbar ? item(ICON.key, t.releaseKeys, release, { disabled: !on, title: t.releaseHint }) : null,
       h('div', { class: 'sep' }),
       state.status?.device?.kind!=='physical' ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
     ]);

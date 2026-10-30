@@ -21,11 +21,23 @@
     }
 
     attach(el) {
+      if (this._el) this.detach();
       this._el = el;
       this._bind();
+      // All gesture sources share the same cancellation boundary. Each source
+      // owns its local state and supplies an idempotent cleanup in _bind().
+      const cancel = () => this._cancel?.();
+      this._on(root, 'blur', cancel);
+      this._on(root, 'pagehide', cancel);
+      this._on(root, 'message', e => {
+        if (e.origin === root.location.origin && e.source === root.parent && e.data?.type === 'cindy-release-input') cancel();
+      });
+      this._on(root.document, 'visibilitychange', () => { if (root.document.hidden) cancel(); });
     }
 
     detach() {
+      this._cancel?.();
+      this._cancel = null;
       for (const [target, event, fn, opts] of this._handlers) {
         target.removeEventListener(event, fn, opts);
       }

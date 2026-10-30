@@ -9,7 +9,9 @@ const path=require('node:path');
 function harness(orientation='portrait'){
   const handlers=new Map(),calls=[],dots=[];
   const target={addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener(){},getBoundingClientRect:()=>({left:30,top:50,width:200,height:400})};
-  const window={...target};
+  const documentHandlers=new Map();
+  const document={hidden:false,addEventListener:(name,fn)=>documentHandlers.set(name,fn),removeEventListener(){}};
+  const window={...target,document,location:{origin:'http://example.test'},parent:{}};
   const screen={size:{width:400,height:800}};
   for(const name of ['touchDown','touchMove','touchUp'])screen[name]=(points,opts)=>calls.push([name,JSON.parse(JSON.stringify(points)),...(opts?[JSON.parse(JSON.stringify(opts))]:[])]);
   const dir=path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
@@ -18,8 +20,30 @@ function harness(orientation='portrait'){
   source.attach(target);
   const emit=(type,touches)=>handlers.get(type)({type,touches,preventDefault(){}});
   const native=(phase,touches)=>handlers.get('cindy-trackpad')({detail:{phase,touches}});
-  return {emit,native,calls,dots,source};
+  return {emit,native,calls,dots,source,window,handlers,documentHandlers};
 }
+test('iOS hidden view releases contacts and ignores the cancelled gesture tail until a fresh begin',()=>{
+  for(const kind of ['single','pair','native'])for(const reason of ['message','hidden']){
+    const h=harness(),points=[{identifier:1,clientX:80,clientY:200},{identifier:2,clientX:180,clientY:200}].slice(0,kind==='single'?1:2);
+    const nativePoints=points.map(p=>({id:p.identifier,x:p.clientX,y:p.clientY}));
+    const start=()=>kind==='native'?h.native('begin',nativePoints):h.emit('touchstart',points);
+    const move=()=>kind==='native'?h.native('change',nativePoints):h.emit('touchmove',points);
+    start();
+    if(reason==='message'){
+      const event={origin:h.window.location.origin,source:h.window.parent,data:{type:'cindy-release-input'}};
+      h.handlers.get('message')({...event,source:{}});
+      h.handlers.get('message')({...event,origin:'http://other.test'});
+      assert.equal(h.calls.length,1,'untrusted messages leave active input alone');
+      h.handlers.get('message')(event);
+    }else{h.window.document.hidden=true;h.documentHandlers.get('visibilitychange')();}
+    assert.equal(h.calls.at(-1)[0],'touchUp');assert.equal(h.calls.at(-1)[1].length,points.length);
+    assert.deepEqual(h.dots.at(-1),[]);
+    const count=h.calls.length;move();
+    if(kind==='native')h.native('end',[]);else h.emit('touchend',[]);
+    assert.equal(h.calls.length,count,'old movement or liftoff must not restart cancelled input');
+    start();assert.equal(h.calls.at(-1)[0],'touchDown');h.source.detach();
+  }
+});
 test('raw contacts keep finger identity and reverse on the next input frame',()=>{
   const h=harness(),a={identifier:3,clientX:80,clientY:200},b={identifier:7,clientX:180,clientY:200};
   h.emit('touchstart',[a,b]);

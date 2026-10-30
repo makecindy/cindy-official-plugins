@@ -68,7 +68,7 @@ test('Android wheel gestures match iPhone contacts at the same cursor, scale and
     vm.runInNewContext(read(android,'screen-actions.js'),context);
     context.window.androidScreenActions({canvas,frame:node(),pointers,screenSize:()=>size,input:async()=>{},flush:async()=>{sent.push(copy([...pointers.values()]));for(const [key,p] of pointers)if(!p.pressure)pointers.delete(key);}});
     let iosWheel,expected;
-    const ios={window:{},setTimeout:()=>1,clearTimeout(){}};
+    const ios={window:{addEventListener(){},document:{addEventListener(){}}},setTimeout:()=>1,clearTimeout(){}};
     for(const name of ['attachable-event-source.js','wheel-gesture-source.js'])vm.runInNewContext(read(gestures,name),ios);
     new ios.window.Baguette._WheelGestureSource({size,touchDown(){},touchUp(){},touchMove:p=>expected=copy(p)}).attach({getBoundingClientRect:()=>bounds,addEventListener:(name,fn)=>{iosWheel=fn;}});
     for(const delta of [{deltaY:10},{deltaX:-8,deltaY:-15}]){
@@ -91,22 +91,40 @@ test('Android wheel gestures match iPhone contacts at the same cursor, scale and
 });
 
 function pointerHarness({withActions=false,holdInput=false}={}){
-  const handlers={},globalHandlers={},sent=[];let dots=[];
+  const handlers={},globalHandlers={},documentHandlers={},sent=[];let dots=[];
   const pending=[];
   const node=()=>({hidden:true,addEventListener(){}}),nodes={};
   const frame={style:{},getAnimations:()=>[]};
   const canvas={width:800,height:1600,getContext:()=>({}),focus(){},setPointerCapture(){},
     getBoundingClientRect:()=>({left:20,top:40,width:200,height:400}),addEventListener:(name,fn)=>handlers[name]=fn};
-  const context={URLSearchParams,AbortController,AbortSignal,setTimeout,clearTimeout,location:{pathname:'/simulators/test',search:''},
+  const context={URLSearchParams,AbortController,AbortSignal,setTimeout,clearTimeout,location:{pathname:'/simulators/test',search:'',origin:'http://example.test'},
     window:{Baguette:{_PinchOverlay:class{clear(){dots=[];}setFingers(p){dots=copy(p);}}}},
     parent:{document:{documentElement:{lang:'en'}},cindySim:{state:{viewport:{width:400,height:800}}}},
-    document:{addEventListener(){},getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:nodes[name]||(nodes[name]=node())},
+    document:{addEventListener:(name,fn)=>documentHandlers[name]=fn,getElementById:name=>name==='display'?canvas:name==='nativeDeviceFrame'?frame:nodes[name]||(nodes[name]=node())},
     matchMedia:()=>({matches:false}),addEventListener:(name,fn)=>globalHandlers[name]=fn,
     fetch:(url,options)=>{if(url!=='/android-input')return new Promise(()=>{});sent.push(JSON.parse(options.body));const response={ok:true,json:async()=>({ok:true})};return holdInput?new Promise(resolve=>pending.push(()=>resolve(response))):Promise.resolve(response);}};
   if(withActions)vm.runInNewContext(read(android,'screen-actions.js'),context);
   vm.runInNewContext(read(android,'screen.js'),context);
-  return {handlers,globalHandlers,sent,pending,dots:()=>dots,native:(phase,touches)=>handlers['cindy-trackpad']({detail:{phase,touches}})};
+  return {handlers,globalHandlers,documentHandlers,context,sent,pending,dots:()=>dots,native:(phase,touches)=>handlers['cindy-trackpad']({detail:{phase,touches}})};
 }
+
+test('Android keyboard disable and hidden page discard queued typing before releasing input',async()=>{
+ for(const reason of ['disable','hidden']){
+  const h=pointerHarness({holdInput:true});
+  h.handlers.keydown({key:'a',preventDefault(){}});await pause(0);
+  h.handlers.keydown({key:'b',preventDefault(){}});
+  if(reason==='disable'){
+   const message={source:h.context.parent,origin:h.context.location.origin,data:{type:'cindy-release-input'}};
+   h.globalHandlers.message({...message,source:{}}); // other frames cannot cancel input
+   assert.equal(h.sent.length,1);
+   h.globalHandlers.message(message);
+  }else{h.context.document.hidden=true;h.documentHandlers.visibilitychange();}
+  for(let i=0;i<6;i++){h.pending.shift()?.();await pause(0);}
+  assert.deepEqual(h.sent.map(p=>[p.action,p.keys]),[['type','a'],['release',undefined]]);
+  h.handlers.keydown({key:'c',preventDefault(){}});await pause(0);
+  assert.equal(h.sent.at(-1).keys,'c');h.pending.shift()?.();await pause(0);
+ }
+});
 
 test('Android queues native release and next begin while the previous request is pending',async()=>{
   const h=pointerHarness({withActions:true,holdInput:true});
@@ -161,7 +179,7 @@ test('Android and iPhone wheel pan consume edge travel and reverse with the pair
   vm.runInNewContext(read(android,'screen-actions.js'),context);
   const actions=context.window.androidScreenActions({canvas,frame:node(),pointers,screenSize:()=>({width:400,height:800}),input:async()=>{},flush:async()=>{sent.push(copy([...pointers.values()]));for(const [key,p]of pointers)if(!p.pressure)pointers.delete(key);}});t.after(actions.release);
   let iosWheel,iosLast;
-  const ios={window:{},setTimeout:()=>1,clearTimeout(){}};
+  const ios={window:{addEventListener(){},document:{addEventListener(){}}},setTimeout:()=>1,clearTimeout(){}};
   for(const name of ['attachable-event-source.js','wheel-gesture-source.js'])vm.runInNewContext(read(gestures,name),ios);
   new ios.window.Baguette._WheelGestureSource({size:{width:400,height:800},touchDown(){},touchUp(){},touchMove:p=>iosLast=copy(p)}).attach({getBoundingClientRect:()=>({left:0,top:0,width:400,height:800}),addEventListener:(_name,fn)=>iosWheel=fn});
   const pan=(deltaX,deltaY)=>{const e=event({clientX:200,clientY:400,deltaX,deltaY});handlers.wheel(e);iosWheel(e);};

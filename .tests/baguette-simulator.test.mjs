@@ -18,6 +18,7 @@ import './baguette/paste-compat.test.cjs';
 import './baguette/screen-pieces.test.cjs';
 import './baguette/wheel-overlay.test.cjs';
 import './baguette/native-contacts.test.cjs';
+import './baguette/gesture-cancellation.test.cjs';
 import './baguette/fold-orientation.test.cjs';
 import './baguette/runtime.test.cjs';
 import './baguette/device-manager.test.cjs';

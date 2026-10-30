@@ -17,6 +17,11 @@
 
     _bind() {
       let state = null;
+      this._cancel = () => {
+        if (state) this.screen.touchUp(state.fingers);
+        state = null;
+        this.overlay?.clear();
+      };
 
       const fingersFor = (scale, rotRad, centreDev, baseDev) => {
         const rr = baseDev * scale;
@@ -47,6 +52,7 @@
           lastMs: 0,
         };
         const fingers = fingersFor(1, 0, centreDev, BASE_SPREAD_PT);
+        state.fingers = fingers;
         this.screen.touchDown(fingers);
         if (this.overlay) {
           this.overlay.setFingers([
@@ -93,7 +99,8 @@
         const now = performance.now();
         if (now - state.lastMs < MOVE_FLUSH_MS) return;
         state.lastMs = now;
-        this.screen.touchMove(fingersFor(scale, rotRad, state.centreDev, BASE_SPREAD_PT));
+        state.fingers = fingersFor(scale, rotRad, state.centreDev, BASE_SPREAD_PT);
+        this.screen.touchMove(state.fingers);
       });
 
       this._on(this._el, 'gestureend', (e) => {
