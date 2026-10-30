@@ -5,7 +5,7 @@
   "name": "设备模拟器",
   "description": "在统一设备列表和任务侧栏中查看、操作 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，以及 USB 或网络配对的 iPhone/iPad 真机。支持输入、截图、App 管理和日志；真机需要 Mac、Xcode 27+ 和开发者模式；文字定位与输入需要签名组件。真机不参与模拟器自动关机。 Apple 模拟器需要 macOS 15+、Apple Silicon、完整 Xcode 和对应运行时；安卓模拟器支持 Mac、Windows x64、Linux x64，安装环境前确认下载大小和许可。",
   "whenToUse": "连接、查看和操作 iPhone/iPad 真机；使用 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器。App 安装启动、触摸输入、截图、界面检查和日志排查。先 devices 选择精确设备，再按手册验证结果。",
-  "version": "0.3.26",
+  "version": "0.3.27",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",

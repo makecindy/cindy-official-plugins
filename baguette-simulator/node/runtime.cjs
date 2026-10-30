@@ -59,7 +59,9 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     }
     if (!knownDevices) commandBudget(1, deadline, now);
     return {...(knownDevices || await dispatch('devices', {includeMemoryModes:true}, deadline)), settings: {...settings}, settingsError, lastStop,
-      deviceJob:manager.snapshot(),idleDeadline: settings.idleMinutes ? lastActivity + settings.idleMinutes * 60000 : null};
+      // Watching protects the device before the cleanup timer runs, too. Do not
+      // show a shutdown countdown for a deadline that cannot shut it down.
+      deviceJob:manager.snapshot(),idleDeadline: settings.idleMinutes && !viewing() ? lastActivity + settings.idleMinutes * 60000 : null};
   }
   async function stopAll(reason, deadline = now() + 110000) {
     const run = (method, params = {}) => {
@@ -343,7 +345,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       const settings = await load();
       if (settings.enabled && (!settings.idleMinutes || now() - lastActivity < settings.idleMinutes * 60000)) return;
       // Someone is still watching or operating a device: start a new idle period.
-      if (settings.enabled && (tasks?.hasActivity?.(now()) || await inUse().catch(() => true))) { touch(); return; }
+      if (settings.enabled && (viewing() || tasks?.hasActivity?.(now()) || await inUse().catch(() => true))) { touch(); return; }
       const result = await stopAll(settings.enabled ? 'idle' : 'disabled');
       // Incomplete shutdown stays visible; do not silently retry forever.
       idleHandled = true;
