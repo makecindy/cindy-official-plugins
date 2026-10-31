@@ -65,6 +65,24 @@
               "type": "string"
             },
             "description": "已生成的成果列表（如 RQ Brief, Outline, Draft, Review Reports 等）"
+          },
+          "manuscript_excerpt": {
+            "type": "string",
+            "description": "可选，当前手稿文本或内容摘要，用于计算真实的材料护照哈希 (Material Passport Hash)"
+          },
+          "integrity_audit_passed": {
+            "type": "boolean",
+            "description": "可选，Stage 2.5 或 Stage 4.5 学术诚信门禁审计是否已通过（仅当为 true 时允许放行至下一阶段）"
+          },
+          "review_decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "minor_revision",
+              "major_revision",
+              "reject"
+            ],
+            "description": "可选，Stage 3 或 Stage 3' 同行评审决定（决定分流至终审门禁、返修或回退立项）"
           }
         },
         "required": [
@@ -195,6 +213,17 @@
               "final_integrity_gate"
             ],
             "description": "门禁阶段：pre_review_gate (Stage 2.5 审前诚信门禁), final_integrity_gate (Stage 4.5 终审零回归门禁)。默认 pre_review_gate"
+          },
+          "verified_dois": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可选，已通过 verify_doi 在线核验确认存在的 DOI 列表，用于完成 Mode 1 引用真实性对账放行"
+          },
+          "implementation_verified": {
+            "type": "boolean",
+            "description": "可选，作者是否已核查并确认代码实现、训练集/测试集隔离与随机种子无数据泄露，用于完成 Mode 3 放行"
           }
         },
         "required": [
@@ -449,7 +478,8 @@
               "continuous",
               "binary",
               "ordinal",
-              "count"
+              "count",
+              "time_to_event"
             ],
             "description": "因变量/结果变量数据类型"
           },
@@ -567,6 +597,29 @@
           "perform_cld_ranking": {
             "type": "boolean",
             "description": "可选，是否输出基于均值从大到小降序排列的显著性字母标记 (Compact Letter Display, CLD)"
+          },
+          "pairwise_comparisons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group1": {
+                  "type": "string"
+                },
+                "group2": {
+                  "type": "string"
+                },
+                "p_adj": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "group1",
+                "group2",
+                "p_adj"
+              ]
+            },
+            "description": "可选，多组（>2 组）事后两两比较的校正后 p 值列表，用于精确计算显著性字母标记 (CLD)"
           },
           "multiple_comparison_method": {
             "type": "string",

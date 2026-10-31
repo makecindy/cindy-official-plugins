@@ -1635,12 +1635,15 @@ function computeCldLetters(sortedGroups, overallP, pairwise) {
     return sig2 ? ['a', 'b'] : ['a', 'a'];
   }
 
-  // For k > 2, require pairwise comparisons; build symmetric significance matrix (true = significantly different)
+  // For k > 2, require complete pairwise comparisons for all k*(k-1)/2 pairs
   var sigMatrix = [];
+  var observedMatrix = [];
   for (var i = 0; i < k; i++) {
     sigMatrix[i] = [];
+    observedMatrix[i] = [];
     for (var j = 0; j < k; j++) {
       sigMatrix[i][j] = false;
+      observedMatrix[i][j] = (i === j);
     }
   }
 
@@ -1651,16 +1654,32 @@ function computeCldLetters(sortedGroups, overallP, pairwise) {
     var pVal = typeof pw.p_adj === 'number' ? pw.p_adj :
                (typeof pw.p_value === 'number' ? pw.p_value :
                (typeof pw.p === 'number' ? pw.p : null));
-    if (!g1 || !g2 || pVal === null) continue;
+    if (!g1 || !g2 || pVal === null || Number.isNaN(pVal)) continue;
     var idx1 = -1;
     var idx2 = -1;
     for (var m = 0; m < k; m++) {
       if (sortedGroups[m].name === g1) idx1 = m;
       if (sortedGroups[m].name === g2) idx2 = m;
     }
-    if (idx1 >= 0 && idx2 >= 0 && idx1 !== idx2 && pVal < 0.05) {
-      sigMatrix[idx1][idx2] = true;
-      sigMatrix[idx2][idx1] = true;
+    if (idx1 >= 0 && idx2 >= 0 && idx1 !== idx2) {
+      observedMatrix[idx1][idx2] = true;
+      observedMatrix[idx2][idx1] = true;
+      if (pVal < 0.05) {
+        sigMatrix[idx1][idx2] = true;
+        sigMatrix[idx2][idx1] = true;
+      } else {
+        sigMatrix[idx1][idx2] = false;
+        sigMatrix[idx2][idx1] = false;
+      }
+    }
+  }
+
+  // Verify every pair (r, c) was explicitly provided in pairwise_comparisons
+  for (var rCheck = 0; rCheck < k; rCheck++) {
+    for (var cCheck = rCheck + 1; cCheck < k; cCheck++) {
+      if (!observedMatrix[rCheck][cCheck]) {
+        return null;
+      }
     }
   }
 
@@ -1810,16 +1829,23 @@ async function academicDataSummaryTool(args) {
   var cldList = [];
   if (sortedDescriptives.length > 0 && doCld) {
     var computedLetters = computeCldLetters(sortedDescriptives, p, pairwise);
-    for (var dIdx = 0; dIdx < sortedDescriptives.length; dIdx++) {
-      var item = sortedDescriptives[dIdx];
-      cldList.push({
-        rank: dIdx + 1,
-        name: item.name,
-        mean: item.mean,
-        sd: item.sd,
-        n: item.n,
-        cld_letter: computedLetters[dIdx],
-      });
+    if (!computedLetters) {
+      if (explicitCldArg === true) {
+        return fail('多组显著性字母标记 (CLD) 计算失败：pairwise_comparisons 未完整覆盖全部 k*(k-1)/2 个组对或组名与 group_descriptives 不匹配。');
+      }
+      doCld = false;
+    } else {
+      for (var dIdx = 0; dIdx < sortedDescriptives.length; dIdx++) {
+        var item = sortedDescriptives[dIdx];
+        cldList.push({
+          rank: dIdx + 1,
+          name: item.name,
+          mean: item.mean,
+          sd: item.sd,
+          n: item.n,
+          cld_letter: computedLetters[dIdx],
+        });
+      }
     }
   }
 
