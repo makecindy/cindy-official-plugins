@@ -17,9 +17,9 @@
 | **Stage 2.5** | **审前诚信阻断门禁**<br>`Stage_2_5_Integrity` | 调用 `academic_integrity_audit` 排查 7 类失败模式（未核验 DOI、缺对照、过度宣称、p-hacking 等） | **阻断式门禁：** 仅当 `integrity_audit_passed = true` 时放行至 Stage 3；否则退回 Stage 2 修复 |
 | **Stage 3** | **多视角同行评审**<br>`Stage_3_Review` | 调用 `peer_review_evaluation` 从主编、方法学、小同行、可复现性及魔鬼代言人五视角盲审打分 | 审稿意见书与明确决议（`accept` / `minor_revision` / `major_revision` / `reject`） |
 | **Stage 4** | **逐点答辩与返修**<br>`Stage_4_Revise` | 调用 `rebuttal_matrix_coach` 拆解审稿人批评，补充实验或稳健性分析，撰写 Point-by-point 答辩信 | 高亮标记的修改稿（Revised Manuscript）与逐点答辩矩阵 |
-| **Stage 3'** | **验证性再审**<br>`Stage_3_Prime_Rereview` | 核验作者是否实质性解决了 Stage 3 提出的方法学与统计关切 | 若仍需大修则转入 `Stage_4_Prime_Rerevise`；若达标则转入终审门禁 Stage 4.5 |
-| **Stage 4.5** | **终审零回归门禁**<br>`Stage_4_5_FinalIntegrity` | 对返修稿再次执行 `academic_integrity_audit`，确保补实验与新增引用未引入任何新缺陷 | 终审合规放行凭证（Final Gate Pass） |
-| **Stage 5 & 6** | **排版定稿与归档**<br>`Stage_5_Finalize` / `Stage_6_Summary` | 调用 `author_disclosure_statement` 与 `bibtex_format_converter` 生成 CRediT 贡献声明、利益冲突披露与标准参考文献 | 具备完整可溯源记录的待投稿定稿包（Submission-Ready Package） |
+| **Stage 3' & 4'** | **验证性再审与二轮返修**<br>`Stage_3_Prime_Rereview` / `Stage_4_Prime_Rerevise` | 核验作者是否实质性解决了 Stage 3 提出的方法学与统计关切 | 若仍需大修则转入 `Stage_4_Prime_Rerevise`；若达标则转入终审门禁 `Stage_4_5_Final_Integrity` |
+| **Stage 4.5** | **终审零回归门禁**<br>`Stage_4_5_Final_Integrity` | 对返修稿再次执行 `academic_integrity_audit`，确保补实验与新增引用未引入任何新缺陷 | 终审合规放行凭证（Final Gate Pass） |
+| **Stage 5 & 6** | **排版定稿与归档**<br>`Stage_5_Finalize` / `Stage_6_Process_Summary` | 调用 `author_disclosure_statement` 与 `bibtex_format_converter` 生成 CRediT 贡献声明、利益冲突披露与标准参考文献 | 具备完整可溯源记录的待投稿定稿包（Submission-Ready Package） |
 
 ---
 
