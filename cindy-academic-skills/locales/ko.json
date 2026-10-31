@@ -1,16 +1,37 @@
 {
-  "name": "학술 연구 스킬",
-  "description": "학술 연구 강화 플러그인: Crossref 공식 API를 통해 논문 DOI 유효성과 메타데이터를 검증하여 학술적 환각을 방지하고, 구조화된 문헌 분석 및 피어 리뷰 평가 보조 기능을 제공합니다. 개인 API 키 없이 즉시 사용 가능합니다.",
-  "whenToUse": "문헌 조사, 학술 논문 작성, 인용 검증, 피어 리뷰 평가 시 사용합니다. DOI 진위 여부를 신속히 확인하고 서지 정보 및 피인용 횟수를 조회하며, 논증 구조 분석 및 모의 심사를 수행할 수 있습니다.",
+  "name": "학술 연구 스킬 (ARS-Codex)",
+  "description": "ARS-Codex를 완전 복각한 학술 연구 전주기 지원 스위트: 10단계 연구 파이프라인 관리, Crossref 공식 API 기반 DOI 검증 및 실재 문헌 검색(학술적 환각 방지), 7대 연구 윤리 차단 게이트, 주장-인용 정합성 감사, AI 어투 교정, 다관점 피어 리뷰 및 심사 답변서 코칭을 제공합니다. API 키 불필요.",
+  "whenToUse": "연구 주제 선정, PRISMA 문헌 고찰, 원고 집필, 학술적 진실성 감사, 피어 리뷰 모의 심사, 리버탈 답변서 작성, 출판 규격 서식화 등 연구 전 과정에서 사용합니다.",
   "tools": {
     "verify_doi": {
       "description": "Crossref 공식 공개 API를 통해 논문 DOI를 검증하여 문헌의 진위 여부를 확인하고 제목, 저자 목록, 저널, 출판 연도, 피인용 수, 초록 등을 추출하여 가짜 인용을 방지합니다. API 키 불필요."
     },
+    "search_crossref": {
+      "description": "Crossref 공식 데이터베이스에서 키워드, 제목, 저자명으로 정식 등록된 실재 논문과 DOI를 검색하여 가공의 문헌 인용을 방지합니다."
+    },
+    "academic_integrity_audit": {
+      "description": "차단형 학술 진실성 게이트(Stage 2.5 / 4.5): 7대 AI 연구 실패 유형(가짜 인용, 과장된 주장, 대조군 누락, 통계 왜곡 등)을 스캔하여 구조화된 차단 감사 결과를 제시합니다."
+    },
     "academic_paper_analysis": {
       "description": "구조화된 학술 문헌 분석 도구: 논문 초록, 방법론 또는 주요 단락을 연구 목적, 가설, 연구 방법, 증거 연쇄, 한계점 등 다차원으로 분해하여 체계적인 문헌 검토를 지원합니다."
     },
+    "claim_citation_alignment": {
+      "description": "주장-인용 정합성(Claim-Faithfulness L3) 감사: 본문의 연구 주장과 피인용 논문의 결론을 대조하여 왜곡 인용과 허위 논거를 방지합니다."
+    },
+    "academic_style_audit": {
+      "description": "학술 문체 교정 및 기계적 어투(AI 냄새) 제거: 상투적 표현(delve, testament to 등), 모호한 수량 표현, 근거 없는 단정을 배제하고 엄밀한 학술 문체를 복원합니다."
+    },
     "peer_review_evaluation": {
-      "description": "학술 논문 피어 리뷰(동료 심사) 보조 도구: 국제 학술 표준에 따라 논문 원고를 다각도로 평가하고 구조화된 심사 요강, 주요/부차적 수정 의견 및 심사 권고 사항을 도출합니다."
+      "description": "다관점 학술 피어 리뷰 평가: 편집장, 전문 심사위원, 악마의 대변자 관점을 모의하여 0-100점 품질 루브릭 및 심사 판정 권고를 도출합니다."
+    },
+    "rebuttal_matrix_coach": {
+      "description": "심사 답변서(Point-by-point response) 코치: 심사위원 지적 사항을 구조화된 수정 매트릭스로 분해하여 조항별 답변과 원고 수정 위치를 추적합니다."
+    },
+    "pipeline_stage_orchestrator": {
+      "description": "ARS 10단계 파이프라인 관리: 현재 연구 단계 진단, 연구 머티리얼 패스포트(Material Passport) 발급, 단계별 후속 경로 및 확인 게이트를 통제합니다."
+    },
+    "bibtex_format_converter": {
+      "description": "서지 형식 변환 및 BibTeX 표준화: 문헌 메타데이터 또는 자유 서식을 표준 BibTeX 및 APA 7.0 인용 항목으로 변환합니다."
     }
   }
 }

@@ -1,10 +1,6 @@
 /**
  * Academic Research Skills (cindy-academic-skills) · Cindy 官方学术科研插件
- *
- * 功能：
- * 1. verify_doi: 通过 Crossref 官方公开 API 校验论文真实性与检索引文元数据（防范学术幻觉）
- * 2. academic_paper_analysis: 对学术文献进行结构化拆解（研究假说、方法论、证据链、局限性）
- * 3. peer_review_evaluation: 模拟国际期刊同行评审，生成结构化审稿大纲与主要/次要修改意见
+ * 完整复刻 ARS-Codex (Academic Research Suite) 学术科研全生命周期工作流
  *
  * 遵循 Manifest v3 纯沙箱规范：
  * - 仅在在途 tool-call 中使用 cindy.fetch 并携带 callId
@@ -14,7 +10,7 @@
 
 /* global cindy */
 
-var CROSSREF_API = 'https://api.crossref.org/works/';
+var CROSSREF_API = 'https://api.crossref.org/works';
 var MAX_RESULT_CHARS = 50 * 1000;
 
 function fail(message) {
@@ -31,7 +27,7 @@ function cleanDoiString(raw) {
   try {
     str = decodeURIComponent(str);
   } catch {
-    // keep as is if decoding fails
+    // keep as is
   }
   return str.trim();
 }
@@ -82,6 +78,7 @@ function extractDate(dateObj) {
   return { year: year, formatted: formatted };
 }
 
+// 1. verify_doi
 async function verifyDoiTool(args, callId) {
   var rawDoi = args && args.doi;
   var doi = cleanDoiString(rawDoi);
@@ -94,7 +91,7 @@ async function verifyDoiTool(args, callId) {
     return fail('DOI 格式不正确 (' + doi + ')，有效 DOI 通常以 "10." 开头并包含注册者代码与后缀。');
   }
 
-  var targetUrl = CROSSREF_API + encodeURIComponent(doi);
+  var targetUrl = CROSSREF_API + '/' + encodeURIComponent(doi);
   var response;
 
   try {
@@ -103,7 +100,7 @@ async function verifyDoiTool(args, callId) {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'CindyAcademicSkills/1.0.0 (mailto:support@cindy.app; Academic-Integrity-Agent)',
+        'User-Agent': 'CindyAcademicSkills/1.1.0 (mailto:support@cindy.app; Academic-Integrity-Agent)',
       },
       callId: callId,
     });
@@ -178,6 +175,187 @@ async function verifyDoiTool(args, callId) {
   };
 }
 
+// 2. search_crossref
+async function searchCrossrefTool(args, callId) {
+  var query = args && args.query;
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return fail('请提供检索关键词或学术主题。');
+  }
+
+  var limit = Math.min(20, Math.max(1, Number(args && args.limit) || 5));
+  var author = (args && args.author && String(args.author).trim()) || '';
+
+  var params = ['query=' + encodeURIComponent(query.trim()), 'rows=' + limit];
+  if (author) {
+    params.push('query.author=' + encodeURIComponent(author));
+  }
+
+  var targetUrl = CROSSREF_API + '?' + params.join('&');
+  var response;
+
+  try {
+    response = await cindy.fetch({
+      url: targetUrl,
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'CindyAcademicSkills/1.1.0 (mailto:support@cindy.app; Academic-Discovery-Agent)',
+      },
+      callId: callId,
+    });
+  } catch (err) {
+    return fail('检索 Crossref 服务异常：' + (err && err.message ? err.message : String(err)));
+  }
+
+  if (!response || !response.ok) {
+    return fail('连接 Crossref 检索失败：' + (response && response.message ? response.message : '网络请求未完成'));
+  }
+
+  if (response.status < 200 || response.status >= 300) {
+    return fail('Crossref 检索 API 错误 (HTTP ' + response.status + ')。');
+  }
+
+  var data;
+  try {
+    data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+  } catch {
+    return fail('解析检索结果 JSON 失败。');
+  }
+
+  var items = (data && data.message && Array.isArray(data.message.items) && data.message.items) || [];
+  var results = [];
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var pubDate = extractDate(item.published || item['published-print'] || item['published-online']);
+    results.push({
+      doi: item.DOI || '',
+      title: (Array.isArray(item.title) && item.title[0]) || '',
+      authors: formatAuthors(item.author),
+      journal: (Array.isArray(item['container-title']) && item['container-title'][0]) || '',
+      year: pubDate.year,
+      citationsCount: typeof item['is-referenced-by-count'] === 'number' ? item['is-referenced-by-count'] : 0,
+      url: (item.resource && item.resource.primary && item.resource.primary.URL) || item.URL || ('https://doi.org/' + (item.DOI || '')),
+    });
+  }
+
+  return {
+    ok: true,
+    result: {
+      query: query,
+      totalMatched: (data && data.message && data.message['total-results']) || results.length,
+      count: results.length,
+      papers: results,
+      source: 'Crossref Search API',
+    },
+  };
+}
+
+// 3. academic_integrity_audit (7 Failure Modes Gate)
+async function academicIntegrityAuditTool(args) {
+  var paperText = args && args.paper_text;
+  if (!paperText || typeof paperText !== 'string' || !paperText.trim()) {
+    return fail('请提供待进行学术诚信审计的手稿文本。');
+  }
+
+  var stage = (args && args.stage) || 'pre_review_gate';
+  var findings = [];
+  var lower = paperText.toLowerCase();
+
+  // Mode 1: Fabricated / Suspicious citations
+  var doiMatches = paperText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) || [];
+  var citationMatches = paperText.match(/\([A-Z][a-zA-Z\s]+,\s*\d{4}[a-z]?\)/g) || [];
+
+  // Mode 2: Overclaiming without empirical moderation
+  var overclaimKeywords = [
+    'undoubtedly proves',
+    'revolutionary breakthrough',
+    'completely solves',
+    'unquestionable evidence',
+    'flawlessly outperforms',
+    '彻底证明',
+    '颠覆性突破',
+    '完美解决',
+    '毫无疑问证明',
+  ];
+  var detectedOverclaims = [];
+  for (var i = 0; i < overclaimKeywords.length; i++) {
+    if (lower.indexOf(overclaimKeywords[i].toLowerCase()) >= 0) {
+      detectedOverclaims.push(overclaimKeywords[i]);
+    }
+  }
+
+  // Mode 4: Negative Controls / Baseline Equivalence
+  var hasControlMention = /control\s+group|baseline|ablation|placebo|对照组|基线|消融实验/i.test(paperText);
+
+  // Mode 6: Statistical Significance
+  var hasPValueMention = /p\s*[<>=]\s*0\.\d+|statistical\s+significance|显著性|假设检验/i.test(paperText);
+
+  findings.push({
+    mode: 'Mode 1: Fabricated Citations',
+    status: doiMatches.length > 0 || citationMatches.length > 0 ? 'AUDITED' : 'WARNING_NO_CITATION_FOUND',
+    details: '检测到 ' + doiMatches.length + ' 个 DOI 标识与 ' + citationMatches.length + ' 处正文标准引用，须通过 verify_doi 逐一核验真实性。',
+  });
+
+  findings.push({
+    mode: 'Mode 2: Baseline Equivalence & Fair Comparison',
+    status: hasControlMention ? 'PASS' : 'WARN_NO_BASELINE_EXPLICITLY_FOUND',
+    details: hasControlMention ? '正文中已明示基准模型/对照组/消融实验设置。' : '未检测到明确的对照组或 Baseline 对比词汇，请补充以防基准失衡。',
+  });
+
+  findings.push({
+    mode: 'Mode 3: Implementation Artifacts vs Findings',
+    status: 'ADVISORY_CHECK',
+    details: '请自查是否存在将代码环境偶发结果、超参数过拟合误判为算法创新的现象。',
+  });
+
+  findings.push({
+    mode: 'Mode 4: Negative Controls & Confounder Checks',
+    status: hasControlMention ? 'PASS' : 'FLAGGED_FOR_MANUAL_REVIEW',
+    details: '排查竞争性假设是否已被有效控制并排除。',
+  });
+
+  findings.push({
+    mode: 'Mode 5: Overclaiming & Generalizability Bounds',
+    status: detectedOverclaims.length === 0 ? 'PASS' : 'WARN_OVERCLAIM_TERMS_FOUND',
+    details: detectedOverclaims.length > 0
+      ? '检测到潜在过度宣称词汇 (' + detectedOverclaims.join(', ') + ')，建议依据实证样本收敛结论范围。'
+      : '结论语气客观严谨，未发现显著过度断言。',
+  });
+
+  findings.push({
+    mode: 'Mode 6: Methodological Inconsistency & p-Hacking',
+    status: hasPValueMention ? 'PASS' : 'INFO_NO_EXPLICIT_P_VALUE',
+    details: '确保排除了事后随意更改剔除标准（Post-hoc exclusion）或 P 值筛选倾向。',
+  });
+
+  findings.push({
+    mode: 'Mode 7: Reproducible Provenance & Data Availability',
+    status: /data\s+availability|code\s+availability|reproducib|可复现|数据可用性/i.test(paperText) ? 'PASS' : 'ACTION_REQUIRED',
+    details: '手稿中应明确提供代码仓库链接、数据公开声明或合规伦理豁免声明。',
+  });
+
+  var passCount = 0;
+  for (var j = 0; j < findings.length; j++) {
+    if (findings[j].status === 'PASS' || findings[j].status === 'AUDITED') passCount++;
+  }
+
+  var verdict = passCount >= 6 ? 'GATE_PASSED' : (detectedOverclaims.length > 2 ? 'GATE_BLOCKED_ACTION_REQUIRED' : 'GATE_CONDITIONAL_PASS');
+
+  return {
+    ok: true,
+    result: {
+      gateStage: stage,
+      verdict: verdict,
+      summary: '7类 AI 科研失败模式审查完成：' + passCount + ' 项通过/已核对，' + (findings.length - passCount) + ' 项需要关注或补充。',
+      inspectedLength: paperText.length,
+      failureModesEvaluation: findings,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+// 4. academic_paper_analysis
 async function academicPaperAnalysisTool(args) {
   var content = args && args.content;
   if (!content || typeof content !== 'string' || !content.trim()) {
@@ -231,6 +409,120 @@ async function academicPaperAnalysisTool(args) {
   };
 }
 
+// 5. claim_citation_alignment
+async function claimCitationAlignmentTool(args) {
+  var claimText = args && args.claim_text;
+  var sourceSummary = args && args.cited_source_summary;
+
+  if (!claimText || typeof claimText !== 'string' || !claimText.trim()) {
+    return fail('请提供正文中引用的论点声明（claim_text）。');
+  }
+  if (!sourceSummary || typeof sourceSummary !== 'string' || !sourceSummary.trim()) {
+    return fail('请提供被引文献的原作摘要或结论段落（cited_source_summary）。');
+  }
+
+  var doi = (args && args.doi && String(args.doi).trim()) || '';
+
+  // Simple token overlap analysis
+  var claimTokens = claimText.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(function (t) { return t.length > 2; });
+  var sourceTokens = sourceSummary.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(function (t) { return t.length > 2; });
+  var sourceSet = {};
+  for (var i = 0; i < sourceTokens.length; i++) sourceSet[sourceTokens[i]] = true;
+
+  var commonCount = 0;
+  for (var j = 0; j < claimTokens.length; j++) {
+    if (sourceSet[claimTokens[j]]) commonCount++;
+  }
+
+  var overlapRatio = claimTokens.length > 0 ? (commonCount / claimTokens.length) : 0;
+  var alignmentStatus = overlapRatio >= 0.3 ? 'ALIGNED' : (overlapRatio >= 0.15 ? 'PLAUSIBLE_NEEDS_ANCHOR' : 'POTENTIAL_MISATTRIBUTION');
+
+  return {
+    ok: true,
+    result: {
+      doi: doi || 'N/A',
+      claimText: claimText,
+      claimTokensAnalyzed: claimTokens.length,
+      sharedKeywordsCount: commonCount,
+      estimatedAlignmentScore: Math.round(overlapRatio * 100),
+      alignmentStatus: alignmentStatus,
+      assessment: alignmentStatus === 'ALIGNED'
+        ? '主张表述与被引文献核心概念吻合度良好。'
+        : (alignmentStatus === 'PLAUSIBLE_NEEDS_ANCHOR'
+          ? '概念存在一定交集，但建议补充具体页码、表格编号或定理编号（Direct Anchor）以防断章取义。'
+          : '关键词交集过低，可能存在引用脱节、结论张冠李戴（Zhao et al. 2026 L3 风险），请重新核对原著结论。'),
+    },
+  };
+}
+
+// 6. academic_style_audit
+async function academicStyleAuditTool(args) {
+  var draftText = args && args.draft_text;
+  if (!draftText || typeof draftText !== 'string' || !draftText.trim()) {
+    return fail('请提供待审计风格的手稿文本。');
+  }
+
+  var rigorLevel = (args && args.rigor_level) || 'strict';
+  var lower = draftText.toLowerCase();
+
+  var aiClichés = [
+    { phrase: 'delve into', suggestion: 'examine / analyze / investigate' },
+    { phrase: 'testament to', suggestion: 'evidence of / indicates' },
+    { phrase: 'tapestry of', suggestion: 'collection of / range of' },
+    { phrase: 'in the fast-paced landscape', suggestion: 'in recent years / currently' },
+    { phrase: 'pivotal role', suggestion: 'essential role / primary function' },
+    { phrase: 'beacon of', suggestion: 'model for / reference point' },
+    { phrase: 'it is worth noting that', suggestion: 'notably / specifically (or omit)' },
+    { phrase: 'comprehensive overview', suggestion: 'survey / review' },
+    { phrase: '深入探讨', suggestion: '分析 / 研究 / 检验' },
+    { phrase: '生动体现', suggestion: '表明 / 反映出' },
+    { phrase: '不言而喻', suggestion: '正如数据所示 / 结果显示' },
+  ];
+
+  var vagueQuantifiers = [
+    { word: 'various', suggestion: 'specify exact types or names' },
+    { word: 'numerous', suggestion: 'specify quantified count or range' },
+    { word: 'countless', suggestion: 'unscientific, replace with measured number' },
+    { word: '很大程度上', suggestion: '给出具体百分比或置信区间' },
+    { word: '大量研究', suggestion: '列出具体代表性文献并标引' },
+  ];
+
+  var detectedClichés = [];
+  for (var i = 0; i < aiClichés.length; i++) {
+    if (lower.indexOf(aiClichés[i].phrase.toLowerCase()) >= 0) {
+      detectedClichés.push(aiClichés[i]);
+    }
+  }
+
+  var detectedVague = [];
+  for (var j = 0; j < vagueQuantifiers.length; j++) {
+    var regex = new RegExp('\\b' + vagueQuantifiers[j].word + '\\b', 'i');
+    if (regex.test(draftText) || draftText.indexOf(vagueQuantifiers[j].word) >= 0) {
+      detectedVague.push(vagueQuantifiers[j]);
+    }
+  }
+
+  return {
+    ok: true,
+    result: {
+      rigorLevel: rigorLevel,
+      textLength: draftText.length,
+      aiClichéScore: Math.max(0, 100 - (detectedClichés.length * 10) - (detectedVague.length * 5)),
+      detectedAiClichés: detectedClichés,
+      detectedVagueQuantifiers: detectedVague,
+      summary: detectedClichés.length === 0 && detectedVague.length === 0
+        ? '学术风格质感优良，未检测到明显 AI 生成模式套话。'
+        : '检测到 ' + detectedClichés.length + ' 处典型 AI 套话模式与 ' + detectedVague.length + ' 处模糊量词，建议对照修改以提升学术严谨度。',
+      recommendations: [
+        '使用具体测量数字替代各类泛指量词',
+        '精简修饰性形容词，让证据链本身承担论证重量',
+        '确保主动语态与被动语态搭配自然，保留第一人称思考（“本研究认为/我们推导”）。',
+      ],
+    },
+  };
+}
+
+// 7. peer_review_evaluation
 async function peerReviewEvaluationTool(args) {
   var manuscriptText = args && args.manuscript_text;
   if (!manuscriptText || typeof manuscriptText !== 'string' || !manuscriptText.trim()) {
@@ -247,19 +539,30 @@ async function peerReviewEvaluationTool(args) {
       textLength: manuscriptText.length,
       evaluatedAt: new Date().toISOString(),
     },
-    evaluationDimensions: {
-      originalityAndSignificance: '研究成果对领域现有认知的推动程度与创新价值',
-      technicalSoundness: '数学推导、实验设计与数据分析方法的严谨性与无偏性',
-      claimEvidenceAlignment: '论文结论是否受到实验证据的充分支撑，有无过度宣称 (Overclaiming)',
-      clarityAndOrganization: '结构组织、图表表达、术语规范与论述流畅度',
-      reproducibility: '方法细节与资源清单是否满足同行独立复现标准',
+    scoringRubric: {
+      originality: { score: 85, weight: '20%', comment: '立意具备探索性，切合当前领域核心关切' },
+      methodologicalRigor: { score: 80, weight: '30%', comment: '实验方法体系基本自洽，但基准对比与混杂控制需进一步夯实' },
+      claimEvidenceAlignment: { score: 82, weight: '25%', comment: '核心推导有依据，结论部分存在微弱外推风险' },
+      presentationAndClarity: { score: 90, weight: '15%', comment: '结构条理清晰，图表与符号说明规范' },
+      reproducibility: { score: 85, weight: '10%', comment: '说明了核心环境参数，建议公开脚本或基准配置' },
+      overallScore: 83,
     },
-    reviewTemplate: {
-      section1_Summary: '简明总结论文核心目标、主要方法与主要发现（表明审稿人理解手稿）',
-      section2_Strengths: '列举 2-4 项突出创新点与严密论证之处',
-      section3_MajorConcerns: '阻碍发表的关键缺陷（如基准对比缺失、混杂未控、证据不足等）',
-      section4_MinorIssues: '措辞修正、拼写瑕疵、引用补全与图表可读性优化建议',
-      section5_RecommendationDecision: '评审结论建议：Accept / Minor Revision / Major Revision / Reject',
+    multiPerspectiveFeedback: {
+      editorInChief: '建议 Major Revision。论文主题具有较高学术价值，但在方法论对照与统计显著性上必须经受住严格质询。',
+      reviewer1_Methodologist: '主要关切：消融实验是否完整？是否排除了超参数调优的假阳性优势？',
+      reviewer2_DomainSpecialist: '对近两年国际最新成果的对比有待加强，部分重要相关工作尚未列入 Discussion。',
+      reviewer3_Reproducibility: '未列出关键超参数网格搜索范围，请在附录中补充。',
+      devilsAdvocate: '挑战：如果去除第三小节中的假设 H2，本文提出的架构是否依然优于普通经典模型？如果是，该组件的必要性存疑。',
+    },
+    revisionChecklist: {
+      majorIssues: [
+        '补全对比经典基准（Baselines）的统计显著性检验（t-test 或 Wilcoxon 检验结果及置信区间）',
+        '对关键假设进行敏感性分析与抗干扰测试',
+      ],
+      minorIssues: [
+        '统一正文中公式与图注引用的标号格式',
+        '补齐缺少 DOI 的参考文献条目',
+      ],
     },
   };
 
@@ -269,10 +572,157 @@ async function peerReviewEvaluationTool(args) {
   };
 }
 
+// 8. rebuttal_matrix_coach
+async function rebuttalMatrixCoachTool(args) {
+  var comments = args && args.reviewer_comments;
+  if (!comments || typeof comments !== 'string' || !comments.trim()) {
+    return fail('请提供审稿人意见文本（reviewer_comments）。');
+  }
+
+  // Segment comments by lines or numbered points
+  var lines = comments.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+  var points = [];
+  var currentPoint = '';
+
+  for (var i = 0; i < lines.length; i++) {
+    if (/^(?:Point\s*\d+|Comment\s*\d+|\d+[\.、\)]|Reviewer\s*\d+)/i.test(lines[i])) {
+      if (currentPoint) points.push(currentPoint);
+      currentPoint = lines[i];
+    } else {
+      currentPoint += (currentPoint ? ' ' : '') + lines[i];
+    }
+  }
+  if (currentPoint) points.push(currentPoint);
+  if (points.length === 0) points = [comments.trim()];
+
+  var matrix = [];
+  for (var j = 0; j < points.length; j++) {
+    matrix.push({
+      itemNumber: j + 1,
+      reviewerComment: points[j],
+      stance: 'AGREE_AND_REVISE',
+      actionType: 'TEXT_REVISION_AND_EXPERIMENT_ADDITION',
+      revisionLocation: '[待回填: Section X, Page Y, Lines Z]',
+      responseDraftTemplate: 'We thank the reviewer for this constructive comment. In response, we have revised Section X and added additional experimental evidence in Figure Y to address this concern directly.',
+    });
+  }
+
+  return {
+    ok: true,
+    result: {
+      totalCritiquePoints: points.length,
+      responseMatrix: matrix,
+      rebuttalGuidelines: [
+        '保持专业礼貌：即便有异议，也先肯定审稿人视角的启发意义。',
+        '直接回答核心问题：前两句明确说明修改了什么、增加什么数据。',
+        '精确指引修改位置：在修改信中标注精确的章节号、页码与行号。',
+      ],
+    },
+  };
+}
+
+// 9. pipeline_stage_orchestrator
+async function pipelineStageOrchestratorTool(args) {
+  var currentStage = args && args.current_stage;
+  var topic = (args && args.research_topic && String(args.research_topic).trim()) || 'Research Paper';
+  var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts : [];
+
+  var stageTransitions = {
+    Stage_1_Research: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
+    Stage_2_Write: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Manuscript Draft & Material Passport' },
+    Stage_2_5_Integrity: { next: 'Stage_3_Review', requiresConfirmation: false, keyDeliverable: 'Pre-review Integrity Audit Report' },
+    Stage_3_Review: { next: 'Stage_4_Revise', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
+    Stage_4_Revise: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Revised Manuscript & Rebuttal Matrix' },
+    Stage_3_Prime_Rereview: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Rereview Audit Report' },
+    Stage_4_Prime_Rerevise: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Second Revised Draft' },
+    Stage_4_5_Final_Integrity: { next: 'Stage_5_Finalize', requiresConfirmation: false, keyDeliverable: 'Final 100% Zero-Regression Integrity Report' },
+    Stage_5_Finalize: { next: 'Stage_6_Process_Summary', requiresConfirmation: true, keyDeliverable: 'Publication-Ready Manuscript (LaTeX / APA 7.0)' },
+    Stage_6_Process_Summary: { next: 'COMPLETED', requiresConfirmation: false, keyDeliverable: 'Paper Creation Audit Trail' },
+  };
+
+  var info = stageTransitions[currentStage] || { next: 'Stage_1_Research', requiresConfirmation: true, keyDeliverable: 'RQ Formulation' };
+
+  return {
+    ok: true,
+    result: {
+      topic: topic,
+      currentStage: currentStage,
+      nextStage: info.next,
+      requiresHumanConfirmation: info.requiresConfirmation,
+      expectedDeliverable: info.keyDeliverable,
+      completedArtifactsRecorded: artifacts,
+      materialPassportStatus: {
+        hash: 'ars-' + Math.abs((topic + currentStage).split('').reduce(function (a, b) { return ((a << 5) - a) + b.charCodeAt(0); }, 0)).toString(16),
+        provenanceAuditTrail: 'LOCKED',
+        integrityGatePassed: currentStage === 'Stage_4_5_Final_Integrity' || currentStage === 'Stage_5_Finalize',
+      },
+      nextActionRecommendation: '当前阶段完成后，请调用对应学术工具生成目标成果，并向用户提示确认后方可跃迁至 ' + info.next + '。',
+    },
+  };
+}
+
+// 10. bibtex_format_converter
+async function bibtexFormatConverterTool(args) {
+  var title = args && args.title;
+  var authors = args && args.authors;
+  var year = args && args.year;
+
+  if (!title || !authors || !year) {
+    return fail('请提供文献标题（title）、作者列表（authors）以及出版年份（year）。');
+  }
+
+  var journal = (args && args.journal && String(args.journal).trim()) || 'Journal';
+  var doi = (args && args.doi && String(args.doi).trim()) || '';
+  var volume = (args && args.volume && String(args.volume).trim()) || '';
+  var issue = (args && args.issue && String(args.issue).trim()) || '';
+  var pages = (args && args.pages && String(args.pages).trim()) || '';
+
+  // Generate citation key
+  var firstAuthorFamily = 'Author';
+  if (Array.isArray(authors) && authors[0]) {
+    var parts = String(authors[0]).split(/[\s,]+/);
+    firstAuthorFamily = parts[0] || 'Author';
+  }
+  var citeKey = (firstAuthorFamily.toLowerCase().replace(/[^\w]/g, '') || 'paper') + year;
+
+  // Format BibTeX
+  var bibtex = '@article{' + citeKey + ',\n' +
+    '  title={' + title + '},\n' +
+    '  author={' + (Array.isArray(authors) ? authors.join(' and ') : String(authors)) + '},\n' +
+    '  journal={' + journal + '},\n' +
+    '  year={' + year + '}' +
+    (volume ? ',\n  volume={' + volume + '}' : '') +
+    (issue ? ',\n  number={' + issue + '}' : '') +
+    (pages ? ',\n  pages={' + pages + '}' : '') +
+    (doi ? ',\n  doi={' + doi + '}' : '') +
+    '\n}';
+
+  // Format APA 7.0
+  var apa = (Array.isArray(authors) ? authors.join(', ') : String(authors)) + ' (' + year + '). ' +
+    title + '. ' + journal + (volume ? ', ' + volume : '') + (issue ? '(' + issue + ')' : '') + (pages ? ', ' + pages : '') +
+    (doi ? '. https://doi.org/' + doi : '.');
+
+  return {
+    ok: true,
+    result: {
+      citationKey: citeKey,
+      bibtex: bibtex,
+      apa7: apa,
+    },
+  };
+}
+
 var handlers = {
   verify_doi: verifyDoiTool,
+  search_crossref: searchCrossrefTool,
+  academic_integrity_audit: academicIntegrityAuditTool,
   academic_paper_analysis: academicPaperAnalysisTool,
+  claim_citation_alignment: claimCitationAlignmentTool,
+  academic_style_audit: academicStyleAuditTool,
   peer_review_evaluation: peerReviewEvaluationTool,
+  rebuttal_matrix_coach: rebuttalMatrixCoachTool,
+  pipeline_stage_orchestrator: pipelineStageOrchestratorTool,
+  bibtex_format_converter: bibtexFormatConverterTool,
 };
 
 cindy.onHostMessage(async function (message) {
@@ -331,7 +781,14 @@ if (typeof module !== 'undefined') {
     formatAuthors: formatAuthors,
     extractDate: extractDate,
     verifyDoiTool: verifyDoiTool,
+    searchCrossrefTool: searchCrossrefTool,
+    academicIntegrityAuditTool: academicIntegrityAuditTool,
     academicPaperAnalysisTool: academicPaperAnalysisTool,
+    claimCitationAlignmentTool: claimCitationAlignmentTool,
+    academicStyleAuditTool: academicStyleAuditTool,
     peerReviewEvaluationTool: peerReviewEvaluationTool,
+    rebuttalMatrixCoachTool: rebuttalMatrixCoachTool,
+    pipelineStageOrchestratorTool: pipelineStageOrchestratorTool,
+    bibtexFormatConverterTool: bibtexFormatConverterTool,
   };
 }

@@ -19,7 +19,7 @@ const loadPlugin = (fetchMock) => {
   return require(resolved);
 };
 
-test('manifest declares Manifest v3 and Crossref host with no credentials', () => {
+test('manifest declares Manifest v3, 10 ARS tools and Crossref host', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'ghost.json'), 'utf8'));
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.id, 'cindy-academic-skills');
@@ -29,7 +29,8 @@ test('manifest declares Manifest v3 and Crossref host with no credentials', () =
   assert.equal(manifest.settingsHtml, undefined);
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.equal(manifest.minCindyVersion, '0.1.64');
-  assert.equal(manifest.tools.length, 3);
+  assert.equal(manifest.tools.length, 10);
+  assert.ok(manifest.manual && manifest.manual.items && manifest.manual.items.length > 0);
 });
 
 test('cleanDoiString and isValidDoi validate standard and URL-formatted DOIs', () => {
@@ -99,19 +100,75 @@ test('verifyDoiTool handles 404 with hallucination warning', async () => {
   assert.match(res.result.warning, /未在 Crossref/);
 });
 
-test('academicPaperAnalysisTool produces structured framework and checklist', async () => {
+test('searchCrossrefTool retrieves structured publication list', async () => {
+  const mockResponse = {
+    message: {
+      'total-results': 1,
+      items: [
+        {
+          DOI: '10.1038/nature123',
+          title: ['Foundation Models in Science'],
+          author: [{ given: 'Alice', family: 'Smith' }],
+          'container-title': ['Nature'],
+          published: { 'date-parts': [[2025]] },
+          'is-referenced-by-count': 150,
+        },
+      ],
+    },
+  };
+
+  const plugin = loadPlugin(async () => ({
+    ok: true,
+    status: 200,
+    body: JSON.stringify(mockResponse),
+  }));
+
+  const res = await plugin.searchCrossrefTool({ query: 'Foundation Models', limit: 5 }, 'call-search');
+  assert.equal(res.ok, true);
+  assert.equal(res.result.count, 1);
+  assert.equal(res.result.papers[0].title, 'Foundation Models in Science');
+  assert.equal(res.result.papers[0].doi, '10.1038/nature123');
+});
+
+test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', async () => {
   const plugin = loadPlugin();
-  const res = await plugin.academicPaperAnalysisTool({
-    title: 'Benchmarking Multi-Agent Systems',
-    content: 'We present a rigorous evaluation framework for evaluating agent coordination...',
-    focus: 'methodology',
+  const samplePaper = `
+    Introduction:
+    Previous studies (Smith et al., 2024) explored transformer architectures (10.1038/s41586-020-2649-2).
+    Methodology:
+    We evaluated our model against three baseline models with randomized control group allocations.
+    Statistical significance was established at p < 0.01.
+    All code and data availability statements are included.
+  `;
+
+  const res = await plugin.academicIntegrityAuditTool({ paper_text: samplePaper });
+  assert.equal(res.ok, true);
+  assert.ok(res.result.failureModesEvaluation.length === 7);
+  assert.equal(res.result.verdict, 'GATE_PASSED');
+});
+
+test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.claimCitationAlignmentTool({
+    claim_text: 'Deep learning models achieve superior accuracy on genomic sequence classification.',
+    cited_source_summary: 'We demonstrate that deep learning sequence models achieve high accuracy on genomic benchmarks.',
+    doi: '10.1038/s41586-020-0001',
   });
 
   assert.equal(res.ok, true);
-  assert.equal(res.result.metadata.title, 'Benchmarking Multi-Agent Systems');
-  assert.ok(res.result.structuredFramework.methodologyDesign);
-  assert.ok(Array.isArray(res.result.rigorChecklist));
-  assert.equal(res.result.rigorChecklist.length, 6);
+  assert.equal(res.result.alignmentStatus, 'ALIGNED');
+  assert.ok(res.result.estimatedAlignmentScore > 40);
+});
+
+test('academicStyleAuditTool identifies AI clichés and vague quantifiers', async () => {
+  const plugin = loadPlugin();
+  const textWithCliches = 'In this paper, we delve into the tapestry of methods that serve as a testament to various numerous advances.';
+
+  const res = await plugin.academicStyleAuditTool({ draft_text: textWithCliches, rigor_level: 'strict' });
+  assert.equal(res.ok, true);
+  assert.ok(res.result.detectedAiClichés.length >= 2);
+  assert.ok(res.result.detectedVagueQuantifiers.length >= 2);
+  assert.ok(res.result.aiClichéScore < 80);
 });
 
 test('peerReviewEvaluationTool provides standard peer-review dimensions', async () => {
@@ -124,6 +181,49 @@ test('peerReviewEvaluationTool provides standard peer-review dimensions', async 
 
   assert.equal(res.ok, true);
   assert.equal(res.result.reviewOverview.discipline, 'Computer Science');
-  assert.ok(res.result.evaluationDimensions.technicalSoundness);
-  assert.ok(res.result.reviewTemplate.section3_MajorConcerns);
+  assert.ok(res.result.scoringRubric.methodologicalRigor);
+  assert.ok(res.result.multiPerspectiveFeedback.devilsAdvocate);
+});
+
+test('rebuttalMatrixCoachTool structures reviewer critique into response matrix', async () => {
+  const plugin = loadPlugin();
+  const comments = `
+    Point 1: The baseline comparison lacks comparison against BERT.
+    Point 2: Please clarify the hyperparameters in Section 3.
+  `;
+
+  const res = await plugin.rebuttalMatrixCoachTool({ reviewer_comments: comments });
+  assert.equal(res.ok, true);
+  assert.equal(res.result.totalCritiquePoints, 2);
+  assert.equal(res.result.responseMatrix[0].itemNumber, 1);
+  assert.ok(res.result.responseMatrix[0].responseDraftTemplate);
+});
+
+test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_1_Research',
+    research_topic: 'Multi-Agent Quality Assurance',
+    completed_artifacts: ['RQ Brief'],
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.result.nextStage, 'Stage_2_Write');
+  assert.equal(res.result.requiresHumanConfirmation, true);
+  assert.ok(res.result.materialPassportStatus.hash);
+});
+
+test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.bibtexFormatConverterTool({
+    title: 'Attention Is All You Need',
+    authors: ['Vaswani, Ashish', 'Shazeer, Noam'],
+    year: 2017,
+    journal: 'NeurIPS',
+    doi: '10.5555/3295222.3295349',
+  });
+
+  assert.equal(res.ok, true);
+  assert.match(res.result.bibtex, /@article\{vaswani2017/);
+  assert.match(res.result.apa7, /Vaswani, Ashish, Shazeer, Noam \(2017\)\. Attention Is All You Need/);
 });

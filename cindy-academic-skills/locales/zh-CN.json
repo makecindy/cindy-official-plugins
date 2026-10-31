@@ -1,16 +1,37 @@
 {
-  "name": "学术科研套件",
-  "description": "学术科研增强套件：提供基于 Crossref 的论文 DOI 真实性校验与元数据查询，防范学术幻觉；同时提供结构化文献拆解与同行评审评估辅助。开箱即用，无需配置私有 API Key。",
-  "whenToUse": "在学术研究、论文写作、文献调研、引用核对时使用。可快速校验文献 DOI 的真实性、检索作者与被引频次，或对论文论据链进行结构化分析及模拟同行评审。",
+  "name": "学术科研工作流套件 (ARS-Codex)",
+  "description": "完整学术研究工作流套件（复刻 ARS-Codex）：包含 10 阶段科研生命周期调度、Crossref 真实引文检索与 DOI 校验防幻觉、7 类学术诚信阻断门禁、主张与引用保真度核查、去 AI 味风格校准、多视角同行评审与答辩矩阵教练。开箱即用，无需私有 Key。",
+  "whenToUse": "在学术研究、选题立项、PRISMA文献综述、论文撰写、学术诚信自查、同行评审盲审、返修答辩与出版格式排版全流程中使用。开箱即用，提供从构思到定稿的严密科研支撑与防幻觉机制。",
   "tools": {
     "verify_doi": {
       "description": "通过 Crossref 官方公开 API 校验论文 DOI，验证文献真实性，提取标题、作者列表、期刊、发表年份、引用次数与摘要等元数据，防范学术幻觉与虚构引用。无需 API Key。"
     },
+    "search_crossref": {
+      "description": "通过 Crossref 官方检索公开学术文献库，按关键词、标题或作者检索已正式注册 DOI 的真实论文与引用元数据，防范虚构文献。只读，无需 API Key。"
+    },
+    "academic_integrity_audit": {
+      "description": "学术诚信阻断式门禁（Stage 2.5 / 4.5）：基于 7 大 AI 科研失败模式（虚构引用、过度宣称、基准失衡、统计谬误等）扫描论文文本，输出结构化合规审计与拦截意见。"
+    },
     "academic_paper_analysis": {
       "description": "学术文献结构化拆解与分析工具：对论文摘要、方法或全文核心段落进行多维度拆解（研究目标、理论假说、方法论、证据链、创新点与局限性），辅助研读与文献笔记整理。"
     },
+    "claim_citation_alignment": {
+      "description": "引用锚点与主张一致性（Claim-Faithfulness L3）核查：比对正文声明与被引文献结论，排查张冠李戴、断章取义或虚假支撑。"
+    },
+    "academic_style_audit": {
+      "description": "学术写作风格校准与去 AI 味审计：排查空洞套话（如 delve, testament to）、模糊量词、过度断言，强化严密准确的学术表达，保留作者真实声音。"
+    },
     "peer_review_evaluation": {
-      "description": "学术论文同行评审（Peer Review）辅助工具：依据国际学术规范对论文手稿进行模拟同行评审，生成结构化评审大纲、主要/次要修改意见及审稿建议。"
+      "description": "多视角学术同行评审评估：模拟主编、专业审稿人与魔鬼代言人等多视角评估手稿有效性、创新性、方法论严谨度，输出 0-100 质量量表与决策意见。"
+    },
+    "rebuttal_matrix_coach": {
+      "description": "返修答辩矩阵教练（Point-by-point response）：将同行评审意见结构化拆解为修改矩阵，指引针对性答辩、代码实验补充与修订定位追踪。"
+    },
+    "pipeline_stage_orchestrator": {
+      "description": "ARS 10 阶段全流程调度与检查点管理：检测当前科研阶段、生成材料护照（Material Passport）、规划后续路径与人机确认门禁。"
+    },
+    "bibtex_format_converter": {
+      "description": "学术引用格式转换与 BibTeX 标准化：将文献元数据或自由文本引用转换为标准 BibTeX 条目与 APA 7.0 引用条目。"
     }
   }
 }
