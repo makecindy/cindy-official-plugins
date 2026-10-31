@@ -140,7 +140,7 @@ var MESSAGES = {
     prStateMerged: '已合并',
     prStateClosed: '已关闭',
     prFollowEnded: '跟进已结束',
-    prFollow: '自动跟进',
+    prFollow: '跟进到合并',
     prFollowStarting: '正在开启跟进',
     prStop: '停止',
     prStopping: '正在停止跟进',
@@ -179,7 +179,7 @@ var MESSAGES = {
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
-    prClickFollow: '用户在 PR 卡片上点了「自动跟进」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prClickFollow: '用户在 PR 卡片上点了「跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
@@ -243,7 +243,7 @@ var MESSAGES = {
     prStateMerged: 'Merged',
     prStateClosed: 'Closed',
     prFollowEnded: 'Following ended',
-    prFollow: 'Auto-follow',
+    prFollow: 'Follow until merged',
     prFollowStarting: 'Starting to follow',
     prStop: 'Stop',
     prStopping: 'Stopping',
@@ -282,7 +282,7 @@ var MESSAGES = {
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
-    prClickFollow: 'The user clicked "Auto-follow" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prClickFollow: 'The user clicked "Follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
@@ -346,7 +346,7 @@ var MESSAGES = {
     prStateMerged: 'マージ済み',
     prStateClosed: 'クローズ済み',
     prFollowEnded: 'フォロー終了',
-    prFollow: '自動フォロー',
+    prFollow: 'マージまでフォロー',
     prFollowStarting: 'フォローを開始しています',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
@@ -385,7 +385,7 @@ var MESSAGES = {
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
-    prClickFollow: 'ユーザーが PR カードの「自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prClickFollow: 'ユーザーが PR カードの「マージまでフォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
@@ -449,7 +449,7 @@ var MESSAGES = {
     prStateMerged: '병합됨',
     prStateClosed: '닫힘',
     prFollowEnded: '팔로우 종료됨',
-    prFollow: '자동 팔로우',
+    prFollow: '병합까지 팔로우',
     prFollowStarting: '팔로우 시작 중',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
@@ -488,7 +488,7 @@ var MESSAGES = {
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
-    prClickFollow: '사용자가 PR 카드에서 "자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prClickFollow: '사용자가 PR 카드에서 "병합까지 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
@@ -2532,6 +2532,8 @@ var PR_CSS =
   'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}' +
   'button[data-ghost-action^="pr:"]::before{content:attr(aria-label)}' +
   'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
+  'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
+  'div:hover>button[data-ghost-action="pr:stop"],div:focus-within>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
   '@keyframes prspin{to{transform:rotate(360deg)}}' +
   '</style>';
 
@@ -2646,6 +2648,14 @@ function prPillButton(action, label) {
 function prQuietButton(action, label, extra, inner) {
   return prButton(action, label, 'display:inline-flex;align-items:center;height:28px;padding:0 8px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;color:var(--text-secondary);--hover:' + PR_HOVER + (extra || ''), inner);
+}
+
+/** 跟进中:按钮原地变成绿色状态胶囊(静态——宿主只让运行中的卡片播动画)。 */
+function prFollowingPill() {
+  return '<div style="' + PR_PILL + 'gap:7px;padding:0 12px;color:var(--text-primary);' +
+    'border:1px solid color-mix(in srgb,' + PR_GREEN + ' 35%,transparent);background:color-mix(in srgb,' + PR_GREEN + ' 10%,transparent)">' +
+    '<span style="flex:none;width:7px;height:7px;border-radius:50%;background:' + PR_GREEN + ';' +
+    'box-shadow:0 0 0 3px color-mix(in srgb,' + PR_GREEN + ' 22%,transparent)"></span>' + prEsc(t('prStateFollowing')) + '</div>';
 }
 
 function prChip(label, pending) {
@@ -2801,7 +2811,7 @@ function renderPrCard(card, settings) {
         : card.pending === 'stop'
           ? prChip(t('prStopping'), true)
           : card.following
-            ? prChip(t('prStateFollowing')) + prQuietButton('pr:stop', t('prStop'))
+            ? prFollowingPill() + prQuietButton('pr:stop', t('prStop'))
             : prPillButton('pr:follow', t('prFollow'));
       body += prActions(follow);
     } else {
