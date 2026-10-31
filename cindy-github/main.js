@@ -151,6 +151,12 @@ var MESSAGES = {
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prTurnOn: '开启「{name}」',
+    prFollowModel: '自动跟进用的模型',
+    prFollowModelDefault: '和当前任务相同',
+    prFollowModelChange: '更改',
+    prFollowModelChangeAria: '更改自动跟进用的模型',
+    prFollowModelReset: '恢复默认',
+    prFollowModelFailed: '没能打开模型选择：{detail}',
     prTurnOff: '关闭「{name}」',
     prCiPassed: 'CI 通过',
     prCiFailed: 'CI 未通过',
@@ -255,6 +261,12 @@ var MESSAGES = {
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prTurnOn: 'Turn on "{name}"',
+    prFollowModel: 'Model for auto-follow',
+    prFollowModelDefault: 'Same as this task',
+    prFollowModelChange: 'Change',
+    prFollowModelChangeAria: 'Change the model for auto-follow',
+    prFollowModelReset: 'Use default',
+    prFollowModelFailed: 'Could not open the model picker: {detail}',
     prTurnOff: 'Turn off "{name}"',
     prCiPassed: 'CI passed',
     prCiFailed: 'CI failed',
@@ -359,6 +371,12 @@ var MESSAGES = {
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prTurnOn: '「{name}」をオン',
+    prFollowModel: '自動フォローに使うモデル',
+    prFollowModelDefault: 'このタスクと同じ',
+    prFollowModelChange: '変更',
+    prFollowModelChangeAria: '自動フォローに使うモデルを変更',
+    prFollowModelReset: 'デフォルトに戻す',
+    prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
     prTurnOff: '「{name}」をオフ',
     prCiPassed: 'CI 成功',
     prCiFailed: 'CI 失敗',
@@ -463,6 +481,12 @@ var MESSAGES = {
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prTurnOn: '"{name}" 켜기',
+    prFollowModel: '자동 팔로우에 쓸 모델',
+    prFollowModelDefault: '현재 작업과 같음',
+    prFollowModelChange: '변경',
+    prFollowModelChangeAria: '자동 팔로우에 쓸 모델 변경',
+    prFollowModelReset: '기본값으로',
+    prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
     prTurnOff: '"{name}" 끄기',
     prCiPassed: 'CI 통과',
     prCiFailed: 'CI 실패',
@@ -2412,9 +2436,36 @@ async function readKv() {
   return kv && typeof kv === 'object' && !Array.isArray(kv) ? kv : {};
 }
 
+var PR_AGENT_KINDS = { cc: 1, codex: 1, pi: 1 };
+
+/** 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。 */
+function prFollowModelFrom(value) {
+  var v = value && typeof value === 'object' ? value : null;
+  var r = v && v.route && typeof v.route === 'object' ? v.route : null;
+  if (!r || !PR_AGENT_KINDS[r.agentKind] || typeof r.providerId !== 'string' || typeof r.model !== 'string' || !r.model ||
+      typeof r.effort !== 'string' || !(typeof r.fastMode === 'boolean' || r.fastMode === 'ultrafast')) return null;
+  return {
+    route: { agentKind: r.agentKind, providerId: r.providerId, model: r.model, effort: r.effort, fastMode: r.fastMode },
+    label: typeof v.label === 'string' && v.label ? v.label.slice(0, 120) : r.model,
+  };
+}
+
 function prSettingsFrom(kv) {
   var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
-  return { autoRename: s.autoRename === true, autoFollow: s.autoFollow === true };
+  return { autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, followModel: prFollowModelFrom(s.followModel) };
+}
+
+/** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
+function prSettingsForAgent(settings, autoFollow) {
+  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  var m = settings.followModel;
+  if (m) {
+    out.follow_model = {
+      model_agent_kind: m.route.agentKind === 'cc' ? 'claude-code' : m.route.agentKind,
+      provider_id: m.route.providerId, model: m.route.model, effort: m.route.effort, fast_mode: m.route.fastMode, label: m.label,
+    };
+  }
+  return out;
 }
 
 async function readPrSettings() {
@@ -2425,14 +2476,39 @@ async function readPrSettings() {
   }
 }
 
-async function togglePrSetting(key) {
+async function writePrSettings(change) {
   var kv = await readKv();
   var next = prSettingsFrom(kv);
-  next[key] = !next[key];
-  kv.prCard = next;
+  change(next);
+  kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
+  if (next.followModel) kv.prCard.followModel = next.followModel;
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
+}
+function togglePrSetting(key) {
+  return writePrSettings(function (next) { next[key] = !next[key]; });
+}
+
+/** 用宿主统一的模型选择器选跟进模型;名字从同源模型目录取,取不到就显示模型 id。 */
+async function pickPrFollowModel(settings, msg) {
+  var picked = await cindy.pickModel(Object.assign(
+    settings.followModel ? { initial: settings.followModel.route } : {},
+    msg.mobilePageId ? { mobilePageId: msg.mobilePageId } : {}
+  ));
+  if (!picked || picked.ok !== true) {
+    return picked && picked.errorCode === 'CANCELLED' ? { settings: settings } : { settings: settings, error: (picked && picked.message) || 'UNAVAILABLE' };
+  }
+  var label = '';
+  try {
+    var res = await fetch('/agent-models');
+    var list = res && res.ok !== false ? (await res.json()).models : null;
+    var hit = Array.isArray(list) && list.find(function (m) { return m && m.id === picked.route.model && m.providerId === picked.route.providerId; });
+    if (hit) label = hit.name + (hit.providerName ? ' · ' + hit.providerName : '');
+  } catch (e) { /* 名字只是展示,取不到用模型 id */ }
+  var value = prFollowModelFrom({ route: picked.route, label: label });
+  if (!value) return { settings: settings, error: 'INVALID_ROUTE' };
+  return { settings: await writePrSettings(function (next) { next.followModel = value; }) };
 }
 
 /* ── PR 状态(GitHub GraphQL,一次取齐卡片要显示的字段) ── */
@@ -2727,11 +2803,27 @@ function prSettingRow(action, label, hint, on) {
     '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
 }
 
+/** 跟进模型:旧版宿主没有统一选择器时不显示这一行(不维护硬编码名单)。 */
+function prModelRow(settings) {
+  if (typeof cindy.pickModel !== 'function') return '';
+  var m = settings.followModel;
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px">' +
+    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' +
+    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
+    prEsc(m ? m.label : t('prFollowModelDefault')) + '</div></div>' +
+    '<div style="display:flex;flex:none;gap:4px">' +
+    (m ? prQuietButton('prset:modelReset', t('prFollowModelReset'), '', prEsc(t('prFollowModelReset'))) : '') +
+    prButton('prset:model', t('prFollowModelChangeAria'), PR_PILL + 'height:28px;border:1px solid var(--border-default);' +
+      '--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 8%)', prEsc(t('prFollowModelChange'))) +
+    '</div></div>';
+}
+
 function prSettingsPanel(settings) {
   return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prModelRow(settings) +
     '</div>';
 }
 
@@ -2919,7 +3011,7 @@ async function prCardTool(args, callId) {
   var result = {
     card_id: card.id,
     stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
-    settings: { auto_rename: settings.autoRename, auto_follow: settings.autoFollow },
+    settings: prSettingsForAgent(settings, settings.autoFollow),
   };
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
@@ -2961,10 +3053,11 @@ async function handOffPr(card, action, settings, msg) {
     event.pr_url = url;
     // 插件替用户把草稿转了正式:告诉 Agent,免得它以为是用户在 GitHub 上改的。
     if (card.markedReady) event.marked_ready_on_card = true;
+    if (action === 'pr:follow' && settings.followModel) event.follow_model = prSettingsForAgent(settings, true).follow_model;
   } else {
     event.head = card.head;
     if (card.base) event.base = card.base;
-    event.settings = { auto_rename: settings.autoRename, auto_follow: settings.autoFollow && action === 'pr:publish' };
+    event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
   }
   var r;
   try {
@@ -3032,6 +3125,20 @@ async function prCardAction(msg) {
   } else if (action === 'prset:rename' || action === 'prset:follow') {
     try {
       settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : 'autoFollow');
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && typeof cindy.pickModel === 'function') {
+    try {
+      var picked = await pickPrFollowModel(settings, msg);
+      settings = picked.settings;
+      if (picked.error) card.note = t('prFollowModelFailed', { detail: String(picked.error).slice(0, 120) });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:modelReset') {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = null; });
     } catch (e) {
       card.note = t('prSettingFailed');
     }

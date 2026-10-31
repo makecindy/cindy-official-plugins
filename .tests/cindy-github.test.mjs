@@ -642,6 +642,7 @@ function createPrRuntime(options = {}) {
   const agentRuns = [];
   let kv = options.kv ?? {};
   const cindy = {
+    ...(options.pickModel ? { pickModel: options.pickModel } : {}),
     async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
     onHostMessage(fn) { handler = fn; },
     async send(message) {
@@ -676,6 +677,7 @@ function createPrRuntime(options = {}) {
     cindy,
     BroadcastChannel: class { postMessage() {} },
     fetch: async (url, init = {}) => {
+      if (url === '/agent-models' && options.agentModels) return { ok: true, status: 200, json: async () => ({ ok: true, models: options.agentModels }) };
       assert.equal(url, '/kv');
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
@@ -834,6 +836,34 @@ test('a draft card marks the PR ready itself, then follows when the card setting
   // Once following, the check strip is a slot the host fills from the title bar's live data.
   await runtime.tool({ card_id: cardId, following: true });
   assert.match(runtime.lastCard(cardId).html, /<div data-ghost-pr-status="octo\/repo#9">/);
+});
+
+// The follow-up round can run on a cheaper model than the task. The card uses the host's own
+// model picker (no hard-coded list), shows the chosen name, and hands the full route to the agent.
+test('card settings pick the auto-follow model with the host picker and hand its route to the agent', async () => {
+  const route = { agentKind: 'cc', providerId: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fastMode: false };
+  const pickModel = async (request) => { picks.push(JSON.parse(JSON.stringify(request))); return { ok: true, route }; };
+  const picks = [];
+  const runtime = createPrRuntime({ github: prGraphql({ number: 7 }), pickModel,
+    agentModels: [{ id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', providerId: 'anthropic', providerName: 'Anthropic' }] });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowModelDefault));
+
+  await runtime.click(cardId, 'prset:model', { mobilePageId: '12345678-1234-1234-1234-123456789abc' });
+  // The picker opens on the device that tapped the card.
+  assert.deepEqual(picks, [{ mobilePageId: '12345678-1234-1234-1234-123456789abc' }]);
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, followModel: { route, label: 'Sonnet 5.5 · Anthropic' } });
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes('Sonnet 5.5 · Anthropic'));
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
+  });
+
+  await runtime.click(cardId, 'prset:modelReset');
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false });
 });
 
 test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {
