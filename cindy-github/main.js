@@ -140,9 +140,6 @@ var MESSAGES = {
     prStateMerged: '已合并',
     prStateClosed: '已关闭',
     prFollowEnded: '跟进已结束',
-    prRenameTo: '改名为 #{number}',
-    prRenamed: '已改名',
-    prRenaming: '正在改名',
     prFollow: '自动跟进',
     prFollowStarting: '正在开启跟进',
     prStop: '停止',
@@ -182,7 +179,6 @@ var MESSAGES = {
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
-    prClickRename: '用户在 PR 卡片上点了「改名」。用 cindy_helper 的 call_tool 调用 set_current_session_title(args: {"title": ...})把当前任务改名为「{title}」；改名成功后再用 card_id 调用 pr_card，renamed=true。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
@@ -247,9 +243,6 @@ var MESSAGES = {
     prStateMerged: 'Merged',
     prStateClosed: 'Closed',
     prFollowEnded: 'Following ended',
-    prRenameTo: 'Rename to #{number}',
-    prRenamed: 'Renamed',
-    prRenaming: 'Renaming',
     prFollow: 'Auto-follow',
     prFollowStarting: 'Starting to follow',
     prStop: 'Stop',
@@ -289,7 +282,6 @@ var MESSAGES = {
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
-    prClickRename: 'The user clicked "Rename" on the PR card. Rename the current task to "{title}" with cindy_helper call_tool set_current_session_title (args: {"title": ...}); only after it succeeds, call pr_card with card_id and renamed=true.',
     prClickFollow: 'The user clicked "Auto-follow" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
@@ -354,9 +346,6 @@ var MESSAGES = {
     prStateMerged: 'マージ済み',
     prStateClosed: 'クローズ済み',
     prFollowEnded: 'フォロー終了',
-    prRenameTo: '#{number} に改名',
-    prRenamed: '改名済み',
-    prRenaming: '改名中',
     prFollow: '自動フォロー',
     prFollowStarting: 'フォローを開始しています',
     prStop: 'フォロー停止',
@@ -396,7 +385,6 @@ var MESSAGES = {
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
-    prClickRename: 'ユーザーが PR カードの「改名」を押しました。cindy_helper の call_tool で set_current_session_title(args: {"title": ...})を呼び、現在のタスク名を「{title}」に変更してください。成功してから card_id と renamed=true を付けて pr_card を呼んでください。',
     prClickFollow: 'ユーザーが PR カードの「自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
@@ -461,9 +449,6 @@ var MESSAGES = {
     prStateMerged: '병합됨',
     prStateClosed: '닫힘',
     prFollowEnded: '팔로우 종료됨',
-    prRenameTo: '#{number}(으)로 이름 변경',
-    prRenamed: '이름 변경됨',
-    prRenaming: '이름 변경 중',
     prFollow: '자동 팔로우',
     prFollowStarting: '팔로우 시작 중',
     prStop: '중지',
@@ -503,7 +488,6 @@ var MESSAGES = {
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
-    prClickRename: '사용자가 PR 카드에서 "이름 변경"을 눌렀습니다. cindy_helper의 call_tool로 set_current_session_title(args: {"title": ...})을 호출해 현재 작업 이름을 "{title}"(으)로 바꾸세요. 성공한 뒤에 card_id와 renamed=true로 pr_card를 호출하세요.',
     prClickFollow: '사용자가 PR 카드에서 "자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
@@ -2348,7 +2332,7 @@ async function callTool(args, callId) {
  * Agent 想问用户要不要发 PR 时调用;发出后同一张卡片接着显示 PR 状态和后续操作。
  * - 宿主卡片沙箱没有脚本、SVG 和 class:图标用 CSS 画,按钮文字由 aria-label 经
  *   ::before 生成——手机端只投影纯文本 + 原生按钮,正文里不会混进按钮字;
- * - 发 PR / 改名 / 跟进 / 停止:凭点击票据让本任务的 Agent 接着做(agent.run
+ * - 发 PR / 跟进 / 停止:凭点击票据让本任务的 Agent 接着做(agent.run
  *   continue;[UI_ACTION_TRIGGER] 前缀让这条代发消息不在对话里显示,卡片本身
  *   显示进度);查看改动与设置开关只在本地重画卡片;
  * - 卡片状态按 card_id(首次调用的 callId)存在私有数据目录,两项设置存 /kv;
@@ -2807,11 +2791,6 @@ function renderPrCard(card, settings) {
       var state = pr.draft ? t('prStateDraft') : card.following ? t('prStateFollowing') : t('prStateOpen');
       header = prHeader(pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open'), title, [prEsc(card.repo), prEsc(state)], true);
       if (card.following) body += prStatusStrip(pr);
-      var rename = card.renamed
-        ? prChip(t('prRenamed'))
-        : card.pending === 'rename'
-          ? prChip(t('prRenaming'), true)
-          : prPillButton('pr:rename', t('prRenameTo', { number: pr.number }));
       var follow = card.pending === 'follow'
         ? prChip(t('prFollowStarting'), true)
         : card.pending === 'stop'
@@ -2819,7 +2798,7 @@ function renderPrCard(card, settings) {
           : card.following
             ? prChip(t('prStateFollowing')) + prQuietButton('pr:stop', t('prStop'))
             : prPillButton('pr:follow', t('prFollow'));
-      body += prActions(rename + follow);
+      body += prActions(follow);
     } else {
       var meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
       if (card.followedEver) meta.push(prEsc(t('prFollowEnded')));
@@ -2899,7 +2878,6 @@ async function prCardTool(args, callId) {
   if (a.files_total !== undefined) card.filesTotal = prCount(a.files_total);
   if (typeof a.renamed === 'boolean') {
     card.renamed = a.renamed;
-    if (card.pending === 'rename') card.pending = null;
   }
   if (typeof a.following === 'boolean') {
     card.following = a.following;
@@ -2969,7 +2947,6 @@ async function prCardTool(args, callId) {
 var PR_AGENT_ACTIONS = {
   'pr:publish': function (card) { return card.stage === 'ask'; },
   'pr:draft': function (card) { return card.stage === 'ask'; },
-  'pr:rename': function (card) { return card.stage === 'open' && !card.renamed && !card.pending; },
   'pr:follow': function (card) { return card.stage === 'open' && !card.following && !card.pending; },
   'pr:stop': function (card) { return card.stage === 'open' && card.following && !card.pending; },
 };
@@ -2984,7 +2961,6 @@ async function handOffPr(card, action, settings, msg) {
   var text;
   if (action === 'pr:publish') text = t('prClickPublish');
   else if (action === 'pr:draft') text = t('prClickPublishDraft');
-  else if (action === 'pr:rename') text = t('prClickRename', { title: prTaskTitle(card) });
   else if (action === 'pr:follow') text = t('prClickFollow', { url: url });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
@@ -3039,7 +3015,7 @@ async function prCardAction(msg) {
       card.filesOpen = false;
       card.settingsOpen = false;
     } else if (handoff.ok) {
-      card.pending = action === 'pr:rename' ? 'rename' : action === 'pr:follow' ? 'follow' : 'stop';
+      card.pending = action === 'pr:follow' ? 'follow' : 'stop';
     } else {
       card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
     }
