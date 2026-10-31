@@ -8,6 +8,9 @@
     },
     "call_tool": {
       "description": "执行 list_tools 返回的具体 GitHub 操作，args 按其参数 schema 传入。仓库级操作必须显式传 owner 与 repo；在 Git 仓库中工作时可从 git remote get-url origin 推导。响应默认剥除 API 链接字段但保留 html_url；传 raw=true 获取原始 JSON。结果超过 50KB 时自动写入会话工作目录并只返回文件路径，out_file 可指定路径。下载 Actions 产物或日志 ZIP 时，必须在 ghost_call 顶层 save_dir 提供目标目录。"
+    },
+    "pr_card": {
+      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问：传 repo、head、base，可附 commits 与 files 改动概况（此时还不需要标题和说明）。用户点「发 PR / 发成草稿」或在对话里答复后，由 Agent 提交并创建 PR；按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片：卡片显示 PR 状态，提供「自动跟进到合并」按钮，以及发完自动改名、自动跟进两项设置，结果里的 settings / todo 说明还要做什么；renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态。卡片只在 Cindy 自己的对话界面显示，IM 渠道看不到。"
     }
   }
 }
