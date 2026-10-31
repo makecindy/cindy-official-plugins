@@ -848,7 +848,9 @@ test('card settings pick the auto-follow model with the host picker and hand its
     agentModels: [{ id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', providerId: 'anthropic', providerName: 'Anthropic' }] });
   const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
   await runtime.click(cardId, 'prui:settings');
-  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowModelDefault));
+  // Default is following the task; the choice is a two-way switch.
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowModelTaskHint));
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelTask" aria-label="跟随当前任务"/);
 
   await runtime.click(cardId, 'prset:model', { mobilePageId: '12345678-1234-1234-1234-123456789abc' });
   // The picker opens on the device that tapped the card.
@@ -862,7 +864,7 @@ test('card settings pick the auto-follow model with the host picker and hand its
     model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
   });
 
-  await runtime.click(cardId, 'prset:modelReset');
+  await runtime.click(cardId, 'prset:modelTask');
   assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false });
 });
 

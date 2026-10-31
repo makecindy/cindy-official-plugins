@@ -152,10 +152,10 @@ var MESSAGES = {
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prTurnOn: '开启「{name}」',
     prFollowModel: '自动跟进用的模型',
-    prFollowModelDefault: '和当前任务相同',
-    prFollowModelChange: '更改',
-    prFollowModelChangeAria: '更改自动跟进用的模型',
-    prFollowModelReset: '恢复默认',
+    prFollowModelTask: '跟随当前任务',
+    prFollowModelTaskHint: '每次跟进用这个任务当时的模型',
+    prFollowModelCustom: '指定模型',
+    prFollowModelCustomAgain: '换一个指定的模型',
     prFollowModelFailed: '没能打开模型选择：{detail}',
     prTurnOff: '关闭「{name}」',
     prCiPassed: 'CI 通过',
@@ -262,10 +262,10 @@ var MESSAGES = {
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prTurnOn: 'Turn on "{name}"',
     prFollowModel: 'Model for auto-follow',
-    prFollowModelDefault: 'Same as this task',
-    prFollowModelChange: 'Change',
-    prFollowModelChangeAria: 'Change the model for auto-follow',
-    prFollowModelReset: 'Use default',
+    prFollowModelTask: 'Follow this task',
+    prFollowModelTaskHint: 'Each round uses the model this task has at the time',
+    prFollowModelCustom: 'Choose a model',
+    prFollowModelCustomAgain: 'Choose a different model',
     prFollowModelFailed: 'Could not open the model picker: {detail}',
     prTurnOff: 'Turn off "{name}"',
     prCiPassed: 'CI passed',
@@ -372,10 +372,10 @@ var MESSAGES = {
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prTurnOn: '「{name}」をオン',
     prFollowModel: '自動フォローに使うモデル',
-    prFollowModelDefault: 'このタスクと同じ',
-    prFollowModelChange: '変更',
-    prFollowModelChangeAria: '自動フォローに使うモデルを変更',
-    prFollowModelReset: 'デフォルトに戻す',
+    prFollowModelTask: 'タスクに合わせる',
+    prFollowModelTaskHint: '毎回、その時点のこのタスクのモデルを使います',
+    prFollowModelCustom: 'モデルを指定',
+    prFollowModelCustomAgain: '別のモデルを指定',
     prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
     prTurnOff: '「{name}」をオフ',
     prCiPassed: 'CI 成功',
@@ -482,10 +482,10 @@ var MESSAGES = {
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prTurnOn: '"{name}" 켜기',
     prFollowModel: '자동 팔로우에 쓸 모델',
-    prFollowModelDefault: '현재 작업과 같음',
-    prFollowModelChange: '변경',
-    prFollowModelChangeAria: '자동 팔로우에 쓸 모델 변경',
-    prFollowModelReset: '기본값으로',
+    prFollowModelTask: '현재 작업 따르기',
+    prFollowModelTaskHint: '매번 그 시점의 이 작업 모델을 사용합니다',
+    prFollowModelCustom: '모델 지정',
+    prFollowModelCustomAgain: '다른 모델 지정',
     prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
     prTurnOff: '"{name}" 끄기',
     prCiPassed: 'CI 통과',
@@ -2803,18 +2803,27 @@ function prSettingRow(action, label, hint, on) {
     '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
 }
 
-/** 跟进模型:旧版宿主没有统一选择器时不显示这一行(不维护硬编码名单)。 */
+function prSegment(action, label, active, inner) {
+  return prButton(action, label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
+    'font-size:12px;font-weight:500;white-space:nowrap;' + (active
+      ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+}
+
+/**
+ * 跟进模型二选一:跟随当前任务(默认),或用宿主统一选择器指定一个。已指定时再点「指定模型」
+ * 换一个。旧版宿主没有选择器时不显示这一行(不维护硬编码名单)。
+ */
 function prModelRow(settings) {
   if (typeof cindy.pickModel !== 'function') return '';
   var m = settings.followModel;
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px">' +
     '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' +
     '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
-    prEsc(m ? m.label : t('prFollowModelDefault')) + '</div></div>' +
-    '<div style="display:flex;flex:none;gap:4px">' +
-    (m ? prQuietButton('prset:modelReset', t('prFollowModelReset'), '', prEsc(t('prFollowModelReset'))) : '') +
-    prButton('prset:model', t('prFollowModelChangeAria'), PR_PILL + 'height:28px;border:1px solid var(--border-default);' +
-      '--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 8%)', prEsc(t('prFollowModelChange'))) +
+    prEsc(m ? m.label : t('prFollowModelTaskHint')) + '</div></div>' +
+    '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
+    prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
+    prSegment('prset:model', m ? t('prFollowModelCustomAgain') : t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
     '</div></div>';
 }
 
@@ -3136,7 +3145,7 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:modelReset') {
+  } else if (action === 'prset:modelTask') {
     try {
       settings = await writePrSettings(function (next) { next.followModel = null; });
     } catch (e) {
