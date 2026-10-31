@@ -20,7 +20,6 @@ The suite is organized into five interconnected pillars across the 10-stage scie
 
 1. **Stage 1 (Literature Exploration & Socratic Mentoring):**
    - References: `references/deep-research-socratic.md`
-   - Skill Specification: `skills/deep-research.md`
    - Tools: `socratic_research_guide`, `verify_doi`, `search_crossref`, `three_way_lit_scan`
 2. **Stage 1.5 (Empirical Data Analysis & Statistical Diagnostics):**
    - References: `references/data-analysis-workflow.md`
@@ -30,15 +29,12 @@ The suite is organized into five interconnected pillars across the 10-stage scie
    - Tools: `scientific_figure_designer`
 4. **Stage 2 to Stage 2.5 (Manuscript Drafting & Integrity Gate):**
    - References: `references/academic-paper-writing.md`, `references/integrity-failure-modes.md`
-   - Skill Specification: `skills/academic-paper.md`
    - Tools: `academic_paper_analysis`, `claim_citation_alignment`, `academic_style_audit`, `academic_integrity_audit`, `author_disclosure_statement`, `bibtex_format_converter`
 5. **Stage 3 to Stage 4.5 (Multi-Perspective Peer Review & Rebuttal Coaching):**
    - References: `references/peer-review-rubric.md`, `references/rebuttal-and-revision.md`
-   - Skill Specification: `skills/academic-paper-reviewer.md`
    - Tools: `peer_review_evaluation`, `rebuttal_matrix_coach`
 6. **Overall Governance (Pipeline Orchestration):**
    - References: `references/pipeline-10-stages.md`
-   - Skill Specification: `skills/academic-pipeline.md`
    - Tools: `pipeline_stage_orchestrator`
 
 ## 2. Dispatching & Routing Rules
@@ -51,11 +47,11 @@ When a user request enters the Academic Research Suite, the Agent classifies the
 | **Citation Verification & Anti-Hallucination** | DOI Verification | `verify_doi`, `search_crossref` |
 | **Statistical Model Selection & p-Hacking Prevention** | Empirical Statistics | `statistical_analysis_advisor`, `academic_data_summary` |
 | **Publication Figure Planning & Plotting Scripts** | Scientific Figure Studio | `scientific_figure_designer` |
-| **Manuscript Writing & Style Calibration** | Paper Drafting | `academic_paper.md`, `academic_style_audit` |
+| **Manuscript Writing & Style Calibration** | Paper Drafting | `academic_style_audit`, `references/academic-paper-writing.md` |
 | **Academic Integrity Gate** | Integrity Gate | `academic_integrity_audit` (Stage 2.5 / 4.5) |
-| **Peer Review Simulation & Critique** | Peer Review | `peer_review_evaluation`, `academic-paper-reviewer.md` |
+| **Peer Review Simulation & Critique** | Peer Review | `peer_review_evaluation`, `references/peer-review-rubric.md` |
 | **Reviewer Response & Revision Matrix** | Rebuttal Coaching | `rebuttal_matrix_coach` |
-| **End-to-End Scientific Lifecycle** | Pipeline Orchestration | `pipeline_stage_orchestrator`, `academic-pipeline.md` |
+| **End-to-End Scientific Lifecycle** | Pipeline Orchestration | `pipeline_stage_orchestrator`, `references/pipeline-10-stages.md` |
 
 ## 3. Human-in-the-Loop (HITL) Checkpoints
 

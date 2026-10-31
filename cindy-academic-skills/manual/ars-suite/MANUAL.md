@@ -48,15 +48,9 @@
 
 ---
 
-## 二、完整 Skill 规范与原语规约 (Full Skill Specifications)
+## 二、工作流路由与调度规范 (Workflow Routing Specification)
 
-本套件内置了系统严密的学术研究规范与原语规约，存放在 `skills/` 目录下供 Cindy 智能体按需深层读取：
-
-1. **[academic-research-suite.md](skills/academic-research-suite.md)**: 学术研究套件统一总调度器规约 (Master Suite Router)，协调 Pipeline、Research、Paper 与 Reviewer 全流程。
-2. **[academic-pipeline.md](skills/academic-pipeline.md)**: 10 阶段科研生命周期、状态机、阶段迁移契约（Material Passport）与质量闸门。
-3. **[deep-research.md](skills/deep-research.md)**: 13-Agent 深度学术调研团队规约（系统性综述、事实核查、3W 扫描、PRISMA 报告等 8 大模式）。
-4. **[academic-paper.md](skills/academic-paper.md)**: 13-Agent 学术论文写作团队规约（IMRaD 结构、认识论主张分级、CER 论证链、去 AI 味风格校准）。
-5. **[academic-paper-reviewer.md](skills/academic-paper-reviewer.md)**: 7-Agent 同行评审委员会规约（5 种评审拓扑、0-100 质量量表、魔鬼代言人挑战、逐点答辩矩阵）。
+- **[academic-research-suite.md](skills/academic-research-suite.md)**: 学术研究套件总调度器规约 (Master Suite Router)，协调 Pipeline、Data Analysis、Figure Studio、Paper Drafting 与 Peer Review 全流程。
 
 ---
 

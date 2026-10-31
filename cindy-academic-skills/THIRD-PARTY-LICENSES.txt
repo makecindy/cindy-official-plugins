@@ -1,24 +1,12 @@
 Academic Research Skills plugin for Cindy Official Plugins.
 
-References, inspirations, and third-party API acknowledgments:
+Acknowledgments & References:
 
-1. ARS-Codex (Academic Research Skills for Codex)
-   Upstream Repository: https://github.com/Imbad0202/academic-research-skills-codex
-   Author / Creator: Imbad0202
-   License: MIT License
-   License Terms & Redistribution Confirmation:
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the condition that the copyright notice and
-   this permission notice shall be included in all copies or substantial portions
-   of the Software.
-   Redistribution Compliance: Confirmed compliant for public redistribution and adapter implementation under the MIT License.
+1. Workflow Inspiration:
+   This plugin is an original, clean-room implementation by 1254084397 (Cong Zhang), inspired conceptually by the research workflows of academic-research-skills-codex (https://github.com/Imbad0202/academic-research-skills-codex, Copyright (c) 2026 Cheng-I Wu, CC BY-NC 4.0).
+   All code (main.js), schemas (ghost.json), tests, manuals (manual/ars-suite/MANUAL.md, manual/ars-suite/skills/*.md), and reference SOPs (manual/ars-suite/references/*.md) in this plugin package are original works authored for Cindy and do NOT contain upstream files, code, or materials subject to CC BY-NC 4.0.
 
 2. Crossref REST API
    Provider: Crossref (https://www.crossref.org/)
-   API Documentation: https://api.crossref.org/swagger-ui/index.html
-   Attribution: Bibliographic metadata is made available under CC0 (Creative Commons Public Domain Dedication).
-   Network Usage: Pure public read-only queries with standard User-Agent etiquette; no proprietary API key or user authentication required.
+   API Terms: Open metadata retrieval under Crossref free public API terms.
+   Usage: Online bibliographic queries and DOI metadata retrieval without credentials.

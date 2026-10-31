@@ -730,9 +730,20 @@ async function claimCitationAlignmentTool(args) {
   var overlapRatio = claimTokens.length > 0 ? (commonCount / claimTokens.length) : 0;
 
   // Negation and polarity check to detect reversed assertions
-  var negations = ['not', 'never', 'no', 'fails', 'failed', 'cannot', 'neither', 'nor', 'unsupported', 'refuted', 'denies', 'contrary', '不', '未', '无', '非', '未能', '绝不', '否认', '相反'];
-  var claimHasNeg = negations.some(function (n) { return new RegExp('\\b' + n + '\\b|' + n, 'i').test(claimText); });
-  var sourceHasNeg = negations.some(function (n) { return new RegExp('\\b' + n + '\\b|' + n, 'i').test(sourceSummary); });
+  var englishNegations = ['not', 'never', 'no', 'fails', 'failed', 'cannot', 'neither', 'nor', 'unsupported', 'refuted', 'denies', 'contrary'];
+  var chineseNegations = ['不', '未', '无', '非', '未能', '绝不', '否认', '相反'];
+  function checkNegation(text) {
+    if (!text) return false;
+    var hasEn = englishNegations.some(function (n) {
+      return new RegExp('\\b' + n + '\\b', 'i').test(text);
+    });
+    if (hasEn) return true;
+    return chineseNegations.some(function (cn) {
+      return text.indexOf(cn) >= 0;
+    });
+  }
+  var claimHasNeg = checkNegation(claimText);
+  var sourceHasNeg = checkNegation(sourceSummary);
   var polarityMismatch = (claimHasNeg !== sourceHasNeg);
 
   var alignmentStatus = 'POTENTIAL_MISATTRIBUTION';
@@ -1413,6 +1424,20 @@ async function scientificFigureDesignerTool(args) {
   var safeGroupCtrl = escapeCodeString(groupCtrl);
   var safeGroupTreat = escapeCodeString(groupTreat);
 
+  var errorBarType = (args && args.error_bar_type) || 'ci95';
+  var errorBandExpr = '1.96 * ctrl_traj.std(axis=0) / np.sqrt(10)';
+  var treatBandExpr = '1.96 * treat_traj.std(axis=0) / np.sqrt(10)';
+  var errorCaptionDesc = 'Data are presented as mean with shaded 95% confidence intervals (CI).';
+  if (errorBarType === 'sem') {
+    errorBandExpr = 'ctrl_traj.std(axis=0) / np.sqrt(10)';
+    treatBandExpr = 'treat_traj.std(axis=0) / np.sqrt(10)';
+    errorCaptionDesc = 'Data are presented as mean ± s.e.m.';
+  } else if (errorBarType === 'sd') {
+    errorBandExpr = 'ctrl_traj.std(axis=0)';
+    treatBandExpr = 'treat_traj.std(axis=0)';
+    errorCaptionDesc = 'Data are presented as mean ± s.d.';
+  }
+
   var panelRoles = [
     { panel: 'a', role: 'Context / Conceptual Schematic', description: '实验设计流程、分子机制图或模型流水线架构总览', chartType: 'Schematic flow / Concept diagram' },
     { panel: 'b', role: 'Hero Evidence (Primary Comparison)', description: '核心处理组与对照组定量指标对比（小提琴图 + 箱线图 + 抖动散点呈现个体数据点）', chartType: 'Violin / Box + Jittered points' },
@@ -1423,7 +1448,7 @@ async function scientificFigureDesignerTool(args) {
   var captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
     'a, Schematic overview of experimental design. ' +
     'b, Comparison of target phenotype between conditions (center line, median; box limits, upper and lower quartiles; error bars, 1.5× IQR; dots represent individual biological replicates, n = ...). ' +
-    'c, Time-dependent dynamic trajectory. Data are presented as mean ± s.e.m. ' +
+    'c, Time-dependent dynamic trajectory. ' + errorCaptionDesc + ' ' +
     'd, Correlation analysis between key biomarkers. Two-tailed Pearson r = ..., *P < 0.05, **P < 0.01, ***P < 0.001 (unpaired two-tailed Student\'s t-test or Welch\'s correction).';
 
   var codeSnippet = null;
@@ -1434,17 +1459,17 @@ async function scientificFigureDesignerTool(args) {
     var plotSpecificCode = '';
     if (archetype === 'dose_time_response') {
       plotSpecificCode = [
-        '# Plotting: Line plot with shaded 95% CI error bands',
+        '# Plotting: Line plot with error bands (' + errorBarType.toUpperCase() + ')',
         'time_pts = np.linspace(0, 24, 7)',
         'np.random.seed(42)',
         'ctrl_traj = np.sin(time_pts / 5) * 10 + 60 + np.random.normal(0, 2, (10, 7))',
         'treat_traj = np.sin(time_pts / 5) * 25 + 60 + np.random.normal(0, 2.5, (10, 7))',
         'ax.plot(time_pts, ctrl_traj.mean(axis=0), color=OKABE_ITO[0], marker="o", label="' + safeGroupCtrl + '")',
-        'ax.fill_between(time_pts, ctrl_traj.mean(axis=0) - 1.96 * ctrl_traj.std(axis=0)/np.sqrt(10),',
-        '                ctrl_traj.mean(axis=0) + 1.96 * ctrl_traj.std(axis=0)/np.sqrt(10), color=OKABE_ITO[0], alpha=0.2)',
+        'ax.fill_between(time_pts, ctrl_traj.mean(axis=0) - ' + errorBandExpr + ',',
+        '                ctrl_traj.mean(axis=0) + ' + errorBandExpr + ', color=OKABE_ITO[0], alpha=0.2)',
         'ax.plot(time_pts, treat_traj.mean(axis=0), color=OKABE_ITO[1], marker="s", label="' + safeGroupTreat + '")',
-        'ax.fill_between(time_pts, treat_traj.mean(axis=0) - 1.96 * treat_traj.std(axis=0)/np.sqrt(10),',
-        '                treat_traj.mean(axis=0) + 1.96 * treat_traj.std(axis=0)/np.sqrt(10), color=OKABE_ITO[1], alpha=0.2)',
+        'ax.fill_between(time_pts, treat_traj.mean(axis=0) - ' + treatBandExpr + ',',
+        '                treat_traj.mean(axis=0) + ' + treatBandExpr + ', color=OKABE_ITO[1], alpha=0.2)',
         'ax.legend(frameon=False)',
       ].join('\n');
     } else if (archetype === 'correlation_heatmap') {

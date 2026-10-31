@@ -189,6 +189,15 @@ test('claimCitationAlignmentTool evaluates token overlap and alignment status', 
   assert.equal(res.ok, true);
   assert.equal(res.result.alignmentStatus, 'ALIGNED');
   assert.ok(res.result.estimatedAlignmentScore > 40);
+
+  // Affirmative statement with 'novel' must not trigger false negation/contradiction
+  const resAffirmative = await plugin.claimCitationAlignmentTool({
+    claim_text: 'A novel treatment improves survival in clinical trials.',
+    cited_source_summary: 'The treatment improves survival in clinical trials.',
+    doi: '10.1038/s41586-020-0002',
+  });
+  assert.equal(resAffirmative.ok, true);
+  assert.equal(resAffirmative.result.alignmentStatus, 'ALIGNED');
 });
 
 test('academicStyleAuditTool identifies AI clichés and vague quantifiers', async () => {
