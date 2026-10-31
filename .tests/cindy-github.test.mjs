@@ -724,7 +724,8 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(askCard.sourceCallId, undefined);
   // Button labels live in aria-label, so the phone's text projection is just the question.
   assert.deepEqual(visibleText(askCard.html), [zhCopy.prAskTitle, 'octo/repo', 'feat/pr-card → main · 3 个提交 · 2 个文件']);
-  assert.match(askCard.html, /<button data-ghost-action="pr:publish" aria-label="发 PR" style="[^"]*"><\/button>/);
+  // The primary marker lets the phone draw this one as the main button.
+  assert.match(askCard.html, /<button data-ghost-action="pr:publish" aria-label="发 PR" data-ghost-primary style="[^"]*"><\/button>/);
 
   await runtime.click(cardId, 'pr:publish');
   assert.deepEqual(runtime.agentRuns, [{
@@ -768,7 +769,8 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   await runtime.click(cardId, 'prui:settings');
   await runtime.click(cardId, 'prset:follow');
   assert.deepEqual(runtime.kv, { unrelated: 1, prCard: { autoRename: false, autoFollow: true } });
-  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:follow" aria-label="关闭「发完自动跟进」"/);
+  // The toggle state lets the phone draw a native switch.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:follow" data-ghost-toggle="on" aria-label="关闭「发完自动跟进」"/);
   assert.equal(runtime.agentRuns.length, 0);
 
   // A bare number resolves against the repository recorded on the card.
@@ -786,7 +788,9 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
 
   await runtime.tool({ card_id: cardId, following: true });
   const lines = visibleText(runtime.lastCard(cardId).html);
-  assert.equal(lines[1], `octo/repo · ${zhCopy.prStateFollowing}`);
+  // Following is shown once, by the live indicator in the footer.
+  assert.equal(lines[1], 'octo/repo');
+  assert.equal(lines.filter((line) => line === zhCopy.prStateFollowing).length, 1);
   for (const text of [zhCopy.prCiRunning, fill(zhCopy.prThreadsOpen, { count: 1 }), zhCopy.prMergeWaiting]) assert.ok(lines.includes(text), text);
 
   runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));

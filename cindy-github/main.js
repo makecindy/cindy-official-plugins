@@ -2644,13 +2644,14 @@ function prFooter(leftHtml, actionsHtml) {
 
 var PR_PILL = 'display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:9999px;font-size:13px;font-weight:500;white-space:nowrap;';
 
-function prButton(action, label, style, inner) {
-  return '<button data-ghost-action="' + action + '" aria-label="' + prEsc(label) + '" style="' + style + '">' + (inner || '') + '</button>';
+function prButton(action, label, style, inner, extraAttrs) {
+  return '<button data-ghost-action="' + action + '" aria-label="' + prEsc(label) + '"' + (extraAttrs || '') + ' style="' + style + '">' + (inner || '') + '</button>';
 }
 
+// data-ghost-primary:手机端把它画成主按钮(电脑端靠这里的样式)。
 function prCtaButton(action, label) {
   return prButton(action, label, PR_PILL + 'border:1px solid transparent;color:var(--accent-pure-cta-fg,#fff);' +
-    '--bg:var(--accent-cta-bg,#000);--hover:color-mix(in srgb,var(--accent-cta-bg,#000),var(--surface-elevated) 18%)');
+    '--bg:var(--accent-cta-bg,#000);--hover:color-mix(in srgb,var(--accent-cta-bg,#000),var(--surface-elevated) 18%)', '', ' data-ghost-primary');
 }
 
 function prPillButton(action, label) {
@@ -2665,7 +2666,8 @@ function prQuietButton(action, label, extra, inner) {
 
 /** 跟进中:按钮原地换成一行安静的状态(小绿点 + 次级文字),圆点由宿主播呼吸光环(data-ghost-live)。 */
 function prFollowingPill() {
-  return '<div style="display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 4px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
+  // data-ghost-live-label:手机端据此把这一项画成带呼吸点的状态。
+  return '<div data-ghost-live-label="' + prEsc(t('prStateFollowing')) + '" style="display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 4px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
     '<span style="position:relative;flex:none;width:6px;height:6px">' +
     // 宿主按 data-ghost-live 给这层播呼吸光环;旧版宿主不认这个属性时它只是叠在圆点下的同色圆。
     '<span data-ghost-live style="position:absolute;inset:0;border-radius:50%;background:' + PR_GREEN + '"></span>' +
@@ -2716,7 +2718,8 @@ function prContextLine(card) {
 }
 
 function prSettingRow(action, label, hint, on) {
-  return '<button data-ghost-action="' + action + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: label }) : t('prTurnOn', { name: label })) + '" ' +
+  // data-ghost-toggle:手机端把这一行画成原生开关(文字取按钮里的标题和说明)。
+  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: label }) : t('prTurnOn', { name: label })) + '" ' +
     'style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;text-align:left;--hover:' + PR_HOVER + '">' +
     '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) + '</div>' +
     '<div style="font-size:12px;line-height:16px;color:var(--text-secondary)">' + prEsc(hint) + '</div></div>' +
@@ -2773,9 +2776,9 @@ function renderPrCard(card, settings) {
     }
     if (card.stage === 'open') {
       gear = true;
-      var state = pr.draft ? t('prStateDraft') : card.following ? t('prStateFollowing') : t('prStateOpen');
       tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
-      meta = [prEsc(card.repo), prEsc(state)];
+      // 跟进中由下层的「● 跟进中」表达,标题行不再重复。
+      meta = card.following ? [prEsc(card.repo)] : [prEsc(card.repo), prEsc(pr.draft ? t('prStateDraft') : t('prStateOpen'))];
       // 跟进中的检查状态交给宿主按标题栏同一份数据实时填写;这里画的是兜底快照
       // (旧版宿主、手机,或宿主还没查到这条 PR 时显示)。
       left = card.following
