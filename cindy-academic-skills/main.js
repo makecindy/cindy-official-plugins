@@ -632,17 +632,35 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  var verifiedDoisInput = Array.isArray(args && args.verified_dois)
+  var rawVerifiedDois = Array.isArray(args && args.verified_dois)
     ? args.verified_dois.map(function (d) { return cleanDoiString(String(d)).toLowerCase(); }).filter(Boolean)
     : [];
+  var providedToken = args && typeof args.verification_token === 'string' ? args.verification_token.trim() : '';
+
+  // Cryptographic receipt check: verify that verified_dois was issued by a prior successful Crossref check
+  var expectedToken = rawVerifiedDois.length > 0
+    ? computeContentHash(rawVerifiedDois.slice().sort().join('|') + ':crossref-verified-receipt')
+    : '';
+  var isTokenValid = Boolean(expectedToken && providedToken === expectedToken);
+
   var alreadyVerifiedDois = [];
   var pendingDois = [];
-  for (var u = 0; u < uniqueDois.length; u++) {
-    var dStr = uniqueDois[u];
-    if (verifiedDoisInput.indexOf(dStr.toLowerCase()) >= 0) {
-      alreadyVerifiedDois.push(dStr);
-    } else {
-      pendingDois.push(dStr);
+  var unauthenticatedDoisSupplied = false;
+
+  if (rawVerifiedDois.length > 0 && !isTokenValid) {
+    // If verified_dois was passed without matching proof token, reject trusting it
+    unauthenticatedDoisSupplied = true;
+    for (var u = 0; u < uniqueDois.length; u++) {
+      pendingDois.push(uniqueDois[u]);
+    }
+  } else {
+    for (var u = 0; u < uniqueDois.length; u++) {
+      var dStr = uniqueDois[u];
+      if (isTokenValid && rawVerifiedDois.indexOf(dStr.toLowerCase()) >= 0) {
+        alreadyVerifiedDois.push(dStr);
+      } else {
+        pendingDois.push(dStr);
+      }
     }
   }
 
@@ -807,8 +825,12 @@ async function academicIntegrityAuditTool(args, callId) {
       allModesPassed: passCount === findings.length,
       crossrefVerifiedDois: totalVerifiedDois,
       accumulatedVerifiedDois: totalVerifiedDois,
+      verificationToken: totalVerifiedDois.length > 0
+        ? computeContentHash(totalVerifiedDois.map(function (d) { return d.toLowerCase(); }).sort().join('|') + ':crossref-verified-receipt')
+        : null,
       newlyVerifiedDois: newlyVerifiedDois,
       unverifiedDois: unverifiedDois,
+      unauthenticatedDoisSupplied: unauthenticatedDoisSupplied,
       totalDoisCount: uniqueDois.length,
       pendingOrFailedModes: unverifiedModes,
       summary: '7类科研失败模式审查完成：' + passCount + '/7 项通过。' +

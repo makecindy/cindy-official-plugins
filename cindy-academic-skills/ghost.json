@@ -219,7 +219,11 @@
             "items": {
               "type": "string"
             },
-            "description": "可选，此前已核验通过的 DOI 列表（支持长参考文献表跨批次累计传入以完成全量核验放行）"
+            "description": "可选，此前已核验通过的 DOI 列表（须配合 verification_token 证明真实核验结果，支持长参考文献表跨批次累计传入以完成全量核验放行）"
+          },
+          "verification_token": {
+            "type": "string",
+            "description": "可选，上一次分批核验返回的防伪凭证 verificationToken，用于校验 verified_dois 的真实核验结果，防止未经核验的列表绕过门禁"
           },
           "implementation_verified": {
             "type": "boolean",

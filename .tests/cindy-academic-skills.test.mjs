@@ -239,18 +239,43 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
   assert.equal(resBatch1.result.crossrefVerifiedDois.length, 30);
   assert.equal(resBatch1.result.unverifiedDois.length, 6);
 
-  // Second batch passing verified_dois skips previously verified DOIs and completes gate passage
+  // Second batch passing verified_dois AND verificationToken skips previously verified DOIs and completes gate passage
   fetchCallCount = 0;
   const resBatch2 = await pluginCapped.academicIntegrityAuditTool({
     paper_text: paperWithManyDois,
     implementation_verified: true,
     verified_dois: resBatch1.result.crossrefVerifiedDois,
+    verification_token: resBatch1.result.verificationToken,
   });
   assert.equal(resBatch2.ok, true);
   assert.equal(fetchCallCount, 6);
   assert.equal(resBatch2.result.verdict, 'GATE_PASSED');
   assert.equal(resBatch2.result.allModesPassed, true);
   assert.equal(resBatch2.result.crossrefVerifiedDois.length, 36);
+
+  // 5. Unauthenticated verified_dois without valid verification_token cannot bypass network verification
+  const fakePaper = samplePaper + '\n10.1038/s41586-099-fake';
+  const pluginAntiBypass = loadPlugin(async (req) => {
+    if (req.url && req.url.includes('10.1038%2Fs41586-099-fake')) {
+      return { ok: false, status: 404, body: 'Not Found' };
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: JSON.stringify({ message: { DOI: '10.1038/s41586-020-2649-2', title: ['Real Paper'] } }),
+    };
+  });
+  // Attempt to claim 10.1038/s41586-099-fake is already verified without a valid token
+  const resBypassAttempt = await pluginAntiBypass.academicIntegrityAuditTool({
+    paper_text: fakePaper,
+    implementation_verified: true,
+    verified_dois: ['10.1038/s41586-099-fake'],
+    // Missing verification_token
+  });
+  assert.equal(resBypassAttempt.ok, true);
+  assert.equal(resBypassAttempt.result.unauthenticatedDoisSupplied, true);
+  assert.equal(resBypassAttempt.result.verdict, 'GATE_BLOCKED_ACTION_REQUIRED');
+  assert.equal(resBypassAttempt.result.allModesPassed, false);
 });
 
 test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {
