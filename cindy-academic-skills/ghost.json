@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "cindy-academic-skills",
   "name": "Academic Research Skills (ARS-Codex)",
-  "description": "专业级学术研究与实证数据分析工作流套件（深度复刻并强化 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 真实引文检索与 DOI 校验防幻觉、统计模型决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、7 类学术诚信阻断门禁、主张与引用保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
-  "whenToUse": "适用于学术研究全流程：课题选题立项、PRISMA 综述、实证数据分析与统计检验决策、论文起草撰写、学术诚信自查、同行评审盲审、答辩矩阵构建与出版排版。提供端到端严密科研支撑与防幻觉机制。",
-  "version": "1.3.0",
+  "description": "专业级学术研究、实证数据分析与顶刊科研绘图工作流套件（深度复刻并强化 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 真实引文检索与 DOI 校验防幻觉、统计决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、顶刊多面板配图架构规划、Python/R 出版级绘图代码生成、7 类学术诚信阻断门禁、主张保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
+  "whenToUse": "适用于学术研究全流程：课题立项、PRISMA 综述、实证数据分析与统计检验、顶刊多面板配图架构与代码生成、论文起草撰写、学术诚信自查、同行评审盲审、答辩矩阵构建与出版排版。提供端到端严密科研支撑与防幻觉机制。",
+  "version": "1.4.0",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -42,6 +42,7 @@
             "enum": [
               "Stage_1_Research",
               "Stage_1_5_DataAnalysis",
+              "Stage_1_8_FigureDesign",
               "Stage_2_Write",
               "Stage_2_5_Integrity",
               "Stage_3_Review",
@@ -569,6 +570,75 @@
           "test_statistic",
           "df",
           "p_value"
+        ]
+      }
+    },
+    {
+      "name": "scientific_figure_designer",
+      "description": "顶刊科研配图与多面板可视化工作台：基于核心科学发现规划 Multi-panel 证据链架构（Panel a-d 角色分工）、物理排版尺寸（单栏89mm/双栏180mm）、色盲友好色板（Okabe-Ito），并一键生成 Python (Matplotlib/Seaborn) 或 R (ggplot2) 出版级绘图代码。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "main_scientific_claim": {
+            "type": "string",
+            "description": "本图所要证明的核心科学发现或结论（Main Takeaway）"
+          },
+          "target_journal": {
+            "type": "string",
+            "description": "目标期刊或出版机构（如 'Nature', 'Science', 'Cell', 'IEEE', 'PNAS'）"
+          },
+          "plot_archetype": {
+            "type": "string",
+            "enum": [
+              "multi_panel_composite",
+              "violin_box_jitter",
+              "dose_time_response",
+              "correlation_heatmap",
+              "volcano_differential_plot"
+            ],
+            "description": "图表原型类型"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "python_matplotlib",
+              "r_ggplot2",
+              "planning_only"
+            ],
+            "description": "绘图脚本语言与库后端（若仅需排版规划与图注草稿可设为 planning_only）"
+          },
+          "column_width": {
+            "type": "string",
+            "enum": [
+              "single_column_89mm",
+              "double_column_180mm",
+              "intermediate_120mm"
+            ],
+            "description": "可选，版面宽度，缺省为 double_column_180mm"
+          },
+          "x_label": {
+            "type": "string",
+            "description": "可选，X 轴物理量及单位（如 'Concentration (μM)' 或 'Condition'）"
+          },
+          "y_label": {
+            "type": "string",
+            "description": "可选，Y 轴物理量及单位（如 'Relative Expression (%)'）"
+          },
+          "error_bar_type": {
+            "type": "string",
+            "enum": [
+              "sem",
+              "sd",
+              "ci95"
+            ],
+            "description": "可选，误差棒统计定义（SEM: 均值标准误；SD: 样本标准差；CI95: 95% 置信区间）"
+          }
+        },
+        "required": [
+          "main_scientific_claim",
+          "target_journal",
+          "plot_archetype",
+          "backend"
         ]
       }
     }

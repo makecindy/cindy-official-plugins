@@ -19,7 +19,7 @@ const loadPlugin = (fetchMock) => {
   return require(resolved);
 };
 
-test('manifest declares Manifest v3, 15 ARS tools and structured manual', () => {
+test('manifest declares Manifest v3, 16 ARS tools and structured manual', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'ghost.json'), 'utf8'));
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.id, 'cindy-academic-skills');
@@ -29,7 +29,7 @@ test('manifest declares Manifest v3, 15 ARS tools and structured manual', () => 
   assert.equal(manifest.settingsHtml, undefined);
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.equal(manifest.minCindyVersion, '0.1.64');
-  assert.equal(manifest.tools.length, 15);
+  assert.equal(manifest.tools.length, 16);
   assert.ok(manifest.manual && manifest.manual.items && manifest.manual.items.length > 0);
   assert.equal(manifest.manual.items[0].dir, 'manual/ars-suite');
 });
@@ -264,7 +264,15 @@ test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {
     completed_artifacts: ['Statistical Results & Tables'],
   });
   assert.equal(res2.ok, true);
-  assert.equal(res2.result.nextStage, 'Stage_2_Write');
+  assert.equal(res2.result.nextStage, 'Stage_1_8_FigureDesign');
+
+  const res3 = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_1_8_FigureDesign',
+    research_topic: 'Multi-Agent Quality Assurance',
+    completed_artifacts: ['Multi-panel Figures'],
+  });
+  assert.equal(res3.ok, true);
+  assert.equal(res3.result.nextStage, 'Stage_2_Write');
 });
 
 test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
@@ -323,4 +331,53 @@ test('academicDataSummaryTool formats APA7 sentences and three-line tables', asy
   assert.match(res.result.threeLineTableMarkdown, /Control/);
   assert.equal(res.result.natureReportingGuidelineCheck.effectSizePresent, true);
   assert.equal(res.result.natureReportingGuidelineCheck.confidenceIntervalPresent, true);
+});
+
+test('scientificFigureDesignerTool plans multi-panel layouts and generates plot scripts', async () => {
+  const plugin = loadPlugin();
+
+  // Test Python Matplotlib generation
+  const resPy = await plugin.scientificFigureDesignerTool({
+    main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
+    target_journal: 'Nature',
+    plot_archetype: 'violin_box_jitter',
+    backend: 'python_matplotlib',
+    column_width: 'double_column_180mm',
+    x_label: 'Treatment Group',
+    y_label: 'Cognitive Score',
+  });
+
+  assert.equal(resPy.ok, true);
+  assert.equal(resPy.result.targetJournal, 'Nature');
+  assert.equal(resPy.result.layoutSpecifications.physicalWidthMm, 180);
+  assert.equal(resPy.result.multipanelArchitecture.length, 4);
+  assert.match(resPy.result.figureCaptionTemplate, /Fig\. 1 \| Targeted inhibition/);
+  assert.match(resPy.result.generatedPlotScript, /plt\.rcParams\["pdf\.fonttype"\] = 42/);
+  assert.match(resPy.result.generatedPlotScript, /OKABE_ITO/);
+
+  // Test R ggplot2 generation
+  const resR = await plugin.scientificFigureDesignerTool({
+    main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
+    target_journal: 'Nature',
+    plot_archetype: 'violin_box_jitter',
+    backend: 'r_ggplot2',
+    column_width: 'single_column_89mm',
+  });
+
+  assert.equal(resR.ok, true);
+  assert.equal(resR.result.layoutSpecifications.physicalWidthMm, 89);
+  assert.match(resR.result.generatedPlotScript, /library\(ggplot2\)/);
+  assert.match(resR.result.generatedPlotScript, /cairo_pdf/);
+
+  // Test planning_only mode
+  const resPlan = await plugin.scientificFigureDesignerTool({
+    main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
+    target_journal: 'Science',
+    plot_archetype: 'multi_panel_composite',
+    backend: 'planning_only',
+  });
+
+  assert.equal(resPlan.ok, true);
+  assert.equal(resPlan.result.generatedPlotScript, null);
+  assert.equal(resPlan.result.natureChecklistPassed.individualDataPointsShown, true);
 });

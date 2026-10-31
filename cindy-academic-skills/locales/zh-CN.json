@@ -47,6 +47,9 @@
     },
     "academic_data_summary": {
       "description": "学术数据统计量化报告与 APA 7.0 / Nature 级三线表生成：输入统计检验指标与效应量，自动生成符合顶刊规范的统计描述语句、精确 p 值、置信区间与 Markdown 三线表，杜绝伪重复与统计夸大宣称。"
+    },
+    "scientific_figure_designer": {
+      "description": "顶刊科研配图与多面板可视化工作台：基于核心科学发现规划 Multi-panel 证据链架构（Panel a-d 角色分工）、物理排版尺寸（单栏89mm/双栏180mm）、色盲友好色板（Okabe-Ito），并一键生成 Python (Matplotlib) 或 R (ggplot2) 出版级绘图代码。"
     }
   }
 }

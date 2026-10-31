@@ -47,6 +47,9 @@
     },
     "academic_data_summary": {
       "description": "Scholarly statistical reporting & APA 7.0 / Nature-style three-line table generator: format exact test statistics, p-values, effect sizes, and confidence intervals into publication-grade prose and Markdown three-line tables."
+    },
+    "scientific_figure_designer": {
+      "description": "Multi-panel scientific figure studio: design multi-panel evidence architectures (Panel a-d inferential roles), exact 89/180mm dimensions, Okabe-Ito palettes, Nature captions, and publication-ready Python or R plotting scripts."
     }
   }
 }

@@ -47,6 +47,9 @@
     },
     "academic_data_summary": {
       "description": "学術統計報告＆APA 7.0 / Nature基準三線表生成：検定統計量、自由度、正確なp値、効果量、信頼区間を入力し、トップ学術誌基準の記述文およびMarkdown三線表を自動生成します。"
+    },
+    "scientific_figure_designer": {
+      "description": "学術論文マルチパネル図設計＆描画スクリプト生成スタジオ：マルチパネル証拠連鎖（Panel a〜dの役割分担）、物理版面寸法（単段89mm/2段180mm）、色覚バリアフリー配色（Okabe-Ito）を設計し、出版級のPythonまたはRコードを一括生成します。"
     }
   }
 }

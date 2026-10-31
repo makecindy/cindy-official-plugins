@@ -47,6 +47,9 @@
     },
     "academic_data_summary": {
       "description": "학술 통계 정량 보고 및 APA 7.0 / Nature 기준 삼선표 생성: 검정통계량, 자유도, 정확한 p값, 효과크기, 신뢰구간을 입력받아 학술지 표준 통계 서술문과 Markdown 삼선표를 자동 생성합니다."
+    },
+    "scientific_figure_designer": {
+      "description": "학술 논문 멀티패널 도판 기획 및 시각화 스튜디오: 핵심 과학적 발견에 맞춘 멀티패널 증거 연쇄(Panel a-d 역할 분담), 인쇄 판면 규격(단단 89mm/양단 180mm), 색약 배려 팔레트(Okabe-Ito)를 설계하고 출판용 Python/R 시각화 코드를 원스톱 생성합니다."
     }
   }
 }
