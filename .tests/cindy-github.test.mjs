@@ -753,6 +753,8 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(update.sourceCallId, opened.callId);
   assert.deepEqual(visibleText(update.html), ['#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`]);
   assert.match(update.html, /<a href="https:\/\/github\.com\/octo\/repo\/pull\/42">/);
+  // Every stage asks the host to keep the card after the turn's changed-files card, so it never jumps.
+  for (const html of [askCard.html, update.html]) assert.match(html, /<div data-ghost-placement="turn-end" style=/);
 });
 
 test('card settings persist in /kv and become one-time todos once the PR exists', async () => {

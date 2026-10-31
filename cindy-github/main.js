@@ -2775,8 +2775,9 @@ function renderPrCard(card, settings) {
     body += '<div style="margin-top:10px;font-size:12px;line-height:16px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
+  // 排到本轮末尾:宿主把卡放在「已更改 N 个文件」卡之后,发不发是这一轮最后要拍板的事。
   return PR_CSS +
-    '<div style="position:relative;display:flex;flex-direction:column;justify-content:' + (body ? 'space-between' : 'center') + ';' +
+    '<div data-ghost-placement="turn-end" style="position:relative;display:flex;flex-direction:column;justify-content:' + (body ? 'space-between' : 'center') + ';' +
     'min-height:120px;padding:14px 16px;border:1px solid var(--border-default);border-radius:12px;background:var(--surface-elevated);' +
     'color:var(--text-primary);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5">' +
     header + (body ? '<div style="padding-left:44px">' + body + '</div>' : '') + (gear ? prGearButton(card.settingsOpen) : '') +
