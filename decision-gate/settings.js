@@ -472,14 +472,25 @@ const PICKER_MODEL = {
   },
   target: { type: 'route' },
 };
-async function publishModels(config) {
-  const list = await fetch('/secrets').then((r) => r.json()).catch(() => []);
-  // The judge in use needs its key, not just any key. Same default as usesOpenAi: OpenAI unless Jev was chosen.
-  const keyName = config.provider === 'jev' ? 'typesafe_api_key' : 'openai_api_key';
-  const keySaved = list.some((s) => s.key === keyName && s.saved);
-  const ready = keySaved && config.rules.some((r) => r.point === 'will-start-task' && r.enabled !== false);
-  // Hosts before model publishing answer with an error here; the rest of the plugin still works.
-  await fetch('/models', { method: 'PUT', body: JSON.stringify({ models: ready ? [PICKER_MODEL] : [] }) }).catch(() => {});
+// Publishes run one at a time and each reads the latest state once it is its turn, so a slow older
+// publish can never remove a model a newer save just added. If a read fails, the last list stays.
+// Its own lock: callers may already hold the config lock, and this one never waits on that.
+function publishModels() {
+  const run = async () => {
+    try {
+      const [configRes, secretsRes] = await Promise.all([fetch('/kv'), fetch('/secrets')]);
+      if (!configRes.ok || !secretsRes.ok) return;
+      const [config, list] = await Promise.all([configRes.json(), secretsRes.json()]);
+      // The judge in use needs its key, not just any key. Same default as usesOpenAi: OpenAI unless Jev was chosen.
+      const keyName = config.provider === 'jev' ? 'typesafe_api_key' : 'openai_api_key';
+      const keySaved = list.some((s) => s.key === keyName && s.saved);
+      const rules = Array.isArray(config.rules) ? config.rules : [];
+      const ready = keySaved && rules.some((r) => r.point === 'will-start-task' && r.enabled !== false);
+      // Hosts before model publishing answer with an error here; the rest of the plugin still works.
+      await fetch('/models', { method: 'PUT', body: JSON.stringify({ models: ready ? [PICKER_MODEL] : [] }) });
+    } catch { /* the picker keeps the last published list */ }
+  };
+  return globalThis.navigator?.locks ? navigator.locks.request('decision-gate-models', run) : run();
 }
 // The brain and this page rewrite the whole config: one lock keeps either from writing back a stale copy.
 const withConfigLock = (fn) => (navigator.locks ? navigator.locks.request('decision-gate-config', fn) : fn());
@@ -523,7 +534,7 @@ async function save() {
     stored = JSON.stringify(next);
     storeError = '';
     channel.postMessage({ from: 'settings', type: 'config-changed' });
-    await publishModels(next);
+    await publishModels();
     return true;
   } catch (error) {
     cfg = JSON.parse(stored);
@@ -591,7 +602,7 @@ function judgeSection() {
           storeError = t('storeSaveFailed', { error: error && error.message });
         }
         await loadSecrets();
-        await publishModels(cfg);
+        await publishModels();
         render();
       },
     }, h('div', { class: 'grow' }, h('p', {}, p.keyLabel), h('p', { class: 'meta', style: 'margin-top:2px' }, saved ? t('keyStored') : t('notSet')),
@@ -880,7 +891,7 @@ async function boot() {
   if (!cfg.provider) { cfg.provider = secrets.openai_api_key || !secrets.typesafe_api_key ? 'openai' : 'jev'; await save(); }
   render();
   // The brain only starts when it is needed, so the page keeps the published list current too.
-  publishModels(cfg);
+  publishModels();
   if (providerId() === 'jev') loadJevModels();
 }
 boot();
