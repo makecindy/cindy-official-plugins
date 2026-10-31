@@ -721,13 +721,14 @@ async function commitRule() {
   if (ruleError) { render(); return; }
   const i = cfg.rules.findIndex((r) => r.id === d.id);
   if (i >= 0) cfg.rules[i] = d; else cfg.rules.push(d);
-  // Keep the editor open if saving fails, so the edit is not lost.
-  if (await save()) { openId = null; draft = null; tryState = null; }
+  // Keep the editor open if saving fails, so the edit is not lost. Another editor opened meanwhile stays.
+  if (await save() && draft === d) { openId = null; draft = null; tryState = null; }
   render();
 }
 async function removeRule() {
-  cfg.rules = cfg.rules.filter((r) => r.id !== draft.id);
-  if (await save()) { openId = null; draft = null; tryState = null; }
+  const removing = draft;
+  cfg.rules = cfg.rules.filter((r) => r.id !== removing.id);
+  if (await save() && draft === removing) { openId = null; draft = null; tryState = null; }
   render();
 }
 async function runTry() {
