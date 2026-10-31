@@ -797,6 +797,40 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   ]);
 });
 
+// Drafts are still being worked on, so the card offers "mark ready" instead of following.
+// The plugin flips it directly, rereads GitHub, then applies the auto-follow setting.
+test('a draft card marks the PR ready itself, then follows when the card setting says so', async () => {
+  let draft = true;
+  const mutations = [];
+  const github = (request) => {
+    const { query, variables } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { mutations.push(variables); draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse({ data: { repository: { pullRequest: {
+      number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+    } } } });
+  };
+  const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } } });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  const draftCard = runtime.lastCard(cardId).html;
+  assert.match(draftCard, /data-ghost-action="pr:ready" aria-label="转为正式 PR"/);
+  assert.doesNotMatch(draftCard, /pr:follow/);
+
+  await runtime.click(cardId, 'pr:ready');
+  assert.deepEqual(mutations, [{ id: 'PR_node' }]);
+  const url = 'https://github.com/octo/repo/pull/9';
+  assert.equal(runtime.agentRuns.length, 1);
+  assert.equal(runtime.agentRuns[0].userMessage, fill(zhCopy.prReadyFollow, { url }));
+  const card = runtime.lastCard(cardId);
+  assert.equal(card.state, 'working');
+  assert.ok(visibleText(card.html).includes(zhCopy.prFollowStarting));
+
+  // Once following, the check strip is a slot the host fills from the title bar's live data.
+  await runtime.tool({ card_id: cardId, following: true });
+  assert.match(runtime.lastCard(cardId).html, /<div data-ghost-pr-status="octo\/repo#9">/);
+});
+
 test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {
   const cases = [
     [() => ({ ok: false, errorCode: 'TOKEN_EXPIRED' }), {}, zhCopy.prHandoffFailed],

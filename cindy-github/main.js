@@ -139,6 +139,9 @@ var MESSAGES = {
     prFollowEnded: '跟进已结束',
     prFollow: '自动跟进到合并',
     prFollowStarting: '正在开启跟进',
+    prMarkReady: '转为正式 PR',
+    prMarkingReady: '正在转为正式 PR',
+    prReadyFailed: '没能转为正式 PR：{detail}',
     prStop: '停止',
     prStopping: '正在停止跟进',
     prSettings: 'PR 设置',
@@ -177,6 +180,7 @@ var MESSAGES = {
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prReadyFollow: '用户在 PR 卡片上把草稿转成了正式 PR，卡片设置是发完自动跟进。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
@@ -239,6 +243,9 @@ var MESSAGES = {
     prFollowEnded: 'Following ended',
     prFollow: 'Auto-follow until merged',
     prFollowStarting: 'Starting to follow',
+    prMarkReady: 'Mark ready for review',
+    prMarkingReady: 'Marking ready for review',
+    prReadyFailed: 'Could not mark it ready for review: {detail}',
     prStop: 'Stop',
     prStopping: 'Stopping',
     prSettings: 'PR settings',
@@ -277,6 +284,7 @@ var MESSAGES = {
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
     prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prReadyFollow: 'The user marked the draft ready for review on the PR card, and the card setting says to follow it automatically. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
@@ -339,6 +347,9 @@ var MESSAGES = {
     prFollowEnded: 'フォロー終了',
     prFollow: 'マージまで自動フォロー',
     prFollowStarting: 'フォローを開始しています',
+    prMarkReady: '正式な PR にする',
+    prMarkingReady: '正式な PR に切り替えています',
+    prReadyFailed: '正式な PR にできませんでした：{detail}',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
     prSettings: 'PR 設定',
@@ -377,6 +388,7 @@ var MESSAGES = {
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prReadyFollow: 'ユーザーが PR カードで下書きを正式な PR にしました。カードの設定は作成後に自動フォローです。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
@@ -439,6 +451,9 @@ var MESSAGES = {
     prFollowEnded: '팔로우 종료됨',
     prFollow: '병합까지 자동 팔로우',
     prFollowStarting: '팔로우 시작 중',
+    prMarkReady: '정식 PR로 전환',
+    prMarkingReady: '정식 PR로 전환 중',
+    prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
     prSettings: 'PR 설정',
@@ -477,6 +492,7 @@ var MESSAGES = {
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prReadyFollow: '사용자가 PR 카드에서 초안을 정식 PR로 전환했고, 카드 설정은 만든 뒤 자동 팔로우입니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
@@ -2760,15 +2776,24 @@ function renderPrCard(card, settings) {
       var state = pr.draft ? t('prStateDraft') : card.following ? t('prStateFollowing') : t('prStateOpen');
       tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
       meta = [prEsc(card.repo), prEsc(state)];
-      left = card.following ? prStatusStrip(pr) : prContextLine(card);
-      // 停止排在胶囊左边:悬停这一行才出现,出现时不推动「跟进中」。
+      // 跟进中的检查状态交给宿主按标题栏同一份数据实时填写;这里画的是兜底快照
+      // (旧版宿主、手机,或宿主还没查到这条 PR 时显示)。
+      left = card.following
+        ? '<div data-ghost-pr-status="' + prEsc(card.repo + '#' + pr.number) + '">' + prStatusStrip(pr) + '</div>'
+        : prContextLine(card);
+      // 停止排在状态左边:悬停这一行才出现,出现时不推动「跟进中」。
+      // 草稿不提供自动跟进(还在改,Agent 后台推提交会撞车),主操作是转为正式。
       actions = card.pending === 'follow'
         ? prChip(t('prFollowStarting'), true)
         : card.pending === 'stop'
           ? prChip(t('prStopping'), true)
-          : card.following
-            ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
-            : prPillButton('pr:follow', t('prFollow'));
+          : card.pending === 'ready'
+            ? prChip(t('prMarkingReady'), true)
+            : card.following
+              ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
+              : pr.draft
+                ? prCtaButton('pr:ready', t('prMarkReady'))
+                : prPillButton('pr:follow', t('prFollow'));
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
       meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
@@ -2911,7 +2936,7 @@ async function prCardTool(args, callId) {
 var PR_AGENT_ACTIONS = {
   'pr:publish': function (card) { return card.stage === 'ask'; },
   'pr:draft': function (card) { return card.stage === 'ask'; },
-  'pr:follow': function (card) { return card.stage === 'open' && !card.following && !card.pending; },
+  'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.pending; },
   'pr:stop': function (card) { return card.stage === 'open' && card.following && !card.pending; },
 };
 
@@ -2925,7 +2950,7 @@ async function handOffPr(card, action, settings, msg) {
   var text;
   if (action === 'pr:publish') text = t('prClickPublish');
   else if (action === 'pr:draft') text = t('prClickPublishDraft');
-  else if (action === 'pr:follow') text = t('prClickFollow', { url: url });
+  else if (action === 'pr:follow') text = msg.afterReady ? t('prReadyFollow', { url: url }) : t('prClickFollow', { url: url });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
   if (card.pr) {
@@ -2952,6 +2977,42 @@ async function handOffPr(card, action, settings, msg) {
   return r && r.ok === false ? { ok: false } : { ok: false, unknown: true };
 }
 
+/**
+ * 草稿转正式:插件直接调 GitHub,不经过 Agent。成功后按卡片设置决定是否把跟进交给 Agent。
+ * 写操作失败时重读一次状态,以 GitHub 上的实际结果为准(请求可能已生效、只是回包丢了)。
+ */
+async function markPrReady(card, settings, msg) {
+  card.pending = 'ready';
+  await savePrCard(card);
+  await sendPrCard(card, settings, null);
+  var slash = card.repo.indexOf('/');
+  var owner = card.repo.slice(0, slash);
+  var name = card.repo.slice(slash + 1);
+  var idRes = await gql('query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}',
+    { owner: owner, name: name, number: card.pr.number });
+  var id = idRes.data && idRes.data.repository && idRes.data.repository.pullRequest && idRes.data.repository.pullRequest.id;
+  var err = idRes.err || (id ? null : t('status404'));
+  if (!err) {
+    var mut = await gql('mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}', { id: id });
+    err = mut.err || null;
+  }
+  var fresh = await fetchPrStatus(card.repo, card.pr.number);
+  if (fresh.pr) {
+    card.pr = fresh.pr;
+    card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
+  }
+  card.pending = null;
+  if (card.pr.draft) {
+    card.note = t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
+  } else if (settings.autoFollow && card.stage === 'open') {
+    var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
+    if (handoff.ok) card.pending = 'follow';
+    else card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
+  }
+  await savePrCard(card);
+  await sendPrCard(card, settings, null);
+}
+
 async function prCardAction(msg) {
   var id = String(msg.callId || '');
   if (!PR_CARD_ID_RE.test(id)) return;
@@ -2968,6 +3029,9 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
+  } else if (action === 'pr:ready' && card.stage === 'open' && card.pr.draft && !card.following && !card.pending) {
+    await markPrReady(card, settings, msg);
+    return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
     var handoff = await handOffPr(card, action, settings, msg);
     if (handoff.ok && (action === 'pr:publish' || action === 'pr:draft')) {
