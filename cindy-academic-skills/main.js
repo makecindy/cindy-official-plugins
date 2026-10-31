@@ -23,6 +23,10 @@ function cleanDoiString(raw) {
   str = str.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
   str = str.replace(/^doi:\s*/i, '');
   str = str.replace(/[#?].*$/, '');
+  str = str.replace(/[.,;:\]}>]+$/, '');
+  if (str.endsWith(')') && str.indexOf('(') < 0) {
+    str = str.replace(/\)+$/, '').replace(/[.,;:\]}>]+$/, '');
+  }
   str = str.trim();
   try {
     str = decodeURIComponent(str);
@@ -132,61 +136,116 @@ function getStudentTCriticalValue(df) {
   return 1.96;
 }
 
+function formatCrossrefHttpError(status, contextLabel) {
+  if (status === 400 || status === 422) {
+    return contextLabel + '请求参数无效 (HTTP ' + status + ')：请检查输入的 DOI 或检索关键词是否包含非法字符，修正参数后重试。';
+  }
+  if (status === 401 || status === 403) {
+    return contextLabel + '被拒绝访问 (HTTP ' + status + ')：请检查本地网络代理、防火墙或 User-Agent 配置后重试。';
+  }
+  if (status === 429) {
+    return contextLabel + '触发 Crossref 速率限制 (HTTP 429)：请等待 15-30 秒后重试，并降低并发调用频率。';
+  }
+  if (status >= 500) {
+    return contextLabel + '遇到 Crossref 上游服务暂时不可用 (HTTP ' + status + ')：此为远端服务器故障而非输入错误，请稍后重试。';
+  }
+  return contextLabel + '返回异常状态 (HTTP ' + status + ')：请核对输入参数并稍后重试。';
+}
+
+function computeContentHash(text) {
+  var h1 = 0xdeadbeef ^ text.length;
+  var h2 = 0x41c6ce57 ^ text.length;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+}
+
 // 1. pipeline_stage_orchestrator
 async function pipelineStageOrchestratorTool(args) {
   var currentStage = args && args.current_stage;
   var topic = (args && args.research_topic && String(args.research_topic).trim()) || 'Research Paper';
-  var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts : [];
+  var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts.filter(Boolean) : [];
   var manuscript = (args && args.manuscript_content && String(args.manuscript_content).trim()) || '';
   var reviewDecision = args && args.review_decision ? String(args.review_decision).toLowerCase().trim() : null;
-  var auditPassed = typeof args.integrity_audit_passed === 'boolean' ? args.integrity_audit_passed : null;
+  var auditPassed = typeof (args && args.integrity_audit_passed) === 'boolean' ? args.integrity_audit_passed : null;
 
   var stageTransitions = {
     Stage_1_Research: { next: 'Stage_1_5_DataAnalysis', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
     Stage_1_5_DataAnalysis: { next: 'Stage_1_8_FigureDesign', requiresConfirmation: true, keyDeliverable: 'Empirical Data Analysis Report & Three-line Statistical Tables' },
     Stage_1_8_FigureDesign: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'Multi-panel Scientific Figures & Plot Scripts (300+ DPI)' },
     Stage_2_Write: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Manuscript Draft & Material Passport' },
-    Stage_2_5_Integrity: { next: 'Stage_3_Review', requiresConfirmation: false, keyDeliverable: 'Pre-review Integrity Audit Report' },
-    Stage_3_Review: { next: 'Stage_4_Revise', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
+    Stage_2_5_Integrity: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Pre-review Integrity Audit Report' },
+    Stage_3_Review: { next: 'Stage_3_Review', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
     Stage_4_Revise: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Revised Manuscript & Rebuttal Matrix' },
-    Stage_3_Prime_Rereview: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Rereview Audit Report' },
-    Stage_4_Prime_Rerevise: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Second Revised Draft' },
-    Stage_4_5_Final_Integrity: { next: 'Stage_5_Finalize', requiresConfirmation: false, keyDeliverable: 'Final 100% Zero-Regression Integrity Report' },
+    Stage_3_Prime_Rereview: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Rereview Audit Report' },
+    Stage_4_Prime_Rerevise: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Second Revised Draft' },
+    Stage_4_5_Final_Integrity: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Final 100% Zero-Regression Integrity Report' },
     Stage_5_Finalize: { next: 'Stage_6_Process_Summary', requiresConfirmation: true, keyDeliverable: 'Publication-Ready Manuscript (LaTeX / APA 7.0)' },
     Stage_6_Process_Summary: { next: 'COMPLETED', requiresConfirmation: false, keyDeliverable: 'Paper Creation Audit Trail' },
   };
 
-  var info = stageTransitions[currentStage] || { next: 'Stage_1_Research', requiresConfirmation: true, keyDeliverable: 'RQ Formulation' };
+  if (!currentStage || !stageTransitions[currentStage]) {
+    return fail('无效的阶段名称: ' + String(currentStage) + '。请提供合法的 current_stage 枚举值。');
+  }
+
+  var info = stageTransitions[currentStage];
   var effectiveNext = info.next;
   var actionRec = '当前阶段完成后，请调用对应学术工具生成目标成果，并向用户提示确认后方可跃迁至 ' + effectiveNext + '。';
 
-  // Dynamic decision handling
+  // Outcome-driven stage transitions
   if (currentStage === 'Stage_3_Review') {
-    if (reviewDecision === 'reject') {
-      effectiveNext = 'Stage_1_Research';
-      actionRec = '同行评审决议为拒绝 (Reject)，建议重回选题与假设探索阶段，系统性重构核心立论与实验设计。';
+    if (reviewDecision === 'accept') {
+      effectiveNext = 'Stage_4_5_Final_Integrity';
+      actionRec = '同行评审决议为直接录用 (Accept)，跳过返修阶段，直接进入 Stage_4_5_Final_Integrity 执行终审零回归诚信门禁。';
     } else if (reviewDecision === 'major_revision' || reviewDecision === 'minor_revision') {
       effectiveNext = 'Stage_4_Revise';
-      actionRec = '同行评审决议为返修 (' + reviewDecision + ')，请进入 Stage_4_Revise 阶段构建逐条答辩矩阵。';
+      actionRec = '同行评审决议为返修 (' + reviewDecision + ')，请进入 Stage_4_Revise 阶段构建逐条答辩矩阵并修改手稿。';
+    } else if (reviewDecision === 'reject') {
+      effectiveNext = 'Stage_1_Research';
+      actionRec = '同行评审决议为拒绝 (Reject)，建议重回 Stage_1_Research 系统性重构核心立论与实验设计。';
+    } else {
+      effectiveNext = 'Stage_3_Review';
+      actionRec = '当前处于 Stage_3_Review，请先调用 peer_review_evaluation 获取审稿结论，并传入 review_decision (accept / minor_revision / major_revision / reject) 后再决定下一阶段。';
     }
   } else if (currentStage === 'Stage_3_Prime_Rereview') {
-    if (reviewDecision === 'major_revision') {
+    if (reviewDecision === 'accept' || reviewDecision === 'minor_revision') {
+      effectiveNext = 'Stage_4_5_Final_Integrity';
+      actionRec = '再审通过 (' + reviewDecision + ')，请进入 Stage_4_5_Final_Integrity 执行终审零回归诚信核查。';
+    } else if (reviewDecision === 'major_revision') {
       effectiveNext = 'Stage_4_Prime_Rerevise';
       actionRec = '二审决定仍需较大幅度修改 (Major Revision)，请跃迁至 Stage_4_Prime_Rerevise 继续补充实证与论述。';
     } else if (reviewDecision === 'reject') {
       effectiveNext = 'Stage_1_Research';
-      actionRec = '二审决议为拒绝，请重新审视根本性立论。';
+      actionRec = '二审决议为拒绝 (Reject)，请退回 Stage_1_Research 重新审视根本性立论。';
+    } else {
+      effectiveNext = 'Stage_3_Prime_Rereview';
+      actionRec = '当前处于再审阶段，请传入再审决议 review_decision (accept / minor_revision / major_revision / reject) 以决定流转方向。';
     }
   } else if (currentStage === 'Stage_2_5_Integrity' || currentStage === 'Stage_4_5_Final_Integrity') {
-    if (auditPassed === false) {
+    if (auditPassed === true) {
+      effectiveNext = (currentStage === 'Stage_4_5_Final_Integrity') ? 'Stage_5_Finalize' : 'Stage_3_Review';
+      actionRec = '学术诚信门禁核验通过，准予流转至 ' + effectiveNext + '。';
+    } else if (auditPassed === false) {
       effectiveNext = (currentStage === 'Stage_4_5_Final_Integrity') ? 'Stage_4_Prime_Rerevise' : 'Stage_2_Write';
-      actionRec = '学术诚信门禁未通过，已阻断流程跃迁，请根据审计报告修复虚构引用或过度宣称后重试。';
+      actionRec = '学术诚信门禁未通过，已阻断流程跃迁，请退回 ' + effectiveNext + ' 修复未核验引用或方法学缺陷后重测。';
+    } else {
+      effectiveNext = currentStage;
+      actionRec = '当前处于阻断式诚信门禁阶段 (' + currentStage + ')，必须先执行 academic_integrity_audit 并显式传入 integrity_audit_passed (true/false) 方可放行。';
     }
   }
 
-  // Bind hash to real content to ensure uniqueness
-  var seedString = topic + currentStage + JSON.stringify(artifacts) + manuscript;
-  var hashVal = Math.abs(seedString.split('').reduce(function (a, b) { return ((a << 5) - a) + b.charCodeAt(0); }, 0)).toString(16);
+  // Bind Material Passport strictly to actual material payload (not topic/stage name)
+  var hasActualMaterial = Boolean(manuscript) || artifacts.length > 0;
+  var materialPayload = JSON.stringify({
+    manuscript: manuscript,
+    artifacts: artifacts,
+  });
+  var hashVal = hasActualMaterial ? ('ars-' + computeContentHash(materialPayload)) : null;
 
   return {
     ok: true,
@@ -198,10 +257,10 @@ async function pipelineStageOrchestratorTool(args) {
       expectedDeliverable: info.keyDeliverable,
       completedArtifactsRecorded: artifacts,
       materialPassportStatus: {
-        hash: 'ars-' + hashVal,
-        contentBound: manuscript ? 'MANUSCRIPT_BOUND' : (artifacts.length > 0 ? 'ARTIFACTS_BOUND' : 'METADATA_ONLY'),
-        provenanceAuditTrail: 'LOCKED',
-        integrityGatePassed: (currentStage === 'Stage_4_5_Final_Integrity' || currentStage === 'Stage_5_Finalize') && (auditPassed !== false),
+        hash: hashVal,
+        contentBound: manuscript ? 'MANUSCRIPT_BOUND' : (artifacts.length > 0 ? 'ARTIFACTS_BOUND' : 'UNBOUND_NO_MATERIAL_PROVIDED'),
+        provenanceAuditTrail: hasActualMaterial ? 'LOCKED' : 'UNLOCKED_PENDING_MATERIAL',
+        integrityGatePassed: auditPassed === true,
       },
       nextActionRecommendation: actionRec,
     },
@@ -218,23 +277,22 @@ async function socraticResearchGuideTool(args) {
   var discipline = (args && args.target_discipline && String(args.target_discipline).trim()) || 'General / Interdisciplinary';
   var userContext = (args && args.user_context && String(args.user_context).trim()) || '';
   var topicClean = topic.trim();
+  var combinedText = topicClean + ' ' + userContext;
 
-  // Dynamic FINER evaluation based on topic specificity and user context
+  // Evidence-based FINER evaluation: only score dimensions supported by input evidence
   var wordCount = topicClean.split(/\s+/).length;
-  var hasContext = userContext.length > 20;
-
-  var feasScore = Math.min(95, 65 + (hasContext ? 20 : 0) + Math.min(10, wordCount * 2));
-  var novScore = Math.min(95, 60 + Math.min(25, wordCount * 3) + (hasContext ? 10 : 0));
-  var intScore = 85;
-  var relScore = Math.min(95, 75 + (hasContext ? 15 : 5));
+  var hasDatasetOrSample = /dataset|sample|cohort|n\s*=|experiment|survey|corpus|数据|样本|队列|实验|调查/i.test(combinedText);
+  var hasComparisonOrGap = /vs\.?|versus|compared|gap|conflict|novel|however|对比|相比|缺口|冲突|未解/i.test(combinedText);
+  var hasEthicsRisk = /patient|clinical|human|animal|mice|privacy|受试者|患者|临床|动物|隐私/i.test(combinedText);
+  var hasEthicsApproval = /irb|iacuc|consent|anonymized|ethical approval|伦理批件|知情同意|脱敏/i.test(combinedText);
 
   var questions = [
-    '【动机层】在 ' + topicClean + ' 领域，促使你关注此问题的最核心驱动力是什么？是现有文献冲突还是实践瓶颈？',
-    '【边界层】本研究打算聚焦于哪类具体样本群、技术栈或时间跨度？是否有必须排除的外部干扰变量？',
-    '【机制层】你预期的因果机制或核心反事实假设（Counterfactual Hypothesis）是什么？',
+    '【动机与缺口】在 "' + topicClean + '" 中，既有研究尚未解决的具体矛盾或经验盲区是什么？',
+    '【操作化定义】你计划用什么可观测的定量指标（Outcome）来度量核心自变量的效应，以及如何设置基准对照（Control/Baseline）？',
+    '【可证伪性自检】什么样的实证数据或反例一旦出现，就能够直接推翻（证伪）你的核心假说？',
   ];
-  if (userContext) {
-    questions.push('【情境层】结合你提供的背景（' + userContext.slice(0, 60) + '...），该特定约束如何改变你的核心检验方法？');
+  if (!hasDatasetOrSample) {
+    questions.push('【可行性待核查】当前输入尚未说明数据来源、样本规模或实验条件，请补充可用数据集或实验平台信息。');
   }
 
   return {
@@ -244,22 +302,36 @@ async function socraticResearchGuideTool(args) {
         rawTopic: topicClean,
         discipline: discipline,
         userContextProvided: Boolean(userContext),
-        specificityLevel: wordCount > 4 ? 'FOCUSED' : 'BROAD_NEEDS_SCOPING',
+        specificityLevel: (wordCount > 4 && hasDatasetOrSample) ? 'EVIDENCE_GROUNDED' : 'NEEDS_EMPIRICAL_SCOPING',
       },
       socraticProbingQuestions: questions,
       finerEvaluation: {
-        feasible: { score: feasScore, rating: feasScore >= 80 ? 'HIGH' : 'MODERATE', note: '基于主题描述的实证可操作性与数据可获取度评估' },
-        interesting: { score: intScore, rating: 'HIGH', note: '切中学术界与行业技术关切' },
-        novel: { score: novScore, rating: novScore >= 80 ? 'HIGH' : 'EMERGING', note: '边际理论增量或跨领域结合潜力' },
-        ethical: { score: 95, rating: 'PASS', note: '无高风险伦理违规，符合标准科研学术规范' },
-        relevant: { score: relScore, rating: 'STRONG', note: '对学科知识积累或实践应用具备明确指导意义' },
+        feasible: hasDatasetOrSample
+          ? { score: 85, rating: 'EVIDENCE_PROVIDED', note: '输入中已包含实验/数据来源线索。' }
+          : { score: null, rating: 'PENDING_VERIFICATION', note: '待核查：尚未提供样本量、数据获取途径或实验条件。' },
+        interesting: {
+          score: wordCount >= 3 ? 80 : null,
+          rating: wordCount >= 3 ? 'SCOPED_TOPIC' : 'PENDING_CLARIFICATION',
+          note: '基于主题词具体度评估；需结合文献检索确认领域关注度。',
+        },
+        novel: hasComparisonOrGap
+          ? { score: 82, rating: 'GAP_INDICATED', note: '输入已指明对比维度或研究缺口。' }
+          : { score: null, rating: 'PENDING_LITERATURE_SCAN', note: '待核查：请调用 search_crossref 与 three_way_lit_scan 核实创新边界。' },
+        ethical: hasEthicsRisk
+          ? (hasEthicsApproval
+            ? { score: 90, rating: 'APPROVAL_NOTED', note: '涉及人类/动物样本且已提及伦理合规措施。' }
+            : { score: null, rating: 'ETHICS_REVIEW_REQUIRED', note: '检测到潜在人类受试者/动物实验/隐私关键词，必须补充 IRB/IACUC 伦理审查说明。' })
+          : { score: null, rating: 'PENDING_PROTOCOL_CHECK', note: '待根据具体实验对象确认是否需要伦理审批或数据合规审查。' },
+        relevant: userContext
+          ? { score: 85, rating: 'CONTEXT_PROVIDED', note: '已提供应用场景与研究背景说明。' }
+          : { score: null, rating: 'PENDING_APPLICATION_SCOPE', note: '待补充：请说明研究结论拟解决的具体理论或实践问题。' },
       },
       candidateResearchQuestions: [
-        { type: 'Exploratory (探索型)', question: '在 ' + topicClean + ' 背景下，主要影响机制呈现出哪些阶段性特征与演变路径？' },
-        { type: 'Comparative (对比型)', question: '与传统基准相比，' + topicClean + ' 对核心因变量的边际效应有何统计差异？' },
-        { type: 'Mechanistic (因果机制型)', question: '在何种边界条件下，' + topicClean + ' 能通过特定中介路径产生统计显著的正向赋能？' },
+        { type: 'Exploratory (探索型)', question: '在 ' + topicClean + ' 中，核心观测指标随关键条件变化的实证分布特征是什么？' },
+        { type: 'Comparative (对比型)', question: '在控制混杂变量后，' + topicClean + ' 相比现有基线对照是否产生具有统计显著性与实际效应量的改善？' },
+        { type: 'Mechanistic (因果机制型)', question: '在何种边界条件下，' + topicClean + ' 通过特定中介机制改变目标结局？' },
       ],
-      nextStepRecommendation: '建议从上述三个候选 RQ 中选定一个主方向，随后调用 search_crossref 开启 PRISMA 系统性文献检索。',
+      nextStepRecommendation: '请先补充上述标记为 PENDING 的研究要素（数据来源、对照设计与伦理合规），再调用 search_crossref 检索实证文献。',
     },
   };
 }
@@ -291,11 +363,16 @@ async function verifyDoiTool(args, callId) {
       callId: callId,
     });
   } catch (err) {
-    return fail('请求 Crossref 验证服务异常：' + (err && err.message ? err.message : String(err)));
+    return fail('请求 Crossref 验证服务异常：' + (err && err.message ? err.message : String(err)) + '。请检查本地网络连接后重试。');
   }
 
   if (!response || !response.ok) {
-    return fail('连接 Crossref 服务失败：' + (response && response.message ? response.message : '网络请求未完成'));
+    if (response && typeof response.status === 'number' && response.status >= 400 && response.status !== 404) {
+      return fail(formatCrossrefHttpError(response.status, 'Crossref DOI 核验'));
+    }
+    if (!response || response.status !== 404) {
+      return fail('连接 Crossref 服务失败：' + (response && response.message ? response.message : '网络请求未完成') + '。请检查网络状态或稍后重试。');
+    }
   }
 
   if (response.status === 404) {
@@ -312,19 +389,15 @@ async function verifyDoiTool(args, callId) {
     };
   }
 
-  if (response.status === 429) {
-    return fail('Crossref API 请求频率超限 (HTTP 429)，请稍后重试。');
-  }
-
   if (response.status < 200 || response.status >= 300) {
-    return fail('Crossref API 服务返回错误 (HTTP ' + response.status + ')。');
+    return fail(formatCrossrefHttpError(response.status, 'Crossref DOI 核验'));
   }
 
   var data;
   try {
     data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
   } catch {
-    return fail('解析 Crossref 返回数据失败，响应格式非标准 JSON。');
+    return fail('解析 Crossref 返回数据失败，响应格式非标准 JSON，请稍后重试。');
   }
 
   var item = (data && data.message) || {};
@@ -390,22 +463,25 @@ async function searchCrossrefTool(args, callId) {
       callId: callId,
     });
   } catch (err) {
-    return fail('检索 Crossref 服务异常：' + (err && err.message ? err.message : String(err)));
+    return fail('检索 Crossref 服务异常：' + (err && err.message ? err.message : String(err)) + '。请检查本地网络连接后重试。');
   }
 
   if (!response || !response.ok) {
-    return fail('连接 Crossref 检索失败：' + (response && response.message ? response.message : '网络请求未完成'));
+    if (response && typeof response.status === 'number' && response.status >= 400) {
+      return fail(formatCrossrefHttpError(response.status, 'Crossref 文献检索'));
+    }
+    return fail('连接 Crossref 检索失败：' + (response && response.message ? response.message : '网络请求未完成') + '。请检查网络状态或稍后重试。');
   }
 
   if (response.status < 200 || response.status >= 300) {
-    return fail('Crossref 检索 API 错误 (HTTP ' + response.status + ')。');
+    return fail(formatCrossrefHttpError(response.status, 'Crossref 文献检索'));
   }
 
   var data;
   try {
     data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
   } catch {
-    return fail('解析检索结果 JSON 失败。');
+    return fail('解析检索结果 JSON 失败，上游响应格式异常，请稍后重试。');
   }
 
   var items = (data && data.message && Array.isArray(data.message.items) && data.message.items) || [];
@@ -447,42 +523,67 @@ async function threeWayLitScanTool(args) {
   var comparisonFocus = (args && args.comparison_focus) || 'comprehensive';
   var matrix = [];
   var extractedThemes = [];
+  var tokenFreq = {};
+  var missingMethodTitles = [];
+  var missingFindingTitles = [];
 
   for (var i = 0; i < papers.length; i++) {
     var p = papers[i];
     var title = p.title || ('Paper #' + (i + 1));
-    var notes = p.abstract_or_notes || p.abstract || '';
+    var notes = (p.abstract_or_notes || p.abstract || '').trim();
     extractedThemes.push(title);
 
     var whyExcerpt = '';
     var howExcerpt = '';
     var whatExcerpt = '';
 
+    var combinedPaperText = (title + ' ' + notes).toLowerCase();
+    var pTokens = combinedPaperText.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(function (w) {
+      return w.length >= 4 && !/^(this|that|with|from|into|have|were|been|their|study|paper)$/.test(w);
+    });
+    var seenInPaper = {};
+    for (var tIdx = 0; tIdx < pTokens.length; tIdx++) {
+      var tok = pTokens[tIdx];
+      if (!seenInPaper[tok]) {
+        seenInPaper[tok] = true;
+        tokenFreq[tok] = (tokenFreq[tok] || 0) + 1;
+      }
+    }
+
     if (notes) {
-      // Dynamic sentence extraction
       var sentences = notes.split(/[.。;；\n]+/).map(function (s) { return s.trim(); }).filter(Boolean);
       for (var sIdx = 0; sIdx < sentences.length; sIdx++) {
         var s = sentences[sIdx];
-        if (!whyExcerpt && /aim|objective|problem|challenge|investigate|focus|研究|旨在|探讨|问题|瓶颈/i.test(s)) {
+        if (!whyExcerpt && /aim|objective|problem|challenge|investigate|explore|examine|focus|研究|旨在|探讨|问题|瓶颈|探索|分析/i.test(s)) {
           whyExcerpt = s;
-        } else if (!howExcerpt && /method|model|approach|experiment|dataset|sample|using|采用|模型|方法|数据|样本/i.test(s)) {
+        } else if (!howExcerpt && /method|model|approach|experiment|dataset|sample|using|survey|trial|采用|模型|方法|数据|样本|实验/i.test(s)) {
           howExcerpt = s;
-        } else if (!whatExcerpt && /result|find|show|demonstrate|conclude|achieve|outperform|发现|表明|证实|得出/i.test(s)) {
+        } else if (!whatExcerpt && /result|find|show|demonstrate|conclude|achieve|outperform|rate|latency|发现|表明|证实|得出|结果/i.test(s)) {
           whatExcerpt = s;
         }
       }
+      if (!whyExcerpt && sentences.length > 0) {
+        whyExcerpt = sentences[0];
+      }
     }
+
+    if (!howExcerpt) missingMethodTitles.push(title);
+    if (!whatExcerpt) missingFindingTitles.push(title);
 
     matrix.push({
       paperTitle: title,
       authors: p.authors || 'Unknown',
       year: p.year || 'N/A',
-      why: whyExcerpt || ('针对 ' + title + ' 所指出的研究缺口与理论问题进行切入'),
-      how: howExcerpt || ('依托实证实验与基准对照分析进行验证'),
-      what: whatExcerpt || ('得出实证结果并验证核心假说有效性'),
+      why: whyExcerpt || '[PENDING_VERIFICATION: 传入摘要/笔记未包含明确研究动机描述，请补充原文背景]',
+      how: howExcerpt || '[PENDING_VERIFICATION: 传入摘要/笔记未提及具体实验方法、模型或样本量，请核查原文 Methods]',
+      what: whatExcerpt || '[PENDING_VERIFICATION: 传入摘要/笔记未包含定量实证结论，请核查原文 Results，切勿直接假定假说成立]',
       hasDetailedAbstract: Boolean(notes),
+      extractionStatus: (whyExcerpt && howExcerpt && whatExcerpt) ? 'COMPLETE' : 'PARTIAL_NEEDS_FULLTEXT_CHECK',
     });
   }
+
+  var sharedKeywords = Object.keys(tokenFreq).filter(function (k) { return tokenFreq[k] >= 2; });
+  var distinctKeywords = Object.keys(tokenFreq).filter(function (k) { return tokenFreq[k] === 1; }).slice(0, 8);
 
   return {
     ok: true,
@@ -492,9 +593,18 @@ async function threeWayLitScanTool(args) {
       threeWayMatrix: matrix,
       crossStudySynthesis: {
         analyzedPapers: extractedThemes,
-        consensusPoints: '所有对比文献均关注于该领域的效能与可靠性挑战，并主张结合实证数据进行基准对比。',
-        controversialAreas: '各研究在具体方法论路径选择（参数设定与环境条件）与泛化性边界上存在异质性。',
-        openResearchGap: '文献间缺乏跨情境的统一评测基准，这构成了本手稿的核心切入点。',
+        sharedConceptsDetected: sharedKeywords,
+        consensusPoints: sharedKeywords.length > 0
+          ? ('跨文献共同高频主题词包括: ' + sharedKeywords.join(', '))
+          : '传入文献笔记之间未检出重合词根，各篇聚焦维度高度独立，需人工核对是否存在共同理论主线。',
+        controversialAreas: distinctKeywords.length > 0
+          ? ('各篇文献侧重的差异化概念包括: ' + distinctKeywords.join(', '))
+          : '待结合完整实验条件与效应方向进一步核对文献间分歧。',
+        openResearchGap: (missingMethodTitles.length > 0 || missingFindingTitles.length > 0)
+          ? ('待核查缺口：' +
+             (missingMethodTitles.length > 0 ? ('[' + missingMethodTitles.join(', ') + '] 缺少方法学细节；') : '') +
+             (missingFindingTitles.length > 0 ? ('[' + missingFindingTitles.join(', ') + '] 缺少定量结果证据。') : ''))
+          : '已从全部传入笔记中提取 Why-How-What 三维记录，请对比各篇样本边界以确立本研究切入点。',
       },
     },
   };
@@ -508,14 +618,22 @@ async function academicIntegrityAuditTool(args) {
   }
 
   var stage = (args && args.stage) || 'pre_review_gate';
+  var verifiedDoisInput = Array.isArray(args && args.verified_dois)
+    ? args.verified_dois.map(function (d) { return cleanDoiString(String(d)).toLowerCase(); }).filter(Boolean)
+    : [];
+  var implementationVerified = Boolean(args && args.implementation_verified);
   var findings = [];
   var lower = paperText.toLowerCase();
 
   var doiMatches = paperText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) || [];
-  var citationMatches = paperText.match(/\([A-Z][a-zA-Z\s]+,\s*\d{4}[a-z]?\)/g) || [];
+  var normalizedMatches = doiMatches.map(function (d) { return cleanDoiString(d).toLowerCase(); });
 
   // Check for suspicious or placeholder DOIs
   var hasFakeDoi = /10\.\d+\/(?:fake|dummy|test|placeholder|1234)/i.test(paperText);
+  var unverifiedDois = normalizedMatches.filter(function (d) {
+    return verifiedDoisInput.indexOf(d) < 0;
+  });
+  var allDoisVerified = normalizedMatches.length > 0 && !hasFakeDoi && unverifiedDois.length === 0;
 
   var overclaimKeywords = [
     'undoubtedly proves',
@@ -536,18 +654,27 @@ async function academicIntegrityAuditTool(args) {
   }
 
   var hasControlMention = /control\s+group|baseline|ablation|placebo|对照组|基线|消融实验/i.test(paperText);
+  var hasNegativeControlMention = /negative\s+control|random\s+control|randomized\s+control|placebo|blank\s+control|confounder|阴性对照|空白对照|随机对照|混杂控制/i.test(paperText);
+  var hasLeakageSafeguard = implementationVerified || /no\s+data\s+leakage|held-out\s+test|independent\s+test|cross-validation|独立测试集|无数据泄露|物理隔离/i.test(paperText);
   var hasPValueMention = /p\s*[<>=]\s*0\.\d+|statistical\s+significance|显著性|假设检验/i.test(paperText);
   var hasDataAvailability = /data\s+availability|code\s+availability|reproducib|可复现|数据可用性/i.test(paperText);
 
-  var mode1Status = hasFakeDoi ? 'FLAGGED_SUSPICIOUS_DOI' : (doiMatches.length > 0 ? 'VERIFICATION_REQUIRED' : 'WARNING_NO_CITATION_FOUND');
+  var mode1Status = hasFakeDoi
+    ? 'FLAGGED_SUSPICIOUS_DOI'
+    : (allDoisVerified
+      ? 'PASS'
+      : (doiMatches.length > 0 ? 'VERIFICATION_REQUIRED' : 'WARNING_NO_CITATION_FOUND'));
+
   findings.push({
     mode: 'Mode 1: Fabricated Citations',
     status: mode1Status,
     details: hasFakeDoi
       ? '检测到疑似伪造/占位符 DOI (如包含 fake/dummy/test)，门禁拦截！'
-      : (doiMatches.length > 0
-        ? '检测到 ' + doiMatches.length + ' 处 DOI 标记。必须调用 verify_doi 逐一在线核验后方可通过本项门禁。'
-        : '未检测到规范 DOI 标识，存在文献真实性风险。'),
+      : (allDoisVerified
+        ? ('全部 ' + normalizedMatches.length + ' 处 DOI 已通过 verify_doi 清单对账核验。')
+        : (doiMatches.length > 0
+          ? ('检测到 ' + unverifiedDois.length + ' 处未经核验的 DOI (' + unverifiedDois.join(', ') + ')。必须先调用 verify_doi 在线核验并通过 verified_dois 传入后方可通过门禁。')
+          : '未检测到规范 DOI 标识，存在文献真实性风险。')),
   });
 
   findings.push({
@@ -558,14 +685,18 @@ async function academicIntegrityAuditTool(args) {
 
   findings.push({
     mode: 'Mode 3: Implementation Artifacts vs Findings',
-    status: 'ADVISORY_PENDING_AUTHOR_SIGNOFF',
-    details: '请作者确认不存在将代码超参数微调优势误判为实质算法创新的情况。',
+    status: hasLeakageSafeguard ? 'PASS' : 'UNVERIFIED_IMPLEMENTATION_ARTIFACTS',
+    details: hasLeakageSafeguard
+      ? '已确认包含独立测试隔离或作者实现无泄露签字确认。'
+      : '尚未提供数据防泄露/独立测试集隔离说明或 implementation_verified 签字确认，暂不放行。',
   });
 
   findings.push({
     mode: 'Mode 4: Negative Controls & Confounder Checks',
-    status: hasControlMention ? 'PASS' : 'FLAGGED_FOR_MANUAL_REVIEW',
-    details: hasControlMention ? '已设立控制机制以排除竞争性假设。' : '缺少明确的对照/混杂控制描述。',
+    status: (hasControlMention && hasNegativeControlMention) ? 'PASS' : 'FLAGGED_FOR_MANUAL_REVIEW',
+    details: (hasControlMention && hasNegativeControlMention)
+      ? '已设立随机/阴性对照机制以排除竞争性假设。'
+      : '缺少明确的阴性对照/随机对照/混杂控制描述，需补充说明。',
   });
 
   findings.push({
@@ -579,7 +710,7 @@ async function academicIntegrityAuditTool(args) {
   findings.push({
     mode: 'Mode 6: Methodological Inconsistency & p-Hacking',
     status: hasPValueMention ? 'PASS' : 'INFO_NO_EXPLICIT_P_VALUE',
-    details: hasPValueMention ? '包含统计指标，请确保未执行选择性数据剔除。' : '未检测到具体 p 值或假设检验描述。',
+    details: hasPValueMention ? '包含统计检验指标，请确保多重比较已校正且未执行选择性剔除。' : '未检测到具体 p 值或假设检验描述。',
   });
 
   findings.push({
@@ -589,14 +720,19 @@ async function academicIntegrityAuditTool(args) {
   });
 
   var passCount = 0;
+  var unverifiedModes = [];
   for (var j = 0; j < findings.length; j++) {
-    if (findings[j].status === 'PASS') passCount++;
+    if (findings[j].status === 'PASS') {
+      passCount++;
+    } else {
+      unverifiedModes.push(findings[j].mode + ' [' + findings[j].status + ']');
+    }
   }
 
   var verdict = 'GATE_CONDITIONAL_PENDING_VERIFICATION';
-  if (hasFakeDoi || detectedOverclaims.length > 2) {
+  if (hasFakeDoi || detectedOverclaims.length > 0) {
     verdict = 'GATE_BLOCKED_ACTION_REQUIRED';
-  } else if (passCount >= 4 && mode1Status !== 'FLAGGED_SUSPICIOUS_DOI') {
+  } else if (passCount === findings.length) {
     verdict = 'GATE_PASSED';
   }
 
@@ -605,7 +741,10 @@ async function academicIntegrityAuditTool(args) {
     result: {
       gateStage: stage,
       verdict: verdict,
-      summary: '7类科研失败模式审查完成：' + passCount + ' 项明确通过，剩余项目需结合实证复核。',
+      allModesPassed: passCount === findings.length,
+      pendingOrFailedModes: unverifiedModes,
+      summary: '7类科研失败模式审查完成：' + passCount + '/7 项通过。' +
+        (passCount === findings.length ? '全部阻断项已核验放行。' : '存在未核验或待整改项，门禁保持拦截状态。'),
       inspectedLength: paperText.length,
       failureModesEvaluation: findings,
       timestamp: new Date().toISOString(),
@@ -627,25 +766,43 @@ async function academicPaperAnalysisTool(args) {
   var wordCount = content.trim().split(/\s+/).length;
   var charCount = content.length;
 
-  // Dynamically extract core sentences from content
+  // Dynamically extract core sentences from content; return pending markers when absent
   var sentences = content.split(/[.。;；\n]+/).map(function (s) { return s.trim(); }).filter(Boolean);
   var extractedRQ = '';
+  var extractedHypothesis = '';
   var extractedMethod = '';
   var extractedFindings = '';
+  var extractedInnovation = '';
   var extractedLimits = '';
 
   for (var i = 0; i < sentences.length; i++) {
     var s = sentences[i];
-    if (!extractedRQ && /aim|propose|investigate|study|address|研究|旨在|探讨|提出/i.test(s)) {
+    if (!extractedRQ && /aim|propose|investigate|study|address|objective|研究|旨在|探讨|提出|目标/i.test(s)) {
       extractedRQ = s;
-    } else if (!extractedMethod && /method|approach|model|experiment|dataset|sample|采用|实验|方法|模型/i.test(s)) {
+    }
+    if (!extractedHypothesis && /hypothes|assume|premise|expect|predict|假说|假设|前提|预期/i.test(s)) {
+      extractedHypothesis = s;
+    }
+    if (!extractedMethod && /method|approach|model|experiment|dataset|sample|baseline|采用|实验|方法|模型|样本|对照/i.test(s)) {
       extractedMethod = s;
-    } else if (!extractedFindings && /result|show|find|demonstrate|achieve|发现|表明|证实|结果/i.test(s)) {
+    }
+    if (!extractedFindings && /result|show|find|demonstrate|achieve|p\s*[<>=]|发现|表明|证实|结果|显著/i.test(s)) {
       extractedFindings = s;
-    } else if (!extractedLimits && /limit|however|threat|constraint|future|局限|不足|未来|但是/i.test(s)) {
+    }
+    if (!extractedInnovation && /novel|first|contribut|outperform|advance|new|创新|首次|贡献|优于|突破/i.test(s)) {
+      extractedInnovation = s;
+    }
+    if (!extractedLimits && /limit|however|threat|constraint|future|caveat|局限|不足|未来|然而|边界/i.test(s)) {
       extractedLimits = s;
     }
   }
+
+  var missingItems = [];
+  if (!extractedRQ) missingItems.push('研究问题 (Research Question)');
+  if (!extractedHypothesis) missingItems.push('显式假说与前提 (Hypotheses & Assumptions)');
+  if (!extractedMethod) missingItems.push('方法学与样本细节 (Methodology Design)');
+  if (!extractedFindings) missingItems.push('定量实证结果 (Empirical Evidence)');
+  if (!extractedLimits) missingItems.push('局限性与效度边界 (Limitations)');
 
   var analysisSchema = {
     metadata: {
@@ -653,31 +810,31 @@ async function academicPaperAnalysisTool(args) {
       analyzedFocus: focus,
       characterCount: charCount,
       estimatedWords: wordCount,
+      missingElementsCount: missingItems.length,
       timestamp: new Date().toISOString(),
     },
     structuredFramework: {
-      researchQuestion: extractedRQ || '从文本推断：主要研究切入点与科学目标',
-      hypothesesAndAssumptions: '作者设立的理论假说、边界条件与关键前提',
-      methodologyDesign: extractedMethod || '研究方案、实验设计与基准对比',
-      evidenceChain: extractedFindings || '实证结果对论点的支撑链条',
-      strengthsAndInnovations: '主要学术贡献、方法创新或新颖发现',
-      limitationsAndThreatsToValidity: extractedLimits || '样本约束、外部效度或测量误差',
+      researchQuestion: extractedRQ || '[PENDING_VERIFICATION: 传入文本未包含明确的研究目标或科学问题语句]',
+      hypothesesAndAssumptions: extractedHypothesis || '[PENDING_VERIFICATION: 传入文本未显式声明理论假说或模型前提假设]',
+      methodologyDesign: extractedMethod || '[PENDING_VERIFICATION: 传入文本未包含实验方案、样本量或基准对比细节]',
+      evidenceChain: extractedFindings || '[PENDING_VERIFICATION: 传入文本未包含具体统计检验或定量实证结果]',
+      strengthsAndInnovations: extractedInnovation || '[PENDING_VERIFICATION: 传入文本未包含明确的创新性或相比基线的增量声明]',
+      limitationsAndThreatsToValidity: extractedLimits || '[PENDING_VERIFICATION: 传入文本未讨论研究局限性、外部效度边界或潜在混杂威胁]',
     },
-    guidance: [
-      '核查实验对照（Control Groups）设置是否足以排除竞争性假设',
-      '评估样本量与统计功效，防范小样本假阳性',
-      '确认数据公开性（Data Availability）支持第三方独立复现',
-    ],
+    pendingVerificationItems: missingItems,
+    guidance: missingItems.length > 0
+      ? ['待核查提示：当前传入片段缺少 ' + missingItems.join('、') + '，请提供对应章节全文后再作定论。']
+      : ['已从文本中检出完整的六维结构要素，请结合同行评审量表核实其统计效力。'],
   };
 
   if (includeChecklist) {
     analysisSchema.rigorChecklist = [
-      { item: '明确的研究问题与反事实假设 (Counterfactual / Hypothesis)', status: extractedRQ ? '已在文本中检出' : '建议重点评估' },
-      { item: '实验与对照组平衡 (Randomization / Baseline Equivalence)', status: extractedMethod ? '已提供方法线索' : '需核对' },
-      { item: '混杂因素控制 (Confounding Variables Controlled)', status: '需核对' },
-      { item: '统计功效与多重检验校正 (Power Analysis & Multiple Testing Correction)', status: '需核对' },
-      { item: '数据集/代码公开声明与透明度 (FAIR Principles)', status: '需核对' },
-      { item: '结论边界与外部效度外推风险 (Generalizability Bounds)', status: extractedLimits ? '已检出局限性说明' : '建议自查' },
+      { item: '明确的研究问题与反事实假设 (Counterfactual / Hypothesis)', status: (extractedRQ && extractedHypothesis) ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
+      { item: '实验与对照组平衡 (Randomization / Baseline Equivalence)', status: extractedMethod ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
+      { item: '混杂因素控制 (Confounding Variables Controlled)', status: /confound|control|adjust|random|混杂|控制|随机/i.test(content) ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
+      { item: '统计功效与多重检验校正 (Power Analysis & Multiple Testing Correction)', status: /power|bonferroni|fdr|tukey|holm|功效|校正/i.test(content) ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
+      { item: '数据集/代码公开声明与透明度 (FAIR Principles)', status: /data\s+availability|code|github|zenodo|开源|数据可用/i.test(content) ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
+      { item: '结论边界与外部效度外推风险 (Generalizability Bounds)', status: extractedLimits ? 'DETECTED_IN_TEXT' : 'MISSING_NEEDS_VERIFICATION' },
     ];
   }
 
@@ -862,23 +1019,42 @@ async function peerReviewEvaluationTool(args) {
   var discipline = (args && args.discipline && String(args.discipline).trim()) || 'General';
   var reviewType = (args && args.review_type) || 'standard_review';
   var len = manuscriptText.length;
-  var lower = manuscriptText.toLowerCase();
 
   // Dynamic analysis of manuscript content
-  var hasMethods = /method|experiment|procedure|protocol|采用|方法|实验/i.test(manuscriptText);
-  var hasStats = /p\s*[<>=]|t\(|f\(|chi-square|anova|sd|sem|显著|检验/i.test(manuscriptText);
-  var hasBaselines = /baseline|control|compared to|ablation|基准|对照/i.test(manuscriptText);
-  var hasLimitations = /limit|threat|future work|caveat|局限|不足|展望/i.test(manuscriptText);
+  var hasNoveltyClaim = /novel|propose|introduce|new|first|创新|首次|提出|新颖/i.test(manuscriptText);
+  var hasMethods = /method|experiment|procedure|protocol|dataset|采用|方法|实验|数据集/i.test(manuscriptText);
+  var hasStats = /p\s*[<>=]|t\(|f\(|chi-square|anova|sd|sem|ci|显著|检验|置信区间/i.test(manuscriptText);
+  var hasBaselines = /baseline|control|compared to|ablation|state-of-the-art|sota|基准|对照|消融/i.test(manuscriptText);
+  var hasLimitations = /limit|threat|future work|caveat|boundary|局限|不足|展望|边界/i.test(manuscriptText);
+  var hasReproAssets = /code|github|repository|hyperparameter|seed|open-source|代码|开源|随机种子|超参数/i.test(manuscriptText);
+  var hasCitations = /\b10\.\d{4,9}\/|\[\d+\]|\([A-Z][a-z]+(?:\s+et\s+al\.)?,\s*\d{4}\)/i.test(manuscriptText);
 
-  var origScore = Math.min(92, 70 + (len > 500 ? 15 : 5));
-  var methScore = hasMethods ? (hasStats && hasBaselines ? 88 : 74) : 60;
-  var alignScore = hasStats ? 84 : 70;
-  var presScore = len >= 300 ? 88 : 65;
-  var reproScore = (hasMethods && hasStats) ? 82 : 62;
+  var origScore = hasNoveltyClaim ? (hasCitations ? 85 : 72) : 55;
+  var methScore = hasMethods ? (hasStats && hasBaselines ? 88 : (hasStats || hasBaselines ? 74 : 62)) : 45;
+  var alignScore = hasStats ? (hasBaselines ? 86 : 74) : (hasMethods ? 58 : 42);
+  var presScore = len >= 300 ? (hasCitations ? 86 : 75) : 55;
+  var reproScore = hasReproAssets ? 88 : (hasMethods && hasStats ? 72 : 48);
 
   var overall = Math.round(origScore * 0.2 + methScore * 0.3 + alignScore * 0.25 + presScore * 0.15 + reproScore * 0.1);
 
-  var decision = overall >= 85 ? 'Accept / Minor Revision' : (overall >= 70 ? 'Major Revision' : 'Reject');
+  var decision = overall >= 82 ? 'Accept / Minor Revision' : (overall >= 65 ? 'Major Revision' : 'Reject');
+
+  var majorIssues = [];
+  if (!hasMethods) majorIssues.push('缺少实验设计、数据集与方法流程说明（Methods 章节证据缺失）');
+  if (!hasBaselines) majorIssues.push('未检出明确的 Baseline / 对照组或消融对比实验');
+  if (!hasStats) majorIssues.push('缺少具体统计检验指标、自由度、效应量或精确 p 值');
+  if (!hasLimitations) majorIssues.push('未声明研究局限性（Limitations）与结论适用边界');
+  if (majorIssues.length === 0) {
+    majorIssues.push('进一步核查多重假设检验校正（FDR / Bonferroni）与置信区间完整性');
+  }
+
+  var minorIssues = [];
+  if (!hasCitations) minorIssues.push('正文中未检出规范的学术文献引用锚点或 DOI');
+  if (!hasReproAssets) minorIssues.push('建议补充代码仓库链接、随机种子或关键超参数配置以提升可复现性');
+  if (len < 300) minorIssues.push('当前提交的文本片段较短（' + len + ' 字符），建议补充完整章节以供深入评审');
+  if (minorIssues.length === 0) {
+    minorIssues.push('核对图表字号、误差棒说明与参考文献 DOI 格式统一性');
+  }
 
   return {
     ok: true,
@@ -890,29 +1066,51 @@ async function peerReviewEvaluationTool(args) {
         evaluatedAt: new Date().toISOString(),
       },
       scoringRubric: {
-        originality: { score: origScore, weight: '20%', comment: '立意具备探索性，切合当前领域核心关切' },
-        methodologicalRigor: { score: methScore, weight: '30%', comment: hasMethods ? (hasBaselines ? '实验方案基本闭环' : '缺少明确基准或消融对照') : '缺少清晰的方法描述与流程说明' },
-        claimEvidenceAlignment: { score: alignScore, weight: '25%', comment: hasStats ? '论断具备一定数据量化支撑' : '缺少具体统计量支持' },
-        presentationAndClarity: { score: presScore, weight: '15%', comment: len >= 300 ? '正文论述结构完整' : '文稿篇幅偏短，需充实论述' },
-        reproducibility: { score: reproScore, weight: '10%', comment: hasStats ? '已给出部分实验参数' : '建议补充数据集、代码及参数配置' },
+        originality: {
+          score: origScore,
+          weight: '20%',
+          comment: hasNoveltyClaim
+            ? (hasCitations ? '明确阐述了创新贡献并与既有文献建立对比' : '声明了创新点，但缺少文献引用锚点支撑')
+            : '未在文本中检出明确的创新点或核心贡献声明',
+        },
+        methodologicalRigor: {
+          score: methScore,
+          weight: '30%',
+          comment: hasMethods
+            ? (hasBaselines && hasStats ? '包含方法描述、对照基准与统计检验' : '已描述方法，但缺少对照基准或统计检验支撑')
+            : '未检出明确的方法学描述或实验流程说明',
+        },
+        claimEvidenceAlignment: {
+          score: alignScore,
+          weight: '25%',
+          comment: hasStats
+            ? '论断具备统计检验或量化指标支撑'
+            : '缺少具体统计量或实验数据支撑核心论断',
+        },
+        presentationAndClarity: {
+          score: presScore,
+          weight: '15%',
+          comment: len >= 300 ? '文稿段落结构较完整' : '提交文本偏短，论述细节不足',
+        },
+        reproducibility: {
+          score: reproScore,
+          weight: '10%',
+          comment: hasReproAssets
+            ? '包含代码、参数或复现性说明'
+            : (hasMethods && hasStats ? '提供了基本实验与统计指标，建议补充开源代码/数据声明' : '缺少复现所需的实验参数、数据集与统计细节'),
+        },
         overallScore: overall,
       },
       multiPerspectiveFeedback: {
-        editorInChief: '建议 ' + decision + '。手稿整体评分为 ' + overall + ' 分。' + (hasStats ? '方法论指标具备一定基础。' : '亟需补齐统计检验与实证证据。'),
-        reviewer1_Methodologist: hasBaselines ? '基准对比已有初步设计，建议进一步核验方差齐性与正态性前提。' : '主要关切：未检出明确的 Baseline/对照组 对比实验，结论可信度受限。',
-        reviewer2_DomainSpecialist: '对当前最新研究的文献对话有待拓展，请强化与近两年代表性成果的比较。',
-        reviewer3_Reproducibility: hasLimitations ? '已明确提及研究局限性，值得肯定。' : '手稿未展开讨论结论适用边界与潜在混杂威胁，需在讨论中补充。',
-        devilsAdvocate: '挑战：若控制实验中的样本异质性，本文的核心优势是否依然稳健？请提供敏感性分析。',
+        editorInChief: '建议 ' + decision + '。手稿基于实证特征综合评分为 ' + overall + ' 分。' + (hasStats && hasMethods ? '具备基本方法与数据框架。' : '核心方法或统计实证存在明显缺失。'),
+        reviewer1_Methodologist: hasBaselines ? '已包含基准或对照设计，建议进一步核验方差齐性与多重比较校正。' : '主要关切：未检出明确的 Baseline/对照组 对比实验，结论内生效度受限。',
+        reviewer2_DomainSpecialist: hasCitations ? '已包含文献引用对话，建议进一步确认近两年代表性工作的覆盖度。' : '主要关切：文本中未检出规范的学术引用或 DOI，缺乏与既有文献的学术对话。',
+        reviewer3_Reproducibility: hasLimitations ? '已明确讨论研究局限性。' : '手稿未讨论结论适用边界与潜在混杂威胁，需补充 Limitations 小节。',
+        devilsAdvocate: hasStats ? '挑战：请确认所报告的显著性结果在控制混杂变量或更换随机种子后是否依然稳健。' : '挑战：当前结论缺乏量化统计检验支撑，无法排除随机波动或主观偏差。',
       },
       revisionChecklist: {
-        majorIssues: [
-          hasBaselines ? '补齐置信区间与效应量（Cohen\'s d 或 η²）指标' : '补充标准基准模型（Baseline）与对照组的对比分析',
-          hasStats ? '进行多重检验校正说明（如 FDR 或 Bonferroni）' : '提供具体统计量、自由度与精确 p 值',
-        ],
-        minorIssues: [
-          '统一正文中公式与图注引用的标号格式',
-          '补齐缺少 DOI 的参考文献条目',
-        ],
+        majorIssues: majorIssues,
+        minorIssues: minorIssues,
       },
     },
   };
@@ -1088,22 +1286,50 @@ async function statisticalAnalysisAdvisorTool(args) {
   var varHomog = typeof args.variance_homogeneity_satisfied === 'boolean' ? args.variance_homogeneity_satisfied : null;
   var compCount = typeof args.multiple_comparisons_count === 'number' ? args.multiple_comparisons_count : 1;
 
+  var supportedDesigns = [
+    'two_groups_independent',
+    'two_groups_paired',
+    'multi_groups_independent',
+    'multi_groups_repeated',
+    'correlation',
+    'regression',
+    'categorical_proportions',
+  ];
+  var supportedOutcomes = ['continuous', 'binary', 'ordinal', 'count', 'time_to_event'];
+
+  if (!design || supportedDesigns.indexOf(design) < 0) {
+    return fail('不支持的实验设计类型 (design_type): ' + String(design) + '。支持的类型: ' + supportedDesigns.join(', '));
+  }
+  if (!outcome || supportedOutcomes.indexOf(outcome) < 0) {
+    return fail('不支持的因变量类型 (outcome_type): ' + String(outcome) + '。支持的类型: ' + supportedOutcomes.join(', '));
+  }
+  if (design === 'categorical_proportions' && outcome !== 'binary' && outcome !== 'ordinal') {
+    return fail('设计类型 categorical_proportions 仅适用于分类/比例结局（binary 或 ordinal），与结局类型 ' + outcome + ' 冲突。');
+  }
+
   var recommendation = {};
 
   if (design === 'two_groups_independent') {
     if (outcome === 'continuous') {
+      var useNonParam2Ind = (normal === false);
       recommendation = {
-        primaryTest: (varHomog === false) ? "Welch's Independent Samples t-test (不等方差校正 t 检验)" : "Student's Independent Samples t-test (独立样本 t 检验)",
-        remedialTest: "Mann-Whitney U test (Wilcoxon 秩和检验，若正态性严重偏离或存在极端离群值)",
-        effectSizeMetric: "Cohen's d (若样本量小 n < 20 建议校正为 Hedges' g)",
+        primaryTest: useNonParam2Ind
+          ? "Mann-Whitney U test (Wilcoxon 秩和检验，因正态性不满足已切换为非参数主检验)"
+          : ((varHomog === false) ? "Welch's Independent Samples t-test (不等方差校正 t 检验)" : "Student's Independent Samples t-test (独立样本 t 检验)"),
+        remedialTest: useNonParam2Ind
+          ? "Permutation t-test (置换检验) 或 Bootstrap 均值差置信区间"
+          : "Mann-Whitney U test (Wilcoxon 秩和检验，若正态性偏离或存在极端离群值)",
+        effectSizeMetric: useNonParam2Ind ? "Rank-biserial correlation (r_rb) 或 Cliff's Delta" : "Cohen's d (若样本量小 n < 20 建议校正为 Hedges' g)",
         assumptionsToCheck: [
           "1. 观测独立性 (Independence of observations): 独立实验单元，杜绝伪重复",
           "2. 正态性 (Normality): 每组因变量分布近似正态 (Shapiro-Wilk 检验)",
-          "3. 方差齐性 (Homoscedasticity): Levene 检验 (若方差不齐默认使用 Welch t-test)",
+          "3. 方差齐性 (Homoscedasticity): Levene 检验 (若方差不齐使用 Welch t-test)",
         ],
-        reportingTemplate: "独立样本 t 检验显示，实验组 (M = ..., SD = ...) 与对照组 (M = ..., SD = ...) 差异显著, t(df) = ..., p = ..., Cohen's d = ..., 95% CI [... , ...]。",
+        reportingTemplate: useNonParam2Ind
+          ? "Mann-Whitney U 检验显示两组差异显著, U = ..., Z = ..., p = ..., r_rb = ...。"
+          : "独立样本 t 检验显示，实验组 (M = ..., SD = ...) 与对照组 (M = ..., SD = ...) 差异显著, t(df) = ..., p = ..., Cohen's d = ..., 95% CI [... , ...]。",
       };
-    } else if (outcome === 'binary' || outcome === 'categorical_proportions') {
+    } else if (outcome === 'binary') {
       recommendation = {
         primaryTest: (n && n < 30) ? "Fisher's Exact Test (Fisher 精确概率检验)" : "Pearson's Chi-Square Test (卡方独立性检验)",
         remedialTest: "Fisher's Exact Test (若任一期望频数 E < 5)",
@@ -1111,46 +1337,191 @@ async function statisticalAnalysisAdvisorTool(args) {
         assumptionsToCheck: ["1. 单元格独立性", "2. 期望频数准则: 至少 80% 单元格期望频数 >= 5"],
         reportingTemplate: "卡方检验表明两组比例差异显著, χ²(df, N = ...) = ..., p = ..., OR = ... (95% CI [... , ...])。",
       };
-    } else {
+    } else if (outcome === 'ordinal') {
       recommendation = {
-        primaryTest: "Mann-Whitney U test",
-        remedialTest: "Ordinal Logistic Regression (有序 Logistic 回归)",
+        primaryTest: "Mann-Whitney U test (Wilcoxon 秩和检验)",
+        remedialTest: "Proportional Odds Ordinal Logistic Regression (比例优势有序 Logistic 回归)",
         effectSizeMetric: "Rank-biserial correlation 或 Cliff's Delta",
-        assumptionsToCheck: ["独立观测", "因变量为有序尺度或连续非正态尺度"],
-        reportingTemplate: "Mann-Whitney U 检验表明组间差异显著, U = ..., Z = ..., p = ..., r = ...。",
+        assumptionsToCheck: ["1. 独立观测", "2. 因变量为有序测量尺度"],
+        reportingTemplate: "Mann-Whitney U 检验表明组间等级分布差异显著, U = ..., Z = ..., p = ..., Cliff's δ = ...。",
+      };
+    } else if (outcome === 'count') {
+      recommendation = {
+        primaryTest: "Poisson / Negative Binomial Two-Group Rate Comparison (泊松或负二项率比检验)",
+        remedialTest: "Mann-Whitney U test (秩和检验)",
+        effectSizeMetric: "Incidence Rate Ratio (IRR, 发生率比) 与 95% CI",
+        assumptionsToCheck: ["1. 事件独立性", "2. 均值-方差等分散性检验 (若过离散则采用负二项模型)"],
+        reportingTemplate: "负二项/泊松率比检验显示两组计数率差异显著, IRR = ..., 95% CI [... , ...], p = ...。",
+      };
+    } else {
+      // time_to_event
+      recommendation = {
+        primaryTest: "Log-Rank Test with Kaplan-Meier Survival Curves (对数秩检验配 KM 生存曲线)",
+        remedialTest: "Peto-Peto / Gehan-Breslow Generalized Wilcoxon Test (若早期事件权重更高或比例风险假定偏离)",
+        effectSizeMetric: "Hazard Ratio (HR, 风险比) 与中位生存时间差",
+        assumptionsToCheck: ["1. 删失独立性 (Non-informative censoring)", "2. 比例风险假定 (Proportional hazards assumption)"],
+        reportingTemplate: "Log-rank 检验表明两组生存曲线差异显著, χ²(1) = ..., p = ..., HR = ..., 95% CI [... , ...]。",
       };
     }
   } else if (design === 'two_groups_paired') {
-    recommendation = {
-      primaryTest: "Paired Samples t-test (配对样本 t 检验)",
-      remedialTest: "Wilcoxon Signed-Rank Test (配对符号秩检验)",
-      effectSizeMetric: "Cohen's d_z 或 Hedges' g",
-      assumptionsToCheck: ["1. 配对差值正态性", "2. 组对独立性"],
-      reportingTemplate: "配对样本 t 检验显示处理后相比基线有显著改变, t(df) = ..., p = ..., d_z = ...。",
-    };
+    if (outcome === 'continuous') {
+      var useNonParamPaired = (normal === false);
+      recommendation = {
+        primaryTest: useNonParamPaired
+          ? "Wilcoxon Signed-Rank Test (配对符号秩检验，因差值正态性不满足已切换为非参数主检验)"
+          : "Paired Samples t-test (配对样本 t 检验)",
+        remedialTest: useNonParamPaired ? "Sign Test (符号检验) 或配对置换检验" : "Wilcoxon Signed-Rank Test (配对符号秩检验)",
+        effectSizeMetric: useNonParamPaired ? "Matched-pairs rank-biserial correlation (r_rb)" : "Cohen's d_z 或 Hedges' g_rm",
+        assumptionsToCheck: ["1. 配对差值正态性 (Shapiro-Wilk 检验)", "2. 配对个体间相互独立"],
+        reportingTemplate: useNonParamPaired
+          ? "Wilcoxon 配对符号秩检验显示处理前后差异显著, W = ..., Z = ..., p = ..., r_rb = ...。"
+          : "配对样本 t 检验显示处理后相比基线有显著改变, t(df) = ..., p = ..., d_z = ...。",
+      };
+    } else if (outcome === 'binary') {
+      recommendation = {
+        primaryTest: "McNemar's Test (配对列联表 McNemar 检验)",
+        remedialTest: "Exact Binomial McNemar Test (若不一致对数 b + c < 25)",
+        effectSizeMetric: "Matched Pairs Odds Ratio (OR_matched) 或 Cohen's g",
+        assumptionsToCheck: ["1. 配对观测成对独立", "2. 结局为二分类互斥状态"],
+        reportingTemplate: "McNemar 检验表明配对前后阳性比例发生显著改变, χ²(1) = ..., p = ..., OR_matched = ...。",
+      };
+    } else if (outcome === 'ordinal') {
+      recommendation = {
+        primaryTest: "Wilcoxon Signed-Rank Test (配对符号秩检验)",
+        remedialTest: "Marginal Homogeneity Test / Sign Test",
+        effectSizeMetric: "Matched-pairs rank-biserial correlation",
+        assumptionsToCheck: ["1. 配对个体间独立", "2. 有序等级尺度可比较"],
+        reportingTemplate: "Wilcoxon 配对符号秩检验显示前后等级评分差异显著, Z = ..., p = ..., r = ...。",
+      };
+    } else if (outcome === 'count') {
+      recommendation = {
+        primaryTest: "Generalized Estimating Equations (GEE) Poisson / Negative Binomial (配对计数模型)",
+        remedialTest: "Wilcoxon Signed-Rank Test",
+        effectSizeMetric: "Incidence Rate Ratio (IRR)",
+        assumptionsToCheck: ["1. 配对相关性结构设定", "2. 过离散检验"],
+        reportingTemplate: "配对泊松/负二项模型显示前后事件发生率差异显著, IRR = ..., 95% CI [... , ...], p = ...。",
+      };
+    } else {
+      recommendation = {
+        primaryTest: "Stratified Log-Rank Test / Frailty Cox Model (配对/分层生存分析模型)",
+        remedialTest: "Clustered Bootstrap Survival Comparison",
+        effectSizeMetric: "Stratified Hazard Ratio (HR)",
+        assumptionsToCheck: ["1. 配对内共享脆弱性设定", "2. 删失独立性"],
+        reportingTemplate: "分层生存分析显示配对条件下风险比显著, HR = ..., 95% CI [... , ...], p = ...。",
+      };
+    }
   } else if (design === 'multi_groups_independent') {
-    recommendation = {
-      primaryTest: (varHomog === false) ? "Welch's ANOVA (配 Games-Howell 事后多重比较)" : "One-Way ANOVA (单因素方差分析，配 Tukey HSD 事后检验)",
-      remedialTest: "Kruskal-Wallis H test (配 Dunn's 检验并进行 FDR 校正)",
-      effectSizeMetric: "Partial Eta Squared (η_p²) 或 Omega Squared (ω²)",
-      assumptionsToCheck: ["1. 组间独立性", "2. 残差正态性", "3. 方差齐性 (Levene 检验)"],
-      reportingTemplate: "单因素方差分析表明主效应显著, F(df1, df2) = ..., p = ..., η_p² = ...。Tukey HSD 事后检验显示组 A 与组 B 差异显著 (p_adj = ...)。",
-    };
+    if (outcome === 'continuous') {
+      var useNonParamAnova = (normal === false);
+      recommendation = {
+        primaryTest: useNonParamAnova
+          ? "Kruskal-Wallis H test (非参数多组秩和检验，配 Dunn's 事后检验，因正态性不满足已切换为主检验)"
+          : ((varHomog === false) ? "Welch's ANOVA (不等方差方差分析，配 Games-Howell 事后多重比较)" : "One-Way ANOVA (单因素方差分析，配 Tukey HSD 事后检验)"),
+        remedialTest: useNonParamAnova
+          ? "Permutation One-Way ANOVA (多组置换检验)"
+          : "Kruskal-Wallis H test (配 Dunn's 检验并进行 FDR 校正)",
+        effectSizeMetric: useNonParamAnova ? "Epsilon-squared (ε²) 或 Eta-squared based on H (η_H²)" : "Partial Eta Squared (η_p²) 或 Omega Squared (ω²)",
+        assumptionsToCheck: ["1. 组间独立性", "2. 残差正态性", "3. 方差齐性 (Levene 检验)"],
+        reportingTemplate: useNonParamAnova
+          ? "Kruskal-Wallis H 检验表明多组间差异显著, H(df) = ..., p = ..., ε² = ...。Dunn's 事后检验显示组 A 与组 B 差异显著 (p_adj = ...)。"
+          : "单因素方差分析表明主效应显著, F(df1, df2) = ..., p = ..., η_p² = ...。Tukey HSD 事后检验显示组 A 与组 B 差异显著 (p_adj = ...)。",
+      };
+    } else if (outcome === 'binary') {
+      recommendation = {
+        primaryTest: "R × 2 Pearson's Chi-Square Test (多组二分类卡方检验)",
+        remedialTest: "Fisher-Freeman-Halton Exact Test (小样本精确检验)",
+        effectSizeMetric: "Cramer's V",
+        assumptionsToCheck: ["1. 观测独立性", "2. 期望频数 >= 5 占 80% 以上"],
+        reportingTemplate: "多组卡方检验显示组间比例差异显著, χ²(df, N = ...) = ..., p = ..., Cramer's V = ...。",
+      };
+    } else if (outcome === 'ordinal') {
+      recommendation = {
+        primaryTest: "Kruskal-Wallis H test (多组非参数秩和检验，配 Dunn's 事后比较)",
+        remedialTest: "Proportional Odds Ordinal Logistic Regression",
+        effectSizeMetric: "Epsilon-squared (ε²)",
+        assumptionsToCheck: ["1. 组间独立性", "2. 有序测量尺度"],
+        reportingTemplate: "Kruskal-Wallis H 检验显示多组等级分布差异显著, H(df) = ..., p = ..., ε² = ...。",
+      };
+    } else if (outcome === 'count') {
+      recommendation = {
+        primaryTest: "Poisson / Negative Binomial GLM with Omnibus Likelihood Ratio Test (多组计数广义线性模型)",
+        remedialTest: "Kruskal-Wallis H test",
+        effectSizeMetric: "Incidence Rate Ratio (IRR) 与 Deviance Explained",
+        assumptionsToCheck: ["1. 独立观测", "2. 过离散检验"],
+        reportingTemplate: "负二项/泊松 GLM 似然比检验显示组别主效应显著, χ²(df) = ..., p = ...。",
+      };
+    } else {
+      recommendation = {
+        primaryTest: "Multi-Group Log-Rank Test with Pairwise Holm/FDR Adjusted Survival Comparisons",
+        remedialTest: "Cox Proportional Hazards Model with Group Factor",
+        effectSizeMetric: "Group-specific Hazard Ratios (HR)",
+        assumptionsToCheck: ["1. 删失独立性", "2. 比例风险假定"],
+        reportingTemplate: "多组 Log-rank 检验显示生存分布存在显著差异, χ²(df) = ..., p = ...。",
+      };
+    }
   } else if (design === 'multi_groups_repeated') {
-    recommendation = {
-      primaryTest: "Repeated Measures ANOVA (重复测量方差分析，Mauchly 球形度检验)",
-      remedialTest: "Greenhouse-Geisser 或 Huynh-Feldt 自由度校正 (若球形度违反 ε < 0.75)；或 Friedman 秩和检验",
-      effectSizeMetric: "Partial Eta Squared (η_p²)",
-      assumptionsToCheck: ["1. 球形度假设 (Mauchly's test)", "2. 残差各时点正态性"],
-      reportingTemplate: "重复测量方差分析显示时间主效应显著, F(df_corr1, df_corr2) = ..., p = ..., η_p² = ...。",
-    };
+    if (outcome === 'continuous') {
+      var useNonParamRM = (normal === false);
+      recommendation = {
+        primaryTest: useNonParamRM
+          ? "Friedman Test (非参数重复测量秩和检验，配 Conover / Nemenyi 事后检验，因正态性不满足已切换为主检验)"
+          : "Repeated Measures ANOVA (重复测量方差分析，配 Mauchly 球形度检验) 或 Linear Mixed-Effects Model (LMM)",
+        remedialTest: useNonParamRM
+          ? "Linear Mixed-Effects Model with Robust SE (稳健标准误混合效应模型)"
+          : "Greenhouse-Geisser / Huynh-Feldt 自由度校正 (若球形度违反 ε < 0.75)；或 Friedman 秩和检验",
+        effectSizeMetric: useNonParamRM ? "Kendall's W (肯德尔和谐系数)" : "Partial Eta Squared (η_p²) 或 Generalized Eta Squared (η_G²)",
+        assumptionsToCheck: ["1. 球形度假设 (Mauchly's test)", "2. 残差各时点正态性", "3. 个体间独立性"],
+        reportingTemplate: useNonParamRM
+          ? "Friedman 检验显示各测量时点/条件差异显著, χ²(df) = ..., p = ..., Kendall's W = ...。"
+          : "重复测量方差分析显示时间主效应显著, F(df_corr1, df_corr2) = ..., p = ..., η_p² = ...。",
+      };
+    } else if (outcome === 'binary') {
+      recommendation = {
+        primaryTest: "Cochran's Q Test (多时点/多条件配对二分类检验) 或 Binary GLMM / GEE",
+        remedialTest: "Pairwise McNemar Tests with Holm-Bonferroni Adjustment",
+        effectSizeMetric: "Chance-corrected effect size (η_Q²) 或 Population-averaged OR",
+        assumptionsToCheck: ["1. 受试对象间相互独立", "2. 结局为二分类变量"],
+        reportingTemplate: "Cochran's Q 检验显示重复测量条件下阳性率差异显著, Q(df) = ..., p = ...。",
+      };
+    } else if (outcome === 'ordinal') {
+      recommendation = {
+        primaryTest: "Friedman Test (重复测量非参数检验)",
+        remedialTest: "Cumulative Link Mixed Model (CLMM, 有序混合效应模型)",
+        effectSizeMetric: "Kendall's W",
+        assumptionsToCheck: ["1. 受试对象独立", "2. 有序等级尺度"],
+        reportingTemplate: "Friedman 检验显示重复测量间等级分布差异显著, χ²(df) = ..., p = ..., W = ...。",
+      };
+    } else if (outcome === 'count') {
+      recommendation = {
+        primaryTest: "Poisson / Negative Binomial GLMM or GEE (纵向计数混合效应模型/广义估计方程)",
+        remedialTest: "Friedman Test on Count Ranks",
+        effectSizeMetric: "Incidence Rate Ratio (IRR)",
+        assumptionsToCheck: ["1. 个体内自相关结构设定 (AR1 / Exchangeable)", "2. 过离散检验"],
+        reportingTemplate: "纵向负二项 GEE 模型显示时间/条件主效应显著, Wald χ²(df) = ..., p = ..., IRR = ...。",
+      };
+    } else {
+      recommendation = {
+        primaryTest: "Andersen-Gill / Prentice-Williams-Peterson (PWP) Recurrent Event Cox Model (复发事件生存模型)",
+        remedialTest: "Shared Frailty Survival Model (共享脆弱性生存模型)",
+        effectSizeMetric: "Recurrent Event Hazard Ratio (HR)",
+        assumptionsToCheck: ["1. 个体内事件相关性校正", "2. 比例风险与独立删失假定"],
+        reportingTemplate: "复发事件 Cox 模型显示条件效应显著, HR = ..., 95% CI [... , ...], p = ...。",
+      };
+    }
   } else if (design === 'correlation') {
+    var useNonParamCorr = (normal === false || outcome !== 'continuous');
     recommendation = {
-      primaryTest: "Pearson Correlation Coefficient (皮尔逊积差相关)",
-      remedialTest: "Spearman Rank Correlation (斯皮尔曼秩相关) 或 Kendall's Tau-b",
-      effectSizeMetric: "r (相关系数本身即为标准化效应量，r² 为决定系数)",
-      assumptionsToCheck: ["1. 双变量正态性", "2. 线性关联 (散点图排查非线性关系)", "3. 无极端异常值"],
-      reportingTemplate: "两个变量之间存在显著正相关关系, r(df) = ..., p = ..., 95% CI [... , ...]。",
+      primaryTest: useNonParamCorr
+        ? "Spearman Rank Correlation (斯皮尔曼秩相关，因非正态或非连续尺度已切换为主检验)"
+        : "Pearson Correlation Coefficient (皮尔逊积差相关)",
+      remedialTest: useNonParamCorr
+        ? "Kendall's Tau-b (肯德尔等级相关，针对结值较多或小样本场景)"
+        : "Spearman Rank Correlation (斯皮尔曼秩相关) 或 Kendall's Tau-b",
+      effectSizeMetric: useNonParamCorr ? "ρ (Spearman's rho) 或 τ_b (Kendall's tau-b)" : "r (相关系数本身即为标准化效应量，r² 为决定系数)",
+      assumptionsToCheck: ["1. 双变量正态性 (Pearson 要求)", "2. 单调或线性关联 (散点图排查)", "3. 无极端异常值"],
+      reportingTemplate: useNonParamCorr
+        ? "斯皮尔曼秩相关分析显示两变量存在显著单调关联, r_s(df) = ..., p = ..., 95% CI [... , ...]。"
+        : "皮尔逊相关分析显示两个变量之间存在显著线性关联, r(df) = ..., p = ..., 95% CI [... , ...]。",
     };
   } else if (design === 'regression') {
     if (outcome === 'binary') {
@@ -1161,30 +1532,51 @@ async function statisticalAnalysisAdvisorTool(args) {
         assumptionsToCheck: ["1. 无多重共线性 (VIF < 2.5)", "2. 连续自变量与对数发生比线性相关 (Box-Tidwell 检验)", "3. 无极端影响点"],
         reportingTemplate: "Logistic 回归模型整体显著, χ²(df) = ..., p = ..., Nagelkerke R² = ...。自变量显著预测结局发生, OR = ..., 95% CI [... , ...], p = ...。",
       };
-    } else {
+    } else if (outcome === 'ordinal') {
       recommendation = {
-        primaryTest: "Multiple Linear Regression (多元线性回归，OLS)",
-        remedialTest: "Robust Regression (稳健回归，如 Huber M 估计) 或 Generalized Linear Model (GLM)",
-        effectSizeMetric: "R² 与 Adjusted R² (全模型解释率)，标准化回归系数 β",
-        assumptionsToCheck: ["1. 线性度与无多重共线性 (VIF < 5)", "2. 残差独立性 (Durbin-Watson)", "3. 残差齐方差性与正态性"],
-        reportingTemplate: "多元回归模型整体显著, F(df1, df2) = ..., p = ..., R² = ..., Adj. R² = ...。自变量显著正向预测因变量, β = ..., t = ..., p = ...。",
+        primaryTest: "Proportional Odds Ordinal Logistic Regression (比例优势有序 Logistic 回归)",
+        remedialTest: "Generalized Ordinal Logit / Multinomial Logistic Regression (若比例优势假定违反)",
+        effectSizeMetric: "Proportional Odds Ratio (OR) 与 95% CI，McFadden Pseudo-R²",
+        assumptionsToCheck: ["1. 比例优势假定 (Brant test / 平行线检验)", "2. 无多重共线性 (VIF < 2.5)"],
+        reportingTemplate: "有序 Logistic 回归显示自变量显著预测结局等级提升, OR = ..., 95% CI [... , ...], p = ...。",
+      };
+    } else if (outcome === 'count') {
+      recommendation = {
+        primaryTest: "Poisson Regression / Negative Binomial Regression (泊松或负二项回归)",
+        remedialTest: "Zero-Inflated Negative Binomial (ZINB) 或 Hurdle Model (若存在零膨胀)",
+        effectSizeMetric: "Incidence Rate Ratio (IRR, 发生率比) 与 95% CI",
+        assumptionsToCheck: ["1. 过离散检验 (Cameron-Trivedi test)", "2. 零膨胀检验", "3. 对数线性暴露时间偏移项 (Offset) 设定"],
+        reportingTemplate: "负二项/泊松回归表明自变量显著预测事件计数, IRR = ..., 95% CI [... , ...], p = ...。",
+      };
+    } else if (outcome === 'time_to_event') {
+      recommendation = {
+        primaryTest: "Multivariable Cox Proportional Hazards Regression (多因素 Cox 比例风险回归)",
+        remedialTest: "Accelerated Failure Time (AFT) Model 或 Time-Varying Covariate Cox Model (若 Schoenfeld 残差违反比例风险)",
+        effectSizeMetric: "Hazard Ratio (HR, 风险比) 与 95% CI，Harrell's C-index",
+        assumptionsToCheck: ["1. 比例风险假定 (Schoenfeld 残差检验)", "2. 删失独立性", "3. 连续协变量线性度 (Martingale 残差)"],
+        reportingTemplate: "多因素 Cox 回归显示自变量为独立预后因素, HR = ..., 95% CI [... , ...], p = ..., C-index = ...。",
+      };
+    } else {
+      // continuous
+      var useRobustOLS = (normal === false || varHomog === false);
+      recommendation = {
+        primaryTest: useRobustOLS
+          ? "Multiple Linear Regression with HC3 Robust Standard Errors / Quantile Regression (因正态性或齐方差不满足已启用稳健/分位数回归)"
+          : "Multiple Linear Regression (多元线性回归，OLS)",
+        remedialTest: "Robust Regression (Huber M / MM 估计) 或 Generalized Additive Model (GAM)",
+        effectSizeMetric: "R² 与 Adjusted R² (全模型解释率)，标准化回归系数 β 与偏 η²",
+        assumptionsToCheck: ["1. 线性度与无多重共线性 (VIF < 5)", "2. 残差独立性 (Durbin-Watson)", "3. 残差齐方差性 (Breusch-Pagan) 与正态性"],
+        reportingTemplate: "多元回归模型整体显著, F(df1, df2) = ..., p = ..., R² = ..., Adj. R² = ...。自变量显著预测因变量, β = ..., t = ..., p = ..., 95% CI [... , ...]。",
       };
     }
-  } else if (design === 'categorical_proportions') {
+  } else {
+    // categorical_proportions (binary or ordinal validated above)
     recommendation = {
-      primaryTest: (n && n < 30) ? "Fisher's Exact Test" : "Pearson's Chi-Square Test (卡方独立性检验)",
+      primaryTest: (n && n < 30) ? "Fisher's Exact Test (精确概率检验)" : (outcome === 'ordinal' ? "Cochran-Armitage Trend Test / Linear-by-Linear Association Test" : "Pearson's Chi-Square Test (卡方独立性检验)"),
       remedialTest: "Fisher's Exact Test (若任一期望频数 < 5)",
       effectSizeMetric: "Cramer's V / Phi 系数 或 Odds Ratio",
       assumptionsToCheck: ["1. 独立观测", "2. 期望频数 >= 5 准则"],
-      reportingTemplate: "列联表卡方检验显示组别间比例分布差异显著, χ²(df) = ..., p = ..., Cramer's V = ...。",
-    };
-  } else {
-    recommendation = {
-      primaryTest: "General Linear Model (GLM) / 线性混合效应模型 (LMM)",
-      remedialTest: "Generalized Estimating Equations (GEE) 或非参数置换检验",
-      effectSizeMetric: "Marginal R² / Conditional R² 或标准化系数",
-      assumptionsToCheck: ["明确层次结构与聚类效应", "固定效应与随机效应设定"],
-      reportingTemplate: "报告模型统计量、系数及置信区间。",
+      reportingTemplate: "列联表检验显示组别间比例分布差异显著, χ²(df) = ..., p = ..., Cramer's V = ...。",
     };
   }
 
@@ -1213,6 +1605,8 @@ async function statisticalAnalysisAdvisorTool(args) {
       researchQuestion: rq,
       designEvaluated: design,
       outcomeTypeEvaluated: outcome,
+      normalityEvaluated: normal,
+      varianceHomogeneityEvaluated: varHomog,
       primaryModel: recommendation.primaryTest,
       remedialModel: recommendation.remedialTest,
       effectSizeMetric: recommendation.effectSizeMetric,
@@ -1223,6 +1617,119 @@ async function statisticalAnalysisAdvisorTool(args) {
       replicationIntegrityNotice: "【学术诚信红线】请确保样本量 n 代表完全独立的生物/实验单元，杜绝将技术重复、重复测量或同一细胞系的分裂视作独立样本 (Pseudoreplication 伪重复)！",
     },
   };
+}
+
+// Helper: Compute Compact Letter Display (CLD) from pairwise comparisons using Piepho's sweep-and-absorb algorithm
+function computeCldLetters(sortedGroups, overallP, pairwise) {
+  var k = sortedGroups.length;
+  var letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+  if (k === 0) return [];
+  if (k === 1) return ['a'];
+  if (k === 2) {
+    var sig2 = overallP < 0.05;
+    if (pairwise && pairwise.length > 0) {
+      var p0 = typeof pairwise[0].p_adj === 'number' ? pairwise[0].p_adj :
+               (typeof pairwise[0].p_value === 'number' ? pairwise[0].p_value : pairwise[0].p);
+      if (typeof p0 === 'number') sig2 = p0 < 0.05;
+    }
+    return sig2 ? ['a', 'b'] : ['a', 'a'];
+  }
+
+  // For k > 2, require pairwise comparisons; build symmetric significance matrix (true = significantly different)
+  var sigMatrix = [];
+  for (var i = 0; i < k; i++) {
+    sigMatrix[i] = [];
+    for (var j = 0; j < k; j++) {
+      sigMatrix[i][j] = false;
+    }
+  }
+
+  for (var pIdx = 0; pIdx < pairwise.length; pIdx++) {
+    var pw = pairwise[pIdx] || {};
+    var g1 = String(pw.group1 || pw.group_a || pw.from || '').trim();
+    var g2 = String(pw.group2 || pw.group_b || pw.to || '').trim();
+    var pVal = typeof pw.p_adj === 'number' ? pw.p_adj :
+               (typeof pw.p_value === 'number' ? pw.p_value :
+               (typeof pw.p === 'number' ? pw.p : null));
+    if (!g1 || !g2 || pVal === null) continue;
+    var idx1 = -1;
+    var idx2 = -1;
+    for (var m = 0; m < k; m++) {
+      if (sortedGroups[m].name === g1) idx1 = m;
+      if (sortedGroups[m].name === g2) idx2 = m;
+    }
+    if (idx1 >= 0 && idx2 >= 0 && idx1 !== idx2 && pVal < 0.05) {
+      sigMatrix[idx1][idx2] = true;
+      sigMatrix[idx2][idx1] = true;
+    }
+  }
+
+  // Piepho's insert-and-absorb algorithm
+  var columns = [];
+  var fullCol = [];
+  for (var initIdx = 0; initIdx < k; initIdx++) fullCol.push(true);
+  columns.push(fullCol);
+
+  for (var r = 0; r < k; r++) {
+    for (var c = r + 1; c < k; c++) {
+      if (sigMatrix[r][c]) {
+        var nextCols = [];
+        for (var colIdx = 0; colIdx < columns.length; colIdx++) {
+          var col = columns[colIdx];
+          if (col[r] && col[c]) {
+            var copy1 = col.slice();
+            copy1[r] = false;
+            var copy2 = col.slice();
+            copy2[c] = false;
+            nextCols.push(copy1);
+            nextCols.push(copy2);
+          } else {
+            nextCols.push(col);
+          }
+        }
+        // Absorb redundant columns
+        var absorbed = [];
+        for (var a = 0; a < nextCols.length; a++) {
+          var isSubset = false;
+          for (var b = 0; b < nextCols.length; b++) {
+            if (a === b) continue;
+            var subset = true;
+            var equal = true;
+            for (var x = 0; x < k; x++) {
+              if (nextCols[a][x] && !nextCols[b][x]) subset = false;
+              if (nextCols[a][x] !== nextCols[b][x]) equal = false;
+            }
+            if (subset && (!equal || a > b)) {
+              isSubset = true;
+              break;
+            }
+          }
+          if (!isSubset) absorbed.push(nextCols[a]);
+        }
+        columns = absorbed;
+      }
+    }
+  }
+
+  // Sort columns by earliest true index so highest mean gets 'a', next gets 'b', etc.
+  columns.sort(function (colA, colB) {
+    for (var idx = 0; idx < k; idx++) {
+      if (colA[idx] !== colB[idx]) return colA[idx] ? -1 : 1;
+    }
+    return 0;
+  });
+
+  var assigned = [];
+  for (var gIdx = 0; gIdx < k; gIdx++) {
+    var s = '';
+    for (var lIdx = 0; lIdx < columns.length; lIdx++) {
+      if (columns[lIdx][gIdx]) {
+        s += letters[Math.min(letters.length - 1, lIdx)];
+      }
+    }
+    assigned.push(s || letters[Math.min(letters.length - 1, gIdx)]);
+  }
+  return assigned;
 }
 
 // 15. academic_data_summary
@@ -1246,8 +1753,17 @@ async function academicDataSummaryTool(args) {
   var pairwise = Array.isArray(args && args.pairwise_comparisons) ? args.pairwise_comparisons : [];
   var label = (args && args.comparison_label && String(args.comparison_label).trim()) || 'Target outcome';
   var explicitCldArg = args && typeof args.perform_cld_ranking === 'boolean' ? args.perform_cld_ranking : null;
-  var doCld = explicitCldArg !== false && (explicitCldArg === true || descriptives.length === 2 || pairwise.length > 0);
   var multMethod = (args && args.multiple_comparison_method) || 'none';
+
+  if (descriptives.length > 2 && explicitCldArg === true && pairwise.length === 0) {
+    return fail('当组别数量大于 2 且要求生成显著性字母标记 (perform_cld_ranking=true) 时，必须提供事后两两比较结果 (pairwise_comparisons)，严禁仅凭总 p 值推导多组字母分组。');
+  }
+
+  // Only perform CLD when 2 groups or when pairwise post-hoc data is explicitly provided for >2 groups
+  var doCld = explicitCldArg !== false && (
+    (descriptives.length === 2) ||
+    (descriptives.length > 2 && pairwise.length > 0)
+  );
 
   // Format p-value in APA style
   var pFormatted = '';
@@ -1292,32 +1808,17 @@ async function academicDataSummaryTool(args) {
   });
 
   var cldList = [];
-  if (sortedDescriptives.length > 0) {
-    // Assign CLD letters only if requested or supported by post-hoc pairwise data
-    var letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  if (sortedDescriptives.length > 0 && doCld) {
+    var computedLetters = computeCldLetters(sortedDescriptives, p, pairwise);
     for (var dIdx = 0; dIdx < sortedDescriptives.length; dIdx++) {
       var item = sortedDescriptives[dIdx];
-      var letterAssigned = 'a';
-      if (doCld && sortedDescriptives.length > 1) {
-        if (p < 0.05) {
-          if (dIdx === 0) {
-            letterAssigned = 'a';
-          } else if (dIdx === sortedDescriptives.length - 1) {
-            letterAssigned = letters[Math.min(letters.length - 1, dIdx)];
-          } else {
-            letterAssigned = letters[Math.min(letters.length - 1, dIdx - 1)] + letters[Math.min(letters.length - 1, dIdx)];
-          }
-        } else {
-          letterAssigned = 'a';
-        }
-      }
       cldList.push({
         rank: dIdx + 1,
         name: item.name,
         mean: item.mean,
         sd: item.sd,
         n: item.n,
-        cld_letter: letterAssigned,
+        cld_letter: computedLetters[dIdx],
       });
     }
   }
@@ -1325,7 +1826,7 @@ async function academicDataSummaryTool(args) {
   // Generate three-line table (三线表) with exact Student's t critical value for CI
   var tableMd = '';
   if (sortedDescriptives.length > 0) {
-    if (doCld && sortedDescriptives.length > 1) {
+    if (doCld && cldList.length > 1) {
       tableMd += '| Rank | Group / Condition | N | Mean ± SD | 95% CI (Student\'s t) | Sig. Letter (CLD) |\n';
       tableMd += '| :---: | :--- | :---: | :---: | :---: | :---: |\n';
       for (var i = 0; i < cldList.length; i++) {
@@ -1337,7 +1838,10 @@ async function academicDataSummaryTool(args) {
         var high = (g.mean + margin).toFixed(2);
         tableMd += '| ' + g.rank + ' | ' + g.name + ' | ' + g.n + ' | ' + g.mean.toFixed(2) + ' ± ' + g.sd.toFixed(2) + ' | [' + low + ', ' + high + '] | **' + g.cld_letter + '** |\n';
       }
-      tableMd += '\n*Note: Groups are ranked in descending order of sample means (highest = a). Means followed by different lowercase letters differ significantly at p < 0.05 under ' + (multMethod === 'none' ? 'post-hoc' : multMethod) + ' adjustment (Compact Letter Display).*';
+      var adjustmentDesc = (multMethod && multMethod !== 'none')
+        ? ('under ' + multMethod + ' multiple-comparison adjustment')
+        : 'based on unadjusted pairwise comparisons';
+      tableMd += '\n*Note: Groups are ranked in descending order of sample means (highest = a). Means followed by different lowercase letters differ significantly at p < 0.05 ' + adjustmentDesc + ' (Compact Letter Display).*';
     } else {
       tableMd += '| Group / Condition | N | Mean | SD | 95% CI (Student\'s t) |\n';
       tableMd += '| :--- | :---: | :---: | :---: | :---: |\n';
@@ -1371,7 +1875,7 @@ async function academicDataSummaryTool(args) {
         effectSizePresent: effVal !== null,
         confidenceIntervalPresent: ci !== null,
         degreesOfFreedomDeclared: true,
-        cldDescendingOrderVerified: true,
+        cldDescendingOrderVerified: doCld && cldList.length > 0,
         pseudoreplicationAudit: 'Verified: Ensure N reflects independent experimental units.',
       },
     },
@@ -1392,6 +1896,11 @@ async function scientificFigureDesignerTool(args) {
   var supportedArchetypes = ['multi_panel_composite', 'violin_box_jitter', 'dose_time_response', 'correlation_heatmap', 'volcano_differential_plot'];
   if (supportedArchetypes.indexOf(archetype) < 0) {
     return fail('不支持的图表原型: ' + archetype + '。支持的原型包括: ' + supportedArchetypes.join(', '));
+  }
+
+  var supportedBackends = ['python_matplotlib', 'r_ggplot2', 'planning_only', 'spec_only'];
+  if (supportedBackends.indexOf(backend) < 0) {
+    return fail('不支持的绘图后端模式: ' + backend + '。支持的后端包括: python_matplotlib, r_ggplot2, planning_only');
   }
 
   var colWidth = args.column_width || 'double_column_180mm';
@@ -1427,97 +1936,71 @@ async function scientificFigureDesignerTool(args) {
   var errorBarType = (args && args.error_bar_type) || 'ci95';
   var errorBandExpr = '1.96 * ctrl_traj.std(axis=0) / np.sqrt(10)';
   var treatBandExpr = '1.96 * treat_traj.std(axis=0) / np.sqrt(10)';
+  var rRibbonMult = '1.96';
   var errorCaptionDesc = 'Data are presented as mean with shaded 95% confidence intervals (CI).';
   if (errorBarType === 'sem') {
     errorBandExpr = 'ctrl_traj.std(axis=0) / np.sqrt(10)';
     treatBandExpr = 'treat_traj.std(axis=0) / np.sqrt(10)';
+    rRibbonMult = '1.0';
     errorCaptionDesc = 'Data are presented as mean ± s.e.m.';
   } else if (errorBarType === 'sd') {
     errorBandExpr = 'ctrl_traj.std(axis=0)';
     treatBandExpr = 'treat_traj.std(axis=0)';
+    rRibbonMult = 'sqrt(10)';
     errorCaptionDesc = 'Data are presented as mean ± s.d.';
   }
 
-  var panelRoles = [
-    { panel: 'a', role: 'Context / Conceptual Schematic', description: '实验设计流程、分子机制图或模型流水线架构总览', chartType: 'Schematic flow / Concept diagram' },
-    { panel: 'b', role: 'Hero Evidence (Primary Comparison)', description: '核心处理组与对照组定量指标对比（小提琴图 + 箱线图 + 抖动散点呈现个体数据点）', chartType: 'Violin / Box + Jittered points' },
-    { panel: 'c', role: 'Dynamic Kinetics / Dose Response', description: '不同时间点或浓度梯度下的连续动态响应曲线（带误差带或 95% CI）', chartType: 'Line plot with error bands (SEM / 95% CI)' },
-    { panel: 'd', role: 'Mechanism Corroboration / Correlation', description: '生物标志物/关键指标与表型之间的相关性散点图或差异火山图', chartType: 'Scatter with regression trend / Volcano plot' },
-  ];
+  var panelRoles = [];
+  var captionDraft = '';
 
-  var captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
-    'a, Schematic overview of experimental design. ' +
-    'b, Comparison of target phenotype between conditions (center line, median; box limits, upper and lower quartiles; error bars, 1.5× IQR; dots represent individual biological replicates, n = ...). ' +
-    'c, Time-dependent dynamic trajectory. ' + errorCaptionDesc + ' ' +
-    'd, Correlation analysis between key biomarkers. Two-tailed Pearson r = ..., *P < 0.05, **P < 0.01, ***P < 0.001 (unpaired two-tailed Student\'s t-test or Welch\'s correction).';
+  if (archetype === 'multi_panel_composite') {
+    panelRoles = [
+      { panel: 'a', role: 'Context / Baseline Distribution', description: '核心处理组与对照组基线与效应分布对比', chartType: 'Boxplot + Jittered biological replicates' },
+      { panel: 'b', role: 'Dynamic Kinetics / Dose-Time Trajectory', description: '不同时间点或剂量梯度下的连续动态响应曲线（带误差带）', chartType: 'Line plot with error bands (' + errorBarType.toUpperCase() + ')' },
+      { panel: 'c', role: 'Feature Correlation Matrix', description: '关键表型指标与多维特征的相关性矩阵热图', chartType: 'Lower-triangle correlation heatmap' },
+      { panel: 'd', role: 'Differential Volcano Overview', description: '全量特征效应量 (log2FC) 与统计显著性 (-log10 P) 火山图', chartType: 'Volcano differential scatter plot' },
+    ];
+    captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
+      'a, Comparison of target phenotype between conditions (center line, median; box limits, upper and lower quartiles; whiskers, 1.5× IQR; dots represent individual biological replicates, n = 30 per group). ' +
+      'b, Time-dependent dynamic response trajectory. ' + errorCaptionDesc + ' ' +
+      'c, Pairwise Pearson correlation matrix across key features. ' +
+      'd, Volcano plot of differential effect size (log2 fold change) versus statistical significance (-log10 P). Two-tailed tests; *P < 0.05, **P < 0.01, ***P < 0.001.';
+  } else if (archetype === 'dose_time_response') {
+    panelRoles = [
+      { panel: 'a', role: 'Dynamic Kinetics / Dose-Time Response', description: '连续时间点或剂量梯度下的组间动态轨迹与误差带对比', chartType: 'Line plot with shaded error bands (' + errorBarType.toUpperCase() + ')' },
+    ];
+    captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
+      'a, Dose/time-dependent response trajectory comparing ' + safeGroupCtrl + ' and ' + safeGroupTreat + ' (n = 10 independent biological replicates per time point). ' + errorCaptionDesc + ' Two-tailed repeated-measures comparison.';
+  } else if (archetype === 'correlation_heatmap') {
+    panelRoles = [
+      { panel: 'a', role: 'Multivariate Correlation Matrix', description: '多维核心变量间的成对相关系数矩阵', chartType: 'Annotated correlation heatmap' },
+    ];
+    captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
+      'a, Pairwise Pearson correlation heatmap across measured variables (n = 50 independent observations). Color scale encodes correlation coefficient r from -1.0 to +1.0.';
+  } else if (archetype === 'volcano_differential_plot') {
+    panelRoles = [
+      { panel: 'a', role: 'Differential Magnitude vs. Significance', description: '效应量 (log2FC) 与多重校正显著性 (-log10 P) 火山分布图', chartType: 'Volcano scatter plot with threshold guides' },
+    ];
+    captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
+      'a, Volcano plot displaying log2(fold change) against -log10(P value). Dashed lines indicate significance threshold (P = 0.05, -log10 P = 1.30) and magnitude cutoff (|log2FC| = 1.0).';
+  } else {
+    // violin_box_jitter
+    panelRoles = [
+      { panel: 'a', role: 'Primary Group Comparison (Distribution + Individual Replicates)', description: '组间中位数、四分位距与个体生物重复散点叠加图', chartType: 'Violin / Boxplot + Jittered individual points' },
+    ];
+    captionDraft = 'Fig. 1 | ' + safeClaim + '. ' +
+      'a, Comparison of ' + safeYLabel + ' across ' + safeXLabel + ' (center line, median; box limits, 25th and 75th percentiles; whiskers, 1.5× IQR; points represent individual biological replicates, n = 30 per group). Two-tailed Student\'s or Welch\'s t-test.';
+  }
 
   var codeSnippet = null;
   var figW = widthInches.toFixed(2);
-  var figH = isDouble ? '3.5' : (colWidth === 'intermediate_120mm' ? '3.0' : '2.8');
+  var figH = archetype === 'multi_panel_composite'
+    ? (isDouble ? '5.6' : '4.8')
+    : (isDouble ? '3.5' : (colWidth === 'intermediate_120mm' ? '3.0' : '2.8'));
+  var heightMm = archetype === 'multi_panel_composite' ? (isDouble ? 140 : 120) : 75;
 
   if (backend === 'python_matplotlib') {
-    var plotSpecificCode = '';
-    if (archetype === 'dose_time_response') {
-      plotSpecificCode = [
-        '# Plotting: Line plot with error bands (' + errorBarType.toUpperCase() + ')',
-        'time_pts = np.linspace(0, 24, 7)',
-        'np.random.seed(42)',
-        'ctrl_traj = np.sin(time_pts / 5) * 10 + 60 + np.random.normal(0, 2, (10, 7))',
-        'treat_traj = np.sin(time_pts / 5) * 25 + 60 + np.random.normal(0, 2.5, (10, 7))',
-        'ax.plot(time_pts, ctrl_traj.mean(axis=0), color=OKABE_ITO[0], marker="o", label="' + safeGroupCtrl + '")',
-        'ax.fill_between(time_pts, ctrl_traj.mean(axis=0) - ' + errorBandExpr + ',',
-        '                ctrl_traj.mean(axis=0) + ' + errorBandExpr + ', color=OKABE_ITO[0], alpha=0.2)',
-        'ax.plot(time_pts, treat_traj.mean(axis=0), color=OKABE_ITO[1], marker="s", label="' + safeGroupTreat + '")',
-        'ax.fill_between(time_pts, treat_traj.mean(axis=0) - ' + treatBandExpr + ',',
-        '                treat_traj.mean(axis=0) + ' + treatBandExpr + ', color=OKABE_ITO[1], alpha=0.2)',
-        'ax.legend(frameon=False)',
-      ].join('\n');
-    } else if (archetype === 'correlation_heatmap') {
-      plotSpecificCode = [
-        '# Plotting: Correlation heatmap with lower-triangle mask',
-        'np.random.seed(42)',
-        'data = np.random.randn(50, 4)',
-        'corr = pd.DataFrame(data, columns=["Feature A", "Feature B", "Feature C", "Outcome"]).corr()',
-        'mask = np.triu(np.ones_like(corr, dtype=bool))',
-        'sns.heatmap(corr, mask=mask, cmap="coolwarm", vmin=-1, vmax=1, annot=True, fmt=".2f",',
-        '            cbar_kws={"label": "Pearson r"}, square=True, ax=ax)',
-      ].join('\n');
-    } else if (archetype === 'volcano_differential_plot') {
-      plotSpecificCode = [
-        '# Plotting: Volcano differential scatter plot',
-        'np.random.seed(42)',
-        'log2fc = np.random.normal(0, 1.5, 500)',
-        'pvals = np.random.beta(0.5, 5, 500)',
-        'neg_log_p = -np.log10(np.clip(pvals, 1e-10, 1))',
-        'colors = [OKABE_ITO[3] if (fc > 1 and p > 1.3) else (OKABE_ITO[0] if (fc < -1 and p > 1.3) else "#999999") for fc, p in zip(log2fc, neg_log_p)]',
-        'ax.scatter(log2fc, neg_log_p, c=colors, s=10, alpha=0.7, edgecolors="none")',
-        'ax.axhline(1.30, ls="--", color="black", lw=0.6)',
-        'ax.axvline(1.0, ls="--", color="black", lw=0.6)',
-        'ax.axvline(-1.0, ls="--", color="black", lw=0.6)',
-      ].join('\n');
-    } else {
-      // violin_box_jitter or default
-      plotSpecificCode = [
-        '# Simulated reproducible sample data',
-        'np.random.seed(42)',
-        'ctrl = np.random.normal(loc=65.0, scale=8.0, size=30)',
-        'treat = np.random.normal(loc=78.0, scale=7.5, size=30)',
-        'df = pd.DataFrame({',
-        '    "Group": ["' + safeGroupCtrl + '"] * 30 + ["' + safeGroupTreat + '"] * 30,',
-        '    "Value": np.concatenate([ctrl, treat])',
-        '})',
-        '',
-        '# Plotting: Boxplot + Jittered individual replicates',
-        'palette = {"' + safeGroupCtrl + '": OKABE_ITO[0], "' + safeGroupTreat + '": OKABE_ITO[1]}',
-        'sns.boxplot(data=df, x="Group", y="Value", palette=palette, width=0.45,',
-        '            showcaps=True, boxprops=dict(alpha=0.7), whiskerprops=dict(linewidth=0.8),',
-        '            medianprops=dict(color="black", linewidth=1.2), ax=ax)',
-        'sns.stripplot(data=df, x="Group", y="Value", color="black", alpha=0.6,',
-        '              size=3.5, jitter=0.18, ax=ax)',
-      ].join('\n');
-    }
-
-    codeSnippet = [
+    var headerSetup = [
       '# Publication-ready scientific plot script (Nature/Science grade)',
       '# Generated by Cindy Academic Research Suite (ARS)',
       'import matplotlib.pyplot as plt',
@@ -1530,7 +2013,7 @@ async function scientificFigureDesignerTool(args) {
       '# --------------------------------------------------------------------------',
       '# [避坑铁律 1] 必须先调用 sns.set_theme()，然后再设置 plt.rcParams！',
       '# 若顺序颠倒，Seaborn 会内部重置所有 rcParams 参数，导致字号变回默认值并被大幅缩放！',
-      '# [避坑铁律 2] 画布尺寸必须 1:1 匹配实际单栏(' + widthMm + 'mm=' + figW + 'in)！',
+      '# [避坑铁律 2] 画布尺寸必须 1:1 匹配实际栏宽(' + widthMm + 'mm=' + figW + 'in)！',
       '# [避坑铁律 3] 高分辨率(dpi=300)仅在 savefig 中指定，严禁在 plt.figure() 中强设导致布局变形！',
       '# ==========================================================================',
       'sns.set_theme(style="ticks")',
@@ -1557,58 +2040,302 @@ async function scientificFigureDesignerTool(args) {
       '# 2. Okabe-Ito 色盲友好学术色板 (Colorblind-Friendly Palette)',
       'OKABE_ITO = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"]',
       '',
-      '# 3. Canvas setup with 1:1 constrained physical layout (' + widthMm + ' mm)',
-      'fig, ax = plt.subplots(figsize=(' + figW + ', ' + figH + '), layout="constrained")',
-      '',
-      plotSpecificCode,
-      '',
-      '# Spines and labels formatting',
-      'ax.spines["top"].set_visible(False)',
-      'ax.spines["right"].set_visible(False)',
-      'ax.set_xlabel("' + safeXLabel + '", fontweight="bold")',
-      'ax.set_ylabel("' + safeYLabel + '", fontweight="bold")',
-      'ax.text(-0.15, 1.05, "a", transform=ax.transAxes, fontsize=9, fontweight="bold", va="top")',
+    ];
+
+    var bodyCode = [];
+    if (archetype === 'multi_panel_composite') {
+      bodyCode = [
+        '# 3. Multi-panel 2x2 canvas setup with 1:1 constrained physical layout (' + widthMm + ' mm)',
+        'fig, axes = plt.subplots(2, 2, figsize=(' + figW + ', ' + figH + '), layout="constrained")',
+        'ax_a, ax_b, ax_c, ax_d = axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]',
+        'np.random.seed(42)',
+        '',
+        '# Panel a: Boxplot + Jittered individual replicates',
+        'ctrl = np.random.normal(loc=65.0, scale=8.0, size=30)',
+        'treat = np.random.normal(loc=78.0, scale=7.5, size=30)',
+        'df_a = pd.DataFrame({"Group": ["' + safeGroupCtrl + '"] * 30 + ["' + safeGroupTreat + '"] * 30, "Value": np.concatenate([ctrl, treat])})',
+        'palette = {"' + safeGroupCtrl + '": OKABE_ITO[0], "' + safeGroupTreat + '": OKABE_ITO[1]}',
+        'sns.boxplot(data=df_a, x="Group", y="Value", palette=palette, width=0.45, showcaps=True, boxprops=dict(alpha=0.7), ax=ax_a)',
+        'sns.stripplot(data=df_a, x="Group", y="Value", color="black", alpha=0.6, size=3.0, jitter=0.18, ax=ax_a)',
+        'ax_a.set_xlabel("' + safeXLabel + '", fontweight="bold")',
+        'ax_a.set_ylabel("' + safeYLabel + '", fontweight="bold")',
+        '',
+        '# Panel b: Dose/Time response trajectory with error bands (' + errorBarType.toUpperCase() + ')',
+        'time_pts = np.linspace(0, 24, 7)',
+        'ctrl_traj = np.sin(time_pts / 5) * 10 + 60 + np.random.normal(0, 2, (10, 7))',
+        'treat_traj = np.sin(time_pts / 5) * 25 + 60 + np.random.normal(0, 2.5, (10, 7))',
+        'ax_b.plot(time_pts, ctrl_traj.mean(axis=0), color=OKABE_ITO[0], marker="o", label="' + safeGroupCtrl + '")',
+        'ax_b.fill_between(time_pts, ctrl_traj.mean(axis=0) - ' + errorBandExpr + ', ctrl_traj.mean(axis=0) + ' + errorBandExpr + ', color=OKABE_ITO[0], alpha=0.2)',
+        'ax_b.plot(time_pts, treat_traj.mean(axis=0), color=OKABE_ITO[1], marker="s", label="' + safeGroupTreat + '")',
+        'ax_b.fill_between(time_pts, treat_traj.mean(axis=0) - ' + treatBandExpr + ', treat_traj.mean(axis=0) + ' + treatBandExpr + ', color=OKABE_ITO[1], alpha=0.2)',
+        'ax_b.set_xlabel("Time (h)", fontweight="bold")',
+        'ax_b.set_ylabel("' + safeYLabel + '", fontweight="bold")',
+        'ax_b.legend(frameon=False)',
+        '',
+        '# Panel c: Correlation heatmap',
+        'corr = pd.DataFrame(np.random.randn(50, 4), columns=["F1", "F2", "F3", "Out"]).corr()',
+        'mask = np.triu(np.ones_like(corr, dtype=bool))',
+        'sns.heatmap(corr, mask=mask, cmap="coolwarm", vmin=-1, vmax=1, annot=True, fmt=".2f", cbar=False, square=True, ax=ax_c)',
+        '',
+        '# Panel d: Volcano differential plot',
+        'log2fc = np.random.normal(0, 1.5, 300)',
+        'neg_log_p = -np.log10(np.clip(np.random.beta(0.5, 5, 300), 1e-10, 1))',
+        'v_colors = [OKABE_ITO[1] if (fc > 1 and p > 1.3) else (OKABE_ITO[0] if (fc < -1 and p > 1.3) else "#999999") for fc, p in zip(log2fc, neg_log_p)]',
+        'ax_d.scatter(log2fc, neg_log_p, c=v_colors, s=8, alpha=0.7, edgecolors="none")',
+        'ax_d.axhline(1.30, ls="--", color="black", lw=0.5)',
+        'ax_d.set_xlabel("log2(Fold Change)", fontweight="bold")',
+        'ax_d.set_ylabel("-log10(P value)", fontweight="bold")',
+        '',
+        '# Format spines and panel tags (a, b, c, d)',
+        'for tag, panel_ax in zip(["a", "b", "c", "d"], [ax_a, ax_b, ax_c, ax_d]):',
+        '    panel_ax.spines["top"].set_visible(False)',
+        '    panel_ax.spines["right"].set_visible(False)',
+        '    panel_ax.text(-0.15, 1.08, tag, transform=panel_ax.transAxes, fontsize=9, fontweight="bold", va="top")',
+      ];
+    } else {
+      var singlePlotLines = [];
+      if (archetype === 'dose_time_response') {
+        singlePlotLines = [
+          '# Plotting: Line plot with error bands (' + errorBarType.toUpperCase() + ')',
+          'time_pts = np.linspace(0, 24, 7)',
+          'np.random.seed(42)',
+          'ctrl_traj = np.sin(time_pts / 5) * 10 + 60 + np.random.normal(0, 2, (10, 7))',
+          'treat_traj = np.sin(time_pts / 5) * 25 + 60 + np.random.normal(0, 2.5, (10, 7))',
+          'ax.plot(time_pts, ctrl_traj.mean(axis=0), color=OKABE_ITO[0], marker="o", label="' + safeGroupCtrl + '")',
+          'ax.fill_between(time_pts, ctrl_traj.mean(axis=0) - ' + errorBandExpr + ',',
+          '                ctrl_traj.mean(axis=0) + ' + errorBandExpr + ', color=OKABE_ITO[0], alpha=0.2)',
+          'ax.plot(time_pts, treat_traj.mean(axis=0), color=OKABE_ITO[1], marker="s", label="' + safeGroupTreat + '")',
+          'ax.fill_between(time_pts, treat_traj.mean(axis=0) - ' + treatBandExpr + ',',
+          '                treat_traj.mean(axis=0) + ' + treatBandExpr + ', color=OKABE_ITO[1], alpha=0.2)',
+          'ax.legend(frameon=False)',
+        ];
+      } else if (archetype === 'correlation_heatmap') {
+        singlePlotLines = [
+          '# Plotting: Correlation heatmap with lower-triangle mask',
+          'np.random.seed(42)',
+          'data = np.random.randn(50, 4)',
+          'corr = pd.DataFrame(data, columns=["Feature A", "Feature B", "Feature C", "Outcome"]).corr()',
+          'mask = np.triu(np.ones_like(corr, dtype=bool))',
+          'sns.heatmap(corr, mask=mask, cmap="coolwarm", vmin=-1, vmax=1, annot=True, fmt=".2f",',
+          '            cbar_kws={"label": "Pearson r"}, square=True, ax=ax)',
+        ];
+      } else if (archetype === 'volcano_differential_plot') {
+        singlePlotLines = [
+          '# Plotting: Volcano differential scatter plot',
+          'np.random.seed(42)',
+          'log2fc = np.random.normal(0, 1.5, 500)',
+          'pvals = np.random.beta(0.5, 5, 500)',
+          'neg_log_p = -np.log10(np.clip(pvals, 1e-10, 1))',
+          'colors = [OKABE_ITO[3] if (fc > 1 and p > 1.3) else (OKABE_ITO[0] if (fc < -1 and p > 1.3) else "#999999") for fc, p in zip(log2fc, neg_log_p)]',
+          'ax.scatter(log2fc, neg_log_p, c=colors, s=10, alpha=0.7, edgecolors="none")',
+          'ax.axhline(1.30, ls="--", color="black", lw=0.6)',
+          'ax.axvline(1.0, ls="--", color="black", lw=0.6)',
+          'ax.axvline(-1.0, ls="--", color="black", lw=0.6)',
+        ];
+      } else {
+        singlePlotLines = [
+          '# Simulated reproducible sample data',
+          'np.random.seed(42)',
+          'ctrl = np.random.normal(loc=65.0, scale=8.0, size=30)',
+          'treat = np.random.normal(loc=78.0, scale=7.5, size=30)',
+          'df = pd.DataFrame({',
+          '    "Group": ["' + safeGroupCtrl + '"] * 30 + ["' + safeGroupTreat + '"] * 30,',
+          '    "Value": np.concatenate([ctrl, treat])',
+          '})',
+          '',
+          '# Plotting: Violin + Boxplot + Jittered individual replicates',
+          'palette = {"' + safeGroupCtrl + '": OKABE_ITO[0], "' + safeGroupTreat + '": OKABE_ITO[1]}',
+          'sns.violinplot(data=df, x="Group", y="Value", palette=palette, inner=None, alpha=0.25, cut=0, ax=ax)',
+          'sns.boxplot(data=df, x="Group", y="Value", palette=palette, width=0.35,',
+          '            showcaps=True, boxprops=dict(alpha=0.7), whiskerprops=dict(linewidth=0.8),',
+          '            medianprops=dict(color="black", linewidth=1.2), ax=ax)',
+          'sns.stripplot(data=df, x="Group", y="Value", color="black", alpha=0.6,',
+          '              size=3.5, jitter=0.18, ax=ax)',
+        ];
+      }
+
+      bodyCode = [
+        '# 3. Canvas setup with 1:1 constrained physical layout (' + widthMm + ' mm)',
+        'fig, ax = plt.subplots(figsize=(' + figW + ', ' + figH + '), layout="constrained")',
+        '',
+        singlePlotLines.join('\n'),
+        '',
+        '# Spines and labels formatting',
+        'ax.spines["top"].set_visible(False)',
+        'ax.spines["right"].set_visible(False)',
+        'ax.set_xlabel("' + safeXLabel + '", fontweight="bold")',
+        'ax.set_ylabel("' + safeYLabel + '", fontweight="bold")',
+        'ax.text(-0.15, 1.05, "a", transform=ax.transAxes, fontsize=9, fontweight="bold", va="top")',
+      ];
+    }
+
+    var exportLines = [
       '',
       '# High-resolution export (Vector PDF & 300+ DPI PNG)',
       'plt.savefig("figure_output.pdf", format="pdf", bbox_inches="tight")',
       'plt.savefig("figure_output.png", dpi=300, bbox_inches="tight")',
       'print("Figure exported successfully: figure_output.pdf and figure_output.png")',
-    ].join('\n');
+    ];
+
+    codeSnippet = headerSetup.concat(bodyCode).concat(exportLines).join('\n');
   } else if (backend === 'r_ggplot2') {
-    codeSnippet = [
-      '# Publication-ready scientific plot script (R ggplot2)',
+    var rHeader = [
+      '# Publication-ready scientific plot script (R ggplot2 - ' + archetype + ')',
       '# Generated by Cindy Academic Research Suite (ARS)',
       'library(ggplot2)',
       'library(patchwork)',
       '',
       '# Okabe-Ito Colorblind-Friendly Palette',
       'okabe_ito <- c("#0072B2", "#D55E00", "#009E73", "#E69F00", "#56B4E9")',
-      '',
-      '# Simulated reproducible sample data',
       'set.seed(42)',
-      'df <- data.frame(',
-      '  Group = factor(rep(c("' + safeGroupCtrl + '", "' + safeGroupTreat + '"), each = 30)),',
-      '  Value = c(rnorm(30, mean = 65, sd = 8), rnorm(30, mean = 78, sd = 7.5))',
-      ')',
       '',
-      'p <- ggplot(df, aes(x = Group, y = Value, fill = Group)) +',
-      '  geom_boxplot(width = 0.45, alpha = 0.7, outlier.shape = NA, color = "black", linewidth = 0.4) +',
-      '  geom_jitter(width = 0.15, size = 1.5, alpha = 0.6, color = "black") +',
-      '  scale_fill_manual(values = okabe_ito) +',
-      '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '", tag = "a") +',
-      '  theme_classic(base_size = 7, base_family = "Helvetica") +',
-      '  theme(',
-      '    axis.title = element_text(face = "bold"),',
-      '    axis.line = element_line(linewidth = 0.4),',
-      '    legend.position = "none",',
-      '    plot.tag = element_text(face = "bold", size = 9)',
-      '  )',
+    ];
+
+    var rBody = [];
+    if (archetype === 'multi_panel_composite') {
+      rBody = [
+        '# Panel a: Boxplot + Jittered replicates',
+        'df_a <- data.frame(',
+        '  Group = factor(rep(c("' + safeGroupCtrl + '", "' + safeGroupTreat + '"), each = 30)),',
+        '  Value = c(rnorm(30, mean = 65, sd = 8), rnorm(30, mean = 78, sd = 7.5))',
+        ')',
+        'p_a <- ggplot(df_a, aes(x = Group, y = Value, fill = Group)) +',
+        '  geom_boxplot(width = 0.45, alpha = 0.7, outlier.shape = NA, linewidth = 0.4) +',
+        '  geom_jitter(width = 0.15, size = 1.2, alpha = 0.6) +',
+        '  scale_fill_manual(values = okabe_ito) +',
+        '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '") +',
+        '  theme_classic(base_size = 7) + theme(legend.position = "none")',
+        '',
+        '# Panel b: Dose/Time response trajectory (' + errorBarType.toUpperCase() + ')',
+        'time_pts <- seq(0, 24, length.out = 7)',
+        'df_b <- data.frame(',
+        '  Time = rep(time_pts, 2),',
+        '  Group = factor(rep(c("' + safeGroupCtrl + '", "' + safeGroupTreat + '"), each = 7)),',
+        '  Mean = c(sin(time_pts / 5) * 10 + 60, sin(time_pts / 5) * 25 + 60),',
+        '  SE = rep(c(0.8, 1.1), each = 7)',
+        ')',
+        'df_b$Band <- ' + rRibbonMult + ' * df_b$SE',
+        'p_b <- ggplot(df_b, aes(x = Time, y = Mean, color = Group, fill = Group)) +',
+        '  geom_ribbon(aes(ymin = Mean - Band, ymax = Mean + Band), alpha = 0.2, color = NA) +',
+        '  geom_line(linewidth = 0.7) + geom_point(size = 1.5) +',
+        '  scale_color_manual(values = okabe_ito) + scale_fill_manual(values = okabe_ito) +',
+        '  labs(x = "Time (h)", y = "' + safeYLabel + '") + theme_classic(base_size = 7)',
+        '',
+        '# Panel c: Correlation heatmap',
+        'vars <- c("F1", "F2", "F3", "Out")',
+        'df_c <- expand.grid(Var1 = vars, Var2 = vars)',
+        'df_c$r <- c(1.0, 0.62, -0.35, 0.78, 0.62, 1.0, -0.21, 0.54, -0.35, -0.21, 1.0, -0.48, 0.78, 0.54, -0.48, 1.0)',
+        'p_c <- ggplot(df_c, aes(x = Var1, y = Var2, fill = r)) +',
+        '  geom_tile(color = "white") +',
+        '  geom_text(aes(label = sprintf("%.2f", r)), size = 2.0) +',
+        '  scale_fill_gradient2(low = okabe_ito[1], mid = "white", high = okabe_ito[2], midpoint = 0, limits = c(-1, 1)) +',
+        '  labs(x = NULL, y = NULL) + theme_classic(base_size = 7)',
+        '',
+        '# Panel d: Volcano plot',
+        'df_d <- data.frame(log2FC = rnorm(300, 0, 1.5), negLogP = -log10(rbeta(300, 0.5, 5)))',
+        'df_d$Status <- ifelse(df_d$log2FC > 1 & df_d$negLogP > 1.3, "Up", ifelse(df_d$log2FC < -1 & df_d$negLogP > 1.3, "Down", "NS"))',
+        'p_d <- ggplot(df_d, aes(x = log2FC, y = negLogP, color = Status)) +',
+        '  geom_point(size = 1.0, alpha = 0.7) +',
+        '  geom_hline(yintercept = 1.30, linetype = "dashed", linewidth = 0.4) +',
+        '  geom_vline(xintercept = c(-1, 1), linetype = "dashed", linewidth = 0.4) +',
+        '  scale_color_manual(values = c("Down" = okabe_ito[1], "NS" = "#999999", "Up" = okabe_ito[2])) +',
+        '  labs(x = "log2(Fold Change)", y = "-log10(P value)") +',
+        '  theme_classic(base_size = 7) + theme(legend.position = "none")',
+        '',
+        '# Assemble 2x2 composite figure with patchwork tags (a, b, c, d)',
+        'p <- (p_a + p_b) / (p_c + p_d) + plot_annotation(tag_levels = "a")',
+      ];
+    } else if (archetype === 'dose_time_response') {
+      rBody = [
+        '# Dose/Time response data with error bands (' + errorBarType.toUpperCase() + ')',
+        'time_pts <- seq(0, 24, length.out = 7)',
+        'df <- data.frame(',
+        '  Time = rep(time_pts, 2),',
+        '  Group = factor(rep(c("' + safeGroupCtrl + '", "' + safeGroupTreat + '"), each = 7)),',
+        '  Mean = c(sin(time_pts / 5) * 10 + 60, sin(time_pts / 5) * 25 + 60),',
+        '  SE = rep(c(0.8, 1.1), each = 7)',
+        ')',
+        'df$Band <- ' + rRibbonMult + ' * df$SE',
+        '',
+        'p <- ggplot(df, aes(x = Time, y = Mean, color = Group, fill = Group)) +',
+        '  geom_ribbon(aes(ymin = Mean - Band, ymax = Mean + Band), alpha = 0.2, color = NA) +',
+        '  geom_line(linewidth = 0.8) +',
+        '  geom_point(size = 1.8) +',
+        '  scale_color_manual(values = okabe_ito) +',
+        '  scale_fill_manual(values = okabe_ito) +',
+        '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '", tag = "a") +',
+        '  theme_classic(base_size = 7, base_family = "Helvetica") +',
+        '  theme(axis.title = element_text(face = "bold"), plot.tag = element_text(face = "bold", size = 9))',
+      ];
+    } else if (archetype === 'correlation_heatmap') {
+      rBody = [
+        '# Correlation matrix heatmap data',
+        'vars <- c("Feature A", "Feature B", "Feature C", "Outcome")',
+        'df <- expand.grid(Var1 = vars, Var2 = vars)',
+        'df$r <- c(1.0, 0.62, -0.35, 0.78, 0.62, 1.0, -0.21, 0.54, -0.35, -0.21, 1.0, -0.48, 0.78, 0.54, -0.48, 1.0)',
+        '',
+        'p <- ggplot(df, aes(x = Var1, y = Var2, fill = r)) +',
+        '  geom_tile(color = "white", linewidth = 0.4) +',
+        '  geom_text(aes(label = sprintf("%.2f", r)), size = 2.2) +',
+        '  scale_fill_gradient2(low = okabe_ito[1], mid = "white", high = okabe_ito[2], midpoint = 0, limits = c(-1, 1), name = "Pearson r") +',
+        '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '", tag = "a") +',
+        '  coord_fixed() +',
+        '  theme_classic(base_size = 7, base_family = "Helvetica") +',
+        '  theme(axis.title = element_text(face = "bold"), plot.tag = element_text(face = "bold", size = 9))',
+      ];
+    } else if (archetype === 'volcano_differential_plot') {
+      rBody = [
+        '# Volcano differential expression/effect plot data',
+        'df <- data.frame(',
+        '  log2FC = rnorm(500, mean = 0, sd = 1.5),',
+        '  negLogP = -log10(pmax(rbeta(500, 0.5, 5), 1e-10))',
+        ')',
+        'df$Category <- ifelse(df$log2FC > 1 & df$negLogP > 1.30, "Up",',
+        '               ifelse(df$log2FC < -1 & df$negLogP > 1.30, "Down", "NS"))',
+        '',
+        'p <- ggplot(df, aes(x = log2FC, y = negLogP, color = Category)) +',
+        '  geom_point(size = 1.2, alpha = 0.75) +',
+        '  geom_hline(yintercept = 1.30, linetype = "dashed", linewidth = 0.4, color = "black") +',
+        '  geom_vline(xintercept = c(-1.0, 1.0), linetype = "dashed", linewidth = 0.4, color = "black") +',
+        '  scale_color_manual(values = c("Down" = okabe_ito[1], "NS" = "#999999", "Up" = okabe_ito[2])) +',
+        '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '", tag = "a") +',
+        '  theme_classic(base_size = 7, base_family = "Helvetica") +',
+        '  theme(axis.title = element_text(face = "bold"), legend.position = "none", plot.tag = element_text(face = "bold", size = 9))',
+      ];
+    } else {
+      // violin_box_jitter
+      rBody = [
+        '# Violin + Boxplot + Jittered individual biological replicates',
+        'df <- data.frame(',
+        '  Group = factor(rep(c("' + safeGroupCtrl + '", "' + safeGroupTreat + '"), each = 30)),',
+        '  Value = c(rnorm(30, mean = 65, sd = 8), rnorm(30, mean = 78, sd = 7.5))',
+        ')',
+        '',
+        'p <- ggplot(df, aes(x = Group, y = Value, fill = Group)) +',
+        '  geom_violin(alpha = 0.25, trim = FALSE, color = NA) +',
+        '  geom_boxplot(width = 0.35, alpha = 0.7, outlier.shape = NA, color = "black", linewidth = 0.4) +',
+        '  geom_jitter(width = 0.15, size = 1.5, alpha = 0.6, color = "black") +',
+        '  scale_fill_manual(values = okabe_ito) +',
+        '  labs(x = "' + safeXLabel + '", y = "' + safeYLabel + '", tag = "a") +',
+        '  theme_classic(base_size = 7, base_family = "Helvetica") +',
+        '  theme(',
+        '    axis.title = element_text(face = "bold"),',
+        '    axis.line = element_line(linewidth = 0.4),',
+        '    legend.position = "none",',
+        '    plot.tag = element_text(face = "bold", size = 9)',
+        '  )',
+      ];
+    }
+
+    var rExport = [
       '',
       '# Export exact physical dimensions (' + widthMm + ' mm)',
-      'ggsave("figure_output.pdf", plot = p, width = ' + widthMm + ', height = 75, units = "mm", device = cairo_pdf)',
-      'ggsave("figure_output.png", plot = p, width = ' + widthMm + ', height = 75, units = "mm", dpi = 300)',
+      'ggsave("figure_output.pdf", plot = p, width = ' + widthMm + ', height = ' + heightMm + ', units = "mm", device = cairo_pdf)',
+      'ggsave("figure_output.png", plot = p, width = ' + widthMm + ', height = ' + heightMm + ', units = "mm", dpi = 300)',
       'message("Figure exported successfully.")',
-    ].join('\n');
+    ];
+
+    codeSnippet = rHeader.concat(rBody).concat(rExport).join('\n');
   }
 
   return {
@@ -1646,11 +2373,71 @@ async function scientificFigureDesignerTool(args) {
       generatedPlotScript: codeSnippet,
       natureChecklistPassed: {
         errorBarDefinitionExplicit: true,
-        individualDataPointsShown: true,
+        individualDataPointsShown: archetype === 'multi_panel_composite' || archetype === 'violin_box_jitter' || archetype === 'volcano_differential_plot',
         exactNStated: true,
         twoTailedTestDeclared: true,
       },
     },
+  };
+}
+
+// Helper: Recursively truncate nested strings, arrays, and objects so serialized JSON is guaranteed <= maxChars
+function truncateDeepValue(val, maxStrLen, maxArrLen, depth) {
+  if (depth > 6) return '[MAX_DEPTH_TRUNCATED]';
+  if (val === null || val === undefined) return val;
+  if (typeof val === 'string') {
+    return val.length > maxStrLen ? val.slice(0, maxStrLen) + '... [TRUNCATED]' : val;
+  }
+  if (typeof val !== 'object') return val;
+  if (Array.isArray(val)) {
+    var sliced = val.slice(0, maxArrLen);
+    var outArr = [];
+    for (var i = 0; i < sliced.length; i++) {
+      outArr.push(truncateDeepValue(sliced[i], maxStrLen, maxArrLen, depth + 1));
+    }
+    return outArr;
+  }
+  var outObj = {};
+  var keys = Object.keys(val);
+  var maxKeys = Math.min(keys.length, maxArrLen * 4);
+  for (var kIdx = 0; kIdx < maxKeys; kIdx++) {
+    var k = keys[kIdx];
+    outObj[k] = truncateDeepValue(val[k], maxStrLen, maxArrLen, depth + 1);
+  }
+  return outObj;
+}
+
+function enforceResultLimit(payload, maxChars) {
+  var limit = typeof maxChars === 'number' && maxChars > 0 ? maxChars : MAX_RESULT_CHARS;
+  var jsonStr = JSON.stringify(payload);
+  if (!jsonStr || jsonStr.length <= limit) return payload;
+
+  var origLen = jsonStr.length;
+  var tiers = [
+    { str: 1000, arr: 5 },
+    { str: 400, arr: 3 },
+    { str: 150, arr: 2 },
+  ];
+
+  for (var t = 0; t < tiers.length; t++) {
+    var candidate = {
+      truncated: true,
+      originalLength: origLen,
+      notice: '返回内容超过上限 (' + origLen + ' 字符)，已执行递归截断保护。',
+      data: truncateDeepValue(payload, tiers[t].str, tiers[t].arr, 0),
+    };
+    if (JSON.stringify(candidate).length <= limit) {
+      return candidate;
+    }
+  }
+
+  // Final hard-cap fallback guaranteed to stay within limit
+  var previewBudget = Math.max(100, limit - 260);
+  return {
+    truncated: true,
+    originalLength: origLen,
+    notice: '返回内容超过上限 (' + origLen + ' 字符)，已执行硬上限截断保护。',
+    preview: jsonStr.slice(0, previewBudget) + '... [TRUNCATED]',
   };
 }
 
@@ -1689,26 +2476,7 @@ cindy.onHostMessage(async function (message) {
   try {
     var result = await handler(message.args || {}, message.callId);
     if (result && result.ok) {
-      var bounded = result.result;
-      var jsonStr = JSON.stringify(bounded);
-      if (jsonStr.length > MAX_RESULT_CHARS) {
-        var truncatedPayload = {};
-        for (var k in bounded) {
-          if (Array.isArray(bounded[k])) {
-            truncatedPayload[k] = bounded[k].slice(0, Math.min(bounded[k].length, 5));
-          } else if (typeof bounded[k] === 'string' && bounded[k].length > 1000) {
-            truncatedPayload[k] = bounded[k].slice(0, 1000) + '... [TRUNCATED]';
-          } else {
-            truncatedPayload[k] = bounded[k];
-          }
-        }
-        bounded = {
-          truncated: true,
-          originalLength: jsonStr.length,
-          notice: '返回内容超过上限 (' + jsonStr.length + ' 字符)，已对大文本与长列表执行截断保护。',
-          data: truncatedPayload,
-        };
-      }
+      var bounded = enforceResultLimit(result.result, MAX_RESULT_CHARS);
       cindy.send({
         type: 'tool-result',
         callId: message.callId,
@@ -1742,6 +2510,8 @@ if (typeof module !== 'undefined') {
     formatAuthorsApa7: formatAuthorsApa7,
     extractDate: extractDate,
     getStudentTCriticalValue: getStudentTCriticalValue,
+    computeCldLetters: computeCldLetters,
+    enforceResultLimit: enforceResultLimit,
     pipelineStageOrchestratorTool: pipelineStageOrchestratorTool,
     socraticResearchGuideTool: socraticResearchGuideTool,
     verifyDoiTool: verifyDoiTool,

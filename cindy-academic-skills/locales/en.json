@@ -1,7 +1,7 @@
 {
   "name": "Academic Research & Publishing Suite",
-  "description": "Comprehensive academic research, data analysis, and figure design suite: 10-stage lifecycle, Socratic RQ mentor, Crossref DOI verification, statistical decision trees, APA tables, multi-panel figures, 7 integrity gates, claim alignment, tone calibration, peer review, and rebuttal coaching.",
-  "whenToUse": "Use throughout the research lifecycle: topic formulation, PRISMA reviews, empirical data analysis, publication figure design, manuscript drafting, integrity auditing, mock peer reviews, point-by-point rebuttal letters, and final publication formatting.",
+  "description": "End-to-end academic research, statistical analysis, and publication figure suite: 10-stage workflow, Crossref DOI verification, statistical decision trees, APA tables, figure scripts, integrity gates, and peer review.",
+  "whenToUse": "Use across the research lifecycle: topic scoping, literature verification, statistical test selection, APA table formatting, scientific figure scripting, integrity auditing, peer review, and rebuttal drafting.",
   "tools": {
     "pipeline_stage_orchestrator": {
       "description": "ARS 10-stage pipeline orchestrator: diagnose current research phases, issue Material Passports (evidence-chain audit records), chart sequential next steps, and enforce human-in-the-loop checkpoints."

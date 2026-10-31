@@ -167,15 +167,28 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
     Introduction:
     Previous studies (Smith et al., 2024) explored transformer architectures (10.1038/s41586-020-2649-2).
     Methodology:
-    We evaluated our model against three baseline models with randomized control group allocations.
-    Statistical significance was established at p < 0.01.
+    We evaluated our model against three baseline models with randomized control group and negative control allocations.
+    Train-test split was strictly isolated with no data leakage.
+    Statistical significance was established at p < 0.01 (t(58) = 3.42, 95% CI [1.2, 4.5]).
+    Limitations and boundary conditions of this study are discussed in Section 5.
     All code and data availability statements are included.
   `;
 
-  const res = await plugin.academicIntegrityAuditTool({ paper_text: samplePaper });
-  assert.equal(res.ok, true);
-  assert.ok(res.result.failureModesEvaluation.length === 7);
-  assert.equal(res.result.verdict, 'GATE_PASSED');
+  // Without verified_dois, Mode 1 stays VERIFICATION_REQUIRED and verdict is conditional
+  const resPending = await plugin.academicIntegrityAuditTool({ paper_text: samplePaper });
+  assert.equal(resPending.ok, true);
+  assert.equal(resPending.result.failureModesEvaluation.length, 7);
+  assert.equal(resPending.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
+
+  // With verified_dois covering extracted DOIs, all 7 modes PASS and verdict is GATE_PASSED
+  const resPassed = await plugin.academicIntegrityAuditTool({
+    paper_text: samplePaper,
+    verified_dois: ['10.1038/s41586-020-2649-2'],
+    implementation_verified: true,
+  });
+  assert.equal(resPassed.ok, true);
+  assert.equal(resPassed.result.allModesPassed, true);
+  assert.equal(resPassed.result.verdict, 'GATE_PASSED');
 });
 
 test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {
@@ -254,7 +267,7 @@ test('authorDisclosureStatementTool creates CRediT and AI-assistance disclosures
   assert.ok(res.result.competingInterestsStatement);
 });
 
-test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {
+test('pipelineStageOrchestratorTool manages 10-stage transitions and enforces integrity/review gates', async () => {
   const plugin = loadPlugin();
   const res1 = await plugin.pipelineStageOrchestratorTool({
     current_stage: 'Stage_1_Research',
@@ -265,23 +278,42 @@ test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {
   assert.equal(res1.ok, true);
   assert.equal(res1.result.nextStage, 'Stage_1_5_DataAnalysis');
   assert.equal(res1.result.requiresHumanConfirmation, true);
+  assert.equal(res1.result.materialPassportStatus.provenanceAuditTrail, 'LOCKED');
   assert.ok(res1.result.materialPassportStatus.hash);
 
-  const res2 = await plugin.pipelineStageOrchestratorTool({
-    current_stage: 'Stage_1_5_DataAnalysis',
+  // Without completed_artifacts or manuscript, Material Passport stays UNLOCKED_PENDING_MATERIAL with null hash
+  const resEmpty = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_1_Research',
     research_topic: 'Multi-Agent Quality Assurance',
-    completed_artifacts: ['Statistical Results & Tables'],
   });
-  assert.equal(res2.ok, true);
-  assert.equal(res2.result.nextStage, 'Stage_1_8_FigureDesign');
+  assert.equal(resEmpty.result.materialPassportStatus.provenanceAuditTrail, 'UNLOCKED_PENDING_MATERIAL');
+  assert.equal(resEmpty.result.materialPassportStatus.hash, null);
 
-  const res3 = await plugin.pipelineStageOrchestratorTool({
-    current_stage: 'Stage_1_8_FigureDesign',
+  // Stage_2_5_Integrity holds when integrity_audit_passed is omitted, advances only when true
+  const resHold = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_2_5_Integrity',
     research_topic: 'Multi-Agent Quality Assurance',
-    completed_artifacts: ['Multi-panel Figures'],
   });
-  assert.equal(res3.ok, true);
-  assert.equal(res3.result.nextStage, 'Stage_2_Write');
+  assert.equal(resHold.result.nextStage, 'Stage_2_5_Integrity');
+  assert.equal(resHold.result.materialPassportStatus.integrityGatePassed, false);
+
+  const resPass = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_2_5_Integrity',
+    research_topic: 'Multi-Agent Quality Assurance',
+    integrity_audit_passed: true,
+    completed_artifacts: ['Integrity Audit Pass'],
+  });
+  assert.equal(resPass.result.nextStage, 'Stage_3_Review');
+  assert.equal(resPass.result.materialPassportStatus.integrityGatePassed, true);
+
+  // Stage_3_Review with accept advances directly to Stage_4_5_Final_Integrity
+  const resAccept = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_3_Review',
+    research_topic: 'Multi-Agent Quality Assurance',
+    review_decision: 'accept',
+    completed_artifacts: ['Review Report'],
+  });
+  assert.equal(resAccept.result.nextStage, 'Stage_4_5_Final_Integrity');
 });
 
 test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
@@ -315,6 +347,24 @@ test('statisticalAnalysisAdvisorTool recommends optimal models and assumption ch
   assert.equal(res.result.multipleComparisonsAdjustment.totalComparisons, 5);
   assert.match(res.result.multipleComparisonsAdjustment.recommendedMethod, /Benjamini-Hochberg/);
   assert.ok(res.result.replicationIntegrityNotice);
+
+  // When normality_satisfied is false, switches primaryModel to non-parametric test
+  const resNonNormal = await plugin.statisticalAnalysisAdvisorTool({
+    research_question: 'Does the intervention improve skewed recovery time?',
+    design_type: 'multi_groups_independent',
+    outcome_type: 'continuous',
+    normality_satisfied: false,
+  });
+  assert.equal(resNonNormal.ok, true);
+  assert.match(resNonNormal.result.primaryModel, /Kruskal-Wallis H test/);
+
+  // Contradictory design and outcome returns fail
+  const resInvalid = await plugin.statisticalAnalysisAdvisorTool({
+    research_question: 'Invalid combination check',
+    design_type: 'categorical_proportions',
+    outcome_type: 'continuous',
+  });
+  assert.equal(resInvalid.ok, false);
 });
 
 test('academicDataSummaryTool formats APA7 sentences and three-line tables', async () => {
@@ -345,12 +395,36 @@ test('academicDataSummaryTool formats APA7 sentences and three-line tables', asy
   assert.equal(res.result.natureReportingGuidelineCheck.effectSizePresent, true);
   assert.equal(res.result.natureReportingGuidelineCheck.confidenceIntervalPresent, true);
   assert.equal(res.result.natureReportingGuidelineCheck.cldDescendingOrderVerified, true);
+
+  // For >2 groups with pairwise_comparisons, computes exact CLD letters ('a', 'b', 'c')
+  const res3Groups = await plugin.academicDataSummaryTool({
+    test_type: 'one_way_anova',
+    test_statistic: 18.4,
+    df: '2, 87',
+    p_value: 0.0001,
+    multiple_comparison_method: 'tukey_hsd',
+    group_descriptives: [
+      { name: 'HighDose', mean: 85.0, sd: 5.0, n: 30 },
+      { name: 'LowDose', mean: 72.0, sd: 5.5, n: 30 },
+      { name: 'Control', mean: 60.0, sd: 6.0, n: 30 },
+    ],
+    pairwise_comparisons: [
+      { group1: 'HighDose', group2: 'LowDose', p_adj: 0.002 },
+      { group1: 'HighDose', group2: 'Control', p_adj: 0.0001 },
+      { group1: 'LowDose', group2: 'Control', p_adj: 0.004 },
+    ],
+  });
+  assert.equal(res3Groups.ok, true);
+  assert.deepEqual(
+    res3Groups.result.compactLetterDisplay.map((x) => x.cld_letter),
+    ['a', 'b', 'c'],
+  );
 });
 
 test('scientificFigureDesignerTool plans multi-panel layouts and generates plot scripts', async () => {
   const plugin = loadPlugin();
 
-  // Test Python Matplotlib generation with bilingual mode
+  // Test Python Matplotlib single-panel violin_box_jitter with bilingual mode
   const resPy = await plugin.scientificFigureDesignerTool({
     main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
     target_journal: 'Nature',
@@ -365,7 +439,7 @@ test('scientificFigureDesignerTool plans multi-panel layouts and generates plot 
   assert.equal(resPy.ok, true);
   assert.equal(resPy.result.targetJournal, 'Nature');
   assert.equal(resPy.result.layoutSpecifications.physicalWidthMm, 180);
-  assert.equal(resPy.result.multipanelArchitecture.length, 4);
+  assert.equal(resPy.result.multipanelArchitecture.length, 1);
   assert.equal(resPy.result.bilingualModeConfig.activeMode, 'dual_bilingual');
   assert.ok(resPy.result.dpiAndTypographySafeguards);
   assert.match(resPy.result.dpiAndTypographySafeguards.dpiConflictMechanism, /plt\.figure/);
@@ -376,18 +450,20 @@ test('scientificFigureDesignerTool plans multi-panel layouts and generates plot 
   assert.match(resPy.result.generatedPlotScript, /plt\.rcParams\["pdf\.fonttype"\] = 42/);
   assert.match(resPy.result.generatedPlotScript, /OKABE_ITO/);
 
-  // Test R ggplot2 generation
+  // Test R ggplot2 generation for multi_panel_composite (4 panels)
   const resR = await plugin.scientificFigureDesignerTool({
     main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
     target_journal: 'Nature',
-    plot_archetype: 'violin_box_jitter',
+    plot_archetype: 'multi_panel_composite',
     backend: 'r_ggplot2',
     column_width: 'single_column_89mm',
   });
 
   assert.equal(resR.ok, true);
   assert.equal(resR.result.layoutSpecifications.physicalWidthMm, 89);
+  assert.equal(resR.result.multipanelArchitecture.length, 4);
   assert.match(resR.result.generatedPlotScript, /library\(ggplot2\)/);
+  assert.match(resR.result.generatedPlotScript, /plot_annotation\(tag_levels = "a"\)/);
   assert.match(resR.result.generatedPlotScript, /cairo_pdf/);
 
   // Test planning_only mode
@@ -399,6 +475,20 @@ test('scientificFigureDesignerTool plans multi-panel layouts and generates plot 
   });
 
   assert.equal(resPlan.ok, true);
+  assert.equal(resPlan.result.multipanelArchitecture.length, 4);
   assert.equal(resPlan.result.generatedPlotScript, null);
   assert.equal(resPlan.result.natureChecklistPassed.individualDataPointsShown, true);
+});
+
+test('enforceResultLimit recursively truncates nested payloads within maxChars', () => {
+  const plugin = loadPlugin();
+  const nestedHuge = {
+    meta: {
+      deepText: 'A'.repeat(25000),
+      deepArray: Array.from({ length: 30 }, (_, i) => ({ idx: i, body: 'B'.repeat(2000) })),
+    },
+  };
+  const bounded = plugin.enforceResultLimit(nestedHuge, 8000);
+  assert.equal(bounded.truncated, true);
+  assert.ok(JSON.stringify(bounded).length <= 8000);
 });
