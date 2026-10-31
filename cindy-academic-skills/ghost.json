@@ -563,6 +563,21 @@
           "comparison_label": {
             "type": "string",
             "description": "可选，比较的变量或组别标签，例如 '实验组与对照组后测得分'"
+          },
+          "perform_cld_ranking": {
+            "type": "boolean",
+            "description": "可选，是否输出基于均值从大到小降序排列的显著性字母标记 (Compact Letter Display, CLD)"
+          },
+          "multiple_comparison_method": {
+            "type": "string",
+            "enum": [
+              "tukey_hsd",
+              "bonferroni",
+              "holm",
+              "fdr_bh",
+              "none"
+            ],
+            "description": "可选，多重比较校正方法"
           }
         },
         "required": [
@@ -632,6 +647,15 @@
               "ci95"
             ],
             "description": "可选，误差棒统计定义（SEM: 均值标准误；SD: 样本标准差；CI95: 95% 置信区间）"
+          },
+          "bilingual_mode": {
+            "type": "string",
+            "enum": [
+              "english_only",
+              "chinese_only",
+              "dual_bilingual"
+            ],
+            "description": "可选，中英文双语绘图模式（english_only 国际期刊英文版，chinese_only 中文论文版，dual_bilingual 中英双语对照版）"
           }
         },
         "required": [

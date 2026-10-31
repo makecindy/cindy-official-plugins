@@ -64,3 +64,67 @@
 3. **样本量声明：** 明确给出独立的实验单元样本量（如 $n = 8$ independent biological animals per group）。
 4. **误差棒定义：** 必须明确指出误差棒代表什么（如 Data are shown as mean ± s.e.m. 或 Box plots show median, IQR, and 1.5× IQR whiskers）。
 5. **统计检验声明：** 明确指出检验方法与显著性符号（如 Two-tailed unpaired Student's t-test, \*P < 0.05, \*\*P < 0.01, \*\*\*P < 0.001, NS indicates not significant）。
+
+---
+
+## 五、【陷阱排查】DPI 设置与字体极小/元素缩小的冲突机制详解
+
+在科研绘图时，很多人（以及很多通用 AI）生成的代码常出现一个致命问题：**导出的图片在 Word 或 LaTeX 中插入后，文字和散点变得极其微小，肉眼几乎无法辨认**。
+
+### 1. 核心冲突根源：物理尺寸与显示分辨率的脱钩
+- **字号在 Matplotlib 中是绝对物理量：** 1 point（磅）严格等于 $\frac{1}{72}$ 英寸（约 0.35 mm）。`fontsize=7` 的文字物理高度永远是约 2.45 mm。
+- **错误的做法：** AI 通常习惯随手写一个 `figsize=(10, 6)` 或 `(12, 8)`。当用户把这张 12 英寸宽的图片插入到论文单栏（标准宽度 89 mm = 3.5 英寸）时，排版软件会将其强制缩小到原来的 $3.5 / 12 \approx 29\%$！此时原本 7pt 的文字就被等比压缩成了 **2pt**，变成看不清的“蚂蚁字”！
+- **Seaborn 覆盖冲突（致命陷阱）：** 很多代码先设置了 `plt.rcParams['font.size'] = 7`，接着写了一行 `sns.set_theme()` 或 `sns.set_style("white")`。**Seaborn 的 `set_theme()` 会在内部直接重置所有 rcParams**，彻底抹除前面所有的字号与字体设置！
+- **`plt.figure(dpi=...)` 冲突：** 在 `plt.figure(dpi=300)` 中强制设置高 DPI，会导致屏幕渲染器（Renderer）以 300 DPI 计算坐标变换和边距，与随后的 `layout="constrained"` 或 `plt.tight_layout()` 产生边距误算与标签重叠。
+
+### 2. 避坑三大铁律（Standard Best Practice）
+1. **顺序铁律（Theme First, rcParams Second）：** 必须先调用 `sns.set_theme(style="ticks")`，**然后**再配置 `plt.rcParams` 自定义参数，绝不能颠倒！
+2. **物理尺寸 1:1 铁律（Match Physical Inches Directly）：**
+   - 单栏主图：`figsize=(3.5, 2.8)`（英寸，对应 89 mm）。
+   - 双栏主图：`figsize=(7.08, 3.5)`（英寸，对应 180 mm）。
+   - 字号严格设为 `font.size = 7`，刻度设为 `6`，子图标签 `a, b` 设为 `8`。这样导出的图片在论文中是 1:1 放置，文字大小与正文完全一致，绝不会被二次缩放缩小！
+3. **DPI 分离铁律（Preview Low, Save High）：** 画布初始化保持默认屏幕 DPI（100），高分辨率（300/600 DPI）**仅在保存函数中指定**：
+   ```python
+   plt.savefig("figure_output.png", dpi=300, bbox_inches="tight")
+   plt.savefig("figure_output.pdf", format="pdf", bbox_inches="tight")
+   ```
+
+---
+
+## 六、【双语绘图】中英文混排无乱码与负号方块修复指南
+
+在需要撰写毕业论文、国内中英双语会议报告或中英文对照图表时，常见两大技术痛点：
+
+### 1. 中文字符丢失（Tofu 方块 □□□）与负号缺失
+- **现象：** Matplotlib 默认字体（DejaVu Sans）不含中文字符，导致中文显示为方块；若粗暴替换为 `SimHei`（黑体），又会导致负数坐标轴的减号变成方块（因为 `SimHei` 缺乏标准 Unicode 减号 `\u2212`）。
+- **标准跨平台解决方案：**
+  ```python
+  # 1. 跨平台优雅回退字体栈（Windows / macOS / Linux 自动适配）
+  plt.rcParams['font.sans-serif'] = [
+      'Arial', 'Helvetica', 'DejaVu Sans',          # 英文首选（顶刊标准无衬线）
+      'Microsoft YaHei', 'SimHei',                  # Windows 中文
+      'PingFang SC', 'Hiragino Sans GB',            # macOS 中文
+      'Source Han Sans SC', 'WenQuanYi Micro Hei',  # Linux 中文
+      'sans-serif'
+  ]
+  
+  # 2. 核心：必须显式关闭 unicode_minus！
+  plt.rcParams['axes.unicode_minus'] = False  # 彻底解决坐标轴负号变方块乱码
+  ```
+
+### 2. 双语灵活切换模式 (Bilingual Labeling Switch)
+推荐在代码中通过统一常量 `LANG_MODE` 管理所有轴标题与图例文本，实现“一键切换国际英文期刊版”与“国内答辩双语版”：
+```python
+LANG_MODE = "dual"  # 可选: "en", "zh", "dual"
+
+LABELS = {
+    "x_title": {"en": "Concentration (μM)", "zh": "处理浓度 (μM)", "dual": "Concentration / 处理浓度 (μM)"},
+    "y_title": {"en": "Cell Viability (%)", "zh": "细胞活性 (%)", "dual": "Cell Viability / 细胞活性 (%)"},
+    "control": {"en": "Control", "zh": "对照组", "dual": "Control / 对照组"},
+    "treatment": {"en": "Treatment", "zh": "给药组", "dual": "Treatment / 给药组"}
+}
+
+# 绘图时直接引用当前语言模式：
+ax.set_xlabel(LABELS["x_title"][LANG_MODE], fontweight="bold")
+ax.set_ylabel(LABELS["y_title"][LANG_MODE], fontweight="bold")
+```

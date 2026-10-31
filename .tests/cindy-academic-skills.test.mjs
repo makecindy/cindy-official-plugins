@@ -328,21 +328,27 @@ test('academicDataSummaryTool formats APA7 sentences and three-line tables', asy
   assert.equal(res.ok, true);
   assert.equal(res.result.apaFormattedString, 't(58) = 5.92, p < .001, d = 1.53, 95% CI [10.81, 15.79]');
   assert.match(res.result.threeLineTableMarkdown, /Group \/ Condition/);
-  assert.match(res.result.threeLineTableMarkdown, /Control/);
+  assert.match(res.result.threeLineTableMarkdown, /Intervention/);
+  assert.equal(res.result.compactLetterDisplay[0].name, 'Intervention'); // highest mean ranked first
+  assert.equal(res.result.compactLetterDisplay[0].cld_letter, 'a');
+  assert.equal(res.result.compactLetterDisplay[1].name, 'Control');
+  assert.equal(res.result.compactLetterDisplay[1].cld_letter, 'b');
   assert.equal(res.result.natureReportingGuidelineCheck.effectSizePresent, true);
   assert.equal(res.result.natureReportingGuidelineCheck.confidenceIntervalPresent, true);
+  assert.equal(res.result.natureReportingGuidelineCheck.cldDescendingOrderVerified, true);
 });
 
 test('scientificFigureDesignerTool plans multi-panel layouts and generates plot scripts', async () => {
   const plugin = loadPlugin();
 
-  // Test Python Matplotlib generation
+  // Test Python Matplotlib generation with bilingual mode
   const resPy = await plugin.scientificFigureDesignerTool({
     main_scientific_claim: 'Targeted inhibition of Protein X reverses cognitive decline in mouse models',
     target_journal: 'Nature',
     plot_archetype: 'violin_box_jitter',
     backend: 'python_matplotlib',
     column_width: 'double_column_180mm',
+    bilingual_mode: 'dual_bilingual',
     x_label: 'Treatment Group',
     y_label: 'Cognitive Score',
   });
@@ -351,7 +357,13 @@ test('scientificFigureDesignerTool plans multi-panel layouts and generates plot 
   assert.equal(resPy.result.targetJournal, 'Nature');
   assert.equal(resPy.result.layoutSpecifications.physicalWidthMm, 180);
   assert.equal(resPy.result.multipanelArchitecture.length, 4);
+  assert.equal(resPy.result.bilingualModeConfig.activeMode, 'dual_bilingual');
+  assert.ok(resPy.result.dpiAndTypographySafeguards);
+  assert.match(resPy.result.dpiAndTypographySafeguards.dpiConflictMechanism, /plt\.figure/);
+  assert.match(resPy.result.dpiAndTypographySafeguards.themeResetTrap, /sns\.set_theme/);
   assert.match(resPy.result.figureCaptionTemplate, /Fig\. 1 \| Targeted inhibition/);
+  assert.match(resPy.result.generatedPlotScript, /sns\.set_theme\(style="ticks"\)/);
+  assert.match(resPy.result.generatedPlotScript, /plt\.rcParams\["axes\.unicode_minus"\] = False/);
   assert.match(resPy.result.generatedPlotScript, /plt\.rcParams\["pdf\.fonttype"\] = 42/);
   assert.match(resPy.result.generatedPlotScript, /OKABE_ITO/);
 

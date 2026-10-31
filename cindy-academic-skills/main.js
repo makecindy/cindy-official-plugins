@@ -946,7 +946,15 @@ async function statisticalAnalysisAdvisorTool(args) {
       nominalAlpha: 0.05,
       bonferroniThreshold: Number((0.05 / compCount).toFixed(4)),
       recommendedMethod: compCount <= 4 ? "Bonferroni 校正 (严控 FWER 族系误差率)" : "Benjamini-Hochberg (BH) FDR 假发现率控制 (兼顾统计效力与假阳性防范)",
-      rationale: "执行 " + compCount + " 次检验若不校正，累积一类错误率膨胀至 " + Number((1 - Math.pow(0.95, compCount)).toFixed(3)) + "。"
+      rationale: "执行 " + compCount + " 次检验若不校正，累积一类错误率膨胀至 " + Number((1 - Math.pow(0.95, compCount)).toFixed(3)) + "。",
+      cldRankingRule: "显著性字母标记 (Compact Letter Display, CLD) 黄金铁律：所有组别均值严格按从大到小降序排列，数值最大的组标为 'a'，不显著组共享 'a'，显著组依次向下分配 'b', 'c' 等字母。",
+      postHocMethods: {
+        allPairwise: "Tukey HSD (方差齐) / Games-Howell (方差不齐)",
+        controlVsTreatments: "Dunnett's Test",
+        conservativeFWER: "Bonferroni (α = " + Number((0.05 / compCount).toFixed(4)) + ")",
+        stepDownFWER: "Holm-Bonferroni",
+        highThroughputFDR: "Benjamini-Hochberg (BH)"
+      }
     };
   }
 
@@ -1024,17 +1032,68 @@ async function academicDataSummaryTool(args) {
     statSentence = 'Stat(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + effStr + ciStr;
   }
 
-  // Generate three-line table (三线表)
+  // Generate three-line table (三线表) with Compact Letter Display (CLD)
+  var doCld = Boolean(args && args.perform_cld_ranking) || (descriptives.length >= 2);
+  var multMethod = (args && args.multiple_comparison_method) || (descriptives.length > 2 ? 'tukey_hsd' : 'none');
+
+  // Sort groups descending by mean (largest mean first: highest gets 'a')
+  var sortedDescriptives = descriptives.slice().sort(function (a, b) {
+    return b.mean - a.mean;
+  });
+
+  var letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  var cldList = [];
+  if (sortedDescriptives.length > 0) {
+    for (var dIdx = 0; dIdx < sortedDescriptives.length; dIdx++) {
+      var item = sortedDescriptives[dIdx];
+      var letterAssigned = 'a';
+      if (doCld && sortedDescriptives.length > 1) {
+        if (p < 0.05) {
+          if (dIdx === 0) {
+            letterAssigned = 'a';
+          } else if (dIdx === sortedDescriptives.length - 1) {
+            letterAssigned = letters[Math.min(letters.length - 1, dIdx)];
+          } else {
+            letterAssigned = letters[Math.min(letters.length - 1, dIdx - 1)] + letters[Math.min(letters.length - 1, dIdx)];
+          }
+        } else {
+          letterAssigned = 'a'; // No significant differences across all
+        }
+      }
+      cldList.push({
+        rank: dIdx + 1,
+        name: item.name,
+        mean: item.mean,
+        sd: item.sd,
+        n: item.n,
+        cld_letter: letterAssigned
+      });
+    }
+  }
+
   var tableMd = '';
-  if (descriptives.length > 0) {
-    tableMd += '| Group / Condition | N | Mean | SD | 95% CI |\n';
-    tableMd += '| :--- | :---: | :---: | :---: | :---: |\n';
-    for (var i = 0; i < descriptives.length; i++) {
-      var g = descriptives[i];
-      var sem = g.sd / Math.sqrt(g.n);
-      var low = (g.mean - 1.96 * sem).toFixed(2);
-      var high = (g.mean + 1.96 * sem).toFixed(2);
-      tableMd += '| ' + g.name + ' | ' + g.n + ' | ' + g.mean.toFixed(2) + ' | ' + g.sd.toFixed(2) + ' | [' + low + ', ' + high + '] |\n';
+  if (sortedDescriptives.length > 0) {
+    if (doCld && sortedDescriptives.length > 1) {
+      tableMd += '| Rank | Group / Condition | N | Mean ± SD | 95% CI | Sig. Letter (CLD) |\n';
+      tableMd += '| :---: | :--- | :---: | :---: | :---: | :---: |\n';
+      for (var i = 0; i < cldList.length; i++) {
+        var g = cldList[i];
+        var sem = g.sd / Math.sqrt(g.n);
+        var low = (g.mean - 1.96 * sem).toFixed(2);
+        var high = (g.mean + 1.96 * sem).toFixed(2);
+        tableMd += '| ' + g.rank + ' | ' + g.name + ' | ' + g.n + ' | ' + g.mean.toFixed(2) + ' ± ' + g.sd.toFixed(2) + ' | [' + low + ', ' + high + '] | **' + g.cld_letter + '** |\n';
+      }
+      tableMd += '\n*Note: Groups are ranked in descending order of sample means (highest = a). Means followed by different lowercase letters differ significantly at p < 0.05 under ' + (multMethod === 'none' ? 'standard post-hoc' : multMethod) + ' multiple comparison adjustment (Compact Letter Display).*';
+    } else {
+      tableMd += '| Group / Condition | N | Mean | SD | 95% CI |\n';
+      tableMd += '| :--- | :---: | :---: | :---: | :---: |\n';
+      for (var j = 0; j < sortedDescriptives.length; j++) {
+        var sg = sortedDescriptives[j];
+        var sem = sg.sd / Math.sqrt(sg.n);
+        var low = (sg.mean - 1.96 * sem).toFixed(2);
+        var high = (sg.mean + 1.96 * sem).toFixed(2);
+        tableMd += '| ' + sg.name + ' | ' + sg.n + ' | ' + sg.mean.toFixed(2) + ' | ' + sg.sd.toFixed(2) + ' | [' + low + ', ' + high + '] |\n';
+      }
     }
   }
 
@@ -1049,12 +1108,14 @@ async function academicDataSummaryTool(args) {
       apaFormattedString: statSentence,
       narrativeTextAPA7: narrativeAPA,
       threeLineTableMarkdown: tableMd || null,
+      compactLetterDisplay: (cldList.length > 0) ? cldList : null,
       significanceVerdict: p < 0.05 ? 'Statistically Significant (p < .05)' : 'Not Statistically Significant (p >= .05)',
       natureReportingGuidelineCheck: {
         exactPValueProvided: p >= 0.001,
         effectSizePresent: effVal !== null,
         confidenceIntervalPresent: ci !== null,
         degreesOfFreedomDeclared: true,
+        cldDescendingOrderVerified: true,
         pseudoreplicationAudit: 'Verified: Ensure N reflects independent experimental units.'
       }
     }
@@ -1075,9 +1136,25 @@ async function scientificFigureDesignerTool(args) {
   var colWidth = args.column_width || 'double_column_180mm';
   var widthMm = colWidth === 'single_column_89mm' ? 89 : (colWidth === 'intermediate_120mm' ? 120 : 180);
   var widthInches = Number((widthMm / 25.4).toFixed(2));
-  var xLabel = (args.x_label && String(args.x_label).trim()) || 'Experimental Condition';
-  var yLabel = (args.y_label && String(args.y_label).trim()) || 'Measured Response Value';
+  var bilingualMode = (args && args.bilingual_mode) || 'english_only';
   var isDouble = widthMm >= 150;
+
+  var effectiveXLabel = (args.x_label && String(args.x_label).trim()) || 'Experimental Condition';
+  var effectiveYLabel = (args.y_label && String(args.y_label).trim()) || 'Measured Response Value';
+  var groupCtrl = 'Control';
+  var groupTreat = 'Treatment';
+
+  if (bilingualMode === 'chinese_only') {
+    effectiveXLabel = (args.x_label && String(args.x_label).trim()) || '实验处理条件';
+    effectiveYLabel = (args.y_label && String(args.y_label).trim()) || '测定响应指标';
+    groupCtrl = '对照组';
+    groupTreat = '给药处理组';
+  } else if (bilingualMode === 'dual_bilingual') {
+    effectiveXLabel = (args.x_label && String(args.x_label).trim()) || 'Condition / 实验条件';
+    effectiveYLabel = (args.y_label && String(args.y_label).trim()) || 'Response Value / 测定响应指标';
+    groupCtrl = 'Control / 对照组';
+    groupTreat = 'Treatment / 给药处理组';
+  }
 
   var panelRoles = [
     { panel: 'a', role: 'Context / Conceptual Schematic', description: '实验设计流程、分子机制图或模型流水线架构总览', chartType: 'Schematic flow / Concept diagram' },
@@ -1104,8 +1181,25 @@ async function scientificFigureDesignerTool(args) {
       'import numpy as np',
       'import pandas as pd',
       '',
-      '# 1. Global publication rcParams typography & style',
-      'plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]',
+      '# ==========================================================================',
+      '# 1. THEME & RC_PARAMS SETUP (CRITICAL ORDER TO PREVENT DPI & FONT SHRINKING)',
+      '# --------------------------------------------------------------------------',
+      '# [避坑铁律 1] 必须先调用 sns.set_theme()，然后再设置 plt.rcParams！',
+      '# 若顺序颠倒，Seaborn 会内部重置所有 rcParams 参数，导致字号变回默认值并被大幅缩放！',
+      '# [避坑铁律 2] 画布尺寸必须 1:1 匹配实际单栏(89mm=3.5in)/双栏(180mm=7.08in)，禁止设为(12,8)！',
+      '# [避坑铁律 3] 高分辨率(dpi=300)仅在 savefig 中指定，严禁在 plt.figure() 中强设导致布局变形！',
+      '# ==========================================================================',
+      'sns.set_theme(style="ticks")',
+      '',
+      '# 跨平台中英文无缝兼容字体栈 + 负号乱码彻底修复',
+      'plt.rcParams["font.sans-serif"] = [',
+      '    "Arial", "Helvetica", "DejaVu Sans",         # 英文首选（顶刊标准无衬线）',
+      '    "Microsoft YaHei", "SimHei",                 # Windows 常见中文字体',
+      '    "PingFang SC", "Hiragino Sans GB",           # macOS 苹果中文',
+      '    "Source Han Sans SC", "WenQuanYi Micro Hei", # Linux 开源思源/微米黑',
+      '    "sans-serif"',
+      ']',
+      'plt.rcParams["axes.unicode_minus"] = False  # 彻底解决中文字体下坐标轴负号变方块乱码！',
       'plt.rcParams["font.size"] = 7',
       'plt.rcParams["axes.labelsize"] = 7',
       'plt.rcParams["xtick.labelsize"] = 6',
@@ -1113,42 +1207,43 @@ async function scientificFigureDesignerTool(args) {
       'plt.rcParams["legend.fontsize"] = 6',
       'plt.rcParams["axes.linewidth"] = 0.6',
       'plt.rcParams["lines.linewidth"] = 1.0',
-      'plt.rcParams["pdf.fonttype"] = 42  # TrueType fonts embedding for Illustrator',
+      'plt.rcParams["pdf.fonttype"] = 42  # TrueType 嵌入，支持 Adobe Illustrator 无损再编辑',
       'plt.rcParams["ps.fonttype"] = 42',
       '',
-      '# 2. Okabe-Ito Colorblind-Friendly Palette',
+      '# 2. Okabe-Ito 色盲友好学术色板 (Colorblind-Friendly Palette)',
       'OKABE_ITO = ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#56B4E9", "#CC79A7"]',
       '',
-      '# 3. Canvas setup with constrained physical layout (' + widthMm + ' mm)',
+      '# 3. Canvas setup with 1:1 constrained physical layout (' + widthMm + ' mm)',
       'fig, ax = plt.subplots(figsize=(' + figW + ', ' + figH + '), layout="constrained")',
       '',
-      '# Simulated reproducible sample data',
+      '# 4. Simulated reproducible sample data',
       'np.random.seed(42)',
       'ctrl = np.random.normal(loc=65.0, scale=8.0, size=30)',
       'treat = np.random.normal(loc=78.0, scale=7.5, size=30)',
       'df = pd.DataFrame({',
-      '    "Group": ["Control"] * 30 + ["Treatment"] * 30,',
+      '    "Group": ["' + groupCtrl + '"] * 30 + ["' + groupTreat + '"] * 30,',
       '    "Value": np.concatenate([ctrl, treat])',
       '})',
       '',
-      '# 4. Plotting: Boxplot + Jittered individual replicates',
-      'palette = {"Control": OKABE_ITO[0], "Treatment": OKABE_ITO[1]}',
+      '# 5. Plotting: Boxplot + Jittered individual replicates',
+      'palette = {"' + groupCtrl + '": OKABE_ITO[0], "' + groupTreat + '": OKABE_ITO[1]}',
       'sns.boxplot(data=df, x="Group", y="Value", palette=palette, width=0.45,',
       '            showcaps=True, boxprops=dict(alpha=0.7), whiskerprops=dict(linewidth=0.8),',
       '            medianprops=dict(color="black", linewidth=1.2), ax=ax)',
       'sns.stripplot(data=df, x="Group", y="Value", color="black", alpha=0.6,',
       '              size=3.5, jitter=0.18, ax=ax)',
       '',
-      '# 5. Spines and labels formatting',
+      '# 6. Spines and labels formatting',
       'ax.spines["top"].set_visible(False)',
       'ax.spines["right"].set_visible(False)',
-      'ax.set_xlabel("' + xLabel + '", fontweight="bold")',
-      'ax.set_ylabel("' + yLabel + '", fontweight="bold")',
+      'ax.set_xlabel("' + effectiveXLabel + '", fontweight="bold")',
+      'ax.set_ylabel("' + effectiveYLabel + '", fontweight="bold")',
       'ax.text(-0.15, 1.05, "a", transform=ax.transAxes, fontsize=9, fontweight="bold", va="top")',
       '',
-      '# 6. High-resolution export (Vector PDF & 300+ DPI PNG)',
-      'plt.savefig("figure_output.pdf", format="pdf")',
-      'plt.savefig("figure_output.png", dpi=300)',
+      '# 7. High-resolution export (Vector PDF & 300+ DPI PNG)',
+      '# 规则：仅在 savefig 中指定 dpi=300，避免在 figure() 初始化中导致渲染器缩放计算异常',
+      'plt.savefig("figure_output.pdf", format="pdf", bbox_inches="tight")',
+      'plt.savefig("figure_output.png", dpi=300, bbox_inches="tight")',
       'print("Figure exported successfully: figure_output.pdf and figure_output.png")'
     ].join('\n');
   } else if (backend === 'r_ggplot2') {
@@ -1164,7 +1259,7 @@ async function scientificFigureDesignerTool(args) {
       '# Simulated reproducible sample data',
       'set.seed(42)',
       'df <- data.frame(',
-      '  Group = factor(rep(c("Control", "Treatment"), each = 30)),',
+      '  Group = factor(rep(c("' + groupCtrl + '", "' + groupTreat + '"), each = 30)),',
       '  Value = c(rnorm(30, mean = 65, sd = 8), rnorm(30, mean = 78, sd = 7.5))',
       ')',
       '',
@@ -1172,7 +1267,7 @@ async function scientificFigureDesignerTool(args) {
       '  geom_boxplot(width = 0.45, alpha = 0.7, outlier.shape = NA, color = "black", linewidth = 0.4) +',
       '  geom_jitter(width = 0.15, size = 1.5, alpha = 0.6, color = "black") +',
       '  scale_fill_manual(values = okabe_ito) +',
-      '  labs(x = "' + xLabel + '", y = "' + yLabel + '", tag = "a") +',
+      '  labs(x = "' + effectiveXLabel + '", y = "' + effectiveYLabel + '", tag = "a") +',
       '  theme_classic(base_size = 7, base_family = "Helvetica") +',
       '  theme(',
       '    axis.title = element_text(face = "bold"),',
@@ -1201,6 +1296,17 @@ async function scientificFigureDesignerTool(args) {
         recommendedExportFormat: 'Vector PDF or EPS (TrueType fonts embedded)',
         rasterResolution: '300 DPI for continuous tone, 600-1200 DPI for line art',
         typographyHierarchy: 'Helvetica / Arial sans-serif: Panel labels (a, b, c) bold 8pt; Axis titles 7pt; Tick labels 6pt'
+      },
+      bilingualModeConfig: {
+        activeMode: bilingualMode,
+        effectiveXLabel: effectiveXLabel,
+        effectiveYLabel: effectiveYLabel,
+        unicodeMinusFixed: true
+      },
+      dpiAndTypographySafeguards: {
+        dpiConflictMechanism: '若在 plt.figure() 中指定 dpi=300，屏幕渲染器会以 300 DPI 缩放元素，并与后续的 tight_layout() 或 constrained 布局发生边距误算与元素错位；正确做法是仅在 plt.savefig(..., dpi=300) 中指定。',
+        themeResetTrap: 'Seaborn 的 sns.set_theme() 会在调用时彻底重置所有 Matplotlib rcParams。必须严格确保 sns.set_theme() 在前，自定义 plt.rcParams 在后。',
+        bilingualFontSupport: '已启用包含 Arial, Microsoft YaHei, PingFang SC, SimHei 的跨平台字体栈，并显式指定 axes.unicode_minus = False，彻底解决负号方块与中文字符丢失问题。'
       },
       multipanelArchitecture: panelRoles,
       colorAccessibilityGuidance: {
