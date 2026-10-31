@@ -2,6 +2,9 @@
 // Copy follows the host language only (GET /app-context); anything else falls back to English.
 const MESSAGES = {
   "en": {
+    ruleNeedsQuestion: "Write a question for the decision model first.",
+    ruleNeedsQuestionOrKeyword: "Add a question or at least one keyword first.",
+    ruleNeedsOption: "Each option needs a name and a model, and the rule needs at least one option.",
     storeLoadFailed: "Could not load rules: {error}.",
     storeSaveFailed: "Could not save: {error}. Your change was not applied.",
     storeRetry: "Try again",
@@ -96,6 +99,9 @@ const MESSAGES = {
     tipB: "and it adds the rule here for you to edit.",
   },
   "zh-CN": {
+    ruleNeedsQuestion: "请先写一句交给决策模型判断的问题。",
+    ruleNeedsQuestionOrKeyword: "请先写问题，或至少添加一个关键词。",
+    ruleNeedsOption: "至少要有一个选项，每个选项都要有名称和模型。",
     storeLoadFailed: "读取规则失败：{error}。",
     storeSaveFailed: "保存失败：{error}。这次改动没有生效。",
     storeRetry: "重试",
@@ -190,6 +196,9 @@ const MESSAGES = {
     tipB: "，AI 会把规则加到这里，你可以再改。",
   },
   "ja": {
+    ruleNeedsQuestion: "先に判断モデルへの質問を書いてください。",
+    ruleNeedsQuestionOrKeyword: "先に質問を書くか、キーワードを 1 つ以上追加してください。",
+    ruleNeedsOption: "選択肢が 1 つ以上必要で、各選択肢に名前とモデルが必要です。",
     storeLoadFailed: "ルールを読み込めませんでした: {error}。",
     storeSaveFailed: "保存できませんでした: {error}。変更は適用されていません。",
     storeRetry: "再試行",
@@ -284,6 +293,9 @@ const MESSAGES = {
     tipB: "AI がここにルールを追加し、あとから編集できます。",
   },
   "ko": {
+    ruleNeedsQuestion: "먼저 판단 모델에 물을 질문을 쓰세요.",
+    ruleNeedsQuestionOrKeyword: "먼저 질문을 쓰거나 키워드를 하나 이상 추가하세요.",
+    ruleNeedsOption: "선택지가 하나 이상 필요하며, 각 선택지에는 이름과 모델이 있어야 합니다.",
     storeLoadFailed: "규칙을 불러오지 못했습니다: {error}.",
     storeSaveFailed: "저장하지 못했습니다: {error}. 변경 사항이 적용되지 않았습니다.",
     storeRetry: "다시 시도",
@@ -409,6 +421,9 @@ let editingJudge = false;
 let loaded = false; // the stored config was read successfully
 let stored = '{}'; // last config known to be in the store
 let storeError = '';
+let ruleError = '';
+let tryRun = 0;
+let unsavedKey = '';
 let openId = null; // rule being edited
 let draft = null; // working copy
 let tryText = '';
@@ -458,6 +473,8 @@ function migrate(raw) {
   return out;
 }
 
+// The brain and this page rewrite the whole config: one lock keeps either from writing back a stale copy.
+const withConfigLock = (fn) => (navigator.locks ? navigator.locks.request('decision-gate-config', fn) : fn());
 async function readStore() {
   const res = await fetch('/kv');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -466,11 +483,14 @@ async function readStore() {
 // Returns whether the change landed. On failure the page goes back to what is stored.
 async function save() {
   try {
-    // The brain writes lastByRule: re-read before saving and overwrite only rules and judge settings.
-    const latest = await readStore();
-    const next = { ...cfg, lastByRule: latest.lastByRule || cfg.lastByRule || {} };
-    const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const next = await withConfigLock(async () => {
+      // The brain writes lastByRule: re-read before saving and overwrite only rules and judge settings.
+      const latest = await readStore();
+      const merged = { ...cfg, lastByRule: latest.lastByRule || cfg.lastByRule || {} };
+      const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(merged) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return merged;
+    });
     cfg = next;
     stored = JSON.stringify(next);
     storeError = '';
@@ -525,13 +545,22 @@ function judgeSection() {
     const id = providerId();
     group.append(h('div', { class: 'row' }, h('div', { class: 'grow' }, h('p', {}, t('use'))),
       seg(Object.entries(PROVIDERS).map(([key, v]) => [key, v.name]), id, async (key) => { cfg.provider = key; await save(); render(); if (key === 'jev') loadJevModels(); }, t('judgeModelLabel'))));
-    const keyInput = h('input', { class: 'pill', type: 'password', autocomplete: 'off', placeholder: saved ? t('keyReplace') : t('keyPaste', { label: p.keyLabel }), 'aria-label': p.keyLabel });
+    const keyInput = h('input', { class: 'pill', type: 'password', autocomplete: 'off', value: unsavedKey, placeholder: saved ? t('keyReplace') : t('keyPaste', { label: p.keyLabel }), 'aria-label': p.keyLabel });
     group.append(h('form', {
       class: 'row', onsubmit: async (e) => {
         e.preventDefault();
         const value = keyInput.value.trim();
         if (!value) return;
-        await fetch(`/secrets/${p.key}`, { method: 'PUT', body: JSON.stringify({ value }) });
+        try {
+          const res = await fetch(`/secrets/${p.key}`, { method: 'PUT', body: JSON.stringify({ value }) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          unsavedKey = '';
+          storeError = '';
+        } catch (error) {
+          // Keep what was typed so it can be retried.
+          unsavedKey = value;
+          storeError = t('storeSaveFailed', { error: error && error.message });
+        }
         await loadSecrets();
         render();
       },
@@ -666,8 +695,9 @@ function editor() {
 
   parts.push(h('div', { class: 'edfoot' },
     h('button', { class: 'btn quiet', type: 'button', onclick: removeRule }, svg(ICON.trash, 14), t('delete')),
-    h('span', { class: 'line' }, h('button', { class: 'btn', type: 'button', onclick: () => { openId = null; draft = null; tryState = null; render(); } }, t('cancel')),
+    h('span', { class: 'line' }, h('button', { class: 'btn', type: 'button', onclick: () => { openId = null; draft = null; tryState = null; ruleError = ''; render(); } }, t('cancel')),
       h('button', { class: 'btn cta', type: 'button', onclick: commitRule }, t('save')))));
+  if (ruleError) parts.push(h('p', { class: 'res err' }, ruleError));
   return h('div', { class: 'ed' }, ...parts);
 }
 
@@ -677,8 +707,18 @@ function normalizeDraft(d) {
   else { d.options = (d.options || []).filter((o) => o.label); delete d.keywords; delete d.action; }
   return d;
 }
+function ruleProblem(d) {
+  if (d.type === 'choice') {
+    if (!d.question?.trim()) return t('ruleNeedsQuestion');
+    return d.options?.length && d.options.every((o) => o.route) ? '' : t('ruleNeedsOption');
+  }
+  if (d.point === 'will-start-task') return d.question?.trim() ? '' : t('ruleNeedsQuestion');
+  return d.question?.trim() || d.keywords?.length ? '' : t('ruleNeedsQuestionOrKeyword');
+}
 async function commitRule() {
   const d = normalizeDraft(draft);
+  ruleError = ruleProblem(d);
+  if (ruleError) { render(); return; }
   const i = cfg.rules.findIndex((r) => r.id === d.id);
   if (i >= 0) cfg.rules[i] = d; else cfg.rules.push(d);
   // Keep the editor open if saving fails, so the edit is not lost.
@@ -692,6 +732,10 @@ async function removeRule() {
 }
 async function runTry() {
   if (!tryText.trim()) return;
+  // A late reply must not land in another rule's editor.
+  const run = ++tryRun;
+  const ruleId = draft.id;
+  const current = () => run === tryRun && draft?.id === ruleId;
   tryState = { busy: true }; render();
   try {
     const rule = normalizeDraft(JSON.parse(JSON.stringify(draft)));
@@ -700,8 +744,10 @@ async function runTry() {
     const sample = models.find((m) => m.visible !== false && m.efforts?.length);
     const route = sample ? { agentKind: AGENT_KIND[sample.agent], model: sample.id, providerId: sample.providerId } : {};
     const res = await ask('try', { ruleId: rule.id, text: tryText.trim(), config, route });
+    if (!current()) return;
     tryState = { result: res.result };
   } catch (error) {
+    if (!current()) return;
     tryState = { error: error.message };
   }
   render();
@@ -711,10 +757,16 @@ function ruleRow(rule) {
   const open = openId === rule.id;
   return h('div', { class: `rule ${rule.enabled === false ? 'off' : ''}` },
     h('div', { class: 'rtop' },
-      toggle(rule.enabled !== false, t('enableRule'), async () => { rule.enabled = rule.enabled === false; await save(); render(); }),
+      toggle(rule.enabled !== false, t('enableRule'), async () => {
+        const enabled = rule.enabled === false;
+        rule.enabled = enabled;
+        // The open editor must not bring the old state back when it is saved.
+        if (await save() && draft?.id === rule.id) draft.enabled = enabled;
+        render();
+      }),
       h('button', { class: 'rbody', type: 'button', 'aria-expanded': String(open), onclick: () => {
         if (open) { openId = null; draft = null; } else { openId = rule.id; draft = JSON.parse(JSON.stringify(rule)); }
-        tryState = null; render();
+        tryState = null; ruleError = ''; render();
       } }, h('div', { class: 'grow' }, ...summary(open ? draft : rule), h('p', { class: 'meta' }, lastLine(rule))), h('span', { class: `chev ${open ? 'up' : ''}` }, svg(ICON.chevron, 16)))),
     open ? editor() : null);
 }
@@ -724,7 +776,7 @@ function rulesSection() {
     h('div', { class: 'sh' }, h('div', {}, h('p', { class: 'st' }, t('rulesTitle')), h('p', { class: 'sd' }, t('rulesDesc'))),
       h('button', { class: 'btn', type: 'button', onclick: () => {
         draft = { id: newId(), point: 'will-start-task', type: 'choice', enabled: true, question: '', options: [], threshold: 0.6 };
-        openId = draft.id; tryState = null; render();
+        openId = draft.id; tryState = null; ruleError = ''; render();
       } }, svg(ICON.plus, 14), t('addRule'))));
   const pending = draft && !cfg.rules.some((r) => r.id === draft.id) ? draft : null;
   for (const point of POINTS) {

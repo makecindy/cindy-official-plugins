@@ -9,6 +9,10 @@ const DEFAULT_MODELS = { jev: 'jev-latest', openai: 'gpt-6-luna' };
 const AGENT_KIND = { 'claude-code': 'cc', codex: 'codex', pi: 'pi' };
 const MESSAGES = {
   "en": {
+    modelAmbiguous: "“{model}” matches several models: {candidates}. Pass model with agent and providerId from availableModels.",
+    serviceAuth: "The API key was rejected. Check or replace it under Judged by.",
+    serviceLimit: "The judge service limit or quota was reached. Try again later or check your plan.",
+    serviceDown: "The judge service is temporarily unavailable. Please try again later.",
     whyNoRules: "no rules are enabled",
     whyNoQuestions: "no rule needs the model",
     whyUnsure: "no rule was confident enough",
@@ -37,6 +41,10 @@ const MESSAGES = {
     effort_ultra: "Ultra",
   },
   "zh-CN": {
+    modelAmbiguous: "「{model}」对应多个模型：{candidates}。请按 availableModels 同时传 model、agent 和 providerId。",
+    serviceAuth: "API Key 被拒绝。请在「判断用」里检查或更换。",
+    serviceLimit: "判断服务达到限额或额度不足。请稍后再试，或检查套餐。",
+    serviceDown: "判断服务暂时不可用，请稍后再试。",
     whyNoRules: "没有启用的规则",
     whyNoQuestions: "没有需要模型判断的规则",
     whyUnsure: "没有规则有把握",
@@ -65,6 +73,10 @@ const MESSAGES = {
     effort_ultra: "极致",
   },
   "ja": {
+    modelAmbiguous: "「{model}」は複数のモデルに一致します: {candidates}。availableModels の model、agent、providerId を指定してください。",
+    serviceAuth: "API キーが拒否されました。判断モデルの設定で確認または変更してください。",
+    serviceLimit: "判断サービスの上限またはクォータに達しました。後でもう一度試すか、プランを確認してください。",
+    serviceDown: "判断サービスは一時的に利用できません。後でもう一度お試しください。",
     whyNoRules: "有効なルールがありません",
     whyNoQuestions: "モデルの判断が必要なルールがありません",
     whyUnsure: "確信できるルールがありません",
@@ -93,6 +105,10 @@ const MESSAGES = {
     effort_ultra: "ウルトラ",
   },
   "ko": {
+    modelAmbiguous: "“{model}”에 해당하는 모델이 여러 개입니다: {candidates}. availableModels의 model, agent, providerId를 함께 전달하세요.",
+    serviceAuth: "API 키가 거부되었습니다. 판단 모델 설정에서 확인하거나 교체하세요.",
+    serviceLimit: "판단 서비스 한도 또는 할당량에 도달했습니다. 나중에 다시 시도하거나 요금제를 확인하세요.",
+    serviceDown: "판단 서비스를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
     whyNoRules: "사용 중인 규칙이 없습니다",
     whyNoQuestions: "모델 판단이 필요한 규칙이 없습니다",
     whyUnsure: "확신할 수 있는 규칙이 없습니다",
@@ -129,6 +145,9 @@ async function loadLocale() {
   locale = MESSAGES[next] ? next : 'en';
 }
 const effortName = (effort) => (MESSAGES.en[`effort_${effort}`] ? t(`effort_${effort}`) : effort);
+
+// The brain and the settings page rewrite the whole config: one lock keeps either from writing back a stale copy.
+const withConfigLock = (fn) => (globalThis.navigator?.locks ? navigator.locks.request('decision-gate-config', fn) : fn());
 
 // A failed read must not look like "no rules": callers would overwrite the stored rules or allow the run.
 async function readConfig() {
@@ -182,7 +201,11 @@ const budget = (deadline) => Math.max(1000, Math.min(deadline - Date.now() - 150
 async function post(url, body, deadline) {
   const r = await cindy.fetch({ url, method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: budget(deadline), body: JSON.stringify(body) });
   if (!r.ok) throw new Error(r.message || t('requestFailed'));
-  if (r.status !== 200) throw new Error(`HTTP ${r.status}：${String(r.body).slice(0, 200)}`);
+  if (r.status !== 200) {
+    const hint = r.status === 401 || r.status === 403 ? 'serviceAuth' : r.status === 402 || r.status === 429 ? 'serviceLimit' : r.status >= 500 ? 'serviceDown' : null;
+    const detail = `HTTP ${r.status}: ${String(r.body).slice(0, 200)}`;
+    throw new Error(hint ? `${t(hint)} (${detail})` : detail);
+  }
   return JSON.parse(r.body);
 }
 
@@ -283,9 +306,11 @@ async function decide(point, data, deadline, cfg) {
 async function recordLast(result) {
   if (!result.ruleId) return;
   try {
-    const cfg = await readConfig();
-    cfg.lastByRule = { ...(cfg.lastByRule || {}), [result.ruleId]: { at: Date.now(), summary: result.summary } };
-    await writeConfig(cfg);
+    await withConfigLock(async () => {
+      const cfg = await readConfig();
+      cfg.lastByRule = { ...(cfg.lastByRule || {}), [result.ruleId]: { at: Date.now(), summary: result.summary } };
+      await writeConfig(cfg);
+    });
   } catch { /* display only */ }
 }
 
@@ -307,12 +332,15 @@ cindy.onHostMessage(async (msg) => {
 });
 
 // ── Tools the Agent can call: list, save and delete rules ──────────────────────
-function findModel(models, query) {
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return null;
-  const exact = models.filter((m) => m.id.toLowerCase() === q || m.name.toLowerCase() === q);
-  const pool = exact.length ? exact : models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-  return pool.find((m) => m.visible !== false) || pool[0] || null;
+// The same model can exist under several engines and providers: never pick one of them silently.
+function findModels(models, option) {
+  const q = String(option.model || '').trim().toLowerCase();
+  if (!q) return [];
+  const scoped = models.filter((m) => (!option.agent || m.agent === option.agent) && (!option.providerId || m.providerId === option.providerId));
+  const exact = scoped.filter((m) => m.id.toLowerCase() === q || m.name.toLowerCase() === q);
+  const pool = exact.length ? exact : scoped.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+  const visible = pool.filter((m) => m.visible !== false);
+  return visible.length ? visible : pool;
 }
 
 function routeOf(model, effort) {
@@ -324,8 +352,8 @@ function routeOf(model, effort) {
 async function handleTool(msg) {
   const reply = (ok, payload) => cindy.send({ type: 'tool-result', callId: msg.callId, ok, ...(ok ? { result: payload } : payload) });
   try {
-    const cfg = await readConfig();
     if (msg.tool === 'list_rules') {
+      const cfg = await readConfig();
       const models = await agentModels();
       return reply(true, {
         judge: usesOpenAi(cfg) ? 'OpenAI Decisions' : 'TypeSafe Jev',
@@ -343,8 +371,13 @@ async function handleTool(msg) {
         const models = await agentModels();
         rule.options = [];
         for (const option of a.options) {
-          const model = findModel(models, option.model);
-          if (!model) return reply(false, { errorCode: 'MODEL_NOT_FOUND', message: t('modelNotFound', { model: option.model }) });
+          const found = findModels(models, option);
+          if (!found.length) return reply(false, { errorCode: 'MODEL_NOT_FOUND', message: t('modelNotFound', { model: option.model }) });
+          if (found.length > 1) {
+            const candidates = found.map((m) => `${m.name} (agent: ${m.agent}, providerId: ${m.providerId})`).join('; ');
+            return reply(false, { errorCode: 'MODEL_AMBIGUOUS', message: t('modelAmbiguous', { model: option.model, candidates }) });
+          }
+          const [model] = found;
           rule.options.push({ label: option.label, ...(option.description ? { description: option.description } : {}), route: routeOf(model, option.effort) });
         }
         rule.threshold = typeof a.threshold === 'number' ? a.threshold : 0.6;
@@ -353,9 +386,12 @@ async function handleTool(msg) {
         rule.threshold = typeof a.threshold === 'number' ? a.threshold : 0.7;
         if (a.point !== 'will-start-task' && Array.isArray(a.keywords)) rule.keywords = a.keywords;
       }
-      const index = cfg.rules.findIndex((r) => r.id === rule.id);
-      if (index >= 0) cfg.rules[index] = rule; else cfg.rules.push(rule);
-      await writeConfig(cfg);
+      await withConfigLock(async () => {
+        const cfg = await readConfig();
+        const index = cfg.rules.findIndex((r) => r.id === rule.id);
+        if (index >= 0) cfg.rules[index] = rule; else cfg.rules.push(rule);
+        await writeConfig(cfg);
+      });
       return reply(true, {
         saved: rule,
         note: a.point === 'will-start-task'
@@ -364,10 +400,15 @@ async function handleTool(msg) {
       });
     }
     if (msg.tool === 'delete_rule') {
-      const before = cfg.rules.length;
-      cfg.rules = cfg.rules.filter((r) => r.id !== msg.args?.id);
-      if (cfg.rules.length === before) return reply(false, { errorCode: 'RULE_NOT_FOUND', message: t('ruleNotFound') });
-      await writeConfig(cfg);
+      const deleted = await withConfigLock(async () => {
+        const cfg = await readConfig();
+        const before = cfg.rules.length;
+        cfg.rules = cfg.rules.filter((r) => r.id !== msg.args?.id);
+        if (cfg.rules.length === before) return false;
+        await writeConfig(cfg);
+        return true;
+      });
+      if (!deleted) return reply(false, { errorCode: 'RULE_NOT_FOUND', message: t('ruleNotFound') });
       return reply(true, { deleted: msg.args.id });
     }
     return reply(false, { errorCode: 'UNKNOWN_TOOL', message: t('unknownTool', { tool: msg.tool }) });

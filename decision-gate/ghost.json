@@ -101,7 +101,15 @@
                 },
                 "model": {
                   "type": "string",
-                  "description": "这个选项用的模型，填 list_rules 的 availableModels 里的 id 或名称"
+                  "description": "这个选项用的模型，填 list_rules 的 availableModels 里的 id 或名称；同名模型有多个来源时，要同时传 agent 和 providerId"
+                },
+                "agent": {
+                  "type": "string",
+                  "description": "可选，availableModels 里该模型的 agent，用于区分同名模型"
+                },
+                "providerId": {
+                  "type": "string",
+                  "description": "可选，availableModels 里该模型的 providerId，用于区分同名模型"
                 },
                 "effort": {
                   "type": "string",
