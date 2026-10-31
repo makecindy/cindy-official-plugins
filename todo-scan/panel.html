@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- The Host injects color-scheme and CSP; this page loads only its own files. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todo Scan</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <!-- No title bar: the Host draws the standard header above this document. -->
+  <header class="toolbar">
+    <div class="summary" aria-live="polite" id="summary">No scan yet</div>
+    <button type="button" class="ghost-button" id="refresh" title="Ask the plugin for its current state">Refresh</button>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filter by marker type">
+    <button type="button" class="chip is-active" data-filter="" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-filter="TODO" aria-pressed="false">TODO</button>
+    <button type="button" class="chip" data-filter="FIXME" aria-pressed="false">FIXME</button>
+    <button type="button" class="chip" data-filter="HACK" aria-pressed="false">HACK</button>
+    <button type="button" class="chip" data-filter="XXX" aria-pressed="false">XXX</button>
+  </div>
+
+  <main id="list" class="list" aria-label="Marker items">
+    <p class="empty" id="empty">Run a scan in chat and its results appear here.</p>
+  </main>
+
+  <footer class="footer">
+    <span id="counts">0 open</span>
+    <button type="button" class="ghost-button" id="toggle-markdown" aria-expanded="false" aria-controls="markdown">Show markdown</button>
+  </footer>
+  <textarea id="markdown" class="markdown" readonly hidden aria-label="Unresolved items as a markdown checklist"></textarea>
+
+  <script src="panel.js"></script>
+</body>
+</html>
