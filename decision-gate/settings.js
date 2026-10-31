@@ -460,6 +460,27 @@ const routeLabel = (route) => route ? `${route.modelName || route.model}${route.
 
 const withRules = (raw) => ({ ...raw, rules: Array.isArray(raw.rules) ? raw.rules : [] });
 
+// The model this plugin adds to the new task picker. Published only once a rule can actually decide.
+const PICKER_MODEL = {
+  id: 'by-rules',
+  name: 'Pick by rules',
+  description: 'Picks a model for a new task from your rules',
+  locales: {
+    'zh-CN': { name: '按规则选模型', description: '开新任务时，按你写的规则选模型' },
+    ja: { name: 'ルールで選ぶ', description: '新しいタスクのモデルをルールで選びます' },
+    ko: { name: '규칙으로 선택', description: '새 작업의 모델을 규칙에 따라 고릅니다' },
+  },
+  target: { type: 'route' },
+};
+async function publishModels(config) {
+  const list = await fetch('/secrets').then((r) => r.json()).catch(() => []);
+  // The judge in use needs its key, not just any key. Same default as usesOpenAi: OpenAI unless Jev was chosen.
+  const keyName = config.provider === 'jev' ? 'typesafe_api_key' : 'openai_api_key';
+  const keySaved = list.some((s) => s.key === keyName && s.saved);
+  const ready = keySaved && config.rules.some((r) => r.point === 'will-start-task' && r.enabled !== false);
+  // Hosts before model publishing answer with an error here; the rest of the plugin still works.
+  await fetch('/models', { method: 'PUT', body: JSON.stringify({ models: ready ? [PICKER_MODEL] : [] }) }).catch(() => {});
+}
 // The brain and this page rewrite the whole config: one lock keeps either from writing back a stale copy.
 const withConfigLock = (fn) => (navigator.locks ? navigator.locks.request('decision-gate-config', fn) : fn());
 async function readStore() {
@@ -502,6 +523,7 @@ async function save() {
     stored = JSON.stringify(next);
     storeError = '';
     channel.postMessage({ from: 'settings', type: 'config-changed' });
+    await publishModels(next);
     return true;
   } catch (error) {
     cfg = JSON.parse(stored);
@@ -569,6 +591,7 @@ function judgeSection() {
           storeError = t('storeSaveFailed', { error: error && error.message });
         }
         await loadSecrets();
+        await publishModels(cfg);
         render();
       },
     }, h('div', { class: 'grow' }, h('p', {}, p.keyLabel), h('p', { class: 'meta', style: 'margin-top:2px' }, saved ? t('keyStored') : t('notSet')),
@@ -856,6 +879,8 @@ async function boot() {
   // Same default as the brain; saved here so the page and the actual judge agree.
   if (!cfg.provider) { cfg.provider = secrets.openai_api_key || !secrets.typesafe_api_key ? 'openai' : 'jev'; await save(); }
   render();
+  // The brain only starts when it is needed, so the page keeps the published list current too.
+  publishModels(cfg);
   if (providerId() === 'jev') loadJevModels();
 }
 boot();

@@ -27,7 +27,7 @@ const MESSAGES = {
     badPoint: "point must be will-start-task, will-schedule-run or will-routine-run",
     noQuestion: "question is missing: write one question for the decision model",
     modelNotFound: "Model “{model}” was not found. Check availableModels with list_rules and use an id or name from it.",
-    noteStart: "Saved. It checks only the first message of a new task, once. The user must choose “Let a plugin choose” in the new task model picker for it to apply.",
+    noteStart: "Saved. It checks only the first message of a new task, once. The user must choose “Pick by rules” in the new task model picker for it to apply.",
     noteRun: "Saved. The user must choose Plugin → Decision Gate in that automation or routine’s pre-run check for it to apply.",
     ruleNotFound: "This rule does not exist. Get its id with list_rules first.",
     unknownTool: "Unknown tool {tool}",
@@ -60,7 +60,7 @@ const MESSAGES = {
     badPoint: "point 必须是 will-start-task / will-schedule-run / will-routine-run 之一",
     noQuestion: "缺少 question：写一句交给决策模型判断的问题",
     modelNotFound: "找不到模型「{model}」。先用 list_rules 看 availableModels，再按其中的 id 或名称填写。",
-    noteStart: "已保存。只在新任务的第一条消息判断一次；用户需要在新任务的模型选择器里选「让插件选」才会生效。",
+    noteStart: "已保存。只在新任务的第一条消息判断一次；用户需要在新任务的模型选择器里选「按规则选模型」才会生效。",
     noteRun: "已保存。用户需要在对应自动化或例行任务的「前置检查」里选「插件 → 决策闸门」才会生效。",
     ruleNotFound: "没有这条规则，先用 list_rules 查 id",
     unknownTool: "未知工具 {tool}",
@@ -93,7 +93,7 @@ const MESSAGES = {
     badPoint: "point は will-start-task / will-schedule-run / will-routine-run のいずれかにしてください",
     noQuestion: "question がありません。判断モデルへの質問を 1 つ書いてください",
     modelNotFound: "モデル「{model}」が見つかりません。list_rules の availableModels を確認し、その id か名前を指定してください。",
-    noteStart: "保存しました。新しいタスクの最初のメッセージで一度だけ判断します。適用するには、新しいタスクのモデル選択で「プラグインに任せる」を選ぶ必要があります。",
+    noteStart: "保存しました。新しいタスクの最初のメッセージで一度だけ判断します。適用するには、新しいタスクのモデル選択で「ルールで選ぶ」を選ぶ必要があります。",
     noteRun: "保存しました。適用するには、その自動化またはルーティンの実行前チェックで「プラグイン → Decision Gate」を選ぶ必要があります。",
     ruleNotFound: "このルールはありません。先に list_rules で id を確認してください",
     unknownTool: "不明なツール {tool}",
@@ -126,7 +126,7 @@ const MESSAGES = {
     badPoint: "point는 will-start-task / will-schedule-run / will-routine-run 중 하나여야 합니다",
     noQuestion: "question이 없습니다. 판단 모델에 물을 질문을 하나 쓰세요",
     modelNotFound: "모델 “{model}”을 찾을 수 없습니다. list_rules의 availableModels에서 id나 이름을 확인해 쓰세요.",
-    noteStart: "저장했습니다. 새 작업의 첫 메시지에서 한 번만 판단합니다. 적용하려면 새 작업의 모델 선택기에서 “플러그인에 맡기기”를 골라야 합니다.",
+    noteStart: "저장했습니다. 새 작업의 첫 메시지에서 한 번만 판단합니다. 적용하려면 새 작업의 모델 선택기에서 “규칙으로 선택”를 골라야 합니다.",
     noteRun: "저장했습니다. 적용하려면 해당 자동화나 루틴의 실행 전 확인에서 “플러그인 → Decision Gate”를 골라야 합니다.",
     ruleNotFound: "이 규칙이 없습니다. 먼저 list_rules로 id를 확인하세요",
     unknownTool: "알 수 없는 도구 {tool}",
@@ -164,6 +164,28 @@ async function writeConfig(cfg) {
   const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(cfg) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   channel.postMessage({ from: 'brain', type: 'config-changed' });
+}
+
+// The model this plugin adds to the new task picker. Published only once a rule can actually decide.
+const PICKER_MODEL = {
+  id: 'by-rules',
+  name: 'Pick by rules',
+  description: 'Picks a model for a new task from your rules',
+  locales: {
+    'zh-CN': { name: '按规则选模型', description: '开新任务时，按你写的规则选模型' },
+    ja: { name: 'ルールで選ぶ', description: '新しいタスクのモデルをルールで選びます' },
+    ko: { name: '규칙으로 선택', description: '새 작업의 모델을 규칙에 따라 고릅니다' },
+  },
+  target: { type: 'route' },
+};
+async function publishModels(config) {
+  const list = await fetch('/secrets').then((r) => r.json()).catch(() => []);
+  // The judge in use needs its key, not just any key. Same default as usesOpenAi: OpenAI unless Jev was chosen.
+  const keyName = config.provider === 'jev' ? 'typesafe_api_key' : 'openai_api_key';
+  const keySaved = list.some((s) => s.key === keyName && s.saved);
+  const ready = keySaved && config.rules.some((r) => r.point === 'will-start-task' && r.enabled !== false);
+  // Hosts before model publishing answer with an error here; the rest of the plugin still works.
+  await fetch('/models', { method: 'PUT', body: JSON.stringify({ models: ready ? [PICKER_MODEL] : [] }) }).catch(() => {});
 }
 
 // Rule ids are sent to the decision API as question names.
@@ -381,6 +403,7 @@ async function handleTool(msg) {
         const index = cfg.rules.findIndex((r) => r.id === rule.id);
         if (index >= 0) cfg.rules[index] = rule; else cfg.rules.push(rule);
         await writeConfig(cfg);
+        await publishModels(cfg);
       });
       return reply(true, {
         saved: rule,
@@ -396,6 +419,7 @@ async function handleTool(msg) {
         cfg.rules = cfg.rules.filter((r) => r.id !== msg.args?.id);
         if (cfg.rules.length === before) return false;
         await writeConfig(cfg);
+        await publishModels(cfg);
         return true;
       });
       if (!deleted) return reply(false, { errorCode: 'RULE_NOT_FOUND', message: t('ruleNotFound') });
@@ -433,3 +457,6 @@ channel.onmessage = async ({ data: req }) => {
     reply({ ok: false, message: String((error && error.message) || error) });
   }
 };
+
+// The picker reads the last published list, so a stale one is only ever one start away from fixed.
+readConfig().then(publishModels).catch(() => {});
