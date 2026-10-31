@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 3,
+  "id": "decision-gate",
+  "name": "决策闸门",
+  "description": "按你写的规则做决定：开新任务时替你选模型，自动化和例行任务运行前判断这次要不要跑。判断交给决策模型（OpenAI Decisions / Jev），不占用 Agent 回合。",
+  "whenToUse": "用户想让新任务自动选模型、按任务内容换模型或推理强度，或想在自动化/例行任务运行前自动跳过无事可做的运行时找我；也可以帮用户查看、添加、修改、删除这些规则",
+  "version": "0.5.0",
+  "minCindyVersion": "0.1.122",
+  "entry": "main.js",
+  "subscribe": {
+    "hooks": [
+      "will-start-task",
+      "will-schedule-run",
+      "will-routine-run"
+    ]
+  },
+  "network": {
+    "hosts": [
+      "api.typesafe.ai",
+      "api.openai.com"
+    ],
+    "secrets": [
+      {
+        "key": "typesafe_api_key",
+        "label": "TypeSafe API Key",
+        "hint": "Used to call Jev (System One API)",
+        "url": "https://console.typesafe.ai/",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "api.typesafe.ai"
+          ]
+        }
+      },
+      {
+        "key": "openai_api_key",
+        "label": "OpenAI API Key",
+        "hint": "Used to call the Decisions API (gpt-6-luna)",
+        "url": "https://platform.openai.com/api-keys",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "api.openai.com"
+          ]
+        }
+      }
+    ]
+  },
+  "setup": {
+    "requires": []
+  },
+  "settingsHtml": "settings.html",
+  "releaseNotes": "首个官方版本：开新任务时替你选模型，自动化和例行任务运行前判断这次要不要跑。设置页和运行时文案支持中、英、日、韩。",
+  "tools": [
+    {
+      "name": "list_rules",
+      "description": "列出决策闸门的全部规则、当前使用的判断模型，以及写规则时可选的模型（availableModels）。添加或修改规则前先调用它。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "save_rule",
+      "description": "添加或修改一条规则（传 id 即修改）。规则格式：什么时候(point) → 判断什么(question，可带选项) → 怎么做。返回保存后的规则和生效条件说明，请把生效条件转告用户。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "要修改的规则 id（来自 list_rules）；新建时不传"
+          },
+          "point": {
+            "type": "string",
+            "enum": [
+              "will-start-task",
+              "will-schedule-run",
+              "will-routine-run"
+            ],
+            "description": "什么时候：will-start-task=开新任务时（只判断第一条消息一次），will-schedule-run=自动化运行前，will-routine-run=伙伴例行任务运行前"
+          },
+          "question": {
+            "type": "string",
+            "description": "交给决策模型的一句问题，用用户的说法写，例如「这条消息主要在做什么？」「这次是不是没有新情况，不用跑？」"
+          },
+          "options": {
+            "type": "array",
+            "description": "仅 will-start-task 的多选一规则：每个选项对应一个模型。不传则是“是/否”规则：开新任务时“是”=推理强度调到最高（模型不变），运行前“是”=跳过本次",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "选项名，例如「写代码」「闲聊」"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "可选，帮决策模型区分选项的一句说明"
+                },
+                "model": {
+                  "type": "string",
+                  "description": "这个选项用的模型，填 list_rules 的 availableModels 里的 id 或名称"
+                },
+                "effort": {
+                  "type": "string",
+                  "description": "可选推理强度，必须是该模型 efforts 里的值；不传用模型默认"
+                }
+              },
+              "required": [
+                "label",
+                "model"
+              ]
+            }
+          },
+          "threshold": {
+            "type": "number",
+            "description": "可选，0.5–0.9。决策模型的把握达到它才执行；多选一默认 0.6，是/否默认 0.7"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "仅运行前规则：名称或指令里含这些词时不问模型直接跳过"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用，默认 true"
+          }
+        },
+        "required": [
+          "point",
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "delete_rule",
+      "description": "删除一条规则。删除前先向用户确认是哪一条。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "规则 id（来自 list_rules）"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "icon": "assets/icon.png",
+  "author": "Chris",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  }
+}
