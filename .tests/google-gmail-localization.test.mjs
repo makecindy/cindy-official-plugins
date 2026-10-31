@@ -95,7 +95,7 @@ test('zh-CN copy is the previous Simplified Chinese text, unchanged for Chinese 
   assert.equal(worker.removedImageReferenced, '正文仍引用已移除的图片，请先在正文中删除图片');
   assert.equal(worker.draftBodyCharset, '不支持草稿正文的字符编码，请在邮箱中编辑此草稿。');
   const settings = settingsMessages['zh-CN'];
-  assert.equal(settings.scopeHint, '只授权 Gmail 权限，不会同时取得 Calendar、Drive 或 Sheets 权限。');
+  assert.equal(settings.scopeHint, '连接 Gmail 和 Google 通讯录：读写个人联系人，读取账号资料、其他联系人及可见的企业目录。已有账号需重新连接补充授权；未补充时原邮件功能仍可使用。');
   assert.equal(settings.connectedOther, '已连接 {connected}；这不是所选账号，{target} 仍需重新连接。');
   assert.equal(settings.errors.VAULT_WRITE_FAILED, '账号保存失败，请重试');
 });

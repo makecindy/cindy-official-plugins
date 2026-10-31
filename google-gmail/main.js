@@ -70,6 +70,30 @@ function fail(message) { return { ok: false, message: message }; }
 // navigator.language. Unsupported or unavailable locales fall back to English.
 var MESSAGES = {
   'zh-CN': {
+    contactText: "{name} 必须是非空文本，且不能过长。",
+    contactAction: "未知联系人操作，请查看 gmail_contacts 的参数说明。",
+    contactReadonly: "当前任务为只读，未修改 Google 通讯录。",
+    contactRuntime: "当前 Cindy 不支持联系人网络接口，请更新 Cindy。",
+    contactResource: "请使用查询返回的联系人 resourceName，不能使用 people/me 或自行拼接路径。",
+    contactPageSize: "pageSize 必须是 1–100 的整数。",
+    contactPerson: "person 至少需要一个要写入的联系人字段。",
+    contactFieldLimit: "联系人字段不支持或条目过多：{field}",
+    contactItem: "联系人字段条目必须是非空对象。",
+    contactField: "不支持的联系人字段：{field}",
+    contactValue: "{field} 需要 value。",
+    contactEmpty: "不能创建空联系人。",
+    contactUnknown: "无法确认联系人操作结果，请先核对 Google 通讯录，不要直接重试。",
+    contactReadFailed: "读取联系人失败，请检查网络连接后重试。",
+    contactPermission: "联系人权限不足或账号已失效，请到 Gmail 插件详情重新连接此账号并授权；企业目录还需组织允许访问。现有邮件功能可继续使用已获授权。",
+    contactRejected: "Google 拒绝了联系人操作，请重新读取联系人并核对字段和 etag；资料可能已经更新。",
+    contactNotFound: "联系人不存在，请重新查询并核对 resourceName。",
+    contactUnavailable: "Google 联系人服务暂时不可用，请检查网络或稍后重新读取。",
+    contactReceipt: "联系人操作已执行，但回执不完整。请先到 Google 通讯录核对，不要重复创建或修改。",
+    contactResponse: "联系人响应不完整，请缩小查询范围后重新读取。",
+    contactSearchPage: "联系人搜索不支持 pageToken；需要分页遍历时使用 list。",
+    contactChanged: "联系人已变化或不是可编辑的个人联系人，请重新读取并核对修改内容。未写入任何修改。",
+    contactFailed: "联系人操作失败，请核对 Google 通讯录中的实际状态。",
+    contactDelivery: "联系人结果未能完整返回，请先核对 Google 通讯录中的实际状态，不要重复创建、修改或删除。",
     inlineImagesType: 'inline-images 仅支持 PNG、JPEG、GIF 或 WebP 图片；其他媒体请作为普通附件。',
     accountServiceUnreachable: '无法连接 Cindy 本地账号服务，请稍后重试；若持续失败，请重新打开 Gmail 插件详情检查服务状态',
     accountServiceNoResult: 'Cindy 本地账号服务未返回结果，请稍后重试',
@@ -109,6 +133,30 @@ var MESSAGES = {
     prepareFailed: '无法准备 Gmail 操作，请检查账号和附件输入。',
   },
   en: {
+    contactText: "{name} must be nonempty text within the length limit.",
+    contactAction: "Unknown contact action. Check the gmail_contacts parameters.",
+    contactReadonly: "This task is read-only. Google Contacts was not modified.",
+    contactRuntime: "This Cindy version does not support contact requests. Update Cindy.",
+    contactResource: "Use the contact resourceName returned by a lookup, not people/me or a constructed path.",
+    contactPageSize: "pageSize must be an integer from 1 to 100.",
+    contactPerson: "person requires at least one contact field to write.",
+    contactFieldLimit: "Unsupported contact field or too many entries: {field}",
+    contactItem: "Contact field entries must be nonempty objects.",
+    contactField: "Unsupported contact field: {field}",
+    contactValue: "{field} requires value.",
+    contactEmpty: "Cannot create an empty contact.",
+    contactUnknown: "Could not confirm the contact operation outcome. Check Google Contacts first; do not retry blindly.",
+    contactReadFailed: "Could not read contacts. Check the network connection and try again.",
+    contactPermission: "Contact access is missing or expired. Reconnect and authorize this account in Gmail plugin details; directory access also requires organization permission. Existing mail access remains usable.",
+    contactRejected: "Google rejected the contact operation. Read the contact again and check its fields and etag; it may have changed.",
+    contactNotFound: "Contact not found. Look it up again and check resourceName.",
+    contactUnavailable: "Google Contacts is temporarily unavailable. Check the network or read again later.",
+    contactReceipt: "The contact operation was executed, but its receipt is incomplete. Check Google Contacts first; do not create or update it again.",
+    contactResponse: "The contact response is incomplete. Narrow the query and read again.",
+    contactSearchPage: "Contact search does not support pageToken; use list for pagination.",
+    contactChanged: "The contact changed or is not an editable personal contact. Read it again and review the changes. No changes were written.",
+    contactFailed: "The contact operation failed. Check the actual state in Google Contacts.",
+    contactDelivery: "The contact result was not fully returned. Check the actual state in Google Contacts first; do not create, update or delete again.",
     inlineImagesType: 'inline-images only supports PNG, JPEG, GIF or WebP images; attach other media as regular attachments.',
     accountServiceUnreachable: 'Could not reach the Cindy local account service. Try again later; if it keeps failing, reopen the Gmail plugin details to check the service status',
     accountServiceNoResult: 'The Cindy local account service returned no result. Try again later',
@@ -148,6 +196,30 @@ var MESSAGES = {
     prepareFailed: 'Could not prepare the Gmail operation. Check the account and attachment inputs.',
   },
   ja: {
+    contactText: "{name} は長さ制限内の空でないテキストで指定してください。",
+    contactAction: "不明な連絡先操作です。gmail_contacts のパラメータを確認してください。",
+    contactReadonly: "このタスクは読み取り専用です。Google コンタクトは変更していません。",
+    contactRuntime: "この Cindy は連絡先の通信インターフェースに対応していません。Cindy を更新してください。",
+    contactResource: "検索結果の連絡先 resourceName を使用してください。people/me や独自に組み立てたパスは使用できません。",
+    contactPageSize: "pageSize は 1–100 の整数で指定してください。",
+    contactPerson: "person には書き込む連絡先フィールドを 1 つ以上指定してください。",
+    contactFieldLimit: "未対応の連絡先フィールド、または項目数が多すぎます：{field}",
+    contactItem: "連絡先フィールドの各項目は空でないオブジェクトで指定してください。",
+    contactField: "未対応の連絡先フィールド：{field}",
+    contactValue: "{field} には value が必要です。",
+    contactEmpty: "空の連絡先は作成できません。",
+    contactUnknown: "連絡先操作の結果を確認できません。まず Google コンタクトで確認し、むやみに再試行しないでください。",
+    contactReadFailed: "連絡先を読み取れません。ネットワーク接続を確認してから再試行してください。",
+    contactPermission: "連絡先の権限が不足しているか認証が期限切れです。Gmail プラグインの詳細でこのアカウントを再接続し認証してください。組織ディレクトリには組織の許可も必要です。既存のメール権限は引き続き使用できます。",
+    contactRejected: "Google が連絡先操作を拒否しました。連絡先を再取得し、フィールドと etag を確認してください。情報が更新された可能性があります。",
+    contactNotFound: "連絡先が見つかりません。再検索して resourceName を確認してください。",
+    contactUnavailable: "Google コンタクトは一時的に利用できません。ネットワークを確認するか、後で再取得してください。",
+    contactReceipt: "連絡先操作は実行されましたが、結果が不完全です。まず Google コンタクトで確認し、作成や更新を繰り返さないでください。",
+    contactResponse: "連絡先の応答が不完全です。検索範囲を絞って再取得してください。",
+    contactSearchPage: "連絡先検索は pageToken に対応していません。ページ取得には list を使用してください。",
+    contactChanged: "連絡先が変更されたか、編集可能な個人の連絡先ではありません。再取得して変更内容を確認してください。変更は書き込んでいません。",
+    contactFailed: "連絡先操作に失敗しました。Google コンタクトで実際の状態を確認してください。",
+    contactDelivery: "連絡先の結果をすべて返せませんでした。まず Google コンタクトで実際の状態を確認し、作成、更新、削除を繰り返さないでください。",
     inlineImagesType: 'inline-images は PNG、JPEG、GIF、WebP 画像のみ対応しています。その他のメディアは通常の添付ファイルとして追加してください。',
     accountServiceUnreachable: 'Cindy のローカルアカウントサービスに接続できません。しばらくしてから再試行してください。失敗が続く場合は、Gmail プラグインの詳細を開き直してサービスの状態を確認してください',
     accountServiceNoResult: 'Cindy のローカルアカウントサービスから結果が返されませんでした。しばらくしてから再試行してください',
@@ -187,6 +259,30 @@ var MESSAGES = {
     prepareFailed: 'Gmail の操作を準備できません。アカウントと添付ファイルの入力を確認してください。',
   },
   ko: {
+    contactText: "{name}은(는) 길이 제한 내의 비어 있지 않은 텍스트여야 합니다.",
+    contactAction: "알 수 없는 연락처 작업입니다. gmail_contacts 매개변수를 확인하세요.",
+    contactReadonly: "이 작업은 읽기 전용입니다. Google 연락처를 수정하지 않았습니다.",
+    contactRuntime: "이 Cindy 버전은 연락처 요청을 지원하지 않습니다. Cindy를 업데이트하세요.",
+    contactResource: "조회 결과의 연락처 resourceName을 사용하세요. people/me 또는 직접 만든 경로는 사용할 수 없습니다.",
+    contactPageSize: "pageSize는 1–100 사이의 정수여야 합니다.",
+    contactPerson: "person에는 쓸 연락처 필드가 하나 이상 필요합니다.",
+    contactFieldLimit: "지원하지 않는 연락처 필드이거나 항목이 너무 많습니다: {field}",
+    contactItem: "연락처 필드 항목은 비어 있지 않은 객체여야 합니다.",
+    contactField: "지원하지 않는 연락처 필드: {field}",
+    contactValue: "{field}에는 value가 필요합니다.",
+    contactEmpty: "빈 연락처를 만들 수 없습니다.",
+    contactUnknown: "연락처 작업 결과를 확인할 수 없습니다. 먼저 Google 연락처에서 확인하고 무작정 다시 시도하지 마세요.",
+    contactReadFailed: "연락처를 읽지 못했습니다. 네트워크 연결을 확인한 후 다시 시도하세요.",
+    contactPermission: "연락처 권한이 없거나 인증이 만료되었습니다. Gmail 플러그인 상세 페이지에서 이 계정을 다시 연결하고 승인하세요. 조직 디렉터리는 조직의 허용도 필요합니다. 기존 메일 권한은 계속 사용할 수 있습니다.",
+    contactRejected: "Google이 연락처 작업을 거부했습니다. 연락처를 다시 읽고 필드와 etag를 확인하세요. 정보가 변경되었을 수 있습니다.",
+    contactNotFound: "연락처를 찾을 수 없습니다. 다시 조회하고 resourceName을 확인하세요.",
+    contactUnavailable: "Google 연락처를 일시적으로 사용할 수 없습니다. 네트워크를 확인하거나 나중에 다시 읽으세요.",
+    contactReceipt: "연락처 작업은 실행되었지만 결과가 불완전합니다. 먼저 Google 연락처에서 확인하고 만들기나 수정을 반복하지 마세요.",
+    contactResponse: "연락처 응답이 불완전합니다. 조회 범위를 좁혀 다시 읽으세요.",
+    contactSearchPage: "연락처 검색은 pageToken을 지원하지 않습니다. 페이지 조회에는 list를 사용하세요.",
+    contactChanged: "연락처가 변경되었거나 수정할 수 있는 개인 연락처가 아닙니다. 다시 읽고 변경 내용을 확인하세요. 변경 사항을 쓰지 않았습니다.",
+    contactFailed: "연락처 작업에 실패했습니다. Google 연락처에서 실제 상태를 확인하세요.",
+    contactDelivery: "연락처 결과가 완전히 반환되지 않았습니다. 먼저 Google 연락처에서 실제 상태를 확인하고 만들기, 수정 또는 삭제를 반복하지 마세요.",
     inlineImagesType: 'inline-images는 PNG, JPEG, GIF, WebP 이미지만 지원합니다. 다른 미디어는 일반 첨부 파일로 추가하세요.',
     accountServiceUnreachable: 'Cindy 로컬 계정 서비스에 연결할 수 없습니다. 잠시 후 다시 시도하세요. 계속 실패하면 Gmail 플러그인 상세 페이지를 다시 열어 서비스 상태를 확인하세요',
     accountServiceNoResult: 'Cindy 로컬 계정 서비스가 결과를 반환하지 않았습니다. 잠시 후 다시 시도하세요',
@@ -508,6 +604,69 @@ function assertMailReadResponse(response, fallback) {
   if (response.status === 403) throw new Error(t('readForbidden'));
   if (!response.ok || response.status !== 200 || response.truncated) throw new Error(fallback);
 }
+// Optional read-only enrichment. Account-scoped, bounded, in-memory only; a
+// missing new OAuth scope or an unavailable People API never prevents reading.
+var mailPhotoCache = new Map();
+async function lookupMailParticipantPhotos(accountId, headers) {
+  var emails = [], pieces = [], start = 0, quoted = false, escaped = false, angle = 0;
+  var input = headers.join(', ');
+  for (var i = 0; i <= input.length; i++) {
+    var char = input[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\' && quoted) { escaped = true; continue; }
+    if (char === '"') quoted = !quoted;
+    if (!quoted && char === '<') angle++;
+    if (!quoted && char === '>') angle = Math.max(0, angle - 1);
+    if (i === input.length || (!quoted && !angle && (char === ',' || char === ';'))) { pieces.push(input.slice(start, i)); start = i + 1; }
+  }
+  for (var piece of pieces) {
+    var email = (/<([^<>]+)>\s*$/.exec(piece.trim())?.[1] || piece).trim().toLowerCase();
+    if (email.length <= 320 && /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$/.test(email) && !emails.includes(email)) emails.push(email);
+  }
+  // Large mailing lists use public/initial fallbacks beyond the first 12 people.
+  emails = emails.slice(0, 12);
+  var deadline = Date.now() + 2000;
+  async function search(query) {
+    var remaining = deadline - Date.now();
+    if (remaining < 100) return null;
+    var response = await cindy.fetch({ url: 'https://people.googleapis.com/v1/people:searchContacts?readMask=emailAddresses%2Cphotos&pageSize=30&query=' + encodeURIComponent(query),
+      authAccount: accountId, timeoutMs: Math.min(1000, remaining) });
+    if (!response.ok || response.status !== 200 || response.truncated) return null;
+    var data = JSON.parse(response.body);
+    return Array.isArray(data.results) ? data.results : [];
+  }
+  var warmup;
+  var photos = await Promise.all(emails.map(async function (email) {
+    var key = JSON.stringify([accountId, email]);
+    var cached = mailPhotoCache.get(key);
+    if (cached && cached.until > Date.now()) return cached.value;
+    // One warmup per batch; parallel readers share in-flight email lookups.
+    if (!warmup) warmup = search('').catch(function () { return null; });
+    var value = (async function () {
+      try {
+        if (await warmup === null) return null;
+        var results = await search(email);
+        for (var result of results || []) {
+          var person = result.person;
+          if (!person || !Array.isArray(person.emailAddresses) || !person.emailAddresses.some(function (a) { return typeof a.value === 'string' && a.value.trim().toLowerCase() === email; })) continue;
+          for (var photo of Array.isArray(person.photos) ? person.photos : []) {
+            if (photo.default === true || typeof photo.url !== 'string' || photo.url.length > 2048) continue;
+            var url = new URL(photo.url);
+            if (url.protocol === 'https:' && !url.username && !url.password && !url.port &&
+                (url.hostname === 'googleusercontent.com' || url.hostname.endsWith('.googleusercontent.com'))) return { email: email, url: url.href };
+          }
+        }
+      } catch (_) { /* Best effort: keep mail and public avatar fallbacks available. */ }
+      return null;
+    })();
+    mailPhotoCache.delete(key);
+    mailPhotoCache.set(key, { until: Date.now() + 60000, value: value });
+    while (mailPhotoCache.size > 256) mailPhotoCache.delete(mailPhotoCache.keys().next().value);
+    return value;
+  }));
+  return photos.filter(Boolean);
+}
+
 async function readMailMessageLink(args, beginOperation, operation) {
   if (args.markRead !== undefined && typeof args.markRead !== 'boolean') throw new Error('Invalid markRead flag');
   var url = new URL(args.url);
@@ -545,6 +704,7 @@ async function readMailMessageLink(args, beginOperation, operation) {
   assertMailReadResponse(response, t('readMessageFailed'));
   var message = parseMailReadJson(response.body);
   if (!/^[a-f0-9]{8,32}$/i.test(message.id || '') || !message.payload) throw new Error('Incomplete Gmail message');
+  var photos = lookupMailParticipantPhotos(selected.accountId, ['from', 'to', 'cc', 'bcc'].map(function (name) { return header(message.payload, name); })).catch(function () { return []; });
   var conversation, conversationUnavailable = false;
   // Read only metadata for the surrounding messages. Cindy requests a body
   // through the same reader when the user expands that message.
@@ -625,7 +785,9 @@ async function readMailMessageLink(args, beginOperation, operation) {
     } catch (_) { markReadResult = { execution: 'unknown', message: t('markReadUnknown') }; }
     finishMarkRead?.(markReadResult.execution);
   }
+  var participantPhotos = await photos;
   return { accountId: selected.accountId, messageId: message.id, from: header(message.payload, 'from'),
+    ...(participantPhotos.length ? { participantPhotos: participantPhotos } : {}),
     to: header(message.payload, 'to'), cc: header(message.payload, 'cc'), bcc: header(message.payload, 'bcc'),
     subject: header(message.payload, 'subject'), date: header(message.payload, 'date'),
     bodyText: bodies['text/plain'].join('\n'), bodyHtml: bodies['text/html'].join('\n'),
@@ -658,6 +820,128 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
     draftId: args.arguments[0], readOnly: args.session_context.workdir_is_read_only !== false, sourceCallId });
   if (result) finish(result.execution);
   return result;
+}
+
+// Google People operations share the selected Gmail account. Credentials stay
+// in the Host; no contact data is persisted in plugin KV or sent to other APIs.
+async function googleContacts(args, callId, beginOperation, operation) {
+  var action = args.action;
+  var writes = ['create', 'update', 'delete'];
+  var write = writes.includes(action);
+  var fields = 'names,emailAddresses,phoneNumbers,organizations,photos,metadata';
+  var execution = 'not_executed';
+  function error(message) { throw new Error(message); }
+  function text(value, name, max = 1000) {
+    if (typeof value !== 'string' || !value.trim() || value.length > max) error(t('contactText', { name: name }));
+    return value;
+  }
+  try {
+    if (!['list', 'search', 'get', 'other_contacts', 'directory', ...writes].includes(action)) error(t('contactAction'));
+    if (write && args.session_context?.workdir_is_read_only !== false) error(t('contactReadonly'));
+    if (typeof cindy.fetch !== 'function') error(t('contactRuntime'));
+    var selected = await selectGoogleAccount(args.account, operation);
+    if (!selected.ok) error(selected.message);
+    var resource;
+    if (['get', 'update', 'delete'].includes(action)) {
+      resource = text(args.resourceName, 'resourceName', 200);
+      if (!/^people\/[A-Za-z0-9_-]+$/.test(resource) || resource === 'people/me') error(t('contactResource'));
+    }
+    var pageSize = args.pageSize === undefined ? 50 : args.pageSize;
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) error(t('contactPageSize'));
+    var page = { pageSize: String(pageSize) };
+    if (args.pageToken !== undefined) page.pageToken = text(args.pageToken, 'pageToken', 4096);
+    var person;
+    if (['create', 'update'].includes(action)) {
+      var allowed = { names: ['givenName', 'familyName', 'middleName', 'unstructuredName'],
+        emailAddresses: ['value', 'type'], phoneNumbers: ['value', 'type'], organizations: ['name', 'title', 'department', 'type'] };
+      if (!args.person || typeof args.person !== 'object' || Array.isArray(args.person) || !Object.keys(args.person).length) error(t('contactPerson'));
+      person = {};
+      for (var key of Object.keys(args.person)) {
+        var values = args.person[key];
+        if (!Object.hasOwn(allowed, key) || !Array.isArray(values) || values.length > (key === 'names' ? 1 : 20)) error(t('contactFieldLimit', { field: key }));
+        person[key] = values.map(function (item) {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || !Object.keys(item).length) error(t('contactItem'));
+          var result = {};
+          for (var name of Object.keys(item)) {
+            if (!allowed[key].includes(name)) error(t('contactField', { field: key + '.' + name }));
+            result[name] = text(item[name], key + '.' + name);
+          }
+          if (['emailAddresses', 'phoneNumbers'].includes(key) && !result.value) error(t('contactValue', { field: key }));
+          return result;
+        });
+      }
+      if (action === 'create' && !Object.values(person).some(function (items) { return items.length; })) error(t('contactEmpty'));
+      if (action === 'update') text(args.etag, 'etag', 1000);
+    }
+    async function request(path, query = {}, method = 'GET', body) {
+      var url = 'https://people.googleapis.com/v1/' + path;
+      var params = new URLSearchParams();
+      for (var key of Object.keys(query)) {
+        for (var value of Array.isArray(query[key]) ? query[key] : [query[key]]) params.append(key, value);
+      }
+      var qs = params.toString();
+      if (qs) url += '?' + qs;
+      // Serialize before entering the uncertain write phase.
+      var options = { url, method, callId, authAccount: selected.accountId, timeoutMs: 20000,
+        ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) };
+      var mutating = method !== 'GET';
+      var finish;
+      if (mutating) { execution = 'unknown'; finish = beginOperation(); }
+      var response;
+      try { response = await cindy.fetch(options); }
+      catch (_) { error(mutating ? t('contactUnknown') : t('contactReadFailed')); }
+      if (mutating) {
+        if (response?.ok && response.status >= 200 && response.status < 300) execution = 'executed';
+        else if ([400, 401, 403, 404, 405, 409, 412, 413, 415, 422, 429].includes(response?.status)) execution = 'not_executed';
+        finish(execution);
+      }
+      if (!response?.ok || response.status < 200 || response.status >= 300) {
+        if (execution === 'unknown') error(t('contactUnknown'));
+        if ([401, 403].includes(response?.status)) error(t('contactPermission'));
+        if ([400, 409, 412].includes(response?.status)) error(t('contactRejected'));
+        if (response?.status === 404) error(t('contactNotFound'));
+        error(t('contactUnavailable'));
+      }
+      if (method === 'DELETE') return { resourceName: resource, deleted: true };
+      try {
+        if (response.truncated) throw new Error('truncated');
+        var data = JSON.parse(response.body);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('invalid');
+        // Linking or unlinking a Google Profile can change a contact's name.
+        // Return the new server identifier so later operations use it.
+        if (mutating && !/^people\/[A-Za-z0-9_-]+$/.test(data.resourceName || '')) throw new Error('invalid receipt');
+        return data;
+      } catch (_) {
+        error(execution === 'executed' ? t('contactReceipt') : t('contactResponse'));
+      }
+    }
+    var data;
+    if (action === 'list') data = await request('people/me/connections', { ...page, personFields: fields });
+    else if (action === 'get') data = await request(resource, { personFields: fields });
+    else if (action === 'search') {
+      var query = text(args.query, 'query');
+      if (args.pageToken !== undefined) error(t('contactSearchPage'));
+      // People search requires an empty-query warmup before the real query.
+      await request('people:searchContacts', { query: '', readMask: fields, pageSize: '1' });
+      data = await request('people:searchContacts', { query, readMask: fields, pageSize: String(Math.min(pageSize, 30)) });
+    } else if (action === 'other_contacts') data = await request('otherContacts', { ...page, readMask: 'names,emailAddresses,phoneNumbers,photos,metadata' });
+    else if (action === 'directory') data = await request('people:searchDirectoryPeople', {
+      ...page, query: text(args.query, 'query'), readMask: fields,
+      sources: ['DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE', 'DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT'],
+    });
+    else if (action === 'create') data = await request('people:createContact', { personFields: fields }, 'POST', person);
+    else if (action === 'update') {
+      var current = await request(resource, { personFields: fields, sources: 'READ_SOURCE_TYPE_CONTACT' });
+      var source = current.metadata?.sources?.find(function (s) { return s.type === 'CONTACT'; });
+      if (!source || source.etag !== args.etag) error(t('contactChanged'));
+      data = await request(resource + ':updateContact', { updatePersonFields: Object.keys(person).join(','), personFields: fields }, 'PATCH', {
+        ...person, resourceName: resource, metadata: { sources: [source] },
+      });
+    } else if (action === 'delete') data = await request(resource + ':deleteContact', {}, 'DELETE');
+    return { ok: true, result: { accountId: selected.accountId, action, execution, data } };
+  } catch (err) {
+    return { ok: false, message: '[' + execution + '] ' + (err.message || t('contactFailed')) };
+  }
 }
 
 (function () {
@@ -694,6 +978,11 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
       };
     }
     try {
+      if (message.tool === 'gmail_contacts') {
+        var contacts = await googleContacts(args, message.callId, beginOperation, operation);
+        await cindy.send({ type: 'tool-result', callId: message.callId, ...contacts });
+        return;
+      }
       if (message.tool === 'gmail_read_message') {
         var mail = await readMailMessageLink(args, beginOperation, operation);
         await cindy.send({ type: 'tool-result', callId: message.callId, ok: true, result: mail });
@@ -770,6 +1059,11 @@ async function mailToolDraft(args, sourceCallId, beginOperation) {
         ...(result.ok ? { result: result.data } : { message: '[' + execution + '] ' + (execution === result.execution
           ? result.message : t('earlierDraftUnconfirmed')) }) });
     } catch (error) {
+      if (message.tool === 'gmail_contacts') {
+        await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
+          message: '[' + execution + '] ' + t('contactDelivery') });
+        return;
+      }
       await cindy.send({ type: 'tool-result', callId: message.callId, ok: false,
         message: execution === 'executed' ? '[executed] ' + t('executedUnreturned')
           : execution === 'unknown' ? '[unknown] ' + t('outcomeUnknown')

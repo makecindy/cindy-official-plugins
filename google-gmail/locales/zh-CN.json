@@ -1,7 +1,7 @@
 {
   "name": "Gmail",
-  "description": "搜索和阅读 Gmail、下载附件到当前任务、创建草稿和发送邮件。账号授权由 Cindy 托管。",
-  "whenToUse": "用于 Gmail 邮件、附件、草稿和发送。先用 gmail_accounts 选择账号，再用 gmail_schema 查询命令、gmail_run 执行。分析附件前，先下载到明确指定的本地任务目录路径。",
+  "description": "搜索和阅读 Gmail、下载附件、创建草稿和发送邮件；查询联系人头像并管理 Google 通讯录。账号授权由 Cindy 托管。",
+  "whenToUse": "用于 Gmail 邮件、附件、草稿、发送及 Google 通讯录。先用 gmail_accounts 选择账号；邮件用 gmail_schema 查询命令后通过 gmail_run 执行；联系人查询、头像及增删改用 gmail_contacts。分析附件前先下载到明确指定的本地任务路径。",
   "tools": {
     "gmail_read_message": {
       "description": "Read a Gmail message and chronological conversation summaries for Cindy's native preview. Read-only by default. Mark-read returns markReadResult.execution (not_executed/executed/unknown); unknown requires checking mailbox state, never a blind retry. Only markRead:true for an explicit user opening or mark-read request removes UNREAD from the selected message; never mark during AI/background reads. Never changes drafts or sends. Input: Gmail HTTPS message/conversation link (hex ID), with authuser=email to bind the account. A missing conversation root resolves the latest non-draft message. Returns the selected body plus optional conversation {threadId,messages:[{messageId,url,from,date,subject,snippet}]}; drafts are excluded except a selected draft. Read a member URL to expand its body. conversationUnavailable means only the selected mail could be read. Include account-qualified links in answers; Cindy owns HTML, inline images and collapsed history."
@@ -14,6 +14,9 @@
     },
     "gmail_run": {
       "description": "Execute discovered Gmail commands; read the gog manual. Default: show the saved draft card and wait for confirmation of recipients/content. Skip another question only for clear confirmation of this email or explicit user/task instructions; writing, replying, edits and auto-approval alone are not consent. Card Send is confirmation. All sends MUST use the same card and drafts send by ID: 10-second Undo/Send now window, flush latest edits, wait for receipt, never retry cancelled/unknown writes. No raw send/CLI/API bypass. Replies default to all (reply-mode=sender is explicit). Edits auto-sync to Gmail; drafts get reads latest edits. HTML is AI-authored and previewed inside the card. New inline images: drafts create with inline-images hashes and matching cid:img1@cindy.local HTML, body text alternative; recipients may be empty for preview. A separate local HTML preview is not the saved mail. Chat attachments: 16 MiB/file. Card Send continues the task."
+    },
+    "gmail_contacts": {
+      "description": "Query Google contacts, photos, other contacts and the visible Workspace directory using a selected gmail_accounts account. Actions: list/search/get/other_contacts/directory are read-only; create/update/delete change Google Contacts and require user intent. Read the contacts manual first. Search is prefix matching; verify exact email before attributing a photo. For update, first get the contact and pass its CONTACT source etag; supplied person arrays replace those fields, omitted fields are preserved and [] clears a field. Delete only a specifically identified contact. Directory and other contacts are read-only. Writes return execution and failures distinguish not_executed/executed/unknown; never blindly retry a write, including an incomplete successful receipt. Mutate sequentially per account. Missing scopes require reconnecting that account; never switch accounts."
     }
   }
 }
