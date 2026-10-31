@@ -1,0 +1,16 @@
+{
+  "name": "Todo 扫描",
+  "description": "在 Agent 已有的文本里查找 TODO / FIXME / HACK / XXX 标记，在停靠面板里整理，并把仍未完成的条目以结构化数据或 Markdown 清单交回。只读：不修改文件、不访问网络。",
+  "whenToUse": "需要在源码、Diff、笔记或文档里查找明确写出的 TODO、FIXME、HACK、XXX 标记时使用，例如「把这个 PR 里的 FIXME 收集出来」「上线前列出所有 HACK」「找出这个文件里的 TODO」；也需要在面板里复核、勾选标记条目时使用。只匹配字面标记，不处理普通待办清单。",
+  "panel": {
+    "title": "Todo 扫描"
+  },
+  "tools": {
+    "scan_todos": {
+      "description": "扫描文本中的 TODO、FIXME、HACK、XXX 标记。把要检查的原文作为 `text` 传入（文件内容、diff 或笔记）；传 `tag` 只保留一种标记。一行可能有多个标记：每个都会单独返回，并带上从 1 开始的 `column`。返回 JSON { total, truncated, scannedLines, byTag, items }，每个 item 为 { key, line, column, tag, text }，`line`、`column` 是在所传文本内从 1 开始的位置，`text` 是该标记之后的剩余文本。同一批结果会推送到插件面板，用户可在面板里筛选并勾选。`truncated: true` 表示匹配超过 200 条、只返回前 200 条，此时 `total` 等于返回条数而不是真实总数。没有任何匹配是成功结果，不是错误。本工具只读取传入的字符串：不打开文件、不修改任何内容、不发起网络请求。"
+    },
+    "get_selection": {
+      "description": "在用户整理之后，以结构化数据读取面板的当前状态。返回 JSON { hasScan, lastScanAt, filter, total, truncated, visibleCount, unresolvedCount, resolvedCount, byTag, items, markdown, note }，其中 `items` 是面板当前显示、用户尚未勾选的标记，每个为 { key, line, column, tag, text }，`markdown` 是同一份清单的 `- [ ]` 形式，可直接粘贴到回复或文件里。`items`、`markdown` 与 `visibleCount`、`unresolvedCount`、`resolvedCount` 都跟随当前 `filter`：`visibleCount` 是面板显示的数量，`resolvedCount` 只统计用户真正勾掉的项，被筛选隐藏的标记绝不会算作已完成；`total` 和 `byTag` 描述整次扫描，不受筛选影响。若 `truncated` 为 true，说明扫描撞上 200 条上限、清单不完整，`note` 会说明。当用户提到自己在 Todo Scan 面板里勾选、筛选或选择的内容时（例如\"用我剩下的那些\"\"总结还没做的\"\"把我的选择变成任务清单\"），调用本工具。它不重新扫描、不做任何 I/O：只读取本插件内存中的上一次扫描结果。若 hasScan 为 false，请先让用户运行一次扫描。"
+    }
+  }
+}

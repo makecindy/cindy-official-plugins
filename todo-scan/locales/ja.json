@@ -1,0 +1,16 @@
+{
+  "name": "Todo スキャン",
+  "description": "Agent が持っているテキストから TODO / FIXME / HACK / XXX を抽出し、ドッキングパネルで整理でき、未処理の項目を構造化データまたは Markdown チェックリストで返します。読み取り専用で、ファイル編集もネットワークアクセスも行いません。",
+  "whenToUse": "ソースコード、Diff、メモ、文書に書かれた TODO / FIXME / HACK / XXX のマーカーを明示的に探すときに使います。例:「この PR の FIXME を集めて」「リリース前に HACK を全部洗い出す」「このファイルの TODO を探して」。パネルで項目を見直したりチェックしたりするときにも使います。見つけるのはマーカーそのもので、任意のタスク一覧は扱いません。",
+  "panel": {
+    "title": "Todo スキャン"
+  },
+  "tools": {
+    "scan_todos": {
+      "description": "テキストから TODO、FIXME、HACK、XXX のマーカーを探します。調べる原文を `text` に渡し（ファイル内容、diff、メモなど）、`tag` を渡すと 1 種類だけに絞ります。1 行に複数のマーカーがあってもよく、それぞれ 1 始まりの `column` 付きで個別に返します。返り値は JSON { total, truncated, scannedLines, byTag, items } で、各 item は { key, line, column, tag, text } です。`line` と `column` は渡したテキスト内の 1 始まりの位置、`text` はマーカー以降の残りです。同じ結果はプラグインのパネルにも送られ、ユーザーは絞り込みとチェックができます。`truncated: true` は一致が 200 件を超え、先頭 200 件だけを返したことを示し、`total` は実件数ではなく返した件数になります。一致なしは成功結果でありエラーではありません。本ツールは渡された文字列を読むだけで、ファイルを開かず、何も変更せず、ネットワークも使いません。"
+    },
+    "get_selection": {
+      "description": "ユーザーが整理した後のパネルの状態を構造化データとして読みます。返り値は JSON { hasScan, lastScanAt, filter, total, truncated, visibleCount, unresolvedCount, resolvedCount, byTag, items, markdown, note } で、`items` はパネルに表示中の、まだチェックされていないマーカー（各 { key, line, column, tag, text }）、`markdown` は同じ一覧を `- [ ]` 形式にしたもので、返信やファイルにそのまま貼れます。`items`・`markdown` と `visibleCount`・`unresolvedCount`・`resolvedCount` が現在の `filter` に従います。`visibleCount` はパネルの表示件数、`resolvedCount` はユーザーが実際にチェックした件数だけで、フィルターで隠れたマーカーが解決済みとして数えられることはありません。`total` と `byTag` は絞り込みに関係なくスキャン全体を表します。`truncated` が true の場合は 200 件の上限でスキャンが止まり一覧は不完全で、`note` がその旨を示します。ユーザーが Todo Scan パネルでチェック・絞り込み・選択した内容に言及したとき（「残したものを使って」「未対応をまとめて」「選択をチケット一覧にして」など）に呼び出してください。再スキャンも I/O も行わず、このプラグインがメモリに保持する直近のスキャン結果を読むだけです。hasScan が false なら、まずスキャンを実行するようユーザーに伝えてください。"
+    }
+  }
+}
