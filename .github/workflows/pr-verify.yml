@@ -53,7 +53,10 @@ jobs:
         run: node --test .tests/provisioning.test.mjs
 
       - name: Validate publish workflows
-        run: node --test .tests/publish-workflows.test.mjs
+        run: node --test .tests/publish-workflows.test.mjs .tests/chrome-webstore.test.mjs
+
+      - name: Require a Chrome version bump for store package changes
+        run: node .github/scripts/chrome-webstore.mjs validate-version "$(git rev-parse HEAD^1)"
 
       - name: Validate binary dependency packaging
         run: node --test .tests/binary-dependencies.test.mjs

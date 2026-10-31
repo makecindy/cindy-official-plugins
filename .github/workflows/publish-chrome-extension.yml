@@ -1,0 +1,133 @@
+name: Publish Chrome extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'my-browser/extension/**'
+      - 'my-browser/distribution.json'
+      - 'my-browser/binary-dependencies.json'
+      - 'my-browser/THIRD-PARTY-LICENSES.txt'
+      - 'scripts/build-my-browser.mjs'
+      - '.github/scripts/package-plugin.sh'
+      - '.github/scripts/binary-dependencies.py'
+      - '.github/scripts/chrome-webstore.mjs'
+      - '.github/workflows/publish-chrome-extension.yml'
+  workflow_dispatch:
+  # Reconcile the latest main version after an older review completes.
+  schedule:
+    - cron: '37 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-webstore-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.repository == 'makecindy/cindy-official-plugins' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: chrome-webstore
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      publish: ${{ steps.status.outputs.publish }}
+    env:
+      CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/chrome-webstore.mjs
+            /my-browser/extension/manifest.json
+            /my-browser/distribution.json
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: auth
+        with:
+          workload_identity_provider: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Check store version and pending review
+        id: status
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: node .github/scripts/chrome-webstore.mjs check
+
+  package:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # No Google credentials or OIDC permission while building dependencies.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Build and verify Chrome store package
+        run: |
+          node scripts/build-my-browser.mjs "${RUNNER_TEMP}/chrome-package" chrome
+          node .github/scripts/chrome-webstore.mjs receipt "${RUNNER_TEMP}/chrome-package"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: chrome-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/chrome-package/extension.zip
+            ${{ runner.temp }}/chrome-package/source.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: chrome-webstore
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/chrome-webstore.mjs
+            /my-browser/extension/manifest.json
+            /my-browser/distribution.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: chrome-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/chrome-package
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: auth
+        with:
+          workload_identity_provider: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload and request automatic publication after review
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: node .github/scripts/chrome-webstore.mjs publish "${RUNNER_TEMP}/chrome-package"
