@@ -855,8 +855,10 @@ test('card settings pick the auto-follow model with the host picker and hand its
   await runtime.click(cardId, 'prset:model', { mobilePageId: '12345678-1234-1234-1234-123456789abc' });
   // The picker opens on the device that tapped the card.
   assert.deepEqual(picks, [{ mobilePageId: '12345678-1234-1234-1234-123456789abc' }]);
-  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, followModel: { route, label: 'Sonnet 5.5 · Anthropic' } });
-  assert.ok(visibleText(runtime.lastCard(cardId).html).includes('Sonnet 5.5 · Anthropic'));
+  const chosen = { route, label: 'Sonnet 5.5 · Anthropic' };
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, followModel: chosen, lastFollowModel: chosen });
+  // The chosen model shows as a clickable name; clicking it changes the model.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelPick"[^>]*>.*Sonnet 5\.5 · Anthropic<\/span>/);
 
   await runtime.tool({ card_id: cardId, pr: '7' });
   await runtime.click(cardId, 'pr:follow');
@@ -864,8 +866,16 @@ test('card settings pick the auto-follow model with the host picker and hand its
     model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
   });
 
+  // Back to following the task keeps the chosen model in memory: picking "choose a model" again
+  // restores it without reopening the picker; changing it goes through the model name.
   await runtime.click(cardId, 'prset:modelTask');
-  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false });
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, lastFollowModel: { route, label: 'Sonnet 5.5 · Anthropic' } });
+  await runtime.click(cardId, 'prset:model');
+  assert.equal(picks.length, 1);
+  assert.deepEqual(runtime.kv.prCard.followModel, { route, label: 'Sonnet 5.5 · Anthropic' });
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelPick" aria-label="更换模型（当前：Sonnet 5.5 · Anthropic）"/);
+  await runtime.click(cardId, 'prset:modelPick');
+  assert.deepEqual(picks.at(-1), { initial: route });
 });
 
 test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {

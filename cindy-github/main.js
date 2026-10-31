@@ -155,7 +155,7 @@ var MESSAGES = {
     prFollowModelTask: '跟随当前任务',
     prFollowModelTaskHint: '每次跟进用这个任务当时的模型',
     prFollowModelCustom: '指定模型',
-    prFollowModelCustomAgain: '换一个指定的模型',
+    prFollowModelChangeTo: '更换模型（当前：{name}）',
     prFollowModelFailed: '没能打开模型选择：{detail}',
     prTurnOff: '关闭「{name}」',
     prCiPassed: 'CI 通过',
@@ -265,7 +265,7 @@ var MESSAGES = {
     prFollowModelTask: 'Follow this task',
     prFollowModelTaskHint: 'Each round uses the model this task has at the time',
     prFollowModelCustom: 'Choose a model',
-    prFollowModelCustomAgain: 'Choose a different model',
+    prFollowModelChangeTo: 'Change model (now {name})',
     prFollowModelFailed: 'Could not open the model picker: {detail}',
     prTurnOff: 'Turn off "{name}"',
     prCiPassed: 'CI passed',
@@ -375,7 +375,7 @@ var MESSAGES = {
     prFollowModelTask: 'タスクに合わせる',
     prFollowModelTaskHint: '毎回、その時点のこのタスクのモデルを使います',
     prFollowModelCustom: 'モデルを指定',
-    prFollowModelCustomAgain: '別のモデルを指定',
+    prFollowModelChangeTo: 'モデルを変更（現在：{name}）',
     prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
     prTurnOff: '「{name}」をオフ',
     prCiPassed: 'CI 成功',
@@ -485,7 +485,7 @@ var MESSAGES = {
     prFollowModelTask: '현재 작업 따르기',
     prFollowModelTaskHint: '매번 그 시점의 이 작업 모델을 사용합니다',
     prFollowModelCustom: '모델 지정',
-    prFollowModelCustomAgain: '다른 모델 지정',
+    prFollowModelChangeTo: '모델 변경 (현재: {name})',
     prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
     prTurnOff: '"{name}" 끄기',
     prCiPassed: 'CI 통과',
@@ -2452,7 +2452,11 @@ function prFollowModelFrom(value) {
 
 function prSettingsFrom(kv) {
   var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
-  return { autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, followModel: prFollowModelFrom(s.followModel) };
+  // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
+  return {
+    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true,
+    followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
+  };
 }
 
 /** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
@@ -2482,6 +2486,7 @@ async function writePrSettings(change) {
   change(next);
   kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
   if (next.followModel) kv.prCard.followModel = next.followModel;
+  if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
   if (!r || r.ok === false) throw new Error('kv write failed');
   return next;
@@ -2508,7 +2513,7 @@ async function pickPrFollowModel(settings, msg) {
   } catch (e) { /* 名字只是展示,取不到用模型 id */ }
   var value = prFollowModelFrom({ route: picked.route, label: label });
   if (!value) return { settings: settings, error: 'INVALID_ROUTE' };
-  return { settings: await writePrSettings(function (next) { next.followModel = value; }) };
+  return { settings: await writePrSettings(function (next) { next.followModel = value; next.lastFollowModel = value; }) };
 }
 
 /* ── PR 状态(GitHub GraphQL,一次取齐卡片要显示的字段) ── */
@@ -2811,19 +2816,25 @@ function prSegment(action, label, active, inner) {
 }
 
 /**
- * 跟进模型二选一:跟随当前任务(默认),或用宿主统一选择器指定一个。已指定时再点「指定模型」
- * 换一个。旧版宿主没有选择器时不显示这一行(不维护硬编码名单)。
+ * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下一行是可点的模型名,点它换模型;
+ * 切回「跟随」再切回「指定」直接恢复上次的模型,不必重选。旧版宿主没有统一选择器时不显示这一行。
  */
 function prModelRow(settings) {
   if (typeof cindy.pickModel !== 'function') return '';
   var m = settings.followModel;
+  var detail = m
+    ? prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
+      'display:inline-flex;align-items:center;max-width:100%;margin:1px 0 0 -6px;padding:1px 6px;border-radius:6px;font-size:12px;line-height:16px;' +
+      'color:var(--text-primary);--hover:' + PR_HOVER,
+      '<span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + prEsc(m.label) + '</span>' +
+      '<span style="flex:none;margin-left:4px;color:var(--text-tertiary)">›</span>')
+    : '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
+      prEsc(t('prFollowModelTaskHint')) + '</div>';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px">' +
-    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' +
-    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
-    prEsc(m ? m.label : t('prFollowModelTaskHint')) + '</div></div>' +
+    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' + detail + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
-    prSegment('prset:model', m ? t('prFollowModelCustomAgain') : t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
     '</div></div>';
 }
 
@@ -3137,7 +3148,15 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'prset:model' && typeof cindy.pickModel === 'function') {
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && typeof cindy.pickModel === 'function') {
     try {
       var picked = await pickPrFollowModel(settings, msg);
       settings = picked.settings;
