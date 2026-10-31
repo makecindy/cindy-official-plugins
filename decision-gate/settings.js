@@ -779,8 +779,11 @@ function ruleRow(rule) {
   return h('div', { class: `rule ${rule.enabled === false ? 'off' : ''}` },
     h('div', { class: 'rtop' },
       toggle(rule.enabled !== false, t('enableRule'), async () => {
-        const enabled = rule.enabled === false;
-        rule.enabled = enabled;
+        // cfg may have been refreshed since this row rendered: change the current rule, not the captured one.
+        const current = cfg.rules.find((r) => r.id === rule.id);
+        if (!current) { render(); return; }
+        const enabled = current.enabled === false;
+        current.enabled = enabled;
         // The open editor must not bring the old state back when it is saved.
         if (await save() && draft?.id === rule.id) draft.enabled = enabled;
         render();
