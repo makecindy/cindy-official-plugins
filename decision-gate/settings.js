@@ -423,7 +423,7 @@ let stored = '{}'; // last config known to be in the store
 let storeError = '';
 let ruleError = '';
 let tryRun = 0;
-let unsavedKey = '';
+const unsavedKeys = {}; // input kept after a failed save, per secret so it never fills another service's field
 let openId = null; // rule being edited
 let draft = null; // working copy
 let tryText = '';
@@ -545,7 +545,7 @@ function judgeSection() {
     const id = providerId();
     group.append(h('div', { class: 'row' }, h('div', { class: 'grow' }, h('p', {}, t('use'))),
       seg(Object.entries(PROVIDERS).map(([key, v]) => [key, v.name]), id, async (key) => { cfg.provider = key; await save(); render(); if (key === 'jev') loadJevModels(); }, t('judgeModelLabel'))));
-    const keyInput = h('input', { class: 'pill', type: 'password', autocomplete: 'off', value: unsavedKey, placeholder: saved ? t('keyReplace') : t('keyPaste', { label: p.keyLabel }), 'aria-label': p.keyLabel });
+    const keyInput = h('input', { class: 'pill', type: 'password', autocomplete: 'off', value: unsavedKeys[p.key] || '', placeholder: saved ? t('keyReplace') : t('keyPaste', { label: p.keyLabel }), 'aria-label': p.keyLabel });
     group.append(h('form', {
       class: 'row', onsubmit: async (e) => {
         e.preventDefault();
@@ -554,11 +554,11 @@ function judgeSection() {
         try {
           const res = await fetch(`/secrets/${p.key}`, { method: 'PUT', body: JSON.stringify({ value }) });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          unsavedKey = '';
+          delete unsavedKeys[p.key];
           storeError = '';
         } catch (error) {
           // Keep what was typed so it can be retried.
-          unsavedKey = value;
+          unsavedKeys[p.key] = value;
           storeError = t('storeSaveFailed', { error: error && error.message });
         }
         await loadSecrets();
