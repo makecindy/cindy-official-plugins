@@ -2831,7 +2831,7 @@ function prModelRow(settings) {
     : '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
       prEsc(t('prFollowModelTaskHint')) + '</div>';
   return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px">' +
-    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' + detail + '</div>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' + detail + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
     prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
