@@ -2567,11 +2567,16 @@ function prGlyph(kind) {
   return '<span style="position:relative;display:block;width:16px;height:16px">' + parts + '</span>';
 }
 
-/** 设置按钮的图形:两条滑杆(不用齿轮——齿轮没法只靠 CSS 画清楚)。 */
-function prSlidersGlyph() {
-  return '<span style="position:relative;display:block;width:16px;height:16px">' +
-    prHLine(5, 1.5, 7.6) + prRing(10, 5) + prHLine(5, 12.4, 14.5) +
-    prHLine(11, 1.5, 3.6) + prRing(6, 11) + prHLine(11, 8.4, 14.5) + '</span>';
+/** 设置按钮的齿轮:描边外圈 + 中心孔,8 个齿绕中心旋转排布(卡内没有 SVG,用 CSS 拼)。 */
+function prGearGlyph() {
+  var teeth = '';
+  for (var i = 0; i < 8; i++) {
+    teeth += prSpan('left:6.8px;top:0.6px;width:2.4px;height:2.8px;border-radius:0.6px;background:currentColor;' +
+      'transform-origin:1.2px 7.4px;transform:rotate(' + (i * 45) + 'deg)');
+  }
+  return '<span style="position:relative;display:block;width:16px;height:16px">' + teeth +
+    prSpan('left:2.6px;top:2.6px;width:10.8px;height:10.8px;border:1.6px solid currentColor;border-radius:50%') +
+    prRing(8, 8) + '</span>';
 }
 
 function prCheckGlyph() {
@@ -2715,7 +2720,7 @@ function prGearButton(open) {
   return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
     'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
     'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
-    prSlidersGlyph());
+    prGearGlyph());
 }
 
 function prStatsParts(card) {
