@@ -9,6 +9,7 @@ const DEFAULT_MODELS = { jev: 'jev-latest', openai: 'gpt-6-luna' };
 const AGENT_KIND = { 'claude-code': 'cc', codex: 'codex', pi: 'pi' };
 const MESSAGES = {
   "en": {
+    badOptionLabels: "Each option needs a name, and names must be different: the decision model answers with the name.",
     modelAmbiguous: "“{model}” matches several models: {candidates}. Pass model with agent and providerId from availableModels.",
     serviceAuth: "The API key was rejected. Check or replace it under Judged by.",
     serviceLimit: "The judge service limit or quota was reached. Try again later or check your plan.",
@@ -41,6 +42,7 @@ const MESSAGES = {
     effort_ultra: "Ultra",
   },
   "zh-CN": {
+    badOptionLabels: "每个选项都要有名称，且名称不能重复：决策模型按名称作答。",
     modelAmbiguous: "「{model}」对应多个模型：{candidates}。请按 availableModels 同时传 model、agent 和 providerId。",
     serviceAuth: "API Key 被拒绝。请在「判断用」里检查或更换。",
     serviceLimit: "判断服务达到限额或额度不足。请稍后再试，或检查套餐。",
@@ -73,6 +75,7 @@ const MESSAGES = {
     effort_ultra: "极致",
   },
   "ja": {
+    badOptionLabels: "各選択肢に名前が必要で、名前は重複できません。判断モデルは名前で回答します。",
     modelAmbiguous: "「{model}」は複数のモデルに一致します: {candidates}。availableModels の model、agent、providerId を指定してください。",
     serviceAuth: "API キーが拒否されました。判断モデルの設定で確認または変更してください。",
     serviceLimit: "判断サービスの上限またはクォータに達しました。後でもう一度試すか、プランを確認してください。",
@@ -105,6 +108,7 @@ const MESSAGES = {
     effort_ultra: "ウルトラ",
   },
   "ko": {
+    badOptionLabels: "각 선택지에는 이름이 있어야 하며 이름은 겹칠 수 없습니다. 판단 모델은 이름으로 답합니다.",
     modelAmbiguous: "“{model}”에 해당하는 모델이 여러 개입니다: {candidates}. availableModels의 model, agent, providerId를 함께 전달하세요.",
     serviceAuth: "API 키가 거부되었습니다. 판단 모델 설정에서 확인하거나 교체하세요.",
     serviceLimit: "판단 서비스 한도 또는 할당량에 도달했습니다. 나중에 다시 시도하거나 요금제를 확인하세요.",
@@ -368,6 +372,10 @@ async function handleTool(msg) {
       const type = a.point === 'will-start-task' && Array.isArray(a.options) && a.options.length ? 'choice' : 'predicate';
       const rule = { id: a.id || newId(), point: a.point, type, enabled: a.enabled !== false, question: a.question };
       if (type === 'choice') {
+        const labels = a.options.map((o) => String(o.label || '').trim());
+        if (labels.some((l) => !l) || new Set(labels).size !== labels.length) {
+          return reply(false, { errorCode: 'INVALID_RULE', message: t('badOptionLabels') });
+        }
         const models = await agentModels();
         rule.options = [];
         for (const option of a.options) {
