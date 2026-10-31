@@ -879,6 +879,14 @@ test('card settings pick the auto-follow model with the host picker and hand its
   assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelPick" aria-label="更换模型（当前：Sonnet 5.5 · Anthropic）"/);
   await runtime.click(cardId, 'prset:modelPick');
   assert.deepEqual(picks.at(-1), { initial: route });
+
+  // A host with the in-card dropdown opens it under the button (the current model rides on the
+  // button) and returns the checked choice with the click; the dialog picker stays closed.
+  assert.ok(runtime.lastCard(cardId).html.includes(` data-ghost-model-select="${JSON.stringify(route).replace(/"/g, '&quot;')}"`));
+  const codex = { agentKind: 'codex', providerId: 'openai', model: 'gpt-5.6', effort: 'high', fastMode: true };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: codex });
+  assert.equal(picks.length, 2);
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
 });
 
 test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {

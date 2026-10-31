@@ -2536,14 +2536,19 @@ async function pickPrFollowModel(settings, msg) {
   if (!picked || picked.ok !== true) {
     return picked && picked.errorCode === 'CANCELLED' ? { settings: settings } : { settings: settings, error: (picked && picked.message) || 'UNAVAILABLE' };
   }
+  return savePrFollowModel(settings, picked.route);
+}
+
+/** 记下选中的跟进模型(卡内下拉框或选择器选的都走这里)。 */
+async function savePrFollowModel(settings, route) {
   var label = '';
   try {
     var res = await fetch('/agent-models');
     var list = res && res.ok !== false ? (await res.json()).models : null;
-    var hit = Array.isArray(list) && list.find(function (m) { return m && m.id === picked.route.model && m.providerId === picked.route.providerId; });
+    var hit = Array.isArray(list) && list.find(function (m) { return m && m.id === route.model && m.providerId === route.providerId; });
     if (hit) label = hit.name + (hit.providerName ? ' · ' + hit.providerName : '');
   } catch (e) { /* 名字只是展示,取不到用模型 id */ }
-  var value = prFollowModelFrom({ route: picked.route, label: label });
+  var value = prFollowModelFrom({ route: route, label: label });
   if (!value) return { settings: settings, error: 'INVALID_ROUTE' };
   return { settings: await writePrSettings(function (next) { next.followModel = value; next.lastFollowModel = value; }) };
 }
@@ -2864,8 +2869,9 @@ function prChevron() {
 }
 
 /**
- * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下面单独一行是模型选择按钮
- * (模型名 · 档位 ⌄,样式同输入框旁的选择器),点它打开 Cindy 的模型选择器;切回「跟随」再切回
+ * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下面单独一行是模型下拉框
+ * (模型名 · 档位 ⌄)。新版宿主认 data-ghost-model-select,点它在框下方弹出模型列表;
+ * 手机和旧版宿主照常派发动作,由这里打开 Cindy 的模型选择器;切回「跟随」再切回
  * 「指定」直接恢复上次的模型。旧版宿主没有统一选择器时不显示这一行。
  */
 function prModelRow(settings) {
@@ -2885,7 +2891,7 @@ function prModelRow(settings) {
       'border:1px solid var(--border-default);--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 6%)',
       '<span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500">' + prEsc(m.label) + '</span>' +
       prRouteExtras(m.route).map(function (x) { return '<span style="flex:none;margin-left:8px;color:var(--text-secondary)">' + prEsc(x) + '</span>'; }).join('') +
-      prChevron()) + '</div>'
+      prChevron(), ' data-ghost-model-select="' + prEsc(JSON.stringify(m.route)) + '"') + '</div>'
     : '';
   return '<div style="padding:8px">' + head + picker + '</div>';
 }
@@ -3205,6 +3211,15 @@ async function prCardAction(msg) {
   } else if (action === 'prset:model' && settings.lastFollowModel) {
     try {
       settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+    // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
+    try {
+      var chosen = await savePrFollowModel(settings, msg.modelSelection);
+      settings = chosen.settings;
+      if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
     } catch (e) {
       card.note = t('prSettingFailed');
     }
