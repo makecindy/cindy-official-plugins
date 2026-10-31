@@ -19,7 +19,9 @@
   "settingsHtml": "settings.html",
   "notify": true,
   "fs": true,
-  "card": {},
+  "card": {
+    "externalLinks": true
+  },
   "agent": {},
   "command": "cindy-github",
   "network": {

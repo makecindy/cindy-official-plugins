@@ -66,8 +66,8 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
-  // PR card: basic card plus click-triggered agent turns only; no external links or background runs.
-  assert.deepEqual(manifest.card, {});
+  // PR card: the title links to the PR; agent turns only on clicks, no background runs.
+  assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
   assert.equal(manifest.version, '1.4.0');
@@ -756,6 +756,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   const update = runtime.lastCard(cardId);
   assert.equal(update.sourceCallId, opened.callId);
   assert.deepEqual(visibleText(update.html), ['#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`]);
+  assert.match(update.html, /<a href="https:\/\/github\.com\/octo\/repo\/pull\/42">/);
 });
 
 test('card settings persist in /kv and become one-time todos once the PR exists', async () => {

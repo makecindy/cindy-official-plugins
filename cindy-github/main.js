@@ -2531,6 +2531,7 @@ var PR_CSS =
   'button:disabled{cursor:default;opacity:.5}' +
   'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}' +
   'button[data-ghost-action^="pr:"]::before{content:attr(aria-label)}' +
+  'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
   '@keyframes prspin{to{transform:rotate(360deg)}}' +
   '</style>';
 
@@ -2786,6 +2787,10 @@ function renderPrCard(card, settings) {
   } else {
     var pr = card.pr;
     var title = '<span style="margin-right:2px;color:var(--text-secondary);font-weight:500">#' + pr.number + '</span> ' + prEsc(pr.title || card.repo);
+    // 标题即 PR 链接:宿主确认后用系统浏览器打开(需 card.externalLinks)。
+    if (/^https:\/\/github\.com\//.test(pr.url)) {
+      title = '<a href="' + prEsc(pr.url) + '">' + title + '</a>';
+    }
     if (card.stage === 'open') {
       gear = true;
       var state = pr.draft ? t('prStateDraft') : card.following ? t('prStateFollowing') : t('prStateOpen');
