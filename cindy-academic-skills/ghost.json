@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 3,
+  "id": "cindy-academic-skills",
+  "name": "Academic Research Skills",
+  "description": "学术科研增强套件：提供基于 Crossref 的论文 DOI 真实性校验与元数据查询，防范学术幻觉；同时提供结构化文献拆解与同行评审评估辅助。开箱即用，无需配置私有 API Key。",
+  "whenToUse": "在学术研究、论文写作、文献调研、引用核对时使用。可快速校验文献 DOI 的真实性、检索作者与被引频次，或对论文论据链进行结构化分析及模拟同行评审。",
+  "version": "1.0.0",
+  "minCindyVersion": "0.1.64",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "Cindy plugin contributor",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "command": "academic-skills",
+  "network": {
+    "hosts": [
+      "api.crossref.org"
+    ]
+  },
+  "tools": [
+    {
+      "name": "verify_doi",
+      "description": "通过 Crossref 官方公开 API 校验论文 DOI，验证文献真实性，提取标题、作者列表、期刊、发表年份、引用次数与摘要等元数据，防范学术幻觉与虚构引用。无需 API Key。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "doi": {
+            "type": "string",
+            "description": "待校验的 DOI 字符串或包含 DOI 的 URL，例如 '10.1038/s41586-020-2649-2' 或 'https://doi.org/10.1038/s41586-020-2649-2'"
+          }
+        },
+        "required": [
+          "doi"
+        ]
+      }
+    },
+    {
+      "name": "academic_paper_analysis",
+      "description": "学术文献结构化拆解与分析工具：对论文摘要、方法或全文核心段落进行多维度拆解（研究目标、理论假说、方法论、证据链、创新点与局限性），辅助研读与文献笔记整理。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "论文标题或研究主题（可选）"
+          },
+          "content": {
+            "type": "string",
+            "description": "论文摘要、引言、方法论或待分析的研究文本"
+          },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "comprehensive",
+              "methodology",
+              "evidence_chain",
+              "limitations"
+            ],
+            "description": "分析重点：comprehensive (全面分析), methodology (方法论与实验设计), evidence_chain (论点与证据链契合度), limitations (局限性与改进空间)。默认 comprehensive"
+          },
+          "include_checklist": {
+            "type": "boolean",
+            "description": "是否包含科研可信度自查清单（对照实验、样本量、可复现性等），默认 true"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "peer_review_evaluation",
+      "description": "学术论文同行评审（Peer Review）辅助工具：依据国际学术规范对论文手稿进行模拟同行评审，生成结构化评审大纲、主要/次要修改意见及审稿建议。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "manuscript_text": {
+            "type": "string",
+            "description": "待评审的手稿内容、方法章节、实验结果或全文摘要"
+          },
+          "discipline": {
+            "type": "string",
+            "description": "学科领域（可选，如 'Computer Science', 'Biomedicine', 'Materials Science', 'Economics' 等），默认 'General'"
+          },
+          "review_type": {
+            "type": "string",
+            "enum": [
+              "standard_review",
+              "rebuttal_prep",
+              "pre_submission_audit"
+            ],
+            "description": "评审模式：standard_review (标准期刊同行评审), rebuttal_prep (返修/答辩抗辩准备), pre_submission_audit (投稿前自审)。默认 standard_review"
+          }
+        },
+        "required": [
+          "manuscript_text"
+        ]
+      }
+    }
+  ]
+}

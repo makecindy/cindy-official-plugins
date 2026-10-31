@@ -1,0 +1,14 @@
+Academic Research Skills plugin for Cindy Official Plugins.
+
+References, inspirations, and third-party API acknowledgments:
+
+1. ARS-Codex (Academic Research Suite)
+   Reference repository / design inspiration: ARS-Codex
+   Concept: Academic research toolset providing citation verification, literature analysis, and evidence-chain validation.
+   License: Apache-2.0 / MIT
+
+2. Crossref REST API
+   Provider: Crossref (https://www.crossref.org/)
+   API Documentation: https://api.crossref.org/swagger-ui/index.html
+   Attribution: Bibliographic metadata is made available under CC0 (Creative Commons Public Domain Dedication).
+   Network Usage: Pure public read-only queries with standard User-Agent etiquette; no proprietary API key or user authentication required.

@@ -1,0 +1,16 @@
+{
+  "name": "Academic Research Skills",
+  "description": "Academic research enhancement suite: verify DOI metadata and citation counts via Crossref to prevent academic hallucinations, perform structured literature analysis, and assist with peer-review evaluation. Ready to use with no private API key required.",
+  "whenToUse": "Use during literature review, academic writing, citation verification, or manuscript peer review. Quickly verify DOI authenticity, extract publication metadata, analyze argumentation chains, and simulate peer reviews.",
+  "tools": {
+    "verify_doi": {
+      "description": "Verify paper DOIs via the Crossref API to validate literature authenticity, extract titles, authors, journals, publication years, citation counts, and abstracts to prevent academic hallucinations. No API key required."
+    },
+    "academic_paper_analysis": {
+      "description": "Structured literature analysis tool: decompose abstracts, methodology, or key arguments across multiple dimensions (objectives, hypotheses, methods, evidence chains, and limitations) to streamline research notes."
+    },
+    "peer_review_evaluation": {
+      "description": "Academic peer review assistant: evaluate scientific manuscripts against international publication standards, producing structured critique rubrics, major/minor revision notes, and review recommendations."
+    }
+  }
+}
