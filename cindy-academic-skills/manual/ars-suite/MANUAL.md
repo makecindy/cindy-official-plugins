@@ -45,9 +45,21 @@
 
 ---
 
-## 二、子模块深入参考指南
+## 二、完整 Skill 规范与原语规约 (Full Skill Specifications)
 
-详细执行规约与专项 SOP 存放在本目录 `references/` 下，Cindy Agent 可通过 `ghost_manual` 随时按需查阅：
+本插件完整复刻了 ARS-Codex 及上游的核心 Skill 原文指令与提示词规范，存放在 `skills/` 目录下供 Cindy 智能体按需深层读取：
+
+1. **[academic-research-suite.md](skills/academic-research-suite.md)**: ARS-Codex 统一总调度器规约 (Master Suite Router)，协调 Pipeline、Research、Paper 与 Reviewer 全流程。
+2. **[academic-pipeline.md](skills/academic-pipeline.md)**: 10 阶段科研生命周期、状态机、阶段迁移契约（Material Passport）与质量闸门。
+3. **[deep-research.md](skills/deep-research.md)**: 13-Agent 深度学术调研团队规约（系统性综述、事实核查、3W 扫描、PRISMA 报告等 8 大模式）。
+4. **[academic-paper.md](skills/academic-paper.md)**: 13-Agent 学术论文写作团队规约（IMRaD 结构、认识论主张分级、CER 论证链、去 AI 味风格校准）。
+5. **[academic-paper-reviewer.md](skills/academic-paper-reviewer.md)**: 7-Agent 同行评审委员会规约（5 种评审拓扑、0-100 质量量表、魔鬼代言人挑战、逐点答辩矩阵）。
+
+---
+
+## 三、专项 SOP 与细化操作指南 (References)
+
+专项 SOP 存放在本目录 `references/` 下，Cindy Agent 可通过 `ghost_manual` 随时按需查阅：
 
 - [10 阶段生命周期与状态机规约](references/pipeline-10-stages.md) (`references/pipeline-10-stages.md`)
 - [深度研究、苏格拉底引导与 3W 文献扫描](references/deep-research-socratic.md) (`references/deep-research-socratic.md`)
@@ -58,7 +70,7 @@
 
 ---
 
-## 三、快速上手路径
+## 四、快速上手路径
 
 - **从零构思：** 告诉 Agent：“帮我引导选题，我想研究少子化对高等教育财务的影响” → 自动触发 `socratic_research_guide`。
 - **文献检索与验证：** 检索文献时调用 `search_crossref`，核查文献真实性时调用 `verify_doi`。
