@@ -480,13 +480,33 @@ async function readStore() {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+// Apply only what this page changed since `base` onto the latest store, so a rule the Agent just saved survives.
+function mergeChanges(base, mine, latest) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const merged = { ...latest };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(mine)])) {
+    if (key !== 'rules' && key !== 'lastByRule' && !same(base[key], mine[key])) merged[key] = mine[key];
+  }
+  const rulesById = (rules) => new Map((rules || []).map((r) => [r.id, r]));
+  const baseRules = rulesById(base.rules);
+  const mineRules = rulesById(mine.rules);
+  const rules = (latest.rules || []).filter((r) => !baseRules.has(r.id) || mineRules.has(r.id));
+  for (const rule of mine.rules || []) {
+    if (same(baseRules.get(rule.id), rule)) continue;
+    const index = rules.findIndex((r) => r.id === rule.id);
+    if (index >= 0) rules[index] = rule; else rules.push(rule);
+  }
+  merged.rules = rules;
+  return merged;
+}
 // Returns whether the change landed. On failure the page goes back to what is stored.
 async function save() {
   try {
+    // Captured now: while waiting for the lock, the brain may change the store and refresh cfg.
+    const mine = cfg;
+    const base = JSON.parse(stored);
     const next = await withConfigLock(async () => {
-      // The brain writes lastByRule: re-read before saving and overwrite only rules and judge settings.
-      const latest = await readStore();
-      const merged = { ...cfg, lastByRule: latest.lastByRule || cfg.lastByRule || {} };
+      const merged = mergeChanges(base, mine, migrate(await readStore()));
       const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(merged) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return merged;
