@@ -810,7 +810,10 @@ function ruleRow(rule) {
         render();
       }),
       h('button', { class: 'rbody', type: 'button', 'aria-expanded': String(open), onclick: () => {
-        if (open) { openId = null; draft = null; } else { openId = rule.id; draft = JSON.parse(JSON.stringify(rule)); }
+        // cfg may have been refreshed since this row rendered: edit the current rule, not the captured one.
+        const current = cfg.rules.find((r) => r.id === rule.id);
+        if (open || !current) { openId = null; draft = null; }
+        else { openId = rule.id; draft = JSON.parse(JSON.stringify(current)); }
         tryState = null; ruleError = ''; render();
       } }, h('div', { class: 'grow' }, ...summary(open ? draft : rule), h('p', { class: 'meta' }, lastLine(rule))), h('span', { class: `chev ${open ? 'up' : ''}` }, svg(ICON.chevron, 16)))),
     open ? editor() : null);
