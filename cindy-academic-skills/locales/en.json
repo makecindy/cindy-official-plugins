@@ -1,7 +1,7 @@
 {
-  "name": "Academic Research Skills (ARS-Codex)",
-  "description": "Complete academic research & statistical suite (ARS-Codex): 10-stage pipeline, Socratic RQ mentor, Crossref DOI validation, statistical models, APA tables, 7 integrity gates, claim alignment, tone calibration, peer review, and rebuttal coach. Ready out-of-the-box with zero private keys.",
-  "whenToUse": "Use throughout the scholarly research lifecycle: research topic formulation, PRISMA systematic literature reviews, manuscript drafting, academic integrity auditing, multi-perspective mock peer reviews, point-by-point rebuttal letters, and publication formatting.",
+  "name": "Academic Research & Publishing Suite",
+  "description": "Comprehensive academic research, data analysis, and figure design suite: 10-stage lifecycle, Socratic RQ mentor, Crossref DOI verification, statistical decision trees, APA tables, multi-panel figures, 7 integrity gates, claim alignment, tone calibration, peer review, and rebuttal coaching.",
+  "whenToUse": "Use throughout the research lifecycle: topic formulation, PRISMA reviews, empirical data analysis, publication figure design, manuscript drafting, integrity auditing, mock peer reviews, point-by-point rebuttal letters, and final publication formatting.",
   "tools": {
     "pipeline_stage_orchestrator": {
       "description": "ARS 10-stage pipeline orchestrator: diagnose current research phases, issue Material Passports (evidence-chain audit records), chart sequential next steps, and enforce human-in-the-loop checkpoints."

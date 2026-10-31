@@ -1,14 +1,14 @@
-# Academic Research Skills (ARS-Codex) — Cindy 官方综合学术研究工作流套件
+# Academic Research Suite (ARS) — 综合学术研究与出版工作流套件
 
-> **核心哲学 (Core Philosophy):** AI 是你的副驾驶，不是机长。本系统不会在真空里替你写论文，而是处理文献检索验证、学术诚信防线、逻辑一致性核对与多视角盲审，让人类研究者专注于问题定义、实验洞察与本质推论。
+> **核心哲学 (Core Philosophy):** AI 是你的副驾驶，不是机长。本系统不会在真空里替你写论文，而是处理文献检索验证、实证数据分析、顶刊配图架构、学术诚信防线、逻辑一致性核对与多视角盲审，让人类研究者专注于问题定义、实验洞察与本质推论。
 
-本套件完全复刻 **ARS-Codex (Academic Research Suite v3.24.0)** 的工作流设计与学术规范，专为 Cindy 打造，提供开箱即用、无私有 Key 依赖的端到端科研支撑。
+本套件是专为 Cindy 平台打造的专业级端到端学术科研与论文出版工作流系统，深度整合科学文献探索、实证数据分析、顶刊科学绘图、学术论文写作与同行评审五大支柱，提供开箱即用、无私有 Key 依赖的强大学术工程支撑。
 
 ---
 
 ## 一、架构总览与能力矩阵
 
-套件整合了 ARS 的四大核心支柱与 10 大阶段：
+套件深度整合了学术科研全生命周期的五大支柱与 10 大阶段：
 
 ```text
 [Stage 1: 研究探索] ──> [Stage 1.5: 实证数据分析] ──> [Stage 1.8: 顶刊配图设计] ──> [Stage 2: 论文撰写]
@@ -50,9 +50,9 @@
 
 ## 二、完整 Skill 规范与原语规约 (Full Skill Specifications)
 
-本插件完整复刻了 ARS-Codex 及上游的核心 Skill 原文指令与提示词规范，存放在 `skills/` 目录下供 Cindy 智能体按需深层读取：
+本套件内置了系统严密的学术研究规范与原语规约，存放在 `skills/` 目录下供 Cindy 智能体按需深层读取：
 
-1. **[academic-research-suite.md](skills/academic-research-suite.md)**: ARS-Codex 统一总调度器规约 (Master Suite Router)，协调 Pipeline、Research、Paper 与 Reviewer 全流程。
+1. **[academic-research-suite.md](skills/academic-research-suite.md)**: 学术研究套件统一总调度器规约 (Master Suite Router)，协调 Pipeline、Research、Paper 与 Reviewer 全流程。
 2. **[academic-pipeline.md](skills/academic-pipeline.md)**: 10 阶段科研生命周期、状态机、阶段迁移契约（Material Passport）与质量闸门。
 3. **[deep-research.md](skills/deep-research.md)**: 13-Agent 深度学术调研团队规约（系统性综述、事实核查、3W 扫描、PRISMA 报告等 8 大模式）。
 4. **[academic-paper.md](skills/academic-paper.md)**: 13-Agent 学术论文写作团队规约（IMRaD 结构、认识论主张分级、CER 论证链、去 AI 味风格校准）。

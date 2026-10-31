@@ -1,8 +1,8 @@
 {
   "schemaVersion": 3,
   "id": "cindy-academic-skills",
-  "name": "Academic Research Skills (ARS-Codex)",
-  "description": "专业级学术研究、实证数据分析与顶刊科研绘图工作流套件（深度复刻并强化 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 真实引文检索与 DOI 校验防幻觉、统计决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、顶刊多面板配图架构规划、Python/R 出版级绘图代码生成、7 类学术诚信阻断门禁、主张保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
+  "name": "Academic Research Suite",
+  "description": "专业级学术研究、实证数据分析与顶刊科研绘图全流程套件：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 权威引文检索与 DOI 真实性校验防幻觉、统计决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、顶刊多面板配图架构设计、Python/R 出版级绘图代码生成、7 类学术诚信阻断门禁、主张保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
   "whenToUse": "适用于学术研究全流程：课题立项、PRISMA 综述、实证数据分析与统计检验、顶刊多面板配图架构与代码生成、论文起草撰写、学术诚信自查、同行评审盲审、答辩矩阵构建与出版排版。提供端到端严密科研支撑与防幻觉机制。",
   "version": "1.4.0",
   "minCindyVersion": "0.1.64",
@@ -26,7 +26,7 @@
       {
         "dir": "manual/ars-suite",
         "name": "ars-suite",
-        "description": "Complete ARS-Codex academic research suite manual, 10-stage pipeline orchestrator, 7 failure modes, Socratic mentoring, peer review rubrics, and SOP."
+        "description": "Complete Academic Research Suite (ARS) manual: 10-stage pipeline orchestrator, statistical decision trees, publication figure design, Socratic mentoring, peer review rubrics, and SOP."
       }
     ]
   },

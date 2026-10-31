@@ -235,7 +235,7 @@ test('authorDisclosureStatementTool creates CRediT and AI-assistance disclosures
   const res = await plugin.authorDisclosureStatementTool({
     lead_author: 'Alice Smith',
     co_authors: ['Bob Jones'],
-    ai_tools_used: ['Cindy Academic Skills (ARS-Codex)'],
+    ai_tools_used: ['Cindy Academic Research Suite (ARS)'],
     ai_tasks_performed: ['DOI citation verification', 'Style calibration'],
   });
 
