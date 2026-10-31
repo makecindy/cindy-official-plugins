@@ -9,6 +9,8 @@ const DEFAULT_MODELS = { jev: 'jev-latest', openai: 'gpt-6-luna' };
 const AGENT_KIND = { 'claude-code': 'cc', codex: 'codex', pi: 'pi' };
 const MESSAGES = {
   "en": {
+    effortKept: "Reasoning effort is already at its highest",
+    effortKeptSummary: "Yes {pct} → model and reasoning effort unchanged",
     badOptionLabels: "Each option needs a name, and names must be different: the decision model answers with the name.",
     modelAmbiguous: "“{model}” matches several models: {candidates}. Pass model with agent and providerId from availableModels.",
     serviceAuth: "The API key was rejected. Check or replace it under Judged by.",
@@ -42,6 +44,8 @@ const MESSAGES = {
     effort_ultra: "Ultra",
   },
   "zh-CN": {
+    effortKept: "推理强度已经是最高",
+    effortKeptSummary: "是 {pct} → 模型和推理强度不变",
     badOptionLabels: "每个选项都要有名称，且名称不能重复：决策模型按名称作答。",
     modelAmbiguous: "「{model}」对应多个模型：{candidates}。请按 availableModels 同时传 model、agent 和 providerId。",
     serviceAuth: "API Key 被拒绝。请在「判断用」里检查或更换。",
@@ -75,6 +79,8 @@ const MESSAGES = {
     effort_ultra: "极致",
   },
   "ja": {
+    effortKept: "推論レベルはすでに最高です",
+    effortKeptSummary: "はい {pct} → モデルと推論レベルは変更なし",
     badOptionLabels: "各選択肢に名前が必要で、名前は重複できません。判断モデルは名前で回答します。",
     modelAmbiguous: "「{model}」は複数のモデルに一致します: {candidates}。availableModels の model、agent、providerId を指定してください。",
     serviceAuth: "API キーが拒否されました。判断モデルの設定で確認または変更してください。",
@@ -108,6 +114,8 @@ const MESSAGES = {
     effort_ultra: "ウルトラ",
   },
   "ko": {
+    effortKept: "추론 강도가 이미 최고입니다",
+    effortKeptSummary: "예 {pct} → 모델과 추론 강도 변경 없음",
     badOptionLabels: "각 선택지에는 이름이 있어야 하며 이름은 겹칠 수 없습니다. 판단 모델은 이름으로 답합니다.",
     modelAmbiguous: "“{model}”에 해당하는 모델이 여러 개입니다: {candidates}. availableModels의 model, agent, providerId를 함께 전달하세요.",
     serviceAuth: "API 키가 거부되었습니다. 판단 모델 설정에서 확인하거나 교체하세요.",
@@ -310,7 +318,10 @@ async function decide(point, data, deadline, cfg) {
       const models = await agentModels();
       const entry = models.find((m) => m.id === current.model && m.providerId === current.providerId && AGENT_KIND[m.agent] === current.agentKind);
       const top = entry?.efforts?.length ? entry.efforts[entry.efforts.length - 1] : null;
-      if (!top || top === current.effort) continue;
+      // Already at the top, or no effort to raise: this rule still has its answer, so the model stays and later rules don't run.
+      if (!top || top === current.effort) {
+        return { action: 'allow', ruleId: rule.id, ms, why: t('effortKept'), summary: t('effortKeptSummary', { pct: pct(answer.probability) }) };
+      }
       return {
         action: 'route', route: { ...current, effort: top }, ruleId: rule.id, ms,
         reason: t('effortReason', { pct: pct(answer.probability) }), summary: t('effortSummary', { pct: pct(answer.probability), effort: effortName(top) }),
