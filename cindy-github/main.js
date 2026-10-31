@@ -2956,6 +2956,8 @@ async function handOffPr(card, action, settings, msg) {
   if (card.pr) {
     event.pr_number = card.pr.number;
     event.pr_url = url;
+    // 插件替用户把草稿转了正式:告诉 Agent,免得它以为是用户在 GitHub 上改的。
+    if (card.markedReady) event.marked_ready_on_card = true;
   } else {
     event.head = card.head;
     if (card.base) event.base = card.base;
@@ -3002,6 +3004,7 @@ async function markPrReady(card, settings, msg) {
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
   }
   card.pending = null;
+  if (!card.pr.draft) card.markedReady = true;
   if (card.pr.draft) {
     card.note = t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
   } else if (settings.autoFollow && card.stage === 'open') {

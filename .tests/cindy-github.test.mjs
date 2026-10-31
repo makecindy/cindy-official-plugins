@@ -822,6 +822,7 @@ test('a draft card marks the PR ready itself, then follows when the card setting
   const url = 'https://github.com/octo/repo/pull/9';
   assert.equal(runtime.agentRuns.length, 1);
   assert.equal(runtime.agentRuns[0].userMessage, fill(zhCopy.prReadyFollow, { url }));
+  assert.equal(runtime.agentRuns[0].event.marked_ready_on_card, true);
   const card = runtime.lastCard(cardId);
   assert.equal(card.state, 'working');
   assert.ok(visibleText(card.html).includes(zhCopy.prFollowStarting));
