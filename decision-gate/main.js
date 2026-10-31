@@ -130,16 +130,16 @@ async function loadLocale() {
 }
 const effortName = (effort) => (MESSAGES.en[`effort_${effort}`] ? t(`effort_${effort}`) : effort);
 
+// A failed read must not look like "no rules": callers would overwrite the stored rules or allow the run.
 async function readConfig() {
-  try {
-    return migrate(await (await fetch('/kv')).json());
-  } catch {
-    return { rules: [] };
-  }
+  const res = await fetch('/kv');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return migrate(await res.json());
 }
 
 async function writeConfig(cfg) {
-  await fetch('/kv', { method: 'PUT', body: JSON.stringify(cfg) });
+  const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(cfg) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   channel.postMessage({ from: 'brain', type: 'config-changed' });
 }
 

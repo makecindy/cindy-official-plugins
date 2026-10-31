@@ -2,6 +2,9 @@
 // Copy follows the host language only (GET /app-context); anything else falls back to English.
 const MESSAGES = {
   "en": {
+    storeLoadFailed: "Could not load rules: {error}.",
+    storeSaveFailed: "Could not save: {error}. Your change was not applied.",
+    storeRetry: "Try again",
     pointStart: "When a new task starts",
     pointStartHint: "Checks the first message once and keeps that model afterward. Not used in teammate chats.",
     pointSchedule: "Before an automation runs",
@@ -93,6 +96,9 @@ const MESSAGES = {
     tipB: "and it adds the rule here for you to edit.",
   },
   "zh-CN": {
+    storeLoadFailed: "读取规则失败：{error}。",
+    storeSaveFailed: "保存失败：{error}。这次改动没有生效。",
+    storeRetry: "重试",
     pointStart: "开新任务时",
     pointStartHint: "只在新任务的第一条消息判断一次，之后不再换模型；伙伴对话不使用",
     pointSchedule: "自动化运行前",
@@ -184,6 +190,9 @@ const MESSAGES = {
     tipB: "，AI 会把规则加到这里，你可以再改。",
   },
   "ja": {
+    storeLoadFailed: "ルールを読み込めませんでした: {error}。",
+    storeSaveFailed: "保存できませんでした: {error}。変更は適用されていません。",
+    storeRetry: "再試行",
     pointStart: "新しいタスクの開始時",
     pointStartHint: "新しいタスクの最初のメッセージで一度だけ判断し、その後はモデルを変えません。チームメイトとの会話では使いません。",
     pointSchedule: "自動化の実行前",
@@ -275,6 +284,9 @@ const MESSAGES = {
     tipB: "AI がここにルールを追加し、あとから編集できます。",
   },
   "ko": {
+    storeLoadFailed: "규칙을 불러오지 못했습니다: {error}.",
+    storeSaveFailed: "저장하지 못했습니다: {error}. 변경 사항이 적용되지 않았습니다.",
+    storeRetry: "다시 시도",
     pointStart: "새 작업을 시작할 때",
     pointStartHint: "새 작업의 첫 메시지에서 한 번만 판단하고 이후에는 모델을 바꾸지 않습니다. 팀원 대화에서는 쓰지 않습니다.",
     pointSchedule: "자동화 실행 전",
@@ -394,6 +406,9 @@ let secrets = {};
 let models = [];
 let jevModels = null;
 let editingJudge = false;
+let loaded = false; // the stored config was read successfully
+let stored = '{}'; // last config known to be in the store
+let storeError = '';
 let openId = null; // rule being edited
 let draft = null; // working copy
 let tryText = '';
@@ -443,13 +458,29 @@ function migrate(raw) {
   return out;
 }
 
+async function readStore() {
+  const res = await fetch('/kv');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+// Returns whether the change landed. On failure the page goes back to what is stored.
 async function save() {
-  // The brain writes lastByRule: re-read before saving and overwrite only rules and judge settings.
-  const latest = await fetch('/kv').then((r) => r.json()).catch(() => ({}));
-  const next = { ...cfg, lastByRule: latest.lastByRule || cfg.lastByRule || {} };
-  await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
-  cfg = next;
-  channel.postMessage({ from: 'settings', type: 'config-changed' });
+  try {
+    // The brain writes lastByRule: re-read before saving and overwrite only rules and judge settings.
+    const latest = await readStore();
+    const next = { ...cfg, lastByRule: latest.lastByRule || cfg.lastByRule || {} };
+    const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    cfg = next;
+    stored = JSON.stringify(next);
+    storeError = '';
+    channel.postMessage({ from: 'settings', type: 'config-changed' });
+    return true;
+  } catch (error) {
+    cfg = JSON.parse(stored);
+    storeError = t('storeSaveFailed', { error: error && error.message });
+    return false;
+  }
 }
 
 function ask(kind, payload, timeoutMs = 30000) {
@@ -650,14 +681,13 @@ async function commitRule() {
   const d = normalizeDraft(draft);
   const i = cfg.rules.findIndex((r) => r.id === d.id);
   if (i >= 0) cfg.rules[i] = d; else cfg.rules.push(d);
-  openId = null; draft = null; tryState = null;
-  await save();
+  // Keep the editor open if saving fails, so the edit is not lost.
+  if (await save()) { openId = null; draft = null; tryState = null; }
   render();
 }
 async function removeRule() {
   cfg.rules = cfg.rules.filter((r) => r.id !== draft.id);
-  openId = null; draft = null; tryState = null;
-  await save();
+  if (await save()) { openId = null; draft = null; tryState = null; }
   render();
 }
 async function runTry() {
@@ -714,7 +744,11 @@ function rulesSection() {
 
 function render() {
   const focused = document.activeElement?.getAttribute('aria-label');
-  root.replaceChildren(judgeSection(), rulesSection());
+  if (!loaded) {
+    root.replaceChildren(h('p', { class: 'res err' }, storeError), h('button', { class: 'btn', type: 'button', onclick: boot }, t('storeRetry')));
+    return;
+  }
+  root.replaceChildren(...(storeError ? [h('p', { class: 'res err' }, storeError)] : []), judgeSection(), rulesSection());
   if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
 }
 
@@ -734,16 +768,31 @@ async function loadModels() {
 // The brain or the AI changed rules: refresh unless the user is editing.
 channel.addEventListener('message', async ({ data }) => {
   if (data?.from !== 'brain' || data.type !== 'config-changed') return;
-  cfg = migrate(await fetch('/kv').then((r) => r.json()).catch(() => ({})));
-  if (!draft) render();
+  const raw = await readStore().catch(() => null);
+  if (!raw) return;
+  cfg = migrate(raw);
+  stored = JSON.stringify(cfg);
+  if (loaded && !draft) render();
 });
 
-(async () => {
+async function boot() {
   await loadLocale();
-  const [raw] = await Promise.all([fetch('/kv').then((r) => r.json()).catch(() => ({})), loadSecrets(), loadModels()]);
+  let raw;
+  try {
+    [raw] = await Promise.all([readStore(), loadSecrets(), loadModels()]);
+  } catch (error) {
+    // Do not render an empty page that could be saved over the stored rules.
+    storeError = t('storeLoadFailed', { error: error && error.message });
+    render();
+    return;
+  }
   cfg = migrate(raw);
+  stored = JSON.stringify(cfg);
+  loaded = true;
+  storeError = '';
   // Same default as the brain; saved here so the page and the actual judge agree.
   if (!cfg.provider) { cfg.provider = secrets.openai_api_key || !secrets.typesafe_api_key ? 'openai' : 'jev'; await save(); }
   render();
   if (providerId() === 'jev') loadJevModels();
-})();
+}
+boot();
