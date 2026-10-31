@@ -41,6 +41,12 @@
     },
     "bibtex_format_converter": {
       "description": "서지 서식 변환 및 BibTeX 표준화: 문헌 메타데이터 또는 자유 형식의 참고문헌을 표준 BibTeX 엔트리 및 APA 7.0 인용 양식으로 상호 변환하고 표준화합니다."
+    },
+    "statistical_analysis_advisor": {
+      "description": "통계 분석 기법 의사결정 트리 및 전제조건 진단: 변수 유형, 집단 수, 표본 분포 특성에 기반하여 최적의 통계 모델(t검정, 분산분석 ANOVA, 비모수 검정, 회귀분석 등)을 추천하고, 전제조건 검증 체크리스트와 p-hacking 방지 다중비교 보정 전략을 제공합니다."
+    },
+    "academic_data_summary": {
+      "description": "학술 통계 정량 보고 및 APA 7.0 / Nature 기준 삼선표 생성: 검정통계량, 자유도, 정확한 p값, 효과크기, 신뢰구간을 입력받아 학술지 표준 통계 서술문과 Markdown 삼선표를 자동 생성합니다."
     }
   }
 }

@@ -41,6 +41,12 @@
     },
     "bibtex_format_converter": {
       "description": "文献フォーマット変換＆BibTeX標準化：文献メタデータや自由記述の引用情報を、標準的なBibTeXエントリおよびAPA 7.0形式の参照文献リストへと変換・整形します。"
+    },
+    "statistical_analysis_advisor": {
+      "description": "統計手法決定ツリー＆前提条件診断：変数型・群数・標本分布特性に基づき最適な統計モデル（t検定/ANOVA/ノンパラメトリック/回帰分析等）を推奨し、前提条件チェックリスト、効果量指標、p-hacking防止多重比較補正策を提示します。"
+    },
+    "academic_data_summary": {
+      "description": "学術統計報告＆APA 7.0 / Nature基準三線表生成：検定統計量、自由度、正確なp値、効果量、信頼区間を入力し、トップ学術誌基準の記述文およびMarkdown三線表を自動生成します。"
     }
   }
 }

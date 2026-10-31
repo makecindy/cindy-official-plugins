@@ -85,7 +85,8 @@ async function pipelineStageOrchestratorTool(args) {
   var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts : [];
 
   var stageTransitions = {
-    Stage_1_Research: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
+    Stage_1_Research: { next: 'Stage_1_5_DataAnalysis', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
+    Stage_1_5_DataAnalysis: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'Empirical Data Analysis Report & Three-line Statistical Tables' },
     Stage_2_Write: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Manuscript Draft & Material Passport' },
     Stage_2_5_Integrity: { next: 'Stage_3_Review', requiresConfirmation: false, keyDeliverable: 'Pre-review Integrity Audit Report' },
     Stage_3_Review: { next: 'Stage_4_Revise', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
@@ -821,6 +822,244 @@ async function bibtexFormatConverterTool(args) {
   };
 }
 
+// 14. statistical_analysis_advisor
+async function statisticalAnalysisAdvisorTool(args) {
+  var rq = args && args.research_question;
+  if (!rq || typeof rq !== 'string' || !rq.trim()) {
+    return fail('请提供研究问题或实证研究假设。');
+  }
+  var design = args.design_type;
+  var outcome = args.outcome_type;
+  var n = typeof args.sample_size_per_group === 'number' ? args.sample_size_per_group : null;
+  var normal = typeof args.normality_satisfied === 'boolean' ? args.normality_satisfied : null;
+  var varHomog = typeof args.variance_homogeneity_satisfied === 'boolean' ? args.variance_homogeneity_satisfied : null;
+  var compCount = typeof args.multiple_comparisons_count === 'number' ? args.multiple_comparisons_count : 1;
+
+  var recommendation = {};
+
+  if (design === 'two_groups_independent') {
+    if (outcome === 'continuous') {
+      recommendation = {
+        primaryTest: (varHomog === false) ? "Welch's Independent Samples t-test (不等方差校正 t 检验)" : "Student's Independent Samples t-test (独立样本 t 检验)",
+        remedialTest: "Mann-Whitney U test (Wilcoxon 秩和检验，若正态性严重偏离或存在极端离群值)",
+        effectSizeMetric: "Cohen's d (若样本量小 n < 20 建议校正为 Hedges' g)",
+        assumptionsToCheck: [
+          "1. 观测独立性 (Independence of observations): 独立实验单元，杜绝同一受试者/同一样本的技术重复 (伪重复)",
+          "2. 正态性 (Normality): 每组因变量分布近似正态 (Shapiro-Wilk 检验，若 n > 50 结合 Q-Q 图)",
+          "3. 方差齐性 (Homoscedasticity): Levene 检验 (若 p < .05 方差不齐，默认使用 Welch t-test 代替 Student t)"
+        ],
+        reportingTemplate: "独立样本 t 检验显示，实验组 (M = ..., SD = ...) 与对照组 (M = ..., SD = ...) 差异显著, t(df) = ..., p = ..., Cohen's d = ..., 95% CI [... , ...]。"
+      };
+    } else if (outcome === 'binary' || outcome === 'categorical_proportions') {
+      recommendation = {
+        primaryTest: (n && n < 30) ? "Fisher's Exact Test (Fisher 精确概率检验)" : "Pearson's Chi-Square Test (卡方独立性检验)",
+        remedialTest: "Fisher's Exact Test (若任一期望频数 E < 5)",
+        effectSizeMetric: "Odds Ratio (OR, 比值比) 或 Cramer's V / Phi 关联系数",
+        assumptionsToCheck: [
+          "1. 单元格独立性: 每个观测仅能落入单一单元格",
+          "2. 期望频数准则: 所有单元格期望频数 >= 1，且至少 80% 单元格期望频数 >= 5"
+        ],
+        reportingTemplate: "卡方检验表明两组比例差异显著, χ²(df, N = ...) = ..., p = ..., OR = ... (95% CI [... , ...])。"
+      };
+    } else {
+      recommendation = {
+        primaryTest: "Mann-Whitney U test",
+        remedialTest: "Ordinal Logistic Regression (有序 Logistic 回归)",
+        effectSizeMetric: "Rank-biserial correlation (r_rb) 或 Cliff's Delta",
+        assumptionsToCheck: ["独立观测", "因变量为有序尺度或连续非正态尺度"],
+        reportingTemplate: "Mann-Whitney U 检验表明组间差异显著, U = ..., Z = ..., p = ..., r = ...。"
+      };
+    }
+  } else if (design === 'two_groups_paired') {
+    recommendation = {
+      primaryTest: "Paired Samples t-test (配对样本 t 检验)",
+      remedialTest: "Wilcoxon Signed-Rank Test (配对符号秩检验)",
+      effectSizeMetric: "Cohen's d_z (配对差值标准差标准化) 或 Hedges' g",
+      assumptionsToCheck: [
+        "1. 配对差值正态性: 两条件间的差值分数 (Difference scores) 呈近似正态分布",
+        "2. 配对独立性: 组对之间相互独立"
+      ],
+      reportingTemplate: "配对样本 t 检验显示处理后相比基线有显著改变, t(df) = ..., p = ..., d_z = ...。"
+    };
+  } else if (design === 'multi_groups_independent') {
+    recommendation = {
+      primaryTest: (varHomog === false) ? "Welch's ANOVA (配 Games-Howell 事后多重比较)" : "One-Way ANOVA (单因素方差分析，配 Tukey HSD 事后检验)",
+      remedialTest: "Kruskal-Wallis H test (配 Dunn's 检验并进行 FDR 校正)",
+      effectSizeMetric: "Partial Eta Squared (η_p²) 或 Omega Squared (ω²)",
+      assumptionsToCheck: [
+        "1. 组间独立性: 组与组之间无共享被试或嵌套依赖",
+        "2. 各组残差正态性 (Residual normality)",
+        "3. 方差齐性: Levene 检验，若显著则必须使用 Welch ANOVA"
+      ],
+      reportingTemplate: "单因素方差分析表明主效应显著, F(df1, df2) = ..., p = ..., η_p² = ...。Tukey HSD 事后检验显示组 A 与组 B 差异显著 (p_adj = ...)。"
+    };
+  } else if (design === 'multi_groups_repeated') {
+    recommendation = {
+      primaryTest: "Repeated Measures ANOVA (重复测量方差分析，Mauchly 球形度检验)",
+      remedialTest: "Greenhouse-Geisser 或 Huynh-Feldt 自由度校正 (若球形度违反 ε < 0.75)；或 Friedman 秩和检验",
+      effectSizeMetric: "Partial Eta Squared (η_p²)",
+      assumptionsToCheck: [
+        "1. 球形度假设 (Sphericity): Mauchly's test (p > .05)，若违反应报告校正后的 F 值与 ε",
+        "2. 残差各时点正态性"
+      ],
+      reportingTemplate: "重复测量方差分析显示时间主效应显著, F(df_corr1, df_corr2) = ..., p = ..., η_p² = ... (Greenhouse-Geisser 校正 ε = ...)。"
+    };
+  } else if (design === 'correlation') {
+    recommendation = {
+      primaryTest: "Pearson Correlation Coefficient (皮尔逊积差相关)",
+      remedialTest: "Spearman Rank Correlation (斯皮尔曼秩相关) 或 Kendall's Tau-b (样本量小有结分)",
+      effectSizeMetric: "r (相关系数本身即为标准化效应量，r² 为决定系数解释变异量)",
+      assumptionsToCheck: [
+        "1. 双变量正态性 (Bivariate normality)",
+        "2. 线性关系 (散点图检验，排除非线性 U 型关联)",
+        "3. 无极端多变量异常值 (Mahalanobis 距离检验)"
+      ],
+      reportingTemplate: "两个变量之间存在显著的正相关关系, r(df) = ..., p = ..., 95% CI [... , ...]。"
+    };
+  } else if (design === 'regression') {
+    recommendation = {
+      primaryTest: "Multiple Linear Regression (多元线性回归，OLS)",
+      remedialTest: "Robust Regression (稳健回归，如 Huber M 估计) 或 Generalized Linear Model (GLM)",
+      effectSizeMetric: "R² 与 Adjusted R² (全模型变异解释率)，标准化回归系数 β",
+      assumptionsToCheck: [
+        "1. 线性度与无多重共线性: 方差膨胀因子 VIF < 5 (严格准则 VIF < 2.5)",
+        "2. 残差独立性 (Durbin-Watson 统计量接近 2)",
+        "3. 残差同方差性 (Breusch-Pagan 检验) 与残差正态性 (Q-Q 图)"
+      ],
+      reportingTemplate: "多元回归模型整体显著, F(df1, df2) = ..., p = ..., R² = ..., Adj. R² = ...。自变量显著正向预测因变量, β = ..., t = ..., p = ...。"
+    };
+  } else {
+    recommendation = {
+      primaryTest: "General Linear Model (GLM) / 线性混合效应模型 (LMM)",
+      remedialTest: "Generalized Estimating Equations (GEE) 或非参数置换检验 (Permutation Test)",
+      effectSizeMetric: "Marginal R² / Conditional R² 或标准化系数",
+      assumptionsToCheck: ["明确层次结构与聚类效应", "固定效应与随机效应设定"],
+      reportingTemplate: "报告模型统计量、系数及置信区间。"
+    };
+  }
+
+  var multCompPlan = null;
+  if (compCount > 1) {
+    multCompPlan = {
+      totalComparisons: compCount,
+      nominalAlpha: 0.05,
+      bonferroniThreshold: Number((0.05 / compCount).toFixed(4)),
+      recommendedMethod: compCount <= 4 ? "Bonferroni 校正 (严控 FWER 族系误差率)" : "Benjamini-Hochberg (BH) FDR 假发现率控制 (兼顾统计效力与假阳性防范)",
+      rationale: "执行 " + compCount + " 次检验若不校正，累积一类错误率膨胀至 " + Number((1 - Math.pow(0.95, compCount)).toFixed(3)) + "。"
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      researchQuestion: rq,
+      designEvaluated: design,
+      outcomeTypeEvaluated: outcome,
+      primaryModel: recommendation.primaryTest,
+      remedialModel: recommendation.remedialTest,
+      effectSizeMetric: recommendation.effectSizeMetric,
+      preregistrationStatement: "本研究依据预注册计划采用 " + recommendation.primaryTest + " 检验假设。若关键假设不满足，则自动转为 " + recommendation.remedialTest + "，绝不依据事后 p 值筛选统计检验 (Anti-p-hacking protocol)。",
+      assumptionsChecklist: recommendation.assumptionsToCheck,
+      multipleComparisonsAdjustment: multCompPlan,
+      apaReportingTemplate: recommendation.reportingTemplate,
+      replicationIntegrityNotice: "【学术诚信红线】请确保样本量 n 代表完全独立的生物/实验单元，杜绝将技术重复、重复测量或同一细胞系的分裂视作独立样本 (Pseudoreplication 伪重复)！"
+    }
+  };
+}
+
+// 15. academic_data_summary
+async function academicDataSummaryTool(args) {
+  var testType = args && args.test_type;
+  if (!testType || typeof testType !== 'string') {
+    return fail('请指定统计检验类型 (如 independent_t, one_way_anova, chi_square 等)。');
+  }
+  var stat = typeof args.test_statistic === 'number' ? args.test_statistic : null;
+  var df = args && args.df ? String(args.df).trim() : null;
+  var p = typeof args.p_value === 'number' ? args.p_value : null;
+
+  if (stat === null || df === null || p === null) {
+    return fail('请提供检验统计量数值 (test_statistic)、自由度 (df) 与精确 p 值 (p_value)。');
+  }
+
+  var effType = args && args.effect_size_type ? String(args.effect_size_type) : 'none';
+  var effVal = typeof args.effect_size_value === 'number' ? args.effect_size_value : null;
+  var ci = Array.isArray(args && args.ci_95) && args.ci_95.length === 2 ? args.ci_95 : null;
+  var descriptives = Array.isArray(args && args.group_descriptives) ? args.group_descriptives : [];
+  var label = (args && args.comparison_label && String(args.comparison_label).trim()) || 'Target outcome';
+
+  // Format p-value in APA style
+  var pFormatted = '';
+  if (p < 0.001) {
+    pFormatted = 'p < .001';
+  } else {
+    var pStr = p.toFixed(3).replace(/^0/, '');
+    pFormatted = 'p = ' + pStr;
+  }
+
+  // Format statistical statement
+  var statSentence = '';
+  var effStr = '';
+  if (effVal !== null && effType !== 'none') {
+    var effName = effType === 'cohens_d' ? 'd' :
+                  effType === 'hedges_g' ? 'g' :
+                  effType === 'eta_sq_partial' ? 'η_p²' :
+                  effType === 'odds_ratio' ? 'OR' :
+                  effType === 'r' ? 'r' : effType;
+    effStr = ', ' + effName + ' = ' + effVal.toFixed(2);
+  }
+  var ciStr = ci ? ', 95% CI [' + ci[0].toFixed(2) + ', ' + ci[1].toFixed(2) + ']' : '';
+
+  if (testType === 'independent_t' || testType === 'paired_t') {
+    statSentence = 't(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + effStr + ciStr;
+  } else if (testType === 'one_way_anova' || testType === 'two_way_anova') {
+    statSentence = 'F(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + effStr + ciStr;
+  } else if (testType === 'chi_square') {
+    statSentence = 'χ²(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + effStr;
+  } else if (testType === 'pearson_correlation' || testType === 'spearman_correlation') {
+    statSentence = 'r(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + ciStr;
+  } else if (testType === 'linear_regression') {
+    statSentence = 'β = ' + stat.toFixed(2) + ', t(' + df + ') = ' + (effVal ? effVal.toFixed(2) : '...') + ', ' + pFormatted + ciStr;
+  } else {
+    statSentence = 'Stat(' + df + ') = ' + stat.toFixed(2) + ', ' + pFormatted + effStr + ciStr;
+  }
+
+  // Generate three-line table (三线表)
+  var tableMd = '';
+  if (descriptives.length > 0) {
+    tableMd += '| Group / Condition | N | Mean | SD | 95% CI |\n';
+    tableMd += '| :--- | :---: | :---: | :---: | :---: |\n';
+    for (var i = 0; i < descriptives.length; i++) {
+      var g = descriptives[i];
+      var sem = g.sd / Math.sqrt(g.n);
+      var low = (g.mean - 1.96 * sem).toFixed(2);
+      var high = (g.mean + 1.96 * sem).toFixed(2);
+      tableMd += '| ' + g.name + ' | ' + g.n + ' | ' + g.mean.toFixed(2) + ' | ' + g.sd.toFixed(2) + ' | [' + low + ', ' + high + '] |\n';
+    }
+  }
+
+  var narrativeAPA = (p < 0.05) ?
+    '统计检验表明，' + label + '差异具有统计学显著性，' + statSentence + '。' :
+    '统计检验表明，' + label + '未达到统计学显著性水平，' + statSentence + '。';
+
+  return {
+    ok: true,
+    result: {
+      comparisonLabel: label,
+      apaFormattedString: statSentence,
+      narrativeTextAPA7: narrativeAPA,
+      threeLineTableMarkdown: tableMd || null,
+      significanceVerdict: p < 0.05 ? 'Statistically Significant (p < .05)' : 'Not Statistically Significant (p >= .05)',
+      natureReportingGuidelineCheck: {
+        exactPValueProvided: p >= 0.001,
+        effectSizePresent: effVal !== null,
+        confidenceIntervalPresent: ci !== null,
+        degreesOfFreedomDeclared: true,
+        pseudoreplicationAudit: 'Verified: Ensure N reflects independent experimental units.'
+      }
+    }
+  };
+}
+
 var handlers = {
   pipeline_stage_orchestrator: pipelineStageOrchestratorTool,
   socratic_research_guide: socraticResearchGuideTool,
@@ -835,6 +1074,8 @@ var handlers = {
   rebuttal_matrix_coach: rebuttalMatrixCoachTool,
   author_disclosure_statement: authorDisclosureStatementTool,
   bibtex_format_converter: bibtexFormatConverterTool,
+  statistical_analysis_advisor: statisticalAnalysisAdvisorTool,
+  academic_data_summary: academicDataSummaryTool,
 };
 
 cindy.onHostMessage(async function (message) {
@@ -905,5 +1146,7 @@ if (typeof module !== 'undefined') {
     rebuttalMatrixCoachTool: rebuttalMatrixCoachTool,
     authorDisclosureStatementTool: authorDisclosureStatementTool,
     bibtexFormatConverterTool: bibtexFormatConverterTool,
+    statisticalAnalysisAdvisorTool: statisticalAnalysisAdvisorTool,
+    academicDataSummaryTool: academicDataSummaryTool,
   };
 }

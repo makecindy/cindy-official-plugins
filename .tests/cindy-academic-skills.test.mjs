@@ -19,7 +19,7 @@ const loadPlugin = (fetchMock) => {
   return require(resolved);
 };
 
-test('manifest declares Manifest v3, 13 ARS tools and structured manual', () => {
+test('manifest declares Manifest v3, 15 ARS tools and structured manual', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'ghost.json'), 'utf8'));
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.id, 'cindy-academic-skills');
@@ -29,7 +29,7 @@ test('manifest declares Manifest v3, 13 ARS tools and structured manual', () => 
   assert.equal(manifest.settingsHtml, undefined);
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.equal(manifest.minCindyVersion, '0.1.64');
-  assert.equal(manifest.tools.length, 13);
+  assert.equal(manifest.tools.length, 15);
   assert.ok(manifest.manual && manifest.manual.items && manifest.manual.items.length > 0);
   assert.equal(manifest.manual.items[0].dir, 'manual/ars-suite');
 });
@@ -247,16 +247,24 @@ test('authorDisclosureStatementTool creates CRediT and AI-assistance disclosures
 
 test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {
   const plugin = loadPlugin();
-  const res = await plugin.pipelineStageOrchestratorTool({
+  const res1 = await plugin.pipelineStageOrchestratorTool({
     current_stage: 'Stage_1_Research',
     research_topic: 'Multi-Agent Quality Assurance',
     completed_artifacts: ['RQ Brief'],
   });
 
-  assert.equal(res.ok, true);
-  assert.equal(res.result.nextStage, 'Stage_2_Write');
-  assert.equal(res.result.requiresHumanConfirmation, true);
-  assert.ok(res.result.materialPassportStatus.hash);
+  assert.equal(res1.ok, true);
+  assert.equal(res1.result.nextStage, 'Stage_1_5_DataAnalysis');
+  assert.equal(res1.result.requiresHumanConfirmation, true);
+  assert.ok(res1.result.materialPassportStatus.hash);
+
+  const res2 = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_1_5_DataAnalysis',
+    research_topic: 'Multi-Agent Quality Assurance',
+    completed_artifacts: ['Statistical Results & Tables'],
+  });
+  assert.equal(res2.ok, true);
+  assert.equal(res2.result.nextStage, 'Stage_2_Write');
 });
 
 test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
@@ -272,4 +280,47 @@ test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
   assert.equal(res.ok, true);
   assert.match(res.result.bibtex, /@article\{vaswani2017/);
   assert.match(res.result.apa7, /Vaswani, Ashish, Shazeer, Noam \(2017\)\. Attention Is All You Need/);
+});
+
+test('statisticalAnalysisAdvisorTool recommends optimal models and assumption checks', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.statisticalAnalysisAdvisorTool({
+    research_question: 'Does the intervention significantly improve test scores compared to control?',
+    design_type: 'two_groups_independent',
+    outcome_type: 'continuous',
+    variance_homogeneity_satisfied: false,
+    multiple_comparisons_count: 5,
+  });
+
+  assert.equal(res.ok, true);
+  assert.match(res.result.primaryModel, /Welch's Independent Samples t-test/);
+  assert.match(res.result.remedialModel, /Mann-Whitney U/);
+  assert.equal(res.result.multipleComparisonsAdjustment.totalComparisons, 5);
+  assert.match(res.result.multipleComparisonsAdjustment.recommendedMethod, /Benjamini-Hochberg/);
+  assert.ok(res.result.replicationIntegrityNotice);
+});
+
+test('academicDataSummaryTool formats APA7 sentences and three-line tables', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.academicDataSummaryTool({
+    test_type: 'independent_t',
+    test_statistic: 5.92,
+    df: '58',
+    p_value: 0.0003,
+    effect_size_type: 'cohens_d',
+    effect_size_value: 1.53,
+    ci_95: [10.81, 15.79],
+    comparison_label: '干预组后测得分',
+    group_descriptives: [
+      { name: 'Control', mean: 65.10, sd: 9.10, n: 30 },
+      { name: 'Intervention', mean: 78.40, sd: 8.25, n: 30 },
+    ],
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.result.apaFormattedString, 't(58) = 5.92, p < .001, d = 1.53, 95% CI [10.81, 15.79]');
+  assert.match(res.result.threeLineTableMarkdown, /Group \/ Condition/);
+  assert.match(res.result.threeLineTableMarkdown, /Control/);
+  assert.equal(res.result.natureReportingGuidelineCheck.effectSizePresent, true);
+  assert.equal(res.result.natureReportingGuidelineCheck.confidenceIntervalPresent, true);
 });

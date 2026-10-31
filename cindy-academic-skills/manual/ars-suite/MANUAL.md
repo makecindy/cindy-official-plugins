@@ -11,10 +11,10 @@
 套件整合了 ARS 的四大核心支柱与 10 大阶段：
 
 ```text
-[Stage 1: 研究探索] ──> [Stage 2: 论文撰写] ──> [Stage 2.5: 审前诚信门禁]
-                                                        │
-                                                   PASS │ (失败修复 <=3 轮)
-                                                        ▼
+[Stage 1: 研究探索] ──> [Stage 1.5: 实证数据分析] ──> [Stage 2: 论文撰写] ──> [Stage 2.5: 审前诚信门禁]
+                                                                        │
+                                                                   PASS │ (失败修复 <=3 轮)
+                                                                        ▼
 [Stage 4: 答辩返修] <── (Major/Minor) ── [Stage 3: 五重视角同行评审]
        │
        ▼
@@ -27,21 +27,23 @@
                                                [Stage 6: 人机协作过程记录]
 ```
 
-### 13 项实体工具索引
+### 15 项实体工具索引
 
 1. **`pipeline_stage_orchestrator`**: 10 阶段科研生命周期与材料护照调度。
 2. **`socratic_research_guide`**: 苏格拉底式对话引导选题与研究问题（FINER 标准）蓝图构建。
 3. **`verify_doi`**: Crossref 官方 REST API 真实文献校验与元数据提取，防范学术幻觉。
 4. **`search_crossref`**: Crossref 官方公开学术文献库检索，杜绝虚构文献。
 5. **`three_way_lit_scan`**: 3W 文献对比矩阵（Why 背景、How 方法、What 结论）。
-6. **`academic_integrity_audit`**: 7 类 AI 科研失败模式阻断门禁（Stage 2.5 / 4.5）。
-7. **`claim_citation_alignment`**: 引用三层锚点与主张一致性（L3 Claim-Faithfulness）核查。
-8. **`academic_style_audit`**: 风格校准与去 AI 味审计（清除空洞套话与模糊副词）。
-9. **`academic_paper_analysis`**: 论文多维结构化拆解与 CER 证据链闭环审查。
-10. **`peer_review_evaluation`**: 五视角盲审（主编 + 3 位审稿人 + 魔鬼代言人，0-100 质量量表）。
-11. **`rebuttal_matrix_coach`**: 审稿意见条目化拆解与 Point-by-point 答辩矩阵教练。
-12. **`author_disclosure_statement`**: CRediT 学术分工标准与 AI 辅助伦理声明生成。
-13. **`bibtex_format_converter`**: 标准 BibTeX 与 APA 7.0 引用条目格式转换。
+6. **`statistical_analysis_advisor`**: 统计检验决策树与假设前提诊断（t检验/ANOVA/非参数/回归，防 p-hacking）。
+7. **`academic_data_summary`**: 学术统计量化报告与 APA 7.0 / Nature 级规范三线表生成。
+8. **`academic_integrity_audit`**: 7 类 AI 科研失败模式阻断门禁（Stage 2.5 / 4.5）。
+9. **`claim_citation_alignment`**: 引用三层锚点与主张一致性（L3 Claim-Faithfulness）核查。
+10. **`academic_style_audit`**: 风格校准与去模型化润色（清除空洞套话与模糊副词）。
+11. **`academic_paper_analysis`**: 论文多维结构化拆解与 CER 证据链闭环审查。
+12. **`peer_review_evaluation`**: 五视角盲审（主编 + 3 位审稿人 + 魔鬼代言人，0-100 质量量表）。
+13. **`rebuttal_matrix_coach`**: 审稿意见条目化拆解与 Point-by-point 答辩矩阵教练。
+14. **`author_disclosure_statement`**: CRediT 学术分工标准与 AI 辅助伦理声明生成。
+15. **`bibtex_format_converter`**: 标准 BibTeX 与 APA 7.0 引用条目格式转换。
 
 ---
 
@@ -63,6 +65,7 @@
 
 - [10 阶段生命周期与状态机规约](references/pipeline-10-stages.md) (`references/pipeline-10-stages.md`)
 - [深度研究、苏格拉底引导与 3W 文献扫描](references/deep-research-socratic.md) (`references/deep-research-socratic.md`)
+- [实证研究与数据分析、统计决策与三线表规范](references/data-analysis-workflow.md) (`references/data-analysis-workflow.md`)
 - [论文撰写、CER 论证链与风格校准](references/academic-paper-writing.md) (`references/academic-paper-writing.md`)
 - [五视角同行评审与 0-100 质量量表](references/peer-review-rubric.md) (`references/peer-review-rubric.md`)
 - [7 大学术诚信失败模式与 L3 引用锚点](references/integrity-failure-modes.md) (`references/integrity-failure-modes.md`)

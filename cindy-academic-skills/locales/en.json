@@ -41,6 +41,12 @@
     },
     "bibtex_format_converter": {
       "description": "Bibliographic format converter & BibTeX normalizer: convert publication metadata or freeform references into standard BibTeX entries and APA 7.0 citations."
+    },
+    "statistical_analysis_advisor": {
+      "description": "Statistical test decision tree & assumption diagnostics: recommend optimal statistical models (t-tests, ANOVA, non-parametric, regression) based on variable types, distributions, and study designs, with assumption checklists and anti-p-hacking adjustments."
+    },
+    "academic_data_summary": {
+      "description": "Scholarly statistical reporting & APA 7.0 / Nature-style three-line table generator: format exact test statistics, p-values, effect sizes, and confidence intervals into publication-grade prose and Markdown three-line tables."
     }
   }
 }

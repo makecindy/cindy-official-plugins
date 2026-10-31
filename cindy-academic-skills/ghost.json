@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "cindy-academic-skills",
   "name": "Academic Research Skills (ARS-Codex)",
-  "description": "完整学术研究工作流套件（复刻 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题引导、3W 文献扫描、Crossref 真实引文检索与 DOI 校验防幻觉、7 类学术诚信阻断门禁、主张与引用保真度核查、去 AI 味风格校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 Key。",
-  "whenToUse": "在学术研究、选题立项、PRISMA文献综述、论文撰写、学术诚信自查、同行评审盲审、返修答辩与出版格式排版全流程中使用。开箱即用，提供从构思到定稿的严密科研支撑与防幻觉机制。",
-  "version": "1.2.0",
+  "description": "专业级学术研究与实证数据分析工作流套件（深度复刻并强化 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 真实引文检索与 DOI 校验防幻觉、统计模型决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、7 类学术诚信阻断门禁、主张与引用保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
+  "whenToUse": "适用于学术研究全流程：课题选题立项、PRISMA 综述、实证数据分析与统计检验决策、论文起草撰写、学术诚信自查、同行评审盲审、答辩矩阵构建与出版排版。提供端到端严密科研支撑与防幻觉机制。",
+  "version": "1.3.0",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -41,6 +41,7 @@
             "type": "string",
             "enum": [
               "Stage_1_Research",
+              "Stage_1_5_DataAnalysis",
               "Stage_2_Write",
               "Stage_2_5_Integrity",
               "Stage_3_Review",
@@ -415,6 +416,159 @@
           "title",
           "authors",
           "year"
+        ]
+      }
+    },
+    {
+      "name": "statistical_analysis_advisor",
+      "description": "科研统计检验决策树与假设前提诊断：根据自变量/因变量类型、组数与样本分布特征，推荐最适统计模型（t检验/ANOVA/非参数/回归/混合效应等），提供前提假设检验清单、效应量指标与防 p-hacking 多重检验校正策略。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "research_question": {
+            "type": "string",
+            "description": "研究问题或实证研究假设"
+          },
+          "design_type": {
+            "type": "string",
+            "enum": [
+              "two_groups_independent",
+              "two_groups_paired",
+              "multi_groups_independent",
+              "multi_groups_repeated",
+              "correlation",
+              "regression",
+              "categorical_proportions"
+            ],
+            "description": "实验或研究设计类型"
+          },
+          "outcome_type": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "binary",
+              "ordinal",
+              "count"
+            ],
+            "description": "因变量/结果变量数据类型"
+          },
+          "sample_size_per_group": {
+            "type": "number",
+            "description": "可选，每组样本量 n"
+          },
+          "normality_satisfied": {
+            "type": "boolean",
+            "description": "可选，正态性前提是否满足（如 Shapiro-Wilk p > .05）"
+          },
+          "variance_homogeneity_satisfied": {
+            "type": "boolean",
+            "description": "可选，方差齐性前提是否满足（如 Levene p > .05）"
+          },
+          "multiple_comparisons_count": {
+            "type": "number",
+            "description": "可选，计划执行的成对比较或假设检验总次数"
+          }
+        },
+        "required": [
+          "research_question",
+          "design_type",
+          "outcome_type"
+        ]
+      }
+    },
+    {
+      "name": "academic_data_summary",
+      "description": "学术数据统计量化报告与 APA 7.0 / Nature 级三线表生成：输入统计检验指标与效应量，自动生成符合顶刊规范的统计描述语句、精确 p 值、置信区间与 Markdown 三线表，杜绝伪重复与统计夸大宣称。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "test_type": {
+            "type": "string",
+            "enum": [
+              "independent_t",
+              "paired_t",
+              "one_way_anova",
+              "two_way_anova",
+              "chi_square",
+              "pearson_correlation",
+              "spearman_correlation",
+              "linear_regression",
+              "mann_whitney_u"
+            ],
+            "description": "已执行的统计检验类型"
+          },
+          "test_statistic": {
+            "type": "number",
+            "description": "检验统计量数值（如 t 值、F 值、chi-square 值、r 值）"
+          },
+          "df": {
+            "type": "string",
+            "description": "自由度，例如 '58' 或 '2, 57'"
+          },
+          "p_value": {
+            "type": "number",
+            "description": "精确 p 值，例如 0.017 或 0.0002"
+          },
+          "effect_size_type": {
+            "type": "string",
+            "enum": [
+              "cohens_d",
+              "hedges_g",
+              "eta_sq_partial",
+              "r",
+              "odds_ratio",
+              "none"
+            ],
+            "description": "效应量类型"
+          },
+          "effect_size_value": {
+            "type": "number",
+            "description": "效应量数值，例如 0.65"
+          },
+          "ci_95": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "可选，95% 置信区间下限与上限，例如 [0.12, 1.18]"
+          },
+          "group_descriptives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "mean": {
+                  "type": "number"
+                },
+                "sd": {
+                  "type": "number"
+                },
+                "n": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "mean",
+                "sd",
+                "n"
+              ]
+            },
+            "description": "可选，各组描述性统计量（组名、均值、标准差、样本量）"
+          },
+          "comparison_label": {
+            "type": "string",
+            "description": "可选，比较的变量或组别标签，例如 '实验组与对照组后测得分'"
+          }
+        },
+        "required": [
+          "test_type",
+          "test_statistic",
+          "df",
+          "p_value"
         ]
       }
     }
