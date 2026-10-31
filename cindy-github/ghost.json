@@ -113,7 +113,7 @@
           },
           "files": {
             "type": "array",
-            "description": "改动文件(最多 50 个),用户点「查看改动」时展开",
+            "description": "改动文件(最多 50 个),卡片只显示文件数;看具体改动用宿主的审查面板",
             "items": {
               "type": "object",
               "properties": {

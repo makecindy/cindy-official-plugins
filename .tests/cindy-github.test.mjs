@@ -726,10 +726,6 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.deepEqual(visibleText(askCard.html), [zhCopy.prAskTitle, 'feat/pr-card → main · 3 个提交 · 2 个文件']);
   assert.match(askCard.html, /<button data-ghost-action="pr:publish" aria-label="发 PR" style="[^"]*"><\/button>/);
 
-  await runtime.click(cardId, 'pr:files');
-  assert.ok(visibleText(runtime.lastCard(cardId).html).includes('cindy-github/main.js +900 −2'));
-  assert.equal(runtime.agentRuns.length, 0);
-
   await runtime.click(cardId, 'pr:publish');
   assert.deepEqual(runtime.agentRuns, [{
     mode: 'continue',
@@ -819,14 +815,14 @@ test('pr_card rejects unusable input and keeps its largest card under the host s
   assert.equal((await runtime.tool({ repo: 'octo/repo', pr: 'pull/abc' })).reply.message, zhCopy.prBadPr);
   assert.equal((await runtime.tool({ card_id: '../escape' })).reply.message, zhCopy.prBadCardId);
 
-  const files = Array.from({ length: 80 }, (_, i) => ({
-    path: `packages/a/deeply/nested/module-${i}/${'segment/'.repeat(30)}index.ts`, additions: 1000 + i, deletions: i,
-  }));
+  const files = Array.from({ length: 80 }, (_, i) => ({ path: `packages/module-${i}/index.ts`, additions: 1000 + i, deletions: i }));
   const ask = await runtime.tool({ repo: 'octo/repo', head: `feat/${'x'.repeat(250)}`, base: 'main', commits: 99, files, files_total: 80 });
   const cardId = ask.reply.result.card_id;
-  await runtime.click(cardId, 'pr:files');
   await runtime.click(cardId, 'prui:settings');
   const { html } = runtime.lastCard(cardId);
   assert.ok(Buffer.byteLength(html) < 32 * 1024, `${Buffer.byteLength(html)} bytes`);
-  assert.ok(visibleText(html).includes(fill(zhCopy.prMoreFiles, { count: 72 })));
+
+  // Uncommitted changes: the card reports files only, never "0 commits".
+  const pending = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main', commits: 0, files_total: 1 });
+  assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[1], `feat/x → main · ${zhCopy.prFileOne}`);
 });

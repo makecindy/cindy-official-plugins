@@ -125,11 +125,8 @@ var MESSAGES = {
     prCommitMany: '{count} 个提交',
     prFileOne: '1 个文件',
     prFileMany: '{count} 个文件',
-    prMoreFiles: '另外 {count} 个文件',
     prPublish: '发 PR',
     prPublishDraft: '发成草稿',
-    prShowChanges: '查看改动',
-    prHideChanges: '收起改动',
     prPublishingTitle: '正在发 PR',
     prPublishingDraftTitle: '正在发草稿 PR',
     prPublishingMeta: '已交给 Agent，完成后这里会更新',
@@ -228,11 +225,8 @@ var MESSAGES = {
     prCommitMany: '{count} commits',
     prFileOne: '1 file',
     prFileMany: '{count} files',
-    prMoreFiles: '{count} more files',
     prPublish: 'Open PR',
     prPublishDraft: 'Open as draft',
-    prShowChanges: 'View changes',
-    prHideChanges: 'Hide changes',
     prPublishingTitle: 'Opening the pull request',
     prPublishingDraftTitle: 'Opening a draft pull request',
     prPublishingMeta: 'Handed to the agent. This card updates when it is done.',
@@ -331,11 +325,8 @@ var MESSAGES = {
     prCommitMany: '{count} 件のコミット',
     prFileOne: '1 個のファイル',
     prFileMany: '{count} 個のファイル',
-    prMoreFiles: 'ほか {count} 個のファイル',
     prPublish: 'PR を作成',
     prPublishDraft: '下書きで作成',
-    prShowChanges: '変更を表示',
-    prHideChanges: '変更を隠す',
     prPublishingTitle: 'PR を作成しています',
     prPublishingDraftTitle: '下書き PR を作成しています',
     prPublishingMeta: 'エージェントに渡しました。完了するとこのカードが更新されます',
@@ -434,11 +425,8 @@ var MESSAGES = {
     prCommitMany: '커밋 {count}개',
     prFileOne: '파일 1개',
     prFileMany: '파일 {count}개',
-    prMoreFiles: '파일 {count}개 더',
     prPublish: 'PR 만들기',
     prPublishDraft: '초안으로 만들기',
-    prShowChanges: '변경 사항 보기',
-    prHideChanges: '변경 사항 숨기기',
     prPublishingTitle: 'PR을 만드는 중',
     prPublishingDraftTitle: '초안 PR을 만드는 중',
     prPublishingMeta: '에이전트에게 맡겼습니다. 끝나면 이 카드가 업데이트됩니다',
@@ -2345,7 +2333,6 @@ var PR_CARD_KEEP = 200;
 var PR_CARD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 var PR_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 var PR_FILES_KEPT = 50;
-var PR_FILES_SHOWN = 8;
 var PR_TITLE_MAX = 120;
 var PR_TRIGGER = '[UI_ACTION_TRIGGER]';
 
@@ -2510,7 +2497,7 @@ function newPrCard(id, repo) {
     id: id, repo: repo, head: '', base: '', commits: null, files: null, filesTotal: null,
     stage: 'ask', publishingDraft: false, queued: false, pr: null,
     renamed: false, following: false, followedEver: false, pending: null,
-    filesOpen: false, settingsOpen: false, note: null, settingsApplied: false,
+    settingsOpen: false, note: null, settingsApplied: false,
   };
 }
 
@@ -2597,11 +2584,6 @@ function prMiniSpinner() {
     'border-top-color:transparent;border-radius:50%;animation:prspin var(--motion-spinner-cycle,900ms) linear infinite"></span>';
 }
 
-function prChevron(open) {
-  return '<span style="display:inline-block;width:6px;height:6px;margin:' + (open ? '-3px' : '0') + ' 0 0 6px;' +
-    'border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(' + (open ? 45 : -45) + 'deg)"></span>';
-}
-
 function prTile(glyph, tone) {
   var color = 'var(--text-secondary)';
   var bg = 'var(--surface-chip)';
@@ -2671,37 +2653,6 @@ function prActions(html) {
   return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px">' + html + '</div>';
 }
 
-/** 长路径保留结尾(文件名比目录更要紧),前面用 …/ 省略。 */
-function prShortPath(path) {
-  // 卡片 460px 宽时一行等宽字约放 40 个字符,留出右侧增删行数。
-  if (path.length <= 40) return path;
-  var segments = path.split('/');
-  var kept = segments.pop();
-  if (kept.length > 38) return '…' + kept.slice(-37);
-  while (segments.length && kept.length + segments[segments.length - 1].length + 1 <= 38) {
-    kept = segments.pop() + '/' + kept;
-  }
-  return '…/' + kept;
-}
-
-function prFilesPanel(card) {
-  var shown = card.files.slice(0, PR_FILES_SHOWN);
-  var rows = '';
-  for (var i = 0; i < shown.length; i++) {
-    var f = shown[i];
-    var counts = (f.additions != null ? '+' + f.additions : '') + (f.deletions ? ' −' + f.deletions : '');
-    rows += '<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 12px">' +
-      '<code style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:ui-monospace,SF Mono,Menlo,monospace;font-size:12px;color:var(--text-primary)">' +
-      prEsc(prShortPath(f.path)) + '</code> ' +
-      '<span style="flex:none;color:var(--text-tertiary);font-variant-numeric:tabular-nums">' + prEsc(counts) + '</span></div>';
-  }
-  var total = card.filesTotal != null ? card.filesTotal : card.files.length;
-  if (total > shown.length) {
-    rows += '<div style="padding:4px 12px;color:var(--text-tertiary)">' + prEsc(t('prMoreFiles', { count: total - shown.length })) + '</div>';
-  }
-  return '<div style="margin-top:12px;padding:6px 0;border-radius:8px;background:var(--surface);font-size:12px;line-height:16px">' + rows + '</div>';
-}
-
 function prStatusItem(tone, label) {
   var dot = tone === 'good'
     ? 'background:' + PR_GREEN
@@ -2768,7 +2719,8 @@ function prGearButton(open) {
 
 function prStatsParts(card) {
   var parts = [];
-  if (card.commits != null) parts.push(prEsc(card.commits === 1 ? t('prCommitOne') : t('prCommitMany', { count: card.commits })));
+  // 改动还没提交时只报文件数,不显示「0 个提交」。
+  if (card.commits) parts.push(prEsc(card.commits === 1 ? t('prCommitOne') : t('prCommitMany', { count: card.commits })));
   var files = card.filesTotal != null ? card.filesTotal : card.files ? card.files.length : null;
   if (files != null && files > 0) parts.push(prEsc(files === 1 ? t('prFileOne') : t('prFileMany', { count: files })));
   return parts;
@@ -2782,13 +2734,8 @@ function renderPrCard(card, settings) {
     gear = true;
     var branch = prEsc(card.head) + (card.base ? ' → ' + prEsc(card.base) : '');
     header = prHeader(prTile('branch'), prEsc(t('prAskTitle')), [branch].concat(prStatsParts(card)), true);
-    var hasFiles = Boolean(card.files && card.files.length);
-    if (hasFiles && card.filesOpen) body += prFilesPanel(card);
-    body += prActions(
-      prCtaButton('pr:publish', t('prPublish')) +
-      prPillButton('pr:draft', t('prPublishDraft')) +
-      (hasFiles ? prQuietButton('pr:files', card.filesOpen ? t('prHideChanges') : t('prShowChanges'), ';margin-left:auto', prChevron(card.filesOpen)) : '')
-    );
+    // 看改动交给宿主的审查面板(真实 diff、可撤销),卡片只管发不发。
+    body += prActions(prCtaButton('pr:publish', t('prPublish')) + prPillButton('pr:draft', t('prPublishDraft')));
   } else if (card.stage === 'publishing') {
     header = prHeader(
       prTile('spinner'),
@@ -2841,7 +2788,6 @@ function prCardHeight(card) {
   var h = 2 + 28 + 38;
   if (card.stage === 'ask') {
     h += 40;
-    if (card.filesOpen && card.files && card.files.length) h += 24 + Math.min(card.files.length, PR_FILES_SHOWN + 1) * 24;
   } else if (card.stage === 'open') {
     h += 40;
     if (card.following) h += 44;
@@ -2920,7 +2866,6 @@ async function prCardTool(args, callId) {
     }
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
     card.queued = false;
-    card.filesOpen = false;
     if (card.stage !== 'open') {
       card.settingsOpen = false;
       card.pending = null;
@@ -3014,9 +2959,7 @@ async function prCardAction(msg) {
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
   card.note = null;
-  if (action === 'pr:files' && card.stage === 'ask') {
-    card.filesOpen = !card.filesOpen;
-  } else if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
+  if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
     card.settingsOpen = !card.settingsOpen;
   } else if (action === 'prset:rename' || action === 'prset:follow') {
     try {
@@ -3030,7 +2973,6 @@ async function prCardAction(msg) {
       card.stage = 'publishing';
       card.publishingDraft = action === 'pr:draft';
       card.queued = handoff.queued;
-      card.filesOpen = false;
       card.settingsOpen = false;
     } else if (handoff.ok) {
       card.pending = action === 'pr:follow' ? 'follow' : 'stop';
