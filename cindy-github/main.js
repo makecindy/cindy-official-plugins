@@ -2701,14 +2701,17 @@ function prGlyph(kind) {
   return '<span style="position:relative;display:block;width:16px;height:16px">' + parts + '</span>';
 }
 
-/** 设置按钮的齿轮:描边外圈 + 中心孔,8 个齿绕中心旋转排布(卡内没有 SVG,用 CSS 拼)。 */
+/**
+ * 设置按钮的齿轮。新版宿主认 data-ghost-icon="settings",换成 App 里同一个设置图标;
+ * 旧版宿主显示里面用 CSS 拼的兜底齿轮(描边外圈 + 中心孔,8 个齿绕中心旋转排布)。
+ */
 function prGearGlyph() {
   var teeth = '';
   for (var i = 0; i < 8; i++) {
     teeth += prSpan('left:6.8px;top:0.6px;width:2.4px;height:2.8px;border-radius:0.6px;background:currentColor;' +
       'transform-origin:1.2px 7.4px;transform:rotate(' + (i * 45) + 'deg)');
   }
-  return '<span style="position:relative;display:block;width:16px;height:16px">' + teeth +
+  return '<span data-ghost-icon="settings" style="position:relative;display:block;width:16px;height:16px">' + teeth +
     prSpan('left:2.6px;top:2.6px;width:10.8px;height:10.8px;border:1.6px solid currentColor;border-radius:50%') +
     prRing(8, 8) + '</span>';
 }
