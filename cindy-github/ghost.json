@@ -6,7 +6,7 @@
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。支持 github.com。",
   "whenToUse": "只管 github.com 域名的仓库/链接(GitLab 实例的找 GitLab)。需要查/建/改 GitHub issue 或 PR,提交/回复 code review,合并 PR,查仓库/分支/commit/文件内容,触发或查看 GitHub Actions,管理 release,搜索代码/仓库/用户,或下载 Actions 产物与日志时找我。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
   "version": "1.4.0",
-  "releaseNotes": "新增 PR 卡片：Agent 想问要不要发 PR 时显示卡片，可以点「发 PR / 发成草稿」，也可以直接在对话里说；发出后同一张卡片显示 PR 状态，提供「跟进到合并」按钮，并可在卡片设置里打开发完自动改名、自动跟进。",
+  "releaseNotes": "新增 PR 卡片：Agent 想问要不要发 PR 时显示卡片，可以点「发 PR / 发成草稿」，也可以直接在对话里说；发出后同一张卡片显示 PR 状态，提供「自动跟进到合并」按钮，并可在卡片设置里打开发完自动改名、自动跟进。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -91,7 +91,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问:传 repo、head、base,可附 commits 与 files 改动概况(此时还不需要标题和说明)。用户点「发 PR / 发成草稿」或在对话里答复后,由 Agent 提交并创建 PR;按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片:卡片显示 PR 状态,提供「跟进到合并」按钮,以及发完自动改名、自动跟进两项设置,结果里的 settings / todo 说明还要做什么;renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态。卡片只在 Cindy 自己的对话界面显示,IM 渠道看不到。",
+      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问:传 repo、head、base,可附 commits 与 files 改动概况(此时还不需要标题和说明)。用户点「发 PR / 发成草稿」或在对话里答复后,由 Agent 提交并创建 PR;按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片:卡片显示 PR 状态,提供「自动跟进到合并」按钮,以及发完自动改名、自动跟进两项设置,结果里的 settings / todo 说明还要做什么;renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态。卡片只在 Cindy 自己的对话界面显示,IM 渠道看不到。",
       "parameters": {
         "type": "object",
         "properties": {

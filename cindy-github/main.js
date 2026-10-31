@@ -137,7 +137,7 @@ var MESSAGES = {
     prStateMerged: '已合并',
     prStateClosed: '已关闭',
     prFollowEnded: '跟进已结束',
-    prFollow: '跟进到合并',
+    prFollow: '自动跟进到合并',
     prFollowStarting: '正在开启跟进',
     prStop: '停止',
     prStopping: '正在停止跟进',
@@ -176,7 +176,7 @@ var MESSAGES = {
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
-    prClickFollow: '用户在 PR 卡片上点了「跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
@@ -237,7 +237,7 @@ var MESSAGES = {
     prStateMerged: 'Merged',
     prStateClosed: 'Closed',
     prFollowEnded: 'Following ended',
-    prFollow: 'Follow until merged',
+    prFollow: 'Auto-follow until merged',
     prFollowStarting: 'Starting to follow',
     prStop: 'Stop',
     prStopping: 'Stopping',
@@ -276,7 +276,7 @@ var MESSAGES = {
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
-    prClickFollow: 'The user clicked "Follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
@@ -337,7 +337,7 @@ var MESSAGES = {
     prStateMerged: 'マージ済み',
     prStateClosed: 'クローズ済み',
     prFollowEnded: 'フォロー終了',
-    prFollow: 'マージまでフォロー',
+    prFollow: 'マージまで自動フォロー',
     prFollowStarting: 'フォローを開始しています',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
@@ -376,7 +376,7 @@ var MESSAGES = {
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
-    prClickFollow: 'ユーザーが PR カードの「マージまでフォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
@@ -437,7 +437,7 @@ var MESSAGES = {
     prStateMerged: '병합됨',
     prStateClosed: '닫힘',
     prFollowEnded: '팔로우 종료됨',
-    prFollow: '병합까지 팔로우',
+    prFollow: '병합까지 자동 팔로우',
     prFollowStarting: '팔로우 시작 중',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
@@ -476,7 +476,7 @@ var MESSAGES = {
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
-    prClickFollow: '사용자가 PR 카드에서 "병합까지 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
@@ -2795,7 +2795,10 @@ function prCardHeight(card) {
 
 function sendPrCard(card, settings, sourceCallId) {
   var msg = {
-    type: 'card-update', callId: card.id, v: 2, state: 'done',
+    // 正在发、正在开启或停止跟进时报 working:宿主才播卡内转圈(静态版会剥掉动画),
+    // Agent 用 pr_card 更新结果时换回 done。
+    type: 'card-update', callId: card.id, v: 2,
+    state: card.stage === 'publishing' || card.pending ? 'working' : 'done',
     html: renderPrCard(card, settings), height: prCardHeight(card),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
@@ -2975,7 +2978,7 @@ async function prCardAction(msg) {
     }
   }
   await savePrCard(card);
-  // 原地更新被点的卡片并标 done:这次点击在宿主侧的「运行中」随之结束。
+  // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
   await sendPrCard(card, settings, null);
 }
 

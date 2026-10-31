@@ -740,6 +740,8 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
     zhCopy.prPublishingTitle, zhCopy.prPublishingMeta, 'feat/pr-card → main · 3 个提交 · 2 个文件',
   ]);
+  // While the agent publishes, the card stays live so the host plays its spinner.
+  assert.equal(runtime.lastCard(cardId).state, 'working');
 
   const opened = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
   assert.equal(opened.reply.result.stage, 'open');
@@ -751,6 +753,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(runtime.cards(opened.callId).length, 0);
   const update = runtime.lastCard(cardId);
   assert.equal(update.sourceCallId, opened.callId);
+  assert.equal(update.state, 'done');
   assert.deepEqual(visibleText(update.html), [
     '#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`, 'feat/pr-card → main · 3 个提交 · 2 个文件',
   ]);
