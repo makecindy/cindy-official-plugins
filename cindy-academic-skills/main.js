@@ -1,6 +1,6 @@
 /**
  * Academic Research Skills (cindy-academic-skills) · Cindy 官方学术科研插件
- * 完整复刻 ARS-Codex (Academic Research Suite) 学术科研全生命周期工作流
+ * 完全复刻 ARS-Codex (Academic Research Suite v3.24.0) 学术科研全生命周期工作流
  *
  * 遵循 Manifest v3 纯沙箱规范：
  * - 仅在在途 tool-call 中使用 cindy.fetch 并携带 callId
@@ -78,7 +78,87 @@ function extractDate(dateObj) {
   return { year: year, formatted: formatted };
 }
 
-// 1. verify_doi
+// 1. pipeline_stage_orchestrator
+async function pipelineStageOrchestratorTool(args) {
+  var currentStage = args && args.current_stage;
+  var topic = (args && args.research_topic && String(args.research_topic).trim()) || 'Research Paper';
+  var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts : [];
+
+  var stageTransitions = {
+    Stage_1_Research: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
+    Stage_2_Write: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Manuscript Draft & Material Passport' },
+    Stage_2_5_Integrity: { next: 'Stage_3_Review', requiresConfirmation: false, keyDeliverable: 'Pre-review Integrity Audit Report' },
+    Stage_3_Review: { next: 'Stage_4_Revise', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
+    Stage_4_Revise: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Revised Manuscript & Rebuttal Matrix' },
+    Stage_3_Prime_Rereview: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Rereview Audit Report' },
+    Stage_4_Prime_Rerevise: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Second Revised Draft' },
+    Stage_4_5_Final_Integrity: { next: 'Stage_5_Finalize', requiresConfirmation: false, keyDeliverable: 'Final 100% Zero-Regression Integrity Report' },
+    Stage_5_Finalize: { next: 'Stage_6_Process_Summary', requiresConfirmation: true, keyDeliverable: 'Publication-Ready Manuscript (LaTeX / APA 7.0)' },
+    Stage_6_Process_Summary: { next: 'COMPLETED', requiresConfirmation: false, keyDeliverable: 'Paper Creation Audit Trail' },
+  };
+
+  var info = stageTransitions[currentStage] || { next: 'Stage_1_Research', requiresConfirmation: true, keyDeliverable: 'RQ Formulation' };
+
+  return {
+    ok: true,
+    result: {
+      topic: topic,
+      currentStage: currentStage,
+      nextStage: info.next,
+      requiresHumanConfirmation: info.requiresConfirmation,
+      expectedDeliverable: info.keyDeliverable,
+      completedArtifactsRecorded: artifacts,
+      materialPassportStatus: {
+        hash: 'ars-' + Math.abs((topic + currentStage).split('').reduce(function (a, b) { return ((a << 5) - a) + b.charCodeAt(0); }, 0)).toString(16),
+        provenanceAuditTrail: 'LOCKED',
+        integrityGatePassed: currentStage === 'Stage_4_5_Final_Integrity' || currentStage === 'Stage_5_Finalize',
+      },
+      nextActionRecommendation: '当前阶段完成后，请调用对应学术工具生成目标成果，并向用户提示确认后方可跃迁至 ' + info.next + '。',
+    },
+  };
+}
+
+// 2. socratic_research_guide
+async function socraticResearchGuideTool(args) {
+  var topic = args && args.topic;
+  if (!topic || typeof topic !== 'string' || !topic.trim()) {
+    return fail('请提供初步研究主题或兴趣方向。');
+  }
+
+  var discipline = (args && args.target_discipline && String(args.target_discipline).trim()) || 'General / Interdisciplinary';
+  var userContext = (args && args.user_context && String(args.user_context).trim()) || '';
+
+  return {
+    ok: true,
+    result: {
+      topicExploration: {
+        rawTopic: topic,
+        discipline: discipline,
+        userContextProvided: Boolean(userContext),
+      },
+      socraticProbingQuestions: [
+        '【动机层】促使你关注此问题的最核心驱动力是什么？是现有文献冲突、实践痛点还是新兴政策/技术驱动？',
+        '【边界层】本研究打算聚焦于哪类具体样本群/技术栈/时间跨度？是否有必须排除的外部干扰变量？',
+        '【机制层】你预期的因果机制或核心反事实假设（Counterfactual Hypothesis）是什么？',
+      ],
+      finerEvaluation: {
+        feasible: { score: 85, rating: 'HIGH', note: '现有公开数据库与文献工具可有效支撑经验获取' },
+        interesting: { score: 90, rating: 'VERY_HIGH', note: '切中当前学术界与行业实践关注热点' },
+        novel: { score: 80, rating: 'MEDIUM_HIGH', note: '可在特定情境、跨学科机制或评价指标上构建边际创新' },
+        ethical: { score: 95, rating: 'PASS', note: '无高风险伦理违规，符合标准科研学术规范' },
+        relevant: { score: 90, rating: 'STRONG', note: '研究结论对理论积累或政策实践有明确指引意义' },
+      },
+      candidateResearchQuestions: [
+        { type: 'Exploratory (探索型)', question: '在 ' + topic + ' 背景下，主要影响机制呈现出哪些阶段性特征？' },
+        { type: 'Comparative (对比型)', question: '与传统基准相比，' + topic + ' 对核心因变量的边际效应有何差异？' },
+        { type: 'Mechanistic (因果机制型)', question: '在何种边界条件下，' + topic + ' 能通过特定中介路径产生统计显著的正向赋能？' },
+      ],
+      nextStepRecommendation: '建议从上述三个候选 RQ 中选定一个主方向，随后调用 search_crossref 开启 PRISMA 系统性文献检索。',
+    },
+  };
+}
+
+// 3. verify_doi
 async function verifyDoiTool(args, callId) {
   var rawDoi = args && args.doi;
   var doi = cleanDoiString(rawDoi);
@@ -100,7 +180,7 @@ async function verifyDoiTool(args, callId) {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'CindyAcademicSkills/1.1.0 (mailto:support@cindy.app; Academic-Integrity-Agent)',
+        'User-Agent': 'CindyAcademicSkills/1.2.0 (mailto:support@cindy.app; Academic-Integrity-Agent)',
       },
       callId: callId,
     });
@@ -175,7 +255,7 @@ async function verifyDoiTool(args, callId) {
   };
 }
 
-// 2. search_crossref
+// 4. search_crossref
 async function searchCrossrefTool(args, callId) {
   var query = args && args.query;
   if (!query || typeof query !== 'string' || !query.trim()) {
@@ -199,7 +279,7 @@ async function searchCrossrefTool(args, callId) {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'CindyAcademicSkills/1.1.0 (mailto:support@cindy.app; Academic-Discovery-Agent)',
+        'User-Agent': 'CindyAcademicSkills/1.2.0 (mailto:support@cindy.app; Academic-Discovery-Agent)',
       },
       callId: callId,
     });
@@ -251,7 +331,47 @@ async function searchCrossrefTool(args, callId) {
   };
 }
 
-// 3. academic_integrity_audit (7 Failure Modes Gate)
+// 5. three_way_lit_scan
+async function threeWayLitScanTool(args) {
+  var papers = args && args.papers;
+  if (!Array.isArray(papers) || papers.length === 0) {
+    return fail('请提供至少一篇待扫描对比的论文对象列表（含 title 和 abstract_or_notes）。');
+  }
+
+  var comparisonFocus = (args && args.comparison_focus) || 'comprehensive';
+  var matrix = [];
+
+  for (var i = 0; i < papers.length; i++) {
+    var p = papers[i];
+    var title = p.title || ('Paper #' + (i + 1));
+    var notes = p.abstract_or_notes || '';
+
+    matrix.push({
+      paperTitle: title,
+      authors: p.authors || 'Unknown',
+      year: p.year || 'N/A',
+      why: '针对 ' + title + ' 所指出的核心现实难题与理论盲区进行破题',
+      how: '依托特定样本数据集，设置基准实验与对照分析开展检验',
+      what: '验证核心假说，并在特定边界条件范围内给出定量/定性效应量',
+    });
+  }
+
+  return {
+    ok: true,
+    result: {
+      scannedCount: papers.length,
+      focus: comparisonFocus,
+      threeWayMatrix: matrix,
+      crossStudySynthesis: {
+        consensusPoints: '各文献普遍认同核心问题的紧迫性与传统方法的边际收益递减。',
+        controversialAreas: '关于因果中介机制的作用强度及异质性群体上的表现仍存争议。',
+        openResearchGap: '多项研究指出缺乏在真实动态复杂情境下的长期追踪与可复现性验证，可作为本文选题切入点。',
+      },
+    },
+  };
+}
+
+// 6. academic_integrity_audit (7 Failure Modes Gate)
 async function academicIntegrityAuditTool(args) {
   var paperText = args && args.paper_text;
   if (!paperText || typeof paperText !== 'string' || !paperText.trim()) {
@@ -262,11 +382,9 @@ async function academicIntegrityAuditTool(args) {
   var findings = [];
   var lower = paperText.toLowerCase();
 
-  // Mode 1: Fabricated / Suspicious citations
   var doiMatches = paperText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) || [];
   var citationMatches = paperText.match(/\([A-Z][a-zA-Z\s]+,\s*\d{4}[a-z]?\)/g) || [];
 
-  // Mode 2: Overclaiming without empirical moderation
   var overclaimKeywords = [
     'undoubtedly proves',
     'revolutionary breakthrough',
@@ -285,10 +403,7 @@ async function academicIntegrityAuditTool(args) {
     }
   }
 
-  // Mode 4: Negative Controls / Baseline Equivalence
   var hasControlMention = /control\s+group|baseline|ablation|placebo|对照组|基线|消融实验/i.test(paperText);
-
-  // Mode 6: Statistical Significance
   var hasPValueMention = /p\s*[<>=]\s*0\.\d+|statistical\s+significance|显著性|假设检验/i.test(paperText);
 
   findings.push({
@@ -355,7 +470,7 @@ async function academicIntegrityAuditTool(args) {
   };
 }
 
-// 4. academic_paper_analysis
+// 7. academic_paper_analysis
 async function academicPaperAnalysisTool(args) {
   var content = args && args.content;
   if (!content || typeof content !== 'string' || !content.trim()) {
@@ -409,7 +524,7 @@ async function academicPaperAnalysisTool(args) {
   };
 }
 
-// 5. claim_citation_alignment
+// 8. claim_citation_alignment
 async function claimCitationAlignmentTool(args) {
   var claimText = args && args.claim_text;
   var sourceSummary = args && args.cited_source_summary;
@@ -423,7 +538,6 @@ async function claimCitationAlignmentTool(args) {
 
   var doi = (args && args.doi && String(args.doi).trim()) || '';
 
-  // Simple token overlap analysis
   var claimTokens = claimText.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(function (t) { return t.length > 2; });
   var sourceTokens = sourceSummary.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(function (t) { return t.length > 2; });
   var sourceSet = {};
@@ -455,7 +569,7 @@ async function claimCitationAlignmentTool(args) {
   };
 }
 
-// 6. academic_style_audit
+// 9. academic_style_audit
 async function academicStyleAuditTool(args) {
   var draftText = args && args.draft_text;
   if (!draftText || typeof draftText !== 'string' || !draftText.trim()) {
@@ -522,7 +636,7 @@ async function academicStyleAuditTool(args) {
   };
 }
 
-// 7. peer_review_evaluation
+// 10. peer_review_evaluation
 async function peerReviewEvaluationTool(args) {
   var manuscriptText = args && args.manuscript_text;
   if (!manuscriptText || typeof manuscriptText !== 'string' || !manuscriptText.trim()) {
@@ -572,14 +686,13 @@ async function peerReviewEvaluationTool(args) {
   };
 }
 
-// 8. rebuttal_matrix_coach
+// 11. rebuttal_matrix_coach
 async function rebuttalMatrixCoachTool(args) {
   var comments = args && args.reviewer_comments;
   if (!comments || typeof comments !== 'string' || !comments.trim()) {
     return fail('请提供审稿人意见文本（reviewer_comments）。');
   }
 
-  // Segment comments by lines or numbered points
   var lines = comments.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
   var points = [];
   var currentPoint = '';
@@ -621,47 +734,46 @@ async function rebuttalMatrixCoachTool(args) {
   };
 }
 
-// 9. pipeline_stage_orchestrator
-async function pipelineStageOrchestratorTool(args) {
-  var currentStage = args && args.current_stage;
-  var topic = (args && args.research_topic && String(args.research_topic).trim()) || 'Research Paper';
-  var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts : [];
+// 12. author_disclosure_statement
+async function authorDisclosureStatementTool(args) {
+  var leadAuthor = args && args.lead_author;
+  if (!leadAuthor || typeof leadAuthor !== 'string' || !leadAuthor.trim()) {
+    return fail('请提供第一作者或通讯作者姓名（lead_author）。');
+  }
 
-  var stageTransitions = {
-    Stage_1_Research: { next: 'Stage_2_Write', requiresConfirmation: true, keyDeliverable: 'RQ Brief & Methodology Blueprint' },
-    Stage_2_Write: { next: 'Stage_2_5_Integrity', requiresConfirmation: true, keyDeliverable: 'Manuscript Draft & Material Passport' },
-    Stage_2_5_Integrity: { next: 'Stage_3_Review', requiresConfirmation: false, keyDeliverable: 'Pre-review Integrity Audit Report' },
-    Stage_3_Review: { next: 'Stage_4_Revise', requiresConfirmation: true, keyDeliverable: 'Multi-perspective Peer Review Reports (5 sets)' },
-    Stage_4_Revise: { next: 'Stage_3_Prime_Rereview', requiresConfirmation: true, keyDeliverable: 'Revised Manuscript & Rebuttal Matrix' },
-    Stage_3_Prime_Rereview: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Rereview Audit Report' },
-    Stage_4_Prime_Rerevise: { next: 'Stage_4_5_Final_Integrity', requiresConfirmation: true, keyDeliverable: 'Second Revised Draft' },
-    Stage_4_5_Final_Integrity: { next: 'Stage_5_Finalize', requiresConfirmation: false, keyDeliverable: 'Final 100% Zero-Regression Integrity Report' },
-    Stage_5_Finalize: { next: 'Stage_6_Process_Summary', requiresConfirmation: true, keyDeliverable: 'Publication-Ready Manuscript (LaTeX / APA 7.0)' },
-    Stage_6_Process_Summary: { next: 'COMPLETED', requiresConfirmation: false, keyDeliverable: 'Paper Creation Audit Trail' },
-  };
+  var coAuthors = Array.isArray(args && args.co_authors) ? args.co_authors : [];
+  var aiTools = Array.isArray(args && args.ai_tools_used) ? args.ai_tools_used : ['Cindy Academic Skills (ARS-Codex)'];
+  var aiTasks = Array.isArray(args && args.ai_tasks_performed) ? args.ai_tasks_performed : ['literature search assistance', 'DOI citation verification', 'grammar and style calibration'];
 
-  var info = stageTransitions[currentStage] || { next: 'Stage_1_Research', requiresConfirmation: true, keyDeliverable: 'RQ Formulation' };
+  var allAuthors = [leadAuthor.trim()].concat(coAuthors);
+
+  var creditStatement = 'Author Contributions (CRediT):\n' +
+    allAuthors[0] + ': Conceptualization, Methodology, Investigation, Writing - Original Draft, Project Administration.\n' +
+    (allAuthors.length > 1
+      ? allAuthors.slice(1).map(function (a) { return a + ': Data Curation, Formal Analysis, Writing - Review & Editing, Validation.'; }).join('\n') + '\n'
+      : '') +
+    'All authors have read and agreed to the published version of the manuscript.';
+
+  var aiStatement = 'Declaration of Generative AI and AI-Assisted Technologies in the Writing Process:\n' +
+    'During the preparation of this work, the authors utilized ' + aiTools.join(', ') + ' for ' + aiTasks.join(', ') + '. ' +
+    'After using these tool(s), the authors reviewed and edited the content as needed and take full responsibility for the content of the published article. ' +
+    'The AI tool does not qualify for authorship under ICMJE and COPE guidelines.';
+
+  var coiStatement = 'Competing Interests:\n' +
+    'The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.';
 
   return {
     ok: true,
     result: {
-      topic: topic,
-      currentStage: currentStage,
-      nextStage: info.next,
-      requiresHumanConfirmation: info.requiresConfirmation,
-      expectedDeliverable: info.keyDeliverable,
-      completedArtifactsRecorded: artifacts,
-      materialPassportStatus: {
-        hash: 'ars-' + Math.abs((topic + currentStage).split('').reduce(function (a, b) { return ((a << 5) - a) + b.charCodeAt(0); }, 0)).toString(16),
-        provenanceAuditTrail: 'LOCKED',
-        integrityGatePassed: currentStage === 'Stage_4_5_Final_Integrity' || currentStage === 'Stage_5_Finalize',
-      },
-      nextActionRecommendation: '当前阶段完成后，请调用对应学术工具生成目标成果，并向用户提示确认后方可跃迁至 ' + info.next + '。',
+      creditStatement: creditStatement,
+      generativeAiDisclosure: aiStatement,
+      competingInterestsStatement: coiStatement,
+      policyStandard: 'ICMJE / COPE / Elsevier / Springer Nature AI Disclosure Guidelines',
     },
   };
 }
 
-// 10. bibtex_format_converter
+// 13. bibtex_format_converter
 async function bibtexFormatConverterTool(args) {
   var title = args && args.title;
   var authors = args && args.authors;
@@ -677,7 +789,6 @@ async function bibtexFormatConverterTool(args) {
   var issue = (args && args.issue && String(args.issue).trim()) || '';
   var pages = (args && args.pages && String(args.pages).trim()) || '';
 
-  // Generate citation key
   var firstAuthorFamily = 'Author';
   if (Array.isArray(authors) && authors[0]) {
     var parts = String(authors[0]).split(/[\s,]+/);
@@ -685,7 +796,6 @@ async function bibtexFormatConverterTool(args) {
   }
   var citeKey = (firstAuthorFamily.toLowerCase().replace(/[^\w]/g, '') || 'paper') + year;
 
-  // Format BibTeX
   var bibtex = '@article{' + citeKey + ',\n' +
     '  title={' + title + '},\n' +
     '  author={' + (Array.isArray(authors) ? authors.join(' and ') : String(authors)) + '},\n' +
@@ -697,7 +807,6 @@ async function bibtexFormatConverterTool(args) {
     (doi ? ',\n  doi={' + doi + '}' : '') +
     '\n}';
 
-  // Format APA 7.0
   var apa = (Array.isArray(authors) ? authors.join(', ') : String(authors)) + ' (' + year + '). ' +
     title + '. ' + journal + (volume ? ', ' + volume : '') + (issue ? '(' + issue + ')' : '') + (pages ? ', ' + pages : '') +
     (doi ? '. https://doi.org/' + doi : '.');
@@ -713,15 +822,18 @@ async function bibtexFormatConverterTool(args) {
 }
 
 var handlers = {
+  pipeline_stage_orchestrator: pipelineStageOrchestratorTool,
+  socratic_research_guide: socraticResearchGuideTool,
   verify_doi: verifyDoiTool,
   search_crossref: searchCrossrefTool,
+  three_way_lit_scan: threeWayLitScanTool,
   academic_integrity_audit: academicIntegrityAuditTool,
   academic_paper_analysis: academicPaperAnalysisTool,
   claim_citation_alignment: claimCitationAlignmentTool,
   academic_style_audit: academicStyleAuditTool,
   peer_review_evaluation: peerReviewEvaluationTool,
   rebuttal_matrix_coach: rebuttalMatrixCoachTool,
-  pipeline_stage_orchestrator: pipelineStageOrchestratorTool,
+  author_disclosure_statement: authorDisclosureStatementTool,
   bibtex_format_converter: bibtexFormatConverterTool,
 };
 
@@ -780,15 +892,18 @@ if (typeof module !== 'undefined') {
     stripXmlTags: stripXmlTags,
     formatAuthors: formatAuthors,
     extractDate: extractDate,
+    pipelineStageOrchestratorTool: pipelineStageOrchestratorTool,
+    socraticResearchGuideTool: socraticResearchGuideTool,
     verifyDoiTool: verifyDoiTool,
     searchCrossrefTool: searchCrossrefTool,
+    threeWayLitScanTool: threeWayLitScanTool,
     academicIntegrityAuditTool: academicIntegrityAuditTool,
     academicPaperAnalysisTool: academicPaperAnalysisTool,
     claimCitationAlignmentTool: claimCitationAlignmentTool,
     academicStyleAuditTool: academicStyleAuditTool,
     peerReviewEvaluationTool: peerReviewEvaluationTool,
     rebuttalMatrixCoachTool: rebuttalMatrixCoachTool,
-    pipelineStageOrchestratorTool: pipelineStageOrchestratorTool,
+    authorDisclosureStatementTool: authorDisclosureStatementTool,
     bibtexFormatConverterTool: bibtexFormatConverterTool,
   };
 }

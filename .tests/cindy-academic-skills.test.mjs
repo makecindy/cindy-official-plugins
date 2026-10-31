@@ -19,7 +19,7 @@ const loadPlugin = (fetchMock) => {
   return require(resolved);
 };
 
-test('manifest declares Manifest v3, 10 ARS tools and Crossref host', () => {
+test('manifest declares Manifest v3, 13 ARS tools and structured manual', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'ghost.json'), 'utf8'));
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.id, 'cindy-academic-skills');
@@ -29,8 +29,9 @@ test('manifest declares Manifest v3, 10 ARS tools and Crossref host', () => {
   assert.equal(manifest.settingsHtml, undefined);
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.equal(manifest.minCindyVersion, '0.1.64');
-  assert.equal(manifest.tools.length, 10);
+  assert.equal(manifest.tools.length, 13);
   assert.ok(manifest.manual && manifest.manual.items && manifest.manual.items.length > 0);
+  assert.equal(manifest.manual.items[0].dir, 'manual/ars-suite');
 });
 
 test('cleanDoiString and isValidDoi validate standard and URL-formatted DOIs', () => {
@@ -49,6 +50,19 @@ test('stripXmlTags cleans JATS markup from abstract texts', () => {
   const plugin = loadPlugin();
   const raw = '<jats:title>Abstract</jats:title><jats:p>This study demonstrates &lt;b&gt;high-fidelity&lt;/b&gt; verification.</jats:p>';
   assert.equal(plugin.stripXmlTags(raw), 'AbstractThis study demonstrates <b>high-fidelity</b> verification.');
+});
+
+test('socraticResearchGuideTool provides FINER scores and candidate RQs', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.socraticResearchGuideTool({
+    topic: 'Impact of AI on academic peer review',
+    target_discipline: 'Computer Science & Higher Education',
+  });
+
+  assert.equal(res.ok, true);
+  assert.ok(res.result.socraticProbingQuestions.length >= 3);
+  assert.ok(res.result.finerEvaluation.feasible);
+  assert.ok(res.result.candidateResearchQuestions.length === 3);
 });
 
 test('verifyDoiTool returns structured metadata for valid Crossref response', async () => {
@@ -130,6 +144,23 @@ test('searchCrossrefTool retrieves structured publication list', async () => {
   assert.equal(res.result.papers[0].doi, '10.1038/nature123');
 });
 
+test('threeWayLitScanTool builds Why-How-What comparison matrix', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.threeWayLitScanTool({
+    papers: [
+      { title: 'Paper A', abstract_or_notes: 'Explores AI peer review latency' },
+      { title: 'Paper B', abstract_or_notes: 'Examines reviewer agreement rates' },
+    ],
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.result.scannedCount, 2);
+  assert.ok(res.result.threeWayMatrix[0].why);
+  assert.ok(res.result.threeWayMatrix[0].how);
+  assert.ok(res.result.threeWayMatrix[0].what);
+  assert.ok(res.result.crossStudySynthesis.openResearchGap);
+});
+
 test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', async () => {
   const plugin = loadPlugin();
   const samplePaper = `
@@ -197,6 +228,21 @@ test('rebuttalMatrixCoachTool structures reviewer critique into response matrix'
   assert.equal(res.result.totalCritiquePoints, 2);
   assert.equal(res.result.responseMatrix[0].itemNumber, 1);
   assert.ok(res.result.responseMatrix[0].responseDraftTemplate);
+});
+
+test('authorDisclosureStatementTool creates CRediT and AI-assistance disclosures', async () => {
+  const plugin = loadPlugin();
+  const res = await plugin.authorDisclosureStatementTool({
+    lead_author: 'Alice Smith',
+    co_authors: ['Bob Jones'],
+    ai_tools_used: ['Cindy Academic Skills (ARS-Codex)'],
+    ai_tasks_performed: ['DOI citation verification', 'Style calibration'],
+  });
+
+  assert.equal(res.ok, true);
+  assert.match(res.result.creditStatement, /Alice Smith: Conceptualization/);
+  assert.match(res.result.generativeAiDisclosure, /ICMJE and COPE/);
+  assert.ok(res.result.competingInterestsStatement);
 });
 
 test('pipelineStageOrchestratorTool manages 10-stage transitions', async () => {

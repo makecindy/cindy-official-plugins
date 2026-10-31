@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "cindy-academic-skills",
   "name": "Academic Research Skills (ARS-Codex)",
-  "description": "完整学术研究工作流套件（复刻 ARS-Codex）：包含 10 阶段科研生命周期调度、Crossref 真实引文检索与 DOI 校验防幻觉、7 类学术诚信阻断门禁、主张与引用保真度核查、去 AI 味风格校准、多视角同行评审与答辩矩阵教练。开箱即用，无需私有 Key。",
+  "description": "完整学术研究工作流套件（复刻 ARS-Codex）：包含 10 阶段科研生命周期调度、苏格拉底式选题引导、3W 文献扫描、Crossref 真实引文检索与 DOI 校验防幻觉、7 类学术诚信阻断门禁、主张与引用保真度核查、去 AI 味风格校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 Key。",
   "whenToUse": "在学术研究、选题立项、PRISMA文献综述、论文撰写、学术诚信自查、同行评审盲审、返修答辩与出版格式排版全流程中使用。开箱即用，提供从构思到定稿的严密科研支撑与防幻觉机制。",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minCindyVersion": "0.1.64",
   "locales": {
     "en": "locales/en.json",
@@ -24,13 +24,77 @@
   "manual": {
     "items": [
       {
-        "dir": "manual/workflow",
-        "name": "workflow",
-        "description": "Complete ARS 10-stage academic research pipeline, failure mode checks, peer review rubrics, and SOP."
+        "dir": "manual/ars-suite",
+        "name": "ars-suite",
+        "description": "Complete ARS-Codex academic research suite manual, 10-stage pipeline orchestrator, 7 failure modes, Socratic mentoring, peer review rubrics, and SOP."
       }
     ]
   },
   "tools": [
+    {
+      "name": "pipeline_stage_orchestrator",
+      "description": "ARS 10 阶段全流程调度与检查点管理：检测当前科研阶段、生成材料护照（Material Passport）、规划后续路径与人机确认门禁。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "current_stage": {
+            "type": "string",
+            "enum": [
+              "Stage_1_Research",
+              "Stage_2_Write",
+              "Stage_2_5_Integrity",
+              "Stage_3_Review",
+              "Stage_4_Revise",
+              "Stage_3_Prime_Rereview",
+              "Stage_4_Prime_Rerevise",
+              "Stage_4_5_Final_Integrity",
+              "Stage_5_Finalize",
+              "Stage_6_Process_Summary"
+            ],
+            "description": "当前所处研究阶段"
+          },
+          "research_topic": {
+            "type": "string",
+            "description": "研究课题或论文主标题"
+          },
+          "completed_artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "已生成的成果列表（如 RQ Brief, Outline, Draft, Review Reports 等）"
+          }
+        },
+        "required": [
+          "current_stage",
+          "research_topic"
+        ]
+      }
+    },
+    {
+      "name": "socratic_research_guide",
+      "description": "苏格拉底式选题导师与研究问题（RQ）蓝图构建：通过多层启发式对话将模糊想法收敛为精确定量/定性的科学问题，输出 FINER 创新性与可行性评分及候选假说。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "拟探讨的初步学术研究领域或模糊兴趣方向"
+          },
+          "target_discipline": {
+            "type": "string",
+            "description": "目标学科门类（如 'Higher Education', 'Computer Science', 'Biomedicine' 等）"
+          },
+          "user_context": {
+            "type": "string",
+            "description": "可选，用户当前已有的初步思考、资源限制或方法偏好"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      }
+    },
     {
       "name": "verify_doi",
       "description": "通过 Crossref 官方公开 API 校验论文 DOI，验证文献真实性，提取标题、作者列表、期刊、发表年份、引用次数与摘要等元数据，防范学术幻觉与虚构引用。无需 API Key。",
@@ -68,6 +132,47 @@
         },
         "required": [
           "query"
+        ]
+      }
+    },
+    {
+      "name": "three_way_lit_scan",
+      "description": "3W 三段式文献对比矩阵扫描（Why 研究缺口、How 方法样本与对照、What 核心实证结论与边界条件），提炼多篇代表性论文的共识、争议与理论空白。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "papers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "abstract_or_notes": {
+                  "type": "string"
+                },
+                "year": {
+                  "type": "number"
+                },
+                "authors": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "abstract_or_notes"
+              ]
+            },
+            "description": "待对比的论文列表（至少 1 篇，建议 2-5 篇）"
+          },
+          "comparison_focus": {
+            "type": "string",
+            "description": "可选，重点对比关注维度（如 'methodology', 'empirical_findings', 'theoretical_framework'）"
+          }
+        },
+        "required": [
+          "papers"
         ]
       }
     },
@@ -228,42 +333,39 @@
       }
     },
     {
-      "name": "pipeline_stage_orchestrator",
-      "description": "ARS 10 阶段全流程调度与检查点管理：检测当前科研阶段、生成材料护照（Material Passport）、规划后续路径与人机确认门禁。",
+      "name": "author_disclosure_statement",
+      "description": "作者贡献与伦理披露生成器：依据 CRediT (Contributor Roles Taxonomy) 标准规范生成作者分工清单，并生成符合国际顶刊政策的 AI 辅助使用声明与利益冲突说明。",
       "parameters": {
         "type": "object",
         "properties": {
-          "current_stage": {
+          "lead_author": {
             "type": "string",
-            "enum": [
-              "Stage_1_Research",
-              "Stage_2_Write",
-              "Stage_2_5_Integrity",
-              "Stage_3_Review",
-              "Stage_4_Revise",
-              "Stage_3_Prime_Rereview",
-              "Stage_4_Prime_Rerevise",
-              "Stage_4_5_Final_Integrity",
-              "Stage_5_Finalize",
-              "Stage_6_Process_Summary"
-            ],
-            "description": "当前所处研究阶段"
+            "description": "主要作者或通讯作者姓名"
           },
-          "research_topic": {
-            "type": "string",
-            "description": "研究课题或论文主标题"
-          },
-          "completed_artifacts": {
+          "co_authors": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "已生成的成果列表（如 RQ Brief, Outline, Draft, Review Reports 等）"
+            "description": "共同作者姓名列表"
+          },
+          "ai_tools_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "研究与写作过程中辅助使用的 AI 工具列表"
+          },
+          "ai_tasks_performed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "AI 工具参与的具体辅助任务（如文献核查、文风润色等）"
           }
         },
         "required": [
-          "current_stage",
-          "research_topic"
+          "lead_author"
         ]
       }
     },

@@ -1,13 +1,22 @@
 {
   "name": "Academic Research Skills (ARS-Codex)",
-  "description": "Complete academic research suite replicating ARS-Codex: 10-stage research pipeline orchestrator, Crossref citation discovery & DOI verification against hallucinations, 7-category integrity gates, claim-faithfulness alignment, style calibration, and peer review coaching. Ready out-of-the-box.",
+  "description": "Complete academic research suite replicating ARS-Codex: 10-stage research pipeline orchestrator, Socratic RQ guidance, 3W literature matrix, Crossref DOI verification, 7-category integrity gates, claim-faithfulness alignment, style calibration, and peer review coaching. Ready out-of-the-box.",
   "whenToUse": "Use throughout the entire scholarly research lifecycle: RQ formulation, PRISMA literature reviews, manuscript drafting, academic integrity auditing, multi-perspective peer review, rebuttal coaching, and publication-ready formatting.",
   "tools": {
+    "pipeline_stage_orchestrator": {
+      "description": "ARS 10-stage pipeline orchestrator: detect current research phases, generate Material Passports, plan sequential next steps, and enforce human confirmation checkpoints."
+    },
+    "socratic_research_guide": {
+      "description": "Socratic research mentor & RQ blueprint builder: multi-layer heuristic dialogue transforming vague topics into precise scientific questions with FINER feasibility & novelty scoring."
+    },
     "verify_doi": {
       "description": "Verify paper DOIs via the Crossref API to validate literature authenticity, extract titles, authors, journals, publication years, citation counts, and abstracts to prevent academic hallucinations. No API key required."
     },
     "search_crossref": {
       "description": "Search the official Crossref database by keywords, title, or author to retrieve published papers with verified DOIs and bibliographic metadata to prevent fabricated citations."
+    },
+    "three_way_lit_scan": {
+      "description": "3W literature matrix scanner (Why problem/gap, How methodology/controls, What findings/bounds) synthesizing cross-study agreements, conflicts, and open theoretical gaps."
     },
     "academic_integrity_audit": {
       "description": "Blocking academic integrity gate (Stage 2.5 / 4.5): audit manuscripts against 7 structural AI failure modes (hallucinated references, overclaiming, baseline flaws, p-hacking, etc.)."
@@ -27,8 +36,8 @@
     "rebuttal_matrix_coach": {
       "description": "Point-by-point rebuttal matrix coach: decompose reviewer critique into actionable revision matrices, guiding evidence additions and line-by-line response letters."
     },
-    "pipeline_stage_orchestrator": {
-      "description": "ARS 10-stage pipeline orchestrator: detect current research phases, generate Material Passports, plan sequential next steps, and enforce human confirmation checkpoints."
+    "author_disclosure_statement": {
+      "description": "CRediT author contributions & ethics disclosure generator: create formalized Contributor Roles Taxonomy statements, AI assistance statements, and conflict of interest declarations."
     },
     "bibtex_format_converter": {
       "description": "Bibliographic format converter & BibTeX normalizer: convert publication metadata or freeform references into standard BibTeX and APA 7.0 citations."

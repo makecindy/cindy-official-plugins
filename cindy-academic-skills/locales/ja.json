@@ -1,13 +1,22 @@
 {
   "name": "学術研究スキル (ARS-Codex)",
-  "description": "ARS-Codexを完全移植した学術研究支援プラグイン：10段階の研究ライフサイクル統括、CrossrefによるDOI検証と実文献検索（学術幻覚防止）、7大不正防止ゲート、主張と引用の整合性監査、AI臭排除スタイル校正、多視点査読と査読回答書作成支援を提供します。APIキー不要。",
+  "description": "ARS-Codexを完全移植した学術研究支援プラグイン：10段階の研究ライフサイクル統括、ソクラテス式問い立て、3W文献比較、CrossrefによるDOI検証と文献検索、7大不正防止ゲート、主張-引用整合性監査、AI臭排除校正、多視点査読、査読回答コーチ、CRediT声明生成を提供します。APIキー不要。",
   "whenToUse": "テーマ設定、PRISMA文献調査、論文執筆、学術整合性監査、多視点模擬査読、査読回答（リバッタル）、出版フォーマット整備など研究全行程で活用できます。",
   "tools": {
+    "pipeline_stage_orchestrator": {
+      "description": "ARS 10段階パイプライン統括＆チェックポイント管理：現在の研究フェーズの検知、マテリアルパスポートの発行、次工程の計画と確認ゲートを管理します。"
+    },
+    "socratic_research_guide": {
+      "description": "ソクラテス式研究問い立てメンター：多層の対話により漠然とした構想を精緻な問いへ収束させ、FINER基準による評価と仮説設計を支援します。"
+    },
     "verify_doi": {
       "description": "Crossref公式公開APIを介して論文DOIを検証し、文献の真正性を確認します。タイトル、著者、掲載誌、出版年、被引用数、要約などを取得し、架空の引用や幻覚を防ぎます。APIキー不要。"
     },
     "search_crossref": {
       "description": "Crossrefデータベースをキーワードや著者名で検索し、正規登録された実在の論文とDOIメタデータを取得して架空文献を防止します。"
+    },
+    "three_way_lit_scan": {
+      "description": "3W三段式文献比較マトリクス（Why問題提起、How研究手法、What主要結論と適用限界）を作成し、論文間の共通点・相違点・研究の空白を抽出します。"
     },
     "academic_integrity_audit": {
       "description": "遮断型学術インテグリティゲート（Stage 2.5 / 4.5）：7大AI研究失敗パターン（虚偽引用、誇大主張、不適切な対照群、統計不正など）を検出し、遮断監査結果を出力します。"
@@ -27,8 +36,8 @@
     "rebuttal_matrix_coach": {
       "description": "査読回答（Point-by-point response）作成コーチ：査読者の指摘を構造化された改訂マトリクスに分解し、的確な反論と修正追跡を支援します。"
     },
-    "pipeline_stage_orchestrator": {
-      "description": "ARS 10段階パイプライン統括＆チェックポイント管理：現在の研究フェーズの検知、マテリアルパスポートの発行、次工程の計画と確認ゲートを管理します。"
+    "author_disclosure_statement": {
+      "description": "著者貢献度＆倫理開示ジェネレーター：CRediT国際基準に基づく著者分工声明およびAI支援ツールの使用開示文を生成します。"
     },
     "bibtex_format_converter": {
       "description": "文献フォーマット変換＆BibTeX標準化：文献メタデータを標準的なBibTeXエントリおよびAPA 7.0引用形式に変換します。"
