@@ -287,7 +287,7 @@ test('bibtexFormatConverterTool outputs valid BibTeX and APA7', async () => {
 
   assert.equal(res.ok, true);
   assert.match(res.result.bibtex, /@article\{vaswani2017/);
-  assert.match(res.result.apa7, /Vaswani, Ashish, Shazeer, Noam \(2017\)\. Attention Is All You Need/);
+  assert.match(res.result.apa7, /Vaswani, A\., & Shazeer, N\. \(2017\)\. Attention Is All You Need/);
 });
 
 test('statisticalAnalysisAdvisorTool recommends optimal models and assumption checks', async () => {

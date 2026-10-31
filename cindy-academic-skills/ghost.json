@@ -12,7 +12,7 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "author": "Cindy plugin contributor",
+  "author": "1254084397 (Cong Zhang)",
   "icon": "assets/icon.png",
   "entry": "main.js",
   "command": "ars",
