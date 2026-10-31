@@ -632,47 +632,21 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  var rawVerifiedDois = Array.isArray(args && args.verified_dois)
-    ? args.verified_dois.map(function (d) { return cleanDoiString(String(d)).toLowerCase(); }).filter(Boolean)
-    : [];
-  var providedToken = args && typeof args.verification_token === 'string' ? args.verification_token.trim() : '';
-
-  // Cryptographic receipt check: verify that verified_dois was issued by a prior successful Crossref check
-  var expectedToken = rawVerifiedDois.length > 0
-    ? computeContentHash(rawVerifiedDois.slice().sort().join('|') + ':crossref-verified-receipt')
-    : '';
-  var isTokenValid = Boolean(expectedToken && providedToken === expectedToken);
-
-  var alreadyVerifiedDois = [];
-  var pendingDois = [];
-  var unauthenticatedDoisSupplied = false;
-
-  if (rawVerifiedDois.length > 0 && !isTokenValid) {
-    // If verified_dois was passed without matching proof token, reject trusting it
-    unauthenticatedDoisSupplied = true;
-    for (var u = 0; u < uniqueDois.length; u++) {
-      pendingDois.push(uniqueDois[u]);
-    }
-  } else {
-    for (var u = 0; u < uniqueDois.length; u++) {
-      var dStr = uniqueDois[u];
-      if (isTokenValid && rawVerifiedDois.indexOf(dStr.toLowerCase()) >= 0) {
-        alreadyVerifiedDois.push(dStr);
-      } else {
-        pendingDois.push(dStr);
-      }
-    }
+  var fullAudit = (args && args.full_audit === true);
+  var rawMaxChecks = (args && typeof args.max_doi_checks === 'number') ? Math.floor(args.max_doi_checks) : 30;
+  var maxChecks = Math.max(1, Math.min(rawMaxChecks, 100));
+  if (fullAudit) {
+    maxChecks = Math.max(maxChecks, uniqueDois.length);
   }
 
-  // Check for suspicious or placeholder DOIs and verify extracted DOIs against Crossref (capped at 30 new checks per call)
-  var MAX_INTEGRITY_DOI_CHECKS = 30;
+  // Check for suspicious or placeholder DOIs and verify extracted DOIs against Crossref
   var hasFakeDoi = /10\.\d+\/(?:fake|dummy|test|placeholder|1234)/i.test(paperText);
-  var newlyVerifiedDois = [];
+  var crossrefVerifiedDois = [];
   var notFoundDois = [];
   var unverifiedDois = [];
 
-  var targetDois = pendingDois.slice(0, MAX_INTEGRITY_DOI_CHECKS);
-  var excessDois = pendingDois.slice(MAX_INTEGRITY_DOI_CHECKS);
+  var targetDois = uniqueDois.slice(0, maxChecks);
+  var excessDois = uniqueDois.slice(maxChecks);
   for (var exIdx = 0; exIdx < excessDois.length; exIdx++) {
     unverifiedDois.push(excessDois[exIdx]);
   }
@@ -698,7 +672,7 @@ async function academicIntegrityAuditTool(args, callId) {
           var msg = parsed && parsed.message;
           var hasRealRecord = Boolean(msg && (msg.DOI || (Array.isArray(msg.title) && msg.title.length > 0)));
           if (hasRealRecord) {
-            newlyVerifiedDois.push(targetDoi);
+            crossrefVerifiedDois.push(targetDoi);
           } else {
             unverifiedDois.push(targetDoi);
           }
@@ -711,8 +685,7 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  var totalVerifiedDois = alreadyVerifiedDois.concat(newlyVerifiedDois);
-  var allDoisVerified = uniqueDois.length > 0 && !hasFakeDoi && notFoundDois.length === 0 && unverifiedDois.length === 0 && totalVerifiedDois.length === uniqueDois.length;
+  var allDoisVerified = uniqueDois.length > 0 && !hasFakeDoi && notFoundDois.length === 0 && unverifiedDois.length === 0 && crossrefVerifiedDois.length === uniqueDois.length;
 
   var overclaimKeywords = [
     'undoubtedly proves',
@@ -752,9 +725,9 @@ async function academicIntegrityAuditTool(args, callId) {
       : (notFoundDois.length > 0
         ? ('Crossref 官方库中查无此 DOI (' + notFoundDois.join(', ') + ')，判定为疑似幻觉引用，门禁拦截！')
         : (allDoisVerified
-          ? ('全部 ' + totalVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
+          ? ('全部 ' + crossrefVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
           : (uniqueDois.length > 0
-            ? ('检测到 ' + unverifiedDois.length + ' 处未完成核验的 DOI (' + unverifiedDois.slice(0, 5).join(', ') + (unverifiedDois.length > 5 ? ' 等' : '') + ')' + (excessDois.length > 0 ? ('，单次调用优先核查前 ' + MAX_INTEGRITY_DOI_CHECKS + ' 篇未核验文献，其余 ' + excessDois.length + ' 篇待后续分批核验（已累计核验 ' + totalVerifiedDois.length + '/' + uniqueDois.length + '）') : '') + '。')
+            ? ('检测到 ' + unverifiedDois.length + ' 处未完成核验的 DOI (' + unverifiedDois.slice(0, 5).join(', ') + (unverifiedDois.length > 5 ? ' 等' : '') + ')' + (excessDois.length > 0 ? ('，默认单次核查前 ' + maxChecks + ' 篇，其余 ' + excessDois.length + ' 篇待核验。如需全量核验放行，请传入 full_audit: true') : '') + '。')
             : '未检测到规范 DOI 标识，存在文献真实性风险。'))),
   });
 
@@ -823,15 +796,11 @@ async function academicIntegrityAuditTool(args, callId) {
       gateStage: stage,
       verdict: verdict,
       allModesPassed: passCount === findings.length,
-      crossrefVerifiedDois: totalVerifiedDois,
-      accumulatedVerifiedDois: totalVerifiedDois,
-      verificationToken: totalVerifiedDois.length > 0
-        ? computeContentHash(totalVerifiedDois.map(function (d) { return d.toLowerCase(); }).sort().join('|') + ':crossref-verified-receipt')
-        : null,
-      newlyVerifiedDois: newlyVerifiedDois,
+      crossrefVerifiedDois: crossrefVerifiedDois,
       unverifiedDois: unverifiedDois,
-      unauthenticatedDoisSupplied: unauthenticatedDoisSupplied,
+      checkedDoisCount: crossrefVerifiedDois.length,
       totalDoisCount: uniqueDois.length,
+      fullAudit: fullAudit,
       pendingOrFailedModes: unverifiedModes,
       summary: '7类科研失败模式审查完成：' + passCount + '/7 项通过。' +
         (passCount === findings.length ? '全部阻断项已核验放行。' : '存在未核验或待整改项，门禁保持拦截状态。'),

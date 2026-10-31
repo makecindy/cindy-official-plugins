@@ -214,16 +214,13 @@
             ],
             "description": "门禁阶段：pre_review_gate (Stage 2.5 审前诚信门禁), final_integrity_gate (Stage 4.5 终审零回归门禁)。默认 pre_review_gate"
           },
-          "verified_dois": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "可选，此前已核验通过的 DOI 列表（须配合 verification_token 证明真实核验结果，支持长参考文献表跨批次累计传入以完成全量核验放行）"
+          "full_audit": {
+            "type": "boolean",
+            "description": "可选，是否对参考文献超过 30 篇的手稿执行全量 Crossref 实时在线核验以完成放行。默认 false（优先核验前 30 篇，防止请求过载）"
           },
-          "verification_token": {
-            "type": "string",
-            "description": "可选，上一次分批核验返回的防伪凭证 verificationToken，用于校验 verified_dois 的真实核验结果，防止未经核验的列表绕过门禁"
+          "max_doi_checks": {
+            "type": "integer",
+            "description": "可选，单次向 Crossref 发起实时核验的最大 DOI 数量（1-100，默认 30），防止超长文献表并发请求过载"
           },
           "implementation_verified": {
             "type": "boolean",

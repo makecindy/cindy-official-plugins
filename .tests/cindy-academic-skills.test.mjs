@@ -217,7 +217,7 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
   assert.equal(resPassed.result.allModesPassed, true);
   assert.equal(resPassed.result.verdict, 'GATE_PASSED');
 
-  // 4. Cap DOI checking at 30 per call and support multi-batch accumulation via verified_dois
+  // 4. Default DOI checking is capped at 30 per call for manuscripts with many citations
   const manyDois = Array.from({ length: 35 }, (_, i) => `10.1038/s41586-020-${1000 + i}`).join(' ');
   const paperWithManyDois = samplePaper + '\n' + manyDois;
   let fetchCallCount = 0;
@@ -229,33 +229,33 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
       body: JSON.stringify({ message: { DOI: '10.1038/s41586-020-0000', title: ['Paper'] } }),
     };
   });
-  const resBatch1 = await pluginCapped.academicIntegrityAuditTool({
+  const resDefault = await pluginCapped.academicIntegrityAuditTool({
     paper_text: paperWithManyDois,
     implementation_verified: true,
   });
-  assert.equal(resBatch1.ok, true);
+  assert.equal(resDefault.ok, true);
   assert.equal(fetchCallCount, 30);
-  assert.equal(resBatch1.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
-  assert.equal(resBatch1.result.crossrefVerifiedDois.length, 30);
-  assert.equal(resBatch1.result.unverifiedDois.length, 6);
+  assert.equal(resDefault.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
+  assert.equal(resDefault.result.crossrefVerifiedDois.length, 30);
+  assert.equal(resDefault.result.unverifiedDois.length, 6);
 
-  // Second batch passing verified_dois AND verificationToken skips previously verified DOIs and completes gate passage
+  // 5. When full_audit: true is enabled, all 36 DOIs are fully queried via Crossref to complete verification
   fetchCallCount = 0;
-  const resBatch2 = await pluginCapped.academicIntegrityAuditTool({
+  const resFull = await pluginCapped.academicIntegrityAuditTool({
     paper_text: paperWithManyDois,
     implementation_verified: true,
-    verified_dois: resBatch1.result.crossrefVerifiedDois,
-    verification_token: resBatch1.result.verificationToken,
+    full_audit: true,
   });
-  assert.equal(resBatch2.ok, true);
-  assert.equal(fetchCallCount, 6);
-  assert.equal(resBatch2.result.verdict, 'GATE_PASSED');
-  assert.equal(resBatch2.result.allModesPassed, true);
-  assert.equal(resBatch2.result.crossrefVerifiedDois.length, 36);
+  assert.equal(resFull.ok, true);
+  assert.equal(fetchCallCount, 36);
+  assert.equal(resFull.result.verdict, 'GATE_PASSED');
+  assert.equal(resFull.result.allModesPassed, true);
+  assert.equal(resFull.result.crossrefVerifiedDois.length, 36);
+  assert.equal(resFull.result.unverifiedDois.length, 0);
 
-  // 5. Unauthenticated verified_dois without valid verification_token cannot bypass network verification
+  // 6. Every DOI must actually be verified; 404 or fake citations can NEVER bypass the gate
   const fakePaper = samplePaper + '\n10.1038/s41586-099-fake';
-  const pluginAntiBypass = loadPlugin(async (req) => {
+  const pluginFake = loadPlugin(async (req) => {
     if (req.url && req.url.includes('10.1038%2Fs41586-099-fake')) {
       return { ok: false, status: 404, body: 'Not Found' };
     }
@@ -265,17 +265,14 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
       body: JSON.stringify({ message: { DOI: '10.1038/s41586-020-2649-2', title: ['Real Paper'] } }),
     };
   });
-  // Attempt to claim 10.1038/s41586-099-fake is already verified without a valid token
-  const resBypassAttempt = await pluginAntiBypass.academicIntegrityAuditTool({
+  const resFakeBlocked = await pluginFake.academicIntegrityAuditTool({
     paper_text: fakePaper,
     implementation_verified: true,
-    verified_dois: ['10.1038/s41586-099-fake'],
-    // Missing verification_token
+    full_audit: true,
   });
-  assert.equal(resBypassAttempt.ok, true);
-  assert.equal(resBypassAttempt.result.unauthenticatedDoisSupplied, true);
-  assert.equal(resBypassAttempt.result.verdict, 'GATE_BLOCKED_ACTION_REQUIRED');
-  assert.equal(resBypassAttempt.result.allModesPassed, false);
+  assert.equal(resFakeBlocked.ok, true);
+  assert.equal(resFakeBlocked.result.verdict, 'GATE_BLOCKED_ACTION_REQUIRED');
+  assert.equal(resFakeBlocked.result.allModesPassed, false);
 });
 
 test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {
