@@ -1,46 +1,46 @@
 {
   "name": "Academic Research Skills (ARS-Codex)",
-  "description": "Complete academic research suite replicating ARS-Codex: 10-stage research pipeline orchestrator, Socratic RQ guidance, 3W literature matrix, Crossref DOI verification, 7-category integrity gates, claim-faithfulness alignment, style calibration, and peer review coaching. Ready out-of-the-box.",
-  "whenToUse": "Use throughout the entire scholarly research lifecycle: RQ formulation, PRISMA literature reviews, manuscript drafting, academic integrity auditing, multi-perspective peer review, rebuttal coaching, and publication-ready formatting.",
+  "description": "Comprehensive academic research workflow suite replicating ARS-Codex: 10-stage lifecycle orchestration, Socratic RQ guidance, 3W literature matrix, official Crossref DOI verification, 7-category integrity gates, claim-faithfulness alignment, scholarly tone calibration, multi-perspective peer review, and rebuttal coaching. Ready out of the box with zero private key requirements.",
+  "whenToUse": "Use throughout the scholarly research lifecycle: research topic formulation, PRISMA systematic literature reviews, manuscript drafting, academic integrity auditing, multi-perspective mock peer reviews, point-by-point rebuttal letters, and publication formatting.",
   "tools": {
     "pipeline_stage_orchestrator": {
-      "description": "ARS 10-stage pipeline orchestrator: detect current research phases, generate Material Passports, plan sequential next steps, and enforce human confirmation checkpoints."
+      "description": "ARS 10-stage pipeline orchestrator: diagnose current research phases, issue Material Passports (evidence-chain audit records), chart sequential next steps, and enforce human-in-the-loop checkpoints."
     },
     "socratic_research_guide": {
-      "description": "Socratic research mentor & RQ blueprint builder: multi-layer heuristic dialogue transforming vague topics into precise scientific questions with FINER feasibility & novelty scoring."
+      "description": "Socratic research mentor & RQ blueprint builder: multi-turn heuristic dialogue refining broad concepts into rigorous scientific questions, scored via FINER criteria with candidate hypotheses."
     },
     "verify_doi": {
-      "description": "Verify paper DOIs via the Crossref API to validate literature authenticity, extract titles, authors, journals, publication years, citation counts, and abstracts to prevent academic hallucinations. No API key required."
+      "description": "Validate paper DOIs via the Crossref REST API to verify scholarly authenticity, extracting titles, authors, journals, publication years, citation counts, and abstracts to block AI hallucinations. No API key required."
     },
     "search_crossref": {
-      "description": "Search the official Crossref database by keywords, title, or author to retrieve published papers with verified DOIs and bibliographic metadata to prevent fabricated citations."
+      "description": "Search the official Crossref repository by keyword, title, or author to retrieve registered papers with verified DOIs and bibliographic metadata, eliminating fabricated citations."
     },
     "three_way_lit_scan": {
-      "description": "3W literature matrix scanner (Why problem/gap, How methodology/controls, What findings/bounds) synthesizing cross-study agreements, conflicts, and open theoretical gaps."
+      "description": "3W literature matrix scanner (Why problem/gap, How methodology/controls, What findings/bounds) synthesizing cross-study consensus, theoretical debates, and open research gaps."
     },
     "academic_integrity_audit": {
-      "description": "Blocking academic integrity gate (Stage 2.5 / 4.5): audit manuscripts against 7 structural AI failure modes (hallucinated references, overclaiming, baseline flaws, p-hacking, etc.)."
+      "description": "Pre-review and pre-submission academic integrity gate (Stage 2.5 / 4.5): audit manuscripts against 7 structural failure modes (hallucinated references, overclaiming, baseline flaws, statistical errors, etc.)."
     },
     "academic_paper_analysis": {
-      "description": "Structured literature analysis tool: decompose abstracts, methodology, or key arguments across multiple dimensions (objectives, hypotheses, methods, evidence chains, and limitations) to streamline research notes."
+      "description": "Structured scholarly literature analyzer: decompose abstracts, methods, or core passages across key dimensions (objectives, hypotheses, methodology, evidence chains, novelty, and limitations) for systematic research synthesis."
     },
     "claim_citation_alignment": {
-      "description": "Claim-faithfulness (L3) verification: compare manuscript assertions with cited source conclusions to detect out-of-context citations and ungrounded claims."
+      "description": "Claim-faithfulness (L3) verification: cross-check manuscript assertions against cited source findings to detect out-of-context citations and ungrounded claims."
     },
     "academic_style_audit": {
-      "description": "Academic style calibration & de-AI-ification: audit and eliminate hollow buzzwords (delve, testament to), vague quantifiers, and unsubstantiated superlatives while preserving the author's scholarly voice."
+      "description": "Academic style calibration & formulaic prose elimination: audit and eliminate hollow buzzwords (delve, testament to), vague quantifiers, and unsubstantiated superlatives while preserving the author's scholarly voice."
     },
     "peer_review_evaluation": {
-      "description": "Multi-perspective peer review evaluation: simulate Editor-in-Chief, methodology reviewers, and Devil's Advocate to critique validity and rigor on a 0-100 rubric with actionable recommendations."
+      "description": "Multi-perspective peer review simulation: evaluate manuscript validity, theoretical novelty, and methodological rigor from the perspectives of Editor-in-Chief, methodology reviewers, and Devil's Advocate using a 0-100 rubric."
     },
     "rebuttal_matrix_coach": {
-      "description": "Point-by-point rebuttal matrix coach: decompose reviewer critique into actionable revision matrices, guiding evidence additions and line-by-line response letters."
+      "description": "Point-by-point rebuttal matrix coach: decompose reviewer critique into structured revision matrices, guiding evidence additions, empirical revisions, and line-by-line response letters."
     },
     "author_disclosure_statement": {
-      "description": "CRediT author contributions & ethics disclosure generator: create formalized Contributor Roles Taxonomy statements, AI assistance statements, and conflict of interest declarations."
+      "description": "CRediT author contribution and ethics disclosure generator: create formalized Contributor Roles Taxonomy statements, AI assistance statements, and conflict of interest declarations aligned with major journal policies."
     },
     "bibtex_format_converter": {
-      "description": "Bibliographic format converter & BibTeX normalizer: convert publication metadata or freeform references into standard BibTeX and APA 7.0 citations."
+      "description": "Bibliographic format converter & BibTeX normalizer: convert publication metadata or freeform references into standard BibTeX entries and APA 7.0 citations."
     }
   }
 }
