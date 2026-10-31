@@ -217,7 +217,7 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
   assert.equal(resPassed.result.allModesPassed, true);
   assert.equal(resPassed.result.verdict, 'GATE_PASSED');
 
-  // 4. Cap DOI checking at 30 per call for manuscripts with many citations
+  // 4. Cap DOI checking at 30 per call and support multi-batch accumulation via verified_dois
   const manyDois = Array.from({ length: 35 }, (_, i) => `10.1038/s41586-020-${1000 + i}`).join(' ');
   const paperWithManyDois = samplePaper + '\n' + manyDois;
   let fetchCallCount = 0;
@@ -229,13 +229,28 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
       body: JSON.stringify({ message: { DOI: '10.1038/s41586-020-0000', title: ['Paper'] } }),
     };
   });
-  const resCapped = await pluginCapped.academicIntegrityAuditTool({
+  const resBatch1 = await pluginCapped.academicIntegrityAuditTool({
     paper_text: paperWithManyDois,
     implementation_verified: true,
   });
-  assert.equal(resCapped.ok, true);
+  assert.equal(resBatch1.ok, true);
   assert.equal(fetchCallCount, 30);
-  assert.equal(resCapped.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
+  assert.equal(resBatch1.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
+  assert.equal(resBatch1.result.crossrefVerifiedDois.length, 30);
+  assert.equal(resBatch1.result.unverifiedDois.length, 6);
+
+  // Second batch passing verified_dois skips previously verified DOIs and completes gate passage
+  fetchCallCount = 0;
+  const resBatch2 = await pluginCapped.academicIntegrityAuditTool({
+    paper_text: paperWithManyDois,
+    implementation_verified: true,
+    verified_dois: resBatch1.result.crossrefVerifiedDois,
+  });
+  assert.equal(resBatch2.ok, true);
+  assert.equal(fetchCallCount, 6);
+  assert.equal(resBatch2.result.verdict, 'GATE_PASSED');
+  assert.equal(resBatch2.result.allModesPassed, true);
+  assert.equal(resBatch2.result.crossrefVerifiedDois.length, 36);
 });
 
 test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {

@@ -632,15 +632,29 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  // Check for suspicious or placeholder DOIs and verify extracted DOIs against Crossref (capped at first 30 per call)
+  var verifiedDoisInput = Array.isArray(args && args.verified_dois)
+    ? args.verified_dois.map(function (d) { return cleanDoiString(String(d)).toLowerCase(); }).filter(Boolean)
+    : [];
+  var alreadyVerifiedDois = [];
+  var pendingDois = [];
+  for (var u = 0; u < uniqueDois.length; u++) {
+    var dStr = uniqueDois[u];
+    if (verifiedDoisInput.indexOf(dStr.toLowerCase()) >= 0) {
+      alreadyVerifiedDois.push(dStr);
+    } else {
+      pendingDois.push(dStr);
+    }
+  }
+
+  // Check for suspicious or placeholder DOIs and verify extracted DOIs against Crossref (capped at 30 new checks per call)
   var MAX_INTEGRITY_DOI_CHECKS = 30;
   var hasFakeDoi = /10\.\d+\/(?:fake|dummy|test|placeholder|1234)/i.test(paperText);
-  var crossrefVerifiedDois = [];
+  var newlyVerifiedDois = [];
   var notFoundDois = [];
   var unverifiedDois = [];
 
-  var targetDois = uniqueDois.slice(0, MAX_INTEGRITY_DOI_CHECKS);
-  var excessDois = uniqueDois.slice(MAX_INTEGRITY_DOI_CHECKS);
+  var targetDois = pendingDois.slice(0, MAX_INTEGRITY_DOI_CHECKS);
+  var excessDois = pendingDois.slice(MAX_INTEGRITY_DOI_CHECKS);
   for (var exIdx = 0; exIdx < excessDois.length; exIdx++) {
     unverifiedDois.push(excessDois[exIdx]);
   }
@@ -666,7 +680,7 @@ async function academicIntegrityAuditTool(args, callId) {
           var msg = parsed && parsed.message;
           var hasRealRecord = Boolean(msg && (msg.DOI || (Array.isArray(msg.title) && msg.title.length > 0)));
           if (hasRealRecord) {
-            crossrefVerifiedDois.push(targetDoi);
+            newlyVerifiedDois.push(targetDoi);
           } else {
             unverifiedDois.push(targetDoi);
           }
@@ -679,7 +693,8 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  var allDoisVerified = uniqueDois.length > 0 && !hasFakeDoi && notFoundDois.length === 0 && unverifiedDois.length === 0 && crossrefVerifiedDois.length === uniqueDois.length;
+  var totalVerifiedDois = alreadyVerifiedDois.concat(newlyVerifiedDois);
+  var allDoisVerified = uniqueDois.length > 0 && !hasFakeDoi && notFoundDois.length === 0 && unverifiedDois.length === 0 && totalVerifiedDois.length === uniqueDois.length;
 
   var overclaimKeywords = [
     'undoubtedly proves',
@@ -719,9 +734,9 @@ async function academicIntegrityAuditTool(args, callId) {
       : (notFoundDois.length > 0
         ? ('Crossref 官方库中查无此 DOI (' + notFoundDois.join(', ') + ')，判定为疑似幻觉引用，门禁拦截！')
         : (allDoisVerified
-          ? ('全部 ' + crossrefVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
+          ? ('全部 ' + totalVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
           : (uniqueDois.length > 0
-            ? ('检测到 ' + unverifiedDois.length + ' 处未完成核验的 DOI (' + unverifiedDois.slice(0, 5).join(', ') + (unverifiedDois.length > 5 ? ' 等' : '') + ')' + (excessDois.length > 0 ? ('，单次调用优先核查前 ' + MAX_INTEGRITY_DOI_CHECKS + ' 篇，其余 ' + excessDois.length + ' 篇标记为待分批核验') : '') + '。')
+            ? ('检测到 ' + unverifiedDois.length + ' 处未完成核验的 DOI (' + unverifiedDois.slice(0, 5).join(', ') + (unverifiedDois.length > 5 ? ' 等' : '') + ')' + (excessDois.length > 0 ? ('，单次调用优先核查前 ' + MAX_INTEGRITY_DOI_CHECKS + ' 篇未核验文献，其余 ' + excessDois.length + ' 篇待后续分批核验（已累计核验 ' + totalVerifiedDois.length + '/' + uniqueDois.length + '）') : '') + '。')
             : '未检测到规范 DOI 标识，存在文献真实性风险。'))),
   });
 
@@ -790,7 +805,11 @@ async function academicIntegrityAuditTool(args, callId) {
       gateStage: stage,
       verdict: verdict,
       allModesPassed: passCount === findings.length,
-      crossrefVerifiedDois: crossrefVerifiedDois,
+      crossrefVerifiedDois: totalVerifiedDois,
+      accumulatedVerifiedDois: totalVerifiedDois,
+      newlyVerifiedDois: newlyVerifiedDois,
+      unverifiedDois: unverifiedDois,
+      totalDoisCount: uniqueDois.length,
       pendingOrFailedModes: unverifiedModes,
       summary: '7类科研失败模式审查完成：' + passCount + '/7 项通过。' +
         (passCount === findings.length ? '全部阻断项已核验放行。' : '存在未核验或待整改项，门禁保持拦截状态。'),

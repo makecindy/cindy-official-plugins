@@ -214,6 +214,13 @@
             ],
             "description": "门禁阶段：pre_review_gate (Stage 2.5 审前诚信门禁), final_integrity_gate (Stage 4.5 终审零回归门禁)。默认 pre_review_gate"
           },
+          "verified_dois": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可选，此前已核验通过的 DOI 列表（支持长参考文献表跨批次累计传入以完成全量核验放行）"
+          },
           "implementation_verified": {
             "type": "boolean",
             "description": "可选，作者是否已核查并确认代码实现、训练集/测试集隔离与随机种子无数据泄露，用于完成 Mode 3 放行"
