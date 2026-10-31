@@ -632,15 +632,22 @@ async function academicIntegrityAuditTool(args, callId) {
     }
   }
 
-  // Check for suspicious or placeholder DOIs and verify every extracted DOI against Crossref
+  // Check for suspicious or placeholder DOIs and verify extracted DOIs against Crossref (capped at first 30 per call)
+  var MAX_INTEGRITY_DOI_CHECKS = 30;
   var hasFakeDoi = /10\.\d+\/(?:fake|dummy|test|placeholder|1234)/i.test(paperText);
   var crossrefVerifiedDois = [];
   var notFoundDois = [];
   var unverifiedDois = [];
 
-  if (!hasFakeDoi && uniqueDois.length > 0) {
-    for (var uIdx = 0; uIdx < uniqueDois.length; uIdx++) {
-      var targetDoi = uniqueDois[uIdx];
+  var targetDois = uniqueDois.slice(0, MAX_INTEGRITY_DOI_CHECKS);
+  var excessDois = uniqueDois.slice(MAX_INTEGRITY_DOI_CHECKS);
+  for (var exIdx = 0; exIdx < excessDois.length; exIdx++) {
+    unverifiedDois.push(excessDois[exIdx]);
+  }
+
+  if (!hasFakeDoi && targetDois.length > 0) {
+    for (var uIdx = 0; uIdx < targetDois.length; uIdx++) {
+      var targetDoi = targetDois[uIdx];
       try {
         var url = CROSSREF_API + '/' + encodeURIComponent(targetDoi);
         var res = await cindy.fetch({
@@ -714,7 +721,7 @@ async function academicIntegrityAuditTool(args, callId) {
         : (allDoisVerified
           ? ('全部 ' + crossrefVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
           : (uniqueDois.length > 0
-            ? ('检测到 ' + unverifiedDois.length + ' 处尚未完成 Crossref 实时核验的 DOI (' + unverifiedDois.join(', ') + ')，暂不放行。')
+            ? ('检测到 ' + unverifiedDois.length + ' 处未完成核验的 DOI (' + unverifiedDois.slice(0, 5).join(', ') + (unverifiedDois.length > 5 ? ' 等' : '') + ')' + (excessDois.length > 0 ? ('，单次调用优先核查前 ' + MAX_INTEGRITY_DOI_CHECKS + ' 篇，其余 ' + excessDois.length + ' 篇标记为待分批核验') : '') + '。')
             : '未检测到规范 DOI 标识，存在文献真实性风险。'))),
   });
 

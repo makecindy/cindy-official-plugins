@@ -216,6 +216,26 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
   assert.match(capturedReq.url, /10\.1038%2Fs41586-020-2649-2/);
   assert.equal(resPassed.result.allModesPassed, true);
   assert.equal(resPassed.result.verdict, 'GATE_PASSED');
+
+  // 4. Cap DOI checking at 30 per call for manuscripts with many citations
+  const manyDois = Array.from({ length: 35 }, (_, i) => `10.1038/s41586-020-${1000 + i}`).join(' ');
+  const paperWithManyDois = samplePaper + '\n' + manyDois;
+  let fetchCallCount = 0;
+  const pluginCapped = loadPlugin(async () => {
+    fetchCallCount++;
+    return {
+      ok: true,
+      status: 200,
+      body: JSON.stringify({ message: { DOI: '10.1038/s41586-020-0000', title: ['Paper'] } }),
+    };
+  });
+  const resCapped = await pluginCapped.academicIntegrityAuditTool({
+    paper_text: paperWithManyDois,
+    implementation_verified: true,
+  });
+  assert.equal(resCapped.ok, true);
+  assert.equal(fetchCallCount, 30);
+  assert.equal(resCapped.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
 });
 
 test('claimCitationAlignmentTool evaluates token overlap and alignment status', async () => {
