@@ -458,20 +458,7 @@ const providerId = () => (cfg.provider === 'jev' ? 'jev' : 'openai');
 const modelOf = (id) => (id === 'openai' ? cfg.openaiModel : cfg.jevModel) || PROVIDERS[id].model;
 const routeLabel = (route) => route ? `${route.modelName || route.model}${route.effort ? ` · ${effortName(route.effort)}` : ''}` : t('noModel');
 
-function migrate(raw) {
-  const out = { ...raw };
-  if (!Array.isArray(out.rules)) {
-    out.rules = [];
-    for (const point of ['will-schedule-run', 'will-routine-run']) {
-      const old = raw[point];
-      if (!old || (!old.question && !(old.keywords || []).length)) continue;
-      out.rules.push({ id: newId(), point, type: 'predicate', enabled: old.enabled !== false, question: old.question || '', keywords: old.keywords || [], action: 'skip', threshold: typeof old.threshold === 'number' ? old.threshold : 0.7 });
-    }
-  }
-  delete out['will-schedule-run'];
-  delete out['will-routine-run'];
-  return out;
-}
+const withRules = (raw) => ({ ...raw, rules: Array.isArray(raw.rules) ? raw.rules : [] });
 
 // The brain and this page rewrite the whole config: one lock keeps either from writing back a stale copy.
 const withConfigLock = (fn) => (navigator.locks ? navigator.locks.request('decision-gate-config', fn) : fn());
@@ -506,7 +493,7 @@ async function save() {
     const mine = cfg;
     const base = JSON.parse(stored);
     const next = await withConfigLock(async () => {
-      const merged = mergeChanges(base, mine, migrate(await readStore()));
+      const merged = mergeChanges(base, mine, withRules(await readStore()));
       const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(merged) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return merged;
@@ -846,7 +833,7 @@ channel.addEventListener('message', async ({ data }) => {
   if (data?.from !== 'brain' || data.type !== 'config-changed') return;
   const raw = await readStore().catch(() => null);
   if (!raw) return;
-  cfg = migrate(raw);
+  cfg = withRules(raw);
   stored = JSON.stringify(cfg);
   if (loaded && !draft) render();
 });
@@ -862,7 +849,7 @@ async function boot() {
     render();
     return;
   }
-  cfg = migrate(raw);
+  cfg = withRules(raw);
   stored = JSON.stringify(cfg);
   loaded = true;
   storeError = '';

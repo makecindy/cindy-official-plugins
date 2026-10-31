@@ -157,7 +157,7 @@ const withConfigLock = (fn) => (globalThis.navigator?.locks ? navigator.locks.re
 async function readConfig() {
   const res = await fetch('/kv');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return migrate(await res.json());
+  return withRules(await res.json());
 }
 
 async function writeConfig(cfg) {
@@ -169,25 +169,7 @@ async function writeConfig(cfg) {
 // Rule ids are sent to the decision API as question names.
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, '0')).join('');
 
-// Early builds stored one rule per point; convert them to the rules list on read.
-function migrate(raw) {
-  const cfg = { ...raw };
-  if (!Array.isArray(cfg.rules)) {
-    cfg.rules = [];
-    for (const point of ['will-schedule-run', 'will-routine-run']) {
-      const old = raw[point];
-      if (!old || (!old.question && !(old.keywords || []).length)) continue;
-      cfg.rules.push({
-        id: newId(), point, type: 'predicate', enabled: old.enabled !== false,
-        question: old.question || '', keywords: old.keywords || [], action: 'skip',
-        threshold: typeof old.threshold === 'number' ? old.threshold : 0.7,
-      });
-    }
-  }
-  delete cfg['will-schedule-run'];
-  delete cfg['will-routine-run'];
-  return cfg;
-}
+const withRules = (raw) => ({ ...raw, rules: Array.isArray(raw.rules) ? raw.rules : [] });
 
 function describe(point, data) {
   if (point === 'will-start-task') {
@@ -434,7 +416,7 @@ channel.onmessage = async ({ data: req }) => {
   try {
     await loadLocale();
     if (req.kind === 'try') {
-      const config = migrate(req.config || {});
+      const config = withRules(req.config || {});
       const rule = config.rules.find((r) => r.id === req.ruleId);
       if (!rule) throw new Error(t('saveRuleFirst'));
       const data = rule.point === 'will-start-task'
