@@ -190,21 +190,30 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
   assert.equal(resBlocked.result.verdict, 'GATE_BLOCKED_ACTION_REQUIRED');
 
   // 3. When Crossref returns valid metadata and implementation_verified is true, all 7 modes PASS
-  const pluginVerified = loadPlugin(async () => ({
-    ok: true,
-    status: 200,
-    body: JSON.stringify({
-      message: {
-        DOI: '10.1038/s41586-020-2649-2',
-        title: ['Array programming with NumPy'],
-      },
-    }),
-  }));
-  const resPassed = await pluginVerified.academicIntegrityAuditTool({
-    paper_text: samplePaper,
-    implementation_verified: true,
+  let capturedReq = null;
+  const pluginVerified = loadPlugin(async (req) => {
+    capturedReq = req;
+    return {
+      ok: true,
+      status: 200,
+      body: JSON.stringify({
+        message: {
+          DOI: '10.1038/s41586-020-2649-2',
+          title: ['Array programming with NumPy'],
+        },
+      }),
+    };
   });
+  const resPassed = await pluginVerified.academicIntegrityAuditTool(
+    {
+      paper_text: samplePaper,
+      implementation_verified: true,
+    },
+    'call-audit-1',
+  );
   assert.equal(resPassed.ok, true);
+  assert.equal(capturedReq.callId, 'call-audit-1');
+  assert.match(capturedReq.url, /10\.1038%2Fs41586-020-2649-2/);
   assert.equal(resPassed.result.allModesPassed, true);
   assert.equal(resPassed.result.verdict, 'GATE_PASSED');
 });

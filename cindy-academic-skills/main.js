@@ -643,7 +643,8 @@ async function academicIntegrityAuditTool(args, callId) {
       var targetDoi = uniqueDois[uIdx];
       try {
         var url = CROSSREF_API + '/' + encodeURIComponent(targetDoi);
-        var res = await cindy.fetch(url, {
+        var res = await cindy.fetch({
+          url: url,
           callId: callId,
           method: 'GET',
           headers: {
