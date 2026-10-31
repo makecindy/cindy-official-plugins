@@ -2650,12 +2650,15 @@ function prQuietButton(action, label, extra, inner) {
     'font-size:12px;font-weight:500;color:var(--text-secondary);--hover:' + PR_HOVER + (extra || ''), inner);
 }
 
-/** 跟进中:按钮原地变成绿色状态胶囊(静态——宿主只让运行中的卡片播动画)。 */
+/** 跟进中:按钮原地变成绿色状态胶囊,圆点由宿主播呼吸光环(data-ghost-live)。 */
 function prFollowingPill() {
   return '<div style="' + PR_PILL + 'gap:7px;padding:0 12px;color:var(--text-primary);' +
     'border:1px solid color-mix(in srgb,' + PR_GREEN + ' 35%,transparent);background:color-mix(in srgb,' + PR_GREEN + ' 10%,transparent)">' +
-    '<span style="flex:none;width:7px;height:7px;border-radius:50%;background:' + PR_GREEN + ';' +
-    'box-shadow:0 0 0 3px color-mix(in srgb,' + PR_GREEN + ' 22%,transparent)"></span>' + prEsc(t('prStateFollowing')) + '</div>';
+    '<span style="position:relative;flex:none;width:7px;height:7px">' +
+    // 宿主按 data-ghost-live 给这层播呼吸光环;旧版宿主不认这个属性时它只是叠在圆点下的同色圆。
+    '<span data-ghost-live style="position:absolute;inset:0;border-radius:50%;background:' + PR_GREEN + '"></span>' +
+    '<span style="position:absolute;inset:0;border-radius:50%;background:' + PR_GREEN + ';' +
+    'box-shadow:0 0 0 3px color-mix(in srgb,' + PR_GREEN + ' 22%,transparent)"></span></span>' + prEsc(t('prStateFollowing')) + '</div>';
 }
 
 function prChip(label, pending) {
