@@ -162,7 +162,6 @@ test('threeWayLitScanTool builds Why-How-What comparison matrix', async () => {
 });
 
 test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', async () => {
-  const plugin = loadPlugin();
   const samplePaper = `
     Introduction:
     Previous studies (Smith et al., 2024) explored transformer architectures (10.1038/s41586-020-2649-2).
@@ -174,16 +173,35 @@ test('academicIntegrityAuditTool scans 7 failure modes and reports verdict', asy
     All code and data availability statements are included.
   `;
 
-  // Without verified_dois, Mode 1 stays VERIFICATION_REQUIRED and verdict is conditional
-  const resPending = await plugin.academicIntegrityAuditTool({ paper_text: samplePaper });
+  // 1. Default mock returns empty message {} -> Mode 1 stays VERIFICATION_REQUIRED and verdict is conditional
+  const pluginUnverified = loadPlugin();
+  const resPending = await pluginUnverified.academicIntegrityAuditTool({ paper_text: samplePaper });
   assert.equal(resPending.ok, true);
   assert.equal(resPending.result.failureModesEvaluation.length, 7);
   assert.equal(resPending.result.verdict, 'GATE_CONDITIONAL_PENDING_VERIFICATION');
 
-  // With verified_dois covering extracted DOIs, all 7 modes PASS and verdict is GATE_PASSED
-  const resPassed = await plugin.academicIntegrityAuditTool({
+  // 2. When Crossref returns 404 for a non-existent DOI, verdict is GATE_BLOCKED_ACTION_REQUIRED
+  const plugin404 = loadPlugin(async () => ({ ok: false, status: 404, body: 'Not Found' }));
+  const resBlocked = await plugin404.academicIntegrityAuditTool({
     paper_text: samplePaper,
-    verified_dois: ['10.1038/s41586-020-2649-2'],
+    implementation_verified: true,
+  });
+  assert.equal(resBlocked.ok, true);
+  assert.equal(resBlocked.result.verdict, 'GATE_BLOCKED_ACTION_REQUIRED');
+
+  // 3. When Crossref returns valid metadata and implementation_verified is true, all 7 modes PASS
+  const pluginVerified = loadPlugin(async () => ({
+    ok: true,
+    status: 200,
+    body: JSON.stringify({
+      message: {
+        DOI: '10.1038/s41586-020-2649-2',
+        title: ['Array programming with NumPy'],
+      },
+    }),
+  }));
+  const resPassed = await pluginVerified.academicIntegrityAuditTool({
+    paper_text: samplePaper,
     implementation_verified: true,
   });
   assert.equal(resPassed.ok, true);
@@ -288,6 +306,20 @@ test('pipelineStageOrchestratorTool manages 10-stage transitions and enforces in
   });
   assert.equal(resEmpty.result.materialPassportStatus.provenanceAuditTrail, 'UNLOCKED_PENDING_MATERIAL');
   assert.equal(resEmpty.result.materialPassportStatus.hash, null);
+
+  // Changing manuscript_content produces distinct Material Passport hashes
+  const resDraftV1 = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_2_Write',
+    research_topic: 'Multi-Agent Quality Assurance',
+    manuscript_content: 'Draft version 1 with initial results.',
+  });
+  const resDraftV2 = await plugin.pipelineStageOrchestratorTool({
+    current_stage: 'Stage_2_Write',
+    research_topic: 'Multi-Agent Quality Assurance',
+    manuscript_content: 'Draft version 2 with updated statistical tables.',
+  });
+  assert.ok(resDraftV1.result.materialPassportStatus.hash);
+  assert.notEqual(resDraftV1.result.materialPassportStatus.hash, resDraftV2.result.materialPassportStatus.hash);
 
   // Stage_2_5_Integrity holds when integrity_audit_passed is omitted, advances only when true
   const resHold = await plugin.pipelineStageOrchestratorTool({

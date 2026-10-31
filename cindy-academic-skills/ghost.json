@@ -66,7 +66,7 @@
             },
             "description": "已生成的成果列表（如 RQ Brief, Outline, Draft, Review Reports 等）"
           },
-          "manuscript_excerpt": {
+          "manuscript_content": {
             "type": "string",
             "description": "可选，当前手稿文本或内容摘要，用于计算真实的材料护照哈希 (Material Passport Hash)"
           },
@@ -213,13 +213,6 @@
               "final_integrity_gate"
             ],
             "description": "门禁阶段：pre_review_gate (Stage 2.5 审前诚信门禁), final_integrity_gate (Stage 4.5 终审零回归门禁)。默认 pre_review_gate"
-          },
-          "verified_dois": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "可选，已通过 verify_doi 在线核验确认存在的 DOI 列表，用于完成 Mode 1 引用真实性对账放行"
           },
           "implementation_verified": {
             "type": "boolean",

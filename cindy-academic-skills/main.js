@@ -170,7 +170,8 @@ async function pipelineStageOrchestratorTool(args) {
   var currentStage = args && args.current_stage;
   var topic = (args && args.research_topic && String(args.research_topic).trim()) || 'Research Paper';
   var artifacts = Array.isArray(args && args.completed_artifacts) ? args.completed_artifacts.filter(Boolean) : [];
-  var manuscript = (args && args.manuscript_content && String(args.manuscript_content).trim()) || '';
+  var rawManuscript = (args && (args.manuscript_content || args.manuscript_excerpt)) || '';
+  var manuscript = String(rawManuscript).trim();
   var reviewDecision = args && args.review_decision ? String(args.review_decision).toLowerCase().trim() : null;
   var auditPassed = typeof (args && args.integrity_audit_passed) === 'boolean' ? args.integrity_audit_passed : null;
 
@@ -611,29 +612,66 @@ async function threeWayLitScanTool(args) {
 }
 
 // 6. academic_integrity_audit (7 Failure Modes Gate)
-async function academicIntegrityAuditTool(args) {
+async function academicIntegrityAuditTool(args, callId) {
   var paperText = args && args.paper_text;
   if (!paperText || typeof paperText !== 'string' || !paperText.trim()) {
     return fail('请提供待进行学术诚信审计的手稿文本。');
   }
 
   var stage = (args && args.stage) || 'pre_review_gate';
-  var verifiedDoisInput = Array.isArray(args && args.verified_dois)
-    ? args.verified_dois.map(function (d) { return cleanDoiString(String(d)).toLowerCase(); }).filter(Boolean)
-    : [];
-  var implementationVerified = Boolean(args && args.implementation_verified);
+  var implementationVerified = (args && args.implementation_verified === true);
   var findings = [];
   var lower = paperText.toLowerCase();
 
   var doiMatches = paperText.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/g) || [];
-  var normalizedMatches = doiMatches.map(function (d) { return cleanDoiString(d).toLowerCase(); });
+  var uniqueDois = [];
+  for (var dIdx = 0; dIdx < doiMatches.length; dIdx++) {
+    var cleaned = cleanDoiString(doiMatches[dIdx]);
+    if (cleaned && uniqueDois.indexOf(cleaned) < 0) {
+      uniqueDois.push(cleaned);
+    }
+  }
 
-  // Check for suspicious or placeholder DOIs
+  // Check for suspicious or placeholder DOIs and verify every extracted DOI against Crossref
   var hasFakeDoi = /10\.\d+\/(?:fake|dummy|test|placeholder|1234)/i.test(paperText);
-  var unverifiedDois = normalizedMatches.filter(function (d) {
-    return verifiedDoisInput.indexOf(d) < 0;
-  });
-  var allDoisVerified = normalizedMatches.length > 0 && !hasFakeDoi && unverifiedDois.length === 0;
+  var crossrefVerifiedDois = [];
+  var notFoundDois = [];
+  var unverifiedDois = [];
+
+  if (!hasFakeDoi && uniqueDois.length > 0) {
+    for (var uIdx = 0; uIdx < uniqueDois.length; uIdx++) {
+      var targetDoi = uniqueDois[uIdx];
+      try {
+        var url = CROSSREF_API + '/' + encodeURIComponent(targetDoi);
+        var res = await cindy.fetch(url, {
+          callId: callId,
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            'User-Agent': 'CindyAcademicPlugin/1.4 (https://cindy.app; mailto:1254084397@qq.com)',
+          },
+        });
+        if (res && res.status === 404) {
+          notFoundDois.push(targetDoi);
+        } else if (res && res.ok && res.status === 200) {
+          var parsed = JSON.parse(res.body || '{}');
+          var msg = parsed && parsed.message;
+          var hasRealRecord = Boolean(msg && (msg.DOI || (Array.isArray(msg.title) && msg.title.length > 0)));
+          if (hasRealRecord) {
+            crossrefVerifiedDois.push(targetDoi);
+          } else {
+            unverifiedDois.push(targetDoi);
+          }
+        } else {
+          unverifiedDois.push(targetDoi);
+        }
+      } catch {
+        unverifiedDois.push(targetDoi);
+      }
+    }
+  }
+
+  var allDoisVerified = uniqueDois.length > 0 && !hasFakeDoi && notFoundDois.length === 0 && unverifiedDois.length === 0 && crossrefVerifiedDois.length === uniqueDois.length;
 
   var overclaimKeywords = [
     'undoubtedly proves',
@@ -655,26 +693,28 @@ async function academicIntegrityAuditTool(args) {
 
   var hasControlMention = /control\s+group|baseline|ablation|placebo|对照组|基线|消融实验/i.test(paperText);
   var hasNegativeControlMention = /negative\s+control|random\s+control|randomized\s+control|placebo|blank\s+control|confounder|阴性对照|空白对照|随机对照|混杂控制/i.test(paperText);
-  var hasLeakageSafeguard = implementationVerified || /no\s+data\s+leakage|held-out\s+test|independent\s+test|cross-validation|独立测试集|无数据泄露|物理隔离/i.test(paperText);
+  var hasLeakageSafeguard = implementationVerified && /no\s+data\s+leakage|held-out\s+test|independent\s+test|cross-validation|独立测试集|无数据泄露|物理隔离/i.test(paperText);
   var hasPValueMention = /p\s*[<>=]\s*0\.\d+|statistical\s+significance|显著性|假设检验/i.test(paperText);
   var hasDataAvailability = /data\s+availability|code\s+availability|reproducib|可复现|数据可用性/i.test(paperText);
 
-  var mode1Status = hasFakeDoi
-    ? 'FLAGGED_SUSPICIOUS_DOI'
+  var mode1Status = (hasFakeDoi || notFoundDois.length > 0)
+    ? 'FLAGGED_FABRICATED_OR_MISSING_DOI'
     : (allDoisVerified
       ? 'PASS'
-      : (doiMatches.length > 0 ? 'VERIFICATION_REQUIRED' : 'WARNING_NO_CITATION_FOUND'));
+      : (uniqueDois.length > 0 ? 'VERIFICATION_REQUIRED' : 'WARNING_NO_CITATION_FOUND'));
 
   findings.push({
     mode: 'Mode 1: Fabricated Citations',
     status: mode1Status,
     details: hasFakeDoi
       ? '检测到疑似伪造/占位符 DOI (如包含 fake/dummy/test)，门禁拦截！'
-      : (allDoisVerified
-        ? ('全部 ' + normalizedMatches.length + ' 处 DOI 已通过 verify_doi 清单对账核验。')
-        : (doiMatches.length > 0
-          ? ('检测到 ' + unverifiedDois.length + ' 处未经核验的 DOI (' + unverifiedDois.join(', ') + ')。必须先调用 verify_doi 在线核验并通过 verified_dois 传入后方可通过门禁。')
-          : '未检测到规范 DOI 标识，存在文献真实性风险。')),
+      : (notFoundDois.length > 0
+        ? ('Crossref 官方库中查无此 DOI (' + notFoundDois.join(', ') + ')，判定为疑似幻觉引用，门禁拦截！')
+        : (allDoisVerified
+          ? ('全部 ' + crossrefVerifiedDois.length + ' 处 DOI 已通过 Crossref 实时在线对账核验。')
+          : (uniqueDois.length > 0
+            ? ('检测到 ' + unverifiedDois.length + ' 处尚未完成 Crossref 实时核验的 DOI (' + unverifiedDois.join(', ') + ')，暂不放行。')
+            : '未检测到规范 DOI 标识，存在文献真实性风险。'))),
   });
 
   findings.push({
@@ -687,8 +727,8 @@ async function academicIntegrityAuditTool(args) {
     mode: 'Mode 3: Implementation Artifacts vs Findings',
     status: hasLeakageSafeguard ? 'PASS' : 'UNVERIFIED_IMPLEMENTATION_ARTIFACTS',
     details: hasLeakageSafeguard
-      ? '已确认包含独立测试隔离或作者实现无泄露签字确认。'
-      : '尚未提供数据防泄露/独立测试集隔离说明或 implementation_verified 签字确认，暂不放行。',
+      ? '已核实正文中独立测试集隔离声明且作者已显式确认 implementation_verified=true。'
+      : '尚未同时满足正文防数据泄露隔离说明与 implementation_verified=true 独立核查确认，暂不放行。',
   });
 
   findings.push({
@@ -730,7 +770,7 @@ async function academicIntegrityAuditTool(args) {
   }
 
   var verdict = 'GATE_CONDITIONAL_PENDING_VERIFICATION';
-  if (hasFakeDoi || detectedOverclaims.length > 0) {
+  if (hasFakeDoi || notFoundDois.length > 0 || detectedOverclaims.length > 0) {
     verdict = 'GATE_BLOCKED_ACTION_REQUIRED';
   } else if (passCount === findings.length) {
     verdict = 'GATE_PASSED';
@@ -742,6 +782,7 @@ async function academicIntegrityAuditTool(args) {
       gateStage: stage,
       verdict: verdict,
       allModesPassed: passCount === findings.length,
+      crossrefVerifiedDois: crossrefVerifiedDois,
       pendingOrFailedModes: unverifiedModes,
       summary: '7类科研失败模式审查完成：' + passCount + '/7 项通过。' +
         (passCount === findings.length ? '全部阻断项已核验放行。' : '存在未核验或待整改项，门禁保持拦截状态。'),
