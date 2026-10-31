@@ -268,7 +268,10 @@ function assertParity(tables, label, { allowJaSameAsZh = new Set(), allowSameAsZ
 
 test('runtime, catalog and settings tables have identical keys and placeholders in all four locales', () => {
   const runtime = createRuntime().context;
-  assertParity(runtime.MESSAGES, 'main.js MESSAGES');
+  // Effort names follow Cindy's own Japanese model picker, which shares the kanji with Chinese.
+  assertParity(runtime.MESSAGES, 'main.js MESSAGES', {
+    allowJaSameAsZh: new Set(['prEffortLow', 'prEffortMedium', 'prEffortHigh', 'prEffortXhigh', 'prEffortMax']),
+  });
   assertParity(runtime.PARAM_NOTES, 'main.js PARAM_NOTES');
   assertParity(createSettings().messages, 'settings.js', { allowJaSameAsZh: new Set(['save']) });
 

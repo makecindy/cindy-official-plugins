@@ -156,6 +156,14 @@ var MESSAGES = {
     prFollowModelTaskHint: '每次跟进用这个任务当时的模型',
     prFollowModelCustom: '指定模型',
     prFollowModelChangeTo: '更换模型（当前：{name}）',
+    prEffortMinimal: '最低',
+    prEffortLow: '低',
+    prEffortMedium: '中',
+    prEffortHigh: '高',
+    prEffortXhigh: '超高',
+    prEffortMax: '最高',
+    prFastMode: '快速',
+    prUltrafastMode: '超快',
     prFollowModelFailed: '没能打开模型选择：{detail}',
     prTurnOff: '关闭「{name}」',
     prCiPassed: 'CI 通过',
@@ -266,6 +274,14 @@ var MESSAGES = {
     prFollowModelTaskHint: 'Each round uses the model this task has at the time',
     prFollowModelCustom: 'Choose a model',
     prFollowModelChangeTo: 'Change model (now {name})',
+    prEffortMinimal: 'Minimal',
+    prEffortLow: 'Low',
+    prEffortMedium: 'Medium',
+    prEffortHigh: 'High',
+    prEffortXhigh: 'Extra high',
+    prEffortMax: 'Max',
+    prFastMode: 'Fast',
+    prUltrafastMode: 'Ultra fast',
     prFollowModelFailed: 'Could not open the model picker: {detail}',
     prTurnOff: 'Turn off "{name}"',
     prCiPassed: 'CI passed',
@@ -376,6 +392,14 @@ var MESSAGES = {
     prFollowModelTaskHint: '毎回、その時点のこのタスクのモデルを使います',
     prFollowModelCustom: 'モデルを指定',
     prFollowModelChangeTo: 'モデルを変更（現在：{name}）',
+    prEffortMinimal: '最小',
+    prEffortLow: '低',
+    prEffortMedium: '中',
+    prEffortHigh: '高',
+    prEffortXhigh: '超高',
+    prEffortMax: '最高',
+    prFastMode: '高速',
+    prUltrafastMode: '超高速',
     prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
     prTurnOff: '「{name}」をオフ',
     prCiPassed: 'CI 成功',
@@ -486,6 +510,14 @@ var MESSAGES = {
     prFollowModelTaskHint: '매번 그 시점의 이 작업 모델을 사용합니다',
     prFollowModelCustom: '모델 지정',
     prFollowModelChangeTo: '모델 변경 (현재: {name})',
+    prEffortMinimal: '최소',
+    prEffortLow: '낮음',
+    prEffortMedium: '중간',
+    prEffortHigh: '높음',
+    prEffortXhigh: '매우 높음',
+    prEffortMax: '최대',
+    prFastMode: '빠름',
+    prUltrafastMode: '초고속',
     prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
     prTurnOff: '"{name}" 끄기',
     prCiPassed: 'CI 통과',
@@ -2815,27 +2847,47 @@ function prSegment(action, label, active, inner) {
       : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
 }
 
+/** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
+function prRouteExtras(route) {
+  var effort = { minimal: t('prEffortMinimal'), low: t('prEffortLow'), medium: t('prEffortMedium'), high: t('prEffortHigh'),
+    xhigh: t('prEffortXhigh'), max: t('prEffortMax') }[route.effort] || route.effort;
+  var parts = effort ? [effort] : [];
+  if (route.fastMode === 'ultrafast') parts.push(t('prUltrafastMode'));
+  else if (route.fastMode === true) parts.push(t('prFastMode'));
+  return parts;
+}
+
+/** 下拉箭头(卡内没有 SVG,用描边拼)。 */
+function prChevron() {
+  return '<span style="flex:none;display:inline-block;width:6px;height:6px;margin:0 2px -1px 8px;' +
+    'border-right:1.5px solid var(--text-tertiary);border-bottom:1.5px solid var(--text-tertiary);transform:translateY(-2px) rotate(45deg)"></span>';
+}
+
 /**
- * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下一行是可点的模型名,点它换模型;
- * 切回「跟随」再切回「指定」直接恢复上次的模型,不必重选。旧版宿主没有统一选择器时不显示这一行。
+ * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下面单独一行是模型选择按钮
+ * (模型名 · 档位 ⌄,样式同输入框旁的选择器),点它打开 Cindy 的模型选择器;切回「跟随」再切回
+ * 「指定」直接恢复上次的模型。旧版宿主没有统一选择器时不显示这一行。
  */
 function prModelRow(settings) {
   if (typeof cindy.pickModel !== 'function') return '';
   var m = settings.followModel;
-  var detail = m
-    ? prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
-      'display:inline-flex;align-items:center;max-width:100%;margin:1px 0 0 -6px;padding:1px 6px;border-radius:6px;font-size:12px;line-height:16px;' +
-      'color:var(--text-primary);--hover:' + PR_HOVER,
-      '<span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + prEsc(m.label) + '</span>' +
-      '<span style="flex:none;margin-left:4px;color:var(--text-tertiary)">›</span>')
-    : '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
-      prEsc(t('prFollowModelTaskHint')) + '</div>';
-  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px">' +
-    '<div style="flex:1;min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' + detail + '</div>' +
+  var head = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">' +
+    '<div style="flex:1;min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' +
+    (m ? '' : '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
+      prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
     '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
     prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
     prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
     '</div></div>';
+  var picker = m
+    ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
+      'display:inline-flex;align-items:center;max-width:100%;height:32px;padding:0 10px;border-radius:8px;font-size:13px;' +
+      'border:1px solid var(--border-default);--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 6%)',
+      '<span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500">' + prEsc(m.label) + '</span>' +
+      prRouteExtras(m.route).map(function (x) { return '<span style="flex:none;margin-left:8px;color:var(--text-secondary)">' + prEsc(x) + '</span>'; }).join('') +
+      prChevron()) + '</div>'
+    : '';
+  return '<div style="padding:8px">' + head + picker + '</div>';
 }
 
 function prSettingsPanel(settings) {
