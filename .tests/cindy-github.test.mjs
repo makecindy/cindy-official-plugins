@@ -723,7 +723,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(askCard.state, 'done');
   assert.equal(askCard.sourceCallId, undefined);
   // Button labels live in aria-label, so the phone's text projection is just the question.
-  assert.deepEqual(visibleText(askCard.html), [zhCopy.prAskTitle, 'feat/pr-card → main · 3 个提交 · 2 个文件']);
+  assert.deepEqual(visibleText(askCard.html), [zhCopy.prAskTitle, 'octo/repo', 'feat/pr-card → main · 3 个提交 · 2 个文件']);
   assert.match(askCard.html, /<button data-ghost-action="pr:publish" aria-label="发 PR" style="[^"]*"><\/button>/);
 
   await runtime.click(cardId, 'pr:publish');
@@ -751,10 +751,12 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(runtime.cards(opened.callId).length, 0);
   const update = runtime.lastCard(cardId);
   assert.equal(update.sourceCallId, opened.callId);
-  assert.deepEqual(visibleText(update.html), ['#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`]);
+  assert.deepEqual(visibleText(update.html), [
+    '#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`, 'feat/pr-card → main · 3 个提交 · 2 个文件',
+  ]);
   assert.match(update.html, /<a href="https:\/\/github\.com\/octo\/repo\/pull\/42">/);
-  // Every stage asks the host to keep the card after the turn's changed-files card, so it never jumps.
-  for (const html of [askCard.html, update.html]) assert.match(html, /<div data-ghost-placement="turn-end" style=/);
+  // Every stage asks the host for the changed-files card's slot and width, so it never jumps or resizes.
+  for (const html of [askCard.html, update.html]) assert.match(html, /<div data-ghost-placement="turn-end" data-ghost-width="full" style=/);
 });
 
 test('card settings persist in /kv and become one-time todos once the PR exists', async () => {
@@ -826,5 +828,5 @@ test('pr_card rejects unusable input and keeps its largest card under the host s
 
   // Uncommitted changes: the card reports files only, never "0 commits".
   const pending = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main', commits: 0, files_total: 1 });
-  assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[1], `feat/x → main · ${zhCopy.prFileOne}`);
+  assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[2], `feat/x → main · ${zhCopy.prFileOne}`);
 });

@@ -2520,7 +2520,7 @@ var PR_CSS =
   'button[data-ghost-action^="pr:"]::before{content:attr(aria-label)}' +
   'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
   'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
-  'div:hover>button[data-ghost-action="pr:stop"],div:focus-within>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
+  'div:hover>div>button[data-ghost-action="pr:stop"],div:focus-within>div>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
   '@keyframes prspin{to{transform:rotate(360deg)}}' +
   '</style>';
 
@@ -2596,22 +2596,32 @@ function prTile(glyph, tone) {
   } else if (tone === 'muted') {
     color = 'var(--text-tertiary)';
   }
-  return '<div style="display:grid;place-items:center;width:32px;height:32px;border-radius:8px;color:' + color + ';background:' + bg + '">' +
+  return '<div style="display:grid;flex:none;place-items:center;width:36px;height:36px;border-radius:8px;color:' + color + ';background:' + bg + '">' +
     prGlyph(glyph) + '</div>';
 }
 
-function prHeader(tile, titleHtml, metaParts, withGear) {
-  var sep = '<span style="color:var(--text-tertiary)"> · </span>';
-  return '<div style="display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:12px;align-items:center' + (withGear ? ';padding-right:32px' : '') + '">' +
+var PR_SEP = '<span style="color:var(--text-tertiary)"> · </span>';
+
+/** 上层:图标、标题、仓库或进度说明,设置按钮靠右。 */
+function prHeader(tile, titleHtml, metaParts, gear) {
+  return '<div style="display:flex;align-items:center;gap:12px;padding:14px 12px 14px 16px">' +
     tile +
-    '<div style="min-width:0">' +
-    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;line-height:20px;font-weight:600">' + titleHtml + '</div>' +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;line-height:20px;font-weight:500">' + titleHtml + '</div>' +
     '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
-    metaParts.join(sep) + '</div>' +
-    '</div></div>';
+    metaParts.join(PR_SEP) + '</div>' +
+    '</div>' + (gear || '') + '</div>';
 }
 
-var PR_PILL = 'display:inline-flex;align-items:center;height:28px;padding:0 14px;border-radius:9999px;font-size:13px;font-weight:500;white-space:nowrap;';
+/** 下层:左边分支或状态,右边按钮;窄的时候按钮换到下一行。 */
+function prFooter(leftHtml, actionsHtml) {
+  return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
+    '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
+    (actionsHtml ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
+    '</div>';
+}
+
+var PR_PILL = 'display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:9999px;font-size:13px;font-weight:500;white-space:nowrap;';
 
 function prButton(action, label, style, inner) {
   return '<button data-ghost-action="' + action + '" aria-label="' + prEsc(label) + '" style="' + style + '">' + (inner || '') + '</button>';
@@ -2628,7 +2638,7 @@ function prPillButton(action, label) {
 }
 
 function prQuietButton(action, label, extra, inner) {
-  return prButton(action, label, 'display:inline-flex;align-items:center;height:28px;padding:0 8px;border-radius:9999px;' +
+  return prButton(action, label, 'display:inline-flex;align-items:center;height:32px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;color:var(--text-secondary);--hover:' + PR_HOVER + (extra || ''), inner);
 }
 
@@ -2644,13 +2654,9 @@ function prFollowingPill() {
 }
 
 function prChip(label, pending) {
-  return '<div style="display:inline-flex;align-items:center;height:28px;padding:0 2px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
+  return '<div style="display:inline-flex;align-items:center;height:32px;padding:0 2px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
     '<span style="display:inline-flex;align-items:center;color:var(--text-tertiary)">' + (pending ? prMiniSpinner() : prCheckGlyph()) + '</span>' +
     '<span style="margin-left:4px">' + prEsc(label) + '</span></div>';
-}
-
-function prActions(html) {
-  return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px">' + html + '</div>';
 }
 
 function prStatusItem(tone, label) {
@@ -2677,20 +2683,16 @@ function prStatusStrip(pr) {
   else if (pr.review === 'CHANGES_REQUESTED') items += prStatusItem('wait', t('prMergeChanges'));
   else if (pr.review === 'REVIEW_REQUIRED') items += prStatusItem('wait', t('prMergeApproval'));
   else items += prStatusItem('wait', t('prMergeWaiting'));
-  return '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;padding:8px 12px;border-radius:8px;background:var(--surface);' +
-    'font-size:12px;line-height:16px;color:var(--text-secondary)">' + items + '</div>';
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px 16px">' + items + '</div>';
 }
 
-/** 发布中 / 已合并 / 已关闭只有标题行时,补一行分支与改动概况。 */
-function prContextStrip(card) {
+/** 分支与改动概况(下层左边)。 */
+function prContextLine(card) {
   var head = card.head || (card.pr && card.pr.head) || '';
   var base = card.base || (card.pr && card.pr.base) || '';
   var parts = head ? [prEsc(head) + (base ? ' → ' + prEsc(base) : '')] : [];
   parts = parts.concat(prStatsParts(card));
-  if (!parts.length) return '';
-  return '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:12px;padding:8px 12px;border-radius:8px;' +
-    'background:var(--surface);font-size:12px;line-height:16px;color:var(--text-secondary)">' +
-    parts.join('<span style="color:var(--text-tertiary)"> · </span>') + '</div>';
+  return '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + parts.join(PR_SEP) + '</div>';
 }
 
 function prSettingRow(action, label, hint, on) {
@@ -2703,7 +2705,7 @@ function prSettingRow(action, label, hint, on) {
 }
 
 function prSettingsPanel(settings) {
-  return '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-default)">' +
+  return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
@@ -2712,7 +2714,7 @@ function prSettingsPanel(settings) {
 
 function prGearButton(open) {
   return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
-    'position:absolute;top:16px;right:10px;display:grid;place-items:center;width:28px;height:28px;border-radius:9999px;' +
+    'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
     'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
     prSlidersGlyph());
 }
@@ -2727,26 +2729,24 @@ function prStatsParts(card) {
 }
 
 function renderPrCard(card, settings) {
-  var header;
-  var body = '';
+  var tile, title, meta, left, actions = '';
   var gear = false;
   if (card.stage === 'ask') {
     gear = true;
-    var branch = prEsc(card.head) + (card.base ? ' → ' + prEsc(card.base) : '');
-    header = prHeader(prTile('branch'), prEsc(t('prAskTitle')), [branch].concat(prStatsParts(card)), true);
+    tile = prTile('branch');
+    title = prEsc(t('prAskTitle'));
+    meta = [prEsc(card.repo)];
+    left = prContextLine(card);
     // 看改动交给宿主的审查面板(真实 diff、可撤销),卡片只管发不发。
-    body += prActions(prCtaButton('pr:publish', t('prPublish')) + prPillButton('pr:draft', t('prPublishDraft')));
+    actions = prPillButton('pr:draft', t('prPublishDraft')) + prCtaButton('pr:publish', t('prPublish'));
   } else if (card.stage === 'publishing') {
-    header = prHeader(
-      prTile('spinner'),
-      prEsc(card.publishingDraft ? t('prPublishingDraftTitle') : t('prPublishingTitle')),
-      [prEsc(card.queued ? t('prQueuedMeta') : t('prPublishingMeta'))],
-      false
-    );
-    body += prContextStrip(card);
+    tile = prTile('spinner');
+    title = prEsc(card.publishingDraft ? t('prPublishingDraftTitle') : t('prPublishingTitle'));
+    meta = [prEsc(card.queued ? t('prQueuedMeta') : t('prPublishingMeta'))];
+    left = prContextLine(card);
   } else {
     var pr = card.pr;
-    var title = '<span style="margin-right:2px;color:var(--text-secondary);font-weight:500">#' + pr.number + '</span> ' + prEsc(pr.title || card.repo);
+    title = '<span style="margin-right:2px;color:var(--text-secondary);font-weight:500">#' + pr.number + '</span> ' + prEsc(pr.title || card.repo);
     // 标题即 PR 链接:宿主确认后用系统浏览器打开(需 card.externalLinks)。
     if (/^https:\/\/github\.com\//.test(pr.url)) {
       title = '<a href="' + prEsc(pr.url) + '">' + title + '</a>';
@@ -2754,50 +2754,43 @@ function renderPrCard(card, settings) {
     if (card.stage === 'open') {
       gear = true;
       var state = pr.draft ? t('prStateDraft') : card.following ? t('prStateFollowing') : t('prStateOpen');
-      header = prHeader(pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open'), title, [prEsc(card.repo), prEsc(state)], true);
-      if (card.following) body += prStatusStrip(pr);
-      var follow = card.pending === 'follow'
+      tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
+      meta = [prEsc(card.repo), prEsc(state)];
+      left = card.following ? prStatusStrip(pr) : prContextLine(card);
+      // 停止排在胶囊左边:悬停这一行才出现,出现时不推动「跟进中」。
+      actions = card.pending === 'follow'
         ? prChip(t('prFollowStarting'), true)
         : card.pending === 'stop'
           ? prChip(t('prStopping'), true)
           : card.following
-            ? prFollowingPill() + prQuietButton('pr:stop', t('prStop'))
+            ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
             : prPillButton('pr:follow', t('prFollow'));
-      body += prActions(follow);
     } else {
-      var meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
+      tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
+      meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
       if (card.followedEver) meta.push(prEsc(t('prFollowEnded')));
-      header = prHeader(card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted'), title, meta, false);
-      body += prContextStrip(card);
+      left = prContextLine(card);
     }
   }
   if (card.note) {
-    body += '<div style="margin-top:10px;font-size:12px;line-height:16px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
+    left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
+  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions);
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
-  // 排到本轮末尾:宿主把卡放在「已更改 N 个文件」卡之后,发不发是这一轮最后要拍板的事。
+  // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
   return PR_CSS +
-    '<div data-ghost-placement="turn-end" style="position:relative;display:flex;flex-direction:column;justify-content:' + (body ? 'space-between' : 'center') + ';' +
-    'min-height:120px;padding:14px 16px;border:1px solid var(--border-default);border-radius:12px;background:var(--surface-elevated);' +
+    '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;flex-direction:column;justify-content:space-between;' +
+    'min-height:120px;overflow:hidden;border:1px solid var(--border-default);border-radius:12px;background:var(--surface-elevated);' +
     'color:var(--text-primary);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5">' +
-    header + (body ? '<div style="padding-left:44px">' + body + '</div>' : '') + (gear ? prGearButton(card.settingsOpen) : '') +
-    '</div>';
+    body + '</div>';
 }
 
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
 function prCardHeight(card) {
-  var h = 2 + 28 + 38;
-  if (card.stage === 'ask') {
-    h += 40;
-  } else if (card.stage === 'open') {
-    h += 40;
-    if (card.following) h += 44;
-  } else {
-    h += 44;
-  }
-  if (card.note) h += 26;
-  if (card.settingsOpen && (card.stage === 'ask' || card.stage === 'open')) h += 150;
-  return Math.max(120, Math.min(900, h - 8));
+  var h = 120;
+  if (card.note) h += 22;
+  if (card.settingsOpen && (card.stage === 'ask' || card.stage === 'open')) h += 160;
+  return Math.min(900, h);
 }
 
 function sendPrCard(card, settings, sourceCallId) {
