@@ -23,13 +23,16 @@ const MODIFIERS=['shift','control','option','command'];
 const HEAD={'Content-Type':'application/x-cindy-live-screen','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
 const CAPS={ios:{touches:2,keyboard:true},ipados:{touches:2,keyboard:true},android:{touches:10,keyboard:true},tvos:{touches:0,keyboard:false},visionos:{touches:0,keyboard:true}};
 // [button id, Cindy icon]. Ids are this plugin's existing press buttons where one exists.
-const HANDHELD=[['home','home'],['app-switcher','recents'],['lock','lock'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right'],['shake','shake']];
+// orientation-* set an absolute pose, so a phone can make the device follow its own.
+const TURN=[['orientation-portrait','rotate-right'],['orientation-landscape','rotate-left']];
+const ORIENTATION_BUTTONS={'orientation-portrait':'portrait','orientation-landscape':'landscape-left'};
+const HANDHELD=[['home','home'],['app-switcher','recents'],['lock','lock'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right'],['shake','shake'],...TURN];
 const BUTTONS={ios:HANDHELD,ipados:HANDHELD,
-  android:[['back','back'],['home','home'],['recents','recents'],['power','power'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right']],
+  android:[['back','back'],['home','home'],['recents','recents'],['power','power'],['volume-up','volume-up'],['volume-down','volume-down'],['rotate-left','rotate-left'],['rotate-right','rotate-right'],...TURN],
   tvos:[['home','home'],['menu','menu'],['play-pause','play-pause']],visionos:[['home','home']]};
 const LABELS={
-  en:{home:'Home','app-switcher':'App Switcher',back:'Back',recents:'Recents',lock:'Lock',power:'Power','volume-up':'Volume Up','volume-down':'Volume Down','rotate-left':'Rotate Left','rotate-right':'Rotate Right',shake:'Shake',menu:'Menu','play-pause':'Play/Pause'},
-  'zh-CN':{home:'主屏幕','app-switcher':'App 切换器',back:'返回',recents:'最近任务',lock:'锁定',power:'电源','volume-up':'调高音量','volume-down':'调低音量','rotate-left':'向左旋转','rotate-right':'向右旋转',shake:'摇一摇',menu:'菜单','play-pause':'播放/暂停'},
+  en:{home:'Home','app-switcher':'App Switcher',back:'Back',recents:'Recents',lock:'Lock',power:'Power','volume-up':'Volume Up','volume-down':'Volume Down','rotate-left':'Rotate Left','rotate-right':'Rotate Right','orientation-portrait':'Portrait','orientation-landscape':'Landscape',shake:'Shake',menu:'Menu','play-pause':'Play/Pause'},
+  'zh-CN':{home:'主屏幕','app-switcher':'App 切换器',back:'返回',recents:'最近任务',lock:'锁定',power:'电源','volume-up':'调高音量','volume-down':'调低音量','rotate-left':'向左旋转','rotate-right':'向右旋转','orientation-portrait':'竖屏','orientation-landscape':'横屏',shake:'摇一摇',menu:'菜单','play-pause':'播放/暂停'},
 };
 const MESSAGES={
   en:{NOT_FOUND:'This device is not in the simulator plugin. Refresh the device list.',NOT_OPEN:'This screen is not open. Open it again.',NOT_RUNNING:'The device is not running. Start it first.',
@@ -337,6 +340,11 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     }
     if(e.kind==='text')return operation('type_text',{udid:s.udid,text:e.text,method:'paste'});
     if(e.kind==='key')return operation('type_text',{udid:s.udid,keys:[[...e.modifiers,e.code].join('+')]});
+    if(Object.hasOwn(ORIENTATION_BUTTONS,e.button)){
+      const orientation=ORIENTATION_BUTTONS[e.button];
+      await operation('set_state',{udid:s.udid,orientation});
+      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;return;
+    }
     if(e.button==='rotate-left'||e.button==='rotate-right'){
       const orientation=ORIENTATIONS[((s.requested??s.rotation)+(e.button==='rotate-right'?1:3))%4];
       await operation('set_state',{udid:s.udid,orientation});
@@ -346,6 +354,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     return operation('press',{udid:s.udid,button:e.button});
   }
   async function androidStep(s,e){
+    if(e.kind==='press'&&Object.hasOwn(ORIENTATION_BUTTONS,e.button))
+      return operation('set_state',{udid:s.udid,orientation:ORIENTATION_BUTTONS[e.button]});
     if(e.kind==='press'&&e.button.startsWith('rotate-')){
       // Like the viewer: turn the emulator's physical pose from what it shows.
       const next=((s.device||0)-(e.button==='rotate-right'?1:-1)+4)%4;

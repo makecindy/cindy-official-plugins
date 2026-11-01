@@ -98,7 +98,8 @@ test('open returns a loopback URL with a 32-byte one-time token and the iPhone d
   assert.deepEqual(opened.screen,{platform:'ios',width:1178,height:2556,cornerRadius:0.13,maxTouches:2,keyboard:true,buttons:[
     {id:'home',icon:'home',label:'主屏幕'},{id:'app-switcher',icon:'recents',label:'App 切换器'},{id:'lock',icon:'lock',label:'锁定'},
     {id:'volume-up',icon:'volume-up',label:'调高音量'},{id:'volume-down',icon:'volume-down',label:'调低音量'},
-    {id:'rotate-left',icon:'rotate-left',label:'向左旋转'},{id:'rotate-right',icon:'rotate-right',label:'向右旋转'},{id:'shake',icon:'shake',label:'摇一摇'}]});
+    {id:'rotate-left',icon:'rotate-left',label:'向左旋转'},{id:'rotate-right',icon:'rotate-right',label:'向右旋转'},{id:'shake',icon:'shake',label:'摇一摇'},
+    {id:'orientation-portrait',icon:'rotate-right',label:'竖屏'},{id:'orientation-landscape',icon:'rotate-left',label:'横屏'}]});
   const ws=FakeSocket.all.at(-1);
   assert.equal(ws.url,`ws://127.0.0.1:9/simulators/${PHONE}/stream?format=avcc&version=v2&display=phone`);
   assert.deepEqual(ws.sent.slice(0,2),[{type:'set_fps',fps:60},{type:'force_idr'}]);
@@ -251,6 +252,14 @@ test('iOS input sends touches on the stream socket and buttons, text and keys th
   await code(refused.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'home'}]}),'DEVICE_NOT_BOOTED');
 });
 
+test('orientation buttons set an absolute pose, so later relative turns start from it',async t=>{
+  const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-landscape'},{kind:'press',button:'orientation-landscape'},
+    {kind:'press',button:'rotate-right'},{kind:'press',button:'orientation-portrait'}]});
+  assert.deepEqual(f.calls,[['set_state',{udid:PHONE,orientation:'landscape-left'}],['set_state',{udid:PHONE,orientation:'landscape-left'}],
+    ['set_state',{udid:PHONE,orientation:'portrait-upside-down'}],['set_state',{udid:PHONE,orientation:'portrait'}]]);
+});
+
 test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=>{
   const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});
   const keys=Array.from({length:42},()=>({kind:'key',code:'KeyA'}));
@@ -284,7 +293,7 @@ test('Android streams the shared encoder output in the same framing with screen 
   const f=fixture(t);
   const opened=await f.live.request('liveScreen.open',{id:DROID,_locale:'en'});
   assert.deepEqual({...opened.screen,buttons:opened.screen.buttons.map(b=>b.id)},{platform:'android',width:1080,height:2400,cornerRadius:0,maxTouches:10,keyboard:true,
-    buttons:['back','home','recents','power','volume-up','volume-down','rotate-left','rotate-right']});
+    buttons:['back','home','recents','power','volume-up','volume-down','rotate-left','rotate-right','orientation-portrait','orientation-landscape']});
   const stream=await fetchStream(opened.url);t.after(()=>stream.close());
   await until(()=>f.sink());assert.equal(stream.status,200);assert.equal(stream.headers['content-type'],'application/x-cindy-live-screen');
   const sink=f.sink();
