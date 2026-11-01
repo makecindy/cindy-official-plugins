@@ -628,7 +628,7 @@ async function changeRule(id, change) {
   render();
 }
 
-function ruleRow(rule, index, list, point) {
+function ruleRow(rule, index, point) {
   const start = point.id === 'will-start-task';
   const n = index + 1;
   const condition = h('input', {
@@ -636,12 +636,16 @@ function ruleRow(rule, index, list, point) {
     placeholder: start ? t('phCondition') : t('phRunCondition'),
     onchange: (e) => changeRule(rule.id, (r) => { r.question = e.target.value.trim(); }),
   });
-  const swap = () => {
-    const before = list[index - 1];
-    const at = cfg.rules.findIndex((r) => r.id === rule.id);
-    const target = cfg.rules.findIndex((r) => r.id === before.id);
-    cfg.rules.splice(at, 1);
-    cfg.rules.splice(target, 0, rule);
+  const moveUp = () => {
+    // cfg may have been refreshed since this row rendered: move what is there now, by id.
+    const rows = cfg.rules.filter((r) => r.point === point.id);
+    const at = rows.findIndex((r) => r.id === rule.id);
+    if (at > 0) {
+      const from = cfg.rules.indexOf(rows[at]);
+      const to = cfg.rules.indexOf(rows[at - 1]);
+      cfg.rules.splice(from, 1);
+      cfg.rules.splice(to, 0, rows[at]);
+    }
     save().then(render);
   };
   return h('div', { class: `rule ${rule.enabled === false ? 'off' : ''}` },
@@ -653,10 +657,10 @@ function ruleRow(rule, index, list, point) {
       start
         ? modelButton(rule.route, t('modelFor', { n }), (route) => changeRule(rule.id, (r) => { r.route = route; }))
         : h('span', { class: 'sd skip' }, t('skipRun')),
-      h('button', { class: 'ib', type: 'button', disabled: index === 0, 'aria-label': t('moveUp', { n }), onclick: swap }, svg(ICON.up, 14)),
+      h('button', { class: 'ib', type: 'button', disabled: index === 0, 'aria-label': t('moveUp', { n }), onclick: moveUp }, svg(ICON.up, 14)),
       h('button', { class: 'ib', type: 'button', 'aria-label': t('deleteRule', { n }), onclick: () => { cfg.rules = cfg.rules.filter((r) => r.id !== rule.id); save().then(render); } }, svg(ICON.trash, 14))),
     start ? null : h('div', { class: 'kw' }, h('span', { class: 'hint' }, t('keywordHint')),
-      chipsOf(rule.keywords || [], (i) => changeRule(rule.id, (r) => { r.keywords.splice(i, 1); }), t('addKeyword'),
+      chipsOf(rule.keywords || [], (i) => { const word = rule.keywords[i]; changeRule(rule.id, (r) => { r.keywords = (r.keywords || []).filter((k) => k !== word); }); }, t('addKeyword'),
         (k) => changeRule(rule.id, (r) => { r.keywords ||= []; if (!r.keywords.includes(k)) r.keywords.push(k); }))),
     cfg.lastByRule?.[rule.id] ? h('p', { class: 'meta last' }, lastLine(rule)) : null);
 }
@@ -705,7 +709,7 @@ function rulesSection() {
     if (start || list.length || cfg.rules.length === 0 || !start) {
       sec.append(h('div', { class: 'glabel' }, h('b', {}, point.label()), h('span', {}, point.hint())));
     }
-    const group = h('div', { class: 'group' }, ...list.map((rule, i) => ruleRow(rule, i, list, point)));
+    const group = h('div', { class: 'group' }, ...list.map((rule, i) => ruleRow(rule, i, point)));
     if (start) {
       group.append(h('div', { class: 'rule base' }, h('div', { class: 'rr other' },
         h('span', { class: 'lab' }, t('otherwise')), h('span', { class: 'w' }, t('useWord')),
