@@ -1699,8 +1699,8 @@ function cell(v) {
 async function legacyMergeMaps(pending) {
   const contacts = new Map();
   const mergedAway = new Map();
-  for (const m of await q(
-    "SELECT source_id, target_id FROM contact_merges WHERE (undone_at IS NULL OR undone_at = '') AND source_id NOT IN (SELECT id FROM contacts)",
+  for (const m of await qAll(
+    "SELECT source_id, target_id FROM contact_merges WHERE (undone_at IS NULL OR undone_at = '') AND source_id NOT IN (SELECT id FROM contacts) ORDER BY id",
   )) {
     const [dst] = await q('SELECT id FROM contacts WHERE id = ?', [m.target_id]);
     mergedAway.set(m.source_id, dst ? dst.id : null);
