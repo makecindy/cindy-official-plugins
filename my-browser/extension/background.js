@@ -167,12 +167,12 @@ function markAgentTab(tabId,mode) {
   return sent;
 }
 
-// ── Chrome's debugger, on demand ───────────────────────────────────────────────────────────
-// An optional permission. Chrome lets the user grant it only by a click on the extension's own
-// page, so the first action that needs it opens that page in the user's window. While attached,
-// Chrome shows a notice bar in every window, so it is attached only for the action that needs
-// it (PDF, full-page/element/background screenshots, recipe protocol sessions) and detached
-// right after; a recipe session that goes quiet is detached by an idle timer.
+// ── Chrome's debugger ──────────────────────────────────────────────────────────────────────
+// Chrome does not allow `debugger` as an optional permission and the extension does not require it, so
+// the published extension has no debugger: these paths run only in a build that declares it (the
+// real-browser tests do). While attached, Chrome shows a notice bar in every window, so it is attached
+// only for the action that needs it and detached right after; a recipe session that goes quiet is
+// detached by an idle timer.
 const DEBUGGER_ACCESS = {permissions:['debugger']};
 const DEBUGGER_IDLE_MS = 120000, DEBUGGER_EVENT_MAX = 5000;
 const debugged = new Map();
@@ -180,25 +180,186 @@ let debuggerHooked = false;
 async function debuggerAllowed() {
   try { return await chrome.permissions.contains(DEBUGGER_ACCESS); } catch { return false; }
 }
-const DEBUGGER_PROMPT_INTERVAL_MS = 10*60000;
-// Opens the grant page at most once per interval, so a retrying agent cannot keep popping tabs.
-async function debuggerDenied() {
-  const last = (await sessionStore.get('debuggerPrompted')).debuggerPrompted || 0;
-  let opened = false;
-  if (Date.now()-last >= DEBUGGER_PROMPT_INTERVAL_MS) {
-    await sessionStore.set({debuggerPrompted:Date.now()});
-    opened = await openDebuggerPage().then(() => true,() => false);
-  }
-  return {...fail('DEBUGGER_NOT_ALLOWED',opened
-    ? "This needs Chrome's debugger, which the user has not allowed yet. A page explaining it has just opened in the user's Chrome. Ask the user to click Turn on there (Chrome asks them to confirm), then retry. If they decline, do not retry."
-    : "This needs Chrome's debugger, which the user has not allowed. The page to allow it was opened recently; ask the user to confirm it there before retrying. If they decline, do not retry."),grantPageOpened:opened};
+function debuggerDenied() {
+  return fail('DEBUGGER_UNAVAILABLE',"This needs Chrome's debugger, which an extension cannot request when needed: Chrome does not allow it as an optional permission. Tell the user, and offer Cindy's dedicated browser; do not retry or switch by yourself.");
 }
-async function openDebuggerPage() {
-  // One of the user's own shown windows, never Cindy's (minimized) window.
-  const agent = await agentWindow();
-  const windows = (await chrome.windows.getAll({windowTypes:['normal']})).filter(w => w.id !== agent && w.state !== 'minimized');
-  const win = windows.find(w => w.focused) || windows[0];
-  await chrome.tabs.create({url:chrome.runtime.getURL('permissions.html?needed=1'),active:true,...(win ? {windowId:win.id} : {})});
+// ── Iframes ────────────────────────────────────────────────────────────────────────────────
+// Refs are unique across a page, so nothing about frames reaches Cindy or the agent: a snapshot lists
+// what every frame shows, and an action finds the frame that holds its ref. Evaluate, extract and
+// selector-addressed actions stay on the top document.
+const FRAME_MAX = 15, SNAPSHOT_LIMIT_DEFAULT = 80;
+// A frame is read under one deadline, and waits for a scoped region only briefly: the top document has
+// already waited for it, and a frame that lacks the region must answer "not here" before the deadline, not
+// after it. Not constants only so the real-browser tests can shrink them to line up a late read.
+let FRAME_DEADLINE_MS = 5000, FRAME_WAIT_MS = 1500;
+async function runPageOperation(job,tabId,documentId,url,tabUrl,target) {
+  // The re-check on arrival compares this document's own address; an about: frame has no site of its own.
+  // One entry per document: frames of one snapshot are read side by side under the same job id.
+  const key = job.id+'|'+documentId;
+  targets.set(key,{url,authorizeUrl:url.startsWith('about:') ? tabUrl : url,target,tabId,documentId});
+  try {
+    const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job]});
+    return out?.[0]?.documentId === documentId ? out[0].result : null;
+  } finally { targets.delete(key); }
+}
+// Every frame that shows something, except the top document. A frame Chrome will not enter is left out.
+// Visibility belongs to the iframe element that holds the frame, so it is matched by identity, not by
+// address: the parent finds which of its frames each hidden element holds (`el.contentWindow` against its
+// own `window.frames`), and each frame finds its own place in its parent the same way. Both comparisons
+// are allowed across sites. A hidden frame hides everything inside it, nested frames included.
+async function childFrames(tabId,documentId) {
+  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => {
+    let index = -1;
+    try { for (let i = 0; i < parent.frames.length; i++) if (parent.frames[i] === window) { index = i; break; } } catch {}
+    const hidden = [];
+    for (const el of document.querySelectorAll('iframe,frame')) {
+      let off = el.getClientRects().length === 0 || getComputedStyle(el).visibility !== 'visible';
+      for (let node = el; node && !off; node = node.parentElement) if (getComputedStyle(node).opacity === '0') off = true;
+      const r = el.getBoundingClientRect();
+      if (!off && !(r.width > 0 && r.height > 0)) off = true;
+      if (!off) continue;
+      for (let i = 0; i < frames.length; i++) if (frames[i] === el.contentWindow) { hidden.push(i); break; }
+    }
+    return {url:location.href,index,shown:innerWidth > 0 && innerHeight > 0,hidden};
+  }}).catch(() => []);
+  const byFrame = new Map(out.map(f => [f.frameId,f.result]));
+  const parents = new Map();
+  try { for (const f of await chrome.webNavigation.getAllFrames({tabId}) || []) parents.set(f.frameId,f.parentFrameId); } catch {}
+  const off = new Set(out.filter(f => f.documentId !== documentId && f.result?.index >= 0 && byFrame.get(parents.get(f.frameId))?.hidden?.includes(f.result.index)).map(f => f.frameId));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [frameId,parentId] of parents) if (!off.has(frameId) && off.has(parentId)) { off.add(frameId); grew = true; }
+  }
+  return out.filter(f => f.documentId !== documentId && f.result?.shown && !off.has(f.frameId)).map(f => ({documentId:f.documentId,url:f.result.url}));
+}
+// The document an action belongs to: the one whose ref table holds its ref(s), or whose upload transfer or
+// selector match it. A drag has two ends; both must live in the same document, because one synthetic gesture
+// cannot span two documents. A selector end belongs to the top document, as selectors always do.
+async function frameForAction(job,tabId,documentId) {
+  const a = job.payload;
+  const upload = job.action === 'upload';
+  const refs = [a.ref,a.startRef,a.endRef].filter(Boolean);
+  if (!refs.length && !upload) return null;
+  const transfer = a.op && a.op !== 'begin' ? a.transfer : null;
+  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:(refs,selector,transfer) => ({url:location.href,here:transfer
+    ? [!!globalThis.__cindyUploads?.has(transfer)]
+    : refs.length ? refs.map(ref => !!globalThis.__myBrowserSnapshot?.refs?.has(ref)) : [!!(selector && document.querySelector(selector))]}),args:[refs,a.selector || null,transfer]}).catch(() => []);
+  const owners = new Set();
+  if (job.action === 'drag' && (a.startSelector || a.endSelector)) owners.add(documentId);
+  for (let i = 0; i < (transfer ? 1 : refs.length || 1); i++) {
+    const holders = out.filter(f => f.result?.here?.[i]);
+    if (holders.length) owners.add(holders.some(f => f.documentId === documentId) ? documentId : holders[0].documentId);
+  }
+  if (owners.size > 1) return {conflict:true};
+  const [owner] = owners;
+  if (!owner || owner === documentId) return null;
+  const hit = out.find(f => f.documentId === owner);
+  return {documentId:hit.documentId,url:hit.result.url};
+}
+// Snapshot generations: a page keeps one ref table per frame, and only the newest snapshot may write it. The
+// counter is the single judge: a snapshot that started earlier is refused when it reaches the page, however
+// late it gets there (a frame read that outlived its deadline, for instance).
+let snapshotGeneration = 0;
+async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
+  const gen = ++snapshotGeneration;
+  job = {...job,payload:{...job.payload,gen}};
+  // A new snapshot retires every older ref on the page, including those of frames this one will not read
+  // (hidden since, past the frame limit, or refused by policy).
+  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:g => { globalThis.__myBrowserSnapshot = null; globalThis.__cindySnapGen = g; },args:[gen]}).catch(() => {});
+  const top = sanitizeResult(await runPageOperation(job,tabId,documentId,tabUrl,tabUrl,target));
+  if (!top) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.');
+  const frames = await childFrames(tabId,documentId);
+  const max = job.payload.maxChars || 6000;
+  const limit = Math.min(job.payload.limit || SNAPSHOT_LIMIT_DEFAULT,500);
+  let cut = frames.length > FRAME_MAX;
+  // Frames are read side by side under one deadline: serial reads would add their waits up.
+  const reads = await Promise.all(frames.slice(0,FRAME_MAX).map(async frame => {
+    if (!frame.url.startsWith('about:') && !P.check(policy,'snapshot',frame.url).ok) return null;
+    try { if (!frame.url.startsWith('about:')) network.assertSupported?.(frame.url,PAGE_ACCESS); } catch { return null; }
+    const frameJob = {...job,payload:{...job.payload,waitMs:Math.min(job.payload.waitMs ?? 10000,FRAME_WAIT_MS)}};
+    const done = await withDeadline(runPageOperation(frameJob,tabId,frame.documentId,frame.url,tabUrl,target),FRAME_DEADLINE_MS,Error('FRAME_DEADLINE')).catch(() => null);
+    // A frame that does not hold the scoped region is no failure; one that could not be read is.
+    if (!done?.ok && done?.error !== 'CONTENT_NOT_READY') cut = true;
+    return done?.ok ? {frame,done} : null;
+  }));
+  const shown = [],frameLines = [];
+  let budget = Math.floor(max/2);
+  for (const read of reads) {
+    if (!read) continue;
+    const {frame,done} = read;
+    const text = String(done.text || '').trim();
+    const lines = String(done.elements || '').split('\n').filter(Boolean);
+    if (!text && !lines.length) continue;
+    if (done.truncated) cut = true;
+    frameLines.push(...lines);
+    if (text && budget > 0) {
+      // The heading counts against the budget too, so the whole of maxChars holds.
+      const heading = '\n\n[iframe '+frame.url.slice(0,200)+']\n';
+      const room = budget - heading.length;
+      if (room <= 0) { cut = true; continue; }
+      if (text.length > room) cut = true;
+      const block = heading+text.slice(0,room);
+      budget -= block.length;
+      shown.push(block);
+    }
+  }
+  if (!top.ok && !frameLines.length && !shown.length) return top;
+  const topLines = String(top.elements || '').split('\n').filter(Boolean);
+  // One limit for the whole page. Embedded forms are often the point of a page whose own controls are
+  // navigation, so frames go first, but never past half of it unless the page itself needs less.
+  const fromFrames = Math.min(frameLines.length,Math.max(limit-topLines.length,Math.floor(limit/2)));
+  const fromTop = Math.min(topLines.length,limit-fromFrames);
+  if (fromFrames < frameLines.length || fromTop < topLines.length) cut = true;
+  const list = [...frameLines.slice(0,fromFrames),...topLines.slice(0,fromTop)];
+  const frameText = shown.join('');
+  const topText = String(top.text || '');
+  const room = Math.max(0,max-frameText.length);
+  return {...(top.ok ? top : {ok:true,url:tabUrl,untrusted_content:true}),elements:list.join('\n'),text:topText.slice(0,room)+frameText,truncated:!!top.truncated || cut || topText.length > room};
+}
+// A file too large for one job arrives from Cindy in pieces. They wait in the page's isolated world, where
+// the File has to be built anyway; leaving the page drops them, and the document check refuses the rest.
+async function chunkedUpload(tabId,documentId,a,authorize) {
+  // The last await before the page is touched: a closed connection or a finished task refuses every piece.
+  if (a.op !== 'abort') await authorize();
+  const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'ISOLATED',func:a => {
+    const uploads = globalThis.__cindyUploads ||= new Map();
+    // A transfer nobody finishes is dropped after five quiet minutes, so a failed upload frees its memory.
+    const touch = (id,state) => { clearTimeout(state.timer); state.timer = setTimeout(() => uploads.delete(id),300000); };
+    if (a.op === 'abort') { clearTimeout(uploads.get(a.transfer)?.timer); uploads.delete(a.transfer); return {ok:true}; }
+    if (a.op === 'begin') {
+      const snapshot = globalThis.__myBrowserSnapshot;
+      const el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;
+      if (a.ref && (!el || !el.isConnected)) return {error:'STALE_REF'};
+      const only = document.querySelectorAll('input[type=file]');
+      const input = el && el.matches('input[type=file]') ? el : el?.querySelector('input[type=file]') || el?.closest('form')?.querySelector('input[type=file]') || (only.length === 1 ? only[0] : null);
+      if (!input) return {error:'INVALID_ELEMENT'};
+      if (!input.multiple && a.chunkFiles.length > 1) return {error:'SINGLE_FILE_INPUT'};
+      clearTimeout(uploads.get(a.transfer)?.timer);
+      const created = {input,files:a.chunkFiles.map(f => ({...f,parts:[]}))};
+      uploads.set(a.transfer,created); touch(a.transfer,created);
+      return {ok:true};
+    }
+    const state = uploads.get(a.transfer);
+    if (!state) return {error:'UPLOAD_EXPIRED'};
+    if (a.op === 'chunk') {
+      const binary = atob(a.data), bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      state.files[a.file].parts.push(bytes);
+      touch(a.transfer,state);
+      return {ok:true};
+    }
+    clearTimeout(state.timer); uploads.delete(a.transfer);
+    if (!state.input.isConnected) return {error:'INVALID_ELEMENT'};
+    const transfer = new DataTransfer();
+    for (const f of state.files) transfer.items.add(new File(f.parts,f.name,{type:f.mimeType || ''}));
+    state.input.files = transfer.files;
+    state.input.dispatchEvent(new Event('input',{bubbles:true})); state.input.dispatchEvent(new Event('change',{bubbles:true}));
+    return {ok:true,finished:true,url:location.href,files:[...state.input.files].map(f => ({name:f.name,size:f.size}))};
+  },args:[a]});
+  const done = out?.[0]?.documentId === documentId ? out[0].result : null;
+  const messages = {STALE_REF:'This ref is stale. Take a new snapshot; do not reuse old refs.',INVALID_ELEMENT:'Choose the file input or a control that contains it.',SINGLE_FILE_INPUT:'This file input accepts one file.',UPLOAD_EXPIRED:'The page changed during the upload. Check it and start the upload again.'};
+  if (!done?.ok) return done?.error ? fail(done.error,messages[done.error]) : fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating it.');
+  return done.finished ? {ok:true,execution:'executed',kind:'upload',url:done.url,files:done.files} : {ok:true,execution:'not_executed'};
 }
 // Large request bodies are cut so one upload cannot fill the event buffer.
 function boundedEvent(params) {
@@ -218,7 +379,7 @@ function hookDebugger() {
   chrome.debugger.onDetach.addListener(source => { const state = debugged.get(source.tabId); if (state) { clearTimeout(state.timer); debugged.delete(source.tabId); } });
 }
 async function debuggerAttach(tabId) {
-  if (!chrome.debugger) throw Object.assign(new Error('DEBUGGER_UNAVAILABLE'),{detail:'Reload the Cindy extension once after allowing the debugging feature.'});
+  if (!chrome.debugger) throw Object.assign(new Error('DEBUGGER_UNAVAILABLE'),{detail:'This build of the Cindy extension does not include the debugger.'});
   hookDebugger();
   let state = debugged.get(tabId);
   if (!state) {
@@ -325,9 +486,8 @@ async function cdpAction(tab,a) {
   const events = state.events.splice(0), dropped = state.dropped; state.dropped = 0;
   return {ok:true,execution:'executed',tabId,...(a.op === 'command' ? {result: result ?? {}} : {}),events,...(dropped ? {droppedEvents:dropped} : {})};
 }
-async function debuggerAccess(a) {
-  if (a.open) await openDebuggerPage();
-  return {ok:true,execution:a.open ? 'executed' : 'not_executed',granted:await debuggerAllowed(),attachedTabs:debugged.size};
+async function debuggerAccess() {
+  return {ok:true,execution:'not_executed',granted:await debuggerAllowed(),attachedTabs:debugged.size};
 }
 // Element or full-page screenshot, or a tab that is not visible: rendered by the debugger.
 async function debuggerScreenshot(tab,a) {
@@ -729,22 +889,68 @@ async function pageOperation(job) {
         }
         return {ok:true,url:location.href,count:records.length,records,truncated,timing,...(a.after ? {cursorFound} : {})};
       }
+      if (a.gen != null) {
+        if ((globalThis.__cindySnapGen || 0) > a.gen) return fail('SNAPSHOT_SUPERSEDED','A newer snapshot started on this page. Read it again.');
+        globalThis.__cindySnapGen = a.gen;
+      }
       const refs = new Map();
       globalThis.__myBrowserSnapshot = {url:location.href,refs};
-      const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[contenteditable]';
-      const nodes = [...(root.matches(sel) ? [root] : []),...root.querySelectorAll(sel)];
+      const sel = 'a,button,input,textarea,select,summary,[role=button],[role=link],[role=textbox],[role=searchbox],[role=tab],[role=combobox],[role=checkbox],[role=radio],[role=switch],[role=menuitem],[role=option],[contenteditable]';
+      // Open shadow roots hold real controls on component-built sites (2026-11-01: Google Cloud console).
+      const collect = (scope,found = []) => {
+        if (scope.matches?.(sel)) found.push(scope);
+        for (const el of scope.querySelectorAll('*')) {
+          if (el.matches(sel)) found.push(el);
+          if (el.shadowRoot) collect(el.shadowRoot,found);
+        }
+        if (scope.shadowRoot) collect(scope.shadowRoot,found);
+        return found;
+      };
+      // A console's navigation can outnumber the whole budget, so what the page is about is listed first.
+      const FOCUS = 'dialog,[role=dialog],main,[role=main]';
+      const focused = el => {
+        for (let node = el; node;) {
+          if (node.matches?.(FOCUS)) return true;
+          node = node.parentElement || node.getRootNode?.().host;
+        }
+        return false;
+      };
+      const all = collect(root);
+      const nodes = [...all.filter(focused),...all.filter(el => !focused(el))];
+      const elementMax = Math.min(a.limit || 80,500), lengthMax = Math.max(14000,Math.min(a.maxChars || 0,60000));
       const elements = []; let length = 0; let truncated = false;
       for (const el of nodes) {
         if (!visible(el) || sensitive(el)) continue;
         const ref = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2,'0')).join(''); refs.set(ref,el);
         const name = String(el.getAttribute('aria-label') || el.getAttribute('placeholder') || readableText(el,120) || el.getAttribute('title') || '').replace(/\s+/g,' ').slice(0,120);
         const line = '['+ref+'] '+(el.getAttribute('role') || el.tagName.toLowerCase())+' '+name;
-        if (length+line.length > 14000 || elements.length >= 80) { truncated = true; refs.delete(ref); break; }
+        if (length+line.length > lengthMax || elements.length >= elementMax) { truncated = true; refs.delete(ref); break; }
         elements.push(line); length += line.length;
       }
       // The snapshot text has its own cap; a cut there must be reported like any other.
       const max = a.maxChars || 6000;
-      const fullText = readableText(root,max + 1);
+      // Text inside open shadow roots is invisible to the light-DOM read above, so each root is read too.
+      // Everything the user can see inside an open shadow root: its elements and its own text nodes, the
+      // selected root included when it is itself a host, nested roots too.
+      const shadowTexts = [];
+      const shadowText = (shadow,host) => {
+        const parts = [];
+        for (const node of shadow.childNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) { const text = readableText(node,max + 1); if (text) parts.push(text); }
+          else if (node.nodeType === Node.TEXT_NODE && getComputedStyle(host).visibility !== 'hidden') { const text = node.nodeValue.replace(/\s+/g,' ').trim(); if (text) parts.push(text); }
+        }
+        return parts.join('\n');
+      };
+      const readHost = host => {
+        if (!host.shadowRoot || sensitive(host) || notRendered(host)) return;
+        const text = shadowText(host.shadowRoot,host);
+        if (text) shadowTexts.push(text);
+        visitShadow(host.shadowRoot);
+      };
+      const visitShadow = scope => { for (const host of scope.querySelectorAll('*')) readHost(host); };
+      if (root.nodeType === Node.ELEMENT_NODE) readHost(root);
+      visitShadow(root);
+      const fullText = [readableText(root,max + 1),...shadowTexts].filter(Boolean).join('\n');
       return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,max),truncated:truncated || fullText.length > max || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
@@ -775,6 +981,16 @@ async function pageOperation(job) {
         const Ctor = type.startsWith('pointer') ? PointerEvent : type.startsWith('drag') || type === 'drop' ? DragEvent : MouseEvent;
         target.dispatchEvent(new Ctor(type,{bubbles:true,cancelable:true,composed:true,clientX:p.x,clientY:p.y,button,buttons:type.endsWith('up') ? 0 : 1,view:window,...keys,...extra}));
       };
+      // What a pointer at (x, y) reaches, shadow roots included: elementFromPoint stops at the host.
+      const hit = p => {
+        let target = document.elementFromPoint(p.x,p.y);
+        while (target?.shadowRoot) {
+          const inner = target.shadowRoot.elementFromPoint(p.x,p.y);
+          if (!inner || inner === target) break;
+          target = inner;
+        }
+        return target;
+      };
       const point = (ref,selector,x,y) => {
         const node = ref ? (snapshot?.url === location.href ? snapshot.refs.get(ref) : null) : selector ? document.querySelector(selector) : null;
         if ((ref || selector) && (!node || !node.isConnected)) return null;
@@ -784,7 +1000,7 @@ async function pageOperation(job) {
       };
       if (action === 'clickCoords') {
         // A ref or selector clicks the element's centre (double, right and modified clicks on elements).
-        const p = el ? point(a.ref,a.selector) : {x:a.x,y:a.y}, target = document.elementFromPoint(p.x,p.y);
+        const p = el ? point(a.ref,a.selector) : {x:a.x,y:a.y}, target = hit(p);
         if (!target) return fail('ELEMENT_NOT_FOUND','Nothing is at those coordinates in the visible viewport.');
         started = true;
         for (const type of ['pointerdown','mousedown','pointerup','mouseup']) fire(type,p,target);
@@ -795,13 +1011,13 @@ async function pageOperation(job) {
       }
       const from = point(a.startRef,a.startSelector,a.startX,a.startY), to = point(a.endRef,a.endSelector,a.endX,a.endY);
       if (!from || !to) return fail('STALE_REF','A drag endpoint is stale. Take a new snapshot.');
-      const source = document.elementFromPoint(from.x,from.y), dest = document.elementFromPoint(to.x,to.y);
+      const source = hit(from), dest = hit(to);
       if (!source || !dest) return fail('ELEMENT_NOT_FOUND','A drag endpoint is outside the visible viewport.');
       started = true;
       const data = new DataTransfer();
       fire('pointerdown',from,source); fire('mousedown',from,source); fire('dragstart',from,source,{dataTransfer:data});
       for (let i = 1; i <= 8; i++) {
-        const p = {x:from.x+(to.x-from.x)*i/8,y:from.y+(to.y-from.y)*i/8}, over = document.elementFromPoint(p.x,p.y) || dest;
+        const p = {x:from.x+(to.x-from.x)*i/8,y:from.y+(to.y-from.y)*i/8}, over = hit(p) || dest;
         fire('pointermove',p,over); fire('mousemove',p,over); fire('dragover',p,over,{dataTransfer:data});
       }
       fire('drop',to,dest,{dataTransfer:data}); fire('dragend',to,source,{dataTransfer:data}); fire('pointerup',to,dest); fire('mouseup',to,dest);
@@ -895,12 +1111,12 @@ async function tabAction(job,tab,policy) {
     return {ok:true,execution:'executed',tabId:tab.id,width:Math.round(a.width),height:Math.round(a.height)};
   }
   if (job.action === 'pdf') {
-    if (!await debuggerAllowed()) return await debuggerDenied();
+    if (!await debuggerAllowed()) return debuggerDenied();
     const printed = await withDebugger(tab.id,send => send('Page.printToPDF',{printBackground:true}));
     return {ok:true,execution:'executed',tabId:tab.id,mimeType:'application/pdf',data:printed.data,bytes:Math.floor(printed.data.length*3/4)};
   }
   if (job.action === 'cdp') {
-    if (!await debuggerAllowed()) return await debuggerDenied();
+    if (!await debuggerAllowed()) return debuggerDenied();
     return cdpAction(tab,a);
   }
   if (job.action === 'screenshot') {
@@ -912,7 +1128,7 @@ async function tabAction(job,tab,policy) {
     // Chrome captures the visible tab of a window. Tabs in Cindy's own window are brought to the front
     // there; a background tab in one of the user's windows is not, because that would change their view.
     if (!tab.active) {
-      if (userWindowBackground) return fail('TAB_NOT_VISIBLE',"This tab is behind another tab in a window the user is using. Capturing it would switch the user's view. Open the page with open (it goes to Cindy's own window). Once the user has allowed Chrome's debugger for Cindy (it is requested when PDF or a recipe first needs it), background tabs are captured without switching.");
+      if (userWindowBackground) return fail('TAB_NOT_VISIBLE',"This tab is behind another tab in a window the user is using. Capturing it would switch the user's view. Open the page with open (it goes to Cindy's own window).");
       await chrome.tabs.update(tab.id,{active:true}); await sleep(300);
     }
     const win = await chrome.windows.get(tab.windowId);
@@ -940,7 +1156,7 @@ async function tabAction(job,tab,policy) {
     const data = dataUrl.slice(dataUrl.indexOf(',')+1);
     const partial = a.fullPage || a.ref || a.selector;
     return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data,bytes:Math.floor(data.length*3/4),
-      ...(partial ? {note:"Only the visible area was captured. Full-page and element screenshots use Chrome's debugger, which the user has not allowed; scroll and capture again, or use pdf for the whole page (it asks the user to allow the debugger)."} : {})};
+      ...(partial ? {note:"Only the visible area was captured. Full-page and element screenshots need Chrome's debugger, which this extension does not have; scroll and capture again, or use Cindy's dedicated browser if the user agrees."} : {})};
   }
   if (job.action === 'wait') {
     const deadline = Date.now()+Math.min(a.timeoutMs ?? 30000,120000);
@@ -1082,7 +1298,7 @@ async function handle(job,policy,target) {
   try { P.validate(job.action,job.payload); } catch (e) { return fail('INVALID_JOB',String(e.message || 'The browser job was invalid.').slice(0,300)+' No action was executed.'); }
   const gate = P.check(policy,job.action,job.payload.url);
   if (!gate.ok) return gate;
-  if (job.action === 'debuggerAccess') return debuggerAccess(job.payload);
+  if (job.action === 'debuggerAccess') return debuggerAccess();
   // The agent's task stopped: end its mark on this tab now instead of waiting for it to fade.
   if (job.action === 'unmark') { await markAgentTab(job.payload.tabId,'clear'); return {ok:true,execution:'executed',tabId:job.payload.tabId}; }
   if (job.action === 'tabs') {
@@ -1149,11 +1365,10 @@ async function handle(job,policy,target) {
     // Tab-level actions need no page script: answer them before injecting anything.
     const direct = await tabAction(job,actual,policy);
     if (direct) return direct;
-    // Uploads that came with paths go through the debugger when the user has allowed it; without it, the
-    // bytes (sent when they fit) take the plain route, and a larger batch asks the user to allow it.
+    // Paths need the debugger; files that do not fit one job arrive in pieces (see chunkedUpload).
     if (job.action === 'upload' && job.payload.paths?.length) {
       if (await debuggerAllowed()) { injecting = true; return await debuggerUpload(actual,job.payload); }
-      if (!job.payload.files?.length) return await debuggerDenied();
+      if (!job.payload.files?.length) return debuggerDenied();
     }
     // Prepare everything asynchronous first, so the authorization re-check below is the last await
     // before the page is touched: a revocation during preparation must not be bypassed.
@@ -1169,17 +1384,19 @@ async function handle(job,policy,target) {
     if (MAIN_WORLD_ACTIONS.has(job.action)) {
       injecting = true;
       const done = await mainWorldAction(job,tab.id,documentId);
-      // A page that forbids scripts (CSP) cannot stop the debugger: when the user has allowed it, evaluate there.
-      if (done.error === 'EVAL_BLOCKED_BY_PAGE') return await debuggerAllowed() ? debuggerEvaluate(tab.id,job.payload) : {...done,message:done.message+" If the user turns on Cindy's on-demand debugging feature (extension Options), such pages run scripts through it."};
+      // A page that forbids scripts (CSP) cannot stop the debugger, in a build that has it.
+      if (done.error === 'EVAL_BLOCKED_BY_PAGE') return await debuggerAllowed() ? debuggerEvaluate(tab.id,job.payload) : done;
       return done;
     }
     injecting = true;
-    targets.set(job.id,{url:actual.url,target,tabId:tab.id,documentId});
-    let out;
-    try {
-      out = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job]});
-    } finally { targets.delete(job.id); }
-    const raw = out?.[0]?.documentId === documentId ? out[0].result : null;
+    if (job.action === 'snapshot') return await snapshotWithFrames(job,tab.id,documentId,actual.url,policy,target);
+    // A ref or an upload may belong to an iframe: the action goes to that frame's document.
+    const frame = await frameForAction(job,tab.id,documentId);
+    if (frame?.conflict) return fail('CROSS_FRAME_DRAG','The two drag endpoints are in different frames. A drag has to start and end in one frame; use coordinates in that frame, or another way to do it.');
+    if (frame && !P.check(policy,job.action,frame.url.startsWith('about:') ? actual.url : frame.url).ok) return fail('REDIRECT_BLOCKED','This frame is on a blocked site. No action was taken.');
+    const inFrame = done => frame && done?.url ? {...done,url:actual.url,frameUrl:frame.url} : done;
+    if (job.action === 'upload' && job.payload.op) return inFrame(await chunkedUpload(tab.id,frame?.documentId || documentId,job.payload,() => fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:(frame && !frame.url.startsWith('about:') ? frame.url : actual.url).slice(0,PAGE_URL_MAX),dispatch:true})));
+    const raw = inFrame(await runPageOperation(job,tab.id,frame?.documentId || documentId,frame?.url || actual.url,actual.url,target));
     const result = sanitizeResult(raw);
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
     if (result.url && !P.check(policy,job.action,result.url).ok) return fail('REDIRECT_BLOCKED','The page moved to a blocked site. No content is returned; verify the action manually.',failureState());
@@ -1237,11 +1454,12 @@ chrome.runtime.onInstalled.addListener(details => {
 const targets = new Map();
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {
   if (msg?.type === 'my-browser-target') {
-    const entry = targets.get(msg.id);
+    const key = msg.id+'|'+_sender.documentId;
+    const entry = targets.get(key);
     if (!entry || _sender.tab?.id !== entry.tabId || _sender.documentId !== entry.documentId) { sendResponse(null); return; }
     // Recheck after injection has reached the document, not only before executeScript.
-    fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.url.slice(0,PAGE_URL_MAX),dispatch:true})
-      .then(r => sendResponse(r.ok && targets.get(msg.id) === entry ? entry.url : null))
+    fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.authorizeUrl.slice(0,PAGE_URL_MAX),dispatch:true})
+      .then(r => sendResponse(r.ok && targets.get(key) === entry ? entry.url : null))
       .catch(() => sendResponse(null));
     return true;
   }
