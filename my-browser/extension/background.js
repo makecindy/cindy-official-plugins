@@ -228,17 +228,28 @@ async function childFrames(tabId,documentId) {
   }
   return out.filter(f => f.documentId !== documentId && f.result?.shown && !off.has(f.frameId)).map(f => ({documentId:f.documentId,url:f.result.url}));
 }
+// The document an action belongs to: the one whose ref table holds its ref(s), or whose upload transfer or
+// selector match it. A drag has two refs; both must live in the same document, because one synthetic gesture
+// cannot span two documents.
 async function frameForAction(job,tabId,documentId) {
   const a = job.payload;
   const upload = job.action === 'upload';
-  const ref = a.ref || a.startRef;
-  if (!ref && !upload) return null;
-  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:(ref,selector,transfer) => ({url:location.href,here:transfer
-    ? !!globalThis.__cindyUploads?.has(transfer)
-    : ref ? !!globalThis.__myBrowserSnapshot?.refs?.has(ref) : !!(selector && document.querySelector(selector))}),args:[ref || null,a.selector || null,a.op && a.op !== 'begin' ? a.transfer : null]}).catch(() => []);
-  const here = out.filter(f => f.result?.here);
-  if (!here.length || here.some(f => f.documentId === documentId)) return null;
-  return {documentId:here[0].documentId,url:here[0].result.url};
+  const refs = [a.ref,a.startRef,a.endRef].filter(Boolean);
+  if (!refs.length && !upload) return null;
+  const transfer = a.op && a.op !== 'begin' ? a.transfer : null;
+  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:(refs,selector,transfer) => ({url:location.href,here:transfer
+    ? [!!globalThis.__cindyUploads?.has(transfer)]
+    : refs.length ? refs.map(ref => !!globalThis.__myBrowserSnapshot?.refs?.has(ref)) : [!!(selector && document.querySelector(selector))]}),args:[refs,a.selector || null,transfer]}).catch(() => []);
+  const owners = new Set();
+  for (let i = 0; i < (transfer ? 1 : refs.length || 1); i++) {
+    const holders = out.filter(f => f.result?.here?.[i]);
+    if (holders.length) owners.add(holders.some(f => f.documentId === documentId) ? documentId : holders[0].documentId);
+  }
+  if (owners.size > 1) return {conflict:true};
+  const [owner] = owners;
+  if (!owner || owner === documentId) return null;
+  const hit = out.find(f => f.documentId === owner);
+  return {documentId:hit.documentId,url:hit.result.url};
 }
 // Snapshot generations: a page keeps one ref table per frame, and only the newest snapshot may write it. The
 // counter is the single judge: a snapshot that started earlier is refused when it reaches the page, however
@@ -261,6 +272,8 @@ async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
     if (!frame.url.startsWith('about:') && !P.check(policy,'snapshot',frame.url).ok) return null;
     try { if (!frame.url.startsWith('about:')) network.assertSupported?.(frame.url,PAGE_ACCESS); } catch { return null; }
     const done = await withDeadline(runPageOperation(job,tabId,frame.documentId,frame.url,tabUrl,target),FRAME_DEADLINE_MS,Error('FRAME_DEADLINE')).catch(() => null);
+    // A frame that does not hold the scoped region is no failure; one that could not be read is.
+    if (!done?.ok && done?.error !== 'CONTENT_NOT_READY') cut = true;
     return done?.ok ? {frame,done} : null;
   }));
   const shown = [],frameLines = [];
@@ -1373,6 +1386,7 @@ async function handle(job,policy,target) {
     if (job.action === 'snapshot') return await snapshotWithFrames(job,tab.id,documentId,actual.url,policy,target);
     // A ref or an upload may belong to an iframe: the action goes to that frame's document.
     const frame = await frameForAction(job,tab.id,documentId);
+    if (frame?.conflict) return fail('CROSS_FRAME_DRAG','The two drag endpoints are in different frames. A drag has to start and end in one frame; use coordinates in that frame, or another way to do it.');
     if (frame && !P.check(policy,job.action,frame.url.startsWith('about:') ? actual.url : frame.url).ok) return fail('REDIRECT_BLOCKED','This frame is on a blocked site. No action was taken.');
     const inFrame = done => frame && done?.url ? {...done,url:actual.url,frameUrl:frame.url} : done;
     if (job.action === 'upload' && job.payload.op) return inFrame(await chunkedUpload(tab.id,frame?.documentId || documentId,job.payload,() => fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:(frame && !frame.url.startsWith('about:') ? frame.url : actual.url).slice(0,PAGE_URL_MAX),dispatch:true})));

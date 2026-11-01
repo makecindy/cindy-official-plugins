@@ -325,6 +325,17 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('limit 1 returns one element in all',one.elements.split('\n').filter(Boolean).length===1 && one.truncated===true,one.elements);
     const four=await act('snapshot',{...T,limit:4,maxChars:30000});
     check('limit 4 returns at most four and still reaches frames',four.elements.split('\n').filter(Boolean).length===4 && /Go (same|cross|nested)/.test(four.elements),four.elements);
+    // A drag whose two ends sit in different documents says so; both ends in one frame work, whichever end names the frame.
+    const dragSnap=await act('snapshot',{...T,maxChars:30000});
+    const dref=name=>(new RegExp('\\[([a-f0-9]{32})\\] \\S+ '+name)).exec(dragSnap.elements)?.[1];
+    const crossDrag=await act('drag',{...T,startRef:dref('Top button'),endRef:dref('Go same')});
+    check('a drag between the top page and a frame is refused plainly',crossDrag.error==='CROSS_FRAME_DRAG',JSON.stringify(crossDrag));
+    const reverseDrag=await act('drag',{...T,startRef:dref('Go cross'),endRef:dref('Top button')});
+    check('a drag between a frame and the top page is refused too',reverseDrag.error==='CROSS_FRAME_DRAG',JSON.stringify(reverseDrag));
+    const frameDrag=await act('drag',{...T,startRef:dref('Go same'),endRef:dref('Field same')});
+    check('a drag with both ends in one frame runs there',frameDrag.ok,JSON.stringify(frameDrag));
+    const endOnly=await act('drag',{...T,startX:5,startY:5,endRef:dref('Field same')});
+    check('a drag whose only ref is the end finds its frame',endOnly.error!=='STALE_REF',JSON.stringify(endOnly));
     const tiny=await act('snapshot',{...T,maxChars:256});
     check('maxChars holds with frames in the page',(tiny.text||'').length<=256,String((tiny.text||'').length));
     // A new snapshot retires the refs of a frame it no longer reads. The ref comes from a fresh, full
@@ -407,6 +418,7 @@ test('real Chrome: shadow text is read whole, and a late snapshot cannot take re
     await new Promise(r=>setTimeout(r,Math.max(0,9000-(Date.now()-t0))));
     const slept=Date.now()-t0;
     const clicked=await act('click',{...W,ref:goRef});
+    check('a frame that could not be read in time marks the first snapshot incomplete',first.truncated===true,JSON.stringify({truncated:first.truncated}));
     check('the ref of the newest snapshot survives the late frame read ('+slept+' ms in)',clicked.ok,JSON.stringify(clicked));
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
