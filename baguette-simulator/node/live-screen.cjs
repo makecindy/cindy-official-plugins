@@ -379,7 +379,12 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     await enabled(locale);
     s.seen=now();controls().touch();
     let completed=0;
-    try{for(const e of events){await (s.kind==='android'?androidStep(s,e):appleStep(s,e,locale));completed++;}}
+    try{for(let i=0;i<events.length;){
+      // A run of keys is one keyboard operation (up to type_text's 40), not one helper launch per key.
+      let run=0;if(s.kind!=='android')while(run<40&&events[i+run]?.kind==='key')run++;
+      if(run>1){await operation('type_text',{udid:s.udid,keys:events.slice(i,i+run).map(e=>[...e.modifiers,e.code].join('+'))});completed+=run;i+=run;continue;}
+      await (s.kind==='android'?androidStep(s,events[i]):appleStep(s,events[i],locale));completed++;i++;
+    }}
     catch(error){throw Object.assign(failure(error.code||'INPUT_FAILED',error.message,completed?'unknown':error.execution||'unknown'),{completed});}
     return {execution:completed?'executed':'not_executed',completed};
   }

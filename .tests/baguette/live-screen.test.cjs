@@ -251,6 +251,15 @@ test('iOS input sends touches on the stream socket and buttons, text and keys th
   await code(refused.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'home'}]}),'DEVICE_NOT_BOOTED');
 });
 
+test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=>{
+  const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});
+  const keys=Array.from({length:42},()=>({kind:'key',code:'KeyA'}));
+  const result=await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'key',code:'KeyQ',modifiers:['shift']},...keys.slice(0,1),{kind:'press',button:'home'},...keys]});
+  assert.deepEqual(result,{execution:'executed',completed:45});
+  assert.deepEqual(f.calls.map(c=>[c[0],c[1].keys?.length??c[1].button]),[['type_text',2],['press','home'],['type_text',40],['type_text',2]]);
+  assert.deepEqual(f.calls[0][1].keys,['shift+KeyQ','KeyA']);
+});
+
 test('Apple TV and Vision Pro forward H.264 without touches and offer their basic buttons',async t=>{
   const f=fixture(t,{size:'1920x1080'});
   const opened=await f.live.request('liveScreen.open',{id:TV,_locale:'en'});

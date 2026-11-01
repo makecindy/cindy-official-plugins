@@ -57,9 +57,25 @@ int main(int argc,const char **argv){@autoreleasepool{
   puts(ready?"{\"ready\":true,\"scope\":\"keyboard-abi\"}":"{\"ready\":false,\"scope\":\"keyboard-abi\",\"errorCode\":\"KEYBOARD_ABI_UNAVAILABLE\"}");
   return ready?0:4;
  }
- if(argc!=6)return 2; // device set, UDID, developer dir, HID usage (0=release), modifier bitmask
- NSString *setPath=@(argv[1]),*udid=@(argv[2]),*dev=@(argv[3]);int key=atoi(argv[4]),mask=atoi(argv[5]);
- if(key<0||key>103||mask<0||mask>15||![[NSUUID alloc]initWithUUIDString:udid])return 2;
+ // device set, UDID, developer dir, then either HID usage (0=release) and modifier bitmask,
+ // or `keys` and a JSON list of [usage, bitmask] chords typed in order by this one process.
+ if(argc!=6)return 2;
+ NSString *setPath=@(argv[1]),*udid=@(argv[2]),*dev=@(argv[3]);
+ NSArray *chords;
+ if(strcmp(argv[4],"keys")==0){
+  chords=[NSJSONSerialization JSONObjectWithData:[@(argv[5]) dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  if(![chords isKindOfClass:NSArray.class]||chords.count<1||chords.count>300)return 2;
+  for(id pair in chords){
+   if(![pair isKindOfClass:NSArray.class]||[pair count]!=2)return 2;
+   for(id n in pair)if(![n isKindOfClass:NSNumber.class]||[n doubleValue]!=[n intValue])return 2;
+   if([pair[0] intValue]<4||[pair[0] intValue]>103||[pair[1] intValue]<0||[pair[1] intValue]>15)return 2;
+  }
+ }else{
+  int key=atoi(argv[4]),mask=atoi(argv[5]);
+  if(key<0||key>103||mask<0||mask>15)return 2;
+  chords=key?@[@[@(key),@(mask)]]:@[];
+ }
+ if(![[NSUUID alloc]initWithUUIDString:udid])return 2;
  int lock=open([[setPath stringByAppendingPathComponent:[NSString stringWithFormat:@".keyboard-%@.lock",udid]]fileSystemRepresentation],O_CREAT|O_RDWR,0600);
  if(lock<0||flock(lock,LOCK_EX|LOCK_NB)!=0)return 3;
  void *kit=loadKeyboardKit(dev);if(!kit){fprintf(stderr,"Keyboard ABI unavailable for the selected Xcode. Run environment diagnostics.\n");return 4;}
@@ -74,13 +90,16 @@ int main(int argc,const char **argv){@autoreleasepool{
  BOOL ok=YES;
  // Release existing latched keys before any new chord. No key-down during recovery.
  if(!releaseKeys(client,hid))return 5;
- if(key){
+ for(NSArray *pair in chords){
+  if(!ok)break;
+  int key=[pair[0] intValue],mask=[pair[1] intValue];
   for(int i=0;i<4;i++)if(mask&(1<<i))if(!sendEvent(client,hid(0x32,7,224+i,1)))ok=NO;
   if(ok)ok=sendEvent(client,hid(0x32,7,key,1));
   usleep(20000);
   // Always attempt the full release, including on partial failure.
   if(!sendEvent(client,hid(0x32,7,key,2)))ok=NO;
   for(int i=3;i>=0;i--)if(!sendEvent(client,hid(0x32,7,224+i,2)))ok=NO;
+  usleep(10000);
  }
  if(!ok)releaseKeys(client,hid);
  close(lock);return ok?0:5;

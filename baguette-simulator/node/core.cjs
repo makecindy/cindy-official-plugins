@@ -139,13 +139,23 @@ function softKeyboardBack(device){
   timer.unref?.();softTimers.set(device.udid,timer);
 }
 async function nativeKey(device,code,modifiers=[],deadline) {
+ return nativeKeys(device,code?[{code,modifiers}]:[],deadline);
+}
+// Keys in order from one helper process: each launch costs about 0.3 s, so a run of keys shares one.
+async function nativeKeys(device,keys,deadline) {
  await trackpadImpl?.cancel(device.udid);
  await spatialImpl?.cancel(device.udid);
- const [key,mask]=code?require('./keys.cjs').chord(code,modifiers):[0,0];
+ const {chord}=require('./keys.cjs');
+ const chords=keys.map(k=>chord(k.code,k.modifiers||[]));
+ const [key,mask]=chords.length===1?chords[0]:[0,0];
  const dev=process.env?.DEVELOPER_DIR || (await run('/usr/bin/xcode-select',['-p'],commandBudget(5000,deadline))).stdout;
- if(platform(device)==='tvOS')return run(path.join(__dirname,'../native/remote'),[DEVICE_SET,device.udid,dev,'key',String(key),String(mask),'0'],{mutation:true,...commandBudget(15000,deadline)});
+ if(platform(device)==='tvOS'){
+  if(chords.length>1)throw new Failure('INVALID_ARGUMENT','Apple TV takes one key per call');
+  return run(path.join(__dirname,'../native/remote'),[DEVICE_SET,device.udid,dev,'key',String(key),String(mask),'0'],{mutation:true,...commandBudget(15000,deadline)});
+ }
  const options={mutation:true,...commandBudget(15000,deadline)};
- try { return await run(path.join(__dirname,'../native/keyboard'),[DEVICE_SET,device.udid,dev,String(key),String(mask)],options); }
+ const args=chords.length>1?['keys',JSON.stringify(chords)]:[String(key),String(mask)];
+ try { return await run(path.join(__dirname,'../native/keyboard'),[DEVICE_SET,device.udid,dev,...args],options); }
  finally { softKeyboardBack(device); }
 }
 async function clipboardAction(p) {
@@ -157,6 +167,7 @@ async function clipboardAction(p) {
   const device=await target(p);
   if(p.action==='release')return await nativeKey(device,null,[],p._deadline);
   if(p.action==='key')return await nativeKey(device,p.code,p.modifiers,p._deadline);
+  if(p.action==='keys')return await nativeKeys(device,p.keys,p._deadline);
   if(p.action==='paste') {
     if(platform(device)==='tvOS')throw new Failure('UNSUPPORTED_INPUT','tvOS has no simulator pasteboard. Use type_text method=type for up to 300 US-keyboard characters, or keys.');
     const text=string(p.text,'text',8000);
@@ -440,7 +451,8 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
       else if(used==='touch'){await inputAction({action:'paste',text,touch:true});typed=await agent().pasteByTouch(device,p._deadline);}
       else await inputAction({action:'paste',text});
     }
-    for(const key of keys)await inputAction({action:'key',code:key.code,modifiers:key.modifiers});
+    if(keys.length>1&&!tv)await inputAction({action:'keys',keys});
+    else for(const key of keys)await inputAction({action:'key',code:key.code,modifiers:key.modifiers});
     agentImpl?.forgetTree(device.udid);
     const keyEvents=keys.length||p.clear===true||(used&&used!=='touch');
     if(keyEvents)softKeyboardBack(device);
