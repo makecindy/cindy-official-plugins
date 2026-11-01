@@ -27,13 +27,21 @@ function fail(id, code, message) {
 
 /* ───────────── 旧版内置通讯录 ───────────── */
 
-// 插件安装在 <userData>/owners/<ownerId>/cindy-brain/<ghostId>/node/worker.cjs。
-// 只从自身安装位置向上推出「当前账号」的 owner 目录，不枚举其它账号。
-function legacyDbPath() {
-  const ownerRoot = path.resolve(__dirname, '..', '..', '..');
-  if (path.basename(path.dirname(ownerRoot)) !== 'owners') return null;
-  const file = path.join(ownerRoot, 'maker-contacts', 'contacts.db');
-  return fs.existsSync(file) ? file : null;
+// 插件安装在 <userData>/owners/<ownerId>/cindy-brain/…/<ghostId>/node/worker.cjs；中间层级随宿主
+// 安装布局变化（如 cindy-brain/_ns/_root/<ghostId>），不能写死层数。
+// 只从自身安装位置向上找到「当前账号」的 owner 目录（父目录名为 owners），不枚举其它账号。
+function legacyDbPath(startDir = __dirname) {
+  let dir = path.resolve(startDir);
+  for (let depth = 0; depth < 12; depth++) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    if (path.basename(parent) === 'owners') {
+      const file = path.join(dir, 'maker-contacts', 'contacts.db');
+      return fs.existsSync(file) ? file : null;
+    }
+    dir = parent;
+  }
+  return null;
 }
 
 const LEGACY_TABLES = {

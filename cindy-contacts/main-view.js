@@ -43,6 +43,8 @@
       helloNote: '整理会用你已经装好的插件和本机能读到的数据（加密的聊天记录不读），每次都会用到 AI 额度。过程在侧边栏「通讯录 · 整理」任务里，第一次用某个插件时可能要你点一下允许。',
       legacyFailed: (m) => `旧版通讯录没有导入成功：${m}`,
       loading: '正在打开通讯录…', importingLegacy: '正在从旧版通讯录导入…', legacyDone: (n) => `已从旧版通讯录导入 ${n} 份档案`,
+      legacyAvailable: (n) => `旧版智能通讯录里还有 ${n} 份档案，可以导入到这里；和已有档案邮箱、手机号或平台账号相同的人会并到一起。`, importLegacy: '导入旧版通讯录',
+      legacyMerged: '旧版通讯录已导入。名字相同但没有共同联系方式的人可能重复，可用「查找重复」合并。',
       readMac: '读取 Mac 通讯录', reading: '正在读取 Mac 通讯录…第一次会弹出系统授权，请选择允许。',
       importIntro: '只读取，不会修改 Mac 通讯录。邮箱或电话相同的名片会并入已有档案。',
       preview: (r) => `共 ${r.total} 张名片：新建 ${r.created} 位，补全 ${r.updated} 位已有档案，${r.unchanged} 位已经在了。`,
@@ -122,6 +124,8 @@
       helloNote: 'Tidying uses your installed plugins and the data this Mac can read (encrypted chat stores are never read), and uses AI quota. Follow along in the tidy-up task in the sidebar; the first use of a plugin may ask you to allow it.',
       legacyFailed: (m) => `Old contacts were not imported: ${m}`,
       loading: 'Opening contacts…', importingLegacy: 'Importing your old contacts…', legacyDone: (n) => `Imported ${n} entries from old contacts`,
+      legacyAvailable: (n) => `Your old Smart Contacts still has ${n} entries you can import here. People who share an email, phone number or account with an existing entry are merged.`, importLegacy: 'Import old contacts',
+      legacyMerged: 'Old contacts imported. People with the same name but no shared contact details may be duplicated; use Find duplicates to merge them.',
       readMac: 'Read Mac Contacts', reading: 'Reading Mac Contacts… macOS asks for permission the first time.',
       importIntro: 'Read-only: your Mac Contacts are not changed. Cards with the same email or phone join existing entries.',
       preview: (r) => `${r.total} cards: ${r.created} new, ${r.updated} existing entries completed, ${r.unchanged} already here.`,
@@ -398,6 +402,7 @@
       <div class="lsub">${freshCount ? `<b>${esc(T.subNew(freshCount))}</b>` : esc(T.subCount(richCount))}</div>
       <label class="find">${I('search')}<input id="findInput" type="search" value="${esc(S.query)}" placeholder="${esc(T.search)}" autocomplete="off" spellcheck="false">${S.query ? `<button class="clear" id="clearFind" aria-label="clear">${I('x', 's')}</button>` : ''}</label></div>`;
     h += '<div class="lscroll" id="lscroll">';
+    if (!S.query) h += legacyNotice();
     const any = secs.some((s) => s.items.length) || folded.length;
     if (!any) h += `<div class="lempty">${esc(S.query ? T.noMatch : T.emptyScope)}</div>`;
     for (const s of secs) {
@@ -431,6 +436,14 @@
     const last = S.meta?.maintenance?.lastRunAt || '';
     const ref = last && last > req.at ? last : req.at;
     return Date.now() - Date.parse(ref) > 50 * 3600 * 1000;
+  }
+
+  /** 资料库已有档案、旧版智能通讯录还没导入时，提示并给出导入入口（不自动合并）。 */
+  function legacyNotice() {
+    const legacy = S.meta?.legacy;
+    if (!legacy || legacy.status !== 'available') return '';
+    const n = legacy.counts?.contacts || 0;
+    return `<div class="notice"><p>${esc(T.legacyAvailable(n))}</p><button class="pill" data-action="retryLegacy">${esc(T.importLegacy)}</button></div>`;
   }
 
   function statusBlock() {
@@ -649,6 +662,8 @@
     const days = S.meta?.settings?.initialDays || 14;
     let h = '<div class="center"><div class="hello">';
     h += `<h1>${esc(T.helloTitle)}</h1>`;
+    // 窄窗口下引导页会盖住列表；已有档案、旧版通讯录还没导入时，这里也要能开始导入。
+    h += legacyNotice();
     if (tidyRunning()) {
       h += `<p><span class="spin"></span>${esc(T.helloRunning)}</p>`;
     } else {
@@ -916,6 +931,7 @@
     if (S.meta?.platform === 'darwin') h += `<button class="mi" data-action="import">${esc(T.importMac)}</button>`;
     h += `<button class="mi" data-action="dups">${esc(T.findDups)}</button>`;
     if (S.meta?.legacy?.status === 'partial' || S.meta?.legacy?.status === 'error') h += `<button class="mi" data-action="retryLegacy">${esc(T.retryLegacy)}</button>`;
+    else if (S.meta?.legacy?.status === 'available') h += `<button class="mi" data-action="retryLegacy">${esc(T.importLegacy)}</button>`;
     openMenu(anchor, h);
   }
   function moreMenu(anchor) {
@@ -1276,7 +1292,7 @@
       renderStatus();
       try {
         const r = await rpc('importLegacy');
-        if (r.status === 'done') toast(T.legacyDone(r.counts?.contacts?.local || 0));
+        if (r.status === 'done') toast(r.merged ? T.legacyMerged : T.legacyDone(r.counts?.contacts?.local || 0));
       } catch (err) {
         failToast(err);
       }
