@@ -466,12 +466,12 @@ function mergeChanges(base, mine, latest) {
   return merged;
 }
 let saves = 0;
-// Returns whether the change landed. On failure the page goes back to what is stored.
+// Returns whether the change landed. On failure the page drops that change and keeps later edits.
 async function save() {
   // All of it inside the lock, so a queued save starts from what this one wrote and from the latest edits.
   const landed = await withConfigLock(async () => {
+    const mine = JSON.parse(JSON.stringify(cfg));
     try {
-      const mine = JSON.parse(JSON.stringify(cfg));
       const next = mergeChanges(JSON.parse(stored), mine, withRules(await readStore()));
       const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -482,7 +482,8 @@ async function save() {
       storeError = '';
       return true;
     } catch (error) {
-      cfg = JSON.parse(stored);
+      // Undo only what this save sent; edits made since belong to the saves queued behind it.
+      cfg = mergeChanges(mine, cfg, JSON.parse(stored));
       storeError = t('storeSaveFailed', { error: error && error.message });
       return false;
     }
