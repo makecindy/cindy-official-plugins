@@ -240,10 +240,16 @@ async function frameForAction(job,tabId,documentId) {
   if (!here.length || here.some(f => f.documentId === documentId)) return null;
   return {documentId:here[0].documentId,url:here[0].result.url};
 }
+// Snapshot generations: a page keeps one ref table per frame, and only the newest snapshot may write it. The
+// counter is the single judge: a snapshot that started earlier is refused when it reaches the page, however
+// late it gets there (a frame read that outlived its deadline, for instance).
+let snapshotGeneration = 0;
 async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
+  const gen = ++snapshotGeneration;
+  job = {...job,payload:{...job.payload,gen}};
   // A new snapshot retires every older ref on the page, including those of frames this one will not read
   // (hidden since, past the frame limit, or refused by policy).
-  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => { globalThis.__myBrowserSnapshot = null; }}).catch(() => {});
+  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:g => { globalThis.__myBrowserSnapshot = null; globalThis.__cindySnapGen = g; },args:[gen]}).catch(() => {});
   const top = sanitizeResult(await runPageOperation(job,tabId,documentId,tabUrl,tabUrl,target));
   if (!top) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.');
   const frames = await childFrames(tabId,documentId);
@@ -864,6 +870,10 @@ async function pageOperation(job) {
         }
         return {ok:true,url:location.href,count:records.length,records,truncated,timing,...(a.after ? {cursorFound} : {})};
       }
+      if (a.gen != null) {
+        if ((globalThis.__cindySnapGen || 0) > a.gen) return fail('SNAPSHOT_SUPERSEDED','A newer snapshot started on this page. Read it again.');
+        globalThis.__cindySnapGen = a.gen;
+      }
       const refs = new Map();
       globalThis.__myBrowserSnapshot = {url:location.href,refs};
       const sel = 'a,button,input,textarea,select,summary,[role=button],[role=link],[role=textbox],[role=searchbox],[role=tab],[role=combobox],[role=checkbox],[role=radio],[role=switch],[role=menuitem],[role=option],[contenteditable]';
@@ -901,15 +911,25 @@ async function pageOperation(job) {
       // The snapshot text has its own cap; a cut there must be reported like any other.
       const max = a.maxChars || 6000;
       // Text inside open shadow roots is invisible to the light-DOM read above, so each root is read too.
+      // Everything the user can see inside an open shadow root: its elements and its own text nodes, the
+      // selected root included when it is itself a host, nested roots too.
       const shadowTexts = [];
-      const visitShadow = scope => {
-        for (const host of scope.querySelectorAll('*')) {
-          if (!host.shadowRoot || sensitive(host) || notRendered(host)) continue;
-          const text = [...host.shadowRoot.children].map(child => readableText(child,max + 1)).filter(Boolean).join('\n');
-          if (text) shadowTexts.push(text);
-          visitShadow(host.shadowRoot);
+      const shadowText = (shadow,host) => {
+        const parts = [];
+        for (const node of shadow.childNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) { const text = readableText(node,max + 1); if (text) parts.push(text); }
+          else if (node.nodeType === Node.TEXT_NODE && getComputedStyle(host).visibility !== 'hidden') { const text = node.nodeValue.replace(/\s+/g,' ').trim(); if (text) parts.push(text); }
         }
+        return parts.join('\n');
       };
+      const readHost = host => {
+        if (!host.shadowRoot || sensitive(host) || notRendered(host)) return;
+        const text = shadowText(host.shadowRoot,host);
+        if (text) shadowTexts.push(text);
+        visitShadow(host.shadowRoot);
+      };
+      const visitShadow = scope => { for (const host of scope.querySelectorAll('*')) readHost(host); };
+      if (root.nodeType === Node.ELEMENT_NODE) readHost(root);
       visitShadow(root);
       const fullText = [readableText(root,max + 1),...shadowTexts].filter(Boolean).join('\n');
       return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,max),truncated:truncated || fullText.length > max || document.title.length > TITLE_MAX,untrusted_content:true};

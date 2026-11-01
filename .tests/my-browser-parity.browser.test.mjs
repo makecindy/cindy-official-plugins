@@ -61,6 +61,14 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
 <iframe id=cross src="http://other.test/frame-inner?who=cross" width=500 height=300></iframe>
 <iframe id=doc srcdoc="<p>Srcdoc text</p><button onclick='document.title=&quot;srcdoc clicked&quot;'>Srcdoc button</button>" width=300 height=100></iframe>
 <iframe id=hidden src="/frame-inner?who=hidden" style="display:none"></iframe>`);
+    if(req.url==='/shadow-text')return res.end(`<title>Shadow</title><p>Light text</p>
+<div id=h1></div><div id=h2></div>
+<script>
+h1.attachShadow({mode:'open'}).textContent='Saved ok';
+const inner=h2.attachShadow({mode:'open'});inner.innerHTML='<p>Outer shadow para</p><div id=deep></div>';inner.getElementById('deep').attachShadow({mode:'open'}).textContent='Deep shadow text';
+</script>`);
+    if(req.url==='/slow-frame')return res.end(`<title>Slow</title><div id=late>top ready</div><iframe src="/slow-inner" width=400 height=200></iframe>`);
+    if(req.url==='/slow-inner')return res.end(`<title>SlowInner</title><button id=b>Early button</button><script>setTimeout(()=>{document.body.insertAdjacentHTML('beforeend','<div id=late>late</div>');},7000);</script>`);
     if(req.url==='/hidden-frames')return res.end(`<title>Hidden</title><h1>Hidden frames</h1>
 <iframe src="/frame-inner?who=shown" width=300 height=100></iframe>
 <iframe src="/frame-inner?who=vishidden" width=300 height=100 style="visibility:hidden"></iframe>
@@ -364,6 +372,35 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
     check('text inside an open shadow root is in the snapshot',more.text.includes('Shadow note text'),more.text);
     const scoped=await act('snapshot',{...T,selector:'[role=main]'});
     check('a selector narrows to the form',!scoped.elements.includes('Nav 0') && scoped.elements.includes('Shadow field') && scoped.truncated===false,scoped.elements);
+  }finally{await close();}
+  assert.deepEqual(results.filter(r=>!r.ok),[]);
+});
+
+test('real Chrome: shadow text is read whole, and a late snapshot cannot take refs back',enabled,async()=>{
+  const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
+  const {act,context,close}=await launch(false);
+  try{
+    const sh=await act('open',{url:'http://parity.test/shadow-text'});
+    const S={tabId:sh.tabId,url:'http://parity.test/shadow-text'};
+    const count=(text,needle)=>text.split(needle).length-1;
+    const whole=await act('snapshot',{...S,maxChars:30000});
+    for(const t of ['Light text','Saved ok','Outer shadow para','Deep shadow text'])check('"'+t+'" is in the snapshot once',count(whole.text,t)===1,whole.text);
+    const host=await act('snapshot',{...S,selector:'#h1',maxChars:30000});
+    check('a selected host reads its own shadow text, text node included',host.ok && count(host.text,'Saved ok')===1,JSON.stringify(host).slice(0,300));
+    const nested=await act('snapshot',{...S,selector:'#h2',maxChars:30000});
+    check('a selected host reads nested shadow roots',count(nested.text,'Outer shadow para')===1 && count(nested.text,'Deep shadow text')===1,nested.text);
+    // A frame read that outlives its deadline must not overwrite the refs of the snapshot taken after it.
+    const slow=await act('open',{url:'http://parity.test/slow-frame'});
+    const W={tabId:slow.tabId,url:'http://parity.test/slow-frame'};
+    const t0=Date.now();
+    const first=await act('snapshot',{...W,selector:'#late',waitMs:12000,maxChars:30000});
+    const second=await act('snapshot',{...W,maxChars:30000});
+    const goRef=(new RegExp('\\[([a-f0-9]{32})\\] \\S+ Early button')).exec(second.elements)?.[1];
+    check('the second snapshot lists the frame button',first.ok && !!goRef,second.elements);
+    await new Promise(r=>setTimeout(r,Math.max(0,9000-(Date.now()-t0))));
+    const slept=Date.now()-t0;
+    const clicked=await act('click',{...W,ref:goRef});
+    check('the ref of the newest snapshot survives the late frame read ('+slept+' ms in)',clicked.ok,JSON.stringify(clicked));
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
 });
