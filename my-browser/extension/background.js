@@ -199,30 +199,32 @@ async function runPageOperation(job,tabId,documentId,url,tabUrl,target) {
   } finally { targets.delete(key); }
 }
 // Every frame that shows something, except the top document. A frame Chrome will not enter is left out.
-// A frame is judged by the iframe element that holds it: visibility:hidden or a zero-size box in any
-// ancestor hides it and everything inside it, so the verdict reaches nested frames too.
+// Visibility belongs to the iframe element that holds the frame, so it is matched by identity, not by
+// address: the parent finds which of its frames each hidden element holds (`el.contentWindow` against its
+// own `window.frames`), and each frame finds its own place in its parent the same way. Both comparisons
+// are allowed across sites. A hidden frame hides everything inside it, nested frames included.
 async function childFrames(tabId,documentId) {
   const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => {
-    const hidden = [],visible = [];
+    let index = -1;
+    try { for (let i = 0; i < parent.frames.length; i++) if (parent.frames[i] === window) { index = i; break; } } catch {}
+    const hidden = [];
     for (const el of document.querySelectorAll('iframe,frame')) {
-      const attr = el.getAttribute('src');
-      if (!attr) continue;
-      let url;try { url = new URL(attr,document.baseURI); url.hash = ''; url = url.href; } catch { continue; }
       let off = el.getClientRects().length === 0 || getComputedStyle(el).visibility !== 'visible';
       for (let node = el; node && !off; node = node.parentElement) if (getComputedStyle(node).opacity === '0') off = true;
       const r = el.getBoundingClientRect();
-      (off || !(r.width > 0 && r.height > 0) ? hidden : visible).push(url);
+      if (!off && !(r.width > 0 && r.height > 0)) off = true;
+      if (!off) continue;
+      for (let i = 0; i < frames.length; i++) if (frames[i] === el.contentWindow) { hidden.push(i); break; }
     }
-    let own = location.href;try { const u = new URL(own); u.hash = ''; own = u.href; } catch {}
-    return {url:location.href,own,shown:innerWidth > 0 && innerHeight > 0,hidden,visible};
+    return {url:location.href,index,shown:innerWidth > 0 && innerHeight > 0,hidden};
   }}).catch(() => []);
-  const hiddenUrls = new Set(out.flatMap(f => f.result?.hidden || [])),visibleUrls = new Set(out.flatMap(f => f.result?.visible || []));
+  const byFrame = new Map(out.map(f => [f.frameId,f.result]));
   const parents = new Map();
   try { for (const f of await chrome.webNavigation.getAllFrames({tabId}) || []) parents.set(f.frameId,f.parentFrameId); } catch {}
-  const off = new Set(out.filter(f => f.documentId !== documentId && hiddenUrls.has(f.result?.own) && !visibleUrls.has(f.result?.own)).map(f => f.frameId));
+  const off = new Set(out.filter(f => f.documentId !== documentId && f.result?.index >= 0 && byFrame.get(parents.get(f.frameId))?.hidden?.includes(f.result.index)).map(f => f.frameId));
   for (let grew = true; grew;) {
     grew = false;
-    for (const [frameId,parent] of parents) if (!off.has(frameId) && off.has(parent)) { off.add(frameId); grew = true; }
+    for (const [frameId,parentId] of parents) if (!off.has(frameId) && off.has(parentId)) { off.add(frameId); grew = true; }
   }
   return out.filter(f => f.documentId !== documentId && f.result?.shown && !off.has(f.frameId)).map(f => ({documentId:f.documentId,url:f.result.url}));
 }

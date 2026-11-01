@@ -65,7 +65,13 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
 <iframe src="/frame-inner?who=shown" width=300 height=100></iframe>
 <iframe src="/frame-inner?who=vishidden" width=300 height=100 style="visibility:hidden"></iframe>
 <div style="opacity:0"><iframe src="/frame-inner?who=faded" width=300 height=100></iframe></div>
-<iframe src="/frame-outer" width=300 height=100 style="visibility:hidden"></iframe>`);
+<iframe src="/frame-outer" width=300 height=100 style="visibility:hidden"></iframe>
+<iframe src="/frame-inner?who=twin" width=300 height=100 style="visibility:hidden"></iframe>
+<iframe src="/frame-inner?who=twin" width=300 height=100></iframe>
+<iframe srcdoc="<p>Srcdoc hidden text</p>" width=300 height=100 style="visibility:hidden"></iframe>
+<iframe id=moves src="/frame-inner?who=start" width=300 height=100></iframe>
+<iframe src="/frame-inner?who=moved" width=300 height=100 style="visibility:hidden"></iframe>
+<script>setTimeout(()=>{document.getElementById('moves').src='/frame-inner?who=moved';},300);</script>`);
     if(req.url==='/frame-outer')return res.end('<title>Outer</title><p>Outer text</p><iframe src="/frame-inner?who=insidehidden" width=200 height=80></iframe>');
     if(req.url.startsWith('/frame-inner')){const who=new URL(req.url,'http://x').searchParams.get('who');return res.end(`<title>Inner</title><p>Inner text ${who}</p>
 <label>Field ${who}<input id=field aria-label="Field ${who}"></label>
@@ -300,6 +306,10 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     let hs;for(let i=0;i<30;i++){hs=await act('snapshot',{tabId:hid.tabId,url:'http://parity.test/hidden-frames',maxChars:30000});if(/Inner text shown/.test(hs.text||''))break;await new Promise(r=>setTimeout(r,200));}
     check('a shown frame is read',hs.text.includes('Inner text shown'),hs.text);
     for(const who of ['vishidden','faded','insidehidden'])check('a frame hidden by CSS ('+who+') stays out, nested ones too',!hs.text.includes('Inner text '+who) && !hs.elements.includes('Go '+who),hs.text);
+    const count=(text,needle)=>text.split(needle).length-1;
+    check('two frames at one address: only the visible one is read',count(hs.text,'Inner text twin')===1 && count(hs.elements,'Go twin')===1,hs.text);
+    check('a hidden srcdoc frame stays out',!hs.text.includes('Srcdoc hidden text'),hs.text);
+    check('a visible frame that moved to a hidden frame address is still read',count(hs.text,'Inner text moved')===1 && count(hs.elements,'Go moved')===1,hs.text);
     check('text of a hidden frame holding a frame stays out',!hs.text.includes('Outer text'),hs.text);
     await act('close',{tabId:hid.tabId,url:'http://parity.test/hidden-frames'});
     // One limit for the whole page, whatever the frames hold.
