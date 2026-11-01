@@ -773,8 +773,9 @@ channel.addEventListener('message', async ({ data }) => {
   const savedIds = new Set((JSON.parse(stored).rules || []).map((r) => r.id));
   const unsaved = cfg.rules.filter((r) => !savedIds.has(r.id));
   cfg = withRules(raw);
-  cfg.rules.push(...unsaved.filter((r) => !cfg.rules.some((x) => x.id === r.id)));
+  // The baseline is only what is stored: a local row in it would look unchanged and never be saved.
   stored = JSON.stringify(cfg);
+  cfg.rules.push(...unsaved.filter((r) => !cfg.rules.some((x) => x.id === r.id)));
   if (loaded && document.activeElement?.tagName !== 'INPUT') render();
 });
 
