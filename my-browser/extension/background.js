@@ -1500,10 +1500,12 @@ async function learningRequest(message,sender) {
   if(!owner)throw Error('INVALID_SOURCE');
   if(learningCalls.has(id))throw Error('BUSY');
   const call={target:null,owner,cancelled:false};learningCalls.set(id,call);
-  let target,page,boundDocument=sender.documentId;
+  let target,page,boundDocument=sender.documentId,embeddedFrame=false;
   async function checkCurrent(){
     if(learningCalls.get(id)!==call||call.cancelled)throw Error('REQUEST_CANCELLED');
     if(page && ((await chrome.tabs.get(page.id)).url!==page.url || await network.document(page.id)!==boundDocument))throw Error('PAGE_CHANGED');
+    // An embedded player can be removed or navigated while the top document stays put.
+    if(embeddedFrame){const frame=await chrome.webNavigation.getFrame({tabId:page.id,frameId:sender.frameId}).catch(()=>null);if(!frame||frame.documentId!==sender.documentId||frame.errorOccurred)throw Error('PAGE_CHANGED');}
   }
   try {
     await restore;await checkCurrent();
@@ -1522,7 +1524,7 @@ async function learningRequest(message,sender) {
       const documentId=await network.document(page.id);
       if(embedded){
         // The tab's top document is still verified; the frame answers for its own address.
-        boundDocument=documentId;
+        boundDocument=documentId;embeddedFrame=true;
         if(request.source.url&&new URL(request.source.url).origin!==new URL(sender.url).origin)throw Error('PAGE_CHANGED');
         request.source={...request.source,url:request.source.url||sender.url,title:(page.title||'').slice(0,500)};
       }else{

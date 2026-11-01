@@ -515,6 +515,8 @@
   }
   // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
   function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
+  // Choosing another caption source takes the old source's timeline down at once: no stale subtitles, no translation of them.
+  function dropTimeline(session){session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
@@ -536,7 +538,7 @@
         const tracks=[...video.textTracks].filter(x=>(x.kind==='subtitles'||x.kind==='captions')&&x.label!=='clone');
         // A site can list dozens of languages in any order: never just take the first.
         const track=tracks.includes(session.nativeTrack)?session.nativeTrack:tracks[L.pickCaptionTrack(tracks,{page:document.documentElement.lang,target:prefs.videoTarget})];
-        if(tracks.length>1&&session.trackOptions?.length!==tracks.length){session.trackOptions=tracks.map((x,index)=>({id:String(index),label:x.label||x.language||String(index)}));session.trackId=String(tracks.indexOf(track));session.chooseTrack=id=>{session.nativeTrack=tracks[Number(id)];session.trackId=id;session.transcript=undefined;session.originalCues=undefined;};videoSettings();}
+        if(tracks.length>1&&session.trackOptions?.length!==tracks.length){session.trackOptions=tracks.map((x,index)=>({id:String(index),label:x.label||x.language||String(index)}));session.trackId=String(tracks.indexOf(track));session.chooseTrack=id=>{session.nativeTrack=tracks[Number(id)];session.trackId=id;dropTimeline(session);};videoSettings();}
         // X draws its own captions through a "clone"; other sites through whichever track they show.
         for(const x of video.textTracks)if(x!==track&&x.mode==='showing'&&(x.kind==='subtitles'||x.kind==='captions'))session.overlay?.track(x);
         if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){
@@ -560,7 +562,7 @@
         if(session!==videoSession)return;
         if(!result?.ok)throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         if(result.videoId)session.videoId=result.videoId;
-        if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.fullTranscript=false;session.nextRead=0;session.transcript=undefined;session.originalCues=undefined;};videoSettings();}
+        if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.fullTranscript=false;session.nextRead=0;dropTimeline(session);};videoSettings();}
         if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}
       }
       // A page without any caption track also deserves a clear answer instead of an endless wait.
