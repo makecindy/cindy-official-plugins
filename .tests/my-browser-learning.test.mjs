@@ -518,3 +518,19 @@ test('site captions read: each site, its own hosts only',async()=>{
   assert.equal((await run('bilibili',{},{[api]:{data:{need_login_subtitle:true,subtitle:{subtitles:[]}}}},{url,state})).error,'SUBTITLE_LOGIN_REQUIRED');
   assert.deepEqual((await run('bilibili',{},{},{url:'https://www.bilibili.com/'})).tracks,[]);
 });
+
+test('bilibili embedded player: cid from the address when the page has no state',async()=>{
+  await import('../my-browser/extension/site-captions.js').catch(()=>{});
+  const saved={fetch:globalThis.fetch,location:globalThis.location,state:globalThis.__INITIAL_STATE__};
+  const asked=[];
+  globalThis.fetch=async url=>{asked.push(url);return {ok:true,text:async()=>JSON.stringify({data:{subtitle:{subtitles:[]}}})};};
+  Object.defineProperty(globalThis,'location',{value:new URL('https://player.bilibili.com/player.html?bvid=BV1xx&cid=4455'),configurable:true,writable:true});
+  globalThis.__INITIAL_STATE__=undefined;
+  try{
+    await globalThis.CindySiteCaptions.read('bilibili',{});
+    assert.equal(asked[0],'https://api.bilibili.com/x/player/v2?bvid=BV1xx&cid=4455');
+    asked.length=0;Object.defineProperty(globalThis,'location',{value:new URL('https://player.bilibili.com/player.html?bvid=BV1xx&cid=../x'),configurable:true,writable:true});
+    await globalThis.CindySiteCaptions.read('bilibili',{});
+    assert.equal(asked.length,0,'a malformed cid is never used');
+  }finally{globalThis.fetch=saved.fetch;Object.defineProperty(globalThis,'location',{value:saved.location,configurable:true,writable:true});globalThis.__INITIAL_STATE__=saved.state;}
+});

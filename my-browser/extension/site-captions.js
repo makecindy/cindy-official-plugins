@@ -46,7 +46,9 @@
       }
       if(site==='bilibili'){
         const state=globalThis.__INITIAL_STATE__,bvid=state?.bvid||location.pathname.match(/\/(BV\w{1,20})/)?.[1]||new URLSearchParams(location.search).get('bvid'),page=Number(new URLSearchParams(location.search).get('p'))||1;
-        const cid=state?.videoData?.pages?.[page-1]?.cid||state?.cid||state?.videoData?.cid;
+        // An embedded player page has no page state, but its address carries the video's cid.
+        const queryCid=new URLSearchParams(location.search).get('cid');
+        const cid=state?.videoData?.pages?.[page-1]?.cid||state?.cid||state?.videoData?.cid||(/^\d{1,20}$/.test(queryCid||'')?queryCid:undefined);
         if(!bvid||!cid)return {ok:true,tracks:[],cues:[]};
         const reply=JSON.parse(await fetchText(`https://api.bilibili.com/x/player/v2?bvid=${encodeURIComponent(bvid)}&cid=${encodeURIComponent(cid)}`,/(^|\.)bilibili\.com$/,{credentials:'include'}));
         const subtitle=reply?.data?.subtitle,tracks=(subtitle?.subtitles||[]).map(t=>{const language=short(String(t.lan||'').replace(/^ai-/,''));return {id:String(t.lan||''),language,label:String(t.lan_doc||t.lan||'').slice(0,80),url:t.subtitle_url};});

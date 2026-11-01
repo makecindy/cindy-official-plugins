@@ -1447,7 +1447,14 @@ chrome.runtime.onInstalled.addListener(details => {
   const files = chrome.runtime.getManifest().content_scripts?.[0]?.js || [];
   if (!files.length) return;
   chrome.tabs.query({url: ['http://*/*', 'https://*/*']}).then(tabs => {
-    for (const tab of tabs) if (tab.id !== undefined) chrome.scripting.executeScript({target: {tabId: tab.id}, files}).catch(() => {});
+    for (const tab of tabs) if (tab.id !== undefined) {
+      chrome.scripting.executeScript({target: {tabId: tab.id}, files}).catch(() => {});
+      // The manifest's player-frame rule only reaches frames loaded after the update: reach the open ones too.
+      Promise.resolve(chrome.webNavigation?.getAllFrames({tabId: tab.id})).then(frames => {
+        const ids = (frames || []).filter(f => f.frameId > 0 && !f.errorOccurred && globalThis.CindySiteCaptions?.embedded(f.url)).map(f => f.frameId);
+        if (ids.length) chrome.scripting.executeScript({target: {tabId: tab.id, frameIds: ids}, files}).catch(() => {});
+      }).catch(() => {});
+    }
   }).catch(() => {});
 });
 // In-flight page targets, keyed by job id. Only the worker can read them, and only while injecting.
