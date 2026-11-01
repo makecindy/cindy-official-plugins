@@ -187,19 +187,44 @@ function debuggerDenied() {
 // Refs are unique across a page, so nothing about frames reaches Cindy or the agent: a snapshot lists
 // what every frame shows, and an action finds the frame that holds its ref. Evaluate, extract and
 // selector-addressed actions stay on the top document.
-const FRAME_MAX = 15, FRAME_DEADLINE_MS = 5000, FRAME_ELEMENTS_MAX = 60;
+const FRAME_MAX = 15, FRAME_DEADLINE_MS = 5000, SNAPSHOT_LIMIT_DEFAULT = 80;
 async function runPageOperation(job,tabId,documentId,url,tabUrl,target) {
   // The re-check on arrival compares this document's own address; an about: frame has no site of its own.
-  targets.set(job.id,{url,authorizeUrl:url.startsWith('about:') ? tabUrl : url,target,tabId,documentId});
+  // One entry per document: frames of one snapshot are read side by side under the same job id.
+  const key = job.id+'|'+documentId;
+  targets.set(key,{url,authorizeUrl:url.startsWith('about:') ? tabUrl : url,target,tabId,documentId});
   try {
     const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'ISOLATED',func:pageOperation,args:[job]});
     return out?.[0]?.documentId === documentId ? out[0].result : null;
-  } finally { targets.delete(job.id); }
+  } finally { targets.delete(key); }
 }
 // Every frame that shows something, except the top document. A frame Chrome will not enter is left out.
+// A frame is judged by the iframe element that holds it: visibility:hidden or a zero-size box in any
+// ancestor hides it and everything inside it, so the verdict reaches nested frames too.
 async function childFrames(tabId,documentId) {
-  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => ({url:location.href,shown:innerWidth > 0 && innerHeight > 0})}).catch(() => []);
-  return out.filter(f => f.documentId !== documentId && f.result?.shown).map(f => ({documentId:f.documentId,url:f.result.url}));
+  const out = await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => {
+    const hidden = [],visible = [];
+    for (const el of document.querySelectorAll('iframe,frame')) {
+      const attr = el.getAttribute('src');
+      if (!attr) continue;
+      let url;try { url = new URL(attr,document.baseURI); url.hash = ''; url = url.href; } catch { continue; }
+      let off = el.getClientRects().length === 0 || getComputedStyle(el).visibility !== 'visible';
+      for (let node = el; node && !off; node = node.parentElement) if (getComputedStyle(node).opacity === '0') off = true;
+      const r = el.getBoundingClientRect();
+      (off || !(r.width > 0 && r.height > 0) ? hidden : visible).push(url);
+    }
+    let own = location.href;try { const u = new URL(own); u.hash = ''; own = u.href; } catch {}
+    return {url:location.href,own,shown:innerWidth > 0 && innerHeight > 0,hidden,visible};
+  }}).catch(() => []);
+  const hiddenUrls = new Set(out.flatMap(f => f.result?.hidden || [])),visibleUrls = new Set(out.flatMap(f => f.result?.visible || []));
+  const parents = new Map();
+  try { for (const f of await chrome.webNavigation.getAllFrames({tabId}) || []) parents.set(f.frameId,f.parentFrameId); } catch {}
+  const off = new Set(out.filter(f => f.documentId !== documentId && hiddenUrls.has(f.result?.own) && !visibleUrls.has(f.result?.own)).map(f => f.frameId));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [frameId,parent] of parents) if (!off.has(frameId) && off.has(parent)) { off.add(frameId); grew = true; }
+  }
+  return out.filter(f => f.documentId !== documentId && f.result?.shown && !off.has(f.frameId)).map(f => ({documentId:f.documentId,url:f.result.url}));
 }
 async function frameForAction(job,tabId,documentId) {
   const a = job.payload;
@@ -217,19 +242,26 @@ async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
   const top = sanitizeResult(await runPageOperation(job,tabId,documentId,tabUrl,tabUrl,target));
   if (!top) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.');
   const frames = await childFrames(tabId,documentId);
-  const shown = [];
   const max = job.payload.maxChars || 6000;
-  let budget = Math.floor(max/2), elements = [], cut = frames.length > FRAME_MAX;
-  for (const frame of frames.slice(0,FRAME_MAX)) {
-    if (!frame.url.startsWith('about:') && !P.check(policy,'snapshot',frame.url).ok) continue;
-    try { if (!frame.url.startsWith('about:')) network.assertSupported?.(frame.url,PAGE_ACCESS); } catch { continue; }
+  const limit = Math.min(job.payload.limit || SNAPSHOT_LIMIT_DEFAULT,500);
+  let cut = frames.length > FRAME_MAX;
+  // Frames are read side by side under one deadline: serial reads would add their waits up.
+  const reads = await Promise.all(frames.slice(0,FRAME_MAX).map(async frame => {
+    if (!frame.url.startsWith('about:') && !P.check(policy,'snapshot',frame.url).ok) return null;
+    try { if (!frame.url.startsWith('about:')) network.assertSupported?.(frame.url,PAGE_ACCESS); } catch { return null; }
     const done = await withDeadline(runPageOperation(job,tabId,frame.documentId,frame.url,tabUrl,target),FRAME_DEADLINE_MS,Error('FRAME_DEADLINE')).catch(() => null);
-    if (!done?.ok) continue;
+    return done?.ok ? {frame,done} : null;
+  }));
+  const shown = [],frameLines = [];
+  let budget = Math.floor(max/2);
+  for (const read of reads) {
+    if (!read) continue;
+    const {frame,done} = read;
     const text = String(done.text || '').trim();
     const lines = String(done.elements || '').split('\n').filter(Boolean);
     if (!text && !lines.length) continue;
     if (done.truncated) cut = true;
-    elements.push(...lines);
+    frameLines.push(...lines);
     if (text && budget > 0) {
       const block = '\n\n[iframe '+frame.url.slice(0,200)+']\n'+text.slice(0,budget);
       if (text.length > budget) cut = true;
@@ -237,22 +269,29 @@ async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
       shown.push(block);
     }
   }
-  if (elements.length > FRAME_ELEMENTS_MAX) { elements = elements.slice(0,FRAME_ELEMENTS_MAX); cut = true; }
-  if (!top.ok && !elements.length && !shown.length) return top;
+  if (!top.ok && !frameLines.length && !shown.length) return top;
+  const topLines = String(top.elements || '').split('\n').filter(Boolean);
+  // One limit for the whole page. Embedded forms are often the point of a page whose own controls are
+  // navigation, so frames go first, but never past half of it unless the page itself needs less.
+  const fromFrames = Math.min(frameLines.length,Math.max(limit-topLines.length,Math.floor(limit/2)));
+  const fromTop = Math.min(topLines.length,limit-fromFrames);
+  if (fromFrames < frameLines.length || fromTop < topLines.length) cut = true;
+  const list = [...frameLines.slice(0,fromFrames),...topLines.slice(0,fromTop)];
   const frameText = shown.join('');
   const topText = String(top.text || '');
   const room = Math.max(0,max-frameText.length);
-  // Embedded forms are often the point of a page whose own controls are navigation, so they go first:
-  // Cindy cuts this list from the end when it runs out of room.
-  const list = [...elements,...String(top.elements || '').split('\n').filter(Boolean)];
   return {...(top.ok ? top : {ok:true,url:tabUrl,untrusted_content:true}),elements:list.join('\n'),text:topText.slice(0,room)+frameText,truncated:!!top.truncated || cut || topText.length > room};
 }
 // A file too large for one job arrives from Cindy in pieces. They wait in the page's isolated world, where
 // the File has to be built anyway; leaving the page drops them, and the document check refuses the rest.
-async function chunkedUpload(tabId,documentId,a) {
+async function chunkedUpload(tabId,documentId,a,authorize) {
+  // The last await before the page is touched: a closed connection or a finished task refuses every piece.
+  if (a.op !== 'abort') await authorize();
   const out = await chrome.scripting.executeScript({target:{tabId,documentIds:[documentId]},world:'ISOLATED',func:a => {
     const uploads = globalThis.__cindyUploads ||= new Map();
-    if (a.op === 'abort') { uploads.delete(a.transfer); return {ok:true}; }
+    // A transfer nobody finishes is dropped after five quiet minutes, so a failed upload frees its memory.
+    const touch = (id,state) => { clearTimeout(state.timer); state.timer = setTimeout(() => uploads.delete(id),300000); };
+    if (a.op === 'abort') { clearTimeout(uploads.get(a.transfer)?.timer); uploads.delete(a.transfer); return {ok:true}; }
     if (a.op === 'begin') {
       const snapshot = globalThis.__myBrowserSnapshot;
       const el = a.ref ? (snapshot?.url === location.href ? snapshot.refs.get(a.ref) : null) : a.selector ? document.querySelector(a.selector) : null;
@@ -261,7 +300,9 @@ async function chunkedUpload(tabId,documentId,a) {
       const input = el && el.matches('input[type=file]') ? el : el?.querySelector('input[type=file]') || el?.closest('form')?.querySelector('input[type=file]') || (only.length === 1 ? only[0] : null);
       if (!input) return {error:'INVALID_ELEMENT'};
       if (!input.multiple && a.chunkFiles.length > 1) return {error:'SINGLE_FILE_INPUT'};
-      uploads.set(a.transfer,{input,files:a.chunkFiles.map(f => ({...f,parts:[]}))});
+      clearTimeout(uploads.get(a.transfer)?.timer);
+      const created = {input,files:a.chunkFiles.map(f => ({...f,parts:[]}))};
+      uploads.set(a.transfer,created); touch(a.transfer,created);
       return {ok:true};
     }
     const state = uploads.get(a.transfer);
@@ -270,9 +311,10 @@ async function chunkedUpload(tabId,documentId,a) {
       const binary = atob(a.data), bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       state.files[a.file].parts.push(bytes);
+      touch(a.transfer,state);
       return {ok:true};
     }
-    uploads.delete(a.transfer);
+    clearTimeout(state.timer); uploads.delete(a.transfer);
     if (!state.input.isConnected) return {error:'INVALID_ELEMENT'};
     const transfer = new DataTransfer();
     for (const f of state.files) transfer.items.add(new File(f.parts,f.name,{type:f.mimeType || ''}));
@@ -1283,7 +1325,7 @@ async function handle(job,policy,target) {
     const frame = await frameForAction(job,tab.id,documentId);
     if (frame && !P.check(policy,job.action,frame.url.startsWith('about:') ? actual.url : frame.url).ok) return fail('REDIRECT_BLOCKED','This frame is on a blocked site. No action was taken.');
     const inFrame = done => frame && done?.url ? {...done,url:actual.url,frameUrl:frame.url} : done;
-    if (job.action === 'upload' && job.payload.op) return inFrame(await chunkedUpload(tab.id,frame?.documentId || documentId,job.payload));
+    if (job.action === 'upload' && job.payload.op) return inFrame(await chunkedUpload(tab.id,frame?.documentId || documentId,job.payload,() => fetchJSON(target.base,'/authorize',target.session,{id:job.id,url:(frame && !frame.url.startsWith('about:') ? frame.url : actual.url).slice(0,PAGE_URL_MAX),dispatch:true})));
     const raw = inFrame(await runPageOperation(job,tab.id,frame?.documentId || documentId,frame?.url || actual.url,actual.url,target));
     const result = sanitizeResult(raw);
     if (!result) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.',failureState());
@@ -1342,11 +1384,12 @@ chrome.runtime.onInstalled.addListener(details => {
 const targets = new Map();
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse) => {
   if (msg?.type === 'my-browser-target') {
-    const entry = targets.get(msg.id);
+    const key = msg.id+'|'+_sender.documentId;
+    const entry = targets.get(key);
     if (!entry || _sender.tab?.id !== entry.tabId || _sender.documentId !== entry.documentId) { sendResponse(null); return; }
     // Recheck after injection has reached the document, not only before executeScript.
     fetchJSON(entry.target.base,'/authorize',entry.target.session,{id:msg.id,url:entry.authorizeUrl.slice(0,PAGE_URL_MAX),dispatch:true})
-      .then(r => sendResponse(r.ok && targets.get(msg.id) === entry ? entry.url : null))
+      .then(r => sendResponse(r.ok && targets.get(key) === entry ? entry.url : null))
       .catch(() => sendResponse(null));
     return true;
   }

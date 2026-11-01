@@ -61,6 +61,12 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
 <iframe id=cross src="http://other.test/frame-inner?who=cross" width=500 height=300></iframe>
 <iframe id=doc srcdoc="<p>Srcdoc text</p><button onclick='document.title=&quot;srcdoc clicked&quot;'>Srcdoc button</button>" width=300 height=100></iframe>
 <iframe id=hidden src="/frame-inner?who=hidden" style="display:none"></iframe>`);
+    if(req.url==='/hidden-frames')return res.end(`<title>Hidden</title><h1>Hidden frames</h1>
+<iframe src="/frame-inner?who=shown" width=300 height=100></iframe>
+<iframe src="/frame-inner?who=vishidden" width=300 height=100 style="visibility:hidden"></iframe>
+<div style="opacity:0"><iframe src="/frame-inner?who=faded" width=300 height=100></iframe></div>
+<iframe src="/frame-outer" width=300 height=100 style="visibility:hidden"></iframe>`);
+    if(req.url==='/frame-outer')return res.end('<title>Outer</title><p>Outer text</p><iframe src="/frame-inner?who=insidehidden" width=200 height=80></iframe>');
     if(req.url.startsWith('/frame-inner')){const who=new URL(req.url,'http://x').searchParams.get('who');return res.end(`<title>Inner</title><p>Inner text ${who}</p>
 <label>Field ${who}<input id=field aria-label="Field ${who}"></label>
 <button id=go onclick="document.title='clicked ${who}';parent.postMessage('clicked ${who}','*')">Go ${who}</button>
@@ -290,6 +296,17 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('a small file reaches a file input in a frame',small.ok&&small.files?.[0]?.size===3&&small.url===T.url,JSON.stringify(small));
     const bySelector=await act('upload',{...T,selector:'input[type=file]',files:[{name:'t.txt',data:'AQID'}]});
     check('a selector finds a file input that only exists in a frame',bySelector.ok&&bySelector.files?.[0]?.name==='t.txt',JSON.stringify(bySelector));
+    const hid=await act('open',{url:'http://parity.test/hidden-frames'});
+    let hs;for(let i=0;i<30;i++){hs=await act('snapshot',{tabId:hid.tabId,url:'http://parity.test/hidden-frames',maxChars:30000});if(/Inner text shown/.test(hs.text||''))break;await new Promise(r=>setTimeout(r,200));}
+    check('a shown frame is read',hs.text.includes('Inner text shown'),hs.text);
+    for(const who of ['vishidden','faded','insidehidden'])check('a frame hidden by CSS ('+who+') stays out, nested ones too',!hs.text.includes('Inner text '+who) && !hs.elements.includes('Go '+who),hs.text);
+    check('text of a hidden frame holding a frame stays out',!hs.text.includes('Outer text'),hs.text);
+    await act('close',{tabId:hid.tabId,url:'http://parity.test/hidden-frames'});
+    // One limit for the whole page, whatever the frames hold.
+    const one=await act('snapshot',{...T,limit:1});
+    check('limit 1 returns one element in all',one.elements.split('\n').filter(Boolean).length===1 && one.truncated===true,one.elements);
+    const four=await act('snapshot',{...T,limit:4,maxChars:30000});
+    check('limit 4 returns at most four and still reaches frames',four.elements.split('\n').filter(Boolean).length===4 && /Go (same|cross|nested)/.test(four.elements),four.elements);
     // Refs of a frame that navigated are gone.
     await context.pages().find(p=>p.url()===T.url).frames().find(f=>f.url().includes('who=cross')).evaluate(()=>{location.href='/frame-inner?who=moved';});
     await new Promise(r=>setTimeout(r,500));

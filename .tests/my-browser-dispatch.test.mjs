@@ -8,7 +8,7 @@ test('injected document receives no target after final authorization is revoked'
   for(const revoked of [false,true]) {
     let listener, calls=0;
     const entry={url:'https://example.test/page',authorizeUrl:'https://example.test/page',target:{base:'http://127.0.0.1:18819',session:'fixture'},tabId:7,documentId:'doc'};
-    const targets=new Map([['job',entry]]);
+    const targets=new Map([['job|doc',entry]]);
     vm.runInNewContext(listenerSource,{targets,PAGE_URL_MAX:8192,chrome:{action:{onClicked:{addListener(){}}},tabs:{onRemoved:{addListener(){}}},runtime:{onMessage:{addListener:fn=>listener ??= fn}}},fetchJSON:async(_base,path,_session,body)=>{
       calls++;assert.equal(path,'/authorize');assert.equal(body.id,'job');assert.equal(body.url,entry.url);assert.equal(body.dispatch,true);
       if(revoked)throw new Error('JOB_EXPIRED');return {ok:true};

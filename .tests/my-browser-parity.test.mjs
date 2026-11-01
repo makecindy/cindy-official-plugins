@@ -34,7 +34,7 @@ function harness(local={clientId:'fixture'},shared,options={}) {
   // A tab the user has open in their own window, behind the one they are looking at.
   if(!shared)tabs.set(1,{id:1,url:'https://example.test/user',windowId:1,status:'complete',active:true});
   if(!shared)tabs.set(2,{id:2,url:'https://example.test/behind',windowId:1,status:'complete',active:false});
-  return {run,tabs,windows,calls,state,chrome};
+  return {run,tabs,windows,calls,state,chrome,context};
 }
 
 test('policy: open is a read like navigate; new actions need a tab id and bounded input',()=>{
@@ -111,6 +111,24 @@ test('without the debugger, what needs it says so and opens no page; a screensho
 test('the debugger cannot be declared optional, so the manifest does not ask for it',()=>{
   const manifest=JSON.parse(fs.readFileSync(new URL('../my-browser/extension/manifest.json',import.meta.url),'utf8'));
   assert.equal([...(manifest.permissions||[]),...(manifest.optional_permissions||[])].includes('debugger'),false);
+});
+
+test('every upload piece is authorized again just before the page is touched',async()=>{
+  const h=harness(undefined,undefined,{timers:'never'});
+  let injected=0,expired=false;
+  h.chrome.scripting={executeScript:async({args})=>{if(args?.length===1)injected++;return [{documentId:'doc',frameId:0,result:{ok:true}}];}};
+  h.context.fetch=async(_url,options)=>{
+    const body=JSON.parse(options?.body||'{}');
+    return body.dispatch && expired ? {ok:false,json:async()=>({error:'JOB_EXPIRED'})} : {ok:true,json:async()=>({policy:P.defaults()})};
+  };
+  const piece={url:'https://example.test/user',tabId:1,selector:'input',transfer:'t',op:'chunk',file:0,data:'AAAA'};
+  const live=await h.run('upload',piece);
+  assert.equal(live.ok,true,JSON.stringify(live));
+  const before=injected;expired=true;
+  const refused=await h.run('upload',{...piece,op:'finish'});
+  assert.equal(refused.ok,false);assert.equal(injected,before);
+  // Cleaning up is never refused.
+  assert.equal((await h.run('upload',{...piece,op:'abort'})).ok,true);
 });
 
 test('upload pieces are validated before they reach a page',()=>{
