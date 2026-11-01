@@ -66114,6 +66114,123 @@ var require_worker = __commonJS({
       a: "icloud_mail_app_password",
       b: "icloud_mail_app_password_b"
     });
+    var DEFAULT_LOCALE = "en";
+    var MESSAGES = Object.freeze({
+      "zh-CN": Object.freeze({
+        invalidEmail: "\u8BF7\u8F93\u5165\u6709\u6548\u7684 iCloud Mail \u90AE\u7BB1\u5730\u5740",
+        invalidAppSpecificPassword: "\u8BF7\u8F93\u5165 Apple \u8D26\u6237\u7F51\u7AD9\u751F\u6210\u7684 App \u4E13\u7528\u5BC6\u7801\uFF0C\u4E0D\u8981\u8F93\u5165 Apple \u8D26\u6237\u5BC6\u7801",
+        notConfigured: "\u5C1A\u672A\u914D\u7F6E iCloud Mail\uFF0C\u8BF7\u5230\u300CiCloud Mail\u300D\u63D2\u4EF6\u8BE6\u60C5\u9875\u8F93\u5165\u90AE\u7BB1\u548C App \u4E13\u7528\u5BC6\u7801",
+        invalidCredentialSlot: "iCloud Mail \u51ED\u8BC1\u72B6\u6001\u65E0\u6548\uFF0C\u8BF7\u5728\u63D2\u4EF6\u8BE6\u60C5\u9875\u91CD\u65B0\u8FDE\u63A5",
+        authRejected: "iCloud Mail \u62D2\u7EDD\u767B\u5F55\u3002\u8BF7\u786E\u8BA4 Apple \u8D26\u6237\u5DF2\u5F00\u542F\u53CC\u91CD\u8BA4\u8BC1\uFF0C\u5E76\u4F7F\u7528\u751F\u6210\u7684 App \u4E13\u7528\u5BC6\u7801\uFF08\u4E0D\u662F Apple \u8D26\u6237\u5BC6\u7801\uFF09",
+        networkUnreachable: "\u65E0\u6CD5\u8FDE\u63A5 iCloud Mail \u670D\u52A1\u5668\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5",
+        rateLimited: "iCloud Mail \u6682\u65F6\u9650\u5236\u4E86\u9891\u7E41\u8BBF\u95EE\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+        messageNotFound: "\u6CA1\u6709\u5728\u6307\u5B9A\u6587\u4EF6\u5939\u627E\u5230\u8FD9\u5C01\u90AE\u4EF6\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22",
+        messageTooLarge: "\u90AE\u4EF6\u5185\u5BB9\u8FC7\u5927\uFF0C\u5F53\u524D\u7248\u672C\u6682\u65F6\u65E0\u6CD5\u5904\u7406",
+        draftFolderNotFound: "\u6CA1\u6709\u627E\u5230 iCloud Mail \u8349\u7A3F\u7BB1\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u786E\u8BA4\u670D\u52A1\u5668\u6587\u4EF6\u5939",
+        draftSaveFailed: "iCloud Mail \u672A\u80FD\u4FDD\u5B58\u8349\u7A3F\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+        targetFolderRequired: "move \u9700\u8981\u76EE\u6807\u6587\u4EF6\u5939",
+        targetFolderSame: "\u76EE\u6807\u6587\u4EF6\u5939\u4E0D\u80FD\u4E0E\u5F53\u524D\u6587\u4EF6\u5939\u76F8\u540C",
+        moveUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u79FB\u52A8\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u90AE\u7BB1\u540E\u518D\u64CD\u4F5C",
+        recipientRequired: "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA",
+        invalidRecipient: "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u6216\u5BC6\u9001\u5730\u5740\u683C\u5F0F\u4E0D\u6B63\u786E",
+        invalidSubject: "\u90AE\u4EF6\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E",
+        invalidBody: "\u90AE\u4EF6\u6B63\u6587\u683C\u5F0F\u4E0D\u6B63\u786E",
+        invalidSearchDate: "\u641C\u7D22\u65E5\u671F\u683C\u5F0F\u65E0\u6548\uFF0C\u8BF7\u4F7F\u7528 ISO \u65E5\u671F\u6216\u65E5\u671F\u65F6\u95F4",
+        folderUnavailable: "iCloud Mail \u6587\u4EF6\u5939\u4E0D\u5B58\u5728\u6216\u4E0D\u53EF\u7528\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u83B7\u53D6\u51C6\u786E\u540D\u79F0",
+        operationFailedRetry: "iCloud Mail \u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+        operationFailed: "iCloud Mail \u64CD\u4F5C\u5931\u8D25",
+        invalidRequestFormat: "\u8BF7\u6C42\u683C\u5F0F\u65E0\u6548",
+        bodyTruncated: "\u2026\uFF08\u6B63\u6587\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\uFF09"
+      }),
+      en: Object.freeze({
+        invalidEmail: "Enter a valid iCloud Mail email address",
+        invalidAppSpecificPassword: "Enter the app-specific password generated on the Apple Account website, not your Apple Account password",
+        notConfigured: 'iCloud Mail is not configured yet. Open the "iCloud Mail" plugin details and enter the email address and app-specific password.',
+        invalidCredentialSlot: "Invalid iCloud Mail credential state. Reconnect in the plugin details.",
+        authRejected: "iCloud Mail rejected the login. Make sure two-factor authentication is on for the Apple Account and use a generated app-specific password (not the Apple Account password).",
+        networkUnreachable: "Cannot reach the iCloud Mail server. Check your network connection and try again.",
+        rateLimited: "iCloud Mail is temporarily rate limiting frequent access. Try again later.",
+        messageNotFound: "This message was not found in the given folder. Search again.",
+        messageTooLarge: "The message is too large for this version to handle",
+        draftFolderNotFound: "No iCloud Mail Drafts folder found. Call list_folders first to check the server folders.",
+        draftSaveFailed: "iCloud Mail could not save the draft. Try again later.",
+        targetFolderRequired: "move requires a target folder",
+        targetFolderSame: "The target folder cannot be the same as the current folder",
+        moveUnconfirmed: "Could not confirm whether the message was moved. Search the mailbox again before doing anything else.",
+        recipientRequired: "Provide at least one recipient",
+        invalidRecipient: "Invalid To, Cc, or Bcc address format",
+        invalidSubject: "Invalid subject format",
+        invalidBody: "Invalid body format",
+        invalidSearchDate: "Invalid search date. Use an ISO date or date-time.",
+        folderUnavailable: "The iCloud Mail folder does not exist or is unavailable. Call list_folders first to get the exact name.",
+        operationFailedRetry: "iCloud Mail operation failed. Try again later.",
+        operationFailed: "iCloud Mail operation failed",
+        invalidRequestFormat: "Invalid request format",
+        bodyTruncated: "... (body too long, truncated)"
+      }),
+      ja: Object.freeze({
+        invalidEmail: "\u6709\u52B9\u306AiCloud\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044",
+        invalidAppSpecificPassword: "Apple \u30A2\u30AB\u30A6\u30F3\u30C8\u306E Web \u30B5\u30A4\u30C8\u3067\u751F\u6210\u3057\u305FApp\u7528\u30D1\u30B9\u30EF\u30FC\u30C9\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002Apple \u30A2\u30AB\u30A6\u30F3\u30C8\u306E\u30D1\u30B9\u30EF\u30FC\u30C9\u306F\u5165\u529B\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044",
+        notConfigured: "iCloud\u30E1\u30FC\u30EB\u306F\u307E\u3060\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002\u300CiCloud\u30E1\u30FC\u30EB\u300D\u30D7\u30E9\u30B0\u30A4\u30F3\u306E\u8A73\u7D30\u753B\u9762\u3067\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\u3068App\u7528\u30D1\u30B9\u30EF\u30FC\u30C9\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044",
+        invalidCredentialSlot: "iCloud\u30E1\u30FC\u30EB\u306E\u8A8D\u8A3C\u60C5\u5831\u306E\u72B6\u614B\u304C\u7121\u52B9\u3067\u3059\u3002\u30D7\u30E9\u30B0\u30A4\u30F3\u306E\u8A73\u7D30\u753B\u9762\u3067\u518D\u63A5\u7D9A\u3057\u3066\u304F\u3060\u3055\u3044",
+        authRejected: "iCloud\u30E1\u30FC\u30EB\u304C\u30ED\u30B0\u30A4\u30F3\u3092\u62D2\u5426\u3057\u307E\u3057\u305F\u3002Apple \u30A2\u30AB\u30A6\u30F3\u30C8\u30672\u30D5\u30A1\u30AF\u30BF\u8A8D\u8A3C\u304C\u6709\u52B9\u306B\u306A\u3063\u3066\u3044\u308B\u3053\u3068\u3092\u78BA\u8A8D\u3057\u3001\u751F\u6210\u3057\u305FApp\u7528\u30D1\u30B9\u30EF\u30FC\u30C9\uFF08Apple \u30A2\u30AB\u30A6\u30F3\u30C8\u306E\u30D1\u30B9\u30EF\u30FC\u30C9\u3067\u306F\u3042\u308A\u307E\u305B\u3093\uFF09\u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044",
+        networkUnreachable: "iCloud\u30E1\u30FC\u30EB\u306E\u30B5\u30FC\u30D0\u30FC\u306B\u63A5\u7D9A\u3067\u304D\u307E\u305B\u3093\u3002\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u3092\u78BA\u8A8D\u3057\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044",
+        rateLimited: "iCloud\u30E1\u30FC\u30EB\u304C\u983B\u7E41\u306A\u30A2\u30AF\u30BB\u30B9\u3092\u4E00\u6642\u7684\u306B\u5236\u9650\u3057\u3066\u3044\u307E\u3059\u3002\u3057\u3070\u3089\u304F\u3057\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044",
+        messageNotFound: "\u6307\u5B9A\u3057\u305F\u30D5\u30A9\u30EB\u30C0\u30FC\u306B\u3053\u306E\u30E1\u30FC\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044",
+        messageTooLarge: "\u30E1\u30FC\u30EB\u306E\u30B5\u30A4\u30BA\u304C\u5927\u304D\u3059\u304E\u308B\u305F\u3081\u3001\u73FE\u5728\u306E\u30D0\u30FC\u30B8\u30E7\u30F3\u3067\u306F\u51E6\u7406\u3067\u304D\u307E\u305B\u3093",
+        draftFolderNotFound: "iCloud\u30E1\u30FC\u30EB\u306E\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u5148\u306B list_folders \u3092\u547C\u3073\u51FA\u3057\u3066\u30B5\u30FC\u30D0\u30FC\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
+        draftSaveFailed: "iCloud\u30E1\u30FC\u30EB\u3067\u4E0B\u66F8\u304D\u3092\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3057\u3070\u3089\u304F\u3057\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044",
+        targetFolderRequired: "move \u306B\u306F\u79FB\u52D5\u5148\u30D5\u30A9\u30EB\u30C0\u30FC\u304C\u5FC5\u8981\u3067\u3059",
+        targetFolderSame: "\u79FB\u52D5\u5148\u30D5\u30A9\u30EB\u30C0\u30FC\u306B\u73FE\u5728\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093",
+        moveUnconfirmed: "\u30E1\u30FC\u30EB\u304C\u79FB\u52D5\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u307B\u304B\u306E\u64CD\u4F5C\u3092\u3059\u308B\u524D\u306B\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3092\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044",
+        recipientRequired: "\u5B9B\u5148\u30921\u4EF6\u4EE5\u4E0A\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044",
+        invalidRecipient: "\u5B9B\u5148\u3001Cc\u3001Bcc\u306E\u30A2\u30C9\u30EC\u30B9\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
+        invalidSubject: "\u4EF6\u540D\u306E\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
+        invalidBody: "\u672C\u6587\u306E\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
+        invalidSearchDate: "\u691C\u7D22\u65E5\u4ED8\u306E\u5F62\u5F0F\u304C\u7121\u52B9\u3067\u3059\u3002ISO\u5F62\u5F0F\u306E\u65E5\u4ED8\u307E\u305F\u306F\u65E5\u6642\u3092\u4F7F\u7528\u3057\u3066\u304F\u3060\u3055\u3044",
+        folderUnavailable: "iCloud\u30E1\u30FC\u30EB\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u304C\u5B58\u5728\u3057\u306A\u3044\u304B\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002\u5148\u306B list_folders \u3092\u547C\u3073\u51FA\u3057\u3066\u6B63\u78BA\u306A\u540D\u524D\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044",
+        operationFailedRetry: "iCloud\u30E1\u30FC\u30EB\u306E\u64CD\u4F5C\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u3057\u3070\u3089\u304F\u3057\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044",
+        operationFailed: "iCloud\u30E1\u30FC\u30EB\u306E\u64CD\u4F5C\u306B\u5931\u6557\u3057\u307E\u3057\u305F",
+        invalidRequestFormat: "\u30EA\u30AF\u30A8\u30B9\u30C8\u306E\u5F62\u5F0F\u304C\u7121\u52B9\u3067\u3059",
+        bodyTruncated: "\u2026\uFF08\u672C\u6587\u304C\u9577\u3059\u304E\u308B\u305F\u3081\u5207\u308A\u8A70\u3081\u307E\u3057\u305F\uFF09"
+      }),
+      ko: Object.freeze({
+        invalidEmail: "\uC62C\uBC14\uB978 iCloud \uBA54\uC77C \uC8FC\uC18C\uB97C \uC785\uB825\uD558\uC138\uC694",
+        invalidAppSpecificPassword: "Apple \uACC4\uC815 \uC6F9\uC0AC\uC774\uD2B8\uC5D0\uC11C \uC0DD\uC131\uD55C \uC571 \uC804\uC6A9 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694. Apple \uACC4\uC815 \uBE44\uBC00\uBC88\uD638\uB294 \uC785\uB825\uD558\uC9C0 \uB9C8\uC138\uC694",
+        notConfigured: 'iCloud \uBA54\uC77C\uC774 \uC544\uC9C1 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. "iCloud \uBA54\uC77C" \uD50C\uB7EC\uADF8\uC778 \uC0C1\uC138 \uD654\uBA74\uC5D0\uC11C \uBA54\uC77C \uC8FC\uC18C\uC640 \uC571 \uC804\uC6A9 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694',
+        invalidCredentialSlot: "iCloud \uBA54\uC77C \uC778\uC99D \uC815\uBCF4 \uC0C1\uD0DC\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uD50C\uB7EC\uADF8\uC778 \uC0C1\uC138 \uD654\uBA74\uC5D0\uC11C \uB2E4\uC2DC \uC5F0\uACB0\uD558\uC138\uC694",
+        authRejected: "iCloud \uBA54\uC77C\uC774 \uB85C\uADF8\uC778\uC744 \uAC70\uBD80\uD588\uC2B5\uB2C8\uB2E4. Apple \uACC4\uC815\uC5D0 \uC774\uC911 \uC778\uC99D\uC774 \uCF1C\uC838 \uC788\uB294\uC9C0 \uD655\uC778\uD558\uACE0, \uC0DD\uC131\uD55C \uC571 \uC804\uC6A9 \uBE44\uBC00\uBC88\uD638(Apple \uACC4\uC815 \uBE44\uBC00\uBC88\uD638 \uC544\uB2D8)\uB97C \uC0AC\uC6A9\uD558\uC138\uC694",
+        networkUnreachable: "iCloud \uBA54\uC77C \uC11C\uBC84\uC5D0 \uC5F0\uACB0\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB124\uD2B8\uC6CC\uD06C\uB97C \uD655\uC778\uD55C \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694",
+        rateLimited: "iCloud \uBA54\uC77C\uC774 \uC7A6\uC740 \uC811\uADFC\uC744 \uC77C\uC2DC\uC801\uC73C\uB85C \uC81C\uD55C\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694",
+        messageNotFound: "\uC9C0\uC815\uD55C \uD3F4\uB354\uC5D0\uC11C \uC774 \uBA54\uC77C\uC744 \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694",
+        messageTooLarge: "\uBA54\uC77C \uD06C\uAE30\uAC00 \uB108\uBB34 \uCEE4\uC11C \uD604\uC7AC \uBC84\uC804\uC5D0\uC11C\uB294 \uCC98\uB9AC\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4",
+        draftFolderNotFound: "iCloud \uBA54\uC77C \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uBA3C\uC800 list_folders\uB97C \uD638\uCD9C\uD574 \uC11C\uBC84 \uD3F4\uB354\uB97C \uD655\uC778\uD558\uC138\uC694",
+        draftSaveFailed: "iCloud \uBA54\uC77C\uC5D0 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694",
+        targetFolderRequired: "move\uC5D0\uB294 \uB300\uC0C1 \uD3F4\uB354\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4",
+        targetFolderSame: "\uB300\uC0C1 \uD3F4\uB354\uB294 \uD604\uC7AC \uD3F4\uB354\uC640 \uAC19\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4",
+        moveUnconfirmed: "\uBA54\uC77C\uC774 \uC774\uB3D9\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uC791\uC5C5\uC744 \uD558\uAE30 \uC804\uC5D0 \uBA54\uC77C\uD568\uC744 \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694",
+        recipientRequired: "\uBC1B\uB294 \uC0AC\uB78C\uC744 \uD55C \uBA85 \uC774\uC0C1 \uC785\uB825\uD558\uC138\uC694",
+        invalidRecipient: "\uBC1B\uB294 \uC0AC\uB78C, \uCC38\uC870 \uB610\uB294 \uC228\uC740 \uCC38\uC870 \uC8FC\uC18C \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
+        invalidSubject: "\uC81C\uBAA9 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
+        invalidBody: "\uBCF8\uBB38 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
+        invalidSearchDate: "\uAC80\uC0C9 \uB0A0\uC9DC \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. ISO \uB0A0\uC9DC \uB610\uB294 \uB0A0\uC9DC \uBC0F \uC2DC\uAC04\uC744 \uC0AC\uC6A9\uD558\uC138\uC694",
+        folderUnavailable: "iCloud \uBA54\uC77C \uD3F4\uB354\uAC00 \uC5C6\uAC70\uB098 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uBA3C\uC800 list_folders\uB97C \uD638\uCD9C\uD574 \uC815\uD655\uD55C \uC774\uB984\uC744 \uD655\uC778\uD558\uC138\uC694",
+        operationFailedRetry: "iCloud \uBA54\uC77C \uC791\uC5C5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694",
+        operationFailed: "iCloud \uBA54\uC77C \uC791\uC5C5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4",
+        invalidRequestFormat: "\uC694\uCCAD \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
+        bodyTruncated: "\u2026(\uBCF8\uBB38\uC774 \uB108\uBB34 \uAE38\uC5B4 \uC798\uB838\uC2B5\uB2C8\uB2E4)"
+      })
+    });
+    function resolveLocale(locale) {
+      return typeof locale === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, locale) ? locale : DEFAULT_LOCALE;
+    }
+    function t(locale, key) {
+      return MESSAGES[resolveLocale(locale)][key];
+    }
+    function requestLocale(request) {
+      const params = request && request.params && typeof request.params === "object" ? request.params : {};
+      return resolveLocale(params.locale);
+    }
     function normalizeCredentials(value) {
       const input = value && typeof value === "object" ? value : {};
       const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
@@ -66334,7 +66451,7 @@ var require_worker = __commonJS({
         };
       }));
     }
-    async function readMessage(credentials, action, deps) {
+    async function readMessage(credentials, action, deps, locale) {
       const folder = action.folder || "INBOX";
       return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
         const message = await client.fetchOne(
@@ -66374,7 +66491,7 @@ var require_worker = __commonJS({
           reply_to: parsed.replyTo && parsed.replyTo.text ? parsed.replyTo.text : "",
           message_id: parsed.messageId || "",
           body_text: text.length > MAX_BODY_CHARS ? `${text.slice(0, MAX_BODY_CHARS)}
-\u2026\uFF08\u6B63\u6587\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\uFF09` : text,
+${t(locale, "bodyTruncated")}` : text,
           attachments: Array.isArray(parsed.attachments) ? parsed.attachments.map((attachment) => ({
             filename: attachment.filename || null,
             content_type: attachment.contentType || null,
@@ -66513,14 +66630,14 @@ var require_worker = __commonJS({
         smtp: `${ICLOUD.smtpHost}:${ICLOUD.smtpPort}`
       };
     }
-    async function performAction(credentials, action, deps) {
+    async function performAction(credentials, action, deps, locale) {
       switch (action.action) {
         case "list_folders":
           return listFolders(credentials, deps);
         case "search":
           return search(credentials, action, deps);
         case "read":
-          return readMessage(credentials, action, deps);
+          return readMessage(credentials, action, deps, locale);
         case "send":
           return sendMessage(credentials, action, deps);
         case "draft":
@@ -66535,56 +66652,57 @@ var require_worker = __commonJS({
           throw new Error("UNKNOWN_ACTION");
       }
     }
-    function humanizeError(error) {
+    function humanizeError(error, locale) {
       const code = error && error.code ? String(error.code) : "";
       const message = error && error.message ? String(error.message) : String(error || "");
       const combined = `${code} ${message}`.toLowerCase();
-      if (message === "INVALID_EMAIL") return "\u8BF7\u8F93\u5165\u6709\u6548\u7684 iCloud Mail \u90AE\u7BB1\u5730\u5740";
+      if (message === "INVALID_EMAIL") return t(locale, "invalidEmail");
       if (message === "INVALID_APP_SPECIFIC_PASSWORD") {
-        return "\u8BF7\u8F93\u5165 Apple \u8D26\u6237\u7F51\u7AD9\u751F\u6210\u7684 App \u4E13\u7528\u5BC6\u7801\uFF0C\u4E0D\u8981\u8F93\u5165 Apple \u8D26\u6237\u5BC6\u7801";
+        return t(locale, "invalidAppSpecificPassword");
       }
       if (message === "NOT_CONFIGURED") {
-        return "\u5C1A\u672A\u914D\u7F6E iCloud Mail\uFF0C\u8BF7\u5230\u300CiCloud Mail\u300D\u63D2\u4EF6\u8BE6\u60C5\u9875\u8F93\u5165\u90AE\u7BB1\u548C App \u4E13\u7528\u5BC6\u7801";
+        return t(locale, "notConfigured");
       }
       if (message === "INVALID_CREDENTIAL_SLOT") {
-        return "iCloud Mail \u51ED\u8BC1\u72B6\u6001\u65E0\u6548\uFF0C\u8BF7\u5728\u63D2\u4EF6\u8BE6\u60C5\u9875\u91CD\u65B0\u8FDE\u63A5";
+        return t(locale, "invalidCredentialSlot");
       }
       if (code === "EAUTH" || combined.includes("authenticationfailed") || combined.includes("authentication failed") || combined.includes("invalid credentials") || combined.includes("login failed")) {
-        return "iCloud Mail \u62D2\u7EDD\u767B\u5F55\u3002\u8BF7\u786E\u8BA4 Apple \u8D26\u6237\u5DF2\u5F00\u542F\u53CC\u91CD\u8BA4\u8BC1\uFF0C\u5E76\u4F7F\u7528\u751F\u6210\u7684 App \u4E13\u7528\u5BC6\u7801\uFF08\u4E0D\u662F Apple \u8D26\u6237\u5BC6\u7801\uFF09";
+        return t(locale, "authRejected");
       }
       if (code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ENETUNREACH" || combined.includes("timed out")) {
-        return "\u65E0\u6CD5\u8FDE\u63A5 iCloud Mail \u670D\u52A1\u5668\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5";
+        return t(locale, "networkUnreachable");
       }
       if (combined.includes("too many") || combined.includes("rate limit") || combined.includes("\u9891\u7E41")) {
-        return "iCloud Mail \u6682\u65F6\u9650\u5236\u4E86\u9891\u7E41\u8BBF\u95EE\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5";
+        return t(locale, "rateLimited");
       }
-      if (message === "MESSAGE_NOT_FOUND") return "\u6CA1\u6709\u5728\u6307\u5B9A\u6587\u4EF6\u5939\u627E\u5230\u8FD9\u5C01\u90AE\u4EF6\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22";
-      if (message === "MESSAGE_TOO_LARGE") return "\u90AE\u4EF6\u5185\u5BB9\u8FC7\u5927\uFF0C\u5F53\u524D\u7248\u672C\u6682\u65F6\u65E0\u6CD5\u5904\u7406";
+      if (message === "MESSAGE_NOT_FOUND") return t(locale, "messageNotFound");
+      if (message === "MESSAGE_TOO_LARGE") return t(locale, "messageTooLarge");
       if (message === "DRAFT_FOLDER_NOT_FOUND") {
-        return "\u6CA1\u6709\u627E\u5230 iCloud Mail \u8349\u7A3F\u7BB1\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u786E\u8BA4\u670D\u52A1\u5668\u6587\u4EF6\u5939";
+        return t(locale, "draftFolderNotFound");
       }
       if (message === "DRAFT_SAVE_FAILED") {
-        return "iCloud Mail \u672A\u80FD\u4FDD\u5B58\u8349\u7A3F\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
+        return t(locale, "draftSaveFailed");
       }
-      if (message === "TARGET_FOLDER_REQUIRED") return "move \u9700\u8981\u76EE\u6807\u6587\u4EF6\u5939";
-      if (message === "TARGET_FOLDER_SAME") return "\u76EE\u6807\u6587\u4EF6\u5939\u4E0D\u80FD\u4E0E\u5F53\u524D\u6587\u4EF6\u5939\u76F8\u540C";
+      if (message === "TARGET_FOLDER_REQUIRED") return t(locale, "targetFolderRequired");
+      if (message === "TARGET_FOLDER_SAME") return t(locale, "targetFolderSame");
       if (message === "MESSAGE_MOVE_UNCONFIRMED") {
-        return "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u79FB\u52A8\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u90AE\u7BB1\u540E\u518D\u64CD\u4F5C";
+        return t(locale, "moveUnconfirmed");
       }
-      if (message === "RECIPIENT_REQUIRED") return "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA";
-      if (message === "INVALID_RECIPIENT") return "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u6216\u5BC6\u9001\u5730\u5740\u683C\u5F0F\u4E0D\u6B63\u786E";
-      if (message === "INVALID_SUBJECT") return "\u90AE\u4EF6\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E";
-      if (message === "INVALID_BODY") return "\u90AE\u4EF6\u6B63\u6587\u683C\u5F0F\u4E0D\u6B63\u786E";
+      if (message === "RECIPIENT_REQUIRED") return t(locale, "recipientRequired");
+      if (message === "INVALID_RECIPIENT") return t(locale, "invalidRecipient");
+      if (message === "INVALID_SUBJECT") return t(locale, "invalidSubject");
+      if (message === "INVALID_BODY") return t(locale, "invalidBody");
       if (message.startsWith("INVALID_SINCE") || message.startsWith("INVALID_BEFORE")) {
-        return "\u641C\u7D22\u65E5\u671F\u683C\u5F0F\u65E0\u6548\uFF0C\u8BF7\u4F7F\u7528 ISO \u65E5\u671F\u6216\u65E5\u671F\u65F6\u95F4";
+        return t(locale, "invalidSearchDate");
       }
       if (combined.includes("mailbox") || combined.includes("folder")) {
-        return "iCloud Mail \u6587\u4EF6\u5939\u4E0D\u5B58\u5728\u6216\u4E0D\u53EF\u7528\uFF0C\u8BF7\u5148\u8C03\u7528 list_folders \u83B7\u53D6\u51C6\u786E\u540D\u79F0";
+        return t(locale, "folderUnavailable");
       }
-      return "iCloud Mail \u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
+      return t(locale, "operationFailedRetry");
     }
     async function handleRequest(request, deps = createRuntimeDeps()) {
       if (!request || typeof request !== "object") throw new Error("INVALID_REQUEST");
+      const locale = requestLocale(request);
       let credentials = null;
       try {
         const params = request.params && typeof request.params === "object" ? request.params : {};
@@ -66610,11 +66728,11 @@ var require_worker = __commonJS({
         if (method === "mail/action") {
           credentials = consumeRequestCredentials(boundRequest);
           const action = params.action && typeof params.action === "object" ? params.action : {};
-          return await performAction(credentials, action, deps);
+          return await performAction(credentials, action, deps, locale);
         }
         throw new Error("METHOD_NOT_FOUND");
       } catch (error) {
-        throw new Error(humanizeError(error));
+        throw new Error(humanizeError(error, locale));
       } finally {
         if (credentials) credentials.appSpecificPassword = "";
       }
@@ -66632,7 +66750,8 @@ var require_worker = __commonJS({
           writeReply({
             jsonrpc: "2.0",
             id: null,
-            error: { code: -32700, message: "\u8BF7\u6C42\u683C\u5F0F\u65E0\u6548" }
+            // 整行无法解析时拿不到 params.locale，按协议回退英文。
+            error: { code: -32700, message: t(DEFAULT_LOCALE, "invalidRequestFormat") }
           });
           return;
         }
@@ -66644,7 +66763,7 @@ var require_worker = __commonJS({
             id: request.id,
             error: {
               code: -32e3,
-              message: error && error.message ? error.message : "iCloud Mail \u64CD\u4F5C\u5931\u8D25"
+              message: error && error.message ? error.message : t(requestLocale(request), "operationFailed")
             }
           });
         });
@@ -66652,7 +66771,9 @@ var require_worker = __commonJS({
     }
     if (require.main === module2) startStdio2();
     module2.exports = {
+      DEFAULT_LOCALE,
       ICLOUD,
+      MESSAGES,
       buildSearchCriteria,
       createRuntimeDeps,
       consumeRequestCredentials,
@@ -66662,6 +66783,7 @@ var require_worker = __commonJS({
       normalizeCredentials,
       normalizeRecipients,
       performAction,
+      resolveLocale,
       smtpOptions,
       startStdio: startStdio2,
       summaryFromMessage
