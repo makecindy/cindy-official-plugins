@@ -443,3 +443,78 @@ test('Chinese variants are named by script, never by region',()=>{
   assert.equal(name('zh-CN','en'),'Simplified Chinese');assert.equal(name('zh-TW','en'),'Traditional Chinese');
   for(const code of core.commonLanguages)assert.doesNotMatch(name(code,'zh-CN'),/中国|台湾|台灣/,code);
 });
+
+test('X videos keep their own identity under one page address',async()=>{
+  const url='https://x.com/home';
+  const parsed=value=>core.validate({op:'config',source:{url,title:'',videoId:value}}).source.videoId;
+  for(const id of ['x:2116755086169055232','youtube:tHYis-DP0oU','tiktok:7702028955729104149','bilibili:BV1C8xn6YEDA_2','dailymotion:xbsmi1a'])assert.equal(parsed(id),id);
+  for(const invalid of ['weird:1','x:1/../..','x:',12])assert.equal(parsed(invalid),undefined);
+  const paths=new Set();
+  const cache=createSubtitleCache({core,library:async r=>{if(r.path)paths.add(r.path);return r.op==='read'?{ok:false,errorCode:'NOT_FOUND'}:{ok:true};}});
+  await cache.open('client',{source:{url,videoId:'x:1'},target:'zh-CN'});
+  await cache.open('client',{source:{url,videoId:'x:2'},target:'zh-CN'});
+  assert.equal(paths.size,2,'two videos on one feed must not share a cache file');
+  await cache.open('client',{source:{url:'https://x.com/u/status/9',videoId:'x:1'},target:'zh-CN'});
+  assert.equal(paths.size,2,'a repost of the same media reuses its cache file');
+});
+
+test('caption track: the video language, never just the first listed',()=>{
+  const list=(...codes)=>codes.map(language=>({language,kind:'subtitles',mode:'disabled'}));
+  const chosen=(tracks,opts)=>tracks[core.pickCaptionTrack(tracks,opts)]?.language;
+  assert.equal(chosen(list('pt-br','el','en','vi'),{page:'en',target:'zh-CN'}),'en','TED lists Portuguese first');
+  assert.equal(chosen(list('de','es','en','fr'),{page:'zh-CN',target:'zh-CN'}),'en','a page in the target language says nothing about the video');
+  assert.equal(chosen(list('ja','zh-CN'),{page:'ja-JP',target:'zh-CN'}),'ja');
+  assert.equal(chosen(list('zh-CN','ko'),{page:'zh-CN',target:'zh-CN'}),'ko','a track in the target language is a last resort');
+  assert.equal(chosen(list('zh-CN'),{page:'en',target:'zh-CN'}),'zh-CN');
+  assert.equal(chosen([{language:'en',mode:'disabled'},{language:'fr',mode:'showing'}],{page:'en',target:'zh-CN'}),'fr','what the person already turned on wins');
+  assert.equal(core.pickCaptionTrack([],{}),-1);
+});
+
+test('site captions: bilibili JSON, embedded player allowlist, sites by document',async()=>{
+  const {default:_}=await import('../my-browser/extension/site-captions.js').catch(()=>({}));
+  const helper=globalThis.CindySiteCaptions;
+  assert.deepEqual(helper.cues({format:'bilibili',text:JSON.stringify({body:[{from:1,to:2,content:' 你好 '},{from:3,to:2,content:'bad'},{from:4,to:5,content:''}]})},core.parseSubtitles),[{start:1,end:2,text:'你好'}]);
+  assert.equal(helper.cues({format:'text',text:'1\n00:00:03,680 --> 00:00:09,600\nThe TCU <b>Frogs</b>\n'},core.parseSubtitles)[0].text,'The TCU Frogs');
+  assert.deepEqual(helper.cues({},core.parseSubtitles),[]);
+  assert.throws(()=>helper.cues({format:'bilibili',text:'{"body":1}'},core.parseSubtitles),/SUBTITLE_RESPONSE_INVALID/);
+  for(const url of ['https://www.youtube.com/embed/a','https://www.youtube-nocookie.com/embed/a','https://player.vimeo.com/video/1','https://geo.dailymotion.com/player/x.html?','https://player.bilibili.com/player.html?bvid=1'])assert.equal(helper.embedded(url),true,url);
+  for(const url of ['https://www.youtube.com/watch?v=a','https://evil.test/www.youtube.com/embed/a','https://www.youtube.com.evil.test/embed/a','http://player.vimeo.com/video/1'])assert.equal(helper.embedded(url),false,url);
+  assert.equal(helper.site('https://www.tiktok.com/foryou'),'tiktok');
+  assert.equal(helper.site('https://geo.dailymotion.com/player/x.html'),'dailymotion');
+  assert.equal(helper.site('https://nottiktok.com/'),null);
+  const manifest=JSON.parse(fs.readFileSync(new URL('../my-browser/extension/manifest.json',import.meta.url)));
+  assert.deepEqual(manifest.content_scripts[1].matches,manifest.content_scripts[0].exclude_matches);
+  for(const pattern of manifest.content_scripts[1].matches)assert.equal(helper.embedded(pattern.replace('*','1')),true,pattern);
+  assert.deepEqual(manifest.content_scripts[1].js,manifest.content_scripts[0].js);
+});
+
+test('site captions read: each site, its own hosts only',async()=>{
+  await import('../my-browser/extension/site-captions.js').catch(()=>{});
+  const {read}=globalThis.CindySiteCaptions;
+  const run=async(site,hint,routes,page={})=>{
+    const saved={fetch:globalThis.fetch,location:globalThis.location,document:globalThis.document,state:globalThis.__INITIAL_STATE__};
+    const asked=[];
+    globalThis.fetch=async(url,init)=>{asked.push([url,init?.credentials]);const body=routes[url];if(body===undefined)return {ok:false,text:async()=>''};return {ok:true,text:async()=>typeof body==='string'?body:JSON.stringify(body)};};
+    Object.defineProperty(globalThis,'location',{value:new URL(page.url||'https://www.example.test/'),configurable:true,writable:true});
+    globalThis.document={documentElement:{lang:page.lang||''},querySelector:()=>page.player||null,getElementById:id=>page.item&&id==='__UNIVERSAL_DATA_FOR_REHYDRATION__'?{textContent:JSON.stringify({__DEFAULT_SCOPE__:{'webapp.video-detail':{itemInfo:{itemStruct:page.item}}}})}:null};
+    globalThis.__INITIAL_STATE__=page.state;
+    try{return {...await read(site,hint),asked};}finally{globalThis.fetch=saved.fetch;Object.defineProperty(globalThis,'location',{value:saved.location,configurable:true,writable:true});globalThis.document=saved.document;globalThis.__INITIAL_STATE__=saved.state;}
+  };
+  const dm=await run('dailymotion',{id:'xbsmi1a',target:'zh-CN'},{'https://www.dailymotion.com/player/metadata/video/xbsmi1a':{subtitles:{data:{'en-auto':{label:'English',urls:['https://static2.dmcdn.net/a.srt']}}}},'https://static2.dmcdn.net/a.srt':'1\n00:00:01,000 --> 00:00:02,000\nhi\n'});
+  assert.equal(dm.ok,true);assert.equal(dm.videoId,'dailymotion:xbsmi1a');assert.equal(dm.language,'en');assert.match(dm.text,/hi/);
+  const evil=await run('dailymotion',{id:'xbsmi1a'},{'https://www.dailymotion.com/player/metadata/video/xbsmi1a':{subtitles:{data:{en:{urls:['https://evil.test/a.srt']}}}}});
+  assert.equal(evil.error,'INVALID_SUBTITLE_SOURCE','a caption address on another host is never fetched');assert.equal(evil.asked.length,1);
+  assert.deepEqual((await run('dailymotion',{id:'../x'},{})).tracks,[]);
+  const item={id:'77',video:{subtitleInfos:[{LanguageCodeName:'spa-ES',Format:'webvtt',Source:'MT',Url:'https://v16-webapp.tiktok.com/es.vtt'},{LanguageCodeName:'eng-US',Format:'webvtt',Source:'ASR',Url:'https://v16-webapp.tiktok.com/en.vtt'}]}};
+  const tk=await run('tiktok',{id:'77',target:'zh-CN'},{'https://v16-webapp.tiktok.com/en.vtt':'WEBVTT\n\n00:00.000 --> 00:01.000\nhi\n'},{url:'https://www.tiktok.com/@a/video/77',item});
+  assert.equal(tk.chosen,'eng-US','speech recognition is the original; other languages are machine translations');assert.equal(tk.language,'en');assert.equal(tk.videoId,'tiktok:77');
+  assert.equal((await run('tiktok',{id:'77',track:'spa-ES',target:'zh-CN'},{'https://v16-webapp.tiktok.com/es.vtt':'WEBVTT\n'},{url:'https://www.tiktok.com/@a/video/77',item})).chosen,'spa-ES','a chosen source is respected');
+  const feed=await run('tiktok',{id:'88',target:'zh-CN'},{'https://v16-webapp.tiktok.com/en.vtt':'WEBVTT\n'},{url:'https://www.tiktok.com/foryou',player:{__reactFiberX:{memoizedProps:{},return:{memoizedProps:{videoInfo:{subtitleInfos:item.video.subtitleInfos}}}}}});
+  assert.equal(feed.chosen,'eng-US','a feed item is read from its player');assert.equal(feed.videoId,'tiktok:88');
+  assert.deepEqual((await run('tiktok',{id:'88'},{},{url:'https://www.tiktok.com/foryou',item})).tracks,[],'the first post\'s JSON never answers for another');
+  const state={bvid:'BV1',videoData:{pages:[{cid:11},{cid:22}]}},api='https://api.bilibili.com/x/player/v2?bvid=BV1&cid=22',url='https://www.bilibili.com/video/BV1?p=2';
+  const bili=await run('bilibili',{target:'zh-CN'},{[api]:{data:{subtitle:{subtitles:[{lan:'ai-zh',lan_doc:'中文',subtitle_url:'//aisubtitle.hdslb.com/z.json'},{lan:'ai-en',lan_doc:'English',subtitle_url:'//aisubtitle.hdslb.com/e.json'}]}}},'https://aisubtitle.hdslb.com/e.json':{body:[]}},{url,state});
+  assert.equal(bili.chosen,'ai-en');assert.equal(bili.format,'bilibili');assert.equal(bili.videoId,'bilibili:BV1_2');assert.equal(bili.asked[0][1],'include','the player API needs the page login');assert.equal(bili.asked[1][1],'omit');
+  assert.equal((await run('bilibili',{},{[api]:{data:{need_login_subtitle:true,subtitle:{subtitles:[]}}}},{url,state})).error,'SUBTITLE_LOGIN_REQUIRED');
+  assert.deepEqual((await run('bilibili',{},{},{url:'https://www.bilibili.com/'})).tracks,[]);
+});

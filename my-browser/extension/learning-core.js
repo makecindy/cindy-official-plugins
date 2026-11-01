@@ -34,7 +34,9 @@
     if (url && !/^https?:$/.test(new URL(url).protocol)) throw Error('INVALID_SOURCE');
     const time=value.time;
     if (time!==undefined && (!Number.isFinite(time) || time<0 || time>864000)) throw Error('INVALID_TIME');
-    return {url:url ? new URL(url).href : '',title,...(time===undefined?{}:{time})};
+    // Only for sites where one page address holds many videos; anything else keys by URL.
+    const videoId=typeof value.videoId==='string'&&/^(?:x|youtube|tiktok|bilibili|dailymotion):[\w-]{1,64}$/.test(value.videoId)?value.videoId:undefined;
+    return {url:url ? new URL(url).href : '',title,...(time===undefined?{}:{time}),...(videoId?{videoId}:{})};
   }
   function validate(input) {
     if (!input || !operations.has(input.op)) throw Error('INVALID_OPERATION');
@@ -133,6 +135,14 @@
       if(cues.length>10000)throw Error('SUBTITLE_TOO_LARGE');
     }
     return cues.sort((a,b)=>a.start-b.start);
+  }
+  // Which caption track carries the video's own language. The page language is the
+  // best hint a browser has; the target language is a translation, so it comes last.
+  function pickCaptionTrack(tracks,{page='',target=''}={}) {
+    const base=value=>String(value||'').toLowerCase().split(/[-_]/)[0],to=base(target),on=base(page);
+    const index=test=>tracks.findIndex(test);
+    for(const test of [t=>t.mode==='showing',t=>base(t.language)&&base(t.language)!==to&&base(t.language)===on,t=>base(t.language)==='en'&&to!=='en',t=>base(t.language)!==to]){const found=index(test);if(found>=0)return found;}
+    return tracks.length?0:-1;
   }
   function joinWords(words) {
     let text='';for(const w of words){const part=w.text.trim();if(!part)continue;const tight=/^[,.;:!?，。！？、；：)\]”’]/u.test(part)||/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}，。！？、；：]$/u.test(text)&&/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(part);text+=(text&&!tight?' ':'')+part;}return text;
@@ -328,7 +338,7 @@
     return {...entry,interval:days,due:now+(days?days*86400000:600000),reviews:(entry.reviews||0)+1,updated:now};
   }
   function uuid(){if(globalThis.crypto.randomUUID)return globalThis.crypto.randomUUID();const bytes=globalThis.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;return Array.from(bytes,(v,i)=>([4,6,8,10].includes(i)?'-':'')+v.toString(16).padStart(2,'0')).join('');}
-  const api={captionsMatchLanguage,youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
+  const api={pickCaptionTrack,captionsMatchLanguage,youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
   if(typeof module==='object'&&module.exports)module.exports=api;
   root.CindyLearning=api;
 })(globalThis);
