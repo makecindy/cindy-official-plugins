@@ -9,6 +9,7 @@ A unified Cindy browser companion candidate. **0.4.10** brings compact reading c
 - The selection popup is off by default. In the extension panel, open Settings and check “Show Cindy button when selecting text” to enable it. The choice is saved across page loads and synchronized between tabs; unchecking it immediately removes any visible selection button. The selection context menu remains available.
 - Cancellation also applies while discovering the local connection. Request deadlines include serialized task execution and repair attempts; completed response receipts no longer consume running-request capacity. Browser and plugin updates are both required for this fix.
 - Player controls adapt to narrow widths and long language names. Menus stay within the visible player, keep their close button available while scrolling, and do not overprint subtitles; long captions shrink to fit small players.
+- Cindy subtitles also work on X videos: hover a video that has captions and click the Cindy icon beside the CC button in the control bar. Text comes from X's own caption track (usually auto-generated); videos without one can import an SRT / VTT file. X feeds autoplay, so nothing is translated automatically: each video starts from your click.
 - Captions move toward the bottom when YouTube controls hide and make room when controls reappear. Preparation details, blockers and cache status live inside the subtitle menu. The preparation bar measures playback readiness and reaches Ready once buffered; whole-video translation percentages never float over the video.
 - Compact webpage panel, selection translation, contextual explanation, summary and reading aloud; bilingual pages with dynamic content and restore. Closing the panel keeps page translations.
 - YouTube automatically shows captions inside its player. The player menu offers bilingual, translation-only, original-only and off; video language is independent of webpage language. Native HTML5 captions, SRT/VTT import, sentence navigation, loop, pause and bilingual export remain under More. Live services have not been individually verified; universal coverage is not claimed.
@@ -558,3 +559,14 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 ## 0.4.60 another debugger holding the tab fails the attach (host package 0.4.81)
 
 - When DevTools or another extension already holds a tab's debugger, attaching now fails with the usual "Chrome refused to attach" message instead of pretending to be attached. Only the extension's own leftover attachment (after the worker restarted) is accepted.
+
+## 0.4.62 video subtitles on more sites (host package 0.4.83)
+
+- **X:** reads X's own caption track through the player and shows bilingual subtitles in the player, including fullscreen. Each player on a page has its own entry; choosing another moves the session, and a player removed by scrolling ends it without starting another. Nothing is translated automatically on X: each video starts from your click.
+- **TikTok, Dailymotion, bilibili:** reads captions these sites publish (TikTok speech recognition, Dailymotion auto captions, bilibili subtitles and AI subtitles). bilibili only provides captions after sign-in, and says so when signed out.
+- **TED, Vimeo:** a caption track is no longer the first one listed. The order is a track you turned on, then the page language, then English, with the target language last. When several exist, change "Caption source" in settings.
+- **Embedded players:** YouTube, Vimeo, Dailymotion and bilibili players embedded in other pages work too. Scripts are injected only into those player addresses; other frames get none and cannot ask for translation.
+- **Video inside web components:** sites such as BBC, Reddit and Archive.org that keep video in shadow DOM are now found. Without a caption track, import an SRT / VTT file.
+- Each site's own caption layer is hidden while Cindy subtitles show. Videos are identified by media id, so tasks and caches stay separate under one page address.
+
+Sampled Instagram, Facebook and Douyin videos have no readable captions, and this version does not do speech recognition. Update both the Cindy plugin and the Chrome extension. The new content script match covers only those player addresses; the signed wire protocol is unchanged.

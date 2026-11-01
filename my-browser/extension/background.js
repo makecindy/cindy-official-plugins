@@ -1,5 +1,5 @@
 'use strict';
-if (typeof importScripts === 'function') importScripts('policy.js','network-guard.js','learning-core.js','youtube-transcript.js');
+if (typeof importScripts === 'function') importScripts('policy.js','network-guard.js','learning-core.js','youtube-transcript.js','site-captions.js');
 // A lexical `const chrome` masks Chromium's lazy API initialization; use a var alias.
 var chrome = globalThis.browser || globalThis.chrome;
 const P = globalThis.MyBrowserPolicy;
@@ -1447,7 +1447,14 @@ chrome.runtime.onInstalled.addListener(details => {
   const files = chrome.runtime.getManifest().content_scripts?.[0]?.js || [];
   if (!files.length) return;
   chrome.tabs.query({url: ['http://*/*', 'https://*/*']}).then(tabs => {
-    for (const tab of tabs) if (tab.id !== undefined) chrome.scripting.executeScript({target: {tabId: tab.id}, files}).catch(() => {});
+    for (const tab of tabs) if (tab.id !== undefined) {
+      chrome.scripting.executeScript({target: {tabId: tab.id}, files}).catch(() => {});
+      // The manifest's player-frame rule only reaches frames loaded after the update: reach the open ones too.
+      Promise.resolve(chrome.webNavigation?.getAllFrames({tabId: tab.id})).then(frames => {
+        const ids = (frames || []).filter(f => f.frameId > 0 && !f.errorOccurred && globalThis.CindySiteCaptions?.embedded(f.url)).map(f => f.frameId);
+        if (ids.length) chrome.scripting.executeScript({target: {tabId: tab.id, frameIds: ids}, files}).catch(() => {});
+      }).catch(() => {});
+    }
   }).catch(() => {});
 });
 // In-flight page targets, keyed by job id. Only the worker can read them, and only while injecting.
@@ -1500,10 +1507,12 @@ async function learningRequest(message,sender) {
   if(!owner)throw Error('INVALID_SOURCE');
   if(learningCalls.has(id))throw Error('BUSY');
   const call={target:null,owner,cancelled:false};learningCalls.set(id,call);
-  let target,page;
+  let target,page,boundDocument=sender.documentId,embeddedFrame=false;
   async function checkCurrent(){
     if(learningCalls.get(id)!==call||call.cancelled)throw Error('REQUEST_CANCELLED');
-    if(page && ((await chrome.tabs.get(page.id)).url!==page.url || await network.document(page.id)!==sender.documentId))throw Error('PAGE_CHANGED');
+    if(page && ((await chrome.tabs.get(page.id)).url!==page.url || await network.document(page.id)!==boundDocument))throw Error('PAGE_CHANGED');
+    // An embedded player can be removed or navigated while the top document stays put.
+    if(embeddedFrame){const frame=await chrome.webNavigation.getFrame({tabId:page.id,frameId:sender.frameId}).catch(()=>null);if(!frame||frame.documentId!==sender.documentId||frame.errorOccurred)throw Error('PAGE_CHANGED');}
   }
   try {
     await restore;await checkCurrent();
@@ -1515,12 +1524,21 @@ async function learningRequest(message,sender) {
     // Which tab asked: translation tasks follow the video per tab, not per browser.
     if(Number.isInteger(sender.tab?.id))request.view='tab:'+sender.tab.id;else delete request.view;
     if(!internal) {
-      if(!sender.tab?.id || sender.frameId!==0)throw Error('INVALID_SOURCE');
+      // Besides the top document, only known video player frames may ask.
+      const embedded=sender.frameId>0&&globalThis.CindySiteCaptions.embedded(sender.url);
+      if(!sender.tab?.id || (sender.frameId!==0&&!embedded))throw Error('INVALID_SOURCE');
       page=await chrome.tabs.get(sender.tab.id);
       const documentId=await network.document(page.id);
+      if(embedded){
+        // The tab's top document is still verified; the frame answers for its own address.
+        boundDocument=documentId;embeddedFrame=true;
+        if(request.source.url&&new URL(request.source.url).origin!==new URL(sender.url).origin)throw Error('PAGE_CHANGED');
+        request.source={...request.source,url:request.source.url||sender.url,title:(page.title||'').slice(0,500)};
+      }else{
       // pushState keeps the initial sender URL; bind to document and live origin.
       if(sender.documentId!==documentId || new URL(page.url).origin!==new URL(sender.url).origin || (request.source.url&&request.source.url!==page.url))throw Error('PAGE_CHANGED');
       request.source={...request.source,url:page.url,title:(page.title||'').slice(0,500)};
+      }
     }
     await checkCurrent();
     const deadline=Date.now()+globalThis.CindyLearning.learningRequestTimeout(request);let lastProgress;
@@ -1611,6 +1629,34 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
     chrome.tabs.create({url:chrome.runtime.getURL('library.html')}).then(()=>reply({ok:true}));return true;
   }
 });
+// Captions some sites publish outside text tracks. Authorized like every other
+// caption read, and the site comes from the asking document, never from the message.
+chrome.runtime.onMessage.addListener((m,sender,reply)=>{
+  if(m?.type!=='cindy-site-captions'||sender.id!==chrome.runtime.id||!sender.tab?.id)return;
+  (async()=>{
+    await learningRequest({id:crypto.randomUUID(),request:{op:'config'}},sender);
+    const helper=globalThis.CindySiteCaptions,tab=await chrome.tabs.get(sender.tab.id),site=helper.site(sender.url);
+    if(!site||(sender.frameId!==0&&!helper.embedded(sender.url)))return {ok:true,tracks:[],cues:[]};
+    const id=m.id||(site==='dailymotion'?(new URL(sender.url).searchParams.get('video')||tab.url.match(/\/video\/([a-z0-9]+)/i)?.[1]):undefined);
+    const out=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[sender.documentId]},world:'MAIN',func:helper.read,args:[site,{id,track:m.track,target:m.target}]});
+    const result=out?.[0]?.result;
+    if(!result?.ok)throw Error(result?.error||'SUBTITLE_UNAVAILABLE');
+    let cues=[];try{cues=helper.cues(result,globalThis.CindyLearning.parseSubtitles);}catch(e){throw Error(e.message==='SUBTITLE_TOO_LARGE'?e.message:'SUBTITLE_RESPONSE_INVALID');}
+    return {ok:true,cues,tracks:result.tracks||[],chosen:result.chosen,language:result.language,videoId:result.videoId};
+  })().then(reply).catch(e=>reply({ok:false,error:e.message,...(e.message==='ADDRESS_UNVERIFIED'?{reason:e.reason}:{})}));return true;
+});
+chrome.runtime.onMessage.addListener((m,sender)=>{
+  if(m?.type!=='cindy-frame-video'||sender.id!==chrome.runtime.id||!sender.tab?.id||sender.frameId!==0)return;
+  // Exactly one player frame: the top document picked it, the address must match a direct child frame.
+  (async()=>{
+    let src;try{src=new URL(m.src).href;}catch{return;}
+    if(!globalThis.CindySiteCaptions.embedded(src))return;
+    const frames=(await chrome.webNavigation.getAllFrames({tabId:sender.tab.id}))||[];
+    const target=frames.find(f=>f.parentFrameId===0&&f.url===src);
+    if(target)await chrome.tabs.sendMessage(sender.tab.id,{type:'cindy-ui',action:'video',frame:true},{frameId:target.frameId});
+  })().catch(()=>{});
+});
+
 // YouTube exposes timed caption metadata through its own player. Read only this
 // fixed field; no arbitrary page JavaScript and no cookies leave the browser.
 async function fetchYoutubeCaptions(url) {
@@ -1674,7 +1720,7 @@ function readPlayerTimedtext(languageCode,tlang,kind) {
     if(!name)return {ok:false,error:'SUBTITLE_UNAVAILABLE'};
     let url;
     try{url=new URL(name);}catch{return {ok:false,error:'INVALID_SUBTITLE_SOURCE'};}
-    if(url.protocol!=='https:'||!/(^|\.)youtube\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)return {ok:false,error:'INVALID_SUBTITLE_SOURCE'};
+    if(url.protocol!=='https:'||!/(^|\.)(youtube|youtube-nocookie)\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)return {ok:false,error:'INVALID_SUBTITLE_SOURCE'};
     url.searchParams.set('fmt','json3');
     url.searchParams.delete('tlang'); // the user's auto-translate setting must not replace the source language
     let text;
@@ -1694,8 +1740,8 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type!=='cindy-captions'||sender.id!==chrome.runtime.id)return;
   (async()=>{
     await learningRequest({id:crypto.randomUUID(),request:{op:'config'}},sender);
-    const tab=await chrome.tabs.get(sender.tab.id),documentId=await network.document(tab.id);
-    if(!/(^|\.)youtube\.com$/.test(new URL(tab.url).hostname))return {ok:true,cues:[]};
+    const tab=await chrome.tabs.get(sender.tab.id),topDocument=await network.document(tab.id),embedded=sender.frameId>0&&globalThis.CindySiteCaptions.embedded(sender.url),documentId=embedded?sender.documentId:topDocument;
+    if(!/(^|\.)(youtube|youtube-nocookie)\.com$/.test(new URL(embedded?sender.url:tab.url).hostname))return {ok:true,cues:[]};
     const result=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[documentId]},world:'MAIN',func:()=>{
       const p=document.querySelector('#movie_player');
       const response=p?.getPlayerResponse?.()||globalThis.ytInitialPlayerResponse;
@@ -1704,17 +1750,19 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
       // The original audio is marked audioIsDefault in the streaming formats (e.g. "en-US.4").
       const original=(response?.streamingData?.adaptiveFormats||[]).find(f=>f?.audioTrack?.audioIsDefault)?.audioTrack?.id;
       let current=null;try{const c=p?.getOption?.('captions','track');if(c?.languageCode&&!c.translationLanguage)current={language:c.languageCode,kind:c.kind||null};}catch{}
-      return {tracks:(renderer?.captionTracks||[]).slice(0,60).map(t=>({url:t.baseUrl,language:t.languageCode,kind:t.kind})),defaultIndex:audio?.defaultCaptionTrackIndex,
+      return {tracks:(renderer?.captionTracks||[]).slice(0,60).map(t=>({url:new URL(t.baseUrl,location.href).href,language:t.languageCode,kind:t.kind})),defaultIndex:audio?.defaultCaptionTrackIndex,
         audioLanguage:typeof original==='string'?original.split('.')[0]:null,current};
     }});
     const read=result?.[0]?.documentId===documentId?result[0].result:null;
     const tracks=Array.isArray(read)?read:read?.tracks||[];
-    const track=globalThis.CindyLearning.youtubeCaptionTrack(tracks,m.language,Array.isArray(read)?undefined:read?.defaultIndex,Array.isArray(read)?{}:{audioLanguage:read?.audioLanguage,current:read?.current});
+    let track=globalThis.CindyLearning.youtubeCaptionTrack(tracks,m.language,Array.isArray(read)?undefined:read?.defaultIndex,Array.isArray(read)?{}:{audioLanguage:read?.audioLanguage,current:read?.current});
+    // An embedded player omits the audio language: never settle for the target language while another track exists.
+    if(embedded&&track&&globalThis.CindyLearning.sameLanguage(track.language,m.target))track=tracks[globalThis.CindyLearning.pickCaptionTrack(tracks,{target:m.target})]||track;
     let cues=[],sourceError,machine=[];
     const tlang=globalThis.CindyLearning.youtubeTranslationLanguage(m.target);
     if(track){
       const url=new URL(track.url);
-      if(url.protocol!=='https:'||!/(^|\.)youtube\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)throw Error('INVALID_SUBTITLE_SOURCE');
+      if(url.protocol!=='https:'||!/(^|\.)(youtube|youtube-nocookie)\.com$/.test(url.hostname)||url.pathname!=='/api/timedtext'||url.username||url.password)throw Error('INVALID_SUBTITLE_SOURCE');
       url.searchParams.set('fmt','json3');
       try{cues=await fetchYoutubeCaptions(url.href);if(cues.length&&!globalThis.CindyLearning.captionsMatchLanguage(cues,track.language)){cues=[];throw Error('SUBTITLE_LANGUAGE_MISMATCH');}if(tlang){try{const u=new URL(url.href);u.searchParams.set('tlang',tlang);machine=await fetchYoutubeCaptions(u.href);}catch{}}}catch(e){
         if(!['SUBTITLE_EMPTY','SUBTITLE_RESPONSE_INVALID','SUBTITLE_UNAVAILABLE','SUBTITLE_TIMEOUT','SUBTITLE_FETCH_FAILED','SUBTITLE_LANGUAGE_MISMATCH'].includes(e.message))throw e;

@@ -4,7 +4,7 @@
   "name": "Cindy Chrome",
   "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI.",
   "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.82",
+  "version": "0.4.83",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -244,5 +244,5 @@
       "*.youtube.com"
     ]
   },
-  "releaseNotes": "快照能读取并操作 iframe 和开放 Shadow DOM 里的内容，优先列出主内容区并遵守 limit 和 maxChars，长导航不再挤掉表单；去掉无法生效的调试功能开启按钮（Chrome 不允许按需申请该权限）；配合新版 Cindy，大文件分块上传，不再需要调试功能，也不再受约 30 MB 限制。"
+  "releaseNotes": "视频字幕新增支持 X、TikTok、Dailymotion、B 站，TED、Vimeo 改进了字幕语言选择；嵌入的 YouTube、Vimeo、Dailymotion、B 站播放器也能使用。需要同时更新 Chrome 扩展。"
 }

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Cindy",
   "description": "Cindy: bilingual webpages, video subtitles, PDF reading and learning, together with browser control through Cindy.",
-  "version": "0.4.61",
+  "version": "0.4.62",
   "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApzt9+ONWqbyU7rchkOSfCr/LUeEgG+9vbl67c0fEkwKM3h1JsI07wbpOCUh3tMfwcM+eWYjRlh/iVk6Qxl2o5t85EcIQ9iCRkG8Dxwhl6qIkRI9wXrFCMfX536mEcuo08EPGbw38wRJrduAUnfe9iikIIAfIo3BQO4xWqCnXc/EL1zFDj+5IF0iEqrYkZcbQCuRlxgDLQVp3jYpxDHAUCsMSbiM6Q3ytXe5Jnq4SzPUhfSTqc75OxDk36jjZbXVICjD2E89uG7Lb9OZ+IcRRjvBhZlgoI6asW6jbGodRIump6mXTyu4Ei8LHSwJJTgzAQNYcJPfNDHpiqygyWUVT0wIDAQAB",
   "permissions": [
@@ -59,7 +59,33 @@
         "content.js"
       ],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": false,
+      "exclude_matches": [
+        "https://www.youtube.com/embed/*",
+        "https://www.youtube-nocookie.com/embed/*",
+        "https://player.vimeo.com/video/*",
+        "https://geo.dailymotion.com/player/*",
+        "https://player.bilibili.com/player.html*"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/embed/*",
+        "https://www.youtube-nocookie.com/embed/*",
+        "https://player.vimeo.com/video/*",
+        "https://geo.dailymotion.com/player/*",
+        "https://player.bilibili.com/player.html*"
+      ],
+      "js": [
+        "brand-icon.js",
+        "learning-core.js",
+        "subtitle-playback.js",
+        "ui.js",
+        "reading-ui.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "commands": {

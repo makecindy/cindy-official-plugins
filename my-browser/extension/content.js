@@ -50,7 +50,49 @@
       node('rect',{x:'15',y:'16.5',width:'6',height:'1.2',rx:'.6',fill:active?'#fff':'#111'}),node('rect',{x:'15',y:'18.6',width:'4',height:'1.2',rx:'.6',fill:active?'#fff':'#111'}));
     return svg;}
   function iconButton(label,path,fn){const b=button('',fn,'quiet icon');b.setAttribute('aria-label',label);b.title=label;const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const shape=document.createElementNS(svg.namespaceURI,'path');shape.setAttribute('d',path);svg.append(shape);b.append(svg);return b;}
-  function source(){return {url:location.href,title:document.title.slice(0,500),...(video?{time:video.currentTime}:{})};}
+  // X plays many videos under one page address, so a video is identified by its
+  // media id (shared by reposts) or its post, never by the feed's URL.
+  const xSite=/(^|\.)(x|twitter)\.com$/.test(location.hostname);
+  // Adapted players. anchor: the site's captions control, Cindy's button goes beside it.
+  // hide: the site's own caption layer. floating: no stable control bar, so the entry sits on the video.
+  // multi: several players per page, each with its own entry. external: captions come from site-captions.js.
+  const site=[
+    {id:'youtube',host:/(^|\.)(youtube|youtube-nocookie)\.com$/,player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'},
+    {id:'x',host:/(^|\.)(x|twitter)\.com$/,player:'[data-testid="videoPlayer"]',anchor:'[data-testid="captions"]',multi:true},
+    {id:'vimeo',host:/(^|\.)vimeo\.com$/,player:'.player,#player',anchor:'button[data-cc-button]',hide:'.vp-captions'},
+    {id:'ted',host:/(^|\.)ted\.com$/,player:'media-controller',anchor:'button[aria-label="Subtitles"]',hide:'div:has(> span > .whitespace-pre-line)'},
+    {id:'bilibili',host:/(^|\.)bilibili\.com$/,player:'.bpx-player-container',anchor:'.bpx-player-ctrl-subtitle',hide:'.bpx-player-subtitle-wrap',external:true},
+    {id:'tiktok',host:/(^|\.)tiktok\.com$/,player:'[class*="DivVideoPlayerContainer"]',hide:'[class*="DivCaptionContainer"]',floating:true,multi:true,external:true},
+    {id:'dailymotion',host:/(^|\.)dailymotion\.com$/,player:'.player.video_player',hide:'.subtitles_placeholder',floating:true,external:true},
+  ].find(entry=>entry.host.test(location.hostname))||{id:'generic',player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'};
+  const youtubeSite=site.id==='youtube',inFrame=!!window.parent&&window.parent!==window;
+  const playerSelector=site.player;
+  const embeddedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"],iframe[src*="geo.dailymotion.com/player/"],iframe[src*="player.bilibili.com/player.html"]';
+  function xVideoId(media){
+    const id=media.poster?.match(/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\/(\d+)\//)?.[1]||(media.closest('[data-testid="tweet"]')?.querySelector('a[href*="/status/"] time')?.parentElement?.getAttribute('href')||location.pathname).match(/\/status\/(\d+)/)?.[1];
+    return id?'x:'+id:undefined;
+  }
+  // Where a Cindy button sits in the site's own control bar. X only renders its
+  // bar while the pointer is over the player, so a missing slot is normal there.
+  function controlSlot(player){
+    const bar=site.bar&&player?.querySelector(site.bar);if(bar)return {parent:bar,before:bar.firstChild};
+    let node=site.anchor&&player?.querySelector(site.anchor);
+    while(node&&node.parentElement&&node.parentElement!==player&&node.parentElement.children.length===1)node=node.parentElement;
+    return node?.parentElement?{parent:node.parentElement,before:node}:null;
+  }
+  // Walks shadow roots too: BBC, Reddit and Archive.org keep their <video> inside web components.
+  function allMedia(){
+    const found=[];
+    const walk=(scope,depth)=>{for(const node of scope.querySelectorAll('*')){if(node.tagName==='VIDEO'||node.tagName==='AUDIO')found.push(node);let shadow=node.shadowRoot;if(!shadow&&node instanceof HTMLElement&&api.dom?.openOrClosedShadowRoot){try{shadow=api.dom.openOrClosedShadowRoot(node);}catch{}}if(shadow&&depth<8)walk(shadow,depth+1);}};
+    walk(document,0);return found;
+  }
+  function pageVideoId(media){
+    if(videoSession?.videoId)return videoSession.videoId;
+    if(xSite)return xVideoId(media);
+    if(youtubeSite&&inFrame){const id=location.pathname.match(/\/embed\/([\w-]{1,48})/)?.[1];return id?'youtube:'+id:undefined;}
+    return undefined;
+  }
+  function source(){const videoId=video?pageVideoId(video):undefined;return {url:location.href,title:document.title.slice(0,500),...(video?{time:video.currentTime}:{}),...(videoId?{videoId}:{})};}
   async function request(req,onProgress){
     const id=L.uuid(),url=location.href;requests.add(id);if(onProgress)progressHandlers.set(id,onProgress);updateFooter();
     try{const r=await sendMessage({type:'cindy-learning',id,request:{...(!['config','preferences'].includes(req.op)?{target}:{}),...req,source:req.source||source()}});if(location.href!==url)throw Error('PAGE_CHANGED');if(!r?.ok)throw Object.assign(Error(r?.error||'MODEL_UNAVAILABLE'),{stage:r?.stage,reason:r?.reason});return r;}
@@ -106,7 +148,7 @@
     body=el('main',undefined,'stack');status=el('div','','status');status.setAttribute('role','status');footer=el('footer');cancelButton=button(t.cancel,()=>{if(videoSession){videoSession.paused=true;videoSession.retryButton.hidden=false;}cancel();videoSession?.playback?.update();stopPage();note(t.cancel);},'quiet');footer.append(status,cancelButton);panel.append(header,body,footer);shadow.append(panel);document.documentElement.append(host);updateFooter();
   }
   function clear(mode){if(mode!=='settings'){cancel();stopVideo();}body.onkeydown=null;body.replaceChildren();note('');}
-  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=document.querySelector('video,audio');body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
+  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=allMedia()[0]||document.querySelector(embeddedPlayers);body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
   // Connection problems get a guide with ways out, not a red sentence in an empty panel.
   const CONNECTION_CODES=new Set(['CINDY_DISCONNECTED','UPDATE_CINDY_CHROME','NATIVE_BINDING_UNAVAILABLE','PAIRING_REQUIRED','BRIDGE_REQUEST_FAILED','SESSION_CHANGED']);
   function isConnectionProblem(e){return CONNECTION_CODES.has(e?.message||e);}
@@ -157,7 +199,7 @@
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
     if(videoTargetChanged&&videoSession)reapplyVideoTarget(nextVideoTarget);
-    const youtube=/(^|\.)youtube\.com$/.test(location.hostname);
+    const youtube=youtubeSite;
     const relevantEnable=youtube?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled;
     if(relevantEnable){nextAutoAttempt=0;if(!videoSession)autoOpen();}
     else if(!videoIsEnabled)nextAutoAttempt=Date.now()+5000;
@@ -187,13 +229,15 @@
     const epoch=panelEpoch;
     if(action==='selection'&&window.getSelection()?.toString().trim())selection();
     if(action==='settings'&&videoSession){showSettings();videoSession.overlay.openSettings(false);return;}
-    if((action==='video'||action==='open'&&/(^|\.)youtube\.com$/.test(location.hostname))&&videoSession){videoSession.overlay.openSettings();return;}
+    // Choosing another player on the page moves the session there.
+    if(action==='video'&&videoSession&&requestedMedia&&requestedMedia!==video)stopVideo();
+    if((action==='video'||action==='open'&&youtubeSite)&&videoSession){videoSession.overlay.openSettings();return;}
     // Share only setup, never the model operation. Close invalidates all clicks
     // already waiting here; a new explicit click gets the new panel epoch.
     if(!await preparePanel(epoch)||epoch!==panelEpoch||!runtimeReady())return;
     if(action==='translate-page'){const work=togglePage();showPageHome(true);await work;return;}
     if(action==='settings'){showSettings();return;}
-    if(action==='video'||(/(^|\.)youtube\.com$/.test(location.hostname)&&action!=='selection')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
+    if(action==='video'||(youtubeSite&&action!=='selection')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
     if(action==='selection'&&selected){showSelection();await translateSelection();return;}
     showPageHome();
   }
@@ -246,23 +290,32 @@
     // A running subtitle session mounts its own settings toggle in the control
     // bar; the entry must never sit beside it. YouTube fires yt-navigate-finish
     // after the session may already have auto-started, so remove, don't add.
-    if(videoSession){for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();return;}
-    const media=document.querySelector('video'),player=media?.closest('#movie_player,.html5-video-player');
-    const native=player?.querySelector('.ytp-right-controls');
+    if(videoSession&&!site?.multi){for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();return;}
+    // X keeps several players on a page: each gets its own entry, except the one
+    // the session already runs on. Other sites have one main player.
+    const slots=new Map();
+    for(const media of site?.multi?document.querySelectorAll('video'):[document.querySelector('video')]){
+      if(!media||media===video&&videoSession||!site)continue;
+      const player=media.closest(playerSelector);
+      const slot=site.floating?(player&&media.getClientRects().length?{parent:player,before:null}:null):controlSlot(player);
+      if(slot)slots.set(slot.parent,{slot,media});
+    }
     // Only mount in an adapted control bar. A generic video's parent can be
     // part of the page layout (e.g. a short-video feed), not player controls.
-    for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))if(entry.parentElement!==native)entry.remove();
-    if(!native)return;
-    let host=native.querySelector('[data-cindy-player-entry]');
+    for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))if(!slots.has(entry.parentElement))entry.remove();
+    for(const [native,{slot,media}]of slots)mountVideoEntry(native,slot,media);
+  }
+  function mountVideoEntry(native,slot,media){
+    let host=[...native.children].find(n=>n.hasAttribute('data-cindy-player-entry'));
     if(!host){
-      host=el('div');host.setAttribute('data-cindy-player-entry','');isolateHost(host,{display:'inline-flex',height:'100%','vertical-align':'top'});
-      const root=host.attachShadow({mode:'closed'});root.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;width:36px;padding:0;font-weight:600;display:inline-flex;align-items:center;justify-content:center}button svg{width:24px;height:24px;display:block}'));const control=el('div',undefined,'cindy-root'),entry=button('',()=>open('video'),'quiet');entry.setAttribute('aria-label','Cindy · '+t.video);entry.title='Cindy · '+t.video;entry.append(captionIcon(false));control.append(entry);root.append(control);
+      host=el('div');host.setAttribute('data-cindy-player-entry','');isolateHost(host,site?.floating?{position:'absolute',top:'12px',left:'12px','z-index':'60',display:'inline-flex','background-color':'rgba(18,18,17,.55)','border-radius':'9999px'}:{display:'inline-flex',height:'100%','vertical-align':'top'});
+      const root=host.attachShadow({mode:'closed'});root.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;width:36px;padding:0;font-weight:600;display:inline-flex;align-items:center;justify-content:center}button svg{width:24px;height:24px;display:block}'));const control=el('div',undefined,'cindy-root'),entry=button('',()=>{requestedMedia=site.multi?media:null;return open('video');},'quiet');entry.setAttribute('aria-label','Cindy · '+t.video);entry.title='Cindy · '+t.video;entry.append(captionIcon(false));control.append(entry);root.append(control);
       for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])host.addEventListener(event,e=>e.stopPropagation());
     }
-    if(host.parentElement!==native)native.prepend(host);
+    if(host.parentElement!==native)native.insertBefore(host,slot.before);
   }
   function mountVideoCaptions(media){
-    const player=media.closest('#movie_player,.html5-video-player')||media.parentElement;
+    const player=media.closest(playerSelector)||media.parentElement;
     player.querySelector('[data-cindy-player-entry]')?.remove();
     const overlayHost=el('div');overlayHost.setAttribute('data-cindy-captions','');
     const oldPosition=player.style.getPropertyValue('position'),oldPriority=player.style.getPropertyPriority('position');
@@ -275,8 +328,8 @@
       .caption-original{font-size:calc(var(--caption-size)*.78);font-weight:400;opacity:.86;white-space:pre-line}
       .caption-translation{font-size:var(--caption-size);margin-top:5px;white-space:pre-line}
       @media(prefers-reduced-motion:reduce){.caption-box{transition:none}}
-      .caption-bar{position:absolute;bottom:8px;right:70px;display:flex;gap:4px;align-items:center;padding:3px;border:1px solid var(--board);border-radius:9999px;background:var(--surface);pointer-events:auto;opacity:0;transition:opacity .15s}
-      .captions-root[data-controls=true] .caption-bar,.caption-bar:hover,.caption-bar:focus-within{opacity:1}.caption-bar .label{font-size:12px;padding:0 8px}.caption-bar button{padding:4px 10px}
+      .caption-bar{position:absolute;bottom:8px;right:70px;display:flex;gap:4px;align-items:center;padding:3px;border-radius:9999px;background:rgba(18,18,17,.55);pointer-events:auto;opacity:0;transition:opacity .15s}
+      .captions-root[data-controls=true] .caption-bar,.caption-bar:hover,.caption-bar:focus-within{opacity:1}.caption-bar .label{font-size:12px;padding:0 8px}.caption-bar button{min-height:0;padding:2px 6px;background:transparent;border:0}.caption-bar button svg{width:24px;height:24px;display:block}
       .caption-settings{position:absolute;bottom:56px;right:12px;width:min(292px,calc(100% - 24px));max-height:calc(100% - 68px);overflow:auto;overscroll-behavior:contain;pointer-events:auto;background:var(--card);border:1px solid var(--board);border-radius:12px}
       .caption-heading{position:sticky;top:0;z-index:1;background:var(--card);padding:10px 12px;border-bottom:1px solid var(--board);flex-wrap:nowrap}.caption-settings .status{display:none}.caption-settings footer:has(button[hidden]){display:none}.captions-root:not([data-wide=true]):has(.caption-settings:not([hidden])) .caption-box{visibility:hidden}.captions-root[data-wide=true]:has(.caption-settings:not([hidden])) .caption-box{left:calc((100% - 316px)/2);max-width:calc(100% - 340px)}.captions-root[data-compact=true] .caption-settings{left:0;right:0;width:auto;border-radius:12px 12px 0 0}.caption-notice[data-ready=true]:not(.error) .preparation-track{display:none}main{padding:12px}footer{padding:8px 12px;border-top:1px solid var(--board)}.video-list>button{flex-shrink:0}.cue small{display:block}.status.error{color:var(--danger)}
       .caption-notice{padding:12px;border-bottom:1px solid var(--board);background:var(--surface);color:var(--text);font-size:12px;line-height:18px;pointer-events:auto}.preparation-heading{display:flex;justify-content:space-between;gap:8px;font-weight:500}.preparation-track{height:4px;background:var(--board);border-radius:2px;overflow:hidden;margin:8px 0}.preparation-fill{height:100%;background:var(--text);width:0}.preparation-detail,.preparation-cache{color:var(--muted);margin-top:4px}.preparation-error{color:var(--danger);margin-top:6px;overflow-wrap:anywhere}.preparation-error:empty{display:none}.caption-notice button{margin-top:8px}
@@ -292,7 +345,7 @@
     bar.append(toggle);
     const controlHost=el('div');controlHost.setAttribute('data-cindy-player-control','');isolateHost(controlHost,{display:'inline-flex',height:'100%','vertical-align':'top'});
     const cr=controlHost.attachShadow({mode:'closed'});cr.append(el('style',U.css+'.cindy-root{display:flex;align-items:center;height:100%;background:transparent}button{color:#fff!important;background:transparent!important;border:0!important;min-height:36px;padding:0 10px}button svg{width:24px;height:24px;display:block}'));const control=el('div',undefined,'cindy-root');cr.append(control);
-    const placeControl=()=>{const native=player.querySelector('.ytp-right-controls');if(native){if(controlHost.parentElement!==native)native.prepend(controlHost);if(toggle.parentElement!==control)control.append(toggle);bar.hidden=true;}else{if(toggle.parentElement!==bar)bar.append(toggle);controlHost.remove();bar.hidden=false;}};placeControl();
+    const placeControl=()=>{const slot=controlSlot(player),native=slot?.parent;if(native){if(controlHost.parentElement!==native)native.insertBefore(controlHost,slot.before);if(toggle.parentElement!==control)control.append(toggle);bar.hidden=true;}else{if(toggle.parentElement!==bar)bar.append(toggle);controlHost.remove();bar.hidden=xSite&&media.textTracks?.length>0;}};placeControl();
     for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])controlHost.addEventListener(event,e=>e.stopPropagation());
     const st=U.subtitleStatusCopy(locale),notice=el('div','', 'caption-notice'),noticeText=el('div','','preparation-error'),codeText=el('div','','detail-code'),retry=button(t.retrySubtitles,()=>videoSession?.retry(),'quiet');retry.hidden=true;const useSite=button(t.useSiteCaptions,()=>videoSession?.retry(),'quiet'),importBtn=button(t.subtitles,importSubtitleFile,'quiet'),actions=el('div',undefined,'caption-actions'),hint=el('div','','caption-hint');hint.hidden=true;useSite.hidden=true;importBtn.hidden=true;let noticeCode='';
     const heading=el('div',undefined,'preparation-heading'),percent=el('span','0%'),track=el('div',undefined,'preparation-track'),fill=el('div',undefined,'preparation-fill'),detail=el('div','','preparation-detail'),cacheDetail=el('div','','preparation-cache');
@@ -319,7 +372,7 @@
       track.setAttribute('aria-valuetext',percent.textContent);notice.dataset.ready=String(ready);notice.classList.toggle('error',noticeError);
       if(!ready)toggle.title=t.video+' · '+(noticeError?st.needsRetry:session.paused?st.paused:st.preparingShort);
       const stageText=st.stages[phase]||st.preparing;
-      detail.textContent=empty||sourceProblem?t.captionsUnavailableBody:session.paused?st.stages.paused:ready?(buffer.complete?st.stages.prepared:st.preparedTo.replace('{time}',until)):p.stage==='failed'?st.stages.failed:(session.words?.length&&until?st.preparingTo.replace('{time}',until):st.preparingStart);
+      detail.textContent=empty||sourceProblem?(noticeCode==='SUBTITLE_LOGIN_REQUIRED'?U.error(noticeCode,locale):youtubeSite?t.captionsUnavailableBody:t.captionsUnavailableSite):session.paused?st.stages.paused:ready?(buffer.complete?st.stages.prepared:st.preparedTo.replace('{time}',until)):p.stage==='failed'?st.stages.failed:(session.words?.length&&until?st.preparingTo.replace('{time}',until):st.preparingStart);
       stage.textContent=ready||empty||sourceProblem||p.stage==='failed'||session.paused?'':stageText;
       cacheDetail.textContent=empty||sourceProblem?'':p.cacheError?st.cacheFailed+' · '+t.errorDetails+' '+U.errorDetail(p.cacheError):p.saved?st.saved+(p.cached?' · '+st.cacheHit+' '+p.cached:''):p.complete?st.temporary:'';
       cacheDetail.classList.toggle('warning',!!p.cacheError);
@@ -347,10 +400,14 @@
         size=Math.max(11,size*.87);surface.style.setProperty('--caption-size',size+'px');
       }
     };
+    // X fullscreens an element inside its player, which keeps its small page-layout size.
+    const frameOf=()=>{const full=document.fullscreenElement;return full&&player.contains(full)&&full.contains(media)?full:player;};
+    // Several players fade their bar with CSS rather than removing it: its button must actually be showing.
+    const siteControl=()=>{const anchor=site.anchor&&player.querySelector(site.anchor);if(!anchor||!anchor.getClientRects().length)return null;for(let node=anchor;node&&node!==player.parentElement;node=node.parentElement){const style=getComputedStyle(node);if(style.visibility==='hidden'||Number(style.opacity)<.1)return null;}return anchor;};
     const syncControls=()=>{
       const native=player.querySelector('.ytp-chrome-bottom'),hasNative=!!native||!!player.querySelector('.ytp-right-controls');
-      const visible=hasNative?!player.classList.contains('ytp-autohide'):media.paused||surface.dataset.controls==='true';
-      const p=player.getBoundingClientRect(),barRect=native?.getBoundingClientRect();
+      const visible=hasNative?!player.classList.contains('ytp-autohide'):media.paused||surface.dataset.controls==='true'||!!siteControl();
+      const p=frameOf().getBoundingClientRect(),barRect=native?.getBoundingClientRect();
       const nativeRight=player.querySelector('.ytp-right-controls');
       if(nativeRight){
         const others=[...nativeRight.children].filter(n=>n!==controlHost).reduce((sum,n)=>sum+n.getBoundingClientRect().width,0);
@@ -363,7 +420,7 @@
       const visibleTop=Math.max(0,-p.top),visibleBottom=Math.min(p.height,innerHeight-p.top);
       const menuBottom=Math.max(56,p.height-visibleBottom+8);
       settings.style.bottom=menuBottom+'px';settings.style.maxHeight=Math.max(0,p.height-visibleTop-menuBottom-8)+'px';
-      const clearance=barRect?.height?Math.max(0,p.bottom-barRect.top)+12:60;
+      const control=siteControl(),clearance=barRect?.height?Math.max(0,p.bottom-barRect.top)+12:control?Math.max(80,p.bottom-control.getBoundingClientRect().top+24):60;
       surface.style.setProperty('--caption-bottom',(visible?Math.max(52,Math.min(p.height*.35,clearance)):Math.max(12,Math.min(28,p.height*.025)))+'px');fitCaption();
     };
     const showControls=()=>{surface.dataset.controls='true';syncControls();clearTimeout(controlsTimer);controlsTimer=setTimeout(()=>{if(settings.hidden)surface.dataset.controls='false';syncControls();},2200);};player.addEventListener('pointermove',showControls);showControls();
@@ -372,10 +429,10 @@
     for(const event of ['click','dblclick','pointerdown','pointerup','keydown','keyup','keypress'])overlayHost.addEventListener(event,e=>e.stopPropagation());
     const restoreTracks=()=>{for(const [track,mode]of nativeTracks)if(track.mode==='hidden')track.mode=mode;};
     const restoreNodes=()=>{for(const [node,old]of nativeNodes){if(node.style.getPropertyValue('visibility')==='hidden'){if(old.value)node.style.setProperty('visibility',old.value,old.priority);else node.style.removeProperty('visibility');}}nativeNodes.clear();};
-    const suppressNative=()=>{for(const node of player.querySelectorAll('.ytp-caption-window-container')){if(!nativeNodes.has(node))nativeNodes.set(node,{value:node.style.getPropertyValue('visibility'),priority:node.style.getPropertyPriority('visibility')});node.style.setProperty('visibility','hidden','important');}};
-    const playerFrame=player.matches('#movie_player,.html5-video-player');
+    const suppressNative=()=>{if(!site?.hide)return;for(const node of player.querySelectorAll(site.hide)){if(!nativeNodes.has(node))nativeNodes.set(node,{value:node.style.getPropertyValue('visibility'),priority:node.style.getPropertyPriority('visibility')});node.style.setProperty('visibility','hidden','important');}};
+    const playerFrame=player.matches(playerSelector);
     const position=()=>{
-      const p=player.getBoundingClientRect(),r=playerFrame?p:media.getBoundingClientRect();
+      const p=frameOf().getBoundingClientRect(),r=playerFrame?p:media.getBoundingClientRect();
       // YouTube temporarily moves the video outside its viewport while loading.
       // Its return can be position-only (no ResizeObserver notification), so anchor
       // captions and settings to the stable player, not that transient video rect.
@@ -387,8 +444,8 @@
     };
     const resize=new ResizeObserver(position);resize.observe(media);resize.observe(player);position();
     const observer=new MutationObserver(()=>{placeControl();syncControls();if(currentText&&prefs.videoMode!=='off')suppressNative();else{restoreNodes();if(prefs.videoMode==='off')restoreTracks();}});observer.observe(player,{childList:true,subtree:true});
-    const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
-    const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{position();videoHandler?.();};
+    let lastControlSync=0;const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(site.anchor&&time-lastControlSync>=500){lastControlSync=time;syncControls();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
+    const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{if(overlayHost.parentElement!==frameOf())frameOf().append(overlayHost);position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
     let iconOn=null;const update=()=>{surface.dataset.theme=prefs.theme||pageTheme();box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==(prefs.videoMode!=='off')){iconOn=prefs.videoMode!=='off';toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
     overlayHost.addEventListener('keydown',e=>{if(e.key==='Escape'){settings.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
@@ -458,6 +515,8 @@
   }
   // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
   function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
+  // Choosing another caption source takes the old source's timeline down at once: no stale subtitles, no translation of them.
+  function dropTimeline(session){session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
@@ -469,11 +528,25 @@
     if(session!==videoSession||session.reading)return;
     session.reading=true;clearTimeout(videoTimer);
     try {
-      if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){showVideo();return;}
-      const youtube=/(^|\.)youtube\.com$/.test(location.hostname);
+      if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){
+        // X drops players scrolled far away. Picking another one would start paid translation nobody asked for.
+        if(site?.multi)close();else showVideo();
+        return;
+      }
+      const youtube=youtubeSite;
       if(!session.imported){
-        const tracks=[...video.textTracks],track=tracks.find(x=>x.mode==='showing')||tracks.find(x=>x===session.nativeTrack)||tracks.find(x=>x.kind==='subtitles'||x.kind==='captions');
-        if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){checkSameLanguage(session,track.language);mergeCues(next);}}
+        const tracks=[...video.textTracks].filter(x=>(x.kind==='subtitles'||x.kind==='captions')&&x.label!=='clone');
+        // A site can list dozens of languages in any order: never just take the first.
+        const track=tracks.includes(session.nativeTrack)?session.nativeTrack:tracks[L.pickCaptionTrack(tracks,{page:document.documentElement.lang,target:prefs.videoTarget})];
+        if(tracks.length>1&&session.trackOptions?.length!==tracks.length){session.trackOptions=tracks.map((x,index)=>({id:String(index),label:x.label||x.language||String(index)}));session.trackId=String(tracks.indexOf(track));session.chooseTrack=id=>{session.nativeTrack=tracks[Number(id)];session.trackId=id;session.imported=false;dropTimeline(session);};videoSettings();}
+        // X draws its own captions through a "clone"; other sites through whichever track they show.
+        for(const x of video.textTracks)if(x!==track&&x.mode==='showing'&&(x.kind==='subtitles'||x.kind==='captions'))session.overlay?.track(x);
+        if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){
+          // Segmented captions arrive as the video buffers. Rebuilding on each batch cancels paid requests
+          // in flight, so a longer transcript waits until playback gets close to the end of what is known.
+          const known=session.originalCues,growing=known?.length&&next.length>known.length&&next[0].start===known[0].start&&known.at(-1).end-video.currentTime>30;
+          if(!growing){checkSameLanguage(session,track.language);mergeCues(next);}
+        }}
         if(youtube&&!session.fullTranscript&&!session.readBlocked&&Date.now()>=session.nextRead){
           session.attempts++;session.nextRead=Date.now()+Math.min(30000,3000*session.attempts);
           const requestedTarget=prefs.videoTarget,result=await sendMessage({type:'cindy-captions',language:'auto',target:requestedTarget});
@@ -483,9 +556,18 @@
           if(result?.ok){session.machineCues=Array.isArray(result.machine)?result.machine:[];session.machineTarget=requestedTarget;if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}}else throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         }
       }
+      if(site?.external&&!session.imported&&!session.fullTranscript&&!session.readBlocked&&Date.now()>=session.nextRead){
+        session.attempts++;session.nextRead=Date.now()+Math.min(30000,3000*session.attempts);
+        const result=await sendMessage({type:'cindy-site-captions',target:prefs.videoTarget,track:session.trackId,id:siteMediaId(video)});
+        if(session!==videoSession)return;
+        if(!result?.ok)throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
+        if(result.videoId)session.videoId=result.videoId;
+        if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.imported=false;session.fullTranscript=false;session.nextRead=0;dropTimeline(session);};videoSettings();}
+        if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}
+      }
       // A page without any caption track also deserves a clear answer instead of an endless wait.
-      if(!youtube&&!session.imported&&!session.words?.length)session.attempts++;
-      if(session.words?.length){session.noCaptions=false;translateCues();}else if(!session.readBlocked){session.noCaptions=session.attempts>=(youtube?3:8);note(session.noCaptions?t.noCaptions:t.waitSubtitles);session.playback?.update();}
+      if(!youtube&&!site?.external&&!session.imported&&!session.words?.length)session.attempts++;
+      if(session.words?.length){session.noCaptions=false;translateCues();}else if(!session.readBlocked){session.noCaptions=session.attempts>=(youtube||site?.external?3:8);note(session.noCaptions?t.noCaptions:t.waitSubtitles);session.playback?.update();}
     }catch(e){if(session===videoSession){session.readBlocked=e.message!=='SUBTITLE_UNAVAILABLE';session.noCaptions=session.readBlocked||session.attempts>=3;session.playback?.update();session.retryButton.hidden=false;report(e);}}
     finally{session.reading=false;if(session===videoSession)videoTimer=setTimeout(()=>readCues(session),1200);}
   }
@@ -508,6 +590,7 @@
       body.append(field(t.cindySubtitles,switchControl(t.cindySubtitles,on,next=>{applyVideoMode(next?(prefs.lastVideoMode||'both'):'off');videoSettings();})));
       if(on)body.append(field(t.show,segmented([['both',t.both],['translation',t.translationShort]],prefs.videoMode,mode=>{applyVideoMode(mode);videoSettings();})));
       // The target language can be changed at any time, even when the captions already match it.
+      if(session.trackOptions?.length>1&&session.chooseTrack){const sourceTrack=el('select');sourceTrack.setAttribute('aria-label',t.subtitleSource);for(const option of session.trackOptions){const o=el('option',option.label);o.value=option.id;sourceTrack.append(o);}sourceTrack.value=session.trackId;sourceTrack.onchange=()=>{session.chooseTrack(sourceTrack.value);clearTimeout(videoTimer);readCues(session);};body.append(field(t.subtitleSource,sourceTrack));}
       const languageRow=button('',()=>{videoSubpage='language';videoSettings();},'nav-row');languageRow.append(el('span',t.videoLanguage),el('span',(L.languageName(prefs.videoTarget)||prefs.videoTarget)+'  ›','nav-value'));body.append(languageRow);
       if(on&&session.sameLanguage){const same=el('small',undefined,'inline-note');same.append(el('span',t.sameLanguage.replace('{language}',L.languageName(prefs.videoTarget)||prefs.videoTarget)),button(t.translateAnyway,()=>{session.sameLanguage=false;session.paused=false;session.failed=false;translateCues();session.playback?.update();videoHandler?.();session.overlay?.update();videoSettings();},'text-link'));body.append(same);}
       if(!on)body.append(el('small',t.offHint));
@@ -526,16 +609,39 @@
     cueList();
   }
   function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
+  let requestedMedia=null;
+  // A feed holds many players; the one playing on screen is the one meant.
+  function siteMediaId(media){
+    if(site?.id==='tiktok')return (media.closest('[id^="xgwrapper-"]')?.id.match(/(\d+)$/)||location.pathname.match(/\/video\/(\d+)/))?.[1];
+    return undefined;
+  }
+  function pickMedia(){
+    const all=allMedia(),shown=all.filter(v=>v.getClientRects().length);
+    // TikTok draws on a canvas over a zero-height <video>: the player's box is the visible one.
+    const area=v=>{const r=(v.closest(playerSelector)||v).getBoundingClientRect();return Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0));};
+    // One player can hold an ad and the programme: the programme is the one with captions.
+    const captioned=v=>site.multi||!v.textTracks?0:[...v.textTracks].some(x=>x.kind==='subtitles'||x.kind==='captions')?0:1;
+    return shown.filter(v=>area(v)>0).sort((a,b)=>captioned(a)-captioned(b)||Number(a.paused)-Number(b.paused)||area(b)-area(a))[0]||shown[0]||all[0];
+  }
   async function showVideo(){
-    clear('video');video=[...document.querySelectorAll('video,audio')].find(v=>v.getClientRects().length)||document.querySelector('video,audio');
+    clear('video');video=requestedMedia?.isConnected?requestedMedia:pickMedia();requestedMedia=null;
+    // The player lives in an embedded frame, which runs its own copy of this script.
+    if(!video&&document.querySelector(embeddedPlayers)){
+      // Several embedded players can share a page: start only the one most on screen, never all of them.
+      const onScreen=f=>{const r=f.getBoundingClientRect();return Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0));};
+      const frame=[...document.querySelectorAll(embeddedPlayers)].sort((a,b)=>onScreen(b)-onScreen(a))[0];
+      if(frame&&onScreen(frame)>0)sendMessage({type:'cindy-frame-video',src:frame.src}).catch(()=>{});
+      close();return;
+    }
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
     const media=video;
     if(cueMedia!==media||media.currentSrc!==cueMediaSource){cues=[];cueMedia=media;cueMediaSource=media.currentSrc;}
     cues=[];const session=videoSession={src:media.currentSrc,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0};
     session.retry=async()=>{if(!subtitleSegmentation||!subtitleEditorial)await configure();session.retryButton.hidden=true;for(const chunk of session.chunks||[]){delete chunk.error;delete chunk.recovery;delete chunk.retryAt;delete chunk.retries;}session.failed=false;session.paused=false;session.attempts=0;session.nextRead=0;session.readBlocked=false;clearTimeout(videoTimer);return readCues(session);};
     // A manually opened player session is restorable on every supported site,
-    // including YouTube when automatic opening is disabled.
-    rememberVideo(true);
+    // including YouTube when automatic opening is disabled. An X feed is the
+    // exception: after a reload its address no longer says which video was meant.
+    if(!xSite||/\/status\/\d+/.test(location.pathname))rememberVideo(true);
     session.retryButton=button(t.retrySubtitles,session.retry);session.retryButton.hidden=true;videoSettings();session.overlay=mountVideoCaptions(media);note(t.waitSubtitles);
     videoHandler=()=>{
       session.playback?.update();
@@ -626,14 +732,16 @@
     clearTimeout(agentMarkTimer);
     agentMarkTimer=setTimeout(endAgentMark,AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0;
   async function autoOpen(){
     if(!runtimeReady()||autoOpening||videoSession)return;
-    const youtube=/(^|\.)youtube\.com$/.test(location.hostname)&&!!document.querySelector('video');
-    if(!youtube&&(translated||translations.size))return;
     if(document.querySelector('video,audio'))ensureVideoEntry();
+    // An embedded player only starts when someone asks for it.
+    if(inFrame)return;
+    const youtube=youtubeSite&&!!document.querySelector('video');
+    if(!youtube&&(translated||translations.size))return;
     let stored;
     try{stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};}catch{return;}
     // YouTube subtitles are enabled on a fresh install. An explicit false is
@@ -651,12 +759,14 @@
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
     try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
   }
-  sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
+  if(!inFrame)sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   // The toolbar icon has a light and a dark version; the page knows the browser's appearance.
   {const scheme=globalThis.matchMedia?.('(prefers-color-scheme: dark)');const tell=()=>{if(runtimeReady())sendMessage({type:'cindy-color-scheme',dark:!!scheme.matches}).catch(()=>{});};if(scheme&&window===window.top){tell();scheme.addEventListener?.('change',tell,{signal:lifecycle.signal});}}
-  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=/(^|\.)youtube\.com$/.test(location.hostname);if(!videoSession)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
+  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=youtubeSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
+  // Several players render their control bar on hover; do not leave the entry to the one-second timer.
+  if(site.id!=='generic'&&!youtubeSite){let entryTimer;document.addEventListener('pointerover',e=>{if(!e.target.closest?.(playerSelector))return;clearTimeout(entryTimer);entryTimer=setTimeout(()=>{if(runtimeReady())ensureVideoEntry();},120);},{capture:true,passive:true,signal:lifecycle.signal});}
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){videoSession?.overlay?.closeSettings();if(!videoSession)hidePanel();selectionButton?.remove();}},{signal:lifecycle.signal});
   // Learning shortcuts follow the video, not the panel: they are only skipped inside editable fields and Cindy's own surfaces.
   function videoShortcut(e){if(!videoSession||!e.isTrusted||e.metaKey||e.ctrlKey||e.altKey||e.shiftKey||prefs.videoMode==='off')return;const path=e.composedPath(),target=path[0];if(target instanceof Element&&(/INPUT|TEXTAREA|SELECT/.test(target.tagName)||target.isContentEditable))return;if(path.some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-panel')||n.hasAttribute('data-cindy-captions'))))return;const actions={a:()=>jump(Math.max(0,activeCue-1)),s:()=>jump(Math.max(0,activeCue)),d:()=>jump(Math.min(cues.length-1,activeCue+1)),q:()=>{autoPause=!autoPause;videoSettings();},r:()=>{repeat=!repeat;videoSettings();}};const run=actions[e.key];if(!run)return;e.preventDefault();e.stopPropagation();run();}
