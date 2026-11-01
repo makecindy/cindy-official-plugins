@@ -468,29 +468,29 @@ function mergeChanges(base, mine, latest) {
 let saves = 0;
 // Returns whether the change landed. On failure the page goes back to what is stored.
 async function save() {
-  try {
-    // Captured now: while waiting for the lock, the brain may change the store and refresh cfg.
-    const mine = JSON.parse(JSON.stringify(cfg));
-    const base = JSON.parse(stored);
-    const next = await withConfigLock(async () => {
-      const merged = mergeChanges(base, mine, withRules(await readStore()));
-      const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(merged) });
+  // All of it inside the lock, so a queued save starts from what this one wrote and from the latest edits.
+  const landed = await withConfigLock(async () => {
+    try {
+      const mine = JSON.parse(JSON.stringify(cfg));
+      const next = mergeChanges(JSON.parse(stored), mine, withRules(await readStore()));
+      const res = await fetch('/kv', { method: 'PUT', body: JSON.stringify(next) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return merged;
-    });
-    // Keep what was typed while the write was in flight.
-    cfg = mergeChanges(mine, cfg, next);
-    stored = JSON.stringify(next);
-    saves += 1;
-    storeError = '';
-    channel.postMessage({ from: 'settings', type: 'config-changed' });
-    await publishModels();
-    return true;
-  } catch (error) {
-    cfg = JSON.parse(stored);
-    storeError = t('storeSaveFailed', { error: error && error.message });
-    return false;
-  }
+      // Keep what was typed while the write was in flight.
+      cfg = mergeChanges(mine, cfg, next);
+      stored = JSON.stringify(next);
+      saves += 1;
+      storeError = '';
+      return true;
+    } catch (error) {
+      cfg = JSON.parse(stored);
+      storeError = t('storeSaveFailed', { error: error && error.message });
+      return false;
+    }
+  });
+  if (!landed) return false;
+  channel.postMessage({ from: 'settings', type: 'config-changed' });
+  await publishModels();
+  return true;
 }
 
 function ask(kind, payload, timeoutMs = 30000) {
