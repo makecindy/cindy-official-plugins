@@ -303,7 +303,7 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     const bySelector=await act('upload',{...T,selector:'input[type=file]',files:[{name:'t.txt',data:'AQID'}]});
     check('a selector finds a file input that only exists in a frame',bySelector.ok&&bySelector.files?.[0]?.name==='t.txt',JSON.stringify(bySelector));
     const hid=await act('open',{url:'http://parity.test/hidden-frames'});
-    let hs;for(let i=0;i<30;i++){hs=await act('snapshot',{tabId:hid.tabId,url:'http://parity.test/hidden-frames',maxChars:30000});if(/Inner text shown/.test(hs.text||''))break;await new Promise(r=>setTimeout(r,200));}
+    let hs;for(let i=0;i<30;i++){hs=await act('snapshot',{tabId:hid.tabId,url:'http://parity.test/hidden-frames',maxChars:30000});if(/Inner text shown/.test(hs.text||'') && /Inner text moved/.test(hs.text||'') && /Go moved/.test(hs.elements||''))break;await new Promise(r=>setTimeout(r,200));}
     check('a shown frame is read',hs.text.includes('Inner text shown'),hs.text);
     for(const who of ['vishidden','faded','insidehidden'])check('a frame hidden by CSS ('+who+') stays out, nested ones too',!hs.text.includes('Inner text '+who) && !hs.elements.includes('Go '+who),hs.text);
     const count=(text,needle)=>text.split(needle).length-1;
@@ -317,6 +317,12 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('limit 1 returns one element in all',one.elements.split('\n').filter(Boolean).length===1 && one.truncated===true,one.elements);
     const four=await act('snapshot',{...T,limit:4,maxChars:30000});
     check('limit 4 returns at most four and still reaches frames',four.elements.split('\n').filter(Boolean).length===4 && /Go (same|cross|nested)/.test(four.elements),four.elements);
+    // A new snapshot retires the refs of a frame it no longer reads.
+    const goSame=ref('Go same');
+    await context.pages().find(p=>p.url()===T.url).evaluate(()=>{document.getElementById('same').style.display='none';});
+    await act('snapshot',{...T,maxChars:30000});
+    const retired=await act('click',{...T,ref:goSame});
+    check('a frame hidden after a snapshot leaves its refs stale',retired.error==='STALE_REF',JSON.stringify(retired));
     // Refs of a frame that navigated are gone.
     await context.pages().find(p=>p.url()===T.url).frames().find(f=>f.url().includes('who=cross')).evaluate(()=>{location.href='/frame-inner?who=moved';});
     await new Promise(r=>setTimeout(r,500));

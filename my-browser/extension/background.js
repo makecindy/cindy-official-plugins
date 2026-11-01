@@ -241,6 +241,9 @@ async function frameForAction(job,tabId,documentId) {
   return {documentId:here[0].documentId,url:here[0].result.url};
 }
 async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
+  // A new snapshot retires every older ref on the page, including those of frames this one will not read
+  // (hidden since, past the frame limit, or refused by policy).
+  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'ISOLATED',func:() => { globalThis.__myBrowserSnapshot = null; }}).catch(() => {});
   const top = sanitizeResult(await runPageOperation(job,tabId,documentId,tabUrl,tabUrl,target));
   if (!top) return fail('NO_PAGE_RESULT','Chrome returned no result. Check the page before repeating an interaction.');
   const frames = await childFrames(tabId,documentId);
