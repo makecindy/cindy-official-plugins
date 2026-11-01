@@ -404,6 +404,26 @@ test('资料库已有档案时旧版通讯录标记为可导入，手动导入�
   } finally {
     a.close();
   }
+
+  // 回归（PR #264 review）：复制完旧数据、合并前中断时，旧档案已按原 id 在库里。重试必须沿用记下的
+  // 待合并映射继续合并，不能因「库里已有」跳过并标成完成。拆开后的库正是这个中断现场。
+  const lib = new DatabaseSync(path.join(libDir, 'contacts.sqlite'));
+  lib.prepare('REPLACE INTO plugin_meta (key, value) VALUES (?, ?)').run(
+    'legacy_import',
+    JSON.stringify({ status: 'partial', at: new Date().toISOString(), pending: [['00000000-0000-4000-8000-000000000001', existingId]] }),
+  );
+  lib.close();
+  const b = boot({ libDir, legacyDb: legacy });
+  try {
+    assert.equal(ok(await b.call('stats')).people, 120);
+    assert.equal((await b.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    const resumed = ok(await b.call('get', { id: existingId }));
+    assert.match(resumed.narrative, /第 1 位的故事。/);
+    assert.ok(resumed.events.some((e) => e.text === '事件 1'));
+    assert.equal((await b.view('state')).result.legacy.status, 'done');
+  } finally {
+    b.close();
+  }
 });
 
 test('没有旧版通讯录时不导入，资料库保持为空', async () => {

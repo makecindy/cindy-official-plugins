@@ -1691,9 +1691,17 @@ function cell(v) {
  * 同一个人——先按原 id 导入旧档案，再用普通合并（mergeContacts）并入已有档案：别名取并集、摘要补空、
  * 叙事与备注拼接，并留下可「拆开」的合并记录。同名分组并入已有分组。
  * 只有名字相似、没有共同身份的旧档案照常导入，之后可用「查找重复」合并。
+ * pending 是上次中断或合并失败时留下的映射：那些旧档案已按原 id 在库里，不能再靠「库里没有」识别，
+ * 两边都还在就继续合并。
  */
-async function legacyMergeMaps() {
+async function legacyMergeMaps(pending) {
   const contacts = new Map();
+  for (const [sourceId, targetId] of Array.isArray(pending) ? pending : []) {
+    if (!sourceId || !targetId || sourceId === targetId) continue;
+    const [src] = await q('SELECT id FROM contacts WHERE id = ?', [cell(sourceId)]);
+    const [dst] = await q('SELECT id FROM contacts WHERE id = ?', [cell(targetId)]);
+    if (src && dst) contacts.set(sourceId, targetId);
+  }
   for (let offset = 0; ; offset += 200) {
     const { rows } = await nodeCall('legacy/read', { table: 'contact_identities', offset, limit: 200 }, { timeoutMs: 60000 });
     for (const r of rows) {
@@ -1761,8 +1769,9 @@ async function importLegacy(opts) {
   const merged = n > 0;
   state.importing = 'legacy';
   try {
-    await batch([setMetaStmt('legacy_import', { status: 'partial', at: nowIso() })]);
-    const maps = merged ? await legacyMergeMaps() : null;
+    const maps = merged ? await legacyMergeMaps(done && done.status === 'partial' ? done.pending : null) : null;
+    // 先记下待合并映射再复制：中途退出后重试，已按原 id 落库的旧档案仍能找回要并入的目标。
+    await batch([setMetaStmt('legacy_import', { status: 'partial', at: nowIso(), ...(maps ? { pending: [...maps.contacts] } : {}) })]);
     const total = Object.values(probe.counts).reduce((a, b) => a + b, 0) || 1;
     let copied = 0;
     for (const spec of LEGACY_IMPORT) {
@@ -1800,7 +1809,13 @@ async function importLegacy(opts) {
       at: nowIso(),
       counts,
       ...(merged ? { merged: true, mergedInto: maps.contacts.size - mergeFailures.length } : {}),
-      ...(mergeFailures.length ? { message: `${mergeFailures.length} 份旧档案未能并入已有档案，可用「查找重复」手动合并`, mergeFailures } : {}),
+      ...(mergeFailures.length
+        ? {
+            message: `${mergeFailures.length} 份旧档案未能并入已有档案，可重试导入或用「查找重复」手动合并`,
+            mergeFailures,
+            pending: mergeFailures.map((f) => [f.sourceId, f.targetId]),
+          }
+        : {}),
     };
     await batch([setMetaStmt('legacy_import', result)]);
     state.legacy = result;
