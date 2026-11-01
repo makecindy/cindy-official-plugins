@@ -68,7 +68,7 @@ h1.attachShadow({mode:'open'}).textContent='Saved ok';
 const inner=h2.attachShadow({mode:'open'});inner.innerHTML='<p>Outer shadow para</p><div id=deep></div>';inner.getElementById('deep').attachShadow({mode:'open'}).textContent='Deep shadow text';
 </script>`);
     if(req.url==='/slow-frame')return res.end(`<title>Slow</title><div id=late>top ready</div><iframe src="/slow-inner" width=400 height=200></iframe>`);
-    if(req.url==='/slow-inner')return res.end(`<title>SlowInner</title><button id=b>Early button</button><script>setTimeout(()=>{document.body.insertAdjacentHTML('beforeend','<div id=late>late</div>');},7000);</script>`);
+    if(req.url==='/slow-inner')return res.end(`<title>SlowInner</title><button id=b>Early button</button><script>setTimeout(()=>{document.body.insertAdjacentHTML('beforeend','<div id=late>late</div>');},2500);</script>`);
     if(req.url==='/hidden-frames')return res.end(`<title>Hidden</title><h1>Hidden frames</h1>
 <iframe src="/frame-inner?who=shown" width=300 height=100></iframe>
 <iframe src="/frame-inner?who=vishidden" width=300 height=100 style="visibility:hidden"></iframe>
@@ -336,6 +336,11 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('a drag with both ends in one frame runs there',frameDrag.ok,JSON.stringify(frameDrag));
     const endOnly=await act('drag',{...T,startX:5,startY:5,endRef:dref('Field same')});
     check('a drag whose only ref is the end finds its frame',endOnly.error!=='STALE_REF',JSON.stringify(endOnly));
+    // A frame that lacks the scoped region answers at once: no 10 s wait, and no false 'incomplete'.
+    const tScoped=Date.now();
+    const scopedTop=await act('snapshot',{...T,selector:'#topb',maxChars:30000});
+    const scopedMs=Date.now()-tScoped;
+    check('a scoped snapshot is not held up by frames without the region ('+scopedMs+' ms)',scopedTop.ok && scopedMs<4000 && scopedTop.truncated!==true && /Top button/.test(scopedTop.elements),JSON.stringify({ms:scopedMs,truncated:scopedTop.truncated,elements:scopedTop.elements}));
     const tiny=await act('snapshot',{...T,maxChars:256});
     check('maxChars holds with frames in the page',(tiny.text||'').length<=256,String((tiny.text||'').length));
     // A new snapshot retires the refs of a frame it no longer reads. The ref comes from a fresh, full
@@ -396,7 +401,7 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
 
 test('real Chrome: shadow text is read whole, and a late snapshot cannot take refs back',enabled,async()=>{
   const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
-  const {act,context,close}=await launch(false);
+  const {act,worker,context,close}=await launch(false);
   try{
     const sh=await act('open',{url:'http://parity.test/shadow-text'});
     const S={tabId:sh.tabId,url:'http://parity.test/shadow-text'};
@@ -408,6 +413,8 @@ test('real Chrome: shadow text is read whole, and a late snapshot cannot take re
     const nested=await act('snapshot',{...S,selector:'#h2',maxChars:30000});
     check('a selected host reads nested shadow roots',count(nested.text,'Outer shadow para')===1 && count(nested.text,'Deep shadow text')===1,nested.text);
     // A frame read that outlives its deadline must not overwrite the refs of the snapshot taken after it.
+    // Shrink the frame deadline and lift the frame wait so a read outlives its deadline within seconds.
+    await worker.evaluate(()=>{FRAME_DEADLINE_MS=300;FRAME_WAIT_MS=12000;});
     const slow=await act('open',{url:'http://parity.test/slow-frame'});
     const W={tabId:slow.tabId,url:'http://parity.test/slow-frame'};
     const t0=Date.now();
@@ -415,10 +422,11 @@ test('real Chrome: shadow text is read whole, and a late snapshot cannot take re
     const second=await act('snapshot',{...W,maxChars:30000});
     const goRef=(new RegExp('\\[([a-f0-9]{32})\\] \\S+ Early button')).exec(second.elements)?.[1];
     check('the second snapshot lists the frame button',first.ok && !!goRef,second.elements);
-    await new Promise(r=>setTimeout(r,Math.max(0,9000-(Date.now()-t0))));
+    await new Promise(r=>setTimeout(r,Math.max(0,4500-(Date.now()-t0))));
     const slept=Date.now()-t0;
     const clicked=await act('click',{...W,ref:goRef});
     check('a frame that could not be read in time marks the first snapshot incomplete',first.truncated===true,JSON.stringify({truncated:first.truncated}));
+    await worker.evaluate(()=>{FRAME_DEADLINE_MS=5000;FRAME_WAIT_MS=1500;});
     check('the ref of the newest snapshot survives the late frame read ('+slept+' ms in)',clicked.ok,JSON.stringify(clicked));
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);

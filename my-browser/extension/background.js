@@ -187,7 +187,11 @@ function debuggerDenied() {
 // Refs are unique across a page, so nothing about frames reaches Cindy or the agent: a snapshot lists
 // what every frame shows, and an action finds the frame that holds its ref. Evaluate, extract and
 // selector-addressed actions stay on the top document.
-const FRAME_MAX = 15, FRAME_DEADLINE_MS = 5000, SNAPSHOT_LIMIT_DEFAULT = 80;
+const FRAME_MAX = 15, SNAPSHOT_LIMIT_DEFAULT = 80;
+// A frame is read under one deadline, and waits for a scoped region only briefly: the top document has
+// already waited for it, and a frame that lacks the region must answer "not here" before the deadline, not
+// after it. Not constants only so the real-browser tests can shrink them to line up a late read.
+let FRAME_DEADLINE_MS = 5000, FRAME_WAIT_MS = 1500;
 async function runPageOperation(job,tabId,documentId,url,tabUrl,target) {
   // The re-check on arrival compares this document's own address; an about: frame has no site of its own.
   // One entry per document: frames of one snapshot are read side by side under the same job id.
@@ -271,7 +275,8 @@ async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
   const reads = await Promise.all(frames.slice(0,FRAME_MAX).map(async frame => {
     if (!frame.url.startsWith('about:') && !P.check(policy,'snapshot',frame.url).ok) return null;
     try { if (!frame.url.startsWith('about:')) network.assertSupported?.(frame.url,PAGE_ACCESS); } catch { return null; }
-    const done = await withDeadline(runPageOperation(job,tabId,frame.documentId,frame.url,tabUrl,target),FRAME_DEADLINE_MS,Error('FRAME_DEADLINE')).catch(() => null);
+    const frameJob = {...job,payload:{...job.payload,waitMs:Math.min(job.payload.waitMs ?? 10000,FRAME_WAIT_MS)}};
+    const done = await withDeadline(runPageOperation(frameJob,tabId,frame.documentId,frame.url,tabUrl,target),FRAME_DEADLINE_MS,Error('FRAME_DEADLINE')).catch(() => null);
     // A frame that does not hold the scoped region is no failure; one that could not be read is.
     if (!done?.ok && done?.error !== 'CONTENT_NOT_READY') cut = true;
     return done?.ok ? {frame,done} : null;
