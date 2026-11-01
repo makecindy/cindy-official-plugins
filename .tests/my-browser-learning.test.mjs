@@ -514,7 +514,7 @@ test('site captions read: each site, its own hosts only',async()=>{
   assert.deepEqual((await run('tiktok',{id:'88'},{},{url:'https://www.tiktok.com/foryou',item})).tracks,[],'the first post\'s JSON never answers for another');
   const state={bvid:'BV1',videoData:{pages:[{cid:11},{cid:22}]}},api='https://api.bilibili.com/x/player/v2?bvid=BV1&cid=22',url='https://www.bilibili.com/video/BV1?p=2';
   const bili=await run('bilibili',{target:'zh-CN'},{[api]:{data:{subtitle:{subtitles:[{lan:'ai-zh',lan_doc:'中文',subtitle_url:'//aisubtitle.hdslb.com/z.json'},{lan:'ai-en',lan_doc:'English',subtitle_url:'//aisubtitle.hdslb.com/e.json'}]}}},'https://aisubtitle.hdslb.com/e.json':{body:[]}},{url,state});
-  assert.equal(bili.chosen,'ai-en');assert.equal(bili.format,'bilibili');assert.equal(bili.videoId,'bilibili:BV1_2');assert.equal(bili.asked[0][1],'include','the player API needs the page login');assert.equal(bili.asked[1][1],'omit');
+  assert.equal(bili.chosen,'ai-en');assert.equal(bili.format,'bilibili');assert.equal(bili.videoId,'bilibili:BV1_22','the episode (cid) is part of the identity');assert.equal(bili.asked[0][1],'include','the player API needs the page login');assert.equal(bili.asked[1][1],'omit');
   assert.equal((await run('bilibili',{},{[api]:{data:{need_login_subtitle:true,subtitle:{subtitles:[]}}}},{url,state})).error,'SUBTITLE_LOGIN_REQUIRED');
   assert.deepEqual((await run('bilibili',{},{},{url:'https://www.bilibili.com/'})).tracks,[]);
 });
@@ -527,7 +527,7 @@ test('bilibili embedded player: cid from the address when the page has no state'
   Object.defineProperty(globalThis,'location',{value:new URL('https://player.bilibili.com/player.html?bvid=BV1xx&cid=4455'),configurable:true,writable:true});
   globalThis.__INITIAL_STATE__=undefined;
   try{
-    await globalThis.CindySiteCaptions.read('bilibili',{});
+    const embedded=await globalThis.CindySiteCaptions.read('bilibili',{});
     assert.equal(asked[0],'https://api.bilibili.com/x/player/v2?bvid=BV1xx&cid=4455');
     asked.length=0;Object.defineProperty(globalThis,'location',{value:new URL('https://player.bilibili.com/player.html?bvid=BV1xx&cid=../x'),configurable:true,writable:true});
     await globalThis.CindySiteCaptions.read('bilibili',{});

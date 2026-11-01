@@ -53,7 +53,7 @@
         const reply=JSON.parse(await fetchText(`https://api.bilibili.com/x/player/v2?bvid=${encodeURIComponent(bvid)}&cid=${encodeURIComponent(cid)}`,/(^|\.)bilibili\.com$/,{credentials:'include'}));
         const subtitle=reply?.data?.subtitle,tracks=(subtitle?.subtitles||[]).map(t=>{const language=short(String(t.lan||'').replace(/^ai-/,''));return {id:String(t.lan||''),language,label:String(t.lan_doc||t.lan||'').slice(0,80),url:t.subtitle_url};});
         if(!tracks.length&&reply?.data?.need_login_subtitle)return {ok:false,error:'SUBTITLE_LOGIN_REQUIRED'};
-        return await finish(tracks,/(^|\.)(hdslb\.com|bilivideo\.com|bilibili\.com)$/,'bilibili:'+bvid+(page>1?'_'+page:''),'bilibili');
+        return await finish(tracks,/(^|\.)(hdslb\.com|bilivideo\.com|bilibili\.com)$/,'bilibili:'+bvid+'_'+cid,'bilibili');
       }
       return {ok:true,tracks:[],cues:[]};
     }catch(e){
