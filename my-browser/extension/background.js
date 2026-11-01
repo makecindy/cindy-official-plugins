@@ -1638,7 +1638,14 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
 });
 chrome.runtime.onMessage.addListener((m,sender)=>{
   if(m?.type!=='cindy-frame-video'||sender.id!==chrome.runtime.id||!sender.tab?.id||sender.frameId!==0)return;
-  chrome.tabs.sendMessage(sender.tab.id,{type:'cindy-ui',action:'video',frame:true}).catch(()=>{});
+  // Exactly one player frame: the top document picked it, the address must match a direct child frame.
+  (async()=>{
+    let src;try{src=new URL(m.src).href;}catch{return;}
+    if(!globalThis.CindySiteCaptions.embedded(src))return;
+    const frames=(await chrome.webNavigation.getAllFrames({tabId:sender.tab.id}))||[];
+    const target=frames.find(f=>f.parentFrameId===0&&f.url===src);
+    if(target)await chrome.tabs.sendMessage(sender.tab.id,{type:'cindy-ui',action:'video',frame:true},{frameId:target.frameId});
+  })().catch(()=>{});
 });
 
 // YouTube exposes timed caption metadata through its own player. Read only this

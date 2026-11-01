@@ -536,7 +536,7 @@
         const tracks=[...video.textTracks].filter(x=>(x.kind==='subtitles'||x.kind==='captions')&&x.label!=='clone');
         // A site can list dozens of languages in any order: never just take the first.
         const track=tracks.includes(session.nativeTrack)?session.nativeTrack:tracks[L.pickCaptionTrack(tracks,{page:document.documentElement.lang,target:prefs.videoTarget})];
-        if(tracks.length>1&&session.trackOptions?.length!==tracks.length){session.trackOptions=tracks.map((x,index)=>({id:String(index),label:x.label||x.language||String(index)}));session.trackId=String(tracks.indexOf(track));session.chooseTrack=id=>{session.nativeTrack=tracks[Number(id)];session.trackId=id;session.transcript=undefined;};videoSettings();}
+        if(tracks.length>1&&session.trackOptions?.length!==tracks.length){session.trackOptions=tracks.map((x,index)=>({id:String(index),label:x.label||x.language||String(index)}));session.trackId=String(tracks.indexOf(track));session.chooseTrack=id=>{session.nativeTrack=tracks[Number(id)];session.trackId=id;session.transcript=undefined;session.originalCues=undefined;};videoSettings();}
         // X draws its own captions through a "clone"; other sites through whichever track they show.
         for(const x of video.textTracks)if(x!==track&&x.mode==='showing'&&(x.kind==='subtitles'||x.kind==='captions'))session.overlay?.track(x);
         if(track){session.nativeTrack=track;session.overlay?.track(track);const next=[...(track.cues||[])].map(c=>({start:c.startTime,end:c.endTime,text:L.cleanSubtitleText(c.text).slice(0,4000)})).filter(c=>c.text&&c.end>c.start);if(next.length&&!youtube){
@@ -560,7 +560,7 @@
         if(session!==videoSession)return;
         if(!result?.ok)throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         if(result.videoId)session.videoId=result.videoId;
-        if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.fullTranscript=false;session.nextRead=0;};videoSettings();}
+        if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.fullTranscript=false;session.nextRead=0;session.transcript=undefined;session.originalCues=undefined;};videoSettings();}
         if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}
       }
       // A page without any caption track also deserves a clear answer instead of an endless wait.
@@ -624,7 +624,13 @@
   async function showVideo(){
     clear('video');video=requestedMedia?.isConnected?requestedMedia:pickMedia();requestedMedia=null;
     // The player lives in an embedded frame, which runs its own copy of this script.
-    if(!video&&document.querySelector(embeddedPlayers)){sendMessage({type:'cindy-frame-video'}).catch(()=>{});close();return;}
+    if(!video&&document.querySelector(embeddedPlayers)){
+      // Several embedded players can share a page: start only the one most on screen, never all of them.
+      const onScreen=f=>{const r=f.getBoundingClientRect();return Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0));};
+      const frame=[...document.querySelectorAll(embeddedPlayers)].sort((a,b)=>onScreen(b)-onScreen(a))[0];
+      if(frame&&onScreen(frame)>0)sendMessage({type:'cindy-frame-video',src:frame.src}).catch(()=>{});
+      close();return;
+    }
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
     const media=video;
     if(cueMedia!==media||media.currentSrc!==cueMediaSource){cues=[];cueMedia=media;cueMediaSource=media.currentSrc;}
