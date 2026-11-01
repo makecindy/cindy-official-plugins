@@ -233,8 +233,8 @@ async function childFrames(tabId,documentId) {
   return out.filter(f => f.documentId !== documentId && f.result?.shown && !off.has(f.frameId)).map(f => ({documentId:f.documentId,url:f.result.url}));
 }
 // The document an action belongs to: the one whose ref table holds its ref(s), or whose upload transfer or
-// selector match it. A drag has two refs; both must live in the same document, because one synthetic gesture
-// cannot span two documents.
+// selector match it. A drag has two ends; both must live in the same document, because one synthetic gesture
+// cannot span two documents. A selector end belongs to the top document, as selectors always do.
 async function frameForAction(job,tabId,documentId) {
   const a = job.payload;
   const upload = job.action === 'upload';
@@ -245,6 +245,7 @@ async function frameForAction(job,tabId,documentId) {
     ? [!!globalThis.__cindyUploads?.has(transfer)]
     : refs.length ? refs.map(ref => !!globalThis.__myBrowserSnapshot?.refs?.has(ref)) : [!!(selector && document.querySelector(selector))]}),args:[refs,a.selector || null,transfer]}).catch(() => []);
   const owners = new Set();
+  if (job.action === 'drag' && (a.startSelector || a.endSelector)) owners.add(documentId);
   for (let i = 0; i < (transfer ? 1 : refs.length || 1); i++) {
     const holders = out.filter(f => f.result?.here?.[i]);
     if (holders.length) owners.add(holders.some(f => f.documentId === documentId) ? documentId : holders[0].documentId);

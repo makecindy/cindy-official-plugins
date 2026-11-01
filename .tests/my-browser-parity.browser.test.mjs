@@ -332,6 +332,12 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('a drag between the top page and a frame is refused plainly',crossDrag.error==='CROSS_FRAME_DRAG',JSON.stringify(crossDrag));
     const reverseDrag=await act('drag',{...T,startRef:dref('Go cross'),endRef:dref('Top button')});
     check('a drag between a frame and the top page is refused too',reverseDrag.error==='CROSS_FRAME_DRAG',JSON.stringify(reverseDrag));
+    const refToSelector=await act('drag',{...T,startRef:dref('Go cross'),endSelector:'#topb'});
+    check('a frame ref dragged to a top-page selector is refused plainly',refToSelector.error==='CROSS_FRAME_DRAG',JSON.stringify(refToSelector));
+    const selectorToRef=await act('drag',{...T,startSelector:'#topb',endRef:dref('Go same')});
+    check('a top-page selector dragged to a frame ref is refused plainly',selectorToRef.error==='CROSS_FRAME_DRAG',JSON.stringify(selectorToRef));
+    const topOnly=await act('drag',{...T,startSelector:'#topb',endRef:dref('Top button')});
+    check('a selector and a ref in the top page drag together',topOnly.ok,JSON.stringify(topOnly));
     const frameDrag=await act('drag',{...T,startRef:dref('Go same'),endRef:dref('Field same')});
     check('a drag with both ends in one frame runs there',frameDrag.ok,JSON.stringify(frameDrag));
     const endOnly=await act('drag',{...T,startX:5,startY:5,endRef:dref('Field same')});
