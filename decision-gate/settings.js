@@ -458,7 +458,9 @@ function mergeChanges(base, mine, latest) {
   // Moving a rule changes only the order: follow this page's order, with anything added meanwhile at the end.
   const baseIds = (base.rules || []).map((r) => r.id);
   const mineIds = (mine.rules || []).map((r) => r.id);
-  const moved = !same(baseIds.filter((id) => mineIds.includes(id)), mineIds.filter((id) => baseIds.includes(id)));
+  const kept = baseIds.filter((id) => mineIds.includes(id));
+  const added = mineIds.filter((id) => !baseIds.includes(id));
+  const moved = !same(mineIds, [...kept, ...added]);
   const order = new Map((mine.rules || []).map((r, i) => [r.id, i]));
   merged.rules = moved ? rules.sort((x, y) => (order.get(x.id) ?? Infinity) - (order.get(y.id) ?? Infinity)) : rules;
   return merged;
@@ -467,7 +469,7 @@ function mergeChanges(base, mine, latest) {
 async function save() {
   try {
     // Captured now: while waiting for the lock, the brain may change the store and refresh cfg.
-    const mine = cfg;
+    const mine = JSON.parse(JSON.stringify(cfg));
     const base = JSON.parse(stored);
     const next = await withConfigLock(async () => {
       const merged = mergeChanges(base, mine, withRules(await readStore()));
@@ -475,7 +477,8 @@ async function save() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return merged;
     });
-    cfg = next;
+    // Keep what was typed while the write was in flight.
+    cfg = mergeChanges(mine, cfg, next);
     stored = JSON.stringify(next);
     storeError = '';
     channel.postMessage({ from: 'settings', type: 'config-changed' });
