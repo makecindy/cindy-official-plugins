@@ -366,7 +366,12 @@ test('资料库已有档案时旧版通讯录标记为可导入，手动导入�
     first.close();
   }
 
-  const a = boot({ libDir, legacyDb: legacy });
+  const setLegacyMeta = (value) => {
+    const db = new DatabaseSync(path.join(libDir, 'contacts.sqlite'));
+    db.prepare('REPLACE INTO plugin_meta (key, value) VALUES (?, ?)').run('legacy_import', JSON.stringify(value));
+    db.close();
+  };
+  let a = boot({ libDir, legacyDb: legacy });
   try {
     assert.equal(ok(await a.call('stats')).people, 1);
     const st = await a.view('state');
@@ -391,10 +396,22 @@ test('资料库已有档案时旧版通讯录标记为可导入，手动导入�
     assert.match(merged.narrative, /第 1 位的故事。/);
     assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
     assert.equal((await a.view('state')).result.legacy.status, 'done');
+    assert.equal(merged.merges.length, 1);
+
+    // 回归（PR #264 review）：合并已完成、最终状态没写进去就退出时，重试不能把已并入的旧档案插回再合并一次。
+    a.close();
+    setLegacyMeta({ status: 'partial', at: new Date().toISOString(), pending: [] });
+    a = boot({ libDir, legacyDb: legacy });
+    assert.equal(ok(await a.call('stats')).people, 120);
+    assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    const again = ok(await a.call('get', { id: existingId }));
+    assert.equal(again.narrative.split('第 1 位的故事。').length - 1, 1, 'legacy story is not appended twice');
+    assert.equal(again.merges.length, 1);
+    assert.equal(again.events.filter((e) => e.text === '事件 1').length, 1);
+    assert.equal((await a.view('state')).result.legacy.status, 'done');
 
     // 导入时的合并留有记录，合错了可以拆开，旧档案原样回来。
-    assert.equal(merged.merges.length, 1);
-    const split = await a.view('unmerge', { id: merged.merges[0].id });
+    const split = await a.view('unmerge', { id: again.merges[0].id });
     assert.equal(split.ok, true, split.message);
     const restored = ok(await a.call('get', { id: '00000000-0000-4000-8000-000000000001' }));
     assert.equal(restored.name, '测试人1');
@@ -407,12 +424,7 @@ test('资料库已有档案时旧版通讯录标记为可导入，手动导入�
 
   // 回归（PR #264 review）：复制完旧数据、合并前中断时，旧档案已按原 id 在库里。重试必须沿用记下的
   // 待合并映射继续合并，不能因「库里已有」跳过并标成完成。拆开后的库正是这个中断现场。
-  const lib = new DatabaseSync(path.join(libDir, 'contacts.sqlite'));
-  lib.prepare('REPLACE INTO plugin_meta (key, value) VALUES (?, ?)').run(
-    'legacy_import',
-    JSON.stringify({ status: 'partial', at: new Date().toISOString(), pending: [['00000000-0000-4000-8000-000000000001', existingId]] }),
-  );
-  lib.close();
+  setLegacyMeta({ status: 'partial', at: new Date().toISOString(), pending: [['00000000-0000-4000-8000-000000000001', existingId]] });
   const b = boot({ libDir, legacyDb: legacy });
   try {
     assert.equal(ok(await b.call('stats')).people, 120);

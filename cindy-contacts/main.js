@@ -1693,11 +1693,20 @@ function cell(v) {
  * 只有名字相似、没有共同身份的旧档案照常导入，之后可用「查找重复」合并。
  * pending 是上次中断或合并失败时留下的映射：那些旧档案已按原 id 在库里，不能再靠「库里没有」识别，
  * 两边都还在就继续合并。
+ * mergedAway 是已经并入别处、库里不再有的档案（有未拆开的合并记录）：重试时不再插回、不再合并，
+ * 它名下的旧行改挂到当前目标，避免故事和备注重复拼接、合并记录重复。
  */
 async function legacyMergeMaps(pending) {
   const contacts = new Map();
+  const mergedAway = new Map();
+  for (const m of await q(
+    "SELECT source_id, target_id FROM contact_merges WHERE (undone_at IS NULL OR undone_at = '') AND source_id NOT IN (SELECT id FROM contacts)",
+  )) {
+    const [dst] = await q('SELECT id FROM contacts WHERE id = ?', [m.target_id]);
+    mergedAway.set(m.source_id, dst ? dst.id : null);
+  }
   for (const [sourceId, targetId] of Array.isArray(pending) ? pending : []) {
-    if (!sourceId || !targetId || sourceId === targetId) continue;
+    if (!sourceId || !targetId || sourceId === targetId || mergedAway.has(sourceId)) continue;
     const [src] = await q('SELECT id FROM contacts WHERE id = ?', [cell(sourceId)]);
     const [dst] = await q('SELECT id FROM contacts WHERE id = ?', [cell(targetId)]);
     if (src && dst) contacts.set(sourceId, targetId);
@@ -1705,7 +1714,7 @@ async function legacyMergeMaps(pending) {
   for (let offset = 0; ; offset += 200) {
     const { rows } = await nodeCall('legacy/read', { table: 'contact_identities', offset, limit: 200 }, { timeoutMs: 60000 });
     for (const r of rows) {
-      if (contacts.has(r.contact_id)) continue;
+      if (contacts.has(r.contact_id) || mergedAway.has(r.contact_id)) continue;
       const [own] = await q('SELECT id FROM contacts WHERE id = ?', [r.contact_id]);
       if (own) continue;
       const [hit] = await q('SELECT contact_id FROM contact_identities WHERE platform = ? AND normalized_value = ?', [cell(r.platform), cell(r.normalized_value)]);
@@ -1722,14 +1731,33 @@ async function legacyMergeMaps(pending) {
     }
     if (rows.length < 200) break;
   }
-  return { contacts, groups };
+  return { contacts, groups, mergedAway };
 }
 
-/** 同名分组改挂到已有分组；返回 null 表示这行不再插入。旧档案本身按原 id 导入，导入后再合并。 */
+/**
+ * 同名分组改挂到已有分组；已并入别处的旧档案不再插回，名下的行改挂到当前目标（目标已删则不再插入）。
+ * 返回 null 表示这行不再插入。其余旧档案按原 id 导入，导入后再合并。
+ */
 function remapLegacyRow(table, row, maps) {
+  const away = maps.mergedAway;
+  const c = (id) => (away.has(id) ? away.get(id) : id);
   switch (table) {
+    case 'contacts': return away.has(row.id) ? null : row;
     case 'contact_groups': return maps.groups.has(row.id) ? null : row;
-    case 'contact_group_members': return { ...row, group_id: maps.groups.get(row.group_id) || row.group_id };
+    case 'contact_identities':
+    case 'contact_events': {
+      const contactId = c(row.contact_id);
+      return contactId ? { ...row, contact_id: contactId } : null;
+    }
+    case 'contact_group_members': {
+      const contactId = c(row.contact_id);
+      return contactId ? { ...row, contact_id: contactId, group_id: maps.groups.get(row.group_id) || row.group_id } : null;
+    }
+    case 'contact_relations': {
+      const fromId = c(row.from_id);
+      const toId = c(row.to_id);
+      return fromId && toId && fromId !== toId ? { ...row, from_id: fromId, to_id: toId } : null;
+    }
     default: return row;
   }
 }
