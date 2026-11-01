@@ -4,13 +4,16 @@
   "whenToUse": "Use when the user wants new tasks to pick a model automatically, change model or reasoning effort by task content, or skip automation and routine runs with nothing to do. Also lists, adds, changes and deletes these rules.",
   "tools": {
     "list_rules": {
-      "description": "List all Decision Gate rules, the current judge, and the models rules can use (availableModels). Call this before adding or changing a rule."
+      "description": "List all Decision Gate rules, the fallback model, the judge, and the models you can use (availableModels). Call this before adding or changing a rule."
     },
     "save_rule": {
-      "description": "Add or change a rule (pass id to change). Rule shape: when (point) → what to judge (question, optional options) → what to do. Returns the saved rule and when it applies; tell the user when it applies."
+      "description": "Add or change a rule (pass id to change). Shape: if question holds, use model (new task) or skip this run (before a run). Top to bottom, the first that holds wins. Returns the saved rule and when it applies; tell the user."
     },
     "delete_rule": {
       "description": "Delete a rule. Confirm with the user which rule first."
+    },
+    "set_fallback_model": {
+      "description": "Set the fallback model, used when no condition holds or judging fails. Without one, this plugin’s model does not appear in the new task picker."
     }
   }
 }

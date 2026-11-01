@@ -61,7 +61,7 @@
   "tools": [
     {
       "name": "list_rules",
-      "description": "列出决策闸门的全部规则、当前使用的判断模型，以及写规则时可选的模型（availableModels）。添加或修改规则前先调用它。",
+      "description": "列出决策闸门的全部规则、保底模型、判断模型，以及可选的模型（availableModels）。添加或修改规则前先调用它。",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -69,7 +69,7 @@
     },
     {
       "name": "save_rule",
-      "description": "添加或修改一条规则（传 id 即修改）。规则格式：什么时候(point) → 判断什么(question，可带选项) → 怎么做。返回保存后的规则和生效条件说明，请把生效条件转告用户。",
+      "description": "添加或修改一条规则（传 id 即修改）。规则格式：如果 question 符合，就用 model（开新任务时）或跳过这次（运行前）。从上到下第一条符合的生效。返回保存后的规则和生效条件说明，请转告用户。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -88,48 +88,23 @@
           },
           "question": {
             "type": "string",
-            "description": "交给决策模型的一句问题，用用户的说法写，例如「这条消息主要在做什么？」「这次是不是没有新情况，不用跑？」"
+            "description": "条件，用用户的说法写，例如「在写代码或改 bug」「指令写明这次不用运行」"
           },
-          "options": {
-            "type": "array",
-            "description": "仅 will-start-task 的多选一规则：每个选项对应一个模型。不传则是“是/否”规则：开新任务时“是”=推理强度调到最高（模型不变），运行前“是”=跳过本次",
-            "items": {
-              "type": "object",
-              "properties": {
-                "label": {
-                  "type": "string",
-                  "description": "选项名，例如「写代码」「闲聊」"
-                },
-                "description": {
-                  "type": "string",
-                  "description": "可选，帮决策模型区分选项的一句说明"
-                },
-                "model": {
-                  "type": "string",
-                  "description": "这个选项用的模型，填 list_rules 的 availableModels 里的 id 或名称；同名模型有多个来源时，要同时传 agent 和 providerId"
-                },
-                "agent": {
-                  "type": "string",
-                  "description": "可选，availableModels 里该模型的 agent，用于区分同名模型"
-                },
-                "providerId": {
-                  "type": "string",
-                  "description": "可选，availableModels 里该模型的 providerId，用于区分同名模型"
-                },
-                "effort": {
-                  "type": "string",
-                  "description": "可选推理强度，必须是该模型 efforts 里的值；不传用模型默认"
-                }
-              },
-              "required": [
-                "label",
-                "model"
-              ]
-            }
+          "model": {
+            "type": "string",
+            "description": "模型，填 list_rules 的 availableModels 里的 id 或名称；同名模型有多个来源时，要同时传 agent 和 providerId"
           },
-          "threshold": {
-            "type": "number",
-            "description": "可选，0.5–0.9。决策模型的把握达到它才执行；多选一默认 0.6，是/否默认 0.7"
+          "agent": {
+            "type": "string",
+            "description": "可选，availableModels 里该模型的 agent，用于区分同名模型"
+          },
+          "providerId": {
+            "type": "string",
+            "description": "可选，availableModels 里该模型的 providerId，用于区分同名模型"
+          },
+          "effort": {
+            "type": "string",
+            "description": "可选推理强度，必须是该模型 efforts 里的值；不传用模型默认"
           },
           "keywords": {
             "type": "array",
@@ -138,14 +113,49 @@
             },
             "description": "仅运行前规则：名称或指令里含这些词时不问模型直接跳过"
           },
+          "position": {
+            "type": "integer",
+            "description": "可选，放到第几位（从 0 开始）；不传时新规则放最后，修改时位置不变"
+          },
           "enabled": {
             "type": "boolean",
             "description": "是否启用，默认 true"
           }
         },
         "required": [
-          "point",
-          "question"
+          "point"
+        ]
+      }
+    },
+    {
+      "name": "set_fallback_model",
+      "description": "设置保底模型：没有条件符合或判断失败时用它。没有保底模型时，新任务的模型选择器里不会出现这个插件的模型。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "模型，填 list_rules 的 availableModels 里的 id 或名称；同名模型有多个来源时，要同时传 agent 和 providerId"
+          },
+          "agent": {
+            "type": "string",
+            "description": "可选，availableModels 里该模型的 agent，用于区分同名模型"
+          },
+          "providerId": {
+            "type": "string",
+            "description": "可选，availableModels 里该模型的 providerId，用于区分同名模型"
+          },
+          "effort": {
+            "type": "string",
+            "description": "可选推理强度，必须是该模型 efforts 里的值；不传用模型默认"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "可选，0.5–0.9。判断把握达到它才算条件符合，默认 0.6"
+          }
+        },
+        "required": [
+          "model"
         ]
       }
     },
