@@ -465,6 +465,7 @@ function mergeChanges(base, mine, latest) {
   merged.rules = moved ? rules.sort((x, y) => (order.get(x.id) ?? Infinity) - (order.get(y.id) ?? Infinity)) : rules;
   return merged;
 }
+let saves = 0;
 // Returns whether the change landed. On failure the page goes back to what is stored.
 async function save() {
   try {
@@ -480,6 +481,7 @@ async function save() {
     // Keep what was typed while the write was in flight.
     cfg = mergeChanges(mine, cfg, next);
     stored = JSON.stringify(next);
+    saves += 1;
     storeError = '';
     channel.postMessage({ from: 'settings', type: 'config-changed' });
     await publishModels();
@@ -780,15 +782,18 @@ async function loadModels() {
 // The brain or the AI changed rules: refresh unless the user is editing.
 channel.addEventListener('message', async ({ data }) => {
   if (data?.from !== 'brain' || data.type !== 'config-changed') return;
-  const raw = await readStore().catch(() => null);
-  if (!raw) return;
-  // Rows not in the store yet live only on this page: keep them, and don't redraw under someone typing.
-  const savedIds = new Set((JSON.parse(stored).rules || []).map((r) => r.id));
-  const unsaved = cfg.rules.filter((r) => !savedIds.has(r.id));
-  cfg = withRules(raw);
+  // A read that overlapped a save of ours may be older than that save: read again.
+  let raw, seen;
+  do {
+    seen = saves;
+    raw = await readStore().catch(() => null);
+    if (!raw) return;
+  } while (seen !== saves);
+  // Edits not stored yet, in flight or just typed, stay on this page; don't redraw under someone typing.
+  const latest = withRules(raw);
+  cfg = mergeChanges(JSON.parse(stored), cfg, latest);
   // The baseline is only what is stored: a local row in it would look unchanged and never be saved.
-  stored = JSON.stringify(cfg);
-  cfg.rules.push(...unsaved.filter((r) => !cfg.rules.some((x) => x.id === r.id)));
+  stored = JSON.stringify(latest);
   if (loaded && document.activeElement?.tagName !== 'INPUT') render();
 });
 
