@@ -546,6 +546,15 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 - A page opened by a read (older Cindy) joins the agent's tabs like one opened with `open`, so a user who takes it over keeps it instead of having it reclaimed as idle.
 - Changing the subtitle language in another tab re-judges "already in this language" on this one, so a page that skipped translation starts translating.
 
+## 0.4.61 Removed the debugger switch that could not work; large files upload in pieces (host plugin package 0.4.82)
+
+- Chrome does not allow the debugger as an optional permission: `chrome.permissions.request` refuses without a prompt. The Turn on button therefore never worked for anyone, so that section of the page and the code that opened it are gone.
+- With a current Cindy, files over about 30 MB reach the extension in pieces and are assembled in the page before going into the file input. No debugger is needed, up to 1 GB per batch.
+- Saving as PDF and recipes that read cookies or network requests are not available here; the agent says so and can offer Cindy's dedicated browser. Full-page and element screenshots fall back to the visible area, and background tabs in the user's windows cannot be captured.
+- Snapshots read iframes (cross-site, nested and `srcdoc`) and open shadow DOM, and their refs work directly; uploads reach iframes too. `evaluate`, `extract` and selector-addressed actions stay on the top document.
+- Snapshots list the main content and dialogs first and honour `limit` and `maxChars`, so a long navigation no longer crowds out a form (the fixed limit of 80 elements hid the form in the Google Cloud console).
+- The extension does not declare `debugger`, so install warnings are unchanged and an update does not disable it. The debugger code runs only in builds that declare the permission (the real-browser tests).
+
 ## 0.4.60 another debugger holding the tab fails the attach (host package 0.4.81)
 
 - When DevTools or another extension already holds a tab's debugger, attaching now fails with the usual "Chrome refused to attach" message instead of pretending to be attached. Only the extension's own leftover attachment (after the worker restarted) is accepted.

@@ -95,20 +95,35 @@ test('resize only touches the Cindy window; focus and close act on the addressed
   assert.equal((await h.run('snapshot',{url:'https://example.test/a',tabId:opened.tabId})).error,'TAB_CLOSED');
 });
 
-test('the first action that needs the debugger opens its page in the user window, once',async()=>{
+test('without the debugger, what needs it says so and opens no page; a screenshot falls back to the visible area',async()=>{
   const h=harness();
-  const first=await h.run('pdf',{url:'https://example.test/user',tabId:1});
-  assert.equal(first.error,'DEBUGGER_NOT_ALLOWED');assert.equal(first.grantPageOpened,true);
-  const created=h.calls.filter(c=>c[0]==='tabs.create');
-  same(created,[['tabs.create',{url:'chrome-extension://fixture/permissions.html?needed=1',windowId:1,active:true}]]);
-  const again=await h.run('cdp',{url:'https://example.test/user',tabId:1,op:'begin'});
-  assert.equal(again.error,'DEBUGGER_NOT_ALLOWED');assert.equal(again.grantPageOpened,false);
-  assert.equal(h.calls.filter(c=>c[0]==='tabs.create').length,1);
-  // A screenshot never prompts: it falls back to the visible area and says so.
+  const pdf=await h.run('pdf',{url:'https://example.test/user',tabId:1});
+  assert.equal(pdf.error,'DEBUGGER_UNAVAILABLE');assert.match(pdf.message,/dedicated browser/);
+  assert.equal((await h.run('cdp',{url:'https://example.test/user',tabId:1,op:'begin'})).error,'DEBUGGER_UNAVAILABLE');
+  assert.equal((await h.run('debuggerAccess',{open:true})).granted,false);
+  assert.equal(h.calls.some(c=>c[0]==='tabs.create' && String(c[1].url).includes('permissions')),false);
   const opened=await h.run('open',{url:'https://example.test/a'});
   const shot=await h.run('screenshot',{url:'https://example.test/a',tabId:opened.tabId,fullPage:true});
   assert.equal(shot.ok,true,JSON.stringify(shot));assert.match(shot.note,/visible area/);
-  assert.equal(h.calls.filter(c=>c[0]==='tabs.create' && String(c[1].url).includes('permissions')).length,1);
+  assert.doesNotMatch(shot.note,/allow/i);
+});
+
+test('the debugger cannot be declared optional, so the manifest does not ask for it',()=>{
+  const manifest=JSON.parse(fs.readFileSync(new URL('../my-browser/extension/manifest.json',import.meta.url),'utf8'));
+  assert.equal([...(manifest.permissions||[]),...(manifest.optional_permissions||[])].includes('debugger'),false);
+});
+
+test('upload pieces are validated before they reach a page',()=>{
+  const base={url:'https://example.test/a',tabId:1,selector:'input'};
+  P.validate('upload',{...base,op:'begin',transfer:'t',chunkFiles:[{name:'a.bin',mimeType:''}]});
+  P.validate('upload',{...base,op:'chunk',transfer:'t',file:0,data:'AAAA'});
+  P.validate('upload',{...base,op:'finish',transfer:'t'});
+  P.validate('upload',{...base,op:'abort',transfer:'t'});
+  assert.throws(()=>P.validate('upload',{...base,op:'nope',transfer:'t'}),/op must be/);
+  assert.throws(()=>P.validate('upload',{...base,op:'finish'}),/transfer/);
+  assert.throws(()=>P.validate('upload',{...base,op:'begin',transfer:'t',chunkFiles:[]}),/1–20/);
+  assert.throws(()=>P.validate('upload',{...base,op:'chunk',transfer:'t',file:0,data:'A'.repeat(6000001)}),/4 MB/);
+  assert.throws(()=>P.validate('upload',{...base,op:'chunk',transfer:'t',file:20,data:'AAAA'}),/file index/);
 });
 
 test('a new tab closed while it loads is reported as closed, not as an unknown failure',async()=>{
@@ -200,7 +215,7 @@ test('a failed screenshot shows Cindy\'s mark again',async()=>{
 // 2026-10-30: uploads with paths go through Chrome's debugger when the user has allowed it, so Chrome
 // reads the files itself and the ~30 MB transfer bound does not apply; without it, bytes take the plain
 // route, and a batch sent without bytes asks the user to allow the debugger.
-test('uploads by path through the debugger when allowed; otherwise falls back or asks for it',async()=>{
+test('uploads by path only in a build with the debugger; otherwise refuses plainly',async()=>{
   const h=harness(undefined,undefined,{timers:'never'});
   const sent=[];let markerSet=false;
   h.chrome.scripting={executeScript:async({args})=>{
@@ -216,7 +231,7 @@ test('uploads by path through the debugger when allowed; otherwise falls back or
   same(sent.find(([m])=>m==='DOM.setFileInputFiles'),['DOM.setFileInputFiles',{objectId:'obj-1',files:['/Users/me/big.bin']}]);
   h.chrome.permissions.contains=async()=>false;
   const denied=await h.run('upload',payload);
-  assert.equal(denied.error,'DEBUGGER_NOT_ALLOWED');assert.equal(denied.execution,'not_executed');
+  assert.equal(denied.error,'DEBUGGER_UNAVAILABLE');assert.equal(denied.execution,'not_executed');
 });
 
 // Review 2026-10-30: absolute upload paths include Windows network shares (\\server\share\file).
