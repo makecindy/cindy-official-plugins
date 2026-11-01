@@ -9,6 +9,7 @@ const DEFAULT_MODELS = { jev: 'jev-latest', openai: 'gpt-6-luna' };
 const AGENT_KIND = { 'claude-code': 'cc', codex: 'codex', pi: 'pi' };
 const MESSAGES = {
   "en": {
+    whyNoMatchRun: "No condition matched",
     whyNoMatch: "No condition matched, using the fallback model",
     whyJudgeFailed: "Could not judge, using the fallback model",
     fallbackSummary: "{reason} → {model}",
@@ -40,6 +41,7 @@ const MESSAGES = {
     effort_ultra: "Ultra",
   },
   "zh-CN": {
+    whyNoMatchRun: "没有符合的条件",
     whyNoMatch: "没有符合的条件，用保底模型",
     whyJudgeFailed: "判断失败，用保底模型",
     fallbackSummary: "{reason} → {model}",
@@ -71,6 +73,7 @@ const MESSAGES = {
     effort_ultra: "极致",
   },
   "ja": {
+    whyNoMatchRun: "一致する条件がありません",
     whyNoMatch: "一致する条件がないため、保険のモデルを使います",
     whyJudgeFailed: "判断できなかったため、保険のモデルを使います",
     fallbackSummary: "{reason} → {model}",
@@ -102,6 +105,7 @@ const MESSAGES = {
     effort_ultra: "ウルトラ",
   },
   "ko": {
+    whyNoMatchRun: "맞는 조건이 없습니다",
     whyNoMatch: "일치하는 조건이 없어 기본 모델을 사용합니다",
     whyJudgeFailed: "판단하지 못해 기본 모델을 사용합니다",
     fallbackSummary: "{reason} → {model}",
@@ -285,7 +289,7 @@ async function decide(point, data, deadline, cfg) {
     if (start) return { action: 'route', route: rule.route, reason: label, ruleId: rule.id, ms, summary: `${label} → ${routeName(rule.route)}` };
     return { action: 'skip', reason: t('judgedBy', { name, pct: pct(probability) }), ruleId: rule.id, ms, summary: t('yesSkip', { pct: pct(probability) }) };
   }
-  return { ...fallback(t('whyNoMatch')), ms };
+  return { ...fallback(start ? t('whyNoMatch') : t('whyNoMatchRun')), ms };
 }
 
 // Remember each rule's latest conclusion for the settings page. Read-modify-write keeps rules just saved.

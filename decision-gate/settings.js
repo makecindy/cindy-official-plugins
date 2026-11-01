@@ -357,7 +357,7 @@ let editingJudge = false;
 let loaded = false; // the stored config was read successfully
 let stored = '{}'; // last config known to be in the store
 let storeError = '';
-let tryRun = 0;
+const tryRuns = {};
 const unsavedKeys = {}; // input kept after a failed save, per secret so it never fills another service's field
 let pickerError = '';
 const tryTexts = {};
@@ -628,12 +628,18 @@ async function changeRule(id, change) {
   render();
 }
 
+// The same row number exists in every section: the section name keeps each control's label unique.
+const sectionLabel = (point, text) => `${point.label()}: ${text}`;
+const conditionLabel = (point, n) => sectionLabel(point, t('conditionLabel', { n }));
+
 function ruleRow(rule, index, point) {
   const start = point.id === 'will-start-task';
   const n = index + 1;
   const condition = h('input', {
-    class: 'pill grow', value: rule.question || '', 'aria-label': t('conditionLabel', { n }),
+    class: 'pill grow', value: rule.question || '', 'aria-label': conditionLabel(point, n),
     placeholder: start ? t('phCondition') : t('phRunCondition'),
+    // Keep what is typed in cfg right away, so a redraw from another save can't bring back the old text.
+    oninput: (e) => { const r = cfg.rules.find((x) => x.id === rule.id); if (r) r.question = e.target.value; },
     onchange: (e) => changeRule(rule.id, (r) => { r.question = e.target.value.trim(); }),
   });
   const moveUp = () => {
@@ -650,15 +656,15 @@ function ruleRow(rule, index, point) {
   };
   return h('div', { class: `rule ${rule.enabled === false ? 'off' : ''}` },
     h('div', { class: 'rr' },
-      toggle(rule.enabled !== false, t('enableRule'), () => changeRule(rule.id, (r) => { r.enabled = r.enabled === false; })),
+      toggle(rule.enabled !== false, sectionLabel(point, `${t('enableRule')} ${n}`), () => changeRule(rule.id, (r) => { r.enabled = r.enabled === false; })),
       h('span', { class: 'w' }, t('ifWord')),
       condition,
       h('span', { class: 'w' }, start ? t('useWord') : ''),
       start
-        ? modelButton(rule.route, t('modelFor', { n }), (route) => changeRule(rule.id, (r) => { r.route = route; }))
+        ? modelButton(rule.route, sectionLabel(point, t('modelFor', { n })), (route) => changeRule(rule.id, (r) => { r.route = route; }))
         : h('span', { class: 'sd skip' }, t('skipRun')),
-      h('button', { class: 'ib', type: 'button', disabled: index === 0, 'aria-label': t('moveUp', { n }), onclick: moveUp }, svg(ICON.up, 14)),
-      h('button', { class: 'ib', type: 'button', 'aria-label': t('deleteRule', { n }), onclick: () => { cfg.rules = cfg.rules.filter((r) => r.id !== rule.id); save().then(render); } }, svg(ICON.trash, 14))),
+      h('button', { class: 'ib', type: 'button', disabled: index === 0, 'aria-label': sectionLabel(point, t('moveUp', { n })), onclick: moveUp }, svg(ICON.up, 14)),
+      h('button', { class: 'ib', type: 'button', 'aria-label': sectionLabel(point, t('deleteRule', { n })), onclick: () => { cfg.rules = cfg.rules.filter((r) => r.id !== rule.id); save().then(render); } }, svg(ICON.trash, 14))),
     start ? null : h('div', { class: 'kw' }, h('span', { class: 'hint' }, t('keywordHint')),
       chipsOf(rule.keywords || [], (i) => { const word = rule.keywords[i]; changeRule(rule.id, (r) => { r.keywords = (r.keywords || []).filter((k) => k !== word); }); }, t('addKeyword'),
         (k) => changeRule(rule.id, (r) => { r.keywords ||= []; if (!r.keywords.includes(k)) r.keywords.push(k); }))),
@@ -668,14 +674,15 @@ function ruleRow(rule, index, point) {
 async function runTry(point) {
   const text = (tryTexts[point] || '').trim();
   if (!text) return;
-  const run = ++tryRun;
+  const run = (tryRuns[point] || 0) + 1;
+  tryRuns[point] = run;
   tryStates[point] = { busy: true }; render();
   try {
     const res = await ask('try', { point, text, config: cfg });
-    if (run !== tryRun) return;
+    if (run !== tryRuns[point]) return;
     tryStates[point] = { result: res.result };
   } catch (error) {
-    if (run !== tryRun) return;
+    if (run !== tryRuns[point]) return;
     tryStates[point] = { error: error.message };
   }
   render();
@@ -693,7 +700,7 @@ function tryBox(point) {
   }
   return h('div', { class: 'try' },
     h('div', { class: 'line' },
-      h('input', { class: 'pill grow', value: tryTexts[point.id] || '', 'aria-label': t('tryLabel', { point: point.label() }),
+      h('input', { class: 'pill grow', value: tryTexts[point.id] || '', 'aria-label': sectionLabel(point, t('tryLabel')),
         placeholder: point.id === 'will-start-task' ? t('phTryStart') : t('phTryRun'), oninput: (e) => { tryTexts[point.id] = e.target.value; } }),
       h('button', { class: 'btn', type: 'button', disabled: !!state?.busy, onclick: () => runTry(point.id) }, svg(ICON.play, 14), t('tryIt'))),
     line);
@@ -706,9 +713,7 @@ function rulesSection() {
   for (const point of POINTS) {
     const start = point.id === 'will-start-task';
     const list = cfg.rules.filter((r) => r.point === point.id);
-    if (start || list.length || cfg.rules.length === 0 || !start) {
-      sec.append(h('div', { class: 'glabel' }, h('b', {}, point.label()), h('span', {}, point.hint())));
-    }
+    sec.append(h('div', { class: 'glabel' }, h('b', {}, point.label()), h('span', {}, point.hint())));
     const group = h('div', { class: 'group' }, ...list.map((rule, i) => ruleRow(rule, i, point)));
     if (start) {
       group.append(h('div', { class: 'rule base' }, h('div', { class: 'rr other' },
@@ -719,7 +724,7 @@ function rulesSection() {
     sec.append(h('div', { class: 'line addline' }, h('button', { class: 'btn', type: 'button', onclick: async () => {
       cfg.rules.push({ id: newId(), point: point.id, enabled: true, question: '' });
       render();
-      root.querySelector(`[aria-label="${CSS.escape(t('conditionLabel', { n: list.length + 1 }))}"]`)?.focus();
+      root.querySelector(`[aria-label="${CSS.escape(conditionLabel(point, list.length + 1))}"]`)?.focus();
     } }, svg(ICON.plus, 14), t('addCondition'))));
     if (start && !cfg.fallback) sec.append(h('p', { class: 'hint' }, t('fallbackNeeded')));
     if (start || list.length) sec.append(tryBox(point));
@@ -731,13 +736,19 @@ function rulesSection() {
 }
 
 function render() {
-  const focused = document.activeElement?.getAttribute('aria-label');
+  const active = document.activeElement;
+  const focused = active?.getAttribute('aria-label');
+  const caret = active?.tagName === 'INPUT' && active.type === 'text' ? [active.selectionStart, active.selectionEnd] : null;
   if (!loaded) {
     root.replaceChildren(h('p', { class: 'res err' }, storeError), h('button', { class: 'btn', type: 'button', onclick: boot }, t('storeRetry')));
     return;
   }
   root.replaceChildren(...(storeError ? [h('p', { class: 'res err' }, storeError)] : []), judgeSection(), rulesSection());
-  if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+  if (focused) {
+    const next = root.querySelector(`[aria-label="${CSS.escape(focused)}"]`);
+    next?.focus();
+    if (caret && next?.tagName === 'INPUT') next.setSelectionRange(...caret);
+  }
 }
 
 async function loadSecrets() {
