@@ -1687,20 +1687,61 @@ function cell(v) {
 }
 
 /**
- * 从旧版内置通讯录复制一份。只在本插件资料库为空时进行；重复执行幂等（INSERT OR IGNORE，
+ * 资料库里已有档案时导入旧版：旧档案与已有档案共用同一身份（同一邮箱、手机号或平台账号）时视为
+ * 同一个人，不再另建档案，把它的事件、分组和关系挂到已有档案上；同名分组并入已有分组。
+ * 只有名字相似、没有共同身份的旧档案照常导入，之后可用「查找重复」合并。
+ */
+async function legacyMergeMaps() {
+  const contacts = new Map();
+  for (let offset = 0; ; offset += 200) {
+    const { rows } = await nodeCall('legacy/read', { table: 'contact_identities', offset, limit: 200 }, { timeoutMs: 60000 });
+    for (const r of rows) {
+      if (contacts.has(r.contact_id)) continue;
+      const [own] = await q('SELECT id FROM contacts WHERE id = ?', [r.contact_id]);
+      if (own) continue;
+      const [hit] = await q('SELECT contact_id FROM contact_identities WHERE platform = ? AND normalized_value = ?', [cell(r.platform), cell(r.normalized_value)]);
+      if (hit) contacts.set(r.contact_id, hit.contact_id);
+    }
+    if (rows.length < 200) break;
+  }
+  const groups = new Map();
+  for (let offset = 0; ; offset += 200) {
+    const { rows } = await nodeCall('legacy/read', { table: 'contact_groups', offset, limit: 200 }, { timeoutMs: 60000 });
+    for (const r of rows) {
+      const [hit] = await q('SELECT id FROM contact_groups WHERE name = ? AND id <> ?', [cell(r.name), cell(r.id)]);
+      if (hit) groups.set(r.id, hit.id);
+    }
+    if (rows.length < 200) break;
+  }
+  return { contacts, groups };
+}
+
+/** 按合并映射改写一行旧数据；返回 null 表示这行不再插入。 */
+function remapLegacyRow(table, row, maps) {
+  const c = (id) => maps.contacts.get(id) || id;
+  switch (table) {
+    case 'contacts': return maps.contacts.has(row.id) ? null : row;
+    case 'contact_groups': return maps.groups.has(row.id) ? null : row;
+    case 'contact_identities':
+    case 'contact_events': return { ...row, contact_id: c(row.contact_id) };
+    case 'contact_group_members': return { ...row, contact_id: c(row.contact_id), group_id: maps.groups.get(row.group_id) || row.group_id };
+    case 'contact_relations': {
+      const next = { ...row, from_id: c(row.from_id), to_id: c(row.to_id) };
+      return next.from_id === next.to_id ? null : next;
+    }
+    default: return row;
+  }
+}
+
+/**
+ * 从旧版内置通讯录复制一份。资料库为空时首次启动自动进行；已有档案时只记下「有旧数据可导入」，
+ * 由用户在页面上明确选择导入（按共同身份合并到已有档案）。重复执行幂等（INSERT OR IGNORE，
  * 保留原 id）。完成后按表核对数量并记下结果，之后不再自动执行。
  */
 async function importLegacy(opts) {
   const force = !!(opts && opts.force);
   const done = await getMeta('legacy_import');
   if (done && done.status === 'done' && !force) return done;
-  const [{ n }] = await q('SELECT count(*) AS n FROM contacts');
-  if (n > 0 && !force && !(done && done.status === 'partial')) {
-    const skipped = { status: 'skipped', reason: 'not-empty', at: nowIso() };
-    await batch([setMetaStmt('legacy_import', skipped)]);
-    state.legacy = skipped;
-    return skipped;
-  }
   let probe;
   try {
     probe = await nodeCall('legacy/probe', {}, { timeoutMs: 60000 });
@@ -1716,16 +1757,27 @@ async function importLegacy(opts) {
     state.legacy = none;
     return none;
   }
+  const [{ n }] = await q('SELECT count(*) AS n FROM contacts');
+  if (n > 0 && !force && !(done && done.status === 'partial')) {
+    const available = { status: 'available', counts: probe.counts, at: nowIso() };
+    await batch([setMetaStmt('legacy_import', available)]);
+    state.legacy = available;
+    nodeCall('legacy/close').catch(() => {});
+    return available;
+  }
+  const merged = n > 0;
   state.importing = 'legacy';
   try {
     await batch([setMetaStmt('legacy_import', { status: 'partial', at: nowIso() })]);
+    const maps = merged ? await legacyMergeMaps() : null;
     const total = Object.values(probe.counts).reduce((a, b) => a + b, 0) || 1;
     let copied = 0;
     for (const spec of LEGACY_IMPORT) {
       for (let offset = 0; ; offset += spec.page) {
         const { rows } = await nodeCall('legacy/read', { table: spec.table, offset, limit: spec.page }, { timeoutMs: 60000 });
         if (!rows.length) break;
-        await batchChunks(rows.map((r) => ({ sql: spec.sql, params: spec.cols.map((c) => cell(r[c])) })));
+        const keep = maps ? rows.map((r) => remapLegacyRow(spec.table, r, maps)).filter(Boolean) : rows;
+        if (keep.length) await batchChunks(keep.map((r) => ({ sql: spec.sql, params: spec.cols.map((c) => cell(r[c])) })));
         copied += rows.length;
         state.progress = { done: copied, total };
         broadcast({ kind: 'event', name: 'progress', data: { phase: 'legacy', done: copied, total } });
@@ -1737,9 +1789,15 @@ async function importLegacy(opts) {
     for (const spec of LEGACY_IMPORT) {
       const [{ n: local }] = await q(`SELECT count(*) AS n FROM ${spec.table}`);
       counts[spec.table] = { legacy: probe.counts[spec.table] || 0, local };
-      if (local < (probe.counts[spec.table] || 0)) verified = false;
+      // 合并导入时部分旧行按共同身份并入已有档案，数量不再一一对应。
+      if (!merged && local < (probe.counts[spec.table] || 0)) verified = false;
     }
-    const result = { status: verified ? 'done' : 'partial', at: nowIso(), counts };
+    const result = {
+      status: verified ? 'done' : 'partial',
+      at: nowIso(),
+      counts,
+      ...(merged ? { merged: true, mergedInto: maps.contacts.size } : {}),
+    };
     await batch([setMetaStmt('legacy_import', result)]);
     state.legacy = result;
     return result;

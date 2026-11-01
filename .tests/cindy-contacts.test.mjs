@@ -91,8 +91,8 @@ function makeLibrary(dir) {
   return library;
 }
 
-function makeWorker(env) {
-  const child = spawn(process.execPath, ['--no-warnings', path.join(pluginDir, 'node', 'worker.cjs')], {
+function makeWorker(env, workerFile = path.join(pluginDir, 'node', 'worker.cjs')) {
+  const child = spawn(process.execPath, ['--no-warnings', workerFile], {
     env: { PATH: process.env.PATH, ...env },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -324,6 +324,72 @@ test('首次启动从旧版通讯录完整复制一份，保留 id、状态、�
   const check = new DatabaseSync(legacy, { readOnly: true });
   assert.equal(check.prepare('SELECT count(*) AS n FROM contacts').get().n, 121);
   check.close();
+});
+
+// 回归：宿主把插件装在 cindy-brain/_ns/_root/<id> 下后，写死三层的路径推算找不到旧库，
+// 真实用户的旧数据从未导入。不用测试环境变量，按真实安装布局启动工作进程。
+test('工作进程按真实安装布局找到当前账号的旧版通讯录，不依赖固定层数', async () => {
+  const dir = tmp();
+  const owner = path.join(dir, 'owners', 'owner-a');
+  for (const layout of [['cindy-brain', 'cindy-contacts'], ['cindy-brain', '_ns', '_root', 'cindy-contacts']]) {
+    const nodeDir = path.join(owner, ...layout, 'node');
+    fs.mkdirSync(nodeDir, { recursive: true });
+    fs.copyFileSync(path.join(pluginDir, 'node', 'worker.cjs'), path.join(nodeDir, 'worker.cjs'));
+    const w = makeWorker({}, path.join(nodeDir, 'worker.cjs'));
+    try {
+      assert.deepEqual(ok(await w.request({ method: 'legacy/probe', params: {} })), { found: false });
+      fs.mkdirSync(path.join(owner, 'maker-contacts'), { recursive: true });
+      makeLegacyDb(path.join(owner, 'maker-contacts', 'contacts.db'));
+      const probe = ok(await w.request({ method: 'legacy/probe', params: {} }));
+      assert.equal(probe.found, true, layout.join('/'));
+      assert.equal(probe.counts.contacts, 121);
+    } finally {
+      w.close();
+      fs.rmSync(path.join(owner, 'maker-contacts'), { recursive: true, force: true });
+    }
+  }
+});
+
+// 回归：资料库已有档案时旧版通讯录被静默跳过，且没有任何导入入口。现在记为可导入，由用户触发，
+// 共用身份的旧档案并入已有档案、同名分组合并，不产生重复的人。
+test('资料库已有档案时旧版通讯录标记为可导入，手动导入按共同身份合并到已有档案', async () => {
+  const dir = tmp();
+  const legacy = path.join(dir, 'legacy.db');
+  makeLegacyDb(legacy);
+  const libDir = path.join(dir, 'lib');
+  fs.mkdirSync(libDir);
+  const first = boot({ libDir });
+  let existingId;
+  try {
+    existingId = ok(await first.call('save', { name: '一号同事', identities: [{ platform: 'email', value: 't1@example.test' }], groups: ['同事'] })).id;
+  } finally {
+    first.close();
+  }
+
+  const a = boot({ libDir, legacyDb: legacy });
+  try {
+    assert.equal(ok(await a.call('stats')).people, 1);
+    const st = await a.view('state');
+    assert.equal(st.result.legacy.status, 'available');
+    assert.equal(st.result.legacy.counts.contacts, 121);
+
+    const r = await a.view('importLegacy');
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.result.status, 'done');
+    assert.equal(r.result.merged, true);
+    const s = ok(await a.call('stats'));
+    assert.deepEqual({ people: s.people, orgs: s.orgs, groups: s.groups }, { people: 120, orgs: 1, groups: 1 });
+    const merged = ok(await a.call('get', { id: existingId }));
+    assert.equal(merged.name, '一号同事');
+    assert.ok(merged.identities.some((i) => i.platform === 'phone'), 'legacy identities move to the existing person');
+    assert.ok(merged.events.some((e) => e.text === '事件 1'));
+    assert.deepEqual(merged.groups.map((g) => g.name), ['同事']);
+    assert.equal(merged.relations[0].otherName, '示例公司');
+    assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    assert.equal((await a.view('state')).result.legacy.status, 'done');
+  } finally {
+    a.close();
+  }
 });
 
 test('没有旧版通讯录时不导入，资料库保持为空', async () => {
