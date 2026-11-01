@@ -385,8 +385,22 @@ test('资料库已有档案时旧版通讯录标记为可导入，手动导入�
     assert.ok(merged.events.some((e) => e.text === '事件 1'));
     assert.deepEqual(merged.groups.map((g) => g.name), ['同事']);
     assert.equal(merged.relations[0].otherName, '示例公司');
+    // 旧档案的别名、摘要与故事按普通合并规则保留，不会随导入丢失（PR #264 review）。
+    assert.ok(merged.aliases.includes('测试人1') && merged.aliases.includes('Tester 1'), 'legacy name and aliases kept');
+    assert.equal(merged.summary, '示例公司 · 职位1');
+    assert.match(merged.narrative, /第 1 位的故事。/);
     assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
     assert.equal((await a.view('state')).result.legacy.status, 'done');
+
+    // 导入时的合并留有记录，合错了可以拆开，旧档案原样回来。
+    assert.equal(merged.merges.length, 1);
+    const split = await a.view('unmerge', { id: merged.merges[0].id });
+    assert.equal(split.ok, true, split.message);
+    const restored = ok(await a.call('get', { id: '00000000-0000-4000-8000-000000000001' }));
+    assert.equal(restored.name, '测试人1');
+    assert.ok(restored.events.some((e) => e.text === '事件 1'));
+    assert.ok(restored.identities.some((i) => i.platform === 'phone'));
+    assert.equal(ok(await a.call('get', { id: existingId })).summary, '');
   } finally {
     a.close();
   }

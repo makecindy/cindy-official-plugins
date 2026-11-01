@@ -662,6 +662,8 @@
     const days = S.meta?.settings?.initialDays || 14;
     let h = '<div class="center"><div class="hello">';
     h += `<h1>${esc(T.helloTitle)}</h1>`;
+    // 窄窗口下引导页会盖住列表；已有档案、旧版通讯录还没导入时，这里也要能开始导入。
+    h += legacyNotice();
     if (tidyRunning()) {
       h += `<p><span class="spin"></span>${esc(T.helloRunning)}</p>`;
     } else {

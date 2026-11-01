@@ -1688,7 +1688,8 @@ function cell(v) {
 
 /**
  * 资料库里已有档案时导入旧版：旧档案与已有档案共用同一身份（同一邮箱、手机号或平台账号）时视为
- * 同一个人，不再另建档案，把它的事件、分组和关系挂到已有档案上；同名分组并入已有分组。
+ * 同一个人——先按原 id 导入旧档案，再用普通合并（mergeContacts）并入已有档案：别名取并集、摘要补空、
+ * 叙事与备注拼接，并留下可「拆开」的合并记录。同名分组并入已有分组。
  * 只有名字相似、没有共同身份的旧档案照常导入，之后可用「查找重复」合并。
  */
 async function legacyMergeMaps() {
@@ -1716,19 +1717,11 @@ async function legacyMergeMaps() {
   return { contacts, groups };
 }
 
-/** 按合并映射改写一行旧数据；返回 null 表示这行不再插入。 */
+/** 同名分组改挂到已有分组；返回 null 表示这行不再插入。旧档案本身按原 id 导入，导入后再合并。 */
 function remapLegacyRow(table, row, maps) {
-  const c = (id) => maps.contacts.get(id) || id;
   switch (table) {
-    case 'contacts': return maps.contacts.has(row.id) ? null : row;
     case 'contact_groups': return maps.groups.has(row.id) ? null : row;
-    case 'contact_identities':
-    case 'contact_events': return { ...row, contact_id: c(row.contact_id) };
-    case 'contact_group_members': return { ...row, contact_id: c(row.contact_id), group_id: maps.groups.get(row.group_id) || row.group_id };
-    case 'contact_relations': {
-      const next = { ...row, from_id: c(row.from_id), to_id: c(row.to_id) };
-      return next.from_id === next.to_id ? null : next;
-    }
+    case 'contact_group_members': return { ...row, group_id: maps.groups.get(row.group_id) || row.group_id };
     default: return row;
   }
 }
@@ -1784,8 +1777,18 @@ async function importLegacy(opts) {
         if (rows.length < spec.page) break;
       }
     }
+    const mergeFailures = [];
+    if (maps) {
+      for (const [sourceId, targetId] of maps.contacts) {
+        try {
+          await mergeContacts({ sourceId, targetId, reason: '旧版智能通讯录导入：与已有档案共用同一联系方式' });
+        } catch (e) {
+          mergeFailures.push({ sourceId, targetId, code: e.code || 'INTERNAL' });
+        }
+      }
+    }
     const counts = {};
-    let verified = true;
+    let verified = mergeFailures.length === 0;
     for (const spec of LEGACY_IMPORT) {
       const [{ n: local }] = await q(`SELECT count(*) AS n FROM ${spec.table}`);
       counts[spec.table] = { legacy: probe.counts[spec.table] || 0, local };
@@ -1796,7 +1799,8 @@ async function importLegacy(opts) {
       status: verified ? 'done' : 'partial',
       at: nowIso(),
       counts,
-      ...(merged ? { merged: true, mergedInto: maps.contacts.size } : {}),
+      ...(merged ? { merged: true, mergedInto: maps.contacts.size - mergeFailures.length } : {}),
+      ...(mergeFailures.length ? { message: `${mergeFailures.length} 份旧档案未能并入已有档案，可用「查找重复」手动合并`, mergeFailures } : {}),
     };
     await batch([setMetaStmt('legacy_import', result)]);
     state.legacy = result;
