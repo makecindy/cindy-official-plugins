@@ -120,6 +120,82 @@ var MESSAGES = {
     toolFailed: 'GitHub 工具执行失败:{detail}',
     testFailedNotify: 'GitHub 连接测试失败:{detail}',
     testSucceededNotify: '连接成功:@{login}',
+    prAskTitle: '要发 PR 吗？',
+    prCommitOne: '1 个提交',
+    prCommitMany: '{count} 个提交',
+    prFileOne: '1 个文件',
+    prFileMany: '{count} 个文件',
+    prPublish: '发 PR',
+    prPublishDraft: '发成草稿',
+    prPublishingTitle: '正在发 PR',
+    prPublishingDraftTitle: '正在发草稿 PR',
+    prPublishingMeta: '已交给 Agent，完成后这里会更新',
+    prQueuedMeta: '已排队，当前回复结束后开始',
+    prStateOpen: '已发布',
+    prStateDraft: '草稿',
+    prStateFollowing: '跟进中',
+    prStateMerged: '已合并',
+    prStateClosed: '已关闭',
+    prFollowEnded: '跟进已结束',
+    prFollow: '自动跟进到合并',
+    prFollowStarting: '正在开启跟进',
+    prMarkReady: '转为正式 PR',
+    prMarkingReady: '正在转为正式 PR',
+    prReadyFailed: '没能转为正式 PR：{detail}',
+    prStop: '停止',
+    prStopping: '正在停止跟进',
+    prSettings: 'PR 设置',
+    prHideSettings: '收起 PR 设置',
+    prAutoRename: '发完自动改名',
+    prAutoRenameHint: '任务标题改成 PR 号和标题',
+    prAutoFollow: '发完自动跟进',
+    prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
+    prTurnOn: '开启「{name}」',
+    prFollowModel: '自动跟进用的模型',
+    prFollowModelTask: '跟随当前任务',
+    prFollowModelTaskHint: '每次跟进用这个任务当时的模型',
+    prFollowModelCustom: '指定模型',
+    prFollowModelChangeTo: '更换模型（当前：{name}）',
+    prEffortMinimal: '最低',
+    prEffortLow: '低',
+    prEffortMedium: '中',
+    prEffortHigh: '高',
+    prEffortXhigh: '超高',
+    prEffortMax: '最高',
+    prFastMode: '快速',
+    prUltrafastMode: '超快',
+    prFollowModelFailed: '没能打开模型选择：{detail}',
+    prTurnOff: '关闭「{name}」',
+    prCiPassed: 'CI 通过',
+    prCiFailed: 'CI 未通过',
+    prCiRunning: 'CI 运行中',
+    prThreadsOpen: '{count} 条意见待处理',
+    prThreadsNone: '没有待处理意见',
+    prMergeReady: '可以合并',
+    prMergeConflict: '有冲突',
+    prMergeBehind: '需要同步 {base}',
+    prMergeApproval: '等待审批',
+    prMergeChanges: '需要修改',
+    prMergeWaiting: '等待合并',
+    prHandoffFailed: '没能交给 Agent，请直接在对话里告诉它',
+    prHandoffUnknown: '不确定是否已交给 Agent，请先看对话，不要重复点',
+    prSettingFailed: '设置没有保存，请稍后再试',
+    prNeedRepo: '需要 repo(owner/repo 形式)',
+    prNeedHead: '询问卡片需要 head(改动所在的分支)',
+    prBadPr: 'pr 需要是 GitHub PR 链接或编号',
+    prBadCardId: 'card_id 无效',
+    prCardNotFound: '找不到 card_id 对应的卡片，已新建一张',
+    prFetchFailed: '读取 PR 信息失败({detail})，卡片按已知信息显示',
+    prNextAsk: '卡片已显示。等用户点击或在对话里答复，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
+    prNextApply: '卡片设置要求发完后做 todo 里的事。做完还没做的，再用 card_id 调用 pr_card，带上 renamed / following。',
+    prNextUpdated: '卡片已更新。',
+    prTodoRename: '用 cindy_helper 的 set_current_session_title 把当前任务改名为「{title}」',
+    prTodoFollow: '按 pr 技能开始后台跟进 {url}',
+    prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
+    prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
+    prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prReadyFollow: '用户在 PR 卡片上把草稿转成了正式 PR，卡片设置是发完自动跟进。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
     status401: 'GitHub authorization is missing or expired. Open Plugins > GitHub details to reconnect your account, or replace the fallback token.',
@@ -162,6 +238,82 @@ var MESSAGES = {
     toolFailed: 'GitHub tool failed: {detail}',
     testFailedNotify: 'GitHub connection test failed: {detail}',
     testSucceededNotify: 'Connected: @{login}',
+    prAskTitle: 'Open a pull request?',
+    prCommitOne: '1 commit',
+    prCommitMany: '{count} commits',
+    prFileOne: '1 file',
+    prFileMany: '{count} files',
+    prPublish: 'Open PR',
+    prPublishDraft: 'Open as draft',
+    prPublishingTitle: 'Opening the pull request',
+    prPublishingDraftTitle: 'Opening a draft pull request',
+    prPublishingMeta: 'Handed to the agent. This card updates when it is done.',
+    prQueuedMeta: 'Queued. It starts after the current reply.',
+    prStateOpen: 'Open',
+    prStateDraft: 'Draft',
+    prStateFollowing: 'Following',
+    prStateMerged: 'Merged',
+    prStateClosed: 'Closed',
+    prFollowEnded: 'Following ended',
+    prFollow: 'Auto-follow until merged',
+    prFollowStarting: 'Starting to follow',
+    prMarkReady: 'Mark ready for review',
+    prMarkingReady: 'Marking ready for review',
+    prReadyFailed: 'Could not mark it ready for review: {detail}',
+    prStop: 'Stop',
+    prStopping: 'Stopping',
+    prSettings: 'PR settings',
+    prHideSettings: 'Hide PR settings',
+    prAutoRename: 'Rename after opening',
+    prAutoRenameHint: 'Retitle the task with the PR number and title',
+    prAutoFollow: 'Follow after opening',
+    prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
+    prTurnOn: 'Turn on "{name}"',
+    prFollowModel: 'Model for auto-follow',
+    prFollowModelTask: 'Follow this task',
+    prFollowModelTaskHint: 'Each round uses the model this task has at the time',
+    prFollowModelCustom: 'Choose a model',
+    prFollowModelChangeTo: 'Change model (now {name})',
+    prEffortMinimal: 'Minimal',
+    prEffortLow: 'Low',
+    prEffortMedium: 'Medium',
+    prEffortHigh: 'High',
+    prEffortXhigh: 'Extra high',
+    prEffortMax: 'Max',
+    prFastMode: 'Fast',
+    prUltrafastMode: 'Ultra fast',
+    prFollowModelFailed: 'Could not open the model picker: {detail}',
+    prTurnOff: 'Turn off "{name}"',
+    prCiPassed: 'CI passed',
+    prCiFailed: 'CI failed',
+    prCiRunning: 'CI running',
+    prThreadsOpen: 'Open review threads: {count}',
+    prThreadsNone: 'No open review threads',
+    prMergeReady: 'Ready to merge',
+    prMergeConflict: 'Has conflicts',
+    prMergeBehind: 'Behind {base}',
+    prMergeApproval: 'Waiting for approval',
+    prMergeChanges: 'Changes requested',
+    prMergeWaiting: 'Waiting to merge',
+    prHandoffFailed: 'Could not hand this to the agent. Tell it in the conversation instead.',
+    prHandoffUnknown: 'Not sure the agent received this. Check the conversation before clicking again.',
+    prSettingFailed: 'The setting was not saved. Try again later.',
+    prNeedRepo: 'repo is required (owner/repo)',
+    prNeedHead: 'An ask card needs head (the branch with the changes)',
+    prBadPr: 'pr must be a GitHub pull request URL or number',
+    prBadCardId: 'Invalid card_id',
+    prCardNotFound: 'No card matches card_id, so a new one was created',
+    prFetchFailed: 'Could not read the pull request ({detail}); the card shows what is known',
+    prNextAsk: 'The card is shown. Wait for the user to click or answer in the conversation, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
+    prNextApply: 'The card settings ask for the todo items after opening. Do any not done yet, then call pr_card with card_id, renamed and following.',
+    prNextUpdated: 'Card updated.',
+    prTodoRename: 'Rename the current task to "{title}" with cindy_helper set_current_session_title',
+    prTodoFollow: 'Start following {url} in the background with the pr Skill',
+    prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
+    prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
+    prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prReadyFollow: 'The user marked the draft ready for review on the PR card, and the card setting says to follow it automatically. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
     status401: 'GitHub の認証が未設定か期限切れです。「プラグイン」→「GitHub」の詳細ページでアカウントを再接続するか、予備トークンを差し替えてください。',
@@ -204,6 +356,82 @@ var MESSAGES = {
     toolFailed: 'GitHub ツールの実行に失敗しました: {detail}',
     testFailedNotify: 'GitHub 接続テストに失敗しました: {detail}',
     testSucceededNotify: '接続しました: @{login}',
+    prAskTitle: 'PR を作成しますか？',
+    prCommitOne: '1 件のコミット',
+    prCommitMany: '{count} 件のコミット',
+    prFileOne: '1 個のファイル',
+    prFileMany: '{count} 個のファイル',
+    prPublish: 'PR を作成',
+    prPublishDraft: '下書きで作成',
+    prPublishingTitle: 'PR を作成しています',
+    prPublishingDraftTitle: '下書き PR を作成しています',
+    prPublishingMeta: 'エージェントに渡しました。完了するとこのカードが更新されます',
+    prQueuedMeta: 'キューに追加しました。現在の返信が終わると始まります',
+    prStateOpen: '公開済み',
+    prStateDraft: '下書き',
+    prStateFollowing: 'フォロー中',
+    prStateMerged: 'マージ済み',
+    prStateClosed: 'クローズ済み',
+    prFollowEnded: 'フォロー終了',
+    prFollow: 'マージまで自動フォロー',
+    prFollowStarting: 'フォローを開始しています',
+    prMarkReady: '正式な PR にする',
+    prMarkingReady: '正式な PR に切り替えています',
+    prReadyFailed: '正式な PR にできませんでした：{detail}',
+    prStop: 'フォロー停止',
+    prStopping: 'フォローを停止しています',
+    prSettings: 'PR 設定',
+    prHideSettings: 'PR 設定を閉じる',
+    prAutoRename: '作成後に自動で改名',
+    prAutoRenameHint: 'タスク名を PR 番号とタイトルに変更します',
+    prAutoFollow: '作成後に自動でフォロー',
+    prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
+    prTurnOn: '「{name}」をオン',
+    prFollowModel: '自動フォローに使うモデル',
+    prFollowModelTask: 'タスクに合わせる',
+    prFollowModelTaskHint: '毎回、その時点のこのタスクのモデルを使います',
+    prFollowModelCustom: 'モデルを指定',
+    prFollowModelChangeTo: 'モデルを変更（現在：{name}）',
+    prEffortMinimal: '最小',
+    prEffortLow: '低',
+    prEffortMedium: '中',
+    prEffortHigh: '高',
+    prEffortXhigh: '超高',
+    prEffortMax: '最高',
+    prFastMode: '高速',
+    prUltrafastMode: '超高速',
+    prFollowModelFailed: 'モデルの選択を開けませんでした：{detail}',
+    prTurnOff: '「{name}」をオフ',
+    prCiPassed: 'CI 成功',
+    prCiFailed: 'CI 失敗',
+    prCiRunning: 'CI 実行中',
+    prThreadsOpen: '未解決のレビュー {count} 件',
+    prThreadsNone: '未解決のレビューなし',
+    prMergeReady: 'マージ可能',
+    prMergeConflict: 'コンフリクトあり',
+    prMergeBehind: '{base} との同期が必要',
+    prMergeApproval: '承認待ち',
+    prMergeChanges: '修正依頼あり',
+    prMergeWaiting: 'マージ待ち',
+    prHandoffFailed: 'エージェントに渡せませんでした。会話で直接伝えてください',
+    prHandoffUnknown: 'エージェントに届いたか分かりません。もう一度押す前に会話を確認してください',
+    prSettingFailed: '設定を保存できませんでした。しばらくしてから再試行してください',
+    prNeedRepo: 'repo(owner/repo 形式)が必要です',
+    prNeedHead: '確認カードには head(変更のあるブランチ)が必要です',
+    prBadPr: 'pr には GitHub の PR URL か番号を指定してください',
+    prBadCardId: 'card_id が無効です',
+    prCardNotFound: 'card_id に対応するカードがないため、新しく作成しました',
+    prFetchFailed: 'PR 情報を取得できませんでした({detail})。分かっている情報でカードを表示します',
+    prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での返答を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
+    prNextApply: 'カード設定により、作成後に todo の操作が必要です。未完了のものを済ませてから、card_id・renamed・following を付けて pr_card を呼んでください。',
+    prNextUpdated: 'カードを更新しました。',
+    prTodoRename: 'cindy_helper の set_current_session_title で現在のタスク名を「{title}」に変更する',
+    prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
+    prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
+    prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
+    prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prReadyFollow: 'ユーザーが PR カードで下書きを正式な PR にしました。カードの設定は作成後に自動フォローです。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
     status401: 'GitHub 인증이 설정되지 않았거나 만료되었습니다. ‘플러그인’ > ‘GitHub’ 상세 페이지에서 계정을 다시 연결하거나 예비 토큰을 교체하세요.',
@@ -246,6 +474,82 @@ var MESSAGES = {
     toolFailed: 'GitHub 도구 실행에 실패했습니다: {detail}',
     testFailedNotify: 'GitHub 연결 테스트에 실패했습니다: {detail}',
     testSucceededNotify: '연결되었습니다: @{login}',
+    prAskTitle: 'PR을 만들까요?',
+    prCommitOne: '커밋 1개',
+    prCommitMany: '커밋 {count}개',
+    prFileOne: '파일 1개',
+    prFileMany: '파일 {count}개',
+    prPublish: 'PR 만들기',
+    prPublishDraft: '초안으로 만들기',
+    prPublishingTitle: 'PR을 만드는 중',
+    prPublishingDraftTitle: '초안 PR을 만드는 중',
+    prPublishingMeta: '에이전트에게 맡겼습니다. 끝나면 이 카드가 업데이트됩니다',
+    prQueuedMeta: '대기열에 추가했습니다. 현재 응답이 끝나면 시작합니다',
+    prStateOpen: '게시됨',
+    prStateDraft: '초안',
+    prStateFollowing: '팔로우 중',
+    prStateMerged: '병합됨',
+    prStateClosed: '닫힘',
+    prFollowEnded: '팔로우 종료됨',
+    prFollow: '병합까지 자동 팔로우',
+    prFollowStarting: '팔로우 시작 중',
+    prMarkReady: '정식 PR로 전환',
+    prMarkingReady: '정식 PR로 전환 중',
+    prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
+    prStop: '중지',
+    prStopping: '팔로우 중지 중',
+    prSettings: 'PR 설정',
+    prHideSettings: 'PR 설정 닫기',
+    prAutoRename: '만든 뒤 자동으로 이름 변경',
+    prAutoRenameHint: '작업 제목을 PR 번호와 제목으로 바꿉니다',
+    prAutoFollow: '만든 뒤 자동으로 팔로우',
+    prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
+    prTurnOn: '"{name}" 켜기',
+    prFollowModel: '자동 팔로우에 쓸 모델',
+    prFollowModelTask: '현재 작업 따르기',
+    prFollowModelTaskHint: '매번 그 시점의 이 작업 모델을 사용합니다',
+    prFollowModelCustom: '모델 지정',
+    prFollowModelChangeTo: '모델 변경 (현재: {name})',
+    prEffortMinimal: '최소',
+    prEffortLow: '낮음',
+    prEffortMedium: '중간',
+    prEffortHigh: '높음',
+    prEffortXhigh: '매우 높음',
+    prEffortMax: '최대',
+    prFastMode: '빠름',
+    prUltrafastMode: '초고속',
+    prFollowModelFailed: '모델 선택을 열지 못했습니다: {detail}',
+    prTurnOff: '"{name}" 끄기',
+    prCiPassed: 'CI 통과',
+    prCiFailed: 'CI 실패',
+    prCiRunning: 'CI 실행 중',
+    prThreadsOpen: '처리할 리뷰 의견 {count}개',
+    prThreadsNone: '처리할 리뷰 의견 없음',
+    prMergeReady: '병합 가능',
+    prMergeConflict: '충돌 있음',
+    prMergeBehind: '{base} 동기화 필요',
+    prMergeApproval: '승인 대기 중',
+    prMergeChanges: '수정 요청됨',
+    prMergeWaiting: '병합 대기 중',
+    prHandoffFailed: '에이전트에게 전달하지 못했습니다. 대화에서 직접 말해 주세요',
+    prHandoffUnknown: '에이전트에게 전달됐는지 확실하지 않습니다. 다시 누르기 전에 대화를 확인하세요',
+    prSettingFailed: '설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prNeedRepo: 'repo(owner/repo 형식)가 필요합니다',
+    prNeedHead: '확인 카드에는 head(변경이 있는 브랜치)가 필요합니다',
+    prBadPr: 'pr은 GitHub PR URL이나 번호여야 합니다',
+    prBadCardId: 'card_id가 올바르지 않습니다',
+    prCardNotFound: 'card_id에 해당하는 카드가 없어 새로 만들었습니다',
+    prFetchFailed: 'PR 정보를 읽지 못했습니다({detail}). 알고 있는 정보로 카드를 표시합니다',
+    prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 답할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
+    prNextApply: '카드 설정에 따라 PR을 만든 뒤 todo 항목을 처리해야 합니다. 아직 하지 않은 항목을 마친 뒤 card_id, renamed, following으로 pr_card를 호출하세요.',
+    prNextUpdated: '카드를 업데이트했습니다.',
+    prTodoRename: 'cindy_helper의 set_current_session_title로 현재 작업 이름을 "{title}"(으)로 변경',
+    prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
+    prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
+    prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
+    prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prReadyFollow: '사용자가 PR 카드에서 초안을 정식 PR로 전환했고, 카드 설정은 만든 뒤 자동 팔로우입니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
 
@@ -2084,6 +2388,879 @@ async function callTool(args, callId) {
   return deliver(out.data, Boolean(args.raw), outFile, callId);
 }
 
+/* ── PR 卡片(pr_card)─────────────────────────────────────────────────
+ * Agent 想问用户要不要发 PR 时调用;发出后同一张卡片接着显示 PR 状态和后续操作。
+ * - 宿主卡片沙箱没有脚本、SVG 和 class:图标用 CSS 画,按钮文字由 aria-label 经
+ *   ::before 生成——手机端只投影纯文本 + 原生按钮,正文里不会混进按钮字;
+ * - 发 PR / 跟进 / 停止:凭点击票据让本任务的 Agent 接着做(agent.run
+ *   continue;[UI_ACTION_TRIGGER] 前缀让这条代发消息不在对话里显示,卡片本身
+ *   显示进度);查看改动与设置开关只在本地重画卡片;
+ * - 卡片状态按 card_id(首次调用的 callId)存在私有数据目录,两项设置存 /kv;
+ *   之后的 pr_card 调用带 sourceCallId 原地更新原卡片。
+ * ──────────────────────────────────────────────────────────────────── */
+
+var PR_CARD_DIR = 'pr-cards';
+/** 私有目录最多保留多少张卡片的状态;超出删最旧的(被删的旧卡片点击后不再响应)。 */
+var PR_CARD_KEEP = 200;
+var PR_CARD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+var PR_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+var PR_FILES_KEPT = 50;
+var PR_TITLE_MAX = 120;
+var PR_TRIGGER = '[UI_ACTION_TRIGGER]';
+
+/* 同一张卡片可能同时收到工具调用和按钮点击;全部串行,状态不互相覆盖。 */
+var prQueue = Promise.resolve();
+
+function enqueuePr(fn) {
+  var run = prQueue.then(fn);
+  prQueue = run.catch(function () {});
+  return run;
+}
+
+function prEsc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+/* ── 卡片状态(私有数据目录)与设置(/kv) ── */
+
+function prCardPath(id) {
+  return PR_CARD_DIR + '/' + id + '.json';
+}
+
+async function readPrCard(id) {
+  var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
+  if (!r || !r.ok) return null;
+  try {
+    var card = JSON.parse(r.content);
+    return card && card.id === id ? card : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function savePrCard(card) {
+  var r = await cindy.send({
+    type: 'fs-request', root: 'data', op: 'write',
+    path: prCardPath(card.id), content: JSON.stringify(card),
+  });
+  return Boolean(r && r.ok);
+}
+
+async function prunePrCards() {
+  var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
+  if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
+  var stale = r.entries
+    .slice()
+    .sort(function (a, b) { return a.mtime - b.mtime; })
+    .slice(0, r.entries.length - PR_CARD_KEEP);
+  for (var i = 0; i < stale.length; i++) {
+    await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: stale[i].path });
+  }
+}
+
+/* 读失败时不写:/kv 是整体替换,读不到就写会抹掉别的键。 */
+async function readKv() {
+  var r = await fetch('/kv');
+  if (!r || r.ok === false) throw new Error('kv unavailable');
+  var kv = await r.json();
+  return kv && typeof kv === 'object' && !Array.isArray(kv) ? kv : {};
+}
+
+var PR_AGENT_KINDS = { cc: 1, codex: 1, pi: 1 };
+
+/** 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。 */
+function prFollowModelFrom(value) {
+  var v = value && typeof value === 'object' ? value : null;
+  var r = v && v.route && typeof v.route === 'object' ? v.route : null;
+  if (!r || !PR_AGENT_KINDS[r.agentKind] || typeof r.providerId !== 'string' || typeof r.model !== 'string' || !r.model ||
+      typeof r.effort !== 'string' || !(typeof r.fastMode === 'boolean' || r.fastMode === 'ultrafast')) return null;
+  return {
+    route: { agentKind: r.agentKind, providerId: r.providerId, model: r.model, effort: r.effort, fastMode: r.fastMode },
+    label: typeof v.label === 'string' && v.label ? v.label.slice(0, 120) : r.model,
+  };
+}
+
+function prSettingsFrom(kv) {
+  var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
+  // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
+  return {
+    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true,
+    followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
+  };
+}
+
+/** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
+function prSettingsForAgent(settings, autoFollow) {
+  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  var m = settings.followModel;
+  if (m) {
+    out.follow_model = {
+      model_agent_kind: m.route.agentKind === 'cc' ? 'claude-code' : m.route.agentKind,
+      provider_id: m.route.providerId, model: m.route.model, effort: m.route.effort, fast_mode: m.route.fastMode, label: m.label,
+    };
+  }
+  return out;
+}
+
+async function readPrSettings() {
+  try {
+    return prSettingsFrom(await readKv());
+  } catch (e) {
+    return prSettingsFrom(null);
+  }
+}
+
+async function writePrSettings(change) {
+  var kv = await readKv();
+  var next = prSettingsFrom(kv);
+  change(next);
+  kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
+  if (next.followModel) kv.prCard.followModel = next.followModel;
+  if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
+  var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+  if (!r || r.ok === false) throw new Error('kv write failed');
+  return next;
+}
+function togglePrSetting(key) {
+  return writePrSettings(function (next) { next[key] = !next[key]; });
+}
+
+/** 用宿主统一的模型选择器选跟进模型;名字从同源模型目录取,取不到就显示模型 id。 */
+async function pickPrFollowModel(settings, msg) {
+  var picked = await cindy.pickModel(Object.assign(
+    settings.followModel ? { initial: settings.followModel.route } : {},
+    msg.mobilePageId ? { mobilePageId: msg.mobilePageId } : {}
+  ));
+  if (!picked || picked.ok !== true) {
+    return picked && picked.errorCode === 'CANCELLED' ? { settings: settings } : { settings: settings, error: (picked && picked.message) || 'UNAVAILABLE' };
+  }
+  return savePrFollowModel(settings, picked.route);
+}
+
+/** 记下选中的跟进模型(卡内下拉框或选择器选的都走这里)。 */
+async function savePrFollowModel(settings, route) {
+  var label = '';
+  try {
+    var res = await fetch('/agent-models');
+    var list = res && res.ok !== false ? (await res.json()).models : null;
+    var hit = Array.isArray(list) && list.find(function (m) { return m && m.id === route.model && m.providerId === route.providerId; });
+    if (hit) label = hit.name + (hit.providerName ? ' · ' + hit.providerName : '');
+  } catch (e) { /* 名字只是展示,取不到用模型 id */ }
+  var value = prFollowModelFrom({ route: route, label: label });
+  if (!value) return { settings: settings, error: 'INVALID_ROUTE' };
+  return { settings: await writePrSettings(function (next) { next.followModel = value; next.lastFollowModel = value; }) };
+}
+
+/* ── PR 状态(GitHub GraphQL,一次取齐卡片要显示的字段) ── */
+
+var PR_STATUS_QUERY =
+  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
+  'number title url state isDraft merged mergeStateStatus reviewDecision baseRefName headRefName ' +
+  'commits(last:1){nodes{commit{statusCheckRollup{state}}}} reviewThreads(first:100){nodes{isResolved}}}}}';
+
+async function fetchPrStatus(repo, number, callId) {
+  var slash = repo.indexOf('/');
+  var r = await gql(PR_STATUS_QUERY, { owner: repo.slice(0, slash), name: repo.slice(slash + 1), number: number }, callId);
+  if (r.err) return { err: r.err };
+  var pr = r.data.repository && r.data.repository.pullRequest;
+  if (!pr) return { err: t('status404') };
+  var last = pr.commits && pr.commits.nodes && pr.commits.nodes[0];
+  var rollup = last && last.commit && last.commit.statusCheckRollup;
+  var threads = (pr.reviewThreads && pr.reviewThreads.nodes) || [];
+  return {
+    pr: {
+      number: pr.number,
+      title: pr.title || '',
+      url: pr.url || '',
+      state: pr.merged ? 'merged' : pr.state === 'CLOSED' ? 'closed' : 'open',
+      draft: pr.isDraft === true,
+      base: pr.baseRefName || '',
+      head: pr.headRefName || '',
+      ci: rollup ? rollup.state : null,
+      openThreads: threads.filter(function (n) { return n && n.isResolved === false; }).length,
+      mergeState: pr.mergeStateStatus || null,
+      review: pr.reviewDecision || null,
+    },
+  };
+}
+
+/* ── 参数整理 ── */
+
+function parsePrRef(value, repo) {
+  var s = String(value).trim();
+  var m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/.exec(s);
+  if (m) return { repo: m[1] + '/' + m[2], number: Number(m[3]) };
+  m = /^#?(\d+)$/.exec(s);
+  return m && repo ? { repo: repo, number: Number(m[1]) } : null;
+}
+
+function prCount(value) {
+  var n = Number(value);
+  return value !== null && value !== '' && Number.isInteger(n) && n >= 0 && n < 1e7 ? n : null;
+}
+
+function prFiles(list) {
+  if (!Array.isArray(list)) return null;
+  var out = [];
+  for (var i = 0; i < list.length && out.length < PR_FILES_KEPT; i++) {
+    var f = list[i];
+    var p = f && typeof f === 'object' ? f.path : f;
+    if (typeof p !== 'string' || !p.trim()) continue;
+    out.push({
+      path: p.trim().slice(0, 300),
+      additions: f && typeof f === 'object' ? prCount(f.additions) : null,
+      deletions: f && typeof f === 'object' ? prCount(f.deletions) : null,
+    });
+  }
+  return out;
+}
+
+function prText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 255) : '';
+}
+
+/** 改名用的任务标题:#号 + PR 标题(set_current_session_title 上限 120 字)。 */
+function prTaskTitle(card) {
+  return ('#' + card.pr.number + ' ' + (card.pr.title || card.repo)).slice(0, PR_TITLE_MAX);
+}
+
+function newPrCard(id, repo) {
+  return {
+    id: id, repo: repo, head: '', base: '', commits: null, files: null, filesTotal: null,
+    stage: 'ask', publishingDraft: false, queued: false, pr: null,
+    renamed: false, following: false, followedEver: false, pending: null,
+    settingsOpen: false, note: null, settingsApplied: false,
+  };
+}
+
+/* ── 渲染 ───────────────────────────────────────────────────────────────
+ * 颜色全部取宿主注入的主题变量;PR 状态色不在宿主变量里,用 light-dark() 按
+ * 宿主声明的 color-scheme 取浅/深两套值(与客户端 PR 状态色一致)。
+ * ──────────────────────────────────────────────────────────────────── */
+
+var PR_GREEN = 'light-dark(#2ea043,#3fb950)';
+var PR_BLUE = '#417cdd';
+var PR_HOVER = 'color-mix(in srgb,transparent,var(--text-primary) 7%)';
+var PR_CSS =
+  '<style>' +
+  '*{box-sizing:border-box}' +
+  'button{font:inherit;color:inherit;margin:0;padding:0;border:0;background:var(--bg,transparent);cursor:pointer;' +
+  '-webkit-user-select:none;user-select:none;transition:background-color var(--motion-fast,120ms) var(--motion-ease-out,ease-out)}' +
+  'button:hover:not(:disabled){background:var(--hover,var(--bg,transparent))}' +
+  'button:disabled{cursor:default;opacity:.5}' +
+  'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}' +
+  'button[data-ghost-action^="pr:"]::before{content:attr(aria-label)}' +
+  'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
+  'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
+  'div:hover>div>button[data-ghost-action="pr:stop"],div:focus-within>div>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
+  '@keyframes prspin{to{transform:rotate(360deg)}}' +
+  '</style>';
+
+function prSpan(style) {
+  return '<span style="position:absolute;' + style + '"></span>';
+}
+
+function prRing(cx, cy) {
+  return prSpan('left:' + (cx - 2.4) + 'px;top:' + (cy - 2.4) + 'px;width:4.8px;height:4.8px;border:1.6px solid currentColor;border-radius:50%');
+}
+
+function prVLine(x, y1, y2) {
+  return prSpan('left:' + (x - 0.8) + 'px;top:' + y1 + 'px;width:1.6px;height:' + (y2 - y1) + 'px;border-radius:1px;background:currentColor');
+}
+
+function prHLine(y, x1, x2) {
+  return prSpan('left:' + x1 + 'px;top:' + (y - 0.8) + 'px;width:' + (x2 - x1) + 'px;height:1.6px;border-radius:1px;background:currentColor');
+}
+
+/** 16px 的 git 图形(分支 / PR / 草稿 / 已合并 / 已关闭 / 进行中),按 Lucide 的几何画。 */
+function prGlyph(kind) {
+  var stroke = '1.6px solid currentColor';
+  var parts;
+  if (kind === 'branch') {
+    parts = prVLine(4, 2, 9.6) + prRing(12, 4) + prRing(4, 12) +
+      prSpan('left:6.4px;top:6.4px;width:6.4px;height:6.4px;border-right:' + stroke + ';border-bottom:' + stroke + ';border-bottom-right-radius:6px');
+  } else if (kind === 'spinner') {
+    parts = prSpan('left:1px;top:1px;width:14px;height:14px;border:' + stroke + ';border-top-color:transparent;border-radius:50%;animation:prspin var(--motion-spinner-cycle,900ms) linear infinite');
+  } else if (kind === 'merged') {
+    parts = prRing(4, 4) + prVLine(4, 6.4, 14.4) + prRing(12, 12) +
+      prSpan('left:3.2px;top:6px;width:6.4px;height:6.8px;border-left:' + stroke + ';border-bottom:' + stroke + ';border-bottom-left-radius:6px');
+  } else {
+    parts = prRing(4, 4) + prVLine(4, 6.4, 14.4) + prRing(12, 12);
+    if (kind === 'draft') {
+      parts += prVLine(12, 2.2, 4) + prVLine(12, 5.8, 7.6);
+    } else if (kind === 'closed') {
+      parts += prVLine(12, 6.8, 9.6) +
+        prSpan('left:11.2px;top:0.8px;width:1.6px;height:4.6px;border-radius:1px;background:currentColor;transform:rotate(45deg)') +
+        prSpan('left:11.2px;top:0.8px;width:1.6px;height:4.6px;border-radius:1px;background:currentColor;transform:rotate(-45deg)');
+    } else {
+      parts += prSpan('left:7.6px;top:3.2px;width:5.2px;height:6.4px;border-top:' + stroke + ';border-right:' + stroke + ';border-top-right-radius:2.4px');
+    }
+  }
+  return '<span style="position:relative;display:block;width:16px;height:16px">' + parts + '</span>';
+}
+
+/**
+ * 设置按钮的齿轮。新版宿主认 data-ghost-icon="settings",换成 App 里同一个设置图标;
+ * 旧版宿主显示里面用 CSS 拼的兜底齿轮(描边外圈 + 中心孔,8 个齿绕中心旋转排布)。
+ */
+function prGearGlyph() {
+  var teeth = '';
+  for (var i = 0; i < 8; i++) {
+    teeth += prSpan('left:6.8px;top:0.6px;width:2.4px;height:2.8px;border-radius:0.6px;background:currentColor;' +
+      'transform-origin:1.2px 7.4px;transform:rotate(' + (i * 45) + 'deg)');
+  }
+  return '<span data-ghost-icon="settings" style="position:relative;display:block;width:16px;height:16px">' + teeth +
+    prSpan('left:2.6px;top:2.6px;width:10.8px;height:10.8px;border:1.6px solid currentColor;border-radius:50%') +
+    prRing(8, 8) + '</span>';
+}
+
+function prCheckGlyph() {
+  return '<span style="display:inline-block;width:5px;height:9px;margin:-3px 3px 0 2px;' +
+    'border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(45deg)"></span>';
+}
+
+function prMiniSpinner() {
+  return '<span style="display:inline-block;width:11px;height:11px;margin-right:2px;border:1.5px solid currentColor;' +
+    'border-top-color:transparent;border-radius:50%;animation:prspin var(--motion-spinner-cycle,900ms) linear infinite"></span>';
+}
+
+function prTile(glyph, tone) {
+  var color = 'var(--text-secondary)';
+  var bg = 'var(--surface-chip)';
+  if (tone === 'open') {
+    color = PR_GREEN;
+    bg = 'color-mix(in srgb,' + PR_GREEN + ' 14%,transparent)';
+  } else if (tone === 'merged') {
+    color = PR_BLUE;
+    bg = 'color-mix(in srgb,' + PR_BLUE + ' 16%,transparent)';
+  } else if (tone === 'muted') {
+    color = 'var(--text-tertiary)';
+  }
+  return '<div style="display:grid;flex:none;place-items:center;width:36px;height:36px;border-radius:8px;color:' + color + ';background:' + bg + '">' +
+    prGlyph(glyph) + '</div>';
+}
+
+var PR_SEP = '<span style="color:var(--text-tertiary)"> · </span>';
+
+/** 上层:图标、标题、仓库或进度说明,设置按钮靠右。 */
+function prHeader(tile, titleHtml, metaParts, gear) {
+  return '<div style="display:flex;align-items:center;gap:12px;padding:14px 12px 14px 16px">' +
+    tile +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;line-height:20px;font-weight:500">' + titleHtml + '</div>' +
+    '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:2px;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
+    metaParts.join(PR_SEP) + '</div>' +
+    '</div>' + (gear || '') + '</div>';
+}
+
+/** 下层:左边分支或状态,右边按钮;窄的时候按钮换到下一行。 */
+function prFooter(leftHtml, actionsHtml) {
+  return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
+    '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
+    (actionsHtml ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
+    '</div>';
+}
+
+var PR_PILL = 'display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:9999px;font-size:13px;font-weight:500;white-space:nowrap;';
+
+function prButton(action, label, style, inner, extraAttrs) {
+  return '<button data-ghost-action="' + action + '" aria-label="' + prEsc(label) + '"' + (extraAttrs || '') + ' style="' + style + '">' + (inner || '') + '</button>';
+}
+
+// data-ghost-primary:手机端把它画成主按钮(电脑端靠这里的样式)。
+function prCtaButton(action, label) {
+  return prButton(action, label, PR_PILL + 'border:1px solid transparent;color:var(--accent-pure-cta-fg,#fff);' +
+    '--bg:var(--accent-cta-bg,#000);--hover:color-mix(in srgb,var(--accent-cta-bg,#000),var(--surface-elevated) 18%)', '', ' data-ghost-primary');
+}
+
+function prPillButton(action, label) {
+  return prButton(action, label, PR_PILL + 'border:1px solid var(--border-default);' +
+    '--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 8%)');
+}
+
+function prQuietButton(action, label, extra, inner) {
+  return prButton(action, label, 'display:inline-flex;align-items:center;height:32px;padding:0 10px;border-radius:9999px;' +
+    'font-size:12px;font-weight:500;color:var(--text-secondary);--hover:' + PR_HOVER + (extra || ''), inner);
+}
+
+/** 跟进中:按钮原地换成一行安静的状态(小绿点 + 次级文字),圆点由宿主播呼吸光环(data-ghost-live)。 */
+function prFollowingPill() {
+  // data-ghost-live-label:手机端据此把这一项画成带呼吸点的状态。
+  return '<div data-ghost-live-label="' + prEsc(t('prStateFollowing')) + '" style="display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 4px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
+    '<span style="position:relative;flex:none;width:6px;height:6px">' +
+    // 宿主按 data-ghost-live 给这层播呼吸光环;旧版宿主不认这个属性时它只是叠在圆点下的同色圆。
+    '<span data-ghost-live style="position:absolute;inset:0;border-radius:50%;background:' + PR_GREEN + '"></span>' +
+    '<span style="position:absolute;inset:0;border-radius:50%;background:' + PR_GREEN + '"></span></span>' +
+    prEsc(t('prStateFollowing')) + '</div>';
+}
+
+function prChip(label, pending) {
+  return '<div style="display:inline-flex;align-items:center;height:32px;padding:0 2px;font-size:13px;color:var(--text-secondary);white-space:nowrap">' +
+    '<span style="display:inline-flex;align-items:center;color:var(--text-tertiary)">' + (pending ? prMiniSpinner() : prCheckGlyph()) + '</span>' +
+    '<span style="margin-left:4px">' + prEsc(label) + '</span></div>';
+}
+
+function prStatusItem(tone, label) {
+  var dot = tone === 'good'
+    ? 'background:' + PR_GREEN
+    : tone === 'bad'
+      ? 'background:var(--error-fg,#d93025)'
+      : 'border:1.5px solid var(--text-tertiary)';
+  return '<div style="display:inline-flex;align-items:center;gap:6px;' + (tone === 'good' ? 'color:var(--text-primary)' : '') + '">' +
+    '<span style="flex:none;width:7px;height:7px;border-radius:50%;' + dot + '"></span>' + prEsc(label) + '</div>';
+}
+
+function prStatusStrip(pr) {
+  var items = '';
+  if (pr.ci === 'SUCCESS') items += prStatusItem('good', t('prCiPassed'));
+  else if (pr.ci === 'FAILURE' || pr.ci === 'ERROR') items += prStatusItem('bad', t('prCiFailed'));
+  else if (pr.ci) items += prStatusItem('wait', t('prCiRunning'));
+  items += pr.openThreads > 0
+    ? prStatusItem('wait', t('prThreadsOpen', { count: pr.openThreads }))
+    : prStatusItem('good', t('prThreadsNone'));
+  if (pr.mergeState === 'DIRTY') items += prStatusItem('bad', t('prMergeConflict'));
+  else if (pr.mergeState === 'BEHIND') items += prStatusItem('wait', t('prMergeBehind', { base: pr.base || 'base' }));
+  else if (pr.mergeState === 'CLEAN') items += prStatusItem('good', t('prMergeReady'));
+  else if (pr.review === 'CHANGES_REQUESTED') items += prStatusItem('wait', t('prMergeChanges'));
+  else if (pr.review === 'REVIEW_REQUIRED') items += prStatusItem('wait', t('prMergeApproval'));
+  else items += prStatusItem('wait', t('prMergeWaiting'));
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px 16px">' + items + '</div>';
+}
+
+/** 分支与改动概况(下层左边)。 */
+function prContextLine(card) {
+  var head = card.head || (card.pr && card.pr.head) || '';
+  var base = card.base || (card.pr && card.pr.base) || '';
+  var parts = head ? [prEsc(head) + (base ? ' → ' + prEsc(base) : '')] : [];
+  parts = parts.concat(prStatsParts(card));
+  return '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + parts.join(PR_SEP) + '</div>';
+}
+
+function prSettingRow(action, label, hint, on) {
+  // data-ghost-toggle:手机端把这一行画成原生开关(文字取按钮里的标题和说明)。
+  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: label }) : t('prTurnOn', { name: label })) + '" ' +
+    'style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;text-align:left;--hover:' + PR_HOVER + '">' +
+    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) + '</div>' +
+    '<div style="font-size:12px;line-height:16px;color:var(--text-secondary)">' + prEsc(hint) + '</div></div>' +
+    '<span style="position:relative;flex:none;width:36px;height:20px;border-radius:9999px;background:' + (on ? PR_BLUE : 'light-dark(#808080,#787878)') + '">' +
+    '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
+}
+
+function prSegment(action, label, active, inner) {
+  return prButton(action, label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
+    'font-size:12px;font-weight:500;white-space:nowrap;' + (active
+      ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
+      : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
+}
+
+/** 推理档位与速度的显示名(和输入框旁的模型选择器一样跟在模型名后面)。 */
+function prRouteExtras(route) {
+  var effort = { minimal: t('prEffortMinimal'), low: t('prEffortLow'), medium: t('prEffortMedium'), high: t('prEffortHigh'),
+    xhigh: t('prEffortXhigh'), max: t('prEffortMax') }[route.effort] || route.effort;
+  var parts = effort ? [effort] : [];
+  if (route.fastMode === 'ultrafast') parts.push(t('prUltrafastMode'));
+  else if (route.fastMode === true) parts.push(t('prFastMode'));
+  return parts;
+}
+
+/** 下拉箭头(卡内没有 SVG,用描边拼)。 */
+function prChevron() {
+  return '<span style="flex:none;display:inline-block;width:6px;height:6px;margin:0 2px -1px 8px;' +
+    'border-right:1.5px solid var(--text-tertiary);border-bottom:1.5px solid var(--text-tertiary);transform:translateY(-2px) rotate(45deg)"></span>';
+}
+
+/**
+ * 跟进模型二选一:跟随当前任务(默认),或指定一个模型。指定时下面单独一行是模型下拉框
+ * (模型名 · 档位 ⌄)。新版宿主认 data-ghost-model-select,点它在框下方弹出模型列表;
+ * 手机和旧版宿主照常派发动作,由这里打开 Cindy 的模型选择器;切回「跟随」再切回
+ * 「指定」直接恢复上次的模型。旧版宿主没有统一选择器时不显示这一行。
+ */
+function prModelRow(settings) {
+  if (typeof cindy.pickModel !== 'function') return '';
+  var m = settings.followModel;
+  var head = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">' +
+    '<div style="flex:1;min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(t('prFollowModel')) + '</div>' +
+    (m ? '' : '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:16px;color:var(--text-secondary)">' +
+      prEsc(t('prFollowModelTaskHint')) + '</div>') + '</div>' +
+    '<div style="display:flex;flex:none;gap:2px;padding:2px;border-radius:9999px;background:var(--surface-chip)">' +
+    prSegment('prset:modelTask', t('prFollowModelTask'), !m, prEsc(t('prFollowModelTask'))) +
+    prSegment('prset:model', t('prFollowModelCustom'), !!m, prEsc(t('prFollowModelCustom'))) +
+    '</div></div>';
+  var picker = m
+    ? '<div style="margin-top:8px">' + prButton('prset:modelPick', t('prFollowModelChangeTo', { name: m.label }),
+      'display:inline-flex;align-items:center;max-width:100%;height:32px;padding:0 10px;border-radius:8px;font-size:13px;' +
+      'border:1px solid var(--border-default);--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 6%)',
+      '<span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500">' + prEsc(m.label) + '</span>' +
+      prRouteExtras(m.route).map(function (x) { return '<span style="flex:none;margin-left:8px;color:var(--text-secondary)">' + prEsc(x) + '</span>'; }).join('') +
+      prChevron(), ' data-ghost-model-select="' + prEsc(JSON.stringify(m.route)) + '"') + '</div>'
+    : '';
+  return '<div style="padding:8px">' + head + picker + '</div>';
+}
+
+function prSettingsPanel(settings) {
+  return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
+    '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
+    prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
+    prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prModelRow(settings) +
+    '</div>';
+}
+
+function prGearButton(open) {
+  return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
+    'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
+    'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
+    prGearGlyph());
+}
+
+function prStatsParts(card) {
+  var parts = [];
+  // 改动还没提交时只报文件数,不显示「0 个提交」。
+  if (card.commits) parts.push(prEsc(card.commits === 1 ? t('prCommitOne') : t('prCommitMany', { count: card.commits })));
+  var files = card.filesTotal != null ? card.filesTotal : card.files ? card.files.length : null;
+  if (files != null && files > 0) parts.push(prEsc(files === 1 ? t('prFileOne') : t('prFileMany', { count: files })));
+  return parts;
+}
+
+function renderPrCard(card, settings) {
+  var tile, title, meta, left, actions = '';
+  var gear = false;
+  if (card.stage === 'ask') {
+    gear = true;
+    tile = prTile('branch');
+    title = prEsc(t('prAskTitle'));
+    meta = [prEsc(card.repo)];
+    left = prContextLine(card);
+    // 看改动交给宿主的审查面板(真实 diff、可撤销),卡片只管发不发。
+    actions = prPillButton('pr:draft', t('prPublishDraft')) + prCtaButton('pr:publish', t('prPublish'));
+  } else if (card.stage === 'publishing') {
+    tile = prTile('spinner');
+    title = prEsc(card.publishingDraft ? t('prPublishingDraftTitle') : t('prPublishingTitle'));
+    meta = [prEsc(card.queued ? t('prQueuedMeta') : t('prPublishingMeta'))];
+    left = prContextLine(card);
+  } else {
+    var pr = card.pr;
+    title = '<span style="margin-right:2px;color:var(--text-secondary);font-weight:500">#' + pr.number + '</span> ' + prEsc(pr.title || card.repo);
+    // 标题即 PR 链接:宿主确认后用系统浏览器打开(需 card.externalLinks)。
+    if (/^https:\/\/github\.com\//.test(pr.url)) {
+      title = '<a href="' + prEsc(pr.url) + '">' + title + '</a>';
+    }
+    if (card.stage === 'open') {
+      gear = true;
+      tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
+      // 跟进中由下层的「● 跟进中」表达,标题行不再重复。
+      meta = card.following ? [prEsc(card.repo)] : [prEsc(card.repo), prEsc(pr.draft ? t('prStateDraft') : t('prStateOpen'))];
+      // 跟进中的检查状态交给宿主按标题栏同一份数据实时填写;这里画的是兜底快照
+      // (旧版宿主、手机,或宿主还没查到这条 PR 时显示)。
+      left = card.following
+        ? '<div data-ghost-pr-status="' + prEsc(card.repo + '#' + pr.number) + '">' + prStatusStrip(pr) + '</div>'
+        : prContextLine(card);
+      // 停止排在状态左边:悬停这一行才出现,出现时不推动「跟进中」。
+      // 草稿不提供自动跟进(还在改,Agent 后台推提交会撞车),主操作是转为正式。
+      actions = card.pending === 'follow'
+        ? prChip(t('prFollowStarting'), true)
+        : card.pending === 'stop'
+          ? prChip(t('prStopping'), true)
+          : card.pending === 'ready'
+            ? prChip(t('prMarkingReady'), true)
+            : card.following
+              ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
+              : pr.draft
+                ? prCtaButton('pr:ready', t('prMarkReady'))
+                : prPillButton('pr:follow', t('prFollow'));
+    } else {
+      tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
+      meta = [prEsc(card.repo), prEsc(card.stage === 'merged' ? t('prStateMerged') : t('prStateClosed'))];
+      if (card.followedEver) meta.push(prEsc(t('prFollowEnded')));
+      left = prContextLine(card);
+    }
+  }
+  if (card.note) {
+    left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
+  }
+  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions);
+  if (gear && card.settingsOpen) body += prSettingsPanel(settings);
+  // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
+  return PR_CSS +
+    '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;flex-direction:column;justify-content:space-between;' +
+    'min-height:120px;overflow:hidden;border:1px solid var(--border-default);border-radius:12px;background:var(--surface-elevated);' +
+    'color:var(--text-primary);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5">' +
+    body + '</div>';
+}
+
+/** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
+function prCardHeight(card) {
+  var h = 120;
+  if (card.note) h += 22;
+  if (card.settingsOpen && (card.stage === 'ask' || card.stage === 'open')) h += 160;
+  return Math.min(900, h);
+}
+
+function sendPrCard(card, settings, sourceCallId) {
+  var msg = {
+    // 正在发、正在开启或停止跟进时报 working:宿主才播卡内转圈(静态版会剥掉动画),
+    // Agent 用 pr_card 更新结果时换回 done。
+    type: 'card-update', callId: card.id, v: 2,
+    state: card.stage === 'publishing' || card.pending ? 'working' : 'done',
+    html: renderPrCard(card, settings), height: prCardHeight(card),
+  };
+  // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
+  if (sourceCallId) msg.sourceCallId = sourceCallId;
+  return Promise.resolve(cindy.send(msg)).catch(function () {});
+}
+
+/* ── pr_card 工具 ── */
+
+async function prCardTool(args, callId) {
+  var a = args && typeof args === 'object' ? args : {};
+  var repo = prText(a.repo);
+  if (repo && !PR_REPO_RE.test(repo)) return fail(t('prNeedRepo'));
+  var cardId = a.card_id !== undefined && a.card_id !== null && a.card_id !== '' ? String(a.card_id) : '';
+  if (cardId && !PR_CARD_ID_RE.test(cardId)) return fail(t('prBadCardId'));
+
+  var notes = [];
+  var card = cardId ? await readPrCard(cardId) : null;
+  if (cardId && !card) notes.push(t('prCardNotFound'));
+  var updating = Boolean(card);
+  var ref = null;
+  if (a.pr !== undefined && a.pr !== null && a.pr !== '') {
+    // 只给编号时,仓库取参数或卡片上记的那个。
+    ref = parsePrRef(a.pr, repo || (card ? card.repo : ''));
+    if (!ref) return fail(t('prBadPr'));
+  }
+  if (!card) {
+    if (!repo && !ref) return fail(t('prNeedRepo'));
+    if (!ref && !prText(a.head)) return fail(t('prNeedHead'));
+    card = newPrCard(callId, repo);
+  }
+  if (ref) card.repo = ref.repo;
+  else if (repo) card.repo = repo;
+  if (prText(a.head)) card.head = prText(a.head);
+  if (prText(a.base)) card.base = prText(a.base);
+  if (a.commits !== undefined) card.commits = prCount(a.commits);
+  if (a.files !== undefined) card.files = prFiles(a.files);
+  if (a.files_total !== undefined) card.filesTotal = prCount(a.files_total);
+  if (typeof a.renamed === 'boolean') {
+    card.renamed = a.renamed;
+  }
+  if (typeof a.following === 'boolean') {
+    card.following = a.following;
+    if (a.following) card.followedEver = true;
+    if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
+  }
+  card.note = null;
+
+  var number = ref ? ref.number : card.pr ? card.pr.number : null;
+  if (number) {
+    var status = await fetchPrStatus(card.repo, number, callId);
+    if (status.err) {
+      notes.push(t('prFetchFailed', { detail: status.err }));
+      if (!card.pr || card.pr.number !== number) {
+        card.pr = {
+          number: number, title: '', url: 'https://github.com/' + card.repo + '/pull/' + number,
+          state: 'open', draft: false, base: card.base, ci: null, openThreads: 0, mergeState: null, review: null,
+        };
+      }
+    } else {
+      card.pr = status.pr;
+    }
+    card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
+    card.queued = false;
+    if (card.stage !== 'open') {
+      card.settingsOpen = false;
+      card.pending = null;
+    }
+  } else if (card.stage === 'publishing') {
+    // 发布没成功,Agent 不带 pr 再调一次:卡片回到询问。
+    card.stage = 'ask';
+  }
+
+  var settings = await readPrSettings();
+  var todo = [];
+  if (card.stage === 'open' && !card.settingsApplied) {
+    card.settingsApplied = true;
+    if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
+    if (settings.autoFollow && !card.following && !card.pr.draft) todo.push(t('prTodoFollow', { url: card.pr.url }));
+  }
+
+  await savePrCard(card);
+  await sendPrCard(card, settings, updating ? callId : null);
+  if (!updating) await prunePrCards();
+
+  var result = {
+    card_id: card.id,
+    stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
+    settings: prSettingsForAgent(settings, settings.autoFollow),
+  };
+  if (card.pr) {
+    result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
+  }
+  if (todo.length) {
+    result.todo = todo;
+    result.next = t('prNextApply');
+  } else {
+    result.next = card.stage === 'ask' ? t('prNextAsk') : t('prNextUpdated');
+  }
+  if (notes.length) result.note = notes.join(' ');
+  return { ok: true, result: result };
+}
+
+/* ── 卡片按钮 ── */
+
+var PR_AGENT_ACTIONS = {
+  'pr:publish': function (card) { return card.stage === 'ask'; },
+  'pr:draft': function (card) { return card.stage === 'ask'; },
+  'pr:follow': function (card) { return card.stage === 'open' && !card.pr.draft && !card.following && !card.pending; },
+  'pr:stop': function (card) { return card.stage === 'open' && card.following && !card.pending; },
+};
+
+/**
+ * 把点击交给本任务的 Agent。返回 ok=true 已交出;ok=false 未交出;
+ * unknown=true 宿主没给明确结果(可能已交出),卡片据此提示用户先看对话、别重复点。
+ */
+async function handOffPr(card, action, settings, msg) {
+  if (!msg.userActionToken || !cindy.agent || typeof cindy.agent.run !== 'function') return { ok: false };
+  var url = card.pr ? card.pr.url : '';
+  var text;
+  if (action === 'pr:publish') text = t('prClickPublish');
+  else if (action === 'pr:draft') text = t('prClickPublishDraft');
+  else if (action === 'pr:follow') text = msg.afterReady ? t('prReadyFollow', { url: url }) : t('prClickFollow', { url: url });
+  else text = t('prClickStop', { url: url });
+  var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (card.pr) {
+    event.pr_number = card.pr.number;
+    event.pr_url = url;
+    // 插件替用户把草稿转了正式:告诉 Agent,免得它以为是用户在 GitHub 上改的。
+    if (card.markedReady) event.marked_ready_on_card = true;
+    if (action === 'pr:follow' && settings.followModel) event.follow_model = prSettingsForAgent(settings, true).follow_model;
+  } else {
+    event.head = card.head;
+    if (card.base) event.base = card.base;
+    event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
+  }
+  var r;
+  try {
+    r = await cindy.agent.run({
+      mode: 'continue',
+      userActionToken: msg.userActionToken,
+      promptTemplate: PR_TRIGGER + '{{user_message}}\n{{event_json}}',
+      userMessage: text,
+      event: event,
+    });
+  } catch (e) {
+    return { ok: false, unknown: true };
+  }
+  if (r && r.ok === true) return { ok: true, queued: r.disposition === 'queued' };
+  return r && r.ok === false ? { ok: false } : { ok: false, unknown: true };
+}
+
+/**
+ * 草稿转正式:插件直接调 GitHub,不经过 Agent。成功后按卡片设置决定是否把跟进交给 Agent。
+ * 写操作失败时重读一次状态,以 GitHub 上的实际结果为准(请求可能已生效、只是回包丢了)。
+ */
+async function markPrReady(card, settings, msg) {
+  card.pending = 'ready';
+  await savePrCard(card);
+  await sendPrCard(card, settings, null);
+  var slash = card.repo.indexOf('/');
+  var owner = card.repo.slice(0, slash);
+  var name = card.repo.slice(slash + 1);
+  var idRes = await gql('query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}',
+    { owner: owner, name: name, number: card.pr.number });
+  var id = idRes.data && idRes.data.repository && idRes.data.repository.pullRequest && idRes.data.repository.pullRequest.id;
+  var err = idRes.err || (id ? null : t('status404'));
+  if (!err) {
+    var mut = await gql('mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}', { id: id });
+    err = mut.err || null;
+  }
+  var fresh = await fetchPrStatus(card.repo, card.pr.number);
+  if (fresh.pr) {
+    card.pr = fresh.pr;
+    card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
+  }
+  card.pending = null;
+  if (!card.pr.draft) card.markedReady = true;
+  if (card.pr.draft) {
+    card.note = t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
+  } else if (settings.autoFollow && card.stage === 'open') {
+    var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
+    if (handoff.ok) card.pending = 'follow';
+    else card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
+  }
+  await savePrCard(card);
+  await sendPrCard(card, settings, null);
+}
+
+async function prCardAction(msg) {
+  var id = String(msg.callId || '');
+  if (!PR_CARD_ID_RE.test(id)) return;
+  var card = await readPrCard(id);
+  if (!card) return;
+  var action = String(msg.actionId || '');
+  var settings = await readPrSettings();
+  card.note = null;
+  if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
+    card.settingsOpen = !card.settingsOpen;
+  } else if (action === 'prset:rename' || action === 'prset:follow') {
+    try {
+      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : 'autoFollow');
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:model' && settings.followModel) {
+    // 已经是「指定模型」:不重复打开选择器,换模型点下面的模型名。
+  } else if (action === 'prset:model' && settings.lastFollowModel) {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = next.lastFollowModel; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:modelPick' && msg.modelSelection) {
+    // 新版宿主在卡内下拉框里已选好(并核对过可用),直接记下。
+    try {
+      var chosen = await savePrFollowModel(settings, msg.modelSelection);
+      settings = chosen.settings;
+      if (chosen.error) card.note = t('prFollowModelFailed', { detail: chosen.error });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if ((action === 'prset:model' || action === 'prset:modelPick') && typeof cindy.pickModel === 'function') {
+    try {
+      var picked = await pickPrFollowModel(settings, msg);
+      settings = picked.settings;
+      if (picked.error) card.note = t('prFollowModelFailed', { detail: String(picked.error).slice(0, 120) });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:modelTask') {
+    try {
+      settings = await writePrSettings(function (next) { next.followModel = null; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'pr:ready' && card.stage === 'open' && card.pr.draft && !card.following && !card.pending) {
+    await markPrReady(card, settings, msg);
+    return;
+  } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
+    var handoff = await handOffPr(card, action, settings, msg);
+    if (handoff.ok && (action === 'pr:publish' || action === 'pr:draft')) {
+      card.stage = 'publishing';
+      card.publishingDraft = action === 'pr:draft';
+      card.queued = handoff.queued;
+      card.settingsOpen = false;
+    } else if (handoff.ok) {
+      card.pending = action === 'pr:follow' ? 'follow' : 'stop';
+    } else {
+      card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
+    }
+  }
+  await savePrCard(card);
+  // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
+  await sendPrCard(card, settings, null);
+}
+
 /* ── 设置页测试连接(BroadcastChannel;settings.js 先 /wake 再广播) ── */
 
 var bc = new BroadcastChannel('cindy-github');
@@ -2125,6 +3302,15 @@ cindy.onHostMessage(async function (msg) {
     hostLocale = normalizeLocale(msg.context && msg.context.locale);
     return;
   }
+  if (msg && msg.type === 'event' && msg.name === 'card-action') {
+    try {
+      await ensureLocale();
+      await enqueuePr(function () { return prCardAction(msg); });
+    } catch (e) {
+      // 点击没有回执通道;卡片保持上一版,宿主的「运行中」由超时兜底收口。
+    }
+    return;
+  }
   if (!msg || msg.type !== 'tool-call') return;
   try {
     await ensureLocale();
@@ -2133,6 +3319,8 @@ cindy.onHostMessage(async function (msg) {
       r = listTools(msg.args || {});
     } else if (msg.tool === 'call_tool') {
       r = await callTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'pr_card') {
+      r = await enqueuePr(function () { return prCardTool(msg.args || {}, msg.callId); });
     } else {
       r = fail(t('unknownTool', { tool: msg.tool }));
     }
