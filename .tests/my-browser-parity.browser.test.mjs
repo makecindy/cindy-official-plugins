@@ -55,7 +55,7 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
     if(req.url==='/two')return res.end('<title>Two</title><p>Second page</p>');
     if(req.url==='/crowded')return res.end(`<title>Crowded</title><nav>${Array.from({length:150},(_,i)=>`<a href="#n${i}">Nav ${i}</a>`).join(' ')}</nav>
 <div role=main><h1>Edit provider</h1><textarea aria-label="Attribute condition"></textarea><my-field></my-field><div role=combobox aria-label="Region" tabindex=0>Region</div><button>Save</button></div>
-<script>customElements.define('my-field',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<p>Shadow note text</p><input aria-label="Shadow field" id=sf><button onclick="document.title=&quot;shadow clicked&quot;">Shadow save</button>';}});</script>`);
+<script>customElements.define('my-field',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<p>Shadow note text</p><input aria-label="Shadow field" id=sf><button onclick="document.title=&quot;shadow clicked&quot;" onmousedown="document.title=&quot;shadow down&quot;">Shadow save</button>';}});</script>`);
     if(req.url==='/frames')return res.end(`<title>Frames</title><h1>Top page</h1><button id=topb onclick="document.title='top clicked'">Top button</button>
 <iframe id=same src="/frame-inner?who=same" width=500 height=300></iframe>
 <iframe id=cross src="http://other.test/frame-inner?who=cross" width=500 height=300></iframe>
@@ -369,6 +369,13 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
     check('a ref inside a shadow root can be typed into',typed.ok && (await page.evaluate(()=>document.querySelector('my-field').shadowRoot.getElementById('sf').value))==='in shadow',JSON.stringify(typed));
     const area=await act('type',{...T,ref:ref('Attribute condition'),text:"assertion.sub == 'x'"});
     check('the long form field takes text',area.ok && (await page.evaluate(()=>document.querySelector('textarea').value))==="assertion.sub == 'x'",JSON.stringify(area));
+    // Addressed by ref, a pointer action reaches that element, not the host the page reports at its point.
+    await page.evaluate(()=>{document.title='reset';});
+    const coords=await act('clickCoords',{...T,ref:ref('Shadow save')});
+    check('clickCoords with a shadow ref reaches the inner button',coords.ok && (await page.title())==='shadow clicked',JSON.stringify({coords,title:await page.title()}));
+    await page.evaluate(()=>{document.title='reset';});
+    const dragged=await act('drag',{...T,startRef:ref('Shadow save'),endRef:ref('Attribute condition')});
+    check('drag from a shadow ref starts on the inner button',dragged.ok && (await page.title())==='shadow down',JSON.stringify({dragged,title:await page.title()}));
     check('text inside an open shadow root is in the snapshot',more.text.includes('Shadow note text'),more.text);
     const scoped=await act('snapshot',{...T,selector:'[role=main]'});
     check('a selector narrows to the form',!scoped.elements.includes('Nav 0') && scoped.elements.includes('Shadow field') && scoped.truncated===false,scoped.elements);

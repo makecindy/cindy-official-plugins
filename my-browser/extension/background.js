@@ -962,6 +962,16 @@ async function pageOperation(job) {
         const Ctor = type.startsWith('pointer') ? PointerEvent : type.startsWith('drag') || type === 'drop' ? DragEvent : MouseEvent;
         target.dispatchEvent(new Ctor(type,{bubbles:true,cancelable:true,composed:true,clientX:p.x,clientY:p.y,button,buttons:type.endsWith('up') ? 0 : 1,view:window,...keys,...extra}));
       };
+      // What a pointer at (x, y) reaches, shadow roots included: elementFromPoint stops at the host.
+      const hit = p => {
+        let target = document.elementFromPoint(p.x,p.y);
+        while (target?.shadowRoot) {
+          const inner = target.shadowRoot.elementFromPoint(p.x,p.y);
+          if (!inner || inner === target) break;
+          target = inner;
+        }
+        return target;
+      };
       const point = (ref,selector,x,y) => {
         const node = ref ? (snapshot?.url === location.href ? snapshot.refs.get(ref) : null) : selector ? document.querySelector(selector) : null;
         if ((ref || selector) && (!node || !node.isConnected)) return null;
@@ -971,7 +981,7 @@ async function pageOperation(job) {
       };
       if (action === 'clickCoords') {
         // A ref or selector clicks the element's centre (double, right and modified clicks on elements).
-        const p = el ? point(a.ref,a.selector) : {x:a.x,y:a.y}, target = document.elementFromPoint(p.x,p.y);
+        const p = el ? point(a.ref,a.selector) : {x:a.x,y:a.y}, target = hit(p);
         if (!target) return fail('ELEMENT_NOT_FOUND','Nothing is at those coordinates in the visible viewport.');
         started = true;
         for (const type of ['pointerdown','mousedown','pointerup','mouseup']) fire(type,p,target);
@@ -982,13 +992,13 @@ async function pageOperation(job) {
       }
       const from = point(a.startRef,a.startSelector,a.startX,a.startY), to = point(a.endRef,a.endSelector,a.endX,a.endY);
       if (!from || !to) return fail('STALE_REF','A drag endpoint is stale. Take a new snapshot.');
-      const source = document.elementFromPoint(from.x,from.y), dest = document.elementFromPoint(to.x,to.y);
+      const source = hit(from), dest = hit(to);
       if (!source || !dest) return fail('ELEMENT_NOT_FOUND','A drag endpoint is outside the visible viewport.');
       started = true;
       const data = new DataTransfer();
       fire('pointerdown',from,source); fire('mousedown',from,source); fire('dragstart',from,source,{dataTransfer:data});
       for (let i = 1; i <= 8; i++) {
-        const p = {x:from.x+(to.x-from.x)*i/8,y:from.y+(to.y-from.y)*i/8}, over = document.elementFromPoint(p.x,p.y) || dest;
+        const p = {x:from.x+(to.x-from.x)*i/8,y:from.y+(to.y-from.y)*i/8}, over = hit(p) || dest;
         fire('pointermove',p,over); fire('mousemove',p,over); fire('dragover',p,over,{dataTransfer:data});
       }
       fire('drop',to,dest,{dataTransfer:data}); fire('dragend',to,source,{dataTransfer:data}); fire('pointerup',to,dest); fire('mouseup',to,dest);
