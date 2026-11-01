@@ -443,12 +443,22 @@ function mergeChanges(base, mine, latest) {
   const mineRules = rulesById(mine.rules);
   const rules = (latest.rules || []).filter((r) => !baseRules.has(r.id) || mineRules.has(r.id));
   for (const rule of mine.rules || []) {
-    if (same(baseRules.get(rule.id), rule)) continue;
+    const before = baseRules.get(rule.id);
+    if (same(before, rule)) continue;
     const index = rules.findIndex((r) => r.id === rule.id);
-    if (index >= 0) rules[index] = rule; else rules.push(rule);
+    if (index < 0) { rules.push(rule); continue; }
+    // Same rule changed elsewhere too: apply only the fields this page changed.
+    const next = { ...rules[index] };
+    for (const key of new Set([...Object.keys(before || {}), ...Object.keys(rule)])) {
+      if (same(before?.[key], rule[key])) continue;
+      if (rule[key] === undefined) delete next[key]; else next[key] = rule[key];
+    }
+    rules[index] = before ? next : rule;
   }
   // Moving a rule changes only the order: follow this page's order, with anything added meanwhile at the end.
-  const moved = JSON.stringify((base.rules || []).map((r) => r.id)) !== JSON.stringify((mine.rules || []).map((r) => r.id));
+  const baseIds = (base.rules || []).map((r) => r.id);
+  const mineIds = (mine.rules || []).map((r) => r.id);
+  const moved = !same(baseIds.filter((id) => mineIds.includes(id)), mineIds.filter((id) => baseIds.includes(id)));
   const order = new Map((mine.rules || []).map((r, i) => [r.id, i]));
   merged.rules = moved ? rules.sort((x, y) => (order.get(x.id) ?? Infinity) - (order.get(y.id) ?? Infinity)) : rules;
   return merged;
