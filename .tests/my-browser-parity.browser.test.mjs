@@ -55,7 +55,7 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
     if(req.url==='/two')return res.end('<title>Two</title><p>Second page</p>');
     if(req.url==='/crowded')return res.end(`<title>Crowded</title><nav>${Array.from({length:150},(_,i)=>`<a href="#n${i}">Nav ${i}</a>`).join(' ')}</nav>
 <div role=main><h1>Edit provider</h1><textarea aria-label="Attribute condition"></textarea><my-field></my-field><div role=combobox aria-label="Region" tabindex=0>Region</div><button>Save</button></div>
-<script>customElements.define('my-field',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<input aria-label="Shadow field" id=sf><button onclick="document.title=&quot;shadow clicked&quot;">Shadow save</button>';}});</script>`);
+<script>customElements.define('my-field',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<p>Shadow note text</p><input aria-label="Shadow field" id=sf><button onclick="document.title=&quot;shadow clicked&quot;">Shadow save</button>';}});</script>`);
     if(req.url==='/frames')return res.end(`<title>Frames</title><h1>Top page</h1><button id=topb onclick="document.title='top clicked'">Top button</button>
 <iframe id=same src="/frame-inner?who=same" width=500 height=300></iframe>
 <iframe id=cross src="http://other.test/frame-inner?who=cross" width=500 height=300></iframe>
@@ -317,16 +317,25 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     check('limit 1 returns one element in all',one.elements.split('\n').filter(Boolean).length===1 && one.truncated===true,one.elements);
     const four=await act('snapshot',{...T,limit:4,maxChars:30000});
     check('limit 4 returns at most four and still reaches frames',four.elements.split('\n').filter(Boolean).length===4 && /Go (same|cross|nested)/.test(four.elements),four.elements);
-    // A new snapshot retires the refs of a frame it no longer reads.
-    const goSame=ref('Go same');
+    const tiny=await act('snapshot',{...T,maxChars:256});
+    check('maxChars holds with frames in the page',(tiny.text||'').length<=256,String((tiny.text||'').length));
+    // A new snapshot retires the refs of a frame it no longer reads. The ref comes from a fresh, full
+    // snapshot, so only the clearing of every frame can make it stale.
+    const fresh=await act('snapshot',{...T,maxChars:30000});
+    const freshRef=name=>(new RegExp('\\[([a-f0-9]{32})\\] \\S+ '+name)).exec(fresh.elements)?.[1];
+    const goSame=freshRef('Go same');
+    check('the fresh snapshot lists the frame being hidden',!!goSame && !!freshRef('Go cross'),fresh.elements);
     await context.pages().find(p=>p.url()===T.url).evaluate(()=>{document.getElementById('same').style.display='none';});
     await act('snapshot',{...T,maxChars:30000});
     const retired=await act('click',{...T,ref:goSame});
     check('a frame hidden after a snapshot leaves its refs stale',retired.error==='STALE_REF',JSON.stringify(retired));
+    // Refs of a frame that navigated are gone: taken fresh, so only the navigation can retire it.
+    const again=await act('snapshot',{...T,maxChars:30000});
+    const goCross=(new RegExp('\\[([a-f0-9]{32})\\] \\S+ Go cross')).exec(again.elements)?.[1];
     // Refs of a frame that navigated are gone.
     await context.pages().find(p=>p.url()===T.url).frames().find(f=>f.url().includes('who=cross')).evaluate(()=>{location.href='/frame-inner?who=moved';});
     await new Promise(r=>setTimeout(r,500));
-    const moved=await act('click',{...T,ref:ref('Go cross')});
+    const moved=await act('click',{...T,ref:goCross});
     check('a frame that navigated leaves its refs stale',moved.error==='STALE_REF',JSON.stringify(moved));
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
@@ -352,6 +361,7 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
     check('a ref inside a shadow root can be typed into',typed.ok && (await page.evaluate(()=>document.querySelector('my-field').shadowRoot.getElementById('sf').value))==='in shadow',JSON.stringify(typed));
     const area=await act('type',{...T,ref:ref('Attribute condition'),text:"assertion.sub == 'x'"});
     check('the long form field takes text',area.ok && (await page.evaluate(()=>document.querySelector('textarea').value))==="assertion.sub == 'x'",JSON.stringify(area));
+    check('text inside an open shadow root is in the snapshot',more.text.includes('Shadow note text'),more.text);
     const scoped=await act('snapshot',{...T,selector:'[role=main]'});
     check('a selector narrows to the form',!scoped.elements.includes('Nav 0') && scoped.elements.includes('Shadow field') && scoped.truncated===false,scoped.elements);
   }finally{await close();}

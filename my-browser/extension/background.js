@@ -268,8 +268,12 @@ async function snapshotWithFrames(job,tabId,documentId,tabUrl,policy,target) {
     if (done.truncated) cut = true;
     frameLines.push(...lines);
     if (text && budget > 0) {
-      const block = '\n\n[iframe '+frame.url.slice(0,200)+']\n'+text.slice(0,budget);
-      if (text.length > budget) cut = true;
+      // The heading counts against the budget too, so the whole of maxChars holds.
+      const heading = '\n\n[iframe '+frame.url.slice(0,200)+']\n';
+      const room = budget - heading.length;
+      if (room <= 0) { cut = true; continue; }
+      if (text.length > room) cut = true;
+      const block = heading+text.slice(0,room);
       budget -= block.length;
       shown.push(block);
     }
@@ -896,7 +900,18 @@ async function pageOperation(job) {
       }
       // The snapshot text has its own cap; a cut there must be reported like any other.
       const max = a.maxChars || 6000;
-      const fullText = readableText(root,max + 1);
+      // Text inside open shadow roots is invisible to the light-DOM read above, so each root is read too.
+      const shadowTexts = [];
+      const visitShadow = scope => {
+        for (const host of scope.querySelectorAll('*')) {
+          if (!host.shadowRoot || sensitive(host) || notRendered(host)) continue;
+          const text = [...host.shadowRoot.children].map(child => readableText(child,max + 1)).filter(Boolean).join('\n');
+          if (text) shadowTexts.push(text);
+          visitShadow(host.shadowRoot);
+        }
+      };
+      visitShadow(root);
+      const fullText = [readableText(root,max + 1),...shadowTexts].filter(Boolean).join('\n');
       return {ok:true,url:location.href,title:document.title.slice(0,TITLE_MAX),elements:elements.join('\n'),text:fullText.slice(0,max),truncated:truncated || fullText.length > max || document.title.length > TITLE_MAX,untrusted_content:true};
     }
     const snapshot = globalThis.__myBrowserSnapshot;
