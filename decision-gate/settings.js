@@ -769,8 +769,9 @@ channel.addEventListener('message', async ({ data }) => {
   if (data?.from !== 'brain' || data.type !== 'config-changed') return;
   const raw = await readStore().catch(() => null);
   if (!raw) return;
-  // Rows not saved yet live only on this page: keep them, and don't redraw under someone typing.
-  const unsaved = cfg.rules.filter((r) => !r.question && !r.route && !r.keywords?.length);
+  // Rows not in the store yet live only on this page: keep them, and don't redraw under someone typing.
+  const savedIds = new Set((JSON.parse(stored).rules || []).map((r) => r.id));
+  const unsaved = cfg.rules.filter((r) => !savedIds.has(r.id));
   cfg = withRules(raw);
   cfg.rules.push(...unsaved.filter((r) => !cfg.rules.some((x) => x.id === r.id)));
   stored = JSON.stringify(cfg);
