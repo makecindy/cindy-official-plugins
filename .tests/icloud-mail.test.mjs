@@ -741,7 +741,7 @@ test('Worker handleRequest 按 params.locale 返回错误文案', async () => {
   const request = (locale) => ({
     method: 'mail/action-a',
     params: {
-      email: 'user@icloud.com',
+      email: 'user@example.test',
       action: { action: 'list_folders' },
       ...(locale === undefined ? {} : { locale }),
     },
@@ -779,7 +779,7 @@ test('Worker 截断正文的提示跟随语言', async () => {
       return { meta: { expectedSize: 10 }, content: Readable.from([Buffer.from('raw')]) };
     },
   }, async () => ({ text: longText }));
-  const credentials = { email: 'user@icloud.com', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
+  const credentials = { email: 'user@example.test', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
   const action = { action: 'read', folder: 'INBOX', message_uid: 7 };
   for (const locale of HOST_LOCALES) {
     const result = await worker.performAction(credentials, action, makeHarness().deps, locale);
@@ -806,7 +806,7 @@ test('Worker 与服务器文本比对的中文字面量不随语言变化', asyn
     close() {},
   });
   const saved = await worker.performAction(
-    { email: 'user@icloud.com', appSpecificPassword: 'abcd-efgh-ijkl-mnop' },
+    { email: 'user@example.test', appSpecificPassword: 'abcd-efgh-ijkl-mnop' },
     { action: 'draft', to: 'recipient@example.test', subject: 'Test', body_text: 'Draft' },
     harness.deps,
     'en',
@@ -852,9 +852,9 @@ function runBundledWorker(lines) {
 test('提交的 node/worker.cjs 构建产物包含本地化后的错误文案', async () => {
   const replies = await runBundledWorker([
     'not json',
-    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'mail/action-a', params: { email: 'user@icloud.com', locale: 'ja' } }),
-    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'mail/action-a', params: { email: 'user@icloud.com' } }),
-    JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'mail/action-a', params: { email: 'user@icloud.com', locale: 'zh-CN' } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'mail/action-a', params: { email: 'user@example.test', locale: 'ja' } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'mail/action-a', params: { email: 'user@example.test' } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'mail/action-a', params: { email: 'user@example.test', locale: 'zh-CN' } }),
   ]);
   const byId = new Map(replies.map((reply) => [reply.id, reply]));
   assert.equal(byId.get(null).error.message, worker.MESSAGES.en.invalidRequestFormat);
@@ -1151,11 +1151,11 @@ test('语言和已保存状态读完前表单不可操作，就绪后才放开',
   // 又会让已保存的邮箱盖掉刚填的地址；显示密码按钮会被 applyStaticCopy 刷回「显示」。
   let releaseContext;
   const contextReady = new Promise((resolve) => { releaseContext = resolve; });
-  const page = await createSettingsHarness(() => contextReady, { kv: { email: 'old@icloud.com' } });
+  const page = await createSettingsHarness(() => contextReady, { kv: { email: 'old@example.test' } });
   const controls = ['connect', 'disconnect', 'email', 'appSpecificPassword', 'toggleSecret'];
   for (const id of controls) assert.equal(page.elements.get(id).disabled, true, `${id} disabled while loading`);
 
-  page.elements.get('email').value = 'new@icloud.com';
+  page.elements.get('email').value = 'new@example.test';
   page.elements.get('appSpecificPassword').value = 'abcd-efgh-ijkl-mnop';
   let prevented = false;
   page.elements.get('connectForm').listeners.submit({ preventDefault() { prevented = true; } });
@@ -1177,11 +1177,11 @@ test('语言和已保存状态读完前表单不可操作，就绪后才放开',
 test('设置页已连接状态与读取失败提示同样跟随宿主语言', async () => {
   for (const locale of HOST_LOCALES) {
     const connected = await createSettingsHarness(locale, {
-      kv: { email: 'user@icloud.com', credentialSlot: 'a' },
+      kv: { email: 'user@example.test', credentialSlot: 'a' },
       secrets: [{ key: 'icloud_mail_app_password', saved: true }],
     });
     assert.equal(connected.text('stateBadge'), connected.messages[locale].badgeConnected);
-    assert.equal(connected.text('connectedEmail'), 'user@icloud.com');
+    assert.equal(connected.text('connectedEmail'), 'user@example.test');
   }
   for (const locale of HOST_LOCALES) {
     const broken = await createSettingsHarness(locale, { secrets: 'http-error' });
@@ -1322,7 +1322,7 @@ test('main.js zh-CN 运行时输出与迁移前的硬编码字符串逐字一致
   assert.equal((await harness.settings('connect', { email: 'bad' })).message, '请输入有效的 iCloud Mail 邮箱地址');
   assert.equal((await harness.settings('reset', {})).message, '未知设置动作');
   assert.equal(
-    (await harness.settings('connect', { email: 'user@icloud.com', credentialSlot: 'z' }, 'slot')).message,
+    (await harness.settings('connect', { email: 'user@example.test', credentialSlot: 'z' }, 'slot')).message,
     'iCloud Mail 凭证槽位无效，请重新连接',
   );
 
