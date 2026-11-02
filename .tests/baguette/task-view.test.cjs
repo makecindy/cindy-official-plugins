@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),vm=require('node:vm');
-const {createTaskBindings}=require('../../baguette-simulator/node/tasks.cjs');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
+const {createTaskBindings}=require('../../cindy-simulator/node/tasks.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
 const A='00000000-0000-4000-8000-00000000000A',B='00000000-0000-4000-8000-00000000000B';
 const tmp=async t=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'baguette-task-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;};
 
@@ -128,7 +128,7 @@ test('task binding preserves durable identity through every post-save status and
 });
 
 function logicPage({taskView,preview=async()=>({ok:true}),bindingResult,targetResult={ok:true,sessionId:'task-1'},toolResult,shotResult}={}){
- const code=require('node:fs').readFileSync('baguette-simulator/main.js','utf8');
+ const code=require('node:fs').readFileSync('cindy-simulator/main.js','utf8');
  const buses=new Map();
  class BroadcastChannel{constructor(n){this.name=n;this.onmessage=null;(buses.get(n)||buses.set(n,new Set()).get(n)).add(this);}postMessage(data){for(const p of buses.get(this.name))if(p!==this)queueMicrotask(()=>p.onmessage?.({data}));}}
  let handler;const sent=[],previews=[],views=[],calls=[];
@@ -288,13 +288,13 @@ test('creation mode survives the task poll replacing its live controller with th
   addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>poll=fn,
   document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}}};
  vm.createContext(context);
- vm.runInContext(require('node:fs').readFileSync('baguette-simulator/pages.js','utf8'),context);
+ vm.runInContext(require('node:fs').readFileSync('cindy-simulator/pages.js','utf8'),context);
  const pages=context.CindySimPages;
  Object.assign(pages,{locale:async()=> 'en',h:(tag,props,children=[])=>({tag,props,children}),memoryBadge:()=>null,
   memoryPicker:d=>({selected:pages.memoryArgs(d).memoryMode}),
   rpc:async(action,params)=>{calls.push({action,params});return {ok:true,settings:{enabled:true},device,devices:[device],viewer:device.udid===A?{url:'http://127.0.0.1:1/control?udid='+A}:null};}});
  context.CindySimModel={platform:()=> 'iOS',runtimeLabel:()=> 'iOS 27',createResourceSummary:()=>({node:{},update(){},prune(){}}),showMemoryNotice(){}};
- vm.runInContext(require('node:fs').readFileSync('baguette-simulator/task.js','utf8'),context);await settle();
+ vm.runInContext(require('node:fs').readFileSync('cindy-simulator/task.js','utf8'),context);await settle();
  const message={source:get('screen').contentWindow,origin:'http://127.0.0.1:1',data:{type:'cindy-simulator-created',sessionId:'task-1',udid:B,memoryMode:'minimal'}};
  for(const invalid of [{source:{}},{origin:'https://invalid.test'},{data:{...message.data,sessionId:'another'}}]) events.message({...message,...invalid});
  assert.equal(pages.memoryArgs({udid:B}).memoryMode,'saving');
@@ -313,7 +313,7 @@ test('an already streaming task page polls binding changes and follows a newly a
  const context={URLSearchParams,addEventListener(){},location:{search:'?session=task-1'},document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}},
   setInterval:fn=>{poll=fn;},CindySimPages:{locale:async()=> 'en',onPush(){},h:()=>({}),GLYPH:{},memoryBadge:()=>null,resourceButton:()=>({}),
    rpc:async()=>({ok:true,settings:{enabled:true},device:{udid:device,state:'Booted'},viewer:{url:'http://127.0.0.1:1/control?udid='+device}})},CindySimModel:{runtimeLabel:()=>'iOS 27',createResourceSummary:()=>({node:{},update(){},prune(){},label:()=>({})})}};
- vm.runInNewContext(require('node:fs').readFileSync('baguette-simulator/task.js','utf8'),context);
+ vm.runInNewContext(require('node:fs').readFileSync('cindy-simulator/task.js','utf8'),context);
  await settle();assert.match(get('screen').src,new RegExp(A));
  device=B;poll();await settle();assert.match(get('screen').src,new RegExp(B));
 });
@@ -326,7 +326,7 @@ test('a closed task screen stays closed on refresh and offers an explicit reopen
   const context={URLSearchParams,addEventListener(){},location:{search:'?session=task-1'},document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}},
    setInterval:fn=>{poll=fn;},CindySimPages:{locale:async()=>lang,onPush(){},h:(tag,props,children=[])=>({tag,props,children}),GLYPH:{},memoryBadge:()=>null,resourceButton:()=>({}),
     rpc:async(action,params)=>{calls.push({action,params});if(action==='task_bind')closed=false;return {ok:true,settings:{enabled:true},device:{udid:A,name:'Phone',state:'Booted'},viewerClosed:closed,viewer:closed?null:{url:'http://127.0.0.1:1/control?udid='+A}};}},CindySimModel:{runtimeLabel:()=>'iOS 27',createResourceSummary:()=>({node:{},update(){},prune(){},label:()=>({})})}};
-  vm.runInNewContext(require('node:fs').readFileSync('baguette-simulator/task.js','utf8'),context);
+  vm.runInNewContext(require('node:fs').readFileSync('cindy-simulator/task.js','utf8'),context);
   await settle();poll();await settle();
   const flatten=node=>[node,...(node.children||[]).filter(Boolean).flatMap(flatten)];
   const rendered=get('inner').children.flatMap(flatten);

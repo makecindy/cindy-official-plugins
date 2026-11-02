@@ -20,7 +20,7 @@ function harness(safari=false){
   const screen={size:{width:400,height:800}};
   for(const name of ['touchDown','touchMove','touchUp','tap'])screen[name]=(points,opts)=>calls.push({name,points:copy(points),opts:opts&&copy(opts)});
   const context={window,document,performance:{now:()=>1000},setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id)};
-  const dir=path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
+  const dir=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
   for(const name of ['attachable-event-source','edge-bands','mouse-gesture-source','touch-gesture-source','wheel-gesture-source','safari-gesture-event-source','option-hover-preview','pointer-interpreter'])
     vm.runInNewContext(fs.readFileSync(path.join(dir,name+'.js'),'utf8'),context);
   window.Baguette._MouseGestureSource.prototype._ripple=()=>{};

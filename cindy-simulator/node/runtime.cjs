@@ -23,7 +23,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   // One operation at a time per device; '*' (settings, stop-all, idle) excludes everything.
   const busyKeys = new Map();
   let idleHandled = false;
-  const assertEnabled=async()=>{if(!(await load()).enabled||closing)throw failure('RUNTIME_DISABLED','Baguette is paused. Open plugin settings.');};
+  const assertEnabled=async()=>{if(!(await load()).enabled||closing)throw failure('RUNTIME_DISABLED','Device Simulator is paused. Open plugin settings.');};
   const manager=require('./device-manager.cjs').createDeviceManager({dispatch,exclusive,assertEnabled,touch,contextFile:settingsFile+'.apps.json',
     onSettled:async(entry,p)=>{if(tasks&&validSession(p.task)&&entry.activeUdid)await taskUpdate(entry,()=>tasks.bind(p.task,entry.activeUdid));}});
   const taskUpdate = (result, update) => recordUpdate(result, 'taskBindingError', update,
@@ -33,7 +33,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     if (config) return config;
     const value = await readJsonRecord(settingsFile, {initial:{enabled:true, idleMinutes:15},
       validate:value=>typeof value.enabled === 'boolean' && [0,15,30,60].includes(value.idleMinutes),
-      code:'SETTINGS_UNREADABLE', message:'Cannot read Baguette settings. Restore the settings file before starting a device.'});
+      code:'SETTINGS_UNREADABLE', message:'Cannot read Device Simulator settings. Restore the settings file before starting a device.'});
     config ||= {enabled: value.enabled, idleMinutes: value.idleMinutes,
       ...(['desktop','clipboard'].includes(value.screenshotDestination) ? {screenshotDestination:value.screenshotDestination} : {})};
     return config;
@@ -206,7 +206,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     // job holds its operation lock, and while plugin operation is paused.
     if (method === 'physical_disconnect') return dispatch(method, params, deadline);
     if (READ_ONLY.has(method) || (method === 'screenshot' && !params?.destination)) {
-      if (!(await load()).enabled) throw failure('RUNTIME_DISABLED', 'Baguette is paused. Enable simulator operation in Plugins → Baguette settings.');
+      if (!(await load()).enabled) throw failure('RUNTIME_DISABLED', 'Device Simulator is paused. Enable simulator operation in Plugins → Device Simulator settings.');
       touch();
       const result=await dispatch(method, params, deadline);
       if (method!=='app_install_status' && result?.ok!==false) {
@@ -298,7 +298,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         return {...await status(), ok:true, execution:'executed'};
       }
       const actual = {settings_boot:'boot', settings_restart:'boot', settings_viewer:'open_viewer'}[method] || method;
-      if (!settings.enabled) throw failure('RUNTIME_DISABLED', 'Baguette is paused. Enable simulator operation in Plugins → Baguette settings.');
+      if (!settings.enabled) throw failure('RUNTIME_DISABLED', 'Device Simulator is paused. Enable simulator operation in Plugins → Device Simulator settings.');
       if (method === 'settings_restart') {
         // Keep the existing per-device lock across both steps. A page going away
         // must not strand the device between shutdown and the requested boot.

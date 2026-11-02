@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
-const node=path.join(__dirname,'../../baguette-simulator/node');
+const node=path.join(__dirname,'../../cindy-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002';
 
 // A deliberately small DOM: enough for control.js to render and for the test to read back.
@@ -833,7 +833,7 @@ test('Android keeps handheld screen, Home and rotation while TV/Vision retain th
 
 
 test('resource summary ignores late selections, retains previous readings on failure, and pauses while hidden',async()=>{
- const M=require('../../baguette-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=1000;
+ const M=require('../../cindy-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=1000;
  const view=M.createResourceSummary('zh-CN',(device,force)=>new Promise((resolve,reject)=>pending.push({device,force,resolve,reject})),dom.document,()=>now);
  const a={udid:'a',state:'Booted'},b={udid:'b',state:'Booted'};
  const sample=(id,bytes)=>({udid:id,memory:{status:'ok',bytes},disk:{status:'ok',bytes},sampledAt:new Date(now).toISOString()});
@@ -851,7 +851,7 @@ test('resource summary ignores late selections, retains previous readings on fai
 
 
 test('visible rows share the selected reading, off devices wait five minutes, and old boot results cannot leak',async()=>{
- const M=require('../../baguette-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=0,observe;
+ const M=require('../../cindy-simulator/node/control-model.js'),dom=fakeDocument(),pending=[];let now=0,observe;
  dom.document.defaultView={IntersectionObserver:class{constructor(fn){observe=fn;}observe(){}unobserve(){}}};
  const view=M.createResourceSummary('zh-CN',device=>new Promise(resolve=>pending.push({device,resolve})),dom.document,()=>now);
  const off={udid:'a',state:'Shutdown'},on={...off,state:'Booted'};

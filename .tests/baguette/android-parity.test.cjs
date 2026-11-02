@@ -1,7 +1,21 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),vm=require('node:vm');
-const base=path.resolve('baguette-simulator/node/android'),id='00000000-0000-4000-8000-000000000001';
+const base=path.resolve('cindy-simulator/node/android'),id='00000000-0000-4000-8000-000000000001';
 async function temp(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'android-parity-test-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
+test('Android control pages allow embedding by the current plugin identity in both languages',async t=>{
+ const viewer=require(path.join(base,'viewer.cjs')).createViewer({root:await temp(t),devices:{target:async()=>({udid:id})},agent:{}});
+ t.after(()=>viewer.close());
+ const manifest=JSON.parse(await fs.readFile(path.join(base,'../../ghost.json'),'utf8'));
+ for(const locale of ['en','zh-CN']){
+  const url=new URL((await viewer.open(id,locale)).url);
+  const response=await fetch(url);
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get('content-security-policy'),`frame-ancestors 'self' cindy-ghost://${manifest.id}`);
+  assert.equal(response.headers.get('x-frame-options'),null);
+  assert.equal(response.headers.get('referrer-policy'),'no-referrer');
+  assert.equal(await response.text(),await fs.readFile(path.join(base,locale==='zh-CN'?'../control.zh-CN.html':'../control.html'),'utf8'));
+ }
+});
 test('media import uses generated guest paths, verifies bytes and preserves copied outcomes',async t=>{
  const root=await temp(t),file=path.join(root,'photo; $(ignored).png');await fs.writeFile(file,'test');
  const {importMedia}=require(path.join(base,'files.cjs')),calls=[];

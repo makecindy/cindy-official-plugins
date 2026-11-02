@@ -28,7 +28,7 @@ function fixture(devices,respond) {
         if(result.ok && result.outcome!=='partial') {if(action==='delete')live=live.filter(d=>d.udid!==params.udid);if(action==='shutdown')live=live.map(d=>d.udid===params.udid?{...d,state:'Shutdown'}:d);}
         return result;
       }},CindySimModel:{runtimeLabel:r=>r}};
-  vm.runInNewContext(fs.readFileSync('baguette-simulator/manage.js','utf8')+`
+  vm.runInNewContext(fs.readFileSync('cindy-simulator/manage.js','utf8')+`
     state={ok:true,devices:${JSON.stringify(devices)},settings:{enabled:false}};selected=state.devices[0]?.udid;
     globalThis.page={row,chooseRow,toggleSelection,renderList,confirmBatch,runBatch,selectionMenu,
       selected:()=>selected,checked:()=>[...checked],batch:()=>batch,

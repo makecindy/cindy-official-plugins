@@ -41,6 +41,6 @@ Desktop.ini
 *~
 
 # Android OCR build inputs fetched from SHA-pinned official archives
-/baguette-simulator/vendor/android/tesseract-core-lstm.wasm
-/baguette-simulator/vendor/android/eng.traineddata.gz
-/baguette-simulator/vendor/android/chi_sim.traineddata.gz
+/cindy-simulator/vendor/android/tesseract-core-lstm.wasm
+/cindy-simulator/vendor/android/eng.traineddata.gz
+/cindy-simulator/vendor/android/chi_sim.traineddata.gz

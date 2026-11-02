@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {TouchStream,VideoWatchdog}=require('../../baguette-simulator/node/physical/realtime.js');
-const {Packets,coordinates,createRealtime}=require('../../baguette-simulator/node/physical/realtime.cjs');
+const {TouchStream,VideoWatchdog}=require('../../cindy-simulator/node/physical/realtime.js');
+const {Packets,coordinates,createRealtime}=require('../../cindy-simulator/node/physical/realtime.cjs');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const screen={width:400,height:800,displayId:1,rotation:'rot0'};
 test('quiet video allows a first input to respond, but repeated input cannot postpone recovery forever',()=>{
@@ -87,7 +87,7 @@ test('Agent media works without a viewer and viewer closure preserves held Agent
  assert.equal(shot.source,'live-video');assert.equal(shot.sequence,2);assert.equal(shot.capturedAt,210);
  await live.input(d.udid,{session:lease.session,op:'end',gesture,screen,points:[[3,4]]},'agent');lease.release();
  // Exercise the public adapter path as well as an individual stream closing.
- const filename=path.resolve('baguette-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);let wdaClosed=0;
+ const filename=path.resolve('cindy-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);let wdaClosed=0;
  const context={module:{exports:{}},require(name){
   if(name==='./realtime.cjs')return {createRealtime:()=>live};
   if(name==='./devices.cjs')return {...load(name),createDevices:()=>({target:async()=>d})};

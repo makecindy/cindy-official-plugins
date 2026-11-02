@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {fixedScreen}=require('../../baguette-simulator/node/platform-screen.cjs');
+const {fixedScreen}=require('../../cindy-simulator/node/platform-screen.cjs');
 const screen=(name,w,h,scale,id=1)=>`Screen ID: ${id}\n Device Name: ${name}\n Pixel Size: {${w}, ${h}}\n Preferred UI Scale: ${scale}\n`;
 test('connected TV and Vision framebuffers use their own UI density, not a phone orientation',()=>{
  const tv=fixedScreen(screen('external-0',1920,1080,1));

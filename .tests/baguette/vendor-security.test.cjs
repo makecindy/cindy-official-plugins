@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const web = path.resolve(__dirname, '../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+const web = path.resolve(__dirname, '../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
 
 test('toolbar roles keep untrusted titles out of HTML and retain their controls', () => {
   const sourceCode = fs.readFileSync(path.join(web, 'sim-native.js'), 'utf8');
@@ -40,6 +40,6 @@ test('CSS selector fallback escapes quotes, backslashes, newlines and Unicode', 
 
 test('every packaged upstream file matches vendor-inventory.json',async()=>{
  // The record went stale once (sim-native.js after the patch-port fix) with nothing to notice.
- const {inventoryProblems}=await import('../../baguette-simulator/native/inventory.mjs');
+ const {inventoryProblems}=await import('../../cindy-simulator/native/inventory.mjs');
  assert.deepEqual(inventoryProblems(),[]);
 });

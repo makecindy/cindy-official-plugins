@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');
-const code=fs.readFileSync('baguette-simulator/main.js','utf8');
+const code=fs.readFileSync('cindy-simulator/main.js','utf8');
 async function exercise(tool,previewReply,workerResult){let handler;const previews=[],sent=[];vm.runInNewContext(code,{cindy:{onHostMessage:fn=>handler=fn,node:{request:async()=>({ok:true,result:workerResult})},preview:async p=>{previews.push(p);return previewReply;},send:async p=>sent.push(p)}});await handler({type:'tool-call',tool,callId:'call',args:{session_context:{session_id:'test-session'}}});return {previews,sent};}
 test('open_viewer opens the correct session sidebar',async()=>{const r=await exercise('open_viewer',{ok:true},{ok:true,ready:true,url:'http://127.0.0.1:1234/simulators/test'});assert.equal(r.previews.length,1);assert.equal(r.previews[0].sessionId,'test-session');assert.equal(r.sent[0].result.previewOpened,true);});
 test('launch_app opens sidebar after successful launch',async()=>{const r=await exercise('launch_app',{ok:true},{ok:true,execution:'executed',viewer:{ready:true,url:'http://127.0.0.1:1234/simulators/test'}});assert.equal(r.previews.length,1);assert.equal(r.sent[0].result.viewer.previewOpened,true);});

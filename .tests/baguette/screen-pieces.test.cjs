@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const context={window:{}};
-for(const name of ['screen-quad','screen-pieces'])vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures',name+'.js'),'utf8'),context);
+for(const name of ['screen-quad','screen-pieces'])vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures',name+'.js'),'utf8'),context);
 const Pieces=context.window.Baguette._ScreenPieces;
 const piece=(left,right,u)=>({corners:[[left,0],[right,0],[right,1],[left,1]],u,v:[0,1]});
 test('Duo drags leaving either half stay at the nearest half regardless of ordering',()=>{

@@ -14,7 +14,7 @@ function fixture(width=1000,height=800,saved={}) {
     ResizeObserver:class {constructor(fn){resize=fn;}observe(){}},
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
     CindySimPages:{locale:()=>new Promise(()=>{})},CindySimModel:{}};
-  vm.runInNewContext(fs.readFileSync('baguette-simulator/manage.js','utf8')+'\nsetupSplitter();',context);
+  vm.runInNewContext(fs.readFileSync('cindy-simulator/manage.js','utf8')+'\nsetupSplitter();',context);
   const fire=(name,data={})=>{let prevented=false;events[name]({pointerId:1,button:0,clientX:0,clientY:0,preventDefault(){prevented=true;},...data});return prevented;};
   return {attrs,styles,storage,classes,fire,blur:()=>windowEvents.blur(),captured:()=>captured,
     resize(w,h){rect.width=w;rect.height=h;const next=w<=720;if(next!==media.matches){media.matches=next;change();}resize();}};

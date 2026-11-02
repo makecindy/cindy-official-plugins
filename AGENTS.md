@@ -28,7 +28,7 @@ do not require authors to perform the migration checklist themselves.
 
 ### Device Simulator interaction parity / 模拟器交互一致性
 
-For `baguette-simulator`, use iPhone as the reference for equivalent Android
+For `cindy-simulator`, use iPhone as the reference for equivalent Android
 interactions. Keep gesture meaning, anchors, touch indicators, toolbar actions,
 shortcuts and help consistent whenever platform capabilities permit. Reuse
 components and compare both implementations with the same input cases when
