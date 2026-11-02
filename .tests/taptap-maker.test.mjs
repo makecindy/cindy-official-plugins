@@ -632,7 +632,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.25');
+  assert.equal(manifest.version, '2.1.26');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -679,7 +679,7 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(consoleTool.description, /不自动构建、提交或安装游戏运行环境/);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.39');
+  assert.equal(vendorPackage.version, '0.0.40');
   assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
@@ -3373,5 +3373,21 @@ test('新版 Git 指引统一转换到获授权的通用 Git 和 Maker 插件入
     const failure = createMainHarness(buildFailureResponder(message));
     const failed = await failure.call('maker_build', { session_context: previewBuildSession });
     assert.doesNotMatch(JSON.stringify(failed.result), /taptap-maker git|maker_build_current_directory/);
+  }
+});
+
+test('0.0.40 云端诊断指引不建议绕过插件执行 cloud-commit', async () => {
+  const context = createContext({});
+  new Script(makerBundleFunction('nextActionForFailure')).runInContext(context);
+  for (const classification of ['cloud_workspace_blocked', 'remote_rejected', 'unknown']) {
+    const message = context.nextActionForFailure(classification);
+    const harness = createMainHarness(buildFailureResponder(message, {
+      success: false, execution_state: 'unknown', automatic_retry: false, next_action: message,
+    }));
+    const response = await harness.call('maker_build', { session_context: previewBuildSession });
+    assert.doesNotMatch(JSON.stringify(response.result), /taptap-maker git/);
+    assert.equal(response.result.structuredContent.execution_state, 'unknown');
+    assert.equal(response.result.structuredContent.automatic_retry, false);
+    assert.match(response.result.structuredContent.message, /确认结果前不要重试/);
   }
 });

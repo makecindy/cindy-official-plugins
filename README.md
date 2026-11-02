@@ -433,7 +433,7 @@ test package; authors or maintainers supply runtime and compatibility evidence
 appropriate to the affected behavior before merge. Valid evidence for unaffected
 paths can be reused without reinstalling after every wording change.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.39`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.40`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:

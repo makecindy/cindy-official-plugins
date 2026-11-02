@@ -144,7 +144,7 @@ test('plugins never infer language from the browser or operating system', () => 
       // This pinned, unmodified OCR engine uses the browser locale only to build
       // Emscripten's C-runtime LANG. It never selects the plugin's UI language or
       // OCR language (which the user explicitly chooses). Keep all other reads checked.
-      if (path.relative(root, file) === 'my-browser/extension/vendor/tesseract/tesseract-core-lstm.wasm.js') {
+      if (path.relative(root, file).split(path.sep).join('/') === 'my-browser/extension/vendor/tesseract/tesseract-core-lstm.wasm.js') {
         assert.equal(createHash('sha256').update(source).digest('hex'), '775a35df6f2ae100e02609443e6bd5cafcd07983dd6175454ca4a432a7730687');
         const runtimeLocale = '("object"==typeof navigator&&navigator.languages&&navigator.languages[0]||"C")';
         assert.equal(codeOnly.split(runtimeLocale).length, 2);
