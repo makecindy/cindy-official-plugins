@@ -9,13 +9,15 @@ import (
 )
 
 // Signed browsers allowed to drive the binding; the team is the certificate's subject.OU.
-const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and identifier "com.brave.Browser"))`
+const browserRequirement = `anchor apple generic and ((certificate leaf[subject.OU] = "EQHXZ8M8AV" and (identifier "com.google.Chrome" or identifier "com.google.Chrome.forTesting")) or (certificate leaf[subject.OU] = "UBF8T346G9" and identifier "com.microsoft.edgemac") or (certificate leaf[subject.OU] = "KL8N8XSYF4" and (identifier "com.brave.Browser" or identifier "com.brave.Browser.origin")) or (certificate leaf[subject.OU] = "S6N382Y83G" and identifier "company.thebrowser.dia"))`
 
 var browserIdentities = map[string]string{
 	"com.google.Chrome":            "EQHXZ8M8AV",
 	"com.google.Chrome.forTesting": "EQHXZ8M8AV",
 	"com.microsoft.edgemac":        "UBF8T346G9",
 	"com.brave.Browser":            "KL8N8XSYF4",
+	"com.brave.Browser.origin":     "KL8N8XSYF4",
+	"company.thebrowser.dia":       "S6N382Y83G",
 }
 
 // codesign runs the system tool; tests substitute it.
