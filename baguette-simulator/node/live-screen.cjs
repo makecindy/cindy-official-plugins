@@ -15,7 +15,7 @@ const {chord}=require('./keys.cjs');
 const {toNative}=require('./android/geometry.cjs');
 
 const SCREEN=0x10,PNG=0x06,MAX_MESSAGE=8*1024*1024,MAX_BUFFERED=4*1024*1024;
-const FETCH_MS=30000,IDLE_MS=60000,READY_MS=8000,PROBE_MS=5000;
+const FETCH_MS=30000,IDLE_MS=60000,READY_MS=8000,PROBE_MS=5000,MAX_PROBE=1024*1024;
 // A probe takes about 1.5 s and one taken mid-turn reads the old orientation,
 // while a still screen sends no more frames: probe once the frames pause.
 const QUIET_MS=200;
@@ -167,7 +167,22 @@ function appleRelease(st,size){
   st.mode=null;st.edge=null;return out;
 }
 
-function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=process.platform==='darwin'&&process.arch==='arm64',
+// The interface orientation, from Baguette's accessibility hit test. Over
+// HTTP: Baguette handles a stream's messages one at a time, so a probe on the
+// stream would hold every touch behind it for the 1–2 s it takes.
+function describeOrientation(base,udid){
+  return new Promise((resolve,reject)=>{
+    const request=http.get(`${base}/simulators/${encodeURIComponent(udid)}/describe-ui.json?x=1&y=1`,{timeout:PROBE_MS,headers:{origin:base}},res=>{
+      const chunks=[];let size=0;
+      res.on('data',chunk=>{size+=chunk.length;if(size>MAX_PROBE)request.destroy(Error('Probe answer too large'));else chunks.push(chunk);});
+      res.on('end',()=>{try{resolve(res.statusCode===200?JSON.parse(Buffer.concat(chunks).toString('utf8')):null);}catch{resolve(null);}});
+      res.on('error',reject);
+    });
+    request.once('timeout',()=>request.destroy(Error('Probe timed out')));
+    request.once('error',reject);
+  });
+}
+function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=process.platform==='darwin'&&process.arch==='arm64',describeUi=describeOrientation,
   serve=(...a)=>require('./android/stream.cjs').serve(...a),rpc=(...a)=>require('./android/grpc.cjs').rpc(...a),WebSocket=globalThis.WebSocket,now=Date.now}){
   const sessions=new Map(),tokens=new Map();let server=null,listening=null;
   const timer=setInterval(()=>sweep(),1000);timer.unref?.();
@@ -191,7 +206,11 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
   const checkId=(id,locale)=>{if(typeof id!=='string'||!ID.test(id))throw fail('INVALID_ARGUMENT',locale,undefined,'id');return deviceId(id);};
   function opened(p,locale){const s=sessions.get(checkId(p.id,locale));if(!s)throw fail('NOT_FOUND',locale,'NOT_OPEN');return s;}
   const send=(s,value)=>{if(s.ws?.readyState!==1)return false;s.ws.send(JSON.stringify(value));return true;};
-  const probe=s=>{if((s.kind==='ios'||s.kind==='ipados')&&!s.probing&&send(s,{type:'describe_ui',x:1,y:1})){s.probing=true;s.probeAt=now();}};
+  function probe(s){
+    if((s.kind!=='ios'&&s.kind!=='ipados')||s.probing||s.closed||s.ws?.readyState!==1)return;
+    s.probing=true;const at=s.probeAt=now();
+    describeUi(s.base,s.udid).then(env=>answered(s,at,env),()=>answered(s,at,null));
+  }
   const keyframe=s=>s.kind==='android'?s.control.keyframe?.():send(s,{type:'force_idr'});
   function write(s,data){const head=Buffer.alloc(4);head.writeUInt32BE(data.length);s.res.write(head);s.res.write(data);}
   function screen(s){
@@ -233,15 +252,15 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     s.quiet=setTimeout(()=>{if(s.closed||!s.res)return;if(s.probing)s.reprobe=true;else{s.framed=false;probe(s);}},QUIET_MS);
     s.quiet.unref?.();
   }
-  function text(s,raw){
-    let env;try{env=JSON.parse(raw);}catch{return;}
-    if(env?.type!=='describe_ui_result'||!s.probing)return;
+  function answered(s,at,env){
+    // Closed, or given up on (the sweep) and asked again since.
+    if(s.closed||!s.probing||s.probeAt!==at)return;
     s.probing=false;
     // Asked before a turn was shown, it describes the old pose: ignore it.
     const stale=s.turnedAt>s.probeAt;
     if(s.reprobe||stale){s.reprobe=false;s.framed=false;probe(s);}
     if(stale)return;
-    const rotation=ORIENTATIONS.indexOf(env.ok&&env.tree?.screen?.orientation);
+    const rotation=ORIENTATIONS.indexOf(env?.ok&&env.tree?.screen?.orientation);
     if(rotation<0)return;
     s.oriented=true;
     // Someone else turned the device (or the App did): step from what shows.
@@ -255,7 +274,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     let settle;const ready=new Promise((resolve,reject)=>{settle={resolve,reject};});
     const timeout=setTimeout(()=>settle.reject(fail('NOT_RUNNING',locale,'STREAM')),READY_MS);
     ws.onopen=()=>{send(s,{type:'set_fps',fps:s.fps||60});send(s,{type:'force_idr'});probe(s);};
-    ws.onmessage=e=>{if(typeof e.data==='string')text(s,e.data);else{binary(s,Buffer.from(e.data));if(s.size)settle.resolve();}};
+    ws.onmessage=e=>{if(typeof e.data!=='string'){binary(s,Buffer.from(e.data));if(s.size)settle.resolve();}};
     ws.onerror=ws.onclose=()=>{settle.reject(fail('NOT_RUNNING',locale,'STREAM'));end(s);};
     try{await ready;}finally{clearTimeout(timeout);}
     // The first orientation, so the first 0x10 is usually already right.

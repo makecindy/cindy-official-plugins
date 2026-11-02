@@ -24,13 +24,16 @@ const list=()=>[
 ];
 class FakeSocket{
   static all=[];
-  constructor(url){this.url=url;this.sent=[];this.readyState=0;FakeSocket.all.push(this);setImmediate(()=>{this.readyState=1;this.onopen?.();});}
+  constructor(url){this.url=url;this.sent=[];this.probes=0;this.pending=[];this.readyState=0;FakeSocket.all.push(this);setImmediate(()=>{this.readyState=1;this.onopen?.();});}
   send(text){this.sent.push(JSON.parse(text));}
   close(){if(this.readyState===3)return;this.readyState=3;this.onclose?.();}
   binary(buffer){this.onmessage?.({data:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.length)});}
   text(value){this.onmessage?.({data:JSON.stringify(value)});}
+  // The orientation probe (Baguette's describe-ui over HTTP) for this device, answered by reply().
+  probe(){this.probes++;return new Promise(resolve=>this.pending.push(resolve));}
+  reply(orientation){this.pending.shift()?.({ok:true,tree:{screen:{orientation}}});return new Promise(r=>setImmediate(r));}
   // Baguette: an avcC on connect, then answers the orientation probe.
-  answer(orientation){const probe=this.sent.find(m=>m.type==='describe_ui');if(probe)this.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation}}});}
+  answer(orientation){if(this.pending.length)this.reply(orientation);}
 }
 function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices=list(),tasks=null,request=null}={}){
   const calls=[],touches=[],sendTouch=[];let on=enabled,offset=0;
@@ -48,6 +51,7 @@ function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices
     android:()=>({devices:{target:async()=>({udid:DROID,model,endpoint:{port:1}})},agent}),
     serve:({sink:s,control:c,res,signal})=>{sink=s;control=c;s.begin('application/x-cindy-android-avcc');return new Promise(resolve=>{streamed=resolve;signal.addEventListener('abort',resolve,{once:true});});},
     rpc:async(endpoint,method,body)=>{sendTouch.push(body.touches);return {};},
+    describeUi:async(base,udid)=>FakeSocket.all.findLast(ws=>ws.url.includes(`/simulators/${udid}/`)).probe(),
     WebSocket:class extends FakeSocket{constructor(url){super(url);setImmediate(()=>{this.binary(avcc(size));this.answer(orientation);});}}});
   t.after(()=>live.stop());
   return {live,calls,touches,sendTouch,state,sink:()=>sink,control:()=>control,end:()=>streamed?.(),advance:ms=>{offset+=ms;}};
@@ -145,19 +149,19 @@ test('the stream sends screen JSON before the first frame, starts on a keyframe 
   assert.deepEqual(messages.slice(1).map(m=>m[0]),[1,2,3]);
   assert.deepEqual([...messages[2]],[2,1,2,3],'frames are Baguette envelopes as is');
   // Frames are followed by one orientation probe once they pause; a still screen sends nothing and is not probed.
-  const probes=()=>ws.sent.filter(m=>m.type==='describe_ui').length,initial=probes();
+  const probes=()=>ws.probes,initial=probes();
   await until(()=>probes()>initial,2500);
   // A frame during the probe (a turn still moving) asks for one more as soon as it answers.
   ws.binary(envelope(3,[4]));await new Promise(r=>setTimeout(r,300));
   const during=probes();
-  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  await ws.reply('landscape-left');
   assert.equal(probes(),during+1,'a change during a probe is probed again at once');
-  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  await ws.reply('landscape-left');
   await until(()=>stream.messages().length>=5);
   const before=probes();
   await new Promise(r=>setTimeout(r,1200));assert.equal(probes(),before);assert.equal(stream.messages().length,5,'unchanged orientation sends nothing');
   ws.binary(envelope(3,[5]));await until(()=>probes()>before,2500);
-  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-right'}}});
+  await ws.reply('landscape-right');
   ws.binary(envelope(3,[6]));
   await until(()=>stream.messages().length>=8);
   assert.deepEqual(screenOf(stream.messages()[6]),{type:'screen',width:1178,height:2556,rotation:3});
@@ -273,7 +277,7 @@ test('a requested turn the picture follows shows at once; one the App refuses do
   const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());
   await until(()=>stream.messages().length>=1);
   const rotations=()=>stream.messages().filter(m=>m[0]===0x10).map(m=>screenOf(m).rotation);
-  const probes=()=>ws.sent.filter(m=>m.type==='describe_ui').length,connected=probes();
+  const probes=()=>ws.probes,connected=probes();
   ws.binary(envelope(2,[1]));await until(()=>stream.messages().length>=2);
   // The pause after this frame sends a probe; it is still unanswered when the turn starts.
   await until(()=>probes()>connected,2500);
@@ -288,10 +292,10 @@ test('a requested turn the picture follows shows at once; one the App refuses do
   ws.binary(envelope(3,[2]));
   await until(()=>rotations().at(-1)===1);
   // A probe asked before the turn still reads portrait: it is ignored and asked again.
-  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'portrait'}}});
+  await ws.reply('portrait');
   assert.equal(rotations().at(-1),1);
   assert.ok(probes()>early,'probed again after the turn');
-  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  await ws.reply('landscape-left');
   assert.equal(rotations().at(-1),1);
   // The Home Screen refuses portrait-to-landscape: no frames follow, nothing turns.
   const shown=rotations().length;
@@ -299,6 +303,18 @@ test('a requested turn the picture follows shows at once; one the App refuses do
   f.advance(2000);for(let i=0;i<14;i++)ws.binary(envelope(3,[3]));
   await new Promise(r=>setTimeout(r,50));
   assert.equal(rotations().length,shown,'a frame long after the request does not turn the picture');
+});
+
+test('the orientation probe never shares the stream with touches, so a slow probe holds none',async t=>{
+  const f=fixture(t);const opened=await f.live.request('liveScreen.open',{id:PHONE});
+  const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());
+  ws.binary(envelope(2,[1]));
+  const asked=ws.probes;await until(()=>ws.probes>asked,2500);
+  // Unanswered (Baguette takes 1–2 s): the touch still goes out at once.
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'touch',touches:[{id:0,x:0.5,y:0.5,phase:'began'}]}]});
+  assert.equal(ws.sent.at(-1).type,'touch1-down');
+  assert.deepEqual(ws.sent.map(m=>m.type).filter(type=>!/^(touch|set_fps|force_idr)/.test(type)),[],'the stream carries no probe');
+  await ws.reply('portrait');
 });
 
 test('moves of a finger in one batch reach the device as the latest position only',async t=>{
@@ -329,7 +345,7 @@ test('Apple TV and Vision Pro forward H.264 without touches and offer their basi
   await code(f.live.request('liveScreen.input',{id:TV,events:[{kind:'text',text:'a'}]}),'UNSUPPORTED');
   await f.live.request('liveScreen.input',{id:TV,events:[{kind:'press',button:'menu'},{kind:'press',button:'play-pause'}]});
   assert.deepEqual(f.calls,[['press',{udid:TV,button:'menu'}],['press',{udid:TV,button:'play-pause'}]]);
-  assert.equal(FakeSocket.all.at(-1).sent.filter(m=>m.type==='describe_ui').length,0,'TV has no interface rotation to probe');
+  assert.equal(FakeSocket.all.at(-1).probes,0,'TV has no interface rotation to probe');
   await code(f.live.request('liveScreen.open',{id:VISION}),'NOT_RUNNING');
   await code(f.live.request('liveScreen.open',{id:PAD}),'NOT_RUNNING');
   await code(f.live.request('liveScreen.open',{id:'00000000-0000-4000-8000-0000000000FF'}),'NOT_FOUND');
