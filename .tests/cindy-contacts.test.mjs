@@ -928,10 +928,18 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
   }
 });
 
+/** 等启动时那一轮后台介绍改写结束，免得它和测试随后写入的介绍抢先后。 */
+async function introRewriteIdle(a) {
+  await a.call('stats');
+  const db = a.library.db('contacts.sqlite');
+  for (let i = 0; i < 100 && !db.prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
+}
+
 test('升级后在后台把笔记式的介绍改写成人话：干净的不动，改写结果仍像笔记就不采用', async () => {
   const dir = tmp();
   let a = boot({ libDir: dir });
   try {
+    await introRewriteIdle(a);
     const noisy = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
     const kept = ok(await a.call('save', { name: '另一位', narrative: '另一位是做设计的朋友，常一起讨论界面。' }));
     const bad = ok(await a.call('save', { name: '第三位', narrative: '第三位 GitHub third-dev，2026-10-01 已核实。' }));
@@ -989,6 +997,78 @@ test('LinkedIn 主页：完整链接、带参数的链接和只写名字都能�
     const dup = await a.call('save', { name: 'Someone Else', identities: [{ platform: 'linkedin', value: 'example-person' }] });
     assert.equal(dup.ok, false);
     assert.equal(dup.errorCode, 'IDENTITY_CONFLICT');
+  } finally {
+    a.close();
+  }
+});
+
+test('升级前存下的 LinkedIn 身份按新规则重算匹配键：旧写法也能找到，同一人的重复写法合成一条', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: 'Example Person', identities: [{ platform: 'linkedin', value: 'https://www.linkedin.com/in/Example-Person/' }] }));
+    const db = () => a.library.db('contacts.sqlite');
+    // 模拟旧版本的匹配键：整条链接小写、只写名字
+    db().prepare("UPDATE contact_identities SET normalized_value = 'https://www.linkedin.com/in/example-person/' WHERE contact_id = ?").run(p.id);
+    db().prepare("INSERT INTO contact_identities (id, contact_id, platform, value, normalized_value, label, note, created_at) VALUES ('old-li', ?, 'linkedin', 'example-person', 'example-person', '', '', ?)").run(p.id, new Date().toISOString());
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    let keys = [];
+    for (let i = 0; i < 40; i++) {
+      keys = db().prepare("SELECT normalized_value FROM contact_identities WHERE platform = 'linkedin'").all().map((r) => r.normalized_value);
+      if (keys.length === 1) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.deepEqual(keys, ['linkedin.com/in/example-person']);
+    const hit = ok(await a.call('find', { query: 'https://linkedin.com/in/example-person?trk=public' })).results[0];
+    assert.equal(hit && hit.id, p.id);
+    const dup = await a.call('save', { name: 'Someone Else', identities: [{ platform: 'linkedin', value: 'linkedin.com/in/example-person' }] });
+    assert.equal(dup.errorCode, 'IDENTITY_CONFLICT');
+    // 别的网站链接里带着 linkedin.com 不算 LinkedIn 主页
+    const other = ok(await a.call('save', { name: 'Web Person', identities: [{ platform: 'web', value: 'https://evil.example.test/?u=linkedin.com/in/example-person' }] }));
+    assert.notEqual(other.id, p.id);
+  } finally {
+    a.close();
+  }
+});
+
+test('备份不成功时后台也不改写介绍，原文留到下次', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    await introRewriteIdle(a);
+    const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key IN ('profile_cleanup', 'intro_rewrite')").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    let asked = 0;
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' ? (asked++, { ok: true, text: '做桌面端的同事。' }) : origSend(m));
+    await a.call('stats');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(asked, 0);
+    assert.match(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, /已核实/);
+  } finally {
+    a.close();
+  }
+});
+
+test('同一次 macOS 导入里两张名片是同一个人：后一张只补缺，不覆盖前一张写入的生日和昵称', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([
+    { name: '周一', org: '', title: '', id: 'AB-1', isCompany: false, emails: [{ v: 'zhou@example.test', l: '' }], phones: [], birthday: '1990-07-21', nickname: '一一' },
+    { name: '周一', org: '', title: '', id: 'AB-2', isCompany: false, emails: [{ v: 'zhou@example.test', l: '' }], phones: [], note: '爱跑步', nickname: '小周' },
+  ]));
+  const a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const row = a.library.db('contacts.sqlite').prepare('SELECT facts, aliases FROM contacts').all();
+    assert.equal(row.length, 1);
+    assert.deepEqual(JSON.parse(row[0].facts).map((f) => f.label).sort(), ['备注', '生日'].sort());
+    assert.deepEqual(JSON.parse(row[0].aliases), ['一一', '小周']);
   } finally {
     a.close();
   }

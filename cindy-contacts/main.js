@@ -87,11 +87,15 @@ function normalizePlatform(platform) {
   return p;
 }
 
+// 只认主机就是 linkedin.com（或其子域）的链接，别的网站链接里带着 linkedin.com 不算
+const LINKEDIN_HOST = /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*linkedin\.com(?=[/?#]|$)/i;
+const LINKEDIN_PROFILE = /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*linkedin\.com\/(in|company)\/([^/?#\s]+)/;
+
 /** 身份匹配键：与旧版一致（小写、去 @ 前缀；电话只留数字和 +）。 */
 function normalizeIdentityValue(value, platform) {
   let v = str(value).toLowerCase();
   // LinkedIn 主页：完整链接、带参数的链接和只写名字都归成 linkedin.com/in/<名字>，能互相找到
-  const li = /linkedin\.com\/(in|company)\/([^/?#\s]+)/.exec(v);
+  const li = LINKEDIN_PROFILE.exec(v);
   if (li) return `linkedin.com/${li[1]}/${li[2]}`;
   if (platform === 'linkedin' && /^[a-z0-9-]{3,100}$/.test(v)) return `linkedin.com/in/${v}`;
   if (v.startsWith('@')) v = v.slice(1);
@@ -465,6 +469,28 @@ async function tidyStoredProfiles() {
 
 const PROFILE_CLEANUP_VERSION = 1;
 /** 升级后的一次性整理：先让宿主备份资料库，备份不成功就不动，下次启动再试。 */
+/** 匹配键规则变了的身份（目前是 LinkedIn）按新规则重算，旧档案用新写法也能找到。
+ *  新键已被同一个人占用就删掉重复的那条；被别人占用则保留原样，不并人。 */
+async function migrateIdentityKeys() {
+  const rows = await qAll("SELECT id, contact_id, platform, value, normalized_value FROM contact_identities WHERE platform = 'linkedin' OR normalized_value LIKE '%linkedin.com/%' ORDER BY id");
+  if (!rows.length) return 0;
+  const owner = new Map();
+  for (const r of await qAll('SELECT platform, normalized_value, contact_id FROM contact_identities ORDER BY id')) owner.set(`${r.platform}:${r.normalized_value}`, r.contact_id);
+  const statements = [];
+  for (const r of rows) {
+    const key = normalizeIdentityValue(r.value, r.platform);
+    if (!key || key === r.normalized_value) continue;
+    const held = owner.get(`${r.platform}:${key}`);
+    if (held === r.contact_id) statements.push({ sql: 'DELETE FROM contact_identities WHERE id = ?', params: [r.id] });
+    else if (held) continue;
+    else statements.push({ sql: 'UPDATE contact_identities SET normalized_value = ? WHERE id = ?', params: [key, r.id] });
+    owner.delete(`${r.platform}:${r.normalized_value}`);
+    owner.set(`${r.platform}:${key}`, r.contact_id);
+  }
+  for (let i = 0; i < statements.length; i += BATCH_MAX) await batch(statements.slice(i, i + BATCH_MAX));
+  return statements.length;
+}
+
 async function cleanupStoredProfilesOnce() {
   const done = await getMeta('profile_cleanup');
   if (done && done.version >= PROFILE_CLEANUP_VERSION) return null;
@@ -2121,7 +2147,7 @@ function identityFromUrl(url) {
   const u = str(url);
   const low = u.toLowerCase();
   let m;
-  if (low.includes('linkedin.com/')) return { platform: 'linkedin', value: u };
+  if (LINKEDIN_HOST.test(u)) return { platform: 'linkedin', value: u };
   if ((m = /(?:twitter|x)\.com\/@?([a-z0-9_]{1,30})(?:[/?#]|$)/i.exec(u))) return { platform: 'x', value: m[1] };
   if ((m = /github\.com\/([a-z0-9-]{1,39})(?:[/?#]|$)/i.exec(u))) return { platform: 'github', value: m[1] };
   if (/weibo\.com|t\.sina\.com/.test(low)) return { platform: 'weibo', value: u };
@@ -2262,6 +2288,8 @@ async function importSystem(opts) {
       }
       if (groupId) statements.push({ sql: 'INSERT OR IGNORE INTO contact_group_members (group_id, contact_id) VALUES (?, ?)', params: [groupId, id] });
       facets.push({ id, facets: [f] });
+      // 同一次导入里后面的名片命中这个人时，在已写入的资料上补缺，不覆盖
+      people.set(id, { name: rec.name, aliases, facts: extra.facts.slice(0, 12) });
     }
     if (!dryRun) {
       // 按档案装批：一个人的语句不会被拆进两个批次，中断时不会留下半个档案。
@@ -2402,6 +2430,9 @@ async function rewriteIntrosInBackground() {
   if (introRewriting || !cindy.send) return;
   introRewriting = true;
   try {
+    // 升级整理（含备份）没成功就不改写介绍，原文留到下次启动再处理
+    const cleaned = await getMeta('profile_cleanup');
+    if (!cleaned || cleaned.version < PROFILE_CLEANUP_VERSION) return;
     const meta = (await getMeta('intro_rewrite')) || {};
     if (meta.version >= INTRO_REWRITE_VERSION && meta.finished) return;
     // 每人最多试两次；规则更新后没改成的人再给一次机会
@@ -2964,6 +2995,11 @@ function startLegacyImportOnce() {
   pendingImport = serial(() => importLegacy())
     .catch((e) => ({ status: 'error', code: e.code, message: e.message }))
     .then(async (r) => {
+      try {
+        await serial(migrateIdentityKeys);
+      } catch (_) {
+        /* 下次启动再试 */
+      }
       try {
         await serial(cleanupStoredProfilesOnce);
       } catch (_) {
