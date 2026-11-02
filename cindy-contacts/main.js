@@ -2285,6 +2285,67 @@ async function quickAsk(d, text, talk) {
   return str(r.text);
 }
 
+/* ───────────── 把整理笔记式的介绍改写成人话 ───────────── */
+// 早先的介绍里混着邮箱、平台账号、PR 编号、日期流水和「已核实 / 对应」这类整理笔记，读起来不像在介绍一个人。
+// 升级后在后台逐个用快速通道改写（会用到少量 AI 额度）；没有可用模型就停下，下次启动再试；每人最多试两次。
+const NOISY_STORY = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|github|#\d{2,}|\bou_[0-9a-z]{8,}|核实|对应|\d{4}-\d{2}-\d{2}/i;
+const looksNoisy = (t) => str(t).length > 260 || NOISY_STORY.test(str(t));
+const INTRO_REWRITE_VERSION = 1;
+
+async function rewriteIntro(c) {
+  const facts = parseFacts(c.facts).filter((f) => !isProgressFact(f)).map((f) => `${f.label}：${f.value}`).join('；');
+  const prompt = [
+    '你在整理用户的私人通讯录。把下面这段人物介绍改写成给用户看的 2 到 3 句话，中文不超过 120 字（原介绍主要是其他语言就用那种语言）：这个人是谁、在哪里做什么、和用户是什么关系、最近在一起做什么。',
+    '不要写：邮箱、电话、各平台账号或 id、PR / issue 编号、日期流水，以及「已核实、未核实、对应」这类整理过程的说明。原介绍里没有的事不要编。',
+    '只输出改写后的介绍，不要标题、引号或解释。',
+    '',
+    `名字：${str(c.display_name)}`,
+    c.summary ? `一句话：${str(c.summary)}` : '',
+    facts ? `要点：${facts}` : '',
+    `原介绍：${str(c.narrative).slice(0, 4000)}`,
+  ].filter((x) => x !== '').join('\n');
+  const r = await cindy.send({ type: 'cindy-request', kind: 'oneshot_text', prompt });
+  if (!r || r.ok === false) throw fail(r && r.errorCode === 'NO_CANDIDATE' ? 'NO_QUICK_MODEL' : 'ASK_FAILED', (r && r.message) || 'No answer');
+  const text = str(r.text).replace(/^["“「]+|["”」]+$/g, '').trim();
+  // 改写结果仍像笔记或过长就不采用，保留原文
+  return text && text.length <= 400 && !NOISY_STORY.test(text) ? text : '';
+}
+
+let introRewriting = false;
+async function rewriteIntrosInBackground() {
+  if (introRewriting || !cindy.send) return;
+  introRewriting = true;
+  try {
+    const meta = (await getMeta('intro_rewrite')) || {};
+    if (meta.version >= INTRO_REWRITE_VERSION && meta.finished) return;
+    const tries = meta.tries && typeof meta.tries === 'object' ? meta.tries : {};
+    const rows = await qAll("SELECT id, display_name, summary, narrative, facts FROM contacts WHERE narrative <> '' ORDER BY id");
+    let stopped = false;
+    for (const c of rows) {
+      if (!looksNoisy(c.narrative) || (tries[c.id] || 0) >= 2) continue;
+      let text = '';
+      try {
+        text = await rewriteIntro(c);
+      } catch (e) {
+        if (e.code === 'NO_QUICK_MODEL') { stopped = true; break; }
+      }
+      tries[c.id] = (tries[c.id] || 0) + 1;
+      await serial(async () => {
+        const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
+        // 期间被整理或用户改过就不覆盖
+        const write = text && cur && cur.narrative === c.narrative;
+        await batch([...(write ? [{ sql: 'UPDATE contacts SET narrative = ? WHERE id = ?', params: [text, c.id] }] : []), setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries })]);
+        if (write) notifyChanged();
+      });
+    }
+    if (!stopped) await serial(() => batch([setMetaStmt('intro_rewrite', { version: INTRO_REWRITE_VERSION, tries, finished: true, at: nowIso() })]));
+  } catch (_) {
+    /* 下次启动再试 */
+  } finally {
+    introRewriting = false;
+  }
+}
+
 const running = new Map();
 const TERMINAL = /complete|succeed|success|done|finish|fail|error|cancel|abort|stop|interrupt/i;
 
@@ -2826,6 +2887,7 @@ function startLegacyImportOnce() {
       pendingImport = null;
       broadcast({ kind: 'event', name: 'legacy', data: r });
       notifyChanged();
+      rewriteIntrosInBackground();
     });
 }
 

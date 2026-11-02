@@ -912,6 +912,34 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
   }
 });
 
+test('升级后在后台把笔记式的介绍改写成人话：干净的不动，改写结果仍像笔记就不采用', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const noisy = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const kept = ok(await a.call('save', { name: '另一位', narrative: '另一位是做设计的朋友，常一起讨论界面。' }));
+    const bad = ok(await a.call('save', { name: '第三位', narrative: '第三位 GitHub third-dev，2026-10-01 已核实。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'intro_rewrite'").run();
+    a.close();
+    a = boot({ libDir: dir });
+    // 第三位的改写结果仍带账号：不采用，保留原文
+    let n = 0;
+    a.tasks.quick = { ok: true, text: '做桌面端的同事，最近一起在改文件树。' };
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，GitHub third-dev。' }) : origSend(m));
+    await a.call('stats');
+    for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
+    const story = (id) => db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(id).narrative;
+    assert.equal(story(noisy.id), '做桌面端的同事，最近一起在改文件树。');
+    assert.equal(story(kept.id), '另一位是做设计的朋友，常一起讨论界面。', '干净的介绍不动');
+    assert.equal(story(bad.id), '第三位 GitHub third-dev，2026-10-01 已核实。');
+    assert.equal(n, 1);
+  } finally {
+    a.close();
+  }
+});
+
 test('LinkedIn 主页：完整链接、带参数的链接和只写名字都能找到同一个人', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });
