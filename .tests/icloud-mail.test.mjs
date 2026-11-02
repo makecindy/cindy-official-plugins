@@ -1146,6 +1146,28 @@ test('设置页按 /app-context 的语言渲染全部文案', async () => {
   }
 });
 
+test('语言还在加载时点了显示密码，文案落定后按钮仍按当前状态写「隐藏」', async () => {
+  // Greptile #239：/app-context 返回前按钮已可点；applyStaticCopy 按 data-i18n 把按钮
+  // 刷回「显示」，但密码框仍是明文，按钮和读屏都会报错状态。
+  let releaseContext;
+  const contextReady = new Promise((resolve) => { releaseContext = resolve; });
+  const page = await createSettingsHarness(() => contextReady);
+  const input = page.elements.get('appSpecificPassword');
+  const toggle = page.elements.get('toggleSecret');
+  toggle.listeners.click();
+  assert.equal(input.type, 'text');
+
+  releaseContext(response({ ok: true, context: { region: 'global', locale: 'ja' } }));
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const T = page.messages.ja;
+  assert.equal(page.documentElement.lang, 'ja');
+  assert.equal(input.type, 'text');
+  assert.equal(page.text('toggleSecret'), T.hide);
+  assert.equal(toggle.getAttribute('aria-label'), T.hideAria);
+});
+
 test('设置页已连接状态与读取失败提示同样跟随宿主语言', async () => {
   for (const locale of HOST_LOCALES) {
     const connected = await createSettingsHarness(locale, {

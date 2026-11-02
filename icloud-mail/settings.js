@@ -189,6 +189,14 @@ var MESSAGES = {
         bindings[b][1](nodes[n], t(nodes[n].getAttribute(bindings[b][0])));
       }
     }
+    // 语言加载期间按钮已可点:按密码框当前状态重写,不能被 data-i18n 的「显示」覆盖。
+    syncSecretToggle();
+  }
+
+  function syncSecretToggle() {
+    var revealed = $('appSpecificPassword').type !== 'password';
+    $('toggleSecret').textContent = revealed ? t('hide') : t('show');
+    $('toggleSecret').setAttribute('aria-label', revealed ? t('hideAria') : t('showAria'));
   }
 
   function $(id) {
@@ -408,13 +416,8 @@ var MESSAGES = {
 
   function toggleSecret() {
     var input = $('appSpecificPassword');
-    var reveal = input.type === 'password';
-    input.type = reveal ? 'text' : 'password';
-    $('toggleSecret').textContent = reveal ? t('hide') : t('show');
-    $('toggleSecret').setAttribute(
-      'aria-label',
-      reveal ? t('hideAria') : t('showAria'),
-    );
+    input.type = input.type === 'password' ? 'text' : 'password';
+    syncSecretToggle();
   }
 
   $('connectForm').addEventListener('submit', function (event) { void connect(event); });
