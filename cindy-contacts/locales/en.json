@@ -1,10 +1,10 @@
 {
   "name": "Contacts",
   "description": "AI organizes people, exchanges and follow-ups from your mail, calendar and chats. Imports macOS and old Smart Contacts. Data is stored locally; on supported Cindy versions, enable encrypted sync between computers on the same account. Changes and deletions merge when both are online.",
-  "whenToUse": "An unknown email, phone or Feishu/Slack/GitHub account; contacting, emailing or @-mentioning someone; preparing a meeting or reply and needing background or where things were left; news about a colleague, friend or client; tidying up, backfilling, deduplicating or importing contacts.",
+  "whenToUse": "An unknown email, phone or Feishu/Slack/GitHub/LinkedIn account; contacting, emailing or @-mentioning someone; preparing a meeting or reply and needing background or where things were left; news about a colleague, friend or client; tidying up, backfilling, deduplicating or importing contacts.",
   "tools": {
     "find": {
-      "description": "Find people by any clue: name, alias, email, phone number, Feishu/Slack/GitHub id, or a keyword from their company, projects or events. Returns up to limit people with summary, identities, groups, notes for AI and recent events; matchType is identity (exact identity match, most reliable), name (exact name or alias), partial (a stored name is contained in the clue, e.g. a full name finding an entry saved with a given name only; confirm it) or text (contained in text).",
+      "description": "Find people by any clue: name, alias, email, phone number, Feishu/Slack/GitHub/LinkedIn id, or a keyword from their company, projects or events. Returns up to limit people with summary, identities, groups, notes for AI and recent events; matchType is identity (exact identity match, most reliable), name (exact name or alias), partial (a stored name is contained in the clue, e.g. a full name finding an entry saved with a given name only; confirm it) or text (contained in text).",
       "parameters": {
         "/properties/query": {
           "description": "The clue as written, e.g. zhixia@example.com, 138 0000 0000, Connie, the person who works on payments"
@@ -23,7 +23,7 @@
       }
     },
     "list": {
-      "description": "List entry summaries page by page (no story or full events), optionally filtered by group, status or type. Use it to browse or review the to-confirm queue; use find for a specific person.",
+      "description": "List entry summaries page by page (no story or full events), optionally filtered by group, status or type. Use it to browse or review the to-confirm queue; use find for a specific person. Each entry carries circle (people / customers / community / contactOnly), close (a close contact or not) and score (relationship strength).",
       "parameters": {
         "/properties/group": {
           "description": "Group name"
@@ -70,7 +70,7 @@
           "description": "Identities and contact details to add"
         },
         "/properties/identities/items/properties/platform": {
-          "description": "email / phone / feishu / slack / github / wechat / telegram / x, lowercase"
+          "description": "email / phone / feishu / slack / github / linkedin / wechat / telegram / x, lowercase"
         },
         "/properties/identities/items/properties/label": {
           "description": "Optional, e.g. work, personal"
@@ -99,7 +99,7 @@
       }
     },
     "record": {
-      "description": "Record interactions read from mail, Feishu, calendar, Cindy conversations or GitHub into a person’s file, up to 200 per call. Use contact_id, or identity / email / name to let the plugin find the person; unmatched items return UNRESOLVED, so find or save the person first. The same ref (source id) is recorded once per person, so resubmitting is safe. Record only people the user really deals with; skip marketing, notifications and bots.",
+      "description": "Record interactions read from mail, Feishu, calendar or Cindy conversations into a person’s file, up to 200 per call. GitHub PRs, reviews and comments are not recorded (they are rejected); use save to add GitHub details to the profile instead. Use contact_id, or identity / email / name to let the plugin find the person; unmatched items return UNRESOLVED, so find or save the person first. The same ref (source id) is recorded once per person, so resubmitting is safe. Record only people the user really deals with; skip marketing, notifications and bots.",
       "parameters": {
         "/properties/items/items/properties/contact_id": {
           "description": "Entry id; if unknown use identity, email or name"

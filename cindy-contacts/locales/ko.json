@@ -1,22 +1,22 @@
 {
   "name": "연락처",
   "description": "AI가 메일, 캘린더, 채팅의 인물 정보와 교류, 후속 작업을 정리합니다. macOS 및 이전 스마트 연락처를 가져올 수 있습니다. 데이터는 기기에 저장됩니다. 지원되는 Cindy에서는 같은 계정의 컴퓨터 간 암호화 동기화를 켤 수 있으며, 두 컴퓨터가 온라인일 때 변경과 삭제를 병합합니다.",
-  "whenToUse": "낯선 이메일, 전화번호, Feishu/Slack/GitHub 계정이 누구인지 알고 싶을 때, 누군가에게 연락·메시지·멘션할 때, 회의나 답장 전에 인물 배경이 필요할 때, 동료·가족·친구·고객의 소식(이직, 퇴사, 새 연락처, 약속)이 나왔을 때, 연락처를 정리·그룹화·중복 제거·가져오기 할 때.",
+  "whenToUse": "낯선 이메일, 전화번호, Feishu/Slack/GitHub/LinkedIn 계정이 누구인지 알고 싶을 때, 누군가에게 연락·메시지·멘션할 때, 회의나 답장 전에 인물 배경이 필요할 때, 동료·가족·친구·고객의 소식(이직, 퇴사, 새 연락처, 약속)이 나왔을 때, 연락처를 정리·그룹화·중복 제거·가져오기 할 때.",
   "tools": {
     "find": {
-      "description": "이름, 별명, 이메일, 전화번호, Feishu/Slack/GitHub 등의 ID, 또는 회사·프로젝트·사건의 키워드 등 어떤 단서로든 사람을 찾습니다. 최대 limit명의 요약, ID, 그룹, AI 메모, 최근 사건을 반환합니다. matchType은 identity(ID 정확 일치, 가장 신뢰), name(이름 또는 별명 정확 일치), partial(저장된 이름이 단서에 포함됨. 예: 전체 이름으로 찾았는데 이름만 저장된 사람이 나온 경우, 확인 필요), text(본문에 포함)입니다."
+      "description": "이름, 별명, 이메일, 전화번호, Feishu/Slack/GitHub/LinkedIn 등의 ID, 또는 회사·프로젝트·사건의 키워드 등 어떤 단서로든 사람을 찾습니다. 최대 limit명의 요약, ID, 그룹, AI 메모, 최근 사건을 반환합니다. matchType은 identity(ID 정확 일치, 가장 신뢰), name(이름 또는 별명 정확 일치), partial(저장된 이름이 단서에 포함됨. 예: 전체 이름으로 찾았는데 이름만 저장된 사람이 나온 경우, 확인 필요), text(본문에 포함)입니다."
     },
     "get": {
       "description": "id로 한 사람의 전체 파일을 읽습니다: 신원과 연락처, 소개, 요점, 최신 소식, 미해결 일, 교류(최신순, 최대 200건), 이벤트, 그룹, 관계, 병합 기록."
     },
     "list": {
-      "description": "프로필 요약을 페이지 단위로 나열합니다(이야기와 사건 전문 제외). 그룹, 상태, 유형으로 거를 수 있습니다. 특정 인물은 find를 사용하세요."
+      "description": "프로필 요약을 페이지 단위로 나열합니다(이야기와 사건 전문 제외). 그룹, 상태, 유형으로 거를 수 있습니다. 특정 인물은 find를 사용하세요.각 항목에는 circle(people / customers / community / contactOnly), close(자주 연락하는 사람인지), score(관계 강도)가 포함됩니다."
     },
     "save": {
       "description": "파일을 만들거나 수정합니다. id 없이 만들면 비슷한 이름이 있을 때 DUPLICATE_SUSPECT와 후보를 돌려줍니다. id가 있으면 전달한 항목만 바꾸며 aliases·identities·groups·open_loops는 추가됩니다."
     },
     "record": {
-      "description": "메일, Feishu, 캘린더, Cindy 대화, GitHub에서 읽은 교류를 사람 파일에 기록합니다(한 번에 최대 200건). contact_id 또는 identity / email / name으로 사람을 찾습니다. 같은 ref는 한 번만 기록됩니다."
+      "description": "메일, Feishu, 캘린더, Cindy 대화에서 읽은 교류를 사람 파일에 기록합니다(한 번에 최대 200건). contact_id 또는 identity / email / name으로 사람을 찾습니다. 같은 ref는 한 번만 기록됩니다. GitHub의 PR, 리뷰, 댓글은 기록하지 않습니다(거부됨). GitHub는 save로 프로필을 보완하는 데만 사용합니다."
     },
     "log_event": {
       "description": "날짜가 있는 사건을 추가합니다: 기억할 만한 교류, 약속, 변화."

@@ -1,10 +1,10 @@
 {
   "name": "通讯录",
   "description": "AI 帮你记住打过交道的每个人：整理邮件、日历和聊天里的往来，记录人物档案、最新动态和待办。支持导入 macOS 通讯录与旧版智能通讯录。资料保存在本机；在支持插件同步的 Cindy 中，可开启同账号电脑间的加密同步，两台电脑同时在线时合并修改和删除。",
-  "whenToUse": "遇到陌生邮箱、手机号或飞书/Slack/GitHub 账号想知道是谁；要联系、发消息、写邮件或 @ 某人；准备会议、回邮件需要人物背景或「上次聊到哪」；对话里提到同事、朋友、客户的新情况（换工作、新联系方式、约定）；要整理、回补、去重或导入通讯录时。",
+  "whenToUse": "遇到陌生邮箱、手机号或飞书/Slack/GitHub/LinkedIn 账号想知道是谁；要联系、发消息、写邮件或 @ 某人；准备会议、回邮件需要人物背景或「上次聊到哪」；对话里提到同事、朋友、客户的新情况（换工作、新联系方式、约定）；要整理、回补、去重或导入通讯录时。",
   "tools": {
     "find": {
-      "description": "用任意线索找人：姓名、别名、邮箱、手机号、飞书/Slack/GitHub 等平台 id，或公司、项目、事件里的关键词。返回最多 limit 个人的摘要、身份、分组、给 AI 的提示和最近事件；matchType 为 identity（身份精确命中，最可信）/ name（姓名或别名精确命中）/ partial（已存的名字被线索包含，如查全名找到只记了名的人，需确认）/ text（文字中包含）。",
+      "description": "用任意线索找人：姓名、别名、邮箱、手机号、飞书/Slack/GitHub/LinkedIn 等平台 id，或公司、项目、事件里的关键词。返回最多 limit 个人的摘要、身份、分组、给 AI 的提示和最近事件；matchType 为 identity（身份精确命中，最可信）/ name（姓名或别名精确命中）/ partial（已存的名字被线索包含，如查全名找到只记了名的人，需确认）/ text（文字中包含）。",
       "parameters": {
         "/properties/query": {
           "description": "线索原文，如 zhixia@example.com、138 0000 0000、Connie、做支付的那个人"
@@ -23,7 +23,7 @@
       }
     },
     "list": {
-      "description": "分页列出档案摘要（不含故事和事件全文），可按分组、状态、类型筛选。浏览全册或查看待确认队列时用；找具体某人用 find。",
+      "description": "分页列出档案摘要（不含故事和事件全文），可按分组、状态、类型筛选。浏览全册或查看待确认队列时用；找具体某人用 find。每人带 circle（people 常打交道 / customers 客户与工单 / community 开源社区 / contactOnly 只有联系方式）、close（是否常联系）和 score（关系分）。",
       "parameters": {
         "/properties/group": {
           "description": "分组名"
@@ -70,7 +70,7 @@
           "description": "追加的身份与联系方式"
         },
         "/properties/identities/items/properties/platform": {
-          "description": "email / phone / feishu / slack / github / wechat / telegram / x 等，小写"
+          "description": "email / phone / feishu / slack / github / linkedin / wechat / telegram / x 等，小写"
         },
         "/properties/identities/items/properties/label": {
           "description": "可选，如 work、personal"
@@ -99,7 +99,7 @@
       }
     },
     "record": {
-      "description": "把从邮件、飞书、日历、Cindy 对话、GitHub 读到的往来记进某人的档案，单次最多 200 条。每条用 contact_id，或用 identity / email / name 让插件自己找人；找不到的返回 UNRESOLVED，先 find 或 save 建档再记。同一个人同一个 ref（来源 id）只记一次，可以放心重复提交。只记与用户真实往来的人；营销、通知和机器人不记。",
+      "description": "把从邮件、飞书、日历、Cindy 对话读到的往来记进某人的档案，单次最多 200 条。GitHub 上的 PR、评审和评论不记（会被拒收），GitHub 只用来用 save 补全资料。每条用 contact_id，或用 identity / email / name 让插件自己找人；找不到的返回 UNRESOLVED，先 find 或 save 建档再记。同一个人同一个 ref（来源 id）只记一次，可以放心重复提交。只记与用户真实往来的人；营销、通知和机器人不记。",
       "parameters": {
         "/properties/items/items/properties/contact_id": {
           "description": "档案 id；不知道时用 identity、email 或 name"

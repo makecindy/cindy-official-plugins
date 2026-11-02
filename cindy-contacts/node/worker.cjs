@@ -154,6 +154,24 @@ const JXA_READ = `
   const emailLabels = people.emails.label();
   const phoneValues = people.phones.value();
   const phoneLabels = people.phones.label();
+  // 下面这些字段旧系统或个别名片可能取不到：取不到就当没有，不影响邮箱和电话
+  const safe = (f) => { try { return f() || []; } catch (e) { return []; } };
+  const births = safe(() => people.birthDate());
+  const nicks = safe(() => people.nickname());
+  const notes = safe(() => people.note());
+  const addrValues = safe(() => people.addresses.formattedAddress());
+  const addrLabels = safe(() => people.addresses.label());
+  const urlValues = safe(() => people.urls.value());
+  const urlLabels = safe(() => people.urls.label());
+  const socServices = safe(() => people.socialProfiles.serviceName());
+  const socUsers = safe(() => people.socialProfiles.userName());
+  const socUrls = safe(() => people.socialProfiles.url());
+  const imServices = safe(() => people.instantMessages.serviceName());
+  const imUsers = safe(() => people.instantMessages.userName());
+  const pad = (n) => (n < 10 ? '0' : '') + n;
+  // 生日按本机时区取年月日；没有年份的生日系统记成 1604 年
+  const day = (d) => (d instanceof Date && !isNaN(d) ? (d.getFullYear() === 1604 ? '' : d.getFullYear() + '-') + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) : '');
+  const pairs = (vs, ls) => (vs || []).map((v, j) => ({ v: v || '', l: (ls || [])[j] || '' }));
   const out = [];
   for (let i = 0; i < names.length; i++) {
     out.push({
@@ -164,6 +182,13 @@ const JXA_READ = `
       isCompany: !!companies[i],
       emails: (emailValues[i] || []).map((v, j) => ({ v: v || '', l: (emailLabels[i] || [])[j] || '' })),
       phones: (phoneValues[i] || []).map((v, j) => ({ v: v || '', l: (phoneLabels[i] || [])[j] || '' })),
+      birthday: day(births[i]),
+      nickname: nicks[i] || '',
+      note: notes[i] || '',
+      addresses: pairs(addrValues[i], addrLabels[i]),
+      urls: pairs(urlValues[i], urlLabels[i]),
+      social: (socServices[i] || []).map((s, j) => ({ s: s || '', u: (socUsers[i] || [])[j] || '', url: (socUrls[i] || [])[j] || '' })),
+      ims: (imServices[i] || []).map((s, j) => ({ s: s || '', u: (imUsers[i] || [])[j] || '' })),
     });
   }
   return JSON.stringify(out);
@@ -192,6 +217,17 @@ function normalizeSystemRecords(raw) {
       phones: (p.phones || [])
         .filter((e) => String(e.v || '').trim())
         .map((e) => ({ value: String(e.v).trim(), label: cleanLabel(e.l) })),
+      birthday: /^(\d{4}-)?\d{2}-\d{2}$/.test(String(p.birthday || '')) ? String(p.birthday) : '',
+      nickname: String(p.nickname || '').trim(),
+      note: String(p.note || '').trim().slice(0, 300),
+      addresses: (p.addresses || [])
+        .map((e) => ({ value: String(e.v || '').replace(/\s*\n\s*/g, ' ').trim(), label: cleanLabel(e.l) }))
+        .filter((e) => e.value),
+      urls: (p.urls || []).map((e) => ({ value: String(e.v || '').trim(), label: cleanLabel(e.l) })).filter((e) => e.value),
+      social: (p.social || [])
+        .map((e) => ({ service: String(e.s || '').trim(), user: String(e.u || '').trim(), url: String(e.url || '').trim() }))
+        .filter((e) => e.user || e.url),
+      ims: (p.ims || []).map((e) => ({ service: String(e.s || '').trim(), user: String(e.u || '').trim() })).filter((e) => e.user),
     }));
 }
 

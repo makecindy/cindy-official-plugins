@@ -15,7 +15,8 @@
       syncLast: (w) => `上次确认同步：${w}`,
       syncConflict: '两台电脑上的联系人合并发生冲突。请先撤销其中一次合并，再重新同步；本机资料已保留。',
       syncVersion: '同步版本不兼容。请更新两台电脑上的通讯录插件后重试；本机资料已保留。',
-      syncError: '同步暂未完成，本机资料已保留。请检查两台电脑的连接及同步设置后重试。',
+      syncError: '这次没同步完，Cindy 会自动接着同步，本机资料都在。',
+      syncPeerOff: '另一台电脑还没开启通讯录同步。', syncProgress: (p) => `正在同步 ${p}%…`,
 
       auto: '每天自动整理',
       autoBtn: '打开自动化页设置', autoAgain: '重新打开自动化页',
@@ -26,7 +27,7 @@
       days: '第一次读最近', daysOpt: (d) => `${d} 天`,
       daysHint: '只影响第一次整理。想要更早的，可以在人物页「往来」里往前补。',
       sources: '读哪些来源',
-      src: { mail: '邮件', calendar: '日历', im: '消息（飞书、iMessage 等）', cindy: 'Cindy 对话（只有每天自动整理能读）', github: 'GitHub' },
+      src: { mail: '邮件', calendar: '日历', im: '消息（飞书、iMessage 等）', cindy: 'Cindy 对话（只有每天自动整理能读）', github: 'GitHub（只用来补全资料）' },
       state: { ok: '能读', missing: '没装插件', unauthorized: '没连接账号', unavailable: '这次用不了', error: '出错了', skipped: '跳过' },
       sourcesHint: '用已装的插件、本机命令行工具和能直接读的数据；都读不到的会跳过，并写明原因。',
       mac: 'macOS 通讯录', macSync: '每天和 macOS 通讯录对一次账（不用 AI）', macSyncHint: '只在你导入过一次后生效；只读，不改 Mac 通讯录。',
@@ -44,7 +45,8 @@
       syncLast: (w) => `Last confirmed sync: ${w}`,
       syncConflict: 'Conflicting contact merges on two computers. Undo one merge, then sync again. Local data is preserved.',
       syncVersion: 'Sync versions are incompatible. Update the Contacts plugin on both computers, then retry. Local data is preserved.',
-      syncError: 'Sync has not completed. Local data is preserved. Check both computers’ connections and sync settings, then retry.',
+      syncError: 'This sync did not finish. Cindy keeps trying on its own; your local contacts are safe.',
+      syncPeerOff: 'Contacts sync is not turned on on the other computer yet.', syncProgress: (p) => `Syncing ${p}%…`,
 
       auto: 'Daily tidy-up',
       autoBtn: 'Set up in Automations', autoAgain: 'Open Automations again',
@@ -55,7 +57,7 @@
       days: 'First run reads', daysOpt: (d) => `${d} days`,
       daysHint: 'Only affects the first tidy-up. Go further back from a person’s Exchanges tab.',
       sources: 'Sources',
-      src: { mail: 'Mail', calendar: 'Calendar', im: 'Chats (Feishu, iMessage, etc.)', cindy: 'Cindy chats (daily tidy-up only)', github: 'GitHub' },
+      src: { mail: 'Mail', calendar: 'Calendar', im: 'Chats (Feishu, iMessage, etc.)', cindy: 'Cindy chats (daily tidy-up only)', github: 'GitHub (profile details only)' },
       state: { ok: 'readable', missing: 'not installed', unauthorized: 'not connected', unavailable: 'not available', error: 'error', skipped: 'skipped' },
       sourcesHint: 'Uses installed plugins, command-line tools and data this Mac can read; sources it cannot read are skipped with the reason shown.',
       mac: 'macOS Contacts', macSync: 'Reconcile with macOS Contacts daily (no AI)', macSyncHint: 'Starts after your first import; read-only, never changes Mac Contacts.',
@@ -142,7 +144,13 @@
     h += `<div class="item"><div class="label">${esc(T.sync)}</div><div class="body">`;
     if (ds?.supported) {
       h += `<div class="checks"><label><input type="checkbox" id="deviceSync"${ds.enabled ? ' checked' : ''}>${esc(T.syncEnable)}</label></div><p class="hint">${esc(T.syncHint)}</p>`;
-      if (ds.enabled) h += `<button class="pill" type="button" id="syncNow">${esc(T.syncNow)}</button><p class="status">${esc(T.syncState[ds.phase] || T.syncState.waiting)}</p>${ds.lastAt ? `<p class="hint">${esc(T.syncLast(when(ds.lastAt)))}</p>` : ''}${ds.error ? `<p class="err">${esc(ds.error.code === 'SYNC_MERGE_CONFLICT' ? T.syncConflict : ds.error.code === 'SYNC_VERSION' ? T.syncVersion : LOCALE === 'zh-CN' ? ds.error.message : T.syncError)}</p>` : ''}`;
+      if (ds.enabled) {
+        // 只说用户能看懂、需要知道的：真要用户处理的（合并冲突、版本、对方没开）单独说，其余插件自己重试，不把内部报错抛给用户。
+        const p = ds.progress && ds.progress.total ? Math.floor((ds.progress.done / ds.progress.total) * 100) : null;
+        const status = ds.phase === 'syncing' && p !== null ? T.syncProgress(p) : T.syncState[ds.phase] || T.syncState.waiting;
+        const errText = !ds.error ? '' : ds.error.code === 'SYNC_MERGE_CONFLICT' ? T.syncConflict : ds.error.code === 'SYNC_VERSION' ? T.syncVersion : ds.error.code === 'SYNC_PEER_DISABLED' ? T.syncPeerOff : T.syncError;
+        h += `<button class="pill" type="button" id="syncNow">${esc(T.syncNow)}</button><p class="status">${esc(status)}</p>${ds.lastAt ? `<p class="hint">${esc(T.syncLast(when(ds.lastAt)))}</p>` : ''}${errText ? `<p class="${errText === T.syncError ? 'hint' : 'err'}">${esc(errText)}</p>` : ''}`;
+      }
     } else h += `<p class="hint">${esc(T.syncUnsupported)}</p>`;
     h += '</div></div>';
     h += `<div class="item"><div class="label">${esc(T.days)}</div><div class="body">${seg('initialDays', [7, 14, 30], T.daysOpt)}<p class="hint">${esc(T.daysHint)}</p></div></div>`;
