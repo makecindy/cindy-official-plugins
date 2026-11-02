@@ -305,6 +305,20 @@ test('a requested turn the picture follows shows at once; one the App refuses do
   assert.equal(rotations().length,shown,'a frame long after the request does not turn the picture');
 });
 
+test('a device shut down while shown ends its stream; a still screen that runs does not',async t=>{
+  const devices=list(),f=fixture(t,{devices});
+  const opened=await f.live.request('liveScreen.open',{id:PHONE});
+  const stream=await fetchStream(opened.url);t.after(()=>stream.close());
+  await until(()=>stream.messages().length>=1);
+  // Still for a while, and still running: nothing ends.
+  f.advance(5000);await new Promise(r=>setTimeout(r,1300));
+  assert.equal(stream.ended(),false);
+  // Shut down: Baguette keeps the stream open and just stops sending.
+  devices.find(d=>d.udid===PHONE).state='Shutdown';
+  f.advance(5000);await until(()=>stream.ended(),3000);
+  await code(f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'release'}]}),'NOT_FOUND');
+});
+
 test('the orientation probe never shares the stream with touches, so a slow probe holds none',async t=>{
   const f=fixture(t);const opened=await f.live.request('liveScreen.open',{id:PHONE});
   const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());

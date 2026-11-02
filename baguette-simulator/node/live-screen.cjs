@@ -24,6 +24,10 @@ const QUIET_MS=200;
 // confirm it. A turn animates about 50 changes; a Home Screen that refuses
 // the pose still sends a handful, and a keyframe is not a change.
 const TURN_MS=1500,TURN_FRAMES=12;
+// A device shut down while shown keeps its stream open and simply stops
+// sending, like a still screen: once the picture is still this long, check
+// (at most this often) that it still runs.
+const ALIVE_MS=4000;
 const ID=/^[A-Za-z0-9._:-]{1,128}$/,PATH=/^\/live-screen\/([0-9a-f]{64})$/;
 const ORIENTATIONS=['portrait','landscape-left','portrait-upside-down','landscape-right'];
 const PHASES=['began','moved','stationary','ended','cancelled'],ENDED=new Set(['ended','cancelled']);
@@ -324,6 +328,11 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       // once they pause (mid-turn reads the old pose); a picture that never
       // pauses is still probed every few seconds.
       if(s.res&&s.framed&&!s.probing&&(t-(s.lastFrameAt||0)>=QUIET_MS||t-(s.probeAt||0)>=3000)){s.framed=false;probe(s);}
+      if(s.res&&!s.checking&&t-(s.lastFrameAt||0)>=ALIVE_MS&&t-(s.checkedAt||0)>=ALIVE_MS){
+        s.checking=true;s.checkedAt=t;
+        simulators().then(all=>{const d=all.find(x=>deviceId(x.udid)===s.key);if(!d||stateOf(d)!=='running')end(s);},()=>{})
+          .finally(()=>{s.checking=false;});
+      }
     }
     if(sessions.size)Promise.resolve().then(()=>controls().assertEnabled()).catch(()=>closeAll());
   }
