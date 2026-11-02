@@ -857,7 +857,9 @@ test('card settings pick the auto-follow model with the host picker and hand its
   await runtime.click(cardId, 'prui:settings');
   // Default is following the task; the choice is a two-way switch.
   assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowModelTaskHint));
-  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelTask" aria-label="跟随当前任务"/);
+  // The phone sees only button names, so the selected half says so.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelTask" aria-label="跟随当前任务（当前）"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:model" aria-label="指定模型"/);
 
   await runtime.click(cardId, 'prset:model', { mobilePageId: '12345678-1234-1234-1234-123456789abc' });
   // The picker opens on the device that tapped the card.

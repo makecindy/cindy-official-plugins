@@ -155,6 +155,7 @@ var MESSAGES = {
     prFollowModelTask: '跟随当前任务',
     prFollowModelTaskHint: '每次跟进用这个任务当时的模型',
     prFollowModelCustom: '指定模型',
+    prChoiceCurrent: '{name}（当前）',
     prFollowModelChangeTo: '更换模型（当前：{name}）',
     prEffortMinimal: '最低',
     prEffortLow: '低',
@@ -273,6 +274,7 @@ var MESSAGES = {
     prFollowModelTask: 'Follow this task',
     prFollowModelTaskHint: 'Each round uses the model this task has at the time',
     prFollowModelCustom: 'Choose a model',
+    prChoiceCurrent: '{name} (current)',
     prFollowModelChangeTo: 'Change model (now {name})',
     prEffortMinimal: 'Minimal',
     prEffortLow: 'Low',
@@ -391,6 +393,7 @@ var MESSAGES = {
     prFollowModelTask: 'タスクに合わせる',
     prFollowModelTaskHint: '毎回、その時点のこのタスクのモデルを使います',
     prFollowModelCustom: 'モデルを指定',
+    prChoiceCurrent: '{name}（現在）',
     prFollowModelChangeTo: 'モデルを変更（現在：{name}）',
     prEffortMinimal: '最小',
     prEffortLow: '低',
@@ -509,6 +512,7 @@ var MESSAGES = {
     prFollowModelTask: '현재 작업 따르기',
     prFollowModelTaskHint: '매번 그 시점의 이 작업 모델을 사용합니다',
     prFollowModelCustom: '모델 지정',
+    prChoiceCurrent: '{name} (현재)',
     prFollowModelChangeTo: '모델 변경 (현재: {name})',
     prEffortMinimal: '최소',
     prEffortLow: '낮음',
@@ -2866,8 +2870,9 @@ function prSettingRow(action, label, hint, on) {
     '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
 }
 
+// 手机端只看得到按钮的名字(aria-label),选中的那一段在名字里注明「当前」;电脑端显示里面的文字。
 function prSegment(action, label, active, inner) {
-  return prButton(action, label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
+  return prButton(action, active ? t('prChoiceCurrent', { name: label }) : label, 'display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:9999px;' +
     'font-size:12px;font-weight:500;white-space:nowrap;' + (active
       ? 'color:var(--text-primary);--bg:var(--surface-elevated);box-shadow:0 0 0 1px var(--border-default)'
       : 'color:var(--text-secondary);--hover:' + PR_HOVER), inner);
