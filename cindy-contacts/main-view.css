@@ -180,7 +180,7 @@ h3.hrow > span { display: inline-flex; align-items: center; gap: 7px; }
 .cv { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 40px; }
 .cv .tl:empty { display: none; }
 .cv:has(.tl:empty) { grid-template-columns: minmax(0, 1fr); }
-.kv dd { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kv dd { overflow-wrap: anywhere; white-space: pre-line; }
 .tl { position: relative; padding-left: 18px; }
 .tl:empty { display: none; }
 .tl::before { content: ""; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 1px; background: var(--c-line); }
