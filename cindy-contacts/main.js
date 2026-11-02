@@ -404,6 +404,19 @@ function lastTouched(row) {
 const CHANNEL_WEIGHT = { mail: 1, calendar: 1, call: 1, im: 0.5, cindy: 0.5, other: 0.5, github: 0.25 };
 const CLOSE_MIN = 6; // 常联系门槛：约等于 90 天里 6 天邮件往来，或跨两个月的往来加几件在办的事
 const WAIT_THEM = /^\s*(等待?|若|waiting\b|wait for|awaiting)/i; // 「等 TA …」= 球在对方
+// 「跟进 / 确认 / 核对 …」多是整理时留下的跟踪备注，不是有人在等用户，也不是用户答应过的事。
+const LOOP_NOTE = /^\s*(跟进|关注|留意|观察|确认|核对|复核|补核|补测|审阅|审核|明确|follow[ -]?up|keep an eye|check|verify|confirm|review)/i;
+const LOOP_FRESH_DAYS = 14;
+
+/** 还没完的事分三类：you 该用户做、them 在等对方、note 跟踪备注或 14 天前发起的旧事（默认收起，不算「等你处理」）。 */
+function loopKind(l, now = Date.now()) {
+  const text = str(l.text);
+  const start = str(l.since) || str(l.created_at).slice(0, 10);
+  const at = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(start) ? `${start}T00:00:00Z` : start);
+  if (!Number.isFinite(at) || now - at > LOOP_FRESH_DAYS * 86400000 || LOOP_NOTE.test(text)) return 'note';
+  return WAIT_THEM.test(text) ? 'them' : 'you';
+}
+const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
 const CUSTOMER_RE = /用户|客户|顾客|买家|工单|customer|client|user|ticket|ユーザー|顧客|お客|고객|사용자/i;
 
 /** 由往来渠道和分组判断这个人属于哪一圈：常打交道的人 / 产品用户与工单 / 只在 GitHub 上的社区 / 只有联系方式。 */
@@ -440,7 +453,7 @@ async function relationSignals(now = Date.now()) {
        WHERE occurred_at >= ? GROUP BY contact_id ORDER BY contact_id`,
       [since180],
     ),
-    qAll("SELECT contact_id, text, updated_at FROM contact_loops WHERE status = 'open' ORDER BY contact_id, updated_at DESC"),
+    qAll("SELECT contact_id, text, since, created_at FROM contact_loops WHERE status = 'open' ORDER BY contact_id, created_at DESC"),
   ]);
   const by = new Map();
   const get = (id) => {
@@ -453,11 +466,12 @@ async function relationSignals(now = Date.now()) {
   for (const r of months) get(r.contact_id).months = Number(r.m) || 0;
   for (const r of loops) {
     const s = get(r.contact_id);
-    if (WAIT_THEM.test(str(r.text))) s.theirs += 1;
-    else {
+    const kind = loopKind(r);
+    if (kind === 'them') s.theirs += 1;
+    else if (kind === 'you') {
       s.mine += 1;
-      if (str(r.updated_at) > s.mineAt) {
-        s.mineAt = str(r.updated_at);
+      if (loopStart(r) > s.mineAt) {
+        s.mineAt = loopStart(r);
         s.mineText = str(r.text);
       }
     }
@@ -623,7 +637,7 @@ async function getContact(id, opts) {
       addedAt: i.created_at,
     })),
     interactionTotal: Number(ixTotal) || 0,
-    loops: loops.map((l) => ({ id: l.id, text: l.text, detail: l.detail, status: l.status, since: l.since, source: l.source, updatedAt: l.updated_at })),
+    loops: loops.map((l) => ({ id: l.id, text: l.text, detail: l.detail, status: l.status, since: l.since, source: l.source, updatedAt: l.updated_at, kind: l.status === 'open' ? loopKind(l) : 'done' })),
     merges: merges.map((m) => ({ id: m.id, sourceName: m.source_name, reason: m.reason, at: m.at })),
     groups,
     relations: relations.map((r) => ({

@@ -807,6 +807,10 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     for (let d = 1; d <= 12; d++) items.push({ contact_id: octo.id, occurred_at: daysAgo(d), channel: 'github', title: 'feat: x', ref: `gh-${d}`, link: 'https://github.com/o/r/pull/1' });
     ok(await a.call('record', { items }));
     ok(await a.call('save', { id: an.id, open_loops: [{ text: '给安安补交两份 OpenAI 票据' }, { text: '等安安核对 10 月票据' }] }));
+    // 跟踪备注和 14 天前发起的旧事不算在办，也不让人进「等你处理」
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '跟进安安的报销流程' }, { text: '给安安寄合同原件', since: daysAgo(30).slice(0, 10) }] }));
+    const kinds = Object.fromEntries(ok(await a.call('get', { id: an.id })).loops.map((l) => [l.text, l.kind]));
+    assert.deepEqual(kinds, { '给安安补交两份 OpenAI 票据': 'you', '等安安核对 10 月票据': 'them', '跟进安安的报销流程': 'note', '给安安寄合同原件': 'note' });
 
     const rows = async () => Object.fromEntries((await a.view('list')).result.contacts.map((c) => [c.id, c]));
     let r = await rows();

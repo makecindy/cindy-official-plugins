@@ -93,7 +93,7 @@
       pin: '置顶', pinnedBtn: '已置顶', unpin: '取消置顶', demote: '不放在常联系', undemote: '交回自动排序', pinnedOk: '已置顶', unpinnedOk: '已交回自动排序', demotedOk: '已移出常联系',
       sigClose: '常联系', sigPinned: '置顶', sigDays: (n) => `近 90 天有 ${n} 天往来`, sigVia: (c) => `多在${/^[A-Za-z]/.test(c) ? ' ' : ''}${c}`, sigLast: (d) => `上次 ${d}`,
       waitYou: '等你', waitThem: '等 TA',
-      loopsTitle: '在办的事', doneN: (n) => `已办完 ${n} 件`, hideDone: '收起已办完',
+      loopsTitle: '在办的事', restN: (n) => `更早的、已办完的和跟踪记录 ${n} 件`, hideRest: '收起',
       storyTitle: '你们之间', storyMore: '展开全文', storyLess: '收起',
       threadsTitle: '往来的事', allHistory: (n) => `全部往来 ${n}`, threadN: (n) => `${n} 条`, chatDay: (d) => `聊天 · ${d}`,
       factsTitle: '要点与履历', moreIds: (n) => `另 ${n} 项`,
@@ -186,7 +186,7 @@
       pin: 'Pin', pinnedBtn: 'Pinned', unpin: 'Unpin', demote: 'Keep out of close contacts', undemote: 'Back to automatic', pinnedOk: 'Pinned', unpinnedOk: 'Back to automatic', demotedOk: 'Moved out of close contacts',
       sigClose: 'Close contact', sigPinned: 'Pinned', sigDays: (n) => `in touch on ${n} ${n === 1 ? 'day' : 'days'} in 90`, sigVia: (c) => `mostly ${c.toLowerCase()}`, sigLast: (d) => `last ${d}`,
       waitYou: 'On you', waitThem: 'On them',
-      loopsTitle: 'In progress', doneN: (n) => `${n} done`, hideDone: 'Hide done',
+      loopsTitle: 'In progress', restN: (n) => `${n} older, done or tracking notes`, hideRest: 'Hide',
       storyTitle: 'Between you', storyMore: 'Read all', storyLess: 'Show less',
       threadsTitle: 'What you dealt with', allHistory: (n) => `All exchanges ${n}`, threadN: (n) => `${n}`, chatDay: (d) => `Chat · ${d}`,
       factsTitle: 'Key facts & timeline', moreIds: (n) => `${n} more`,
@@ -372,7 +372,6 @@
   // 名单按关系分层：常联系（速查格）→ 最近来往 → 折叠的更早来往 / 客户与工单 / 开源社区 / 只有联系方式。
   // 关系分、圈子和在办的事由 main.js 的 listContacts 算好；页面只负责分层和排序。
   const TURN_DAYS = 7;
-  const WAIT_THEM = /^\s*(等待?|若|waiting\b|wait for|awaiting)/i; // 与 main.js 同一约定：「等 TA …」= 在等对方
   const yourTurn = (c) => c.circle !== 'contactOnly' && c.pin !== -1 && c.loopsMine > 0 && !!c.mineAt && Date.now() - Date.parse(c.mineAt) <= TURN_DAYS * 86400000;
   const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
   /** 用户实际怎么叫 TA：中日韩界面里，名字是拉丁字母、别名里有短的中日韩称呼（如邮件署名「安安」）时用别名。 */
@@ -613,8 +612,10 @@
     if (d.interactions[0]) sig.push(esc(T.sigLast(fmtDay(d.interactions[0].at))));
     if (sig.length) h += `<div class="sig">${sig.map((x) => `<span>${x}</span>`).join('')}</div>`;
     const ids = d.identities.filter((i) => i.platform !== 'apple-contacts');
+    // 顶部只放能直接用的联系方式；飞书 open_id 这类机器 id 留在「资料」里
+    const readable = ids.filter((i) => identityLabel(i) === i.value);
     const order = ['email', 'phone', 'wechat', 'feishu', 'lark', 'slack', 'telegram', 'github', 'x'];
-    const pick = ids.slice().sort((a, b) => (order.indexOf(a.platform) + 1 || 99) - (order.indexOf(b.platform) + 1 || 99)).slice(0, 3);
+    const pick = readable.slice().sort((a, b) => (order.indexOf(a.platform) + 1 || 99) - (order.indexOf(b.platform) + 1 || 99)).slice(0, 3);
     if (pick.length) {
       h += `<div class="reach">${pick.map((i) => `<button data-copy="${esc(i.value)}" title="${esc(i.value)}">${I(PLATFORM_ICON[i.platform] || 'link', 's')}<span>${esc(identityLabel(i))}</span></button>`).join('')}`;
       if (ids.length > pick.length) h += `<button class="more" data-tab="info">${esc(T.moreIds(ids.length - pick.length))}</button>`;
@@ -623,26 +624,31 @@
     return h;
   }
 
+  /**
+   * 在办的事只放真要处理的：有人在等你、或你在等对方，且 14 天内发起，最多 3 件（分类由 main.js 的 loopKind 给出）。
+   * 跟踪备注、旧事和已办完的收进一行小字，点开才看。
+   */
   function loopsBlock(d) {
     const open = d.loops.filter((l) => l.status === 'open');
-    const done = d.loops.filter((l) => l.status === 'done');
-    if (!open.length && !done.length) return '';
+    const live = open.filter((l) => l.kind === 'you' || l.kind === 'them')
+      .sort((a, b) => (a.kind === 'you' ? 0 : 1) - (b.kind === 'you' ? 0 : 1) || String(b.since || '').localeCompare(String(a.since || '')));
+    const shown = live.slice(0, 3);
+    const rest = [...live.slice(3), ...open.filter((l) => !live.includes(l)), ...d.loops.filter((l) => l.status === 'done')];
     const loopRow = (l) => {
       const isDone = l.status === 'done';
-      const them = WAIT_THEM.test(l.text);
-      const fresh = !isDone && isNew(l.updatedAt);
-      return `<div class="loop${isDone ? ' done' : ''}">
+      const tag = l.kind === 'you' ? `<em class="you">${esc(T.waitYou)}</em>` : l.kind === 'them' ? `<em class="them">${esc(T.waitThem)}</em>` : '';
+      return `<div class="loop${isDone ? ' done' : ''}${l.kind === 'note' ? ' note' : ''}">
         <button class="dot" data-loop="${esc(l.id)}" data-status="${isDone ? 'open' : 'done'}" title="${esc(isDone ? T.reopen : T.markDone)}" aria-label="${esc(isDone ? T.reopen : T.markDone)}">${isDone ? I('check', 's') : ''}</button>
-        <div class="tx">${esc(l.text)}${fresh ? `<span class="tag">${esc(LOCALE === 'zh-CN' ? '新' : 'new')}</span>` : ''}${l.detail ? `<div>${esc(l.detail)}</div>` : ''}</div>
-        <span class="when">${isDone ? esc(T.doneTag) : `<em class="${them ? 'them' : 'you'}">${esc(them ? T.waitThem : T.waitYou)}</em>${esc(fmtDay(l.since || l.updatedAt))}`}</span></div>`;
+        <div class="tx">${esc(l.text)}${l.detail ? `<div>${esc(l.detail)}</div>` : ''}</div>
+        <span class="when">${isDone ? esc(T.doneTag) : `${tag}${esc(fmtDay(l.since || l.updatedAt))}`}</span></div>`;
     };
-    let h = `<h3>${esc(T.loopsTitle)}</h3><div class="loops">`;
-    // 先列该你做的，再列在等对方的
-    const mine = open.filter((l) => !WAIT_THEM.test(l.text));
-    h += [...mine, ...open.filter((l) => !mine.includes(l))].map(loopRow).join('');
-    if (S.showDone) h += done.map(loopRow).join('');
-    h += '</div>';
-    if (done.length) h += `<button class="sublink" data-action="toggleDone">${esc(S.showDone ? T.hideDone : T.doneN(done.length))}</button>`;
+    if (!shown.length && !rest.length) return '';
+    let h = '';
+    if (shown.length) h += `<h3>${esc(T.loopsTitle)}</h3><div class="loops">${shown.map(loopRow).join('')}</div>`;
+    if (rest.length) {
+      h += `<button class="sublink" data-action="toggleDone">${esc(S.showDone ? T.hideRest : T.restN(rest.length))}</button>`;
+      if (S.showDone) h += `<div class="loops rest">${rest.map(loopRow).join('')}</div>`;
+    }
     return h;
   }
 
