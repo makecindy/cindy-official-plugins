@@ -2290,13 +2290,15 @@ async function quickAsk(d, text, talk) {
 // 升级后在后台逐个用快速通道改写（会用到少量 AI 额度）；没有可用模型就停下，下次启动再试；每人最多试两次。
 const NOISY_STORY = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|github|#\d{2,}|\bou_[0-9a-z]{8,}|核实|对应|\d{4}-\d{2}-\d{2}/i;
 const looksNoisy = (t) => str(t).length > 260 || NOISY_STORY.test(str(t));
-const INTRO_REWRITE_VERSION = 1;
+// 改写结果可以说「在 GitHub 上协作」，但不能再带邮箱、账号 id、编号、日期和核实笔记
+const NOISY_OUTPUT = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|#\d{2,}|\bou_[0-9a-z]{8,}|核实|对应|\d{4}-\d{2}-\d{2}/i;
+const INTRO_REWRITE_VERSION = 2;
 
 async function rewriteIntro(c) {
   const facts = parseFacts(c.facts).filter((f) => !isProgressFact(f)).map((f) => `${f.label}：${f.value}`).join('；');
   const prompt = [
     '你在整理用户的私人通讯录。把下面这段人物介绍改写成给用户看的 2 到 3 句话，中文不超过 120 字（原介绍主要是其他语言就用那种语言）：这个人是谁、在哪里做什么、和用户是什么关系、最近在一起做什么。',
-    '不要写：邮箱、电话、各平台账号或 id、PR / issue 编号、日期流水，以及「已核实、未核实、对应」这类整理过程的说明。原介绍里没有的事不要编。',
+    '不要写：邮箱、电话、各平台账号或 id、PR / issue 编号、日期流水，以及「已核实、未核实、对应」这类整理过程的说明。原介绍里没有的事不要编。不确定性别时直接用名字，不要猜「他」或「她」。',
     '只输出改写后的介绍，不要标题、引号或解释。',
     '',
     `名字：${str(c.display_name)}`,
@@ -2308,7 +2310,7 @@ async function rewriteIntro(c) {
   if (!r || r.ok === false) throw fail(r && r.errorCode === 'NO_CANDIDATE' ? 'NO_QUICK_MODEL' : 'ASK_FAILED', (r && r.message) || 'No answer');
   const text = str(r.text).replace(/^["“「]+|["”」]+$/g, '').trim();
   // 改写结果仍像笔记或过长就不采用，保留原文
-  return text && text.length <= 400 && !NOISY_STORY.test(text) ? text : '';
+  return text && text.length <= 400 && !NOISY_OUTPUT.test(text) ? text : '';
 }
 
 let introRewriting = false;
@@ -2318,6 +2320,7 @@ async function rewriteIntrosInBackground() {
   try {
     const meta = (await getMeta('intro_rewrite')) || {};
     if (meta.version >= INTRO_REWRITE_VERSION && meta.finished) return;
+    // 每人最多试两次；规则更新后没改成的人再给一次机会
     const tries = meta.tries && typeof meta.tries === 'object' ? meta.tries : {};
     const rows = await qAll("SELECT id, display_name, summary, narrative, facts FROM contacts WHERE narrative <> '' ORDER BY id");
     let stopped = false;

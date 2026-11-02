@@ -925,13 +925,13 @@ test('升级后在后台把笔记式的介绍改写成人话：干净的不动�
     a = boot({ libDir: dir });
     // 第三位的改写结果仍带账号：不采用，保留原文
     let n = 0;
-    a.tasks.quick = { ok: true, text: '做桌面端的同事，最近一起在改文件树。' };
+    a.tasks.quick = { ok: true, text: '做桌面端的同事，在 GitHub 上一起改文件树。' };
     const origSend = a.ctx.cindy.send;
-    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，GitHub third-dev。' }) : origSend(m));
+    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，邮箱 third@example.test。' }) : origSend(m));
     await a.call('stats');
     for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
     const story = (id) => db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(id).narrative;
-    assert.equal(story(noisy.id), '做桌面端的同事，最近一起在改文件树。');
+    assert.equal(story(noisy.id), '做桌面端的同事，在 GitHub 上一起改文件树。', '可以提到 GitHub，但不带账号');
     assert.equal(story(kept.id), '另一位是做设计的朋友，常一起讨论界面。', '干净的介绍不动');
     assert.equal(story(bad.id), '第三位 GitHub third-dev，2026-10-01 已核实。');
     assert.equal(n, 1);
