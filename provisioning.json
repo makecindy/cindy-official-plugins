@@ -109,6 +109,11 @@
       "audience": {
         "emails": []
       }
+    },
+    "decision-gate": {
+      "audience": {
+        "emails": []
+      }
     }
   }
 }
