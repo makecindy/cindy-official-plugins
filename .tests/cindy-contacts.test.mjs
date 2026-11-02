@@ -818,13 +818,13 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
   const a = boot({ libDir: dir });
   const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
   try {
-    const an = ok(await a.call('save', { name: 'Chun On Lam', aliases: ['安安'], identities: [{ platform: 'email', value: 'co@example.test' }] }));
+    const an = ok(await a.call('save', { name: 'Alex Wong', aliases: ['阿明'], identities: [{ platform: 'email', value: 'alex@example.test' }] }));
     const kim = ok(await a.call('save', { name: 'Kim Wager', summary: '反馈 Android 邮件加载问题的产品用户', groups: ['产品用户往来'], identities: [{ platform: 'email', value: 'kim@example.test' }] }));
-    const mate = ok(await a.call('save', { name: '徐紫旎', groups: ['产品用户往来'], identities: [{ platform: 'feishu', value: 'ou_mate' }] }));
+    const mate = ok(await a.call('save', { name: '林小雨', groups: ['产品用户往来'], identities: [{ platform: 'feishu', value: 'ou_mate' }] }));
     const octo = ok(await a.call('save', { name: 'octo', identities: [{ platform: 'github', value: 'octo' }] }));
     const bare = ok(await a.call('save', { name: '只有电话', identities: [{ platform: 'phone', value: '13800000000' }] }));
     const items = [];
-    // 安安：两个月里 6 天邮件往来，同一天多封只算一天
+    // 阿明：两个月里 6 天邮件往来，同一天多封只算一天
     for (const [i, d] of [3, 3, 10, 20, 35, 41, 50].entries()) items.push({ contact_id: an.id, occurred_at: daysAgo(d), channel: 'mail', title: 'Re: 票据', ref: `an-${i}` });
     for (let d = 1; d <= 9; d++) items.push({ contact_id: kim.id, occurred_at: daysAgo(d), channel: 'mail', title: '反馈', ref: `kim-${d}` });
     for (let d = 1; d <= 3; d++) items.push({ contact_id: mate.id, occurred_at: daysAgo(d), channel: 'im', title: '飞书单聊', ref: `mate-${d}` });
@@ -843,11 +843,11 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     assert.equal(octoFile.interactionTotal, 0);
     assert.deepEqual(octoFile.code.map((r) => [r.repo, r.threads]), [['o/r', 3]]);
     assert.equal(ok(await a.call('get', { id: an.id })).interactions.every((i) => i.channel !== 'github'), true);
-    ok(await a.call('save', { id: an.id, open_loops: [{ text: '给安安补交两份 OpenAI 票据' }, { text: '等安安核对 10 月票据' }] }));
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '给阿明补交两份 OpenAI 票据' }, { text: '等阿明核对 10 月票据' }] }));
     // 跟踪备注和 14 天前发起的旧事不算在办，也不让人进「等你处理」
-    ok(await a.call('save', { id: an.id, open_loops: [{ text: '跟进安安的报销流程' }, { text: '给安安寄合同原件', since: daysAgo(30).slice(0, 10) }] }));
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '跟进阿明的报销流程' }, { text: '给阿明寄合同原件', since: daysAgo(30).slice(0, 10) }] }));
     const kinds = Object.fromEntries(ok(await a.call('get', { id: an.id })).loops.map((l) => [l.text, l.kind]));
-    assert.deepEqual(kinds, { '给安安补交两份 OpenAI 票据': 'you', '等安安核对 10 月票据': 'them', '跟进安安的报销流程': 'note', '给安安寄合同原件': 'note' });
+    assert.deepEqual(kinds, { '给阿明补交两份 OpenAI 票据': 'you', '等阿明核对 10 月票据': 'them', '跟进阿明的报销流程': 'note', '给阿明寄合同原件': 'note' });
 
     const rows = async () => Object.fromEntries((await a.view('list')).result.contacts.map((c) => [c.id, c]));
     let r = await rows();
@@ -857,7 +857,7 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     assert.equal(r[an.id].channel, 'mail');
     assert.equal(r[an.id].loopsMine, 1);
     assert.equal(r[an.id].loopsTheirs, 1);
-    assert.equal(r[an.id].mineText, '给安安补交两份 OpenAI 票据');
+    assert.equal(r[an.id].mineText, '给阿明补交两份 OpenAI 票据');
     assert.equal(r[kim.id].circle, 'customers');
     assert.equal(r[kim.id].close, false, '客户往来再多也不挤进常联系');
     assert.equal(r[mate.id].circle, 'people', '在聊天里一起做事的人不因分组名被归成客户');
@@ -959,7 +959,7 @@ test('升级后在后台把笔记式的介绍改写成人话：干净的不动�
 test('从旧版通讯录迁来、已关联 Mac 名片但没在新版导入过的人，也会自动对账补齐', async () => {
   const dir = tmp();
   const fixture = path.join(dir, 'system.json');
-  fs.writeFileSync(fixture, JSON.stringify([{ name: '旧档案', org: '', title: '', id: 'AB-9', isCompany: false, emails: [], phones: [], birthday: '1982-03-18' }]));
+  fs.writeFileSync(fixture, JSON.stringify([{ name: '旧档案', org: '', title: '', id: 'AB-9', isCompany: false, emails: [], phones: [], birthday: '1990-07-21' }]));
   const a = boot({ libDir: dir, systemFixture: fixture });
   try {
     const p = ok(await a.call('save', { name: '旧档案', identities: [{ platform: 'apple-contacts', value: 'AB-9' }] }));
@@ -970,7 +970,7 @@ test('从旧版通讯录迁来、已关联 Mac 名片但没在新版导入过的
       await new Promise((r) => setTimeout(r, 100));
       facts = ok(await a.call('get', { id: p.id })).facts;
     }
-    assert.deepEqual(facts, [{ label: 'Birthday', value: '1982-03-18' }]);
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1990-07-21' }]);
   } finally {
     a.close();
   }
@@ -1138,7 +1138,7 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
     assert.equal(people, 2);
     // 插件升级后读取的字段变多：不等满一天，马上对一次，把已有的人补齐
     write([
-      { name: '甲', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [{ v: '+1 555 010 0001', l: '' }], birthday: '1982-03-18' },
+      { name: '甲', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [{ v: '+1 555 010 0001', l: '' }], birthday: '1990-07-21' },
       { name: '乙丙', org: '', title: '', id: 'AB-2', isCompany: false, emails: [], phones: [] },
     ]);
     a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_remove(json_set(value, '$.at', ?), '$.fields') WHERE key = 'system_import'").run(new Date().toISOString());
@@ -1149,7 +1149,7 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
       const row = a.library.db('contacts.sqlite').prepare("SELECT c.facts FROM contacts c JOIN contact_identities i ON i.contact_id = c.id WHERE i.platform = 'apple-contacts' AND i.value = 'AB-1'").get();
       facts = JSON.parse(row.facts);
     }
-    assert.deepEqual(facts, [{ label: 'Birthday', value: '1982-03-18' }]);
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1990-07-21' }]);
     // 关掉每日对账后不再自动执行
     await a.view('settings', { macAutoSync: false });
     a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_set(value, '$.at', ?) WHERE key = 'system_import'").run(new Date(Date.now() - 2 * 86400000).toISOString());

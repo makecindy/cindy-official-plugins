@@ -401,7 +401,7 @@
   const TURN_DAYS = 7;
   const yourTurn = (c) => c.circle !== 'contactOnly' && c.pin !== -1 && c.loopsMine > 0 && !!c.mineAt && Date.now() - Date.parse(c.mineAt) <= TURN_DAYS * 86400000;
   const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
-  /** 用户实际怎么叫 TA：中日韩界面里，名字是拉丁字母、别名里有短的中日韩称呼（如邮件署名「安安」）时用别名。 */
+  /** 用户实际怎么叫 TA：中日韩界面里，名字是拉丁字母、别名里有短的中日韩称呼（如邮件署名「阿明」）时用别名。 */
   function callName(c) {
     if (!/^(zh|ja|ko)/i.test(LOCALE) || CJK.test(c.name)) return c.name;
     return (c.aliases || []).find((a) => CJK.test(a) && a.length <= 6 && !/\s/.test(a)) || c.name;
