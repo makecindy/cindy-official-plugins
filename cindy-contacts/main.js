@@ -1249,7 +1249,7 @@ async function deleteContact(id) {
     { sql: 'DELETE FROM contact_merges WHERE target_id = ? OR source_id = ?', params: [c.id, c.id] },
     { sql: 'DELETE FROM plugin_meta WHERE key IN (?, ?)', params: [`qa:${c.id}`, `task:c:${c.id}`] },
     { sql: 'DELETE FROM contacts WHERE id = ?', params: [c.id] },
-    ...(syncState ? [setMetaStmt('device_sync_state', syncState)] : []),
+    ...(syncState ? syncStateStmts(syncState) : []),
   ]);
   return { deleted: c.id, name: c.display_name };
 }
@@ -2732,16 +2732,79 @@ const SYNC_TABLES = {
   contact_loops: 'id contact_id text detail status since source created_at updated_at',
   contact_merges: 'id target_id source_id source_name reason snapshot at undone_at',
 };
-const SYNC_MAX = 12 * 1024 * 1024;
+// One transfer may carry the whole address book on first contact; later ones only carry
+// changes the peer has not acknowledged (see syncPayload). The Host's 64 KiB packet bound
+// is respected per chunk.
+const SYNC_MAX = 96 * 1024 * 1024;
 const SYNC_CHUNK = 8000; // UTF-16; JSON escaping still checked against the Host's byte bound.
-const syncStatus = { supported: typeof cindy.deviceSync === 'function', enabled: false, phase: 'off', lastAt: null, error: null, peers: [] };
+// The Host rejects any single result row over 16 MiB, so the sync state is stored in parts.
+const SYNC_STATE_KEY = 'device_sync_state';
+const SYNC_PART_PREFIX = 'device_sync_state:';
+const SYNC_PART = 1000000; // UTF-16 units per stored part; ≤4 MB UTF-8 even before JSON escaping
+const syncStatus = { supported: typeof cindy.deviceSync === 'function', enabled: false, phase: 'off', lastAt: null, error: null, peers: [], progress: null };
 let syncBusy = false;
 let syncTimer = null;
 const syncTransfers = new Map();
 const syncCompare = (a, b) => a[0] - b[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
 const syncKey = (table, row) => JSON.stringify(table === 'contact_group_members' ? [row.group_id, row.contact_id] : [row.id]);
 const syncClone = (v) => JSON.parse(JSON.stringify(v));
-const syncEmpty = () => ({ version: 1, node: uuid(), clock: 0, tables: {}, projection: {}, origins: {}, contactLinks: [] });
+const syncEmpty = () => ({ version: 1, node: uuid(), clock: 0, seq: 0, received: {}, tables: {}, projection: {}, origins: {}, contactLinks: [] });
+/** Local change order for delta transfers: seq orders entries by when this device last changed them; src marks an entry exactly as received from that peer. */
+function syncTouch(s, entry, src) {
+  s.seq = (Number.isSafeInteger(s.seq) ? s.seq : 0) + 1;
+  entry.seq = s.seq;
+  if (src) entry.src = src;
+  else delete entry.src;
+}
+
+/** Read the stored sync state: parts written by this version, or the single row of older versions (read in slices). */
+async function syncLoadState() {
+  const head = await q('SELECT length(value) AS n FROM plugin_meta WHERE key = ?', [SYNC_STATE_KEY]);
+  if (!head.length) return null;
+  const n = Number(head[0].n) || 0;
+  let text = '';
+  if (n <= SYNC_PART) {
+    text = (await q('SELECT value FROM plugin_meta WHERE key = ?', [SYNC_STATE_KEY]))[0].value;
+    const meta = JSON.parse(text);
+    if (meta && meta.chunked === 1) {
+      const parts = [];
+      for (let i = 0; i < meta.parts; i++) {
+        const r = await q('SELECT value FROM plugin_meta WHERE key = ?', [`${SYNC_PART_PREFIX}${i}`]);
+        if (!r.length) throw Error('missing part');
+        parts.push(r[0].value);
+      }
+      text = parts.join('');
+      if (text.length !== meta.length) throw Error('length mismatch');
+    }
+  } else {
+    // Older versions wrote one row that may exceed the Host row limit: read it in slices.
+    const parts = [];
+    for (let at = 1; at <= n; at += SYNC_PART) {
+      // Keep each slice exactly as stored (no trimming): slices are joined back into one JSON text.
+      const v = (await q('SELECT substr(value, ?, ?) AS v FROM plugin_meta WHERE key = ?', [at, SYNC_PART, SYNC_STATE_KEY]))[0]?.v;
+      if (typeof v !== 'string') throw Error('missing slice');
+      parts.push(v);
+    }
+    text = parts.join('');
+  }
+  return JSON.parse(text);
+}
+
+/** Statements that replace the stored sync state atomically when run in one batch. */
+function syncStateStmts(s) {
+  const text = JSON.stringify(s);
+  const out = [{ sql: 'DELETE FROM plugin_meta WHERE substr(key, 1, ?) = ?', params: [SYNC_PART_PREFIX.length, SYNC_PART_PREFIX] }];
+  let parts = 0;
+  for (let at = 0; at < text.length; parts++) {
+    let end = Math.min(text.length, at + SYNC_PART);
+    // Never split a surrogate pair: SQLite stores UTF-8 and would replace half of one.
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
+    out.push({ sql: 'REPLACE INTO plugin_meta (key, value) VALUES (?, ?)', params: [`${SYNC_PART_PREFIX}${parts}`, text.slice(at, end)] });
+    at = end;
+  }
+  out.push(setMetaStmt(SYNC_STATE_KEY, { chunked: 1, parts, length: text.length }));
+  return out;
+}
 
 async function syncReadRows() {
   const out = {};
@@ -2751,11 +2814,16 @@ async function syncReadRows() {
 
 /** Compare with the last committed projection, including after a crash or upgrade. */
 async function syncCapture({ deletedContactId = null } = {}) {
-  const stored = await q("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'");
   let saved = null;
-  if (stored.length) {
-    try { saved = JSON.parse(stored[0].value); syncValidate(saved); if (!saved.projection || !saved.origins || !Number.isSafeInteger(saved.clock) || saved.clock < 0 || !/^[a-f0-9-]{36}$/.test(saved.node)) throw Error('invalid'); }
-    catch (_) { throw fail('SYNC_CORRUPT', '本机同步记录无法读取，已暂停同步并保留通讯录资料。'); }
+  try {
+    saved = await syncLoadState();
+    if (saved) { syncValidate(saved); if (!saved.projection || !saved.origins || !Number.isSafeInteger(saved.clock) || saved.clock < 0 || !/^[a-f0-9-]{36}$/.test(saved.node)) throw Error('invalid'); }
+  } catch (_) { throw fail('SYNC_CORRUPT', '本机同步记录无法读取，已暂停同步并保留通讯录资料。'); }
+  let upgraded = false;
+  if (saved) {
+    // States from earlier versions have no change order: start at 1 so a full first transfer can be acknowledged.
+    if (!Number.isSafeInteger(saved.seq) || saved.seq < 1) { saved.seq = 1; upgraded = true; }
+    if (!saved.received || typeof saved.received !== 'object' || Array.isArray(saved.received)) saved.received = {};
   }
   if (deletedContactId && !saved) return null; // Never initialize sync for a local-only delete.
   const s = saved || syncEmpty();
@@ -2768,7 +2836,7 @@ async function syncCapture({ deletedContactId = null } = {}) {
   // Remember prior automatic reconciliation even when its shared identity is removed.
   const links = Object.values(s.origins.contacts || {}).flatMap(keys => keys.slice(1).map(key => [JSON.parse(keys[0])[0], JSON.parse(key)[0]]));
   const contactLinks = syncMergeLinks(s.contactLinks || [], links);
-  let changed = !saved || JSON.stringify(contactLinks) !== JSON.stringify(s.contactLinks);
+  let changed = !saved || upgraded || JSON.stringify(contactLinks) !== JSON.stringify(s.contactLinks);
   s.contactLinks = contactLinks;
   const tick = (value) => { if (!saved) return [0, s.node, value]; if (s.clock >= Number.MAX_SAFE_INTEGER - 1) throw fail('SYNC_CLOCK', '同步版本计数已达上限。'); return [++s.clock, s.node, value]; };
   for (const table of Object.keys(SYNC_TABLES)) {
@@ -2785,6 +2853,7 @@ async function syncCapture({ deletedContactId = null } = {}) {
           if (!entry.alive[2] || entry.pruned) entry.alive = tick(true);
           delete entry.pruned;
           for (const [col, value] of Object.entries(row)) entry.fields[col] = tick(col === 'id' ? JSON.parse(target)[0] : value);
+          syncTouch(s, entry);
         }
         changed = true;
       } else {
@@ -2792,13 +2861,14 @@ async function syncCapture({ deletedContactId = null } = {}) {
           for (const target of targets) {
             stateRows[target].fields[col] = tick(value);
             if (table === 'contacts' && col === 'aliases' && targets.length > 1) stateRows[target].fields.display_name = tick(row.display_name);
+            syncTouch(s, stateRows[target]);
           }
           changed = true;
         }
       }
     }
     for (const [key] of before) if (!after.has(key)) {
-      for (const target of s.origins[table]?.[key] || [key]) if (stateRows[target]) stateRows[target].alive = tick(false);
+      for (const target of s.origins[table]?.[key] || [key]) if (stateRows[target]) { stateRows[target].alive = tick(false); syncTouch(s, stateRows[target]); }
       changed = true;
     }
   }
@@ -2808,7 +2878,7 @@ async function syncCapture({ deletedContactId = null } = {}) {
   }
   if (syncPruneDeletedChildren(s)) changed = true;
   s.projection = rows;
-  if (changed && !deletedContactId) await batch([setMetaStmt('device_sync_state', s)]);
+  if (changed && !deletedContactId) await batch(syncStateStmts(s));
   return s;
 }
 
@@ -2864,6 +2934,7 @@ function syncPruneDeletedChildren(s) {
     // ownership versions, so a later legitimate reassignment can supply its payload.
     entry.pruned = Object.fromEntries(['contact_id', 'from_id', 'to_id'].filter(c => entry.fields[c]).map(c => [c, entry.fields[c].slice(0, 2)]));
     entry.fields = {}; changed = true;
+    syncTouch(s, entry);
   }
   return changed;
 }
@@ -2962,21 +3033,27 @@ function syncProject(s) {
   return { rows: output, origins };
 }
 
-async function syncApply(remote) {
+/** Merge a full snapshot or a delta: entries are merged one by one, so absent entries stay as they are. */
+async function syncApply(remote, peer = '', mark = null) {
   syncValidate(remote);
   const s = await syncCapture();
   for (const [table, rows] of Object.entries(remote.tables)) {
-    const local = s.tables[table];
+    const local = s.tables[table] || (s.tables[table] = {});
     for (const [key, incoming] of Object.entries(rows)) {
       s.clock = Math.max(s.clock, incoming.alive[0], ...Object.values(incoming.fields).map(v => v[0]), ...Object.values(incoming.pruned || {}).map(v => v[0]));
-      local[key] = syncMergeEntry(local[key], incoming);
+      const before = local[key] ? JSON.stringify(syncWire(local[key], table)) : '';
+      const merged = syncMergeEntry(local[key], incoming);
+      const after = JSON.stringify(syncWire(merged, table));
+      if (local[key]) { merged.seq = local[key].seq; if (local[key].src) merged.src = local[key].src; }
+      local[key] = merged;
+      // Only real changes are offered to other computers later; what the sender already has is not echoed back.
+      if (after !== before) syncTouch(s, merged, after === JSON.stringify(syncWire(incoming, table)) ? peer : '');
     }
   }
   s.contactLinks = syncMergeLinks(s.contactLinks || [], remote.contactLinks || []);
   syncPruneDeletedChildren(s);
   const { rows, origins } = syncProject(s);
   s.projection = rows; s.origins = origins;
-  if (JSON.stringify(s).length > SYNC_MAX) throw fail('SYNC_LIMIT', '通讯录同步数据超过当前上限，本机资料保留。');
   // One Host transaction, regardless of contact count. FK children are removed first.
   const tables = Object.keys(SYNC_TABLES);
   const writes = [...tables].reverse().map(table => ({ sql: `DELETE FROM ${table}`, params: [] }));
@@ -2984,25 +3061,60 @@ async function syncApply(remote) {
     const cols = SYNC_TABLES[table].split(' ');
     writes.push({ sql: `INSERT INTO ${table} (${cols.join(',')}) SELECT ${cols.map(c => `json_extract(value, '$.${c}')`).join(',')} FROM json_each(?)`, params: [JSON.stringify(rows[table])] });
   }
-  writes.push(setMetaStmt('device_sync_state', s));
+  // Remember how far this sender's changes have arrived; a gap (base beyond what we hold) is merged but not counted.
+  if (peer && mark && typeof mark.node === 'string' && Number.isSafeInteger(mark.upTo) && Number.isSafeInteger(mark.base)) {
+    const got = s.received[peer];
+    const have = got && got.node === mark.node ? got.seq : 0;
+    if (mark.base <= have && mark.upTo > have) s.received[peer] = { node: mark.node, seq: mark.upTo };
+  }
+  writes.push(...syncStateStmts(s));
   await batch(writes);
   notifyChanged();
 }
 
+/** The transferable part of one entry, without local bookkeeping. */
+function syncWire(e, table) {
+  return { alive: e.alive, fields: e.alive[2] && !e.pruned ? Object.fromEntries(SYNC_TABLES[table].split(' ').map(c => [c, e.fields[c]])) : {}, ...(e.pruned ? { pruned: e.pruned } : {}) };
+}
+
+async function syncDigest(text) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * What to send to one peer: everything when it has nothing from this device yet (have = 0),
+ * otherwise only entries changed here after the point it acknowledged, minus those it sent us itself.
+ */
+async function syncPayload(peer, have) {
+  const s = await syncCapture();
+  const full = !(have > 0 && have <= (s.seq || 0));
+  const tables = {};
+  let count = 0;
+  for (const table of Object.keys(SYNC_TABLES)) {
+    tables[table] = {};
+    for (const key of Object.keys(s.tables[table] || {}).sort()) {
+      const e = s.tables[table][key];
+      if (!full && (!(e.seq > have) || e.src === peer)) continue;
+      tables[table][key] = syncWire(e, table);
+      count++;
+    }
+  }
+  const text = JSON.stringify({ version: 1, tables, contactLinks: s.contactLinks });
+  if (text.length > SYNC_MAX) throw fail('SYNC_LIMIT', '通讯录同步数据超过当前上限，本机资料保留。');
+  return { text, digest: await syncDigest(text), count, full, node: s.node, base: full ? 0 : have, upTo: s.seq || 0 };
+}
+
+/** Digest of the whole shared state: equal digests mean both computers hold the same data. */
 async function syncSnapshot() {
   const s = await syncCapture();
   const tables = {};
   for (const table of Object.keys(SYNC_TABLES)) {
     tables[table] = {};
-    for (const key of Object.keys(s.tables[table]).sort()) {
-      const e = s.tables[table][key];
-      tables[table][key] = { alive: e.alive, fields: e.alive[2] && !e.pruned ? Object.fromEntries(SYNC_TABLES[table].split(' ').map(c => [c, e.fields[c]])) : {}, ...(e.pruned ? { pruned: e.pruned } : {}) };
-    }
+    for (const key of Object.keys(s.tables[table] || {}).sort()) tables[table][key] = syncWire(s.tables[table][key], table);
   }
   const text = JSON.stringify({ version: 1, tables, contactLinks: s.contactLinks });
-  if (text.length > SYNC_MAX) throw fail('SYNC_LIMIT', '通讯录同步数据超过当前上限，本机资料保留。');
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return { text, digest: Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('') };
+  return { text, digest: await syncDigest(text), node: s.node, seq: s.seq || 0, received: s.received || {} };
 }
 
 async function syncIncoming(peer, data) {
@@ -3012,7 +3124,17 @@ async function syncIncoming(peer, data) {
   for (const [k, v] of syncTransfers) if (now - v.at > 120000) syncTransfers.delete(k);
   if (data.kind === 'hello') {
     const current = await syncSnapshot();
-    return { digest: current.digest, want: current.digest !== data.digest };
+    // Tell the sender how far we already have its changes, so it only sends what is new.
+    const got = current.received[peer];
+    let have = got && typeof data.node === 'string' && got.node === data.node && Number.isSafeInteger(got.seq) ? got.seq : 0;
+    // Same data on both sides: everything the sender has changed so far is already here.
+    if (current.digest === data.digest && typeof data.node === 'string' && Number.isSafeInteger(data.seq) && data.seq > have) {
+      const s = await syncCapture();
+      s.received[peer] = { node: data.node, seq: data.seq };
+      await batch(syncStateStmts(s));
+      have = data.seq;
+    }
+    return { digest: current.digest, want: current.digest !== data.digest, have };
   }
   if (data.kind !== 'chunk' || typeof data.digest !== 'string' || !/^[a-f0-9]{64}$/.test(data.digest) || !Number.isInteger(data.total) || data.total < 1 || data.total > Math.ceil(SYNC_MAX / SYNC_CHUNK) || !Number.isInteger(data.index) || data.index < 0 || data.index >= data.total || typeof data.text !== 'string' || data.text.length > SYNC_CHUNK) return { error: 'SYNC_INVALID' };
   let transfer = syncTransfers.get(peer);
@@ -3025,10 +3147,9 @@ async function syncIncoming(peer, data) {
   transfer.chunks[data.index] = data.text; transfer.at = now;
   if (transfer.chunks.length < transfer.total) return { received: data.index };
   const text = transfer.chunks.join('');
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  const digest = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+  const digest = await syncDigest(text);
   if (text.length > SYNC_MAX || digest !== data.digest) { syncTransfers.delete(peer); return { error: 'SYNC_INVALID' }; }
-  await syncApply(JSON.parse(text));
+  await syncApply(JSON.parse(text), peer, { node: data.node, base: data.base, upTo: data.upTo });
   syncTransfers.delete(peer);
   syncStatus.lastAt = nowIso(); syncStatus.error = null;
   return { applied: true };
@@ -3058,18 +3179,26 @@ async function syncNow() {
     let success = syncStatus.peers.length > 0;
     for (const peer of syncStatus.peers) {
       try {
-        const hello = await syncRequest(peer.deviceId, { kind: 'hello', digest: snapshot.digest });
+        const hello = await syncRequest(peer.deviceId, { kind: 'hello', digest: snapshot.digest, node: snapshot.node, seq: snapshot.seq });
         if (!hello || typeof hello.want !== 'boolean' || typeof hello.digest !== 'string' || !/^[a-f0-9]{64}$/.test(hello.digest)) throw fail('SYNC_INVALID', '对方返回的同步状态无效，资料已保存在本机。');
         if (hello.want) {
-          const total = Math.ceil(snapshot.text.length / SYNC_CHUNK);
-          for (let index = 0; index < total; index++) {
-            if (!await getMeta('device_sync_enabled')) { syncStatus.phase = 'off'; return syncStatus; }
-            const reply = await syncRequest(peer.deviceId, { kind: 'chunk', digest: snapshot.digest, index, total, text: snapshot.text.slice(index * SYNC_CHUNK, (index + 1) * SYNC_CHUNK) });
-            if (index === total - 1 && !reply?.applied) throw fail('SYNC_UNCONFIRMED', '对方尚未确认保存。');
+          // Older peers do not report what they have; they get everything, as before.
+          const have = Number.isSafeInteger(hello.have) && hello.have > 0 ? hello.have : 0;
+          const payload = await serial(() => syncPayload(peer.deviceId, have));
+          if (payload.full || payload.count) {
+            const total = Math.ceil(payload.text.length / SYNC_CHUNK);
+            syncStatus.progress = total > 1 ? { done: 0, total } : null;
+            for (let index = 0; index < total; index++) {
+              if (!await getMeta('device_sync_enabled')) { syncStatus.phase = 'off'; syncStatus.progress = null; return syncStatus; }
+              const reply = await syncRequest(peer.deviceId, { kind: 'chunk', digest: payload.digest, index, total, text: payload.text.slice(index * SYNC_CHUNK, (index + 1) * SYNC_CHUNK), node: payload.node, base: payload.base, upTo: payload.upTo });
+              if (index === total - 1 && !reply?.applied) throw fail('SYNC_UNCONFIRMED', '对方尚未确认保存。');
+              if (syncStatus.progress && (index % 50 === 49 || index === total - 1)) { syncStatus.progress.done = index + 1; broadcast({ kind: 'event', name: 'sync' }); }
+            }
+            syncStatus.progress = null;
           }
         }
         if (hello.digest !== snapshot.digest) success = false;
-      } catch (e) { success = false; syncStatus.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message }; }
+      } catch (e) { success = false; syncStatus.progress = null; syncStatus.error = { code: e.code || 'SYNC_UNAVAILABLE', message: e.message }; }
     }
     if (success && (await serial(syncSnapshot)).digest !== snapshot.digest) success = false;
     if (success) syncStatus.lastAt = nowIso();

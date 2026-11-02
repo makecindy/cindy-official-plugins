@@ -19,7 +19,10 @@ function isReader(sql) {
 
 const migrations = { count: 0 };
 
-function makeLibrary(dir) {
+// Same bounds as the Host Library (libraryDbCore.ts): 2000 rows and 16 MiB per row / result.
+const HOST_ROW_BYTES = 16 * 1024 * 1024;
+
+function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES } = {}) {
   const dbs = new Map();
   const open = (dbPath) => {
     if (!dbs.has(dbPath)) {
@@ -47,6 +50,15 @@ function makeLibrary(dir) {
         case 'db.exec': {
           const rows = run(open(req.dbPath), req.sql, req.params);
           if (rows.rows && rows.rows.length > 2000) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: 'too many rows' };
+          if (rows.rows) {
+            let total = 0;
+            for (const r of rows.rows) {
+              const bytes = Buffer.byteLength(JSON.stringify(r), 'utf8');
+              total += bytes;
+              if (bytes > rowBytes) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: '单行结果超字节上限;请缩小查询列/分页' };
+              if (total > HOST_ROW_BYTES) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: '结果集超字节上限;请加 LIMIT 或分页' };
+            }
+          }
           return { ok: true, op: 'db.exec', ...rows };
         }
         case 'db.batch': {
@@ -116,8 +128,8 @@ function makeWorker(env, workerFile = path.join(pluginDir, 'node', 'worker.cjs')
   };
 }
 
-function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null }) {
-  const library = makeLibrary(libDir);
+function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null, source = mainSource, rowBytes }) {
+  const library = makeLibrary(libDir, { rowBytes });
   const worker = makeWorker({
     CINDY_CONTACTS_LEGACY_DB_FOR_TEST: legacyDb,
     CINDY_CONTACTS_SYSTEM_FIXTURE_FOR_TEST: systemFixture,
@@ -198,7 +210,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
   // 任务轮询用的计时器在测试里加速。
   const fastTimeout = (fn, ms) => unrefTimeout(fn, deviceSync && ms >= 2000 ? ms : Math.min(ms, 20));
   const ctx = vm.createContext({ cindy, BroadcastChannel: Channel, crypto: globalThis.crypto, TextEncoder, console, setTimeout: timers?.setTimeout || fastTimeout, clearTimeout: timers?.clearTimeout || clearTimeout });
-  vm.runInContext(mainSource, ctx, { filename: 'main.js' });
+  vm.runInContext(source, ctx, { filename: 'main.js' });
   let n = 0;
   const call = (tool, args = {}) =>
     new Promise((resolve) => {
@@ -271,6 +283,16 @@ function makeLegacyDb(file) {
   ins('INSERT INTO contact_group_members VALUES (?, ?)', 'g-1', '00000000-0000-4000-8000-000000000002');
   ins('INSERT INTO contact_relations VALUES (?, ?, ?, ?, ?, ?)', 'rel-1', '00000000-0000-4000-8000-000000000001', 'org-1', 'works_at', '', t);
   db.close();
+}
+
+/** The stored sync state as one text: the parts written by current versions, or the single row of older ones. */
+function storedSyncText(app) {
+  const db = app.library.db('contacts.sqlite');
+  const head = db.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get()?.value;
+  if (head === undefined) return undefined;
+  const meta = JSON.parse(head);
+  if (meta.chunked !== 1) return head;
+  return Array.from({ length: meta.parts }, (_, i) => db.prepare('SELECT value FROM plugin_meta WHERE key = ?').get(`device_sync_state:${i}`).value).join('');
 }
 
 function tmp() {
@@ -1244,7 +1266,7 @@ test('device sync erases deleted payload atomically and migrates full tombstones
   t.after(() => { a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const snapshot = async app => JSON.parse((await vm.runInContext('serial(syncSnapshot)', app.ctx)).text);
   const apply = async (app, state) => { app.ctx.remoteState = structuredClone(state); return vm.runInContext('serial(() => syncApply(remoteState))', app.ctx); };
-  const stored = app => app.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get()?.value;
+  const stored = storedSyncText;
   const source = ok(await a.call('save', { name: 'Private Source', narrative: 'private biography', identities: [{ platform: 'email', value: 'private@example.test' }] }));
   const target = ok(await a.call('save', { name: 'Private Target' }));
   assert.equal(stored(a), undefined);
@@ -1299,7 +1321,7 @@ test('device sync erases concurrent children of a deleted contact', async (t) =>
   t.after(() => { a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const snapshot = async app => JSON.parse((await vm.runInContext('serial(syncSnapshot)', app.ctx)).text);
   const apply = async (app, state) => { app.ctx.remoteState = structuredClone(state); return vm.runInContext('serial(() => syncApply(remoteState))', app.ctx); };
-  const state = app => JSON.parse(app.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value);
+  const state = app => JSON.parse(storedSyncText(app));
   const person = ok(await a.call('save', { name: 'Deleted parent' }));
   const kept = ok(await a.call('save', { name: 'Retained parent' }));
   await b.call('stats'); await apply(b, await snapshot(a));
@@ -1432,6 +1454,82 @@ test('device sync transfers multiple chunks through the plugin request/reply ent
   assert.equal(vm.runInContext('syncStatus.phase', apps.a.ctx), 'waiting');
 });
 
+
+// A real address book outgrew the Host's 16 MiB row bound and every sync failed with
+// DB_ROW_LIMIT. Scaled down: parts stay under the row bound, an oversized single row from
+// an earlier version is still readable, and after the first exchange only changes travel.
+test('device sync handles a state larger than one stored row and sends only changes after the first exchange', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'contacts-large-'));
+  for (const name of ['a', 'b']) fs.mkdirSync(path.join(dir, name));
+  const rowBytes = 6000;
+  const source = mainSource.replace('const SYNC_PART = 1000000;', 'const SYNC_PART = 2000;');
+  assert.notEqual(source, mainSource);
+  const apps = {}, pending = new Map(); let chunks = 0;
+  const transport = name => async req => {
+    if (req.op === 'status') return { ok: true, peers: [{ deviceId: name === 'a' ? 'b' : 'a' }] };
+    if (req.op === 'reply') { pending.get(req.requestId)?.(req.data); return { ok: true }; }
+    if (req.op === 'request') {
+      if (req.data.kind === 'chunk') chunks++;
+      const id = crypto.randomUUID(); let reply;
+      pending.set(id, value => { reply = structuredClone(value); });
+      await apps[req.peer].deliver({ type: 'device-sync-request', requestId: id, peer: name, data: structuredClone(req.data) });
+      pending.delete(id); return { ok: true, data: reply };
+    }
+  };
+  const start = name => (apps[name] = boot({ libDir: path.join(dir, name), deviceSync: transport(name), source, rowBytes }));
+  start('a'); start('b');
+  t.after(() => { apps.a.close(); apps.b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (const app of Object.values(apps)) {
+    await app.call('stats');
+    await vm.runInContext("serial(() => batch([setMetaStmt('device_sync_enabled', true)]))", app.ctx);
+  }
+  const ids = [];
+  for (let i = 0; i < 20; i++) ids.push(ok(await apps.a.call('save', { name: 'Record ' + i, narrative: '示例内容 Example content '.repeat(30) })).id);
+  const sync = async name => { await vm.runInContext('syncNow()', apps[name].ctx); return vm.runInContext('syncStatus', apps[name].ctx); };
+  const parts = db => db.prepare("SELECT key, value FROM plugin_meta WHERE key LIKE 'device@_sync@_state:%' ESCAPE '@'").all();
+
+  await sync('a');
+  assert.equal(ok(await apps.b.call('stats')).people, 20);
+  assert.ok(chunks > 1, 'the first exchange carries everything');
+  // Stored in parts, each row readable under the Host bound.
+  const db = apps.a.library.db('contacts.sqlite');
+  const meta = JSON.parse(db.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value);
+  assert.equal(meta.chunked, 1);
+  assert.ok(meta.parts > 3);
+  assert.equal(parts(db).length, meta.parts);
+  for (const row of parts(db)) assert.ok(Buffer.byteLength(JSON.stringify({ value: row.value }), 'utf8') <= rowBytes, row.key);
+  await sync('b');
+  assert.equal((await sync('a')).phase, 'synced');
+
+  // One edit afterwards travels as one small transfer, not the whole address book.
+  chunks = 0;
+  ok(await apps.a.call('save', { id: ids[3], summary: 'changed on a' }));
+  await sync('a');
+  assert.equal(chunks, 1);
+  assert.equal(ok(await apps.b.call('get', { id: ids[3] })).summary, 'changed on a');
+  chunks = 0;
+  ok(await apps.b.call('save', { id: ids[5], summary: 'changed on b' }));
+  await sync('b');
+  assert.equal(chunks, 1, 'what b received from a is not echoed back');
+  assert.equal(ok(await apps.a.call('get', { id: ids[5] })).summary, 'changed on b');
+  assert.equal((await sync('a')).phase, 'synced');
+
+  // An earlier version left the whole state in one row larger than the Host bound.
+  const whole = storedSyncText(apps.a);
+  db.prepare("DELETE FROM plugin_meta WHERE key LIKE 'device@_sync@_state:%' ESCAPE '@'").run();
+  db.prepare("UPDATE plugin_meta SET value = ? WHERE key = 'device_sync_state'").run(whole);
+  assert.ok(Buffer.byteLength(whole, 'utf8') > rowBytes);
+  apps.a.close(); start('a'); await apps.a.call('stats');
+  ok(await apps.a.call('save', { id: ids[7], summary: 'after upgrade' }));
+  assert.equal((await sync('a')).error, null);
+  assert.equal(ok(await apps.b.call('get', { id: ids[7] })).summary, 'after upgrade');
+  const db2 = apps.a.library.db('contacts.sqlite');
+  assert.equal(JSON.parse(db2.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value).chunked, 1, 'rewritten in parts');
+  await sync('b');
+  // Slices of the old row are joined exactly: both computers end with identical data.
+  assert.equal((await vm.runInContext('serial(syncSnapshot)', apps.a.ctx)).digest, (await vm.runInContext('serial(syncSnapshot)', apps.b.ctx)).digest);
+  assert.equal((await sync('a')).phase, 'synced');
+});
 
 // P1: derived cleanup must not defeat a later legitimate reassignment. Exercise
 // both arrival orders through real SQLite/sync, then replay and explicit deletion.
