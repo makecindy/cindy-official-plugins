@@ -895,11 +895,11 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
     const p = ok(await a.call('save', {
       name: '示例同事',
       narrative: '一起做桌面端的同事。\n\n#101 已合并，#102 待审，#103 关闭，#104 拆分。\n\n最近在准备下季度计划。',
-      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }, { label: 'Marital status', value: 'Married' }, { label: 'Visa status', value: 'H-1B' }, { label: 'Latest update', value: 'shipped v2' }, { label: 'Status update', value: 'on track' }],
+      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }, { label: '补充联系方式', value: '工作日晚上打电话' }, { label: 'Marital status', value: 'Married' }, { label: 'Visa status', value: 'H-1B' }, { label: 'Latest update', value: 'shipped v2' }, { label: 'Status update', value: 'on track' }],
       open_loops: [{ text: '跟进 #101 的验收' }, { text: '给示例同事回复报价' }],
     }));
     // 页面和 AI 读到的要点已经不含进展流水
-    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做', 'Marital status', 'Visa status']);
+    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做', '补充联系方式', 'Marital status', 'Visa status']);
     // 模拟从旧版本升级：还没做过这次整理
     const db = () => a.library.db('contacts.sqlite');
     db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
@@ -913,7 +913,7 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
     await a.call('stats');
     assert.equal(a.library.backups.length, 1, '整理前先备份');
     const row = db().prepare('SELECT facts, narrative FROM contacts WHERE id = ?').get(p.id);
-    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做', 'Marital status', 'Visa status']);
+    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做', '补充联系方式', 'Marital status', 'Visa status']);
     assert.equal(row.narrative, '一起做桌面端的同事。\n\n最近在准备下季度计划。');
     const loops = Object.fromEntries(ok(await a.call('get', { id: p.id })).loops.map((l) => [l.text, l.status]));
     assert.deepEqual(loops, { '跟进 #101 的验收': 'done', '给示例同事回复报价': 'open' });
@@ -953,7 +953,7 @@ test('升级后在后台把笔记式的介绍改写成人话：干净的不动�
     const origSend = a.ctx.cindy.send;
     a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，邮箱 third@example.test。' }) : origSend(m));
     await a.call('stats');
-    for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes(bad.id); i++) await new Promise((r) => setTimeout(r, 20));
     const story = (id) => db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(id).narrative;
     assert.equal(story(noisy.id), '做桌面端的同事，在 GitHub 上一起改文件树。', '可以提到 GitHub，但不带账号');
     assert.equal(story(kept.id), '另一位是做设计的朋友，常一起讨论界面。', '干净的介绍不动');
@@ -1050,6 +1050,72 @@ test('备份不成功时后台也不改写介绍，原文留到下次', async ()
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(asked, 0);
     assert.match(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, /已核实/);
+  } finally {
+    a.close();
+  }
+});
+
+test('备份不成功时，整理结束也不顺手删资料', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: '示例同事', facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展', value: '#1 #2 #3 都已合并' }] }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    const b = ok(await a.call('maintenance', { action: 'begin' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: b.run_id, coverage: b.sources.map((x) => ({ source: x.source, coverage: 'complete' })) }));
+    assert.deepEqual(JSON.parse(db().prepare('SELECT facts FROM contacts WHERE id = ?').get(p.id).facts).map((f) => f.label), ['公司', '最新进展']);
+  } finally {
+    a.close();
+  }
+});
+
+test('介绍改写请求失败的人，下次启动再试一次', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    await introRewriteIdle(a);
+    const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    const meta = () => JSON.parse(db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value || '{}');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'intro_rewrite'").run();
+    a.close();
+    a = boot({ libDir: dir });
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => { if (m && m.kind === 'oneshot_text') throw Object.assign(new Error('network down'), { code: 'NETWORK' }); return origSend(m); };
+    await a.call('stats');
+    for (let i = 0; i < 100 && !(meta().tries || {})[p.id]; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(meta().finished, undefined, '失败的人还有机会，这一轮不算完成');
+    a.close();
+    a = boot({ libDir: dir });
+    a.tasks.quick = { ok: true, text: '做桌面端的同事，常一起改文件树。' };
+    await a.call('stats');
+    for (let i = 0; i < 100 && !meta().finished; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, '做桌面端的同事，常一起改文件树。');
+  } finally {
+    a.close();
+  }
+});
+
+test('macOS 导入按主机认平台；切换语言后再对账不重复补已有的生日', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([
+    { name: '周二', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [], birthday: '1990-07-21',
+      urls: [{ v: 'https://notgithub.com/alice', l: '' }, { v: 'https://github.com/alice-dev', l: '' }, { v: 'https://box.com/ab', l: '' }] },
+  ]));
+  let a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const ids = a.library.db('contacts.sqlite').prepare("SELECT platform, value FROM contact_identities WHERE platform <> 'apple-contacts' ORDER BY value").all();
+    assert.deepEqual(ids.map((r) => `${r.platform}:${r.value}`), ['github:alice-dev', 'web:https://box.com/ab', 'web:https://notgithub.com/alice']);
+    a.close();
+    a = boot({ libDir: dir, systemFixture: fixture, locale: 'en' });
+    ok(await a.call('import_macos', { dry_run: false }));
+    const facts = JSON.parse(a.library.db('contacts.sqlite').prepare('SELECT facts FROM contacts').get().facts);
+    assert.deepEqual(facts.map((f) => f.label), ['生日']);
   } finally {
     a.close();
   }

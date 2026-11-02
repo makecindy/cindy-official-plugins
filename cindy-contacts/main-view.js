@@ -248,7 +248,15 @@
   /** 飞书 open_id 这类机器 id 不直接给人看，显示平台名，点击仍复制原值；LinkedIn 主页显示成 in/名字。 */
   function identityLabel(i) {
     const li = /linkedin\.com\/(in|company)\/([^/?#\s]+)/i.exec(i.value);
-    if (li) return `${li[1].toLowerCase()}/${decodeURIComponent(li[2])}`;
+    if (li) {
+      let name = li[2];
+      try {
+        name = decodeURIComponent(name);
+      } catch (_) {
+        /* 编码无效时显示原路径 */
+      }
+      return `${li[1].toLowerCase()}/${name}`;
+    }
     const opaque = /^[a-z]{2,3}_[0-9a-z]{16,}$/i.test(i.value) || (i.platform === 'slack' && /^[UW][A-Z0-9]{8,}$/.test(i.value)) || (i.value.length > 28 && !/[\s@.]/.test(i.value));
     if (opaque) return i.label || PLATFORM_NAME[i.platform] || i.platform;
     return i.value;
@@ -692,7 +700,8 @@
       const more = paras.length > 1 || paras[0].length > 160;
       const shown = S.storyOpen ? paras : paras.slice(0, 1);
       h += `<h3>${I('users', 's')}${esc(T.storyTitle)}</h3><div class="portrait${S.storyOpen ? '' : ' clamp'}">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
-      if (more) h += `<button class="sublink" data-action="toggleStory">${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
+      // 字数不长但在窄屏或多行里被截断时，渲染后按实际溢出再露出按钮（revealStoryToggle）
+      h += `<button class="sublink" data-action="toggleStory" id="storyToggle"${more || S.storyOpen ? '' : ' hidden'}>${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
     }
     if (String(d.agentNotes || '').trim()) h += `<p class="note">${richText(d.agentNotes)}</p>`;
     return h;
@@ -852,6 +861,13 @@
     h += '</article>';
     h += askBar(d);
     detailEl.innerHTML = h;
+    revealStoryToggle();
+  }
+
+  function revealStoryToggle() {
+    const btn = document.getElementById('storyToggle');
+    if (!btn || !btn.hidden) return;
+    if ([...detailEl.querySelectorAll('.portrait.clamp p')].some((p) => p.scrollHeight > p.clientHeight + 1)) btn.hidden = false;
   }
 
   function idRow(i, n) {

@@ -433,8 +433,9 @@ const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
 /* ───────────── 旧档案的自动整理 ───────────── */
 // 早先的整理把进展流水写进了要点和介绍，把跟踪备注记成了待办。升级后自动收拾一次（先备份），
 // 之后每次整理结束再顺手收一次；用户不需要手动清理。
-// 英文只认明确的进展写法；Marital status、Visa status 这类长期资料不算
-const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|补记|本轮|\bprogress\b|\bstatus updates?\b|^\s*(?:latest|recent)\s+(?:news|updates?|progress|status)\b|^\s*updates?\b/i;
+// 只认明确的进展写法：带「进展 / 补记」，或以「最新 / 本轮 / 本次 / 已完成 / 排查」这类开头；
+// 「补充联系方式」、Marital status、Visa status 这类长期资料不算
+const PROGRESS_FACT = /进展|补记|^\s*(?:最新|近期|本轮|本次|当次|已完成|待排查|排查)|^\s*(?:评审|审核|处理)?结果\s*$|\bprogress\b|\bstatus updates?\b|^\s*(?:latest|recent)\s+(?:news|updates?|progress|status)\b|^\s*updates?\b/i;
 const refCount = (t) => (str(t).match(/#\d{2,}/g) || []).length;
 const isProgressFact = (f) => PROGRESS_FACT.test(str(f.label)) || refCount(f.value) >= 3;
 /** 介绍里成段的 PR / issue 编号流水（一段 ≥3 个 #编号）去掉；第一段总保留。 */
@@ -1831,7 +1832,9 @@ async function maintenance(input) {
     if (Array.isArray(input.sourcesStatus) && input.sourcesStatus.length) await reportSources(input.sourcesStatus);
     const result = await maintenanceEnd(input);
     try {
-      result.cleaned = await tidyStoredProfiles();
+      // 升级整理（含备份）成功后才顺手收拾；备份没成功时一条都不删
+      const cleaned = await getMeta('profile_cleanup');
+      if (cleaned && cleaned.version >= PROFILE_CLEANUP_VERSION) result.cleaned = await tidyStoredProfiles();
     } catch (_) {
       /* 收拾失败不影响这轮整理的结果 */
     }
@@ -2133,6 +2136,11 @@ const FACT_LABELS = {
   ja: { birthday: '誕生日', address: '住所', note: 'メモ', addr: (l) => ({ home: '住所（自宅）', work: '住所（勤務先）' })[l] || '住所' },
   ko: { birthday: '생일', address: '주소', note: '메모', addr: (l) => ({ home: '주소(집)', work: '주소(직장)' })[l] || '주소' },
 };
+/** 内置要点标签归成同一字段：切换语言后再对账，已有「生日」不会再补一条 Birthday。 */
+const FACT_FIELD = new Map(Object.values(FACT_LABELS).flatMap((l) => [
+  [l.birthday, 'birthday'], [l.note, 'note'], [l.address, 'address'], [l.addr('home'), 'address:home'], [l.addr('work'), 'address:work'],
+]));
+const factField = (label) => FACT_FIELD.get(str(label)) || str(label);
 const SERVICE_PLATFORM = { twitter: 'x', x: 'x', linkedin: 'linkedin', facebook: 'facebook', 'sina weibo': 'weibo', sinaweibo: 'weibo', weibo: 'weibo', 'tencent weibo': 'weibo', github: 'github', wechat: 'wechat', qq: 'qq', skype: 'skype', telegram: 'telegram', whatsapp: 'whatsapp', line: 'line' };
 // 早已停用或不是联系方式的服务不导入
 const OBSOLETE_SERVICES = /^(game ?center|msn|aim|icq|jabber|yahoo!?( messenger)?|gadu-gadu|google ?talk|myspace)$/i;
@@ -2148,11 +2156,14 @@ function identityFromUrl(url) {
   const u = str(url);
   const low = u.toLowerCase();
   let m;
+  // 只按主机认平台：notgithub.com、别的网站链接里带着这些域名都记成网站
+  const host = (re) => new RegExp(`^(?:https?:\\/\\/)?(?:[a-z0-9-]+\\.)*(?:${re})(?=[/?#:]|$)`, 'i');
+  const atPath = (re, tail) => new RegExp(`^(?:https?:\\/\\/)?(?:www\\.|mobile\\.)?(?:${re})\\/${tail}`, 'i');
   if (LINKEDIN_HOST.test(u)) return { platform: 'linkedin', value: u };
-  if ((m = /(?:twitter|x)\.com\/@?([a-z0-9_]{1,30})(?:[/?#]|$)/i.exec(u))) return { platform: 'x', value: m[1] };
-  if ((m = /github\.com\/([a-z0-9-]{1,39})(?:[/?#]|$)/i.exec(u))) return { platform: 'github', value: m[1] };
-  if (/weibo\.com|t\.sina\.com/.test(low)) return { platform: 'weibo', value: u };
-  if (/^fb:\/\/|facebook\.com/.test(low)) return { platform: 'facebook', value: u };
+  if ((m = atPath('twitter\\.com|x\\.com', '@?([a-z0-9_]{1,30})(?:[/?#]|$)').exec(u))) return { platform: 'x', value: m[1] };
+  if ((m = atPath('github\\.com', '([a-z0-9-]{1,39})(?:[/?#]|$)').exec(u))) return { platform: 'github', value: m[1] };
+  if (host('weibo\\.com|weibo\\.cn|t\\.sina\\.com\\.cn|t\\.sina\\.com').test(low)) return { platform: 'weibo', value: u };
+  if (/^fb:\/\//.test(low) || host('facebook\\.com|fb\\.com').test(low)) return { platform: 'facebook', value: u };
   return { platform: 'web', value: u };
 }
 function systemExtras(rec, labels) {
@@ -2242,8 +2253,8 @@ async function importSystem(opts) {
       if (match) {
         // 已有的人只补缺的：没有的联系方式、没写过的生日 / 地址 / 备注、没记过的昵称；不改已经写好的内容
         const p = people.get(match) || { name: '', aliases: [], facts: [] };
-        const have = new Set(p.facts.map((f) => f.label));
-        const addFacts = extra.facts.filter((f) => !have.has(f.label)).slice(0, Math.max(0, 12 - p.facts.length));
+        const have = new Set(p.facts.map((f) => factField(f.label)));
+        const addFacts = extra.facts.filter((f) => !have.has(factField(f.label))).slice(0, Math.max(0, 12 - p.facts.length));
         const addAlias = extra.nickname && extra.nickname !== p.name && !p.aliases.includes(extra.nickname) ? [extra.nickname] : [];
         if (!fresh.length && !addFacts.length && !addAlias.length) {
           result.unchanged += 1;
@@ -2449,6 +2460,8 @@ async function rewriteIntrosInBackground() {
         if (e.code === 'NO_QUICK_MODEL') { stopped = true; break; }
       }
       tries[c.id] = (tries[c.id] || 0) + 1;
+      // 请求失败、还有机会的人留到下次启动再试，这一轮不算完成
+      if (!text && tries[c.id] < 2) stopped = true;
       await serial(async () => {
         const [cur] = await q('SELECT narrative FROM contacts WHERE id = ?', [c.id]);
         // 期间被整理或用户改过就不覆盖
