@@ -804,8 +804,21 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     for (const [i, d] of [3, 3, 10, 20, 35, 41, 50].entries()) items.push({ contact_id: an.id, occurred_at: daysAgo(d), channel: 'mail', title: 'Re: 票据', ref: `an-${i}` });
     for (let d = 1; d <= 9; d++) items.push({ contact_id: kim.id, occurred_at: daysAgo(d), channel: 'mail', title: '反馈', ref: `kim-${d}` });
     for (let d = 1; d <= 3; d++) items.push({ contact_id: mate.id, occurred_at: daysAgo(d), channel: 'im', title: '飞书单聊', ref: `mate-${d}` });
-    for (let d = 1; d <= 12; d++) items.push({ contact_id: octo.id, occurred_at: daysAgo(d), channel: 'github', title: 'feat: x', ref: `gh-${d}`, link: 'https://github.com/o/r/pull/1' });
     ok(await a.call('record', { items }));
+    // GitHub 活动不记成往来：record 拒收，提示改用 save 补资料
+    const gh = ok(await a.call('record', { items: [{ contact_id: octo.id, occurred_at: daysAgo(1), channel: 'github', title: 'feat: x', ref: 'gh-new', link: 'https://github.com/o/r/pull/9' }] }));
+    assert.equal(gh.added, 0);
+    assert.equal(gh.results[0].errorCode, 'GITHUB_NOT_RECORDED');
+    // 早先版本记下的 GitHub 记录：只汇总成代码协作，不进往来、关系分和「上次看过之后」
+    const db = a.library.db('contacts.sqlite');
+    const legacy = db.prepare('INSERT INTO contact_interactions (id, contact_id, occurred_at, channel, title, summary, quote, link, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (let d = 1; d <= 12; d++) legacy.run(`gh-${d}`, octo.id, daysAgo(d), 'github', `feat: part ${d % 3}`, 'comment', '', `https://github.com/o/r/pull/${d % 3}#c${d}`, `gh-${d}`, daysAgo(d));
+    legacy.run('gh-an', an.id, daysAgo(1), 'github', 'fix: receipts', 'hi', '', 'https://github.com/o/r/pull/7', 'gh-an', daysAgo(1));
+    const octoFile = ok(await a.call('get', { id: octo.id }));
+    assert.equal(octoFile.interactions.length, 0);
+    assert.equal(octoFile.interactionTotal, 0);
+    assert.deepEqual(octoFile.code.map((r) => [r.repo, r.threads]), [['o/r', 3]]);
+    assert.equal(ok(await a.call('get', { id: an.id })).interactions.every((i) => i.channel !== 'github'), true);
     ok(await a.call('save', { id: an.id, open_loops: [{ text: '给安安补交两份 OpenAI 票据' }, { text: '等安安核对 10 月票据' }] }));
     // 跟踪备注和 14 天前发起的旧事不算在办，也不让人进「等你处理」
     ok(await a.call('save', { id: an.id, open_loops: [{ text: '跟进安安的报销流程' }, { text: '给安安寄合同原件', since: daysAgo(30).slice(0, 10) }] }));
@@ -816,7 +829,7 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     let r = await rows();
     assert.equal(r[an.id].circle, 'people');
     assert.equal(r[an.id].close, true, '低频但持续的一对一邮件往来进常联系');
-    assert.equal(r[an.id].activeDays, 6);
+    assert.equal(r[an.id].activeDays, 6, 'GitHub 活动不算往来天数');
     assert.equal(r[an.id].channel, 'mail');
     assert.equal(r[an.id].loopsMine, 1);
     assert.equal(r[an.id].loopsTheirs, 1);

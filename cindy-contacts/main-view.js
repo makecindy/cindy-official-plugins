@@ -59,7 +59,7 @@
       autoText: 'Cindy 按时间段整理：每次只读上次整理之后的新往来，给有变化的人改写档案。第一次只读最近一段，想要更早的可以往前补。每次整理都会用到 AI 额度。',
       settingsWhere: '读哪些来源、第一次读几天、每天自动整理，在 Cindy 侧边栏「插件」→「通讯录」的详情页里设置；整理用的模型和动手权限也在那里的「任务设置」。',
       firstDays: '第一次读最近', daysOpt: (d) => `${d} 天`,
-      sourcesLabel: '读哪些来源', src: { mail: '邮件', calendar: '日历', im: '消息（飞书、iMessage 等）', cindy: 'Cindy 对话', github: 'GitHub' },
+      sourcesLabel: '读哪些来源', src: { mail: '邮件', calendar: '日历', im: '消息（飞书、iMessage 等）', cindy: 'Cindy 对话', github: 'GitHub（只用来补全资料）' },
       srcHint: '用已装的插件、本机命令行工具和能直接读的数据；都读不到的会跳过，并写明原因。',
       backLabel: '往前补每次', monthsOpt: (m) => `${m} 个月`,
       tidyNow: '现在整理一次', backfillAll: (m) => `所有人往前补 ${m} 个月`, tidySent: '已交给 Cindy，在侧边栏「通讯录 · 整理」任务里可以看过程',
@@ -97,6 +97,7 @@
       storyTitle: '你们之间', storyMore: '展开全文', storyLess: '收起',
       threadsTitle: '往来的事', allHistory: (n) => `全部往来 ${n}`, threadN: (n) => `${n} 条`, chatDay: (d) => `聊天 · ${d}`,
       factsTitle: '要点与履历', moreIds: (n) => `另 ${n} 项`,
+      codeTitle: '代码协作', codeMeta: (n, d) => `${n} 个 PR / issue · 最近 ${d}`,
       sinceThreads: (n) => `${n} 件事有新进展`, newN: (n) => `新 ${n}`,
     },
     en: {
@@ -152,7 +153,7 @@
       settingsWhere: 'Sources, how far the first run reads and the daily tidy-up are set on this plugin’s page under Plugins in the Cindy sidebar; the model and permission for tidy-ups are in its Task settings.',
       autoText: 'Cindy works in time windows: each run reads only what is new since the last one and rewrites the people who changed. The first run reads a short recent window; go further back whenever you like. Each run uses AI quota.',
       firstDays: 'First run reads the last', daysOpt: (d) => `${d} days`,
-      sourcesLabel: 'Sources to read', src: { mail: 'Mail', calendar: 'Calendar', im: 'Chats (Feishu, iMessage, etc.)', cindy: 'Cindy chats', github: 'GitHub' },
+      sourcesLabel: 'Sources to read', src: { mail: 'Mail', calendar: 'Calendar', im: 'Chats (Feishu, iMessage, etc.)', cindy: 'Cindy chats', github: 'GitHub (profile details only)' },
       srcHint: 'Uses installed plugins, command-line tools and data this Mac can read; sources it cannot read are skipped with the reason shown.',
       backLabel: 'Each backfill goes back', monthsOpt: (m) => `${m} ${m === 1 ? 'month' : 'months'}`,
       tidyNow: 'Tidy up now', backfillAll: (m) => `Go back ${m} months for everyone`, tidySent: 'Sent to Cindy; follow along in the tidy-up task in the sidebar',
@@ -190,6 +191,7 @@
       storyTitle: 'Between you', storyMore: 'Read all', storyLess: 'Show less',
       threadsTitle: 'What you dealt with', allHistory: (n) => `All exchanges ${n}`, threadN: (n) => `${n}`, chatDay: (d) => `Chat · ${d}`,
       factsTitle: 'Key facts & timeline', moreIds: (n) => `${n} more`,
+      codeTitle: 'On GitHub', codeMeta: (n, d) => `${n} ${n === 1 ? 'PR or issue' : 'PRs and issues'} · last ${d}`,
       sinceThreads: (n) => `${n} ${n === 1 ? 'thread' : 'threads'} moved`, newN: (n) => `${n} new`,
     },
   };
@@ -224,7 +226,7 @@
   const CHANNEL_ICON = { mail: 'mail', im: 'chat', calendar: 'cal', cindy: 'spark', github: 'git', call: 'phone', other: 'link' };
   /** 飞书 open_id 这类机器 id 不直接给人看，显示平台名，点击仍复制原值。 */
   function identityLabel(i) {
-    const opaque = /^[a-z]{2,3}_[0-9a-z]{16,}$/i.test(i.value) || (i.value.length > 28 && !/[\s@.]/.test(i.value));
+    const opaque = /^[a-z]{2,3}_[0-9a-z]{16,}$/i.test(i.value) || (i.platform === 'slack' && /^[UW][A-Z0-9]{8,}$/.test(i.value)) || (i.value.length > 28 && !/[\s@.]/.test(i.value));
     if (opaque) return i.label || PLATFORM_NAME[i.platform] || i.platform;
     return i.value;
   }
@@ -656,9 +658,11 @@
     const paras = paragraphs(d.narrative);
     let h = '';
     if (paras.length) {
-      const shown = S.storyOpen ? paras : paras.slice(0, 2);
-      h += `<h3>${esc(T.storyTitle)}</h3><div class="portrait">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
-      if (paras.length > 2) h += `<button class="sublink" data-action="toggleStory">${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
+      // 默认只看第一段、最多 5 行；早先整理堆进来的流水账点「展开全文」才看
+      const more = paras.length > 1 || paras[0].length > 160;
+      const shown = S.storyOpen ? paras : paras.slice(0, 1);
+      h += `<h3>${esc(T.storyTitle)}</h3><div class="portrait${S.storyOpen ? '' : ' clamp'}">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
+      if (more) h += `<button class="sublink" data-action="toggleStory">${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
     }
     if (String(d.agentNotes || '').trim()) h += `<p class="note">${richText(d.agentNotes)}</p>`;
     return h;
@@ -670,7 +674,8 @@
     let h = `<h3 class="hrow"><span>${esc(T.threadsTitle)}</span><button data-tab="history">${esc(T.allHistory(d.interactionTotal))}${I('chev', 's')}</button></h3><div class="threads">`;
     for (const th of list) {
       const open = S.openThreads.has(th.key);
-      const top = th.items[0];
+      // 按天归并的聊天里挑信息量最大的一句做摘要，不用当天最后一句「[大笑]」
+      const top = th.channel === 'im' ? th.items.reduce((a, b) => (String(b.summary || '').length > String(a.summary || '').length ? b : a)) : th.items[0];
       const fresh = th.items.some((i) => isNew(i.addedAt));
       h += `<div class="th${open ? ' open' : ''}"><button class="thh" data-thread="${esc(th.key)}" aria-expanded="${open}">
         <span class="ic">${I(CHANNEL_ICON[th.channel] || 'link', 's')}</span>
@@ -689,8 +694,10 @@
     return h + '</div>';
   }
 
+  // 「最新进展（日期）」这类是进展流水，不是要点；往来和在办里已经有，不在这里重复
+  const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|本轮|progress|latest|status|update/i;
   function factsBlock(d) {
-    const kv = [...d.facts.map((f) => [f.label, esc(f.value)])];
+    const kv = [...d.facts.filter((f) => !PROGRESS_FACT.test(f.label)).map((f) => [f.label, esc(f.value)])];
     if (d.relations.length) {
       kv.push([T.related, d.relations.map((r) => `<span class="link" data-goto="${esc(r.otherId)}">${esc(r.otherName)}</span>${r.relation ? `<small>${esc(r.relation)}</small>` : ''}`).join('　')]);
     }
@@ -702,12 +709,24 @@
     return h + '</div>';
   }
 
+  /** GitHub 只用来认识这个人：常在哪些仓库、参与过哪些 PR / issue（由 main.js 的 codeSummary 汇总），不算往来。 */
+  function codeBlock(d) {
+    if (!d.code || !d.code.length) return '';
+    let h = `<h3>${esc(T.codeTitle)}</h3><div class="code">`;
+    for (const r of d.code) {
+      h += `<div class="repo"><div class="rh"><span class="rn">${I('git', 's')}<span>${esc(r.repo)}</span></span><span class="rm">${esc(T.codeMeta(r.threads, fmtDay(r.last)))}</span></div>`;
+      h += r.recent.map((x) => `<a class="pr" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url)}</a>`).join('');
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
+
   function overviewTab(d) {
     let h = '';
-    if (!d.interactions.length && !paragraphs(d.narrative).length) {
+    if (!d.interactions.length && !paragraphs(d.narrative).length && !(d.code && d.code.length)) {
       h += `<div class="thin"><p>${esc(T.thin)}</p>${S.meta?.tasks ? `<button class="pill" data-action="backfill">${I('search', 's')}${esc(T.thinAct)}</button>` : ''}</div>`;
     }
-    return h + loopsBlock(d) + storyBlock(d) + threadsBlock(d) + factsBlock(d);
+    return h + loopsBlock(d) + storyBlock(d) + threadsBlock(d) + factsBlock(d) + codeBlock(d);
   }
 
   function historyTab(d) {

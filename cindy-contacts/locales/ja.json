@@ -16,7 +16,7 @@
       "description": "ファイルを作成または更新します。id なしで作成し、似た名前があると DUPLICATE_SUSPECT と候補を返します。id ありでは渡した項目だけを更新し、aliases・identities・groups・open_loops は追加です。"
     },
     "record": {
-      "description": "メール、Feishu、カレンダー、Cindy の会話、GitHub から読んだやり取りを人物ファイルに記録します（1 回最大 200 件）。contact_id、または identity / email / name で人物を特定します。同じ ref は一度だけ記録されます。"
+      "description": "メール、Feishu、カレンダー、Cindy の会話から読んだやり取りを人物ファイルに記録します（1 回最大 200 件）。contact_id、または identity / email / name で人物を特定します。同じ ref は一度だけ記録されます。 GitHub の PR・レビュー・コメントは記録しません（拒否されます）。GitHub は save でプロフィールを補うためだけに使います。"
     },
     "log_event": {
       "description": "日付付きの出来事を追加します：覚えておく価値のあるやり取り、約束、変化。"

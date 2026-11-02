@@ -381,8 +381,10 @@ const LIST_SQL = `SELECT c.id, c.kind, c.display_name, c.aliases, c.summary, c.s
   c.latest, c.latest_at, length(c.narrative) AS story_len,
   (SELECT MAX(e.date) FROM contact_events e WHERE e.contact_id = c.id) AS last_event,
   (SELECT count(*) FROM contact_events e WHERE e.contact_id = c.id) AS event_count,
-  (SELECT MAX(i.occurred_at) FROM contact_interactions i WHERE i.contact_id = c.id) AS last_ix,
-  (SELECT MAX(i.created_at) FROM contact_interactions i WHERE i.contact_id = c.id) AS last_ingest,
+  (SELECT MAX(i.occurred_at) FROM contact_interactions i WHERE i.contact_id = c.id AND i.channel <> 'github') AS last_ix,
+  (SELECT MAX(i.created_at) FROM contact_interactions i WHERE i.contact_id = c.id AND i.channel <> 'github') AS last_ingest,
+  (SELECT MAX(i.occurred_at) FROM contact_interactions i WHERE i.contact_id = c.id AND i.channel = 'github') AS last_code,
+  EXISTS (SELECT 1 FROM contact_identities d WHERE d.contact_id = c.id AND d.platform = 'github') AS has_github,
   (SELECT count(*) FROM contact_interactions i WHERE i.contact_id = c.id) AS ix_count,
   (SELECT count(*) FROM contact_loops l WHERE l.contact_id = c.id AND l.status = 'open') AS open_loops,
   (SELECT group_concat(g.name, char(31)) FROM contact_group_members m JOIN contact_groups g ON g.id = m.group_id
@@ -391,7 +393,8 @@ const LIST_SQL = `SELECT c.id, c.kind, c.display_name, c.aliases, c.summary, c.s
 
 /** 最近一次往来的时间；没有往来记录时退回事件日期和档案更新日期。 */
 function lastTouched(row) {
-  const ix = str(row.last_ix);
+  // GitHub 活动只用来补资料，不算往来；只有 GitHub 记录的人才退回用它排时间。
+  const ix = str(row.last_ix) || str(row.last_code);
   if (ix) return ix;
   const a = str(row.last_event).slice(0, 10);
   const b = str(row.updated_at).slice(0, 10);
@@ -401,7 +404,7 @@ function lastTouched(row) {
 /* ───────────── 关系强弱与圈子 ───────────── */
 // 往来条数会被群聊逐条消息和 GitHub 通知刷大，所以按「有往来的天数」计，并按渠道加权：
 // 邮件、日程、通话是用户亲自参与的；聊天次之；GitHub 线程多是通知。
-const CHANNEL_WEIGHT = { mail: 1, calendar: 1, call: 1, im: 0.5, cindy: 0.5, other: 0.5, github: 0.25 };
+const CHANNEL_WEIGHT = { mail: 1, calendar: 1, call: 1, im: 0.5, cindy: 0.5, other: 0.5 }; // GitHub 不算往来，见 codeSummary
 const CLOSE_MIN = 6; // 常联系门槛：约等于 90 天里 6 天邮件往来，或跨两个月的往来加几件在办的事
 const WAIT_THEM = /^\s*(等待?|若|waiting\b|wait for|awaiting)/i; // 「等 TA …」= 球在对方
 // 「跟进 / 确认 / 核对 …」多是整理时留下的跟踪备注，不是有人在等用户，也不是用户答应过的事。
@@ -413,7 +416,8 @@ function loopKind(l, now = Date.now()) {
   const text = str(l.text);
   const start = str(l.since) || str(l.created_at).slice(0, 10);
   const at = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(start) ? `${start}T00:00:00Z` : start);
-  if (!Number.isFinite(at) || now - at > LOOP_FRESH_DAYS * 86400000 || LOOP_NOTE.test(text)) return 'note';
+  // GitHub 上的评审、招呼不是这个人和用户之间的待办
+  if (!Number.isFinite(at) || now - at > LOOP_FRESH_DAYS * 86400000 || LOOP_NOTE.test(text) || str(l.source) === 'github') return 'note';
   return WAIT_THEM.test(text) ? 'them' : 'you';
 }
 const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
@@ -427,7 +431,8 @@ function circleOf(row, mix, groups) {
   if (!direct) {
     if (groups.some((g) => CUSTOMER_RE.test(g)) || ((mix.mail || 0) > 0 && CUSTOMER_RE.test(str(row.summary)))) return 'customers';
     const total = Object.values(mix).reduce((a, b) => a + b, 0);
-    if ((mix.github || 0) > 0 && mix.github >= total * 0.8) return 'community';
+    const gh = mix.github || 0;
+    if ((gh > 0 && gh >= total * 0.8) || (total === 0 && row.hasGithub)) return 'community';
   }
   return 'people';
 }
@@ -440,20 +445,20 @@ async function relationSignals(now = Date.now()) {
     qAll('SELECT contact_id, channel, count(*) AS n FROM contact_interactions GROUP BY contact_id, channel ORDER BY contact_id, channel'),
     qAll(
       `SELECT contact_id, channel, count(DISTINCT substr(occurred_at, 1, 10)) AS d FROM contact_interactions
-       WHERE occurred_at >= ? GROUP BY contact_id, channel ORDER BY contact_id, channel`,
+       WHERE occurred_at >= ? AND channel <> 'github' GROUP BY contact_id, channel ORDER BY contact_id, channel`,
       [since90],
     ),
     qAll(
       `SELECT contact_id, count(DISTINCT substr(occurred_at, 1, 10)) AS d FROM contact_interactions
-       WHERE occurred_at >= ? GROUP BY contact_id ORDER BY contact_id`,
+       WHERE occurred_at >= ? AND channel <> 'github' GROUP BY contact_id ORDER BY contact_id`,
       [since90],
     ),
     qAll(
       `SELECT contact_id, count(DISTINCT substr(occurred_at, 1, 7)) AS m FROM contact_interactions
-       WHERE occurred_at >= ? GROUP BY contact_id ORDER BY contact_id`,
+       WHERE occurred_at >= ? AND channel <> 'github' GROUP BY contact_id ORDER BY contact_id`,
       [since180],
     ),
-    qAll("SELECT contact_id, text, since, created_at FROM contact_loops WHERE status = 'open' ORDER BY contact_id, created_at DESC"),
+    qAll("SELECT contact_id, text, since, source, created_at FROM contact_loops WHERE status = 'open' ORDER BY contact_id, created_at DESC"),
   ]);
   const by = new Map();
   const get = (id) => {
@@ -488,7 +493,7 @@ function closeness(sig) {
 
 function mainChannel(mix) {
   let best = '';
-  for (const [ch, n] of Object.entries(mix)) if (!best || n > mix[best]) best = ch;
+  for (const [ch, n] of Object.entries(mix)) if (ch !== 'github' && (!best || n > mix[best])) best = ch;
   return best;
 }
 
@@ -510,6 +515,7 @@ function listRow(r) {
     openLoops: Number(r.open_loops) || 0,
     // 有往来、有事件或写过像样的介绍，才算「整理过的人」；其余只有联系方式，名单里折叠。
     rich: Number(r.ix_count) > 0 || Number(r.event_count) > 0 || Number(r.story_len) > 40,
+    hasGithub: !!Number(r.has_github),
   };
 }
 
@@ -575,6 +581,28 @@ async function requireContact(id) {
   return rows[0];
 }
 
+/**
+ * GitHub 只用来认识这个人：在哪些仓库、参与过哪些 PR / issue。早先记成往来的 GitHub 记录在这里按仓库汇总，
+ * 不再出现在往来、在办和「上次看过之后」里。
+ */
+function codeSummary(rows) {
+  const repos = new Map();
+  for (const r of rows) {
+    const m = /github\.com\/([^/\s]+\/[^/\s#?]+)(?:\/(pull|issues)\/(\d+))?/i.exec(str(r.link));
+    if (!m) continue;
+    const e = repos.get(m[1]) || { repo: m[1], items: new Map(), last: '' };
+    if (m[3] && !e.items.has(`${m[2]}/${m[3]}`)) {
+      e.items.set(`${m[2]}/${m[3]}`, { title: str(r.title).replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, ''), url: `https://github.com/${m[1]}/${m[2]}/${m[3]}`, kind: m[2] === 'pull' ? 'pr' : 'issue', at: r.occurred_at });
+    }
+    if (str(r.occurred_at) > e.last) e.last = str(r.occurred_at);
+    repos.set(m[1], e);
+  }
+  return [...repos.values()]
+    .sort((a, b) => b.items.size - a.items.size || b.last.localeCompare(a.last))
+    .slice(0, 4)
+    .map((e) => ({ repo: e.repo, threads: e.items.size, last: e.last, recent: [...e.items.values()].slice(0, 4) }));
+}
+
 async function getContact(id, opts) {
   const c = await requireContact(id);
   const eventLimit = (opts && opts.eventLimit) || 500;
@@ -596,7 +624,7 @@ async function getContact(id, opts) {
     ),
     q(
       `SELECT id, occurred_at, channel, title, summary, quote, link, ref, created_at FROM contact_interactions
-       WHERE contact_id = ? ORDER BY occurred_at DESC LIMIT ?`,
+       WHERE contact_id = ? AND channel <> 'github' ORDER BY occurred_at DESC LIMIT ?`,
       [c.id, ixLimit],
     ),
     q(
@@ -606,7 +634,8 @@ async function getContact(id, opts) {
     ),
     q(`SELECT id, source_name, reason, at FROM contact_merges WHERE target_id = ? AND undone_at = '' ORDER BY at DESC LIMIT 20`, [c.id]),
   ]);
-  const [{ n: ixTotal }] = await q('SELECT count(*) AS n FROM contact_interactions WHERE contact_id = ?', [c.id]);
+  const [{ n: ixTotal }] = await q("SELECT count(*) AS n FROM contact_interactions WHERE contact_id = ? AND channel <> 'github'", [c.id]);
+  const code = codeSummary(await qAll("SELECT occurred_at, title, link FROM contact_interactions WHERE contact_id = ? AND channel = 'github' ORDER BY occurred_at DESC", [c.id]));
   return {
     id: c.id,
     kind: c.kind,
@@ -637,6 +666,7 @@ async function getContact(id, opts) {
       addedAt: i.created_at,
     })),
     interactionTotal: Number(ixTotal) || 0,
+    code,
     loops: loops.map((l) => ({ id: l.id, text: l.text, detail: l.detail, status: l.status, since: l.since, source: l.source, updatedAt: l.updated_at, kind: l.status === 'open' ? loopKind(l) : 'done' })),
     merges: merges.map((m) => ({ id: m.id, sourceName: m.source_name, reason: m.reason, at: m.at })),
     groups,
@@ -977,6 +1007,10 @@ async function recordInteractions(items) {
       if (Number.isNaN(when)) throw fail('INVALID_PARAMS', 'occurred_at must be an ISO 8601 time');
       if (when > Date.now() + 2 * 86400000) throw fail('INVALID_PARAMS', 'occurred_at is in the future');
       const channel = CHANNELS.has(str(it.channel)) ? str(it.channel) : 'other';
+      if (channel === 'github') {
+        results.push({ index: i, ok: false, errorCode: 'GITHUB_NOT_RECORDED', message: 'GitHub activity is not an exchange with the user. Update the person with save instead: GitHub account in identities, repositories and areas they work on in facts.' });
+        continue;
+      }
       const occurred = new Date(when).toISOString();
       const ref = (str(it.ref) || `${channel}:${occurred}:${str(it.title).slice(0, 60)}`).slice(0, 300);
       const key = `${contactId}|${ref}`;
@@ -1421,7 +1455,9 @@ const SOURCE_GUIDE = {
   cindy:
     'Cindy 对话：cindy_helper 的 get_chat_history（from / to 用本时间段，只看 user 和 assistant；list_sessions 按会话创建时间筛，开了很久的会话会漏，不要用它找）。插件发起的任务里这组工具可能不可用，不可用就跳过。ref 填消息 id。',
   github:
-    'GitHub：已授权的 GitHub 插件或 gh CLI，查本时间段内与用户相关的 PR、review 和 issue 评论（作者、评审人、被 @ 的人）。ref 填 PR 或评论的 URL。',
+    'GitHub：只用来补全已有联系人的资料，不记往来、不开待办。用已授权的 GitHub 插件或 gh CLI，看本时间段内和用户有交集的 PR、issue 的作者与评审人；' +
+    '对通讯录里已有的人，用 save 补上 GitHub 账号（identities），并在 facts 里写清「常在仓库」（如 makecindy/cindy）和「常做」（负责哪一块，如 桌面端文件树、Windows 兼容），每条 20 字内，已写过的只在变化时更新。' +
+    '只在 GitHub 出现、和用户没有其它往来的人不新建档案。不要用 record 记 PR、review、评论，record 会拒收 GitHub。',
 };
 
 const DAY = 86400000;

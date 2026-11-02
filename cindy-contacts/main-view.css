@@ -153,6 +153,7 @@ h3 { margin: 40px 0 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.1
 
 /* 概览 */
 .portrait { margin-top: 0; }
+.portrait.clamp p { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 .portrait p { font: 400 16px/1.9 var(--serif); letter-spacing: 0.01em; color: var(--c-text); margin: 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .portrait b { font-weight: 600; }
 .thin { margin-top: 30px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; color: var(--c-text-2); font-size: 14.5px; }
@@ -208,6 +209,16 @@ h3 { margin: 40px 0 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.1
 .te q { display: block; padding-left: 12px; border-left: 2px solid var(--c-line); margin-top: 4px; font: 14px/1.7 var(--serif); quotes: "「" "」"; }
 .te .go { font-size: 12px; color: var(--c-text-3); text-decoration: none; }
 .te .go:hover { color: var(--c-text); }
+
+/* 代码协作 */
+.code { display: grid; gap: 14px; }
+.repo .rh { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.repo .rn { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; min-width: 0; }
+.repo .rn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo .rn svg { color: var(--c-text-3); }
+.repo .rm { flex: none; font-size: 12px; color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.repo .pr { display: block; margin: 4px 0 0 20px; font-size: 13px; line-height: 1.6; color: var(--c-text-2); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo .pr:hover { color: var(--c-text); text-decoration: underline; text-underline-offset: 3px; }
 
 /* 往来 */
 .filt { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 24px 0 4px; font-size: 13px; }

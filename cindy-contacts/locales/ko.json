@@ -16,7 +16,7 @@
       "description": "파일을 만들거나 수정합니다. id 없이 만들면 비슷한 이름이 있을 때 DUPLICATE_SUSPECT와 후보를 돌려줍니다. id가 있으면 전달한 항목만 바꾸며 aliases·identities·groups·open_loops는 추가됩니다."
     },
     "record": {
-      "description": "메일, Feishu, 캘린더, Cindy 대화, GitHub에서 읽은 교류를 사람 파일에 기록합니다(한 번에 최대 200건). contact_id 또는 identity / email / name으로 사람을 찾습니다. 같은 ref는 한 번만 기록됩니다."
+      "description": "메일, Feishu, 캘린더, Cindy 대화에서 읽은 교류를 사람 파일에 기록합니다(한 번에 최대 200건). contact_id 또는 identity / email / name으로 사람을 찾습니다. 같은 ref는 한 번만 기록됩니다. GitHub의 PR, 리뷰, 댓글은 기록하지 않습니다(거부됨). GitHub는 save로 프로필을 보완하는 데만 사용합니다."
     },
     "log_event": {
       "description": "날짜가 있는 사건을 추가합니다: 기억할 만한 교류, 약속, 변화."

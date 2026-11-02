@@ -99,7 +99,7 @@
       }
     },
     "record": {
-      "description": "Record interactions read from mail, Feishu, calendar, Cindy conversations or GitHub into a person’s file, up to 200 per call. Use contact_id, or identity / email / name to let the plugin find the person; unmatched items return UNRESOLVED, so find or save the person first. The same ref (source id) is recorded once per person, so resubmitting is safe. Record only people the user really deals with; skip marketing, notifications and bots.",
+      "description": "Record interactions read from mail, Feishu, calendar or Cindy conversations into a person’s file, up to 200 per call. GitHub PRs, reviews and comments are not recorded (they are rejected); use save to add GitHub details to the profile instead. Use contact_id, or identity / email / name to let the plugin find the person; unmatched items return UNRESOLVED, so find or save the person first. The same ref (source id) is recorded once per person, so resubmitting is safe. Record only people the user really deals with; skip marketing, notifications and bots.",
       "parameters": {
         "/properties/items/items/properties/contact_id": {
           "description": "Entry id; if unknown use identity, email or name"

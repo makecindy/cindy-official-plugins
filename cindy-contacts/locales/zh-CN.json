@@ -99,7 +99,7 @@
       }
     },
     "record": {
-      "description": "把从邮件、飞书、日历、Cindy 对话、GitHub 读到的往来记进某人的档案，单次最多 200 条。每条用 contact_id，或用 identity / email / name 让插件自己找人；找不到的返回 UNRESOLVED，先 find 或 save 建档再记。同一个人同一个 ref（来源 id）只记一次，可以放心重复提交。只记与用户真实往来的人；营销、通知和机器人不记。",
+      "description": "把从邮件、飞书、日历、Cindy 对话读到的往来记进某人的档案，单次最多 200 条。GitHub 上的 PR、评审和评论不记（会被拒收），GitHub 只用来用 save 补全资料。每条用 contact_id，或用 identity / email / name 让插件自己找人；找不到的返回 UNRESOLVED，先 find 或 save 建档再记。同一个人同一个 ref（来源 id）只记一次，可以放心重复提交。只记与用户真实往来的人；营销、通知和机器人不记。",
       "parameters": {
         "/properties/items/items/properties/contact_id": {
           "description": "档案 id；不知道时用 identity、email 或 name"
