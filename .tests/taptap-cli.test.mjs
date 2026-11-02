@@ -67,6 +67,18 @@ const FIXTURE_TREE = {
     ['get-community-moment', 'Get one community moment'],
     ['list-community-moments', 'List community moments'],
   ],
+  'game-sign': [
+    ['get-game-sign-config', 'Read sign config'],
+    ['save-game-sign-award', 'Save a daily award'],
+  ],
+  'official-message-push': [
+    ['get-official-message-push-info', 'Read quota and followers'],
+    ['create-official-message-push-task', 'Create a push task'],
+  ],
+  'whats-new': [
+    ['get-whats-new-overview', 'Read capacity and top slots'],
+    ['create-whats-new', 'Create a display entry'],
+  ],
   'dashboard-stats': [
     ['get-dashboard-stats', 'Query dashboard stats metrics'],
     ['get-dashboard-position-options', 'List the positions a metric accepts'],
@@ -117,6 +129,9 @@ const FIXTURE_RISK = {
   'app partial-op': 'write',
   'app unavail-op': 'write',
   'app crash-op': 'write',
+  'game-sign save-game-sign-award': 'write',
+  'official-message-push create-official-message-push-task': 'write',
+  'whats-new create-whats-new': 'write',
 };
 
 const FIXTURE_SCHEMA = [
@@ -124,6 +139,9 @@ const FIXTURE_SCHEMA = [
   { name: 'app create-app', description: 'Create', _meta: { risk: 'write' } },
   { name: 'asset-library search-assets', description: 'Search', _meta: { risk: 'read' } },
   { name: 'community-management list-community-moments', description: 'Community moments', inputSchema: { type: 'object', properties: { moment_intent: { type: 'array', items: { type: 'string' } } } }, _meta: { risk: 'read' } },
+  { name: 'game-sign save-game-sign-award', description: 'Save award', inputSchema: { type: 'object', properties: { days: { type: 'integer' } } }, _meta: { risk: 'write' } },
+  { name: 'official-message-push create-official-message-push-task', description: 'Create push', inputSchema: { type: 'object', properties: { preview_fingerprint: { type: 'string' } } }, _meta: { risk: 'write' } },
+  { name: 'whats-new create-whats-new', description: 'Create display entry', inputSchema: { type: 'object', properties: { top_types: { type: 'array', items: { type: 'string' } } } }, _meta: { risk: 'write' } },
   { name: 'dashboard-stats get-dashboard-stats', description: 'Stats', _meta: { risk: 'read' } },
 ];
 
@@ -825,6 +843,29 @@ test('a new read domain keeps its catalogue schema in the drill-down', async () 
   assert.ok(fromCatalog.inputSchema, 'the catalogue operation keeps its argument schema');
   const completionOnly = operations.find((op) => op.name === 'community-management get-community-moment');
   assert.ok(completionOnly, 'completion-only commands stay reachable');
+});
+
+test('the interaction operations domains keep their catalogue schema in the drill-down', async () => {
+  // The three 2026.10.31 interaction operations ship with bundled manuals and
+  // route through list_tools(category:"<service>"); a service missing from
+  // SERVICE_DESCRIPTIONS only returns completion names, so the agent cannot
+  // see inputSchema/risk without a separate schema call.
+  for (const service of ['whats-new', 'official-message-push', 'game-sign']) {
+    assert.match(workerSource, new RegExp(`'${service}':`), `${service} has a display description`);
+  }
+  const [whatsNew, push, sign] = await callWorker([
+    listTools('whats-new', { cli_path: fakeCli }),
+    listTools('official-message-push', { cli_path: fakeCli }),
+    listTools('game-sign', { cli_path: fakeCli }),
+  ]);
+  const expectOp = (reply, name) => {
+    const operation = reply.result.data.operations.find((op) => op.name === name);
+    assert.ok(operation, `${name} is listed`);
+    assert.ok(operation.inputSchema, `${name} keeps its argument schema`);
+  };
+  expectOp(whatsNew, 'whats-new create-whats-new');
+  expectOp(push, 'official-message-push create-official-message-push-task');
+  expectOp(sign, 'game-sign save-game-sign-award');
 });
 
 test('forum data statistics route through the data manual, not the post manual', () => {

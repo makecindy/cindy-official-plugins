@@ -30,10 +30,10 @@ call_tool(name:"whats-new find-whats-new-by-url", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{url:"<站内链接>"}})
 
-# 跨类型/状态分页查重：分页需要实际读取，不能与 dry_run 组合
+# 跨类型/状态分页查重：省略 type/status，分页需要实际读取，不能与 dry_run 组合
 call_tool(name:"whats-new list-whats-new", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{type:"announcement", status:"online", page:1, page_size:20},
+  data:{page:1, page_size:20},
   page_all:true, page_limit:1000})
 ```
 
