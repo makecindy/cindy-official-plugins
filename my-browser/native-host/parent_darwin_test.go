@@ -61,3 +61,42 @@ func TestSignedIdentityParsesCodesignOutput(t *testing.T) {
 		t.Fatalf("got %q %q %q", exe, id, team)
 	}
 }
+
+func TestVerifyParentAcceptsBraveOriginAndDia(t *testing.T) {
+	cases := []struct{ id, team, exe string }{
+		{"com.brave.Browser.origin", "KL8N8XSYF4", "/Applications/Brave Origin.app/Contents/MacOS/Brave Origin"},
+		{"company.thebrowser.dia", "S6N382Y83G", "/Applications/Dia.app/Contents/MacOS/Dia"},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			codesign = func(args ...string) ([]byte, error) {
+				target := args[len(args)-1]
+				if args[0] == "-d" {
+					return []byte("Executable=" + c.exe + "\nIdentifier=" + c.id + "\nTeamIdentifier=" + c.team + "\n"), nil
+				}
+				if target == "4242" {
+					return []byte("the code on disk does not match what is running"), errors.New("exit status 1")
+				}
+				if target == c.exe {
+					return nil, nil
+				}
+				return []byte("unexpected"), errors.New("exit status 1")
+			}
+			if err := verifyParent("4242"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestVerifyParentRejectsDiaWithAnotherTeam(t *testing.T) {
+	codesign = func(args ...string) ([]byte, error) {
+		if args[0] == "-d" {
+			return []byte("Executable=/Applications/Dia.app/Contents/MacOS/Dia\nIdentifier=company.thebrowser.dia\nTeamIdentifier=EQHXZ8M8AV\n"), nil
+		}
+		return []byte("the code on disk does not match what is running"), errors.New("exit status 1")
+	}
+	if err := verifyParent("4242"); err == nil {
+		t.Fatal("wrong team was accepted")
+	}
+}
