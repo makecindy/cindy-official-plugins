@@ -238,8 +238,8 @@ test('iOS input sends touches on the stream socket and buttons, text and keys th
   assert.deepEqual(result,{execution:'executed',completed:8});
   const touches=ws.sent.filter(m=>/^touch/.test(m.type));
   assert.deepEqual(touches[0],{type:'touch1-down',x:0.25*1178,y:0.5*2556,width:1178,height:2556});
-  assert.deepEqual(f.calls,[['press',{udid:PHONE,button:'home'}],['set_state',{udid:PHONE,orientation:'portrait-upside-down'}],['set_state',{udid:PHONE,orientation:'landscape-right'}],
-    ['type_text',{udid:PHONE,text:'你好',method:'paste'}],['type_text',{udid:PHONE,keys:['command+shift+KeyZ']}]],'rotation steps from the last request when the App does not turn');
+  assert.deepEqual(f.calls,[['press',{udid:PHONE,button:'home'}],['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}],
+    ['type_text',{udid:PHONE,text:'你好',method:'paste'}],['type_text',{udid:PHONE,keys:['command+shift+KeyZ']}]],'rotation steps from the last request when the App does not turn, never upside down on an iPhone');
   const {parseKey}=require('../../baguette-simulator/node/keys.cjs');assert.deepEqual(parseKey('command+shift+KeyZ'),{code:'KeyZ',modifiers:['command','shift']});
   await code(f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'menu'}]}),'INVALID_ARGUMENT');
   // A failing later event keeps the completed prefix and reports unknown.
@@ -257,7 +257,7 @@ test('orientation buttons set an absolute pose, so later relative turns start fr
   await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-landscape'},{kind:'press',button:'orientation-landscape'},
     {kind:'press',button:'rotate-right'},{kind:'press',button:'orientation-portrait'}]});
   assert.deepEqual(f.calls,[['set_state',{udid:PHONE,orientation:'landscape-left'}],['set_state',{udid:PHONE,orientation:'landscape-left'}],
-    ['set_state',{udid:PHONE,orientation:'portrait-upside-down'}],['set_state',{udid:PHONE,orientation:'portrait'}]]);
+    ['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}]]);
 });
 
 test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=>{

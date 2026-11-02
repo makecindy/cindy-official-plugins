@@ -346,7 +346,12 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;return;
     }
     if(e.button==='rotate-left'||e.button==='rotate-right'){
-      const orientation=ORIENTATIONS[((s.requested??s.rotation)+(e.button==='rotate-right'?1:3))%4];
+      // An iPhone's Home Screen and most Apps never turn upside down: skip that
+      // pose, so every press visibly turns the picture. An iPad takes all four.
+      const turn=e.button==='rotate-right'?1:3;
+      let next=((s.requested??s.rotation??0)+turn)%4;
+      if(s.kind==='ios'&&ORIENTATIONS[next]==='portrait-upside-down')next=(next+turn)%4;
+      const orientation=ORIENTATIONS[next];
       await operation('set_state',{udid:s.udid,orientation});
       s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;return;
     }
