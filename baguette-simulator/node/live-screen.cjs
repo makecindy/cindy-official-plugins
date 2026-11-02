@@ -16,9 +16,14 @@ const {toNative}=require('./android/geometry.cjs');
 
 const SCREEN=0x10,PNG=0x06,MAX_MESSAGE=8*1024*1024,MAX_BUFFERED=4*1024*1024;
 const FETCH_MS=30000,IDLE_MS=60000,READY_MS=8000,PROBE_MS=5000;
-// The interface may report its new orientation only after a turn's last frame,
-// and a still screen sends no more: keep probing this long after activity.
-const SETTLE_MS=3000;
+// A probe takes about 1.5 s and one taken mid-turn reads the old orientation,
+// while a still screen sends no more frames: probe once the frames pause.
+const QUIET_MS=200;
+// After the viewer asks for a pose, a run of picture changes within this window
+// means the interface is turning: show the pose at once and let a probe
+// confirm it. A turn animates about 50 changes; a Home Screen that refuses
+// the pose still sends a handful, and a keyframe is not a change.
+const TURN_MS=1500,TURN_FRAMES=12;
 const ID=/^[A-Za-z0-9._:-]{1,128}$/,PATH=/^\/live-screen\/([0-9a-f]{64})$/;
 const ORIENTATIONS=['portrait','landscape-left','portrait-upside-down','landscape-right'];
 const PHASES=['began','moved','stationary','ended','cancelled'],ENDED=new Set(['ended','cancelled']);
@@ -209,15 +214,33 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     screen(s);write(s,data);
   }
   function binary(s,data){
-    const type=data[0];s.framed=true;s.settleUntil=now()+SETTLE_MS;
+    const type=data[0];s.framed=true;s.lastFrameAt=now();settle(s);
+    // The interface moved right after a requested turn: it is following it.
+    const turn=s.pendingTurn;
+    if(turn&&now()>turn.until)s.pendingTurn=null;
+    else if(turn&&type===3&&++turn.frames>=TURN_FRAMES){
+      s.pendingTurn=null;
+      if(turn.rotation!==s.rotation){s.rotation=turn.rotation;s.turnedAt=now();if(s.res&&s.size)screen(s);}
+    }
     if(type===1){s.avcc=data;s.size=avccSize(data.subarray(1))||s.size;}
     else if(type===4&&!s.size)s.size=jpegSize(data.subarray(1));
     if(s.res)forward(s,type,data);
+  }
+  // Probe when the picture has paused; a change during a probe asks for another.
+  function settle(s){
+    if(s.kind!=='ios'&&s.kind!=='ipados')return;
+    clearTimeout(s.quiet);
+    s.quiet=setTimeout(()=>{if(s.closed||!s.res)return;if(s.probing)s.reprobe=true;else{s.framed=false;probe(s);}},QUIET_MS);
+    s.quiet.unref?.();
   }
   function text(s,raw){
     let env;try{env=JSON.parse(raw);}catch{return;}
     if(env?.type!=='describe_ui_result'||!s.probing)return;
     s.probing=false;
+    // Asked before a turn was shown, it describes the old pose: ignore it.
+    const stale=s.turnedAt>s.probeAt;
+    if(s.reprobe||stale){s.reprobe=false;s.framed=false;probe(s);}
+    if(stale)return;
     const rotation=ORIENTATIONS.indexOf(env.ok&&env.tree?.screen?.orientation);
     if(rotation<0)return;
     s.oriented=true;
@@ -258,7 +281,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     serve({d:s.d,agent:android().agent,res,signal:s.abort.signal,format:'avcc',sink,control:s.control}).catch(()=>{}).finally(()=>end(s));
   }
   function end(s){
-    if(s.closed)return;s.closed=true;
+    if(s.closed)return;s.closed=true;clearTimeout(s.quiet);
     if(sessions.get(s.key)===s)sessions.delete(s.key);
     tokens.delete(s.token);
     // Lift a finger the phone left down.
@@ -279,8 +302,9 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       if(t-s.seen>(s.res?IDLE_MS:FETCH_MS)){end(s);continue;}
       if(s.probing&&t-s.probeAt>PROBE_MS)s.probing=false;
       // A still screen sends nothing and cannot have turned: probe after frames,
-      // and for a few seconds after the last one, so a turn that settles late is seen.
-      if(s.res&&!s.probing&&(s.framed||t<(s.settleUntil||0))){s.framed=false;probe(s);}
+      // once they pause (mid-turn reads the old pose); a picture that never
+      // pauses is still probed every few seconds.
+      if(s.res&&s.framed&&!s.probing&&(t-(s.lastFrameAt||0)>=QUIET_MS||t-(s.probeAt||0)>=3000)){s.framed=false;probe(s);}
     }
     if(sessions.size)Promise.resolve().then(()=>controls().assertEnabled()).catch(()=>closeAll());
   }
@@ -346,8 +370,9 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(e.kind==='key')return operation('type_text',{udid:s.udid,keys:[[...e.modifiers,e.code].join('+')]});
     if(Object.hasOwn(ORIENTATION_BUTTONS,e.button)){
       const orientation=ORIENTATION_BUTTONS[e.button];
+      s.pendingTurn={rotation:ORIENTATIONS.indexOf(orientation),until:now()+TURN_MS,frames:0};
       await operation('set_state',{udid:s.udid,orientation});
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;s.settleUntil=now()+SETTLE_MS;return;
+      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
     }
     if(e.button==='rotate-left'||e.button==='rotate-right'){
       // An iPhone's Home Screen and most Apps never turn upside down: skip that
@@ -356,8 +381,9 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       let next=((s.requested??s.rotation??0)+turn)%4;
       if(s.kind==='ios'&&ORIENTATIONS[next]==='portrait-upside-down')next=(next+turn)%4;
       const orientation=ORIENTATIONS[next];
+      s.pendingTurn={rotation:next,until:now()+TURN_MS,frames:0};
       await operation('set_state',{udid:s.udid,orientation});
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;s.settleUntil=now()+SETTLE_MS;return;
+      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
     }
     if(e.button==='shake')return shake(s);
     return operation('press',{udid:s.udid,button:e.button});

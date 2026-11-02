@@ -144,21 +144,25 @@ test('the stream sends screen JSON before the first frame, starts on a keyframe 
   assert.deepEqual(screenOf(messages[0]),{type:'screen',width:1178,height:2556,rotation:1});
   assert.deepEqual(messages.slice(1).map(m=>m[0]),[1,2,3]);
   assert.deepEqual([...messages[2]],[2,1,2,3],'frames are Baguette envelopes as is');
-  // Frames are followed by one orientation probe; a still screen sends nothing and is not probed.
+  // Frames are followed by one orientation probe once they pause; a still screen sends nothing and is not probed.
   const probes=()=>ws.sent.filter(m=>m.type==='describe_ui').length,initial=probes();
-  await until(()=>probes()>initial,2500);ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
-  // Shortly after the last frame it looks once more (a turn can settle late), then a still screen is left alone.
-  await until(()=>probes()>initial+1,2500);ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
-  f.advance(4000);await new Promise(r=>setTimeout(r,1200));
+  await until(()=>probes()>initial,2500);
+  // A frame during the probe (a turn still moving) asks for one more as soon as it answers.
+  ws.binary(envelope(3,[4]));await new Promise(r=>setTimeout(r,300));
+  const during=probes();
+  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  assert.equal(probes(),during+1,'a change during a probe is probed again at once');
+  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  await until(()=>stream.messages().length>=5);
   const before=probes();
-  await new Promise(r=>setTimeout(r,1200));assert.equal(probes(),before);assert.equal(stream.messages().length,4,'unchanged orientation sends nothing');
+  await new Promise(r=>setTimeout(r,1200));assert.equal(probes(),before);assert.equal(stream.messages().length,5,'unchanged orientation sends nothing');
   ws.binary(envelope(3,[5]));await until(()=>probes()>before,2500);
   ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-right'}}});
   ws.binary(envelope(3,[6]));
-  await until(()=>stream.messages().length>=7);
-  assert.deepEqual(screenOf(stream.messages()[5]),{type:'screen',width:1178,height:2556,rotation:3});
-  ws.binary(avcc('1206x2622'));await until(()=>stream.messages().length>=9);
-  assert.deepEqual(screenOf(stream.messages()[7]),{type:'screen',width:1206,height:2622,rotation:3},'a new picture size is announced first');
+  await until(()=>stream.messages().length>=8);
+  assert.deepEqual(screenOf(stream.messages()[6]),{type:'screen',width:1178,height:2556,rotation:3});
+  ws.binary(avcc('1206x2622'));await until(()=>stream.messages().length>=10);
+  assert.deepEqual(screenOf(stream.messages()[8]),{type:'screen',width:1206,height:2622,rotation:3},'a new picture size is announced first');
   ws.close();await until(()=>stream.ended());
   await code(f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'release'}]}),'NOT_FOUND');
 });
@@ -261,6 +265,40 @@ test('orientation buttons set an absolute pose, so later relative turns start fr
     {kind:'press',button:'rotate-right'},{kind:'press',button:'orientation-portrait'}]});
   assert.deepEqual(f.calls,[['set_state',{udid:PHONE,orientation:'landscape-left'}],['set_state',{udid:PHONE,orientation:'landscape-left'}],
     ['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}]]);
+});
+
+test('a requested turn the picture follows shows at once; one the App refuses does not',async t=>{
+  const f=fixture(t);
+  const opened=await f.live.request('liveScreen.open',{id:PHONE});
+  const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());
+  await until(()=>stream.messages().length>=1);
+  const rotations=()=>stream.messages().filter(m=>m[0]===0x10).map(m=>screenOf(m).rotation);
+  const probes=()=>ws.sent.filter(m=>m.type==='describe_ui').length,connected=probes();
+  ws.binary(envelope(2,[1]));await until(()=>stream.messages().length>=2);
+  // The pause after this frame sends a probe; it is still unanswered when the turn starts.
+  await until(()=>probes()>connected,2500);
+  const early=probes();
+  // The App turns with the device: its frames follow the request, so the picture turns now.
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-landscape'}]});
+  // A keyframe (asked for by a resized viewer) and a handful of changes are not a turn yet.
+  const before=rotations().length;
+  ws.binary(envelope(2,[2]));for(let i=0;i<11;i++)ws.binary(envelope(3,[2]));
+  await new Promise(r=>setTimeout(r,50));
+  assert.equal(rotations().length,before);
+  ws.binary(envelope(3,[2]));
+  await until(()=>rotations().at(-1)===1);
+  // A probe asked before the turn still reads portrait: it is ignored and asked again.
+  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'portrait'}}});
+  assert.equal(rotations().at(-1),1);
+  assert.ok(probes()>early,'probed again after the turn');
+  ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  assert.equal(rotations().at(-1),1);
+  // The Home Screen refuses portrait-to-landscape: no frames follow, nothing turns.
+  const shown=rotations().length;
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-portrait'}]});
+  f.advance(2000);for(let i=0;i<14;i++)ws.binary(envelope(3,[3]));
+  await new Promise(r=>setTimeout(r,50));
+  assert.equal(rotations().length,shown,'a frame long after the request does not turn the picture');
 });
 
 test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=>{
