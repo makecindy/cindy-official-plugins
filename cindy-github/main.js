@@ -2470,14 +2470,21 @@ async function readKv() {
 
 var PR_AGENT_KINDS = { cc: 1, codex: 1, pi: 1 };
 
-/** 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。 */
+/**
+ * 宿主选择器返回的完整组合(引擎、来源、模型、档位、速度),只认合法形状。卡内下拉框还可能带运行位置
+ * agentDeviceId:同账号另一台电脑,或分享来的供应商(share:<id>);没有 = 插件运行的这台电脑。
+ */
 function prFollowModelFrom(value) {
   var v = value && typeof value === 'object' ? value : null;
   var r = v && v.route && typeof v.route === 'object' ? v.route : null;
   if (!r || !PR_AGENT_KINDS[r.agentKind] || typeof r.providerId !== 'string' || typeof r.model !== 'string' || !r.model ||
       typeof r.effort !== 'string' || !(typeof r.fastMode === 'boolean' || r.fastMode === 'ultrafast')) return null;
+  var device = typeof r.agentDeviceId === 'string' && r.agentDeviceId && r.agentDeviceId.length <= 128 && r.agentDeviceId !== 'local'
+    ? r.agentDeviceId : null;
+  if (r.agentDeviceId !== undefined && !device) return null;
   return {
-    route: { agentKind: r.agentKind, providerId: r.providerId, model: r.model, effort: r.effort, fastMode: r.fastMode },
+    route: Object.assign({ agentKind: r.agentKind, providerId: r.providerId, model: r.model, effort: r.effort, fastMode: r.fastMode },
+      device ? { agentDeviceId: device } : {}),
     label: typeof v.label === 'string' && v.label ? v.label.slice(0, 120) : r.model,
   };
 }
@@ -2500,6 +2507,7 @@ function prSettingsForAgent(settings, autoFollow) {
       model_agent_kind: m.route.agentKind === 'cc' ? 'claude-code' : m.route.agentKind,
       provider_id: m.route.providerId, model: m.route.model, effort: m.route.effort, fast_mode: m.route.fastMode, label: m.label,
     };
+    if (m.route.agentDeviceId) out.follow_model.agent_device_id = m.route.agentDeviceId;
   }
   return out;
 }
@@ -2529,8 +2537,10 @@ function togglePrSetting(key) {
 
 /** 用宿主统一的模型选择器选跟进模型;名字从同源模型目录取,取不到就显示模型 id。 */
 async function pickPrFollowModel(settings, msg) {
+  // 通用选择器只认本机组合:带运行位置的旧选择不作为初始值。
+  var initial = settings.followModel && !settings.followModel.route.agentDeviceId ? settings.followModel.route : null;
   var picked = await cindy.pickModel(Object.assign(
-    settings.followModel ? { initial: settings.followModel.route } : {},
+    initial ? { initial: initial } : {},
     msg.mobilePageId ? { mobilePageId: msg.mobilePageId } : {}
   ));
   if (!picked || picked.ok !== true) {
@@ -2542,11 +2552,19 @@ async function pickPrFollowModel(settings, msg) {
 /** 记下选中的跟进模型(卡内下拉框或选择器选的都走这里)。 */
 async function savePrFollowModel(settings, route) {
   var label = '';
+  var device = route && typeof route.agentDeviceId === 'string' ? route.agentDeviceId : '';
   try {
-    var res = await fetch('/agent-models');
+    var res = await fetch('/agent-models' + (device ? '?agent_device_id=' + encodeURIComponent(device) : ''));
     var list = res && res.ok !== false ? (await res.json()).models : null;
     var hit = Array.isArray(list) && list.find(function (m) { return m && m.id === route.model && m.providerId === route.providerId; });
     if (hit) label = hit.name + (hit.providerName ? ' · ' + hit.providerName : '');
+    if (hit && device) {
+      // 写上在哪里运行:电脑名;分享的位置名本身就是「供应商 · 分享者」,替换掉供应商那一段
+      var where = await fetch('/agent-models');
+      var locations = where && where.ok !== false ? (await where.json()).locations : null;
+      var place = Array.isArray(locations) && locations.find(function (l) { return l && l.agentDeviceId === device; });
+      if (place && place.name) label = device.indexOf('share:') === 0 ? hit.name + ' · ' + place.name : label + ' · ' + place.name;
+    }
   } catch (e) { /* 名字只是展示,取不到用模型 id */ }
   var value = prFollowModelFrom({ route: route, label: label });
   if (!value) return { settings: settings, error: 'INVALID_ROUTE' };

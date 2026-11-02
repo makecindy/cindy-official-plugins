@@ -680,7 +680,11 @@ function createPrRuntime(options = {}) {
     cindy,
     BroadcastChannel: class { postMessage() {} },
     fetch: async (url, init = {}) => {
-      if (url === '/agent-models' && options.agentModels) return { ok: true, status: 200, json: async () => ({ ok: true, models: options.agentModels }) };
+      if (String(url).startsWith('/agent-models') && options.agentModels) {
+        const device = new URL(url, 'http://plugin').searchParams.get('agent_device_id');
+        const models = typeof options.agentModels === 'function' ? options.agentModels(device) : options.agentModels;
+        return { ok: true, status: 200, json: async () => ({ ok: true, models, ...(device ? { agentDeviceId: device } : { locations: options.agentLocations ?? [] }) }) };
+      }
       assert.equal(url, '/kv');
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
@@ -887,6 +891,40 @@ test('card settings pick the auto-follow model with the host picker and hand its
   await runtime.click(cardId, 'prset:modelPick', { modelSelection: codex });
   assert.equal(picks.length, 2);
   assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
+});
+
+// Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
+// The card names where it runs, and the agent gets the location to set on the follow-up schedule.
+test('a follow model on another computer or a shared provider keeps its location', async () => {
+  const picks = [];
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    pickModel: async (request) => { picks.push(JSON.parse(JSON.stringify(request))); return { ok: false, errorCode: 'CANCELLED' }; },
+    agentModels: (device) => device === 'mac-mini'
+      ? [{ id: 'claude-opus-5-5', name: 'Opus 5.5', providerId: 'anthropic', providerName: 'Anthropic' }]
+      : device === 'share:abc' ? [{ id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', providerId: 'openai', providerName: 'OpenAI' }] : [],
+    agentLocations: [{ agentDeviceId: 'mac-mini', name: 'Mac mini' }, { agentDeviceId: 'share:abc', name: 'OpenAI · 来自 Magi 的分享' }],
+  });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  const remote = { agentKind: 'cc', providerId: 'anthropic', model: 'claude-opus-5-5', effort: 'high', fastMode: false, agentDeviceId: 'mac-mini' };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: remote });
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: remote, label: 'Opus 5.5 · Anthropic · Mac mini' });
+  assert.ok(runtime.lastCard(cardId).html.includes(JSON.stringify(remote).replace(/"/g, '&quot;')));
+
+  const shared = { agentKind: 'codex', providerId: 'openai', model: 'gpt-6.1-sol', effort: 'medium', fastMode: false, agentDeviceId: 'share:abc' };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: shared });
+  assert.equal(runtime.kv.prCard.followModel.label, 'GPT-6.1-Sol · OpenAI · 来自 Magi 的分享');
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1).event.follow_model.agent_device_id, 'share:abc');
+  // The generic picker (phone, older hosts) only knows this computer: no remote initial value.
+  await runtime.click(cardId, 'prset:modelPick');
+  assert.deepEqual(picks.at(-1), {});
+  // A location the host would not offer never gets stored.
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: { ...remote, agentDeviceId: 'local' } });
+  assert.equal(runtime.kv.prCard.followModel.route.agentDeviceId, 'share:abc');
 });
 
 test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {
