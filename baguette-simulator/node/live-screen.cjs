@@ -411,6 +411,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       else await agent.press(d,{button:e.button==='recents'?'app-switcher':e.button});
     },'device:'+deviceId(s.udid));
   }
+  const fingerMove=e=>e.kind==='touch'&&!e.edge&&e.touches.every(t=>t.phase==='moved'||t.phase==='stationary');
+  const sameFingers=(a,b)=>a.touches.length===b.touches.length&&a.touches.every(t=>b.touches.some(u=>u.id===t.id));
   async function input(p,locale){
     const s=opened(p,locale);
     if(!only(p,['id','events']))throw fail('INVALID_ARGUMENT',locale);
@@ -424,11 +426,18 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     await enabled(locale);
     s.seen=now();controls().touch();
     let completed=0;
-    try{for(let i=0;i<events.length;){
+    // Only the latest position of a moving finger matters; earlier moves in the
+    // batch would replay behind the finger (a phone samples at up to 120 Hz).
+    const steps=[];
+    for(const e of events){
+      const last=steps.at(-1);
+      if(last&&fingerMove(e)&&fingerMove(last.e)&&sameFingers(last.e,e)){last.e=e;last.n++;}else steps.push({e,n:1});
+    }
+    try{for(let i=0;i<steps.length;){
       // A run of keys is one keyboard operation (up to type_text's 40), not one helper launch per key.
-      let run=0;if(s.kind!=='android')while(run<40&&events[i+run]?.kind==='key')run++;
-      if(run>1){await operation('type_text',{udid:s.udid,keys:events.slice(i,i+run).map(e=>[...e.modifiers,e.code].join('+'))});completed+=run;i+=run;continue;}
-      await (s.kind==='android'?androidStep(s,events[i]):appleStep(s,events[i],locale));completed++;i++;
+      let run=0;if(s.kind!=='android')while(run<40&&steps[i+run]?.e.kind==='key')run++;
+      if(run>1){await operation('type_text',{udid:s.udid,keys:steps.slice(i,i+run).map(({e})=>[...e.modifiers,e.code].join('+'))});completed+=run;i+=run;continue;}
+      await (s.kind==='android'?androidStep(s,steps[i].e):appleStep(s,steps[i].e,locale));completed+=steps[i].n;i++;
     }}
     catch(error){throw Object.assign(failure(error.code||'INPUT_FAILED',error.message,completed?'unknown':error.execution||'unknown'),{completed});}
     return {execution:completed?'executed':'not_executed',completed};

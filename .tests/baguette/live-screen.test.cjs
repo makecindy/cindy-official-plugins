@@ -301,6 +301,16 @@ test('a requested turn the picture follows shows at once; one the App refuses do
   assert.equal(rotations().length,shown,'a frame long after the request does not turn the picture');
 });
 
+test('moves of a finger in one batch reach the device as the latest position only',async t=>{
+  const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});const ws=FakeSocket.all.at(-1);
+  const at=(phase,x)=>({kind:'touch',touches:[{id:0,x,y:0.5,phase}]});
+  const result=await f.live.request('liveScreen.input',{id:PHONE,events:[at('began',0.1),at('moved',0.2),at('moved',0.3),at('moved',0.4),at('moved',0.5),at('ended',0.5)]});
+  assert.deepEqual(result,{execution:'executed',completed:6});
+  const touches=ws.sent.filter(m=>/^touch/.test(m.type));
+  assert.deepEqual(touches.map(m=>m.type),['touch1-down','touch1-move','touch1-up']);
+  assert.equal(touches[1].x,0.5*1178,'the move carries the latest position');
+});
+
 test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=>{
   const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});
   const keys=Array.from({length:42},()=>({kind:'key',code:'KeyA'}));
