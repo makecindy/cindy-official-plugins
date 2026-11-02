@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
-const web=path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
+const web=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web');
 test('a recreated flat view keeps its saved pose when a portrait-only app reports a different orientation',()=>{
  const source=fs.readFileSync(path.join(web,'sim-native.js'),'utf8');
  const storage=source.slice(source.indexOf('  const ORIENTATION_KEY'),source.indexOf('  // Debug knobs'));
@@ -149,7 +149,7 @@ test('the foldable turns with an animation and reports how its book is rolled',(
   const window={matchMedia:q=>({matches:reduced&&/reduce/.test(q),addEventListener(){}})};
   const context=vm.createContext({window,document,getComputedStyle:()=>({objectFit:'contain',getPropertyValue:()=>''}),Promise,
    setTimeout:fn=>{timers.push(fn);return timers.length;},clearTimeout(){}});
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../../baguette-simulator/node/viewer-stage.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../../cindy-simulator/node/viewer-stage.js'),'utf8'),context);
   function Sim3DPanel(){}
   Sim3DPanel.prototype.attach=function(){};Sim3DPanel.prototype.setBackground=function(){};
   Sim3DPanel.prototype.placePosePicker=function(){};Sim3DPanel.prototype.detach=function(){};

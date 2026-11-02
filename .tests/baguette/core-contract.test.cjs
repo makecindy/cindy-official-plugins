@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-const dir=path.resolve('baguette-simulator/node');
+const dir=path.resolve('cindy-simulator/node');
 const udid='00000000-0000-4000-8000-000000000001';
 test('environment reports keyboard ABI failures separately from usable device catalogs',async()=>{
  for(const ready of [true,false]){

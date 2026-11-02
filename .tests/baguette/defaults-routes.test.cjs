@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
-const {blockedRoute}=require('../../baguette-simulator/node/viewer-proxy.cjs');
-const {createClipboard}=require('../../baguette-simulator/node/clipboard.cjs');
+const {blockedRoute}=require('../../cindy-simulator/node/viewer-proxy.cjs');
+const {createClipboard}=require('../../cindy-simulator/node/clipboard.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
 
 test('routes outside the viewer are blocked in every spelling; the viewer\'s own routes pass',()=>{
@@ -35,7 +35,7 @@ test('blocked routes never reach the native server, even with a valid viewer ses
  }finally{bridge.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
 });
 
-const {stagedPage,injectStage,STAGE_STYLE,STAGE_HEAD}=require('../../baguette-simulator/node/viewer-proxy.cjs');
+const {stagedPage,injectStage,STAGE_STYLE,STAGE_HEAD}=require('../../cindy-simulator/node/viewer-proxy.cjs');
 test('only the device page receives the Cindy stage stylesheet, and not when the full workbench is requested',()=>{
  assert.equal(stagedPage(`/simulators/${udid}`),true);assert.equal(stagedPage(`/simulators/${udid}?handheld=1`),true);assert.equal(stagedPage(`/simulators/${udid}/`),true);
  assert.equal(stagedPage(`/simulators/${udid}?handheld=0&cindyFull=1`),false);
@@ -61,8 +61,8 @@ test('the proxy injects the stylesheet into the device page HTML with a correct 
   const page=await fetch(`${bridge.base}/simulators/${udid}?handheld=1`,{headers:{Cookie:cookie}});
   const body=await page.text();
   assert.equal(page.status,200);assert.ok(body.includes('id="cindy-stage-style"'));assert.equal(Number(page.headers.get('content-length')),Buffer.byteLength(body));
-  assert.equal(page.headers.get('x-frame-options'),null);assert.equal(page.headers.get('content-security-policy'),"frame-ancestors 'self' cindy-ghost://baguette-simulator");
-  const control=await fetch(`${bridge.base}/control?udid=${udid}&lang=zh-CN`);assert.equal(control.headers.get('content-security-policy'),"frame-ancestors 'self' cindy-ghost://baguette-simulator");
+  assert.equal(page.headers.get('x-frame-options'),null);assert.equal(page.headers.get('content-security-policy'),"frame-ancestors 'self' cindy-ghost://cindy-simulator");
+  const control=await fetch(`${bridge.base}/control?udid=${udid}&lang=zh-CN`);assert.equal(control.headers.get('content-security-policy'),"frame-ancestors 'self' cindy-ghost://cindy-simulator");
   const full=await (await fetch(`${bridge.base}/simulators/${udid}?handheld=0&cindyFull=1`,{headers:{Cookie:cookie}})).text();
   assert.ok(!full.includes('cindy-stage-style'));
   const json=await (await fetch(`${bridge.base}/simulators/${udid}/stream`,{headers:{Cookie:cookie}})).text();

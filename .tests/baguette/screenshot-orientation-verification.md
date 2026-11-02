@@ -93,7 +93,7 @@ and worker to the native-resolution renderer. Actual screen geometry is still
 checked before/after capture, and foldable/TV/Vision paths retain native geometry.
 
 Forge packed and installed 0.2.25 by updating the existing local instance
-`_ns__xd__baguette-simulator`; no publication or second installation was made.
+`_ns__xd__cindy-simulator`; no publication or second installation was made.
 In the running Cindy personal client, opened this task's iPhone 11 sidebar,
 pressed Rotate Right on Home, navigated to another task (confirmed the simulator
 control frame was destroyed), then returned. All 21 observations from the
@@ -165,7 +165,7 @@ they must not be directly compared with the previous session's single-run
 992 ms sidebar measurement, because machine load and the measured path differ.
 
 626 tests passed in the complete gate. Forge packed and updated the same local
-instance `_ns__xd__baguette-simulator` to 0.2.27. Its authenticated screenshot
+instance `_ns__xd__cindy-simulator` to 0.2.27. Its authenticated screenshot
 control endpoint (the endpoint used by the button) completed three requests in
 655, 637 and 589 ms. Read the resulting PNG from the actual system pasteboard:
 1792 × 828, 1,851,272 bytes, complete sideways Home screen. The actual embedded

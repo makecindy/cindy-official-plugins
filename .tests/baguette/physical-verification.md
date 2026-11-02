@@ -90,7 +90,7 @@ not equivalent to the simulator.
 - Original capture path on Duo inner display: discovery 99 ms, screen query 760 ms, capture 1109 ms, second screen query 429 ms, PNG decode 106 ms, JPEG encode 152 ms (~2.65 s excluding client polling). Outer-display comparison later: 149 + 416 + 858 + 552 + 175 + 75 ms (~2.23 s).
 - Added read-only phone JPEG preview to the existing paired tunnel listener, max 1280 px long edge. Display information has a one-second cache for preview only; input still reads fresh geometry. Unsigned viewing/export uses the unchanged CoreDevice path. Transport loss clears ready and falls back to unsigned viewing, without retrying input.
 - Xcode 27 build-for-testing passes. Required repo suites: 764 passed / 0 failed, 41.8 s. `git diff --check`, vendor inventory and changed JS syntax checks pass.
-- Host install receipt: action updated, version 0.3.2, namespace xd, original instance `_ns__xd__baguette-simulator`, enabled. Actual control returned ready; app launch returned previewOpened=true in Cindy task sidebar.
+- Host install receipt: action updated, version 0.3.2, namespace xd, original instance `_ns__xd__cindy-simulator`, enabled. Actual control returned ready; app launch returned previewOpened=true in Cindy task sidebar.
 - Current physical phone was folded onto display 1 (466×678 points). Eight authenticated installed-viewer frame requests: 744, 229, 167, 175, 231, 166, 624, 209 ms; mean 318 ms. These are frame request times, not glass-to-glass or click-to-display latency. Preview image visually matched IntegrationApp.
 - Real browser canvas click through the installed controller at the freshly observed Attributes button (233,144) changed the real phone from the main menu to the Attributes screen. Screenshot and fresh AX tree confirmed the transition. This fixes the concrete no-input regression; it does not establish native Cindy trackpad feel.
 - Clicking the aIdentifier field brought up the real keyboard. Typing immediately after that click returned accepted but left the field empty. A later viewer keyboard action with the keyboard already visible produced `Cindy test 032`, confirmed in the phone AX value. First-focus keyboard readiness remains an explicit compatibility gap; do not equate XCTest acceptance with visible insertion or replay uncertain typing.
@@ -113,7 +113,7 @@ not equivalent to the simulator.
 - Matches physical hardware model identifiers to the installed Xcode device catalog and uses the unchanged Baguette chrome CLI plus `_Bezel` component. Body, static button artwork, cutout and mask come from local DeviceKit resources; no Apple assets are packaged. Screen geometry selects the Duo panel independently of CoreDevice/simulator display-ID differences. Artwork is loaded and cached outside frame polling; live canvas/input listeners survive body replacement. Whole-body zoom and screen-only touch coordinates remain separate.
 - Browser validation uses current source, real local Xcode artwork and a previously captured IntegrationApp image. Device state/frame reads and all mutations are mocked. Visually inspected Duo cover (asymmetric corners), inner panel rot180 (crease), iPhone Air, and 320px light layout. Also exercised inner landscape, fit/percentage zoom, screen-relative click positions and noninteractive shell edges. Browser errors: none. This is layout/input-coordinate evidence, not live phone execution or native Cindy sidebar/trackpad acceptance.
 - Required suites: 771 passed / 0 failed, 41.29 s. Includes panel selection independent of IDs and pixel/alpha/cutout rotation. Vendor inventory and git diff check pass. Vendor bytes unchanged by this shell update.
-- Host installation receipt confirms 0.3.4 updated and enabled in original xd instance `_ns__xd__baguette-simulator`. Subsequent plugin devices reports the selected Duo disconnected; no installed live-view or input verification claimed. Did not switch to or manipulate unrelated connected phones. After Duo reconnects, reopen its viewer and complete installed-shell, immediate-first-focus typing and latency checks. Prior native trackpad and inner-panel input gaps remain.
+- Host installation receipt confirms 0.3.4 updated and enabled in original xd instance `_ns__xd__cindy-simulator`. Subsequent plugin devices reports the selected Duo disconnected; no installed live-view or input verification claimed. Did not switch to or manipulate unrelated connected phones. After Duo reconnects, reopen its viewer and complete installed-shell, immediate-first-focus typing and latency checks. Prior native trackpad and inner-panel input gaps remain.
 
 ## 0.3.5 Air screen availability and recovery — 2026-10-29
 
@@ -129,7 +129,7 @@ not equivalent to the simulator.
 - Physical percentages now size the original body directly, accounting for fixed parent/child padding. Body/artwork changes trigger parent measurement. Generic handheld measurement derives the applied scale from actual frame bounds. Added regressions for repeated measurements, resize, panel aspect changes and fit restoration.
 - Required repository suites: 775 passed / 0 failed, 40.44 s. Targeted controller/physical tests: 68 passed. Vendor inventory and diff check pass. No vendor bytes or native build changed in this follow-up.
 - Source browser checks used real Xcode Air artwork and mocked device frames. Installed-viewer browser checks used the real Air endpoint. Both validated 25/33/50/67/75/100/300%, repeated 67%, window resize, stored percentage after reload and fit at 320px width. Air body at 67% stayed 329.48×663 CSS px; at 100%, 492×990. Zero page errors. Screenshots inspected. Only viewer zoom was changed; no device input was sent.
-- Host receipt confirms 0.3.6 updated/enabled in original xd instance `_ns__xd__baguette-simulator`; Air viewer open returned previewOpened=true in Cindy task sidebar. Browser layout checks do not establish native sidebar trackpad feel or physical input latency; earlier input acceptance gaps remain separate.
+- Host receipt confirms 0.3.6 updated/enabled in original xd instance `_ns__xd__cindy-simulator`; Air viewer open returned previewOpened=true in Cindy task sidebar. Browser layout checks do not establish native sidebar trackpad feel or physical input latency; earlier input acceptance gaps remain separate.
 
 ## 0.3.7–0.3.8 control notices and third-party keyboard — 2026-10-29
 
@@ -177,7 +177,7 @@ not equivalent to the simulator.
   budget, while an input starts a fresh bounded video-response deadline;
   repeated input cannot postpone it. A regression verifies this distinction.
 - Host receipt confirms 0.3.20 updated and enabled in original instance
-  `_ns__xd__baguette-simulator`, namespace xd. Viewer receipt confirms the
+  `_ns__xd__cindy-simulator`, namespace xd. Viewer receipt confirms the
   selected Air opened in the Cindy task sidebar. Verification used headless
   Chrome against that installed authenticated controller, with real phone
   input/video, not mocked frames. Device: iPhone Air / iOS 27.2, paired network

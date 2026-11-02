@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const M=require('../../baguette-simulator/node/control-model.js');
+const M=require('../../cindy-simulator/node/control-model.js');
 test('restart submits the exact device and chosen mode in one operation, without retries',async()=>{
  const device={udid:'target',runtime:'iOS 27.0'};
  for(const mode of ['saving','standard','minimal']){

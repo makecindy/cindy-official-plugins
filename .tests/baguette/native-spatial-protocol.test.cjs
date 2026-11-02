@@ -7,7 +7,7 @@ const {execFileSync,spawnSync}=require('node:child_process');
 test('native pointer stream preserves large offsets, held masks and release while spatial limits remain', {skip:process.platform!=='darwin'},t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'cindy-spatial-protocol-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const source=fs.readFileSync(path.join(__dirname,'../../baguette-simulator/native/spatial.m'),'utf8');
+ const source=fs.readFileSync(path.join(__dirname,'../../cindy-simulator/native/spatial.m'),'utf8');
  const start=source.indexOf('static int stream('),end=source.indexOf('\nint main(');
  assert.ok(start>=0&&end>start);
  const fixture=fs.readFileSync(path.join(__dirname,'spatial-protocol.m'),'utf8');

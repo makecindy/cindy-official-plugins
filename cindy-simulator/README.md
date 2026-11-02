@@ -73,7 +73,9 @@ iOS startup now offers `saving` (default), `standard`, and `minimal` memory mode
 
 0.2.21 corrects the Agent input descriptions: touch-menu paste supports iOS and Android focused fields with an available paste menu; only iOS performs hardware-keyboard record cleanup. Input implementations are unchanged.
 
-One plugin (`baguette-simulator`), one device manager and one task-sidebar controller for both platforms. Devices belong to this plugin; Android Studio and Xcode default devices remain separate. The run switch, task bindings, idle shutdown, live screen, touch input, keyboard, screenshots and device switching share the same workflow. Requires Cindy 0.1.116 or later with the declared task-view capability.
+One plugin (`cindy-simulator`), one device manager and one task-sidebar controller for both platforms. Devices belong to this plugin; Android Studio and Xcode default devices remain separate. The run switch, task bindings, idle shutdown, live screen, touch input, keyboard, screenshots and device switching share the same workflow. Requires Cindy 0.1.116 or later with the declared task-view capability.
+
+The plugin ID and command are `cindy-simulator` (formerly `baguette-simulator` / `baguette`). The existing `BaguetteCindy` device, settings and task-binding directory is retained. Cindy 0.1.119 or later updates an installed public copy to the new ID in place and keeps its data; older clients keep receiving the previous-ID package, and organization copies are not migrated automatically. Avoid enabling both IDs together.
 
 ## Android setup and use
 
@@ -200,7 +202,7 @@ Capture waits for a complete first frame and confirms the screen before starting
 
 Installation compares bundle content checksums, including resources whose timestamps were preserved. Registration or signing changes use a full install. Container lookup failures are errors, not evidence that the App is absent; automatic installation stops before writing, and log queries retain their scope. A background install keeps the device busy until its writes settle. `method=touch` rejects `clear=true` and `keys` to preserve the on-screen keyboard; capture results retain the action's execution state.
 
-Cindy's official Device Simulator for Apple Silicon Macs, using bundled Baguette 0.2.10. It replaces the retired embedded simulator; Cindy shows previous users a one-time migration notice pointing here (plugin id `baguette-simulator`).
+Cindy's official Device Simulator for Apple Silicon Macs, using bundled Baguette 0.2.10. It replaces the retired embedded simulator; Cindy shows previous users a one-time migration notice pointing here (plugin id `cindy-simulator`).
 The name leaves room for future devices and platforms; it does not add platform support.
 Requires macOS 15.0+, Apple Silicon, Cindy 0.1.83+, Xcode 27 or newer and an installed iOS runtime. No first-run dependency download. Packaging collects nine portable USDZ model assets from the hash-pinned official release via `binary-dependencies.json`; the native executables remain tracked and macOS-only.
 
@@ -259,7 +261,7 @@ Known upstream limitation: stream disconnects can SIGABRT on iOS 27. The supervi
 
 Run `sh native/build.sh` on an Apple Silicon Mac with Xcode. This compiles the included Objective-C source and ad-hoc signs the helper. No dependency download. Baguette and HingeControl are rebuilt from v0.2.10 with `vendor-native.patch` (version constant, 3D scene release, and H.264 frame pacing with idle stop; see VENDOR-REVIEW.md); `native/build.sh` also builds the Android H.264 encoder helper; use `sh native/build-baguette.sh <verified-source-archive>` to reproduce the build, then `node native/inventory.mjs --write`. The release build uses whole-program LTO and Swift `-Osize`, strips symbols and ad-hoc signs the host executable to keep tracked binary content below the repository limit. The private device-set and 3D memory fixes this plugin needed were merged upstream (tddworks/baguette#122, #123). `node .tests/baguette/real-simulator-smoke.mjs --foldable` checks a build against real simulators in a throwaway device set.
 
-Run the repository contracts and `.tests/baguette-simulator.test.mjs`. Review VENDOR-REVIEW.md, THIRD-PARTY-LICENSES.txt and the proposal [#119](https://github.com/makecindy/cindy-official-plugins/issues/119). Initial provisioning is an empty targeted audience, not all users. Final package installation in eligible Cindy must be recorded separately from direct Node/native tests.
+Run the repository contracts and `.tests/cindy-simulator.test.mjs`. Review VENDOR-REVIEW.md, THIRD-PARTY-LICENSES.txt and the proposal [#119](https://github.com/makecindy/cindy-official-plugins/issues/119). Initial provisioning is an empty targeted audience, not all users. Final package installation in eligible Cindy must be recorded separately from direct Node/native tests.
 
 The optional location panel sends search text and requested map tiles to OpenStreetMap through the Node Worker (fixed nominatim.openstreetmap.org and tile.openstreetmap.org HTTPS endpoints). Browser requests remain same-origin; redirects and arbitrary upstream URLs are rejected. No account credentials are forwarded.
 

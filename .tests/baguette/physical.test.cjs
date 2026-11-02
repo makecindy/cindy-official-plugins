@@ -2,13 +2,13 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),http=require('node:http');
-const {normalize,createDevices}=require('../../baguette-simulator/node/physical/devices.cjs');
-const {createAgent}=require('../../baguette-simulator/node/physical/agent.cjs');
+const {normalize,createDevices}=require('../../cindy-simulator/node/physical/devices.cjs');
+const {createAgent}=require('../../cindy-simulator/node/physical/agent.cjs');
 const id='00000000-0000-4000-8000-000000000001';
 const row=()=>({identifier:id,properties:{hardware:{reality:'physical',deviceType:'iPhone',udid:'00008160-0000000000000001'},state:{name:'Test phone',developerModeStatus:'enabled'},software:{osVersionNumber:{stringValue:'27.2'}},connection:{state:'connected',tunnelIPAddress:'fd00::1',transportType:'wired'}}});
 async function temporary(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'physical-test-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
 test('runner startup reports an explicit locked-phone diagnostic from the current log tail',async t=>{
- const {runnerLocked}=require('../../baguette-simulator/node/physical/wda.cjs'),root=await temporary(t),log=path.join(root,'runner.log');
+ const {runnerLocked}=require('../../cindy-simulator/node/physical/wda.cjs'),root=await temporary(t),log=path.join(root,'runner.log');
  assert.equal(await runnerLocked(log),false);
  await fs.writeFile(log,'Xcode cannot launch WebDriverAgentRunner because the device is locked.');assert.equal(await runnerLocked(log),true);
  await fs.writeFile(log,'Unlock Test Phone to Continue');assert.equal(await runnerLocked(log),true);
@@ -27,7 +27,7 @@ test('physical destructive simulator operations reject before any device write',
  const root=await temporary(t),calls=[];
  // Exercise Mac discovery with mocked commands even on the Linux CI runner.
  // Do not change the production host guard or consult attached host devices.
- const filename=path.resolve('baguette-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);
+ const filename=path.resolve('cindy-simulator/node/physical/index.cjs'),load=require('node:module').createRequire(filename);
  const context={module:{exports:{}},require(name){return name==='./devices.cjs'?{...load(name),createDevices:options=>createDevices({...options,host:'darwin'})}:load(name);}};
  require('node:vm').runInNewContext(await fs.readFile(filename,'utf8'),context,{filename});
  const adapter=context.module.exports.createPhysical({root,children:new Set(),run:async(file,args)=>{
@@ -38,7 +38,7 @@ test('physical destructive simulator operations reject before any device write',
  assert.equal(calls.length,6);
 });
 test('signing cancellation is immediate, repeatable, and late completion cannot launch a runner',async t=>{
- const root=await temporary(t),filename=path.resolve('baguette-simulator/node/physical/wda.cjs'),load=require('node:module').createRequire(filename);
+ const root=await temporary(t),filename=path.resolve('cindy-simulator/node/physical/wda.cjs'),load=require('node:module').createRequire(filename);
  let finish;const signing=new Promise(resolve=>finish=resolve),writes=[];
  const context={module:{exports:{}},__dirname:path.dirname(filename),process,Buffer,URL,setTimeout,clearTimeout,require(name){return name==='./signing.cjs'?{createSigning:()=>({resolve:()=>signing})}:load(name);}};
  require('node:vm').runInNewContext(await fs.readFile(filename,'utf8'),context,{filename});
@@ -54,7 +54,7 @@ test('signing cancellation is immediate, repeatable, and late completion cannot 
 });
 test('global stop leaves physical phones running and ignores their discovery errors',async t=>{
  const root=await temporary(t),calls=[];
- const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),dispatch:async (method,p)=>{
+ const runtime=require('../../cindy-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),dispatch:async (method,p)=>{
   if(method==='close_viewer')assert.equal(p._stopControls,true);
   calls.push(method);return method==='devices'?{devices:[normalize(row())],platformErrors:[{platform:'physical',message:'offline'}]}:{ok:true};
  }});
@@ -62,7 +62,7 @@ test('global stop leaves physical phones running and ignores their discovery err
 });
 test('disconnect cancels a setup job while its device lock is held',async t=>{
  const root=await temporary(t);let resolve;const pending=new Promise(r=>resolve=r);
- const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),pendingOperation:()=>pending,dispatch:async method=>{
+ const runtime=require('../../cindy-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),pendingOperation:()=>pending,dispatch:async method=>{
   if(method==='physical_disconnect'){resolve();return {execution:'executed'};}return {state:'running'};
  }});
  await runtime.request('device',{udid:id,action:'connect'});
@@ -89,7 +89,7 @@ test('physical tap uses view points, Unicode input is preserved and observation 
  const result=await a.typeText({udid:id},{text:'once',observe:'ui',settle:0});assert.equal(result.execution,'executed');assert.match(result.observationError.message,/offline/);
 });
 test('viewer requires exact origin, token and opened device; parallel opens share the server',async t=>{
- const {createViewer}=require('../../baguette-simulator/node/physical/viewer.cjs');const calls=[];
+ const {createViewer}=require('../../cindy-simulator/node/physical/viewer.cjs');const calls=[];
  const viewer=createViewer({devices:{target:async()=>normalize(row())},wda:{state:()=>({ready:true})},agent:{}});
  viewer.configure({assertEnabled:async()=>{},request:async(m,p)=>{calls.push([m,p]);return {execution:'executed'};}});t.after(()=>viewer.close());
  const [a,b]=await Promise.all([viewer.open(id,'en'),viewer.open(id,'en')]);assert.equal(a.url,b.url);
@@ -101,9 +101,9 @@ test('viewer requires exact origin, token and opened device; parallel opens shar
  assert.equal((await post(headers)).status,200);assert.equal(calls.length,1);assert.equal(calls[0][0],'tap');
 });
 test('physical viewing and screenshots use the shared controller without preparing signing or control',async t=>{
- const {PNG}=require('../../baguette-simulator/vendor/android/deps.cjs');
+ const {PNG}=require('../../cindy-simulator/vendor/android/deps.cjs');
  const calls=[],screen={displayId:2,width:2,height:3,rotation:'rot0'},image=new PNG({width:2,height:3});
- const viewer=require('../../baguette-simulator/node/physical/viewer.cjs').createViewer({devices:{target:async()=>normalize(row()),screen:async()=>screen},wda:{state:()=>({ready:false,state:'disconnected'})},agent:{preview:async()=>({screen,image:'encoded',mime:'image/jpeg',fast:false}),screenshot:async()=>({path:'/test.png'})}});
+ const viewer=require('../../cindy-simulator/node/physical/viewer.cjs').createViewer({devices:{target:async()=>normalize(row()),screen:async()=>screen},wda:{state:()=>({ready:false,state:'disconnected'})},agent:{preview:async()=>({screen,image:'encoded',mime:'image/jpeg',fast:false}),screenshot:async()=>({path:'/test.png'})}});
  viewer.configure({assertEnabled:async()=>{},status:async()=>({devices:[normalize(row())],settings:{enabled:true}}),request:async(m,p)=>{calls.push([m,p]);return {state:'running',ready:false};}});t.after(()=>viewer.close());
  const u=new URL((await viewer.open(id,'zh-CN')).url),token=new URLSearchParams(u.hash.slice(1)).get('cindyClipboard').split('.')[1];
  const post=async(route,action)=>{const r=await fetch(u.origin+route,{method:'POST',headers:{Origin:u.origin,'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action,udid:id,x:1,y:1})});return r.json();};
@@ -127,12 +127,12 @@ test('native screenshot selects the active panel and deletes the temporary file 
  for(const file of files)await assert.rejects(fs.stat(file),e=>e.code==='ENOENT');
 });
 test('view-only frame never calls the control runner',async()=>{
- const {PNG}=require('../../baguette-simulator/vendor/android/deps.cjs'),image=new PNG({width:4,height:6}),screen={width:2,height:3,displayId:2,rotation:'rot0'};
+ const {PNG}=require('../../cindy-simulator/vendor/android/deps.cjs'),image=new PNG({width:4,height:6}),screen={width:2,height:3,displayId:2,rotation:'rot0'};
  const agent=createAgent({devices:{capture:async()=>({bytes:PNG.sync.write(image),screen})},wda:{call:()=>{throw Error('must not connect');},state:()=>{throw Error('must not depend on control');}}});
  assert.equal((await agent.frame({udid:id})).screen.ratio,2);
 });
 test('signing chooses a single team or the installed runner; ambiguous teams require selection',()=>{
- const {choose}=require('../../baguette-simulator/node/physical/signing.cjs'),teams=[{id:'AAAAAAAAAA',name:'Team A'},{id:'BBBBBBBBBB',name:'Team B'}];
+ const {choose}=require('../../cindy-simulator/node/physical/signing.cjs'),teams=[{id:'AAAAAAAAAA',name:'Team A'},{id:'BBBBBBBBBB',name:'Team B'}];
  assert.equal(choose(teams.slice(0,1)),teams[0].id);assert.equal(choose(teams),null);
  assert.equal(choose(teams,undefined,[{bundleIdentifier:'com.makecindy.WebDriverAgent.bbbbbbbbbb.xctrunner'}]),'BBBBBBBBBB');
  assert.equal(choose(teams,'AAAAAAAAAA',[{bundleIdentifier:'com.makecindy.WebDriverAgent.bbbbbbbbbb.xctrunner'}]),'AAAAAAAAAA');
@@ -141,17 +141,17 @@ test('signing chooses a single team or the installed runner; ambiguous teams req
 test('lost response after a physical write remains unknown, expired budget sends nothing',async t=>{
  let received=0;const server=http.createServer((req)=>{received++;req.resume();req.on('end',()=>req.socket.destroy());});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const {request}=require('../../baguette-simulator/node/physical/wda.cjs'),base=`http://127.0.0.1:${server.address().port}`;
+ const {request}=require('../../cindy-simulator/node/physical/wda.cjs'),base=`http://127.0.0.1:${server.address().port}`;
  await assert.rejects(request(base,'/input',{body:{text:'once'},mutation:true,deadline:Date.now()-1}),e=>e.execution==='not_executed');assert.equal(received,0);
  await assert.rejects(request(base,'/input',{body:{text:'once'},mutation:true}),e=>e.execution==='unknown');assert.equal(received,1);
 });
 test('connected control holds the worker but merely attached phones do not',async t=>{
  const root=await temporary(t);let now=0,ready=false;
- const runtime=require('../../baguette-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),now:()=>now,holdMs:20,holdPollMs:10,sleep:async ms=>{now+=ms;},dispatch:async()=>({devices:[{...normalize(row()),control:{ready}}]})});
+ const runtime=require('../../cindy-simulator/node/runtime.cjs').createRuntime({settingsFile:path.join(root,'settings.json'),now:()=>now,holdMs:20,holdPollMs:10,sleep:async ms=>{now+=ms;},dispatch:async()=>({devices:[{...normalize(row()),control:{ready}}]})});
  assert.equal((await runtime.request('device_hold')).running,false);ready=true;assert.equal((await runtime.request('device_hold')).running,true);
 });
 test('Duo chooses the active integrated display rather than its inactive primary panel',()=>{
- const {activeScreen}=require('../../baguette-simulator/node/physical/devices.cjs');
+ const {activeScreen}=require('../../cindy-simulator/node/physical/devices.cjs');
  const cover={displayId:1,active:false,primary:true,type:{integrated:{}},bounds:[[0,0],[1398,2034]],pointScale:3,currentOrientation:'rot0'};
  const inner={...cover,displayId:2,active:true,primary:false,bounds:[[0,0],[2007,2853]],currentOrientation:'rot180'};
  assert.deepEqual(activeScreen({displays:[cover,inner]}),{displayId:2,width:669,height:951,rotation:'rot180'});
@@ -178,13 +178,13 @@ test('ready preview uses supplied metadata and rejects a fold mismatch',async()=
 });
 
 test('lost preview transport falls back to unsigned viewing without sending or replaying input',async()=>{
- const {PNG}=require('../../baguette-simulator/vendor/android/deps.cjs');const img=new PNG({width:2,height:3}),screen={width:2,height:3,displayId:2,rotation:'rot0'};let ready=true,captures=0,calls=0;
+ const {PNG}=require('../../cindy-simulator/vendor/android/deps.cjs');const img=new PNG({width:2,height:3}),screen={width:2,height:3,displayId:2,rotation:'rot0'};let ready=true,captures=0,calls=0;
  const agent=createAgent({devices:{screen:async()=>screen,capture:async()=>{captures++;return {bytes:PNG.sync.write(img),screen};}},wda:{state:()=>({ready}),call:async()=>{calls++;ready=false;throw Error('connection closed');}}});
  const f=await agent.preview({udid:id});assert.equal(f.fast,false);assert.equal(captures,1);assert.equal(calls,1);assert.equal(f.screen.displayId,2);
 });
 
 test('preview refresh does not block fresh frames, shares captures and bounds stale metadata',async()=>{
- const {createPreview}=require('../../baguette-simulator/node/physical/preview.cjs');let now=0,targets=0,frames=0,resolveRefresh,resolveFrame;
+ const {createPreview}=require('../../cindy-simulator/node/physical/preview.cjs');let now=0,targets=0,frames=0,resolveRefresh,resolveFrame;
  const preview=createPreview({now:()=>now,devices:{target:async()=>{targets++;return {udid:id};},screen:async()=>targets===1?{displayId:1}:new Promise(r=>resolveRefresh=r)},wda:{state:()=>({ready:true})},agent:{preview:async(d,p,screen)=>{frames++;return resolveFrame===false?new Promise(r=>resolveFrame=r):{displayId:screen.displayId};}}});
  assert.equal((await preview.frame(id)).displayId,1);assert.equal(targets,1);
  now=800;assert.equal((await preview.frame(id)).displayId,1,'refresh must not pause a usable frame');assert.equal(targets,2);
@@ -197,7 +197,7 @@ test('preview refresh does not block fresh frames, shares captures and bounds st
 });
 
 test('failed metadata refresh stops stale viewing and never sends device input',async()=>{
- const {createPreview}=require('../../baguette-simulator/node/physical/preview.cjs');let now=0,offline=false,frames=0;
+ const {createPreview}=require('../../cindy-simulator/node/physical/preview.cjs');let now=0,offline=false,frames=0;
  const preview=createPreview({now:()=>now,devices:{target:async()=>{if(offline)throw Error('offline');return {udid:id};},screen:async()=>({displayId:1})},wda:{state:()=>({ready:true})},agent:{preview:async()=>{frames++;return {};}}});
  await preview.frame(id);offline=true;now=2100;await assert.rejects(preview.frame(id),/offline/);assert.equal(frames,1);
 });
@@ -216,7 +216,7 @@ test('keyboard readiness precedes text and timeout reports not_executed without 
 test('a WDA application error does not masquerade as a broken transport',async t=>{
  const server=http.createServer((req,res)=>{res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({value:{error:'invalid argument',message:'invalid display'}}));});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const {request}=require('../../baguette-simulator/node/physical/wda.cjs');
+ const {request}=require('../../cindy-simulator/node/physical/wda.cjs');
  await assert.rejects(request(`http://127.0.0.1:${server.address().port}`,'/frame'),e=>e.execution==='not_executed'&&!e.transport);
 });
 
@@ -231,7 +231,7 @@ test('viewer batches only adjacent unsent text and cancellation never replays it
   async fetch(_url,options){const p=JSON.parse(options.body);if(p.action==='frame'){context.document.hidden=true;return {ok:true,json:async()=>({image:'jpeg',screen:{width:400,height:800,displayId:1,rotation:'rot0'},control:{state:'ready',ready:true},fast:true})};}
    calls.push(p);if(calls.length===1)await new Promise(r=>release=r);return {ok:true,json:async()=>({execution:'executed'})};}
  };context.window=context;t.after(()=>{for(const timer of timers)clearTimeout(timer);});
- vm.runInNewContext(await fs.readFile(path.resolve('baguette-simulator/node/physical/screen.js'),'utf8'),context);
+ vm.runInNewContext(await fs.readFile(path.resolve('cindy-simulator/node/physical/screen.js'),'utf8'),context);
  const settle=()=>new Promise(r=>setImmediate(r));await settle();
  const text=value=>{const k=element('keyboard');k.value=value;k.handlers.input({isComposing:false});};
  text('a');await settle();text('你');text('好');context.__nativeHome();text('d');text('e');
@@ -244,7 +244,7 @@ test('viewer batches only adjacent unsent text and cancellation never replays it
 });
 
 test('physical chrome selects the panel by its native size, never the CoreDevice display ID',()=>{
- const {selectPanel,rotationFor,turnRect}=require('../../baguette-simulator/node/physical/chrome.cjs');
+ const {selectPanel,rotationFor,turnRect}=require('../../cindy-simulator/node/physical/chrome.cjs');
  const cover={displayType:'integrated',deviceName:'primary',width:1398,height:2034,scale:3};
  const inner={...cover,deviceName:'primary-1',width:2007,height:2853};
  assert.equal(selectPanel([cover,inner],{width:951,height:669,displayId:1}),inner);
@@ -259,7 +259,7 @@ test('physical chrome selects the panel by its native size, never the CoreDevice
 });
 
 test('bezel pixels and mask alpha rotate with the screen cutout',()=>{
- const {PNG}=require('../../baguette-simulator/vendor/android/deps.cjs'),{turnPNG}=require('../../baguette-simulator/node/physical/chrome.cjs');
+ const {PNG}=require('../../cindy-simulator/vendor/android/deps.cjs'),{turnPNG}=require('../../cindy-simulator/node/physical/chrome.cjs');
  const src=new PNG({width:2,height:3});for(let i=0;i<6;i++){src.data[i*4]=i+1;src.data[i*4+3]=i*40;}
  const bytes=PNG.sync.write(src);
  for(const [angle,expected] of [[90,[5,3,1,6,4,2]],[180,[6,5,4,3,2,1]],[270,[2,4,6,1,3,5]]]){
@@ -270,7 +270,7 @@ test('bezel pixels and mask alpha rotate with the screen cutout',()=>{
 });
 
 test('single-screen Air wakes without optional active or uniqueId fields; foldables never guess a panel',async t=>{
- const {activeScreen}=require('../../baguette-simulator/node/physical/devices.cjs');
+ const {activeScreen}=require('../../cindy-simulator/node/physical/devices.cjs');
  const air={displayId:1,primary:true,type:{integrated:{}},bounds:[[0,0],[1260,2736]],pointScale:3,currentOrientation:'rot0',backlightState:'activeOn'};
  assert.deepEqual(activeScreen({displays:[air]}),{displayId:1,width:420,height:912,rotation:'rot0'});
  assert.throws(()=>activeScreen({displays:[{...air,active:false}]}),e=>e.code==='DISPLAY_UNAVAILABLE');
@@ -288,7 +288,7 @@ test('single-screen Air wakes without optional active or uniqueId fields; foldab
 });
 
 test('preview resumes after screen-off metadata failure without reconnecting control',async()=>{
- const {createPreview}=require('../../baguette-simulator/node/physical/preview.cjs');let awake=false;
+ const {createPreview}=require('../../cindy-simulator/node/physical/preview.cjs');let awake=false;
  const preview=createPreview({devices:{target:async()=>({udid:id}),screen:async()=>{if(!awake)throw Object.assign(Error('off'),{code:'DISPLAY_ASLEEP'});return {displayId:1};}},wda:{state:()=>({ready:true})},agent:{preview:async(d,p,screen)=>({screen,image:'new'})}});
  await assert.rejects(preview.frame(id),e=>e.code==='DISPLAY_ASLEEP');awake=true;
  assert.equal((await preview.frame(id)).image,'new');

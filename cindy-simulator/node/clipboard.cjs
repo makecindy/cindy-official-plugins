@@ -39,7 +39,7 @@ async function createClipboard(origin,perform,control,preferred={}){
     res.writeHead(200,{'Content-Type':asset.type,'X-Content-Type-Options':'nosniff'});
     return res.end(require('node:fs').readFileSync(require('node:path').join(__dirname,asset.file)));
    }
-   if(req.url.startsWith('/control?')){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"frame-ancestors 'self' cindy-ghost://baguette-simulator",'Referrer-Policy':'no-referrer'});return res.end(require('./viewer-proxy.cjs')[new URL(req.url,'http://localhost').searchParams.get('lang')==='zh-CN'?'chineseHtml':'html']);}
+   if(req.url.startsWith('/control?')){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"frame-ancestors 'self' cindy-ghost://cindy-simulator",'Referrer-Policy':'no-referrer'});return res.end(require('./viewer-proxy.cjs')[new URL(req.url,'http://localhost').searchParams.get('lang')==='zh-CN'?'chineseHtml':'html']);}
    if(!authorized(req))return reply(403,{error:'Viewer capability required'});
    if(req.url.startsWith('/map/'))return require('./map.cjs').serveMap(req,res,own);
    return require('./viewer-proxy.cjs').proxyRequest(req,res,control.port,token);

@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {resourceUsage}=require('../../baguette-simulator/node/resource-usage.cjs');
+const {resourceUsage}=require('../../cindy-simulator/node/resource-usage.cjs');
 const directory='/private/Sim Devices/device-one',device={udid:'one',state:'Booted'};
 const processes=`10 1 100 launchd_sim ${directory}/data/var/run/launchd_bootstrap.plist
 11 10 200 /runtime/SpringBoard
@@ -56,7 +56,7 @@ test('expired budget starts no resource subprocess',async()=>{
 
 
 test('resource cache shares in-flight work and separates memory and disk expiry across owned devices',async()=>{
- const {createResourceCache}=require('../../baguette-simulator/node/resource-usage.cjs');let now=1000;const calls=[];
+ const {createResourceCache}=require('../../cindy-simulator/node/resource-usage.cjs');let now=1000;const calls=[];
  const cache=createResourceCache({now:()=>now,measure:async p=>{calls.push([p.device.udid,p.metrics[0]]);return {[p.metrics[0]]:{bytes:123,status:'ok'}};}});
  const options={device,directory};
  await Promise.all([cache.read(options),cache.read(options),cache.read({...options,refresh:true})]);
@@ -70,7 +70,7 @@ test('resource cache shares in-flight work and separates memory and disk expiry 
  await cache.read({...options,device:{...device,state:'Shutdown'}});assert.equal(calls.length,10);assert.deepEqual(calls.at(-1),['one','memory']);
 });
 test('failed cache refresh retains the last known value with its original timestamp and a bounded retry',async()=>{
- const {createResourceCache}=require('../../baguette-simulator/node/resource-usage.cjs');let now=1000,fail=false,count=0;
+ const {createResourceCache}=require('../../cindy-simulator/node/resource-usage.cjs');let now=1000,fail=false,count=0;
  const cache=createResourceCache({now:()=>now,measure:async p=>{count++;if(fail)throw Error('timeout');return {[p.metrics[0]]:{bytes:456,status:'ok'}};}});
  const options={device,directory};const first=await cache.read(options);fail=true;now+=16000;
  const stale=await cache.read(options);assert.equal(stale.memory.bytes,456);assert.equal(stale.memory.stale,true);assert.equal(stale.memory.sampledAt,first.memory.sampledAt);
@@ -79,7 +79,7 @@ test('failed cache refresh retains the last known value with its original timest
  now+=30000;fail=false;const recovered=await cache.read(options);assert.equal(count,4);assert.equal(recovered.memory.stale,undefined);
 });
 test('lifecycle changes cannot let a late memory sample overwrite the new state',async()=>{
- const {createResourceCache}=require('../../baguette-simulator/node/resource-usage.cjs');const pending=[];
+ const {createResourceCache}=require('../../cindy-simulator/node/resource-usage.cjs');const pending=[];
  const cache=createResourceCache({measure:p=>new Promise(resolve=>pending.push({p,resolve}))});
  const old=cache.read({device,directory});await Promise.resolve();
  const current=cache.read({device:{...device,state:'Shutdown'},directory});await Promise.resolve();

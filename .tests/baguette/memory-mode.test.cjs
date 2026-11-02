@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),vm=require('node:vm');
-const {createMemoryModes,profiles,validateMode}=require('../../baguette-simulator/node/memory-mode.cjs');
+const {createMemoryModes,profiles,validateMode}=require('../../cindy-simulator/node/memory-mode.cjs');
 const udid='00000000-0000-4000-8000-000000000001',device={udid,state:'Shutdown'};
 class Failure extends Error{constructor(code,message,execution='not_executed'){super(message);this.code=code;this.execution=execution;}}
 async function fixture(t){
@@ -52,7 +52,7 @@ test('verification reads active overrides and does not confuse malformed output 
  f.live('not supported');await assert.rejects(f.memory.verify(device),e=>e.code==='MEMORY_MODE_UNVERIFIED');
 });
 test('device reads opt into fresh memory evidence without mutating devices; a failed probe retains the list',async()=>{
- const dir=path.resolve('baguette-simulator/node'),calls=[];
+ const dir=path.resolve('cindy-simulator/node'),calls=[];
  let mode='saving',fail=false;
  const context={module:{exports:{}},__dirname:dir,process:{platform:'darwin',arch:'arm64'},require(name){
   if(name==='./physical/index.cjs')return {createPhysical:()=>({owns:async()=>false,dispatch:async()=>({devices:[]})})};
@@ -85,7 +85,7 @@ test('device reads opt into fresh memory evidence without mutating devices; a fa
  assert.equal(devices[0].memoryMode.verified,false);assert.deepEqual(calls,[udid,udid,udid,udid]);
 });
 test('core boot owns mode application, preserves partial evidence and rejects unsupported platforms',async()=>{
- const dir=path.resolve('baguette-simulator/node');
+ const dir=path.resolve('cindy-simulator/node');
  for(const outcome of ['success','timeout','unverified','unsupported','invalid']){
   const calls=[];let state='Shutdown';
   const runtime=outcome==='unsupported'?'com.apple.CoreSimulator.SimRuntime.tvOS-27-0':'com.apple.CoreSimulator.SimRuntime.iOS-27-0';

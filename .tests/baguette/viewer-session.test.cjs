@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),net=require('node:net');
-const {createClipboard}=require('../../baguette-simulator/node/clipboard.cjs');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
+const {createClipboard}=require('../../cindy-simulator/node/clipboard.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
 const udid='00000000-0000-4000-8000-000000000001';
 const control={port:1,status:async()=>({ready:true})};
 const freePort=()=>new Promise(r=>{const s=net.createServer().listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>r(p));});});
@@ -37,9 +37,9 @@ test('the viewer status preserves screen health and reports only the unreadable 
   const context={module:{exports:{}},process:{pid:process.pid},require(name){
    if(name==='./clipboard.cjs')return {createClipboard:async(_origin,_perform,control)=>{bridge=control;return {session:{port:12345,token:'a'.repeat(64)}};}};
    if(name==='node:http')return {get(_url,_opts,callback){const request=new EventEmitter(),response=new EventEmitter();request.destroy=()=>{};response.statusCode=ready?200:503;response.resume=()=>{};queueMicrotask(()=>{callback(response);response.emit('end');});return request;}};
-   return require(name.startsWith('./')?path.resolve('baguette-simulator/node',name):name);
+   return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
   }};
-  vm.runInNewContext(syncFs.readFileSync('baguette-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.testBridge=initializeBridge;',context);
+  vm.runInNewContext(syncFs.readFileSync('cindy-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.testBridge=initializeBridge;',context);
   context.module.exports.configureControls(runtime);
   await context.module.exports.testBridge({base:'http://example.test',port:12345,generation:1},path.join(dir,'devices'),async()=>{});
   const status=await bridge.status({udid});

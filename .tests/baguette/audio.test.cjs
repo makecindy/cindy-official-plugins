@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
 const {promisify}=require('node:util'),exec=promisify(require('node:child_process').execFile);
-const {createAudio,playbackStatus}=require('../../baguette-simulator/node/audio.cjs');
+const {createAudio,playbackStatus}=require('../../cindy-simulator/node/audio.cjs');
 class Failure extends Error {constructor(code,message,execution='not_executed'){super(message);Object.assign(this,{code,execution});}}
 test('Apple cold boot preparation mutes before clients start and preserves routing and per-device volume',{skip:process.platform!=='darwin'},async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'cindy-audio-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));

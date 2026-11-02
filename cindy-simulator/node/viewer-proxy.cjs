@@ -73,7 +73,7 @@ function proxyRequest(req,res,port,token){
  const upstream=http.request({hostname:'127.0.0.1',port,path:req.url,method:req.method,headers:{...forwarded,host:`127.0.0.1:${port}`,origin:`http://127.0.0.1:${port}`}},response=>{
   const headers={...response.headers};delete headers['x-frame-options'];
   // Only our controller (same origin) under this plugin's Cindy panel page may embed the native page.
-  headers['content-security-policy']=((headers['content-security-policy']||'').replace(/frame-ancestors[^;]*(;|$)/gi,'')+"; frame-ancestors 'self' cindy-ghost://baguette-simulator").replace(/^;\s*/,'');
+  headers['content-security-policy']=((headers['content-security-policy']||'').replace(/frame-ancestors[^;]*(;|$)/gi,'')+"; frame-ancestors 'self' cindy-ghost://cindy-simulator").replace(/^;\s*/,'');
   const html=devicePage&&response.statusCode===200&&/text\/html/i.test(headers['content-type']||'')&&!headers['content-encoding'];
   if(!html){res.writeHead(response.statusCode,headers);return response.pipe(res);}
   const chunks=[];

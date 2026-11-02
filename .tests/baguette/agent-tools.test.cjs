@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const path=require('node:path');const fs=require('node:fs');const os=require('node:os');
-const node=path.join(__dirname,'../../baguette-simulator/node');
+const node=path.join(__dirname,'../../cindy-simulator/node');
 const G=require(path.join(node,'geometry.cjs'));const input=require(path.join(node,'input.cjs'));
 
 test('view points round-trip through every orientation, and frames turn with the screen',()=>{
