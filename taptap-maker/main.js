@@ -538,12 +538,14 @@ function normalizeMakerPluginGuidance(value) {
         return '- 本地诊断环境未就绪；Cindy 插件暂不提供 Python 或 Lua LSP 自动安装入口，不影响远端构建。';
       }
       var normalized = line
-        .replace(/运行\s*\x60?taptap-maker git sync(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
+        .replace(/(?:运行|用)\s*\x60?taptap-maker git sync(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
           '如需同步，先取得用户授权后通过 Cindy 通用 Git 拉取并合并 origin/main；提交或构建使用 maker_build（会提交并推送）')
         .replace(/或运行\s*\x60?taptap-maker git push\x60?/g,
           '经用户明确要求提交或构建后调用 maker_build（会提交并推送）')
-        .replace(/(?:或)?运行\s*\x60?taptap-maker git cloud-status(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
+        .replace(/(?:或)?(?:运行|用)\s*\x60?taptap-maker git cloud-status(?: --target-dir <项目目录>)?\x60?[^。；]*/g,
           '通过 Maker 项目页面核对云端改动与提交记录，确认结果前不要重试提交或构建')
+        .replace(/(?:可用|运行|用)\s*\x60?taptap-maker git cloud-(?:diff|commit)\b[^。；]*/g,
+          '通过 Maker 项目页面核对云端差异和提交记录；确认结果前不要重试，确认后仅在用户授权提交或构建时调用 maker_build')
         .replace(/`?maker_status_lite`?/g, '`maker_status`')
         .replace(/`?maker_build_current_directory`?/g, '`maker_build`')
         .replace(/`?taptap-maker login`?/g, '`maker_login`')

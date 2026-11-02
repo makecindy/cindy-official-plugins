@@ -120,7 +120,7 @@ request/correlation ID, reproduction steps, visible Maker tools, client version,
 Do not include the complete conversation. Send that JSON through stdin, never argv, while running:
 
 ```text
-npx -y --package @taptap/maker@0.0.39 taptap-maker mcp report --ide <client> --target-dir <project> --context-stdin --consent --json
+npx -y --package @taptap/maker@0.0.40 taptap-maker mcp report --ide <client> --target-dir <project> --context-stdin --consent --json
 ```
 
 Prefer the active client's exact Maker MCP `command` plus ordered `args`, then append the `mcp
