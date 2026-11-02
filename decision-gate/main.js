@@ -14,7 +14,7 @@ const MESSAGES = {
     whyJudgeFailed: "Could not judge, using the fallback model",
     fallbackSummary: "{reason} → {model}",
     noteNoFallback: "Saved. Set a fallback model with set_fallback_model: without one, this plugin’s model does not appear in the new task picker.",
-    modelAmbiguous: "“{model}” matches several models: {candidates}. Pass model with agent and providerId from availableModels.",
+    modelAmbiguous: "“{model}” matches several models: {candidates}. Pass model with agent, providerId and agentDeviceId from availableModels.",
     serviceAuth: "The API key was rejected. Check or replace it under Judged by.",
     serviceLimit: "The judge service limit or quota was reached. Try again later or check your plan.",
     serviceDown: "The judge service is temporarily unavailable. Please try again later.",
@@ -46,7 +46,7 @@ const MESSAGES = {
     whyJudgeFailed: "判断失败，用保底模型",
     fallbackSummary: "{reason} → {model}",
     noteNoFallback: "已保存。还要用 set_fallback_model 设置保底模型，否则新任务的模型选择器里不会出现这个模型。",
-    modelAmbiguous: "「{model}」对应多个模型：{candidates}。请按 availableModels 同时传 model、agent 和 providerId。",
+    modelAmbiguous: "「{model}」对应多个模型：{candidates}。请按 availableModels 同时传 model、agent、providerId 和 agentDeviceId。",
     serviceAuth: "API Key 被拒绝。请在「判断用」里检查或更换。",
     serviceLimit: "判断服务达到限额或额度不足。请稍后再试，或检查套餐。",
     serviceDown: "判断服务暂时不可用，请稍后再试。",
@@ -78,7 +78,7 @@ const MESSAGES = {
     whyJudgeFailed: "判断できなかったため、保険のモデルを使います",
     fallbackSummary: "{reason} → {model}",
     noteNoFallback: "保存しました。set_fallback_model で保険のモデルを設定してください。未設定だと新しいタスクのモデル選択に表示されません。",
-    modelAmbiguous: "「{model}」は複数のモデルに一致します: {candidates}。availableModels の model、agent、providerId を指定してください。",
+    modelAmbiguous: "「{model}」は複数のモデルに一致します: {candidates}。availableModels の model、agent、providerId、agentDeviceId を指定してください。",
     serviceAuth: "API キーが拒否されました。判断モデルの設定で確認または変更してください。",
     serviceLimit: "判断サービスの上限またはクォータに達しました。後でもう一度試すか、プランを確認してください。",
     serviceDown: "判断サービスは一時的に利用できません。後でもう一度お試しください。",
@@ -110,7 +110,7 @@ const MESSAGES = {
     whyJudgeFailed: "판단하지 못해 기본 모델을 사용합니다",
     fallbackSummary: "{reason} → {model}",
     noteNoFallback: "저장했습니다. set_fallback_model로 기본 모델을 설정하세요. 없으면 새 작업의 모델 선택기에 나타나지 않습니다.",
-    modelAmbiguous: "“{model}”에 해당하는 모델이 여러 개입니다: {candidates}. availableModels의 model, agent, providerId를 함께 전달하세요.",
+    modelAmbiguous: "“{model}”에 해당하는 모델이 여러 개입니다: {candidates}. availableModels의 model, agent, providerId, agentDeviceId를 함께 전달하세요.",
     serviceAuth: "API 키가 거부되었습니다. 판단 모델 설정에서 확인하거나 교체하세요.",
     serviceLimit: "판단 서비스 한도 또는 할당량에 도달했습니다. 나중에 다시 시도하거나 요금제를 확인하세요.",
     serviceDown: "판단 서비스를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
@@ -244,7 +244,16 @@ async function askAll(cfg, rules, input, deadline) {
 async function agentModels() {
   const r = await fetch('/agent-models');
   const body = await r.json();
-  return body.ok ? body.models : [];
+  if (!body.ok) return [];
+  const remote = await Promise.all((body.supportsRemoteRoutes ? body.locations || [] : []).map(async (location) => {
+    try {
+      const response = await fetch(`/agent-models?agent_device_id=${encodeURIComponent(location.agentDeviceId)}`);
+      const catalog = await response.json();
+      return catalog.ok && catalog.agentDeviceId === location.agentDeviceId
+        ? catalog.models.map((m) => ({ ...m, agentDeviceId: location.agentDeviceId, locationName: location.name })) : [];
+    } catch { return []; }
+  }));
+  return [...body.models, ...remote.flat()];
 }
 
 const providerName = (cfg) => (usesOpenAi(cfg) ? 'OpenAI' : 'Jev');
@@ -313,7 +322,11 @@ cindy.onHostMessage(async (msg) => {
     await loadLocale();
     const result = await decide(msg.name, msg.data, msg.deadline || Date.now() + 8000, await readConfig());
     const { action, reason, route } = result;
-    const { modelName: _label, fastMode: _fast, ...wireRoute } = route || {};
+    // Older hosts would discard the new location field and could use a local namesake.
+    if (route?.agentDeviceId && !(await fetch('/agent-models').then((r) => r.json())).supportsRemoteRoutes) {
+      throw new Error(t('modelNotFound', { model: route.modelName || route.model }));
+    }
+    const { modelName: _label, locationName: _location, fastMode: _fast, ...wireRoute } = route || {};
     cindy.send({ type: 'event-verdict', hookId: msg.hookId, action, ...(reason ? { reason } : {}), ...(route ? { route: wireRoute } : {}) });
     void recordLast(result);
   } catch (error) {
@@ -326,7 +339,7 @@ cindy.onHostMessage(async (msg) => {
 function findModels(models, option) {
   const q = String(option.model || '').trim().toLowerCase();
   if (!q) return [];
-  const scoped = models.filter((m) => (!option.agent || m.agent === option.agent) && (!option.providerId || m.providerId === option.providerId));
+  const scoped = models.filter((m) => (!option.agent || m.agent === option.agent) && (!option.providerId || m.providerId === option.providerId) && (option.agentDeviceId === undefined || (m.agentDeviceId || null) === option.agentDeviceId));
   const exact = scoped.filter((m) => m.id.toLowerCase() === q || m.name.toLowerCase() === q);
   const pool = exact.length ? exact : scoped.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
   const visible = pool.filter((m) => m.visible !== false);
@@ -336,14 +349,14 @@ function findModels(models, option) {
 function routeOf(model, effort) {
   const efforts = model.efforts || [];
   const chosen = effort && efforts.includes(effort) ? effort : model.defaultEffort || undefined;
-  return { agentKind: AGENT_KIND[model.agent], model: model.id, providerId: model.providerId, modelName: model.name, ...(chosen ? { effort: chosen } : {}) };
+  return { agentKind: AGENT_KIND[model.agent], model: model.id, providerId: model.providerId, modelName: model.name, ...(model.agentDeviceId ? { agentDeviceId: model.agentDeviceId, locationName: model.locationName } : {}), ...(chosen ? { effort: chosen } : {}) };
 }
 
 async function resolveRoute(a) {
   const found = findModels(await agentModels(), a);
   if (!found.length) return { error: { errorCode: 'MODEL_NOT_FOUND', message: t('modelNotFound', { model: a.model }) } };
   if (found.length > 1) {
-    const candidates = found.map((m) => `${m.name} (agent: ${m.agent}, providerId: ${m.providerId})`).join('; ');
+    const candidates = found.map((m) => `${m.name} (agent: ${m.agent}, providerId: ${m.providerId}, agentDeviceId: ${m.agentDeviceId || "null"})`).join('; ');
     return { error: { errorCode: 'MODEL_AMBIGUOUS', message: t('modelAmbiguous', { model: a.model, candidates }) } };
   }
   return { route: routeOf(found[0], a.effort) };
@@ -360,7 +373,7 @@ async function handleTool(msg) {
         rules: cfg.rules,
         fallback: cfg.fallback || null,
         threshold: typeof cfg.threshold === 'number' ? cfg.threshold : 0.6,
-        availableModels: models.filter((m) => m.visible !== false).map((m) => ({ id: m.id, name: m.name, agent: m.agent, providerId: m.providerId, efforts: m.efforts })),
+        availableModels: models.filter((m) => m.visible !== false).map((m) => ({ id: m.id, name: m.name, agent: m.agent, providerId: m.providerId, agentDeviceId: m.agentDeviceId || null, ...(m.locationName ? { locationName: m.locationName } : {}), efforts: m.efforts })),
       });
     }
     if (msg.tool === 'save_rule') {

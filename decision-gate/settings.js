@@ -352,6 +352,7 @@ const channel = new BroadcastChannel('decision-gate');
 let cfg = { rules: [] };
 let secrets = {};
 let models = [];
+let supportsRemoteRoutes = false;
 let jevModels = null;
 let editingJudge = false;
 let loaded = false; // the stored config was read successfully
@@ -581,16 +582,16 @@ function lastLine(rule) {
 }
 
 function findModelEntry(route) {
-  return route && models.find((m) => m.id === route.model && m.providerId === route.providerId && AGENT_KIND[m.agent] === route.agentKind);
+  return route && models.find((m) => m.id === route.model && (m.agentDeviceId || null) === (route.agentDeviceId || null) && m.providerId === route.providerId && AGENT_KIND[m.agent] === route.agentKind);
 }
 
 // Choosing a model is the host's picker, the same one Cindy uses everywhere; this page only keeps the result.
 async function pickRoute(current) {
   pickerError = '';
-  const initial = current ? { agentKind: current.agentKind, providerId: current.providerId, model: current.model, effort: current.effort || '', fastMode: false } : undefined;
+  const initial = current && (!current.agentDeviceId || supportsRemoteRoutes) ? { agentKind: current.agentKind, providerId: current.providerId, model: current.model, effort: current.effort || '', fastMode: false, ...(current.agentDeviceId ? { agentDeviceId: current.agentDeviceId } : {}) } : undefined;
   let selected;
   try {
-    const res = await fetch('/model-picker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(initial ? { initial } : {}) });
+    const res = await fetch('/model-picker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(initial ? { initial } : {}), ...(supportsRemoteRoutes ? { allowRemote: true } : {}) }) });
     if (res.status === 404) throw new Error(t('pickerUnsupported'));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     selected = await res.json();
@@ -604,14 +605,14 @@ async function pickRoute(current) {
     return null;
   }
   await loadModels();
-  const { agentKind, providerId, model, effort } = selected.route;
+  const { agentKind, providerId, model, effort, agentDeviceId } = selected.route;
   const name = findModelEntry(selected.route)?.name;
-  return { agentKind, providerId, model, ...(effort ? { effort } : {}), ...(name ? { modelName: name } : {}) };
+  return { agentKind, providerId, model, ...(agentDeviceId ? { agentDeviceId, locationName: findModelEntry(selected.route)?.locationName || current?.locationName } : {}), ...(effort ? { effort } : {}), ...(name ? { modelName: name } : {}) };
 }
 
 function modelButton(route, label, onPick) {
   const entry = findModelEntry(route);
-  const detail = route && [entry ? AGENT_LABEL[entry.agent] || entry.agent : t('modelGone'), route.effort ? effortName(route.effort) : ''].filter(Boolean).join(' · ');
+  const detail = route && [entry ? AGENT_LABEL[entry.agent] || entry.agent : t('modelGone'), entry?.locationName || route.locationName || '', route.effort ? effortName(route.effort) : ''].filter(Boolean).join(' · ');
   return h('button', {
     class: `mbtn ${route ? '' : 'unset'}`, type: 'button', 'aria-label': label,
     onclick: async () => { const next = await pickRoute(route); if (next) await onPick(next); },
@@ -777,7 +778,16 @@ async function loadJevModels() {
 }
 async function loadModels() {
   const body = await fetch('/agent-models').then((r) => r.json()).catch(() => ({ ok: false }));
-  models = body.ok ? body.models : [];
+  supportsRemoteRoutes = body.ok && body.supportsRemoteRoutes === true;
+  if (!body.ok) { models = []; return; }
+  const remote = await Promise.all((body.supportsRemoteRoutes ? body.locations || [] : []).map(async (location) => {
+    try {
+      const catalog = await fetch(`/agent-models?agent_device_id=${encodeURIComponent(location.agentDeviceId)}`).then((r) => r.json());
+      return catalog.ok && catalog.agentDeviceId === location.agentDeviceId
+        ? catalog.models.map((m) => ({ ...m, agentDeviceId: location.agentDeviceId, locationName: location.name })) : [];
+    } catch { return []; }
+  }));
+  models = [...body.models, ...remote.flat()];
 }
 
 // The brain or the AI changed rules: refresh unless the user is editing.
