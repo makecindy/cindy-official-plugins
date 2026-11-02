@@ -956,6 +956,26 @@ test('升级后在后台把笔记式的介绍改写成人话：干净的不动�
   }
 });
 
+test('从旧版通讯录迁来、已关联 Mac 名片但没在新版导入过的人，也会自动对账补齐', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([{ name: '旧档案', org: '', title: '', id: 'AB-9', isCompany: false, emails: [], phones: [], birthday: '1982-03-18' }]));
+  const a = boot({ libDir: dir, systemFixture: fixture });
+  try {
+    const p = ok(await a.call('save', { name: '旧档案', identities: [{ platform: 'apple-contacts', value: 'AB-9' }] }));
+    assert.equal(a.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'system_import'").get(), undefined);
+    ok(await a.call('maintenance', { action: 'begin' }));
+    let facts = [];
+    for (let i = 0; i < 40 && !facts.length; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      facts = ok(await a.call('get', { id: p.id })).facts;
+    }
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1982-03-18' }]);
+  } finally {
+    a.close();
+  }
+});
+
 test('LinkedIn 主页：完整链接、带参数的链接和只写名字都能找到同一个人', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });

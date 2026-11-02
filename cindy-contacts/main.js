@@ -1850,8 +1850,14 @@ async function maybeAutoSyncMac() {
   if (macSyncing || state.importing) return;
   try {
     const settings = await getSettings();
-    const last = await getMeta('system_import');
-    if (!settings.macAutoSync || !last || !last.at) return;
+    let last = await getMeta('system_import');
+    if (!settings.macAutoSync) return;
+    if (!last || !last.at) {
+      // 从旧版智能通讯录迁来、档案里已经关联 Mac 名片的，等同于导入过：照样自动对账补齐
+      const [{ n }] = await q("SELECT count(*) AS n FROM contact_identities WHERE platform = 'apple-contacts'");
+      if (!Number(n)) return;
+      last = { at: '1970-01-01T00:00:00.000Z' };
+    }
     // 读取的字段变多后（插件升级）不等满一天，马上对一次，把已有的人补齐
     if (Date.now() - Date.parse(last.at) < 24 * 3600 * 1000 && (Number(last.fields) || 1) >= SYSTEM_FIELDS_VERSION) return;
     if ((await platform()) !== 'darwin') return;
