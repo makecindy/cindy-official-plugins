@@ -1168,6 +1168,26 @@ test('语言还在加载时点了显示密码，文案落定后按钮仍按当�
   assert.equal(toggle.getAttribute('aria-label'), T.hideAria);
 });
 
+test('语言还在加载时提交表单，状态提示等语言落定后用宿主语言显示', async () => {
+  // Codex #239：/app-context 最长挂 2 秒，期间回车提交会用默认 en 写 #status，
+  // applyStaticCopy 不会改写 #status，ja 页面会一直留着英文提示。
+  let releaseContext;
+  const contextReady = new Promise((resolve) => { releaseContext = resolve; });
+  const page = await createSettingsHarness(() => contextReady);
+  page.elements.get('connectForm').listeners.submit({ preventDefault() {} });
+  for (let index = 0; index < 5; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  releaseContext(response({ ok: true, context: { region: 'global', locale: 'ja' } }));
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const T = page.messages.ja;
+  assert.equal(page.documentElement.lang, 'ja');
+  assert.equal(page.text('status'), T.missingFields);
+});
+
 test('设置页已连接状态与读取失败提示同样跟随宿主语言', async () => {
   for (const locale of HOST_LOCALES) {
     const connected = await createSettingsHarness(locale, {
