@@ -16,7 +16,7 @@ game-sign 管理签到活动主体、每日奖励、集卡与兑换码；提审/
 
 | 用户意图 | Reference | 起手调用 |
 | --- | --- | --- |
-| 查活动、审核状态 | [runbook](taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md)「状态与可执行动作」 | 有 `review_id` 时 `call_tool(name:"game-sign get-game-sign-activity", args:{developer_id:"<developerId>", app_id:"<appId>", data:{review_id:"<reviewId>"}})`；否则 `call_tool(name:"game-sign list-game-sign-activities", args:{developer_id:"<developerId>", app_id:"<appId>", data:{page:1, page_size:20}})` |
+| 查活动、审核状态 | [runbook](taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md)「状态与可执行动作」 | 有 `review_id` 时 `call_tool(name:"game-sign get-game-sign-activity", args:{developer_id:"<developerId>", app_id:"<appId>", data:{review_id:"<reviewId>"}})`；否则 `call_tool(name:"game-sign list-game-sign-activities", args:{developer_id:"<developerId>", app_id:"<appId>", data:{page:1, page_size:20}, page_all:true, page_limit:1000})` |
 | 看奖励、集卡和库存 | [runbook](taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md)「每日奖励」「集卡」 | `call_tool(name:"game-sign get-game-sign-config", args:{developer_id:"<developerId>", app_id:"<appId>", data:{review_id:"<reviewId>"}})` |
 | 创建/修改主体 | [runbook](taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md)「创建活动主体」 | `call_tool(name:"game-sign create-game-sign-activity", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
 | 保存/删除每日奖励 | [runbook](taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md)「每日奖励」 | `call_tool(name:"game-sign save-game-sign-award", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
@@ -35,7 +35,7 @@ list_tools(category:"game-sign")
 # 定位活动（无 review_id 时）
 call_tool(name:"game-sign list-game-sign-activities", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{page:1, page_size:20}})
+  data:{page:1, page_size:20}, page_all:true, page_limit:1000})
 
 # 读主体、奖励、集卡和库存
 call_tool(name:"game-sign get-game-sign-config", args:{
@@ -45,13 +45,17 @@ call_tool(name:"game-sign get-game-sign-config", args:{
 # 创建主体（先 dry_run，确认后 yes:true）
 call_tool(name:"game-sign create-game-sign-activity", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{title:"<活动标题>", start_time:"<RFC3339>", end_time:"<RFC3339>", ...},
+  data:{title:"<活动标题>", color:"#FF8800",
+        game_sign_start_time:<秒级时间戳>, game_sign_end_time:<秒级时间戳>,
+        activity_end_time:<秒级时间戳>, enable_card_collection:false,
+        redeem_method:"<游戏内兑换说明>", redeem_url:""},
   idempotency_key:"<stable-key>", dry_run:true})
 
 # 每日奖励（按累计天数升序；修改已有奖励带 award_id）
 call_tool(name:"game-sign save-game-sign-award", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{review_id:"<reviewId>", day:1, name:"<奖励名>", type:"<类型>", ...},
+  data:{review_id:"<reviewId>", days:1, content:"钻石x100",
+        picture:"https://cdn.example.com/a1.png", state:"<兑换说明>"},
   idempotency_key:"<stable-key>", dry_run:true})
 
 # 自检

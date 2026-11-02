@@ -39,6 +39,11 @@ call_tool(name:"official-message-push preview-official-message-push-object", arg
   developer_id:"<developerId>", app_id:"<appId>",
   data:{url:"https://www.taptap.cn/moment/123"}})
 
+# 定时发送：预览必须带用户选定的 push_time，否则只校验立即发送条件
+call_tool(name:"official-message-push preview-official-message-push-object", args:{
+  developer_id:"<developerId>", app_id:"<appId>",
+  data:{url:"https://www.taptap.cn/moment/123", push_time:"2026-11-03T20:00:00+08:00"}})
+
 # 分页查任务/查重（需要实际读取，不能与 dry_run 组合）
 call_tool(name:"official-message-push list-official-message-push-tasks", args:{
   developer_id:"<developerId>", app_id:"<appId>",
