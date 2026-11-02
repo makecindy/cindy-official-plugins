@@ -219,13 +219,32 @@
     check: '<path d="M5 12l5 5 9-10"/>',
     pin: '<path d="M9.5 3.5h5l-.8 5.6 3.3 3.4v1.5H7v-1.5l3.3-3.4zM12 14v6.5"/>',
     chev: '<path d="m9 6 6 6-6 6"/>',
+    card: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.3 1.7-2 3-2s2.4.7 3 2M14.5 10h3.5M14.5 13.5h2.5"/>',
+    users: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.7-2.9 2.8-4.5 5.5-4.5s4.8 1.6 5.5 4.5M15.5 5.6a3 3 0 0 1 0 5.8M17.2 14.8c1.6.6 2.7 2 3.3 4.2"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+    todo: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/>',
   };
-  const I = (n, cls) => `<svg class="i${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
-  const PLATFORM_ICON = { email: 'mail', phone: 'phone', feishu: 'chat', lark: 'chat', slack: 'chat', wechat: 'chat', telegram: 'chat', dingtalk: 'chat', discord: 'chat', github: 'git', gitlab: 'git', x: 'at', twitter: 'at' };
-  const PLATFORM_NAME = { email: '邮箱', phone: '电话', feishu: '飞书', lark: 'Lark', slack: 'Slack', wechat: '微信', telegram: 'Telegram', dingtalk: '钉钉', discord: 'Discord', github: 'GitHub', x: 'X' };
-  const CHANNEL_ICON = { mail: 'mail', im: 'chat', calendar: 'cal', cindy: 'spark', github: 'git', call: 'phone', other: 'link' };
-  /** 飞书 open_id 这类机器 id 不直接给人看，显示平台名，点击仍复制原值。 */
+  // 第三方品牌标志（单色，随文字颜色）：GitHub 取自 GitHub Octicons（MIT），其余取自 Simple Icons（CC0），见 THIRD-PARTY-LICENSES.txt。
+  // Slack、飞书、LinkedIn 未提供可用标志，用通用图标，不自绘仿冒。
+  const BRAND = {
+    github: ['0 0 16 16', 'M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656'],
+    wechat: ['0 0 24 24', 'M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.047c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 0 1-.023-.156.49.49 0 0 1 .201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-6.656-6.088V8.89c-.135-.01-.27-.027-.407-.03zm-2.53 3.274c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.969-.982z'],
+    telegram: ['0 0 24 24', 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'],
+    x: ['0 0 24 24', 'M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z'],
+    whatsapp: ['0 0 24 24', 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z'],
+    discord: ['0 0 24 24', 'M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z'],
+  };
+  const I = (n, cls) =>
+    BRAND[n]
+      ? `<svg class="i brand${cls ? ` ${cls}` : ''}" viewBox="${BRAND[n][0]}" aria-hidden="true"><path d="${BRAND[n][1]}"/></svg>`
+      : `<svg class="i${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
+  const PLATFORM_ICON = { email: 'mail', phone: 'phone', feishu: 'chat', lark: 'chat', slack: 'chat', wechat: 'wechat', telegram: 'telegram', whatsapp: 'whatsapp', dingtalk: 'chat', discord: 'discord', github: 'github', gitlab: 'git', x: 'x', twitter: 'x', linkedin: 'card' };
+  const PLATFORM_NAME = { email: '邮箱', phone: '电话', feishu: '飞书', lark: 'Lark', slack: 'Slack', wechat: '微信', telegram: 'Telegram', whatsapp: 'WhatsApp', dingtalk: '钉钉', discord: 'Discord', github: 'GitHub', x: 'X', linkedin: 'LinkedIn' };
+  const CHANNEL_ICON = { mail: 'mail', im: 'chat', calendar: 'cal', cindy: 'spark', github: 'github', call: 'phone', other: 'link' };
+  /** 飞书 open_id 这类机器 id 不直接给人看，显示平台名，点击仍复制原值；LinkedIn 主页显示成 in/名字。 */
   function identityLabel(i) {
+    const li = /linkedin\.com\/(in|company)\/([^/?#\s]+)/i.exec(i.value);
+    if (li) return `${li[1].toLowerCase()}/${decodeURIComponent(li[2])}`;
     const opaque = /^[a-z]{2,3}_[0-9a-z]{16,}$/i.test(i.value) || (i.platform === 'slack' && /^[UW][A-Z0-9]{8,}$/.test(i.value)) || (i.value.length > 28 && !/[\s@.]/.test(i.value));
     if (opaque) return i.label || PLATFORM_NAME[i.platform] || i.platform;
     return i.value;
@@ -246,7 +265,9 @@
   }
   const paragraphs = (text) =>
     stripMarkers(text).split(/\n{2,}|\r\n\r\n/).map((p) => p.trim()).filter(Boolean);
-  const PLATFORMS = ['email', 'phone', 'feishu', 'wechat', 'slack', 'telegram', 'github', 'x', 'other'];
+  const PLATFORMS = ['email', 'phone', 'feishu', 'wechat', 'slack', 'telegram', 'whatsapp', 'github', 'linkedin', 'x', 'other'];
+  /** 机器 id（飞书 open_id、Slack 成员 id 等）只在资料页出现，名片头只放能直接用的联系方式。 */
+  const isOpaque = (i) => !/linkedin\.com\//i.test(i.value) && identityLabel(i) !== i.value;
 
   function uid() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -615,8 +636,8 @@
     if (sig.length) h += `<div class="sig">${sig.map((x) => `<span>${x}</span>`).join('')}</div>`;
     const ids = d.identities.filter((i) => i.platform !== 'apple-contacts');
     // 顶部只放能直接用的联系方式；飞书 open_id 这类机器 id 留在「资料」里
-    const readable = ids.filter((i) => identityLabel(i) === i.value);
-    const order = ['email', 'phone', 'wechat', 'feishu', 'lark', 'slack', 'telegram', 'github', 'x'];
+    const readable = ids.filter((i) => !isOpaque(i));
+    const order = ['email', 'phone', 'wechat', 'feishu', 'lark', 'slack', 'telegram', 'whatsapp', 'linkedin', 'github', 'x'];
     const pick = readable.slice().sort((a, b) => (order.indexOf(a.platform) + 1 || 99) - (order.indexOf(b.platform) + 1 || 99)).slice(0, 3);
     if (pick.length) {
       h += `<div class="reach">${pick.map((i) => `<button data-copy="${esc(i.value)}" title="${esc(i.value)}">${I(PLATFORM_ICON[i.platform] || 'link', 's')}<span>${esc(identityLabel(i))}</span></button>`).join('')}`;
@@ -646,7 +667,7 @@
     };
     if (!shown.length && !rest.length) return '';
     let h = '';
-    if (shown.length) h += `<h3>${esc(T.loopsTitle)}</h3><div class="loops">${shown.map(loopRow).join('')}</div>`;
+    if (shown.length) h += `<h3>${I('todo', 's')}${esc(T.loopsTitle)}</h3><div class="loops">${shown.map(loopRow).join('')}</div>`;
     if (rest.length) {
       h += `<button class="sublink" data-action="toggleDone">${esc(S.showDone ? T.hideRest : T.restN(rest.length))}</button>`;
       if (S.showDone) h += `<div class="loops rest">${rest.map(loopRow).join('')}</div>`;
@@ -661,7 +682,7 @@
       // 默认只看第一段、最多 5 行；早先整理堆进来的流水账点「展开全文」才看
       const more = paras.length > 1 || paras[0].length > 160;
       const shown = S.storyOpen ? paras : paras.slice(0, 1);
-      h += `<h3>${esc(T.storyTitle)}</h3><div class="portrait${S.storyOpen ? '' : ' clamp'}">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
+      h += `<h3>${I('users', 's')}${esc(T.storyTitle)}</h3><div class="portrait${S.storyOpen ? '' : ' clamp'}">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
       if (more) h += `<button class="sublink" data-action="toggleStory">${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
     }
     if (String(d.agentNotes || '').trim()) h += `<p class="note">${richText(d.agentNotes)}</p>`;
@@ -671,7 +692,7 @@
   function threadsBlock(d) {
     if (!d.interactions.length) return '';
     const list = threadsOf(d.interactions).slice(0, 5);
-    let h = `<h3 class="hrow"><span>${esc(T.threadsTitle)}</span><button data-tab="history">${esc(T.allHistory(d.interactionTotal))}${I('chev', 's')}</button></h3><div class="threads">`;
+    let h = `<h3 class="hrow"><span>${I('chat', 's')}${esc(T.threadsTitle)}</span><button data-tab="history">${esc(T.allHistory(d.interactionTotal))}${I('chev', 's')}</button></h3><div class="threads">`;
     for (const th of list) {
       const open = S.openThreads.has(th.key);
       // 按天归并的聊天里挑信息量最大的一句做摘要，不用当天最后一句「[大笑]」
@@ -694,16 +715,14 @@
     return h + '</div>';
   }
 
-  // 「最新进展（日期）」这类是进展流水，不是要点；往来和在办里已经有，不在这里重复
-  const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|本轮|progress|latest|status|update/i;
   function factsBlock(d) {
-    const kv = [...d.facts.filter((f) => !PROGRESS_FACT.test(f.label)).map((f) => [f.label, esc(f.value)])];
+    const kv = [...d.facts.map((f) => [f.label, esc(f.value)])];
     if (d.relations.length) {
       kv.push([T.related, d.relations.map((r) => `<span class="link" data-goto="${esc(r.otherId)}">${esc(r.otherName)}</span>${r.relation ? `<small>${esc(r.relation)}</small>` : ''}`).join('　')]);
     }
     if (d.groups.length) kv.push([T.inGroups, d.groups.map((g) => `<span class="link" data-scope="g:${esc(g.name)}">${esc(g.name)}</span>`).join('　')]);
     if (!d.events.length && !kv.length) return '';
-    let h = `<h3>${esc(T.factsTitle)}</h3><div class="cv">`;
+    let h = `<h3>${I('info', 's')}${esc(T.factsTitle)}</h3><div class="cv">`;
     h += `<dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
     h += `<div class="tl">${d.events.slice(0, 8).map((e) => `<div class="ti"><div class="y">${esc(fmtDay(e.date))}</div><div class="e">${esc(e.text)}</div></div>`).join('')}</div>`;
     return h + '</div>';
@@ -712,7 +731,7 @@
   /** GitHub 只用来认识这个人：常在哪些仓库、参与过哪些 PR / issue（由 main.js 的 codeSummary 汇总），不算往来。 */
   function codeBlock(d) {
     if (!d.code || !d.code.length) return '';
-    let h = `<h3>${esc(T.codeTitle)}</h3><div class="code">`;
+    let h = `<h3>${I('github', 's')}${esc(T.codeTitle)}</h3><div class="code">`;
     for (const r of d.code) {
       h += `<div class="repo"><div class="rh"><span class="rn">${I('git', 's')}<span>${esc(r.repo)}</span></span><span class="rm">${esc(T.codeMeta(r.threads, fmtDay(r.last)))}</span></div>`;
       h += r.recent.map((x) => `<a class="pr" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url)}</a>`).join('');
@@ -764,7 +783,7 @@
 
   function infoTab(d) {
     const ids = d.identities.filter((i) => i.platform !== 'apple-contacts');
-    let h = `<h3>${esc(T.ids)}</h3>`;
+    let h = `<h3>${I('card', 's')}${esc(T.ids)}</h3>`;
     for (const i of ids) {
       h += `<button class="idr" data-copy="${esc(i.value)}">${I(PLATFORM_ICON[i.platform] || 'link')}<span class="k">${esc(i.label || PLATFORM_NAME[i.platform] || i.platform)}</span><span class="v">${esc(identityLabel(i))}</span></button>`;
     }

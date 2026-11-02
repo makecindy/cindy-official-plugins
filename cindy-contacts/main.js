@@ -90,6 +90,10 @@ function normalizePlatform(platform) {
 /** 身份匹配键：与旧版一致（小写、去 @ 前缀；电话只留数字和 +）。 */
 function normalizeIdentityValue(value, platform) {
   let v = str(value).toLowerCase();
+  // LinkedIn 主页：完整链接、带参数的链接和只写名字都归成 linkedin.com/in/<名字>，能互相找到
+  const li = /linkedin\.com\/(in|company)\/([^/?#\s]+)/.exec(v);
+  if (li) return `linkedin.com/${li[1]}/${li[2]}`;
+  if (platform === 'linkedin' && /^[a-z0-9-]{3,100}$/.test(v)) return `linkedin.com/in/${v}`;
   if (v.startsWith('@')) v = v.slice(1);
   if (platform === 'phone') {
     const c = v.replace(/[^0-9+]/g, '');
@@ -421,6 +425,55 @@ function loopKind(l, now = Date.now()) {
   return WAIT_THEM.test(text) ? 'them' : 'you';
 }
 const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
+
+/* ───────────── 旧档案的自动整理 ───────────── */
+// 早先的整理把进展流水写进了要点和介绍，把跟踪备注记成了待办。升级后自动收拾一次（先备份），
+// 之后每次整理结束再顺手收一次；用户不需要手动清理。
+const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|本轮|progress|latest|status|update/i;
+const refCount = (t) => (str(t).match(/#\d{2,}/g) || []).length;
+const isProgressFact = (f) => PROGRESS_FACT.test(str(f.label)) || refCount(f.value) >= 3;
+/** 介绍里成段的 PR / issue 编号流水（一段 ≥3 个 #编号）去掉；第一段总保留。 */
+function trimNarrative(text) {
+  const raw = String(text || '');
+  const paras = raw.split(/\n{2,}/);
+  const keep = paras.filter((p, i) => i === 0 || refCount(p) < 3);
+  return keep.length === paras.length ? raw : keep.join('\n\n');
+}
+
+/** 收起跟踪备注和过期待办（标为已办完，可重新打开），删掉进展类要点和介绍里的编号流水。 */
+async function tidyStoredProfiles() {
+  const at = nowIso();
+  const stmts = [];
+  const out = { loops: 0, facts: 0, stories: 0 };
+  for (const l of await qAll("SELECT id, text, since, source, created_at FROM contact_loops WHERE status = 'open' ORDER BY id")) {
+    if (loopKind(l) !== 'note') continue;
+    stmts.push({ sql: "UPDATE contact_loops SET status = 'done', updated_at = ? WHERE id = ? AND status = 'open'", params: [at, l.id] });
+    out.loops++;
+  }
+  for (const c of await qAll('SELECT id, facts, narrative FROM contacts ORDER BY id')) {
+    const facts = parseFacts(c.facts);
+    const kept = facts.filter((f) => !isProgressFact(f));
+    const story = trimNarrative(c.narrative);
+    if (kept.length === facts.length && story === String(c.narrative || '')) continue;
+    stmts.push({ sql: 'UPDATE contacts SET facts = ?, narrative = ? WHERE id = ?', params: [JSON.stringify(kept), story, c.id] });
+    if (kept.length !== facts.length) out.facts++;
+    if (story !== String(c.narrative || '')) out.stories++;
+  }
+  await batchChunks(stmts);
+  return out;
+}
+
+const PROFILE_CLEANUP_VERSION = 1;
+/** 升级后的一次性整理：先让宿主备份资料库，备份不成功就不动，下次启动再试。 */
+async function cleanupStoredProfilesOnce() {
+  const done = await getMeta('profile_cleanup');
+  if (done && done.version >= PROFILE_CLEANUP_VERSION) return null;
+  const [{ n }] = await q('SELECT count(*) AS n FROM contacts');
+  if (Number(n) > 0) await lib({ op: 'db.backup', dbPath: DB });
+  const result = await tidyStoredProfiles();
+  await batch([setMetaStmt('profile_cleanup', { version: PROFILE_CLEANUP_VERSION, at: nowIso(), ...result })]);
+  return result;
+}
 const CUSTOMER_RE = /用户|客户|顾客|买家|工单|customer|client|user|ticket|ユーザー|顧客|お客|고객|사용자/i;
 
 /** 由往来渠道和分组判断这个人属于哪一圈：常打交道的人 / 产品用户与工单 / 只在 GitHub 上的社区 / 只有联系方式。 */
@@ -648,7 +701,7 @@ async function getContact(id, opts) {
     source: c.source,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
-    facts: parseFacts(c.facts),
+    facts: parseFacts(c.facts).filter((f) => !isProgressFact(f)),
     latest: c.latest || '',
     latestAt: c.latest_at || '',
     coveredFrom: c.covered_from || '',
@@ -1750,6 +1803,11 @@ async function maintenance(input) {
   if (input.action === 'end') {
     if (Array.isArray(input.sourcesStatus) && input.sourcesStatus.length) await reportSources(input.sourcesStatus);
     const result = await maintenanceEnd(input);
+    try {
+      result.cleaned = await tidyStoredProfiles();
+    } catch (_) {
+      /* 收拾失败不影响这轮整理的结果 */
+    }
     const cov = normalizeCoverage(input.coverage);
     if (cov.length) {
       const prev = (await getMeta('sources_status')) || { at: nowIso(), items: [] };
@@ -2756,6 +2814,11 @@ function startLegacyImportOnce() {
   pendingImport = serial(() => importLegacy())
     .catch((e) => ({ status: 'error', code: e.code, message: e.message }))
     .then(async (r) => {
+      try {
+        await serial(cleanupStoredProfilesOnce);
+      } catch (_) {
+        /* 备份或整理没成功：资料不动，下次启动再试 */
+      }
       try {
         syncStatus.enabled = !!await getMeta('device_sync_enabled');
         if (syncStatus.supported && syncStatus.enabled) await serial(syncCapture);

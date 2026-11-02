@@ -22,7 +22,7 @@ const migrations = { count: 0 };
 // Same bounds as the Host Library (libraryDbCore.ts): 2000 rows and 16 MiB per row / result.
 const HOST_ROW_BYTES = 16 * 1024 * 1024;
 
-function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES } = {}) {
+function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES, backup = true } = {}) {
   const dbs = new Map();
   const open = (dbPath) => {
     if (!dbs.has(dbPath)) {
@@ -74,6 +74,13 @@ function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES } = {}) {
           }
           return { ok: true, applied: req.statements.length };
         }
+        case 'db.backup': {
+          if (!backup) return { ok: false, errorCode: 'UNSUPPORTED', message: 'backup unavailable' };
+          const dest = path.join(dir, `backup-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+          open(req.dbPath).exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+          library.backups.push(dest);
+          return { ok: true };
+        }
         case 'db.userVersion':
           return { ok: true, op: 'db.userVersion', version: Number(open(req.dbPath).prepare('PRAGMA user_version').get().user_version) };
         case 'db.migrate': {
@@ -96,6 +103,7 @@ function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES } = {}) {
       return { ok: false, errorCode: 'DB_ERROR', message: e.message };
     }
   };
+  library.backups = [];
   library.close = () => {
     for (const db of dbs.values()) db.close();
   };
@@ -128,8 +136,8 @@ function makeWorker(env, workerFile = path.join(pluginDir, 'node', 'worker.cjs')
   };
 }
 
-function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null, source = mainSource, rowBytes }) {
-  const library = makeLibrary(libDir, { rowBytes });
+function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null, source = mainSource, rowBytes, backup }) {
+  const library = makeLibrary(libDir, { rowBytes, backup });
   const worker = makeWorker({
     CINDY_CONTACTS_LEGACY_DB_FOR_TEST: legacyDb,
     CINDY_CONTACTS_SYSTEM_FIXTURE_FOR_TEST: systemFixture,
@@ -859,6 +867,64 @@ test('名单按关系分层：常联系看往来天数与在办的事，客户�
     assert.equal((await a.view('pin', { id: an.id, value: 1 })).ok, true);
     const prefs = a.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'list_prefs'").get();
     assert.deepEqual(JSON.parse(prefs.value).pins, { [an.id]: 1 });
+  } finally {
+    a.close();
+  }
+});
+
+test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删进展要点和编号流水；备份不成功就不动', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', {
+      name: '示例同事',
+      narrative: '一起做桌面端的同事。\n\n#101 已合并，#102 待审，#103 关闭，#104 拆分。\n\n最近在准备下季度计划。',
+      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }],
+      open_loops: [{ text: '跟进 #101 的验收' }, { text: '给示例同事回复报价' }],
+    }));
+    // 页面和 AI 读到的要点已经不含进展流水
+    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做']);
+    // 模拟从旧版本升级：还没做过这次整理
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    await a.call('stats');
+    assert.equal(db().prepare("SELECT count(*) AS n FROM contact_loops WHERE status = 'open'").get().n, 2, '备份不成功时一条都不动');
+    assert.equal(db().prepare("SELECT value FROM plugin_meta WHERE key = 'profile_cleanup'").get(), undefined);
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    assert.equal(a.library.backups.length, 1, '整理前先备份');
+    const row = db().prepare('SELECT facts, narrative FROM contacts WHERE id = ?').get(p.id);
+    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做']);
+    assert.equal(row.narrative, '一起做桌面端的同事。\n\n最近在准备下季度计划。');
+    const loops = Object.fromEntries(ok(await a.call('get', { id: p.id })).loops.map((l) => [l.text, l.status]));
+    assert.deepEqual(loops, { '跟进 #101 的验收': 'done', '给示例同事回复报价': 'open' });
+    assert.equal(JSON.parse(db().prepare("SELECT value FROM plugin_meta WHERE key = 'profile_cleanup'").get().value).loops, 1);
+    // 只做一次：再启动不再备份
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    assert.equal(a.library.backups.length, 0);
+  } finally {
+    a.close();
+  }
+});
+
+test('LinkedIn 主页：完整链接、带参数的链接和只写名字都能找到同一个人', async () => {
+  const dir = tmp();
+  const a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: 'Example Person', identities: [{ platform: 'linkedin', value: 'https://www.linkedin.com/in/Example-Person/' }] }));
+    for (const query of ['linkedin.com/in/example-person', 'https://linkedin.com/in/example-person?trk=public']) {
+      const hit = ok(await a.call('find', { query })).results[0];
+      assert.equal(hit && hit.id, p.id, query);
+      assert.equal(hit.matchType, 'identity');
+    }
+    const dup = await a.call('save', { name: 'Someone Else', identities: [{ platform: 'linkedin', value: 'example-person' }] });
+    assert.equal(dup.ok, false);
+    assert.equal(dup.errorCode, 'IDENTITY_CONFLICT');
   } finally {
     a.close();
   }

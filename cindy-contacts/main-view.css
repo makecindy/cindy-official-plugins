@@ -44,6 +44,7 @@ input::placeholder, textarea::placeholder { color: var(--c-hint); }
 input:focus-visible, textarea:focus-visible { outline: none; }
 svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 svg.i.s { width: 13px; height: 13px; }
+svg.i.brand { fill: currentColor; stroke: none; }
 [hidden] { display: none !important; }
 
 .app { height: 100%; display: grid; grid-template-columns: 360px minmax(0, 1fr); }
@@ -128,7 +129,9 @@ h3.hrow button:hover { color: var(--c-text); }
 .muted { color: var(--c-text-3); }
 .small { font-size: 12.5px; line-height: 1.7; }
 p.note { font-size: 14px; color: var(--c-text-2); line-height: 1.8; margin: 14px 0 0; }
-h3 { margin: 40px 0 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.14em; color: var(--c-text-3); }
+h3 { margin: 40px 0 12px; font-size: 11px; font-weight: 500; letter-spacing: 0.14em; color: var(--c-text-3); display: flex; align-items: center; gap: 7px; }
+h3 svg.i.s { width: 12px; height: 12px; }
+h3.hrow > span { display: inline-flex; align-items: center; gap: 7px; }
 
 /* 上次看过之后 */
 .since { margin-top: 26px; padding: 14px 18px 6px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-bg); }
