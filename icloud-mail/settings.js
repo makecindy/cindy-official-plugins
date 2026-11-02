@@ -420,8 +420,25 @@ var MESSAGES = {
     syncSecretToggle();
   }
 
+  // 语言和已保存的状态读完前表单不可操作:/app-context 最长要等 2 秒,这期间提交会
+  // 用默认 en 写 #status,init 也会把已保存的邮箱写回输入框、盖掉用户刚填的地址。
+  var pageReady = false;
+  setBusy(true);
+
+  $('connectForm').addEventListener('submit', function (event) {
+    if (!pageReady) {
+      event.preventDefault();
+      return;
+    }
+    void connect(event);
+  });
+  $('disconnect').addEventListener('click', function () {
+    if (pageReady) void disconnect();
+  });
+  $('toggleSecret').addEventListener('click', toggleSecret);
+
   // 先定语言再出文案:连接状态和提示都要用宿主语言。
-  var ready = loadLocale().then(async function init() {
+  void loadLocale().then(async function init() {
     applyStaticCopy();
     try {
       var state = await loadState();
@@ -430,17 +447,9 @@ var MESSAGES = {
     } catch (_error) {
       render({ connected: false });
       showStatus(t('loadStateFailed'), true);
+    } finally {
+      pageReady = true;
+      setBusy(false);
     }
   });
-
-  // 语言最长要等 2 秒,期间的提交和断开先排队:#status 只在这些动作里写,
-  // applyStaticCopy 不会改写它,提前写就会留下默认 en 的提示。
-  $('connectForm').addEventListener('submit', function (event) {
-    event.preventDefault();
-    void ready.then(function () { return connect(event); });
-  });
-  $('disconnect').addEventListener('click', function () {
-    void ready.then(disconnect);
-  });
-  $('toggleSecret').addEventListener('click', toggleSecret);
 })();

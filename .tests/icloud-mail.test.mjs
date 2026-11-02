@@ -1146,16 +1146,20 @@ test('设置页按 /app-context 的语言渲染全部文案', async () => {
   }
 });
 
-test('语言还在加载时点了显示密码，文案落定后按钮仍按当前状态写「隐藏」', async () => {
-  // Greptile #239：/app-context 返回前按钮已可点；applyStaticCopy 按 data-i18n 把按钮
-  // 刷回「显示」，但密码框仍是明文，按钮和读屏都会报错状态。
+test('语言和已保存状态读完前表单不可操作，就绪后才放开', async () => {
+  // #239 review：/app-context 最长挂 2 秒。期间提交会用默认 en 写 #status；排队等 init
+  // 又会让已保存的邮箱盖掉刚填的地址；显示密码按钮会被 applyStaticCopy 刷回「显示」。
   let releaseContext;
   const contextReady = new Promise((resolve) => { releaseContext = resolve; });
-  const page = await createSettingsHarness(() => contextReady);
-  const input = page.elements.get('appSpecificPassword');
-  const toggle = page.elements.get('toggleSecret');
-  toggle.listeners.click();
-  assert.equal(input.type, 'text');
+  const page = await createSettingsHarness(() => contextReady, { kv: { email: 'old@icloud.com' } });
+  const controls = ['connect', 'disconnect', 'email', 'appSpecificPassword', 'toggleSecret'];
+  for (const id of controls) assert.equal(page.elements.get(id).disabled, true, `${id} disabled while loading`);
+
+  page.elements.get('email').value = 'new@icloud.com';
+  page.elements.get('appSpecificPassword').value = 'abcd-efgh-ijkl-mnop';
+  let prevented = false;
+  page.elements.get('connectForm').listeners.submit({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
 
   releaseContext(response({ ok: true, context: { region: 'global', locale: 'ja' } }));
   for (let index = 0; index < 20; index += 1) {
@@ -1163,29 +1167,11 @@ test('语言还在加载时点了显示密码，文案落定后按钮仍按当�
   }
   const T = page.messages.ja;
   assert.equal(page.documentElement.lang, 'ja');
-  assert.equal(input.type, 'text');
-  assert.equal(page.text('toggleSecret'), T.hide);
-  assert.equal(toggle.getAttribute('aria-label'), T.hideAria);
-});
-
-test('语言还在加载时提交表单，状态提示等语言落定后用宿主语言显示', async () => {
-  // Codex #239：/app-context 最长挂 2 秒，期间回车提交会用默认 en 写 #status，
-  // applyStaticCopy 不会改写 #status，ja 页面会一直留着英文提示。
-  let releaseContext;
-  const contextReady = new Promise((resolve) => { releaseContext = resolve; });
-  const page = await createSettingsHarness(() => contextReady);
-  page.elements.get('connectForm').listeners.submit({ preventDefault() {} });
-  for (let index = 0; index < 5; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-
-  releaseContext(response({ ok: true, context: { region: 'global', locale: 'ja' } }));
-  for (let index = 0; index < 20; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  const T = page.messages.ja;
-  assert.equal(page.documentElement.lang, 'ja');
-  assert.equal(page.text('status'), T.missingFields);
+  for (const id of controls) assert.equal(page.elements.get(id).disabled, false, `${id} enabled when ready`);
+  assert.equal(page.text('status'), '');
+  assert.equal(page.fetchCalls.filter((path) => path === '/kv').length, 1);
+  assert.equal(page.text('toggleSecret'), T.show);
+  assert.equal(page.elements.get('toggleSecret').getAttribute('aria-label'), T.showAria);
 });
 
 test('设置页已连接状态与读取失败提示同样跟随宿主语言', async () => {
