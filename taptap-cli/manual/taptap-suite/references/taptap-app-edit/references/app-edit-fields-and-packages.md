@@ -14,10 +14,10 @@
 
 Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `prepare-review-snapshot` 和 `precheck-app-review` 的当前结果；预审不通过不自动禁止提审，用户明确继续时按 [audit and history](taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md) 提交，由提交接口做最终校验。
 
-当前 schema 声明 `list-packages.result.package_slots` 时，该字段固定返回
+`list-packages.result.package_slots` 固定返回
 `main`、`windows` 和 `apk_mini_game_play`。每个槽位包含 `available` 与可原样
-回传的 `expected`；空槽位明确返回 `{"kind":"none"}`。当前 schema 未声明
-`package_slots` 时必须停止资料页包体绑定并报告契约缺口，不得从
+回传的 `expected`；空槽位明确返回 `{"kind":"none"}`。响应缺少
+`package_slots` 时必须停止资料页包体绑定并向用户说明缺少绑定所需的信息，当前无法完成包体绑定，不得从
 `current_bindings` 或候选补造槽位快照。`current_bindings` 只有展示摘要，不能
 作为 `select-package` / `clear-package` 的写入前置条件。
 
@@ -77,9 +77,33 @@ call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<develo
 
 ### 包体槽位
 
+**完整绑定输入示例**：`developer_id` / `app_id` 用 scope 参数，`data` 无需重复填写。`package.id` 来自本次 `list-packages` 候选的 `package_id`，保持字符串；不要使用 `current_bindings[].revision` 作为包体 ID。
+
+例如，本次读取确认 `main.available=true`，`main.expected` 恰为 `{"kind":"none"}`，且目标候选是 `type="h5"`、`package_id="12345"`、`status="ready"` 时，`data` 的完整内容为：
+
+```json
+{
+  "slot": "main",
+  "package": {"type": "h5", "id": "12345"},
+  "expected": {"kind": "none"}
+}
+```
+
+以上 ID 仅为示例；实际使用本次选定候选。`expected` 必须替换为同次 `package_slots.main.expected` 的完整原值，包括已有绑定的全部字段，不能根据目标包体类型猜 `kind`，也不能把 `none` 当默认值。缺少快照时停止绑定。
+
+```text
+# 先预览；确认后用相同 payload 和 key 加 yes:true
+call_tool(name:"app select-package", args:{
+  app_id:"<appId>", developer_id:"<developerId>",
+  data:{slot:"main", package:{type:"h5", id:"12345"}, expected:{kind:"none"}},
+  idempotency_key:"<intent-key>", dry_run:true})
+```
+
+参数校验失败时，根据错误指出的字段、预期类型和恢复提示修正；不要连续猜测不同枚举或来回切换 ID 类型。若错误与本次读取结果不一致，核对当前命令定义及原始读取结果；仍无法确定正确输入时停止，不重复提交相同错误请求。
+
 选择或清空包体走统一流程：
 
-1. `list-packages(package_types: [...])` 读取本次候选、`current_bindings` 和当前 schema 声明时的 `package_slots`；当前 schema 未声明 `package_slots` 时停止并报告契约缺口。
+1. `list-packages(package_types: [...])` 读取本次候选、`current_bindings` 和`package_slots`；响应缺少 `package_slots` 时停止并向用户说明缺少绑定所需的信息，当前无法完成包体绑定。
 2. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。
 3. 把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型。
 4. 使用稳定 `--idempotency-key` 先 `--dry-run`；用户确认后用相同 payload 和 key 加 `--yes`。
