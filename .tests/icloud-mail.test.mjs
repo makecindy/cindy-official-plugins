@@ -820,6 +820,113 @@ test('Worker 与服务器文本比对的中文字面量不随语言变化', asyn
   }
 });
 
+// 发信与存草稿失败要分三态（仓库 .greptile 规则）：服务器明确没收下才可建议重试，
+// 结果不确定时提示先核对。下面的错误对象按 nodemailer / imapflow 实际设置的字段构造。
+function smtpError(message, fields) {
+  return Object.assign(new Error(message), fields);
+}
+
+test('发信失败：服务器明确拒收算未发送，发送途中断线算不确定', async () => {
+  const credentials = { email: 'user@example.test', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
+  const action = { action: 'send', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' };
+  const cases = [
+    // 发送途中断线：nodemailer 也记 command 'CONN'，不能当成「还没连上」。
+    [smtpError('Connection closed unexpectedly', { code: 'ECONNECTION', command: 'CONN' }), 'unknown', 'sendUnconfirmed'],
+    [smtpError('Timeout', { code: 'ETIMEDOUT', command: 'CONN' }), 'unknown', 'sendUnconfirmed'],
+    [smtpError('read ECONNRESET', { code: 'ESOCKET', command: 'CONN', syscall: 'read' }), 'unknown', 'sendUnconfirmed'],
+    // 服务器回了 4xx/5xx、认证或收件人被拒、连接根本没建立：确定没发出。
+    [smtpError('Message failed: 554 rejected', { code: 'EMESSAGE', command: 'DATA', responseCode: 554 }), 'not_executed', null],
+    [smtpError('Invalid login: 535', { code: 'EAUTH', command: 'AUTH PLAIN', responseCode: 535 }), 'not_executed', 'authRejected'],
+    [smtpError('connect ECONNREFUSED', { code: 'ESOCKET', command: 'CONN', syscall: 'connect' }), 'not_executed', null],
+    [smtpError('Greeting never received', { code: 'ETIMEDOUT', command: 'CONN' }), 'not_executed', 'networkUnreachable'],
+  ];
+  for (const [failure, execution, key] of cases) {
+    const harness = createWorkerHarness();
+    harness.deps.createSmtp = () => ({
+      async sendMail() { throw failure; },
+      close() {},
+    });
+    const request = {
+      method: 'mail/action-a',
+      params: { email: credentials.email, credentialSlot: 'a', action, locale: 'ja' },
+      cindy: { secrets: { icloud_mail_app_password: credentials.appSpecificPassword } },
+    };
+    await assert.rejects(
+      worker.handleRequest(request, harness.deps),
+      (error) => {
+        assert.equal(error.execution, execution, failure.message);
+        if (key) assert.equal(error.message, worker.MESSAGES.ja[key], failure.message);
+        return true;
+      },
+    );
+  }
+});
+
+test('存草稿时 APPEND 中途断线算不确定，服务器回 NO 算未保存', async () => {
+  const credentials = { email: 'user@example.test', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
+  const action = { action: 'draft', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' };
+  const draftHarness = (appendError) => {
+    const harness = createWorkerHarness({
+      async list() { return [{ path: 'Drafts', specialUse: '\\Drafts' }]; },
+      async append() { throw appendError; },
+    });
+    harness.deps.createComposer = () => ({
+      async sendMail() { return { message: Buffer.from('Subject: Hi\r\n\r\nBody') }; },
+      close() {},
+    });
+    return harness;
+  };
+  await assert.rejects(
+    worker.performAction(credentials, action, draftHarness(new Error('Socket closed unexpectedly')).deps, 'en'),
+    (error) => error.message === 'DRAFT_SAVE_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  await assert.rejects(
+    worker.performAction(
+      credentials,
+      action,
+      draftHarness(Object.assign(new Error('Command failed'), { responseStatus: 'NO' })).deps,
+      'en',
+    ),
+    (error) => error.execution === 'not_executed',
+  );
+  assert.equal(worker.humanizeError(new Error('DRAFT_SAVE_UNCONFIRMED'), 'ko'), worker.MESSAGES.ko.draftUnconfirmed);
+});
+
+test('main.js 发信或存草稿没有 Worker 的明确判断时提示先核对，不建议重试', async () => {
+  const workerMessage = 'worker said so';
+  const responses = [
+    // 宿主超时、Worker 进程退出、旧宿主不给 errorCode：Worker 可能还在发。
+    [{ ok: false, errorCode: 'TIMEOUT', message: 'timed out' }, 'unconfirmed'],
+    [{ ok: false, errorCode: 'PROCESS_EXITED', message: 'exited' }, 'unconfirmed'],
+    [{ ok: false, message: 'legacy host failure' }, 'unconfirmed'],
+    // Worker 自己回了错误并说明了执行结果：照用它的文案。
+    [{ ok: false, errorCode: 'PROTOCOL_ERROR', message: workerMessage, data: { execution: 'not_executed' } }, 'worker'],
+    [{ ok: false, errorCode: 'PROTOCOL_ERROR', message: workerMessage, data: { execution: 'unknown' } }, 'worker'],
+  ];
+  for (const [action, key] of [['send', 'sendUnconfirmed'], ['draft', 'draftUnconfirmed']]) {
+    for (const [reply, expected] of responses) {
+      const harness = createMainHarness(async () => reply, {}, 'en');
+      const result = await harness.call('icloud_mail', {
+        action,
+        to: 'recipient@example.test',
+        subject: 'Hi',
+        body_text: 'Body',
+      });
+      assert.equal(result.ok, false);
+      const message = result.message || (result.result && result.result.message);
+      assert.equal(
+        message,
+        expected === 'worker' ? workerMessage : harness.context.MESSAGES.en[key],
+        `${action} ${JSON.stringify(reply)}`,
+      );
+    }
+  }
+  // 只读操作超时仍按原文提示。
+  const harness = createMainHarness(async () => ({ ok: false, errorCode: 'TIMEOUT', message: 'timed out' }), {}, 'en');
+  const search = await harness.call('icloud_mail', { action: 'search', text: 'invoice' });
+  assert.equal(search.message || (search.result && search.result.message), 'timed out');
+});
+
 function runBundledWorker(lines) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [new URL('node/worker.cjs', pluginRoot).pathname], {
@@ -1383,7 +1490,9 @@ test('Worker zh-CN 错误文案与迁移前的硬编码字符串逐字一致', (
     invalidRequestFormat: '请求格式无效',
     bodyTruncated: '…（正文过长，已截断）',
   };
-  assert.deepEqual(Object.keys(original).sort(), Object.keys(worker.MESSAGES['zh-CN']).sort());
+  // 发信、存草稿结果不确定时的两条提示是本 PR 新增的，不是迁移来的旧文案。
+  const added = ['draftUnconfirmed', 'sendUnconfirmed'];
+  assert.deepEqual([...Object.keys(original), ...added].sort(), Object.keys(worker.MESSAGES['zh-CN']).sort());
   for (const [key, text] of Object.entries(original)) assert.equal(worker.MESSAGES['zh-CN'][key], text, key);
   for (const [error, key] of WORKER_ERROR_KEYS) {
     assert.equal(worker.humanizeError(error, 'zh-CN'), original[key], key);

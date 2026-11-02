@@ -40,6 +40,8 @@ const MESSAGES = Object.freeze({
     targetFolderRequired: 'move 需要目标文件夹',
     targetFolderSame: '目标文件夹不能与当前文件夹相同',
     moveUnconfirmed: '无法确认邮件是否已移动，请重新搜索邮箱后再操作',
+    sendUnconfirmed: '无法确认邮件是否已发出，请先查看「已发送」文件夹，再决定是否重新发送',
+    draftUnconfirmed: '无法确认草稿是否已保存，请先查看「草稿」文件夹，再决定是否重新保存',
     recipientRequired: '请至少填写一个收件人',
     invalidRecipient: '收件人、抄送或密送地址格式不正确',
     invalidSubject: '邮件主题格式不正确',
@@ -66,6 +68,8 @@ const MESSAGES = Object.freeze({
     targetFolderRequired: 'move requires a target folder',
     targetFolderSame: 'The target folder cannot be the same as the current folder',
     moveUnconfirmed: 'Could not confirm whether the message was moved. Search the mailbox again before doing anything else.',
+    sendUnconfirmed: 'Could not confirm whether the message was sent. Check the Sent folder before sending it again.',
+    draftUnconfirmed: 'Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.',
     recipientRequired: 'Provide at least one recipient',
     invalidRecipient: 'Invalid To, Cc, or Bcc address format',
     invalidSubject: 'Invalid subject format',
@@ -92,6 +96,8 @@ const MESSAGES = Object.freeze({
     targetFolderRequired: 'move には移動先フォルダーが必要です',
     targetFolderSame: '移動先フォルダーに現在のフォルダーは指定できません',
     moveUnconfirmed: 'メールが移動されたかどうかを確認できません。ほかの操作をする前にメールボックスをもう一度検索してください',
+    sendUnconfirmed: 'メールが送信されたかどうかを確認できません。もう一度送信する前に送信済みフォルダーを確認してください',
+    draftUnconfirmed: '下書きが保存されたかどうかを確認できません。もう一度保存する前に下書きフォルダーを確認してください',
     recipientRequired: '宛先を1件以上入力してください',
     invalidRecipient: '宛先、Cc、Bccのアドレス形式が正しくありません',
     invalidSubject: '件名の形式が正しくありません',
@@ -118,6 +124,8 @@ const MESSAGES = Object.freeze({
     targetFolderRequired: 'move에는 대상 폴더가 필요합니다',
     targetFolderSame: '대상 폴더는 현재 폴더와 같을 수 없습니다',
     moveUnconfirmed: '메일이 이동되었는지 확인할 수 없습니다. 다른 작업을 하기 전에 메일함을 다시 검색하세요',
+    sendUnconfirmed: '메일이 전송되었는지 확인할 수 없습니다. 다시 보내기 전에 보낸 편지함을 확인하세요',
+    draftUnconfirmed: '임시 보관 메일이 저장되었는지 확인할 수 없습니다. 다시 저장하기 전에 임시 보관함을 확인하세요',
     recipientRequired: '받는 사람을 한 명 이상 입력하세요',
     invalidRecipient: '받는 사람, 참조 또는 숨은 참조 주소 형식이 올바르지 않습니다',
     invalidSubject: '제목 형식이 올바르지 않습니다',
@@ -488,10 +496,47 @@ function mailOptions(credentials, action) {
   };
 }
 
+// 发信与存草稿会在服务器上留下东西。失败时只有拿得出「服务器没收下」的证据才算没执行；
+// nodemailer 把发送途中的断线和超时也记成 command 'CONN'，所以 CONN 本身不是证据。
+const CONNECT_PHASE_SYSCALLS = new Set(['connect', 'getaddrinfo']);
+const CONNECT_PHASE_MESSAGES = ['Connection timeout', 'Greeting never received'];
+
+function smtpFailureExecution(error) {
+  if (!error || typeof error !== 'object') return 'unknown';
+  if (typeof error.responseCode === 'number' && error.responseCode >= 400) return 'not_executed';
+  const code = typeof error.code === 'string' ? error.code : '';
+  if (['EAUTH', 'EENVELOPE', 'EMESSAGE', 'EDNS', 'EREQUIRETLS'].includes(code)) return 'not_executed';
+  if (CONNECT_PHASE_SYSCALLS.has(error.syscall)) return 'not_executed';
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (CONNECT_PHASE_MESSAGES.some((text) => message.startsWith(text))) return 'not_executed';
+  return 'unknown';
+}
+
+function imapAppendExecution(error) {
+  if (!error || typeof error !== 'object') return 'unknown';
+  if (error.responseStatus === 'NO' || error.responseStatus === 'BAD') return 'not_executed';
+  if (typeof error.serverResponseCode === 'string' && error.serverResponseCode) return 'not_executed';
+  return 'unknown';
+}
+
+function withExecution(error, execution) {
+  const marked = error instanceof Error ? error : new Error(String(error));
+  marked.execution = execution;
+  return marked;
+}
+
 async function sendMessage(credentials, action, deps) {
   const transporter = deps.createSmtp(credentials);
   try {
-    const info = await transporter.sendMail(mailOptions(credentials, action));
+    let info;
+    try {
+      info = await transporter.sendMail(mailOptions(credentials, action));
+    } catch (error) {
+      if (smtpFailureExecution(error) === 'unknown') {
+        throw withExecution(new Error('SEND_UNCONFIRMED'), 'unknown');
+      }
+      throw withExecution(error, 'not_executed');
+    }
     return {
       sent: true,
       message_id: info.messageId || null,
@@ -519,7 +564,15 @@ async function saveDraft(credentials, action, deps) {
     if (!info || !Buffer.isBuffer(info.message)) throw new Error('DRAFT_BUILD_FAILED');
     return withImap(credentials, deps, async (client) => {
       const folder = await findDraftFolder(client);
-      const appended = await client.append(folder, info.message, ['\\Draft'], new Date());
+      let appended;
+      try {
+        appended = await client.append(folder, info.message, ['\\Draft'], new Date());
+      } catch (error) {
+        if (imapAppendExecution(error) === 'unknown') {
+          throw withExecution(new Error('DRAFT_SAVE_UNCONFIRMED'), 'unknown');
+        }
+        throw withExecution(error, 'not_executed');
+      }
       if (!appended) throw new Error('DRAFT_SAVE_FAILED');
       return {
         draft: true,
@@ -637,6 +690,8 @@ function humanizeError(error, locale) {
   const message = error && error.message ? String(error.message) : String(error || '');
   const combined = `${code} ${message}`.toLowerCase();
 
+  if (message === 'SEND_UNCONFIRMED') return t(locale, 'sendUnconfirmed');
+  if (message === 'DRAFT_SAVE_UNCONFIRMED') return t(locale, 'draftUnconfirmed');
   if (message === 'INVALID_EMAIL') return t(locale, 'invalidEmail');
   if (message === 'INVALID_APP_SPECIFIC_PASSWORD') {
     return t(locale, 'invalidAppSpecificPassword');
@@ -726,7 +781,11 @@ async function handleRequest(request, deps = createRuntimeDeps()) {
     }
     throw new Error('METHOD_NOT_FOUND');
   } catch (error) {
-    throw new Error(humanizeError(error, locale));
+    // 只有发信、存草稿会标 unknown；其余失败都发生在服务器收下任何东西之前。
+    throw withExecution(
+      new Error(humanizeError(error, locale)),
+      error && error.execution === 'unknown' ? 'unknown' : 'not_executed',
+    );
   } finally {
     if (credentials) credentials.appSpecificPassword = '';
   }
@@ -763,6 +822,7 @@ function startStdio() {
             message: error && error.message
               ? error.message
               : t(requestLocale(request), 'operationFailed'),
+            data: { execution: error && error.execution === 'unknown' ? 'unknown' : 'not_executed' },
           },
         });
       });

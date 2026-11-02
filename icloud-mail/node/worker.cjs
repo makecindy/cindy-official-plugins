@@ -66131,6 +66131,8 @@ var require_worker = __commonJS({
         targetFolderRequired: "move \u9700\u8981\u76EE\u6807\u6587\u4EF6\u5939",
         targetFolderSame: "\u76EE\u6807\u6587\u4EF6\u5939\u4E0D\u80FD\u4E0E\u5F53\u524D\u6587\u4EF6\u5939\u76F8\u540C",
         moveUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u79FB\u52A8\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u90AE\u7BB1\u540E\u518D\u64CD\u4F5C",
+        sendUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u53D1\u51FA\uFF0C\u8BF7\u5148\u67E5\u770B\u300C\u5DF2\u53D1\u9001\u300D\u6587\u4EF6\u5939\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u65B0\u53D1\u9001",
+        draftUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u8349\u7A3F\u662F\u5426\u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u5148\u67E5\u770B\u300C\u8349\u7A3F\u300D\u6587\u4EF6\u5939\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u65B0\u4FDD\u5B58",
         recipientRequired: "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA",
         invalidRecipient: "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u6216\u5BC6\u9001\u5730\u5740\u683C\u5F0F\u4E0D\u6B63\u786E",
         invalidSubject: "\u90AE\u4EF6\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E",
@@ -66157,6 +66159,8 @@ var require_worker = __commonJS({
         targetFolderRequired: "move requires a target folder",
         targetFolderSame: "The target folder cannot be the same as the current folder",
         moveUnconfirmed: "Could not confirm whether the message was moved. Search the mailbox again before doing anything else.",
+        sendUnconfirmed: "Could not confirm whether the message was sent. Check the Sent folder before sending it again.",
+        draftUnconfirmed: "Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.",
         recipientRequired: "Provide at least one recipient",
         invalidRecipient: "Invalid To, Cc, or Bcc address format",
         invalidSubject: "Invalid subject format",
@@ -66183,6 +66187,8 @@ var require_worker = __commonJS({
         targetFolderRequired: "move \u306B\u306F\u79FB\u52D5\u5148\u30D5\u30A9\u30EB\u30C0\u30FC\u304C\u5FC5\u8981\u3067\u3059",
         targetFolderSame: "\u79FB\u52D5\u5148\u30D5\u30A9\u30EB\u30C0\u30FC\u306B\u73FE\u5728\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u306F\u6307\u5B9A\u3067\u304D\u307E\u305B\u3093",
         moveUnconfirmed: "\u30E1\u30FC\u30EB\u304C\u79FB\u52D5\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u307B\u304B\u306E\u64CD\u4F5C\u3092\u3059\u308B\u524D\u306B\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3092\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044",
+        sendUnconfirmed: "\u30E1\u30FC\u30EB\u304C\u9001\u4FE1\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u9001\u4FE1\u3059\u308B\u524D\u306B\u9001\u4FE1\u6E08\u307F\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
+        draftUnconfirmed: "\u4E0B\u66F8\u304D\u304C\u4FDD\u5B58\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u4FDD\u5B58\u3059\u308B\u524D\u306B\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
         recipientRequired: "\u5B9B\u5148\u30921\u4EF6\u4EE5\u4E0A\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044",
         invalidRecipient: "\u5B9B\u5148\u3001Cc\u3001Bcc\u306E\u30A2\u30C9\u30EC\u30B9\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
         invalidSubject: "\u4EF6\u540D\u306E\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
@@ -66209,6 +66215,8 @@ var require_worker = __commonJS({
         targetFolderRequired: "move\uC5D0\uB294 \uB300\uC0C1 \uD3F4\uB354\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4",
         targetFolderSame: "\uB300\uC0C1 \uD3F4\uB354\uB294 \uD604\uC7AC \uD3F4\uB354\uC640 \uAC19\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4",
         moveUnconfirmed: "\uBA54\uC77C\uC774 \uC774\uB3D9\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uC791\uC5C5\uC744 \uD558\uAE30 \uC804\uC5D0 \uBA54\uC77C\uD568\uC744 \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694",
+        sendUnconfirmed: "\uBA54\uC77C\uC774 \uC804\uC1A1\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uBCF4\uB0B4\uAE30 \uC804\uC5D0 \uBCF4\uB0B8 \uD3B8\uC9C0\uD568\uC744 \uD655\uC778\uD558\uC138\uC694",
+        draftUnconfirmed: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uC800\uC7A5\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC800\uC7A5\uD558\uAE30 \uC804\uC5D0 \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uD655\uC778\uD558\uC138\uC694",
         recipientRequired: "\uBC1B\uB294 \uC0AC\uB78C\uC744 \uD55C \uBA85 \uC774\uC0C1 \uC785\uB825\uD558\uC138\uC694",
         invalidRecipient: "\uBC1B\uB294 \uC0AC\uB78C, \uCC38\uC870 \uB610\uB294 \uC228\uC740 \uCC38\uC870 \uC8FC\uC18C \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
         invalidSubject: "\uC81C\uBAA9 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
@@ -66522,10 +66530,41 @@ ${t(locale, "bodyTruncated")}` : text,
         disableUrlAccess: true
       };
     }
+    var CONNECT_PHASE_SYSCALLS = /* @__PURE__ */ new Set(["connect", "getaddrinfo"]);
+    var CONNECT_PHASE_MESSAGES = ["Connection timeout", "Greeting never received"];
+    function smtpFailureExecution(error) {
+      if (!error || typeof error !== "object") return "unknown";
+      if (typeof error.responseCode === "number" && error.responseCode >= 400) return "not_executed";
+      const code = typeof error.code === "string" ? error.code : "";
+      if (["EAUTH", "EENVELOPE", "EMESSAGE", "EDNS", "EREQUIRETLS"].includes(code)) return "not_executed";
+      if (CONNECT_PHASE_SYSCALLS.has(error.syscall)) return "not_executed";
+      const message = typeof error.message === "string" ? error.message : "";
+      if (CONNECT_PHASE_MESSAGES.some((text) => message.startsWith(text))) return "not_executed";
+      return "unknown";
+    }
+    function imapAppendExecution(error) {
+      if (!error || typeof error !== "object") return "unknown";
+      if (error.responseStatus === "NO" || error.responseStatus === "BAD") return "not_executed";
+      if (typeof error.serverResponseCode === "string" && error.serverResponseCode) return "not_executed";
+      return "unknown";
+    }
+    function withExecution(error, execution) {
+      const marked = error instanceof Error ? error : new Error(String(error));
+      marked.execution = execution;
+      return marked;
+    }
     async function sendMessage(credentials, action, deps) {
       const transporter = deps.createSmtp(credentials);
       try {
-        const info = await transporter.sendMail(mailOptions(credentials, action));
+        let info;
+        try {
+          info = await transporter.sendMail(mailOptions(credentials, action));
+        } catch (error) {
+          if (smtpFailureExecution(error) === "unknown") {
+            throw withExecution(new Error("SEND_UNCONFIRMED"), "unknown");
+          }
+          throw withExecution(error, "not_executed");
+        }
         return {
           sent: true,
           message_id: info.messageId || null,
@@ -66551,7 +66590,15 @@ ${t(locale, "bodyTruncated")}` : text,
         if (!info || !Buffer.isBuffer(info.message)) throw new Error("DRAFT_BUILD_FAILED");
         return withImap(credentials, deps, async (client) => {
           const folder = await findDraftFolder(client);
-          const appended = await client.append(folder, info.message, ["\\Draft"], /* @__PURE__ */ new Date());
+          let appended;
+          try {
+            appended = await client.append(folder, info.message, ["\\Draft"], /* @__PURE__ */ new Date());
+          } catch (error) {
+            if (imapAppendExecution(error) === "unknown") {
+              throw withExecution(new Error("DRAFT_SAVE_UNCONFIRMED"), "unknown");
+            }
+            throw withExecution(error, "not_executed");
+          }
           if (!appended) throw new Error("DRAFT_SAVE_FAILED");
           return {
             draft: true,
@@ -66656,6 +66703,8 @@ ${t(locale, "bodyTruncated")}` : text,
       const code = error && error.code ? String(error.code) : "";
       const message = error && error.message ? String(error.message) : String(error || "");
       const combined = `${code} ${message}`.toLowerCase();
+      if (message === "SEND_UNCONFIRMED") return t(locale, "sendUnconfirmed");
+      if (message === "DRAFT_SAVE_UNCONFIRMED") return t(locale, "draftUnconfirmed");
       if (message === "INVALID_EMAIL") return t(locale, "invalidEmail");
       if (message === "INVALID_APP_SPECIFIC_PASSWORD") {
         return t(locale, "invalidAppSpecificPassword");
@@ -66732,7 +66781,10 @@ ${t(locale, "bodyTruncated")}` : text,
         }
         throw new Error("METHOD_NOT_FOUND");
       } catch (error) {
-        throw new Error(humanizeError(error, locale));
+        throw withExecution(
+          new Error(humanizeError(error, locale)),
+          error && error.execution === "unknown" ? "unknown" : "not_executed"
+        );
       } finally {
         if (credentials) credentials.appSpecificPassword = "";
       }
@@ -66763,7 +66815,8 @@ ${t(locale, "bodyTruncated")}` : text,
             id: request.id,
             error: {
               code: -32e3,
-              message: error && error.message ? error.message : t(requestLocale(request), "operationFailed")
+              message: error && error.message ? error.message : t(requestLocale(request), "operationFailed"),
+              data: { execution: error && error.execution === "unknown" ? "unknown" : "not_executed" }
             }
           });
         });

@@ -29,6 +29,8 @@ var MESSAGES = {
     invalidCredentialSlot: 'iCloud Mail 凭证槽位无效，请重新连接',
     notConfigured: '尚未配置 iCloud Mail，请到「iCloud Mail」插件详情页完成连接',
     workerFailed: 'iCloud Mail Worker 调用失败，请稍后重试',
+    sendUnconfirmed: '无法确认邮件是否已发出，请先查看「已发送」文件夹，再决定是否重新发送',
+    draftUnconfirmed: '无法确认草稿是否已保存，请先查看「草稿」文件夹，再决定是否重新保存',
     unknownSettingsAction: '未知设置动作',
     connectFailed: 'iCloud Mail 连接失败，请重试',
     invalidUid: 'message_uid 必须是有效的正整数',
@@ -47,6 +49,8 @@ var MESSAGES = {
     invalidCredentialSlot: 'Invalid iCloud Mail credential slot. Reconnect the account.',
     notConfigured: 'iCloud Mail is not configured yet. Open the "iCloud Mail" plugin details and connect the account.',
     workerFailed: 'The iCloud Mail Worker call failed. Try again later.',
+    sendUnconfirmed: 'Could not confirm whether the message was sent. Check the Sent folder before sending it again.',
+    draftUnconfirmed: 'Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.',
     unknownSettingsAction: 'Unknown settings action',
     connectFailed: 'iCloud Mail connection failed. Try again.',
     invalidUid: 'message_uid must be a valid positive integer',
@@ -65,6 +69,8 @@ var MESSAGES = {
     invalidCredentialSlot: 'iCloudメールの認証情報スロットが無効です。再接続してください',
     notConfigured: 'iCloudメールはまだ設定されていません。「iCloudメール」プラグインの詳細画面で接続を完了してください',
     workerFailed: 'iCloudメールWorkerの呼び出しに失敗しました。しばらくしてから再試行してください',
+    sendUnconfirmed: 'メールが送信されたかどうかを確認できません。もう一度送信する前に送信済みフォルダーを確認してください',
+    draftUnconfirmed: '下書きが保存されたかどうかを確認できません。もう一度保存する前に下書きフォルダーを確認してください',
     unknownSettingsAction: '不明な設定操作です',
     connectFailed: 'iCloudメールへの接続に失敗しました。再試行してください',
     invalidUid: 'message_uid は有効な正の整数である必要があります',
@@ -83,6 +89,8 @@ var MESSAGES = {
     invalidCredentialSlot: 'iCloud 메일 인증 정보 슬롯이 올바르지 않습니다. 다시 연결하세요',
     notConfigured: 'iCloud 메일이 아직 설정되지 않았습니다. "iCloud 메일" 플러그인 상세 화면에서 연결을 완료하세요',
     workerFailed: 'iCloud 메일 Worker 호출에 실패했습니다. 잠시 후 다시 시도하세요',
+    sendUnconfirmed: '메일이 전송되었는지 확인할 수 없습니다. 다시 보내기 전에 보낸 편지함을 확인하세요',
+    draftUnconfirmed: '임시 보관 메일이 저장되었는지 확인할 수 없습니다. 다시 저장하기 전에 임시 보관함을 확인하세요',
     unknownSettingsAction: '알 수 없는 설정 작업입니다',
     connectFailed: 'iCloud 메일 연결에 실패했습니다. 다시 시도하세요',
     invalidUid: 'message_uid는 올바른 양의 정수여야 합니다',
@@ -231,9 +239,17 @@ async function nodeRequest(method, params, timeoutMs, locale) {
     timeoutMs: timeoutMs || 30000,
   });
   if (!response || response.ok !== true) {
-    throw new Error(response && response.message
+    var failure = new Error(response && response.message
       ? response.message
       : t(locale, 'workerFailed'));
+    // 只有 Worker 自己回了错误(PROTOCOL_ERROR)才带得出它对执行结果的判断;
+    // 超时、进程退出、取消或旧宿主不给 errorCode 时,Worker 可能还在发。
+    failure.workerExecution = response && response.errorCode === 'PROTOCOL_ERROR'
+      && isObject(response.data)
+      && (response.data.execution === 'not_executed' || response.data.execution === 'unknown')
+      ? response.data.execution
+      : null;
+    throw failure;
   }
   return response.result;
 }
@@ -368,16 +384,23 @@ async function runMail(args, locale) {
     return fail(error && error.message ? error.message : t(locale, 'invalidArgs'));
   }
 
+  var createsRemote = action.action === 'send' || action.action === 'draft';
+  var requested = false;
   try {
     var account = await requireConfiguredAccount(locale);
+    requested = true;
     var result = await nodeRequest(nodeMethod('mail/action', account.credentialSlot, locale), {
       email: account.email,
       credentialSlot: account.credentialSlot,
       action: action,
       locale: locale,
-    }, action.action === 'send' || action.action === 'draft' ? 60000 : 45000, locale);
+    }, createsRemote ? 60000 : 45000, locale);
     return { ok: true, result: result };
   } catch (error) {
+    // 发信、存草稿一旦交给 Worker,没有 Worker 的明确判断就不能建议重试:提示先核对。
+    if (createsRemote && requested && !(error && error.workerExecution)) {
+      return fail(action.action === 'send' ? t(locale, 'sendUnconfirmed') : t(locale, 'draftUnconfirmed'));
+    }
     return fail(error && error.message ? error.message : t(locale, 'operationFailed'));
   }
 }
