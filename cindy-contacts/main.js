@@ -429,7 +429,7 @@ const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
 /* ───────────── 旧档案的自动整理 ───────────── */
 // 早先的整理把进展流水写进了要点和介绍，把跟踪备注记成了待办。升级后自动收拾一次（先备份），
 // 之后每次整理结束再顺手收一次；用户不需要手动清理。
-const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|本轮|progress|latest|status|update/i;
+const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|补记|本轮|progress|latest|status|update/i;
 const refCount = (t) => (str(t).match(/#\d{2,}/g) || []).length;
 const isProgressFact = (f) => PROGRESS_FACT.test(str(f.label)) || refCount(f.value) >= 3;
 /** 介绍里成段的 PR / issue 编号流水（一段 ≥3 个 #编号）去掉；第一段总保留。 */
@@ -1852,7 +1852,8 @@ async function maybeAutoSyncMac() {
     const settings = await getSettings();
     const last = await getMeta('system_import');
     if (!settings.macAutoSync || !last || !last.at) return;
-    if (Date.now() - Date.parse(last.at) < 24 * 3600 * 1000) return;
+    // 读取的字段变多后（插件升级）不等满一天，马上对一次，把已有的人补齐
+    if (Date.now() - Date.parse(last.at) < 24 * 3600 * 1000 && (Number(last.fields) || 1) >= SYSTEM_FIELDS_VERSION) return;
     if ((await platform()) !== 'darwin') return;
     macSyncing = true;
     serial(() => importSystem({ dryRun: false, auto: true }))
@@ -2090,6 +2091,61 @@ async function importLegacy(opts) {
 
 /* ───────────── 导入：macOS 系统通讯录 ───────────── */
 
+// 系统通讯录里除邮箱电话外的字段：社交账号、即时通讯、主页记成联系方式；生日、地址、备注写成要点；昵称作别名。
+// 字段集合变了就升这个版本，升级后下一次自动对账会把已有的人补齐。
+const SYSTEM_FIELDS_VERSION = 2;
+const FACT_LABELS = {
+  'zh-CN': { birthday: '生日', address: '地址', note: '备注', addr: (l) => ({ home: '地址（家）', work: '地址（公司）' })[l] || '地址' },
+  en: { birthday: 'Birthday', address: 'Address', note: 'Note', addr: (l) => ({ home: 'Address (home)', work: 'Address (work)' })[l] || 'Address' },
+  ja: { birthday: '誕生日', address: '住所', note: 'メモ', addr: (l) => ({ home: '住所（自宅）', work: '住所（勤務先）' })[l] || '住所' },
+  ko: { birthday: '생일', address: '주소', note: '메모', addr: (l) => ({ home: '주소(집)', work: '주소(직장)' })[l] || '주소' },
+};
+const SERVICE_PLATFORM = { twitter: 'x', x: 'x', linkedin: 'linkedin', facebook: 'facebook', 'sina weibo': 'weibo', sinaweibo: 'weibo', weibo: 'weibo', 'tencent weibo': 'weibo', github: 'github', wechat: 'wechat', qq: 'qq', skype: 'skype', telegram: 'telegram', whatsapp: 'whatsapp', line: 'line' };
+// 早已停用或不是联系方式的服务不导入
+const OBSOLETE_SERVICES = /^(game ?center|msn|aim|icq|jabber|yahoo!?( messenger)?|gadu-gadu|google ?talk|myspace)$/i;
+function platformFromService(service) {
+  const k = str(service).toLowerCase();
+  if (OBSOLETE_SERVICES.test(k)) return '';
+  if (SERVICE_PLATFORM[k]) return SERVICE_PLATFORM[k];
+  const p = k.replace(/[^a-z0-9_-]/g, '');
+  return /^[a-z0-9_-]{1,32}$/.test(p) ? p : '';
+}
+/** 主页链接按网站认平台：LinkedIn、X、GitHub、微博、Facebook，其余记成网站。 */
+function identityFromUrl(url) {
+  const u = str(url);
+  const low = u.toLowerCase();
+  let m;
+  if (low.includes('linkedin.com/')) return { platform: 'linkedin', value: u };
+  if ((m = /(?:twitter|x)\.com\/@?([a-z0-9_]{1,30})(?:[/?#]|$)/i.exec(u))) return { platform: 'x', value: m[1] };
+  if ((m = /github\.com\/([a-z0-9-]{1,39})(?:[/?#]|$)/i.exec(u))) return { platform: 'github', value: m[1] };
+  if (/weibo\.com|t\.sina\.com/.test(low)) return { platform: 'weibo', value: u };
+  if (/^fb:\/\/|facebook\.com/.test(low)) return { platform: 'facebook', value: u };
+  return { platform: 'web', value: u };
+}
+function systemExtras(rec, labels) {
+  const ids = [];
+  for (const s of rec.social || []) {
+    const p = platformFromService(s.service) || (s.url ? identityFromUrl(s.url).platform : '');
+    if (!p) continue;
+    const handle = str(s.user).replace(/^@/, '');
+    const value = p === 'x' || p === 'github' ? handle || identityFromUrl(s.url).value : str(s.url) || handle;
+    if (value) ids.push({ platform: p, value, label: '' });
+  }
+  for (const im of rec.ims || []) {
+    const p = platformFromService(im.service);
+    if (p && str(im.user)) ids.push({ platform: p, value: str(im.user), label: '' });
+  }
+  for (const u of rec.urls || []) {
+    const i = identityFromUrl(u.value);
+    ids.push({ ...i, label: i.platform === 'web' ? str(u.label) : '' });
+  }
+  const facts = [];
+  if (rec.birthday) facts.push({ label: labels.birthday, value: rec.birthday });
+  for (const a of (rec.addresses || []).slice(0, 2)) facts.push({ label: labels.addr(a.label), value: str(a.value).slice(0, 200) });
+  if (rec.note) facts.push({ label: labels.note, value: str(rec.note).slice(0, 200) });
+  return { ids, facts, nickname: str(rec.nickname) };
+}
+
 /**
  * 读取系统通讯录并按 anchor → 邮箱 → 电话 匹配已有档案：命中则补齐缺失身份与锚点；
  * 否则新建（与已有档案重名的放进待确认，等用户判断）。只读系统通讯录，不改它。
@@ -2114,10 +2170,15 @@ async function importSystem(opts) {
     )) {
       owners.set(`${r.platform}:${r.normalized_value}`, r.contact_id);
     }
-    const facets = (await qAll('SELECT id, display_name, aliases FROM contacts ORDER BY id')).map((r) => ({
-      id: r.id,
-      facets: [r.display_name, ...parseAliases(r.aliases)].map(nameFacet),
-    }));
+    // 所有已用的联系方式：补进来的社交账号等不能撞到别人名下
+    const taken = new Map();
+    for (const r of await qAll('SELECT platform, normalized_value, contact_id FROM contact_identities ORDER BY id')) taken.set(`${r.platform}:${r.normalized_value}`, r.contact_id);
+    const people = new Map();
+    const facets = (await qAll('SELECT id, display_name, aliases, facts FROM contacts ORDER BY id')).map((r) => {
+      people.set(r.id, { name: r.display_name, aliases: parseAliases(r.aliases), facts: parseFacts(r.facts) });
+      return { id: r.id, facets: [r.display_name, ...parseAliases(r.aliases)].map(nameFacet) };
+    });
+    const labels = FACT_LABELS[await hostLocale()] || FACT_LABELS.en;
     const at = nowIso();
     const head = [];
     const perRecord = [];
@@ -2140,9 +2201,18 @@ async function importSystem(opts) {
           break;
         }
       }
-      const fresh = ids.filter((i) => !owners.has(`${i.platform}:${i.normalized}`));
+      const extra = systemExtras(rec, labels);
+      const extraIds = extra.ids
+        .map((i) => ({ ...i, normalized: normalizeIdentityValue(i.value, i.platform) }))
+        .filter((i, k, all) => i.normalized && !taken.has(`${i.platform}:${i.normalized}`) && all.findIndex((x) => x.platform === i.platform && x.normalized === i.normalized) === k);
+      const fresh = ids.filter((i) => !owners.has(`${i.platform}:${i.normalized}`)).concat(extraIds);
       if (match) {
-        if (!fresh.length) {
+        // 已有的人只补缺的：没有的联系方式、没写过的生日 / 地址 / 备注、没记过的昵称；不改已经写好的内容
+        const p = people.get(match) || { name: '', aliases: [], facts: [] };
+        const have = new Set(p.facts.map((f) => f.label));
+        const addFacts = extra.facts.filter((f) => !have.has(f.label)).slice(0, Math.max(0, 12 - p.facts.length));
+        const addAlias = extra.nickname && extra.nickname !== p.name && !p.aliases.includes(extra.nickname) ? [extra.nickname] : [];
+        if (!fresh.length && !addFacts.length && !addAlias.length) {
           result.unchanged += 1;
           continue;
         }
@@ -2151,7 +2221,13 @@ async function importSystem(opts) {
         perRecord.push(statements);
         for (const i of fresh) {
           owners.set(`${i.platform}:${i.normalized}`, match);
+          taken.set(`${i.platform}:${i.normalized}`, match);
           statements.push(identityInsert(match, i, at));
+        }
+        if (addFacts.length || addAlias.length) {
+          p.facts = [...p.facts, ...addFacts];
+          p.aliases = [...p.aliases, ...addAlias];
+          statements.push({ sql: 'UPDATE contacts SET facts = ?, aliases = ? WHERE id = ?', params: [JSON.stringify(p.facts), JSON.stringify(p.aliases), match] });
         }
         statements.push({ sql: 'UPDATE contacts SET updated_at = ? WHERE id = ?', params: [at, match] });
         if (groupId) statements.push({ sql: 'INSERT OR IGNORE INTO contact_group_members (group_id, contact_id) VALUES (?, ?)', params: [groupId, match] });
@@ -2167,13 +2243,15 @@ async function importSystem(opts) {
       perRecord.push(statements);
       const kind = rec.isCompany ? 'org' : 'person';
       const summary = rec.isCompany ? '' : [rec.title, rec.org].filter(Boolean).join(' · ');
+      const aliases = extra.nickname && extra.nickname !== rec.name ? [extra.nickname] : [];
       statements.push({
-        sql: `INSERT INTO contacts (id, kind, display_name, aliases, summary, narrative, agent_notes, status, source, created_at, updated_at)
-              VALUES (?, ?, ?, '[]', ?, '', '', ?, 'import', ?, ?)`,
-        params: [id, kind, rec.name, summary, status, at, at],
+        sql: `INSERT INTO contacts (id, kind, display_name, aliases, summary, narrative, agent_notes, status, source, created_at, updated_at, facts)
+              VALUES (?, ?, ?, ?, ?, '', '', ?, 'import', ?, ?, ?)`,
+        params: [id, kind, rec.name, JSON.stringify(aliases), summary, status, at, at, JSON.stringify(extra.facts.slice(0, 12))],
       });
-      for (const i of ids) {
+      for (const i of [...ids, ...extraIds]) {
         owners.set(`${i.platform}:${i.normalized}`, id);
+        taken.set(`${i.platform}:${i.normalized}`, id);
         statements.push(identityInsert(id, i, at));
       }
       if (groupId) statements.push({ sql: 'INSERT OR IGNORE INTO contact_group_members (group_id, contact_id) VALUES (?, ?)', params: [groupId, id] });
@@ -2190,7 +2268,7 @@ async function importSystem(opts) {
         chunk.push(...group);
       }
       await batch(chunk);
-      await batch([setMetaStmt('system_import', { at, total: result.total, created: result.created, updated: result.updated, auto: !!(opts && opts.auto) })]);
+      await batch([setMetaStmt('system_import', { at, total: result.total, created: result.created, updated: result.updated, auto: !!(opts && opts.auto), fields: SYSTEM_FIELDS_VERSION })]);
     }
     result.needsReview = result.needsReview.slice(0, 50);
     result.dryRun = dryRun;
@@ -2380,17 +2458,19 @@ const TASK_NAMES = {
   ja: { app: '連絡先', tidy: '整理', schedule: '連絡先を整理' },
   ko: { app: '연락처', tidy: '정리', schedule: '연락처 정리' },
 };
-async function taskNames() {
-  // 不缓存：用户在 Cindy 里切换语言后，下一个任务就用新语言命名。
+/** Cindy 当前界面语言；不缓存，用户切换语言后下一次就用新语言。宿主 3 秒不回应按英文。 */
+async function hostLocale() {
   try {
-    if (typeof cindy.request !== 'function') return TASK_NAMES.en;
-    // 宿主不回应时不能卡住发任务：3 秒取不到就按英文。
+    if (typeof cindy.request !== 'function') return 'en';
     const r = await Promise.race([cindy.request({ kind: 'app-context' }), new Promise((resolve) => setTimeout(() => resolve(null), 3000))]);
-    const l = r && r.ok && r.context && r.context.locale;
-    return TASK_NAMES[l] || TASK_NAMES.en;
+    return (r && r.ok && r.context && r.context.locale) || 'en';
   } catch (_) {
-    return TASK_NAMES.en;
+    return 'en';
   }
+}
+
+async function taskNames() {
+  return TASK_NAMES[await hostLocale()] || TASK_NAMES.en;
 }
 
 /** 每个人一个固定任务（全局整理共用一个）；再问都发到同一个任务里。 */

@@ -556,14 +556,21 @@ test('从 macOS 通讯录导入：先预览，再按锚点、邮箱、电话合�
   const dir = tmp();
   const fixture = path.join(dir, 'system.json');
   fs.writeFileSync(fixture, JSON.stringify([
-    { name: '林知夏', org: '星屿科技', title: '设计', id: 'AB-1', isCompany: false, emails: [{ v: 'zhixia@example.test', l: '_$!<Work>!$_' }], phones: [] },
+    {
+      name: '林知夏', org: '星屿科技', title: '设计', id: 'AB-1', isCompany: false, emails: [{ v: 'zhixia@example.test', l: '_$!<Work>!$_' }], phones: [],
+      birthday: '1990-03-18', nickname: '知夏', note: '喜欢手冲咖啡',
+      addresses: [{ v: '示例路 1 号\n上海', l: '_$!<Home>!$_' }],
+      urls: [{ v: 'http://t.sina.com.cn/zhixia', l: 'homepage' }, { v: 'https://www.linkedin.com/in/zhixia/', l: '' }],
+      social: [{ s: 'Twitter', u: '@ZhixiaLin', url: '' }],
+      ims: [{ s: 'WeChat', u: 'zhixia_wx' }, { s: 'MSN', u: 'old@example.test' }, { s: 'GameCenter', u: 'zx' }],
+    },
     { name: '新朋友', org: '', title: '', id: 'AB-2', isCompany: false, emails: [], phones: [{ v: '+1 (555) 010-0002', l: 'mobile' }] },
     { name: '林知夏', org: '', title: '', id: 'AB-3', isCompany: false, emails: [], phones: [] },
     { name: '星屿科技', org: '星屿科技', title: '', id: 'AB-4', isCompany: true, emails: [], phones: [] },
   ]));
-  const a = boot({ libDir: dir, systemFixture: fixture });
+  const a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
   try {
-    const existing = ok(await a.call('save', { name: '林知夏', identities: [{ platform: 'email', value: 'zhixia@example.test' }] }));
+    const existing = ok(await a.call('save', { name: '林知夏', identities: [{ platform: 'email', value: 'zhixia@example.test' }], facts: [{ label: '备注', value: '用户自己写的' }] }));
     const preview = ok(await a.call('import_macos', {}));
     assert.equal(preview.dryRun, true);
     assert.equal(ok(await a.call('stats')).people, 1, 'dry run writes nothing');
@@ -573,6 +580,15 @@ test('从 macOS 通讯录导入：先预览，再按锚点、邮箱、电话合�
     assert.equal(r.needsReview.length, 1);
     const c = ok(await a.call('get', { id: existing.id }));
     assert.ok(c.identities.some((i) => i.platform === 'apple-contacts' && i.value === 'AB-1'));
+    // 已有的人只补缺的：社交账号、即时通讯、主页记成联系方式；生日、地址写成要点；已写过的备注不覆盖；昵称作别名
+    const idOf = (p) => c.identities.filter((i) => i.platform === p).map((i) => i.value);
+    assert.deepEqual(idOf('x'), ['ZhixiaLin']);
+    assert.deepEqual(idOf('wechat'), ['zhixia_wx']);
+    assert.equal(idOf('msn').length + idOf('gamecenter').length, 0, '停用的服务不导入');
+    assert.deepEqual(idOf('weibo'), ['http://t.sina.com.cn/zhixia']);
+    assert.deepEqual(idOf('linkedin'), ['https://www.linkedin.com/in/zhixia/']);
+    assert.deepEqual(c.facts, [{ label: '备注', value: '用户自己写的' }, { label: '生日', value: '1990-03-18' }, { label: '地址（家）', value: '示例路 1 号 上海' }]);
+    assert.ok(c.aliases.includes('知夏'));
     const s = ok(await a.call('stats'));
     assert.deepEqual({ people: s.people, orgs: s.orgs, pending: s.pending }, { people: 3, orgs: 1, pending: 1 });
 
@@ -1100,6 +1116,20 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
       people = ok(await a.call('stats')).people;
     }
     assert.equal(people, 2);
+    // 插件升级后读取的字段变多：不等满一天，马上对一次，把已有的人补齐
+    write([
+      { name: '甲', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [{ v: '+1 555 010 0001', l: '' }], birthday: '1982-03-18' },
+      { name: '乙丙', org: '', title: '', id: 'AB-2', isCompany: false, emails: [], phones: [] },
+    ]);
+    a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_remove(json_set(value, '$.at', ?), '$.fields') WHERE key = 'system_import'").run(new Date().toISOString());
+    ok(await a.call('maintenance', { action: 'begin' }));
+    let facts = [];
+    for (let i = 0; i < 40 && !facts.length; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const row = a.library.db('contacts.sqlite').prepare("SELECT c.facts FROM contacts c JOIN contact_identities i ON i.contact_id = c.id WHERE i.platform = 'apple-contacts' AND i.value = 'AB-1'").get();
+      facts = JSON.parse(row.facts);
+    }
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1982-03-18' }]);
     // 关掉每日对账后不再自动执行
     await a.view('settings', { macAutoSync: false });
     a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_set(value, '$.at', ?) WHERE key = 'system_import'").run(new Date(Date.now() - 2 * 86400000).toISOString());
