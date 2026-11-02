@@ -433,7 +433,8 @@ const loopStart = (l) => str(l.since) || str(l.created_at).slice(0, 10);
 /* ───────────── 旧档案的自动整理 ───────────── */
 // 早先的整理把进展流水写进了要点和介绍，把跟踪备注记成了待办。升级后自动收拾一次（先备份），
 // 之后每次整理结束再顺手收一次；用户不需要手动清理。
-const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|补记|本轮|progress|latest|status|update/i;
+// 英文只认明确的进展写法；Marital status、Visa status 这类长期资料不算
+const PROGRESS_FACT = /进展|最新|动态|结果|已完成|排查|补充|补记|本轮|\bprogress\b|\bstatus updates?\b|^\s*(?:latest|recent)\s+(?:news|updates?|progress|status)\b|^\s*updates?\b/i;
 const refCount = (t) => (str(t).match(/#\d{2,}/g) || []).length;
 const isProgressFact = (f) => PROGRESS_FACT.test(str(f.label)) || refCount(f.value) >= 3;
 /** 介绍里成段的 PR / issue 编号流水（一段 ≥3 个 #编号）去掉；第一段总保留。 */

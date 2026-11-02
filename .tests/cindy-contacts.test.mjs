@@ -895,11 +895,11 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
     const p = ok(await a.call('save', {
       name: '示例同事',
       narrative: '一起做桌面端的同事。\n\n#101 已合并，#102 待审，#103 关闭，#104 拆分。\n\n最近在准备下季度计划。',
-      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }],
+      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }, { label: 'Marital status', value: 'Married' }, { label: 'Visa status', value: 'H-1B' }, { label: 'Latest update', value: 'shipped v2' }, { label: 'Status update', value: 'on track' }],
       open_loops: [{ text: '跟进 #101 的验收' }, { text: '给示例同事回复报价' }],
     }));
     // 页面和 AI 读到的要点已经不含进展流水
-    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做']);
+    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做', 'Marital status', 'Visa status']);
     // 模拟从旧版本升级：还没做过这次整理
     const db = () => a.library.db('contacts.sqlite');
     db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
@@ -913,7 +913,7 @@ test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删�
     await a.call('stats');
     assert.equal(a.library.backups.length, 1, '整理前先备份');
     const row = db().prepare('SELECT facts, narrative FROM contacts WHERE id = ?').get(p.id);
-    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做']);
+    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做', 'Marital status', 'Visa status']);
     assert.equal(row.narrative, '一起做桌面端的同事。\n\n最近在准备下季度计划。');
     const loops = Object.fromEntries(ok(await a.call('get', { id: p.id })).loops.map((l) => [l.text, l.status]));
     assert.deepEqual(loops, { '跟进 #101 的验收': 'done', '给示例同事回复报价': 'open' });
