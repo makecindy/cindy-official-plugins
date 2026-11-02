@@ -16,6 +16,9 @@ const {toNative}=require('./android/geometry.cjs');
 
 const SCREEN=0x10,PNG=0x06,MAX_MESSAGE=8*1024*1024,MAX_BUFFERED=4*1024*1024;
 const FETCH_MS=30000,IDLE_MS=60000,READY_MS=8000,PROBE_MS=5000;
+// The interface may report its new orientation only after a turn's last frame,
+// and a still screen sends no more: keep probing this long after activity.
+const SETTLE_MS=3000;
 const ID=/^[A-Za-z0-9._:-]{1,128}$/,PATH=/^\/live-screen\/([0-9a-f]{64})$/;
 const ORIENTATIONS=['portrait','landscape-left','portrait-upside-down','landscape-right'];
 const PHASES=['began','moved','stationary','ended','cancelled'],ENDED=new Set(['ended','cancelled']);
@@ -206,7 +209,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     screen(s);write(s,data);
   }
   function binary(s,data){
-    const type=data[0];s.framed=true;
+    const type=data[0];s.framed=true;s.settleUntil=now()+SETTLE_MS;
     if(type===1){s.avcc=data;s.size=avccSize(data.subarray(1))||s.size;}
     else if(type===4&&!s.size)s.size=jpegSize(data.subarray(1));
     if(s.res)forward(s,type,data);
@@ -275,8 +278,9 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     for(const s of [...sessions.values()]){
       if(t-s.seen>(s.res?IDLE_MS:FETCH_MS)){end(s);continue;}
       if(s.probing&&t-s.probeAt>PROBE_MS)s.probing=false;
-      // A still screen sends nothing and cannot have turned: probe only after frames.
-      if(s.res&&s.framed&&!s.probing){s.framed=false;probe(s);}
+      // A still screen sends nothing and cannot have turned: probe after frames,
+      // and for a few seconds after the last one, so a turn that settles late is seen.
+      if(s.res&&!s.probing&&(s.framed||t<(s.settleUntil||0))){s.framed=false;probe(s);}
     }
     if(sessions.size)Promise.resolve().then(()=>controls().assertEnabled()).catch(()=>closeAll());
   }
@@ -343,7 +347,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(Object.hasOwn(ORIENTATION_BUTTONS,e.button)){
       const orientation=ORIENTATION_BUTTONS[e.button];
       await operation('set_state',{udid:s.udid,orientation});
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;return;
+      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;s.settleUntil=now()+SETTLE_MS;return;
     }
     if(e.button==='rotate-left'||e.button==='rotate-right'){
       // An iPhone's Home Screen and most Apps never turn upside down: skip that
@@ -353,7 +357,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       if(s.kind==='ios'&&ORIENTATIONS[next]==='portrait-upside-down')next=(next+turn)%4;
       const orientation=ORIENTATIONS[next];
       await operation('set_state',{udid:s.udid,orientation});
-      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;return;
+      s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;s.settleUntil=now()+SETTLE_MS;return;
     }
     if(e.button==='shake')return shake(s);
     return operation('press',{udid:s.udid,button:e.button});

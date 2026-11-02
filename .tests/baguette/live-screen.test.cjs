@@ -147,6 +147,9 @@ test('the stream sends screen JSON before the first frame, starts on a keyframe 
   // Frames are followed by one orientation probe; a still screen sends nothing and is not probed.
   const probes=()=>ws.sent.filter(m=>m.type==='describe_ui').length,initial=probes();
   await until(()=>probes()>initial,2500);ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  // Shortly after the last frame it looks once more (a turn can settle late), then a still screen is left alone.
+  await until(()=>probes()>initial+1,2500);ws.text({type:'describe_ui_result',ok:true,tree:{screen:{orientation:'landscape-left'}}});
+  f.advance(4000);await new Promise(r=>setTimeout(r,1200));
   const before=probes();
   await new Promise(r=>setTimeout(r,1200));assert.equal(probes(),before);assert.equal(stream.messages().length,4,'unchanged orientation sends nothing');
   ws.binary(envelope(3,[5]));await until(()=>probes()>before,2500);
