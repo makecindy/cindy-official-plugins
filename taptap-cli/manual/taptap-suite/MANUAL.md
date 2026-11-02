@@ -20,6 +20,9 @@
 > | `taptap-dashboard-stats` | `taptap-suite/references/taptap-dashboard-stats` |
 > | `taptap-player-feedback` | `taptap-suite/references/taptap-player-feedback` |
 > | `taptap-community-management` | `taptap-suite/references/taptap-community-management/MANUAL.md` |
+> | `taptap-whats-new` | `taptap-suite/references/taptap-whats-new/MANUAL.md` |
+> | `taptap-official-message-push` | `taptap-suite/references/taptap-official-message-push/MANUAL.md` |
+> | `taptap-game-sign` | `taptap-suite/references/taptap-game-sign/MANUAL.md` |
 >
 > **两层手册**:本插件的手册是**执行纪律层**——它规定怎么经 `call_tool` 调、写门禁怎么走、失败三态怎么读,冲突时一律以它为准。
 > 需要 CLI 自带的官方原文(安装 CLI 时内置,随 CLI 版本更新)作为**深入参考**时,用:
@@ -79,6 +82,10 @@
 | 查论坛帖子、子版块、帖子正文、一级回复和子回复,或发帖/回帖 | `community-management` | 先确认帖子意图、子版块和时间范围;发帖先给预览再发布 |
 | 把本地图片或视频传成帖子素材,或给一级回复配图 | `community-management`(帖子素材上传) | 帖子:图片 `+upload-image`、视频 `+upload-video`;一级回复只用图片 `+upload-image`;子回复只支持文字,回复都不支持视频;别走素材库 `upload` / `upload-video` |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
+| 活动/公告位、置顶、排期、上下线、失效巡检 | `whats-new` | 先看容量与置顶占用 |
+| 推送额度、预览、创建/取消官方消息推送 | `push` | 创建前重读额度+预览 |
+| 签到主体、奖励、集卡、兑换码、提审/撤回 | `sign` | 提审前跑 readiness |
+| 明确要求串联签到 → 公告位 → 推送 | `interactive-operations-flow` | 只串联用户要求的域，按数据依赖顺序执行 |
 
 ## call_tool 返回解读
 
@@ -114,6 +121,7 @@
 | feedback | CLI 问题反馈的触发条件、脱敏和回执话术 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/feedback.md"})` |
 | business routing | 请求横跨多个业务域或路由不确定 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/business-routing.md"})` |
 | 运营阶段识别与官方手册 | 提审、测试、首次上线或版本更新完成后的状态识别与运营手册交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/operation-handbooks.md"})` |
+| 互动运营跨域流程 | 用户明确要求串联签到、公告位和推送 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/interactive-operations-flow.md"})` |
 | 游戏物料要求 | 回答图片、视频、Windows 素材规格或判断素材是否合规 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/material-requirements.md"})` |
 | TapTap 上架规则目录 v4 | 资料填写提示、审核规则溯源,以及区分官方规则与历史审核 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/official-review-rules-v4.md"})` |
 

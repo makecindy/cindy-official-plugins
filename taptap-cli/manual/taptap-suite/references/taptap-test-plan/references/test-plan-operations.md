@@ -53,6 +53,8 @@
 
 ### 追加激活码
 
+仅适用于封闭测试(CBT);先确认目标计划类型。开放式测试不走激活码导入或有效期修改。上传文件须为 CSV,大小不超过 10 MB。
+
 1. 调 `list-activation-codes` 查看当前激活码、`total_count` 与 `distributed_count`。
 2. 上传激活码文件：`upload-activation-code`（`multipart/form-data`，输入 `file`）得到 `oss_key`。
 3. 用该 `oss_key` 调 `import-activation-code` 导入到目标计划（必填 `activation_code_oss_key`、`platforms`、`test_plan_id`）。

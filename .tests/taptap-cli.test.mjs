@@ -1698,3 +1698,37 @@ test('lifecycle decisions key off the normalized status, never the raw code', ()
       `${name}: a lifecycle narration keys off the raw status code`);
   }
 });
+
+test('the 2026.10.31 interaction operations manuals are routed and carry their safety rules', () => {
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  for (const name of ['taptap-whats-new', 'taptap-official-message-push', 'taptap-game-sign']) {
+    assert.match(
+      suite,
+      new RegExp(`taptap-suite/references/${name}/MANUAL\\.md`),
+      `the suite entry must route to ${name}`,
+    );
+  }
+  assert.match(suite, /interactive-operations-flow\.md/, 'the suite entry must route to the cross-domain flow');
+
+  // The new domains must be reachable from the entry with their own rules,
+  // not just listed: each manual keeps the gate that the CLI cannot infer.
+  const whatsNew = read('taptap-suite/references/taptap-whats-new/MANUAL.md');
+  assert.match(whatsNew, /创建即启用/, 'whats-new creation is online immediately');
+  assert.match(whatsNew, /top_types/, 'the top-slot replacement rule must be explicit');
+
+  const push = read('taptap-suite/references/taptap-official-message-push/MANUAL.md');
+  assert.match(push, /preview_fingerprint/, 'push creation must carry the preview fingerprint');
+  assert.match(push, /不能默认全部/, 'the push scope must not default to all followers');
+
+  const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
+  assert.match(sign, /check-game-sign-readiness/, 'sign review must be gated on readiness');
+  assert.match(sign, /award_id/, 'daily awards must be addressed by award_id');
+  assert.match(sign, /card_id/, 'cards must be addressed by card_id');
+
+  const codes = read('taptap-suite/references/taptap-game-sign/references/code-import.md');
+  assert.match(codes, /confirm_hash/, 'code import must require the preview hash');
+  assert.match(codes, /task_id/, 'code import must resume the same task');
+  assert.match(codes, /禁止自动再提交或换 key 重导/, 'unknown submissions are not free retries');
+});
