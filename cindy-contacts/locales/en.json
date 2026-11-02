@@ -23,7 +23,7 @@
       }
     },
     "list": {
-      "description": "List entry summaries page by page (no story or full events), optionally filtered by group, status or type. Use it to browse or review the to-confirm queue; use find for a specific person.",
+      "description": "List entry summaries page by page (no story or full events), optionally filtered by group, status or type. Use it to browse or review the to-confirm queue; use find for a specific person. Each entry carries circle (people / customers / community / contactOnly), close (a close contact or not) and score (relationship strength).",
       "parameters": {
         "/properties/group": {
           "description": "Group name"

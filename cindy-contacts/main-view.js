@@ -86,6 +86,18 @@
       footFail: '上次整理没有完成', footStale: '自动整理好像没在跑',
       runsTitle: '最近几次', runLine: (r) => `${r.scope === 'contact' ? '单人回补' : r.scope === 'backfill' ? '往前补' : '整理'} · 新增 ${r.created} · 更新 ${r.updated}`,
       noSchedule: '当前 Cindy 版本还不支持由插件发起自动化。',
+      secClose: '常联系', secRecent2: '最近来往',
+      foldEarlier: '更早来往', foldCustomers: '客户与工单', foldCommunity: '开源社区', foldContactOnly: '只有联系方式', foldWaiting: (n) => `${n} 人等你`,
+      freshN: (n) => `${n} 人有更新`, turnN: (n) => `${n} 人等你处理`,
+      scopeFresh: '有更新', scopeTurn: '等你处理', scopeClose: '常联系', scopeCustomers: '客户与工单', scopeCommunity: '开源社区',
+      pin: '置顶', pinnedBtn: '已置顶', unpin: '取消置顶', demote: '不放在常联系', undemote: '交回自动排序', pinnedOk: '已置顶', unpinnedOk: '已交回自动排序', demotedOk: '已移出常联系',
+      sigClose: '常联系', sigPinned: '置顶', sigDays: (n) => `近 90 天有 ${n} 天往来`, sigVia: (c) => `多在${/^[A-Za-z]/.test(c) ? ' ' : ''}${c}`, sigLast: (d) => `上次 ${d}`,
+      waitYou: '等你', waitThem: '等 TA',
+      loopsTitle: '在办的事', doneN: (n) => `已办完 ${n} 件`, hideDone: '收起已办完',
+      storyTitle: '你们之间', storyMore: '展开全文', storyLess: '收起',
+      threadsTitle: '往来的事', allHistory: (n) => `全部往来 ${n}`, threadN: (n) => `${n} 条`, chatDay: (d) => `聊天 · ${d}`,
+      factsTitle: '要点与履历', moreIds: (n) => `另 ${n} 项`,
+      sinceThreads: (n) => `${n} 件事有新进展`, newN: (n) => `新 ${n}`,
     },
     en: {
       title: 'People', all: 'Everyone', recent: 'Recent', pending: 'To confirm', orgs: 'Companies & teams', groups: 'Groups',
@@ -167,6 +179,18 @@
       footFail: 'Last tidy-up did not finish', footStale: 'Daily tidy-up seems stopped',
       runsTitle: 'Recent runs', runLine: (r) => `${r.scope === 'contact' ? 'One person' : r.scope === 'backfill' ? 'Backfill' : 'Tidy'} · ${r.created} new · ${r.updated} updated`,
       noSchedule: 'This Cindy version cannot start automations from plugins yet.',
+      secClose: 'Close contacts', secRecent2: 'Recently in touch',
+      foldEarlier: 'Earlier', foldCustomers: 'Customers & tickets', foldCommunity: 'Open-source community', foldContactOnly: 'Contact details only', foldWaiting: (n) => `${n} waiting on you`,
+      freshN: (n) => `${n} updated`, turnN: (n) => `${n} waiting on you`,
+      scopeFresh: 'Updated', scopeTurn: 'Waiting on you', scopeClose: 'Close contacts', scopeCustomers: 'Customers & tickets', scopeCommunity: 'Open-source community',
+      pin: 'Pin', pinnedBtn: 'Pinned', unpin: 'Unpin', demote: 'Keep out of close contacts', undemote: 'Back to automatic', pinnedOk: 'Pinned', unpinnedOk: 'Back to automatic', demotedOk: 'Moved out of close contacts',
+      sigClose: 'Close contact', sigPinned: 'Pinned', sigDays: (n) => `in touch on ${n} ${n === 1 ? 'day' : 'days'} in 90`, sigVia: (c) => `mostly ${c.toLowerCase()}`, sigLast: (d) => `last ${d}`,
+      waitYou: 'On you', waitThem: 'On them',
+      loopsTitle: 'In progress', doneN: (n) => `${n} done`, hideDone: 'Hide done',
+      storyTitle: 'Between you', storyMore: 'Read all', storyLess: 'Show less',
+      threadsTitle: 'What you dealt with', allHistory: (n) => `All exchanges ${n}`, threadN: (n) => `${n}`, chatDay: (d) => `Chat · ${d}`,
+      factsTitle: 'Key facts & timeline', moreIds: (n) => `${n} more`,
+      sinceThreads: (n) => `${n} ${n === 1 ? 'thread' : 'threads'} moved`, newN: (n) => `${n} new`,
     },
   };
   let T = STRINGS.en;
@@ -191,6 +215,8 @@
     spark: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/>',
     back: '<path d="M15 6l-6 6 6 6"/>',
     check: '<path d="M5 12l5 5 9-10"/>',
+    pin: '<path d="M9.5 3.5h5l-.8 5.6 3.3 3.4v1.5H7v-1.5l3.3-3.4zM12 14v6.5"/>',
+    chev: '<path d="m9 6 6 6-6 6"/>',
   };
   const I = (n, cls) => `<svg class="i${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
   const PLATFORM_ICON = { email: 'mail', phone: 'phone', feishu: 'chat', lark: 'chat', slack: 'chat', wechat: 'chat', telegram: 'chat', dingtalk: 'chat', discord: 'chat', github: 'git', gitlab: 'git', x: 'at', twitter: 'at' };
@@ -274,7 +300,10 @@
     groups: [],
     scope: 'all',
     query: '',
-    showFolded: false,
+    folds: new Set(), // 展开的折叠段：earlier / customers / community / contactOnly
+    showDone: false,
+    storyOpen: false,
+    openThreads: new Set(),
     selId: null,
     detail: null,
     qa: [],
@@ -340,80 +369,117 @@
   const isNew = (iso) => !!(S.view.prev && iso && iso > S.view.prev);
 
   /* ───────── 名单 ───────── */
+  // 名单按关系分层：常联系（速查格）→ 最近来往 → 折叠的更早来往 / 客户与工单 / 开源社区 / 只有联系方式。
+  // 关系分、圈子和在办的事由 main.js 的 listContacts 算好；页面只负责分层和排序。
+  const TURN_DAYS = 7;
+  const WAIT_THEM = /^\s*(等待?|若|waiting\b|wait for|awaiting)/i; // 与 main.js 同一约定：「等 TA …」= 在等对方
+  const yourTurn = (c) => c.circle !== 'contactOnly' && c.pin !== -1 && c.loopsMine > 0 && !!c.mineAt && Date.now() - Date.parse(c.mineAt) <= TURN_DAYS * 86400000;
+  const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+  /** 用户实际怎么叫 TA：中日韩界面里，名字是拉丁字母、别名里有短的中日韩称呼（如邮件署名「安安」）时用别名。 */
+  function callName(c) {
+    if (!/^(zh|ja|ko)/i.test(LOCALE) || CJK.test(c.name)) return c.name;
+    return (c.aliases || []).find((a) => CJK.test(a) && a.length <= 6 && !/\s/.test(a)) || c.name;
+  }
+  const formalName = (c) => (callName(c) === c.name ? '' : c.name);
+
   function scoped() {
     let rows = S.contacts;
     if (S.scope === 'recent') rows = rows.filter((c) => daysSince(c.last) <= 30);
     else if (S.scope === 'pending') rows = rows.filter((c) => c.status === 'pending');
     else if (S.scope === 'orgs') rows = rows.filter((c) => c.kind === 'org');
+    else if (S.scope === 'fresh') rows = rows.filter((c) => c.rich && changedSinceView(c));
+    else if (S.scope === 'turn') rows = rows.filter(yourTurn);
+    else if (S.scope === 'close') rows = rows.filter((c) => c.close);
+    else if (S.scope === 'customers' || S.scope === 'community') rows = rows.filter((c) => c.circle === S.scope);
     else if (S.scope.startsWith('g:')) rows = rows.filter((c) => c.groups.includes(S.scope.slice(2)));
     const q = S.query.trim().toLowerCase();
     if (q) rows = rows.filter((c) => [c.name, c.summary, c.latest, ...c.aliases, ...c.groups].some((v) => String(v || '').toLowerCase().includes(q)));
     return rows;
   }
   const byLast = (a, b) => String(b.last || '').localeCompare(String(a.last || '')) || collator.compare(a.name, b.name);
+  const byRank = (a, b) => b.pin - a.pin || b.score - a.score || byLast(a, b);
+  const byTurn = (a, b) => String(b.mineAt).localeCompare(String(a.mineAt)) || byRank(a, b);
   const changedSinceView = (c) => isNew(c.lastIngest) || isNew(c.latestAt);
 
-  /** 有搜索或筛选时平铺；否则分成「上次看过之后 / 最近在来往 / 更早认识的」，只有联系方式的折叠起来。 */
+  /** 有搜索或筛选时平铺；否则常联系做成速查格，其余按圈子分段，次要的几圈折叠。 */
   function sections() {
     const rows = scoped();
-    if (S.query.trim() || S.scope !== 'all') return { secs: [{ key: '', items: rows.slice().sort(byLast) }], folded: [] };
-    const rich = rows.filter((c) => c.rich);
-    const fresh = rich.filter(changedSinceView).sort(byLast);
-    const rest = rich.filter((c) => !changedSinceView(c));
-    const recent = rest.filter((c) => daysSince(c.last) <= 14).sort(byLast);
-    const earlier = rest.filter((c) => daysSince(c.last) > 14).sort(byLast);
-    const folded = rows.filter((c) => !c.rich).sort((a, b) => collator.compare(a.name, b.name));
-    const secs = [];
-    if (fresh.length) secs.push({ key: T.secNew, items: fresh });
-    if (recent.length) secs.push({ key: T.secRecent, items: recent });
-    if (earlier.length) secs.push({ key: T.secEarlier, items: earlier });
-    return { secs, folded };
+    if (S.query.trim() || S.scope !== 'all') {
+      const sort = S.query.trim() ? byRank : S.scope === 'turn' ? byTurn : S.scope === 'close' ? byRank : byLast;
+      return { grid: [], secs: [{ key: '', items: rows.slice().sort(sort) }], folds: [] };
+    }
+    const grid = rows.filter((c) => c.close).sort(byRank);
+    const people = rows.filter((c) => !c.close && c.circle === 'people');
+    const recent = people.filter((c) => daysSince(c.last) <= 30).sort(byLast);
+    const folds = [
+      { key: 'earlier', label: T.foldEarlier, items: people.filter((c) => daysSince(c.last) > 30).sort(byLast) },
+      { key: 'customers', label: T.foldCustomers, items: rows.filter((c) => !c.close && c.circle === 'customers').sort(byLast) },
+      { key: 'community', label: T.foldCommunity, items: rows.filter((c) => !c.close && c.circle === 'community').sort(byRank) },
+      { key: 'contactOnly', label: T.foldContactOnly, items: rows.filter((c) => !c.close && c.circle === 'contactOnly').sort((a, b) => collator.compare(callName(a), callName(b))) },
+    ].filter((f) => f.items.length);
+    return { grid, secs: recent.length ? [{ key: T.secRecent2, items: recent }] : [], folds };
   }
   const flatVisible = () => {
-    const { secs, folded } = sections();
-    return [...secs.flatMap((s) => s.items), ...(S.showFolded ? folded : [])];
+    const { grid, secs, folds } = sections();
+    return [...grid, ...secs.flatMap((s) => s.items), ...folds.filter((f) => S.folds.has(f.key)).flatMap((f) => f.items)];
   };
 
   function scopeTitle() {
     if (S.scope === 'all') return T.title;
-    if (S.scope === 'recent') return T.recent;
-    if (S.scope === 'pending') return T.pending;
-    if (S.scope === 'orgs') return T.orgs;
-    return S.scope.slice(2);
+    const named = { recent: T.recent, pending: T.pending, orgs: T.orgs, fresh: T.scopeFresh, turn: T.scopeTurn, close: T.scopeClose, customers: T.scopeCustomers, community: T.scopeCommunity };
+    return named[S.scope] || S.scope.slice(2);
   }
 
   const listpane = $('#listpane');
   const detailEl = $('#detail');
 
   function rowHtml(c) {
-    const line = c.latest || c.summary || c.groups[0] || '';
-    const fresh = changedSinceView(c) && c.latest;
+    const turn = S.scope === 'turn' && c.mineText;
+    const line = turn ? c.mineText : c.latest || c.summary || c.groups[0] || '';
+    const fresh = changedSinceView(c) && (c.latest || turn);
+    const formal = formalName(c);
     return `<button class="row" data-id="${esc(c.id)}" aria-selected="${c.id === S.selId}">
-      <span class="nm">${esc(c.name)}</span><span class="t">${esc(ago(c.last))}</span>
-      <span class="sub${fresh ? ' fresh' : ''}">${esc(line)}</span></button>`;
+      <span class="nm">${esc(callName(c))}${formal ? `<small>${esc(formal)}</small>` : ''}</span><span class="t">${esc(ago(c.last))}</span>
+      <span class="sub${fresh ? ' fresh' : ''}">${turn ? `<em>${esc(T.waitYou)}</em>` : ''}${esc(line)}</span></button>`;
+  }
+
+  /** 速查格只放名字；有没有更新看标题下的「有更新」筛选，不在每个名字上打点。 */
+  function chipHtml(c) {
+    return `<button class="chip" data-id="${esc(c.id)}" aria-selected="${c.id === S.selId}" title="${esc(c.latest || c.summary || '')}"><span>${esc(callName(c))}</span></button>`;
   }
 
   function renderList() {
-    const { secs, folded } = sections();
+    const { grid, secs, folds } = sections();
     const richCount = S.contacts.filter((c) => c.rich).length;
     const freshCount = S.contacts.filter((c) => c.rich && changedSinceView(c)).length;
+    const turnCount = S.contacts.filter(yourTurn).length;
+    let sub = '';
+    if (freshCount || turnCount) {
+      const f = (key, label) => `<button data-filter-scope="${key}" aria-pressed="${S.scope === key}">${esc(label)}</button>`;
+      sub = [freshCount ? f('fresh', T.freshN(freshCount)) : '', turnCount ? f('turn', T.turnN(turnCount)) : ''].filter(Boolean).join('<span class="sep">·</span>');
+    } else sub = esc(T.subCount(richCount));
     let h = `<div class="lhead">
       <button class="scope" id="scopeBtn" aria-haspopup="menu">${esc(scopeTitle())}${I('down')}</button>
-      <div class="lsub">${freshCount ? `<b>${esc(T.subNew(freshCount))}</b>` : esc(T.subCount(richCount))}</div>
+      <div class="lsub">${sub}</div>
       <label class="find">${I('search')}<input id="findInput" type="search" value="${esc(S.query)}" placeholder="${esc(T.search)}" autocomplete="off" spellcheck="false">${S.query ? `<button class="clear" id="clearFind" aria-label="clear">${I('x', 's')}</button>` : ''}</label></div>`;
     h += '<div class="lscroll" id="lscroll">';
     if (!S.query) h += legacyNotice();
-    const any = secs.some((s) => s.items.length) || folded.length;
+    const any = grid.length || secs.some((s) => s.items.length) || folds.length;
     if (!any) h += `<div class="lempty">${esc(S.query ? T.noMatch : T.emptyScope)}</div>`;
+    if (grid.length) h += `<div class="lsec"><span>${esc(T.secClose)}</span><span class="n">${grid.length}</span></div><div class="chips">${grid.map(chipHtml).join('')}</div>`;
     for (const s of secs) {
       if (!s.items.length) continue;
-      if (s.key) h += `<div class="lsec">${esc(s.key)}</div>`;
+      if (s.key) h += `<div class="lsec"><span>${esc(s.key)}</span><span class="n">${s.items.length}</span></div>`;
       h += s.items.map(rowHtml).join('');
     }
-    if (folded.length) {
-      h += `<button class="fold" data-action="toggleFolded"><span>${esc(T.folded(folded.length))}</span><span>${esc(S.showFolded ? T.collapse : T.expand)} ›</span></button>`;
-      if (S.showFolded) h += `<div class="folded">${folded.map(rowHtml).join('')}</div>`;
+    if (folds.length) h += '<div class="folds">';
+    for (const f of folds) {
+      const open = S.folds.has(f.key);
+      const waiting = f.key === 'customers' ? f.items.filter(yourTurn).length : 0;
+      h += `<button class="fold" data-fold="${f.key}" aria-expanded="${open}"><span>${esc(f.label)}</span><span class="r">${waiting ? `<em>${esc(T.foldWaiting(waiting))}</em>` : ''}${f.items.length}${I('chev', 's')}</span></button>`;
+      if (open) h += `<div class="folded">${f.items.map(rowHtml).join('')}</div>`;
     }
+    if (folds.length) h += '</div>';
     h += '</div>' + listFooter();
     const keepScroll = $('#lscroll')?.scrollTop || 0;
     const hadFocus = document.activeElement?.id === 'findInput';
@@ -491,48 +557,151 @@
   }
 
   /* ───────── 详情：概览 / 往来 / 资料 ───────── */
+  // 往来按「事」归并：邮件按去掉 Re:/回复: 的主题，GitHub 按 PR/issue，聊天按天；
+  // 「10月Elan票据：追加凭证」这类小标题按冒号前归并。
+  const cleanTitle = (t) => String(t || '').replace(/^\s*((re|fw|fwd|aw|回复|答复|转发)\s*[:：]\s*)+/i, '').trim();
+  function threadOf(i) {
+    if (i.channel === 'im') return { key: `im:${localDay(i.at)}`, title: T.chatDay(fmtDay(i.at)) };
+    const gh = i.channel === 'github' && /github\.com\/[^/\s]+\/[^/\s]+\/(?:pull|issues)\/\d+/.exec(i.link || '');
+    const t = cleanTitle(i.title);
+    if (gh) return { key: `gh:${gh[0]}`, title: t || gh[0].replace(/^github\.com\//, '') };
+    const m = /^([^：]{2,24})：/.exec(t);
+    const title = m ? m[1].trim() : t;
+    return { key: `${i.channel}:${title.toLowerCase()}`, title: title || T.ch[i.channel] || i.channel };
+  }
+  /** 新的在前的往来 → 按最近活动排序的事。 */
+  function threadsOf(list) {
+    const map = new Map();
+    for (const i of list) {
+      const th = threadOf(i);
+      if (!map.has(th.key)) map.set(th.key, { key: th.key, title: th.title, channel: i.channel, items: [] });
+      map.get(th.key).items.push(i);
+    }
+    return [...map.values()];
+  }
+  const fmtRange = (items) => {
+    const a = fmtDay(items[items.length - 1].at);
+    const b = fmtDay(items[0].at);
+    return a === b ? b : `${a} – ${b}`;
+  };
+
+  /** 上次看过之后：按事汇总，一件事一行，不再逐条列消息。 */
   function sinceBlock(d) {
-    const fresh = d.interactions.filter((i) => isNew(i.addedAt)).slice(0, 6);
+    const fresh = threadsOf(d.interactions.filter((i) => isNew(i.addedAt)));
     if (!fresh.length) return '';
-    let h = `<section class="since"><div class="sh"><b>${esc(T.since)}</b><span>${esc(T.sinceCount(fresh.length))}</span></div>`;
-    for (const i of fresh) {
-      h += `<div class="si"><span class="t">${esc(fmtWhen(i.at))}</span><div>${esc(i.summary || i.title)}${i.quote ? `<q>${esc(i.quote)}</q>` : ''}</div></div>`;
+    let h = `<section class="since"><div class="sh"><b>${esc(T.since)}</b><span>${esc(T.sinceThreads(fresh.length))}</span></div>`;
+    for (const th of fresh.slice(0, 4)) {
+      const top = th.items[0];
+      h += `<div class="si"><div class="st"><span class="tt">${esc(th.title)}</span>${th.items.length > 1 ? `<span class="tag">${esc(T.newN(th.items.length))}</span>` : ''}<span class="t">${esc(fmtWhen(top.at))}</span></div>
+        <div class="sm">${esc(top.summary || top.title)}</div></div>`;
     }
     return h + '</section>';
   }
 
-  function overviewTab(d) {
-    let h = '';
+  /** 名片头：一句话是谁，关系信号，最常用的几个联系方式。 */
+  function headBlock(d) {
+    const row = S.contacts.find((c) => c.id === d.id);
+    const formal = row ? formalName(row) : '';
+    const latin = formal || d.aliases.find((a) => /^[A-Za-z][A-Za-z .'-]*$/.test(a));
+    let h = `<h1 class="name">${esc(row ? callName(row) : d.name)}${latin ? `<small>${esc(latin)}</small>` : ''}</h1>`;
+    if (d.summary) h += `<p class="who1">${esc(d.summary)}</p>`;
+    const sig = [];
+    if (row && row.pin === 1) sig.push(`<b>${esc(T.sigPinned)}</b>`);
+    else if (row && row.close) sig.push(`<b>${esc(T.sigClose)}</b>`);
+    if (row && row.activeDays) sig.push(esc(T.sigDays(row.activeDays)));
+    if (row && row.channel && T.ch[row.channel]) sig.push(esc(T.sigVia(T.ch[row.channel])));
+    if (d.interactions[0]) sig.push(esc(T.sigLast(fmtDay(d.interactions[0].at))));
+    if (sig.length) h += `<div class="sig">${sig.map((x) => `<span>${x}</span>`).join('')}</div>`;
+    const ids = d.identities.filter((i) => i.platform !== 'apple-contacts');
+    const order = ['email', 'phone', 'wechat', 'feishu', 'lark', 'slack', 'telegram', 'github', 'x'];
+    const pick = ids.slice().sort((a, b) => (order.indexOf(a.platform) + 1 || 99) - (order.indexOf(b.platform) + 1 || 99)).slice(0, 3);
+    if (pick.length) {
+      h += `<div class="reach">${pick.map((i) => `<button data-copy="${esc(i.value)}" title="${esc(i.value)}">${I(PLATFORM_ICON[i.platform] || 'link', 's')}<span>${esc(identityLabel(i))}</span></button>`).join('')}`;
+      if (ids.length > pick.length) h += `<button class="more" data-tab="info">${esc(T.moreIds(ids.length - pick.length))}</button>`;
+      h += '</div>';
+    }
+    return h;
+  }
+
+  function loopsBlock(d) {
+    const open = d.loops.filter((l) => l.status === 'open');
+    const done = d.loops.filter((l) => l.status === 'done');
+    if (!open.length && !done.length) return '';
+    const loopRow = (l) => {
+      const isDone = l.status === 'done';
+      const them = WAIT_THEM.test(l.text);
+      const fresh = !isDone && isNew(l.updatedAt);
+      return `<div class="loop${isDone ? ' done' : ''}">
+        <button class="dot" data-loop="${esc(l.id)}" data-status="${isDone ? 'open' : 'done'}" title="${esc(isDone ? T.reopen : T.markDone)}" aria-label="${esc(isDone ? T.reopen : T.markDone)}">${isDone ? I('check', 's') : ''}</button>
+        <div class="tx">${esc(l.text)}${fresh ? `<span class="tag">${esc(LOCALE === 'zh-CN' ? '新' : 'new')}</span>` : ''}${l.detail ? `<div>${esc(l.detail)}</div>` : ''}</div>
+        <span class="when">${isDone ? esc(T.doneTag) : `<em class="${them ? 'them' : 'you'}">${esc(them ? T.waitThem : T.waitYou)}</em>${esc(fmtDay(l.since || l.updatedAt))}`}</span></div>`;
+    };
+    let h = `<h3>${esc(T.loopsTitle)}</h3><div class="loops">`;
+    // 先列该你做的，再列在等对方的
+    const mine = open.filter((l) => !WAIT_THEM.test(l.text));
+    h += [...mine, ...open.filter((l) => !mine.includes(l))].map(loopRow).join('');
+    if (S.showDone) h += done.map(loopRow).join('');
+    h += '</div>';
+    if (done.length) h += `<button class="sublink" data-action="toggleDone">${esc(S.showDone ? T.hideDone : T.doneN(done.length))}</button>`;
+    return h;
+  }
+
+  function storyBlock(d) {
     const paras = paragraphs(d.narrative);
-    if (paras.length) h += `<div class="portrait">${paras.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
-    if (!d.interactions.length && !paras.length) {
-      h += `<div class="thin"><p>${esc(T.thin)}</p>${S.meta?.tasks ? `<button class="pill" data-action="backfill">${I('search', 's')}${esc(T.thinAct)}</button>` : ''}</div>`;
+    let h = '';
+    if (paras.length) {
+      const shown = S.storyOpen ? paras : paras.slice(0, 2);
+      h += `<h3>${esc(T.storyTitle)}</h3><div class="portrait">${shown.map((p) => `<p>${richText(p)}</p>`).join('')}</div>`;
+      if (paras.length > 2) h += `<button class="sublink" data-action="toggleStory">${esc(S.storyOpen ? T.storyLess : T.storyMore)}</button>`;
     }
     if (String(d.agentNotes || '').trim()) h += `<p class="note">${richText(d.agentNotes)}</p>`;
-    const open = d.loops.filter((l) => l.status === 'open');
-    const done = d.loops.filter((l) => l.status === 'done').slice(0, 3);
-    if (open.length || done.length) {
-      h += `<h3>${esc(T.loops)}</h3><div class="loops">`;
-      for (const l of [...open, ...done]) {
-        const fresh = l.status === 'open' && isNew(l.updatedAt);
-        h += `<div class="loop${l.status === 'done' ? ' done' : ''}">
-          <button class="dot" data-loop="${esc(l.id)}" data-status="${l.status === 'done' ? 'open' : 'done'}" title="${esc(l.status === 'done' ? T.reopen : T.markDone)}" aria-label="${esc(l.status === 'done' ? T.reopen : T.markDone)}">${l.status === 'done' ? I('check', 's') : ''}</button>
-          <div class="tx">${esc(l.text)}${fresh ? '<span class="tag">新</span>' : ''}${l.detail ? `<div>${esc(l.detail)}</div>` : ''}</div>
-          <span class="when">${esc(l.status === 'done' ? T.doneTag : fmtDay(l.since || l.updatedAt))}</span></div>`;
+    return h;
+  }
+
+  function threadsBlock(d) {
+    if (!d.interactions.length) return '';
+    const list = threadsOf(d.interactions).slice(0, 5);
+    let h = `<h3 class="hrow"><span>${esc(T.threadsTitle)}</span><button data-tab="history">${esc(T.allHistory(d.interactionTotal))}${I('chev', 's')}</button></h3><div class="threads">`;
+    for (const th of list) {
+      const open = S.openThreads.has(th.key);
+      const top = th.items[0];
+      const fresh = th.items.some((i) => isNew(i.addedAt));
+      h += `<div class="th${open ? ' open' : ''}"><button class="thh" data-thread="${esc(th.key)}" aria-expanded="${open}">
+        <span class="ic">${I(CHANNEL_ICON[th.channel] || 'link', 's')}</span>
+        <span class="tt">${esc(th.title)}${fresh ? `<i class="dot" aria-hidden="true"></i>` : ''}</span>
+        <span class="tm">${esc(T.threadN(th.items.length))} · ${esc(fmtRange(th.items))}</span>
+        <span class="sm">${esc(top.summary || top.title)}</span></button>`;
+      if (open) {
+        h += '<div class="tes">';
+        for (const i of th.items.slice(0, 12)) {
+          h += `<div class="te"><span class="d">${esc(fmtWhen(i.at))}</span><div>${esc(i.summary || i.title)}${i.quote ? `<q>${esc(i.quote)}</q>` : ''}${i.link ? ` <a class="go" href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${esc(T.open)} ›</a>` : ''}</div></div>`;
+        }
+        h += '</div>';
       }
       h += '</div>';
     }
+    return h + '</div>';
+  }
+
+  function factsBlock(d) {
     const kv = [...d.facts.map((f) => [f.label, esc(f.value)])];
     if (d.relations.length) {
       kv.push([T.related, d.relations.map((r) => `<span class="link" data-goto="${esc(r.otherId)}">${esc(r.otherName)}</span>${r.relation ? `<small>${esc(r.relation)}</small>` : ''}`).join('　')]);
     }
     if (d.groups.length) kv.push([T.inGroups, d.groups.map((g) => `<span class="link" data-scope="g:${esc(g.name)}">${esc(g.name)}</span>`).join('　')]);
-    if (d.events.length || kv.length) {
-      h += `<h3>${esc(T.cv)}</h3><div class="cv">`;
-      h += `<div class="tl">${d.events.slice(0, 8).map((e) => `<div class="ti"><div class="y">${esc(fmtDay(e.date))}</div><div class="e">${esc(e.text)}</div></div>`).join('')}</div>`;
-      h += `<dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+    if (!d.events.length && !kv.length) return '';
+    let h = `<h3>${esc(T.factsTitle)}</h3><div class="cv">`;
+    h += `<dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+    h += `<div class="tl">${d.events.slice(0, 8).map((e) => `<div class="ti"><div class="y">${esc(fmtDay(e.date))}</div><div class="e">${esc(e.text)}</div></div>`).join('')}</div>`;
+    return h + '</div>';
+  }
+
+  function overviewTab(d) {
+    let h = '';
+    if (!d.interactions.length && !paragraphs(d.narrative).length) {
+      h += `<div class="thin"><p>${esc(T.thin)}</p>${S.meta?.tasks ? `<button class="pill" data-action="backfill">${I('search', 's')}${esc(T.thinAct)}</button>` : ''}</div>`;
     }
-    return h;
+    return h + loopsBlock(d) + storyBlock(d) + threadsBlock(d) + factsBlock(d);
   }
 
   function historyTab(d) {
@@ -601,7 +770,7 @@
 
   function askBar(d) {
     if (!S.meta?.tasks && !d) return '';
-    return `<div class="askwrap"><form class="askbar" id="askForm">${I('spark')}<input id="askInput" placeholder="${esc(T.askPh(d ? d.name : ''))}" autocomplete="off"><button class="askgo" type="submit" aria-label="send">${I('arrow', 's')}</button></form></div>`;
+    return `<div class="askwrap"><form class="askbar" id="askForm">${I('spark')}<input id="askInput" placeholder="${esc(T.askPh(d ? callName(S.contacts.find((c) => c.id === d.id) || d) : ''))}" autocomplete="off"><button class="askgo" type="submit" aria-label="send">${I('arrow', 's')}</button></form></div>`;
   }
 
   function renderView() {
@@ -610,13 +779,15 @@
       detailEl.innerHTML = '';
       return;
     }
-    const latin = d.aliases.find((a) => /^[A-Za-z][A-Za-z .'-]*$/.test(a));
+    const row = S.contacts.find((c) => c.id === d.id);
+    const pinned = row && row.pin === 1;
     let h = `<div class="tools"><button class="tbtn back" data-action="back">${I('back', 's')}${esc(T.back)}</button>`;
-    if (!S.confirmDelete) h += `<button class="tbtn" data-action="edit">${esc(T.edit)}</button><button class="tbtn" id="moreBtn" aria-label="${esc(T.more)}">${I('more')}</button>`;
+    if (!S.confirmDelete) {
+      h += `<button class="tbtn${pinned ? ' on' : ''}" data-pin="${pinned ? 0 : 1}" aria-pressed="${pinned}" title="${esc(pinned ? T.unpin : T.pin)}">${I('pin', 's')}${esc(pinned ? T.pinnedBtn : T.pin)}</button>`;
+      h += `<button class="tbtn" data-action="edit">${esc(T.edit)}</button><button class="tbtn" id="moreBtn" aria-label="${esc(T.more)}">${I('more')}</button>`;
+    }
     h += '</div>';
-    h += `<article class="page"><h1 class="name">${esc(d.name)}${latin ? `<small>${esc(latin)}</small>` : ''}</h1>`;
-    const who = [d.summary, d.interactionTotal ? T.contactLine(d.interactionTotal) : '', d.interactions[0] ? T.lastLine(fmtDay(d.interactions[0].at)) : ''].filter(Boolean);
-    h += `<div class="who">${who.map((w) => `<span>${esc(w)}</span>`).join('')}</div>`;
+    h += `<article class="page">${headBlock(d)}`;
     if (S.confirmDelete) {
       h += `<div class="confirmrow"><span>${esc(T.delAsk(d.name))}</span><span class="sp"></span><button class="pill" data-action="cancelDelete">${esc(T.cancel)}</button><button class="pill pri" data-action="doDelete">${esc(T.delYes)}</button></div>`;
     }
@@ -797,6 +968,9 @@
     S.mode = 'view';
     S.tab = 'overview';
     S.filter = 'all';
+    S.showDone = false;
+    S.storyOpen = false;
+    S.openThreads = new Set();
     S.confirmDelete = false;
     S.asking = false;
     renderList();
@@ -919,7 +1093,14 @@
   function scopeMenu(anchor) {
     const count = (fn) => S.contacts.filter(fn).length;
     const item = (key, label, n) => `<button class="mi" data-scope="${esc(key)}"><span>${esc(label)}</span><span class="r">${n}</span></button>`;
-    let h = item('all', T.all, S.contacts.length) + item('recent', T.recent, count((c) => daysSince(c.last) <= 30));
+    let h = item('all', T.all, S.contacts.length) + item('close', T.scopeClose, count((c) => c.close));
+    const turnN = count(yourTurn);
+    if (turnN) h += item('turn', T.scopeTurn, turnN);
+    h += item('recent', T.recent, count((c) => daysSince(c.last) <= 30));
+    for (const k of ['customers', 'community']) {
+      const n = count((c) => c.circle === k);
+      if (n) h += item(k, k === 'customers' ? T.scopeCustomers : T.scopeCommunity, n);
+    }
     const pendingN = count((c) => c.status === 'pending');
     if (pendingN) h += item('pending', T.pending, pendingN);
     h += item('orgs', T.orgs, count((c) => c.kind === 'org'));
@@ -940,6 +1121,9 @@
     const inGroups = new Set(d.groups.map((g) => g.name));
     let h = '';
     if (d.status === 'pending') h += `<button class="mi" data-action="confirm">${esc(T.markConfirmed)}</button><div class="msep"></div>`;
+    const row = S.contacts.find((c) => c.id === d.id);
+    if (row && row.pin === -1) h += `<button class="mi" data-pin="0">${esc(T.undemote)}</button><div class="msep"></div>`;
+    else if (row && row.close && row.pin !== 1) h += `<button class="mi" data-pin="-1">${esc(T.demote)}</button><div class="msep"></div>`;
     h += `<div class="mhead">${esc(T.addToGroup)}</div>`;
     for (const g of S.groups) {
       if (!inGroups.has(g.name)) h += `<button class="mi" data-add-group="${esc(g.name)}">${esc(g.name)}</button>`;
@@ -1131,14 +1315,39 @@
       renderList();
       return $('#findInput').focus();
     }
-    if ((x = c('.row[data-id]'))) return select(x.dataset.id);
+    if ((x = c('.row[data-id], .chip[data-id]'))) return select(x.dataset.id);
+    if ((x = c('[data-fold]'))) {
+      const k = x.dataset.fold;
+      if (S.folds.has(k)) S.folds.delete(k);
+      else S.folds.add(k);
+      return renderList();
+    }
+    if ((x = c('[data-filter-scope]'))) {
+      S.scope = S.scope === x.dataset.filterScope ? 'all' : x.dataset.filterScope;
+      renderList();
+      return;
+    }
     if ((x = c('[data-goto]'))) {
       const id = x.dataset.goto;
       if (!id) return;
       S.scope = 'all';
       S.query = '';
-      if (!S.contacts.find((r) => r.id === id)?.rich) S.showFolded = true;
-      return select(id);
+      // 目标在折叠段里时展开那一段，名单上能看到选中的人
+      const fold = sections().folds.find((f) => f.items.some((r) => r.id === id));
+      if (fold) S.folds.add(fold.key);
+      await select(id);
+      return listpane.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
+    if ((x = c('[data-pin]'))) {
+      const value = Number(x.dataset.pin);
+      closeMenu();
+      return mutate(() => rpc('pin', { id: S.selId, value }), value === 1 ? T.pinnedOk : value === -1 ? T.demotedOk : T.unpinnedOk);
+    }
+    if ((x = c('[data-thread]'))) {
+      const k = x.dataset.thread;
+      if (S.openThreads.has(k)) S.openThreads.delete(k);
+      else S.openThreads.add(k);
+      return renderView();
     }
     if ((x = c('[data-tab]'))) {
       S.tab = x.dataset.tab;
@@ -1202,9 +1411,13 @@
     if (!(x = c('[data-action]'))) return;
     const a = x.dataset.action;
     closeMenu();
-    if (a === 'toggleFolded') {
-      S.showFolded = !S.showFolded;
-      return renderList();
+    if (a === 'toggleDone') {
+      S.showDone = !S.showDone;
+      return renderView();
+    }
+    if (a === 'toggleStory') {
+      S.storyOpen = !S.storyOpen;
+      return renderView();
     }
     if (a === 'edit') {
       S.mode = 'edit';

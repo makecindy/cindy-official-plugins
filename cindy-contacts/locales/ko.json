@@ -10,7 +10,7 @@
       "description": "id로 한 사람의 전체 파일을 읽습니다: 신원과 연락처, 소개, 요점, 최신 소식, 미해결 일, 교류(최신순, 최대 200건), 이벤트, 그룹, 관계, 병합 기록."
     },
     "list": {
-      "description": "프로필 요약을 페이지 단위로 나열합니다(이야기와 사건 전문 제외). 그룹, 상태, 유형으로 거를 수 있습니다. 특정 인물은 find를 사용하세요."
+      "description": "프로필 요약을 페이지 단위로 나열합니다(이야기와 사건 전문 제외). 그룹, 상태, 유형으로 거를 수 있습니다. 특정 인물은 find를 사용하세요.각 항목에는 circle(people / customers / community / contactOnly), close(자주 연락하는 사람인지), score(관계 강도)가 포함됩니다."
     },
     "save": {
       "description": "파일을 만들거나 수정합니다. id 없이 만들면 비슷한 이름이 있을 때 DUPLICATE_SUSPECT와 후보를 돌려줍니다. id가 있으면 전달한 항목만 바꾸며 aliases·identities·groups·open_loops는 추가됩니다."

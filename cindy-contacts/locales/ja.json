@@ -10,7 +10,7 @@
       "description": "id で一人の完全なファイルを読みます：ID と連絡先、紹介、要点、最新の動き、未完了の事、やり取り（新しい順、最大 200 件）、出来事、グループ、関係、統合履歴。"
     },
     "list": {
-      "description": "プロフィールの概要をページ単位で一覧します（ストーリーと出来事の全文は含まない）。グループ・状態・種類で絞り込めます。特定の人を探すときは find を使います。"
+      "description": "プロフィールの概要をページ単位で一覧します（ストーリーと出来事の全文は含まない）。グループ・状態・種類で絞り込めます。特定の人を探すときは find を使います。各項目に circle（people / customers / community / contactOnly）、close（よく連絡する相手か）、score（関係の強さ）が付きます。"
     },
     "save": {
       "description": "ファイルを作成または更新します。id なしで作成し、似た名前があると DUPLICATE_SUSPECT と候補を返します。id ありでは渡した項目だけを更新し、aliases・identities・groups・open_loops は追加です。"

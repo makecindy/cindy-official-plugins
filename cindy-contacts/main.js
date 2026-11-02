@@ -398,6 +398,86 @@ function lastTouched(row) {
   return a > b ? a : b;
 }
 
+/* ───────────── 关系强弱与圈子 ───────────── */
+// 往来条数会被群聊逐条消息和 GitHub 通知刷大，所以按「有往来的天数」计，并按渠道加权：
+// 邮件、日程、通话是用户亲自参与的；聊天次之；GitHub 线程多是通知。
+const CHANNEL_WEIGHT = { mail: 1, calendar: 1, call: 1, im: 0.5, cindy: 0.5, other: 0.5, github: 0.25 };
+const CLOSE_MIN = 6; // 常联系门槛：约等于 90 天里 6 天邮件往来，或跨两个月的往来加几件在办的事
+const WAIT_THEM = /^\s*(等待?|若|waiting\b|wait for|awaiting)/i; // 「等 TA …」= 球在对方
+const CUSTOMER_RE = /用户|客户|顾客|买家|工单|customer|client|user|ticket|ユーザー|顧客|お客|고객|사용자/i;
+
+/** 由往来渠道和分组判断这个人属于哪一圈：常打交道的人 / 产品用户与工单 / 只在 GitHub 上的社区 / 只有联系方式。 */
+function circleOf(row, mix, groups) {
+  if (!row.rich) return 'contactOnly';
+  const direct = (mix.im || 0) + (mix.calendar || 0) + (mix.call || 0);
+  // 在聊天或日程里出现过的人是一起做事的，不因分组或介绍里提到「用户」被归走
+  if (!direct) {
+    if (groups.some((g) => CUSTOMER_RE.test(g)) || ((mix.mail || 0) > 0 && CUSTOMER_RE.test(str(row.summary)))) return 'customers';
+    const total = Object.values(mix).reduce((a, b) => a + b, 0);
+    if ((mix.github || 0) > 0 && mix.github >= total * 0.8) return 'community';
+  }
+  return 'people';
+}
+
+/** 读名单需要的关系信号：近 90 天各渠道有往来的天数、近 180 天跨了几个月、在办的事各在等谁。 */
+async function relationSignals(now = Date.now()) {
+  const since90 = isoOf(now - 90 * 86400000);
+  const since180 = isoOf(now - 180 * 86400000);
+  const [mix, days, active, months, loops] = await Promise.all([
+    qAll('SELECT contact_id, channel, count(*) AS n FROM contact_interactions GROUP BY contact_id, channel ORDER BY contact_id, channel'),
+    qAll(
+      `SELECT contact_id, channel, count(DISTINCT substr(occurred_at, 1, 10)) AS d FROM contact_interactions
+       WHERE occurred_at >= ? GROUP BY contact_id, channel ORDER BY contact_id, channel`,
+      [since90],
+    ),
+    qAll(
+      `SELECT contact_id, count(DISTINCT substr(occurred_at, 1, 10)) AS d FROM contact_interactions
+       WHERE occurred_at >= ? GROUP BY contact_id ORDER BY contact_id`,
+      [since90],
+    ),
+    qAll(
+      `SELECT contact_id, count(DISTINCT substr(occurred_at, 1, 7)) AS m FROM contact_interactions
+       WHERE occurred_at >= ? GROUP BY contact_id ORDER BY contact_id`,
+      [since180],
+    ),
+    qAll("SELECT contact_id, text, updated_at FROM contact_loops WHERE status = 'open' ORDER BY contact_id, updated_at DESC"),
+  ]);
+  const by = new Map();
+  const get = (id) => {
+    if (!by.has(id)) by.set(id, { mix: {}, days: {}, active: 0, months: 0, mine: 0, theirs: 0, mineAt: '', mineText: '' });
+    return by.get(id);
+  };
+  for (const r of mix) get(r.contact_id).mix[r.channel] = Number(r.n) || 0;
+  for (const r of days) get(r.contact_id).days[r.channel] = Number(r.d) || 0;
+  for (const r of active) get(r.contact_id).active = Number(r.d) || 0;
+  for (const r of months) get(r.contact_id).months = Number(r.m) || 0;
+  for (const r of loops) {
+    const s = get(r.contact_id);
+    if (WAIT_THEM.test(str(r.text))) s.theirs += 1;
+    else {
+      s.mine += 1;
+      if (str(r.updated_at) > s.mineAt) {
+        s.mineAt = str(r.updated_at);
+        s.mineText = str(r.text);
+      }
+    }
+  }
+  return by;
+}
+
+function closeness(sig) {
+  let s = 0;
+  for (const [ch, d] of Object.entries(sig.days)) s += (CHANNEL_WEIGHT[ch] ?? 0.5) * d;
+  s += sig.months + Math.min(sig.mine, 3) + 0.5 * Math.min(sig.theirs, 2);
+  return Math.round(s * 10) / 10;
+}
+
+function mainChannel(mix) {
+  let best = '';
+  for (const [ch, n] of Object.entries(mix)) if (!best || n > mix[best]) best = ch;
+  return best;
+}
+
 function listRow(r) {
   return {
     id: r.id,
@@ -419,8 +499,53 @@ function listRow(r) {
   };
 }
 
+/**
+ * 名单行加上关系信号：circle 圈子、score 关系分、close 常联系、mine/theirs 在办的事各在等谁、
+ * pin 用户手动置顶（1）或移出常联系（-1）。置顶偏好只存本机，不随同步表结构变化。
+ */
 async function listContacts() {
-  return (await qAll(LIST_SQL)).map(listRow);
+  const [rows, signals, prefs] = await Promise.all([qAll(LIST_SQL), relationSignals(), getListPrefs()]);
+  const empty = { mix: {}, days: {}, active: 0, months: 0, mine: 0, theirs: 0, mineAt: '', mineText: '' };
+  return rows.map((r) => {
+    const row = listRow(r);
+    const sig = signals.get(row.id) || empty;
+    const pin = prefs.pins[row.id] === 1 ? 1 : prefs.pins[row.id] === -1 ? -1 : 0;
+    const circle = circleOf(row, sig.mix, row.groups);
+    const score = closeness(sig);
+    return {
+      ...row,
+      circle,
+      score,
+      close: pin === 1 || (pin === 0 && circle === 'people' && score >= CLOSE_MIN),
+      pin,
+      channel: mainChannel(sig.mix),
+      activeDays: sig.active,
+      loopsMine: sig.mine,
+      loopsTheirs: sig.theirs,
+      mineAt: sig.mineAt,
+      mineText: sig.mineText,
+    };
+  });
+}
+
+async function getListPrefs() {
+  const p = await getMeta('list_prefs');
+  return { pins: p && p.pins && typeof p.pins === 'object' && !Array.isArray(p.pins) ? p.pins : {} };
+}
+
+/** 置顶（1）、移出常联系（-1）或交回自动（0）。 */
+async function setPin(params) {
+  const id = str(params && params.id);
+  const value = Number(params && params.value);
+  if (![1, 0, -1].includes(value)) throw fail('INVALID_PARAMS', 'value must be 1, 0 or -1');
+  await requireContact(id);
+  const prefs = await getListPrefs();
+  const live = new Set((await qAll('SELECT id FROM contacts ORDER BY id')).map((r) => r.id));
+  const pins = Object.fromEntries(Object.entries(prefs.pins).filter(([k, v]) => live.has(k) && (v === 1 || v === -1)));
+  if (value) pins[id] = value;
+  else delete pins[id];
+  await batch([setMetaStmt('list_prefs', { pins })]);
+  return { id, pin: value };
 }
 
 async function listGroups() {
@@ -2390,11 +2515,12 @@ const VIEW_METHODS = {
   tidy: (p) => tidy(p),
   unmerge: (p) => undoMerge(p.id),
   loop: (p) => setLoopStatus(p),
+  pin: (p) => setPin(p),
   opened: () => opened(),
   settings: (p) => setSettings(p || {}),
   requestAutomation: () => requestAutomation(),
 };
-const MUTATING = new Set(['save', 'logEvent', 'deleteEvent', 'relate', 'organize', 'merge', 'delete', 'groups', 'importSystem', 'importLegacy', 'unmerge', 'loop']);
+const MUTATING = new Set(['save', 'logEvent', 'deleteEvent', 'relate', 'organize', 'merge', 'delete', 'groups', 'importSystem', 'importLegacy', 'unmerge', 'loop', 'pin']);
 
 const answered = new Map();
 function startViewChannel() {

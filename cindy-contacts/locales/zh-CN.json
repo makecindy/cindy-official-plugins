@@ -23,7 +23,7 @@
       }
     },
     "list": {
-      "description": "分页列出档案摘要（不含故事和事件全文），可按分组、状态、类型筛选。浏览全册或查看待确认队列时用；找具体某人用 find。",
+      "description": "分页列出档案摘要（不含故事和事件全文），可按分组、状态、类型筛选。浏览全册或查看待确认队列时用；找具体某人用 find。每人带 circle（people 常打交道 / customers 客户与工单 / community 开源社区 / contactOnly 只有联系方式）、close（是否常联系）和 score（关系分）。",
       "parameters": {
         "/properties/group": {
           "description": "分组名"

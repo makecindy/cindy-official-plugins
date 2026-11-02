@@ -767,6 +767,64 @@ test('往来：按身份或名字归到人、按来源 id 去重；还没完的�
   }
 });
 
+test('名单按关系分层：常联系看往来天数与在办的事，客户和 GitHub 社区单独成圈，置顶与移出只存本机', async () => {
+  const dir = tmp();
+  const a = boot({ libDir: dir });
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  try {
+    const an = ok(await a.call('save', { name: 'Chun On Lam', aliases: ['安安'], identities: [{ platform: 'email', value: 'co@example.test' }] }));
+    const kim = ok(await a.call('save', { name: 'Kim Wager', summary: '反馈 Android 邮件加载问题的产品用户', groups: ['产品用户往来'], identities: [{ platform: 'email', value: 'kim@example.test' }] }));
+    const mate = ok(await a.call('save', { name: '徐紫旎', groups: ['产品用户往来'], identities: [{ platform: 'feishu', value: 'ou_mate' }] }));
+    const octo = ok(await a.call('save', { name: 'octo', identities: [{ platform: 'github', value: 'octo' }] }));
+    const bare = ok(await a.call('save', { name: '只有电话', identities: [{ platform: 'phone', value: '13800000000' }] }));
+    const items = [];
+    // 安安：两个月里 6 天邮件往来，同一天多封只算一天
+    for (const [i, d] of [3, 3, 10, 20, 35, 41, 50].entries()) items.push({ contact_id: an.id, occurred_at: daysAgo(d), channel: 'mail', title: 'Re: 票据', ref: `an-${i}` });
+    for (let d = 1; d <= 9; d++) items.push({ contact_id: kim.id, occurred_at: daysAgo(d), channel: 'mail', title: '反馈', ref: `kim-${d}` });
+    for (let d = 1; d <= 3; d++) items.push({ contact_id: mate.id, occurred_at: daysAgo(d), channel: 'im', title: '飞书单聊', ref: `mate-${d}` });
+    for (let d = 1; d <= 12; d++) items.push({ contact_id: octo.id, occurred_at: daysAgo(d), channel: 'github', title: 'feat: x', ref: `gh-${d}`, link: 'https://github.com/o/r/pull/1' });
+    ok(await a.call('record', { items }));
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '给安安补交两份 OpenAI 票据' }, { text: '等安安核对 10 月票据' }] }));
+
+    const rows = async () => Object.fromEntries((await a.view('list')).result.contacts.map((c) => [c.id, c]));
+    let r = await rows();
+    assert.equal(r[an.id].circle, 'people');
+    assert.equal(r[an.id].close, true, '低频但持续的一对一邮件往来进常联系');
+    assert.equal(r[an.id].activeDays, 6);
+    assert.equal(r[an.id].channel, 'mail');
+    assert.equal(r[an.id].loopsMine, 1);
+    assert.equal(r[an.id].loopsTheirs, 1);
+    assert.equal(r[an.id].mineText, '给安安补交两份 OpenAI 票据');
+    assert.equal(r[kim.id].circle, 'customers');
+    assert.equal(r[kim.id].close, false, '客户往来再多也不挤进常联系');
+    assert.equal(r[mate.id].circle, 'people', '在聊天里一起做事的人不因分组名被归成客户');
+    assert.equal(r[octo.id].circle, 'community');
+    assert.equal(r[octo.id].close, false);
+    assert.equal(r[bare.id].circle, 'contactOnly');
+    // AI 的 list 工具拿到同样的字段
+    assert.equal(ok(await a.call('list', { limit: 10 })).contacts.find((c) => c.id === an.id).close, true);
+
+    assert.equal((await a.view('pin', { id: kim.id, value: 1 })).ok, true);
+    assert.equal((await a.view('pin', { id: an.id, value: -1 })).ok, true);
+    r = await rows();
+    assert.equal(r[kim.id].pin, 1);
+    assert.equal(r[kim.id].close, true, '置顶的人无论哪一圈都放在常联系');
+    assert.equal(r[an.id].close, false, '移出常联系后不再自动放回');
+    assert.equal((await a.view('pin', { id: an.id, value: 0 })).ok, true);
+    assert.equal((await rows())[an.id].close, true);
+    const bad = await a.view('pin', { id: an.id, value: 2 });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.error.code, 'INVALID_PARAMS');
+    // 删掉的人顺带清掉置顶记录
+    ok(await a.call('delete', { id: kim.id, confirm: true }));
+    assert.equal((await a.view('pin', { id: an.id, value: 1 })).ok, true);
+    const prefs = a.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'list_prefs'").get();
+    assert.deepEqual(JSON.parse(prefs.value).pins, { [an.id]: 1 });
+  } finally {
+    a.close();
+  }
+});
+
 test('合并会留下记录，可以拆开：原档案连同它带来的身份、往来、未完的事和分组都还回去', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });
