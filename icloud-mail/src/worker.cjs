@@ -20,6 +20,146 @@ const SECRET_KEYS = Object.freeze({
   b: 'icloud_mail_app_password_b',
 });
 
+// 运行时文案跟随宿主语言：main.js 在每次 JSON-RPC 请求的 params.locale 里带上
+// 宿主当前语言。Worker 拿不到 cindy.request，且按需常驻，可能跨越宿主语言切换，
+// 所以不缓存语言，每个请求按自己的 locale 取文案；缺失或不支持时回退英文。
+const DEFAULT_LOCALE = 'en';
+const MESSAGES = Object.freeze({
+  'zh-CN': Object.freeze({
+    invalidEmail: '请输入有效的 iCloud Mail 邮箱地址',
+    invalidAppSpecificPassword: '请输入 Apple 账户网站生成的 App 专用密码，不要输入 Apple 账户密码',
+    notConfigured: '尚未配置 iCloud Mail，请到「iCloud Mail」插件详情页输入邮箱和 App 专用密码',
+    invalidCredentialSlot: 'iCloud Mail 凭证状态无效，请在插件详情页重新连接',
+    authRejected: 'iCloud Mail 拒绝登录。请确认 Apple 账户已开启双重认证，并使用生成的 App 专用密码（不是 Apple 账户密码）',
+    networkUnreachable: '无法连接 iCloud Mail 服务器，请检查网络后重试',
+    rateLimited: 'iCloud Mail 暂时限制了频繁访问，请稍后再试',
+    messageNotFound: '没有在指定文件夹找到这封邮件，请重新搜索',
+    messageTooLarge: '邮件内容过大，当前版本暂时无法处理',
+    draftFolderNotFound: '没有找到 iCloud Mail 草稿箱，请先调用 list_folders 确认服务器文件夹',
+    draftSaveFailed: 'iCloud Mail 未能保存草稿，请稍后重试',
+    targetFolderRequired: 'move 需要目标文件夹',
+    targetFolderSame: '目标文件夹不能与当前文件夹相同',
+    moveUnconfirmed: '无法确认邮件是否已移动，请重新搜索邮箱后再操作',
+    sendUnconfirmed: '无法确认邮件是否已发出，请先查看「已发送」文件夹，再决定是否重新发送',
+    draftUnconfirmed: '无法确认草稿是否已保存，请先查看「草稿」文件夹，再决定是否重新保存',
+    flagsUnconfirmed: '无法确认已读状态是否已更改，请重新读取这封邮件确认后再操作',
+    recipientRequired: '请至少填写一个收件人',
+    invalidRecipient: '收件人、抄送或密送地址格式不正确',
+    invalidSubject: '邮件主题格式不正确',
+    invalidBody: '邮件正文格式不正确',
+    invalidSearchDate: '搜索日期格式无效，请使用 ISO 日期或日期时间',
+    folderUnavailable: 'iCloud Mail 文件夹不存在或不可用，请先调用 list_folders 获取准确名称',
+    operationFailedRetry: 'iCloud Mail 操作失败，请稍后重试',
+    operationFailed: 'iCloud Mail 操作失败',
+    invalidRequestFormat: '请求格式无效',
+    bodyTruncated: '…（正文过长，已截断）',
+  }),
+  en: Object.freeze({
+    invalidEmail: 'Enter a valid iCloud Mail email address',
+    invalidAppSpecificPassword: 'Enter the app-specific password generated on the Apple Account website, not your Apple Account password',
+    notConfigured: 'iCloud Mail is not configured yet. Open the "iCloud Mail" plugin details and enter the email address and app-specific password.',
+    invalidCredentialSlot: 'Invalid iCloud Mail credential state. Reconnect in the plugin details.',
+    authRejected: 'iCloud Mail rejected the login. Make sure two-factor authentication is on for the Apple Account and use a generated app-specific password (not the Apple Account password).',
+    networkUnreachable: 'Cannot reach the iCloud Mail server. Check your network connection and try again.',
+    rateLimited: 'iCloud Mail is temporarily rate limiting frequent access. Try again later.',
+    messageNotFound: 'This message was not found in the given folder. Search again.',
+    messageTooLarge: 'The message is too large for this version to handle',
+    draftFolderNotFound: 'No iCloud Mail Drafts folder found. Call list_folders first to check the server folders.',
+    draftSaveFailed: 'iCloud Mail could not save the draft. Try again later.',
+    targetFolderRequired: 'move requires a target folder',
+    targetFolderSame: 'The target folder cannot be the same as the current folder',
+    moveUnconfirmed: 'Could not confirm whether the message was moved. Search the mailbox again before doing anything else.',
+    sendUnconfirmed: 'Could not confirm whether the message was sent. Check the Sent folder before sending it again.',
+    draftUnconfirmed: 'Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.',
+    flagsUnconfirmed: 'Could not confirm whether the read status changed. Read the message again to check before changing it.',
+    recipientRequired: 'Provide at least one recipient',
+    invalidRecipient: 'Invalid To, Cc, or Bcc address format',
+    invalidSubject: 'Invalid subject format',
+    invalidBody: 'Invalid body format',
+    invalidSearchDate: 'Invalid search date. Use an ISO date or date-time.',
+    folderUnavailable: 'The iCloud Mail folder does not exist or is unavailable. Call list_folders first to get the exact name.',
+    operationFailedRetry: 'iCloud Mail operation failed. Try again later.',
+    operationFailed: 'iCloud Mail operation failed',
+    invalidRequestFormat: 'Invalid request format',
+    bodyTruncated: '... (body too long, truncated)',
+  }),
+  ja: Object.freeze({
+    invalidEmail: '有効なiCloudメールアドレスを入力してください',
+    invalidAppSpecificPassword: 'Apple アカウントの Web サイトで生成したApp用パスワードを入力してください。Apple アカウントのパスワードは入力しないでください',
+    notConfigured: 'iCloudメールはまだ設定されていません。「iCloudメール」プラグインの詳細画面でメールアドレスとApp用パスワードを入力してください',
+    invalidCredentialSlot: 'iCloudメールの認証情報の状態が無効です。プラグインの詳細画面で再接続してください',
+    authRejected: 'iCloudメールがログインを拒否しました。Apple アカウントで2ファクタ認証が有効になっていることを確認し、生成したApp用パスワード（Apple アカウントのパスワードではありません）を使用してください',
+    networkUnreachable: 'iCloudメールのサーバーに接続できません。ネットワークを確認してから再試行してください',
+    rateLimited: 'iCloudメールが頻繁なアクセスを一時的に制限しています。しばらくしてから再試行してください',
+    messageNotFound: '指定したフォルダーにこのメールが見つかりません。もう一度検索してください',
+    messageTooLarge: 'メールのサイズが大きすぎるため、現在のバージョンでは処理できません',
+    draftFolderNotFound: 'iCloudメールの下書きフォルダーが見つかりません。先に list_folders を呼び出してサーバーのフォルダーを確認してください',
+    draftSaveFailed: 'iCloudメールで下書きを保存できませんでした。しばらくしてから再試行してください',
+    targetFolderRequired: 'move には移動先フォルダーが必要です',
+    targetFolderSame: '移動先フォルダーに現在のフォルダーは指定できません',
+    moveUnconfirmed: 'メールが移動されたかどうかを確認できません。ほかの操作をする前にメールボックスをもう一度検索してください',
+    sendUnconfirmed: 'メールが送信されたかどうかを確認できません。もう一度送信する前に送信済みフォルダーを確認してください',
+    draftUnconfirmed: '下書きが保存されたかどうかを確認できません。もう一度保存する前に下書きフォルダーを確認してください',
+    flagsUnconfirmed: '既読状態が変更されたかどうかを確認できません。もう一度メールを読み込んで確認してから操作してください',
+    recipientRequired: '宛先を1件以上入力してください',
+    invalidRecipient: '宛先、Cc、Bccのアドレス形式が正しくありません',
+    invalidSubject: '件名の形式が正しくありません',
+    invalidBody: '本文の形式が正しくありません',
+    invalidSearchDate: '検索日付の形式が無効です。ISO形式の日付または日時を使用してください',
+    folderUnavailable: 'iCloudメールのフォルダーが存在しないか使用できません。先に list_folders を呼び出して正確な名前を取得してください',
+    operationFailedRetry: 'iCloudメールの操作に失敗しました。しばらくしてから再試行してください',
+    operationFailed: 'iCloudメールの操作に失敗しました',
+    invalidRequestFormat: 'リクエストの形式が無効です',
+    bodyTruncated: '…（本文が長すぎるため切り詰めました）',
+  }),
+  ko: Object.freeze({
+    invalidEmail: '올바른 iCloud 메일 주소를 입력하세요',
+    invalidAppSpecificPassword: 'Apple 계정 웹사이트에서 생성한 앱 전용 비밀번호를 입력하세요. Apple 계정 비밀번호는 입력하지 마세요',
+    notConfigured: 'iCloud 메일이 아직 설정되지 않았습니다. "iCloud 메일" 플러그인 상세 화면에서 메일 주소와 앱 전용 비밀번호를 입력하세요',
+    invalidCredentialSlot: 'iCloud 메일 인증 정보 상태가 올바르지 않습니다. 플러그인 상세 화면에서 다시 연결하세요',
+    authRejected: 'iCloud 메일이 로그인을 거부했습니다. Apple 계정에 이중 인증이 켜져 있는지 확인하고, 생성한 앱 전용 비밀번호(Apple 계정 비밀번호 아님)를 사용하세요',
+    networkUnreachable: 'iCloud 메일 서버에 연결할 수 없습니다. 네트워크를 확인한 후 다시 시도하세요',
+    rateLimited: 'iCloud 메일이 잦은 접근을 일시적으로 제한하고 있습니다. 잠시 후 다시 시도하세요',
+    messageNotFound: '지정한 폴더에서 이 메일을 찾을 수 없습니다. 다시 검색하세요',
+    messageTooLarge: '메일 크기가 너무 커서 현재 버전에서는 처리할 수 없습니다',
+    draftFolderNotFound: 'iCloud 메일 임시 보관함을 찾을 수 없습니다. 먼저 list_folders를 호출해 서버 폴더를 확인하세요',
+    draftSaveFailed: 'iCloud 메일에 임시 보관 메일을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    targetFolderRequired: 'move에는 대상 폴더가 필요합니다',
+    targetFolderSame: '대상 폴더는 현재 폴더와 같을 수 없습니다',
+    moveUnconfirmed: '메일이 이동되었는지 확인할 수 없습니다. 다른 작업을 하기 전에 메일함을 다시 검색하세요',
+    sendUnconfirmed: '메일이 전송되었는지 확인할 수 없습니다. 다시 보내기 전에 보낸 편지함을 확인하세요',
+    draftUnconfirmed: '임시 보관 메일이 저장되었는지 확인할 수 없습니다. 다시 저장하기 전에 임시 보관함을 확인하세요',
+    flagsUnconfirmed: '읽음 상태가 바뀌었는지 확인할 수 없습니다. 메일을 다시 읽어 확인한 후 작업하세요',
+    recipientRequired: '받는 사람을 한 명 이상 입력하세요',
+    invalidRecipient: '받는 사람, 참조 또는 숨은 참조 주소 형식이 올바르지 않습니다',
+    invalidSubject: '제목 형식이 올바르지 않습니다',
+    invalidBody: '본문 형식이 올바르지 않습니다',
+    invalidSearchDate: '검색 날짜 형식이 올바르지 않습니다. ISO 날짜 또는 날짜 및 시간을 사용하세요',
+    folderUnavailable: 'iCloud 메일 폴더가 없거나 사용할 수 없습니다. 먼저 list_folders를 호출해 정확한 이름을 확인하세요',
+    operationFailedRetry: 'iCloud 메일 작업에 실패했습니다. 잠시 후 다시 시도하세요',
+    operationFailed: 'iCloud 메일 작업에 실패했습니다',
+    invalidRequestFormat: '요청 형식이 올바르지 않습니다',
+    bodyTruncated: '…(본문이 너무 길어 잘렸습니다)',
+  }),
+});
+
+function resolveLocale(locale) {
+  return typeof locale === 'string' && Object.prototype.hasOwnProperty.call(MESSAGES, locale)
+    ? locale
+    : DEFAULT_LOCALE;
+}
+
+function t(locale, key) {
+  return MESSAGES[resolveLocale(locale)][key];
+}
+
+function requestLocale(request) {
+  const params = request && request.params && typeof request.params === 'object'
+    ? request.params
+    : {};
+  return resolveLocale(params.locale);
+}
+
 function normalizeCredentials(value) {
   const input = value && typeof value === 'object' ? value : {};
   const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
@@ -274,7 +414,7 @@ async function search(credentials, action, deps) {
   }));
 }
 
-async function readMessage(credentials, action, deps) {
+async function readMessage(credentials, action, deps, locale) {
   const folder = action.folder || 'INBOX';
   return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
     const message = await client.fetchOne(
@@ -324,7 +464,7 @@ async function readMessage(credentials, action, deps) {
       reply_to: parsed.replyTo && parsed.replyTo.text ? parsed.replyTo.text : '',
       message_id: parsed.messageId || '',
       body_text: text.length > MAX_BODY_CHARS
-        ? `${text.slice(0, MAX_BODY_CHARS)}\n…（正文过长，已截断）`
+        ? `${text.slice(0, MAX_BODY_CHARS)}\n${t(locale, 'bodyTruncated')}`
         : text,
       attachments: Array.isArray(parsed.attachments)
         ? parsed.attachments.map((attachment) => ({
@@ -360,10 +500,71 @@ function mailOptions(credentials, action) {
   };
 }
 
+// 发信与存草稿会在服务器上留下东西。失败时只有拿得出「服务器没收下」的证据才算没执行；
+// nodemailer 把发送途中的断线和超时也记成 command 'CONN'，所以 CONN 本身不是证据。
+const CONNECT_PHASE_SYSCALLS = new Set(['connect', 'getaddrinfo']);
+const CONNECT_PHASE_MESSAGES = ['Connection timeout', 'Greeting never received'];
+
+function smtpFailureExecution(error) {
+  if (!error || typeof error !== 'object') return 'unknown';
+  if (typeof error.responseCode === 'number' && error.responseCode >= 400) return 'not_executed';
+  const code = typeof error.code === 'string' ? error.code : '';
+  if (['EAUTH', 'EENVELOPE', 'EMESSAGE', 'EDNS', 'EREQUIRETLS'].includes(code)) return 'not_executed';
+  if (CONNECT_PHASE_SYSCALLS.has(error.syscall)) return 'not_executed';
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (CONNECT_PHASE_MESSAGES.some((text) => message.startsWith(text))) return 'not_executed';
+  return 'unknown';
+}
+
+function imapWriteExecution(error) {
+  if (!error || typeof error !== 'object') return 'unknown';
+  if (error.responseStatus === 'NO' || error.responseStatus === 'BAD') return 'not_executed';
+  if (typeof error.serverResponseCode === 'string' && error.serverResponseCode) return 'not_executed';
+  return 'unknown';
+}
+
+function withExecution(error, execution) {
+  const marked = error instanceof Error ? error : new Error(String(error));
+  marked.execution = execution;
+  return marked;
+}
+
+// IMAP 写命令(移动、改标记)。服务器回了 NO/BAD 才算没改;其余失败一律不确定。
+async function imapWrite(run, unconfirmedCode) {
+  try {
+    return await run();
+  } catch (error) {
+    if (imapWriteExecution(error) === 'unknown') {
+      throw withExecution(new Error(unconfirmedCode), 'unknown');
+    }
+    throw withExecution(error, 'not_executed');
+  }
+}
+
+// 写命令已被服务器接受之后的步骤(核对、取目标 UID):失败时邮箱可能已经改了。
+async function afterWrite(run, unconfirmedCode) {
+  try {
+    return await run();
+  } catch (error) {
+    if (error && error.execution) throw error;
+    throw withExecution(new Error(unconfirmedCode), 'unknown');
+  }
+}
+
 async function sendMessage(credentials, action, deps) {
+  // 收件人、主题、正文的校验在这里抛错:还没连服务器,照原文提示该改哪项。
+  const options = mailOptions(credentials, action);
   const transporter = deps.createSmtp(credentials);
   try {
-    const info = await transporter.sendMail(mailOptions(credentials, action));
+    let info;
+    try {
+      info = await transporter.sendMail(options);
+    } catch (error) {
+      if (smtpFailureExecution(error) === 'unknown') {
+        throw withExecution(new Error('SEND_UNCONFIRMED'), 'unknown');
+      }
+      throw withExecution(error, 'not_executed');
+    }
     return {
       sent: true,
       message_id: info.messageId || null,
@@ -391,7 +592,15 @@ async function saveDraft(credentials, action, deps) {
     if (!info || !Buffer.isBuffer(info.message)) throw new Error('DRAFT_BUILD_FAILED');
     return withImap(credentials, deps, async (client) => {
       const folder = await findDraftFolder(client);
-      const appended = await client.append(folder, info.message, ['\\Draft'], new Date());
+      let appended;
+      try {
+        appended = await client.append(folder, info.message, ['\\Draft'], new Date());
+      } catch (error) {
+        if (imapWriteExecution(error) === 'unknown') {
+          throw withExecution(new Error('DRAFT_SAVE_UNCONFIRMED'), 'unknown');
+        }
+        throw withExecution(error, 'not_executed');
+      }
       if (!appended) throw new Error('DRAFT_SAVE_FAILED');
       return {
         draft: true,
@@ -417,19 +626,21 @@ async function changeFlags(credentials, action, deps, seen) {
 
     const currentFlags = flagsArray(existing.flags);
     if (currentFlags.includes('\\Seen') !== seen) {
-      const updated = seen
-        ? await client.messageFlagsAdd(action.message_uid, ['\\Seen'], { uid: true })
-        : await client.messageFlagsRemove(action.message_uid, ['\\Seen'], { uid: true });
-      if (!updated) throw new Error('MESSAGE_NOT_FOUND');
+      // imapflow 的 STORE 遇到任何错误(含断线)都只返回 false,返回值分不出服务器拒绝
+      // 还是改到一半断线;结果一律以重读为准。
+      await imapWrite(() => (seen
+        ? client.messageFlagsAdd(action.message_uid, ['\\Seen'], { uid: true })
+        : client.messageFlagsRemove(action.message_uid, ['\\Seen'], { uid: true })), 'FLAGS_UNCONFIRMED');
 
-      const verified = await client.fetchOne(
+      const verified = await afterWrite(() => client.fetchOne(
         action.message_uid,
         { uid: true, flags: true },
         { uid: true },
-      );
-      if (!verified) throw new Error('MESSAGE_NOT_FOUND');
+      ), 'FLAGS_UNCONFIRMED');
+      if (!verified) throw withExecution(new Error('FLAGS_UNCONFIRMED'), 'unknown');
       if (flagsArray(verified.flags).includes('\\Seen') !== seen) {
-        throw new Error('MESSAGE_UPDATE_FAILED');
+        // 改完再读,标记确实没变。
+        throw withExecution(new Error('MESSAGE_UPDATE_FAILED'), 'not_executed');
       }
     }
     return { updated: true, folder, uid: action.message_uid, unread: !seen };
@@ -449,12 +660,24 @@ async function moveMessage(credentials, action, deps) {
     );
     if (!existing) throw new Error('MESSAGE_NOT_FOUND');
 
-    const moved = await client.messageMove(action.message_uid, target, { uid: true });
-    if (!moved) throw new Error('MESSAGE_NOT_FOUND');
+    const moved = await imapWrite(
+      () => client.messageMove(action.message_uid, target, { uid: true }),
+      'MESSAGE_MOVE_UNCONFIRMED',
+    );
+    if (!moved) {
+      // imapflow 的 MOVE 遇到任何错误(含断线)都只返回 false:回读源文件夹。邮件还在才算
+      // 没移;不在了或读不到,说明可能已经移走,按不确定处理。
+      const stillThere = await afterWrite(
+        () => client.fetchOne(action.message_uid, { uid: true }, { uid: true }),
+        'MESSAGE_MOVE_UNCONFIRMED',
+      );
+      if (stillThere) throw withExecution(new Error('MESSAGE_MOVE_FAILED'), 'not_executed');
+      throw withExecution(new Error('MESSAGE_MOVE_UNCONFIRMED'), 'unknown');
+    }
     const destinationUid = moved.uidMap && moved.uidMap.get
       ? (moved.uidMap.get(action.message_uid) || null)
       : null;
-    if (!destinationUid) throw new Error('MESSAGE_MOVE_UNCONFIRMED');
+    if (!destinationUid) throw withExecution(new Error('MESSAGE_MOVE_UNCONFIRMED'), 'unknown');
     return {
       moved: true,
       from_folder: folder,
@@ -481,14 +704,14 @@ async function testAccount(credentials, deps) {
   };
 }
 
-async function performAction(credentials, action, deps) {
+async function performAction(credentials, action, deps, locale) {
   switch (action.action) {
     case 'list_folders':
       return listFolders(credentials, deps);
     case 'search':
       return search(credentials, action, deps);
     case 'read':
-      return readMessage(credentials, action, deps);
+      return readMessage(credentials, action, deps, locale);
     case 'send':
       return sendMessage(credentials, action, deps);
     case 'draft':
@@ -504,20 +727,23 @@ async function performAction(credentials, action, deps) {
   }
 }
 
-function humanizeError(error) {
+function humanizeError(error, locale) {
   const code = error && error.code ? String(error.code) : '';
   const message = error && error.message ? String(error.message) : String(error || '');
   const combined = `${code} ${message}`.toLowerCase();
 
-  if (message === 'INVALID_EMAIL') return '请输入有效的 iCloud Mail 邮箱地址';
+  if (message === 'SEND_UNCONFIRMED') return t(locale, 'sendUnconfirmed');
+  if (message === 'DRAFT_SAVE_UNCONFIRMED') return t(locale, 'draftUnconfirmed');
+  if (message === 'FLAGS_UNCONFIRMED') return t(locale, 'flagsUnconfirmed');
+  if (message === 'INVALID_EMAIL') return t(locale, 'invalidEmail');
   if (message === 'INVALID_APP_SPECIFIC_PASSWORD') {
-    return '请输入 Apple 账户网站生成的 App 专用密码，不要输入 Apple 账户密码';
+    return t(locale, 'invalidAppSpecificPassword');
   }
   if (message === 'NOT_CONFIGURED') {
-    return '尚未配置 iCloud Mail，请到「iCloud Mail」插件详情页输入邮箱和 App 专用密码';
+    return t(locale, 'notConfigured');
   }
   if (message === 'INVALID_CREDENTIAL_SLOT') {
-    return 'iCloud Mail 凭证状态无效，请在插件详情页重新连接';
+    return t(locale, 'invalidCredentialSlot');
   }
   if (
     code === 'EAUTH'
@@ -526,7 +752,7 @@ function humanizeError(error) {
     || combined.includes('invalid credentials')
     || combined.includes('login failed')
   ) {
-    return 'iCloud Mail 拒绝登录。请确认 Apple 账户已开启双重认证，并使用生成的 App 专用密码（不是 Apple 账户密码）';
+    return t(locale, 'authRejected');
   }
   if (
     code === 'ETIMEDOUT'
@@ -535,39 +761,40 @@ function humanizeError(error) {
     || code === 'ENETUNREACH'
     || combined.includes('timed out')
   ) {
-    return '无法连接 iCloud Mail 服务器，请检查网络后重试';
+    return t(locale, 'networkUnreachable');
   }
   if (combined.includes('too many') || combined.includes('rate limit') || combined.includes('频繁')) {
-    return 'iCloud Mail 暂时限制了频繁访问，请稍后再试';
+    return t(locale, 'rateLimited');
   }
-  if (message === 'MESSAGE_NOT_FOUND') return '没有在指定文件夹找到这封邮件，请重新搜索';
-  if (message === 'MESSAGE_TOO_LARGE') return '邮件内容过大，当前版本暂时无法处理';
+  if (message === 'MESSAGE_NOT_FOUND') return t(locale, 'messageNotFound');
+  if (message === 'MESSAGE_TOO_LARGE') return t(locale, 'messageTooLarge');
   if (message === 'DRAFT_FOLDER_NOT_FOUND') {
-    return '没有找到 iCloud Mail 草稿箱，请先调用 list_folders 确认服务器文件夹';
+    return t(locale, 'draftFolderNotFound');
   }
   if (message === 'DRAFT_SAVE_FAILED') {
-    return 'iCloud Mail 未能保存草稿，请稍后重试';
+    return t(locale, 'draftSaveFailed');
   }
-  if (message === 'TARGET_FOLDER_REQUIRED') return 'move 需要目标文件夹';
-  if (message === 'TARGET_FOLDER_SAME') return '目标文件夹不能与当前文件夹相同';
+  if (message === 'TARGET_FOLDER_REQUIRED') return t(locale, 'targetFolderRequired');
+  if (message === 'TARGET_FOLDER_SAME') return t(locale, 'targetFolderSame');
   if (message === 'MESSAGE_MOVE_UNCONFIRMED') {
-    return '无法确认邮件是否已移动，请重新搜索邮箱后再操作';
+    return t(locale, 'moveUnconfirmed');
   }
-  if (message === 'RECIPIENT_REQUIRED') return '请至少填写一个收件人';
-  if (message === 'INVALID_RECIPIENT') return '收件人、抄送或密送地址格式不正确';
-  if (message === 'INVALID_SUBJECT') return '邮件主题格式不正确';
-  if (message === 'INVALID_BODY') return '邮件正文格式不正确';
+  if (message === 'RECIPIENT_REQUIRED') return t(locale, 'recipientRequired');
+  if (message === 'INVALID_RECIPIENT') return t(locale, 'invalidRecipient');
+  if (message === 'INVALID_SUBJECT') return t(locale, 'invalidSubject');
+  if (message === 'INVALID_BODY') return t(locale, 'invalidBody');
   if (message.startsWith('INVALID_SINCE') || message.startsWith('INVALID_BEFORE')) {
-    return '搜索日期格式无效，请使用 ISO 日期或日期时间';
+    return t(locale, 'invalidSearchDate');
   }
   if (combined.includes('mailbox') || combined.includes('folder')) {
-    return 'iCloud Mail 文件夹不存在或不可用，请先调用 list_folders 获取准确名称';
+    return t(locale, 'folderUnavailable');
   }
-  return 'iCloud Mail 操作失败，请稍后重试';
+  return t(locale, 'operationFailedRetry');
 }
 
 async function handleRequest(request, deps = createRuntimeDeps()) {
   if (!request || typeof request !== 'object') throw new Error('INVALID_REQUEST');
+  const locale = requestLocale(request);
   let credentials = null;
   try {
     const params = request.params && typeof request.params === 'object' ? request.params : {};
@@ -593,11 +820,16 @@ async function handleRequest(request, deps = createRuntimeDeps()) {
     if (method === 'mail/action') {
       credentials = consumeRequestCredentials(boundRequest);
       const action = params.action && typeof params.action === 'object' ? params.action : {};
-      return await performAction(credentials, action, deps);
+      return await performAction(credentials, action, deps, locale);
     }
     throw new Error('METHOD_NOT_FOUND');
   } catch (error) {
-    throw new Error(humanizeError(error));
+    // 写命令及其后的步骤都已显式标记(imapWrite / afterWrite / 发信 / 存草稿);
+    // 没有标记的失败只可能发生在写之前:参数校验、连接、加锁、读取。
+    throw withExecution(
+      new Error(humanizeError(error, locale)),
+      error && error.execution === 'unknown' ? 'unknown' : 'not_executed',
+    );
   } finally {
     if (credentials) credentials.appSpecificPassword = '';
   }
@@ -616,7 +848,8 @@ function startStdio() {
       writeReply({
         jsonrpc: '2.0',
         id: null,
-        error: { code: -32700, message: '请求格式无效' },
+        // 整行无法解析时拿不到 params.locale，按协议回退英文。
+        error: { code: -32700, message: t(DEFAULT_LOCALE, 'invalidRequestFormat') },
       });
       return;
     }
@@ -630,7 +863,10 @@ function startStdio() {
           id: request.id,
           error: {
             code: -32000,
-            message: error && error.message ? error.message : 'iCloud Mail 操作失败',
+            message: error && error.message
+              ? error.message
+              : t(requestLocale(request), 'operationFailed'),
+            data: { execution: error && error.execution === 'unknown' ? 'unknown' : 'not_executed' },
           },
         });
       });
@@ -640,7 +876,9 @@ function startStdio() {
 if (require.main === module) startStdio();
 
 module.exports = {
+  DEFAULT_LOCALE,
   ICLOUD,
+  MESSAGES,
   buildSearchCriteria,
   createRuntimeDeps,
   consumeRequestCredentials,
@@ -650,6 +888,7 @@ module.exports = {
   normalizeCredentials,
   normalizeRecipients,
   performAction,
+  resolveLocale,
   smtpOptions,
   startStdio,
   summaryFromMessage,
