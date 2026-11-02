@@ -42,6 +42,7 @@ const MESSAGES = Object.freeze({
     moveUnconfirmed: '无法确认邮件是否已移动，请重新搜索邮箱后再操作',
     sendUnconfirmed: '无法确认邮件是否已发出，请先查看「已发送」文件夹，再决定是否重新发送',
     draftUnconfirmed: '无法确认草稿是否已保存，请先查看「草稿」文件夹，再决定是否重新保存',
+    flagsUnconfirmed: '无法确认已读状态是否已更改，请重新读取这封邮件确认后再操作',
     recipientRequired: '请至少填写一个收件人',
     invalidRecipient: '收件人、抄送或密送地址格式不正确',
     invalidSubject: '邮件主题格式不正确',
@@ -70,6 +71,7 @@ const MESSAGES = Object.freeze({
     moveUnconfirmed: 'Could not confirm whether the message was moved. Search the mailbox again before doing anything else.',
     sendUnconfirmed: 'Could not confirm whether the message was sent. Check the Sent folder before sending it again.',
     draftUnconfirmed: 'Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.',
+    flagsUnconfirmed: 'Could not confirm whether the read status changed. Read the message again to check before changing it.',
     recipientRequired: 'Provide at least one recipient',
     invalidRecipient: 'Invalid To, Cc, or Bcc address format',
     invalidSubject: 'Invalid subject format',
@@ -98,6 +100,7 @@ const MESSAGES = Object.freeze({
     moveUnconfirmed: 'メールが移動されたかどうかを確認できません。ほかの操作をする前にメールボックスをもう一度検索してください',
     sendUnconfirmed: 'メールが送信されたかどうかを確認できません。もう一度送信する前に送信済みフォルダーを確認してください',
     draftUnconfirmed: '下書きが保存されたかどうかを確認できません。もう一度保存する前に下書きフォルダーを確認してください',
+    flagsUnconfirmed: '既読状態が変更されたかどうかを確認できません。もう一度メールを読み込んで確認してから操作してください',
     recipientRequired: '宛先を1件以上入力してください',
     invalidRecipient: '宛先、Cc、Bccのアドレス形式が正しくありません',
     invalidSubject: '件名の形式が正しくありません',
@@ -126,6 +129,7 @@ const MESSAGES = Object.freeze({
     moveUnconfirmed: '메일이 이동되었는지 확인할 수 없습니다. 다른 작업을 하기 전에 메일함을 다시 검색하세요',
     sendUnconfirmed: '메일이 전송되었는지 확인할 수 없습니다. 다시 보내기 전에 보낸 편지함을 확인하세요',
     draftUnconfirmed: '임시 보관 메일이 저장되었는지 확인할 수 없습니다. 다시 저장하기 전에 임시 보관함을 확인하세요',
+    flagsUnconfirmed: '읽음 상태가 바뀌었는지 확인할 수 없습니다. 메일을 다시 읽어 확인한 후 작업하세요',
     recipientRequired: '받는 사람을 한 명 이상 입력하세요',
     invalidRecipient: '받는 사람, 참조 또는 숨은 참조 주소 형식이 올바르지 않습니다',
     invalidSubject: '제목 형식이 올바르지 않습니다',
@@ -512,7 +516,7 @@ function smtpFailureExecution(error) {
   return 'unknown';
 }
 
-function imapAppendExecution(error) {
+function imapWriteExecution(error) {
   if (!error || typeof error !== 'object') return 'unknown';
   if (error.responseStatus === 'NO' || error.responseStatus === 'BAD') return 'not_executed';
   if (typeof error.serverResponseCode === 'string' && error.serverResponseCode) return 'not_executed';
@@ -525,12 +529,36 @@ function withExecution(error, execution) {
   return marked;
 }
 
+// IMAP 写命令(移动、改标记)。服务器回了 NO/BAD 才算没改;其余失败一律不确定。
+async function imapWrite(run, unconfirmedCode) {
+  try {
+    return await run();
+  } catch (error) {
+    if (imapWriteExecution(error) === 'unknown') {
+      throw withExecution(new Error(unconfirmedCode), 'unknown');
+    }
+    throw withExecution(error, 'not_executed');
+  }
+}
+
+// 写命令已被服务器接受之后的步骤(核对、取目标 UID):失败时邮箱可能已经改了。
+async function afterWrite(run, unconfirmedCode) {
+  try {
+    return await run();
+  } catch (error) {
+    if (error && error.execution) throw error;
+    throw withExecution(new Error(unconfirmedCode), 'unknown');
+  }
+}
+
 async function sendMessage(credentials, action, deps) {
+  // 收件人、主题、正文的校验在这里抛错:还没连服务器,照原文提示该改哪项。
+  const options = mailOptions(credentials, action);
   const transporter = deps.createSmtp(credentials);
   try {
     let info;
     try {
-      info = await transporter.sendMail(mailOptions(credentials, action));
+      info = await transporter.sendMail(options);
     } catch (error) {
       if (smtpFailureExecution(error) === 'unknown') {
         throw withExecution(new Error('SEND_UNCONFIRMED'), 'unknown');
@@ -568,7 +596,7 @@ async function saveDraft(credentials, action, deps) {
       try {
         appended = await client.append(folder, info.message, ['\\Draft'], new Date());
       } catch (error) {
-        if (imapAppendExecution(error) === 'unknown') {
+        if (imapWriteExecution(error) === 'unknown') {
           throw withExecution(new Error('DRAFT_SAVE_UNCONFIRMED'), 'unknown');
         }
         throw withExecution(error, 'not_executed');
@@ -598,19 +626,20 @@ async function changeFlags(credentials, action, deps, seen) {
 
     const currentFlags = flagsArray(existing.flags);
     if (currentFlags.includes('\\Seen') !== seen) {
-      const updated = seen
-        ? await client.messageFlagsAdd(action.message_uid, ['\\Seen'], { uid: true })
-        : await client.messageFlagsRemove(action.message_uid, ['\\Seen'], { uid: true });
-      if (!updated) throw new Error('MESSAGE_NOT_FOUND');
+      const updated = await imapWrite(() => (seen
+        ? client.messageFlagsAdd(action.message_uid, ['\\Seen'], { uid: true })
+        : client.messageFlagsRemove(action.message_uid, ['\\Seen'], { uid: true })), 'FLAGS_UNCONFIRMED');
+      if (!updated) throw withExecution(new Error('MESSAGE_NOT_FOUND'), 'not_executed');
 
-      const verified = await client.fetchOne(
+      const verified = await afterWrite(() => client.fetchOne(
         action.message_uid,
         { uid: true, flags: true },
         { uid: true },
-      );
-      if (!verified) throw new Error('MESSAGE_NOT_FOUND');
+      ), 'FLAGS_UNCONFIRMED');
+      if (!verified) throw withExecution(new Error('FLAGS_UNCONFIRMED'), 'unknown');
       if (flagsArray(verified.flags).includes('\\Seen') !== seen) {
-        throw new Error('MESSAGE_UPDATE_FAILED');
+        // 改完再读,标记确实没变。
+        throw withExecution(new Error('MESSAGE_UPDATE_FAILED'), 'not_executed');
       }
     }
     return { updated: true, folder, uid: action.message_uid, unread: !seen };
@@ -630,12 +659,15 @@ async function moveMessage(credentials, action, deps) {
     );
     if (!existing) throw new Error('MESSAGE_NOT_FOUND');
 
-    const moved = await client.messageMove(action.message_uid, target, { uid: true });
-    if (!moved) throw new Error('MESSAGE_NOT_FOUND');
+    const moved = await imapWrite(
+      () => client.messageMove(action.message_uid, target, { uid: true }),
+      'MESSAGE_MOVE_UNCONFIRMED',
+    );
+    if (!moved) throw withExecution(new Error('MESSAGE_NOT_FOUND'), 'not_executed');
     const destinationUid = moved.uidMap && moved.uidMap.get
       ? (moved.uidMap.get(action.message_uid) || null)
       : null;
-    if (!destinationUid) throw new Error('MESSAGE_MOVE_UNCONFIRMED');
+    if (!destinationUid) throw withExecution(new Error('MESSAGE_MOVE_UNCONFIRMED'), 'unknown');
     return {
       moved: true,
       from_folder: folder,
@@ -692,6 +724,7 @@ function humanizeError(error, locale) {
 
   if (message === 'SEND_UNCONFIRMED') return t(locale, 'sendUnconfirmed');
   if (message === 'DRAFT_SAVE_UNCONFIRMED') return t(locale, 'draftUnconfirmed');
+  if (message === 'FLAGS_UNCONFIRMED') return t(locale, 'flagsUnconfirmed');
   if (message === 'INVALID_EMAIL') return t(locale, 'invalidEmail');
   if (message === 'INVALID_APP_SPECIFIC_PASSWORD') {
     return t(locale, 'invalidAppSpecificPassword');
@@ -781,7 +814,8 @@ async function handleRequest(request, deps = createRuntimeDeps()) {
     }
     throw new Error('METHOD_NOT_FOUND');
   } catch (error) {
-    // 只有发信、存草稿会标 unknown；其余失败都发生在服务器收下任何东西之前。
+    // 写命令及其后的步骤都已显式标记(imapWrite / afterWrite / 发信 / 存草稿);
+    // 没有标记的失败只可能发生在写之前:参数校验、连接、加锁、读取。
     throw withExecution(
       new Error(humanizeError(error, locale)),
       error && error.execution === 'unknown' ? 'unknown' : 'not_executed',

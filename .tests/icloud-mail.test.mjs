@@ -892,7 +892,77 @@ test('存草稿时 APPEND 中途断线算不确定，服务器回 NO 算未保�
   assert.equal(worker.humanizeError(new Error('DRAFT_SAVE_UNCONFIRMED'), 'ko'), worker.MESSAGES.ko.draftUnconfirmed);
 });
 
-test('main.js 发信或存草稿没有 Worker 的明确判断时提示先核对，不建议重试', async () => {
+test('发信参数校验失败照原文提示该改哪项，不当成发送结果不确定', async () => {
+  let sendCalls = 0;
+  const harness = createWorkerHarness();
+  harness.deps.createSmtp = () => ({
+    async sendMail() { sendCalls += 1; return {}; },
+    close() {},
+  });
+  await assert.rejects(
+    worker.handleRequest({
+      method: 'mail/action-a',
+      params: {
+        email: 'user@example.test',
+        credentialSlot: 'a',
+        action: { action: 'send', to: 'recipient@example.test', subject: 'Hi\r\nBcc: x@example.test', body_text: 'Body' },
+        locale: 'en',
+      },
+      cindy: { secrets: { icloud_mail_app_password: 'abcd-efgh-ijkl-mnop' } },
+    }, harness.deps),
+    (error) => error.message === worker.MESSAGES.en.invalidSubject && error.execution === 'not_executed',
+  );
+  assert.equal(sendCalls, 0);
+});
+
+test('移动与改已读：写命令中途断线或写后核对失败算不确定，服务器回 NO 算未改', async () => {
+  const credentials = { email: 'user@example.test', appSpecificPassword: 'abcd-efgh-ijkl-mnop' };
+  const socketClosed = () => new Error('Socket closed unexpectedly');
+  const refused = () => Object.assign(new Error('Command failed'), { responseStatus: 'NO' });
+  const move = { action: 'move', folder: 'INBOX', target_folder: 'Archive', message_uid: 7 };
+  const moveWith = (messageMove) => createWorkerHarness({
+    async fetchOne() { return { uid: 7 }; },
+    messageMove,
+  }).deps;
+
+  await assert.rejects(
+    worker.performAction(credentials, move, moveWith(async () => { throw socketClosed(); }), 'en'),
+    (error) => error.message === 'MESSAGE_MOVE_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  await assert.rejects(
+    worker.performAction(credentials, move, moveWith(async () => { throw refused(); }), 'en'),
+    (error) => error.execution === 'not_executed',
+  );
+  await assert.rejects(
+    worker.performAction(credentials, move, moveWith(async () => ({ uidMap: new Map() })), 'en'),
+    (error) => error.message === 'MESSAGE_MOVE_UNCONFIRMED' && error.execution === 'unknown',
+  );
+
+  const markRead = { action: 'mark_read', folder: 'INBOX', message_uid: 7 };
+  const flagsWith = (overrides) => createWorkerHarness({
+    async fetchOne() { return { uid: 7, flags: new Set() }; },
+    ...overrides,
+  }).deps;
+  await assert.rejects(
+    worker.performAction(credentials, markRead, flagsWith({ async messageFlagsAdd() { throw socketClosed(); } }), 'en'),
+    (error) => error.message === 'FLAGS_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  let reads = 0;
+  await assert.rejects(
+    worker.performAction(credentials, markRead, flagsWith({
+      async messageFlagsAdd() { return true; },
+      async fetchOne() {
+        reads += 1;
+        if (reads === 1) return { uid: 7, flags: new Set() };
+        throw socketClosed();
+      },
+    }), 'en'),
+    (error) => error.message === 'FLAGS_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  assert.equal(worker.humanizeError(new Error('FLAGS_UNCONFIRMED'), 'ja'), worker.MESSAGES.ja.flagsUnconfirmed);
+});
+
+test('main.js 写邮箱的动作没有 Worker 的明确判断时提示先核对，不建议重试', async () => {
   const workerMessage = 'worker said so';
   const responses = [
     // 宿主超时、Worker 进程退出、旧宿主不给 errorCode：Worker 可能还在发。
@@ -903,15 +973,18 @@ test('main.js 发信或存草稿没有 Worker 的明确判断时提示先核对�
     [{ ok: false, errorCode: 'PROTOCOL_ERROR', message: workerMessage, data: { execution: 'not_executed' } }, 'worker'],
     [{ ok: false, errorCode: 'PROTOCOL_ERROR', message: workerMessage, data: { execution: 'unknown' } }, 'worker'],
   ];
-  for (const [action, key] of [['send', 'sendUnconfirmed'], ['draft', 'draftUnconfirmed']]) {
+  const writes = [
+    [{ action: 'send', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' }, 'sendUnconfirmed'],
+    [{ action: 'draft', to: 'recipient@example.test', subject: 'Hi', body_text: 'Body' }, 'draftUnconfirmed'],
+    [{ action: 'move', message_uid: 7, target_folder: 'Archive' }, 'moveUnconfirmed'],
+    [{ action: 'mark_read', message_uid: 7 }, 'flagsUnconfirmed'],
+    [{ action: 'mark_unread', message_uid: 7 }, 'flagsUnconfirmed'],
+  ];
+  for (const [args, key] of writes) {
+    const action = args.action;
     for (const [reply, expected] of responses) {
       const harness = createMainHarness(async () => reply, {}, 'en');
-      const result = await harness.call('icloud_mail', {
-        action,
-        to: 'recipient@example.test',
-        subject: 'Hi',
-        body_text: 'Body',
-      });
+      const result = await harness.call('icloud_mail', args);
       assert.equal(result.ok, false);
       const message = result.message || (result.result && result.result.message);
       assert.equal(
@@ -1491,7 +1564,7 @@ test('Worker zh-CN 错误文案与迁移前的硬编码字符串逐字一致', (
     bodyTruncated: '…（正文过长，已截断）',
   };
   // 发信、存草稿结果不确定时的两条提示是本 PR 新增的，不是迁移来的旧文案。
-  const added = ['draftUnconfirmed', 'sendUnconfirmed'];
+  const added = ['draftUnconfirmed', 'flagsUnconfirmed', 'sendUnconfirmed'];
   assert.deepEqual([...Object.keys(original), ...added].sort(), Object.keys(worker.MESSAGES['zh-CN']).sort());
   for (const [key, text] of Object.entries(original)) assert.equal(worker.MESSAGES['zh-CN'][key], text, key);
   for (const [error, key] of WORKER_ERROR_KEYS) {

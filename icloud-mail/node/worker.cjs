@@ -66133,6 +66133,7 @@ var require_worker = __commonJS({
         moveUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u79FB\u52A8\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u90AE\u7BB1\u540E\u518D\u64CD\u4F5C",
         sendUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u53D1\u51FA\uFF0C\u8BF7\u5148\u67E5\u770B\u300C\u5DF2\u53D1\u9001\u300D\u6587\u4EF6\u5939\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u65B0\u53D1\u9001",
         draftUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u8349\u7A3F\u662F\u5426\u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u5148\u67E5\u770B\u300C\u8349\u7A3F\u300D\u6587\u4EF6\u5939\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u65B0\u4FDD\u5B58",
+        flagsUnconfirmed: "\u65E0\u6CD5\u786E\u8BA4\u5DF2\u8BFB\u72B6\u6001\u662F\u5426\u5DF2\u66F4\u6539\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u8FD9\u5C01\u90AE\u4EF6\u786E\u8BA4\u540E\u518D\u64CD\u4F5C",
         recipientRequired: "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA",
         invalidRecipient: "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u6216\u5BC6\u9001\u5730\u5740\u683C\u5F0F\u4E0D\u6B63\u786E",
         invalidSubject: "\u90AE\u4EF6\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E",
@@ -66161,6 +66162,7 @@ var require_worker = __commonJS({
         moveUnconfirmed: "Could not confirm whether the message was moved. Search the mailbox again before doing anything else.",
         sendUnconfirmed: "Could not confirm whether the message was sent. Check the Sent folder before sending it again.",
         draftUnconfirmed: "Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.",
+        flagsUnconfirmed: "Could not confirm whether the read status changed. Read the message again to check before changing it.",
         recipientRequired: "Provide at least one recipient",
         invalidRecipient: "Invalid To, Cc, or Bcc address format",
         invalidSubject: "Invalid subject format",
@@ -66189,6 +66191,7 @@ var require_worker = __commonJS({
         moveUnconfirmed: "\u30E1\u30FC\u30EB\u304C\u79FB\u52D5\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u307B\u304B\u306E\u64CD\u4F5C\u3092\u3059\u308B\u524D\u306B\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3092\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044",
         sendUnconfirmed: "\u30E1\u30FC\u30EB\u304C\u9001\u4FE1\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u9001\u4FE1\u3059\u308B\u524D\u306B\u9001\u4FE1\u6E08\u307F\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
         draftUnconfirmed: "\u4E0B\u66F8\u304D\u304C\u4FDD\u5B58\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u4FDD\u5B58\u3059\u308B\u524D\u306B\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
+        flagsUnconfirmed: "\u65E2\u8AAD\u72B6\u614B\u304C\u5909\u66F4\u3055\u308C\u305F\u304B\u3069\u3046\u304B\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u30E1\u30FC\u30EB\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u78BA\u8A8D\u3057\u3066\u304B\u3089\u64CD\u4F5C\u3057\u3066\u304F\u3060\u3055\u3044",
         recipientRequired: "\u5B9B\u5148\u30921\u4EF6\u4EE5\u4E0A\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044",
         invalidRecipient: "\u5B9B\u5148\u3001Cc\u3001Bcc\u306E\u30A2\u30C9\u30EC\u30B9\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
         invalidSubject: "\u4EF6\u540D\u306E\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
@@ -66217,6 +66220,7 @@ var require_worker = __commonJS({
         moveUnconfirmed: "\uBA54\uC77C\uC774 \uC774\uB3D9\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uB978 \uC791\uC5C5\uC744 \uD558\uAE30 \uC804\uC5D0 \uBA54\uC77C\uD568\uC744 \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694",
         sendUnconfirmed: "\uBA54\uC77C\uC774 \uC804\uC1A1\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uBCF4\uB0B4\uAE30 \uC804\uC5D0 \uBCF4\uB0B8 \uD3B8\uC9C0\uD568\uC744 \uD655\uC778\uD558\uC138\uC694",
         draftUnconfirmed: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uC800\uC7A5\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC800\uC7A5\uD558\uAE30 \uC804\uC5D0 \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uD655\uC778\uD558\uC138\uC694",
+        flagsUnconfirmed: "\uC77D\uC74C \uC0C1\uD0DC\uAC00 \uBC14\uB00C\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uBA54\uC77C\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uD655\uC778\uD55C \uD6C4 \uC791\uC5C5\uD558\uC138\uC694",
         recipientRequired: "\uBC1B\uB294 \uC0AC\uB78C\uC744 \uD55C \uBA85 \uC774\uC0C1 \uC785\uB825\uD558\uC138\uC694",
         invalidRecipient: "\uBC1B\uB294 \uC0AC\uB78C, \uCC38\uC870 \uB610\uB294 \uC228\uC740 \uCC38\uC870 \uC8FC\uC18C \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
         invalidSubject: "\uC81C\uBAA9 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4",
@@ -66542,7 +66546,7 @@ ${t(locale, "bodyTruncated")}` : text,
       if (CONNECT_PHASE_MESSAGES.some((text) => message.startsWith(text))) return "not_executed";
       return "unknown";
     }
-    function imapAppendExecution(error) {
+    function imapWriteExecution(error) {
       if (!error || typeof error !== "object") return "unknown";
       if (error.responseStatus === "NO" || error.responseStatus === "BAD") return "not_executed";
       if (typeof error.serverResponseCode === "string" && error.serverResponseCode) return "not_executed";
@@ -66553,12 +66557,31 @@ ${t(locale, "bodyTruncated")}` : text,
       marked.execution = execution;
       return marked;
     }
+    async function imapWrite(run, unconfirmedCode) {
+      try {
+        return await run();
+      } catch (error) {
+        if (imapWriteExecution(error) === "unknown") {
+          throw withExecution(new Error(unconfirmedCode), "unknown");
+        }
+        throw withExecution(error, "not_executed");
+      }
+    }
+    async function afterWrite(run, unconfirmedCode) {
+      try {
+        return await run();
+      } catch (error) {
+        if (error && error.execution) throw error;
+        throw withExecution(new Error(unconfirmedCode), "unknown");
+      }
+    }
     async function sendMessage(credentials, action, deps) {
+      const options = mailOptions(credentials, action);
       const transporter = deps.createSmtp(credentials);
       try {
         let info;
         try {
-          info = await transporter.sendMail(mailOptions(credentials, action));
+          info = await transporter.sendMail(options);
         } catch (error) {
           if (smtpFailureExecution(error) === "unknown") {
             throw withExecution(new Error("SEND_UNCONFIRMED"), "unknown");
@@ -66594,7 +66617,7 @@ ${t(locale, "bodyTruncated")}` : text,
           try {
             appended = await client.append(folder, info.message, ["\\Draft"], /* @__PURE__ */ new Date());
           } catch (error) {
-            if (imapAppendExecution(error) === "unknown") {
+            if (imapWriteExecution(error) === "unknown") {
               throw withExecution(new Error("DRAFT_SAVE_UNCONFIRMED"), "unknown");
             }
             throw withExecution(error, "not_executed");
@@ -66622,16 +66645,16 @@ ${t(locale, "bodyTruncated")}` : text,
         if (!existing) throw new Error("MESSAGE_NOT_FOUND");
         const currentFlags = flagsArray(existing.flags);
         if (currentFlags.includes("\\Seen") !== seen) {
-          const updated = seen ? await client.messageFlagsAdd(action.message_uid, ["\\Seen"], { uid: true }) : await client.messageFlagsRemove(action.message_uid, ["\\Seen"], { uid: true });
-          if (!updated) throw new Error("MESSAGE_NOT_FOUND");
-          const verified = await client.fetchOne(
+          const updated = await imapWrite(() => seen ? client.messageFlagsAdd(action.message_uid, ["\\Seen"], { uid: true }) : client.messageFlagsRemove(action.message_uid, ["\\Seen"], { uid: true }), "FLAGS_UNCONFIRMED");
+          if (!updated) throw withExecution(new Error("MESSAGE_NOT_FOUND"), "not_executed");
+          const verified = await afterWrite(() => client.fetchOne(
             action.message_uid,
             { uid: true, flags: true },
             { uid: true }
-          );
-          if (!verified) throw new Error("MESSAGE_NOT_FOUND");
+          ), "FLAGS_UNCONFIRMED");
+          if (!verified) throw withExecution(new Error("FLAGS_UNCONFIRMED"), "unknown");
           if (flagsArray(verified.flags).includes("\\Seen") !== seen) {
-            throw new Error("MESSAGE_UPDATE_FAILED");
+            throw withExecution(new Error("MESSAGE_UPDATE_FAILED"), "not_executed");
           }
         }
         return { updated: true, folder, uid: action.message_uid, unread: !seen };
@@ -66649,10 +66672,13 @@ ${t(locale, "bodyTruncated")}` : text,
           { uid: true }
         );
         if (!existing) throw new Error("MESSAGE_NOT_FOUND");
-        const moved = await client.messageMove(action.message_uid, target, { uid: true });
-        if (!moved) throw new Error("MESSAGE_NOT_FOUND");
+        const moved = await imapWrite(
+          () => client.messageMove(action.message_uid, target, { uid: true }),
+          "MESSAGE_MOVE_UNCONFIRMED"
+        );
+        if (!moved) throw withExecution(new Error("MESSAGE_NOT_FOUND"), "not_executed");
         const destinationUid = moved.uidMap && moved.uidMap.get ? moved.uidMap.get(action.message_uid) || null : null;
-        if (!destinationUid) throw new Error("MESSAGE_MOVE_UNCONFIRMED");
+        if (!destinationUid) throw withExecution(new Error("MESSAGE_MOVE_UNCONFIRMED"), "unknown");
         return {
           moved: true,
           from_folder: folder,
@@ -66705,6 +66731,7 @@ ${t(locale, "bodyTruncated")}` : text,
       const combined = `${code} ${message}`.toLowerCase();
       if (message === "SEND_UNCONFIRMED") return t(locale, "sendUnconfirmed");
       if (message === "DRAFT_SAVE_UNCONFIRMED") return t(locale, "draftUnconfirmed");
+      if (message === "FLAGS_UNCONFIRMED") return t(locale, "flagsUnconfirmed");
       if (message === "INVALID_EMAIL") return t(locale, "invalidEmail");
       if (message === "INVALID_APP_SPECIFIC_PASSWORD") {
         return t(locale, "invalidAppSpecificPassword");

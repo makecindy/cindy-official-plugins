@@ -31,6 +31,8 @@ var MESSAGES = {
     workerFailed: 'iCloud Mail Worker 调用失败，请稍后重试',
     sendUnconfirmed: '无法确认邮件是否已发出，请先查看「已发送」文件夹，再决定是否重新发送',
     draftUnconfirmed: '无法确认草稿是否已保存，请先查看「草稿」文件夹，再决定是否重新保存',
+    moveUnconfirmed: '无法确认邮件是否已移动，请重新搜索邮箱后再操作',
+    flagsUnconfirmed: '无法确认已读状态是否已更改，请重新读取这封邮件确认后再操作',
     unknownSettingsAction: '未知设置动作',
     connectFailed: 'iCloud Mail 连接失败，请重试',
     invalidUid: 'message_uid 必须是有效的正整数',
@@ -51,6 +53,8 @@ var MESSAGES = {
     workerFailed: 'The iCloud Mail Worker call failed. Try again later.',
     sendUnconfirmed: 'Could not confirm whether the message was sent. Check the Sent folder before sending it again.',
     draftUnconfirmed: 'Could not confirm whether the draft was saved. Check the Drafts folder before saving it again.',
+    moveUnconfirmed: 'Could not confirm whether the message was moved. Search the mailbox again before doing anything else.',
+    flagsUnconfirmed: 'Could not confirm whether the read status changed. Read the message again to check before changing it.',
     unknownSettingsAction: 'Unknown settings action',
     connectFailed: 'iCloud Mail connection failed. Try again.',
     invalidUid: 'message_uid must be a valid positive integer',
@@ -71,6 +75,8 @@ var MESSAGES = {
     workerFailed: 'iCloudメールWorkerの呼び出しに失敗しました。しばらくしてから再試行してください',
     sendUnconfirmed: 'メールが送信されたかどうかを確認できません。もう一度送信する前に送信済みフォルダーを確認してください',
     draftUnconfirmed: '下書きが保存されたかどうかを確認できません。もう一度保存する前に下書きフォルダーを確認してください',
+    moveUnconfirmed: 'メールが移動されたかどうかを確認できません。ほかの操作をする前にメールボックスをもう一度検索してください',
+    flagsUnconfirmed: '既読状態が変更されたかどうかを確認できません。もう一度メールを読み込んで確認してから操作してください',
     unknownSettingsAction: '不明な設定操作です',
     connectFailed: 'iCloudメールへの接続に失敗しました。再試行してください',
     invalidUid: 'message_uid は有効な正の整数である必要があります',
@@ -91,6 +97,8 @@ var MESSAGES = {
     workerFailed: 'iCloud 메일 Worker 호출에 실패했습니다. 잠시 후 다시 시도하세요',
     sendUnconfirmed: '메일이 전송되었는지 확인할 수 없습니다. 다시 보내기 전에 보낸 편지함을 확인하세요',
     draftUnconfirmed: '임시 보관 메일이 저장되었는지 확인할 수 없습니다. 다시 저장하기 전에 임시 보관함을 확인하세요',
+    moveUnconfirmed: '메일이 이동되었는지 확인할 수 없습니다. 다른 작업을 하기 전에 메일함을 다시 검색하세요',
+    flagsUnconfirmed: '읽음 상태가 바뀌었는지 확인할 수 없습니다. 메일을 다시 읽어 확인한 후 작업하세요',
     unknownSettingsAction: '알 수 없는 설정 작업입니다',
     connectFailed: 'iCloud 메일 연결에 실패했습니다. 다시 시도하세요',
     invalidUid: 'message_uid는 올바른 양의 정수여야 합니다',
@@ -384,7 +392,8 @@ async function runMail(args, locale) {
     return fail(error && error.message ? error.message : t(locale, 'invalidArgs'));
   }
 
-  var createsRemote = action.action === 'send' || action.action === 'draft';
+  // 这些动作会改邮箱:发信、存草稿、移动、改已读状态。
+  var writesRemote = ['send', 'draft', 'move', 'mark_read', 'mark_unread'].indexOf(action.action) !== -1;
   var requested = false;
   try {
     var account = await requireConfiguredAccount(locale);
@@ -394,12 +403,15 @@ async function runMail(args, locale) {
       credentialSlot: account.credentialSlot,
       action: action,
       locale: locale,
-    }, createsRemote ? 60000 : 45000, locale);
+    }, action.action === 'send' || action.action === 'draft' ? 60000 : 45000, locale);
     return { ok: true, result: result };
   } catch (error) {
-    // 发信、存草稿一旦交给 Worker,没有 Worker 的明确判断就不能建议重试:提示先核对。
-    if (createsRemote && requested && !(error && error.workerExecution)) {
-      return fail(action.action === 'send' ? t(locale, 'sendUnconfirmed') : t(locale, 'draftUnconfirmed'));
+    // 写邮箱的动作一旦交给 Worker,没有 Worker 的明确判断就不能建议重试:提示先核对。
+    if (writesRemote && requested && !(error && error.workerExecution)) {
+      if (action.action === 'send') return fail(t(locale, 'sendUnconfirmed'));
+      if (action.action === 'draft') return fail(t(locale, 'draftUnconfirmed'));
+      if (action.action === 'move') return fail(t(locale, 'moveUnconfirmed'));
+      return fail(t(locale, 'flagsUnconfirmed'));
     }
     return fail(error && error.message ? error.message : t(locale, 'operationFailed'));
   }
