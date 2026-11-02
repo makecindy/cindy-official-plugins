@@ -481,7 +481,8 @@ test('Worker 不会把不存在或未更新的 UID 误报为标记成功', async
       { action: 'mark_read', folder: 'INBOX', message_uid: 42 },
       unchanged.deps,
     ),
-    /MESSAGE_NOT_FOUND/,
+    // 邮件还在、重读后标记没变:确定没改成，不再报成「找不到邮件」。
+    /MESSAGE_UPDATE_FAILED/,
   );
   assert.equal(mutationCalls, 1);
 });
@@ -522,7 +523,8 @@ test('Worker 仅在服务器返回目标 UID 映射时报告移动成功', async
       { action: 'move', folder: 'INBOX', target_folder: 'Archive', message_uid: 42 },
       unchanged.deps,
     ),
-    /MESSAGE_NOT_FOUND/,
+    // 回读源文件夹邮件还在:确定没移，不再报成「找不到邮件」。
+    /MESSAGE_MOVE_FAILED/,
   );
   assert.equal(moveCalls, 1);
 
@@ -954,6 +956,51 @@ test('移动与改已读：写命令中途断线或写后核对失败算不确�
       async fetchOne() {
         reads += 1;
         if (reads === 1) return { uid: 7, flags: new Set() };
+        throw socketClosed();
+      },
+    }), 'en'),
+    (error) => error.message === 'FLAGS_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  // imapflow 的 MOVE/STORE 在断线时不抛错、只返回 false：结果要靠回读。
+  let moveReads = 0;
+  await assert.rejects(
+    worker.performAction(credentials, move, createWorkerHarness({
+      async fetchOne() {
+        moveReads += 1;
+        if (moveReads === 1) return { uid: 7 };
+        throw socketClosed();
+      },
+      async messageMove() { return false; },
+    }).deps, 'en'),
+    (error) => error.message === 'MESSAGE_MOVE_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  let goneReads = 0;
+  await assert.rejects(
+    worker.performAction(credentials, move, createWorkerHarness({
+      async fetchOne() {
+        goneReads += 1;
+        return goneReads === 1 ? { uid: 7 } : false;
+      },
+      async messageMove() { return false; },
+    }).deps, 'en'),
+    (error) => error.message === 'MESSAGE_MOVE_UNCONFIRMED' && error.execution === 'unknown',
+  );
+  let storeReads = 0;
+  const appliedDespiteFalse = await worker.performAction(credentials, markRead, flagsWith({
+    async messageFlagsAdd() { return false; },
+    async fetchOne() {
+      storeReads += 1;
+      return { uid: 7, flags: new Set(storeReads === 1 ? [] : ['\\Seen']) };
+    },
+  }), 'en');
+  assert.equal(appliedDespiteFalse.updated, true);
+  let lostReads = 0;
+  await assert.rejects(
+    worker.performAction(credentials, markRead, flagsWith({
+      async messageFlagsAdd() { return false; },
+      async fetchOne() {
+        lostReads += 1;
+        if (lostReads === 1) return { uid: 7, flags: new Set() };
         throw socketClosed();
       },
     }), 'en'),

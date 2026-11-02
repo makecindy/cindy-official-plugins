@@ -66645,8 +66645,7 @@ ${t(locale, "bodyTruncated")}` : text,
         if (!existing) throw new Error("MESSAGE_NOT_FOUND");
         const currentFlags = flagsArray(existing.flags);
         if (currentFlags.includes("\\Seen") !== seen) {
-          const updated = await imapWrite(() => seen ? client.messageFlagsAdd(action.message_uid, ["\\Seen"], { uid: true }) : client.messageFlagsRemove(action.message_uid, ["\\Seen"], { uid: true }), "FLAGS_UNCONFIRMED");
-          if (!updated) throw withExecution(new Error("MESSAGE_NOT_FOUND"), "not_executed");
+          await imapWrite(() => seen ? client.messageFlagsAdd(action.message_uid, ["\\Seen"], { uid: true }) : client.messageFlagsRemove(action.message_uid, ["\\Seen"], { uid: true }), "FLAGS_UNCONFIRMED");
           const verified = await afterWrite(() => client.fetchOne(
             action.message_uid,
             { uid: true, flags: true },
@@ -66676,7 +66675,14 @@ ${t(locale, "bodyTruncated")}` : text,
           () => client.messageMove(action.message_uid, target, { uid: true }),
           "MESSAGE_MOVE_UNCONFIRMED"
         );
-        if (!moved) throw withExecution(new Error("MESSAGE_NOT_FOUND"), "not_executed");
+        if (!moved) {
+          const stillThere = await afterWrite(
+            () => client.fetchOne(action.message_uid, { uid: true }, { uid: true }),
+            "MESSAGE_MOVE_UNCONFIRMED"
+          );
+          if (stillThere) throw withExecution(new Error("MESSAGE_MOVE_FAILED"), "not_executed");
+          throw withExecution(new Error("MESSAGE_MOVE_UNCONFIRMED"), "unknown");
+        }
         const destinationUid = moved.uidMap && moved.uidMap.get ? moved.uidMap.get(action.message_uid) || null : null;
         if (!destinationUid) throw withExecution(new Error("MESSAGE_MOVE_UNCONFIRMED"), "unknown");
         return {

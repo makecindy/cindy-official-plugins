@@ -626,10 +626,11 @@ async function changeFlags(credentials, action, deps, seen) {
 
     const currentFlags = flagsArray(existing.flags);
     if (currentFlags.includes('\\Seen') !== seen) {
-      const updated = await imapWrite(() => (seen
+      // imapflow 的 STORE 遇到任何错误(含断线)都只返回 false,返回值分不出服务器拒绝
+      // 还是改到一半断线;结果一律以重读为准。
+      await imapWrite(() => (seen
         ? client.messageFlagsAdd(action.message_uid, ['\\Seen'], { uid: true })
         : client.messageFlagsRemove(action.message_uid, ['\\Seen'], { uid: true })), 'FLAGS_UNCONFIRMED');
-      if (!updated) throw withExecution(new Error('MESSAGE_NOT_FOUND'), 'not_executed');
 
       const verified = await afterWrite(() => client.fetchOne(
         action.message_uid,
@@ -663,7 +664,16 @@ async function moveMessage(credentials, action, deps) {
       () => client.messageMove(action.message_uid, target, { uid: true }),
       'MESSAGE_MOVE_UNCONFIRMED',
     );
-    if (!moved) throw withExecution(new Error('MESSAGE_NOT_FOUND'), 'not_executed');
+    if (!moved) {
+      // imapflow 的 MOVE 遇到任何错误(含断线)都只返回 false:回读源文件夹。邮件还在才算
+      // 没移;不在了或读不到,说明可能已经移走,按不确定处理。
+      const stillThere = await afterWrite(
+        () => client.fetchOne(action.message_uid, { uid: true }, { uid: true }),
+        'MESSAGE_MOVE_UNCONFIRMED',
+      );
+      if (stillThere) throw withExecution(new Error('MESSAGE_MOVE_FAILED'), 'not_executed');
+      throw withExecution(new Error('MESSAGE_MOVE_UNCONFIRMED'), 'unknown');
+    }
     const destinationUid = moved.uidMap && moved.uidMap.get
       ? (moved.uidMap.get(action.message_uid) || null)
       : null;
