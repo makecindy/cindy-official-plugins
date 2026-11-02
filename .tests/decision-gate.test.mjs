@@ -10,9 +10,11 @@ import vm from 'node:vm';
 const settingsSource = readFileSync(new URL('../decision-gate/settings.js', import.meta.url), 'utf8');
 const source = readFileSync(new URL('../decision-gate/main.js', import.meta.url), 'utf8');
 const model = { id: 'example', name: 'Example', agent: 'codex', providerId: 'account', efforts: ['high'], defaultEffort: 'high' };
-function host({ modern = true, fallback = null, settings = false } = {}) {
+function host({ modern = true, fallback = null, settings = false, remoteHang = null } = {}) {
   let handler, stored = { provider: 'openai', rules: [], fallback };
   const sent = [], requests = [], pickerRequests = [];
+  let now = 0, nextTimer = 0;
+  const timers = new Map(), remoteSignals = [];
   class Element {
     constructor(tag) { this.tag = tag; this.attrs = {}; this.children = []; this.listeners = {}; this.classList = { add() {} }; }
     append(...nodes) { this.children.push(...nodes); }
@@ -23,7 +25,9 @@ function host({ modern = true, fallback = null, settings = false } = {}) {
   }
   const root = new Element('root');
   const json = (value) => ({ ok: true, json: async () => structuredClone(value) });
-  const context = vm.createContext({ console: { warn() {} }, crypto: webcrypto,
+  const context = vm.createContext({ console: { warn() {} }, crypto: webcrypto, AbortController,
+    setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, at: now + delay }); return id; },
+    clearTimeout: (id) => timers.delete(id),
     navigator: {},
     document: { documentElement: {}, getElementById: () => root,
       createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
@@ -44,14 +48,25 @@ function host({ modern = true, fallback = null, settings = false } = {}) {
       if (url === '/agent-models') return json({ ok: true, models: [model],
         supportsRemoteRoutes: modern, locations: [{ agentDeviceId: 'share:one', name: 'Shared' }, { agentDeviceId: 'share:offline', name: 'Offline' }] });
       if (url.endsWith('share%3Aone')) return json({ ok: true, agentDeviceId: 'share:one', models: [model] });
-      if (url.endsWith('share%3Aoffline')) return json({ ok: false, errorCode: 'NOT_AVAILABLE' });
+      if (url.endsWith('share%3Aoffline')) {
+        remoteSignals.push(options?.signal);
+        if (remoteHang === 'fetch') return new Promise(() => {});
+        if (remoteHang === 'body') return { ok: true, json: () => new Promise(() => {}) };
+        return json({ ok: false, errorCode: 'NOT_AVAILABLE' });
+      }
       throw new Error(`Unexpected URL ${url}`);
     },
     cindy: { request: async () => ({ context: { locale: 'en' } }),
       onHostMessage: (cb) => { handler = cb; }, send: (msg) => sent.push(structuredClone(msg)) },
   });
   vm.runInContext(settings ? settingsSource.replace(/\nboot\(\);\s*$/, '\nglobalThis.ready = boot();') : source, context);
-  return { sent, requests, root, pickerRequests, ready: context.ready, config: () => stored,
+  return { sent, requests, root, pickerRequests, remoteSignals, ready: context.ready, config: () => stored,
+    pendingTimers: () => timers.size,
+    async tick(ms = 0) {
+      now += ms;
+      for (const [id, timer] of timers) if (timer.at <= now) { timers.delete(id); timer.fn(); }
+      await new Promise((resolve) => setImmediate(resolve));
+    },
     async tool(tool, args = {}) {
       const callId = `call-${sent.length}`;
       await handler({ type: 'tool-call', callId, tool, args });
@@ -107,3 +122,55 @@ test('settings save and reopen retain the share source and its display name', as
   assert.equal(h.pickerRequests[1].initial.agentDeviceId, 'share:one');
   assert.equal(h.pickerRequests[1].initial.model, 'example');
 });
+
+// Bug: one remote fetch/body that never resolves blocks settings boot, listing and saves.
+// Existing cases only cover immediate errors. Tier: unit; the real handlers run with a virtual
+// clock and a transport that ignores abort, so no wall-clock wait or external service is needed.
+for (const remoteHang of ['fetch', 'body']) {
+  test(`tools keep local and healthy shared models when a remote ${remoteHang} stalls`, async () => {
+    const h = host({ remoteHang });
+    const list = h.tool('list_rules');
+    let finished = false;
+    list.then(() => { finished = true; });
+    await h.tick();
+    assert.equal(h.pendingTimers(), 1);
+    await h.tick(2999);
+    assert.equal(finished, false);
+    await h.tick(1);
+    assert.deepEqual((await list).result.availableModels.map((m) => m.agentDeviceId), [null, 'share:one']);
+    assert.equal(h.remoteSignals[0].aborted, true);
+    assert.equal(h.pendingTimers(), 0);
+
+    const save = h.tool('set_fallback_model', { model: 'example', agentDeviceId: 'share:one' });
+    await h.tick();
+    assert.equal(h.pendingTimers(), 1);
+    await h.tick(3000);
+    assert.equal((await save).ok, true);
+    assert.equal(h.config().fallback.agentDeviceId, 'share:one');
+    assert.equal(h.pendingTimers(), 0);
+  });
+
+  test(`settings boot and save stay usable when a remote ${remoteHang} stalls`, async () => {
+    const h = host({ settings: true, remoteHang });
+    let finished = false;
+    h.ready.then(() => { finished = true; });
+    await h.tick();
+    assert.equal(h.pendingTimers(), 1);
+    await h.tick(2999);
+    assert.equal(finished, false);
+    await h.tick(1);
+    await h.ready;
+    assert.equal(h.remoteSignals[0].aborted, true);
+    assert.equal(h.pendingTimers(), 0);
+    const nodes = (node) => node && typeof node === 'object' ? [node, ...node.children.flatMap(nodes)] : [];
+    const button = () => nodes(h.root).find((node) => node.attrs?.class?.startsWith('mbtn'));
+    const save = button().listeners.click();
+    await h.tick();
+    assert.equal(h.pendingTimers(), 1);
+    await h.tick(3000);
+    await save;
+    assert.equal(h.config().fallback.agentDeviceId, 'share:one');
+    assert.equal(h.config().fallback.locationName, 'Shared');
+    assert.equal(h.pendingTimers(), 0);
+  });
+}

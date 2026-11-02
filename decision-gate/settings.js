@@ -781,11 +781,20 @@ async function loadModels() {
   supportsRemoteRoutes = body.ok && body.supportsRemoteRoutes === true;
   if (!body.ok) { models = []; return; }
   const remote = await Promise.all((body.supportsRemoteRoutes ? body.locations || [] : []).map(async (location) => {
+    const controller = new AbortController();
+    let timer;
     try {
-      const catalog = await fetch(`/agent-models?agent_device_id=${encodeURIComponent(location.agentDeviceId)}`).then((r) => r.json());
+      // Bound the response body too; one stalled source must not block the settings page.
+      const catalog = await Promise.race([
+        fetch(`/agent-models?agent_device_id=${encodeURIComponent(location.agentDeviceId)}`, { signal: controller.signal }).then((r) => r.json()),
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Remote model catalog timed out'));
+        }, 3000); }),
+      ]);
       return catalog.ok && catalog.agentDeviceId === location.agentDeviceId
         ? catalog.models.map((m) => ({ ...m, agentDeviceId: location.agentDeviceId, locationName: location.name })) : [];
-    } catch { return []; }
+    } catch { return []; } finally { clearTimeout(timer); }
   }));
   models = [...body.models, ...remote.flat()];
 }
