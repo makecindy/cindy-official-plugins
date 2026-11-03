@@ -352,8 +352,18 @@
       const run=await cindy.tasks.getRun({runId:record.runId});
       if (!terminal.has(run.status) && !active.some(r=>r.runId===run.runId)) active.push(run);
     }
-    if (active.length) return refuse('Run '+active.map(r=>r.runId+' is '+r.status).join(', ')+'; stop it and collect its terminal state first.',
-      record.runId ? 'stop' : 'status');
+    if (active.length) {
+      const ownActive=Boolean(record.runId && active.some(r=>r.runId===record.runId));
+      const summary='Run '+active.map(r=>r.runId+' is '+r.status).join(', ');
+      if (ownActive) return refuse(summary+'; stop it and collect its terminal state first.','stop');
+      const blockers=active.map(r=>r.runId);
+      return {status:'cleanup_refused',operation,taskId:record.taskId,task_id:record.taskId,
+        runId:record.runId || null,run_id:record.runId || null,state:record.state,
+        archived:false,blocking_runs:blockers,
+        reason:summary+' on task '+record.taskId+' outside this operation; stop or finish '+blockers.join(', ')+' in Cindy first, then call cleanup again.',
+        next_tool:null,
+        next_action:'Task '+record.taskId+' has active run(s) ('+summary+') not owned by this operation. Wait for or stop '+blockers.join(', ')+' in the Cindy task list first, then call cleanup again.'};
+    }
     if (record.runId && !record.messagesComplete)
       return refuse('The run is finished but its messages are not all collected. Call status until messages_complete is true.');
     if (record.draft_cleanup==='archived') {
