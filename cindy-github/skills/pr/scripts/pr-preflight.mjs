@@ -12,7 +12,8 @@
  *   - Uncommitted changes (WARN), behind the upstream branch (WARN), not pushed / base moved (NOTE).
  * It prints the rule files to re-read (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) and the PR template.
  *
- * Usage: node pr-preflight.mjs [worktree] [--json]
+ * Usage: node pr-preflight.mjs [worktree] [--base <branch>] [--json]
+ *   --base: compare against this branch instead of the default one (a PR that targets a release or feature branch).
  * Exit:  0 continue (handle WARN/NOTE), 1 a BLOCK to fix first, 2 not a usable Git repository.
  */
 
@@ -135,14 +136,17 @@ export function checkDco(root, base) {
   return { requires: true, missing };
 }
 
-export function preflight(target) {
+export function preflight(target, options = {}) {
   const top = git(target, ['rev-parse', '--show-toplevel']);
   if (!top.ok) return { error: `Not inside a Git repository: ${target}` };
   const root = top.out;
   if (!git(root, ['remote', 'get-url', 'origin']).ok) return { error: 'This repository has no origin remote.' };
   const head = git(root, ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short']);
-  const base = head.ok ? head.out.replace(/^origin\//, '')
-    : ['main', 'master'].find((name) => git(root, ['rev-parse', '--verify', `origin/${name}`]).ok);
+  // A PR that targets another branch (release, a feature branch) is compared against that branch.
+  if (options.base && !git(root, ['rev-parse', '--verify', `origin/${options.base}`]).ok)
+    return { error: `origin/${options.base} does not exist. Run git fetch origin first.` };
+  const base = options.base ?? (head.ok ? head.out.replace(/^origin\//, '')
+    : ['main', 'master'].find((name) => git(root, ['rev-parse', '--verify', `origin/${name}`]).ok));
   if (!base) return { error: 'Cannot tell the default branch (origin/HEAD is unset and origin/main|master is missing). Run git fetch origin first.' };
 
   const blocks = [], warns = [], notes = [];
@@ -177,7 +181,14 @@ export function preflight(target) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const result = preflight(argv.find((arg) => !arg.startsWith('-')) ?? process.cwd());
+  const at = argv.indexOf('--base');
+  const baseOption = at >= 0 ? argv[at + 1] : undefined;
+  if (at >= 0 && (!baseOption || baseOption.startsWith('-'))) {
+    process.stderr.write('[pr-preflight] --base needs a branch name.\n');
+    process.exit(2);
+  }
+  const positional = argv.filter((arg, index) => !arg.startsWith('-') && !(at >= 0 && index === at + 1));
+  const result = preflight(positional[0] ?? process.cwd(), baseOption ? { base: baseOption } : {});
   if (result.error) {
     process.stderr.write(`[pr-preflight] ${result.error}\n`);
     process.exit(2);

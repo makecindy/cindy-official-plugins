@@ -166,6 +166,13 @@ async function main() {
   const worktreesText = (await git(repoRoot, ['worktree', 'list', '--porcelain'])).stdout;
   const worktrees = parseWorktrees(worktreesText);
   const primaryWorktree = worktrees[0]?.path || repoRoot;
+  // The PR facts come from GitHub, the worktrees from this checkout: refuse to combine them when none of
+  // this checkout's remotes is the PR's base or head repository (a wrong --worktree, or another fork).
+  const remoteUrls = (await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout.toLowerCase();
+  const prRepos = [pr.base?.repo?.full_name, pr.head?.repo?.full_name, args.repo].filter(Boolean).map(name => name.toLowerCase());
+  if (!prRepos.some(name => remoteUrls.includes(`github.com/${name}`) || remoteUrls.includes(`github.com:${name}`))) {
+    throw new Error(`This checkout has no remote for ${prRepos[0] ?? 'the PR repository'}; pass --worktree from a checkout of that repository.`);
+  }
   const fetched = args.fetch ? (await git(primaryWorktree, ['fetch', '--prune', 'origin'])).ok : false;
 
   const headRef = pr.head?.ref;

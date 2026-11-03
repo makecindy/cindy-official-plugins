@@ -3312,7 +3312,11 @@ async function markPrReady(card, settings, msg) {
     if (handoff.ok) card.pending = 'follow';
     else card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
   }
-  if (!(await savePrCard(card))) card.note = t('prSaveFailed');
+  if (!(await savePrCard(card))) {
+    // The saved record still says 'ready': draw that (no action buttons) so the card and its record agree.
+    card.pending = 'ready';
+    card.note = t('prSaveFailed');
+  }
   await sendPrCard(card, settings, null);
 }
 

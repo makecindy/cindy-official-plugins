@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { preflight } from '../../cindy-github/skills/pr/scripts/pr-preflight.mjs';
 
@@ -113,4 +114,20 @@ test('remediation follows the repository policy and the identities on the line',
   assert.equal(scenario({ yaml: both, line: own, by: ['Bob', 'bob@example.com'] }), false, 'Bob signing Ada\'s statement himself');
   assert.equal(scenario({ yaml: 'allowRemediationCommits:\n  individual: true\n  thirdParty: false\n', line: behalf, by: ['Bob', 'bob@example.com'] }), false, 'third party switched off');
   assert.equal(scenario({ yaml: both, line: behalf, by: ['Bob', 'bob@example.com'] }), true, 'third party allowed');
+});
+
+test('compares against the base branch of a PR that does not target the default branch', (t) => {
+  const { work, git, commit } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'release');
+  commit('release.txt');
+  git(work, 'push', '-q', 'origin', 'release');
+  git(work, 'checkout', '-q', '-b', 'feature');
+  commit('feature.txt');
+  const against = (options) => preflight(work, options);
+  assert.match(against({ base: 'release' }).notes.join('\n'), /1 commit|not pushed/, 'one commit beyond origin/release');
+  assert.equal(against({ base: 'release' }).base, 'release');
+  assert.equal(against({}).base, 'main');
+  assert.match(against({ base: 'nope' }).error, /origin\/nope does not exist/);
+  const out = execFileSync('node', [fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-preflight.mjs', import.meta.url)), work, '--base', 'release', '--json'], { encoding: 'utf8' });
+  assert.equal(JSON.parse(out).base, 'release');
 });

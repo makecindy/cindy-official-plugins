@@ -658,7 +658,7 @@ function createPrRuntime(options = {}) {
       sent.push(message);
       if (message.type !== 'fs-request') return { ok: true };
       assert.equal(message.root, 'data');
-      if (message.op === 'write' && options.failWrites) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
+      if (message.op === 'write' && (typeof options.failWrites === 'function' ? options.failWrites() : options.failWrites)) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
       if (message.op === 'write') { files.set(message.path, message.content); return { ok: true, op: 'write', path: message.path }; }
       if (message.op === 'read') {
         return files.has(message.path)
@@ -942,6 +942,26 @@ test('pr_card reads every page of review threads, and reports unknown instead of
   const broken = createPrRuntime({ github: github(true) });
   const failed = await broken.tool({ repo: 'octo/repo', pr: '7' });
   assert.equal(failed.reply.ok, false, 'no card with a made-up zero');
+});
+
+test('when the final save after marking ready fails, the card shows no action buttons that its record cannot honour', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  let draft = true;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse(prBody(draft));
+  };
+  let writes = 0;
+  const runtime = createPrRuntime({ github, failWrites: () => ++writes >= 3 });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const card = runtime.lastCard(cardId);
+  assert.doesNotMatch(card.html, /<button data-ghost-action="pr:(follow|stop|ready)"/);
+  assert.ok(visibleText(card.html).includes(zhCopy.prSaveFailed));
 });
 
 test('a click already handed to the agent never goes back to a card with buttons when the save fails', async () => {
