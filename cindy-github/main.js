@@ -144,6 +144,7 @@ var MESSAGES = {
     prReadyFailed: '没能转为正式 PR：{detail}',
     prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
     prSaveFailed: '卡片状态没能保存，请稍后重试',
+    prSettingsUnreadable: '卡片设置暂时读不到，没有发出。请稍后再点一次',
     prCardNotDelivered: '卡片没能显示到对话里，请用同一个 card_id 再调用一次 pr_card',
     prThreadsTruncated: '评审线程太多，未能读完，无法确认未解决数量',
     prHandedOffSaveFailed: '已交给 Agent，但卡片状态没能保存。请先看对话，不要重复点',
@@ -269,6 +270,7 @@ var MESSAGES = {
     prReadyFailed: 'Could not mark it ready for review: {detail}',
     prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
     prSaveFailed: 'Could not save the card state. Try again in a moment.',
+    prSettingsUnreadable: 'The card settings could not be read, so nothing was sent. Try again in a moment.',
     prCardNotDelivered: 'The card could not be shown in the conversation. Call pr_card again with the same card_id.',
     prThreadsTruncated: 'Too many review threads to read them all, so the unresolved count is unknown',
     prHandedOffSaveFailed: 'Handed to the agent, but the card state could not be saved. Check the conversation and do not click again.',
@@ -394,6 +396,7 @@ var MESSAGES = {
     prReadyFailed: '正式な PR にできませんでした：{detail}',
     prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
     prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
+    prSettingsUnreadable: 'カードの設定を読み込めなかったため、何も送信していません。しばらくしてからもう一度お試しください',
     prCardNotDelivered: 'カードを会話に表示できませんでした。同じ card_id でもう一度 pr_card を呼んでください',
     prThreadsTruncated: 'レビュースレッドが多すぎて読み切れず、未解決の数を確認できません',
     prHandedOffSaveFailed: 'エージェントに渡しましたが、カードの状態を保存できませんでした。会話を確認し、もう一度押さないでください',
@@ -519,6 +522,7 @@ var MESSAGES = {
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
     prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
     prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prSettingsUnreadable: '카드 설정을 읽지 못해 아무것도 보내지 않았습니다. 잠시 후 다시 시도하세요',
     prCardNotDelivered: '카드를 대화에 표시하지 못했습니다. 같은 card_id로 pr_card를 다시 호출하세요',
     prThreadsTruncated: '리뷰 스레드가 너무 많아 모두 읽지 못했고 미해결 수를 확인할 수 없습니다',
     prHandedOffSaveFailed: '에이전트에게 전달했지만 카드 상태를 저장하지 못했습니다. 대화를 확인하고 다시 누르지 마세요',
@@ -2574,7 +2578,8 @@ async function readPrSettings() {
   try {
     return prSettingsFrom(await readKv());
   } catch (e) {
-    return prSettingsFrom(null);
+    // Unreadable is not the same as "everything off": callers that hand settings to the agent must not use these.
+    return Object.assign(prSettingsFrom(null), { unreadable: true });
   }
 }
 
@@ -3205,6 +3210,7 @@ async function prCardTool(args, callId) {
 
   var settings = await readPrSettings();
   var todo = [];
+  var settingsAppliedBefore = card.settingsApplied;
   if (card.stage === 'open' && !card.settingsApplied) {
     card.settingsApplied = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
@@ -3218,7 +3224,14 @@ async function prCardTool(args, callId) {
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating) await prunePrCards();
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
-  if (!delivered) return fail(t('prCardNotDelivered'));
+  if (!delivered) {
+    // The retry must produce the same to-do list again, so the one-time settings are not used up by this call.
+    if (card.settingsApplied !== settingsAppliedBefore) {
+      card.settingsApplied = settingsAppliedBefore;
+      await savePrCardRetry(card);
+    }
+    return fail(t('prCardNotDelivered'));
+  }
 
   var result = {
     card_id: card.id,
@@ -3447,20 +3460,40 @@ async function prCardAction(msg) {
     await markPrReady(card, settings, msg);
     return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
-    var handoff = await handOffPr(card, action, settings, msg);
-    // An unclear result (the call threw, or no verdict) may still have reached the agent: keep the in-progress
-    // state with its note, so the same action cannot be sent twice. Only a clear refusal restores the buttons.
-    handedOff = handoff.ok || handoff.unknown === true;
-    if (handedOff && (action === 'pr:publish' || action === 'pr:draft')) {
-      card.stage = 'publishing';
-      card.publishingDraft = action === 'pr:draft';
-      card.queued = handoff.queued === true;
-      card.settingsOpen = false;
-    } else if (handedOff) {
-      card.pending = action === 'pr:follow' ? 'follow' : 'stop';
+    var publishing = action === 'pr:publish' || action === 'pr:draft';
+    if (publishing && settings.unreadable) {
+      // The settings travel with the request; sending "everything off" for a read that failed would be wrong.
+      card.note = t('prSettingsUnreadable');
+    } else {
+      // Record the in-progress state before handing the click to the agent: if it cannot be saved nothing is sent,
+      // and if the handoff then goes through and a later save is lost, the record already blocks a second send.
+      var before = { stage: card.stage, publishingDraft: card.publishingDraft, queued: card.queued, settingsOpen: card.settingsOpen, pending: card.pending };
+      var restoreCard = function () { Object.assign(card, before); };
+      if (publishing) {
+        card.stage = 'publishing';
+        card.publishingDraft = action === 'pr:draft';
+        card.settingsOpen = false;
+      } else {
+        card.pending = action === 'pr:follow' ? 'follow' : 'stop';
+      }
+      if (!(await savePrCard(card))) {
+        restoreCard();
+        card.note = t('prSaveFailed');
+      } else {
+        var handoff = await handOffPr(card, action, settings, msg);
+        // An unclear result (the call threw, or no verdict) may still have reached the agent: keep the in-progress
+        // state with its note, so the same action cannot be sent twice. Only a clear refusal restores the buttons.
+        handedOff = handoff.ok || handoff.unknown === true;
+        if (!handedOff) {
+          restoreCard();
+          await savePrCardRetry(card);
+        } else if (publishing) {
+          card.queued = handoff.queued === true;
+        }
+        if (handoff.unknown) card.note = t('prHandoffUnknown');
+        else if (!handoff.ok) card.note = t('prHandoffFailed');
+      }
     }
-    if (handoff.unknown) card.note = t('prHandoffUnknown');
-    else if (!handoff.ok) card.note = t('prHandoffFailed');
   }
   if (!(await savePrCard(card))) {
     if (handedOff) {

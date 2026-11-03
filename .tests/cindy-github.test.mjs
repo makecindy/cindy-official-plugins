@@ -694,6 +694,7 @@ function createPrRuntime(options = {}) {
         return { ok: true, status: 200, json: async () => ({ ok: true, models, ...(device ? { agentDeviceId: device } : { locations: options.agentLocations ?? [] }) }) };
       }
       assert.equal(url, '/kv');
+      if (options.kvFails && init.method !== 'PUT') return { ok: false, status: 500, json: async () => ({}) };
       if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
     },
@@ -981,17 +982,54 @@ test('when the final save after marking ready fails, the card shows the real sta
   assert.equal(runtime.agentRuns.at(-1)?.event.action, 'follow');
 });
 
-test('a click already handed to the agent never goes back to a card with buttons when the save fails', async () => {
+test('a click is recorded before it is handed over: no record, nothing sent; handed over, a lost save cannot offer it again', async () => {
+  // The in-progress record cannot be saved: nothing is sent and the ask card stays.
   const options = {};
-  const runtime = createPrRuntime(options);
-  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  const none = createPrRuntime(options);
+  const idA = (await none.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
   options.failWrites = true;
-  await runtime.click(cardId, 'pr:publish');
-  assert.equal(runtime.agentRuns.length, 1);
-  const card = runtime.lastCard(cardId);
+  await none.click(idA, 'pr:publish');
+  assert.equal(none.agentRuns.length, 0);
+  assert.ok(visibleText(none.lastCard(idA).html).includes(zhCopy.prSaveFailed));
+  assert.match(none.lastCard(idA).html, /<button data-ghost-action="pr:publish"/);
+
+  // Writes: 1 card, 2 the in-progress record, 3 the final save (lost).
+  let writes = 0;
+  const handed = createPrRuntime({ failWrites: () => ++writes === 3 });
+  const idB = (await handed.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  await handed.click(idB, 'pr:publish');
+  assert.equal(handed.agentRuns.length, 1);
+  const card = handed.lastCard(idB);
   assert.equal(card.state, 'working');
   assert.doesNotMatch(card.html, /data-ghost-action="pr:(publish|draft)"/);
   assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
+  assert.equal(JSON.parse(handed.files.get(`pr-cards/${idB}.json`)).stage, 'publishing');
+  await handed.click(idB, 'pr:publish');
+  assert.equal(handed.agentRuns.length, 1, 'the record already says publishing, so it is not sent again');
+});
+
+test('settings that cannot be read are not sent as "everything off"', async () => {
+  const options = {};
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  options.kvFails = true;
+  await runtime.click(cardId, 'pr:publish');
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
+});
+
+test('a refused card does not use up the one-time settings to-do list', async () => {
+  const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feat/pr-card', base: 'main' });
+  const cardId = ask.reply.result.card_id;
+  options.refuseCards = true;
+  const refused = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(refused.reply.ok, false);
+  options.refuseCards = false;
+  const retry = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(retry.reply.ok, true);
+  assert.ok(Array.isArray(retry.reply.result.todo) && retry.reply.result.todo.length > 0, 'the rename to-do is still there');
 });
 
 test('with auto-follow, a lost save of the follow state sends nothing, and a lost final save cannot cause a second send', async () => {
