@@ -196,7 +196,7 @@ async function handle(method, params) {
     return await exclusive(dir, async()=>{
     const file=path.join(dir,'receipt.json');
     const old=fs.existsSync(file) ? JSON.parse(fs.readFileSync(file,'utf8')) : null;
-    if (old && old.state!=='prepared') return {operation,...old};
+    if (old && !['prepared','create_rejected'].includes(old.state)) return {operation,...old};
     // Nothing was created yet: route again with the current configuration, account map and catalog, so a retry after
     // a fix is not stuck on the answer that failed.
     const mappings=accountMappings(conf);

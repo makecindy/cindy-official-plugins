@@ -41,9 +41,17 @@
   async function loadRecord(msg,operation) {
     const disk=await node(msg,'load',{operation});
     const mem=memory.get(operation);
-    if (mem && mem.parent===disk.parent && (!disk.taskId || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned')) {
-      await tryPersist(msg,operation,mem);
-      return JSON.parse(JSON.stringify(mem));
+    if (mem && mem.parent===disk.parent) {
+      if (disk.state==='prepared' && !disk.createRejected && mem.createRejected) {
+        memory.delete(operation);
+        return disk;
+      }
+      if (!disk.taskId || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned' ||
+          (mem.state==='stopping' && disk.state==='running') ||
+          (terminal.has(mem.state) && !terminal.has(disk.state))) {
+        await tryPersist(msg,operation,mem);
+        return JSON.parse(JSON.stringify(mem));
+      }
     }
     return disk;
   }
@@ -151,6 +159,10 @@
   async function collect(msg,operation,record) {
     if (record.state==='cleaned') return {status:'cleaned',operation,next_action:'The old task is archived. New work needs a new assignment.'};
     if (!record.runId) {
+      if (record.createRejected || record.state==='create_rejected') return {status:'create_rejected',operation,
+        taskId:null,task_id:null,error:record.error || null,error_code:record.errorCode || null,executed:false,
+        next_tool:{ghost_id:'agentcompass',tool:'roll',args:{task:record.task || ''}},
+        next_action:'No Cindy task was created because tasks.create was refused. Fix the reported issue and call roll again to retry.'};
       if (UNCONFIRMED.has(record.state)) return unconfirmed(record,operation);
       if (['blocked','send_rejected'].includes(record.state)) return {status:record.state,operation,taskId:record.taskId || null,
         error:record.error || null,draft_cleanup:record.draft_cleanup || null,next_tool:next('cleanup',operation),
@@ -191,6 +203,7 @@
         'No automatic callback. Call next_tool to collect this same run; stop requests scoped cancellation.'};
   }
   async function roll(msg,ctx,canArchive) {
+    for (const [op,mem] of memory) if (mem.createRejected) await tryPersist(msg,op,mem);
     // The catalog the built-in engine routes over: exactly what this Cindy can run now.
     const prepared=await node(msg,'prepare',{task:msg.args.task,catalog:await cindy.tasks.models()});
     const operation=prepared.operation;
@@ -198,7 +211,7 @@
     if (prepared.router?.status!=='native' && prepared.state==='prepared') return prepared.router;
     return await exclusive('op\0'+operation,async()=>{
       let record=await loadRecord(msg,operation);
-      if (record.state!=='prepared') return await collect(msg,operation,await reconcile(msg,operation,record));
+      if (record.state!=='prepared' || record.createRejected) return await collect(msg,operation,await reconcile(msg,operation,record));
       const route=selectRoute(record.bundle,await cindy.tasks.models(),record.mappings);
       if (!record.prompt || record.prompt.length>32768) throw Error('Full task plus return contract exceeds Cindy send limit (32768 characters); nothing launched.');
       record.route=route;
@@ -207,7 +220,19 @@
       await persist(msg,operation,record);
       let task;
       try {task=await cindy.tasks.create(record.createRequest);} catch(error) {
-        record.state='unknown_create';record.error=error.message;
+        record.error=error?.message || String(error);
+        record.errorCode=error?.code || null;
+        if (REJECTED.has(record.errorCode)) {
+          record.state='prepared';record.createRejected=true;record.task=msg.args.task;
+          delete record.createRequest;delete record.route;
+          const saveError=await tryPersist(msg,operation,record);
+          return {status:'create_rejected',operation,taskId:null,task_id:null,error:record.error,error_code:record.errorCode,
+            executed:false,
+            ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+            next_tool:{ghost_id:'agentcompass',tool:'roll',args:{task:msg.args.task}},
+            next_action:'Cindy refused tasks.create before creating a draft; nothing was created. Fix the reported issue and call roll again to retry.'};
+        }
+        record.state='unknown_create';
         const saveError=await tryPersist(msg,operation,record);
         return {status:record.state,operation,error:record.error,
           ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),next_tool:next('status',operation)};
@@ -260,14 +285,24 @@
     record=await reconcile(msg,operation,record);
     if (!record.runId) throw Error('No confirmed run to cancel. Inspect the Cindy task; unknown delivery is not resent.');
     let run=await cindy.tasks.cancel({runId:record.runId,requestKey:operation+':cancel'});
+    record.run=run;record.state=run.status;
+    let saveError=await tryPersist(msg,operation,record);
+    let pollError=null;
     // Cindy stops a turn at its next safe point: wait a bounded time for the confirmed terminal state, then say which.
-    for (let i=0;i<10 && !terminal.has(run.status);i++) {await pause(1000);run=await cindy.tasks.getRun({runId:record.runId});}
-    record.state=run.status;const saveError=await tryPersist(msg,operation,record);
+    for (let i=0;i<10 && !terminal.has(run.status);i++) {
+      await pause(1000);
+      try {run=await cindy.tasks.getRun({runId:record.runId});record.run=run;record.state=run.status;}
+      catch(error) {pollError=error?.message || String(error);break;}
+    }
+    saveError=(await tryPersist(msg,operation,record)) || saveError;
+    const isTerminal=terminal.has(run.status);
     return {status:run.status,operation,taskId:record.taskId,runId:record.runId,task_id:record.taskId,run_id:record.runId,
-      confirmed_terminal:terminal.has(run.status),
+      confirmed_terminal:isTerminal,
+      ...(pollError ? {poll_error:pollError} : {}),
       ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
       next_tool:next('status',operation),
-      next_action:terminal.has(run.status) ? 'Cindy confirmed the run '+run.status+'. Call status to collect its messages, then cleanup.' :
+      next_action:isTerminal ? 'Cindy confirmed the run '+run.status+'. Call status to collect its messages, then cleanup.' :
+        pollError ? 'Cindy accepted the cancellation ('+run.status+'), but follow-up status polling failed ('+pollError+'). Call status until the run is terminal.' :
         'Cindy accepted the cancellation but the run is still '+run.status+': a command already in flight finishes first. Call status until the run is terminal.'};
   }
   async function cleanup(msg,operation,record,canArchive) {

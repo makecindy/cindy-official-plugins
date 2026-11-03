@@ -162,13 +162,24 @@ test('wrong model/provider/permission/directory cannot receive model input',asyn
   }
   }
 });
-test('lost create is not retried and a failed run preserves failure without inventing output',async()=>{
+test('lost create is not retried, definite create refusals are retriable, and a failed run preserves failure without inventing output',async()=>{
   const f=fixture();f.cindy.tasks.create=async()=>{throw Error('transport lost');};
   const first=await f.send('roll',{task:'x'});
   assert.equal(first.result.status,'unknown_create');
   const observed=await f.send('status',{operation:first.result.operation});
   assert.equal(observed.result.status,'unknown_create');
   assert.equal(f.count('send'),0);
+  // A definite pre-creation refusal (such as PERMISSION_DENIED) is classified as create_rejected and released for retry.
+  const denied=fixture();
+  const realCreate=denied.cindy.tasks.create;
+  denied.cindy.tasks.create=async()=>{throw coded('PERMISSION_DENIED','plugin permission denied');};
+  const rejected=(await denied.send('roll',{task:'x'})).result;
+  assert.deepEqual([rejected.status,rejected.error_code,rejected.executed,rejected.next_tool.tool],
+    ['create_rejected','PERMISSION_DENIED',false,'roll']);
+  assert.equal((await denied.send('status',{operation:rejected.operation})).result.status,'create_rejected');
+  denied.cindy.tasks.create=realCreate;
+  const recovered=(await denied.send('roll',{task:'x'})).result;
+  assert.deepEqual([recovered.status,recovered.taskId,recovered.runId],['running','child-task','run-1']);
   const other=fixture();const launched=await other.send('roll',{task:'x'});
   other.run.status='failed';other.run.error='upstream timeout';
   const failed=await other.send('status',{operation:launched.result.operation});
@@ -274,6 +285,14 @@ test('stop waits a bounded time for the host: stopping is reported as such, a co
   const quick=fixture({cancelTo:'cancelled'});const op=(await quick.send('roll',{task:'x'})).result.operation;
   const confirmed=(await quick.send('stop',{operation:op})).result;
   assert.deepEqual([confirmed.status,confirmed.confirmed_terminal],['cancelled',true]);
+  // If tasks.cancel() succeeds with stopping and a follow-up getRun() poll throws, the accepted cancellation is preserved.
+  const pollFail=fixture();const pop=(await pollFail.send('roll',{task:'x'})).result.operation;
+  pollFail.cindy.tasks.getRun=async()=>{throw Error('getRun transport error');};
+  const pollStopped=await pollFail.send('stop',{operation:pop});
+  assert.equal(pollStopped.ok,true);
+  assert.deepEqual([pollStopped.result.status,pollStopped.result.confirmed_terminal,pollStopped.result.task_id,pollStopped.result.run_id,pollStopped.result.next_tool.tool],
+    ['stopping',false,'child-task','run-1','status']);
+  assert.equal(pollFail.records.get(pop).state,'stopping');
 });
 test('review 1: a persisted `sending` receipt without runId is settled from the host runs, never resent',async()=>{
   const f=fixture();const first=await f.send('roll',{task:'x'});
