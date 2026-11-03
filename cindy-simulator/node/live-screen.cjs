@@ -190,7 +190,7 @@ function describeOrientation(base,udid){
 }
 function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=process.platform==='darwin'&&process.arch==='arm64',describeUi=describeOrientation,
   serve=(...a)=>require('./android/stream.cjs').serve(...a),rpc=(...a)=>require('./android/grpc.cjs').rpc(...a),WebSocket=globalThis.WebSocket,now=Date.now}){
-  const sessions=new Map(),tokens=new Map();let server=null,listening=null;
+  const sessions=new Map(),tokens=new Map(),releasing=new Map();let server=null,listening=null;
   const timer=setInterval(()=>sweep(),1000);timer.unref?.();
   function listen(){
     listening||=new Promise((resolve,reject)=>{
@@ -321,16 +321,19 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     tokens.delete(s.token);
     // Lift a finger the phone left down.
     if(s.kind!=='android'&&s.size)for(const value of appleRelease(s.touch,s.size))send(s,value);
-    if(s.kind==='android'&&s.down)releaseAndroid(s);
+    if(s.kind==='android'&&s.down){
+      const promise=releaseAndroid(s).finally(()=>{if(releasing.get(s.key)===promise)releasing.delete(s.key);});
+      releasing.set(s.key,promise);
+    }
     try{s.ws?.close();}catch{}
     s.abort?.abort();
     if(s.res&&!s.res.writableEnded)s.res.end();
   }
   // A touch still running holds the device: wait for it, then lift the finger.
+  // Opening the device again waits for this (see open), so the release can
+  // never lift the fingers of a screen opened since.
   async function releaseAndroid(s){
     for(let i=0;i<RELEASE_TRIES&&s.down;i++){
-      // A screen opened on the device since owns its fingers now: a release would lift those.
-      if(sessions.has(s.key))return;
       try{await androidStep(s,{kind:'release'});return;}
       catch(error){if(error?.code!=='BUSY')return;await new Promise(resolve=>setTimeout(resolve,RELEASE_WAIT_MS));}
     }
@@ -374,7 +377,13 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(stateOf(device)!=='running')throw fail('NOT_RUNNING',locale);
     const kind=kindOf(device);
     if(kind!=='android'&&(!appleHost||typeof WebSocket!=='function'))throw fail('UNSUPPORTED',locale);
-    const previous=sessions.get(key);if(previous)end(previous);
+    // A finger the last screen left down is lifted before this one takes input.
+    // Nothing awaits between the last check and sessions.set below.
+    for(;;){
+      const previous=sessions.get(key);if(previous)end(previous);
+      const pending=releasing.get(key);if(!pending)break;
+      await pending;
+    }
     const s={key,udid:device.udid,kind,token:randomBytes(32).toString('hex'),seen:now(),res:null,size:null,sent:null,rotation:0,
       touch:{mode:null,ids:[],last:new Map(),edge:null},control:{},closed:false};
     sessions.set(key,s);

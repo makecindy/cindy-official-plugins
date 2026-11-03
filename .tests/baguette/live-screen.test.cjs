@@ -349,15 +349,17 @@ test('closing an Android screen under a running touch lifts the finger once the 
   assert.equal(f.calls.filter(c=>c[0]==='exclusive').length,3,'two busy answers, then the release');
 });
 
-test('a late release of a closed Android screen never lifts the fingers of a screen opened since',async t=>{
+test('reopening an Android device waits for the previous screen to lift its finger, and the new screen keeps its own',async t=>{
   const f=fixture(t);const opened=await f.live.request('liveScreen.open',{id:DROID});
   const stream=await fetchStream(opened.url);t.after(()=>stream.close());await until(()=>f.sink());
   await f.live.request('liveScreen.input',{id:DROID,events:[{kind:'touch',touches:[{id:0,x:0.5,y:0.5,phase:'began'}]}]});
-  f.busy.times=1000;f.calls.length=0;
+  f.busy.times=2;f.calls.length=0;
   f.end();await until(()=>stream.ended());
   await f.live.request('liveScreen.open',{id:DROID});
-  f.busy.times=0;await new Promise(r=>setTimeout(r,350));
-  assert.equal(f.calls.filter(c=>c[0]==='android.release').length,0,'the new screen keeps its fingers');
+  assert.equal(f.calls.filter(c=>c[0]==='android.release').length,1,'the old finger was lifted before the new screen opened');
+  await f.live.request('liveScreen.input',{id:DROID,events:[{kind:'touch',touches:[{id:0,x:0.5,y:0.5,phase:'began'}]}]});
+  await new Promise(r=>setTimeout(r,350));
+  assert.equal(f.calls.filter(c=>c[0]==='android.release').length,1,'nothing lifts the new screen\'s finger later');
 });
 
 test('a second open of the same Apple device leaves no stream of the first behind',async t=>{

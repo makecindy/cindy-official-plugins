@@ -88,7 +88,10 @@ async function ready(current){
  const detail=current.error?.message||[...new Set(current.log.split('\n').filter(Boolean))].slice(-2).join(' ').slice(-600);
  throw Error('Viewer service did not become reachable within 12 seconds. Retry viewer action=open; do not relaunch the App. '+detail);
 }
-async function startViewer(binary,deviceSet,children,clipboardAction){
+// `persist: false` is for Live Screen, which only needs the native server: it
+// must not write the saved viewer address, or a worker restart would read it as
+// the user wanting the desktop viewer open again.
+async function startViewer(binary,deviceSet,children,clipboardAction,{persist=true}={}){
  if(active&&!active.stopped){if(active.starting)return active.starting;if(active.parked)await restartNative(active);return ready(active);}
  const previousPort=active?.port;
  if(active)await stopViewer();
@@ -100,7 +103,7 @@ async function startViewer(binary,deviceSet,children,clipboardAction){
    current.port=previousPort||await freePort();current.base='http://127.0.0.1:'+current.port;
    if(current.stopped)throw Error('Viewer stopped');
    launch(current);await ready(current);
-   await initializeBridge(current,deviceSet,clipboardAction);
+   await initializeBridge(current,deviceSet,clipboardAction,persist);
    if(current.stopped){current.clipboard.close();throw Error('Viewer stopped');}
    return current;
   }catch(error){if(active===current)await stopViewer();throw error;}
@@ -143,7 +146,7 @@ async function viewerStatus(server){
  let available=false;try{await probe(server.base+'/simulators');available=true;}catch{}
  return {ready:available,parked:server.parked,generation:server.generation};
 }
-async function initializeBridge(server,deviceSet,clipboardAction){
+async function initializeBridge(server,deviceSet,clipboardAction,persist=true){
  const preferred=readSession(deviceSet);
  server.clipboard=await createClipboard(server.base,clipboardAction,{
   port:server.port,
@@ -188,10 +191,17 @@ async function initializeBridge(server,deviceSet,clipboardAction){
   touch:()=>controls?.touch()
  },preferred);
  const session=server.clipboard.session;
- if(session.port!==preferred.port||session.token!==preferred.token)writeSession(deviceSet,session);
+ server.unsaved=session.port!==preferred.port||session.token!==preferred.token?session:null;
+ if(persist)persistSession(server,deviceSet);
+}
+// Saves the viewer address once somebody opens the viewer for real.
+function persistSession(server,deviceSet){
+ if(server.unsaved)writeSession(deviceSet,server.unsaved);
+ server.unsaved=null;
 }
 async function openViewer(binary,deviceSet,children,udid,clipboardAction,locale){
  const server=await startViewer(binary,deviceSet,children,clipboardAction);
+ persistSession(server,deviceSet);
  const page=server.base+'/simulators/'+encodeURIComponent(udid);await probe(page);
  server.clipboard.devices.add(udid);
  lastViewerSeen=Date.now();
@@ -200,7 +210,7 @@ async function openViewer(binary,deviceSet,children,udid,clipboardAction,locale)
 }
 // The native server's own loopback address (no capability: it is never handed
 // out); Live Screen connects its device stream there.
-async function nativeBase(binary,deviceSet,children,clipboardAction){return (await startViewer(binary,deviceSet,children,clipboardAction)).base;}
+async function nativeBase(binary,deviceSet,children,clipboardAction){return (await startViewer(binary,deviceSet,children,clipboardAction,{persist:false})).base;}
 // The controller address for a device while the viewer already runs, without
 // starting anything; null when it is not running.
 function existingViewerUrl(udid,locale){

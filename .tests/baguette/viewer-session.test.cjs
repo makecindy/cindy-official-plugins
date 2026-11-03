@@ -52,6 +52,22 @@ test('the viewer status preserves screen health and reports only the unreadable 
  }
 });
 
+test('the native server started for a phone screen leaves no saved viewer address until the viewer is opened',async t=>{
+ const vm=require('node:vm'),syncFs=require('node:fs');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'bag-view-persist-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'viewer-session.json'),deviceSet=path.join(dir,'devices');
+ const context={module:{exports:{}},process:{pid:process.pid},require(name){
+  if(name==='./clipboard.cjs')return {createClipboard:async()=>({session:{port:12345,token:'a'.repeat(64)}})};
+  return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
+ }};
+ vm.runInNewContext(syncFs.readFileSync('cindy-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.testBridge=initializeBridge;module.exports.testSave=persistSession;',context);
+ const server={base:'http://example.test',port:12345,generation:1};
+ await context.module.exports.testBridge(server,deviceSet,async()=>{},false);
+ assert.equal(syncFs.existsSync(file),false,'a phone screen does not record that the desktop viewer is wanted');
+ context.module.exports.testSave(server,deviceSet);
+ assert.equal(JSON.parse(syncFs.readFileSync(file,'utf8')).port,12345,'opening the viewer saves the address');
+});
+
 test('turning simulators off retires the saved viewer address',async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'baguette-session-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  let forgotten=0,state='Booted';
