@@ -165,3 +165,14 @@ export function remoteNameForRepo(remoteVerbose, repoName) {
   }
   return null;
 }
+
+/**
+ * Whether a worktree belongs to the PR. It does when it has the PR's branch checked out; for a fork PR, where a
+ * branch name is not proof, that branch must also sit on the PR's head commit, or the worktree is detached there.
+ * Another branch that happens to sit on the same commit is never taken.
+ */
+export function isPrWorktree(worktree, { headRef, headSha, fromFork }) {
+  const onHead = Boolean(headSha) && worktree.head === headSha;
+  if (worktree.branch === headRef) return !fromFork || onHead;
+  return fromFork && onHead && worktree.detached === true;
+}

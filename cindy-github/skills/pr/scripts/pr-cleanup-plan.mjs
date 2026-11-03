@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
 import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
@@ -194,7 +194,7 @@ async function main() {
   const namedBranch = await refExists(primaryWorktree, localHeadRef);
   const localBranch = fromFork && namedBranch.oid !== headSha ? { exists: false, oid: null } : namedBranch;
   const originBase = await refExists(primaryWorktree, originBaseRef);
-  const targetWorktrees = worktrees.filter(w => (!fromFork && w.branch === headRef) || (headSha && w.head === headSha));
+  const targetWorktrees = worktrees.filter(w => isPrWorktree(w, { headRef, headSha, fromFork }));
   const primaryStatus = await worktreeStatus(primaryWorktree);
   const targetWorktreeDetails = await Promise.all(targetWorktrees.map(async wt => ({
     ...wt,

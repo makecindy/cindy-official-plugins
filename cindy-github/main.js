@@ -3164,8 +3164,6 @@ async function prCardTool(args, callId) {
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
-  // The agent coming back with the PR means the mark-ready flow is over, even if its own last save was lost.
-  if (card.pending === 'ready' && ref) card.pending = null;
   card.note = null;
 
   var number = ref ? ref.number : card.pr ? card.pr.number : null;
@@ -3178,6 +3176,8 @@ async function prCardTool(args, callId) {
     } else {
       card.pr = status.pr;
       card.readyUncertain = false;
+      // The PR was read: a 'ready' left by a mark-ready flow whose last save was lost is over (nothing runs concurrently).
+      if (card.pending === 'ready') card.pending = null;
     }
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
     card.queued = false;
@@ -3342,16 +3342,24 @@ async function markPrReadyInner(card, settings, msg, progress) {
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
   } else if (settings.autoFollow && card.stage === 'open') {
-    var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
-    // An unclear result may still have been delivered: treat it as handed off, never as "not sent".
-    progress.handedOff = handoff.ok || handoff.unknown === true;
-    if (progress.handedOff) card.pending = 'follow';
-    if (handoff.unknown) card.note = t('prHandoffUnknown');
-    else if (!handoff.ok) card.note = t('prHandoffFailed');
+    // Record "following is starting" before handing it to the agent, as the first step does for "ready":
+    // if that cannot be saved, nothing is sent, so a later click can never send it a second time.
+    card.pending = 'follow';
+    if (!(await savePrCard(card))) {
+      card.pending = null;
+      card.note = t('prSaveFailed');
+    } else {
+      var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
+      // An unclear result may still have been delivered: treat it as handed off, never as "not sent".
+      progress.handedOff = handoff.ok || handoff.unknown === true;
+      if (!progress.handedOff) card.pending = null;
+      if (handoff.unknown) card.note = t('prHandoffUnknown');
+      else if (!handoff.ok) card.note = t('prHandoffFailed');
+    }
   }
   if (!(await savePrCard(card))) {
-    // The record still says 'ready'. The state just read is the true one, so draw it; the next click or
-    // update finds the stale 'ready' (nothing runs concurrently) and refreshes it before acting.
+    // The record may still say 'ready' or 'follow'. 'ready' is stale (nothing runs concurrently) and is refreshed
+    // from GitHub at the next click or update; a 'follow' that was handed off is cleared by the agent's update.
     card.note = t('prSaveFailed');
   }
   await sendPrCard(card, settings, null);

@@ -993,6 +993,36 @@ test('a click already handed to the agent never goes back to a card with buttons
   assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
 });
 
+test('with auto-follow, a lost save of the follow state sends nothing, and a lost final save cannot cause a second send', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  const scenario = (failAt) => {
+    let draft = true, writes = 0;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return jsonResponse(prBody(draft));
+    };
+    const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } }, failWrites: () => ++writes === failAt });
+    return runtime;
+  };
+  // Writes: 1 card, 2 'ready', 3 'follow' (before the handoff), 4 final.
+  const noSend = scenario(3);
+  const idA = (await noSend.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await noSend.click(idA, 'pr:ready');
+  assert.equal(noSend.agentRuns.length, 0, 'the follow state could not be recorded, so nothing was sent');
+  assert.ok(visibleText(noSend.lastCard(idA).html).includes(zhCopy.prSaveFailed));
+
+  const sentOnce = scenario(4);
+  const idB = (await sentOnce.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await sentOnce.click(idB, 'pr:ready');
+  assert.equal(sentOnce.agentRuns.length, 1);
+  await sentOnce.click(idB, 'pr:follow');
+  assert.equal(sentOnce.agentRuns.length, 1, 'the record says following is starting, so the same request is not sent again');
+});
+
 test('after an uncertain mark-ready the button stays away until the PR has been read again', async () => {
   let reads = 0;
   const github = (request) => {

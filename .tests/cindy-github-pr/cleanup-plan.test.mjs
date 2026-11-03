@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -147,4 +147,19 @@ test('only the fetch URL of a remote decides which repository it points at', () 
   const remotes = 'origin\thttps://github.com/me/app.git (fetch)\norigin\thttps://github.com/acme/app.git (push)\n';
   assert.equal(remoteNameForRepo(remotes, 'acme/app'), null, 'a push URL alone does not make a remote the base repository');
   assert.deepEqual(githubRepoNamesOfRemotes(remotes), ['me/app', 'acme/app']);
+});
+
+test('a worktree on another branch is not the PR\'s just because it sits on the same commit', () => {
+  const sha = 'a'.repeat(40);
+  const own = { branch: 'feature/pr', head: sha };
+  const other = { branch: 'other', head: sha };
+  const detached = { branch: null, head: sha, detached: true };
+  assert.equal(isPrWorktree(own, { headRef: 'feature/pr', headSha: sha, fromFork: false }), true);
+  assert.equal(isPrWorktree(other, { headRef: 'feature/pr', headSha: sha, fromFork: false }), false);
+  assert.equal(isPrWorktree(detached, { headRef: 'feature/pr', headSha: sha, fromFork: false }), false);
+  // A fork PR: the name alone is not proof, but the same commit on that name, or detached there, is.
+  assert.equal(isPrWorktree({ branch: 'feature/pr', head: 'b'.repeat(40) }, { headRef: 'feature/pr', headSha: sha, fromFork: true }), false);
+  assert.equal(isPrWorktree(own, { headRef: 'feature/pr', headSha: sha, fromFork: true }), true);
+  assert.equal(isPrWorktree(detached, { headRef: 'feature/pr', headSha: sha, fromFork: true }), true);
+  assert.equal(isPrWorktree(other, { headRef: 'feature/pr', headSha: sha, fromFork: true }), false);
 });
