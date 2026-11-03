@@ -3164,6 +3164,8 @@ async function prCardTool(args, callId) {
     if (a.following) card.followedEver = true;
     if (card.pending === 'follow' || card.pending === 'stop') card.pending = null;
   }
+  // The agent coming back with the PR means the mark-ready flow is over, even if its own last save was lost.
+  if (card.pending === 'ready' && ref) card.pending = null;
   card.note = null;
 
   var number = ref ? ref.number : card.pr ? card.pr.number : null;

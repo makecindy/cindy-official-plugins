@@ -121,7 +121,12 @@ function remediatedCommits(root, base, defaultBranch) {
 
 /** DCO, only when the repository asks for it: each commit signed off by its own author. */
 export function checkDco(root, base, defaultBranch) {
-  if (!fs.existsSync(path.join(root, 'DCO')) && !fs.existsSync(path.join(root, '.github', 'dco.yml'))) return { requires: false, missing: [] };
+  // Whether the repository asks for DCO is decided by its default branch: a PR branch cannot opt out by deleting the file.
+  const declared = (ref) => git(root, ['cat-file', '-e', `${ref}:DCO`]).ok || git(root, ['cat-file', '-e', `${ref}:.github/dco.yml`]).ok;
+  const defaultRef = `origin/${defaultBranch ?? base}`;
+  const hasDefaultRef = git(root, ['rev-parse', '--verify', defaultRef]).ok;
+  const requires = hasDefaultRef ? declared(defaultRef) : fs.existsSync(path.join(root, 'DCO')) || fs.existsSync(path.join(root, '.github', 'dco.yml'));
+  if (!requires) return { requires: false, missing: [] };
   // Merge commits are skipped, as the DCO check does.
   const list = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%H%x00%ae%x00%(trailers:key=Signed-off-by,valueonly)%x01']);
   if (!list.ok) return { requires: true, missing: [], error: list.err };

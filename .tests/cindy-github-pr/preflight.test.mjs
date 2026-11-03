@@ -28,7 +28,7 @@ function repo(t) {
   return { work, git, commit };
 }
 
-test('blocks the default branch, checks DCO only when declared, and skips merge commits', (t) => {
+test('blocks the default branch, checks DCO only when the default branch declares it, and skips merge commits', (t) => {
   const { work, git, commit } = repo(t);
   assert.match(preflight(work).blocks.join('\n'), /default branch main/);
 
@@ -36,18 +36,29 @@ test('blocks the default branch, checks DCO only when declared, and skips merge 
   commit('a.txt');
   assert.deepEqual(preflight(work).blocks, [], 'no DCO file: unsigned commits are fine');
 
+  // A DCO file added only on the branch does not make the repository require it.
   fs.writeFileSync(path.join(work, 'DCO'), 'dco');
   git(work, 'add', 'DCO');
-  git(work, 'commit', '-q', '-s', '-m', 'dco');
-  assert.match(preflight(work).blocks.join('\n'), /DCO sign-off.*: [0-9a-f]{8}\./, 'the unsigned a.txt commit');
+  git(work, 'commit', '-q', '-s', '-m', 'dco on the branch only');
+  assert.deepEqual(preflight(work).blocks, []);
 
-  git(work, 'reset', '-q', '--hard', 'origin/main');
+  // Declared on the default branch: the unsigned commit is reported, and deleting the file on the branch does not opt out.
+  git(work, 'checkout', '-q', 'main');
   fs.writeFileSync(path.join(work, 'DCO'), 'dco');
   git(work, 'add', 'DCO');
   git(work, 'commit', '-q', '-s', '-m', 'dco');
+  git(work, 'push', '-q', 'origin', 'main');
+  git(work, 'checkout', '-q', '-b', 'fix2');
+  commit('a.txt');
+  assert.match(preflight(work).blocks.join('\n'), /DCO sign-off.*: [0-9a-f]{8}\./, 'the unsigned a.txt commit');
+  git(work, 'rm', '-q', 'DCO');
+  git(work, 'commit', '-q', '-s', '-m', 'remove the file');
+  assert.match(preflight(work).blocks.join('\n'), /DCO sign-off/, 'removing the file on the branch does not opt out');
+
   git(work, 'checkout', '-q', '-b', 'side', 'origin/main');
   commit('b.txt', '-s');
-  git(work, 'checkout', '-q', 'fix');
+  git(work, 'checkout', '-q', 'fix2');
+  git(work, 'reset', '-q', '--hard', 'origin/main');
   git(work, 'merge', '-q', '--no-ff', '--no-edit', 'side');
   const result = preflight(work);
   assert.deepEqual(result.blocks, [], 'a merge commit needs no sign-off');

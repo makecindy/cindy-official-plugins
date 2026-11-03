@@ -171,7 +171,12 @@ async function main() {
   const remoteVerbose = (await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout;
   const remoteUrls = githubRepoNamesOfRemotes(remoteVerbose);
   // In a fork checkout `origin` is the head fork; the base branch lives on the remote of the PR's base repository.
-  const baseRemote = remoteNameForRepo(remoteVerbose, pr.base?.repo?.full_name ?? args.repo);
+  const baseRepoName = pr.base?.repo?.full_name ?? args.repo;
+  const baseRemote = remoteNameForRepo(remoteVerbose, baseRepoName);
+  // Without a remote for the base repository, falling back to `origin` would compare and fast-forward against a fork.
+  if (!baseRemote) {
+    throw new Error(`This checkout has no remote for the PR's base repository ${baseRepoName} (origin is a fork); add one (git remote add upstream https://github.com/${baseRepoName}.git) and run again.`);
+  }
   const prRepos = [pr.base?.repo?.full_name, pr.head?.repo?.full_name, args.repo].filter(Boolean).map(name => name.toLowerCase());
   if (!prRepos.some(name => remoteUrls.includes(name))) {
     throw new Error(`This checkout has no remote for ${prRepos[0] ?? 'the PR repository'}; pass --worktree from a checkout of that repository.`);

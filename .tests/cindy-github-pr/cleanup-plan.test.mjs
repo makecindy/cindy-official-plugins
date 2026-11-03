@@ -136,7 +136,7 @@ test('a fork checkout syncs the base branch from the remote of the PR base repos
     'upstream\thttps://github.com/Acme/App.git (fetch)',
   ].join('\n');
   assert.equal(remoteNameForRepo(remotes, 'acme/app'), 'upstream');
-  assert.equal(remoteNameForRepo(remotes, 'nobody/else'), 'origin');
+  assert.equal(remoteNameForRepo(remotes, 'nobody/else'), null);
   const commands = buildCleanupCommands({
     primaryWorktree: PRIMARY, baseRef: 'main', headRef: 'feature/pr', localBranchExists: true, targetWorktrees: [], baseRemote: 'upstream',
   });
@@ -145,6 +145,6 @@ test('a fork checkout syncs the base branch from the remote of the PR base repos
 
 test('only the fetch URL of a remote decides which repository it points at', () => {
   const remotes = 'origin\thttps://github.com/me/app.git (fetch)\norigin\thttps://github.com/acme/app.git (push)\n';
-  assert.equal(remoteNameForRepo(remotes, 'acme/app'), 'origin');
+  assert.equal(remoteNameForRepo(remotes, 'acme/app'), null, 'a push URL alone does not make a remote the base repository');
   assert.deepEqual(githubRepoNamesOfRemotes(remotes), ['me/app', 'acme/app']);
 });

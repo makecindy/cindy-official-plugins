@@ -153,7 +153,7 @@ export function githubRepoNamesOfRemotes(remoteVerbose) {
   return [...names];
 }
 
-/** The remote that points at `repoName` (owner/repo, any case); `origin` when none does, as before. */
+/** The remote whose fetch URL is `repoName` (owner/repo, any case); null when none is. */
 export function remoteNameForRepo(remoteVerbose, repoName) {
   const wanted = String(repoName ?? '').toLowerCase();
   for (const line of String(remoteVerbose).split('\n')) {
@@ -163,5 +163,5 @@ export function remoteNameForRepo(remoteVerbose, repoName) {
     const repo = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(m[2])?.[1];
     if (repo && repo.toLowerCase() === wanted) return m[1];
   }
-  return 'origin';
+  return null;
 }
