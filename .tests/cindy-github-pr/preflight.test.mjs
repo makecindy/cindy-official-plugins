@@ -87,3 +87,30 @@ test('accepts a remediation commit only where the repository allows it, for that
   git(work, 'commit', '-q', '-a', '-s', '-m', 'dco config without remediation');
   assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'not allowed by this repository');
 });
+
+test('remediation follows the repository policy and the identities on the line', (t) => {
+  const scenario = ({ yaml, line, by = ['Ada', 'ada@example.com'] }) => {
+    const { work, git, commit } = repo(t);
+    git(work, 'checkout', '-q', '-b', 'fix');
+    commit('a.txt');
+    const unsigned = git(work, 'rev-parse', 'HEAD').trim();
+    fs.mkdirSync(path.join(work, '.github'), { recursive: true });
+    fs.writeFileSync(path.join(work, '.github', 'dco.yml'), yaml);
+    git(work, 'add', '.github');
+    git(work, 'commit', '-q', '-s', '-m', 'dco policy');
+    git(work, 'config', 'user.name', by[0]);
+    git(work, 'config', 'user.email', by[1]);
+    git(work, 'commit', '-q', '--allow-empty', '-s', '-m', `remediation\n\n${line(unsigned)}`);
+    return !new RegExp(unsigned.slice(0, 8)).test(preflight(work).blocks.join('\n'));
+  };
+  const own = (sha) => `I, Ada <ada@example.com>, hereby add my Signed-off-by to this commit: ${sha}`;
+  const behalf = (sha) => `On behalf of Ada <ada@example.com>, I, Bob <bob@example.com>, hereby add my Signed-off-by to this commit: ${sha}`;
+  const both = 'allowRemediationCommits:\n  individual: true\n  thirdParty: true\n';
+
+  assert.equal(scenario({ yaml: both, line: own }), true, 'baseline: allowed, own statement');
+  assert.equal(scenario({ yaml: 'allowRemediationCommits:\n  individual: false\n  thirdParty: false\n', line: own }), false, 'switched off');
+  assert.equal(scenario({ yaml: 'allowRemediationCommits: false\n', line: own }), false, 'switched off inline');
+  assert.equal(scenario({ yaml: both, line: own, by: ['Bob', 'bob@example.com'] }), false, 'Bob signing Ada\'s statement himself');
+  assert.equal(scenario({ yaml: 'allowRemediationCommits:\n  individual: true\n  thirdParty: false\n', line: behalf, by: ['Bob', 'bob@example.com'] }), false, 'third party switched off');
+  assert.equal(scenario({ yaml: both, line: behalf, by: ['Bob', 'bob@example.com'] }), true, 'third party allowed');
+});

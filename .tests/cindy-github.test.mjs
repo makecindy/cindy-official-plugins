@@ -922,6 +922,28 @@ test('marking a draft ready keeps an unconfirmed write uncertain instead of repo
   assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
 });
 
+test('pr_card reads every page of review threads, and reports unknown instead of zero when it cannot', async () => {
+  const thread = (isResolved) => ({ isResolved });
+  const pr = (threads, pageInfo) => ({ number: 7, title: 'Big', url: 'https://github.com/octo/repo/pull/7', state: 'OPEN', isDraft: false,
+    merged: false, mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { pageInfo, nodes: threads } });
+  const seenAfter = [];
+  const github = (failSecondPage) => (request) => {
+    const { variables } = JSON.parse(request.body);
+    seenAfter.push(variables.after ?? null);
+    if (!variables.after) return jsonResponse({ data: { repository: { pullRequest: pr(Array.from({ length: 100 }, () => thread(true)), { hasNextPage: true, endCursor: 'c1' }) } } });
+    if (failSecondPage) return { ok: false, status: 502, body: '', headers: {} };
+    return jsonResponse({ data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [thread(false), thread(false), thread(true)] } } } } });
+  };
+  const ok = createPrRuntime({ github: github(false) });
+  const opened = await ok.tool({ repo: 'octo/repo', pr: '7', following: true });
+  assert.deepEqual(seenAfter, [null, 'c1']);
+  assert.ok(visibleText(ok.lastCard(opened.reply.result.card_id).html).join('\n').includes(fill(zhCopy.prThreadsOpen, { count: 2 })), 'the two unresolved threads on page two are counted');
+
+  const broken = createPrRuntime({ github: github(true) });
+  const failed = await broken.tool({ repo: 'octo/repo', pr: '7' });
+  assert.equal(failed.reply.ok, false, 'no card with a made-up zero');
+});
+
 test('a click already handed to the agent never goes back to a card with buttons when the save fails', async () => {
   const options = {};
   const runtime = createPrRuntime(options);

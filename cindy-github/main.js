@@ -144,6 +144,7 @@ var MESSAGES = {
     prReadyFailed: '没能转为正式 PR：{detail}',
     prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
     prSaveFailed: '卡片状态没能保存，请稍后重试',
+    prThreadsTruncated: '评审线程太多，未能读完，无法确认未解决数量',
     prHandedOffSaveFailed: '已交给 Agent，但卡片状态没能保存。请先看对话，不要重复点',
     prStop: '停止',
     prStopping: '正在停止跟进',
@@ -267,6 +268,7 @@ var MESSAGES = {
     prReadyFailed: 'Could not mark it ready for review: {detail}',
     prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
     prSaveFailed: 'Could not save the card state. Try again in a moment.',
+    prThreadsTruncated: 'Too many review threads to read them all, so the unresolved count is unknown',
     prHandedOffSaveFailed: 'Handed to the agent, but the card state could not be saved. Check the conversation and do not click again.',
     prStop: 'Stop',
     prStopping: 'Stopping',
@@ -390,6 +392,7 @@ var MESSAGES = {
     prReadyFailed: '正式な PR にできませんでした：{detail}',
     prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
     prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
+    prThreadsTruncated: 'レビュースレッドが多すぎて読み切れず、未解決の数を確認できません',
     prHandedOffSaveFailed: 'エージェントに渡しましたが、カードの状態を保存できませんでした。会話を確認し、もう一度押さないでください',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
@@ -513,6 +516,7 @@ var MESSAGES = {
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
     prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
     prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prThreadsTruncated: '리뷰 스레드가 너무 많아 모두 읽지 못했고 미해결 수를 확인할 수 없습니다',
     prHandedOffSaveFailed: '에이전트에게 전달했지만 카드 상태를 저장하지 못했습니다. 대화를 확인하고 다시 누르지 마세요',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
@@ -2609,7 +2613,13 @@ async function savePrFollowModel(settings, route) {
 var PR_STATUS_QUERY =
   'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
   'number title url state isDraft merged mergeStateStatus reviewDecision baseRefName headRefName ' +
-  'commits(last:1){nodes{commit{statusCheckRollup{state}}}} reviewThreads(first:100){nodes{isResolved}}}}}';
+  'commits(last:1){nodes{commit{statusCheckRollup{state}}}} reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}';
+
+/** Later pages of a PR's review threads (the status query reads the first 100). */
+var PR_THREADS_QUERY =
+  'query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){' +
+  'reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}';
+var PR_THREAD_PAGES_MAX = 20;
 
 async function fetchPrStatus(repo, number, callId) {
   var slash = repo.indexOf('/');
@@ -2619,7 +2629,19 @@ async function fetchPrStatus(repo, number, callId) {
   if (!pr) return { err: t('status404') };
   var last = pr.commits && pr.commits.nodes && pr.commits.nodes[0];
   var rollup = last && last.commit && last.commit.statusCheckRollup;
-  var threads = (pr.reviewThreads && pr.reviewThreads.nodes) || [];
+  var threads = ((pr.reviewThreads && pr.reviewThreads.nodes) || []).slice();
+  // More than 100 threads: read the rest, so unresolved ones on later pages are not counted as none.
+  var page = pr.reviewThreads && pr.reviewThreads.pageInfo;
+  for (var pages = 1; page && page.hasNextPage && page.endCursor && pages < PR_THREAD_PAGES_MAX; pages++) {
+    var more = await gql(PR_THREADS_QUERY, { owner: repo.slice(0, slash), name: repo.slice(slash + 1), number: number, after: page.endCursor }, callId);
+    // A page that cannot be read leaves the count unknown, so the whole status is an error rather than a green zero.
+    if (more.err) return { err: more.err };
+    var next = more.data.repository && more.data.repository.pullRequest && more.data.repository.pullRequest.reviewThreads;
+    if (!next) return { err: t('status404') };
+    threads = threads.concat(next.nodes || []);
+    page = next.pageInfo;
+  }
+  if (page && page.hasNextPage) return { err: t('prThreadsTruncated') };
   return {
     pr: {
       number: pr.number,

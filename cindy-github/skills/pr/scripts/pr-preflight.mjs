@@ -70,21 +70,47 @@ export function findTemplate(root) {
 
 const REMEDIATION_LINE = /^(?:On behalf of [^<\n]*<([^>\n]+)>,\s*)?I,\s*[^<\n]*<([^>\n]+)>,\s*hereby add my Signed-off-by to this commit:\s*([0-9a-f]{40})\s*$/gim;
 
+/** Which remediation kinds `.github/dco.yml` turns on (block form: `individual:` / `thirdParty:` set to true). */
+export function remediationPolicy(config) {
+  const lines = String(config).split(/\r?\n/);
+  const at = lines.findIndex((line) => /^allowRemediationCommits\s*:/.test(line));
+  const policy = { individual: false, thirdParty: false };
+  if (at < 0) return policy;
+  for (const line of lines.slice(at + 1)) {
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (!/^\s+/.test(line)) break;
+    const flag = /^\s+(individual|thirdParty)\s*:\s*(true|false)\b/.exec(line);
+    if (flag) policy[flag[1]] = flag[2] === 'true';
+  }
+  return policy;
+}
+
 /**
- * Commits an allowed remediation commit signs off, as a set of `sha|author email`. Only when the repository's
- * DCO configuration allows them; the remediation commit must carry its own sign-off, and the sha it
- * names is treated as signed only for the author the line names (the DCO app's rule).
+ * Commits an allowed remediation commit signs off, as a set of `sha|original author email`. Follows the DCO
+ * app's rules: the repository must allow that kind; the remediation commit carries its own sign-off by its
+ * author, who is the person the line names; an individual remediation signs the person's own commit, a
+ * third-party one names the original author after "On behalf of".
  */
 function remediatedCommits(root, base) {
   let config = '';
   try { config = fs.readFileSync(path.join(root, '.github', 'dco.yml'), 'utf8'); } catch { return new Set(); }
-  if (!/^\s*allowRemediationCommits\s*:/m.test(config)) return new Set();
-  const log = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%B%x01']);
+  const policy = remediationPolicy(config);
   const signed = new Set();
+  if (!policy.individual && !policy.thirdParty) return signed;
+  const log = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%ae%x00%B%x01']);
   if (!log.ok) return signed;
-  for (const body of log.out.split('\x01')) {
-    if (!/^Signed-off-by:\s.*<[^>]+>/im.test(body)) continue;
-    for (const match of body.matchAll(REMEDIATION_LINE)) signed.add(`${match[3].toLowerCase()}|${(match[1] ?? match[2]).toLowerCase()}`);
+  for (const record of log.out.split('\x01')) {
+    const [rawAuthor, body = ''] = record.trim().split('\x00');
+    const author = String(rawAuthor ?? '').toLowerCase();
+    for (const match of body.matchAll(REMEDIATION_LINE)) {
+      const onBehalf = match[1]?.toLowerCase();
+      const declarer = match[2].toLowerCase();
+      // The person making the statement is the remediation commit's author, and signed it off.
+      const signedOff = body.split('\n').some((line) => /^signed-off-by:/i.test(line) && line.toLowerCase().includes(`<${declarer}>`));
+      if (!author || declarer !== author || !signedOff) continue;
+      if (onBehalf ? !policy.thirdParty : !policy.individual) continue;
+      signed.add(`${match[3].toLowerCase()}|${onBehalf ?? declarer}`);
+    }
   }
   return signed;
 }
