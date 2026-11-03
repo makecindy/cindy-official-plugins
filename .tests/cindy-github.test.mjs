@@ -1023,6 +1023,24 @@ test('with auto-follow, a lost save of the follow state sends nothing, and a los
   assert.equal(sentOnce.agentRuns.length, 1, 'the record says following is starting, so the same request is not sent again');
 });
 
+test('a clearly refused follow handoff is written back even if one save fails, so the card is not stuck on starting', async () => {
+  let draft = true, writes = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  // Writes: 1 card, 2 'ready', 3 'follow', 4 the write-back after the refusal (fails once), 5 its retry.
+  const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } }, agentRun: () => ({ ok: false, errorCode: 'TOKEN_EXPIRED' }), failWrites: () => ++writes === 4 });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const record = JSON.parse(runtime.files.get(`pr-cards/${cardId}.json`));
+  assert.equal(record.pending, null);
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:follow"/);
+});
+
 test('after an uncertain mark-ready the button stays away until the PR has been read again', async () => {
   let reads = 0;
   const github = (request) => {

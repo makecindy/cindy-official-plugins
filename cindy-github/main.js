@@ -2494,6 +2494,14 @@ async function savePrCard(card) {
   return Boolean(r && r.ok);
 }
 
+/** The record must stop saying "following is starting" once the handoff clearly failed: try a few times. */
+async function savePrCardRetry(card) {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (await savePrCard(card)) return true;
+  }
+  return false;
+}
+
 async function prunePrCards() {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
@@ -3352,7 +3360,11 @@ async function markPrReadyInner(card, settings, msg, progress) {
       var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
       // An unclear result may still have been delivered: treat it as handed off, never as "not sent".
       progress.handedOff = handoff.ok || handoff.unknown === true;
-      if (!progress.handedOff) card.pending = null;
+      if (!progress.handedOff) {
+        // A clear refusal: the saved 'follow' is wrong now, so write it back before anything else can fail.
+        card.pending = null;
+        await savePrCardRetry(card);
+      }
       if (handoff.unknown) card.note = t('prHandoffUnknown');
       else if (!handoff.ok) card.note = t('prHandoffFailed');
     }
