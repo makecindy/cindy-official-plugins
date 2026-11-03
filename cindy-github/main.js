@@ -682,7 +682,12 @@ async function gql(query, variables, callId) {
     // errors 加上 data 是 GraphQL 允许的部分成功:data 里有内容时写操作可能已执行,不能当作确定拒绝。
     var hasData = d.data !== null && typeof d.data === 'object' &&
       Object.keys(d.data).some(function (k) { return d.data[k] !== null; });
-    var failure = { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }), rejected: !hasData };
+    // Without data it is still not proof the write did not happen: a resolver can fail after the change was
+    // made. Only errors GitHub raises before running a mutation (access, missing object, invalid input) count.
+    var beforeRun = d.errors.every(function (e) {
+      return e && typeof e === 'object' && /^(FORBIDDEN|NOT_FOUND|UNPROCESSABLE|INSUFFICIENT_SCOPES|VALIDATION|BAD_USER_INPUT|UNAUTHENTICATED)$/.test(String(e.type || (e.extensions && e.extensions.code) || ''));
+    });
+    var failure = { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }), rejected: !hasData && beforeRun };
     if (hasData) failure.data = d.data;
     return failure;
   }

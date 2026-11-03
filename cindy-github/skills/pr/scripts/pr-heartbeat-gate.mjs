@@ -441,8 +441,14 @@ export function parseTarget(spec, repoArg) {
   throw new Error(`cannot parse PR target: ${spec}`);
 }
 
+/**
+ * One state file per PR. `owner/repo` becomes `owner__repo` as before, which is unambiguous unless a name itself
+ * contains `__` (acme__tools/app and acme/tools__app would share a file). Those names use a `~`-prefixed
+ * percent-encoded form instead: GitHub names cannot contain `~`, so the two forms never meet.
+ */
 export function stateFilePath(stateDir, repo, number) {
-  return path.join(stateDir, `${repo.replace(/\//g, '__')}-${number}.json`);
+  const plain = !repo.includes('__');
+  return path.join(stateDir, `${plain ? repo.replace(/\//g, '__') : `~${encodeURIComponent(repo)}`}-${number}.json`);
 }
 
 function readState(file) {

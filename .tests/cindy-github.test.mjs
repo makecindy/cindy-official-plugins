@@ -926,8 +926,11 @@ test('marking a draft ready keeps an unconfirmed write uncertain instead of repo
   assert.doesNotMatch(partialReady, new RegExp(zhCopy.prReadyUnknown));
 
   // GitHub answered with an error: the write did not happen, so failing is accurate.
-  const rejected = await noteAfterClick(scenario(() => jsonResponse({ errors: [{ message: 'not allowed' }] }), true));
+  const rejected = await noteAfterClick(scenario(() => jsonResponse({ data: null, errors: [{ type: 'FORBIDDEN', message: 'not allowed' }] }), true));
   assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  // An error with no data and no pre-run type (a resolver failing after the change) is not proof it did not run.
+  const afterRun = await noteAfterClick(scenario(() => jsonResponse({ data: null, errors: [{ message: 'Something went wrong' }] }), true));
+  assert.match(afterRun, new RegExp(zhCopy.prReadyUnknown));
 });
 
 test('pr_card reads every page of review threads, and reports unknown instead of zero when it cannot', async () => {
