@@ -142,3 +142,9 @@ test('a fork checkout syncs the base branch from the remote of the PR base repos
   });
   assert.ok(commands.some(entry => entry.argv.join(' ').endsWith('pull --ff-only upstream main')));
 });
+
+test('only the fetch URL of a remote decides which repository it points at', () => {
+  const remotes = 'origin\thttps://github.com/me/app.git (fetch)\norigin\thttps://github.com/acme/app.git (push)\n';
+  assert.equal(remoteNameForRepo(remotes, 'acme/app'), 'origin');
+  assert.deepEqual(githubRepoNamesOfRemotes(remotes), ['me/app', 'acme/app']);
+});

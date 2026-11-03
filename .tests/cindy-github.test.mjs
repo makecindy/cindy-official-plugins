@@ -988,6 +988,25 @@ test('a click already handed to the agent never goes back to a card with buttons
   assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
 });
 
+test('an exception after the mark-ready write went out is shown as uncertain, not swallowed', async () => {
+  let calls = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: true } } } });
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    calls += 1;
+    if (calls > 1) throw new Error('connection reset');
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: true, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  const runtime = createPrRuntime({ github });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const text = visibleText(runtime.lastCard(cardId).html).join('\n');
+  assert.ok(text.includes(zhCopy.prReadyUnknown));
+  assert.ok(!text.includes(zhCopy.prReadyFailed.split('{')[0]));
+});
+
 test('pr_card does not invent a state it could not read, and does not show a card it could not save', async () => {
   // Status unreadable and no earlier snapshot: no card, so no wrong buttons.
   const unreadable = createPrRuntime({ github: () => ({ ok: false, status: 502, body: '', headers: {} }) });

@@ -157,7 +157,8 @@ export function githubRepoNamesOfRemotes(remoteVerbose) {
 export function remoteNameForRepo(remoteVerbose, repoName) {
   const wanted = String(repoName ?? '').toLowerCase();
   for (const line of String(remoteVerbose).split('\n')) {
-    const m = /^(\S+)\s+(\S+)/.exec(line);
+    // `git remote -v` lists fetch and push URLs; the fetch one is where branches are read from.
+    const m = /^(\S+)\s+(\S+)\s+\(fetch\)/.exec(line);
     if (!m) continue;
     const repo = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(m[2])?.[1];
     if (repo && repo.toLowerCase() === wanted) return m[1];

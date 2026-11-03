@@ -3274,6 +3274,21 @@ async function handOffPr(card, action, settings, msg) {
  * 写操作失败时重读一次状态,以 GitHub 上的实际结果为准(请求可能已生效、只是回包丢了)。
  */
 async function markPrReady(card, settings, msg) {
+  var progress = { sent: false, rejected: false };
+  try {
+    await markPrReadyInner(card, settings, msg, progress);
+  } catch (e) {
+    // An exception after the write went out (network, re-read, save) says nothing about whether GitHub did it.
+    card.pending = null;
+    card.note = progress.sent && !progress.rejected
+      ? t('prReadyUnknown')
+      : t('prReadyFailed', { detail: String(e && e.message ? e.message : e).slice(0, 160) });
+    try { await savePrCard(card); } catch (e2) { /* the card is redrawn below either way */ }
+    await sendPrCard(card, settings, null);
+  }
+}
+
+async function markPrReadyInner(card, settings, msg, progress) {
   card.pending = 'ready';
   // 记不下「进行中」就不发外部写操作:之后无从核对结果。
   if (!(await savePrCard(card))) {
@@ -3294,9 +3309,11 @@ async function markPrReady(card, settings, msg) {
   var sent = false, confirmedReady = false, rejected = false;
   if (!err) {
     sent = true;
+    progress.sent = true;
     var mut = await gql('mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}', { id: id });
     err = mut.err || null;
     rejected = mut.rejected === true;
+    progress.rejected = rejected;
     var done = mut.data && mut.data.markPullRequestReadyForReview && mut.data.markPullRequestReadyForReview.pullRequest;
     confirmedReady = Boolean(done) && done.isDraft === false;
   }
