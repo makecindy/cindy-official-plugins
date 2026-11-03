@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.121",
+  "id": "agentcompass",
+  "name": "AgentCompass",
+  "version": "0.2.0",
+  "author": "akiiwa-games",
+  "kind": "chip",
+  "description": "Route work with AgentCompass and collect exact Cindy task results. Requires the experimental public tasks API.",
+  "whenToUse": "Delegate independent work through AgentCompass from a Cindy Claude, Codex or Pi session.",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "locales": {"en": "locales/en.json", "zh-CN": "locales/zh-CN.json", "ja": "locales/ja.json", "ko": "locales/ko.json"},
+  "sessionContext": true,
+  "agent": { "tasks": true },
+  "node": { "entry": "worker.cjs", "protocol": "json-rpc-stdio", "lifecycle": "on-demand" },
+  "tools": [
+    {"name":"roll","description":"Route the full task unchanged and start one exact Cindy catalog route. Requires experimental tasks capabilities and a matching configured plugin task directory. Returns an operation and a concrete status-tool call; no automatic callback. Never supply session_context yourself.","parameters":{"type":"object","properties":{"task":{"type":"string","description":"The full assignment, unchanged."}},"required":["task"],"additionalProperties":false}},
+    {"name":"status","description":"Collect the same operation. Reads durable host runs and paged messages; saves full output on disk and returns the exact final message summary. Unknown delivery is observed, never resent.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}},
+    {"name":"stop","description":"Cancel this plugin's run through Cindy's official scoped cancel API. Stopping or reconciling does not guarantee termination; collect status until terminal.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}},
+    {"name":"cleanup","description":"Archive this plugin's inactive task when the host supports it; otherwise return its confirmed task ID for manual archiving in Cindy. Refuses active runs. Does not delete history or signal arbitrary processes.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}}
+  ]
+}

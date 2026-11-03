@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "AgentCompass で作業をルーティングし、Cindy タスクの正確な結果を回収します。実験的な公開 tasks API が必要です。",
+  "whenToUse": "Cindy の Claude・Codex・Pi セッションから、AgentCompass を通じて独立した作業を委任するときに使います。",
+  "tools": {
+    "roll": {"description": "タスク全文をそのままルーティングし、完全に一致する Cindy カタログのルートを 1 つ開始します。実験的な tasks 機能と、一致するよう設定されたプラグインのタスクディレクトリが必要です。操作 ID と具体的な status ツール呼び出しを返します。自動コールバックはありません。session_context を自分で渡さないでください。", "parameters": {"/properties/task": {"description": "変更していない課題の全文。"}}},
+    "status": {"description": "同じ操作を回収します。ホストに永続化された実行とページ単位のメッセージを読み、全出力をディスクに保存して、正確な最終メッセージの要約を返します。配信が不明な場合は観察のみで、再送しません。"},
+    "stop": {"description": "Cindy 公式のスコープ付きキャンセル API で、このプラグインの実行をキャンセルします。stopping や reconciling は終了を保証しません。終了状態になるまで status で回収してください。"},
+    "cleanup": {"description": "ホストが対応していれば、このプラグインの非アクティブなタスクをアーカイブします。対応していなければ、Cindy で手動アーカイブするための確認済みタスク ID を返します。実行中のタスクは拒否します。履歴の削除や任意プロセスへのシグナル送信は行いません。"}
+  }
+}

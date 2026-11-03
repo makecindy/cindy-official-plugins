@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "Route work with AgentCompass and collect exact Cindy task results. Requires the experimental public tasks API.",
+  "whenToUse": "Delegate independent work through AgentCompass from a Cindy Claude, Codex or Pi session.",
+  "tools": {
+    "roll": {"description": "Route the full task unchanged and start one exact Cindy catalog route. Requires experimental tasks capabilities and a matching configured plugin task directory. Returns an operation and a concrete status-tool call; no automatic callback. Never supply session_context yourself.", "parameters": {"/properties/task": {"description": "The full assignment, unchanged."}}},
+    "status": {"description": "Collect the same operation. Reads durable host runs and paged messages; saves full output on disk and returns the exact final message summary. Unknown delivery is observed, never resent."},
+    "stop": {"description": "Cancel this plugin's run through Cindy's official scoped cancel API. Stopping or reconciling does not guarantee termination; collect status until terminal."},
+    "cleanup": {"description": "Archive this plugin's inactive task when the host supports it; otherwise return its confirmed task ID for manual archiving in Cindy. Refuses active runs. Does not delete history or signal arbitrary processes."}
+  }
+}

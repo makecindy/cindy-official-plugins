@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "用 AgentCompass 路由工作，并收取 Cindy 任务的确切结果。需要实验性的公开 tasks API。",
+  "whenToUse": "在 Cindy 的 Claude、Codex 或 Pi 会话中，通过 AgentCompass 委派独立工作。",
+  "tools": {
+    "roll": {"description": "原样路由完整任务，并启动一条完全匹配的 Cindy 目录路由。需要实验性 tasks 能力，以及已配置且匹配的插件任务目录。返回一个操作 ID 和具体的 status 工具调用；不会自动回调。不要自己提供 session_context。", "parameters": {"/properties/task": {"description": "完整任务原文，不做改动。"}}},
+    "status": {"description": "收取同一个操作。读取宿主持久化的运行记录和分页消息；完整输出保存到磁盘，并返回确切最终消息的摘要。投递结果未知时只观察，绝不重发。"},
+    "stop": {"description": "通过 Cindy 官方的作用域取消 API 取消本插件的运行。stopping 或 reconciling 不代表已终止；请继续调用 status 直到终态。"},
+    "cleanup": {"description": "宿主支持时归档本插件的非活动任务；否则返回已确认的任务 ID，供在 Cindy 中手动归档。拒绝处理仍在运行的任务。不删除历史，也不向任意进程发信号。"}
+  }
+}
