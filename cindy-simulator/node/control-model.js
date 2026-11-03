@@ -390,11 +390,14 @@
   }
   function handheld(device) { return ['iOS', 'android'].includes(platform(device)); }
 
+  const CORNER = {iphone: 0.13, ipad: 0.035, tv: 0, vision: 0};
   /** Corner radius of the live screen, in CSS px, for a portrait screen box of `width` px. */
   function screenRadius(device, width) {
     if (!width || width <= 0) return 0;
-    return Math.round(width * ({iphone: 0.13, ipad: 0.035, tv: 0, vision: 0}[family(device)]));
+    return Math.round(width * CORNER[family(device)]);
   }
+  /** The same corner as a share of the short (portrait) side; the emulator's Android screen is square-cornered. */
+  function screenCorner(device) { return platform(device) === 'android' ? 0 : CORNER[family(device)]; }
 
   /** Status dot + label from a status response and page flags. */
   function presence(s, flags = {}) {
@@ -503,7 +506,7 @@
   /** The percentage the zoom state shows, given the fitted percentage. */
   const zoomPct = (zoom, fitPct) => Math.round(zoom?.mode === 'pct' ? zoom.pct : (fitPct > 0 ? fitPct : 100));
 
-  const api = { STRINGS, strings, memoryOptions, memoryPicker, memoryHelp, memoryLabel, memoryStatus, showMemoryDetails, restartMemoryMode, memoryNotice, showMemoryNotice, resourceValue, resourceStamp, createResourceSummary, controlHelp, runtimeLabel, family, platform, handheld, screenRadius, presence, overlay, idleLeft, clock, deviceRows, runtimesFor, defaultChoice, ZOOM_STEPS, zoomStep, zoomFactor, zoomPct };
+  const api = { STRINGS, strings, memoryOptions, memoryPicker, memoryHelp, memoryLabel, memoryStatus, showMemoryDetails, restartMemoryMode, memoryNotice, showMemoryNotice, resourceValue, resourceStamp, createResourceSummary, controlHelp, runtimeLabel, family, platform, handheld, screenRadius, screenCorner, presence, overlay, idleLeft, clock, deviceRows, runtimesFor, defaultChoice, ZOOM_STEPS, zoomStep, zoomFactor, zoomPct };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CindySimModel = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

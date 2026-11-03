@@ -139,6 +139,14 @@ iPhone、iPad、Apple TV 和 Vision Pro 共用主屏幕、截图、查看缩放�
 - **安卓**：优先用电脑 GPU 渲染。无窗口模式下 `auto` 会选中 CPU 软件渲染，滑动时占用约 11 个核。GPU 模式启动失败时自动改用软件渲染，`devices` 返回 `renderer: software`，管理页也会标注。Apple Silicon Mac 上，模拟器把原生分辨率像素写入插件私有的共享文件，由 `native/android-encoder` 用 VideoToolbox 编成 H.264，像素不经 gRPC 传输，也不再每帧调用 adb。编码助手异常时自动重连，一分钟内连续两次异常则暂时改用 PNG。Intel Mac、Windows、Linux 以及不支持 WebCodecs 的页面使用不限速 PNG。
 - Agent 的截图、录帧和 OCR 不受影响，仍然读取完整的单帧。
 
+## 手机上查看（实时屏幕）
+
+`ghost.json` 声明了 `"liveScreen": true`。支持该能力的 Cindy 版本可以在用户手机上全屏显示正在运行的设备；旧版本不使用这个字段，行为不变。`liveScreen.list`、`open`、`input`、`control`、`close` 由 Cindy 主进程直接调用 Worker，不是 Agent 工具，`main.js` 也不会转发。
+
+- **画面**：`open` 返回 `http://127.0.0.1:<端口>/live-screen/<令牌>`，令牌为 32 字节随机数。地址只接受一次 GET；30 秒内未取用、画面流结束或调用 `close` 后失效。同一设备再次 `open` 会结束之前的画面流。Worker 转发 Baguette 的 H.264 分帧（安卓转发共用编码助手的分帧，编码助手不可用时用 PNG），另发一条屏幕消息说明画面尺寸和需要转动的角度。接收端读得慢时丢弃画面，从关键帧恢复。
+- **操作**：iPhone 与 iPad 最多两指，经画面连接发送，坐标从摆正后的画面换算回设备原生竖屏，包括底部主屏指示条的边缘手势。安卓最多十指，经 `sendTouch` 发送。按键、文字（粘贴）和键盘沿用现有受控操作。Apple TV 与 Vision Pro 可以看画面并使用主屏幕键（Apple TV 另有菜单与播放/暂停）；遥控器和空间操作暂不支持在手机上使用。
+- **使用状态**：手机上打开的画面算作有人观看，闲置关机会等待。`control` 用于保活，一分钟没有调用就关闭该画面。关闭运行开关会关闭所有手机画面，重新打开前 `open`、`input`、`control` 返回 `DISABLED`。`list` 只读取设备，不启动设备，也不算作使用。只列出模拟器，iPhone/iPad 真机暂不在手机上提供。正在显示的设备被关机后，手机画面会在几秒内结束。
+
 ## Apple TV 与 Vision Pro
 
 可在管理页或任务页新建设备，选择已安装的 tvOS 或 visionOS 运行时（后者标识为

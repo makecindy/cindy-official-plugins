@@ -141,6 +141,14 @@ Every device streams H.264 and sends nothing while the screen is still:
 - **Android**: renders on the Mac's GPU. Headless `auto` selects CPU software rendering, which used about eleven cores while scrolling. If the GPU mode fails to start, the emulator restarts with software rendering, `devices` reports `renderer: software` and the device list shows it. On Apple Silicon the emulator writes native-resolution pixels to a private shared file and `native/android-encoder` encodes them with VideoToolbox; gRPC carries no pixels and no adb command runs per frame. A failed encoder reconnects; two failures within a minute switch new streams to PNG for a while. Intel Macs, Windows, Linux and pages without WebCodecs use unthrottled PNG.
 - Agent screenshots, captures and OCR are unchanged and still read complete single frames.
 
+## Phone view (Live Screen)
+
+`ghost.json` declares `"liveScreen": true`. A Cindy version that supports it shows a running device full screen on the user's phone; older versions keep the field unused and nothing changes. Cindy's main process calls the worker's `liveScreen.list`, `open`, `input`, `control` and `close` methods itself. They are not Agent tools, and `main.js` never forwards them.
+
+- **Frames**: `open` returns `http://127.0.0.1:<port>/live-screen/<token>` with a 32-byte random token. The URL accepts one GET and expires after 30 seconds unfetched, when the stream ends, or on `close`. A new `open` for the same device ends the previous stream. The worker forwards Baguette's H.264 envelopes (Android: the shared encoder's; PNG when it is unavailable), plus a screen message with the picture size and how far to turn it. A slow reader drops frames and resumes at a keyframe.
+- **Input**: iPhone and iPad take up to two fingers on the stream socket, mapped from the upright picture back to the native portrait screen, including the Home-indicator edge. Android takes up to ten through `sendTouch`. Buttons, text (paste) and keys use the existing guarded operations. Apple TV and Vision Pro show the picture with Home (TV also Menu and Play/Pause); their remote and spatial input are not on the phone yet.
+- **Use**: an open phone screen counts as a viewer, so the idle shutdown waits. `control` is the keepalive; a screen without one for a minute closes. Turning simulators off closes every phone screen, and `open`, `input` and `control` return `DISABLED` until it is back on. `list` reads devices only: it starts nothing and does not count as use. Only simulators are listed; physical iPhone/iPad devices are not offered on the phone yet. A device shut down while shown ends its phone screen within seconds.
+
 ## Apple TV and Vision Pro
 
 Create either device in the management view or task tab using an installed tvOS

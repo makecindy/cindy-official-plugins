@@ -139,13 +139,23 @@ function softKeyboardBack(device){
   timer.unref?.();softTimers.set(device.udid,timer);
 }
 async function nativeKey(device,code,modifiers=[],deadline) {
+ return nativeKeys(device,code?[{code,modifiers}]:[],deadline);
+}
+// Keys in order from one helper process: each launch costs about 0.3 s, so a run of keys shares one.
+async function nativeKeys(device,keys,deadline) {
  await trackpadImpl?.cancel(device.udid);
  await spatialImpl?.cancel(device.udid);
- const [key,mask]=code?require('./keys.cjs').chord(code,modifiers):[0,0];
+ const {chord}=require('./keys.cjs');
+ const chords=keys.map(k=>chord(k.code,k.modifiers||[]));
+ const [key,mask]=chords.length===1?chords[0]:[0,0];
  const dev=process.env?.DEVELOPER_DIR || (await run('/usr/bin/xcode-select',['-p'],commandBudget(5000,deadline))).stdout;
- if(platform(device)==='tvOS')return run(path.join(__dirname,'../native/remote'),[DEVICE_SET,device.udid,dev,'key',String(key),String(mask),'0'],{mutation:true,...commandBudget(15000,deadline)});
+ if(platform(device)==='tvOS'){
+  if(chords.length>1)throw new Failure('INVALID_ARGUMENT','Apple TV takes one key per call');
+  return run(path.join(__dirname,'../native/remote'),[DEVICE_SET,device.udid,dev,'key',String(key),String(mask),'0'],{mutation:true,...commandBudget(15000,deadline)});
+ }
  const options={mutation:true,...commandBudget(15000,deadline)};
- try { return await run(path.join(__dirname,'../native/keyboard'),[DEVICE_SET,device.udid,dev,String(key),String(mask)],options); }
+ const args=chords.length>1?['keys',JSON.stringify(chords)]:[String(key),String(mask)];
+ try { return await run(path.join(__dirname,'../native/keyboard'),[DEVICE_SET,device.udid,dev,...args],options); }
  finally { softKeyboardBack(device); }
 }
 async function clipboardAction(p) {
@@ -157,6 +167,7 @@ async function clipboardAction(p) {
   const device=await target(p);
   if(p.action==='release')return await nativeKey(device,null,[],p._deadline);
   if(p.action==='key')return await nativeKey(device,p.code,p.modifiers,p._deadline);
+  if(p.action==='keys')return await nativeKeys(device,p.keys,p._deadline);
   if(p.action==='paste') {
     if(platform(device)==='tvOS')throw new Failure('UNSUPPORTED_INPUT','tvOS has no simulator pasteboard. Use type_text method=type for up to 300 US-keyboard characters, or keys.');
     const text=string(p.text,'text',8000);
@@ -440,7 +451,8 @@ async function appleDispatch(method,p={},deadline=Date.now()+110000) {
       else if(used==='touch'){await inputAction({action:'paste',text,touch:true});typed=await agent().pasteByTouch(device,p._deadline);}
       else await inputAction({action:'paste',text});
     }
-    for(const key of keys)await inputAction({action:'key',code:key.code,modifiers:key.modifiers});
+    if(keys.length>1&&!tv)await inputAction({action:'keys',keys});
+    else for(const key of keys)await inputAction({action:'key',code:key.code,modifiers:key.modifiers});
     agentImpl?.forgetTree(device.udid);
     const keyEvents=keys.length||p.clear===true||(used&&used!=='touch');
     if(keyEvents)softKeyboardBack(device);
@@ -568,18 +580,24 @@ function reply(value){process.stdout.write(JSON.stringify(value)+'\n');}
 function shutdown(){ for(const child of children) child.kill('SIGKILL'); process.exit(0); }
 function startWorker() {
   if(appleHost)require('./viewer.cjs').reapOrphans(BINARY,DEVICE_SET);
-  // In use = a viewer window is open, or another process names a running device.
+  const tasks=require('./tasks.cjs').createTaskBindings(path.join(ROOT,'task-bindings.json'));
+  let runtime;
+  // Cindy's phone view of a device (not an Agent tool; see live-screen.cjs).
+  const live=require('./live-screen.cjs').createLiveScreen({devices:async()=>(await dispatch('devices')).devices,tasks,controls:()=>runtime,
+    appleBase:()=>require('./viewer.cjs').nativeBase(BINARY,DEVICE_SET,children,clipboardAction),android,appleHost});
+  require('./viewer.cjs').configureLive(()=>live.viewing()?1:0);
+  // In use = a viewer window or phone screen is open, or another process names a running device.
   const inUse=async()=>{
-    if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing())return true;
+    if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing()||live.viewing())return true;
     if(appsImpl?.installing()||android().installing())return true;
     const running=(await dispatch('devices')).devices.filter(d=>d.kind!=='physical'&&d.state!=='Shutdown').map(d=>d.udid);
     return process.platform==='win32'?false:(await require('./activity.cjs').externalUse(running)).length>0;
   };
-  const runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing()||physical().viewer.viewing()||!!physical().pending(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
+  runtime=require('./runtime.cjs').createRuntime({dispatch,settingsFile:path.join(ROOT,'runtime-settings.json'),inUse,viewing:()=>require('./viewer.cjs').viewing()||android().viewer.viewing()||android().installing()||live.viewing()||physical().viewer.viewing()||!!physical().pending(),forgetViewer:()=>{require('./viewer.cjs').forgetSession(DEVICE_SET);android().viewer.forget();},
     pendingOperation:udid=>physical().pending(udid)||android().pending(udid)||appsImpl?.pending(udid),
     pendingJob:udid=>android().runningFor(udid)||appsImpl?.runningFor(udid),
     viewerWanted:()=>require('./viewer.cjs').hasSession(DEVICE_SET)||android().viewer.wanted(),
-    tasks:require('./tasks.cjs').createTaskBindings(path.join(ROOT,'task-bindings.json')),
+    tasks,
     existingViewerUrl:async(udid,locale)=>physical().viewer.existing(udid,locale)||(await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale))});
   configureControls(runtime);
   android().configure(runtime);
@@ -590,7 +608,7 @@ function startWorker() {
   recycle.unref();
   let stopping=false;
   const stop=async()=>{
-    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);
+    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);live.stop();
     await trackpadImpl?.stop();
     await spatialImpl?.stop();
     // Host may force termination before this completes. User-facing stop
@@ -603,6 +621,12 @@ function startWorker() {
   input.on('line',async line=>{
     let request;try{request=JSON.parse(line);}catch{return reply({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Invalid JSON'}});}
     if(request.id===undefined)return;
+    // Cindy calls liveScreen.* itself; they bypass Agent routing and never renew use by listing.
+    if(typeof request.method==='string'&&request.method.startsWith('liveScreen.')){
+      try{reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await live.request(request.method,request.params)}});}
+      catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(Number.isInteger(e.completed)?{completed:e.completed}:{})}});}
+      return;
+    }
       try {reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await runtime.request(request.method,request.params)}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(e.busy?{busy:e.busy}:{})}});}
   });

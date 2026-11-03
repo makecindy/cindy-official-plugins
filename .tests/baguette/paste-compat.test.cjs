@@ -44,6 +44,16 @@ test('viewer key input restores the soft-keyboard record after the last chord; t
  await h.clipboard({udid,action:'paste',text:'hello',touch:true});assert.equal(timers.size,0);
 });
 
+test('a run of keys is typed in order by one keyboard helper, a single key keeps the plain form',async()=>{
+ const h=harness({runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-0'}),{chord}=require('../../cindy-simulator/node/keys.cjs');
+ await h.dispatch('type_text',{udid,keys:['a','b','shift+Tab']});
+ const runs=h.calls.filter(c=>c.file.endsWith('/native/keyboard'));
+ assert.equal(runs.length,1);
+ assert.deepEqual(Array.from(runs[0].args.slice(3)),['keys',JSON.stringify([chord('KeyA'),chord('KeyB'),chord('Tab',['shift'])])]);
+ h.calls.length=0;await h.dispatch('type_text',{udid,keys:['Enter']});
+ assert.deepEqual(Array.from(h.calls.filter(c=>c.file.endsWith('/native/keyboard'))[0].args.slice(3)),chord('Enter').map(String));
+});
+
 test('paste writes the private device set with simctl and keeps Unicode text out of command arguments',async()=>{
  // CoreDevice cannot see a private device set (devicectl: "device was not found"), so it is never tried.
  const h=harness();await h.dispatch('type_text',{udid,text:'你好 Duo 🥖',method:'paste'});
@@ -109,7 +119,8 @@ test('input tri-state follows completed steps, preserving busy and preflight rej
    other=vm.runInContext('clipboardAction',context)({udid,action:'key',code:'KeyA'});
    while(!keyboardCalls)await new Promise(resolve=>setImmediate(resolve));
   }
-  const params=mode==='after-clipboard'?{text:'new',method:'paste'}:{keys:['a','b']};
+  // `clear` is two key steps; a run of keys is one helper call, so it cannot fail between keys.
+  const params=mode==='after-clipboard'?{text:'new',method:'paste'}:mode==='after-key'?{clear:true}:{keys:['a','b']};
   await assert.rejects(context.module.exports.dispatch('type_text',{udid,...params}),e=>e.execution===(['busy','first-preflight','expired'].includes(mode)?'not_executed':'unknown'),mode);
   if(mode==='busy'){assert.equal(keyboardCalls,1);release();await other;}
   if(['first-preflight','expired'].includes(mode))assert.equal(keyboardCalls,0);

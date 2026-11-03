@@ -54,6 +54,11 @@ async function showViewer(url, udid, sessionId, locale) {
 
 cindy.onHostMessage(async function (msg) {
   if (msg.type !== 'tool-call') return;
+  // liveScreen.* belong to Cindy's phone view, never to the Agent.
+  if (String(msg.tool).startsWith('liveScreen.')) {
+    await cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:'UNKNOWN_TOOL',message:'Unknown tool; nothing was executed.'});
+    return;
+  }
   const started = Date.now();
   try {
     const locale = await hostLocale();

@@ -46,3 +46,4 @@ import './baguette/android-gestures.test.cjs';
 import './baguette/physical.test.cjs';
 import './baguette/physical-live.test.cjs';
 import './baguette/physical-agent-live.test.cjs';
+import './baguette/live-screen.test.cjs';

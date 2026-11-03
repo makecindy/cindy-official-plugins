@@ -927,7 +927,8 @@ test('capture shares one deadline across before/action/record/check/render and r
 test('all six capture actions inherit the outer deadline, including nested screenshots and partial key sequences',async()=>{
   for(const action of [{tool:'app_launch',args:{bundleId:'test.example.app',screenshot:true,_deadline:Infinity}},
     {tool:'tap',args:{x:10,y:10}},{tool:'gesture',args:{kind:'swipe',from:[10,10],to:[20,20]}},
-    {tool:'press',args:{button:'home'}},{tool:'open_url',args:{url:'https://example.test'}},{tool:'type_text',args:{keys:Array(40).fill('a')}}]){
+    {tool:'press',args:{button:'home'}},{tool:'open_url',args:{url:'https://example.test'}},{tool:'type_text',args:{clear:true,keys:['a']}}]){
+  // `clear` and a single key are separate key steps; a run of keys would be one helper call.
   const jpeg=Buffer.from([0xff,0xd8,1,2,0xff,0xd9]),commands=[];
   const f=agentFixture({frames:[jpeg],clockStep:0,onDelay:(ms,s)=>s.advance(ms),onCommand:(_file,_args,options,s)=>{
     const cost=15000;s.advance(Math.min(cost,options.timeout));if(cost>=options.timeout)throw new Failure('COMMAND_TIMEOUT','slow observation');

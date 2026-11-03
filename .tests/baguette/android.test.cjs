@@ -872,6 +872,34 @@ test('Android PNG stream is unthrottled, unbounded and never runs adb per frame'
   assert.equal(f.res.headers['Content-Type'],'application/octet-stream');
   abort.abort();await done;
 });
+test('Android PNG stream honours a Live Screen rate, holding the newest picture for its turn',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};
+  const sink={begin:()=>{},frame:(pose,payload)=>frames.push(pose.device)};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'png',sink,control}).catch(e=>e);
+  await until(()=>f.live());assert.equal(typeof control.fps,'function','a PNG stream installs the rate control');
+  control.fps(2);
+  for(let i=0;i<10;i++)f.push({format:{width:108,height:240,rotation:{rotation:i<9?0:2}},image:image()});
+  await until(()=>frames.length>=1);await new Promise(r=>setTimeout(r,100));
+  assert.deepEqual(frames,[0],'2 fps lets one of ten immediate pictures through at once');
+  await until(()=>frames.length>=2,1500);
+  assert.deepEqual(frames,[0,2],'the newest picture follows when its turn comes, so a still screen shows its last picture');
+  abort.abort();await done;
+});
+test('Android PNG stream applies a rate asked for before the stream was fetched',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};
+  // Like the Live Screen sink: begin applies the saved rate to the control.
+  const sink={begin:()=>control.fps?.(2),frame:()=>frames.push(1)};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'png',sink,control}).catch(e=>e);
+  await until(()=>f.live());
+  for(let i=0;i<10;i++)f.push({format:{width:108,height:240,rotation:{rotation:0}},image:image()});
+  await until(()=>frames.length>=1);await new Promise(r=>setTimeout(r,100));
+  assert.equal(frames.length,1,'the saved rate holds back the rest');
+  abort.abort();await done;
+});
 test('Android H.264 stream retries one crashed encoder and uses PNG after a second crash',async t=>{
   const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
   for(const attempt of [1,2]){
@@ -912,6 +940,25 @@ test('Android H.264 stream corrects a default rotation once the first failed pol
   encoder.reply(2);await until(()=>f.messages().length>=4);
   assert.deepEqual(f.messages().slice(0,2).map(m=>m[0]),[0,0],'frames before recovery carry the default');
   assert.deepEqual(f.messages().slice(-2).map(m=>[m[0],m[1],m[2]]),[[3,1,1],[3,1,2]]);
+  abort.abort();await done;
+});
+test('Android H.264 stream feeds a Live Screen sink and honours its rate and keyframe requests',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,encoder=fakeEncoder(),abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};let type=null;
+  const sink={begin:value=>{type=value;},frame:(pose,payload)=>frames.push([pose.width,pose.height,pose.device,payload[0]])};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'avcc',spawnEncoder:encoder.spawn,sink,control}).catch(e=>e);
+  await until(()=>f.live());assert.equal(type,'application/x-cindy-android-avcc');
+  control.fps(5);
+  f.push({format:{width:1080,height:2400,rotation:{rotation:0}}});
+  await until(()=>encoder.lines.length===2);encoder.reply(1,Buffer.from([1,0x64,0,0x33]));encoder.reply(2);
+  const at=Date.now();f.push({format:{width:1080,height:2400,rotation:{rotation:0}}});
+  await until(()=>encoder.lines.length===3,1000);assert.ok(Date.now()-at>=150,'5 fps spaces encodes about 200 ms apart');
+  assert.equal(encoder.lines[2],'frame 1080 2400 0');encoder.reply(3);
+  control.keyframe();await until(()=>encoder.lines.length===4,1000);assert.equal(encoder.lines[3],'frame 1080 2400 1');encoder.reply(2);
+  await until(()=>frames.length===5);
+  assert.deepEqual(frames,[[1080,2400,0,1],[1080,2400,0,2],[1080,2400,0,3],[1080,2400,0,1],[1080,2400,0,2]]);
+  assert.equal(f.messages().length,0,'the viewer framing is not written');
   abort.abort();await done;
 });
 test('Android H.264 stream re-sends a still frame as a keyframe when display rotation turns',async t=>{
