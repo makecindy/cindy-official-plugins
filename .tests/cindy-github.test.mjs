@@ -955,7 +955,7 @@ test('pr_card reads every page of review threads, and reports unknown instead of
   assert.equal(failed.reply.ok, false, 'no card with a made-up zero');
 });
 
-test('when the final save after marking ready fails, the card shows no action buttons that its record cannot honour', async () => {
+test('when the final save after marking ready fails, the card shows the real state and its next click works', async () => {
   const prBody = (draft) => ({ data: { repository: { pullRequest: {
     number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
     mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
@@ -966,13 +966,18 @@ test('when the final save after marking ready fails, the card shows no action bu
     if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
     return jsonResponse(prBody(draft));
   };
-  let writes = 0;
-  const runtime = createPrRuntime({ github, failWrites: () => ++writes >= 3 });
+  let writes = 0, healed = false;
+  const runtime = createPrRuntime({ github, failWrites: () => !healed && ++writes >= 3 });
   const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
   await runtime.click(cardId, 'pr:ready');
   const card = runtime.lastCard(cardId);
-  assert.doesNotMatch(card.html, /<button data-ghost-action="pr:(follow|stop|ready)"/);
+  // The PR is ready for review now, so the card offers following; the note says the record was not saved.
+  assert.match(card.html, /<button data-ghost-action="pr:follow"/);
   assert.ok(visibleText(card.html).includes(zhCopy.prSaveFailed));
+  // The record still says 'ready': the next click reads the PR again first, then works.
+  healed = true;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1)?.event.action, 'follow');
 });
 
 test('a click already handed to the agent never goes back to a card with buttons when the save fails', async () => {

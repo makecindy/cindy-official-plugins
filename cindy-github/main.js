@@ -3350,8 +3350,8 @@ async function markPrReadyInner(card, settings, msg, progress) {
     else if (!handoff.ok) card.note = t('prHandoffFailed');
   }
   if (!(await savePrCard(card))) {
-    // The saved record still says 'ready': draw that (no action buttons) so the card and its record agree.
-    card.pending = 'ready';
+    // The record still says 'ready'. The state just read is the true one, so draw it; the next click or
+    // update finds the stale 'ready' (nothing runs concurrently) and refreshes it before acting.
     card.note = t('prSaveFailed');
   }
   await sendPrCard(card, settings, null);
@@ -3364,6 +3364,17 @@ async function prCardAction(msg) {
   if (!card) return;
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
+  // Card actions run one at a time, so a mark-ready flow cannot be running now: a 'ready' left in the record
+  // means its final save was lost. Read the PR again to find the real state before acting.
+  if (card.pending === 'ready' && card.pr) {
+    var current = await fetchPrStatus(card.repo, card.pr.number);
+    if (current.pr) {
+      card.pr = current.pr;
+      card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
+      card.pending = null;
+      card.readyUncertain = false;
+    }
+  }
   card.note = null;
   var handedOff = false;
   if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
