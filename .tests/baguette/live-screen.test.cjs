@@ -349,6 +349,27 @@ test('closing an Android screen under a running touch lifts the finger once the 
   assert.equal(f.calls.filter(c=>c[0]==='exclusive').length,3,'two busy answers, then the release');
 });
 
+test('a late release of a closed Android screen never lifts the fingers of a screen opened since',async t=>{
+  const f=fixture(t);const opened=await f.live.request('liveScreen.open',{id:DROID});
+  const stream=await fetchStream(opened.url);t.after(()=>stream.close());await until(()=>f.sink());
+  await f.live.request('liveScreen.input',{id:DROID,events:[{kind:'touch',touches:[{id:0,x:0.5,y:0.5,phase:'began'}]}]});
+  f.busy.times=1000;f.calls.length=0;
+  f.end();await until(()=>stream.ended());
+  await f.live.request('liveScreen.open',{id:DROID});
+  f.busy.times=0;await new Promise(r=>setTimeout(r,350));
+  assert.equal(f.calls.filter(c=>c[0]==='android.release').length,0,'the new screen keeps its fingers');
+});
+
+test('a second open of the same Apple device leaves no stream of the first behind',async t=>{
+  const f=fixture(t);
+  const first=f.live.request('liveScreen.open',{id:PHONE}).catch(e=>e);
+  const second=f.live.request('liveScreen.open',{id:PHONE});
+  await Promise.all([first,second]);
+  await new Promise(r=>setTimeout(r,20));
+  const open=FakeSocket.all.filter(ws=>ws.readyState===1||ws.readyState===0);
+  assert.equal(open.length,1,'only the screen that stays has a stream');
+});
+
 test('a turn that failed to start never turns the picture later',async t=>{
   let fail=true;
   const f=fixture(t,{request:async(method)=>{if(method==='set_state'&&fail)throw Object.assign(Error('refused'),{code:'FAILED'});return {execution:'executed'};}});

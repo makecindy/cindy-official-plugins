@@ -887,6 +887,19 @@ test('Android PNG stream honours a Live Screen rate, holding the newest picture 
   assert.deepEqual(frames,[0,2],'the newest picture follows when its turn comes, so a still screen shows its last picture');
   abort.abort();await done;
 });
+test('Android PNG stream applies a rate asked for before the stream was fetched',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};
+  // Like the Live Screen sink: begin applies the saved rate to the control.
+  const sink={begin:()=>control.fps?.(2),frame:()=>frames.push(1)};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'png',sink,control}).catch(e=>e);
+  await until(()=>f.live());
+  for(let i=0;i<10;i++)f.push({format:{width:108,height:240,rotation:{rotation:0}},image:image()});
+  await until(()=>frames.length>=1);await new Promise(r=>setTimeout(r,100));
+  assert.equal(frames.length,1,'the saved rate holds back the rest');
+  abort.abort();await done;
+});
 test('Android H.264 stream retries one crashed encoder and uses PNG after a second crash',async t=>{
   const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
   for(const attempt of [1,2]){

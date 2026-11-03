@@ -283,6 +283,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
   }
   async function connect(s,device,locale){
     s.base=await appleBase();
+    // Replaced or closed while waiting: open no stream nobody would close.
+    if(s.closed)throw fail('NOT_RUNNING',locale,'STREAM');
     const ws=new WebSocket(`${s.base.replace(/^http:/,'ws:')}/simulators/${encodeURIComponent(device.udid)}/stream?format=avcc&version=v2${s.kind==='ios'||s.kind==='ipados'?'&display=phone':''}`);
     ws.binaryType='arraybuffer';s.ws=ws;
     let settle;const ready=new Promise((resolve,reject)=>{settle={resolve,reject};});
@@ -327,6 +329,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
   // A touch still running holds the device: wait for it, then lift the finger.
   async function releaseAndroid(s){
     for(let i=0;i<RELEASE_TRIES&&s.down;i++){
+      // A screen opened on the device since owns its fingers now: a release would lift those.
+      if(sessions.has(s.key))return;
       try{await androidStep(s,{kind:'release'});return;}
       catch(error){if(error?.code!=='BUSY')return;await new Promise(resolve=>setTimeout(resolve,RELEASE_WAIT_MS));}
     }
@@ -383,7 +387,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       const caps=CAPS[kind];
       return {url:`${base}/live-screen/${s.token}`,screen:{platform:kind,width:s.size.width,height:s.size.height,cornerRadius:M.screenCorner(device),
         maxTouches:caps.touches,keyboard:caps.keyboard,buttons:BUTTONS[kind].map(([id,icon])=>({id,icon,label:LABELS[locale][id]}))}};
-    }catch(error){end(s);throw error;}
+    }catch(error){end(s);try{s.ws?.close();}catch{}throw error;}
   }
   // Results of the existing guarded operations (run switch, device lock, activity).
   async function operation(method,params){

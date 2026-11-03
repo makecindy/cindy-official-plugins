@@ -55,11 +55,12 @@ function poseSink(res){
 }
 
 async function streamPng({d,res,signal,rotation,sink,control}){
-  sink.begin('application/octet-stream');
   // A requested rate (Live Screen) spaces pictures; the newest one waits its
-  // turn, so a screen that goes still shows its last picture.
+  // turn, so a screen that goes still shows its last picture. Installed before
+  // begin, which applies a rate asked for before the stream was fetched.
   let gap=0,sentAt=0,held=null,timer=null;
   if(control)control.fps=fps=>{gap=1000/fps;};
+  sink.begin('application/octet-stream');
   const emit=image=>{
     sentAt=Date.now();
     sink.frame({display:rotation.display??0,device:image.format.rotation?.rotation||0,png:true},image.image);
