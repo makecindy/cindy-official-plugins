@@ -144,6 +144,7 @@ var MESSAGES = {
     prReadyFailed: '没能转为正式 PR：{detail}',
     prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
     prSaveFailed: '卡片状态没能保存，请稍后重试',
+    prHandedOffSaveFailed: '已交给 Agent，但卡片状态没能保存。请先看对话，不要重复点',
     prStop: '停止',
     prStopping: '正在停止跟进',
     prSettings: 'PR 设置',
@@ -266,6 +267,7 @@ var MESSAGES = {
     prReadyFailed: 'Could not mark it ready for review: {detail}',
     prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
     prSaveFailed: 'Could not save the card state. Try again in a moment.',
+    prHandedOffSaveFailed: 'Handed to the agent, but the card state could not be saved. Check the conversation and do not click again.',
     prStop: 'Stop',
     prStopping: 'Stopping',
     prSettings: 'PR settings',
@@ -388,6 +390,7 @@ var MESSAGES = {
     prReadyFailed: '正式な PR にできませんでした：{detail}',
     prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
     prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
+    prHandedOffSaveFailed: 'エージェントに渡しましたが、カードの状態を保存できませんでした。会話を確認し、もう一度押さないでください',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
     prSettings: 'PR 設定',
@@ -510,6 +513,7 @@ var MESSAGES = {
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
     prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
     prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prHandedOffSaveFailed: '에이전트에게 전달했지만 카드 상태를 저장하지 못했습니다. 대화를 확인하고 다시 누르지 마세요',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
     prSettings: 'PR 설정',
@@ -3298,6 +3302,7 @@ async function prCardAction(msg) {
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
   card.note = null;
+  var handedOff = false;
   if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
     card.settingsOpen = !card.settingsOpen;
   } else if (action === 'prset:rename' || action === 'prset:follow') {
@@ -3342,6 +3347,7 @@ async function prCardAction(msg) {
     return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
     var handoff = await handOffPr(card, action, settings, msg);
+    handedOff = handoff.ok;
     if (handoff.ok && (action === 'pr:publish' || action === 'pr:draft')) {
       card.stage = 'publishing';
       card.publishingDraft = action === 'pr:draft';
@@ -3354,6 +3360,13 @@ async function prCardAction(msg) {
     }
   }
   if (!(await savePrCard(card))) {
+    if (handedOff) {
+      // 点击已经交给 Agent:卡片不能退回有按钮的旧状态,否则用户会把同一件事再派一遍。
+      // 画交出后的进行中状态(没有操作按钮)并提示先看对话;Agent 之后用 card_id 回写时仍读到旧记录,照常更新。
+      card.note = t('prHandedOffSaveFailed');
+      await sendPrCard(card, settings, null);
+      return;
+    }
     // 没存上就不显示新状态(按钮会和记录对不上):重画已保存的那一版并提示。
     var saved = await readPrCard(id);
     if (!saved) return;

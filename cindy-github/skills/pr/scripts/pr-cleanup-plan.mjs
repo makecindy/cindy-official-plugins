@@ -173,9 +173,13 @@ async function main() {
   const headSha = pr.head?.sha || null;
   const localHeadRef = `refs/heads/${headRef}`;
   const originBaseRef = `refs/remotes/origin/${baseRef}`;
-  const localBranch = await refExists(primaryWorktree, localHeadRef);
+  // A fork PR's head.ref is a branch name in someone else's repository; a same-named local branch or
+  // worktree here is not that PR's work unless it sits exactly on the PR head.
+  const fromFork = !pr.head?.repo || pr.head.repo.full_name?.toLowerCase() !== pr.base?.repo?.full_name?.toLowerCase();
+  const namedBranch = await refExists(primaryWorktree, localHeadRef);
+  const localBranch = fromFork && namedBranch.oid !== headSha ? { exists: false, oid: null } : namedBranch;
   const originBase = await refExists(primaryWorktree, originBaseRef);
-  const targetWorktrees = worktrees.filter(w => w.branch === headRef || (headSha && w.head === headSha));
+  const targetWorktrees = worktrees.filter(w => (!fromFork && w.branch === headRef) || (headSha && w.head === headSha));
   const primaryStatus = await worktreeStatus(primaryWorktree);
   const targetWorktreeDetails = await Promise.all(targetWorktrees.map(async wt => ({
     ...wt,

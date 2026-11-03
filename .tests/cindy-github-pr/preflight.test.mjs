@@ -63,3 +63,27 @@ test('runs when launched directly from a path with spaces and non-ASCII characte
   const out = execFileSync('node', [script, work, '--json'], { encoding: 'utf8' });
   assert.equal(JSON.parse(out).branch, 'fix', 'the check must print its result, not exit silently');
 });
+
+test('accepts a remediation commit only where the repository allows it, for that author and sha', (t) => {
+  const { work, git, commit } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'fix');
+  commit('a.txt');
+  const unsigned = git(work, 'rev-parse', 'HEAD').trim();
+  const remediate = (sha, name = 'Ada', email = 'ada@example.com') => git(work, 'commit', '-q', '--allow-empty', '-s', '-m',
+    `remediation\n\nI, ${name} <${email}>, hereby add my Signed-off-by to this commit: ${sha}`);
+
+  fs.mkdirSync(path.join(work, '.github'));
+  fs.writeFileSync(path.join(work, '.github', 'dco.yml'), 'allowRemediationCommits:\n  individual: true\n');
+  git(work, 'add', '.github');
+  git(work, 'commit', '-q', '-s', '-m', 'dco config');
+  remediate('0'.repeat(40));
+  assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'a line naming another sha does not count');
+  remediate(unsigned, 'Ada', 'other@example.com');
+  assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'a line naming another author does not count');
+  remediate(unsigned);
+  assert.deepEqual(preflight(work).blocks, [], 'the allowed remediation signs the old commit off');
+
+  fs.writeFileSync(path.join(work, '.github', 'dco.yml'), 'require:\n  members: true\n');
+  git(work, 'commit', '-q', '-a', '-s', '-m', 'dco config without remediation');
+  assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'not allowed by this repository');
+});

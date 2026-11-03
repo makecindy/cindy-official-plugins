@@ -68,6 +68,27 @@ export function findTemplate(root) {
   return null;
 }
 
+const REMEDIATION_LINE = /^(?:On behalf of [^<\n]*<([^>\n]+)>,\s*)?I,\s*[^<\n]*<([^>\n]+)>,\s*hereby add my Signed-off-by to this commit:\s*([0-9a-f]{40})\s*$/gim;
+
+/**
+ * Commits an allowed remediation commit signs off, as a set of `sha|author email`. Only when the repository's
+ * DCO configuration allows them; the remediation commit must carry its own sign-off, and the sha it
+ * names is treated as signed only for the author the line names (the DCO app's rule).
+ */
+function remediatedCommits(root, base) {
+  let config = '';
+  try { config = fs.readFileSync(path.join(root, '.github', 'dco.yml'), 'utf8'); } catch { return new Set(); }
+  if (!/^\s*allowRemediationCommits\s*:/m.test(config)) return new Set();
+  const log = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%B%x01']);
+  const signed = new Set();
+  if (!log.ok) return signed;
+  for (const body of log.out.split('\x01')) {
+    if (!/^Signed-off-by:\s.*<[^>]+>/im.test(body)) continue;
+    for (const match of body.matchAll(REMEDIATION_LINE)) signed.add(`${match[3].toLowerCase()}|${(match[1] ?? match[2]).toLowerCase()}`);
+  }
+  return signed;
+}
+
 /** DCO, only when the repository asks for it: each commit signed off by its own author. */
 export function checkDco(root, base) {
   if (!fs.existsSync(path.join(root, 'DCO')) && !fs.existsSync(path.join(root, '.github', 'dco.yml'))) return { requires: false, missing: [] };
@@ -75,11 +96,15 @@ export function checkDco(root, base) {
   const list = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%H%x00%ae%x00%(trailers:key=Signed-off-by,valueonly)%x01']);
   if (!list.ok) return { requires: true, missing: [], error: list.err };
   const missing = [];
+  const remediated = remediatedCommits(root, base);
   for (const record of list.out.split('\x01')) {
     const text = record.trim();
     if (!text) continue;
     const [hash, email, trailers] = text.split('\x00');
-    if (!trailers || !trailers.toLowerCase().includes(`<${String(email ?? '').toLowerCase()}>`)) missing.push(hash.slice(0, 8));
+    if (!trailers || !trailers.toLowerCase().includes(`<${String(email ?? '').toLowerCase()}>`)) {
+      if (remediated.has(`${hash.toLowerCase()}|${String(email ?? '').toLowerCase()}`)) continue;
+      missing.push(hash.slice(0, 8));
+    }
   }
   return { requires: true, missing };
 }

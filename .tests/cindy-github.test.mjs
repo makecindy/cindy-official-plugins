@@ -922,6 +922,19 @@ test('marking a draft ready keeps an unconfirmed write uncertain instead of repo
   assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
 });
 
+test('a click already handed to the agent never goes back to a card with buttons when the save fails', async () => {
+  const options = {};
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  options.failWrites = true;
+  await runtime.click(cardId, 'pr:publish');
+  assert.equal(runtime.agentRuns.length, 1);
+  const card = runtime.lastCard(cardId);
+  assert.equal(card.state, 'working');
+  assert.doesNotMatch(card.html, /data-ghost-action="pr:(publish|draft)"/);
+  assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
+});
+
 test('pr_card does not invent a state it could not read, and does not show a card it could not save', async () => {
   // Status unreadable and no earlier snapshot: no card, so no wrong buttons.
   const unreadable = createPrRuntime({ github: () => ({ ok: false, status: 502, body: '', headers: {} }) });
