@@ -3051,7 +3051,7 @@ function renderPrCard(card, settings) {
             : card.following
               ? prQuietButton('pr:stop', t('prStop')) + prFollowingPill()
               : pr.draft
-                ? prCtaButton('pr:ready', t('prMarkReady'))
+                ? (card.readyUncertain ? '' : prCtaButton('pr:ready', t('prMarkReady')))
                 : prPillButton('pr:follow', t('prFollow'));
     } else {
       tile = card.stage === 'merged' ? prTile('merged', 'merged') : prTile('closed', 'muted');
@@ -3177,6 +3177,7 @@ async function prCardTool(args, callId) {
       notes.push(t('prFetchFailed', { detail: status.err }));
     } else {
       card.pr = status.pr;
+      card.readyUncertain = false;
     }
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
     card.queued = false;
@@ -3283,6 +3284,7 @@ async function markPrReady(card, settings, msg) {
     // An exception after the write went out (network, re-read, save) says nothing about whether GitHub did it.
     // If the follow-up was already handed to the agent, the card stays in that in-progress state.
     card.pending = progress.handedOff ? 'follow' : null;
+    card.readyUncertain = !progress.handedOff && progress.sent && !progress.rejected;
     card.note = progress.handedOff ? t('prHandedOffSaveFailed') : progress.sent && !progress.rejected
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(e && e.message ? e.message : e).slice(0, 160) });
@@ -3329,10 +3331,13 @@ async function markPrReadyInner(card, settings, msg, progress) {
     card.pr.draft = false;
   }
   card.pending = null;
+  card.readyUncertain = false;
   if (!card.pr.draft) card.markedReady = true;
   if (card.pr.draft) {
     // 重读到的状态才算准;读不到时,写请求发出过又没被服务端明确拒绝就是不确定,要用户先核对。
     var uncertain = !fresh.pr && sent && !rejected;
+    // Not sure whether GitHub did it: no button to press again until the PR has been read successfully.
+    card.readyUncertain = uncertain;
     card.note = uncertain
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
@@ -3400,7 +3405,7 @@ async function prCardAction(msg) {
     } catch (e) {
       card.note = t('prSettingFailed');
     }
-  } else if (action === 'pr:ready' && card.stage === 'open' && card.pr.draft && !card.following && !card.pending) {
+  } else if (action === 'pr:ready' && card.stage === 'open' && card.pr.draft && !card.following && !card.pending && !card.readyUncertain) {
     await markPrReady(card, settings, msg);
     return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {

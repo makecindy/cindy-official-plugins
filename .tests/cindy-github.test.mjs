@@ -988,6 +988,32 @@ test('a click already handed to the agent never goes back to a card with buttons
   assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
 });
 
+test('after an uncertain mark-ready the button stays away until the PR has been read again', async () => {
+  let reads = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) return { ok: false, status: 502, body: '', headers: {} };
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    reads += 1;
+    if (reads === 2) return { ok: false, status: 502, body: '', headers: {} };
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: true, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  const runtime = createPrRuntime({ github });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+  await runtime.click(cardId, 'pr:ready');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prReadyUnknown));
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+  // A click that still arrives (an old card on another screen) does nothing.
+  const agentRunsBefore = runtime.agentRuns.length;
+  await runtime.click(cardId, 'pr:ready');
+  assert.equal(runtime.agentRuns.length, agentRunsBefore);
+  // The agent reads the PR again: the real state is known, so the button returns.
+  await runtime.tool({ card_id: cardId, pr: '9' });
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+});
+
 test('an exception after the mark-ready write went out is shown as uncertain, not swallowed', async () => {
   let calls = 0;
   const github = (request) => {
