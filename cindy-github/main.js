@@ -3469,8 +3469,9 @@ async function prCardAction(msg) {
     return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
     var publishing = action === 'pr:publish' || action === 'pr:draft';
-    if (publishing && settings.unreadable) {
-      // The settings travel with the request; sending "everything off" for a read that failed would be wrong.
+    if ((publishing || action === 'pr:follow') && settings.unreadable) {
+      // The settings (and the chosen follow model) travel with the request; sending "everything off" for a read
+      // that failed would be wrong.
       card.note = t('prSettingsUnreadable');
     } else {
       // Record the in-progress state before handing the click to the agent: if it cannot be saved nothing is sent,

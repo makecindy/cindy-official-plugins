@@ -1018,6 +1018,19 @@ test('settings that cannot be read are not sent as "everything off"', async () =
   assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
 });
 
+test('following an existing PR is not started with a default model when the settings cannot be read', async () => {
+  const options = { kv: { prCard: { followModel: { route: { agentKind: 'cc', providerId: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fastMode: false }, label: 'Sonnet' } } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  options.kvFails = true;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
+  options.kvFails = false;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.length, 1);
+});
+
 test('unreadable settings do not use up the one-time to-do list either', async () => {
   const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
   const runtime = createPrRuntime(options);
