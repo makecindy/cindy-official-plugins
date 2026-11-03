@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup } from './lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
 import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
@@ -168,18 +168,21 @@ async function main() {
   const primaryWorktree = worktrees[0]?.path || repoRoot;
   // The PR facts come from GitHub, the worktrees from this checkout: refuse to combine them when none of
   // this checkout's remotes is the PR's base or head repository (a wrong --worktree, or another fork).
-  const remoteUrls = githubRepoNamesOfRemotes((await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout);
+  const remoteVerbose = (await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout;
+  const remoteUrls = githubRepoNamesOfRemotes(remoteVerbose);
+  // In a fork checkout `origin` is the head fork; the base branch lives on the remote of the PR's base repository.
+  const baseRemote = remoteNameForRepo(remoteVerbose, pr.base?.repo?.full_name ?? args.repo);
   const prRepos = [pr.base?.repo?.full_name, pr.head?.repo?.full_name, args.repo].filter(Boolean).map(name => name.toLowerCase());
   if (!prRepos.some(name => remoteUrls.includes(name))) {
     throw new Error(`This checkout has no remote for ${prRepos[0] ?? 'the PR repository'}; pass --worktree from a checkout of that repository.`);
   }
-  const fetched = args.fetch ? (await git(primaryWorktree, ['fetch', '--prune', 'origin'])).ok : false;
+  const fetched = args.fetch ? (await git(primaryWorktree, ['fetch', '--prune', baseRemote])).ok : false;
 
   const headRef = pr.head?.ref;
   const baseRef = pr.base?.ref;
   const headSha = pr.head?.sha || null;
   const localHeadRef = `refs/heads/${headRef}`;
-  const originBaseRef = `refs/remotes/origin/${baseRef}`;
+  const originBaseRef = `refs/remotes/${baseRemote}/${baseRef}`;
   // A fork PR's head.ref is a branch name in someone else's repository; a same-named local branch or
   // worktree here is not that PR's work unless it sits exactly on the PR head.
   const fromFork = !pr.head?.repo || pr.head.repo.full_name?.toLowerCase() !== pr.base?.repo?.full_name?.toLowerCase();
@@ -271,6 +274,7 @@ async function main() {
             localBranchExists: localBranch.exists,
             targetWorktrees: targetWorktreeDetails,
             syncPrimary: plan.canSyncPrimary,
+            baseRemote,
           })
         : [],
     },

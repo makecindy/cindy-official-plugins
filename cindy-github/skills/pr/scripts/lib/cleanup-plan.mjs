@@ -31,6 +31,7 @@ export function buildCleanupCommands({
   localBranchExists,
   targetWorktrees,
   syncPrimary = true,
+  baseRemote = 'origin',
 }) {
   const commands = [];
   const removableWorktrees = targetWorktrees.filter(worktree => worktree.path !== primaryWorktree);
@@ -62,7 +63,7 @@ export function buildCleanupCommands({
   }
   if (syncPrimary) {
     commands.push(command(
-      ['git', '-C', primaryWorktree, 'pull', '--ff-only', 'origin', baseRef],
+      ['git', '-C', primaryWorktree, 'pull', '--ff-only', baseRemote, baseRef],
       `Fast-forward ${baseRef}`,
     ));
   }
@@ -150,4 +151,16 @@ export function githubRepoNamesOfRemotes(remoteVerbose) {
     if (m) names.add(m[1].toLowerCase());
   }
   return [...names];
+}
+
+/** The remote that points at `repoName` (owner/repo, any case); `origin` when none does, as before. */
+export function remoteNameForRepo(remoteVerbose, repoName) {
+  const wanted = String(repoName ?? '').toLowerCase();
+  for (const line of String(remoteVerbose).split('\n')) {
+    const m = /^(\S+)\s+(\S+)/.exec(line);
+    if (!m) continue;
+    const repo = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(m[2])?.[1];
+    if (repo && repo.toLowerCase() === wanted) return m[1];
+  }
+  return 'origin';
 }

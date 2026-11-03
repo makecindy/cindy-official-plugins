@@ -18,6 +18,7 @@ import {
   passAdvisories,
   probeAllowsSkip,
   stateFilePath,
+  adoptLegacyStateFile,
   snapshotFailurePlan,
 } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { classifyMergeQueue } from '../../cindy-github/skills/pr/scripts/lib/merge-queue.mjs';
@@ -774,4 +775,26 @@ test('state files of different repositories never share a name, and ordinary nam
   assert.equal(stateFilePath(dir, 'acme/app', 12), '/state/acme__app-12.json');
   assert.notEqual(stateFilePath(dir, 'acme__tools/app', 12), stateFilePath(dir, 'acme/tools__app', 12));
   assert.ok(path.basename(stateFilePath(dir, 'acme__tools/app', 12)).startsWith('~'));
+});
+
+test('a followed PR whose repository name contains __ keeps its old state file under the new name', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-state-'));
+  try {
+    const repo = 'acme__tools/app';
+    const legacy = path.join(dir, 'acme__tools__app-12.json');
+    fs.writeFileSync(legacy, '{"watch":{}}');
+    const file = stateFilePath(dir, repo, 12);
+    adoptLegacyStateFile(dir, repo, 12, file);
+    assert.equal(fs.readFileSync(file, 'utf8'), '{"watch":{}}');
+    assert.equal(fs.existsSync(legacy), false);
+    // An existing new file is never overwritten, and ordinary names are left alone.
+    fs.writeFileSync(legacy, 'old');
+    adoptLegacyStateFile(dir, repo, 12, file);
+    assert.equal(fs.readFileSync(file, 'utf8'), '{"watch":{}}');
+    fs.writeFileSync(path.join(dir, 'acme__app-1.json'), 'plain');
+    adoptLegacyStateFile(dir, 'acme/app', 1, stateFilePath(dir, 'acme/app', 1));
+    assert.equal(fs.readFileSync(path.join(dir, 'acme__app-1.json'), 'utf8'), 'plain');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

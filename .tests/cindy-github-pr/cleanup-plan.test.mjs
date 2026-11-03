@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -128,4 +128,17 @@ test('a remote matches the PR repository by its whole name, not by a shared pref
   const names = githubRepoNamesOfRemotes(remotes);
   assert.deepEqual(names.sort(), ['acme/app', 'acme/app-tools']);
   assert.equal(githubRepoNamesOfRemotes('origin\thttps://github.com/acme/app-tools.git (fetch)').includes('acme/app'), false);
+});
+
+test('a fork checkout syncs the base branch from the remote of the PR base repository', () => {
+  const remotes = [
+    'origin\thttps://github.com/me/app.git (fetch)',
+    'upstream\thttps://github.com/Acme/App.git (fetch)',
+  ].join('\n');
+  assert.equal(remoteNameForRepo(remotes, 'acme/app'), 'upstream');
+  assert.equal(remoteNameForRepo(remotes, 'nobody/else'), 'origin');
+  const commands = buildCleanupCommands({
+    primaryWorktree: PRIMARY, baseRef: 'main', headRef: 'feature/pr', localBranchExists: true, targetWorktrees: [], baseRemote: 'upstream',
+  });
+  assert.ok(commands.some(entry => entry.argv.join(' ').endsWith('pull --ff-only upstream main')));
 });

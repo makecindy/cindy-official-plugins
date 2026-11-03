@@ -451,6 +451,23 @@ export function stateFilePath(stateDir, repo, number) {
   return path.join(stateDir, `${plain ? repo.replace(/\//g, '__') : `~${encodeURIComponent(repo)}`}-${number}.json`);
 }
 
+/**
+ * Repositories whose names contain `__` used to share the plain `owner__repo-N.json` name. When the new
+ * file does not exist yet but the old one does, move it over so a followed PR keeps its history. (Another
+ * repository that mapped to the same old name could have written it, which is exactly why the name changed;
+ * a wrong adoption costs one extra wake-up, never a missed one.)
+ */
+export function adoptLegacyStateFile(stateDir, repo, number, file) {
+  if (!repo.includes('__')) return;
+  const legacy = path.join(stateDir, `${repo.replace(/\//g, '__')}-${number}.json`);
+  try {
+    if (fs.existsSync(file) || !fs.existsSync(legacy)) return;
+    fs.renameSync(legacy, file);
+  } catch {
+    // Nothing to adopt, or the directory is not writable: start from a fresh baseline as before.
+  }
+}
+
 function readState(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -1214,6 +1231,7 @@ async function gateMain(argv, ctx) {
   }
 
   const file = stateFilePath(args.stateDir, args.repo, args.number);
+  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
   const now = ctx.now();
 
   // --last-result:只读最近一轮普通 gate 的实际结果。preRunHook 本身只负责 run/skip；

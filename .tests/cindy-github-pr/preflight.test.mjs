@@ -150,3 +150,12 @@ test('still refuses to start from the default branch when the PR targets another
   git(work, 'checkout', '-q', 'release');
   assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch release/);
 });
+
+test('finds the default branch itself when origin/HEAD is unset and a PR targets another branch', (t) => {
+  const { work, git } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'release');
+  git(work, 'push', '-q', 'origin', 'release');
+  git(work, 'remote', 'set-head', 'origin', '-d');
+  git(work, 'checkout', '-q', 'main');
+  assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch main/);
+});
