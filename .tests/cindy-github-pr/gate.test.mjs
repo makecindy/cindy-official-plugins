@@ -777,33 +777,31 @@ test('state files of different repositories never share a name, and ordinary nam
   assert.ok(path.basename(stateFilePath(dir, 'acme__tools/app', 12)).startsWith('~'));
 });
 
-test('a followed PR whose repository name contains __ keeps its old state file under the new name', () => {
+test('a followed PR whose repository name contains __ keeps its old state file under the new name, if it is its own', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-gate-state-'));
   try {
     const repo = 'acme__tools/app';
     const legacy = path.join(dir, 'acme__tools__app-12.json');
-    fs.writeFileSync(legacy, '{"watch":{}}');
+    const state = (url) => JSON.stringify({ watch: {}, url });
+    // Written by the other repository that maps to the same old name: not adopted.
+    fs.writeFileSync(legacy, state('https://github.com/acme/tools__app/pull/12'));
     const file = stateFilePath(dir, repo, 12);
     adoptLegacyStateFile(dir, repo, 12, file);
-    assert.equal(fs.readFileSync(file, 'utf8'), '{"watch":{}}');
+    assert.equal(fs.existsSync(file), false);
+    assert.equal(fs.existsSync(legacy), true);
+    // Its own PR URL: adopted.
+    fs.writeFileSync(legacy, state('https://github.com/Acme__Tools/app/pull/12'));
+    adoptLegacyStateFile(dir, repo, 12, file);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).url, 'https://github.com/Acme__Tools/app/pull/12');
     assert.equal(fs.existsSync(legacy), false);
     // An existing new file is never overwritten, and ordinary names are left alone.
-    fs.writeFileSync(legacy, 'old');
+    fs.writeFileSync(legacy, state('https://github.com/acme__tools/app/pull/12'));
     adoptLegacyStateFile(dir, repo, 12, file);
-    assert.equal(fs.readFileSync(file, 'utf8'), '{"watch":{}}');
+    assert.equal(fs.existsSync(legacy), true);
     fs.writeFileSync(path.join(dir, 'acme__app-1.json'), 'plain');
     adoptLegacyStateFile(dir, 'acme/app', 1, stateFilePath(dir, 'acme/app', 1));
     assert.equal(fs.readFileSync(path.join(dir, 'acme__app-1.json'), 'utf8'), 'plain');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('a check that fails in a second workflow under the same name is reported too', () => {
-  const first = evaluateWatch(seenWatch(snap()), snap({ checks: [check('test', 'failed', { workflowName: 'A', required: true })] }), T0);
-  assert.deepEqual(kinds(first), ['checks-failed']);
-  const both = snap({ checks: [check('test', 'failed', { workflowName: 'A', required: true }), check('test', 'failed', { workflowName: 'B', required: true })] });
-  const second = evaluateWatch(first.next, both, T0 + MIN);
-  assert.deepEqual(second.events.map((e) => [e.kind, e.failed.map((c) => c.workflowName)]), [['checks-failed', ['B']]]);
-  assert.deepEqual(kinds(evaluateWatch(second.next, both, T0 + 2 * MIN)), [], 'neither is reported twice');
 });

@@ -453,15 +453,18 @@ export function stateFilePath(stateDir, repo, number) {
 
 /**
  * Repositories whose names contain `__` used to share the plain `owner__repo-N.json` name. When the new
- * file does not exist yet but the old one does, move it over so a followed PR keeps its history. (Another
- * repository that mapped to the same old name could have written it, which is exactly why the name changed;
- * a wrong adoption costs one extra wake-up, never a missed one.)
+ * file does not exist yet but the old one does, move it over so a followed PR keeps its history. Another
+ * repository that mapped to the same old name could have written it (which is why the name changed), and
+ * its newer comment baseline would hide comments here: adopt only a file whose recorded PR URL is this PR.
  */
 export function adoptLegacyStateFile(stateDir, repo, number, file) {
   if (!repo.includes('__')) return;
   const legacy = path.join(stateDir, `${repo.replace(/\//g, '__')}-${number}.json`);
   try {
     if (fs.existsSync(file) || !fs.existsSync(legacy)) return;
+    const wanted = `https://github.com/${repo}/pull/${number}`.toLowerCase();
+    const recorded = String(JSON.parse(fs.readFileSync(legacy, 'utf8'))?.url ?? '').toLowerCase().replace(/[?#].*$/, '').replace(/\/$/, '');
+    if (recorded !== wanted) return;
     fs.renameSync(legacy, file);
   } catch {
     // Nothing to adopt, or the directory is not writable: start from a fresh baseline as before.
