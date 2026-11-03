@@ -1106,10 +1106,9 @@ test('a follow model on another computer or a shared provider keeps its location
   assert.equal(runtime.kv.prCard.followModel.route.agentDeviceId, 'share:abc');
 });
 
-test('a click the agent did not receive keeps the ask card and says whether to retry', async () => {
+test('a click the agent clearly did not receive keeps the ask card; an unclear one stays in progress', async () => {
   const cases = [
     [() => ({ ok: false, errorCode: 'TOKEN_EXPIRED' }), {}, zhCopy.prHandoffFailed],
-    [() => { throw new Error('bridge closed'); }, {}, zhCopy.prHandoffUnknown],
     // No click token: the plugin's agent capability was not granted, so nothing is sent.
     [undefined, { userActionToken: undefined }, zhCopy.prHandoffFailed],
   ];
@@ -1122,6 +1121,15 @@ test('a click the agent did not receive keeps the ask card and says whether to r
     assert.equal(lines.at(-1), note);
     assert.equal(runtime.agentRuns.length, agentRun ? 1 : 0);
   }
+
+  // The call threw: the agent may have received it, so the buttons must not offer the same action again.
+  const unclear = createPrRuntime({ agentRun: () => { throw new Error('bridge closed'); } });
+  const cardId = (await unclear.tool({ repo: 'octo/repo', head: 'feat/x' })).reply.result.card_id;
+  await unclear.click(cardId, 'pr:publish');
+  const card = unclear.lastCard(cardId);
+  assert.doesNotMatch(card.html, /<button data-ghost-action="pr:(publish|draft)"/);
+  assert.equal(visibleText(card.html).at(-1), zhCopy.prHandoffUnknown);
+  assert.equal(card.state, 'working');
 });
 
 test('pr_card rejects unusable input and keeps its largest card under the host size limit', async () => {

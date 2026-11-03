@@ -3274,13 +3274,14 @@ async function handOffPr(card, action, settings, msg) {
  * 写操作失败时重读一次状态,以 GitHub 上的实际结果为准(请求可能已生效、只是回包丢了)。
  */
 async function markPrReady(card, settings, msg) {
-  var progress = { sent: false, rejected: false };
+  var progress = { sent: false, rejected: false, handedOff: false };
   try {
     await markPrReadyInner(card, settings, msg, progress);
   } catch (e) {
     // An exception after the write went out (network, re-read, save) says nothing about whether GitHub did it.
-    card.pending = null;
-    card.note = progress.sent && !progress.rejected
+    // If the follow-up was already handed to the agent, the card stays in that in-progress state.
+    card.pending = progress.handedOff ? 'follow' : null;
+    card.note = progress.handedOff ? t('prHandedOffSaveFailed') : progress.sent && !progress.rejected
       ? t('prReadyUnknown')
       : t('prReadyFailed', { detail: String(e && e.message ? e.message : e).slice(0, 160) });
     try { await savePrCard(card); } catch (e2) { /* the card is redrawn below either way */ }
@@ -3335,8 +3336,11 @@ async function markPrReadyInner(card, settings, msg, progress) {
       : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
   } else if (settings.autoFollow && card.stage === 'open') {
     var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
-    if (handoff.ok) card.pending = 'follow';
-    else card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
+    // An unclear result may still have been delivered: treat it as handed off, never as "not sent".
+    progress.handedOff = handoff.ok || handoff.unknown === true;
+    if (progress.handedOff) card.pending = 'follow';
+    if (handoff.unknown) card.note = t('prHandoffUnknown');
+    else if (!handoff.ok) card.note = t('prHandoffFailed');
   }
   if (!(await savePrCard(card))) {
     // The saved record still says 'ready': draw that (no action buttons) so the card and its record agree.
@@ -3399,17 +3403,19 @@ async function prCardAction(msg) {
     return;
   } else if (PR_AGENT_ACTIONS[action] && PR_AGENT_ACTIONS[action](card)) {
     var handoff = await handOffPr(card, action, settings, msg);
-    handedOff = handoff.ok;
-    if (handoff.ok && (action === 'pr:publish' || action === 'pr:draft')) {
+    // An unclear result (the call threw, or no verdict) may still have reached the agent: keep the in-progress
+    // state with its note, so the same action cannot be sent twice. Only a clear refusal restores the buttons.
+    handedOff = handoff.ok || handoff.unknown === true;
+    if (handedOff && (action === 'pr:publish' || action === 'pr:draft')) {
       card.stage = 'publishing';
       card.publishingDraft = action === 'pr:draft';
-      card.queued = handoff.queued;
+      card.queued = handoff.queued === true;
       card.settingsOpen = false;
-    } else if (handoff.ok) {
+    } else if (handedOff) {
       card.pending = action === 'pr:follow' ? 'follow' : 'stop';
-    } else {
-      card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
     }
+    if (handoff.unknown) card.note = t('prHandoffUnknown');
+    else if (!handoff.ok) card.note = t('prHandoffFailed');
   }
   if (!(await savePrCard(card))) {
     if (handedOff) {
