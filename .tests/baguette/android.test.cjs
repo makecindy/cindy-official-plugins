@@ -872,6 +872,19 @@ test('Android PNG stream is unthrottled, unbounded and never runs adb per frame'
   assert.equal(f.res.headers['Content-Type'],'application/octet-stream');
   abort.abort();await done;
 });
+test('Android PNG stream honours a Live Screen rate by dropping pictures sent sooner',async t=>{
+  const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
+  const f=streamFixture(t),endpoint=await f.ready,abort=new AbortController();t.after(()=>abort.abort());
+  const frames=[],control={};
+  const sink={begin:()=>{},frame:(pose,payload)=>frames.push(payload.length)};
+  const done=serve({d:{udid:id,endpoint,model:{width:1080,height:2400}},agent:{displayRotation:async()=>0},res:f.res,signal:abort.signal,format:'png',sink,control}).catch(e=>e);
+  await until(()=>f.live());assert.equal(typeof control.fps,'function','a PNG stream installs the rate control');
+  control.fps(2);
+  for(let i=0;i<10;i++)f.push({format:{width:108,height:240,rotation:{rotation:0}},image:image()});
+  await until(()=>frames.length>=1);await new Promise(r=>setTimeout(r,100));
+  assert.equal(frames.length,1,'2 fps lets one of ten immediate pictures through');
+  abort.abort();await done;
+});
 test('Android H.264 stream retries one crashed encoder and uses PNG after a second crash',async t=>{
   const {serve,resetFailures}=require(path.join(A,'stream.cjs'));resetFailures();t.after(resetFailures);
   for(const attempt of [1,2]){

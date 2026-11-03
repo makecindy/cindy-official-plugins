@@ -24,6 +24,8 @@ const QUIET_MS=200;
 // confirm it. A turn animates about 50 changes; a Home Screen that refuses
 // the pose still sends a handful, and a keyframe is not a change.
 const TURN_MS=1500,TURN_FRAMES=12;
+// Closing the screen while a touch runs: try to lift the finger for this long.
+const RELEASE_TRIES=30,RELEASE_WAIT_MS=100;
 // A device shut down while shown keeps its stream open and simply stops
 // sending, like a still screen: once the picture is still this long, check
 // (at most this often) that it still runs.
@@ -309,10 +311,17 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     tokens.delete(s.token);
     // Lift a finger the phone left down.
     if(s.kind!=='android'&&s.size)for(const value of appleRelease(s.touch,s.size))send(s,value);
-    if(s.kind==='android'&&s.down)androidStep(s,{kind:'release'}).catch(()=>{});
+    if(s.kind==='android'&&s.down)releaseAndroid(s);
     try{s.ws?.close();}catch{}
     s.abort?.abort();
     if(s.res&&!s.res.writableEnded)s.res.end();
+  }
+  // A touch still running holds the device: wait for it, then lift the finger.
+  async function releaseAndroid(s){
+    for(let i=0;i<RELEASE_TRIES&&s.down;i++){
+      try{await androidStep(s,{kind:'release'});return;}
+      catch(error){if(error?.code!=='BUSY')return;await new Promise(resolve=>setTimeout(resolve,RELEASE_WAIT_MS));}
+    }
   }
   function closeAll(){
     for(const s of [...sessions.values()])end(s);
@@ -400,7 +409,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(Object.hasOwn(ORIENTATION_BUTTONS,e.button)){
       const orientation=ORIENTATION_BUTTONS[e.button];
       s.pendingTurn={rotation:ORIENTATIONS.indexOf(orientation),until:now()+TURN_MS,frames:0};
-      await operation('set_state',{udid:s.udid,orientation});
+      try{await operation('set_state',{udid:s.udid,orientation});}catch(error){s.pendingTurn=null;throw error;}
       s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
     }
     if(e.button==='rotate-left'||e.button==='rotate-right'){
@@ -411,7 +420,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       if(s.kind==='ios'&&ORIENTATIONS[next]==='portrait-upside-down')next=(next+turn)%4;
       const orientation=ORIENTATIONS[next];
       s.pendingTurn={rotation:next,until:now()+TURN_MS,frames:0};
-      await operation('set_state',{udid:s.udid,orientation});
+      try{await operation('set_state',{udid:s.udid,orientation});}catch(error){s.pendingTurn=null;throw error;}
       s.requested=ORIENTATIONS.indexOf(orientation);s.framed=true;settle(s);return;
     }
     if(e.button==='shake')return shake(s);
@@ -428,6 +437,8 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     const c=controls(),{devices:own,agent}=android();
     return c.exclusive(async()=>{
       await c.assertEnabled();const d=await own.target({udid:s.udid});c.touch();
+      // A closed screen sends no more touches; only the release goes through.
+      if(e.kind==='touch'&&s.closed)return;
       if(e.kind==='touch'){
         const turned=(s.device||0)%2,size={width:turned?d.model.height:d.model.width,height:turned?d.model.width:d.model.height};
         s.down=true;
@@ -441,6 +452,10 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     },'device:'+deviceId(s.udid));
   }
   const fingerMove=e=>e.kind==='touch'&&!e.edge&&e.touches.every(t=>t.phase==='moved'||t.phase==='stationary');
+  // The merged move carries the latest positions, and stays a move when an
+  // earlier one in the batch was: Apple devices only get a move for `moved`.
+  const mergedMove=(previous,e)=>previous.touches.some(t=>t.phase==='moved')&&!e.touches.some(t=>t.phase==='moved')
+    ?{...e,touches:e.touches.map(t=>({...t,phase:'moved'}))}:e;
   const sameFingers=(a,b)=>a.touches.length===b.touches.length&&a.touches.every(t=>b.touches.some(u=>u.id===t.id));
   async function input(p,locale){
     const s=opened(p,locale);
@@ -460,7 +475,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     const steps=[];
     for(const e of events){
       const last=steps.at(-1);
-      if(last&&fingerMove(e)&&fingerMove(last.e)&&sameFingers(last.e,e)){last.e=e;last.n++;}else steps.push({e,n:1});
+      if(last&&fingerMove(e)&&fingerMove(last.e)&&sameFingers(last.e,e)){last.e=mergedMove(last.e,e);last.n++;}else steps.push({e,n:1});
     }
     try{for(let i=0;i<steps.length;){
       // A run of keys is one keyboard operation (up to type_text's 40), not one helper launch per key.

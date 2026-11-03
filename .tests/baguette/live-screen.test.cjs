@@ -36,13 +36,13 @@ class FakeSocket{
   answer(orientation){if(this.pending.length)this.reply(orientation);}
 }
 function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices=list(),tasks=null,request=null}={}){
-  const calls=[],touches=[],sendTouch=[];let on=enabled,offset=0;
+  const calls=[],touches=[],sendTouch=[];let on=enabled,offset=0;const busy={times:0};
   const state={enabled:()=>on,set:v=>{on=v;}};
   const runtime={
     assertEnabled:async()=>{if(!on)throw Object.assign(Error('paused'),{code:'RUNTIME_DISABLED'});},
     touch:()=>touches.push(Date.now()),
     request:async(method,params)=>{calls.push([method,params]);return request?request(method,params):{execution:'executed'};},
-    exclusive:async(fn,key)=>{calls.push(['exclusive',key]);return fn();},
+    exclusive:async(fn,key)=>{calls.push(['exclusive',key]);if(busy.times>0){busy.times--;throw Object.assign(Error('device busy'),{code:'BUSY'});}return fn();},
   };
   const agent={press:async(d,p)=>{calls.push(['android.press',p.button]);return {execution:'executed'};},typeText:async(d,p)=>{calls.push(['android.type',p]);return {execution:'executed'};},release:async()=>{calls.push(['android.release']);}};
   const model={width:1080,height:2400};
@@ -54,7 +54,7 @@ function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices
     describeUi:async(base,udid)=>FakeSocket.all.findLast(ws=>ws.url.includes(`/simulators/${udid}/`)).probe(),
     WebSocket:class extends FakeSocket{constructor(url){super(url);setImmediate(()=>{this.binary(avcc(size));this.answer(orientation);});}}});
   t.after(()=>live.stop());
-  return {live,calls,touches,sendTouch,state,sink:()=>sink,control:()=>control,end:()=>streamed?.(),advance:ms=>{offset+=ms;}};
+  return {live,calls,touches,sendTouch,busy,state,sink:()=>sink,control:()=>control,end:()=>streamed?.(),advance:ms=>{offset+=ms;}};
 }
 // Reads [u32 length][message] off the frame URL.
 function fetchStream(url){
@@ -329,6 +329,40 @@ test('the orientation probe never shares the stream with touches, so a slow prob
   assert.equal(ws.sent.at(-1).type,'touch1-down');
   assert.deepEqual(ws.sent.map(m=>m.type).filter(type=>!/^(touch|set_fps|force_idr)/.test(type)),[],'the stream carries no probe');
   await ws.reply('portrait');
+});
+
+test('a batch ending on stationary still moves Apple fingers to the latest position',async t=>{
+  const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});const ws=FakeSocket.all.at(-1);
+  const at=(phase,x)=>({kind:'touch',touches:[{id:0,x,y:0.5,phase}]});
+  await f.live.request('liveScreen.input',{id:PHONE,events:[at('began',0.1),at('moved',0.3),at('stationary',0.5)]});
+  const moves=ws.sent.filter(m=>m.type==='touch1-move');
+  assert.equal(moves.length,1);assert.equal(moves[0].x,0.5*1178,'the move carries the last position');
+});
+
+test('closing an Android screen under a running touch lifts the finger once the device is free',async t=>{
+  const f=fixture(t);const opened=await f.live.request('liveScreen.open',{id:DROID});
+  const stream=await fetchStream(opened.url);t.after(()=>stream.close());await until(()=>f.sink());
+  await f.live.request('liveScreen.input',{id:DROID,events:[{kind:'touch',touches:[{id:0,x:0.5,y:0.5,phase:'began'}]}]});
+  f.busy.times=2;f.sendTouch.length=0;f.calls.length=0;
+  f.end();await until(()=>stream.ended());
+  await until(()=>f.calls.some(c=>c[0]==='android.release'),2000);
+  assert.equal(f.calls.filter(c=>c[0]==='exclusive').length,3,'two busy answers, then the release');
+});
+
+test('a turn that failed to start never turns the picture later',async t=>{
+  let fail=true;
+  const f=fixture(t,{request:async(method)=>{if(method==='set_state'&&fail)throw Object.assign(Error('refused'),{code:'FAILED'});return {execution:'executed'};}});
+  const opened=await f.live.request('liveScreen.open',{id:PHONE});
+  const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());
+  await until(()=>stream.messages().length>=1);
+  const rotations=()=>stream.messages().filter(m=>m[0]===0x10).map(m=>screenOf(m).rotation);
+  ws.binary(envelope(2,[1]));await until(()=>stream.messages().length>=2);
+  await assert.rejects(f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-landscape'}]}));
+  const shown=rotations().length;
+  for(let i=0;i<14;i++)ws.binary(envelope(3,[2]));
+  await new Promise(r=>setTimeout(r,50));
+  assert.equal(rotations().length,shown,'frames after a refused turn do not turn the picture');
+  fail=false;
 });
 
 test('moves of a finger in one batch reach the device as the latest position only',async t=>{

@@ -54,10 +54,16 @@ function poseSink(res){
   }};
 }
 
-async function streamPng({d,res,signal,rotation,sink}){
+async function streamPng({d,res,signal,rotation,sink,control}){
   sink.begin('application/octet-stream');
+  // A requested rate (Live Screen) drops pictures sent sooner than it allows.
+  let gap=0,sentAt=0;
+  if(control)control.fps=fps=>{gap=1000/fps;};
   await rpc(d.endpoint,'streamScreenshot',{format:0,width:720,height:1600},{unbounded:true,signal,onData:image=>{
     if(!image.image.length||res.destroyed||res.writableLength>2e6)return;
+    const at=Date.now();
+    if(at-sentAt<gap)return;
+    sentAt=at;
     sink.frame({display:rotation.display??0,device:image.format.rotation?.rotation||0,png:true},image.image);
   }});
 }
@@ -141,7 +147,7 @@ async function serve({d,agent,res,signal,format,spawnEncoder,sink=poseSink(res),
   const rotation=rotations({d,agent,signal});
   // Tests inject the encoder process; the platform check is for the shipped binary.
   if(format==='avcc'&&(spawnEncoder?healthy():encoderAvailable()))return streamAvcc({d,res,signal,rotation,sink,control,spawnEncoder});
-  await rotation.ready;return streamPng({d,res,signal,rotation,sink});
+  await rotation.ready;return streamPng({d,res,signal,rotation,sink,control});
 }
 // Tests start each case with a clean failure history.
 const resetFailures=()=>{failures=[];};
