@@ -570,3 +570,10 @@ Brings in the "Show Cindy button when selecting text" setting (off by default) f
 - Each site's own caption layer is hidden while Cindy subtitles show. Videos are identified by media id, so tasks and caches stay separate under one page address.
 
 Sampled Instagram, Facebook and Douyin videos have no readable captions, and this version does not do speech recognition. Update both the Cindy plugin and the Chrome extension. The new content script match covers only those player addresses; the signed wire protocol is unchanged.
+
+## 0.4.63 clicks open menus that wait for a press (host package 0.4.85)
+
+- A click now sends what a mouse click sends, in Chrome's order: the pointer moves onto the element, presses, releases, then clicks. Before, only `click` was sent, so menus that open on the press (ChatGPT's profile menu, and other sites built on the same kind of menu component) stayed shut while the action reported success. As in Chrome, a page that cancels the press gets no mouse-down and no focus change.
+- The extension does not press Enter on its own afterwards: a page can update its state later than the extension can tell, and a second toggle would close what the click opened. If a click leaves the page unchanged, the agent reads the page and presses Enter or Space itself.
+- Hover sends the same pointer-enter and move events as a mouse, so menus and tooltips that open on hover respond.
+- Input is still synthetic. Sites that accept only trusted input may ignore it; no new permission is requested.

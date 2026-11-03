@@ -1029,8 +1029,28 @@ async function pageOperation(job) {
       if (action === 'press' && !el) el = document.activeElement;
       if (!el || !el.isConnected || !visible(el)) return fail('ELEMENT_NOT_FOUND','Read the page again and choose a visible element.');
       if (el.disabled) return fail('ELEMENT_DISABLED','This element is disabled.');
-      if (action === 'click') { started = true; el.click(); }
-      else if (action === 'hover') { started = true; el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})); }
+      // A user's click is a sequence, not one event: menus and other widgets often open on pointerdown or
+      // mousedown and ignore a lone click() (2026-11-03: ChatGPT's profile menu stayed shut). The order
+      // follows Chrome's, so widgets that handle both pointer and click events see what a user sends.
+      const pointer = (type,init = {}) => {
+        const r = el.getBoundingClientRect(), bubbles = !type.endsWith('enter');
+        const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+        return el.dispatchEvent(new Ctor(type,{bubbles,cancelable:bubbles,composed:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0,buttons:0,pointerId:1,pointerType:'mouse',isPrimary:true,...init}));
+      };
+      const approach = () => { for (const type of ['pointerover','pointerenter','mouseover','mouseenter','pointermove','mousemove']) pointer(type); };
+      if (action === 'click') {
+        started = true;
+        approach();
+        // As in Chrome, a cancelled pointerdown suppresses the mouse events and the focus change; click follows.
+        const down = pointer('pointerdown',{buttons:1,detail:1});
+        if (down && pointer('mousedown',{buttons:1,detail:1})) el.focus?.({preventScroll:true});
+        pointer('pointerup',{detail:1});
+        if (down) pointer('mouseup',{detail:1});
+        // No automatic Enter afterwards: a page may update its state later than we can tell, and a second
+        // toggle would close what the click just opened. The caller reads the page and chooses the keyboard.
+        if (el.isConnected) el.click();
+      }
+      else if (action === 'hover') { started = true; approach(); }
       else if (action === 'select') {
         if (!(el instanceof HTMLSelectElement)) return fail('INVALID_ELEMENT','Select requires a native select element.');
         if (a.values.some(v => ![...el.options].some(o => o.value === v))) return fail('OPTION_NOT_FOUND','One of the requested option values does not exist.');
