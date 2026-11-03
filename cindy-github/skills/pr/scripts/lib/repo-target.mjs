@@ -1,16 +1,17 @@
 import { execFileSync } from 'node:child_process';
 
+import { githubRepoOfUrl } from './cleanup-plan.mjs';
+
 /** Parse an owner/name pair from a GitHub remote URL. */
 export function parseGitHubRemote(url) {
-  const normalized = String(url || '').trim().replace(/\.git$/, '');
-  const match = normalized.match(/github\.com(?::|\/)([^/:\s]+)\/([^/\s]+)$/i);
-  return match ? `${match[1]}/${match[2]}` : null;
+  // The host must be exactly github.com: a look-alike such as evilgithub.com is not a GitHub remote.
+  return githubRepoOfUrl(String(url || '').trim()) ?? null;
 }
 
 /** Parse repository identity and PR number from a full GitHub pull request URL. */
 export function parsePullRequestUrl(value) {
   const match = String(value || '').match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[/?#].*)?$/i,
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[/?#].*)?$/i,
   );
   return match ? { repo: `${match[1]}/${match[2]}`, number: Number(match[3]) } : null;
 }

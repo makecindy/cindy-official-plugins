@@ -424,7 +424,7 @@ export function parseArgs(argv, env = process.env) {
  * 仓库。所以要么给完整 URL,要么 PR 号 + --repo。
  */
 export function parseTarget(spec, repoArg) {
-  const url = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/.exec(spec);
+  const url = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/i.exec(spec);
   if (url) {
     return { repo: `${url[1]}/${url[2]}`, number: Number(url[3]) };
   }

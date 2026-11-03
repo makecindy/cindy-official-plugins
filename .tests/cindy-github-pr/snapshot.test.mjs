@@ -228,6 +228,8 @@ nodeTest('parses common GitHub remote forms', () => {
   assert.equal(parseGitHubRemote('https://github.com/acme/widgets-moved.git'), 'acme/widgets-moved');
   assert.equal(parseGitHubRemote('ssh://git@github.com/acme/widgets-moved.git'), 'acme/widgets-moved');
   assert.equal(parseGitHubRemote('git@gitlab.example.com:group/repo.git'), null);
+  assert.equal(parseGitHubRemote('https://evilgithub.com/acme/app.git'), null);
+  assert.equal(parseGitHubRemote('git@evilgithub.com:acme/app.git'), null);
 });
 
 nodeTest('full PR URL supplies repo and number', () => {

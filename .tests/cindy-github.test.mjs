@@ -656,6 +656,7 @@ function createPrRuntime(options = {}) {
     onHostMessage(fn) { handler = fn; },
     async send(message) {
       sent.push(message);
+      if (message.type === 'card-update' && options.refuseCards) throw new Error('card refused');
       if (message.type !== 'fs-request') return { ok: true };
       assert.equal(message.root, 'data');
       if (message.op === 'write' && (typeof options.failWrites === 'function' ? options.failWrites() : options.failWrites)) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
@@ -1021,6 +1022,13 @@ test('with auto-follow, a lost save of the follow state sends nothing, and a los
   assert.equal(sentOnce.agentRuns.length, 1);
   await sentOnce.click(idB, 'pr:follow');
   assert.equal(sentOnce.agentRuns.length, 1, 'the record says following is starting, so the same request is not sent again');
+});
+
+test('a card the host refuses is reported to the agent, not claimed as shown', async () => {
+  const runtime = createPrRuntime({ refuseCards: true });
+  const attempt = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+  assert.equal(attempt.reply.ok, false);
+  assert.equal(attempt.reply.message, zhCopy.prCardNotDelivered);
 });
 
 test('a clearly refused follow handoff is written back even if one save fails, so the card is not stuck on starting', async () => {

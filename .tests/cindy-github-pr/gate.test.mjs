@@ -170,6 +170,8 @@ test('parseTarget 接受完整 URL,裸 PR 号要求 --repo(不从 cwd 猜仓库)
   assert.deepEqual(parseTarget('42', REPO), { repo: REPO, number: 42 });
   assert.throws(() => parseTarget('42'), /--repo/);
   assert.throws(() => parseTarget('not-a-pr'), /cannot parse/);
+  assert.throws(() => parseTarget('https://evilgithub.com/acme/app/pull/12'), /cannot parse/);
+  assert.deepEqual(parseTarget('https://github.com/acme/app/pull/12/files'), { repo: 'acme/app', number: 12 });
 });
 
 test('normalizeConflicting:两套字段域都认,未知窗口 carry-forward', () => {
