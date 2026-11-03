@@ -92,9 +92,12 @@ export function remediationPolicy(config) {
  * author, who is the person the line names; an individual remediation signs the person's own commit, a
  * third-party one names the original author after "On behalf of".
  */
-function remediatedCommits(root, base) {
+function remediatedCommits(root, base, defaultBranch) {
   let config = '';
-  try { config = fs.readFileSync(path.join(root, '.github', 'dco.yml'), 'utf8'); } catch { return new Set(); }
+  // Only the default branch's DCO configuration applies to a PR, so a branch cannot switch remediation on for itself.
+  const onDefault = git(root, ['show', `origin/${defaultBranch ?? base}:.github/dco.yml`]);
+  if (!onDefault.ok) return new Set();
+  config = onDefault.out;
   const policy = remediationPolicy(config);
   const signed = new Set();
   if (!policy.individual && !policy.thirdParty) return signed;
@@ -117,13 +120,13 @@ function remediatedCommits(root, base) {
 }
 
 /** DCO, only when the repository asks for it: each commit signed off by its own author. */
-export function checkDco(root, base) {
+export function checkDco(root, base, defaultBranch) {
   if (!fs.existsSync(path.join(root, 'DCO')) && !fs.existsSync(path.join(root, '.github', 'dco.yml'))) return { requires: false, missing: [] };
   // Merge commits are skipped, as the DCO check does.
   const list = git(root, ['log', '--no-merges', `origin/${base}..HEAD`, '--format=%H%x00%ae%x00%(trailers:key=Signed-off-by,valueonly)%x01']);
   if (!list.ok) return { requires: true, missing: [], error: list.err };
   const missing = [];
-  const remediated = remediatedCommits(root, base);
+  const remediated = remediatedCommits(root, base, defaultBranch);
   for (const record of list.out.split('\x01')) {
     const text = record.trim();
     if (!text) continue;
@@ -156,7 +159,7 @@ export function preflight(target, options = {}) {
   if (branch === 'HEAD') blocks.push('Detached HEAD: work on a branch made for this change.');
   else if (branch === defaultBranch || branch === base) blocks.push(`On the default branch ${branch}: move the work to a branch made for this change.`);
 
-  const dco = checkDco(root, base);
+  const dco = checkDco(root, base, defaultBranch);
   if (dco.error) warns.push(`Could not check DCO sign-offs (${dco.error}); check Signed-off-by by hand before pushing.`);
   else if (dco.missing.length) blocks.push(`The repository requires DCO sign-off; these commits lack a Signed-off-by matching their author: ${dco.missing.join(', ')}. Add it (git rebase --signoff origin/${base}, or git commit --amend -s for the last one).`);
 

@@ -140,3 +140,14 @@ export function planLocalCleanup({
     canSyncPrimary,
   };
 }
+
+/** `owner/repo` of every GitHub remote in `git remote -v` output, lower-cased; the whole name must match, not a prefix. */
+export function githubRepoNamesOfRemotes(remoteVerbose) {
+  const names = new Set();
+  for (const line of String(remoteVerbose).split('\n')) {
+    const url = /^\S+\s+(\S+)/.exec(line)?.[1] ?? '';
+    const m = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(url);
+    if (m) names.add(m[1].toLowerCase());
+  }
+  return [...names];
+}

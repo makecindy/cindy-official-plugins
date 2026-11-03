@@ -375,7 +375,8 @@ query($owner: String!, $name: String!, $number: Int!) {
           commit { oid }
         }
       }
-      comments(last: 50) {
+      comments(last: 100) {
+        totalCount
         nodes {
           id
           author { login __typename }
@@ -616,6 +617,8 @@ async function main() {
     reviewThreads,
     reviews: (pr.reviews?.nodes || []).map(normalizeReview),
     comments: (pr.comments?.nodes || []).map(normalizeTopComment),
+    // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
+    commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
   };
 
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');

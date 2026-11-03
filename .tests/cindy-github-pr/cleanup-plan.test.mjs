@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, planLocalCleanup } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -116,4 +116,16 @@ test('local commits the PR does not contain block cleanup even when the worktree
   assert.equal(result.recommendation, 'do_not_cleanup');
   assert.equal(result.canCleanupLocal, false);
   assert.ok(result.blockers.includes('local_commits_not_in_pr'));
+});
+
+test('a remote matches the PR repository by its whole name, not by a shared prefix', () => {
+  const remotes = [
+    'origin\thttps://github.com/acme/app-tools.git (fetch)',
+    'origin\thttps://github.com/acme/app-tools.git (push)',
+    'fork\tgit@github.com:Acme/App.git (fetch)',
+    'ci\thttps://example.com/acme/app (fetch)',
+  ].join('\n');
+  const names = githubRepoNamesOfRemotes(remotes);
+  assert.deepEqual(names.sort(), ['acme/app', 'acme/app-tools']);
+  assert.equal(githubRepoNamesOfRemotes('origin\thttps://github.com/acme/app-tools.git (fetch)').includes('acme/app'), false);
 });

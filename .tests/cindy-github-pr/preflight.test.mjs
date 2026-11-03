@@ -65,40 +65,49 @@ test('runs when launched directly from a path with spaces and non-ASCII characte
   assert.equal(JSON.parse(out).branch, 'fix', 'the check must print its result, not exit silently');
 });
 
-test('accepts a remediation commit only where the repository allows it, for that author and sha', (t) => {
-  const { work, git, commit } = repo(t);
+// The DCO configuration that applies to a PR is the default branch's, so the tests put it there.
+function repoWithDcoConfig(t, yaml) {
+  const made = repo(t);
+  fs.mkdirSync(path.join(made.work, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(made.work, '.github', 'dco.yml'), yaml);
+  made.git(made.work, 'add', '.github');
+  made.git(made.work, 'commit', '-q', '-s', '-m', 'dco config');
+  made.git(made.work, 'push', '-q', 'origin', 'main');
+  return made;
+}
+
+test('accepts a remediation commit only where the default branch allows it, for that author and sha', (t) => {
+  const { work, git, commit } = repoWithDcoConfig(t, 'allowRemediationCommits:\n  individual: true\n');
   git(work, 'checkout', '-q', '-b', 'fix');
   commit('a.txt');
   const unsigned = git(work, 'rev-parse', 'HEAD').trim();
   const remediate = (sha, name = 'Ada', email = 'ada@example.com') => git(work, 'commit', '-q', '--allow-empty', '-s', '-m',
     `remediation\n\nI, ${name} <${email}>, hereby add my Signed-off-by to this commit: ${sha}`);
-
-  fs.mkdirSync(path.join(work, '.github'));
-  fs.writeFileSync(path.join(work, '.github', 'dco.yml'), 'allowRemediationCommits:\n  individual: true\n');
-  git(work, 'add', '.github');
-  git(work, 'commit', '-q', '-s', '-m', 'dco config');
   remediate('0'.repeat(40));
   assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'a line naming another sha does not count');
   remediate(unsigned, 'Ada', 'other@example.com');
   assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'a line naming another author does not count');
   remediate(unsigned);
   assert.deepEqual(preflight(work).blocks, [], 'the allowed remediation signs the old commit off');
+});
 
-  fs.writeFileSync(path.join(work, '.github', 'dco.yml'), 'require:\n  members: true\n');
-  git(work, 'commit', '-q', '-a', '-s', '-m', 'dco config without remediation');
-  assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)), 'not allowed by this repository');
+test('a branch cannot switch remediation on by editing the DCO configuration itself', (t) => {
+  const { work, git, commit } = repoWithDcoConfig(t, 'require:\n  members: true\n');
+  git(work, 'checkout', '-q', '-b', 'fix');
+  commit('a.txt');
+  const unsigned = git(work, 'rev-parse', 'HEAD').trim();
+  fs.writeFileSync(path.join(work, '.github', 'dco.yml'), 'allowRemediationCommits:\n  individual: true\n');
+  git(work, 'commit', '-q', '-a', '-s', '-m', 'turn remediation on');
+  git(work, 'commit', '-q', '--allow-empty', '-s', '-m', `remediation\n\nI, Ada <ada@example.com>, hereby add my Signed-off-by to this commit: ${unsigned}`);
+  assert.match(preflight(work).blocks.join('\n'), new RegExp(unsigned.slice(0, 8)));
 });
 
 test('remediation follows the repository policy and the identities on the line', (t) => {
   const scenario = ({ yaml, line, by = ['Ada', 'ada@example.com'] }) => {
-    const { work, git, commit } = repo(t);
+    const { work, git, commit } = repoWithDcoConfig(t, yaml);
     git(work, 'checkout', '-q', '-b', 'fix');
     commit('a.txt');
     const unsigned = git(work, 'rev-parse', 'HEAD').trim();
-    fs.mkdirSync(path.join(work, '.github'), { recursive: true });
-    fs.writeFileSync(path.join(work, '.github', 'dco.yml'), yaml);
-    git(work, 'add', '.github');
-    git(work, 'commit', '-q', '-s', '-m', 'dco policy');
     git(work, 'config', 'user.name', by[0]);
     git(work, 'config', 'user.email', by[1]);
     git(work, 'commit', '-q', '--allow-empty', '-s', '-m', `remediation\n\n${line(unsigned)}`);

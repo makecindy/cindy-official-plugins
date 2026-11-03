@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { buildCleanupCommands, planLocalCleanup } from './lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, planLocalCleanup } from './lib/cleanup-plan.mjs';
 import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
@@ -168,9 +168,9 @@ async function main() {
   const primaryWorktree = worktrees[0]?.path || repoRoot;
   // The PR facts come from GitHub, the worktrees from this checkout: refuse to combine them when none of
   // this checkout's remotes is the PR's base or head repository (a wrong --worktree, or another fork).
-  const remoteUrls = (await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout.toLowerCase();
+  const remoteUrls = githubRepoNamesOfRemotes((await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout);
   const prRepos = [pr.base?.repo?.full_name, pr.head?.repo?.full_name, args.repo].filter(Boolean).map(name => name.toLowerCase());
-  if (!prRepos.some(name => remoteUrls.includes(`github.com/${name}`) || remoteUrls.includes(`github.com:${name}`))) {
+  if (!prRepos.some(name => remoteUrls.includes(name))) {
     throw new Error(`This checkout has no remote for ${prRepos[0] ?? 'the PR repository'}; pass --worktree from a checkout of that repository.`);
   }
   const fetched = args.fetch ? (await git(primaryWorktree, ['fetch', '--prune', 'origin'])).ok : false;
