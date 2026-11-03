@@ -18,6 +18,7 @@
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 function git(root, args) {
@@ -155,4 +156,4 @@ function realpathOrSelf(target) {
 // Run only when executed directly (tests import the functions). Compare real paths: the Skill
 // directory may be reached through a link.
 const entry = process.argv[1] ? realpathOrSelf(process.argv[1]) : null;
-if (entry && entry === realpathOrSelf(new URL(import.meta.url).pathname)) main();
+if (entry && entry === realpathOrSelf(fileURLToPath(import.meta.url))) main();

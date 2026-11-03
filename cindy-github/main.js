@@ -142,6 +142,8 @@ var MESSAGES = {
     prMarkReady: '转为正式 PR',
     prMarkingReady: '正在转为正式 PR',
     prReadyFailed: '没能转为正式 PR：{detail}',
+    prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
+    prSaveFailed: '卡片状态没能保存，请稍后重试',
     prStop: '停止',
     prStopping: '正在停止跟进',
     prSettings: 'PR 设置',
@@ -262,6 +264,8 @@ var MESSAGES = {
     prMarkReady: 'Mark ready for review',
     prMarkingReady: 'Marking ready for review',
     prReadyFailed: 'Could not mark it ready for review: {detail}',
+    prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
+    prSaveFailed: 'Could not save the card state. Try again in a moment.',
     prStop: 'Stop',
     prStopping: 'Stopping',
     prSettings: 'PR settings',
@@ -382,6 +386,8 @@ var MESSAGES = {
     prMarkReady: '正式な PR にする',
     prMarkingReady: '正式な PR に切り替えています',
     prReadyFailed: '正式な PR にできませんでした：{detail}',
+    prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
+    prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
     prSettings: 'PR 設定',
@@ -502,6 +508,8 @@ var MESSAGES = {
     prMarkReady: '정식 PR로 전환',
     prMarkingReady: '정식 PR로 전환 중',
     prReadyFailed: '정식 PR로 전환하지 못했습니다: {detail}',
+    prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
+    prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
     prStop: '중지',
     prStopping: '팔로우 중지 중',
     prSettings: 'PR 설정',
@@ -663,7 +671,8 @@ async function gql(query, variables, callId) {
   if (r.err) return { err: r.err };
   var d = r.data;
   if (d && Array.isArray(d.errors) && d.errors.length) {
-    return { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }) };
+    // 服务端已答复并拒绝:写操作确定没有执行(与网络中断、超时的不确定态区分)。
+    return { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }), rejected: true };
   }
   if (!d || d.data === undefined) return { err: t('graphqlNoData') };
   return { data: d.data };
@@ -3060,7 +3069,7 @@ function renderPrMovedStub(card) {
     '<span style="flex:none">· ' + prEsc(t('prMovedBelow')) + '</span></div>';
 }
 
-/** 把卡片挪到这次调用上:新位置记别名,旧位置换成一行提示(凭这次调用重开旧卡片)。 */
+/** 挪卡第一步:新位置记别名并改 anchor(卡片状态保存成功后再用 sendPrMovedStub 收口旧位置)。返回旧位置,别名写不进去时返回 null。 */
 async function movePrCard(card, callId) {
   var from = prAnchor(card);
   var alias = await cindy.send({
@@ -3068,13 +3077,17 @@ async function movePrCard(card, callId) {
     path: prCardPath(callId), content: JSON.stringify({ id: callId, alias: card.id }),
   });
   // 别名写不进去时不挪:新位置的按钮会找不回卡片。
-  if (!alias || !alias.ok) return false;
+  if (!alias || !alias.ok) return null;
   card.anchor = callId;
-  await Promise.resolve(cindy.send({
+  return from;
+}
+
+/** 旧位置换成一行提示(凭这次调用重开旧卡片)。 */
+function sendPrMovedStub(card, from, callId) {
+  return Promise.resolve(cindy.send({
     type: 'card-update', callId: from, v: 2, state: 'done',
     html: renderPrMovedStub(card), height: 44, sourceCallId: callId,
   })).catch(function () {});
-  return true;
 }
 
 /* ── pr_card 工具 ── */
@@ -3122,13 +3135,9 @@ async function prCardTool(args, callId) {
   if (number) {
     var status = await fetchPrStatus(card.repo, number, callId);
     if (status.err) {
+      // 读不到这条 PR 的状态又没有旧快照时不凭空画一张「开放、非草稿」的卡:状态未知,让 Agent 稍后重试。
+      if (!card.pr || card.pr.number !== number) return fail(t('prFetchFailed', { detail: status.err }));
       notes.push(t('prFetchFailed', { detail: status.err }));
-      if (!card.pr || card.pr.number !== number) {
-        card.pr = {
-          number: number, title: '', url: 'https://github.com/' + card.repo + '/pull/' + number,
-          state: 'open', draft: false, base: card.base, ci: null, openThreads: 0, mergeState: null, review: null,
-        };
-      }
     } else {
       card.pr = status.pr;
     }
@@ -3151,9 +3160,11 @@ async function prCardTool(args, callId) {
     if (settings.autoFollow && !card.following && !card.pr.draft) todo.push(t('prTodoFollow', { url: card.pr.url }));
   }
 
-  var moved = updating && a.to_latest === true && prAnchor(card) !== callId && await movePrCard(card, callId);
-  await savePrCard(card);
-  await sendPrCard(card, settings, updating && !moved ? callId : null);
+  var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
+  // 状态没存上时按钮点了找不到记录:不显示卡片,让 Agent 稍后重试。
+  if (!(await savePrCard(card))) return fail(t('prSaveFailed'));
+  if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
+  await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating) await prunePrCards();
 
   var result = {
@@ -3229,7 +3240,13 @@ async function handOffPr(card, action, settings, msg) {
  */
 async function markPrReady(card, settings, msg) {
   card.pending = 'ready';
-  await savePrCard(card);
+  // 记不下「进行中」就不发外部写操作:之后无从核对结果。
+  if (!(await savePrCard(card))) {
+    card.pending = null;
+    card.note = t('prSaveFailed');
+    await sendPrCard(card, settings, null);
+    return;
+  }
   await sendPrCard(card, settings, null);
   var slash = card.repo.indexOf('/');
   var owner = card.repo.slice(0, slash);
@@ -3238,25 +3255,38 @@ async function markPrReady(card, settings, msg) {
     { owner: owner, name: name, number: card.pr.number });
   var id = idRes.data && idRes.data.repository && idRes.data.repository.pullRequest && idRes.data.repository.pullRequest.id;
   var err = idRes.err || (id ? null : t('status404'));
+  // 写请求的结果分三态:确定没执行(没发出,或服务端已拒绝)/ 确定已执行(回包 isDraft=false)/ 不确定。
+  var sent = false, confirmedReady = false, rejected = false;
   if (!err) {
+    sent = true;
     var mut = await gql('mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}', { id: id });
     err = mut.err || null;
+    rejected = mut.rejected === true;
+    var done = mut.data && mut.data.markPullRequestReadyForReview && mut.data.markPullRequestReadyForReview.pullRequest;
+    confirmedReady = Boolean(done) && done.isDraft === false;
   }
   var fresh = await fetchPrStatus(card.repo, card.pr.number);
   if (fresh.pr) {
     card.pr = fresh.pr;
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
+  } else if (confirmedReady) {
+    // 重读失败,但写请求的回包已经确认转成了正式:按回包记下,不沿用旧的草稿快照。
+    card.pr.draft = false;
   }
   card.pending = null;
   if (!card.pr.draft) card.markedReady = true;
   if (card.pr.draft) {
-    card.note = t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
+    // 重读到的状态才算准;读不到时,写请求发出过又没被服务端明确拒绝就是不确定,要用户先核对。
+    var uncertain = !fresh.pr && sent && !rejected;
+    card.note = uncertain
+      ? t('prReadyUnknown')
+      : t('prReadyFailed', { detail: String(err || fresh.err || '').slice(0, 160) });
   } else if (settings.autoFollow && card.stage === 'open') {
     var handoff = await handOffPr(card, 'pr:follow', settings, Object.assign({}, msg, { afterReady: true }));
     if (handoff.ok) card.pending = 'follow';
     else card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
   }
-  await savePrCard(card);
+  if (!(await savePrCard(card))) card.note = t('prSaveFailed');
   await sendPrCard(card, settings, null);
 }
 
@@ -3323,7 +3353,14 @@ async function prCardAction(msg) {
       card.note = handoff.unknown ? t('prHandoffUnknown') : t('prHandoffFailed');
     }
   }
-  await savePrCard(card);
+  if (!(await savePrCard(card))) {
+    // 没存上就不显示新状态(按钮会和记录对不上):重画已保存的那一版并提示。
+    var saved = await readPrCard(id);
+    if (!saved) return;
+    saved.note = t('prSaveFailed');
+    await sendPrCard(saved, settings, null);
+    return;
+  }
   // 原地更新被点的卡片:交给 Agent 的动作报 working 直到它用 pr_card 回写结果,其余点击报 done 立即结束。
   await sendPrCard(card, settings, null);
 }

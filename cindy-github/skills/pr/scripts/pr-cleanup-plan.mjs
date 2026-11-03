@@ -195,6 +195,15 @@ async function main() {
     : null;
 
   const primaryIsHead = targetWorktreeDetails.some(worktree => worktree.path === primaryWorktree);
+  // Local work the PR does not contain: every local tip (the branch and each target worktree's HEAD)
+  // must be the PR head or one of its ancestors. A tip that cannot be compared counts as unverified.
+  const localTips = [...new Set([
+    ...(localBranch.exists ? [localBranch.oid] : []),
+    ...targetWorktreeDetails.map(worktree => worktree.head).filter(Boolean),
+  ])];
+  const tipsInPr = await Promise.all(localTips.map(async tip =>
+    !headSha ? null : tip === headSha ? true : isAncestor(primaryWorktree, tip, headSha)));
+  const localWorkNotInPr = tipsInPr.some(inPr => inPr !== true);
   const plan = planLocalCleanup({
     terminal,
     merged,
@@ -204,6 +213,7 @@ async function main() {
     dirtyTargetCount: dirtyWorktrees.length,
     hasLocalArtifacts,
     cindyManagedWorktree,
+    localWorkNotInPr,
   });
 
   const out = {
@@ -232,6 +242,7 @@ async function main() {
       originBaseExists: originBase.exists,
       headShaAncestorOfOriginBase,
       localBranchAncestorOfOriginBase,
+      localWorkNotInPr,
       targetWorktrees: targetWorktreeDetails,
       cindyManagedWorktree,
     },

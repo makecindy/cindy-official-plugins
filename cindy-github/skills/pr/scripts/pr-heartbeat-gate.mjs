@@ -975,9 +975,11 @@ export function decide({
   if (legacy && previous?.pendingFingerprint) {
     return passPending('upgraded', 'the follow-up check was upgraded while an update was still unacknowledged; look at the PR once', '', 'upgraded', result.next);
   }
-  // 纯人工批准等待期间,外部变化(评论、检查通过)不再唤起 agent;首次退化成这种状态时
-  // 仍按事件放行一次,让 agent 看到并留下必要的收尾说明。
-  if (result.events.length > 0 && previous?.humanOnlyPending === true && isHumanOnlyReviewPending(snap)) {
+  // 纯人工批准等待期间,检查通过这类外部变化不再唤起 agent;首次退化成这种状态时
+  // 仍按事件放行一次,让 agent 看到并留下必要的收尾说明。新留言、冲突等一律交给 agent 判断
+  // (旧线程的「等批准」分类管不了新来的技术评论),上一轮还没确认的更新也不能被这里清掉。
+  if (result.events.length > 0 && !pendingWatch && previous?.humanOnlyPending === true
+    && result.events.every((e) => e.kind === 'checks-passed') && isHumanOnlyReviewPending(snap)) {
     return skip('blocked-human', `${humanOnlyReviewDetail(snap)}; only external state changed, confirmed without waking the agent`, result.next);
   }
   if (result.events.length > 0) {

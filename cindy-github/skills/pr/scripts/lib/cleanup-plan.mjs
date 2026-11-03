@@ -90,6 +90,7 @@ export function planLocalCleanup({
   dirtyTargetCount,
   hasLocalArtifacts,
   cindyManagedWorktree = false,
+  localWorkNotInPr = false,
 }) {
   const blockers = [];
   const notes = [...STATIC_NOTES];
@@ -100,6 +101,8 @@ export function planLocalCleanup({
   if (!hasLocalArtifacts) blockers.push('nothing_local_to_cleanup');
   if (terminal && !merged) blockers.push('closed_unmerged_requires_user_decision');
   if (cindyManagedWorktree) blockers.push('cindy_managed_worktree');
+  // Commits made after the PR head (not pushed, so `git status` stays clean) would be lost with `branch -D`.
+  if (localWorkNotInPr) blockers.push('local_commits_not_in_pr');
 
   const primaryReadable = Boolean(primaryStatus?.ok);
   const primaryDirty = primaryReadable && Boolean(primaryStatus.dirty);
@@ -118,6 +121,7 @@ export function planLocalCleanup({
     && !longLivedBranch
     && dirtyTargetCount === 0
     && !cindyManagedWorktree
+    && !localWorkNotInPr
     && Boolean(hasLocalArtifacts)
     && !cannotLeavePrimaryHead;
 

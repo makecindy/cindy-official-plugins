@@ -658,6 +658,7 @@ function createPrRuntime(options = {}) {
       sent.push(message);
       if (message.type !== 'fs-request') return { ok: true };
       assert.equal(message.root, 'data');
+      if (message.op === 'write' && options.failWrites) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
       if (message.op === 'write') { files.set(message.path, message.content); return { ok: true, op: 'write', path: message.path }; }
       if (message.op === 'read') {
         return files.has(message.path)
@@ -881,6 +882,59 @@ test('a draft card marks the PR ready itself, then follows when the card setting
   // Once following, the check strip is a slot the host fills from the title bar's live data.
   await runtime.tool({ card_id: cardId, following: true });
   assert.match(runtime.lastCard(cardId).html, /<div data-ghost-pr-status="octo\/repo#9">/);
+});
+
+test('marking a draft ready keeps an unconfirmed write uncertain instead of reporting failure', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+  } } } });
+  const scenario = (mutation, rereadFails) => {
+    let reads = 0;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) return mutation();
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      reads += 1;
+      return reads > 1 && rereadFails ? { ok: false, status: 502, body: '', headers: {} } : jsonResponse(prBody(true));
+    };
+    return createPrRuntime({ github });
+  };
+  const noteAfterClick = async (runtime) => {
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:ready');
+    return visibleText(runtime.lastCard(cardId).html).join('\n');
+  };
+
+  // The request went out, its answer was lost, and the re-read failed too: GitHub may already have it.
+  const lost = await noteAfterClick(scenario(() => ({ ok: false, status: 502, body: '', headers: {} }), true));
+  assert.match(lost, new RegExp(zhCopy.prReadyUnknown));
+  assert.doesNotMatch(lost, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+
+  // The answer says it worked although the re-read failed: believe the answer.
+  const confirmed = scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }), true);
+  const confirmedText = await noteAfterClick(confirmed);
+  assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyUnknown));
+
+  // GitHub answered with an error: the write did not happen, so failing is accurate.
+  const rejected = await noteAfterClick(scenario(() => jsonResponse({ errors: [{ message: 'not allowed' }] }), true));
+  assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+});
+
+test('pr_card does not invent a state it could not read, and does not show a card it could not save', async () => {
+  // Status unreadable and no earlier snapshot: no card, so no wrong buttons.
+  const unreadable = createPrRuntime({ github: () => ({ ok: false, status: 502, body: '', headers: {} }) });
+  const failed = await unreadable.tool({ repo: 'octo/repo', pr: '9' });
+  assert.equal(failed.reply.ok, false);
+  assert.equal(unreadable.cards(failed.callId).length, 0);
+
+  // The card record cannot be saved: buttons would find nothing, so the card is not shown.
+  const full = createPrRuntime({ failWrites: true });
+  const saved = await full.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+  assert.equal(saved.reply.ok, false);
+  assert.equal(saved.reply.message, zhCopy.prSaveFailed);
+  assert.equal(full.cards(saved.callId).length, 0);
 });
 
 // The follow-up round can run on a cheaper model than the task. The card uses the host's own

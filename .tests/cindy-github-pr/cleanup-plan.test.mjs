@@ -110,3 +110,10 @@ test('dirty primary omits switch/pull but still removes sibling worktree and bra
     'worktree prune',
   ]);
 });
+
+test('local commits the PR does not contain block cleanup even when the worktree is clean', () => {
+  const result = plan({ localWorkNotInPr: true });
+  assert.equal(result.recommendation, 'do_not_cleanup');
+  assert.equal(result.canCleanupLocal, false);
+  assert.ok(result.blockers.includes('local_commits_not_in_pr'));
+});

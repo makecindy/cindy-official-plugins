@@ -425,9 +425,19 @@ test('decide:只剩人工批准时吸收外部变化;保底巡检;defer 未到�
   const watch = seenWatch(humanOnly);
   const nudged = { ...humanOnly, comments: [comment('C1', 'lead', iso(T0 + MIN), 'still waiting')] };
   const held = decide({ snap: nudged, previous: { watch, humanOnlyPending: true, lastPassAt: T0 }, now: T0 + 2 * MIN });
-  assert.equal(held.reason, 'blocked-human');
-  assert.ok(Date.parse(held.nextWatch.remarksThrough) > Date.parse(watch.remarksThrough), '吸收后不再重报');
-  assert.equal(decide({ snap: nudged, previous: { watch, lastPassAt: T0 }, now: T0 + 2 * MIN }).reason, 'changed', '第一次仍然唤起');
+  assert.equal(held.reason, 'changed', '新留言交给 agent 判断,不沿用旧线程的等批准分类');
+  assert.equal(decide({ snap: nudged, previous: { watch, lastPassAt: T0 }, now: T0 + 2 * MIN }).reason, 'changed', '第一次也唤起');
+
+  // 只有检查通过这类变化被吸收;上一轮还没确认的更新则保留重试。
+  const running = { ...humanOnly, checks: [check('build', 'pending', { required: true })] };
+  const greenOnly = { ...humanOnly, checks: [check('build', 'passed', { required: true })] };
+  const runningWatch = seenWatch(running);
+  assert.deepEqual(kinds(evaluateWatch(runningWatch, greenOnly, T0 + MIN)), ['checks-passed']);
+  const absorbed = decide({ snap: greenOnly, previous: { watch: runningWatch, humanOnlyPending: true, lastPassAt: T0 }, now: T0 + 2 * MIN });
+  assert.equal(absorbed.reason, 'blocked-human');
+  const kept = decide({ snap: greenOnly, previous: { watch: runningWatch, humanOnlyPending: true, pendingWatch: runningWatch, pendingKey: 'k', pendingPassCount: 1, lastPassAt: T0 - 11 * MIN }, now: T0 + 2 * MIN });
+  assert.notEqual(kept.reason, 'blocked-human', '未确认的更新不被吸收');
+  assert.ok(kept.nextPendingWatch, '待确认的那一份保留');
 
   const quiet = { watch: seenWatch(snap()), lastPassAt: T0 };
   const day = 24 * 60 * MIN;

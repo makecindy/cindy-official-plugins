@@ -52,3 +52,14 @@ test('blocks the default branch, checks DCO only when declared, and skips merge 
   assert.deepEqual(result.blocks, [], 'a merge commit needs no sign-off');
   assert.ok(result.notes.some((n) => /not pushed/.test(n)));
 });
+
+test('runs when launched directly from a path with spaces and non-ASCII characters', (t) => {
+  const { work, git } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'fix');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr skill 目录 '));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const script = path.join(dir, 'pr-preflight.mjs');
+  fs.copyFileSync(new URL('../../cindy-github/skills/pr/scripts/pr-preflight.mjs', import.meta.url), script);
+  const out = execFileSync('node', [script, work, '--json'], { encoding: 'utf8' });
+  assert.equal(JSON.parse(out).branch, 'fix', 'the check must print its result, not exit silently');
+});
