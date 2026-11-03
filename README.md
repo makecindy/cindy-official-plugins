@@ -67,6 +67,7 @@ permission gate.
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | Push notifications to your phone or desktop through your own ntfy server; the access token is stored by Cindy and sent only to that server; opt-in |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | Decision Gate | [`decision-gate`](./decision-gate) | Decides by your rules: picks a model when a new task starts and judges before an automation or routine runs whether it needs to |
+| <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | Uses your local AgentCompass to pick the account, model and effort from a task profile and live quota across your accounts, starts the exactly matching Cindy task and returns its exact result; requires AgentCompass; opt-in |
 
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
