@@ -47,6 +47,9 @@
         return disk;
       }
       if (!disk.taskId || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned' ||
+          (mem.draft_cleanup && mem.draft_cleanup!==disk.draft_cleanup) ||
+          (mem.cancelError && !disk.cancelError) ||
+          (['blocked','send_rejected','unknown_create','unknown_send'].includes(mem.state) && mem.state!==disk.state) ||
           (mem.state==='stopping' && disk.state==='running') ||
           (terminal.has(mem.state) && !terminal.has(disk.state))) {
         await tryPersist(msg,operation,mem);
@@ -141,12 +144,33 @@
   // A created draft that received no plugin input: archived when Cindy can, otherwise handed back for manual archiving.
   async function discardDraft(record,canArchive) {
     if (canArchive) {
-      try {await cindy.tasks.archive({taskId:record.taskId});record.draft_cleanup='archived';}
-      catch(error) {record.draft_cleanup='needs_cleanup';record.cleanup_error=error.message;}
+      try {
+        await cindy.tasks.archive({taskId:record.taskId});
+        record.draft_cleanup='archived';record.draft_archived=true;
+      } catch(error) {
+        const err=error?.message || String(error), code=error?.code || null;
+        record.cleanup_error=err;record.cleanup_error_code=code;
+        if (REJECTED.has(code)) {record.draft_cleanup='needs_cleanup';record.draft_archived=false;}
+        else {record.draft_cleanup='unknown_archive';record.draft_archived='unknown';}
+      }
     } else {
-      record.draft_cleanup='manual_cleanup_required';
+      record.draft_cleanup='manual_cleanup_required';record.draft_archived=false;
       record.cleanup_error='Cindy has no public archive API. Archive this draft, which received no plugin input, in the Cindy task list.';
     }
+  }
+  function draftOutcome(record,operation) {
+    const unknown=record.draft_cleanup==='unknown_archive';
+    const archived=record.draft_cleanup==='archived' ? true : unknown ? 'unknown' : false;
+    return {
+      draft_cleanup:record.draft_cleanup || null,
+      archived,
+      cleanup_error:record.cleanup_error || null,
+      ...(record.cleanup_error_code ? {cleanup_error_code:record.cleanup_error_code} : {}),
+      next_tool:next(unknown ? 'status' : 'cleanup',operation),
+      next_action:unknown
+        ? 'No input was accepted, and the draft archive reply for task '+record.taskId+' was lost ('+(record.cleanup_error || 'unknown outcome')+'). Inspect task '+record.taskId+' in the Cindy task list before retrying cleanup.'
+        : 'No input was accepted. Cleanup archives or hands back the draft.'
+    };
   }
   function unconfirmed(record,operation) {
     const why={unknown_create:'Cindy may have created the draft, but its answer never arrived. Inspect the Cindy task list; nothing is created again.',
@@ -165,8 +189,7 @@
         next_action:'No Cindy task was created because tasks.create was refused. Fix the reported issue and call roll again to retry.'};
       if (UNCONFIRMED.has(record.state)) return unconfirmed(record,operation);
       if (['blocked','send_rejected'].includes(record.state)) return {status:record.state,operation,taskId:record.taskId || null,
-        error:record.error || null,draft_cleanup:record.draft_cleanup || null,next_tool:next('cleanup',operation),
-        next_action:'No input was accepted. Cleanup archives or hands back the draft.'};
+        task_id:record.taskId || null,executed:false,error:record.error || null,...draftOutcome(record,operation)};
       return {status:record.state,operation,next_tool:next('status',operation),
         cause:'No Cindy task was started for this operation yet.'};
     }
@@ -234,7 +257,7 @@
         }
         record.state='unknown_create';
         const saveError=await tryPersist(msg,operation,record);
-        return {status:record.state,operation,error:record.error,
+        return {status:record.state,operation,executed:'unknown',error:record.error,
           ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),next_tool:next('status',operation)};
       }
       record.taskId=task.taskId;
@@ -243,9 +266,9 @@
         record.state='blocked';record.error='Created draft has different route/permissions/workdir. Configure plugin task directory to the current project; no model input sent.';
         await discardDraft(record,canArchive);
         const saveError=await tryPersist(msg,operation,record);
-        return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,error:record.error,
-          draft_cleanup:record.draft_cleanup,cleanup_error:record.cleanup_error || null,
-          ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),next_tool:next('cleanup',operation)};
+        return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,executed:false,error:record.error,
+          ...draftOutcome(record,operation),
+          ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
       }
       record.sendRequest={taskId:task.taskId,expectedRevision:task.revision,requestKey:operation+':send',text:record.prompt};
       record.state='sending';
@@ -255,9 +278,9 @@
         record.error='Created draft could not be recorded before send: '+preSendError;
         await discardDraft(record,canArchive);
         await tryPersist(msg,operation,record);
-        return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,runId:null,run_id:null,
-          error:record.error,draft_cleanup:record.draft_cleanup,cleanup_error:record.cleanup_error || null,
-          receipt_saved:false,receipt_error:preSendError,next_tool:next('cleanup',operation)};
+        return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,runId:null,run_id:null,executed:false,
+          error:record.error,...draftOutcome(record,operation),
+          receipt_saved:false,receipt_error:preSendError};
       }
       let run, failure;
       try {run=await cindy.tasks.send(record.sendRequest);} catch(error) {failure=error;}
@@ -276,9 +299,8 @@
       return {status:record.state,operation,taskId:record.taskId,runId:record.runId || null,
         task_id:record.taskId,run_id:record.runId || null,
         error:record.error || null,error_code:record.errorCode || null,automatic_callback:false,
-        ...(record.state==='send_rejected' ? {draft_cleanup:record.draft_cleanup,cleanup_error:record.cleanup_error || null} : {}),
-        ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
-        next_tool:next(record.state==='send_rejected' ? 'cleanup' : 'status',operation)};
+        ...(record.state==='send_rejected' ? {executed:false,...draftOutcome(record,operation)} : {next_tool:next('status',operation)}),
+        ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
     });
   }
   async function stop(msg,operation,record) {
@@ -339,6 +361,14 @@
       return {status:'cleaned',operation,taskId:record.taskId,task_id:record.taskId,
         ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
     }
+    if (record.draft_cleanup==='unknown_archive') {
+      return {status:'unknown_archive',operation,taskId:record.taskId,runId:record.runId || null,
+        task_id:record.taskId,run_id:record.runId || null,
+        executed:'unknown',archived:'unknown',draft_cleanup:'unknown_archive',
+        error:record.cleanup_error || null,error_code:record.cleanup_error_code || null,
+        next_tool:next('status',operation),
+        next_action:'tasks.archive previously failed or its reply was lost ('+(record.cleanup_error || 'unknown outcome')+'). Archive outcome is unknown; inspect task '+record.taskId+' in the Cindy task list before retrying.'};
+    }
     if (!canArchive) return {status:'manual_cleanup_required',operation,taskId:record.taskId,
       run_status:record.run?.status || null,archived:false,
       next_action:'Cindy has no public archive API. Archive this confirmed inactive task in the Cindy task list. History and the operation receipt are retained; do not resend the assignment.'};
@@ -346,10 +376,21 @@
     catch(error) {
       const err=error?.message || String(error), code=error?.code || null;
       record.cleanup_error=err;record.cleanup_error_code=code;
+      if (REJECTED.has(code)) {
+        record.draft_cleanup='needs_cleanup';
+        const saveError=await tryPersist(msg,operation,record);
+        return {status:'archive_rejected',operation,taskId:record.taskId,runId:record.runId || null,
+          task_id:record.taskId,run_id:record.runId || null,
+          executed:false,archived:false,error:err,error_code:code,
+          ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+          next_tool:next('cleanup',operation),
+          next_action:'Cindy refused tasks.archive before archiving ('+err+'). Fix the reported issue and call cleanup again.'};
+      }
+      record.draft_cleanup='unknown_archive';
       const saveError=await tryPersist(msg,operation,record);
       return {status:'unknown_archive',operation,taskId:record.taskId,runId:record.runId || null,
         task_id:record.taskId,run_id:record.runId || null,
-        executed:'unknown',archived:'unknown',error:err,error_code:code,
+        executed:'unknown',archived:'unknown',draft_cleanup:'unknown_archive',error:err,error_code:code,
         ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
         next_tool:next('status',operation),
         next_action:'tasks.archive failed or its reply was lost ('+err+'). Archive outcome is unknown; inspect task '+record.taskId+' in the Cindy task list or call status/cleanup to verify.'};
