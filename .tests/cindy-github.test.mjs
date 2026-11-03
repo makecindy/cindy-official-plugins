@@ -1018,6 +1018,20 @@ test('settings that cannot be read are not sent as "everything off"', async () =
   assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
 });
 
+test('unreadable settings do not use up the one-time to-do list either', async () => {
+  const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/pr-card', base: 'main' })).reply.result.card_id;
+  options.kvFails = true;
+  const first = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(first.reply.ok, true);
+  assert.equal(first.reply.result.todo, undefined);
+  assert.ok(first.reply.result.note.includes(zhCopy.prSettingsLater));
+  options.kvFails = false;
+  const second = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.ok(second.reply.result.todo?.length > 0, 'the to-do list is still there once the settings can be read');
+});
+
 test('a refused card does not use up the one-time settings to-do list', async () => {
   const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
   const runtime = createPrRuntime(options);
