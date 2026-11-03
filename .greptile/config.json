@@ -79,7 +79,7 @@
     {
       "id": "server-public-release-policy",
       "severity": "high",
-      "rule": "官方仓发布的是 Server public release，必须符合其公开发布边界：network.secrets[].source 禁止 oidc-token；携带 skill.items 的 public 插件只允许 Server 现有豁免 id（ios-simulator、taptap-maker、x-manager）；携带 manual 的插件必须声明 minCindyVersion。CI 在本仓执行 manifest、包结构与这些准入检查，不得 checkout Cindy 或私有 Server 仓库；review 中发现绕过、弱化或移除对应门禁必须按 P1 报。"
+      "rule": "官方仓发布的是 Server public release，必须符合其公开发布边界：network.secrets[].source 禁止 oidc-token；携带 manual 的插件必须声明 minCindyVersion。CI 在本仓执行 manifest、包结构与这些准入检查，不得 checkout Cindy 或私有 Server 仓库；review 中发现绕过、弱化或移除对应门禁必须按 P1 报。"
     },
     {
       "id": "minimum-client-version-evidence",

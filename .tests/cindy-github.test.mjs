@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
 
+// CI runs only .tests/<plugin>.test.mjs for a changed plugin; the /pr Skill's script tests ride along here.
+import './cindy-github-pr/cleanup-plan.test.mjs';
+import './cindy-github-pr/gate.test.mjs';
+import './cindy-github-pr/preflight.test.mjs';
+import './cindy-github-pr/snapshot.test.mjs';
+
 const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
   'utf8',
@@ -62,7 +68,7 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.minCindyVersion, '0.1.112');
+  assert.equal(manifest.minCindyVersion, '0.1.122');
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
