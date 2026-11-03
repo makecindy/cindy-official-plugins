@@ -142,13 +142,22 @@ export function planLocalCleanup({
   };
 }
 
+/**
+ * `owner/repo` of a remote URL whose host is exactly github.com (https, ssh:// and scp-style), else undefined.
+ * The host must stand alone: `evilgithub.com` and `github.com.evil.net` do not count.
+ */
+export function githubRepoOfUrl(url) {
+  const m = /^(?:[a-z][a-z0-9+.-]*:\/\/(?:[^/@]*@)?|[^/@:]+@)(?:www\.)?github\.com(?::\d+)?[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url));
+  return m?.[1];
+}
+
 /** `owner/repo` of every GitHub remote in `git remote -v` output, lower-cased; the whole name must match, not a prefix. */
 export function githubRepoNamesOfRemotes(remoteVerbose) {
   const names = new Set();
   for (const line of String(remoteVerbose).split('\n')) {
     const url = /^\S+\s+(\S+)/.exec(line)?.[1] ?? '';
-    const m = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(url);
-    if (m) names.add(m[1].toLowerCase());
+    const name = githubRepoOfUrl(url);
+    if (name) names.add(name.toLowerCase());
   }
   return [...names];
 }
@@ -160,7 +169,7 @@ export function remoteNameForRepo(remoteVerbose, repoName) {
     // `git remote -v` lists fetch and push URLs; the fetch one is where branches are read from.
     const m = /^(\S+)\s+(\S+)\s+\(fetch\)/.exec(line);
     if (!m) continue;
-    const repo = /github\.com[/:]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(m[2])?.[1];
+    const repo = githubRepoOfUrl(m[2]);
     if (repo && repo.toLowerCase() === wanted) return m[1];
   }
   return null;

@@ -805,3 +805,11 @@ test('a followed PR whose repository name contains __ keeps its old state file u
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('an unacknowledged failure in one workflow and a new one in another get different event keys', () => {
+  const failA = snap({ checks: [check('test', 'failed', { workflowName: 'A', required: true })] });
+  const failB = snap({ checks: [check('test', 'failed', { workflowName: 'B', required: true })] });
+  const a = decide({ snap: failA, previous: { watch: seenWatch(snap()) }, now: T0 });
+  const b = decide({ snap: failB, previous: { watch: seenWatch(snap()) }, now: T0 });
+  assert.notEqual(a.nextPendingKey, b.nextPendingKey);
+});

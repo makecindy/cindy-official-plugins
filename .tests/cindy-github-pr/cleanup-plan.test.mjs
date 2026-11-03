@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, githubRepoNamesOfRemotes, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, githubRepoOfUrl, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -162,4 +162,14 @@ test('a worktree on another branch is not the PR\'s just because it sits on the 
   assert.equal(isPrWorktree(own, { headRef: 'feature/pr', headSha: sha, fromFork: true }), true);
   assert.equal(isPrWorktree(detached, { headRef: 'feature/pr', headSha: sha, fromFork: true }), true);
   assert.equal(isPrWorktree(other, { headRef: 'feature/pr', headSha: sha, fromFork: true }), false);
+});
+
+test('only the real github.com host counts as a GitHub remote', () => {
+  assert.equal(githubRepoOfUrl('https://github.com/acme/app.git'), 'acme/app');
+  assert.equal(githubRepoOfUrl('git@github.com:Acme/App.git'), 'Acme/App');
+  assert.equal(githubRepoOfUrl('ssh://git@github.com/acme/app'), 'acme/app');
+  for (const url of ['https://evilgithub.com/acme/app.git', 'ssh://git@evilgithub.com/acme/app.git', 'git@evilgithub.com:acme/app.git',
+    'https://github.com.evil.net/acme/app', '/local/path/github.com/acme/app']) assert.equal(githubRepoOfUrl(url), undefined, url);
+  assert.deepEqual(githubRepoNamesOfRemotes('origin\thttps://evilgithub.com/acme/app.git (fetch)'), []);
+  assert.equal(remoteNameForRepo('origin\thttps://evilgithub.com/acme/app.git (fetch)', 'acme/app'), null);
 });

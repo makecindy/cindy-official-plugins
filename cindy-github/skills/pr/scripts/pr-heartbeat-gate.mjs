@@ -882,7 +882,7 @@ export function eventReport(events, snap, exhausted = false) {
 /** 这次要报的事件的身份:同一批事件重复放行才算重试。 */
 function eventKey(events) {
   const parts = events.map((e) => {
-    if (e.kind === 'checks-failed') return `${e.kind}:${e.failed.map((c) => c.name).sort().join(',')}`;
+    if (e.kind === 'checks-failed') return `${e.kind}:${e.failed.map((c) => (c.workflowName ? `${c.workflowName}\u0000${c.name}` : c.name)).sort().join(',')}`;
     if (e.kind === 'remarks') return `${e.kind}:${e.remarks.map((r) => `${r.id}@${r.at}`).sort().join(',')}`;
     if (e.kind === 'merge-queue') return `${e.kind}:${e.blockers.join(',')}`;
     if (e.kind === 'base-moved') return `${e.kind}:${e.sha}`;
