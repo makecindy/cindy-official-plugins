@@ -56,16 +56,26 @@ function poseSink(res){
 
 async function streamPng({d,res,signal,rotation,sink,control}){
   sink.begin('application/octet-stream');
-  // A requested rate (Live Screen) drops pictures sent sooner than it allows.
-  let gap=0,sentAt=0;
+  // A requested rate (Live Screen) spaces pictures; the newest one waits its
+  // turn, so a screen that goes still shows its last picture.
+  let gap=0,sentAt=0,held=null,timer=null;
   if(control)control.fps=fps=>{gap=1000/fps;};
-  await rpc(d.endpoint,'streamScreenshot',{format:0,width:720,height:1600},{unbounded:true,signal,onData:image=>{
-    if(!image.image.length||res.destroyed||res.writableLength>2e6)return;
-    const at=Date.now();
-    if(at-sentAt<gap)return;
-    sentAt=at;
+  const emit=image=>{
+    sentAt=Date.now();
     sink.frame({display:rotation.display??0,device:image.format.rotation?.rotation||0,png:true},image.image);
-  }});
+  };
+  try{
+    await rpc(d.endpoint,'streamScreenshot',{format:0,width:720,height:1600},{unbounded:true,signal,onData:image=>{
+      if(!image.image.length||res.destroyed||res.writableLength>2e6)return;
+      const wait=sentAt+gap-Date.now();
+      if(wait<=0){held=null;return emit(image);}
+      held=image;
+      if(!timer)timer=setTimeout(()=>{
+        timer=null;const next=held;held=null;
+        if(next&&!signal.aborted&&!res.destroyed)emit(next);
+      },wait);
+    }});
+  }finally{clearTimeout(timer);timer=null;held=null;}
 }
 
 async function streamAvcc({d,res,signal,rotation,sink,control,spawnEncoder=spawn}){

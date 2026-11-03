@@ -23,7 +23,7 @@ const QUIET_MS=200;
 // means the interface is turning: show the pose at once and let a probe
 // confirm it. A turn animates about 50 changes; a Home Screen that refuses
 // the pose still sends a handful, and a keyframe is not a change.
-const TURN_MS=1500,TURN_FRAMES=12;
+const TURN_MS=1500,TURN_FRAMES=12,CONFIRM_MS=1000;
 // Closing the screen while a touch runs: try to lift the finger for this long.
 const RELEASE_TRIES=30,RELEASE_WAIT_MS=100;
 // A device shut down while shown keeps its stream open and simply stops
@@ -245,11 +245,19 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(turn&&now()>turn.until)s.pendingTurn=null;
     else if(turn&&type===3&&++turn.frames>=TURN_FRAMES){
       s.pendingTurn=null;
-      if(turn.rotation!==s.rotation){s.rotation=turn.rotation;s.turnedAt=now();if(s.res&&s.size)screen(s);}
+      if(turn.rotation!==s.rotation){s.rotation=turn.rotation;s.turnedAt=now();if(s.res&&s.size)screen(s);confirmTurn(s);}
     }
     if(type===1){s.avcc=data;s.size=avccSize(data.subarray(1))||s.size;}
     else if(type===4&&!s.size)s.size=jpegSize(data.subarray(1));
     if(s.res)forward(s,type,data);
+  }
+  // Frames alone cannot prove the interface turned (a locked App playing video
+  // sends them too, and the picture keeps its portrait size), so a turn shown
+  // early is checked against the device soon after and undone if it did not turn.
+  function confirmTurn(s){
+    clearTimeout(s.confirm);
+    s.confirm=setTimeout(()=>{if(s.closed||!s.res)return;if(s.probing)s.reprobe=true;else{s.framed=false;probe(s);}},CONFIRM_MS);
+    s.confirm.unref?.();
   }
   // Probe when the picture has paused; a change during a probe asks for another.
   function settle(s){
@@ -306,7 +314,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     serve({d:s.d,agent:android().agent,res,signal:s.abort.signal,format:'avcc',sink,control:s.control}).catch(()=>{}).finally(()=>end(s));
   }
   function end(s){
-    if(s.closed)return;s.closed=true;clearTimeout(s.quiet);
+    if(s.closed)return;s.closed=true;clearTimeout(s.quiet);clearTimeout(s.confirm);
     if(sessions.get(s.key)===s)sessions.delete(s.key);
     tokens.delete(s.token);
     // Lift a finger the phone left down.

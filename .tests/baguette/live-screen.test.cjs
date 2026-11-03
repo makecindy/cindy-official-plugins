@@ -365,6 +365,24 @@ test('a turn that failed to start never turns the picture later',async t=>{
   fail=false;
 });
 
+test('a turn shown early is checked against the device and undone when a locked App did not turn',async t=>{
+  const f=fixture(t);
+  const opened=await f.live.request('liveScreen.open',{id:PHONE});
+  const ws=FakeSocket.all.at(-1),stream=await fetchStream(opened.url);t.after(()=>stream.close());
+  await until(()=>stream.messages().length>=1);
+  const rotations=()=>stream.messages().filter(m=>m[0]===0x10).map(m=>screenOf(m).rotation);
+  ws.binary(envelope(2,[1]));await until(()=>stream.messages().length>=2);
+  await until(()=>ws.probes>=1,2500);await ws.reply('portrait');
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-landscape'}]});
+  // A video keeps the picture changing, with or without a turn.
+  for(let i=0;i<13;i++)ws.binary(envelope(3,[2]));
+  await until(()=>rotations().at(-1)===1);
+  const asked=ws.probes;
+  await until(()=>ws.probes>asked,2500);
+  await ws.reply('portrait');
+  await until(()=>rotations().at(-1)===0);
+});
+
 test('moves of a finger in one batch reach the device as the latest position only',async t=>{
   const f=fixture(t);await f.live.request('liveScreen.open',{id:PHONE});const ws=FakeSocket.all.at(-1);
   const at=(phase,x)=>({kind:'touch',touches:[{id:0,x,y:0.5,phase}]});
