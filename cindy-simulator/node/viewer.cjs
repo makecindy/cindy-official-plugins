@@ -215,6 +215,8 @@ async function nativeBase(binary,deviceSet,children,clipboardAction){return (awa
 // starting anything; null when it is not running.
 function existingViewerUrl(udid,locale){
  if(!active||active.stopped||active.parked||!active.clipboard)return null;
+ // Handing out the desktop address is opening the viewer, however it got here.
+ persistSession(active,active.deviceSet);
  active.clipboard.devices.add(udid);
  return active.clipboard.base+'/control?udid='+encodeURIComponent(udid)+'&lang='+(locale==='zh-CN'?'zh-CN':'en')+'#'+active.clipboard.fragment;
 }

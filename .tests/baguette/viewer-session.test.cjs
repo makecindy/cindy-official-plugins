@@ -60,12 +60,18 @@ test('the native server started for a phone screen leaves no saved viewer addres
   if(name==='./clipboard.cjs')return {createClipboard:async()=>({session:{port:12345,token:'a'.repeat(64)}})};
   return require(name.startsWith('./')?path.resolve('cindy-simulator/node',name):name);
  }};
- vm.runInNewContext(syncFs.readFileSync('cindy-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.testBridge=initializeBridge;module.exports.testSave=persistSession;',context);
+ vm.runInNewContext(syncFs.readFileSync('cindy-simulator/node/viewer.cjs','utf8')+'\nmodule.exports.testBridge=initializeBridge;module.exports.testSave=persistSession;module.exports.setActive=value=>{active=value;};',context);
  const server={base:'http://example.test',port:12345,generation:1};
  await context.module.exports.testBridge(server,deviceSet,async()=>{},false);
  assert.equal(syncFs.existsSync(file),false,'a phone screen does not record that the desktop viewer is wanted');
  context.module.exports.testSave(server,deviceSet);
  assert.equal(JSON.parse(syncFs.readFileSync(file,'utf8')).port,12345,'opening the viewer saves the address');
+ // Handing out the address of an already running server counts as opening it too.
+ syncFs.rmSync(file);
+ const clipboard={devices:new Set(),base:'http://example.test',fragment:'f'};
+ context.module.exports.setActive({...server,clipboard,deviceSet,unsaved:{port:12345,token:'a'.repeat(64)},stopped:false,parked:false});
+ assert.match(context.module.exports.existingViewerUrl(udid,'en'),/^http:\/\/example\.test\/control\?udid=/);
+ assert.equal(syncFs.existsSync(file),true,'the address of the running desktop viewer is saved');
 });
 
 test('turning simulators off retires the saved viewer address',async t=>{
