@@ -293,6 +293,21 @@ test('stop waits a bounded time for the host: stopping is reported as such, a co
   assert.deepEqual([pollStopped.result.status,pollStopped.result.confirmed_terminal,pollStopped.result.task_id,pollStopped.result.run_id,pollStopped.result.next_tool.tool],
     ['stopping',false,'child-task','run-1','status']);
   assert.equal(pollFail.records.get(pop).state,'stopping');
+  // If tasks.cancel() or tasks.archive() loses its reply, return known handles, executed: 'unknown', and status verification.
+  const cancelLost=fixture();const clop=(await cancelLost.send('roll',{task:'x'})).result.operation;
+  cancelLost.cindy.tasks.cancel=async()=>{cancelLost.run.status='stopping';throw Error('cancel reply lost');};
+  const cancelUnknown=await cancelLost.send('stop',{operation:clop});
+  assert.equal(cancelUnknown.ok,true);
+  assert.deepEqual([cancelUnknown.result.status,cancelUnknown.result.executed,cancelUnknown.result.confirmed_terminal,cancelUnknown.result.task_id,cancelUnknown.result.run_id,cancelUnknown.result.next_tool.tool],
+    ['unknown_cancel','unknown',false,'child-task','run-1','status']);
+  const archiveLost=fixture();const alop=(await archiveLost.send('roll',{task:'x'})).result.operation;
+  archiveLost.run.status='completed';archiveLost.run.outputMessageId='out-exact';
+  await archiveLost.send('status',{operation:alop});
+  archiveLost.cindy.tasks.archive=async()=>{throw Error('archive reply lost');};
+  const archiveUnknown=await archiveLost.send('cleanup',{operation:alop});
+  assert.equal(archiveUnknown.ok,true);
+  assert.deepEqual([archiveUnknown.result.status,archiveUnknown.result.executed,archiveUnknown.result.archived,archiveUnknown.result.task_id,archiveUnknown.result.run_id,archiveUnknown.result.next_tool.tool],
+    ['unknown_archive','unknown','unknown','child-task','run-1','status']);
 });
 test('review 1: a persisted `sending` receipt without runId is settled from the host runs, never resent',async()=>{
   const f=fixture();const first=await f.send('roll',{task:'x'});
@@ -512,6 +527,10 @@ test('self: an explicit "answer here" or a short pure question is the current se
     assert.match(result.next_action, /current session/);
   }
   assert.equal(selfGate('Why does util.py fail? Fix it and add a test.'), null);
+  for (const workQuestion of ['Can you review the diff for regressions?', 'Can you translate the supplied paragraph into Japanese?']) {
+    assert.equal(selfGate(workQuestion), null, workQuestion);
+    assert.equal(routeBuiltIn(workQuestion).status, 'native', workQuestion);
+  }
 });
 
 test('native routes are exact rows of the real catalog: codex for edits, Pi for read-and-report work', () => {
@@ -605,6 +624,16 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const emptyEffort = routeBuiltIn('Rename foo to bar in util.py.', emptyEffortCatalog);
   assert.equal(emptyEffort.status, 'native');
   assert.equal(emptyEffort.route.bundle.effort, '');
+
+  const sparkOnlyCatalog = {models: [REAL_CATALOG.models.at(-1)]};
+  const sparkAlgo = routeBuiltIn('Implement a standalone algorithm.', sparkOnlyCatalog);
+  assert.equal(sparkAlgo.status, 'native', 'all host-offered efforts are ranked when static alias efforts do not overlap');
+  assert.equal(sparkAlgo.route.bundle.effort, 'xhigh');
+
+  const lunaOnlyCatalog = {models: [REAL_CATALOG.models.find(r => r.route.model === 'gpt-6-luna')]};
+  const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
+  assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
+  assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
 });
 
 test('nothing runnable: an empty or foreign catalog is blocked, never guessed', () => {

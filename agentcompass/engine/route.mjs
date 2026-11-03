@@ -36,7 +36,7 @@ export function splitGate(task) {
 
 const SELF = /\b(?:answer|reply|respond)\s+(?:it\s+)?(?:directly|here|in this (?:session|chat|conversation))\b|\bdo(?:n't| not)\s+(?:delegate|dispatch|start a (?:task|worker))\b|\bno (?:worker|sub-?task|delegation)\b|直接(?:回答|答复|回复|告诉我)|不要(?:派发|委派|开(?:子)?任务|启动(?:子)?任务)|无需(?:派发|委派)|在(?:当前|本)会话(?:里|中|内)?(?:直接)?(?:回答|完成)/i;
 const QUESTION = /^(?:what|why|how|when|where|which|who|is|are|does|do|can|should|explain|define)\b|^(?:什么|为什么|为何|怎么|如何|是否|哪个|哪些|解释|请问)|[?？]\s*$/i;
-const WORK = /\b(?:implement|fix|refactor|write|create|build|add|remove|delete|update|edit|change|migrate|run|test|deploy|install|commit|generate|rename)\b|实现|修复|重构|编写|写(?:一个|入)?|创建|新增|添加|删除|修改|更新|迁移|运行|测试|部署|安装|提交|生成|重命名|[\w.-]+\.(?:py|js|ts|mjs|cjs|go|rs|java|json|md|toml|yaml|yml)\b/i;
+const WORK = /\b(?:implement|fix|refactor|write|create|build|add|remove|delete|update|edit|change|migrate|run|test|deploy|install|commit|generate|rename|review|audit|translate|localize|investigate|research|analyze|analyse|summarize|summarise|inspect|diagnose|debug|trace|triage|verify|check|compare|benchmark|profile)\b|实现|修复|重构|编写|写(?:一个|入)?|创建|新增|添加|删除|修改|更新|迁移|运行|测试|部署|安装|提交|生成|重命名|审查|评审|审阅|翻译|排查|调查|调研|研究|分析|总结|汇总|检查|核对|定位|诊断|验证|对比|[\w.-]+\.(?:py|js|ts|mjs|cjs|go|rs|java|json|md|toml|yaml|yml)\b/i;
 
 // Work the current session should do itself: an explicit request not to delegate, or a short pure question.
 export function selfGate(task) {
@@ -165,11 +165,10 @@ export function routeTask(task, catalog, {env = process.env, now = Date.now(), q
     const canonical = canonicalOf(row.route.model);
     const spec = resolveModelSpec(canonical).spec;
     const offered = (row.efforts?.length ? row.efforts : [row.route.effort]).filter(Boolean);
-    const efforts = offered.filter(e => (spec.efforts || []).includes(e));
     const fallbackEffort = (spec.efforts || []).includes('high') ? 'high' : (spec.efforts || [])[0] || 'medium';
     row._canonical = canonical;
     row._emptyEffort = !offered.length;
-    row._efforts = efforts.length ? efforts : offered.length ? offered.slice(0, 1) : [fallbackEffort];
+    row._efforts = offered.length ? offered : [fallbackEffort];
     const entry = pool.get(canonical) || new Set();
     row._efforts.forEach(e => entry.add(e));
     pool.set(canonical, entry);

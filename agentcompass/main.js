@@ -284,7 +284,18 @@
   async function stop(msg,operation,record) {
     record=await reconcile(msg,operation,record);
     if (!record.runId) throw Error('No confirmed run to cancel. Inspect the Cindy task; unknown delivery is not resent.');
-    let run=await cindy.tasks.cancel({runId:record.runId,requestKey:operation+':cancel'});
+    let run;
+    try {run=await cindy.tasks.cancel({runId:record.runId,requestKey:operation+':cancel'});}
+    catch(error) {
+      const err=error?.message || String(error), code=error?.code || null;
+      record.cancelError=err;record.cancelErrorCode=code;
+      const saveError=await tryPersist(msg,operation,record);
+      return {status:'unknown_cancel',operation,taskId:record.taskId,runId:record.runId,task_id:record.taskId,run_id:record.runId,
+        executed:'unknown',confirmed_terminal:false,error:err,error_code:code,
+        ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+        next_tool:next('status',operation),
+        next_action:'tasks.cancel failed or its reply was lost ('+err+'). Cancellation outcome is unknown; call status to verify the run state before retrying stop or cleanup.'};
+    }
     record.run=run;record.state=run.status;
     let saveError=await tryPersist(msg,operation,record);
     let pollError=null;
@@ -331,7 +342,18 @@
     if (!canArchive) return {status:'manual_cleanup_required',operation,taskId:record.taskId,
       run_status:record.run?.status || null,archived:false,
       next_action:'Cindy has no public archive API. Archive this confirmed inactive task in the Cindy task list. History and the operation receipt are retained; do not resend the assignment.'};
-    await cindy.tasks.archive({taskId:record.taskId});
+    try {await cindy.tasks.archive({taskId:record.taskId});}
+    catch(error) {
+      const err=error?.message || String(error), code=error?.code || null;
+      record.cleanup_error=err;record.cleanup_error_code=code;
+      const saveError=await tryPersist(msg,operation,record);
+      return {status:'unknown_archive',operation,taskId:record.taskId,runId:record.runId || null,
+        task_id:record.taskId,run_id:record.runId || null,
+        executed:'unknown',archived:'unknown',error:err,error_code:code,
+        ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+        next_tool:next('status',operation),
+        next_action:'tasks.archive failed or its reply was lost ('+err+'). Archive outcome is unknown; inspect task '+record.taskId+' in the Cindy task list or call status/cleanup to verify.'};
+    }
     record.state='cleaned';const saveError=await tryPersist(msg,operation,record);
     return {status:'cleaned',operation,taskId:record.taskId,task_id:record.taskId,
       ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
