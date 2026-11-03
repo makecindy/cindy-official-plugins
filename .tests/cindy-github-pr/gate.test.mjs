@@ -798,3 +798,12 @@ test('a followed PR whose repository name contains __ keeps its old state file u
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a check that fails in a second workflow under the same name is reported too', () => {
+  const first = evaluateWatch(seenWatch(snap()), snap({ checks: [check('test', 'failed', { workflowName: 'A', required: true })] }), T0);
+  assert.deepEqual(kinds(first), ['checks-failed']);
+  const both = snap({ checks: [check('test', 'failed', { workflowName: 'A', required: true }), check('test', 'failed', { workflowName: 'B', required: true })] });
+  const second = evaluateWatch(first.next, both, T0 + MIN);
+  assert.deepEqual(second.events.map((e) => [e.kind, e.failed.map((c) => c.workflowName)]), [['checks-failed', ['B']]]);
+  assert.deepEqual(kinds(evaluateWatch(second.next, both, T0 + 2 * MIN)), [], 'neither is reported twice');
+});

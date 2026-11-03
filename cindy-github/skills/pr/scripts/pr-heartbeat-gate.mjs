@@ -723,9 +723,12 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   const checks = checksUnavailable ? [] : (snap?.checks ?? []).filter((c) => c?.name);
   if (checks.length > 0) {
     const failed = checks.filter((c) => checkOutcome(c) === 'failed');
-    const newlyFailed = failed.filter((c) => !failedChecks.includes(c.name));
+    // Two workflows can each have a check with the same name: remember failures per workflow too.
+    // (An entry stored by an older version is a bare name and still matches by name.)
+    const failedKey = (c) => (c.workflowName ? `${c.workflowName}\u0000${c.name}` : c.name);
+    const newlyFailed = failed.filter((c) => !failedChecks.includes(failedKey(c)) && !failedChecks.includes(c.name));
     if (newlyFailed.length > 0) events.push({ kind: 'checks-failed', failed: newlyFailed });
-    failedChecks = failed.map((c) => c.name);
+    failedChecks = failed.map(failedKey);
 
     const required = checks.filter((c) => c.required === true);
     const gate = required.length > 0 ? required : checks;
