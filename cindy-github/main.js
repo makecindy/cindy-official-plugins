@@ -186,6 +186,7 @@ var MESSAGES = {
     prBadPr: 'pr 需要是 GitHub PR 链接或编号',
     prBadCardId: 'card_id 无效',
     prCardNotFound: '找不到 card_id 对应的卡片，已新建一张',
+    prMovedBelow: '最新状态在下方',
     prFetchFailed: '读取 PR 信息失败({detail})，卡片按已知信息显示',
     prNextAsk: '卡片已显示。等用户点击或在对话里答复，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
     prNextApply: '卡片设置要求发完后做 todo 里的事。做完还没做的，再用 card_id 调用 pr_card，带上 renamed / following。',
@@ -305,6 +306,7 @@ var MESSAGES = {
     prBadPr: 'pr must be a GitHub pull request URL or number',
     prBadCardId: 'Invalid card_id',
     prCardNotFound: 'No card matches card_id, so a new one was created',
+    prMovedBelow: 'Latest status is below',
     prFetchFailed: 'Could not read the pull request ({detail}); the card shows what is known',
     prNextAsk: 'The card is shown. Wait for the user to click or answer in the conversation, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
     prNextApply: 'The card settings ask for the todo items after opening. Do any not done yet, then call pr_card with card_id, renamed and following.',
@@ -424,6 +426,7 @@ var MESSAGES = {
     prBadPr: 'pr には GitHub の PR URL か番号を指定してください',
     prBadCardId: 'card_id が無効です',
     prCardNotFound: 'card_id に対応するカードがないため、新しく作成しました',
+    prMovedBelow: '最新の状態は下にあります',
     prFetchFailed: 'PR 情報を取得できませんでした({detail})。分かっている情報でカードを表示します',
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での返答を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
     prNextApply: 'カード設定により、作成後に todo の操作が必要です。未完了のものを済ませてから、card_id・renamed・following を付けて pr_card を呼んでください。',
@@ -543,6 +546,7 @@ var MESSAGES = {
     prBadPr: 'pr은 GitHub PR URL이나 번호여야 합니다',
     prBadCardId: 'card_id가 올바르지 않습니다',
     prCardNotFound: 'card_id에 해당하는 카드가 없어 새로 만들었습니다',
+    prMovedBelow: '최신 상태는 아래에 있습니다',
     prFetchFailed: 'PR 정보를 읽지 못했습니다({detail}). 알고 있는 정보로 카드를 표시합니다',
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 답할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
     prNextApply: '카드 설정에 따라 PR을 만든 뒤 todo 항목을 처리해야 합니다. 아직 하지 않은 항목을 마친 뒤 card_id, renamed, following으로 pr_card를 호출하세요.',
@@ -2400,7 +2404,10 @@ async function callTool(args, callId) {
  *   continue;[UI_ACTION_TRIGGER] 前缀让这条代发消息不在对话里显示,卡片本身
  *   显示进度);查看改动与设置开关只在本地重画卡片;
  * - 卡片状态按 card_id(首次调用的 callId)存在私有数据目录,两项设置存 /kv;
- *   之后的 pr_card 调用带 sourceCallId 原地更新原卡片。
+ *   之后的 pr_card 调用带 sourceCallId 原地更新原卡片;
+ * - to_latest:卡片挪到当前这次调用(本轮末尾)显示,card_id 不变。显示位置记在
+ *   card.anchor,新位置另存一份指回 card_id 的别名,点击新位置时据此找回状态;
+ *   旧位置缩成一行「最新状态在下方」。
  * ──────────────────────────────────────────────────────────────────── */
 
 var PR_CARD_DIR = 'pr-cards';
@@ -2433,15 +2440,24 @@ function prCardPath(id) {
   return PR_CARD_DIR + '/' + id + '.json';
 }
 
-async function readPrCard(id) {
+async function readPrCard(id, viaAlias) {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: prCardPath(id) });
   if (!r || !r.ok) return null;
+  var card;
   try {
-    var card = JSON.parse(r.content);
-    return card && card.id === id ? card : null;
+    card = JSON.parse(r.content);
   } catch (e) {
     return null;
   }
+  if (!card || card.id !== id) return null;
+  // 挪过位置的卡片:新位置的点击带的是别名,只跟一层。
+  if (card.alias) return !viaAlias && PR_CARD_ID_RE.test(card.alias) ? readPrCard(card.alias, true) : null;
+  return card;
+}
+
+/** 卡片现在显示在哪次调用上:挪过位置的是 anchor,否则是 card_id 本身。 */
+function prAnchor(card) {
+  return card.anchor || card.id;
 }
 
 async function savePrCard(card) {
@@ -3025,13 +3041,40 @@ function sendPrCard(card, settings, sourceCallId) {
   var msg = {
     // 正在发、正在开启或停止跟进时报 working:宿主才播卡内转圈(静态版会剥掉动画),
     // Agent 用 pr_card 更新结果时换回 done。
-    type: 'card-update', callId: card.id, v: 2,
+    type: 'card-update', callId: prAnchor(card), v: 2,
     state: card.stage === 'publishing' || card.pending ? 'working' : 'done',
     html: renderPrCard(card, settings), height: prCardHeight(card),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
   return Promise.resolve(cindy.send(msg)).catch(function () {});
+}
+
+/** 挪走后留在原处的一行:PR 号和标题,提示最新状态在下方。没有按钮,点击不会落到这里。 */
+function renderPrMovedStub(card) {
+  var label = card.pr ? '#' + card.pr.number + ' ' + (card.pr.title || card.repo) : card.repo;
+  return '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;align-items:center;gap:6px;' +
+    'padding:10px 14px;border:1px solid var(--border-default);border-radius:12px;color:var(--text-secondary);' +
+    'font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;font-size:13px;line-height:1.5">' +
+    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + prEsc(label) + '</span> ' +
+    '<span style="flex:none">· ' + prEsc(t('prMovedBelow')) + '</span></div>';
+}
+
+/** 把卡片挪到这次调用上:新位置记别名,旧位置换成一行提示(凭这次调用重开旧卡片)。 */
+async function movePrCard(card, callId) {
+  var from = prAnchor(card);
+  var alias = await cindy.send({
+    type: 'fs-request', root: 'data', op: 'write',
+    path: prCardPath(callId), content: JSON.stringify({ id: callId, alias: card.id }),
+  });
+  // 别名写不进去时不挪:新位置的按钮会找不回卡片。
+  if (!alias || !alias.ok) return false;
+  card.anchor = callId;
+  await Promise.resolve(cindy.send({
+    type: 'card-update', callId: from, v: 2, state: 'done',
+    html: renderPrMovedStub(card), height: 44, sourceCallId: callId,
+  })).catch(function () {});
+  return true;
 }
 
 /* ── pr_card 工具 ── */
@@ -3108,8 +3151,9 @@ async function prCardTool(args, callId) {
     if (settings.autoFollow && !card.following && !card.pr.draft) todo.push(t('prTodoFollow', { url: card.pr.url }));
   }
 
+  var moved = updating && a.to_latest === true && prAnchor(card) !== callId && await movePrCard(card, callId);
   await savePrCard(card);
-  await sendPrCard(card, settings, updating ? callId : null);
+  await sendPrCard(card, settings, updating && !moved ? callId : null);
   if (!updating) await prunePrCards();
 
   var result = {

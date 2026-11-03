@@ -772,6 +772,38 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   for (const html of [askCard.html, update.html]) assert.match(html, /<div data-ghost-placement="turn-end" data-ghost-width="full" style=/);
 });
 
+test('to_latest moves the card to the current call and leaves one line where it was', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 'https://github.com/octo/repo/pull/42', following: true });
+  const cardId = first.reply.result.card_id;
+
+  const moved = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  // card_id stays the same, so the schedule prompt keeps working.
+  assert.equal(moved.reply.result.card_id, cardId);
+  const stub = runtime.lastCard(cardId);
+  assert.equal(stub.sourceCallId, moved.callId);
+  assert.deepEqual(visibleText(stub.html), [`#42 Built-in PR skill · ${zhCopy.prMovedBelow}`]);
+  assert.doesNotMatch(stub.html, /data-ghost-action/);
+  const latest = runtime.lastCard(moved.callId);
+  assert.equal(latest.sourceCallId, undefined);
+  assert.equal(visibleText(latest.html)[0], '#42 Built-in PR skill');
+
+  // A click on the new place finds the card through the alias and redraws it there.
+  await runtime.click(moved.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, cardId);
+  assert.equal(runtime.cards(cardId).length, 2);
+  assert.equal(runtime.lastCard(moved.callId).state, 'working');
+
+  // A later refresh without to_latest updates the new place in place.
+  const refresh = await runtime.tool({ card_id: cardId, following: false });
+  assert.equal(runtime.cards(refresh.callId).length, 0);
+  assert.equal(runtime.lastCard(moved.callId).sourceCallId, refresh.callId);
+
+  // The stub is left alone, and the new place's id also finds the card.
+  assert.equal(runtime.cards(cardId).length, 2);
+  assert.equal((await runtime.tool({ card_id: moved.callId })).reply.result.card_id, cardId);
+});
+
 test('card settings persist in /kv and become one-time todos once the PR exists', async () => {
   const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login', ci: 'PENDING', threads: [false, true], mergeState: 'BLOCKED' }), kv: { unrelated: 1 } });
   const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;

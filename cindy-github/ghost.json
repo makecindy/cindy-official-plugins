@@ -91,7 +91,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问:传 repo、head、base,可附 commits 与 files 改动概况(此时还不需要标题和说明)。用户点「发 PR / 发成草稿」或在对话里答复后,由 Agent 提交并创建 PR;按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片:卡片显示 PR 状态,提供「自动跟进到合并」按钮,以及发完自动改名、自动跟进两项设置,结果里的 settings / todo 说明还要做什么;renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态。卡片只在 Cindy 自己的对话界面显示,IM 渠道看不到。",
+      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问:传 repo、head、base,可附 commits 与 files 改动概况(此时还不需要标题和说明)。用户点「发 PR / 发成草稿」或在对话里答复后,由 Agent 提交并创建 PR;按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片:卡片显示 PR 状态,提供「自动跟进到合并」按钮,以及发完自动改名、自动跟进两项设置,结果里的 settings / todo 说明还要做什么;renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态;需要提醒用户时加 to_latest,把卡片挪到最新一轮。卡片只在 Cindy 自己的对话界面显示,IM 渠道看不到。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -151,6 +151,10 @@
           "following": {
             "type": "boolean",
             "description": "后台跟进已开启(true)或已停止(false)"
+          },
+          "to_latest": {
+            "type": "boolean",
+            "description": "把卡片挪到这次调用的位置(本轮回复末尾)显示,原位置留一行提示;只在要提醒用户看卡片时传(可以合并、等用户决定、已合并或关闭)"
           }
         }
       }
