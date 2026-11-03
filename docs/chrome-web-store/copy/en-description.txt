@@ -13,10 +13,10 @@ Read the web. Follow the video.
 • Read PDF documents and import subtitle files.
 
 Enable more when you need it
-With Chrome's optional debugging permission enabled in extension Options, Cindy can export webpages as PDF, capture full-page or background-tab screenshots, upload files, and run browser tasks that need debugging or network access. Optional tab grouping helps identify Cindy's pages.
+Cindy can upload files to webpages as part of a browser task. Exporting webpages as PDF and tasks that need debugging or network access use Cindy's dedicated browser. Optional tab grouping helps identify Cindy's pages.
 
 Getting started
 Requires a current Cindy desktop application and a configured AI text model. Enable the Cindy Chrome plugin for reading and translation, and keep Cindy running while using these features. To let Cindy work in your Chrome, select My browser in Cindy's browser settings. This extension does not include an AI subscription. Model availability, translation quality, and response time depend on your selected provider and settings. Some browser-protected pages cannot be accessed.
 
 How data is processed
-When you request translation or browser assistance, relevant page text, subtitles, documents, images, form values, URLs, and task results may be sent to Cindy on your computer and processed by your configured AI provider. Depending on your task, this may include personal communications, health or financial information, location information, and authentication data. With optional debugging permission, browser tasks can also access site cookies and network information. Cindy can execute task-specific JavaScript in a webpage's context. Review the task and permission settings in Cindy before granting access to sensitive pages.
+When you request translation or browser assistance, relevant page text, subtitles, documents, images, form values, URLs, and task results may be sent to Cindy on your computer and processed by your configured AI provider. Depending on your task, this may include personal communications, health or financial information, location information, and authentication data. Cindy can execute task-specific JavaScript in a webpage's context. Review the task and permission settings in Cindy before granting access to sensitive pages.

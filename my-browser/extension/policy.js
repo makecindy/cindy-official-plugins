@@ -80,7 +80,7 @@
     if (!READ.includes(action) && !INTERACT.includes(action)) throw new Error('Unsupported browser action.');
     if (!UNADDRESSED.includes(action) && (typeof payload.url !== 'string' || payload.url.length > 8192)) throw new Error('Provide a full URL of at most 8192 characters.');
     if (payload.browser != null && (typeof payload.browser !== 'string' || payload.browser.length > 128)) throw new Error('Invalid browser connection id.');
-    if (payload.limit != null && (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100)) throw new Error('Limit must be 1–100.');
+    if (payload.limit != null && (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > (action === 'snapshot' ? 500 : 100))) throw new Error('Limit must be 1–'+(action === 'snapshot' ? 500 : 100)+'.');
     if (payload.maxChars != null && (!Number.isInteger(payload.maxChars) || payload.maxChars < 256 || payload.maxChars > 30000)) throw new Error('maxChars must be 256–30000.');
     if (payload.waitMs != null && (!Number.isInteger(payload.waitMs) || payload.waitMs < 0 || payload.waitMs > 15000)) throw new Error('waitMs must be 0–15000.');
     if (payload.host != null) normalizeHost(payload.host);
@@ -98,7 +98,12 @@
     if (action === 'responseBody' && (typeof payload.requestUrl !== 'string' || payload.requestUrl.length > 8192)) throw new Error('responseBody needs the request URL.');
     if (action === 'dialog' && payload.promptText != null && (typeof payload.promptText !== 'string' || payload.promptText.length > 16000)) throw new Error('Invalid promptText.');
     // Paths let Chrome read the files itself through the debugger; bytes are the fallback without it.
-    if (action === 'upload' && payload.files == null && payload.paths == null) throw new Error('upload needs files or paths.');
+    if (action === 'upload' && payload.op != null) {
+      if (!['begin','chunk','finish','abort'].includes(payload.op)) throw new Error('upload op must be begin, chunk, finish or abort.');
+      if (typeof payload.transfer !== 'string' || !payload.transfer || payload.transfer.length > 64) throw new Error('Invalid upload transfer.');
+      if (payload.op === 'begin' && (!Array.isArray(payload.chunkFiles) || !payload.chunkFiles.length || payload.chunkFiles.length > 20 || payload.chunkFiles.some(f => !f || typeof f.name !== 'string' || !f.name || f.name.length > 255 || (f.mimeType != null && (typeof f.mimeType !== 'string' || f.mimeType.length > 200))))) throw new Error('upload begin needs 1–20 files with a name.');
+      if (payload.op === 'chunk' && (!Number.isInteger(payload.file) || payload.file < 0 || payload.file > 19 || typeof payload.data !== 'string' || payload.data.length > 6000000)) throw new Error('upload chunk needs a file index and at most about 4 MB of base64 data.');
+    } else if (action === 'upload' && payload.files == null && payload.paths == null) throw new Error('upload needs files or paths.');
     if (action === 'upload' && payload.files != null && (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 20 || payload.files.some(f => !f || typeof f.name !== 'string' || !f.name || f.name.length > 255 || typeof f.data !== 'string' || (f.mimeType != null && (typeof f.mimeType !== 'string' || f.mimeType.length > 200))))) throw new Error('upload needs 1–20 files with name and base64 data.');
     if (action === 'upload' && payload.files != null && payload.files.reduce((n, f) => n + f.data.length, 0) > 40000000) throw new Error('Upload files must total at most about 30 MB.');
     if (action === 'upload' && payload.paths != null && (!Array.isArray(payload.paths) || !payload.paths.length || payload.paths.length > 20 || payload.paths.some(p => typeof p !== 'string' || !p || p.length > 4096 || !(/^\//.test(p) || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\[^\\/]/.test(p))) || (payload.files != null && payload.files.length !== payload.paths.length))) throw new Error('upload paths must be 1–20 absolute file paths, one per file.');

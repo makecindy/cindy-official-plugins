@@ -54,3 +54,25 @@ test('native registration is ready before the browser has ever created a profile
  assert.equal(JSON.parse(await fs.readFile(path.join(profile,'NativeMessagingHosts',HOST+'.json'))).name,HOST);
  await n.close();
 });
+
+test('one browser directory failure does not abort native installation',async t=>{
+ const {dir,binary}=await fixture(t),home=path.join(dir,'home');
+ const bad=path.join(home,'Library/Application Support/Dia/NativeMessagingHosts');
+ await fs.mkdir(path.dirname(bad),{recursive:true});await fs.symlink(dir,bad);
+ const n=createNativeBinding({root:path.join(dir,'native'),binary,platform:'darwin',home});
+ assert.equal((await n.install(18819,['a'.repeat(32)])).ok,true);
+ assert.equal(n.status(),'ready');
+ const host=HOST+'.json';
+ assert.equal(JSON.parse(await fs.readFile(path.join(home,'Library/Application Support/BraveSoftware/Brave-Origin/NativeMessagingHosts',host))).name,HOST);
+ assert.equal(JSON.parse(await fs.readFile(path.join(home,'Library/Application Support/Google/Chrome/NativeMessagingHosts',host))).name,HOST);
+ await assert.rejects(fs.readFile(path.join(bad,host)));
+ await n.close();
+});
+test('native installation still fails when every browser directory fails',async t=>{
+ const {dir,binary}=await fixture(t);
+ const a=path.join(dir,'a'),b=path.join(dir,'b');
+ await fs.writeFile(a,'x');await fs.writeFile(b,'y');
+ const n=createNativeBinding({root:path.join(dir,'native'),binary,platform:'darwin',profiles:[a,b]});
+ assert.equal((await n.install(18819,['a'.repeat(32)])).ok,false);
+ assert.equal(n.status(),'unavailable');
+});

@@ -18,6 +18,7 @@ description: 升级或审查 Cindy 官方 tap制造插件随包 Maker MCP Runtim
 ## 先确定证据和范围
 
 1. 在仓库根读取 AGENTS.md、README、docs/plugin-authoring.zh-CN.md、docs/taptap-maker-maintenance.zh-CN.md 和 .greptile 审查契约。检查工作树，保留用户现有改动。
+   每轮升级在修改插件前先 fetch 并核对最新官方 main，从该提交新建本轮分支，记录分支名和基线 SHA；恢复同一轮任务时沿用该分支。不得直接在 main 修改、提交或推送，不复用已合并 PR 的分支；脏树不能安全切换时使用独立工作树。只读审查不要求建分支。
 2. 读取 [逐提交清单](references/history.md)，运行 `node .agents/skills/taptap-maker-runtime-upgrade/scripts/check-history.mjs`。脚本只读本地 Git，不联网、不改文件；它检查普通提交和合并独有差异，并另列共享文件候选。
 3. 确认是否浅克隆、refs 是否新鲜。经正常只读 Git/API 获取缺失历史；网络或权限失败就记录缺口，不把本地 `--all` 称为全平台全部历史。路径重命名、测试、配方、文档、provisioning 和共享发布脚本都要纳入。
 4. 对新增候选逐个读实际 diff：`git show --format=fuller <hash> -- <paths>`。合并用 `git show --cc` 并与各父提交比较；超大 vendor diff 分函数/资产审查，不把截断输出、标题或版本号当证据。更新清单的来源、替代关系和对应验收项。
@@ -52,4 +53,4 @@ git diff --check
 
 最终直接回答：历史保护逐项结论、实际改动、未解决高风险/未知项、测试和设备缺口。不要只给文件链接。若用户问分支权限，区分本地建分支与远端 push，核实认证账号和仓库权限；不要根据 Git author 或 fork 的存在猜测权限。
 
-提交前遵守仓库版本、许可证、双语、四语言、DCO 门禁；用户没有要求就不提交。未提交改动只能用配方 ID/文件定位，不能编造 hash；有真实提交后再补清单。新会话可通过 `$taptap-maker-runtime-upgrade` 或同名 Skill 调用。
+提交前核对当前为本轮升级分支而非 main，且未对应已合并 PR；push 显式指定已核实的 remote 和本轮 head 分支。遵守仓库版本、许可证、双语、四语言、DCO 门禁；用户没有要求就不提交。未提交改动只能用配方 ID/文件定位，不能编造 hash；有真实提交后再补清单。新会话可通过 `$taptap-maker-runtime-upgrade` 或同名 Skill 调用。

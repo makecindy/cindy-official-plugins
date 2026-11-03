@@ -4,6 +4,16 @@
 
 ## Read first
 
+### 2.1.26: Runtime 0.0.40
+
+Use the official npm release and a separate 0.0.40 recipe, retaining V1-V10.
+V5 follows the new bundle aliases; V10 follows the updated 015 live-canvas read
+and import-error message while preserving stop and uncertain-request safeguards.
+New Git cloud-status/cloud-diff/cloud-commit guidance maps to the Maker project
+page and authorized plugin build entry; uncertain outcomes must not be retried blindly.
+Upstream adds preview validate --network; maker_validate still exposes only
+single-player parameters, so upstream support is not plugin network-validation support.
+
 ### 2.1.25: Runtime 0.0.39 and request windows
 
 Use the official npm release from local cache with a dedicated 0.0.39 recipe,

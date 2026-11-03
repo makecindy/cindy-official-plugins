@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {createLiveAgent}=require('../../baguette-simulator/node/physical/live-agent.cjs');
+const {createLiveAgent}=require('../../cindy-simulator/node/physical/live-agent.cjs');
 const screen={width:400,height:800,displayId:1,rotation:'rot0'},d={udid:'00000000-0000-4000-8000-000000000001'};
 function fixture(t){
  const calls=[];let leases=0,failed=false;
@@ -37,10 +37,10 @@ test('expired cached or newly acquired frames never permit a new touch or Home a
 test('text lookup still uses accessibility, input preserves Unicode, and snapshots use live frame provenance',async t=>{
  const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'agent-live-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
- const {jpeg}=require('../../baguette-simulator/vendor/android/deps.cjs');
+ const {jpeg}=require('../../cindy-simulator/vendor/android/deps.cjs');
  const screen={width:2,height:3,displayId:1,rotation:'rot0'},calls=[];
  const live={actions:async(d,p,paths)=>{calls.push({paths});return {udid:d.udid,execution:'executed',transport:'continuous'};},snapshot:async()=>({image:jpeg.encode({width:2,height:3,data:Buffer.alloc(24,255)},90).data.toString('base64'),screen,source:'live-video',capturedAt:1000,frameAgeMs:30,sequence:9})};
- const agent=require('../../baguette-simulator/node/physical/agent.cjs').createAgent({root,live,devices:{screen:async()=>screen,capture:()=>{throw Error('must not capture separately');}},wda:{call:async(d,route,p,body)=>{
+ const agent=require('../../cindy-simulator/node/physical/agent.cjs').createAgent({root,live,devices:{screen:async()=>screen,capture:()=>{throw Error('must not capture separately');}},wda:{call:async(d,route,p,body)=>{
   if(route==='/wda/apps/list')return [];
   if(route==='/source?format=json')return {type:'XCUIElementTypeButton',label:'Next',name:'next',rect:{x:0,y:1,width:2,height:1}};
   if(route==='/cindy/keyboard-ready')return {ready:true};

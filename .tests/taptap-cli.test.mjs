@@ -67,6 +67,18 @@ const FIXTURE_TREE = {
     ['get-community-moment', 'Get one community moment'],
     ['list-community-moments', 'List community moments'],
   ],
+  'game-sign': [
+    ['get-game-sign-config', 'Read sign config'],
+    ['save-game-sign-award', 'Save a daily award'],
+  ],
+  'official-message-push': [
+    ['get-official-message-push-info', 'Read quota and followers'],
+    ['create-official-message-push-task', 'Create a push task'],
+  ],
+  'whats-new': [
+    ['get-whats-new-overview', 'Read capacity and top slots'],
+    ['create-whats-new', 'Create a display entry'],
+  ],
   'dashboard-stats': [
     ['get-dashboard-stats', 'Query dashboard stats metrics'],
     ['get-dashboard-position-options', 'List the positions a metric accepts'],
@@ -117,6 +129,9 @@ const FIXTURE_RISK = {
   'app partial-op': 'write',
   'app unavail-op': 'write',
   'app crash-op': 'write',
+  'game-sign save-game-sign-award': 'write',
+  'official-message-push create-official-message-push-task': 'write',
+  'whats-new create-whats-new': 'write',
 };
 
 const FIXTURE_SCHEMA = [
@@ -124,6 +139,9 @@ const FIXTURE_SCHEMA = [
   { name: 'app create-app', description: 'Create', _meta: { risk: 'write' } },
   { name: 'asset-library search-assets', description: 'Search', _meta: { risk: 'read' } },
   { name: 'community-management list-community-moments', description: 'Community moments', inputSchema: { type: 'object', properties: { moment_intent: { type: 'array', items: { type: 'string' } } } }, _meta: { risk: 'read' } },
+  { name: 'game-sign save-game-sign-award', description: 'Save award', inputSchema: { type: 'object', properties: { days: { type: 'integer' } } }, _meta: { risk: 'write' } },
+  { name: 'official-message-push create-official-message-push-task', description: 'Create push', inputSchema: { type: 'object', properties: { preview_fingerprint: { type: 'string' } } }, _meta: { risk: 'write' } },
+  { name: 'whats-new create-whats-new', description: 'Create display entry', inputSchema: { type: 'object', properties: { top_types: { type: 'array', items: { type: 'string' } } } }, _meta: { risk: 'write' } },
   { name: 'dashboard-stats get-dashboard-stats', description: 'Stats', _meta: { risk: 'read' } },
 ];
 
@@ -825,6 +843,29 @@ test('a new read domain keeps its catalogue schema in the drill-down', async () 
   assert.ok(fromCatalog.inputSchema, 'the catalogue operation keeps its argument schema');
   const completionOnly = operations.find((op) => op.name === 'community-management get-community-moment');
   assert.ok(completionOnly, 'completion-only commands stay reachable');
+});
+
+test('the interaction operations domains keep their catalogue schema in the drill-down', async () => {
+  // The three 2026.10.31 interaction operations ship with bundled manuals and
+  // route through list_tools(category:"<service>"); a service missing from
+  // SERVICE_DESCRIPTIONS only returns completion names, so the agent cannot
+  // see inputSchema/risk without a separate schema call.
+  for (const service of ['whats-new', 'official-message-push', 'game-sign']) {
+    assert.match(workerSource, new RegExp(`'${service}':`), `${service} has a display description`);
+  }
+  const [whatsNew, push, sign] = await callWorker([
+    listTools('whats-new', { cli_path: fakeCli }),
+    listTools('official-message-push', { cli_path: fakeCli }),
+    listTools('game-sign', { cli_path: fakeCli }),
+  ]);
+  const expectOp = (reply, name) => {
+    const operation = reply.result.data.operations.find((op) => op.name === name);
+    assert.ok(operation, `${name} is listed`);
+    assert.ok(operation.inputSchema, `${name} keeps its argument schema`);
+  };
+  expectOp(whatsNew, 'whats-new create-whats-new');
+  expectOp(push, 'official-message-push create-official-message-push-task');
+  expectOp(sign, 'game-sign save-game-sign-award');
 });
 
 test('forum data statistics route through the data manual, not the post manual', () => {
@@ -1697,4 +1738,38 @@ test('lifecycle decisions key off the normalized status, never the raw code', ()
       text, /(?:回到|仍是|已经是|进入)\s?`[0-5]`/,
       `${name}: a lifecycle narration keys off the raw status code`);
   }
+});
+
+test('the 2026.10.31 interaction operations manuals are routed and carry their safety rules', () => {
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  for (const name of ['taptap-whats-new', 'taptap-official-message-push', 'taptap-game-sign']) {
+    assert.match(
+      suite,
+      new RegExp(`taptap-suite/references/${name}/MANUAL\\.md`),
+      `the suite entry must route to ${name}`,
+    );
+  }
+  assert.match(suite, /interactive-operations-flow\.md/, 'the suite entry must route to the cross-domain flow');
+
+  // The new domains must be reachable from the entry with their own rules,
+  // not just listed: each manual keeps the gate that the CLI cannot infer.
+  const whatsNew = read('taptap-suite/references/taptap-whats-new/MANUAL.md');
+  assert.match(whatsNew, /创建即启用/, 'whats-new creation is online immediately');
+  assert.match(whatsNew, /top_types/, 'the top-slot replacement rule must be explicit');
+
+  const push = read('taptap-suite/references/taptap-official-message-push/MANUAL.md');
+  assert.match(push, /preview_fingerprint/, 'push creation must carry the preview fingerprint');
+  assert.match(push, /不能默认全部/, 'the push scope must not default to all followers');
+
+  const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
+  assert.match(sign, /check-game-sign-readiness/, 'sign review must be gated on readiness');
+  assert.match(sign, /award_id/, 'daily awards must be addressed by award_id');
+  assert.match(sign, /card_id/, 'cards must be addressed by card_id');
+
+  const codes = read('taptap-suite/references/taptap-game-sign/references/code-import.md');
+  assert.match(codes, /confirm_hash/, 'code import must require the preview hash');
+  assert.match(codes, /task_id/, 'code import must resume the same task');
+  assert.match(codes, /禁止自动再提交或换 key 重导/, 'unknown submissions are not free retries');
 });

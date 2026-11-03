@@ -26,7 +26,9 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
   const digestOf=async value=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('');};
   // A video identity never includes playback time, page title or the browser
   // profile: two extension connections watching the same video share one task.
-  function videoKey(url){
+  function videoKey(source){
+    if(source?.videoId)return source.videoId;
+    const url=source?.url||'';
     if(!url)return null;
     try{const u=new URL(url);if(/(^|\.)youtube\.com$/.test(u.hostname)&&u.searchParams.get('v'))return 'youtube:'+u.searchParams.get('v');u.hash='';return u.href;}
     catch{return url;}
@@ -51,7 +53,7 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
       (state.pending.runId!==undefined&&!nonempty(state.pending.runId))))fail('TASK_BINDING_INVALID');
     if(state.videos!==undefined&&(typeof state.videos!=='object'||Array.isArray(state.videos)||Object.values(state.videos).some(e=>!validEntry(e))))fail('TASK_BINDING_INVALID');
     const perVideo=caps.hiddenTasks===true;
-    const key=perVideo?videoKey(args?.source?.url||''):null;
+    const key=perVideo?videoKey(args?.source):null;
     let entry,task;
     if(key){
       const scope=args?.scope||'';

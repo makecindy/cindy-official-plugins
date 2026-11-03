@@ -18,7 +18,7 @@ function harness(width, height) {
     clear() { dots = []; },
   };
   const context = { window: { addEventListener() {}, document: { addEventListener() {} } }, setTimeout(fn) { idle = fn; return 1; }, clearTimeout() {} };
-  const dir = path.join(__dirname, '../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
+  const dir = path.join(__dirname, '../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
   for (const name of ['attachable-event-source', 'wheel-gesture-source']) {
     vm.runInNewContext(fs.readFileSync(path.join(dir, name + '.js'), 'utf8'), context);
   }

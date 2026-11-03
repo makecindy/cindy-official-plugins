@@ -62,10 +62,11 @@ permission gate.
 | <img src="./qq-mail/assets/icon.png" width="22" alt=""> | QQ Mail | [`qq-mail`](./qq-mail) | Cindy stores the authorization code securely; search, read, organize, and send via IMAP/SMTP on demand |
 | <img src="./yahoo-mail/assets/icon.png" width="22" alt=""> | Yahoo Mail | [`yahoo-mail`](./yahoo-mail) | Cindy stores the app password securely; manage and send Yahoo Mail via IMAP/SMTP on demand |
 | <img src="./taptap-maker/assets/icon.png" width="22" alt=""> | TapTap Maker | [`taptap-maker`](./taptap-maker) | Account connection, project sync, builds, and official news tools |
-| <img src="./baguette-simulator/assets/icon.png" width="22" alt=""> | Device Simulator | [`baguette-simulator`](./baguette-simulator) | Cindy's official Device Simulator (built on open-source Baguette) with a private device set and live sidebar control; replaces the retired embedded simulator; marketplace install |
+| <img src="./cindy-simulator/assets/icon.png" width="22" alt=""> | Device Simulator | [`cindy-simulator`](./cindy-simulator) | Cindy's official Device Simulator (built on open-source Baguette) with a private device set and live sidebar control; replaces the retired embedded simulator; marketplace install |
 | <img src="./ios-simulator/assets/icon.png" width="22" alt=""> | iOS Simulator | [`ios-simulator`](./ios-simulator) | Host-owned embedded workflow; Host-authorized fallback hands off the exact task and device to a named external workflow; staged rollout |
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | Search X (Twitter) and post to it — xAI x_search with Grok-subscription / API-key fallback, posting via the official X API v2; currently in a targeted rollout |
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | Push notifications to your phone or desktop through your own ntfy server; the access token is stored by Cindy and sent only to that server; opt-in |
+| <img src="./decision-gate/assets/icon.png" width="22" alt=""> | Decision Gate | [`decision-gate`](./decision-gate) | Decides by your rules: picks a model when a new task starts and judges before an automation or routine runs whether it needs to |
 
 Missing a plugin you want? [Propose it](#submit-your-plugin) — or build it
 yourself and submit it here.
@@ -432,7 +433,7 @@ test package; authors or maintainers supply runtime and compatibility evidence
 appropriate to the affected behavior before merge. Valid evidence for unaffected
 paths can be reused without reinstalling after every wording change.
 
-`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.39`
+`taptap-maker/vendor/taptap-maker/` ships the official `@taptap/maker@0.0.40`
 with the plugin. When upgrading, replace the published npm package content
 wholesale and bump the plugin version accordingly. Preserve these reviewed Cindy
 compatibility patches until the official package includes equivalent fixes:

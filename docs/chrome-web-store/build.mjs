@@ -257,7 +257,7 @@ try {
       );
       await permissions.goto("https://extension-demo.test/permissions.html");
       await permissions.waitForFunction(
-        () => document.querySelector("#debug-title").textContent.length > 0,
+        () => document.querySelector("#group-title").textContent.length > 0,
       );
       await permissions.screenshot({
         path: path.join(out, `source/permissions-${locale}.png`),

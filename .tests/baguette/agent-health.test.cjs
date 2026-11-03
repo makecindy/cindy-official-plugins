@@ -1,8 +1,8 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),syncFs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm'),http=require('node:http');
-const {createRuntime}=require('../../baguette-simulator/node/runtime.cjs');
-const {createTaskBindings}=require('../../baguette-simulator/node/tasks.cjs');
+const {createRuntime}=require('../../cindy-simulator/node/runtime.cjs');
+const {createTaskBindings}=require('../../cindy-simulator/node/tasks.cjs');
 const A='00000000-0000-4000-8000-000000000001',B='00000000-0000-4000-8000-000000000002';
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 async function fixture(t,extra={}){
@@ -19,7 +19,7 @@ test('healthy HTTP service is reusable after the listening log scrolls away',asy
  let probes=0;
  const server=http.createServer((req,res)=>{probes++;assert.equal(req.url,'/simulators');res.end('[]');});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const file=path.resolve('baguette-simulator/node/viewer.cjs');
+ const file=path.resolve('cindy-simulator/node/viewer.cjs');
  const context={module:{exports:{}},require:require('node:module').createRequire(file),process,Buffer,setTimeout,clearTimeout,Date};
  vm.runInNewContext(syncFs.readFileSync(file,'utf8')+'\nmodule.exports.readyForTest=ready;',context);
  const current={child:{exitCode:null,signalCode:null},log:'[baguette] start: format=avcc\n'.repeat(180).slice(-4000),base:`http://127.0.0.1:${server.address().port}`};

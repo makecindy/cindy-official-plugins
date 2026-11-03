@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const android=path.resolve(__dirname,'../../baguette-simulator/node/android');
+const android=path.resolve(__dirname,'../../cindy-simulator/node/android');
 const gestures=path.resolve(android,'../../vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
 const read=(dir,name)=>fs.readFileSync(path.join(dir,name),'utf8');
 const copy=value=>JSON.parse(JSON.stringify(value));

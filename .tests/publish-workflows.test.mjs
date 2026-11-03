@@ -55,7 +55,9 @@ test('changed-plugin detection uses the merge parents even when event base is st
     const run = mkdtempSync(path.join(os.tmpdir(), 'cindy-plugin-pr-output-'));
     t.after(() => rmSync(run, { recursive: true, force: true }));
     const output = path.join(run, 'output');
-    execFileSync('bash', ['-c', script], {
+    const scriptPath = path.join(run, 'detect.sh');
+    writeFileSync(scriptPath, script);
+    execFileSync('bash', [scriptPath], {
       cwd: fixture,
       encoding: 'utf8',
       env: { ...process.env, BASE_SHA: staleBase, HEAD_SHA: prHead, RUNNER_TEMP: run, GITHUB_OUTPUT: output },
@@ -142,7 +144,9 @@ test('PR packaging stages only complete packages with matching hash and merge id
   const output = path.join(fixture, 'output');
   const env = { ...process.env, RUNNER_TEMP: fixture, GITHUB_OUTPUT: output, HEAD_SHA: head,
     PLUGINS: JSON.stringify([{ directory: 'first-plugin' }, { directory: 'second-plugin' }]) };
-  const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], { cwd: build, env, encoding: 'utf8' });
+  const scriptPath = path.join(fixture, 'package.sh');
+  writeFileSync(scriptPath, script);
+  const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', scriptPath], { cwd: build, env, encoding: 'utf8' });
   const result = run();
   assert.equal(result.status, 0, result.stderr);
   const staged = readFileSync(output, 'utf8').trim().replace(/^directory=/, '');
@@ -151,7 +155,9 @@ test('PR packaging stages only complete packages with matching hash and merge id
     const dir = path.join(staged, directory);
     assert.deepEqual(readdirSync(dir).sort(), ['plugin.cindy', 'plugin.cindy.sha256', 'source.json']);
     const hash = createHash('sha256').update(readFileSync(path.join(dir, 'plugin.cindy'))).digest('hex');
-    assert.equal(readFileSync(path.join(dir, 'plugin.cindy.sha256'), 'utf8'), `${hash}  plugin.cindy\n`);
+    assert.ok([`${hash}  plugin.cindy\n`, `${hash} *plugin.cindy\n`].includes(
+      readFileSync(path.join(dir, 'plugin.cindy.sha256'), 'utf8'),
+    ));
     assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'source.json'), 'utf8')), {
       pluginDirectory: directory, prHeadSha: head, baseSha: base, buildCommit: merge,
     });
@@ -297,8 +303,12 @@ if (url === 'https://oidc.example.test/token?request=1&audience=cindy-plugin') {
       GITHUB_OUTPUT: path.join(built, 'output'), ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'fixture-request-token',
       ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.test/token?request=1',
       ['CINDY_PLUGIN_PLATFORM_URL_' + region]: 'https://platform.example.test/publish',
-      DELIVERED_PACKAGE: path.join(fixture, region + '-delivered.cindy') };
-    const run = (name, cwd = build) => execFileSync('bash', ['-e', '-o', 'pipefail', '-c', script(workflow, name)], { cwd, env, encoding: 'utf8', stdio: 'pipe' });
+      DELIVERED_PACKAGE: path.join(fixture, region + '-delivered.cindy'), FIXTURE_BIN: bin };
+    const run = (name, cwd = build) => {
+      const scriptPath = path.join(fixture, 'workflow.sh');
+      writeFileSync(scriptPath, 'export PATH="$(cd "$FIXTURE_BIN" && pwd):$PATH"\n' + script(workflow, name));
+      return execFileSync('bash', ['-e', '-o', 'pipefail', scriptPath], { cwd, env, encoding: 'utf8', stdio: 'pipe' });
+    };
     run('Package plugin');
     run('Record package identity');
     const recorded = readFileSync(env.GITHUB_OUTPUT, 'utf8');
@@ -411,7 +421,9 @@ if (filter) {
   process.stdout.write(json.endsWith('\\n') ? json : json + '\\n');
 }
 `, { mode: 0o755 });
-  const result = spawnSync('bash', ['-c', extractGuidanceScript()], {
+  const scriptPath = path.join(fixture, 'guidance.sh');
+  writeFileSync(scriptPath, 'export PATH="$(cd "$FIXTURE_BIN" && pwd):$PATH"\n' + extractGuidanceScript());
+  const result = spawnSync('bash', [scriptPath], {
     cwd: work,
     encoding: 'utf8',
     env: {
@@ -421,6 +433,7 @@ if (filter) {
       REPO: 'makecindy/cindy-official-plugins',
       PR: '161',
       GUIDANCE_FIXTURE: data,
+      FIXTURE_BIN: bin,
       GUIDANCE_RETRY_SLEEP: '0',
     },
   });

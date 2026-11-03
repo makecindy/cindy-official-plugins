@@ -37,8 +37,8 @@ function createNativeBinding(options={}) {
         const reg=path.join(env.SystemRoot||env.WINDIR||'C:\\Windows','System32','reg.exe');
         for(const vendor of ['Google\\Chrome','Microsoft\\Edge','BraveSoftware\\Brave-Browser'])await run(reg,['ADD','HKCU\\Software\\'+vendor+'\\NativeMessagingHosts\\'+HOST,'/ve','/t','REG_SZ','/d',file,'/f'],{windowsHide:true,timeout:10000});
       } else {
-        const profiles=options.profiles||(platform==='darwin'?['Google/Chrome','Google/Chrome for Testing','Chromium','Microsoft Edge','BraveSoftware/Brave-Browser'].map(p=>path.join(home,'Library/Application Support',p)):['google-chrome','google-chrome-for-testing','chromium','microsoft-edge','BraveSoftware/Brave-Browser'].map(p=>path.join(env.XDG_CONFIG_HOME||path.join(home,'.config'),p)));
-        for(const profile of profiles){const dir=path.join(profile,'NativeMessagingHosts');await privateDirectory(dir);await atomic(path.join(dir,HOST+'.json'),JSON.stringify(manifest));}
+        const profiles=options.profiles||(platform==='darwin'?['Google/Chrome','Google/Chrome for Testing','Chromium','Microsoft Edge','BraveSoftware/Brave-Browser','BraveSoftware/Brave-Origin','Dia'].map(p=>path.join(home,'Library/Application Support',p)):['google-chrome','google-chrome-for-testing','chromium','microsoft-edge','BraveSoftware/Brave-Browser'].map(p=>path.join(env.XDG_CONFIG_HOME||path.join(home,'.config'),p)));
+        let registered=0;for(const profile of profiles){try{const dir=path.join(profile,'NativeMessagingHosts');await privateDirectory(dir);await atomic(path.join(dir,HOST+'.json'),JSON.stringify(manifest));registered++;}catch(e){const reason=['EACCES','EPERM','ENOENT','EROFS','EBUSY'].includes(e?.code)?e.code:e?.message==='NATIVE_PATH_UNSAFE'?'NATIVE_PATH_UNSAFE':'INSTALL_FAILED';console.error('Cindy native binding skipped a browser directory: '+reason);}}if(!registered)throw Error('INSTALL_FAILED');
       }
       config=path.join(root,'connections',port+'.json');await atomic(config,JSON.stringify({token}));
       state='ready';return {ok:true};

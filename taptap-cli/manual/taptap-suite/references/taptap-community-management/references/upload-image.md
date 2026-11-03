@@ -67,4 +67,4 @@ call_tool(name:"community-management +upload-image", args:{
 | 400 `invalid_argument` | 扩展名/文件头/参数不合法 | 按提示修文件或参数 |
 | 413 | 超过平台 multipart 上限 | 压缩或裁剪图片 |
 | 503 `temporarily_unavailable` | 图片服务或社区上游不可用,这次请求可能已经到达服务端 | 结果不确定:先核对这次上传是否已产出 `url`(本次响应或用户侧记录),确认没生效再用同一个 `idempotency_key` 续跑,不要重复上传多份 |
-| `failed_precondition`,提示命令不可执行 | 当前 CLI 版本或环境还不支持社区图片上传 | 升级 CLI 或等元数据更新;不要改用素材库 `upload` 凑合 |
+| `failed_precondition`,提示命令不可执行 | 本次运行环境无法执行社区图片上传 | 按实际错误核对命令可用状态;不把它解释为功能尚未实现,不改用素材库 `upload` |

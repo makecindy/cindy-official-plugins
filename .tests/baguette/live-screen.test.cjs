@@ -1,8 +1,8 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
-const L=require('../../baguette-simulator/node/live-screen.cjs');
-const {createTaskBindings}=require('../../baguette-simulator/node/tasks.cjs');
-const ghost=require('../../baguette-simulator/ghost.json');
+const L=require('../../cindy-simulator/node/live-screen.cjs');
+const {createTaskBindings}=require('../../cindy-simulator/node/tasks.cjs');
+const ghost=require('../../cindy-simulator/ghost.json');
 
 const PHONE='00000000-0000-4000-8000-0000000000A1',PAD='00000000-0000-4000-8000-0000000000A2',TV='00000000-0000-4000-8000-0000000000A3',
   VISION='00000000-0000-4000-8000-0000000000A4',DROID='00000000-0000-4000-8000-0000000000A5';
@@ -251,7 +251,7 @@ test('iOS input sends touches on the stream socket and buttons, text and keys th
   assert.deepEqual(touches[0],{type:'touch1-down',x:0.25*1178,y:0.5*2556,width:1178,height:2556});
   assert.deepEqual(f.calls,[['press',{udid:PHONE,button:'home'}],['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}],
     ['type_text',{udid:PHONE,text:'你好',method:'paste'}],['type_text',{udid:PHONE,keys:['command+shift+KeyZ']}]],'rotation steps from the last request when the App does not turn, never upside down on an iPhone');
-  const {parseKey}=require('../../baguette-simulator/node/keys.cjs');assert.deepEqual(parseKey('command+shift+KeyZ'),{code:'KeyZ',modifiers:['command','shift']});
+  const {parseKey}=require('../../cindy-simulator/node/keys.cjs');assert.deepEqual(parseKey('command+shift+KeyZ'),{code:'KeyZ',modifiers:['command','shift']});
   await code(f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'menu'}]}),'INVALID_ARGUMENT');
   // A failing later event keeps the completed prefix and reports unknown.
   const failing=fixture(t,{request:()=>{throw Object.assign(Error('busy'),{code:'BUSY',execution:'not_executed'});}});await failing.live.request('liveScreen.open',{id:PHONE});
@@ -404,7 +404,7 @@ test('Android touches follow the device pose into native panel coordinates, up t
   // Landscape (device rotation 1): a 2400×1080 picture.
   f.sink().frame({display:1,device:1,width:2400,height:1080},avcc('2400x1080'));
   await f.live.request('liveScreen.input',{id:DROID,events:[{kind:'touch',touches:[{id:1,x:0.25,y:0.5,phase:'began'}]}]});
-  const {toNative}=require('../../baguette-simulator/node/android/geometry.cjs');
+  const {toNative}=require('../../cindy-simulator/node/android/geometry.cjs');
   assert.deepEqual(f.sendTouch[2],[{identifier:1,pressure:1024,...toNative({width:1080,height:2400},1,600,540)}]);
   assert.deepEqual(f.sendTouch[2][0],{identifier:1,pressure:1024,x:539,y:600});
   f.calls.length=0;

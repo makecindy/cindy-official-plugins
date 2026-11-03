@@ -73,7 +73,9 @@ iOS 启动入口和 `device action=boot memoryMode=…` 均支持 `saving`（默
 
 0.2.21 修正 Agent 输入说明：iOS/安卓均支持已聚焦输入框的触摸菜单粘贴，需要可用粘贴菜单；只有 iOS 清理硬件键盘记录。输入实现保持不变。
 
-一个插件（`baguette-simulator`）、一套设备管理和任务侧栏控制器，支持两种系统。所有设备都属于插件，与 Android Studio、Xcode 默认设备隔离。共用运行开关、任务绑定、闲置关机、实时画面、触摸、键盘、截图与设备切换。需要 Cindy 0.1.116 或更新版本及声明的任务页签能力。
+一个插件（`cindy-simulator`）、一套设备管理和任务侧栏控制器，支持两种系统。所有设备都属于插件，与 Android Studio、Xcode 默认设备隔离。共用运行开关、任务绑定、闲置关机、实时画面、触摸、键盘、截图与设备切换。需要 Cindy 0.1.116 或更新版本及声明的任务页签能力。
+
+插件 ID 与调用命令统一为 `cindy-simulator`（原为 `baguette-simulator` / `baguette`），继续沿用 `BaguetteCindy` 下的设备、设置和任务绑定。Cindy 0.1.119 及以上版本更新时会把已安装的公共版原地迁移到新 ID 并保留数据；旧客户端继续获得旧 ID 的包，组织版不会自动迁移。不要同时启用两个 ID。
 
 ## 安卓环境与使用
 
@@ -143,7 +145,7 @@ iPhone、iPad、Apple TV 和 Vision Pro 共用主屏幕、截图、查看缩放�
 
 - **画面**：`open` 返回 `http://127.0.0.1:<端口>/live-screen/<令牌>`，令牌为 32 字节随机数。地址只接受一次 GET；30 秒内未取用、画面流结束或调用 `close` 后失效。同一设备再次 `open` 会结束之前的画面流。Worker 转发 Baguette 的 H.264 分帧（安卓转发共用编码助手的分帧，编码助手不可用时用 PNG），另发一条屏幕消息说明画面尺寸和需要转动的角度。接收端读得慢时丢弃画面，从关键帧恢复。
 - **操作**：iPhone 与 iPad 最多两指，经画面连接发送，坐标从摆正后的画面换算回设备原生竖屏，包括底部主屏指示条的边缘手势。安卓最多十指，经 `sendTouch` 发送。按键、文字（粘贴）和键盘沿用现有受控操作。Apple TV 与 Vision Pro 可以看画面并使用主屏幕键（Apple TV 另有菜单与播放/暂停）；遥控器和空间操作暂不支持在手机上使用。
-- **使用状态**：手机上打开的画面算作有人观看，闲置关机会等待。`control` 用于保活，一分钟没有调用就关闭该画面。关闭运行开关会关闭所有手机画面，重新打开前 `open`、`input`、`control` 返回 `DISABLED`。`list` 只读取设备，不启动设备，也不算作使用。只列出模拟器，iPhone/iPad 真机暂不在手机上提供。
+- **使用状态**：手机上打开的画面算作有人观看，闲置关机会等待。`control` 用于保活，一分钟没有调用就关闭该画面。关闭运行开关会关闭所有手机画面，重新打开前 `open`、`input`、`control` 返回 `DISABLED`。`list` 只读取设备，不启动设备，也不算作使用。只列出模拟器，iPhone/iPad 真机暂不在手机上提供。正在显示的设备被关机后，手机画面会在几秒内结束。
 
 ## Apple TV 与 Vision Pro
 
@@ -194,7 +196,7 @@ tvOS/visionOS 所有查询模式均使用 OCR 文本列表（含 `mode=full` 和
 
 安装按包内容校验和比较，资源保留时间戳也不会漏过；安装登记或签名信息变化时整包安装。容器查询故障会报错，不作为 App 未安装的依据；自动安装会在写入前停止，日志查询也不扩大范围。后台安装完成写入前，设备保持占用。`method=touch` 拒绝搭配 `clear=true` 或 `keys`，以保留屏幕键盘；录帧会保留动作真实的执行状态。
 
-Cindy 官方设备模拟器，适用于 Apple Silicon Mac，随包带 Baguette 0.2.10。它替代已下线的内置模拟器；原内置模拟器用户会在 Cindy 中看到一次指向这里的迁移提示（插件 ID 为 `baguette-simulator`）。名称为后续设备和平台扩展留出空间，不代表新增平台支持。需要 Cindy 0.1.83+、Xcode 27 或更新版本和已安装的 iOS runtime，首次运行不下载依赖。打包时通过 binary-dependencies.json 从固定哈希的官方归档收集九个可移植 USDZ 模型；原生可执行文件仍保留在 Git，仅支持 macOS。
+Cindy 官方设备模拟器，适用于 Apple Silicon Mac，随包带 Baguette 0.2.10。它替代已下线的内置模拟器；原内置模拟器用户会在 Cindy 中看到一次指向这里的迁移提示（插件 ID 为 `cindy-simulator`）。名称为后续设备和平台扩展留出空间，不代表新增平台支持。需要 Cindy 0.1.83+、Xcode 27 或更新版本和已安装的 iOS runtime，首次运行不下载依赖。打包时通过 binary-dependencies.json 从固定哈希的官方归档收集九个可移植 USDZ 模型；原生可执行文件仍保留在 Git，仅支持 macOS。
 
 iOS 模拟器任务默认使用。先 environment、devices，复用适合的已登录设备，必要时 `device action=boot`。App 仍由项目正常流程构建（独立设备用 `-destination 'generic/platform=iOS Simulator'`），再用 `app action=install`、`app action=launch` 安装和启动模拟器 .app。启动默认打开当前任务的模拟器页签；检查 viewer.previewOpened，不能把服务启动成功说成页面已显示。切换 session 后通过 `viewer action=open` 打开已有设备。
 
@@ -253,7 +255,7 @@ Node Worker 有当前用户级本机权限。只调用固定可执行文件和�
 
 在装有 Xcode 的 Apple Silicon Mac 上运行 sh native/build.sh，编译随包 Objective-C 源码并临时签名，不下载依赖；Baguette 和 HingeControl 基于 v0.2.10 重新编译，vendor-native.patch 含版本号、3D 场景释放修复，以及 H.264 帧调度与静止停发（见 VENDOR-REVIEW.md）；native/build.sh 同时编译安卓 H.264 编码助手；运行 sh native/build-baguette.sh <已验证的源码压缩包> 可重建，之后运行 node native/inventory.mjs --write。本插件需要的独立设备目录与 3D 内存两处修复已合入上游（tddworks/baguette#122、#123）。运行 node .tests/baguette/real-simulator-smoke.mjs --foldable 可在临时设备目录中用真模拟器检查一次构建。
 
-运行仓库契约和 .tests/baguette-simulator.test.mjs。审核 VENDOR-REVIEW.md、THIRD-PARTY-LICENSES.txt 和提案 #119：https://github.com/makecindy/cindy-official-plugins/issues/119。首发为空定向受众，不推送全体用户。最终包在合格 Cindy 客户端内的安装验证，必须与直接 Node/原生测试分开记录。
+运行仓库契约和 .tests/cindy-simulator.test.mjs。审核 VENDOR-REVIEW.md、THIRD-PARTY-LICENSES.txt 和提案 #119：https://github.com/makecindy/cindy-official-plugins/issues/119。首发为空定向受众，不推送全体用户。最终包在合格 Cindy 客户端内的安装验证，必须与直接 Node/原生测试分开记录。
 
 可选位置面板通过 Node Worker 向 OpenStreetMap 发送搜索词和地图瓦片请求，仅使用固定 HTTPS 端点 nominatim.openstreetmap.org 与 tile.openstreetmap.org。浏览器请求保持同源；拒绝重定向和任意上游 URL，不转发账号凭证。
 

@@ -42,7 +42,7 @@ try {
   delete m.key;
   if(browser==='safari') {
     delete m.minimum_chrome_version;
-    m.background={scripts:['policy.js','network-guard.js','learning-core.js','youtube-transcript.js','background.js'],persistent:false};
+    m.background={scripts:['policy.js','network-guard.js','learning-core.js','youtube-transcript.js','site-captions.js','background.js'],persistent:false};
   }
   await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify(m,null,2)+'\n');
   if(browser!=='safari') {

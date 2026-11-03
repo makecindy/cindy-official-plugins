@@ -14,7 +14,7 @@ function harness(orientation='portrait'){
   const window={...target,document,location:{origin:'http://example.test'},parent:{}};
   const screen={size:{width:400,height:800}};
   for(const name of ['touchDown','touchMove','touchUp'])screen[name]=(points,opts)=>calls.push([name,JSON.parse(JSON.stringify(points)),...(opts?[JSON.parse(JSON.stringify(opts))]:[])]);
-  const dir=path.join(__dirname,'../../baguette-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
+  const dir=path.join(__dirname,'../../cindy-simulator/vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures');
   for(const name of ['attachable-event-source','edge-bands','touch-gesture-source'])vm.runInNewContext(fs.readFileSync(path.join(dir,name+'.js'),'utf8'),{window});
   const source=new window.Baguette._TouchGestureSource(screen,{getOrientation:()=>orientation,overlay:{setFingers:p=>dots.push(JSON.parse(JSON.stringify(p))),clear:()=>dots.push([])}});
   source.attach(target);

@@ -19,7 +19,10 @@ function isReader(sql) {
 
 const migrations = { count: 0 };
 
-function makeLibrary(dir) {
+// Same bounds as the Host Library (libraryDbCore.ts): 2000 rows and 16 MiB per row / result.
+const HOST_ROW_BYTES = 16 * 1024 * 1024;
+
+function makeLibrary(dir, { rowBytes = HOST_ROW_BYTES, backup = true } = {}) {
   const dbs = new Map();
   const open = (dbPath) => {
     if (!dbs.has(dbPath)) {
@@ -47,6 +50,15 @@ function makeLibrary(dir) {
         case 'db.exec': {
           const rows = run(open(req.dbPath), req.sql, req.params);
           if (rows.rows && rows.rows.length > 2000) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: 'too many rows' };
+          if (rows.rows) {
+            let total = 0;
+            for (const r of rows.rows) {
+              const bytes = Buffer.byteLength(JSON.stringify(r), 'utf8');
+              total += bytes;
+              if (bytes > rowBytes) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: '单行结果超字节上限;请缩小查询列/分页' };
+              if (total > HOST_ROW_BYTES) return { ok: false, errorCode: 'DB_ROW_LIMIT', message: '结果集超字节上限;请加 LIMIT 或分页' };
+            }
+          }
           return { ok: true, op: 'db.exec', ...rows };
         }
         case 'db.batch': {
@@ -61,6 +73,13 @@ function makeLibrary(dir) {
             throw e;
           }
           return { ok: true, applied: req.statements.length };
+        }
+        case 'db.backup': {
+          if (!backup) return { ok: false, errorCode: 'UNSUPPORTED', message: 'backup unavailable' };
+          const dest = path.join(dir, `backup-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+          open(req.dbPath).exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+          library.backups.push(dest);
+          return { ok: true };
         }
         case 'db.userVersion':
           return { ok: true, op: 'db.userVersion', version: Number(open(req.dbPath).prepare('PRAGMA user_version').get().user_version) };
@@ -84,6 +103,7 @@ function makeLibrary(dir) {
       return { ok: false, errorCode: 'DB_ERROR', message: e.message };
     }
   };
+  library.backups = [];
   library.close = () => {
     for (const db of dbs.values()) db.close();
   };
@@ -91,8 +111,8 @@ function makeLibrary(dir) {
   return library;
 }
 
-function makeWorker(env) {
-  const child = spawn(process.execPath, ['--no-warnings', path.join(pluginDir, 'node', 'worker.cjs')], {
+function makeWorker(env, workerFile = path.join(pluginDir, 'node', 'worker.cjs')) {
+  const child = spawn(process.execPath, ['--no-warnings', workerFile], {
     env: { PATH: process.env.PATH, ...env },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -116,8 +136,8 @@ function makeWorker(env) {
   };
 }
 
-function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null }) {
-  const library = makeLibrary(libDir);
+function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSync = null, timers = null, source = mainSource, rowBytes, backup }) {
+  const library = makeLibrary(libDir, { rowBytes, backup });
   const worker = makeWorker({
     CINDY_CONTACTS_LEGACY_DB_FOR_TEST: legacyDb,
     CINDY_CONTACTS_SYSTEM_FIXTURE_FOR_TEST: systemFixture,
@@ -198,7 +218,7 @@ function boot({ libDir, legacyDb = '', systemFixture = '', locale = '', deviceSy
   // 任务轮询用的计时器在测试里加速。
   const fastTimeout = (fn, ms) => unrefTimeout(fn, deviceSync && ms >= 2000 ? ms : Math.min(ms, 20));
   const ctx = vm.createContext({ cindy, BroadcastChannel: Channel, crypto: globalThis.crypto, TextEncoder, console, setTimeout: timers?.setTimeout || fastTimeout, clearTimeout: timers?.clearTimeout || clearTimeout });
-  vm.runInContext(mainSource, ctx, { filename: 'main.js' });
+  vm.runInContext(source, ctx, { filename: 'main.js' });
   let n = 0;
   const call = (tool, args = {}) =>
     new Promise((resolve) => {
@@ -273,6 +293,16 @@ function makeLegacyDb(file) {
   db.close();
 }
 
+/** The stored sync state as one text: the parts written by current versions, or the single row of older ones. */
+function storedSyncText(app) {
+  const db = app.library.db('contacts.sqlite');
+  const head = db.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get()?.value;
+  if (head === undefined) return undefined;
+  const meta = JSON.parse(head);
+  if (meta.chunked !== 1) return head;
+  return Array.from({ length: meta.parts }, (_, i) => db.prepare('SELECT value FROM plugin_meta WHERE key = ?').get(`device_sync_state:${i}`).value).join('');
+}
+
 function tmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-contacts-test-'));
 }
@@ -324,6 +354,118 @@ test('首次启动从旧版通讯录完整复制一份，保留 id、状态、�
   const check = new DatabaseSync(legacy, { readOnly: true });
   assert.equal(check.prepare('SELECT count(*) AS n FROM contacts').get().n, 121);
   check.close();
+});
+
+// 回归：宿主把插件装在 cindy-brain/_ns/_root/<id> 下后，写死三层的路径推算找不到旧库，
+// 真实用户的旧数据从未导入。不用测试环境变量，按真实安装布局启动工作进程。
+test('工作进程按真实安装布局找到当前账号的旧版通讯录，不依赖固定层数', async () => {
+  const dir = tmp();
+  const owner = path.join(dir, 'owners', 'owner-a');
+  for (const layout of [['cindy-brain', 'cindy-contacts'], ['cindy-brain', '_ns', '_root', 'cindy-contacts']]) {
+    const nodeDir = path.join(owner, ...layout, 'node');
+    fs.mkdirSync(nodeDir, { recursive: true });
+    fs.copyFileSync(path.join(pluginDir, 'node', 'worker.cjs'), path.join(nodeDir, 'worker.cjs'));
+    const w = makeWorker({}, path.join(nodeDir, 'worker.cjs'));
+    try {
+      assert.deepEqual(ok(await w.request({ method: 'legacy/probe', params: {} })), { found: false });
+      fs.mkdirSync(path.join(owner, 'maker-contacts'), { recursive: true });
+      makeLegacyDb(path.join(owner, 'maker-contacts', 'contacts.db'));
+      const probe = ok(await w.request({ method: 'legacy/probe', params: {} }));
+      assert.equal(probe.found, true, layout.join('/'));
+      assert.equal(probe.counts.contacts, 121);
+    } finally {
+      w.close();
+      fs.rmSync(path.join(owner, 'maker-contacts'), { recursive: true, force: true });
+    }
+  }
+});
+
+// 回归：资料库已有档案时旧版通讯录被静默跳过，且没有任何导入入口。现在记为可导入，由用户触发，
+// 共用身份的旧档案并入已有档案、同名分组合并，不产生重复的人。
+test('资料库已有档案时旧版通讯录标记为可导入，手动导入按共同身份合并到已有档案', async () => {
+  const dir = tmp();
+  const legacy = path.join(dir, 'legacy.db');
+  makeLegacyDb(legacy);
+  const libDir = path.join(dir, 'lib');
+  fs.mkdirSync(libDir);
+  const first = boot({ libDir });
+  let existingId;
+  try {
+    existingId = ok(await first.call('save', { name: '一号同事', identities: [{ platform: 'email', value: 't1@example.test' }], groups: ['同事'] })).id;
+  } finally {
+    first.close();
+  }
+
+  const setLegacyMeta = (value) => {
+    const db = new DatabaseSync(path.join(libDir, 'contacts.sqlite'));
+    db.prepare('REPLACE INTO plugin_meta (key, value) VALUES (?, ?)').run('legacy_import', JSON.stringify(value));
+    db.close();
+  };
+  let a = boot({ libDir, legacyDb: legacy });
+  try {
+    assert.equal(ok(await a.call('stats')).people, 1);
+    const st = await a.view('state');
+    assert.equal(st.result.legacy.status, 'available');
+    assert.equal(st.result.legacy.counts.contacts, 121);
+
+    const r = await a.view('importLegacy');
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.result.status, 'done');
+    assert.equal(r.result.merged, true);
+    const s = ok(await a.call('stats'));
+    assert.deepEqual({ people: s.people, orgs: s.orgs, groups: s.groups }, { people: 120, orgs: 1, groups: 1 });
+    const merged = ok(await a.call('get', { id: existingId }));
+    assert.equal(merged.name, '一号同事');
+    assert.ok(merged.identities.some((i) => i.platform === 'phone'), 'legacy identities move to the existing person');
+    assert.ok(merged.events.some((e) => e.text === '事件 1'));
+    assert.deepEqual(merged.groups.map((g) => g.name), ['同事']);
+    assert.equal(merged.relations[0].otherName, '示例公司');
+    // 旧档案的别名、摘要与故事按普通合并规则保留，不会随导入丢失（PR #264 review）。
+    assert.ok(merged.aliases.includes('测试人1') && merged.aliases.includes('Tester 1'), 'legacy name and aliases kept');
+    assert.equal(merged.summary, '示例公司 · 职位1');
+    assert.match(merged.narrative, /第 1 位的故事。/);
+    assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    assert.equal((await a.view('state')).result.legacy.status, 'done');
+    assert.equal(merged.merges.length, 1);
+
+    // 回归（PR #264 review）：合并已完成、最终状态没写进去就退出时，重试不能把已并入的旧档案插回再合并一次。
+    a.close();
+    setLegacyMeta({ status: 'partial', at: new Date().toISOString(), pending: [] });
+    a = boot({ libDir, legacyDb: legacy });
+    assert.equal(ok(await a.call('stats')).people, 120);
+    assert.equal((await a.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    const again = ok(await a.call('get', { id: existingId }));
+    assert.equal(again.narrative.split('第 1 位的故事。').length - 1, 1, 'legacy story is not appended twice');
+    assert.equal(again.merges.length, 1);
+    assert.equal(again.events.filter((e) => e.text === '事件 1').length, 1);
+    assert.equal((await a.view('state')).result.legacy.status, 'done');
+
+    // 导入时的合并留有记录，合错了可以拆开，旧档案原样回来。
+    const split = await a.view('unmerge', { id: again.merges[0].id });
+    assert.equal(split.ok, true, split.message);
+    const restored = ok(await a.call('get', { id: '00000000-0000-4000-8000-000000000001' }));
+    assert.equal(restored.name, '测试人1');
+    assert.ok(restored.events.some((e) => e.text === '事件 1'));
+    assert.ok(restored.identities.some((i) => i.platform === 'phone'));
+    assert.equal(ok(await a.call('get', { id: existingId })).summary, '');
+  } finally {
+    a.close();
+  }
+
+  // 回归（PR #264 review）：复制完旧数据、合并前中断时，旧档案已按原 id 在库里。重试必须沿用记下的
+  // 待合并映射继续合并，不能因「库里已有」跳过并标成完成。拆开后的库正是这个中断现场。
+  setLegacyMeta({ status: 'partial', at: new Date().toISOString(), pending: [['00000000-0000-4000-8000-000000000001', existingId]] });
+  const b = boot({ libDir, legacyDb: legacy });
+  try {
+    assert.equal(ok(await b.call('stats')).people, 120);
+    assert.equal((await b.call('get', { id: '00000000-0000-4000-8000-000000000001' })).ok, false);
+    const resumed = ok(await b.call('get', { id: existingId }));
+    assert.match(resumed.narrative, /第 1 位的故事。/);
+    assert.ok(resumed.events.some((e) => e.text === '事件 1'));
+    assert.equal((await b.view('state')).result.legacy.status, 'done');
+  } finally {
+    b.close();
+  }
 });
 
 test('没有旧版通讯录时不导入，资料库保持为空', async () => {
@@ -414,14 +556,21 @@ test('从 macOS 通讯录导入：先预览，再按锚点、邮箱、电话合�
   const dir = tmp();
   const fixture = path.join(dir, 'system.json');
   fs.writeFileSync(fixture, JSON.stringify([
-    { name: '林知夏', org: '星屿科技', title: '设计', id: 'AB-1', isCompany: false, emails: [{ v: 'zhixia@example.test', l: '_$!<Work>!$_' }], phones: [] },
+    {
+      name: '林知夏', org: '星屿科技', title: '设计', id: 'AB-1', isCompany: false, emails: [{ v: 'zhixia@example.test', l: '_$!<Work>!$_' }], phones: [],
+      birthday: '1990-03-18', nickname: '知夏', note: '喜欢手冲咖啡',
+      addresses: [{ v: '示例路 1 号\n上海', l: '_$!<Home>!$_' }],
+      urls: [{ v: 'http://t.sina.com.cn/zhixia', l: 'homepage' }, { v: 'https://www.linkedin.com/in/zhixia/', l: '' }],
+      social: [{ s: 'Twitter', u: '@ZhixiaLin', url: '' }],
+      ims: [{ s: 'WeChat', u: 'zhixia_wx' }, { s: 'MSN', u: 'old@example.test' }, { s: 'GameCenter', u: 'zx' }],
+    },
     { name: '新朋友', org: '', title: '', id: 'AB-2', isCompany: false, emails: [], phones: [{ v: '+1 (555) 010-0002', l: 'mobile' }] },
     { name: '林知夏', org: '', title: '', id: 'AB-3', isCompany: false, emails: [], phones: [] },
     { name: '星屿科技', org: '星屿科技', title: '', id: 'AB-4', isCompany: true, emails: [], phones: [] },
   ]));
-  const a = boot({ libDir: dir, systemFixture: fixture });
+  const a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
   try {
-    const existing = ok(await a.call('save', { name: '林知夏', identities: [{ platform: 'email', value: 'zhixia@example.test' }] }));
+    const existing = ok(await a.call('save', { name: '林知夏', identities: [{ platform: 'email', value: 'zhixia@example.test' }], facts: [{ label: '备注', value: '用户自己写的' }] }));
     const preview = ok(await a.call('import_macos', {}));
     assert.equal(preview.dryRun, true);
     assert.equal(ok(await a.call('stats')).people, 1, 'dry run writes nothing');
@@ -431,6 +580,15 @@ test('从 macOS 通讯录导入：先预览，再按锚点、邮箱、电话合�
     assert.equal(r.needsReview.length, 1);
     const c = ok(await a.call('get', { id: existing.id }));
     assert.ok(c.identities.some((i) => i.platform === 'apple-contacts' && i.value === 'AB-1'));
+    // 已有的人只补缺的：社交账号、即时通讯、主页记成联系方式；生日、地址写成要点；已写过的备注不覆盖；昵称作别名
+    const idOf = (p) => c.identities.filter((i) => i.platform === p).map((i) => i.value);
+    assert.deepEqual(idOf('x'), ['ZhixiaLin']);
+    assert.deepEqual(idOf('wechat'), ['zhixia_wx']);
+    assert.equal(idOf('msn').length + idOf('gamecenter').length, 0, '停用的服务不导入');
+    assert.deepEqual(idOf('weibo'), ['http://t.sina.com.cn/zhixia']);
+    assert.deepEqual(idOf('linkedin'), ['https://www.linkedin.com/in/zhixia/']);
+    assert.deepEqual(c.facts, [{ label: '备注', value: '用户自己写的' }, { label: '生日', value: '1990-03-18' }, { label: '地址（家）', value: '示例路 1 号 上海' }]);
+    assert.ok(c.aliases.includes('知夏'));
     const s = ok(await a.call('stats'));
     assert.deepEqual({ people: s.people, orgs: s.orgs, pending: s.pending }, { people: 3, orgs: 1, pending: 1 });
 
@@ -655,6 +813,333 @@ test('往来：按身份或名字归到人、按来源 id 去重；还没完的�
   }
 });
 
+test('名单按关系分层：常联系看往来天数与在办的事，客户和 GitHub 社区单独成圈，置顶与移出只存本机', async () => {
+  const dir = tmp();
+  const a = boot({ libDir: dir });
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  try {
+    const an = ok(await a.call('save', { name: 'Alex Wong', aliases: ['阿明'], identities: [{ platform: 'email', value: 'alex@example.test' }] }));
+    const kim = ok(await a.call('save', { name: 'Kim Wager', summary: '反馈 Android 邮件加载问题的产品用户', groups: ['产品用户往来'], identities: [{ platform: 'email', value: 'kim@example.test' }] }));
+    const mate = ok(await a.call('save', { name: '林小雨', groups: ['产品用户往来'], identities: [{ platform: 'feishu', value: 'ou_mate' }] }));
+    const octo = ok(await a.call('save', { name: 'octo', identities: [{ platform: 'github', value: 'octo' }] }));
+    const bare = ok(await a.call('save', { name: '只有电话', identities: [{ platform: 'phone', value: '13800000000' }] }));
+    const items = [];
+    // 阿明：两个月里 6 天邮件往来，同一天多封只算一天
+    for (const [i, d] of [3, 3, 10, 20, 35, 41, 50].entries()) items.push({ contact_id: an.id, occurred_at: daysAgo(d), channel: 'mail', title: 'Re: 票据', ref: `an-${i}` });
+    for (let d = 1; d <= 9; d++) items.push({ contact_id: kim.id, occurred_at: daysAgo(d), channel: 'mail', title: '反馈', ref: `kim-${d}` });
+    for (let d = 1; d <= 3; d++) items.push({ contact_id: mate.id, occurred_at: daysAgo(d), channel: 'im', title: '飞书单聊', ref: `mate-${d}` });
+    ok(await a.call('record', { items }));
+    // GitHub 活动不记成往来：record 拒收，提示改用 save 补资料
+    const gh = ok(await a.call('record', { items: [{ contact_id: octo.id, occurred_at: daysAgo(1), channel: 'github', title: 'feat: x', ref: 'gh-new', link: 'https://github.com/o/r/pull/9' }] }));
+    assert.equal(gh.added, 0);
+    assert.equal(gh.results[0].errorCode, 'GITHUB_NOT_RECORDED');
+    // 早先版本记下的 GitHub 记录：只汇总成代码协作，不进往来、关系分和「上次看过之后」
+    const db = a.library.db('contacts.sqlite');
+    const legacy = db.prepare('INSERT INTO contact_interactions (id, contact_id, occurred_at, channel, title, summary, quote, link, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (let d = 1; d <= 12; d++) legacy.run(`gh-${d}`, octo.id, daysAgo(d), 'github', `feat: part ${d % 3}`, 'comment', '', `https://github.com/o/r/pull/${d % 3}#c${d}`, `gh-${d}`, daysAgo(d));
+    legacy.run('gh-an', an.id, daysAgo(1), 'github', 'fix: receipts', 'hi', '', 'https://github.com/o/r/pull/7', 'gh-an', daysAgo(1));
+    const octoFile = ok(await a.call('get', { id: octo.id }));
+    assert.equal(octoFile.interactions.length, 0);
+    assert.equal(octoFile.interactionTotal, 0);
+    assert.deepEqual(octoFile.code.map((r) => [r.repo, r.threads]), [['o/r', 3]]);
+    assert.equal(ok(await a.call('get', { id: an.id })).interactions.every((i) => i.channel !== 'github'), true);
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '给阿明补交两份 OpenAI 票据' }, { text: '等阿明核对 10 月票据' }] }));
+    // 跟踪备注和 14 天前发起的旧事不算在办，也不让人进「等你处理」
+    ok(await a.call('save', { id: an.id, open_loops: [{ text: '跟进阿明的报销流程' }, { text: '给阿明寄合同原件', since: daysAgo(30).slice(0, 10) }] }));
+    const kinds = Object.fromEntries(ok(await a.call('get', { id: an.id })).loops.map((l) => [l.text, l.kind]));
+    assert.deepEqual(kinds, { '给阿明补交两份 OpenAI 票据': 'you', '等阿明核对 10 月票据': 'them', '跟进阿明的报销流程': 'note', '给阿明寄合同原件': 'note' });
+
+    const rows = async () => Object.fromEntries((await a.view('list')).result.contacts.map((c) => [c.id, c]));
+    let r = await rows();
+    assert.equal(r[an.id].circle, 'people');
+    assert.equal(r[an.id].close, true, '低频但持续的一对一邮件往来进常联系');
+    assert.equal(r[an.id].activeDays, 6, 'GitHub 活动不算往来天数');
+    assert.equal(r[an.id].channel, 'mail');
+    assert.equal(r[an.id].loopsMine, 1);
+    assert.equal(r[an.id].loopsTheirs, 1);
+    assert.equal(r[an.id].mineText, '给阿明补交两份 OpenAI 票据');
+    assert.equal(r[kim.id].circle, 'customers');
+    assert.equal(r[kim.id].close, false, '客户往来再多也不挤进常联系');
+    assert.equal(r[mate.id].circle, 'people', '在聊天里一起做事的人不因分组名被归成客户');
+    assert.equal(r[octo.id].circle, 'community');
+    assert.equal(r[octo.id].close, false);
+    assert.equal(r[bare.id].circle, 'contactOnly');
+    // AI 的 list 工具拿到同样的字段
+    assert.equal(ok(await a.call('list', { limit: 10 })).contacts.find((c) => c.id === an.id).close, true);
+
+    assert.equal((await a.view('pin', { id: kim.id, value: 1 })).ok, true);
+    assert.equal((await a.view('pin', { id: an.id, value: -1 })).ok, true);
+    r = await rows();
+    assert.equal(r[kim.id].pin, 1);
+    assert.equal(r[kim.id].close, true, '置顶的人无论哪一圈都放在常联系');
+    assert.equal(r[an.id].close, false, '移出常联系后不再自动放回');
+    assert.equal((await a.view('pin', { id: an.id, value: 0 })).ok, true);
+    assert.equal((await rows())[an.id].close, true);
+    const bad = await a.view('pin', { id: an.id, value: 2 });
+    assert.equal(bad.ok, false);
+    assert.equal(bad.error.code, 'INVALID_PARAMS');
+    // 删掉的人顺带清掉置顶记录
+    ok(await a.call('delete', { id: kim.id, confirm: true }));
+    assert.equal((await a.view('pin', { id: an.id, value: 1 })).ok, true);
+    const prefs = a.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'list_prefs'").get();
+    assert.deepEqual(JSON.parse(prefs.value).pins, { [an.id]: 1 });
+  } finally {
+    a.close();
+  }
+});
+
+test('升级后自动收拾旧档案：先备份，再收起跟踪备注、删进展要点和编号流水；备份不成功就不动', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', {
+      name: '示例同事',
+      narrative: '一起做桌面端的同事。\n\n#101 已合并，#102 待审，#103 关闭，#104 拆分。\n\n最近在准备下季度计划。',
+      facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展（2026-10-30）', value: '#1 #2 #3 都已合并' }, { label: '常做', value: '桌面端文件树' }, { label: '补充联系方式', value: '工作日晚上打电话' }, { label: 'Marital status', value: 'Married' }, { label: 'Visa status', value: 'H-1B' }, { label: 'Latest update', value: 'shipped v2' }, { label: 'Status update', value: 'on track' }],
+      open_loops: [{ text: '跟进 #101 的验收' }, { text: '给示例同事回复报价' }],
+    }));
+    // 页面和 AI 读到的要点已经不含进展流水
+    assert.deepEqual(ok(await a.call('get', { id: p.id })).facts.map((f) => f.label), ['公司', '常做', '补充联系方式', 'Marital status', 'Visa status']);
+    // 模拟从旧版本升级：还没做过这次整理
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    await a.call('stats');
+    assert.equal(db().prepare("SELECT count(*) AS n FROM contact_loops WHERE status = 'open'").get().n, 2, '备份不成功时一条都不动');
+    assert.equal(db().prepare("SELECT value FROM plugin_meta WHERE key = 'profile_cleanup'").get(), undefined);
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    assert.equal(a.library.backups.length, 1, '整理前先备份');
+    const row = db().prepare('SELECT facts, narrative FROM contacts WHERE id = ?').get(p.id);
+    assert.deepEqual(JSON.parse(row.facts).map((f) => f.label), ['公司', '常做', '补充联系方式', 'Marital status', 'Visa status']);
+    assert.equal(row.narrative, '一起做桌面端的同事。\n\n最近在准备下季度计划。');
+    const loops = Object.fromEntries(ok(await a.call('get', { id: p.id })).loops.map((l) => [l.text, l.status]));
+    assert.deepEqual(loops, { '跟进 #101 的验收': 'done', '给示例同事回复报价': 'open' });
+    assert.equal(JSON.parse(db().prepare("SELECT value FROM plugin_meta WHERE key = 'profile_cleanup'").get().value).loops, 1);
+    // 只做一次：再启动不再备份
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    assert.equal(a.library.backups.length, 0);
+  } finally {
+    a.close();
+  }
+});
+
+/** 等启动时那一轮后台介绍改写结束，免得它和测试随后写入的介绍抢先后。 */
+async function introRewriteIdle(a) {
+  await a.call('stats');
+  const db = a.library.db('contacts.sqlite');
+  for (let i = 0; i < 100 && !db.prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes('finished'); i++) await new Promise((r) => setTimeout(r, 20));
+}
+
+test('升级后在后台把笔记式的介绍改写成人话：干净的不动，改写结果仍像笔记就不采用', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    await introRewriteIdle(a);
+    const noisy = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const kept = ok(await a.call('save', { name: '另一位', narrative: '另一位是做设计的朋友，常一起讨论界面。' }));
+    const bad = ok(await a.call('save', { name: '第三位', narrative: '第三位 GitHub third-dev，2026-10-01 已核实。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'intro_rewrite'").run();
+    a.close();
+    a = boot({ libDir: dir });
+    // 第三位的改写结果仍带账号：不采用，保留原文
+    let n = 0;
+    a.tasks.quick = { ok: true, text: '做桌面端的同事，在 GitHub 上一起改文件树。' };
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' && m.prompt.includes('third-dev') ? (n++, { ok: true, text: '第三位，邮箱 third@example.test。' }) : origSend(m));
+    await a.call('stats');
+    for (let i = 0; i < 100 && !db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value.includes(bad.id); i++) await new Promise((r) => setTimeout(r, 20));
+    const story = (id) => db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(id).narrative;
+    assert.equal(story(noisy.id), '做桌面端的同事，在 GitHub 上一起改文件树。', '可以提到 GitHub，但不带账号');
+    assert.equal(story(kept.id), '另一位是做设计的朋友，常一起讨论界面。', '干净的介绍不动');
+    assert.equal(story(bad.id), '第三位 GitHub third-dev，2026-10-01 已核实。');
+    assert.equal(n, 1);
+  } finally {
+    a.close();
+  }
+});
+
+test('从旧版通讯录迁来、已关联 Mac 名片但没在新版导入过的人，也会自动对账补齐', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([{ name: '旧档案', org: '', title: '', id: 'AB-9', isCompany: false, emails: [], phones: [], birthday: '1990-07-21' }]));
+  const a = boot({ libDir: dir, systemFixture: fixture });
+  try {
+    const p = ok(await a.call('save', { name: '旧档案', identities: [{ platform: 'apple-contacts', value: 'AB-9' }] }));
+    assert.equal(a.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'system_import'").get(), undefined);
+    ok(await a.call('maintenance', { action: 'begin' }));
+    let facts = [];
+    for (let i = 0; i < 40 && !facts.length; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      facts = ok(await a.call('get', { id: p.id })).facts;
+    }
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1990-07-21' }]);
+  } finally {
+    a.close();
+  }
+});
+
+test('LinkedIn 主页：完整链接、带参数的链接和只写名字都能找到同一个人', async () => {
+  const dir = tmp();
+  const a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: 'Example Person', identities: [{ platform: 'linkedin', value: 'https://www.linkedin.com/in/Example-Person/' }] }));
+    for (const query of ['linkedin.com/in/example-person', 'https://linkedin.com/in/example-person?trk=public']) {
+      const hit = ok(await a.call('find', { query })).results[0];
+      assert.equal(hit && hit.id, p.id, query);
+      assert.equal(hit.matchType, 'identity');
+    }
+    const dup = await a.call('save', { name: 'Someone Else', identities: [{ platform: 'linkedin', value: 'example-person' }] });
+    assert.equal(dup.ok, false);
+    assert.equal(dup.errorCode, 'IDENTITY_CONFLICT');
+  } finally {
+    a.close();
+  }
+});
+
+test('升级前存下的 LinkedIn 身份按新规则重算匹配键：旧写法也能找到，同一人的重复写法合成一条', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: 'Example Person', identities: [{ platform: 'linkedin', value: 'https://www.linkedin.com/in/Example-Person/' }] }));
+    const db = () => a.library.db('contacts.sqlite');
+    // 模拟旧版本的匹配键：整条链接小写、只写名字
+    db().prepare("UPDATE contact_identities SET normalized_value = 'https://www.linkedin.com/in/example-person/' WHERE contact_id = ?").run(p.id);
+    db().prepare("INSERT INTO contact_identities (id, contact_id, platform, value, normalized_value, label, note, created_at) VALUES ('old-li', ?, 'linkedin', 'example-person', 'example-person', '', '', ?)").run(p.id, new Date().toISOString());
+    a.close();
+    a = boot({ libDir: dir });
+    await a.call('stats');
+    let keys = [];
+    for (let i = 0; i < 40; i++) {
+      keys = db().prepare("SELECT normalized_value FROM contact_identities WHERE platform = 'linkedin'").all().map((r) => r.normalized_value);
+      if (keys.length === 1) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.deepEqual(keys, ['linkedin.com/in/example-person']);
+    const hit = ok(await a.call('find', { query: 'https://linkedin.com/in/example-person?trk=public' })).results[0];
+    assert.equal(hit && hit.id, p.id);
+    const dup = await a.call('save', { name: 'Someone Else', identities: [{ platform: 'linkedin', value: 'linkedin.com/in/example-person' }] });
+    assert.equal(dup.errorCode, 'IDENTITY_CONFLICT');
+    // 别的网站链接里带着 linkedin.com 不算 LinkedIn 主页
+    const other = ok(await a.call('save', { name: 'Web Person', identities: [{ platform: 'web', value: 'https://evil.example.test/?u=linkedin.com/in/example-person' }] }));
+    assert.notEqual(other.id, p.id);
+  } finally {
+    a.close();
+  }
+});
+
+test('备份不成功时后台也不改写介绍，原文留到下次', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    await introRewriteIdle(a);
+    const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key IN ('profile_cleanup', 'intro_rewrite')").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    let asked = 0;
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => (m && m.kind === 'oneshot_text' ? (asked++, { ok: true, text: '做桌面端的同事。' }) : origSend(m));
+    await a.call('stats');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(asked, 0);
+    assert.match(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, /已核实/);
+  } finally {
+    a.close();
+  }
+});
+
+test('备份不成功时，整理结束也不顺手删资料', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    const p = ok(await a.call('save', { name: '示例同事', facts: [{ label: '公司', value: '示例公司' }, { label: '最新进展', value: '#1 #2 #3 都已合并' }] }));
+    const db = () => a.library.db('contacts.sqlite');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'profile_cleanup'").run();
+    a.close();
+    a = boot({ libDir: dir, backup: false });
+    const b = ok(await a.call('maintenance', { action: 'begin' }));
+    ok(await a.call('maintenance', { action: 'end', run_id: b.run_id, coverage: b.sources.map((x) => ({ source: x.source, coverage: 'complete' })) }));
+    assert.deepEqual(JSON.parse(db().prepare('SELECT facts FROM contacts WHERE id = ?').get(p.id).facts).map((f) => f.label), ['公司', '最新进展']);
+  } finally {
+    a.close();
+  }
+});
+
+test('介绍改写请求失败的人，下次启动再试一次', async () => {
+  const dir = tmp();
+  let a = boot({ libDir: dir });
+  try {
+    await introRewriteIdle(a);
+    const p = ok(await a.call('save', { name: '示例同事', narrative: '示例同事（GitHub example-dev，邮箱 dev@example.test）已核实。#101 已合并，#102 待审。' }));
+    const db = () => a.library.db('contacts.sqlite');
+    const meta = () => JSON.parse(db().prepare("SELECT value FROM plugin_meta WHERE key = 'intro_rewrite'").get()?.value || '{}');
+    db().prepare("DELETE FROM plugin_meta WHERE key = 'intro_rewrite'").run();
+    a.close();
+    a = boot({ libDir: dir });
+    const origSend = a.ctx.cindy.send;
+    a.ctx.cindy.send = async (m) => { if (m && m.kind === 'oneshot_text') throw Object.assign(new Error('network down'), { code: 'NETWORK' }); return origSend(m); };
+    await a.call('stats');
+    for (let i = 0; i < 100 && !(meta().tries || {})[p.id]; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(meta().finished, undefined, '失败的人还有机会，这一轮不算完成');
+    a.close();
+    a = boot({ libDir: dir });
+    a.tasks.quick = { ok: true, text: '做桌面端的同事，常一起改文件树。' };
+    await a.call('stats');
+    for (let i = 0; i < 100 && !meta().finished; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(db().prepare('SELECT narrative FROM contacts WHERE id = ?').get(p.id).narrative, '做桌面端的同事，常一起改文件树。');
+  } finally {
+    a.close();
+  }
+});
+
+test('macOS 导入按主机认平台；切换语言后再对账不重复补已有的生日', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([
+    { name: '周二', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [], birthday: '1990-07-21',
+      urls: [{ v: 'https://notgithub.com/alice', l: '' }, { v: 'https://github.com/alice-dev', l: '' }, { v: 'https://box.com/ab', l: '' }] },
+  ]));
+  let a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const ids = a.library.db('contacts.sqlite').prepare("SELECT platform, value FROM contact_identities WHERE platform <> 'apple-contacts' ORDER BY value").all();
+    assert.deepEqual(ids.map((r) => `${r.platform}:${r.value}`), ['github:alice-dev', 'web:https://box.com/ab', 'web:https://notgithub.com/alice']);
+    a.close();
+    a = boot({ libDir: dir, systemFixture: fixture, locale: 'en' });
+    ok(await a.call('import_macos', { dry_run: false }));
+    const facts = JSON.parse(a.library.db('contacts.sqlite').prepare('SELECT facts FROM contacts').get().facts);
+    assert.deepEqual(facts.map((f) => f.label), ['生日']);
+  } finally {
+    a.close();
+  }
+});
+
+test('同一次 macOS 导入里两张名片是同一个人：后一张只补缺，不覆盖前一张写入的生日和昵称', async () => {
+  const dir = tmp();
+  const fixture = path.join(dir, 'system.json');
+  fs.writeFileSync(fixture, JSON.stringify([
+    { name: '周一', org: '', title: '', id: 'AB-1', isCompany: false, emails: [{ v: 'zhou@example.test', l: '' }], phones: [], birthday: '1990-07-21', nickname: '一一' },
+    { name: '周一', org: '', title: '', id: 'AB-2', isCompany: false, emails: [{ v: 'zhou@example.test', l: '' }], phones: [], note: '爱跑步', nickname: '小周' },
+  ]));
+  const a = boot({ libDir: dir, systemFixture: fixture, locale: 'zh-CN' });
+  try {
+    ok(await a.call('import_macos', { dry_run: false }));
+    const row = a.library.db('contacts.sqlite').prepare('SELECT facts, aliases FROM contacts').all();
+    assert.equal(row.length, 1);
+    assert.deepEqual(JSON.parse(row[0].facts).map((f) => f.label).sort(), ['备注', '生日'].sort());
+    assert.deepEqual(JSON.parse(row[0].aliases), ['一一', '小周']);
+  } finally {
+    a.close();
+  }
+});
+
 test('合并会留下记录，可以拆开：原档案连同它带来的身份、往来、未完的事和分组都还回去', async () => {
   const dir = tmp();
   const a = boot({ libDir: dir });
@@ -797,6 +1282,20 @@ test('导入过 macOS 通讯录后，超过一天会在自动维护开始时自�
       people = ok(await a.call('stats')).people;
     }
     assert.equal(people, 2);
+    // 插件升级后读取的字段变多：不等满一天，马上对一次，把已有的人补齐
+    write([
+      { name: '甲', org: '', title: '', id: 'AB-1', isCompany: false, emails: [], phones: [{ v: '+1 555 010 0001', l: '' }], birthday: '1990-07-21' },
+      { name: '乙丙', org: '', title: '', id: 'AB-2', isCompany: false, emails: [], phones: [] },
+    ]);
+    a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_remove(json_set(value, '$.at', ?), '$.fields') WHERE key = 'system_import'").run(new Date().toISOString());
+    ok(await a.call('maintenance', { action: 'begin' }));
+    let facts = [];
+    for (let i = 0; i < 40 && !facts.length; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const row = a.library.db('contacts.sqlite').prepare("SELECT c.facts FROM contacts c JOIN contact_identities i ON i.contact_id = c.id WHERE i.platform = 'apple-contacts' AND i.value = 'AB-1'").get();
+      facts = JSON.parse(row.facts);
+    }
+    assert.deepEqual(facts, [{ label: 'Birthday', value: '1990-07-21' }]);
     // 关掉每日对账后不再自动执行
     await a.view('settings', { macAutoSync: false });
     a.library.db('contacts.sqlite').prepare("UPDATE plugin_meta SET value = json_set(value, '$.at', ?) WHERE key = 'system_import'").run(new Date(Date.now() - 2 * 86400000).toISOString());
@@ -1074,7 +1573,7 @@ test('device sync erases deleted payload atomically and migrates full tombstones
   t.after(() => { a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const snapshot = async app => JSON.parse((await vm.runInContext('serial(syncSnapshot)', app.ctx)).text);
   const apply = async (app, state) => { app.ctx.remoteState = structuredClone(state); return vm.runInContext('serial(() => syncApply(remoteState))', app.ctx); };
-  const stored = app => app.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get()?.value;
+  const stored = storedSyncText;
   const source = ok(await a.call('save', { name: 'Private Source', narrative: 'private biography', identities: [{ platform: 'email', value: 'private@example.test' }] }));
   const target = ok(await a.call('save', { name: 'Private Target' }));
   assert.equal(stored(a), undefined);
@@ -1129,7 +1628,7 @@ test('device sync erases concurrent children of a deleted contact', async (t) =>
   t.after(() => { a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const snapshot = async app => JSON.parse((await vm.runInContext('serial(syncSnapshot)', app.ctx)).text);
   const apply = async (app, state) => { app.ctx.remoteState = structuredClone(state); return vm.runInContext('serial(() => syncApply(remoteState))', app.ctx); };
-  const state = app => JSON.parse(app.library.db('contacts.sqlite').prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value);
+  const state = app => JSON.parse(storedSyncText(app));
   const person = ok(await a.call('save', { name: 'Deleted parent' }));
   const kept = ok(await a.call('save', { name: 'Retained parent' }));
   await b.call('stats'); await apply(b, await snapshot(a));
@@ -1262,6 +1761,82 @@ test('device sync transfers multiple chunks through the plugin request/reply ent
   assert.equal(vm.runInContext('syncStatus.phase', apps.a.ctx), 'waiting');
 });
 
+
+// A real address book outgrew the Host's 16 MiB row bound and every sync failed with
+// DB_ROW_LIMIT. Scaled down: parts stay under the row bound, an oversized single row from
+// an earlier version is still readable, and after the first exchange only changes travel.
+test('device sync handles a state larger than one stored row and sends only changes after the first exchange', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'contacts-large-'));
+  for (const name of ['a', 'b']) fs.mkdirSync(path.join(dir, name));
+  const rowBytes = 6000;
+  const source = mainSource.replace('const SYNC_PART = 1000000;', 'const SYNC_PART = 2000;');
+  assert.notEqual(source, mainSource);
+  const apps = {}, pending = new Map(); let chunks = 0;
+  const transport = name => async req => {
+    if (req.op === 'status') return { ok: true, peers: [{ deviceId: name === 'a' ? 'b' : 'a' }] };
+    if (req.op === 'reply') { pending.get(req.requestId)?.(req.data); return { ok: true }; }
+    if (req.op === 'request') {
+      if (req.data.kind === 'chunk') chunks++;
+      const id = crypto.randomUUID(); let reply;
+      pending.set(id, value => { reply = structuredClone(value); });
+      await apps[req.peer].deliver({ type: 'device-sync-request', requestId: id, peer: name, data: structuredClone(req.data) });
+      pending.delete(id); return { ok: true, data: reply };
+    }
+  };
+  const start = name => (apps[name] = boot({ libDir: path.join(dir, name), deviceSync: transport(name), source, rowBytes }));
+  start('a'); start('b');
+  t.after(() => { apps.a.close(); apps.b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (const app of Object.values(apps)) {
+    await app.call('stats');
+    await vm.runInContext("serial(() => batch([setMetaStmt('device_sync_enabled', true)]))", app.ctx);
+  }
+  const ids = [];
+  for (let i = 0; i < 20; i++) ids.push(ok(await apps.a.call('save', { name: 'Record ' + i, narrative: '示例内容 Example content '.repeat(30) })).id);
+  const sync = async name => { await vm.runInContext('syncNow()', apps[name].ctx); return vm.runInContext('syncStatus', apps[name].ctx); };
+  const parts = db => db.prepare("SELECT key, value FROM plugin_meta WHERE key LIKE 'device@_sync@_state:%' ESCAPE '@'").all();
+
+  await sync('a');
+  assert.equal(ok(await apps.b.call('stats')).people, 20);
+  assert.ok(chunks > 1, 'the first exchange carries everything');
+  // Stored in parts, each row readable under the Host bound.
+  const db = apps.a.library.db('contacts.sqlite');
+  const meta = JSON.parse(db.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value);
+  assert.equal(meta.chunked, 1);
+  assert.ok(meta.parts > 3);
+  assert.equal(parts(db).length, meta.parts);
+  for (const row of parts(db)) assert.ok(Buffer.byteLength(JSON.stringify({ value: row.value }), 'utf8') <= rowBytes, row.key);
+  await sync('b');
+  assert.equal((await sync('a')).phase, 'synced');
+
+  // One edit afterwards travels as one small transfer, not the whole address book.
+  chunks = 0;
+  ok(await apps.a.call('save', { id: ids[3], summary: 'changed on a' }));
+  await sync('a');
+  assert.equal(chunks, 1);
+  assert.equal(ok(await apps.b.call('get', { id: ids[3] })).summary, 'changed on a');
+  chunks = 0;
+  ok(await apps.b.call('save', { id: ids[5], summary: 'changed on b' }));
+  await sync('b');
+  assert.equal(chunks, 1, 'what b received from a is not echoed back');
+  assert.equal(ok(await apps.a.call('get', { id: ids[5] })).summary, 'changed on b');
+  assert.equal((await sync('a')).phase, 'synced');
+
+  // An earlier version left the whole state in one row larger than the Host bound.
+  const whole = storedSyncText(apps.a);
+  db.prepare("DELETE FROM plugin_meta WHERE key LIKE 'device@_sync@_state:%' ESCAPE '@'").run();
+  db.prepare("UPDATE plugin_meta SET value = ? WHERE key = 'device_sync_state'").run(whole);
+  assert.ok(Buffer.byteLength(whole, 'utf8') > rowBytes);
+  apps.a.close(); start('a'); await apps.a.call('stats');
+  ok(await apps.a.call('save', { id: ids[7], summary: 'after upgrade' }));
+  assert.equal((await sync('a')).error, null);
+  assert.equal(ok(await apps.b.call('get', { id: ids[7] })).summary, 'after upgrade');
+  const db2 = apps.a.library.db('contacts.sqlite');
+  assert.equal(JSON.parse(db2.prepare("SELECT value FROM plugin_meta WHERE key = 'device_sync_state'").get().value).chunked, 1, 'rewritten in parts');
+  await sync('b');
+  // Slices of the old row are joined exactly: both computers end with identical data.
+  assert.equal((await vm.runInContext('serial(syncSnapshot)', apps.a.ctx)).digest, (await vm.runInContext('serial(syncSnapshot)', apps.b.ctx)).digest);
+  assert.equal((await sync('a')).phase, 'synced');
+});
 
 // P1: derived cleanup must not defeat a later legitimate reassignment. Exercise
 // both arrival orders through real SQLite/sync, then replay and explicit deletion.

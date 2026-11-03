@@ -8,7 +8,8 @@ export function createSubtitleCache({library,core}) {
     if(!req.source?.url)throw Error('CACHE_SOURCE_MISSING');
     const url=new URL(req.source.url);
     let identity=url.href;
-    if(/(^|\.)youtube\.com$/.test(url.hostname)&&url.searchParams.get('v'))identity='youtube:'+url.searchParams.get('v');
+    if(req.source.videoId)identity=req.source.videoId;
+    else if(/(^|\.)youtube\.com$/.test(url.hostname)&&url.searchParams.get('v'))identity='youtube:'+url.searchParams.get('v');
     // Library path segments are capped at 64 characters by the host; a full SHA-256 plus ".json" is 69.
     return `browser/subtitles/${(await hash([1,identity,req.target||'zh-CN'])).slice(0,48)}.json`;
   }

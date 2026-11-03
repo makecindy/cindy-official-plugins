@@ -1,11 +1,11 @@
 {
   "schemaVersion": 3,
   "minCindyVersion": "0.1.116",
-  "id": "baguette-simulator",
+  "id": "cindy-simulator",
   "name": "设备模拟器",
   "description": "在统一设备列表和任务侧栏中查看、操作 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，以及 USB 或网络配对的 iPhone/iPad 真机。支持输入、截图、App 管理和日志；真机需要 Mac、Xcode 27+ 和开发者模式；文字定位与输入需要签名组件。真机不参与模拟器自动关机。 Apple 模拟器需要 macOS 15+、Apple Silicon、完整 Xcode 和对应运行时；安卓模拟器支持 Mac、Windows x64、Linux x64，安装环境前确认下载大小和许可。",
   "whenToUse": "连接、查看和操作 iPhone/iPad 真机；使用 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器。App 安装启动、触摸输入、截图、界面检查和日志排查。先 devices 选择精确设备，再按手册验证结果。",
-  "version": "0.3.28",
+  "version": "0.3.29",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -1046,7 +1046,7 @@
     "idleTimeoutSeconds": 3600
   },
   "liveScreen": true,
-  "command": "baguette",
+  "command": "cindy-simulator",
   "preview": {
     "hosts": [
       "127.0.0.1"
@@ -1078,5 +1078,5 @@
       }
     ]
   },
-  "releaseNotes": "通过「使用电脑键盘／使用手机键盘」文字菜单切换输入方式；释放按键收进高级工具，新增明确的关闭入口；补齐页面隐藏和关闭电脑输入时的待发输入清理。"
+  "releaseNotes": "可以在手机上全屏查看并操作正在运行的模拟器：触摸、主屏幕等按键、旋转和跟随手机方向；需要支持实时画面的 Cindy 版本，旧版本不受影响。"
 }

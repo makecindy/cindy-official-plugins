@@ -79,15 +79,18 @@ test('an update injects the new content script into pages that are already open'
     runtime:{getManifest:()=>({version:'0.4.27',content_scripts:[{js:['brand-icon.js','content.js']}]}),onStartup:noop,onInstalled:{addListener:fn=>installed.push(fn)},onMessage:noop},
     storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async()=>({}),set:async()=>{}}},
     tabs:{onRemoved:noop,onActivated:noop,onUpdated:noop,query:async({url}={})=>{if(url)assert.deepEqual([...url],['http://*/*','https://*/*']);return [{id:4,url:'https://www.youtube.com/watch?v=x'},{id:9,url:'https://example.test/'}];}},
-    scripting:{executeScript:async({target,files})=>{injected.push({tabId:target.tabId,files});if(target.tabId===9)throw Error('Cannot access contents of the page');}},
+    scripting:{executeScript:async({target,files})=>{injected.push({tabId:target.tabId,frameIds:target.frameIds,files});if(target.tabId===9)throw Error('Cannot access contents of the page');}},
+    webNavigation:{getAllFrames:async({tabId})=>tabId===4?[{frameId:0,url:'https://www.youtube.com/watch?v=x'},{frameId:3,url:'https://player.vimeo.com/video/1'},{frameId:5,url:'https://ads.example.test/'},{frameId:6,url:'https://www.youtube.com/embed/a',errorOccurred:true}]:[]},
     alarms:{create(){},onAlarm:noop},action:{async setBadgeText(){},async setBadgeBackgroundColor(){}},
   };
-  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,''),{chrome,MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout});
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,''),{chrome,CindySiteCaptions:{embedded:url=>/^https:\/\/(player\.vimeo\.com\/video\/|www\.youtube\.com\/embed\/)/.test(url)},MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout});
   // The worker's own watchdog (chain) is also an onInstalled listener; only the injector is under test.
   const injectors=installed.filter(fn=>fn.name!=='chain');assert.equal(injectors.length,1);
   for(const fn of injectors)fn({reason:'update'});
   await new Promise(r=>setTimeout(r,10));
-  assert.deepEqual(injected,[{tabId:4,files:['brand-icon.js','content.js']},{tabId:9,files:['brand-icon.js','content.js']}],'every open http(s) page, failures ignored');
+  const files=['brand-icon.js','content.js'];
+  assert.deepEqual(injected.filter(x=>!x.frameIds),[{tabId:4,frameIds:undefined,files},{tabId:9,frameIds:undefined,files}],'every open http(s) page, failures ignored');
+  assert.deepEqual(injected.filter(x=>x.frameIds),[{tabId:4,frameIds:[3],files}],'open player frames too, and only those');
   injected.length=0;for(const fn of injectors)fn({reason:'chrome_update'});await new Promise(r=>setTimeout(r,10));
   assert.deepEqual(injected,[],'browser updates do not re-inject');
 });

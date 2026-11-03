@@ -43,7 +43,7 @@ function createViewer({root,run,devices,wda,agent,children,live}){
       const u=new URL(req.url,base);
       try{
         if(req.method==='GET'&&(assets[u.pathname]||u.pathname==='/control')){
-          const [file,type]=assets[u.pathname]||[u.searchParams.get('lang')==='zh-CN'?'../control.zh-CN.html':'../control.html','text/html; charset=utf-8'];res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' cindy-ghost://baguette-simulator");
+          const [file,type]=assets[u.pathname]||[u.searchParams.get('lang')==='zh-CN'?'../control.zh-CN.html':'../control.html','text/html; charset=utf-8'];res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' cindy-ghost://cindy-simulator");
           res.writeHead(200,{'Content-Type':type});return res.end(await fs.readFile(path.join(__dirname,file)));
         }
         const match=/^\/simulators\/([a-f0-9-]{36})(\/definition.json)?$/i.exec(u.pathname);
