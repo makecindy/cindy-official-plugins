@@ -114,6 +114,21 @@ test('full snapshot: active queue checks, requeue and incomplete evidence', t =>
   assert.ok(unknown.blockers.includes('merge_queue_unavailable'));
 });
 
+test('full snapshot: a long review thread keeps its first comment and says how many were left out', t => {
+  const run = fixture(t);
+  const comment = (id) => ({ id, databaseId: id.length, author: { login: 'bot', __typename: 'Bot' }, body: id, createdAt: '2026-11-03T00:00:00Z', updatedAt: '2026-11-03T00:00:00Z', url: '' });
+  const last = Array.from({ length: 30 }, (_, i) => comment(`late-${i}`));
+  const snap = run({ reviewThreads: { totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [{
+    id: 'T1', isResolved: false, isOutdated: false, path: 'a.js', line: 1, originalLine: 1,
+    firstComment: { nodes: [comment('original-ask')] }, comments: { totalCount: 45, nodes: last },
+  }] } });
+  const thread = snap.reviewThreads.nodes[0];
+  assert.equal(thread.comments[0].body, 'original-ask');
+  assert.equal(thread.comments.length, 31);
+  assert.equal(thread.commentsOmitted, 14);
+  assert.equal(snap.reviewThreads.commentsOmitted, 14);
+});
+
 test('full snapshot: terminal status wins over historical failure', t => {
   const run = fixture(t);
   assert.equal(run({ merged: true, closed: true }).verdict, 'MERGED_CLEANUP_READY');

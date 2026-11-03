@@ -917,6 +917,14 @@ test('marking a draft ready keeps an unconfirmed write uncertain instead of repo
   assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
   assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyUnknown));
 
+  // Errors next to data are a partial success: the write may have happened, so with the re-read failing too
+  // it stays uncertain unless the data itself says ready.
+  const partial = await noteAfterClick(scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: true } } }, errors: [{ message: 'field error' }] }), true));
+  assert.match(partial, new RegExp(zhCopy.prReadyUnknown));
+  const partialReady = await noteAfterClick(scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } }, errors: [{ message: 'field error' }] }), true));
+  assert.doesNotMatch(partialReady, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  assert.doesNotMatch(partialReady, new RegExp(zhCopy.prReadyUnknown));
+
   // GitHub answered with an error: the write did not happen, so failing is accurate.
   const rejected = await noteAfterClick(scenario(() => jsonResponse({ errors: [{ message: 'not allowed' }] }), true));
   assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));

@@ -679,8 +679,12 @@ async function gql(query, variables, callId) {
   if (r.err) return { err: r.err };
   var d = r.data;
   if (d && Array.isArray(d.errors) && d.errors.length) {
-    // 服务端已答复并拒绝:写操作确定没有执行(与网络中断、超时的不确定态区分)。
-    return { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }), rejected: true };
+    // errors 加上 data 是 GraphQL 允许的部分成功:data 里有内容时写操作可能已执行,不能当作确定拒绝。
+    var hasData = d.data !== null && typeof d.data === 'object' &&
+      Object.keys(d.data).some(function (k) { return d.data[k] !== null; });
+    var failure = { err: t('graphqlError', { detail: JSON.stringify(d.errors).slice(0, 500) }), rejected: !hasData };
+    if (hasData) failure.data = d.data;
+    return failure;
   }
   if (!d || d.data === undefined) return { err: t('graphqlNoData') };
   return { data: d.data };

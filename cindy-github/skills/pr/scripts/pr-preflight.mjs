@@ -149,10 +149,12 @@ export function preflight(target, options = {}) {
     : ['main', 'master'].find((name) => git(root, ['rev-parse', '--verify', `origin/${name}`]).ok));
   if (!base) return { error: 'Cannot tell the default branch (origin/HEAD is unset and origin/main|master is missing). Run git fetch origin first.' };
 
+  // The default branch is where work must not start; the target branch is what the PR is compared against.
+  const defaultBranch = head.ok ? head.out.replace(/^origin\//, '') : base;
   const blocks = [], warns = [], notes = [];
   const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).out;
   if (branch === 'HEAD') blocks.push('Detached HEAD: work on a branch made for this change.');
-  else if (branch === base) blocks.push(`On the default branch ${base}: move the work to a branch made for this change.`);
+  else if (branch === defaultBranch || branch === base) blocks.push(`On the default branch ${branch}: move the work to a branch made for this change.`);
 
   const dco = checkDco(root, base);
   if (dco.error) warns.push(`Could not check DCO sign-offs (${dco.error}); check Signed-off-by by hand before pushing.`);

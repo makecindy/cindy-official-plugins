@@ -131,3 +131,13 @@ test('compares against the base branch of a PR that does not target the default 
   const out = execFileSync('node', [fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-preflight.mjs', import.meta.url)), work, '--base', 'release', '--json'], { encoding: 'utf8' });
   assert.equal(JSON.parse(out).base, 'release');
 });
+
+test('still refuses to start from the default branch when the PR targets another branch', (t) => {
+  const { work, git } = repo(t);
+  git(work, 'checkout', '-q', '-b', 'release');
+  git(work, 'push', '-q', 'origin', 'release');
+  git(work, 'checkout', '-q', 'main');
+  assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch main/);
+  git(work, 'checkout', '-q', 'release');
+  assert.match(preflight(work, { base: 'release' }).blocks.join('\n'), /default branch release/);
+});

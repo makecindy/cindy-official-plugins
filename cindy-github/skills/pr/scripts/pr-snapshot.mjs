@@ -233,8 +233,13 @@ function normalizeComment(c) {
 }
 
 function normalizeThread(t) {
-  const comments = t.comments?.nodes || [];
+  let comments = t.comments?.nodes || [];
+  // A long thread keeps its last 30 comments plus the first one: the original ask must not be lost.
+  const first = t.firstComment?.nodes?.[0];
+  if (first && comments.length > 0 && !comments.some((c) => c.id === first.id)) comments = [first, ...comments];
+  const total = t.comments?.totalCount;
   return {
+    commentsOmitted: Number.isFinite(total) ? Math.max(0, total - comments.length) : 0,
     id: t.id,
     isResolved: Boolean(t.isResolved),
     isOutdated: Boolean(t.isOutdated),
@@ -317,7 +322,19 @@ query($owner: String!, $name: String!, $number: Int!) {
           path
           line
           originalLine
+          firstComment: comments(first: 1) {
+            nodes {
+              id
+              databaseId
+              author { login __typename }
+              body
+              createdAt
+              updatedAt
+              url
+            }
+          }
           comments(last: 30) {
+            totalCount
             nodes {
               id
               databaseId
@@ -533,6 +550,8 @@ async function main() {
     outdatedUnresolvedCount: outdatedUnresolvedThreads.length,
     rawUnresolvedCount: rawUnresolvedThreads.length,
     truncated: reviewThreadsTruncated,
+    // Comments left out of long threads (the first one and the last 30 are always kept).
+    commentsOmitted: threads.reduce((sum, t) => sum + (t.commentsOmitted || 0), 0),
     nodes: threads,
   };
   const truncated = reviewThreadsTruncated || checksTruncated;
