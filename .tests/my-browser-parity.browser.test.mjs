@@ -40,13 +40,16 @@ async function launch(grantDebugger){
 <input type="file" id="f" multiple aria-label="Files">
 <button id="al" onclick="window.res=confirm('Sure?')">confirm</button>
 <button id="menu" aria-haspopup="menu" aria-expanded="false">Profile menu</button>
-<button id="kbd" aria-expanded="false">Keyboard disclosure</button>
+<button id="lazy" aria-expanded="false">Lazy disclosure</button>
 <div id="hov" style="width:120px;height:30px" aria-label="Hover target" role="button" tabindex="0">hover</div>
 <script>
 // Like Radix menus: open on pointerdown and cancel it; click does nothing.
 menu.addEventListener('pointerdown',e=>{if(e.button===0&&!e.ctrlKey){menu.setAttribute('aria-expanded','true');e.preventDefault();}});
 menu.addEventListener('mousedown',()=>{window.menuMouseDown=true;});
-kbd.addEventListener('keydown',e=>{if(e.key==='Enter')kbd.setAttribute('aria-expanded','true');});
+// Click and Enter share one toggle that the page applies late (as a slow render would): a second
+// trigger after the first would close it again.
+const lazyToggle=()=>setTimeout(()=>lazy.setAttribute('aria-expanded',String(lazy.getAttribute('aria-expanded')!=='true')),150);
+lazy.addEventListener('click',lazyToggle);lazy.addEventListener('keydown',e=>{if(e.key==='Enter')lazyToggle();});
 hov.addEventListener('pointerenter',()=>{hov.textContent='hovered';});
 dst.addEventListener('dragover',e=>e.preventDefault());dst.addEventListener('drop',e=>{e.preventDefault();dst.textContent='dropped';});
 f.addEventListener('change',()=>{window.picked=[...f.files].map(x=>x.name+':'+x.size);});
@@ -167,12 +170,13 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const clicked=await act('click',{...T,ref:ref('Click me')});
   const ev=await act('evaluate',{...T,fn:'() => document.title'});
   check('click + evaluate',clicked.ok && ev.ok && ev.result==='clicked',JSON.stringify(ev));
-  // Widgets that open on pointerdown or only from the keyboard still open from one click.
+  // A widget that opens on pointerdown opens from one click; one that updates late is toggled once, not twice.
   const menuClick=await act('click',{...T,ref:ref('Profile menu')});
-  const kbdClick=await act('click',{...T,ref:ref('Keyboard disclosure')});
+  const lazyClick=await act('click',{...T,ref:ref('Lazy disclosure')});
   const hover=await act('hover',{...T,ref:ref('Hover target')});
-  const widgets=await act('evaluate',{...T,fn:"() => [menu.getAttribute('aria-expanded'), !!window.menuMouseDown, kbd.getAttribute('aria-expanded'), hov.textContent]"});
-  check('click opens a pointerdown menu, keyboard disclosure; hover enters',menuClick.ok && kbdClick.ok && hover.ok && JSON.stringify(widgets.result)==='["true",false,"true","hovered"]',JSON.stringify(widgets.result));
+  await new Promise(r=>setTimeout(r,500));
+  const widgets=await act('evaluate',{...T,fn:"() => [menu.getAttribute('aria-expanded'), !!window.menuMouseDown, lazy.getAttribute('aria-expanded'), hov.textContent]"});
+  check('click opens a pointerdown menu, toggles a late widget once; hover enters',menuClick.ok && lazyClick.ok && hover.ok && JSON.stringify(widgets.result)==='["true",false,"true","hovered"]',JSON.stringify(widgets.result));
   const c1=await act('console',T);await act('evaluate',{...T,fn:"() => console.warn('hello from agent')"});const c2=await act('console',T);
   check('console capture',c1.ok && c2.ok && JSON.stringify(c2.messages).includes('hello from agent'),JSON.stringify(c2.messages));
   const reqs=await act('requests',{...T,filter:'/api/'});
@@ -281,7 +285,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
     check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,41);
+  assert.equal(results.length,42);
 });
 
 test('real Chrome: an iframe reads and acts like the page around it',enabled,async()=>{

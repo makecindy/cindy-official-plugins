@@ -1040,21 +1040,15 @@ async function pageOperation(job) {
       const approach = () => { for (const type of ['pointerover','pointerenter','mouseover','mouseenter','pointermove','mousemove']) pointer(type); };
       if (action === 'click') {
         started = true;
-        const collapsed = el.getAttribute('aria-expanded') === 'false';
         approach();
         // As in Chrome, a cancelled pointerdown suppresses the mouse events and the focus change; click follows.
         const down = pointer('pointerdown',{buttons:1,detail:1});
         if (down && pointer('mousedown',{buttons:1,detail:1})) el.focus?.({preventScroll:true});
         pointer('pointerup',{detail:1});
         if (down) pointer('mouseup',{detail:1});
+        // No automatic Enter afterwards: a page may update its state later than we can tell, and a second
+        // toggle would close what the click just opened. The caller reads the page and chooses the keyboard.
         if (el.isConnected) el.click();
-        // A disclosure that is still shut was not opened by the pointer: try the keyboard way a user would.
-        if (collapsed) {
-          await new Promise(resolve => setTimeout(resolve,50));
-          if (el.isConnected && el.getAttribute('aria-expanded') === 'false') {
-            for (const type of ['keydown','keyup']) el.dispatchEvent(new KeyboardEvent(type,{key:'Enter',code:'Enter',bubbles:true,cancelable:true,composed:true}));
-          }
-        }
       }
       else if (action === 'hover') { started = true; approach(); }
       else if (action === 'select') {
