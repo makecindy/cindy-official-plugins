@@ -102,7 +102,9 @@
         memory.delete(operation);
         return disk;
       }
-      if (!disk.taskId || (mem.runId && !disk.runId) || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned' ||
+      if (!disk.taskId || (mem.runId && !disk.runId) || (mem.messagesComplete && !disk.messagesComplete) ||
+          ((mem.artifacts?.length || 0)>(disk.artifacts?.length || 0)) ||
+          (mem.messageCursor && mem.messageCursor!==disk.messageCursor) || mem.state==='cleaned' ||
           (mem.draft_cleanup && mem.draft_cleanup!==disk.draft_cleanup) ||
           (mem.cancelError && !disk.cancelError) ||
           (['blocked','send_rejected','unknown_create','unknown_send'].includes(mem.state) && mem.state!==disk.state) ||

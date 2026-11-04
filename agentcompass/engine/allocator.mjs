@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at e98a82287ee1793ae559c8a0fed188e5d1c69ef1 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at a2215b3e2dc57cd6a3689b05ae8d4927e7926b7f (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate rather than edit.
 /**
  * AgentCompass Core Pure Intent & Multi-Dimensional Capability Allocator
@@ -1203,10 +1203,11 @@ export function profileKind(profile, policy = DEFAULT_SCORING_POLICY) {
 export function effortValue(policy, curves, name, effort, fallback) {
   const own = curves?.[name] || {};
   if (effort in own) return own[effort];
+  if (effort === "ultra" && "max" in own) return own.max;
   const policyTable = policy?.[`effort_${name}`] || {};
   if ((effort === "minimal" || effort === "none" || effort === "off") && "low" in own) {
     if (name === "ability") {
-      const delta = (policyTable[effort] ?? -1.0) - (policyTable.low ?? -0.7);
+      const delta = (policyTable[effort] ?? -1.0) - (policyTable.low ?? -0.54);
       return own.low + Math.min(delta, -0.2);
     }
     if (name === "burn") {
@@ -1214,7 +1215,9 @@ export function effortValue(policy, curves, name, effort, fallback) {
       return round4(own.low * Math.min(ratio, 0.75));
     }
   }
-  return effort in policyTable ? policyTable[effort] : fallback;
+  if (effort in policyTable) return policyTable[effort];
+  if (effort === "ultra" && "max" in policyTable) return policyTable.max;
+  return fallback;
 }
 
 /**
@@ -1321,12 +1324,39 @@ export function fitScore(kind, model, catalog = {}, options = {}) {
 }
 
 /**
+ * The minimum ability a route's work needs at a difficulty (`allocator.py:ability_floor`).
+ */
+export function abilityFloor(policy = DEFAULT_SCORING_POLICY, route = null, difficulty = "hard") {
+  const own = route?.ability_floor || {};
+  return difficulty in own ? Number(own[difficulty]) : Number(policy.ability_floor?.[difficulty] ?? 3.0);
+}
+
+/**
+ * Extra ability critical work needs above the difficulty's floor (`allocator.py:critical_headroom`).
+ */
+export function criticalHeadroom(policy = DEFAULT_SCORING_POLICY, difficulty = "hard") {
+  const own = policy?.critical_headroom_by_difficulty || {};
+  return difficulty in own ? Number(own[difficulty]) : Number(policy?.critical_headroom ?? 0.3);
+}
+
+/**
  * Continuous task ability demand (`allocator.py:task_demand`).
  */
-export function taskDemand(profile, difficulty, critical, divergence, policy = DEFAULT_SCORING_POLICY, highPrecision = false) {
+export function taskDemand(
+  profile,
+  difficulty,
+  critical,
+  divergence,
+  policy = DEFAULT_SCORING_POLICY,
+  highPrecision = false,
+  floorOverride = null,
+) {
   const cfg = policy.demand || DEFAULT_SCORING_POLICY.demand;
-  const floor = Number(policy.ability_floor?.[difficulty] ?? 3.3);
-  const headroom = critical ? Number(policy.critical_headroom ?? 0.3) : 0.0;
+  const floor =
+    floorOverride === null || floorOverride === undefined
+      ? Number(policy.ability_floor?.[difficulty] ?? 3.3)
+      : Number(floorOverride);
+  const headroom = critical ? criticalHeadroom(policy, difficulty) : 0.0;
   const precision = highPrecision && !critical ? Number(cfg.precision_headroom ?? 0.15) : 0.0;
   const span = Number(policy.profile?.saturation_span ?? 0.3);
 
@@ -1525,15 +1555,16 @@ export function evaluateCandidate(candidate, taskCtx, catalog = {}) {
       `context window ${info.context_window || 128000} outgrown by ${taskCtx.min_context_tokens} tokens`
     );
   }
+  const routes = catalog.routes || CANONICAL_ROUTES;
+  const route = routes[taskCtx.kind] || {};
   const ability = effortAbility(policy, curves, info, effort);
   const highAbility = effortAbility(policy, curves, info, "high");
   const demand = taskCtx.demand;
   const target = demand.required_ability;
-  const floor = policy.ability_floor[taskCtx.difficulty] ?? 3.0;
-  const gate = floor + (taskCtx.critical ? policy.critical_headroom : 0.0);
+  const floor = demand.floor ?? abilityFloor(policy, route, taskCtx.difficulty);
+  const headroom = taskCtx.critical ? criticalHeadroom(policy, taskCtx.difficulty) : 0.0;
+  const gate = floor + headroom;
 
-  const routes = catalog.routes || CANONICAL_ROUTES;
-  const route = routes[taskCtx.kind] || {};
   if (
     route.restrict_models &&
     taskCtx.specialist_available &&
@@ -1630,7 +1661,8 @@ export function evaluateCandidate(candidate, taskCtx, catalog = {}) {
     span = Number(policy.profile?.saturation_span ?? 0.3);
   }
 
-  let abilityScore = clamp((credited - (taskCtx.high_precision ? gate : floor)) / span, 0, 1);
+  const origin = Math.max(floor, Number(policy.ability_score_origin?.[taskCtx.difficulty] ?? floor));
+  let abilityScore = clamp((credited - origin - (taskCtx.high_precision ? gate - floor : 0.0)) / span, 0, 1);
   const qualityBonus = taskCtx.high_precision
     ? round4(Number(policy.high_precision_effort_weight ?? 0.14) * effortGain)
     : 0.0;
@@ -1805,7 +1837,9 @@ export function rankCandidates(profileInput, options = {}) {
       (!critical || mechanicalRunbook)
   );
 
-  const demand = taskDemand(profile, difficulty, critical, div, policy, highPrecision);
+  const routeObj = routes[kind] || {};
+  const floor = abilityFloor(policy, routeObj, difficulty);
+  const demand = taskDemand(profile, difficulty, critical, div, policy, highPrecision, floor);
   const requirements = profileRequirements(profile, policy);
   const sWeights = subjectiveWeights(profile, kind);
 
@@ -1842,7 +1876,6 @@ export function rankCandidates(profileInput, options = {}) {
     if (rawM) candidateCanonicals.add(canonicalModel(rawM, aliases));
   }
   const dotAvailable = candidateCanonicals.has("dot");
-  const routeObj = routes[kind] || {};
   const specialistAvailable = Boolean(
     routeObj.restrict_models &&
       (routeObj.preferred || []).some((m) => candidateCanonicals.has(canonicalModel(m, aliases)))

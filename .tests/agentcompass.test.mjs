@@ -518,6 +518,14 @@ test('review 4: a terminal run with unread message pages points to status, and c
   const rest=(await f.send('status',{operation:op})).result;
   assert.deepEqual([rest.messages_complete,rest.message_pages_read,rest.output_available,rest.next_tool.tool],[true,12,true,'cleanup']);
   assert.equal((await f.send('cleanup',{operation:op})).result.status,'cleaned');
+  // Even when receipt saves fail after the first 10 pages, cached pagination progress advances to completion across status calls.
+  const paged=fixture({saveFails:rec=>(rec.artifacts?.length || 0)>10});paged.host.pages=25;
+  const pop=(await paged.send('roll',{task:'x'})).result.operation;
+  paged.run.status='completed';paged.run.outputMessageId='out-exact';
+  assert.equal((await paged.send('status',{operation:pop})).result.message_pages_read,10);
+  assert.equal((await paged.send('status',{operation:pop})).result.message_pages_read,20);
+  const pDone=(await paged.send('status',{operation:pop})).result;
+  assert.deepEqual([pDone.messages_complete,pDone.message_pages_read,pDone.output_available],[true,25,true]);
   // An oversized message page (> 256 KiB across 100 chatty messages or a large final reply) is chunked across the
   // Node RPC boundary and its receipt stores only the 4,000-char summary, so status and cleanup succeed under the 256 KiB limit.
   const chatty=fixture();
@@ -775,26 +783,28 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   assert.equal(sparkAlgo.status, 'native', 'all host-offered efforts are ranked when static alias efforts do not overlap');
   assert.equal(sparkAlgo.route.bundle.effort, 'xhigh');
   const sparkRoutine = routeBuiltIn('Batch rename foo to bar in all filenames.', sparkOnlyCatalog);
-  assert.equal(sparkRoutine.route.bundle.effort, 'xhigh', 'minimal effort is scored conservatively below low and does not clear the 3.0 routine floor on a 3.2-tier model');
+  assert.equal(sparkRoutine.route.bundle.effort, 'xhigh', 'minimal effort (2.1) is below the 2.3 routine floor while xhigh (3.3) clears it');
 
   const lunaOnlyCatalog = {models: [REAL_CATALOG.models.find(r => r.route.model === 'gpt-6-luna')]};
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
   assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
   assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
-  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.', '修复翻译模块的 bug']) {
+  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.', 'Debug translation pipeline', '修复翻译模块的 bug', 'Fix the keyboard shortcuts in editor.py.', 'Fix mouse event handler in app.ts']) {
     const res = routeBuiltIn(debugTask, lunaOnlyCatalog);
     assert.equal(res.decision.work_kind, 'debug_review', debugTask);
     assert.equal(res.route.bundle.effort, 'max', debugTask);
   }
+  assert.equal(routeBuiltIn('用鼠标点击设置里的保存', lunaOnlyCatalog).decision.work_kind, 'computer_use');
   assert.equal(routeBuiltIn('Translate README.md into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
   assert.equal(routeBuiltIn('Translate the React component documentation into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
 
   const multiSegmentPiCatalog = {models: [
-    {route: {agentKind: 'pi', providerId: 'openrouter', model: 'openrouter/qwen/qwen3-coder', effort: 'high', fastMode: false}, efforts: ['medium', 'high'], supportsFastMode: false},
+    {route: {agentKind: 'pi', providerId: 'openrouter', model: 'openrouter/qwen/qwen3-coder-next', effort: 'high', fastMode: false}, efforts: ['medium', 'high'], supportsFastMode: false},
   ]};
   const multiSeg = routeBuiltIn('Rename foo to bar in util.py.', multiSegmentPiCatalog);
   assert.equal(multiSeg.status, 'native', 'multi-segment Pi model IDs remain stable across canonicalization and allocator lookup');
-  assert.equal(multiSeg.route.bundle.model, 'openrouter/qwen/qwen3-coder');
+  assert.equal(multiSeg.route.bundle.model, 'openrouter/qwen/qwen3-coder-next');
+  assert.equal(routeBuiltIn('Fix the keyboard shortcuts in editor.py.', multiSegmentPiCatalog).status, 'native');
 });
 
 test('nothing runnable: an empty or foreign catalog is blocked, never guessed', () => {

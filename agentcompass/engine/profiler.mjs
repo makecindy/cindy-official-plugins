@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at dcca04c7946a4e86c4c9dfa986f158fef83458af (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at a2215b3e2dc57cd6a3689b05ae8d4927e7926b7f (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate rather than edit.
 /**
  * Multi-Protocol Request Extractor & Deterministic 10-Field Task Profiler
@@ -79,25 +79,36 @@ export const READONLY_REVIEW_PHRASES = [
 ];
 
 export const GUI_WORDS = [
-  "click the",
-  "click save",
-  "take a screenshot",
-  "capture a screenshot",
+  "click",
+  "screenshot",
   " gui",
   "desktop app",
   "mouse",
-  "keyboard",
+  "点击",
+  "截图",
+  "桌面",
+  "鼠标",
+];
+
+export const COMPUTER_USE_PHRASES = [
+  "click the",
+  "click save",
+  "use the mouse",
+  "with the mouse",
+  "mouse and keyboard",
+  "keyboard and mouse",
   "operate the browser",
   "operate the desktop",
   "点击",
-  "截取屏幕",
-  "截屏操作",
-  "桌面",
-  "鼠标",
-  "键盘",
+  "用鼠标",
+  "键鼠",
+  "鼠标键盘",
   "操作浏览器",
   "操作桌面",
 ];
+
+export const CODE_FILE_RE =
+  /[\w-]\.(?:py|pyw|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swift|lua|sh|ps1)(?!\w)(?!\.\w)/i;
 
 const OBJECTIVE_LOCAL_RUNTIME_RE =
   /\b(?:ssh|ssh-agent|vps|localhost|127\.0\.0\.1|pytest|unittest|sqlite|daemon|worktree|adb|emulator|intranet|webhook|credentials?)\b/i;
@@ -150,7 +161,8 @@ const FRONTIER_SIGNALS = [
 
 export function inferKindFromObjective(objective) {
   const text = ` ${String(objective || "").toLowerCase()} `;
-  if (GUI_WORDS.some((w) => text.includes(w))) {
+  const namesCode = CODE_FILE_RE.test(text);
+  if (!namesCode && COMPUTER_USE_PHRASES.some((w) => text.includes(w))) {
     return "computer_use";
   }
   const rules = [
@@ -229,6 +241,22 @@ export function inferKindFromObjective(objective) {
       ],
     ],
     [
+      "text_in_text_out",
+      [
+        "translate",
+        "translation of",
+        "draft a document",
+        "draft documentation",
+        "rewrite the text",
+        "summarize the text",
+        "翻译",
+        "撰写文档",
+        "文案",
+        "润色",
+        "摘要",
+      ],
+    ],
+    [
       "visual_analysis",
       [
         "visual diff",
@@ -249,6 +277,22 @@ export function inferKindFromObjective(objective) {
         "检查截图",
         "设计稿检查",
         "看图分析",
+      ],
+    ],
+    [
+      "frontend_implementation",
+      [
+        "frontend",
+        "react",
+        "css",
+        "tailwind",
+        "mockup",
+        "desktop ui",
+        "game ui",
+        "界面",
+        "前端",
+        "样式",
+        "组件",
       ],
     ],
     [
@@ -280,39 +324,6 @@ export function inferKindFromObjective(objective) {
         "只读审查",
         "安全审计",
         "内存泄漏",
-      ],
-    ],
-    [
-      "text_in_text_out",
-      [
-        "translate ",
-        "translation of ",
-        "translation into ",
-        "draft a document",
-        "draft documentation",
-        "rewrite the text",
-        "summarize the text",
-        "翻译",
-        "撰写文档",
-        "文案",
-        "润色",
-        "摘要",
-      ],
-    ],
-    [
-      "frontend_implementation",
-      [
-        "frontend",
-        "react",
-        "css",
-        "tailwind",
-        "mockup",
-        "desktop ui",
-        "game ui",
-        "界面",
-        "前端",
-        "样式",
-        "组件",
       ],
     ],
     [
@@ -378,9 +389,13 @@ export function inferKindFromObjective(objective) {
     ],
   ];
 
+  const debugKeywords = rules.find(([k]) => k === "debug_review")?.[1] || [];
+  const debugging = debugKeywords.some((word) => text.includes(word));
   for (const [kind, keywords] of rules) {
-    const check = kind === "text_in_text_out" ? text.replace(/(?:翻译|文案|摘要)(?:模块|函数|接口|服务|逻辑|代码|脚本|组件|插件|解析|器)/g, " ") : text;
-    if (keywords.some((w) => check.includes(w))) {
+    if (kind === "text_in_text_out" && (namesCode || debugging)) {
+      continue;
+    }
+    if (keywords.some((w) => text.includes(w))) {
       return kind;
     }
   }
