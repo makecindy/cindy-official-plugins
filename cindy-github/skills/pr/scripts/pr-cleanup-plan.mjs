@@ -1,0 +1,288 @@
+#!/usr/bin/env node
+// Read-only local cleanup planner for an already-terminal GitHub PR.
+//
+// This script intentionally does not remove worktrees, delete branches, or
+// touch remote refs. It produces a bounded JSON plan so the agent can decide
+// whether local cleanup is safe before running any destructive git command.
+
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
+import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
+import { resolvePullRequestTarget } from './lib/repo-target.mjs';
+
+const exec = promisify(execFile);
+const MAX_BUFFER = 10 * 1024 * 1024;
+
+function usage() {
+  process.stderr.write(`Usage: node scripts/pr-cleanup-plan.mjs <pr-number-or-url> [--repo owner/name] [--worktree path] [--fetch]\n`);
+}
+
+function parseArgs(argv) {
+  let repo = null;
+  let prArg = null;
+  let worktree = process.cwd();
+  let fetch = false;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '-h' || arg === '--help') {
+      usage();
+      process.exit(0);
+    }
+    if (arg === '--repo') {
+      repo = argv[++i];
+      continue;
+    }
+    if (arg === '--worktree') {
+      worktree = argv[++i];
+      continue;
+    }
+    if (arg === '--fetch') {
+      fetch = true;
+      continue;
+    }
+    if (!prArg) {
+      prArg = arg;
+      continue;
+    }
+    throw new Error(`Unexpected argument: ${arg}`);
+  }
+  return {
+    ...resolvePullRequestTarget(prArg, { explicitRepo: repo, worktree }),
+    worktree,
+    fetch,
+  };
+}
+
+async function ensureGit() {
+  try {
+    await exec('git', ['--version'], { encoding: 'utf8' });
+  } catch {
+    process.stderr.write('[git] binary not found on PATH. Install git and re-run.\n');
+    process.exit(1);
+  }
+}
+
+async function git(cwd, args, { allowFailure = false } = {}) {
+  try {
+    const { stdout, stderr } = await exec('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      maxBuffer: MAX_BUFFER,
+    });
+    return { ok: true, stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), code: 0 };
+  } catch (e) {
+    if (!allowFailure) throw e;
+    return {
+      ok: false,
+      stdout: String(e.stdout || '').trimEnd(),
+      stderr: String(e.stderr || e.message || '').trimEnd(),
+      code: typeof e.code === 'number' ? e.code : 1,
+    };
+  }
+}
+
+function parseWorktrees(text) {
+  const entries = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (current) entries.push(current);
+      current = { path: line.slice('worktree '.length), head: null, branchRef: null, branch: null, detached: false, bare: false };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith('HEAD ')) current.head = line.slice('HEAD '.length);
+    else if (line.startsWith('branch ')) {
+      current.branchRef = line.slice('branch '.length);
+      current.branch = current.branchRef.startsWith('refs/heads/')
+        ? current.branchRef.slice('refs/heads/'.length)
+        : current.branchRef;
+    } else if (line === 'detached') current.detached = true;
+    else if (line === 'bare') current.bare = true;
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
+function classifyStatusLine(line) {
+  if (line.startsWith('??')) return 'untracked';
+  return 'tracked';
+}
+
+async function worktreeStatus(path) {
+  const res = await git(path, ['status', '--porcelain=v1', '--untracked-files=all'], { allowFailure: true });
+  if (!res.ok) {
+    return { ok: false, dirty: true, error: res.stderr, tracked: 0, untracked: 0, files: [] };
+  }
+  const lines = res.stdout ? res.stdout.split('\n') : [];
+  const files = lines.slice(0, 50).map(line => ({
+    status: line.slice(0, 2),
+    kind: classifyStatusLine(line),
+    path: line.slice(3),
+  }));
+  return {
+    ok: true,
+    dirty: lines.length > 0,
+    tracked: lines.filter(line => classifyStatusLine(line) === 'tracked').length,
+    untracked: lines.filter(line => classifyStatusLine(line) === 'untracked').length,
+    files,
+    truncated: lines.length > files.length,
+  };
+}
+
+/** Worktrees Cindy created for a task; Cindy owns their lifecycle. */
+function isCindyManagedWorktree(worktreePath) {
+  const parent = path.basename(path.dirname(path.resolve(worktreePath)));
+  return parent === '.cindy-worktrees' || parent === '.xdt-worktrees';
+}
+
+async function refExists(cwd, ref) {
+  const res = await git(cwd, ['rev-parse', '--verify', '--quiet', ref], { allowFailure: true });
+  return { exists: res.ok, oid: res.ok ? res.stdout.trim() : null };
+}
+
+async function isAncestor(cwd, ancestor, descendant) {
+  const res = await git(cwd, ['merge-base', '--is-ancestor', ancestor, descendant], { allowFailure: true });
+  if (res.code === 0) return true;
+  if (res.code === 1) return false;
+  return null;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  await ensureBinary();
+  await ensureAuth();
+  await ensureGit();
+
+  const pr = await ghJson(`repos/${args.repo}/pulls/${args.number}`);
+  const repoRoot = (await git(args.worktree, ['rev-parse', '--show-toplevel'])).stdout;
+  const worktreesText = (await git(repoRoot, ['worktree', 'list', '--porcelain'])).stdout;
+  const worktrees = parseWorktrees(worktreesText);
+  const primaryWorktree = worktrees[0]?.path || repoRoot;
+  // The PR facts come from GitHub, the worktrees from this checkout: refuse to combine them when none of
+  // this checkout's remotes is the PR's base or head repository (a wrong --worktree, or another fork).
+  const remoteVerbose = (await git(primaryWorktree, ['remote', '-v'], { allowFailure: true })).stdout;
+  const remoteUrls = githubRepoNamesOfRemotes(remoteVerbose);
+  // In a fork checkout `origin` is the head fork; the base branch lives on the remote of the PR's base repository.
+  const baseRepoName = pr.base?.repo?.full_name ?? args.repo;
+  const baseRemote = remoteNameForRepo(remoteVerbose, baseRepoName);
+  // Without a remote for the base repository, falling back to `origin` would compare and fast-forward against a fork.
+  if (!baseRemote) {
+    throw new Error(`This checkout has no remote for the PR's base repository ${baseRepoName} (origin is a fork); add one (git remote add upstream https://github.com/${baseRepoName}.git) and run again.`);
+  }
+  const prRepos = [pr.base?.repo?.full_name, pr.head?.repo?.full_name, args.repo].filter(Boolean).map(name => name.toLowerCase());
+  if (!prRepos.some(name => remoteUrls.includes(name))) {
+    throw new Error(`This checkout has no remote for ${prRepos[0] ?? 'the PR repository'}; pass --worktree from a checkout of that repository.`);
+  }
+  const fetched = args.fetch ? (await git(primaryWorktree, ['fetch', '--prune', baseRemote])).ok : false;
+
+  const headRef = pr.head?.ref;
+  const baseRef = pr.base?.ref;
+  const headSha = pr.head?.sha || null;
+  const localHeadRef = `refs/heads/${headRef}`;
+  const originBaseRef = `refs/remotes/${baseRemote}/${baseRef}`;
+  // A fork PR's head.ref is a branch name in someone else's repository; a same-named local branch or
+  // worktree here is not that PR's work unless it sits exactly on the PR head.
+  const fromFork = !pr.head?.repo || pr.head.repo.full_name?.toLowerCase() !== pr.base?.repo?.full_name?.toLowerCase();
+  const namedBranch = await refExists(primaryWorktree, localHeadRef);
+  const localBranch = fromFork && namedBranch.oid !== headSha ? { exists: false, oid: null } : namedBranch;
+  const originBase = await refExists(primaryWorktree, originBaseRef);
+  const targetWorktrees = worktrees.filter(w => isPrWorktree(w, { headRef, headSha, fromFork }));
+  const primaryStatus = await worktreeStatus(primaryWorktree);
+  const targetWorktreeDetails = await Promise.all(targetWorktrees.map(async wt => ({
+    ...wt,
+    status: await worktreeStatus(wt.path),
+  })));
+  const cindyManagedWorktree = targetWorktreeDetails.some(worktree => isCindyManagedWorktree(worktree.path));
+  const dirtyWorktrees = targetWorktreeDetails.filter(wt => wt.status.dirty);
+  const longLivedBranch = isLongLivedBranch(headRef, [pr.head?.repo?.default_branch, pr.base?.repo?.default_branch].filter(Boolean));
+  const terminal = pr.state === 'closed';
+  const merged = Boolean(pr.merged);
+  const hasLocalArtifacts = localBranch.exists || targetWorktreeDetails.length > 0;
+  const headShaAncestorOfOriginBase = headSha && originBase.exists
+    ? await isAncestor(primaryWorktree, headSha, originBaseRef)
+    : null;
+  const localBranchAncestorOfOriginBase = localBranch.exists && originBase.exists
+    ? await isAncestor(primaryWorktree, localHeadRef, originBaseRef)
+    : null;
+
+  const primaryIsHead = targetWorktreeDetails.some(worktree => worktree.path === primaryWorktree);
+  // Local work the PR does not contain: every local tip (the branch and each target worktree's HEAD)
+  // must be the PR head or one of its ancestors. A tip that cannot be compared counts as unverified.
+  const localTips = [...new Set([
+    ...(localBranch.exists ? [localBranch.oid] : []),
+    ...targetWorktreeDetails.map(worktree => worktree.head).filter(Boolean),
+  ])];
+  const tipsInPr = await Promise.all(localTips.map(async tip =>
+    !headSha ? null : tip === headSha ? true : isAncestor(primaryWorktree, tip, headSha)));
+  const localWorkNotInPr = tipsInPr.some(inPr => inPr !== true);
+  const plan = planLocalCleanup({
+    terminal,
+    merged,
+    longLivedBranch,
+    primaryStatus,
+    primaryIsHead,
+    dirtyTargetCount: dirtyWorktrees.length,
+    hasLocalArtifacts,
+    cindyManagedWorktree,
+    localWorkNotInPr,
+  });
+
+  const out = {
+    fetchedAt: new Date().toISOString(),
+    dryRun: true,
+    fetched,
+    fetchRecommended: !args.fetch,
+    repo: args.repo,
+    number: args.number,
+    url: pr.html_url,
+    state: pr.state,
+    merged,
+    mergedAt: pr.merged_at,
+    closedAt: pr.closed_at,
+    mergeCommitSha: pr.merge_commit_sha,
+    headRef,
+    baseRef,
+    headSha,
+    local: {
+      requestedWorktree: args.worktree,
+      repoRoot,
+      primaryWorktree,
+      primaryStatus,
+      localBranchExists: localBranch.exists,
+      localBranchOid: localBranch.oid,
+      originBaseExists: originBase.exists,
+      headShaAncestorOfOriginBase,
+      localBranchAncestorOfOriginBase,
+      localWorkNotInPr,
+      targetWorktrees: targetWorktreeDetails,
+      cindyManagedWorktree,
+    },
+    cleanup: {
+      recommendation: plan.recommendation,
+      canCleanupLocal: plan.canCleanupLocal,
+      canSyncPrimary: plan.canSyncPrimary,
+      blockers: plan.blockers,
+      notes: plan.notes,
+      commands: plan.canCleanupLocal
+        ? buildCleanupCommands({
+            primaryWorktree,
+            baseRef,
+            headRef,
+            localBranchExists: localBranch.exists,
+            targetWorktrees: targetWorktreeDetails,
+            syncPrimary: plan.canSyncPrimary,
+            baseRemote,
+          })
+        : [],
+    },
+  };
+
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
+main().catch(e => {
+  process.stderr.write(`[pr-cleanup-plan] ${e.message}\n`);
+  process.exit(2);
+});

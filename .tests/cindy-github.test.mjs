@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createContext, Script } from 'node:vm';
 
+// CI runs only .tests/<plugin>.test.mjs for a changed plugin; the /pr Skill's script tests ride along here.
+import './cindy-github-pr/cleanup-plan.test.mjs';
+import './cindy-github-pr/gate.test.mjs';
+import './cindy-github-pr/preflight.test.mjs';
+import './cindy-github-pr/snapshot.test.mjs';
+
 const githubSource = readFileSync(
   new URL('../cindy-github/main.js', import.meta.url),
   'utf8',
@@ -62,12 +68,17 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.minCindyVersion, '0.1.64');
+  // First Cindy release carrying makecindy/cindy#8244: 0.1.125-beta and earlier do not contain it, and a
+  // stable release reuses its same-number beta's commit (so 0.1.125 stable would not either).
+  assert.equal(manifest.minCindyVersion, '0.1.126');
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
+  // PR card: the title links to the PR; agent turns only on clicks, no background runs.
+  assert.deepEqual(manifest.card, { externalLinks: true });
+  assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.3.0');
+  assert.equal(manifest.version, '1.4.0');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -265,7 +276,10 @@ function assertParity(tables, label, { allowJaSameAsZh = new Set(), allowSameAsZ
 
 test('runtime, catalog and settings tables have identical keys and placeholders in all four locales', () => {
   const runtime = createRuntime().context;
-  assertParity(runtime.MESSAGES, 'main.js MESSAGES');
+  // Effort names follow Cindy's own Japanese model picker, which shares the kanji with Chinese.
+  assertParity(runtime.MESSAGES, 'main.js MESSAGES', {
+    allowJaSameAsZh: new Set(['prEffortLow', 'prEffortMedium', 'prEffortHigh', 'prEffortXhigh', 'prEffortMax']),
+  });
   assertParity(runtime.PARAM_NOTES, 'main.js PARAM_NOTES');
   assertParity(createSettings().messages, 'settings.js', { allowJaSameAsZh: new Set(['save']) });
 
@@ -594,4 +608,699 @@ test('settings.html ships no hardcoded copy before the host locale is known', ()
   const body = settingsHtml.slice(settingsHtml.indexOf('<body>'));
   assert.doesNotMatch(body.replace(/<!--[\s\S]*?-->/g, ''), hanRe);
   assert.doesNotMatch(body, /\splaceholder="|\stitle="/);
+});
+
+/* ── PR card (pr_card) ───────────────────────────────────────────────── */
+
+// Production entry: the plugin's tool-call and card-action handlers. The host renders the
+// card HTML on desktop and projects only its text plus aria-label buttons on the phone,
+// so the visible text and the actions handed to the task's agent are the contract.
+const zhCopy = createRuntime().context.MESSAGES['zh-CN'];
+const fill = (text, vars) => text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
+
+function visibleText(html) {
+  return html
+    .replace(/<style>[\s\S]*?<\/style>/g, '')
+    .replace(/<\/(?:div|p)>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function prGraphql({ number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', threads = [], mergeState = 'CLEAN', merged = false } = {}) {
+  return (request) => {
+    assert.equal(request.url, 'https://api.github.com/graphql');
+    assert.deepEqual(JSON.parse(request.body).variables, { owner: 'octo', name: 'repo', number });
+    return jsonResponse({ data: { repository: { pullRequest: {
+      number, title, url: `https://github.com/octo/repo/pull/${number}`, state: merged ? 'MERGED' : 'OPEN',
+      isDraft: false, merged, mergeStateStatus: mergeState, reviewDecision: null, baseRefName: 'main',
+      commits: { nodes: [{ commit: { statusCheckRollup: ci ? { state: ci } : null } }] },
+      reviewThreads: { nodes: threads.map((isResolved) => ({ isResolved })) },
+    } } } });
+  };
+}
+
+function createPrRuntime(options = {}) {
+  let handler = null;
+  const sent = [];
+  const files = new Map();
+  const agentRuns = [];
+  let kv = options.kv ?? {};
+  const cindy = {
+    ...(options.pickModel ? { pickModel: options.pickModel } : {}),
+    async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
+    onHostMessage(fn) { handler = fn; },
+    async send(message) {
+      sent.push(message);
+      if (message.type === 'card-update' && options.refuseCards) throw new Error('card refused');
+      if (message.type !== 'fs-request') return { ok: true };
+      assert.equal(message.root, 'data');
+      if (message.op === 'write' && (typeof options.failWrites === 'function' ? options.failWrites() : options.failWrites)) return { ok: false, errorCode: 'IO_ERROR', message: 'disk full' };
+      if (message.op === 'write') { files.set(message.path, message.content); return { ok: true, op: 'write', path: message.path }; }
+      if (message.op === 'read') {
+        return files.has(message.path)
+          ? { ok: true, op: 'read', path: message.path, content: files.get(message.path) }
+          : { ok: false, errorCode: 'NOT_FOUND', message: 'missing' };
+      }
+      if (message.op === 'list') {
+        const entries = [...files.keys()].filter((p) => p.startsWith(`${message.path}/`)).map((p, mtime) => ({ path: p, bytes: 1, mtime }));
+        return { ok: true, op: 'list', entries };
+      }
+      if (message.op === 'delete') return { ok: true, op: 'delete', path: message.path, existed: files.delete(message.path) };
+      throw new Error(`unexpected fs op ${message.op}`);
+    },
+    async fetch(request) {
+      if (options.github) return options.github(request);
+      throw new Error(`unexpected GitHub request ${request.url}`);
+    },
+    agent: {
+      async run(request) {
+        agentRuns.push(JSON.parse(JSON.stringify(request)));
+        return options.agentRun ? options.agentRun(request) : { ok: true, sessionId: 's1', mode: 'continue', disposition: 'resumed' };
+      },
+    },
+  };
+  const context = createContext({
+    cindy,
+    BroadcastChannel: class { postMessage() {} },
+    fetch: async (url, init = {}) => {
+      if (String(url).startsWith('/agent-models') && options.agentModels) {
+        const device = new URL(url, 'http://plugin').searchParams.get('agent_device_id');
+        const models = typeof options.agentModels === 'function' ? options.agentModels(device) : options.agentModels;
+        return { ok: true, status: 200, json: async () => ({ ok: true, models, ...(device ? { agentDeviceId: device } : { locations: options.agentLocations ?? [] }) }) };
+      }
+      assert.equal(url, '/kv');
+      if (options.kvFails && init.method !== 'PUT') return { ok: false, status: 500, json: async () => ({}) };
+      if (init.method === 'PUT') { kv = JSON.parse(init.body); return { ok: true, status: 204 }; }
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(kv)) };
+    },
+    setTimeout,
+    clearTimeout,
+    URL,
+    encodeURIComponent,
+  });
+  new Script(githubSource, { filename: 'cindy-github/main.js' }).runInContext(context);
+  let seq = 0;
+  const cards = (callId) => sent.filter((m) => m.type === 'card-update' && m.callId === callId);
+  return {
+    files,
+    agentRuns,
+    get kv() { return kv; },
+    cards,
+    lastCard: (callId) => cards(callId).at(-1),
+    setGithub(github) { options.github = github; },
+    async tool(args) {
+      const callId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
+      await handler({ type: 'tool-call', tool: 'pr_card', callId, args });
+      const reply = sent.filter((m) => m.type === 'tool-result' && m.callId === callId).at(-1);
+      return { callId, reply: JSON.parse(JSON.stringify(reply)) };
+    },
+    click: (callId, actionId, extra = {}) => handler({
+      type: 'event', name: 'card-action', callId, actionId, spawnCallId: `${callId}::sp1`, ts: 1,
+      sessionId: 's1', userActionToken: 'token-1', ...extra,
+    }),
+  };
+}
+
+test('pr_card asks first, hands the click to the task agent, then updates the same card with the PR', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const ask = await runtime.tool({
+    repo: 'octo/repo', head: 'feat/pr-card', base: 'main', commits: 3,
+    files: [{ path: 'cindy-github/main.js', additions: 900, deletions: 2 }, { path: 'cindy-github/ghost.json', additions: 70 }],
+  });
+  const cardId = ask.reply.result.card_id;
+  assert.equal(cardId, ask.callId);
+  assert.deepEqual(ask.reply.result, {
+    card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false }, next: zhCopy.prNextAsk,
+  });
+  const askCard = runtime.lastCard(cardId);
+  assert.equal(askCard.state, 'done');
+  assert.equal(askCard.sourceCallId, undefined);
+  // Button labels live in aria-label, so the phone's text projection is just the question.
+  assert.deepEqual(visibleText(askCard.html), [zhCopy.prAskTitle, 'octo/repo', 'feat/pr-card → main · 3 个提交 · 2 个文件']);
+  // The primary marker lets the phone draw this one as the main button.
+  assert.match(askCard.html, /<button data-ghost-action="pr:publish" aria-label="发 PR" data-ghost-primary style="[^"]*"><\/button>/);
+
+  await runtime.click(cardId, 'pr:publish');
+  assert.deepEqual(runtime.agentRuns, [{
+    mode: 'continue',
+    userActionToken: 'token-1',
+    promptTemplate: '[UI_ACTION_TRIGGER]{{user_message}}\n{{event_json}}',
+    userMessage: zhCopy.prClickPublish,
+    event: {
+      card_id: cardId, action: 'publish', repo: 'octo/repo', head: 'feat/pr-card', base: 'main',
+      settings: { auto_rename: false, auto_follow: false },
+    },
+  }]);
+  assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
+    zhCopy.prPublishingTitle, zhCopy.prPublishingMeta, 'feat/pr-card → main · 3 个提交 · 2 个文件',
+  ]);
+  // While the agent publishes, the card stays live so the host plays its spinner.
+  assert.equal(runtime.lastCard(cardId).state, 'working');
+
+  const opened = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(opened.reply.result.stage, 'open');
+  assert.deepEqual(opened.reply.result.pr, {
+    number: 42, title: 'Built-in PR skill', url: 'https://github.com/octo/repo/pull/42', state: 'open', draft: false,
+  });
+  assert.equal(opened.reply.result.todo, undefined);
+  // The later call updates the original card in place instead of adding a second one.
+  assert.equal(runtime.cards(opened.callId).length, 0);
+  const update = runtime.lastCard(cardId);
+  assert.equal(update.sourceCallId, opened.callId);
+  assert.equal(update.state, 'done');
+  assert.deepEqual(visibleText(update.html), [
+    '#42 Built-in PR skill', `octo/repo · ${zhCopy.prStateOpen}`, 'feat/pr-card → main · 3 个提交 · 2 个文件',
+  ]);
+  assert.match(update.html, /<a href="https:\/\/github\.com\/octo\/repo\/pull\/42">/);
+  // Every stage asks the host for the changed-files card's slot and width, so it never jumps or resizes.
+  for (const html of [askCard.html, update.html]) assert.match(html, /<div data-ghost-placement="turn-end" data-ghost-width="full" style=/);
+});
+
+test('to_latest moves the card to the current call and leaves one line where it was', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 'https://github.com/octo/repo/pull/42', following: true });
+  const cardId = first.reply.result.card_id;
+
+  const moved = await runtime.tool({ card_id: cardId, pr: 42, to_latest: true });
+  // card_id stays the same, so the schedule prompt keeps working.
+  assert.equal(moved.reply.result.card_id, cardId);
+  const stub = runtime.lastCard(cardId);
+  assert.equal(stub.sourceCallId, moved.callId);
+  assert.deepEqual(visibleText(stub.html), [`#42 Built-in PR skill · ${zhCopy.prMovedBelow}`]);
+  assert.doesNotMatch(stub.html, /data-ghost-action/);
+  const latest = runtime.lastCard(moved.callId);
+  assert.equal(latest.sourceCallId, undefined);
+  assert.equal(visibleText(latest.html)[0], '#42 Built-in PR skill');
+
+  // A click on the new place finds the card through the alias and redraws it there.
+  await runtime.click(moved.callId, 'pr:stop');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, cardId);
+  assert.equal(runtime.cards(cardId).length, 2);
+  assert.equal(runtime.lastCard(moved.callId).state, 'working');
+
+  // A later refresh without to_latest updates the new place in place.
+  const refresh = await runtime.tool({ card_id: cardId, following: false });
+  assert.equal(runtime.cards(refresh.callId).length, 0);
+  assert.equal(runtime.lastCard(moved.callId).sourceCallId, refresh.callId);
+
+  // The stub is left alone, and the new place's id also finds the card.
+  assert.equal(runtime.cards(cardId).length, 2);
+  assert.equal((await runtime.tool({ card_id: moved.callId })).reply.result.card_id, cardId);
+});
+
+test('card settings persist in /kv and become one-time todos once the PR exists', async () => {
+  const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login', ci: 'PENDING', threads: [false, true], mergeState: 'BLOCKED' }), kv: { unrelated: 1 } });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  await runtime.click(cardId, 'prset:follow');
+  assert.deepEqual(runtime.kv, { unrelated: 1, prCard: { autoRename: false, autoFollow: true } });
+  // The toggle state lets the phone draw a native switch.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:follow" data-ghost-toggle="on" aria-label="关闭「发完自动跟进」"/);
+  assert.equal(runtime.agentRuns.length, 0);
+
+  // A bare number resolves against the repository recorded on the card.
+  const opened = await runtime.tool({ card_id: cardId, pr: '7' });
+  const url = 'https://github.com/octo/repo/pull/7';
+  assert.deepEqual(opened.reply.result.settings, { auto_rename: false, auto_follow: true });
+  assert.deepEqual(opened.reply.result.todo, [fill(zhCopy.prTodoFollow, { url })]);
+  assert.equal(opened.reply.result.next, zhCopy.prNextApply);
+  assert.equal((await runtime.tool({ card_id: cardId })).reply.result.todo, undefined);
+
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1).userMessage, fill(zhCopy.prClickFollow, { url }));
+  assert.deepEqual(runtime.agentRuns.at(-1).event, { card_id: cardId, action: 'follow', repo: 'octo/repo', pr_number: 7, pr_url: url });
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowStarting));
+
+  await runtime.tool({ card_id: cardId, following: true });
+  const lines = visibleText(runtime.lastCard(cardId).html);
+  // Following is shown once, by the live indicator in the footer.
+  assert.equal(lines[1], 'octo/repo');
+  assert.equal(lines.filter((line) => line === zhCopy.prStateFollowing).length, 1);
+  for (const text of [zhCopy.prCiRunning, fill(zhCopy.prThreadsOpen, { count: 1 }), zhCopy.prMergeWaiting]) assert.ok(lines.includes(text), text);
+
+  runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));
+  const merged = await runtime.tool({ card_id: cardId });
+  assert.equal(merged.reply.result.stage, 'merged');
+  assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
+    '#7 Fix login', `octo/repo · ${zhCopy.prStateMerged} · ${zhCopy.prFollowEnded}`, 'fix/login → main',
+  ]);
+});
+
+// Drafts are still being worked on, so the card offers "mark ready" instead of following.
+// The plugin flips it directly, rereads GitHub, then applies the auto-follow setting.
+test('a draft card marks the PR ready itself, then follows when the card setting says so', async () => {
+  let draft = true;
+  const mutations = [];
+  const github = (request) => {
+    const { query, variables } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { mutations.push(variables); draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse({ data: { repository: { pullRequest: {
+      number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+    } } } });
+  };
+  const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } } });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  const draftCard = runtime.lastCard(cardId).html;
+  assert.match(draftCard, /data-ghost-action="pr:ready" aria-label="转为正式 PR"/);
+  assert.doesNotMatch(draftCard, /pr:follow/);
+
+  await runtime.click(cardId, 'pr:ready');
+  assert.deepEqual(mutations, [{ id: 'PR_node' }]);
+  const url = 'https://github.com/octo/repo/pull/9';
+  assert.equal(runtime.agentRuns.length, 1);
+  assert.equal(runtime.agentRuns[0].userMessage, fill(zhCopy.prReadyFollow, { url }));
+  assert.equal(runtime.agentRuns[0].event.marked_ready_on_card, true);
+  const card = runtime.lastCard(cardId);
+  assert.equal(card.state, 'working');
+  assert.ok(visibleText(card.html).includes(zhCopy.prFollowStarting));
+
+  // Once following, the check strip is a slot the host fills from the title bar's live data.
+  await runtime.tool({ card_id: cardId, following: true });
+  assert.match(runtime.lastCard(cardId).html, /<div data-ghost-pr-status="octo\/repo#9">/);
+});
+
+test('marking a draft ready keeps an unconfirmed write uncertain instead of reporting failure', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] },
+  } } } });
+  const scenario = (mutation, rereadFails) => {
+    let reads = 0;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) return mutation();
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      reads += 1;
+      return reads > 1 && rereadFails ? { ok: false, status: 502, body: '', headers: {} } : jsonResponse(prBody(true));
+    };
+    return createPrRuntime({ github });
+  };
+  const noteAfterClick = async (runtime) => {
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:ready');
+    return visibleText(runtime.lastCard(cardId).html).join('\n');
+  };
+
+  // The request went out, its answer was lost, and the re-read failed too: GitHub may already have it.
+  const lost = await noteAfterClick(scenario(() => ({ ok: false, status: 502, body: '', headers: {} }), true));
+  assert.match(lost, new RegExp(zhCopy.prReadyUnknown));
+  assert.doesNotMatch(lost, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+
+  // The answer says it worked although the re-read failed: believe the answer.
+  const confirmed = scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }), true);
+  const confirmedText = await noteAfterClick(confirmed);
+  assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  assert.doesNotMatch(confirmedText, new RegExp(zhCopy.prReadyUnknown));
+
+  // Errors next to data are a partial success: the write may have happened, so with the re-read failing too
+  // it stays uncertain unless the data itself says ready.
+  const partial = await noteAfterClick(scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: true } } }, errors: [{ message: 'field error' }] }), true));
+  assert.match(partial, new RegExp(zhCopy.prReadyUnknown));
+  const partialReady = await noteAfterClick(scenario(() => jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } }, errors: [{ message: 'field error' }] }), true));
+  assert.doesNotMatch(partialReady, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  assert.doesNotMatch(partialReady, new RegExp(zhCopy.prReadyUnknown));
+
+  // GitHub answered with an error: the write did not happen, so failing is accurate.
+  const rejected = await noteAfterClick(scenario(() => jsonResponse({ data: null, errors: [{ type: 'FORBIDDEN', message: 'not allowed' }] }), true));
+  assert.match(rejected, new RegExp(zhCopy.prReadyFailed.split('{')[0]));
+  // An error with no data and no pre-run type (a resolver failing after the change) is not proof it did not run.
+  const afterRun = await noteAfterClick(scenario(() => jsonResponse({ data: null, errors: [{ message: 'Something went wrong' }] }), true));
+  assert.match(afterRun, new RegExp(zhCopy.prReadyUnknown));
+});
+
+test('pr_card reads every page of review threads, and reports unknown instead of zero when it cannot', async () => {
+  const thread = (isResolved) => ({ isResolved });
+  const pr = (threads, pageInfo) => ({ number: 7, title: 'Big', url: 'https://github.com/octo/repo/pull/7', state: 'OPEN', isDraft: false,
+    merged: false, mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { pageInfo, nodes: threads } });
+  const seenAfter = [];
+  const github = (failSecondPage) => (request) => {
+    const { variables } = JSON.parse(request.body);
+    seenAfter.push(variables.after ?? null);
+    if (!variables.after) return jsonResponse({ data: { repository: { pullRequest: pr(Array.from({ length: 100 }, () => thread(true)), { hasNextPage: true, endCursor: 'c1' }) } } });
+    if (failSecondPage) return { ok: false, status: 502, body: '', headers: {} };
+    return jsonResponse({ data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [thread(false), thread(false), thread(true)] } } } } });
+  };
+  const ok = createPrRuntime({ github: github(false) });
+  const opened = await ok.tool({ repo: 'octo/repo', pr: '7', following: true });
+  assert.deepEqual(seenAfter, [null, 'c1']);
+  assert.ok(visibleText(ok.lastCard(opened.reply.result.card_id).html).join('\n').includes(fill(zhCopy.prThreadsOpen, { count: 2 })), 'the two unresolved threads on page two are counted');
+
+  const broken = createPrRuntime({ github: github(true) });
+  const failed = await broken.tool({ repo: 'octo/repo', pr: '7' });
+  assert.equal(failed.reply.ok, false, 'no card with a made-up zero');
+});
+
+test('when the final save after marking ready fails, the card shows the real state and its next click works', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  let draft = true;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse(prBody(draft));
+  };
+  let writes = 0, healed = false;
+  const runtime = createPrRuntime({ github, failWrites: () => !healed && ++writes >= 3 });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const card = runtime.lastCard(cardId);
+  // The PR is ready for review now, so the card offers following; the note says the record was not saved.
+  assert.match(card.html, /<button data-ghost-action="pr:follow"/);
+  assert.ok(visibleText(card.html).includes(zhCopy.prSaveFailed));
+  // The record still says 'ready': the next click reads the PR again first, then works.
+  healed = true;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1)?.event.action, 'follow');
+});
+
+test('a click is recorded before it is handed over: no record, nothing sent; handed over, a lost save cannot offer it again', async () => {
+  // The in-progress record cannot be saved: nothing is sent and the ask card stays.
+  const options = {};
+  const none = createPrRuntime(options);
+  const idA = (await none.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  options.failWrites = true;
+  await none.click(idA, 'pr:publish');
+  assert.equal(none.agentRuns.length, 0);
+  assert.ok(visibleText(none.lastCard(idA).html).includes(zhCopy.prSaveFailed));
+  assert.match(none.lastCard(idA).html, /<button data-ghost-action="pr:publish"/);
+
+  // Writes: 1 card, 2 the in-progress record, 3 the final save (lost).
+  let writes = 0;
+  const handed = createPrRuntime({ failWrites: () => ++writes === 3 });
+  const idB = (await handed.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  await handed.click(idB, 'pr:publish');
+  assert.equal(handed.agentRuns.length, 1);
+  const card = handed.lastCard(idB);
+  assert.equal(card.state, 'working');
+  assert.doesNotMatch(card.html, /data-ghost-action="pr:(publish|draft)"/);
+  assert.ok(visibleText(card.html).includes(zhCopy.prHandedOffSaveFailed));
+  assert.equal(JSON.parse(handed.files.get(`pr-cards/${idB}.json`)).stage, 'publishing');
+  await handed.click(idB, 'pr:publish');
+  assert.equal(handed.agentRuns.length, 1, 'the record already says publishing, so it is not sent again');
+});
+
+test('settings that cannot be read are not sent as "everything off"', async () => {
+  const options = {};
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' })).reply.result.card_id;
+  options.kvFails = true;
+  await runtime.click(cardId, 'pr:publish');
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
+});
+
+test('following an existing PR is not started with a default model when the settings cannot be read', async () => {
+  const options = { kv: { prCard: { followModel: { route: { agentKind: 'cc', providerId: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fastMode: false }, label: 'Sonnet' } } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '42' })).reply.result.card_id;
+  options.kvFails = true;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prSettingsUnreadable));
+  options.kvFails = false;
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.length, 1);
+});
+
+test('unreadable settings do not use up the one-time to-do list either', async () => {
+  const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/pr-card', base: 'main' })).reply.result.card_id;
+  options.kvFails = true;
+  const first = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(first.reply.ok, true);
+  assert.equal(first.reply.result.todo, undefined);
+  assert.ok(first.reply.result.note.includes(zhCopy.prSettingsLater));
+  options.kvFails = false;
+  const second = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.ok(second.reply.result.todo?.length > 0, 'the to-do list is still there once the settings can be read');
+});
+
+test('a refused card does not use up the one-time settings to-do list', async () => {
+  const options = { kv: { prCard: { autoRename: true, autoFollow: false } }, github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feat/pr-card', base: 'main' });
+  const cardId = ask.reply.result.card_id;
+  options.refuseCards = true;
+  const refused = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(refused.reply.ok, false);
+  options.refuseCards = false;
+  const retry = await runtime.tool({ card_id: cardId, pr: 'https://github.com/octo/repo/pull/42' });
+  assert.equal(retry.reply.ok, true);
+  assert.ok(Array.isArray(retry.reply.result.todo) && retry.reply.result.todo.length > 0, 'the rename to-do is still there');
+});
+
+test('with auto-follow, a lost save of the follow state sends nothing, and a lost final save cannot cause a second send', async () => {
+  const prBody = (draft) => ({ data: { repository: { pullRequest: {
+    number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+    mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  const scenario = (failAt) => {
+    let draft = true, writes = 0;
+    const github = (request) => {
+      const { query } = JSON.parse(request.body);
+      if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+      if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+      return jsonResponse(prBody(draft));
+    };
+    const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } }, failWrites: () => ++writes === failAt });
+    return runtime;
+  };
+  // Writes: 1 card, 2 'ready', 3 'follow' (before the handoff), 4 final.
+  const noSend = scenario(3);
+  const idA = (await noSend.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await noSend.click(idA, 'pr:ready');
+  assert.equal(noSend.agentRuns.length, 0, 'the follow state could not be recorded, so nothing was sent');
+  assert.ok(visibleText(noSend.lastCard(idA).html).includes(zhCopy.prSaveFailed));
+
+  const sentOnce = scenario(4);
+  const idB = (await sentOnce.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await sentOnce.click(idB, 'pr:ready');
+  assert.equal(sentOnce.agentRuns.length, 1);
+  await sentOnce.click(idB, 'pr:follow');
+  assert.equal(sentOnce.agentRuns.length, 1, 'the record says following is starting, so the same request is not sent again');
+});
+
+test('a card the host refuses is reported to the agent, not claimed as shown', async () => {
+  const runtime = createPrRuntime({ refuseCards: true });
+  const attempt = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+  assert.equal(attempt.reply.ok, false);
+  assert.equal(attempt.reply.message, zhCopy.prCardNotDelivered);
+});
+
+test('a clearly refused follow handoff is written back even if one save fails, so the card is not stuck on starting', async () => {
+  let draft = true, writes = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) { draft = false; return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: draft, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  // Writes: 1 card, 2 'ready', 3 'follow', 4 the write-back after the refusal (fails once), 5 its retry.
+  const runtime = createPrRuntime({ github, kv: { prCard: { autoRename: false, autoFollow: true } }, agentRun: () => ({ ok: false, errorCode: 'TOKEN_EXPIRED' }), failWrites: () => ++writes === 4 });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const record = JSON.parse(runtime.files.get(`pr-cards/${cardId}.json`));
+  assert.equal(record.pending, null);
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:follow"/);
+});
+
+test('after an uncertain mark-ready the button stays away until the PR has been read again', async () => {
+  let reads = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) return { ok: false, status: 502, body: '', headers: {} };
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    reads += 1;
+    if (reads === 2) return { ok: false, status: 502, body: '', headers: {} };
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: true, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  const runtime = createPrRuntime({ github });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+  await runtime.click(cardId, 'pr:ready');
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prReadyUnknown));
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+  // A click that still arrives (an old card on another screen) does nothing.
+  const agentRunsBefore = runtime.agentRuns.length;
+  await runtime.click(cardId, 'pr:ready');
+  assert.equal(runtime.agentRuns.length, agentRunsBefore);
+  // The agent reads the PR again: the real state is known, so the button returns.
+  await runtime.tool({ card_id: cardId, pr: '9' });
+  assert.match(runtime.lastCard(cardId).html, /<button data-ghost-action="pr:ready"/);
+});
+
+test('an exception after the mark-ready write went out is shown as uncertain, not swallowed', async () => {
+  let calls = 0;
+  const github = (request) => {
+    const { query } = JSON.parse(request.body);
+    if (query.startsWith('mutation')) return jsonResponse({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: true } } } });
+    if (query.includes('{id}')) return jsonResponse({ data: { repository: { pullRequest: { id: 'PR_node' } } } });
+    calls += 1;
+    if (calls > 1) throw new Error('connection reset');
+    return jsonResponse({ data: { repository: { pullRequest: { number: 9, title: 'Draft', url: 'https://github.com/octo/repo/pull/9', state: 'OPEN', isDraft: true, merged: false,
+      mergeStateStatus: 'CLEAN', reviewDecision: null, baseRefName: 'main', commits: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+  };
+  const runtime = createPrRuntime({ github });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '9' })).reply.result.card_id;
+  await runtime.click(cardId, 'pr:ready');
+  const text = visibleText(runtime.lastCard(cardId).html).join('\n');
+  assert.ok(text.includes(zhCopy.prReadyUnknown));
+  assert.ok(!text.includes(zhCopy.prReadyFailed.split('{')[0]));
+});
+
+test('pr_card does not invent a state it could not read, and does not show a card it could not save', async () => {
+  // Status unreadable and no earlier snapshot: no card, so no wrong buttons.
+  const unreadable = createPrRuntime({ github: () => ({ ok: false, status: 502, body: '', headers: {} }) });
+  const failed = await unreadable.tool({ repo: 'octo/repo', pr: '9' });
+  assert.equal(failed.reply.ok, false);
+  assert.equal(unreadable.cards(failed.callId).length, 0);
+
+  // The card record cannot be saved: buttons would find nothing, so the card is not shown.
+  const full = createPrRuntime({ failWrites: true });
+  const saved = await full.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+  assert.equal(saved.reply.ok, false);
+  assert.equal(saved.reply.message, zhCopy.prSaveFailed);
+  assert.equal(full.cards(saved.callId).length, 0);
+});
+
+// The follow-up round can run on a cheaper model than the task. The card uses the host's own
+// model picker (no hard-coded list), shows the chosen name, and hands the full route to the agent.
+test('card settings pick the auto-follow model with the host picker and hand its route to the agent', async () => {
+  const route = { agentKind: 'cc', providerId: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fastMode: false };
+  const pickModel = async (request) => { picks.push(JSON.parse(JSON.stringify(request))); return { ok: true, route }; };
+  const picks = [];
+  const runtime = createPrRuntime({ github: prGraphql({ number: 7 }), pickModel,
+    agentModels: [{ id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', providerId: 'anthropic', providerName: 'Anthropic' }] });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  // Default is following the task; the choice is a two-way switch.
+  assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowModelTaskHint));
+  // The phone sees only button names, so the selected half says so.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelTask" aria-label="跟随当前任务（当前）"/);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:model" aria-label="指定模型"/);
+
+  await runtime.click(cardId, 'prset:model', { mobilePageId: '12345678-1234-1234-1234-123456789abc' });
+  // The picker opens on the device that tapped the card.
+  assert.deepEqual(picks, [{ mobilePageId: '12345678-1234-1234-1234-123456789abc' }]);
+  const chosen = { route, label: 'Sonnet 5.5 · Anthropic' };
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, followModel: chosen, lastFollowModel: chosen });
+  // The chosen model shows as a clickable name; clicking it changes the model.
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelPick"[^>]*>.*Sonnet 5\.5 · Anthropic<\/span>/);
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
+    model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
+  });
+
+  // Back to following the task keeps the chosen model in memory: picking "choose a model" again
+  // restores it without reopening the picker; changing it goes through the model name.
+  await runtime.click(cardId, 'prset:modelTask');
+  assert.deepEqual(runtime.kv.prCard, { autoRename: false, autoFollow: false, lastFollowModel: { route, label: 'Sonnet 5.5 · Anthropic' } });
+  await runtime.click(cardId, 'prset:model');
+  assert.equal(picks.length, 1);
+  assert.deepEqual(runtime.kv.prCard.followModel, { route, label: 'Sonnet 5.5 · Anthropic' });
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:modelPick" aria-label="更换模型（当前：Sonnet 5.5 · Anthropic）"/);
+  await runtime.click(cardId, 'prset:modelPick');
+  assert.deepEqual(picks.at(-1), { initial: route });
+
+  // A host with the in-card dropdown opens it under the button (the current model rides on the
+  // button) and returns the checked choice with the click; the dialog picker stays closed.
+  assert.ok(runtime.lastCard(cardId).html.includes(` data-ghost-model-select="${JSON.stringify(route).replace(/"/g, '&quot;')}"`));
+  const codex = { agentKind: 'codex', providerId: 'openai', model: 'gpt-5.6', effort: 'high', fastMode: true };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: codex });
+  assert.equal(picks.length, 2);
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: codex, label: 'gpt-5.6' });
+});
+
+// Remote providers: the card dropdown can pick a model on another computer or from a shared provider.
+// The card names where it runs, and the agent gets the location to set on the follow-up schedule.
+test('a follow model on another computer or a shared provider keeps its location', async () => {
+  const picks = [];
+  const runtime = createPrRuntime({
+    github: prGraphql({ number: 7 }),
+    pickModel: async (request) => { picks.push(JSON.parse(JSON.stringify(request))); return { ok: false, errorCode: 'CANCELLED' }; },
+    agentModels: (device) => device === 'mac-mini'
+      ? [{ id: 'claude-opus-5-5', name: 'Opus 5.5', providerId: 'anthropic', providerName: 'Anthropic' }]
+      : device === 'share:abc' ? [{ id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', providerId: 'openai', providerName: 'OpenAI' }] : [],
+    agentLocations: [{ agentDeviceId: 'mac-mini', name: 'Mac mini' }, { agentDeviceId: 'share:abc', name: 'OpenAI · 来自 Magi 的分享' }],
+  });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'fix/login', base: 'main' })).reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  const remote = { agentKind: 'cc', providerId: 'anthropic', model: 'claude-opus-5-5', effort: 'high', fastMode: false, agentDeviceId: 'mac-mini' };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: remote });
+  assert.deepEqual(runtime.kv.prCard.followModel, { route: remote, label: 'Opus 5.5 · Anthropic · Mac mini' });
+  assert.ok(runtime.lastCard(cardId).html.includes(JSON.stringify(remote).replace(/"/g, '&quot;')));
+
+  const shared = { agentKind: 'codex', providerId: 'openai', model: 'gpt-6.1-sol', effort: 'medium', fastMode: false, agentDeviceId: 'share:abc' };
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: shared });
+  assert.equal(runtime.kv.prCard.followModel.label, 'GPT-6.1-Sol · OpenAI · 来自 Magi 的分享');
+
+  await runtime.tool({ card_id: cardId, pr: '7' });
+  await runtime.click(cardId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1).event.follow_model.agent_device_id, 'share:abc');
+  // The generic picker (phone, older hosts) only knows this computer: no remote initial value.
+  await runtime.click(cardId, 'prset:modelPick');
+  assert.deepEqual(picks.at(-1), {});
+  // A location the host would not offer never gets stored.
+  await runtime.click(cardId, 'prset:modelPick', { modelSelection: { ...remote, agentDeviceId: 'local' } });
+  assert.equal(runtime.kv.prCard.followModel.route.agentDeviceId, 'share:abc');
+});
+
+test('a click the agent clearly did not receive keeps the ask card; an unclear one stays in progress', async () => {
+  const cases = [
+    [() => ({ ok: false, errorCode: 'TOKEN_EXPIRED' }), {}, zhCopy.prHandoffFailed],
+    // No click token: the plugin's agent capability was not granted, so nothing is sent.
+    [undefined, { userActionToken: undefined }, zhCopy.prHandoffFailed],
+  ];
+  for (const [agentRun, extra, note] of cases) {
+    const runtime = createPrRuntime({ agentRun });
+    const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/x' })).reply.result.card_id;
+    await runtime.click(cardId, 'pr:publish', extra);
+    const lines = visibleText(runtime.lastCard(cardId).html);
+    assert.equal(lines[0], zhCopy.prAskTitle);
+    assert.equal(lines.at(-1), note);
+    assert.equal(runtime.agentRuns.length, agentRun ? 1 : 0);
+  }
+
+  // The call threw: the agent may have received it, so the buttons must not offer the same action again.
+  const unclear = createPrRuntime({ agentRun: () => { throw new Error('bridge closed'); } });
+  const cardId = (await unclear.tool({ repo: 'octo/repo', head: 'feat/x' })).reply.result.card_id;
+  await unclear.click(cardId, 'pr:publish');
+  const card = unclear.lastCard(cardId);
+  assert.doesNotMatch(card.html, /<button data-ghost-action="pr:(publish|draft)"/);
+  assert.equal(visibleText(card.html).at(-1), zhCopy.prHandoffUnknown);
+  assert.equal(card.state, 'working');
+});
+
+test('pr_card rejects unusable input and keeps its largest card under the host size limit', async () => {
+  const runtime = createPrRuntime();
+  assert.equal((await runtime.tool({ head: 'feat/x' })).reply.message, zhCopy.prNeedRepo);
+  assert.equal((await runtime.tool({ repo: 'octo/repo' })).reply.message, zhCopy.prNeedHead);
+  assert.equal((await runtime.tool({ repo: 'octo/repo', pr: 'pull/abc' })).reply.message, zhCopy.prBadPr);
+  assert.equal((await runtime.tool({ card_id: '../escape' })).reply.message, zhCopy.prBadCardId);
+
+  const files = Array.from({ length: 80 }, (_, i) => ({ path: `packages/module-${i}/index.ts`, additions: 1000 + i, deletions: i }));
+  const ask = await runtime.tool({ repo: 'octo/repo', head: `feat/${'x'.repeat(250)}`, base: 'main', commits: 99, files, files_total: 80 });
+  const cardId = ask.reply.result.card_id;
+  await runtime.click(cardId, 'prui:settings');
+  const { html } = runtime.lastCard(cardId);
+  assert.ok(Buffer.byteLength(html) < 32 * 1024, `${Buffer.byteLength(html)} bytes`);
+
+  // Uncommitted changes: the card reports files only, never "0 commits".
+  const pending = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main', commits: 0, files_total: 1 });
+  assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[2], `feat/x → main · ${zhCopy.prFileOne}`);
 });
