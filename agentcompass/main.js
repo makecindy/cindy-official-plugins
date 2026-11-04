@@ -56,11 +56,12 @@
     if (start<str.length || !chunks.length) chunks.push(str.slice(start));
     return chunks;
   }
+  let streamSeq=0;
   async function writeOutput(msg,operation,page) {
     const raw=JSON.stringify(page);
     if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'output',{operation,page});
     const parts=splitUtf8(raw,MAX_RPC_BYTES);
-    const stream=operation+':'+String(page.nextCursor || 'end')+':'+String(parts.length);
+    const stream=operation+':'+String(++streamSeq)+':'+String(page.nextCursor || 'end')+':'+String(parts.length);
     let reply=null;
     for (let i=0;i<parts.length;i++) {
       reply=await node(msg,'output',{operation,stream,index:i,chunk:parts[i],done:i===parts.length-1});
@@ -76,7 +77,7 @@
     const raw=JSON.stringify(catalog);
     if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'prepare',{task,catalog});
     const parts=splitUtf8(raw,MAX_RPC_BYTES);
-    const stream='catalog:'+String(parts.length);
+    const stream=String(msg.callId || '')+':'+String(++streamSeq)+':'+String(parts.length);
     let reply=null;
     for (let i=0;i<parts.length;i++) {
       const done=i===parts.length-1;

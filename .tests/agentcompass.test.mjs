@@ -126,8 +126,8 @@ test('exact route/permission, unchanged task, concurrent repeats create and send
   hugeCat.cindy.tasks.models=async()=>({models:[{route,efforts:['high'],supportsFastMode:true},
     ...Array.from({length:1500},(_,i)=>({route:{agentKind:'pi',providerId:'openrouter',model:'openrouter/vendor/model-'+i,effort:'high',fastMode:false},
       efforts:['medium','high'],supportsFastMode:false,details:{description:'x'.repeat(160)}}))]});
-  const hugeRes=await hugeCat.send('roll',{task:'x'});
-  assert.equal(hugeRes.ok,true);
+  const hugeRes=await Promise.all([hugeCat.send('roll',{task:'x'}),hugeCat.send('roll',{task:'y'})]);
+  assert.ok(hugeRes.every(r=>r.ok));
   assert.equal(hugeCat.calls.find(c=>c[0]==='prepare')[1].catalog.models.length,1501);
 });
 test('a router answer that is not a native route is returned as is and starts nothing',async()=>{
