@@ -584,7 +584,9 @@ test('split: several independent deliverables come back as split with the task c
     assert.equal(result.route, undefined);
   }
   assert.equal(splitGate('Steps:\n1. Reproduce the crash.\n2. Then fix it.\n3. Then add a regression test.'), null);
+  assert.equal(splitGate('Task 1: First implement the helper.\nTask 2: Then test the helper created above.'), null);
   assert.equal(routeBuiltIn('Steps:\n1. Reproduce the crash.\n2. Then fix it.').status, 'native');
+  assert.equal(routeBuiltIn('Task 1: First implement the helper.\nTask 2: Then test the helper created above.').status, 'native');
 });
 
 test('self: an explicit "answer here" or a short pure question is the current session\'s job', () => {
