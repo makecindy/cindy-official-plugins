@@ -68,8 +68,9 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal(manifest.schemaVersion, 3);
-  // Deliberately above every released client until the release carrying #8244 ships; then set it to that release.
-  assert.equal(manifest.minCindyVersion, '0.1.999');
+  // First Cindy release carrying makecindy/cindy#8244: 0.1.125-beta and earlier do not contain it, and a
+  // stable release reuses its same-number beta's commit (so 0.1.125 stable would not either).
+  assert.equal(manifest.minCindyVersion, '0.1.126');
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);
