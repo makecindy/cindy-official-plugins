@@ -589,6 +589,48 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   assert.equal(probeAllowsSkip({ ...settled, lastPassAt: now - 24 * 60 * MIN }, previous.probe, now + MIN), false, '保底巡检到点');
 });
 
+test('从未放行过的跟进也能数满静默时长:起点固定在首次检查,不随每轮刷新', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap());
+  await fx.run();
+  await fx.run(['--ack']);
+  // 模拟「从未放行过」:状态里没有 lastPassAt(例如没有 CI、没有评论、没有冲突)
+  fx.writeState({ lastPassAt: undefined, silenceSince: undefined });
+  assert.equal(fx.readState().lastPassAt, undefined);
+
+  fx.advance(31); // 超过 30 分钟的完整读取间隔:这一轮走完整读取并跳过
+  let r = await fx.run();
+  assert.equal(r.code, 2, r.stdout);
+  const anchor = fx.readState().silenceSince;
+  assert.ok(anchor > 0, '首次跳过时写下计时起点');
+  assert.equal(fx.readState().lastPassAt, undefined);
+
+  // 每 10 分钟一轮、每 30 分钟完整读取一次(lastCheckedAt 随之刷新),连续跑 23 小时:起点不变,仍未到点
+  for (let i = 0; i < 6 * 23; i++) {
+    fx.advance(10);
+    r = await fx.run();
+    assert.equal(r.code, 2, `第 ${i} 轮不该放行: ${r.stdout}`);
+  }
+  assert.equal(fx.readState().silenceSince, anchor, '起点不随检查刷新');
+
+  // 满 24 小时:保底巡检放行,并从此以 lastPassAt 为准
+  fx.advance(70);
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(r.json().reason, 'silence-guard');
+  assert.ok(fx.readState().lastPassAt > 0);
+});
+
+test('保底巡检起点:最近放行 > 首次检查 > 旧版状态里的上次检查', () => {
+  const day = 24 * 60 * MIN;
+  const quiet = { watch: seenWatch(snap()) };
+  assert.equal(decide({ snap: snap(), previous: { ...quiet, silenceSince: T0, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'silence-guard');
+  assert.equal(decide({ snap: snap(), previous: { ...quiet, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'idle', '旧版状态只能按上次检查算');
+  assert.equal(decide({ snap: snap(), previous: { ...quiet, silenceSince: T0 - 2 * day, lastPassAt: T0 }, now: T0 + day - MIN }).reason, 'idle', '放行过就以最近放行为准');
+});
+
 test('快照失败先容忍瞬时抖动,连续到阈值才 fail-closed —— 绝不静默跳过', async (t) => {
   const fx = createFixture(t);
   fx.setSnapshot(snap());

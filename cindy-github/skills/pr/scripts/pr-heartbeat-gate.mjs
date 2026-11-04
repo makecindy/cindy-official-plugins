@@ -255,6 +255,15 @@ const FULL_REREAD_MS = 30 * 60_000;
 const LISTED_ITEMS = 10;
 const SNIPPET_LENGTH = 200;
 
+/**
+ * 保底巡检的计时起点:最近一次放行;从未放行过的跟进用首次检查时间(silenceSince)。
+ * 不能回退到每次都会刷新的 lastCheckedAt,否则从不放行的跟进永远数不满静默时长。
+ * lastCheckedAt 只兜旧版状态文件(没有 silenceSince)。
+ */
+function silenceAnchorOf(previous) {
+  return Number(previous?.lastPassAt) || Number(previous?.silenceSince) || Number(previous?.lastCheckedAt) || 0;
+}
+
 function formatDuration(ms) {
   const m = Math.round(ms / 60_000);
   if (m < 60) return `${m} min`;
@@ -1044,7 +1053,7 @@ export function decide({
     };
   }
   // 保底巡检:太久没有真正放行过 —— 指纹看不到的东西,以及 gate 自身的静默失效,让 AI 看一眼。
-  const silenceAnchor = lastPassAt || Number(previous?.lastCheckedAt) || 0;
+  const silenceAnchor = silenceAnchorOf(previous);
   if (silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs) {
     return {
       ...base,
@@ -1191,7 +1200,7 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
   if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
-  const silenceAnchor = Number(previous.lastPassAt) || Number(previous.lastCheckedAt) || 0;
+  const silenceAnchor = silenceAnchorOf(previous);
   return !(silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs);
 }
 
@@ -1493,6 +1502,10 @@ async function gateMain(argv, ctx) {
       : previous?.lastPassAt
         ? { lastPassAt: previous.lastPassAt }
         : {}),
+    // 从未放行过:固定住首次检查时间,作为保底巡检的计时起点(lastCheckedAt 每轮都会刷新)
+    ...(!passed && !previous?.lastPassAt
+      ? { silenceSince: Number(previous?.silenceSince) || Number(previous?.lastCheckedAt) || now }
+      : {}),
     // 放行即消费掉 defer;跳过时原样保留,否则 defer 永远只生效一轮。
     ...(decision.keepNextAllowAt ? { nextAllowAt: previous.nextAllowAt } : {}),
     // 回合状态(见上方注释):writeState 是整对象替换,必须显式带上才能跨轮存活
