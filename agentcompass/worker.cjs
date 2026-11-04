@@ -175,6 +175,7 @@ async function route(conf, task, ctx, dir, catalog) {
 }
 // One preparation per operation at a time; different operations never wait for each other.
 const busy=new Map();
+const outputStreams=new Map();
 function exclusive(key, work) {
   const run=(busy.get(key) || Promise.resolve()).then(work, work);
   const tail=run.catch(()=>{});
@@ -218,6 +219,21 @@ async function handle(method, params) {
     return {saved:true};
   }
   if (method==='output') {
+    if (typeof params.chunk==='string') {
+      const key=dir+'\0'+String(params.stream || '');
+      const list=params.index===0 ? [] : (outputStreams.get(key) || []);
+      list.push(params.chunk);
+      if (!params.done) {
+        outputStreams.set(key,list);
+        return {artifact:null,partial:true};
+      }
+      outputStreams.delete(key);
+      const raw=list.join('');
+      const parsed=JSON.parse(raw);
+      const file=path.join(dir,'messages-'+digest(raw).slice(0,16)+'.json');
+      atomic(file,parsed);
+      return {artifact:file};
+    }
     const file=path.join(dir,'messages-'+digest(JSON.stringify(params.page)).slice(0,16)+'.json');
     atomic(file,params.page);
     return {artifact:file};

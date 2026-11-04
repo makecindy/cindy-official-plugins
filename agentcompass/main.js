@@ -29,6 +29,44 @@
     if (!reply.ok) throw Error(reply.message || 'Node bridge unavailable');
     return reply.result;
   }
+  // The Host node API accepts at most 256 KiB; chunk oversized message pages before crossing the RPC boundary.
+  const MAX_RPC_BYTES = 96 * 1024;
+  function utf8Bytes(str) {
+    let n=0;
+    for (let i=0;i<str.length;i++) {
+      const c=str.charCodeAt(i);
+      n+=c<0x80 ? 1 : c<0x800 ? 2 : (c>=0xd800 && c<=0xdbff) ? (i++,4) : 3;
+    }
+    return n;
+  }
+  function splitUtf8(str,maxBytes) {
+    const chunks=[];
+    let start=0, bytes=0;
+    for (let i=0;i<str.length;i++) {
+      const c=str.charCodeAt(i);
+      const hi=c>=0xd800 && c<=0xdbff;
+      const charBytes=c<0x80 ? 1 : c<0x800 ? 2 : hi ? 4 : 3;
+      if (bytes+charBytes>maxBytes && i>start) {
+        chunks.push(str.slice(start,i));
+        start=i;bytes=0;
+      }
+      if (hi) i++;
+      bytes+=charBytes;
+    }
+    if (start<str.length || !chunks.length) chunks.push(str.slice(start));
+    return chunks;
+  }
+  async function writeOutput(msg,operation,page) {
+    const raw=JSON.stringify(page);
+    if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'output',{operation,page});
+    const parts=splitUtf8(raw,MAX_RPC_BYTES);
+    const stream=operation+':'+String(page.nextCursor || 'end')+':'+String(parts.length);
+    let reply=null;
+    for (let i=0;i<parts.length;i++) {
+      reply=await node(msg,'output',{operation,stream,index:i,chunk:parts[i],done:i===parts.length-1});
+    }
+    return reply;
+  }
   const memory = new Map();
   async function persist(msg,operation,record) {
     await node(msg,'save',{operation,record});
@@ -201,10 +239,13 @@
       for (let i=0;i<10 && !record.messagesComplete;i++) {
         const page=await cindy.tasks.readMessages({taskId:record.taskId,limit:100,
           ...(record.messageCursor ? {after:record.messageCursor} : {})});
-        const {artifact}=await node(msg,'output',{operation,page});
+        const {artifact}=await writeOutput(msg,operation,page);
         (record.artifacts ||= []).push(artifact);
         const final=page.items?.find(item=>item.id===run.outputMessageId);
-        if (final) record.finalMessage=final;
+        if (final) {
+          const full=text(final.content);
+          record.finalMessage={id:final.id,role:final.role,content:full.slice(0,4000),shortened:full.length>4000};
+        }
         record.messageCursor=page.nextCursor;
         record.messagesComplete=!page.nextCursor;
         saveError=(await tryPersist(msg,operation,record)) || saveError;
@@ -212,12 +253,13 @@
     }
     saveError=(await tryPersist(msg,operation,record)) || saveError;
     const output=record.finalMessage ? text(record.finalMessage.content) : '';
+    const shortened=Boolean(record.finalMessage?.shortened || output.length>4000);
     const done=terminal.has(run.status) && Boolean(record.messagesComplete);
     return {status:run.status,operation,taskId:record.taskId,runId:run.runId,
       error:run.error || null,outputMessageId:run.outputMessageId || null,
       output_available:Boolean(record.finalMessage),messages_complete:Boolean(record.messagesComplete),
       message_pages_read:(record.artifacts || []).length,
-      final_result_summary:output.slice(0,4000),summary_shortened:output.length>4000,
+      final_result_summary:output.slice(0,4000),summary_shortened:shortened,
       full_result_artifacts:record.artifacts || [],
       ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
       next_tool:next(done ? 'cleanup' : 'status',operation),
