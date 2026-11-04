@@ -762,7 +762,7 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
   assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
   assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
-  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.']) {
+  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.', '修复翻译模块的 bug']) {
     const res = routeBuiltIn(debugTask, lunaOnlyCatalog);
     assert.equal(res.decision.work_kind, 'debug_review', debugTask);
     assert.equal(res.route.bundle.effort, 'max', debugTask);

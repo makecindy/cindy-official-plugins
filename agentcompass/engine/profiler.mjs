@@ -229,23 +229,6 @@ export function inferKindFromObjective(objective) {
       ],
     ],
     [
-      "text_in_text_out",
-      [
-        "translate ",
-        "translation of ",
-        "translation into ",
-        "draft a document",
-        "draft documentation",
-        "rewrite the text",
-        "summarize the text",
-        "翻译",
-        "撰写文档",
-        "文案",
-        "润色",
-        "摘要",
-      ],
-    ],
-    [
       "visual_analysis",
       [
         "visual diff",
@@ -297,6 +280,23 @@ export function inferKindFromObjective(objective) {
         "只读审查",
         "安全审计",
         "内存泄漏",
+      ],
+    ],
+    [
+      "text_in_text_out",
+      [
+        "translate ",
+        "translation of ",
+        "translation into ",
+        "draft a document",
+        "draft documentation",
+        "rewrite the text",
+        "summarize the text",
+        "翻译",
+        "撰写文档",
+        "文案",
+        "润色",
+        "摘要",
       ],
     ],
     [
@@ -379,7 +379,8 @@ export function inferKindFromObjective(objective) {
   ];
 
   for (const [kind, keywords] of rules) {
-    if (keywords.some((w) => text.includes(w))) {
+    const check = kind === "text_in_text_out" ? text.replace(/(?:翻译|文案|摘要)(?:模块|函数|接口|服务|逻辑|代码|脚本|组件|插件|解析|器)/g, " ") : text;
+    if (keywords.some((w) => check.includes(w))) {
       return kind;
     }
   }
