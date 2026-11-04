@@ -602,8 +602,10 @@ test('split: several independent deliverables come back as split with the task c
   }
   assert.equal(splitGate('Steps:\n1. Reproduce the crash.\n2. Then fix it.\n3. Then add a regression test.'), null);
   assert.equal(splitGate('Task 1: First implement the helper.\nTask 2: Then test the helper created above.'), null);
+  assert.equal(splitGate('Task 1: Collect latency metrics.\nTask 2: Plot a chart based on the previous results.'), null);
   assert.equal(routeBuiltIn('Steps:\n1. Reproduce the crash.\n2. Then fix it.').status, 'native');
   assert.equal(routeBuiltIn('Task 1: First implement the helper.\nTask 2: Then test the helper created above.').status, 'native');
+  assert.equal(routeBuiltIn('Task 1: Collect latency metrics.\nTask 2: Plot a chart based on the previous results.').status, 'native');
 });
 
 test('self: an explicit "answer here" or a short pure question is the current session\'s job', () => {
@@ -766,6 +768,7 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
     assert.equal(res.route.bundle.effort, 'max', debugTask);
   }
   assert.equal(routeBuiltIn('Translate README.md into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
+  assert.equal(routeBuiltIn('Translate the React component documentation into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
 
   const multiSegmentPiCatalog = {models: [
     {route: {agentKind: 'pi', providerId: 'openrouter', model: 'openrouter/qwen/qwen3-coder', effort: 'high', fastMode: false}, efforts: ['medium', 'high'], supportsFastMode: false},
