@@ -589,6 +589,21 @@ test('fast mode needs the signal word, a fast-capable codex row and known quota 
   assert.equal(routeBuiltIn(task, REAL_CATALOG, {source: 'test', status: 'ok', used_percent: 70}).route.bundle.fast, false);
   assert.equal(routeBuiltIn(task, REAL_CATALOG, {source: 'test', status: 'unknown'}).route.bundle.fast, false);
   assert.equal(routeBuiltIn('加急：把 util.py 里的 foo 改名为 bar 并更新两个调用点。').decision.wants_fast, true);
+  for (const optedOut of [
+    'Rename foo to bar in util.py. Do not use fast mode.',
+    'Rename foo to bar in util.py without fast mode.',
+    'Rename foo to bar in util.py. This is not urgent.',
+    'This is urgent: rename foo to bar in util.py, but do not use fast mode.',
+    '把 util.py 里的 foo 改名为 bar，不要使用快速模式。',
+    '把 util.py 里的 foo 改名为 bar，这件事不紧急、不用加急。',
+  ]) {
+    const res = routeBuiltIn(optedOut);
+    assert.equal(res.decision.wants_fast, false, optedOut);
+    assert.equal(res.route.bundle.fast, false, optedOut);
+  }
+  const nonUrgentButFast = routeBuiltIn('Rename the non-urgent helper foo to bar in util.py in fast mode.');
+  assert.equal(nonUrgentButFast.decision.wants_fast, true);
+  assert.equal(nonUrgentButFast.route.bundle.fast, true);
 });
 
 test('quota: an exhausted Codex window moves the route to another signed-in connection', () => {

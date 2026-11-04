@@ -48,6 +48,13 @@ export function selfGate(task) {
 }
 
 const FAST = /\bfast mode\b|\buse fast\b|\burgent(?:ly)?\b|\basap\b|\bas soon as possible\b|快速模式|加急|紧急|尽快|越快越好/i;
+const NO_FAST = /\b(?:do(?:n't| not)|never|avoid|skip)\s+(?:use\s+|using\s+|enable\s+|enabling\s+|turn\s+on\s+|run(?:ning)?\s+(?:in|with)\s+)?fast(?:\s+mode)?\b|\b(?:no|without|disable|turn\s+off)\s+fast(?:\s+mode)?\b|\bfast(?:\s*mode)?\s*(?:is\s+|:?\s*|=?\s*)(?:off|disabled|false)\b|(?:不要|不用|无需|不必|别|禁止|禁用|关闭|不开启|不使用|不开)\s*(?:使用|开启|打开|用)?\s*快速模式/i;
+const NEGATED_FAST = /\b(?:not|non|never|no|without|neither|nor|isn't|aren't|wasn't|weren't|don't|doesn't|didn't|needn't|shouldn't|wouldn't|won't|can't|cannot)\b(?:[\s-]+\w+){0,3}[\s-]+(?:fast(?:\s+mode)?|urgent(?:ly)?|asap|as soon as possible)\b|(?:不|非|无需|不必|不用|不要|没那么|不算|并不)\s*(?:算|是|太|怎么|需要|用)?\s*(?:快速模式|加急|紧急|尽快|越快越好)/gi;
+
+function isFastRequested(task) {
+  if (NO_FAST.test(task)) return false;
+  return FAST.test(task.replace(NEGATED_FAST, ' '));
+}
 
 // ---- quota: the newest rate-limit snapshot the Codex CLI wrote into its own session logs --------------------------
 // Cindy runs Codex with its own CODEX_HOME (<app data>/CindyGlobal/codex-home), which the plugin process does not inherit.
@@ -181,7 +188,7 @@ export function routeTask(task, catalog, {env = process.env, now = Date.now(), q
     scores.set(`${r.canonicalModel}:${r.effort}`, r);
   }
   const kind = ranked.task.kind;
-  const wantsFast = FAST.test(task);
+  const wantsFast = isFastRequested(task);
 
   const candidates = [];
   for (const row of rows) {
