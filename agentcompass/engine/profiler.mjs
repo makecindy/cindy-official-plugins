@@ -229,22 +229,6 @@ export function inferKindFromObjective(objective) {
       ],
     ],
     [
-      "text_in_text_out",
-      [
-        "translate",
-        "translation",
-        "draft a document",
-        "draft documentation",
-        "rewrite the text",
-        "summarize the text",
-        "翻译",
-        "撰写文档",
-        "文案",
-        "润色",
-        "摘要",
-      ],
-    ],
-    [
       "visual_analysis",
       [
         "visual diff",
@@ -373,6 +357,23 @@ export function inferKindFromObjective(objective) {
         "独立脚本",
         "自包含",
         "实现算法",
+      ],
+    ],
+    [
+      "text_in_text_out",
+      [
+        "translate ",
+        "translation of ",
+        "translation into ",
+        "draft a document",
+        "draft documentation",
+        "rewrite the text",
+        "summarize the text",
+        "翻译",
+        "撰写文档",
+        "文案",
+        "润色",
+        "摘要",
       ],
     ],
   ];

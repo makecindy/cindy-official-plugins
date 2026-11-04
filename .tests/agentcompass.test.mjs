@@ -192,6 +192,21 @@ test('lost create is not retried, definite create refusals are retriable, and a 
   denied.cindy.tasks.create=realCreate;
   const recovered=(await denied.send('roll',{task:'x'})).result;
   assert.deepEqual([recovered.status,recovered.taskId,recovered.runId],['running','child-task','run-1']);
+  // A lost acknowledgement on the pre-create `creating` save (where the worker committed `creating` before the bridge broke)
+  // is recovered as not-executed (never permanent `unknown_create`) because the caller knows tasks.create was not called.
+  let preCreateBridgeDown=true;
+  const lostAck=fixture({saveFails:rec=>{
+    if (!preCreateBridgeDown) return false;
+    if (rec.state==='creating') {lostAck.records.set(opOf(ctx.session_id,'x'),structuredClone(rec));return true;}
+    return true;
+  }});
+  const preCreateFailed=(await lostAck.send('roll',{task:'x'})).result;
+  assert.equal(lostAck.count('create'),0);
+  assert.deepEqual([preCreateFailed.status,preCreateFailed.executed,preCreateFailed.next_tool.tool],['create_rejected',false,'roll']);
+  preCreateBridgeDown=false;
+  assert.equal((await lostAck.send('status',{operation:preCreateFailed.operation})).result.status,'create_rejected');
+  const afterBridgeRecovery=(await lostAck.send('roll',{task:'x'})).result;
+  assert.deepEqual([afterBridgeRecovery.status,afterBridgeRecovery.taskId,afterBridgeRecovery.runId],['running','child-task','run-1']);
   const other=fixture();const launched=await other.send('roll',{task:'x'});
   other.run.status='failed';other.run.error='upstream timeout';
   const failed=await other.send('status',{operation:launched.result.operation});
@@ -745,6 +760,12 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
   assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
   assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
+  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.']) {
+    const res = routeBuiltIn(debugTask, lunaOnlyCatalog);
+    assert.equal(res.decision.work_kind, 'debug_review', debugTask);
+    assert.equal(res.route.bundle.effort, 'max', debugTask);
+  }
+  assert.equal(routeBuiltIn('Translate README.md into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
 
   const multiSegmentPiCatalog = {models: [
     {route: {agentKind: 'pi', providerId: 'openrouter', model: 'openrouter/qwen/qwen3-coder', effort: 'high', fastMode: false}, efforts: ['medium', 'high'], supportsFastMode: false},

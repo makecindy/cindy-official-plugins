@@ -282,7 +282,19 @@
       record.route=route;
       record.createRequest={requestKey:operation+':create',title:'AgentCompass '+operation.slice(0,12),route,permissionMode:'bypassPermissions'};
       record.state='creating';
-      await persist(msg,operation,record);
+      const preCreateError=await tryPersist(msg,operation,record);
+      if (preCreateError) {
+        record.state='prepared';record.createRejected=true;record.task=msg.args.task;
+        record.error='Could not record pre-create receipt before tasks.create: '+preCreateError;
+        record.errorCode=null;
+        delete record.createRequest;delete record.route;
+        const saveError=await tryPersist(msg,operation,record);
+        return {status:'create_rejected',operation,taskId:null,task_id:null,error:record.error,error_code:null,
+          executed:false,
+          ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+          next_tool:{ghost_id:'agentcompass',tool:'roll',args:{task:msg.args.task}},
+          next_action:'Could not confirm the pre-create receipt; tasks.create was not called and no draft was created. Call roll again to retry.'};
+      }
       let task;
       try {task=await cindy.tasks.create(record.createRequest);} catch(error) {
         record.error=error?.message || String(error);
