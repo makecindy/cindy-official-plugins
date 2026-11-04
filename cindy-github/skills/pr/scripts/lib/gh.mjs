@@ -104,7 +104,10 @@ export async function ghJson(path, { retries = 1, includeHeaders = false } = {})
 export async function ghGraphQL(query, variables = {}, { retries = 1, includeHeaders = false } = {}) {
   const args = ['api', 'graphql', ...(includeHeaders ? ['--include'] : []), '-f', `query=${query}`];
   for (const [k, v] of Object.entries(variables)) {
-    args.push('-F', `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    // Strings go through -f (raw): -F would turn a repo named `2048`, `true` or `null` into a
+    // number/boolean/null, or read a file for a value starting with `@`. Other types need -F's typing.
+    if (typeof v === 'string') args.push('-f', `${k}=${v}`);
+    else args.push('-F', `${k}=${JSON.stringify(v)}`);
   }
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {

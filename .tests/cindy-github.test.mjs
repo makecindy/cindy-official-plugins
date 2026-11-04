@@ -68,7 +68,8 @@ async function testConnection() {
 
 test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.equal(manifest.schemaVersion, 3);
-  assert.equal(manifest.minCindyVersion, '0.1.122');
+  // Deliberately above every released client until the release carrying #8244 ships; then set it to that release.
+  assert.equal(manifest.minCindyVersion, '0.1.999');
   assert.equal('slots' in manifest, false);
   assert.equal(manifest.notify, true);
   assert.equal(manifest.fs, true);

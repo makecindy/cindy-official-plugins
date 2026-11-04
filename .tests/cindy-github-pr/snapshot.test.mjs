@@ -200,6 +200,32 @@ process.exitCode = 1;
   }
 });
 
+nodeTest('graphql string variables stay raw strings; other types keep their JSON typing', { skip: process.platform === 'win32' ? 'POSIX-only: fake gh shim / symlink' : false }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-graphql-vars-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }));
+`, { mode: 0o755 });
+  const moduleUrl = new URL('../../cindy-github/skills/pr/scripts/lib/gh.mjs', import.meta.url).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { ghGraphQL } from ${JSON.stringify(moduleUrl)}; const r = await ghGraphQL('query{}', { name: '2048', flag: 'true', nothing: 'null', file: '@secret', number: 7, ok: false }); process.stdout.write(JSON.stringify(r));`], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const { argv } = JSON.parse(result.stdout);
+  const pairs = [];
+  for (let i = 0; i < argv.length; i++) if (argv[i] === '-f' || argv[i] === '-F') pairs.push([argv[i], argv[i + 1]]);
+  assert.deepEqual(pairs, [
+    ['-f', 'query=query{}'],
+    ['-f', 'name=2048'],
+    ['-f', 'flag=true'],
+    ['-f', 'nothing=null'],
+    ['-f', 'file=@secret'],
+    ['-F', 'number=7'],
+    ['-F', 'ok=false'],
+  ]);
+});
+
 nodeTest('HTTP metadata is separated from JSON for LF and CRLF responses', () => {
   for (const newline of ['\n', '\r\n']) {
     const response = ['HTTP/2.0 200 OK', 'Content-Type: application/json', 'X-RateLimit-Reset: 123', '', '{"ok":true}'].join(newline);
