@@ -34,7 +34,7 @@ export function splitGate(task) {
   return {task_count: count > 3 ? '>3' : String(count), reason};
 }
 
-const SELF = /\b(?:answer|reply|respond)\s+(?:it\s+)?(?:directly|here|in this (?:session|chat|conversation))\b|\bdo(?:n't| not)\s+(?:delegate|dispatch|start a (?:task|worker))\b|\bno (?:worker|sub-?task|delegation)\b|直接(?:回答|答复|回复|告诉我)|不要(?:派发|委派|开(?:子)?任务|启动(?:子)?任务)|无需(?:派发|委派)|在(?:当前|本)会话(?:里|中|内)?(?:直接)?(?:回答|完成)/i;
+const SELF = /\b(?:answer|reply|respond)\s+(?:it\s+)?(?:directly|here|in this (?:session|chat|conversation))\b|\bdo(?:n't| not)\s+(?:delegate|dispatch|start a (?:task|worker)|spawn a (?:task|worker))\b|\bwithout (?:delegat(?:ing|ion)|a sub-?task|spawning a (?:task|worker|sub-?agent)|starting a (?:task|worker|sub-?agent))\b|(?:^|[.!;,\n]\s*)no (?:delegation|sub-?tasks?|sub-?agents?|(?:workers?\s+(?:needed|necessary|required|please)))(?=$|[.!;,\n])|直接(?:回答|答复|回复|告诉我)|不要(?:派发|委派|开(?:子)?任务|启动(?:子)?任务)|无需(?:派发|委派)|在(?:当前|本)会话(?:里|中|内)?(?:直接)?(?:回答|完成)/i;
 const QUESTION = /^(?:what|why|how|when|where|which|who|is|are|does|do|can|should|explain|define)\b|^(?:什么|为什么|为何|怎么|如何|是否|哪个|哪些|解释|请问)|[?？]\s*$/i;
 const WORK = /\b(?:implement|fix|refactor|write|create|build|add|remove|delete|update|edit|change|migrate|run|test|deploy|install|commit|generate|rename|review|audit|translate|localize|investigate|research|analyze|analyse|summarize|summarise|inspect|diagnose|debug|trace|triage|verify|check|compare|benchmark|profile)\b|实现|修复|重构|编写|写(?:一个|入)?|创建|新增|添加|删除|修改|更新|迁移|运行|测试|部署|安装|提交|生成|重命名|审查|评审|审阅|翻译|排查|调查|调研|研究|分析|总结|汇总|检查|核对|定位|诊断|验证|对比|[\w.-]+\.(?:py|js|ts|mjs|cjs|go|rs|java|json|md|toml|yaml|yml)\b/i;
 
@@ -49,7 +49,7 @@ export function selfGate(task) {
 
 const FAST = /\bfast mode\b|\buse fast\b|\burgent(?:ly)?\b|\basap\b|\bas soon as possible\b|快速模式|加急|紧急|尽快|越快越好/i;
 const NO_FAST = /\b(?:do(?:n't| not)|never|avoid|skip)\s+(?:use\s+|using\s+|enable\s+|enabling\s+|turn\s+on\s+|run(?:ning)?\s+(?:in|with)\s+)?fast(?:\s+mode)?\b|\b(?:no|without|disable|turn\s+off)\s+fast(?:\s+mode)?\b|\bfast(?:\s*mode)?\s*(?:is\s+|:?\s*|=?\s*)(?:off|disabled|false)\b|(?:不要|不用|无需|不必|别|禁止|禁用|关闭|不开启|不使用|不开)\s*(?:使用|开启|打开|用)?\s*快速模式/i;
-const NEGATED_FAST = /\b(?:not|non|never|no|without|neither|nor|isn't|aren't|wasn't|weren't|don't|doesn't|didn't|needn't|shouldn't|wouldn't|won't|can't|cannot)\b(?:[\s-]+\w+){0,3}[\s-]+(?:fast(?:\s+mode)?|urgent(?:ly)?|asap|as soon as possible)\b|(?:不|非|无需|不必|不用|不要|没那么|不算|并不)\s*(?:算|是|太|怎么|需要|用)?\s*(?:快速模式|加急|紧急|尽快|越快越好)/gi;
+const NEGATED_FAST = /\b(?:not|non|never|no|without|neither|nor|isn't|aren't|wasn't|weren't|don't|doesn't|didn't|needn't|shouldn't|wouldn't|won't|can't|cannot)\b(?:[\s-]+(?!but\b|however\b|yet\b|still\b|though\b|although\b|and\b|or\b|fast\b|urgent(?:ly)?\b|asap\b)\w+){0,3}?[\s-]+(?:fast(?:\s+mode)?|urgent(?:ly)?|asap|as soon as possible)\b|(?:不|非|无需|不必|不用|不要|没那么|不算|并不)\s*(?:算|是|太|怎么|需要|用)?\s*(?:快速模式|加急|紧急|尽快|越快越好)/gi;
 
 function isFastRequested(task) {
   if (NO_FAST.test(task)) return false;

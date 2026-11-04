@@ -300,6 +300,13 @@ test('stop waits a bounded time for the host: stopping is reported as such, a co
   assert.equal(cancelUnknown.ok,true);
   assert.deepEqual([cancelUnknown.result.status,cancelUnknown.result.executed,cancelUnknown.result.confirmed_terminal,cancelUnknown.result.task_id,cancelUnknown.result.run_id,cancelUnknown.result.next_tool.tool],
     ['unknown_cancel','unknown',false,'child-task','run-1','status']);
+  // Definite pre-mutation cancellation refusal (e.g. PERMISSION_DENIED) is reported as cancel_rejected with executed: false.
+  const cancelRefused=fixture();const crop=(await cancelRefused.send('roll',{task:'x'})).result.operation;
+  cancelRefused.cindy.tasks.cancel=async()=>{throw coded('PERMISSION_DENIED','cannot cancel');};
+  const cancelRej=await cancelRefused.send('stop',{operation:crop});
+  assert.equal(cancelRej.ok,true);
+  assert.deepEqual([cancelRej.result.status,cancelRej.result.executed,cancelRej.result.confirmed_terminal,cancelRej.result.error_code,cancelRej.result.task_id,cancelRej.result.run_id,cancelRej.result.next_tool.tool],
+    ['cancel_rejected',false,false,'PERMISSION_DENIED','child-task','run-1','stop']);
   const archiveLost=fixture();const alop=(await archiveLost.send('roll',{task:'x'})).result.operation;
   archiveLost.run.status='completed';archiveLost.run.outputMessageId='out-exact';
   await archiveLost.send('status',{operation:alop});
@@ -555,7 +562,12 @@ test('self: an explicit "answer here" or a short pure question is the current se
     assert.match(result.next_action, /current session/);
   }
   assert.equal(selfGate('Why does util.py fail? Fix it and add a test.'), null);
-  for (const workQuestion of ['Can you review the diff for regressions?', 'Can you translate the supplied paragraph into Japanese?']) {
+  for (const workQuestion of [
+    'Can you review the diff for regressions?',
+    'Can you translate the supplied paragraph into Japanese?',
+    'Fix the "no worker available" error in scheduler.py.',
+    'Implement a worker pool with no worker thread leaks.',
+  ]) {
     assert.equal(selfGate(workQuestion), null, workQuestion);
     assert.equal(routeBuiltIn(workQuestion).status, 'native', workQuestion);
   }
@@ -601,9 +613,15 @@ test('fast mode needs the signal word, a fast-capable codex row and known quota 
     assert.equal(res.decision.wants_fast, false, optedOut);
     assert.equal(res.route.bundle.fast, false, optedOut);
   }
-  const nonUrgentButFast = routeBuiltIn('Rename the non-urgent helper foo to bar in util.py in fast mode.');
-  assert.equal(nonUrgentButFast.decision.wants_fast, true);
-  assert.equal(nonUrgentButFast.route.bundle.fast, true);
+  for (const enabledDespiteNegatedUrgency of [
+    'Rename the non-urgent helper foo to bar in util.py in fast mode.',
+    'Rename foo in util.py. This is not urgent but use fast mode.',
+    '把 util.py 里的 foo 改名为 bar，这件事不紧急，但请使用快速模式。',
+  ]) {
+    const res = routeBuiltIn(enabledDespiteNegatedUrgency);
+    assert.equal(res.decision.wants_fast, true, enabledDespiteNegatedUrgency);
+    assert.equal(res.route.bundle.fast, true, enabledDespiteNegatedUrgency);
+  }
 });
 
 test('quota: an exhausted Codex window moves the route to another signed-in connection', () => {
@@ -682,6 +700,8 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const sparkAlgo = routeBuiltIn('Implement a standalone algorithm.', sparkOnlyCatalog);
   assert.equal(sparkAlgo.status, 'native', 'all host-offered efforts are ranked when static alias efforts do not overlap');
   assert.equal(sparkAlgo.route.bundle.effort, 'xhigh');
+  const sparkRoutine = routeBuiltIn('Batch rename foo to bar in all filenames.', sparkOnlyCatalog);
+  assert.equal(sparkRoutine.route.bundle.effort, 'xhigh', 'minimal effort is scored conservatively below low and does not clear the 3.0 routine floor on a 3.2-tier model');
 
   const lunaOnlyCatalog = {models: [REAL_CATALOG.models.find(r => r.route.model === 'gpt-6-luna')]};
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);

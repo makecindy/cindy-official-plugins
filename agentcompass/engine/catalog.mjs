@@ -41,7 +41,7 @@ export const DEPTH_BY_DIFFICULTY = {
   frontier: 4,
 };
 
-export const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
+export const EFFORT_ORDER = ["none", "off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
 export const HARD_BY_DEFAULT = [
   "debug_review",
@@ -1339,18 +1339,26 @@ export const DEFAULT_SCORING_POLICY = {
   effort_unlock_difficulties: ["coupled", "frontier"],
   critical_headroom: 0.3,
   effort_ability: {
+    none: -1.1,
+    off: -1.1,
+    minimal: -1.0,
     low: -0.7,
     medium: -0.3,
     high: 0.0,
     xhigh: 0.2,
     max: 0.4,
+    ultra: 0.5,
   },
   effort_burn: {
+    none: 0.1,
+    off: 0.1,
+    minimal: 0.12,
     low: 0.2,
     medium: 0.4,
     high: 0.7,
     xhigh: 1.0,
     max: 1.3,
+    ultra: 1.6,
   },
   demand: {
     property_span: 0.5,

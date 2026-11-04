@@ -312,6 +312,13 @@
       const err=error?.message || String(error), code=error?.code || null;
       record.cancelError=err;record.cancelErrorCode=code;
       const saveError=await tryPersist(msg,operation,record);
+      if (REJECTED.has(code)) {
+        return {status:'cancel_rejected',operation,taskId:record.taskId,runId:record.runId,task_id:record.taskId,run_id:record.runId,
+          executed:false,confirmed_terminal:false,error:err,error_code:code,
+          ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
+          next_tool:next('stop',operation),
+          next_action:'Cindy refused tasks.cancel before cancelling ('+err+'). Fix the reported issue and call stop again.'};
+      }
       return {status:'unknown_cancel',operation,taskId:record.taskId,runId:record.runId,task_id:record.taskId,run_id:record.runId,
         executed:'unknown',confirmed_terminal:false,error:err,error_code:code,
         ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
