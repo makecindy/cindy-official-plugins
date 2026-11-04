@@ -556,7 +556,8 @@ test('split: several independent deliverables come back as split with the task c
 
 test('self: an explicit "answer here" or a short pure question is the current session\'s job', () => {
   for (const task of ['What is the difference between a mutex and a semaphore?', '直接回答：Python 的 GIL 是什么？',
-    'Do not delegate this: summarise the README in two lines.']) {
+    'Do not delegate this: summarise the README in two lines.',
+    'No delegation please. Rename foo in util.py.']) {
     const result = routeBuiltIn(task);
     assert.equal(result.status, 'self', task);
     assert.match(result.next_action, /current session/);

@@ -73,9 +73,9 @@ const RETURN_CHANNEL = '\nCindy plugin task return channel: this task has no wor
   'Do not use Paseo, askpass routes, user-dialog tools or invent a callback.\n';
 const children=new Set();
 function stop(child) {
-  if (!child.pid || child.exitCode!==null) return;
-  if (process.platform==='win32') spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
-  else {try {process.kill(-child.pid,'SIGKILL');} catch {child.kill('SIGKILL');}}
+  if (!child.pid) return;
+  if (process.platform==='win32') {if (child.exitCode===null) spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});}
+  else {try {process.kill(-child.pid,'SIGKILL');} catch {if (child.exitCode===null) try {child.kill('SIGKILL');} catch {}}}
 }
 process.on('exit',()=>{for(const child of children) stop(child);});
 process.on('SIGTERM',()=>{for(const child of children) stop(child);process.exit(143);});
