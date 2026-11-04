@@ -185,3 +185,18 @@ export function isPrWorktree(worktree, { headRef, headSha, fromFork }) {
   if (worktree.branch === headRef) return !fromFork || onHead;
   return fromFork && onHead && worktree.detached === true;
 }
+
+const LONG_LIVED_BRANCHES = new Set(['main', 'master', 'develop', 'dev', 'staging', 'production']);
+const LONG_LIVED_PREFIXES = ['release/', 'hotfix/', 'support/'];
+
+/**
+ * Whether a PR head branch is a long-lived branch that cleanup must never delete. Besides the common names,
+ * the repositories' actual default branches (for example `trunk`) are protected: a PR can merge the default
+ * branch into a release branch, and that head must not look like a throwaway topic branch.
+ */
+export function isLongLivedBranch(name, defaultBranches = []) {
+  if (!name) return false;
+  return defaultBranches.includes(name)
+    || LONG_LIVED_BRANCHES.has(name)
+    || LONG_LIVED_PREFIXES.some(prefix => name.startsWith(prefix));
+}

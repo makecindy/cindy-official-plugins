@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCleanupCommands, githubRepoNamesOfRemotes, githubRepoOfUrl, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, githubRepoOfUrl, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from '../../cindy-github/skills/pr/scripts/lib/cleanup-plan.mjs';
 
 const PRIMARY = '/repo';
 const SIBLING = '/repo-pr-branch';
@@ -172,4 +172,16 @@ test('only the real github.com host counts as a GitHub remote', () => {
     'https://github.com.evil.net/acme/app', '/local/path/github.com/acme/app']) assert.equal(githubRepoOfUrl(url), undefined, url);
   assert.deepEqual(githubRepoNamesOfRemotes('origin\thttps://evilgithub.com/acme/app.git (fetch)'), []);
   assert.equal(remoteNameForRepo('origin\thttps://evilgithub.com/acme/app.git (fetch)', 'acme/app'), null);
+});
+
+test('long-lived branches include the repository default branch, whatever it is called', () => {
+  for (const name of ['main', 'master', 'develop', 'release/1', 'hotfix/2', 'support/3']) assert.equal(isLongLivedBranch(name), true, name);
+  assert.equal(isLongLivedBranch('trunk'), false, 'unknown name without metadata looks like a topic branch');
+  assert.equal(isLongLivedBranch('trunk', ['trunk']), true, 'the actual default branch is protected');
+  assert.equal(isLongLivedBranch('trunk', ['main']), false);
+  assert.equal(isLongLivedBranch('fix/x', ['trunk', 'main']), false);
+  assert.equal(isLongLivedBranch('', ['']), false);
+  // The planner refuses to clean up a protected head even when it is merged into a release branch.
+  const result = plan({ longLivedBranch: isLongLivedBranch('trunk', ['trunk']) });
+  assert.equal(result.canCleanupLocal, false);
 });

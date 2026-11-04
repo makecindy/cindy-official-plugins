@@ -8,14 +8,12 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { buildCleanupCommands, githubRepoNamesOfRemotes, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
+import { buildCleanupCommands, githubRepoNamesOfRemotes, isLongLivedBranch, isPrWorktree, planLocalCleanup, remoteNameForRepo } from './lib/cleanup-plan.mjs';
 import { ensureAuth, ensureBinary, ghJson } from './lib/gh.mjs';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
 
 const exec = promisify(execFile);
 const MAX_BUFFER = 10 * 1024 * 1024;
-const LONG_LIVED_BRANCHES = new Set(['main', 'master', 'develop', 'dev', 'staging', 'production']);
-const LONG_LIVED_PREFIXES = ['release/', 'hotfix/', 'support/'];
 
 function usage() {
   process.stderr.write(`Usage: node scripts/pr-cleanup-plan.mjs <pr-number-or-url> [--repo owner/name] [--worktree path] [--fetch]\n`);
@@ -139,10 +137,6 @@ function isCindyManagedWorktree(worktreePath) {
   return parent === '.cindy-worktrees' || parent === '.xdt-worktrees';
 }
 
-function isLongLivedBranch(name) {
-  return LONG_LIVED_BRANCHES.has(name) || LONG_LIVED_PREFIXES.some(prefix => name.startsWith(prefix));
-}
-
 async function refExists(cwd, ref) {
   const res = await git(cwd, ['rev-parse', '--verify', '--quiet', ref], { allowFailure: true });
   return { exists: res.ok, oid: res.ok ? res.stdout.trim() : null };
@@ -202,7 +196,7 @@ async function main() {
   })));
   const cindyManagedWorktree = targetWorktreeDetails.some(worktree => isCindyManagedWorktree(worktree.path));
   const dirtyWorktrees = targetWorktreeDetails.filter(wt => wt.status.dirty);
-  const longLivedBranch = isLongLivedBranch(headRef);
+  const longLivedBranch = isLongLivedBranch(headRef, [pr.head?.repo?.default_branch, pr.base?.repo?.default_branch].filter(Boolean));
   const terminal = pr.state === 'closed';
   const merged = Boolean(pr.merged);
   const hasLocalArtifacts = localBranch.exists || targetWorktreeDetails.length > 0;
