@@ -628,6 +628,16 @@ test("with no CODEX_HOME the telemetry Cindy's own Codex writes (<app data>/Cind
     assert.equal(codexQuota(env, now, homes).used_percent, 22);
     write(homes[0], 99, 100);
     assert.equal(codexQuota(env, now, homes).used_percent, 22);
+    // A session started in an earlier date folder that was updated more recently than today's folder wins by mtime.
+    const prevDay = path.join(homes[1], 'sessions', '2026', '11', '02');
+    fs.mkdirSync(prevDay, {recursive: true});
+    const prevFile = path.join(prevDay, 'rollout-prev.jsonl');
+    fs.writeFileSync(prevFile, JSON.stringify({type: 'event_msg', payload: {type: 'token_count',
+      rate_limits: {primary: {used_percent: 98, window_minutes: 10080, resets_at: now / 1000 + 600}, secondary: null}}}) + '\n');
+    const newerAt = new Date(now - 200);
+    fs.utimesSync(prevFile, newerAt, newerAt);
+    assert.deepEqual([codexQuota(env, now, homes).status, codexQuota(env, now, homes).used_percent, codexQuota(env, now, homes).file],
+      ['exhausted', 98, prevFile]);
   } finally {fs.rmSync(home, {recursive: true, force: true});}
 });
 
@@ -662,6 +672,13 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
   assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
   assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
+
+  const multiSegmentPiCatalog = {models: [
+    {route: {agentKind: 'pi', providerId: 'openrouter', model: 'openrouter/qwen/qwen3-coder', effort: 'high', fastMode: false}, efforts: ['medium', 'high'], supportsFastMode: false},
+  ]};
+  const multiSeg = routeBuiltIn('Rename foo to bar in util.py.', multiSegmentPiCatalog);
+  assert.equal(multiSeg.status, 'native', 'multi-segment Pi model IDs remain stable across canonicalization and allocator lookup');
+  assert.equal(multiSeg.route.bundle.model, 'openrouter/qwen/qwen3-coder');
 });
 
 test('nothing runnable: an empty or foreign catalog is blocked, never guessed', () => {

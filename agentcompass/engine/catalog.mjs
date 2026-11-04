@@ -1430,9 +1430,13 @@ export function canonicalModel(rawModel, aliases = MODEL_ALIASES) {
     }
   }
   if (aliases[clean]) return aliases[clean];
-  const slashIdx = clean.indexOf("/");
-  const unprefixed = slashIdx >= 0 ? clean.slice(slashIdx + 1) : clean;
-  if (aliases[unprefixed]) return aliases[unprefixed];
+  let unprefixed = clean;
+  while (unprefixed.includes("/")) {
+    unprefixed = unprefixed.slice(unprefixed.indexOf("/") + 1);
+    if (aliases[unprefixed]) return aliases[unprefixed];
+    const lowerStep = unprefixed.toLowerCase();
+    if (aliases[lowerStep]) return aliases[lowerStep];
+  }
   const lower = unprefixed.toLowerCase();
   if (aliases[lower]) return aliases[lower];
   return unprefixed;

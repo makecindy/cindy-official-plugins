@@ -63,16 +63,17 @@ const QUOTA_TAIL_BYTES = 256 * 1024;
 let quotaCache = {key: '', limits: null};
 
 function newestSession(home) {
-  let newest = null;
+  let newest = null, days = 0;
   try {
-    // sessions/YYYY/MM/DD/rollout-*.jsonl: walk the newest days only.
+    // sessions/YYYY/MM/DD/rollout-*.jsonl: compare mtimes across date directories so sessions crossing midnight win.
     const desc = dir => fs.readdirSync(dir).filter(n => /^\d+$/.test(n)).sort().reverse().map(n => path.join(dir, n));
     outer: for (const year of desc(path.join(home, 'sessions'))) for (const month of desc(year)) for (const day of desc(month)) {
-      for (const name of fs.readdirSync(day).filter(n => n.endsWith('.jsonl'))) {
+      const files = fs.readdirSync(day).filter(n => n.endsWith('.jsonl'));
+      for (const name of files) {
         const file = path.join(day, name), stat = fs.statSync(file);
         if (!newest || stat.mtimeMs > newest.mtime) newest = {file, mtime: stat.mtimeMs, size: stat.size, home};
       }
-      if (newest) break outer;
+      if (files.length && ++days >= 30) break outer;
     }
   } catch {}
   return newest;
@@ -174,7 +175,11 @@ export function routeTask(task, catalog, {env = process.env, now = Date.now(), q
     pool.set(canonical, entry);
   }
   const ranked = rankCandidates(profile, {objective: task, candidateModels: [...pool].map(([model, efforts]) => ({model, efforts: [...efforts]}))});
-  const scores = new Map(ranked.ranking.map(r => [`${r.canonicalModel}:${r.effort}`, r]));
+  const scores = new Map();
+  for (const r of ranked.ranking) {
+    scores.set(`${r.model}:${r.effort}`, r);
+    scores.set(`${r.canonicalModel}:${r.effort}`, r);
+  }
   const kind = ranked.task.kind;
   const wantsFast = FAST.test(task);
 
