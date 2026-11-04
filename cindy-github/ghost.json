@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.122",
+  "minCindyVersion": "0.1.999",
   "id": "cindy-github",
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。支持 github.com。",
