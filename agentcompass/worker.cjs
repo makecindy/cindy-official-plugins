@@ -125,7 +125,7 @@ async function builtin(task, catalog, dir) {
   if (result.status==='blocked') throw Error(result.error);
   return result;
 }
-async function external(command, task, ctx, dir) {
+async function external(command, task, ctx, dir, timeoutMs=110000) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     !/^(PASEO_|HC_|ORCA_|T3_|ROUTER_PARENT_|ROUTER_CINDY_CONTEXT)/.test(key)));
   if (!Array.isArray(command) || !command.length || command.some(v=>typeof v!=='string')) throw Error('Invalid public router command');
@@ -136,23 +136,24 @@ async function external(command, task, ctx, dir) {
       {cwd:ctx.workdir, env, windowsHide:true, detached:process.platform!=='win32',stdio:['pipe','pipe','pipe']});
     children.add(child);
     const stdout=[], stderr=[];
-    let stdinError=null;
-    const timer=setTimeout(()=>stop(child), 110000);
+    let stdinError=null, timedOut=false;
+    const timer=setTimeout(()=>{timedOut=true;stop(child);}, Number.isFinite(timeoutMs) && timeoutMs>0 ? timeoutMs : 110000);
     child.stdout.on('data',data=>stdout.push(data));
     child.stderr.on('data',data=>stderr.push(data));
     // A router that exits before reading the whole task (EPIPE, EOF) fails this roll only; it must not take the shared
     // worker down. The exit code and output still decide the answer.
     child.stdin.on('error',error=>{stdinError=error;});
     child.on('error',error=>{clearTimeout(timer);children.delete(child);reject(error);});
-    child.on('close',code=>{
+    child.on('close',(code,signal)=>{
       clearTimeout(timer);
       children.delete(child);
       const text=Buffer.concat(stdout).toString('utf8');
       writeDiag(path.join(dir,'router.stdout.json'),text);
       writeDiag(path.join(dir,'router.stderr.txt'),Buffer.concat(stderr));
       try {
+        if (timedOut || signal || code===null) throw Error(timedOut ? 'Router timed out' : 'Router terminated by '+(signal || 'signal'));
         const result=JSON.parse(text);
-        if (code && !['self','split'].includes(result.status)) throw Error(result.error || result.next || 'Router blocked');
+        if (code!==0 && !['self','split'].includes(result.status)) throw Error(result.error || result.next || 'Router blocked');
         resolve({...result, engine:'cli'});
       } catch(error) {
         reject(Error('Router returned no usable route; inspect '+dir+': '+error.message+
@@ -164,7 +165,7 @@ async function external(command, task, ctx, dir) {
 }
 // The engine for this roll: the configured CLI, an opted-in CLI when it is installed, otherwise the built-in engine.
 async function route(conf, task, ctx, dir, catalog) {
-  if (conf.engine==='cli' && conf.command) return await external(conf.command, task, ctx, dir);
+  if (conf.engine==='cli' && conf.command) return await external(conf.command, task, ctx, dir, conf.timeoutMs);
   if (conf.engine==='cli') {
     const found=discover();
     if (found) return await external([found, 'roll'], task, ctx, dir);

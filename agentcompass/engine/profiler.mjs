@@ -93,6 +93,8 @@ export const GUI_WORDS = [
 export const COMPUTER_USE_PHRASES = [
   "click the",
   "click save",
+  "take a screenshot",
+  "capture a screenshot",
   "use the mouse",
   "with the mouse",
   "mouse and keyboard",
@@ -100,6 +102,8 @@ export const COMPUTER_USE_PHRASES = [
   "operate the browser",
   "operate the desktop",
   "点击",
+  "截取屏幕",
+  "截屏操作",
   "用鼠标",
   "键鼠",
   "鼠标键盘",
@@ -280,22 +284,6 @@ export function inferKindFromObjective(objective) {
       ],
     ],
     [
-      "frontend_implementation",
-      [
-        "frontend",
-        "react",
-        "css",
-        "tailwind",
-        "mockup",
-        "desktop ui",
-        "game ui",
-        "界面",
-        "前端",
-        "样式",
-        "组件",
-      ],
-    ],
-    [
       "debug_review",
       [
         "bug",
@@ -324,6 +312,22 @@ export function inferKindFromObjective(objective) {
         "只读审查",
         "安全审计",
         "内存泄漏",
+      ],
+    ],
+    [
+      "frontend_implementation",
+      [
+        "frontend",
+        "react",
+        "css",
+        "tailwind",
+        "mockup",
+        "desktop ui",
+        "game ui",
+        "界面",
+        "前端",
+        "样式",
+        "组件",
       ],
     ],
     [

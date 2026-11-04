@@ -789,11 +789,12 @@ test('screenshot review classifies as visual_analysis (not GUI computer_use), mu
   const lunaAlgo = routeBuiltIn('Implement a standalone algorithm.', lunaOnlyCatalog);
   assert.equal(lunaAlgo.status, 'native', 'all host-offered efforts are ranked even when static spec efforts partially overlap');
   assert.equal(lunaAlgo.route.bundle.effort, 'xhigh');
-  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.', 'Debug translation pipeline', '修复翻译模块的 bug', 'Fix the keyboard shortcuts in editor.py.', 'Fix mouse event handler in app.ts']) {
+  for (const debugTask of ['Fix translation.py.', 'Fix the translation parser bug in parser.py.', 'Debug translation pipeline', '修复翻译模块的 bug', 'Fix the keyboard shortcuts in editor.py.', 'Fix mouse event handler in app.ts', 'Fix the React component bug in editor.tsx.']) {
     const res = routeBuiltIn(debugTask, lunaOnlyCatalog);
     assert.equal(res.decision.work_kind, 'debug_review', debugTask);
     assert.equal(res.route.bundle.effort, 'max', debugTask);
   }
+  assert.equal(routeBuiltIn('Take a screenshot of the app.', lunaOnlyCatalog).decision.work_kind, 'computer_use');
   assert.equal(routeBuiltIn('用鼠标点击设置里的保存', lunaOnlyCatalog).decision.work_kind, 'computer_use');
   assert.equal(routeBuiltIn('Translate README.md into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
   assert.equal(routeBuiltIn('Translate the React component documentation into Japanese.', lunaOnlyCatalog).decision.work_kind, 'text_in_text_out');
@@ -843,7 +844,7 @@ process.stdin.on('data',d=>chunks.push(d)).on('end',()=>{
   fs.appendFileSync(${JSON.stringify(calls)},'call\\n');
   fs.writeFileSync(${JSON.stringify(capture)},JSON.stringify({argv:process.argv.slice(2),stdin,
     cwd:process.cwd(),paseo:process.env.PASEO_AGENT_ID??null,hc:process.env.HC_TERMINAL_ID??null,legacy:process.env.ROUTER_CINDY_CONTEXT??null}));
-  setTimeout(()=>{process.stdout.write(fs.readFileSync(${JSON.stringify(answerFile)},'utf8'));process.exit(${code});},stdin.includes('SLOW')?1500:0);
+  setTimeout(()=>{process.stdout.write(fs.readFileSync(${JSON.stringify(answerFile)},'utf8'));if(stdin.includes('HANG')){setInterval(()=>{},1000);return;}process.exit(${code});},stdin.includes('SLOW')?1500:0);
 });`);
   const settings = {command: [process.execPath, fake], stateRoot: path.join(root, 'state')};
   if (config === 'plugin') fs.writeFileSync(path.join(out, 'router.json'), JSON.stringify(settings));
@@ -979,6 +980,15 @@ test('self and split from the CLI are recorded as the router answer; a blocked r
   const p = plugin({status: 'blocked', error: 'no account'}, 2);
   const [reply] = rpc(p, [prepare(p, 'x')]);
   assert.match(reply.error.message, /no account/);
+  const hang = plugin(codex);
+  fs.writeFileSync(path.join(hang.out, 'router.json'), JSON.stringify({
+    command: [process.execPath, hang.fake],
+    stateRoot: hang.state,
+    timeoutMs: 150,
+  }));
+  const [timedOut] = rpc(hang, [prepare(hang, 'HANG after writing native JSON')]);
+  assert.match(timedOut.error.message, /Router timed out/);
+  assert.deepEqual(receipts(hang), []);
 });
 
 test('an untrusted context and a foreign session are refused before the router runs', () => {
