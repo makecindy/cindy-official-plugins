@@ -771,13 +771,17 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   // 这个 PR 以前跑过检查,新 head 却迟迟没有任何检查:可能没触发,也可能被禁用了。
   const everHadChecks = Boolean(watch.everHadChecks) || checks.length > 0;
   let checksAwaitedSince = watch.checksAwaitedSince ?? null;
-  if (!checksUnavailable && watch.everHadChecks) {
-    const awaitedBefore = headMoved ? isoAt(now) : checksAwaitedSince;
-    checksAwaitedSince = checks.length > 0 ? null : awaitedBefore;
-    const awaitedMs = checksAwaitedSince === null ? 0 : now - Date.parse(checksAwaitedSince);
-    if (awaitedMs >= NO_CHECKS_MS) {
-      events.push({ kind: 'no-checks', minutes: Math.round(awaitedMs / 60_000) });
-      checksAwaitedSince = null;
+  if (watch.everHadChecks) {
+    // 计时从 head 前进的那一刻开始,哪怕这一轮检查读不到:watch.headSha 会随之推进,
+    // 之后 headMoved 不会再为 true,读取恢复时才起算就永远起算不了。
+    if (headMoved) checksAwaitedSince = isoAt(now);
+    if (!checksUnavailable) {
+      if (checks.length > 0) checksAwaitedSince = null;
+      const awaitedMs = checksAwaitedSince === null ? 0 : now - Date.parse(checksAwaitedSince);
+      if (awaitedMs >= NO_CHECKS_MS) {
+        events.push({ kind: 'no-checks', minutes: Math.round(awaitedMs / 60_000) });
+        checksAwaitedSince = null;
+      }
     }
   }
 

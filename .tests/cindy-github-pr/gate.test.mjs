@@ -253,6 +253,26 @@ test('新 head 15 分钟没有任何检查上报时说一次;从没跑过检查�
   assert.deepEqual(kinds(evaluateWatch(quiet.next, { ...never, latestCommitOid: 'bbb2222' }, T0 + 60 * MIN)), []);
 });
 
+test('新 head 的第一次检查读不到,恢复读取后仍按推送时刻起算 no-checks,且只说一次', () => {
+  const pushed = (extra = {}) => snap({ latestCommitOid: 'bbb2222', checks: [], ...extra });
+  const unreadable = pushed({ checksSummary: { unavailable: true } });
+  let r = evaluateWatch(seenWatch(snap()), unreadable, T0);
+  assert.deepEqual(kinds(r), [], '读不到时不报');
+  assert.equal(r.next.headSha, 'bbb2222');
+  assert.ok(r.next.checksAwaitedSince, '计时已在推送时刻起算');
+  r = evaluateWatch(r.next, unreadable, T0 + 5 * MIN);
+  assert.deepEqual(kinds(r), [], '仍读不到:不报,计时也不被清掉');
+  r = evaluateWatch(r.next, pushed(), T0 + 16 * MIN);
+  assert.deepEqual(r.events, [{ kind: 'no-checks', minutes: 16 }]);
+  assert.deepEqual(kinds(evaluateWatch(r.next, pushed(), T0 + 40 * MIN)), [], '只说一次');
+
+  // 读取恢复后检查其实在跑:计时清掉,不误报
+  const ok = evaluateWatch(evaluateWatch(seenWatch(snap()), unreadable, T0).next,
+    pushed({ checks: [check('build', 'pending', { required: true })] }), T0 + 20 * MIN);
+  assert.equal(ok.next.checksAwaitedSince, null);
+  assert.ok(!kinds(ok).includes('no-checks'));
+});
+
 // ── 事件:留言 ──────────────────────────────────────────────────────────────
 
 test('只有别人的新留言唤起:自己的回复、看过的、内容为空的 COMMENTED review 都不算', () => {
