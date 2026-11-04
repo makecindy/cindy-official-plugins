@@ -576,6 +576,7 @@ test('split: several independent deliverables come back as split with the task c
   for (const [task, count] of [['Two independent tasks:\n1. Add a dark theme to the settings page.\n2. Fix the CSV export encoding bug in report.py.', '2'],
     ['Two independent tasks:\nTask 1: Fix foo.py, then run its tests.\nTask 2: Translate README.md into Japanese.', '2'],
     ['Task 1: Next.js: fix the hydration bug.\nTask 2: Django: add CSV export.', '2'],
+    ['Task 1: Fix the bug in ordering logic.\nTask 2: Translate README.md into Japanese.', '2'],
     ['Task 1: write the release notes.\nTask 2: upgrade the lodash dependency.\nTask 3: add retry to the HTTP client.', '3'],
     ['以下是互不相关的任务：\n1. 给设置页加深色主题\n2. 修复 report.py 的 CSV 编码\n3. 升级 lodash\n4. 给 HTTP 客户端加重试', '>3']]) {
     const result = routeBuiltIn(task);
