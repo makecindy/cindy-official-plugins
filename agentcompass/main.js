@@ -67,6 +67,23 @@
     }
     return reply;
   }
+  async function writePrepare(msg,task,rawCatalog) {
+    const catalog={models:(rawCatalog?.models || []).map(row=>({
+      route:row.route,
+      ...(row.efforts ? {efforts:row.efforts} : {}),
+      ...(row.supportsFastMode!==undefined ? {supportsFastMode:row.supportsFastMode} : {}),
+    }))};
+    const raw=JSON.stringify(catalog);
+    if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'prepare',{task,catalog});
+    const parts=splitUtf8(raw,MAX_RPC_BYTES);
+    const stream='catalog:'+String(parts.length);
+    let reply=null;
+    for (let i=0;i<parts.length;i++) {
+      const done=i===parts.length-1;
+      reply=await node(msg,'prepare',{...(done ? {task} : {}),stream,index:i,chunk:parts[i],done});
+    }
+    return reply;
+  }
   const memory = new Map();
   async function persist(msg,operation,record) {
     await node(msg,'save',{operation,record});
@@ -84,7 +101,7 @@
         memory.delete(operation);
         return disk;
       }
-      if (!disk.taskId || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned' ||
+      if (!disk.taskId || (mem.runId && !disk.runId) || (mem.messagesComplete && !disk.messagesComplete) || mem.state==='cleaned' ||
           (mem.draft_cleanup && mem.draft_cleanup!==disk.draft_cleanup) ||
           (mem.cancelError && !disk.cancelError) ||
           (['blocked','send_rejected','unknown_create','unknown_send'].includes(mem.state) && mem.state!==disk.state) ||
@@ -270,7 +287,7 @@
   async function roll(msg,ctx,canArchive) {
     for (const [op,mem] of memory) if (mem.createRejected) await tryPersist(msg,op,mem);
     // The catalog the built-in engine routes over: exactly what this Cindy can run now.
-    const prepared=await node(msg,'prepare',{task:msg.args.task,catalog:await cindy.tasks.models()});
+    const prepared=await writePrepare(msg,msg.args.task,await cindy.tasks.models());
     const operation=prepared.operation;
     // self, split or a router-side launch: the router's own answer, not a Cindy task.
     if (prepared.router?.status!=='native' && prepared.state==='prepared') return prepared.router;

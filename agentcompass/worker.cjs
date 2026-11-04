@@ -190,6 +190,18 @@ async function handle(method, params) {
   const root=stateRoot(conf);
   fs.mkdirSync(root, {recursive:true});
   if (method==='prepare') {
+    let catalog=params.catalog;
+    if (typeof params.chunk==='string') {
+      const key='prepare\0'+ctx.session_id+'\0'+String(params.stream || '');
+      const list=params.index===0 ? [] : (outputStreams.get(key) || []);
+      list.push(params.chunk);
+      if (!params.done) {
+        outputStreams.set(key,list);
+        return {partial:true};
+      }
+      outputStreams.delete(key);
+      catalog=JSON.parse(list.join(''));
+    }
     if (typeof params.task!=='string' || !params.task.trim()) throw Error('Task is empty');
     const operation=digest(ctx.session_id+'\0'+params.task).slice(0,40);
     const dir=path.join(root,operation);
@@ -201,7 +213,7 @@ async function handle(method, params) {
     // Nothing was created yet: route again with the current configuration, account map and catalog, so a retry after
     // a fix is not stuck on the answer that failed.
     const mappings=accountMappings(conf);
-    const result=await route(conf,params.task,ctx,dir,params.catalog);
+    const result=await route(conf,params.task,ctx,dir,catalog);
     // self/split/a router-side launch are the router's answer to the parent, not a Cindy task.
     const {bundle,prompt}=result.status==='native' ? contract(result,ctx,params.task) : {bundle:null,prompt:''};
     const record={parent:ctx.session_id, state:'prepared', engine:result.engine, router:result, bundle, prompt,
