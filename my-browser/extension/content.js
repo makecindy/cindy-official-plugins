@@ -641,7 +641,9 @@
   // finished passages come from the cache and the same task. Any explicit Cindy action drops the carry.
   function carryVideo(){
     // A session the person cancelled, or that failed, stays stopped: only a deliberate click starts paid work again.
-    if(!xSite||!videoSession||!video||videoSession.paused||videoSession.failed){carried=null;return;}
+    // Without a session there is nothing new to say: a record the player-removal check saved a moment ago must survive the navigation check.
+    if(!xSite||!videoSession||!video)return;
+    if(videoSession.paused||videoSession.failed){carried=null;return;}
     // A post can hold several videos: its own id only stands in when no media id was ever seen.
     const now=xVideoIds(video),media=videoSession.ids?.media||now.media,id=media?{media}:{post:videoSession.ids?.post||now.post};
     carried=id.media||id.post?{...id,videoId:videoSession.videoId,auto:videoSession.auto,until:Date.now()+10000}:null;
