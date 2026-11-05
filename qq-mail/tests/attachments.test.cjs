@@ -72,7 +72,7 @@ test('draft uses the same MIME attachment path', async t => {
 });
 test('main passes draft attachment paths to the shared compose worker without attachment bytes', async () => {
   let handler, request, response;
-  const context = { Map, setTimeout, fetch: async url=>({ok:true,json:async()=>url==='/kv'?{email:'test@example.com'}:[{key:'qq_mail_authorization_code',saved:true}]}), cindy: {
+  const context = { cindyMail: { version: 1, sendGraceMs: 10000, register: () => ({ present: async () => true, beforeTool: async () => null, resolveDraft: async () => null }) }, Map, setTimeout, fetch: async url=>({ok:true,json:async()=>url==='/kv'?{email:'test@example.com'}:[{key:'qq_mail_authorization_code',saved:true}]}), cindy: {
     onHostMessage: fn=>{handler=fn;},node:{request:async r=>{request=r;return {ok:true,result:{ok:true,execution:'executed',data:{draft:true,draftId:'<d@example.com>',readBack:{status:'unavailable',message:'x'}}}};}},send: async r=>{response=r;},
   }};
   vm.runInNewContext(await fs.readFile(path.join(__dirname,'../main.js'),'utf8'),context);
@@ -147,7 +147,7 @@ test('worker distinguishes rejected attachment input from ambiguous SMTP failure
 
 test('host timeouts on draft writes are unknown and never invite blind retries', async () => {
   let handler, response;
-  const context = { Map, setTimeout, fetch: async url => ({ ok: true, json: async () => url === '/kv' ? { email: credentials.email } : [{ key: 'qq_mail_authorization_code', saved: true }] }), cindy: {
+  const context = { cindyMail: { version: 1, sendGraceMs: 10000, register: () => ({ present: async () => true, beforeTool: async () => null, resolveDraft: async () => null }) }, Map, setTimeout, fetch: async url => ({ ok: true, json: async () => url === '/kv' ? { email: credentials.email } : [{ key: 'qq_mail_authorization_code', saved: true }] }), cindy: {
     onHostMessage: fn => { handler = fn; }, node: { request: async () => ({ ok: false, errorCode: 'TIMEOUT', message: '请求超时，请重试' }) }, send: async r => { response = r; },
   } };
   vm.runInNewContext(await fs.readFile(path.join(__dirname, '../main.js'), 'utf8'), context);

@@ -424,6 +424,30 @@ test('reader resolves account-bound links, conversations and a three-state read 
   assert.equal(lonely.result.conversation, undefined);
 });
 
+test('a paged conversation is reported unavailable, never presented as the whole thread', async t => {
+  const f = fixture(t);
+  const only = f.box.add({ id: 'onlyAAMk1=', isDraft: false, subject: 'Plan', from: person('a@example.test'), receivedDateTime: '2026-11-01T00:00:00Z', body: { contentType: 'html', content: '<p>x</p>' } });
+  const link = 'https://outlook.office365.com/owa/?ItemID=' + encodeURIComponent(only.id) + '&exvsurl=1&cindy_account=g1';
+  f.faults.push(req => (req.url.includes('$filter=') || req.url.includes('%24filter=') ? { ok: true, status: 200,
+    body: JSON.stringify({ value: [{ id: only.id, isDraft: false, subject: 'Plan', webLink: only.webLink, receivedDateTime: only.receivedDateTime }],
+      '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=next' }) } : undefined));
+  const read = await f.tool({ url: link }, { tool: 'outlook_read_message' });
+  assert.equal(read.ok, true, read.message);
+  assert.equal(read.result.conversationUnavailable, true);
+  assert.equal(read.result.conversation, undefined);
+  assert.match(read.result.bodyHtml, /<p>x<\/p>/);
+});
+
+test('a draft longer than the draft card can hold is refused before Graph is written', async t => {
+  const f = fixture(t);
+  const result = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Long', body_text: 'x'.repeat(16001) });
+  assert.equal(result.ok, false);
+  assert.equal(f.writes().length, 0);
+  const fits = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Fits', body_text: 'x'.repeat(16000) });
+  assert.equal(fits.ok, true, fits.message);
+  assert.equal(fits.result.draftCard, true);
+});
+
 test('reader never guesses between accounts or follows foreign links', async t => {
   const two = copy(accountsFixture);
   two[0].accounts.push({ id: 'g2', label: 'Second', status: 'connected', isDefault: false });

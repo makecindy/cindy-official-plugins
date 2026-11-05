@@ -68,6 +68,7 @@ class FakeImapClient {
   async append(path, raw, flags) {
     this.server.calls.push('append');
     if (this.server.failures.append) throw this.server.failures.append;
+    if (this.server.failures.mutateAppend) raw = this.server.failures.mutateAppend(raw);
     const uid = this.server.add(path, raw, flags);
     return this.server.failures.noUidPlus ? {} : { destination: path, uid, uidValidity: this.server.folders[path].uidValidity };
   }

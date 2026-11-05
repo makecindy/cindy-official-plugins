@@ -82,6 +82,7 @@ function createMainHarness(nodeResponder, initial = {}) {
     return response(null, false);
   }
   new Script(mainSource, { filename: 'yahoo-mail/main.js' }).runInContext(createContext({
+    cindyMail: { version: 1, sendGraceMs: 10000, register: () => ({ present: async () => true, beforeTool: async () => null, resolveDraft: async () => null }) },
     BroadcastChannel: FakeBroadcastChannel,
     Map,
     Number,

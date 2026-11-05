@@ -33,7 +33,7 @@ const SOURCE = [
   '',
 ].join('\r\n');
 
-function harness(plugin, { email, kv: extraKv = {}, secretKeys, locale = 'en', readOnly = false } = {}) {
+function harness(plugin, { email, kv: extraKv = {}, secretKeys, locale = 'en', readOnly = false, noSdk = false } = {}) {
   const require = createRequire(new URL('../' + plugin + '/src/worker.cjs', import.meta.url));
   const worker = require('./worker.cjs');
   const box = new FakeMailbox();
@@ -106,7 +106,7 @@ function harness(plugin, { email, kv: extraKv = {}, secretKeys, locale = 'en', r
       },
     },
   });
-  runInContext(sdk, context);
+  if (!noSdk) runInContext(sdk, context);
   runInContext(read(plugin + '/main.js'), context, { filename: plugin + '/main.js' });
   const tool = plugin === 'qq-mail' ? 'qq_mail' : plugin === '163-mail' ? 'mail_163' : plugin.replace('-', '_');
   const settle = async (rounds = 60) => { for (let i = 0; i < rounds; i++) await new Promise((resolve) => setImmediate(resolve)); };
@@ -366,6 +366,62 @@ export function runImapComposeSuite(plugin, options) {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test(plugin + ': a save whose read-back differs keeps the previous complete draft', async () => {
+    const t = h();
+    await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Hello', body_text: 'Body' });
+    t.box.failures.mutateAppend = (raw) => Buffer.from(raw.toString().replace('Edited', 'Garbled'));
+    await t.card('change', { ...t.values(), body: 'Edited' });
+    await t.advance(2000);
+    delete t.box.failures.mutateAppend;
+    assert.equal(t.drafts().length, 1, 'the mismatched new copy is dropped');
+    assert.match(t.draftSource(), /Body/);
+    assert.doesNotMatch(t.draftSource(), /Garbled|Edited/);
+    assert.equal(t.box.sent.length, 0);
+  });
+
+  test(plugin + ': update_draft with only body_html also refreshes the plain-text part, and signed drafts are refused', async () => {
+    const t = h();
+    const created = await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Hello', body_text: 'Old text' });
+    await t.card('change', t.values()); // keep the card record
+    const updated = await t.call({ action: 'update_draft', draft_id: created.result.draft_id, body_html: '<p>New <b>text</b> &amp; more</p><style>p{color:red}</style>' });
+    assert.equal(updated.ok, true, updated.message);
+    assert.equal(updated.result.readBack.editor.body, 'New text & more');
+    assert.doesNotMatch(t.draftSource(), /Old text/);
+    t.box.add('Drafts', ['From: ' + self, 'To: dave@example.test', 'Subject: Signed', 'Message-ID: <signed-1@example.test>', 'MIME-Version: 1.0',
+      'Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="b1"', '',
+      '--b1', 'Content-Type: text/plain', '', 'signed body', '--b1', 'Content-Type: application/pgp-signature', '', 'SIG', '--b1--', ''].join('\r\n'), ['\\Draft']);
+    const before = t.drafts().map(([uid]) => uid);
+    const refused = await t.call({ action: 'update_draft', draft_id: '<signed-1@example.test>', subject: 'Changed' });
+    assert.equal(refused.ok, false);
+    assert.match(refused.message, /^\[not_executed\]/);
+    assert.deepEqual(t.drafts().map(([uid]) => uid), before);
+  });
+
+  test(plugin + ': without the mail SDK nothing is created; huge or script-bearing quotes still make a usable draft', async () => {
+    const old = h({ noSdk: true });
+    const refused = await old.call({ action: 'draft', to: 'dave@example.test', subject: 'x', body_text: 'y' });
+    assert.equal(refused.ok, false);
+    assert.match(refused.message, /^\[not_executed\]/);
+    assert.equal(old.drafts().length, 0);
+    assert.equal(old.box.calls.includes('append'), false);
+
+    const t = h();
+    const huge = 'line of the original message\n'.repeat(1500);
+    t.box.add('INBOX', ['From: Alice <alice@example.test>', 'To: ' + self, 'Subject: Big', 'Message-ID: <big-1@example.test>', 'Date: Mon, 02 Nov 2026 10:00:00 +0000',
+      'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '',
+      '<p>Hello</p><scr<script>ipt>alert(1)</script ><SCRIPT type="x">alert(2)</SCRIPT foo><div>' + huge.replace(/\n/g, '<br>') + '</div>', ''].join('\r\n'));
+    const reply = await t.call({ action: 'reply', folder: 'INBOX', message_uid: 2, body_text: 'ok' });
+    assert.equal(reply.ok, true, reply.message);
+    assert.equal(reply.result.draftCard, true, 'the card can show it');
+    assert.ok(t.values().quote.length <= 16000);
+    assert.doesNotMatch(t.draftSource(), /<script/i);
+    const small = h();
+    small.box.add('INBOX', ['From: Alice <alice@example.test>', 'To: ' + self, 'Subject: Small', 'Message-ID: <small-1@example.test>', 'Date: Mon, 02 Nov 2026 10:00:00 +0000',
+      'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '', '<p>Hi</p><scr<script>ipt>alert(1)</script ><p>there</p>', ''].join('\r\n'));
+    await small.call({ action: 'reply', folder: 'INBOX', message_uid: 2, body_text: 'ok' });
+    assert.doesNotMatch(small.draftSource(), /<script|alert\(1\)<\/script/i);
   });
 
   test(plugin + ': card records keep only routing and receipts in plugin KV', async () => {

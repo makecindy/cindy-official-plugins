@@ -464,11 +464,6 @@ function createMailCompose(env) {
       saved = null;
     }
     if (!saved) return unverified;
-    // Older revisions are removed only after the new one is readable. A failed
-    // removal leaves a duplicate; later lookups always pick the newest UID.
-    const older = (await findCopies(client, draftId).catch(() => [])).filter((uid) => uid !== saved.uid);
-    if (current && !older.includes(current.uid)) older.push(current.uid);
-    if (older.length) await client.messageDelete(older.join(','), { uid: true }).catch(() => undefined);
     const readBack = snapshot(saved.parsed, saved.raw, draftId, saved.locator);
     const actual = { to: readBack.headers.to, cc: readBack.headers.cc, bcc: readBack.headers.bcc };
     const sameText = (a, b) => normalizeNewlines(a).replace(/\s+$/, '') === normalizeNewlines(b).replace(/\s+$/, '');
@@ -477,8 +472,16 @@ function createMailCompose(env) {
       || !sameText(readBack.editor.body + readBack.editor.quote, content.text)
       || normalizeNewlines(typeof saved.parsed.html === 'string' ? saved.parsed.html : '').trim() !== normalizeNewlines(content.html || '').trim()
       || facts(parsedFiles(saved.parsed)) !== facts(content.files)) {
+      // The previous revision stays: it is the last complete copy. Drop only the
+      // mismatched new one (best effort) so a later lookup cannot pick it.
+      if (current) await client.messageDelete(String(saved.uid), { uid: true }).catch(() => undefined);
       return { ok: false, execution: 'executed', message: text(locale, 'savedMismatch') };
     }
+    // Older revisions are removed only after the new one is readable and verified.
+    // A failed removal leaves a duplicate; later lookups always pick the newest UID.
+    const older = (await findCopies(client, draftId).catch(() => [])).filter((uid) => uid !== saved.uid);
+    if (current && !older.includes(current.uid)) older.push(current.uid);
+    if (older.length) await client.messageDelete(older.join(','), { uid: true }).catch(() => undefined);
     return { ok: true, execution: 'executed', data: { draftId, readBack } };
   }
 
@@ -682,13 +685,18 @@ function createMailCompose(env) {
         if (!current) throw new ComposeError('draftNotFound');
         const readBack = snapshot(current.parsed, current.raw, action.draft_id, current.locator);
         Object.assign(current, { readBack, headers: readBack.headers, editor: readBack.editor });
+        // Signed/encrypted drafts cannot be rebuilt without breaking them.
+        if (!supportedType(current.parsed)) throw new ComposeError('notEditable');
         if (!readBack.editor.editable && action.body_html === undefined && action.body_text !== undefined) throw new ComposeError('notEditable');
+        const htmlOnly = action.body_html !== undefined && action.body_text === undefined;
         const fields = {
           to: action.to !== undefined ? joinRecipients(action.to) : readBack.headers.to,
           cc: action.cc !== undefined ? joinRecipients(action.cc) : readBack.headers.cc,
           bcc: action.bcc !== undefined ? joinRecipients(action.bcc) : readBack.headers.bcc,
           subject: action.subject !== undefined ? action.subject : readBack.headers.subject,
-          body: action.body_text !== undefined ? normalizeNewlines(action.body_text) : readBack.editor.body,
+          // An HTML-only update must not leave the old plain-text alternative behind.
+          body: action.body_text !== undefined ? normalizeNewlines(action.body_text)
+            : htmlOnly ? htmlToText(action.body_html) : readBack.editor.body,
           quote: readBack.editor.quote,
           bodyHtml: action.body_html !== undefined ? action.body_html
             : action.body_text !== undefined ? textToHtml(action.body_text) : readBack.editor.bodyHtml || sdkTextHtml(readBack.editor.body),
@@ -813,6 +821,14 @@ function createMailCompose(env) {
         if (mode === 'reply_all') cc = addressList(unique([...headerAddresses(source, 'to'), ...headerAddresses(source, 'cc')]));
       }
     }
+    // The draft card holds at most 16,000 text / 64,000 HTML characters per field. A
+    // longer quoted message is shortened to a plain-text quote rather than creating
+    // a draft that no card can show or send.
+    if (quoteText.length > MAX_FIELD || quoteHtml.length > MAX_HTML_FIELD) {
+      quoteText = quoteText.slice(0, 12000).replace(/\s+$/, '') + '\n…';
+      quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+      if (mode !== 'forward') files = [];
+    }
     const html = (action.body_html !== undefined ? action.body_html : textToHtml(body)) + quoteHtml;
     return {
       to: pick('to', to), cc: pick('cc', cc), bcc: pick('bcc', ''), subject,
@@ -826,12 +842,68 @@ function createMailCompose(env) {
 function decodeSafe(value) {
   try { return decodeURIComponent(value); } catch (_error) { return value; }
 }
+// Drop every script element, scanning tags instead of pattern-matching them, so
+// split or oddly spaced end tags cannot leave a script start behind.
+function stripScripts(html) {
+  const lower = html.toLowerCase();
+  const nameEnd = (at) => !/[a-z0-9:_-]/.test(lower[at] || '');
+  let out = '';
+  let index = 0;
+  while (index < html.length) {
+    const lt = html.indexOf('<', index);
+    if (lt < 0) { out += html.slice(index); break; }
+    out += html.slice(index, lt);
+    const open = lower.startsWith('<script', lt) && nameEnd(lt + 7);
+    const close = lower.startsWith('</script', lt) && nameEnd(lt + 8);
+    if (!open && !close) { out += '<'; index = lt + 1; continue; }
+    let end = lt;
+    if (open) {
+      end = lower.indexOf('</script', lt + 7);
+      if (end < 0) break; // unterminated script: drop the remainder
+    }
+    const gt = html.indexOf('>', end);
+    if (gt < 0) break;
+    index = gt + 1;
+  }
+  return out;
+}
 // Quote only the body of a full HTML document; keep its styles, drop scripts.
 function htmlFragment(html) {
   const styles = (html.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) || []).join('');
   const body = /<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html);
   const inner = body ? styles + body[1] : html.replace(/<!doctype[^>]*>|<\/?(?:html|head|body)\b[^>]*>|<meta\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>/gi, '');
-  return inner.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  return stripScripts(inner);
+}
+// Plain-text alternative for an HTML fragment (fallback only; never sent as HTML).
+function htmlToText(html) {
+  const source = stripScripts(html);
+  const lower = source.toLowerCase();
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  let out = '';
+  let index = 0;
+  while (index < source.length) {
+    const lt = source.indexOf('<', index);
+    out += source.slice(index, lt < 0 ? source.length : lt);
+    if (lt < 0) break;
+    const gt = source.indexOf('>', lt);
+    if (gt < 0) break;
+    const tag = /^<\/?([a-z][a-z0-9]*)/.exec(lower.slice(lt, gt + 1));
+    const name = tag ? tag[1] : '';
+    if (name === 'style' && lower[lt + 1] !== '/') {
+      const close = lower.indexOf('</style', gt);
+      index = close < 0 ? source.length : (source.indexOf('>', close) < 0 ? source.length : source.indexOf('>', close) + 1);
+      continue;
+    }
+    if (name === 'br' || lower[lt + 1] === '/' && ['p', 'div', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote'].includes(name)) out += '\n';
+    index = gt + 1;
+  }
+  return out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, entity) => {
+    if (entity[0] === '#') {
+      const code = entity[1] === 'x' || entity[1] === 'X' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      return Number.isInteger(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : all;
+    }
+    return Object.hasOwn(entities, entity.toLowerCase()) ? entities[entity.toLowerCase()] : all;
+  }).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 const MIME_TYPES = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',

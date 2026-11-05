@@ -642,6 +642,8 @@ function createImapMailCompose(config) {
     }
     // Mailbox writes follow the task's permission, like every other mail plugin.
     if (CREATE[action] && readOnly) return toTool(await failure('readOnly'));
+    // Without the common mail SDK a draft would have no card to edit or send from.
+    if (CREATE[action] && !compose) return toTool(await failure('updateCindy'));
     if (CREATE[action]) {
       fields.mode = CREATE[action];
       return toTool(await presented(message, args, await worker('compose_create', { fields: fields }, true)));

@@ -114,8 +114,8 @@
           },
           "body_text": {
             "type": "string",
-            "description": "draft/update_draft：纯文本正文；reply/reply_all/forward：引用上方的回复正文。允许空字符串，不能与 body_html 同时传。",
-            "maxLength": 200000
+            "description": "draft/update_draft：纯文本正文；reply/reply_all/forward：引用上方的回复正文。最多 16000 字符（草稿卡上限），允许空字符串，不能与 body_html 同时传。",
+            "maxLength": 16000
           },
           "to": {
             "oneOf": [

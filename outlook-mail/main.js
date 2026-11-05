@@ -442,7 +442,8 @@ var OutlookMail = (() => {
     }
     if (['send','draft'].includes(a.action)) {
       text(a.subject,'subject',998,true);
-      if (!(a.action === 'draft' && a.body_html !== undefined)) text(a.body_text,'body_text',200000,true);
+      // A draft must fit the draft card (16,000 characters), or it could never be shown or sent.
+      if (!(a.action === 'draft' && a.body_html !== undefined)) text(a.body_text,'body_text',a.action === 'draft' ? 16000 : 200000,true);
       const total = ['to','cc','bcc'].map(k => recipients(a[k],k).length).reduce((x,y) => x+y,0);
       if (a.action === 'send' && total === 0) invalid('noRecipient');
       if (total > 100) invalid('tooManyRecipients');
@@ -758,7 +759,8 @@ var OutlookMail = (() => {
   async function loadAttachments(ctx, messageId, transport, callId, { bytes: wantBytes = [] } = {}) {
     const base = '/me/messages/' + encodeURIComponent(messageId) + '/attachments';
     const { data } = await graph(transport, ctx, { path: base + '?$select=id,name,contentType,size,isInline' }, { callId });
-    if (!Array.isArray(object(data).value)) throw new MailError('INVALID_RESPONSE', 'incompleteList');
+    // A further page would silently drop attachments from edits and sends.
+    if (!Array.isArray(object(data).value) || data['@odata.nextLink']) throw new MailError('INVALID_RESPONSE', 'incompleteList');
     const started = Date.now(); let total = 0;
     const files = {}, list = [];
     for (const item of data.value) {
@@ -1106,7 +1108,9 @@ var OutlookMail = (() => {
       try {
         const q = new URLSearchParams({ $filter: "conversationId eq '" + message.conversationId.replace(/'/g, "''") + "'", $select: 'id,subject,from,receivedDateTime,sentDateTime,bodyPreview,isDraft,webLink', $top: '1000' });
         const list = object((await graph(transport, ctx, { path: '/me/messages?' + q }, { callId })).data);
-        if (!Array.isArray(list.value)) throw new Error('incomplete');
+        // Following further pages is not supported: report the conversation as unavailable
+        // instead of presenting the first page as the whole thread.
+        if (!Array.isArray(list.value) || list['@odata.nextLink']) throw new Error('incomplete');
         const members = list.value.filter(m => m && typeof m.id === 'string' && (m.isDraft !== true || m.id === id))
           .map(m => ({ m, at: Date.parse(m.receivedDateTime || m.sentDateTime || '') || 0 })).sort((x, y) => x.at - y.at).map(x => x.m);
         const ids = new Set(members.map(m => m.id));

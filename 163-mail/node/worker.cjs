@@ -66527,15 +66527,16 @@ var require_mail_compose = __commonJS({
           saved = null;
         }
         if (!saved) return unverified;
-        const older = (await findCopies(client, draftId).catch(() => [])).filter((uid) => uid !== saved.uid);
-        if (current && !older.includes(current.uid)) older.push(current.uid);
-        if (older.length) await client.messageDelete(older.join(","), { uid: true }).catch(() => void 0);
         const readBack = snapshot(saved.parsed, saved.raw, draftId, saved.locator);
         const actual = { to: readBack.headers.to, cc: readBack.headers.cc, bcc: readBack.headers.bcc };
         const sameText = (a, b) => normalizeNewlines(a).replace(/\s+$/, "") === normalizeNewlines(b).replace(/\s+$/, "");
         if (["to", "cc", "bcc"].some((name) => addressKey(actual[name]) !== addressKey(content[name] || "")) || readBack.headers.subject !== content.subject.trim() || !sameText(readBack.editor.body + readBack.editor.quote, content.text) || normalizeNewlines(typeof saved.parsed.html === "string" ? saved.parsed.html : "").trim() !== normalizeNewlines(content.html || "").trim() || facts(parsedFiles(saved.parsed)) !== facts(content.files)) {
+          if (current) await client.messageDelete(String(saved.uid), { uid: true }).catch(() => void 0);
           return { ok: false, execution: "executed", message: text(locale, "savedMismatch") };
         }
+        const older = (await findCopies(client, draftId).catch(() => [])).filter((uid) => uid !== saved.uid);
+        if (current && !older.includes(current.uid)) older.push(current.uid);
+        if (older.length) await client.messageDelete(older.join(","), { uid: true }).catch(() => void 0);
         return { ok: true, execution: "executed", data: { draftId, readBack } };
       }
       function validateFields(fields) {
@@ -66733,13 +66734,16 @@ var require_mail_compose = __commonJS({
             if (!current) throw new ComposeError("draftNotFound");
             const readBack = snapshot(current.parsed, current.raw, action.draft_id, current.locator);
             Object.assign(current, { readBack, headers: readBack.headers, editor: readBack.editor });
+            if (!supportedType(current.parsed)) throw new ComposeError("notEditable");
             if (!readBack.editor.editable && action.body_html === void 0 && action.body_text !== void 0) throw new ComposeError("notEditable");
+            const htmlOnly = action.body_html !== void 0 && action.body_text === void 0;
             const fields = {
               to: action.to !== void 0 ? joinRecipients(action.to) : readBack.headers.to,
               cc: action.cc !== void 0 ? joinRecipients(action.cc) : readBack.headers.cc,
               bcc: action.bcc !== void 0 ? joinRecipients(action.bcc) : readBack.headers.bcc,
               subject: action.subject !== void 0 ? action.subject : readBack.headers.subject,
-              body: action.body_text !== void 0 ? normalizeNewlines(action.body_text) : readBack.editor.body,
+              // An HTML-only update must not leave the old plain-text alternative behind.
+              body: action.body_text !== void 0 ? normalizeNewlines(action.body_text) : htmlOnly ? htmlToText(action.body_html) : readBack.editor.body,
               quote: readBack.editor.quote,
               bodyHtml: action.body_html !== void 0 ? action.body_html : action.body_text !== void 0 ? textToHtml(action.body_text) : readBack.editor.bodyHtml || sdkTextHtml(readBack.editor.body),
               quoteHtml: readBack.editor.quoteHtml,
@@ -66864,6 +66868,11 @@ var require_mail_compose = __commonJS({
             if (mode === "reply_all") cc = addressList(unique([...headerAddresses(source, "to"), ...headerAddresses(source, "cc")]));
           }
         }
+        if (quoteText.length > MAX_FIELD || quoteHtml.length > MAX_HTML_FIELD) {
+          quoteText = quoteText.slice(0, 12e3).replace(/\s+$/, "") + "\n\u2026";
+          quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+          if (mode !== "forward") files = [];
+        }
         const html = (action.body_html !== void 0 ? action.body_html : textToHtml(body)) + quoteHtml;
         return {
           to: pick("to", to),
@@ -66886,11 +66895,71 @@ var require_mail_compose = __commonJS({
         return value;
       }
     }
+    function stripScripts(html) {
+      const lower = html.toLowerCase();
+      const nameEnd = (at) => !/[a-z0-9:_-]/.test(lower[at] || "");
+      let out = "";
+      let index = 0;
+      while (index < html.length) {
+        const lt = html.indexOf("<", index);
+        if (lt < 0) {
+          out += html.slice(index);
+          break;
+        }
+        out += html.slice(index, lt);
+        const open = lower.startsWith("<script", lt) && nameEnd(lt + 7);
+        const close = lower.startsWith("</script", lt) && nameEnd(lt + 8);
+        if (!open && !close) {
+          out += "<";
+          index = lt + 1;
+          continue;
+        }
+        let end = lt;
+        if (open) {
+          end = lower.indexOf("</script", lt + 7);
+          if (end < 0) break;
+        }
+        const gt = html.indexOf(">", end);
+        if (gt < 0) break;
+        index = gt + 1;
+      }
+      return out;
+    }
     function htmlFragment(html) {
       const styles = (html.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) || []).join("");
       const body = /<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html);
       const inner = body ? styles + body[1] : html.replace(/<!doctype[^>]*>|<\/?(?:html|head|body)\b[^>]*>|<meta\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>/gi, "");
-      return inner.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+      return stripScripts(inner);
+    }
+    function htmlToText(html) {
+      const source = stripScripts(html);
+      const lower = source.toLowerCase();
+      const entities = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+      let out = "";
+      let index = 0;
+      while (index < source.length) {
+        const lt = source.indexOf("<", index);
+        out += source.slice(index, lt < 0 ? source.length : lt);
+        if (lt < 0) break;
+        const gt = source.indexOf(">", lt);
+        if (gt < 0) break;
+        const tag = /^<\/?([a-z][a-z0-9]*)/.exec(lower.slice(lt, gt + 1));
+        const name = tag ? tag[1] : "";
+        if (name === "style" && lower[lt + 1] !== "/") {
+          const close = lower.indexOf("</style", gt);
+          index = close < 0 ? source.length : source.indexOf(">", close) < 0 ? source.length : source.indexOf(">", close) + 1;
+          continue;
+        }
+        if (name === "br" || lower[lt + 1] === "/" && ["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "blockquote"].includes(name)) out += "\n";
+        index = gt + 1;
+      }
+      return out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, entity) => {
+        if (entity[0] === "#") {
+          const code = entity[1] === "x" || entity[1] === "X" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+          return Number.isInteger(code) && code > 0 && code < 1114112 ? String.fromCodePoint(code) : all;
+        }
+        return Object.hasOwn(entities, entity.toLowerCase()) ? entities[entity.toLowerCase()] : all;
+      }).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     }
     var MIME_TYPES = {
       png: "image/png",
