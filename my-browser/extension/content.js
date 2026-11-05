@@ -52,12 +52,13 @@
   // X plays many videos under one page address, so a video is identified by its
   // media id (shared by reposts) or its post, never by the feed's URL.
   const xSite=/(^|\.)(x|twitter)\.com$/.test(location.hostname);
-  // Adapted players. anchor: the site's captions control, Cindy's button goes beside it.
+  // Adapted players. anchor: the site's captions control, Cindy's button goes beside it; barEnd: when that
+  // control is missing, the end of the control bar instead (see barEnd).
   // hide: the site's own caption layer. floating: no stable control bar, so the entry sits on the video.
   // multi: several players per page, each with its own entry. external: captions come from site-captions.js.
   const site=[
     {id:'youtube',host:/(^|\.)(youtube|youtube-nocookie)\.com$/,player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'},
-    {id:'x',host:/(^|\.)(x|twitter)\.com$/,player:'[data-testid="videoPlayer"]',anchor:'[data-testid="captions"]',multi:true},
+    {id:'x',host:/(^|\.)(x|twitter)\.com$/,player:'[data-testid="videoPlayer"]',anchor:'[data-testid="captions"]',barEnd:true,multi:true},
     {id:'vimeo',host:/(^|\.)vimeo\.com$/,player:'.player,#player',anchor:'button[data-cc-button]',hide:'.vp-captions'},
     {id:'ted',host:/(^|\.)ted\.com$/,player:'media-controller',anchor:'button[aria-label="Subtitles"]',hide:'div:has(> span > .whitespace-pre-line)'},
     {id:'bilibili',host:/(^|\.)bilibili\.com$/,player:'.bpx-player-container',anchor:'.bpx-player-ctrl-subtitle',hide:'.bpx-player-subtitle-wrap',external:true},
@@ -90,9 +91,19 @@
   // bar while the pointer is over the player, so a missing slot is normal there.
   function controlSlot(player){
     const bar=site.bar&&player?.querySelector(site.bar);if(bar)return {parent:bar,before:bar.firstChild};
-    let node=site.anchor&&player?.querySelector(site.anchor);
+    let node=site.anchor&&player?.querySelector(site.anchor)||(site.barEnd?barEnd(player):null);
     while(node&&node.parentElement&&node.parentElement!==player&&node.parentElement.children.length===1)node=node.parentElement;
     return node?.parentElement?{parent:node.parentElement,before:node}:null;
+  }
+  // X leaves its captions button out of some players whose video still carries a caption track.
+  // The entry then sits before the bar's last button (fullscreen), in the row showing "0:08 / 0:40":
+  // no labels, so any interface language works, and still only where there are captions to read.
+  function barEnd(player){
+    const media=player?.querySelector('video'),buttons=player?.querySelectorAll('button');
+    if(!buttons?.length||![...(media?.textTracks||[])].some(x=>(x.kind==='subtitles'||x.kind==='captions')&&x.label!=='clone'))return null;
+    let node=buttons[buttons.length-1];
+    while(node.parentElement&&node.parentElement!==player&&node.parentElement.children.length===1)node=node.parentElement;
+    return node.parentElement!==player&&/\d:\d\d\s*\/\s*\d+:\d\d/.test(node.parentElement?.textContent||'')?node:null;
   }
   // Walks shadow roots too: BBC, Reddit and Archive.org keep their <video> inside web components.
   function allMedia(){

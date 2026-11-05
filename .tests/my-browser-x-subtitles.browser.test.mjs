@@ -250,3 +250,47 @@ for(const order of ['player first','address first','player replaced during setup
     }finally{await browser.close();}
   });
 }
+
+// Some real X players (seen on a portrait video) carry an auto-generated caption track but no captions
+// button. The bar's other buttons sit apart; fullscreen shares a row with "elapsed / duration".
+test('X: a captioned player without a captions button still gets an entry',{skip:!process.env.PLAYWRIGHT_CORE,timeout:30000},async()=>{
+  const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+  const bar='<div class="bar"><div><button aria-label="Pause">II</button></div><div><div><button aria-label="Hide">h</button></div><div><button aria-label="Settings">s</button></div><div><button aria-label="Picture in picture">p</button></div></div><div class="row"><div><span>0:08 / 0:40</span></div><div><button aria-label="Fullscreen">F</button></div></div></div>';
+  const portrait=(id,controls,tracks)=>`<article data-testid="tweet"><a href="/u/status/9${id}"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video poster="${poster(id)}"${tracks?' data-tracks':''}></video></div>${controls}</div></article>`;
+  try{
+    const page=await browser.newPage({viewport:{width:1000,height:1400}});page.setDefaultTimeout(6000);
+    await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>.p{position:relative;width:315px;height:420px;background:#333;margin:10px}.c,video{width:100%;height:100%}.bar{position:absolute;bottom:0;left:0;right:0;display:flex;height:40px}.row{display:flex}</style><main>${portrait(111,bar,true)}${portrait(222,bar,false)}${portrait(333,'<div><button aria-label="Unhide">u</button></div>',true)}</main>`}));
+    await page.route('https://pbs.twimg.com/**',route=>route.abort());
+    await page.goto('https://x.com/home');
+    await page.evaluate(()=>{
+      for(const video of document.querySelectorAll('video[data-tracks]')){const real=video.addTextTrack('subtitles','en (auto-generated)','en');real.mode='hidden';real.addCue(new VTTCue(0,2,'hello there'));real.addCue(new VTTCue(2,4,'general kenobi'));real.mode='disabled';}
+      globalThis.log=[];const store={cindyReadingPreferences:{webTarget:'zh-CN',videoTarget:'zh-CN',autoVideo:true,videoMode:'both'}};
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'data:,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){
+        if(m.type!=='cindy-learning')return {ok:true,enabled:false,cues:[]};
+        const q=m.request;log.push({op:q.op,videoId:q.source?.videoId,words:q.words?.map(w=>w.text).join(' ')});
+        if(q.op==='config')return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};
+        if(q.op==='subtitles')return {ok:true,cues:[{start:q.words[0].start,end:q.words.at(-1).end,text:'t',translation:'译'}]};
+        return {ok:true};
+      }},storage:{local:{async get(){return store;},async set(v){Object.assign(store,v);}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+      await page.addScriptTag({path:path.join(extension,file)});
+    const players=page.locator('[data-testid="videoPlayer"]');
+    const entry=i=>players.nth(i).locator('[data-cindy-player-entry]');
+    await entry(0).waitFor({state:'attached'});
+    assert.equal(await players.nth(0).evaluate(p=>{const host=p.querySelector('[data-cindy-player-entry]');return host.parentElement.classList.contains('row')&&host.nextElementSibling?.querySelector('button')?.getAttribute('aria-label');}),'Fullscreen','beside fullscreen, in the row with the time');
+    await page.waitForTimeout(1500);
+    assert.equal(await entry(1).count(),0,'no caption track: no entry, as before');
+    assert.equal(await entry(2).count(),0,'collapsed controls are not a control bar');
+    assert.deepEqual(await page.evaluate(()=>log.filter(x=>x.op==='subtitles')),[],'a feed must not start translation unasked');
+
+    await entry(0).click();
+    await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));
+    const sent=await page.evaluate(()=>log.find(x=>x.op==='subtitles'));
+    assert.equal(sent.videoId,'x:111');
+    assert.match(sent.words,/hello there general kenobi/);
+    assert.equal(await players.nth(0).locator('[data-cindy-captions]').count(),1);
+    assert.equal(await entry(0).count(),0,'the session control replaces the entry');
+  }finally{await browser.close();}
+});
