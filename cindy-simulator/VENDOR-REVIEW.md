@@ -14,6 +14,7 @@ download, dynamic-code mechanism, credential handling or permission changed.
 The existing host opt-in is already declared on the controller HTML. Reproduction
 is recorded in `vendor-web.patch`; hashes are in `vendor-inventory.json`.
 Runtime/acceptance evidence and limits: `../docs/simulator-gesture-parity.md`.
+Review follow-up: `vendor-web.patch` is regenerated as one diff per file against the pinned archive and replays cleanly with `patch -p1` (every resulting file byte-identical to `vendor/`). 3D wheel pan now measures travel on the mapper's unclamped coordinates, so a pointer parked at a screen edge still reverses immediately.
 
 ## Interactive animation wait 0.3.9 (2026-10-29)
 

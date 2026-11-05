@@ -59,10 +59,15 @@
             finger.x = Math.max(0, Math.min(width, finger.x));
             finger.y = Math.max(0, Math.min(height, finger.y));
           }
+          // Measure the delta on unclamped coordinates: the mapped point is
+          // clamped to the screen, which would zero it next to an edge.
+          const raw = p => ({ x: p.rawX ?? p.x, y: p.rawY ?? p.y });
+          const from = raw(centre);
+          const to = raw(this._screenPoint(e.clientX-e.deltaX*factor, e.clientY-e.deltaY*factor));
           const shiftX = Math.max(-Math.min(state.f1.x, state.f2.x),
-            Math.min(width - Math.max(state.f1.x, state.f2.x), (this._screenPoint(e.clientX-e.deltaX*factor,e.clientY-e.deltaY*factor).x-centre.x)));
+            Math.min(width - Math.max(state.f1.x, state.f2.x), to.x - from.x));
           const shiftY = Math.max(-Math.min(state.f1.y, state.f2.y),
-            Math.min(height - Math.max(state.f1.y, state.f2.y), (this._screenPoint(e.clientX-e.deltaX*factor,e.clientY-e.deltaY*factor).y-centre.y)));
+            Math.min(height - Math.max(state.f1.y, state.f2.y), to.y - from.y));
           state.f1.x += shiftX; state.f1.y += shiftY;
           state.f2.x += shiftX; state.f2.y += shiftY;
         }

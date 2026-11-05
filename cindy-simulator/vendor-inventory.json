@@ -256,8 +256,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/wheel-gesture-source.js",
-    "bytes": 3715,
-    "sha256": "6ca7c1a20dba35255a621b09ad938152a1c55a21deb1ca1edfbfd319da4eec09"
+    "bytes": 3929,
+    "sha256": "6ef8c26e2a9b6b06041a774192c237a712b8e8269e05892cfa463a38e2de28f0"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js",
@@ -426,8 +426,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-3d.js",
-    "bytes": 53706,
-    "sha256": "89f99e8b4c6942a89e3368722424df014ed46126a1460da59b94045dee09765b"
+    "bytes": 53886,
+    "sha256": "31c63917bf391f36bb1464ec50ccaa10b59995b53fff9cff2596081e537ebf13"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/sim-ax-inspector.js",
