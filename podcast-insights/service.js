@@ -1,6 +1,8 @@
 (function(root){
   'use strict';
   const C=typeof module!=='undefined'?require('./core.js'):root.PodcastCore;
+  const Minutes=typeof module!=='undefined'?require('./minutes.js'):root.PodcastMinutes;
+  const Feishu=typeof module!=='undefined'?require('./feishu.js'):root.FeishuMinutes;
   const schema=[
     'CREATE TABLE IF NOT EXISTS shows(id TEXT PRIMARY KEY,feed_url TEXT UNIQUE,title TEXT,author TEXT,language TEXT,link TEXT,source_kind TEXT,added_at TEXT,updated_at TEXT)',
     'CREATE TABLE IF NOT EXISTS episodes(id TEXT PRIMARY KEY,show_id TEXT,guid TEXT,title TEXT,published_at TEXT,duration_s REAL,audio_bytes INTEGER,audio_url TEXT,page_url TEXT,transcript_state TEXT,audio_media_hash TEXT,remote_transcripts TEXT,UNIQUE(show_id,guid))',
@@ -15,7 +17,7 @@
   ];
   const now=()=>new Date().toISOString(), id=()=>crypto.randomUUID();
   class Service{
-    constructor(host){this.host=host;this.ready=null;}
+    constructor(host){this.host=host;this.ready=null;this.feishu=new Feishu(this);this.minutes=new Minutes(this);}
     async io(a){const r=await this.host.library(a);if(!r?.ok || r.state==='unavailable') C.fail(r?.errorCode || 'LIBRARY_UNAVAILABLE');return r;}
     async sql(sql,params=[]){return this.io({op:'db.exec',dbPath:'podcasts.sqlite',sql,params});}
     async rows(sql,params=[]){return (await this.sql(sql,params)).rows || [];}
@@ -59,6 +61,7 @@
     async network(url,callId,body,cloud=false,timeoutMs=60000){
       const hostname=new URL(C.url(url)).hostname.replace(/\.$/,'');
       if(hostname==='api.assemblyai.com'&&!cloud)C.fail('SOURCE_PROVIDER_FORBIDDEN');
+      if(hostname==='open.feishu.cn')C.fail('SOURCE_PROVIDER_FORBIDDEN');
       if(cloud&&hostname!=='api.assemblyai.com')C.fail('INVALID_INPUT');
       const r=await this.host.fetch({url:C.url(url),...(callId?{callId}:{}),method:body?'POST':'GET',headers:{Accept:cloud?'application/json':'application/rss+xml,application/atom+xml,application/xml,text/html,text/vtt,application/x-subrip,application/json,text/plain,*/*;q=0.1',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),as:'text',timeoutMs});
       if(!r?.ok || r.status<200 || r.status>=300 || r.truncated){const code=r?.status===401?(new URL(url).hostname==='api.assemblyai.com'?'AAI_KEY_MISSING':'SOURCE_AUTH_REQUIRED'):r?.status===403?'NETWORK_FORBIDDEN':'NETWORK_FAILED';throw Object.assign(new Error(code),{code,httpStatus:r?.status,httpResponseCompleted:r?.ok===true});}
@@ -67,7 +70,7 @@
     async episode(eid){const e=(await this.rows('SELECT e.id,e.show_id,e.guid,e.title,e.published_at,e.duration_s,e.audio_bytes,e.audio_url,e.page_url,e.transcript_state,s.title AS show_title FROM episodes e JOIN shows s ON s.id=e.show_id WHERE e.id=?',[eid]))[0];if(!e)C.fail('EPISODE_NOT_FOUND');return e;}
     publicJob(j){
       if(!j)return j;const safe={};
-      for(const key of ['id','episode_id','provider','state','remote_id','est_usd','submitted_at','checked_at','card_id','submission_outcome','local_state_persisted','recovery_incomplete'])if(j[key]!==undefined)safe[key]=j[key];
+      for(const key of ['id','episode_id','provider','state','remote_id','est_usd','submitted_at','checked_at','card_id','submission_outcome','upload_outcome','minute_outcome','local_state_persisted','recovery_incomplete'])if(j[key]!==undefined)safe[key]=j[key];
       for(const key of ['error','errorCode'])if(j[key]!==undefined)safe[key]=String(j[key]).slice(0,128);
       return safe;
     }
@@ -115,6 +118,7 @@
       // Reject malformed selectors before any source fetch or database write.
       this.validateEpisodeSelector(a.episodes);
       let source=C.url(a.url), u=new URL(source), feed, kind='rss';
+      if(/(^|\.)youtube\.com$/.test(u.hostname)||u.hostname==='youtu.be')C.fail('YOUTUBE_IMPORT_UNSUPPORTED');
       if(u.hostname==='podcasts.apple.com'){
         const aid=u.pathname.match(/id(\d+)/)?.[1];if(!aid)C.fail('INVALID_URL');
         const j=JSON.parse(await this.network('https://itunes.apple.com/lookup?id='+aid+'&entity=podcast',callId));
@@ -235,6 +239,7 @@
       if(event?.type!=='event'||event.name!=='card-action'||!event.userActionToken||event.actionId!=='transcribe:'+jid)C.fail('USER_CLICK_REQUIRED');
       const j=(await this.rows('SELECT * FROM jobs WHERE id=?',[jid]))[0];if(!j)C.fail('JOB_NOT_FOUND');
       if(j.card_id!==event.callId)C.fail('USER_CLICK_REQUIRED');
+      if(j.provider==='feishu')return this.feishu.submit(j,event);
       if(j.state!=='prepared')return {job:j,already_submitted:true};
       if(!(await this.host.credentialsStatus()))C.fail('AAI_KEY_MISSING');
       const e=await this.episode(j.episode_id),est=e.duration_s==null?null:e.duration_s/3600*0.23;
@@ -289,6 +294,7 @@
       return (await this.rows('SELECT * FROM jobs WHERE id=?',[j.id]))[0];
     }
     async check(j,deadline=Infinity){
+      if(j.provider==='feishu')return this.feishu.check(j,deadline);
       const fetchStatus=url=>{const remaining=deadline-Date.now();if(remaining<=0)C.fail('STATUS_BUDGET_EXHAUSTED');return this.network(url,null,null,true,Math.min(60000,remaining));};
       if(j.state==='claiming')return this.releaseClaim(j);
       if(j.state==='submitting')j={...j,state:'unknown',error:'SUBMISSION_UNKNOWN'};
@@ -327,6 +333,8 @@
     }
     async runData(tool,a={},callId,options={}){
       await this.init();
+      if(tool==='podcast_minutes')return this.minutes.run(a,callId);
+      if(tool==='podcast_feishu')return this.feishu.run(a,callId);
       if(tool==='podcast_import')return this.importReceipt(await this.importSource(a,callId));
       if(tool==='podcast_import_transcript'){await this.episode(a.episode_id);return this.store(a.episode_id,C.segments(a.content,a.format),'user',a.format);}
       if(tool==='podcast_library'){
@@ -429,7 +437,7 @@
       const eids='SELECT id FROM episodes WHERE '+where;
       if((await this.rows("SELECT id FROM jobs WHERE state IN ('claiming','submitting','submitted','unknown') AND episode_id IN ("+eids+') LIMIT 1',params)).length)C.fail('ACTIVE_CLOUD_JOB');
       await this.io({op:'db.backup',dbPath:'podcasts.sqlite',label:'pre-delete'});
-      const statements=[{sql:'DELETE FROM segments WHERE transcript_id IN (SELECT id FROM transcripts WHERE episode_id IN ('+eids+'))',params},{sql:'DELETE FROM transcripts WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM notes WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM jobs WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM episodes WHERE '+where,params}];
+      const statements=[{sql:"DELETE FROM meta WHERE key IN (SELECT 'minutes:' || id FROM episodes WHERE "+where+")",params},{sql:"DELETE FROM meta WHERE key IN (SELECT 'feishu:' || id FROM jobs WHERE episode_id IN ("+eids+")) OR key IN (SELECT 'feishu-artifacts:' || id FROM jobs WHERE episode_id IN ("+eids+"))",params:[...params,...params]},{sql:'DELETE FROM segments WHERE transcript_id IN (SELECT id FROM transcripts WHERE episode_id IN ('+eids+'))',params},{sql:'DELETE FROM transcripts WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM notes WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM jobs WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM episodes WHERE '+where,params}];
       if(kind==='show')statements.push({sql:'DELETE FROM shows WHERE id=?',params});if(kind==='all')statements.push({sql:'DELETE FROM shows',params:[]},{sql:"DELETE FROM meta WHERE key LIKE 'import:%'",params:[]});
       await this.batch(statements);return {deleted:true,backup_retained:true,legacy_files_retained:true};
     }

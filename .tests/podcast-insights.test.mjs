@@ -63,7 +63,7 @@ function harness(options={}){
   const db=new DatabaseSync(':memory:'), files=new Map(Object.entries(options.files || {})), calls=[];
   let version=0;
   const host={
-    credentialsStatus:async()=>options.key!==false,
+    credentialsStatus:async provider=>provider==='feishu'?options.feishu!==false:options.key!==false,
     fetch:async a=>{calls.push(a);if(options.network)return options.network(a);return {ok:true,status:200,body:JSON.stringify({id:'remote-1',status:'queued'})};},
     library:async a=>{
       if(['open','status'].includes(a.op))return {ok:true,state:'ready',usedBytes:1200};
@@ -89,6 +89,159 @@ async function seed(h,overrides={}){
   const r=await h.service.ingest({title:'Synthetic show',episodes:[{guid:'episode-1',title:'Synthetic episode',audio_url:'https://audio.example.test/one.mp3',page_url:'https://example.test/episode',duration_s:3600,audio_bytes:10000,transcripts:[],...overrides}]},'https://example.test/feed','rss');return r.episodes[0].id;
 }
 const click=(jid,extra={})=>({type:'event',name:'card-action',actionId:'transcribe:'+jid,userActionToken:'host-issued-test-token',callId:'estimate-1',spawnCallId:'progress-1',...extra});
+// Minutes regression: production Service.run plus real SQLite/Library entry points.
+// Gap: no generated-reading coverage. Tier: existing SQLite contract. Minimal input:
+// two source paragraphs, model excerpts, then a replacement transcript version.
+function minutesModel(h,transform=x=>x){
+  let count=0;
+  h.host.text=async a=>{
+    count++;assert.equal(a.callId,'minutes-test');
+    if(a.prompt.includes('SOURCE=')){
+      const src=JSON.parse(a.prompt.split('SOURCE=')[1]);
+      const p={text:'A grounded insight',segment_idx:src[0].idx,excerpt_idx:0};
+      return {ok:true,model:'fixture/model',text:JSON.stringify(transform({chapters:[{title:'A chapter',summary:'A faithful chapter summary.',start_idx:src[0].idx,end_idx:src.at(-1).idx,points:[p],quotes:[p],decisions:[]}]}))};
+    }
+    return {ok:true,model:'fixture/model',text:JSON.stringify({overview:'A faithful overview.',key_points:[{chapter_index:0,point_index:0}]})};
+  };
+  return ()=>count;
+}
+test('minutes generation preserves all original segments and caches by active version',async()=>{
+  const h=harness();try{const eid=await seed(h);const source=[{text:'原文第一句。但是这是第二句。',start:0,end:12,speaker:'A'},{text:'The next original sentence.',start:13,end:20,speaker:'B'}];await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify(source)});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    const count=minutesModel(h);const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');
+    assert.equal(r.segment_count,2);assert.equal(r.chapter_count,1);assert.equal(r.interpretation_verified,false);
+    const d=JSON.parse(h.files.get(r.path));assert.deepEqual(d.segments.map(s=>s.text),source.map(s=>s.text));assert.equal(d.chapters[0].points[0].start_ms,0);assert.equal(d.chapters[0].points[0].end_ms,12000);assert.deepEqual(d.chapters[0].decisions,[]);
+    const runtime=runtimeHarness(h),index=await runtime.request('minutes_index',{},'saved-reading-index');assert.equal(index.ok,true);assert.equal(index.result.minutes.length,1);assert.equal(index.result.minutes[0].episode_id,eid);assert.equal(index.result.minutes[0].chapter_count,1);
+    assert.match(h.files.get(r.html_path),/data-transcript-search/);assert.match(h.files.get(r.html_path),/The next original sentence/);
+    const exported=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exported.push(a);return {ok:true};};
+    const artifact=await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');assert.equal(exported.length,2);assert.equal(exported[0].callId,'minutes-test');assert.equal(exported[0].path,artifact.task_path);assert.equal(JSON.parse(exported[1].content).segments.length,2);
+    assert.deepEqual(d.chapters.flatMap(c=>Array.from({length:c.end_idx-c.start_idx+1},(_,i)=>i+c.start_idx)),[0,1]);
+    assert.equal((await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test')).cached,true);assert.equal(count(),2);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement source.'});assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).stale,true);
+  }finally{h.close();}
+});
+test('minutes rejects fabricated evidence or omitted coverage before committing an artifact',async()=>{
+  for(const corrupt of [d=>{d.chapters[0].points[0].excerpt_idx=999;return d;},d=>{d.chapters=[];return d;}]){
+    const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Only original evidence.'});minutesModel(h,corrupt);await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_INVALID_OUTPUT|MINUTES_COVERAGE_FAILED/);assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).available,false);}finally{h.close();}
+  }
+});
+test('minutes model unavailable never starts audio or loses an old reading record',async()=>{
+  const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Existing evidence.'});await h.service.sql('INSERT INTO meta VALUES(?,?)',['minutes:'+eid,JSON.stringify({id:'previous',transcript_id:'old',language:'zh-CN',path:'previous.json'})]);h.host.text=async()=>({ok:false,errorCode:'NO_CANDIDATE'});await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_MODEL_UNAVAILABLE/);assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).id,'previous');assert.equal(h.calls.length,0);}finally{h.close();}
+});
+test('YouTube unsupported gives a specific error before fetching or changing the library',async()=>{
+  const h=harness();try{await assert.rejects(h.service.run('podcast_import',{url:'https://www.youtube.com/watch?v=synthetic'},'minutes-test'),/YOUTUBE_IMPORT_UNSUPPORTED/);assert.equal(h.calls.length,0);assert.equal((await h.service.run('podcast_library')).episodes.length,0);}finally{h.close();}
+});
+test('reading semantics preserve long clauses and escape transcript markup in standalone output',()=>{
+  const R=require('../podcast-insights/reading.js');const long='完整语义'.repeat(80)+'，这是同一个意思。';assert.deepEqual(R.paragraphs(long),[long]);assert.deepEqual(R.paragraphs('我 们 开 始。 但是继续， 所以停顿。'),['我们开始。','但是继续，','所以停顿。']);
+  const d={language:'zh-CN',episode:{title:'<script>unsafe</script>',show_title:'Test'},created_at:'2026-11-05',overview:'Overview',key_points:[],chapters:[],links:[],segments:[{id:'one',idx:0,text:'</script><img src=x onerror=alert(1)>',start_ms:null,end_ms:null}]};const html=R.documentHTML(d,'');assert.ok(!html.includes('<img src=x'));assert.ok(html.includes('&lt;img'));new vm.Script(html.match(/<script>([\s\S]*)<\/script>/)[1]);
+});
+// Feishu acceptance: production Service.run / host card events, not internal calls.
+// Rule: explicit cloud confirmation, uncertain-write recovery, original evidence retention.
+// Gap: existing provider tests exercise AssemblyAI only. Minimal fixtures: one episode,
+// one Minute, in-memory SQLite and injected HTTP responses. Tier: existing SQLite contract.
+function feishuHarness(options={}){
+  const state={account:'ou_synthetic',pending:false,quota:false,uncertain:false,transcript:'First passage.\n\nSecond passage.',...options};
+  const json=data=>({ok:true,status:200,body:JSON.stringify({code:0,data})});
+  const h=harness({feishu:options.credential!==false,network:async request=>{
+    const path=new URL(request.url).pathname;
+    if(path==='/open-apis/authen/v1/user_info')return json({open_id:state.account});
+    if(request.as==='media')return {ok:true,status:200,media:{hash:'a'.repeat(64),bytes:state.bytes||10000,ext:'mp3'}};
+    if(path==='/open-apis/drive/explorer/v2/root_folder/meta')return json({token:'folder_synthetic'});
+    if(path==='/open-apis/drive/v1/files/upload_all')return json({file_token:'file_synthetic'});
+    if(path==='/open-apis/minutes/v1/minutes/upload'){
+      if(state.quota)return {ok:true,status:200,body:JSON.stringify({code:2091008})};
+      if(state.uncertain)return {ok:false,errorCode:'NETWORK_TIMEOUT'};
+      return json({minute_url:'https://example.feishu.cn/minutes/obcsynthetic'});
+    }
+    if(path.endsWith('/artifacts'))return state.pending?{ok:true,status:200,body:JSON.stringify({code:2091003})}:json({transcript:state.transcript,summary:'Untrusted provider summary',minute_chapters:[]});
+    if(path==='/open-apis/minutes/v1/minutes/obcsynthetic')return json({minute:{title:'Synthetic minute'}});
+    throw new Error('Unexpected Feishu request: '+request.url);
+  }});return {...h,state};
+}
+test('Feishu preparation discloses provider and cannot submit through tool args or forged events',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid,confirm_cloud:true},'estimate-1');
+    assert.equal(r.job.provider,'feishu');assert.equal(r.job.state,'prepared');assert.equal(r.job.est_usd,null);assert.equal(r.requires_user_confirmation,true);
+    assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+    await assert.rejects(h.service.submitFromClick(r.job.id,{}),/USER_CLICK_REQUIRED/);
+    await assert.rejects(h.service.submitFromClick(r.job.id,click(r.job.id,{callId:'wrong-card'})),/USER_CLICK_REQUIRED/);
+    assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+  }finally{h.close();}
+});
+test('Feishu confirmed upload completes and keeps old transcript versions without invented timing',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Old original'});
+    const r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    const submitted=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(submitted.job.state,'submitted');
+    const upload=h.calls.find(r=>r.url.endsWith('/files/upload_all'));assert.equal(upload.upload.field,'file');assert.equal(upload.upload.fields.size,'10000');
+    const status=await h.service.run('podcast_status',{job_id:r.job.id});assert.equal(status.jobs[0].state,'completed');
+    const read=await h.service.run('podcast_read',{episode_id:eid});assert.match(read.segments.map(s=>s.text).join(''),/First passage/);assert.ok(read.segments.every(s=>s.start_ms===null&&s.speaker===''));
+    assert.equal(h.db.prepare('SELECT count(*) AS n FROM transcripts WHERE episode_id=?').get(eid).n,2);
+    const creates=()=>h.calls.filter(r=>r.url.endsWith('/minutes/upload')).length;
+    await h.service.submitFromClick(r.job.id,click(r.job.id,{callId:'progress-1'}));assert.equal(creates(),1);
+  }finally{h.close();}
+});
+test('Feishu large recordings require a Drive file token and never download or transcode silently',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h,{audio_bytes:104000000});
+    await assert.rejects(h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1'),/FEISHU_UPLOAD_TOO_LARGE/);
+    const r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid,file_token:'file_existing'},'estimate-1');
+    await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(h.calls.filter(r=>r.as==='media'||r.upload).length,0);
+    assert.deepEqual(JSON.parse(h.calls.find(r=>r.url.endsWith('/minutes/upload')).body),{file_token:'file_existing'});
+  }finally{h.close();}
+});
+test('Feishu actual download size is enforced before anything is uploaded',async()=>{
+  const h=feishuHarness({bytes:21*1024*1024});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    const result=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(result.job.error,'FEISHU_UPLOAD_TOO_LARGE');assert.equal(result.job.submission_outcome,'not_executed');
+    assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+  }finally{h.close();}
+});
+test('Feishu creation rejection reports the uploaded file separately from the uncreated Minute',async()=>{
+  const h=feishuHarness({quota:true});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    const result=await h.service.submitFromClick(r.job.id,click(r.job.id));
+    assert.equal(result.job.state,'failed');assert.equal(result.job.upload_outcome,'executed');assert.equal(result.job.minute_outcome,'not_executed');assert.equal(result.job.submission_outcome,'executed');
+    assert.equal(h.calls.filter(r=>r.upload).length,1);assert.equal(h.calls.filter(r=>r.url.endsWith('/minutes/upload')).length,1);
+  }finally{h.close();}
+});
+test('Feishu unknown creation stays unknown across restart and only explicit URL recovery resumes reads',async()=>{
+  const h=feishuHarness({uncertain:true});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid,file_token:'file_existing'},'estimate-1');
+    const result=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(result.job.submission_outcome,'unknown');
+    const restarted=new Service(h.host);const status=await restarted.run('podcast_status',{job_id:r.job.id});assert.equal(status.jobs[0].recovery_incomplete,true);
+    await restarted.run('podcast_status',{job_id:r.job.id});assert.equal(h.calls.filter(r=>r.method==='POST').length,1);
+    const recovered=await restarted.run('podcast_feishu',{action:'recover',episode_id:eid,job_id:r.job.id,minute_url:'https://example.feishu.cn/minutes/obcsynthetic'});
+    assert.equal(recovered.job.state,'completed');assert.equal(h.calls.filter(r=>r.method==='POST').length,1);
+  }finally{h.close();}
+});
+test('Feishu account changes and missing credentials prevent writes; quota rejection has no fallback',async()=>{
+  const missing=feishuHarness({credential:false});try{const eid=await seed(missing);await assert.rejects(missing.service.run('podcast_feishu',{action:'prepare',episode_id:eid}),/FEISHU_TOKEN_MISSING/);assert.equal(missing.calls.length,0);}finally{missing.close();}
+  const h=feishuHarness({quota:true});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid,file_token:'file_existing'},'estimate-1');h.state.account='ou_other';
+    await assert.rejects(h.service.submitFromClick(r.job.id,click(r.job.id)),/FEISHU_ACCOUNT_CHANGED/);assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+    h.state.account='ou_synthetic';const result=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(result.job.error,'FEISHU_QUOTA_EXCEEDED');assert.equal(result.job.submission_outcome,'not_executed');
+    assert.equal(h.calls.some(r=>r.url.includes('assemblyai')),false);
+  }finally{h.close();}
+});
+test('Feishu existing Minute import preserves SRT timings without uploads and supports pending artifacts',async()=>{
+  const h=feishuHarness({pending:true,transcript:'1\n00:00:01,250 --> 00:00:02,500\nTimed original'});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'import',episode_id:eid,minute_url:'https://example.feishu.cn/minutes/obcsynthetic'});
+    assert.equal(r.job.state,'submitted');h.state.pending=false;
+    assert.equal((await h.service.run('podcast_status',{job_id:r.job.id})).jobs[0].state,'completed');
+    const read=await h.service.run('podcast_read',{episode_id:eid});assert.equal(read.segments[0].start_ms,1250);assert.equal(read.segments[0].end_ms,2500);
+    assert.equal(h.calls.filter(r=>r.method==='POST'||r.as==='media').length,0);
+    await assert.rejects(h.service.run('podcast_feishu',{action:'import',episode_id:eid,minute_url:'https://evil.example.test/minutes/obcsynthetic'}),/FEISHU_INVALID_MINUTE/);
+  }finally{h.close();}
+});
+test('Feishu deletion removes local provider metadata and artifacts but never deletes cloud files',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'import',episode_id:eid,minute_url:'https://example.feishu.cn/minutes/obcsynthetic'});
+    assert.equal(r.job.state,'completed');await h.service.remove('episode',eid);
+    assert.equal(h.db.prepare("SELECT count(*) AS n FROM meta WHERE key LIKE 'feishu%'").get().n,0);
+    assert.equal(h.calls.filter(r=>r.method==='DELETE').length,0);
+  }finally{h.close();}
+});
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function runtimeHarness(h,missingCapability,failUi=false){
   let listener,channel;const messages=[],waiters=new Map(),timers=[];
@@ -97,7 +250,7 @@ function runtimeHarness(h,missingCapability,failUi=false){
     fetch:async()=>{if(failUi)throw new Error('Synthetic UI load failure');return {ok:true,json:async()=>ui};},
     BroadcastChannel:class{constructor(){channel=this;}postMessage(m){messages.push(m);if(m.type==='response')waiters.get(m.reqId)?.resolve(m);}},
     setInterval:()=>0,clearInterval(){},setTimeout:(f,ms)=>{timers.push({f,ms});return timers.length;},
-    cindy:{library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);}},
+    cindy:{tasks:h.tasks,library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);}},
   };
   if(missingCapability)delete ctx.cindy[missingCapability];
   vm.runInNewContext(fs.readFileSync(new URL('../podcast-insights/runtime.js',import.meta.url),'utf8'),ctx);
@@ -106,6 +259,22 @@ function runtimeHarness(h,missingCapability,failUi=false){
     request:(tool,args,reqId)=>{const done=deferred();waiters.set(reqId,done);channel.onmessage({data:{type:'request',tool,args,reqId}});return done.promise;},
   };
 }
+test('reading actions create native Cindy tasks with original chapter context',async()=>{
+  const h=harness();try{const sent=[];h.tasks={capabilities:async()=>({operations:['create','send']}),create:async()=>({taskId:'native-task',revision:1}),send:async a=>{sent.push(a);return {ok:true};}};
+    const runtime=runtimeHarness(h);const result=await runtime.request('minutes_generate',{action:'generate',episode_id:'synthetic-episode',language:'zh-CN'},'generate-reading');assert.equal(result.ok,true);assert.match(sent[0].text,/podcast_minutes/);
+    await runtime.request('chapter_ask',{episode_id:'synthetic-episode',transcript_id:'synthetic-version',from_segment_idx:3,to_segment_idx:7,question:'How does this apply?'},'ask-reading');assert.equal(sent.length,2);assert.match(sent[1].text,/podcast_read and podcast_cite/);assert.match(sent[1].text,/synthetic-version/);assert.match(sent[1].text,/from_segment_idx/);assert.equal(h.calls.length,0);
+  }finally{h.close();}
+});
+test('Feishu confirmation card names Feishu quota without showing AssemblyAI prices',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h),runtime=runtimeHarness(h);
+    const result=await runtime.call('podcast_feishu',{action:'prepare',episode_id:eid},'feishu-estimate');
+    assert.equal(result.ok,true);
+    const card=runtime.messages.find(m=>m.type==='card-update'&&m.callId==='feishu-estimate');
+    assert.match(card.html,/Feishu/);assert.doesNotMatch(card.html,/\$0\.23|AssemblyAI/);assert.match(card.html,/transcribe:/);
+    assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+  }finally{h.close();}
+});
 test('long TXT, MD and JSON split without invented internal timestamps',()=>{
   const text='a'.repeat(25001);
   for(const format of ['txt','md','json']){

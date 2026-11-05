@@ -54,3 +54,10 @@ Additional0.2.5 fixes: source retrieval refuses the credentialed AssemblyAI API 
 0.2.20: HTML evidence uses the pinned parse5 standard parser; excludes plaintext/raw-text/template contexts without executing scripts or fetching resources. WebVTT cue entities decode once. Publisher retries retain active cloud status; continuation restarts on transcript-version changes; deletion refreshes notes. Progress cards show current recovery errors. Restart reclaims only incomplete inactive user/publisher versions, retaining completed history, active and cloud versions. Parser provenance: THIRD-PARTY-LICENSES.txt.
 
 0.2.21: Unknown-job cards retain a safe default recovery hint when UI localization initialization fails.
+
+0.3.0 development: optional direct Feishu Minutes integration, without MCP. See [Feishu integration](FEISHU.md) for credentials, the20 MiB direct-upload limit, existing Drive/Minute imports, recovery and verification limits.
+## 0.4.2 development: automatic reading notes
+
+See [automatic reading notes](READING.md): model-generated chapters with extracted
+source evidence, complete transcript reading/search, chapter questions and HTML/JSON
+export. EP52 was generated in a separate local test instance; no audio retranscription.
