@@ -84,7 +84,7 @@ function fixture(t, options = {}) {
       const all = rest === 'createReplyAll', forward = rest === 'createForward';
       const draft = box.add({ id: box.newId('reply'), subject: (forward ? 'FW: ' : 'RE: ') + m.subject, conversationId: m.conversationId,
         toRecipients: forward ? [] : [m.from, ...(all ? m.toRecipients : [])], ccRecipients: all ? m.ccRecipients : [],
-        body: { contentType: 'html', content: '<html><head><style>p{margin:0}</style></head><body dir="ltr">' + QUOTE + '</body></html>' },
+        body: { contentType: 'html', content: '<html><head><style>p{margin:0}</style></head><body dir="ltr">' + QUOTE + (m.longQuote ? '<div>' + 'x'.repeat(m.longQuote) + '</div>' : '') + '</body></html>' },
         attachments: forward ? copy(m.attachments) : [] });
       return reply(201, view(draft));
     }
@@ -422,6 +422,18 @@ test('reader resolves account-bound links, conversations and a three-state read 
   const lonely = await f.tool({ url: link }, { tool: 'outlook_read_message' });
   assert.equal(lonely.result.conversationUnavailable, true);
   assert.equal(lonely.result.conversation, undefined);
+});
+
+test('an Outlook quote beyond the draft card limits is shortened so the card can show and send it', async t => {
+  const f = fixture(t);
+  const original = f.box.add({ id: 'bigAAMk1=', isDraft: false, subject: 'Big', longQuote: 17000, from: person('sender@example.test', 'Sender'), toRecipients: [person('self@example.test')] });
+  const r = await f.tool({ action: 'reply', message_id: original.id, body_text: 'ok' });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.result.draftCard, true);
+  const editor = r.result.readBack.editor;
+  assert.ok(editor.quote.length <= 16000 && editor.quote.trimEnd().endsWith('…'));
+  assert.equal(editor.bodyHtml, '<div>ok</div>');
+  assert.match(f.box.messages.get(r.result.draft_id).body.content, /id="appendonsend"/);
 });
 
 test('a paged conversation is reported unavailable, never presented as the whole thread', async t => {

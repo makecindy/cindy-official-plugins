@@ -388,6 +388,10 @@ export function runImapComposeSuite(plugin, options) {
     const updated = await t.call({ action: 'update_draft', draft_id: created.result.draft_id, body_html: '<p>New <b>text</b> &amp; more</p><style>p{color:red}</style>' });
     assert.equal(updated.ok, true, updated.message);
     assert.equal(updated.result.readBack.editor.body, 'New text & more');
+    // A ">" inside a quoted attribute value is not the end of the tag.
+    const quoted = await t.call({ action: 'update_draft', draft_id: created.result.draft_id, body_html: '<p><a title="1 > 0" href=\'x>y\'>click</a> here</p>' });
+    assert.equal(quoted.ok, true, quoted.message);
+    assert.equal(quoted.result.readBack.editor.body, 'click here');
     assert.doesNotMatch(t.draftSource(), /Old text/);
     t.box.add('Drafts', ['From: ' + self, 'To: dave@example.test', 'Subject: Signed', 'Message-ID: <signed-1@example.test>', 'MIME-Version: 1.0',
       'Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="b1"', '',

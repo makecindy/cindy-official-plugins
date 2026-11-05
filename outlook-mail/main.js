@@ -1052,6 +1052,15 @@ var OutlookMail = (() => {
       let readBack;
       try { readBack = (await readSnapshot(ctx, draftId, transport, callId)).snapshot; }
       catch (_) { return { ...common, execution_status: 'executed', draft_id: draftId, readBack: { status: 'unavailable', message: t('draftSavedUnverified') } }; }
+      // Outlook's generated quote can outgrow the draft card's field limits, which
+      // would leave a draft no card can show or send. Shorten it to a text quote.
+      if (a.action !== 'draft' && (readBack.editor.quote.length > 16000 || readBack.editor.quoteHtml.length > 64000)) {
+        const cut = readBack.editor.quote.slice(0, 12000).replace(/\s+$/, '') + '\n…';
+        const shrunk = await writeDraft(ctx, { draftId, fingerprint: readBack.fingerprint, send: false, additions: [], fields: { ...fieldsOf(readBack), quote: cut,
+          quoteHtml: '<div id="appendonsend"></div><hr style="display:inline-block;width:98%" tabindex="-1"><div>' + textHtml(cut) + '</div>' } }, transport, callId);
+        if (!shrunk.ok) return { ...common, execution_status: 'executed', draft_id: draftId, readBack: { status: 'unavailable', message: t('draftSavedUnverified') } };
+        readBack = shrunk.data.readBack;
+      }
       return { ...common, execution_status: 'executed', draft_id: draftId, message: { id: draftId, subject: readBack.headers.subject, is_draft: true, web_url: readBack.webLink },
         readBack, draftCard: await present(readBack) };
     }

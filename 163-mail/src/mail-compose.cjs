@@ -874,6 +874,16 @@ function htmlFragment(html) {
   const inner = body ? styles + body[1] : html.replace(/<!doctype[^>]*>|<\/?(?:html|head|body)\b[^>]*>|<meta\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>/gi, '');
   return stripScripts(inner);
 }
+// End of the tag starting at `start`; a ">" inside a quoted attribute value does not end it.
+function tagEnd(source, start) {
+  let quote = '';
+  for (let index = start + 1; index < source.length; index++) {
+    const char = source[index];
+    if (quote) { if (char === quote) quote = ''; } else if (char === '"' || char === "'") quote = char;
+    else if (char === '>') return index;
+  }
+  return -1;
+}
 // Plain-text alternative for an HTML fragment (fallback only; never sent as HTML).
 function htmlToText(html) {
   const source = stripScripts(html);
@@ -885,7 +895,7 @@ function htmlToText(html) {
     const lt = source.indexOf('<', index);
     out += source.slice(index, lt < 0 ? source.length : lt);
     if (lt < 0) break;
-    const gt = source.indexOf('>', lt);
+    const gt = tagEnd(source, lt);
     if (gt < 0) break;
     const tag = /^<\/?([a-z][a-z0-9]*)/.exec(lower.slice(lt, gt + 1));
     const name = tag ? tag[1] : '';
