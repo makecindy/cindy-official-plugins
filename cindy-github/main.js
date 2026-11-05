@@ -2445,7 +2445,7 @@ async function callTool(args, callId) {
  *   之后的 pr_card 调用带 sourceCallId 原地更新原卡片;
  * - to_latest:卡片挪到当前这次调用(本轮末尾)显示,card_id 不变。显示位置记在
  *   card.anchor,新位置另存一份指回 card_id 的别名,点击新位置时据此找回状态;
- *   旧位置缩成一行「最新状态在下方」。
+ *   旧位置声明 supersededBy 由 Cindy 藏起,不认得的旧版缩成一行「最新状态在下方」。
  * ──────────────────────────────────────────────────────────────────── */
 
 var PR_CARD_DIR = 'pr-cards';
@@ -3152,11 +3152,11 @@ async function movePrCard(card, callId) {
   return from;
 }
 
-/** 旧位置换成一行提示(凭这次调用重开旧卡片)。 */
+/** 收口旧位置(凭这次调用重开旧卡片):supersededBy 让认得它的 Cindy 整张藏起旧卡,旧版 Cindy 和手机显示这一行提示。 */
 function sendPrMovedStub(card, from, callId) {
   return Promise.resolve(cindy.send({
     type: 'card-update', callId: from, v: 2, state: 'done',
-    html: renderPrMovedStub(card), height: 44, sourceCallId: callId,
+    html: renderPrMovedStub(card), height: 44, sourceCallId: callId, supersededBy: callId,
   })).catch(function () {});
 }
 
