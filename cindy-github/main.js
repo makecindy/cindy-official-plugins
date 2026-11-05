@@ -2859,11 +2859,20 @@ function prHeader(tile, titleHtml, metaParts, gear) {
 }
 
 /** 下层:左边分支或状态,右边按钮;窄的时候按钮换到下一行。 */
-function prFooter(leftHtml, actionsHtml) {
+function prFooter(leftHtml, actionsHtml, openOnly) {
   return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
     '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
-    (actionsHtml ? '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
+    (actionsHtml ? '<div' + (openOnly || '') + ' style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
     '</div>';
+}
+
+/**
+ * data-ghost-pr-open-only:只在 PR 还开着时成立的部分(跟进中、操作按钮、设置、「开放中」)。
+ * 卡片是调用时的快照;PR 在卡片之外被合并或关闭时(有人在 GitHub 上手动合并,Agent 没被叫醒),
+ * 宿主按标题栏同一份状态把这些藏起来,卡片不会继续说「跟进中」。旧版宿主不认这个属性,照常显示。
+ */
+function prOpenOnly(card) {
+  return card.pr ? ' data-ghost-pr-open-only="' + prEsc(card.repo + '#' + card.pr.number) + '"' : '';
 }
 
 var PR_PILL = 'display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:9999px;font-size:13px;font-weight:500;white-space:nowrap;';
@@ -3012,11 +3021,11 @@ function prSettingsPanel(settings) {
     '</div>';
 }
 
-function prGearButton(open) {
+function prGearButton(open, extraAttrs) {
   return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
     'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
     'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
-    prGearGlyph());
+    prGearGlyph(), extraAttrs);
 }
 
 function prStatsParts(card) {
@@ -3055,7 +3064,9 @@ function renderPrCard(card, settings) {
       gear = true;
       tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
       // 跟进中由下层的「● 跟进中」表达,标题行不再重复。
-      meta = card.following ? [prEsc(card.repo)] : [prEsc(card.repo), prEsc(pr.draft ? t('prStateDraft') : t('prStateOpen'))];
+      meta = card.following
+        ? [prEsc(card.repo)]
+        : [prEsc(card.repo), '<span' + prOpenOnly(card) + '>' + prEsc(pr.draft ? t('prStateDraft') : t('prStateOpen')) + '</span>'];
       // 跟进中的检查状态交给宿主按标题栏同一份数据实时填写;这里画的是兜底快照
       // (旧版宿主、手机,或宿主还没查到这条 PR 时显示)。
       left = card.following
@@ -3084,7 +3095,8 @@ function renderPrCard(card, settings) {
   if (card.note) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
-  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions);
+  var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
+  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen, openOnly) : '') + prFooter(left, actions, openOnly);
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
   return PR_CSS +

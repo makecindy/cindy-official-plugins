@@ -55,12 +55,15 @@ function createFixture(t) {
   );
   let clock = T0;
   let probe = null;
+  let trigger = null;
   let snapshotRuns = 0;
 
   // 端到端用例按分钟推进时钟;默认关掉最小放行间隔判据,它有专门用例。
   const gateArgs = (extraArgs) => [
     PR_URL, '--state-dir', stateDir, '--snapshot', fakeSnapshot,
     ...(extraArgs.includes('--min-pass-spacing-minutes') ? [] : ['--min-pass-spacing-minutes', '0']),
+    // 节奏有专门用例;其余用例每次都检查。
+    '--no-pacing',
     ...extraArgs,
   ];
 
@@ -73,6 +76,9 @@ function createFixture(t) {
     setProbe(value) {
       probe = value;
     },
+    setTrigger(value) {
+      trigger = value;
+    },
     advance(minutes) {
       clock += minutes * MIN;
     },
@@ -80,6 +86,13 @@ function createFixture(t) {
     snapshotRuns: () => snapshotRuns,
     readState() {
       return JSON.parse(fs.readFileSync(stateFilePath(stateDir, REPO, NUMBER), 'utf8'));
+    },
+    readRepoState() {
+      return JSON.parse(fs.readFileSync(path.join(stateDir, 'acme__widgets.repo.json'), 'utf8'));
+    },
+    writeRepoState(value) {
+      fs.mkdirSync(stateDir, { recursive: true });
+      fs.writeFileSync(path.join(stateDir, 'acme__widgets.repo.json'), JSON.stringify(value), 'utf8');
     },
     writeState(patch) {
       const file = stateFilePath(stateDir, REPO, NUMBER);
@@ -103,6 +116,7 @@ function createFixture(t) {
           };
         },
         runProbe: async () => (probe ? { code: 0, stdout: JSON.stringify(probe), stderr: '' } : { code: 1, stdout: '', stderr: '' }),
+        readTrigger: async () => trigger,
         out: (text) => { stdout += text; },
         err: (text) => { stderr += text; },
       });
@@ -462,10 +476,12 @@ test('decide:只剩人工批准时吸收外部变化;保底巡检;defer 未到�
   assert.notEqual(kept.reason, 'blocked-human', '未确认的更新不被吸收');
   assert.ok(kept.nextPendingWatch, '待确认的那一份保留');
 
+  // 保底巡检只对还有技术活的 PR 叫醒(只等人审或合并的见专门用例)。
+  const busy = snap({ verdict: 'NEEDS_WORK', blockers: ['review_threads_open'] });
   const quiet = { watch: seenWatch(snap()), lastPassAt: T0 };
   const day = 24 * 60 * MIN;
   assert.equal(decide({ snap: snap(), previous: quiet, now: T0 + day - MIN }).reason, 'idle');
-  const guard = decide({ snap: snap(), previous: quiet, now: T0 + day });
+  const guard = decide({ snap: busy, previous: quiet, now: T0 + day });
   assert.equal(guard.reason, 'silence-guard');
   assert.equal(guard.nextPendingWatch, null);
   assert.equal(decide({ snap: snap(), previous: { ...quiet, nextAllowAt: T0 + 2 * day }, now: T0 + day }).reason, 'deferred');
@@ -613,7 +629,7 @@ test('从未放行过的跟进也能数满静默时长:起点固定在首次检�
   const fx = createFixture(t);
   const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0' };
   fx.setProbe(probe);
-  fx.setSnapshot(snap());
+  fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['review_threads_open'] }));
   await fx.run();
   await fx.run(['--ack']);
   // 模拟「从未放行过」:状态里没有 lastPassAt(例如没有 CI、没有评论、没有冲突)
@@ -645,10 +661,11 @@ test('从未放行过的跟进也能数满静默时长:起点固定在首次检�
 
 test('保底巡检起点:最近放行 > 首次检查 > 旧版状态里的上次检查', () => {
   const day = 24 * 60 * MIN;
-  const quiet = { watch: seenWatch(snap()) };
-  assert.equal(decide({ snap: snap(), previous: { ...quiet, silenceSince: T0, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'silence-guard');
-  assert.equal(decide({ snap: snap(), previous: { ...quiet, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'idle', '旧版状态只能按上次检查算');
-  assert.equal(decide({ snap: snap(), previous: { ...quiet, silenceSince: T0 - 2 * day, lastPassAt: T0 }, now: T0 + day - MIN }).reason, 'idle', '放行过就以最近放行为准');
+  const busy = snap({ verdict: 'NEEDS_WORK', blockers: ['review_threads_open'] });
+  const quiet = { watch: seenWatch(busy) };
+  assert.equal(decide({ snap: busy, previous: { ...quiet, silenceSince: T0, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'silence-guard');
+  assert.equal(decide({ snap: busy, previous: { ...quiet, lastCheckedAt: T0 + day - MIN }, now: T0 + day }).reason, 'idle', '旧版状态只能按上次检查算');
+  assert.equal(decide({ snap: busy, previous: { ...quiet, silenceSince: T0 - 2 * day, lastPassAt: T0 }, now: T0 + day - MIN }).reason, 'idle', '放行过就以最近放行为准');
 });
 
 test('快照失败先容忍瞬时抖动,连续到阈值才 fail-closed —— 绝不静默跳过', async (t) => {
@@ -710,7 +727,7 @@ test('只读查询:--last-result 带事件清单且不改状态;--suggest 兼容
   assert.equal(last.json().lastResult.decision, 'run');
   assert.match(last.json().lastResult.report, /Checks failed/);
   const suggest = await fx.run(['--suggest']);
-  assert.match(suggest.stdout, /no longer changes its pace/);
+  assert.match(suggest.stdout, /paces itself/);
   for (const extra of [['--suggest', '--ack'], ['--last-result', '--defer', '60'], ['--suggest', '--last-result']]) {
     const r = await fx.run(extra);
     assert.equal(r.code, 1, `应拒绝: ${extra.join(' ')}`);
@@ -876,4 +893,139 @@ test('an unacknowledged failure in one workflow and a new one in another get dif
   const a = decide({ snap: failA, previous: { watch: seenWatch(snap()) }, now: T0 });
   const b = decide({ snap: failB, previous: { watch: seenWatch(snap()) }, now: T0 });
   assert.notEqual(a.nextPendingKey, b.nextPendingKey);
+});
+
+// ── 推送后收齐、按阶段节奏、宿主触发 ────────────────────────────────────────
+
+const botReview = (id, author, commitOid, at, body = 'P2: tighten this') =>
+  ({ id, author, authorIsBot: true, state: 'COMMENTED', body, submittedAt: at, url: `https://gh/${id}`, commitOid });
+
+test('推送后先收齐:bot 与检查的新事件压到要等的 bot 都在新提交上给出结果', async (t) => {
+  const fx = createFixture(t);
+  // 第一个提交上 Codex 和 Greptile 都审过:之后的推送要等它们两个。
+  const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - 5 * MIN)), botReview('R2', 'greptile-apps', 'aaa1111', iso(T0 - 4 * MIN))] });
+  fx.setSnapshot(first);
+  await fx.run();
+  await fx.run(['--ack']);
+
+  // 推送新提交,CI 很快失败:先不叫醒。
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  let r = await fx.run(['--json']);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /chatgpt-codex-connector, greptile-apps/);
+  assert.ok(fx.readState().settleUntil > fx.now());
+
+  // Codex 只点 👍,Greptile 还没动:继续压。
+  fx.advance(4);
+  const thumbs = [{ content: 'THUMBS_UP', at: iso(fx.now()), author: 'chatgpt-codex-connector[bot]' }];
+  fx.setSnapshot(snap({ ...first, ...red, reactions: thumbs }));
+  r = await fx.run(['--json']);
+  assert.equal(r.json().reason, 'settling');
+  assert.match(r.json().detail, /held until greptile-apps answer/);
+
+  // Greptile 在新提交上提了意见:收齐,一次叫醒,报出失败和意见。
+  fx.advance(4);
+  const greptile = botReview('R3', 'greptile-apps', 'bbb2222', iso(fx.now()));
+  fx.setSnapshot(snap({ ...first, ...red, reactions: thumbs, reviews: [...first.reviews, greptile] }));
+  r = await fx.run(['--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.match(r.json().detail, /events=\[checks-failed,remarks\]/);
+});
+
+test('收齐窗口最多 20 分钟;人的留言不等,立刻叫醒', async (t) => {
+  const fx = createFixture(t);
+  const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - 5 * MIN))] });
+  fx.setSnapshot(first);
+  await fx.run();
+  await fx.run(['--ack']);
+  fx.advance(2);
+  const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...red }));
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+  fx.advance(19);
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+  fx.advance(2);
+  const late = await fx.run(['--json']);
+  assert.equal(late.code, 0, '超过 20 分钟就不再等');
+  assert.match(late.json().detail, /checks-failed/);
+
+  // 新一轮:人留言时不压。
+  await fx.run(['--ack']);
+  fx.advance(2);
+  const next = { latestCommitOid: 'ccc3333', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  fx.setSnapshot(snap({ ...first, ...next }));
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+  fx.advance(2);
+  fx.setSnapshot(snap({ ...first, ...next, comments: [comment('C9', 'alice', iso(fx.now()), 'why this?')] }));
+  const human = await fx.run(['--json']);
+  assert.equal(human.code, 0);
+  assert.match(human.json().detail, /remarks/);
+});
+
+test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库不等', async (t) => {
+  const fx = createFixture(t);
+  // 本 PR 还没被 bot 审过,但仓库记录里 Codex 最近审过别的 PR。
+  fx.writeRepoState({ reviewerBots: { 'chatgpt-codex-connector': T0 - 60 * MIN } });
+  fx.setSnapshot(snap());
+  await fx.run();
+  await fx.run(['--ack']);
+  fx.advance(2);
+  fx.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' }));
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+
+  const plain = createFixture(t);
+  plain.setSnapshot(snap());
+  await plain.run();
+  await plain.run(['--ack']);
+  plain.advance(2);
+  plain.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' }));
+  assert.equal((await plain.run(['--json'])).code, 0, '没有要等的 bot,照常立刻叫醒');
+  assert.deepEqual(Object.keys(plain.readRepoState().reviewerBots), []);
+});
+
+test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调用 GitHub;宿主触发立刻看', async (t) => {
+  const fx = createFixture(t);
+  const probe = { status: 'OPEN false MERGEABLE aaa1111  SUCCESS:2', remarks: '0  0  0 0' };
+  fx.setProbe(probe);
+  fx.setSnapshot(snap({ verdict: 'READY' }));
+  await fx.run(['--pacing']);
+  await fx.run(['--ack']);
+  // 上一轮叫醒 agent 已是很久以前(否则一小时内按活跃节奏看)。
+  fx.writeState({ lastPassAt: T0 - 120 * MIN });
+  const reads = fx.snapshotRuns();
+  fx.advance(10);
+  let r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().reason, 'not-due');
+  assert.match(r.json().detail, /pace=waiting/);
+  assert.equal(fx.snapshotRuns(), reads, '不到时间不读快照');
+
+  // 宿主看到变化而提前触发:跳过节奏和探测,直接完整读取。
+  fx.setTrigger({ kind: 'watch', source: 'github-pr-status', detail: PR_URL });
+  fx.setSnapshot(snap({ verdict: 'READY', comments: [comment('C1', 'alice', iso(fx.now()))] }));
+  r = await fx.run(['--pacing', '--json']);
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(fx.snapshotRuns(), reads + 1);
+  fx.setTrigger(null);
+  await fx.run(['--ack']);
+  fx.writeState({ lastPassAt: T0 - 120 * MIN });
+
+  fx.advance(31);
+  r = await fx.run(['--pacing', '--json']);
+  assert.notEqual(r.json().reason, 'not-due', '满 30 分钟照常看');
+});
+
+test('只等人工批准时保底巡检不叫醒 agent', () => {
+  const approval = snap({ verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], reviewDecision: 'REVIEW_REQUIRED' });
+  const quiet = { watch: seenWatch(approval), lastPassAt: T0 };
+  const day = 24 * 60 * MIN;
+  const result = decide({ snap: approval, previous: quiet, now: T0 + 2 * day });
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.reason, 'waiting-human');
+  // 还有技术活(检查失败)时照常保底巡检。
+  const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'] });
+  assert.equal(decide({ snap: red, previous: { watch: seenWatch(red), lastPassAt: T0 }, now: T0 + 2 * day }).reason, 'silence-guard');
 });
