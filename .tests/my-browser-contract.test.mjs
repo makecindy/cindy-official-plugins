@@ -25,6 +25,12 @@ test('content script listens for cross-tab preference changes',()=>{
   assert.match(content,/const session=videoSession=\{src:media\.currentSrc,auto,/);
   assert.match(content,/makePanel\(\);await showVideo\(true\);/);
   assert.doesNotMatch(content,/videoSession\.auto=true/);
+  // Every caption source runs the same-language check before its cues are merged
+  // (an imported file is the reader's own choice), and switching sources forgets the old judgment.
+  const merges=[...content.matchAll(/([^;{}]*;)mergeCues\(/g)].map(m=>m[1]);
+  assert.equal(merges.length,4);
+  for(const before of merges)assert.match(before,/^(checkSameLanguage\(session,(track|result)\.language\)|session\.sameLanguage=false);$/);
+  assert.match(content,/function dropTimeline\(session\)\{session\.languageChecked=false;session\.sameLanguage=false;session\.language=null;/);
   assert.match(content,/removeListener\(onPreferencesChanged\)/);
 });
 

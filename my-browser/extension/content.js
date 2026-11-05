@@ -525,7 +525,8 @@
   // Only automatic sessions skip translation; a person who opened subtitles on purpose keeps the choice.
   function checkSameLanguage(session,language){if(session.languageChecked||!session.auto)return;session.languageChecked=true;session.language=language||null;if(language&&L.sameLanguage(language,prefs.videoTarget)){session.sameLanguage=true;cancel();videoSettings();session.overlay?.update();}}
   // Choosing another caption source takes the old source's timeline down at once: no stale subtitles, no translation of them.
-  function dropTimeline(session){session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
+  // Its language judgment goes with it, so the new source is checked again on its first read.
+  function dropTimeline(session){session.languageChecked=false;session.sameLanguage=false;session.language=null;session.transcript=undefined;session.originalCues=undefined;session.words=[];session.chunks=[];session.revision=(session.revision||0)+1;cancel();cues=[];cueList();videoHandler?.();}
   function mergeCues(next){
     const session=videoSession;if(!session)return;
     const signature=JSON.stringify(next);if(signature===session.transcript)return;
@@ -572,7 +573,7 @@
         if(!result?.ok)throw Object.assign(Error(result?.error||'SUBTITLE_UNAVAILABLE'),{reason:result?.reason});
         if(result.videoId)session.videoId=result.videoId;
         if(result.tracks?.length>1&&session.trackOptions?.length!==result.tracks.length){session.trackOptions=result.tracks.map(x=>({id:x.id,label:x.label||x.language||x.id}));session.trackId=result.chosen;session.chooseTrack=id=>{session.trackId=id;session.imported=false;session.fullTranscript=false;session.nextRead=0;dropTimeline(session);};videoSettings();}
-        if(result.cues?.length){session.fullTranscript=true;mergeCues(result.cues);}
+        if(result.cues?.length){session.fullTranscript=true;checkSameLanguage(session,result.language);mergeCues(result.cues);}
       }
       // A page without any caption track also deserves a clear answer instead of an endless wait.
       if(!youtube&&!site?.external&&!session.imported&&!session.words?.length)session.attempts++;
