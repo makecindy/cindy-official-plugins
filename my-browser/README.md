@@ -596,3 +596,11 @@ Update both the Chrome extension and the Cindy plugin. Verification: the extensi
 - No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
 
 Verification: `my-browser-x-subtitles.browser.test.mjs` adds feed fixtures (no poster attribute, thumbnail image only, wrapped timestamp, a player with no identifier at all) and the switch to the post page, passing with the real content scripts in Chromium; the same test fails on the code before this change. The fixtures follow X's page structure by hand and were not checked against the live X feed; verify after installing the new extension.
+
+## 0.4.66 Cindy subtitles on X videos without a captions button (host package 0.4.88)
+
+- **The entry no longer needs X's captions button:** on X, the Cindy subtitles button used to sit only beside X's own captions button. Some videos (seen on a portrait video) carry X's auto-generated English caption track while the player shows no captions button, so the Cindy entry disappeared with it. When the video has a caption track and X shows no captions button, the entry now sits in the same row, before the fullscreen button. The position comes from the control bar's structure and its "0:08 / 0:40" time display, not from button labels, so any interface language works.
+- **Everything else is unchanged:** X videos without a caption track still show no entry, collapsed controls get no entry, and feed videos still wait for the button.
+- No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
+
+Verification: `my-browser-x-subtitles.browser.test.mjs` adds fixtures following a real X portrait player (caption track without a captions button, no caption track, collapsed controls), passing with the real content scripts in Chromium; the same test fails on the code before this change. The control bar structure was checked layer by layer on a signed-in X page.
