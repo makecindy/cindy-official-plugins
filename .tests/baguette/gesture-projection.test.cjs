@@ -75,3 +75,15 @@ test('fold pieces project contacts back to their visible half and expose only th
  const client=panel.mapScreenPoint(300,400),back=panel.mapClientPoint(client.x,client.y);assert.ok(Math.abs(back.x-300)<1e-6&&Math.abs(back.y-400)<1e-6);
  panel.mode='pose';panel.updateInteractionSurface();assert.equal(attrs['data-cindy-trackpad'],undefined);assert.equal(surface.hidden,true);
 });
+
+test('folded 3D wheel pan parked on the lit-screen edge reverses immediately using the real mapper',()=>{
+ const window={addEventListener(){},document:{addEventListener(){}}},context={window,document:{},URLSearchParams,setTimeout:()=>1,clearTimeout(){}};
+ for(const file of ['baguette/gestures/screen-quad.js','baguette/gestures/screen-pieces.js','baguette/gestures/attachable-event-source.js','baguette/gestures/wheel-gesture-source.js','sim-3d.js'])vm.runInNewContext(fs.readFileSync(path.join(web,file),'utf8'),context);
+ const pieces=window.Baguette._ScreenPieces.fromMessage({pieces:[{corners:[[.1,.2],[.45,.25],[.45,.75],[.1,.8]],u:[0,.5],v:[0,1]},{corners:[[.45,.25],[.8,.3],[.8,.7],[.45,.75]],u:[.5,1],v:[0,1]}]});
+ const panel=new window.Sim3DPanel();Object.assign(panel,{mode:'interact',screenQuad:pieces,deviceSize:{width:400,height:800},canvas:{width:1000,height:1000,hasAttribute:()=>true,getBoundingClientRect:()=>({left:10,top:20,width:1000,height:1000})}});
+ let wheel,contacts;
+ const screen={size:{width:400,height:800},touchDown(){},touchUp(){},touchMove(p){contacts=JSON.parse(JSON.stringify(p));}};
+ new window.Baguette._WheelGestureSource(screen,{mapClientPoint:(x,y)=>panel.mapClientPoint(x,y),mapScreenPoint:(x,y)=>panel.mapScreenPoint(x,y)}).attach({getBoundingClientRect:()=>({left:0,top:0,width:1000,height:1000}),addEventListener(n,cb){if(n==='wheel')wheel=cb;}});
+ const edge=panel.mapScreenPoint(0,400),send=deltaX=>wheel({clientX:edge.x,clientY:edge.y,deltaX,deltaY:0,preventDefault(){}});
+ send(-60);const out=contacts[0].x;send(60);assert.ok(contacts[0].x<out,'reversal moves the fingers back at once');
+});

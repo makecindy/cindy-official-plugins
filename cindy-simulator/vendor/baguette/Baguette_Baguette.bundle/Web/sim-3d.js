@@ -949,7 +949,7 @@
     const { width, height } = this.deviceSize;
     // rawX/rawY keep the unclamped solve so relative motion (wheel pan)
     // survives a pointer parked against the screen edge.
-    return { x: xNorm * width, y: yNorm * height, rawX: solved.u * width, rawY: solved.v * height, xNorm, yNorm, inside: solved.inside };
+    return { x: xNorm * width, y: yNorm * height, rawX: (solved.rawU ?? solved.u) * width, rawY: (solved.rawV ?? solved.v) * height, xNorm, yNorm, inside: solved.inside };
   };
 
   Sim3DPanel.prototype.sendCamera = function () {

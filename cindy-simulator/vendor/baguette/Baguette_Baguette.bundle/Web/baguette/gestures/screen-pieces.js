@@ -61,6 +61,9 @@
         const placed = {
           u: piece.u[0] + Math.max(0, Math.min(1, hit.u)) * (piece.u[1] - piece.u[0]),
           v: piece.v[0] + Math.max(0, Math.min(1, hit.v)) * (piece.v[1] - piece.v[0]),
+          // Unclamped placement, for relative motion past the screen edge.
+          rawU: piece.u[0] + hit.u * (piece.u[1] - piece.u[0]),
+          rawV: piece.v[0] + hit.v * (piece.v[1] - piece.v[0]),
           inside: !!hit.inside,
         };
         if (placed.inside) return placed;

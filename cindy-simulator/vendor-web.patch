@@ -11,7 +11,7 @@
        screenArea.style.top = sp.top + '%';
 --- a/baguette/gestures/screen-pieces.js
 +++ b/baguette/gestures/screen-pieces.js
-@@ -31,12 +31,32 @@
+@@ -31,20 +31,54 @@
        return new ScreenPieces(quad ? [{ quad, u: [0, 1], v: [0, 1] }] : []);
      }
 
@@ -46,7 +46,10 @@
          const hit = piece.quad.locate(px, py);
          const placed = {
            u: piece.u[0] + Math.max(0, Math.min(1, hit.u)) * (piece.u[1] - piece.u[0]),
-@@ -44,7 +64,18 @@
+           v: piece.v[0] + Math.max(0, Math.min(1, hit.v)) * (piece.v[1] - piece.v[0]),
++          // Unclamped placement, for relative motion past the screen edge.
++          rawU: piece.u[0] + hit.u * (piece.u[1] - piece.u[0]),
++          rawV: piece.v[0] + hit.v * (piece.v[1] - piece.v[0]),
            inside: !!hit.inside,
          };
          if (placed.inside) return placed;
@@ -361,7 +364,7 @@
 -    return { x: xNorm * width, y: yNorm * height, xNorm, yNorm, inside: solved.inside };
 +    // rawX/rawY keep the unclamped solve so relative motion (wheel pan)
 +    // survives a pointer parked against the screen edge.
-+    return { x: xNorm * width, y: yNorm * height, rawX: solved.u * width, rawY: solved.v * height, xNorm, yNorm, inside: solved.inside };
++    return { x: xNorm * width, y: yNorm * height, rawX: (solved.rawU ?? solved.u) * width, rawY: (solved.rawV ?? solved.v) * height, xNorm, yNorm, inside: solved.inside };
    };
 
    Sim3DPanel.prototype.sendCamera = function () {
