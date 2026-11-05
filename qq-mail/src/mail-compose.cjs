@@ -532,6 +532,9 @@ function createMailCompose(env) {
       });
     }
     files = files.concat(additions);
+    // The card reads the HTML back as two fields; derived HTML (one block per line) can
+    // outgrow them even when the text fits, so refuse before anything is written.
+    if (bodyHtml.length > MAX_HTML_FIELD || quoteHtml.length > MAX_HTML_FIELD) throw new ComposeError('fieldsInvalid');
     const html = bodyHtml + quoteHtml;
     return {
       to: fields.to, cc: fields.cc, bcc: fields.bcc, subject: fields.subject,

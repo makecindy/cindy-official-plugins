@@ -66588,6 +66588,7 @@ var require_mail_compose = __commonJS({
           });
         }
         files = files.concat(additions);
+        if (bodyHtml.length > MAX_HTML_FIELD || quoteHtml.length > MAX_HTML_FIELD) throw new ComposeError("fieldsInvalid");
         const html = bodyHtml + quoteHtml;
         return {
           to: fields.to,

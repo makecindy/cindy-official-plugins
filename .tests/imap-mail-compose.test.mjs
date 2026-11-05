@@ -449,6 +449,23 @@ export function runImapComposeSuite(plugin, options) {
     assert.ok(quoted.result.readBack.editor.quoteHtml.length <= 64000);
   });
 
+  test(plugin + ': a card edit whose derived HTML cannot fit the card is refused before the mailbox is written', async () => {
+    const t = h();
+    await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Hello', body_text: 'Body' });
+    const appends = () => t.box.calls.filter((call) => call === 'append').length;
+    const before = appends();
+    await t.card('change', { ...t.values(), body: 'x\n'.repeat(6000) });
+    await t.advance(2000);
+    assert.equal(appends(), before, 'nothing was appended');
+    assert.match(t.draftSource(), /Body/);
+    assert.doesNotMatch(t.draftSource(), /xxx/);
+    assert.equal(t.lastCard().draft.state, 'error', 'the card shows why it was not saved');
+    // A fitting edit still saves.
+    await t.card('change', { ...t.values(), body: 'x\n'.repeat(600) });
+    await t.advance(2000);
+    assert.equal(appends(), before + 1);
+  });
+
   test(plugin + ': card records keep only routing and receipts in plugin KV', async () => {
     const t = h();
     const created = await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Hello', body_text: 'Body' });
