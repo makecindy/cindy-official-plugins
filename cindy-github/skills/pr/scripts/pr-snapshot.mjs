@@ -375,6 +375,9 @@ query($owner: String!, $name: String!, $number: Int!) {
           commit { oid }
         }
       }
+      reactions(last: 30) {
+        nodes { content createdAt user { login } }
+      }
       comments(last: 100) {
         totalCount
         nodes {
@@ -421,6 +424,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       comments(last: 1) { totalCount nodes { updatedAt } }
       reviews(last: 1) { totalCount nodes { updatedAt } }
       reviewThreads { totalCount }
+      reactions { totalCount }
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 1) {
         checkRunCountsByState { state count }
         statusContextCountsByState { state count }
@@ -443,6 +447,8 @@ function probeFingerprint(pr) {
       pr.comments?.totalCount ?? 0, pr.comments?.nodes?.at(-1)?.updatedAt ?? '',
       pr.reviews?.totalCount ?? 0, pr.reviews?.nodes?.at(-1)?.updatedAt ?? '',
       pr.reviewThreads?.totalCount ?? 0,
+      // A bot reviewer's 👍 (Codex: no suggestions) ends the wait after a push.
+      pr.reactions?.totalCount ?? 0,
     ].join(' '),
     // base 分支当前提交:只在检查失败期间被 gate 用来判断要不要完整读取。
     base: pr.baseRef?.target?.oid ?? '',
@@ -617,6 +623,8 @@ async function main() {
     reviewThreads,
     reviews: (pr.reviews?.nodes || []).map(normalizeReview),
     comments: (pr.comments?.nodes || []).map(normalizeTopComment),
+    // Reactions on the PR itself: a bot reviewer's 👍 can be its whole answer to a push.
+    reactions: (pr.reactions?.nodes || []).map((r) => ({ content: r.content ?? null, at: r.createdAt ?? null, author: r.user?.login ?? null })),
     // Older top-level comments beyond the 100 read (a PR with more than that; the gate watches new ones only).
     commentsOmitted: Math.max(0, (pr.comments?.totalCount ?? 0) - (pr.comments?.nodes?.length ?? 0)),
   };

@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.4.2');
+  assert.equal(manifest.version, '1.4.3');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -868,10 +868,15 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   assert.equal(lines[1], 'octo/repo');
   assert.equal(lines.filter((line) => line === zhCopy.prStateFollowing).length, 1);
   for (const text of [zhCopy.prCiRunning, fill(zhCopy.prThreadsOpen, { count: 1 }), zhCopy.prMergeWaiting]) assert.ok(lines.includes(text), text);
+  // Parts that only hold while the PR is open carry the slot key, so the host can hide them once it sees a merge.
+  const openOnly = runtime.lastCard(cardId).html.match(/<(\w+)[^>]*data-ghost-pr-open-only="octo\/repo#7"/g) ?? [];
+  // The settings panel opened earlier in this test is open-only too (Greptile P2 on #287), not just its button.
+  assert.deepEqual(openOnly.map((tag) => tag.match(/^<(\w+)/)[1]), ['button', 'div', 'div']);
 
   runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));
   const merged = await runtime.tool({ card_id: cardId });
   assert.equal(merged.reply.result.stage, 'merged');
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-open-only/);
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
     '#7 Fix login', `octo/repo · ${zhCopy.prStateMerged} · ${zhCopy.prFollowEnded}`, 'fix/login → main',
   ]);
