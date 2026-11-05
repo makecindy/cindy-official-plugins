@@ -868,3 +868,169 @@ test('visible rows share the selected reading, off devices wait five minutes, an
  pending[2].resolve(sample(3*1024**3,6*1024**3));await boot;
  assert.match(dom.text(view.node),/磁盘 7.00 GiB/);assert.doesNotMatch(dom.text(view.node),/内存|6.00 GiB/);
 });
+
+test('3D percentages use lit-screen points independently of window fit, stream density and panel',async()=>{
+ let logical={width:800,height:600},available={width:400,height:700};
+ const f=await boot({respond:({action})=>action==='viewport'?logical:status()});
+ const frame=f.dom.byId.frame,screen=f.dom.byId.screen;
+ f.context.getComputedStyle=()=>({paddingLeft:'12px',paddingRight:'12px',paddingTop:'12px',paddingBottom:'64px'});
+ f.dom.byId.stage.getBoundingClientRect=()=>available;
+ let panel='primary',density=1;
+ // Real 3D framing: a 1000x1000 stage contains an 800x600 screen;
+ // fixed viewer chrome occupies 20x68px. Measurements follow laid-out CSS,
+ // regardless of video backing resolution, just as contentRect does.
+ screen.contentDocument.getElementById=id=>id==='simNativeView'?{getAttribute:()=> 'open'}:null;
+ screen.contentWindow.__cindyView=()=>{
+  const w=parseFloat(frame.style.width)||400,h=parseFloat(frame.style.height)||700;
+  const scale=Math.min((w-24-20)/1000,(h-76-68)/1000);
+  return {panel,width:logical.width*scale,height:logical.height*scale,
+   stageWidth:1000*scale,stageHeight:1000*scale,insetX:20,insetY:68,backingWidth:1000*density};
+ };
+ await f.sim.measure();
+ assert.equal(f.sim.state.fitPct,35.6);
+ f.sim.setZoom({mode:'pct',pct:100});
+ for(let i=0;i<8;i++){await f.sim.measure();assert.equal(frame.style.width,'1044px');assert.equal(frame.style.height,'1144px');}
+ assert.equal(screen.contentWindow.__cindyView().width,800,'100% is device points');
+ available={width:900,height:1000};density=3;await f.sim.measure();
+ assert.equal(frame.style.width,'1044px','window resize does not change absolute size');
+ assert.equal(screen.contentWindow.__cindyView().width,800);
+ f.sim.setZoom({mode:'pct',pct:200});await f.sim.measure();
+ assert.equal(screen.contentWindow.__cindyView().width,1600);
+ f.sim.setZoom({mode:'fit'});await f.sim.measure();
+ assert.equal(frame.style.width,'900px');assert.equal(frame.style.height,'1000px');
+ assert.equal(f.sim.state.fitPct,85.6);
+ // Changing to the cover refreshes point dimensions; it does not reuse the
+ // unfolded screen's viewport. Rotation retains the same logical long side.
+ panel='secondary';logical={width:400,height:700};await f.sim.measure();
+ f.sim.setZoom({mode:'pct',pct:100});await f.sim.measure();
+ assert.equal(screen.contentWindow.__cindyView().height,700);
+ logical={width:700,height:400};await f.sim.measure();
+ assert.equal(Math.max(screen.contentWindow.__cindyView().width,screen.contentWindow.__cindyView().height),700);
+ assert.equal(f.calls.filter(p=>p.action==='viewport').length,2,'geometry reads only when the lit panel changes');
+ screen.contentWindow.__cindyView=()=>null;await f.sim.measure();
+ assert.equal(frame.style.width,'1044px','temporary missing metadata does not reset percent to fit');
+});
+
+test('3D Fit fills the usable window with device and controls, cropping camera margins without redefining 100%',async()=>{
+ let available={width:400,height:700};
+ const f=await boot({respond:({action})=>action==='viewport'?{width:400,height:600}:status()});
+ const frame=f.dom.byId.frame,screen=f.dom.byId.screen,scroll=f.dom.byId.scroll;
+ f.context.getComputedStyle=()=>({paddingLeft:'12px',paddingRight:'12px',paddingTop:'12px',paddingBottom:'64px'});
+ f.dom.byId.stage.getBoundingClientRect=()=>available;
+ Object.defineProperties(scroll,{clientWidth:{get:()=>available.width},clientHeight:{get:()=>available.height}});
+ screen.contentDocument.getElementById=id=>id==='simNativeView'?{getAttribute:()=> 'open'}:null;
+ screen.contentWindow.__cindyView=()=>{
+  const w=parseFloat(frame.style.width)||400,h=parseFloat(frame.style.height)||700;
+  const scale=Math.min((w-48)/1500,(h-144)/2000);
+  return {panel:'primary',width:400*scale,height:600*scale,stageWidth:1500*scale,stageHeight:2000*scale,insetX:24,insetY:68,
+   fit:{width:600*scale,height:800*scale,centerX:12+825*scale,centerY:34+1000*scale}};
+ };
+ await f.sim.measure();f.sim.setZoom({mode:'fit'});
+ for(const size of [{width:400,height:700},{width:1000,height:500},{width:350,height:900}]){
+  available=size;
+  for(let i=0;i<5;i++)await f.sim.measure();
+  const projected=screen.contentWindow.__cindyView().fit;
+  const scale=Math.min((size.width-24-36)/600,(size.height-76-36)/800);
+  assert.ok(Math.abs(f.sim.state.fitPct-scale*100)<1e-6);
+  assert.ok(Math.abs(projected.width-600*scale)<1e-6);
+  assert.ok(Math.abs(scroll.scrollLeft-(projected.centerX-(size.width-24)/2))<1e-6,'off-centre controls remain centred with the device');
+  assert.ok(Math.abs(scroll.scrollTop-(projected.centerY-(size.height-76)/2))<1e-6,'bottom toolbar space remains reserved');
+  assert.equal(f.dom.byId.stage.getAttribute('data-fit3d'),'','blank scene margins are clipped in Fit');
+ }
+ f.sim.setZoom({mode:'pct',pct:100});await f.sim.measure();
+ assert.equal(screen.contentWindow.__cindyView().width,400);
+ assert.equal(f.dom.byId.stage.getAttribute('data-fit3d'),null,'percentage views remain scrollable');
+});
+
+test('first-frame calibration joins pending geometry reads and reveals only the fitted current document',async()=>{
+ let resolve;const f=await boot({respond:({action})=>action==='viewport'?new Promise(r=>{resolve=r;}):status()});
+ const frame=f.dom.byId.frame,screen=f.dom.byId.screen;
+ screen.contentDocument.getElementById=id=>id==='simNativeView'?{getAttribute:()=> 'open'}:null;
+ let height=600;
+ screen.contentWindow.__cindyView=()=>({panel:'primary',width:400,height,stageWidth:1500,stageHeight:2000,insetX:24,insetY:68,fit:{width:500,height:800,centerX:750,centerY:1000}});
+ let reveals=0;
+ screen.contentWindow.__cindyLayoutReady=()=>{reveals++;assert.ok(parseFloat(frame.style.width)>400);assert.equal(f.dom.byId.stage.getAttribute('data-fit3d'),'');};
+ const first=f.sim.measure(),second=f.sim.measure();await new Promise(r=>setImmediate(r));
+ assert.equal(f.calls.filter(c=>c.action==='viewport').length,1);assert.equal(reveals,0);
+ height=800;resolve({width:400,height:800});await Promise.all([first,second]);
+ assert.equal(reveals,2);assert.equal(f.sim.state.view3D.width,1500,'the latest metadata is used after the async read');
+ f.sim.state.panel3D=null;f.sim.state.viewport=null;f.sim.state.view3D=null;
+ const stale=f.sim.measure();await new Promise(r=>setImmediate(r));
+ screen.contentDocument={getElementById:()=>null};resolve({width:400,height:800});await stale;
+ assert.equal(reveals,2,'a response for the old iframe never reveals its replacement');
+});
+
+test('resizing retains the previous view centre instead of mixing new client size with old offsets',async()=>{
+ const f=await boot({respond:()=>status()});
+ const viewport={width:800,height:600},scroll=f.dom.byId.scroll,frame=f.dom.byId.frame;
+ f.dom.byId.stage.getBoundingClientRect=()=>viewport;
+ let left=0,top=0;
+ const content=axis=>Math.max(viewport[axis],parseFloat(frame.style[axis])||0);
+ Object.defineProperties(scroll,{
+  clientWidth:{get:()=>viewport.width},clientHeight:{get:()=>viewport.height},
+  scrollWidth:{get:()=>content('width')},scrollHeight:{get:()=>content('height')},
+  scrollLeft:{get:()=>Math.min(left,content('width')-viewport.width),set:value=>{left=Math.max(0,Math.min(value,content('width')-viewport.width));}},
+  scrollTop:{get:()=>Math.min(top,content('height')-viewport.height),set:value=>{top=Math.max(0,Math.min(value,content('height')-viewport.height));}},
+ });
+ f.sim.state.fitPct=100;f.sim.applyZoom();
+ f.sim.setZoom({mode:'pct',pct:150});
+ const centre=axis=>((axis==='width'?scroll.scrollLeft:scroll.scrollTop)+viewport[axis]/2)/content(axis);
+ const centred=()=>{assert.ok(Math.abs(centre('width')-.5)<.001);assert.ok(Math.abs(centre('height')-.5)<.001);};
+ centred();assert.equal(scroll.scrollLeft,200);assert.equal(scroll.scrollTop,150);
+ for(const [width,height] of [[400,1000],[1200,400],[320,900],[1600,1100],[800,600]]){
+  viewport.width=width;viewport.height=height;
+  // Browsers may emit a scroll after clamping during layout, before RO.
+  scroll.dispatch('scroll');f.sim.applyZoom();centred();
+ }
+ // Manual panning is meaningful: resize/zoom should preserve that part of
+ // the device instead of snapping everything back to the geometric centre.
+ scroll.scrollLeft=300;scroll.scrollTop=100;scroll.dispatch('scroll');
+ const focus={x:centre('width'),y:centre('height')};
+ viewport.width=600;viewport.height=500;scroll.dispatch('scroll');f.sim.applyZoom();
+ assert.ok(Math.abs(centre('width')-focus.x)<.001);assert.ok(Math.abs(centre('height')-focus.y)<.001);
+ f.sim.setZoom({mode:'pct',pct:200});
+ assert.ok(Math.abs(centre('width')-focus.x)<.001);assert.ok(Math.abs(centre('height')-focus.y)<.001);
+ f.sim.setZoom({mode:'fit'});assert.equal(scroll.scrollLeft,0);assert.equal(scroll.scrollTop,0);
+ f.sim.setZoom({mode:'pct',pct:150});centred();
+});
+
+test('fold Fit follows metadata before a slow viewport read, eases scale and centre, and ignores stale calibration',async()=>{
+ let resolve,panel='primary',now=0,next=0;const raf=new Map();
+ const f=await boot({respond:({action})=>action==='viewport'?new Promise(r=>{resolve=r;}):status()});
+ const {frame,screen,scroll,stage}=f.dom.byId;
+ f.context.performance={now:()=>now};f.context.requestAnimationFrame=fn=>{raf.set(++next,fn);return next;};f.context.cancelAnimationFrame=id=>raf.delete(id);
+ const step=time=>{now=time;const callbacks=[...raf.values()];raf.clear();callbacks.forEach(fn=>fn(time));};
+ stage.getBoundingClientRect=()=>({width:400,height:700});scroll.clientWidth=400;scroll.clientHeight=700;
+ screen.contentDocument.getElementById=id=>id==='simNativeView'?{getAttribute:()=> 'open'}:null;
+ screen.contentWindow.__cindyView=()=>{
+  const scale=Math.min((parseFloat(frame.style.width)||400)/1500,(parseFloat(frame.style.height)||700)/2000);
+  return {panel,width:400*scale,height:600*scale,stageWidth:1500*scale,stageHeight:2000*scale,insetX:0,insetY:0,
+   fit:{width:(panel==='primary'?600:1000)*scale,height:800*scale,centerX:(panel==='primary'?750:900)*scale,centerY:1000*scale}};
+ };
+ const initial=f.sim.measure();resolve({width:400,height:600});await initial;
+ const initialWidth=parseFloat(frame.style.width),initialLeft=scroll.scrollLeft;
+ panel='secondary';await f.sim.measure({animate:true});await f.sim.measure({animate:true});
+ assert.equal(f.calls.filter(c=>c.action==='viewport').length,2,'one joined background calibration per panel');
+ assert.equal(parseFloat(frame.style.width),initialWidth,'scheduling the transition does not jump');
+ assert.equal(scroll.scrollLeft,initialLeft);
+ step(30);const middle=parseFloat(frame.style.width);
+ assert.ok(middle<initialWidth && middle>546,'Fit moves before the pending system query completes');
+ assert.ok(scroll.scrollLeft<initialLeft,'centering moves with scale');
+ step(180);assert.ok(Math.abs(parseFloat(frame.style.width)-546)<1e-6);
+ assert.ok(Math.abs(scroll.scrollLeft-(screen.contentWindow.__cindyView().fit.centerX-200))<1e-6);
+ resolve({width:800,height:1200});await new Promise(r=>setImmediate(r));step(360);
+ assert.ok(Math.abs(parseFloat(frame.style.width)-546)<1e-6,'point calibration does not change Fit geometry');
+ panel='primary';await f.sim.measure({animate:true});step(390);const turning=parseFloat(frame.style.width);
+ assert.ok(turning>546 && turning<initialWidth);
+ panel='secondary';await f.sim.measure({animate:true});assert.equal(parseFloat(frame.style.width),turning);
+ step(420);assert.ok(parseFloat(frame.style.width)<turning,'quick reversal starts from the displayed size');
+ resolve({width:1,height:1});await new Promise(r=>setImmediate(r));
+ assert.equal(f.sim.state.panel3D,'secondary','old-panel response is ignored');
+ assert.equal(f.sim.state.viewport.width,800);
+ f.sim.setZoom({mode:'pct',pct:100});const manual=frame.style.width;step(1000);assert.equal(frame.style.width,manual,'manual zoom cancels the fit motion');
+ f.sim.setZoom({mode:'fit'});f.context.matchMedia=()=>({matches:true});panel='primary';await f.sim.measure({animate:true});
+ assert.ok(Math.abs(parseFloat(frame.style.width)-initialWidth)<1e-6,'reduced motion applies the new Fit immediately');
+ assert.equal(raf.size,0);
+ screen.contentDocument={getElementById:()=>null};resolve({width:4,height:4});await new Promise(r=>setImmediate(r));
+ assert.equal(f.sim.state.viewport.width,800,'old-document response is ignored');
+});

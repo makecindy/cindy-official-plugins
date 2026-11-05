@@ -170,6 +170,8 @@
         '<div class="r3d-live-state" data-role="live-state">' +
           '<span class="r3d-spinner"></span><span>Loading model…</span>' +
         '</div>';
+    this.interactionObserver?.disconnect();
+    this.interactionSurface=null;
     this.canvas = this.stage.querySelector('canvas');
     this.canvas.addEventListener('mousedown', (event) => {
       if (event.button === 0 && this.mode === 'pose') {
@@ -412,9 +414,13 @@
           this.screenQuad = pieces.length ? pieces : null;
           if ((envelope.litPanel === 'primary' || envelope.litPanel === 'secondary') &&
               envelope.litPanel !== this.litPanel) {
+            this.interactiveScreen?.cancelInput();
             this.litPanel = envelope.litPanel;
             if (this.onLitPanelChange) this.onLitPanelChange(this.litPanel);
           }
+          if(this.inputHinge!==undefined && this.inputHinge!==envelope.pose?.hingeDegrees) this.interactiveScreen?.cancelInput();
+          this.inputHinge=envelope.pose?.hingeDegrees;
+          this.updateInteractionSurface();
           this.placeButtons(Array.isArray(envelope.buttons) ? envelope.buttons : []);
           this.placePosePicker(envelope.pose || null);
           return true;
@@ -454,6 +460,7 @@
 
   Sim3DPanel.prototype.stop = function () {
     this.cancelPointer();
+    this.interactiveScreen?.cancelInput();
     this.generation += 1;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = null;
@@ -499,6 +506,8 @@
   };
 
   Sim3DPanel.prototype.detach = function () {
+    this.interactionObserver?.disconnect();this.interactionObserver=null;
+    this.interactionSurface?.remove();this.interactionSurface=null;
     this.stop();
     if (this.interactiveScreen) this.interactiveScreen.detach();
     this.interactiveScreen = null;
@@ -513,6 +522,7 @@
   };
 
   Sim3DPanel.prototype.send = function (payload) {
+    if(payload.type==='set_pose')this.interactiveScreen?.cancelInput();
     return !!(this.session && this.session.send(payload));
   };
 
@@ -670,14 +680,28 @@
     if (this.stage) this.stage.dataset.mode = this.mode;
     if (this.interactiveScreen && this.canvas) {
       if (this.mode === 'interact') {
+        if(!this.interactionSurface){
+          const surface=document.createElement('div');
+          surface.className='r3d-touch-surface';
+          surface.style.cssText='position:absolute;touch-action:none;z-index:1;outline:none;';
+          this.stage.appendChild(surface);this.interactionSurface=surface;
+          if(typeof ResizeObserver==='function'){
+            this.interactionObserver=new ResizeObserver(()=>this.updateInteractionSurface());
+            this.interactionObserver.observe(this.canvas);
+          }
+        }
+        this.updateInteractionSurface();
         this.interactiveScreen.bindInteraction({
-          element: this.canvas,
+          element: this.interactionSurface,
           overlayHost: this.stage,
           mapClientPoint: (clientX, clientY) => this.mapClientPoint(clientX, clientY),
+          mapScreenPoint: (x,y) => this.mapScreenPoint(x,y),
         });
       } else {
         this.interactiveScreen.unbindInteraction();
+        if(this.interactionSurface){this.interactionSurface.hidden=true;this.interactionSurface.removeAttribute('data-cindy-trackpad');}
       }
+      if(this.keyboard){this.keyboard.detach();this.keyboard.attach(this.mode==='interact'?this.interactionSurface:this.canvas);}
     }
     const selector = '[data-mode], [data-stage-mode]';
     document.querySelectorAll(selector).forEach((candidate) => {
@@ -799,7 +823,7 @@
     if (label) label.textContent = message || '';
     const spinner = state.querySelector('.r3d-spinner');
     if (spinner) spinner.hidden = !busy;
-    if (!message && this.canvas) this.canvas.setAttribute('data-painted', '');
+    if (!message && this.canvas) { this.canvas.setAttribute('data-painted', '');this.updateInteractionSurface(); }
   };
 
   Sim3DPanel.prototype.pointerDown = function (id, clientX, clientY, event) {
@@ -882,6 +906,33 @@
    * screen is a rotated, perspective-foreshortened quad sitting inside
    * a larger canvas (device body/bezel/background/cover-glass).
    */
+  Sim3DPanel.prototype.updateInteractionSurface = function () {
+    const surface=this.interactionSurface,canvas=this.canvas,pieces=this.screenQuad?.pieces;
+    if(!surface)return;
+    const ready=this.mode==='interact'&&canvas?.hasAttribute('data-painted')&&pieces?.length;
+    surface.hidden=!ready;
+    if(!ready){surface.removeAttribute('data-cindy-trackpad');return;}
+    const rect=window.Baguette._ScreenQuad.contentRect(canvas),stage=this.stage.getBoundingClientRect();
+    const points=pieces.flatMap(p=>[p.quad.topLeft,p.quad.topRight,p.quad.bottomRight,p.quad.bottomLeft]);
+    const left=Math.min(...points.map(p=>p.u))*rect.width,top=Math.min(...points.map(p=>p.v))*rect.height;
+    const width=Math.max(...points.map(p=>p.u))*rect.width-left,height=Math.max(...points.map(p=>p.v))*rect.height-top;
+    if(!(width>0&&height>0)){surface.hidden=true;surface.removeAttribute('data-cindy-trackpad');return;}
+    Object.assign(surface.style,{left:(rect.left-stage.left+left)+'px',top:(rect.top-stage.top+top)+'px',width:width+'px',height:height+'px'});
+    // Hit-test only lit screen pieces. Camera margins, bezel and the gap
+    // between folded halves cannot start a native touch capture.
+    const path=pieces.map(({quad:q})=>[q.topLeft,q.topRight,q.bottomRight,q.bottomLeft]
+      .map((p,i)=>(i?'L':'M')+(p.u*rect.width-left)+' '+(p.v*rect.height-top)).join(' ')+' Z').join(' ');
+    surface.style.clipPath=`path('${path}')`;
+    surface.setAttribute('data-cindy-trackpad','contacts');
+  };
+
+  Sim3DPanel.prototype.mapScreenPoint = function (x,y) {
+    const point=this.screenQuad?.project(x/this.deviceSize.width,y/this.deviceSize.height);
+    if(!point||!this.canvas)return null;
+    const rect=window.Baguette._ScreenQuad.contentRect(this.canvas);
+    return {x:rect.left+point.u*rect.width,y:rect.top+point.v*rect.height};
+  };
+
   Sim3DPanel.prototype.mapClientPoint = function (clientX, clientY) {
     const ScreenQuad = window.Baguette._ScreenQuad;
     const outside = { x: 0, y: 0, xNorm: 0, yNorm: 0, inside: false };
@@ -896,7 +947,9 @@
     const xNorm = Math.max(0, Math.min(1, solved.u));
     const yNorm = Math.max(0, Math.min(1, solved.v));
     const { width, height } = this.deviceSize;
-    return { x: xNorm * width, y: yNorm * height, xNorm, yNorm, inside: solved.inside };
+    // rawX/rawY keep the unclamped solve so relative motion (wheel pan)
+    // survives a pointer parked against the screen edge.
+    return { x: xNorm * width, y: yNorm * height, rawX: (solved.rawU ?? solved.u) * width, rawY: (solved.rawV ?? solved.v) * height, xNorm, yNorm, inside: solved.inside };
   };
 
   Sim3DPanel.prototype.sendCamera = function () {
@@ -920,6 +973,7 @@
    * Nothing is read back — a rotation made in Device Hub is its own.
    */
   Sim3DPanel.prototype.setInterfaceOrientation = function (value) {
+    if(this.interfaceOrientation!==value)this.interactiveScreen?.cancelInput();
     this.interfaceOrientation = value;
     this.sendCamera();
   };

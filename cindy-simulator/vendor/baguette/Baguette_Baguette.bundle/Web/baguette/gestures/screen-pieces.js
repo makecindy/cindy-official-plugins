@@ -31,6 +31,25 @@
       return new ScreenPieces(quad ? [{ quad, u: [0, 1], v: [0, 1] }] : []);
     }
 
+    // Forward projection used by contact indicators. The inverse hit-test and
+    // this map share the same piece ranges, including folded screen halves.
+    project(u,v) {
+      let selected=null,distance=Infinity;
+      for(const piece of this.pieces){
+        const pu=Math.max(Math.min(...piece.u),Math.min(Math.max(...piece.u),u));
+        const pv=Math.max(Math.min(...piece.v),Math.min(Math.max(...piece.v),v));
+        const d=(u-pu)**2+(v-pv)**2;
+        if(d<distance){selected={piece,u:pu,v:pv};distance=d;}
+      }
+      if(!selected)return null;
+      const {piece}=selected,q=piece.quad;
+      const x=(selected.u-piece.u[0])/(piece.u[1]-piece.u[0]||1);
+      const y=(selected.v-piece.v[0])/(piece.v[1]-piece.v[0]||1);
+      const blend=axis=>q.topLeft[axis]*(1-x)*(1-y)+q.topRight[axis]*x*(1-y)+
+        q.bottomRight[axis]*x*y+q.bottomLeft[axis]*(1-x)*y;
+      return {u:blend('u'),v:blend('v')};
+    }
+
     /** Frame point (normalized) → framebuffer point (normalized). Off
      *  every piece, the point is still placed — clamped onto the nearest
      *  piece — so a drag that leaves the screen keeps a position. */
@@ -42,6 +61,9 @@
         const placed = {
           u: piece.u[0] + Math.max(0, Math.min(1, hit.u)) * (piece.u[1] - piece.u[0]),
           v: piece.v[0] + Math.max(0, Math.min(1, hit.v)) * (piece.v[1] - piece.v[0]),
+          // Unclamped placement, for relative motion past the screen edge.
+          rawU: piece.u[0] + hit.u * (piece.u[1] - piece.u[0]),
+          rawV: piece.v[0] + hit.v * (piece.v[1] - piece.v[0]),
           inside: !!hit.inside,
         };
         if (placed.inside) return placed;
