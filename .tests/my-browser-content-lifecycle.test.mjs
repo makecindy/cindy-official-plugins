@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import fs from 'node:fs/promises';
 const source=await fs.readFile(new URL('../my-browser/extension/content.js',import.meta.url),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(send=async()=>({enabled:false}),preferences={}){
+function fixture(send=async()=>({enabled:false}),preferences={},page={}){
+  const hostname=page.hostname||'example.test';
   const timers=new Map(),sent=[],listeners=new Set(),nodes=[],storageListeners=new Set(),documentHandlers={};let sequence=0,stored={...preferences};
   class Node extends EventTarget {
     constructor(){super();nodes.push(this);this.handlers={};this.attrs={};this.children=[];this.className='';this.isConnected=true;this.style={props:Object.create(null),setProperty(k,v){this.props[k]=v;},getPropertyValue(k){return this.props[k]||'';},removeProperty(k){delete this.props[k];}};}
@@ -26,14 +27,14 @@ function fixture(send=async()=>({enabled:false}),preferences={}){
     closest(){return null;} getClientRects(){return [];}
     getBoundingClientRect(){return {top:0,bottom:0,left:0,right:0,width:0,height:0};}
   }
-  const document=new EventTarget();document.querySelector=()=>null;document.title='Fixture';
+  const document=new EventTarget();let video=null;document.querySelector=sel=>page.video&&/(^|,)\s*video\b/.test(sel)?(video||=new Node()):null;document.title='Fixture';
   const addDocumentListener=document.addEventListener.bind(document);
   document.addEventListener=(name,fn,options)=>{documentHandlers[name]=fn;addDocumentListener(name,fn,options);};
   document.querySelectorAll=()=>[];
   document.createElement=document.createElementNS=()=>new Node();document.documentElement=new Node();document.body=new Node();
   function setPreferences(value){const oldValue=stored;stored={...value};for(const fn of storageListeners)fn({cindyReadingPreferences:{oldValue,newValue:stored}},'local');}
   const chrome={runtime:{id:'fixture',getURL:p=>'chrome-extension://fixture/'+p,sendMessage:m=>{sent.push(m);return send(m);},onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}},storage:{local:{get:async()=>({cindyReadingPreferences:{...stored}}),set:async data=>setPreferences(data.cindyReadingPreferences)},onChanged:{addListener:fn=>storageListeners.add(fn),removeListener:fn=>storageListeners.delete(fn)}}};
-  const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://example.test/start',hostname:'example.test',origin:'https://example.test'},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
+  const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://'+hostname+'/start',hostname,origin:'https://'+hostname},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
   vm.runInNewContext(source,context);
   return {chrome,context,timers,sent,listeners,nodes,documentHandlers,setPreferences,preferences:()=>stored};
 }
@@ -154,9 +155,25 @@ test('a late startup reply after invalidation cannot reopen UI or restart pollin
   f.chrome.runtime=undefined;[...f.timers.values()][0]();resolve({enabled:true});await settle();assert.equal(f.timers.size,0);
 });
 
+// Automatic subtitles on single-player sites must not override page translation.
+function watchPage(f){const counts={observe:0,disconnect:0};f.context.MutationObserver=class{observe(){counts.observe++;}disconnect(){counts.disconnect++;}};return counts;}
+test('an enabled per-site translation wins over default-on subtitles on a video site',{timeout:5000},async()=>{
+  const f=fixture(async m=>m.request?.op==='translate'?{ok:true,translations:[]}:{ok:true,enabled:false},{autoSites:{'https://vimeo.com':true}},{hostname:'vimeo.com',video:true});
+  const page=watchPage(f);await settle();await settle();await settle();
+  assert.equal(page.observe,1,'the page is translated');assert.equal(page.disconnect,0,'subtitles did not replace it');
+});
+test('turning automatic subtitles on does not interrupt a page translation in progress',{timeout:5000},async()=>{
+  const f=fixture(async m=>m.request?.op==='translate'?new Promise(()=>{}):{ok:true,enabled:false},{autoVideo:false},{hostname:'vimeo.com',video:true});
+  const page=watchPage(f);await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'translate-page'},{id:'fixture'},()=>{});await settle();await settle();
+  assert.equal(page.observe,1);
+  f.setPreferences({...f.preferences(),autoVideo:true});await settle();await settle();await settle();
+  assert.equal(page.disconnect,0,'the reader keeps the page translation');
+});
+
 test('native cues share safe markup cleanup and disabled YouTube auto-open stops retry polling',()=>{
   assert.match(source,/text:L\.cleanSubtitleText\(c\.text\)\.slice\(0,4000\)/);
-  assert.match(source,/if\(!enabled\)\{[\s\S]*?if\(youtube\)prefs\.autoVideo=false;[\s\S]*?nextAutoAttempt=Date\.now\(\)\+5000;[\s\S]*?return;/);
+  assert.match(source,/if\(!siteEnabled&&!videoEnabled\)\{[\s\S]*?if\(youtube\)prefs\.autoVideo=false;[\s\S]*?nextAutoAttempt=Date\.now\(\)\+5000;[\s\S]*?return;/);
 });
 
 test('an interrupted panel open cannot recreate removed UI when its config reply arrives',async()=>{

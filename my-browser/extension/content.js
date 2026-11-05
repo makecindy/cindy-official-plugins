@@ -208,7 +208,8 @@
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
     if(videoTargetChanged&&videoSession)reapplyVideoTarget(nextVideoTarget);
     const youtube=autoVideoSite;
-    const relevantEnable=youtube?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled;
+    const relevantEnable=youtube&&!videoWasEnabled&&videoIsEnabled||!siteWasEnabled&&siteIsEnabled;
+    if(!siteWasEnabled&&siteIsEnabled)autoTranslatedURL='';
     if(relevantEnable){nextAutoAttempt=0;if(!videoSession)autoOpen();}
     else if(!videoIsEnabled)nextAutoAttempt=Date.now()+5000;
   }
@@ -742,30 +743,34 @@
   }
   function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
-  let autoOpening=false,nextAutoAttempt=0;
+  let autoOpening=false,nextAutoAttempt=0,autoTranslatedURL='';
   async function autoOpen(){
     if(!runtimeReady()||autoOpening||videoSession)return;
     if(document.querySelector('video,audio'))ensureVideoEntry();
     // An embedded player only starts when someone asks for it.
     if(inFrame)return;
     const youtube=autoVideoSite&&!!document.querySelector('video');
-    if(!youtube&&(translated||translations.size))return;
+    // Automatic subtitles never take over a page the reader is translating:
+    // starting them would cancel the page translation and move the panel.
+    if(translated||translations.size)return;
     let stored;
     try{stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};}catch{return;}
     // Video subtitles are enabled on a fresh install. An explicit false is
-    // the only opt-out; site translation remains opt-in per origin.
-    const enabled=youtube?stored.autoVideo!==false:stored.autoSites?.[location.origin]===true;
-    if(!enabled){
+    // the only opt-out; site translation remains opt-in per origin. The two
+    // settings are read separately, and the explicit per-site choice wins.
+    const siteEnabled=stored.autoSites?.[location.origin]===true,videoEnabled=youtube&&stored.autoVideo!==false;
+    if(!siteEnabled&&!videoEnabled){
       // Keep the one-second navigation timer from re-reading the stored opt-out
       // forever. An explicit settings change runs configure() and restores the
       // current persisted preference before the next automatic attempt.
       if(youtube)prefs.autoVideo=false;
-      else if(prefs.autoSites&&typeof prefs.autoSites==='object')prefs.autoSites[location.origin]=false;
+      if(prefs.autoSites&&typeof prefs.autoSites==='object')prefs.autoSites[location.origin]=false;
       nextAutoAttempt=Date.now()+5000;
       return;
     }
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
-    try{await configure();if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}else if(prefs.autoSites[location.origin]===true){await togglePage();}}catch{}finally{autoOpening=false;}
+    // Translate a page automatically once per address: restoring the original stays restored.
+    try{await configure();if(prefs.autoSites[location.origin]===true){nextAutoAttempt=Infinity;if(autoTranslatedURL!==location.href){autoTranslatedURL=location.href;await togglePage();}}else if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}}catch{}finally{autoOpening=false;}
   }
   if(!inFrame)sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});

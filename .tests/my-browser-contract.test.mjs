@@ -14,12 +14,12 @@ test('content script listens for cross-tab preference changes',()=>{
   assert.match(content,/Object\.assign\(prefs,merged\)/);
   assert.match(content,/autoSites:\{\[location\.origin\]:value\?true:undefined\}/);
   assert.match(content,/const videoWasEnabled=previous\.autoVideo!==false,videoIsEnabled=stored\.autoVideo!==false/);
-  assert.match(content,/const relevantEnable=youtube\?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled/);
+  assert.match(content,/const relevantEnable=youtube&&!videoWasEnabled&&videoIsEnabled\|\|!siteWasEnabled&&siteIsEnabled/);
   assert.match(content,/if\(relevantEnable\)\{nextAutoAttempt=0;if\(!videoSession\)autoOpen\(\);\}/);
   assert.match(content,/const videoTargetChanged=nextVideoTarget!==prefs\.videoTarget/);
   assert.match(content,/if\(videoTargetChanged&&videoSession\)reapplyVideoTarget\(nextVideoTarget\);/);
   assert.match(content,/function setVideoTarget\(value\)\{prefs\.videoTarget=value;reapplyVideoTarget\(value\);/);
-  assert.match(content,/if\(!youtube&&\(translated\|\|translations\.size\)\)return;/);
+  assert.match(content,/if\(translated\|\|translations\.size\)return;/);
   assert.match(content,/removeListener\(onPreferencesChanged\)/);
 });
 
