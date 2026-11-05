@@ -30,10 +30,10 @@
 
 | 路径 | 做什么 | 不做什么 |
 | --- | --- | --- |
-| **包体管理与自测** | `get-available-package-types` 取可用类型 → 对应 `list-*` 查包体库与线上/待处理状态；返回 `self_test_targets` 时可继续调 `package-management get-test-qr-code`（靶标 `package_id` 或 `version_code`）。流程见 [taptap-package-management](taptap-suite/references/taptap-package-management/MANUAL.md) | 只读；不提供资料页 `expected`，不执行主包体绑定 |
-| **资料页槽位绑定** | 调用 `app list-packages` → 按 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)「包体槽位」五步契约执行（同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回；stale/409 停止重读，禁止自动重放） | — |
+| **包体管理与自测** | `get-available-package-types` 取可用类型 → 对应 `list-*` 查包体库与线上/待处理状态；返回 `self_test_targets` 时直接调顶层 `test-qr-code`（靶标 `package_id` 或 `version_code`）一条命令取地址并出图。流程见 [taptap-package-management](taptap-suite/references/taptap-package-management/MANUAL.md) | 只读；不提供资料页 `expected`，不执行主包体绑定 |
+| **资料页槽位绑定** | 先确认可编辑草稿（无草稿时核对 `app create-draft` 前置条件并在已有编辑授权内创建，创建后丢弃旧快照重新 `app list-packages`）→ 按 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)「包体槽位」契约执行（同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回；422 不原样重试且不加 `force:true`；409 先核对快照与草稿再重读，禁止自动覆盖） | — |
 
-- 当前 schema 未声明 `package_slots` 时必须停止资料页包体绑定并报告契约缺口，不得从 `current_bindings`、候选或历史响应补造 `available` / `expected`；`current_bindings` 只用于展示，不能作为写入前置条件。
+- 当前 schema 未声明 `package_slots` 时必须停止资料页包体绑定并报告契约缺口，不得从 `current_bindings`、候选或历史响应补造 `available` / `expected`；`current_bindings` 只用于展示，不能作为写入前置条件。无草稿时不要用 dry-run 成功当作草稿可编辑的证明；保存字段同前，创建草稿后旧 `expected` 全部作废。
 - Spark 使用专用 `call_tool(name:"app +bind-spark-version", …)` 编排相同门禁：dry-run 离线校验精确 `selectPackage` 输入并生成 apply 参数；`yes:true` 会重新读取实时 Spark 候选和主槽位，只有候选 `status=ready`、`available=true` 且传入 expected 与实时值严格一致时才写入，成功后必须读回目标 `spark_version_code`。契约见 [fields and packages](taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md)「包体槽位」。
 - TapTap 制造 / Spark 包体必须先在 TapTap 制造创建或更新（官方入口为 `https://maker.taptap.cn/`，面向用户时按共享规范单独一行输出）。CLI 不上传、不更新 Spark 包，只能把已存在且 ready 的版本绑到资料页主槽位。
 - 包体上传成功后必须重新读取候选和槽位，用户确认后才能绑定，不能把「上传成功」解释成「已绑定」或「可以提交审核」。
@@ -50,20 +50,20 @@
 
 ## 6. 提审
 
-**意图门禁**：泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示；只有用户明确表达"提交审核 / 提审"后才可调 `app prepare-review-snapshot`，预审结果后仍须再次确认才可调 `app submit-app-review`。
+**意图门禁**：泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示；只有用户明确表达"提交审核 / 提审"后才可调 `app prepare-review-snapshot`，预审后确认或用户明确要求跳过预检并提交时可 `app submit-app-review`。
 
 **三步**：`prepare-review-snapshot` → `precheck-app-review` → `submit-app-review --yes`
 
 - `release_schedule` 只在第 2、3 步传递且**必须完全相同**（第 1 步不接受）。上线方式只支持立即上线或精确定时；模糊季度/档期必须追问具体时间或改为立即上线。
 - 任一步 `version_id` 与第一步不一致 → 复核对象已漂移，回到第一步重读，禁止沿用旧快照。
 - metadata：前两步是 `read`（无需 `--yes`），`submit-app-review` 是 `write`（需 `--yes` + 稳定幂等键）。`--dry-run` 只预览请求，不执行预检。
-- 执行 submit 前必须用**本次** precheck 的结果完成正式预审；不能依赖旧截图、旧结果或"上传成功"推断已满足。
+- 默认用本次 precheck 展示问题；用户明确要求跳过预检时可直接提交，不能把跳过说成预检通过。
 - 普通游戏提审前同时检查上架资质和开发者认证；未认证时按服务端 blocker 停止提审并引导办理。关卡游戏是否豁免、以及认证豁免范围，一律以服务端当次返回为准，不自行判断。
 
 **预检口径**：
 
 - HTTP 200 / 顶层成功只说明预检执行成功；分别读取预审结果、blockers 和 warnings。预审通过不能覆盖非空 blockers，blockers 为空也不能把预审未通过说成通过。字段缺失时说明结果未知，不补写“阻塞项：无”。
-- 预审不通过本身不禁止提审。展示本次问题与风险，用户明确选择继续/「强制提交」后允许 submit，由提交接口裁决；不要自行新增本地硬门禁或宣称必定被拒绝。
+- 展示本次问题与风险；用户明确选择跳过预检或继续提交后允许 submit，由提交接口裁决，不在客户端增加认证门禁，也不要宣称必定被拒绝。正式提交明确拒绝时停止本次意图，不自动重放或换幂等键重发；结果未知时先读回版本状态。
 - 本次预审通过（`preaudit_status === "passed"`）且 blockers 明确为空时展示“阻塞项：无”和“提交状态：可提交审核”；`preaudit_status === "rejected"` 且无阻断时同时说明“不阻断提交，但可能被审核驳回”；`preaudit_status === "unavailable"` 说明“本次预检没得出内容预审结论，可稍后重试预检，也可直接提交”，不得说成预审未通过。
 - `preaudit_status` 是机审结论的主口径（缺失时退回 `preaudit_passed`）；两者都仅用于内部判断，不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。
 - blockers 按服务端原文展示；协议同意仍走下方独立签署流程，不能用继续提交的授权代替签约。

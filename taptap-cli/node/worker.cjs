@@ -573,6 +573,7 @@ const GLOBAL_RULES = [
   '调用示例:先 list_tools(category) 看该域操作与参数(enum=可选值、pattern=格式、required=true=必填),再 call_tool。例——创建冒险游戏:call_tool(name:"app create-app", args:{developer_id:"1001", data:{title:"我的游戏", category:"adventure", package_type:"apk", developer_role:"developer"}, dry_run:true});用户确认后同参数加 yes:true。务必按 inputSchema 的 enum 取值、按 pattern 校验格式,不要猜值。',
   '输出:成功结果的 result.envelope 是 CLI 的 JSON envelope(顶层 ok / data / error),result.name / result.duration_ms 是执行元信息;失败结果的 data 就是 CLI envelope。业务失败以 ok:false 返回,message 含 error.type / error.message / error.hint。不要手动传 json / format flag,输出已默认结构化(默认文本的命令如 auth status 由插件自动补 --json)。',
   '失败三态:失败结果带 `execution_state` 字段,只有两个取值。`not_executed` 表示操作没有生效,可按 message 修正参数后重试;`unknown` 表示写操作可能已经在服务端生效,必须先核对实际状态(上传类用 task +list 查看已有任务)再决定是否重试,禁止直接重跑。',
+  '反馈:CLI 自身的问题(报错看不懂、行为不合预期、缺能力)可用 feedback 上报一次。触发条件只有三种:用户明确表达受阻;错误信封带 `_notice.feedback` 或同一 error.subtype 连续失败;你能说清复现命令和期望 vs 实际的差异。上报前先按 error.hint 修正输入或补齐 auth/scope,不要把没登录或参数写错当成 CLI 的问题。feedback 是写操作,同样先 dry_run:true 预览、用户同意后再 yes:true;完整口径见手册「反馈与问题收集」。',
   '身份:缺 developer_id / app_id 时先用 overview 或 developer 命令查询候选,多候选让用户选,不要猜 ID。',
   '手册:完整业务流程与领域规范用 ghost_manual({ghost_id:"taptap-cli", path:...}) 读取,入口见 taptap-suite——这是本插件的执行纪律层。需要 CLI 自带的官方原文(随 CLI 版本内置)时用 call_tool(name:"skills", args:{_positional:["list"]}) 看清单、call_tool(name:"skills", args:{_positional:["read","<手册名>"]}) 读取,作为深入参考;两者冲突时以本插件手册的执行纪律为准。',
 ];

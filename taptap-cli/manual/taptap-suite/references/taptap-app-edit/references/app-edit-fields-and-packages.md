@@ -12,7 +12,7 @@
 
 按 [skill analysis](taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md) 读取模块、包体、版本和资质，由 Agent 汇总当前阻断项。只检查当次返回且可见的字段；动态必填、包体限制或资质无法确认时明确标记未知，不能推断为通过。
 
-Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `prepare-review-snapshot` 和 `precheck-app-review` 的当前结果；预审不通过不自动禁止提审，用户明确继续时按 [audit and history](taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md) 提交，由提交接口做最终校验。
+Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `prepare-review-snapshot` 和 `precheck-app-review` 的当前结果；预检发现问题时说明风险；用户明确跳过预检或继续时按 [audit and history](taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md) 提交，由提交接口做最终校验。
 
 `list-packages.result.package_slots` 固定返回
 `main`、`windows` 和 `apk_mini_game_play`。每个槽位包含 `available` 与可原样
@@ -37,6 +37,8 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `
 - 每条 change 先读取最新并发快照：`expected` 直接原样回填该字段读取时的 `current_value`。`current_value` 为 `null`（首次写入）时，`expected` 传 `[]`；其余情况（string / 数组 / 数字 / 布尔）原样回传。除显式 `force=true` 外，每条 change 必须携带 `expected`。
 - `title_ios`、`description_ios`、`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios` 是可选 iOS 覆盖；空值（`current_value` 为 null）表示继承 Android。清空 iOS 覆盖字段恢复继承时，`expected` 使用该 iOS 字段自己的严格 `current_value`。
 - `category` 是可编辑的游戏类型；C 端商店标签当前不能通过本 skill 或 CLI 修改。`age_grade`、`apk_package_name`、`mini_game_play_enabled` 也不能作为普通字段保存。
+
+保存字段前也必须先确认可编辑草稿；无草稿时，先检查创建前置条件，在用户已授权的编辑意图内创建。创建后丢弃此前所有字段 `expected`，重新读取对应模块的 `current_value` 再构造 changes。不能把创建草稿前的字段值用于新草稿，也不能把 dry-run 成功当作草稿可编辑的证明。
 
 ### 保存失败与部分完成
 
@@ -101,13 +103,20 @@ call_tool(name:"app select-package", args:{
 
 参数校验失败时，根据错误指出的字段、预期类型和恢复提示修正；不要连续猜测不同枚举或来回切换 ID 类型。若错误与本次读取结果不一致，核对当前命令定义及原始读取结果；仍无法确定正确输入时停止，不重复提交相同错误请求。
 
-选择或清空包体走统一流程：
+选择或清空包体走统一流程（顺序不可交换）：
 
-1. `list-packages(package_types: [...])` 读取本次候选、`current_bindings` 和`package_slots`；响应缺少 `package_slots` 时停止并向用户说明缺少绑定所需的信息，当前无法完成包体绑定。
-2. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。
-3. 把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型。
-4. 使用稳定 `--idempotency-key` 先 `--dry-run`；用户确认后用相同 payload 和 key 加 `--yes`。
-5. 写入后重新调用 `list-packages`，核对同一 app、slot、包体类型与 ID 和新 `expected`。stale/409 时先重读；若目标已经绑定，只报告当前状态已达成，不归因失败请求，不重复写；否则重新决策，禁止自动覆盖。二维码成功、上传成功或开发包创建成功均不能替代绑定读回；仅上传或自测目标不强加绑定。
+1. **先确认可编辑草稿**：同一 app / developer 下调用 `list-app-versions`，必要时 `get-app-version` 核对当前草稿状态。上传成功只表示包体进入包体库，不表示已有资料草稿；不要凭上次绑定成功或对话历史认定草稿仍存在。
+2. **无草稿时先处理草稿创建**：检查 `create-draft` 的当前前置条件；用户已授权本次资料换包且前置条件满足时创建草稿。审核中、定时上线或状态不明确时先说明阻断，不自动撤审、重置或覆盖。`create-draft` 失败就停止绑定。
+3. **创建草稿后必须重读**：`create-draft` 成功后丢弃创建前取得的所有槽位快照，再调 `list-packages(package_types: [...])` 读取本次候选、`current_bindings` 和 `package_slots`。即使先前返回 `expected={"kind":"none"}` 也不能沿用；新草稿可能继承旧版本绑定。已有可编辑草稿也必须在本次绑定前读取。响应缺少 `package_slots` 时停止并向用户说明缺少绑定所需的信息，当前无法完成包体绑定。
+4. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型；`expected` 描述旧槽位，不是目标包体。
+5. 使用稳定 `idempotency_key` 先 `dry_run: true`；按已有授权用相同 payload 和 key 加 `yes: true`。预览后若创建、更换或重置了草稿，返回第 3 步重新读取和预览，不复用旧快照。
+6. 写入后重新调用 `list-packages`，核对同一 app、slot、包体类型与 ID 和新 `expected`。二维码成功、上传成功或开发包创建成功均不能替代绑定读回；仅上传或自测目标不强加绑定。
+
+失败按具体原因处理：
+
+- **422 / failed_precondition**：先读服务端原因。没有草稿则返回第 1、2 步，创建后必须执行第 3 步；其它前置条件失败按实际原因处理，不一概创建草稿。禁止原样重试、换幂等键连发或加 `force: true` 绕过。
+- **409 / stale_state**：不等于“别人修改了”。先检查快照字段是否正确、读取后是否创建过草稿，再重读当前草稿和槽位。若目标已经绑定，只报告当前状态已达成，不归因失败请求，不重复写；否则比较变化并按原授权重新决策，重新预览。再次冲突时停止并报告状态，禁止自动覆盖。
+- **expected 校验失败**：`package` 使用 `{"type":"h5","id":"目标版本ID"}`，H5 的旧快照使用 `{"kind":"h5","h5_version_id":"旧版本ID"}`；不能把 `id` 写进 expected，不能遗漏 `h5_version_id`，不能把 ID 改成数字。`none` 仅代表本次读取的空槽位，不能作为默认值，也不能携带旧包 ID。即使显式使用 `force: true`，也不能省略或伪造 expected。
 
 Spark 版本有专用编排命令，避免把包体管理概览误当成资料页绑定接口：
 
@@ -137,5 +146,6 @@ payload 和 idempotency key，用户确认后必须原样执行该命令。apply
 - TapTap 制造 / Spark 包体由 [TapTap 制造](https://maker.taptap.cn/) 传入，CLI 不支持上传或更新；CLI 可把已存在且 ready 的 Spark 版本绑定到资料页主槽位。
 - H5 使用 `slot:"main"` + `package.type:"h5"`；即使开启 `PC_OFFICIAL` 也不得使用 `windows` 槽或调用 `upload-pc-package`。ID 取 H5 版本 ID，`select-package` 的 package 严格只传 `type` 和 `id`，不得带入返回项中的 `h5Package`。H5 元数据仅用于本地 pending state / 提审 override。是否已绑定以 `package_slots.main.expected`（`kind:"h5"` + `h5_version_id`）为准，不要靠 form_data 里的判别字段推断；若 `package_slots.windows` 带有历史绑定，按最新 `expected` 调 `clear-package` 清理；若因该槽位 `available=false` 被拒绝，停止并报告契约缺口，不要改写其它槽位。
 - Windows 使用 `select-package` / `clear-package`，不写 `save-changes.pc_package_id`。同时设置启动器包和游戏本体包时，每写一个 branch 后重新读取，再用最新 `expected` 写下一个。
+- Windows 快照必须原样保留 `kind:"windows"`、正整数字符串 `package_id` 和 `source:"legacy"` / `"branch"`。`branch`、`branches` 可选；存在时 branch 为非负整数字符串，分支项必须有 branch，package_id 与 whatsnew 可选，不能把空分支列表推断成 none，也不能用上传 selector 的 id 替代 package_id。
 - APK 内部配置仍用 `save-changes`：先读 package 模块，再修改防沉迷、TapPlay 授权、更新日志、更新模式和活动关联等当前可见字段；支持语言当前不可编辑，默认 `zh_CN`。
 - 用户选择“未接入防沉迷”时写 `apk_anti_addiction_status=not-integrated`；工具会同步 `apk_sandbox_authorized=true`，回复中说明这是提审要求。

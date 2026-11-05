@@ -16,7 +16,7 @@
 
 哪些请求算提审意图、哪些只算目标方向，以 [shared execution](taptap-suite/references/shared-execution.md)「提审意图门禁」的唯一词表为准，本文件不另立清单；本节流程从“用户已明确提审”开始。
 
-标准流程固定为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。
+默认流程为：`prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --idempotency-key <submit-key> --yes`。**第 2、3 步必须传完全相同的 `release_schedule`**；第 1 步的入参只有 scope，不接受该字段（`additionalProperties: false`，多传即校验失败）。用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回）。当前 metadata 把前两步标为 `read`，无需 `--yes` 与幂等键；`submit-app-review` 仍为 `write`，需稳定幂等键与 `--yes`。CLI 不覆盖其风险分类。用户明确要求跳过预检或继续提交时可直接进入 `submit-app-review`，由服务端校验裁决。
 
 发布前必须把“版本发布”和“平台分发状态”拆开处理：
 
@@ -107,6 +107,11 @@ H5 开通 PC 分发入口时按两阶段执行：
 成功后告知"已成功提交审核，请耐心等待审核结果，通常 1-3 个工作日"，并附最新读回的各可见 `region_flag_*` 分发状态。仍为“敬请期待”的入口要说明：本次提交未调整该入口，发布后它仍会保持“敬请期待”；如需开放下载或游玩，请在下一轮提审前先调整对应分发状态。这不代表发布失败。
 
 最后按 shared execution 的“运营阶段手册交接”补充一个后续运营入口和一句官方描述摘要；进入提审链路时先用 `list-app-versions --page-all` 读取完整发布历史并保存本次证据，作为后续阶段判定的输入。提审成功本身不能证明运营阶段，历史不完整或证据冲突时只给快速入门总入口。
+
+### 提审失败与重复调用防护
+
+- 正式提交明确拒绝时，原样说明服务端原因，不自动重复提交或换幂等键重放；不要用改包或重建草稿处理无关的业务拒绝。条件变化后按用户当前授权重新决策。
+- 正式提交结果未知时，先用 `list-app-versions` / `get-app-version` 读回状态；已在审核中则不重复提交，无法确认时报告结果未知并停止自动重放。
 
 ### F. 撤销 / 回退（字段级）
 
@@ -272,7 +277,7 @@ call_tool(name:"app get-app-version", args:{app_id:"<appId>", developer_id:"<dev
 3. 若用户没说清楚是哪一种，先追问**一个**高价值问题，不要连发问卷式问题：
    - "这次是想做首曝、开放预约、开放测试、更新版本，还是正式上线？"
 4. 目标明确后，再只围绕该目标需要的模块补资料；不要一上来把所有可选字段全盘罗列给用户
-5. 资料与设置补齐后，只报告准备状态和提审选项；只有用户明确说“提交审核 / 提审”后，才进入 `prepare-review-snapshot` → `precheck-app-review`，预审结果后仍需最终确认才进入 `submit-app-review`
+5. 资料与设置补齐后，只报告准备状态和提审选项；只有用户明确说“提交审核 / 提审”后，才进入 `prepare-review-snapshot` → `precheck-app-review`，预审后确认或用户明确要求跳过预检并提交时进入 `submit-app-review`
 
 关键约束：
 

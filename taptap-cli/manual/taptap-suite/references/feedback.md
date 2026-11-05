@@ -4,12 +4,15 @@ CLI 自身的问题（报错看不懂、行为不合预期、缺能力、文档�
 
 ## 什么时候提交
 
-只在这两种情况提交，其余一律不提交：
+只在这三种情况提交，其余一律不提交：
 
 1. 用户明确表达受阻或不满：`这什么破命令`、`我卡住了`、`为什么一直失败`、`看不懂这个报错`、`能不能加个 XX`。
-2. 同一 `error.subtype` 在同一任务里连续失败 2 次以上。
+2. 同一 `error.subtype` 在同一任务里连续失败 2 次以上，或错误信封带了 `_notice.feedback`。
+3. 你判断 CLI 缺能力、文档误导或行为不合预期，并且说得清具体证据：复现命令、期望 vs 实际、涉及的 `error.type` / `error.subtype`。
 
-不提交：普通报错、用户只是在问问题、用户说不用提交、你自己没有证据说明 CLI 有问题。
+不提交：普通报错、用户只是在问问题、用户说不用提交、问题其实是输入 / 登录 / 权限 / 网络没准备好。第 2、3 条提交前先按错误信封的 `hint` 修正输入，或补齐 auth/scope 重试一次；仍失败才提交——不要把「没登录」「参数写错」当成 CLI 的问题。
+
+`_notice.feedback` 是 CLI 对重复失败的提示（同一个 `error.subtype` 在 30 分钟内第二次失败时附带），里面有已经脱敏的复现命令，可以直接拿来填 `command` 和 `error`；收到它不等于必须提交，判断标准仍是上面三条。
 
 ## 调用
 
@@ -34,7 +37,7 @@ call_tool(name:"feedback", args:{
 
 三个 trigger 都走同一道写门禁：先 `dry_run: true` 预览 payload，用户同意后再用完全相同的参数（只换 `dry_run` 为 `yes: true`）发送；不要因为 `feedback` 是给团队报问题就跳过确认，`yes: true` 只解除门禁、不代表用户已经看过摘要。
 
-`trigger` 只能是 `user-complaint` / `command-failure` / `agent-request`。用户自己抱怨用第一个，你自己判断的失败用 `command-failure`。
+`trigger` 只能是 `user-complaint` / `command-failure` / `agent-request`。用户自己抱怨用第一个；你自己观察到的重复失败用 `command-failure`；能力缺失、文档误导、行为不合预期用 `agent-request`。
 
 ## 写描述的要求
 

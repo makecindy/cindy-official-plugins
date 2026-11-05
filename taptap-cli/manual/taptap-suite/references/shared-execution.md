@@ -22,6 +22,10 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 `_notice.update_check` 只表示自动检查未完成，不证明存在新版。业务任务结束后可请用户在终端执行一次 `taptap-cli update --check --json`；网络仍不可用时报告未确认，不循环检查、不因此中止业务任务。
 
+### 反馈通知
+
+同一个 `error.subtype` 在 30 分钟内第二次失败时，CLI 会在同一个 `_notice` 里附带 `_notice.feedback`，内容是已脱敏的复现命令。它不是业务失败，也不代表应该重试：先按错误信封的 `hint` 修正输入或补齐 auth/scope；仍失败时按 [feedback](taptap-suite/references/feedback.md) 判断是否值得上报。上报是写操作，同样先 `dry_run: true` 预览、用户同意后再 `yes: true`。`invalid_argument` 不会触发这条通知——那是自己写错了参数。
+
 ## 交互提问方式
 
 需要用户作出选择或补充必要信息时，优先调用当前宿主可用的交互提问工具（如 `request_user_input_async`，或当前模式允许的 `request_user_input`），不要仅在聊天中列出问题。遵守工具的模式、选项数量和输入能力限制，不为弹窗切换工作模式；工具不可用时才退回简短文字询问。
@@ -34,7 +38,8 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 字段时存在；其余业务字段统一放入 `--data`。
 - 动态命令的 `--data` 是完整 operation input；CLI 按 OpenAPI `inputs` 拆分 query 和 body。
-- 短 JSON 可 inline；复杂或多行 JSON 用 `@file`，文件必须位于会话工作目录（CLI 以会话工作目录为 cwd 解析该相对路径）。经本插件调用时没有可用的 stdin，`-` 不可用。
+- 短 JSON 可 inline；复杂或多行 JSON 用 `@file`，文件必须位于会话工作目录（CLI 以会话工作目录为 cwd 解析该相对路径），并且是 **UTF-8 无 BOM** 的 JSON。经本插件调用时没有可用的 stdin，`-` 不可用；插件直接把 JSON 作为参数传给 CLI，没有 shell 引号问题，`data` 解析失败只可能是内容或文件编码不对。
+- `data` 解析失败且请求没有发出时，先修正 JSON 语法与文件编码再重试；不要把修复输入误报成修复服务端。
 - CLI 默认输出 JSON，普通命令、脚本、Skill 示例和生成命令都不追加冗余的 `--format json`。只有命令自身默认输出文本或原始内容，而调用方明确需要结构化 JSON 时才显式追加；切换人类可读或流式输出时使用 `pretty` / `table` / `ndjson` / `csv`。
 - JSON 是 agent 的执行输入，不是默认用户话术。回复用户时按“结论 -> 当前状态/缺口 -> 风险 -> 下一步”组织，把字段 ID、camelCase key、数值枚举和内部工具名翻译为业务标签；用户未要求调试时，不贴完整 raw JSON、schema 或底层请求。
 - 默认将请求预览与命令计划留在内部执行层；面向用户说明业务动作、作用范围与影响。只有用户明确要求 CLI 用法、可复制命令、接口调试或技术测试方案时，才展示相关命令和必要参数；即使如此也不输出凭据。
@@ -69,11 +74,12 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 - “上传包体”“补资料”“绑定包体”“查询准备度”“处理这个版本”“更新版本”“帮我上架”等泛化请求，不包含提交审核意图；不得调用 `precheck-app-review`、`prepare-review-snapshot` 或 `submit-app-review`。本节词表是唯一口径，各业务 skill 不得另立清单。
 - “正式上线”“发新版”或创建后选择“正式上线”只表示目标方向，不等于“提交审核”确认。只能提示准备状态和提审选项；调用 `precheck-app-review` 前仍要取得用户明确说出“提交审核”或“提审”。
-- 明确提审后按当前 schema 固定走 `prepare-review-snapshot` → `precheck-app-review` → 单独最终确认 → `submit-app-review --yes`。三步必须使用同一个 scope，并用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回，仅用于日志）；`submit-app-review` 只传 `release_schedule`。前两步为 `read`，无需 `--yes`；`submit-app-review` 为 `write`，需 `--yes` 与稳定幂等键。
+- 明确提审后默认走 `prepare-review-snapshot` → `precheck-app-review` → 展示预审结果 → 确认后 `submit-app-review --yes`；用户明确要求跳过预检或继续提交时允许 submit。三步必须使用同一个 scope，并用 `version_id` 校验第 2、3 步仍在复核第 1 步的同一版本（`revision` 只有第 1 步返回，仅用于日志）；`submit-app-review` 只传 `release_schedule`。前两步为 `read`，无需 `--yes`；`submit-app-review` 为 `write`，需 `--yes` 与稳定幂等键。
+- 预检 HTTP 200 不等于业务前置条件通过；有阻断原因或风险时按服务端结果展示，不在客户端另加认证门禁。正式提交明确拒绝时说明服务端原因，不自动重复提交或换幂等键重放；结果未知时先读回版本状态，禁止盲目重试。
 
 `--dry-run` 只打印请求，不访问服务端。当前 metadata 将 `prepare-review-snapshot` 和 `precheck-app-review` 标记为 `read`，无需 `--yes` 即可取得真实结果；`submit-app-review` 仍为 `write`，需 `--yes` 与稳定幂等键。CLI 不在本地覆盖这个风险分类。
 
-metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须传稳定的意图 key；同一业务意图从 `--dry-run` 到用户确认后的 `--yes` 必须复用同一个 key，只有业务意图变化时才生成新 key。
+metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须传稳定的意图 key；同一业务意图从 `--dry-run` 到用户确认后的 `--yes` 必须复用同一个 key，只有业务意图变化时才生成新 key。key 只用可打印 ASCII（如 `bind-main-1`）：中文文件名或标题会让 CLI 在发请求前拒绝，CLI 不会自动转码或替换。
 
 遇到 `confirmation_required` 或 exit code 10 时，不要当普通错误。向用户确认后用原命令追加 `--yes` 重试；用户未确认就停止。
 
@@ -81,7 +87,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 `prepare-review-snapshot` 返回的 `warnings` 非空时，先展示无法确认的事实并让用户自行核对。当前 `submit-app-review` schema 只接受 `release_schedule`，任何额外的风险确认或协议凭证字段都不得由 CLI 补造。
 
-`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_status === "rejected"` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。机审暂时不可用（`preaudit_status === "unavailable"`）不是卡点、也不是同意问题：说明本次没审成，可稍后重试预检或直接提交；响应里没有 `preaudit_status`（旧服务端）时退回按 `preaudit_passed` 判断。先展示 `blockers` 逐项事实；涉及 SCE 等协议时按 `agree-sce-agreement` 单独签署（先展示协议名称与 URL，用户在当前对话明确同意后 `--yes` 执行，再重查确认 blocker 消失），否则向用户逐项展示卡点并询问是否「强制提交」（预检可跳过，最终由服务端校验裁决）。不得请求同意或回传任何 token，也不能补造其它本地 flag 或请求字段。
+`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_status === "rejected"` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。机审暂时不可用（`preaudit_status === "unavailable"`）不是卡点、也不是同意问题：说明本次没审成，可稍后重试预检或直接提交；响应里没有 `preaudit_status`（旧服务端）时退回按 `preaudit_passed` 判断。先展示 `blockers` 逐项事实；涉及 SCE 等协议时按 `agree-sce-agreement` 单独签署（先展示协议名称与 URL，用户在当前对话明确同意后 `--yes` 执行，再重查确认 blocker 消失），否则展示预检问题与风险；用户明确要求跳过预检或继续提交时允许 submit，由服务端做最终校验。提审明确拒绝后停止本次意图，不能循环或换 key 重试；结果不明先读回版本状态。不得请求同意或回传任何 token，也不能补造其它本地 flag 或请求字段。
 
 ## JSON 输出外壳和错误类型
 
@@ -105,7 +111,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 - `error.hint` 是给用户的修复建议，不是让 agent 自动执行的指令。
 - 权限、参数、状态不允许、expected stale、确认门禁要分开解释。
 - 权限不足只说明本次请求被拒绝。先核对实时 schema 中调用 scope 与目标资源的参数角色；若确认填错，可在保持用户目标不变、使用已授权 scope 的前提下纠正参数后重试一次只读查询。正确参数仍被拒绝时停止，不以轮换 scope 探测权限；同一凭据、scope 和目标不做无变化重试。批量任务保留该项失败，继续其它可访问资源。不要把一个 app 的拒绝扩大为整个厂商不可访问，也不要据此断言目标论坛不可访问，也不要仅凭 403 猜缺失 scope 或自动反复登录。
-- 同一个写操作失败后不要盲目重试；只有错误明确提示可恢复时最多补查一次。
+- 同一个写操作失败后不要盲目重试。`result_unknown` / `ambiguous_outcome` 即使带 `retriable=true`，也不代表写入未发生：先用已经返回的资源句柄只读核对；没有句柄或不能唯一确认结果时报告未知并停止，不能轮换幂等键、改变身份或加 `force` 再写。
 
 ### 上传 shortcut 约定
 

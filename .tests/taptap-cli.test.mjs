@@ -961,12 +961,12 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
     'a permission denial must not be repeated for the same resource',
   );
 
-  // Precheck: HTTP success and a failed content preaudit are separate facts,
-  // and the preaudit alone does not forbid submission.
-  assert.match(appEdit, /预检 HTTP 200 \/ 顶层成功不等于内容预审通过/);
-  assert.match(appEdit, /预审不通过本身不禁止提审/);
+  // Precheck is advisory: an HTTP 200 does not prove the business preconditions,
+  // and a missing preaudit is not a client-side veto.
+  assert.match(appEdit, /预检 HTTP 200 不等于业务前置条件通过/);
+  assert.match(appEdit, /用户明确要求跳过预检或继续提交时允许 `app submit-app-review`/);
   assert.match(audit, /且本次 `blockers` 明确为空时/);
-  assert.match(rules, /预审不通过本身不禁止提审/);
+  assert.match(rules, /用户明确要求跳过预检并提交时可 `app submit-app-review`/);
   assert.match(rules, /完成判据按用户目标和同一资源核对/);
 
   // Version detail returns logs; a field snapshot is not part of the contract.
@@ -991,6 +991,83 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   ].join('\n');
   assert.doesNotMatch(appEditManual, /字段 `required`/, 'field requiredness must use state="required"');
   assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
+});
+
+test('the 2026.11.2 sync keeps the new recovery contracts on the plugin path', async () => {
+  // CLI v2026.11.2 makes review prechecks advisory, requires a fresh package
+  // snapshot after creating a draft, validates expected snapshots locally, and
+  // stops the agent from replaying a write whose outcome is unknown. Each of
+  // those changes what the agent does next, so the bundled manual has to carry
+  // them instead of leaving the agent on the CLI's old wording.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const feedback = read('taptap-suite/references/feedback.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const miniApp = read('taptap-suite/references/taptap-materials/references/mini-app-handoff.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const post = read('taptap-suite/references/taptap-community-management/references/publish-post.md');
+  const patterns = read('taptap-suite/references/cli-command-patterns.md');
+
+  // Feedback nudge: a repeated failure now carries `_notice.feedback`, so the
+  // trigger list must name it instead of counting two failures on its own.
+  assert.match(shared, /_notice\.feedback/, 'the shared rules must explain the repeat-failure notice');
+  assert.match(feedback, /错误信封带了 `_notice\.feedback`/);
+  assert.match(feedback, /`agent-request`/, 'a capability gap is a reportable trigger');
+  assert.match(top, /三种触发/);
+  assert.match(workerSource, /错误信封带 `_notice\.feedback` 或同一 error\.subtype 连续失败/,
+    'the rule handed out by list_tools must agree with the manual');
+  const [listing] = await callWorker([listTools('', { cli_path: fakeCli })]);
+  assert.ok(
+    listing.result.data.rules.some((rule) => rule.includes('_notice.feedback')),
+    'list_tools has to hand the agent the feedback rule, not just keep it in source',
+  );
+
+  // Package binding: confirm or create a draft first, then discard every older
+  // snapshot and read again — a new draft can inherit the previous bindings.
+  assert.match(appEdit, /确认可编辑草稿 → 必要时 `app create-draft` → 重新 `app list-packages`/);
+  assert.match(fields, /创建草稿后必须重读/);
+  assert.match(fields, /即使先前返回 `expected=\{"kind":"none"\}` 也不能沿用/);
+  assert.match(fields, /禁止原样重试、换幂等键连发或加 `force: true` 绕过/);
+  assert.match(fields, /Windows 快照必须原样保留 `kind:"windows"`/);
+  assert.match(fields, /不能把空分支列表推断成 none/);
+
+  // Submission: an unknown outcome is read back, never replayed.
+  assert.match(audit, /### 提审失败与重复调用防护/);
+  assert.match(audit, /结果未知时，先用 `list-app-versions` \/ `get-app-version` 读回状态/);
+  assert.match(shared, /用已经返回的资源句柄只读核对/);
+  assert.doesNotMatch(audit, /预审结果后仍需最终确认才进入 `submit-app-review`/,
+    'the old always-confirm wording must be gone');
+
+  // A mini-game upload already completes and parses; a second complete is a bug.
+  assert.match(materials, /不得再次 complete/);
+  assert.match(miniApp, /不得再调用 `complete-mini-app-package-upload`/);
+  assert.match(miniApp, /`packageRecordStatus=artifact_only` 只表示尚未创建包体记录/);
+  assert.match(packages, /不能用重复 complete 代替查询/);
+  assert.doesNotMatch(packages, /不要调用 `package-management upload-mini-app-package`/,
+    'the upload shortcut exists, so the manual must not forbid it');
+
+  // One QR call fetches the target and renders the PNG; the dynamic lookup is
+  // only for a raw URI, and an output clash is not an excuse to force-write.
+  assert.match(diagnostics, /该命令一次完成获取 URI 和生成 PNG/);
+  assert.match(diagnostics, /只有明确需要原始 URI 时才单独使用动态命令/);
+  assert.match(diagnostics, /禁止原样重试或自动 `force: true`/);
+
+  // Post bodies: list items live under a list, start at level 1, and an unknown
+  // publish outcome is read back through the draft handle.
+  assert.match(post, /`list-item` 只放在 `list\.children`/);
+  assert.match(post, /不能用 0/);
+  assert.match(post, /不能改 key 再建草稿/);
+
+  // An idempotency key and a `@file` payload have one accepted encoding each; a
+  // rejection is an input problem the agent fixes, not a server fault to retry.
+  assert.match(shared, /key 只用可打印 ASCII/);
+  assert.match(patterns, /UTF-8 无 BOM/);
 });
 
 test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {

@@ -52,7 +52,7 @@ call_tool(name:"app +list", args:{dev_id:"1", page_size:50})
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 时注册；其余字段按 schema 放入 `--data`
 - 动态命令的 `--data` 是完整 operation input；资源发现优先使用命令树中的 `developer` / `app` 命令
 - `data` 支持内联 JSON 对象,或字符串 `"@relative-file.json"`(相对会话工作目录的文件);经本插件调用时没有可用的 stdin,`-` 不可用
-- 短 JSON 用内联对象;复杂或多行 JSON 用 `@file`,文件必须位于会话工作目录(CLI 以会话工作目录为 cwd 解析该相对路径)
+- 短 JSON 用内联对象;复杂或多行 JSON 用 `@file`,文件必须位于会话工作目录(CLI 以会话工作目录为 cwd 解析该相对路径),并且是 UTF-8 无 BOM 的 JSON。插件直接把 JSON 作为参数传给 CLI,没有 shell 引号问题;`data` 解析失败先检查 JSON 语法与文件编码,不要原样重发。
 - `--dev-id` / `--app-id` 与 `--data` 中同名字段冲突时返回 validation error，不静默覆盖
 - 默认输出是 JSON，普通命令、脚本、Skill 示例和生成命令都不追加冗余的 `--format json`
 - 只有命令自身默认输出文本或原始内容，而调用方明确需要结构化 JSON 时才显式追加
