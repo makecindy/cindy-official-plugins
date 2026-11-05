@@ -106,3 +106,147 @@ test('generic pages: video inside a web component, the right caption language',{
     assert.equal(await page.evaluate(()=>!!document.querySelector('my-player').shadowRoot.querySelector('[data-cindy-captions]')),true);
   }finally{await browser.close();}
 });
+
+// The feed draws the thumbnail as an image and wraps the timestamp; a post opened from the feed
+// replaces the player with another element showing the same video.
+test('X: feed players keep their own identity, and subtitles follow a post opened from the feed',{skip:!process.env.PLAYWRIGHT_CORE,timeout:40000},async()=>{
+  const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+  const feedPlayer=(post,media)=>`<article data-testid="tweet"><a href="/u/status/${post}"><span><time>t</time></span></a><div data-testid="videoPlayer" class="p"><div class="c"><video></video>${media?`<img src="${poster(media)}">`:''}</div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article>`;
+  try{
+    const page=await browser.newPage({viewport:{width:1000,height:1300}});page.setDefaultTimeout(8000);
+    await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>.p{position:relative;width:560px;height:315px;background:#333;margin:10px}.c,video{width:100%;height:100%}img{display:none}.row{position:absolute;bottom:0;right:0;display:flex;height:40px}</style><main>${feedPlayer(9111,111)}${feedPlayer(9222)}<article data-testid="tweet"><div data-testid="videoPlayer" class="p"><div class="c"><video></video></div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article></main>`}));
+    await page.route('https://pbs.twimg.com/**',route=>route.abort());
+    await page.goto('https://x.com/home');
+    await page.evaluate(()=>{
+      globalThis.captions=video=>{const real=video.addTextTrack('subtitles','en (auto-generated)','en');real.mode='hidden';real.addCue(new VTTCue(0,2,'hello there'));real.addCue(new VTTCue(2,4,'general kenobi'));real.mode='disabled';};
+      for(const video of document.querySelectorAll('video'))captions(video);
+      globalThis.log=[];const store={cindyReadingPreferences:{webTarget:'zh-CN',videoTarget:'zh-CN',autoVideo:true,videoMode:'both'}};
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'data:,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){
+        if(m.type!=='cindy-learning')return {ok:true,enabled:false,cues:[]};
+        const q=m.request;log.push({op:q.op,videoId:q.source?.videoId});
+        if(q.op==='config')return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};
+        if(q.op==='subtitles')return {ok:true,cues:[{start:q.words[0].start,end:q.words.at(-1).end,text:'t',translation:'译'}]};
+        return {ok:true};
+      }},storage:{local:{async get(){return store;},async set(v){Object.assign(store,v);}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+      await page.addScriptTag({path:path.join(extension,file)});
+    const players=page.locator('[data-testid="videoPlayer"]');
+    const entry=i=>players.nth(i).locator('[data-cindy-player-entry]');
+    const sent=()=>page.evaluate(()=>log.filter(x=>x.op==='subtitles').map(x=>x.videoId));
+    const start=async i=>{await players.nth(i).hover();await entry(i).click();await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));const ids=await sent();await page.evaluate(()=>{log.length=0;});return ids.at(-1);};
+
+    assert.equal(await start(1),'x:9222','without a thumbnail, the post the player sits in, never the feed address');
+    const first=await start(2);
+    assert.match(first,/^x:s-[0-9a-f-]{36}$/,'an unrecognised player gets an identity of its own');
+    assert.equal(await start(1),'x:9222');
+    assert.notEqual(await start(2),first,'a new session on it never reuses an earlier one');
+    assert.equal(await start(0),'x:111','the media id from the thumbnail the feed draws');
+
+    // Opening the post: the address changes and X mounts a new element for the same video.
+    await page.evaluate(()=>{history.pushState({},'','/u/status/9111');const main=document.querySelector('main');main.innerHTML=`<article data-testid="tweet"><a href="/u/status/9111"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video poster="https://pbs.twimg.com/amplify_video_thumb/111/img/a.jpg"></video></div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article>`;captions(main.querySelector('video'));});
+    await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));
+    assert.deepEqual([...new Set(await sent())],['x:111'],'the subtitles continue under the same identity, unasked');
+    assert.equal(await page.locator('[data-cindy-captions]').count(),1);
+
+    // A different video on the next page is not started by itself.
+    await page.evaluate(()=>{log.length=0;history.pushState({},'','/v/status/9333');const main=document.querySelector('main');main.innerHTML=`<article data-testid="tweet"><a href="/v/status/9333"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video poster="https://pbs.twimg.com/amplify_video_thumb/333/img/a.jpg"></video></div></div></article>`;captions(main.querySelector('video'));});
+    await page.waitForTimeout(2500);
+    assert.deepEqual(await sent(),[]);
+    assert.equal(await page.locator('[data-cindy-captions]').count(),0);
+  }finally{await browser.close();}
+});
+
+// A carried session is a convenience, never a new decision: it must not undo a cancel or a page translation.
+for(const scenario of ['cancelled','page-translation']){
+  test(`X: subtitles do not follow into the post after ${scenario==='cancelled'?'the person cancelled them':'a page translation started'}`,{skip:!process.env.PLAYWRIGHT_CORE,timeout:40000},async()=>{
+    const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+    const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+    const feed=`<article data-testid="tweet"><p>Feed text that can be translated</p><a href="/u/status/9111"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video></video><img src="${poster(111)}"></div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article>`;
+    const post=`<article data-testid="tweet"><p>Post text that can be translated</p><a href="/u/status/9111"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video poster="${poster(111)}"></video></div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article>`;
+    try{
+      const page=await browser.newPage({viewport:{width:1000,height:1300}});page.setDefaultTimeout(8000);
+      await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>.p{position:relative;width:560px;height:315px;background:#333;margin:10px}.c,video{width:100%;height:100%}img{display:none}.row{position:absolute;bottom:0;right:0;display:flex;height:40px}</style><main>${feed}</main>`}));
+      await page.route('https://pbs.twimg.com/**',route=>route.abort());
+      await page.goto('https://x.com/home');
+      await page.evaluate(({post,scenario})=>{
+        // Open shadow roots let the test reach the cancel button.
+        const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(init){return attach.call(this,{...init,mode:'open'});};
+        globalThis.captions=video=>{const real=video.addTextTrack('subtitles','en (auto-generated)','en');real.mode='hidden';real.addCue(new VTTCue(0,2,'hello there'));real.addCue(new VTTCue(2,4,'general kenobi'));real.mode='disabled';};
+        captions(document.querySelector('video'));
+        globalThis.post=post;globalThis.log=[];globalThis.release=null;
+        const gate=new Promise(resolve=>{globalThis.release=resolve;});
+        const store={cindyReadingPreferences:{webTarget:'zh-CN',videoTarget:'zh-CN',autoVideo:true,videoMode:'both'}};globalThis.store=store;
+        globalThis.browser={runtime:{id:'fixture',getURL:()=>'data:,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){
+          if(m.type!=='cindy-learning')return {ok:true,enabled:false,cues:[]};
+          const q=m.request;log.push({op:q.op,videoId:q.source?.videoId});
+          if(q.op==='config')return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};
+          if(q.op==='translate')return {ok:true,translations:q.texts.map(()=>'译')};
+          if(q.op==='subtitles'){if(scenario==='cancelled')await gate;return {ok:true,cues:[{start:q.words[0].start,end:q.words.at(-1).end,text:'t',translation:'译'}]};}
+          return {ok:true};
+        }},storage:{local:{async get(){return store;},async set(v){Object.assign(store,v);}},onChanged:{addListener(){},removeListener(){}}}};
+      },{post,scenario});
+      for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+        await page.addScriptTag({path:path.join(extension,file)});
+      const player=page.locator('[data-testid="videoPlayer"]');
+      await player.hover();await player.locator('[data-cindy-player-entry]').click();
+      await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));
+      if(scenario==='cancelled'){
+        await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'video'},{id:'fixture'},resolve)));
+        await page.locator('[data-cindy-captions] button',{hasText:/^(取消|Cancel)$/}).click();
+      }else{
+        await page.evaluate(()=>{store.cindyReadingPreferences.autoSites={'https://x.com':true};});
+      }
+      await page.evaluate(()=>{log.length=0;history.pushState({},'','/u/status/9111');const main=document.querySelector('main');main.innerHTML=post;captions(main.querySelector('video'));});
+      await page.waitForTimeout(3000);
+      assert.deepEqual(await page.evaluate(()=>log.filter(x=>x.op==='subtitles')),[],'no paid subtitle request starts by itself');
+      assert.equal(await page.locator('[data-cindy-captions]').count(),0);
+      if(scenario==='page-translation')assert.ok(await page.evaluate(()=>log.some(x=>x.op==='translate')),'the page translation that was asked for still runs');
+    }finally{await browser.close();}
+  });
+}
+
+// X removes the old player and changes the address in either order; two timers notice them separately.
+for(const order of ['player first','address first','player replaced during setup']){
+  test(`X: subtitles follow into the post when the ${order} changes`,{skip:!process.env.PLAYWRIGHT_CORE,timeout:40000},async()=>{
+    const {chromium}=require(process.env.PLAYWRIGHT_CORE);
+    const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+    const markup=(href,thumb)=>`<article data-testid="tweet"><a href="${href}"><time>t</time></a><div data-testid="videoPlayer" class="p"><div class="c"><video${thumb?` poster="${poster(111)}"`:''}></video>${thumb?'':`<img src="${poster(111)}">`}</div><div class="row"><div><button data-testid="captions">CC</button></div><div><button>Fullscreen</button></div></div></div></article>`;
+    try{
+      const page=await browser.newPage({viewport:{width:1000,height:1300}});page.setDefaultTimeout(8000);
+      await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:`<meta charset="utf-8"><style>.p{position:relative;width:560px;height:315px;background:#333;margin:10px}.c,video{width:100%;height:100%}img{display:none}.row{position:absolute;bottom:0;right:0;display:flex;height:40px}</style><main>${markup('/u/status/9111',false)}</main>`}));
+      await page.route('https://pbs.twimg.com/**',route=>route.abort());
+      await page.goto('https://x.com/home');
+      await page.evaluate(post=>{
+        globalThis.captions=video=>{const real=video.addTextTrack('subtitles','en (auto-generated)','en');real.mode='hidden';real.addCue(new VTTCue(0,2,'hello there'));real.addCue(new VTTCue(2,4,'general kenobi'));real.mode='disabled';};
+        captions(document.querySelector('video'));globalThis.post=post;globalThis.log=[];
+        const store={cindyReadingPreferences:{webTarget:'zh-CN',videoTarget:'zh-CN',autoVideo:true,videoMode:'both'}};
+        globalThis.browser={runtime:{id:'fixture',getURL:()=>'data:,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){
+          if(m.type!=='cindy-learning')return {ok:true,enabled:false,cues:[]};
+          const q=m.request;log.push({op:q.op,videoId:q.source?.videoId});
+          if(q.op==='config'){if(globalThis.configDelay)await new Promise(r=>setTimeout(r,globalThis.configDelay));return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};}
+          if(q.op==='subtitles')return {ok:true,cues:[{start:q.words[0].start,end:q.words.at(-1).end,text:'t',translation:'译'}]};
+          return {ok:true};
+        }},storage:{local:{async get(){return store;},async set(v){Object.assign(store,v);}},onChanged:{addListener(){},removeListener(){}}}};
+      },markup('/u/status/9111',true));
+      for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+        await page.addScriptTag({path:path.join(extension,file)});
+      const player=page.locator('[data-testid="videoPlayer"]');
+      await player.hover();await player.locator('[data-cindy-player-entry]').click();
+      await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));
+      await page.evaluate(()=>{log.length=0;});
+      const swap=()=>page.evaluate(()=>{const main=document.querySelector('main');main.innerHTML=post;captions(main.querySelector('video'));});
+      const navigate=()=>page.evaluate(()=>history.pushState({},'','/u/status/9111'));
+      if(order==='player first'){await page.evaluate(()=>document.querySelector('video').remove());await page.waitForTimeout(2600);await navigate();await swap();}
+      else if(order==='address first'){await navigate();await swap();}
+      else{
+        // The address changes first; the new player appears only after the panel's configuration request is under way.
+        await page.evaluate(()=>{globalThis.configDelay=1500;});
+        await navigate();await page.waitForFunction(()=>log.some(x=>x.op==='config'));await swap();
+      }
+      await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'),null,{timeout:12000});
+      assert.deepEqual([...new Set(await page.evaluate(()=>log.filter(x=>x.op==='subtitles').map(x=>x.videoId)))],['x:111']);
+    }finally{await browser.close();}
+  });
+}
