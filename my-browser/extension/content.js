@@ -251,7 +251,7 @@
     panelSetup=setup;return setup.promise;
   }
   async function open(action){
-    carried=null;const epoch=panelEpoch;
+    carried=resuming=null;const epoch=panelEpoch;
     if(action==='selection'&&window.getSelection()?.toString().trim())selection();
     if(action==='settings'&&videoSession){showSettings();videoSession.overlay.openSettings(false);return;}
     // Choosing another player on the page moves the session there.
@@ -635,12 +635,13 @@
     cueList();
   }
   function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
-  let requestedMedia=null,carried=null;
+  let requestedMedia=null,carried=null,resuming=null;
   // X replaces the player when a post opens from the feed (or the feed comes back): the same video in
   // another element. Subtitles someone turned on follow it there, keeping the session's identity so the
   // finished passages come from the cache and the same task. Any explicit Cindy action drops the carry.
   function carryVideo(){
-    if(!xSite||!videoSession||!video)return;
+    // A session the person cancelled, or that failed, stays stopped: only a deliberate click starts paid work again.
+    if(!xSite||!videoSession||!video||videoSession.paused||videoSession.failed){carried=null;return;}
     // A post can hold several videos: its own id only stands in when no media id was ever seen.
     const now=xVideoIds(video),media=videoSession.ids?.media||now.media,id=media?{media}:{post:videoSession.ids?.post||now.post};
     carried=id.media||id.post?{...id,videoId:videoSession.videoId,auto:videoSession.auto,until:Date.now()+10000}:null;
@@ -651,8 +652,13 @@
     if(translated||translations.size){carried=null;return;}
     if(Date.now()>carry.until){carried=null;return;}
     const found=[...document.querySelectorAll('video')].filter(m=>{const ids=xVideoIds(m);return carry.media?ids.media===carry.media:ids.post===carry.post;}),media=found.length===1?found[0]:null;if(!media)return;
-    carried=null;const epoch=panelEpoch;
-    preparePanel(epoch).then(ok=>{if(ok&&epoch===panelEpoch&&runtimeReady()&&!videoSession&&media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}}).catch(()=>{});
+    // While the panel is prepared, a click on Cindy (open clears resuming) or a page translation that
+    // another automatic start began (it shares configure()) must win: showVideo would cancel that work.
+    carried=null;resuming=carry;const epoch=panelEpoch;
+    preparePanel(epoch).then(ok=>{
+      if(resuming!==carry)return;resuming=null;
+      if(ok&&epoch===panelEpoch&&runtimeReady()&&!videoSession&&!translated&&!translations.size&&media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}
+    }).catch(()=>{resuming=null;});
   }
   // A feed holds many players; the one playing on screen is the one meant.
   function siteMediaId(media){
