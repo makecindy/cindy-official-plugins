@@ -24,7 +24,7 @@ Reply in the user's language. Read the reference files only when this file point
 - Never push or open a pull request until the user asks for it or agrees. Never approve, merge, enable auto-merge, re-enqueue a merge queue, or take a PR out of draft unless the user authorised it for this repository. Authorisation for one repository never carries to another.
 - Never stash, reset, clean, revert or overwrite the user's uncommitted changes. Never force-push.
 - Public replies stay short, factual and traceable. Ask before posting anything that takes a product position, discloses sensitive material, or attaches screenshots.
-- Requires the GitHub CLI signed in (`gh auth status`) and Node.js. If either is missing, or the repository is not on GitHub, say exactly that; you can still do the local work.
+- Requires the GitHub CLI signed in (`gh auth status`) and Node.js. If GitHub is not signed in, call Cindy's `connect_account` with `kind: "plugin"` and this plugin's id: Cindy opens its own GitHub sign-in on this computer (`GITHUB_SIGN_IN_REQUIRED`), so tell the user to finish it there and check `gh auth status` again; never ask for a token in chat. If that is unavailable, Node.js or `gh` is missing, or the repository is not on GitHub, say exactly that; you can still do the local work.
 
 ## Where to start
 
@@ -57,7 +57,7 @@ To take over an existing PR, use the link or number given, or the current branch
    `node "<skill-dir>/scripts/pr-snapshot.mjs" <PR_URL>`. Use its `verdict` and `blockers[]`. If the snapshot fails or is truncated, never claim the PR is clean.
 2. Review threads are read per thread, active **and** outdated. For each outdated unresolved thread, check the current HEAD: still a problem → fix it; already fixed or superseded → reply pointing at the commit, then resolve.
 3. **Feedback is a symptom, not a task list.** Before editing, attribute each comment to the invariant it reveals, group comments by that invariant (a failure family), and fix every path of the family, including ones nobody pointed at. Fix one family at a time, not one thread at a time. Method: `references/review-convergence.md`.
-4. **Wait for the round to be complete.** After a push, if a bot reviewer that reviewed earlier commits has not yet reviewed the new head, end the round with `--defer 15` (at most once per push; see `references/review-convergence.md` §5). Then fix everything from the round together.
+4. **Wait for the round to be complete.** While following, the check already does this: after a push it holds news from bots and checks until every bot reviewer of this PR or repository has answered on the new commit (a review, a comment, or a reaction such as Codex's 👍), or 20 minutes have passed. When it wakes you, fix everything it lists together. Without a schedule (a fix round in the foreground), if a bot reviewer that reviewed earlier commits has not yet reviewed the new head, wait for it once (see `references/review-convergence.md` §5). Checks need no separate wait: look at them again right before pushing (step 8) and fold in any failure that arrived meanwhile.
 5. **CI:** read `gh pr checks` and `gh run view <run-id> --log-failed`. Failures unrelated to this PR (they also fail on the base branch) are baseline problems: do not mix fixes for them into this PR. Re-run only a confirmed flake, once (`gh run rerun <run-id> --failed`); a second failure is real.
 6. **Conflicts or a stale base:** merge the base branch into the PR branch (`git fetch origin <base>`, `git merge origin/<base>`), resolve, test. Do not rebase a shared PR branch.
 7. Verify with the narrowest tests, lint and type checks that cover the change, using the commands the repository's rules name (its own test gate when it has one). Write long test output to a log file and read the log to find failures instead of re-running a whole suite because the terminal cut it off. A failure unrelated to this PR is a baseline problem when it also fails on an up-to-date base: say so with that evidence, do not mix a fix for it into this PR, and do not let it block the push. Stage only related files.
@@ -83,8 +83,8 @@ Use `cindy_scheduler` (`list_tools` with category `scheduler`, then `call_tool`)
 {
   "name": "PR #<number>",
   "prompt": "Follow <PR_URL> with the pr Skill of Cindy's GitHub plugin (background round): load it first (in Claude Code it sits under the plugin `cindy-plugin-cindy-github`; if this session does not offer it, read <skill-dir>/SKILL.md) and follow its section 5. Checkout: <worktree path> (branch <branch>).",
-  "cronExpr": "*/10 * * * *",
-  "intervalMs": 600000,
+  "cronExpr": "*/5 * * * *",
+  "intervalMs": 300000,
   "timezone": "<the user's IANA time zone>",
   "recurring": true,
   "bindToCurrentSession": true,
@@ -105,7 +105,7 @@ Use `cindy_scheduler` (`list_tools` with category `scheduler`, then `call_tool`)
 - The hook path must be the resolved `<skill-dir>`. Never put a path under the system temp directory (for example one containing `cindy-claude-skills-`) in the hook: it disappears when Cindy restarts. Resolve it right before creating the schedule: run `realpath` on the base directory Cindy gave when this Skill was loaded. If that directory no longer exists, load this Skill again for a fresh one. Never search the disk for it.
 - `notify` values are JSON booleans. On `INVALID_ARGS`, fix the arguments once from the returned schema; if it fails again, report it.
 - A returned id is not proof. Read it back with `schedule_get`, confirm its `preRunHook.command` points at this Skill's update-stable entry (the path contains `/agent-skills/skills/`), and confirm it appears in `schedule_list`. Tell the user in one line that following started and how to stop it ("say stop following", or the card's Stop button), and update the card with `following: true`.
-- Leave `cronExpr` and `intervalMs` alone afterwards. Each check first asks GitHub one small question and reads the PR in full only when something changed. How the check decides is described in `references/follow-up.md`.
+- Leave `cronExpr` and `intervalMs` alone afterwards. The check paces itself from what it last saw: most firings end at once without calling GitHub, a PR that only waits for a human is looked at every 30 minutes, and Cindy fires the schedule at once when its title-bar PR status shows a change. How the check decides is described in `references/follow-up.md`.
 
 ## 5. Background round
 
@@ -120,13 +120,14 @@ The schedule wakes this task only when something new needs you: a check failed, 
    - **`comment-limit`:** ten updates in a row brought only comments, usually a loop with a bot. Stop following and tell the user why.
    - **`defer-expired`:** the wait you set is over. Continue with what you have, for example fix with the bot feedback that did arrive.
    - **`silence-guard`:** a periodic look at what the check cannot see. Decide whether to merge in the base, re-run, close or nudge, rather than staying silent just because nothing changed.
-   - **Merged or closed:** report it in one line, then `schedule_delete` this schedule (delete, never pause), then clean up (section 6).
+   - **Merged or closed:** report it in one line, update the card (below), then `schedule_delete` this schedule (delete, never pause), then clean up (section 6).
 3. If the prompt names a PR card, refresh it before finishing: `pr_card` with `card_id`, `repo` and `pr`. It reads the current CI, review and merge state itself. When this round notifies the user (below), add `to_latest: true` so the card moves under your message; otherwise it updates where it is. If it names none (a follow-up started before cards existed, or moved from another workflow) and the plugin is available, show one with `pr_card` (`repo`, `pr`, `following: true`), then add `PR card: <card_id>.` to the end of this schedule's prompt with `schedule_update` (pass `cronExpr`, `intervalMs` and `preRunHook` unchanged with it) so later rounds refresh the same card.
-4. Finish every round with `node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --ack`. Use `--defer <minutes>` (which implies `--ack`) only to be woken again at a set time when nothing else happens first: waiting for this push's bot reviewers (15, at most once per push). When you are waiting for the user's decision, just `--ack`: their reply comes to this task.
+4. Finish every round with `node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --ack`. Use `--defer <minutes>` (which implies `--ack`) only to be woken again at a set time when nothing else happens first; the check already waits for this push's bot reviewers by itself. When you are waiting for the user's decision, just `--ack`: their reply comes to this task.
+5. **An older schedule:** if this schedule still fires every 10 minutes (`cronExpr` `*/10 * * * *`), switch it once with `schedule_update` to `"cronExpr": "*/5 * * * *"`, `"intervalMs": 300000`, passing `preRunHook` unchanged. The check paces itself, so the extra firings cost nothing.
 
 **Notifications.** The schedule runs silently. Call `schedule_notify_current_run` (then write one short message) only when the user should know now: it was merged or closed, you need their decision, following stopped on its own (a draft or the comment limit), or the check reports a problem stuck for several backoff cycles. Never notify to say nothing changed or that the PR is ready to merge, and never nag about pending approval or merge.
 
-If the user asks to stop (the card's Stop button sends this request too), delete the schedule and update the card with `following: false`.
+**Ending following, on any path** (merged or closed, the user asks to stop or presses the card's Stop button, a draft or the comment limit, or cleanup done in the foreground): first update the PR card with `pr_card` (`card_id`, `repo`, `pr`, `following: false`; add `to_latest: true` when you also tell the user), then delete the schedule. A card left at "following" keeps telling the user a follow-up exists. The `card_id` is in the schedule prompt (`PR card: …`) or in this task's earlier card.
 
 **Draft and ready.** When the user asks in text to mark a draft ready, run `gh pr ready <PR_URL>`, refresh the card (`pr_card` with `card_id`, `repo`, `pr`) and apply its follow setting as after opening. When they ask to turn a PR back into a draft, run `gh pr ready --undo <PR_URL>`; if it was being followed, stop following as above, then refresh the card.
 

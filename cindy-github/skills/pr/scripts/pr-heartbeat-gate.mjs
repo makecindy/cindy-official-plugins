@@ -36,9 +36,10 @@
  * 同一 session 的 turn 串行。若将来改成非绑定 / 每轮新建会话 / 允许并发,必须让 ack 携带
  * 本轮的标识再提升。
  *
- * 成本:调度固定每 10 分钟触发。每次先跑一个很小的探测查询(pr-snapshot.mjs --probe),与上次
- * 完整读取一致就直接跳过;有变化、有未确认的放行、检查在跑或超过 30 分钟没完整读过时,才做
- * 完整快照(三四个接口)。
+ * 成本:调度每 5 分钟触发,宿主看到这个 PR 的标题栏状态变了还会提前触发一次。每次先按阶段判断
+ * 这一轮该不该看(lib/follow-pacing.mjs,不该看就直接跳过,不调用 GitHub);该看时先跑一个很小的
+ * 探测查询(pr-snapshot.mjs --probe),与上次完整读取一致就直接跳过;有变化、有未确认的放行、检查
+ * 在跑或超过 30 分钟没完整读过时,才做完整快照(三四个接口)。推送后的收齐也在这里(settling)。
  *
  * 用法:
  *   node pr-heartbeat-gate.mjs <PR_URL|PR号> [--repo owner/name] [选项]
@@ -66,12 +67,16 @@
  *                              没跑」不该消耗额度
  *   --max-silence-hours N      保底巡检闸门(默认 24):连续这么久没真正放行过就强制唤起一次
  *   --json                     决策以 JSON 输出(便于排查;不影响退出码)
+ *   --triggered                当作宿主触发的一轮:不看节奏,也不做探测,直接完整读取
+ *                              (宿主也可经 stdin 的 trigger 字段告知,见 readHookTrigger)
+ *   --no-pacing                不按阶段跳过,每次都检查(排查用)
  *   已退役、接受并忽略:--suggest(只读兼容输出)、--no-cadence-throttle、
  *   --draft-reminder-hours N、--max-work-pending-passes N
  */
 
 import { createHash } from 'node:crypto';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
+import { breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,7 +128,7 @@ const DEFAULT_RETRY_BACKOFF_MINUTES = 30;
  * 顺延,把 3 次快速重试额度烧光并 armed 30 分钟短退避,而 schedule_runs 里那条心跳
  * 一条真正的 run 都没有)。宿主重启、agent spawn 失败也是同一类空放行。
  *
- * 判据用时间而不是别的:心跳最快档位是 10 分钟,一轮真实处理(拉快照 + 读 + 改 + 验证)
+ * 判据用时间而不是别的:一轮真实处理(拉快照 + 读 + 改 + 验证)
  * 也远不止几分钟,所以「上次放行才过了 90 秒又来敲门」只可能是空放行。空放行照样放行
  * (agent 确实还没跑,不能吞掉),但不消耗额度。
  */
@@ -197,6 +202,14 @@ export function isHumanOnlyReviewPending(snap) {
       .join('\n');
     return HUMAN_APPROVAL_LANGUAGE.test(body);
   });
+}
+
+/** Nothing for the agent to do: ready to merge, or only a human approval (branch protection) is left. */
+export function waitingOnHumans(snap) {
+  if (snap?.verdict === 'READY') return true;
+  if (snap?.verdict !== 'BLOCKED_HUMAN') return false;
+  const blockers = snap?.blockers ?? [];
+  return blockers.length > 0 && blockers.every((b) => HUMAN_ONLY_BLOCKERS.has(b));
 }
 
 function humanOnlyReviewDetail(snap) {
@@ -297,6 +310,8 @@ export function parseArgs(argv, env = process.env) {
   let minPassSpacingMinutes = DEFAULT_MIN_PASS_SPACING_MINUTES;
   let maxSilenceHours = DEFAULT_MAX_SILENCE_HOURS;
   let json = false;
+  let triggered = false;
+  let pacing = true;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -307,6 +322,14 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--ack') {
       ack = true;
+      continue;
+    }
+    if (arg === '--triggered') {
+      triggered = true;
+      continue;
+    }
+    if (arg === '--no-pacing' || arg === '--pacing') {
+      pacing = arg === '--pacing';
       continue;
     }
     // 已退役的选项:旧调度的 hook 可能还带着,接受并忽略,不让它们 fail-closed。
@@ -424,6 +447,8 @@ export function parseArgs(argv, env = process.env) {
     minPassSpacingMs: Math.round(minPassSpacingMinutes * 60_000),
     maxSilenceMs: Math.round(maxSilenceHours * 3_600_000),
     json,
+    triggered,
+    pacing,
   };
 }
 
@@ -466,6 +491,11 @@ export function stateFilePath(stateDir, repo, number) {
  * repository that mapped to the same old name could have written it (which is why the name changed), and
  * its newer comment baseline would hide comments here: adopt only a file whose recorded PR URL is this PR.
  */
+/** 仓库级状态(近期见过的 bot reviewer),与各 PR 的状态文件放在同一目录。 */
+export function repoStateFilePath(stateDir, repo) {
+  return path.join(stateDir, `${repo.replace('/', '__')}.repo.json`);
+}
+
 export function adoptLegacyStateFile(stateDir, repo, number, file) {
   if (!repo.includes('__')) return;
   const legacy = path.join(stateDir, `${repo.replace(/\//g, '__')}-${number}.json`);
@@ -675,16 +705,16 @@ const remarkTime = (c) => (c?.authorIsBot ? c?.createdAt ?? c?.updatedAt : c?.up
 export function remarksOf(snap) {
   const out = [];
   for (const c of snap?.comments ?? []) {
-    out.push({ id: c?.id, author: c?.author, at: remarkTime(c), body: c?.body ?? '', path: null, url: c?.url ?? null });
+    out.push({ id: c?.id, author: c?.author, authorIsBot: Boolean(c?.authorIsBot), at: remarkTime(c), body: c?.body ?? '', path: null, url: c?.url ?? null });
   }
   for (const r of snap?.reviews ?? []) {
     const body = String(r?.body ?? '').trim();
     if (!body && ['COMMENTED', 'PENDING'].includes(r?.state)) continue;
-    out.push({ id: r?.id, author: r?.author, at: r?.submittedAt, body, state: r?.state ?? null, path: null, url: r?.url ?? null });
+    out.push({ id: r?.id, author: r?.author, authorIsBot: Boolean(r?.authorIsBot), at: r?.submittedAt, body, state: r?.state ?? null, path: null, url: r?.url ?? null });
   }
   for (const t of snap?.reviewThreads?.nodes ?? []) {
     for (const c of t?.comments ?? []) {
-      out.push({ id: c?.id, author: c?.author, at: remarkTime(c), body: c?.body ?? '', path: t?.path ?? null, url: c?.url ?? null });
+      out.push({ id: c?.id, author: c?.author, authorIsBot: Boolean(c?.authorIsBot), at: remarkTime(c), body: c?.body ?? '', path: t?.path ?? null, url: c?.url ?? null });
     }
   }
   return out.filter((r) => r.id && Number.isFinite(Date.parse(r.at ?? '')));
@@ -929,6 +959,7 @@ export function decide({
   retryBackoffMs = DEFAULT_RETRY_BACKOFF_MINUTES * 60_000,
   minPassSpacingMs = DEFAULT_MIN_PASS_SPACING_MINUTES * 60_000,
   maxSilenceMs = DEFAULT_MAX_SILENCE_HOURS * 3_600_000,
+  settle = null,
 }) {
   const lastKnownConflicting =
     typeof previous?.lastKnownConflicting === 'boolean' ? previous.lastKnownConflicting : null;
@@ -1017,6 +1048,17 @@ export function decide({
   if (legacy && previous?.pendingFingerprint) {
     return passPending('upgraded', 'the follow-up check was upgraded while an update was still unacknowledged; look at the PR once', '', 'upgraded', result.next);
   }
+  // 推送后收齐再叫醒:新提交上要等的 bot reviewer 还没全部给出结果、也没超过收齐窗口时,
+  // 只由 bot 与检查产生的新事件先压着(watch 不推进,下一轮连同新到的一起报);人的留言、
+  // 合并队列问题和草稿变化不压。已放行未确认的更新照常走重试,不在这里压。
+  if (result.events.length > 0 && !pendingWatch && settle?.open && !breaksSettle(result.events)) {
+    const kinds = [...new Set(result.events.map((e) => e.kind))];
+    return skip(
+      'settling',
+      `events=[${kinds.join(',')}] held until ${settle.waiting.join(', ')} answer on the new commit or ${isoAt(settle.until)}`,
+      baseline,
+    );
+  }
   // 纯人工批准等待期间,检查通过这类外部变化不再唤起 agent;首次退化成这种状态时
   // 仍按事件放行一次,让 agent 看到并留下必要的收尾说明。新留言、冲突等一律交给 agent 判断
   // (旧线程的「等批准」分类管不了新来的技术评论),上一轮还没确认的更新也不能被这里清掉。
@@ -1056,8 +1098,13 @@ export function decide({
       nextPendingCount: 0,
     };
   }
+  // 只等人审批或合并时保底巡检也不叫醒 agent:它没有可做的事,有变化时检查自己会报。
+  if (isHumanOnlyReviewPending(snap)) return skip('blocked-human', humanOnlyReviewDetail(snap), result.next);
   // 保底巡检:太久没有真正放行过 —— 指纹看不到的东西,以及 gate 自身的静默失效,让 AI 看一眼。
   const silenceAnchor = silenceAnchorOf(previous);
+  if (silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs && waitingOnHumans(snap)) {
+    return skip('waiting-human', `verdict=${snap.verdict}; only approval or merge is left, not waking the agent for the silence guard`, result.next);
+  }
   if (silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs) {
     return {
       ...base,
@@ -1200,6 +1247,8 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取。
   if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha) return false;
   if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return false;
+  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
+  if ((Number(previous.settleUntil) || 0) > 0) return false;
   if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
@@ -1292,7 +1341,7 @@ async function gateMain(argv, ctx) {
       repo: args.repo,
       number: args.number,
       reason: 'suggest-fixed',
-      detail: 'the check no longer changes its pace; keep the 10-minute schedule',
+      detail: 'the check paces itself from what it last saw; keep the schedule as created',
     }, out);
     return EXIT_PASS;
   }
@@ -1338,9 +1387,27 @@ async function gateMain(argv, ctx) {
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
     return EXIT_SKIP;
   }
+  // 宿主看到这个 PR 的状态变了而提前触发的一轮:不看节奏,也不做探测(宿主已经知道有变化)。
+  const hookTrigger = await ctx.readTrigger();
+  const triggered = args.triggered || (hookTrigger?.kind === 'watch');
+  // 按阶段决定这一轮要不要看:不到时间就直接跳过,不调用 GitHub,也不改状态。
+  if (args.pacing) {
+    const pace = pacingDue(previous, now, { triggered });
+    if (!pace.due) {
+      emit(args, {
+        exitCode: EXIT_SKIP,
+        repo: args.repo,
+        number: args.number,
+        reason: 'not-due',
+        detail: `pace=${pace.pace}; next look at ${isoAt(pace.nextAt)}`,
+      }, out);
+      if (!args.json) out('CINDY_PRECHECK_OK\n');
+      return EXIT_SKIP;
+    }
+  }
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
-  const probe = parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
-  if (probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
+  const probe = triggered ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
+  if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
     emit(args, { ...lastResult, repo: args.repo, number: args.number }, out);
@@ -1397,6 +1464,16 @@ async function gateMain(argv, ctx) {
 
   const checkSucceeded = !snap.gate?.truncated && !snap.checksSummary?.unavailable
     && !(snap.blockers ?? []).includes('merge_queue_unavailable');
+  // 推送后收齐:新提交第一次被看到的时刻,和要等的 bot reviewer(本 PR 见过的 + 本仓库近期见过的)。
+  // 开始跟进时已在的提交不知道何时推送,不算新提交(不压)。
+  const headFirstSeen = Boolean(snap.latestCommitOid) && Boolean(previous?.headOid) && snap.latestCommitOid !== previous.headOid;
+  const headSeenAt = headFirstSeen ? now : Number(previous?.headSeenAt) || null;
+  const repoFile = repoStateFilePath(args.stateDir, args.repo);
+  const repoState = readState(repoFile) ?? {};
+  const repoBots = updateRepoBots(repoState.reviewerBots, snap, now);
+  const waitFor = expectedBots({ snap, previous, repoBots, viewer: snap.viewer });
+  // 旧版状态没有 headSeenAt:这个提交不知道何时推送的,不压。
+  const settle = settleState({ snap, headSeenAt, expected: waitFor, now });
   const decision = decide({
     snap,
     previous,
@@ -1405,8 +1482,10 @@ async function gateMain(argv, ctx) {
     retryBackoffMs: args.retryBackoffMs,
     minPassSpacingMs: args.minPassSpacingMs,
     maxSilenceMs: args.maxSilenceMs,
+    settle,
   });
   const passed = decision.exitCode === EXIT_PASS;
+  writeState(repoFile, { ...repoState, reviewerBots: repoBots });
   // 回合状态:per-head 持久化,供「回合制与收敛止损」的机判使用(references/review-convergence.md)。
   // 这些信息理论上能从即时快照推导,但快照的 reviews 窗口只有 50 条、defer 痕迹又只活
   // 一轮,推导出的判据在边界上会失效 —— 所以由 gate 用确定性代码跨轮累积:
@@ -1518,6 +1597,12 @@ async function gateMain(argv, ctx) {
     ...(reviewersSeen.length ? { reviewersSeen } : {}),
     ...(deferredHeadOid ? { deferredHeadOid } : {}),
     ...(typeof lastKnownConflicting === 'boolean' ? { lastKnownConflicting } : {}),
+    // 节奏与收齐:新提交首次看到的时刻、本 PR 见过的 bot reviewer、收齐窗口截止、上次有变化的时刻
+    ...(headSeenAt ? { headSeenAt } : {}),
+    reviewerBots: [...new Set([...(Array.isArray(previous?.reviewerBots) ? previous.reviewerBots : []), ...reviewerBotsOf(snap)])].sort(),
+    ...(settle.open && decision.reason === 'settling' ? { settleUntil: settle.until } : {}),
+    lastChangeAt: decision.fingerprint !== previous?.currentFingerprint || !previous?.lastChangeAt
+      ? now : previous.lastChangeAt,
     fingerprintFields: fingerprintFieldHashes(
       snap,
       typeof previous?.lastKnownConflicting === 'boolean' ? previous.lastKnownConflicting : null,
@@ -1567,16 +1652,40 @@ function realpathOrSelf(target) {
  * 可注入入口:CLI 与测试共用同一条判定路径。测试在进程内调用,注入时钟、快照执行器与输出,
  * 不必为每一轮各起两个 node 进程;CLI 使用真实实现。任何未预期错误按协议 fail-closed。
  */
+/**
+ * 宿主经 stdin 传给前置检查一个 JSON(schedule-pre-run),提前触发的轮次带 `trigger`:
+ * `{ kind: 'watch', source, detail }`。手动运行(终端)没有 stdin,不等待。
+ */
+export async function readHookTrigger(stdin = process.stdin, timeoutMs = 500) {
+  if (!stdin || stdin.isTTY) return null;
+  const text = await new Promise((resolve) => {
+    let data = '';
+    const done = () => { clearTimeout(timer); stdin.removeAllListeners('data'); stdin.removeAllListeners('end'); resolve(data); };
+    const timer = setTimeout(done, timeoutMs);
+    stdin.setEncoding?.('utf8');
+    stdin.on('data', (chunk) => { data += chunk; if (data.length > 64 * 1024) done(); });
+    stdin.on('end', done);
+    stdin.on('error', done);
+  });
+  try {
+    const payload = JSON.parse(text);
+    return payload && typeof payload.trigger === 'object' ? payload.trigger : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runGate(argv, {
   env = process.env,
   now = Date.now,
   runSnapshot: snapshotRunner = runSnapshot,
   runProbe: probeRunner = runProbe,
+  readTrigger = readHookTrigger,
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
 } = {}) {
   try {
-    return await gateMain(argv, { env, now, runSnapshot: snapshotRunner, runProbe: probeRunner, out, err });
+    return await gateMain(argv, { env, now, runSnapshot: snapshotRunner, runProbe: probeRunner, readTrigger, out, err });
   } catch (error) {
     err(`[pr-heartbeat-gate] ${error.message}\n`);
     return EXIT_BLOCK;
