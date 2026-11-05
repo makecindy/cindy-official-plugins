@@ -14,6 +14,50 @@ Mail plugins should reuse the [shared compose workflow](mail-compose.md) for
 editable draft cards, autosave, unified sends and task continuation. Keep
 provider account, MIME and transport differences in adapters.
 
+## Target Host reference and capability map
+
+When authoring inside Cindy, start with the built-in `cindy-plugin-creator` Skill.
+`ghost_forge_guide` is a compatibility reader for that same bundled reference,
+not another SDK. Outside Cindy, use this repository's quick path and the matching
+Host reference; no Cindy-specific tools or client checkout are required.
+
+The [Host Skill and reference index](https://github.com/makecindy/cindy/tree/main/apps/desktop/resources/system-skills/cindy-plugin-creator)
+and its [version verification guide](https://github.com/makecindy/cindy/blob/main/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-source-verification.md)
+are navigation links. Determine the executing computer's Cindy version and
+verified release tag or build commit, then read those files at that ref. `main`,
+an unmerged PR, or a development-only chapter does not prove installed support.
+When source verification is unavailable, state the limit and use the target
+Host's bundled guide and actual runtime results without inventing API support.
+
+Use the matching reference index to find the capability before implementing it:
+
+| Need | Declarations / interfaces | Host reference sections |
+|---|---|---|
+| Agent tools and workflows | `tools`, `manual`, bundled `skill` | §3, §3.5, §3.6, §4.16 |
+| UI and interaction | `panel`, `mainView`, `taskView`, `settingsHtml`, cards, `mcpApps.ui` | §4.5, §4.8, §4.20, §4.22, §4.23, §5 |
+| Models and media | model catalog / picker, `models`, `cindy`, Agent Core `media` | §4.0.3, §4.0.4, §4.6.3 |
+| Host interaction | public context, `notify`, `badge`, `confirm` | §4.1, §4.9, §4.18 |
+| Tasks and coordination | `agent`, `cindy.tasks`, `cindy.targets` | §4.11 |
+| Events and routine triggers | `subscribe`, reply hooks, control points, `routineEvents` | §4.6 and routine-event reference |
+| Files and project context | `fs`, `library`, `sessionContext`, `pick`, `preview`, `workspace` | §4.10, §4.13–§4.17 |
+| Bundled code, CLI and stdio MCP | top-level `node`, declared entries and secret bindings | §4.12 |
+| Browser integration | `browserExtension` | §4.24 |
+| Mobile pages and desktop synchronization | `mobile`, `deviceSync` | §5.1, §4.10.2 |
+
+This is a reading map, not a minimum-version or availability guarantee. Check
+the target Host's capability results and the relevant chapter's release status;
+experimental or unpublished interfaces are not a stable compatibility promise.
+Repository validation and publication rules remain defined here; runtime API
+parameters, return values and authorization come from the matching Host contract.
+
+### Icons
+
+Use a user-supplied image, or generate one only after the user's consent.
+Do not draw or keep a solid-color placeholder, including one from an older
+scaffold. If no icon is supplied, omit `icon` and the unused file as described
+in the README; let the Host render its default symbol. Do not package that
+default symbol as an image. A declared `icon` must reference a real package file.
+
 ## Capability declarations are not a client support gate
 
 Plugin development must not wait for Cindy client capability releases. Within a
@@ -165,12 +209,12 @@ Establish stable/Beta release evidence before relying on the hidden card or sett
   the plugin if none exists. If the task explicitly requires new fixes for
   v2-only clients, the current repository gate does not support that path:
   explain the conflict instead of lowering metadata or changing CI yourself.
-- Installation and updates do not ask for per-capability confirmation because
-  declarations changed. Package source does not create another capability
-  authorization policy. Existing automatic installation entry points remain;
-  development-tool packaging only produces an artifact, and installation needs
-  an appropriate user request. Runtime Agent authorization, account connection,
-  credential setup, and user directory selection may still be necessary.
+- Repository validation and publication do not grant Host permissions. Installation,
+  updates, and any capability confirmation follow the target Host version and
+  installation source; consult its matching guide. Development-tool packaging only
+  produces an artifact, and installation needs an appropriate user request.
+  Runtime Agent authorization, account connection, credential setup, and user
+  directory selection remain separate steps.
 - Package manifests accurately describe contributions and autonomous Host use.
   Do not introduce an installation gate treating market summaries as the actual
   package's capability ceiling. Host support, credential boundaries, and existing
@@ -266,9 +310,15 @@ use existing Agent file tools or a genuinely needed Node worker, respecting that
 execution route's authorization and scope. Preserve `library` for persistent
 user works rather than moving them into uninstall-deleted private `data`.
 
+Declaring `sessionContext` can provide a trusted `args.session_context.workdir`
+path. Location metadata grants no file access: check `workdir_is_local` and
+`workdir_is_read_only` before passing it to a Node worker, following Host §4.13.
+
 ### Bundled Node / CLI
 
-Add this field fragment to the existing Manifest and declare the actual tool
+Bundled code, CLIs and stdio MCP always require the top-level `node` field,
+including when called by the current Agent. Add this field fragment to the
+existing Manifest and declare the actual tool
 (for example `git_version`). `entry: 'main.js'` remains the sandbox entry;
 `node.entry` refers to a different, real bundled file.
 
@@ -348,6 +398,24 @@ Never send it through ordinary `params`, cache it, return it, or log it. Keep
 credential setup separate from business calls: installation success is not
 proof of account connection.
 
+### Media generation and task coordination
+
+For new image/video functionality, the plugin returns business parameters and
+model preferences. The current Agent calls Cindy Core `media`, then explicitly
+hands results to the plugin through `ghost_call.attachments` if needed. The Host
+does not automatically invoke the plugin after generation. Legacy
+`cindy-request` image/video generation is for existing-plugin compatibility;
+do not copy it as the new-plugin path. See Host §4.0.4 for the full flow.
+
+For independent Agent work, use the target Host's §4.11 task interfaces and their
+declared capabilities. Check `cindy.tasks.capabilities()` before incremental
+operations. `archive({taskId})` applies only to the plugin's own idle local tasks;
+busy tasks return `TASK_BUSY`. Sending to projects, existing tasks or companions
+requires the separately declared and approved `agent.targets` together with
+`agent.tasks`; it does not confer ownership of every task. Newer observation and
+companion interfaces must follow their own release status and Host checks;
+their presence in a guide does not establish stable support.
+
 ## Validation and delivery: handled by the Agent
 
 1. Compare existing declarations and code with the migration; preserve resources,
@@ -388,14 +456,19 @@ proof of account connection.
 
 ## Interpreting documentation and comments
 
-Runtime examples follow Cindy's
-[Host authoring reference](https://github.com/makecindy/cindy/blob/d1171fc58cc3368005a92c63afe8b4b7bc0ccda3/apps/desktop/src/main/cindy-brain/forge.ts).
-They are reproduced here for any harness; invoking Forge or checking out the
-client is unnecessary. The pinned validator records its source in the header of
+Runtime examples are a convenience for any harness; consult the
+[matching Host reference](#target-host-reference-and-capability-map) for current
+API details instead of treating an old single-file guide as the whole SDK.
+Invoking Forge or checking out the client is unnecessary. The pinned validator
+records its source in the header of
 `.tests/contracts/plugin-manifest.*.mjs`. It is generated, not hand-edited, and is
 not a complete SDK manual. Historical v2 slot/installation-confirmation comments
 do not authorize reinstating installation permission gates. Use this reference,
 Contributing, and the target Host's actual interfaces for current behavior.
+Official repository plugins are published through PRs and the repository workflow.
+Client community submissions use their separate contribution flow; Forge
+`intent: 'publish'` targets the current organization. Packaging alone does not
+select any of those destinations or publish a plugin.
 Keep both languages synchronized; correcting wording does not require changing
 plugin packages, Host behavior, or CI restrictions.
 

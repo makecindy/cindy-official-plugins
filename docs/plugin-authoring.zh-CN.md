@@ -11,6 +11,45 @@
 邮箱插件的可编辑草稿卡、自动保存、统一发送和任务续接，应复用
 [公共邮件流程](mail-compose.zh-CN.md)。账号、MIME 和请求方式的服务商差异留在适配器。
 
+## 目标宿主参考与能力导航
+
+在 Cindy 内编写插件时，从内置 `cindy-plugin-creator` Skill 开始。
+`ghost_forge_guide` 是同一份随包参考的兼容读取入口，不是另一套 SDK。
+在外部 Agent 或编辑器中，沿本仓快速路径和匹配的 Host 参考开发，不要求拥有 Cindy
+专用工具，也不要求 checkout 客户端。
+
+[Host Skill 与参考索引](https://github.com/makecindy/cindy/tree/main/apps/desktop/resources/system-skills/cindy-plugin-creator)
+及其[版本核对指南](https://github.com/makecindy/cindy/blob/main/apps/desktop/resources/system-skills/cindy-plugin-creator/references/plugin-source-verification.md)
+是导航入口。先确认实际执行电脑的 Cindy 版本及已核实的发布 tag 或构建 commit，再读
+该 ref 下的资料。`main`、未合并 PR 和“开发中”章节不能证明安装版支持。
+无法核实源码时说明限制，使用目标 Host 随包指南和实际运行结果，不自行补出 API 能力。
+
+实现前从匹配的参考索引找到对应能力：
+
+| 需求 | 声明或接口 | Host 参考章节 |
+|---|---|---|
+| Agent 工具与工作流 | `tools`、`manual`、随包 `skill` | §3、§3.5、§3.6、§4.16 |
+| 界面与交互 | `panel`、`mainView`、`taskView`、`settingsHtml`、卡片、`mcpApps.ui` | §4.5、§4.8、§4.20、§4.22、§4.23、§5 |
+| 模型与媒体 | 模型目录/选择器、`models`、`cindy`、Agent Core `media` | §4.0.3、§4.0.4、§4.6.3 |
+| 宿主交互 | 公开上下文、`notify`、`badge`、`confirm` | §4.1、§4.9、§4.18 |
+| 任务与协作 | `agent`、`cindy.tasks`、`cindy.targets` | §4.11 |
+| 事件与例行任务触发 | `subscribe`、回复钩子、控制节点、`routineEvents` | §4.6 与例行任务事件参考 |
+| 文件与项目上下文 | `fs`、`library`、`sessionContext`、`pick`、`preview`、`workspace` | §4.10、§4.13–§4.17 |
+| 随包代码、CLI 与 stdio MCP | 顶层 `node`、入口和凭证绑定 | §4.12 |
+| 浏览器集成 | `browserExtension` | §4.24 |
+| 手机页面与电脑间同步 | `mobile`、`deviceSync` | §5.1、§4.10.2 |
+
+这是一份阅读导航，不是最低版本或接口可用性保证。检查目标 Host 返回的能力信息及
+对应章节的发布状态；实验性或未发布接口不作为稳定兼容承诺。本仓继续定义仓库校验与
+发布规则，运行时 API 的参数、返回和授权以匹配的 Host 契约为准。
+
+### 图标
+
+使用用户提供的图片，或征得用户同意后生成。不手绘或保留纯色色块占位图，旧脚手架
+带来的占位图同样不提交。尚未提供图标时，按 README 省略 `icon` 和未使用的文件，
+由 Host 显示默认符号；不要把默认符号另存成图片打包。声明了 `icon` 时，必须指向
+真实存在的包内文件。
+
 ## 能力声明不绑定客户端实现进度
 
 插件开发不应等待 Cindy 客户端能力发布。在支持的清单格式内，不认识的能力声明是
@@ -129,9 +168,9 @@ v2 和 v3 均接受 `true`、`false`；省略或设为 `true` 时按原有能力
   Server 根据包的最低版本向旧客户端选择兼容历史 release；没有则不展示。若任务
   明确要求给仅支持 v2 的客户端继续发修复包，当前仓库门禁不支持，应说明冲突，
   不可降低版本元数据来绕过，也不可自行修改 CI。
-- 安装和更新不以能力变化为由逐项请求确认，来源不构成另一套能力授权策略。原有
-  自动安装入口仍存在；开发工具的“打包”只生成产物，安装需有相应用户请求。
-  使用时仍可能需要 Agent 授权、登录、配置凭证或用户选择目录，不能把这些取消。
+- 仓库校验与发布不授予 Host 权限。安装、更新和能力确认按目标 Host 版本与安装来源
+  执行，具体阅读匹配版本的指南。开发工具的“打包”只生成产物，安装需有相应用户请求。
+  使用时的 Agent 授权、登录、配置凭证和用户选择目录仍是独立步骤。
 - 包内 Manifest 应准确描述插件贡献项和自主 Host 使用；不要另造“市场摘要是实际包
   能力上限”的安装门禁。实际使用按 Host 支持、凭证边界和既有运行时授权处理。
 
@@ -215,8 +254,13 @@ if (!written.ok) throw new Error(written.message || '写入未完成，请检查
 或确实需要的 Node worker 完成，并遵守该执行路径的授权和范围。用户持久作品需要
 `library` 时保留该能力，不能改存卸载即删的 `data`。
 
+声明 `sessionContext` 后可取得可信的 `args.session_context.workdir` 路径；位置元数据
+不授予文件访问权。交给 Node worker 前按 Host §4.13 核对 `workdir_is_local` 和
+`workdir_is_read_only`，不能把远程路径当作本机目录或忽略只读状态。
+
 ### 随包 Node / CLI
 
+随包代码、CLI 和 stdio MCP 始终需要顶层 `node` 字段，包括当前 Agent 调用的场景。
 在现有 Manifest 中加入下面的字段片段，并声明实际工具（例如 `git_version`）。
 `entry: 'main.js'` 仍是沙箱入口，`node.entry` 是另一个真实的随包文件。
 
@@ -290,6 +334,19 @@ Worker 使用明文时用 `node.secretBindings` 限定方法和入口，Host 在
 `cindy.secrets` 注入，不能通过普通 `params` 传入、缓存、回传或写日志。凭证配置与
 业务调用分开，不把“安装成功”等同于“账号已连接”。
 
+### 媒体生成与任务协作
+
+新建图片/视频生成功能时，插件返回业务参数与模型偏好，当前 Agent 调 Cindy Core
+`media`，需要把结果交回插件时再显式使用 `ghost_call.attachments`。生成结束不会由
+Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存量兼容，不作为新插件
+起步路径，完整流程见 Host §4.0.4。
+
+独立 Agent 工作使用目标 Host §4.11 的任务接口与对应声明，使用增量操作前先检查
+`cindy.tasks.capabilities()`。`archive({taskId})` 仅归档本插件创建的本机空闲任务，
+忙时返回 `TASK_BUSY`。向项目、已有任务或伙伴投递须单独声明并获批 `agent.targets`，
+同时声明 `agent.tasks`，不代表插件取得所有任务的归属。较新的任务观察、伙伴接口按
+各自发布状态与 Host 检查使用；指南中出现接口不等于已发布稳定支持。
+
 ## 校验与交付：Agent 自行完成，不增加作者手工步骤
 
 1. 对照旧声明与源码检查迁移后仍有所有原能力，保留引用的资源、工具参数和四语言
@@ -318,12 +375,16 @@ Worker 使用明文时用 `node.secretBindings` 限定方法和入口，Host 在
 
 ## 文档与注释的解释边界
 
-运行时示例依据 Cindy [Host 编写参考](https://github.com/makecindy/cindy/blob/d1171fc58cc3368005a92c63afe8b4b7bc0ccda3/apps/desktop/src/main/cindy-brain/forge.ts)，
-列在这里供任意 harness 直接使用，不要求调用 Forge 或 checkout 客户端。
+运行时示例供任意 harness 直接使用，当前 API 细节查阅
+[匹配版本的 Host 参考](#目标宿主参考与能力导航)，不把旧的单文件指南视为完整 SDK。
+不要求调用 Forge 或 checkout 客户端。
 固定校验器的来源在 `.tests/contracts/plugin-manifest.*.mjs` 文件头；它是生成产物，
 不手改，也不是完整 SDK 手册。里面保留的 v2“槽”“安装确认框”等历史注释不能用来
 恢复安装授权门禁；当前行为以本文、贡献指南和目标 Host 的实际接口为准。修改文档时
 同步中英文，不因纠正文案去更改插件包、Host 行为或新增 CI 限制。
+
+官方仓插件通过 PR 和仓库工作流发布；客户端社区投稿有独立贡献流程，Forge 的
+`intent: 'publish'` 面向当前组织。仅打包既不选择这些发布目标，也不会发布插件。
 
 ## 同账号设备同步
 

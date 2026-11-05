@@ -27,9 +27,9 @@
   后会自动将变更包提交到海外 Plugin Platform，审核通过后才对用户可见。从
   [提交你的插件](#提交你的插件)开始。
 
-已安装的市场插件会沿安装时记录的来源静默更新。审核通过后，版本升级可以在
-用户无需再次点击、也不会出现能力确认弹窗的情况下到达已安装用户。请把能力扩张
-和运行时行为变更视为立即生效的线上变更：包内 `ghost.json` 只声明实际必需的最小能力，
+已安装的市场插件按安装时记录的来源更新。审核通过、安装、能力授权和账号配置是
+不同事实；是否自动更新、是否需要确认，以目标 Host 的版本和安装来源为准。请把能力扩张
+和运行时行为变更视为线上变更：包内 `ghost.json` 只声明实际必需的最小能力，
 遵守 Host 授权及凭证边界；市场摘要不是另一套安装权限门禁。
 
 ## 插件列表
@@ -122,7 +122,8 @@
    使用 Host 下发且严格在途的 `callId`，随包代码与 CLI 继续走已有 Node 工作进程。
    不要仅为了预登记具体命令、域名或路径新增 Slot 或 Manifest 字段。插件若要从
    Panel、订阅、scheduler 或常驻进程中自主使用 Host
-   能力，才在 `ghost.json` 声明对应直接字段。自主 Node Runtime 仍必须显式声明顶层
+   能力，才在 `ghost.json` 声明对应直接字段。所有随包 Node Runtime，包括当前
+   Agent 工具调用中使用的，也必须显式声明顶层
    `node` 字段、固定入口和最小子进程边界。
 2. **密钥归属明确**：普通 API token 通过主机的 `/secrets` 只写通道保存；Node
    插件需明文凭证时，用 `node.secretBindings` 将其限制到指定 Worker 方法并由
@@ -140,7 +141,7 @@
 - [ ] 已分清执行者：插件工具调用由现有 Agent 授权，HTTPS／workdir 操作用当前
       `callId`；CLI 走已有 Node 工作进程，`ghost.json` 不预登记具体命令
 - [ ] Node 插件：显式 `node` 字段、固定入口、最小子进程边界；`node/worker.cjs`
-      是随 `src/` 重建的 esbuild 产物
+      等生成产物按对应源码和构建步骤重建
 - [ ] 任何地方无明文凭证：token 走 `/secrets` 只写通道或 `node.secretBindings`；
       不经过 `main.js`、Agent 参数、日志、KV、页面状态
 - [ ] 有不可逆外发副作用的工具（发送 / 发帖 / 删除）在每条失败路径上区分
@@ -213,10 +214,14 @@ Plugin Server；Platform 创建待审核 release。
 
 ## 本地开发
 
-插件编写契约由本仓库定义：以下说明与 [`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)、
+本仓库的源码、校验与发布契约由以下说明、[`CONTRIBUTING.zh-CN.md`](./CONTRIBUTING.zh-CN.md)、
 `.tests/contracts/` 中固定版本的 Cindy Manifest 校验器，以及仓库打包门禁共同组成
 正本。无论使用哪一种 Agent 或 harness，写出的文件都遵循同一契约。Cindy Forge 工具
 只是可选捷径，不属于插件格式，也不是开发前置条件。
+
+Host API 的参数、能力声明与运行时限制，以目标 Cindy 版本随包的编写参考为准。
+选择接口前先读[版本与能力导航](docs/plugin-authoring.zh-CN.md#目标宿主参考与能力导航)；
+仓库校验器通过不等于运行时支持。
 
 维护已有插件、v2/v3 字段映射、HTTPS、文件和 Node/CLI 的具体调用见
 [插件编写与迁移参考](./docs/plugin-authoring.zh-CN.md)。Agent 可依据这些事实和
@@ -235,16 +240,17 @@ Plugin Server；Platform 创建待审核 release。
 直接字段表达插件贡献项和**自主** Host 能力，不是具体命令、域名或路径的预登记清单。
 插件工具是否执行由当前 `ghost_call` 的既有 Agent 授权决定；普通 HTTPS 与 workdir
 文件操作把 Host 下发的 `callId` 传给 `cindy.fetch` 或 `cindy.fs`。随包代码与 CLI
-继续走已有 Node 工作进程。Host 托管凭证以及脱离该在途调用的使用仍须对应的显式声明。
+继续走已有 Node 工作进程，始终需要顶层 `node` 声明。
+Host 托管凭证以及脱离该在途调用的使用仍须对应的显式声明。
 
 ### 工具无关的快速路径
 
 把下面这段发给任意能够编辑文件、运行命令的 coding Agent 或 harness：
 
 ```text
-只按照当前仓库中的插件编写契约，帮我制作一个用于[具体用途]的 Cindy 插件。先读
+按当前仓库的发布要求和目标 Host 的编写参考，帮我制作一个用于[具体用途]的 Cindy 插件。先读
 AGENTS.md 和 docs/plugin-authoring.zh-CN.md，根据任务自行判断所需声明与运行时接口，
-只确认仓库事实无法确定的功能取舍或验证缺口。新建 Manifest v3 插件目录，
+按目标 Cindy 版本核对所需 Host API，只确认现有事实无法确定的功能取舍或验证缺口。新建 Manifest v3 插件目录，
 不要复制现有 v2 ghost.json。使用仓库校验器检查 Manifest，把目录内容打成 .cindy ZIP
 包并返回产物路径。除非我明确要求，否则不要安装插件。
 ```
@@ -288,6 +294,7 @@ my-plugin/
 }
 ```
 
+使用用户提供的图片，或在用户同意后生成图标，不制作或保留纯色色块占位图。
 在 `assets/icon.png` 放入真实 PNG；如果暂时没有图标，就同时删除 Manifest 的 `icon`
 字段和未使用的 `assets/` 项。禁止打包 Manifest 已声明、包内却不存在的文件。
 
@@ -310,6 +317,8 @@ cindy.onHostMessage(async function (message) {
 `tool-result`。普通 HTTPS 与 workdir 文件操作同样把 Host 下发的 `callId` 传给
 `cindy.fetch` / `cindy.fs`，沿用 Cindy 现有运行时授权，不需要在 Manifest 中预登记
 具体命令、域名或路径。只有插件贡献项或脱离该调用的自主 Host 使用才声明对应顶层能力。
+随包 Node 工作进程与托管凭证在调用内也须有各自声明。新建图片/视频生成功能应遵循
+[媒体流程](docs/plugin-authoring.zh-CN.md#媒体生成与任务协作)。
 
 在仓库根目录校验 Manifest：
 
@@ -343,6 +352,8 @@ unzip -Z1 /tmp/my-plugin-1.0.0.cindy
 工具，`ghost_forge_scaffold` 可以生成同样的 v3 基线，`ghost_forge_pack` 可以校验并
 打包，`ghost_forge_install` 可以在用户明确要求后安装。它们只是可选加速器；源码与
 `.cindy` 格式完全相同。Forge 不解析依赖声明，本地需先准备好声明对应的文件。
+旧版脚手架可能带占位图，应替换或省略 `icon`，不要提交占位图。打包不等于发布：
+官方仓插件走上文的 PR 流程；客户端社区投稿和 `intent: 'publish'` 组织发布是其它目标。
 迁移步骤、完整声明示例与 PR 验证包下载见[依赖接入指南](docs/binary-dependencies.zh-CN.md)。
 
 提交到官方仓库前，还必须补充 `provisioning.json` 条目，并在 Manifest 中声明恰好
