@@ -37,7 +37,7 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 ## JSON 输入和输出
 
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 字段时存在；其余业务字段统一放入 `--data`。
-- 动态命令的 `--data` 是完整 operation input；CLI 按 OpenAPI `inputs` 拆分 query 和 body。
+- 动态命令的 `--data` 是完整 operation input；CLI 按接口定义的 `inputs` 拆分 query 和 body。
 - 短 JSON 可 inline；复杂或多行 JSON 用 `@file`，文件必须位于会话工作目录（CLI 以会话工作目录为 cwd 解析该相对路径），并且是 **UTF-8 无 BOM** 的 JSON。经本插件调用时没有可用的 stdin，`-` 不可用；插件直接把 JSON 作为参数传给 CLI，没有 shell 引号问题，`data` 解析失败只可能是内容或文件编码不对。
 - `data` 解析失败且请求没有发出时，先修正 JSON 语法与文件编码再重试；不要把修复输入误报成修复服务端。
 - CLI 默认输出 JSON，普通命令、脚本、Skill 示例和生成命令都不追加冗余的 `--format json`。只有命令自身默认输出文本或原始内容，而调用方明确需要结构化 JSON 时才显式追加；切换人类可读或流式输出时使用 `pretty` / `table` / `ndjson` / `csv`。
@@ -117,7 +117,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 兑换码由 `taptap-game-sign` 的 `game-sign +import-codes` 负责，复用 prepare-code-upload / import-codes / get-code-import 接口；流程见该手册的 code-import 引用。它要求显式 `idempotency_key`、确认 `confirm_hash`，恢复用 task 的 dry-run/yes，不通过物料上传入口发送。
 
-`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用动态 OpenAPI 的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
+`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用底层接口的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
 
 域内上传例外是 `community-management +upload-image` 与 `+upload-video`：它们把本地图片/视频传成帖子素材，分别只返回图片地址与宽高、以及发帖用的 `videoId`，不建素材库记录、不发布帖子，由 `taptap-community-management` 执行；它们和素材库的 `upload` / `+upload-video` 是不同链路、要不同的权限，不能互相替代。发帖请求里才用 `pin_video_id` / `cover_video_id`（字符串）与正文节点 `info.video_id`（整数），上传响应字段始终是 `videoId`。发帖本身不在上传 shortcut 里，走 `community-management` 的 `create` / `update` / `get` / `publish-draft` 四步，同样归 `taptap-community-management`。
 
@@ -134,7 +134,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 1. 先说明用户现在要做的动作，再给入口；不要只说“CLI 暂不支持”并等待用户追问链接。
 2. URL 单独占一行且只展示一次。不要使用 `[名称](URL)`、`URL (URL)` 等 Markdown 或括号包装，也不要在同一回复的标题、正文和列表中重复同一 URL。
 3. URL 使用 CLI 当前环境或本次服务端响应提供的原始地址；不要追加 `utm_*` 等追踪参数，也不要为了找已知官方入口调用网页搜索。当前环境未知时，可用 `call_tool(name:"auth status", args:{offline:true})` 只读取得 `data.serverUrl`，不要为解析入口验证 Token 或访问网络。
-4. 服务端本次返回完整 `page_url` 时原样使用。当前 DC 契约不返回 `page_path`，不要自行补全或拼接页面路径。
+4. 服务端本次返回完整 `page_url` 时原样使用。当前接口不返回 `page_path`，不要自行补全或拼接页面路径。
 5. 固定且已确认的官方入口可以直接提供；没有可靠入口时明确说明“当前没有可确认的页面链接”，不要猜路径、搜索替代入口或把内部 API 地址当成用户页面。
 6. 提供入口不等于已经打开页面、切换网页 scope 或获得浏览器自动化授权；只有用户明确要求时才执行页面操作。
 
@@ -201,3 +201,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
    “无法确认”；不能用“素材都已处理”等总括语句替代逐项状态。
 7. 用户确认上传前，候选必须明确标记为“待确认上传”；图片预览、机器校验通过和素材库
    收录都不能表述成已写入资料字段或已通过审核。
+
+## 面向用户的用语
+
+向用户说明操作时使用具体业务名称；不使用 OpenAPI、DC、Capability API 等内部称呼，不说「转 Web」，改为「前往开发者后台」并说明办理事项。有服务端返回的完整页面链接时直接提供，不猜路径。命令、参数、JSON 字段和错误代码保持原样，仅在排错或用户需要时展示。

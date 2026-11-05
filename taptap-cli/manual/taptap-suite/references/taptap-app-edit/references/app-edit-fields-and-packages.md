@@ -79,6 +79,8 @@ call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<develo
 
 ### 包体槽位
 
+绑定前先遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)：仅更新已确认类型的版本或明确支持的附加用途。槽位 `available=true`、空 `expected` 或清空其它判别字段的协议行为都不是改变类型的许可；类型未知或不匹配时停止绑定，不能先清空再换类型。
+
 **完整绑定输入示例**：`developer_id` / `app_id` 用 scope 参数，`data` 无需重复填写。`package.id` 来自本次 `list-packages` 候选的 `package_id`，保持字符串；不要使用 `current_bindings[].revision` 作为包体 ID。
 
 例如，本次读取确认 `main.available=true`，`main.expected` 恰为 `{"kind":"none"}`，且目标候选是 `type="h5"`、`package_id="12345"`、`status="ready"` 时，`data` 的完整内容为：

@@ -67,7 +67,7 @@ call_tool(name:"schema", args:{_positional:["package-management","get-test-qr-co
 - 小游戏能力未开通时,`package-management list-mini-app-packages` 会返回失败或不包含 `mini_app` 类型。用户明确要求开通时,展示影响并等待用户确认后才调用 `package-management get-or-create-mini-app`,成功后重调 `package-management get-available-package-types` 验证。
 - H5 查询失败时不要调用小游戏开通工具;H5 和小游戏是不同能力。
 - TapTap 制造包体全部由 Maker 传入;CLI 不提供 Spark 包体上传或更新能力。用户要创建、构建或更新 Maker 包体时,必须引导到 `https://maker.taptap.cn/`(单独一行输出),完成后再用 CLI 查询已有版本或继续资料编辑。
-- 用户要上传 Tap 小游戏包时,走 materials 手册的 `upload-mini-app-package`;上传成功后不得再调用 `complete-mini-app-package-upload`。`artifact_only` 表示产物尚未创建包体记录,不是上传未完成;产物句柄解释与交接见 [小游戏交接](taptap-suite/references/taptap-materials/references/mini-app-handoff.md),不能用重复 complete 代替查询。当前 DC 契约不返回页面路径,不要自行补全或拼接页面路径。
+- 用户要上传 Tap 小游戏包时,走 materials 手册的 `upload-mini-app-package`;上传成功后不得再调用 `complete-mini-app-package-upload`。`artifact_only` 表示产物尚未创建包体记录,不是上传未完成;产物句柄解释与交接见 [小游戏交接](taptap-suite/references/taptap-materials/references/mini-app-handoff.md),不能用重复 complete 代替查询。当前接口不返回页面路径,不要自行补全或拼接页面路径。
 - 历史 `mini-app-upload` 任务先用 `task +list|get` 诊断;用户明确要求恢复时可执行 `task +resume`,其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。
 
 ## 输出规则

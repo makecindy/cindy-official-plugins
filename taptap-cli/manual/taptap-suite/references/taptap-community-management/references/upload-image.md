@@ -28,7 +28,7 @@ call_tool(name:"community-management +upload-image", args:{
 
 | 命令 | 服务端权限 | 403 时该怎么做 |
 | --- | --- | --- |
-| `community-management +upload-image` | 论坛管理员(版主 / 主管理员) | 换有论坛管理权限的账号,或先在 DC「权限管理-论坛主管理员设置」里配置 |
+| `community-management +upload-image` | 论坛管理员(版主 / 主管理员) | 换有论坛管理权限的账号,或先在 开发者后台「权限管理-论坛主管理员设置」里配置 |
 | `upload` | App 的「资料更新」权限 | 去要资料更新权限 |
 
 **这两个命令不能互相替代**:图片落不同的桶和前缀,社区图片**没有** `assetId`。不要为了让上传跑通就改调另一个。

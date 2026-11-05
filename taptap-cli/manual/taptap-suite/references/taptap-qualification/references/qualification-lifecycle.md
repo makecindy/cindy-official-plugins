@@ -4,6 +4,8 @@
 
 用户要提交某项资质增量审核、撤回审核，或需要判断撤回影响范围时使用本 reference。
 
+先按 [draft](taptap-suite/references/taptap-qualification/references/qualification-draft.md) 核对材料所属域：小游戏域的隐私、ICP、防沉迷材料需前往开发者后台办理，不能使用下列应用资料审核流程。
+
 ## 提交资质增量审核
 
 1. 先读 `qualification get-qualification-status` 确认指定资质状态为 `uploaded`（材料已存草稿）。`pending_upload` 说明材料缺失，先转 [qualification draft](taptap-suite/references/taptap-qualification/references/qualification-draft.md) 补材料。

@@ -1,5 +1,7 @@
 # Package Management Diagnostics
 
+包体写入前先遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)。
+
 ### A. 查包体库状态
 
 1. 先调 `package-management get-available-package-types`，拿本次实际返回的 `available_package_types`。
@@ -22,12 +24,11 @@
 ### B. 小游戏能力未开通
 
 1. `package-management get-available-package-types` 的 `available_package_types` 不含 `mini_app` 时，只说明当前应用没有开通 Tap 小游戏包体。
-2. 用户明确要求开通时，展示开通影响并等待确认，之后才调用 `package-management get-or-create-mini-app`。
+2. 只有已确认原类型及附加用途允许 Tap 小游戏，且用户明确要求开通时，才展示开通影响并等待确认，之后调用 `package-management get-or-create-mini-app`。
 3. 调用成功后重调 `package-management get-available-package-types` 验证 `mini_app` 是否出现，再查 `package-management list-mini-app-packages`。
 4. 用户取消或未确认时，不继续查小游戏列表或二维码。
-5. H5 不走能力开通分支；H5 可用时直接查 `package-management list-h5-packages`，不可用时只说明当前应用不会展示 H5 包体库，不要调用小游戏开通命令。
-6. 小游戏分包测试不在 CLI 进行；CLI 只能查看已提交包体的状态。当前 DC 契约不返回页面路径，不要自行补全或拼接页面路径。
-7. 用户要上传小游戏包时，不调用 `package-management upload-mini-app-package`。读取最新小游戏列表，引导到开发者中心完成上传和分包测试。目录或混合 zip 转 materials 手册盘点，它也只能输出相同开发者中心交接。
+5. H5 游戏可能为关卡游戏或非关卡游戏，不能仅凭 H5 类型推断身份。可用时查 `package-management list-h5-packages`；权限、网络或类目查询失败不能当成主体未开通。只有已可靠确认原 H5 类型、服务端明确返回小游戏主体未开通且用户要求继续上传时，才单独说明开通影响与协议要求，并按明确授权调用 `package-management get-or-create-mini-app`；不能代替用户同意协议、转换关卡或申请升级。新建 H5 正常会自动建立主体；缺失可能是创建后处理失败，不能盲目重建游戏。开通遇到白名单或权限限制时保留 appId 和版本句柄并交接核查；开通后重新查询实际能力。
+6. 小游戏分包测试不在 CLI 进行；CLI 只能查看已提交包体的状态。当前接口不返回页面路径，不要自行补全或拼接页面路径。
 
 ### C. 处理自测意图
 
@@ -57,3 +58,7 @@
 4. `package-management list-spark-versions` 的发布状态暂不展示；只说明版本、更新时间、大小、自测入口和资料编辑下一步。
 
 物料上传不是本手册的只读诊断入口；所有本地上传（含单个确定包体）都转 materials 手册执行。不要为了查询包体状态调用任何上传命令。
+
+### H5 上传后的诊断
+
+`uploaded=true` 只表示包体上传完成。若返回 `readbackErrors`，按 `package` / `material` / `distribution` 阶段及 `type` / `subtype` 处理权限、网络或契约问题，只重做读取，不重新上传或创建版本。`readinessCheck.bindable` 和最新 `package_slots` 决定是否生成绑定预览；读回失败不能说成无包体、已绑定或可提审。存量关卡升级仍需专用升级流程，不用 `save-changes` 改身份。

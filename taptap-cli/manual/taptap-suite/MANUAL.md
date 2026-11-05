@@ -72,6 +72,7 @@
 | 登录、当前身份、找 developerId/appId | `identity` | 已有适用的调用 scope 不重复查；先区分目标资源 ID，否则查候选 |
 | 创建新游戏、选择游戏类型或包体方向 | `app-edit`(新游戏创建一节) | 先收集并确认创建字段 |
 | 改资料、素材、主包体、整版提审/撤审/发布 | `app-edit` | 先 read-before-write |
+| 关卡游戏升级为独立游戏(创意工坊升级) | `app-edit`(level upgrade) | 先查升级条件，隐私声明与升级分别确认 |
 | 上传本地图片、视频或包体(单个文件或目录/zip 盘点) | `materials`(第一部分) | 先盘点和确认用途,再逐项上传和交接 |
 | 查资质缺口、补资质材料、资质增量提审/撤回 | `qualification` | 先确认发布意图,再分析 |
 | 检索、生成或收录游戏图片素材 | `materials`(第二部分) | 先本地素材后生图;上传执行在第一部分 |
@@ -123,6 +124,7 @@
 | 运营阶段识别与官方手册 | 提审、测试、首次上线或版本更新完成后的状态识别与运营手册交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/operation-handbooks.md"})` |
 | 互动运营跨域流程 | 用户明确要求串联签到、公告位和推送 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/interactive-operations-flow.md"})` |
 | 游戏物料要求 | 回答图片、视频、Windows 素材规格或判断素材是否合规 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/material-requirements.md"})` |
+| 固定包体类型边界 | 判断能否上传/绑定某类包体、包体类型与关卡属性冲突、创建类型未保存时如何恢复 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/package-type-boundary.md"})` |
 | TapTap 上架规则目录 v4 | 资料填写提示、审核规则溯源,以及区分官方规则与历史审核 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/official-review-rules-v4.md"})` |
 
 ## 不在本插件范围

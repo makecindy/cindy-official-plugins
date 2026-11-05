@@ -1070,6 +1070,77 @@ test('the 2026.11.2 sync keeps the new recovery contracts on the plugin path', a
   assert.match(patterns, /UTF-8 无 BOM/);
 });
 
+test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boundaries', () => {
+  // CLI v2026.11.4 separates the package type from the level attribute, adds the
+  // workshop upgrade flow, and routes small-game privacy/ICP/filing material to
+  // the developer site. Each change decides whether a write may happen at all,
+  // so the bundled manual has to state the boundary instead of letting the agent
+  // infer a type from a file name or the previous conversation.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const top = read('taptap-suite/MANUAL.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const boundary = read('taptap-suite/references/package-type-boundary.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const creation = read('taptap-suite/references/taptap-app-edit/references/publish-game-creation.md');
+  const upgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
+  const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+
+  // The fixed type boundary is a shared document with one rule set, reachable
+  // from the routes that decide whether an upload may proceed.
+  assert.match(top, /taptap-suite\/references\/package-type-boundary\.md/);
+  assert.match(boundary, /`declared_package_types`/);
+  assert.match(boundary, /`package_type_saved:false` 表示游戏已创建、类型尚未保存/);
+  assert.match(boundary, /不能借附加用途混入其它类型/);
+  assert.match(fields, /固定包体类型边界/);
+  assert.match(materials, /固定包体类型边界/);
+
+  // H5 creation: is_level is explicit, independent from package_type, and the
+  // saved declaration is verified before the first upload.
+  assert.match(creation, /`is_level` 省略或显式 `false` 创建非关卡游戏/);
+  assert.match(creation, /先读当前 `schema app create-app` 确认 `is_level` 已声明/);
+  assert.match(creation, /H5 \+ APK、H5 \+ Windows、H5 \+ Tap 小游戏均拦截创建/);
+  assert.match(creation, /package_type:"h5", is_level:false/);
+  assert.match(creation, /`package_type_saved:false` 表示类型尚未保存/);
+  assert.match(creation, /核对 `declared_package_types` 与创建选择一致/);
+  assert.doesNotMatch(creation, /主要在个人主页曝光/, 'H5 exposure wording is no longer the creation boundary');
+
+  // Workshop upgrade: an irreversible submit and a privacy declaration are two
+  // separate confirmations and must not be chained automatically.
+  assert.match(appEdit, /\| 创意工坊升级 \|/);
+  assert.match(appEdit, /app-edit-level-upgrade\.md/);
+  assert.match(upgrade, /get-level-upgrade-privacy/);
+  assert.match(upgrade, /confirm_no_processing:true, confirm_submit:true/);
+  assert.match(upgrade, /隐私声明确认不授权升级，不能自动串联两次提交/);
+  assert.match(upgrade, /升级为独立游戏后无法转回关卡/);
+
+  // Qualification: the unavailable warning is not an all-clear, must-level is
+  // derived from the saved identity, and small-game material is not filed here.
+  assert.match(qualification, /`QUALIFICATION_STATUS_UNAVAILABLE` 表示未知,不能当作无缺口/);
+  assert.match(qualification, /小游戏隐私、ICP、防沉迷转开发者后台/);
+  assert.match(qualification, /不能用 `qualification save-qualification-draft` 代替/);
+  assert.match(qualAnalysis, /先检查 `QUALIFICATION_STATUS_UNAVAILABLE`/);
+  assert.match(qualDraft, /## 小游戏域材料边界/);
+  assert.match(qualDraft, /## 创建类型声明与恢复/);
+
+  // H5 uploads stay on the H5 slot; a readback failure is retried as a read.
+  assert.match(materials, /H5 只用 H5 主包，禁止上传或绑定 Windows 包体/);
+  assert.match(materials, /`readbackErrors` 时保留版本句柄，仅重查失败阶段/);
+  assert.match(diagnostics, /### H5 上传后的诊断/);
+  assert.match(diagnostics, /只有已确认原类型及附加用途允许 Tap 小游戏/);
+
+  // Internal vocabulary stays out of user-facing replies.
+  assert.match(shared, /## 面向用户的用语/);
+  assert.match(shared, /不说「转 Web」/);
+  assert.doesNotMatch(uploadImage, /DC「权限管理/);
+});
+
 test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {
   // CLI v2026.10.28 turns the forum domain from read-only into read + write:
   // post drafts and publishing, first-level and child replies, and two upload

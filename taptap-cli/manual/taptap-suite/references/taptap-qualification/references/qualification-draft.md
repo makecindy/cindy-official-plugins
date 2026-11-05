@@ -4,6 +4,18 @@
 
 用户要保存版号、备案、隐私、AI、软著、授权书、安全评估等非敏感材料，或工具返回需要人工填写的资质时使用本 reference。
 
+## 小游戏域材料边界
+
+H5、Spark、Tap 小游戏及包含小游戏的组合，其适用的隐私合规、ICP、防沉迷材料使用小游戏域流程。除创意工坊升级中的“不处理个人信息”简单声明外，当前 CLI 不支持这些材料的保存、提审或撤回；前往开发者后台对应材料入口办理，完成后重新读取状态。该例外按 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 核对并取得用户明确确认后提交独立隐私审核；复杂声明仍转开发者后台，不能用 `save-qualification-draft` 代替。不能用应用资料中的资质草稿代替小游戏材料完成，也不能改类型绕过 `failed_precondition`。仅保存 `app_features` 的事实确认仍可使用现有接口；AI、版号、授权等其它材料按当前工具契约处理。
+
+## 创建类型声明与恢复
+
+创建时选定的包体类型遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)。正常保存联网、内购、AI 等事实时省略 `app_features.package_types`，保留已有声明；不能用资质保存把 H5 改成 Tap 小游戏或其他类型，也不能用声明覆盖实际包体。
+
+仅当本次创建返回 `created:true`、`package_type_saved:false` 且已保留 appId 与创建类型时，才按以下流程补存同一选择：读取当前 schema，用同一 appId/devId 预览并保存 `{"app_features":{"package_types":["h5"]}}`（示例仅适用于本次确实选择 H5；其它类型必须逐字沿用创建选择 `apk` / `windows` / `mini_app`）。不得添加未经确认的业务事实，不重放创建。补存成功后调用 `package-management get-available-package-types`，读取 `data.result.declared_package_types`；H5 必须精确为 `["h5"]`，Tap 小游戏必须精确为 `["mini_app"]`，并与创建选择一致，不能只看 `available_package_types` 或保存接口返回成功。读回确认后才能继续包体上传；恢复以本次读回为准，原创建响应的 `package_type_saved:false` 不会被改写，不要为了取得新的创建回包而重放创建。缺失来源、既有声明冲突或关联对象不存在时停止，不把这个恢复步骤当成给任意游戏选择首包类型的入口。
+
+APK + Windows 的已确认附加用途单独处理：先读取已有 `declared_package_types`，仅允许保留原 APK/Windows 类型并增量保存 `{"app_features":{"package_types":["apk","windows"]}}`；不能删除原类型、从 H5/Tap 小游戏转入，或把它用于其它类型组合。保存后重新读回两项声明，并确认原有平台、槽位和权限门禁均满足，再处理附加包体。仅有 `["apk"]` 或 `["windows"]` 的声明不能自动扩展为两类。
+
 ## 保存非敏感材料
 
 1. 先确定 `qualification_type`，再读取当前 schema：

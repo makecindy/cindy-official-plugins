@@ -32,7 +32,7 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 1. 读取 `platform-status`。若 `app_platforms.current_value` 尚无 `PC_OFFICIAL`，构造新值时保留其中全部现有平台并追加 `PC_OFFICIAL`；不得替换成仅 PC，也不得加入 `PC_STEAM`。按普通字段流程 dry-run、确认、写入并立即重读。
 2. 只使用重读结果继续。仅当 `region_flag_pc` 已实际返回且其 `options` 包含 `4` 时，才以最新 `current_value` 作为 `expected` 写 `region_flag_pc=4`，完成后再次重读。若首次读取已经包含 `PC_OFFICIAL` 且 `region_flag_pc.options` 已含 `4`，可以直接执行本步骤。
-3. 不把 `app_platforms` 与尚不可见的 `region_flag_pc` 放在同一批写入，不硬编码 `4`；任一步返回的字段或 options 不符合上述条件都停止并报告。此流程只开启 PC 分发入口，不创建 Windows 包体槽；H5 包体继续使用 `package_slots.main`。
+3. 不把 `app_platforms` 与尚不可见的 `region_flag_pc` 放在同一批写入，不硬编码 `4`；任一步返回的字段或 options 不符合上述条件都停止并报告。H5 游戏包继续使用 `package_slots.main`。H5 的 PC 分发不代表可以上传 Windows 包；无论是否为关卡，H5 游戏均不绑定 Windows 槽。若预检仍要求 H5 提供 Windows 包，报告契约冲突并交接核查，不通过上传其它包体绕过。
 
 三步：
 

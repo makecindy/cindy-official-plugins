@@ -46,11 +46,11 @@
 - **平台维度**：平台和游戏类型只用于解释工具已经返回的字段，不能用于自行推导字段集合。每次读取 `platform-status`、`release-settings` 和目标模块，以字段实际 `visible`、`current_value`、`options`、`value_labels` 为准；`steam_id`、`itunes_id`、Windows 素材、Android 兼容性和 iOS 覆盖素材是否出现都以本次返回为准。
 - **分发状态（`region_flag_*`）**：可选值由「分发类型 × 平台 × 门槛」决定，一律以字段当次返回的 `options` / `value_labels` 为准，不要硬套「0=正式上线 / 4=开放试玩」。`app_platforms` / `itunes_id` / `steam_id` 不是分发状态入口。
   - **可见性**：含移动端平台才见 `region_flag_android` / `region_flag_ios`；含 Windows 包体槽才见 `region_flag_pc`。
-  - **普通游戏**：android / pc 需已通过版号（`game-license` approved）或非游戏应用才可选「0 正式上线」，否则只能「4 开放试玩」；iOS 需 Apple ID 且 AppStore 已开放才可选 0（小游戏包豁免 Apple ID）。
-  - **H5 / Spark**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。H5 完成备案、`isLevel` 状态变化后仍保持此规则；H5 的 PC 平台只允许 `PC_OFFICIAL`，不允许 `PC_STEAM`，PC 状态不允许 `0`。
+  - **`normal` 分发分支（不含 H5 / Spark / 应用拉起分发，不能仅由 `is_level=false` 推断）**：android / pc 需已通过版号（`game-license` approved）或非游戏应用才可选「0 正式上线」，否则只能「4 开放试玩」；iOS 需 Apple ID 且 AppStore 已开放才可选 0（小游戏包豁免 Apple ID）。
+  - **H5 / Spark**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。H5 完成备案、是否为关卡的状态变化后仍保持此规则；H5 的 PC 平台只允许 `PC_OFFICIAL`，不允许 `PC_STEAM`，PC 状态不允许 `0`。
   - **应用拉起型关卡**：仅 `[1,0]`（PC 不支持时无选项）；**未知分发类型**：仅 `[1]`。
   - 用户说「正式上线」但无版号时，落到「开放试玩」或提示不可选，先引导补版号，不要硬写 0。
-- **游戏类型维度**：关卡游戏（TapTap 制造）的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏和 H5 PC 分发豁免 Windows EXE、启动器、PC 防沉迷、Windows 更新日志与 PC 系统配置；选择 PC 平台后仍以接口返回为准处理 Windows 图片素材。TapMaker / urhox 中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填，且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
+- **游戏类型维度**：关卡游戏的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏和 H5 PC 分发豁免 Windows EXE、启动器、PC 防沉迷、Windows 更新日志与 PC 系统配置；选择 PC 平台后仍以接口返回为准处理 Windows 图片素材。TapMaker / urhox 中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填，且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
   - 「关卡游戏」与「TapMaker / urhox」可能同时成立并驱动不同豁免——不要自己给游戏归类，以各模块当次返回的字段 `visible` / `state` 为准（`state="required"` 才是必填）。
 - **包体状态维度**：PC 防沉迷状态 / PC 更新日志仅在已选 PC（EXE）包体时可见；根级上线方式优先读写 `release_schedule`，旧 `release_time` 仅 `release_method=1`（定时上线）时可见。
 

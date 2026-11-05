@@ -1,6 +1,6 @@
 # TapTap CLI 插件:新游戏创建与资料维护(app-edit)
 
-本手册合并两个业务域:**新游戏创建**(创建草稿、收集厂商/名称/类型/包体方向)与**资料维护**(字段修改、素材规格、包体槽位、审核提交/撤审/发布/定时、草稿重置、版本历史)。命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用。
+本手册合并两个业务域:**新游戏创建**(创建草稿、收集厂商/名称/类型/包体方向)与**资料维护**(字段修改、素材规格、包体槽位、审核提交/撤审/发布/定时、草稿重置、创意工坊升级、版本历史)。命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用。
 
 ## 第一部分:新游戏创建
 
@@ -77,6 +77,7 @@
 
 | 用户意图 | 首选调用 / 流程 |
 | --- | --- |
+| 创意工坊升级 | 查询升级条件 → 按返回状态办理隐私声明或转开发者后台 → 单独确认升级 → 提交并读回 |
 | "还差什么 / 能不能提审" | 读取模块、包体、版本、资质和历史审核后生成分层风险清单(读 skill analysis 与 review risk checklist) |
 | 查字段、选项、图片/视频规格 | `call_tool(name:"app get-app-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
 | 为 H5 开启 PC 分发(`platform-status`、`region_flag_pc`) | 读模块 → 保留全部现有平台并追加 `PC_OFFICIAL` → 写后立即重读 → 仅当 `region_flag_pc` 已实际返回且 `options` 含 `4` 时才按最新 `expected` 写入;H5 不得使用 `windows` 槽 |
@@ -122,6 +123,7 @@
 | Reference | 什么时候读 | 读取方式 |
 | --- | --- | --- |
 | publish-game creation | 完整创建字段收集、类型推荐、包体方向、素材和创建后推进 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/publish-game-creation.md"})` |
+| app-edit level upgrade | 创意工坊升级查询、不处理个人信息的隐私声明、升级确认与开发者后台交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md"})` |
 | app-edit analysis | 资料体检、文案候选、图片分类和新版资料规划 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md"})` |
 | app-edit execution rules | 资料维护完整执行细则:前置与路由、字段写入、图片与视频、包体两条路径、资质事实、提审三步与预检口径、SCE 协议、发布与生命周期、输出与后续检查 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md"})` |
 | app-edit field map | 模块字段、可见性、联动、平台差异和详细包体模型 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md"})` |

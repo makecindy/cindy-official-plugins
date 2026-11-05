@@ -37,23 +37,25 @@
   不能直接推导为「名称=电瓶车送外卖极速版本、类型=休闲、包体=H5」。
 - 名称候选：给 2-3 个可直接写入「游戏名称」的最终名称，不要只给命名风格。
 - 游戏类型候选：给 2-3 个后台枚举可映射的中文类型，并说明一句判断依据。
-- 包体类型：只在名称和游戏类型明确之后再确认；四选一且不得漏项 APK / 小游戏 / PC / H5，用一句话解释如何区分：APK=安卓手机安装包；小游戏=Tap 运行的小游戏包；PC=Windows 客户端包；H5=浏览器运行的网页包。
+- 包体类型：只在名称和游戏类型明确之后再确认；四选一且不得漏项 APK / 小游戏 / PC / H5，用一句话解释如何区分：APK=安卓手机安装包；小游戏=Tap 运行的小游戏包；PC=Windows 客户端包；H5=浏览器运行的 H5 游戏包。
 - 禁止组合候选：不要给「名称 + 游戏类型 + 包体类型」组合选项；资料文案不走选择题。
 
 - 用户选定后记录当前答案并停止本轮；下一轮只追问下一个缺失字段，不要一次性铺开所有创建规则。
 - 简介 / 首页推荐语 / 开发者的话等描述文案留到创建成功后交接 `taptap-app-edit` 处理，创建阶段不写。
-- 名称、游戏类型、厂商角色以及可选的包体类型确认后，先用带稳定 `--idempotency-key` 的 `app create-app --dry-run` 预览；用户已经明确确认创建时，首个真实创建命令复用相同 `--data` 和同一个 key，并追加 `--yes`，不要先触发一次确认失败。
+- 名称、游戏类型、厂商角色以及必选的包体类型确认后，先用带稳定 `idempotency_key` 的 `app create-app` dry-run 预览；用户已经明确确认创建时，首个真实创建命令复用相同 `data` 和同一个 key，并加 `yes:true`，不要先触发一次确认失败。
 
 ### 2. 包体类型判断
 
 包体只能辅助判断包体类型和后续路径，不能代替游戏名称或游戏类型。
+
+创建前选定的 `package_type` 在本次游戏后续流程中固定，交接必须携带该类型和已确认的附加用途。`is_level` 是独立的关卡属性，不是包体类型；身份读回成功也不证明包体类型已建立。后续上传、绑定均遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)，不能中途改类型绕过限制。
 
 | 上传包体 | 创建方向 | 后续说明 |
 | --- | --- | --- |
 | APK 包 | APK | 适用于 Android 游戏；创建后继续上传或关联包体，并完善资料和合规认证 |
 | 小游戏包 | 小游戏 | Tap 小游戏包需包含 `game.json`；创建后用 `upload-mini-app-package` 上传；分包测试不在 CLI 进行，上传后回 CLI 查询状态或关联已有包体 |
 | PC / Windows 包 | PC | 适用于 Windows 游戏；创建后继续关联包体并完善 Windows 专属信息（转 `taptap-app-edit`） |
-| H5 包 | H5 | H5 包需包含 `index.html`；主要在个人主页曝光，创建后继续上传包体并完善资料 |
+| H5 包 | H5 | H5 包需包含 `index.html`；默认非关卡游戏，创建后继续上传包体并完善资料 |
 
 APK / 小游戏 / PC 要求：
 
@@ -62,10 +64,13 @@ APK / 小游戏 / PC 要求：
 - 必须完成所有游戏合规认证。
 - 支持 APK、小游戏包和 PC 包。
 
-H5 路径说明：
+H5 创建属性与包体组合：
 
-- 仅支持 H5 包体。
-- 游戏仅能在个人主页曝光。
+- `is_level` 省略或显式 `false` 创建非关卡游戏；用户明确要求「关卡 / 创意工坊」时才传 `is_level:true`，且当前仅支持 `package_type:"h5"`。不能从 H5 文件、题材或玩法推断关卡，也不能用普通资料保存改变已有游戏身份。
+- 先读当前 `schema app create-app` 确认 `is_level` 已声明。非关卡 H5 游戏的预览与执行显式传 `is_level:false`，确保旧服务端不把缺省 H5 创建为关卡；字段未声明时停止并说明服务端创建契约尚未更新，不能删除该字段降级重试。
+- H5 + APK、H5 + Windows、H5 + Tap 小游戏均拦截创建；要求只保留 H5，或将另一类包体用于另一个游戏，`is_level` 不改变互斥规则。
+- APK + Windows 可保留并继续规划；APK + Tap 小游戏、Windows + Tap 小游戏、三者同时提供时也先保留附件。创建前必须确定唯一 `package_type` 和每份附加包体的明确用途，附加用途只接受当前服务端明确支持的槽位、平台和权限；无法确认则停止创建。不把附件保留解释为可同时绑定，也不承诺创建后再选主包类型。
+- 曝光与发布入口以创建后实际分发状态为准；非关卡 H5 游戏按非关卡游戏资质规则准备材料，不能沿用关卡豁免。
 
 适用于所有创建方向的分发提醒：
 
@@ -108,12 +113,12 @@ H5 路径说明：
 | APK | Android 游戏，后续需要完整资料、包体和合规资质 | 认证开发者才可发布上线 |
 | 小游戏 | Tap 小游戏包，后续需要完整资料和包体审核 | 创建请求会按 Tap 小游戏供给类型处理 |
 | PC | Windows 游戏 | 后续还要补 Windows 素材和包体 |
-| H5 | 浏览器运行的网页游戏、关卡或创意内容 | 主要在个人主页曝光，创建后继续上传 H5 包并完善资料 |
+| H5 | 浏览器运行的网页游戏、关卡或创意内容 | 默认非关卡 H5 游戏；明确要求关卡时才设置 `is_level:true` |
 
 选择建议：
 
 - 用户明确要使用 APK、PC 或 Tap 小游戏包，或需要完整商店页、后续提审：推荐对应包体方向。
-- 用户明确内容在浏览器运行，并且只需在个人主页曝光：推荐 H5。
+- 用户明确内容在浏览器运行：推荐 H5；是否关卡另按用户明确意图判断。
 - 用户不确定时，说明四种包体方向的运行环境和后续差异，让用户选择，或让用户先上传包体自动识别；不得默认写入 APK。
 - 用户说“发布后不要敬请期待 / 要提供游玩 / 要开放下载”时，把它记录为创建后的分发目标；不要在尚未读取实际可见的 `region_flag_*` 与各自 options 时猜入口、字段值或排除某种包体方向。
 
@@ -171,7 +176,7 @@ H5 路径说明：
 - 包体类型，以及用户选择或包体识别依据
 - 不单独展示发布模式；不得显示 `quick` / `regular`、“快速发布 / 常规发布”、“创建方式”或“发布形态”
 - 创建预览只做业务抽象，不展示底层请求细节（方法、地址、参数、请求体）或原始命令
-- 包体类型存在展示差异时，只说明与当前创建结果直接相关的影响，例如 H5 主要在个人主页曝光；不要在创建摘要中罗列不可用的后续能力
+- 创建摘要只说明与当前选择直接相关的影响，例如 H5 游戏是否为关卡；不要在创建摘要中罗列不可用的后续能力
 - 创建后仍需按工具实际返回且可见的 `region_flag_*` 确认分发目标
 - 创建目标
 - 后续流程
@@ -247,7 +252,7 @@ appId：<appId>
 以下示例区分“本地 dry-run”和“真实创建成功”；占位符不能作为真实请求参数。不得把已有游戏的 appId 填入模拟回包冒充创建结果；推进方式由 CLI 固定提供，不依赖服务端返回的 `intent_question` / `intent_options`。`--dry-run` 返回的请求详情是内部执行信息，不回显给用户，面向用户只做业务抽象。
 
 ```text
-call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:{title:"<gameTitle>", category:"<category>", developer_role:"<developer|author|publisher>", package_type:"h5"}, idempotency_key:"<create-key>", dry_run:true})
+call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:{title:"<gameTitle>", category:"<category>", developer_role:"<developer|author|publisher>", package_type:"h5", is_level:false}, idempotency_key:"<create-key>", dry_run:true})
 ```
 
 ```json
@@ -262,7 +267,8 @@ call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:{title
         "title": "<gameTitle>",
         "category": "<category>",
         "developer_role": "<developer|author|publisher>",
-        "package_type": "h5"
+        "package_type": "h5",
+        "is_level": false
       }
     }
   }
@@ -282,13 +288,17 @@ call_tool(name:"app create-app", args:{developer_id:"<developerId>", data:"@crea
   "data": {
     "result": {
       "created": true,
-      "app_id": "<newAppId>"
+      "app_id": "<newAppId>",
+      "package_type_saved": true,
+      "is_level": false
     }
   }
 }
 ```
 
-创建成功只证明拿到新 appId，不代表包体、资料或提审已经完成。随后必须读取该新游戏的实际包体槽位和资料状态；不能拿其他已有游戏或历史执行记录代替本次读回。
+创建后保留 appId 和用户已确认的输入。`package_type_saved:false` 表示类型尚未保存，转 `taptap-qualification` 在同一 appId 补存原选择；不重复创建或更换类型。字段缺失不能当作已保存，补存后以最新读回为准。
+
+继续上传前，调用 `package-management get-available-package-types`，核对 `declared_package_types` 与创建选择一致；调用 `analyze-app-status` 核对实际 `is_level`：非关卡 H5 游戏为 `false`，显式关卡为 `true`。创建响应中的 `is_level` 也是实际值，不是输入回显；缺失表示未知。声明或身份缺失、不符、查询失败时停止上传、绑定和提审，只读重查或交接核查。
 
 推进方式由 CLI 固定提供（开预约 / 测试 / 正式上线），不再依赖服务端返回的 `intent_question` / `intent_options`。
 

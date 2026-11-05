@@ -6,7 +6,7 @@
 
 已知 `developerId` 和 `appId` 后，按问题所需读取以下证据；用户问“还差什么 / 能不能提审 / 帮我检查资料”时读取完整集合：
 
-0. 先调用 `analyze-app-status` 做总体体检：一次拿到 `blockers`（必填缺失 / 包体缺失 / 字段约束 / 防沉迷联动 / SCE 协议 / READ_ONLY）、`warnings`（资质缺口 `QUALIFICATION_INCOMPLETE`、审核结论、默认图标）和 `suggestions`（建议补充字段）。这比逐个读模块更全局，优先用于回答「还差什么 / 能不能提交」；具体字段为什么缺、怎么补，再用下面第 1 步的 `get-app-module` 读字段级详情。资质维度**只看 `QUALIFICATION_INCOMPLETE`**：它是按游戏事实算出的必须资质缺口，message 里列出的才是必须补的资质；没有它 = 资质不阻断，不要再去列 8 类资质客观状态。
+0. 先调用 `analyze-app-status` 做总体体检：一次拿到 `blockers`（必填缺失 / 包体缺失 / 字段约束 / 防沉迷联动 / SCE 协议 / READ_ONLY）、`warnings`（资质缺口 `QUALIFICATION_INCOMPLETE`、审核结论、默认图标）和 `suggestions`（建议补充字段）。这比逐个读模块更全局，优先用于回答「还差什么 / 能不能提交」；具体字段为什么缺、怎么补，再用下面第 1 步的 `get-app-module` 读字段级详情。资质维度先检查 `QUALIFICATION_STATUS_UNAVAILABLE`，出现时标记未知并重查，不能当作无缺口。分析成功且无状态不可用警告时，`QUALIFICATION_INCOMPLETE` 的 message 才是按游戏事实算出的必须资质缺口；不要把 8 类客观空槽全列为必须。
 1. 对 9 个模块分别调用 `get-app-module`：
    - `basic-info`
    - `assets-upload`
