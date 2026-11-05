@@ -415,9 +415,8 @@ var OutlookMail = (() => {
     if (a.body_html !== undefined) {
       text(a.body_html,'body_html',64000,true);
       if (a.body_text !== undefined) invalid('bodyTextOrHtml');
-      // The card also holds the plain-text form (16,000 characters); estimate it from the
-      // visible text plus the line breaks Outlook adds for blocks, and refuse before writing.
-      if (visible(a.body_html).length + 2 * (a.body_html.match(/<\/(?:p|div|tr|li|h[1-6]|blockquote)>|<br\b/gi) || []).length > 16000) invalid('bodyTooLarge');
+      // The card also holds the plain-text form (16,000 characters); estimate it before writing.
+      if (plainSize(a.body_html) > 16000) invalid('bodyTooLarge');
     }
     if (['reply','reply_all','forward','update_draft'].includes(a.action) && a.body_text !== undefined) text(a.body_text,'body_text',16000,true);
     // The card edits the HTML form, where every line costs a <div>; it must fit as well.
@@ -671,6 +670,10 @@ var OutlookMail = (() => {
   // the readable text and inline image references, never byte-identical markup.
   const visible = html => decodeEntities(html.replace(/<(style|script|title)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  // Size of the plain text Outlook derives from HTML: inline tags vanish without a
+  // space (adjacent spans stay joined), each block end or <br> costs a CRLF.
+  const plainSize = html => decodeEntities(html.replace(/<(style|script|title)\b[\s\S]*?<\/\1\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')).length
+    + 2 * (html.match(/<\/(?:p|div|tr|li|h[1-6]|blockquote)>|<br\b/gi) || []).length;
   const cids = html => [...new Set([...html.matchAll(/\bcid:([^"'\s)>]+)/gi)].map(m => decodeEntities(m[1]).toLowerCase()))].sort().join(',');
   const bareCid = v => String(v || '').replace(/^<|>$/g, '');
   // Graph returns a full HTML document. The editor works on the body content;

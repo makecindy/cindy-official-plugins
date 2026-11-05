@@ -451,6 +451,10 @@ test('many short quoted lines are shortened by their HTML size, and a body whose
   const longHtml = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Html', body_html: '<p>' + 'x'.repeat(17000) + '</p>' });
   assert.equal(longHtml.ok, false);
   assert.equal(f.writes().length, before);
+  // Adjacent inline tags do not add characters to the plain text, so this fits (14,001 characters).
+  const spans = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Spans', body_html: '<span>x</span>'.repeat(2000) + 'x'.repeat(12001) });
+  assert.equal(spans.ok, true, spans.message);
+  assert.equal(spans.result.draftCard, true);
   const okHtml = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Html', body_html: '<p>' + 'x'.repeat(15000) + '</p>' });
   assert.equal(okHtml.ok, true, okHtml.message);
   assert.equal(okHtml.result.draftCard, true);
