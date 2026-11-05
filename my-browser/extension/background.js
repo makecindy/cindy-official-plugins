@@ -1644,11 +1644,6 @@ chrome.commands?.onCommand.addListener(async command=>{
   if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');
 });
 
-chrome.runtime.onMessage.addListener((m,sender,reply)=>{
-  if(sender.id===chrome.runtime.id&&['cindy-open-library','cindy-open-reader'].includes(m?.type)) {
-    chrome.tabs.create({url:chrome.runtime.getURL('library.html')}).then(()=>reply({ok:true}));return true;
-  }
-});
 // Captions some sites publish outside text tracks. Authorized like every other
 // caption read, and the site comes from the asking document, never from the message.
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{

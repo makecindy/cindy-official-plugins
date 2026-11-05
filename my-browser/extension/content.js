@@ -39,7 +39,6 @@
   function report(e){if(disposed)return;const code=e?.message||e,message=code==='TIMEOUT'&&videoSession&&!cues.some(c=>c.translation)?U.subtitleStatusCopy(locale).emptyTimeout:U.error(code,locale,e?.reason),detail=U.errorDetail(code,e?.reason);videoSession?.overlay?.notify(message,true,detail);if(status){status.textContent=message;status.title=detail;status.className='status error';updateFooter();}}
   function note(text){if(disposed)return;const failed=videoSession?.chunks?.find(c=>c.error);videoSession?.overlay?.notify(failed?U.error(failed.error,locale):text,!!failed);if(!status)return;status.textContent=text;status.className='status';updateFooter();}
   function updateFooter(){if(!footer)return;cancelButton.hidden=!requests.size;footer.hidden=!requests.size&&!status.textContent;}
-  function pageTheme(){for(const node of [document.body,document.documentElement]){if(!node)continue;const c=getComputedStyle(node).backgroundColor.match(/[\d.]+/g)?.map(Number);if(c&&c.length>=3&&(c.length===3||c[3]>=0.5))return (c[0]*.2126+c[1]*.7152+c[2]*.0722)<128?'dark':'light';}return getComputedStyle(document.documentElement).colorScheme==='dark'?'dark':'light';}
   function isolateHost(node,layout){node.style.setProperty('all','initial','important');for(const [key,value]of Object.entries(layout))node.style.setProperty(key,value,'important');}
   // Cindy's silhouette with a caption bubble: whose subtitles these are, in any language. The bubble
   // turns Cindy red while Cindy subtitles are on.
@@ -65,8 +64,12 @@
     {id:'tiktok',host:/(^|\.)tiktok\.com$/,player:'[class*="DivVideoPlayerContainer"]',hide:'[class*="DivCaptionContainer"]',floating:true,multi:true,external:true},
     {id:'dailymotion',host:/(^|\.)dailymotion\.com$/,player:'.player.video_player',hide:'.subtitles_placeholder',floating:true,external:true},
   ].find(entry=>entry.host.test(location.hostname))||{id:'generic',player:'#movie_player,.html5-video-player',bar:'.ytp-right-controls',hide:'.ytp-caption-window-container'};
-  const youtubeSite=site.id==='youtube',inFrame=!!window.parent&&window.parent!==window;
+  // Sites with one main player start subtitles on their own. X and TikTok are scrolling feeds: starting there
+  // would translate every video scrolled past, so they wait for the player button.
+  const youtubeSite=site.id==='youtube',autoVideoSite=['youtube','vimeo','ted','bilibili','dailymotion'].includes(site.id),inFrame=!!window.parent&&window.parent!==window;
   const playerSelector=site.player;
+  // Embeds that run this script in their own frame (see manifest) and so mount the in-player entry.
+  const framedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"]';
   const embeddedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"],iframe[src*="geo.dailymotion.com/player/"],iframe[src*="player.bilibili.com/player.html"]';
   function xVideoId(media){
     const id=media.poster?.match(/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\/(\d+)\//)?.[1]||(media.closest('[data-testid="tweet"]')?.querySelector('a[href*="/status/"] time')?.parentElement?.getAttribute('href')||location.pathname).match(/\/status\/(\d+)/)?.[1];
@@ -108,7 +111,7 @@
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
       const selectionButtonEnabled=selectionRevision===selectionPreferenceRevision?stored.selectionButton===true:prefs.selectionButton;
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{}};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -143,12 +146,18 @@
     if(host){host.style.setProperty('display','block','important');host.style.removeProperty('left');host.style.setProperty('right','16px','important');host.style.setProperty('top','16px','important');return;}
     host=el('div');host.setAttribute('data-cindy-panel','');isolateHost(host,{position:'fixed',display:'block','z-index':'2147483646',top:'16px',right:'16px',width:'min(336px,calc(100vw - 32px))','max-height':'calc(100vh - 32px)'});
     shadow=host.attachShadow({mode:'closed'});shadow.append(el('style',U.css+`.panel{display:flex;flex-direction:column;max-height:calc(100vh - 32px);background:var(--card);border:1px solid var(--board);border-radius:12px;overflow:hidden}header{padding:12px 16px;border-bottom:1px solid var(--board)}.heading{flex-wrap:nowrap}main{padding:20px;overflow:auto;min-height:0}footer{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--board)}footer .status{flex:1;min-width:0}footer button{flex:none}.selection-source{font-size:12px;color:var(--muted);max-height:90px;overflow:auto}.result{font-size:16px;line-height:1.7}.result:empty{display:none}details{border-top:1px solid var(--board);padding-top:12px}summary{cursor:pointer;font-size:12px;color:var(--muted)}details .stack{margin-top:12px}`));
-    const panel=el('section',undefined,'panel cindy-root');panel.dataset.theme=prefs.theme||pageTheme();panel.setAttribute('aria-label','Cindy');const header=el('header',undefined,'row heading'),brand=el('img');brand.className='brand';brand.src=brandURL;brand.alt='';
-    header.append(brand,el('h1','Cindy','grow'),iconButton(t.settings,'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2',showSettings),iconButton(t.close,'M6 6l12 12M18 6 6 18',hidePanel));
+    const panel=el('section',undefined,'panel cindy-root');panel.setAttribute('aria-label','Cindy');const header=el('header',undefined,'row heading'),brand=el('img');brand.className='brand';brand.src=brandURL;brand.alt='';
+    header.append(brand,el('h1','Cindy','grow'),iconButton(t.settings,'M4 7h9M17 7h3M15 5v4M4 17h3M11 17h9M9 15v4',showSettings),iconButton(t.close,'M6 6l12 12M18 6 6 18',hidePanel));
     body=el('main',undefined,'stack');status=el('div','','status');status.setAttribute('role','status');footer=el('footer');cancelButton=button(t.cancel,()=>{if(videoSession){videoSession.paused=true;videoSession.retryButton.hidden=false;}cancel();videoSession?.playback?.update();stopPage();note(t.cancel);},'quiet');footer.append(status,cancelButton);panel.append(header,body,footer);shadow.append(panel);document.documentElement.append(host);updateFooter();
   }
   function clear(mode){if(mode!=='settings'){cancel();stopVideo();}body.onkeydown=null;body.replaceChildren();note('');}
-  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const media=allMedia()[0]||document.querySelector(embeddedPlayers);body.append(el('h2',t.readTitle),el('p',t.readHint,'muted'),field(t.target,languageControl()));if(media)body.append(button(t.video,()=>showVideo(),'primary full'));body.append(button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.selectionHint),field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})),button(t.modelSettings,showSettings,'text-link'),button(t.textFile,()=>sendMessage({type:'cindy-open-reader'}),'quiet'));}
+  // One primary action per page: translating it. Adapted sites and framed YouTube / Vimeo embeds put the
+  // subtitle entry in the player itself; the panel offers it only for players that have no entry of their own.
+  // The model lives in settings, behind the header button.
+  function showPageHome(preserveWork=false){clear(preserveWork?'settings':'page');const embedded=document.querySelector(embeddedPlayers),media=site.id==='generic'&&(allMedia()[0]||embedded&&!embedded.matches(framedPlayers));
+    body.append(field(t.target,languageControl()),button(translated?t.restore:t.translatePage,()=>{const work=togglePage();if(host)showPageHome(true);return work;},'primary full'),el('small',translated?t.restoreHint:t.readHint));
+    if(media)body.append(button(t.videoTranslate,()=>showVideo(),'full'));
+    body.append(field(t.autoSite,switchControl(t.autoSite,prefs.autoSites[location.origin]===true,value=>{if(value)prefs.autoSites[location.origin]=true;else delete prefs.autoSites[location.origin];return savePreferences({autoSites:{[location.origin]:value?true:undefined}});})));}
   // Connection problems get a guide with ways out, not a red sentence in an empty panel.
   const CONNECTION_CODES=new Set(['CINDY_DISCONNECTED','UPDATE_CINDY_CHROME','NATIVE_BINDING_UNAVAILABLE','PAIRING_REQUIRED','BRIDGE_REQUEST_FAILED','SESSION_CHANGED']);
   function isConnectionProblem(e){return CONNECTION_CODES.has(e?.message||e);}
@@ -164,16 +173,16 @@
     body.append(el('h2',t.clientGuideTitle),intro,steps,actions,el('small',t.clientGuideNote),download);
   }
   function selectionButtonCheckbox(){
-    const label=el('label',undefined,'row'),input=el('input');input.type='checkbox';input.checked=prefs.selectionButton===true;
-    input.className='selection-button-checkbox';input.style.cssText='width:18px;min-height:18px;flex:none';
+    const label=el('label',undefined,'field'),input=el('input');input.type='checkbox';input.checked=prefs.selectionButton===true;
+    input.className='selection-button-checkbox switch-input';
     input.addEventListener('change',()=>{prefs.selectionButton=input.checked;if(!input.checked){selectionButton?.remove();selectionButton=null;}savePreferences({selectionButton:input.checked}).catch(report);});
-    label.append(input,el('span',t.selectionButton));return label;
+    label.append(el('span',t.selectionButton),input);return label;
   }
-  function showSettings(){clear('settings');body.append(button(t.back,()=>videoSession?videoSettings():showPageHome(),'quiet'),el('h2',t.settings),field(t.webLanguage,languageControl()));
+  function showSettings(){clear('settings');const head=el('div',undefined,'subpage-head'),back=button('‹',()=>videoSession?videoSettings():showPageHome());back.setAttribute('aria-label',t.back);back.title=t.back;head.append(back,el('h2',t.settings));body.append(head);
     body.append(selectionButtonCheckbox());
     body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
-    const theme=el('select');theme.setAttribute('aria-label',t.appearance);for(const [value,label]of [['light',t.light],['dark',t.dark]]){const o=el('option',label);o.value=value;theme.append(o);}theme.value=prefs.theme||pageTheme();theme.onchange=()=>{prefs.theme=theme.value;shadow.querySelector('.cindy-root').dataset.theme=prefs.theme;videoSession?.overlay?.update();savePreferences({theme:prefs.theme}).catch(report);};body.append(field(t.appearance,theme),el('h2',t.modelSettings),el('p',t.modelHint,'muted'));
-    const link=el('a',t.open);link.href='cindy://focus';body.append(link);
+    const model=el('div',undefined,'stack settings-section'),change=el('a',t.modelChange,'button-link');change.href='cindy://plugins/my-browser';
+    model.append(field(t.modelSettings,change),el('small',t.modelHint));body.append(model);
   }
   function onPreferencesChanged(changes,area){
     const change=changes?.cindyReadingPreferences;
@@ -195,11 +204,10 @@
     const checkbox=body?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
     prefs.bufferPause=stored.bufferPause===true;
     prefs.backgroundFill=stored.backgroundFill===true;
-    prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
     prefs.autoSites=stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{};
     if(videoTargetChanged&&videoSession)reapplyVideoTarget(nextVideoTarget);
-    const youtube=youtubeSite;
+    const youtube=autoVideoSite;
     const relevantEnable=youtube?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled;
     if(relevantEnable){nextAutoAttempt=0;if(!videoSession)autoOpen();}
     else if(!videoIsEnabled)nextAutoAttempt=Date.now()+5000;
@@ -335,7 +343,7 @@
       .caption-notice{padding:12px;border-bottom:1px solid var(--board);background:var(--surface);color:var(--text);font-size:12px;line-height:18px;pointer-events:auto}.preparation-heading{display:flex;justify-content:space-between;gap:8px;font-weight:500}.preparation-track{height:4px;background:var(--board);border-radius:2px;overflow:hidden;margin:8px 0}.preparation-fill{height:100%;background:var(--text);width:0}.preparation-detail,.preparation-cache{color:var(--muted);margin-top:4px}.preparation-error{color:var(--danger);margin-top:6px;overflow-wrap:anywhere}.preparation-error:empty{display:none}.caption-notice button{margin-top:8px}
       .caption-notice[data-mode=compact]{display:none}.ready-dot{min-height:0;width:10px;height:10px;padding:0;border:0;border-radius:50%;background:var(--muted);flex:none;margin:0 auto 0 8px;opacity:.55}.ready-dot[data-state=ready]{background:#3aa65f;opacity:1}.ready-dot[data-state=problem]{background:var(--danger);opacity:1}.ready-dot[data-state=preparing]{animation:cindy-dot-pulse 1.6s ease-in-out infinite}@keyframes cindy-dot-pulse{0%,100%{opacity:.35}50%{opacity:.9}}@media(prefers-reduced-motion:reduce){.ready-dot[data-state=preparing]{animation:none;opacity:.6}}.ready-dot:hover{background:var(--text)}.ready-dot:focus-visible{outline:2px solid var(--focus);outline-offset:3px}.preparation-detail[role=button]{cursor:pointer}.preparation-detail[role=button]:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}.preparation-stage{color:var(--muted);margin-top:2px}.preparation-stage:empty{display:none}.caption-notice.error .preparation-heading{color:var(--danger)}.caption-notice .preparation-error{color:var(--text)}.preparation-cache.warning{color:var(--danger)}.detail-code{font-size:11px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.detail-code:empty{display:none}.caption-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.caption-actions:not(:has(button:not([hidden]))){display:none}.caption-notice button{margin-top:0}
     `;
-    root.append(el('style',css));const surface=el('div',undefined,'cindy-root captions-root');surface.dataset.theme=prefs.theme||pageTheme();
+    root.append(el('style',css));const surface=el('div',undefined,'cindy-root captions-root');
     const box=el('div',undefined,'caption-box');box.setAttribute('aria-label',t.bilingualSubtitles);box.hidden=true;
     const original=el('div','', 'caption-original'),translation=el('div','', 'caption-translation');box.append(original,translation);
     const settings=el('section',undefined,'caption-settings');settings.setAttribute('aria-label',t.subtitleSettings);settings.hidden=true;
@@ -447,7 +455,7 @@
     let lastControlSync=0;const tick=time=>{if(time-lastFrame>=50){lastFrame=time;videoHandler?.();}if(site.anchor&&time-lastControlSync>=500){lastControlSync=time;syncControls();}if(!media.paused&&!media.ended)frame=requestAnimationFrame(tick);};
     const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{if(overlayHost.parentElement!==frameOf())frameOf().append(overlayHost);position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
-    let iconOn=null;const update=()=>{surface.dataset.theme=prefs.theme||pageTheme();box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==(prefs.videoMode!=='off')){iconOn=prefs.videoMode!=='off';toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
+    let iconOn=null;const update=()=>{box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==(prefs.videoMode!=='off')){iconOn=prefs.videoMode!=='off';toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
     overlayHost.addEventListener('keydown',e=>{if(e.key==='Escape'){settings.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
     const outside=e=>{if(!e.composedPath().includes(overlayHost)&&!e.composedPath().includes(controlHost)){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}};document.addEventListener('pointerdown',outside);
     return {
@@ -675,7 +683,7 @@
     // A click or double-click selects text on the page but is not an explicit
     // request for Cindy. Only a real drag may create the contextual entry.
     if(prefs.selectionButton!==true||!dragged||!window.getSelection()?.toString().trim()||!selected)return;
-    if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.dataset.theme=pageTheme();root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
+    if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
   },{signal:lifecycle.signal});
   // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.
   // It never takes clicks, lives in a closed shadow root (so page reads do not see it) and fades a few
@@ -740,11 +748,11 @@
     if(document.querySelector('video,audio'))ensureVideoEntry();
     // An embedded player only starts when someone asks for it.
     if(inFrame)return;
-    const youtube=youtubeSite&&!!document.querySelector('video');
+    const youtube=autoVideoSite&&!!document.querySelector('video');
     if(!youtube&&(translated||translations.size))return;
     let stored;
     try{stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};}catch{return;}
-    // YouTube subtitles are enabled on a fresh install. An explicit false is
+    // Video subtitles are enabled on a fresh install. An explicit false is
     // the only opt-out; site translation remains opt-in per origin.
     const enabled=youtube?stored.autoVideo!==false:stored.autoSites?.[location.origin]===true;
     if(!enabled){
@@ -763,7 +771,7 @@
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   // The toolbar icon has a light and a dark version; the page knows the browser's appearance.
   {const scheme=globalThis.matchMedia?.('(prefers-color-scheme: dark)');const tell=()=>{if(runtimeReady())sendMessage({type:'cindy-color-scheme',dark:!!scheme.matches}).catch(()=>{});};if(scheme&&window===window.top){tell();scheme.addEventListener?.('change',tell,{signal:lifecycle.signal});}}
-  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=youtubeSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
+  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=autoVideoSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
   // Several players render their control bar on hover; do not leave the entry to the one-second timer.
   if(site.id!=='generic'&&!youtubeSite){let entryTimer;document.addEventListener('pointerover',e=>{if(!e.target.closest?.(playerSelector))return;clearTimeout(entryTimer);entryTimer=setTimeout(()=>{if(runtimeReady())ensureVideoEntry();},120);},{capture:true,passive:true,signal:lifecycle.signal});}
