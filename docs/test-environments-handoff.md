@@ -44,7 +44,7 @@
 `mode:acceptance` 需要上述客户端合同；缺失时应报告 `PROJECT_UPDATE_REQUIRED`。
 `mode:legacy` 不传新增验收参数，但仍需要项目导出的 `scripts/desktop-restart-runner.mjs`。
 
-### Cindy 服务端：本地分支 `dev-device-authorization`
+### Cindy 服务端：本地分支 `feat/dev-device-authorization`
 
 新的空设备授权源/目标方案有独立服务端 WIP，未部署生产。`loginSource` 字段和客户端代码存在不代表线上授权可用。
 已有沙盒自己的有效登录可复用；全新沙盒不能凭账号引用得到身份。
