@@ -415,6 +415,9 @@ var OutlookMail = (() => {
     if (a.body_html !== undefined) {
       text(a.body_html,'body_html',64000,true);
       if (a.body_text !== undefined) invalid('bodyTextOrHtml');
+      // The card also holds the plain-text form (16,000 characters); estimate it from the
+      // visible text plus the line breaks Outlook adds for blocks, and refuse before writing.
+      if (visible(a.body_html).length + 2 * (a.body_html.match(/<\/(?:p|div|tr|li|h[1-6]|blockquote)>|<br\b/gi) || []).length > 16000) invalid('bodyTooLarge');
     }
     if (['reply','reply_all','forward','update_draft'].includes(a.action) && a.body_text !== undefined) text(a.body_text,'body_text',16000,true);
     // The card edits the HTML form, where every line costs a <div>; it must fit as well.

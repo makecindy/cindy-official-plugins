@@ -447,6 +447,13 @@ test('many short quoted lines are shortened by their HTML size, and a body whose
   const refused = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Lines', body_text: 'x\n'.repeat(6000) });
   assert.equal(refused.ok, false);
   assert.equal(f.writes().length, before);
+  // HTML within 64,000 characters whose plain-text form exceeds the card's 16,000.
+  const longHtml = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Html', body_html: '<p>' + 'x'.repeat(17000) + '</p>' });
+  assert.equal(longHtml.ok, false);
+  assert.equal(f.writes().length, before);
+  const okHtml = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Html', body_html: '<p>' + 'x'.repeat(15000) + '</p>' });
+  assert.equal(okHtml.ok, true, okHtml.message);
+  assert.equal(okHtml.result.draftCard, true);
 });
 
 test('a paged conversation is reported unavailable, never presented as the whole thread', async t => {
