@@ -417,6 +417,8 @@ var OutlookMail = (() => {
       if (a.body_text !== undefined) invalid('bodyTextOrHtml');
     }
     if (['reply','reply_all','forward','update_draft'].includes(a.action) && a.body_text !== undefined) text(a.body_text,'body_text',16000,true);
+    // The card edits the HTML form, where every line costs a <div>; it must fit as well.
+    if (['draft','reply','reply_all','forward','update_draft'].includes(a.action) && typeof a.body_text === 'string' && textHtml(a.body_text).length > 64000) invalid('bodyTooLarge');
     if (a.action === 'update_draft') {
       if (!['to','cc','bcc','subject','body_text','body_html'].some(k => a[k] !== undefined)) invalid('updateEmpty');
       if (a.subject !== undefined) text(a.subject,'subject',998,true);
@@ -1055,9 +1057,13 @@ var OutlookMail = (() => {
       // Outlook's generated quote can outgrow the draft card's field limits, which
       // would leave a draft no card can show or send. Shorten it to a text quote.
       if (a.action !== 'draft' && (readBack.editor.quote.length > 16000 || readBack.editor.quoteHtml.length > 64000)) {
-        const cut = readBack.editor.quote.slice(0, 12000).replace(/\s+$/, '') + '\n…';
-        const shrunk = await writeDraft(ctx, { draftId, fingerprint: readBack.fingerprint, send: false, additions: [], fields: { ...fieldsOf(readBack), quote: cut,
-          quoteHtml: '<div id="appendonsend"></div><hr style="display:inline-block;width:98%" tabindex="-1"><div>' + textHtml(cut) + '</div>' } }, transport, callId);
+        let limit = 12000, cut, quoteHtml;
+        for (;; limit = Math.floor(limit * 0.6)) {
+          cut = readBack.editor.quote.slice(0, limit).replace(/\s+$/, '') + '\n…';
+          quoteHtml = '<div id="appendonsend"></div><hr style="display:inline-block;width:98%" tabindex="-1"><div>' + textHtml(cut) + '</div>';
+          if (quoteHtml.length <= 64000 || limit < 200) break; // newlines expand the HTML: measure it
+        }
+        const shrunk = await writeDraft(ctx, { draftId, fingerprint: readBack.fingerprint, send: false, additions: [], fields: { ...fieldsOf(readBack), quote: cut, quoteHtml } }, transport, callId);
         if (!shrunk.ok) return { ...common, execution_status: 'executed', draft_id: draftId, readBack: { status: 'unavailable', message: t('draftSavedUnverified') } };
         readBack = shrunk.data.readBack;
       }

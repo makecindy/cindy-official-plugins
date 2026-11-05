@@ -428,6 +428,27 @@ export function runImapComposeSuite(plugin, options) {
     assert.doesNotMatch(small.draftSource(), /<script|alert\(1\)<\/script/i);
   });
 
+  test(plugin + ': HTML-only replies get a plain-text part, and bodies or quotes that cannot fit the card are handled before writing', async () => {
+    const t = h();
+    const reply = await t.call({ action: 'reply', folder: 'INBOX', message_uid: 1, body_html: '<p>Important new reply</p>' });
+    assert.equal(reply.ok, true, reply.message);
+    assert.equal(reply.result.readBack.editor.body, 'Important new reply');
+    assert.match(t.draftSource(), /Important new reply/);
+    // Newlines expand to 4+ characters of HTML: 12,000 characters are under the text limit but over the HTML one.
+    const appends = t.box.calls.filter((call) => call === 'append').length;
+    const refused = await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Lines', body_text: 'x\n'.repeat(6000) });
+    assert.equal(refused.ok, false);
+    assert.match(refused.message, /^\[not_executed\]/);
+    assert.equal(t.box.calls.filter((call) => call === 'append').length, appends);
+    // A quote made of many short lines is shortened by its HTML size until the card can hold it.
+    t.box.add('INBOX', ['From: Alice <alice@example.test>', 'To: ' + self, 'Subject: Lines', 'Message-ID: <lines-1@example.test>', 'Date: Mon, 02 Nov 2026 10:00:00 +0000',
+      'Content-Type: text/plain; charset=utf-8', '', 'x\n'.repeat(15000), ''].join('\r\n'));
+    const quoted = await t.call({ action: 'reply', folder: 'INBOX', message_uid: 2, body_text: 'ok' });
+    assert.equal(quoted.ok, true, quoted.message);
+    assert.equal(quoted.result.draftCard, true);
+    assert.ok(quoted.result.readBack.editor.quoteHtml.length <= 64000);
+  });
+
   test(plugin + ': card records keep only routing and receipts in plugin KV', async () => {
     const t = h();
     const created = await t.call({ action: 'draft', to: 'dave@example.test', subject: 'Hello', body_text: 'Body' });

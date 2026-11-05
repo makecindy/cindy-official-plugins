@@ -66776,7 +66776,7 @@ var require_mail_compose = __commonJS({
           if (!["new", "reply", "reply_all", "forward"].includes(mode)) throw new ComposeError("fieldsInvalid");
           if (action.body_text !== void 0 && typeof action.body_text !== "string") throw new ComposeError("fieldsInvalid");
           if (action.body_html !== void 0 && (typeof action.body_html !== "string" || action.body_html.length > MAX_HTML_FIELD)) throw new ComposeError("fieldsInvalid");
-          const body = normalizeNewlines(action.body_text || "").replace(/\n+$/, "");
+          const body = (action.body_text !== void 0 || action.body_html === void 0 ? normalizeNewlines(action.body_text || "") : htmlToText(action.body_html)).replace(/\n+$/, "");
           if (body.length > MAX_FIELD) throw new ComposeError("fieldsInvalid");
           const additions = await loadFiles(agentPaths(action.attachment_paths));
           return env.withImap(async (client) => {
@@ -66868,12 +66868,18 @@ var require_mail_compose = __commonJS({
             if (mode === "reply_all") cc = addressList(unique([...headerAddresses(source, "to"), ...headerAddresses(source, "cc")]));
           }
         }
+        const bodyHtml = action.body_html !== void 0 ? action.body_html : textToHtml(body);
+        if (body.length > MAX_FIELD || bodyHtml.length > MAX_HTML_FIELD) throw new ComposeError("fieldsInvalid");
         if (quoteText.length > MAX_FIELD || quoteHtml.length > MAX_HTML_FIELD) {
-          quoteText = quoteText.slice(0, 12e3).replace(/\s+$/, "") + "\n\u2026";
-          quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+          const full = quoteText;
+          for (let limit = 12e3; ; limit = Math.floor(limit * 0.6)) {
+            quoteText = full.slice(0, limit).replace(/\s+$/, "") + "\n\u2026";
+            quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+            if (quoteHtml.length <= MAX_HTML_FIELD || limit < 200) break;
+          }
           if (mode !== "forward") files = [];
         }
-        const html = (action.body_html !== void 0 ? action.body_html : textToHtml(body)) + quoteHtml;
+        const html = bodyHtml + quoteHtml;
         return {
           to: pick("to", to),
           cc: pick("cc", cc),

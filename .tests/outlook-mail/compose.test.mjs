@@ -84,7 +84,7 @@ function fixture(t, options = {}) {
       const all = rest === 'createReplyAll', forward = rest === 'createForward';
       const draft = box.add({ id: box.newId('reply'), subject: (forward ? 'FW: ' : 'RE: ') + m.subject, conversationId: m.conversationId,
         toRecipients: forward ? [] : [m.from, ...(all ? m.toRecipients : [])], ccRecipients: all ? m.ccRecipients : [],
-        body: { contentType: 'html', content: '<html><head><style>p{margin:0}</style></head><body dir="ltr">' + QUOTE + (m.longQuote ? '<div>' + 'x'.repeat(m.longQuote) + '</div>' : '') + '</body></html>' },
+        body: { contentType: 'html', content: '<html><head><style>p{margin:0}</style></head><body dir="ltr">' + QUOTE + (m.longQuote ? '<div>' + 'x'.repeat(m.longQuote) + '</div>' : '') + (m.longLines ? '<div>x</div><div></div><div></div>'.repeat(m.longLines) : '') + '</body></html>' },
         attachments: forward ? copy(m.attachments) : [] });
       return reply(201, view(draft));
     }
@@ -434,6 +434,19 @@ test('an Outlook quote beyond the draft card limits is shortened so the card can
   assert.ok(editor.quote.length <= 16000 && editor.quote.trimEnd().endsWith('…'));
   assert.equal(editor.bodyHtml, '<div>ok</div>');
   assert.match(f.box.messages.get(r.result.draft_id).body.content, /id="appendonsend"/);
+});
+
+test('many short quoted lines are shortened by their HTML size, and a body whose HTML cannot fit is refused', async t => {
+  const f = fixture(t);
+  const original = f.box.add({ id: 'linesAAMk1=', isDraft: false, subject: 'Lines', longLines: 3000, from: person('sender@example.test', 'Sender'), toRecipients: [person('self@example.test')] });
+  const r = await f.tool({ action: 'reply', message_id: original.id, body_text: 'ok' });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.result.draftCard, true);
+  assert.ok(r.result.readBack.editor.quoteHtml.length <= 64000);
+  const before = f.writes().length;
+  const refused = await f.tool({ action: 'draft', to: 'dave@example.test', subject: 'Lines', body_text: 'x\n'.repeat(6000) });
+  assert.equal(refused.ok, false);
+  assert.equal(f.writes().length, before);
 });
 
 test('a paged conversation is reported unavailable, never presented as the whole thread', async t => {

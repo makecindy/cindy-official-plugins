@@ -734,7 +734,9 @@ function createMailCompose(env) {
       if (!['new', 'reply', 'reply_all', 'forward'].includes(mode)) throw new ComposeError('fieldsInvalid');
       if (action.body_text !== undefined && typeof action.body_text !== 'string') throw new ComposeError('fieldsInvalid');
       if (action.body_html !== undefined && (typeof action.body_html !== 'string' || action.body_html.length > MAX_HTML_FIELD)) throw new ComposeError('fieldsInvalid');
-      const body = normalizeNewlines(action.body_text || '').replace(/\n+$/, '');
+      // An HTML-only body still needs its plain-text alternative.
+      const body = (action.body_text !== undefined || action.body_html === undefined
+        ? normalizeNewlines(action.body_text || '') : htmlToText(action.body_html)).replace(/\n+$/, '');
       if (body.length > MAX_FIELD) throw new ComposeError('fieldsInvalid');
       const additions = await loadFiles(agentPaths(action.attachment_paths));
       return env.withImap(async (client) => {
@@ -821,15 +823,22 @@ function createMailCompose(env) {
         if (mode === 'reply_all') cc = addressList(unique([...headerAddresses(source, 'to'), ...headerAddresses(source, 'cc')]));
       }
     }
-    // The draft card holds at most 16,000 text / 64,000 HTML characters per field. A
-    // longer quoted message is shortened to a plain-text quote rather than creating
-    // a draft that no card can show or send.
+    // The draft card holds at most 16,000 text / 64,000 HTML characters per field,
+    // measured on the HTML actually produced (newlines and escapes expand it). A
+    // longer quoted message is shortened to a plain-text quote until it fits; an
+    // own body that cannot fit is refused before anything is written.
+    const bodyHtml = action.body_html !== undefined ? action.body_html : textToHtml(body);
+    if (body.length > MAX_FIELD || bodyHtml.length > MAX_HTML_FIELD) throw new ComposeError('fieldsInvalid');
     if (quoteText.length > MAX_FIELD || quoteHtml.length > MAX_HTML_FIELD) {
-      quoteText = quoteText.slice(0, 12000).replace(/\s+$/, '') + '\n…';
-      quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+      const full = quoteText;
+      for (let limit = 12000; ; limit = Math.floor(limit * 0.6)) {
+        quoteText = full.slice(0, limit).replace(/\s+$/, '') + '\n…';
+        quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+        if (quoteHtml.length <= MAX_HTML_FIELD || limit < 200) break;
+      }
       if (mode !== 'forward') files = [];
     }
-    const html = (action.body_html !== undefined ? action.body_html : textToHtml(body)) + quoteHtml;
+    const html = bodyHtml + quoteHtml;
     return {
       to: pick('to', to), cc: pick('cc', cc), bcc: pick('bcc', ''), subject,
       text: body + quoteText, html, inReplyTo, references, files: files.concat(additions),
