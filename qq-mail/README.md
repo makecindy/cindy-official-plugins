@@ -1,12 +1,39 @@
-# QQ Mail attachments (0.2.11)
+# QQ Mail
 
 [简体中文](README.zh-CN.md)
 
-`qq_mail` supports `attachment_paths` for `send` and `draft`: up to 10 regular
-files, **32 MiB combined raw size**. Use absolute paths on the computer running
+## Draft cards (0.3.0)
+
+QQ Mail now uses Cindy's common mail cards, like Gmail. `draft` writes a new
+message; `reply` answers the sender only; `reply_all` (the default reply) answers
+everyone except this account, duplicate addresses and the original Bcc; `forward`
+keeps the original attachments. Replies and forwards take the original `folder`
+and `message_uid`. The draft is saved to the QQ Drafts folder, read back and shown
+as a card the user can edit directly; edits sync automatically. Every result
+returns `draft_id` (the draft's Message-ID).
+
+Mail is sent only from that card: the card's Send button, or `send_draft` after the
+user confirmed the message, sends the latest card content after a 10-second undo
+countdown. The old direct `send` action is refused. `get_draft`, `update_draft` and
+`delete_draft` take `draft_id`. Optional `body_html` writes rich text; inline images
+use `cid:` references. Writes are refused in read-only tasks. Minimum Cindy is 0.1.112.
+
+IMAP cannot edit a stored message, so each save appends the next revision, reads
+it back and verifies it before removing older copies. Sending rebuilds the verified
+draft without a Bcc header (Bcc goes only in the SMTP envelope), then removes the
+draft. An SMTP rejection of every recipient is `not_executed`; any other interrupted
+write is `unknown` and is never retried. The receipt reports `accepted`/`rejected`
+recipients and `delivery_confirmed:false`. These paths are verified with Cindy's
+mail SDK against simulated IMAP/SMTP servers only, not yet a real QQ mailbox.
+
+## Attachments
+
+`attachment_paths` works with `draft`, `reply`, `reply_all`, `forward` and
+`update_draft`: up to 10 regular files; new attachments are limited to **16 MiB each
+and 25 MiB combined raw size**. Use absolute paths on the computer running
 Cindy, and attach only files explicitly authorized by the user. URLs, relative
 paths, directories, missing files and oversized totals are rejected before
-sending. Unicode filenames, empty files and binary files are supported. Omit
+anything is written to the mailbox. Unicode filenames, empty files and binary files are supported. Omit
 the parameter or use `[]` for plain mail. Source files are never modified.
 
 The existing Node Worker reads bounded buffers and builds MIME locally; file
@@ -23,7 +50,7 @@ the address without sending mail.
 
 ```json
 {
-  "action": "send",
+  "action": "draft",
   "to": "recipient@example.test",
   "subject": "Report",
   "body_text": "Please see the attached report.",
@@ -31,7 +58,8 @@ the address without sending mail.
 }
 ```
 
-Use `action: "draft"` to save a draft instead. `to`, `cc`, and `bcc` accept
+Cindy shows the saved draft as a card; send it from the card or with
+`send_draft` once the user confirms. `to`, `cc`, and `bcc` accept
 comma-separated strings or arrays. A Windows JSON path looks like
 `"C:\\Users\\yourname\\Documents\\report.pdf"`. Remote/mobile files must first reach the
 computer running Cindy. Put these parameters inside `ghost_call.args`, never
@@ -40,9 +68,10 @@ instances exist, use the exact namespace returned by `ghost_info`.
 
 ## Results and failures
 
-`send` reports SMTP acceptance (`sent`, `message_id`, `accepted`, `rejected`),
-not guaranteed inbox delivery. `draft: true` means a draft was saved, not sent.
-`send`, `draft`, and `read` include attachment filename, byte size and SHA-256.
+A send receipt reports SMTP acceptance (`sent`, `messageId`, `accepted`,
+`rejected`, `delivery_confirmed:false`), not guaranteed inbox delivery. A draft
+result means a draft was saved, not sent. Draft read-backs list attachment names
+and sizes; `read` includes attachment filename, byte size and SHA-256.
 `read` returns metadata, not downloaded files. To verify delivery, search a
 unique subject, read the returned folder/UID, and compare names, sizes and hashes.
 SMTP message IDs are not IMAP UIDs.
@@ -54,8 +83,8 @@ After a timeout, cancellation or lost response, the outcome may be unknown:
 verify the mailbox before retrying to avoid duplicates. Use `list_folders` for
 server folder names, including junk folders when checking delayed delivery.
 
-The read limit is **48 MiB of encoded mail**; send/draft/read wait up to
-120 seconds. MIME expands attachment bytes. The 32 MiB limit is a plugin limit,
+The read limit is **48 MiB of encoded mail**; draft and read requests wait up to
+120 seconds. MIME expands attachment bytes. The 25 MiB limit is a plugin limit,
 not a provider guarantee; recipient servers may impose lower limits.
 
 ## Verification and development
@@ -76,8 +105,8 @@ cd ..
 node --test .tests/qq-mail.test.mjs
 ```
 
-Manifest v3 retains the tools and Node declarations. Minimum Cindy is 0.1.92:
-that published release includes the callId/cancelWithCall lifecycle used here.
+Manifest v3 retains the tools and Node declarations. Minimum Cindy is 0.1.112,
+the first release with the common mail SDK used by draft cards.
 
 ## Authorization boundary
 

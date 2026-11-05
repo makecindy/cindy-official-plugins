@@ -1,13 +1,16 @@
 {
   "name": "Outlook Mail",
-  "description": "Search, read, send, draft and organize Outlook and Microsoft 365 email through Cindy Host-managed OAuth and Microsoft Graph. Connect an account in plugin settings first.",
+  "description": "Search, read, draft, reply to, send and organize Outlook and Microsoft 365 email. Writing and replies use Cindy’s editable draft card with an undo window before sending. Uses Cindy Host-managed OAuth and Microsoft Graph; connect an account in plugin settings first.",
   "whenToUse": "Use for Outlook, Hotmail, Live and Microsoft 365 email, including 21Vianet China: connect accounts, find, read, send, draft and organize mail.",
   "tools": {
     "outlook_accounts": {
       "description": "List connected accounts, per-cloud defaults and application setup for global and China services. Multiple accounts can stay signed in. Optionally pass profile_account to read that account’s mail and user_principal_name from Graph. A sign-in name is not necessarily a receiving address; do not guess when mail is null. No mail is read and no tokens are returned."
     },
     "outlook_mail": {
-      "description": "Search, read, send, draft, list folders, mark read/unread or move messages. Writes require explicit user intent; verify sender, recipients and content before sending. Send success means accepted, not delivered. If execution_status is unknown, inspect the mailbox before retrying. Reading does not mark read. Pagination binds to account/action. Microsoft cloud mailboxes only; no other providers or on-premises Exchange."
+      "description": "Search, read, draft, reply, forward, send and organize mail: list folders, mark read/unread and move. To write or reply, create a draft with draft, reply_all (default: replies to everyone except yourself, duplicates and Bcc), reply (sender only, when the user asks) or forward; Cindy shows an editable draft card. get_draft/update_draft/delete_draft read, edit and delete drafts; send_draft sends the latest card content after a 10-second undo countdown. Direct send is not available. Send only after the user confirms recipients and content; success means Microsoft accepted it, not delivered. If execution_status is unknown, check the mailbox before retrying. Reading does not mark read; cite the returned web_url links in answers. Microsoft cloud mailboxes only."
+    },
+    "outlook_read_message": {
+      "description": "Read-only: open an Outlook web message link (bound to an account by cindy_account) for Cindy’s native reader, returning the selected message body, attachments and summaries of its conversation. Does not mark read unless markRead:true for an explicit user opening or mark-read request; only the selected message is marked and markReadResult.execution (not_executed/executed/unknown) is returned. On unknown, check the mailbox; never retry blindly. Never edits drafts or sends. Read a conversation member url to expand it."
     }
   }
 }

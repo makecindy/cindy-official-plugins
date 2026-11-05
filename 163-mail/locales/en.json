@@ -7,7 +7,7 @@
       "description": "Check whether 163 Mail is configured. Returns only the email address and connection status, never the client authorization password."
     },
     "mail_163": {
-      "description": "Perform 163 Mail operations: list folders, search, read, send, save drafts, mark messages read or unread, and move messages. Each operation opens a temporary IMAP/SMTP connection and closes it afterward. Sending, moving, and changing read status require explicit user intent."
+      "description": "Perform 163 Mail operations: list folders, search, read, send, save drafts, mark messages read or unread, and move messages. Each operation opens a temporary IMAP/SMTP connection and closes it afterward. Sending, moving, and changing read status require explicit user intent. Compose with draft/reply/reply_all/forward (reply_all is the default reply); drafts appear as editable Cindy cards. send_draft sends the card after a 10-second undo countdown, only after the user confirms. Direct send is not supported."
     }
   }
 }

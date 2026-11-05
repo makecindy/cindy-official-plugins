@@ -45,8 +45,28 @@ fields and retain the selected message; old readers still work as single message
 Cindy owns the universal mail editor, layout, autosave, sending and task continuation.
 Plugins provide only accounts and mailbox operations, registered with the Host's
 `cindyMail` SDK (version 1). Do not bundle the SDK or generate card HTML.
-Gmail is the first migrated consumer. QQ, IMAP, Graph and local stores use the same
-adapter contract; their actual plugins still require integration and real-provider tests.
+Connected plugins: Gmail, Outlook (Microsoft Graph), and the IMAP/SMTP plugins QQ Mail,
+163 Mail, iCloud Mail and Yahoo Mail. Gmail is verified with real mailboxes; Outlook and
+the IMAP plugins are so far verified only against simulated mailboxes (see Provider notes).
+
+## Provider notes
+
+- **IMAP/SMTP** (QQ, 163, iCloud, Yahoo) share one adapter: `src/mail-compose.cjs` in the
+  Node worker and the `cindy-imap-compose` block in `main.js`. The copies must stay
+  identical; `.tests/imap-mail-compose.test.mjs` checks this and runs the same end-to-end
+  suite for every plugin. The draft's Message-ID is the stable `draftId`; the locator is
+  folder + UID + UIDVALIDITY, falling back to a Message-ID search. IMAP cannot edit a stored
+  message, so each save appends the next revision, reads it back, verifies it and only then
+  removes older copies; the fingerprint is the SHA-256 of the stored message. Sending
+  rebuilds the verified draft without a Bcc header (Bcc goes only in the SMTP envelope),
+  then removes the draft; an SMTP envelope rejection before DATA is `not_executed`, every
+  other interruption `unknown`. Saving a copy to Sent is left to the provider, as before.
+- **Outlook** uses Graph's native drafts, `createReply`/`createReplyAll`/`createForward` and
+  `/send`, plus a `mailReader` for Outlook web links. It has no Node worker, so new local
+  files cannot be attached from the card yet; removing, renaming or inlining existing
+  attachments works.
+- Direct-send tool actions are refused in all of these plugins; mail is sent only through
+  the draft card flow.
 
 ## Adapter
 
@@ -221,7 +241,8 @@ Run `.tests/mail-compose.test.mjs` and the provider tests. The SDK contract snap
 in `.tests/contracts/cindy-mail-runtime.js` is test-only, copied from Cindy's
 `apps/desktop/src/main/cindy-brain/runtime/mailComposeRuntime.js`; it must never be
 packaged. Cindy also tests the authoritative source, lifecycle, ownership and UI.
-Synthetic IMAP/Graph tests do not establish real provider support or mail delivery.
+For IMAP plugins also run `.tests/<plugin>.test.mjs`, which includes the shared
+end-to-end suite. Synthetic IMAP/Graph tests do not establish real provider support or mail delivery.
 
 By default, present the draft card and wait for the user to confirm recipients and content. Skip another question only when the user clearly confirmed this email or an applicable user/task instruction explicitly authorizes direct sending within this scope; writing/reply requests, edits and auto-approval alone are not confirmation. A card Send click is confirmation. Even authorized direct sends first present the same draft card and use its latest edits; no raw-send, CLI or other bypass is allowed. Both entry points wait 10 seconds before the adapter receives send:true; the card offers Undo and Send now. beforeTool(send) waits for the final receipt. Cancellation retains the draft and must not be retried automatically. Restart does not resume waiting sends. Direct-send tool commands must route through this flow.
 

@@ -618,3 +618,7 @@ test('Worker 将认证、网络与频控错误转换成可行动文案', () => {
   assert.match(worker.humanizeError(new Error('Too many simultaneous connections')), /稍后/);
   assert.match(worker.humanizeError(new Error('DRAFT_SAVE_FAILED')), /草稿/);
 });
+
+// Shared common-mail-card adapter, exercised end to end with Cindy's SDK.
+import { runImapComposeSuite } from './imap-mail-compose.test.mjs';
+runImapComposeSuite('163-mail', { email: 'user@163.com', kv: { credentialSlot: 'a' }, secretKeys: ['mail_163_authorization_code'], providerName: '163 邮箱' });

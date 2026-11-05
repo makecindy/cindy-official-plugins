@@ -70,22 +70,37 @@ test('draft uses the same MIME attachment path', async t => {
   assert.equal(result.draft,true);
   assert.equal((await simpleParser(appended)).attachments[0].content.toString(),'draft');
 });
-test('main passes paths and current callId to worker without passing attachment bytes', async () => {
+test('main passes draft attachment paths to the shared compose worker without attachment bytes', async () => {
   let handler, request, response;
   const context = { Map, setTimeout, fetch: async url=>({ok:true,json:async()=>url==='/kv'?{email:'test@example.com'}:[{key:'qq_mail_authorization_code',saved:true}]}), cindy: {
-    onHostMessage: fn=>{handler=fn;},node:{request:async r=>{request=r;return {ok:true,result:{sent:true}};}},send: async r=>{response=r;},
+    onHostMessage: fn=>{handler=fn;},node:{request:async r=>{request=r;return {ok:true,result:{ok:true,execution:'executed',data:{draft:true,draftId:'<d@example.com>',readBack:{status:'unavailable',message:'x'}}}};}},send: async r=>{response=r;},
   }};
   vm.runInNewContext(await fs.readFile(path.join(__dirname,'../main.js'),'utf8'),context);
-  handler({type:'tool-call',tool:'qq_mail',callId:'current-call',args:{...base,attachment_paths:['/tmp/test.txt']}});
+  handler({type:'tool-call',tool:'qq_mail',callId:'current-call',args:{...base,action:'draft',attachment_paths:['/tmp/test.txt'],session_context:{workdir_is_read_only:false}}});
   for(let i=0;i<20&&!response;i++) await new Promise(r=>setImmediate(r));
   assert.equal(response.ok,true);
+  assert.equal(request.method,'mail/action');
+  assert.equal(request.params.action.action,'compose_create');
   assert.deepEqual(Array.from(request.params.action.attachment_paths),['/tmp/test.txt']);
-  assert.equal(request.callId,'current-call'); assert.equal(request.cancelWithCall,true);
+  assert.ok(!JSON.stringify(request).includes('content'));
+});
+test('main refuses direct send before contacting the worker', async () => {
+  let handler, response, calls = 0;
+  const context = { Map, setTimeout, fetch: async url=>({ok:true,json:async()=>url==='/kv'?{email:'test@example.com'}:[{key:'qq_mail_authorization_code',saved:true}]}), cindy: {
+    onHostMessage: fn=>{handler=fn;},node:{request:async()=>{calls++;return {ok:true,result:{sent:true}};}},send: async r=>{response=r;},
+  }};
+  vm.runInNewContext(await fs.readFile(path.join(__dirname,'../main.js'),'utf8'),context);
+  handler({type:'tool-call',tool:'qq_mail',callId:'send-call',args:base});
+  for(let i=0;i<20&&!response;i++) await new Promise(r=>setImmediate(r));
+  assert.equal(response.ok,false);
+  assert.match(response.message,/^\[not_executed\]/);
+  assert.match(response.message,/send_draft/);
+  assert.equal(calls,0);
 });
 test('connect verifies saved secret before persisting email, and keeps configuration on failure', async () => {
   for (const success of [true,false]) {
     let handler, response, request, written;
-    const context={Map,setTimeout,fetch:async(url,options)=>{
+    const context={Map,setTimeout,navigator:{locks:{request:async(_name,fn)=>fn()}},fetch:async(url,options)=>{
       if(options?.method==='PUT'){written=JSON.parse(options.body);return {ok:true};}
       return {ok:true,json:async()=>({untouched:'keep'})};
     },cindy:{onHostMessage:fn=>{handler=fn;},node:{request:async r=>{request=r;return success?{ok:true,result:{connected:true,email:'test@example.com'}}:{ok:false,message:'connection failed'};}},send:async r=>{response=r;}}};
@@ -130,16 +145,16 @@ test('worker distinguishes rejected attachment input from ambiguous SMTP failure
   });
 });
 
-test('host timeouts on send are unknown and never invite blind retries', async () => {
+test('host timeouts on draft writes are unknown and never invite blind retries', async () => {
   let handler, response;
   const context = { Map, setTimeout, fetch: async url => ({ ok: true, json: async () => url === '/kv' ? { email: credentials.email } : [{ key: 'qq_mail_authorization_code', saved: true }] }), cindy: {
     onHostMessage: fn => { handler = fn; }, node: { request: async () => ({ ok: false, errorCode: 'TIMEOUT', message: '请求超时，请重试' }) }, send: async r => { response = r; },
   } };
   vm.runInNewContext(await fs.readFile(path.join(__dirname, '../main.js'), 'utf8'), context);
-  handler({ type: 'tool-call', tool: 'qq_mail', callId: 'timeout-call', args: base });
+  handler({ type: 'tool-call', tool: 'qq_mail', callId: 'timeout-call', args: { ...base, action: 'draft', session_context: { workdir_is_read_only: false } } });
   for (let i = 0; i < 20 && !response; i++) await new Promise(r => setImmediate(r));
   assert.equal(response.ok, false);
-  assert.match(response.message, /结果不确定/);
+  assert.match(response.message, /^\[unknown\]/);
   assert.doesNotMatch(response.message, /请重试/);
 });
 
@@ -232,13 +247,13 @@ test('draft cleanup runs after append and preserves its known result', async () 
       append: async () => { await new Promise(resolve => setImmediate(resolve)); appended = true; return { uid: 1 }; } }),
   }), error => error.executionState === 'executed');
 });
-test('main preserves known executed failures instead of suggesting another send', async () => {
+test('main preserves known executed failures instead of suggesting another mutation', async () => {
   let handler, response;
   const context = { Map, setTimeout, fetch: async url => ({ ok: true, json: async () => url === '/kv' ? { email: credentials.email } : [{ key: 'qq_mail_authorization_code', saved: true }] }), cindy: {
     onHostMessage: fn => { handler = fn; }, node: { request: async () => ({ ok: false, message: '操作已执行，请核对邮箱', data: { execution_state: 'executed' } }) }, send: async r => { response = r; },
   } };
   vm.runInNewContext(await fs.readFile(path.join(__dirname, '../main.js'), 'utf8'), context);
-  handler({ type: 'tool-call', tool: 'qq_mail', callId: 'completed-call', args: base });
+  handler({ type: 'tool-call', tool: 'qq_mail', callId: 'completed-call', args: { ...base, action: 'move', message_uid: 1, target_folder: 'Archive' } });
   for (let i = 0; i < 20 && !response; i++) await new Promise(r => setImmediate(r));
   assert.equal(response.ok, false);
   assert.equal(response.message, '操作已执行，请核对邮箱');
@@ -292,11 +307,11 @@ test('attachment open/stat/read/close errors stay in the local file error domain
 });
 
 test('a transient result-delivery failure preserves known outcomes without repeating mailbox operations', async () => {
-  for (const action of ['send', 'draft', 'move', 'mark_read', 'mark_unread']) {
+  for (const action of ['move', 'mark_read', 'mark_unread']) {
     for (const state of ['success', 'not_executed', 'executed', 'unknown', 'invalid']) {
       let handler, delivered, calls = 0, deliveries = 0;
       const args = { ...base, action, message_uid: 1, target_folder: 'Archive' };
-      if (state === 'invalid') { if (action === 'send' || action === 'draft') delete args.subject; else delete args.message_uid; }
+      if (state === 'invalid') delete args.message_uid;
       const expectedMessage = state === 'not_executed' ? '操作未执行：附件路径错误' : '操作已执行，请核对邮箱';
       const context = { Map, setTimeout, fetch: async url => ({ ok: true, json: async () => url === '/kv' ? { email: credentials.email } : [{ key: 'qq_mail_authorization_code', saved: true }] }), cindy: {
         onHostMessage: fn => { handler = fn; }, node: { request: async () => {

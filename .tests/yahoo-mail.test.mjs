@@ -149,7 +149,8 @@ function createWorkerHarness(overrides = {}, parseMessage = async () => ({})) {
 test('manifest 声明 Cindy 持久凭证及其最小 Node 注入范围', () => {
   assert.equal(manifest.id, 'yahoo-mail');
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  assert.deepEqual(manifest.slots, ['tool', 'node']);
+  assert.equal(manifest.schemaVersion, 3);
+  assert.equal(Object.hasOwn(manifest, 'slots'), false);
   assert.deepEqual(manifest.node.secretBindings, [
     {
       key: 'yahoo_mail_app_password',
@@ -237,8 +238,6 @@ test('main.js 的连接与邮件请求只携带邮箱和非敏感凭证槽位', 
 
 test('main.js 将写操作的 Node RPC 中断转换为结果不确定', async () => {
   const cases = [
-    { action: 'send', to: 'recipient@example.com', subject: 'Test', body_text: 'Message' },
-    { action: 'draft', to: 'recipient@example.com', subject: 'Test', body_text: 'Draft' },
     { action: 'move', message_uid: 42, target_folder: 'Archive' },
     { action: 'mark_read', message_uid: 42 },
     { action: 'mark_unread', message_uid: 42 },
@@ -253,6 +252,16 @@ test('main.js 将写操作的 Node RPC 中断转换为结果不确定', async ()
     assert.match(result.message, /无法确认/);
     assert.match(result.message, /不要重试|重新搜索|重新读取/);
   }
+  // Draft writes go through the shared mail-card flow with the same guarantee.
+  const harness = createMainHarness(async () => {
+    throw new Error('Worker request timed out');
+  });
+  const draft = await harness.call('yahoo_mail', { action: 'draft', to: 'recipient@example.com', subject: 'Test', body_text: 'Draft',
+    session_context: { workdir_is_read_only: false } });
+  assert.equal(draft.ok, false);
+  assert.match(draft.message, /^\[unknown\]/);
+  const send = await harness.call('yahoo_mail', { action: 'send', to: 'recipient@example.com', subject: 'Test', body_text: 'Message' });
+  assert.match(send.message, /^\[not_executed\]/);
 });
 
 test('状态取自 Cindy 持久存储，不依赖 Worker 是否仍在运行', async () => {
@@ -741,3 +750,7 @@ test('Worker 将认证、网络与频控错误转换成可行动文案', () => {
   assert.match(worker.humanizeError(new Error('SEND_UNCONFIRMED')), /已发送/);
   assert.match(worker.humanizeError(new Error('DRAFT_SAVE_UNCONFIRMED')), /草稿箱/);
 });
+
+// Shared common-mail-card adapter, exercised end to end with Cindy's SDK.
+import { runImapComposeSuite } from './imap-mail-compose.test.mjs';
+runImapComposeSuite('yahoo-mail', { email: 'user@yahoo.com', kv: { credentialSlot: 'a' }, secretKeys: ['yahoo_mail_app_password'], providerName: 'Yahoo Mail' });

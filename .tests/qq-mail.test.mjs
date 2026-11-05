@@ -144,7 +144,7 @@ test('manifest 声明 Cindy 持久凭证及其最小 Node 注入范围', () => {
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(Object.hasOwn(manifest, 'slots'), false);
-  assert.equal(manifest.minCindyVersion, '0.1.92');
+  assert.equal(manifest.minCindyVersion, '0.1.112');
   assert.equal(manifest.settingsHtml, 'settings.html');
   assert.equal(
     Object.hasOwn(manifest, 'settingsHeight'),
@@ -491,3 +491,7 @@ import '../qq-mail/tests/attachments.test.cjs';
 
 // Exercise search pagination and coverage boundaries in the per-plugin CI job.
 import '../qq-mail/tests/search.test.cjs';
+
+// Shared common-mail-card adapter, exercised end to end with Cindy's SDK.
+import { runImapComposeSuite } from './imap-mail-compose.test.mjs';
+runImapComposeSuite('qq-mail', { email: 'user@qq.com', secretKeys: ['qq_mail_authorization_code'], providerName: 'QQ 邮箱' });

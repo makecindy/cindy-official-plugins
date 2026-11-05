@@ -1,11 +1,11 @@
 {
   "schemaVersion": 3,
-  "minCindyVersion": "0.1.75",
+  "minCindyVersion": "0.1.112",
   "id": "outlook-mail",
   "name": "Outlook 邮箱",
-  "description": "搜索、阅读、发送、起草和整理 Outlook 与 Microsoft 365 邮件。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
+  "description": "搜索、阅读、起草、回复、发送和整理 Outlook 与 Microsoft 365 邮件；写信和回复使用 Cindy 可编辑草稿卡，发送前可撤销。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
   "whenToUse": "需要连接 Outlook、Hotmail、Live 或 Microsoft 365 企业邮箱，查询、阅读、发送、起草或整理邮件时使用，包括世纪互联中国区微软托管邮箱。",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -28,7 +28,7 @@
     },
     {
       "name": "outlook_mail",
-      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。",
+      "description": "搜索、阅读、起草、回复、转发、发送和整理邮件，列文件夹、标记已读／未读及移动。写信和回复先用 draft、reply_all（默认回复所有人，排除自己、重复地址和密送）、reply（仅回复发件人，用户明确要求时）或 forward 创建草稿，Cindy 会展示可编辑的草稿卡；get_draft/update_draft/delete_draft 读取、修改、删除草稿，send_draft 经 10 秒撤销倒计时发送最新卡片内容。不能直接 send。用户确认收件人和内容后才发送；发送成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；回答中引用返回的 web_url 链接。仅支持微软云端邮箱。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -37,12 +37,19 @@
             "enum": [
               "search",
               "read",
-              "send",
-              "draft",
               "list_folders",
               "mark_read",
               "mark_unread",
-              "move"
+              "move",
+              "draft",
+              "reply",
+              "reply_all",
+              "forward",
+              "get_draft",
+              "update_draft",
+              "send_draft",
+              "delete_draft",
+              "send"
             ]
           },
           "account": {
@@ -68,7 +75,7 @@
           },
           "subject": {
             "type": "string",
-            "description": "search：主题包含文字；send/draft：主题，允许空字符串。",
+            "description": "search：主题包含文字；draft/update_draft：主题，允许空字符串。",
             "maxLength": 998
           },
           "unread": {
@@ -99,7 +106,7 @@
           },
           "message_id": {
             "type": "string",
-            "description": "read/mark_read/mark_unread/move：原始邮件 ID。移动后使用返回的新 ID。"
+            "description": "read/mark_read/mark_unread/move/reply/reply_all/forward：原始邮件 ID。移动后使用返回的新 ID。"
           },
           "target_folder": {
             "type": "string",
@@ -107,7 +114,7 @@
           },
           "body_text": {
             "type": "string",
-            "description": "send/draft：纯文本正文，允许空字符串。请求总大小不超过 250 KB。",
+            "description": "draft/update_draft：纯文本正文；reply/reply_all/forward：引用上方的回复正文。允许空字符串，不能与 body_html 同时传。",
             "maxLength": 200000
           },
           "to": {
@@ -123,7 +130,7 @@
                 "maxItems": 100
               }
             ],
-            "description": "send/draft：to 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+            "description": "draft/update_draft/forward：to 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个；forward 至少需要 to。"
           },
           "cc": {
             "oneOf": [
@@ -138,7 +145,7 @@
                 "maxItems": 100
               }
             ],
-            "description": "send/draft：cc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+            "description": "draft/update_draft/forward：cc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个；forward 至少需要 to。"
           },
           "bcc": {
             "oneOf": [
@@ -153,11 +160,46 @@
                 "maxItems": 100
               }
             ],
-            "description": "send/draft：bcc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个。"
+            "description": "draft/update_draft/forward：bcc 邮箱地址数组或逗号／分号分隔文本，不带显示姓名。总收件人最多 100 个；forward 至少需要 to。"
+          },
+          "body_html": {
+            "type": "string",
+            "maxLength": 64000,
+            "description": "draft/update_draft/reply/reply_all/forward：HTML 正文片段（不含 html/head/body），回复时放在引用上方。不能与 body_text 同时传。"
+          },
+          "draft_id": {
+            "type": "string",
+            "description": "get_draft/update_draft/send_draft/delete_draft：draft、reply、reply_all、forward 返回的 draft_id。"
           }
         },
         "required": [
           "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "outlook_read_message",
+      "description": "只读读取 Outlook 网页邮件链接（含 cindy_account 绑定账号）用于 Cindy 原生阅读，返回当前邮件正文、附件及同一会话的邮件摘要。默认不标记已读；仅在用户明确打开或要求标记已读时传 markRead:true，只标记当前这封，返回 markReadResult.execution（not_executed/executed/unknown），unknown 时先在邮箱核对，不要直接重试。不修改草稿、不发送。展开会话中的其他邮件时读取其 url。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Outlook 网页邮件链接，例如 outlook_mail 返回的 web_url（https://outlook.office365.com/owa/?ItemID=…&cindy_account=…）。"
+          },
+          "account": {
+            "type": "string",
+            "description": "可选：outlook_accounts 返回的账号 ID；链接未绑定账号且连接了多个账号时必填。"
+          },
+          "markRead": {
+            "type": "boolean",
+            "description": "仅在用户明确打开邮件或要求标记已读时为 true；AI 读取和邻近预加载不传。"
+          }
+        },
+        "required": [
+          "url"
         ],
         "additionalProperties": false
       }
@@ -254,5 +296,24 @@
   },
   "setup": {
     "requires": []
+  },
+  "cindy": {
+    "media": [
+      "deposit"
+    ]
+  },
+  "agent": {},
+  "sessionContext": true,
+  "mail": true,
+  "mailReader": {
+    "tool": "outlook_read_message",
+    "hosts": [
+      "outlook.office365.com",
+      "outlook.office.com",
+      "outlook.live.com",
+      "outlook.cloud.microsoft",
+      "partner.outlook.cn"
+    ],
+    "markRead": true
   }
 }

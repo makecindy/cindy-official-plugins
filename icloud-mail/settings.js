@@ -259,22 +259,27 @@ var MESSAGES = {
     };
   }
 
+  // Same lock as main.js and Cindy's mail SDK, which keeps draft-card records in this KV.
   async function saveAccountState(email, credentialSlot) {
-    var current = await readJson('/kv');
-    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    data.email = email;
-    data.credentialSlot = credentialSlot;
-    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error(t('saveStateFailed'));
+    return navigator.locks.request('icloud-mail-kv', async function () {
+      var current = await readJson('/kv');
+      var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+      data.email = email;
+      data.credentialSlot = credentialSlot;
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+      if (!response.ok) throw new Error(t('saveStateFailed'));
+    });
   }
 
   async function clearAccountState() {
-    var current = await readJson('/kv');
-    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    delete data.email;
-    delete data.credentialSlot;
-    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error(t('clearStateFailed'));
+    return navigator.locks.request('icloud-mail-kv', async function () {
+      var current = await readJson('/kv');
+      var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+      delete data.email;
+      delete data.credentialSlot;
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+      if (!response.ok) throw new Error(t('clearStateFailed'));
+    });
   }
 
   async function saveAppSpecificPassword(credentialSlot, value) {

@@ -178,14 +178,9 @@ test('long read reports explicit truncation',async()=>{
   const h=harness({reply:response({id:'m',body:{contentType:'text',content:'a'.repeat(50001)}})});
   const r=await h.call({action:'read',message_id:'m'});assert.equal(r.result.body.length,50000);assert.equal(r.result.body_truncated,true);
 });
-test('send returns accepted, not delivered, and preserves BCC/CC and Unicode',async()=>{
+test('send never sends directly; mail goes through a visible draft card (compose.test.mjs)',async()=>{
   const h=harness({reply:response(null,202)});const r=await h.call({...send,subject:'中文',body_text:'原文\n第二行',cc:['cc@example.test'],bcc:'secret@example.test'});
-  assert(r.ok);assert.equal(r.result.accepted,true);assert.equal(r.result.delivery_confirmed,false);assert.equal(h.requests.length,1);
-  const body=JSON.parse(h.requests[0].body);assert.equal(body.message.body.content,'原文\n第二行');assert.equal(body.message.bccRecipients[0].emailAddress.address,'secret@example.test');assert.equal(body.saveToSentItems,true);
-});
-test('draft permits empty recipients/subject/body and never calls sendMail',async()=>{
-  const h=harness({reply:response({id:'draft1',isDraft:true},201)});const r=await h.call({action:'draft',subject:'',body_text:''});assert(r.ok);
-  assert.equal(h.requests[0].url,ctx.base+'/me/messages');assert.equal(JSON.parse(h.requests[0].body).body.content,'');assert.equal(r.result.message.is_draft,true);
+  assert.equal(r.ok,false);assert.equal(r.errorCode,'SEND_REQUIRES_DRAFT');assert.match(r.message,/execution_status=not_executed/);assert.equal(h.requests.length,0);
 });
 test('read/unread patches only isRead',async()=>{
   for(const action of ['mark_read','mark_unread']){const h=harness({reply:response({id:'m',isRead:action==='mark_read'})});await h.call({action,message_id:'m'});
@@ -227,17 +222,17 @@ test('OData pagination cannot switch user, collection, origin or operation',asyn
   }
 });
 test('write transport failures and 5xx never retry and declare unknown',async()=>{
-  for(const action of ['send','draft','mark_read','mark_unread','move'])for(const reply of [new Error('private upstream stack'),{ok:false,message:'token=secret'},response({error:{message:'private'}},503)]){
+  for(const action of ['mark_read','mark_unread','move'])for(const reply of [new Error('private upstream stack'),{ok:false,message:'token=secret'},response({error:{message:'private'}},503)]){
     const h=harness({reply});const r=await h.call(mutation(action));assert(!r.ok);assert.match(r.message,/execution_status=unknown/);assert.equal(h.requests.length,1);assert.doesNotMatch(r.message,/private|secret/);
   }
 });
 test('Graph rejections distinguish not executed and have recovery guidance',async()=>{
   for(const status of [400,401,403,404,429]){
-    const h=harness({reply:response({error:{code:'ErrorAccessDenied',message:'private'}},status)});const r=await h.call(send);assert(!r.ok);assert.match(r.message,/not_executed/);assert.equal(h.requests.length,1);assert.doesNotMatch(r.message,/private/);
+    const h=harness({reply:response({error:{code:'ErrorAccessDenied',message:'private'}},status)});const r=await h.call(mutation('mark_read'));assert(!r.ok);assert.match(r.message,/not_executed/);assert.equal(h.requests.length,1);assert.doesNotMatch(r.message,/private/);
   }
 });
 test('successful malformed write response is executed, never claimed unsent',async()=>{
-  const h=harness({reply:{ok:true,status:201,body:'bad json'}});const r=await h.call({action:'draft',subject:'t',body_text:'b'});assert(!r.ok);assert.match(r.message,/execution_status=executed/);assert.equal(h.requests.length,1);
+  const h=harness({reply:{ok:true,status:201,body:'bad json'}});const r=await h.call(mutation('move'));assert(!r.ok);assert.match(r.message,/execution_status=executed/);assert.equal(h.requests.length,1);
 });
 test('truncated reads are errors, not silently incomplete successful data',async()=>{
   const h=harness({reply:response({value:[]},200,{truncated:true})});const r=await h.call({action:'search'});assert.equal(r.errorCode,'INVALID_RESPONSE');
@@ -266,7 +261,7 @@ test('local account state failure is known not executed and does not expose raw 
   assert.equal(r.errorCode,'LOCAL_STATE_FAILED');assert.match(r.message,/not_executed/);assert.doesNotMatch(r.message,/private/);assert.equal(h.requests.length,0);
 });
 test('every accepted but malformed mutation preserves executed and prohibits blind retry',async()=>{
-  for(const action of ['draft','mark_read','mark_unread','move']) {
+  for(const action of ['mark_read','mark_unread','move']) {
     for(const reply of [{ok:true,status:201,body:'bad json'},response({id:'m'},200,{truncated:true}),response({},200)]) {
       const h=harness({reply});const r=await h.call(mutation(action));
       assert.equal(r.ok,false);assert.match(r.message,/execution_status=executed/);
@@ -286,7 +281,7 @@ test('four settings locales contain the same translated UI keys',()=>{
 
 test('invalid Host response status never reports a write as definitely unexecuted',async()=>{
   for(const status of [undefined,0,'200',999]){
-    const h=harness({reply:{ok:true,status,body:'{}'}});const r=await h.call(send);
+    const h=harness({reply:{ok:true,status,body:'{}'}});const r=await h.call(mutation('mark_read'));
     assert.equal(r.ok,false);assert.match(r.message,/execution_status=unknown/);assert.equal(h.requests.length,1);
   }
 });
@@ -365,7 +360,7 @@ test('four runtime locales cover identical message keys and placeholders',()=>{
 test('every message key used by main.js exists, and every table key is used',()=>{
   const {MESSAGES}=harness().M;
   const used=new Set([
-    ...[...source.matchAll(/\b(?:invalid|t)\('(\w+)'/g)].map(m=>m[1]),
+    ...[...source.matchAll(/\b(?:invalid|t|fail)\('(\w+)'/g)].map(m=>m[1]),
     ...[...source.matchAll(/MailError\('\w+',\s*(?:write \? )?'(\w+)'(?: : '(\w+)')?/g)].flatMap(m=>m.slice(1).filter(Boolean)),
     ...[...source.matchAll(/return '(\w+)';/g)].map(m=>m[1]),
     ...[...source.matchAll(/'(\w+)' : undefined/g)].map(m=>m[1]),
@@ -410,14 +405,15 @@ test('zh-CN runtime output is byte-identical to the previous hardcoded strings',
     [{reply:new Error('x')},{action:'search'},notExecuted('连接中断；请检查网络后重试。')],
     [{reply:{ok:false}},{action:'search'},notExecuted('主机未能完成请求；请检查账号授权和网络后重试。')],
     [{reply:response({x:1})},{action:'search'},notExecuted('微软返回的列表不完整，请重新查询。')],
-    [{reply:new Error('x')},send,'[execution_status=unknown] 操作结果不确定；请先检查邮箱中的实际状态，不要直接重复执行。'],
-    [{reply:{ok:true,status:201,body:'bad'}},{action:'draft',subject:'',body_text:''},'[execution_status=executed] 服务已接受操作，但结果未能完整返回；请先检查邮箱中的实际状态，不要直接重复执行。'],
+    [{reply:new Error('x')},mutation('mark_read'),'[execution_status=unknown] 操作结果不确定；请先检查邮箱中的实际状态，不要直接重复执行。'],
+    [{reply:{ok:true,status:201,body:'bad'}},mutation('move'),'[execution_status=executed] 服务已接受操作，但结果未能完整返回；请先检查邮箱中的实际状态，不要直接重复执行。'],
+    [{},{action:'draft',subject:'',body_text:''},notExecuted('当前 Cindy 版本不支持邮件草稿卡片，请更新 Cindy 后再创建、修改或发送草稿。')],
   ];
   for(const [options,args,expected] of cases){
     const r=await harness(options).call(args);assert.equal(r.message,expected,JSON.stringify(args).slice(0,80));
   }
   assert.equal((await harness().tool('outlook_unknown')).message,notExecuted('未知邮件工具，请重新获取插件工具清单。'));
-  assert.equal((await harness({reply:response(null,202)}).call(send)).result.note,'微软已接受发送请求；不代表收件人已收到邮件。');
+  assert.equal((await harness({reply:response(null,202)}).call(send)).message,notExecuted('不能直接发送。请先用 draft、reply、reply_all 或 forward 创建草稿并展示卡片，再用 send_draft 发送；发送前有 10 秒撤销时间。'));
   assert.equal((await harness({reply:response({id:'new'},201)}).call({action:'move',message_id:'old',target_folder:'t'})).result.note,'后续操作请使用返回的新 ID。');
 });
 test('English is used for unsupported, missing or failed host locales',async()=>{
@@ -495,8 +491,7 @@ test('Japanese and Korean hosts receive their own validation, account and Graph 
     assert.equal(r.errorCode,'GRAPH_REQUEST_FAILED');assert.equal(r.message,notExecuted(T.httpOther.replace('{status}','418')));
     h=harness({locale:lang,reply:response({error:{code:'MailboxNotEnabledForRESTAPI'}},404)});r=await h.call({action:'search'});
     assert.equal(r.message,notExecuted(T.mailboxNotEnabled));
-    h=harness({locale:lang,reply:response(null,202)});r=await h.call(send);assert(r.ok);assert.equal(r.result.note,T.sendAccepted);
-    assert.equal(r.result.execution_status,'executed');assert.equal(r.result.delivery_confirmed,false);
+    h=harness({locale:lang,reply:response(null,202)});r=await h.call(send);assert.equal(r.message,notExecuted(T.sendRequiresDraft));assert.equal(h.requests.length,0);
     h=harness({locale:lang,reply:response({id:'new'},201)});r=await h.call({action:'move',message_id:'old',target_folder:'t'});assert.equal(r.result.note,T.moveNote);
   }
 });
@@ -525,13 +520,13 @@ test('uncertain write outcomes say check the mailbox first and never retry, in e
     for(const key of ['interruptedWrite','hostFailedWrite','unknownSuffix','incompleteWrite','outcomeUnknown','outcomeExecuted']){
       assert.match(T[key],rule.check,lang+'.'+key);assert.match(T[key],rule.noRepeat,lang+'.'+key);assert.doesNotMatch(T[key],rule.retry,lang+'.'+key);
     }
-    assert.doesNotMatch(T.unexpectedSend,rule.retry,lang);
-    for(const action of ['send','draft','mark_read','mark_unread','move'])for(const reply of [new Error('private'),{ok:false},response({},503)]){
+    for(const key of ['draftSavedMismatch','draftSavedUnverified','partialSave','markReadUnknown'])assert.doesNotMatch(T[key],rule.retry,lang+'.'+key);
+    for(const action of ['mark_read','mark_unread','move'])for(const reply of [new Error('private'),{ok:false},response({},503)]){
       const h=harness({locale:lang,reply});const r=await h.call(mutation(action));
       assert.equal(r.message,'[execution_status=unknown] '+T.outcomeUnknown);assert.equal(h.requests.length,1);
     }
     for(const reply of [{ok:true,status:201,body:'bad json'},response({},200)]){
-      const h=harness({locale:lang,reply});const r=await h.call(mutation('draft'));
+      const h=harness({locale:lang,reply});const r=await h.call(mutation('move'));
       assert.equal(r.message,'[execution_status=executed] '+T.outcomeExecuted);assert.equal(h.requests.length,1);
     }
   }

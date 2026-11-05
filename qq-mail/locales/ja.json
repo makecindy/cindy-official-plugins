@@ -7,7 +7,7 @@
       "description": "QQメールが設定済みか確認します。メールアドレスと接続状態だけを返し、認証コードは返しません。"
     },
     "qq_mail": {
-      "description": "QQ Mail の IMAP/SMTP 検索とメール操作。send/draft の attachment_paths は明示的に許可された Cindy 実行端末の絶対パスのみ。通常ファイル最大10個、合計32 MiB。元ファイルは変更せず、smtp.qq.com で送信、imap.qq.com で下書き保存。send/draft/read は添付名・バイト数・SHA-256 を返し、read はファイルをダウンロードしない。トップレベルの dir/attachments は使わない。送信・変更にはユーザーの明示的な依頼が必要。結果が不明なら再試行前にメールボックスを確認する。 read は本文と MIME を含むエンコード済みメールが 48 MiB を超えると拒否します。先に search が返す size を確認してください。 検索は1ページ最大20件。has_more=trueなら同じ条件とnext_page_tokenをpage_tokenとして続行。日時はreceived_atで厳密に判定し、日付のみはUTC+8。全文検索は漏れの可能性を明示。 全ページでcoverage_complete=trueかつhas_more=falseの場合のみ全件確認済みと判断してください。text_scope:metadataは復号済みの件名・送受信者のみを検索し、本文は読みません。"
+      "description": "QQ Mail の IMAP/SMTP 検索とメール操作。attachment_paths は明示的に許可された Cindy 実行端末の絶対パスのみ。通常ファイル最大10個（追加する添付は1件16 MiB、合計25 MiBまで）。元ファイルは変更せず、imap.qq.com の下書きに保存し、下書きカードのカウントダウン後にのみ smtp.qq.com で送信。read は添付名・バイト数・SHA-256 を返し、ファイルをダウンロードしない。トップレベルの dir/attachments は使わない。送信・変更にはユーザーの明示的な依頼が必要。結果が不明なら再試行前にメールボックスを確認する。 read は本文と MIME を含むエンコード済みメールが 48 MiB を超えると拒否します。先に search が返す size を確認してください。 検索は1ページ最大20件。has_more=trueなら同じ条件とnext_page_tokenをpage_tokenとして続行。日時はreceived_atで厳密に判定し、日付のみはUTC+8。全文検索は漏れの可能性を明示。 全ページでcoverage_complete=trueかつhas_more=falseの場合のみ全件確認済みと判断してください。text_scope:metadataは復号済みの件名・送受信者のみを検索し、本文は読みません。 作成は draft/reply/reply_all/forward（返信の既定は reply_all）。下書きは編集できる Cindy カードで表示されます。send_draft は10秒の取り消し可能なカウントダウン後にカードを送信し、ユーザーの確認後にのみ使います。直接送信は不可。"
     },
     "qq_mail_connect": {
       "description": "Cindy に安全に保存済みの IMAP/SMTP 認証コードで指定の QQ メールに接続します。imap.qq.com と smtp.qq.com を検証後、メールアドレスを保存します。認証コードは引数に渡さず、メールアドレスのみ指定してください。メールは送信しません。"
