@@ -13,9 +13,10 @@
      * @param {(clientX:number, clientY:number) => {x:number,y:number,
      *   xNorm:number,yNorm:number,inside:boolean}} [opts.mapClientPoint]
      */
-    constructor(screen, { mapClientPoint } = {}) {
+    constructor(screen, { mapClientPoint, mapScreenPoint } = {}) {
       this.screen = screen;
       this._mapClientPoint = mapClientPoint || null;
+      this._mapScreenPoint = mapScreenPoint || null;
       this._handlers = [];
       this._el = null;
     }
@@ -63,6 +64,20 @@
       const xNorm = r.width ? (clientX - r.left) / r.width : 0;
       const yNorm = r.height ? (clientY - r.top) / r.height : 0;
       return { x: xNorm * width, y: yNorm * height, xNorm, yNorm, inside: true };
+    }
+
+    // One projection path for both dispatch previews and 3D HUD positions.
+    _showFingers(points) {
+      if (!this.overlay) return;
+      const r = this._el.getBoundingClientRect();
+      const origin = this.overlay.host?.getBoundingClientRect?.() || r;
+      const {width,height} = this.screen.size;
+      this.overlay.setFingers(points.map(p => {
+        const bounded={x:Math.max(0,Math.min(width,p.x)),y:Math.max(0,Math.min(height,p.y))};
+        const client=this._mapScreenPoint?.(bounded.x,bounded.y) ||
+          {x:r.left+bounded.x/width*r.width,y:r.top+bounded.y/height*r.height};
+        return {x:client.x-origin.left,y:client.y-origin.top};
+      }));
     }
 
     /** Concrete sources wire their own listeners here via `this._on`. */

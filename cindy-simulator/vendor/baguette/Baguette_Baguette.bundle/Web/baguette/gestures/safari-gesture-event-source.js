@@ -10,8 +10,8 @@
   const MOVE_FLUSH_MS = 16;  // ~60 fps coalescing window
 
   class SafariGestureEventSource extends root.Baguette._AttachableEventSource {
-    constructor(screen, { overlay } = {}) {
-      super(screen);
+    constructor(screen, { overlay, mapClientPoint, mapScreenPoint } = {}) {
+      super(screen, { mapClientPoint, mapScreenPoint });
       this.overlay = overlay || null;
     }
 
@@ -41,10 +41,8 @@
         if (!width || !height) return;
         const r = this._el.getBoundingClientRect();
         const vx = e.clientX - r.left, vy = e.clientY - r.top;
-        const centreDev = {
-          x: (vx / r.width) * width,
-          y: (vy / r.height) * height,
-        };
+        const centreDev=this._screenPoint(e.clientX,e.clientY);
+        if(!centreDev.inside)return;
         state = {
           centreVx: vx, centreVy: vy,
           centreDev,
@@ -54,12 +52,7 @@
         const fingers = fingersFor(1, 0, centreDev, BASE_SPREAD_PT);
         state.fingers = fingers;
         this.screen.touchDown(fingers);
-        if (this.overlay) {
-          this.overlay.setFingers([
-            { x: vx + state.viewR, y: vy },
-            { x: vx - state.viewR, y: vy },
-          ]);
-        }
+        this._showFingers(fingers);
       });
 
       // Recompute the centroid from the event's clientX/Y on each
@@ -75,10 +68,7 @@
         const vx = e.clientX - r.left, vy = e.clientY - r.top;
         state.centreVx = vx;
         state.centreVy = vy;
-        state.centreDev = {
-          x: (vx / r.width) * width,
-          y: (vy / r.height) * height,
-        };
+        state.centreDev=this._screenPoint(e.clientX,e.clientY);
         state.viewR = (BASE_SPREAD_PT / width) * r.width;
       };
 
@@ -88,19 +78,12 @@
         updateCentre(e);
         const scale = e.scale || 1;
         const rotRad = ((e.rotation || 0) * Math.PI) / 180;
-        if (this.overlay) {
-          const vdx = Math.cos(rotRad) * state.viewR * scale;
-          const vdy = Math.sin(rotRad) * state.viewR * scale;
-          this.overlay.setFingers([
-            { x: state.centreVx + vdx, y: state.centreVy + vdy },
-            { x: state.centreVx - vdx, y: state.centreVy - vdy },
-          ]);
-        }
         const now = performance.now();
         if (now - state.lastMs < MOVE_FLUSH_MS) return;
         state.lastMs = now;
         state.fingers = fingersFor(scale, rotRad, state.centreDev, BASE_SPREAD_PT);
         this.screen.touchMove(state.fingers);
+        this._showFingers(state.fingers);
       });
 
       this._on(this._el, 'gestureend', (e) => {

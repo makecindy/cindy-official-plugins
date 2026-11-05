@@ -1,5 +1,20 @@
 # Vendored runtime evidence
 
+## Multi-contact projection parity 0.3.38 (2026-11-06)
+
+Local JavaScript patches only, on the existing verified Baguette v0.2.10 archive.
+`Screen`/`PointerInterpreter` pass forward and inverse mapping to every gesture
+source; the same projected contacts feed the HUD. `ScreenPieces.project` is the
+bilinear inverse counterpart used by both folded halves. 3D Interact creates a
+clipped lit-screen input surface with the existing `data-cindy-trackpad=contacts`
+host contract; Pose retains camera controls. Geometry updates resize that surface
+without rebinding active input, and fold/panel/orientation changes cancel contacts.
+No host API, privileged bridge, dependency version, native binary, endpoint,
+download, dynamic-code mechanism, credential handling or permission changed.
+The existing host opt-in is already declared on the controller HTML. Reproduction
+is recorded in `vendor-web.patch`; hashes are in `vendor-inventory.json`.
+Runtime/acceptance evidence and limits: `../docs/simulator-gesture-parity.md`.
+
 ## Interactive animation wait 0.3.9 (2026-10-29)
 
 New control sessions set the existing WDA animationCoolOffTimeout setting to zero before reporting ready. The default post-gesture quiescence wait blocks the main route queue also serving screenshots. Cindy's display-targeted viewport points now go directly into the existing synthesized touch path, avoiding an accessibility snapshot for each XCUICoordinate.screenPoint resolution. Other origins retain upstream resolution. This retains input completion/error handling, fresh display/bounds checks, gesture duration and explicit observation waits for Agent tools. The native source patch changes; the pinned archive is unchanged. No new endpoint, polling, cache or permission.

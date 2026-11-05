@@ -492,7 +492,7 @@
   }
 
   // Zoom, in percent of actual size (one device point per CSS pixel). `fitPct`
-  // is what "fit window" currently amounts to; unknown (3D stage) counts as 100.
+  // is what "fit window" currently amounts to; unknown geometry is provisional.
   const ZOOM_STEPS = [25, 33, 50, 67, 75, 100, 125, 150, 200, 300];
   function zoomStep(pct, direction) {
     const steps = direction > 0 ? ZOOM_STEPS : [...ZOOM_STEPS].reverse();

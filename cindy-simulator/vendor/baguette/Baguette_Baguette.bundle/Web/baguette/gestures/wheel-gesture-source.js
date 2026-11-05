@@ -8,8 +8,8 @@
   const WHEEL_IDLE_MS = 120; // wheel idle → close 2-finger
 
   class WheelGestureSource extends root.Baguette._AttachableEventSource {
-    constructor(screen, { overlay } = {}) {
-      super(screen);
+    constructor(screen, { overlay, mapClientPoint, mapScreenPoint } = {}) {
+      super(screen, { mapClientPoint, mapScreenPoint });
       this.overlay = overlay || null;
     }
 
@@ -30,11 +30,9 @@
         const { width, height } = this.screen.size;
         if (!width || !height) return;
         const r = this._el.getBoundingClientRect();
-        const vx = e.clientX - r.left, vy = e.clientY - r.top;
-        const centre = {
-          x: (vx / r.width) * width,
-          y: (vy / r.height) * height,
-        };
+        const centre=this._screenPoint(e.clientX,e.clientY);
+        if(!state&&!centre.inside)return;
+        const factor=e.deltaMode===1?16:e.deltaMode===2?r.height:1;
         const wantKind = e.ctrlKey ? 'pinch' : 'pan';
 
         if (!state || state.kind !== wantKind) {
@@ -49,7 +47,8 @@
         }
 
         if (state.kind === 'pinch') {
-          state.scale = Math.max(0.25, Math.min(6, state.scale * Math.exp(-e.deltaY / 200)));
+          const maxScale=Math.min(6,Math.max(centre.x,width-centre.x)/BASE_SPREAD_PT);
+          state.scale = Math.max(0.25, Math.min(maxScale, state.scale * Math.exp(-e.deltaY*factor / 200)));
           const rr = BASE_SPREAD_PT * state.scale;
           state.f1 = { x: centre.x + rr, y: centre.y };
           state.f2 = { x: centre.x - rr, y: centre.y };
@@ -61,9 +60,9 @@
             finger.y = Math.max(0, Math.min(height, finger.y));
           }
           const shiftX = Math.max(-Math.min(state.f1.x, state.f2.x),
-            Math.min(width - Math.max(state.f1.x, state.f2.x), (-e.deltaX / r.width) * width));
+            Math.min(width - Math.max(state.f1.x, state.f2.x), (this._screenPoint(e.clientX-e.deltaX*factor,e.clientY-e.deltaY*factor).x-centre.x)));
           const shiftY = Math.max(-Math.min(state.f1.y, state.f2.y),
-            Math.min(height - Math.max(state.f1.y, state.f2.y), (-e.deltaY / r.height) * height));
+            Math.min(height - Math.max(state.f1.y, state.f2.y), (this._screenPoint(e.clientX-e.deltaX*factor,e.clientY-e.deltaY*factor).y-centre.y)));
           state.f1.x += shiftX; state.f1.y += shiftY;
           state.f2.x += shiftX; state.f2.y += shiftY;
         }
@@ -76,14 +75,7 @@
         }));
         this.screen.touchMove(points);
 
-        if (this.overlay) {
-          // Draw the actual contacts for both pan and pinch; mirroring the
-          // first contact makes a parallel pan look like fingers spreading.
-          this.overlay.setFingers(points.map((finger) => ({
-            x: finger.x / width * r.width,
-            y: finger.y / height * r.height,
-          })));
-        }
+        this._showFingers(points);
 
         clearTimeout(state.idleTimer);
         state.idleTimer = setTimeout(close, WHEEL_IDLE_MS);

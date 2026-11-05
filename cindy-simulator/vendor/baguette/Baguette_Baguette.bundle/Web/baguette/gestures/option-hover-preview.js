@@ -13,8 +13,8 @@
   const BASE_SPREAD_PT = 80; // sim-pt for the pan preview's finger pair
 
   class OptionHoverPreview extends root.Baguette._AttachableEventSource {
-    constructor(screen, { overlay } = {}) {
-      super(screen);
+    constructor(screen, { overlay, mapClientPoint, mapScreenPoint } = {}) {
+      super(screen, { mapClientPoint, mapScreenPoint });
       this.overlay = overlay || null;
       this._optionHeld = false;
       this._shiftHeld = false;
@@ -33,22 +33,14 @@
       if (!this.overlay) return;
       if (this._dragActive) return;
       if (!this._optionHeld || !this._cursorInside) { this.overlay.clear(); return; }
-      const r = this._el.getBoundingClientRect();
-      const { width } = this.screen.size;
-      if (!width) return;
-      const pV = { x: r.width / 2, y: r.height / 2 };
-      if (this._shiftHeld) {
-        const dxPx = (BASE_SPREAD_PT / width) * r.width;
-        this.overlay.setFingers([
-          { x: pV.x + dxPx, y: pV.y },
-          { x: pV.x - dxPx, y: pV.y },
-        ]);
-      } else {
-        this.overlay.setFingers([
-          { x: this._cursorVx, y: this._cursorVy },
-          { x: 2 * pV.x - this._cursorVx, y: 2 * pV.y - this._cursorVy },
-        ]);
-      }
+      const {width,height}=this.screen.size;
+      if(!width||!height)return;
+      const centre={x:width/2,y:height/2};
+      const point=this._screenPoint(this._clientX,this._clientY);
+      if(!point.inside){this.overlay.clear();return;}
+      this._showFingers(this._shiftHeld ? [
+        {x:centre.x+BASE_SPREAD_PT,y:centre.y},{x:centre.x-BASE_SPREAD_PT,y:centre.y},
+      ] : [point,{x:width-point.x,y:height-point.y}]);
     }
 
     _bind() {
@@ -58,9 +50,7 @@
         this.overlay?.clear();
       };
       const updateCursor = (e) => {
-        const r = this._el.getBoundingClientRect();
-        this._cursorVx = e.clientX - r.left;
-        this._cursorVy = e.clientY - r.top;
+        this._clientX=e.clientX;this._clientY=e.clientY;
       };
       this._on(this._el, 'mousemove', (e) => {
         updateCursor(e); this._cursorInside = true;
