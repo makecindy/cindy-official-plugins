@@ -323,5 +323,5 @@ test('checks keep only the latest run per name, carry required flags, and the pr
     reviews: { totalCount: 0, nodes: [] }, reviewThreads: { totalCount: 1 }, baseRef: { target: { oid: 'base-sha' } },
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [{ state: 'SUCCESS', count: 3 }, { state: 'QUEUED', count: 0 }] } } } }] },
   }, 'ahead', { args: ['--probe'] });
-  assert.deepEqual(probe, { status: 'OPEN false MERGEABLE head-sha  SUCCESS:3 ', remarks: '2 c2 0  1', base: 'base-sha' });
+  assert.deepEqual(probe, { status: 'OPEN false MERGEABLE head-sha  SUCCESS:3 ', remarks: '2 c2 0  1 0', base: 'base-sha' });
 });

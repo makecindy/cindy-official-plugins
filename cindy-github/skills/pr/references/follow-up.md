@@ -2,13 +2,38 @@
 
 Read this when debugging a follow-up, or before changing the schedule or the check. Day-to-day rounds only need SKILL.md.
 
-The schedule fires every 10 minutes. Each time, `scripts/pr-heartbeat-gate.mjs` runs first as the schedule's pre-run check:
+The schedule fires every 5 minutes (older schedules: every 10, switched by their next round). Each time, `scripts/pr-heartbeat-gate.mjs` runs first as the schedule's pre-run check:
 
 - **exit 0:** wake the agent in the bound task; the check's output, including the list of what happened, is attached to the prompt.
 - **exit 2:** skip this run. No model call, no tokens, nothing in the task.
 - **anything else:** the run is recorded as failed and the user is notified.
 
 Each check saves its decision, reason, detail and list as `lastResult`. The agent reads it with the read-only `--last-result --json`.
+
+## Pace: most firings end at once
+
+Before any GitHub call the check asks whether a look is due, from what its last look saw (`lib/follow-pacing.mjs`). A firing that is not due ends with `not-due`: no API call, no state change.
+
+| Stage | Looks |
+|---|---|
+| Fast: an unacknowledged update, a due defer or no-checks deadline, an open settle window | every firing |
+| Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
+| Idle | about every 10 minutes |
+| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | about every 30 minutes |
+| Quiet: a draft, or nothing changed for 6 hours | about every hour |
+
+**Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. `--triggered` does the same by hand; `--no-pacing` looks every time.
+
+## Batching: collect a push's feedback first
+
+After a new commit (one first seen while following, not the commit already there when following started), news that only bots and checks produced is held (`settling`) until every expected bot has answered on that commit, or 20 minutes after the commit was first seen:
+
+- **Expected bots:** bots that reviewed or reacted on this PR, plus bots that reviewed or reacted on other PRs of this repository in the last 14 days (`<owner>__<repo>.repo.json` in the state directory). Plain comment bots (deploy previews) are not waited for; neither is the agent's own account.
+- **Answered:** a review on the new commit, or a comment, thread comment or reaction from that bot since the commit was first seen (5 minutes of slack). Codex's 👍 counts: it means no suggestions.
+- **Not held:** comments or reviews from people, merge-queue problems, draft changes, merged or closed, and an update already released but not acknowledged.
+- **Checks are not waited for.** A failure that arrives while the agent works is folded in before its push.
+
+While a round settles the watch does not advance, so the held items and anything newer arrive together in one wake.
 
 ## Cost: a small question first
 
@@ -32,7 +57,7 @@ Not woken: pushes, checks starting or running, an unchanged failure, the agent's
 
 - **Comment limit:** after 10 updates in a row that bring only comments, the check asks the agent to stop following (`comment-limit`), which stops reply loops with bots. A push or any check, conflict or queue news resets the count.
 - **Defer:** `--defer <minutes>` acknowledges the round and asks for one more wake at that time if nothing happens first (`defer-expired`).
-- **Silence guard:** after 24 hours without waking the agent, one look at what the check cannot see (`silence-guard`).
+- **Silence guard:** after 24 hours without waking the agent, one look at what the check cannot see (`silence-guard`). Not while only a human approval or the merge is left (`waiting-human`): there is nothing for the agent to do, and any change is reported by the check itself.
 - **Truncated snapshot:** incomplete data never counts as "nothing changed"; the watch does not advance past it.
 
 ## Reliability rules
