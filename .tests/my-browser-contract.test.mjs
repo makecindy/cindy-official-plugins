@@ -20,6 +20,11 @@ test('content script listens for cross-tab preference changes',()=>{
   assert.match(content,/if\(videoTargetChanged&&videoSession\)reapplyVideoTarget\(nextVideoTarget\);/);
   assert.match(content,/function setVideoTarget\(value\)\{prefs\.videoTarget=value;reapplyVideoTarget\(value\);/);
   assert.match(content,/if\(translated\|\|translations\.size\)return;/);
+  // The first native-track read already runs the same-language check, so the
+  // automatic mark must exist when the session is created, not after showVideo returns.
+  assert.match(content,/const session=videoSession=\{src:media\.currentSrc,auto,/);
+  assert.match(content,/makePanel\(\);await showVideo\(true\);/);
+  assert.doesNotMatch(content,/videoSession\.auto=true/);
   assert.match(content,/removeListener\(onPreferencesChanged\)/);
 });
 

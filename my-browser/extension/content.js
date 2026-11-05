@@ -539,7 +539,7 @@
     try {
       if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){
         // X drops players scrolled far away. Picking another one would start paid translation nobody asked for.
-        if(site?.multi)close();else showVideo();
+        if(site?.multi)close();else showVideo(session.auto);
         return;
       }
       const youtube=youtubeSite;
@@ -632,7 +632,8 @@
     const captioned=v=>site.multi||!v.textTracks?0:[...v.textTracks].some(x=>x.kind==='subtitles'||x.kind==='captions')?0:1;
     return shown.filter(v=>area(v)>0).sort((a,b)=>captioned(a)-captioned(b)||Number(a.paused)-Number(b.paused)||area(b)-area(a))[0]||shown[0]||all[0];
   }
-  async function showVideo(){
+  // auto marks a session the page started on its own; the first caption read already checks the language with it.
+  async function showVideo(auto=false){
     clear('video');video=requestedMedia?.isConnected?requestedMedia:pickMedia();requestedMedia=null;
     // The player lives in an embedded frame, which runs its own copy of this script.
     if(!video&&document.querySelector(embeddedPlayers)){
@@ -645,7 +646,7 @@
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
     const media=video;
     if(cueMedia!==media||media.currentSrc!==cueMediaSource){cues=[];cueMedia=media;cueMediaSource=media.currentSrc;}
-    cues=[];const session=videoSession={src:media.currentSrc,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0};
+    cues=[];const session=videoSession={src:media.currentSrc,auto,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0};
     session.retry=async()=>{if(!subtitleSegmentation||!subtitleEditorial)await configure();session.retryButton.hidden=true;for(const chunk of session.chunks||[]){delete chunk.error;delete chunk.recovery;delete chunk.retryAt;delete chunk.retries;}session.failed=false;session.paused=false;session.attempts=0;session.nextRead=0;session.readBlocked=false;clearTimeout(videoTimer);return readCues(session);};
     // A manually opened player session is restorable on every supported site,
     // including YouTube when automatic opening is disabled. An X feed is the
@@ -770,7 +771,7 @@
     }
     autoOpening=true;nextAutoAttempt=Date.now()+5000;
     // Translate a page automatically once per address: restoring the original stays restored.
-    try{await configure();if(prefs.autoSites[location.origin]===true){nextAutoAttempt=Infinity;if(autoTranslatedURL!==location.href){autoTranslatedURL=location.href;await togglePage();}}else if(youtube&&prefs.autoVideo){makePanel();await showVideo();if(videoSession)videoSession.auto=true;}}catch{}finally{autoOpening=false;}
+    try{await configure();if(prefs.autoSites[location.origin]===true){nextAutoAttempt=Infinity;if(autoTranslatedURL!==location.href){autoTranslatedURL=location.href;await togglePage();}}else if(youtube&&prefs.autoVideo){makePanel();await showVideo(true);}}catch{}finally{autoOpening=false;}
   }
   if(!inFrame)sendMessage({type:'cindy-agent-tab'}).then(r=>{if(r?.opened)showOpenedMark();}).catch(()=>{});
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
