@@ -11,7 +11,7 @@ import {generateKeyPairSync,createHash} from 'node:crypto';
 import {createLearningService} from '../my-browser/learning-service.js';
 const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'../my-browser');
 const {createBridge}=require('../my-browser/node/bridge.cjs'),core=require('../my-browser/extension/learning-core.js');
-test('Chrome reading: compact UI, independent subtitle modes/languages, auto YouTube, buffer, PDF/OCR',{skip:!process.env.PLAYWRIGHT_CORE,timeout:120000},async t=>{
+test('Chrome reading: compact UI, independent subtitle modes/languages, auto video, buffer',{skip:!process.env.PLAYWRIGHT_CORE,timeout:120000},async t=>{
  const {chromium}=require(process.env.PLAYWRIGHT_CORE),profile=await fs.mkdtemp(path.join(os.tmpdir(),'cindy-learning-'));let context,bridge;
  t.after(async()=>{await context?.close();await bridge?.close();await fs.rm(profile,{recursive:true,force:true,maxRetries:3});});
  const extension=path.join(profile,'extension');await fs.cp(path.join(root,'extension'),extension,{recursive:true});
@@ -60,9 +60,11 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  async function waitText(text){for(let i=0;i<70&&!(await panelText()).includes(text);i++)await page.waitForTimeout(100);assert.ok((await panelText()).includes(text),'missing '+text);}
  async function summary(label){const r=await readNode('SUMMARY',label,'function(){this.scrollIntoView({block:"nearest"});const r=this.getBoundingClientRect();return {x:r.x+12,y:r.y+r.height/2}}');await page.mouse.click(r.x,r.y);}
  async function appearance(){return readNode('SECTION','Cindy','function(){const s=getComputedStyle(this);return {width:this.getBoundingClientRect().width,color:s.color,background:s.backgroundColor,theme:this.dataset.theme}}');}
- assert.equal((await appearance()).width,336);assert.equal((await appearance()).theme,'light');
+ const lightCard='rgb(255, 255, 255)',darkCard='rgb(44, 44, 42)';
+ assert.equal((await appearance()).width,336);assert.equal((await appearance()).background,lightCard);assert.equal((await appearance()).theme,undefined,'no stored appearance override');
  assert.doesNotMatch(await panelText(),/"nodeValue":"(?:口语|收藏)"/);
- await page.emulateMedia({colorScheme:'dark'});assert.equal((await appearance()).theme,'light');
+ // The panel follows the system appearance, not the page's own colors.
+ await page.emulateMedia({colorScheme:'dark'});assert.equal((await appearance()).background,darkCard);await page.emulateMedia({colorScheme:'light'});assert.equal((await appearance()).background,lightCard);
  await page.addStyleTag({content:'html{--text:red;--surface:red;font:32px serif;color:red}html>div{font:40px serif!important;color:black!important;background:red!important;position:static!important;width:900px!important}'});
  assert.equal((await appearance()).color,'rgb(38, 38, 38)');assert.equal((await appearance()).width,336);
  if(screenshots)await page.screenshot({path:path.join(screenshots,'web-light.png')});
@@ -73,10 +75,10 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'selection'}),tabId);await waitText('译文：Hello world');assert.doesNotMatch(await panelText(),/"nodeValue":"收藏"/);
  await click('解释');await waitText('这是结合上下文的解释。');await click('关闭');
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'settings'}),tabId);
- await waitText('在「模型与任务」中修改');
- await readNode('SELECT','外观','function(){this.value="dark";this.dispatchEvent(new Event("change"))}');assert.equal((await appearance()).theme,'dark');
+ await waitText('为 Cindy Chrome 选择的模型');assert.doesNotMatch(await panelText(),/"nodeValue":"外观"/);
+ await page.emulateMedia({colorScheme:'dark'});assert.equal((await appearance()).background,darkCard);
  if(screenshots)await page.screenshot({path:path.join(screenshots,'settings-dark.png')});
- await readNode('SELECT','外观','function(){this.value="light";this.dispatchEvent(new Event("change"))}');await click('返回');
+ await page.emulateMedia({colorScheme:'light'});await click('返回');
  const wav=Buffer.alloc(44+8000*2*3);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
  await page.evaluate(async data=>{const v=document.querySelector('video');v.src='data:audio/wav;base64,'+data;await new Promise(r=>v.onloadedmetadata=r);const track=v.addTextTrack('captions','English','en');track.mode='showing';track.addCue(new VTTCue(0,.4,'First'));track.addCue(new VTTCue(.4,1,'subtitle'));track.addCue(new VTTCue(1,1.4,'and I think'));track.addCue(new VTTCue(1.4,1.7,'you can relate'));track.addCue(new VTTCue(1.7,2,'to this,'));v.currentTime=1.4},wav.toString('base64'));
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'video'}),tabId);await waitText('而且我觉得你也能对此产生共鸣，');
@@ -172,7 +174,7 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  const beforeMenu=modelCalls.length;await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'open'}),tabId);assert.equal((await captions()).settingsHidden,false);assert.equal(modelCalls.length,beforeMenu,'opening player settings keeps prepared subtitles');await click('字幕设置');
  await click('字幕设置');await page.getByRole('switch',{name:'Cindy 字幕'}).click();const beforeOriginal=modelCalls.length;
  await page.evaluate(()=>{history.pushState({},'', '/watch?v=second');document.dispatchEvent(new Event('yt-navigate-finish'))});await page.waitForTimeout(2500);assert.equal(modelCalls.length,beforeOriginal);assert.equal((await captions()).hidden,true);assert.equal((await captions()).settingsHidden,true);
- await click('字幕设置');await page.getByRole('switch',{name:'Cindy 字幕'}).click();await click('选项');await click('自动应用到 YouTube');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','自动应用到 YouTube','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
+ await click('字幕设置');await page.getByRole('switch',{name:'Cindy 字幕'}).click();await click('选项');await click('打开视频时自动开启字幕');await page.waitForTimeout(100);assert.equal(await readNode('BUTTON','打开视频时自动开启字幕','function(){return this.getAttribute("aria-checked")}'),'false');assert.equal(await worker.evaluate(async()=> (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences.autoVideo),false);
  await page.goto('http://www.youtube.com/watch?v=third');await page.waitForTimeout(800);assert.equal(await page.locator('[data-cindy-captions]').count(),0,'auto preference survives navigation');
  // Slow requests: play current prepared window, prefetch next; seeking prioritizes the new place.
  await page.goto('http://example.test/buffer');await page.waitForTimeout(100);
@@ -185,12 +187,10 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await waitText('翻译任务执行中');assert.equal(await readNode('DIV','preparation-track','function(){return this.getAttribute("aria-valuenow")}'),'0');
  if(screenshots){
    await page.screenshot({path:path.join(screenshots,'subtitle-progress-waiting.png')});
-   await click('模型设置');
-   await readNode('SELECT','外观','function(){this.value="dark";this.dispatchEvent(new Event("change"))}');
+   await page.emulateMedia({colorScheme:'dark'});
    assert.equal(await readNode('DIV','caption-notice','function(){return getComputedStyle(this).backgroundColor}'),'rgb(31, 31, 30)');
-   await click('返回');await page.screenshot({path:path.join(screenshots,'subtitle-progress-dark.png')});
-   await click('模型设置');
-   await readNode('SELECT','外观','function(){this.value="light";this.dispatchEvent(new Event("change"))}');await click('返回');
+   await page.screenshot({path:path.join(screenshots,'subtitle-progress-dark.png')});
+   await page.emulateMedia({colorScheme:'light'});
  }
  assert.deepEqual(prefetchStarted,['Buffer0','Buffer180']);assert.equal(await page.locator('video').evaluate(v=>v.paused),true);
  prefetchGates.get('Buffer0')();for(let i=0;i<40&&await page.locator('video').evaluate(v=>v.paused);i++)await page.waitForTimeout(100);assert.equal(await page.locator('video').evaluate(v=>v.paused),false);
@@ -217,18 +217,6 @@ test('Chrome reading: compact UI, independent subtitle modes/languages, auto You
  await page.evaluate(async()=>{const v=document.querySelector('video'),track=v.textTracks[0];for(const c of [...track.cues])track.removeCue(c);track.addCue(new VTTCue(0,2.8,'UnavailableSubtitle'));v.currentTime=.2;await v.play();});
  await waitText('(INTERNAL)');if(screenshots)await page.screenshot({path:path.join(screenshots,'subtitle-progress-error.png')});assert.equal(await page.locator('video').evaluate(v=>v.paused),false,'failed translation cannot strand the buffering pause');
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'close'}),tabId);
- const reader=await context.newPage();await reader.goto('chrome-extension://'+extensionId+'/library.html');await reader.getByRole('button',{name:'打开 PDF / 文本 / Markdown'}).waitFor();assert.equal(await reader.getByRole('button',{name:'收藏',exact:true}).count(),0);
- const ocr=await reader.evaluate(async()=>{const {createOCR}=await import('./ocr.js');const c=document.createElement('canvas');c.width=1000;c.height=180;const x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,c.width,c.height);x.fillStyle='black';x.font='60px Arial';x.fillText('CINDY READING TEST',25,100);const o=createOCR();try{return await o.recognize(c,'eng')}finally{o.close()}});assert.match(ocr,/CINDY READING TEST/);
- const printPage=await context.newPage();await printPage.setContent('<h1>Cindy PDF reading</h1><p>Hello from the PDF text layer.</p>');const pdf=await printPage.pdf();await printPage.close();const choosing=reader.waitForEvent('filechooser');await reader.getByRole('button',{name:'打开 PDF / 文本 / Markdown'}).click();await(await choosing).setFiles({name:'fixture.pdf',mimeType:'application/pdf',buffer:pdf});await reader.locator('canvas').waitFor();await reader.getByText('1 / 1',{exact:true}).waitFor();await worker.evaluate(()=>{const original=globalThis.fetch;let dropped=false;globalThis.fetch=(...args)=>{if(!dropped&&String(args[0]).endsWith('/learning/result')){dropped=true;return Promise.reject(new TypeError('fixture lost response'));}return original(...args);};});
- await reader.getByRole('button',{name:'翻译',exact:true}).last().click();await reader.getByText('译文：Hello from the PDF text layer.',{exact:false}).waitFor();
- assert.equal(modelCalls.filter(r=>JSON.parse(r.prompt.split('\n').at(-1)).texts?.includes('Hello from the PDF text layer.')).length,1,'a lost result poll never resubmits the model request');
- // Finish a slow old PDF after a new text file is selected: its UI must stay detached.
- await reader.evaluate(()=>{const original=File.prototype.arrayBuffer;File.prototype.arrayBuffer=async function(){if(this.name==='slow.pdf')await new Promise(r=>setTimeout(r,400));return original.call(this);};});
- const chooseFile=async file=>{const choosing=reader.waitForEvent('filechooser');await reader.getByRole('button',{name:'打开 PDF / 文本 / Markdown'}).click();await(await choosing).setFiles(file);};
- await chooseFile({name:'slow.pdf',mimeType:'application/pdf',buffer:pdf});
- await chooseFile({name:'latest.txt',mimeType:'text/plain',buffer:Buffer.from('Latest reader document')});await reader.waitForTimeout(700);
- assert.equal(await reader.locator('textarea').inputValue(),'Latest reader document');assert.equal(await reader.locator('canvas').count(),0);
- if(screenshots)await reader.screenshot({path:path.join(screenshots,'pdf.png')});
  // Real extension reload: old content scripts remain in SPA documents but their
  // APIs are invalid. They must release the player and stop URL polling quietly.
  await worker.evaluate(id=>chrome.tabs.sendMessage(id,{type:'cindy-ui',action:'video'}),tabId);

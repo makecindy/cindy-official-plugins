@@ -2,18 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-const source=await fs.readFile(new URL('../my-browser/extension/library.js',import.meta.url),'utf8');
 const content=await fs.readFile(new URL('../my-browser/extension/content.js',import.meta.url),'utf8');
-const pdf=await fs.readFile(new URL('../my-browser/extension/reader-pdf.js',import.meta.url),'utf8');
 const bridge=await fs.readFile(new URL('../my-browser/node/bridge.cjs',import.meta.url),'utf8');
 const background=await fs.readFile(new URL('../my-browser/extension/background.js',import.meta.url),'utf8');
 const settings=await fs.readFile(new URL('../my-browser/settings.js',import.meta.url),'utf8');
-
-test('text reader bounds total translation work before sending model requests',()=>{
-  assert.match(source,/MAX_TEXT_TRANSLATION_PARTS=100/);
-  assert.match(source,/MAX_TEXT_TRANSLATION_CHARS=200000/);
-  assert.match(source,/parts\.some\(part=>part\.length>MAX_TEXT_TRANSLATION_PART\)\)throw Error\('IMPORT_TOO_LARGE'\)/);
-});
 
 test('content script listens for cross-tab preference changes',()=>{
   assert.match(content,/storage\?\.onChanged\?\.addListener\(onPreferencesChanged\)/);
@@ -22,19 +14,24 @@ test('content script listens for cross-tab preference changes',()=>{
   assert.match(content,/Object\.assign\(prefs,merged\)/);
   assert.match(content,/autoSites:\{\[location\.origin\]:value\?true:undefined\}/);
   assert.match(content,/const videoWasEnabled=previous\.autoVideo!==false,videoIsEnabled=stored\.autoVideo!==false/);
-  assert.match(content,/const relevantEnable=youtube\?!videoWasEnabled&&videoIsEnabled:!siteWasEnabled&&siteIsEnabled/);
+  assert.match(content,/const relevantEnable=youtube&&!videoWasEnabled&&videoIsEnabled\|\|!siteWasEnabled&&siteIsEnabled/);
   assert.match(content,/if\(relevantEnable\)\{nextAutoAttempt=0;if\(!videoSession\)autoOpen\(\);\}/);
   assert.match(content,/const videoTargetChanged=nextVideoTarget!==prefs\.videoTarget/);
   assert.match(content,/if\(videoTargetChanged&&videoSession\)reapplyVideoTarget\(nextVideoTarget\);/);
   assert.match(content,/function setVideoTarget\(value\)\{prefs\.videoTarget=value;reapplyVideoTarget\(value\);/);
-  assert.match(content,/if\(!youtube&&\(translated\|\|translations\.size\)\)return;/);
+  assert.match(content,/if\(translated\|\|translations\.size\)return;/);
+  // The first native-track read already runs the same-language check, so the
+  // automatic mark must exist when the session is created, not after showVideo returns.
+  assert.match(content,/const session=videoSession=\{src:media\.currentSrc,auto,/);
+  assert.match(content,/makePanel\(\);await showVideo\(true\);/);
+  assert.doesNotMatch(content,/videoSession\.auto=true/);
+  // Every caption source runs the same-language check before its cues are merged
+  // (an imported file is the reader's own choice), and switching sources forgets the old judgment.
+  const merges=[...content.matchAll(/([^;{}]*;)mergeCues\(/g)].map(m=>m[1]);
+  assert.equal(merges.length,4);
+  for(const before of merges)assert.match(before,/^(checkSameLanguage\(session,(track|result)\.language\)|session\.sameLanguage=false);$/);
+  assert.match(content,/function dropTimeline\(session\)\{session\.languageChecked=false;session\.sameLanguage=false;session\.language=null;/);
   assert.match(content,/removeListener\(onPreferencesChanged\)/);
-});
-
-test('PDF reader bounds page translation before sending model requests',()=>{
-  assert.match(pdf,/MAX_TRANSLATION_BATCHES=20/);
-  assert.match(pdf,/MAX_TRANSLATION_CHARS=200000/);
-  assert.match(pdf,/batches\.length>MAX_TRANSLATION_BATCHES\|\|totalCharacters>MAX_TRANSLATION_CHARS\)throw Error\('IMPORT_TOO_LARGE'\)/);
 });
 
 test('bridge learning access requires the paired extension challenge key and stays in the legacy port range',()=>{
