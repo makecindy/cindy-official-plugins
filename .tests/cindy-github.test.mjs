@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.4.1');
+  assert.equal(manifest.version, '1.4.2');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -793,6 +793,8 @@ test('to_latest moves the card to the current call and leaves one line where it 
   assert.equal(moved.reply.result.card_id, cardId);
   const stub = runtime.lastCard(cardId);
   assert.equal(stub.sourceCallId, moved.callId);
+  // Cindy hides the old place; versions that do not know supersededBy show the one-line stub instead.
+  assert.equal(stub.supersededBy, moved.callId);
   assert.deepEqual(visibleText(stub.html), [`#42 Built-in PR skill · ${zhCopy.prMovedBelow}`]);
   assert.doesNotMatch(stub.html, /data-ghost-action/);
   const latest = runtime.lastCard(moved.callId);
@@ -813,6 +815,28 @@ test('to_latest moves the card to the current call and leaves one line where it 
   // The stub is left alone, and the new place's id also finds the card.
   assert.equal(runtime.cards(cardId).length, 2);
   assert.equal((await runtime.tool({ card_id: moved.callId })).reply.result.card_id, cardId);
+});
+
+test('to_latest also moves a card that is still asking, with the new change summary', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', head: 'feat/pr-card', base: 'main', commits: 2, files_total: 4 })).reply.result.card_id;
+
+  // More commits landed after the first ask: the same card moves under the new reply.
+  const moved = await runtime.tool({ card_id: cardId, commits: 3, files_total: 6, to_latest: true });
+  assert.equal(moved.reply.result.card_id, cardId);
+  assert.equal(moved.reply.result.stage, 'ask');
+  const stub = runtime.lastCard(cardId);
+  assert.deepEqual(visibleText(stub.html), [`octo/repo · ${zhCopy.prMovedBelow}`]);
+  assert.doesNotMatch(stub.html, /data-ghost-action/);
+  const latest = runtime.lastCard(moved.callId);
+  assert.deepEqual(visibleText(latest.html), [zhCopy.prAskTitle, 'octo/repo', 'feat/pr-card → main · 3 个提交 · 6 个文件']);
+  assert.match(latest.html, /data-ghost-action="pr:publish"/);
+
+  // Open PR on the new place reaches the agent with the original card_id.
+  await runtime.click(moved.callId, 'pr:publish');
+  assert.equal(runtime.agentRuns.at(-1).event.card_id, cardId);
+  assert.equal(runtime.agentRuns.at(-1).event.action, 'publish');
+  assert.equal(runtime.lastCard(moved.callId).state, 'working');
 });
 
 test('card settings persist in /kv and become one-time todos once the PR exists', async () => {
