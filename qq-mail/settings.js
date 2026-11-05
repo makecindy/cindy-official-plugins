@@ -57,12 +57,15 @@
     return { connected: Boolean(email && secretSaved), email: email || null };
   }
 
+  // Same lock as main.js and Cindy's mail SDK, which keeps draft-card records in this KV.
   async function saveEmail(email) {
-    var current = await readJson('/kv');
-    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    data.email = email;
-    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error('保存 QQ 邮箱地址失败');
+    await navigator.locks.request('qq-mail-kv', async function () {
+      var current = await readJson('/kv');
+      var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+      data.email = email;
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+      if (!response.ok) throw new Error('保存 QQ 邮箱地址失败');
+    });
   }
 
   async function saveAuthorizationCode(value) {

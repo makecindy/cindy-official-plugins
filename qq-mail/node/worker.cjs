@@ -66093,6 +66093,927 @@ var require_mailparser = __commonJS({
   }
 });
 
+// src/mail-compose.cjs
+var require_mail_compose = __commonJS({
+  "src/mail-compose.cjs"(exports2, module2) {
+    "use strict";
+    var crypto = require("node:crypto");
+    var fs = require("node:fs/promises");
+    var { constants: fsConstants } = require("node:fs");
+    var path = require("node:path");
+    var addressparser = require_addressparser();
+    var MAX_FIELD = 16e3;
+    var MAX_HTML_FIELD = 64e3;
+    var MAX_NEW_FILE = 16 * 1024 * 1024;
+    var MAX_NEW_TOTAL = 25 * 1024 * 1024;
+    var MAX_PREVIEW_IMAGE = 16 * 1024 * 1024;
+    var MAX_PREVIEW_TOTAL = 25 * 1024 * 1024;
+    var MAX_AGENT_FILES = 10;
+    var DRAFT_SCAN_LIMIT = 500;
+    var EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
+    var DRAFT_ID_RE = /^<[^<>\s\0]{3,994}>$/;
+    var QUOTE_HTML_MARK = '<div class="cindy_quote"';
+    var QUOTE_TEXT_RE = /\r?\n\r?\n(?=On [^\r\n]{1,600} wrote:\r?\n|-{10} Forwarded message -{9}\r?\n)/;
+    var BLOCKQUOTE = '<blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">';
+    var MESSAGES = Object.freeze({
+      "zh-CN": {
+        fieldsInvalid: "\u8349\u7A3F\u5185\u5BB9\u4E0D\u5B8C\u6574\u6216\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650\uFF0C\u672A\u4FDD\u5B58\u3002",
+        headersInvalid: "\u6536\u4EF6\u4EBA\u3001\u6284\u9001\u3001\u5BC6\u9001\u6216\u4E3B\u9898\u683C\u5F0F\u4E0D\u6B63\u786E\uFF0C\u672A\u4FDD\u5B58\u3002",
+        recipientRequired: "\u8BF7\u81F3\u5C11\u586B\u5199\u4E00\u4E2A\u6536\u4EF6\u4EBA\uFF0C\u90AE\u4EF6\u672A\u53D1\u9001\u3002",
+        draftIdInvalid: "draft_id \u5FC5\u987B\u662F\u521B\u5EFA\u6216\u8BFB\u53D6\u8349\u7A3F\u65F6\u8FD4\u56DE\u7684 Message-ID\uFF08\u5F62\u5982 <id@example.test>\uFF09\u3002",
+        draftNotFound: "\u6CA1\u6709\u5728\u8349\u7A3F\u7BB1\u627E\u5230\u8FD9\u4EFD\u8349\u7A3F\uFF1B\u5B83\u53EF\u80FD\u5DF2\u88AB\u53D1\u9001\u3001\u5220\u9664\u6216\u5728\u5176\u4ED6\u8BBE\u5907\u4E0A\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u8349\u7A3F\u7BB1\u3002",
+        draftNoMessageId: "\u8FD9\u4EFD\u8349\u7A3F\u6CA1\u6709 Message-ID\uFF0C\u65E0\u6CD5\u5728\u5361\u7247\u4E2D\u7F16\u8F91\uFF1B\u8BF7\u5728\u90AE\u7BB1\u4E2D\u6253\u5F00\u5B83\u3002",
+        draftChanged: "\u8349\u7A3F\u5DF2\u5728\u90AE\u7BB1\u4E2D\u88AB\u4FEE\u6539\uFF0C\u8BF7\u6838\u5BF9\u6700\u65B0\u5185\u5BB9\u540E\u518D\u64CD\u4F5C\u3002",
+        notEditable: "\u8FD9\u4EFD\u8349\u7A3F\u7684\u683C\u5F0F\u65E0\u6CD5\u5728\u5361\u7247\u4E2D\u5B8C\u6574\u7F16\u8F91\uFF08\u4F8B\u5982\u7B7E\u540D\u6216\u52A0\u5BC6\u90AE\u4EF6\uFF09\uFF0C\u8BF7\u5728\u90AE\u7BB1\u4E2D\u5904\u7406\u3002",
+        attachmentListInvalid: "\u9644\u4EF6\u5217\u8868\u65E0\u6548\u6216\u5305\u542B\u672A\u77E5\u9644\u4EF6\uFF0C\u672A\u4FDD\u5B58\u3002",
+        attachmentUnreadable: "\u9644\u4EF6\u4E0D\u5B58\u5728\u3001\u65E0\u6CD5\u8BFB\u53D6\u3001\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u6216\u4E0E\u9009\u62E9\u65F6\u4E0D\u4E00\u81F4\uFF0C\u672A\u4FDD\u5B58\u3002",
+        attachmentTooLarge: "\u65B0\u589E\u9644\u4EF6\u5355\u4E2A\u4E0D\u80FD\u8D85\u8FC7 16 MiB\uFF0C\u5408\u8BA1\u4E0D\u80FD\u8D85\u8FC7 25 MiB\uFF0C\u672A\u4FDD\u5B58\u3002",
+        attachmentPathsInvalid: "attachment_paths \u987B\u4E3A\u672C\u673A\u6587\u4EF6\u7EDD\u5BF9\u8DEF\u5F84\u5217\u8868\uFF0C\u6BCF\u5C01\u6700\u591A 10 \u4E2A\u6587\u4EF6\u3002",
+        messageTooLarge: "\u90AE\u4EF6\u5185\u5BB9\u8FC7\u5927\uFF0C\u672A\u4FDD\u5B58\u3002",
+        sourceNotFound: "\u6CA1\u6709\u5728\u6307\u5B9A\u6587\u4EF6\u5939\u627E\u5230\u8981\u56DE\u590D\u6216\u8F6C\u53D1\u7684\u539F\u90AE\u4EF6\uFF0C\u8BF7\u91CD\u65B0\u641C\u7D22\u540E\u518D\u8BD5\u3002",
+        sourceRequired: "\u56DE\u590D\u6216\u8F6C\u53D1\u9700\u8981\u539F\u90AE\u4EF6\u7684 folder \u548C message_uid\u3002",
+        saveUnknown: "\u65E0\u6CD5\u786E\u8BA4\u8349\u7A3F\u662F\u5426\u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u5148\u67E5\u770B\u8349\u7A3F\u7BB1\uFF0C\u4E0D\u8981\u91CD\u590D\u4FDD\u5B58\u3002",
+        savedUnverified: "\u8349\u7A3F\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u672A\u80FD\u8BFB\u56DE\u6838\u5BF9\uFF1B\u8BF7\u5148\u8BFB\u53D6\u8349\u7A3F\u786E\u8BA4\uFF0C\u4E0D\u8981\u91CD\u590D\u521B\u5EFA\u3002",
+        savedMismatch: "\u8349\u7A3F\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u8BFB\u56DE\u5185\u5BB9\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4\uFF1B\u8BF7\u8BFB\u53D6\u8349\u7A3F\u6838\u5BF9\u540E\u518D\u53D1\u9001\u3002",
+        sendUnknown: "\u65E0\u6CD5\u786E\u8BA4\u90AE\u4EF6\u662F\u5426\u5DF2\u53D1\u51FA\uFF0C\u8BF7\u5148\u67E5\u770B\u300C\u5DF2\u53D1\u9001\u300D\u6587\u4EF6\u5939\uFF0C\u4E0D\u8981\u91CD\u590D\u53D1\u9001\u3002",
+        sendRejected: "\u90AE\u4EF6\u670D\u52A1\u5668\u62D2\u7EDD\u4E86\u5168\u90E8\u6536\u4EF6\u4EBA\uFF0C\u90AE\u4EF6\u672A\u53D1\u9001\u3002",
+        deleteUnknown: "\u65E0\u6CD5\u786E\u8BA4\u8349\u7A3F\u662F\u5426\u5DF2\u5220\u9664\uFF0C\u8BF7\u5148\u67E5\u770B\u8349\u7A3F\u7BB1\uFF0C\u4E0D\u8981\u91CD\u590D\u64CD\u4F5C\u3002",
+        readFailed: "\u65E0\u6CD5\u8BFB\u53D6\u8349\u7A3F\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002"
+      },
+      en: {
+        fieldsInvalid: "The draft is incomplete or exceeds the size limit. Nothing was saved.",
+        headersInvalid: "Invalid To, Cc, Bcc or Subject. Nothing was saved.",
+        recipientRequired: "Add at least one recipient. The message was not sent.",
+        draftIdInvalid: "draft_id must be the Message-ID returned when the draft was created or read (like <id@example.test>).",
+        draftNotFound: "This draft is no longer in the Drafts folder. It may have been sent, deleted or changed elsewhere; search Drafts again.",
+        draftNoMessageId: "This draft has no Message-ID and cannot be edited in the card. Open it in your mailbox.",
+        draftChanged: "The draft was changed in the mailbox. Review the latest version before continuing.",
+        notEditable: "This draft cannot be edited in full here (for example a signed or encrypted message). Handle it in your mailbox.",
+        attachmentListInvalid: "The attachment list is invalid or contains an unknown attachment. Nothing was saved.",
+        attachmentUnreadable: "An attachment is missing, unreadable, not a regular file or changed since it was selected. Nothing was saved.",
+        attachmentTooLarge: "New attachments are limited to 16 MiB each and 25 MiB in total. Nothing was saved.",
+        attachmentPathsInvalid: "attachment_paths must be a list of absolute local file paths, at most 10 per message.",
+        messageTooLarge: "The message is too large. Nothing was saved.",
+        sourceNotFound: "The message to reply to or forward was not found in that folder. Search again.",
+        sourceRequired: "Replying or forwarding needs the original message folder and message_uid.",
+        saveUnknown: "Could not confirm whether the draft was saved. Check the Drafts folder before saving again.",
+        savedUnverified: "The draft was saved but could not be read back. Read the draft before doing anything else; do not create it again.",
+        savedMismatch: "The draft was saved, but its read-back differs from what was expected. Read the draft and review it before sending.",
+        sendUnknown: "Could not confirm whether the message was sent. Check the Sent folder; do not send it again.",
+        sendRejected: "The mail server rejected every recipient. The message was not sent.",
+        deleteUnknown: "Could not confirm whether the draft was deleted. Check the Drafts folder; do not repeat the operation.",
+        readFailed: "Could not read the draft. Try again later."
+      },
+      ja: {
+        fieldsInvalid: "\u4E0B\u66F8\u304D\u306E\u5185\u5BB9\u304C\u4E0D\u5B8C\u5168\u304B\u3001\u30B5\u30A4\u30BA\u306E\u4E0A\u9650\u3092\u8D85\u3048\u3066\u3044\u307E\u3059\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        headersInvalid: "\u5B9B\u5148\u3001Cc\u3001Bcc\u3001\u307E\u305F\u306F\u4EF6\u540D\u306E\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        recipientRequired: "\u5B9B\u5148\u30921\u4EF6\u4EE5\u4E0A\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u30E1\u30FC\u30EB\u306F\u9001\u4FE1\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        draftIdInvalid: "draft_id \u306B\u306F\u4E0B\u66F8\u304D\u306E\u4F5C\u6210\u6642\u307E\u305F\u306F\u8AAD\u307F\u8FBC\u307F\u6642\u306B\u8FD4\u3055\u308C\u305F Message-ID\uFF08<id@example.test> \u306E\u5F62\u5F0F\uFF09\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        draftNotFound: "\u3053\u306E\u4E0B\u66F8\u304D\u306F\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u306B\u3042\u308A\u307E\u305B\u3093\u3002\u9001\u4FE1\u30FB\u524A\u9664\u3055\u308C\u305F\u304B\u3001\u5225\u306E\u5834\u6240\u3067\u5909\u66F4\u3055\u308C\u305F\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        draftNoMessageId: "\u3053\u306E\u4E0B\u66F8\u304D\u306B\u306F Message-ID \u304C\u306A\u3044\u305F\u3081\u3001\u30AB\u30FC\u30C9\u3067\u7DE8\u96C6\u3067\u304D\u307E\u305B\u3093\u3002\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3067\u958B\u3044\u3066\u304F\u3060\u3055\u3044\u3002",
+        draftChanged: "\u4E0B\u66F8\u304D\u304C\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3067\u5909\u66F4\u3055\u308C\u307E\u3057\u305F\u3002\u6700\u65B0\u306E\u5185\u5BB9\u3092\u78BA\u8A8D\u3057\u3066\u304B\u3089\u7D9A\u3051\u3066\u304F\u3060\u3055\u3044\u3002",
+        notEditable: "\u3053\u306E\u4E0B\u66F8\u304D\u306F\u3053\u3053\u3067\u306F\u5B8C\u5168\u306B\u7DE8\u96C6\u3067\u304D\u307E\u305B\u3093\uFF08\u7F72\u540D\u4ED8\u304D\u307E\u305F\u306F\u6697\u53F7\u5316\u3055\u308C\u305F\u30E1\u30FC\u30EB\u306A\u3069\uFF09\u3002\u30E1\u30FC\u30EB\u30DC\u30C3\u30AF\u30B9\u3067\u51E6\u7406\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        attachmentListInvalid: "\u6DFB\u4ED8\u30D5\u30A1\u30A4\u30EB\u306E\u4E00\u89A7\u304C\u7121\u52B9\u304B\u3001\u4E0D\u660E\u306A\u6DFB\u4ED8\u30D5\u30A1\u30A4\u30EB\u3092\u542B\u3093\u3067\u3044\u307E\u3059\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        attachmentUnreadable: "\u6DFB\u4ED8\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u3089\u306A\u3044\u3001\u8AAD\u307F\u8FBC\u3081\u306A\u3044\u3001\u901A\u5E38\u306E\u30D5\u30A1\u30A4\u30EB\u3067\u306F\u306A\u3044\u3001\u307E\u305F\u306F\u9078\u629E\u5F8C\u306B\u5909\u66F4\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        attachmentTooLarge: "\u8FFD\u52A0\u3059\u308B\u6DFB\u4ED8\u30D5\u30A1\u30A4\u30EB\u306F1\u4EF616 MiB\u3001\u5408\u8A0825 MiB\u307E\u3067\u3067\u3059\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        attachmentPathsInvalid: "attachment_paths \u306B\u306F\u30ED\u30FC\u30AB\u30EB\u30D5\u30A1\u30A4\u30EB\u306E\u7D76\u5BFE\u30D1\u30B9\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\uFF081\u901A\u3042\u305F\u308A\u6700\u592710\u4EF6\uFF09\u3002",
+        messageTooLarge: "\u30E1\u30FC\u30EB\u306E\u30B5\u30A4\u30BA\u304C\u5927\u304D\u3059\u304E\u307E\u3059\u3002\u4FDD\u5B58\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        sourceNotFound: "\u8FD4\u4FE1\u307E\u305F\u306F\u8EE2\u9001\u3059\u308B\u5143\u306E\u30E1\u30FC\u30EB\u304C\u305D\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u306B\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u691C\u7D22\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        sourceRequired: "\u8FD4\u4FE1\u3084\u8EE2\u9001\u306B\u306F\u5143\u306E\u30E1\u30FC\u30EB\u306E folder \u3068 message_uid \u304C\u5FC5\u8981\u3067\u3059\u3002",
+        saveUnknown: "\u4E0B\u66F8\u304D\u304C\u4FDD\u5B58\u3055\u308C\u305F\u304B\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u3082\u3046\u4E00\u5EA6\u4FDD\u5B58\u3059\u308B\u524D\u306B\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        savedUnverified: "\u4E0B\u66F8\u304D\u306F\u4FDD\u5B58\u3055\u308C\u307E\u3057\u305F\u304C\u3001\u8AAD\u307F\u623B\u3057\u3066\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u5148\u306B\u4E0B\u66F8\u304D\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u78BA\u8A8D\u3057\u3001\u4F5C\u308A\u76F4\u3055\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
+        savedMismatch: "\u4E0B\u66F8\u304D\u306F\u4FDD\u5B58\u3055\u308C\u307E\u3057\u305F\u304C\u3001\u8AAD\u307F\u623B\u3057\u305F\u5185\u5BB9\u304C\u60F3\u5B9A\u3068\u7570\u306A\u308A\u307E\u3059\u3002\u9001\u4FE1\u3059\u308B\u524D\u306B\u4E0B\u66F8\u304D\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+        sendUnknown: "\u30E1\u30FC\u30EB\u304C\u9001\u4FE1\u3055\u308C\u305F\u304B\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u9001\u4FE1\u6E08\u307F\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3001\u3082\u3046\u4E00\u5EA6\u9001\u4FE1\u3057\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
+        sendRejected: "\u30E1\u30FC\u30EB\u30B5\u30FC\u30D0\u30FC\u304C\u3059\u3079\u3066\u306E\u5B9B\u5148\u3092\u62D2\u5426\u3057\u307E\u3057\u305F\u3002\u30E1\u30FC\u30EB\u306F\u9001\u4FE1\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+        deleteUnknown: "\u4E0B\u66F8\u304D\u304C\u524A\u9664\u3055\u308C\u305F\u304B\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3002\u4E0B\u66F8\u304D\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u78BA\u8A8D\u3057\u3001\u64CD\u4F5C\u3092\u7E70\u308A\u8FD4\u3055\u306A\u3044\u3067\u304F\u3060\u3055\u3044\u3002",
+        readFailed: "\u4E0B\u66F8\u304D\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3057\u3070\u3089\u304F\u3057\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+      },
+      ko: {
+        fieldsInvalid: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C \uB0B4\uC6A9\uC774 \uBD88\uC644\uC804\uD558\uAC70\uB098 \uD06C\uAE30 \uC81C\uD55C\uC744 \uB118\uC5C8\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        headersInvalid: "\uBC1B\uB294 \uC0AC\uB78C, \uCC38\uC870, \uC228\uC740 \uCC38\uC870 \uB610\uB294 \uC81C\uBAA9 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        recipientRequired: "\uBC1B\uB294 \uC0AC\uB78C\uC744 \uD55C \uBA85 \uC774\uC0C1 \uC785\uB825\uD558\uC138\uC694. \uBA54\uC77C\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        draftIdInvalid: "draft_id\uC5D0\uB294 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC744 \uB9CC\uB4E4\uAC70\uB098 \uC77D\uC744 \uB54C \uBC18\uD658\uB41C Message-ID(<id@example.test> \uD615\uC2DD)\uB97C \uC9C0\uC815\uD558\uC138\uC694.",
+        draftNotFound: "\uC774 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uC784\uC2DC \uBCF4\uAD00\uD568\uC5D0 \uC5C6\uC2B5\uB2C8\uB2E4. \uC774\uBBF8 \uBCF4\uB0C8\uAC70\uB098 \uC0AD\uC81C\uD588\uAC70\uB098 \uB2E4\uB978 \uACF3\uC5D0\uC11C \uBCC0\uACBD\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694.",
+        draftNoMessageId: "\uC774 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC5D0\uB294 Message-ID\uAC00 \uC5C6\uC5B4 \uCE74\uB4DC\uC5D0\uC11C \uD3B8\uC9D1\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uBA54\uC77C\uD568\uC5D0\uC11C \uC5EC\uC138\uC694.",
+        draftChanged: "\uBA54\uC77C\uD568\uC5D0\uC11C \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uCD5C\uC2E0 \uB0B4\uC6A9\uC744 \uD655\uC778\uD55C \uD6C4 \uACC4\uC18D\uD558\uC138\uC694.",
+        notEditable: "\uC774 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC740 \uC5EC\uAE30\uC5D0\uC11C \uC644\uC804\uD788 \uD3B8\uC9D1\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4(\uC608: \uC11C\uBA85 \uB610\uB294 \uC554\uD638\uD654\uB41C \uBA54\uC77C). \uBA54\uC77C\uD568\uC5D0\uC11C \uCC98\uB9AC\uD558\uC138\uC694.",
+        attachmentListInvalid: "\uCCA8\uBD80 \uD30C\uC77C \uBAA9\uB85D\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uAC70\uB098 \uC54C \uC218 \uC5C6\uB294 \uCCA8\uBD80 \uD30C\uC77C\uC774 \uC788\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        attachmentUnreadable: "\uCCA8\uBD80 \uD30C\uC77C\uC774 \uC5C6\uAC70\uB098, \uC77D\uC744 \uC218 \uC5C6\uAC70\uB098, \uC77C\uBC18 \uD30C\uC77C\uC774 \uC544\uB2C8\uAC70\uB098, \uC120\uD0DD\uD55C \uB4A4 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        attachmentTooLarge: "\uC0C8 \uCCA8\uBD80 \uD30C\uC77C\uC740 \uD30C\uC77C\uB2F9 16 MiB, \uD569\uACC4 25 MiB\uAE4C\uC9C0\uC785\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        attachmentPathsInvalid: "attachment_paths\uC5D0\uB294 \uB85C\uCEEC \uD30C\uC77C \uC808\uB300 \uACBD\uB85C \uBAA9\uB85D\uC744 \uC9C0\uC815\uD558\uC138\uC694(\uBA54\uC77C\uB2F9 \uCD5C\uB300 10\uAC1C).",
+        messageTooLarge: "\uBA54\uC77C\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4. \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        sourceNotFound: "\uB2F5\uC7A5\uD558\uAC70\uB098 \uC804\uB2EC\uD560 \uC6D0\uBCF8 \uBA54\uC77C\uC744 \uD574\uB2F9 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uAC80\uC0C9\uD558\uC138\uC694.",
+        sourceRequired: "\uB2F5\uC7A5\uC774\uB098 \uC804\uB2EC\uC5D0\uB294 \uC6D0\uBCF8 \uBA54\uC77C\uC758 folder\uC640 message_uid\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4.",
+        saveUnknown: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uC800\uC7A5\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC800\uC7A5\uD558\uAE30 \uC804\uC5D0 \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uD655\uC778\uD558\uC138\uC694.",
+        savedUnverified: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC740 \uC800\uC7A5\uD588\uC9C0\uB9CC \uB2E4\uC2DC \uC77D\uC5B4 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBA3C\uC800 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC744 \uC77D\uC5B4 \uD655\uC778\uD558\uACE0 \uB2E4\uC2DC \uB9CC\uB4E4\uC9C0 \uB9C8\uC138\uC694.",
+        savedMismatch: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC740 \uC800\uC7A5\uD588\uC9C0\uB9CC \uB2E4\uC2DC \uC77D\uC740 \uB0B4\uC6A9\uC774 \uC608\uC0C1\uACFC \uB2E4\uB985\uB2C8\uB2E4. \uBCF4\uB0B4\uAE30 \uC804\uC5D0 \uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC744 \uC77D\uC5B4 \uD655\uC778\uD558\uC138\uC694.",
+        sendUnknown: "\uBA54\uC77C\uC774 \uC804\uC1A1\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uBCF4\uB0B8 \uD3B8\uC9C0\uD568\uC744 \uD655\uC778\uD558\uACE0 \uB2E4\uC2DC \uBCF4\uB0B4\uC9C0 \uB9C8\uC138\uC694.",
+        sendRejected: "\uBA54\uC77C \uC11C\uBC84\uAC00 \uBAA8\uB4E0 \uBC1B\uB294 \uC0AC\uB78C\uC744 \uAC70\uBD80\uD588\uC2B5\uB2C8\uB2E4. \uBA54\uC77C\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.",
+        deleteUnknown: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC774 \uC0AD\uC81C\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uC784\uC2DC \uBCF4\uAD00\uD568\uC744 \uD655\uC778\uD558\uACE0 \uC791\uC5C5\uC744 \uBC18\uBCF5\uD558\uC9C0 \uB9C8\uC138\uC694.",
+        readFailed: "\uC784\uC2DC \uBCF4\uAD00 \uBA54\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694."
+      }
+    });
+    function localeOf(value) {
+      if (typeof value !== "string") return "en";
+      if (/^zh/i.test(value)) return "zh-CN";
+      const base = value.slice(0, 2).toLowerCase();
+      return MESSAGES[base] ? base : "en";
+    }
+    function text(locale, key) {
+      return MESSAGES[localeOf(locale)][key] || MESSAGES.en[key];
+    }
+    var ComposeError = class extends Error {
+      constructor(key) {
+        super(key);
+        this.composeKey = key;
+      }
+    };
+    var sha256 = (data) => crypto.createHash("sha256").update(data).digest("hex");
+    var escapeHtml = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var normalizeNewlines = (value) => String(value || "").replace(/\r\n?/g, "\n");
+    var bareCid = (value) => String(value || "").trim().replace(/^<|>$/g, "");
+    function textToHtml(value) {
+      return '<div dir="auto">' + normalizeNewlines(value).split("\n").map((line) => "<div>" + (escapeHtml(line) || "<br>") + "</div>").join("") + "</div>";
+    }
+    function sdkTextHtml(value) {
+      return "<div>" + value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") + "</div>";
+    }
+    function quoteBlock(innerHtml, attributionHtml) {
+      return QUOTE_HTML_MARK + ' style="margin-top:1em">' + (attributionHtml || "") + BLOCKQUOTE + innerHtml + "</blockquote></div>";
+    }
+    function parseAddresses(value) {
+      if (typeof value !== "string" || /[\r\n\0]/.test(value) || value.length > MAX_FIELD) throw new ComposeError("headersInvalid");
+      if (!value.trim()) return [];
+      const flat = [];
+      const walk = (items) => items.forEach((item) => item.group ? walk(item.group) : flat.push(item));
+      walk(addressparser(value.replace(/;/g, ",")));
+      if (flat.length > 100 || flat.some((item) => !EMAIL_RE.test(item.address || ""))) throw new ComposeError("headersInvalid");
+      return flat.map((item) => ({ name: item.name || "", address: item.address }));
+    }
+    function formatAddress(item) {
+      if (!item.name) return item.address;
+      const name = /^[\w .'-]+$/u.test(item.name) ? item.name : '"' + item.name.replace(/["\\]/g, "\\$&") + '"';
+      return name + " <" + item.address + ">";
+    }
+    var addressKey = (value) => parseAddresses(value).map((item) => item.address.toLowerCase()).sort().join(",");
+    function headerAddresses(parsed, name) {
+      const value = parsed[name];
+      const list = Array.isArray(value) ? value : value ? [value] : [];
+      const flat = [];
+      const walk = (items) => items.forEach((item) => item.group ? walk(item.group) : item.address && flat.push({ name: item.name || "", address: item.address }));
+      list.forEach((entry) => walk(entry.value || []));
+      return flat;
+    }
+    var addressList = (items) => items.map(formatAddress).join(", ");
+    function referencesOf(parsed) {
+      const value = parsed.references;
+      return (Array.isArray(value) ? value : typeof value === "string" ? value.split(/\s+/) : []).filter((id) => DRAFT_ID_RE.test(id));
+    }
+    function rootContentType(parsed) {
+      const value = parsed.headers && typeof parsed.headers.get === "function" ? parsed.headers.get("content-type") : null;
+      return String(value && value.value || value || "").toLowerCase();
+    }
+    function supportedType(parsed) {
+      return !/^multipart\/(signed|encrypted)|^application\/(pkcs7|x-pkcs7)-mime/.test(rootContentType(parsed));
+    }
+    function snapshotAttachments(parsed) {
+      const seen = /* @__PURE__ */ new Map();
+      let previewBytes = 0;
+      return (parsed.attachments || []).map((attachment) => {
+        const content = Buffer.isBuffer(attachment.content) ? attachment.content : Buffer.alloc(0);
+        const digest = sha256(content);
+        const index = seen.get(digest) || 0;
+        seen.set(digest, index + 1);
+        const mimeType = String(attachment.contentType || "application/octet-stream").toLowerCase();
+        const cid = bareCid(attachment.cid);
+        const item = {
+          // Content-addressed, so renaming or (re)assigning a Content-ID keeps the key.
+          key: digest.slice(0, 40) + "-" + index,
+          filename: attachment.filename || "",
+          mimeType,
+          bytes: content.length,
+          contentId: cid && attachment.contentDisposition !== "attachment" ? cid : "",
+          sha256: digest
+        };
+        if (/^image\/(png|jpeg|gif|webp)$/.test(mimeType) && content.length <= MAX_PREVIEW_IMAGE && previewBytes + content.length <= MAX_PREVIEW_TOTAL) {
+          previewBytes += content.length;
+          item.inlineData = content.toString("base64");
+        }
+        return item;
+      });
+    }
+    function draftEditor(bodyText, bodyHtml, supported) {
+      const htmlAt = bodyHtml.indexOf(QUOTE_HTML_MARK);
+      const textMatch = QUOTE_TEXT_RE.exec(bodyText);
+      const split = textMatch && (htmlAt >= 0 || !bodyHtml);
+      const body = split ? bodyText.slice(0, textMatch.index) : bodyText;
+      const quote = split ? bodyText.slice(textMatch.index) : "";
+      const html = split && htmlAt >= 0 ? bodyHtml.slice(0, htmlAt) : bodyHtml;
+      const quoteHtml = split && htmlAt >= 0 ? bodyHtml.slice(htmlAt) : "";
+      return {
+        format: !html || html === textToHtml(body) ? "text" : "html",
+        body,
+        quote,
+        bodyHtml: html,
+        quoteHtml,
+        editable: supported && Boolean(bodyText || !bodyHtml)
+      };
+    }
+    function createMailCompose(env) {
+      const self = env.email.toLowerCase();
+      const domain = self.split("@")[1];
+      async function download(client, uid) {
+        const downloaded = await client.download(String(uid), void 0, { uid: true, maxBytes: env.maxSourceBytes + 1 });
+        if (!downloaded || !downloaded.content) return null;
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of downloaded.content) {
+          size += chunk.length;
+          if (size > env.maxSourceBytes) {
+            if (typeof downloaded.content.destroy === "function") downloaded.content.destroy();
+            throw new ComposeError("messageTooLarge");
+          }
+          chunks.push(chunk);
+        }
+        return Buffer.concat(chunks, size);
+      }
+      function snapshot(parsed, raw, draftId, locator) {
+        const bodyText = normalizeNewlines(typeof parsed.text === "string" ? parsed.text : "").replace(/\n+$/, "");
+        const bodyHtml = typeof parsed.html === "string" ? parsed.html : "";
+        const supported = supportedType(parsed);
+        return {
+          status: "read_back",
+          draftId,
+          fingerprint: sha256(raw),
+          locator,
+          headers: {
+            from: addressList(headerAddresses(parsed, "from")),
+            to: addressList(headerAddresses(parsed, "to")),
+            cc: addressList(headerAddresses(parsed, "cc")),
+            bcc: addressList(headerAddresses(parsed, "bcc")),
+            subject: parsed.subject || ""
+          },
+          editor: draftEditor(bodyText, bodyHtml, supported),
+          attachments: snapshotAttachments(parsed)
+        };
+      }
+      async function readAt(client, folder, uid, draftId) {
+        const raw = await download(client, uid);
+        if (!raw) return null;
+        const parsed = await env.parseMessage(raw);
+        if (parsed.messageId !== draftId) return null;
+        return {
+          raw,
+          parsed,
+          uid: Number(uid),
+          locator: { folder, uid: Number(uid), uidValidity: String(client.mailbox && client.mailbox.uidValidity) }
+        };
+      }
+      async function findCopies(client, draftId) {
+        let uids = [];
+        try {
+          uids = await client.search({ header: { "message-id": draftId } }, { uid: true }) || [];
+        } catch (_error) {
+          uids = [];
+        }
+        if (!uids.length) {
+          const exists = client.mailbox && Number(client.mailbox.exists);
+          if (exists > 0) {
+            const range = Math.max(1, exists - DRAFT_SCAN_LIMIT + 1) + ":*";
+            for await (const message of client.fetch(range, { uid: true, envelope: true, flags: true })) {
+              const flags = message.flags ? Array.from(message.flags) : [];
+              if (message.envelope && message.envelope.messageId === draftId && !flags.includes("\\Deleted")) uids.push(message.uid);
+            }
+          }
+        }
+        return uids.map(Number).filter((uid) => Number.isInteger(uid) && uid > 0).sort((a, b) => b - a);
+      }
+      async function locate(client, folder, draftId, locator) {
+        if (locator && locator.folder === folder && Number.isInteger(Number(locator.uid)) && String(locator.uidValidity) === String(client.mailbox && client.mailbox.uidValidity)) {
+          const found = await readAt(client, folder, locator.uid, draftId);
+          if (found) return found;
+        }
+        for (const uid of await findCopies(client, draftId)) {
+          const found = await readAt(client, folder, uid, draftId);
+          if (found) return found;
+        }
+        return null;
+      }
+      async function inDrafts(locator, operation) {
+        return env.withImap(async (client) => {
+          const folder = locator && typeof locator.folder === "string" && locator.folder ? locator.folder : await env.findDraftFolder(client);
+          return env.withMailbox(client, folder, () => operation(client, folder));
+        });
+      }
+      async function buildRaw(options) {
+        const composer = env.createComposer();
+        try {
+          const info = await composer.sendMail({
+            ...options,
+            disableFileAccess: true,
+            disableUrlAccess: true
+          });
+          if (!info || !Buffer.isBuffer(info.message)) throw new ComposeError("fieldsInvalid");
+          return info.message;
+        } finally {
+          if (composer && typeof composer.close === "function") composer.close();
+        }
+      }
+      function headerMeta(parsed) {
+        const from = headerAddresses(parsed, "from");
+        const replyTo = headerAddresses(parsed, "replyTo");
+        return {
+          from: from.length === 1 && from[0].address.toLowerCase() === self ? formatAddress(from[0]) : env.email,
+          replyTo: addressList(replyTo),
+          inReplyTo: DRAFT_ID_RE.test(parsed.inReplyTo || "") ? parsed.inReplyTo : "",
+          references: referencesOf(parsed)
+        };
+      }
+      function messageOptions(meta, draftId, content) {
+        return {
+          from: meta.from,
+          to: content.to,
+          cc: content.cc,
+          bcc: content.bcc,
+          subject: content.subject,
+          messageId: draftId,
+          date: /* @__PURE__ */ new Date(),
+          ...meta.replyTo ? { replyTo: meta.replyTo } : {},
+          ...meta.inReplyTo ? { inReplyTo: meta.inReplyTo } : {},
+          ...meta.references.length ? { references: meta.references } : {},
+          text: content.text,
+          ...content.html ? { html: content.html } : {},
+          attachments: content.files.map((file) => ({
+            filename: file.filename || void 0,
+            content: file.content,
+            contentType: file.mimeType,
+            ...file.contentId ? { cid: file.contentId } : {},
+            contentDisposition: file.contentId ? "inline" : "attachment"
+          }))
+        };
+      }
+      async function loadFiles(descriptors) {
+        if (!Array.isArray(descriptors)) throw new ComposeError("attachmentListInvalid");
+        let total = 0;
+        const files = [];
+        for (const item of descriptors) {
+          if (!item || typeof item.path !== "string" || !path.isAbsolute(item.path) || /[\r\n\0]/.test(item.path)) {
+            throw new ComposeError("attachmentUnreadable");
+          }
+          let handle;
+          try {
+            const link = await fs.lstat(item.path);
+            if (!link.isFile()) throw new ComposeError("attachmentUnreadable");
+            handle = await fs.open(item.path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0) | (fsConstants.O_NONBLOCK || 0));
+            const stat = await handle.stat();
+            if (!stat.isFile()) throw new ComposeError("attachmentUnreadable");
+            if (stat.size > MAX_NEW_FILE || total + stat.size > MAX_NEW_TOTAL) throw new ComposeError("attachmentTooLarge");
+            const content = Buffer.alloc(stat.size);
+            let offset = 0;
+            while (offset < stat.size) {
+              const { bytesRead } = await handle.read(content, offset, stat.size - offset, offset);
+              if (!bytesRead) break;
+              offset += bytesRead;
+            }
+            const extra = await handle.read(Buffer.alloc(1), 0, 1, offset);
+            if (offset !== stat.size || extra.bytesRead) throw new ComposeError("attachmentUnreadable");
+            if (item.bytes !== void 0 && item.bytes !== content.length || item.sha256 !== void 0 && item.sha256 !== sha256(content)) throw new ComposeError("attachmentUnreadable");
+            total += content.length;
+            const filename = typeof item.filename === "string" && item.filename && !/[\r\n\0/\\]/.test(item.filename) ? item.filename : path.basename(item.path);
+            const contentId = item.contentId === void 0 ? "" : bareCid(item.contentId);
+            if (contentId && !/^[^<>\s@]+@[^<>\s@]+$/.test(contentId)) throw new ComposeError("attachmentListInvalid");
+            files.push({ filename, content, mimeType: mimeFor(filename, item.mimeType), contentId });
+          } catch (error) {
+            if (error instanceof ComposeError) throw error;
+            throw new ComposeError("attachmentUnreadable");
+          } finally {
+            if (handle) await handle.close().catch(() => void 0);
+          }
+        }
+        return files;
+      }
+      function parsedFiles(parsed) {
+        const meta = snapshotAttachments(parsed);
+        return (parsed.attachments || []).map((attachment, index) => ({
+          key: meta[index].key,
+          filename: meta[index].filename,
+          mimeType: meta[index].mimeType,
+          contentId: meta[index].contentId,
+          content: Buffer.isBuffer(attachment.content) ? attachment.content : Buffer.alloc(0)
+        }));
+      }
+      const facts = (files) => JSON.stringify(files.map((file) => [
+        file.filename || "",
+        String(file.mimeType || "").toLowerCase(),
+        file.bytes !== void 0 ? file.bytes : file.content.length,
+        bareCid(file.contentId),
+        file.sha256 || sha256(file.content)
+      ]).sort());
+      async function saveRevision(client, folder, current, draftId, content, execution, locale, meta) {
+        const raw = await buildRaw(messageOptions(meta || headerMeta(current.parsed), draftId, content));
+        if (raw.length > env.maxSourceBytes) throw new ComposeError("messageTooLarge");
+        execution.state = "unknown";
+        const appended = await client.append(folder, raw, ["\\Draft", "\\Seen"], /* @__PURE__ */ new Date());
+        execution.state = "executed";
+        const unverified = { ok: false, execution: "executed", message: text(locale, "savedUnverified") };
+        let saved = null;
+        try {
+          if (appended && appended.uid) saved = await readAt(client, folder, appended.uid, draftId);
+          if (!saved) {
+            const latest = (await findCopies(client, draftId)).find((uid) => !current || uid !== current.uid);
+            if (latest) saved = await readAt(client, folder, latest, draftId);
+          }
+        } catch (_error) {
+          saved = null;
+        }
+        if (!saved) return unverified;
+        const readBack = snapshot(saved.parsed, saved.raw, draftId, saved.locator);
+        const actual = { to: readBack.headers.to, cc: readBack.headers.cc, bcc: readBack.headers.bcc };
+        const sameText = (a, b) => normalizeNewlines(a).replace(/\s+$/, "") === normalizeNewlines(b).replace(/\s+$/, "");
+        if (["to", "cc", "bcc"].some((name) => addressKey(actual[name]) !== addressKey(content[name] || "")) || readBack.headers.subject !== content.subject.trim() || !sameText(readBack.editor.body + readBack.editor.quote, content.text) || normalizeNewlines(typeof saved.parsed.html === "string" ? saved.parsed.html : "").trim() !== normalizeNewlines(content.html || "").trim() || facts(parsedFiles(saved.parsed)) !== facts(content.files)) {
+          if (current) await client.messageDelete(String(saved.uid), { uid: true }).catch(() => void 0);
+          return { ok: false, execution: "executed", message: text(locale, "savedMismatch") };
+        }
+        const older = (await findCopies(client, draftId).catch(() => [])).filter((uid) => uid !== saved.uid);
+        if (current && !older.includes(current.uid)) older.push(current.uid);
+        if (older.length) await client.messageDelete(older.join(","), { uid: true }).catch(() => void 0);
+        return { ok: true, execution: "executed", data: { draftId, readBack } };
+      }
+      function validateFields(fields) {
+        const names = ["to", "cc", "bcc", "subject", "body", "quote"];
+        const rich = fields && typeof fields.bodyHtml === "string";
+        if (rich) names.push("bodyHtml", "quoteHtml", "attachmentItems");
+        if (!fields || typeof fields !== "object" || Array.isArray(fields) || names.some((name) => typeof fields[name] !== "string" || fields[name].includes("\0") || fields[name].length > (name.endsWith("Html") ? MAX_HTML_FIELD : MAX_FIELD))) {
+          throw new ComposeError("fieldsInvalid");
+        }
+        for (const name of ["to", "cc", "bcc"]) parseAddresses(fields[name]);
+        if (/[\r\n]/.test(fields.subject) || fields.subject.length > 998) throw new ComposeError("headersInvalid");
+        return rich;
+      }
+      function contentFromFields(before, fields, rich, additions) {
+        const editor = before.editor;
+        const original = {
+          body: editor.body,
+          quote: editor.quote,
+          bodyHtml: editor.bodyHtml || sdkTextHtml(editor.body),
+          quoteHtml: editor.quoteHtml
+        };
+        const htmlless = !editor.bodyHtml && !editor.quoteHtml;
+        let bodyHtml;
+        if (rich && (editor.format === "html" || fields.bodyHtml !== original.bodyHtml)) bodyHtml = fields.bodyHtml;
+        else if (fields.body === original.body) bodyHtml = htmlless ? "" : editor.bodyHtml;
+        else bodyHtml = htmlless ? "" : textToHtml(fields.body);
+        let quoteHtml;
+        if (rich && fields.quoteHtml !== original.quoteHtml) quoteHtml = fields.quoteHtml;
+        else if (fields.quote === original.quote) quoteHtml = editor.quoteHtml;
+        else quoteHtml = htmlless || !fields.quote ? "" : quoteBlock(textToHtml(fields.quote.replace(/^\n+/, "")));
+        let files = parsedFiles(before.parsed);
+        if (rich) {
+          let wanted;
+          try {
+            wanted = JSON.parse(fields.attachmentItems);
+          } catch (_error) {
+            throw new ComposeError("attachmentListInvalid");
+          }
+          if (!Array.isArray(wanted) || wanted.some((item) => !item || typeof item.key !== "string")) throw new ComposeError("attachmentListInvalid");
+          const keys = /* @__PURE__ */ new Set();
+          files = wanted.map((item) => {
+            const file = files.find((candidate) => candidate.key === item.key);
+            if (!file || keys.has(item.key)) throw new ComposeError("attachmentListInvalid");
+            keys.add(item.key);
+            const filename = typeof item.filename === "string" && item.filename && !/[\r\n\0/\\]/.test(item.filename) ? item.filename : file.filename;
+            const contentId = typeof item.contentId === "string" ? bareCid(item.contentId) : file.contentId;
+            if (contentId && !/^[^<>\s]+$/.test(contentId)) throw new ComposeError("attachmentListInvalid");
+            return { ...file, filename, contentId };
+          });
+        }
+        files = files.concat(additions);
+        if (bodyHtml.length > MAX_HTML_FIELD || quoteHtml.length > MAX_HTML_FIELD) throw new ComposeError("fieldsInvalid");
+        const html = bodyHtml + quoteHtml;
+        return {
+          to: fields.to,
+          cc: fields.cc,
+          bcc: fields.bcc,
+          subject: fields.subject,
+          text: fields.body + fields.quote,
+          html: html || (additions.some((file) => file.contentId) ? textToHtml(fields.body) : ""),
+          files
+        };
+      }
+      function sameContent(before, content) {
+        const parsedHtml = typeof before.parsed.html === "string" ? before.parsed.html : "";
+        const beforeText = before.editor.body + before.editor.quote;
+        return content.to === before.headers.to && content.cc === before.headers.cc && content.bcc === before.headers.bcc && content.subject === before.headers.subject && normalizeNewlines(content.text) === normalizeNewlines(beforeText) && (content.html || "") === parsedHtml && facts(content.files) === facts(parsedFiles(before.parsed));
+      }
+      async function sendRevision(current, draftId, execution, locale, client) {
+        const headers = current.readBack.headers;
+        const recipients = ["to", "cc", "bcc"].flatMap((name) => parseAddresses(headers[name]).map((item) => item.address));
+        if (!recipients.length) throw new ComposeError("recipientRequired");
+        const parsedHtml = typeof current.parsed.html === "string" ? current.parsed.html : "";
+        const raw = await buildRaw(messageOptions(headerMeta(current.parsed), draftId, {
+          to: headers.to,
+          cc: headers.cc,
+          bcc: "",
+          subject: headers.subject,
+          text: current.readBack.editor.body + current.readBack.editor.quote,
+          html: parsedHtml,
+          files: parsedFiles(current.parsed)
+        }));
+        const transporter = env.createSmtp();
+        let info;
+        try {
+          execution.state = "unknown";
+          info = await transporter.sendMail({ envelope: { from: env.email, to: [...new Set(recipients)] }, raw });
+          execution.state = "executed";
+        } catch (error) {
+          if (error && error.code === "EENVELOPE" && !(error.accepted && error.accepted.length)) {
+            execution.state = "not_executed";
+            return { ok: false, execution: "not_executed", message: text(locale, "sendRejected") };
+          }
+          return { ok: false, execution: "unknown", message: text(locale, "sendUnknown") };
+        } finally {
+          if (transporter && typeof transporter.close === "function") transporter.close();
+        }
+        let draftRemoved = false;
+        try {
+          const copies = await findCopies(client, draftId);
+          if (!copies.includes(current.uid)) copies.push(current.uid);
+          await client.messageDelete(copies.join(","), { uid: true });
+          draftRemoved = true;
+        } catch (_error) {
+          draftRemoved = false;
+        }
+        return { ok: true, execution: "executed", data: { sent: true, draftId, receipt: {
+          messageId: draftId,
+          accepted: Array.isArray(info && info.accepted) ? info.accepted.map(String).slice(0, 100) : [],
+          rejected: Array.isArray(info && info.rejected) ? info.rejected.map(String).slice(0, 100) : [],
+          delivery_confirmed: false,
+          draftRemoved
+        } } };
+      }
+      async function guarded(locale, execution, operation) {
+        try {
+          return await operation();
+        } catch (error) {
+          if (execution.state === "unknown") return { ok: false, execution: "unknown", message: text(locale, execution.unknownKey || "saveUnknown") };
+          if (execution.state === "executed") return { ok: false, execution: "executed", message: text(locale, "savedUnverified") };
+          const message = error instanceof ComposeError ? text(locale, error.composeKey) : env.describeError(error, locale);
+          return { ok: false, execution: "not_executed", message };
+        }
+      }
+      function checkDraftId(draftId) {
+        if (typeof draftId !== "string" || !DRAFT_ID_RE.test(draftId)) throw new ComposeError("draftIdInvalid");
+      }
+      async function readDraft({ draftId, locator }, locale) {
+        const execution = { state: "not_executed" };
+        return guarded(locale, execution, async () => {
+          checkDraftId(draftId);
+          return inDrafts(locator, async (client, folder) => {
+            const current = await locate(client, folder, draftId, locator);
+            if (!current) throw new ComposeError("draftNotFound");
+            return { ok: true, data: { draftId, readBack: snapshot(current.parsed, current.raw, draftId, current.locator) } };
+          });
+        });
+      }
+      async function writeDraft({ draftId, locator, fingerprint, fields, send, attachments }, locale) {
+        const execution = { state: "not_executed" };
+        return guarded(locale, execution, async () => {
+          checkDraftId(draftId);
+          if (typeof fingerprint !== "string" || typeof send !== "boolean") throw new ComposeError("fieldsInvalid");
+          const rich = validateFields(fields);
+          const additions = await loadFiles(attachments || []);
+          return inDrafts(locator, async (client, folder) => {
+            let current = await locate(client, folder, draftId, locator);
+            if (!current) throw new ComposeError("draftNotFound");
+            current.readBack = snapshot(current.parsed, current.raw, draftId, current.locator);
+            current.headers = current.readBack.headers;
+            current.editor = current.readBack.editor;
+            if (current.readBack.fingerprint !== fingerprint) {
+              return { ok: false, execution: "not_executed", stale: current.readBack, message: text(locale, "draftChanged") };
+            }
+            if (!current.editor.editable && !rich) throw new ComposeError("notEditable");
+            if (!supportedType(current.parsed)) throw new ComposeError("notEditable");
+            const content = contentFromFields(current, fields, rich, additions);
+            if (send && !["to", "cc", "bcc"].some((name) => parseAddresses(content[name]).length)) throw new ComposeError("recipientRequired");
+            if (!sameContent(current, content)) {
+              const saved = await saveRevision(client, folder, current, draftId, content, execution, locale);
+              if (!saved.ok || !send) return saved;
+              const reread = await locate(client, folder, draftId, saved.data.readBack.locator);
+              if (!reread) return { ok: false, execution: "executed", message: text(locale, "savedUnverified") };
+              current = reread;
+              current.readBack = saved.data.readBack;
+            }
+            if (!send) return { ok: true, execution: "not_executed", data: { draftId, readBack: current.readBack } };
+            execution.unknownKey = "sendUnknown";
+            return sendRevision(current, draftId, execution, locale, client);
+          });
+        });
+      }
+      async function deleteDraft({ draftId, locator }, locale) {
+        const execution = { state: "not_executed", unknownKey: "deleteUnknown" };
+        return guarded(locale, execution, async () => {
+          checkDraftId(draftId);
+          return inDrafts(locator, async (client, folder) => {
+            const current = await locate(client, folder, draftId, locator);
+            if (!current) throw new ComposeError("draftNotFound");
+            const copies = await findCopies(client, draftId);
+            if (!copies.includes(current.uid)) copies.push(current.uid);
+            execution.state = "unknown";
+            await client.messageDelete(copies.join(","), { uid: true });
+            execution.state = "executed";
+            return { ok: true, execution: "executed", data: { deleted: true, draftId } };
+          });
+        });
+      }
+      async function updateDraft(action, locale) {
+        const execution = { state: "not_executed" };
+        return guarded(locale, execution, async () => {
+          checkDraftId(action.draft_id);
+          const additions = await loadFiles(agentPaths(action.attachment_paths));
+          return inDrafts(action.locator, async (client, folder) => {
+            const current = await locate(client, folder, action.draft_id, action.locator);
+            if (!current) throw new ComposeError("draftNotFound");
+            const readBack = snapshot(current.parsed, current.raw, action.draft_id, current.locator);
+            Object.assign(current, { readBack, headers: readBack.headers, editor: readBack.editor });
+            if (!supportedType(current.parsed)) throw new ComposeError("notEditable");
+            if (!readBack.editor.editable && action.body_html === void 0 && action.body_text !== void 0) throw new ComposeError("notEditable");
+            const htmlOnly = action.body_html !== void 0 && action.body_text === void 0;
+            const fields = {
+              to: action.to !== void 0 ? joinRecipients(action.to) : readBack.headers.to,
+              cc: action.cc !== void 0 ? joinRecipients(action.cc) : readBack.headers.cc,
+              bcc: action.bcc !== void 0 ? joinRecipients(action.bcc) : readBack.headers.bcc,
+              subject: action.subject !== void 0 ? action.subject : readBack.headers.subject,
+              // An HTML-only update must not leave the old plain-text alternative behind.
+              body: action.body_text !== void 0 ? normalizeNewlines(action.body_text) : htmlOnly ? htmlToText(action.body_html) : readBack.editor.body,
+              quote: readBack.editor.quote,
+              bodyHtml: action.body_html !== void 0 ? action.body_html : action.body_text !== void 0 ? textToHtml(action.body_text) : readBack.editor.bodyHtml || sdkTextHtml(readBack.editor.body),
+              quoteHtml: readBack.editor.quoteHtml,
+              attachmentItems: JSON.stringify(readBack.attachments.map((item) => ({ key: item.key, filename: item.filename, contentId: item.contentId })))
+            };
+            if (typeof fields.subject !== "string" || typeof fields.bodyHtml !== "string") throw new ComposeError("fieldsInvalid");
+            validateFields(fields);
+            const content = contentFromFields(current, fields, true, additions);
+            if (sameContent(current, content)) return { ok: true, execution: "not_executed", data: { draftId: action.draft_id, readBack } };
+            return saveRevision(client, folder, current, action.draft_id, content, execution, locale);
+          });
+        });
+      }
+      function joinRecipients(value) {
+        if (Array.isArray(value)) return value.map(String).join(", ");
+        if (typeof value === "string") return value;
+        throw new ComposeError("headersInvalid");
+      }
+      function agentPaths(value) {
+        if (value === void 0) return [];
+        if (!Array.isArray(value) || value.length > MAX_AGENT_FILES || value.some((item) => typeof item !== "string")) {
+          throw new ComposeError("attachmentPathsInvalid");
+        }
+        return value.map((file) => ({ path: file }));
+      }
+      async function createDraft(action, locale) {
+        const execution = { state: "not_executed" };
+        return guarded(locale, execution, async () => {
+          const mode = action.mode || "new";
+          if (!["new", "reply", "reply_all", "forward"].includes(mode)) throw new ComposeError("fieldsInvalid");
+          if (action.body_text !== void 0 && typeof action.body_text !== "string") throw new ComposeError("fieldsInvalid");
+          if (action.body_html !== void 0 && (typeof action.body_html !== "string" || action.body_html.length > MAX_HTML_FIELD)) throw new ComposeError("fieldsInvalid");
+          const body = (action.body_text !== void 0 || action.body_html === void 0 ? normalizeNewlines(action.body_text || "") : htmlToText(action.body_html)).replace(/\n+$/, "");
+          if (body.length > MAX_FIELD) throw new ComposeError("fieldsInvalid");
+          const additions = await loadFiles(agentPaths(action.attachment_paths));
+          return env.withImap(async (client) => {
+            let source = null;
+            if (mode !== "new") {
+              const uid = Number(action.source_uid);
+              if (typeof action.source_folder !== "string" || !action.source_folder || !Number.isInteger(uid) || uid <= 0) {
+                throw new ComposeError("sourceRequired");
+              }
+              source = await env.withMailbox(client, action.source_folder, async () => {
+                const raw = await download(client, uid);
+                return raw ? env.parseMessage(raw) : null;
+              });
+              if (!source) throw new ComposeError("sourceNotFound");
+            }
+            const draftId = "<" + crypto.randomUUID() + "@" + domain + ">";
+            const plan = composePlan(mode, source, action, body, additions);
+            const folder = await env.findDraftFolder(client);
+            return env.withMailbox(client, folder, async () => {
+              for (const name of ["to", "cc", "bcc"]) parseAddresses(plan[name]);
+              if (typeof plan.subject !== "string" || /[\r\n]/.test(plan.subject) || plan.subject.length > 998) throw new ComposeError("headersInvalid");
+              const content = { to: plan.to, cc: plan.cc, bcc: plan.bcc, subject: plan.subject, text: plan.text, html: plan.html, files: plan.files };
+              const meta = { from: env.email, replyTo: "", inReplyTo: plan.inReplyTo, references: plan.references };
+              const saved = await saveRevision(client, folder, null, draftId, content, execution, locale, meta);
+              if (saved.ok) return { ok: true, execution: "executed", data: { draft: true, draftId, readBack: saved.data.readBack } };
+              if (saved.execution === "executed") {
+                return { ok: true, execution: "executed", data: {
+                  draft: true,
+                  draftId,
+                  readBack: { status: "unavailable", message: saved.message }
+                } };
+              }
+              return saved;
+            });
+          });
+        });
+      }
+      function composePlan(mode, source, action, body, additions) {
+        const pick = (name, fallback) => action[name] !== void 0 ? joinRecipients(action[name]) : fallback;
+        let to = "";
+        let cc = "";
+        let subject = typeof action.subject === "string" ? action.subject : "";
+        let quoteText = "";
+        let quoteHtml = "";
+        let inReplyTo = "";
+        let references = [];
+        let files = [];
+        if (source) {
+          const sourceText = normalizeNewlines(typeof source.text === "string" ? source.text : "").replace(/\n+$/, "");
+          const sourceHtml = typeof source.html === "string" ? htmlFragment(source.html) : textToHtml(sourceText);
+          const fromText = addressList(headerAddresses(source, "from")) || "unknown sender";
+          const date = source.date instanceof Date && !Number.isNaN(source.date.getTime()) ? source.date.toUTCString() : "";
+          const sourceFiles = parsedFiles(source);
+          if (mode === "forward") {
+            if (action.subject === void 0) subject = /^\s*(fwd?|转发)\s*[:：]/i.test(source.subject || "") ? source.subject : "Fwd: " + (source.subject || "");
+            const lines = [
+              "---------- Forwarded message ---------",
+              "From: " + fromText,
+              "Date: " + date,
+              "Subject: " + (source.subject || ""),
+              "To: " + addressList(headerAddresses(source, "to"))
+            ];
+            const cc0 = addressList(headerAddresses(source, "cc"));
+            if (cc0) lines.push("Cc: " + cc0);
+            quoteText = "\n\n" + lines.join("\n") + "\n\n" + sourceText;
+            quoteHtml = QUOTE_HTML_MARK + ' style="margin-top:1em">' + lines.map((line) => "<div>" + escapeHtml(line) + "</div>").join("") + "<br>" + sourceHtml + "</div>";
+            files = sourceFiles;
+          } else {
+            if (action.subject === void 0) subject = /^\s*(re|回复|答复)\s*[:：]/i.test(source.subject || "") ? source.subject : "Re: " + (source.subject || "");
+            const attribution = "On " + (date || "an earlier date") + ", " + fromText + " wrote:";
+            quoteText = "\n\n" + attribution + "\n" + sourceText.split("\n").map((line) => "> " + line).join("\n");
+            quoteHtml = quoteBlock(sourceHtml, '<div dir="auto">' + escapeHtml(attribution) + "</div>");
+            const cids = new Set((sourceHtml.match(/cid:[^"'\s)>]+/gi) || []).map((ref) => bareCid(decodeSafe(ref.slice(4)))));
+            files = sourceFiles.filter((file) => file.contentId && cids.has(file.contentId));
+            inReplyTo = DRAFT_ID_RE.test(source.messageId || "") ? source.messageId : "";
+            references = [.../* @__PURE__ */ new Set([...referencesOf(source), ...inReplyTo ? [inReplyTo] : []])];
+            const replyTo = headerAddresses(source, "replyTo");
+            const from = headerAddresses(source, "from");
+            let primary = replyTo.length ? replyTo : from;
+            if (primary.length && primary.every((item) => item.address.toLowerCase() === self)) primary = headerAddresses(source, "to");
+            const seen = /* @__PURE__ */ new Set([self]);
+            const unique = (items) => items.filter((item) => {
+              const key = item.address.toLowerCase();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+            to = addressList(unique(primary));
+            if (mode === "reply_all") cc = addressList(unique([...headerAddresses(source, "to"), ...headerAddresses(source, "cc")]));
+          }
+        }
+        const bodyHtml = action.body_html !== void 0 ? action.body_html : textToHtml(body);
+        if (body.length > MAX_FIELD || bodyHtml.length > MAX_HTML_FIELD) throw new ComposeError("fieldsInvalid");
+        if (quoteText.length > MAX_FIELD || quoteHtml.length > MAX_HTML_FIELD) {
+          const full = quoteText;
+          for (let limit = 12e3; ; limit = Math.floor(limit * 0.6)) {
+            quoteText = full.slice(0, limit).replace(/\s+$/, "") + "\n\u2026";
+            quoteHtml = quoteBlock(textToHtml(quoteText.trim()));
+            if (quoteHtml.length <= MAX_HTML_FIELD || limit < 200) break;
+          }
+          if (mode !== "forward") files = [];
+        }
+        const html = bodyHtml + quoteHtml;
+        return {
+          to: pick("to", to),
+          cc: pick("cc", cc),
+          bcc: pick("bcc", ""),
+          subject,
+          text: body + quoteText,
+          html,
+          inReplyTo,
+          references,
+          files: files.concat(additions)
+        };
+      }
+      return { readDraft, writeDraft, deleteDraft, updateDraft, createDraft };
+    }
+    function decodeSafe(value) {
+      try {
+        return decodeURIComponent(value);
+      } catch (_error) {
+        return value;
+      }
+    }
+    function stripScripts(html) {
+      const lower = html.toLowerCase();
+      const nameEnd = (at) => !/[a-z0-9:_-]/.test(lower[at] || "");
+      let out = "";
+      let index = 0;
+      while (index < html.length) {
+        const lt = html.indexOf("<", index);
+        if (lt < 0) {
+          out += html.slice(index);
+          break;
+        }
+        out += html.slice(index, lt);
+        const open = lower.startsWith("<script", lt) && nameEnd(lt + 7);
+        const close = lower.startsWith("</script", lt) && nameEnd(lt + 8);
+        if (!open && !close) {
+          out += "<";
+          index = lt + 1;
+          continue;
+        }
+        let end = lt;
+        if (open) {
+          end = lower.indexOf("</script", lt + 7);
+          if (end < 0) break;
+        }
+        const gt = html.indexOf(">", end);
+        if (gt < 0) break;
+        index = gt + 1;
+      }
+      return out;
+    }
+    function htmlFragment(html) {
+      const styles = (html.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) || []).join("");
+      const body = /<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html);
+      const inner = body ? styles + body[1] : html.replace(/<!doctype[^>]*>|<\/?(?:html|head|body)\b[^>]*>|<meta\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>/gi, "");
+      return stripScripts(inner);
+    }
+    function tagEnd(source, start) {
+      let quote = "";
+      for (let index = start + 1; index < source.length; index++) {
+        const char = source[index];
+        if (quote) {
+          if (char === quote) quote = "";
+        } else if (char === '"' || char === "'") quote = char;
+        else if (char === ">") return index;
+      }
+      return -1;
+    }
+    function htmlToText(html) {
+      const source = stripScripts(html);
+      const lower = source.toLowerCase();
+      const entities = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+      let out = "";
+      let index = 0;
+      while (index < source.length) {
+        const lt = source.indexOf("<", index);
+        out += source.slice(index, lt < 0 ? source.length : lt);
+        if (lt < 0) break;
+        const gt = tagEnd(source, lt);
+        if (gt < 0) break;
+        const tag = /^<\/?([a-z][a-z0-9]*)/.exec(lower.slice(lt, gt + 1));
+        const name = tag ? tag[1] : "";
+        if (name === "style" && lower[lt + 1] !== "/") {
+          const close = lower.indexOf("</style", gt);
+          index = close < 0 ? source.length : source.indexOf(">", close) < 0 ? source.length : source.indexOf(">", close) + 1;
+          continue;
+        }
+        if (name === "br" || lower[lt + 1] === "/" && ["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "blockquote"].includes(name)) out += "\n";
+        index = gt + 1;
+      }
+      return out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, entity) => {
+        if (entity[0] === "#") {
+          const code = entity[1] === "x" || entity[1] === "X" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+          return Number.isInteger(code) && code > 0 && code < 1114112 ? String.fromCodePoint(code) : all;
+        }
+        return Object.hasOwn(entities, entity.toLowerCase()) ? entities[entity.toLowerCase()] : all;
+      }).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    }
+    var MIME_TYPES = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml",
+      pdf: "application/pdf",
+      txt: "text/plain",
+      csv: "text/csv",
+      md: "text/markdown",
+      html: "text/html",
+      json: "application/json",
+      zip: "application/zip",
+      doc: "application/msword",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      xls: "application/vnd.ms-excel",
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ppt: "application/vnd.ms-powerpoint",
+      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      mp3: "audio/mpeg",
+      mp4: "video/mp4",
+      mov: "video/quicktime",
+      ics: "text/calendar",
+      eml: "message/rfc822"
+    };
+    function mimeFor(filename, declared) {
+      if (typeof declared === "string" && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(declared)) return declared.toLowerCase();
+      const extension = /\.([a-z0-9]+)$/i.exec(filename || "");
+      return extension && MIME_TYPES[extension[1].toLowerCase()] || "application/octet-stream";
+    }
+    module2.exports = { createMailCompose, textToHtml, MESSAGES };
+  }
+});
+
 // src/worker.cjs
 var require_worker = __commonJS({
   "src/worker.cjs"(exports2, module2) {
@@ -66105,6 +67026,7 @@ var require_worker = __commonJS({
     var { ImapFlow } = require_imap_flow();
     var nodemailer = require_nodemailer();
     var { simpleParser } = require_mailparser();
+    var { createMailCompose } = require_mail_compose();
     var QQ = Object.freeze({
       imapHost: "imap.qq.com",
       imapPort: 993,
@@ -66215,6 +67137,7 @@ var require_worker = __commonJS({
         from: addressText(envelope.from),
         to: addressText(envelope.to),
         subject: envelope.subject || "",
+        message_id: envelope.messageId || "",
         date: isoDateOrNull(envelope.date) || receivedAt,
         received_at: receivedAt,
         unread: !flags.includes("\\Seen"),
@@ -66710,7 +67633,30 @@ var require_worker = __commonJS({
         smtp: `${QQ.smtpHost}:${QQ.smtpPort}`
       };
     }
-    async function performAction(credentials, action, deps, execution = { state: "not_executed" }) {
+    var COMPOSE_ACTIONS = Object.freeze({
+      compose_create: "createDraft",
+      compose_read: "readDraft",
+      compose_write: "writeDraft",
+      compose_update: "updateDraft",
+      compose_delete: "deleteDraft"
+    });
+    function composeFor(credentials, deps) {
+      return createMailCompose({
+        email: credentials.email,
+        maxSourceBytes: MAX_SOURCE_BYTES,
+        withImap: (operation) => withImap(credentials, deps, operation),
+        withMailbox,
+        findDraftFolder,
+        createSmtp: () => deps.createSmtp(credentials),
+        createComposer: () => deps.createComposer(),
+        parseMessage: (source) => deps.parseMessage(source),
+        describeError: (error) => humanizeError(error)
+      });
+    }
+    async function performAction(credentials, action, deps, execution = { state: "not_executed" }, locale) {
+      if (Object.hasOwn(COMPOSE_ACTIONS, action.action)) {
+        return composeFor(credentials, deps)[COMPOSE_ACTIONS[action.action]](action, locale);
+      }
       switch (action.action) {
         case "list_folders":
           return listFolders(credentials, deps);
@@ -66797,7 +67743,7 @@ var require_worker = __commonJS({
         if (request.method === "mail/action") {
           credentials = consumeRequestCredentials(request);
           const action = params.action && typeof params.action === "object" ? params.action : {};
-          return await performAction(credentials, action, deps, execution);
+          return await performAction(credentials, action, deps, execution, params.locale);
         }
         throw new Error("METHOD_NOT_FOUND");
       } catch (error) {

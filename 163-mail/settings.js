@@ -69,22 +69,27 @@
     };
   }
 
+  // Same lock as main.js and Cindy's mail SDK, which keeps draft-card records in this KV.
   async function saveAccountState(email, credentialSlot) {
-    var current = await readJson('/kv');
-    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    data.email = email;
-    data.credentialSlot = credentialSlot;
-    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error('保存 163 邮箱连接状态失败');
+    return navigator.locks.request('163-mail-kv', async function () {
+      var current = await readJson('/kv');
+      var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+      data.email = email;
+      data.credentialSlot = credentialSlot;
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+      if (!response.ok) throw new Error('保存 163 邮箱连接状态失败');
+    });
   }
 
   async function clearAccountState() {
-    var current = await readJson('/kv');
-    var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    delete data.email;
-    delete data.credentialSlot;
-    var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
-    if (!response.ok) throw new Error('清除 163 邮箱连接状态失败');
+    return navigator.locks.request('163-mail-kv', async function () {
+      var current = await readJson('/kv');
+      var data = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+      delete data.email;
+      delete data.credentialSlot;
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(data) });
+      if (!response.ok) throw new Error('清除 163 邮箱连接状态失败');
+    });
   }
 
   async function saveAuthorizationCode(credentialSlot, value) {

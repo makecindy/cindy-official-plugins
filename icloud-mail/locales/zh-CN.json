@@ -7,7 +7,7 @@
       "description": "查询 iCloud Mail 是否已配置。只返回邮箱地址和连接状态，不返回 App 专用密码。"
     },
     "icloud_mail": {
-      "description": "执行 iCloud Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。"
+      "description": "执行 iCloud Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。 写信用 draft/reply/reply_all/forward（回复默认用 reply_all），草稿在 Cindy 显示为可编辑的草稿卡；send_draft 在 10 秒可撤销倒计时后发送卡片内容，只在用户确认后调用，不支持直接发送。"
     }
   }
 }

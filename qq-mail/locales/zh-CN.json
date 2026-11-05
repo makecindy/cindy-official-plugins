@@ -7,7 +7,7 @@
       "description": "查询 QQ 邮箱是否已配置。只返回邮箱地址和连接状态，不返回授权码。"
     },
     "qq_mail": {
-      "description": "执行 QQ 邮箱 IMAP/SMTP 查询及邮件操作。send/draft 的 attachment_paths 仅接收明确授权的本机绝对路径，最多 10 个、合计 32 MiB；Worker 读取指定普通文件，经 smtp.qq.com 发送或 imap.qq.com 保存草稿，不修改源文件。send/draft/read 返回附件名称、字节数与 SHA-256；read 不下载附件。勿用顶层 dir/attachments。发送与修改须有用户明确要求；结果不确定时先核对邮箱，禁止盲目重试。 read 拒绝超过 48 MiB 的编码邮件（含正文和 MIME）；先检查 search 返回的 size。 search按received_at收信时间筛选（since含、before不含）；每批最多20封，has_more=true时用next_page_token作为page_token并保持原筛选继续。只有coverage_complete=true且翻页结束才可称查全。标题/地址在本地元数据筛选；全文可能漏搜，text_scope:metadata只查标题/地址。"
+      "description": "执行 QQ 邮箱 IMAP/SMTP 查询及邮件操作。attachment_paths 仅接收明确授权的本机绝对路径（最多 10 个，新增附件单个不超过 16 MiB、合计 25 MiB）；Worker 读取指定普通文件存入 imap.qq.com 草稿箱，不修改源文件；邮件仅在草稿卡倒计时结束后经 smtp.qq.com 发送。read 返回附件名称、字节数与 SHA-256，不下载附件。勿用顶层 dir/attachments。发送与修改须有用户明确要求；结果不确定时先核对邮箱，禁止盲目重试。 read 拒绝超过 48 MiB 的编码邮件（含正文和 MIME）；先检查 search 返回的 size。 search按received_at收信时间筛选（since含、before不含）；每批最多20封，has_more=true时用next_page_token作为page_token并保持原筛选继续。只有coverage_complete=true且翻页结束才可称查全。标题/地址在本地元数据筛选；全文可能漏搜，text_scope:metadata只查标题/地址。 写信用 draft/reply/reply_all/forward（回复默认用 reply_all），草稿在 Cindy 显示为可编辑的草稿卡；send_draft 在 10 秒可撤销倒计时后发送卡片内容，只在用户确认后调用，不支持直接发送。"
     },
     "qq_mail_connect": {
       "description": "使用 Cindy 已保存的 IMAP/SMTP 授权码连接指定 QQ 邮箱，验证 imap.qq.com 和 smtp.qq.com 后保存邮箱地址。用于用户完成保密输入后补全或恢复连接。只传邮箱地址，绝不传授权码；不发送邮件。"

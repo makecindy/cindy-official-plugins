@@ -1,13 +1,16 @@
 {
   "name": "Outlook 邮箱",
-  "description": "搜索、阅读、发送、起草和整理 Outlook 与 Microsoft 365 邮件。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
+  "description": "搜索、阅读、起草、回复、发送和整理 Outlook 与 Microsoft 365 邮件；写信和回复使用 Cindy 可编辑草稿卡，发送前可撤销。通过 Cindy 托管 OAuth 授权和令牌注入访问 Microsoft Graph；首次使用请在插件详情页连接账号。",
   "whenToUse": "需要连接 Outlook、Hotmail、Live 或 Microsoft 365 企业邮箱，查询、阅读、发送、起草或整理邮件时使用，包括世纪互联中国区微软托管邮箱。",
   "tools": {
     "outlook_accounts": {
       "description": "同时列出全球版和世纪互联中国区的已连接账号、各区默认账号及应用配置状态。支持多账号同时登录；可传 profile_account，通过只读 Graph 查询该账号的 mail 与 user_principal_name。登录名不一定是收信地址，mail 为空时不要猜测。不读取邮件、不返回令牌。"
     },
     "outlook_mail": {
-      "description": "搜索、阅读、发送、保存草稿、列文件夹、标记已读／未读及移动邮件。发送、草稿和整理操作必须来自用户明确意图，发送前核对发件账号、收件人和内容。send 成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；分页凭据绑定账号及操作。仅支持微软云端邮箱，不支持其他服务商或本地 Exchange。"
+      "description": "搜索、阅读、起草、回复、转发、发送和整理邮件，列文件夹、标记已读／未读及移动。写信和回复先用 draft、reply_all（默认回复所有人，排除自己、重复地址和密送）、reply（仅回复发件人，用户明确要求时）或 forward 创建草稿，Cindy 会展示可编辑的草稿卡；get_draft/update_draft/delete_draft 读取、修改、删除草稿，send_draft 经 10 秒撤销倒计时发送最新卡片内容。不能直接 send。用户确认收件人和内容后才发送；发送成功仅表示微软接受请求，不代表送达；结果为 unknown 时先查邮箱，不要直接重试。read 不标记已读；回答中引用返回的 web_url 链接。仅支持微软云端邮箱。"
+    },
+    "outlook_read_message": {
+      "description": "只读读取 Outlook 网页邮件链接（含 cindy_account 绑定账号）用于 Cindy 原生阅读，返回当前邮件正文、附件及同一会话的邮件摘要。默认不标记已读；仅在用户明确打开或要求标记已读时传 markRead:true，只标记当前这封，返回 markReadResult.execution（not_executed/executed/unknown），unknown 时先在邮箱核对，不要直接重试。不修改草稿、不发送。展开会话中的其他邮件时读取其 url。"
     }
   }
 }

@@ -1,13 +1,16 @@
 {
   "name": "Outlook メール",
-  "description": "Cindy が管理する OAuth と Microsoft Graph を通じて、Outlook と Microsoft 365 メールを検索、閲覧、送信、下書き、整理します。先にプラグイン設定でアカウントを接続してください。",
+  "description": "Outlook と Microsoft 365 のメールを検索・閲覧・下書き・返信・送信・整理します。作成と返信には Cindy の編集可能な下書きカードを使い、送信前に取り消せます。Cindy ホストが管理する OAuth と Microsoft Graph を使用します。最初にプラグイン設定でアカウントを接続してください。",
   "whenToUse": "Outlook、Hotmail、Live、Microsoft 365（中国 21Vianet を含む）のアカウント接続、メールの検索・閲覧・送信・下書き・整理に使用。",
   "tools": {
     "outlook_accounts": {
       "description": "グローバル版と中国版の接続済みアカウント、地域別の既定アカウントとアプリ設定を一覧表示します。複数アカウントを同時接続できます。profile_account を指定すると、Graph からそのアカウントの mail と user_principal_name を読み取ります。サインイン名は受信アドレスとは限りません。mail が null の場合は推測しないでください。メール本文やトークンは取得しません。"
     },
     "outlook_mail": {
-      "description": "検索、閲覧、送信、下書き、フォルダー一覧、既読／未読、移動。書き込みはユーザーの明確な指示が必要。送信前に送信元・宛先・本文を確認。成功は受付のみで配達確認ではありません。結果が unknown の場合は再実行前にメールボックスを確認。閲覧で既読にはしません。ページ情報はアカウントと操作に紐付きます。Microsoft クラウド専用。他社やオンプレミス Exchange は非対応。"
+      "description": "メールの検索・閲覧・下書き・返信・転送・送信と整理（フォルダー一覧、既読／未読、移動）を行います。作成や返信は draft、reply_all（既定。自分、重複アドレス、Bcc を除く全員に返信）、reply（ユーザーが求めた場合のみ差出人に返信）、forward で下書きを作成し、Cindy が編集可能な下書きカードを表示します。get_draft/update_draft/delete_draft で下書きを読み込み・編集・削除し、send_draft は 10 秒間の取り消しカウントダウンの後に最新のカード内容を送信します。直接送信はできません。ユーザーが宛先と内容を確認してから送信してください。成功は Microsoft が受け付けたことを意味し、配信完了ではありません。execution_status が unknown の場合は、再試行の前にメールボックスを確認してください。閲覧では既読になりません。回答では返された web_url を引用してください。Microsoft クラウドのメールボックスのみ対応します。"
+    },
+    "outlook_read_message": {
+      "description": "読み取り専用：Outlook のウェブメールリンク（cindy_account でアカウントに結び付け）を Cindy のネイティブ表示用に読み込み、選択したメールの本文・添付ファイル・同じ会話のメール概要を返します。ユーザーが明示的に開いた、または既読を求めた場合に markRead:true を渡したときだけ、そのメールのみを既読にし、markReadResult.execution（not_executed/executed/unknown）を返します。unknown の場合はメールボックスを確認し、そのまま再試行しないでください。下書きの編集や送信は行いません。会話内の他のメールは、その url を読み込んで展開します。"
     }
   }
 }

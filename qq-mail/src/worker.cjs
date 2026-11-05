@@ -8,6 +8,7 @@ const { createHash } = require('node:crypto');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
+const { createMailCompose } = require('./mail-compose.cjs');
 
 const QQ = Object.freeze({
   imapHost: 'imap.qq.com',
@@ -146,6 +147,7 @@ function summaryFromMessage(message, folder) {
     from: addressText(envelope.from),
     to: addressText(envelope.to),
     subject: envelope.subject || '',
+    message_id: envelope.messageId || '',
     date: isoDateOrNull(envelope.date) || receivedAt,
     received_at: receivedAt,
     unread: !flags.includes('\\Seen'),
@@ -654,7 +656,29 @@ async function testAccount(credentials, deps) {
   };
 }
 
-async function performAction(credentials, action, deps, execution = { state: 'not_executed' }) {
+// Common mail-card operations return structured receipts and never throw.
+const COMPOSE_ACTIONS = Object.freeze({
+  compose_create: 'createDraft', compose_read: 'readDraft', compose_write: 'writeDraft',
+  compose_update: 'updateDraft', compose_delete: 'deleteDraft',
+});
+function composeFor(credentials, deps) {
+  return createMailCompose({
+    email: credentials.email,
+    maxSourceBytes: MAX_SOURCE_BYTES,
+    withImap: (operation) => withImap(credentials, deps, operation),
+    withMailbox,
+    findDraftFolder,
+    createSmtp: () => deps.createSmtp(credentials),
+    createComposer: () => deps.createComposer(),
+    parseMessage: (source) => deps.parseMessage(source),
+    describeError: (error) => humanizeError(error),
+  });
+}
+
+async function performAction(credentials, action, deps, execution = { state: 'not_executed' }, locale) {
+  if (Object.hasOwn(COMPOSE_ACTIONS, action.action)) {
+    return composeFor(credentials, deps)[COMPOSE_ACTIONS[action.action]](action, locale);
+  }
   switch (action.action) {
     case 'list_folders':
       return listFolders(credentials, deps);
@@ -757,7 +781,7 @@ async function handleRequest(request, deps = createRuntimeDeps()) {
     if (request.method === 'mail/action') {
       credentials = consumeRequestCredentials(request);
       const action = params.action && typeof params.action === 'object' ? params.action : {};
-      return await performAction(credentials, action, deps, execution);
+      return await performAction(credentials, action, deps, execution, params.locale);
     }
     throw new Error('METHOD_NOT_FOUND');
   } catch (error) {

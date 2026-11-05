@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "yahoo-mail",
   "name": "Yahoo Mail",
   "description": "通过 Yahoo Mail IMAP/SMTP 搜索、阅读、整理邮件，并创建草稿或发送邮件。应用密码由 Cindy 安全保存，仅在执行邮箱请求时临时提供给插件 Worker。",
   "whenToUse": "需要查找、阅读或整理 Yahoo Mail 邮件，以及创建草稿或发送邮件时使用。首次使用前请在插件详情页输入完整 Yahoo 邮箱地址和应用密码并完成连接测试。",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -16,10 +16,6 @@
   "entry": "main.js",
   "settingsHtml": "settings.html",
   "settingsHeight": 520,
-  "slots": [
-    "tool",
-    "node"
-  ],
   "node": {
     "entry": "node/worker.cjs",
     "protocol": "json-rpc-stdio",
@@ -56,7 +52,7 @@
     },
     {
       "name": "yahoo_mail",
-      "description": "执行 Yahoo Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。如果写操作结果不确定，请先检查邮箱当前状态，不要直接重试。",
+      "description": "执行 Yahoo Mail 操作：列文件夹、搜索、阅读、发送、保存草稿、标记已读/未读或移动邮件。每次操作临时建立 IMAP/SMTP 连接并在完成后断开；发送、移动和修改已读状态必须来自用户的明确要求。如果写操作结果不确定，请先检查邮箱当前状态，不要直接重试。 写信用 draft/reply/reply_all/forward（回复默认用 reply_all），草稿在 Cindy 显示为可编辑的草稿卡；send_draft 在 10 秒可撤销倒计时后发送卡片内容，只在用户确认后调用，不支持直接发送。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -66,20 +62,27 @@
               "list_folders",
               "search",
               "read",
-              "send",
               "draft",
+              "reply",
+              "reply_all",
+              "forward",
+              "get_draft",
+              "update_draft",
+              "send_draft",
+              "delete_draft",
               "mark_read",
               "mark_unread",
               "move"
-            ]
+            ],
+            "description": "draft 新建；reply 仅回复发件人；reply_all 回复全部（默认，排除自己、重复地址和原密送）；forward 转发并带原附件。reply/reply_all/forward 用 folder 与 message_uid 指定原邮件。草稿存入草稿箱并在 Cindy 显示可编辑、自动同步的草稿卡，返回 draft_id（Message-ID）。get_draft/update_draft/delete_draft/send_draft 传 draft_id；send_draft 按卡片最新内容 10 秒倒计时后发送，只在用户确认该邮件后调用。草稿箱 search 结果的 message_id 即 draft_id。"
           },
           "folder": {
             "type": "string",
-            "description": "IMAP 文件夹原始名称，默认 INBOX。非 INBOX 操作前先调用 list_folders，逐字使用服务器返回的 path，不要翻译。"
+            "description": "IMAP 文件夹原始名称，默认 INBOX。非 INBOX 操作前先调用 list_folders，逐字使用服务器返回的 path，不要翻译。reply/reply_all/forward 时为原邮件所在文件夹。"
           },
           "message_uid": {
             "type": "integer",
-            "description": "邮件 UID。UID 只在对应 folder 内有效，必须与搜索结果返回的 folder 一起使用。"
+            "description": "邮件 UID。UID 只在对应 folder 内有效，必须与搜索结果返回的 folder 一起使用。reply/reply_all/forward 时为原邮件 UID。"
           },
           "target_folder": {
             "type": "string",
@@ -94,21 +97,21 @@
             "description": "search 的发件人关键词。"
           },
           "to": {
-            "description": "search 时是收件人关键词；send/draft 时是收件人地址，可传逗号分隔字符串或字符串数组。"
+            "description": "search 时是收件人关键词；draft/reply/reply_all/forward/update_draft 时是收件人地址，可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "cc": {
-            "description": "send/draft 的抄送地址，可传逗号分隔字符串或字符串数组。"
+            "description": "draft/reply/reply_all/forward/update_draft 的抄送地址，可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "bcc": {
-            "description": "send/draft 的密送地址，可传逗号分隔字符串或字符串数组。"
+            "description": "draft/reply/reply_all/forward/update_draft 的密送地址，可传逗号分隔字符串或字符串数组。回复时省略即按原邮件自动计算。"
           },
           "subject": {
             "type": "string",
-            "description": "search 时是主题关键词；send/draft 时是邮件主题。"
+            "description": "search 时是主题关键词；draft/update_draft 时是邮件主题。"
           },
           "body_text": {
             "type": "string",
-            "description": "send/draft 的纯文本正文。"
+            "description": "draft/reply/reply_all/forward/update_draft 的纯文本正文（不含引用的原邮件，回复会自动附上引用）。"
           },
           "unread": {
             "type": "boolean",
@@ -125,6 +128,22 @@
           "max_results": {
             "type": "integer",
             "description": "search 返回条数，默认 10，最大 20。"
+          },
+          "body_html": {
+            "type": "string",
+            "description": "可选 HTML 正文片段，用于图文邮件；与 body_text 表达同一内容。内嵌图片用 cid: 引用附件。"
+          },
+          "draft_id": {
+            "type": "string",
+            "description": "get_draft/update_draft/delete_draft/send_draft 的草稿 ID：创建或读取草稿时返回的 draft_id（Message-ID，含尖括号）。"
+          },
+          "attachment_paths": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "string"
+            },
+            "description": "draft/reply/reply_all/forward/update_draft 追加的附件：运行 Cindy 的电脑上的本机文件绝对路径，最多 10 个，新增附件单个不超过 16 MiB、合计 25 MiB；仅使用用户明确授权发送的文件。"
           }
         },
         "required": [
@@ -132,5 +151,14 @@
         ]
       }
     }
-  ]
+  ],
+  "minCindyVersion": "0.1.112",
+  "cindy": {
+    "media": [
+      "deposit"
+    ]
+  },
+  "agent": {},
+  "sessionContext": true,
+  "mail": true
 }
