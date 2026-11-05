@@ -17,10 +17,10 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 | Stage | Looks |
 |---|---|
 | Fast: an unacknowledged update, a due defer or no-checks deadline, an open settle window | every firing |
-| Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every 6 minutes |
-| Idle | every 10 minutes |
-| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | every 30 minutes |
-| Quiet: a draft, or nothing changed for 6 hours | every hour |
+| Active: checks running, a failure, a conflict or merge-queue problem, a new commit or an agent round in the last hour | every firing of the 5-minute schedule |
+| Idle | about every 10 minutes |
+| Waiting: only a human approval or the merge is left (`READY`, `BLOCKED_HUMAN`) | about every 30 minutes |
+| Quiet: a draft, or nothing changed for 6 hours | about every hour |
 
 **Cindy fires it early.** When the title-bar PR status (refreshed about every 90 seconds while someone looks at Cindy) shows a change for this PR, Cindy runs the schedule at once and tells the check through the hook's stdin (`trigger: { kind: 'watch', … }`). Such a run skips both the pace and the probe and reads the PR in full. `--triggered` does the same by hand; `--no-pacing` looks every time.
 

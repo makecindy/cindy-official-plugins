@@ -3097,7 +3097,8 @@ function renderPrCard(card, settings) {
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
   var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen, openOnly) : '') + prFooter(left, actions, openOnly);
-  if (gear && card.settingsOpen) body += prSettingsPanel(settings);
+  // The open settings panel only holds while the PR is open, like the button that opened it.
+  if (gear && card.settingsOpen) body += '<div' + openOnly + '>' + prSettingsPanel(settings) + '</div>';
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
   return PR_CSS +
     '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;flex-direction:column;justify-content:space-between;' +

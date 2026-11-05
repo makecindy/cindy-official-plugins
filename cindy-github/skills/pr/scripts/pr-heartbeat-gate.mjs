@@ -1247,6 +1247,8 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   // 检查失败期间 base 前进要报,探测看到 base 变了就完整读取。
   if (previous.watch.baseSha && probe.base && probe.base !== previous.watch.baseSha) return false;
   if (previous.pendingWatch || previous.inFlight || previous.merged || previous.closed) return false;
+  // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
+  if ((Number(previous.settleUntil) || 0) > 0) return false;
   if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;

@@ -846,7 +846,8 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   for (const text of [zhCopy.prCiRunning, fill(zhCopy.prThreadsOpen, { count: 1 }), zhCopy.prMergeWaiting]) assert.ok(lines.includes(text), text);
   // Parts that only hold while the PR is open carry the slot key, so the host can hide them once it sees a merge.
   const openOnly = runtime.lastCard(cardId).html.match(/<(\w+)[^>]*data-ghost-pr-open-only="octo\/repo#7"/g) ?? [];
-  assert.deepEqual(openOnly.map((tag) => tag.match(/^<(\w+)/)[1]), ['button', 'div']);
+  // The settings panel opened earlier in this test is open-only too (Greptile P2 on #287), not just its button.
+  assert.deepEqual(openOnly.map((tag) => tag.match(/^<(\w+)/)[1]), ['button', 'div', 'div']);
 
   runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));
   const merged = await runtime.tool({ card_id: cardId });

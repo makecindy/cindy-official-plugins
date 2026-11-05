@@ -489,6 +489,11 @@ test('decide:只剩人工批准时吸收外部变化;保底巡检;defer 未到�
   assert.equal(expired.reason, 'defer-expired', '到点再唤起一次(等机器人 review 的那 15 分钟)');
   assert.equal(expired.keepNextAllowAt, undefined, '放行即消费');
   assert.equal(probeAllowsSkip({ watch: quiet.watch, probe: { status: 's', remarks: 'r' }, lastFullReadAt: T0 + 19 * MIN, lastPassAt: T0, nextAllowAt: T0 + 15 * MIN }, { status: 's', remarks: 'r' }, T0 + 20 * MIN), false, '探测不跳过到点的 defer');
+  // Review (Codex P2, Greptile P2 on #287): while news is held for the bots, an identical probe must
+  // not skip the full read, or the hold would outlive its 20-minute deadline.
+  const holding = { watch: quiet.watch, probe: { status: 's', remarks: 'r' }, lastFullReadAt: T0 + 5 * MIN, lastPassAt: T0, settleUntil: T0 + 20 * MIN };
+  assert.equal(probeAllowsSkip(holding, { status: 's', remarks: 'r' }, T0 + 10 * MIN), false, '收齐期间探测不跳过');
+  assert.equal(probeAllowsSkip({ ...holding, settleUntil: undefined }, { status: 's', remarks: 'r' }, T0 + 10 * MIN), true);
   const red = snap({ checks: [check('build', 'failed', { required: true })] });
   assert.equal(decide({ snap: red, previous: { ...quiet, nextAllowAt: T0 + 2 * day }, now: T0 + MIN }).reason, 'changed', '新事件穿透 defer');
 });

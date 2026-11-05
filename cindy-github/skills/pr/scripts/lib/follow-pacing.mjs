@@ -6,7 +6,7 @@
  *   - fast (every tick): a host trigger, an unacknowledged update, a due defer or no-checks deadline,
  *     or an open settle window;
  *   - active: checks running, something failing or conflicting, a new commit or an agent round
- *     in the last hour;
+ *     in the last hour (every tick of the 5-minute schedule);
  *   - waiting: only a human approval or the merge is left;
  *   - quiet: a draft, or nothing changed for hours;
  *   - otherwise idle.
@@ -24,11 +24,13 @@
 export const TICK_MS = 2 * 60_000;
 export const PACE_MS = {
   fast: 0,
-  active: 6 * 60_000,
+  active: 5 * 60_000,
   idle: 10 * 60_000,
   waiting: 30 * 60_000,
   quiet: 60 * 60_000,
 };
+/** The cron fires every TICK_MS but never exactly on time; a look this much early still counts as due. */
+export const PACE_SLACK_MS = 60_000;
 export const ACTIVE_WINDOW_MS = 60 * 60_000;
 export const QUIET_AFTER_MS = 6 * 60 * 60_000;
 export const SETTLE_MAX_MS = 20 * 60_000;
@@ -65,13 +67,37 @@ export function reviewerBotsOf(snap) {
   return bots;
 }
 
-/** Merge this snapshot's reviewer bots into a repository record `{ <bot>: lastSeenAtMs }`. */
+/** When each reviewer bot last reviewed or reacted on this PR (ms); bots with no usable time are left out. */
+function reviewerBotActivity(snap) {
+  const last = new Map();
+  const note = (login, value) => {
+    const at = timeOf(value);
+    if (at === null) return;
+    const key = botKey(login);
+    if (key && at > (last.get(key) ?? 0)) last.set(key, at);
+  };
+  for (const review of snap?.reviews ?? []) {
+    if (review?.authorIsBot && review.author) note(review.author, review.submittedAt);
+  }
+  for (const reaction of snap?.reactions ?? []) {
+    if (/\[bot\]$/i.test(String(reaction?.author ?? ''))) note(reaction.author, reaction.at);
+  }
+  return last;
+}
+
+/**
+ * Merge this snapshot's reviewer bots into a repository record `{ <bot>: lastActivityAtMs }`, using the
+ * time of the review or reaction itself (an old PR that still shows a retired bot's review must not keep
+ * renewing it), and dropping bots idle for REPO_BOT_TTL_MS.
+ */
 export function updateRepoBots(record, snap, now) {
   const next = {};
   for (const [bot, at] of Object.entries(record && typeof record === 'object' ? record : {})) {
     if (Number.isFinite(Number(at)) && now - Number(at) < REPO_BOT_TTL_MS) next[bot] = Number(at);
   }
-  for (const bot of reviewerBotsOf(snap)) next[bot] = now;
+  for (const [bot, at] of reviewerBotActivity(snap)) {
+    if (now - at < REPO_BOT_TTL_MS && at > (next[bot] ?? 0)) next[bot] = at;
+  }
   return next;
 }
 
@@ -98,7 +124,8 @@ export function botsAnswered(snap, bots, head, since) {
     if (wanted.has(key)) answered.add(key);
   };
   for (const review of snap?.reviews ?? []) {
-    if ((head && review?.commitOid === head) || after(review?.submittedAt)) mark(review?.author);
+    // A review that names its commit answers for that commit only; time decides just when it names none.
+    if (review?.commitOid ? review.commitOid === head : after(review?.submittedAt)) mark(review?.author);
   }
   for (const comment of snap?.comments ?? []) {
     if (after(comment?.updatedAt ?? comment?.createdAt)) mark(comment?.author);
@@ -157,7 +184,7 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
   const fast = previous.pendingWatch
     || (nextAllowAt > 0 && now >= nextAllowAt)
     || (awaited !== null && now - awaited >= 15 * 60_000)
-    || (Number(previous.settleUntil) || 0) > now
+    || (Number(previous.settleUntil) || 0) > 0
     || Number(previous.retryBackoffUntil) > 0;
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
@@ -173,7 +200,7 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
     pace = 'idle';
   }
   const interval = PACE_MS[pace];
-  return since >= interval
+  return since + PACE_SLACK_MS >= interval
     ? { due: true, pace, reason: pace }
-    : { due: false, pace, reason: pace, nextAt: lastLook + interval };
+    : { due: false, pace, reason: pace, nextAt: lastLook + interval - PACE_SLACK_MS };
 }
