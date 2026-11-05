@@ -71,10 +71,21 @@
   // Embeds that run this script in their own frame (see manifest) and so mount the in-player entry.
   const framedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"]';
   const embeddedPlayers='iframe[src*="youtube.com/embed/"],iframe[src*="youtube-nocookie.com/embed/"],iframe[src*="player.vimeo.com/video/"],iframe[src*="geo.dailymotion.com/player/"],iframe[src*="player.bilibili.com/player.html"]';
-  function xVideoId(media){
-    const id=media.poster?.match(/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\/(\d+)\//)?.[1]||(media.closest('[data-testid="tweet"]')?.querySelector('a[href*="/status/"] time')?.parentElement?.getAttribute('href')||location.pathname).match(/\/status\/(\d+)/)?.[1];
-    return id?'x:'+id:undefined;
+  // Both ids a player can be known by: its media (from the poster, the stream or the thumbnail the
+  // feed draws before playing) and the post holding it (its timestamp links to it). A player outside
+  // any post (the media viewer) takes the post from the address; one inside a post never does, or a
+  // reply's video would pass for the post the page is about.
+  function xVideoIds(media){
+    const thumb=/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb|amplify_video|ext_tw_video|tweet_video)\/(\d{1,25})\//;
+    const box=media.closest('[data-testid="videoPlayer"],[data-testid="videoComponent"]');
+    const sources=[media.poster,media.currentSrc,media.getAttribute('src'),...[...media.querySelectorAll('source')].map(s=>s.src),...(box?[...box.querySelectorAll('img')].map(i=>i.currentSrc||i.src):[])];
+    const mediaId=sources.map(s=>String(s||'').match(thumb)?.[1]).find(Boolean);
+    const post=media.closest('article,[data-testid="tweet"]');
+    const link=post?[...post.querySelectorAll('time')].map(t=>t.closest('a[href*="/status/"]')).find(Boolean)?.getAttribute('href'):location.pathname;
+    const postId=link?.match(/\/status\/(\d{1,25})/)?.[1];
+    return {media:mediaId&&'x:'+mediaId,post:postId&&'x:'+postId};
   }
+  const xVideoId=media=>{const ids=xVideoIds(media);return ids.media||ids.post;};
   // Where a Cindy button sits in the site's own control bar. X only renders its
   // bar while the pointer is over the player, so a missing slot is normal there.
   function controlSlot(player){
@@ -91,7 +102,12 @@
   }
   function pageVideoId(media){
     if(videoSession?.videoId)return videoSession.videoId;
-    if(xSite)return xVideoId(media);
+    if(site.multi){
+      // A session keeps the identity it first sent, so its passages stay in one task and cache.
+      // A feed's address names no video: an unrecognised player gets its own identity rather than sharing the page's.
+      const id=xSite?xVideoId(media):undefined;if(!videoSession||media!==video)return id;
+      videoSession.videoId=id||site.id+':s-'+L.uuid();return videoSession.videoId;
+    }
     if(youtubeSite&&inFrame){const id=location.pathname.match(/\/embed\/([\w-]{1,48})/)?.[1];return id?'youtube:'+id:undefined;}
     return undefined;
   }
@@ -235,7 +251,7 @@
     panelSetup=setup;return setup.promise;
   }
   async function open(action){
-    const epoch=panelEpoch;
+    carried=null;const epoch=panelEpoch;
     if(action==='selection'&&window.getSelection()?.toString().trim())selection();
     if(action==='settings'&&videoSession){showSettings();videoSession.overlay.openSettings(false);return;}
     // Choosing another player on the page moves the session there.
@@ -540,7 +556,7 @@
     try {
       if(!video.isConnected||(video.currentSrc&&video.currentSrc!==session.src)){
         // X drops players scrolled far away. Picking another one would start paid translation nobody asked for.
-        if(site?.multi)close();else showVideo(session.auto);
+        if(site?.multi){carryVideo();close();}else showVideo(session.auto);
         return;
       }
       const youtube=youtubeSite;
@@ -619,7 +635,25 @@
     cueList();
   }
   function importSubtitleFile(){const session=videoSession;if(!session)return;const file=el('input');file.type='file';file.accept='.srt,.vtt';file.hidden=true;file.onchange=async()=>{try{const f=file.files[0];if(!f)return;if(f.size>2000000)throw Error('SUBTITLE_TOO_LARGE');const next=L.parseSubtitles(await f.text());if(session!==videoSession)return;session.imported=true;session.failed=false;session.paused=false;session.noCaptions=false;session.sameLanguage=false;mergeCues(next);translateCues();session.overlay?.update();}catch(e){report(e);}finally{file.remove();}};body.append(file);file.click();}
-  let requestedMedia=null;
+  let requestedMedia=null,carried=null;
+  // X replaces the player when a post opens from the feed (or the feed comes back): the same video in
+  // another element. Subtitles someone turned on follow it there, keeping the session's identity so the
+  // finished passages come from the cache and the same task. Any explicit Cindy action drops the carry.
+  function carryVideo(){
+    if(!xSite||!videoSession||!video)return;
+    // A post can hold several videos: its own id only stands in when no media id was ever seen.
+    const now=xVideoIds(video),media=videoSession.ids?.media||now.media,id=media?{media}:{post:videoSession.ids?.post||now.post};
+    carried=id.media||id.post?{...id,videoId:videoSession.videoId,auto:videoSession.auto,until:Date.now()+10000}:null;
+  }
+  function resumeCarried(){
+    const carry=carried;if(!carry||videoSession||disposed)return;
+    // Like automatic subtitles, a carried session never takes over a page being translated.
+    if(translated||translations.size){carried=null;return;}
+    if(Date.now()>carry.until){carried=null;return;}
+    const found=[...document.querySelectorAll('video')].filter(m=>{const ids=xVideoIds(m);return carry.media?ids.media===carry.media:ids.post===carry.post;}),media=found.length===1?found[0]:null;if(!media)return;
+    carried=null;const epoch=panelEpoch;
+    preparePanel(epoch).then(ok=>{if(ok&&epoch===panelEpoch&&runtimeReady()&&!videoSession&&media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}}).catch(()=>{});
+  }
   // A feed holds many players; the one playing on screen is the one meant.
   function siteMediaId(media){
     if(site?.id==='tiktok')return (media.closest('[id^="xgwrapper-"]')?.id.match(/(\d+)$/)||location.pathname.match(/\/video\/(\d+)/))?.[1];
@@ -634,7 +668,7 @@
     return shown.filter(v=>area(v)>0).sort((a,b)=>captioned(a)-captioned(b)||Number(a.paused)-Number(b.paused)||area(b)-area(a))[0]||shown[0]||all[0];
   }
   // auto marks a session the page started on its own; the first caption read already checks the language with it.
-  async function showVideo(auto=false){
+  async function showVideo(auto=false,videoId){
     clear('video');video=requestedMedia?.isConnected?requestedMedia:pickMedia();requestedMedia=null;
     // The player lives in an embedded frame, which runs its own copy of this script.
     if(!video&&document.querySelector(embeddedPlayers)){
@@ -647,7 +681,7 @@
     if(!video){body.append(el('p',t.noVideo));videoTimer=setTimeout(showVideo,1200);return;}
     const media=video;
     if(cueMedia!==media||media.currentSrc!==cueMediaSource){cues=[];cueMedia=media;cueMediaSource=media.currentSrc;}
-    cues=[];const session=videoSession={src:media.currentSrc,auto,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0};
+    cues=[];const session=videoSession={src:media.currentSrc,auto,running:false,paused:false,failed:false,imported:false,attempts:0,nextRead:0,...(videoId?{videoId}:{}),...(xSite?{ids:xVideoIds(media)}:{})};
     session.retry=async()=>{if(!subtitleSegmentation||!subtitleEditorial)await configure();session.retryButton.hidden=true;for(const chunk of session.chunks||[]){delete chunk.error;delete chunk.recovery;delete chunk.retryAt;delete chunk.retries;}session.failed=false;session.paused=false;session.attempts=0;session.nextRead=0;session.readBlocked=false;clearTimeout(videoTimer);return readCues(session);};
     // A manually opened player session is restorable on every supported site,
     // including YouTube when automatic opening is disabled. An X feed is the
@@ -778,7 +812,7 @@
   sendMessage({type:'cindy-video-resume'}).then(r=>{if(r?.enabled)open('video').catch(()=>{});else autoOpen();}).catch(()=>{});
   // The toolbar icon has a light and a dark version; the page knows the browser's appearance.
   {const scheme=globalThis.matchMedia?.('(prefers-color-scheme: dark)');const tell=()=>{if(runtimeReady())sendMessage({type:'cindy-color-scheme',dark:!!scheme.matches}).catch(()=>{});};if(scheme&&window===window.top){tell();scheme.addEventListener?.('change',tell,{signal:lifecycle.signal});}}
-  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=autoVideoSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();},1000);
+  let lastURL=location.href;navigationTimer=setInterval(()=>{if(!runtimeReady())return;const youtube=autoVideoSite;if(!videoSession||site?.multi)ensureVideoEntry();if(lastURL!==location.href){lastURL=location.href;restorePage();carryVideo();close();selectionButton?.remove();selected='';cues=[];autoOpen();}else if(!videoSession&&youtube&&prefs.autoVideo&&Date.now()>=nextAutoAttempt)autoOpen();resumeCarried();},1000);
   document.addEventListener('yt-navigate-finish',()=>{ensureVideoEntry();autoOpen();},{signal:lifecycle.signal});
   // Several players render their control bar on hover; do not leave the entry to the one-second timer.
   if(site.id!=='generic'&&!youtubeSite){let entryTimer;document.addEventListener('pointerover',e=>{if(!e.target.closest?.(playerSelector))return;clearTimeout(entryTimer);entryTimer=setTimeout(()=>{if(runtimeReady())ensureVideoEntry();},120);},{capture:true,passive:true,signal:lifecycle.signal});}
