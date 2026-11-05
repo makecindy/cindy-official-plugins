@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "Cindy で GitHub のリポジトリ、Issue、PR、Actions を管理します。github.com に対応。",
-  "whenToUse": "github.com のリポジトリとリンクにだけ使用します。GitLab インスタンスには GitLab を使用してください。issue や Pull Request の確認・変更、コードレビューの投稿・返信、Pull Request のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions の実行・確認、release 管理、コード・リポジトリ・ユーザー検索、Actions の成果物やログのダウンロードができます。この端末の GitHub ログインを優先します。プラグイン詳細でアカウントを接続するか、予備トークンを設定してください。",
+  "description": "Cindy で GitHub のリポジトリ、Issue、PR、Actions を管理します。PR を作成するときはインタラクティブなカードで提出を手伝い、マージまで CI とレビューを自動でフォローします。この端末の GitHub ログインを使用。github.com に対応。",
+  "whenToUse": "github.com のリポジトリとリンクにだけ使用します（GitLab インスタンスは GitLab）。issue・PR の確認と変更、コードレビュー、PR のマージ、リポジトリ・ブランチ・commit・ファイルの確認、GitHub Actions、release、検索、成果物やログのダウンロードができます。PR を作成するか尋ねるとき、作成後に PR の状態を示すときは PR カードを使います。この端末の GitHub ログインを優先し、予備トークンも設定できます。",
   "tools": {
     "list_tools": {
       "description": "issues、pulls、repo、commits、actions、releases、search、users、orgs、events、notifications、gists、git_data、reactions、meta を含む 117 個の GitHub 操作を一覧表示します。category なしではカテゴリ名・件数・説明を返し、category を指定するとそのカテゴリの全操作と説明・パラメータを返します。"

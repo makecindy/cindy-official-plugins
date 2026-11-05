@@ -1,7 +1,7 @@
 {
   "name": "GitHub",
-  "description": "Manage GitHub repositories, issues, pull requests, and Actions in Cindy. Supports github.com.",
-  "whenToUse": "Use for github.com repositories and links; use GitLab for GitLab instances. Handles issues, pull requests, reviews, merges, repositories, Actions, releases, search, and logs. Use the computer’s GitHub login first. Connect your account or configure a fallback token in plugin details.",
+  "description": "Manage GitHub repositories, issues, pull requests, and Actions in Cindy. When you open a PR, an interactive card helps you submit it and automatically follows CI and reviews until merge. Uses the local GitHub login. Supports github.com.",
+  "whenToUse": "Use for github.com repositories and links; use GitLab for GitLab instances. Handles issues, PRs, reviews, merges, repositories, Actions, releases, search, and logs. Use the PR card to ask about opening a PR and to show its status afterwards. Uses the local GitHub login or a fallback token.",
   "tools": {
     "list_tools": {
       "description": "List this plugin's 117 GitHub operations across issues, pulls, repo, commits, actions, releases, search, users, orgs, events, notifications, gists, git_data, reactions, and meta. With no category, return category names, counts, and descriptions; with a category, return every operation in that category with its description and parameters."
