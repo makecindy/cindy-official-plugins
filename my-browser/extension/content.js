@@ -659,7 +659,10 @@
     carried=null;resuming=carry;const epoch=panelEpoch;
     preparePanel(epoch).then(ok=>{
       if(resuming!==carry)return;resuming=null;
-      if(ok&&epoch===panelEpoch&&runtimeReady()&&!videoSession&&!translated&&!translations.size&&media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}
+      if(!ok||epoch!==panelEpoch||!runtimeReady()||videoSession||translated||translations.size)return;
+      if(media.isConnected){requestedMedia=media;return showVideo(carry.auto,carry.videoId);}
+      // X swapped the player while the panel was being prepared: keep the record, and its original expiry, for the next match.
+      carried=carry;
     }).catch(()=>{resuming=null;});
   }
   // A feed holds many players; the one playing on screen is the one meant.

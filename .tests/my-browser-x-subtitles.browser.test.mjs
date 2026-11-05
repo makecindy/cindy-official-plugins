@@ -208,7 +208,7 @@ for(const scenario of ['cancelled','page-translation']){
 }
 
 // X removes the old player and changes the address in either order; two timers notice them separately.
-for(const order of ['player first','address first']){
+for(const order of ['player first','address first','player replaced during setup']){
   test(`X: subtitles follow into the post when the ${order} changes`,{skip:!process.env.PLAYWRIGHT_CORE,timeout:40000},async()=>{
     const {chromium}=require(process.env.PLAYWRIGHT_CORE);
     const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
@@ -225,7 +225,7 @@ for(const order of ['player first','address first']){
         globalThis.browser={runtime:{id:'fixture',getURL:()=>'data:,',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){
           if(m.type!=='cindy-learning')return {ok:true,enabled:false,cues:[]};
           const q=m.request;log.push({op:q.op,videoId:q.source?.videoId});
-          if(q.op==='config')return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};
+          if(q.op==='config'){if(globalThis.configDelay)await new Promise(r=>setTimeout(r,globalThis.configDelay));return {ok:true,locale:'zh-CN',features:['subtitle-segmentation-v1','subtitle-editorial-v1']};}
           if(q.op==='subtitles')return {ok:true,cues:[{start:q.words[0].start,end:q.words.at(-1).end,text:'t',translation:'译'}]};
           return {ok:true};
         }},storage:{local:{async get(){return store;},async set(v){Object.assign(store,v);}},onChanged:{addListener(){},removeListener(){}}}};
@@ -239,8 +239,13 @@ for(const order of ['player first','address first']){
       const swap=()=>page.evaluate(()=>{const main=document.querySelector('main');main.innerHTML=post;captions(main.querySelector('video'));});
       const navigate=()=>page.evaluate(()=>history.pushState({},'','/u/status/9111'));
       if(order==='player first'){await page.evaluate(()=>document.querySelector('video').remove());await page.waitForTimeout(2600);await navigate();await swap();}
-      else{await navigate();await swap();}
-      await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'));
+      else if(order==='address first'){await navigate();await swap();}
+      else{
+        // The address changes first; the new player appears only after the panel's configuration request is under way.
+        await page.evaluate(()=>{globalThis.configDelay=1500;});
+        await navigate();await page.waitForFunction(()=>log.some(x=>x.op==='config'));await swap();
+      }
+      await page.waitForFunction(()=>log.some(x=>x.op==='subtitles'),null,{timeout:12000});
       assert.deepEqual([...new Set(await page.evaluate(()=>log.filter(x=>x.op==='subtitles').map(x=>x.videoId)))],['x:111']);
     }finally{await browser.close();}
   });
