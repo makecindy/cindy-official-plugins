@@ -30,10 +30,11 @@ This is the source for every official plugin (Ghost) in the
   approval. Start at
   [Submit your plugin](#submit-your-plugin).
 
-Already-installed marketplace plugins follow their recorded source and update
-silently. After a release is approved, a version bump can
-reach installed users without another click or capability-confirmation dialog. Treat capability expansion and
-runtime changes as immediate production changes: declare the minimum required
+Already-installed marketplace plugins follow their recorded source for updates.
+Review approval, installation, capability authorization, and account setup are
+separate facts. Automatic updates and confirmation follow the target Host's
+version and installation source. Treat capability expansion and
+runtime changes as production changes: declare the minimum required
 capabilities in the package's `ghost.json`, and preserve Host authorization and
 credential boundaries. Marketplace summaries are not a separate installation
 permission gate.
@@ -148,7 +149,8 @@ approval. Four principles:
    Slot or manifest field just to pre-register a specific command, host, or path.
    A plugin that uses Host capabilities autonomously from a panel,
    subscription, scheduler, or long-lived process must declare the corresponding
-   direct field in `ghost.json`. An autonomous Node Runtime still requires the
+   direct field in `ghost.json`. Any bundled Node Runtime, including one used
+   inside the current Agent tool call, requires the
    top-level `node` field, a fixed entry point, and a minimal child-process boundary.
 2. **Clear secret ownership.** Ordinary API tokens are stored through the
    host's write-only `/secrets` channel. When a Node plugin needs plaintext
@@ -172,7 +174,7 @@ approval. Four principles:
       HTTPS/workdir operations use the current `callId`, and CLIs use the existing
       Node worker without pre-registering individual commands
 - [ ] Node plugins: explicit `node` field, fixed entry, minimal child-process
-      boundary; `node/worker.cjs` is an esbuild artifact rebuilt from `src/`
+      boundary; generated workers rebuilt from their source and documented build steps
 - [ ] No plaintext credentials anywhere: tokens go through the write-only
       `/secrets` channel or `node.secretBindings`; never through `main.js`,
       Agent parameters, logs, KV, or page state
@@ -264,11 +266,17 @@ change. The new `major.minor.patch` SemVer must be greater than the version on
 
 ## Local development
 
-The authoring contract is defined by this repository: the guidance below and in
+The repository's source, validation, and publishing contract is defined by
+the guidance below and in
 [`CONTRIBUTING.md`](./CONTRIBUTING.md), the pinned Cindy Manifest validator under
 `.tests/contracts/`, and the repository packaging checks. It is independent of
 the Agent or harness used to edit files. Cindy's Forge tools are optional
 shortcuts, not part of the plugin format and not a prerequisite for development.
+
+Host API parameters, capability declarations, and runtime limits follow the
+target Cindy version's bundled authoring reference. Start with the
+[version and capability map](docs/plugin-authoring.md#target-host-reference-and-capability-map)
+before choosing an API; the repository validator alone cannot prove runtime support.
 
 For existing-plugin maintenance, v2/v3 field mappings, and concrete HTTPS,
 file, and Node/CLI calls, use the
@@ -296,7 +304,8 @@ not a pre-registration list for a specific command, host, or path. Whether the
 plugin tool runs is decided by the current `ghost_call` and existing Agent
 authorization; ordinary HTTPS and workdir operations pass the Host-issued
 `callId` to `cindy.fetch` or `cindy.fs`. Bundled code and CLIs continue to use the
-existing Node worker. Managed credentials and any use outside that in-flight call
+existing Node worker and always require a top-level `node` declaration.
+Managed credentials and any use outside that in-flight call
 still require the corresponding explicit declaration.
 
 ### Harness-independent quick path
@@ -304,9 +313,11 @@ still require the corresponding explicit declaration.
 Paste this into any coding Agent or harness that can edit files and run commands:
 
 ```text
-Using only the authoring contract in this repository, build a Cindy plugin for
+Using this repository's publishing requirements and the target Host's authoring
+reference, build a Cindy plugin for
 [what it should do]. Read AGENTS.md and docs/plugin-authoring.md, infer the
-necessary declarations and runtime interfaces from the task, and clarify only
+necessary declarations and runtime interfaces from the task, verify required Host
+APIs against the target Cindy version, and clarify only
 product choices or verification gaps that the repository cannot establish. Create a new
 Manifest-v3 plugin directory without copying an existing v2 ghost.json. Validate
 its manifest with the repository validator, package the directory contents as a
@@ -355,7 +366,9 @@ version that supports the concrete plugin you are building.
 }
 ```
 
-Place a real PNG at `assets/icon.png`. If no icon is ready, remove both the
+Use a user-supplied image or generate one only with the user's consent; do not
+create or retain a solid-color placeholder. Place a real PNG at `assets/icon.png`.
+If no icon is ready, remove both the
 `icon` field and the unused `assets/` entry; never package a path declared by
 the Manifest without its file.
 
@@ -379,7 +392,10 @@ The `callId` belongs to that one in-flight tool call. Return exactly one
 also carry this Host-issued `callId` through `cindy.fetch` and `cindy.fs`; they
 use Cindy's existing runtime authorization instead of pre-registering a command,
 host, or path in the Manifest. Declare a direct top-level capability only for a
-plugin contribution or autonomous Host use outside that in-flight call.
+plugin contribution or autonomous Host use outside that in-flight call. Bundled
+Node workers and managed credentials still need their own declarations inside
+the call. For new image/video generation, follow the
+[media flow](docs/plugin-authoring.md#media-generation-and-task-coordination).
 
 Validate the Manifest from the repository root:
 
@@ -423,6 +439,10 @@ baseline, `ghost_forge_pack` can validate and package it, and
 `ghost_forge_install` can install it after an explicit user request. These are
 optional accelerators; the source and `.cindy` format are identical. Forge does
 not interpret dependency declarations; prepare the output files locally first.
+An older scaffold may include a placeholder icon; replace it or omit `icon`
+instead of submitting the placeholder. Packaging does not publish: official
+repository plugins use the PR flow above. Client community submissions and
+`intent: 'publish'` organization publishing are separate destinations.
 See the [dependency guide](docs/binary-dependencies.md) for migration steps,
 complete declaration examples and downloading PR verification packages.
 
