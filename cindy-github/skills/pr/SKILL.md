@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Carry a GitHub pull request from start to merge in any Git repository - start the work on a fresh branch, open the PR when the user wants it, fix failing checks, merge conflicts and review feedback, follow it in the background, and clean up after merge. Use when the user invokes /pr or gives a PR link, starts a feature or fix that will become a pull request, or asks to open, fix or follow a PR.
+description: Carry a GitHub pull request from start to merge in any Git repository - start the work on a fresh branch, open the PR only when the user asks for it, fix failing checks, merge conflicts and review feedback, follow it in the background, and clean up after merge. Use when the user invokes /pr or gives a PR link, starts a feature or fix that will become a pull request, or asks to open, fix or follow a PR.
 ---
 
 # PR
@@ -21,7 +21,7 @@ Reply in the user's language. Read the reference files only when this file point
 - **Ask the user first** only for: product behaviour changes; security, permission or privacy boundaries; splitting the PR; adding new machinery that significantly raises complexity (concurrency, locks, caches, persistence, retries). Give your recommended option, the trade-off and the impact.
 - **Tell the user** (do not ask) when a problem stays stuck after repeated attempts; the check output names these cases.
 - Deleting machinery that grew during review, reverting, or shrinking back to the PR's original goal is technical convergence. It needs no confirmation and is not "splitting the PR".
-- Never push or open a pull request until the user asks for it or agrees. Never approve, merge, enable auto-merge, re-enqueue a merge queue, or take a PR out of draft unless the user authorised it for this repository. Authorisation for one repository never carries to another.
+- Never push or open a pull request until the user explicitly asks for one or clicks the PR card's button. Approving a plan does not count, even one that mentions a PR. Never approve, merge, enable auto-merge, re-enqueue a merge queue, or take a PR out of draft unless the user authorised it for this repository. Authorisation for one repository never carries to another.
 - Never stash, reset, clean, revert or overwrite the user's uncommitted changes. Never force-push.
 - Public replies stay short, factual and traceable. Ask before posting anything that takes a product position, discloses sensitive material, or attaches screenshots.
 - Requires the GitHub CLI signed in (`gh auth status`) and Node.js. If GitHub is not signed in, call Cindy's `connect_account` with `kind: "plugin"` and this plugin's id: Cindy opens its own GitHub sign-in on this computer (`GITHUB_SIGN_IN_REQUIRED`), so tell the user to finish it there and check `gh auth status` again; never ask for a token in chat. If that is unavailable, Node.js or `gh` is missing, or the repository is not on GitHub, say exactly that; you can still do the local work.
