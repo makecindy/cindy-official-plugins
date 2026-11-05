@@ -185,6 +185,21 @@ test('card edits autosave with If-Match and keep plain-text drafts plain', async
   assert.equal(sends(f).length, 0);
 });
 
+test('a plain-text card edit whose derived HTML cannot fit the card is refused before Graph is written', async t => {
+  const f = fixture(t);
+  const r = await f.tool({ action: 'draft', to: 'reader@example.test', subject: 'Hello', body_text: 'Draft' });
+  const card = f.cards()[0];
+  await f.action(card, 'change', { formValues: { ...f.values(card.draft), body: 'x\n'.repeat(6000) } });
+  await f.flush();
+  assert.equal(f.writes().filter(w => w.method === 'PATCH').length, 0);
+  assert.equal(f.box.messages.get(r.result.draft_id).body.content, 'Draft');
+  assert.equal(f.cards().at(-1).draft.state, 'error', 'the card shows why it was not saved');
+  // A fitting edit still saves.
+  await f.action(card, 'change', { formValues: { ...f.values(card.draft), body: 'x\n'.repeat(600) } });
+  await f.flush();
+  assert.equal(f.box.messages.get(r.result.draft_id).body.content, 'x\n'.repeat(600));
+});
+
 test('a draft changed in Outlook merges with card edits instead of being overwritten', async t => {
   const f = fixture(t);
   const r = await f.tool({ action: 'draft', to: 'reader@example.test', subject: 'Original subject', body_text: 'Original body' });

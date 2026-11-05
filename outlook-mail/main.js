@@ -42,7 +42,7 @@ var OutlookMail = (() => {
       pageUrlScope: '分页地址不属于当前邮箱区域或操作，请重新查询。',
       pageTokenInvalid: '分页凭据无效，请重新查询。',
       pageTokenMismatch: '分页凭据与账号或操作不匹配，请重新查询。',
-      bodyTooLarge: '邮件内容过大，请缩短正文后重试（请求上限约 250 KB）。',
+      bodyTooLarge: '邮件内容过大，请缩短正文后重试（草稿卡上限：纯文本 16,000 字符、HTML 64,000 字符；请求上限约 250 KB）。',
       mailboxNotEnabled: '此账号没有可用的云端邮箱，请确认已分配 Exchange Online 邮箱；本地 Exchange 或其他服务商邮箱不能通过此插件连接。',
       http401: '微软授权已失效，请在插件详情页重新连接账号。',
       http403: '微软拒绝此操作，请重新连接以授权邮件读写／发送权限；若仍失败，请让企业管理员检查应用访问策略。',
@@ -117,7 +117,7 @@ var OutlookMail = (() => {
       pageUrlScope: 'The pagination URL does not belong to the current mailbox region or action; query again.',
       pageTokenInvalid: 'Invalid page token; query again.',
       pageTokenMismatch: 'The page token does not match the account or action; query again.',
-      bodyTooLarge: 'Message is too large; shorten the body and retry (request limit is about 250 KB).',
+      bodyTooLarge: 'Message is too large; shorten the body and retry (draft card limits: 16,000 text / 64,000 HTML characters; request limit is about 250 KB).',
       mailboxNotEnabled: 'This account has no usable cloud mailbox; confirm an Exchange Online mailbox is assigned. On-premises Exchange and other providers cannot be connected through this plugin.',
       http401: 'Microsoft authorization has expired; reconnect the account in the plugin details page.',
       http403: 'Microsoft denied this operation; reconnect to grant mail read/write and send permissions. If it still fails, ask your organization administrator to check the application access policy.',
@@ -192,7 +192,7 @@ var OutlookMail = (() => {
       pageUrlScope: 'ページング URL が現在のメールボックスの地域または操作に属していません。もう一度検索してください。',
       pageTokenInvalid: 'ページトークンが無効です。もう一度検索してください。',
       pageTokenMismatch: 'ページトークンがアカウントまたは操作と一致しません。もう一度検索してください。',
-      bodyTooLarge: 'メールの内容が大きすぎます。本文を短くしてから再試行してください（リクエストの上限は約 250 KB）。',
+      bodyTooLarge: 'メールの内容が大きすぎます。本文を短くしてから再試行してください（下書きカードの上限：テキスト16,000文字、HTML 64,000文字。リクエストの上限は約 250 KB）。',
       mailboxNotEnabled: 'このアカウントには利用可能なクラウドメールボックスがありません。Exchange Online メールボックスが割り当てられていることを確認してください。オンプレミスの Exchange や他社のメールは、このプラグインでは接続できません。',
       http401: 'Microsoft の認証が期限切れです。プラグインの詳細ページでアカウントを再接続してください。',
       http403: 'Microsoft がこの操作を拒否しました。再接続してメールの読み書き・送信の権限を許可してください。それでも失敗する場合は、組織の管理者にアプリのアクセスポリシーを確認してもらってください。',
@@ -267,7 +267,7 @@ var OutlookMail = (() => {
       pageUrlScope: '페이지 URL이 현재 메일함 지역 또는 작업에 속하지 않습니다. 다시 조회하세요.',
       pageTokenInvalid: '페이지 토큰이 올바르지 않습니다. 다시 조회하세요.',
       pageTokenMismatch: '페이지 토큰이 계정 또는 작업과 일치하지 않습니다. 다시 조회하세요.',
-      bodyTooLarge: '메일 내용이 너무 큽니다. 본문을 줄인 후 다시 시도하세요(요청 한도는 약 250KB).',
+      bodyTooLarge: '메일 내용이 너무 큽니다. 본문을 줄인 후 다시 시도하세요(임시 보관 카드 한도: 텍스트 16,000자, HTML 64,000자, 요청 한도는 약 250KB).',
       mailboxNotEnabled: '이 계정에는 사용할 수 있는 클라우드 메일함이 없습니다. Exchange Online 메일함이 할당되어 있는지 확인하세요. 온프레미스 Exchange나 다른 제공업체의 메일함은 이 플러그인으로 연결할 수 없습니다.',
       http401: 'Microsoft 인증이 만료되었습니다. 플러그인 세부 정보 페이지에서 계정을 다시 연결하세요.',
       http403: 'Microsoft가 이 작업을 거부했습니다. 다시 연결하여 메일 읽기/쓰기 및 보내기 권한을 부여하세요. 그래도 실패하면 조직 관리자에게 앱 액세스 정책을 확인해 달라고 요청하세요.',
@@ -671,9 +671,43 @@ var OutlookMail = (() => {
   const visible = html => decodeEntities(html.replace(/<(style|script|title)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
   // Size of the plain text Outlook derives from HTML: inline tags vanish without a
-  // space (adjacent spans stay joined), each block end or <br> costs a CRLF.
-  const plainSize = html => decodeEntities(html.replace(/<(style|script|title)\b[\s\S]*?<\/\1\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')).length
-    + 2 * (html.match(/<\/(?:p|div|tr|li|h[1-6]|blockquote)>|<br\b/gi) || []).length;
+  // space (adjacent spans stay joined), each block end or <br> costs a CRLF. It only
+  // measures, so tags are walked rather than pattern-stripped.
+  const BLOCK_ENDS = new Set(['p', 'div', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']);
+  function plainSize(html) {
+    const lower = html.toLowerCase();
+    let text = '', breaks = 0, index = 0;
+    while (index < html.length) {
+      const lt = html.indexOf('<', index);
+      if (lt < 0) { text += html.slice(index); break; }
+      text += html.slice(index, lt);
+      if (lower.startsWith('<!--', lt)) {
+        const end = html.indexOf('-->', lt + 4);
+        if (end < 0) break;
+        index = end + 3;
+        continue;
+      }
+      const tag = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 24));
+      if (!tag) { text += '<'; index = lt + 1; continue; }
+      let gt = -1, quote = '';
+      for (let at = lt + 1; at < html.length && gt < 0; at++) {
+        const char = html[at];
+        if (quote) { if (char === quote) quote = ''; } else if (char === '"' || char === "'") quote = char;
+        else if (char === '>') gt = at;
+      }
+      if (gt < 0) break;
+      if (!tag[1] && ['style', 'script', 'title'].includes(tag[2])) {
+        const close = lower.indexOf('</' + tag[2], gt);
+        const end = close < 0 ? -1 : html.indexOf('>', close);
+        if (end < 0) break;
+        index = end + 1;
+        continue;
+      }
+      if (tag[1] ? BLOCK_ENDS.has(tag[2]) : tag[2] === 'br') breaks++;
+      index = gt + 1;
+    }
+    return decodeEntities(text).length + 2 * breaks;
+  }
   const cids = html => [...new Set([...html.matchAll(/\bcid:([^"'\s)>]+)/gi)].map(m => decodeEntities(m[1]).toLowerCase()))].sort().join(',');
   const bareCid = v => String(v || '').replace(/^<|>$/g, '');
   // Graph returns a full HTML document. The editor works on the body content;
@@ -878,6 +912,9 @@ var OutlookMail = (() => {
       let expectedBody = null;
       if (bodyChanged) {
         if (plainOnly) {
+          // A plain-text draft is read back whole: the card shows it as one text field and
+          // as the HTML derived from it, so both forms must fit before anything is written.
+          if ((fields.body + fields.quote).length > 16000 || textHtml(fields.body + fields.quote).length > 64000) invalid('bodyTooLarge');
           patch.body = { contentType: 'Text', content: fields.body + fields.quote };
           expectedBody = { text: fields.body + fields.quote };
         } else {
