@@ -9,7 +9,7 @@
       imageEdit: '改图',
       videoGenerate: '生成视频',
       videoEdit: '图生视频',
-      defaultOption: '{model}(默认)',
+      notConfigured: '未配置模型',
       noModels: '暂无可用模型',
       loading: '正在读取模型目录…',
       loadFailed: '模型配置加载失败，请重新打开设置页',
@@ -24,7 +24,7 @@
       imageEdit: 'Image editing',
       videoGenerate: 'Video generation',
       videoEdit: 'Image to video',
-      defaultOption: '{model} (default)',
+      notConfigured: 'No model configured',
       noModels: 'No models available',
       loading: 'Loading model catalog…',
       loadFailed: 'Could not load model settings. Reopen this page.',
@@ -39,7 +39,7 @@
       imageEdit: '画像編集',
       videoGenerate: '動画生成',
       videoEdit: '画像から動画',
-      defaultOption: '{model}(既定)',
+      notConfigured: 'モデル未設定',
       noModels: '利用可能なモデルがありません',
       loading: 'モデル一覧を読み込み中…',
       loadFailed: 'モデル設定を読み込めませんでした。設定ページを開き直してください。',
@@ -54,7 +54,7 @@
       imageEdit: '이미지 편집',
       videoGenerate: '동영상 생성',
       videoEdit: '이미지에서 동영상',
-      defaultOption: '{model}(기본)',
+      notConfigured: '모델 미설정',
       noModels: '사용 가능한 모델이 없습니다',
       loading: '모델 목록을 불러오는 중…',
       loadFailed: '모델 설정을 불러오지 못했습니다. 설정 페이지를 다시 열어 주세요.',
@@ -232,16 +232,13 @@
           : null) || null
       : null;
     var stale = configured && !selected ? configured : null;
-    var pinnedDefault = selected && fallback && selected.id === fallback.id && selected.providerId === fallback.providerId;
     var triggerLabel = selected
       ? modelLabel(selected, models)
       : stale
         ? stale.modelId
-        : fallback
-          ? t('defaultOption', { model: modelLabel(fallback, models) })
-          : t('noModels');
+        : t('notConfigured');
     var options = models.filter(function (model) {
-      return pinnedDefault || !fallback || model.id !== fallback.id || model.providerId !== fallback.providerId;
+      return !fallback || model.id !== fallback.id || model.providerId !== fallback.providerId;
     }).map(function (model) {
       return {
         modelId: model.id,
@@ -258,9 +255,9 @@
       providerId: fallback.providerId,
       providerName: fallback.providerName,
       routing: fallback.routing,
-      label: t('defaultOption', { model: modelLabel(fallback, models) }),
-      isDefault: true,
-      selected: !configured
+      label: modelLabel(fallback, models),
+      isDefault: false,
+      selected: selected && selected.id === fallback.id && selected.providerId === fallback.providerId
     });
     if (stale) options.push({
       modelId: stale.modelId,
@@ -281,8 +278,8 @@
       (models.length === 0 && !stale
         ? '<span class="no-models">' + t('noModels') + '</span>'
         : '<div class="model-picker" data-capability="' + capability.key + '">' +
-          '<button class="model-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="' + t(capability.label) + '" title="' + escapeHtml(providerLabel(selected || stale || fallback)) + '">' +
-          (stale ? '' : providerMark(selected || fallback)) +
+          '<button class="model-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="' + t(capability.label) + '" title="' + escapeHtml(providerLabel(selected || stale || {})) + '">' +
+          (stale || !selected ? '' : providerMark(selected)) +
           '<span class="model-name">' + escapeHtml(triggerLabel) + '</span>' +
           artSettingsIcons.icon('chevron-down', 'chevron') +
           '</button>' +

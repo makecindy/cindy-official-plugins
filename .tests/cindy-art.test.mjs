@@ -344,7 +344,8 @@ test('settings review: the latest failed save keeps the last successful selectio
   await settings.choose('image.edit', 'second-image', 'custom');
   assert.deepEqual(preferences.modelOverrides, { 'image.generate': { modelId: 'second-image', providerId: 'custom' } });
   assert.match(settings.status.textContent, /模型配置保存失败.*重试/);
-  assert.equal(settings.row('image.edit').choices.find((choice) => choice.dataset.default === 'true').selected, 'true');
+  assert.equal(settings.row('image.edit').choices.filter((choice) => choice.selected === 'true').length, 0);
+  assert.match(settings.row('image.edit').innerHTML, /class="model-name">未配置模型<\/span>/);
 });
 
 test('settings review: duplicate model labels identify providers in the menu and current selection', async () => {
@@ -386,6 +387,42 @@ test('settings review: catalog failures are distinct from successful empty direc
   assert.equal(empty.status.textContent, '暂无可用模型');
 });
 
+test('all four settings can explicitly save the only catalog model and use it without asking again', async (t) => {
+  const catalogs = Object.fromEntries(['image', 'video'].map((type) => [type, [{
+    id: `only-${type}`, providerId: 'xd',
+    modalities: { input: ['text', 'image'], output: [type] },
+  }]]));
+  for (const [tool, capability, type] of [
+    ['gen_image', 'image.generate', 'image'], ['edit_image', 'image.edit', 'image'],
+    ['gen_video', 'video.generate', 'video'], ['edit_video', 'video.edit', 'video'],
+  ]) {
+    await t.test(capability, async () => {
+      const otherCapability = capability === 'image.generate' ? 'video.edit' : 'image.generate';
+      const existing = { modelId: 'saved-model', providerId: 'saved-provider' };
+      const preferences = { unrelated: 'preserved', modelOverrides: { [otherCapability]: existing } };
+      const settings = await createSettingsHarness(preferences, catalogs);
+      const initialRow = settings.row(capability);
+      const choice = initialRow.choices.find((entry) => entry.dataset.modelId === `only-${type}`);
+      assert.ok(choice);
+      assert.equal(settings.writes.length, 0);
+      await settings.choose(capability, choice.dataset.modelId, choice.dataset.providerId, choice.dataset.default === 'true');
+      const expected = { modelId: `only-${type}`, providerId: 'xd' };
+      assert.deepEqual(preferences.modelOverrides[capability], expected);
+      assert.deepEqual(preferences.modelOverrides[otherCapability], existing);
+      assert.equal(preferences.unrelated, 'preserved');
+      assert.equal(initialRow.choices.filter((entry) => entry.selected === 'true').length, 0);
+      assert.match(initialRow.innerHTML, /class="model-name">未配置模型<\/span>/);
+      const reopened = await createSettingsHarness(preferences, catalogs);
+      assert.equal(reopened.row(capability).choices.filter((entry) => entry.selected === 'true').length, 1);
+      const runtime = createHarness(preferences, catalogs);
+      const result = await runtime.call(tool, { prompt: 'check explicit selection', images: [`cindy-media://blobs/${'a'.repeat(64)}.png`] });
+      assert.equal(result.ok, true, tool);
+      assert.equal(result.result.request.modelId, expected.modelId);
+      assert.equal(result.result.request.providerId, expected.providerId);
+    });
+  }
+});
+
 test('settings review: a saved default tuple stays pinned and has exactly one selected option', async () => {
   const preferences = { modelOverrides: { 'image.generate': { modelId: 'image-model', providerId: 'xd' } } };
   const catalogs = imageCatalogForTests();
@@ -401,9 +438,9 @@ test('settings review: a saved default tuple stays pinned and has exactly one se
     defaults: { image: { modelId: 'another-default', providerId: 'custom' } },
   });
   assert.equal(changedDefault.row('image.generate').choices.filter((choice) => choice.selected === 'true').length, 1);
-  await settings.choose('image.generate', 'image-model', 'xd', true);
-  assert.equal(preferences.modelOverrides['image.generate'], undefined);
-  assert.equal(settings.row('image.generate').choices.find((choice) => choice.dataset.default === 'true').selected, 'true');
+  await settings.choose('image.generate', 'image-model', 'xd');
+  assert.deepEqual(preferences.modelOverrides['image.generate'], { modelId: 'image-model', providerId: 'xd' });
+  assert.equal(settings.row('image.generate').choices.filter((choice) => choice.selected === 'true').length, 1);
 });
 
 test('settings keep same-name providers distinct through save, reopen and tool reads', async () => {
@@ -422,11 +459,11 @@ test('settings keep same-name providers distinct through save, reopen and tool r
   assert.equal(result.result.request.providerId, 'other-provider');
   const reopened = await createSettingsHarness(preferences, catalogs, options);
   assert.equal(reopened.row('image.generate').choices.find((choice) => choice.dataset.providerId === 'other-provider').selected, 'true');
-  await reopened.choose('image.generate', 'shared-model', 'xd', true);
-  assert.equal(preferences.modelOverrides['image.generate'], undefined);
-  result = await runtime.call('gen_image', { prompt: 'check restored default' });
-  assert.equal(result.ok, false);
-  assert.match(result.message, /没有配置模型.*询问.*哪个模型/);
+  await reopened.choose('image.generate', 'shared-model', 'xd');
+  assert.deepEqual(preferences.modelOverrides['image.generate'], { modelId: 'shared-model', providerId: 'xd' });
+  result = await runtime.call('gen_image', { prompt: 'check saved Cindy provider' });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.request.providerId, 'xd');
 });
 
 test('all four model menus put personal providers before Cindy without changing selections', async () => {
@@ -449,10 +486,10 @@ test('all four model menus put personal providers before Cindy without changing 
       const firstCindy = choices.findIndex((choice) => choice.dataset.providerId === 'xd');
       assert.equal(firstCindy, 3, capability);
       assert.ok(choices.slice(firstCindy).every((choice) => choice.dataset.providerId === 'xd'));
-      assert.deepEqual(choices.slice(firstCindy).map((choice) => choice.dataset.modelId), selection?.providerId === 'xd' ? ['cindy-b', 'cindy-a', 'cindy-b'] : ['cindy-b', 'cindy-a']);
+      assert.deepEqual(choices.slice(firstCindy).map((choice) => choice.dataset.modelId), ['cindy-b', 'cindy-a']);
       const selected = choices.filter((choice) => choice.selected === 'true');
-      assert.equal(selected.length, 1);
-      assert.equal(selected[0].dataset.modelId, selection?.modelId ?? 'cindy-b');
+      assert.equal(selected.length, selection ? 1 : 0);
+      if (selection) assert.equal(selected[0].dataset.modelId, selection.modelId);
       assert.deepEqual(preferences, original);
       assert.equal(settings.writes.length, 0);
     }
