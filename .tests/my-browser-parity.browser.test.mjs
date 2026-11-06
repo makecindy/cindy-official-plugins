@@ -64,6 +64,8 @@ fetch('/api/data').then(r=>r.json()).then(j=>window.api=j);
     if(host==='127.0.0.1')return res.end('<title>Local</title><p>Local service page</p>');
     if(req.url==='/user')return res.end('<title>User page</title><p>The user is reading this.</p>');
     if(req.url==='/two')return res.end('<title>Two</title><p>Second page</p>');
+    if(req.url==='/to-slow')return res.end('<title>To slow</title><a id=slowlink href="/slow-page">Slow page</a>');
+    if(req.url==='/slow-page'){setTimeout(()=>res.end('<title>Slow page</title><p>Arrived late</p>'),2500);return;}
     if(req.url==='/crowded')return res.end(`<title>Crowded</title><nav>${Array.from({length:150},(_,i)=>`<a href="#n${i}">Nav ${i}</a>`).join(' ')}</nav>
 <div role=main><h1>Edit provider</h1><textarea aria-label="Attribute condition"></textarea><my-field></my-field><div role=combobox aria-label="Region" tabindex=0>Region</div><button>Save</button></div>
 <script>customElements.define('my-field',class extends HTMLElement{constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<p>Shadow note text</p><input aria-label="Shadow field" id=sf><button onclick="document.title=&quot;shadow clicked&quot;" onmousedown="document.title=&quot;shadow down&quot;">Shadow save</button>';}});</script>`);
@@ -214,6 +216,15 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const rz=await act('resize',{...T,width:900,height:700});
   const rzUser=await act('resize',{tabId:userTab.id,url:'http://parity.test/user',width:900,height:700});
   check('resize only the Cindy window',rz.ok && rzUser.error==='USER_WINDOW',JSON.stringify({rz:rz.error,rzUser:rzUser.error}));
+  // 2026-11-06: the mark went with the page it was drawn on; a page the agent's click led to stayed
+  // unmarked until the next action. The worker gives a newly loaded page the mark for the time left.
+  const toSlow=await act('navigate',{...T,url:'http://parity.test/to-slow'});
+  const linkSnap=await act('snapshot',{tabId:T.tabId,url:'http://parity.test/to-slow',maxChars:2000});
+  const slowRef=/^\[([a-f0-9]{32})\][^\n]*Slow page/m.exec(String(linkSnap.elements||''))?.[1];
+  await act('click',{tabId:T.tabId,url:'http://parity.test/to-slow',ref:slowRef});
+  let slowMarked=false;
+  for(let i=0;i<40 && !slowMarked;i++){await new Promise(r=>setTimeout(r,200));slowMarked=await worker.evaluate(async id=>{const t=await chrome.tabs.get(id);if(t.status!=='complete'||!t.url.endsWith('/slow-page'))return false;return (await chrome.scripting.executeScript({target:{tabId:id},func:()=>!!document.querySelector('[data-cindy-agent-mark]')}))[0].result;},T.tabId).catch(()=>false);}
+  check('a page the agent\'s click led to gets the mark once it loads',toSlow.ok && !!slowRef && slowMarked,JSON.stringify({toSlow:toSlow.ok,slowRef:!!slowRef,slowMarked}));
   const nav=await act('navigate',{...T,url:'http://parity.test/two'});
   check('navigate keeps the tab',nav.ok && nav.tabId===T.tabId && nav.url==='http://parity.test/two',JSON.stringify(nav));
   const after=await act('text',{tabId:T.tabId,url:'http://parity.test/two'});
@@ -285,7 +296,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
     check('full page falls back to the visible area with a note',full.ok && /visible area/.test(full.note||''),full.error||'');
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
-  assert.equal(results.length,42);
+  assert.equal(results.length,43);
 });
 
 test('real Chrome: an iframe reads and acts like the page around it',enabled,async()=>{

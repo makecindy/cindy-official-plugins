@@ -18,7 +18,7 @@ function harness(local={clientId:'fixture'},shared,options={}) {
   const state={closeOnCreate:false};
   const chrome={permissions:{contains:async()=>false},action:{onClicked:{addListener(){}}},runtime:{getURL:path=> 'chrome-extension://fixture/'+(path||''),getManifest:()=>({version:'0.4.42'}),onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(){}}},
     storage:{local:{get:async key=>({[key]:structuredClone(local[key])}),set:async value=>Object.assign(local,structuredClone(value)),remove:async keys=>{for(const k of [].concat(keys))delete local[k];}},session:{get:async key=>({[key]:structuredClone(data[key])}),set:async value=>Object.assign(data,structuredClone(value))}},
-    tabs:{get:async id=>{if(!tabs.has(id))throw new Error('No tab');return {...tabs.get(id)};},query:async q=>[...tabs.values()].filter(t=>!q?.windowId || t.windowId===q.windowId).map(t=>({...t})),
+    tabs:{...(options.updates?{onUpdated:{addListener:fn=>options.updates.push(fn),removeListener(){}}}:{}),get:async id=>{if(!tabs.has(id))throw new Error('No tab');return {...tabs.get(id)};},query:async q=>[...tabs.values()].filter(t=>!q?.windowId || t.windowId===q.windowId).map(t=>({...t})),
       create:async({url,windowId=1,active=false})=>{const t={id:next++,url,windowId,status:'complete',active};if(state.closeOnCreate)queueMicrotask(()=>tabs.delete(t.id));if(active)for(const o of tabs.values())if(o.windowId===windowId)o.active=false;tabs.set(t.id,t);calls.push(['tabs.create',{url,windowId,active}]);return {...t};},
       update:async(id,props)=>{calls.push(['tabs.update',id,props]);const t=tabs.get(id);if(props.active)for(const o of tabs.values())if(o.windowId===t.windowId)o.active=false;Object.assign(t,props);return {...t};},
       remove:async id=>{tabs.delete(id);calls.push(['tabs.remove',id]);},
@@ -28,7 +28,9 @@ function harness(local={clientId:'fixture'},shared,options={}) {
       get:async id=>{if(!windows.has(id))throw new Error('No window');return {...windows.get(id)};},getLastFocused:async()=>({id:1}),getAll:async()=>[...windows.values()].map(w=>({...w,focused:w.id===1})),update:async(id,props)=>{calls.push(['windows.update',id,props]);Object.assign(windows.get(id),props);return {};}}};
   const context={chrome,MyBrowserPolicy:P,MyBrowserNetwork:{create:()=>({assertSupported,isReady:async()=>true,document:async()=> 'doc'})},fetch:async()=>({ok:true,json:async()=>({policy:P.defaults()})}),navigator:{userAgent:'Chrome/140'},URL,crypto:globalThis.crypto,TextEncoder,btoa,AbortController,
     // Timers fire at once by default; 'never' keeps idle timers and deadlines from firing.
-    setTimeout(fn){if(options.timers!=='never')queueMicrotask(fn);return 0;},clearTimeout(){}};
+    // 'manual' queues them in options.queue for the test to fire.
+    setTimeout(fn,ms){if(options.timers==='manual'){const t={fn,ms};options.queue.push(t);return t;}if(options.timers!=='never')queueMicrotask(fn);return 0;},
+    clearTimeout(t){const i=options.queue?.indexOf(t);if(i>=0)options.queue.splice(i,1);}};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
   const run=(action,payload,policy=P.defaults())=>context.tabTest.handle({id:'job',action,payload},policy,{base:'http://fixture',session:'fixture'});
   // A tab the user has open in their own window, behind the one they are looking at.
@@ -218,6 +220,50 @@ test('open keeps earlier tabs of the same address and has no fixed tab limit',as
   for(let i=0;i<14;i++)assert.equal((await h.run('open',{url:'https://example.test/p'+i})).ok,true);
 });
 
+
+// 2026-11-06: right after a navigation the page had no content script yet, so the one mark message was
+// dropped and the mark only showed with the agent's next action; a page that loaded lost it too.
+test('a mark the loading page misses is retried, and a page that loads gets it back',async()=>{
+  const queue=[],updates=[];const h=harness(undefined,undefined,{timers:'manual',queue,updates});
+  const sent=[];let ready=false;
+  h.chrome.tabs.sendMessage=async(tabId,message,options)=>{sent.push({tabId,message,options});if(!ready)throw new Error('Could not establish connection. Receiving end does not exist.');};
+  const settle=()=>new Promise(r=>setImmediate(r));
+  const fire=ms=>{for(const t of queue.filter(t=>t.ms===ms)){queue.splice(queue.indexOf(t),1);t.fn();}};
+  const shows=()=>sent.filter(s=>s.message.ms>0);
+  await h.context.markAgentTab(1);await settle();
+  assert.equal(shows().length,1);assert.equal(sent[0].options?.frameId,0,'only the top page draws the mark');
+  ready=true;fire(700);await settle();
+  assert.equal(shows().length,2,'retried after the page could not receive it');
+  assert.ok(shows()[1].message.ms<=20000);
+  fire(700);await settle();
+  assert.equal(shows().length,2,'no retry once it landed');
+  // The agent clicked a link: the new page starts without the mark and gets it for the time left.
+  for(const fn of updates)fn(1,{status:'complete'});await settle();
+  assert.equal(shows().length,3);
+  // Hidden for a capture: a page load during it does not bring the mark into the picture.
+  await h.context.markAgentTab(1,'hidden');
+  for(const fn of updates)fn(1,{status:'complete'});await settle();
+  assert.equal(shows().length,3);
+  await h.context.markAgentTab(1);await settle();
+  assert.equal(shows().length,4);
+  // Once the mark has run out, a load does not bring it back.
+  fire(20000);
+  for(const fn of updates)fn(1,{status:'complete'});await settle();
+  assert.equal(shows().length,4);
+  // Nor after the task cleared it.
+  await h.context.markAgentTab(2);await settle();await h.context.markAgentTab(2,'clear');
+  for(const fn of updates)fn(2,{status:'complete'});await settle();
+  assert.equal(shows().filter(s=>s.tabId===2).length,1);
+});
+
+test('"Opened by Cindy" comes back on each page its tab loads',async()=>{
+  const queue=[],updates=[];const h=harness(undefined,undefined,{timers:'manual',queue,updates});
+  const opened=[];h.chrome.tabs.sendMessage=async(tabId,message)=>{if(message.opened)opened.push(tabId);};
+  const settle=()=>new Promise(r=>setImmediate(r));
+  await h.context.markAgentOpened(2);await settle();
+  for(const fn of updates){fn(2,{status:'complete'});fn(1,{status:'complete'});}await settle();
+  same(opened,[2,2]);
+});
 
 // Review 2026-10-29: a failed capture left Cindy's activity mark hidden for the rest of the operation.
 test('a failed screenshot shows Cindy\'s mark again',async()=>{
