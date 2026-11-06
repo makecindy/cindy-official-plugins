@@ -25,3 +25,5 @@ After a timeout or lost receipt, never repeat upload or creation automatically. 
 ## Verification boundary
 
 Baseline: official plugin commit `628bfd79773453fd09734cfe53a261dedade215a` (0.2.21); new version0.3.0. Host APIs checked against Cindy0.1.125, commit `ac785430449042f120a296b881a25ae52333f1e1`. Injected HTTP and in-memory SQLite tests do not prove live Feishu compatibility, permissions or pricing. No live audio submission, installation, publication or production-library replacement has been performed.
+
+Malformed 2xx write receipts (including missing or non-integer business codes) remain unknown, even when JSON parsing succeeds. Only a valid explicit rejection establishes not-executed status; polling and re-preparation never repeat an uncertain POST.

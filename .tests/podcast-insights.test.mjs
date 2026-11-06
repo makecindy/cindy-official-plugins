@@ -120,6 +120,27 @@ test('minutes generation preserves all original segments and caches by active ve
     await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement source.'});assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).stale,true);
   }finally{h.close();}
 });
+// PR #285: a supported unpunctuated source must not exceed the model excerpt cap.
+// Exercise TXT import, model prompt/identifier selection, artifacts and citation tools.
+test('minutes bounded excerpts support long unpunctuated originals without changing the reader',async()=>{
+  const R=require('../podcast-insights/reading.js');
+  for(const original of ['x'.repeat(600),'x'.repeat(601),'x'.repeat(1200),'a'.repeat(599)+'😀'+'b'.repeat(200),('a long clause without sentence punctuation ').repeat(20)]){
+    const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:original});
+      h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+      let excerptCount=0,calls=0;
+      h.host.text=async a=>{calls++;if(!a.prompt.includes('SOURCE='))return {ok:true,text:JSON.stringify({overview:'A source-backed overview.',key_points:[{chapter_index:0,point_index:0}]})};
+        const src=JSON.parse(a.prompt.split('SOURCE=')[1]);excerptCount=src[0].excerpts.length;
+        for(const e of src[0].excerpts){assert.ok(e.text.length<=600,'overlong model excerpt');assert.ok(C.norm(original).includes(C.norm(e.text)));assert.equal(e.text.isWellFormed(),true);}
+        const evidence=src[0].excerpts.map(e=>({text:'Original evidence',segment_idx:src[0].idx,excerpt_idx:e.excerpt_idx}));
+        return {ok:true,text:JSON.stringify({chapters:[{title:'Source chapter',summary:'A faithful source summary.',points:evidence,decisions:[],quotes:[]}]})};
+      };
+      const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');assert.equal(calls,2);
+      const d=JSON.parse(h.files.get(r.path));assert.equal(d.segments[0].text,original.trim());assert.equal(d.chapters[0].points.length,excerptCount);
+      for(const p of d.chapters[0].points){assert.equal(p.segment_id,d.segments[0].id);const cite=await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]});assert.ok(['exact','normalized'].includes(cite.citations[0].status));}
+      if(!original.includes(' '))assert.equal(R.paragraphs(original).length,1,'reading view must retain semantic paragraph');
+    }finally{h.close();}
+  }
+});
 test('minutes rejects fabricated evidence or omitted coverage before committing an artifact',async()=>{
   for(const corrupt of [d=>{d.chapters[0].points[0].excerpt_idx=999;return d;},d=>{d.chapters=[];return d;}]){
     const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Only original evidence.'});minutesModel(h,corrupt);await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_INVALID_OUTPUT|MINUTES_COVERAGE_FAILED/);assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).available,false);}finally{h.close();}
@@ -148,6 +169,7 @@ function feishuHarness(options={}){
     if(request.as==='media'){assert.equal(request.callId,state.expectedCallId||'estimate-1','audio needs a live Agent call');if(state.downloadDenied)return {ok:false,errorCode:'NETWORK_FORBIDDEN'};}
     if(request.as==='media')return {ok:true,status:200,media:{hash:'a'.repeat(64),bytes:state.bytes||10000,ext:'mp3'}};
     if(path==='/open-apis/drive/explorer/v2/root_folder/meta')return json({token:'folder_synthetic'});
+    if(request.method==='POST'&&state.invalidReceiptAt===path)return {ok:true,status:200,body:state.invalidReceiptBody};
     if(path==='/open-apis/drive/v1/files/upload_all')return state.uploadTimeout?{ok:false,errorCode:'NETWORK_TIMEOUT'}:json({file_token:'file_synthetic'});
     if(path==='/open-apis/minutes/v1/minutes/upload'){
       if(state.quota)return {ok:true,status:200,body:JSON.stringify({code:2091008})};
@@ -205,6 +227,24 @@ test('Feishu creation rejection reports the uploaded file separately from the un
     for(const service of [h.service,new Service(h.host)]){const status=await service.run('podcast_status',{job_id:r.job.id});assert.equal(status.jobs[0].upload_outcome,'executed');assert.equal(status.jobs[0].minute_outcome,'not_executed');assert.equal(status.jobs[0].submission_outcome,'executed');}
     assert.equal(h.calls.filter(r=>r.upload).length,1);assert.equal(h.calls.filter(r=>r.url.endsWith('/minutes/upload')).length,1);
   }finally{h.close();}
+});
+// PR #285 follow-up: malformed 2xx receipts must not authorize a replacement write.
+// SQLite contract tier; exercise both provider POSTs and restart through production tools.
+test('Feishu malformed success receipts remain unknown and never permit a second submission',async()=>{
+  for(const stage of ['upload','create'])for(const body of ['{"data":{}}','{"code":null,"data":{}}','{"code":"2091008","data":{}}','{"code":false,"data":{}}','{"code":1.5,"data":{}}','{"code":0,"data":[]}','{"code":0}','null','[]','{']){
+    const path=stage==='upload'?'/open-apis/drive/v1/files/upload_all':'/open-apis/minutes/v1/minutes/upload';
+    const h=feishuHarness({invalidReceiptAt:path,invalidReceiptBody:body});try{
+      const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+      const first=(await h.service.submitFromClick(r.job.id,click(r.job.id))).job;
+      assert.equal(first.state,'unknown',stage+body);assert.equal(first.submission_outcome,'unknown',stage+body);
+      assert.equal(first.upload_outcome,stage==='upload'?'unknown':'executed');assert.equal(first.minute_outcome,stage==='create'?'unknown':'not_executed');
+      const writes=h.calls.filter(r=>r.method==='POST').length;
+      const restarted=new Service(h.host),status=(await restarted.run('podcast_status',{job_id:r.job.id})).jobs[0];
+      assert.equal(status.upload_outcome,first.upload_outcome);assert.equal(status.minute_outcome,first.minute_outcome);assert.equal(status.submission_outcome,'unknown');
+      const reused=await restarted.run('podcast_feishu',{action:'prepare',episode_id:eid},'retry-card');assert.equal(reused.job.id,r.job.id);assert.equal(reused.requires_user_confirmation,false);
+      await restarted.submitFromClick(r.job.id,click(r.job.id,{callId:'progress-1'}));assert.equal(h.calls.filter(r=>r.method==='POST').length,writes);
+    }finally{h.close();}
+  }
 });
 test('Feishu unknown creation stays unknown across restart and only explicit URL recovery resumes reads',async()=>{
   const h=feishuHarness({uncertain:true});try{

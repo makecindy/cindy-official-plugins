@@ -23,8 +23,11 @@
       const r=await this.s.host.fetch({url:API+path,method,as:'text',timeoutMs:Math.min(60000,remaining),headers:{Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),...(upload?{upload}:{})});
       if(!r?.ok||r.truncated||r.status<200||r.status>=300)throw Object.assign(new Error(r?.status===401?'FEISHU_AUTH_EXPIRED':r?.status===403?'FEISHU_PERMISSION_REQUIRED':'FEISHU_NETWORK_FAILED'),{code:r?.status===401?'FEISHU_AUTH_EXPIRED':r?.status===403?'FEISHU_PERMISSION_REQUIRED':'FEISHU_NETWORK_FAILED',definitelyRejected:r?.ok===true&&r.status>=400&&r.status<500});
       let data;try{data=JSON.parse(r.body);}catch{C.fail('FEISHU_INVALID_RESPONSE');}
+      // A parseable body is not a provider acknowledgement. Missing/malformed
+      // business codes cannot establish rejection after a possibly accepted POST.
+      if(!data||typeof data!=='object'||Array.isArray(data)||!Number.isSafeInteger(data.code))C.fail('FEISHU_INVALID_RESPONSE');
       if(data.code!==0){const code=data.code===2091003?'FEISHU_PROCESSING':data.code===2091008?'FEISHU_QUOTA_EXCEEDED':[99991663,99991664,99991668].includes(data.code)?'FEISHU_AUTH_EXPIRED':[99991672,99991679,2091005].includes(data.code)?'FEISHU_PERMISSION_REQUIRED':'FEISHU_REJECTED';throw Object.assign(new Error(code),{code,definitelyRejected:true});}
-      if(!data.data||typeof data.data!=='object')C.fail('FEISHU_INVALID_RESPONSE');return data.data;
+      if(!data.data||typeof data.data!=='object'||Array.isArray(data.data))C.fail('FEISHU_INVALID_RESPONSE');return data.data;
     }
     async account(deadline=Infinity){
       if(!(await this.s.host.credentialsStatus('feishu')))C.fail('FEISHU_TOKEN_MISSING');
