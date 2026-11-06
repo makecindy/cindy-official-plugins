@@ -240,6 +240,39 @@
         : fallback
           ? t('defaultOption', { model: modelLabel(fallback, models) })
           : t('noModels');
+    var options = models.filter(function (model) {
+      return pinnedDefault || !fallback || model.id !== fallback.id || model.providerId !== fallback.providerId;
+    }).map(function (model) {
+      return {
+        modelId: model.id,
+        providerId: model.providerId,
+        providerName: model.providerName,
+        routing: model.routing,
+        label: modelLabel(model, models),
+        isDefault: false,
+        selected: selected && selected.id === model.id && selected.providerId === model.providerId
+      };
+    });
+    if (fallback) options.unshift({
+      modelId: fallback.id,
+      providerId: fallback.providerId,
+      providerName: fallback.providerName,
+      routing: fallback.routing,
+      label: t('defaultOption', { model: modelLabel(fallback, models) }),
+      isDefault: true,
+      selected: !configured
+    });
+    if (stale) options.push({
+      modelId: stale.modelId,
+      providerId: stale.providerId || '',
+      label: stale.modelId,
+      stale: true,
+      isDefault: false,
+      selected: true
+    });
+    options.sort(function (left, right) {
+      return Number(left.providerId === 'xd') - Number(right.providerId === 'xd');
+    });
     var row = document.createElement('div');
     row.className = 'cap-row';
     row.dataset.capability = capability.key;
@@ -254,34 +287,9 @@
           artSettingsIcons.icon('chevron-down', 'chevron') +
           '</button>' +
           '<div class="model-popover"><div class="model-list" role="listbox" aria-label="' + t(capability.label) + '">' +
-          (fallback ? optionRow({
-            modelId: fallback.id,
-            providerId: fallback.providerId,
-            providerName: fallback.providerName,
-            routing: fallback.routing,
-            label: t('defaultOption', { model: modelLabel(fallback, models) }),
-            isDefault: true
-          }, !configured, capability) : '') +
-          models.filter(function (model) {
-            return pinnedDefault || !fallback || model.id !== fallback.id || model.providerId !== fallback.providerId;
-          }).map(function (model) {
-            var active = selected && selected.id === model.id && selected.providerId === model.providerId;
-            return optionRow({
-              modelId: model.id,
-              providerId: model.providerId,
-              providerName: model.providerName,
-              routing: model.routing,
-              label: modelLabel(model, models),
-              isDefault: false
-            }, active, capability);
+          options.map(function (option) {
+            return optionRow(option, option.selected, capability);
           }).join('') +
-          (stale ? optionRow({
-            modelId: stale.modelId,
-            providerId: stale.providerId || '',
-            label: stale.modelId,
-            stale: true,
-            isDefault: false
-          }, true, capability) : '') +
           '</div></div></div>');
     root.appendChild(row);
 

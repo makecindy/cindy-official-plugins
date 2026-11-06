@@ -414,7 +414,7 @@ test('settings keep same-name providers distinct through save, reopen and tool r
   ], video: [] };
   const options = { defaults: { image: { modelId: 'shared-model', providerId: 'xd' } } };
   const settings = await createSettingsHarness(preferences, catalogs, options);
-  assert.deepEqual(settings.row('image.generate').choices.map((choice) => choice.dataset.providerId), ['xd', 'other-provider']);
+  assert.deepEqual(settings.row('image.generate').choices.map((choice) => choice.dataset.providerId), ['other-provider', 'xd']);
   const runtime = createHarness(preferences, catalogs, null, options);
   await settings.choose('image.generate', 'shared-model', 'other-provider');
   assert.deepEqual(preferences.modelOverrides['image.generate'], { modelId: 'shared-model', providerId: 'other-provider' });
@@ -425,7 +425,38 @@ test('settings keep same-name providers distinct through save, reopen and tool r
   await reopened.choose('image.generate', 'shared-model', 'xd', true);
   assert.equal(preferences.modelOverrides['image.generate'], undefined);
   result = await runtime.call('gen_image', { prompt: 'check restored default' });
-  assert.equal(result.result.request.providerId, 'xd');
+  assert.equal(result.ok, false);
+  assert.match(result.message, /没有配置模型.*询问.*哪个模型/);
+});
+
+test('all four model menus put personal providers before Cindy without changing selections', async () => {
+  const models = (output) => [
+    { id: 'cindy-a', providerId: 'xd' },
+    { id: 'personal-b', providerId: 'custom-b' },
+    { id: 'personal-openai', providerId: 'openai' },
+    { id: 'cindy-b', providerId: 'xd' },
+    { id: 'personal-a', providerId: 'custom-a' },
+  ].map((model) => ({ ...model, name: model.id, modalities: { input: ['text', 'image'], output: [output] } }));
+  const catalogs = { image: models('image'), video: models('video') };
+  const defaults = Object.fromEntries(['image', 'video'].map((type) => [type, { modelId: 'cindy-b', providerId: 'xd' }]));
+  for (const capability of ['image.generate', 'image.edit', 'video.generate', 'video.edit']) {
+    for (const selection of [null, { modelId: 'personal-openai', providerId: 'openai' }, { modelId: 'cindy-b', providerId: 'xd' }]) {
+      const preferences = selection ? { modelOverrides: { [capability]: selection } } : {};
+      const original = structuredClone(preferences);
+      const settings = await createSettingsHarness(preferences, catalogs, { defaults });
+      const choices = settings.row(capability).choices;
+      assert.deepEqual(choices.filter((choice) => choice.dataset.providerId !== 'xd').map((choice) => choice.dataset.modelId), ['personal-b', 'personal-openai', 'personal-a']);
+      const firstCindy = choices.findIndex((choice) => choice.dataset.providerId === 'xd');
+      assert.equal(firstCindy, 3, capability);
+      assert.ok(choices.slice(firstCindy).every((choice) => choice.dataset.providerId === 'xd'));
+      assert.deepEqual(choices.slice(firstCindy).map((choice) => choice.dataset.modelId), selection?.providerId === 'xd' ? ['cindy-b', 'cindy-a', 'cindy-b'] : ['cindy-b', 'cindy-a']);
+      const selected = choices.filter((choice) => choice.selected === 'true');
+      assert.equal(selected.length, 1);
+      assert.equal(selected[0].dataset.modelId, selection?.modelId ?? 'cindy-b');
+      assert.deepEqual(preferences, original);
+      assert.equal(settings.writes.length, 0);
+    }
+  }
 });
 
 test('settings preserve an unavailable provider pin instead of displaying a different source', async () => {
@@ -485,7 +516,7 @@ test('all four settings are saved, reloaded and read by their corresponding tool
 });
 
 test('manifest exposes only the four media preparation tools and the Art settings page', () => {
-  assert.equal(manifest.version, '1.15.5');
+  assert.equal(manifest.version, '1.15.7');
   assert.equal(manifest.minCindyVersion, '0.1.68');
   assert.equal(manifest.schemaVersion, 3);
   assert.equal(manifest.settingsHtml, 'settings.html');
@@ -717,15 +748,16 @@ test('Art settings provider selection disambiguates duplicate model ids', async 
   assert.equal(result.result.request.providerId, 'openai');
 });
 
-test('without a saved model Art follows the catalog default', async () => {
+test('without a saved model Art asks the user which model to use', async () => {
   const catalogs = mediaCatalogsForPreferences({ 'image.generate': 'catalog-default' });
   const harness = createHarness({}, catalogs);
 
   const result = await harness.call('gen_image', { prompt: 'a cat' });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.result.request.modelId, 'catalog-default');
-  assert.equal(result.result.request.providerId, 'xd');
+  assert.equal(result.ok, false);
+  assert.match(result.message, /没有配置模型.*询问.*哪个模型.*等待用户回答/);
+  assert.equal(result.result, undefined);
+  assert.deepEqual(harness.fetches, ['/kv']);
 });
 
 test('a saved model tuple is not replaced when absent from the public catalog', async () => {
@@ -791,7 +823,7 @@ test('configuration read failures stop the call rather than silently selecting a
   }
 });
 
-test('unconfigured tools use a capability-compatible default with its exact provider', async () => {
+test('unconfigured tools ask the user instead of choosing a catalog model', async () => {
   const catalogs = {
     image: [
       { id: 'image-shared', providerId: 'other-provider', modalities: { input: ['text'], output: ['image'] } },
@@ -806,16 +838,11 @@ test('unconfigured tools use a capability-compatible default with its exact prov
   const harness = createHarness({}, catalogs, null, {
     defaults: { image: { modelId: 'image-shared', providerId: 'xd' } },
   });
-  for (const [tool, modelId, providerId] of [
-    ['gen_image', 'image-shared', 'xd'],
-    ['edit_image', 'image-edit', 'edit-provider'],
-    ['gen_video', 'video-default', 'xd'],
-    ['edit_video', 'video-edit', 'video-provider'],
-  ]) {
+  for (const tool of ['gen_image', 'edit_image', 'gen_video', 'edit_video']) {
     const result = await harness.call(tool, { prompt: 'check compatible default', images: [`cindy-media://blobs/${'a'.repeat(64)}.png`] });
-    assert.equal(result.ok, true, tool);
-    assert.equal(result.result.request.modelId, modelId);
-    assert.equal(result.result.request.providerId, providerId);
+    assert.equal(result.ok, false, tool);
+    assert.match(result.message, /没有配置模型.*询问.*哪个模型/);
+    assert.equal(result.result, undefined);
   }
 });
 
