@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.4.5",
-  "releaseNotes": "PR 卡片离得远时，Agent 会把它挪到最新回复下面，不再让你往上翻找；补了改动后再问要不要发 PR，也沿用原来那张卡片。新版 Cindy 会把原位置的卡片整张隐去，旧版仍留一行「最新状态在下方」。",
+  "version": "1.5.0",
+  "releaseNotes": "PR 合并或关闭后，卡片上会出现「归档任务」按钮，点一下就和侧边栏一样归档这个任务。「PR 设置」里新增「合并后自动归档」：你看过已合并的卡片、离开这个任务后自动归档，有未提交的改动、任务还在运行或绑着定时任务时保留，归档后可以撤销。快要自动归档时卡片上会提示，点「本次不归档」或在任务里发一条消息就取消这一次。需要新版 Cindy，旧版不显示这个按钮。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
