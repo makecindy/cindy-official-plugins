@@ -135,8 +135,10 @@ const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs]});
 async function markAgentOpened(tabId) {
   (await loadAgentTabs()).add(tabId); await saveAgentTabs();
   quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
-  sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true});
+  sendMarkMessage(tabId,() => openedMarkMessage(tabId));
 }
+// "Opened by Cindy" is shown only on a tab that still carries it, and never into a capture in progress.
+const openedMarkMessage = tabId => agentTabs?.has(tabId) && !agentMarkHidden.has(tabId) && {type:'cindy-agent-mark',opened:true};
 async function userTookOver(tabId) {
   if (!(await loadAgentTabs()).delete(tabId)) return;
   await saveAgentTabs();
@@ -179,7 +181,8 @@ function markAgentTab(tabId,mode) {
     agentMarkHidden.add(tabId);
     return quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',hidden:true},TOP_FRAME),1500,Error('MARK_TIMEOUT')));
   }
-  agentMarkHidden.delete(tabId);
+  // A page that loaded during a capture was not given its "Opened by Cindy" label: give it now.
+  if (agentMarkHidden.delete(tabId) && mode !== 'clear') sendMarkMessage(tabId,() => openedMarkMessage(tabId));
   clearTimeout(agentMarkTimers.get(tabId));
   if (mode === 'clear') {
     agentMarkTimers.delete(tabId); agentMarkUntil.delete(tabId);
@@ -200,7 +203,7 @@ function markAgentTab(tabId,mode) {
 function remarkLoadedTab(tabId) {
   const until = agentMarkUntil.get(tabId);
   if (until) sendMarkMessage(tabId,() => agentMarkMessage(tabId,until));
-  quietly(async () => { if ((await loadAgentTabs()).has(tabId)) await sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true}); });
+  quietly(async () => { if ((await loadAgentTabs()).has(tabId)) await sendMarkMessage(tabId,() => openedMarkMessage(tabId)); });
 }
 
 // ── Chrome's debugger ──────────────────────────────────────────────────────────────────────

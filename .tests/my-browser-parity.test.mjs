@@ -30,7 +30,9 @@ function harness(local={clientId:'fixture'},shared,options={}) {
     // Timers fire at once by default; 'never' keeps idle timers and deadlines from firing.
     // 'manual' queues them in options.queue for the test to fire.
     setTimeout(fn,ms){if(options.timers==='manual'){const t={fn,ms};options.queue.push(t);return t;}if(options.timers!=='never')queueMicrotask(fn);return 0;},
-    clearTimeout(t){const i=options.queue?.indexOf(t);if(i>=0)options.queue.splice(i,1);}};
+    clearTimeout(t){const i=options.queue?.indexOf(t);if(i>=0)options.queue.splice(i,1);},
+    // options.now: a clock the test moves by hand.
+    ...(options.now?{Date:class extends Date{static now(){return options.now();}}}:{})};
   vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.tabTest={handle};',context);
   const run=(action,payload,policy=P.defaults())=>context.tabTest.handle({id:'job',action,payload},policy,{base:'http://fixture',session:'fixture'});
   // A tab the user has open in their own window, behind the one they are looking at.
@@ -224,7 +226,7 @@ test('open keeps earlier tabs of the same address and has no fixed tab limit',as
 // 2026-11-06: right after a navigation the page had no content script yet, so the one mark message was
 // dropped and the mark only showed with the agent's next action; a page that loaded lost it too.
 test('a mark the loading page misses is retried, and a page that loads gets it back',async()=>{
-  const queue=[],updates=[];const h=harness(undefined,undefined,{timers:'manual',queue,updates});
+  const queue=[],updates=[];let clock=1_000_000;const h=harness(undefined,undefined,{timers:'manual',queue,updates,now:()=>clock});
   const sent=[];let ready=false;
   h.chrome.tabs.sendMessage=async(tabId,message,options)=>{sent.push({tabId,message,options});if(!ready)throw new Error('Could not establish connection. Receiving end does not exist.');};
   const settle=()=>new Promise(r=>setImmediate(r));
@@ -234,19 +236,23 @@ test('a mark the loading page misses is retried, and a page that loads gets it b
   assert.equal(shows().length,1);assert.equal(sent[0].options?.frameId,0,'only the top page draws the mark');
   ready=true;fire(700);await settle();
   assert.equal(shows().length,2,'retried after the page could not receive it');
-  assert.ok(shows()[1].message.ms<=20000);
+  assert.equal(shows()[1].message.ms,20000);
   fire(700);await settle();
   assert.equal(shows().length,2,'no retry once it landed');
-  // The agent clicked a link: the new page starts without the mark and gets it for the time left.
+  // The agent clicked a link 8 s later: the new page starts without the mark and gets it for the 12 s left.
+  clock+=8000;
   for(const fn of updates)fn(1,{status:'complete'});await settle();
-  assert.equal(shows().length,3);
+  assert.equal(shows().length,3);assert.equal(shows()[2].message.ms,12000,'only the time that is left');
   // Hidden for a capture: a page load during it does not bring the mark into the picture.
   await h.context.markAgentTab(1,'hidden');
   for(const fn of updates)fn(1,{status:'complete'});await settle();
   assert.equal(shows().length,3);
   await h.context.markAgentTab(1);await settle();
   assert.equal(shows().length,4);
-  // Once the mark has run out, a load does not bring it back.
+  // Once the mark has run out, a load does not bring it back, even if the expiry timer has not fired yet.
+  clock+=20000;
+  for(const fn of updates)fn(1,{status:'complete'});await settle();
+  assert.equal(shows().length,4);
   fire(20000);
   for(const fn of updates)fn(1,{status:'complete'});await settle();
   assert.equal(shows().length,4);
@@ -263,6 +269,12 @@ test('"Opened by Cindy" comes back on each page its tab loads',async()=>{
   await h.context.markAgentOpened(2);await settle();
   for(const fn of updates){fn(2,{status:'complete'});fn(1,{status:'complete'});}await settle();
   same(opened,[2,2]);
+  // A page that loads during a capture gets no label into the picture; it gets it when the capture ends.
+  await h.context.markAgentTab(2,'hidden');
+  for(const fn of updates)fn(2,{status:'complete'});await settle();
+  same(opened,[2,2]);
+  await h.context.markAgentTab(2);await settle();
+  same(opened,[2,2,2]);
 });
 
 // Review 2026-10-29: a failed capture left Cindy's activity mark hidden for the rest of the operation.

@@ -613,3 +613,5 @@ Verification: `my-browser-x-subtitles.browser.test.mjs` adds fixtures following 
 - Marks go to the top page only, so an embedded player frame answering first cannot stop the retries. No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
 
 Verification: `my-browser-parity.browser.test.mjs` adds a click that leads to a page answering after 2.5 s; in Chromium the new page shows the mark once it loads, and the same check fails on the code before this change. `my-browser-parity.test.mjs` covers the retry, the re-send after a load, the remaining time, the hidden capture and the cleared or expired mark. On the user's own Chrome (0.4.66), the mark was missing after navigating to chatgpt.com and appeared only with the following action; this version has not yet been installed there.
+
+The "Opened by Cindy" label follows the same rule: a tab that loads while a screenshot is being taken is not labelled into the picture, and gets the label back when the capture ends. The remaining-time and expiry tests now run on a hand-moved clock.
