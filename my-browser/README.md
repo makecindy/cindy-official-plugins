@@ -604,3 +604,12 @@ Verification: `my-browser-x-subtitles.browser.test.mjs` adds feed fixtures (no p
 - No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
 
 Verification: `my-browser-x-subtitles.browser.test.mjs` adds fixtures following a real X portrait player (caption track without a captions button, no caption track, collapsed controls), passing with the real content scripts in Chromium; the same test fails on the code before this change. The control bar structure was checked layer by layer on a signed-in X page.
+
+## 0.4.67 the activity mark reaches pages that are still loading (host package 0.4.89)
+
+- **Shown when the page is ready, not only at the moment of the action:** the extension sent the red "Cindy is working on this page" mark once per action. Right after a navigation, a heavy page (seen on chatgpt.com) has no content script yet, so that one message was dropped and the mark only appeared with the agent's next action. The mark is now re-sent for a few seconds until the page receives it.
+- **A page the agent's action leads to keeps the mark:** clicking a link or navigating replaces the page and the mark with it. When a tab finishes loading while its mark is still on, the new page gets it back for the time that is left, and "Opened by Cindy" returns on tabs Cindy opened. A mark that has run out or that the task cleared does not come back, and a page loading during a screenshot is not re-marked.
+- **Toolbar badge:** a navigation no longer wipes the AI badge from a tab Cindy is working on.
+- Marks go to the top page only, so an embedded player frame answering first cannot stop the retries. No new permission; the signed protocol is unchanged. Only the Chrome extension needs updating.
+
+Verification: `my-browser-parity.browser.test.mjs` adds a click that leads to a page answering after 2.5 s; in Chromium the new page shows the mark once it loads, and the same check fails on the code before this change. `my-browser-parity.test.mjs` covers the retry, the re-send after a load, the remaining time, the hidden capture and the cleared or expired mark. On the user's own Chrome (0.4.66), the mark was missing after navigating to chatgpt.com and appeared only with the following action; this version has not yet been installed there.

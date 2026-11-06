@@ -775,7 +775,7 @@
     root.append(pill);document.documentElement.append(openedMark);
     for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
   }
-  async function markAgent(hidden,clear,opened){
+  async function markAgent(hidden,clear,opened,ms){
     if(opened){await showOpenedMark();return;}
     if(clear){endAgentMark();return;}
     if(hidden){agentMark?.style.setProperty('display','none','important');openedMark?.style.setProperty('display','none','important');return;}
@@ -797,9 +797,10 @@
     }
     agentMark.style.setProperty('display','block','important');agentMark.classList.remove('leaving');
     clearTimeout(agentMarkTimer);
-    agentMarkTimer=setTimeout(endAgentMark,AGENT_MARK_MS);
+    // A mark re-sent after the page loaded only lasts for the time the worker has left.
+    agentMarkTimer=setTimeout(endAgentMark,Number.isFinite(ms)&&ms>0?Math.min(ms,AGENT_MARK_MS):AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true,m.ms).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0,autoTranslatedURL='';
   async function autoOpen(){

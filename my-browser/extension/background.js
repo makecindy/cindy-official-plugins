@@ -135,7 +135,7 @@ const saveAgentTabs = () => agentStore.set({agentTabs:[...agentTabs]});
 async function markAgentOpened(tabId) {
   (await loadAgentTabs()).add(tabId); await saveAgentTabs();
   quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
-  quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',opened:true}),1500,Error('MARK_TIMEOUT')));
+  sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true});
 }
 async function userTookOver(tabId) {
   if (!(await loadAgentTabs()).delete(tabId)) return;
@@ -153,18 +153,54 @@ function withDeadline(promise,ms,error) {
   let timer;
   return Promise.race([promise,new Promise((_,reject) => { timer = setTimeout(() => reject(error),ms); })]).finally(() => clearTimeout(timer));
 }
+// A page that is still loading has no content script yet and misses the message. Marks are re-sent
+// for a few seconds until one lands; message() returns null once the mark is no longer wanted.
+// Only the top page draws marks: an embedded player frame answering first would stop the retries.
+const MARK_RETRY_MS = 700, MARK_RETRIES = 6, TOP_FRAME = {frameId:0};
+function sendMarkMessage(tabId,message,attempt = 0) {
+  const m = message();
+  if (!m) return Promise.resolve();
+  let sent;
+  try { sent = chrome.tabs.sendMessage(tabId,m,TOP_FRAME); } catch (e) { sent = Promise.reject(e); }
+  return withDeadline(Promise.resolve(sent),1500,Error('MARK_TIMEOUT')).catch(() => {
+    if (attempt < MARK_RETRIES) setTimeout(() => sendMarkMessage(tabId,message,attempt+1),MARK_RETRY_MS);
+  });
+}
+// Tab id → when its activity mark ends. A page that loads while the mark is on (the agent navigated or
+// clicked a link) gets it again for the time that is left, and a capture in progress is never re-marked.
+const AGENT_MARK_MS = 20000, agentMarkUntil = new Map(), agentMarkHidden = new Set();
+function agentMarkMessage(tabId,until) {
+  const ms = until - Date.now();
+  return agentMarkUntil.get(tabId) === until && !agentMarkHidden.has(tabId) && ms > 0 && {type:'cindy-agent-mark',ms};
+}
 // mode: undefined shows (or extends) the mark, 'hidden' hides it for a capture, 'clear' ends it now.
 function markAgentTab(tabId,mode) {
-  const sent = quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',...(mode === 'hidden' ? {hidden:true} : mode === 'clear' ? {clear:true} : {})}),1500,Error('MARK_TIMEOUT')));
-  if (mode === 'clear') {
-    clearTimeout(agentMarkTimers.get(tabId)); agentMarkTimers.delete(tabId);
-    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
-  } else if (!mode) {
-    quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
-    clearTimeout(agentMarkTimers.get(tabId));
-    agentMarkTimers.set(tabId,setTimeout(() => { agentMarkTimers.delete(tabId); quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)})); },20000));
+  if (mode === 'hidden') {
+    agentMarkHidden.add(tabId);
+    return quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',hidden:true},TOP_FRAME),1500,Error('MARK_TIMEOUT')));
   }
+  agentMarkHidden.delete(tabId);
+  clearTimeout(agentMarkTimers.get(tabId));
+  if (mode === 'clear') {
+    agentMarkTimers.delete(tabId); agentMarkUntil.delete(tabId);
+    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
+    return quietly(() => withDeadline(chrome.tabs.sendMessage(tabId,{type:'cindy-agent-mark',clear:true},TOP_FRAME),1500,Error('MARK_TIMEOUT')));
+  }
+  const until = Date.now()+AGENT_MARK_MS;
+  agentMarkUntil.set(tabId,until);
+  const sent = quietly(() => sendMarkMessage(tabId,() => agentMarkMessage(tabId,until)));
+  quietly(() => chrome.action.setBadgeText({tabId,text:'AI'}));
+  agentMarkTimers.set(tabId,setTimeout(() => {
+    agentMarkTimers.delete(tabId); agentMarkUntil.delete(tabId);
+    quietly(() => chrome.action.setBadgeText({tabId,text:restingBadge(tabId)}));
+  },AGENT_MARK_MS));
   return sent;
+}
+// A loaded page starts without marks: give it back the ones its tab still carries.
+function remarkLoadedTab(tabId) {
+  const until = agentMarkUntil.get(tabId);
+  if (until) sendMarkMessage(tabId,() => agentMarkMessage(tabId,until));
+  quietly(async () => { if ((await loadAgentTabs()).has(tabId)) await sendMarkMessage(tabId,() => agentTabs.has(tabId) && {type:'cindy-agent-mark',opened:true}); });
 }
 
 // ── Chrome's debugger ──────────────────────────────────────────────────────────────────────
@@ -1617,9 +1653,10 @@ async function openOnTab(tabId,action='open') {
   } finally {chrome.tabs.onUpdated?.removeListener(navigated);}
 }
 chrome.tabs.onUpdated?.addListener((tabId,change)=>{
+  if(change.status==='complete')remarkLoadedTab(tabId);
   if(change.status==='loading'||change.url) {
-    // Navigation/refresh replaces the document that could not receive the click.
-    chrome.action.setBadgeText({tabId,text:null}).catch(()=>{});
+    // Navigation/refresh replaces the document that could not receive the click. Cindy's own badge stays.
+    chrome.action.setBadgeText({tabId,text:agentMarkUntil.has(tabId)?'AI':restingBadge(tabId)}).catch(()=>{});
   }
 });
 if(chrome.contextMenus) {
