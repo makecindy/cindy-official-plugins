@@ -157,6 +157,9 @@ var MESSAGES = {
     prAutoRenameHint: '任务标题改成 PR 号和标题',
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
+    prAutoArchive: '合并后自动归档',
+    prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
+    prArchiveTask: '归档任务',
     prTurnOn: '开启「{name}」',
     prFollowModel: '自动跟进用的模型',
     prFollowModelTask: '跟随当前任务',
@@ -284,6 +287,9 @@ var MESSAGES = {
     prAutoRenameHint: 'Retitle the task with the PR number and title',
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
+    prAutoArchive: 'Archive after merge',
+    prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
+    prArchiveTask: 'Archive task',
     prTurnOn: 'Turn on "{name}"',
     prFollowModel: 'Model for auto-follow',
     prFollowModelTask: 'Follow this task',
@@ -411,6 +417,9 @@ var MESSAGES = {
     prAutoRenameHint: 'タスク名を PR 番号とタイトルに変更します',
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
+    prAutoArchive: 'マージ後に自動でアーカイブ',
+    prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
+    prArchiveTask: 'タスクをアーカイブ',
     prTurnOn: '「{name}」をオン',
     prFollowModel: '自動フォローに使うモデル',
     prFollowModelTask: 'タスクに合わせる',
@@ -538,6 +547,9 @@ var MESSAGES = {
     prAutoRenameHint: '작업 제목을 PR 번호와 제목으로 바꿉니다',
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
+    prAutoArchive: '병합 후 자동 보관',
+    prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
+    prArchiveTask: '작업 보관',
     prTurnOn: '"{name}" 켜기',
     prFollowModel: '자동 팔로우에 쓸 모델',
     prFollowModelTask: '현재 작업 따르기',
@@ -2559,7 +2571,7 @@ function prSettingsFrom(kv) {
   var s = kv && kv.prCard && typeof kv.prCard === 'object' ? kv.prCard : {};
   // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
   return {
-    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true,
+    autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, autoArchive: s.autoArchive === true,
     followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
   };
 }
@@ -2592,6 +2604,7 @@ async function writePrSettings(change) {
   var next = prSettingsFrom(kv);
   change(next);
   kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
+  if (next.autoArchive) kv.prCard.autoArchive = true;
   if (next.followModel) kv.prCard.followModel = next.followModel;
   if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
   var r = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
@@ -2754,7 +2767,7 @@ var PR_CSS =
   'button:hover:not(:disabled){background:var(--hover,var(--bg,transparent))}' +
   'button:disabled{cursor:default;opacity:.5}' +
   'button:focus-visible{outline:2px solid var(--focus-ring,#417cdd);outline-offset:2px}' +
-  'button[data-ghost-action^="pr:"]::before{content:attr(aria-label)}' +
+  'button[data-ghost-action^="pr:"]::before,button[data-ghost-task-archive]::before{content:attr(aria-label)}' +
   'a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}' +
   'button[data-ghost-action="pr:stop"]{opacity:0;visibility:hidden;transition:opacity var(--motion-fast,120ms) var(--motion-ease-out,ease-out),visibility 0s linear var(--motion-fast,120ms)}' +
   'div:hover>div>button[data-ghost-action="pr:stop"],div:focus-within>div>button[data-ghost-action="pr:stop"]{opacity:1;visibility:visible;transition-delay:0s}' +
@@ -2859,11 +2872,29 @@ function prHeader(tile, titleHtml, metaParts, gear) {
 }
 
 /** 下层:左边分支或状态,右边按钮;窄的时候按钮换到下一行。 */
-function prFooter(leftHtml, actionsHtml, openOnly) {
+function prFooter(leftHtml, actionsHtml, openOnly, archiveHtml) {
   return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:52px;padding:10px 16px;border-top:1px solid var(--border-default)">' +
     '<div style="flex:1 1 220px;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary)">' + leftHtml + '</div>' +
     (actionsHtml ? '<div' + (openOnly || '') + ' style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-left:auto">' + actionsHtml + '</div>' : '') +
+    // 归档按钮不放进 open-only 的那一组:PR 在卡片之外合并后,那一组被藏起,这颗正好露出来。
+    (archiveHtml ? '<div style="display:flex;align-items:center;margin-left:auto">' + archiveHtml + '</div>' : '') +
     '</div>';
+}
+
+/**
+ * 归档任务按钮(data-ghost-task-archive):点击由 Cindy 走标准归档流程,插件收不到这次点击。
+ * 写成 display:none,新版 Cindy 在 PR 已合并或关闭时把它露出来(包括在卡片之外合并的情况),
+ * 旧版 Cindy 和手机不认这个标记,一直藏着。开了「合并后自动归档」时加 -auto,由 Cindy 自己确认
+ * 已合并、用户看过并离开、归档不会丢东西后才归档。
+ */
+function prArchiveButton(card, settings) {
+  if (!card.pr) return '';
+  var ended = card.stage === 'merged' || card.stage === 'closed';
+  return '<button data-ghost-task-archive="' + prEsc(card.repo + '#' + card.pr.number) + '"' +
+    (ended ? ' data-ghost-task-archive-state="' + card.stage + '"' : '') +
+    (settings.autoArchive ? ' data-ghost-task-archive-auto' : '') +
+    ' aria-label="' + prEsc(t('prArchiveTask')) + '" style="' + PR_PILL.replace('display:inline-flex;', 'display:none;') +
+    'border:1px solid var(--border-default);--bg:var(--surface-elevated);--hover:color-mix(in srgb,var(--surface-elevated),var(--text-primary) 8%)"></button>';
 }
 
 /**
@@ -3017,6 +3048,7 @@ function prSettingsPanel(settings) {
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
     '</div>';
 }
@@ -3096,7 +3128,7 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen, openOnly) : '') + prFooter(left, actions, openOnly);
+  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen, openOnly) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
   // The open settings panel only holds while the PR is open, like the button that opened it.
   if (gear && card.settingsOpen) body += '<div' + openOnly + '>' + prSettingsPanel(settings) + '</div>';
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
@@ -3440,9 +3472,9 @@ async function prCardAction(msg) {
   var handedOff = false;
   if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
     card.settingsOpen = !card.settingsOpen;
-  } else if (action === 'prset:rename' || action === 'prset:follow') {
+  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
     try {
-      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : 'autoFollow');
+      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
     } catch (e) {
       card.note = t('prSettingFailed');
     }

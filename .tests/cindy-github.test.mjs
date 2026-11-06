@@ -882,6 +882,28 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   ]);
 });
 
+// Rule (2026-11-06): the archive-task button is Cindy's, not the plugin's. Every card for a PR carries it
+// hidden (so a merge outside the card can reveal it), outside the open-only group, with the plugin's
+// snapshot once it read the PR ended; the "Archive after merge" setting adds the auto marker.
+test('PR cards carry a hidden host archive button and the auto-archive setting', async () => {
+  const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login' }) });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '7' })).reply.result.card_id;
+  const button = () => runtime.lastCard(cardId).html.match(/<button data-ghost-task-archive=[^>]*>/)?.[0] ?? '';
+  assert.match(button(), /^<button data-ghost-task-archive="octo\/repo#7" aria-label="归档任务" style="display:none;/);
+  assert.doesNotMatch(button(), /data-ghost-action|data-ghost-task-archive-(?:state|auto)/);
+  assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-open-only="[^"]*"[^>]*>(?:(?!<\/div>).)*data-ghost-task-archive/s);
+
+  await runtime.click(cardId, 'prui:settings');
+  await runtime.click(cardId, 'prset:archive');
+  assert.equal(runtime.kv.prCard.autoArchive, true);
+  assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:archive" data-ghost-toggle="on" aria-label="关闭「合并后自动归档」"/);
+  assert.match(button(), / data-ghost-task-archive-auto /);
+
+  runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));
+  await runtime.tool({ card_id: cardId });
+  assert.match(button(), /data-ghost-task-archive="octo\/repo#7" data-ghost-task-archive-state="merged" data-ghost-task-archive-auto aria-label/);
+});
+
 // Drafts are still being worked on, so the card offers "mark ready" instead of following.
 // The plugin flips it directly, rereads GitHub, then applies the auto-follow setting.
 test('a draft card marks the PR ready itself, then follows when the card setting says so', async () => {
