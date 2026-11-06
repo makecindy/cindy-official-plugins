@@ -657,7 +657,7 @@ if(typeof module!=='undefined')module.exports=PodcastHtmlParser;
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function clean(s){return s.replace(/([\p{Script=Han}])\s+(?=[\p{Script=Han}])/gu,'$1').replace(/\s+([，。！？；：、])/g,'$1').replace(/([，。！？；：、])\s+/g,'$1');}
   function paragraphs(s){return clean(s).replace(/([。！？；]|[.!?](?=\s+[A-Z]))\s*/g,'$1\n').replace(/([，,])\s*(?=(?:但是|所以|不过|因此|同时|而且|实际上|总而言之|比如说|另外))/g,'$1\n').split(/\n+/).map(x=>x.trim()).filter(Boolean);}
-  const stamp=(ms,L)=>ms==null?L.unknown:new Date(Math.floor(ms/1000)*1000).toISOString().slice(11,19);
+  const stamp=(ms,L)=>{if(ms==null)return L.unknown;const seconds=Math.floor(ms/1000);return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(n=>String(n).padStart(2,'0')).join(':');};
   function render(d,{interactive=false}={}){
     const L=labels[d.language]||labels['zh-CN'],time=s=>stamp(s.start_ms,L)+(s.end_ms==null?'':'–'+stamp(s.end_ms,L));
     const anchor=(id,text)=>'<a href="#'+esc(id)+'">'+esc(text)+'</a>';
@@ -680,7 +680,28 @@ if(typeof module!=='undefined')module.exports=PodcastHtmlParser;
       for(const item of targets)if(item===active)item.a.setAttribute('aria-current','location');else item.a.removeAttribute('aria-current');
     }
     body?.addEventListener('scroll',()=>{if(!frame)frame=requestAnimationFrame(sync);},{passive:true});sync();
-    container.querySelector('[data-transcript-search]')?.addEventListener('input',e=>{const q=e.target.value.toLocaleLowerCase().trim();let matches=0;for(const node of container.querySelectorAll('[data-transcript-segment]')){const hit=!q||node.textContent.toLocaleLowerCase().includes(q);node.hidden=!hit;if(hit)matches++;}container.querySelector('[data-match-count]').textContent=q?matches+' '+L.matches:L.all;});
+    // Storage chunks share timing and speaker; search their continuous text and
+    // map each occurrence back to every source chunk it touches.
+    const nodes=Array.from(container.querySelectorAll('[data-transcript-segment]'));
+    const groups=[];
+    for(let i=0;i<d.segments.length;i++){
+      const s=d.segments[i],prev=d.segments[i-1];
+      if(!prev||s.idx!==prev.idx+1||s.start_ms!==prev.start_ms||s.end_ms!==prev.end_ms||s.speaker!==prev.speaker)groups.push([]);
+      groups.at(-1).push({s,i});
+    }
+    container.querySelector('[data-transcript-search]')?.addEventListener('input',e=>{
+      const q=e.target.value.toLocaleLowerCase().trim(),hits=new Set();
+      if(q)for(const group of groups){
+        let text='';const spans=group.map(({s,i})=>{const start=text.length;text+=s.text.toLocaleLowerCase();return {i,start,end:text.length};});
+        let first=0;
+        for(let at=text.indexOf(q);at>=0;at=text.indexOf(q,at+1)){
+          while(first<spans.length&&spans[first].end<=at)first++;
+          for(let j=first;j<spans.length&&spans[j].start<at+q.length;j++)hits.add(spans[j].i);
+        }
+      }
+      let matches=0;nodes.forEach((node,i)=>{const hit=!q||hits.has(i)||node.textContent.toLocaleLowerCase().includes(q);node.hidden=!hit;if(hit)matches++;});
+      container.querySelector('[data-match-count]').textContent=q?matches+' '+L.matches:L.all;
+    });
     container.querySelectorAll('a[href^="#"]').forEach(a=>a.addEventListener('click',e=>{const target=container.querySelector(a.getAttribute('href'));if(target&&body){e.preventDefault();target.hidden=false;body.scrollTo({top:body.scrollTop+target.getBoundingClientRect().top-body.getBoundingClientRect().top-24,behavior:'auto'});target.tabIndex=-1;target.focus({preventScroll:true});sync();}}));
     container.querySelectorAll('[data-ask-chapter]').forEach(b=>b.addEventListener('click',()=>onAsk?.(Number(b.dataset.askChapter))));
   }

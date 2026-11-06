@@ -1424,3 +1424,34 @@ test('unknown progress cards survive failed UI localization initialization',asyn
     const card=runtime.messages.find(m=>m.type==='card-update'&&m.callId==='failed-ui-slot');assert.ok(card);assert.match(card.html,/Check provider jobs; do not resubmit/);
   }finally{h.close();}
 });
+
+// #285 P2 regressions: real Service import/generation/export and Reading.bind.
+// Existing tests checked rendered markup, not search input or cumulative hours.
+// Minimal inputs: a keyword split at 12000 and JSON time at 25h. Tier: SQLite/unit.
+test('reading and exported binder find storage-boundary words and retain cumulative hours',async()=>{
+  const R=require('../podcast-insights/reading.js'),vm=await import('node:vm');
+  const h=harness();try{
+    const eid=await seed(h);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'x'.repeat(11998)+'量子计算 tail'});
+    assert.equal((await h.service.run('podcast_search',{query:'量子计算'})).evidence.length,1);
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h);
+    async function generate(){const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');return JSON.parse(h.files.get(r.path));}
+    const d=await generate();assert.equal(d.segments.length,2);
+    const exports=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exports.push(a);return {ok:true};};
+    await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+    function exercise(bind){
+      let input;const count={},nodes=d.segments.map(s=>({textContent:s.text,hidden:false}));
+      const container={querySelector:s=>s==='[data-transcript-search]'?{addEventListener:(_,fn)=>{input=fn;}}:s==='[data-match-count]'?count:null,querySelectorAll:s=>s==='[data-transcript-segment]'?nodes:[]};
+      bind(container,d);input({target:{value:'量子计算'}});assert.deepEqual(nodes.map(n=>n.hidden),[false,false]);assert.match(count.textContent,/^2 /);
+      input({target:{value:'absent'}});assert.ok(nodes.every(n=>n.hidden));input({target:{value:''}});assert.ok(nodes.every(n=>!n.hidden));
+    }
+    exercise(R.bind);
+    const script=exports[0].content.match(/<script>([\s\S]*)<\/script>/)[1];
+    // Execute the actual exported script against the same DOM adapter.
+    exercise((container)=>vm.runInNewContext(script,{document:container}));
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'Long recording evidence.',start:90000,end:90061}])});
+    const timed=await generate();assert.equal(timed.segments[0].start_ms,90000000);
+    for(const html of [R.render(timed),R.documentHTML(timed,'')])assert.match(html,/25:00:00–25:01:01/);
+  }finally{h.close();}
+});
