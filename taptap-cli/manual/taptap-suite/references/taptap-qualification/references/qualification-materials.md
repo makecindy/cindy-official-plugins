@@ -50,19 +50,7 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 }
 ```
 
-APK ICP：
-
-```json
-{
-  "qualification": {
-    "qualification_type": "icp-filing",
-    "icp_number": "<备案号>",
-    "icp_file": { "type": "pdf", "url": "<https-url>" }
-  }
-}
-```
-
-小游戏 ICP 包含主体敏感信息时，不在 CLI payload 中补齐；让 `qualification save-qualification-draft` 返回人工填写分支，再使用当前开发者后台资质页面入口完成。
+APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提审。本手册不收集或回显主体证件/联系人；先在同环境开发者后台填妥，再按最新 write_domain 与 submit_blockers 判断能否从 CLI 完成非敏感后续动作。小游戏 ICP 属于独立域，不用应用资质接口代办。
 
 隐私合规：
 
@@ -155,3 +143,13 @@ IP 授权书：
 | `anti_addiction_video_file` | 防沉迷说明视频 |
 
 “接入防沉迷”= 接入未成年人防沉迷服务（TapTap SDK / 其他 / 新规）；未接入时走包体侧 `apk_anti_addiction_status=not-integrated` + 授权 TapPlay 免安装上架。
+
+## 材料编辑规则
+
+按 schema 构造材料输入。隐私托管模式 `use_general_privacy_policy:true` 的链接由服务端生成；环境配置不可用时，说明错误并引导用户前往对应环境的开发者后台。小游戏常规隐私配置在开发者后台办理。
+
+AI 的 `proof_files` 会替换完整证明列表，每项格式为 `{ "package_type":"apk", "file":{"type":"pdf","url":"<https-url>"} }`。不同包体可以使用不同文件。删除某个包体的证明时，提交其余包体的完整列表；传 `[]` 表示全部清空，省略该字段表示保留。
+
+`proof_file` 与 `package_types` 用于向指定包体添加同一份证明，不删除其他包体的文件；不能与 `proof_files` 同时传入。用户确认不提供 AI 服务时，设置 `provide_aigc_service=false`；是否删除已保存的证明须另行确认。
+
+数组字段在 schema 允许时用 `[]` 清空；省略或 `null` 不猜删除。其他可选标量或禁止清空字段在没有明确删除契约时转开发者后台，不以空字符串冒充删除。版号/软著文本与扫描件成对补齐，AI 服务证明、防沉迷条件项按服务端完整性校验。

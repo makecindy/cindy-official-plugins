@@ -72,6 +72,7 @@
 | 登录、当前身份、找 developerId/appId | `identity` | 已有适用的调用 scope 不重复查；先区分目标资源 ID，否则查候选 |
 | 创建新游戏、选择游戏类型或包体方向 | `app-edit`(新游戏创建一节) | 先收集并确认创建字段 |
 | 改资料、素材、主包体、整版提审/撤审/发布 | `app-edit` | 先 read-before-write |
+| 关卡游戏升级为独立游戏(创意工坊升级) | `app-edit`(level upgrade) | 先查升级条件，隐私声明与升级分别确认 |
 | 上传本地图片、视频或包体(单个文件或目录/zip 盘点) | `materials`(第一部分) | 先盘点和确认用途,再逐项上传和交接 |
 | 查资质缺口、补资质材料、资质增量提审/撤回 | `qualification` | 先确认发布意图,再分析 |
 | 检索、生成或收录游戏图片素材 | `materials`(第二部分) | 先本地素材后生图;上传执行在第一部分 |
@@ -107,9 +108,9 @@
 - 业务字段统一放 `args.data`,只有 `developer_id` / `app_id` 是独立 scope 字段(映射为 `--dev-id` / `--app-id`)。除 scope 和 `data` 外的键都是控制 flag,透传成 `--flag`,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);不确定可用 flag 时先对目标命令传 `args._help:true` 看完整帮助。typed 命令的 `data` 是完整 tool input。
 - 默认输出就是 JSON,不要追加冗余的 `--format json`。
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
-- `precheck-app-review` 返回 `blockers` 非空或 `preaudit_status === "rejected"` 时,只展示 `blockers` 逐项事实;`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次没审成、可稍后重试预检或直接提交;响应里没有 `preaudit_status` 时退回按 `preaudit_passed` 判断。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则向用户逐项展示卡点并询问是否强制提交(预检可跳过,最终由服务端校验裁决)。不得回传任何 token,也不能补造本地参数或请求字段。
+- `precheck-app-review` 返回阻断项或 `preaudit_status === "rejected"` 时,先向用户展示具体问题和提交风险,再确认是否继续;`yes:true` 本身不能代替用户确认。`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次未得出机审结论、可稍后重试预检或在用户授权下直接提交;响应缺少该字段时明确说明机审结论无法确认。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认阻断项消失),继续提审的授权不能代替协议同意。提审明确拒绝后停止,结果不明先查询版本状态,不循环提交或更换幂等键。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
-- CLI 自身的问题(报错看不懂、行为不合预期)在用户明确受阻或同一 `error.subtype` 连续失败 2 次时用 `feedback` 上报,条件与话术见 [feedback](taptap-suite/references/feedback.md);它是写操作,同样先 `dry_run: true` 预览再 `yes: true`。
+- CLI 自身的问题(报错看不懂、行为不合预期、缺能力)用 `feedback` 上报一次,三种触发:用户明确表达受阻;错误信封带 `_notice.feedback` 或同一 `error.subtype` 连续失败;你能说清复现命令和期望 vs 实际的差异。上报前先确认不是自己的输入、登录或权限问题,先修好输入和 auth/scope 重试;条件与话术见 [feedback](taptap-suite/references/feedback.md);它是写操作,同样先 `dry_run: true` 预览再 `yes: true`。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。
 
 ## References
@@ -123,6 +124,7 @@
 | 运营阶段识别与官方手册 | 提审、测试、首次上线或版本更新完成后的状态识别与运营手册交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/operation-handbooks.md"})` |
 | 互动运营跨域流程 | 用户明确要求串联签到、公告位和推送 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/interactive-operations-flow.md"})` |
 | 游戏物料要求 | 回答图片、视频、Windows 素材规格或判断素材是否合规 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/material-requirements.md"})` |
+| 固定包体类型边界 | 判断能否上传/绑定某类包体、包体类型与关卡属性冲突、创建类型未保存时如何恢复 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/package-type-boundary.md"})` |
 | TapTap 上架规则目录 v4 | 资料填写提示、审核规则溯源,以及区分官方规则与历史审核 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/official-review-rules-v4.md"})` |
 
 ## 不在本插件范围

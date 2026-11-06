@@ -961,12 +961,12 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
     'a permission denial must not be repeated for the same resource',
   );
 
-  // Precheck: HTTP success and a failed content preaudit are separate facts,
-  // and the preaudit alone does not forbid submission.
-  assert.match(appEdit, /预检 HTTP 200 \/ 顶层成功不等于内容预审通过/);
-  assert.match(appEdit, /预审不通过本身不禁止提审/);
+  // Precheck is advisory: an HTTP 200 does not prove the business preconditions,
+  // and a missing preaudit is not a client-side veto.
+  assert.match(appEdit, /预检 HTTP 200 不等于业务前置条件通过/);
+  assert.match(appEdit, /用户明确要求跳过预检或继续提交时允许 `app submit-app-review`/);
   assert.match(audit, /且本次 `blockers` 明确为空时/);
-  assert.match(rules, /预审不通过本身不禁止提审/);
+  assert.match(rules, /用户明确要求跳过预检并提交时可 `app submit-app-review`/);
   assert.match(rules, /完成判据按用户目标和同一资源核对/);
 
   // Version detail returns logs; a field snapshot is not part of the contract.
@@ -991,6 +991,184 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   ].join('\n');
   assert.doesNotMatch(appEditManual, /字段 `required`/, 'field requiredness must use state="required"');
   assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
+});
+
+test('the 2026.11.2 sync keeps the new recovery contracts on the plugin path', async () => {
+  // CLI v2026.11.2 makes review prechecks advisory, requires a fresh package
+  // snapshot after creating a draft, validates expected snapshots locally, and
+  // stops the agent from replaying a write whose outcome is unknown. Each of
+  // those changes what the agent does next, so the bundled manual has to carry
+  // them instead of leaving the agent on the CLI's old wording.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const feedback = read('taptap-suite/references/feedback.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const miniApp = read('taptap-suite/references/taptap-materials/references/mini-app-handoff.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const post = read('taptap-suite/references/taptap-community-management/references/publish-post.md');
+  const patterns = read('taptap-suite/references/cli-command-patterns.md');
+
+  // Feedback nudge: a repeated failure now carries `_notice.feedback`, so the
+  // trigger list must name it instead of counting two failures on its own.
+  assert.match(shared, /_notice\.feedback/, 'the shared rules must explain the repeat-failure notice');
+  assert.match(feedback, /错误信封带了 `_notice\.feedback`/);
+  assert.match(feedback, /`agent-request`/, 'a capability gap is a reportable trigger');
+  assert.match(top, /三种触发/);
+  assert.match(workerSource, /错误信封带 `_notice\.feedback` 或同一 error\.subtype 连续失败/,
+    'the rule handed out by list_tools must agree with the manual');
+  const [listing] = await callWorker([listTools('', { cli_path: fakeCli })]);
+  assert.ok(
+    listing.result.data.rules.some((rule) => rule.includes('_notice.feedback')),
+    'list_tools has to hand the agent the feedback rule, not just keep it in source',
+  );
+
+  // Package binding: confirm or create a draft first, then discard every older
+  // snapshot and read again — a new draft can inherit the previous bindings.
+  assert.match(appEdit, /确认可编辑草稿 → 必要时 `app create-draft` → 重新 `app list-packages`/);
+  assert.match(fields, /创建草稿后必须重读/);
+  assert.match(fields, /即使先前返回 `expected=\{"kind":"none"\}` 也不能沿用/);
+  assert.match(fields, /禁止原样重试、换幂等键连发或加 `force: true` 绕过/);
+  assert.match(fields, /Windows 快照必须原样保留 `kind:"windows"`/);
+  assert.match(fields, /不能把空分支列表推断成 none/);
+
+  // Submission: an unknown outcome is read back, never replayed.
+  assert.match(audit, /### 提审失败与重复调用防护/);
+  assert.match(audit, /结果未知时，先用 `list-app-versions` \/ `get-app-version` 读回状态/);
+  assert.match(shared, /用已经返回的资源句柄只读核对/);
+  assert.doesNotMatch(audit, /预审结果后仍需最终确认才进入 `submit-app-review`/,
+    'the old always-confirm wording must be gone');
+
+  // A mini-game upload already completes and parses; a second complete is a bug.
+  assert.match(materials, /不得再次 complete/);
+  assert.match(miniApp, /不得再调用 `complete-mini-app-package-upload`/);
+  assert.match(miniApp, /`packageRecordStatus=artifact_only` 只表示尚未创建包体记录/);
+  assert.match(packages, /不能用重复 complete 代替查询/);
+  assert.doesNotMatch(packages, /不要调用 `package-management upload-mini-app-package`/,
+    'the upload shortcut exists, so the manual must not forbid it');
+
+  // One QR call fetches the target and renders the PNG; the dynamic lookup is
+  // only for a raw URI, and an output clash is not an excuse to force-write.
+  assert.match(diagnostics, /该命令一次完成获取 URI 和生成 PNG/);
+  assert.match(diagnostics, /只有明确需要原始 URI 时才单独使用动态命令/);
+  assert.match(diagnostics, /禁止原样重试或自动 `force: true`/);
+
+  // Post bodies: list items live under a list, start at level 1, and an unknown
+  // publish outcome is read back through the draft handle.
+  assert.match(post, /`list-item` 只放在 `list\.children`/);
+  assert.match(post, /不能用 0/);
+  assert.match(post, /不能改 key 再建草稿/);
+
+  // An idempotency key and a `@file` payload have one accepted encoding each; a
+  // rejection is an input problem the agent fixes, not a server fault to retry.
+  assert.match(shared, /key 只用可打印 ASCII/);
+  assert.match(patterns, /UTF-8 无 BOM/);
+});
+
+test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boundaries', () => {
+  // CLI v2026.11.4 separates the package type from the level attribute, adds the
+  // workshop upgrade flow, and routes small-game privacy/ICP/filing material to
+  // the developer site. Each change decides whether a write may happen at all,
+  // so the bundled manual has to state the boundary instead of letting the agent
+  // infer a type from a file name or the previous conversation.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const top = read('taptap-suite/MANUAL.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const boundary = read('taptap-suite/references/package-type-boundary.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const creation = read('taptap-suite/references/taptap-app-edit/references/publish-game-creation.md');
+  const upgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fields = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
+  const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const execRules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
+  const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
+
+  // The fixed type boundary is a shared document with one rule set, reachable
+  // from the routes that decide whether an upload may proceed.
+  assert.match(top, /taptap-suite\/references\/package-type-boundary\.md/);
+  assert.match(boundary, /`declared_package_types`/);
+  assert.match(boundary, /`package_type_saved:false` 表示游戏已创建、类型尚未保存/);
+  assert.match(boundary, /不能借附加用途混入其它类型/);
+  assert.match(fields, /固定包体类型边界/);
+  assert.match(materials, /固定包体类型边界/);
+
+  // H5 creation: is_level is explicit, independent from package_type, and the
+  // saved declaration is verified before the first upload.
+  assert.match(creation, /`is_level` 省略或显式 `false` 创建非关卡游戏/);
+  assert.match(creation, /非关卡 H5 游戏在预览和创建时都显式传 `is_level:false`/);
+  assert.match(creation, /如果接口不支持明确指定游戏身份，停止创建/);
+  assert.match(creation, /H5 \+ APK、H5 \+ Windows、H5 \+ Tap 小游戏均拦截创建/);
+  assert.match(creation, /package_type:"h5", is_level:false/);
+  assert.match(creation, /`package_type_saved:false` 表示类型尚未保存/);
+  assert.match(creation, /核对 `declared_package_types` 与创建选择一致/);
+  assert.doesNotMatch(creation, /主要在个人主页曝光/, 'H5 exposure wording is no longer the creation boundary');
+
+  // Workshop upgrade: an irreversible submit and a privacy declaration are two
+  // separate confirmations and must not be chained automatically.
+  assert.match(appEdit, /\| 创意工坊升级 \|/);
+  assert.match(appEdit, /app-edit-level-upgrade\.md/);
+  assert.match(upgrade, /get-level-upgrade-privacy/);
+  assert.match(upgrade, /confirm_no_processing:true, confirm_submit:true/);
+  assert.match(upgrade, /隐私声明确认不授权升级，不能自动串联两次提交/);
+  assert.match(upgrade, /升级为独立游戏后无法转回关卡/);
+
+  // Qualification: the unavailable warning is not an all-clear, must-level is
+  // derived from the saved identity, and small-game material is not filed here.
+  assert.match(qualification, /H5、Spark、Tap 小游戏的隐私与 ICP/);
+  assert.match(qualification, /不能用 `qualification save-qualification-draft` 代替/);
+  assert.match(qualDraft, /## 小游戏域材料边界/);
+  assert.match(qualDraft, /## 创建类型声明与恢复/);
+
+  // H5 uploads stay on the H5 slot; a readback failure is retried as a read.
+  assert.match(materials, /H5 只用 H5 主包，禁止上传或绑定 Windows 包体/);
+  assert.match(materials, /`readbackErrors` 时保留版本句柄，仅重查失败阶段/);
+  assert.match(diagnostics, /### H5 上传后的诊断/);
+  assert.match(diagnostics, /只有已确认原类型及附加用途允许 Tap 小游戏/);
+
+  // Internal vocabulary stays out of user-facing replies.
+
+  // 2026.11.5: qualification reads one assessment document, writes carry the
+  // snapshot they were built from, and the level-upgrade flow routes routine
+  // privacy configuration to the developer site instead of the limited
+  // "no personal data" declaration.
+  assert.match(qualification, /qualification get-qualification-assessment/);
+  assert.match(qualification, /read_state=partial\/unknown/);
+  assert.match(qualification, /`effective_approved`/);
+  assert.match(qualification, /expected_snapshot/);
+  assert.match(qualification, /save-age-grade-qualification/);
+  assert.match(qualAnalysis, /effective_approved=true/);
+  assert.match(qualLifecycle, /expected_snapshot.*snapshot/);
+  assert.match(qualLifecycle, /已撤回审核，材料已保留/);
+  assert.match(levelUpgrade, /KIND_SELF_ICP/);
+  assert.match(levelUpgrade, /常规隐私设置，以及隐私查询明确返回不支持的声明/);
+  assert.match(levelUpgrade, /升级为独立游戏后无法转回关卡游戏/);
+  assert.match(levelUpgrade, /qualification get-qualification-assessment/);
+  assert.match(shared, /缺少该字段时，明确说明机审结论无法确认/);
+  assert.match(fieldMap, /按 qualification 手册的适龄流程/);
+  // Eligibility is decided by the assessment and the real submission, not by a
+  // plugin-side hard gate that would refuse a user-approved submit.
+  assert.match(appEdit, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(appEdit, /未认证时按服务端 blocker 停止提审/);
+  assert.match(execRules, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(execRules, /未认证时按服务端 blocker 停止提审/);
+
+  assert.match(shared, /## 面向用户的用语/);
+  assert.match(shared, /默认使用中文业务表达/);
+  assert.match(shared, /不得夹带字段名、状态码/);
+  assert.doesNotMatch(uploadImage, /DC「权限管理/);
 });
 
 test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {

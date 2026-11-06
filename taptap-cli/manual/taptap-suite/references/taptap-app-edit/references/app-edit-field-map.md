@@ -46,11 +46,11 @@
 - **平台维度**：平台和游戏类型只用于解释工具已经返回的字段，不能用于自行推导字段集合。每次读取 `platform-status`、`release-settings` 和目标模块，以字段实际 `visible`、`current_value`、`options`、`value_labels` 为准；`steam_id`、`itunes_id`、Windows 素材、Android 兼容性和 iOS 覆盖素材是否出现都以本次返回为准。
 - **分发状态（`region_flag_*`）**：可选值由「分发类型 × 平台 × 门槛」决定，一律以字段当次返回的 `options` / `value_labels` 为准，不要硬套「0=正式上线 / 4=开放试玩」。`app_platforms` / `itunes_id` / `steam_id` 不是分发状态入口。
   - **可见性**：含移动端平台才见 `region_flag_android` / `region_flag_ios`；含 Windows 包体槽才见 `region_flag_pc`。
-  - **普通游戏**：android / pc 需已通过版号（`game-license` approved）或非游戏应用才可选「0 正式上线」，否则只能「4 开放试玩」；iOS 需 Apple ID 且 AppStore 已开放才可选 0（小游戏包豁免 Apple ID）。
-  - **H5 / Spark**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。H5 完成备案、`isLevel` 状态变化后仍保持此规则；H5 的 PC 平台只允许 `PC_OFFICIAL`，不允许 `PC_STEAM`，PC 状态不允许 `0`。
+  - **`normal` 分发分支（不含 H5 / Spark / 应用拉起分发，不能仅由 `is_level=false` 推断）**：android / pc 需已通过版号（`game-license` approved）或非游戏应用才可选「0 正式上线」，否则只能「4 开放试玩」；iOS 需 Apple ID 且 AppStore 已开放才可选 0（小游戏包豁免 Apple ID）。
+  - **H5 / Spark**：android / pc 为 `[1,3,4]`、iOS 为 `[1,3,0]`，0/4 都是「提供游玩」。H5 完成备案、是否为关卡的状态变化后仍保持此规则；H5 的 PC 平台只允许 `PC_OFFICIAL`，不允许 `PC_STEAM`，PC 状态不允许 `0`。
   - **应用拉起型关卡**：仅 `[1,0]`（PC 不支持时无选项）；**未知分发类型**：仅 `[1]`。
   - 用户说「正式上线」但无版号时，落到「开放试玩」或提示不可选，先引导补版号，不要硬写 0。
-- **游戏类型维度**：关卡游戏（TapTap 制造）的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏和 H5 PC 分发豁免 Windows EXE、启动器、PC 防沉迷、Windows 更新日志与 PC 系统配置；选择 PC 平台后仍以接口返回为准处理 Windows 图片素材。TapMaker / urhox 中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填，且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
+- **游戏类型维度**：关卡游戏的简介 / 素材降级为建议；`level_game_launch_link` 仅应用拉起型关卡可见且必填。TapMaker / urhox 引擎游戏和 H5 PC 分发豁免 Windows EXE、启动器、PC 防沉迷、Windows 更新日志与 PC 系统配置；选择 PC 平台后仍以接口返回为准处理 Windows 图片素材。TapMaker / urhox 中竖版游戏封面图 `cover_vertical` 必填，其余 Windows 图片素材非必填，且不渲染首发时间——遇到这类游戏不要追问用户为什么不填这些豁免项。
   - 「关卡游戏」与「TapMaker / urhox」可能同时成立并驱动不同豁免——不要自己给游戏归类，以各模块当次返回的字段 `visible` / `state` 为准（`state="required"` 才是必填）。
 - **包体状态维度**：PC 防沉迷状态 / PC 更新日志仅在已选 PC（EXE）包体时可见；根级上线方式优先读写 `release_schedule`，旧 `release_time` 仅 `release_method=1`（定时上线）时可见。
 
@@ -63,7 +63,7 @@
   - **跨端游戏**：最低 Win10 64位 / i3-6100 / 8GB / Intel UHD 630 或 GTX 750 Ti / 10GB / DX11；推荐 i5-8400 / 16GB / GTX 1050 Ti / 20GB / DX11。
   - **3A 大作**：最低 Win10 64位 / i5-8400 / 16GB / GTX 1060 6GB / 50GB / DX12；推荐 Win11 64位 / i7-9700 / 32GB / RTX 3060 / 100GB / DX12。
 
-Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是 `library_hero`。`library_banner` 是旧版兼容字段，不要主动写入；如果在后端审核、历史版本或 legacy 说明里看到它，按旧版游戏库背景壁纸理解，并优先引导使用 `library_hero`。
+游戏库背景壁纸使用 `library_hero`。
 
 ### 按平台发行时间（与 release_schedule 不是一回事）
 `release_schedule` 控制**整个版本的上线时机**，只支持立即或精确定时；而「按平台发行时间」组是**各平台在商店展示的市场档期信息**，安卓和 PC 各一套，落在 `info.*`，其中 `expected_launch_time_vague_*` 仍可表达平台展示用的模糊档期：
@@ -80,9 +80,9 @@ Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是
 - **包体**：主包体 apk / mini_app / spark / h5 四选一互斥（见 Package 段）；Windows 包体是独立 `windows` 槽位，可能带分支。spark 专属约束见 Package 段。APK 包体配置中，未接入防沉迷时必须授权 TapPlay；`apk_force_update_in_app` 仅在 `apk_update_mode=force` 时可见。
 - **关卡启动链接** `level_game_launch_link`：需全局唯一，重复会在写入时被拒（「该链接已存在对应游戏」），可提前提醒用户换一个。
 
-### 不可直接写入的历史字段
+### 需要专用流程的字段
 
-- `age_grade`：转游戏资质页面人工处理。
+- `age_grade`：按 qualification 手册的适龄流程保存、提审或撤回。
 - `apk_package_name`：来自 APK 固有元数据；需要变更时重新构建并上传 APK，再绑定新包体。
 - `mini_game_play_enabled`：由 `apk_mini_game_play` 槽位派生，只能通过 `select-package` / `clear-package` 改变。
 

@@ -1,5 +1,7 @@
 # Package Management Diagnostics
 
+包体写入前先遵守[固定包体类型边界](taptap-suite/references/package-type-boundary.md)。
+
 ### A. 查包体库状态
 
 1. 先调 `package-management get-available-package-types`，拿本次实际返回的 `available_package_types`。
@@ -13,7 +15,7 @@
 4. 这些 `list-*` 都声明了分页（OpenAPI 名 `x-pagination`，catalog 里序列化为 `pagination`），且 catalog 声明的 `page_size` 默认值统一是 **20**。可用 `page` / `page_size` 写进 `args.data`，翻全量传分页控制 flag（`page_all:true`，可配 `page_limit` / `page_delay`）；开发者中心各页面自己的分页条数（APK 20、Windows/小游戏 100、H5/TapTap 制造 10）是页面行为，**不是** API 默认值，不要当成默认值转述。
 5. 某类型的列表返回失败时，只说明该类型当前不可用；不要把失败说成“应用不支持该类型”，也不要据此去开通别的能力。
 6. 向用户解释列表时优先说版本名、包名/文件名、更新时间和状态字段；raw ID 只在用户明确要排查 ID 或接口数据时展示。
-7. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：命中 `pc_package_branch` 白名单时 `1` 游戏本体包、`2` 启动器包（两个角色同时必填）；未命中时 `0` 是默认包体（legacy 唯一槽位，**没有启动器包**）。判定信号见 `get-app-module` 的 `other-settings` 字段（`pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型，`pc_whatsnew` = legacy）。上传/绑定时分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`，不是参数错误）。`expected` 快照过期是 **409**，插件侧统一呈现为 `conflict`（响应体 `error` 为 `stale_state`，`error_description` 说明槽位已被外部修改），重新读 `list-packages` 后重试，确认覆盖时传 `force: true`。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
+7. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：命中 `pc_package_branch` 白名单时 `1` 游戏本体包、`2` 启动器包（两个角色同时必填）；未命中时 `0` 是默认包体（单槽位模型，**没有启动器包**）。判定信号见 `get-app-module` 的 `other-settings` 字段（`pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型，`pc_whatsnew` = 单槽位模型）。上传/绑定时分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`，不是参数错误）。包体绑定必须按 `taptap-app-edit` 的草稿创建后重读流程执行。`expected` 快照过期或字段不匹配会返回 **409**，插件侧统一呈现为 `conflict`（响应体 `error` 为 `stale_state`，`error_description` 说明槽位已被外部修改），先核对草稿与快照字段并重新读 `list-packages` 后决策，禁止原样重试或自动 `force: true`。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
 8. APK 条目带 `config_status`：`empty` 所有必填字段为空、`warning` 部分必填字段未填、`configured` 已配置完整；`null` 表示未知。不要把它说成审核状态。
 9. TapTap 制造条目的 `status` 为 0 未上线 / 1 当前线上；发布相关的其它状态字段不准确，必须隐藏，不要据此判断是否已发布。
 10. 小游戏条目按 `stage` 分段：`dev` 开发版本、`audit` 审核版本、`published` 线上版本。
@@ -22,12 +24,11 @@
 ### B. 小游戏能力未开通
 
 1. `package-management get-available-package-types` 的 `available_package_types` 不含 `mini_app` 时，只说明当前应用没有开通 Tap 小游戏包体。
-2. 用户明确要求开通时，展示开通影响并等待确认，之后才调用 `package-management get-or-create-mini-app`。
+2. 只有已确认原类型及附加用途允许 Tap 小游戏，且用户明确要求开通时，才展示开通影响并等待确认，之后调用 `package-management get-or-create-mini-app`。
 3. 调用成功后重调 `package-management get-available-package-types` 验证 `mini_app` 是否出现，再查 `package-management list-mini-app-packages`。
 4. 用户取消或未确认时，不继续查小游戏列表或二维码。
-5. H5 不走能力开通分支；H5 可用时直接查 `package-management list-h5-packages`，不可用时只说明当前应用不会展示 H5 包体库，不要调用小游戏开通命令。
-6. 小游戏分包测试不在 CLI 进行；CLI 只能查看已提交包体的状态。当前 DC 契约不返回页面路径，不要自行补全或拼接页面路径。
-7. 用户要上传小游戏包时，不调用 `package-management upload-mini-app-package`。读取最新小游戏列表，引导到开发者中心完成上传和分包测试。目录或混合 zip 转 materials 手册盘点，它也只能输出相同开发者中心交接。
+5. H5 游戏可能为关卡游戏或非关卡游戏，不能仅凭 H5 类型推断身份。可用时查 `package-management list-h5-packages`；权限、网络或类目查询失败不能当成主体未开通。只有已可靠确认原 H5 类型、服务端明确返回小游戏主体未开通且用户要求继续上传时，才单独说明开通影响与协议要求，并按明确授权调用 `package-management get-or-create-mini-app`；不能代替用户同意协议、转换关卡或申请升级。新建 H5 正常会自动建立主体；缺失可能是创建后处理失败，不能盲目重建游戏。开通遇到白名单或权限限制时保留 appId 和版本句柄并交接核查；开通后重新查询实际能力。
+6. 小游戏分包测试不在 CLI 进行；CLI 只能查看已提交包体的状态。当前接口不返回页面路径，不要自行补全或拼接页面路径。
 
 ### C. 处理自测意图
 
@@ -40,13 +41,14 @@
    - 小游戏：从 `package-management list-mini-app-packages` 里选 `stage=dev` 的候选（审核/线上版本没有自测二维码入口），取它的 `package_id`。
    - H5：从 `package-management list-h5-packages` 里选目标版本，取它的 `package_id`。
    - TapTap 制造：从 `package-management list-spark-versions` 里选目标版本，取它的 `version_code`。
-7. 调 `package-management get-test-qr-code` 时，`package_id` 和 `version_code` **互斥，只能传其中一个**。多个候选时先让用户按版本/时间选择，再传选中的 ID。
-8. `package-management get-test-qr-code`（动态命令，JSON）负责拿 `qr_code_url`；拿到后必须调用 `call_tool(name:"test-qr-code", args:{data:{package_id:"<packageId>"}, output:"<file>.png"})`（TapTap 制造传 `data:{version_code:"<sparkVersionCode>"}`）生成 PNG 二维码（`output` 是相对会话工作目录的文件路径），并把返回的 `data.file_path` 作为图片附件展示给用户扫码。
-   - `<file>` 必须按目标区分（例如 `artifacts/test-qr-<packageId>.png`），**不要复用固定名字**（如 `test-qr.png`）：同一目录下重名文件会让命令以 `validation/invalid_argument`、`param=--output` 失败。
-   - 同一个包只渲染一次；不要对同一 `package_id` + 同一 `output` 并行重发。文件已存在且内容相同会被判为幂等成功，内容不同才需要换名字，或显式加 `force: true` 覆盖。
-   - `output` 冲突是文件占用问题，不是参数写错：换路径/加 `force: true`/（内容相同则）直接视为成功，不要原样重试同一命令。
+7. 无论用顶层 `test-qr-code` 还是动态 `get-test-qr-code`，`package_id` 和 `version_code` **互斥，只能传其中一个**。多个候选时先让用户按版本/时间选择，再传选中的 ID。
+8. 需要二维码图片时，直接调用顶层 `call_tool(name:"test-qr-code", args:{dev_id:"<developerId>", app_id:"<appId>", data:{package_id:"<packageId>"}, output:"artifacts/test-qr-<packageId>.png"})`；TapTap 制造改传 `data:{version_code:"<sparkVersionCode>"}`。该命令一次完成获取 URI 和生成 PNG，不要先调用动态 `get-test-qr-code` 再重复获取。把返回的 `data.file_path` 作为图片附件展示给用户扫码。只有明确需要原始 URI 时才单独使用动态命令。
+   - 默认文件名已按目标区分；需要指定位置时使用当前目录内的相对路径，例如 `artifacts/test-qr-<packageId>.png`。
+   - `data` 不是合法 JSON 时先修正引号、空值或文件编码再重试，不要原样重发。
+   - `param=--output` 不等于文件重名：若消息为路径无效，先修正为当前目录内的安全相对路径；若消息为文件已存在且不能确认内容相同，保留原文件并使用新的目标文件名。不要靠重试或 `force` 绕过。
+   - 同一个包只渲染一次，不要并行重发。同内容文件由 CLI 比较后判为幂等成功；不能由 Agent 仅凭文件存在就宣称成功。
 9. Codex 会折叠命令行输出，不能把命令输出本身当作二维码交付。`view_image`、`Viewed Image`、工具输出里的图片预览都只对 Agent 可见，不算用户收到二维码。不要只输出 `qr_code_url`、只给文件路径或说“二维码已展示”。动态命令不在本地补造二维码图片字段。
-10. 调 `package-management get-test-qr-code` 失败时，只说明失败原因或下一步要求，不要要求用户提供内部参数名。
+10. 调 `test-qr-code` 失败时，只说明失败原因或下一步要求，不要要求用户提供内部参数名。
 
 ### D. TapTap 制造包体边界
 
@@ -56,3 +58,7 @@
 4. `package-management list-spark-versions` 的发布状态暂不展示；只说明版本、更新时间、大小、自测入口和资料编辑下一步。
 
 物料上传不是本手册的只读诊断入口；所有本地上传（含单个确定包体）都转 materials 手册执行。不要为了查询包体状态调用任何上传命令。
+
+### H5 上传后的诊断
+
+`uploaded=true` 只表示包体上传完成。若返回 `readbackErrors`，按 `package` / `material` / `distribution` 阶段及 `type` / `subtype` 处理权限、网络或契约问题，只重做读取，不重新上传或创建版本。`readinessCheck.bindable` 和最新 `package_slots` 决定是否生成绑定预览；读回失败不能说成无包体、已绑定或可提审。存量关卡升级仍需专用升级流程，不用 `save-changes` 改身份。

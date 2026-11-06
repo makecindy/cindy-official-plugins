@@ -1,6 +1,6 @@
 # TapTap CLI 插件:新游戏创建与资料维护(app-edit)
 
-本手册合并两个业务域:**新游戏创建**(创建草稿、收集厂商/名称/类型/包体方向)与**资料维护**(字段修改、素材规格、包体槽位、审核提交/撤审/发布/定时、草稿重置、版本历史)。命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用。
+本手册合并两个业务域:**新游戏创建**(创建草稿、收集厂商/名称/类型/包体方向)与**资料维护**(字段修改、素材规格、包体槽位、审核提交/撤审/发布/定时、草稿重置、创意工坊升级、版本历史)。命令行示例按 taptap-suite 手册的映射表转成 call_tool 调用。
 
 ## 第一部分:新游戏创建
 
@@ -63,6 +63,8 @@
 
 **CRITICAL — 审核、发布、撤审、撤定时、立即上线和重置草稿等高影响动作,必须先 dry-run 或等待用户明确确认。哪些请求不算提审意图,以共享执行规范「提审意图门禁」的唯一词表为准(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/shared-execution.md"})`);三步契约流程细节见 `app-edit/references/app-edit-audit-and-history.md`。**
 
+**CRITICAL — 创意工坊升级必须由用户明确确认目标游戏、版本及“升级后无法转回关卡”;dry-run、`yes:true` 或隐私声明确认均不能替代升级确认。常规隐私配置优先交接开发者后台;有限“不处理个人信息”声明仅在用户明确选择且能力支持时办理。**
+
 **CRITICAL — 版本发布与分发状态独立。发布前调用 `app platform-status`(或读对应模块),只处理当次实际返回且可见的 `region_flag_*`,不能预设入口、状态或替用户切换。**
 
 **每次资料、包体、审核或发布写操作完成后必须输出 handoff:当前阶段、已完成、未完成、用户现在是否需要操作、下一次检查时间、下一步动作和实际返回的页面或试玩入口。审核中不得表述为已上线;定时上线不得表述为已发布。**
@@ -77,11 +79,12 @@
 
 | 用户意图 | 首选调用 / 流程 |
 | --- | --- |
+| 创意工坊升级 | 查询条件 → 开发者后台或受限声明办理 → 回流核验 → 单独确认升级 → 提交并读回 |
 | "还差什么 / 能不能提审" | 读取模块、包体、版本、资质和历史审核后生成分层风险清单(读 skill analysis 与 review risk checklist) |
 | 查字段、选项、图片/视频规格 | `call_tool(name:"app get-app-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
 | 为 H5 开启 PC 分发(`platform-status`、`region_flag_pc`) | 读模块 → 保留全部现有平台并追加 `PC_OFFICIAL` → 写后立即重读 → 仅当 `region_flag_pc` 已实际返回且 `options` 含 `4` 时才按最新 `expected` 写入;H5 不得使用 `windows` 槽 |
 | 改文字、图片、视频等普通字段 | 读模块详情,带最新 `expected` 调 `app save-changes` |
-| 切换或清空主包体 / Windows 包体 | `app list-packages` → `app select-package` / `app clear-package` |
+| 切换或清空主包体 / Windows 包体 | 确认可编辑草稿 → 必要时 `app create-draft` → 重新 `app list-packages` → `app select-package` / `app clear-package` |
 | 按 Spark version_code 绑定资料页主包体 | `app list-packages` → `app +bind-spark-version` dry-run → 确认后 apply |
 | 提交审核并设置上线方式 | skill analysis → platform-status →(关卡 / TapTap 制造先签 SCE 协议)→ 三步提审:prepare-review-snapshot → precheck-app-review → 确认 → submit-app-review |
 | 撤审、撤定时、改时间、重置草稿 | 先确认 version 状态,再预览和确认 |
@@ -97,19 +100,19 @@
 
 完整细则(前置与路由、字段写入与并发凭证、图片与视频、包体两条路径、资质判断事实、提审三步与预检口径、SCE 协议、发布与生命周期、输出与后续检查)见 app-edit execution rules(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md"})`)。要点:
 
-- 编辑资料时先确认资质判断事实(`app_features`),再推导必须资质。
+- 编辑资料时先读取已保存的资质判断事实(`app_features`),只询问缺失或冲突内容;只读分析不自动保存,用户确认修改后再写入并重算。
 - 缺 `developerId` / `appId` 时转 identity 手册;不知道字段所属模块先读 field map(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md"})`)。引导用户打开资料编辑页时只使用 `https://<current-server-host>/v3/<developerId>/app/<appId>/store/update`,不要自行拼接 `/store`,也不要把 Maker 或包体管理页当成资料编辑入口。
 - 普通字段每批不超过 10 个 change。除显式 `force=true` 外,每条 change 必须携带 `expected`:取值是该字段读取时的严格 `current_value` 原样回填;`current_value` 为 `null`(首次写入)时传 `[]`。stale 时停止并重新读取,旧截图、旧对话、历史 `form_data` 和 iOS 的继承后 `platform_value.resolved_value` 都不能作为并发快照。严格取值见 fields and packages(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md"})`)「文字字段」。
 - 可选 iOS 覆盖字段是 `title_ios` / `description_ios` / `icon_ios` / `banner_4_ios` / `square_promo_image_ios` / `screenshots_ios`:空值表示继承 Android 主字段,清空即恢复继承,写入时的 `expected` 必须用该 `_ios` 字段自己的严格存储值。继承与清空口径见 field map。
-- `age_grade`、`apk_package_name`、`mini_game_play_enabled` 不能通过普通字段保存:适龄分级转资质人工流程;APK 包名需重建并上传 APK 后重新绑定;小游戏游玩方式用 `apk_mini_game_play` 槽位选择或清空。`category` 是资料中的游戏类型,可修改;C 端商店标签不是资料字段,当前 CLI 不支持修改,需人工处理。
+- `age_grade`、`apk_package_name`、`mini_game_play_enabled` 不能通过普通字段保存:适龄分级按 qualification 手册的适龄流程保存/提审/撤回;APK 包名需重建并上传 APK 后重新绑定;小游戏游玩方式用 `apk_mini_game_play` 槽位选择或清空。`category` 是资料中的游戏类型,可修改;C 端商店标签不是资料字段,当前 CLI 不支持修改,需人工处理。
 - 图片和视频能否使用,以字段当次返回的 `image_spec` / `video_spec` 为准;`trailer` 与 `gameplay_demo_video` 最终不能使用同一个 `videoId`,重复时停止并让用户换一个视频。不同 `videoId` 只证明引用不同对象,不证明内容不同或已符合审核规范 2.6.10,需要内容判断时标记人工复核;不得把历史审核中的"高度雷同"表述成官方文档规则。素材库检索与收录转 materials 手册。
-- 所有包体统一分两条独立执行路径:**包体管理与自测**先用 `get-available-package-types` 取可用类型,再按类型调对应 `list-*` 查包体库与状态,自测二维码走 `package-management get-test-qr-code`;该路径只读,不提供资料页 `expected`,也不执行绑定。**资料页包体槽位绑定**调用 `app list-packages`,按「包体槽位」五步契约执行(同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回;stale/409 停止重读,禁止自动重放)。Spark 使用专用 `app +bind-spark-version` 编排相同门禁。两条路径冲突时停止写入并报告 scope / 权限问题;上传成功不等于资料页包体槽位已绑定。
+- 所有包体统一分两条独立执行路径:**包体管理与自测**先用 `get-available-package-types` 取可用类型,再按类型调对应 `list-*` 查包体库与状态,自测二维码直接调 `call_tool(name:"test-qr-code", args:{dev_id, app_id, data:{package_id} | data:{version_code}, output})`,一条命令完成取地址与出图;该路径只读,不提供资料页 `expected`,也不执行绑定。**资料页包体槽位绑定**先确认可编辑草稿(无草稿时核对 `app create-draft` 前置条件并在已有编辑授权内创建,创建后丢弃旧快照重新 `app list-packages`),再按「包体槽位」契约执行(同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回;422 不原样重试且不加 `force:true` 绕过;409 先核对快照与草稿再重读,禁止自动覆盖)。Spark 使用专用 `app +bind-spark-version` 编排相同门禁。两条路径冲突时停止写入并报告 scope / 权限问题;上传成功不等于资料页包体槽位已绑定。
 - TapTap 制造 / Spark 包体必须先在 TapTap 制造创建或更新;官方入口为 `https://maker.taptap.cn/`,面向用户时按共享规范单独一行输出。CLI 不上传或更新 Spark 包,只能把已存在且 ready 的版本绑定到资料页主槽位。
 - 任意图片或视频上传成功后,先完成目标资料字段回填并重新读取;包体上传成功后必须重新读取候选和槽位,用户确认后才能绑定,不能把"上传成功"解释成"已绑定"或"可以提交审核"。
-- 提审意图必须单独确认:泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示;只有用户明确表达"提交审核 / 提审"后才可调用 `app prepare-review-snapshot`,预审结果后仍须再次确认才可调用 `app submit-app-review`。
+- 提审意图必须单独确认:泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示;只有用户明确表达"提交审核 / 提审"后才可调用 `app prepare-review-snapshot`,默认展示预审结果后确认提交;用户明确要求跳过预检或继续提交时允许 `app submit-app-review`,最终由服务端校验。
 - 提审固定三步:`app prepare-review-snapshot`(read)→ `app precheck-app-review`(read)→ 用户最终确认后 `app submit-app-review`(write,`yes:true` + 稳定幂等键)。`release_schedule` 只在第 2、3 步传递且必须完全相同(第 1 步不接受);上线方式只支持立即上线或精确定时,模糊季度/档期必须追问具体时间或改为立即上线。任一步 `version_id` 与第一步不一致时回到第一步重读,禁止沿用旧快照。
-- 普通游戏提审前同时检查上架资质和开发者认证;未认证时按服务端 blocker 停止提审并引导办理。关卡游戏是否豁免以服务端当次返回为准。
-- 预检 HTTP 200 / 顶层成功不等于内容预审通过;分别解释预审结果、阻断项和风险。预审不通过本身不禁止提审,展示问题后用户明确继续/「强制提交」即可进入提交,由服务端裁决。仅在本次 `blockers` 明确为空时说"阻塞项:无";`preaudit_status === "passed"` 且无阻断时说明"提交状态:可提交审核",`rejected` 时同时说明内容风险,`preaudit_status === "unavailable"`(机审暂时不可用、本次没审成)说明"本次预检没得出结论,可稍后重试预检,也可直接提交",不得说成内容未通过或要求改资料。不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段;完整组合见 audit and history 手册(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md"})`);复核返回风险数据不可用且要求确认时展示 warning,`yes:true` 不代表已核对。
+- 普通游戏提审前按 qualification 手册读取 assessment,开发者认证与豁免以其中的资格结论为准;资格 blocked/unknown 时说明影响与风险,不自行新增客户端硬门禁,最终由正式提交校验。关卡游戏是否豁免以服务端当次返回为准。
+- 预检 HTTP 200 不等于业务前置条件通过;有阻断原因或风险提示时按服务端结果展示,不在客户端增加认证门禁。正式提交明确拒绝时说明服务端原因,不自动重复提交或换幂等键重放;结果未知时先读回版本状态,禁止盲目重试。仅本次 `blockers` 明确为空时说"阻塞项:无";`preaudit_status === "passed"` 且无阻断时说明"提交状态:可提交审核",`rejected` 时同时说明内容风险,`preaudit_status === "unavailable"`(机审暂时不可用、本次没审成)说明"本次预检没得出结论,可稍后重试预检,也可直接提交",不得说成内容未通过或要求改资料。不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段;完整组合见 audit and history 手册(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md"})`);复核返回风险数据不可用且要求确认时展示 warning,`yes:true` 不代表已核对。
 - `precheck-app-review` 不再返回 `required_consents`。SCE《创意工坊内容授权协议》改由 `analyze-app-status` 提前暴露:关卡 / TapTap 制造游戏未签署时返回 `SCE_AGREEMENT_REQUIRED` blocker,体检阶段就展示协议名称与 url,用户明确同意后调 `app agree-sce-agreement`,再重查确认 blocker 消失;`yes:true` 不代表协议同意。
 - 发布前逐项说明可见 `region_flag_*` 的真实状态。统一说明:"发布版本不会自动改变分发入口状态。当前仍是'敬请期待'的入口,发布后也会保持'敬请期待';如需开放下载或游玩,请在提审前先调整对应分发状态,随本次版本一起审核生效。"
 - 生命周期动作先用 `app list-app-versions` / `app get-app-version` 读取当前状态;业务事件以 `get-app-version` 的 `last_event`(或 `logs[].event`)为准,`schedule_cancelled` 不是审核驳回。定时版本通常由平台自动发布;若 `status="scheduled"` 且 `release_time <= 当前时间` 仍未上线,可在展示影响并取得明确确认后调用 `app publish-scheduled-release`,成功后重新读取版本与分发状态。人工确认后状态漂移必须重新读取。
@@ -122,6 +125,7 @@
 | Reference | 什么时候读 | 读取方式 |
 | --- | --- | --- |
 | publish-game creation | 完整创建字段收集、类型推荐、包体方向、素材和创建后推进 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/publish-game-creation.md"})` |
+| app-edit level upgrade | 创意工坊升级查询、不处理个人信息的隐私声明、升级确认与开发者后台交接 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md"})` |
 | app-edit analysis | 资料体检、文案候选、图片分类和新版资料规划 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-analysis.md"})` |
 | app-edit execution rules | 资料维护完整执行细则:前置与路由、字段写入、图片与视频、包体两条路径、资质事实、提审三步与预检口径、SCE 协议、发布与生命周期、输出与后续检查 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md"})` |
 | app-edit field map | 模块字段、可见性、联动、平台差异和详细包体模型 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md"})` |
