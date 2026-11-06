@@ -1092,6 +1092,7 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
   const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
   const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const execRules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
   const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
   const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
 
@@ -1157,6 +1158,12 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   assert.match(levelUpgrade, /qualification get-qualification-assessment/);
   assert.match(shared, /缺少该字段时，明确说明机审结论无法确认/);
   assert.match(fieldMap, /按 qualification 手册的适龄流程/);
+  // Eligibility is decided by the assessment and the real submission, not by a
+  // plugin-side hard gate that would refuse a user-approved submit.
+  assert.match(appEdit, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(appEdit, /未认证时按服务端 blocker 停止提审/);
+  assert.match(execRules, /不自行新增客户端硬门禁/);
+  assert.doesNotMatch(execRules, /未认证时按服务端 blocker 停止提审/);
 
   assert.match(shared, /## 面向用户的用语/);
   assert.match(shared, /默认使用中文业务表达/);

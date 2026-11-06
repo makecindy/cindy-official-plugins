@@ -111,7 +111,7 @@
 - 任意图片或视频上传成功后,先完成目标资料字段回填并重新读取;包体上传成功后必须重新读取候选和槽位,用户确认后才能绑定,不能把"上传成功"解释成"已绑定"或"可以提交审核"。
 - 提审意图必须单独确认:泛化准备请求和"正式上线"目标只能触发准备状态检查或提审选项提示;只有用户明确表达"提交审核 / 提审"后才可调用 `app prepare-review-snapshot`,默认展示预审结果后确认提交;用户明确要求跳过预检或继续提交时允许 `app submit-app-review`,最终由服务端校验。
 - 提审固定三步:`app prepare-review-snapshot`(read)→ `app precheck-app-review`(read)→ 用户最终确认后 `app submit-app-review`(write,`yes:true` + 稳定幂等键)。`release_schedule` 只在第 2、3 步传递且必须完全相同(第 1 步不接受);上线方式只支持立即上线或精确定时,模糊季度/档期必须追问具体时间或改为立即上线。任一步 `version_id` 与第一步不一致时回到第一步重读,禁止沿用旧快照。
-- 普通游戏提审前同时检查上架资质和开发者认证;未认证时按服务端 blocker 停止提审并引导办理。关卡游戏是否豁免以服务端当次返回为准。
+- 普通游戏提审前按 qualification 手册读取 assessment,开发者认证与豁免以其中的资格结论为准;资格 blocked/unknown 时说明影响与风险,不自行新增客户端硬门禁,最终由正式提交校验。关卡游戏是否豁免以服务端当次返回为准。
 - 预检 HTTP 200 不等于业务前置条件通过;有阻断原因或风险提示时按服务端结果展示,不在客户端增加认证门禁。正式提交明确拒绝时说明服务端原因,不自动重复提交或换幂等键重放;结果未知时先读回版本状态,禁止盲目重试。仅本次 `blockers` 明确为空时说"阻塞项:无";`preaudit_status === "passed"` 且无阻断时说明"提交状态:可提交审核",`rejected` 时同时说明内容风险,`preaudit_status === "unavailable"`(机审暂时不可用、本次没审成)说明"本次预检没得出结论,可稍后重试预检,也可直接提交",不得说成内容未通过或要求改资料。不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段;完整组合见 audit and history 手册(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md"})`);复核返回风险数据不可用且要求确认时展示 warning,`yes:true` 不代表已核对。
 - `precheck-app-review` 不再返回 `required_consents`。SCE《创意工坊内容授权协议》改由 `analyze-app-status` 提前暴露:关卡 / TapTap 制造游戏未签署时返回 `SCE_AGREEMENT_REQUIRED` blocker,体检阶段就展示协议名称与 url,用户明确同意后调 `app agree-sce-agreement`,再重查确认 blocker 消失;`yes:true` 不代表协议同意。
 - 发布前逐项说明可见 `region_flag_*` 的真实状态。统一说明:"发布版本不会自动改变分发入口状态。当前仍是'敬请期待'的入口,发布后也会保持'敬请期待';如需开放下载或游玩,请在提审前先调整对应分发状态,随本次版本一起审核生效。"
