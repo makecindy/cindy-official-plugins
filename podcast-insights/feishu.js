@@ -26,7 +26,7 @@
       // A parseable body is not a provider acknowledgement. Missing/malformed
       // business codes cannot establish rejection after a possibly accepted POST.
       if(!data||typeof data!=='object'||Array.isArray(data)||!Number.isSafeInteger(data.code))C.fail('FEISHU_INVALID_RESPONSE');
-      if(data.code!==0){const code=data.code===2091003?'FEISHU_PROCESSING':data.code===2091008?'FEISHU_QUOTA_EXCEEDED':[99991663,99991664,99991668].includes(data.code)?'FEISHU_AUTH_EXPIRED':[99991672,99991679,2091005].includes(data.code)?'FEISHU_PERMISSION_REQUIRED':'FEISHU_REJECTED';throw Object.assign(new Error(code),{code,definitelyRejected:true});}
+      if(data.code!==0){const code=data.code===2091003?'FEISHU_PROCESSING':data.code===2091008?'FEISHU_QUOTA_EXCEEDED':[20005,20006,99991663,99991664,99991668].includes(data.code)?'FEISHU_AUTH_EXPIRED':[99991672,99991679,2091005].includes(data.code)?'FEISHU_PERMISSION_REQUIRED':'FEISHU_REJECTED';throw Object.assign(new Error(code),{code,providerCode:data.code,definitelyRejected:true});}
       if(!data.data||typeof data.data!=='object'||Array.isArray(data.data))C.fail('FEISHU_INVALID_RESPONSE');return data.data;
     }
     async account(deadline=Infinity){

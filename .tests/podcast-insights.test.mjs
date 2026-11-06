@@ -165,7 +165,7 @@ function feishuHarness(options={}){
   const json=data=>({ok:true,status:200,body:JSON.stringify({code:0,data})});
   const h=harness({feishu:options.credential!==false,network:async request=>{
     const path=new URL(request.url).pathname;
-    if(path==='/open-apis/authen/v1/user_info')return json({open_id:state.account});
+    if(path==='/open-apis/authen/v1/user_info')return state.accountErrorCode?{ok:true,status:200,body:JSON.stringify({code:state.accountErrorCode,msg:'SYNTHETIC_PRIVATE_RESPONSE',data:{private:'SYNTHETIC_PRIVATE_RESPONSE'}})}:json({open_id:state.account});
     if(request.as==='media'){assert.equal(request.callId,state.expectedCallId||'estimate-1','audio needs a live Agent call');if(state.downloadDenied)return {ok:false,errorCode:'NETWORK_FORBIDDEN'};}
     if(request.as==='media')return {ok:true,status:200,media:{hash:'a'.repeat(64),bytes:state.bytes||10000,ext:'mp3'}};
     if(path==='/open-apis/drive/explorer/v2/root_folder/meta')return json({token:'folder_synthetic'});
@@ -348,6 +348,18 @@ test('reading actions create native Cindy tasks with original chapter context',a
     await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'How does this apply?'},'ask-reading');assert.equal(sent.length,2);assert.match(sent[1].text,/podcast_read and podcast_cite/);assert.ok(sent[1].text.includes(active.id));assert.match(sent[1].text,/from_segment_idx/);assert.equal(h.calls.length,0);
     await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement evidence.'});const stale=await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'Old question'},'stale-question');assert.equal(stale.ok,false);assert.equal(stale.errorCode,'MINUTES_SOURCE_CHANGED');assert.equal(sent.length,2);
   }finally{h.close();}
+});
+// Live-test gap: the tool previously collapsed unknown provider business codes,
+// making authorization failures undiagnosable. Keep only the numeric diagnostic.
+test('Feishu authorization failures expose a numeric provider code without raw response data',async()=>{
+  for(const [providerCode,expected] of [[99999999,'FEISHU_REJECTED'],[20005,'FEISHU_AUTH_EXPIRED'],[20006,'FEISHU_AUTH_EXPIRED']]){
+  const h=feishuHarness({accountErrorCode:providerCode});try{const eid=await seed(h),runtime=runtimeHarness(h);
+    const result=await runtime.call('podcast_feishu',{action:'prepare',episode_id:eid},'error-diagnostic');
+    assert.equal(result.ok,false);assert.equal(result.errorCode,expected);
+    assert.ok(result.message.includes(String(providerCode)));assert.doesNotMatch(JSON.stringify(runtime.messages),/SYNTHETIC_PRIVATE_RESPONSE/);
+    assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+  }finally{h.close();}
+  }
 });
 test('Feishu confirmation card names Feishu quota without showing AssemblyAI prices',async()=>{
   const h=feishuHarness();try{

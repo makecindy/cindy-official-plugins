@@ -516,7 +516,7 @@ if(typeof module!=='undefined')module.exports=PodcastHtmlParser;
       // A parseable body is not a provider acknowledgement. Missing/malformed
       // business codes cannot establish rejection after a possibly accepted POST.
       if(!data||typeof data!=='object'||Array.isArray(data)||!Number.isSafeInteger(data.code))C.fail('FEISHU_INVALID_RESPONSE');
-      if(data.code!==0){const code=data.code===2091003?'FEISHU_PROCESSING':data.code===2091008?'FEISHU_QUOTA_EXCEEDED':[99991663,99991664,99991668].includes(data.code)?'FEISHU_AUTH_EXPIRED':[99991672,99991679,2091005].includes(data.code)?'FEISHU_PERMISSION_REQUIRED':'FEISHU_REJECTED';throw Object.assign(new Error(code),{code,definitelyRejected:true});}
+      if(data.code!==0){const code=data.code===2091003?'FEISHU_PROCESSING':data.code===2091008?'FEISHU_QUOTA_EXCEEDED':[20005,20006,99991663,99991664,99991668].includes(data.code)?'FEISHU_AUTH_EXPIRED':[99991672,99991679,2091005].includes(data.code)?'FEISHU_PERMISSION_REQUIRED':'FEISHU_REJECTED';throw Object.assign(new Error(code),{code,providerCode:data.code,definitelyRejected:true});}
       if(!data.data||typeof data.data!=='object'||Array.isArray(data.data))C.fail('FEISHU_INVALID_RESPONSE');return data.data;
     }
     async account(deadline=Infinity){
@@ -1280,7 +1280,10 @@ if(typeof module!=='undefined')module.exports=PodcastHtmlParser;
   const ready=cindy.request({kind:'app-context'}).then(async r=>{zh=r.context?.locale==='zh-CN';ui=await (await fetch('/ui/'+(zh?'zh-CN':'en')+'.json')).json();}).catch(()=>{});
   const channel=new BroadcastChannel('podcast-insights-v2');
   const enqueue=f=>{const p=queue.then(f);queue=p.catch(()=>{});return p;};
-  const error=e=>({ok:false,errorCode:e.code || 'INTERNAL_ERROR',message:(ui.errors?.[e.code] || (zh?'操作未完成，请检查输入、网络或资料库后重试':'Operation incomplete. Check input, network, or library and retry.'))+(typeof e.validationStage==='string'&&/^[a-z0-9_]+$/.test(e.validationStage)?' ['+e.validationStage+']':'')});
+  const error=e=>{
+    const providerCode=Number.isSafeInteger(e.providerCode)?e.providerCode:undefined;
+    return {ok:false,errorCode:e.code || 'INTERNAL_ERROR',message:(ui.errors?.[e.code] || (zh?'操作未完成，请检查输入、网络或资料库后重试':'Operation incomplete. Check input, network, or library and retry.'))+(providerCode!==undefined?(zh?'（飞书业务错误码：'+providerCode+'）':' (Feishu business error code: '+providerCode+')'):'')+(typeof e.validationStage==='string'&&/^[a-z0-9_]+$/.test(e.validationStage)?' ['+e.validationStage+']':'')};
+  };
   const esc=C.escape;
   const time=ms=>ms==null?(ui.unknown || 'Unknown'):C.time(ms/1000);
   function citationText(c){
