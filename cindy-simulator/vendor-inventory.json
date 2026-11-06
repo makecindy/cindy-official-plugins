@@ -526,8 +526,8 @@
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/stream-session.js",
-    "bytes": 6081,
-    "sha256": "5d5d8459f64a44e45734799ae711e76b4469148010060a1058f7e75747d02077"
+    "bytes": 6263,
+    "sha256": "22cde651012995b7fa47d96ebc8ef4a914d722c02165924bc8534c19e75e3f93"
   },
   {
     "path": "vendor/baguette/Baguette_Baguette.bundle/Web/target.js",

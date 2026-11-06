@@ -1,5 +1,16 @@
 # Vendored runtime evidence
 
+## Stream recovery after a device restart 0.3.39 (2026-11-06)
+
+Local JavaScript patch only, on the existing verified Baguette v0.2.10 archive.
+When `StreamSession` stops after its existing eight reconnect attempts, it sets
+`data-viewer-unavailable` on its document. The Cindy controller already reloads
+a frame carrying that marker when status reports the device Booted and ready
+(the same path used for a 503 from the viewer proxy). A device that is shut down
+and booted again while the view is open, or while the panel is not polling, now
+returns to a live view instead of a dead "Stream disconnected" page. No host API,
+endpoint, polling interval, timer, dependency, native binary or permission changes.
+
 ## Multi-contact projection parity 0.3.38 (2026-11-06)
 
 Local JavaScript patches only, on the existing verified Baguette v0.2.10 archive.

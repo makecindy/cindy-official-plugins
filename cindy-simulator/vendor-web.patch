@@ -785,7 +785,7 @@
 +    this.stopping = false;
      const ctx = canvas.getContext('2d');
      const log = onLog || (() => {});
-
+ 
 @@ -84,6 +85,7 @@
          try { env = JSON.parse(e.data); } catch { /* not JSON; let decoder log */ }
          if (env && onText(env) === true) return;
@@ -794,7 +794,7 @@
        this.decoder.feed(e);
      };
      socket.onclose   = () => {
-@@ -91,6 +93,15 @@
+@@ -91,6 +93,19 @@
        this.alive = false;
        this.ws = null;
        if (onClose) onClose();
@@ -805,14 +805,18 @@
 +        if (attempts <= 8) {
 +          log('Reconnecting simulator stream…');
 +          this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.start(); }, 1500);
-+        } else { log('Stream disconnected. Reopen the viewer to retry.', true); }
++        } else {
++          log('Stream disconnected. Reopen the viewer to retry.', true);
++          // Cindy's controller reloads this page once the device is running again.
++          document.documentElement.setAttribute('data-viewer-unavailable', '');
++        }
 +      }
      };
      socket.onerror   = () => {
        log('WS error', true);
-@@ -125,6 +136,9 @@
+@@ -125,6 +140,9 @@
    };
-
+ 
    StreamSession.prototype.stop = function () {
 +    this.stopping = true;
 +    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }

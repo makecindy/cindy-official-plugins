@@ -753,6 +753,17 @@ test('selecting a stopped device never loads its stream or boots until Open is c
  assert.equal(dom.byId.screen.loads.at(-1),`/simulators/${other}?handheld=0&cindyViewer=token#cindyClipboard=123.token`);
 });
 
+test('a stream page that gave up reloads once the device is running again',async()=>{
+ const {dom,poll}=await boot({respond:()=>status()});
+ assert.equal(dom.byId.screen.loads.length,1);
+ await poll();assert.equal(dom.byId.screen.loads.length,1,'a live page is kept');
+ // The device was shut down and booted again while this page was not polling.
+ dom.byId.screen.contentDocument.querySelector=sel=>sel==='[data-viewer-unavailable]'?{}:null;
+ await poll();
+ assert.equal(dom.byId.screen.loads.length,2);
+ assert.equal(dom.byId.screen.loads.at(-1),`/simulators/${udid}?handheld=0&cindyViewer=token#cindyClipboard=123.token`);
+});
+
 test('a page that outlives its service says how to reopen, then reconnects on its own when the service is back',async()=>{
  let mode='up';
  const {dom,poll}=await boot({respond:({action})=>action!=='status'?{ok:true}:mode==='down'?new TypeError('fetch failed'):mode==='expired'?{httpStatus:403}:status()});

@@ -306,3 +306,5 @@ Foldable percentage zoom uses the same device-point basis as 2D phones: at 100%,
 Window resizing preserves the last view centre, including a manually panned position at enlarged zoom. Layout-induced scroll clamping is not treated as user panning.
 
 Two-contact parity covers iPhone, iPad, Duo (closed / half-open / flat) and Android touch-screen simulators. Apple TV uses single-contact Siri Remote input and Vision Pro uses spatial gestures; neither is a phone-style two-contact screen. Automated checks compare device contacts and indicator positions for the same inputs. Physical trackpad feel still requires real trackpad acceptance in the Cindy development task sidebar; synthetic browser events do not replace it.
+
+If a device shuts down and boots again while its view is open, a stream that has stopped retrying marks its page unavailable. The task panel reloads the view once the device is running again, so the user does not need to reopen it. While the device is off, the panel shows the existing shutdown card with its boot button.
