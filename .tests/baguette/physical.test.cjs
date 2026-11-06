@@ -16,7 +16,9 @@ test('runner startup reports an explicit locked-phone diagnostic from the curren
 });
 test('CoreDevice discovery separates paired physical phones, offline devices and simulators',()=>{
  const d=normalize(row());assert.equal(d.kind,'physical');assert.equal(d.state,'Booted');assert.equal(d.developerMode,true);assert.equal(d.runtime,'iOS 27.2');
- const offline=row();offline.properties.connection.state='disconnected';assert.equal(normalize(offline).isAvailable,false);
+ const idle=row();idle.properties.connection.state='disconnected';delete idle.properties.connection.tunnelIPAddress;idle.properties.connection.transportType='localNetwork';
+ assert.equal(normalize(idle).isAvailable,true);assert.equal(normalize(idle).tunnel,'idle');assert.equal(normalize(idle).state,'Booted');
+ const offline=row();offline.properties.connection={state:'unavailable'};assert.equal(normalize(offline).isAvailable,false);assert.equal(normalize(offline).state,'Disconnected');
  const sim=row();sim.properties.hardware.reality='simulated';assert.equal(normalize(sim),null);
  const bad=row();bad.identifier='arbitrary host';assert.equal(normalize(bad),null);
  const devices=createDevices({root:'/unused',run:()=>{throw Error('not called');}});
@@ -292,4 +294,30 @@ test('preview resumes after screen-off metadata failure without reconnecting con
  const preview=createPreview({devices:{target:async()=>({udid:id}),screen:async()=>{if(!awake)throw Object.assign(Error('off'),{code:'DISPLAY_ASLEEP'});return {displayId:1};}},wda:{state:()=>({ready:true})},agent:{preview:async(d,p,screen)=>({screen,image:'new'})}});
  await assert.rejects(preview.frame(id),e=>e.code==='DISPLAY_ASLEEP');awake=true;
  assert.equal((await preview.frame(id)).image,'new');
+});
+
+test('a reachable paired phone with an idle tunnel is woken once on demand',async t=>{
+ const root=await temporary(t),calls=[];let woken=false;
+ const listed=()=>{const r=row();r.properties.connection=woken?{state:'connected',tunnelIPAddress:'fd00::1',transportType:'localNetwork'}:{state:'disconnected',transportType:'localNetwork'};return r;};
+ const devices=createDevices({root,host:'darwin',run:async(file,args)=>{
+   calls.push(args.slice(1,3).join(' '));let result={};
+   if(args[1]==='list')result={devices:[listed()]};
+   else if(args.includes('details')){await new Promise(r=>setTimeout(r,10));woken=true;}
+   await fs.writeFile(args[args.indexOf('--json-output')+1],JSON.stringify({info:{outcome:'success'},result}));return {stdout:''};
+ }});
+ const [a,b]=await Promise.all([devices.target({udid:id}),devices.target({udid:id})]);
+ assert.equal(a.tunnel,'connected');assert.equal(b.tunnelAddress,'fd00::1');
+ assert.equal(calls.filter(c=>c==='device info').length,1);
+ assert.equal((await devices.target({udid:id})).tunnel,'connected');assert.equal(calls.filter(c=>c==='device info').length,1);
+});
+test('an idle tunnel that does not come up still reports a disconnected phone',async t=>{
+ const root=await temporary(t);let wakes=0;
+ const devices=createDevices({root,host:'darwin',run:async(file,args)=>{
+   let result={};
+   if(args[1]==='list'){const r=row();r.properties.connection={state:'disconnected',transportType:'localNetwork'};result={devices:[r]};}
+   else if(args.includes('details')){wakes++;throw Object.assign(Error('locked'),{code:1});}
+   await fs.writeFile(args[args.indexOf('--json-output')+1],JSON.stringify({info:{outcome:'success'},result}));return {stdout:''};
+ }});
+ await assert.rejects(devices.target({udid:id}),e=>e.code==='DEVICE_DISCONNECTED');assert.equal(wakes,1);
+ assert.equal((await devices.target({udid:id},false)).tunnel,'idle');assert.equal(wakes,1);
 });
