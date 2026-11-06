@@ -1091,6 +1091,9 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
   const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
   const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
 
   // The fixed type boundary is a shared document with one rule set, reachable
   // from the routes that decide whether an upload may proceed.
@@ -1104,7 +1107,8 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   // H5 creation: is_level is explicit, independent from package_type, and the
   // saved declaration is verified before the first upload.
   assert.match(creation, /`is_level` 省略或显式 `false` 创建非关卡游戏/);
-  assert.match(creation, /先读当前 `schema app create-app` 确认 `is_level` 已声明/);
+  assert.match(creation, /非关卡 H5 游戏在预览和创建时都显式传 `is_level:false`/);
+  assert.match(creation, /如果接口不支持明确指定游戏身份，停止创建/);
   assert.match(creation, /H5 \+ APK、H5 \+ Windows、H5 \+ Tap 小游戏均拦截创建/);
   assert.match(creation, /package_type:"h5", is_level:false/);
   assert.match(creation, /`package_type_saved:false` 表示类型尚未保存/);
@@ -1122,10 +1126,8 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
 
   // Qualification: the unavailable warning is not an all-clear, must-level is
   // derived from the saved identity, and small-game material is not filed here.
-  assert.match(qualification, /`QUALIFICATION_STATUS_UNAVAILABLE` 表示未知,不能当作无缺口/);
-  assert.match(qualification, /小游戏隐私、ICP、防沉迷转开发者后台/);
+  assert.match(qualification, /H5、Spark、Tap 小游戏的隐私与 ICP/);
   assert.match(qualification, /不能用 `qualification save-qualification-draft` 代替/);
-  assert.match(qualAnalysis, /先检查 `QUALIFICATION_STATUS_UNAVAILABLE`/);
   assert.match(qualDraft, /## 小游戏域材料边界/);
   assert.match(qualDraft, /## 创建类型声明与恢复/);
 
@@ -1136,8 +1138,29 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   assert.match(diagnostics, /只有已确认原类型及附加用途允许 Tap 小游戏/);
 
   // Internal vocabulary stays out of user-facing replies.
+
+  // 2026.11.5: qualification reads one assessment document, writes carry the
+  // snapshot they were built from, and the level-upgrade flow routes routine
+  // privacy configuration to the developer site instead of the limited
+  // "no personal data" declaration.
+  assert.match(qualification, /qualification get-qualification-assessment/);
+  assert.match(qualification, /read_state=partial\/unknown/);
+  assert.match(qualification, /`effective_approved`/);
+  assert.match(qualification, /expected_snapshot/);
+  assert.match(qualification, /save-age-grade-qualification/);
+  assert.match(qualAnalysis, /effective_approved=true/);
+  assert.match(qualLifecycle, /expected_snapshot.*snapshot/);
+  assert.match(qualLifecycle, /已撤回审核，材料已保留/);
+  assert.match(levelUpgrade, /KIND_SELF_ICP/);
+  assert.match(levelUpgrade, /常规隐私设置，以及隐私查询明确返回不支持的声明/);
+  assert.match(levelUpgrade, /升级为独立游戏后无法转回关卡游戏/);
+  assert.match(levelUpgrade, /qualification get-qualification-assessment/);
+  assert.match(shared, /缺少该字段时，明确说明机审结论无法确认/);
+  assert.match(fieldMap, /按 qualification 手册的适龄流程/);
+
   assert.match(shared, /## 面向用户的用语/);
-  assert.match(shared, /不说「转 Web」/);
+  assert.match(shared, /默认使用中文业务表达/);
+  assert.match(shared, /不得夹带字段名、状态码/);
   assert.doesNotMatch(uploadImage, /DC「权限管理/);
 });
 

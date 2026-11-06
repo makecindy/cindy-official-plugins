@@ -108,7 +108,7 @@
 - 业务字段统一放 `args.data`,只有 `developer_id` / `app_id` 是独立 scope 字段(映射为 `--dev-id` / `--app-id`)。除 scope 和 `data` 外的键都是控制 flag,透传成 `--flag`,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);不确定可用 flag 时先对目标命令传 `args._help:true` 看完整帮助。typed 命令的 `data` 是完整 tool input。
 - 默认输出就是 JSON,不要追加冗余的 `--format json`。
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
-- `precheck-app-review` 返回 `blockers` 非空或 `preaudit_status === "rejected"` 时,只展示 `blockers` 逐项事实;`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次没审成、可稍后重试预检或直接提交;响应里没有 `preaudit_status` 时退回按 `preaudit_passed` 判断。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则展示预检问题与风险;用户明确要求跳过预检或继续提交时允许 submit,由服务端做最终校验。提审明确拒绝后停止本次意图,不循环或换 key 重试;结果不明先读回版本状态。不得回传任何 token,也不能补造本地参数或请求字段。
+- `precheck-app-review` 返回阻断项或 `preaudit_status === "rejected"` 时,先向用户展示具体问题和提交风险,再确认是否继续;`yes:true` 本身不能代替用户确认。`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次未得出机审结论、可稍后重试预检或在用户授权下直接提交;响应缺少该字段时明确说明机审结论无法确认。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认阻断项消失),继续提审的授权不能代替协议同意。提审明确拒绝后停止,结果不明先查询版本状态,不循环提交或更换幂等键。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
 - CLI 自身的问题(报错看不懂、行为不合预期、缺能力)用 `feedback` 上报一次,三种触发:用户明确表达受阻;错误信封带 `_notice.feedback` 或同一 `error.subtype` 连续失败;你能说清复现命令和期望 vs 实际的差异。上报前先确认不是自己的输入、登录或权限问题,先修好输入和 auth/scope 重试;条件与话术见 [feedback](taptap-suite/references/feedback.md);它是写操作,同样先 `dry_run: true` 预览再 `yes: true`。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。

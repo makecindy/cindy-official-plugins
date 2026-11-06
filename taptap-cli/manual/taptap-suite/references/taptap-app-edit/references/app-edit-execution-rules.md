@@ -46,7 +46,7 @@
   - Windows → `pc_game_anti_addiction_status`；
   - H5 / 小游戏 → 走 TapPlay 免安装上架、防沉迷平台兜底，无需询问。
 - 这些事实通过 `save-qualification-draft` 的 `app_features`（转 qualification 手册，[taptap-qualification](taptap-suite/references/taptap-qualification/MANUAL.md)）填写，决定"哪些资质必须"；不确定时逐项询问，不默认 false、不跳过，也不留到提审前才问。
-- 提审前按正式发布口径检查资质：缺口以 `analyze-app-status` 的 `QUALIFICATION_INCOMPLETE` 为准（按游戏事实算出的必须资质，不是把 8 类客观状态全列一遍）；认证与豁免以 qualification 手册的当前分析为准；不得自行放宽或收紧。
+- 提审前按预约/测试/正式上线目标解释当前待办与完整清单，按 qualification 手册读取 assessment（含适龄、认证/豁免、未知与冲突），再执行正式预检。QUALIFICATION_INCOMPLETE 仅反映部分材料缺口，不能替代完整验证；不得自行放宽或收紧实际门禁。
 
 ## 6. 提审
 
@@ -65,9 +65,9 @@
 - HTTP 200 / 顶层成功只说明预检执行成功；分别读取预审结果、blockers 和 warnings。预审通过不能覆盖非空 blockers，blockers 为空也不能把预审未通过说成通过。字段缺失时说明结果未知，不补写“阻塞项：无”。
 - 展示本次问题与风险；用户明确选择跳过预检或继续提交后允许 submit，由提交接口裁决，不在客户端增加认证门禁，也不要宣称必定被拒绝。正式提交明确拒绝时停止本次意图，不自动重放或换幂等键重发；结果未知时先读回版本状态。
 - 本次预审通过（`preaudit_status === "passed"`）且 blockers 明确为空时展示“阻塞项：无”和“提交状态：可提交审核”；`preaudit_status === "rejected"` 且无阻断时同时说明“不阻断提交，但可能被审核驳回”；`preaudit_status === "unavailable"` 说明“本次预检没得出内容预审结论，可稍后重试预检，也可直接提交”，不得说成预审未通过。
-- `preaudit_status` 是机审结论的主口径（缺失时退回 `preaudit_passed`）；两者都仅用于内部判断，不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。
-- blockers 按服务端原文展示；协议同意仍走下方独立签署流程，不能用继续提交的授权代替签约。
-- 资质缺口（`QUALIFICATION_INCOMPLETE`）是 warning、submit 不卡控 → 展示"继续提审可能被驳回"并询问是否继续。
+- `preaudit_status` 是机审结论的主口径；缺失时说明无法确认机审结论。该字段仅用于内部判断，不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。
+- blockers 按服务端中文说明解释具体阻断原因，不把代码、字段列表或整个对象展示给用户；协议同意仍走下方独立签署流程，不能用继续提交的授权代替签约。
+- 资质缺口（`QUALIFICATION_INCOMPLETE`）是建议性 warning，具体提交门禁仍以预检和正式 submit 为准 → 展示"继续提审可能被驳回"并询问是否继续。
 - 复核返回风险数据不可用且要求确认时展示 warning；`--yes` 不代表已核对。schema 未声明风险确认输入时停止并报告契约缺口，不补造本地 flag。
 
 ## 7. SCE 协议

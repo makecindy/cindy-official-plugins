@@ -63,6 +63,8 @@
 
 **CRITICAL — 审核、发布、撤审、撤定时、立即上线和重置草稿等高影响动作,必须先 dry-run 或等待用户明确确认。哪些请求不算提审意图,以共享执行规范「提审意图门禁」的唯一词表为准(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/shared-execution.md"})`);三步契约流程细节见 `app-edit/references/app-edit-audit-and-history.md`。**
 
+**CRITICAL — 创意工坊升级必须由用户明确确认目标游戏、版本及“升级后无法转回关卡”;dry-run、`yes:true` 或隐私声明确认均不能替代升级确认。常规隐私配置优先交接开发者后台;有限“不处理个人信息”声明仅在用户明确选择且能力支持时办理。**
+
 **CRITICAL — 版本发布与分发状态独立。发布前调用 `app platform-status`(或读对应模块),只处理当次实际返回且可见的 `region_flag_*`,不能预设入口、状态或替用户切换。**
 
 **每次资料、包体、审核或发布写操作完成后必须输出 handoff:当前阶段、已完成、未完成、用户现在是否需要操作、下一次检查时间、下一步动作和实际返回的页面或试玩入口。审核中不得表述为已上线;定时上线不得表述为已发布。**
@@ -77,7 +79,7 @@
 
 | 用户意图 | 首选调用 / 流程 |
 | --- | --- |
-| 创意工坊升级 | 查询升级条件 → 按返回状态办理隐私声明或转开发者后台 → 单独确认升级 → 提交并读回 |
+| 创意工坊升级 | 查询条件 → 开发者后台或受限声明办理 → 回流核验 → 单独确认升级 → 提交并读回 |
 | "还差什么 / 能不能提审" | 读取模块、包体、版本、资质和历史审核后生成分层风险清单(读 skill analysis 与 review risk checklist) |
 | 查字段、选项、图片/视频规格 | `call_tool(name:"app get-app-module", args:{dev_id, app_id, data:{module_id:"<module_id>"}})` |
 | 为 H5 开启 PC 分发(`platform-status`、`region_flag_pc`) | 读模块 → 保留全部现有平台并追加 `PC_OFFICIAL` → 写后立即重读 → 仅当 `region_flag_pc` 已实际返回且 `options` 含 `4` 时才按最新 `expected` 写入;H5 不得使用 `windows` 槽 |
@@ -98,11 +100,11 @@
 
 完整细则(前置与路由、字段写入与并发凭证、图片与视频、包体两条路径、资质判断事实、提审三步与预检口径、SCE 协议、发布与生命周期、输出与后续检查)见 app-edit execution rules(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md"})`)。要点:
 
-- 编辑资料时先确认资质判断事实(`app_features`),再推导必须资质。
+- 编辑资料时先读取已保存的资质判断事实(`app_features`),只询问缺失或冲突内容;只读分析不自动保存,用户确认修改后再写入并重算。
 - 缺 `developerId` / `appId` 时转 identity 手册;不知道字段所属模块先读 field map(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md"})`)。引导用户打开资料编辑页时只使用 `https://<current-server-host>/v3/<developerId>/app/<appId>/store/update`,不要自行拼接 `/store`,也不要把 Maker 或包体管理页当成资料编辑入口。
 - 普通字段每批不超过 10 个 change。除显式 `force=true` 外,每条 change 必须携带 `expected`:取值是该字段读取时的严格 `current_value` 原样回填;`current_value` 为 `null`(首次写入)时传 `[]`。stale 时停止并重新读取,旧截图、旧对话、历史 `form_data` 和 iOS 的继承后 `platform_value.resolved_value` 都不能作为并发快照。严格取值见 fields and packages(`ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md"})`)「文字字段」。
 - 可选 iOS 覆盖字段是 `title_ios` / `description_ios` / `icon_ios` / `banner_4_ios` / `square_promo_image_ios` / `screenshots_ios`:空值表示继承 Android 主字段,清空即恢复继承,写入时的 `expected` 必须用该 `_ios` 字段自己的严格存储值。继承与清空口径见 field map。
-- `age_grade`、`apk_package_name`、`mini_game_play_enabled` 不能通过普通字段保存:适龄分级转资质人工流程;APK 包名需重建并上传 APK 后重新绑定;小游戏游玩方式用 `apk_mini_game_play` 槽位选择或清空。`category` 是资料中的游戏类型,可修改;C 端商店标签不是资料字段,当前 CLI 不支持修改,需人工处理。
+- `age_grade`、`apk_package_name`、`mini_game_play_enabled` 不能通过普通字段保存:适龄分级按 qualification 手册的适龄流程保存/提审/撤回;APK 包名需重建并上传 APK 后重新绑定;小游戏游玩方式用 `apk_mini_game_play` 槽位选择或清空。`category` 是资料中的游戏类型,可修改;C 端商店标签不是资料字段,当前 CLI 不支持修改,需人工处理。
 - 图片和视频能否使用,以字段当次返回的 `image_spec` / `video_spec` 为准;`trailer` 与 `gameplay_demo_video` 最终不能使用同一个 `videoId`,重复时停止并让用户换一个视频。不同 `videoId` 只证明引用不同对象,不证明内容不同或已符合审核规范 2.6.10,需要内容判断时标记人工复核;不得把历史审核中的"高度雷同"表述成官方文档规则。素材库检索与收录转 materials 手册。
 - 所有包体统一分两条独立执行路径:**包体管理与自测**先用 `get-available-package-types` 取可用类型,再按类型调对应 `list-*` 查包体库与状态,自测二维码直接调 `call_tool(name:"test-qr-code", args:{dev_id, app_id, data:{package_id} | data:{version_code}, output})`,一条命令完成取地址与出图;该路径只读,不提供资料页 `expected`,也不执行绑定。**资料页包体槽位绑定**先确认可编辑草稿(无草稿时核对 `app create-draft` 前置条件并在已有编辑授权内创建,创建后丢弃旧快照重新 `app list-packages`),再按「包体槽位」契约执行(同次 `status=ready` 候选、目标 `available=true`、原样 `expected`、稳定 key dry-run → `yes:true`、写后读回;422 不原样重试且不加 `force:true` 绕过;409 先核对快照与草稿再重读,禁止自动覆盖)。Spark 使用专用 `app +bind-spark-version` 编排相同门禁。两条路径冲突时停止写入并报告 scope / 权限问题;上传成功不等于资料页包体槽位已绑定。
 - TapTap 制造 / Spark 包体必须先在 TapTap 制造创建或更新;官方入口为 `https://maker.taptap.cn/`,面向用户时按共享规范单独一行输出。CLI 不上传或更新 Spark 包,只能把已存在且 ready 的版本绑定到资料页主槽位。

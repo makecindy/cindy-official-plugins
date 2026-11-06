@@ -110,7 +110,7 @@ call_tool(name:"app select-package", args:{
 1. **先确认可编辑草稿**：同一 app / developer 下调用 `list-app-versions`，必要时 `get-app-version` 核对当前草稿状态。上传成功只表示包体进入包体库，不表示已有资料草稿；不要凭上次绑定成功或对话历史认定草稿仍存在。
 2. **无草稿时先处理草稿创建**：检查 `create-draft` 的当前前置条件；用户已授权本次资料换包且前置条件满足时创建草稿。审核中、定时上线或状态不明确时先说明阻断，不自动撤审、重置或覆盖。`create-draft` 失败就停止绑定。
 3. **创建草稿后必须重读**：`create-draft` 成功后丢弃创建前取得的所有槽位快照，再调 `list-packages(package_types: [...])` 读取本次候选、`current_bindings` 和 `package_slots`。即使先前返回 `expected={"kind":"none"}` 也不能沿用；新草稿可能继承旧版本绑定。已有可编辑草稿也必须在本次绑定前读取。响应缺少 `package_slots` 时停止并向用户说明缺少绑定所需的信息，当前无法完成包体绑定。
-4. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型；`expected` 描述旧槽位，不是目标包体。
+4. 候选必须来自同次 `list`、类型匹配且 `status=ready`；目标槽位必须 `available=true`。把 `package_slots.<slot>.expected` 原样写入 `select-package` / `clear-package`，不改变字段名或 ID 类型；`expected` 描述修改前的槽位，不是目标包体。
 5. 使用稳定 `idempotency_key` 先 `dry_run: true`；按已有授权用相同 payload 和 key 加 `yes: true`。预览后若创建、更换或重置了草稿，返回第 3 步重新读取和预览，不复用旧快照。
 6. 写入后重新调用 `list-packages`，核对同一 app、slot、包体类型与 ID 和新 `expected`。二维码成功、上传成功或开发包创建成功均不能替代绑定读回；仅上传或自测目标不强加绑定。
 
@@ -118,7 +118,7 @@ call_tool(name:"app select-package", args:{
 
 - **422 / failed_precondition**：先读服务端原因。没有草稿则返回第 1、2 步，创建后必须执行第 3 步；其它前置条件失败按实际原因处理，不一概创建草稿。禁止原样重试、换幂等键连发或加 `force: true` 绕过。
 - **409 / stale_state**：不等于“别人修改了”。先检查快照字段是否正确、读取后是否创建过草稿，再重读当前草稿和槽位。若目标已经绑定，只报告当前状态已达成，不归因失败请求，不重复写；否则比较变化并按原授权重新决策，重新预览。再次冲突时停止并报告状态，禁止自动覆盖。
-- **expected 校验失败**：`package` 使用 `{"type":"h5","id":"目标版本ID"}`，H5 的旧快照使用 `{"kind":"h5","h5_version_id":"旧版本ID"}`；不能把 `id` 写进 expected，不能遗漏 `h5_version_id`，不能把 ID 改成数字。`none` 仅代表本次读取的空槽位，不能作为默认值，也不能携带旧包 ID。即使显式使用 `force: true`，也不能省略或伪造 expected。
+- **expected 校验失败**：`package` 使用 `{"type":"h5","id":"目标版本ID"}`，当前 H5 槽位的 `expected` 使用 `{"kind":"h5","h5_version_id":"旧版本ID"}`；不能把 `id` 写进 expected，不能遗漏 `h5_version_id`，不能把 ID 改成数字。`none` 仅代表本次读取的空槽位，不能作为默认值，也不能携带旧包 ID。即使显式使用 `force: true`，也不能省略或伪造 expected。
 
 Spark 版本有专用编排命令，避免把包体管理概览误当成资料页绑定接口：
 

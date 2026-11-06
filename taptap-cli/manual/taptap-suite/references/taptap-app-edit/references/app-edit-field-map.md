@@ -63,7 +63,7 @@
   - **跨端游戏**：最低 Win10 64位 / i3-6100 / 8GB / Intel UHD 630 或 GTX 750 Ti / 10GB / DX11；推荐 i5-8400 / 16GB / GTX 1050 Ti / 20GB / DX11。
   - **3A 大作**：最低 Win10 64位 / i5-8400 / 16GB / GTX 1060 6GB / 50GB / DX12；推荐 Win11 64位 / i7-9700 / 32GB / RTX 3060 / 100GB / DX12。
 
-Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是 `library_hero`。`library_banner` 是旧版兼容字段，不要主动写入；如果在后端审核、历史版本或 legacy 说明里看到它，按旧版游戏库背景壁纸理解，并优先引导使用 `library_hero`。
+游戏库背景壁纸使用 `library_hero`。
 
 ### 按平台发行时间（与 release_schedule 不是一回事）
 `release_schedule` 控制**整个版本的上线时机**，只支持立即或精确定时；而「按平台发行时间」组是**各平台在商店展示的市场档期信息**，安卓和 PC 各一套，落在 `info.*`，其中 `expected_launch_time_vague_*` 仍可表达平台展示用的模糊档期：
@@ -80,9 +80,9 @@ Windows 素材中，当前资料模块主流程的游戏库背景壁纸字段是
 - **包体**：主包体 apk / mini_app / spark / h5 四选一互斥（见 Package 段）；Windows 包体是独立 `windows` 槽位，可能带分支。spark 专属约束见 Package 段。APK 包体配置中，未接入防沉迷时必须授权 TapPlay；`apk_force_update_in_app` 仅在 `apk_update_mode=force` 时可见。
 - **关卡启动链接** `level_game_launch_link`：需全局唯一，重复会在写入时被拒（「该链接已存在对应游戏」），可提前提醒用户换一个。
 
-### 不可直接写入的历史字段
+### 需要专用流程的字段
 
-- `age_grade`：转游戏资质页面人工处理。
+- `age_grade`：按 qualification 手册的适龄流程保存、提审或撤回。
 - `apk_package_name`：来自 APK 固有元数据；需要变更时重新构建并上传 APK，再绑定新包体。
 - `mini_game_play_enabled`：由 `apk_mini_game_play` 槽位派生，只能通过 `select-package` / `clear-package` 改变。
 
