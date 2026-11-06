@@ -56,8 +56,10 @@ Additional0.2.5 fixes: source retrieval refuses the credentialed AssemblyAI API 
 0.2.21: Unknown-job cards retain a safe default recovery hint when UI localization initialization fails.
 
 0.3.0 development: optional direct Feishu Minutes integration, without MCP. See [Feishu integration](FEISHU.md) for credentials, the20 MiB direct-upload limit, existing Drive/Minute imports, recovery and verification limits.
-## 0.4.2 development: automatic reading notes
+## 0.4.3 development: automatic reading notes
 
 See [automatic reading notes](READING.md): model-generated chapters with extracted
 source evidence, complete transcript reading/search, chapter questions and HTML/JSON
 export. EP52 was generated in a separate local test instance; no audio retranscription.
+
+Optional feedback is available in the library and reading toolbar; it opens a public GitHub form for your review and manual submission, without attaching personal content. See [reading notes](READING.md).

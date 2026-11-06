@@ -143,7 +143,9 @@
     "MINUTES_GENERATING": "This episode is already generating. Wait for its result.",
     "MINUTES_RENDER_FAILED": "The reading page could not be loaded. Reopen the plugin.",
     "MINUTES_NOT_FOUND": "No reading notes yet. Generate them first.",
-    "MINUTES_EXPORT_FAILED": "Export incomplete. Check working directory permissions and retry."
+    "MINUTES_EXPORT_FAILED": "Export incomplete. Check working directory permissions and retry.",
+    "FEISHU_SOURCE_CHANGED": "The audio source changed. Prepare a new Feishu confirmation card in a Cindy task.",
+    "FEISHU_AUDIO_PREPARATION_REQUIRED": "Prepare a new Feishu card in a Cindy task to fetch the audio before confirming the upload."
   },
   "quoteTooLong": "Quote exceeds 1200 characters. Select a shorter passage; nothing was saved.",
   "excerptNotice": "Excerpt around the matching words; […] marks omitted source text. Open the library for the complete passage.",
@@ -171,11 +173,15 @@
   "minutesChapters": "chapters",
   "minutesMissing": "No reading notes yet. Generate from the existing transcript; this uses your text model quota, not audio transcription.",
   "minutesStarted": "Generation started in a Cindy task. Return here when it completes.",
-  "minutesStale": "The transcript has changed. Regenerate before relying on these notes.",
+  "minutesStale": "The transcript has changed. You can read these notes, but chapter questions are disabled. Regenerate the notes before asking.",
   "minutesQuestion": "What would you like to ask about this chapter?",
   "minutesLoading": "Loading reading notes…",
   "minutesModelNotice": "Generation sends this transcript to your selected Cindy text model and uses its quota.",
   "backToLibrary": "Back to library",
   "minutesIndexEmpty": "No saved reading notes yet. Select an episode with a transcript to generate them.",
-  "selectionSaveFailed": "Reading position could not be saved. Reopen and check it."
+  "selectionSaveFailed": "Reading position could not be saved. Reopen and check it.",
+  "feedback": "Optional feedback",
+  "feedbackNotice": "Review and submit a public GitHub issue; a GitHub account is required. No transcripts, notes, account details or logs are attached automatically. Do not include secrets or private information.",
+  "feedbackOpen": "Open feedback form",
+  "feedbackTemplate": "Plugin: podcast-insights\nPlugin version (optional):\n\nProblem or suggestion:\n\nSteps to reproduce (optional):\n\nExpected behavior:\n\nDo not paste credentials, private transcripts, account details or full logs."
 }

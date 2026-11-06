@@ -212,6 +212,7 @@
       if(e.duration_s>14400 || e.audio_bytes>256*1024*1024)C.fail('AUDIO_TOO_LARGE');
       if(!(await this.host.credentialsStatus()))C.fail('AAI_KEY_MISSING');
       const existing=(await this.rows("SELECT * FROM jobs WHERE episode_id=? AND state IN ('prepared','claiming','submitting','submitted','unknown') ORDER BY submitted_at DESC LIMIT 1",[eid]))[0];if(existing){
+        if(existing.provider!=='assemblyai')C.fail('PROVIDER_JOB_EXISTS');
         if(existing.state==='claiming')return this.prepareAfterClaim(existing,eid,cardId);
         if(existing.state==='prepared'){
           const est=e.duration_s==null?null:e.duration_s/3600*0.23;

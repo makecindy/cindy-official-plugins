@@ -75,10 +75,13 @@
           const grounded=proposed.map(raw=>{
             const points=list(raw.points,10).map(p=>this.evidence(p,part));if(!points.length)invalid('empty_points');
             return {title:str(raw.title,120),summary:str(raw.summary,2200),points,decisions:list(raw.decisions,6).map(p=>this.evidence(p,part)),quotes:list(raw.quotes,6).map(p=>this.evidence(p,part))};
-          }).sort((a,b)=>Math.min(...a.points.map(p=>p.segment_idx))-Math.min(...b.points.map(p=>p.segment_idx)));
-          // Source references anchor navigation. Equal anchors belong to one section.
+          });
+          const refs=c=>[...c.points,...c.decisions,...c.quotes].map(p=>p.segment_idx);
+          const anchored=grounded.map(chapter=>({chapter,anchor:Math.min(...refs(chapter)),last:Math.max(...refs(chapter))})).sort((a,b)=>a.anchor-b.anchor);
+          // Merge intersecting evidence spans; a chapter must contain every source
+          // it cites, while navigation still covers the original text exactly once.
           const grouped=[];
-          for(const c of grounded){const anchor=Math.min(...c.points.map(p=>p.segment_idx)),last=grouped.at(-1);if(last&&last.anchor===anchor){last.chapter.title+=' / '+c.title;last.chapter.summary+='\n'+c.summary;for(const k of ['points','decisions','quotes'])last.chapter[k].push(...c[k]);}else grouped.push({anchor,chapter:c});}
+          for(const c of anchored){const last=grouped.at(-1);if(last&&c.anchor<=last.last){last.last=Math.max(last.last,c.last);last.chapter.title+=' / '+c.chapter.title;last.chapter.summary+='\n'+c.chapter.summary;for(const k of ['points','decisions','quotes'])last.chapter[k].push(...c.chapter[k]);}else grouped.push(c);}
           for(let i=0;i<grouped.length;i++){const start=i===0?part[0].idx:grouped[i].anchor,end=i+1<grouped.length?grouped[i+1].anchor-1:part.at(-1).idx;chapters.push({...grouped[i].chapter,start_idx:start,end_idx:end});}
 
         }

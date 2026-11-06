@@ -46,3 +46,7 @@ base publishing is included.
 YouTube extraction is not implemented. YouTube URLs now return a specific
 supported-alternatives message before fetching; matching RSS is a separate
 Agent step, not an automatic plugin capability.
+
+Chapter ranges merge overlapping evidence spans, including decisions and quotations, so every cited segment remains within its chapter. When a transcript changes, the open reader updates its stale warning without rebuilding the document or resetting scroll; chapter questions are disabled and the runtime checks the active source version before creating a task. Regenerate before asking.
+
+The library header and reading toolbar offer **Optional feedback**. Expand the entry to review the public GitHub disclosure, then open an editable issue form. Only a fixed plugin identifier and blank prompts are prefilled; no transcript, notes, account details or logs are collected or attached. Submission is always performed by the user in GitHub.

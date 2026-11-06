@@ -72,7 +72,7 @@ Metadata exceeding title500/author300/language64 chars, GUID/URL4000, date128 or
 0.2.19 (ko): JSON: 배열 또는 {segments:[...]}; text(별칭 body), start/end(별칭 startTime/endTime)는 밀리초가 아닌 초 단위이며 speaker는 선택 사항입니다. HTML 주석, 중첩 template, raw-text 컨테이너를 제외하며 일반적인 페이지 가시성/CSS 추출기가 아닙니다.
 # Optional direct Feishu Minutes (0.3.0 development)
 
-When the user selects Feishu, use `podcast_feishu`. `prepare` with episode_id only prepares a real confirmation card; only its host-issued owner click uploads audio and creates a Minute. Direct upload is limited to20MiB. Larger media must already be in Drive; use its file_token, never an access token. No automatic conversion, splitting or provider fallback.
+When the user selects Feishu, use `podcast_feishu`. `prepare` with episode_id fetches public audio into host-managed media in the active Agent call when file_token is absent, checks its actual size, and prepares a real confirmation card; only its host-issued owner click uploads audio and creates a Minute. Direct upload is limited to20MiB. Larger media must already be in Drive; use its file_token, never an access token. No automatic conversion, splitting or provider fallback.
 
 Credentials belong only in plugin settings and the Host vault. This version uses a short-lived Feishu user token, not shared XD Feishu OAuth; replace expired tokens in settings. Never ask for credentials in chat or put them in tool arguments.
 

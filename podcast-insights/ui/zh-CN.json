@@ -143,7 +143,9 @@
     "MINUTES_GENERATING": "本期纪要正在生成，请等待完成。",
     "MINUTES_RENDER_FAILED": "阅读页未能加载，请重新打开插件。",
     "MINUTES_NOT_FOUND": "尚无知识纪要，请先生成。",
-    "MINUTES_EXPORT_FAILED": "纪要导出未完成，请检查工作目录权限后重试。"
+    "MINUTES_EXPORT_FAILED": "纪要导出未完成，请检查工作目录权限后重试。",
+    "FEISHU_SOURCE_CHANGED": "音频来源已变化，请在 Cindy 任务中重新准备飞书确认卡。",
+    "FEISHU_AUDIO_PREPARATION_REQUIRED": "请在 Cindy 任务中重新准备飞书确认卡，先取得音频后再确认上传。"
   },
   "quoteTooLong": "引用超过1200字符，请缩短选中的原文；本次未保存",
   "excerptNotice": "展示命中原句附近的上下文；[…] 表示省略的原文。完整段落请在资料库核验。",
@@ -171,11 +173,15 @@
   "minutesChapters": "个章节",
   "minutesMissing": "尚未生成纪要。使用已有转录整理，会消耗文本模型用量，不会重新转录音频。",
   "minutesStarted": "已在 Cindy 任务中开始生成，完成后可回到此处阅读。",
-  "minutesStale": "转录已更新，请重新生成后再使用这份纪要。",
+  "minutesStale": "原文已有新版本；当前纪要仍可阅读，章节追问已停用，请重新生成纪要后追问。",
   "minutesQuestion": "你想围绕本章问什么？",
   "minutesLoading": "正在读取知识纪要……",
   "minutesModelNotice": "生成会将转录交给你在 Cindy 中选择的文本模型，并消耗模型用量。",
   "backToLibrary": "返回资料库",
   "minutesIndexEmpty": "还没有已生成的知识纪要。选择已有转录的单集后即可生成。",
-  "selectionSaveFailed": "阅读位置未能保存，请重新打开后检查。"
+  "selectionSaveFailed": "阅读位置未能保存，请重新打开后检查。",
+  "feedback": "自愿反馈",
+  "feedbackNotice": "在 GitHub 填写并公开提交，需要 GitHub 账号。不会自动附带转录、笔记、账号或日志；请勿填写密钥和私人资料。",
+  "feedbackOpen": "打开反馈表单",
+  "feedbackTemplate": "插件：podcast-insights\n插件版本（选填）：\n\n遇到的问题或建议：\n\n复现步骤（选填）：\n\n预期效果：\n\n请勿粘贴密钥、私人转录、账号或完整日志。"
 }

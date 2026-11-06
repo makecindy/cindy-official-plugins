@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id),channel=new BroadcastChannel('podcast-insights-v2'),pending=new Map();
   let pendingFocus=null;
   let ui,show='',episode='',next=null,episodeOffset=null,notesNext=null,nextChar=0,highlight='',busy=false,refreshPending=false,readerNeedsRetry=false,readerVersion='';
-  let libraryScroll=0,minutesId='',viewMode='library',navigation=0,selectionQueue=Promise.resolve();
+  let libraryScroll=0,minutesStale=false,minutesId='',viewMode='library',navigation=0,selectionQueue=Promise.resolve();
   function saveSelection(selected,token=navigation){
     const work=selectionQueue.then(async()=>{if(token!==navigation)return;const r=await fetch('/kv');if(!r.ok)throw new Error(ui.selectionSaveFailed);const cfg=await r.json();if(token!==navigation)return;const saved=await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,selected})});if(!saved.ok)throw new Error(ui.selectionSaveFailed);});
     selectionQueue=work.catch(()=>{});return work;
@@ -23,6 +23,18 @@
   async function act(fn){if(busy)return;busy=true;try{await fn();}catch(e){notice(e.message);}finally{busy=false;if(pendingFocus){const focus=pendingFocus;pendingFocus=null;act(()=>focus.mode==='minutes'?openMinutes(focus.episode_id):read(focus.episode_id,0,0,focus.segment_id));}else if(refreshPending){refreshPending=false;act(()=>refresh());}}}
   const stamp=ms=>{if(ms==null)return ui.unknown;const seconds=Math.floor(ms/1000);return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(n=>String(n).padStart(2,'0')).join(':');};
   const confirmDelete=async(kind,id)=>{if(!confirm(ui.confirmDelete))return;await request('delete',{kind,id,confirm:true});episode='';highlight='';readerVersion='';readerNeedsRetry=false;next=null;nextChar=0;notesNext=null;$('reader').replaceChildren();$('episode-actions').hidden=true;$('more').hidden=true;$('notes').replaceChildren();$('more-notes').hidden=true;await refresh();await notes(false);notice(ui.deletedBackup);};
+  function updateMinutesStale(stale){
+    minutesStale=stale===true;
+    const warning=$('minutes-stale');if(warning){warning.hidden=!minutesStale;warning.textContent=minutesStale?ui.minutesStale:'';}
+    $('reader').querySelectorAll('[data-ask-chapter]').forEach(b=>{if(b instanceof HTMLButtonElement){b.disabled=minutesStale;b.title=minutesStale?ui.minutesStale:'';}});
+  }
+  function feedback(){
+    const entry=node('details');entry.className='feedback-entry';entry.append(node('summary',ui.feedback));
+    const explanation=node('p',ui.feedbackNotice),link=node('a',ui.feedbackOpen);
+    const url=new URL('https://github.com/makecindy/cindy-official-plugins/issues/new');
+    url.searchParams.set('title','[podcast-insights] '+ui.feedback);url.searchParams.set('body',ui.feedbackTemplate);
+    link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';entry.append(explanation,link);return entry;
+  }
   async function refresh(append=false){
     const r=await request('podcast_library',{show_id:show || undefined,transcript_state:$('state').value || undefined,offset:append?episodeOffset || 0:0});
     if(!append){$('shows').replaceChildren(button(ui.allShows,async()=>{show='';await refresh();}));for(const s of r.shows){const row=node('div');row.append(button(s.title,async()=>{show=s.id;await refresh();}),button(ui.deleteShow,()=>confirmDelete('show',s.id)));$('shows').append(row);}$('episodes').replaceChildren();}
@@ -34,7 +46,7 @@
       const index=await request('minutes_index');$('minutes-list').replaceChildren();
       for(const saved of index.minutes){const row=node('div');row.className='minutes-saved-item';const open=button(saved.title,()=>openMinutes(saved.episode_id));open.className='minutes-saved-open';row.append(node('small',saved.show_title+' · '+saved.chapter_count+' '+ui.minutesChapters),open);$('minutes-list').append(row);}
       if(!index.minutes.length)$('minutes-list').append(node('p',ui.minutesIndexEmpty));
-      if(viewMode==='minutes'&&episode){const latest=await request('minutes_document',{episode_id:episode});if(latest.available&&latest.id!==minutesId)await openMinutes(episode,latest);return;}
+      if(viewMode==='minutes'&&episode){const latest=await request('minutes_document',{episode_id:episode});if(latest.available&&latest.id!==minutesId)await openMinutes(episode,latest);else updateMinutesStale(!latest.available||latest.stale);return;}
     }
     if(!append&&episode){
       if(readerNeedsRetry)await read(episode,0,0,highlight);
@@ -74,11 +86,12 @@
     $('reader').replaceChildren();$('reader').classList.remove('reading-empty');$('more').hidden=true;next=null;readerVersion='';readerNeedsRetry=false;detailMode(true);$('search').hidden=true;$('episode-actions').hidden=false;
     const language=document.documentElement.lang==='zh-CN'?'zh-CN':'en';
     const generate=async regenerate=>{const result=await request('minutes_generate',{action:'generate',episode_id:eid,language,regenerate});notice(result.message||ui.minutesStarted);};
-    const toolbar=node('div');toolbar.className='reading-toolbar';toolbar.append(button(ui.backToLibrary,backToLibrary));const actions=node('div');actions.className='reading-toolbar-actions';toolbar.append(actions);$('reader').append(toolbar);
+    const toolbar=node('div');toolbar.className='reading-toolbar';toolbar.append(button(ui.backToLibrary,backToLibrary));const actions=node('div');actions.className='reading-toolbar-actions';toolbar.append(actions);actions.append(feedback());const warning=node('p');warning.id='minutes-stale';warning.className='reading-stale';warning.setAttribute('role','status');warning.hidden=true;$('reader').append(toolbar,warning);
     if(!r.available){const empty=node('div');empty.className='reading-empty';empty.append(node('p',ui.minutesMissing),node('p',ui.minutesModelNotice),button(ui.minutesGenerate,()=>generate(false)));$('reader').append(empty);notice('');return;}
-    notice(r.stale?ui.minutesStale:'');actions.append(button(ui.minutesOriginal,()=>read(eid)),button(ui.minutesRegenerate,()=>generate(true)));
+    notice('');actions.append(button(ui.minutesOriginal,()=>read(eid)),button(ui.minutesRegenerate,()=>generate(true)));
     const body=node('div');body.className='reading-host';body.innerHTML=PodcastReading.render(r.document,{interactive:true});$('reader').append(body);
-    PodcastReading.bind(body,r.document,index=>act(async()=>{const question=prompt(ui.minutesQuestion);if(!question?.trim())return;const chapter=r.document.chapters[index];const result=await request('chapter_ask',{episode_id:eid,transcript_id:r.document.transcript_id,from_segment_idx:chapter.start_idx,to_segment_idx:chapter.end_idx,chapter:chapter.title,question:question.slice(0,2000)});notice(result.message||ui.openTask);}));
+    PodcastReading.bind(body,r.document,index=>act(async()=>{if(minutesStale)throw new Error(ui.minutesStale);const question=prompt(ui.minutesQuestion);if(!question?.trim())return;const chapter=r.document.chapters[index];const result=await request('chapter_ask',{episode_id:eid,transcript_id:r.document.transcript_id,from_segment_idx:chapter.start_idx,to_segment_idx:chapter.end_idx,chapter:chapter.title,question:question.slice(0,2000)});notice(result.message||ui.openTask);}));
+    updateMinutesStale(r.stale);
     const scroller=body.querySelector('.minutes-body'),toc=body.querySelector('.minutes-toc');
     if(restore?.record_id===r.id){scroller.scrollTop=Math.max(0,Number(restore.scroll_top)||0);toc.scrollTop=Math.max(0,Number(restore.toc_scroll)||0);}
     const selected=()=>({episode_id:eid,mode:'minutes',record_id:r.id,scroll_top:scroller.scrollTop,toc_scroll:toc.scrollTop});
@@ -91,7 +104,7 @@
     if(m.type==='minutes-focus'){if(busy)pendingFocus={...m,mode:'minutes'};else act(()=>openMinutes(m.episode_id));}
     if(m.type==='focus'){if(busy)pendingFocus=m;else act(()=>read(m.episode_id,0,0,m.segment_id));}
   };
-  addEventListener('podcast-ui-ready',()=>{ui=PodcastUI;
+  addEventListener('podcast-ui-ready',()=>{ui=PodcastUI;$('library-feedback').append(feedback());
     $('import').onsubmit=e=>{e.preventDefault();act(async()=>{const r=await request('import_link',{url:$('url').value});notice(r.message || ui.openTask);});};
     $('search').onsubmit=e=>{e.preventDefault();act(async()=>{const r=await request('podcast_search',{query:$('query').value,show_id:show || undefined});episode='';highlight='';next=null;nextChar=0;$('episode-title').textContent=ui.searchResults;$('episode-actions').hidden=true;$('reader').replaceChildren();for(const s of r.evidence)$('reader').append(renderSegment(s,s));notice(!r.evidence.length?ui.noHits:r.results_truncated?ui.searchLimited:'');$('more').hidden=true;});};
     $('state').onchange=()=>act(()=>refresh());$('more-episodes').onclick=()=>act(()=>refresh(true));$('clear').onclick=()=>act(()=>confirmDelete('all',''));$('delete-episode').onclick=()=>act(()=>confirmDelete('episode',episode));

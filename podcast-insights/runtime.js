@@ -83,6 +83,7 @@
     }
     if(m.tool==='minutes_document'){await service.init();const r=await service.minutes.read(m.args.episode_id);if(!r.available)return r;const file=await service.io({op:'read',path:r.path});return {...r,document:JSON.parse(file.content)};}
     if(m.tool==='minutes_generate'||m.tool==='chapter_ask'||m.tool==='import_link' || m.tool==='cloud' || m.tool==='feishu'){
+      if(m.tool==='chapter_ask'){const active=(await service.rows('SELECT id FROM transcripts WHERE episode_id=? AND is_active=1',[m.args.episode_id]))[0];if(!active||active.id!==m.args.transcript_id)C.fail('MINUTES_SOURCE_CHANGED');}
       if(!cindy.tasks?.capabilities)C.fail('TASKS_UNAVAILABLE');
       const caps=await cindy.tasks.capabilities();if(!caps.operations?.includes('create')||!caps.operations?.includes('send'))C.fail('TASKS_UNAVAILABLE');
       const args=['minutes_generate','chapter_ask'].includes(m.tool)?m.args:m.tool==='feishu'?{episode_id:m.args.episode_id,action:'prepare'}:m.tool==='cloud'?{episode_id:m.args.episode_id}:{url:C.url(m.args.url)};

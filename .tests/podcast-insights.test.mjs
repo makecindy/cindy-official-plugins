@@ -145,9 +145,10 @@ function feishuHarness(options={}){
   const h=harness({feishu:options.credential!==false,network:async request=>{
     const path=new URL(request.url).pathname;
     if(path==='/open-apis/authen/v1/user_info')return json({open_id:state.account});
+    if(request.as==='media'){assert.equal(request.callId,state.expectedCallId||'estimate-1','audio needs a live Agent call');if(state.downloadDenied)return {ok:false,errorCode:'NETWORK_FORBIDDEN'};}
     if(request.as==='media')return {ok:true,status:200,media:{hash:'a'.repeat(64),bytes:state.bytes||10000,ext:'mp3'}};
     if(path==='/open-apis/drive/explorer/v2/root_folder/meta')return json({token:'folder_synthetic'});
-    if(path==='/open-apis/drive/v1/files/upload_all')return json({file_token:'file_synthetic'});
+    if(path==='/open-apis/drive/v1/files/upload_all')return state.uploadTimeout?{ok:false,errorCode:'NETWORK_TIMEOUT'}:json({file_token:'file_synthetic'});
     if(path==='/open-apis/minutes/v1/minutes/upload'){
       if(state.quota)return {ok:true,status:200,body:JSON.stringify({code:2091008})};
       if(state.uncertain)return {ok:false,errorCode:'NETWORK_TIMEOUT'};
@@ -192,8 +193,7 @@ test('Feishu large recordings require a Drive file token and never download or t
 });
 test('Feishu actual download size is enforced before anything is uploaded',async()=>{
   const h=feishuHarness({bytes:21*1024*1024});try{
-    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
-    const result=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(result.job.error,'FEISHU_UPLOAD_TOO_LARGE');assert.equal(result.job.submission_outcome,'not_executed');
+    const eid=await seed(h);await assert.rejects(h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1'),/FEISHU_UPLOAD_TOO_LARGE/);
     assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
   }finally{h.close();}
 });
@@ -202,6 +202,7 @@ test('Feishu creation rejection reports the uploaded file separately from the un
     const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
     const result=await h.service.submitFromClick(r.job.id,click(r.job.id));
     assert.equal(result.job.state,'failed');assert.equal(result.job.upload_outcome,'executed');assert.equal(result.job.minute_outcome,'not_executed');assert.equal(result.job.submission_outcome,'executed');
+    for(const service of [h.service,new Service(h.host)]){const status=await service.run('podcast_status',{job_id:r.job.id});assert.equal(status.jobs[0].upload_outcome,'executed');assert.equal(status.jobs[0].minute_outcome,'not_executed');assert.equal(status.jobs[0].submission_outcome,'executed');}
     assert.equal(h.calls.filter(r=>r.upload).length,1);assert.equal(h.calls.filter(r=>r.url.endsWith('/minutes/upload')).length,1);
   }finally{h.close();}
 });
@@ -242,6 +243,47 @@ test('Feishu deletion removes local provider metadata and artifacts but never de
     assert.equal(h.calls.filter(r=>r.method==='DELETE').length,0);
   }finally{h.close();}
 });
+
+// PR #285: real Service/SQLite regressions for live authorization, provider selection,
+// and durable external side effects; no prior test modeled these failure paths.
+test('Feishu prepares media within the live call and a changed source requires a fresh card',async()=>{
+  const h=feishuHarness();try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    assert.equal(h.calls.filter(r=>r.as==='media').length,1);assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+    await assert.rejects(h.service.run('podcast_transcribe',{episode_id:eid},'other-provider'),/PROVIDER_JOB_EXISTS/);
+    assert.equal(h.db.prepare('SELECT card_id FROM jobs WHERE id=?').get(r.job.id).card_id,'estimate-1');
+    await h.service.sql('UPDATE episodes SET audio_url=? WHERE id=?',['https://audio.example.test/changed.mp3',eid]);
+    await assert.rejects(h.service.submitFromClick(r.job.id,click(r.job.id)),/FEISHU_SOURCE_CHANGED/);
+    assert.equal(h.calls.filter(r=>r.as==='media').length,1);assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+  }finally{h.close();}
+});
+test('old Feishu cards cannot download autonomously and must be prepared again',async()=>{
+  const h=feishuHarness();try{const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    const row=h.db.prepare('SELECT value FROM meta WHERE key=?').get('feishu:'+r.job.id),meta=JSON.parse(row.value);delete meta.audio;
+    await h.service.sql('UPDATE meta SET value=? WHERE key=?',[JSON.stringify(meta),'feishu:'+r.job.id]);
+    await assert.rejects(h.service.submitFromClick(r.job.id,click(r.job.id)),/FEISHU_AUDIO_PREPARATION_REQUIRED/);
+    assert.equal(h.calls.filter(r=>r.as==='media').length,1);assert.equal(h.calls.filter(r=>r.method==='POST').length,0);
+    assert.equal(h.db.prepare('SELECT state FROM jobs WHERE id=?').get(r.job.id).state,'prepared');
+  }finally{h.close();}
+});
+test('Feishu unknown upload survives status and service restart without repeated writes',async()=>{
+  const h=feishuHarness({uploadTimeout:true});try{
+    const eid=await seed(h),r=await h.service.run('podcast_feishu',{action:'prepare',episode_id:eid},'estimate-1');
+    const first=await h.service.submitFromClick(r.job.id,click(r.job.id));assert.equal(first.job.upload_outcome,'unknown');
+    for(const service of [h.service,new Service(h.host)]){const status=await service.run('podcast_status',{job_id:r.job.id});assert.equal(status.jobs[0].upload_outcome,'unknown');assert.equal(status.jobs[0].minute_outcome,'not_executed');assert.equal(status.jobs[0].submission_outcome,'unknown');}
+    assert.equal(h.calls.filter(r=>r.upload).length,1);assert.equal(h.calls.filter(r=>r.url.endsWith('/minutes/upload')).length,0);
+  }finally{h.close();}
+});
+test('chapter ranges include interleaved point decision and quotation evidence',async()=>{
+  const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify(Array.from({length:5},(_,i)=>({text:'Original '+i,start:i*10,end:i*10+5,speaker:String(i)})))});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h,()=>({chapters:[{title:'One',summary:'Summary one',points:[{text:'Point',segment_idx:0,excerpt_idx:0}],decisions:[{text:'Choice',segment_idx:4,excerpt_idx:0}],quotes:[]},{title:'Two',summary:'Summary two',points:[{text:'Point',segment_idx:2,excerpt_idx:0}],decisions:[],quotes:[{text:'Quotation',segment_idx:1,excerpt_idx:0}]}]}));
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+    for(const c of d.chapters)for(const p of [...c.points,...c.decisions,...c.quotes])assert.ok(c.start_idx<=p.segment_idx&&p.segment_idx<=c.end_idx,JSON.stringify(c));
+    assert.deepEqual(d.chapters.flatMap(c=>Array.from({length:c.end_idx-c.start_idx+1},(_,i)=>c.start_idx+i)),[0,1,2,3,4]);
+  }finally{h.close();}
+});
+
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function runtimeHarness(h,missingCapability,failUi=false){
   let listener,channel;const messages=[],waiters=new Map(),timers=[];
@@ -262,12 +304,14 @@ function runtimeHarness(h,missingCapability,failUi=false){
 test('reading actions create native Cindy tasks with original chapter context',async()=>{
   const h=harness();try{const sent=[];h.tasks={capabilities:async()=>({operations:['create','send']}),create:async()=>({taskId:'native-task',revision:1}),send:async a=>{sent.push(a);return {ok:true};}};
     const runtime=runtimeHarness(h);const result=await runtime.request('minutes_generate',{action:'generate',episode_id:'synthetic-episode',language:'zh-CN'},'generate-reading');assert.equal(result.ok,true);assert.match(sent[0].text,/podcast_minutes/);
-    await runtime.request('chapter_ask',{episode_id:'synthetic-episode',transcript_id:'synthetic-version',from_segment_idx:3,to_segment_idx:7,question:'How does this apply?'},'ask-reading');assert.equal(sent.length,2);assert.match(sent[1].text,/podcast_read and podcast_cite/);assert.match(sent[1].text,/synthetic-version/);assert.match(sent[1].text,/from_segment_idx/);assert.equal(h.calls.length,0);
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Source evidence.'});const active=(await h.service.rows('SELECT id FROM transcripts WHERE episode_id=? AND is_active=1',[eid]))[0];
+    await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'How does this apply?'},'ask-reading');assert.equal(sent.length,2);assert.match(sent[1].text,/podcast_read and podcast_cite/);assert.ok(sent[1].text.includes(active.id));assert.match(sent[1].text,/from_segment_idx/);assert.equal(h.calls.length,0);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement evidence.'});const stale=await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'Old question'},'stale-question');assert.equal(stale.ok,false);assert.equal(stale.errorCode,'MINUTES_SOURCE_CHANGED');assert.equal(sent.length,2);
   }finally{h.close();}
 });
 test('Feishu confirmation card names Feishu quota without showing AssemblyAI prices',async()=>{
   const h=feishuHarness();try{
-    const eid=await seed(h),runtime=runtimeHarness(h);
+    const eid=await seed(h),runtime=runtimeHarness(h);h.state.expectedCallId='feishu-estimate';
     const result=await runtime.call('podcast_feishu',{action:'prepare',episode_id:eid},'feishu-estimate');
     assert.equal(result.ok,true);
     const card=runtime.messages.find(m=>m.type==='card-update'&&m.callId==='feishu-estimate');
