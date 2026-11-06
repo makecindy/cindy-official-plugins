@@ -50,21 +50,31 @@ function createDevices({root,run,host=process.platform}){
   }
   async function list(p={}){if(host!=='darwin')return [];return ((await command(['list','devices'],{...p,_deadline:Math.min(p._deadline||Infinity,Date.now()+10000)})).devices||[]).map(normalize).filter(Boolean);}
   const waking=new Map();
-  // Any devicectl request to the phone brings up its tunnel. Concurrent callers share one attempt.
-  function wake(d,p){
+  // Any devicectl request to the phone brings up its tunnel. Concurrent callers share only this
+  // one attempt, which has its own budget; each caller waits within its own deadline.
+  function wake(d){
     let pending=waking.get(d.udid);
     if(!pending){
-      pending=command(['device','info','details','--device',d.udid],{_deadline:Math.min(p._deadline||Infinity,Date.now()+20000)})
-        .catch(()=>{}).then(()=>list(p)).finally(()=>waking.delete(d.udid));
+      pending=command(['device','info','details','--device',d.udid],{_deadline:Date.now()+20000})
+        .catch(()=>{}).finally(()=>waking.delete(d.udid));
       waking.set(d.udid,pending);
     }
-    return pending.then(devices=>devices.find(x=>x.udid===d.udid));
+    return pending;
+  }
+  async function woken(d,p){
+    const remaining=Math.floor((p._deadline??Infinity)-Date.now());
+    if(remaining<=0)commandBudget(1,p._deadline);
+    let timer;
+    const pending=wake(d);
+    if(Number.isFinite(remaining))await Promise.race([pending,new Promise(r=>{timer=setTimeout(r,remaining);})]);else await pending;
+    clearTimeout(timer);
+    return (await list(p)).find(x=>x.udid===d.udid);
   }
   async function target(p,connected=true){
     if(!UUID.test(p.udid||''))throw fail('INVALID_DEVICE','请使用 devices 返回的精确设备 ID。');
     let d=(await list(p)).find(d=>d.udid===p.udid.toUpperCase());
     if(!d)throw fail('DEVICE_NOT_FOUND','未找到这台已配对的 iPhone / iPad，请刷新设备列表。');
-    if(connected&&d.tunnel==='idle')d=await wake(d,p)||d;
+    if(connected&&d.tunnel==='idle')d=await woken(d,p)||d;
     if(connected&&d.tunnel!=='connected')throw fail('DEVICE_DISCONNECTED','手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。');
     return d;
   }

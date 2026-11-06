@@ -321,3 +321,15 @@ test('an idle tunnel that does not come up still reports a disconnected phone',a
  await assert.rejects(devices.target({udid:id}),e=>e.code==='DEVICE_DISCONNECTED');assert.equal(wakes,1);
  assert.equal((await devices.target({udid:id},false)).tunnel,'idle');assert.equal(wakes,1);
 });
+test('a short-budget request neither waits for nor fails a longer wake shared with it',async t=>{
+ const root=await temporary(t);let woken=false,release;const gate=new Promise(r=>{release=r;});
+ const devices=createDevices({root,host:'darwin',run:async(file,args)=>{
+   let result={};
+   if(args[1]==='list'){const r=row();r.properties.connection=woken?{state:'connected',tunnelIPAddress:'fd00::1',transportType:'localNetwork'}:{state:'disconnected',transportType:'localNetwork'};result={devices:[r]};}
+   else if(args.includes('details')){await gate;woken=true;}
+   await fs.writeFile(args[args.indexOf('--json-output')+1],JSON.stringify({info:{outcome:'success'},result}));return {stdout:''};
+ }});
+ const short=devices.target({udid:id,_deadline:Date.now()+50}),long=devices.target({udid:id,_deadline:Date.now()+5000});
+ await assert.rejects(short,e=>e.code==='TIME_BUDGET_EXHAUSTED');
+ release();assert.equal((await long).tunnel,'connected');
+});
