@@ -144,6 +144,9 @@ function resolveConfiguredModel(models, defaultModelId, defaultProviderId, confi
 async function readArtModel(invocationCapability, preferences) {
   const requirement = MEDIA_REQUIREMENTS[invocationCapability];
   const override = readModelOverride(preferences, invocationCapability);
+  if (!override) {
+    throw new Error('Art 当前没有配置模型，请先告知用户并询问这次使用哪个模型，等待用户回答后再继续，不要自行选择。');
+  }
   if (override && override.providerId) {
     return {
       modelId: override.modelId.trim(),
