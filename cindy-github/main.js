@@ -2983,7 +2983,7 @@ function prArchiveButton(card, settings) {
 }
 
 /**
- * data-ghost-pr-open-only:只在 PR 还开着时成立的部分(跟进中、操作按钮、设置、「开放中」)。
+ * data-ghost-pr-open-only:只在 PR 还开着时成立的部分(跟进中、操作按钮、「开放中」)。
  * 卡片是调用时的快照;PR 在卡片之外被合并或关闭时(有人在 GitHub 上手动合并,Agent 没被叫醒),
  * 宿主按标题栏同一份状态把这些藏起来,卡片不会继续说「跟进中」。旧版宿主不认这个属性,照常显示。
  */
@@ -3138,11 +3138,11 @@ function prSettingsPanel(settings) {
     '</div>';
 }
 
-function prGearButton(open, extraAttrs) {
+function prGearButton(open) {
   return prButton('prui:settings', open ? t('prHideSettings') : t('prSettings'),
     'display:grid;flex:none;align-self:flex-start;place-items:center;width:32px;height:32px;border-radius:9999px;' +
     'color:' + (open ? 'var(--text-primary);--bg:' + PR_HOVER : 'var(--text-tertiary)') + ';--hover:' + PR_HOVER,
-    prGearGlyph(), extraAttrs);
+    prGearGlyph());
 }
 
 function prStatsParts(card) {
@@ -3173,11 +3173,14 @@ function renderPrReference(card, owner) {
     prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], '') + prFooter(status, taskLink, '', '') + '</div>';
 }
 
+function prHasSettings(card) {
+  return card.stage === 'ask' || card.stage === 'open' || card.stage === 'merged' || card.stage === 'closed';
+}
+
 function renderPrCard(card, settings) {
   var tile, title, meta, left, actions = '';
-  var gear = false;
+  var gear = prHasSettings(card);
   if (card.stage === 'ask') {
-    gear = true;
     tile = prTile('branch');
     title = prEsc(t('prAskTitle'));
     meta = [prEsc(card.repo)];
@@ -3197,7 +3200,6 @@ function renderPrCard(card, settings) {
       title = '<a href="' + prEsc(pr.url) + '">' + title + '</a>';
     }
     if (card.stage === 'open') {
-      gear = true;
       tile = pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
       // 跟进中由下层的「● 跟进中」表达,标题行不再重复。
       meta = card.following
@@ -3232,9 +3234,9 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen, openOnly) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
-  // The open settings panel only holds while the PR is open, like the button that opened it.
-  if (gear && card.settingsOpen) body += '<div' + openOnly + '>' + prSettingsPanel(settings) + '</div>';
+  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
+  // Settings remain available after merge/close, including when the host updates an open snapshot.
+  if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。
   return PR_CSS +
     '<div data-ghost-placement="turn-end" data-ghost-width="full" style="display:flex;flex-direction:column;justify-content:space-between;' +
@@ -3247,7 +3249,7 @@ function renderPrCard(card, settings) {
 function prCardHeight(card) {
   var h = 120;
   if (card.note) h += 22;
-  if (card.settingsOpen && (card.stage === 'ask' || card.stage === 'open')) h += 160;
+  if (card.settingsOpen && prHasSettings(card)) h += 160;
   return Math.min(900, h);
 }
 
@@ -3382,8 +3384,7 @@ async function prCardTool(args, callId) {
     card.stage = card.pr.state === 'merged' ? 'merged' : card.pr.state === 'closed' ? 'closed' : 'open';
     card.queued = false;
     if (card.stage !== 'open') {
-      card.settingsOpen = false;
-      if (card.pending === 'ready') card.pending = null;
+      card.pending = null;
     }
   } else if (card.stage === 'publishing') {
     // 发布没成功,Agent 不带 pr 再调一次:卡片回到询问。
@@ -3624,7 +3625,7 @@ async function prCardAction(msg) {
   }
   card.note = null;
   var handedOff = false;
-  if (action === 'prui:settings' && (card.stage === 'ask' || card.stage === 'open')) {
+  if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
   } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
     try {
