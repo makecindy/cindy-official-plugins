@@ -604,11 +604,14 @@ function startWorker() {
   physical().configure(runtime);
   const timer=setInterval(()=>runtime.checkIdle().catch(error=>process.stderr.write('[baguette-idle] '+(error.code||'FAILED')+'\n')),15000);
   timer.unref();
+  const reclaim=()=>runtime.checkReclamation().catch(error=>process.stderr.write('[simulator-reclaim] '+(error.code||'FAILED')+'\n'));
+  void reclaim();
+  const reclaimTimer=setInterval(reclaim,3600000);reclaimTimer.unref();
   const recycle=setInterval(()=>require('./viewer.cjs').recycleIfBloated().catch(()=>{}),60000);
   recycle.unref();
   let stopping=false;
   const stop=async()=>{
-    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);live.stop();
+    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);clearInterval(reclaimTimer);live.stop();
     await trackpadImpl?.stop();
     await spatialImpl?.stop();
     // Host may force termination before this completes. User-facing stop

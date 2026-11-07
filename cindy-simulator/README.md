@@ -1,5 +1,19 @@
 # Device Simulator
 
+## Temporary devices and automatic reclamation (0.3.42)
+
+Devices created manually through settings, management or the viewer are permanent; Agent-created devices are temporary. Legacy devices with unknown provenance remain permanent, regardless of their name or old task bindings. Physical devices are never reclaimed. No management UI or settings are added.
+
+Agents request a device with `device action=create`, `runtime`, `deviceType` and `purpose`. Matching idle devices, or this task's own active allocation, are reused without renaming, booting or erasing data. Devices occupied by another task, running with unknown activity, installing or executing an operation are not reused. Provide a concrete `isolationReason` only when a separate clean environment is necessary. There is no hard total-device cap: multi-model testing remains supported; do not create duplicates merely to change a name.
+
+Keep the two most recently idle temporary devices for reuse, reclaiming them after seven continuous idle days. Excess idle devices are reclaimed after 72 continuous idle hours. Reclamation deletes Apps and data. On explicit user request, `device action=retain udid=…` makes a simulator permanent; do not retain every temporary device to bypass cleanup. Permanent devices still follow ordinary idle shutdown.
+
+Idle eligibility depends on effective use and device state, never a task ending or an Agent's final reply. Only confirmed shutdown devices without active use become idle after leases expire or are released; new use resets the period. Last use, idle start and protective leases persist across workers. Running/unknown devices are protected after restart. Renew `activity` every five minutes during long external scripts and `release` afterwards. Device lists, App metadata and install-status polling do not renew retention. Collection conservatively skips open viewers or unexcluded external use.
+
+Checks run at worker startup, before Agent device requests, and hourly while the worker lives. Pausing the plugin suppresses automatic reclamation. No OS background task is installed: an inactive worker checks again when started. Deletion rechecks state and use under the same operation lock as creation/boot. In-flight observation and waiting are protected; listing stays available. Corrupt records stop creation/collection without overwriting data. Bookkeeping failure after an operation preserves the completed result and never warrants repeating it.
+
+`devices` reports `retention` (temporary/permanent/unknown), `lastUsedAt`, `idleSince`, planned `reclaimAt`, `retentionPolicy`, and the latest 100 `reclamationHistory` entries. Planned dates remain subject to use protection. Failure entries preserve execution state and are retried on later checks. Freed disk space is not estimated.
+
 ## Keyboard and advanced tools (0.3.26)
 
 More offers a plain text action: Use phone keyboard when computer input is enabled, or Use computer keyboard when it is disabled. Clicking switches input mode; there is no switch graphic or On/Off badge. While Advanced tools is open, More shows Close advanced tools and the Release all keys recovery fallback. No extra header or button row is added above the screen. Closing restores the compact view without reloading the stream or recording. The iOS simulator keeps its existing workbench; other devices expose the same recovery menu action.

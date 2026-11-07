@@ -6,6 +6,7 @@ const {commandBudget} = require('./budget.cjs');
 const {readJsonRecord,recordUpdate} = require('./json-record.cjs');
 const path = require('node:path');
 const {randomUUID} = require('node:crypto');
+const {createDeviceLifecycle,planReclamation}=require('./device-lifecycle.cjs');
 
 // One owner for tools, settings and viewer actions. Polling never renews use.
 // Idle shutdown skips devices still in use: an open viewer window, or another
@@ -16,6 +17,9 @@ const HOLD_MS = 100000, HOLD_POLL_MS = 10000;
 function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async () => false, viewing = () => false, forgetViewer = () => {},
   tasks = null, existingViewerUrl = () => null, pendingOperation = () => null, pendingJob = () => null, viewerWanted = () => true,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), holdMs = HOLD_MS, holdPollMs = HOLD_POLL_MS}) {
+  const lifecycle=createDeviceLifecycle(settingsFile+'.devices.json',now);
+  const activeReads=new Map();
+  let reclaiming=false;
   let config, lastActivity = now(), lastStop = null, closing = false;
   // The existing saved viewer session carries reopen intent across workers;
   // explicit close retires it, while unexpected worker exit preserves it.
@@ -25,7 +29,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   let idleHandled = false;
   const assertEnabled=async()=>{if(!(await load()).enabled||closing)throw failure('RUNTIME_DISABLED','Device Simulator is paused. Open plugin settings.');};
   const manager=require('./device-manager.cjs').createDeviceManager({dispatch,exclusive,assertEnabled,touch,contextFile:settingsFile+'.apps.json',
-    onSettled:async(entry,p)=>{if(tasks&&validSession(p.task)&&entry.activeUdid)await taskUpdate(entry,()=>tasks.bind(p.task,entry.activeUdid));}});
+    onSettled:async(entry,p)=>{await lifecycle.use(entry.activeUdid);if(tasks&&validSession(p.task)&&entry.activeUdid)await taskUpdate(entry,()=>tasks.bind(p.task,entry.activeUdid));}});
   const taskUpdate = (result, update) => recordUpdate(result, 'taskBindingError', update,
     'Task bindings could not be saved. The device outcome is retained; check the bindings file and storage, and do not repeat the device operation.');
   const failure = (code, message, execution = 'not_executed') => Object.assign(new Error(message), {code, execution});
@@ -138,13 +142,17 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   // Keep durable selection separate from recent multi-device activity.
   // No recent activity on a running device means unknown, never proven free.
   async function annotate(devices, session) {
-    if (!tasks) return devices;
-    const counts = await tasks.counts();
-    const mine = session ? (await tasks.get(session))?.udid : null;
+    const counts = await tasks?.counts() || {};
+    const mine = session ? (await tasks?.get(session))?.udid : null;
+    let saved,retentionError;
+    try { saved=await lifecycle.snapshot(); } catch(error) { retentionError={code:error.code,message:error.message}; }
+    const plans=saved?planReclamation(devices,saved.devices,now()):[];
     return devices.map(d => {
       const id=deviceId(d.udid), held=busyKeys.get('device:'+id)||busyKeys.get('*');
-      const activity=tasks.usage?.(id,session,now()) || {activeTasks:0,thisTaskActive:false};
-      return {...d, tasks:counts[id]||0, ...(session ? {thisTask:id===deviceId(mine)} : {}), ...activity,
+      const activity=tasks?.usage?.(id,session,now()) || {activeTasks:0,thisTaskActive:false};
+      const retention=d.kind==='physical'?undefined:retentionError?'unknown':saved?.devices[id]?.retention||'permanent';
+      return {...d, ...(d.kind!=='physical'?{retention,...(saved?.devices[id]?{createdBy:saved.devices[id].createdBy,creationReason:saved.devices[id].creationReason,purpose:saved.devices[id].purpose,lastUsedAt:saved.devices[id].lastUsedAt,idleSince:saved.devices[id].idleSince}:{}),
+        ...(plans.find(p=>deviceId(p.udid)===id)?{reclaimAt:plans.find(p=>deviceId(p.udid)===id).reclaimAt}:{}),...(retentionError?{retentionError}: {})}:{}), tasks:counts[id]||0, ...(session ? {thisTask:id===deviceId(mine)} : {}), ...activity,
         usage:held||activity.activeTasks ? 'active' : d.state==='Shutdown' ? 'idle' : 'unknown',
         ...(held ? {operation:{name:held.operation, scope:held.scope, udid:held.udid,
           elapsedSeconds:Math.max(0,Math.floor((now()-held.startedAt)/1000)), ...(pendingJob(id) ? {job:pendingJob(id).id} : {})}} : {})};
@@ -174,7 +182,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   }
   // Agent tools grouped by intent → the worker's own operations.
   const ROUTES = {
-    device: {create: 'create_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media',audio:'audio',connect:'physical_connect',connect_status:'physical_status',disconnect:'physical_disconnect'},
+    device: {create: 'create_device', retain:'retain_device', boot: 'boot', shutdown: 'shutdown', rename: 'rename_device', erase: 'erase_device', delete: 'delete_device', activity:'device_activity', release:'device_release', import_media:'import_media',audio:'audio',connect:'physical_connect',connect_status:'physical_status',disconnect:'physical_disconnect'},
     app: {install: 'app_install', install_status: 'app_install_status', info: 'app_info', launch: 'launch_app', terminate: 'app_terminate', uninstall: 'app_uninstall', open_url: 'open_url'},
     viewer: {open: 'open_viewer', close: 'close_viewer'},
   };
@@ -190,30 +198,39 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       if (!actual) throw failure('INVALID_ARGUMENT', `action must be one of ${Object.keys(ROUTES[method]).join(', ')}`);
       return request(actual, params, deadline);
     }
+    if((reclaiming || busyKeys.get('*')?.operation==='reclaim-devices') && !['devices','settings_status','manage_state','environment','resource_usage'].includes(method)) throw failure('BUSY','Device reclamation is running. Retry after it finishes.');
     if (method === 'device_activity' || method === 'device_release') {
+      activeReads.set(params.udid,(activeReads.get(params.udid)||0)+1);
+      try {
       const session=sessionOf(params);
       if (!tasks || !validSession(session)) throw failure('INVALID_ARGUMENT','Device activity requires the calling task session context.');
       if (method==='device_activity') await assertEnabled();
       const listed=(await dispatch('devices',{},deadline)).devices;
       if (!listed.some(d=>deviceId(d.udid)===params.udid)) throw failure('DEVICE_NOT_OWNED','Select an exact device from devices.');
-      if (method==='device_release') tasks.release(session,params.udid);
-      else {tasks.activity(session,params.udid,now());touch();}
+      if (method==='device_release') {tasks.release(session,params.udid);if(!tasks.usage(params.udid,session,now()).activeTasks)await lifecycle.release(params.udid);}
+      else {await lifecycle.use(params.udid);tasks.activity(session,params.udid,now());touch();}
       return {ok:true,udid:params.udid,execution:'executed',...tasks.usage(params.udid,session,now()),
         note:method==='device_release'?'Task activity released; device and App keep running.':'Task activity recorded for 15 minutes. Renew during a long script; release when finished. This is not an exclusive reservation.'};
+      } finally {const n=activeReads.get(params.udid)-1;if(n)activeReads.set(params.udid,n);else activeReads.delete(params.udid);}
     }
     if(method==='audio'&&params.audioEnabled===undefined)return dispatch(method,params,deadline);
     // Cancelling this device's owned setup job must remain possible while that
     // job holds its operation lock, and while plugin operation is paused.
     if (method === 'physical_disconnect') return dispatch(method, params, deadline);
     if (READ_ONLY.has(method) || (method === 'screenshot' && !params?.destination)) {
+      activeReads.set(params.udid,(activeReads.get(params.udid)||0)+1);
+      try {
       if (!(await load()).enabled) throw failure('RUNTIME_DISABLED', 'Device Simulator is paused. Enable simulator operation in Plugins → Device Simulator settings.');
       touch();
+      if(method!=='app_install_status'&&method!=='app_info')await lifecycle.use(params.udid);
       const result=await dispatch(method, params, deadline);
-      if (method!=='app_install_status' && result?.ok!==false) {
+      if(method==='app_info'&&result?.ok!==false)touch(); // Preserve existing shutdown timing, without extending retention.
+      if (!['app_install_status','app_info'].includes(method) && result?.ok!==false) {
         tasks?.activity?.(sessionOf(params),params.udid,now());
         touch();
       }
       return result;
+      } finally {const n=activeReads.get(params.udid)-1;if(n)activeReads.set(params.udid,n);else activeReads.delete(params.udid);}
     }
     // A settings refresh must not reject a user's stop/permission change.
     // Reading simulator state is safe while a command is in flight.
@@ -229,16 +246,20 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       return {ok:true, sessionId};
     }
     if (method === 'task_bind') {
+      activeReads.set(params.udid,(activeReads.get(params.udid)||0)+1);
+      try {
       if (!tasks || !validSession(params._task)) throw failure('INVALID_ARGUMENT', 'Unknown task.');
       const listed = (await dispatch('devices')).devices;
       if (!listed.some(d => deviceId(d.udid) === params.udid)) throw failure('INVALID_ARGUMENT', 'Unknown device. Refresh the list.');
+      await lifecycle.use(params.udid);
       await tasks.bind(params._task, params.udid);
       viewerClosed = false;
       const result = {ok:true, execution:'executed', sessionId:params._task, boundUdid:params.udid};
       // Binding is already durable. Status/viewer failure cannot undo it or
       // make the caller believe that its previous device is still assigned.
-      return recordUpdate(result, 'taskStateError', async () => Object.assign(result, await taskState(params._task, params._locale)),
+      return await recordUpdate(result, 'taskStateError', async () => Object.assign(result, await taskState(params._task, params._locale)),
         'Task binding was saved, but its status or screen could not be read. Refresh the task; do not repeat the binding.');
+      } finally {const n=activeReads.get(params.udid)-1;if(n)activeReads.set(params.udid,n);else activeReads.delete(params.udid);}
     }
     if (method === 'manage_state') {
       // The management view passes the task in front (if any) so rows can say
@@ -253,7 +274,9 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     // Listing devices and the toolchain reads only; it never waits behind another device's operation, and works while paused.
     if (method === 'devices') {
       const result = await dispatch(method, {...params,includeMemoryModes:true});
-      return {...result, devices: await annotate(result.devices, sessionOf(params))};
+      const devices=await annotate(result.devices, sessionOf(params));
+      let history=[];try{history=(await lifecycle.snapshot()).history;}catch{}
+      return {...result,devices,retentionPolicy:{idleDevicesToKeep:2,excessIdleHours:72,maxIdleDays:7},reclamationHistory:history};
     }
     if (method === 'environment') return dispatch(method, params);
     // Device operations are independent. The manager serializes only shared
@@ -276,10 +299,16 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         if(result.outcome==='partial')return result;
         await manager.updateRecord(result, () => manager.forget(result.udid || params.udid));
         if (method === 'delete_device' && tasks) await taskUpdate(result, () => tasks.forgetDevice(params.udid));
+        if (method === 'delete_device' && result.ok!==false) await recordUpdate(result,'retentionError',()=>lifecycle.forget(params.udid),'Device deleted; retention record could not be cleared.');
         // The management page refreshes independently after the operation.
         // Do not start another core budget or replace a completed destructive
         // operation with an error from an optional device-list read.
         return result;
+      }
+      if(method==='retain_device'){
+        const device=(await dispatch('devices',{},deadline)).devices.find(d=>deviceId(d.udid)===params.udid&&d.kind!=='physical');
+        if(!device)throw failure('DEVICE_NOT_OWNED','Select a simulator from devices.');
+        await lifecycle.retain(params.udid);return {ok:true,udid:params.udid,retention:'permanent',execution:'executed'};
       }
       const settings = await load();
       if (method === 'screenshot_destination') {
@@ -299,6 +328,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       }
       const actual = {settings_boot:'boot', settings_restart:'boot', settings_viewer:'open_viewer'}[method] || method;
       if (!settings.enabled) throw failure('RUNTIME_DISABLED', 'Device Simulator is paused. Enable simulator operation in Plugins → Device Simulator settings.');
+      if(actual==='create_device')return allocate(params,deadline);
       if (method === 'settings_restart') {
         // Keep the existing per-device lock across both steps. A page going away
         // must not strand the device between shutdown and the requested boot.
@@ -313,6 +343,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       // A command can mutate a device and then fail (e.g. bootstatus timeout).
       // Re-arm cleanup before dispatch, even when no success result follows.
       touch();
+      await lifecycle.use(params.udid);
       const result = await dispatch(actual, params, deadline);
       if (actual === 'app_uninstall') await manager.updateRecord(result, () => manager.forget(result.udid || params.udid, params.bundleId));
       if (actual === 'boot' || actual === 'open_viewer' || (actual === 'launch_app' && result?.viewer?.ready)) viewerClosed = false;
@@ -325,6 +356,82 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       touch();
       return result;
     }, key, {operation:method,udid:params.udid,sessionId:sessionOf(params),deadline,wait:key!=='*'});
+  }
+  const protectedDevice=d=>!!activeReads.get(deviceId(d.udid))||!!pendingOperation(deviceId(d.udid))||!!tasks?.usage?.(d.udid,null,now()).activeTasks;
+  async function allocate(params,deadline){
+    // Origin is set by main.js for Agent calls, never inferred from a task name.
+    const agent=params._agent===true;
+    if(agent&&(typeof params.purpose!=='string'||!params.purpose.trim()||params.purpose.length>500))throw failure('INVALID_ARGUMENT','Provide purpose for this device request. Existing matching idle devices are reused; isolationReason is required for a separate clean environment.');
+    if(params.isolationReason!==undefined&&(typeof params.isolationReason!=='string'||!params.isolationReason.trim()||params.isolationReason.length>500))throw failure('INVALID_ARGUMENT','Provide a non-empty isolationReason (at most 500 characters).');
+    await lifecycle.snapshot(); // Fail before creation if provenance cannot be persisted.
+    if(agent){
+      const listed=await dispatch('devices',{},deadline),saved=await lifecycle.snapshot();
+      if(listed.platformErrors?.some(e=>e.platform!=='physical'))throw failure('DEVICE_LIST_INCOMPLETE','Cannot safely allocate with an incomplete simulator list.');
+      const session=sessionOf(params);
+      if(!params.isolationReason){
+        const candidates=listed.devices.filter(d=>{
+          if(d.kind==='physical'||d.isAvailable===false||!['Shutdown','Booted'].includes(d.state)||d.runtime!==params.runtime||d.deviceType!==params.deviceType)return false;
+          const id=deviceId(d.udid),use=tasks?.usage?.(id,session,now());
+          if(activeReads.has(id)||pendingOperation(id))return false;
+          return (use?.thisTaskActive&&use.activeTasks===1)||
+            (d.state==='Shutdown'&&!use?.activeTasks&&!(saved.devices[id]?.leaseUntil>now()));
+        });
+        const mine=await tasks?.get(session);
+        candidates.sort((a,b)=>Number(deviceId(b.udid)===deviceId(mine?.udid))-Number(deviceId(a.udid)===deviceId(mine?.udid)));
+        if(candidates.length){const d=candidates[0];await lifecycle.use(d.udid);tasks?.activity?.(session,d.udid,now());
+          return {ok:true,udid:d.udid,name:d.name,runtime:d.runtime,deviceType:d.deviceType,reused:true,retention:saved.devices[deviceId(d.udid)]?.retention||'permanent',execution:'executed',note:'Existing device reused without erasing its Apps or data.'};}
+      }
+    }
+    // Reuse even an overdue matching device before considering deletion.
+    if(agent)await collect(deadline);
+    const result=await dispatch('create_device',params,deadline);
+    if(result.udid&&result.ok!==false){
+      await recordUpdate(result,'retentionError',()=>lifecycle.register(result.udid,{temporary:agent,purpose:params.purpose,isolationReason:params.isolationReason}),'Device created, but retention could not be saved. It is protected as permanent until repaired; do not repeat creation.');
+      result.retention=result.retentionError?'permanent':agent?'temporary':'permanent';result.reused=false;
+      tasks?.activity?.(sessionOf(params),result.udid,now());
+    }
+    return result;
+  }
+  // Caller owns the global operation lock. Observe first; re-check immediately
+  // before each delete. No timer or caller can race allocation/boot against GC.
+  async function collect(deadline=now()+110000){
+    reclaiming=true;
+    try {
+      const listed=await dispatch('devices',{},deadline);
+      if(listed.platformErrors?.some(e=>e.platform!=='physical'))return;
+      const visible=viewing();
+      await lifecycle.observe(listed.devices,d=>visible||protectedDevice(d));
+      if(visible||activeReads.size||await inUse().catch(()=>true))return;
+      const saved=await lifecycle.snapshot();
+      const plan=planReclamation(listed.devices,saved.devices,now()).filter(p=>p.reclaimAt<=now());
+      for(const entry of plan){
+        if(deadline-now()<5000)break;
+        const current=await dispatch('devices',{},deadline);
+        if(current.platformErrors?.some(e=>e.platform!=='physical'))break;
+        const d=current.devices.find(d=>deviceId(d.udid)===deviceId(entry.udid));
+        if(!d||d.kind==='physical'||d.state!=='Shutdown'||protectedDevice(d)||viewing())continue;
+        if(await inUse().catch(()=>true))break;
+        let result;
+        try { result=await dispatch('delete_device',{udid:d.udid},deadline); }
+        catch(error){await lifecycle.record({...entry,outcome:'failed',errorCode:error.code||'DELETE_FAILED',execution:error.execution||'unknown'});continue;}
+        if(result.ok===false||result.outcome==='partial'){
+          await lifecycle.record({...entry,outcome:'failed',execution:result.execution||'unknown',errorCode:result.errorCode||result.deviceError?.code||'DELETE_INCOMPLETE'});continue;
+        }
+        // Deletion already succeeded. A bookkeeping failure cannot turn it into
+        // a failed native operation or justify replaying the deletion.
+        await recordUpdate(result,'retentionError',()=>lifecycle.forget(d.udid),'Device deleted; retention record could not be cleared.');
+        await manager.updateRecord(result,()=>manager.forget(d.udid));
+        if(tasks)await taskUpdate(result,()=>tasks.forgetDevice(d.udid));
+        await lifecycle.record({...entry,outcome:'deleted',execution:'executed',
+          ...(result.retentionError?{retentionError:result.retentionError}:{}),
+          ...(result.appContextError?{appContextError:result.appContextError}:{}),
+          ...(result.taskBindingError?{taskBindingError:result.taskBindingError}:{})});
+      }
+    } finally {reclaiming=false;}
+  }
+  async function checkReclamation(){
+    if(busyKeys.size||closing||activeReads.size)return;
+    return exclusive(async()=>{if((await load()).enabled)return collect();},'*',{operation:'reclaim-devices'});
   }
   // Returns once no device is running and no viewer window is open (or at the
   // hold limit). A window can start a device itself, so it counts too. Never
@@ -352,7 +459,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       return result;
     });
   }
-  return {request, status, checkIdle, touch, exclusive,currentApp:manager.currentApp,assertEnabled,
+  return {request, status, checkIdle, checkReclamation, touch, exclusive,currentApp:manager.currentApp,assertEnabled,
     async close() { closing = true; return stopAll('worker-exit'); }};
 }
 module.exports = {createRuntime};
