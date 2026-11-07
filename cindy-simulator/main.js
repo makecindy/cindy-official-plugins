@@ -66,7 +66,7 @@ cindy.onHostMessage(async function (msg) {
     // Boot retains 15s start + 90s readiness (113s total).
     // Screenshots the model asks for (the screenshot tool, screenshot:true, observe=screenshot, a wait that ran out)
     // are shown to it inline (host `images`); the worker attaches nothing otherwise.
-    const response = await cindy.node.request({method: msg.tool, params: {...msg.args,_locale:locale,_inline:true}, timeoutMs: 120000});
+    const response = await cindy.node.request({method: msg.tool, params: {...msg.args,_agent:true,_locale:locale,_inline:true}, timeoutMs: 120000});
     if (!response.ok) {
       await cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:'NODE_REQUEST_FAILED',message:response.message || 'Worker failed; execution may be unknown. Inspect device before retrying.'});
       return;
