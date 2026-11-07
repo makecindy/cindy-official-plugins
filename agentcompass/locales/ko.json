@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "내장 AgentCompass 엔진으로 작업을 라우팅하고 로컬 Codex 세션 로그 끝부분(~/.codex 및 Cindy의 codex-home)에서 할당량을 읽으며, 부모 세션 모드와 무관하게 부모 프로젝트 디렉터리에서 bypassPermissions(Claude) / full-access(Codex, Pi)로 하위 작업을 시작해 정확한 결과를 수집합니다.",
+  "whenToUse": "Cindy의 Claude, Codex 또는 Pi 세션에서 AgentCompass를 통해 독립적인 작업을 위임할 때 사용합니다.",
+  "tools": {
+    "roll": {"description": "내장 AgentCompass 엔진(또는 설정된 AgentCompass CLI)으로 이 Cindy의 실시간 모델 카탈로그에서 전체 작업을 변경 없이 라우팅하고 정확히 일치하는 카탈로그 경로 하나를 시작합니다. 할당량 확인을 위해 로컬 Codex 세션 로그 끝부분(~/.codex 및 Cindy의 codex-home)을 읽으며, 부모 세션의 모드와 관계없이 부모 프로젝트 디렉터리에서 bypassPermissions(Claude) 또는 full-access(Codex, Pi)로 하위 작업을 생성합니다. split과 self 응답은 아무것도 시작하지 않습니다. 실험적인 tasks 기능과 일치하도록 설정된 플러그인 작업 디렉터리가 필요합니다. 작업 ID와 구체적인 status 도구 호출을 반환하며, 자동 콜백은 없습니다. session_context를 직접 제공하지 마세요.", "parameters": {"/properties/task": {"description": "변경하지 않은 전체 과제."}}},
+    "status": {"description": "같은 작업을 수집합니다. 호스트에 저장된 실행과 페이지 단위 메시지를 읽고, 전체 출력을 디스크에 저장한 뒤 정확한 최종 메시지 요약을 반환합니다. 실행이 종료 상태가 되고 messages_complete가 true가 될 때까지 호출한 다음 cleanup을 호출하세요. 전달 여부가 불확실하면 호스트 실행 기록으로 대조하고 다시 보내지 않습니다."},
+    "stop": {"description": "Cindy 공식 범위 지정 취소 API로 이 플러그인의 실행을 취소하고 호스트의 확인을 잠시 기다립니다. 아직 stopping으로 보고되는 실행은 종료되지 않았으므로 종료 상태가 될 때까지 status로 수집하세요."},
+    "cleanup": {"description": "작업의 모든 실행이 종료되고 메시지를 모두 수집하면 이 플러그인의 작업을 보관합니다. 그렇지 않으면 거부하고 호출할 도구를 알려 줍니다. 호스트에 보관 API가 없으면 Cindy에서 수동으로 보관할 수 있도록 확인된 작업 ID를 반환합니다. 기록을 삭제하거나 임의의 프로세스에 신호를 보내지 않습니다."}
+  }
+}

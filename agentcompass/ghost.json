@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.121",
+  "id": "agentcompass",
+  "name": "AgentCompass",
+  "version": "0.3.0",
+  "author": "akiiwa-games",
+  "kind": "chip",
+  "description": "Route work with the built-in AgentCompass engine, read the tail of local Codex session logs (~/.codex and Cindy's codex-home) for quota, start matched child tasks in the parent project directory with bypassPermissions (Claude) / full-access (Codex, Pi), and collect exact results.",
+  "whenToUse": "Delegate independent work through AgentCompass from a Cindy Claude, Codex or Pi session.",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "locales": {"en": "locales/en.json", "zh-CN": "locales/zh-CN.json", "ja": "locales/ja.json", "ko": "locales/ko.json"},
+  "sessionContext": true,
+  "agent": { "tasks": true },
+  "node": { "entry": "worker.cjs", "protocol": "json-rpc-stdio", "lifecycle": "on-demand" },
+  "tools": [
+    {"name":"roll","description":"Route the full task unchanged with the built-in AgentCompass engine (or a configured AgentCompass CLI) over this Cindy's live model catalog and start one exact catalog route. Reads the tail of local Codex session logs (~/.codex and Cindy's codex-home) for quota, and creates the child task in the parent's project directory with bypassPermissions (Claude) or full-access (Codex, Pi) regardless of the parent session's own mode. split and self answers start nothing. Requires experimental tasks capabilities and a matching configured plugin task directory. Returns an operation and a concrete status-tool call; no automatic callback. Never supply session_context yourself.","parameters":{"type":"object","properties":{"task":{"type":"string","description":"The full assignment, unchanged."}},"required":["task"],"additionalProperties":false}},
+    {"name":"status","description":"Collect the same operation. Reads durable host runs and paged messages; saves full output on disk and returns the exact final message summary. Call it until the run is terminal and messages_complete is true, then cleanup. Unknown delivery is reconciled from host runs, never resent.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}},
+    {"name":"stop","description":"Cancel this plugin's run through Cindy's official scoped cancel API and wait briefly for the host to confirm. A run still reported as stopping is not terminated yet; collect status until terminal.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}},
+    {"name":"cleanup","description":"Archive this plugin's task once every run on it is terminal and its messages are fully collected; otherwise refuse and name the tool to call. Without a host archive API, return the confirmed task ID for manual archiving in Cindy. Does not delete history or signal arbitrary processes.","parameters":{"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false}}
+  ]
+}

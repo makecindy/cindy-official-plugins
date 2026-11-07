@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "用内置 AgentCompass 引擎路由工作，只读读取本地 Codex 会话日志尾部（~/.codex 与 Cindy 的 codex-home）获取配额，无视父会话模式在父项目目录下以 bypassPermissions（Claude）/ full-access（Codex、Pi）启动子任务并收取结果。",
+  "whenToUse": "在 Cindy 的 Claude、Codex 或 Pi 会话中，通过 AgentCompass 委派独立工作。",
+  "tools": {
+    "roll": {"description": "用内置的 AgentCompass 引擎（或已配置的 AgentCompass CLI）在本机 Cindy 的实时模型目录上原样路由完整任务，并启动一条完全匹配的目录路由。会读取本地 Codex 会话日志尾部（~/.codex 与 Cindy 的 codex-home）获取配额，并无视父会话自身模式而在父项目目录下以 bypassPermissions（Claude）或 full-access（Codex、Pi）创建子任务。split 和 self 回答不启动任何任务。需要实验性 tasks 能力，以及已配置且匹配的插件任务目录。返回一个操作 ID 和具体的 status 工具调用；不会自动回调。不要自己提供 session_context。", "parameters": {"/properties/task": {"description": "完整任务原文，不做改动。"}}},
+    "status": {"description": "收取同一个操作。读取宿主持久化的运行记录和分页消息；完整输出保存到磁盘，并返回确切最终消息的摘要。反复调用直到运行进入终态且 messages_complete 为 true，再调用 cleanup。投递结果未知时依据宿主运行记录核对，绝不重发。"},
+    "stop": {"description": "通过 Cindy 官方的作用域取消 API 取消本插件的运行，并短暂等待宿主确认。仍报告 stopping 的运行尚未终止；请继续调用 status 直到终态。"},
+    "cleanup": {"description": "任务上的所有运行都进入终态、且消息已全部收齐后，归档本插件的任务；否则拒绝并指明应调用的工具。宿主没有归档 API 时，返回已确认的任务 ID，供在 Cindy 中手动归档。不删除历史，也不向任意进程发信号。"}
+  }
+}

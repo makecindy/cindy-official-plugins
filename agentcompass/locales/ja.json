@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "内蔵 AgentCompass エンジンで作業をルーティングし、ローカル Codex セッションログ末尾（~/.codex と Cindy の codex-home）からクォータを読み取り、親セッションのモードに関わらず親プロジェクトディレクトリで bypassPermissions（Claude）/ full-access（Codex・Pi）の子タスクを開始して正確な結果を回収します。",
+  "whenToUse": "Cindy の Claude・Codex・Pi セッションから、AgentCompass を通じて独立した作業を委任するときに使います。",
+  "tools": {
+    "roll": {"description": "内蔵の AgentCompass エンジン（または設定済みの AgentCompass CLI）で、この Cindy のライブなモデルカタログ上でタスク全文をそのままルーティングし、完全に一致するカタログのルートを 1 つ開始します。クォータ判定のためローカル Codex セッションログ末尾（~/.codex と Cindy の codex-home）を読み取り、親セッション自身のモードに関わらず親プロジェクトディレクトリで bypassPermissions（Claude）または full-access（Codex・Pi）の子タスクを作成します。split と self の回答では何も開始しません。実験的な tasks 機能と、一致するよう設定されたプラグインのタスクディレクトリが必要です。操作 ID と具体的な status ツール呼び出しを返します。自動コールバックはありません。session_context を自分で渡さないでください。", "parameters": {"/properties/task": {"description": "変更していない課題の全文。"}}},
+    "status": {"description": "同じ操作を回収します。ホストに永続化された実行とページ単位のメッセージを読み、全出力をディスクに保存して、正確な最終メッセージの要約を返します。実行が終了状態になり messages_complete が true になるまで呼び出し、その後 cleanup を呼びます。配信が不明な場合はホストの実行記録で照合し、再送しません。"},
+    "stop": {"description": "Cindy 公式のスコープ付きキャンセル API でこのプラグインの実行をキャンセルし、ホストの確認を短時間待ちます。まだ stopping と報告される実行は終了していません。終了状態になるまで status で回収してください。"},
+    "cleanup": {"description": "タスク上のすべての実行が終了し、メッセージをすべて回収したら、このプラグインのタスクをアーカイブします。そうでなければ拒否し、呼ぶべきツールを示します。ホストにアーカイブ API がない場合は、Cindy で手動アーカイブするための確認済みタスク ID を返します。履歴の削除や任意プロセスへのシグナル送信は行いません。"}
+  }
+}
