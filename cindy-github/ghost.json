@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.3",
-  "releaseNotes": "IM 发 PR 后也读取与卡片共用的跟进偏好；群聊转独立任务跟进，核验实际调度后再报告开启，明确未开启和启动失败状态。",
+  "version": "1.5.4",
+  "releaseNotes": "同一个 PR 只开启一份自动跟进。没有任务跟进时，用户可以选择在哪个任务点击「自动跟进到合并」；其他任务跟进期间，卡片显示状态、原因和卡内跳转入口。停止完成后可以换任务开启。旧卡片刷新后切换显示，重复点击会重新检查。新增读取当前任务上下文，用于核对跟进任务。PR 技能在询问是否发布前，先简要说明改动和验证结果；需要时配合图文，并将说明和适合分享的图文带入 PR 正文，帮助评审者理解。IM 发 PR 后也读取与卡片共用的跟进偏好；群聊转独立任务跟进，核验实际调度后再报告开启，明确未开启和启动失败状态。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -100,7 +100,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在对话里显示 PR 卡片。Agent 想问用户要不要发 PR 时用它代替文字询问:传 repo、head、base,可附 commits 与 files 改动概况(此时还不需要标题和说明)。用户点「发 PR / 发成草稿」或在对话里明确说要发后,由 Agent 提交并创建 PR;按钮点击会以本插件代发、对话里不显示的消息交给当前任务的 Agent。创建 PR 后传 card_id 与 pr 更新同一张卡片:卡片显示 PR 状态,提供「自动跟进到合并」按钮,以及发完自动改名、自动跟进两项设置,结果里的 settings / todo 说明还要做什么;renamed / following 只填已经完成的动作。后台跟进每一轮可传 card_id 刷新状态;需要提醒用户时加 to_latest,把卡片挪到最新一轮。卡片只在 Cindy 自己的对话界面显示,IM 渠道看不到。",
+      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和卡内跳转。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -164,6 +164,10 @@
           "to_latest": {
             "type": "boolean",
             "description": "把卡片挪到这次调用的位置(本轮回复末尾)显示,原位置的卡片隐去(旧版 Cindy 留一行提示);只在要提醒用户看卡片时传(可以合并、等用户决定、已合并或关闭)"
+          },
+          "claim_follow": {
+            "type": "boolean",
+            "description": "开始跟进前先传 true 申请在当前任务跟进。只有成功且 follow_claimed=true 才能创建定时任务；existing_task 表示其它任务正在跟进。following 仅报告已完成的开启或停止。"
           }
         }
       }
@@ -176,5 +180,6 @@
         "properties": {}
       }
     }
-  ]
+  ],
+  "sessionContext": true
 }
