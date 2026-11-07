@@ -11,6 +11,9 @@
     },
     "pr_card": {
       "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和卡内跳转。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。"
+    },
+    "pr_follow_settings": {
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。"
     }
   }
 }

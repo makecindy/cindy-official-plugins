@@ -11,6 +11,9 @@
     },
     "pr_card": {
       "description": "Cindy の会話に PR カードを表示します（IM 対象外）。作成の確認には repo、head、base、必要に応じて commits/files を渡します。クリックまたは明確な依頼後に Agent がコミット・作成し、card_id と pr で同じカードを更新して todo を実行します。renamed/following は完了した操作だけを報告します。既存 PR の表示だけではフォローを開始しません。開始前に claim_follow=true を渡し、成功かつ follow_claimed=true の場合のみスケジュールを作成します。別タスクでフォロー中は existing_task を返し、状態・理由・カード内のタスクリンクのみを表示します。停止はスケジュール削除を確認してから following=false を報告し、その後は別タスクで開始できます。バックグラウンドでは card_id で更新し、通知時は to_latest で最新の返信へ移動します。"
+    },
+    "pr_follow_settings": {
+      "description": "PR カードと共通の自動改名・自動フォロー・フォロー用モデル設定を読み取ります。カード表示、タスク作成、フォロー開始は行いません。settings は稼働の証明ではありません。IM で PR を作成した後も読み取り、pr の手順でフォローを作成・検証します。読み取り失敗は無効ではなく不明です。"
     }
   }
 }

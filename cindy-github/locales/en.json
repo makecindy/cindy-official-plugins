@@ -11,6 +11,9 @@
     },
     "pr_card": {
       "description": "Show a PR card in Cindy (not IM). To ask about opening a PR, pass repo, head, base and optional commits/files. The agent commits and opens it only after a click or explicit request. Update the same card with card_id and pr after opening, and apply its todo; renamed/following report completed actions only. Viewing an existing PR never starts following. Before starting, pass claim_follow=true and require success with follow_claimed=true before creating a schedule. If another task is following, existing_task returns a status-only card explaining why, with an in-card task link. Delete and verify the schedule before reporting following=false; the user can then follow in another task. Refresh with card_id each background round; use to_latest when notifying the user."
+    },
+    "pr_follow_settings": {
+      "description": "Read the same auto-rename, auto-follow and follow-model preferences used by PR cards. Returns settings without showing a card, creating a task or starting follow-up; preferences are not proof that following is active. Use after opening a PR in IM too, then create and verify follow-up with the pr workflow. A read failure means unknown, not disabled."
     }
   }
 }

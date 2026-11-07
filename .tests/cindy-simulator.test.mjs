@@ -49,3 +49,5 @@ import './baguette/physical-agent-live.test.cjs';
 import './baguette/live-screen.test.cjs';
 
 import './baguette/gesture-projection.test.cjs';
+
+import './baguette/device-lifecycle.test.cjs';
