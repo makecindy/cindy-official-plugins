@@ -1,0 +1,724 @@
+{
+  "schemaVersion": 3,
+  "id": "cindy-academic-skills",
+  "name": "Academic Research Suite",
+  "description": "专业级学术研究、实证数据分析与顶刊科研绘图全流程套件：包含 10 阶段科研生命周期调度、苏格拉底式选题导师、3W 文献对比矩阵、Crossref 权威引文检索与 DOI 真实性校验防幻觉、统计决策树与假设前提诊断、APA 7.0/Nature 规范三线表报告、顶刊多面板配图架构设计、Python/R 出版级绘图代码生成、7 类学术诚信阻断门禁、主张保真度核查、去模型化文体校准、多视角同行评审、答辩矩阵教练与 CRediT 声明生成。开箱即用，无需私有 API Key。",
+  "whenToUse": "适用于学术研究全流程：课题立项、PRISMA 综述、实证数据分析与统计检验、顶刊多面板配图架构与代码生成、论文起草撰写、学术诚信自查、同行评审盲审、答辩矩阵构建与出版排版。提供端到端严密科研支撑与防幻觉机制。",
+  "version": "1.4.0",
+  "minCindyVersion": "0.1.64",
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "1254084397 (Cong Zhang)",
+  "icon": "assets/icon.png",
+  "entry": "main.js",
+  "command": "ars",
+  "network": {
+    "hosts": [
+      "api.crossref.org"
+    ]
+  },
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/ars-suite",
+        "name": "ars-suite",
+        "description": "Complete Academic Research Suite (ARS) manual: 10-stage pipeline orchestrator, statistical decision trees, publication figure design, Socratic mentoring, peer review rubrics, and SOP."
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "pipeline_stage_orchestrator",
+      "description": "ARS 10 阶段全流程调度与检查点管理：检测当前科研阶段、生成材料护照（Material Passport）、规划后续路径与人机确认门禁。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "current_stage": {
+            "type": "string",
+            "enum": [
+              "Stage_1_Research",
+              "Stage_1_5_DataAnalysis",
+              "Stage_1_8_FigureDesign",
+              "Stage_2_Write",
+              "Stage_2_5_Integrity",
+              "Stage_3_Review",
+              "Stage_4_Revise",
+              "Stage_3_Prime_Rereview",
+              "Stage_4_Prime_Rerevise",
+              "Stage_4_5_Final_Integrity",
+              "Stage_5_Finalize",
+              "Stage_6_Process_Summary"
+            ],
+            "description": "当前所处研究阶段"
+          },
+          "research_topic": {
+            "type": "string",
+            "description": "研究课题或论文主标题"
+          },
+          "completed_artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "已生成的成果列表（如 RQ Brief, Outline, Draft, Review Reports 等）"
+          },
+          "manuscript_content": {
+            "type": "string",
+            "description": "可选，当前手稿文本或内容摘要，用于计算真实的材料护照哈希 (Material Passport Hash)"
+          },
+          "integrity_audit_passed": {
+            "type": "boolean",
+            "description": "可选，Stage 2.5 或 Stage 4.5 学术诚信门禁审计是否已通过（仅当为 true 时允许放行至下一阶段）"
+          },
+          "review_decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "minor_revision",
+              "major_revision",
+              "reject"
+            ],
+            "description": "可选，Stage 3 或 Stage 3' 同行评审决定（决定分流至终审门禁、返修或回退立项）"
+          }
+        },
+        "required": [
+          "current_stage",
+          "research_topic"
+        ]
+      }
+    },
+    {
+      "name": "socratic_research_guide",
+      "description": "苏格拉底式选题导师与研究问题（RQ）蓝图构建：通过多层启发式对话将模糊想法收敛为精确定量/定性的科学问题，输出 FINER 创新性与可行性评分及候选假说。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "拟探讨的初步学术研究领域或模糊兴趣方向"
+          },
+          "target_discipline": {
+            "type": "string",
+            "description": "目标学科门类（如 'Higher Education', 'Computer Science', 'Biomedicine' 等）"
+          },
+          "user_context": {
+            "type": "string",
+            "description": "可选，用户当前已有的初步思考、资源限制或方法偏好"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      }
+    },
+    {
+      "name": "verify_doi",
+      "description": "通过 Crossref 官方公开 API 校验论文 DOI，验证文献真实性，提取标题、作者列表、期刊、发表年份、引用次数与摘要等元数据，防范学术幻觉与虚构引用。无需 API Key。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "doi": {
+            "type": "string",
+            "description": "待校验的 DOI 字符串或包含 DOI 的 URL，例如 '10.1038/s41586-020-2649-2' 或 'https://doi.org/10.1038/s41586-020-2649-2'"
+          }
+        },
+        "required": [
+          "doi"
+        ]
+      }
+    },
+    {
+      "name": "search_crossref",
+      "description": "通过 Crossref 官方检索公开学术文献库，按关键词、标题或作者检索已正式注册 DOI 的真实论文与引用元数据，防范虚构文献。只读，无需 API Key。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "学术检索关键词或研究主题"
+          },
+          "author": {
+            "type": "string",
+            "description": "可选，限定作者姓名"
+          },
+          "limit": {
+            "type": "number",
+            "description": "返回篇数，默认 5，最大 20"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "three_way_lit_scan",
+      "description": "3W 三段式文献对比矩阵扫描（Why 研究缺口、How 方法样本与对照、What 核心实证结论与边界条件），提炼多篇代表性论文的共识、争议与理论空白。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "papers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "abstract_or_notes": {
+                  "type": "string"
+                },
+                "year": {
+                  "type": "number"
+                },
+                "authors": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "abstract_or_notes"
+              ]
+            },
+            "description": "待对比的论文列表（至少 1 篇，建议 2-5 篇）"
+          },
+          "comparison_focus": {
+            "type": "string",
+            "description": "可选，重点对比关注维度（如 'methodology', 'empirical_findings', 'theoretical_framework'）"
+          }
+        },
+        "required": [
+          "papers"
+        ]
+      }
+    },
+    {
+      "name": "academic_integrity_audit",
+      "description": "学术诚信阻断式门禁（Stage 2.5 / 4.5）：基于 7 大 AI 科研失败模式（虚构引用、过度宣称、基准失衡、统计谬误等）扫描论文文本，输出结构化合规审计与拦截意见。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paper_text": {
+            "type": "string",
+            "description": "待审查的论文手稿文本、摘要或方法章节"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "pre_review_gate",
+              "final_integrity_gate"
+            ],
+            "description": "门禁阶段：pre_review_gate (Stage 2.5 审前诚信门禁), final_integrity_gate (Stage 4.5 终审零回归门禁)。默认 pre_review_gate"
+          },
+          "full_audit": {
+            "type": "boolean",
+            "description": "可选，是否对参考文献超过 30 篇的手稿执行全量 Crossref 实时在线核验以完成放行。默认 false（优先核验前 30 篇，防止请求过载）"
+          },
+          "max_doi_checks": {
+            "type": "integer",
+            "description": "可选，单次向 Crossref 发起实时核验的最大 DOI 数量（1-100，默认 30），防止超长文献表并发请求过载"
+          },
+          "implementation_verified": {
+            "type": "boolean",
+            "description": "可选，作者是否已核查并确认代码实现、训练集/测试集隔离与随机种子无数据泄露，用于完成 Mode 3 放行"
+          }
+        },
+        "required": [
+          "paper_text"
+        ]
+      }
+    },
+    {
+      "name": "academic_paper_analysis",
+      "description": "学术文献结构化拆解与分析工具：对论文摘要、方法或全文核心段落进行多维度拆解（研究目标、理论假说、方法论、证据链、创新点与局限性），辅助研读与文献笔记整理。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "论文标题或研究主题（可选）"
+          },
+          "content": {
+            "type": "string",
+            "description": "论文摘要、引言、方法论或待分析的研究文本"
+          },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "comprehensive",
+              "methodology",
+              "evidence_chain",
+              "limitations"
+            ],
+            "description": "分析重点：comprehensive (全面分析), methodology (方法论与实验设计), evidence_chain (论点与证据链契合度), limitations (局限性与改进空间)。默认 comprehensive"
+          },
+          "include_checklist": {
+            "type": "boolean",
+            "description": "是否包含科研可信度自查清单（对照实验、样本量、可复现性等），默认 true"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "claim_citation_alignment",
+      "description": "引用锚点与主张一致性（Claim-Faithfulness L3）核查：比对正文声明与被引文献结论，排查张冠李戴、断章取义或虚假支撑。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "claim_text": {
+            "type": "string",
+            "description": "正文中提出的具体学术主张或引用句"
+          },
+          "cited_source_summary": {
+            "type": "string",
+            "description": "被引文献的原作摘要、结论或核心段落"
+          },
+          "doi": {
+            "type": "string",
+            "description": "可选，被引文献的 DOI"
+          }
+        },
+        "required": [
+          "claim_text",
+          "cited_source_summary"
+        ]
+      }
+    },
+    {
+      "name": "academic_style_audit",
+      "description": "学术写作风格校准与去 AI 味审计：排查空洞套话（如 delve, testament to）、模糊量词、过度断言，强化严密准确的学术表达，保留作者真实声音。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "draft_text": {
+            "type": "string",
+            "description": "待审计的手稿段落或全文文本"
+          },
+          "rigor_level": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "standard"
+            ],
+            "description": "审计严格度：strict (严格排查套话与模糊副词), standard (常规学术质感排查)。默认 strict"
+          }
+        },
+        "required": [
+          "draft_text"
+        ]
+      }
+    },
+    {
+      "name": "peer_review_evaluation",
+      "description": "多视角学术同行评审评估：模拟主编、专业审稿人与魔鬼代言人等多视角评估手稿有效性、创新性、方法论严谨度，输出 0-100 质量量表与决策意见。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "manuscript_text": {
+            "type": "string",
+            "description": "待评审的手稿内容、方法章节、实验结果或全文摘要"
+          },
+          "discipline": {
+            "type": "string",
+            "description": "学科领域（可选，如 'Computer Science', 'Biomedicine', 'Materials Science', 'Economics' 等），默认 'General'"
+          },
+          "review_type": {
+            "type": "string",
+            "enum": [
+              "standard_review",
+              "rebuttal_prep",
+              "pre_submission_audit"
+            ],
+            "description": "评审模式：standard_review (标准期刊同行评审), rebuttal_prep (返修/答辩抗辩准备), pre_submission_audit (投稿前自审)。默认 standard_review"
+          }
+        },
+        "required": [
+          "manuscript_text"
+        ]
+      }
+    },
+    {
+      "name": "rebuttal_matrix_coach",
+      "description": "返修答辩矩阵教练（Point-by-point response）：将同行评审意见结构化拆解为修改矩阵，指引针对性答辩、代码实验补充与修订定位追踪。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reviewer_comments": {
+            "type": "string",
+            "description": "审稿人意见文本（Reviewer Comments）"
+          },
+          "author_draft_context": {
+            "type": "string",
+            "description": "可选，论文初稿或当前手稿相关段落背景"
+          }
+        },
+        "required": [
+          "reviewer_comments"
+        ]
+      }
+    },
+    {
+      "name": "author_disclosure_statement",
+      "description": "作者贡献与伦理披露生成器：依据 CRediT (Contributor Roles Taxonomy) 标准规范生成作者分工清单，并生成符合国际顶刊政策的 AI 辅助使用声明与利益冲突说明。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "lead_author": {
+            "type": "string",
+            "description": "主要作者或通讯作者姓名"
+          },
+          "co_authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "共同作者姓名列表"
+          },
+          "ai_tools_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "研究与写作过程中辅助使用的 AI 工具列表"
+          },
+          "ai_tasks_performed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "AI 工具参与的具体辅助任务（如文献核查、文风润色等）"
+          }
+        },
+        "required": [
+          "lead_author"
+        ]
+      }
+    },
+    {
+      "name": "bibtex_format_converter",
+      "description": "学术引用格式转换与 BibTeX 标准化：将文献元数据或自由文本引用转换为标准 BibTeX 条目与 APA 7.0 引用条目。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "文献标题"
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "作者列表，例如 [\"Wrapp, Daniel\", \"Wang, Nianshuang\"]"
+          },
+          "year": {
+            "type": "number",
+            "description": "出版年份"
+          },
+          "journal": {
+            "type": "string",
+            "description": "期刊或会议名称"
+          },
+          "doi": {
+            "type": "string",
+            "description": "可选，文献 DOI"
+          },
+          "volume": {
+            "type": "string",
+            "description": "可选，卷号"
+          },
+          "issue": {
+            "type": "string",
+            "description": "可选，期号"
+          },
+          "pages": {
+            "type": "string",
+            "description": "可选，页码范围"
+          }
+        },
+        "required": [
+          "title",
+          "authors",
+          "year"
+        ]
+      }
+    },
+    {
+      "name": "statistical_analysis_advisor",
+      "description": "科研统计检验决策树与假设前提诊断：根据自变量/因变量类型、组数与样本分布特征，推荐最适统计模型（t检验/ANOVA/非参数/回归/混合效应等），提供前提假设检验清单、效应量指标与防 p-hacking 多重检验校正策略。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "research_question": {
+            "type": "string",
+            "description": "研究问题或实证研究假设"
+          },
+          "design_type": {
+            "type": "string",
+            "enum": [
+              "two_groups_independent",
+              "two_groups_paired",
+              "multi_groups_independent",
+              "multi_groups_repeated",
+              "correlation",
+              "regression",
+              "categorical_proportions"
+            ],
+            "description": "实验或研究设计类型"
+          },
+          "outcome_type": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "binary",
+              "ordinal",
+              "count",
+              "time_to_event"
+            ],
+            "description": "因变量/结果变量数据类型"
+          },
+          "sample_size_per_group": {
+            "type": "number",
+            "description": "可选，每组样本量 n"
+          },
+          "normality_satisfied": {
+            "type": "boolean",
+            "description": "可选，正态性前提是否满足（如 Shapiro-Wilk p > .05）"
+          },
+          "variance_homogeneity_satisfied": {
+            "type": "boolean",
+            "description": "可选，方差齐性前提是否满足（如 Levene p > .05）"
+          },
+          "multiple_comparisons_count": {
+            "type": "number",
+            "description": "可选，计划执行的成对比较或假设检验总次数"
+          }
+        },
+        "required": [
+          "research_question",
+          "design_type",
+          "outcome_type"
+        ]
+      }
+    },
+    {
+      "name": "academic_data_summary",
+      "description": "学术数据统计量化报告与 APA 7.0 / Nature 级三线表生成：输入统计检验指标与效应量，自动生成符合顶刊规范的统计描述语句、精确 p 值、置信区间与 Markdown 三线表，杜绝伪重复与统计夸大宣称。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "test_type": {
+            "type": "string",
+            "enum": [
+              "independent_t",
+              "paired_t",
+              "one_way_anova",
+              "two_way_anova",
+              "chi_square",
+              "pearson_correlation",
+              "spearman_correlation",
+              "linear_regression",
+              "mann_whitney_u"
+            ],
+            "description": "已执行的统计检验类型"
+          },
+          "test_statistic": {
+            "type": "number",
+            "description": "检验统计量数值（如 t 值、F 值、chi-square 值、r 值）"
+          },
+          "df": {
+            "type": "string",
+            "description": "自由度，例如 '58' 或 '2, 57'"
+          },
+          "p_value": {
+            "type": "number",
+            "description": "精确 p 值，例如 0.017 或 0.0002"
+          },
+          "effect_size_type": {
+            "type": "string",
+            "enum": [
+              "cohens_d",
+              "hedges_g",
+              "eta_sq_partial",
+              "r",
+              "odds_ratio",
+              "none"
+            ],
+            "description": "效应量类型"
+          },
+          "effect_size_value": {
+            "type": "number",
+            "description": "效应量数值，例如 0.65"
+          },
+          "ci_95": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "可选，95% 置信区间下限与上限，例如 [0.12, 1.18]"
+          },
+          "group_descriptives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "mean": {
+                  "type": "number"
+                },
+                "sd": {
+                  "type": "number"
+                },
+                "n": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "mean",
+                "sd",
+                "n"
+              ]
+            },
+            "description": "可选，各组描述性统计量（组名、均值、标准差、样本量）"
+          },
+          "comparison_label": {
+            "type": "string",
+            "description": "可选，比较的变量或组别标签，例如 '实验组与对照组后测得分'"
+          },
+          "perform_cld_ranking": {
+            "type": "boolean",
+            "description": "可选，是否输出基于均值从大到小降序排列的显著性字母标记 (Compact Letter Display, CLD)"
+          },
+          "pairwise_comparisons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group1": {
+                  "type": "string"
+                },
+                "group2": {
+                  "type": "string"
+                },
+                "p_adj": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "group1",
+                "group2",
+                "p_adj"
+              ]
+            },
+            "description": "可选，多组（>2 组）事后两两比较的校正后 p 值列表，用于精确计算显著性字母标记 (CLD)"
+          },
+          "multiple_comparison_method": {
+            "type": "string",
+            "enum": [
+              "tukey_hsd",
+              "bonferroni",
+              "holm",
+              "fdr_bh",
+              "none"
+            ],
+            "description": "可选，多重比较校正方法"
+          }
+        },
+        "required": [
+          "test_type",
+          "test_statistic",
+          "df",
+          "p_value"
+        ]
+      }
+    },
+    {
+      "name": "scientific_figure_designer",
+      "description": "顶刊科研配图与多面板可视化工作台：基于核心科学发现规划 Multi-panel 证据链架构（Panel a-d 角色分工）、物理排版尺寸（单栏89mm/双栏180mm）、色盲友好色板（Okabe-Ito），并一键生成 Python (Matplotlib/Seaborn) 或 R (ggplot2) 出版级绘图代码。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "main_scientific_claim": {
+            "type": "string",
+            "description": "本图所要证明的核心科学发现或结论（Main Takeaway）"
+          },
+          "target_journal": {
+            "type": "string",
+            "description": "目标期刊或出版机构（如 'Nature', 'Science', 'Cell', 'IEEE', 'PNAS'）"
+          },
+          "plot_archetype": {
+            "type": "string",
+            "enum": [
+              "multi_panel_composite",
+              "violin_box_jitter",
+              "dose_time_response",
+              "correlation_heatmap",
+              "volcano_differential_plot"
+            ],
+            "description": "图表原型类型"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "python_matplotlib",
+              "r_ggplot2",
+              "planning_only"
+            ],
+            "description": "绘图脚本语言与库后端（若仅需排版规划与图注草稿可设为 planning_only）"
+          },
+          "column_width": {
+            "type": "string",
+            "enum": [
+              "single_column_89mm",
+              "double_column_180mm",
+              "intermediate_120mm"
+            ],
+            "description": "可选，版面宽度，缺省为 double_column_180mm"
+          },
+          "x_label": {
+            "type": "string",
+            "description": "可选，X 轴物理量及单位（如 'Concentration (μM)' 或 'Condition'）"
+          },
+          "y_label": {
+            "type": "string",
+            "description": "可选，Y 轴物理量及单位（如 'Relative Expression (%)'）"
+          },
+          "error_bar_type": {
+            "type": "string",
+            "enum": [
+              "sem",
+              "sd",
+              "ci95"
+            ],
+            "description": "可选，误差棒统计定义（SEM: 均值标准误；SD: 样本标准差；CI95: 95% 置信区间）"
+          },
+          "bilingual_mode": {
+            "type": "string",
+            "enum": [
+              "english_only",
+              "chinese_only",
+              "dual_bilingual"
+            ],
+            "description": "可选，中英文双语绘图模式（english_only 国际期刊英文版，chinese_only 中文论文版，dual_bilingual 中英双语对照版）"
+          }
+        },
+        "required": [
+          "main_scientific_claim",
+          "target_journal",
+          "plot_archetype",
+          "backend"
+        ]
+      }
+    }
+  ]
+}
