@@ -168,3 +168,11 @@ test('post-delete bookkeeping errors preserve successful deletion in audit histo
  const entry=(await f.lifecycle.snapshot()).history.at(-1);
  assert.equal(entry.outcome,'deleted');assert.equal(entry.execution,'executed');assert.equal(entry.taskBindingError.code,'TASK_BINDINGS_UNREADABLE');
 });
+test('a request arriving during a startup reclamation scan waits for it instead of failing',async t=>{
+ const f=await setup(t);await f.create();
+ let release;f.gate(new Promise(r=>release=r));
+ const scan=f.runtime.checkReclamation();await new Promise(r=>setImmediate(r));
+ const first=f.runtime.request('settings_save',{});
+ await new Promise(r=>setImmediate(r));release();await scan;
+ await assert.doesNotReject(first.catch(e=>{if(e.code==='BUSY')throw e;}));
+});

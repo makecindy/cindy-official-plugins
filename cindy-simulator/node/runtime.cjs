@@ -19,7 +19,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), holdMs = HOLD_MS, holdPollMs = HOLD_POLL_MS}) {
   const lifecycle=createDeviceLifecycle(settingsFile+'.devices.json',now);
   const activeReads=new Map();
-  let reclaiming=false;
+  let reclaiming=false,deleteAttempts=0;
   let config, lastActivity = now(), lastStop = null, closing = false;
   // The existing saved viewer session carries reopen intent across workers;
   // explicit close retires it, while unexpected worker exit preserves it.
@@ -198,7 +198,15 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       if (!actual) throw failure('INVALID_ARGUMENT', `action must be one of ${Object.keys(ROUTES[method]).join(', ')}`);
       return request(actual, params, deadline);
     }
-    if((reclaiming || busyKeys.get('*')?.operation==='reclaim-devices') && !['devices','settings_status','manage_state','environment','resource_usage'].includes(method)) throw failure('BUSY','Device reclamation is running. Retry after it finishes.');
+    const reclaimRunning=()=>reclaiming||busyKeys.get('*')?.operation==='reclaim-devices';
+    if(reclaimRunning() && !['devices','settings_status','manage_state','environment','resource_usage'].includes(method)){
+      // A startup or hourly scan usually finishes within seconds without deleting anything. Wait
+      // for it before execution (never mid-operation) instead of failing the first request after
+      // a cold start. A request that overlaps an actual deletion is still rejected, never replayed.
+      const startedDeletes=deleteAttempts,limit=Math.min(now()+10000,deadline===undefined?Infinity:deadline-1100);
+      for(let attempt=0;reclaimRunning()&&deleteAttempts===startedDeletes&&!closing&&attempt<100&&now()<limit;attempt++)await sleep(100);
+      if(reclaimRunning()||deleteAttempts!==startedDeletes)throw failure('BUSY','Device reclamation is running. Retry after it finishes.');
+    }
     if (method === 'device_activity' || method === 'device_release') {
       activeReads.set(params.udid,(activeReads.get(params.udid)||0)+1);
       try {
@@ -418,6 +426,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         if(!d||d.kind==='physical'||d.state!=='Shutdown'||protectedDevice(d)||viewing())continue;
         if(await inUse().catch(()=>true))break;
         let result;
+        deleteAttempts++;
         try { result=await dispatch('delete_device',{udid:d.udid},deadline); }
         catch(error){await lifecycle.record({...entry,outcome:'failed',errorCode:error.code||'DELETE_FAILED',execution:error.execution||'unknown'});continue;}
         if(result.ok===false||result.outcome==='partial'){
