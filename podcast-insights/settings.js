@@ -39,5 +39,23 @@
     state().catch(() => {
       status.textContent = ui.failed;
     });
+    const input=document.getElementById('feishu-key'), output=document.getElementById('feishu-status');
+    async function feishuState(){
+      const r=await fetch('/secrets');if(!r.ok)throw new Error(ui.failed);
+      const entry=(await r.json()).find(v=>v.key==='feishu_user_token'&&v.saved);
+      output.textContent=entry?ui.feishuSaved:ui.feishuMissing;
+    }
+    async function feishuAct(method){
+      const controls=[document.getElementById('feishu-save'),document.getElementById('feishu-clear')];controls.forEach(b=>b.disabled=true);
+      try{
+        if(method==='PUT'&&!input.value.trim()){output.textContent=ui.feishuMissing;return;}
+        const init={method,...(method==='PUT'?{body:JSON.stringify({value:input.value.trim()})}:{})};input.value='';
+        const r=await fetch('/secrets/feishu_user_token',init);if(!r.ok)throw new Error(ui.failed);
+        await feishuState();
+      }catch{output.textContent=ui.failed;}finally{input.value='';controls.forEach(b=>b.disabled=false);}
+    }
+    document.getElementById('feishu-save').onclick=()=>feishuAct('PUT');
+    document.getElementById('feishu-clear').onclick=()=>feishuAct('DELETE');
+    feishuState().catch(()=>output.textContent=ui.failed);
   });
 })();
