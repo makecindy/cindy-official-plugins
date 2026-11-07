@@ -1534,23 +1534,33 @@ test('other-task refresh reuses its local card and reads status without changing
   assert.equal(runtime.agentRuns.length, 0);
 });
 
-test('a refused card releases the follow reservation this call added but keeps an earlier one', async () => {
-  const options = { github: prGraphql() };
+test('without a card surface, a follow claim still succeeds, blocks other tasks and can be released', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), refuseCards: true });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  assert.equal(claimed.reply.ok, true);
+  assert.equal(claimed.reply.result.follow_claimed, true);
+  assert.equal(claimed.reply.result.card_shown, false);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.ok, true);
+  assert.equal(other.reply.result.disposition, 'existing_task');
+  assert.equal(other.reply.result.card_shown, false);
+  // Releasing without a card is not undone by the failed redraw.
+  const released = await runtime.tool({ card_id: claimed.reply.result.card_id, following: false });
+  assert.equal(released.reply.ok, true);
+  const retaken = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(retaken.reply.result.follow_claimed, true);
+});
+
+test('a refused card on a plain refresh still releases a reservation that call added', async () => {
+  const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } } };
   const runtime = createPrRuntime(options);
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
   options.refuseCards = true;
-  const refused = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const refused = await runtime.tool({ card_id: ask.callId, pr: 42 });
   assert.equal(refused.reply.ok, false);
   options.refuseCards = false;
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
-  assert.equal(other.reply.result.disposition, undefined);
   assert.equal(other.reply.result.follow_claimed, true);
-  // s2 now holds the reservation; a refused refresh from s2 must not drop it.
-  options.refuseCards = true;
-  const again = await runtime.tool({ card_id: other.reply.result.card_id, claim_follow: true, session_context: { session_id: 's2' } });
-  assert.equal(again.reply.ok, false);
-  options.refuseCards = false;
-  const third = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's3' } });
-  assert.equal(third.reply.result.disposition, 'existing_task');
 });
 
 test('merged cards cannot claim following and other-task references cannot archive the viewing task', async () => {

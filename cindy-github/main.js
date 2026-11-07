@@ -154,6 +154,7 @@ var MESSAGES = {
     prOtherStopping: '其他任务正在停止跟进',
     prOpenTask: '打开跟进任务',
     prCardNotDelivered: '卡片没能显示到对话里，请用同一个 card_id 再调用一次 pr_card',
+    prCardNotShown: '卡片没能显示（例如 IM 渠道），状态已保存；跟进申请、开启和停止的报告仍然有效',
     prThreadsTruncated: '评审线程太多，未能读完，无法确认未解决数量',
     prHandedOffSaveFailed: '已交给 Agent，但卡片状态没能保存。请先看对话，不要重复点',
     prStop: '停止',
@@ -291,6 +292,7 @@ var MESSAGES = {
     prOtherStopping: 'Stopping follow-up in another task',
     prOpenTask: 'Open follow-up task',
     prCardNotDelivered: 'The card could not be shown in the conversation. Call pr_card again with the same card_id.',
+    prCardNotShown: 'The card could not be shown (for example in an IM channel); the state is saved, so follow claims and start/stop reports still count.',
     prThreadsTruncated: 'Too many review threads to read them all, so the unresolved count is unknown',
     prHandedOffSaveFailed: 'Handed to the agent, but the card state could not be saved. Check the conversation and do not click again.',
     prStop: 'Stop',
@@ -428,6 +430,7 @@ var MESSAGES = {
     prOtherStopping: '別のタスクでフォロー停止中',
     prOpenTask: 'フォロー中のタスクを開く',
     prCardNotDelivered: 'カードを会話に表示できませんでした。同じ card_id でもう一度 pr_card を呼んでください',
+    prCardNotShown: 'カードを表示できませんでした（IM チャンネルなど）。状態は保存済みで、フォローの申請と開始・停止の報告は有効です',
     prThreadsTruncated: 'レビュースレッドが多すぎて読み切れず、未解決の数を確認できません',
     prHandedOffSaveFailed: 'エージェントに渡しましたが、カードの状態を保存できませんでした。会話を確認し、もう一度押さないでください',
     prStop: 'フォロー停止',
@@ -565,6 +568,7 @@ var MESSAGES = {
     prOtherStopping: '다른 작업에서 팔로우 중지 중',
     prOpenTask: '팔로우 작업 열기',
     prCardNotDelivered: '카드를 대화에 표시하지 못했습니다. 같은 card_id로 pr_card를 다시 호출하세요',
+    prCardNotShown: '카드를 표시하지 못했습니다(예: IM 채널). 상태는 저장되었으며 팔로우 신청과 시작·중지 보고는 유효합니다',
     prThreadsTruncated: '리뷰 스레드가 너무 많아 모두 읽지 못했고 미해결 수를 확인할 수 없습니다',
     prHandedOffSaveFailed: '에이전트에게 전달했지만 카드 상태를 저장하지 못했습니다. 대화를 확인하고 다시 누르지 마세요',
     prStop: '중지',
@@ -2583,7 +2587,7 @@ async function findPrCardOwner(repo, number, head, explicitId, sessionId, localO
     candidates.find(function (c) { return !c.sessionId && c.id === explicitId; }) || null;
 }
 
-async function prOtherTask(owner, callId, sessionId, localCard, toLatest) {
+async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateOp) {
   var local = localCard && localCard.sessionId === sessionId ? localCard : newPrCard(callId, owner.repo);
   var updating = local.id !== callId;
   local.sessionId = sessionId;
@@ -2602,11 +2606,15 @@ async function prOtherTask(owner, callId, sessionId, localCard, toLatest) {
   var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
   if (!(await savePrCard(local))) return fail(t('prSaveFailed'));
   if (movedFrom) await sendPrMovedStub(local, movedFrom, callId);
-  if (!(await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null))) return fail(t('prCardNotDelivered'));
-  return { ok: true, result: {
+  var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
+  // A claim or stop report still needs the answer when no card can be shown (IM).
+  if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
+  var other = {
     disposition: 'existing_task', card_id: local.id, owner_card_id: owner.id, owner_session_id: owner.sessionId,
     task_url: 'cindy://session/' + encodeURIComponent(owner.sessionId), follow_claimed: false, todo: [], next: t('prOtherTask'),
-  } };
+  };
+  if (!shown) { other.card_shown = false; other.note = t('prCardNotShown'); }
+  return { ok: true, result: other };
 }
 
 async function prunePrCards() {
@@ -3343,7 +3351,8 @@ async function prCardTool(args, callId) {
       // Reuse a local card even when a different task currently holds the follow-up.
       var local = card || await findPrCardOwner(owner.repo, owner.pr && owner.pr.number,
         owner.head, null, sessionId, true);
-      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true);
+      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true,
+        a.claim_follow === true || typeof a.following === 'boolean');
     }
     card = owner;
     updating = true;
@@ -3424,8 +3433,10 @@ async function prCardTool(args, callId) {
   if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating) await prunePrCards();
+  // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
+  var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
-  if (!delivered) {
+  if (!delivered && !stateOp) {
     // The retry must produce the same to-do list again, so the one-time settings are not used up by this call.
     // No permission to follow was handed out either, so a reservation added by this call must not keep other tasks out.
     var released = card.pending !== pendingBefore;
@@ -3442,6 +3453,7 @@ async function prCardTool(args, callId) {
     stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
     settings: prSettingsForAgent(settings, settings.autoFollow),
   };
+  if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
   if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
     card.pending !== 'stop' && prFollowActive(card);
   if (card.pr) {
