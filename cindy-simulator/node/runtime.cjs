@@ -378,8 +378,14 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         });
         const mine=await tasks?.get(session);
         candidates.sort((a,b)=>Number(deviceId(b.udid)===deviceId(mine?.udid))-Number(deviceId(a.udid)===deviceId(mine?.udid)));
-        if(candidates.length){const d=candidates[0];await lifecycle.use(d.udid);tasks?.activity?.(session,d.udid,now());
-          return {ok:true,udid:d.udid,name:d.name,runtime:d.runtime,deviceType:d.deviceType,reused:true,retention:saved.devices[deviceId(d.udid)]?.retention||'permanent',execution:'executed',note:'Existing device reused without erasing its Apps or data.'};}
+        for(const d of candidates){
+          await lifecycle.use(d.udid);
+          // Another task may have registered use while we waited. Re-check synchronously with the commit.
+          const use=tasks?.usage?.(d.udid,session,now());
+          if(use?.activeTasks&&!(use.thisTaskActive&&use.activeTasks===1))continue;
+          tasks?.activity?.(session,d.udid,now());
+          return {ok:true,udid:d.udid,name:d.name,runtime:d.runtime,deviceType:d.deviceType,reused:true,retention:saved.devices[deviceId(d.udid)]?.retention||'permanent',execution:'executed',note:'Existing device reused without erasing its Apps or data.'};
+        }
       }
     }
     // Reuse even an overdue matching device before considering deletion.

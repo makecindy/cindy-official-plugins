@@ -91,7 +91,18 @@ test('external use and explicit leases prevent collection; old task bindings alo
  await f.runtime.request('device',{action:'activity',udid:id(1),session_context:{session_id:'long-test'}});
  await f.runtime.checkReclamation();assert.equal(f.devices.length,1);
  await f.runtime.request('device',{action:'release',udid:id(1),session_context:{session_id:'long-test'}});
- await f.tasks.bind('old-task',id(1));f.advance(MAX_IDLE_MS);await f.runtime.checkReclamation();assert.equal(f.devices.length,0);
+ await f.tasks.bind('old-task',id(1));await f.runtime.checkReclamation();assert.equal(f.devices.length,1);
+ f.advance(MAX_IDLE_MS);await f.runtime.checkReclamation();assert.equal(f.devices.length,0);
+});
+test('releasing a running device does not start idle timing until it is observed shut down',async t=>{
+ const f=await setup(t);await f.create();await f.idle();
+ f.devices[0].state='Booted';
+ await f.runtime.request('device',{action:'activity',udid:id(1),session_context:{session_id:'long-test'}});
+ f.advance(MAX_IDLE_MS);
+ await f.runtime.request('device',{action:'release',udid:id(1),session_context:{session_id:'long-test'}});
+ assert.equal((await f.lifecycle.snapshot()).devices[id(1)].idleSince,null);
+ f.advance(MAX_IDLE_MS);f.devices[0].state='Shutdown';
+ await f.runtime.checkReclamation();assert.equal(f.devices.length,1);
 });
 test('status and install polling do not refresh retention; waiting operation blocks GC',async t=>{
  const f=await setup(t);await f.create();await f.idle();const before=(await f.lifecycle.snapshot()).devices[id(1)];

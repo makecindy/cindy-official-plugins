@@ -29,7 +29,7 @@ function createDeviceLifecycle(file,now=Date.now){
   use(udid){return change(v=>{const d=v.devices[deviceId(udid)];if(!d||d.retention!=='temporary')return false;
    const at=now();if(d.idleSince===null&&d.lastUsedAt>at-60000&&d.leaseUntil>at+LEASE_MS-60000)return false;
    d.lastUsedAt=at;d.idleSince=null;d.leaseUntil=at+LEASE_MS;});},
-  release(udid){return change(v=>{const d=v.devices[deviceId(udid)];if(!d)return false;d.leaseUntil=now();d.idleSince=now();});},
+  release(udid){return change(v=>{const d=v.devices[deviceId(udid)];if(!d)return false;d.leaseUntil=now();d.idleSince=null;});}, // Idle timing starts only once observe sees it shut down.,
   retain(udid){return change(v=>{const d=v.devices[deviceId(udid)];if(!d)return false;d.retention='permanent';});},
   forget(udid){return change(v=>{if(!v.devices[deviceId(udid)])return false;delete v.devices[deviceId(udid)];});},
   record(entry){return change(v=>{v.history.push({...entry,at:now()});v.history=v.history.slice(-100);});},
