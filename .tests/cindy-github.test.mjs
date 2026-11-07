@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.2');
+  assert.equal(manifest.version, '1.5.3');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -715,9 +715,9 @@ function createPrRuntime(options = {}) {
     cards,
     lastCard: (callId) => cards(callId).at(-1),
     setGithub(github) { options.github = github; },
-    async tool(args) {
+    async tool(args, tool = 'pr_card') {
       const callId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
-      await handler({ type: 'tool-call', tool: 'pr_card', callId, args });
+      await handler({ type: 'tool-call', tool, callId, args });
       const reply = sent.filter((m) => m.type === 'tool-result' && m.callId === callId).at(-1);
       return { callId, reply: JSON.parse(JSON.stringify(reply)) };
     },
@@ -1376,4 +1376,46 @@ test('pr_card rejects unusable input and keeps its largest card under the host s
   // Uncommitted changes: the card reports files only, never "0 commits".
   const pending = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main', commits: 0, files_total: 1 });
   assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[2], `feat/x → main · ${zhCopy.prFileOne}`);
+});
+
+// IM has no PR card surface. Preferences must still be readable through the real tool dispatcher.
+test('IM follow settings share card preferences and selected remote model without starting work', async () => {
+  const model = { route: { agentKind: 'cc', providerId: 'example-provider', model: 'example-model', effort: 'high', fastMode: false, agentDeviceId: 'example-device' }, label: 'Example' };
+  const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoRename: true, autoFollow: true, followModel: model } }, github: prGraphql() });
+  const read = await runtime.tool({}, 'pr_follow_settings');
+  assert.equal(read.reply.ok, true);
+  assert.deepEqual(read.reply.result.settings, {
+    auto_rename: true, auto_follow: true,
+    follow_model: { model_agent_kind: 'claude-code', provider_id: 'example-provider', model: 'example-model', effort: 'high', fast_mode: false, agent_device_id: 'example-device', label: 'Example' },
+  });
+  assert.equal(runtime.cards(read.callId).length, 0);
+  assert.equal(runtime.files.size, 0);
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.equal(runtime.kv.unrelated, 'keep');
+  const card = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  assert.deepEqual(card.reply.result.settings, read.reply.result.settings);
+  // Card switch changes are immediately visible to the IM entry; the reader never consumes card todos.
+  assert.ok(card.reply.result.todo.some((item) => item.includes('42')));
+  await runtime.click(card.reply.result.card_id, 'prset:follow');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, false);
+});
+
+test('IM preferences remain available when cards cannot be delivered; missing differs from unreadable', async () => {
+  for (const autoFollow of [false, true]) {
+    const runtime = createPrRuntime({ refuseCards: true, kv: { prCard: { autoFollow } } });
+    const { reply, callId } = await runtime.tool({}, 'pr_follow_settings');
+    assert.equal(reply.ok, true);
+    assert.equal(reply.result.settings.auto_follow, autoFollow);
+    assert.equal(runtime.cards(callId).length, 0);
+    assert.equal(runtime.files.size, 0);
+  }
+  const options = { kvFails: true, kv: { prCard: { autoFollow: true } } };
+  const runtime = createPrRuntime(options);
+  const failed = (await runtime.tool({}, 'pr_follow_settings')).reply;
+  assert.equal(failed.ok, false);
+  assert.equal(failed.result, undefined);
+  assert.match(failed.message, /无法读取.*设置/);
+  options.kvFails = false;
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, true);
+  assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false });
 });

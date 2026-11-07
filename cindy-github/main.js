@@ -145,6 +145,7 @@ var MESSAGES = {
     prReadyUnknown: '不确定是否已转为正式 PR，请先到 GitHub 核对，不要重复点',
     prSaveFailed: '卡片状态没能保存，请稍后重试',
     prSettingsLater: '卡片设置暂时读不到，改名和跟进的待办留到下次调用 pr_card 时再给',
+    prSettingsReadFailed: "无法读取 PR 跟进设置，请稍后重试；当前不能判断自动跟进是否开启。",
     prSettingsUnreadable: '卡片设置暂时读不到，没有发出。请稍后再点一次',
     prCardNotDelivered: '卡片没能显示到对话里，请用同一个 card_id 再调用一次 pr_card',
     prThreadsTruncated: '评审线程太多，未能读完，无法确认未解决数量',
@@ -275,6 +276,7 @@ var MESSAGES = {
     prReadyUnknown: 'Not sure the PR was marked ready. Check it on GitHub before clicking again.',
     prSaveFailed: 'Could not save the card state. Try again in a moment.',
     prSettingsLater: 'The card settings could not be read, so the rename and follow to-do list will come with the next pr_card call.',
+    prSettingsReadFailed: "Could not read PR follow-up settings. Try again later; whether auto-follow is enabled is currently unknown.",
     prSettingsUnreadable: 'The card settings could not be read, so nothing was sent. Try again in a moment.',
     prCardNotDelivered: 'The card could not be shown in the conversation. Call pr_card again with the same card_id.',
     prThreadsTruncated: 'Too many review threads to read them all, so the unresolved count is unknown',
@@ -405,6 +407,7 @@ var MESSAGES = {
     prReadyUnknown: 'PR が正式になったか分かりません。もう一度押す前に GitHub で確認してください',
     prSaveFailed: 'カードの状態を保存できませんでした。しばらくしてからもう一度お試しください',
     prSettingsLater: 'カードの設定を読み込めなかったため、改名とフォローの作業は次回の pr_card 呼び出しでお知らせします',
+    prSettingsReadFailed: "PR のフォロー設定を読み取れません。後で再試行してください。自動フォローが有効かどうかは現在不明です。",
     prSettingsUnreadable: 'カードの設定を読み込めなかったため、何も送信していません。しばらくしてからもう一度お試しください',
     prCardNotDelivered: 'カードを会話に表示できませんでした。同じ card_id でもう一度 pr_card を呼んでください',
     prThreadsTruncated: 'レビュースレッドが多すぎて読み切れず、未解決の数を確認できません',
@@ -535,6 +538,7 @@ var MESSAGES = {
     prReadyUnknown: '정식 PR로 전환됐는지 확실하지 않습니다. 다시 누르기 전에 GitHub에서 확인하세요',
     prSaveFailed: '카드 상태를 저장하지 못했습니다. 잠시 후 다시 시도하세요',
     prSettingsLater: '카드 설정을 읽지 못해 이름 변경과 팔로우 할 일은 다음 pr_card 호출 때 알려 드립니다',
+    prSettingsReadFailed: "PR 팔로우 설정을 읽을 수 없습니다. 나중에 다시 시도하세요. 자동 팔로우 활성화 여부는 현재 알 수 없습니다.",
     prSettingsUnreadable: '카드 설정을 읽지 못해 아무것도 보내지 않았습니다. 잠시 후 다시 시도하세요',
     prCardNotDelivered: '카드를 대화에 표시하지 못했습니다. 같은 card_id로 pr_card를 다시 호출하세요',
     prThreadsTruncated: '리뷰 스레드가 너무 많아 모두 읽지 못했고 미해결 수를 확인할 수 없습니다',
@@ -3627,6 +3631,11 @@ cindy.onHostMessage(async function (msg) {
       r = listTools(msg.args || {});
     } else if (msg.tool === 'call_tool') {
       r = await callTool(msg.args || {}, msg.callId);
+    } else if (msg.tool === 'pr_follow_settings') {
+      var settings = await readPrSettings();
+      r = settings.unreadable
+        ? fail(t('prSettingsReadFailed'))
+        : { ok: true, result: { settings: prSettingsForAgent(settings, settings.autoFollow) } };
     } else if (msg.tool === 'pr_card') {
       r = await enqueuePr(function () { return prCardTool(msg.args || {}, msg.callId); });
     } else {
