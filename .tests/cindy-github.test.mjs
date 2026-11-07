@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.0');
+  assert.equal(manifest.version, '1.5.1');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -633,12 +633,12 @@ function visibleText(html) {
     .filter(Boolean);
 }
 
-function prGraphql({ number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', threads = [], mergeState = 'CLEAN', merged = false } = {}) {
+function prGraphql({ number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', threads = [], mergeState = 'CLEAN', merged = false, state = merged ? 'MERGED' : 'OPEN' } = {}) {
   return (request) => {
     assert.equal(request.url, 'https://api.github.com/graphql');
     assert.deepEqual(JSON.parse(request.body).variables, { owner: 'octo', name: 'repo', number });
     return jsonResponse({ data: { repository: { pullRequest: {
-      number, title, url: `https://github.com/octo/repo/pull/${number}`, state: merged ? 'MERGED' : 'OPEN',
+      number, title, url: `https://github.com/octo/repo/pull/${number}`, state,
       isDraft: false, merged, mergeStateStatus: mergeState, reviewDecision: null, baseRefName: 'main',
       commits: { nodes: [{ commit: { statusCheckRollup: ci ? { state: ci } : null } }] },
       reviewThreads: { nodes: threads.map((isResolved) => ({ isResolved })) },
@@ -870,14 +870,14 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   for (const text of [zhCopy.prCiRunning, fill(zhCopy.prThreadsOpen, { count: 1 }), zhCopy.prMergeWaiting]) assert.ok(lines.includes(text), text);
   // Parts that only hold while the PR is open carry the slot key, so the host can hide them once it sees a merge.
   const openOnly = runtime.lastCard(cardId).html.match(/<(\w+)[^>]*data-ghost-pr-open-only="octo\/repo#7"/g) ?? [];
-  // The settings panel opened earlier in this test is open-only too (Greptile P2 on #287), not just its button.
-  assert.deepEqual(openOnly.map((tag) => tag.match(/^<(\w+)/)[1]), ['button', 'div', 'div']);
+  // Settings stay accessible after an external merge; only active PR actions are open-only.
+  assert.deepEqual(openOnly.map((tag) => tag.match(/^<(\w+)/)[1]), ['div']);
 
   runtime.setGithub(prGraphql({ number: 7, title: 'Fix login', merged: true }));
   const merged = await runtime.tool({ card_id: cardId });
   assert.equal(merged.reply.result.stage, 'merged');
   assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-open-only/);
-  assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
+  assert.deepEqual(visibleText(runtime.lastCard(cardId).html).slice(0, 3), [
     '#7 Fix login', `octo/repo · ${zhCopy.prStateMerged} · ${zhCopy.prFollowEnded}`, 'fix/login → main',
   ]);
 });
@@ -903,6 +903,28 @@ test('PR cards carry a hidden host archive button and the auto-archive setting',
   await runtime.tool({ card_id: cardId });
   assert.match(button(), /data-ghost-task-archive="octo\/repo#7" data-ghost-task-archive-state="merged" data-ghost-task-archive-auto aria-label/);
 });
+
+for (const state of ['MERGED', 'CLOSED']) {
+  test(`ended PR settings remain usable: ${state}`, async () => {
+    const github = prGraphql({ number: 7, merged: state === 'MERGED', state });
+    const runtime = createPrRuntime({ github });
+    const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '7' })).reply.result.card_id;
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prui:settings"/);
+    await runtime.click(cardId, 'prui:settings');
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:archive"/);
+    assert.equal(runtime.lastCard(cardId).height, 280);
+    await runtime.click(cardId, 'prset:archive');
+    assert.equal(runtime.kv.prCard.autoArchive, true);
+    await runtime.tool({ card_id: cardId });
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:archive"/);
+    assert.match(runtime.lastCard(cardId).html, /data-ghost-task-archive-auto/);
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-pr-open-only|<button[^>]*data-ghost-action="pr:(?:follow|ready|stop)"/);
+    await runtime.click(cardId, 'prui:settings');
+    assert.doesNotMatch(runtime.lastCard(cardId).html, /data-ghost-action="prset:archive"/);
+    assert.equal(runtime.lastCard(cardId).height, 120);
+    assert.equal(runtime.agentRuns.length, 0);
+  });
+}
 
 // Drafts are still being worked on, so the card offers "mark ready" instead of following.
 // The plugin flips it directly, rereads GitHub, then applies the auto-follow setting.
