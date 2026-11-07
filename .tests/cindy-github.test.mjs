@@ -1576,3 +1576,18 @@ test('a stop report cannot reapply deferred post-publication auto-follow setting
   const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
   assert.equal(other.reply.result.follow_claimed, true);
 });
+
+test('a task with its own legacy duplicate follow record can still stop it while another task is active', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const dupId = '00000000-0000-4000-8000-0000000000aa';
+  const dup = { ...JSON.parse(runtime.files.get(`pr-cards/${first.callId}.json`)), id: dupId, sessionId: 's2' };
+  runtime.files.set(`pr-cards/${dupId}.json`, JSON.stringify(dup));
+  const stopped = await runtime.tool({ card_id: dupId, following: false, session_context: { session_id: 's2' } });
+  assert.equal(stopped.reply.result.disposition, undefined);
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${dupId}.json`)).following, false);
+  // The other task's record is untouched and still excludes a third task.
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${first.callId}.json`)).following, true);
+  const third = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's3' } });
+  assert.equal(third.reply.result.disposition, 'existing_task');
+});

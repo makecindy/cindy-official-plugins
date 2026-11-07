@@ -2573,7 +2573,9 @@ async function findPrCardOwner(repo, number, head, explicitId, sessionId, localO
     if (number ? record.pr && record.pr.number === number : !record.pr && record.head === head) candidates.push(record);
   }
   // Only an active (or starting/stopping) follow-up excludes other tasks.
-  return (!localOnly && candidates.find(prFollowActive)) || candidates.find(function (c) { return c.sessionId === sessionId; }) ||
+  // A task's own active record wins, so records duplicated before this rule existed can still be stopped by their own task.
+  return (!localOnly && (candidates.find(function (c) { return prFollowActive(c) && c.sessionId === sessionId; }) ||
+    candidates.find(prFollowActive))) || candidates.find(function (c) { return c.sessionId === sessionId; }) ||
     candidates.find(function (c) { return !c.sessionId && c.id === explicitId; }) || null;
 }
 
