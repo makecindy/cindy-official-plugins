@@ -1657,3 +1657,14 @@ test('IM preferences remain available when cards cannot be delivered; missing di
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, true);
   assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false });
 });
+
+test('releasing a source task reservation lets the dedicated task claim the follow-up', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const source = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const blocked = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 'dedicated' } });
+  assert.equal(blocked.reply.result.disposition, 'existing_task');
+  await runtime.tool({ card_id: source.reply.result.card_id, following: false });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 'dedicated' } });
+  assert.equal(claimed.reply.result.disposition, undefined);
+  assert.equal(claimed.reply.result.follow_claimed, true);
+});
