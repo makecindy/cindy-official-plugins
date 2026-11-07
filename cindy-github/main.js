@@ -2577,7 +2577,7 @@ async function findPrCardOwner(repo, number, head, explicitId, sessionId, localO
     candidates.find(function (c) { return !c.sessionId && c.id === explicitId; }) || null;
 }
 
-async function prOtherTask(owner, callId, sessionId, localCard) {
+async function prOtherTask(owner, callId, sessionId, localCard, toLatest) {
   var local = localCard && localCard.sessionId === sessionId ? localCard : newPrCard(callId, owner.repo);
   var updating = local.id !== callId;
   local.sessionId = sessionId;
@@ -2592,8 +2592,11 @@ async function prOtherTask(owner, callId, sessionId, localCard) {
     if (status.err) local.note = t('prFetchFailed', { detail: status.err });
     else { local.pr = status.pr; local.stage = status.pr.state; local.note = null; }
   }
+  // The read-only card moves like any other card; its local card_id stays.
+  var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
   if (!(await savePrCard(local))) return fail(t('prSaveFailed'));
-  if (!(await sendPrCard(local, await readPrSettings(), updating ? callId : null))) return fail(t('prCardNotDelivered'));
+  if (movedFrom) await sendPrMovedStub(local, movedFrom, callId);
+  if (!(await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null))) return fail(t('prCardNotDelivered'));
   return { ok: true, result: {
     disposition: 'existing_task', card_id: local.id, owner_card_id: owner.id, owner_session_id: owner.sessionId,
     task_url: 'cindy://session/' + encodeURIComponent(owner.sessionId), follow_claimed: false, todo: [], next: t('prOtherTask'),
@@ -3332,7 +3335,7 @@ async function prCardTool(args, callId) {
       // Reuse a local card even when a different task currently holds the follow-up.
       var local = card || await findPrCardOwner(owner.repo, owner.pr && owner.pr.number,
         owner.head, null, sessionId, true);
-      return prOtherTask(owner, callId, sessionId, local);
+      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true);
     }
     card = owner;
     updating = true;
@@ -3387,6 +3390,7 @@ async function prCardTool(args, callId) {
 
   // A claim is permission to create a schedule, not a report that one already exists.
   // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
+  var pendingBefore = card.pending;
   if (a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following) {
     card.pending = 'follow';
   }
@@ -3416,7 +3420,10 @@ async function prCardTool(args, callId) {
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
   if (!delivered) {
     // The retry must produce the same to-do list again, so the one-time settings are not used up by this call.
-    if (card.settingsApplied !== settingsAppliedBefore) {
+    // No permission to follow was handed out either, so a reservation added by this call must not keep other tasks out.
+    var released = card.pending !== pendingBefore;
+    if (released) card.pending = pendingBefore;
+    if (card.settingsApplied !== settingsAppliedBefore || released) {
       card.settingsApplied = settingsAppliedBefore;
       await savePrCardRetry(card);
     }

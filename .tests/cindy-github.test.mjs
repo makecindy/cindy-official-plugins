@@ -1502,12 +1502,33 @@ test('other-task refresh reuses its local card and reads status without changing
   const refresh = await runtime.tool({ card_id: ref.reply.result.card_id, following: true,
     to_latest: true, session_context: { session_id: 's2' } });
   assert.equal(refresh.reply.result.card_id, ref.callId);
+  // The read-only card moves like any other card: the old place becomes a stub, the local card_id stays.
   assert.equal(runtime.lastCard(ref.callId).sourceCallId, refresh.callId);
-  assert.match(runtime.lastCard(ref.callId).html, /CI 未通过/);
+  assert.equal(runtime.lastCard(ref.callId).supersededBy, refresh.callId);
+  assert.match(runtime.lastCard(refresh.callId).html, /CI 未通过/);
   assert.equal(runtime.files.get(ownerPath), before);
-  assert.equal(runtime.files.size, 2);
-  await runtime.click(ref.callId, 'pr:follow', { sessionId: 's2' });
+  assert.equal(runtime.files.size, 3);
+  await runtime.click(refresh.callId, 'pr:follow', { sessionId: 's2' });
   assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('a refused card releases the follow reservation this call added but keeps an earlier one', async () => {
+  const options = { github: prGraphql() };
+  const runtime = createPrRuntime(options);
+  options.refuseCards = true;
+  const refused = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  assert.equal(refused.reply.ok, false);
+  options.refuseCards = false;
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, undefined);
+  assert.equal(other.reply.result.follow_claimed, true);
+  // s2 now holds the reservation; a refused refresh from s2 must not drop it.
+  options.refuseCards = true;
+  const again = await runtime.tool({ card_id: other.reply.result.card_id, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(again.reply.ok, false);
+  options.refuseCards = false;
+  const third = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's3' } });
+  assert.equal(third.reply.result.disposition, 'existing_task');
 });
 
 test('merged cards cannot claim following and other-task references cannot archive the viewing task', async () => {
