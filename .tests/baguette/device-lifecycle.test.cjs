@@ -10,12 +10,12 @@ const id=n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
 async function setup(t){
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sim-lifecycle-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const settingsFile=path.join(dir,'settings.json'),file=settingsFile+'.devices.json';
- let clock=1000000,watching=false,external=false,deleteError=false,partial=false,readsGate=null;
+ let clock=1000000,watching=false,external=false,deleteError=false,partial=false,readsGate=null,devicesGate=null;
  const devices=[],calls=[],tasks=createTaskBindings(path.join(dir,'tasks.json'));
  const lifecycle=createDeviceLifecycle(file,()=>clock);
  const options={settingsFile,tasks,now:()=>clock,viewing:()=>watching,inUse:async()=>external,dispatch:async(method,p={})=>{
   calls.push({method,...p});
-  if(method==='devices')return {devices:devices.map(d=>({...d}))};
+  if(method==='devices'){if(devicesGate)await devicesGate;return {devices:devices.map(d=>({...d}))};}
   if(method==='create_device'){const d={udid:id(devices.length+1),name:p.name||'Test',state:'Shutdown',isAvailable:true,deviceType:p.deviceType,runtime:p.runtime};devices.push(d);return {...d,execution:'executed'};}
   if(method==='delete_device'){
    if(deleteError)throw Object.assign(Error('delete failed'),{code:'TEST_FAILURE',execution:'unknown'});
@@ -30,7 +30,7 @@ async function setup(t){
  let runtime=createRuntime(options);
  return {devices,calls,lifecycle,file,tasks,get runtime(){return runtime;},time:()=>clock,advance:ms=>clock+=ms,
   restart:()=>runtime=createRuntime({...options,tasks:createTaskBindings(path.join(dir,'tasks.json'))}),
-  watching:v=>watching=v,external:v=>external=v,fail:v=>deleteError=v,partial:v=>partial=v,gate:v=>readsGate=v,
+  watching:v=>watching=v,external:v=>external=v,fail:v=>deleteError=v,partial:v=>partial=v,gate:v=>readsGate=v,gateDevices:v=>devicesGate=v,
   async create(n=1){for(let i=0;i<n;i++)await runtime.request('device',{action:'create',_agent:true,purpose:'UI coverage',isolationReason:'Independent fixture '+i,deviceType:'phone',runtime:'test-os',session_context:{session_id:'task-'+i}});},
   async idle(){clock+=16*60000;await runtime.checkReclamation();},
  };
@@ -170,9 +170,15 @@ test('post-delete bookkeeping errors preserve successful deletion in audit histo
 });
 test('a request arriving during a startup reclamation scan waits for it instead of failing',async t=>{
  const f=await setup(t);await f.create();
- let release;f.gate(new Promise(r=>release=r));
+ let release;f.gateDevices(new Promise(r=>release=r));
  const scan=f.runtime.checkReclamation();await new Promise(r=>setImmediate(r));
- const first=f.runtime.request('settings_save',{});
- await new Promise(r=>setImmediate(r));release();await scan;
- await assert.doesNotReject(first.catch(e=>{if(e.code==='BUSY')throw e;}));
+ let settled=false;const first=f.runtime.request('settings_save',{enabled:true,idleMinutes:0}).finally(()=>settled=true);
+ await new Promise(r=>setTimeout(r,250));assert.equal(settled,false);
+ release();await scan;const result=await first;assert.equal(result.ok,true);
+});
+test('erasing a temporary device restarts its idle period',async t=>{
+ const f=await setup(t);await f.create();await f.idle();f.advance(MAX_IDLE_MS);
+ await f.runtime.request('device',{action:'erase',udid:id(1)});
+ await f.runtime.checkReclamation();assert.equal(f.devices.length,1);
+ assert.equal(f.calls.some(c=>c.method==='delete_device'),false);
 });

@@ -308,6 +308,8 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
         await manager.updateRecord(result, () => manager.forget(result.udid || params.udid));
         if (method === 'delete_device' && tasks) await taskUpdate(result, () => tasks.forgetDevice(params.udid));
         if (method === 'delete_device' && result.ok!==false) await recordUpdate(result,'retentionError',()=>lifecycle.forget(params.udid),'Device deleted; retention record could not be cleared.');
+        // Erasing is a new operation: restart idle timing for a temporary device.
+        if (method === 'erase_device' && result.ok!==false) await recordUpdate(result,'retentionError',()=>lifecycle.use(params.udid),'Device erased; retention timing could not be refreshed.');
         // The management page refreshes independently after the operation.
         // Do not start another core budget or replace a completed destructive
         // operation with an error from an optional device-list read.
