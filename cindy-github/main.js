@@ -215,6 +215,7 @@ var MESSAGES = {
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prReadyFollow: '用户在 PR 卡片上把草稿转成了正式 PR，卡片设置是发完自动跟进。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prClickOpenTask: "用户点击了旧版卡片的任务入口。请仅在当前回复中显示一个 Markdown 链接：[打开跟进任务]({url})。这是导航请求，不要启动、停止或转移跟进，不要改名、修改卡片或创建定时任务。",
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
@@ -353,6 +354,7 @@ var MESSAGES = {
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
     prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prReadyFollow: 'The user marked the draft ready for review on the PR card, and the card setting says to follow it automatically. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prClickOpenTask: "The user clicked the legacy task entry. Reply only with one Markdown link: [Open follow-up task]({url}). This is navigation only: do not start, stop or transfer following, rename tasks, modify cards, or create schedules.",
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
@@ -491,6 +493,7 @@ var MESSAGES = {
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prReadyFollow: 'ユーザーが PR カードで下書きを正式な PR にしました。カードの設定は作成後に自動フォローです。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prClickOpenTask: "旧版カードのタスク入口が押されました。返信には Markdown リンク [フォロー中のタスクを開く]({url}) を1つだけ表示してください。移動のみの要求です。フォローの開始・停止・移管、名前やカードの変更、スケジュールの作成はしないでください。",
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
@@ -629,6 +632,7 @@ var MESSAGES = {
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prReadyFollow: '사용자가 PR 카드에서 초안을 정식 PR로 전환했고, 카드 설정은 만든 뒤 자동 팔로우입니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prClickOpenTask: "사용자가 이전 버전 카드의 작업 진입점을 눌렀습니다. 답변에 Markdown 링크 [팔로우 작업 열기]({url}) 하나만 표시하세요. 이동 요청일 뿐이므로 팔로우 시작·중지·이전, 이름·카드 변경 또는 일정 생성을 하지 마세요.",
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
@@ -3176,10 +3180,10 @@ function renderPrReference(card, owner) {
     '<div data-ghost-pr-status="' + prEsc(card.repo + '#' + pr.number) + '">' +
     (card.stage === 'merged' ? prEsc(t('prStateMerged')) : card.stage === 'closed' ? prEsc(t('prStateClosed')) : prStatusStrip(pr)) + '</div>';
   if (card.note) status += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(card.note) + '</div>';
-  var taskLink = '<a href="cindy://session/' + prEsc(encodeURIComponent(owner.sessionId)) +
+  var taskLink = '<button data-ghost-action="pr:open-task" data-ghost-session-link="cindy://session/' + prEsc(encodeURIComponent(owner.sessionId)) +
     '" style="display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--border-default);' +
-    'border-radius:9999px;color:var(--text-primary);text-decoration:none;font-size:12px;white-space:nowrap">' +
-    prEsc(t('prOpenTask')) + ' ↗</a>';
+    'border-radius:9999px;background:transparent;color:var(--text-primary);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer">' +
+    prEsc(t('prOpenTask')) + ' ↗</button>';
   return '<style>*{box-sizing:border-box}</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
     'background:var(--surface-elevated);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5">' +
     prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], '') + prFooter(status, taskLink, '', '') + '</div>';
@@ -3482,15 +3486,17 @@ var PR_AGENT_ACTIONS = {
  * 把点击交给本任务的 Agent。返回 ok=true 已交出;ok=false 未交出;
  * unknown=true 宿主没给明确结果(可能已交出),卡片据此提示用户先看对话、别重复点。
  */
-async function handOffPr(card, action, settings, msg) {
+async function handOffPr(card, action, settings, msg, taskUrl) {
   if (!msg.userActionToken || !cindy.agent || typeof cindy.agent.run !== 'function') return { ok: false };
   var url = card.pr ? card.pr.url : '';
   var text;
   if (action === 'pr:publish') text = t('prClickPublish');
   else if (action === 'pr:draft') text = t('prClickPublishDraft');
   else if (action === 'pr:follow') text = msg.afterReady ? t('prReadyFollow', { url: url }) : t('prClickFollow', { url: url });
+  else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
     event.pr_url = url;
@@ -3625,6 +3631,13 @@ async function prCardAction(msg) {
   var settings = await readPrSettings();
   var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
   if (active && prFollowActive(active) && active.sessionId !== card.sessionId) {
+    // Legacy clients use the existing click handoff to provide a normal task link.
+    // Re-resolve the active task at click time; never start/stop or transfer follow-up.
+    if (action === 'pr:open-task' && active.sessionId) {
+      var navigation = await handOffPr(card, action, settings, msg, 'cindy://session/' + encodeURIComponent(active.sessionId));
+      card.note = navigation.unknown ? t('prHandoffUnknown') : navigation.ok ? null : t('prHandoffFailed');
+      await savePrCard(card);
+    }
     await sendPrCard(card, settings, null);
     return;
   }

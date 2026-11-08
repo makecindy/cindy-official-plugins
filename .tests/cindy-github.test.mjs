@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.5');
+  assert.equal(manifest.version, '1.5.6');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1409,9 +1409,10 @@ test('concurrent follow claims reserve one task and render the other card as sta
   assert.deepEqual(second.reply.result.todo, []);
   const html = runtime.lastCard(second.callId).html;
   assert.match(html, /其他任务正在开启跟进/);
-  assert.match(html, /href="cindy:\/\/session\/s1"/);
+  assert.match(html, /data-ghost-session-link="cindy:\/\/session\/s1"/);
   assert.match(html, /data-ghost-pr-status="octo\/repo#42"/);
-  assert.doesNotMatch(html, /data-ghost-action|data-ghost-task-archive|<button/);
+  assert.deepEqual([...html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
+  assert.doesNotMatch(html, /data-ghost-task-archive/);
 });
 
 test('simultaneous clicks on previously idle cards hand off once and redraw the stale card', async () => {
@@ -1424,8 +1425,8 @@ test('simultaneous clicks on previously idle cards hand off once and redraw the 
   ]);
   assert.equal(runtime.agentRuns.length, 1);
   assert.equal(runtime.agentRuns[0].event.card_id, b.callId);
-  assert.match(runtime.lastCard(a.callId).html, /href="cindy:\/\/session\/s2"/);
-  assert.doesNotMatch(runtime.lastCard(a.callId).html, /data-ghost-action/);
+  assert.match(runtime.lastCard(a.callId).html, /data-ghost-session-link="cindy:\/\/session\/s2"/);
+  assert.deepEqual([...runtime.lastCard(a.callId).html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
 });
 
 test('stopping retains the reservation; after confirmed stop the user can follow in a different task', async () => {
@@ -1570,7 +1571,8 @@ test('merged cards cannot claim following and other-task references cannot archi
   const ref = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
   const html = runtime.lastCard(ref.callId).html;
   assert.match(html, /已合并/);
-  assert.doesNotMatch(html, /data-ghost-action|data-ghost-task-archive|<button/);
+  assert.deepEqual([...html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
+  assert.doesNotMatch(html, /data-ghost-task-archive/);
   const ended = createPrRuntime({ github: prGraphql({ merged: true }) });
   assert.equal((await ended.tool({ repo: 'octo/repo', pr: 42, claim_follow: true })).reply.result.follow_claimed, false);
 });
@@ -1677,4 +1679,31 @@ test('releasing a source task reservation lets the dedicated task claim the foll
   const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 'dedicated' } });
   assert.equal(claimed.reply.result.disposition, undefined);
   assert.equal(claimed.reply.result.follow_claimed, true);
+});
+
+// Legacy clients dispatch the ordinary action after stripping the optional native task link.
+// Navigation must use the active task at click time without creating a second reservation.
+test('legacy task-entry clicks return only a navigation handoff and retain follow ownership', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const owner = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const ref = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  const ownerBefore = runtime.files.get(`pr-cards/${owner.callId}.json`);
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 'foreign' });
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2', userActionToken: undefined });
+  assert.equal(runtime.agentRuns.length, 0);
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.length, 1);
+  const request = runtime.agentRuns[0];
+  assert.equal(request.mode, 'continue');
+  assert.equal(request.event.action, 'open-task');
+  assert.equal(request.event.task_url, 'cindy://session/s1');
+  assert.match(request.userMessage, /仅在当前回复中显示一个 Markdown 链接/);
+  assert.equal(runtime.files.get(`pr-cards/${owner.callId}.json`), ownerBefore);
+  const refState = [...runtime.files.values()].map(JSON.parse).find(card => card.id === ref.callId);
+  assert.equal(!!refState.following, false);
+  assert.equal(!!refState.pending, false);
+  await runtime.tool({ card_id: owner.callId, following: false });
+  await runtime.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's3' } });
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.at(-1).event.task_url, 'cindy://session/s3');
 });
