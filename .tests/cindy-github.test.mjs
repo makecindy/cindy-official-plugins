@@ -78,7 +78,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.5');
+  assert.equal(manifest.version, '1.5.6');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -649,7 +649,7 @@ function prGraphql({ number = 42, title = 'Built-in PR skill', ci = 'SUCCESS', t
 function createPrRuntime(options = {}) {
   let handler = null;
   const sent = [];
-  const files = new Map();
+  const files = options.files ?? new Map();
   const agentRuns = [];
   let kv = options.kv ?? {};
   const cindy = {
@@ -706,7 +706,7 @@ function createPrRuntime(options = {}) {
     encodeURIComponent,
   });
   new Script(githubSource, { filename: 'cindy-github/main.js' }).runInContext(context);
-  let seq = 0;
+  let seq = options.files ? 100 : 0;
   const cards = (callId) => sent.filter((m) => m.type === 'card-update' && m.callId === callId);
   return {
     files,
@@ -717,7 +717,7 @@ function createPrRuntime(options = {}) {
     setGithub(github) { options.github = github; },
     async tool(args, tool = 'pr_card') {
       const callId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
-      await handler({ type: 'tool-call', tool, callId, args });
+      await handler({ type: 'tool-call', tool, callId, args: tool === 'pr_card' ? { session_context: { session_id: 's1' }, ...args } : args });
       const reply = sent.filter((m) => m.type === 'tool-result' && m.callId === callId).at(-1);
       return { callId, reply: JSON.parse(JSON.stringify(reply)) };
     },
@@ -858,8 +858,7 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   assert.equal((await runtime.tool({ card_id: cardId })).reply.result.todo, undefined);
 
   await runtime.click(cardId, 'pr:follow');
-  assert.equal(runtime.agentRuns.at(-1).userMessage, fill(zhCopy.prClickFollow, { url }));
-  assert.deepEqual(runtime.agentRuns.at(-1).event, { card_id: cardId, action: 'follow', repo: 'octo/repo', pr_number: 7, pr_url: url });
+  assert.equal(runtime.agentRuns.length, 0); // the auto-follow todo already reserved this start
   assert.ok(visibleText(runtime.lastCard(cardId).html).includes(zhCopy.prFollowStarting));
 
   await runtime.tool({ card_id: cardId, following: true });
@@ -1378,6 +1377,255 @@ test('pr_card rejects unusable input and keeps its largest card under the host s
   assert.equal(visibleText(runtime.lastCard(pending.reply.result.card_id).html)[2], `feat/x → main · ${zhCopy.prFileOne}`);
 });
 
+
+test('idle cards in different tasks stay interactive without automatically following', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true, autoRename: true } } });
+  const [first, second] = await Promise.all([
+    runtime.tool({ repo: 'octo/repo', pr: 42 }),
+    runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } }),
+  ]);
+  for (const card of [first, second]) {
+    assert.equal(card.reply.ok, true);
+    assert.equal(card.reply.result.disposition, undefined);
+    assert.equal(card.reply.result.todo, undefined);
+    assert.match(runtime.lastCard(card.callId).html, /data-ghost-action="pr:follow"/);
+  }
+  assert.notEqual(first.reply.result.card_id, second.reply.result.card_id);
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.equal(runtime.files.size, 2);
+});
+
+test('concurrent follow claims reserve one task and render the other card as status plus task link', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const [first, second] = await Promise.all([
+    runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true }),
+    runtime.tool({ repo: 'OCTO/REPO', pr: 42, claim_follow: true, session_context: { session_id: 's2' } }),
+  ]);
+  assert.equal(first.reply.result.follow_claimed, true);
+  assert.equal(second.reply.result.follow_claimed, false);
+  assert.equal(second.reply.result.disposition, 'existing_task');
+  assert.equal(second.reply.result.card_id, second.callId);
+  assert.equal(second.reply.result.task_url, 'cindy://session/s1');
+  assert.deepEqual(second.reply.result.todo, []);
+  const html = runtime.lastCard(second.callId).html;
+  assert.match(html, /其他任务正在开启跟进/);
+  assert.match(html, /data-ghost-session-link="cindy:\/\/session\/s1"/);
+  assert.match(html, /data-ghost-pr-status="octo\/repo#42"/);
+  assert.deepEqual([...html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
+  assert.doesNotMatch(html, /data-ghost-task-archive/);
+});
+
+test('simultaneous clicks on previously idle cards hand off once and redraw the stale card', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const a = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  const b = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  await Promise.all([
+    runtime.click(b.callId, 'pr:follow', { sessionId: 's2' }),
+    runtime.click(a.callId, 'pr:follow'),
+  ]);
+  assert.equal(runtime.agentRuns.length, 1);
+  assert.equal(runtime.agentRuns[0].event.card_id, b.callId);
+  assert.match(runtime.lastCard(a.callId).html, /data-ghost-session-link="cindy:\/\/session\/s2"/);
+  assert.deepEqual([...runtime.lastCard(a.callId).html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
+});
+
+test('stopping retains the reservation; after confirmed stop the user can follow in a different task', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const a = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  await runtime.click(a.callId, 'pr:stop');
+  const stopping = await runtime.tool({ card_id: a.callId, claim_follow: true });
+  assert.equal(stopping.reply.result.follow_claimed, false);
+  const b = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(b.reply.result.follow_claimed, false);
+  assert.match(runtime.lastCard(b.callId).html, /其他任务正在停止跟进/);
+  // The agent reports false only after scheduler deletion has been confirmed.
+  const stopped = await runtime.tool({ card_id: a.callId, following: false, claim_follow: true });
+  assert.equal(stopped.reply.result.follow_claimed, false);
+  const available = await runtime.tool({ card_id: b.callId, session_context: { session_id: 's2' } });
+  assert.equal(available.reply.result.disposition, undefined);
+  assert.match(runtime.lastCard(b.callId).html, /data-ghost-action="pr:follow"/);
+  await runtime.click(b.callId, 'pr:follow', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.length, 2); // stop in A, start in B
+  await runtime.tool({ card_id: b.callId, following: true, session_context: { session_id: 's2' } });
+  const old = await runtime.tool({ card_id: a.callId });
+  assert.equal(old.reply.result.task_url, 'cindy://session/s2');
+  assert.match(runtime.lastCard(a.callId).html, /其他任务正在跟进/);
+});
+
+test('same task reuses its card and foreign updates cannot change the active follower', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const again = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  assert.equal(again.reply.result.card_id, first.callId);
+  const before = runtime.files.get(`pr-cards/${first.callId}.json`);
+  const foreign = await runtime.tool({ card_id: first.callId, to_latest: true, following: false,
+    session_context: { session_id: 's2' } });
+  assert.equal(foreign.reply.result.disposition, 'existing_task');
+  await runtime.click(first.callId, 'pr:stop', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.length, 0);
+  assert.equal(runtime.files.get(`pr-cards/${first.callId}.json`), before);
+});
+
+test('follow reservations survive restart and missing context cannot create cards', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const restarted = createPrRuntime({ files: runtime.files, github: prGraphql() });
+  const foreign = await restarted.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  assert.equal(foreign.reply.result.disposition, 'existing_task');
+  const missing = await restarted.tool({ repo: 'octo/repo', pr: 43, session_context: null });
+  assert.equal(missing.reply.ok, false);
+  assert.equal(restarted.files.size, 2);
+});
+
+test('legacy active follow-ups block new claims until refreshed explicitly in their original task', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const original = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const path = `pr-cards/${original.callId}.json`;
+  const legacy = JSON.parse(runtime.files.get(path));
+  delete legacy.sessionId;
+  runtime.files.set(path, JSON.stringify(legacy));
+  const duplicate = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  assert.equal(duplicate.reply.ok, false);
+  const refresh = await runtime.tool({ card_id: original.callId });
+  assert.equal(refresh.reply.ok, true);
+  assert.equal(JSON.parse(runtime.files.get(path)).sessionId, 's1');
+});
+
+test('unpublished cards do not own a branch and corrupt history prevents follow claims', async () => {
+  const runtime = createPrRuntime();
+  await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const other = await runtime.tool({ repo: 'octo/repo', head: 'feature', session_context: { session_id: 's2' } });
+  assert.equal(other.reply.ok, true);
+  assert.equal(other.reply.result.disposition, undefined);
+  runtime.files.set('pr-cards/broken.json', '{');
+  const failed = await runtime.tool({ repo: 'octo/repo', head: 'another', claim_follow: true });
+  assert.equal(failed.reply.ok, false);
+  assert.equal(runtime.files.size, 3);
+});
+
+test('active follow reservations are not pruned when card history exceeds retention', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  for (let i = 0; i < 205; i++) {
+    runtime.files.set(`pr-cards/old-${i}.json`, JSON.stringify({ id: `old-${i}`, repo: 'other/repo', stage: 'closed' }));
+  }
+  await runtime.tool({ repo: 'other/repo', head: 'new' });
+  assert.ok(runtime.files.has(`pr-cards/${first.callId}.json`));
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
+});
+
+test('other-task refresh reuses its local card and reads status without changing the follower', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const owner = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const ownerPath = `pr-cards/${owner.callId}.json`;
+  const before = runtime.files.get(ownerPath);
+  const ref = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  runtime.setGithub(prGraphql({ ci: 'FAILURE', threads: [false] }));
+  const refresh = await runtime.tool({ card_id: ref.reply.result.card_id, following: true,
+    to_latest: true, session_context: { session_id: 's2' } });
+  assert.equal(refresh.reply.result.card_id, ref.callId);
+  // The read-only card moves like any other card: the old place becomes a stub, the local card_id stays.
+  assert.equal(runtime.lastCard(ref.callId).sourceCallId, refresh.callId);
+  assert.equal(runtime.lastCard(ref.callId).supersededBy, refresh.callId);
+  assert.match(runtime.lastCard(refresh.callId).html, /CI 未通过/);
+  assert.equal(runtime.files.get(ownerPath), before);
+  assert.equal(runtime.files.size, 3);
+  await runtime.click(refresh.callId, 'pr:follow', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('without a card surface, a follow claim still succeeds, blocks other tasks and can be released', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), refuseCards: true });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  assert.equal(claimed.reply.ok, true);
+  assert.equal(claimed.reply.result.follow_claimed, true);
+  assert.equal(claimed.reply.result.card_shown, false);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.ok, true);
+  assert.equal(other.reply.result.disposition, 'existing_task');
+  assert.equal(other.reply.result.card_shown, false);
+  // Releasing without a card is not undone by the failed redraw.
+  const released = await runtime.tool({ card_id: claimed.reply.result.card_id, following: false });
+  assert.equal(released.reply.ok, true);
+  const retaken = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(retaken.reply.result.follow_claimed, true);
+});
+
+test('a refused card on a plain refresh still releases a reservation that call added', async () => {
+  const options = { github: prGraphql(), kv: { prCard: { autoFollow: true } } };
+  const runtime = createPrRuntime(options);
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  options.refuseCards = true;
+  const refused = await runtime.tool({ card_id: ask.callId, pr: 42 });
+  assert.equal(refused.reply.ok, false);
+  options.refuseCards = false;
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.follow_claimed, true);
+});
+
+test('merged cards cannot claim following and other-task references cannot archive the viewing task', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  runtime.setGithub(prGraphql({ merged: true }));
+  const ref = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  const html = runtime.lastCard(ref.callId).html;
+  assert.match(html, /已合并/);
+  assert.deepEqual([...html.matchAll(/data-ghost-action="([^"]+)"/g)].map(match => match[1]), ['pr:open-task']);
+  assert.doesNotMatch(html, /data-ghost-task-archive/);
+  const ended = createPrRuntime({ github: prGraphql({ merged: true }) });
+  assert.equal((await ended.tool({ repo: 'octo/repo', pr: 42, claim_follow: true })).reply.result.follow_claimed, false);
+});
+
+test('publishing with auto-follow reserves the originating task before returning its todo', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const published = await runtime.tool({ card_id: ask.callId, pr: 42 });
+  assert.equal(published.reply.result.todo.length, 1);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.disposition, 'existing_task');
+  assert.equal(other.reply.result.follow_claimed, false);
+});
+
+test('a rejected handoff releases the reservation but an unknown handoff retains it', async () => {
+  for (const unknown of [false, true]) {
+    const runtime = createPrRuntime({ github: prGraphql(), agentRun: () => {
+      if (unknown) throw new Error('transport disconnected');
+      return { ok: false };
+    } });
+    const first = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+    await runtime.click(first.callId, 'pr:follow');
+    const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+    assert.equal(other.reply.result.follow_claimed, !unknown);
+    assert.equal(other.reply.result.disposition, unknown ? 'existing_task' : undefined);
+  }
+});
+
+test('a stop report cannot reapply deferred post-publication auto-follow settings', async () => {
+  const runtime = createPrRuntime({ github: prGraphql(), kv: { prCard: { autoFollow: true } } });
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const stopped = await runtime.tool({ card_id: ask.callId, pr: 42, following: false, claim_follow: true });
+  assert.equal(stopped.reply.result.follow_claimed, false);
+  assert.equal(stopped.reply.result.todo, undefined);
+  const other = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's2' } });
+  assert.equal(other.reply.result.follow_claimed, true);
+});
+
+test('a task with its own legacy duplicate follow record can still stop it while another task is active', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const dupId = '00000000-0000-4000-8000-0000000000aa';
+  const dup = { ...JSON.parse(runtime.files.get(`pr-cards/${first.callId}.json`)), id: dupId, sessionId: 's2' };
+  runtime.files.set(`pr-cards/${dupId}.json`, JSON.stringify(dup));
+  const stopped = await runtime.tool({ card_id: dupId, following: false, session_context: { session_id: 's2' } });
+  assert.equal(stopped.reply.result.disposition, undefined);
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${dupId}.json`)).following, false);
+  // The other task's record is untouched and still excludes a third task.
+  assert.equal(JSON.parse(runtime.files.get(`pr-cards/${first.callId}.json`)).following, true);
+  const third = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 's3' } });
+  assert.equal(third.reply.result.disposition, 'existing_task');
+});
+
 // IM has no PR card surface. Preferences must still be readable through the real tool dispatcher.
 test('IM follow settings share card preferences and selected remote model without starting work', async () => {
   const model = { route: { agentKind: 'cc', providerId: 'example-provider', model: 'example-model', effort: 'high', fastMode: false, agentDeviceId: 'example-device' }, label: 'Example' };
@@ -1392,7 +1640,9 @@ test('IM follow settings share card preferences and selected remote model withou
   assert.equal(runtime.files.size, 0);
   assert.equal(runtime.agentRuns.length, 0);
   assert.equal(runtime.kv.unrelated, 'keep');
-  const card = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  // Publishing from an ask card applies the settings once; merely viewing an existing PR does not.
+  const ask = await runtime.tool({ repo: 'octo/repo', head: 'feature' });
+  const card = await runtime.tool({ card_id: ask.callId, pr: 42 });
   assert.deepEqual(card.reply.result.settings, read.reply.result.settings);
   // Card switch changes are immediately visible to the IM entry; the reader never consumes card todos.
   assert.ok(card.reply.result.todo.some((item) => item.includes('42')));
@@ -1418,4 +1668,42 @@ test('IM preferences remain available when cards cannot be delivered; missing di
   options.kvFails = false;
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, true);
   assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false });
+});
+
+test('releasing a source task reservation lets the dedicated task claim the follow-up', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const source = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });
+  const blocked = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 'dedicated' } });
+  assert.equal(blocked.reply.result.disposition, 'existing_task');
+  await runtime.tool({ card_id: source.reply.result.card_id, following: false });
+  const claimed = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true, session_context: { session_id: 'dedicated' } });
+  assert.equal(claimed.reply.result.disposition, undefined);
+  assert.equal(claimed.reply.result.follow_claimed, true);
+});
+
+// Legacy clients dispatch the ordinary action after stripping the optional native task link.
+// Navigation must use the active task at click time without creating a second reservation.
+test('legacy task-entry clicks return only a navigation handoff and retain follow ownership', async () => {
+  const runtime = createPrRuntime({ github: prGraphql() });
+  const owner = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const ref = await runtime.tool({ repo: 'octo/repo', pr: 42, session_context: { session_id: 's2' } });
+  const ownerBefore = runtime.files.get(`pr-cards/${owner.callId}.json`);
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 'foreign' });
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2', userActionToken: undefined });
+  assert.equal(runtime.agentRuns.length, 0);
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.length, 1);
+  const request = runtime.agentRuns[0];
+  assert.equal(request.mode, 'continue');
+  assert.equal(request.event.action, 'open-task');
+  assert.equal(request.event.task_url, 'cindy://session/s1');
+  assert.match(request.userMessage, /仅在当前回复中显示一个 Markdown 链接/);
+  assert.equal(runtime.files.get(`pr-cards/${owner.callId}.json`), ownerBefore);
+  const refState = [...runtime.files.values()].map(JSON.parse).find(card => card.id === ref.callId);
+  assert.equal(!!refState.following, false);
+  assert.equal(!!refState.pending, false);
+  await runtime.tool({ card_id: owner.callId, following: false });
+  await runtime.tool({ repo: 'octo/repo', pr: 42, following: true, session_context: { session_id: 's3' } });
+  await runtime.click(ref.callId, 'pr:open-task', { sessionId: 's2' });
+  assert.equal(runtime.agentRuns.at(-1).event.task_url, 'cindy://session/s3');
 });

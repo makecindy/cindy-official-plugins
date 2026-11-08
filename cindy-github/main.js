@@ -147,7 +147,14 @@ var MESSAGES = {
     prSettingsLater: '卡片设置暂时读不到，改名和跟进的待办留到下次调用 pr_card 时再给',
     prSettingsReadFailed: "无法读取 PR 跟进设置，请稍后重试；当前不能判断自动跟进是否开启。",
     prSettingsUnreadable: '卡片设置暂时读不到，没有发出。请稍后再点一次',
+    prOwnershipUnknown: '无法确认 PR 卡片所属任务，请先回原任务刷新已有卡片，不要新建自动跟进。',
+    prOtherTask: '已展示只读 PR 状态卡片。跳转入口已在卡片内，不要在回复中重复显示 task_url；不要改名、操作原卡片或在当前任务启动自动跟进。',
+    prReadOnly: '其他任务正在跟进',
+    prOtherStarting: '其他任务正在开启跟进',
+    prOtherStopping: '其他任务正在停止跟进',
+    prOpenTask: '打开跟进任务',
     prCardNotDelivered: '卡片没能显示到对话里，请用同一个 card_id 再调用一次 pr_card',
+    prCardNotShown: '卡片没能显示（例如 IM 渠道），状态已保存；跟进申请、开启和停止的报告仍然有效',
     prThreadsTruncated: '评审线程太多，未能读完，无法确认未解决数量',
     prHandedOffSaveFailed: '已交给 Agent，但卡片状态没能保存。请先看对话，不要重复点',
     prStop: '停止',
@@ -208,6 +215,7 @@ var MESSAGES = {
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
     prReadyFollow: '用户在 PR 卡片上把草稿转成了正式 PR，卡片设置是发完自动跟进。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
+    prClickOpenTask: "用户点击了旧版卡片的任务入口。请仅在当前回复中显示一个 Markdown 链接：[打开跟进任务]({url})。这是导航请求，不要启动、停止或转移跟进，不要改名、修改卡片或创建定时任务。",
     prClickStop: '用户在 PR 卡片上点了「停止」跟进。删除 {url} 的跟进定时任务，再用 card_id 调用 pr_card，following=false。',
   },
   en: {
@@ -278,7 +286,14 @@ var MESSAGES = {
     prSettingsLater: 'The card settings could not be read, so the rename and follow to-do list will come with the next pr_card call.',
     prSettingsReadFailed: "Could not read PR follow-up settings. Try again later; whether auto-follow is enabled is currently unknown.",
     prSettingsUnreadable: 'The card settings could not be read, so nothing was sent. Try again in a moment.',
+    prOwnershipUnknown: 'Cannot verify the PR card task. Refresh the existing card in its original task before starting any follow-up.',
+    prOtherTask: 'A read-only PR status card is shown. The card contains the task link; do not repeat task_url in your reply; do not rename, operate the original card, or start following here.',
+    prReadOnly: 'Following in another task',
+    prOtherStarting: 'Starting follow-up in another task',
+    prOtherStopping: 'Stopping follow-up in another task',
+    prOpenTask: 'Open follow-up task',
     prCardNotDelivered: 'The card could not be shown in the conversation. Call pr_card again with the same card_id.',
+    prCardNotShown: 'The card could not be shown (for example in an IM channel); the state is saved, so follow claims and start/stop reports still count.',
     prThreadsTruncated: 'Too many review threads to read them all, so the unresolved count is unknown',
     prHandedOffSaveFailed: 'Handed to the agent, but the card state could not be saved. Check the conversation and do not click again.',
     prStop: 'Stop',
@@ -339,6 +354,7 @@ var MESSAGES = {
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
     prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
     prReadyFollow: 'The user marked the draft ready for review on the PR card, and the card setting says to follow it automatically. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
+    prClickOpenTask: "The user clicked the legacy task entry. Reply only with one Markdown link: [Open follow-up task]({url}). This is navigation only: do not start, stop or transfer following, rename tasks, modify cards, or create schedules.",
     prClickStop: 'The user clicked "Stop" following on the PR card. Delete the follow-up schedule for {url}, then call pr_card with card_id and following=false.',
   },
   ja: {
@@ -409,7 +425,14 @@ var MESSAGES = {
     prSettingsLater: 'カードの設定を読み込めなかったため、改名とフォローの作業は次回の pr_card 呼び出しでお知らせします',
     prSettingsReadFailed: "PR のフォロー設定を読み取れません。後で再試行してください。自動フォローが有効かどうかは現在不明です。",
     prSettingsUnreadable: 'カードの設定を読み込めなかったため、何も送信していません。しばらくしてからもう一度お試しください',
+    prOwnershipUnknown: 'PR カードの所属タスクを確認できません。元のタスクで既存カードを更新してからフォローしてください。',
+    prOtherTask: '読み取り専用の PR 状態カードを表示しました。タスクへのリンクはカード内にあるため返信で task_url を繰り返さず、改名・元のカードの操作・ここでのフォローは行わないでください。',
+    prReadOnly: '別のタスクでフォロー中',
+    prOtherStarting: '別のタスクでフォロー開始中',
+    prOtherStopping: '別のタスクでフォロー停止中',
+    prOpenTask: 'フォロー中のタスクを開く',
     prCardNotDelivered: 'カードを会話に表示できませんでした。同じ card_id でもう一度 pr_card を呼んでください',
+    prCardNotShown: 'カードを表示できませんでした（IM チャンネルなど）。状態は保存済みで、フォローの申請と開始・停止の報告は有効です',
     prThreadsTruncated: 'レビュースレッドが多すぎて読み切れず、未解決の数を確認できません',
     prHandedOffSaveFailed: 'エージェントに渡しましたが、カードの状態を保存できませんでした。会話を確認し、もう一度押さないでください',
     prStop: 'フォロー停止',
@@ -470,6 +493,7 @@ var MESSAGES = {
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
     prReadyFollow: 'ユーザーが PR カードで下書きを正式な PR にしました。カードの設定は作成後に自動フォローです。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
+    prClickOpenTask: "旧版カードのタスク入口が押されました。返信には Markdown リンク [フォロー中のタスクを開く]({url}) を1つだけ表示してください。移動のみの要求です。フォローの開始・停止・移管、名前やカードの変更、スケジュールの作成はしないでください。",
     prClickStop: 'ユーザーが PR カードの「フォロー停止」を押しました。{url} のフォロー用スケジュールを削除し、card_id と following=false を付けて pr_card を呼んでください。',
   },
   ko: {
@@ -540,7 +564,14 @@ var MESSAGES = {
     prSettingsLater: '카드 설정을 읽지 못해 이름 변경과 팔로우 할 일은 다음 pr_card 호출 때 알려 드립니다',
     prSettingsReadFailed: "PR 팔로우 설정을 읽을 수 없습니다. 나중에 다시 시도하세요. 자동 팔로우 활성화 여부는 현재 알 수 없습니다.",
     prSettingsUnreadable: '카드 설정을 읽지 못해 아무것도 보내지 않았습니다. 잠시 후 다시 시도하세요',
+    prOwnershipUnknown: 'PR 카드의 작업을 확인할 수 없습니다. 팔로우를 시작하기 전에 원래 작업에서 기존 카드를 새로 고치세요.',
+    prOtherTask: '읽기 전용 PR 상태 카드가 표시되었습니다. 작업 링크는 카드 안에 있으므로 답변에 task_url을 반복하지 마세요. 이름 변경, 원래 카드 조작 또는 여기서 팔로우를 시작하지 마세요.',
+    prReadOnly: '다른 작업에서 팔로우 중',
+    prOtherStarting: '다른 작업에서 팔로우 시작 중',
+    prOtherStopping: '다른 작업에서 팔로우 중지 중',
+    prOpenTask: '팔로우 작업 열기',
     prCardNotDelivered: '카드를 대화에 표시하지 못했습니다. 같은 card_id로 pr_card를 다시 호출하세요',
+    prCardNotShown: '카드를 표시하지 못했습니다(예: IM 채널). 상태는 저장되었으며 팔로우 신청과 시작·중지 보고는 유효합니다',
     prThreadsTruncated: '리뷰 스레드가 너무 많아 모두 읽지 못했고 미해결 수를 확인할 수 없습니다',
     prHandedOffSaveFailed: '에이전트에게 전달했지만 카드 상태를 저장하지 못했습니다. 대화를 확인하고 다시 누르지 마세요',
     prStop: '중지',
@@ -601,6 +632,7 @@ var MESSAGES = {
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
     prReadyFollow: '사용자가 PR 카드에서 초안을 정식 PR로 전환했고, 카드 설정은 만든 뒤 자동 팔로우입니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
+    prClickOpenTask: "사용자가 이전 버전 카드의 작업 진입점을 눌렀습니다. 답변에 Markdown 링크 [팔로우 작업 열기]({url}) 하나만 표시하세요. 이동 요청일 뿐이므로 팔로우 시작·중지·이전, 이름·카드 변경 또는 일정 생성을 하지 마세요.",
     prClickStop: '사용자가 PR 카드에서 팔로우 "중지"를 눌렀습니다. {url}의 팔로우 일정을 삭제하고, card_id와 following=false로 pr_card를 호출하세요.',
   },
 };
@@ -2530,6 +2562,65 @@ async function savePrCardRetry(card) {
   return false;
 }
 
+// Runs inside enqueuePr: reserving a follow-up and saving its card are serialized.
+// An idle card never permanently owns a PR; active reservations survive restarts.
+function prFollowActive(card) {
+  return card.following === true || card.pending === 'follow' || card.pending === 'stop';
+}
+
+async function findPrCardOwner(repo, number, head, explicitId, sessionId, localOnly) {
+  var listing = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
+  if (listing && !listing.ok && listing.errorCode === 'NOT_FOUND') return null;
+  if (!listing || !listing.ok || !Array.isArray(listing.entries)) throw new Error(t('prOwnershipUnknown'));
+  var candidates = [];
+  for (var i = 0; i < listing.entries.length; i++) {
+    var path = listing.entries[i].path;
+    var match = /^pr-cards\/([A-Za-z0-9_-]{1,64})\.json$/.exec(path);
+    if (!match) continue;
+    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: path });
+    if (!saved || !saved.ok) throw new Error(t('prOwnershipUnknown'));
+    var record = JSON.parse(saved.content);
+    if (record.alias) continue;
+    if (String(record.repo).toLowerCase() !== repo.toLowerCase()) continue;
+    if (number ? record.pr && record.pr.number === number : !record.pr && record.head === head) candidates.push(record);
+  }
+  // Only an active (or starting/stopping) follow-up excludes other tasks.
+  // A task's own active record wins, so records duplicated before this rule existed can still be stopped by their own task.
+  return (!localOnly && (candidates.find(function (c) { return prFollowActive(c) && c.sessionId === sessionId; }) ||
+    candidates.find(prFollowActive))) || candidates.find(function (c) { return c.sessionId === sessionId; }) ||
+    candidates.find(function (c) { return !c.sessionId && c.id === explicitId; }) || null;
+}
+
+async function prOtherTask(owner, callId, sessionId, localCard, toLatest, stateOp) {
+  var local = localCard && localCard.sessionId === sessionId ? localCard : newPrCard(callId, owner.repo);
+  var updating = local.id !== callId;
+  local.sessionId = sessionId;
+  local.pr = owner.pr;
+  local.stage = owner.stage;
+  local.head = owner.head;
+  local.base = owner.base;
+  local.settingsApplied = true;
+  // Never copy the other task's pending or following state into this task.
+  if (local.pr) {
+    var status = await fetchPrStatus(local.repo, local.pr.number, callId);
+    if (status.err) local.note = t('prFetchFailed', { detail: status.err });
+    else { local.pr = status.pr; local.stage = status.pr.state; local.note = null; }
+  }
+  // The read-only card moves like any other card; its local card_id stays.
+  var movedFrom = updating && toLatest && prAnchor(local) !== callId ? await movePrCard(local, callId) : null;
+  if (!(await savePrCard(local))) return fail(t('prSaveFailed'));
+  if (movedFrom) await sendPrMovedStub(local, movedFrom, callId);
+  var shown = await sendPrCard(local, await readPrSettings(), updating && !movedFrom ? callId : null);
+  // A claim or stop report still needs the answer when no card can be shown (IM).
+  if (!shown && !stateOp) return fail(t('prCardNotDelivered'));
+  var other = {
+    disposition: 'existing_task', card_id: local.id, owner_card_id: owner.id, owner_session_id: owner.sessionId,
+    task_url: 'cindy://session/' + encodeURIComponent(owner.sessionId), follow_claimed: false, todo: [], next: t('prOtherTask'),
+  };
+  if (!shown) { other.card_shown = false; other.note = t('prCardNotShown'); }
+  return { ok: true, result: other };
+}
+
 async function prunePrCards() {
   var r = await cindy.send({ type: 'fs-request', root: 'data', op: 'list', path: PR_CARD_DIR });
   if (!r || !r.ok || !Array.isArray(r.entries) || r.entries.length <= PR_CARD_KEEP) return;
@@ -2538,6 +2629,12 @@ async function prunePrCards() {
     .sort(function (a, b) { return a.mtime - b.mtime; })
     .slice(0, r.entries.length - PR_CARD_KEEP);
   for (var i = 0; i < stale.length; i++) {
+    var saved = await cindy.send({ type: 'fs-request', root: 'data', op: 'read', path: stale[i].path });
+    if (!saved || !saved.ok) continue;
+    var record;
+    try { record = JSON.parse(saved.content); } catch (e) { continue; }
+    // Active ownership must not disappear merely because other cards were created.
+    if (prFollowActive(record)) continue;
     await cindy.send({ type: 'fs-request', root: 'data', op: 'delete', path: stale[i].path });
   }
 }
@@ -3073,6 +3170,25 @@ function prStatsParts(card) {
   return parts;
 }
 
+function renderPrReference(card, owner) {
+  owner = owner || card;
+  var pr = card.pr;
+  var title = pr ? '#' + pr.number + ' ' + (pr.title || card.repo) : t('prAskTitle');
+  var tile = !pr ? prTile('branch') : card.stage === 'merged' ? prTile('merged', 'merged') :
+    card.stage === 'closed' ? prTile('closed', 'muted') : pr.draft ? prTile('draft', 'muted') : prTile('pr', 'open');
+  var status = !pr ? prContextLine(card) :
+    '<div data-ghost-pr-status="' + prEsc(card.repo + '#' + pr.number) + '">' +
+    (card.stage === 'merged' ? prEsc(t('prStateMerged')) : card.stage === 'closed' ? prEsc(t('prStateClosed')) : prStatusStrip(pr)) + '</div>';
+  if (card.note) status += '<div style="margin-top:4px;color:var(--text-secondary)">' + prEsc(card.note) + '</div>';
+  var taskLink = '<button data-ghost-action="pr:open-task" data-ghost-session-link="cindy://session/' + prEsc(encodeURIComponent(owner.sessionId)) +
+    '" style="display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--border-default);' +
+    'border-radius:9999px;background:transparent;color:var(--text-primary);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer">' +
+    prEsc(t('prOpenTask')) + ' ↗</button>';
+  return '<style>*{box-sizing:border-box}</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
+    'background:var(--surface-elevated);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5">' +
+    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], '') + prFooter(status, taskLink, '', '') + '</div>';
+}
+
 function prHasSettings(card) {
   return card.stage === 'ask' || card.stage === 'open' || card.stage === 'merged' || card.stage === 'closed';
 }
@@ -3153,13 +3269,15 @@ function prCardHeight(card) {
   return Math.min(900, h);
 }
 
-function sendPrCard(card, settings, sourceCallId) {
+async function sendPrCard(card, settings, sourceCallId) {
+  var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
+  var other = active && prFollowActive(active) && active.sessionId !== card.sessionId ? active : null;
   var msg = {
     // 正在发、正在开启或停止跟进时报 working:宿主才播卡内转圈(静态版会剥掉动画),
     // Agent 用 pr_card 更新结果时换回 done。
     type: 'card-update', callId: prAnchor(card), v: 2,
-    state: card.stage === 'publishing' || card.pending ? 'working' : 'done',
-    html: renderPrCard(card, settings), height: prCardHeight(card),
+    state: !other && (card.stage === 'publishing' || card.pending) ? 'working' : 'done',
+    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
@@ -3202,6 +3320,8 @@ function sendPrMovedStub(card, from, callId) {
 
 async function prCardTool(args, callId) {
   var a = args && typeof args === 'object' ? args : {};
+  var sessionId = a.session_context && a.session_context.session_id;
+  if (typeof sessionId !== 'string' || !sessionId) return fail(t('prOwnershipUnknown'));
   var repo = prText(a.repo);
   if (repo && !PR_REPO_RE.test(repo)) return fail(t('prNeedRepo'));
   var cardId = a.card_id !== undefined && a.card_id !== null && a.card_id !== '' ? String(a.card_id) : '';
@@ -3217,11 +3337,37 @@ async function prCardTool(args, callId) {
     ref = parsePrRef(a.pr, repo || (card ? card.repo : ''));
     if (!ref) return fail(t('prBadPr'));
   }
+  if (card && card.sessionId && card.sessionId !== sessionId) {
+    if (!ref && card.pr) ref = { repo: card.repo, number: card.pr.number };
+    if (!repo) repo = card.repo;
+    card = null;
+    updating = false;
+  }
+  if (card && ref && card.pr && (card.repo.toLowerCase() !== ref.repo.toLowerCase() || card.pr.number !== ref.number)) {
+    return fail(t('prBadCardId'));
+  }
+  var owner = await findPrCardOwner(ref ? ref.repo : repo || (card && card.repo) || '',
+    ref ? ref.number : card && card.pr ? card.pr.number : null,
+    prText(a.head) || (card && card.head), card && card.id, sessionId);
+  if (owner) {
+    if (!owner.sessionId && (!card || card.id !== owner.id)) return fail(t('prOwnershipUnknown'));
+    if (owner.sessionId && owner.sessionId !== sessionId) {
+      // Reuse a local card even when a different task currently holds the follow-up.
+      var local = card || await findPrCardOwner(owner.repo, owner.pr && owner.pr.number,
+        owner.head, null, sessionId, true);
+      return prOtherTask(owner, callId, sessionId, local, a.to_latest === true,
+        a.claim_follow === true || typeof a.following === 'boolean');
+    }
+    card = owner;
+    updating = true;
+  }
   if (!card) {
     if (!repo && !ref) return fail(t('prNeedRepo'));
     if (!ref && !prText(a.head)) return fail(t('prNeedHead'));
     card = newPrCard(callId, repo);
+    if (ref) card.settingsApplied = true;
   }
+  card.sessionId = sessionId;
   if (ref) card.repo = ref.repo;
   else if (repo) card.repo = repo;
   if (prText(a.head)) card.head = prText(a.head);
@@ -3262,6 +3408,13 @@ async function prCardTool(args, callId) {
     card.stage = 'ask';
   }
 
+  // A claim is permission to create a schedule, not a report that one already exists.
+  // Keep stop reservations until deletion is confirmed; contradictory requests never reacquire.
+  var pendingBefore = card.pending;
+  if (a.claim_follow === true && a.following !== false && card.stage === 'open' && card.pending !== 'stop' && !card.following) {
+    card.pending = 'follow';
+  }
+
   var settings = await readPrSettings();
   var todo = [];
   var settingsAppliedBefore = card.settingsApplied;
@@ -3272,7 +3425,10 @@ async function prCardTool(args, callId) {
   if (card.stage === 'open' && !card.settingsApplied && !settings.unreadable) {
     card.settingsApplied = true;
     if (settings.autoRename && !card.renamed) todo.push(t('prTodoRename', { title: prTaskTitle(card) }));
-    if (settings.autoFollow && !card.following && !card.pr.draft) todo.push(t('prTodoFollow', { url: card.pr.url }));
+    if (settings.autoFollow && a.following !== false && card.pending !== 'stop' && !card.following && !card.pr.draft) {
+      card.pending = 'follow';
+      todo.push(t('prTodoFollow', { url: card.pr.url }));
+    }
   }
 
   var movedFrom = updating && a.to_latest === true && prAnchor(card) !== callId ? await movePrCard(card, callId) : null;
@@ -3281,10 +3437,15 @@ async function prCardTool(args, callId) {
   if (movedFrom) await sendPrMovedStub(card, movedFrom, callId);
   var delivered = await sendPrCard(card, settings, updating && !movedFrom ? callId : null);
   if (!updating) await prunePrCards();
+  // A follow claim or a start/stop report is a state operation: its answer matters even where no card can be shown (IM).
+  var stateOp = a.claim_follow === true || typeof a.following === 'boolean';
   // The state is saved but the card did not reach the conversation: do not report a card the user cannot see.
-  if (!delivered) {
+  if (!delivered && !stateOp) {
     // The retry must produce the same to-do list again, so the one-time settings are not used up by this call.
-    if (card.settingsApplied !== settingsAppliedBefore) {
+    // No permission to follow was handed out either, so a reservation added by this call must not keep other tasks out.
+    var released = card.pending !== pendingBefore;
+    if (released) card.pending = pendingBefore;
+    if (card.settingsApplied !== settingsAppliedBefore || released) {
       card.settingsApplied = settingsAppliedBefore;
       await savePrCardRetry(card);
     }
@@ -3296,6 +3457,9 @@ async function prCardTool(args, callId) {
     stage: card.stage === 'open' && card.pr.draft ? 'draft' : card.stage,
     settings: prSettingsForAgent(settings, settings.autoFollow),
   };
+  if (!delivered) { result.card_shown = false; notes.push(t('prCardNotShown')); }
+  if (a.claim_follow === true) result.follow_claimed = a.following !== false && card.stage === 'open' &&
+    card.pending !== 'stop' && prFollowActive(card);
   if (card.pr) {
     result.pr = { number: card.pr.number, title: card.pr.title, url: card.pr.url, state: card.pr.state, draft: card.pr.draft };
   }
@@ -3322,15 +3486,17 @@ var PR_AGENT_ACTIONS = {
  * 把点击交给本任务的 Agent。返回 ok=true 已交出;ok=false 未交出;
  * unknown=true 宿主没给明确结果(可能已交出),卡片据此提示用户先看对话、别重复点。
  */
-async function handOffPr(card, action, settings, msg) {
+async function handOffPr(card, action, settings, msg, taskUrl) {
   if (!msg.userActionToken || !cindy.agent || typeof cindy.agent.run !== 'function') return { ok: false };
   var url = card.pr ? card.pr.url : '';
   var text;
   if (action === 'pr:publish') text = t('prClickPublish');
   else if (action === 'pr:draft') text = t('prClickPublishDraft');
   else if (action === 'pr:follow') text = msg.afterReady ? t('prReadyFollow', { url: url }) : t('prClickFollow', { url: url });
+  else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
     event.pr_url = url;
@@ -3460,8 +3626,21 @@ async function prCardAction(msg) {
   if (!PR_CARD_ID_RE.test(id)) return;
   var card = await readPrCard(id);
   if (!card) return;
+  if (card.sessionId && card.sessionId !== msg.sessionId) return;
   var action = String(msg.actionId || '');
   var settings = await readPrSettings();
+  var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
+  if (active && prFollowActive(active) && active.sessionId !== card.sessionId) {
+    // Legacy clients use the existing click handoff to provide a normal task link.
+    // Re-resolve the active task at click time; never start/stop or transfer follow-up.
+    if (action === 'pr:open-task' && active.sessionId) {
+      var navigation = await handOffPr(card, action, settings, msg, 'cindy://session/' + encodeURIComponent(active.sessionId));
+      card.note = navigation.unknown ? t('prHandoffUnknown') : navigation.ok ? null : t('prHandoffFailed');
+      await savePrCard(card);
+    }
+    await sendPrCard(card, settings, null);
+    return;
+  }
   // Card actions run one at a time, so a mark-ready flow cannot be running now: a 'ready' left in the record
   // means its final save was lost. Read the PR again to find the real state before acting.
   if (card.pending === 'ready' && card.pr) {
