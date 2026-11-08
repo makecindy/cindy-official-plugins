@@ -298,6 +298,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       headRefName
       headRefOid
       baseRefName
+      baseRef { target { oid } }
       mergeQueueEntry {
         id state
         headCommit { ...QueueCommit }
@@ -586,10 +587,9 @@ async function main() {
     mergeableState: ghView.mergeable_state ?? null,
     headRefName: pr.headRefName,
     baseRefName: pr.baseRefName,
-    // REST /pulls 会把 base.sha 解析成 base 分支**当前** HEAD。gate 仅在 CI 红时
-    // 条件性把它纳入指纹，让「失败其实来自旧 main、main 修好后该重跑」能被唤醒；
-    // 健康 PR 不受 main 的日常推进影响。
-    baseCommitOid: ghView.base?.sha || null,
+    // Match the lightweight probe's live base ref. REST pull.base.sha can remain
+    // at the PR's old base after the branch advances, hiding baseline fixes.
+    baseCommitOid: pr.baseRef?.target?.oid ?? null,
     latestCommitOid: pr.headRefOid || latestCommit?.oid || ghView.head?.sha || null,
     // diff 规模(REST /pulls 自带):供 gate 的「范围膨胀」机判用。刻意不进 gate 指纹
     // (指纹按字段显式挑选),base 移动等噪声不会因此制造无谓唤起。

@@ -911,7 +911,7 @@ export function eventReport(events, snap, exhausted = false) {
     } else if (e.kind === 'draft-exited') {
       lines.push('- The PR left draft and is ready for review.');
     } else if (e.kind === 'base-moved') {
-      lines.push(`- ${base} moved to ${String(e.sha).slice(0, 7)} while checks are failing${commit}. If the failure came from ${base}, merge it in or re-run the failed checks.`);
+      lines.push(`- ${base} moved to ${String(e.sha).slice(0, 7)} while checks are failing${commit}. If the failure came from ${base}, check for its fix on the updated base; if present, merge, verify and push, then confirm CI starts on the new head. Re-running the old head does not bring in the fix.`);
     } else if (e.kind === 'merge-queue') {
       lines.push(`- Merge queue problem: ${e.blockers.join(', ')}${e.reason ? ` (reason: ${e.reason})` : ''}.`);
     }
