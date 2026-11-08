@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import nodeTest from 'node:test';
 
-import { decide, isHumanOnlyReviewPending, watchFromSnapshot } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { splitHttpResponse, rateLimitRetryAt } from '../../cindy-github/skills/pr/scripts/lib/gh.mjs';
 import {
   parseGitHubRemote,
@@ -45,7 +45,7 @@ if [ "$1" = api ] && [ "$2" = graphql ]; then
   q=""
   for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
   case "$q" in *checkRunCountsByState*) cat "$d/resp-probe.json"; exit 0 ;; esac
-  for f in mergeQueueEntry beforeCommit ADDED_TO_MERGE_QUEUE_EVENT headRefOid; do
+  for f in mergeQueueEntry beforeCommit ADDED_TO_MERGE_QUEUE_EVENT headRefOid baseRef; do
     case "$q" in *"$f"*) ;; *) echo "Missing query field: $f" >&2; exit 1 ;; esac
   done
   cat "$d/resp-graphql.json"; exit 0
@@ -69,12 +69,29 @@ exit 1
     write('resp-graphql.json', { data: { viewer: { login: 'me' }, repository: { pullRequest: data.pr } } });
     write('resp-probe.json', { data: { repository: { pullRequest: data.pr } } });
     write('resp-compare.json', { status: data.comparison });
-    write('resp-rest.json', { head: { sha: data.restHead }, mergeable: true, state: 'open', html_url: 'https://github.com/acme/game/pull/54' });
+    write('resp-rest.json', { base: { sha: data.restBase ?? 'old-base' }, head: { sha: data.restHead }, mergeable: true, state: 'open', html_url: 'https://github.com/acme/game/pull/54' });
     return JSON.parse(execFileSync(process.execPath, [script, 'https://github.com/acme/game/pull/54', ...(data.args ?? [])], {
       env: { ...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`, QUEUE_FIXTURE_DIR: root }, encoding: 'utf8',
     }));
   };
 }
+
+test('base movement uses the live ref in both probe and full snapshot despite a stale REST base', t => {
+  const run = fixture(t);
+  const pr = (base) => ({ timelineItems: { nodes: [] }, baseRef: base ? { target: { oid: base } } : null });
+  const red = { rollup: [{ __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' }] };
+  const before = run(pr('old-base'), 'ahead', red);
+  const watch = watchFromSnapshot(before, Date.now());
+  const probe = run(pr('new-base'), 'ahead', { args: ['--probe'] });
+  const after = run(pr('new-base'), 'ahead', red);
+  assert.equal(after.baseCommitOid, probe.base);
+  const moved = evaluateWatch(watch, after, Date.now());
+  assert.deepEqual(moved.events, [{ kind: 'base-moved', sha: 'new-base' }]);
+  assert.deepEqual(evaluateWatch(moved.next, after, Date.now()).events, []);
+  const green = run(pr('new-base'));
+  assert.equal(evaluateWatch(watchFromSnapshot(run(pr('old-base')), Date.now()), green, Date.now()).events.length, 0);
+  assert.equal(run(pr(null), 'ahead', red).baseCommitOid, null, 'missing live ref must not fall back to stale REST base');
+});
 
 test('full snapshot: PR green + merge-group failed/removed wakes gate despite approval blocker', t => {
   const run = fixture(t);
