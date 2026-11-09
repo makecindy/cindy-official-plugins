@@ -8,6 +8,7 @@
 import { ensureAuth, ensureBinary, ghGraphQL, ghJson } from './lib/gh.mjs';
 import { execFile } from 'node:child_process';
 import { resolvePullRequestTarget } from './lib/repo-target.mjs';
+import { applyRequiredChecks, requiredChecksOf } from './lib/required-checks.mjs';
 import { classifyMergeQueue } from './lib/merge-queue.mjs';
 
 const PASS_CONCLUSIONS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
@@ -33,11 +34,18 @@ function parseArgs(argv) {
   let prArg = null;
   let strictExit = false;
   let probe = false;
+  let expectHead = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '-h' || arg === '--help') {
       usage();
       process.exit(0);
+    }
+    if (arg === '--expect-head') {
+      const value = argv[++i];
+      if (!value || value.startsWith('--')) throw new Error(`${arg} needs a commit SHA`);
+      expectHead = value;
+      continue;
     }
     if (arg === '--repo') {
       repo = argv[++i];
@@ -57,7 +65,9 @@ function parseArgs(argv) {
     }
     throw new Error(`Unexpected argument: ${arg}`);
   }
+  if (probe && expectHead) throw new Error('--expect-head cannot be used with --probe');
   return {
+    expectHead,
     ...resolvePullRequestTarget(prArg, { explicitRepo: repo }),
     strictExit,
     probe,
@@ -298,7 +308,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       headRefName
       headRefOid
       baseRefName
-      baseRef { target { oid } }
+      baseRef { target { oid } branchProtectionRule { requiresStatusChecks requiredStatusChecks { context app { databaseId } } } }
       mergeQueueEntry {
         id state
         headCommit { ...QueueCommit }
@@ -351,13 +361,14 @@ query($owner: String!, $name: String!, $number: Int!) {
       commits(last: 1) {
         nodes {
           commit {
+            oid
             statusCheckRollup {
               contexts(first: 100) {
                 totalCount
                 pageInfo { hasNextPage }
                 nodes {
                   __typename
-                  ... on CheckRun { name isRequired(pullRequestNumber: $number) }
+                  ... on CheckRun { name isRequired(pullRequestNumber: $number) status conclusion detailsUrl startedAt completedAt checkSuite { app { databaseId slug } } }
                   ... on StatusContext { context isRequired(pullRequestNumber: $number) }
                 }
               }
@@ -542,7 +553,36 @@ async function main() {
   const checkContexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts || null;
   const requiredNames = new Set((checkContexts?.nodes ?? [])
     .filter((n) => n?.isRequired === true).map((n) => n.name ?? n.context).filter(Boolean));
-  checkRollup = checkRollup.map((c) => ({ ...c, required: requiredNames.has(c.name), outcome: checkOutcome(c) }));
+  // Identity comes from GitHub, never from a display-name/body heuristic. Match an exact attempt.
+  checkRollup = checkRollup.map((c) => {
+    const candidates = (checkContexts?.nodes ?? []).filter(n => n.__typename === 'CheckRun'
+      && n.name === c.name && n.detailsUrl === c.detailsUrl
+      && n.startedAt === c.startedAt && n.completedAt === c.completedAt);
+    const app = candidates.length === 1 ? candidates[0].checkSuite?.app : null;
+    return { ...c, appId: app?.databaseId ?? null, required: requiredNames.has(c.name), outcome: checkOutcome(c) };
+  });
+  let requiredChecks = [];
+  let requiredChecksUnavailable = false;
+  if (!terminal) {
+    try {
+      if (!pr.baseRefName) throw new Error('Missing PR base branch');
+      const rules = await ghJson(`repos/${args.repo}/rules/branches/${encodeURIComponent(pr.baseRefName)}?per_page=100`, { includeHeaders: true, fatalExit: false, retries: 1 });
+      // A full page may be truncated. Unknown is not an empty inventory.
+      if (!Array.isArray(rules) || rules.length >= 100) throw new Error('Incomplete branch rules');
+      requiredChecks = requiredChecksOf(pr.baseRef, rules);
+      checkRollup = applyRequiredChecks(checkRollup, requiredChecks);
+    } catch (error) {
+      requiredChecksUnavailable = true;
+      checksError = checksError || `Required-check inventory unavailable: ${String(error.message).slice(0, 300)}`;
+    }
+  }
+  const checkCommit = pr.commits?.nodes?.[0]?.commit;
+  const reviewerChecks = !checksUnavailable && !checkContexts?.pageInfo?.hasNextPage
+    && checkCommit?.oid === pr.headRefOid
+    ? (checkContexts?.nodes ?? []).filter(n => n.__typename === 'CheckRun').map(n => ({
+      ...normalizeCheckRun(n), headSha: checkCommit.oid,
+      appId: n.checkSuite?.app?.databaseId ?? null, appSlug: n.checkSuite?.app?.slug ?? null,
+    })) : [];
   const checksTruncated = Boolean(checkContexts?.pageInfo?.hasNextPage);
   const checksSummary = summarizeChecks(
     checkRollup,
@@ -564,6 +604,14 @@ async function main() {
   };
   const truncated = reviewThreadsTruncated || checksTruncated;
   const gate = deriveVerdict({ pr, ghView, checksSummary, reviewThreads, truncated, mergeQueue });
+  if (requiredChecksUnavailable && !terminal) {
+    if (gate.verdict === 'READY') gate.verdict = 'NOT_READY';
+    gate.blockers.push('required_checks_unavailable');
+  }
+  if (args.expectHead && args.expectHead !== pr.headRefOid) {
+    gate.verdict = 'NEEDS_WORK';
+    gate.blockers.push('delivery_evidence_changed');
+  }
   const strictExitCode = VERDICT_EXIT_CODES[gate.verdict] ?? 50;
 
   const out = {
@@ -601,11 +649,14 @@ async function main() {
     gate: {
       verdict: gate.verdict,
       strictExitCode,
+      requiredChecksUnavailable,
       truncated,
       reviewThreadsTruncated,
       checksTruncated,
     },
     checks: checkRollup,
+    requiredChecks,
+    reviewerChecks,
     mergeQueue,
     checksSummary: {
       total: checksSummary.total,

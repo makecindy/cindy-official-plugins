@@ -78,7 +78,7 @@ export async function ensureBinary() {
 
 // `gh api <path>` returning parsed JSON. One retry with backoff on transient failure.
 // Auth / rate-limit failures exit(1) immediately.
-export async function ghJson(path, { retries = 1, includeHeaders = false } = {}) {
+export async function ghJson(path, { retries = 1, includeHeaders = false, fatalExit = true } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -90,7 +90,8 @@ export async function ghJson(path, { retries = 1, includeHeaders = false } = {})
       if (looksFatal(errStr)) {
         if (includeHeaders) reportRateLimit(e);
         process.stderr.write(`[gh] fatal on ${path}: ${errStr.slice(0, 500)}\n`);
-        process.exit(1);
+        if (fatalExit) process.exit(1);
+        throw e;
       }
       if (attempt < retries) {
         await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));

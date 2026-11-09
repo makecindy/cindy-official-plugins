@@ -23,6 +23,7 @@ export function waitFacts(snap) {
       && !snap.reviewThreads?.truncated,
     checks: (snap.checks ?? []).filter((c) => c.name).map((c) => ({
       name: c.name, workflowName: c.workflowName || '', outcome: checkOutcome(c),
+      ...(c.expected ? { expected: true } : {}),
       attempt: JSON.stringify([c.detailsUrl ?? '', c.startedAt ?? '', c.completedAt ?? '']),
     })),
     threads: (snap.reviewThreads?.nodes ?? []).map((t) => ({
@@ -34,7 +35,7 @@ export function waitFacts(snap) {
 }
 
 const KINDS = new Set(['human', 'baseline', 'checks', 'retry']);
-const HUMAN_BLOCKERS = new Set(['ci_failing', 'unresolved_review_threads', 'branch_protection_blocked', 'approval_required', 'check_action_required', 'changes_requested_waiting_re_review', 'merge_state_unstable']);
+const HUMAN_BLOCKERS = new Set(['required_checks_unavailable','ci_failing', 'unresolved_review_threads', 'branch_protection_blocked', 'approval_required', 'check_action_required', 'changes_requested_waiting_re_review', 'merge_state_unstable']);
 
 /** Validate before ack or any state write. Missing/ambiguous targets fail rather than widening scope. */
 export function makeWait(input, facts, now) {
@@ -84,6 +85,17 @@ export function makeWait(input, facts, now) {
   };
 }
 
+function waitCheck(old, checks) {
+  if (old.expected || old.workflowName?.startsWith('required-app:')) {
+    const matches = checks.filter(c => c.name === old.name);
+    // An expected requirement can expand into several workflow attempts. Keep waiting for all.
+    if (matches.length) return { ...matches[0], outcome: matches.some(c => c.outcome === 'failed') ? 'failed'
+      : matches.some(c => c.outcome === 'pending') ? 'pending' : 'passed',
+      attempt: JSON.stringify(matches.map(c => c.attempt).sort()) };
+  }
+  return checks.find(c => checkKey(c) === checkKey(old));
+}
+
 /** An explicit wait never hides new failures/comments/conflicts. It can only absorb base movement
  * for the exact failed checks already handled, plus the ordinary silence guard. */
 export function inspectWait(wait, snap) {
@@ -94,9 +106,9 @@ export function inspectWait(wait, snap) {
   // A CI wait is one batch. Successful partial progress does not require model work.
   // Other wait kinds still react to each repaired/retried blocker individually.
   const checksPending = wait.kind === 'checks' && wait.checks.some((old) =>
-    current.checks.some((c) => checkKey(c) === checkKey(old) && c.outcome === 'pending'));
+    waitCheck(old, current.checks)?.outcome === 'pending');
   for (const old of wait.checks) {
-    const check = current.checks.find((c) => checkKey(c) === checkKey(old));
+    const check = waitCheck(old, current.checks);
     // Never hide a missing target, a failure, or recovery of an already-failed blocker.
     if (checksPending && check?.outcome === 'passed' && old.outcome !== 'failed') continue;
     // Running is not actionable. Completion of a different attempt is, even with the same verdict.
@@ -123,7 +135,7 @@ export function inspectWait(wait, snap) {
   const ignoreBase = current.checks.filter((c) => c.outcome === 'failed').every((c) =>
     wait.checks.some((old) => checkKey(old) === checkKey(c) && old.attempt === c.attempt && old.outcome === c.outcome));
   const signature = JSON.stringify([
-    wait.checks.map((old) => current.checks.find((c) => checkKey(c) === checkKey(old)) ?? null),
+    wait.checks.map((old) => waitCheck(old, current.checks) ?? null),
     wait.threads.map((old) => current.threads.find((t) => t.id === old.id) ?? null),
     reopened, current.reviewDecision, current.blockers.includes('branch_behind_base'),
   ]);

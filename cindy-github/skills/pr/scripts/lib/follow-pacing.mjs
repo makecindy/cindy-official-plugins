@@ -134,6 +134,26 @@ export function botsAnswered(snap, bots, head, since) {
   for (const reaction of snap?.reactions ?? []) {
     if (reaction?.content === 'THUMBS_UP' && after(reaction?.at)) mark(reaction?.author);
   }
+  // Only an expected reviewer's own GitHub App can supply its completion signal.
+  // Keep the latest attempt per app/check; a failed/cancelled/skipped run is not success.
+  if (!snap?.checksSummary?.unavailable && !snap?.checksSummary?.truncated) {
+    for (const bot of wanted) {
+      const latest = new Map();
+      for (const c of snap?.reviewerChecks ?? []) {
+        if (c.headSha !== head || c.appSlug !== bot || !Number.isInteger(c.appId) || c.appId <= 0) continue;
+        const at = timeOf(c.startedAt);
+        if (at === null || !c.name) continue;
+        const key = `${c.appId}:${c.name}`;
+        const old = latest.get(key);
+        if (!old || at > old.at) latest.set(key, { at, c });
+        else if (at === old.at && (c.status !== old.c.status || c.conclusion !== old.c.conclusion)) {
+          latest.set(key, { at, c: { ...c, status: 'UNKNOWN' } });
+        }
+      }
+      if (latest.size && [...latest.values()].every(({c}) => c.status === 'COMPLETED'
+        && c.conclusion === 'SUCCESS' && timeOf(c.completedAt) !== null)) mark(bot);
+    }
+  }
   return [...answered].sort();
 }
 

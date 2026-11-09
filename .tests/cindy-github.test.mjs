@@ -7,6 +7,8 @@ import { createContext, Script } from 'node:vm';
 import './cindy-github-pr/cleanup-plan.test.mjs';
 import './cindy-github-pr/gate.test.mjs';
 import './cindy-github-pr/preflight.test.mjs';
+import './cindy-github-pr/pacing.test.mjs';
+import './cindy-github-pr/trace.test.mjs';
 import './cindy-github-pr/snapshot.test.mjs';
 
 const githubSource = readFileSync(
@@ -78,7 +80,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.8');
+  assert.equal(manifest.version, '1.5.9');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
