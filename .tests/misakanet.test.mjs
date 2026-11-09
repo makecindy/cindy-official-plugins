@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE = join(root, 'misakanet');
@@ -80,6 +81,7 @@ async function loadPlugin({ respond, fetchResult } = {}) {
   // evaluates the file the way the host does, with the host stub already in place.
   const context = vm.createContext({
     cindy: stub,
+    crypto: globalThis.crypto ?? webcrypto,
     console,
     JSON,
     Math,
@@ -473,7 +475,9 @@ test('submit_intake: a rejected request is "not sent" — retrying it is safe', 
   assert.match(answer.message, /可以重试/);
 });
 
-test('submit_intake: a connection that never opened is "not sent"', async () => {
+test('submit_intake: a failure it cannot place stays "uncertain", never "safe to retry"', async () => {
+  // The conservative rule: without proof that the request never left, the plugin must not call it
+  // retryable — a duplicate public issue is worse than a cautious message.
   const load = await loadPlugin({
     fetchResult: () => ({ ok: false, message: 'getaddrinfo ENOTFOUND misakanet.org' }),
   });
@@ -482,7 +486,8 @@ test('submit_intake: a connection that never opened is "not sent"', async () => 
     user_confirmed: true,
   });
   assert.equal(answer.ok, false);
-  assert.equal(answer.delivery, 'not_sent');
+  assert.equal(answer.delivery, 'uncertain');
+  assert.match(answer.message, /不要重发/);
 });
 
 test('search: a network failure keeps the plain retry advice', async () => {
@@ -495,4 +500,90 @@ test('search: a network failure keeps the plain retry advice', async () => {
   assert.equal(answer.ok, false);
   assert.equal(answer.delivery, undefined);
   assert.match(answer.message, /稍后重试/);
+});
+
+/* ── 自动 review 的其余几处修复 ────────────────────────────────────────────── */
+
+test('the outward client id comes from a CSPRNG, never a weak fallback', async () => {
+  // The id travels to the endpoint as X-MisakaNet-Client and the endpoint counts distinct
+  // clients with it, so a predictable value would make that count meaningless.
+  const source = readFileSync(MAIN, 'utf8');
+  assert.doesNotMatch(source, /Math\.random\s*\(/, 'no weak randomness for an outward id');
+  const load = await loadPlugin({ respond: () => ({ results: [] }) });
+  await callTool(load, 'misakanet_search', { query: 'anything' });
+  const id = load.requests[0].headers['X-MisakaNet-Client'];
+  assert.match(id, /^cindy-[a-z0-9]{16}$/, `CSPRNG id shape: ${id}`);
+});
+
+test('submit_intake: an unknown network failure is "uncertain", not "not sent"', async () => {
+  // Only a failure that proves the request never left may be called "not sent".
+  const load = await loadPlugin({
+    fetchResult: () => ({ ok: false, message: 'proxy closed the connection unexpectedly' }),
+  });
+  const answer = await callTool(load, 'misakanet_submit_intake', {
+    problem: 'a report whose fate is unknown',
+    user_confirmed: true,
+  });
+  assert.equal(answer.ok, false);
+  assert.equal(answer.delivery, 'uncertain');
+  assert.match(answer.message, /不要重发/);
+});
+
+test('submit_intake: a fetch that throws is "uncertain"', async () => {
+  const load = await loadPlugin({
+    fetchResult: () => { throw new Error('socket hang up'); },
+  });
+  const answer = await callTool(load, 'misakanet_submit_intake', {
+    problem: 'a report whose fetch threw',
+    user_confirmed: true,
+  });
+  assert.equal(answer.ok, false);
+  assert.equal(answer.delivery, 'uncertain');
+  assert.match(answer.message, /不要重发/);
+});
+
+test('search: detail=full keeps the whole record the endpoint returned', async () => {
+  const load = await loadPlugin({
+    respond: () => ({
+      detail: 'full',
+      results: [
+        {
+          id: 'lesson-x',
+          title: 'Lesson X',
+          problem: 'the problem',
+          content: '# the whole markdown body',
+          fix: 'the fix',
+          verification: 'the verification',
+          path: 'lessons/core/lesson-x.md',
+          score: 3.2,
+        },
+      ],
+    }),
+  });
+  const answer = await callTool(load, 'misakanet_search', { query: 'anything', detail: 'full' });
+  assert.equal(answer.ok, true);
+  const first = answer.result.results[0];
+  assert.equal(first.content, '# the whole markdown body', 'full detail must not be trimmed to a summary');
+  assert.equal(first.fix, 'the fix');
+  assert.equal(first.verification, 'the verification');
+});
+
+test('the turn counter advances in memory when the private write fails', async () => {
+  // If the file were the only source of truth, a failing write would re-announce the first-turn
+  // notice on every turn.
+  const load = await loadPlugin({ respond: () => ({ results: [] }) });
+  const originalSend = load.stub.send.bind(load.stub);
+  load.stub.send = async (payload) => {
+    if (payload.type === 'fs-request') return { ok: false };
+    return originalSend(payload);
+  };
+  await load.stub.handler({ type: 'event', name: 'did-turn-end', data: { sessionId: 's1' } });
+  // The turn handler is fire-and-forget: the host does not await it, so the test waits for it.
+  for (let i = 0; i < 100 && load.sent.filter((m) => m.type === 'notify').length === 0; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await load.stub.handler({ type: 'event', name: 'did-turn-end', data: { sessionId: 's1' } });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const notices = load.sent.filter((m) => m.type === 'notify');
+  assert.equal(notices.length, 1, 'the first-turn notice must not repeat when the write fails');
 });

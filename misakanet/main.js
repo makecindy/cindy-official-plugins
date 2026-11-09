@@ -16,7 +16,7 @@
 
 const MCP_URL = 'https://misakanet.org/mcp';
 const FETCH_TIMEOUT_MS = 45000;
-const PLUGIN_VERSION = '1.5.0';
+const PLUGIN_VERSION = '1.6.0';
 
 /* 客户端标识：每台机器一个稳定 id。
  * 端点会把 X-MisakaNet-Client salt-hash 进 search_signals.client_hint，而 client_hint 是
@@ -228,14 +228,27 @@ async function callHostedTool(toolName, args, callId, options) {
     params: { name: toolName, arguments: args },
   });
 
-  const response = await cindy.fetch({
-    url: MCP_URL,
-    method: 'POST',
-    headers: buildHeaders(await ensureClientId()),
-    body,
-    timeoutMs: FETCH_TIMEOUT_MS,
-    callId,
-  });
+  let response;
+  try {
+    response = await cindy.fetch({
+      url: MCP_URL,
+      method: 'POST',
+      headers: buildHeaders(await ensureClientId()),
+      body,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      callId,
+    });
+  } catch (error) {
+    // 宿主代发抛异常：请求可能已经发出去了。外发工具在这里只能按最坏情况处理。
+    const err = new Error(asString(error && error.message) || '网络调用失败');
+    err.code = 'MISAKANET_NETWORK';
+    err.hint = '无法连接 MisakaNet 托管端点（https://misakanet.org/mcp）：' + err.message;
+    if (irreversible) {
+      err.delivery = DELIVERY_UNCERTAIN;
+      err.hint = deliveryHint(err.delivery) + err.hint;
+    }
+    throw err;
+  }
 
   if (!response || response.ok !== true) {
     const reason = asString(response && response.message) || '未知网络错误';
@@ -328,8 +341,17 @@ async function callHostedTool(toolName, args, callId, options) {
 /* ---------- 各工具的结果整形 ---------- */
 
 function shapeSearch(payload, args) {
+  const detail = asString(payload.detail) || asString(args.detail) || 'compact';
+  const wantsFull = detail === 'full';
   const results = asArray(payload.results).map((item) => {
     const row = item && typeof item === 'object' ? item : {};
+    if (wantsFull) {
+      // full 级别端点返回的是完整记录（正文 / 修法 / 验证 / 路径…）。这一层不能把它压回
+      // 摘要字段：调用方明确要了全文，就得拿到全文，否则 detail 参数形同虚设。
+      return Object.assign({}, row, {
+        summary_plain: clip(asString(row.summary_plain), 240) || undefined,
+      });
+    }
     return {
       id: asString(row.id) || undefined,
       title: asString(row.title) || undefined,
@@ -543,7 +565,14 @@ const CHECKPOINT_STATE_FILE = 'checkpoint.json';
 const CHECKPOINT_AT = 20;
 const CHECKPOINT_EVERY = 10;
 
+// 轮次计数的权威副本在内存里，私有目录文件只用于跨重启延续。
+let checkpointStateCache = null;
+
 async function readCheckpointState() {
+  // 内存是权威，文件只是持久化副本。写失败时计数仍在内存里前进：否则每次都从文件重读，
+  // 读写都失败就会每轮重新公告一次首轮提示；读得到旧文件而写不进去则计数永远不前进。
+  if (checkpointStateCache) return checkpointStateCache;
+  let parsed = null;
   try {
     const read = await cindy.send({
       type: 'fs-request',
@@ -552,18 +581,20 @@ async function readCheckpointState() {
       path: CHECKPOINT_STATE_FILE,
     });
     if (read && read.ok === true && typeof read.content === 'string') {
-      const parsed = JSON.parse(read.content);
-      if (parsed && typeof parsed === 'object' && parsed.sessions && typeof parsed.sessions === 'object') {
-        return { sessions: parsed.sessions };
+      const value = JSON.parse(read.content);
+      if (value && typeof value === 'object' && value.sessions && typeof value.sessions === 'object') {
+        parsed = value;
       }
     }
   } catch (error) {
     /* 读不到就当没有 */
   }
-  return { sessions: {} };
+  checkpointStateCache = parsed || { sessions: {} };
+  return checkpointStateCache;
 }
 
 async function writeCheckpointState(state) {
+  checkpointStateCache = state;
   try {
     await cindy.send({
       type: 'fs-request',
@@ -618,6 +649,8 @@ async function handleToolCall(msg) {
   const callId = msg.callId;
   const tool = msg.tool;
   const args = msg.args || {};
+  // 外发工具的失败路径必须区分三态，所以要知道这次调用是不是外发。
+  let irreversibleCall = false;
 
   try {
     if (tool === TOOLS.misakanet_search) {
@@ -662,6 +695,7 @@ async function handleToolCall(msg) {
       if (!intakeArgs.kind) delete intakeArgs.kind;
       intakeArgs.source = 'cindy';
       // irreversible: 这会在第三方公开仓库建一条不可撤回的公开 issue，失败必须分三态。
+      irreversibleCall = true;
       const payload = await callHostedTool(TOOLS.misakanet_submit_intake, intakeArgs, callId, {
         irreversible: true,
       });
@@ -687,7 +721,12 @@ async function handleToolCall(msg) {
   } catch (error) {
     const code = (error && error.code) || 'MISAKANET_ERROR';
     const hint = (error && error.hint) || '调用 MisakaNet 失败。';
-    return fail(callId, code, hint, error && error.delivery);
+    const delivery = error && error.delivery;
+    if (!delivery && irreversibleCall) {
+      // 外发工具的兜底出口：拿不到任何回执就按「不确定」处理，绝不提示盲目重试。
+      return fail(callId, code, deliveryHint(DELIVERY_UNCERTAIN) + hint, DELIVERY_UNCERTAIN);
+    }
+    return fail(callId, code, hint, delivery);
   }
 }
 
