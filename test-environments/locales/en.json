@@ -44,6 +44,9 @@
     },
     "select_account": {
       "description": "Request switching the exact owned live Cindy acceptance job to a remembered real account from the same project. Returns requested, not success. The app must have its own login on this computer; uncertainty never triggers an automatic repeat. Query status and inspect before explicitly requesting another switch. Does not export credentials."
+    },
+    "remote": {
+      "description": "SSH template; choose a computer each run. catalog(target) reads B profiles/hardware. plan(target,profile,pr{repo,number,commit},requirements) previews a pinned PR; start(runId) checks it out in a new worktree and builds/starts using B-local login. status/stop/select_account/action/collect use the same runId. action runs saved prepare/verify argv only. collect brings bounded, hashed results and optional logs/screenshot to outputDir or private storage. Uses existing OpenSSH trust, no password/key storage or agent forwarding; deploys plugin code only. Never copies app credentials. B missing login requires normal reauthorization; cross-device first authorization is separate. Lost replies are unknown: query status before any repeat; never blindly repeat start/actions. Human/device-tool work stays pending after command exits; real devices and human input are required. No automatic PR publication; review/redact logs."
     }
   }
 }

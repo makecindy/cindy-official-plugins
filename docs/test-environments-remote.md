@@ -63,3 +63,58 @@ wrong-host/repository/SHA, uncertain disconnect, worktree isolation, artifact bo
 size checks and real SSH/hardware evidence. Without an actual selected B, simulated
 transport plus local Git/process tests must be labeled simulated, never cross-computer
 hardware acceptance.
+
+## Phase 2 implementation draft (separate PR, version 1.1.0)
+
+Generic AI/CLI tools now include remote_catalog, remote_plan, remote_start,
+remote_status, remote_stop, remote_select_account, remote_action and remote_collect.
+Pass target.host and optionally target.node each time; no per-computer business script
+is generated. The management page remains local-first; use AI/CLI for SSH.
+
+Read B's catalog, get the exact head SHA through the GitHub plugin, then remote_plan
+with target, B profile ID, pr.repo/number/commit and requirements. Review the returned
+runId/plan, start once, and use that same ID for status, account selection, configured
+prepare/verify commands, stop and collection. outputDir can name the current task's
+absolute directory; otherwise artifacts remain in private local application data.
+
+B needs a Phase 1 profile, source repository and project toolchain. Only the fixed
+plugin runtime is provisioned outside Git; no Cindy plugin installation or credential
+transfer occurs on B. A new worktree checks repository origin and exact SHA without
+overwriting B's source. Reuse B-local application login; missing login waits rather
+than treating SSH as authorization. Cindy can use project-owned prepare/verify argv;
+missing commands report ACTION_NOT_CONFIGURED. Device/human work stays pending after
+zero command exits.
+
+OpenSSH uses existing host trust, BatchMode, and disables agent/port forwarding.
+No password/private key is read or stored. Transfer contains plugin code, public
+configuration and selected evidence only. A fixed Node bootstrap receives JSON stdin;
+validated target/Node values are shell-quoted, Git/project commands use argv.
+Remote execution and evidence transfer are a separate review boundary requiring
+maintainer assessment in the follow-up PR, not certification by local tests alone.
+
+Automated tests simulate SSH transport with real Node/Git/worktrees/shared runners,
+checking checkout, sample/verification commands, scoped stop, evidence limits/hashes
+and uncertain replies. There is **no actual cross-computer SSH, real-account, specific
+hardware, physical-phone or human-trackpad evidence** yet. Missing 1.0.4 WIP evidence
+is not reused.
+
+## Cross-device first authorization: findings and reserved design
+
+| Capability | Source finding | Plan |
+| --- | --- | --- |
+| B already signed in | Existing account list/switch/refresh and encrypted storage paths | Reuse directly; no new auth service prerequisite |
+| Browser login result retrieval | Hosted callback, PKCE and client polling exist; current entry opens B's system browser | Evaluate a minimal URL handoff later; this is not A's Cindy approving B |
+| Signed-in A approving an independent session for empty B | No complete reusable contract found in inspected routes/client; no deployment assumed | Separate protocol work, never copy A's session files |
+
+Potential interfaces are begin (B initiates and retains its secret), approve/deny
+(A explicitly confirms device/account), and redeem/poll (B proves initiation and
+receives its own device session). Bind target identity/challenge, account, expiry and
+single consumption; cover denial, revocation, expiration and concurrent replay.
+Editable display fields must not establish device identity. A/B credentials remain
+inside their respective applications; plugin/SSH carries only public request IDs,
+authorization links and progress. Prefer existing session issuance/completeLogin.
+Minimal client/server changes, compatibility and deployment order require protocol
+review and real integration evidence. This iteration reserves design/unsupported
+states only, without new authorization endpoints or claims of password-free login.
+
+AI calls the single `remote` tool with operation=catalog/plan/start/status/stop/select_account/action/collect. The remote_catalog-style names also remain CLI/internal workflow entries, not eight separate Host tools.

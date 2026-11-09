@@ -5,7 +5,7 @@
   "name": "Test Environments",
   "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
   "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -478,6 +478,127 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "remote",
+      "description": "SSH template; choose a computer each run. catalog(target) reads B profiles/hardware. plan(target,profile,pr{repo,number,commit},requirements) previews a pinned PR; start(runId) checks it out in a new worktree and builds/starts using B-local login. status/stop/select_account/action/collect use the same runId. action runs saved prepare/verify argv only. collect brings bounded, hashed results and optional logs/screenshot to outputDir or private storage. Uses existing OpenSSH trust, no password/key storage or agent forwarding; deploys plugin code only. Never copies app credentials. B missing login requires normal reauthorization; cross-device first authorization is separate. Lost replies are unknown: query status before any repeat; never blindly repeat start/actions. Human/device-tool work stays pending after command exits; real devices and human input are required. No automatic PR publication; review/redact logs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "plan",
+              "start",
+              "status",
+              "stop",
+              "select_account",
+              "action",
+              "collect"
+            ]
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Exact preconfigured SSH Host alias/hostname. Never passwords, private keys or ssh options."
+              },
+              "node": {
+                "type": "string",
+                "description": "node or an absolute Node executable path on the target."
+              }
+            },
+            "required": [
+              "host"
+            ],
+            "additionalProperties": false
+          },
+          "profile": {
+            "type": "string"
+          },
+          "pr": {
+            "type": "object",
+            "properties": {
+              "repo": {
+                "type": "string",
+                "description": "GitHub owner/repo matching B repository origin."
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$",
+                "description": "Exact current PR head SHA obtained with the GitHub plugin."
+              }
+            },
+            "required": [
+              "repo",
+              "number",
+              "commit"
+            ],
+            "additionalProperties": false
+          },
+          "requirements": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "human",
+                    "device-tool"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "deviceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "runId": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "prepare",
+              "verify"
+            ]
+          },
+          "logs": {
+            "type": "boolean",
+            "default": false
+          },
+          "screenshot": {
+            "type": "boolean",
+            "default": false
+          },
+          "outputDir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "additionalProperties": false
+      }
     }
   ],
   "node": {
@@ -509,5 +630,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "Phase 1: local real-account acceptance workflow and explicit reauthorization states. SSH orchestration and cross-device first authorization are separate Phase 2 work."
+  "releaseNotes": "Phase 2: parameterized SSH orchestration, pinned PR worktrees, B-local session reuse, configured sample/verification commands and private evidence collection. Cross-device first authorization remains independent research; real hardware and human verification remain explicit."
 }

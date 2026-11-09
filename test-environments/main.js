@@ -1,5 +1,5 @@
 'use strict';
-const METHODS=['catalog','save_project','save_account','save_profile','save_case','remove','import_cindy','select_account','plan','start','status','stop','inspect'];
+const METHODS=['catalog','save_project','save_account','save_profile','save_case','remove','import_cindy','select_account','plan','start','status','stop','inspect','remote'];
 async function request(method,args){
   if(!METHODS.includes(method))return {ok:false,errorCode:'UNKNOWN_OPERATION',message:'Unknown operation.',execution:'not_executed'};
   const r=await cindy.node.request({method,params:args||{},timeoutMs:30000});

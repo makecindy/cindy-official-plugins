@@ -108,4 +108,25 @@ The catalog, job logs and screenshots stay in local user data. Review/redact log
 before sharing. Do not enable unfinished builds in the daily host or install this
 plugin inside the target dev app to launch another layer. Packaging is not installation.
 
-This package is the Phase 1 local delivery. SSH orchestration and cross-device first authorization are independent Phase 2 capabilities, neither a Phase 1 completion gate. Device-tool and real human steps remain explicit.
+Phase 1 local delivery remains independent. SSH orchestration and cross-device first authorization are independent Phase 2 capabilities, neither a Phase 1 completion gate. Device-tool and real human steps remain explicit.
+
+## Phase 2 SSH template (separate draft)
+
+Version 1.1.0 adds generic SSH orchestration in a separate PR; computers are parameters.
+Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
+remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
+runId. Reuse that ID for status, account selection, remote_action, stop and collection.
+target.host is a configured SSH alias/hostname; target.node optionally names B's Node
+executable. pr requires GitHub owner/repo, number and exact commit. B needs its Phase 1
+profile, repository, SSH trust and toolchain; accounts/encrypted sessions stay on B.
+Prepare/verify run saved argv only, never arbitrary ad-hoc SSH commands. Missing project
+commands/device tools produce explicit handoffs. Human/device-tool requirements remain
+pending; synthetic input and command exits do not certify real hardware or human feel.
+Only this run's result, bounded optional logs and private screenshot are collected with
+hash checks; no credentials or automatic PR publication. Review/redact project logs.
+After disconnect, inspect the same runId rather than blindly starting again. Cross-device
+first authorization remains independent research; missing B login waits normally.
+Current evidence is simulated SSH with real local Git/processes, not cross-computer,
+real-account, physical-phone or human-input verification.
+
+AI calls the single `remote` tool with operation=catalog/plan/start/status/stop/select_account/action/collect. The remote_catalog-style names also remain CLI/internal workflow entries, not eight separate Host tools.

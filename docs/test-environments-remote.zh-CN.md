@@ -52,3 +52,46 @@ B 的已保存档案及验收项目。常用电脑可以复用已有 SSH 配置�
 第一阶段证据只覆盖其当前实现。第二阶段应新增命令注入、错误主机/仓库/SHA、断线未知、
 独立工作树、证据越界/大小校验及实际 SSH/硬件验证。没有选定的真实 B 时，可以验证模拟传输和
 本机 Git/进程链路，但必须标为模拟，不能宣称跨电脑真机验收已完成。
+
+## 第二阶段实现草稿（独立 PR，版本 1.1.0）
+
+已实现通用 AI/CLI 工具 remote_catalog、remote_plan、remote_start、remote_status、remote_stop、
+remote_select_account、remote_action、remote_collect。每次传 target.host，可选 target.node；
+无需为每台电脑生成一份业务脚本。管理页当前仍以本机流程为主，SSH 通过 AI 工具或 CLI 使用。
+
+典型调用：先 remote_catalog 读取 B 档案，再从 GitHub 工具获得 PR 的精确 head SHA；
+remote_plan 指定 target、B 档案 ID、pr.repo/number/commit 和 requirements，返回 runId。
+查看计划后 remote_start；之后按同一 runId 查询、选账号、执行已配置 prepare/verify、停止和收集。
+remote_collect 的 outputDir 可指定当前任务的绝对目录，省略则写本机私有数据目录。
+
+B 需要已有第一阶段档案、目标源码仓库及工具链。插件只部署自身固定运行代码到 B 用户数据目录，
+不在 B 安装 Cindy 插件或搬认证数据。PR 在新的独立 worktree 检出，校验 origin 和精确 SHA，
+不覆盖 B 现有源码。应用复用 B 档案自己的登录；未登录保持等待，SSH 成功不能代替授权。
+Cindy 的 prepare/verify 可配置项目自己的 argv，缺少命令时明确报 ACTION_NOT_CONFIGURED；
+手机与人工项目继续保持待验，不会因脚本退出 0 变成通过。
+
+SSH 使用已有主机信任、BatchMode 和禁用 Agent/端口转发的选项，不读取或保存密码和私钥。
+传输只包括插件源码、公开配置和指定证据。源代码字符串只进入固定 Node bootstrap，
+PR 参数经 JSON stdin 传递；目标别名和 Node 路径校验并 shell 引号，Git/项目命令用 argv。
+远端动作和产物属于新的远端执行/传输面，独立 PR 需维护者按该边界审核，不能凭本机代码测试放行。
+
+当前自动测试模拟 SSH 传输，使用真实 Node/Git/工作树/共享 runner 验证检出、样本命令、
+验收命令、精确停止、产物名称/大小/哈希及未知回执。**尚无真实跨电脑 SSH、正式账号、
+硬件型号实机、实体手机或触控板人工验收证据**。既有 1.0.4 WIP 证据不适用。
+
+## 跨设备首次授权研究结论与预留
+
+| 能力 | 源码核查结果 | 计划 |
+| --- | --- | --- |
+| B 已有本机登录 | 现有账号列表/切换/刷新与加密保存路径可复用 | SSH 方案直接使用，不依赖新授权服务 |
+| B 发起浏览器登录后取回结果 | 已有托管回调和 PKCE/客户端轮询，当前入口打开 B 的系统浏览器 | 未来评估最小登录链接交接；它不等于 A 的 Cindy 确认设备授权 |
+| 已登录 A 确认、给空 B 签发独立会话 | 当前核查路由/客户端未发现可直接复用的完整接口；不假定支持或已部署 | 独立协议评估，禁止复制 A 的会话文件 |
+
+研究中的接口可分为 begin（B 发起并持有秘密）、approve/deny（A 明确确认目标及账号）、
+redeem/poll（B 证明持有发起凭据并取得自己的设备会话）。请求需绑定 B 身份/挑战、指定账号、
+有效期与单次消费；覆盖拒绝、撤销、过期和并发重放。目标设备不能由 A 的可编辑展示字段冒充。
+A 和 B 的凭证仍只由各自主程序保管，插件/SSH 只转交公开请求 ID/授权链接及进度。
+优先复用现有签发与 completeLogin 路径；需要的最小主程序/服务端改动、兼容性及发布顺序，
+必须以协议评审和真实联调为依据。本轮只预留设计和 unsupported 状态，不新增授权端点或宣称免密可用。
+
+AI 实际调用统一 `remote` 工具，以 operation 选择 catalog/plan/start/status/stop/select_account/action/collect。文中的 remote_catalog 等名称也保留为 CLI/内部流程入口；不是八个独立宿主工具。

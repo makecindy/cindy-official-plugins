@@ -88,7 +88,10 @@ class Environments{
     const project=db.projects[p.project],account=p.account?db.accounts[p.account]:undefined;if(!project||p.account&&!account)fail('REFERENCE_MISSING','A profile reference is missing.');
     const vars={profile:p.id,account:account?.selector,isolated:p.isolated,fixture:p.fixture,remoteControl:p.remoteControl||'inherit',background:p.background||'inherit',platform:p.platform,dataDir:path.join(this.home,'workspaces',p.project,p.id)};
     let argv,readiness='process',notes=[],handoff;
-    if(project.adapter==='cindy'){
+    if(project.adapter==='cindy'&&action!=='start'&&project.commands[action]){
+      argv=expand(project.commands[action],vars);readiness='command';
+      notes.push('Runs the project-configured sample/verification command. A zero exit code does not certify human or device-tool requirements.');
+    }else if(project.adapter==='cindy'){
       const mobile=p.platform!=='desktop',options=[`--region=${p.region||'global'}`];if(!mobile)options.push(`--isolated=${p.isolated}`);
       if(p.mode==='acceptance'){
         if(p.loginSource||p.serveLogin||account?.loginSource)fail('REMOTE_AUTH_NOT_IMPLEMENTED','This version uses normal sign-in on each computer. Remove the old loginSource/serveLogin WIP options; no credentials are transferred.');
@@ -122,7 +125,7 @@ class Environments{
   start(profileId,action='start'){
     const plan=this.plan(profileId,action),lock=path.join(this.home,'.launch-lock');try{fs.mkdirSync(lock);}catch(e){if(e.code==='EEXIST')fail('LAUNCH_BUSY','Another launch is being registered.');throw e;}
     try{
-      for(const job of this.jobs())if(job.projectRoot===plan.projectRoot&&(!['stopped','completed','failed'].includes(job.state)||alive(job.supervisorPid))&&action!=='verify')fail('PROJECT_BUSY',`Inspect or stop job ${job.jobId} before launching again.`);
+      for(const job of this.jobs())if(job.projectRoot===plan.projectRoot&&(!['stopped','completed','failed'].includes(job.state)||alive(job.supervisorPid))&&action!=='verify'&&!(action==='prepare'&&plan.readiness==='command'&&job.action==='start'))fail('PROJECT_BUSY',`Inspect or stop job ${job.jobId} before launching again.`);
       if(plan.readiness==='cindy'){
         const processes=execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8',maxBuffer:8*1024*1024});
         if(processes.split('\n').some(line=>line.includes(plan.projectRoot)&&/electron|electron-forge|vite|restart-desktop/.test(line)))fail('CHECKOUT_IN_USE','A desktop process already uses this checkout. Stop it through its owner before launching here.');
@@ -146,6 +149,6 @@ class Environments{
   }
   stop(jobId){const s=this.status(jobId);if(['stopped','completed','failed'].includes(s.state)&&!alive(s.supervisorPid))return s;if(s.state==='unknown')fail('JOB_UNCONFIRMED','Original supervisor unavailable; no process was stopped.');atomic(path.join(this.home,'jobs',jobId,'cancel.json'),{jobId,at:Date.now()});return {jobId,state:'stopping',execution:'requested',dataPreserved:true};}
   inspect(jobId,screenshot=false){if(typeof screenshot!=='boolean')fail('INVALID_INPUT','screenshot must be boolean.');const state=this.status(jobId),dir=path.join(this.home,'jobs',jobId);return require('./observation.cjs').inspectDesktop(dir,json(path.join(dir,'plan.json')),state,{screenshot});}
-  invoke(method,args={}){switch(method){case 'catalog':return this.catalog();case 'save_project':return this.saveProject(args.project,args.revision);case 'save_account':return this.saveAccount(args.account,args.revision);case 'save_profile':return this.saveProfile(args.profile,args.revision);case 'save_case':return this.saveCase(args.testCase,args.revision);case 'remove':return this.remove(args.kind,args.id,args.revision);case 'import_cindy':return this.importCindy(args.project,args.jobId);case 'select_account':return this.selectAccount(args.jobId,args.account);case 'plan':return this.plan(args.profile,args.action);case 'start':return this.start(args.profile,args.action);case 'status':return args.jobId?this.status(args.jobId):{jobs:this.jobs()};case 'stop':return this.stop(args.jobId);case 'inspect':return this.inspect(args.jobId,args.screenshot);default:fail('UNKNOWN_OPERATION','Unknown operation.');}}
+  invoke(method,args={}){if(method==='remote'){const {operation,...params}=args;if(!['catalog','plan','start','status','stop','select_account','action','collect'].includes(operation))fail('UNKNOWN_OPERATION','Unknown remote operation.');return new (require('./remote.cjs').Remote)(this.home).invoke('remote_'+operation,params);}if(['remote_catalog','remote_plan','remote_start','remote_status','remote_stop','remote_select_account','remote_action','remote_collect'].includes(method))return new (require('./remote.cjs').Remote)(this.home).invoke(method,args);switch(method){case 'catalog':return this.catalog();case 'save_project':return this.saveProject(args.project,args.revision);case 'save_account':return this.saveAccount(args.account,args.revision);case 'save_profile':return this.saveProfile(args.profile,args.revision);case 'save_case':return this.saveCase(args.testCase,args.revision);case 'remove':return this.remove(args.kind,args.id,args.revision);case 'import_cindy':return this.importCindy(args.project,args.jobId);case 'select_account':return this.selectAccount(args.jobId,args.account);case 'plan':return this.plan(args.profile,args.action);case 'start':return this.start(args.profile,args.action);case 'status':return args.jobId?this.status(args.jobId):{jobs:this.jobs()};case 'stop':return this.stop(args.jobId);case 'inspect':return this.inspect(args.jobId,args.screenshot);default:fail('UNKNOWN_OPERATION','Unknown operation.');}}
 }
 module.exports={Environments,defaultHome,atomic,json,alive,safeEnv};

@@ -44,6 +44,9 @@
     },
     "select_account": {
       "description": "이 플러그인이 소유한 Cindy 검수 작업을 같은 프로젝트의 기록된 실제 계정으로 전환하도록 요청합니다. 성공이 아닌 요청됨을 반환합니다. 각 컴퓨터에서 앱에 로그인하고 상태를 확인하세요. 불확실할 때 자동 재시도하지 않고 확인 후 명시적으로 다시 요청합니다. 자격 증명을 내보내지 않습니다."
+    },
+    "remote": {
+      "description": "공통 SSH 검수 템플릿입니다. catalog는 지정 컴퓨터와 B의 프로필을 조회하고, plan은 target·profile·PR repo/number/정확한 commit 및 선택적 수동/기기 요구사항으로 미실행 runId를 반환합니다. start는 새 worktree에서 빌드하고 B 자신의 로그인을 재사용합니다. status/stop/select_account/action/collect는 같은 runId를 씁니다. action은 저장된 prepare/verify 인수만 실행하고 collect는 크기와 해시를 확인한 결과·선택 로그/비공개 이미지를 로컬에 가져옵니다. 기존 OpenSSH 호스트 신뢰를 쓰며 키·자격 증명 복사, Agent 전달이나 기기 간 최초 인증은 하지 않습니다. B가 미로그인 상태이면 정상 재인증이 필요합니다. 불확실하면 상태부터 확인하고 시작·작업을 반복하지 마세요. 명령 종료로 실제 기기 도구·사람 검증을 통과시키지 않으며 PR에 자동 공개하지 않습니다. 공유 전 로그를 검토하세요."
     }
   }
 }

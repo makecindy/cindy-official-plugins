@@ -123,3 +123,5 @@ host or install the plugin inside the target dev instance.
 ```sh
 node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/test-environments.test.mjs
 ```
+
+A separate Phase 2 implementation draft now adds the generic SSH tools; see the [Phase 2 plan](test-environments-remote.md). It is not a Phase 1 completion gate. Actual SSH/hardware and authorization research evidence remains separate from Phase 1 account simulations.

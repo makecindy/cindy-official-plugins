@@ -108,3 +108,5 @@ prepare/verify 命令，不转换不同应用认证格式。
 ```sh
 node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/test-environments.test.mjs
 ```
+
+第二阶段独立实现草稿现已追加通用 SSH 工具，详见[第二阶段方案](test-environments-remote.zh-CN.md)。它不进入第一阶段完成门槛；实际 SSH/硬件与授权研究证据单列，不能与第一阶段模拟账号证据混用。

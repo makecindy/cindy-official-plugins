@@ -44,6 +44,9 @@
     },
     "select_account": {
       "description": "请求将准确的本插件 Cindy 验收实例切换到同项目已记录的正式账号。只返回已请求，需查询状态；本机缺少或过期的登录需正常登录。不确定时不自动重试，先检查实际实例，再明确请求切换。不导出凭证。"
+    },
+    "remote": {
+      "description": "通用 SSH 验收模板。operation=catalog 查看明确指定电脑及其 B 本机档案；plan 指定 target（SSH 别名/主机名，可选 Node 路径）、profile、pr（repo/number/精确 commit）及人工/设备要求，返回未执行的 runId。start 在新工作树检出该 PR 并构建启动，复用 B 自己的登录。status/stop/select_account/action/collect 均使用同一 runId；action 只执行项目已保存的 prepare/verify，collect 将本次限量、校验哈希的结果及可选日志/私有截图带回指定 outputDir 或本机私有目录。复用 OpenSSH 主机信任，不保存密码/私钥，不转发 Agent，只部署插件代码。不复制登录文件或实现跨设备首次授权；B 未登录需正常重新授权。回执丢失先查同一运行，不盲目重复启动或命令。命令退出不能代替实体设备工具和真实人工操作；不自动发到 PR，分享日志前脱敏。"
     }
   }
 }
