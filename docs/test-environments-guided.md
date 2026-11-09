@@ -1,5 +1,7 @@
 # 1.2.0: start from the guided home page
 
+> Version 1.2.1 further simplifies this to Choose project → Start; see [minimal usage](test-environments-simple.md). Below is historical 1.2.0 guidance/evidence.
+
 [简体中文](test-environments-guided.zh-CN.md)
 
 The old empty catalog exposed projects/accounts/profiles/cases/runs without a first

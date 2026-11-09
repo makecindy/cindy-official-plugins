@@ -25,7 +25,7 @@ async function setup(t,{locale='zh-CN',width=860,mode='light',advanced=true}={})
  fs.writeFileSync(path.join(project,'prepare.cjs'),"require('fs').writeFileSync('sample.txt','browser sample');");
  fs.writeFileSync(path.join(project,'verify.cjs'),"if(require('fs').readFileSync('sample.txt','utf8')!=='browser sample')process.exit(3);");
  const core=new Environments(store),worker=spawn(process.execPath,[path.join(root,'node/worker.cjs')],{env:{...safeEnv(),TEST_ENVIRONMENTS_HOME:store},stdio:['pipe','pipe','pipe']});
- let id=0;const pending=new Map(),calls=[],errors=[],state={wake:true,delay:0},token=randomUUID();
+ let id=0;const pending=new Map(),calls=[],errors=[],state={wake:true,delay:0,pickCalls:[],pickResult:{ok:false,errorCode:'CANCELLED'}},token=randomUUID();
  readline.createInterface({input:worker.stdout}).on('line',line=>{const r=JSON.parse(line);pending.get(r.id)?.(r.result);pending.delete(r.id);});
  const rpc=q=>new Promise(resolve=>{calls.push(q);const n=++id;pending.set(n,resolve);worker.stdin.write(JSON.stringify({id:n,method:q.method,params:q.params})+'\n');});
  const server=http.createServer(async(req,res)=>{
@@ -33,12 +33,13 @@ async function setup(t,{locale='zh-CN',width=860,mode='light',advanced=true}={})
   const reply=(value,status=200,type='application/json')=>{res.writeHead(status,{'Content-Type':type});res.end(type==='application/json'?JSON.stringify(value):value);};
   if(u.pathname==='/wake')return reply({},state.wake?200:503);
   if(u.pathname==='/app-context')return reply({context:{locale}});
+  if(u.pathname==='/pick'&&req.method==='POST'){if(req.headers.origin!==`http://127.0.0.1:${server.address().port}`||req.headers['x-test-bridge']!==token)return reply({},403);let body='';for await(const b of req)body+=b;state.pickCalls.push(JSON.parse(body));if(state.pickDelay)await wait(state.pickDelay);return reply(state.pickResult);}
   if(u.pathname==='/rpc'&&req.method==='POST'){
    if(req.headers.origin!==`http://127.0.0.1:${server.address().port}`||req.headers['x-test-bridge']!==token)return reply({},403);
    let body='';for await(const b of req){body+=b;if(body.length>100000){reply({},413);return;}}
    const q=JSON.parse(body);if(q.method==='remote'&&state.remoteHandler){calls.push(q);try{return reply({ok:true,data:await state.remoteHandler(q.params)});}catch(e){return reply({ok:false,errorCode:e.code||'REMOTE_FAILED',message:e.message,execution:e.execution||'unknown'});}}if(state.delay)await wait(state.delay);return reply(await rpc(q));
   }
-  if(u.pathname==='/bridge.html')return reply(`<script>window.cindy={node:{request:async q=>({ok:true,result:await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Test-Bridge':${JSON.stringify(token)}},body:JSON.stringify(q)}).then(r=>r.json())})},onHostMessage:()=>{},send:async()=>{}};</script><script src="/main.js" onload="window.bridgeReady=true"></script>`,200,'text/html');
+  if(u.pathname==='/bridge.html')return reply(`<meta charset="utf-8"><script>window.cindy={pick:async q=>fetch('/pick',{method:'POST',headers:{'Content-Type':'application/json','X-Test-Bridge':${JSON.stringify(token)}},body:JSON.stringify(q)}).then(r=>r.json()),node:{request:async q=>({ok:true,result:await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Test-Bridge':${JSON.stringify(token)}},body:JSON.stringify(q)}).then(r=>r.json())})},onHostMessage:()=>{},send:async()=>{}};</script><script src="/main.js" onload="window.bridgeReady=true"></script>`,200,'text/html');
   const name=u.pathname.slice(1),types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png'};
   if(!['manage.html','manage.js','manage.css','main.js','workflow.js','assets/icon.png'].includes(name))return reply({},404);
   reply(fs.readFileSync(path.join(root,name)),200,types[path.extname(name)]);
@@ -96,7 +97,7 @@ test('clicks reject rebinding and invalid JSON, preserve newer edits and recover
 });
 
 test('clicking save with a delayed response deduplicates BroadcastChannel retries',async t=>{
- const f=await setup(t);await addProject(f);await tab(f.page,'账号');await editAdd(f.page);await fill(f.page,{id:'account-a',label:'Delayed example',project:'project',selector:'example-a'});f.state.delay=1400;const before=f.calls.length;
+ const f=await setup(t);await f.page.evaluate(()=>{const original=channel.onmessage;channel.onmessage=event=>{if(event.data.type!=='accepted')original(event);};});await addProject(f);await tab(f.page,'账号');await editAdd(f.page);await fill(f.page,{id:'account-a',label:'Delayed example',project:'project',selector:'example-a'});f.state.delay=1400;const before=f.calls.length;
  await button(f.page,'保存').click();await f.page.locator('#editor').waitFor({state:'hidden'});await f.page.getByRole('status').filter({hasText:'已保存'}).waitFor();assert.equal(f.calls.slice(before).filter(q=>q.method==='save_account').length,1);assert.equal(Object.keys(f.core.catalog().accounts).length,1);
 });
 
@@ -123,22 +124,23 @@ test('clicks remember/select accounts against a simulated app over real CDP and 
 
 const home=page=>page.locator('#workflow');
 const homeButton=(page,name)=>home(page).getByRole('button',{name,exact:true});
-test('first-use guide asks only for a source folder/name and saves a stable recommended profile without launching',async t=>{
- const f=await setup(t,{advanced:false});await home(f.page).getByRole('heading',{name:'添加第一个项目',exact:true}).waitFor();
- assert.equal(await f.page.locator('#advanced').getAttribute('open'),null);assert.equal(await home(f.page).locator('input').count(),2);assert.equal(await home(f.page).getByLabel('调试端口').count(),0);
- fs.mkdirSync(path.join(f.project,'scripts'));fs.writeFileSync(path.join(f.project,'scripts/restart-desktop-remote.mjs'),'');fs.writeFileSync(path.join(f.project,'scripts/desktop-restart-runner.mjs'),'');
- await home(f.page).getByLabel('项目名称',{exact:true}).fill('我的 Cindy');await home(f.page).getByLabel('Cindy 源码文件夹（绝对路径）',{exact:true}).fill(f.project);
- await homeButton(f.page,'保存项目并继续').click();await homeButton(f.page,'检查启动设置').waitFor();
- const db=f.core.catalog(),p=Object.values(db.profiles)[0];assert.equal(Object.keys(db.projects).length,1);assert.equal(p.mode,'acceptance');assert.equal(p.remoteControl,'off');assert.ok(p.isolated);assert.ok(p.debugPort);assert.equal(f.core.jobs().length,0);
- await homeButton(f.page,'检查启动设置').click();await homeButton(f.page,'启动测试').waitFor();assert.equal(f.core.jobs().length,0);await f.shot('guided-first-preview');await f.page.reload();await homeButton(f.page,'检查启动设置').waitFor();assert.equal(Object.values(f.core.catalog().profiles)[0].isolated,p.isolated);assert.equal(f.core.jobs().length,0);
+test('first use reuses the native picker, stores defaults once and never launches on selection',async t=>{
+ const f=await setup(t,{advanced:false});await homeButton(f.page,'选择项目…').waitFor();assert.equal(await home(f.page).locator('input').count(),0);
+ fs.mkdirSync(path.join(f.project,'scripts'));fs.writeFileSync(path.join(f.project,'scripts/restart-desktop-remote.mjs'),'');fs.writeFileSync(path.join(f.project,'scripts/desktop-restart-runner.mjs'),'');f.state.pickResult={ok:true,path:f.project,name:'我的 Cindy'};
+ await homeButton(f.page,'选择项目…').click();await homeButton(f.page,'启动测试').waitFor();const db=f.core.catalog(),p=Object.values(db.profiles)[0];assert.equal(Object.keys(db.projects).length,1);assert.equal(p.mode,'acceptance');assert.equal(p.remoteControl,'off');assert.ok(p.isolated);assert.equal(f.core.jobs().length,0);assert.deepEqual(f.state.pickCalls[0],{mode:'directory',title:'选择 Cindy 项目'});await f.shot('compact-first-selected');
+ await homeButton(f.page,'选择项目…').click();await until(()=>f.state.pickCalls.length,n=>n===2);await until(()=>f.core.catalog().revision,n=>n>db.revision);assert.equal(Object.keys(f.core.catalog().projects).length,1);assert.equal(Object.values(f.core.catalog().profiles)[0].isolated,p.isolated);await f.page.reload();await homeButton(f.page,'启动测试').waitFor();assert.equal(f.core.jobs().length,0);
+});
+
+test('native picker cancellation is respected without saving, launching or automatically reopening',async t=>{
+ const f=await setup(t,{advanced:false});await homeButton(f.page,'选择项目…').click();await until(()=>f.state.pickCalls.length,n=>n===1);await homeButton(f.page,'选择项目…').waitFor({state:'visible'});assert.equal(Object.keys(f.core.catalog().projects).length,0);assert.equal(f.core.jobs().length,0);assert.equal(f.state.pickCalls.length,1);
 });
 
 test('guided local workflow previews before launch and executes sample/check/stop without claiming command login',async t=>{
  const f=await setup(t,{advanced:false});f.core.saveProject({id:'p',label:'样本项目',root:f.project,adapter:'command',commands:{start:[process.execPath,'app.cjs'],prepare:[process.execPath,'prepare.cjs'],verify:[process.execPath,'verify.cjs']}});f.core.saveProfile({id:'daily',label:'可复用配置',project:'p',platform:'desktop',mode:'acceptance'});
- await f.page.reload();await homeButton(f.page,'检查启动设置').click();assert.equal(f.core.jobs().length,0);await homeButton(f.page,'启动测试').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.action==='start'&&j.state==='running'));
+ await f.page.reload();assert.equal(f.core.jobs().length,0);await homeButton(f.page,'启动测试').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.action==='start'&&j.state==='running'));
  await homeButton(f.page,'更新状态').click();await home(f.page).getByText('应用进程已启动。请按应用自己的方式登录并检查用例；启动成功不代表验收通过。',{exact:true}).waitFor();
  for(const [label,action]of [['准备样本','prepare'],['运行验收脚本','verify']]){await homeButton(f.page,label).click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.action===action&&j.state==='completed'));await homeButton(f.page,'更新状态').click();}
- assert.equal(fs.readFileSync(path.join(f.project,'sample.txt'),'utf8'),'browser sample');assert.equal(await home(f.page).getByLabel('项目',{exact:true}).isVisible(),false);await f.shot('guided-local-running');await homeButton(f.page,'停止这次实例').click();await until(()=>f.core.jobs(),jobs=>jobs.filter(j=>j.action==='start').every(j=>j.state==='stopped'));await homeButton(f.page,'更新状态').click();await f.shot('guided-local-stopped');const starts=f.calls.filter(q=>q.method==='start'&&!q.params?.action).length;await f.page.reload();await homeButton(f.page,'检查启动设置').waitFor();assert.equal(f.calls.filter(q=>q.method==='start'&&!q.params?.action).length,starts);
+ assert.equal(fs.readFileSync(path.join(f.project,'sample.txt'),'utf8'),'browser sample');assert.equal(await home(f.page).locator('.workflow-panel').count(),2);await f.shot('guided-local-running');await homeButton(f.page,'停止这次实例').click();await until(()=>f.core.jobs(),jobs=>jobs.filter(j=>j.action==='start').every(j=>j.state==='stopped'));await homeButton(f.page,'更新状态').click();await f.shot('guided-local-stopped');const starts=f.calls.filter(q=>q.method==='start'&&!q.params?.action).length;await f.page.reload();await homeButton(f.page,'启动测试').waitFor();assert.equal(f.calls.filter(q=>q.method==='start'&&!q.params?.action).length,starts);
 });
 
 function remoteFixture(f){const runId='00000000-0000-4000-8000-000000000009',commit='a'.repeat(40),ops=[];let state='running';
@@ -157,14 +159,14 @@ test('guided remote UI preserves a lost-start runId and removes the blind-start 
 });
 
 for(const locale of ['zh-CN','en','ja','ko'])for(const mode of ['light','dark'])test(`guided first-use ${locale}/${mode} fits 320px with advanced settings collapsed`,async t=>{
- const f=await setup(t,{locale,mode,width:320,advanced:false}),titles={'zh-CN':'添加第一个项目',en:'Add your first project',ja:'最初のプロジェクトを追加',ko:'첫 프로젝트 추가'};await home(f.page).getByRole('heading',{name:titles[locale],exact:true}).waitFor();assert.equal(await f.page.locator('#advanced').getAttribute('open'),null);assert.equal(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await f.shot(`guided-${locale}-${mode}`);
+ const f=await setup(t,{locale,mode,width:320,advanced:false}),titles={'zh-CN':'选择项目',en:'Choose a project',ja:'プロジェクトを選択',ko:'프로젝트 선택'};await home(f.page).getByRole('heading',{name:titles[locale],exact:true}).waitFor();assert.equal(await f.page.locator('#advanced').getAttribute('open'),null);assert.equal(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await f.shot(`guided-${locale}-${mode}`);
 });
 
 test('guided stop also cancels this run’s active sample command while preserving another project',async t=>{
  const f=await setup(t,{advanced:false});fs.writeFileSync(path.join(f.project,'long-prepare.cjs'),"setInterval(()=>{},1000);");
  f.core.saveProject({id:'p',label:'目标项目',root:f.project,adapter:'command',commands:{start:[process.execPath,'app.cjs'],prepare:[process.execPath,'long-prepare.cjs']}});f.core.saveProfile({id:'daily',label:'目标配置',project:'p',platform:'desktop',mode:'acceptance'});
  const other=path.join(f.project,'other');fs.mkdirSync(other);fs.writeFileSync(path.join(other,'app.cjs'),"setInterval(()=>{},1000);");f.core.saveProject({id:'other',label:'Other',root:other,adapter:'command',commands:{start:[process.execPath,'app.cjs']}});f.core.saveProfile({id:'other',label:'Other',project:'other',platform:'desktop',mode:'legacy'});const unrelated=f.core.start('other');
- await f.page.reload();await homeButton(f.page,'检查启动设置').click();await homeButton(f.page,'启动测试').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.profile==='daily'&&j.action==='start'&&j.state==='running'));await homeButton(f.page,'更新状态').click();await homeButton(f.page,'准备样本').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.profile==='daily'&&j.action==='prepare'&&j.state==='running'));await homeButton(f.page,'停止这次实例').click();await until(()=>f.core.jobs(),jobs=>jobs.filter(j=>j.profile==='daily').every(j=>['stopped','completed','failed'].includes(j.state)));assert.equal(f.core.status(unrelated.jobId).state,'running');
+ await f.page.reload();await homeButton(f.page,'启动测试').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.profile==='daily'&&j.action==='start'&&j.state==='running'));await homeButton(f.page,'更新状态').click();await homeButton(f.page,'准备样本').click();await until(()=>f.core.jobs(),jobs=>jobs.some(j=>j.profile==='daily'&&j.action==='prepare'&&j.state==='running'));await homeButton(f.page,'停止这次实例').click();await until(()=>f.core.jobs(),jobs=>jobs.filter(j=>j.profile==='daily').every(j=>['stopped','completed','failed'].includes(j.state)));assert.equal(f.core.status(unrelated.jobId).state,'running');
 });
 
 test('guided viewing state persists validated references rather than invalid SSH text or PR query secrets',async t=>{

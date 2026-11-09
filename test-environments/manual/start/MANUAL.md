@@ -1,23 +1,20 @@
 # Test Environments
 
-## Start here (1.2.0)
+## Simplest use (1.2.1)
 
-The home page guides the workflow without requiring internal IDs or launch parameters:
+Choose project… uses **Cindy’s existing native directory picker**. Select the source
+project, then Start test. No path/name/profile form: defaults are stored automatically,
+and choosing the same canonical directory reuses its project and persistent profile.
+Selection/cancellation never launches. One running panel shows sign-in guidance and
+available sample/check/capture/stop actions. Advanced management retains configuration,
+diagnostics and history. SSH still previews the exact revision before starting.
 
-1. Choose This computer, enter a Cindy source folder/name and Save project and continue. A reusable persistent test profile is created without launching.
-2. Check launch settings, review project/account/data, then Start test. Complete first sign-in normally in the target app; saved accounts become selectable.
-3. Prepare samples and run scripts/actual cases as instructed. Capture before stop, then Stop this instance. Missing scripts produce next-step guidance, not an acceptance pass.
-4. For SSH, choose Another computer, read its configuration, paste the application PR link and preview its exact revision before starting. SHA entry is optional; advanced pinning remains.
-
-If the source location is unknown, ask Cindy in a conversation to locate it and configure this plugin, previewing before launch. The source folder is not the installed Cindy.app.
-Advanced management retains projects, accounts, profiles, cases and history on the shared core.
-The author display field is omitted at the owner's request; original commits/contributor history remain intact.
-
-
-[简体中文](MANUAL.zh-CN.md)
-
-Use `catalog` first, choose exact IDs, then inspect `plan` before `start`.
-The plugin runs on its hosting computer, even when viewed from another device.
+This uses the public cindy.pick API, not copied private project-picker components or
+Host database scanning. It reuses native directory selection, not the Host recent-project
+list, whose component has no public plugin API. The pick declaration is solely for
+user-selected directories; existing node filesystem authority is unchanged. Cancellation,
+busy and unsupported results never automatically reopen the picker. Author stays omitted;
+Git/contributor history is preserved.
 
 ## Real accounts and retained sessions
 
@@ -126,7 +123,7 @@ Local acceptance and generic SSH orchestration are delivered together in PR #309
 
 ## Generic SSH template (unified test package)
 
-Unified test package 1.2.0 includes local acceptance and generic SSH orchestration; computers are parameters.
+Unified test package 1.2.1 includes local acceptance and generic SSH orchestration; computers are parameters.
 Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
 remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
 runId. Reuse that ID for status, account selection, remote_action, stop and collection.

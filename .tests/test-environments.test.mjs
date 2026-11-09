@@ -341,3 +341,10 @@ test('owned CDP capture saves only valid bounded PNGs and rejects screenshots af
  for(const mode of ['invalid','oversize']){fs.writeFileSync(path.join(dir,'capture.json'),JSON.stringify({mode}));await assert.rejects(app.inspect(jobId,true),{code:'INVALID_CAPTURE'});assert.deepEqual(fs.readFileSync(result.screenshot),png);}
  fs.writeFileSync(path.join(dir,'cancel.json'),'{}');await exited;await assert.rejects(app.inspect(jobId,true),{code:'APP_NOT_INSPECTABLE'});
 });
+
+test('native-picked project setup reuses canonical roots and profiles without resetting accounts or starting apps',t=>{
+ const {dir,app}=fixture(t),root=path.join(dir,'source');fs.mkdirSync(path.join(root,'scripts'),{recursive:true});fs.writeFileSync(path.join(root,'scripts/restart-desktop-remote.mjs'),'');
+ const first=app.ensureTestProject({root,label:'My Cindy'});app.saveAccount({id:'a',project:first.project.id,label:'Example',selector:'example-a'});const profile={...app.catalog().profiles[first.profile.id],account:'a'};app.saveProfile(profile);
+ const alias=path.join(dir,'source-link');fs.symlinkSync(root,alias,'dir');const second=app.ensureTestProject({root:alias,label:'Folder name'});assert.equal(second.project.id,first.project.id);assert.equal(second.profile.id,first.profile.id);assert.equal(second.project.label,'My Cindy');assert.equal(app.catalog().profiles[first.profile.id].account,'a');assert.equal(Object.keys(app.catalog().projects).length,1);assert.equal(Object.keys(app.catalog().profiles).length,1);assert.equal(app.jobs().length,0);assert.equal(JSON.stringify(second).includes(root),false);
+ assert.equal(app.ensureTestProject({project:first.project.id}).profile.id,first.profile.id);const revision=app.catalog().revision;assert.throws(()=>app.ensureTestProject({root:dir,label:'Not source'}),{code:'INVALID_PROJECT'});assert.equal(app.catalog().revision,revision);assert.throws(()=>app.ensureTestProject({project:'missing'}),{code:'PROJECT_NOT_FOUND'});
+});

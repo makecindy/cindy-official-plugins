@@ -1,5 +1,7 @@
 # 1.2.0：从引导首页开始
 
+> 当前 1.2.1 已进一步收成“选择项目 → 启动”，见[最简使用说明](test-environments-simple.zh-CN.md)。下文保留 1.2.0 的历史引导与证据。
+
 [English](test-environments-guided.md)
 
 旧首页把项目、账号、方案、用例和运行记录并排放在空白目录里，使用者不知道先做什么。
