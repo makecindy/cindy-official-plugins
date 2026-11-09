@@ -3,10 +3,13 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {spawn}=require('node:child_process');
 const {identity}=require('./observation.cjs');
+const {SessionMonitor}=require('./session-monitor.cjs');
 const dir=process.argv[2],plan=JSON.parse(fs.readFileSync(path.join(dir,'plan.json'),'utf8'));
 let state=JSON.parse(fs.readFileSync(path.join(dir,'status.json'),'utf8'));
 let child,childExited=false,stopping=false,userData,receipt,receiptIdentity,lastOutput='',timer;
 let failureCode,wasReady=false,lastTick=Date.now(),activeStartupMs=0;
+const session=plan.configuration.mode==='acceptance'&&plan.readiness==='cindy'?new SessionMonitor(plan,dir):null;
+let observing=false,lastAccountPoll=0;
 function write(patch){state={...state,...patch,supervisorPid:process.pid,updatedAt:Date.now()};const tmp=path.join(dir,`${crypto.randomUUID()}.tmp`);fs.writeFileSync(tmp,JSON.stringify(state)+'\n',{mode:0o600});fs.renameSync(tmp,path.join(dir,'status.json'));}
 function alive(pid){try{process.kill(pid,0);return true;}catch{return false;}}
 function inspect(){
@@ -18,12 +21,26 @@ function inspect(){
       if(receipt&&receipt.instanceId!==r.instanceId)continue;
       if(!receipt){receiptIdentity=identity(r.pid);if(!receiptIdentity)continue;}
       receipt=r;
-      const base={application:{pid:r.pid,instanceId:r.instanceId,userDataDir:r.userDataDir,processIdentity:receiptIdentity,acceptance:r.acceptance||null},execution:'executed'};
-      if(r.state==='ready'&&(plan.configuration.mode!=='acceptance'||r.acceptance)){wasReady=true;write({...base,state:'ready',code:undefined,nextAction:undefined,verification:plan.configuration.mode==='acceptance'?'application-acceptance-receipt':'application-ready'});}
+      const base={application:{pid:r.pid,instanceId:r.instanceId,userDataDir:r.userDataDir,processIdentity:receiptIdentity},execution:'executed'};
+      if(r.state==='ready'){wasReady=true;write(session?base:{...base,state:'ready',code:undefined,nextAction:undefined,verification:'application-ready'});}
       else if(r.state==='failed'){write(base);failRun(r.failure?.code||'APPLICATION_FAILED');}
       else write(base);
     }
   }catch(e){if(e.code!=='ENOENT')write({observation:'receipt-unavailable'});}
+}
+async function observeAccounts(){
+  if(!session||!state.application||observing||stopping||Date.now()-lastAccountPoll<3000)return;
+  observing=true;lastAccountPoll=Date.now();
+  if(fs.existsSync(path.join(dir,'select-account.json')))write({state:'checking-account',verification:undefined,accountVerifiedAt:undefined});
+  try{
+    const patch=await session.poll(state);
+    if(!stopping)write({verification:undefined,accountVerifiedAt:undefined,...patch});
+  }catch{
+    // No raw IPC/CDP exceptions: they may include application data. A switch may
+    // already have happened; SessionMonitor records the attempt before dispatch.
+    if(!stopping)write({state:'checking-account',code:'ACCOUNT_OBSERVATION_UNCONFIRMED',verification:undefined,accountVerifiedAt:undefined,
+      nextAction:'Inspect this exact app and its login state. Account operations are not automatically repeated after an uncertain result.'});
+  }finally{observing=false;}
 }
 function observeStartup(){
   if(stopping||wasReady)return;
@@ -31,12 +48,12 @@ function observeStartup(){
   if(startup?.state==='failed'){failRun(startup.code||'APPLICATION_FAILED');return;}
   // Ignore another PID's waiting signal, even if a checkout incorrectly reused
   // a status file. Ready still requires the matching application receipt.
-  const waiting=receipt&&startup?.pid===receipt.pid&&startup?.code==='DEV_SIGN_IN_REQUIRED'&&startup.state==='window-ready';
+  const waiting=state.state==='waiting-for-owner'||state.state==='checking-account'||receipt&&startup?.pid===receipt.pid&&startup?.code==='DEV_SIGN_IN_REQUIRED'&&startup.state==='window-ready';
   const now=Date.now();
   if(!waiting&&state.state!=='waiting-for-owner')activeStartupMs+=Math.max(0,now-lastTick);
   lastTick=now;
-  if(waiting)write({state:'waiting-for-owner',code:'DEV_SIGN_IN_REQUIRED',nextAction:'This sandbox is retained. Reuse its existing login or complete supported remote authorization; do not restart or require desktop unlock for inspection.'});
-  else if(state.state==='waiting-for-owner')write({state:'preparing',code:undefined,nextAction:undefined});
+  if(waiting&&!session)write({state:'waiting-for-owner',code:'DEV_SIGN_IN_REQUIRED',nextAction:'This sandbox is retained. Complete normal application sign-in; do not restart or require desktop unlock for inspection.'});
+  else if(!waiting&&state.state==='waiting-for-owner')write({state:'preparing',code:undefined,nextAction:undefined});
   if(activeStartupMs>120000)failRun('STARTUP_TIMEOUT');
 }
 function failRun(code){failureCode=failureCode||code;stop();}
@@ -75,6 +92,6 @@ try{
   });
   timer=setInterval(()=>{
     if(fs.existsSync(path.join(dir,'cancel.json'))){stop();return;}if(stopping)return;
-    if(plan.readiness==='cindy'){inspect();observeStartup();if(!stopping&&receipt&&identity(receipt.pid)!==receiptIdentity)failRun(wasReady?'APPLICATION_EXITED':'APPLICATION_NOT_READY');}
+    if(plan.readiness==='cindy'){inspect();observeStartup();if(!stopping&&receipt&&identity(receipt.pid)!==receiptIdentity)failRun(wasReady?'APPLICATION_EXITED':'APPLICATION_NOT_READY');void observeAccounts();}
   },500);
 }catch{finish('failed','COMMAND_START_FAILED');}

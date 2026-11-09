@@ -3,16 +3,16 @@
   "minCindyVersion": "0.1.124",
   "id": "test-environments",
   "name": "Test Environments",
-  "description": "Reusable test accounts, launch profiles and acceptance cases for desktop and mobile projects.",
-  "whenToUse": "Reusable test accounts, launch profiles and acceptance cases for desktop and mobile projects.",
-  "version": "1.0.4",
+  "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
+  "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
+  "version": "1.0.5",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
   "tools": [
     {
       "name": "catalog",
-      "description": "List projects, account references, launch profiles and acceptance cases. No credentials. Call first to choose exact IDs.",
+      "description": "List projects, real account references with local profile history, launch profiles and acceptance cases. No credentials. A listed account is not proof of a valid login.",
       "parameters": {
         "type": "object",
         "properties": {},
@@ -95,7 +95,7 @@
     },
     {
       "name": "save_account",
-      "description": "Save a named account reference; the application retains credentials. Existing identity cannot be rebound.",
+      "description": "Save a real application account reference using its opaque account key. The application retains encrypted sessions; plugin edits preserve remembered local profiles. Identity cannot be rebound.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -112,7 +112,8 @@
                 "type": "string"
               },
               "selector": {
-                "type": "string"
+                "type": "string",
+                "description": "Opaque application accountKey from the owned app account list, not a nickname or credential."
               },
               "loginSource": {
                 "type": "string"
@@ -142,7 +143,7 @@
     },
     {
       "name": "save_profile",
-      "description": "Save launch settings. Cindy desktop requires isolated storage; legacy preserves the original login flow.",
+      "description": "Save reusable launch settings. Cindy desktop uses a persistent isolated data profile that can hold real accounts; acceptance requires debugPort. Each computer signs in separately.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -165,13 +166,16 @@
                 "type": "string"
               },
               "fixture": {
-                "type": "string"
+                "type": "string",
+                "description": "Sample name for AI preparation using normal application tools. Saving does not inject data or execute acceptance."
               },
               "loginSource": {
-                "type": "string"
+                "type": "string",
+                "description": "Legacy WIP field retained for catalog compatibility; unsupported for execution. Use normal sign-in separately on each computer."
               },
               "serveLogin": {
-                "type": "string"
+                "type": "string",
+                "description": "Legacy WIP field retained for catalog compatibility; unsupported for execution. Use normal sign-in separately on each computer."
               },
               "deviceId": {
                 "type": "string"
@@ -338,12 +342,16 @@
     },
     {
       "name": "import_cindy",
-      "description": "Import public account aliases from the existing local Cindy dev profile catalog. Never copies credentials.",
+      "description": "Remember all accounts saved in this plugin job’s owned Cindy app, using the app account-sync interface. Optionally choose jobId; otherwise exactly one live job must match the project. Never copies credentials or scans daily-host profiles.",
       "parameters": {
         "type": "object",
         "properties": {
           "project": {
             "type": "string"
+          },
+          "jobId": {
+            "type": "string",
+            "description": "Exact owned live job. Required when multiple jobs match."
           }
         },
         "required": [
@@ -353,8 +361,29 @@
       }
     },
     {
+      "name": "select_account",
+      "description": "Request switching the exact owned live Cindy acceptance job to a remembered real account from the same project. Returns requested, not success. The app must have its own login on this computer; uncertainty never triggers an automatic repeat. Query status and inspect before explicitly requesting another switch. Does not export credentials.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string",
+            "description": "Account ID from catalog, not a token or display name."
+          }
+        },
+        "required": [
+          "jobId",
+          "account"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "plan",
-      "description": "Resolve exact argv and configuration without executing. For mobile, returns simulator handoff; use baguette-simulator on the exact device.",
+      "description": "Preview commands and the complete start/select-account/prepare-samples/execute-cases/stop workflow without execution. Mobile uses Baguette. No missing client WIP flags are passed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -378,7 +407,7 @@
     },
     {
       "name": "start",
-      "description": "Start a saved profile action; returns a persistent jobId immediately. Query status, never repeat while waiting. No process-start result proves login.",
+      "description": "Start a saved profile action and return a persistent jobId. Cindy acceptance automatically remembers app-saved real accounts, selects the requested saved identity once and verifies online authentication. Missing/expired local login waits for normal sign-in. Samples and cases still need real execution; never repeat start while waiting.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -402,7 +431,7 @@
     },
     {
       "name": "status",
-      "description": "Read one job or all jobs, actual readiness and sign-in requirements. Unknown state requires inspection, not blind retry.",
+      "description": "Read jobs, account observation and online identity verification. Ready means the account and app are usable, not that samples or acceptance cases passed. Unknown requires inspecting the exact instance.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -416,7 +445,7 @@
     },
     {
       "name": "stop",
-      "description": "Stop only this plugin job and its verified owned process. Preserve login and data. Query status until stopped.",
+      "description": "Stop only this job and its verified owned process. Preserve every app-saved account, encrypted session, data and plugin account history. Does not log out. Query until stopped.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -432,7 +461,7 @@
     },
     {
       "name": "inspect",
-      "description": "Inspect this job’s owned desktop app through its local debug port, including while the desktop is locked. Returns only login step/error and an optional private screenshot path. Set debugPort before starting. Never reads credentials or another app.",
+      "description": "Inspect only this job’s owned desktop app through its local debug port, even while locked. Return projected login state, remembered-account count and optional private screenshot. Never return tokens, cookies, raw auth state or another app.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -479,5 +508,6 @@
     "zh-CN": "locales/zh-CN.json",
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
-  }
+  },
+  "releaseNotes": "Real accounts with automatic local-profile history and app-owned encrypted session reuse. Removed dependence on unshipped acceptance/login-source WIP. Full acceptance workflow remains explicit; cross-computer first sign-in uses the application."
 }

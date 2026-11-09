@@ -1,119 +1,109 @@
 # Test Environments
 
-Use `catalog` first. Choose the exact project, account reference and profile. Inspect
-`plan` before `start`. Only execute within the user's authorized project/device scope.
-The plugin runs on the computer hosting it, including when viewed from another device.
+[简体中文](MANUAL.zh-CN.md)
 
-## What is stored
+Use `catalog` first, choose exact IDs, then inspect `plan` before `start`.
+The plugin runs on its hosting computer, even when viewed from another device.
 
-Projects, named account references, launch settings and ordered acceptance cases live
-outside the plugin package in the current user's Test Environments application-data
-directory. CLI and Cindy use the same catalog. Uninstalling or updating the plugin
-does not remove this catalog or app login. `remove` removes a catalog entry only.
+## Real accounts and retained sessions
 
-Credentials remain in each application's isolated profile/secure storage. Never put
-passwords, cookies, tokens or copied production credential files in catalog fields,
-command arguments, case steps, logs, or tool input. An account selector names an
-application-managed account; it is not a token vault or an authentication bypass.
-Initial login and expired authorizations use the application's ordinary login.
-Changing an account reference's identity requires a new reference.
+Accounts are ordinary real application accounts, not machine-only test identities.
+Each computer must complete its own normal sign-in. The same account may then be
+selected in that computer's application profile, subject to the application's
+normal session policy. This is not credential synchronization or data migration.
 
-## Cindy
+Keep the same persistent isolated name to reuse its own login and data. Multiple
+real accounts can be saved in one profile through the application's normal Add
+account flow, or kept in separate profiles. While an acceptance job is supervised,
+the plugin observes every app-saved account and remembers its opaque account key
+and local profile binding automatically. Login committed immediately before stop
+remains in the application's vault and is discovered on the next run. The plugin
+cannot retain accounts the application itself never saves or that were logged out.
 
-Add a source checkout using adapter `cindy`; `import_cindy` imports only public local
-dev account aliases. Save persistent isolated names for desktop profiles. Keep the
-same name to reuse that profile's own valid login and data. Different accounts may
-have different isolated names. `mode:legacy` supplies no new acceptance arguments
-and preserves original startup/sign-in behavior. `mode:acceptance` requires a
-checkout supporting `scripts/lib/dev-acceptance.mjs`; use the existing WIP checkout
-until those project changes are released. This does not require updating the Cindy
-application hosting this plugin.
+`catalog.accounts[].sessions` records local profile locations, whether an account
+was last listed, and historical authenticated observation. It is not a token vault
+or proof of current authorization. Credentials stay in application-owned encrypted
+storage. Do not put passwords, tokens, cookies or copied credential files in plugin
+fields, commands, tool arguments, logs or exports. Stop and remove never log out or
+delete the application profile; updates do not replace it. Expiration, revocation,
+application logout or deletion of app data requires normal sign-in again.
 
-Acceptance options: account, region, remoteControl, background, fixture, loginSource,
-serveLogin. Use remoteControl/off and background/off for quiet acceptance profiles.
-A login source for a fresh device requires the application's supported authorization
-service; the plugin does not bypass that service. Existing local login is reused.
-An authenticated source may be a different configured profile, managed separately.
+`import_cindy({project,jobId})` explicitly refreshes public references from the exact
+owned app. Omit jobId only if exactly one live job matches. It no longer reads an
+unshipped dev alias file or scans daily-host profiles. Account labels are editable;
+the opaque selector cannot be rebound. Old nickname selectors must be replaced by
+a newly observed real-account reference and selected on the profile.
 
-## Other projects (Filo, Electron, native or Linux)
+## Full acceptance workflow
 
-Use adapter `command`, root as an absolute project path and commands as argv arrays:
-`{"start":["node","scripts/dev.mjs","--profile","{profile}","--account","{account}","--data-dir","{dataDir}"]}`.
-Supported substitutions: profile, account, isolated, fixture, remoteControl,
-background, platform, dataDir. Configure optional prepare/verify commands using the
-project's own documented interfaces. No implicit shell is used. Parameters only
-work when the target project actually implements them; do not invent project flags.
-The adapter does not transform authentication formats between applications.
-Node, Python 3 for the macOS desktop terminal, and each project's toolchain must already be installed on the execution computer.
-macOS is currently runtime-tested; Windows/Linux behavior needs platform validation.
+1. Save a Cindy source project and desktop profile with `mode:acceptance`, a stable
+   `isolated` name and unused `debugPort`. Default automatic background triggers and
+   remote control are off. `background:off` uses the existing `--passive` scheduler/
+   routine switch; it does not disable authentication refresh or every background process.
+2. Call `plan`, then `start` once. Read its jobId with `status`; do not repeat start.
+3. Sign in through the target application's normal UI on this computer. Add any
+   other real accounts there. They are recorded automatically. Choose a reference
+   in the saved profile for next start, or call `select_account({jobId,account})`
+   to request a switch now. `account` is the catalog ID, not a display name or token.
+4. Wait for `ready / application-account-online`: the account must be authenticated,
+   match the selection, pass the app's online refresh and have a ready database.
+   Login waiting does not consume the launch deadline. Missing local login waits;
+   app readiness or a saved-account list alone cannot prove authentication.
+5. Read `plan.workflow`: prepare the named sample and execute each saved case's
+   actions with actual application tools. `fixture` is a sample instruction label,
+   not a client injection flag. Keep sample names distinguishable and account-scoped.
+   Record actual results/evidence. `ready` is not acceptance success; sample and
+   case status remains `not-verified / not-executed` until the AI verifies them.
+6. Call `stop` and query until stopped. Only the owned process group and verified
+   application instance are stopped; all saved accounts and local data remain.
 
-## Execution and recovery
+Uncertain switches are never automatically repeated. Inspect the exact current
+account and login state, then explicitly select again if appropriate. A supervisor
+that exited unexpectedly reports unknown; do not kill processes by broad patterns.
+Only one active launch per project root is allowed. An immediately restarted
+checkout may still have exiting child processes; retain the ownership checks.
 
-`start` returns a jobId immediately. Query `status`; do not repeatedly start while a
-build/sign-in is pending. Runs survive the plugin Worker's idle timeout. A Cindy
-ready receipt is distinct from a custom command merely running or exiting zero.
-`waiting-for-owner` preserves the existing app without charging login time to the
-startup deadline. Never
-report an account test successful from a process-start receipt alone. Acceptance
-cases are instructions: the AI executes them with actual tools and reports actual
-results; saving a case does not run it.
+## Existing project capabilities
 
-`stop` targets only the job's own process group and verified app instance, retaining
-login/data. Query until stopped. Unknown state requires inspecting the exact recorded
-instance before retrying; do not kill broad process patterns. One active launch per
-project root avoids the project's own restart scripts replacing an unrelated test.
-Private run logs remain locally available; they may contain project output and are
-not returned inline by tools. Do not upload them without reviewing/redacting secrets.
+Cindy uses the exported restart coordinator, preserving isolation, migration,
+dependency, asset and process-conflict checks. Only the final `--wait-ready` wait
+moves into the plugin. No `dev-acceptance.mjs`, special acceptance receipt or
+`--preset/--account/--fixture/--login-source/--serve-login` WIP is required.
+`loginSource` / `serveLogin` remain readable legacy fields but fail clearly on
+execution. New computers use normal sign-in, not credentials from another profile.
+`mode:legacy` preserves original launch/login behavior and does not supervise accounts.
 
-## Simulators
+The fixed CDP adapter verifies PID, process startup identity and debug-port ownership
+before attaching to exactly one main page. It uses only existing app APIs and projects
+non-secret results. No arbitrary JavaScript or debug URL is accepted. `inspect` can
+capture a private screenshot, including while the desktop is locked. This does not
+complete sign-in or approve OS credential dialogs. The new integration has not yet
+been verified on real Cindy accounts. Windows is explicitly unavailable for account
+supervision; Linux still needs real platform evidence.
 
-For iOS/Android, prepare builds or the project's Metro service here. Read the returned
-handoff and use the installed `baguette-simulator` plugin: discover exact devices,
-install the actual build, confirm matchesLocal, launch and inspect account/fixtures.
-The AI coordinates the two plugins; this plugin does not claim a host-provided
-cross-plugin bridge. Android does not receive iOS-only app arguments/environment;
-Cindy transports its configuration via the project's Metro configuration. Do not
-revive a cancelled owner handoff or a device the user asked to keep stopped.
+The server already has hosted browser-login callbacks, but delivering a login URL
+to a different device is not implemented here. Source-profile authorization of an
+empty target profile is also not implemented. Neither is required to reuse a valid
+login already saved by the target application on this computer.
 
-## Standalone CLI
+For other projects, use adapter `command` and documented argv arrays, for example
+`{"start":["node","scripts/dev.mjs","--data-dir","{dataDir}"]}`. Substitutions are
+profile, account, isolated, fixture, remoteControl, background, platform and dataDir.
+Optional prepare/verify commands belong to that project. No implicit shell or
+cross-application credential conversion exists.
 
-`node <plugin-source>/node/cli.cjs catalog`
+For iOS/Android, prepare builds or Metro, then follow `plan.handoff` through the
+installed Baguette plugin: select the exact device, install and confirm matchesLocal,
+launch, sign in and inspect samples/cases. Desktop account supervision is not mobile
+login support. Do not revive cancelled devices or invent unsupported app flags.
 
-For writes, supply JSON on stdin with `--stdin`, for example:
-`node <plugin-source>/node/cli.cjs plan --stdin` with `{"profile":"daily"}`.
-`TEST_ENVIRONMENTS_HOME` selects a different catalog for independent tests. The CLI
-uses the identical core, without a running Cindy client. Do not place its storage
-inside a Git-tracked project or the plugin installation folder.
+## Independent development
 
-## Away from the execution computer
+Use `node <plugin-source>/node/cli.cjs catalog`. For parameters use `--stdin` with
+JSON, e.g. method `plan` with `{"profile":"daily"}`. Set `TEST_ENVIRONMENTS_HOME`
+outside the repository and plugin install folder. Node, the project's toolchain,
+Python 3 for macOS PTY and lsof for owned-port checks must already be installed.
 
-Cindy desktop launches use an owned background PTY and the project's exported
-`runDesktopRestart` coordinator. Isolation, migration, dependency, asset and
-existing-process checks stay in that coordinator; only its final `--wait-ready`
-flag is removed because the plugin owns readiness. Removing the flag from the
-outer pnpm command is insufficient: that command adds it back internally.
-The plugin reads the app's
-private startup status and matching instance receipt itself, so its login wait
-is independent of the restart CLI's fixed `--wait-ready` deadline. Genuine startup
-failure and unexpected exit remain failures with their cause, not a successful stop.
-Normal project CLI commands remain unchanged.
-
-Save a dedicated `debugPort` on the desktop profile. `inspect({jobId,screenshot:true})`
-checks that the listener belongs to that exact live app before using CDP to read
-non-secret login state and capture the app viewport. It does not use screen recording,
-Accessibility, Terminal.app or the desktop lock state. It never reads credentials,
-cookies, form values or raw login data. The latest image replaces the previous job
-inspection image; it is private local user data, and the AI can deliver it through
-Cindy's standard media import when requested. No arbitrary debug URL or JavaScript
-is accepted. macOS/Linux ownership checks use lsof; Windows is not yet verified.
-
-A locked desktop does not imply a locked credential store. Reuse an already signed-in
-isolated app profile first. A missing login remains a separate authentication step;
-inspection does not complete sign-in or approve a Keychain dialog. If a project needs
-browser authorization, route it through a supported remote authorization flow rather
-than repeatedly asking the owner to unlock the execution computer. This version does
-not yet provide Cindy's remote sign-in bridge; do not report a waiting job as logged in.
-
-For plugin development use a separate TEST_ENVIRONMENTS_HOME with the standalone CLI.
-Do not install/enable an unfinished plugin in the owner's daily host or launch another
-plugin host from a target dev instance. Target apps do not need this plugin installed.
+The catalog, job logs and screenshots stay in local user data. Review/redact logs
+before sharing. Do not enable unfinished builds in the daily host or install this
+plugin inside the target dev app to launch another layer. Packaging is not installation.

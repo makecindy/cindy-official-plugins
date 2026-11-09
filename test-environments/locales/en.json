@@ -1,22 +1,22 @@
 {
   "name": "Test Environments",
-  "description": "Reusable local account references, launch profiles and acceptance cases.",
-  "whenToUse": "Reusable local account references, launch profiles and acceptance cases.",
+  "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
+  "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
   "mainView": {
     "title": "Test Environments"
   },
   "tools": {
     "catalog": {
-      "description": "List projects, account references, launch profiles and acceptance cases. No credentials. Call first to choose exact IDs."
+      "description": "List projects, real account references with local profile history, launch profiles and acceptance cases. No credentials. A listed account is not proof of a valid login."
     },
     "save_project": {
       "description": "Save a project and its argv commands. Commands execute as this computer user. Never store secrets in arguments."
     },
     "save_account": {
-      "description": "Save a named account reference; the application retains credentials. Existing identity cannot be rebound."
+      "description": "Save a real application account reference using its opaque account key. The application retains encrypted sessions; plugin edits preserve remembered local profiles. Identity cannot be rebound."
     },
     "save_profile": {
-      "description": "Save launch settings. Cindy desktop requires isolated storage; legacy preserves the original login flow."
+      "description": "Save reusable launch settings. Cindy desktop uses a persistent isolated data profile that can hold real accounts; acceptance requires debugPort. Each computer signs in separately."
     },
     "save_case": {
       "description": "Save ordered acceptance actions and expected outcomes. Saving does not run a test."
@@ -25,22 +25,25 @@
       "description": "Remove a catalog entry only. Dependencies must be reassigned first; application data and credentials remain."
     },
     "import_cindy": {
-      "description": "Import public account aliases from the existing local Cindy dev profile catalog. Never copies credentials."
+      "description": "Remember all accounts saved in this plugin job’s owned Cindy app, using the app account-sync interface. Optionally choose jobId; otherwise exactly one live job must match the project. Never copies credentials or scans daily-host profiles."
     },
     "plan": {
-      "description": "Resolve exact argv and configuration without executing. For mobile, returns simulator handoff; use baguette-simulator on the exact device."
+      "description": "Preview commands and the complete start/select-account/prepare-samples/execute-cases/stop workflow without execution. Mobile uses Baguette. No missing client WIP flags are passed."
     },
     "start": {
-      "description": "Start a saved profile action; returns a persistent jobId immediately. Query status, never repeat while waiting. No process-start result proves login."
+      "description": "Start a saved profile action and return a persistent jobId. Cindy acceptance automatically remembers app-saved real accounts, selects the requested saved identity once and verifies online authentication. Missing/expired local login waits for normal sign-in. Samples and cases still need real execution; never repeat start while waiting."
     },
     "status": {
-      "description": "Read one job or all jobs, actual readiness and sign-in requirements. Unknown state requires inspection, not blind retry."
+      "description": "Read jobs, account observation and online identity verification. Ready means the account and app are usable, not that samples or acceptance cases passed. Unknown requires inspecting the exact instance."
     },
     "stop": {
-      "description": "Stop only this plugin job and its verified owned process. Preserve login and data. Query status until stopped."
+      "description": "Stop only this job and its verified owned process. Preserve every app-saved account, encrypted session, data and plugin account history. Does not log out. Query until stopped."
     },
     "inspect": {
-      "description": "Inspect the owned desktop app through its debug port, even while locked. Optionally save a private screenshot; never reads credentials."
+      "description": "Inspect only this job’s owned desktop app through its local debug port, even while locked. Return projected login state, remembered-account count and optional private screenshot. Never return tokens, cookies, raw auth state or another app."
+    },
+    "select_account": {
+      "description": "Request switching the exact owned live Cindy acceptance job to a remembered real account from the same project. Returns requested, not success. The app must have its own login on this computer; uncertainty never triggers an automatic repeat. Query status and inspect before explicitly requesting another switch. Does not export credentials."
     }
   }
 }

@@ -7,6 +7,6 @@ readline.createInterface({input:process.stdin}).on('line',async line=>{
   if(request.id===undefined)return;
   let result;
   try{result={ok:true,data:await app.invoke(request.method,request.params||{})};}
-  catch(e){result={ok:false,errorCode:e.code||'OPERATION_FAILED',message:e.code?e.message:'Operation failed. Existing data was preserved; inspect the project and local catalog.',execution:request.method==='start'?'unknown':'not_executed'};}
+  catch(e){result={ok:false,errorCode:e.code||'OPERATION_FAILED',message:e.code?e.message:'Operation failed. Existing data was preserved; inspect the project and local catalog.',execution:['start','select_account','import_cindy'].includes(request.method)?'unknown':'not_executed'};}
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\n');
 });
