@@ -47,6 +47,12 @@
     },
     "remote": {
       "description": "共通 SSH 検証です。catalog は対象端末の設定を取得。plan は target、profile、PR repo/number と任意の commit を受け取り、省略時は対象 Git から現在の SHA を読みます。確認後 start が新しい worktree と B のログインを使います。status/stop/select_account/action/collect は同じ runId。action は保存した prepare/verify のみ、collect は制限付きログ・画像・結果をハッシュ確認して取得。既存 SSH 信頼を使い、秘密鍵・パスワード保存、Agent 転送、認証情報コピーはしません。未ログインは通常認証が必要です。初回端末間認証は未実装。返信不明時は同じ実行を確認し、重複起動しないでください。実機と人手の証拠は別途必要です。PR へ自動公開しません。"
+    },
+    "login_accounts": {
+      "description": "この端末に保存したプロジェクト共通のテストアカウント参照を一覧表示します。保存先の存在はログインの有効性を保証しません。認証情報は含みません。"
+    },
+    "bind_login_account": {
+      "description": "保存済みアカウントのアプリ管理プロファイルを再利用します。地域情報がない場合は既存プロファイルのバージョンを使います。起動や認証情報のコピーは行いません。使用中のインスタンスは先に停止してください。"
     }
   }
 }

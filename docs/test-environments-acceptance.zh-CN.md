@@ -1,5 +1,7 @@
 # Test Environments 1.1.3：实机验收操作单
 
+当前 1.3.0 的多账号操作、存储位置、默认续期边界与逐项预期，请先按[账号验收步骤](test-environments-accounts.zh-CN.md)执行。本次只改插件，不测试未交付的宿主授权或永久登录。
+
 > 当前 1.2.0 新首页按[引导说明](test-environments-guided.zh-CN.md)使用；本单保留 1.1.3 包与旧菜单证据，旧入口在“高级管理”。不要把旧包哈希当作 1.2.0。
 
 [English](test-environments-acceptance.md)

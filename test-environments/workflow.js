@@ -1,6 +1,14 @@
 'use strict';
 // Guided controls reuse the same catalog and owned-run APIs as advanced management.
 const WORKFLOW_COPY={
+ savedLogin:['Saved test account','已保存的测试账号','保存済みテストアカウント','저장된 테스트 계정'],
+ newLogin:['Choose or add an account in the test app','在测试应用中选择或添加账号','テストアプリでアカウントを選択・追加','테스트 앱에서 계정 선택 또는 추가'],
+ loginReuse:['Reuses this computer’s app-owned profile. Expired sessions still require sign-in.','复用这台电脑上由应用保管的登录档案；授权失效时仍需重新登录。','この端末のアプリのプロファイルを再利用します。期限切れ時は再ログインが必要です。','이 컴퓨터의 앱 프로필을 재사용합니다. 만료되면 다시 로그인하세요.'],
+ missingRegion:['Using the version of the saved profile; the app did not report this account’s region.','沿用上次登录档案的版本；应用未提供这个账号的所属区域。','保存済みプロファイルのバージョンを使います。アプリは地域を返していません。','저장된 프로필의 버전을 사용합니다. 앱에서 계정 지역을 제공하지 않았습니다.'],
+ loginRegion:['Version for first sign-in','首次登录使用的版本','初回ログインのバージョン','처음 로그인할 버전'],
+ globalEdition:['Global','国际版','Global','Global'],cnEdition:['China mainland','中国大陆版','中国本土版','중국 본토 버전'],
+ profileLocation:['App-owned login profile','应用保管登录态的位置','アプリのログイン保存先','앱 로그인 저장 위치'],
+
  title:['Start a test','开始一次测试','テストを始める','테스트 시작'],
  subtitle:['Choose a project and start.','选择项目，然后启动。','プロジェクトを選んで起動します。','프로젝트를 선택하고 시작하세요.'],
  advanced:['Advanced management','高级管理','詳細管理','고급 관리'],
@@ -78,7 +86,7 @@ function workflowButton(label,action,disabled=false){const b=button(label,action
 function workflowPanel(title,help){const box=el('section',undefined,'workflow-panel');box.append(el('h2',title));if(help)box.append(el('p',help,'workflow-help'));return box;}
 function workflowField(label,control){const field=el('label',label);control.setAttribute('aria-label',label);field.append(control);return field;}
 function workflowInput(label,key,{placeholder='',required=false}={}){const input=el('input');input.value=workflowState[key]||'';input.placeholder=placeholder;input.required=required;input.oninput=()=>{workflowState[key]=input.value;if(['host','node','prUrl','pin'].includes(key)){workflowPreview=null;if(['host','node'].includes(key))workflowRemoteCatalog=null;for(const b of $('workflow').querySelectorAll(['host','node'].includes(key)?'[data-preview-launch],[data-plan-remote]':'[data-preview-launch]')){b.dataset.unavailable='true';b.disabled=true;}}keepWorkflow();};return workflowField(label,input);}
-function workflowSelect(label,items,value,change){const select=el('select');for(const item of items)select.append(new Option(item.label,item.value));select.value=value||'';select.onchange=()=>perform(()=>change(select.value));return workflowField(label,select);}
+function workflowSelect(label,items,value,change){const select=el('select');for(const item of items){const option=new Option(item.label,item.value);option.disabled=item.disabled===true;select.append(option);}select.value=value||'';select.onchange=()=>perform(()=>change(select.value));return workflowField(label,select);}
 function workflowInfo(box,label,value){const line=el('div',undefined,'workflow-info');line.append(el('span',label),el('strong',String(value||'—')));box.append(line);}
 function showAdvanced(kind,record){$('advanced').open=true;tab=kind;$('editor').hidden=true;return renderAdvanced().then(()=>{if(record)edit(record);$('advanced').scrollIntoView({block:'start'});});}
 
@@ -98,7 +106,17 @@ async function renderWorkflow(){
  const profile=db.profiles[workflowState.profile],jobs=(await call('status')).jobs;let job=profile&&jobs.find(j=>j.jobId===workflowState.jobId&&j.profile===profile.id);if(!job&&profile)job=jobs.find(j=>j.profile===profile.id&&j.action==='start');if(job&&isTerminal(job.state)&&jobs.some(j=>j.profile===profile.id&&j.action!=='start'&&j.startedAt>=job.startedAt&&!isTerminal(j.state)))job={...job,state:'stopping'};workflowLastLocalState=job?.state;
  if(job){workflowState.jobId=job.jobId;keepWorkflow();}
  if(!job||isTerminal(job.state)){
-  if(profile?.mode==='acceptance'){const accounts=Object.values(db.accounts).filter(a=>a.project===project.id);if(accounts.length)source.append(workflowSelect(wt('account'),[{value:'',label:wt('signLater')},...accounts.map(a=>({value:a.id,label:a.label}))],profile.account||'',async value=>{const updated={...profile};if(value)updated.account=value;else delete updated.account;await call('save_profile',{profile:updated,revision:db.revision});await refresh();}));}
+  if(project.adapter==='cindy'){
+   const library=(await call('login_accounts')).accounts;
+   source.append(workflowSelect(wt('savedLogin'),[{value:'',label:wt('newLogin')},...library.map(a=>({value:a.id,disabled:!a.available,label:a.label+' · '+(a.launchRegion?wt(a.launchRegion==='cn'?'cnEdition':'globalEdition'):wt('signLater'))}))],profile?.libraryAccount||'',async value=>{
+    const result=value?await call('bind_login_account',{account:value,project:project.id}):await call('prepare_project',{project:project.id,region:profile?.region||'global'});
+    workflowState.profile=result.profile.id;workflowState.jobId='';keepWorkflow();await refresh();
+   }),el('p',wt('loginReuse'),'workflow-help'));
+   if(library.some(a=>a.id===profile?.libraryAccount&&a.regionSource==='saved-profile'))source.append(el('p',wt('missingRegion'),'workflow-help'));
+   if(profile?.libraryAccount){const saved=library.find(a=>a.id===profile.libraryAccount),session=Object.values(saved?.sessions||{}).find(s=>s.isolated===profile.isolated&&s.region===profile.region);if(session?.userDataDir){const location=el('details');location.append(el('summary',wt('profileLocation')),el('p',session.userDataDir,'workflow-path'));source.append(location);}}
+   else source.append(workflowSelect(wt('loginRegion'),[{value:'global',label:wt('globalEdition')},{value:'cn',label:wt('cnEdition')}],profile?.region||'global',async region=>{const result=await call('prepare_project',{project:project.id,region});workflowState.profile=result.profile.id;workflowState.jobId='';keepWorkflow();await refresh();}));
+  }
+  if(project.adapter!=='cindy'&&profile?.mode==='acceptance'&&!profile.libraryAccount){const accounts=Object.values(db.accounts).filter(a=>a.project===project.id);if(accounts.length)source.append(workflowSelect(wt('account'),[{value:'',label:wt('signLater')},...accounts.map(a=>({value:a.id,label:a.label}))],profile.account||'',async value=>{const updated={...profile};if(value)updated.account=value;else delete updated.account;await call('save_profile',{profile:updated,revision:db.revision});await refresh();}));}
   source.append(workflowButton(wt('launch'),async()=>{const selected=profile||await ensureWorkflowProfile(project);await call('plan',{profile:selected.id});const result=await call('start',{profile:selected.id});workflowState.jobId=result.jobId;keepWorkflow();await render();}));
  }
  container.append(source);if(job&&profile)renderWorkflowRun(container,{job,project,profile,jobs,remote:false});

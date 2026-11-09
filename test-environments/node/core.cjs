@@ -21,9 +21,10 @@ class Environments{
   constructor(home=defaultHome()){this.home=home;privateDir(home);this.file=path.join(home,'catalog.json');}
   read(){const db=json(this.file,empty());if(db.version!==1||!Number.isSafeInteger(db.revision)||!['projects','accounts','profiles','cases'].every(k=>db[k]&&typeof db[k]==='object'&&!Array.isArray(db[k])))fail('INVALID_CATALOG','Catalog cannot be read; original data was preserved.');return db;}
   change(fn,revision){const lock=path.join(this.home,'.catalog-lock');try{fs.mkdirSync(lock,{mode:0o700});}catch(e){if(e.code==='EEXIST')fail('CATALOG_BUSY','Another writer is saving.');throw e;}try{const db=this.read();if(revision!==undefined&&db.revision!==revision)fail('REVISION_CHANGED','Refresh before saving; another editor changed this catalog.');const result=fn(db);db.revision++;atomic(this.file,db);return {saved:result,revision:db.revision};}finally{fs.rmdirSync(lock);}}
-  catalog(){return {storage:this.home,...this.read()};}
+  ensureLoginLibrary(){if(this.read().loginAccounts===undefined&&Object.values(this.read().accounts).some(a=>a.sessions))this.change(db=>require('./login-library.cjs').migrateLoginAccounts(db));}
+  catalog(){this.ensureLoginLibrary();return {storage:this.home,...this.read()};}
   ensureTestProject(input){
-    fields(input,['root','label','project']);if(input.project!==undefined&&input.root!==undefined)fail('INVALID_INPUT','Choose a saved project or a picked folder.');const existing=input.project!==undefined?this.read().projects[id(input.project)]:null;if(input.project!==undefined&&!existing)fail('PROJECT_NOT_FOUND','Refresh the project list.');const selected=text(existing?.root||input.root,'project directory',4096);
+    fields(input,['root','label','project','region']);if(input.region!==undefined&&!['global','cn'].includes(input.region))fail('INVALID_REGION','Select global or cn.');if(input.project!==undefined&&input.root!==undefined)fail('INVALID_INPUT','Choose a saved project or a picked folder.');const existing=input.project!==undefined?this.read().projects[id(input.project)]:null;if(input.project!==undefined&&!existing)fail('PROJECT_NOT_FOUND','Refresh the project list.');const selected=text(existing?.root||input.root,'project directory',4096);
     if(!path.isAbsolute(selected))fail('INVALID_PATH','Choose an existing local project.');
     const root=fs.realpathSync(selected);if(!fs.statSync(root).isDirectory())fail('INVALID_PATH','Choose a directory.');
     const label=input.label===undefined?path.basename(root):text(input.label,'project name');
@@ -32,9 +33,28 @@ class Environments{
       if(input.project!==undefined&&!db.projects[input.project])fail('PROJECT_NOT_FOUND','Refresh the project list.');
       let project=Object.values(db.projects).find(p=>p.root===root);
       if(!project){if(!cindy)fail('INVALID_PROJECT','Choose a Cindy source checkout. Other adapters can be configured under Advanced management.');const key='project-'+crypto.randomUUID();project={id:key,label,root,adapter:'cindy',commands:{}};db.projects[key]=project;}
-      let profile=Object.values(db.profiles).find(p=>p.project===project.id&&p.mode==='acceptance'&&p.platform==='desktop');
-      if(!profile){const key='qa-'+crypto.randomUUID().replaceAll('-','').slice(0,24),used=new Set(Object.values(db.profiles).map(p=>p.debugPort));let port=9237;while(used.has(port))port++;if(port>65535)fail('PORT_CONFIGURATION_REQUIRED','Choose a debug port in Advanced management.');profile={id:key,label:project.label,project:project.id,platform:'desktop',mode:'acceptance',isolated:key,region:'global',remoteControl:'off',background:'off',debugPort:port};db.profiles[key]=profile;}
+      let profile=Object.values(db.profiles).find(p=>p.project===project.id&&p.mode==='acceptance'&&p.platform==='desktop'&&!p.libraryAccount&&(!input.region||(p.region||'global')===input.region));
+      if(!profile){const key='qa-'+crypto.randomUUID().replaceAll('-','').slice(0,24),used=new Set(Object.values(db.profiles).map(p=>p.debugPort));let port=9237;while(used.has(port))port++;if(port>65535)fail('PORT_CONFIGURATION_REQUIRED','Choose a debug port in Advanced management.');profile={id:key,label:project.label,project:project.id,platform:'desktop',mode:'acceptance',isolated:key,region:input.region||'global',remoteControl:'off',background:'off',debugPort:port};db.profiles[key]=profile;}
       return {project:{id:project.id,label:project.label},profile:{id:profile.id,label:profile.label}};
+    });return {...result.saved,revision:result.revision};
+  }
+  loginAccounts(){this.ensureLoginLibrary();return {accounts:require('./login-library.cjs').listLoginAccounts(this.read())};}
+  bindLoginAccount(accountId,projectId){
+    id(accountId);id(projectId);this.ensureLoginLibrary();
+    const result=this.change(db=>{
+      const account=db.loginAccounts?.[accountId],project=db.projects[projectId];
+      if(!account)fail('ACCOUNT_NOT_FOUND','Choose a saved test account.');
+      if(project?.adapter!=='cindy')fail('INVALID_PROJECT','Choose a Cindy source project.');
+      const session=require('./login-library.cjs').selectLoginSession(account);
+      if(!session)fail('ACCOUNT_SIGN_IN_REQUIRED','Sign in once in a test profile for this account region.');
+      let profile=Object.values(db.profiles).find(p=>p.project===projectId&&p.libraryAccount===accountId&&p.region===session.region&&p.isolated===session.isolated);
+      if(!profile){
+        const alias=crypto.randomUUID(),key='qa-'+crypto.randomUUID().replaceAll('-','').slice(0,24);
+        let port=9237;const used=new Set(Object.values(db.profiles).map(p=>p.debugPort));while(used.has(port))port++;if(port>65535)fail('PORT_CONFIGURATION_REQUIRED','Choose a free debug port.');
+        db.accounts[alias]={id:alias,project:projectId,label:account.label,selector:account.selector,libraryAccount:accountId};
+        profile=db.profiles[key]={id:key,label:account.label,project:projectId,account:alias,libraryAccount:accountId,platform:'desktop',mode:'acceptance',region:session.region,isolated:session.isolated,debugPort:port,remoteControl:'off',background:'off'};
+      }
+      return {account:{id:account.id,label:account.label,region:account.region},profile:{id:profile.id,label:profile.label},userDataDir:session.userDataDir};
     });return {...result.saved,revision:result.revision};
   }
   saveProject(p,revision){
@@ -49,11 +69,11 @@ class Environments{
     return this.change(db=>{if(Object.values(db.profiles).some(v=>v.project===p.id)&&db.projects[p.id]?.adapter!==p.adapter)fail('PROJECT_IN_USE','Create a separate project to change adapters.');db.projects[p.id]=saved;return saved;},revision);
   }
   saveAccount(a,revision){
-    fields(a,['id','project','label','selector','loginSource','notes']);id(a.id);id(a.project);text(a.label,'account label');text(a.selector,'application account key',512);if(a.loginSource)id(a.loginSource);if(a.notes)text(a.notes,'notes',1000);
-    return this.change(db=>{if(!db.projects[a.project])fail('PROJECT_NOT_FOUND','Save the project first.');if(db.accounts[a.id]&&['project','selector'].some(k=>db.accounts[a.id][k]!==a[k]))fail('ACCOUNT_IDENTITY_CHANGED','Create a new account reference instead of rebinding an existing name.');db.accounts[a.id]={...a,...(db.accounts[a.id]?.sessions?{sessions:db.accounts[a.id].sessions}:{})};return db.accounts[a.id];},revision);
+    fields(a,['id','project','label','selector','loginSource','notes','libraryAccount']);id(a.id);id(a.project);text(a.label,'account label');text(a.selector,'application account key',512);if(a.loginSource)id(a.loginSource);if(a.notes)text(a.notes,'notes',1000);
+    return this.change(db=>{if(!db.projects[a.project])fail('PROJECT_NOT_FOUND','Save the project first.');const old=db.accounts[a.id];if(old&&['project','selector'].some(k=>old[k]!==a[k]))fail('ACCOUNT_IDENTITY_CHANGED','Create a new account reference instead of rebinding an existing name.');if(a.libraryAccount!==undefined&&a.libraryAccount!==old?.libraryAccount)fail('ACCOUNT_IDENTITY_CHANGED','Choose a saved account through the account picker.');db.accounts[a.id]={...a,...(old?.sessions?{sessions:old.sessions}:{}),...(old?.libraryAccount?{libraryAccount:old.libraryAccount}:{})};return db.accounts[a.id];},revision);
   }
   saveProfile(p,revision){
-    fields(p,['id','label','project','platform','mode','account','isolated','region','remoteControl','background','fixture','loginSource','serveLogin','deviceId','artifactPath','bundleId','debugPort']);id(p.id);id(p.project);text(p.label,'profile label');
+    fields(p,['id','label','project','platform','mode','account','isolated','region','remoteControl','background','fixture','loginSource','serveLogin','deviceId','artifactPath','bundleId','debugPort','libraryAccount']);id(p.id);id(p.project);text(p.label,'profile label');
     if(!['desktop','ios','android','linux'].includes(p.platform))fail('INVALID_PLATFORM','Select desktop, ios, android or linux.');
     if(!['legacy','acceptance'].includes(p.mode))fail('INVALID_MODE','Select legacy or acceptance.');
     for(const k of ['account','fixture','loginSource','serveLogin'])if(p[k])id(p[k]);
@@ -64,6 +84,12 @@ class Environments{
     for(const k of ['deviceId','bundleId'])if(p[k])text(p[k],k,256);
     if(p.artifactPath&&!path.isAbsolute(text(p.artifactPath,'artifact path',4096)))fail('INVALID_PATH','Build artifact path must be absolute.');
     return this.change(db=>{const project=db.projects[p.project];if(!project)fail('PROJECT_NOT_FOUND','Save the project first.');if(p.account&&db.accounts[p.account]?.project!==p.project)fail('ACCOUNT_PROJECT_MISMATCH','Choose an account from this project.');
+      const old=db.profiles[p.id];
+      if(p.libraryAccount!==undefined&&p.libraryAccount!==old?.libraryAccount)fail('ACCOUNT_IDENTITY_CHANGED','Choose a saved account through the account picker.');
+      if(old?.libraryAccount){
+        if(['project','account','region','isolated','platform','mode'].some(k=>old[k]!==p[k]))fail('ACCOUNT_IDENTITY_CHANGED','Choose another account through the account picker; its saved profile cannot be rebound.');
+        p={...p,libraryAccount:old.libraryAccount};
+      }
       if(project.adapter==='cindy'){
         if(p.platform==='linux')fail('INVALID_PLATFORM','For Cindy on Linux select desktop.');
         if(p.platform==='desktop'&&!p.isolated)fail('ISOLATION_REQUIRED','Choose a persistent isolated desktop profile.');
@@ -141,6 +167,11 @@ class Environments{
     const plan=this.plan(profileId,action),lock=path.join(this.home,'.launch-lock');try{fs.mkdirSync(lock);}catch(e){if(e.code==='EEXIST')fail('LAUNCH_BUSY','Another launch is being registered.');throw e;}
     try{
       for(const job of this.jobs())if(job.projectRoot===plan.projectRoot&&(!['stopped','completed','failed'].includes(job.state)||alive(job.supervisorPid))&&action!=='verify'&&!(action==='prepare'&&plan.readiness==='command'&&job.action==='start'))fail('PROJECT_BUSY',`Inspect or stop job ${job.jobId} before launching again.`);
+      if(plan.readiness==='cindy')for(const job of this.jobs()){
+        if(job.action!=='start'||['stopped','completed','failed'].includes(job.state)&&!alive(job.supervisorPid))continue;
+        const previous=json(path.join(this.home,'jobs',job.jobId,'plan.json'));
+        if(previous.readiness==='cindy'&&previous.configuration?.isolated===plan.configuration.isolated&&previous.configuration?.region===plan.configuration.region)fail('ACCOUNT_PROFILE_BUSY',`Stop or inspect job ${job.jobId} before reusing this account profile.`);
+      }
       if(plan.readiness==='cindy'){
         const processes=execFileSync('ps',['-axo','pid=,command='],{encoding:'utf8',maxBuffer:8*1024*1024});
         if(processes.split('\n').some(line=>line.includes(plan.projectRoot)&&/electron|electron-forge|vite|restart-desktop/.test(line)))fail('CHECKOUT_IN_USE','A desktop process already uses this checkout. Stop it through its owner before launching here.');
@@ -156,7 +187,7 @@ class Environments{
         fs.copyFileSync(path.join(__dirname,'cindy-launch.cjs'),path.join(dir,'cindy-launch.cjs'));plan.argv[1]=path.join(dir,'cindy-launch.cjs');
       }
       plan.catalogHome=this.home;
-      for(const name of ['runner.cjs','observation.cjs','account-catalog.cjs','session-monitor.cjs'])fs.copyFileSync(path.join(__dirname,name),path.join(dir,name));if(plan.terminalPython)fs.copyFileSync(path.join(__dirname,'terminal.py'),path.join(dir,'terminal.py'));atomic(path.join(dir,'plan.json'),plan);atomic(path.join(dir,'status.json'),{jobId,profile:plan.profile,projectRoot:plan.projectRoot,action,startedAt:Date.now(),state:'starting',execution:'not_executed'});
+      for(const name of ['runner.cjs','observation.cjs','account-catalog.cjs','session-monitor.cjs','login-library.cjs'])fs.copyFileSync(path.join(__dirname,name),path.join(dir,name));if(plan.terminalPython)fs.copyFileSync(path.join(__dirname,'terminal.py'),path.join(dir,'terminal.py'));atomic(path.join(dir,'plan.json'),plan);atomic(path.join(dir,'status.json'),{jobId,profile:plan.profile,projectRoot:plan.projectRoot,action,startedAt:Date.now(),state:'starting',execution:'not_executed'});
       const log=fs.openSync(path.join(dir,'supervisor.log'),'a',0o600);let child;try{child=spawn(node,[path.join(dir,'runner.cjs'),dir],{detached:true,stdio:['ignore',log,log],env:safeEnv()});child.unref();}finally{fs.closeSync(log);}
       child.on('error',()=>atomic(path.join(dir,'status.json'),{jobId,profile:plan.profile,projectRoot:plan.projectRoot,action,startedAt:Date.now(),state:'failed',code:'RUNNER_START_FAILED',execution:'not_executed'}));
       return {jobId,state:'starting',plan,nextAction:'Query status with this jobId; do not repeat start while preparing or waiting for sign-in.'};
@@ -164,6 +195,6 @@ class Environments{
   }
   stop(jobId){const s=this.status(jobId);if(['stopped','completed','failed'].includes(s.state)&&!alive(s.supervisorPid))return s;if(s.state==='unknown')fail('JOB_UNCONFIRMED','Original supervisor unavailable; no process was stopped.');atomic(path.join(this.home,'jobs',jobId,'cancel.json'),{jobId,at:Date.now()});return {jobId,state:'stopping',execution:'requested',dataPreserved:true};}
   inspect(jobId,screenshot=false){if(typeof screenshot!=='boolean')fail('INVALID_INPUT','screenshot must be boolean.');const state=this.status(jobId),dir=path.join(this.home,'jobs',jobId);return require('./observation.cjs').inspectDesktop(dir,json(path.join(dir,'plan.json')),state,{screenshot});}
-  invoke(method,args={}){if(method==='remote'){const {operation,...params}=args;if(!['catalog','plan','start','status','stop','select_account','action','collect'].includes(operation))fail('UNKNOWN_OPERATION','Unknown remote operation.');return new (require('./remote.cjs').Remote)(this.home).invoke('remote_'+operation,params);}if(['remote_catalog','remote_plan','remote_start','remote_status','remote_stop','remote_select_account','remote_action','remote_collect'].includes(method))return new (require('./remote.cjs').Remote)(this.home).invoke(method,args);switch(method){case 'catalog':return this.catalog();case 'ensure_test_project':return this.ensureTestProject(args);case 'save_project':return this.saveProject(args.project,args.revision);case 'save_account':return this.saveAccount(args.account,args.revision);case 'save_profile':return this.saveProfile(args.profile,args.revision);case 'save_case':return this.saveCase(args.testCase,args.revision);case 'remove':return this.remove(args.kind,args.id,args.revision);case 'import_cindy':return this.importCindy(args.project,args.jobId);case 'select_account':return this.selectAccount(args.jobId,args.account);case 'plan':return this.plan(args.profile,args.action);case 'start':return this.start(args.profile,args.action);case 'status':return args.jobId?this.status(args.jobId):{jobs:this.jobs()};case 'stop':return this.stop(args.jobId);case 'inspect':return this.inspect(args.jobId,args.screenshot);default:fail('UNKNOWN_OPERATION','Unknown operation.');}}
+  invoke(method,args={}){if(method==='remote'){const {operation,...params}=args;if(!['catalog','plan','start','status','stop','select_account','action','collect'].includes(operation))fail('UNKNOWN_OPERATION','Unknown remote operation.');return new (require('./remote.cjs').Remote)(this.home).invoke('remote_'+operation,params);}if(['remote_catalog','remote_plan','remote_start','remote_status','remote_stop','remote_select_account','remote_action','remote_collect'].includes(method))return new (require('./remote.cjs').Remote)(this.home).invoke(method,args);switch(method){case 'catalog':return this.catalog();case 'login_accounts':return this.loginAccounts();case 'bind_login_account':return this.bindLoginAccount(args.account,args.project);case 'ensure_test_project':return this.ensureTestProject(args);case 'save_project':return this.saveProject(args.project,args.revision);case 'save_account':return this.saveAccount(args.account,args.revision);case 'save_profile':return this.saveProfile(args.profile,args.revision);case 'save_case':return this.saveCase(args.testCase,args.revision);case 'remove':return this.remove(args.kind,args.id,args.revision);case 'import_cindy':return this.importCindy(args.project,args.jobId);case 'select_account':return this.selectAccount(args.jobId,args.account);case 'plan':return this.plan(args.profile,args.action);case 'start':return this.start(args.profile,args.action);case 'status':return args.jobId?this.status(args.jobId):{jobs:this.jobs()};case 'stop':return this.stop(args.jobId);case 'inspect':return this.inspect(args.jobId,args.screenshot);default:fail('UNKNOWN_OPERATION','Unknown operation.');}}
 }
 module.exports={Environments,defaultHome,atomic,json,alive,safeEnv};

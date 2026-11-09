@@ -42,6 +42,10 @@ function rememberAccounts(home, plan, application, snapshot) {
       const old = record.project === plan.project && record.sessions?.[plan.profile];
       if (old?.listed && !visible.has(record.id)) { old.listed = false; changed = true; }
     }
+    const beforeLibrary = JSON.stringify(db.loginAccounts);
+    require('./login-library.cjs').migrateLoginAccounts(db);
+    require('./login-library.cjs').rememberLoginAccounts(db, profile, application, snapshot);
+    if (JSON.stringify(db.loginAccounts) !== beforeLibrary) changed = true;
     if (!changed) return {saved: true, changed: false};
     db.revision++;
     const tmp = `${file}.${crypto.randomUUID()}.tmp`;

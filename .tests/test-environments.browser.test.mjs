@@ -51,6 +51,32 @@ async function setup(t,{locale='zh-CN',width=860,mode='light',advanced=true}={})
  return {page,context,url,core,project,calls,state,errors,async shot(name){if(evidence){fs.mkdirSync(evidence,{recursive:true});await page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});}}};
 }
 const button=(page,name)=>page.locator('#advanced').getByRole('button',{name,exact:true});
+test('saved account picker reuses another project profile and follows its reported region without launching',async t=>{
+ const f=await setup(t,{advanced:false});
+ fs.mkdirSync(path.join(f.project,'scripts'));for(const file of ['restart-desktop-remote.mjs','desktop-restart-runner.mjs'])fs.writeFileSync(path.join(f.project,'scripts',file),'');
+ f.core.saveProject({id:'source',label:'示例源码',root:f.project,adapter:'cindy'});
+ const prepared=f.core.ensureTestProject({project:'source',region:'cn'}),profile=f.core.read().profiles[prepared.profile.id];
+ const {rememberAccounts}=require('../test-environments/node/account-catalog.cjs');
+ const userDataDir=path.join(f.project,'app-owned-login');
+ rememberAccounts(f.core.home,f.core.plan(profile.id),{userDataDir},{authenticated:true,accounts:[{accountKey:'opaque-example-account',displayName:'示例正式账号',isCurrent:true}]});
+ await f.page.reload();await f.page.getByLabel('已保存的测试账号',{exact:true}).waitFor();
+ const account=f.core.loginAccounts().accounts[0];
+ await f.page.getByLabel('已保存的测试账号',{exact:true}).selectOption(account.id);
+ await until(()=>f.page.getByLabel('已保存的测试账号',{exact:true}).inputValue(),value=>value===account.id);
+ await f.page.getByText('沿用上次登录档案的版本；应用未提供这个账号的所属区域。',{exact:true}).waitFor();
+ await f.page.getByText('应用保管登录态的位置',{exact:true}).click();
+ await f.page.getByText(userDataDir,{exact:true}).waitFor();
+ assert.equal(f.core.jobs().length,0);
+ const bound=Object.values(f.core.read().profiles).find(p=>p.libraryAccount===account.id);assert.equal(bound.region,'cn');assert.equal(bound.isolated,profile.isolated);
+ assert.equal(await f.page.getByLabel('首次登录使用的版本',{exact:true}).count(),0);
+ await f.shot('saved-account-picker');
+ await f.page.getByLabel('已保存的测试账号',{exact:true}).selectOption('');
+ await f.page.getByLabel('首次登录使用的版本',{exact:true}).waitFor();
+ await f.page.getByLabel('首次登录使用的版本',{exact:true}).selectOption('global');
+ await until(()=>f.page.getByLabel('首次登录使用的版本',{exact:true}).inputValue(),value=>value==='global');
+ assert.equal(f.core.jobs().length,0);
+ assert.equal(f.core.loginAccounts().accounts[0].id,account.id);
+});
 async function tab(page,name){await button(page,name).click();await page.waitForFunction(()=>!document.querySelector('#tabs button:disabled'));}
 async function editAdd(page){await button(page,'添加').click();await page.locator('#editor form').waitFor({state:'visible'});}
 async function fill(page,values){for(const [name,value]of Object.entries(values)){const field=page.locator(`#editor [name="${name}"]`);if(await field.evaluate(e=>e.tagName)==='SELECT')await field.selectOption(value);else await field.fill(String(value));}}

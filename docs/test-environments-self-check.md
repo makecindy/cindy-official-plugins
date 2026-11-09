@@ -1,5 +1,20 @@
 # Unified test package 1.1.2 self-check
 
+## 1.3.0 current implementation checks (plugin only)
+
+Adds cross-checkout public account references, old-catalog migration, compatibility with clients lacking region metadata, stable profile reuse and ownership protection.
+Native client/server/database drafts are not in this PR or package. No permanent-login feature or new authorization endpoint is shipped.
+
+- Repository gates, plugin behavior, native-picker bridge, unpacked real Worker/CLI and real OpenSSH loopback: 114 passed, zero failed/skipped.
+- Current pages/main.js and actual Worker in Chromium: 29 passed, zero failed/skipped. Covers account selection without client region metadata, profile paths, first-sign-in edition selection, existing workflow and four-language narrow layouts.
+- Environment: Node 22.23.2, macOS darwin/arm64, Chrome 157.0.8103.38. The browser Host bridge is a fixture, not installed-Cindy acceptance.
+- 1.3.0 `.cindy`: 472769 bytes, all 28 files match source bytes, ZIP CRC passed; SHA-256 `aa9a77039728d0bdd4f7ec164823adccc9d11d4a285c60e5d0199520297601f3`. Not automatically installed.
+- Evidence covers placeholder accounts and owned local processes. Real SSO/email/phone sign-in, real expiry/revocation, two physical computers and actual Cindy build/installation remain runtime gaps.
+
+The new account cases are imported by `.tests/test-environments.test.mjs`, so the existing plugin CI entry runs them without changing the workflow.
+See [account acceptance](test-environments-accounts.md) for user steps, storage and expected outcomes. Historical evidence follows and does not substitute for this section.
+
+
 Scope: PR #309 local real-account supervision, generic SSH orchestration, stop and
 artifact collection. #308 is superseded; #279 remains the handoff source. This test
 package has not been installed, enabled, merged or published.

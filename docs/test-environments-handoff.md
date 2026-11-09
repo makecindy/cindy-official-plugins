@@ -1,5 +1,12 @@
 # Test Environments：统一 PR 方案与交接
 
+## 当前范围更新：1.3.0，仅插件
+
+用户已接受现有默认约 30 天自动续期，明确要求只改插件。新增跨项目多账号引用、复用本机应用档案、版本选择和占用保护；不提交客户端、服务端或数据库草稿，也不提供永久登录。
+两种 SSO 的历史目标不作为此次完成前提：本次使用测试应用现有正常登录入口；日常 Cindy 直接授权仍未实现。
+操作和验收以[最新账号说明](test-environments-accounts.zh-CN.md)为准；以下历史方案涉及主程序/服务端的内容保留为后续背景，不是当前交付承诺。
+
+
 [English](test-environments-handoff.en.md)
 
 2026-11-09 按接手者决定统一交付：**[#309](https://github.com/makecindy/cindy-official-plugins/pull/309)

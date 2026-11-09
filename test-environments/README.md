@@ -1,5 +1,13 @@
 # Test Environments
 
+## 1.3.0: plugin-only account reuse
+
+Choose a project, select a saved test account, then start. First sign-in stays in the app; stopping retains its profile, including reuse from another source checkout.
+Older clients without account-region metadata reuse the observed profile version. No new client/server API is required. Existing sliding expiry remains unchanged (code default about 30 days; deployment configuration is authoritative); idle listed accounts are not refreshed in the background.
+Expand App-owned login profile after selecting an account to see its path. See [account usage and acceptance](../docs/test-environments-accounts.md).
+Daily-host authorization, permanent login and arbitrary packaged desktop isolation are outside this delivery. The 1.2.1 sections below describe existing behavior.
+
+
 ## Simplest use (1.2.1)
 
 Choose project… uses **Cindy’s existing native directory picker**. Select the source

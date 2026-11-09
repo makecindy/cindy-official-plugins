@@ -1,7 +1,7 @@
 'use strict';
-const METHODS=['catalog','save_project','save_account','save_profile','save_case','remove','import_cindy','select_account','plan','start','status','stop','inspect','remote'];
+const METHODS=['catalog','save_project','save_account','save_profile','save_case','remove','import_cindy','select_account','plan','start','status','stop','inspect','remote','login_accounts','bind_login_account'];
 async function request(method,args){
-  if(method==='prepare_project'){const r=await cindy.node.request({method:'ensure_test_project',params:{project:args?.project},timeoutMs:30000});return r.ok?r.result:{ok:false,errorCode:'WORKER_UNAVAILABLE',message:'Inspect the catalog before trying again.',execution:'unknown'};}
+  if(method==='prepare_project'){const r=await cindy.node.request({method:'ensure_test_project',params:{project:args?.project,...(args?.region?{region:args.region}:{})},timeoutMs:30000});return r.ok?r.result:{ok:false,errorCode:'WORKER_UNAVAILABLE',message:'Inspect the catalog before trying again.',execution:'unknown'};}
   if(method==='pick_project'){
     if(typeof cindy.pick!=='function')return {ok:false,errorCode:'PICK_UNAVAILABLE',message:'Native directory selection is unavailable. Update Cindy or use Advanced management.',execution:'not_executed'};
     const titles={en:'Choose a Cindy project','zh-CN':'选择 Cindy 项目',ja:'Cindy プロジェクトを選択',ko:'Cindy 프로젝트 선택'};

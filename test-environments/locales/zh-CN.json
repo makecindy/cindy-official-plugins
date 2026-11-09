@@ -47,6 +47,12 @@
     },
     "remote": {
       "description": "通用 SSH 验收流程。catalog 查看指定电脑的档案与硬件；plan 提供 target、profile 和 pr（repo/number，可选 commit）。省略 commit 时从目标 Git 读取 PR 当前版本，预览精确 SHA 后再 start。start 使用新工作树和 B 本机登录；status/stop/select_account/action/collect 使用同一 runId。action 仅执行已保存的 prepare/verify 参数；collect 取回限量、校验摘要的结果、可选日志和私有截图。沿用 OpenSSH 主机信任，不保存密码/私钥、不转发 Agent、不复制凭证。B 未登录正常授权；跨设备首次授权未实现。回执丢失先查原运行，不盲目重试。命令成功不代替真机和人工证据；不自动发布 PR，分享前脱敏。"
+    },
+    "login_accounts": {
+      "description": "列出本机跨项目保存的测试账号引用。可用只表示已发现匹配的应用档案，不保证登录仍有效；不含凭证。"
+    },
+    "bind_login_account": {
+      "description": "为 Cindy 源码项目选择已保存账号，复用应用保管的隔离档案。优先使用应用报告的区域，缺失时沿用已观察档案的版本。不启动、不复制凭证；先停止占用该档案的实例。"
     }
   }
 }

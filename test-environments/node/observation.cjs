@@ -47,7 +47,7 @@ const SNAPSHOT=`const auth=await api.authInitialize();
  const database=authenticated&&typeof auth.dataOwnerId==='string'&&api.localDb?.ensureReady
    ?await api.localDb.ensureReady(auth.dataOwnerId):null;
  return {supported:true,authenticated,databaseReady:database?.ready===true,
-  accounts:saved.accounts.map(a=>({accountKey:a.accountKey,displayName:a.displayName,isCurrent:a.isCurrent===true})),
+  accounts:saved.accounts.map(a=>({accountKey:a.accountKey,displayName:a.displayName,isCurrent:a.isCurrent===true,region:a.region,email:a.email,orgName:a.orgName,kind:a.kind})),
   step:authenticated?'authenticated':login?.state?.step||null,
   code:database?.error?.code||(login?.success===false?login.code:null),
   remoteControl:api.deviceLink?.getState?(await api.deviceLink.getState()).remoteControlEnabled:null,
@@ -57,7 +57,10 @@ function projectSnapshot(value){
   const bounded=(v,max)=>typeof v==='string'&&v.length<=max&&!v.includes('\0')?v:null;
   const accounts=value.accounts.map(a=>{
     const accountKey=bounded(a?.accountKey,512);if(!accountKey)fail('INVALID_ACCOUNT_SNAPSHOT','Invalid account reference from the application.');
-    return {accountKey,displayName:bounded(a.displayName,256)||'Cindy account',isCurrent:a.isCurrent===true};
+    return {accountKey,displayName:bounded(a.displayName,256)||'Cindy account',isCurrent:a.isCurrent===true,
+      ...(['cn','global'].includes(a.region)?{region:a.region}:{}),
+      ...(bounded(a.email,320)?{email:a.email}:{}),...(bounded(a.orgName,256)?{orgName:a.orgName}:{}),
+      ...(['personal','org'].includes(a.kind)?{kind:a.kind}:{})};
   });
   if(accounts.filter(a=>a.isCurrent).length>1)fail('INVALID_ACCOUNT_SNAPSHOT','Ambiguous current account.');
   return {authenticated:value.authenticated===true,databaseReady:value.databaseReady===true,accounts,

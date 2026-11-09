@@ -1,5 +1,15 @@
 # Test Environments
 
+## 1.3.0: plugin-only saved account reuse
+
+Choose a project and edition for initial sign-in in the test app. `login_accounts` lists public references;
+`bind_login_account({account,project})` reuses the observed app-owned profile for another source checkout and returns a profile to preview/start.
+The page offers Saved test account and an expandable App-owned login profile path. Previously observed catalog entries migrate automatically.
+Without client region metadata, reuse the observed build/profile rather than infer a realm. No new native/server API is needed.
+Stopping retains data. Existing sliding expiry (default about 30 days, server configuration authoritative) remains; idle listed accounts are not refreshed in the background.
+Do not claim permanent login, direct daily-host authorization or arbitrary desktop-package isolation. Never read/copy credentials.
+
+
 ## Simplest use (1.2.1)
 
 Choose project… uses **Cindy’s existing native directory picker**. Select the source

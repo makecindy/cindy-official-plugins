@@ -1,5 +1,12 @@
 # Test Environments: unified PR plan and handoff
 
+## Current scope: 1.3.0, plugin only
+
+The user accepted existing sliding expiry (code default about 30 days) and explicitly limited this implementation to the plugin. Add cross-project account references, reuse app-owned profiles, select versions and prevent concurrent profile ownership. Client/server/database drafts and permanent login are not submitted.
+Historical goals for both SSO sources are not prerequisites for this delivery: use the test app’s existing sign-in; direct daily-host authorization remains unimplemented.
+Use the [current account guide](test-environments-accounts.md) for instructions and acceptance. Historical native/server proposals below are future context, not current delivery claims.
+
+
 [简体中文](test-environments-handoff.md)
 
 On 2026-11-09 the recipient chose **[#309](https://github.com/makecindy/cindy-official-plugins/pull/309)

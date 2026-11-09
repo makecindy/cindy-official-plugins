@@ -47,6 +47,12 @@
     },
     "remote": {
       "description": "SSH test workflow. catalog(target) reads the chosen computer’s profiles/hardware. plan(target,profile,pr{repo,number,commit?}) previews an exact revision; omit commit to read the PR head with target Git. start(runId) uses a new worktree and B-local login. status/stop/select_account/action/collect keep that runId. action executes saved prepare/verify argv only. collect returns bounded, hashed results and optional logs/private screenshot. Existing OpenSSH trust; no password/key storage, agent forwarding or credential copying. Missing B login needs normal sign-in; cross-device first authorization is not implemented. Lost replies are unknown: query the same run before repeating operations. Human/device checks need real evidence and stay pending after script success. No automatic PR publication; review/redact evidence."
+    },
+    "login_accounts": {
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials."
+    },
+    "bind_login_account": {
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first."
     }
   }
 }

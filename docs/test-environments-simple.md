@@ -1,5 +1,7 @@
 # 1.2.1: choose a project, then start
 
+Version 1.3.0 adds saved-account selection, reuse across source checkouts and first-sign-in edition selection. Start with the [current account usage and acceptance guide](test-environments-accounts.md). Existing project-picker behavior follows.
+
 [简体中文](test-environments-simple.zh-CN.md)
 
 Home retains local/SSH, project and Start. A running instance uses one status panel
