@@ -175,7 +175,7 @@ function pickArgs(args, keys) {
  * submit_intake 会在第三方公开仓库建一条公开 issue（发出去就撤不回），所以它照这条做：
  *   not_sent  确定没发出去（连接没建起来 / 端点明确拒绝）→ 可以重试
  *   uncertain 可能已经建了 issue，只是回执没回来       → 不许说「重试」，要说清怎么查
- *   sent      确定已执行（拿到回执）
+ *   成功（拿到回执）走 ok:true，不在这里再发一个 `sent` 字段——三态只用于失败路径。
  * 读操作不区分三态：重试无害。
  */
 const DELIVERY_NOT_SENT = 'not_sent';
@@ -183,12 +183,15 @@ const DELIVERY_UNCERTAIN = 'uncertain';
 
 function classifyDelivery(reason, status) {
   const text = String(reason || '');
-  if (status >= 500) return DELIVERY_UNCERTAIN;   // 服务端可能已经建了 issue
-  if (status >= 400) return DELIVERY_NOT_SENT;     // 端点明确拒绝，没有创建
+  // 4xx 是端点明确拒绝：请求到了、没有创建，可以重试。
+  if (status >= 400 && status < 500) return DELIVERY_NOT_SENT;
+  // 5xx 时服务端可能已经建了 issue 才失败。
+  if (status >= 500) return DELIVERY_UNCERTAIN;
   if (/超时|timeout|timed out|aborted|ECONNRESET|EPIPE|socket hang up|ETIMEDOUT|EAI_AGAIN/i.test(text)) {
     return DELIVERY_UNCERTAIN;                      // 请求可能已发出，只是回执没回来
   }
-  return DELIVERY_NOT_SENT;                         // 连接就没建起来
+  // 其余网络错误一律按不确定处理：没有证据证明连接从未建立，宁可让调用方先核对。
+  return DELIVERY_UNCERTAIN;
 }
 
 function deliveryHint(state) {
@@ -266,7 +269,7 @@ async function callHostedTool(toolName, args, callId, options) {
     const err = new Error(asString(envelope.error.message) || 'MCP 错误');
     err.code = 'MISAKANET_MCP_ERROR';
     err.hint = err.message;
-    if (irreversible) err.delivery = DELIVERY_NOT_SENT;
+    if (irreversible) err.delivery = DELIVERY_UNCERTAIN;
     throw err;
   }
 
@@ -278,7 +281,7 @@ async function callHostedTool(toolName, args, callId, options) {
     const err = new Error(text || 'MCP 调用返回错误');
     err.code = 'MISAKANET_TOOL_ERROR';
     err.hint = clip(text, 600);
-    if (irreversible) err.delivery = DELIVERY_NOT_SENT;
+    if (irreversible) err.delivery = DELIVERY_UNCERTAIN;
     throw err;
   }
 
@@ -302,7 +305,7 @@ async function callHostedTool(toolName, args, callId, options) {
     const err = new Error(message || '业务错误');
     err.code = 'MISAKANET_TOOL_ERROR';
     err.hint = message || '业务错误';
-    if (irreversible) err.delivery = DELIVERY_NOT_SENT;
+    if (irreversible) err.delivery = DELIVERY_UNCERTAIN;
     throw err;
   }
   return payload;

@@ -95,9 +95,9 @@ ghost_call({ ghost_id: "misakanet", tool: "misakanet_preflight",
      或用 `misakanet_me_inbox` 查；
    - 拿到回执 → 确定已执行，把 intake_id 与 dedup_key 给用户。
 
-包本身带发布者签名（包内 `cindy-signatures.json`）：Cindy 安装时会复算文件清单并验签，
-**清单对不上的包装不上**（也不会静默降级成未签名包）。签名证明「文件没被改、还是同一把钥匙」，
-不证明发布者的现实身份。
+官方通道的包由平台在发布流水线写入签名（本目录不含 `cindy-signatures.json`）：Cindy 安装时会复算
+文件清单并验签，**清单对不上的包装不上**（也不会静默降级成未签名包）。签名证明「文件没被改、还是
+同一把钥匙」，不证明发布者的现实身份；自签只用于社区投稿通道的本地校验。
 
 ## 6. 可信边界（重要）
 
