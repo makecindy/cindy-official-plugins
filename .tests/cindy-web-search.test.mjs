@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -39,6 +40,8 @@ function createHarness(options = {}) {
   const cindyRequests = [];
   const appContextRequests = [];
   const toolResults = [];
+  const fileRequests = [];
+  const files = new Map();
   let handler = null;
 
   const cindy = {
@@ -57,6 +60,18 @@ function createHarness(options = {}) {
       throw new Error('unexpected network request');
     },
     async send(message) {
+      if (message.type === 'fs-request') {
+        fileRequests.push(message);
+        assert.equal(message.op, 'write');
+        assert.equal(message.root, 'workdir');
+        assert.equal(typeof message.callId, 'string');
+        assert.equal(typeof message.content, 'string');
+        const bytes = Buffer.byteLength(message.content, 'utf8');
+        assert.ok(bytes <= 16 * 1024 * 1024, 'Host rejects file writes above 16 MiB');
+        if (options.fileResult) return options.fileResult(message);
+        files.set(message.path, Buffer.from(message.content, 'utf8').toString('utf8'));
+        return { ok: true, path: message.path, bytes };
+      }
       if (message.type === 'cindy-request') {
         cindyRequests.push(message);
         if (options.cindyError) throw options.cindyError;
@@ -83,6 +98,8 @@ function createHarness(options = {}) {
   if (options.withoutRequest) delete cindy.request;
   const context = {
     cindy,
+    crypto: options.crypto === undefined ? webcrypto : options.crypto,
+    TextEncoder,
     fetch: async (url, init) => {
       if (options.kvFetch) return options.kvFetch(url, init);
       assert.equal(url, '/kv');
@@ -110,7 +127,17 @@ function createHarness(options = {}) {
     cindyRequests,
     appContextRequests,
     toolResults,
+    fileRequests,
+    files,
     messages: context.MESSAGES,
+    fullResult(message) {
+      if (!message.result.preview) return message.result;
+      const saved = JSON.parse(files.get(message.result.saved_to));
+      if (message.result.saved_format === 'json-chunks') {
+        return JSON.parse(saved.parts.map(part => files.get(part.path)).join(''));
+      }
+      return saved;
+    },
     async hostMessage(message) {
       await handler(message);
     },
@@ -232,7 +259,7 @@ function createSettingsHarness(options = {}) {
 }
 
 test('manifest declares Cindy Web Search and keeps BYO providers explicit', () => {
-  assert.equal(manifest.version, '1.6.0');
+  assert.equal(manifest.version, '1.7.0');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.equal(manifest.schemaVersion, 3);
   assert.deepEqual(manifest.cindy, { search: ['web'] });
@@ -246,18 +273,20 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   assert.ok(fetchTool);
   const provider = searchTool.parameters.properties.provider;
   assert.deepEqual(provider.enum, ['cindy', 'brave', 'tavily', 'deepseek']);
+  assert.equal(searchTool.parameters.properties.limit.default, 10);
   assert.equal(provider.enum.includes('auto'), false);
   const query = searchTool.parameters.properties.query;
-  assert.equal(query.maxLength, 2000);
+  assert.equal(query.maxLength, undefined);
   assert.match(searchTool.description, /2000/);
   assert.match(query.description, /2000/);
   assert.equal(fetchTool.parameters.properties.url.maxLength, 2048);
   assert.equal(fetchTool.parameters.properties.confirm_public_url.type, 'boolean');
   assert.deepEqual(fetchTool.parameters.required, ['url', 'confirm_public_url']);
   assert.deepEqual(fetchTool.parameters.properties.extract_depth.enum, ['basic', 'advanced']);
-  assert.match(fetchTool.description, /50000/);
+  assert.match(fetchTool.description, /12000/);
+  assert.match(fetchTool.description, /saved_to/);
   assert.match(fetchTool.description, /不可信/);
-  assert.match(fetchTool.description, /响应过大/);
+  assert.match(fetchTool.description, /宿主截断/);
   assert.match(fetchTool.description, /浏览器登录/);
   assert.match(fetchTool.description, /执行页面脚本/);
   assert.match(fetchTool.description, /confirm_public_url=true/);
@@ -273,7 +302,10 @@ test('manifest declares Cindy Web Search and keeps BYO providers explicit', () =
   ];
   for (const [index, locale] of locales.entries()) {
     assert.match(locale.tools.search_web.description, /2000/);
-    assert.match(locale.tools.fetch_page.description, /50000/);
+    assert.match(locale.tools.search_web.description, /12000/);
+    assert.match(locale.tools.search_web.description, /saved_to/);
+    assert.match(locale.tools.fetch_page.description, /12000/);
+    assert.match(locale.tools.fetch_page.description, /saved_to/);
     assert.match(locale.tools.fetch_page.description, /confirm_public_url=true/);
     assert.match(locale.whenToUse, localeRoutingContracts[index][0]);
     assert.match(locale.whenToUse, localeRoutingContracts[index][1]);
@@ -329,10 +361,11 @@ test('fetch_page calls Tavily Extract without handling credentials in the sandbo
     content_chars: 15,
     truncated: false,
     content_is_untrusted: true,
+    preview: false,
   });
 });
 
-test('fetch_page supports advanced extraction and marks content truncation explicitly', async () => {
+test('fetch_page supports advanced extraction and keeps full content outside its bounded preview', async () => {
   const content = 'x'.repeat(50001);
   const harness = createHarness({
     networkResult(request) {
@@ -358,9 +391,46 @@ test('fetch_page supports advanced extraction and marks content truncation expli
 
   assert.equal(result.ok, true);
   assert.equal(result.result.extract_depth, 'advanced');
-  assert.equal(result.result.content.length, 50000);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.equal(result.result.preview, true);
+  assert.equal(result.result.complete_saved, true);
   assert.equal(result.result.content_chars, 50001);
   assert.equal(result.result.truncated, true);
+  assert.equal(harness.fullResult(result).content, content);
+  assert.equal(harness.fullResult(result).truncated, false);
+  assert.equal(harness.networkCalls.length, 1);
+});
+
+test('fetch_page preserves valid content above one million characters including whitespace', async () => {
+  const content = '    # Indented page\n' + '正文😀\n'.repeat(220000) + '\n\n';
+  const harness = createHarness({ networkResult: () => ({
+    ok: true, status: 200, body: JSON.stringify({
+      results: [{ url: 'https://example.test/article', raw_content: content }], failed_results: [],
+    }),
+  }) });
+  const result = await harness.fetchPage();
+  assert.equal(result.ok, true);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.equal(harness.fullResult(result).content, content);
+  assert.equal(harness.fullResult(result).content_chars, content.length);
+  assert.equal(harness.fullResult(result).content_is_untrusted, true);
+  assert.equal(harness.networkCalls.length, 1);
+});
+
+test('fetch_page reports saving failure after extraction without retrying or inlining full content', async () => {
+  const harness = createHarness({
+    fileResult: () => ({ ok: false, message: 'fixture write denied' }),
+    networkResult: () => ({ ok: true, status: 200, body: JSON.stringify({
+      results: [{ url: 'https://example.test/article', raw_content: 'Body'.repeat(10000) }], failed_results: [],
+    }) }),
+  });
+  const result = await harness.fetchPage();
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'RESULT_SAVE_FAILED');
+  assert.match(result.message, /读取已完成/);
+  assert.doesNotMatch(result.message, /fixture|BodyBody/);
+  assert.equal(harness.networkCalls.length, 1);
+  assert.equal(harness.toolResults.length, 1);
 });
 
 test('fetch_page accepts uppercase characters in valid public URLs', async (t) => {
@@ -510,9 +580,9 @@ test('fetch_page fails closed on transport and malformed provider responses', as
       expected: /数据过大/,
     },
     {
-      name: 'oversized response',
+      name: 'large invalid json',
       response: { ok: true, status: 200, headers: {}, body: 'x'.repeat(1000001) },
-      expected: /数据过大/,
+      expected: /无法解析/,
     },
     {
       name: 'invalid json',
@@ -588,7 +658,7 @@ test('missing provider uses Cindy AI by default and does not touch BYO network',
   assert.equal(request.type, 'cindy-request');
   assert.equal(request.kind, 'search_web');
   assert.equal(request.query, 'Cindy');
-  assert.equal(request.limit, 5);
+  assert.equal(request.limit, 10);
   assert.equal(request.provider, 'cindy');
   assert.equal(request.callId, 'call-1');
   assert.equal(request.callerTool, 'search_web');
@@ -694,6 +764,364 @@ test('explicit provider wins over settings and provider failures never fall back
   assert.equal(failedResult.ok, false);
   assert.equal(failedResult.message, 'Cindy AI quota exhausted');
   assert.equal(failedResult.errorCode, 'QUOTA_EXHAUSTED');
+});
+
+test('Cindy preserves the requested count and complete native data behind its bounded preview', async () => {
+  const results = Array.from({ length: 50 }, (_, index) => ({
+    title: `Cindy result ${index}`, url: `https://example.test/${index}`,
+    snippet: '原始摘要'.repeat(300), summary: 'Independent summary',
+    content: 'Full page content', page_age: '2026-11-01', date: null, score: 0,
+  }));
+  const metadata = {
+    content: [{ type: 'web_search_tool_result', content: results }],
+    usage: { server_tool_use: { web_search_requests: 1 } },
+  };
+  const harness = createHarness({ cindyResult: { ok: true, provider: 'cindy', results, metadata } });
+
+  const result = await harness.search({ provider: 'cindy', limit: 50 });
+
+  assert.equal(harness.cindyRequests.length, 1);
+  assert.equal(harness.cindyRequests[0].limit, 50);
+  assert.equal(harness.networkCalls.length, 0);
+  assert.equal(result.result.preview, true);
+  assert.equal(result.result.total_results, 50);
+  assert.equal(result.result.results.length, 5);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.deepEqual(harness.fullResult(result).results, results);
+  assert.deepEqual(harness.fullResult(result).metadata, metadata);
+});
+
+test('Agent search saves all 50 results and returns only a bounded preview', async () => {
+  const items = Array.from({ length: 50 }, (_, index) => deepSeekItem({
+    title: `Result ${index}`, url: `https://example.test/${index}`,
+    date: null, content: `# Page ${index}\nFull content`, rerank_score: 0,
+  }));
+  const harness = createHarness({ networkResult: () => deepSeekResponse(items) });
+  const result = await harness.search({ provider: 'deepseek', limit: 50, deepseek_options: { need_content: true } });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.preview, true);
+  assert.equal(result.result.total_results, 50);
+  assert.equal(result.result.results.length, 5);
+  assert.equal(result.result.complete_saved, true);
+  assert.match(result.result.saved_to, /^web-search\/result-[a-f0-9]{32}\.json$/);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.equal(result.result.results[0].date, null);
+  assert.equal(result.result.results[0].rerank_score, 0);
+  assert.equal(result.result.results[0].content, undefined);
+  assert.deepEqual(harness.fullResult(result).results, items);
+  assert.equal(harness.fullResult(result).content_is_untrusted, true);
+  assert.equal(harness.fileRequests[0].callId, 'call-1');
+  assert.equal(harness.networkCalls.length, 1);
+  assert.equal(JSON.parse(harness.networkCalls[0].body).count, 50);
+  const remaining = harness.fullResult(result).results.slice(5, 15);
+  assert.equal(remaining.length, 10);
+  assert.equal(harness.networkCalls.length, 1);
+});
+
+test('Agent search budget also covers metadata, long titles and snippets', async () => {
+  const item = { title: 'Title'.repeat(5000), url: 'https://example.test/page', content: 'Summary'.repeat(5000), raw_content: null };
+  const data = { results: [item], answer: 'Answer'.repeat(50000), images: [{ url: 'https://example.test/image' }], usage: { credits: 1 } };
+  const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body: JSON.stringify(data) }) });
+  const result = await harness.search({ provider: 'tavily' });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.preview, true);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.equal(harness.fullResult(result).results[0].title, item.title);
+  assert.equal(harness.fullResult(result).results[0].snippet, item.content);
+  assert.equal(harness.fullResult(result).metadata.answer, data.answer);
+  assert.equal(harness.networkCalls.length, 1);
+});
+
+test('Agent search never inlines large data or retries when saving is denied or unsupported', async () => {
+  for (const fileResult of [
+    () => ({ ok: false, errorCode: 'PERMISSION_DENIED', message: 'sensitive fixture path' }),
+    () => { throw new Error('unsupported remote workdir'); },
+  ]) {
+    const harness = createHarness({ fileResult, networkResult: () => deepSeekResponse([deepSeekItem({ content: 'body'.repeat(10000) })]) });
+    const result = await harness.search({ provider: 'deepseek' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'RESULT_SAVE_FAILED');
+    assert.match(result.message, /搜索已完成/);
+    assert.doesNotMatch(result.message, /sensitive|unsupported|bodybody/);
+    assert.equal(harness.networkCalls.length, 1);
+    assert.equal(harness.fileRequests.length, 1);
+    assert.equal(harness.toolResults.length, 1);
+  }
+});
+
+test('Agent search splits large UTF-8 results within Host file limits without losing Unicode', async () => {
+  const content = '中😀'.repeat(3000000);
+  const harness = createHarness({ networkResult: () => deepSeekResponse([deepSeekItem({ content })]) });
+  const result = await harness.search({ provider: 'deepseek', deepseek_options: { need_content: true } });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.saved_format, 'json-chunks');
+  const index = JSON.parse(harness.files.get(result.result.saved_to));
+  assert.equal(index.encoding, 'utf-8');
+  assert.ok(index.parts.length > 1);
+  for (const part of index.parts) {
+    assert.ok(harness.files.has(part.path));
+    assert.ok(Buffer.byteLength(harness.files.get(part.path), 'utf8') <= 16 * 1024 * 1024);
+    assert.doesNotMatch(harness.files.get(part.path), /\uFFFD/);
+  }
+  assert.deepEqual(harness.fullResult(result).results, [deepSeekItem({ content })]);
+  assert.equal(harness.fileRequests.at(-1).path, result.result.saved_to);
+  assert.ok(JSON.stringify(result).length <= 12000);
+  assert.equal(harness.networkCalls.length, 1);
+});
+
+test('partial result-file failure never publishes a complete index or repeats the search', async () => {
+  let writes = 0;
+  const harness = createHarness({
+    fileResult: (message) => ++writes === 1
+      ? { ok: true, path: message.path, bytes: Buffer.byteLength(message.content, 'utf8') }
+      : { ok: false, message: 'fixture disk failure' },
+    networkResult: () => deepSeekResponse([deepSeekItem({ content: '中😀'.repeat(3000000) })]),
+  });
+  const result = await harness.search({ provider: 'deepseek' });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'RESULT_SAVE_FAILED');
+  assert.equal(writes, 2);
+  assert.ok(harness.fileRequests.every(message => message.path.endsWith('.txt')));
+  assert.equal(harness.networkCalls.length, 1);
+  assert.equal(harness.toolResults.length, 1);
+});
+
+test('concurrent Agent searches save distinct files under their own call contexts', async () => {
+  const harness = createHarness({ networkResult: (request) => deepSeekResponse([
+    deepSeekItem({ title: JSON.parse(request.body).query, content: 'Page'.repeat(10000) }),
+  ]) });
+  await Promise.all(['first', 'second'].map(query => harness.hostMessage({
+    type: 'tool-call', tool: 'search_web', callId: `call-${query}`, args: { provider: 'deepseek', query },
+  })));
+  const first = harness.toolResults.find(message => message.callId === 'call-first');
+  const second = harness.toolResults.find(message => message.callId === 'call-second');
+  assert.notEqual(first.result.saved_to, second.result.saved_to);
+  assert.equal(harness.fullResult(first).results[0].title, 'first');
+  assert.equal(harness.fullResult(second).results[0].title, 'second');
+  assert.deepEqual(new Set(harness.fileRequests.map(message => message.callId)), new Set(['call-first', 'call-second']));
+});
+
+test('small Agent search results stay inline and do not write files', async () => {
+  const harness = createHarness({ networkResult: () => deepSeekResponse([deepSeekItem()]) });
+  const result = await harness.search({ provider: 'deepseek' });
+  assert.equal(result.ok, true);
+  assert.equal(result.result.preview, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.results)), [deepSeekItem()]);
+  assert.equal(harness.fileRequests.length, 0);
+});
+
+test('Brave passes native filters and pagination and preserves all 20 rich results', async () => {
+  const items = Array.from({ length: 20 }, (_, index) => ({
+    title: `Result ${index}`, url: `https://example.test/${index}`,
+    description: `Snippet ${index}`, extra_snippets: ['More context'],
+    page_age: index === 0 ? null : '2026-11-01T12:00:00Z',
+    profile: { name: 'Example', img: 'https://example.test/icon.png' },
+    article: { author: 'Example author' },
+  }));
+  const query = 'Cindy site:example.test';
+  const options = {
+    country: 'DE', search_lang: 'de', ui_lang: 'de-DE', offset: 2,
+    freshness: '2026-11-01to2026-11-09', safesearch: 'strict',
+    spellcheck: false, text_decorations: false, result_filter: ['web', 'news'],
+    extra_snippets: true, goggles: ['https://example.test/one.goggle', 'https://example.test/two.goggle'],
+    operators: true, operators_fallback: false, include_fetch_metadata: true,
+    headers: { 'x-loc-lat': 37.787, 'x-loc-long': -122.4, 'cache-control': 'no-cache' },
+  };
+  const harness = createHarness({ networkResult: () => ({
+    ok: true, status: 200, body: JSON.stringify({
+      type: 'search', query: { original: query, more_results_available: true },
+      web: { type: 'search', family_friendly: true, results: items },
+      news: { results: [{ title: 'News', url: 'https://example.test/news' }] },
+    }),
+  }) });
+  const result = await harness.search({ provider: 'brave', query, limit: 20, brave_options: options });
+  assert.equal(result.ok, true);
+  const request = harness.networkCalls[0];
+  const url = new URL(request.url);
+  assert.equal(url.origin + url.pathname, 'https://api.search.brave.com/res/v1/web/search');
+  assert.equal(url.searchParams.get('q'), query);
+  assert.equal(url.searchParams.get('count'), '20');
+  for (const [key, value] of Object.entries(options)) {
+    if (key === 'headers') continue;
+    if (key === 'goggles') assert.deepEqual(url.searchParams.getAll(key), value);
+    else assert.equal(url.searchParams.get(key), String(value));
+  }
+  assert.equal(request.headers['x-loc-lat'], '37.787');
+  assert.equal(request.headers['x-loc-long'], '-122.4');
+  assert.equal(request.headers['cache-control'], 'no-cache');
+  assert.equal(request.headers['X-Subscription-Token'], undefined);
+  assert.deepEqual(harness.fullResult(result).results, items.map(item => ({ ...item, snippet: item.description })));
+  assert.deepEqual(harness.fullResult(result).metadata, {
+    type: 'search', query: { original: query, more_results_available: true },
+    web: { type: 'search', family_friendly: true },
+    news: { results: [{ title: 'News', url: 'https://example.test/news' }] },
+  });
+  assert.equal(harness.cindyRequests.length, 0);
+});
+
+test('Brave preserves non-web result types when the upstream omits web results', async () => {
+  const data = { type: 'search', news: { results: [{ title: 'News', url: 'https://example.test/news' }] } };
+  const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body: JSON.stringify(data) }) });
+  const result = await harness.search({ provider: 'brave', brave_options: { result_filter: ['news'] } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.results)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.metadata)), data);
+});
+
+test('Brave rejects mismatched options and credential or routing overrides before network access', async () => {
+  for (const options of [null, [], { offset: '2' }, { extra_snippets: 'true' },
+    { result_filter: [123] }, { q: 'another query' }, { count: 20 },
+    { api_key: 'fixture-placeholder' }, { url: 'https://example.test' },
+    { headers: { Authorization: 'fixture-placeholder' } }, { headers: { Host: 'example.test' } }]) {
+    const harness = createHarness();
+    const result = await harness.search({ provider: 'brave', brave_options: options });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'INVALID_PARAMS');
+    assert.equal(harness.networkCalls.length, 0);
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+  const harness = createHarness();
+  const result = await harness.search({ provider: 'cindy', brave_options: { extra_snippets: true } });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'INVALID_PARAMS');
+  assert.equal(harness.cindyRequests.length, 0);
+});
+
+test('Brave rejects truncated or malformed responses without leaking response bodies', async () => {
+  for (const response of [
+    { body: '{', truncated: true }, { body: 'sensitive response' },
+    { body: JSON.stringify({ web: { results: 'bad' } }) },
+  ]) {
+    const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, ...response }) });
+    const result = await harness.search({ provider: 'brave' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'RESPONSE_INVALID');
+    assert.doesNotMatch(result.message, /sensitive|Unexpected|TypeError/);
+    assert.equal(harness.networkCalls.length, 1);
+  }
+});
+
+test('Tavily passes native search options and preserves 20 results, content and response metadata', async () => {
+  const items = Array.from({ length: 20 }, (_, index) => ({
+    title: `Result ${index}`, url: `https://example.test/${index}`, content: `Summary ${index}`,
+    raw_content: index === 0 ? null : `# Full page ${index}`, score: 0.91,
+    published_date: index === 0 ? null : 'Tue, 03 Nov 2026 12:00:00 GMT',
+    favicon: 'https://example.test/favicon.png', id: `result-${index}`,
+    images: [{ url: 'https://example.test/photo.png', description: 'Source photo' }],
+  }));
+  const metadata = {
+    query: 'Cindy', answer: 'Upstream answer', response_time: 1.23,
+    request_id: 'fixture-request', usage: { credits: 2 },
+    auto_parameters: { topic: 'news', search_depth: 'advanced' },
+    images: [{ url: 'https://example.test/image.png', description: 'Query image' }],
+  };
+  const options = {
+    search_depth: 'advanced', chunks_per_source: 3, topic: 'news', time_range: 'week',
+    start_date: '2026-11-01', end_date: '2026-11-09', include_published_date: true,
+    filter_by_published_date: true, max_age_hours: 0,
+    include_answer: 'advanced', include_raw_content: 'markdown',
+    include_images: true, include_image_descriptions: true, include_favicon: true,
+    include_domains: ['example.test'], exclude_domains: ['excluded.example.test'], include_domains_mode: 'prefer',
+    language: 'en', filter_by_language: true, auto_parameters: true,
+    exact_match: false, include_usage: true, safe_search: true,
+  };
+  for (const provider of ['tavily', undefined]) {
+    const harness = createHarness({
+      kv: { cindyAiEnabled: false, byoDefaultProvider: 'tavily' },
+      networkResult: () => ({ ok: true, status: 200, body: JSON.stringify({ results: items, ...metadata }) }),
+    });
+    const result = await harness.search({ provider, limit: 20, tavily_options: options });
+    assert.equal(result.ok, true);
+    assert.equal(harness.networkCalls.length, 1);
+    const request = harness.networkCalls[0];
+    assert.equal(request.url, 'https://api.tavily.com/search');
+    assert.equal(request.headers.Authorization, undefined);
+    assert.deepEqual(JSON.parse(request.body), { query: 'Cindy', max_results: 20, ...options });
+    assert.deepEqual(harness.fullResult(result).results, items.map(item => ({ ...item, snippet: item.content })));
+    assert.deepEqual(harness.fullResult(result).metadata, metadata);
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+});
+
+test('Tavily supports answer-only searches and lets explicit auto_parameters choose search depth', async () => {
+  const harness = createHarness({ networkResult: () => ({
+    ok: true, status: 200, body: JSON.stringify({ results: [], answer: 'Answer only', usage: { credits: 1 } }),
+  }) });
+  const result = await harness.search({ provider: 'tavily', limit: 0, tavily_options: { include_answer: true, auto_parameters: true } });
+  assert.equal(result.ok, true);
+  const body = JSON.parse(harness.networkCalls[0].body);
+  assert.equal(body.max_results, 0);
+  assert.equal(body.include_answer, true);
+  assert.equal(body.auto_parameters, true);
+  assert.equal(body.search_depth, undefined);
+  assert.equal(body.include_raw_content, false);
+  assert.equal(result.result.metadata.answer, 'Answer only');
+});
+
+test('Tavily queries do not inherit the Cindy host query length limit', async () => {
+  const query = '完整查询'.repeat(600);
+  const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body: '{"results":[]}' }) });
+  const result = await harness.search({ provider: 'tavily', query });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.parse(harness.networkCalls[0].body).query, query);
+  assert.equal(harness.cindyRequests.length, 0);
+});
+
+test('native options cannot spill into other providers or override Tavily credentials and query', async () => {
+  for (const options of [null, [], { search_depth: false }, { include_domains: 'example.test' },
+    { include_images: 'true' }, { query: 'another query' }, { max_results: 20 },
+    { api_key: 'fixture-placeholder' }, { endpoint: 'https://example.test' }]) {
+    const harness = createHarness();
+    const result = await harness.search({ provider: 'tavily', tavily_options: options });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'INVALID_PARAMS');
+    assert.equal(harness.networkCalls.length, 0);
+  }
+  for (const provider of ['cindy', 'brave', 'deepseek']) {
+    const harness = createHarness();
+    const result = await harness.search({ provider, tavily_options: { include_raw_content: true } });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'INVALID_PARAMS');
+    assert.equal(harness.networkCalls.length, 0);
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+});
+
+test('Tavily fails explicitly on truncated and malformed native responses', async () => {
+  for (const response of [
+    { body: '{', truncated: true }, { body: 'sensitive response' },
+    { body: JSON.stringify({ results: 'bad' }) },
+  ]) {
+    const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, ...response }) });
+    const result = await harness.search({ provider: 'tavily' });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'RESPONSE_INVALID');
+    assert.doesNotMatch(result.message, /sensitive|Unexpected|TypeError/);
+    assert.equal(harness.networkCalls.length, 1);
+  }
+});
+
+test('BYO searches preserve responses larger than one million characters', async (t) => {
+  const content = '完整正文'.repeat(300000);
+  for (const provider of ['brave', 'tavily', 'deepseek']) {
+    await t.test(provider, async () => {
+      const item = provider === 'deepseek'
+        ? deepSeekItem({ content })
+        : { title: 'Example', url: 'https://example.test/article',
+            ...(provider === 'tavily' ? { content: 'Summary', raw_content: content }
+              : { description: 'Summary', extra_snippets: [content] }) };
+      const data = provider === 'brave' ? { web: { results: [item] } } : { results: [item] };
+      const harness = createHarness({ networkResult: () => ({ ok: true, status: 200, body: JSON.stringify(data) }) });
+      const result = await harness.search({ provider,
+        ...(provider === 'deepseek' ? { deepseek_options: { need_content: true } }
+          : provider === 'tavily' ? { tavily_options: { include_raw_content: true } }
+            : { brave_options: { extra_snippets: true } }) });
+      assert.equal(result.ok, true);
+      assert.ok(JSON.stringify(result).length <= 12000);
+      assert.deepEqual(harness.fullResult(result).results[0], provider === 'deepseek'
+        ? item : { ...item, snippet: 'Summary' });
+    });
+  }
 });
 
 for (const provider of ['cindy', 'brave', 'tavily']) {
@@ -848,8 +1276,9 @@ test('DeepSeek uses the independent Search API with Host-only credential injecti
   assert.equal(result.ok, true);
   assert.equal(result.result.provider, 'deepseek');
   assert.deepEqual(JSON.parse(JSON.stringify(result.result.results)), [
-    { title: 'Example page', url: 'https://example.test/page', snippet: 'Long summary for the model' },
-    { title: 'Example page', url: 'https://example.test/page', snippet: 'Fallback snippet' },
+    deepSeekItem(),
+    deepSeekItem({ summary: '', snippet: 'Fallback snippet' }),
+    deepSeekItem({ title: 'Extra result' }),
   ]);
   assert.equal(harness.networkCalls.length, 1);
   assert.equal(harness.cindyRequests.length, 0);
@@ -869,7 +1298,7 @@ test('DeepSeek may be the BYO default while Cindy AI remains the initial default
   assert.equal(result.ok, true);
   assert.equal(result.result.provider, 'deepseek');
   assert.equal(result.result.results.length, 0);
-  assert.equal(JSON.parse(harness.networkCalls[0].body).count, 5);
+  assert.equal(JSON.parse(harness.networkCalls[0].body).count, 10);
   assert.equal(harness.cindyRequests.length, 0);
 
   const enabled = createHarness({ kv: { ...configured, cindyAiEnabled: true } });
@@ -877,12 +1306,69 @@ test('DeepSeek may be the BYO default while Cindy AI remains the initial default
   assert.equal(enabled.networkCalls.length, 0);
 });
 
-test('DeepSeek limit respects the shared 1–10 result contract', async () => {
-  for (const [limit, count] of [[0, 1], [2.9, 2], [50, 10]]) {
+test('DeepSeek limit respects its native 1–50 result contract', async () => {
+  for (const [limit, count] of [[0, 1], [2.9, 2], [50, 50], [51, 50]]) {
     const harness = createHarness({ networkResult: () => deepSeekResponse() });
     assert.equal((await harness.search({ provider: 'deepseek', limit })).ok, true);
     assert.equal(JSON.parse(harness.networkCalls[0].body).count, count);
   }
+});
+
+test('DeepSeek exposes native search options and all 50 results without losing metadata', async () => {
+  const items = Array.from({ length: 50 }, (_, index) => deepSeekItem({
+    title: `Result ${index}`, url: `https://example.test/${index}`,
+    date: index === 0 ? null : '2026-11-05T12:00:00Z',
+    site_name: 'Example', site_icon: null, rerank_score: 2.4, authority: 3,
+    content: `# Page ${index}\nFull content`,
+  }));
+  for (const provider of ['deepseek', undefined]) {
+    const harness = createHarness({
+      kv: { cindyAiEnabled: false, byoDefaultProvider: 'deepseek' },
+      networkResult: () => deepSeekResponse(items),
+    });
+    const query = 'Cindy site:example.test after:2026-11-01 before:2026-11-06 lang:zh';
+    const options = { need_content: true, ori_question: 'Cindy 最近有哪些变化？', localization: '203.0.113.1' };
+    const result = await harness.search({ provider, query, limit: 50, deepseek_options: options });
+    assert.equal(result.ok, true);
+    assert.deepEqual(harness.fullResult(result).results, items);
+    assert.equal(harness.networkCalls.length, 1);
+    assert.deepEqual(JSON.parse(harness.networkCalls[0].body), { query, count: 50, ...options });
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+});
+
+test('DeepSeek keeps native short and long summaries separate without requesting content by default', async () => {
+  const item = deepSeekItem({ date: null, site_name: null, authority: -1, rerank_score: 0.8 });
+  const harness = createHarness({ networkResult: () => deepSeekResponse([item]) });
+  const result = await harness.search({ provider: 'deepseek' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result.results[0])), item);
+  assert.equal(JSON.parse(harness.networkCalls[0].body).need_content, false);
+});
+
+test('DeepSeek accepts the native nullable original question', async () => {
+  const harness = createHarness({ networkResult: () => deepSeekResponse() });
+  const result = await harness.search({ provider: 'deepseek', deepseek_options: { ori_question: null } });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.parse(harness.networkCalls[0].body).ori_question, null);
+});
+
+test('DeepSeek validates native options before sending or silently switching providers', async () => {
+  for (const options of [null, [], { need_content: 'true' }, { ori_question: '' },
+    { ori_question: '😀'.repeat(129) }, { localization: 123 }, { count: 50 },
+    { api_key: 'fixture-placeholder' }]) {
+    const harness = createHarness();
+    const result = await harness.search({ provider: 'deepseek', deepseek_options: options });
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, 'INVALID_PARAMS');
+    assert.equal(harness.networkCalls.length, 0);
+    assert.equal(harness.cindyRequests.length, 0);
+  }
+  const wrongProvider = createHarness();
+  const result = await wrongProvider.search({ provider: 'cindy', deepseek_options: { need_content: true } });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'INVALID_PARAMS');
+  assert.equal(wrongProvider.cindyRequests.length, 0);
 });
 
 test('DeepSeek validates 128 Unicode code points without truncation for both routing paths', async () => {
@@ -971,13 +1457,13 @@ test('DeepSeek handles legacy Host failures and exceptions without exposing diag
   }
 });
 
-test('DeepSeek rejects malformed, truncated and oversized results instead of returning empty success', async () => {
+test('DeepSeek rejects malformed and truncated results instead of returning empty success', async () => {
   const bodies = ['invalid-json', 'null', '{}', '{"results":{}}', '{"results":[null]}',
     JSON.stringify({ results: [deepSeekItem({ title: null })] }),
     JSON.stringify({ results: [deepSeekItem({ summary: null })] }),
     JSON.stringify({ results: [deepSeekItem({ url: 42 })] }),
     JSON.stringify({ results: [deepSeekItem({ snippet: null })] }),
-    ' '.repeat(1000001), null,
+    null,
   ];
   for (const response of [
     ...bodies.map(body => ({ ok: true, status: 200, body })),

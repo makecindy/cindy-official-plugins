@@ -14,16 +14,46 @@
  * 任一路失败都原样返回，不跨 Provider fallback，避免静默消耗另一套凭证。
  */
 
-/* global cindy */
+/* global cindy, crypto */
 
 var BRAVE_URL = 'https://api.search.brave.com/res/v1/web/search';
 var TAVILY_URL = 'https://api.tavily.com/search';
 var DEEPSEEK_URL = 'https://api.deepseek.com/v1/tools/search';
 var TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract';
 var FETCH_PAGE_MAX_URL_CHARS = 2048;
-var FETCH_PAGE_MAX_CONTENT_CHARS = 50000;
-var FETCH_PAGE_MAX_RESPONSE_CHARS = 1000000;
 var FETCH_PAGE_HOST_TIMEOUT_MS = 55000;
+// Agent delivery budgets only; provider responses and saved files stay complete.
+var TOOL_RESULT_MAX_CHARS = 12000;
+var SEARCH_PREVIEW_RESULTS = 5;
+var SEARCH_PREVIEW_SNIPPET_CHARS = 500;
+var PAGE_PREVIEW_CONTENT_CHARS = 5000;
+var RESULT_FILE_MAX_BYTES = 16 * 1024 * 1024;
+// At most 12 MiB in UTF-8, below the Host's 16 MiB write limit.
+var RESULT_FILE_CHUNK_CHARS = 4 * 1024 * 1024;
+var BRAVE_SEARCH_OPTIONS = {
+  country: 'string', search_lang: 'string', ui_lang: 'string', offset: 'number',
+  freshness: 'string', safesearch: 'string', spellcheck: 'boolean',
+  text_decorations: 'boolean', result_filter: 'string|string[]', units: 'string',
+  goggles: 'string|string[]', extra_snippets: 'boolean', summary: 'boolean',
+  enable_rich_callback: 'boolean', include_fetch_metadata: 'boolean',
+  operators: 'boolean', operators_fallback: 'boolean',
+  headers: {
+    'x-loc-lat': 'number', 'x-loc-long': 'number', 'x-loc-timezone': 'string',
+    'x-loc-city': 'string', 'x-loc-state': 'string', 'x-loc-state-name': 'string',
+    'x-loc-country': 'string', 'x-loc-postal-code': 'string',
+    'api-version': 'string', 'cache-control': 'string', 'user-agent': 'string',
+  },
+};
+var TAVILY_SEARCH_OPTIONS = {
+  search_depth: 'string', chunks_per_source: 'number', topic: 'string',
+  time_range: 'string|null', start_date: 'string', end_date: 'string',
+  include_published_date: 'boolean', filter_by_published_date: 'boolean', max_age_hours: 'number',
+  include_answer: 'boolean|string', include_raw_content: 'boolean|string',
+  include_images: 'boolean', include_image_descriptions: 'boolean', include_favicon: 'boolean',
+  include_domains: 'string[]', exclude_domains: 'string[]', include_domains_mode: 'string',
+  country: 'string|null', language: 'string', filter_by_language: 'boolean',
+  auto_parameters: 'boolean', exact_match: 'boolean', include_usage: 'boolean', safe_search: 'boolean',
+};
 
 /*
  * 运行时文案只跟随宿主语言(cindy.request app-context / host-context-changed),
@@ -34,15 +64,21 @@ var MESSAGES = {
   'zh-CN': {
     cindyUnavailable: 'Cindy AI 搜索服务暂时不可用，请稍后再试',
     httpError: '{provider} 返回 HTTP {status}:{body}',
+    nativeOptionsInvalid: '{options} 只能用于对应搜索源，并须使用已声明的原生参数类型；不能覆盖查询、条数、请求地址或凭证。',
+    nativeResponseInvalid: '{provider} 返回的搜索结果格式无效或被宿主截断，请检查上游响应后重试。',
+    resultPreviewSaved: '当前仅展示预览；完整结果见 saved_to。按需读取已保存文件，无需重复调用本工具。',
+    resultSaveFailed: '本次搜索已完成，但完整结果文件未保存。请检查任务文件写入权限及工作目录支持后，再决定是否重新搜索。',
+    pageResultSaveFailed: '网页读取已完成，但完整正文文件未保存。请检查任务文件写入权限及工作目录支持后，再决定是否重新读取。',
     deepSeek_NOT_CONFIGURED: '请在「插件」→「Web Search」详情页配置 DeepSeek API Key。',
     deepSeek_AUTH_REJECTED: 'DeepSeek API Key 无效，请在「插件」→「Web Search」详情页更新 Key。',
     deepSeek_PERMISSION_DENIED: 'DeepSeek 搜索请求未获授权，请检查 Cindy 授权及 DeepSeek 账号的接口权限。',
     deepSeek_QUOTA_EXHAUSTED: 'DeepSeek 账户余额不足，请充值后再搜索。',
     deepSeek_RATE_LIMITED: 'DeepSeek 搜索请求过于频繁，请稍后重试（每账户最多 5 次/秒）。',
     deepSeek_INVALID_INPUT: 'DeepSeek 搜索参数无效，请使用 1–128 个 Unicode 字符的查询后重试。',
+    deepSeek_INVALID_OPTIONS: 'deepseek_options 仅用于 DeepSeek，支持 need_content（布尔值）、ori_question（1–128 个 Unicode 字符）和 localization（IP 地址字符串）；不能覆盖查询、条数或凭证。',
     deepSeek_UPSTREAM_UNAVAILABLE: 'DeepSeek 搜索服务暂时不可用，请检查网络连接后稍后重试。',
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek 未接受搜索请求，请检查账号权限或更新 Web Search 插件后再试。',
-    deepSeek_RESPONSE_INVALID: 'DeepSeek 返回的搜索结果格式无效或过大，请缩小结果条数后重试。',
+    deepSeek_RESPONSE_INVALID: 'DeepSeek 返回的搜索结果格式无效或被宿主截断，请检查上游响应后重试。',
     deepSeekFallback: 'DeepSeek 搜索请求未完成，请检查网络连接、Cindy 授权，并确认「插件」→「Web Search」详情页已配置有效的 DeepSeek API Key。',
     queryEmpty: 'query 不能为空',
     queryTooLong: 'query 过长(上限 2000 字符)',
@@ -73,15 +109,21 @@ var MESSAGES = {
   en: {
     cindyUnavailable: 'Cindy AI search is temporarily unavailable. Please try again later.',
     httpError: '{provider} returned HTTP {status}: {body}',
+    nativeOptionsInvalid: '{options} is only available for its matching provider and declared native parameter types. Query, count, endpoint and credentials cannot be overridden.',
+    nativeResponseInvalid: '{provider} returned invalid search data or the host truncated it. Check the upstream response and try again.',
+    resultPreviewSaved: 'This is a preview. Read the complete result at saved_to as needed; do not repeat this tool call.',
+    resultSaveFailed: 'The search completed, but the complete result file was not saved. Check task file permissions and workdir support before deciding whether to search again.',
+    pageResultSaveFailed: 'The page was read, but the complete content file was not saved. Check task file permissions and workdir support before deciding whether to read it again.',
     deepSeek_NOT_CONFIGURED: 'Configure a DeepSeek API Key in "Plugins" > "Web Search" details.',
     deepSeek_AUTH_REJECTED: 'The DeepSeek API Key is invalid. Update the key in "Plugins" > "Web Search" details.',
     deepSeek_PERMISSION_DENIED: 'The DeepSeek search request was not authorized. Check the Cindy authorization and the API permissions of your DeepSeek account.',
     deepSeek_QUOTA_EXHAUSTED: 'Your DeepSeek account balance is insufficient. Top up before searching again.',
     deepSeek_RATE_LIMITED: 'Too many DeepSeek search requests. Please try again later (at most 5 requests per second per account).',
     deepSeek_INVALID_INPUT: 'Invalid DeepSeek search parameters. Retry with a query of 1 to 128 Unicode characters.',
+    deepSeek_INVALID_OPTIONS: 'deepseek_options is only available for DeepSeek: need_content (boolean), ori_question (1–128 Unicode characters), localization (IP address string). Query, count and credentials cannot be overridden.',
     deepSeek_UPSTREAM_UNAVAILABLE: 'DeepSeek search is temporarily unavailable. Check your network connection and try again later.',
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek did not accept the search request. Check your account permissions or update the Web Search plugin, then try again.',
-    deepSeek_RESPONSE_INVALID: 'DeepSeek returned search results with an invalid format or that are too large. Lower the number of results and try again.',
+    deepSeek_RESPONSE_INVALID: 'DeepSeek returned invalid search data or the host truncated it. Check the upstream response and try again.',
     deepSeekFallback: 'The DeepSeek search request did not complete. Check your network connection and the Cindy authorization, and make sure a valid DeepSeek API Key is configured in "Plugins" > "Web Search" details.',
     queryEmpty: 'query must not be empty',
     queryTooLong: 'query is too long (max 2000 characters)',
@@ -112,15 +154,21 @@ var MESSAGES = {
   ja: {
     cindyUnavailable: 'Cindy AI 検索は一時的に利用できません。しばらくしてから再試行してください。',
     httpError: '{provider} が HTTP {status} を返しました: {body}',
+    nativeOptionsInvalid: '{options} は対応する検索元と宣言された型のネイティブパラメータにのみ使用できます。クエリ、件数、送信先、認証情報は上書きできません。',
+    nativeResponseInvalid: '{provider} の検索結果の形式が無効か、ホストによって切り詰められました。上流の応答を確認して再試行してください。',
+    resultPreviewSaved: 'プレビューのみ表示しています。完全な結果はsaved_toのファイルを必要に応じて読み取ってください。このツールの再実行は不要です。',
+    resultSaveFailed: '検索は完了しましたが、完全な結果ファイルを保存できませんでした。タスクの書き込み権限と作業ディレクトリの対応状況を確認してから、再検索するか判断してください。',
+    pageResultSaveFailed: 'ページの取得は完了しましたが、完全な本文ファイルを保存できませんでした。タスクの書き込み権限と作業ディレクトリの対応状況を確認してから、再取得するか判断してください。',
     deepSeek_NOT_CONFIGURED: '「プラグイン」→「Web Search」の詳細画面で DeepSeek API キーを設定してください。',
     deepSeek_AUTH_REJECTED: 'DeepSeek API キーが無効です。「プラグイン」→「Web Search」の詳細画面でキーを更新してください。',
     deepSeek_PERMISSION_DENIED: 'DeepSeek 検索リクエストが承認されていません。Cindy の認可と DeepSeek アカウントの API 権限を確認してください。',
     deepSeek_QUOTA_EXHAUSTED: 'DeepSeek アカウントの残高が不足しています。チャージしてから再度検索してください。',
     deepSeek_RATE_LIMITED: 'DeepSeek 検索リクエストが多すぎます。しばらくしてから再試行してください（1 アカウントあたり毎秒最大 5 回）。',
     deepSeek_INVALID_INPUT: 'DeepSeek 検索パラメータが無効です。1～128 文字（Unicode 文字単位）のクエリで再試行してください。',
+    deepSeek_INVALID_OPTIONS: 'deepseek_options は DeepSeek 専用です。need_content（真偽値）、ori_question（Unicode 1～128 文字）、localization（IP アドレス文字列）を指定できます。クエリ、件数、認証情報は上書きできません。',
     deepSeek_UPSTREAM_UNAVAILABLE: 'DeepSeek 検索サービスは一時的に利用できません。ネットワーク接続を確認し、しばらくしてから再試行してください。',
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek が検索リクエストを受け付けませんでした。アカウントの権限を確認するか、Web Search プラグインを更新してから再試行してください。',
-    deepSeek_RESPONSE_INVALID: 'DeepSeek から返された検索結果の形式が無効か、サイズが大きすぎます。結果の件数を減らして再試行してください。',
+    deepSeek_RESPONSE_INVALID: 'DeepSeek の検索結果の形式が無効か、ホストによって切り詰められました。上流の応答を確認して再試行してください。',
     deepSeekFallback: 'DeepSeek 検索リクエストが完了しませんでした。ネットワーク接続と Cindy の認可を確認し、「プラグイン」→「Web Search」の詳細画面に有効な DeepSeek API キーが設定されていることを確認してください。',
     queryEmpty: 'query は空にできません',
     queryTooLong: 'query が長すぎます（上限 2000 文字）',
@@ -151,15 +199,21 @@ var MESSAGES = {
   ko: {
     cindyUnavailable: 'Cindy AI 검색을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
     httpError: '{provider}이(가) HTTP {status} 응답을 반환했습니다: {body}',
+    nativeOptionsInvalid: '{options}는 해당 검색 공급자와 선언된 기본 매개변수 형식에만 사용할 수 있습니다. 검색어, 결과 수, 요청 주소, 자격 증명은 덮어쓸 수 없습니다.',
+    nativeResponseInvalid: '{provider} 검색 결과 형식이 잘못되었거나 호스트에서 잘렸습니다. 상위 서비스 응답을 확인하고 다시 시도하세요.',
+    resultPreviewSaved: '미리보기만 표시합니다. 필요할 때 saved_to의 전체 결과 파일을 읽으세요. 이 도구를 다시 호출할 필요가 없습니다.',
+    resultSaveFailed: '검색은 완료되었지만 전체 결과 파일을 저장하지 못했습니다. 작업 파일 쓰기 권한과 작업 디렉터리 지원 여부를 확인한 후 다시 검색할지 결정하세요.',
+    pageResultSaveFailed: '페이지 읽기는 완료되었지만 전체 본문 파일을 저장하지 못했습니다. 작업 파일 쓰기 권한과 작업 디렉터리 지원 여부를 확인한 후 다시 읽을지 결정하세요.',
     deepSeek_NOT_CONFIGURED: '"플러그인" → "Web Search" 상세 화면에서 DeepSeek API 키를 설정하세요.',
     deepSeek_AUTH_REJECTED: 'DeepSeek API 키가 유효하지 않습니다. "플러그인" → "Web Search" 상세 화면에서 키를 업데이트하세요.',
     deepSeek_PERMISSION_DENIED: 'DeepSeek 검색 요청이 승인되지 않았습니다. Cindy 권한과 DeepSeek 계정의 API 권한을 확인하세요.',
     deepSeek_QUOTA_EXHAUSTED: 'DeepSeek 계정 잔액이 부족합니다. 충전한 후 다시 검색하세요.',
     deepSeek_RATE_LIMITED: 'DeepSeek 검색 요청이 너무 많습니다. 잠시 후 다시 시도하세요(계정당 초당 최대 5회).',
     deepSeek_INVALID_INPUT: 'DeepSeek 검색 매개변수가 잘못되었습니다. Unicode 문자 기준 1~128자의 검색어로 다시 시도하세요.',
+    deepSeek_INVALID_OPTIONS: 'deepseek_options는 DeepSeek 전용입니다. need_content(불리언), ori_question(Unicode 1~128자), localization(IP 주소 문자열)을 지원하며 검색어, 결과 수, 자격 증명은 덮어쓸 수 없습니다.',
     deepSeek_UPSTREAM_UNAVAILABLE: 'DeepSeek 검색 서비스를 일시적으로 사용할 수 없습니다. 네트워크 연결을 확인한 후 잠시 후 다시 시도하세요.',
     deepSeek_UPSTREAM_REJECTED: 'DeepSeek이 검색 요청을 받아들이지 않았습니다. 계정 권한을 확인하거나 Web Search 플러그인을 업데이트한 후 다시 시도하세요.',
-    deepSeek_RESPONSE_INVALID: 'DeepSeek이 반환한 검색 결과의 형식이 잘못되었거나 너무 큽니다. 결과 수를 줄여서 다시 시도하세요.',
+    deepSeek_RESPONSE_INVALID: 'DeepSeek 검색 결과 형식이 잘못되었거나 호스트에서 잘렸습니다. 상위 서비스 응답을 확인하고 다시 시도하세요.',
     deepSeekFallback: 'DeepSeek 검색 요청이 완료되지 않았습니다. 네트워크 연결과 Cindy 권한을 확인하고 "플러그인" → "Web Search" 상세 화면에 유효한 DeepSeek API 키가 설정되어 있는지 확인하세요.',
     queryEmpty: 'query는 비워 둘 수 없습니다',
     queryTooLong: 'query가 너무 깁니다(최대 2000자)',
@@ -239,13 +293,49 @@ function t(key, vars) {
   });
 }
 
-function clampLimit(n) {
-  var v = typeof n === 'number' && isFinite(n) ? Math.floor(n) : 5;
-  return Math.min(10, Math.max(1, v));
+function clampLimit(n, max, min) {
+  var v = typeof n === 'number' && isFinite(n) ? Math.floor(n) : 10;
+  return Math.min(max, Math.max(min === undefined ? 1 : min, v));
 }
 
 function isByoProvider(value) {
   return value === 'brave' || value === 'tavily' || value === 'deepseek';
+}
+
+function validSearchOptions(options, allowed) {
+  if (options === undefined) return true;
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return false;
+  return Object.keys(options).every(function (key) {
+    if (!hasOwn.call(allowed, key)) return false;
+    var rule = allowed[key];
+    var value = options[key];
+    if (typeof rule === 'object') return value !== undefined && validSearchOptions(value, rule);
+    return rule.split('|').some(function (type) {
+      if (type === 'null') return value === null;
+      if (type === 'string[]') {
+        return Array.isArray(value) && value.every(function (item) { return typeof item === 'string'; });
+      }
+      return typeof value === type && (type !== 'number' || isFinite(value));
+    });
+  });
+}
+
+function nativeOptionsFailure(name) {
+  return { ok: false, errorCode: 'INVALID_PARAMS', message: t('nativeOptionsInvalid', { options: name }) };
+}
+
+function parseSearchResponse(response) {
+  if (response.truncated || typeof response.body !== 'string') return null;
+  try {
+    var data = JSON.parse(response.body);
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function nativeResponseFailure(provider) {
+  return { ok: false, errorCode: 'RESPONSE_INVALID', message: t('nativeResponseInvalid', { provider: provider }) };
 }
 
 async function readSearchPrefs() {
@@ -290,51 +380,77 @@ async function searchCindy(query, limit, callId, callerTool) {
 }
 
 /** Brave:GET + query 参数，Key 由主机注入 X-Subscription-Token。 */
-async function searchBrave(query, limit) {
+async function searchBrave(query, limit, options) {
   var url = BRAVE_URL + '?q=' + encodeURIComponent(query) + '&count=' + limit;
-  var r = await cindy.fetch({ url: url, headers: { Accept: 'application/json' } });
+  var headers = { Accept: 'application/json' };
+  Object.keys(options || {}).forEach(function (key) {
+    var value = options[key];
+    if (key === 'headers') {
+      Object.keys(value).forEach(function (name) { headers[name] = String(value[name]); });
+    } else if (key === 'goggles' && Array.isArray(value)) {
+      value.forEach(function (goggle) { url += '&goggles=' + encodeURIComponent(goggle); });
+    } else {
+      url += '&' + key + '=' + encodeURIComponent(Array.isArray(value) ? value.join(',') : String(value));
+    }
+  });
+  var r = await cindy.fetch({ url: url, headers: headers });
   if (!r.ok) return r;
   if (r.status !== 200) {
     return { ok: false, message: t('httpError', { provider: 'Brave', status: r.status, body: r.body.slice(0, 200) }) };
   }
-  var data = JSON.parse(r.body);
-  var items = (data.web && data.web.results) || [];
+  var data = parseSearchResponse(r);
+  if (!data || (data.web != null && (!data.web || !Array.isArray(data.web.results)))) {
+    return nativeResponseFailure('Brave');
+  }
+  var items = data.web ? data.web.results : [];
+  if (items.some(function (item) {
+    return !item || typeof item.title !== 'string' || typeof item.url !== 'string';
+  })) return nativeResponseFailure('Brave');
+  // Lift web results once; keep other result types and pagination metadata intact.
+  if (data.web) delete data.web.results;
   return {
     ok: true,
     provider: 'brave',
-    results: items.slice(0, limit).map(function (it) {
-      return { title: it.title, url: it.url, snippet: it.description || '' };
+    results: items.map(function (item) {
+      item.snippet = item.description || '';
+      return item;
     }),
+    metadata: data,
   };
 }
 
 /** Tavily BYO:POST JSON，Key 由主机注入 Authorization:Bearer。 */
-async function searchTavily(query, limit) {
+async function searchTavily(query, limit, options) {
+  var body = {
+    query: query, max_results: limit,
+    include_answer: false, include_raw_content: false, include_images: false,
+  };
+  if (!options || !options.auto_parameters) body.search_depth = 'basic';
+  Object.keys(options || {}).forEach(function (key) { body[key] = options[key]; });
   var r = await cindy.fetch({
     url: TAVILY_URL,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: query,
-      max_results: limit,
-      search_depth: 'basic',
-      include_answer: false,
-      include_raw_content: false,
-      include_images: false,
-    }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) return r;
   if (r.status !== 200) {
     return { ok: false, message: t('httpError', { provider: 'Tavily', status: r.status, body: r.body.slice(0, 200) }) };
   }
-  var data = JSON.parse(r.body);
-  var items = data.results || [];
+  var data = parseSearchResponse(r);
+  if (!data || !Array.isArray(data.results) || data.results.some(function (item) {
+    return !item || typeof item.title !== 'string' || typeof item.url !== 'string';
+  })) return nativeResponseFailure('Tavily');
+  var items = data.results;
+  delete data.results;
   return {
     ok: true,
     provider: 'tavily',
-    results: items.slice(0, limit).map(function (it) {
-      return { title: it.title, url: it.url, snippet: it.content || '' };
+    results: items.map(function (item) {
+      item.snippet = item.content || '';
+      return item;
     }),
+    metadata: data,
   };
 }
 
@@ -350,16 +466,28 @@ function deepSeekFailure(errorCode) {
 }
 
 /** Independent Search API; the Host alone injects the Bearer credential. */
-async function searchDeepSeek(query, limit, callId) {
+async function searchDeepSeek(query, limit, callId, options) {
   // Count Unicode code points, not UTF-16 units (e.g. emoji count as one).
   if (Array.from(query).length > 128) return deepSeekFailure('INVALID_INPUT');
+  if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some(function (key) {
+      return key !== 'need_content' && key !== 'ori_question' && key !== 'localization';
+    })
+    || (options.need_content !== undefined && typeof options.need_content !== 'boolean')
+    || (options.ori_question != null && (typeof options.ori_question !== 'string'
+      || !options.ori_question.trim() || Array.from(options.ori_question).length > 128))
+    || (options.localization !== undefined && typeof options.localization !== 'string'))) {
+    return { ok: false, errorCode: 'INVALID_PARAMS', message: t('deepSeek_INVALID_OPTIONS') };
+  }
+  var body = { query: query, count: limit, need_content: false };
+  Object.keys(options || {}).forEach(function (key) { body[key] = options[key]; });
   var r;
   try {
     r = await cindy.fetch({
       url: DEEPSEEK_URL,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query, count: limit, need_content: false }),
+      body: JSON.stringify(body),
       callId: callId,
     });
   } catch (e) {
@@ -379,8 +507,8 @@ async function searchDeepSeek(query, limit, callId) {
     return deepSeekFailure(codes[r.status] || (r.status >= 500 && r.status <= 599
       ? 'UPSTREAM_UNAVAILABLE' : 'UPSTREAM_REJECTED'));
   }
-  // Do not parse truncated/oversized responses or pass upstream error bodies on.
-  if (r.truncated || typeof r.body !== 'string' || r.body.length > 1000000) {
+  // A host-truncated response is incomplete; never return it as a complete result.
+  if (r.truncated || typeof r.body !== 'string') {
     return deepSeekFailure('RESPONSE_INVALID');
   }
   var data;
@@ -396,16 +524,14 @@ async function searchDeepSeek(query, limit, callId) {
   return {
     ok: true,
     provider: 'deepseek',
-    results: data.results.slice(0, limit).map(function (item) {
-      return { title: item.title, url: item.url, snippet: item.summary || item.snippet };
-    }),
+    results: data.results,
   };
 }
 
-function searchByo(provider, query, limit, callId) {
-  if (provider === 'deepseek') return searchDeepSeek(query, limit, callId);
-  if (provider === 'tavily') return searchTavily(query, limit);
-  return searchBrave(query, limit);
+function searchByo(provider, query, limit, callId, args) {
+  if (provider === 'deepseek') return searchDeepSeek(query, limit, callId, args.deepseek_options);
+  if (provider === 'tavily') return searchTavily(query, limit, args.tavily_options);
+  return searchBrave(query, limit, args.brave_options);
 }
 
 /** fetch_page: 只读取经用户明确确认的单个公开页面，先做主机侧可达性判断。 */
@@ -509,8 +635,8 @@ async function fetchPage(args, callId) {
   if (!r.ok) return { ok: false, message: tavilyTransportError(r.message) };
   if (r.status !== 200) return { ok: false, message: tavilyHttpError(r.status) };
   if (r.truncated) return { ok: false, message: t('pageResponseTooLarge') };
-  if (typeof r.body !== 'string' || r.body.length > FETCH_PAGE_MAX_RESPONSE_CHARS) {
-    return { ok: false, message: t('pageResponseTooLarge') };
+  if (typeof r.body !== 'string') {
+    return { ok: false, message: t('pageResponseMalformed') };
   }
 
   var data;
@@ -534,11 +660,9 @@ async function fetchPage(args, callId) {
   if (!resultUrl || typeof item.raw_content !== 'string') {
     return { ok: false, message: t('pageResponseMalformed') };
   }
-  var content = item.raw_content.trim();
-  if (!content) return { ok: false, message: t('pageNoContent') };
+  var content = item.raw_content;
+  if (!content.trim()) return { ok: false, message: t('pageNoContent') };
   var contentChars = content.length;
-  var truncated = contentChars > FETCH_PAGE_MAX_CONTENT_CHARS;
-  if (truncated) content = content.slice(0, FETCH_PAGE_MAX_CONTENT_CHARS);
   return {
     ok: true,
     provider: 'tavily',
@@ -547,32 +671,137 @@ async function fetchPage(args, callId) {
     format: 'markdown',
     extract_depth: depth,
     content_chars: contentChars,
-    truncated: truncated,
+    truncated: false,
   };
 }
 
 async function searchWeb(args, callId, callerTool) {
   var query = args && typeof args.query === 'string' ? args.query.trim() : '';
   if (!query) return { ok: false, message: t('queryEmpty') };
-  if (query.length > 2000) return { ok: false, message: t('queryTooLong') };
-  var limit = clampLimit(args.limit);
   var provider = args && args.provider;
 
   if (provider !== undefined && provider !== 'cindy' && !isByoProvider(provider)) {
     return { ok: false, message: t('providerUnsupported') };
   }
-  if (provider === 'cindy') return searchCindy(query, limit, callId, callerTool);
-  if (isByoProvider(provider)) return searchByo(provider, query, limit, callId);
-
-  var prefs;
-  try {
-    prefs = await readSearchPrefs();
-  } catch (e) {
-    return { ok: false, message: t('prefsUnavailable') };
+  if (provider === undefined) {
+    var prefs;
+    try {
+      prefs = await readSearchPrefs();
+    } catch (e) {
+      return { ok: false, message: t('prefsUnavailable') };
+    }
+    provider = prefs.cindyAiEnabled ? 'cindy' : prefs.byoDefaultProvider;
   }
-  return prefs.cindyAiEnabled
-    ? searchCindy(query, limit, callId, callerTool)
-    : searchByo(prefs.byoDefaultProvider, query, limit, callId);
+  if (provider === 'cindy' && query.length > 2000) return { ok: false, message: t('queryTooLong') };
+  if (args.deepseek_options !== undefined && provider !== 'deepseek') {
+    return { ok: false, errorCode: 'INVALID_PARAMS', message: t('deepSeek_INVALID_OPTIONS') };
+  }
+  if (args.brave_options !== undefined && (provider !== 'brave'
+    || !validSearchOptions(args.brave_options, BRAVE_SEARCH_OPTIONS))) {
+    return nativeOptionsFailure('brave_options');
+  }
+  if (args.tavily_options !== undefined && (provider !== 'tavily'
+    || !validSearchOptions(args.tavily_options, TAVILY_SEARCH_OPTIONS))) {
+    return nativeOptionsFailure('tavily_options');
+  }
+  var limit = clampLimit(args.limit, provider === 'deepseek' ? 50 : provider === 'cindy' ? Infinity : 20,
+    provider === 'tavily' ? 0 : 1);
+  if (provider === 'cindy') return searchCindy(query, limit, callId, callerTool);
+  return searchByo(provider, query, limit, callId, args);
+}
+
+async function writeResultFile(path, text, callId) {
+  var saved = await cindy.send({
+    type: 'fs-request', op: 'write', root: 'workdir',
+    path: path, content: text, callId: callId,
+  });
+  return saved && saved.ok ? saved : null;
+}
+
+async function saveToolResult(text, callId) {
+  try {
+    var random = new Uint8Array(16);
+    crypto.getRandomValues(random);
+    var name = Array.from(random).map(function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+    var base = 'web-search/result-' + name;
+    var bytes = new TextEncoder().encode(text).length;
+    if (bytes <= RESULT_FILE_MAX_BYTES) {
+      var single = await writeResultFile(base + '.json', text, callId);
+      return single ? { path: single.path, format: 'json', bytes: bytes } : null;
+    }
+    var parts = [];
+    for (var start = 0; start < text.length;) {
+      var end = Math.min(start + RESULT_FILE_CHUNK_CHARS, text.length);
+      // Splitting a surrogate pair would corrupt the UTF-8 written by the Host.
+      if (end < text.length && text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff
+        && text.charCodeAt(end) >= 0xdc00 && text.charCodeAt(end) <= 0xdfff) end--;
+      var part = await writeResultFile(base + '-part-' + String(parts.length + 1).padStart(4, '0') + '.txt',
+        text.slice(start, end), callId);
+      if (!part) return null;
+      parts.push({ path: part.path, bytes: part.bytes });
+      start = end;
+    }
+    // Publish the ordered index only after every part is successfully saved.
+    var index = await writeResultFile(base + '.json', JSON.stringify({
+      format: 'json-chunks', encoding: 'utf-8', bytes: bytes, parts: parts,
+    }), callId);
+    return index ? { path: index.path, format: 'json-chunks', bytes: bytes } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function agentToolResult(result, callId, tool) {
+  var isPage = tool === 'fetch_page';
+  var full = isPage ? {
+    provider: result.provider, url: result.url, content: result.content, format: result.format,
+    extract_depth: result.extract_depth, content_chars: result.content_chars,
+    truncated: false, content_is_untrusted: true, preview: false,
+  } : {
+    provider: result.provider, results: result.results, metadata: result.metadata,
+    note: t('resultNote', { provider: result.provider, count: result.results.length }),
+    preview: false, content_is_untrusted: true,
+  };
+  var message = { type: 'tool-result', callId: callId, ok: true, result: full };
+  if ((isPage || full.results.length <= SEARCH_PREVIEW_RESULTS) && JSON.stringify(message).length <= TOOL_RESULT_MAX_CHARS) {
+    return message;
+  }
+  var saved = await saveToolResult(JSON.stringify(full), callId);
+  if (!saved) {
+    return { type: 'tool-result', callId: callId, ok: false, errorCode: 'RESULT_SAVE_FAILED',
+      message: t(isPage ? 'pageResultSaveFailed' : 'resultSaveFailed') };
+  }
+  message.result = isPage ? Object.assign({}, full, {
+    content: full.content.slice(0, PAGE_PREVIEW_CONTENT_CHARS), truncated: true,
+  }) : {
+    provider: full.provider, total_results: full.results.length,
+    results: full.results.slice(0, SEARCH_PREVIEW_RESULTS).map(function (item, index) {
+      var preview = { index: index, title: item.title, url: item.url,
+        snippet: typeof item.snippet === 'string' ? item.snippet.slice(0, SEARCH_PREVIEW_SNIPPET_CHARS) : '' };
+      ['date', 'published_date', 'site_name', 'rerank_score', 'authority', 'score'].forEach(function (key) {
+        if (hasOwn.call(item, key)) preview[key] = item[key];
+      });
+      return preview;
+    }),
+    content_is_untrusted: true,
+  };
+  message.result.preview = true;
+  message.result.complete_saved = true;
+  message.result.saved_to = saved.path;
+  message.result.saved_format = saved.format;
+  message.result.saved_bytes = saved.bytes;
+  message.result.note = (full.note ? full.note + '\n' : '') + t('resultPreviewSaved');
+  // Count the whole wire reply, including metadata, file references and notes.
+  if (isPage) {
+    while (message.result.content.length && JSON.stringify(message).length > TOOL_RESULT_MAX_CHARS) {
+      message.result.content = message.result.content.slice(0, Math.floor(message.result.content.length / 2));
+    }
+  } else {
+    while (message.result.results.length && JSON.stringify(message).length > TOOL_RESULT_MAX_CHARS) {
+      message.result.results.pop();
+    }
+  }
+  return message;
 }
 
 cindy.onHostMessage(async function (msg) {
@@ -593,34 +822,7 @@ cindy.onHostMessage(async function (msg) {
         ? await fetchPage(msg.args || {}, msg.callId)
         : await searchWeb(msg.args || {}, msg.callId, msg.tool);
     if (r.ok) {
-      if (msg.tool === 'fetch_page') {
-        cindy.send({
-          type: 'tool-result',
-          callId: msg.callId,
-          ok: true,
-          result: {
-            provider: r.provider,
-            url: r.url,
-            content: r.content,
-            format: r.format,
-            extract_depth: r.extract_depth,
-            content_chars: r.content_chars,
-            truncated: r.truncated,
-            content_is_untrusted: true,
-          },
-        });
-        return;
-      }
-      cindy.send({
-        type: 'tool-result',
-        callId: msg.callId,
-        ok: true,
-        result: {
-          provider: r.provider,
-          results: r.results,
-          note: t('resultNote', { provider: r.provider, count: r.results.length }),
-        },
-      });
+      await cindy.send(await agentToolResult(r, msg.callId, msg.tool));
     } else {
       cindy.send({
         type: 'tool-result',
