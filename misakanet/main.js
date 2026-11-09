@@ -28,12 +28,26 @@ const CLIENT_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
 let clientIdPromise = null;
 
 function randomClientId() {
-  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let id = 'cindy-';
-  for (let i = 0; i < 16; i += 1) {
-    id += alphabet[Math.floor(Math.random() * alphabet.length)];
+  // 外发标识必须来自密码学随机源：它会作为 X-MisakaNet-Client 发往外部端点，端点还用它统计
+  // 独立客户端数。Math.random 可预测，且没有安全的降级方案——拿不到 CSPRNG 时宁可失败。
+  const cryptoObj = typeof globalThis === 'object' && globalThis ? globalThis.crypto : undefined;
+  if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
+    const err = new Error('crypto.getRandomValues 不可用，拒绝用弱随机生成外发客户端标识');
+    err.code = 'MISAKANET_NO_CSPRNG';
+    err.hint = err.message; // handleToolCall 的 catch 只透传 hint
+    throw err;
   }
-  return id;
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const chars = [];
+  const bytes = new Uint8Array(32);
+  while (chars.length < 16) {
+    cryptoObj.getRandomValues(bytes);
+    for (let i = 0; i < bytes.length && chars.length < 16; i += 1) {
+      // 252 = 36 * 7：拒绝 >=252 的字节，每个字符恰好 7 个原像，无取模偏差。
+      if (bytes[i] < 252) chars.push(alphabet[bytes[i] % 36]);
+    }
+  }
+  return 'cindy-' + chars.join('');
 }
 
 async function ensureClientId() {
