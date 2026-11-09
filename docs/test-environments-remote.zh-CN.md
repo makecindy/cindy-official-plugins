@@ -98,3 +98,9 @@ A 和 B 的凭证仍只由各自主程序保管，插件/SSH 只转交公开请�
 必须以协议评审和真实联调为依据。本轮只预留设计和 unsupported 状态，不新增授权端点或宣称免密可用。
 
 AI 实际调用统一 `remote` 工具，以 operation 选择 catalog/plan/start/status/stop/select_account/action/collect。文中的 remote_catalog 等名称也保留为 CLI/内部流程入口；不是八个独立宿主工具。
+
+补充自动证据：真实 OpenSSH 客户端连接 127.0.0.1 临时测试 SSH 服务，覆盖两个本机模拟目标、
+精确检出/模拟构建、样本/验证、启动/动作/停止回执丢失、证据取回和严格主机密钥拒绝。
+解包后公开 CLI 和 main.js → 真实 Worker 也经过此回环；宿主传输仍为测试适配。
+这不等于两台真实电脑或正式账号验证。实机按[操作单](test-environments-acceptance.zh-CN.md)执行；
+截图在目标仍运行时收集，停止后收集最终日志/结果时不请求新截图。

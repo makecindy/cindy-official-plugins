@@ -26,10 +26,11 @@ const api = {
 };
 function frame(value) {
   const body = Buffer.from(JSON.stringify(value));
-  const head = Buffer.alloc(body.length < 126 ? 2 : 4);
+  const head = Buffer.alloc(body.length < 126 ? 2 : body.length <= 65535 ? 4 : 10);
   head[0] = 0x81;
   if (head.length === 2) head[1] = body.length;
-  else { head[1] = 126; head.writeUInt16BE(body.length, 2); }
+  else if(head.length===4) { head[1] = 126; head.writeUInt16BE(body.length, 2); }
+  else {head[1]=127;head.writeBigUInt64BE(BigInt(body.length),2);}
   return Buffer.concat([head, body]);
 }
 const server = http.createServer((req, res) => {
@@ -58,6 +59,11 @@ server.on('upgrade', (req, socket) => {
       if (opcode !== 1) continue;
       if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
       const request = JSON.parse(payload.toString());
+      if(request.method==='Page.captureScreenshot'){
+        const config=JSON.parse(fs.readFileSync(path.join(dir,'capture.json'),'utf8'));
+        const image=config.mode==='valid'?fs.readFileSync(path.resolve(__dirname,'../../test-environments/assets/icon.png')):config.mode==='oversize'?Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),Buffer.alloc(16*1024*1024)]):Buffer.from('not a PNG');
+        socket.write(frame({id:request.id,result:{data:image.toString('base64')}}));continue;
+      }
       if (request.method !== 'Runtime.evaluate') { socket.destroy(); return; }
       void Promise.resolve(vm.runInNewContext(request.params.expression, {window: {electronAPI: api}})).then(
         value => socket.write(frame({id: request.id, result: {result: {value}}})),

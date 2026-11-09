@@ -121,3 +121,11 @@ review and real integration evidence. This iteration reserves design/unsupported
 states only, without new authorization endpoints or claims of password-free login.
 
 AI calls the single `remote` tool with operation=catalog/plan/start/status/stop/select_account/action/collect. The remote_catalog-style names also remain CLI/internal workflow entries, not eight separate Host tools.
+
+Additional automated evidence uses the actual OpenSSH client over 127.0.0.1 to an
+ephemeral SSH test server: two local fixture targets, pinned checkout/mock build,
+samples/verification, lost start/action/stop receipts, evidence and strict host-key
+rejection. Unpacked public CLI and main.js → real Worker also use this loopback;
+Host transport remains a fixture. This is not two-computer/formal-account acceptance.
+Follow the [real checklist](test-environments-acceptance.md). Capture while running;
+collect final stopped logs/results without requesting a new screenshot.

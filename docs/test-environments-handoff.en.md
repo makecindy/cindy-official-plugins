@@ -17,7 +17,7 @@ Isolation separates local test data, not a special machine-bound account identit
 | Capability | Unified PR implementation | Verification boundary |
 | --- | --- | --- |
 | Local acceptance | Catalog, account discovery/selection, supervision, sample/verification commands and stop | Current-code automated regressions; real Cindy/accounts still unverified |
-| Generic SSH template | Choose computer/B profile per run, pin PR SHA, checkout/build/start, reuse B login, run commands and retrieve evidence | Simulated SSH with real Git/processes; actual cross-computer/hardware testing remains |
+| Generic SSH template | Choose computer/B profile per run, pin PR SHA, checkout/build/start, reuse B login, run commands and retrieve evidence | Simulated transport, real OpenSSH loopback and unpacked entries; actual cross-computer/hardware testing remains |
 | Physical devices/human steps | Explicit device-tool/human handoffs stay pending | Phones require their actual tools; trackpad feel requires real human input |
 | Cross-device first authorization | Research/interface design only, not implemented/deployed | Not a prerequisite for SSH with an already-signed-in B or an implemented capability |
 
@@ -115,3 +115,13 @@ node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/
 ```
 
 The package, source commit and SHA-256 association is recorded in #309 and the current Cindy task.
+
+## Actionable real acceptance checklist
+
+[English checklist](test-environments-acceptance.md) / [中文](test-environments-acceptance.zh-CN.md)
+provides prerequisites, actions, expected results and evidence: L1–L6 local, R0–R4
+two-computer, plus relevant device/human checks. Capture screenshots before stop;
+collect final logs/results afterward. Latest combined checks: 114/114 passed, none skipped,
+including browser, unpacked AI/Worker/CLI, actual OpenSSH loopback and screenshot
+protocol boundaries. This does not certify an installed Host, formal accounts or
+two physical computers. Packaged runtime/content remains 1.1.3 unchanged.

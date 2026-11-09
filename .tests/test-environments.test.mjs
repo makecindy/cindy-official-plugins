@@ -327,3 +327,17 @@ test('a previously verified session becoming signed out keeps explicit reauthori
  for(let i=0;i<2;i++){const state=await monitor.poll({application});assert.equal(state.state,'waiting-for-owner');assert.equal(state.code,'ACCOUNT_REAUTH_REQUIRED');assert.equal(state.verification,undefined);}
  assert.equal(switches,0);
 });
+
+test('owned CDP capture saves only valid bounded PNGs and rejects screenshots after stop',{skip:process.platform==='win32'},async t=>{
+ const {app,plan,job}=realAccountPlan(t),jobId='capture-job';
+ const dir=path.join(app.home,'jobs',jobId);fs.mkdirSync(dir,{recursive:true});
+ const reserve=net.createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const port=reserve.address().port;await new Promise(r=>reserve.close(r));
+ const configured={...plan,env:{XDT_CDP_PORT:String(port)},argv:[process.execPath,path.resolve(import.meta.dirname,'fixtures/test-environments-app.cjs'),dir]};
+ fs.writeFileSync(path.join(dir,'plan.json'),JSON.stringify(configured));fs.writeFileSync(path.join(dir,'status.json'),JSON.stringify({jobId,profile:'daily',projectRoot:plan.projectRoot,startedAt:Date.now(),state:'starting'}));fs.writeFileSync(path.join(dir,'account.json'),JSON.stringify({current:'account-a'}));
+ const runner=spawn(process.execPath,[path.join(root,'node/runner.cjs'),dir],{stdio:'ignore'}),exited=once(runner,'exit');
+ t.after(async()=>{if(runner.exitCode===null&&runner.signalCode===null){fs.writeFileSync(path.join(dir,'cancel.json'),'{}');await exited;}});
+ await until(()=>app.status(jobId),s=>s.state==='ready',10000);
+ fs.writeFileSync(path.join(dir,'capture.json'),JSON.stringify({mode:'valid'}));const result=await app.inspect(jobId,true),png=fs.readFileSync(path.join(root,'assets/icon.png'));assert.deepEqual(fs.readFileSync(result.screenshot),png);assert.equal(fs.statSync(result.screenshot).mode&0o777,0o600);assert.equal(JSON.stringify(result).includes('must-not-leak'),false);
+ for(const mode of ['invalid','oversize']){fs.writeFileSync(path.join(dir,'capture.json'),JSON.stringify({mode}));await assert.rejects(app.inspect(jobId,true),{code:'INVALID_CAPTURE'});assert.deepEqual(fs.readFileSync(result.screenshot),png);}
+ fs.writeFileSync(path.join(dir,'cancel.json'),'{}');await exited;await assert.rejects(app.inspect(jobId,true),{code:'APP_NOT_INSPECTABLE'});
+});
