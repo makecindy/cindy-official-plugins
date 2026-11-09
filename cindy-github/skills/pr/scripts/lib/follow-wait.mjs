@@ -79,6 +79,8 @@ export function makeWait(input, facts, now) {
     kind: input.kind, headSha: facts.headSha, reason: input.reason.trim(),
     createdAt: now, until: minutes === null ? null : now + minutes * 60_000,
     checks, threads, reviewDecision: facts.reviewDecision, blockers: facts.blockers,
+    // Every thread as first seen, so a resolved one that is reopened later still wakes the loop.
+    threadStates: facts.threads,
   };
 }
 
@@ -99,6 +101,12 @@ export function inspectWait(wait, snap) {
   for (const old of wait.threads) {
     const thread = current.threads.find((t) => t.id === old.id);
     if (!thread || thread.resolved !== old.resolved || thread.outdated !== old.outdated) changed.push(`thread ${old.id}`);
+  }
+  // A thread now unresolved that was resolved (or absent) when the wait was made is new work.
+  for (const thread of current.threads) {
+    if (thread.resolved || wait.threads.some((t) => t.id === thread.id)) continue;
+    const old = (wait.threadStates ?? []).find((t) => t.id === thread.id);
+    if (!old || old.resolved) changed.push(`thread ${thread.id}`);
   }
   if (current.blockers.includes('branch_behind_base') && !wait.blockers.includes('branch_behind_base')) changed.push('branch requires an updated base');
   if (current.reviewDecision !== wait.reviewDecision) changed.push('review decision');

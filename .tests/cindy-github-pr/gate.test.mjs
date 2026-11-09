@@ -1140,6 +1140,26 @@ test('replay: important new events pierce a human wait immediately, even through
   });
 });
 
+test('replay: a resolved thread reopened later wakes a human wait', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked({
+    reviewThreads: { nodes: [
+      { id: 'security-thread', isResolved: false, comments: [] },
+      { id: 'old-thread', isResolved: true, comments: [] },
+    ] },
+  });
+  await startWait(fx, s);
+  fx.advance(1);
+  fx.setTrigger({ kind: 'watch' });
+  fx.setSnapshot({ ...s, reviewThreads: { nodes: [
+    { id: 'security-thread', isResolved: false, comments: [] },
+    { id: 'old-thread', isResolved: false, comments: [] },
+  ] } });
+  const result = await fx.run(['--pacing', '--json']);
+  assert.equal(result.code, 0, result.stdout);
+  assert.match(`${result.json().report ?? ''} ${result.json().detail}`, /thread old-thread/);
+});
+
 test('replay: wait is bound to the released head; own push clears it and keeps the bot settle window', async (t) => {
   const fx = createFixture(t);
   const s = humanBlocked({ reviews: [{ author: 'review-bot', authorIsBot: true, commitOid: 'aaa1111', submittedAt: iso(T0 - MIN), state: 'COMMENTED' }] });
