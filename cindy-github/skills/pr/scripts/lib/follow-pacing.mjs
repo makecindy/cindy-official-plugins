@@ -139,10 +139,16 @@ export function botsAnswered(snap, bots, head, since) {
   if (!snap?.checksSummary?.unavailable && !snap?.checksSummary?.truncated) {
     for (const bot of wanted) {
       const latest = new Map();
+      let unfinished = false;
       for (const c of snap?.reviewerChecks ?? []) {
         if (c.headSha !== head || c.appSlug !== bot || !Number.isInteger(c.appId) || c.appId <= 0) continue;
         const at = timeOf(c.startedAt);
-        if (at === null || !c.name) continue;
+        if (!c.name) continue;
+        // 排队或等待中、还没有开始时间的重跑:只要它没结束就不能凭旧的成功算「已答复」。
+        if (at === null) {
+          if (c.status !== 'COMPLETED') unfinished = true;
+          continue;
+        }
         const key = `${c.appId}:${c.name}`;
         const old = latest.get(key);
         if (!old || at > old.at) latest.set(key, { at, c });
@@ -150,7 +156,7 @@ export function botsAnswered(snap, bots, head, since) {
           latest.set(key, { at, c: { ...c, status: 'UNKNOWN' } });
         }
       }
-      if (latest.size && [...latest.values()].every(({c}) => c.status === 'COMPLETED'
+      if (!unfinished && latest.size && [...latest.values()].every(({c}) => c.status === 'COMPLETED'
         && c.conclusion === 'SUCCESS' && timeOf(c.completedAt) !== null)) mark(bot);
     }
   }

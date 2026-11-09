@@ -817,6 +817,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   // 这个 PR 以前跑过检查,新 head 却迟迟没有任何检查:可能没触发,也可能被禁用了。
   const everHadChecks = Boolean(watch.everHadChecks) || checks.length > 0;
   let checksAwaitedSince = watch.checksAwaitedSince ?? null;
+  let noChecksReminded = Boolean(watch.noChecksReminded);
   const missingRequired = checks.some((c) => c.expected === true);
   const runningActual = checks.some(c => !c.expected && checkOutcome(c) === 'pending');
   if (watch.everHadChecks || missingRequired) {
@@ -824,12 +825,17 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     // 之后 headMoved 不会再为 true,读取恢复时才起算就永远起算不了。
     if (headMoved) checksAwaitedSince = isoAt(now);
     if (missingRequired && runningActual) checksAwaitedSince = isoAt(now);
+    // 同一提交上新增(或恢复读取后首次发现)的缺失必需检查:首次看到就起算。提醒过一次后
+    // 不再重新起算,直到缺失项补齐或 head 前进。
+    if (headMoved || !missingRequired) noChecksReminded = false;
+    if (missingRequired && !noChecksReminded && checksAwaitedSince === null && !checksUnavailable) checksAwaitedSince = isoAt(now);
     if (!checksUnavailable) {
       if (checks.length > 0 && !missingRequired) checksAwaitedSince = null;
       const awaitedMs = checksAwaitedSince === null ? 0 : now - Date.parse(checksAwaitedSince);
       if (awaitedMs >= NO_CHECKS_MS && !runningActual) {
         events.push({ kind: 'no-checks', minutes: Math.round(awaitedMs / 60_000), ...(missingRequired ? { missing: checks.filter(c => c.expected).map(c => c.name) } : {}) });
         checksAwaitedSince = null;
+        noChecksReminded = true;
       }
     }
   }
@@ -877,7 +883,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     exhausted: commentsOnly && wakes >= COMMENT_WAKE_LIMIT,
     next: {
       headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
-      conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, everHadChecks, baseSha,
+      conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, noChecksReminded, everHadChecks, baseSha,
       waitFacts: waitFacts(snap), inventoryRecoveryOwed,
     },
   };
@@ -1004,8 +1010,14 @@ export function decide({
 
   // 基线:新跟进从空白起;旧版 gate 留下的状态(只有指纹)从这次快照起,不补报旧事。
   const legacy = !previous?.watch && Boolean(previous?.fingerprint || previous?.pendingFingerprint);
-  const baseline = previous?.watch
+  let baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
+  // 规则故障提醒还没被确认就恢复了:待确认的那份记着「欠一次复核」,不能因为已确认的 watch
+  // 没有这个标记而丢掉。
+  if (pendingWatch?.inventoryRecoveryOwed === true && !baseline.inventoryRecoveryOwed
+      && pendingWatch.headSha === baseline.headSha) {
+    baseline = { ...baseline, inventoryRecoveryOwed: true };
+  }
   const result = evaluateWatch(baseline, snap, now, lastKnownConflicting);
   const waiting = inspectWait(previous?.wait, snap);
   // A wait was installed only after ack; base noise must not defeat retries of its deadline.
@@ -1827,7 +1839,17 @@ export async function runGate(argv, {
     // Never retain the human/model explanation passed to resume.
     if (record.argv.includes('--resume')) record.argv[record.argv.indexOf('--resume')+1] = 'recorded resume';
     // Pacing-only firings contain no new evidence. Do not duplicate the old state each tick.
-    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) appendTrace(traceFile, record);
+    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
+      // 连续编号放在状态文件旁的小文件里(不动状态本身),写入失败也照常前进:
+      // 下一条成功记录的编号会跳号,回放据此标出缺口。
+      try {
+        const seqFile = `${stateFilePath(args.stateDir, args.repo, args.number)}.trace-seq`;
+        const last = Number.parseInt(fs.existsSync(seqFile) ? fs.readFileSync(seqFile, 'utf8') : '0', 10) || 0;
+        record.seq = last + 1;
+        fs.writeFileSync(seqFile, String(record.seq), { mode: 0o600 });
+      } catch { /* Numbering must not change the follow decision. */ }
+      appendTrace(traceFile, record);
+    }
   }
   return code;
 }

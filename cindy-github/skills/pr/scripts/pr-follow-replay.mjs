@@ -9,7 +9,7 @@ if (!trace) throw new Error('Usage: pr-follow-replay.mjs <trace.jsonl> [candidat
 const {runGate,stateFilePath,repoStateFilePath} = await import(pathToFileURL(path.resolve(scripts,'pr-heartbeat-gate.mjs')));
 const rows = fs.readFileSync(trace,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(),'pr-follow-replay-'));
-let seeded = false, previousAt = -Infinity, key, observed = 0, candidate = 0, gaps = 0;
+let seeded = false, previousAt = -Infinity, previousSeq = null, key, observed = 0, candidate = 0, gaps = 0;
 const differences = [];
 try {
   for (const row of rows) {
@@ -17,6 +17,8 @@ try {
     const currentKey = `${row.repo}#${row.number}`;
     if ((key && key !== currentKey) || row.at < previousAt) throw new Error('Trace must contain one PR in chronological order');
     key=currentKey;previousAt=row.at;
+    // Consecutive numbers prove no recorded round was lost between two kept rows.
+    if(Number.isInteger(row.seq)){if(previousSeq!==null&&row.seq!==previousSeq+1){gaps++;break;}previousSeq=row.seq;}else previousSeq=null;
     if (!seeded) {
       for(const [file,data] of [[stateFilePath(dir,row.repo,row.number),row.before],[repoStateFilePath(dir,row.repo),row.repoBefore]]) {
         if(data) fs.writeFileSync(file,JSON.stringify(data));
