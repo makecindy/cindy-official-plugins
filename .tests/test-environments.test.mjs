@@ -233,6 +233,18 @@ test('uncertain account switching is not retried and requires an explicit new se
  await assert.rejects(monitor.poll({application}));assert.equal(calls,2);
 });
 
+test('expired saved sessions explicitly require reauthorization without repeated switches',async t=>{
+ const {plan,job,application}=realAccountPlan(t);let attempts=0;
+ const api={authInitialize:async()=>({mode:'signed-out',isAuthenticated:false}),authListAccounts:async()=>({accounts:snapshot(null).accounts}),
+  authGetLoginState:async()=>({success:true,state:{step:'identifier'}}),
+  authSwitchAccount:async()=>{attempts++;throw Error('Error invoking remote method: Error: [ACCOUNT_REAUTH_REQUIRED] private detail');}};
+ const perform=async(_p,_s,op,args)=>projectSnapshot(await vm.runInNewContext(accountExpression(op,args),{window:{electronAPI:api}}));
+ const monitor=new SessionMonitor({...plan,account:{selector:'account-b'}},job,{perform});
+ const result=await monitor.poll({application});assert.equal(result.code,'ACCOUNT_REAUTH_REQUIRED');assert.equal(result.state,'waiting-for-owner');
+ assert.equal((await monitor.poll({application})).code,'ACCOUNT_REAUTH_REQUIRED');assert.equal(attempts,1);
+ assert.equal(JSON.stringify(result).includes('private detail'),false);
+});
+
 test('live recording respects catalog locks and removed profiles rather than recreating them',async t=>{
  const {app,plan,job,application}=realAccountPlan(t);
  fs.mkdirSync(path.join(app.home,'.catalog-lock'));

@@ -8,7 +8,7 @@ class SessionMonitor {
   constructor(plan, dir, {perform = performDesktop, remember = rememberAccounts, now = Date.now} = {}) {
     this.plan = plan; this.dir = dir; this.perform = perform; this.remember = remember; this.now = now;
     this.target = plan.account; this.attempted = null; this.verifiedKey = null; this.verifiedAt = 0;
-    this.observedKey = null;
+    this.observedKey = null; this.reauthCode = null;
     this.lastVerificationAttempt = -Infinity; this.remoteAttempted = false;
   }
   async poll(status) {
@@ -17,7 +17,7 @@ class SessionMonitor {
       const request = JSON.parse(fs.readFileSync(requestFile, 'utf8'));
       // Consume before dispatch: a lost reply must never cause an automatic repeat.
       fs.unlinkSync(requestFile);
-      this.target = request.account; this.attempted = null; this.verifiedKey = null;
+      this.target = request.account; this.attempted = null; this.verifiedKey = null; this.reauthCode = null;
       this.remoteAttempted = false; this.lastVerificationAttempt = -Infinity;
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     let snapshot = await this.perform(this.plan, status, 'snapshot');
@@ -37,10 +37,11 @@ class SessionMonitor {
         return {...base, state: 'waiting-for-owner', code: 'ACCOUNT_SIGN_IN_REQUIRED',
           nextAction: 'Sign in to the selected real account in this application on this computer. Other computers retain their own sessions.'};
       if (this.attempted === this.target.selector)
-        return {...base, state: 'waiting-for-owner', code: 'ACCOUNT_SELECTION_UNCONFIRMED',
-          nextAction: 'Inspect the actual account/login state. Complete sign-in or explicitly select the account again after checking; no automatic switch retry.'};
+        return {...base, state: 'waiting-for-owner', code: this.reauthCode || 'ACCOUNT_SELECTION_UNCONFIRMED',
+          nextAction: this.reauthCode?'The saved local session is unavailable. Reauthorize this account through normal Cindy sign-in on this computer; other computers keep their own sessions.':'Inspect the actual account/login state. Complete sign-in or explicitly select the account again after checking; no automatic switch retry.'};
       this.attempted = this.target.selector;
-      await this.perform(this.plan, status, 'select', {accountKey: this.target.selector});
+      const selection=await this.perform(this.plan, status, 'select', {accountKey: this.target.selector});
+      if(selection.operationError){this.reauthCode=selection.operationError;return {...base,state:'waiting-for-owner',code:this.reauthCode,nextAction:'Reauthorize this account through normal Cindy sign-in on this computer. No stored credential is copied or switch automatically retried.'};}
       return {...base, state: 'checking-account', code: undefined, verification: undefined,
         nextAction: 'Account switch requested; the next observation must confirm identity and online authentication.'};
     }
@@ -63,6 +64,7 @@ class SessionMonitor {
       this.lastVerificationAttempt = this.now();
       const before = current();
       snapshot = await this.perform(this.plan, status, 'verify');
+      if(!snapshot.authenticated)return {...base,state:'waiting-for-owner',code:'ACCOUNT_REAUTH_REQUIRED',verification:undefined,nextAction:'The local session is no longer authenticated. Reauthorize through normal Cindy sign-in on this computer.'};
       if (snapshot.verified && current() === before && snapshot.databaseReady) {
         this.verifiedKey = before; this.verifiedAt = this.now();
       } else this.verifiedKey = null;

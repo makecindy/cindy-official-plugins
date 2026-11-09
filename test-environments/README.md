@@ -33,3 +33,5 @@ application jobs, not arbitrary daily-host instances.
 Run `node --test .tests/test-environments.test.mjs` from the repository root.
 This draft still needs real Cindy host/account integration evidence; simulated
 protocol tests are not proof of real-account or cross-computer authentication.
+
+This package is the Phase 1 local delivery. SSH orchestration and cross-device first authorization are independent Phase 2 capabilities, neither a Phase 1 completion gate. Device-tool and real human steps remain explicit.

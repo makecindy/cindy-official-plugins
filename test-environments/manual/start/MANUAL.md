@@ -107,3 +107,5 @@ Python 3 for macOS PTY and lsof for owned-port checks must already be installed.
 The catalog, job logs and screenshots stay in local user data. Review/redact logs
 before sharing. Do not enable unfinished builds in the daily host or install this
 plugin inside the target dev app to launch another layer. Packaging is not installation.
+
+This package is the Phase 1 local delivery. SSH orchestration and cross-device first authorization are independent Phase 2 capabilities, neither a Phase 1 completion gate. Device-tool and real human steps remain explicit.

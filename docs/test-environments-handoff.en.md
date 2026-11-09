@@ -20,6 +20,22 @@ No tokens, cookies, Keychain entries or encrypted credential files are copied, a
 no indefinite authentication is promised. Discovery covers only this plugin's
 owned applications, not arbitrary daily-host or other-computer login histories.
 
+## Two-phase delivery boundary
+
+| Area | Phase 1: current #279 / #308 | Phase 2: separate follow-up PR |
+| --- | --- | --- |
+| Execution | Complete local acceptance; real accounts sign in independently per computer | Generic SSH template; choose computer, PR, profile and hardware requirements per run |
+| Login storage | Cindy owns local sessions; plugin keeps references, locations and configuration | Reuse B's local session; SSH never transports credentials |
+| B signed out | Explicit normal reauthorization wait | Research cross-device first authorization separately; not a prerequisite for SSH with B already signed in |
+| Samples/cases | Plugin orchestration, real tools and explicit human steps | Prepare/execute on B; bring logs, screenshots and results to the current task |
+| Evidence | Current implementation's real integration, without requiring SSH or password-free authorization | Separate SSH, hardware, device-tool and human verification evidence |
+
+See the [SSH and first-authorization design](test-environments-remote.md) for reserved interfaces.
+Targets are parameters, not hard-coded computers: SSH Host, B repository path, PR number and exact commit,
+B profile and cases. SSH trust, Node and the project toolchain must exist on the selected computer.
+A concrete machine is needed for real hardware verification, not for writing the generic template.
+Physical phones use their device tools; trackpad feel keeps real human input rather than synthetic events.
+
 ## Implementation ownership
 
 | Module | Responsibility |
@@ -75,7 +91,7 @@ converting authentication formats between applications.
 
 ## Evidence and remaining work
 
-Version 1.0.5 has regressions for persistence, safe app projections, A→B→A state
+Version 1.0.6 has regressions for persistence, safe app projections, A→B→A state
 transitions, independent computer login, uncertain switch handling, locks, deleted
 profiles and real child-process/PTY/ownership behavior. A local HTTP/WebSocket app
 simulator exercises the real runner, lsof and CDP transport, without real accounts

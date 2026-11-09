@@ -51,7 +51,7 @@ const SNAPSHOT=`const auth=await api.authInitialize();
   step:authenticated?'authenticated':login?.state?.step||null,
   code:database?.error?.code||(login?.success===false?login.code:null),
   remoteControl:api.deviceLink?.getState?(await api.deviceLink.getState()).remoteControlEnabled:null,
-  verified};`;
+  verified,operationError};`;
 function projectSnapshot(value){
   if(!value?.supported||!Array.isArray(value.accounts)||value.accounts.length>1000)fail('APP_INTERFACE_UNAVAILABLE','The target does not expose the expected account interface.');
   const bounded=(v,max)=>typeof v==='string'&&v.length<=max&&!v.includes('\0')?v:null;
@@ -61,7 +61,8 @@ function projectSnapshot(value){
   });
   if(accounts.filter(a=>a.isCurrent).length>1)fail('INVALID_ACCOUNT_SNAPSHOT','Ambiguous current account.');
   return {authenticated:value.authenticated===true,databaseReady:value.databaseReady===true,accounts,
-    step:bounded(value.step,80),code:bounded(value.code,100),remoteControl:typeof value.remoteControl==='boolean'?value.remoteControl:null,verified:value.verified===true};
+    step:bounded(value.step,80),code:bounded(value.code,100),remoteControl:typeof value.remoteControl==='boolean'?value.remoteControl:null,verified:value.verified===true,
+    operationError:['ACCOUNT_REAUTH_REQUIRED','CREDENTIAL_STORE_UNAVAILABLE','ACCOUNT_NOT_FOUND'].includes(value.operationError)?value.operationError:null};
 }
 function accountExpression(operation='snapshot',args={}){
   let action='';
@@ -75,8 +76,11 @@ function accountExpression(operation='snapshot',args={}){
     action=`await api.deviceLink.setEnabled(${args.enabled});`;
   }else if(operation!=='snapshot')fail('UNKNOWN_OPERATION','Unknown application operation.');
   return `(async()=>{const api=window.electronAPI;
-      if(!api?.authInitialize||!api?.authListAccounts)return {supported:false};let verified=false;
-      ${action}${SNAPSHOT}})()`;
+      if(!api?.authInitialize||!api?.authListAccounts)return {supported:false};let verified=false,operationError=null;
+      try{${action}}catch(e){const known=['ACCOUNT_REAUTH_REQUIRED','CREDENTIAL_STORE_UNAVAILABLE','ACCOUNT_NOT_FOUND'];
+       operationError=known.find(code=>e?.code===code||typeof e?.message==='string'&&e.message.includes('['+code+']'));
+       if(!operationError)throw Error('APP_OPERATION_UNCONFIRMED');}
+      ${SNAPSHOT}})()`;
 }
 async function performDesktop(plan,status,operation='snapshot',args={}){
   const expression=accountExpression(operation,args);

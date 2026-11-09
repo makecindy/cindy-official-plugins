@@ -5,7 +5,7 @@
   "name": "Test Environments",
   "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
   "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -509,5 +509,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "Real accounts with automatic local-profile history and app-owned encrypted session reuse. Removed dependence on unshipped acceptance/login-source WIP. Full acceptance workflow remains explicit; cross-computer first sign-in uses the application."
+  "releaseNotes": "Phase 1: local real-account acceptance workflow and explicit reauthorization states. SSH orchestration and cross-device first authorization are separate Phase 2 work."
 }
