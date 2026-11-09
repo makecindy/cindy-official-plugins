@@ -15,8 +15,8 @@
  * answer within minutes. Waking the agent on the first failed check or the first bot comment makes
  * it push again while the other reviewers are still on the old commit, which costs a whole extra
  * round. So for up to SETTLE_MAX_MS after a new commit is first seen, news that only bots or checks
- * produced is held until every expected bot has answered on the new commit (a review, a comment or
- * a reaction such as Codex's 👍 for "no suggestions"). People's comments, merge-queue problems and
+ * produced is held until every expected bot has answered on the new commit (a submitted review or
+ * a 👍 reaction for "no suggestions"). People's comments, merge-queue problems and
  * draft changes are never held. Checks are not waited for: the agent looks at them again before it
  * pushes, so a failure that lands while it works joins the same round.
  */
@@ -124,19 +124,15 @@ export function botsAnswered(snap, bots, head, since) {
     if (wanted.has(key)) answered.add(key);
   };
   for (const review of snap?.reviews ?? []) {
+    if (!['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'].includes(review?.state)) continue;
     // A review that names its commit answers for that commit only; time decides just when it names none.
     if (review?.commitOid ? review.commitOid === head : after(review?.submittedAt)) mark(review?.author);
   }
-  for (const comment of snap?.comments ?? []) {
-    if (after(comment?.updatedAt ?? comment?.createdAt)) mark(comment?.author);
-  }
-  for (const thread of snap?.reviewThreads?.nodes ?? []) {
-    for (const comment of thread?.comments ?? []) {
-      if (after(comment?.updatedAt ?? comment?.createdAt)) mark(comment?.author);
-    }
-  }
+  // Plain comments (including edited status summaries) and individual inline findings do not
+  // prove the reviewer has finished. Unknown/comment-only bots retain the 20-minute bound.
+  // EYES means started, not finished. Only a positive completion reaction closes the window.
   for (const reaction of snap?.reactions ?? []) {
-    if (after(reaction?.at)) mark(reaction?.author);
+    if (reaction?.content === 'THUMBS_UP' && after(reaction?.at)) mark(reaction?.author);
   }
   return [...answered].sort();
 }

@@ -91,8 +91,14 @@ export function inspectWait(wait, snap) {
   const current = waitFacts(snap);
   const changed = [];
   if (!current.complete) return { wait, changed, ignoreBase: false };
+  // A CI wait is one batch. Successful partial progress does not require model work.
+  // Other wait kinds still react to each repaired/retried blocker individually.
+  const checksPending = wait.kind === 'checks' && wait.checks.some((old) =>
+    current.checks.some((c) => checkKey(c) === checkKey(old) && c.outcome === 'pending'));
   for (const old of wait.checks) {
     const check = current.checks.find((c) => checkKey(c) === checkKey(old));
+    // Never hide a missing target, a failure, or recovery of an already-failed blocker.
+    if (checksPending && check?.outcome === 'passed' && old.outcome !== 'failed') continue;
     // Running is not actionable. Completion of a different attempt is, even with the same verdict.
     if (!check || (check.outcome !== 'pending' && (check.outcome !== old.outcome || check.attempt !== old.attempt))) {
       changed.push(`check ${old.name}`);
@@ -121,5 +127,5 @@ export function inspectWait(wait, snap) {
     wait.threads.map((old) => current.threads.find((t) => t.id === old.id) ?? null),
     reopened, current.reviewDecision, current.blockers.includes('branch_behind_base'),
   ]);
-  return { wait, changed, ignoreBase, signature };
+  return { wait, changed, ignoreBase, signature, checksPending };
 }

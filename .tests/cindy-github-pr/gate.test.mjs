@@ -1513,3 +1513,96 @@ test('replay: slow wait acknowledgement preserves a new failure arriving on the 
   assert.equal(next.code, 0);
   assert.match(next.json().report, /new-test/);
 });
+
+test('replay: twenty CI successes batch into one wake, including required checks and host triggers', async (t) => {
+  const fx = createFixture(t);
+  const s = snap({ checks: Array.from({ length: 20 }, (_, i) => check(`test-${i}`, 'pending', { required: i === 0 })), verdict: 'WAITING_CI' });
+  await startWait(fx, s, { kind: 'checks', afterMinutes: 30, checks: s.checks.map(({ name }) => ({ name })), threads: [] });
+  const until = fx.readState().wait.until;
+  for (let i = 0; i < 20; i++) {
+    fx.advance(1);
+    s.checks[i] = { ...s.checks[i], outcome: 'passed' };
+    fx.setSnapshot(s);
+    const r = await fx.run(['--json', '--triggered']);
+    assert.equal(r.code, i === 19 ? 0 : 2, `success ${i + 1}: ${r.stdout}`);
+    assert.equal(fx.readState().wait.until, until, 'progress never extends the original deadline');
+  }
+  assert.equal((await fx.run(['--resume', 'All CI results inspected.'])).code, 0);
+  assert.equal((await fx.run(['--triggered'])).code, 2, 'completion is not reported twice');
+});
+
+test('replay: batching CI successes preserves failures, feedback, reopened threads, deadlines and terminal events', async (t) => {
+  const cases = [
+    ['failure', s => { s.checks[1].outcome = 'failed'; }],
+    ['feedback', s => { s.comments = [comment('new', 'reviewer', iso(T0 + MIN))]; }],
+    ['bot feedback', s => { s.comments = [comment('new', 'review-bot', iso(T0 + MIN), 'Fix this race', { authorIsBot: true })]; }],
+    ['thread reopened', s => { s.reviewThreads.nodes[0].isResolved = false; }],
+    ['conflict', s => { s.mergeable = false; s.mergeStateStatus = 'DIRTY'; }],
+    ['missing check', s => { s.checks.pop(); }],
+    ['incomplete', s => { s.checksSummary.unavailable = true; }],
+    ['merged', s => { s.merged = true; }],
+    ['closed', s => { s.closed = true; }],
+    ['deadline', () => {}],
+  ];
+  for (const [label, mutate] of cases) {
+    const fx = createFixture(t);
+    const s = snap({ checks: [check('first', 'pending', { required: true }), check('second', 'pending')], reviewThreads: { nodes: [{ id: 'old', isResolved: true }] } });
+    await startWait(fx, s, { kind: 'checks', afterMinutes: 10, checks: s.checks.map(({ name }) => ({ name })), threads: [] });
+    fx.advance(1);
+    s.checks[0].outcome = 'passed';
+    fx.setSnapshot(s);
+    assert.equal((await fx.run(['--triggered'])).code, 2, label);
+    fx.advance(label === 'deadline' ? 9 : 1);
+    mutate(s);
+    fx.setSnapshot(s);
+    const r = await fx.run(['--json', '--triggered']);
+    assert.equal(r.code, 0, `${label}: ${r.stdout}`);
+  }
+});
+
+test('replay: bot progress and partial inline comments do not end the settle window', async (t) => {
+  const fx = createFixture(t);
+  const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - MIN))] });
+  fx.setSnapshot(first);
+  await fx.run();
+  await fx.run(['--ack']);
+  fx.advance(2);
+  const next = snap({ ...first, latestCommitOid: 'bbb2222', checks: [check('build', 'failed')],
+    comments: [comment('progress', 'chatgpt-codex-connector', iso(fx.now()), 'Codex Review Summary: Running', { authorIsBot: true })],
+    reactions: [{ author: 'chatgpt-codex-connector[bot]', content: 'EYES', at: iso(fx.now()) }],
+    reviewThreads: { nodes: [{ id: 'partial', isResolved: false, comments: [comment('partial', 'chatgpt-codex-connector', iso(fx.now()), 'One finding', { authorIsBot: true })] }] },
+  });
+  fx.setSnapshot(next);
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+  fx.advance(3);
+  next.reviews.push(botReview('R2', 'chatgpt-codex-connector', 'bbb2222', iso(fx.now())));
+  fx.setSnapshot(next);
+  const done = await fx.run(['--json']);
+  assert.equal(done.code, 0);
+  assert.match(done.json().report, /build/);
+  assert.match(done.json().report, /One finding/);
+});
+
+test('CLI: persisted CI wait batches successes and keeps feedback arriving during an unfinished round', async (t) => {
+  const fx = createFixture(t);
+  const s = snap({ checks: [check('one', 'pending', { required: true }), check('two', 'pending')] });
+  fx.setSnapshot(s);
+  assert.equal((await fx.runVia(gatePath, ['--json'])).code, 2);
+  const plan = waitPlan(s, { kind: 'checks', afterMinutes: 15, checks: s.checks.map(({ name }) => ({ name })), threads: [] });
+  assert.equal((await fx.runVia(gatePath, ['--wait', fx.writeWait(plan)])).code, 0);
+  s.checks[0].outcome = 'passed';
+  fx.setSnapshot(s);
+  assert.equal((await fx.runVia(gatePath, ['--triggered'])).code, 2);
+  s.checks[1].outcome = 'passed';
+  fx.setSnapshot(s);
+  assert.equal((await fx.runVia(gatePath, ['--triggered'])).code, 0);
+  const pending = fx.readState().pendingWatch;
+  s.comments = [comment('late', 'reviewer', new Date(Date.now() + 1000).toISOString(), 'Late feedback must survive')];
+  fx.setSnapshot(s);
+  assert.equal((await fx.runVia(gatePath, ['--triggered'])).code, 0);
+  assert.deepEqual(fx.readState().pendingWatch, pending, 'slow turn only owns the earliest observation');
+  assert.equal((await fx.runVia(gatePath, ['--resume', 'Inspected completed checks.'])).code, 0);
+  const late = await fx.runVia(gatePath, ['--json', '--triggered']);
+  assert.equal(late.code, 0);
+  assert.match(JSON.parse(late.stdout).report, /Late feedback must survive/);
+});
