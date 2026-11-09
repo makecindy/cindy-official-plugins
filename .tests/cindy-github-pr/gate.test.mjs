@@ -82,6 +82,11 @@ function createFixture(t) {
     advance(minutes) {
       clock += minutes * MIN;
     },
+    writeWait(plan) {
+      const file = path.join(root, 'wait.json');
+      fs.writeFileSync(file, JSON.stringify(plan));
+      return file;
+    },
     now: () => clock,
     snapshotRuns: () => snapshotRuns,
     readState() {
@@ -176,6 +181,28 @@ function seenWatch(s, now = T0) {
 }
 
 const kinds = (result) => result.events.map((e) => e.kind);
+
+const waitPlan = (s, extra = {}) => ({
+  kind: 'human', headSha: s.latestCommitOid, reason: 'A maintainer must handle the certificate finding.',
+  afterMinutes: null, checks: [{ name: 'CodeQL' }], threads: ['security-thread'], ...extra,
+});
+const humanBlocked = (extra = {}) => snap({
+  verdict: 'NEEDS_WORK', reviewDecision: 'REVIEW_REQUIRED',
+  blockers: ['ci_failing', 'unresolved_review_threads', 'branch_protection_blocked'],
+  baseCommitOid: 'base-0',
+  checks: [check('build', 'passed', { required: true }), check('CodeQL', 'failed', { startedAt: iso(T0 - MIN) })],
+  reviewThreads: { nodes: [{ id: 'security-thread', isResolved: false, comments: [] }] },
+  ...extra,
+});
+
+async function startWait(fx, s, extra = {}) {
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const result = await fx.run(['--wait', fx.writeWait(waitPlan(s, extra)), '--json']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.json().reason, 'wait-set');
+  return result;
+}
 
 // ── 目标解析 ────────────────────────────────────────────────────────────────
 
@@ -1033,4 +1060,294 @@ test('只等人工批准时保底巡检不叫醒 agent', () => {
   // 还有技术活(检查失败)时照常保底巡检。
   const red = snap({ verdict: 'NEEDS_WORK', blockers: ['ci_failing'] });
   assert.equal(decide({ snap: red, previous: { watch: seenWatch(red), lastPassAt: T0 }, now: T0 + 2 * day }).reason, 'silence-guard');
+});
+
+// Historical scenario replays: real gate entry, persisted state, controlled clock / GitHub facts.
+// No calls to the live PR, scheduler or model are made by these tests.
+test('replay: human-only CodeQL wait absorbs 72 base updates and host triggers without model wakes', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s);
+  let modelWakes = 0;
+  for (let tick = 1; tick <= 72; tick += 1) {
+    fx.advance(5);
+    fx.setSnapshot({ ...s, baseCommitOid: `base-${tick}` });
+    fx.setTrigger({ kind: 'watch' });
+    const result = await fx.run(['--pacing', '--json']);
+    if (result.code === 0) modelWakes += 1;
+    assert.equal(result.json().reason, 'waiting');
+  }
+  assert.equal(modelWakes, 0, 'six hours of unrelated main commits must cost zero model calls');
+  fx.advance(2 * 24 * 60);
+  assert.equal((await fx.run(['--json'])).json().reason, 'waiting', 'no daily reminder for an explicit human wait');
+  assert.ok(fx.readState().wait);
+});
+
+test('replay: baseline CI failure batches main updates until the model-selected time, then runs once', async (t) => {
+  const fx = createFixture(t);
+  const s = snap({ checks: [check('build', 'failed')], baseCommitOid: 'base-0', verdict: 'NEEDS_WORK', blockers: ['ci_failing'] });
+  await startWait(fx, s, { kind: 'baseline', afterMinutes: 30, checks: [{ name: 'build' }], threads: [], reason: 'The same test fails on main; recheck whether its fix has landed.' });
+  for (let tick = 1; tick <= 5; tick += 1) {
+    fx.advance(5);
+    fx.setSnapshot({ ...s, baseCommitOid: `base-${tick}` });
+    assert.equal((await fx.run(['--json', '--triggered'])).code, 2);
+  }
+  fx.advance(5);
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-fixed' });
+  const due = await fx.run(['--json']);
+  assert.equal(due.code, 0);
+  assert.equal(due.json().reason, 'wait-expired');
+  await fx.run(['--ack']);
+  assert.equal(fx.readState().wait, undefined);
+  // Model merges fixed main and pushes; the old wait must not delay new CI or replay the old failure.
+  fx.setSnapshot(snap({ latestCommitOid: 'new-head', baseCommitOid: 'base-fixed', checks: [check('build', 'pending')] }));
+  assert.equal((await fx.run(['--json'])).code, 2);
+  fx.advance(5);
+  fx.setSnapshot(snap({ latestCommitOid: 'new-head', baseCommitOid: 'base-fixed' }));
+  assert.equal((await fx.run(['--json'])).code, 0);
+  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--json'])).code, 2, 'CI result handled exactly once');
+});
+
+test('replay: important new events pierce a human wait immediately, even through a host trigger', async (t) => {
+  const cases = [
+    ['new failing check', (s) => ({ ...s, checks: [...s.checks, check('new-test', 'failed')] }), /Checks failed/],
+    ['new human feedback', (s) => ({ ...s, comments: [comment('new', 'reviewer', iso(T0 + MIN), 'Please fix a regression.')] }), /regression/],
+    ['new bot feedback', (s) => ({ ...s, comments: [comment('new', 'review-bot', iso(T0 + MIN), 'P1: regression', { authorIsBot: true })] }), /regression/],
+    ['conflict', (s) => ({ ...s, mergeable: false, mergeStateStatus: 'DIRTY' }), /conflict/i],
+    ['merge queue eviction', (s) => ({ ...s, mergeQueue: { blockers: ['merge_queue_removed'] } }), /queue/i],
+    ['approval', (s) => ({ ...s, reviewDecision: 'APPROVED' }), /review decision/],
+    ['thread resolved', (s) => ({ ...s, reviewThreads: { nodes: [{ id: 'security-thread', isResolved: true }] } }), /thread security-thread/],
+    ['optional CodeQL passed', (s) => ({ ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, outcome: 'passed' } : c) }), /check CodeQL/],
+    ['rerun failed with same name', (s) => ({ ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, startedAt: iso(T0 + MIN) } : c) }), /check CodeQL/],
+    ['base required by protection', (s) => ({ ...s, blockers: [...s.blockers, 'branch_behind_base'] }), /updated base/],
+    ['draft conversion', (s) => ({ ...s, isDraft: true }), /draft/i],
+    ['merged', (s) => ({ ...s, merged: true }), /merged/],
+    ['closed', (s) => ({ ...s, closed: true }), /closed/],
+  ];
+  for (const [name, mutate, report] of cases) await t.test(name, async (t) => {
+    const fx = createFixture(t);
+    const s = humanBlocked();
+    await startWait(fx, s);
+    fx.advance(1);
+    fx.setTrigger({ kind: 'watch' });
+    fx.setSnapshot(mutate(s));
+    const result = await fx.run(['--pacing', '--json']);
+    assert.equal(result.code, 0, result.stdout);
+    assert.match(`${result.json().report ?? ''} ${result.json().detail}`, report);
+    await fx.run(['--ack']);
+    assert.equal(fx.readState().wait, undefined, 'the next round must reassess its wait');
+  });
+});
+
+test('replay: wait is bound to the released head; own push clears it and keeps the bot settle window', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked({ reviews: [{ author: 'review-bot', authorIsBot: true, commitOid: 'aaa1111', submittedAt: iso(T0 - MIN), state: 'COMMENTED' }] });
+  await startWait(fx, s);
+  fx.advance(5);
+  fx.setSnapshot({ ...s, latestCommitOid: 'new-head', checks: [check('build', 'pending')], reviewThreads: { nodes: [] } });
+  assert.equal((await fx.run(['--json'])).code, 2);
+  assert.equal(fx.readState().wait, undefined);
+  fx.advance(5);
+  fx.setSnapshot({ ...s, latestCommitOid: 'new-head', checks: [check('build', 'failed')], reviewThreads: { nodes: [] } });
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling');
+  fx.advance(15);
+  assert.equal((await fx.run(['--json'])).code, 0);
+});
+
+test('replay: model-selected deadline survives a crash; base churn cannot defeat retry backoff', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s, { kind: 'baseline', afterMinutes: 10 });
+  fx.advance(10);
+  assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+  for (let attempt = 2; attempt <= 3; attempt += 1) {
+    fx.advance(5);
+    fx.setSnapshot({ ...s, baseCommitOid: `base-${attempt}` });
+    assert.equal((await fx.run(['--json'])).json().reason, 'retry-unacked');
+  }
+  fx.advance(5);
+  assert.equal((await fx.run(['--json'])).json().reason, 'retry-backoff-attempt');
+  fx.advance(5);
+  fx.setSnapshot({ ...s, baseCommitOid: 'still-more-base' });
+  assert.equal((await fx.run(['--json'])).json().reason, 'retry-backoff');
+  // A different actual failure must not wait for the crashed deadline's backoff.
+  fx.setSnapshot({ ...s, checks: [...s.checks, check('new-test', 'failed')] });
+  assert.equal((await fx.run(['--json'])).code, 0);
+});
+
+test('replay: slow acknowledgement cannot wait on or acknowledge a newer unseen head', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  fx.advance(5);
+  fx.setSnapshot({ ...s, latestCommitOid: 'new-head', comments: [comment('fresh', 'reviewer', iso(T0 + MIN))] });
+  await fx.run(['--json']);
+  const before = fx.readState();
+  assert.equal((await fx.run(['--wait', fx.writeWait(waitPlan({ ...s, latestCommitOid: 'new-head' }))])).code, 1);
+  assert.deepEqual(fx.readState(), before, 'rejected plan must not ack anything');
+  assert.equal((await fx.run(['--wait', fx.writeWait(waitPlan(s))])).code, 0);
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 0, 'new head and its unseen human comment remain actionable');
+  assert.match(next.json().report, /fresh|please fix/);
+});
+
+test('replay: incomplete data cannot silently extend a human wait', async (t) => {
+  for (const patch of [{ gate: { truncated: true } }, { checksSummary: { unavailable: true } }, { reviewThreads: { truncated: true } }]) {
+    const fx = createFixture(t);
+    const s = humanBlocked();
+    await startWait(fx, s);
+    fx.setSnapshot({ ...s, ...patch });
+    const result = await fx.run(['--json']);
+    assert.equal(result.code, 0);
+    assert.match(result.json().reason, /truncated|wait-unavailable/);
+  }
+});
+
+test('wait validation: reject unknown scope, unhandled work, stale head and unsafe durations without ack', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const before = fx.readState();
+  for (const extra of [
+    { headSha: 'wrong-head' }, { afterMinutes: 0 }, { afterMinutes: 1441 }, { afterMinutes: '30' },
+    { kind: 'baseline', afterMinutes: null }, { reason: '' }, { arbitraryField: true },
+    { checks: [] }, { threads: [] }, { checks: [{ name: 'unknown' }] }, { threads: ['unknown'] },
+  ]) {
+    const result = await fx.run(['--wait', fx.writeWait(waitPlan(s, extra))]);
+    assert.equal(result.code, 1, JSON.stringify(extra));
+    assert.deepEqual(fx.readState(), before);
+  }
+  for (const arg of ['--defer', '--last-result', '--suggest']) {
+    const result = await fx.run(['--wait', fx.writeWait(waitPlan(s)), arg, ...(arg === '--defer' ? ['10'] : [])]);
+    assert.equal(result.code, 1);
+  }
+  const readback = (await fx.run(['--last-result', '--json'])).json();
+  assert.equal(readback.waitContext.headSha, s.latestCommitOid);
+  assert.equal(readback.wait, null);
+});
+
+test('replay: cheap polling continues during a wait; a deadline is not hidden by an unchanged probe', async (t) => {
+  const fx = createFixture(t);
+  const s = snap();
+  fx.setProbe({ status: 'same', remarks: 'same', base: 'base-0' });
+  await startWait(fx, s, { kind: 'retry', afterMinutes: 10, checks: [], threads: [], reason: 'Recheck an external service.' });
+  const calls = fx.snapshotRuns();
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'unchanged');
+  assert.equal(fx.snapshotRuns(), calls, 'one small probe, no full snapshot or model');
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'wait-expired');
+  assert.equal(fx.snapshotRuns(), calls + 1);
+});
+
+test('real CLI: --wait reads a file, persists it, and suppresses irrelevant base changes', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  assert.equal((await fx.runVia(gatePath, ['--json'])).code, 0);
+  const result = await fx.runVia(gatePath, ['--wait', fx.writeWait(waitPlan(s)), '--json']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).wait.until, null);
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-new' });
+  assert.equal((await fx.runVia(gatePath, ['--triggered', '--json'])).code, 2);
+});
+
+test('replay: same-count check reruns and inline resolutions are discovered on the next five-minute poll', async (t) => {
+  for (const mutate of [
+    (s) => ({ ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, startedAt: iso(T0 + MIN) } : c) }),
+    (s) => ({ ...s, reviewThreads: { nodes: [{ id: 'security-thread', isResolved: true }] } }),
+  ]) {
+    const fx = createFixture(t);
+    const s = humanBlocked();
+    fx.setProbe({ status: 'same', remarks: 'same', base: 'base-0' });
+    await startWait(fx, s);
+    fx.setSnapshot(mutate(s));
+    fx.advance(5);
+    assert.equal((await fx.run(['--pacing', '--json'])).code, 0, 'must not wait for the old 30-minute full-read fallback');
+  }
+});
+
+test('replay: workflow names scope waits; a known but unlisted failure still watches the base', async (t) => {
+  const fx = createFixture(t);
+  const s = snap({ baseCommitOid: 'base-0', checks: [
+    check('test', 'failed', { workflowName: 'Linux' }), check('test', 'failed', { workflowName: 'Windows' }),
+  ] });
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const plan = waitPlan(s, { kind: 'baseline', afterMinutes: 30, checks: [{ name: 'test' }], threads: [] });
+  const rejected = await fx.run(['--wait', fx.writeWait(plan)]);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /ambiguous/);
+  plan.checks[0].workflowName = 'Linux';
+  assert.equal((await fx.run(['--wait', fx.writeWait(plan)])).code, 0);
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-1' });
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 0, 'Windows failure is outside this wait');
+  assert.match(next.json().report, /base-1/);
+});
+
+test('replay: starting a rerun does not wake a human wait; its completed result does', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s);
+  fx.setSnapshot({ ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, outcome: 'pending', startedAt: iso(T0 + MIN) } : c) });
+  assert.equal((await fx.run(['--json'])).code, 2);
+  fx.setSnapshot({ ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, outcome: 'passed', startedAt: iso(T0 + MIN) } : c) });
+  assert.equal((await fx.run(['--json'])).code, 0);
+});
+
+test('replay: explicit wait does not mistake bot status edits or own replies for new work', async (t) => {
+  const fx = createFixture(t);
+  const old = comment('deploy', 'deploy-bot', iso(T0 - MIN), 'Deploying', { authorIsBot: true });
+  const s = humanBlocked({ comments: [old] });
+  await startWait(fx, s);
+  fx.advance(5);
+  fx.setSnapshot({ ...s, comments: [{ ...old, body: 'Deployed', updatedAt: iso(fx.now()) }, comment('own', 'me', iso(fx.now()), 'Handled.')] });
+  assert.equal((await fx.run(['--json'])).code, 2);
+});
+
+test('replay: timed CI wait wakes on completion and never grants an indefinite wait to running CI', async (t) => {
+  const fx = createFixture(t);
+  const s = snap({ checks: [check('build', 'pending', { required: true })] });
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const plan = waitPlan(s, { checks: [{ name: 'build' }], threads: [] });
+  assert.equal((await fx.run(['--wait', fx.writeWait(plan)])).code, 1);
+  assert.equal((await fx.run(['--wait', fx.writeWait({ ...plan, kind: 'checks', afterMinutes: 20 })])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot(snap());
+  assert.equal((await fx.run(['--json'])).code, 0);
+});
+
+test('replay: a new result of the awaited check breaks an older unacknowledged result backoff', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s);
+  const rerun = { ...s, checks: s.checks.map((c) => c.name === 'CodeQL' ? { ...c, startedAt: iso(T0 + MIN) } : c) };
+  fx.setSnapshot(rerun);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    fx.advance(5);
+    assert.equal((await fx.run(['--json'])).code, 0);
+  }
+  fx.advance(5);
+  assert.equal((await fx.run(['--json'])).json().reason, 'retry-backoff');
+  fx.setSnapshot({ ...rerun, checks: rerun.checks.map((c) => c.name === 'CodeQL' ? { ...c, outcome: 'passed' } : c) });
+  assert.equal((await fx.run(['--json'])).code, 0, 'new success is not the old failed attempt');
+});
+
+test('replay: slow wait acknowledgement preserves a new failure arriving on the same head', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  fx.setSnapshot({ ...s, checks: [...s.checks, check('new-test', 'failed')] });
+  await fx.run(['--json']);
+  // Plan acknowledges only the first released observation, where new-test did not exist.
+  assert.equal((await fx.run(['--wait', fx.writeWait(waitPlan(s))])).code, 0);
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 0);
+  assert.match(next.json().report, /new-test/);
 });

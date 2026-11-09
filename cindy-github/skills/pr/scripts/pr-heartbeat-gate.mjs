@@ -55,6 +55,7 @@
  *                              事件清单(零 API、不改状态)。
  *   --defer <分钟>             **隐含 --ack**,并约定到点再唤起一次(期间有新事件照常唤起)。
  *                              用于等一会儿再看,例如等这次推送的机器人 review。
+ *   --wait <path>              隐含 --ack；JSON 指定具体等待项与复查时间，见 references/follow-up.md。
  *   --snapshot <path>          pr-snapshot.mjs 路径(默认见 DEFAULT_SNAPSHOT)
  *   --state-dir <dir>          状态目录(默认 ~/.cache/cindy-pr,或 CINDY_PR_STATE_DIR)
  *   --max-snapshot-failures N  连续快照失败容忍轮数,超过则 fail-closed(默认 3)
@@ -75,6 +76,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { checkOutcome, inspectWait, makeWait, waitFacts } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
@@ -288,7 +290,7 @@ function formatDuration(ms) {
 function usage(err = (text) => process.stderr.write(text)) {
   err(
     'Usage: node pr-heartbeat-gate.mjs <PR_URL|number> [--repo owner/name] ' +
-      '[--ack] [--defer <minutes>] [--last-result] [--snapshot <path>] [--state-dir <dir>] ' +
+      '[--ack] [--wait <plan.json>] [--defer <minutes>] [--last-result] [--snapshot <path>] [--state-dir <dir>] ' +
       '[--max-snapshot-failures <n>] [--max-pass-attempts <n>] ' +
       '[--retry-backoff-minutes <n>] [--max-silence-hours <n>] [--json]\n',
   );
@@ -299,6 +301,7 @@ export function parseArgs(argv, env = process.env) {
   let spec;
   let repo;
   let deferMinutes;
+  let waitFile;
   let ack = false;
   let suggest = false;
   let lastResult = false;
@@ -356,6 +359,11 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--state-dir') {
       stateDir = argv[++i];
+      continue;
+    }
+    if (arg === '--wait') {
+      waitFile = argv[++i];
+      if (!waitFile || waitFile.startsWith('--')) throw new Error('--wait expects a JSON file path');
       continue;
     }
     if (arg === '--defer') {
@@ -429,6 +437,9 @@ export function parseArgs(argv, env = process.env) {
       '--suggest / --last-result are read-only and cannot be combined with --ack / --defer; run them as separate commands',
     );
   }
+  if (waitFile && (suggest || lastResult || deferMinutes !== undefined)) {
+    throw new Error('--wait cannot be combined with --last-result, --suggest or --defer');
+  }
   const target = parseTarget(spec, repo);
   return {
     help: false,
@@ -436,6 +447,7 @@ export function parseArgs(argv, env = process.env) {
     repo: target.repo,
     number: target.number,
     deferMinutes,
+    waitFile,
     ack,
     suggest,
     lastResult,
@@ -681,20 +693,6 @@ function diffFingerprintFields(prevFields, currentFields) {
 
 const isoAt = (ms) => new Date(ms).toISOString();
 
-/** 快照里的检查结果:新快照自带 outcome,旧格式(测试夹具等)按状态推出来。 */
-function checkOutcome(check) {
-  if (check?.outcome) return check.outcome;
-  const status = String(check?.status ?? '').toUpperCase();
-  const conclusion = String(check?.conclusion ?? '').toUpperCase();
-  if (check?.type === 'StatusContext') {
-    if (['PENDING', 'EXPECTED'].includes(status)) return 'pending';
-    return ['FAILURE', 'ERROR'].includes(status) ? 'failed' : 'passed';
-  }
-  if (status && status !== 'COMPLETED') return 'pending';
-  if (!conclusion) return 'pending';
-  return ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(conclusion) ? 'passed' : 'failed';
-}
-
 /**
  * PR 上的全部留言:顶层评论、有内容或有结论的 review、review thread 里的评论。只有内容的
  * 「COMMENTED」空 review 不单列 —— 它的内容就是 thread 里的那几条评论。人的编辑算新留言;
@@ -859,6 +857,7 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     next: {
       headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
       conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, everHadChecks, baseSha,
+      waitFacts: waitFacts(snap),
     },
   };
 }
@@ -910,6 +909,8 @@ export function eventReport(events, snap, exhausted = false) {
       lines.push('- The PR was converted to a draft.');
     } else if (e.kind === 'draft-exited') {
       lines.push('- The PR left draft and is ready for review.');
+    } else if (e.kind === 'wait-changed') {
+      lines.push(`- The wait condition changed: ${e.changes.join(', ')}. Reassess what can proceed.`);
     } else if (e.kind === 'base-moved') {
       lines.push(`- ${base} moved to ${String(e.sha).slice(0, 7)} while checks are failing${commit}. If the failure came from ${base}, check for its fix on the updated base; if present, merge, verify and push, then confirm CI starts on the new head. Re-running the old head does not bring in the fix.`);
     } else if (e.kind === 'merge-queue') {
@@ -928,6 +929,7 @@ function eventKey(events) {
     if (e.kind === 'checks-failed') return `${e.kind}:${e.failed.map((c) => (c.workflowName ? `${c.workflowName}\u0000${c.name}` : c.name)).sort().join(',')}`;
     if (e.kind === 'remarks') return `${e.kind}:${e.remarks.map((r) => `${r.id}@${r.at}`).sort().join(',')}`;
     if (e.kind === 'merge-queue') return `${e.kind}:${e.blockers.join(',')}`;
+    if (e.kind === 'wait-changed') return `${e.kind}:${e.signature}`;
     if (e.kind === 'base-moved') return `${e.kind}:${e.sha}`;
     return e.kind;
   });
@@ -980,7 +982,18 @@ export function decide({
   const baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
   const result = evaluateWatch(baseline, snap, now, lastKnownConflicting);
-  const base = { fingerprint: current };
+  const waiting = inspectWait(previous?.wait, snap);
+  // A wait was installed only after ack; base noise must not defeat retries of its deadline.
+  if (waiting.wait && waiting.ignoreBase) {
+    result.events = result.events.filter((e) => e.kind !== 'base-moved');
+  }
+  if (waiting.changed.length > 0) result.events.push({ kind: 'wait-changed', changes: waiting.changed, signature: waiting.signature });
+  // Absorbed base commits must not reset the comment-loop guard.
+  const commentsOnly = result.events.length > 0 && result.events.every((e) => e.kind === 'remarks');
+  const progress = baseline.headSha !== result.next.headSha || (result.events.length > 0 && !commentsOnly);
+  result.next.wakes = (progress ? 0 : Number(baseline.wakes) || 0) + (commentsOnly ? 1 : 0);
+  result.exhausted = commentsOnly && result.next.wakes >= COMMENT_WAKE_LIMIT;
+  const base = { fingerprint: current, nextWait: waiting.wait };
 
   /**
    * 放行并登记「已放行未确认」。同一批事件每轮快速重试 maxPassAttempts 次后转入退避重试:
@@ -1041,6 +1054,9 @@ export function decide({
       nextPendingCount: pendingKey === 'terminal' ? pendingCount + 1 : 1,
     };
   }
+  if (waiting.wait && !result.next.waitFacts.complete && !snap.gate?.truncated) {
+    return passPending('wait-unavailable', 'cannot verify the wait condition: snapshot is incomplete', '', 'wait-unavailable', baseline);
+  }
   if (snap.gate?.truncated) {
     // 数据不全:不推进基线(确认后仍从原基线算,不会越过可能漏掉的留言)
     return passPending('truncated', 'snapshot truncated', '', 'truncated', baseline);
@@ -1081,6 +1097,15 @@ export function decide({
   // 没有新事件:推送、检查在跑、自己的评论这类变化直接并入基线,不唤起 agent。
   const changedKeys = diffFingerprintFields(previous?.fingerprintFields, fingerprintFieldHashes(snap, lastKnownConflicting));
   const quietNote = changedKeys ? `; no news in changedFields=[${changedKeys}]` : '';
+  if (waiting.wait) {
+    const wait = waiting.wait;
+    if (wait.until !== null && now >= wait.until) {
+      // Unlike a fire-and-forget timer, keep this pending until an agent really acknowledges it.
+      return passPending('wait-expired', `the ${wait.kind} wait is due: ${wait.reason}`, '',
+        `wait:${wait.createdAt}:${wait.until}`, result.next);
+    }
+    return skip('waiting', `${wait.kind}: ${wait.reason}; ${wait.until === null ? 'relevant events only' : `review at ${isoAt(wait.until)}`}${quietNote}`, result.next);
+  }
   // defer = 「到点叫我,除非先有事」:未到点跳过,到点放行一次(放行即消费掉)。
   const nextAllowAt = Number(previous?.nextAllowAt) || 0;
   if (nextAllowAt > now) {
@@ -1194,7 +1219,7 @@ function promotePending(state, now) {
   if (state.pendingWatch) next.watch = state.pendingWatch;
   // 旧版 gate 留下的未确认指纹:确认后照旧前进,下一轮按新规则从快照建立基线
   if (state.pendingFingerprint) next.fingerprint = state.pendingFingerprint;
-  for (const key of ['pendingWatch', 'pendingKey', 'pendingFingerprint', 'pendingPassCount', 'retryBackoffUntil']) delete next[key];
+  for (const key of ['pendingWatch', 'pendingKey', 'pendingFingerprint', 'pendingPassCount', 'retryBackoffUntil', 'wait']) delete next[key];
   return next;
 }
 
@@ -1250,6 +1275,7 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
   if ((Number(previous.settleUntil) || 0) > 0) return false;
   if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
+  if (previous.wait?.until && now >= previous.wait.until) return false;
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
   if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
@@ -1330,6 +1356,8 @@ async function gateMain(argv, ctx) {
         : 'no gate result recorded yet',
       report: lastResult?.report,
       lastResult,
+      wait: state?.wait ?? null,
+      waitContext: state?.pendingWatch?.waitFacts ?? state?.watch?.waitFacts ?? null,
     }, out);
     return EXIT_PASS;
   }
@@ -1347,9 +1375,16 @@ async function gateMain(argv, ctx) {
   }
 
   // --ack / --defer:纯管理命令,不跑快照、不做门禁判定(供 agent 收尾时调用)
-  if (args.ack || args.deferMinutes !== undefined) {
+  if (args.ack || args.deferMinutes !== undefined || args.waitFile) {
     const previous = readState(file) ?? {};
+    // Validate against the earliest released observation BEFORE acknowledging anything.
+    const wait = args.waitFile ? makeWait(JSON.parse(fs.readFileSync(args.waitFile, 'utf8')),
+      previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts, now) : null;
     let next = promotePending(previous, now);
+    if (wait) {
+      next.wait = wait;
+      delete next.nextAllowAt;
+    }
     let detail = next.watch ? `confirmed head=${String(next.watch.headSha ?? 'none').slice(0, 7)}` : 'confirmed';
     if (args.deferMinutes !== undefined) {
       // defer 隐含 ack,并约定到点再唤起一次;期间新事件照常唤起。
@@ -1368,8 +1403,9 @@ async function gateMain(argv, ctx) {
       exitCode: EXIT_PASS,
       repo: args.repo,
       number: args.number,
-      reason: args.deferMinutes !== undefined ? 'defer-set' : 'acked',
+      reason: wait ? 'wait-set' : args.deferMinutes !== undefined ? 'defer-set' : 'acked',
       detail,
+      ...(wait ? { wait } : {}),
     }, out);
     return EXIT_PASS;
   }
@@ -1406,7 +1442,10 @@ async function gateMain(argv, ctx) {
     }
   }
   // 先问一句「有没有变」:一个很小的查询,与上次完整读取时一致就不做三四个接口的完整读取。
-  const probe = triggered ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
+  // Counts alone cannot reveal a named check's rerun or a thread being resolved/replied to.
+  // While explicitly waiting on those items, inspect them each tick rather than waiting 30 minutes.
+  const targetedWait = previous?.wait && (previous.wait.checks.length > 0 || previous.wait.threads.length > 0);
+  const probe = triggered || targetedWait ? null : parseProbe(await ctx.runProbe(args.snapshot, args.repo, args.number));
   if (!triggered && probeAllowsSkip(previous, probe, now, args.maxSilenceMs)) {
     const lastResult = { decision: 'skip', exitCode: EXIT_SKIP, reason: 'unchanged', detail: 'probe matches the last full read', checkedAt: now };
     writeState(file, { ...previous, lastProbeAt: now, lastDecision: 'skip', lastDecisionReason: lastResult.reason, lastResult });
@@ -1539,6 +1578,7 @@ async function gateMain(argv, ctx) {
   writeState(file, {
     // watch 只由 --ack / --defer 或「没有新事件」推进,放行时不推进
     watch: decision.nextWatch,
+    ...(decision.nextWait ? { wait: decision.nextWait } : {}),
     ...(decision.nextPendingWatch
       ? {
           pendingWatch: decision.nextPendingWatch,

@@ -21,7 +21,7 @@
  * pushes, so a failure that lands while it works joins the same round.
  */
 
-export const TICK_MS = 2 * 60_000;
+export const TICK_MS = 5 * 60_000;
 export const PACE_MS = {
   fast: 0,
   active: 5 * 60_000,
@@ -145,6 +145,8 @@ export function botsAnswered(snap, bots, head, since) {
 export function breaksSettle(events) {
   return events.some((event) =>
     (event.kind === 'remarks' && (event.remarks ?? []).some((remark) => !remark.authorIsBot))
+    || event.kind === 'conflicting'
+    || event.kind === 'wait-changed'
     || event.kind === 'merge-queue'
     || event.kind === 'draft-entered'
     || event.kind === 'draft-exited');
@@ -183,13 +185,15 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
   const awaited = timeOf(watch.checksAwaitedSince);
   const fast = previous.pendingWatch
     || (nextAllowAt > 0 && now >= nextAllowAt)
+    || (previous.wait?.until && now >= previous.wait.until)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
     || Number(previous.retryBackoffUntil) > 0;
   if (fast) return { due: true, pace: 'fast', reason: 'fast' };
   const recent = (value) => Number.isFinite(Number(value)) && Number(value) > 0 && now - Number(value) < ACTIVE_WINDOW_MS;
   let pace;
-  if (previous.inFlight || (watch.failedChecks ?? []).length > 0 || watch.conflicting
+  // A model wait delays model work, not detection of new work. Keep cheap polling responsive.
+  if (previous.wait || previous.inFlight || (watch.failedChecks ?? []).length > 0 || watch.conflicting
     || (watch.queueProblems ?? []).length > 0 || recent(previous.headSeenAt) || recent(previous.lastPassAt)) {
     pace = 'active';
   } else if (previous.humanOnlyPending || WAITING_VERDICTS.has(previous.verdict)) {
