@@ -43,7 +43,7 @@ test('pacing: each stage looks at its own interval; fast reasons look every tick
   }
 });
 
-test('settle: expected bots answer by a review on the head, a later comment or a reaction', () => {
+test('settle: expected bots answer by a submitted review on the head or a thumbs-up reaction', () => {
   assert.equal(botKey('chatgpt-codex-connector[bot]'), 'chatgpt-codex-connector');
   const repoBots = updateRepoBots({ stale: T0 - 30 * 24 * 60 * MIN }, { reviews: [{ author: 'greptile-apps', authorIsBot: true, submittedAt: new Date(T0 - 60 * MIN).toISOString() }] }, T0);
   assert.deepEqual(Object.keys(repoBots), ['greptile-apps'], 'bots unseen for 14 days drop out');
@@ -61,18 +61,18 @@ test('settle: expected bots answer by a review on the head, a later comment or a
   assert.deepEqual(settleState({ snap: base, headSeenAt: seen, expected, now: T0 + MIN }).waiting, expected);
   const answered = {
     ...base,
-    reviews: [{ author: 'greptile-apps', commitOid: head, submittedAt: new Date(T0 - 60 * MIN).toISOString() }],
-    reactions: [{ author: 'chatgpt-codex-connector[bot]', at: new Date(T0 + 2 * MIN).toISOString() }],
+    reviews: [{ author: 'greptile-apps', state: 'COMMENTED', commitOid: head, submittedAt: new Date(T0 - 60 * MIN).toISOString() }],
+    reactions: [{ author: 'chatgpt-codex-connector[bot]', content: 'THUMBS_UP', at: new Date(T0 + 2 * MIN).toISOString() }],
   };
   assert.deepEqual(botsAnswered(answered, expected, head, seen), expected);
   assert.equal(settleState({ snap: answered, headSeenAt: seen, expected, now: T0 + 3 * MIN }).open, false);
   // Review (Codex P2, Greptile P1 on #287): a review that names an older commit answers for that commit
   // only, however recently it was submitted.
-  const stale = { ...base, reviews: [{ author: 'greptile-apps', commitOid: 'aaa', submittedAt: new Date(T0 + MIN).toISOString() }] };
+  const stale = { ...base, reviews: [{ author: 'greptile-apps', state: 'COMMENTED', commitOid: 'aaa', submittedAt: new Date(T0 + MIN).toISOString() }] };
   assert.deepEqual(botsAnswered(stale, expected, head, seen - 5 * MIN), []);
-  assert.deepEqual(botsAnswered({ ...base, reviews: [{ author: 'greptile-apps', submittedAt: new Date(T0 + MIN).toISOString() }] }, expected, head, seen), ['greptile-apps'], 'no commit named: the time decides');
+  assert.deepEqual(botsAnswered({ ...base, reviews: [{ author: 'greptile-apps', state: 'COMMENTED', submittedAt: new Date(T0 + MIN).toISOString() }] }, expected, head, seen), ['greptile-apps'], 'no commit named: the time decides');
   // An old reaction from the previous round does not count.
-  const old = { ...base, reactions: [{ author: 'chatgpt-codex-connector[bot]', at: new Date(T0 - 30 * MIN).toISOString() }] };
+  const old = { ...base, reactions: [{ author: 'chatgpt-codex-connector[bot]', content: 'THUMBS_UP', at: new Date(T0 - 30 * MIN).toISOString() }] };
   assert.deepEqual(botsAnswered(old, expected, head, seen - 5 * MIN), []);
   // The window closes after 20 minutes even if bots never answer.
   assert.equal(settleState({ snap: base, headSeenAt: seen, expected, now: T0 + 20 * MIN }).open, false);
@@ -83,4 +83,26 @@ test('settle: only people, the merge queue and draft changes break the wait', ()
   assert.equal(breaksSettle([{ kind: 'checks-failed' }, { kind: 'remarks', remarks: [{ authorIsBot: true }] }]), false);
   assert.equal(breaksSettle([{ kind: 'remarks', remarks: [{ authorIsBot: false }] }]), true);
   for (const kind of ['merge-queue', 'draft-entered', 'draft-exited']) assert.equal(breaksSettle([{ kind }]), true, kind);
+});
+
+test('settle: pending reviews, status comments, inline findings and EYES are not completion evidence', () => {
+  const head = 'new-head';
+  const at = new Date(T0 + MIN).toISOString();
+  const bot = 'review-bot';
+  const snap = {
+    latestCommitOid: head,
+    reviews: [{ author: bot, state: 'PENDING', commitOid: head, submittedAt: at }],
+    comments: [{ author: bot, createdAt: at, body: 'Running' }],
+    reviewThreads: { nodes: [{ comments: [{ author: bot, createdAt: at, body: 'Partial finding' }] }] },
+    reactions: [{ author: bot, at, content: 'EYES' }],
+  };
+  assert.deepEqual(botsAnswered(snap, [bot], head, T0), []);
+  assert.equal(settleState({ snap, headSeenAt: T0, expected: [bot], now: T0 + 19 * MIN }).open, true);
+  assert.equal(settleState({ snap, headSeenAt: T0, expected: [bot], now: T0 + 20 * MIN }).open, false);
+  snap.comments[0].body = 'Unknown bot final summary';
+  assert.deepEqual(botsAnswered(snap, [bot], head, T0), [], 'unstructured content cannot prove completion');
+  for (const state of ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED']) {
+    snap.reviews[0].state = state;
+    assert.deepEqual(botsAnswered(snap, [bot], head, T0), [bot]);
+  }
 });

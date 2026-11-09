@@ -999,6 +999,9 @@ export function decide({
   if (waiting.wait && waiting.ignoreBase) {
     result.events = result.events.filter((e) => e.kind !== 'base-moved');
   }
+  // The ordinary required-check milestone must not bypass an explicit CI batch wait.
+  // Keep failures and all non-check events; the original wait deadline remains unchanged.
+  if (waiting.checksPending) result.events = result.events.filter((e) => e.kind !== 'checks-passed');
   if (waiting.changed.length > 0) result.events.push({ kind: 'wait-changed', changes: waiting.changed, signature: waiting.signature });
   // Absorbed base commits must not reset the comment-loop guard.
   const commentsOnly = result.events.length > 0 && result.events.every((e) => e.kind === 'remarks');

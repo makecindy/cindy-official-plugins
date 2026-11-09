@@ -30,9 +30,14 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 After a new commit (one first seen while following, not the commit already there when following started), news that only bots and checks produced is held (`settling`) until every expected bot has answered on that commit, or 20 minutes after the commit was first seen:
 
 - **Expected bots:** bots that reviewed or reacted on this PR, plus bots that reviewed or reacted on other PRs of this repository in the last 14 days (`<owner>__<repo>.repo.json` in the state directory). Plain comment bots (deploy previews) are not waited for; neither is the agent's own account.
-- **Answered:** a review on the new commit, or a comment, thread comment or reaction from that bot since the commit was first seen (5 minutes of slack). Codex's 👍 counts: it means no suggestions.
+- **Answered:** a submitted review on the new commit, or a 👍 from that bot since the commit was first seen (5 minutes of slack). A review naming an older commit never counts.
 - **Not held:** comments or reviews from people, new conflicts, changes to named wait conditions, merge-queue problems, draft changes, merged or closed, and an update already released but not acknowledged.
 - **Checks are not waited for.** A failure that arrives while the agent works is folded in before its push.
+
+Only submitted `APPROVED`, `CHANGES_REQUESTED` or `COMMENTED` reviews, or a recent 👍,
+count as completion. Plain comments (including Running/Queued summaries), individual inline
+findings, pending reviews and 👀 do not close the window. Unknown or comment-only bot formats
+remain bounded by the same 20-minute deadline; their feedback is retained for that round.
 
 While a round settles the watch does not advance, so the held items and anything newer arrive together in one wake.
 
@@ -100,7 +105,7 @@ checks, merge permissions, thread resolution or the PR's verdict.
 |---|---|---|
 | `human` | All remaining failures/threads have been investigated and need a human action | `null`: relevant events only; optional timed review if justified |
 | `baseline` | A named failed check also fails on the base; waiting for its fix | Usually 10–15 minutes during active repair, 30–60 after repeated blockage; batch base commits until then |
-| `checks` | Named CI checks are running; there is no work to do before a result | Choose a time, often 10–20 minutes; completion can wake earlier |
+| `checks` | Named CI checks are running; there is no work to do before a result | Choose a time, often 10–20 minutes; successful results are batched until all named checks finish |
 | `retry` | An external temporary dependency needs another attempt | Choose a time from the observed failure and its likely recovery |
 
 Durations are 5–1440 minutes. Only `human` accepts `null`. Repeated baseline failures should get
@@ -119,9 +124,12 @@ Safety and resumption:
   failures and feedback still get a round. A new head invalidates the wait; an own push alone still
   does not wake the model, and new-head bot batching continues normally.
 - New failures, human or bot feedback, conflicts, queue problems, draft changes, merged/closed states
-  remain actionable. Named checks completing (including an optional failure passing), a new completed
-  attempt with the same result, named threads resolving/outdating, approval changes and a newly required
-  base update also wake. Starting a check does not wake. Required status alone never decides suppression.
+  remain actionable. In a `checks` wait, a successful partial result (including a required-check
+  milestone) is absorbed while another named check is pending; all named checks completing or the
+  original deadline wakes once. Progress never extends that deadline. A missing target, failure or
+  recovery of a previously failed target still wakes. Other wait kinds keep per-target completion
+  and same-result rerun handling. Named threads resolving/outdating, approval changes and a newly
+  required base update also wake. Starting a check does not wake.
 - Base movement alone cannot wake when all remaining failures are the exact handled attempts. This
   applies to ordinary polls and host-triggered polls. Baseline waits get their model-chosen deadline;
   indefinite human waits do not get daily reminders.
