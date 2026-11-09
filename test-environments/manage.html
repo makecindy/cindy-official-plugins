@@ -1,1 +1,13 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="manage.css"><title>Test Environments</title></head><body><main><header><img src="assets/icon.png" alt="" width="42" height="42"><div><h1 id="title"></h1><p id="subtitle"></p></div></header><nav id="tabs" aria-label="Sections"></nav><div class="toolbar"><button id="add"></button><button id="refresh"></button></div><p id="notice" role="status" aria-live="polite"></p><section id="editor" hidden></section><section id="records"></section><details id="outputWrap" hidden><summary id="outputTitle"></summary><pre id="output"></pre></details><footer id="storage"></footer></main><script src="manage.js"></script></body></html>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="manage.css"><title>Test Environments</title></head>
+<body><main>
+<header><div><h1 id="title"></h1><p id="subtitle"></p></div></header>
+<p id="notice" role="status" aria-live="polite"></p>
+<section id="workflow" aria-label="Test workflow"></section>
+<details id="advanced"><summary id="advancedTitle">Advanced management</summary>
+<p id="advancedHelp"></p><nav id="tabs" aria-label="Sections"></nav>
+<div class="toolbar"><button id="add"></button><button id="refresh"></button></div>
+<section id="editor" hidden></section><section id="records"></section>
+<details id="outputWrap" hidden><summary id="outputTitle"></summary><pre id="output"></pre></details>
+<details id="storageWrap"><summary id="storageTitle">Data location</summary><footer id="storage"></footer></details>
+</details></main><script src="manage.js"></script><script src="workflow.js"></script></body></html>

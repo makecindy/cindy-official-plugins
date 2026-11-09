@@ -5,7 +5,7 @@
   "name": "Test Environments",
   "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
   "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -481,7 +481,7 @@
     },
     {
       "name": "remote",
-      "description": "SSH template; choose a computer each run. catalog(target) reads B profiles/hardware. plan(target,profile,pr{repo,number,commit},requirements) previews a pinned PR; start(runId) checks it out in a new worktree and builds/starts using B-local login. status/stop/select_account/action/collect use the same runId. action runs saved prepare/verify argv only. collect brings bounded, hashed results and optional logs/screenshot to outputDir or private storage. Uses existing OpenSSH trust, no password/key storage or agent forwarding; deploys plugin code only. Never copies app credentials. B missing login requires normal reauthorization; cross-device first authorization is separate. Lost replies are unknown: query status before any repeat; never blindly repeat start/actions. Human/device-tool work stays pending after command exits; real devices and human input are required. No automatic PR publication; review/redact logs.",
+      "description": "SSH test workflow. catalog(target) reads the chosen computer’s profiles/hardware. plan(target,profile,pr{repo,number,commit?}) previews an exact revision; omit commit to read the PR head with target Git. start(runId) uses a new worktree and B-local login. status/stop/select_account/action/collect keep that runId. action executes saved prepare/verify argv only. collect returns bounded, hashed results and optional logs/private screenshot. Existing OpenSSH trust; no password/key storage, agent forwarding or credential copying. Missing B login needs normal sign-in; cross-device first authorization is not implemented. Lost replies are unknown: query the same run before repeating operations. Human/device checks need real evidence and stay pending after script success. No automatic PR publication; review/redact evidence.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -532,13 +532,12 @@
               "commit": {
                 "type": "string",
                 "pattern": "^[a-f0-9]{40}$",
-                "description": "Exact current PR head SHA obtained with the GitHub plugin."
+                "description": "Optional exact PR head SHA. If omitted, B reads the PR head with Git and previews its exact SHA before starting."
               }
             },
             "required": [
               "repo",
-              "number",
-              "commit"
+              "number"
             ],
             "additionalProperties": false
           },
@@ -607,7 +606,6 @@
     "lifecycle": "on-demand",
     "idleTimeoutSeconds": 120
   },
-  "author": "Chris",
   "command": "test-environments",
   "mainView": {
     "title": "Test Environments",
@@ -630,5 +628,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "Add the missing desktop Prepare samples action in the management page. Keep explicit reauthorization guidance when a verified local session expires. Verified original-page clicks against the real Worker in isolated Chromium; real Cindy host/account and two-computer SSH acceptance remain pending."
+  "releaseNotes": "Replace the empty configuration-first screen with guided local and SSH test workflows, first-project setup, readable next steps, reusable profiles and a reviewed start preview. Resolve an omitted PR pin through the selected target Git repository before preview. Keep advanced management and credential ownership unchanged. Omit author display at the owner’s request."
 }

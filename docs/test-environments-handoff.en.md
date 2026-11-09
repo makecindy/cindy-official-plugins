@@ -52,7 +52,7 @@ Paths below are relative to test-environments/.
 | node/runner.cjs, node/terminal.py | Owned supervision, macOS PTY and scoped stop |
 | node/remote.cjs | Parameterized OpenSSH, local run ledger, bounded/hash-checked artifact storage |
 | node/remote-agent.cjs, node/remote-runner.cjs | B-side preview, pinned PR worktree, shared core, status/stop/evidence receipts |
-| main.js, manage.*, worker/CLI | Shared implementation; SSH currently uses AI/CLI |
+| main.js, manage.*, workflow.js, worker/CLI | Guided/advanced/AI/CLI share implementation; local/SSH both have page controls |
 
 No client/server code or third-party OAuth scopes change. Remote execution/transfer
 still requires maintainer review; a unified PR or green tests does not waive it.
@@ -86,7 +86,7 @@ query the same run instead of blindly repeating start/actions. See the [SSH/auth
 
 ## Current-code evidence and gaps
 
-Unified test package: **1.1.3**. This revision fixes stop/action races, stale account and
+Unified test package: **1.2.0**. This revision fixes stop/action races, stale account and
 process status, SSH UTF-8 receipts, execution uncertainty, shared FETCH_HEAD and mixed evidence.
 Version 1.1.3 also adds the desktop Prepare samples button and persistent reauthorization guidance after a verified session expires. See [click testing](test-environments-click-check.md).
 See the [self-check record](test-environments-self-check.md) for fixes, regression evidence and integration gaps.
@@ -121,7 +121,19 @@ The package, source commit and SHA-256 association is recorded in #309 and the c
 [English checklist](test-environments-acceptance.md) / [中文](test-environments-acceptance.zh-CN.md)
 provides prerequisites, actions, expected results and evidence: L1–L6 local, R0–R4
 two-computer, plus relevant device/human checks. Capture screenshots before stop;
-collect final logs/results afterward. Latest combined checks: 114/114 passed, none skipped,
+collect final logs/results afterward. Historical 1.1.3 combined checks: 114/114 passed, none skipped,
 including browser, unpacked AI/Worker/CLI, actual OpenSSH loopback and screenshot
 protocol boundaries. This does not certify an installed Host, formal accounts or
-two physical computers. Packaged runtime/content remains 1.1.3 unchanged.
+two physical computers. That historical test-only revision left 1.1.3 package content unchanged.
+
+## 1.2.0 guided home
+
+See the [guided usage notes](test-environments-guided.md): local/SSH target, project,
+account and five-step workflow by default; catalog controls move under Advanced.
+First setup creates persistent configuration; target Git resolves omitted PR pins
+for exact preview. Author display is omitted at the owner’s request without changing
+contributor history. Older evidence keeps its original version.
+
+Final 1.2.0 checks: **129/129 passed, none skipped** (100 regular, 27 browser,
+one unpacked package and one actual OpenSSH loopback test). Runtime and page changes
+in this version require the new 1.2.0 package; old evidence remains versioned.

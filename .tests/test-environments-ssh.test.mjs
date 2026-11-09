@@ -175,3 +175,11 @@ test('remote evidence reads stay bounded across file growth and short reads',asy
  vm.runInNewContext(fs.readFileSync(new URL('../test-environments/node/remote-agent.cjs',import.meta.url),'utf8'),context);
  assert.equal(context.module.exports.readArtifact(file,4).toString(),'abc');
 });
+
+test('PR preview can resolve an omitted pin through the verified target repository without starting',async t=>{
+ const f=setup(t),planned=await f.remote.invoke('remote_plan',{target:f.target,profile:'daily',pr:{repo:'example/test-project',number:17}});
+ assert.equal(planned.plan.pr.commit,f.commit);assert.equal(planned.execution,'not_executed');assert.equal(fs.existsSync(path.join(f.b,'store','ssh-runs',planned.runId)),false);
+ await assert.rejects(f.remote.invoke('remote_plan',{target:f.target,profile:'daily',pr:{repo:'example/wrong',number:17}}),{code:'REPOSITORY_MISMATCH'});
+ await assert.rejects(f.remote.invoke('remote_plan',{target:f.target,profile:'daily',pr:{repo:'example/test-project',number:999}}),{code:'GIT_PROBE_FAILED'});
+ assert.equal(fs.existsSync(path.join(f.b,'store','ssh-runs')),false);
+});

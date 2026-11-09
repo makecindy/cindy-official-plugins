@@ -46,7 +46,7 @@
       "description": "同じプロジェクトの記録済み実アカウントへの切替を、このプラグイン所有の Cindy 検証ジョブに要求します。結果は要求済みです。各端末でアプリにログインし、状態を確認してください。不明時は自動再試行せず、確認後に明示的に再要求します。認証情報は出力しません。"
     },
     "remote": {
-      "description": "共通 SSH 検証テンプレートです。catalog は指定端末と B のプロファイルを確認、plan は target・profile・PR の repo/number/正確な commit と任意の人手/デバイス要件を受け、未実行の runId を返します。start は新しい worktree で構築起動し B 自身のログインを再利用します。status/stop/select_account/action/collect は同じ runId を使います。action は保存済み prepare/verify 引数のみ、collect はサイズとハッシュを検証した結果・任意ログ/非公開画像をローカルへ取得します。既存の OpenSSH ホスト信頼を使い、秘密鍵や認証情報の複製、Agent 転送や端末間の初回認証はしません。B 未ログイン時は通常の再認証が必要です。不明時は状態を確認し、起動・操作を繰り返さないでください。実機ツールと人手確認は終了コードで合格になりません。PR に自動公開せず、共有前にログを確認してください。"
+      "description": "共通 SSH 検証です。catalog は対象端末の設定を取得。plan は target、profile、PR repo/number と任意の commit を受け取り、省略時は対象 Git から現在の SHA を読みます。確認後 start が新しい worktree と B のログインを使います。status/stop/select_account/action/collect は同じ runId。action は保存した prepare/verify のみ、collect は制限付きログ・画像・結果をハッシュ確認して取得。既存 SSH 信頼を使い、秘密鍵・パスワード保存、Agent 転送、認証情報コピーはしません。未ログインは通常認証が必要です。初回端末間認証は未実装。返信不明時は同じ実行を確認し、重複起動しないでください。実機と人手の証拠は別途必要です。PR へ自動公開しません。"
     }
   }
 }

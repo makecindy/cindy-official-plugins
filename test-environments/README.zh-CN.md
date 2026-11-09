@@ -1,5 +1,19 @@
 # 测试环境
 
+## 从这里开始（1.2.0）
+
+首页按实际流程引导，不必先理解目录标识或填写启动参数：
+
+1. 选“本机”，填写 Cindy 源码文件夹和项目名称，点“保存项目并继续”。插件会建立可复用的持久测试配置，不会立即启动。
+2. 点“检查启动设置”，核对项目、账号和保留的数据后，再点“启动测试”。首次到目标应用正常登录，之后可以选择记住的账号。
+3. 根据提示准备样本、运行验收脚本或实际用例，停止前保存截图，最后“停止这次实例”。没有脚本时会明确给出下一步说明，不假报验收通过。
+4. 远程测试选“另一台电脑 · SSH”，读取对方配置，粘贴目标应用的 PR 链接并预览精确版本后再启动；无需手填 SHA，仍可在高级选项固定版本。
+
+不知道源码在哪，可在 Cindy 对话中说：“帮我找到本机的 Cindy 源码，配置测试环境，先预览不要启动。”源码文件夹不是安装好的 Cindy.app。
+高级管理保留项目、账号、方案、用例及历史；首页自动生成的配置仍使用同一共享核心。
+作者显示字段按使用者要求省略；这不改写原提交和贡献者历史。
+
+
 [English](README.md)
 
 可选的 Cindy 插件及独立本机 CLI，保留完整流程：
@@ -29,11 +43,11 @@ AI 工具、管理页和 CLI 共用目录。Cindy 桌面复用现有启动、隔
 
 ## 通用 SSH 模板（统一测试包）
 
-统一测试包 1.1.3 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
+统一测试包 1.2.0 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
 通过 AI/CLI 先 remote_catalog(target) 读目标电脑的档案和实际型号，再 remote_plan(target,profile,pr,requirements)，
 检查计划后用返回的 runId 调 remote_start；后续 remote_status、remote_select_account、remote_action、
 remote_stop、remote_collect 始终引用同一运行。target.host 是已配置的 SSH 别名/主机名，target.node
-可选为 B 的 Node 绝对路径；pr 必须提供 GitHub owner/repo、number 和精确 commit。
+可选为 B 的 Node 绝对路径；pr 提供 GitHub owner/repo、number；可选 commit，不填时从目标 Git 读取并预览精确版本。
 B 需已有本机验收档案、源码仓库、SSH 主机信任和项目工具链，账户及其加密登录态留在 B。
 prepare/verify 只执行项目保存的参数数组；不接受临时任意远端命令。没有项目命令或设备工具时明确交接待办。
 requirements 中 human/device-tool 项目保持 pending，不能用合成事件或命令退出码当作真机/人工通过。

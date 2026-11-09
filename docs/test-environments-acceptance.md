@@ -1,5 +1,7 @@
 # Test Environments 1.1.3: real acceptance checklist
 
+> For the current 1.2.0 home see [guided usage](test-environments-guided.md). This checklist retains 1.1.3 package/menu evidence; those controls are under Advanced management. Its old digest is not the 1.2.0 digest.
+
 [简体中文](test-environments-acceptance.zh-CN.md)
 
 Unified PR: [#309](https://github.com/makecindy/cindy-official-plugins/pull/309).

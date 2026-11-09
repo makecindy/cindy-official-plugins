@@ -14,7 +14,7 @@ function profileSnapshot(profileId){
  const cases=Object.values(db.cases).filter(c=>c.profile===profile.id);
  return {project,profile,accounts,cases};
 }
-function validatePr(pr){if(!pr||! /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(pr.repo||'')||!Number.isSafeInteger(pr.number)||pr.number<1||! /^[a-f0-9]{40}$/.test(pr.commit||''))fail('INVALID_PR_REVISION');return {repo:pr.repo,number:pr.number,commit:pr.commit};}
+function validatePr(pr){if(!pr||! /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(pr.repo||'')||!Number.isSafeInteger(pr.number)||pr.number<1||pr.commit!==undefined&&! /^[a-f0-9]{40}$/.test(pr.commit))fail('INVALID_PR_REVISION');return {repo:pr.repo,number:pr.number,commit:pr.commit};}
 function verifyRepository(root,repo){
  const actual=fs.realpathSync(root);if(git(actual,['rev-parse','--show-toplevel'])!==actual)fail('INVALID_REPOSITORY_ROOT');
  const origin=git(actual,['config','--get','remote.origin.url']);
@@ -28,6 +28,7 @@ function requirements(values){
 function plan(request){
  if(!['darwin','linux'].includes(process.platform))fail('REMOTE_PLATFORM_UNSUPPORTED');
  const source=profileSnapshot(request.profile),pr=validatePr(request.pr),root=verifyRepository(source.project.root,pr.repo);
+ if(pr.commit===undefined){const ref=`refs/pull/${pr.number}/head`,line=git(root,['ls-remote','--exit-code','origin',ref]).split('\n').find(row=>row.split('\t')[1]===ref);const commit=line?.split('\t')[0];if(!/^[a-f0-9]{40}$/.test(commit||''))fail('PR_HEAD_UNAVAILABLE');pr.commit=commit;}
  for(const argv of Object.values(source.project.commands||{}))for(const arg of argv)if(arg===root||arg.startsWith(root+path.sep))fail('COMMAND_USES_ORIGINAL_CHECKOUT');
  return {protocol:1,pr,repositoryRoot:root,profile:source.profile.id,configHash:hash(source),hardware:hardware(),
   requirements:requirements(request.requirements||[]),source,

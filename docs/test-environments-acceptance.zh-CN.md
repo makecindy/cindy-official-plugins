@@ -1,5 +1,7 @@
 # Test Environments 1.1.3：实机验收操作单
 
+> 当前 1.2.0 新首页按[引导说明](test-environments-guided.zh-CN.md)使用；本单保留 1.1.3 包与旧菜单证据，旧入口在“高级管理”。不要把旧包哈希当作 1.2.0。
+
 [English](test-environments-acceptance.md)
 
 统一 PR：[#309](https://github.com/makecindy/cindy-official-plugins/pull/309)。

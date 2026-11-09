@@ -12,16 +12,17 @@ const ACCOUNT_COPY={
 for(const key of Object.keys(COPY))COPY[key].push(...ACCOUNT_COPY[key],{en:'Prepare samples','zh-CN':'准备样本',ja:'サンプルを準備',ko:'샘플 준비'}[key],{en:'This local sign-in has expired. Sign in again in the target application; other computers keep their own sessions.','zh-CN':'本机登录已失效，请在目标应用中重新登录。其他电脑的登录态不受影响。',ja:'この端末のログインが失効しました。対象アプリで再ログインしてください。他の端末のセッションには影響しません。',ko:'이 컴퓨터의 로그인이 만료되었습니다. 대상 앱에서 다시 로그인하세요. 다른 컴퓨터의 세션은 유지됩니다.'}[key]);
 let locale='en',db,tab='profiles',busy=false;const $=id=>document.getElementById(id),t=n=>(COPY[locale]||COPY.en)[n];
 const channel=new BroadcastChannel('test-environments-pages'),pending=new Map();
-channel.onmessage=({data})=>{if(data?.type!=='response')return;const p=pending.get(data.id);if(!p)return;clearTimeout(p.timer);clearInterval(p.resend);pending.delete(data.id);data.result?.ok?p.resolve(data.result.data):p.reject(Object.assign(new Error(data.result?.message||t(55)),{code:data.result?.errorCode}));};
-async function call(method,args={}){await fetch('/wake').then(r=>{if(!r.ok)throw Error(t(55));});return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{clearInterval(resend);pending.delete(id);reject(Error(t(55)));},32000);const send=()=>channel.postMessage({type:'request',id,method,args}),resend=setInterval(send,600);pending.set(id,{resolve,reject,timer,resend});send();});}
+channel.onmessage=({data})=>{if(data?.type!=='response')return;const p=pending.get(data.id);if(!p)return;clearTimeout(p.timer);clearInterval(p.resend);pending.delete(data.id);data.result?.ok?p.resolve(data.result.data):p.reject(Object.assign(new Error(data.result?.message||t(55)),{code:data.result?.errorCode,operation:p.method,remoteOperation:p.remoteOperation,execution:data.result?.execution}));};
+async function call(method,args={}){await fetch('/wake').then(r=>{if(!r.ok)throw Error(t(55));});return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{clearInterval(resend);pending.delete(id);reject(Error(t(55)));},32000);const send=()=>channel.postMessage({type:'request',id,method,args}),resend=setInterval(send,600);pending.set(id,{resolve,reject,timer,resend,method,remoteOperation:args.operation});send();});}
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
 function notice(text,error=false){$('notice').textContent=text;$('notice').className=error?'error':'';}
-async function perform(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{await fn();}catch(e){notice(e.code==='REVISION_CHANGED'?t(57):`${e.code||''} ${e.message}`,true);}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
-function button(text,fn,cls){const b=el('button',text,cls);b.type='button';b.onclick=()=>perform(fn);return b;}
+async function perform(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{await fn();}catch(e){notice(typeof workflowError==='function'?workflowError(e):e.code==='REVISION_CHANGED'?t(57):`${e.code||''} ${e.message}`,true);}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=b.dataset.unavailable==='true');}}
+function button(text,fn,cls){const b=el('button',text,cls);b.type='button';b.disabled=busy;b.onclick=()=>perform(fn);return b;}
 function output(data){$('outputWrap').hidden=false;$('outputWrap').open=true;$('output').textContent=JSON.stringify(data,null,2);}
 async function refresh(){db=await call('catalog');$('storage').textContent=t(47)+'\n'+db.storage;await render();notice('');}
 const sections={profiles:2,projects:3,accounts:4,cases:5,jobs:6};
-async function render(){
+async function render(){await renderAdvanced();if(typeof renderWorkflow==='function')await renderWorkflow();}
+async function renderAdvanced(){
  $('tabs').replaceChildren(...Object.entries(sections).map(([k,n])=>{const b=button(t(n),async()=>{tab=k;$('editor').hidden=true;await render();});b.setAttribute('aria-pressed',String(tab===k));return b;}));$('add').hidden=tab==='jobs';$('records').replaceChildren();
  const records=tab==='jobs'?(await call('status')).jobs:Object.values(db[tab]);if(!records.length){$('records').append(el('p',t(19),'empty'));return;}
  for(const record of records){const card=el('article',undefined,'record');card.append(el('h2',record.label||db.profiles[record.profile]?.label||record.profile));

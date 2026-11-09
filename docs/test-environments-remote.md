@@ -67,7 +67,7 @@ size checks and real SSH/hardware evidence. Without an actual selected B, simula
 transport plus local Git/process tests must be labeled simulated, never cross-computer
 hardware acceptance.
 
-## Unified implementation draft (PR #309, test package 1.1.3)
+## Unified implementation draft (PR #309, test package 1.2.0)
 
 The unified AI remote tool and CLI workflow entries include remote_catalog, remote_plan, remote_start,
 remote_status, remote_stop, remote_select_account, remote_action and remote_collect.
@@ -129,3 +129,9 @@ rejection. Unpacked public CLI and main.js → real Worker also use this loopbac
 Host transport remains a fixture. This is not two-computer/formal-account acceptance.
 Follow the [real checklist](test-environments-acceptance.md). Capture while running;
 collect final stopped logs/results without requesting a new screenshot.
+
+Version 1.2.0 exposes SSH setup, PR preview, start/status recovery, actions, stop and
+collection in the home page. pr.commit is optional: after origin verification, fixed
+Git ls-remote resolves the head for exact preview before an explicit start. Existing
+pins remain valid and changed heads still fail checkout. No new network target,
+forwarding, credential reading or client/server change is introduced.

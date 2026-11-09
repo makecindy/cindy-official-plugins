@@ -1,5 +1,19 @@
 # Test Environments
 
+## Start here (1.2.0)
+
+The home page guides the workflow without requiring internal IDs or launch parameters:
+
+1. Choose This computer, enter a Cindy source folder/name and Save project and continue. A reusable persistent test profile is created without launching.
+2. Check launch settings, review project/account/data, then Start test. Complete first sign-in normally in the target app; saved accounts become selectable.
+3. Prepare samples and run scripts/actual cases as instructed. Capture before stop, then Stop this instance. Missing scripts produce next-step guidance, not an acceptance pass.
+4. For SSH, choose Another computer, read its configuration, paste the application PR link and preview its exact revision before starting. SHA entry is optional; advanced pinning remains.
+
+If the source location is unknown, ask Cindy in a conversation to locate it and configure this plugin, previewing before launch. The source folder is not the installed Cindy.app.
+Advanced management retains projects, accounts, profiles, cases and history on the shared core.
+The author display field is omitted at the owner's request; original commits/contributor history remain intact.
+
+
 [简体中文](MANUAL.zh-CN.md)
 
 Use `catalog` first, choose exact IDs, then inspect `plan` before `start`.
@@ -112,12 +126,12 @@ Local acceptance and generic SSH orchestration are delivered together in PR #309
 
 ## Generic SSH template (unified test package)
 
-Unified test package 1.1.3 includes local acceptance and generic SSH orchestration; computers are parameters.
+Unified test package 1.2.0 includes local acceptance and generic SSH orchestration; computers are parameters.
 Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
 remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
 runId. Reuse that ID for status, account selection, remote_action, stop and collection.
 target.host is a configured SSH alias/hostname; target.node optionally names B's Node
-executable. pr requires GitHub owner/repo, number and exact commit. B needs its local acceptance
+executable. pr requires GitHub owner/repo and number; commit is optional and otherwise read from target Git for exact preview. B needs its local acceptance
 profile, repository, SSH trust and toolchain; accounts/encrypted sessions stay on B.
 Prepare/verify run saved argv only, never arbitrary ad-hoc SSH commands. Missing project
 commands/device tools produce explicit handoffs. Human/device-tool requirements remain

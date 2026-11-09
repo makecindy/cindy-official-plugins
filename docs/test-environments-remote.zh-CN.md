@@ -56,11 +56,11 @@ B 的已保存档案及验收项目。常用电脑可以复用已有 SSH 配置�
 独立工作树、证据越界/大小校验及实际 SSH/硬件验证。没有选定的真实 B 时，可以验证模拟传输和
 本机 Git/进程链路，但必须标为模拟，不能宣称跨电脑真机验收已完成。
 
-## 统一实现草稿（PR #309，测试包 1.1.3）
+## 统一实现草稿（PR #309，测试包 1.2.0）
 
 已实现通用 AI/CLI 工具 remote_catalog、remote_plan、remote_start、remote_status、remote_stop、
 remote_select_account、remote_action、remote_collect。每次传 target.host，可选 target.node；
-无需为每台电脑生成一份业务脚本。管理页当前仍以本机流程为主，SSH 通过 AI 工具或 CLI 使用。
+无需为每台电脑生成一份业务脚本。1.2.0 管理页提供本机/SSH 引导，AI 工具和 CLI 入口继续保留。
 
 典型调用：先 remote_catalog 读取 B 档案，再从 GitHub 工具获得 PR 的精确 head SHA；
 remote_plan 指定 target、B 档案 ID、pr.repo/number/commit 和 requirements，返回 runId。
@@ -104,3 +104,8 @@ AI 实际调用统一 `remote` 工具，以 operation 选择 catalog/plan/start/
 解包后公开 CLI 和 main.js → 真实 Worker 也经过此回环；宿主传输仍为测试适配。
 这不等于两台真实电脑或正式账号验证。实机按[操作单](test-environments-acceptance.zh-CN.md)执行；
 截图在目标仍运行时收集，停止后收集最终日志/结果时不请求新截图。
+
+1.2.0 首页支持 SSH 配置、PR 链接预览、启动、状态恢复、样本/验收、停止和收集。
+pr.commit 可省略：目标先核对项目 origin，再固定执行 Git ls-remote 读取 PR head，
+预览明确 SHA 后仍需用户点击启动；已固定 SHA 的旧调用继续可用，head 变化仍在检出时拒绝。
+无新增网络目标、SSH 转发、凭证读取或客户端/服务端改动。
