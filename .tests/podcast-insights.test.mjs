@@ -1477,3 +1477,28 @@ test('minutes rejects empty normalized quotes while retaining source excerpt and
     }
   }finally{h.close();}
 });
+
+// #285 chapter range regression: production Service import/generate/export to
+// Reading.render; previous coverage used one timed segment. SQLite/unit tier.
+// Two segments (0-5s,55-60s) must display the full chapter, not its first segment.
+test('chapter headings use first start and last end through Service reading and HTML export',async()=>{
+  const R=require('../podcast-insights/reading.js'),h=harness();try{
+    const eid=await seed(h);
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h);h.host.readingCSS=async()=>'';const exported=[];h.host.writeTaskFile=async a=>{exported.push(a);return {ok:true};};
+    for(const [start,end,lastStart,lastEnd,expected] of [[0,5,55,60,'00:00:00–00:01:00'],[90000,90005,90055,90060,'25:00:00–25:01:00'],[0,5,55,null,'00:00:00'],[null,null,55,60,'时间未知–00:01:00'],[null,null,null,null,'时间未知']]){
+      await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'First source evidence',start,end},{text:'Last source evidence',start:lastStart,end:lastEnd,speaker:'B'}])});
+      const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+      assert.equal(d.chapters[0].start_idx,0);assert.equal(d.chapters[0].end_idx,1);
+      exported.length=0;await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+      for(const html of [R.render(d),h.files.get(r.html_path),exported[0].content]){
+        const heading=html.match(/id="chapter-0"><p class="meta">([^<]*)<\/p>/)[1];assert.equal(heading,'01 / '+expected);
+      }
+      const p=d.chapters[0].points[0];assert.equal(p.segment_id,d.segments[0].id);assert.equal(p.start_ms,d.segments[0].start_ms);assert.equal(p.end_ms,d.segments[0].end_ms);
+      assert.equal((await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]})).citations[0].status,'exact');
+      // Incomplete historical records retain unknown/omitted endpoint semantics.
+      const missing=structuredClone(d);missing.segments=[];
+      assert.match(R.render(missing),/01 \/ 时间未知<\/p>/);
+    }
+  }finally{h.close();}
+});
