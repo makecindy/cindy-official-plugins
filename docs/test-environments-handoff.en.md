@@ -147,3 +147,12 @@ panel. pick is declared without expanding existing Node filesystem authority; no
 recent-project component copying, Host DB reading or main-app changes. Author stays
 omitted; older evidence remains versioned. Actual OS dialog/accounts/two-computer
 integration still need real evidence.
+
+## Additional account choice and both SSO requirements
+
+The user requires both daily-Cindy enterprise account authorization and existing browser SSO,
+alongside selectable email/phone accounts. [Account plan and acceptance](test-environments-accounts.md)
+separates the goal from 1.2.1: saved target accounts are selectable and normal browser/email/phone
+login uses the existing app; daily-Cindy-to-isolated-target authorization is still unimplemented.
+It needs a minimal client/server authorization contract, never credential copying, removed isolation
+or presenting account discovery as granted auth. The additional goal remains open despite previous tests.
