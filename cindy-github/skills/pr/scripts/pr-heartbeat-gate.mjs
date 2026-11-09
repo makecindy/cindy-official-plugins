@@ -25,7 +25,7 @@
  * 状态文件刻意落在 worktree 之外(默认 ~/.cache/cindy-pr/):PR 心跳绑定的是被审查仓库的
  * worktree,收口时会被删掉。
  *
- * 状态是**两段式**的,这是正确性关键:`watch` 记 agent 已确认处理完的基线(由 --ack / --defer
+ * 状态是**两段式**的,这是正确性关键:`watch` 记 agent 已确认处理完的基线(由收尾命令
  * 提升;没有新事件时直接前进),`pendingWatch` 记已放行但还没被确认的那一份。事件一律拿已确认
  * 的 watch 算 —— 所以放行之后宿主建会话失败、agent 启动失败或中途崩掉时,同一批事件下一轮
  * 还在,会被重试。`pendingWatch` 只登记**最早一份**:慢 agent 随后的 --ack 只能把基线推进到
@@ -49,12 +49,12 @@
  *
  * 选项:
  *   --repo owner/name          PR 号形式时必填;URL 形式会自动解析
- *   --ack                      确认本轮已处理完:把 pendingWatch 提升为已确认,并退出 0。
- *                              心跳每轮收尾必须调它,否则同一批事件会被重放。
+ *   --ack                      无等待或阻塞时确认本轮；否则要求明确收尾决定。
+ *   --resume <reason>          已处理或推送：确认本轮并清除等待，继续观察。
  *   --last-result              只读输出最近一轮普通 gate 的 run/skip/block、reason、detail 与
  *                              事件清单(零 API、不改状态)。
  *   --defer <分钟>             **隐含 --ack**,并约定到点再唤起一次(期间有新事件照常唤起)。
- *                              用于等一会儿再看,例如等这次推送的机器人 review。
+ *                              兼容旧计时器；不能替换已有的具体等待。
  *   --wait <path>              隐含 --ack；JSON 指定具体等待项与复查时间，见 references/follow-up.md。
  *   --snapshot <path>          pr-snapshot.mjs 路径(默认见 DEFAULT_SNAPSHOT)
  *   --state-dir <dir>          状态目录(默认 ~/.cache/cindy-pr,或 CINDY_PR_STATE_DIR)
@@ -290,7 +290,7 @@ function formatDuration(ms) {
 function usage(err = (text) => process.stderr.write(text)) {
   err(
     'Usage: node pr-heartbeat-gate.mjs <PR_URL|number> [--repo owner/name] ' +
-      '[--ack] [--wait <plan.json>] [--defer <minutes>] [--last-result] [--snapshot <path>] [--state-dir <dir>] ' +
+      '[--ack | --resume <reason> | --wait <plan.json>] [--defer <minutes>] [--last-result] [--snapshot <path>] [--state-dir <dir>] ' +
       '[--max-snapshot-failures <n>] [--max-pass-attempts <n>] ' +
       '[--retry-backoff-minutes <n>] [--max-silence-hours <n>] [--json]\n',
   );
@@ -302,6 +302,7 @@ export function parseArgs(argv, env = process.env) {
   let repo;
   let deferMinutes;
   let waitFile;
+  let resumeReason;
   let ack = false;
   let suggest = false;
   let lastResult = false;
@@ -325,6 +326,13 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--ack') {
       ack = true;
+      continue;
+    }
+    if (arg === '--resume') {
+      resumeReason = argv[++i]?.trim();
+      if (!resumeReason || resumeReason.startsWith('--') || resumeReason.length > 2000) {
+        throw new Error('--resume expects a reason (1–2000 characters) describing what was handled or pushed');
+      }
       continue;
     }
     if (arg === '--triggered') {
@@ -440,6 +448,9 @@ export function parseArgs(argv, env = process.env) {
   if (waitFile && (suggest || lastResult || deferMinutes !== undefined)) {
     throw new Error('--wait cannot be combined with --last-result, --suggest or --defer');
   }
+  if (resumeReason && (ack || waitFile || deferMinutes !== undefined || suggest || lastResult)) {
+    throw new Error('--resume is a separate finish decision; do not combine it with --ack, --wait, --defer or read-only queries');
+  }
   const target = parseTarget(spec, repo);
   return {
     help: false,
@@ -448,6 +459,7 @@ export function parseArgs(argv, env = process.env) {
     number: target.number,
     deferMinutes,
     waitFile,
+    resumeReason,
     ack,
     suggest,
     lastResult,
@@ -1213,13 +1225,13 @@ export function passAdvisories(snap, roundCount, extras = {}) {
   return notes;
 }
 
-/** --ack / --defer 共用:把已放行的 pendingWatch 提升为已确认。无 pending 时是 no-op。 */
+/** Confirm only the earliest released observation. Choosing the next action owns wait changes. */
 function promotePending(state, now) {
   const next = { ...state, lastAckAt: now };
   if (state.pendingWatch) next.watch = state.pendingWatch;
   // 旧版 gate 留下的未确认指纹:确认后照旧前进,下一轮按新规则从快照建立基线
   if (state.pendingFingerprint) next.fingerprint = state.pendingFingerprint;
-  for (const key of ['pendingWatch', 'pendingKey', 'pendingFingerprint', 'pendingPassCount', 'retryBackoffUntil', 'wait']) delete next[key];
+  for (const key of ['pendingWatch', 'pendingKey', 'pendingFingerprint', 'pendingPassCount', 'retryBackoffUntil']) delete next[key];
   return next;
 }
 
@@ -1283,6 +1295,8 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   return !(silenceAnchor > 0 && now - silenceAnchor >= maxSilenceMs);
 }
 
+const FINISH_HINT = 'Finish: blocked → --wait <plan.json>; handled/pushed → --resume <reason>; clear → --ack. See references/follow-up.md.';
+
 function emit(args, payload, out = (text) => process.stdout.write(text)) {
   if (args.json) {
     out(`${JSON.stringify(payload, null, 2)}\n`);
@@ -1293,7 +1307,8 @@ function emit(args, payload, out = (text) => process.stdout.write(text)) {
   out(
     `[pr-heartbeat-gate] ${decision} ${payload.repo}#${payload.number} ` +
       `reason=${payload.reason}${payload.detail ? ` (${payload.detail})` : ''}\n` +
-      (payload.report ? `${payload.report}\n` : ''),
+      (payload.report ? `${payload.report}\n` : '') +
+      (payload.finish ? `${payload.finish}\n` : ''),
   );
 }
 
@@ -1358,6 +1373,7 @@ async function gateMain(argv, ctx) {
       lastResult,
       wait: state?.wait ?? null,
       waitContext: state?.pendingWatch?.waitFacts ?? state?.watch?.waitFacts ?? null,
+      ...(lastResult?.decision === 'run' ? { finish: FINISH_HINT } : {}),
     }, out);
     return EXIT_PASS;
   }
@@ -1374,18 +1390,30 @@ async function gateMain(argv, ctx) {
     return EXIT_PASS;
   }
 
-  // --ack / --defer:纯管理命令,不跑快照、不做门禁判定(供 agent 收尾时调用)
-  if (args.ack || args.deferMinutes !== undefined || args.waitFile) {
+  // Finish commands are local: validate before acknowledging or changing any wait.
+  if (args.ack || args.deferMinutes !== undefined || args.waitFile || args.resumeReason) {
     const previous = readState(file) ?? {};
+    const facts = previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts;
+    if (!args.waitFile && !args.resumeReason) {
+      const needsDecision = previous.wait || (args.deferMinutes === undefined &&
+        (!facts?.complete || facts.blockers.length || facts.checks.some((c) => c.outcome !== 'passed')
+          || facts.threads.some((t) => !t.resolved)));
+      if (needsDecision) throw new Error(`finish decision required; state unchanged. ${FINISH_HINT}`);
+    }
     // Validate against the earliest released observation BEFORE acknowledging anything.
     const wait = args.waitFile ? makeWait(JSON.parse(fs.readFileSync(args.waitFile, 'utf8')),
-      previous.pendingWatch?.waitFacts ?? previous.watch?.waitFacts, now) : null;
+      facts, now) : null;
     let next = promotePending(previous, now);
+    if (args.resumeReason) {
+      delete next.wait;
+      delete next.nextAllowAt;
+    }
     if (wait) {
       next.wait = wait;
       delete next.nextAllowAt;
     }
     let detail = next.watch ? `confirmed head=${String(next.watch.headSha ?? 'none').slice(0, 7)}` : 'confirmed';
+    if (args.resumeReason) detail += `; ${args.resumeReason}`;
     if (args.deferMinutes !== undefined) {
       // defer 隐含 ack,并约定到点再唤起一次;期间新事件照常唤起。
       // deferredHeadOid:当前 head 已用掉一次等待额度(回合制机判依据),head 一变由普通轮清掉。
@@ -1403,7 +1431,7 @@ async function gateMain(argv, ctx) {
       exitCode: EXIT_PASS,
       repo: args.repo,
       number: args.number,
-      reason: wait ? 'wait-set' : args.deferMinutes !== undefined ? 'defer-set' : 'acked',
+      reason: wait ? 'wait-set' : args.resumeReason ? 'resumed' : args.deferMinutes !== undefined ? 'defer-set' : 'acked',
       detail,
       ...(wait ? { wait } : {}),
     }, out);
@@ -1657,6 +1685,7 @@ async function gateMain(argv, ctx) {
     detail: decision.detail,
     report: decision.report,
     verdict: snap.verdict ?? null,
+    ...(passed ? { finish: FINISH_HINT } : {}),
   }, out);
   // Optional host marker: healthy SKIP is recovery, backoff SKIP is not.
   if (!args.json && checkSucceeded) {

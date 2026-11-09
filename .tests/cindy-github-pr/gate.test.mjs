@@ -551,7 +551,7 @@ test('新跟进:必需检查通过与失败各报一次,确认后安静;我们�
   assert.match(r.stdout, /PASS .*reason=changed \(events=\[checks-failed\]/);
   assert.match(r.stdout, /\n- Checks failed on aaa1111:\n {2}- build https:\/\/ci\/build\n/);
   assert.equal(fx.readState().lastResult.report, '- Checks failed on aaa1111:\n  - build https://ci/build');
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--resume', 'Pushed the build fix.'])).code, 0);
 
   fx.advance(10);
   fx.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'pending', { required: true })], comments: [comment('C1', 'me', iso(fx.now()), 'pushed a fix')] }));
@@ -563,7 +563,7 @@ test('新跟进:必需检查通过与失败各报一次,确认后安静;我们�
   r = await fx.run();
   assert.match(r.stdout, /events=\[checks-passed\]/);
   assert.match(r.stdout, /All 1 required check passed on bbb2222\./);
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.advance(10);
   assert.equal((await fx.run()).code, 2);
 });
@@ -572,7 +572,7 @@ test('放行后没 ack → 下一轮重试;慢 agent 的 ack 不会确认它没�
   const fx = createFixture(t);
   fx.setSnapshot(snap());
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
 
   fx.advance(10);
   const c1 = comment('C1', 'alice', iso(fx.now()), 'first');
@@ -585,7 +585,7 @@ test('放行后没 ack → 下一轮重试;慢 agent 的 ack 不会确认它没�
   fx.advance(5);
   const c2 = comment('C2', 'bob', iso(fx.now()), 'second');
   fx.setSnapshot(snap({ comments: [c1, c2] }));
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.advance(5);
   const r = await fx.run();
   assert.equal(r.code, 0);
@@ -630,7 +630,7 @@ test('低成本探测:与上次完整读取一致时不做完整快照;有理由
   fx.setProbe(probe);
   fx.setSnapshot(snap());
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.advance(10);
   const reads = fx.snapshotRuns();
   let r = await fx.run();
@@ -663,7 +663,7 @@ test('从未放行过的跟进也能数满静默时长:起点固定在首次检�
   fx.setProbe(probe);
   fx.setSnapshot(snap({ verdict: 'NEEDS_WORK', blockers: ['review_threads_open'] }));
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--resume', 'Handled the reported threads.'])).code, 0);
   // 模拟「从未放行过」:状态里没有 lastPassAt(例如没有 CI、没有评论、没有冲突)
   fx.writeState({ lastPassAt: undefined, silenceSince: undefined });
   assert.equal(fx.readState().lastPassAt, undefined);
@@ -704,7 +704,7 @@ test('快照失败先容忍瞬时抖动,连续到阈值才 fail-closed —— �
   const fx = createFixture(t);
   fx.setSnapshot(snap());
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   const failEnv = { FAKE_SNAPSHOT_EXIT: '2', FAKE_SNAPSHOT_STDERR: '[pr-snapshot] gh auth expired\n' };
   assert.equal((await fx.run([], failEnv)).code, 2);
   assert.match(fx.readState().lastResult.detail, /failures=1\/3/);
@@ -787,9 +787,10 @@ test('经软链调用时 main 照跑(退出码 0 不等于真跑过)', { skip: p
   assert.equal(viaLink.code, 0, viaLink.stderr);
   assert.match(viaLink.stdout, /PASS .*events=\[checks-failed\]/, '软链调用必须真的做出判定');
   assert.ok(fx.readState().pendingWatch, '状态文件必须真的写了');
-  const acked = await fx.runVia(linked, ['--ack']);
-  assert.match(acked.stdout, /reason=acked/);
-  assert.equal(fx.readState().pendingWatch, undefined, '软链调用的 --ack 必须真的提升基线');
+  const acked = await fx.runVia(linked, ['--resume', 'Pushed the build fix.']);
+  assert.equal(acked.code, 0, acked.stderr);
+  assert.match(acked.stdout, /reason=resumed/);
+  assert.equal(fx.readState().pendingWatch, undefined, '软链调用的收尾必须真的提升基线');
 });
 
 // ── 机判提示(回合止损 / 临门一脚 / 无底洞 / 范围膨胀) ─────────────────────
@@ -938,7 +939,7 @@ test('推送后先收齐:bot 与检查的新事件压到要等的 bot 都在新�
   const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - 5 * MIN)), botReview('R2', 'greptile-apps', 'aaa1111', iso(T0 - 4 * MIN))] });
   fx.setSnapshot(first);
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
 
   // 推送新提交,CI 很快失败:先不叫醒。
   fx.advance(2);
@@ -972,7 +973,7 @@ test('收齐窗口最多 20 分钟;人的留言不等,立刻叫醒', async (t) =
   const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - 5 * MIN))] });
   fx.setSnapshot(first);
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.advance(2);
   const red = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
   fx.setSnapshot(snap({ ...first, ...red }));
@@ -985,7 +986,7 @@ test('收齐窗口最多 20 分钟;人的留言不等,立刻叫醒', async (t) =
   assert.match(late.json().detail, /checks-failed/);
 
   // 新一轮:人留言时不压。
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--resume', 'Pushed the next fix.'])).code, 0);
   fx.advance(2);
   const next = { latestCommitOid: 'ccc3333', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
   fx.setSnapshot(snap({ ...first, ...next }));
@@ -1003,7 +1004,7 @@ test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库
   fx.writeRepoState({ reviewerBots: { 'chatgpt-codex-connector': T0 - 60 * MIN } });
   fx.setSnapshot(snap());
   await fx.run();
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.advance(2);
   fx.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' }));
   assert.equal((await fx.run(['--json'])).json().reason, 'settling');
@@ -1011,7 +1012,7 @@ test('仓库里常见的 bot reviewer 也要等;没有见过任何 bot 的仓库
   const plain = createFixture(t);
   plain.setSnapshot(snap());
   await plain.run();
-  await plain.run(['--ack']);
+  assert.equal((await plain.run(['--ack'])).code, 0);
   plain.advance(2);
   plain.setSnapshot(snap({ latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' }));
   assert.equal((await plain.run(['--json'])).code, 0, '没有要等的 bot,照常立刻叫醒');
@@ -1024,7 +1025,7 @@ test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调�
   fx.setProbe(probe);
   fx.setSnapshot(snap({ verdict: 'READY' }));
   await fx.run(['--pacing']);
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   // 上一轮叫醒 agent 已是很久以前(否则一小时内按活跃节奏看)。
   fx.writeState({ lastPassAt: T0 - 120 * MIN });
   const reads = fx.snapshotRuns();
@@ -1042,7 +1043,7 @@ test('按阶段节奏:只等人审时 30 分钟才看一次,不到时间不调�
   assert.equal(r.code, 0, r.stdout);
   assert.equal(fx.snapshotRuns(), reads + 1);
   fx.setTrigger(null);
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   fx.writeState({ lastPassAt: T0 - 120 * MIN });
 
   fx.advance(31);
@@ -1064,6 +1065,117 @@ test('只等人工批准时保底巡检不叫醒 agent', () => {
 
 // Historical scenario replays: real gate entry, persisted state, controlled clock / GitHub facts.
 // No calls to the live PR, scheduler or model are made by these tests.
+test('replay: an old task using plain ack must finish its blocker before base churn can stay quiet', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  const event = await fx.run(['--json']);
+  assert.match(event.json().finish, /--wait.*--resume.*--ack/);
+  const before = fs.readFileSync(fx.stateFile(), 'utf8');
+  const reads = fx.snapshotRuns();
+  const legacy = await fx.run(['--ack']);
+  assert.equal(legacy.code, 1);
+  assert.match(legacy.stderr, /finish decision required.*--wait/);
+  assert.equal(fs.readFileSync(fx.stateFile(), 'utf8'), before, 'do not ack, clear waits or schedule an extra wake');
+  assert.equal(fx.snapshotRuns(), reads, 'finish is local; no extra GitHub poll');
+  const receipt = await fx.run(['--wait', fx.writeWait(waitPlan(s)), '--json']);
+  assert.equal(receipt.code, 0, receipt.stderr);
+  assert.equal(receipt.json().reason, 'wait-set');
+  assert.equal(fx.readState().pendingWatch, undefined);
+  for (let tick = 1; tick <= 72; tick++) {
+    fx.advance(5);
+    fx.setSnapshot({ ...s, baseCommitOid: `base-${tick}` });
+    assert.equal((await fx.run(['--triggered'])).code, 2);
+  }
+});
+
+test('finish: plain ack cannot guess missing observations or classify blockers as human-only', async (t) => {
+  const cases = [
+    null,
+    snap({ checks: [check('build', 'failed')] }),
+    snap({ checks: [check('build', 'pending')] }),
+    snap({ reviewThreads: { nodes: [{ id: 'thread', isResolved: false }] } }),
+    snap({ blockers: ['approval_required'] }),
+    snap({ blockers: ['merge_conflict'] }),
+    snap({ checksSummary: { unavailable: true } }),
+  ];
+  for (const s of cases) {
+    const fx = createFixture(t);
+    if (s) { fx.setSnapshot(s); await fx.run(); }
+    else fx.writeState({ watch: { headSha: 'legacy-head' }, pendingFingerprint: 'legacy' });
+    const before = fx.readState();
+    const result = await fx.run(['--ack']);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /finish decision required/);
+    assert.deepEqual(fx.readState(), before);
+    assert.equal(fx.readState().wait, undefined, 'do not infer an indefinite human wait');
+  }
+});
+
+test('finish: clean ack needs no extra poll or model wake', async (t) => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap());
+  await fx.run();
+  const reads = fx.snapshotRuns();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  assert.equal(fx.snapshotRuns(), reads);
+  const idle = await fx.run();
+  assert.equal(idle.code, 2);
+  assert.doesNotMatch(idle.stdout, /Finish:/);
+});
+
+test('finish: ack and defer preserve a recorded wait; resume explicitly clears waits and timers', async (t) => {
+  const fx = createFixture(t);
+  await startWait(fx, humanBlocked());
+  fx.writeState({ nextAllowAt: T0 + 60 * MIN });
+  const before = fx.readState();
+  for (const args of [
+    ['--ack'], ['--defer', '10'], ['--resume'], ['--resume', ' '],
+    ['--resume', 'x'.repeat(2001)], ['--resume', 'handled', '--ack'],
+    ['--resume', 'handled', '--defer', '10'], ['--resume', 'handled', '--last-result'],
+    ['--resume', 'handled', '--suggest'], ['--resume', 'handled', '--wait', 'unused.json'],
+  ]) {
+    assert.equal((await fx.run(args)).code, 1, args.join(' '));
+    assert.deepEqual(fx.readState(), before);
+  }
+  const resumed = await fx.run(['--resume', 'Fixed the certificate check and pushed.', '--json']);
+  assert.equal(resumed.code, 0, resumed.stderr);
+  assert.equal(resumed.json().reason, 'resumed');
+  assert.equal(fx.readState().wait, undefined);
+  assert.equal(fx.readState().nextAllowAt, undefined);
+});
+
+test('replay: replacing an expired wait acknowledges it without a separate retry round', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s, { kind: 'baseline', afterMinutes: 10 });
+  fx.advance(10);
+  assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+  const before = fx.readState();
+  assert.equal((await fx.run(['--ack'])).code, 1);
+  assert.deepEqual(fx.readState(), before);
+  assert.equal((await fx.run(['--wait', fx.writeWait(waitPlan(s, { kind: 'baseline', afterMinutes: 30 }))])).code, 0);
+  fx.advance(5);
+  fx.setSnapshot({ ...s, baseCommitOid: 'another-unrelated-commit' });
+  assert.equal((await fx.run(['--triggered'])).code, 2);
+  fx.advance(25);
+  assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+});
+
+test('replay: resume confirms the earliest round and preserves a newer failure', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  fx.setSnapshot(s);
+  await fx.run();
+  fx.advance(5);
+  fx.setSnapshot({ ...s, checks: [...s.checks, check('later', 'failed')] });
+  await fx.run();
+  assert.equal((await fx.run(['--resume', 'Handled the originally reported finding.'])).code, 0);
+  const next = await fx.run(['--json']);
+  assert.equal(next.code, 0);
+  assert.match(next.json().report, /later/);
+});
+
 test('replay: human-only CodeQL wait absorbs 72 base updates and host triggers without model wakes', async (t) => {
   const fx = createFixture(t);
   const s = humanBlocked();
@@ -1097,7 +1209,7 @@ test('replay: baseline CI failure batches main updates until the model-selected 
   const due = await fx.run(['--json']);
   assert.equal(due.code, 0);
   assert.equal(due.json().reason, 'wait-expired');
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--resume', 'Merged the baseline fix and pushed.'])).code, 0);
   assert.equal(fx.readState().wait, undefined);
   // Model merges fixed main and pushes; the old wait must not delay new CI or replay the old failure.
   fx.setSnapshot(snap({ latestCommitOid: 'new-head', baseCommitOid: 'base-fixed', checks: [check('build', 'pending')] }));
@@ -1105,7 +1217,7 @@ test('replay: baseline CI failure batches main updates until the model-selected 
   fx.advance(5);
   fx.setSnapshot(snap({ latestCommitOid: 'new-head', baseCommitOid: 'base-fixed' }));
   assert.equal((await fx.run(['--json'])).code, 0);
-  await fx.run(['--ack']);
+  assert.equal((await fx.run(['--ack'])).code, 0);
   assert.equal((await fx.run(['--json'])).code, 2, 'CI result handled exactly once');
 });
 
@@ -1135,8 +1247,9 @@ test('replay: important new events pierce a human wait immediately, even through
     const result = await fx.run(['--pacing', '--json']);
     assert.equal(result.code, 0, result.stdout);
     assert.match(`${result.json().report ?? ''} ${result.json().detail}`, report);
-    await fx.run(['--ack']);
-    assert.equal(fx.readState().wait, undefined, 'the next round must reassess its wait');
+    const before = fx.readState();
+    assert.equal((await fx.run(['--ack'])).code, 1, 'an empty ack cannot discard the wait');
+    assert.deepEqual(fx.readState(), before, 'reassess and finish explicitly in this round');
   });
 });
 
@@ -1288,11 +1401,20 @@ test('real CLI: --wait reads a file, persists it, and suppresses irrelevant base
   const s = humanBlocked();
   fx.setSnapshot(s);
   assert.equal((await fx.runVia(gatePath, ['--json'])).code, 0);
+  const before = fs.readFileSync(fx.stateFile(), 'utf8');
+  const empty = await fx.runVia(gatePath, ['--ack']);
+  assert.equal(empty.code, 1);
+  assert.match(empty.stderr, /finish decision required.*--wait/);
+  assert.equal(fs.readFileSync(fx.stateFile(), 'utf8'), before);
   const result = await fx.runVia(gatePath, ['--wait', fx.writeWait(waitPlan(s)), '--json']);
   assert.equal(result.code, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).wait.until, null);
   fx.setSnapshot({ ...s, baseCommitOid: 'base-new' });
   assert.equal((await fx.runVia(gatePath, ['--triggered', '--json'])).code, 2);
+  const resumed = await fx.runVia(gatePath, ['--resume', 'Handled the finding and pushed.', '--json']);
+  assert.equal(resumed.code, 0, resumed.stderr);
+  assert.equal(JSON.parse(resumed.stdout).reason, 'resumed');
+  assert.equal(fx.readState().wait, undefined);
 });
 
 test('replay: same-count check reruns and inline resolutions are discovered on the next five-minute poll', async (t) => {

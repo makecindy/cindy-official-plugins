@@ -63,6 +63,15 @@ Not woken: pushes, checks starting or running, an unchanged failure, the agent's
 
 ## Model-directed waits
 
+A round ends with one decision: `--wait <plan.json>` for a known blocker,
+`--resume "<what was handled or pushed>"` to acknowledge and resume observation, or `--ack`
+when nothing remains. All acknowledge only the earliest released observation. Plain ack refuses
+an existing wait, incomplete/missing observations or remaining checks, threads or blockers;
+it leaves state untouched and tells the model how to finish in the same turn. The gate's event
+output carries the same short hint, including for schedules created before this protocol.
+No extra wake or migration timer is added; an interrupted turn uses the existing retry/backoff.
+Resume is the model's explicit account of its work, not machine proof that a failure was fixed.
+
 A wait delays **model work**, not observation of GitHub. No extra scheduler, background process,
 lock or queue is added: `--wait` acknowledges the current round and writes one record alongside
 `watch` in the existing state file. The schedule stays at five minutes. A skip creates no model
@@ -96,7 +105,7 @@ checks, merge permissions, thread resolution or the PR's verdict.
 
 Durations are 5–1440 minutes. Only `human` accepts `null`. Repeated baseline failures should get
 longer evidence-based waits, not a five-minute timer or repeated reruns. New work is never delayed
-until that timer. After a push use ordinary ack and the existing bot settle window; do not extend
+until that timer. After a push use `--resume` and the existing bot settle window; do not extend
 bot batching with successive model waits. A baseline fix must be merged and pushed, not just rerun
 on the old commit. When several causes coexist, use a timed wait and include the handled checks;
 only choose indefinite human waiting when every failing check and unresolved thread is accounted for.
@@ -117,8 +126,9 @@ Safety and resumption:
   applies to ordinary polls and host-triggered polls. Baseline waits get their model-chosen deadline;
   indefinite human waits do not get daily reminders.
 - Expiry uses the same pending/ack/retry mechanism as other events. If the model fails to start or
-  crashes, the deadline is retried with backoff, not silently consumed. Ack clears the wait; the next
-  round chooses a new one if needed. Real new events can break a retry backoff.
+  crashes, the deadline is retried with backoff, not silently consumed. Replace the wait with
+  `--wait`, or clear it with `--resume` after handling the work. Plain `--ack` and legacy `--defer`
+  cannot discard an existing wait. Real new events can break a retry backoff.
 - Missing/truncated data is never evidence of continued waiting. It requests investigation without
   advancing past potentially unseen events. Existing network failures and rate-limit backoff still apply.
 
