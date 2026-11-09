@@ -1455,3 +1455,25 @@ test('reading and exported binder find storage-boundary words and retain cumulat
     for(const html of [R.render(timed),R.documentHTML(timed,'')])assert.match(html,/25:00:00–25:01:01/);
   }finally{h.close();}
 });
+
+// #285 P2: unlike cite, minutes accepted punctuation-only model quotations.
+// Service/SQLite unit regression: missing excerpt_idx + quote '...' must not
+// save an artifact; existing coverage only rejected missing excerpt identifiers.
+test('minutes rejects empty normalized quotes while retaining source excerpt and valid quote mapping',async()=>{
+  const h=harness();try{
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Only original evidence'});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h,d=>{d.chapters[0].points[0]={...d.chapters[0].points[0]};delete d.chapters[0].points[0].excerpt_idx;d.chapters[0].points[0].quote='...';return d;});
+    await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_QUOTE_MISMATCH/);
+    assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).available,false);
+    assert.equal(h.files.size,0);assert.equal(h.db.prepare("SELECT count(*) AS n FROM meta WHERE key=?").get('minutes:'+eid).n,0);
+    await assert.rejects(h.service.run('podcast_cite',{references:[{episode_id:eid,quote:'...'}]}),/INVALID_INPUT/);
+    minutesModel(h,d=>{d.chapters[0].points[0]={...d.chapters[0].points[0]};delete d.chapters[0].points[0].excerpt_idx;d.chapters[0].points[0].quote='only ORIGINAL evidence';return d;});
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+    assert.equal(d.chapters[0].points[0].quote,'only ORIGINAL evidence');assert.equal(d.chapters[0].quotes[0].quote,'Only original evidence');
+    for(const p of [d.chapters[0].points[0],d.chapters[0].quotes[0]]){
+      assert.equal(p.segment_id,d.segments[0].id);
+      const c=await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]});assert.ok(['exact','normalized'].includes(c.citations[0].status));
+    }
+  }finally{h.close();}
+});

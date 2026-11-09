@@ -767,7 +767,8 @@ if(typeof module!=='undefined')module.exports=PodcastHtmlParser;
       const quote=Number.isInteger(p.excerpt_idx)?excerpts[p.excerpt_idx]:p.quote;
       if(typeof quote!=='string')invalid('evidence_segment_'+(Number.isInteger(p.segment_idx)?p.segment_idx:'missing')+'_excerpt_'+(Number.isInteger(p.excerpt_idx)?p.excerpt_idx:'missing')+'_count_'+excerpts.length);
       str(quote,quoteLimit);
-      if(!segment||!C.norm(segment.text).includes(C.norm(quote)))C.fail('MINUTES_QUOTE_MISMATCH');
+      const needle=C.norm(quote);
+      if(!segment||!needle||!C.norm(segment.text).includes(needle))C.fail('MINUTES_QUOTE_MISMATCH');
       return {text:str(p.text,1000),quote,segment_id:segment.id,segment_idx:segment.idx,start_ms:segment.start_ms,end_ms:segment.end_ms,speaker:segment.speaker||''};
     }
     async model(prompt,callId){
