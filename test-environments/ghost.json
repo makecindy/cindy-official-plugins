@@ -5,7 +5,7 @@
   "name": "Test Environments",
   "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
   "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -630,5 +630,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "Phase 2: parameterized SSH orchestration, pinned PR worktrees, B-local session reuse, configured sample/verification commands and private evidence collection. Cross-device first authorization remains independent research; real hardware and human verification remain explicit."
+  "releaseNotes": "Unified local real-account acceptance and generic SSH workflows in one PR and test package. PR #308 is superseded by #309; #279 remains the handoff source. Cross-device first authorization remains future research. Runtime behavior is unchanged from 1.1.0."
 }

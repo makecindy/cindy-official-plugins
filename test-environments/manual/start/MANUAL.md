@@ -108,16 +108,16 @@ The catalog, job logs and screenshots stay in local user data. Review/redact log
 before sharing. Do not enable unfinished builds in the daily host or install this
 plugin inside the target dev app to launch another layer. Packaging is not installation.
 
-Phase 1 local delivery remains independent. SSH orchestration and cross-device first authorization are independent Phase 2 capabilities, neither a Phase 1 completion gate. Device-tool and real human steps remain explicit.
+Local acceptance and generic SSH orchestration are delivered together in PR #309 and one test package, with separate evidence. #308 is superseded; #279 remains the handoff source. Neither must merge first. Cross-device first authorization remains unimplemented future research.
 
-## Phase 2 SSH template (separate draft)
+## Generic SSH template (unified test package)
 
-Version 1.1.0 adds generic SSH orchestration in a separate PR; computers are parameters.
+Unified test package 1.1.1 includes local acceptance and generic SSH orchestration; computers are parameters.
 Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
 remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
 runId. Reuse that ID for status, account selection, remote_action, stop and collection.
 target.host is a configured SSH alias/hostname; target.node optionally names B's Node
-executable. pr requires GitHub owner/repo, number and exact commit. B needs its Phase 1
+executable. pr requires GitHub owner/repo, number and exact commit. B needs its local acceptance
 profile, repository, SSH trust and toolchain; accounts/encrypted sessions stay on B.
 Prepare/verify run saved argv only, never arbitrary ad-hoc SSH commands. Missing project
 commands/device tools produce explicit handoffs. Human/device-tool requirements remain

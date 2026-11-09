@@ -1,6 +1,9 @@
-# Phase 2: generic SSH acceptance and first authorization
+# Generic SSH acceptance and future first authorization
 
 [简体中文](test-environments-remote.zh-CN.md)
+
+
+[#309](https://github.com/makecindy/cindy-official-plugins/pull/309) is the single delivery PR; #308 is superseded and #279 remains the handoff source. Neither must merge first. One package contains local and SSH features with separate evidence; cross-device first authorization remains design-only.
 
 ## Independent capabilities
 
@@ -10,7 +13,7 @@
 2. **Cross-device first authorization**: research A approving a new, independent
    device session for signed-out B. Check existing client/server capabilities first;
    hosted browser callbacks do not establish that device authorization exists.
-   This does not block SSH for an already-signed-in B or Phase 1 delivery.
+   This does not block SSH for an already-signed-in B and is not an implemented capability.
 
 SSH carries control and evidence, never copied credentials, cookies, Keychain files
 or A's existing device session as a substitute for authorization.
@@ -27,11 +30,11 @@ A's agent. The selected computer needs SSH, Node, Git, the project toolchain and
 required graphical session. These prerequisites and B's own login are setup, not
 hard-coded business logic for each computer.
 
-## Reserved interfaces (design-only in Phase 1; implemented in Phase 2)
+## SSH interfaces in the unified PR
 
 - remote_catalog(target): observe platform/model and B's public project/profile/account references.
 - remote_plan(target, profile, pr): preview pinned checkout/start and human/device steps.
-- remote_start(planId): start only the previewed target/repository/PR-SHA/profile and return a durable run ID.
+- remote_start(runId): start only the previewed target/repository/PR-SHA/profile and return a durable run ID.
 - remote_status(runId), remote_stop(runId): reconcile the same run after disconnect and stop only its work.
 - remote_collect(runId): retrieve only this run's logs, private screenshots and structured results with size/hash checks.
 - Samples/cases use project-declared commands and real app/device tools, with explicit evidence sources.
@@ -55,18 +58,18 @@ review/redact before authorized PR publication, never send automatically.
 Source contains SSH management, isolated startup, account switching and hosted
 browser callbacks. The plugin does not import private client modules or copy other
 Agent authentication files through their bootstrap helpers. Prefer system OpenSSH
-and Phase 1's shared CLI. Cross-device approval still needs source identity, target
+and the shared local-acceptance core. Cross-device approval still needs source identity, target
 binding, expiry, denial/revocation and independent-session protocol evaluation.
 
-Phase 1 evidence applies only to that implementation. Phase 2 adds injection,
+Local evidence cannot certify actual SSH/hardware. Current tests cover injection,
 wrong-host/repository/SHA, uncertain disconnect, worktree isolation, artifact boundary/
 size checks and real SSH/hardware evidence. Without an actual selected B, simulated
 transport plus local Git/process tests must be labeled simulated, never cross-computer
 hardware acceptance.
 
-## Phase 2 implementation draft (separate PR, version 1.1.0)
+## Unified implementation draft (PR #309, test package 1.1.1)
 
-Generic AI/CLI tools now include remote_catalog, remote_plan, remote_start,
+The unified AI remote tool and CLI workflow entries include remote_catalog, remote_plan, remote_start,
 remote_status, remote_stop, remote_select_account, remote_action and remote_collect.
 Pass target.host and optionally target.node each time; no per-computer business script
 is generated. The management page remains local-first; use AI/CLI for SSH.
@@ -77,7 +80,7 @@ runId/plan, start once, and use that same ID for status, account selection, conf
 prepare/verify commands, stop and collection. outputDir can name the current task's
 absolute directory; otherwise artifacts remain in private local application data.
 
-B needs a Phase 1 profile, source repository and project toolchain. Only the fixed
+B needs a local acceptance profile, source repository and project toolchain. Only the fixed
 plugin runtime is provisioned outside Git; no Cindy plugin installation or credential
 transfer occurs on B. A new worktree checks repository origin and exact SHA without
 overwriting B's source. Reuse B-local application login; missing login waits rather
@@ -90,7 +93,7 @@ No password/private key is read or stored. Transfer contains plugin code, public
 configuration and selected evidence only. A fixed Node bootstrap receives JSON stdin;
 validated target/Node values are shell-quoted, Git/project commands use argv.
 Remote execution and evidence transfer are a separate review boundary requiring
-maintainer assessment in the follow-up PR, not certification by local tests alone.
+maintainer assessment in the unified PR, not certification by local tests alone.
 
 Automated tests simulate SSH transport with real Node/Git/worktrees/shared runners,
 checking checkout, sample/verification commands, scoped stop, evidence limits/hashes

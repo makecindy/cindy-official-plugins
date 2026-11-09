@@ -89,16 +89,16 @@ macOS PTY 所需 Python 3，以及核对端口归属的 lsof。
 不要把未完成版本启用到日常宿主，也不在目标 dev 中安装本插件以启动下一层。
 打包不等于安装。
 
-第一阶段本机流程独立交付。SSH 远程编排与跨设备首次授权是第二阶段的两项独立能力，均不作为第一阶段完成前提；后续分别记录设备工具与真实人工步骤。
+本机验收与通用 SSH 编排统一在 PR #309 和同一个测试包交付、分别记录证据。#308 已被替代，#279 保留交接来源，不再要求前置 PR 先合入。跨设备首次授权仍是后续独立研究，未实现或部署。
 
-## 第二阶段 SSH 模板（独立草稿）
+## 通用 SSH 模板（统一测试包）
 
-本轮 1.1.0 在独立 PR 实现通用 SSH 编排，电脑是参数，不是固定目标。
+统一测试包 1.1.1 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
 通过 AI/CLI 先 remote_catalog(target) 读目标电脑的档案和实际型号，再 remote_plan(target,profile,pr,requirements)，
 检查计划后用返回的 runId 调 remote_start；后续 remote_status、remote_select_account、remote_action、
 remote_stop、remote_collect 始终引用同一运行。target.host 是已配置的 SSH 别名/主机名，target.node
 可选为 B 的 Node 绝对路径；pr 必须提供 GitHub owner/repo、number 和精确 commit。
-B 需已有第一阶段档案、源码仓库、SSH 主机信任和项目工具链，账户及其加密登录态留在 B。
+B 需已有本机验收档案、源码仓库、SSH 主机信任和项目工具链，账户及其加密登录态留在 B。
 prepare/verify 只执行项目保存的参数数组；不接受临时任意远端命令。没有项目命令或设备工具时明确交接待办。
 requirements 中 human/device-tool 项目保持 pending，不能用合成事件或命令退出码当作真机/人工通过。
 证据仅包含本次结果、可选限量日志和私有截图，校验摘要，绝不复制登录文件或自动发往 PR。

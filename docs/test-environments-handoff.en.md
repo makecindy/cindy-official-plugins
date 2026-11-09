@@ -1,127 +1,115 @@
-# Test Environments: real-account plan and handoff
+# Test Environments: unified PR plan and handoff
 
 [简体中文](test-environments-handoff.md)
 
-Revised on 2026-11-09 for the recipient's goal. PR #279 remains Draft, not installed
-or published. This is not a claim of completed real-account acceptance.
+On 2026-11-09 the recipient chose **[#309](https://github.com/makecindy/cindy-official-plugins/pull/309)
+as the single development, testing and merge entry** for local and SSH workflows.
+#308 is superseded; [#279](https://github.com/makecindy/cindy-official-plugins/pull/279)
+remains the original requirements/handoff source. Neither must merge first.
+The unified PR remains Draft; packaging does not mean installation, publication or real acceptance.
 
-## Goal
+## Goal and included scope
 
 Keep **start → select account → prepare samples → execute acceptance → stop**.
-Use ordinary real application accounts, with separate sign-in on each computer.
-An isolated profile separates local data; it does not create a machine-bound account.
+Use ordinary real application accounts with independent sign-in on each computer.
+Isolation separates local test data, not a special machine-bound account identity.
 
-Retention has two layers: the app's existing vault keeps all app-saved encrypted
-sessions; the plugin remembers public account references, local profile bindings
-and observations. Stop/restart, metadata edits and plugin upgrades do not log out
-or clear these profiles. Sign in once on a new computer to retain its own session.
-Expiration, revocation, explicit logout or deleting app data still requires sign-in.
-No tokens, cookies, Keychain entries or encrypted credential files are copied, and
-no indefinite authentication is promised. Discovery covers only this plugin's
-owned applications, not arbitrary daily-host or other-computer login histories.
-
-## Two-phase delivery boundary
-
-| Area | Phase 1: current #279 / #308 | Phase 2: separate follow-up PR |
+| Capability | Unified PR implementation | Verification boundary |
 | --- | --- | --- |
-| Execution | Complete local acceptance; real accounts sign in independently per computer | Generic SSH template; choose computer, PR, profile and hardware requirements per run |
-| Login storage | Cindy owns local sessions; plugin keeps references, locations and configuration | Reuse B's local session; SSH never transports credentials |
-| B signed out | Explicit normal reauthorization wait | Research cross-device first authorization separately; not a prerequisite for SSH with B already signed in |
-| Samples/cases | Plugin orchestration, real tools and explicit human steps | Prepare/execute on B; bring logs, screenshots and results to the current task |
-| Evidence | Current implementation's real integration, without requiring SSH or password-free authorization | Separate SSH, hardware, device-tool and human verification evidence |
+| Local acceptance | Catalog, account discovery/selection, supervision, sample/verification commands and stop | Current-code automated regressions; real Cindy/accounts still unverified |
+| Generic SSH template | Choose computer/B profile per run, pin PR SHA, checkout/build/start, reuse B login, run commands and retrieve evidence | Simulated SSH with real Git/processes; actual cross-computer/hardware testing remains |
+| Physical devices/human steps | Explicit device-tool/human handoffs stay pending | Phones require their actual tools; trackpad feel requires real human input |
+| Cross-device first authorization | Research/interface design only, not implemented/deployed | Not a prerequisite for SSH with an already-signed-in B or an implemented capability |
 
-See the [SSH and first-authorization design](test-environments-remote.md) for reserved interfaces.
-Targets are parameters, not hard-coded computers: SSH Host, B repository path, PR number and exact commit,
-B profile and cases. SSH trust, Node and the project toolchain must exist on the selected computer.
-A concrete machine is needed for real hardware verification, not for writing the generic template.
-Physical phones use their device tools; trackpad feel keeps real human input rather than synthetic events.
+Local and SSH features share one test package, with evidence recorded separately.
+Cross-device first authorization remains independent future work.
 
-## Implementation ownership
+## Login and data ownership
+
+Cindy's existing vault safely retains each computer's encrypted sessions. The plugin
+records public account references, local profile locations and launch configuration.
+All app-saved accounts can be remembered; renaming metadata, stop/restart and plugin
+updates do not log out or clear application profiles.
+
+A new computer needs its own normal sign-in. Expiration, revocation, explicit logout
+or deleted application data requires reauthorization. No plaintext tokens, cookies,
+Keychain entries or credential files are extracted, copied or stored by the plugin,
+and indefinite login is not promised. Discovery covers only verified plugin-owned
+apps, not arbitrary daily-host/other-computer history. SSH carries control, public
+configuration and selected evidence, never copied credentials as device authorization.
+
+## Code navigation
+
+Paths below are relative to test-environments/.
 
 | Module | Responsibility |
 | --- | --- |
-| Plugin `node/core.cjs` | Project/account/profile/case catalog, launch plans, explicit selection requests and workflow instructions |
-| `node/account-catalog.cjs` | Merge every app-saved public account and local profile history without credentials |
-| `node/session-monitor.cjs` | Observe identity, request a switch once, wait for sign-in, verify online and record status |
-| `node/observation.cjs` | PID/process/port/main-page ownership, fixed app operations, projected results and screenshots |
-| `node/cindy-launch.cjs` | Reuse restart coordinator and checks; take over only final readiness waiting |
-| `node/runner.cjs`, `terminal.py` | Owned job supervision, macOS background PTY, waiting and exact stop |
-| `manage.*`, `main.js`, worker/CLI | One shared implementation for UI, AI and CLI |
+| node/core.cjs | Shared catalog, plans, account selection, sample/verification commands and workflow |
+| node/account-catalog.cjs | Merge app-saved public references and local profile history, without credentials |
+| node/session-monitor.cjs | Actual identity, one-shot selection, reauthorization waits, online auth/database checks |
+| node/observation.cjs | PID/startup identity/port/main-page ownership, fixed app operations and projected results |
+| node/cindy-launch.cjs | Reuse restart coordinator/checks; take over final readiness wait only |
+| node/runner.cjs, node/terminal.py | Owned supervision, macOS PTY and scoped stop |
+| node/remote.cjs | Parameterized OpenSSH, local run ledger, bounded/hash-checked artifact storage |
+| node/remote-agent.cjs, node/remote-runner.cjs | B-side preview, pinned PR worktree, shared core, status/stop/evidence receipts |
+| main.js, manage.*, worker/CLI | Shared implementation; SSH currently uses AI/CLI |
 
-Plugin paths are relative to `test-environments/`. No client/server code or OAuth
-scope changed. New `select_account` only controls a verified plugin job, not
-arbitrary IPC/JS or host accounts. `import_cindy` now syncs public references from
-an exact live job instead of an unshipped alias file.
+No client/server code or third-party OAuth scopes change. Remote execution/transfer
+still requires maintainer review; a unified PR or green tests does not waive it.
+Audience remains opt-in.
 
-## Existing capabilities reused
+## Testing local and SSH paths
 
-Local client source and GitHub main's auth manager, preload, restart coordinator
-and startup status were inspected. The local server checkout was older, so main's
-auth route list and hosted callback were checked separately. Source availability
-is not proof of a released client version or production deployment.
+Locally, catalog first; save a source project and persistent isolated profile with an
+unused debugPort. Preview, start and use normal app sign-in/Add account. References
+are remembered automatically. Select an account and inspect status; missing/expired
+login waits for normal authorization. ready/application-account-online proves online
+identity/database readiness only. Prepare samples, execute cases with real tools and
+evidence, then stop and query until stopped.
 
-- Named isolation, restart coordination and `.dev-instances` registration.
-- App account list/sync/switch, ordinary login, auth refresh and database readiness.
-- Existing `--passive` for automatic scheduler/routine triggers, not every background process.
-- Existing remote-control setting, off by default for acceptance and checked afterwards.
-- Existing hosted browser-login callback and client polling; no new device-auth service.
+For SSH, obtain the exact current PR SHA through the GitHub plugin. Use the single
+remote tool:
 
-The missing local `dev-acceptance-profiles` and `feat/dev-device-authorization` WIP
-are no longer dependencies. No WIP acceptance flags or special acceptance receipt
-are required. Old loginSource/serveLogin fields remain readable but fail clearly
-on execution with normal per-computer login guidance.
+1. operation=catalog with target {host,node?} reads B's observed model/public catalog.
+2. operation=plan takes target, B profile ID, pr {repo,number,commit} and requirements.
+   The repository path comes from B's profile/catalog. Returned runId has not fetched/started the PR.
+3. Review, then start. All subsequent status/select_account/action/stop/collect operations use that runId.
+4. action runs saved prepare/verify argv only. Missing commands require explicit handoff.
+   Human/device work never passes from a zero exit code.
+5. collect returns results and optional bounded logs/private screenshots to outputDir
+   or private local storage; review/redact before sharing.
 
-## Workflow and boundaries
+B needs existing SSH trust, Node, Git, project tooling and a local profile, not a
+computer-specific business script. Never automatically trust new host keys, forward
+A's agent, overwrite B's working tree or kill broad process patterns. After disconnect,
+query the same run instead of blindly repeating start/actions. See the [SSH/auth design](test-environments-remote.md).
 
-1. Save a project and persistent desktop profile with an unused debugPort. Start
-   without selecting an account if necessary, then complete normal app login.
-2. Automatically remember every app-saved account and profile; refresh/edit names in UI.
-3. Select a reference for next launch or request a switch in the exact live job.
-4. Missing local sign-in waits; no sessions are copied from other computers/profiles.
-5. App ready alone is insufficient: verify actual account, online auth and database.
-6. Prepare named samples and execute saved cases with real app tools and evidence,
-   then stop. The plan exposes the whole workflow; saving, launching or login does
-   not automatically pass sample preparation or cases.
-7. Lost/uncertain switch results require observation, never an automatic repeat.
+## Current-code evidence and gaps
 
-Legacy mode preserves original startup/login without account supervision. Mobile
-build/Metro and Baguette handoff remain; desktop evidence does not certify mobile.
-Generic argv adapters retain project-owned prepare/verify commands without
-converting authentication formats between applications.
+Unified test package: **1.1.1**. This revision changes delivery documentation, version
+and package metadata; runtime code is unchanged from 1.1.0. Required checks are rerun.
+Current automated coverage includes:
 
-## Evidence and remaining work
+- Local persistence, A→B→A state transitions, separate-computer login models,
+  expiration guidance, uncertain switch handling and invalidating stale queued readiness.
+- Real children/macOS PTY/ownership/coordinator checks and a simulated app using real HTTP/WebSocket/CDP.
+- Simulated SSH driving real Node/Git/worktrees/shared runners, sample/verification commands, scoped stop and evidence transfer.
+- SSH input validation, wrong repository/SHA, unknown versus confirmed-not-executed outcomes and artifact name/size/hash checks.
 
-Version 1.0.6 has regressions for persistence, safe app projections, A→B→A state
-transitions, independent computer login, uncertain switch handling, locks, deleted
-profiles and real child-process/PTY/ownership behavior. A local HTTP/WebSocket app
-simulator exercises the real runner, lsof and CDP transport, without real accounts
-or credentials. It is not real Cindy account integration evidence.
+This is not real Cindy, real-account, two-computer, specific-hardware, physical-phone
+or human-feel acceptance. Missing 1.0.4 WIP evidence remains historical only.
 
-The 1.0.4 tests with missing client WIP are historical context, not proof of this
-new adapter. Still required:
+Still required: real local login/restart/A→B→A, second-computer sign-in, actual SSH
+build/login reuse/recovery/evidence retrieval, UI/AI/CLI host integration with actual
+version/channel, and the relevant device-tool/human checks. Windows account supervision
+remains explicitly unavailable; Linux/mobile need separate verification.
 
-1. Real Cindy dev login, remembering all accounts, stop/restart reuse and A→B→A.
-2. Independent sign-in to the same real account on a second computer, checking
-   identity, samples and retention on the original computer.
-3. Expiration/revocation, login waits, account/database/background transitions and legacy startup.
-4. Real host UI/AI/CLI integration with actual client version and channel recorded.
-5. If first login must happen from another device, evaluate a minimal login-URL
-   handoff and test the hosted callback. Source-profile authorization of an empty
-   target is a separate unimplemented capability, not this iteration's dependency.
-6. Separate mobile, Windows, Linux and other-project evidence. Windows account
-   supervision currently fails explicitly as unsupported.
-
-Keep Draft until the real integration gaps relevant to release are filled. Never
-upload private accounts, logs, screenshots or application profiles to the PR.
-
-## Continue
-
-Set a separate TEST_ENVIRONMENTS_HOME outside Git; use the shared CLI with JSON
-stdin, catalog/plan before start. Do not enable unfinished builds in the daily
-host or install the plugin inside the target dev instance.
+Do not install/enable the unfinished package in the daily host or bundle real accounts,
+logs or profiles. Use a separate TEST_ENVIRONMENTS_HOME outside Git and the shared CLI;
+do not install this plugin inside a target dev instance to launch another layer.
 
 ```sh
-node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/test-environments.test.mjs
+node --test .tests/plugin-contract.test.mjs .tests/localization.test.mjs .tests/provisioning.test.mjs .tests/publish-workflows.test.mjs .tests/test-environments.test.mjs .tests/test-environments-ssh.test.mjs
 ```
 
-A separate Phase 2 implementation draft now adds the generic SSH tools; see the [Phase 2 plan](test-environments-remote.md). It is not a Phase 1 completion gate. Actual SSH/hardware and authorization research evidence remains separate from Phase 1 account simulations.
+The package, source commit and SHA-256 association is recorded in #309 and the current Cindy task.
