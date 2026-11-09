@@ -22,7 +22,7 @@ class SessionMonitor {
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     let snapshot = await this.perform(this.plan, status, 'snapshot');
     const saved = this.remember(this.plan.catalogHome, this.plan, status.application, snapshot);
-    const base = {login: {step: snapshot.step, authenticated: snapshot.authenticated},
+    let base = {login: {step: snapshot.step, authenticated: snapshot.authenticated},
       accountsRemembered: snapshot.accounts.length, accountCapture: saved.saved ? 'saved' : saved.reason,
       currentAccount: snapshot.authenticated ? snapshot.accounts.find(a => a.isCurrent) || null : null,
       selectedAccount: this.target ? {id:this.target.id,label:this.target.label,selector:this.target.selector} : null,
@@ -64,11 +64,13 @@ class SessionMonitor {
       this.lastVerificationAttempt = this.now();
       const before = current();
       snapshot = await this.perform(this.plan, status, 'verify');
-      if(!snapshot.authenticated)return {...base,state:'waiting-for-owner',code:'ACCOUNT_REAUTH_REQUIRED',verification:undefined,nextAction:'The local session is no longer authenticated. Reauthorize through normal Cindy sign-in on this computer.'};
+      base={...base,login:{step:snapshot.step,authenticated:snapshot.authenticated},currentAccount:snapshot.authenticated?snapshot.accounts.find(a=>a.isCurrent)||null:null};
+      if(!snapshot.authenticated){this.verifiedKey=null;return {...base,state:'waiting-for-owner',code:'ACCOUNT_REAUTH_REQUIRED',verification:undefined,nextAction:'The local session is no longer authenticated. Reauthorize through normal Cindy sign-in on this computer.'};}
       if (snapshot.verified && current() === before && snapshot.databaseReady) {
         this.verifiedKey = before; this.verifiedAt = this.now();
       } else this.verifiedKey = null;
     }
+    if(remote!=='inherit'&&snapshot.remoteControl!==(remote==='on'))return {...base,state:'checking-account',code:'REMOTE_CONTROL_UNCONFIRMED',verification:undefined,nextAction:'The remote-control setting changed during online verification; wait for another observation.'};
     if (!this.verifiedKey || this.verifiedKey !== current() || this.now() - this.verifiedAt >= 60_000)
       return {...base, state: 'checking-account', code: 'ONLINE_VERIFICATION_PENDING', verification: undefined,
         nextAction: 'Online authentication is not confirmed. Check network or application sign-in; no acceptance success is implied.'};

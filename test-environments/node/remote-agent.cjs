@@ -48,10 +48,16 @@ function status(request){
  if(!job&&!['failed','stopped'].includes(state)&&(!run.supervisorPid||identity(run.supervisorPid)!==run.supervisorIdentity))state='unknown';
  return {runId:request.runId,state,stage:run.stage,execution:job?.execution||run.execution||'unknown',pr:run.plan.pr,
   actualCommit:run.actualCommit||null,checkout:run.checkout||null,hardware:run.plan.hardware,profile:run.plan.profile,
+  accounts:run.jobId?Object.values(coreFor(dir).read().accounts).map(({id,project,label,selector})=>({id,project,label,selector})):[],
   job,actions,requirements:run.plan.requirements,acceptance:'not-certified-by-command-exit',errorCode:run.errorCode||null};
 }
 function readArtifact(file,max,tail=false){
- const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.size>max&&!tail)fail('ARTIFACT_SIZE_LIMIT');if(stat.size<=max)return fs.readFileSync(fd);const bytes=Buffer.alloc(max);fs.readSync(fd,bytes,0,max,stat.size-max);return Buffer.concat([Buffer.from('[Truncated: last bytes of this run log]\n'),bytes]);}finally{fs.closeSync(fd);}
+ const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{
+  const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.size>max&&!tail)fail('ARTIFACT_SIZE_LIMIT');
+  const size=Math.min(stat.size,max),bytes=Buffer.alloc(size),start=stat.size-size;let read=0;
+  while(read<size){const n=fs.readSync(fd,bytes,read,size-read,start+read);if(!n)break;read+=n;}
+  const content=bytes.subarray(0,read);return stat.size>max?Buffer.concat([Buffer.from('[Truncated: last bytes of this run log]\n'),content]):content;
+ }finally{fs.closeSync(fd);}
 }
 async function dispatch(request){
  if(!request||typeof request.method!=='string')fail('INVALID_REMOTE_REQUEST');
@@ -78,9 +84,11 @@ async function dispatch(request){
   return {runId:request.runId,state:'stopping',execution:'requested',nextAction:'Query until the owned instance stops. No profiles or credentials are deleted.'};
  }
  if(request.method==='select_account'){
+  if(fs.existsSync(path.join(dir,'cancel.json')))fail('REMOTE_RUN_STOPPING');
   if(!run.jobId)fail('REMOTE_APP_NOT_STARTED');return core.selectAccount(run.jobId,request.account);
  }
  if(request.method==='action'){
+  if(fs.existsSync(path.join(dir,'cancel.json')))fail('REMOTE_RUN_STOPPING');
   if(!['prepare','verify'].includes(request.action)||!UUID.test(request.actionId||''))fail('INVALID_ACTION');
   if((run.actions||[]).some(a=>a.actionId===request.actionId))return status(request);
   if(!run.jobId||!['ready','running'].includes(core.status(run.jobId).state))fail('REMOTE_APP_NOT_READY');
@@ -88,8 +96,10 @@ async function dispatch(request){
   if(!run.plan.source.project.commands?.[request.action])fail('ACTION_NOT_CONFIGURED');
   const lock=path.join(dir,'.action-lock');try{fs.mkdirSync(lock);}catch{fail('REMOTE_ACTION_BUSY');}
   try{
+   if(fs.existsSync(path.join(dir,'cancel.json')))fail('REMOTE_RUN_STOPPING');
    if(core.jobs().some(j=>j.action!=='start'&&!['stopped','failed','completed'].includes(j.state)))fail('REMOTE_ACTION_PENDING');
    const result=core.start(run.plan.profile,request.action);run.actions.push({actionId:request.actionId,action:request.action,jobId:result.jobId});atomic(path.join(dir,'run.json'),run);
+   if(fs.existsSync(path.join(dir,'cancel.json')))core.stop(result.jobId);
    return {runId:request.runId,actionId:request.actionId,jobId:result.jobId,execution:'requested',requirements:run.plan.requirements};
   }finally{fs.rmdirSync(lock);}
  }
@@ -103,4 +113,4 @@ async function dispatch(request){
  }
  fail('UNKNOWN_REMOTE_OPERATION');
 }
-module.exports={dispatch,plan,status,hash,hardware,requirements,runDirectory};
+module.exports={dispatch,plan,status,hash,hardware,requirements,runDirectory,readArtifact};

@@ -86,8 +86,9 @@ query the same run instead of blindly repeating start/actions. See the [SSH/auth
 
 ## Current-code evidence and gaps
 
-Unified test package: **1.1.1**. This revision changes delivery documentation, version
-and package metadata; runtime code is unchanged from 1.1.0. Required checks are rerun.
+Unified test package: **1.1.2**. This revision fixes stop/action races, stale account and
+process status, SSH UTF-8 receipts, execution uncertainty, shared FETCH_HEAD and mixed evidence.
+See the [self-check record](test-environments-self-check.md) for fixes, regression evidence and integration gaps.
 Current automated coverage includes:
 
 - Local persistence, A→B→A state transitions, separate-computer login models,

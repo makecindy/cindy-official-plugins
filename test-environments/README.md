@@ -38,7 +38,7 @@ Local acceptance and generic SSH orchestration are delivered together in PR #309
 
 ## Generic SSH template (unified test package)
 
-Unified test package 1.1.1 includes local acceptance and generic SSH orchestration; computers are parameters.
+Unified test package 1.1.2 includes local acceptance and generic SSH orchestration; computers are parameters.
 Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
 remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
 runId. Reuse that ID for status, account selection, remote_action, stop and collection.
@@ -56,3 +56,10 @@ Current evidence is simulated SSH with real local Git/processes, not cross-compu
 real-account, physical-phone or human-input verification.
 
 AI calls the single `remote` tool with operation=catalog/plan/start/status/stop/select_account/action/collect. The remote_catalog-style names also remain CLI/internal workflow entries, not eight separate Host tools.
+
+New actions and account selections are rejected after stop; commands being registered receive cancellation too.
+Local requests for the same runId are serialized; wait for an in-flight receipt. Abandoned locks
+are reclaimed only after checking process identity, without trusting a reused PID.
+remote_status.accounts exposes this run’s discovered catalog IDs for remote_select_account, without credentials.
+Each collection validates the entire manifest before creating an independent evidence subdirectory;
+old screenshots cannot mix with a new result, and failed collections do not deliver partial files.

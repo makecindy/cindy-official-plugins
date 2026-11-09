@@ -29,7 +29,7 @@ AI 工具、管理页和 CLI 共用目录。Cindy 桌面复用现有启动、隔
 
 ## 通用 SSH 模板（统一测试包）
 
-统一测试包 1.1.1 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
+统一测试包 1.1.2 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
 通过 AI/CLI 先 remote_catalog(target) 读目标电脑的档案和实际型号，再 remote_plan(target,profile,pr,requirements)，
 检查计划后用返回的 runId 调 remote_start；后续 remote_status、remote_select_account、remote_action、
 remote_stop、remote_collect 始终引用同一运行。target.host 是已配置的 SSH 别名/主机名，target.node
@@ -43,3 +43,8 @@ requirements 中 human/device-tool 项目保持 pending，不能用合成事件�
 当前只有模拟 SSH + 本机真实 Git/进程测试，没有跨电脑、真实账号、实体手机或人工手感验收。
 
 AI 实际调用统一 `remote` 工具，以 operation 选择 catalog/plan/start/status/stop/select_account/action/collect。文中的 remote_catalog 等名称也保留为 CLI/内部流程入口；不是八个独立宿主工具。
+
+停止请求后拒绝新动作和账号切换；启动中的动作会补收停止请求。同一 runId 的本机请求串行处理，
+忙碌时等待回执；进程退出留下的锁按进程启动身份核对后恢复，不信任复用的 PID。
+remote_status.accounts 返回本次运行发现的账号目录 ID，供 remote_select_account 使用；不包含登录凭证。
+每次 collect 先验证完整清单，再生成独立证据子目录；旧截图不会混入新结果，失败不交付半套文件。

@@ -24,14 +24,15 @@ process.env.PATH=path.dirname(process.execPath)+path.delimiter+(process.env.PATH
 const data=await require(path.join(root,'remote-agent.cjs')).dispatch(q.request);process.stdout.write(JSON.stringify({ok:true,data})+'\\n');
 }catch(e){process.stdout.write(JSON.stringify({ok:false,errorCode:/^[A-Z_]+$/.test(e.code||'')?e.code:'REMOTE_OPERATION_UNCONFIRMED',message:'Inspect the same remote run before repeating an operation.',execution:e.execution||'unknown'})+'\\n')}});`;
 function sshArguments(value){const t=target(value);return ['-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','ConnectTimeout=10','--',t.host,`${quote(t.node)} -e ${quote(BOOTSTRAP)}`];}
-function transport(value,payload){return new Promise((resolve,reject)=>{
- let output='',size=0,settled=false,child;const finish=(e,v)=>{if(settled)return;settled=true;clearTimeout(timer);e?reject(e):resolve(v);};
+function transport(value,payload,{spawnProcess=spawn}={}){return new Promise((resolve,reject)=>{
+ const chunks=[];let size=0,settled=false,spawned=false,child;const finish=(e,v)=>{if(settled)return;settled=true;clearTimeout(timer);e?reject(e):resolve(v);};
  const error=()=>Object.assign(new Error('SSH returned no confirmed receipt. Query the same runId; do not repeat start or an action.'),{code:'SSH_UNCONFIRMED',execution:'unknown'});
  const timer=setTimeout(()=>{child?.kill();finish(error());},25000);
- try{child=spawn('ssh',sshArguments(value),{stdio:['pipe','pipe','ignore']});}catch(e){finish(Object.assign(error(),{execution:'not_executed'}));return;}
- child.on('error',()=>finish(Object.assign(error(),{execution:'not_executed'})));
- child.stdin.on('error',()=>{});child.stdout.on('data',b=>{size+=b.length;if(size>32*1024*1024){child.kill();finish(error());}else output+=b.toString();});
- child.on('close',code=>{if(code!==0){finish(error());return;}try{const reply=JSON.parse(output);if(!reply.ok)finish(Object.assign(error(),{code:reply.errorCode,execution:reply.execution||'unknown'}));else finish(null,reply.data);}catch{finish(error());}});
+ try{child=spawnProcess('ssh',sshArguments(value),{stdio:['pipe','pipe','ignore']});}catch(e){finish(Object.assign(error(),{execution:'not_executed'}));return;}
+ child.on('spawn',()=>{spawned=true;});
+ child.on('error',()=>finish(Object.assign(error(),{execution:spawned?'unknown':'not_executed'})));
+ child.stdin.on('error',()=>{});child.stdout.on('data',b=>{size+=b.length;if(size>32*1024*1024){child.kill();finish(error());}else chunks.push(Buffer.from(b));});
+ child.on('close',code=>{if(code!==0){finish(error());return;}try{const reply=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!reply.ok)finish(Object.assign(error(),{code:reply.errorCode,execution:reply.execution||'unknown'}));else finish(null,reply.data);}catch{finish(error());}});
  child.stdin.end(JSON.stringify(payload));
 });}
 class Remote{
@@ -41,6 +42,32 @@ class Remote{
  save(record){const file=this.file(record.runId);fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});require('./core.cjs').atomic(file,record);}
  read(id){return JSON.parse(fs.readFileSync(this.file(id),'utf8'));}
  async invoke(method,args){
+  if(['remote_catalog','remote_plan'].includes(method))return this.invokeUnlocked(method,args);
+  const lock=path.join(path.dirname(this.file(args.runId)),'.request-lock'),owner=crypto.randomUUID()+'.json';
+  const busy=()=>fail('REMOTE_REQUEST_BUSY','Another request is in progress. Wait for its receipt before querying the same run.');
+  try{fs.mkdirSync(lock,{mode:0o700});}catch(e){
+   if(e.code!=='EEXIST')throw e;
+   // Remove only the exact dead owner's file. A racing replacement owner has
+   // another name, so rmdir cannot remove its occupied lock directory.
+   const names=fs.readdirSync(lock);let removed=names.length===0;
+   for(const name of names){
+    if(!/^[a-f0-9-]+\.json$/.test(name))busy();
+    let previous;try{previous=JSON.parse(fs.readFileSync(path.join(lock,name),'utf8'));}catch{busy();}
+    const {alive}=require('./core.cjs'),{identity}=require('./observation.cjs');
+    if(alive(previous.pid)){const current=identity(previous.pid);if(!previous.identity||!current||current===previous.identity)busy();}
+    try{fs.unlinkSync(path.join(lock,name));removed=true;}catch{busy();}
+   }
+   if(!removed)busy();try{fs.rmdirSync(lock);fs.mkdirSync(lock,{mode:0o700});}catch{busy();}
+  }
+  const ownerFile=path.join(lock,owner);
+  try{fs.writeFileSync(ownerFile,JSON.stringify({pid:process.pid,identity:require('./observation.cjs').identity(process.pid)}),{flag:'wx',mode:0o600});}catch{busy();}
+  try{
+   if(fs.readdirSync(lock).some(name=>name!==owner))busy();
+   return await this.invokeUnlocked(method,args);
+  }finally{fs.unlinkSync(ownerFile);try{fs.rmdirSync(lock);}catch(e){if(!['ENOENT','ENOTEMPTY'].includes(e.code))throw e;}}
+
+ }
+ async invokeUnlocked(method,args){
   if(method==='remote_catalog')return this.call(args.target,{method:'catalog'});
   if(method==='remote_plan'){
    const t=target(args.target),plan=await this.call(t,{method:'plan',profile:args.profile,pr:args.pr,requirements:args.requirements||[]});
@@ -68,18 +95,26 @@ class Remote{
  }
  collect(record,result,outputDir){
   if(!Array.isArray(result.files)||result.files.length>8)fail('INVALID_ARTIFACTS','Invalid evidence manifest.','unknown');
-  const dir=outputDir?path.join(outputDir,`ssh-${record.runId}`):path.join(path.dirname(this.file(record.runId)),'artifacts');
   if(outputDir&&!path.isAbsolute(outputDir))fail('INVALID_PATH','Choose an absolute task output directory.');
-  fs.mkdirSync(dir,{recursive:true,mode:0o700});if(fs.lstatSync(dir).isSymbolicLink())fail('UNSAFE_ARTIFACT_PATH','Artifact directory must not be a symbolic link.');
-  const written=[];
+  const names=new Set(),validated=[];
   for(const file of result.files){
-   if(!['result.json','build.log','app.log','inspection.png'].includes(file.name)||typeof file.content!=='string'||file.content.length>24*1024*1024)fail('INVALID_ARTIFACTS','Unapproved evidence file.','unknown');
-   const bytes=Buffer.from(file.content,'base64');if(bytes.length>16*1024*1024||hash(bytes)!==file.sha256)fail('ARTIFACT_HASH_MISMATCH','Evidence did not match its manifest.','unknown');
-   const name=path.join(dir,file.name),tmp=path.join(dir,crypto.randomUUID()+'.tmp');
-   fs.writeFileSync(tmp,bytes,{flag:'wx',mode:0o600});fs.renameSync(tmp,name);written.push({name:file.name,path:name,sha256:file.sha256,bytes:bytes.length});
+   if(!file||!['result.json','build.log','app.log','inspection.png'].includes(file.name)||names.has(file.name)||typeof file.content!=='string'||file.content.length>24*1024*1024)fail('INVALID_ARTIFACTS','Unapproved or duplicate evidence file.','unknown');
+   names.add(file.name);const bytes=Buffer.from(file.content,'base64');
+   if(bytes.toString('base64')!==file.content||bytes.length>16*1024*1024||hash(bytes)!==file.sha256)fail('ARTIFACT_HASH_MISMATCH','Evidence did not match its manifest.','unknown');
+   validated.push({file,bytes});
   }
+  const root=outputDir?path.join(outputDir,`ssh-${record.runId}`):path.join(path.dirname(this.file(record.runId)),'artifacts');
+  fs.mkdirSync(root,{recursive:true,mode:0o700});if(fs.lstatSync(root).isSymbolicLink())fail('UNSAFE_ARTIFACT_PATH','Artifact directory must not be a symbolic link.');
+  const collection=crypto.randomUUID(),staging=path.join(root,'.'+collection),dir=path.join(root,collection),written=[];
+  fs.mkdirSync(staging,{mode:0o700});
+  try{
+   for(const {file,bytes} of validated){
+    fs.writeFileSync(path.join(staging,file.name),bytes,{flag:'wx',mode:0o600});written.push({name:file.name,path:path.join(dir,file.name),sha256:file.sha256,bytes:bytes.length});
+   }
+   fs.renameSync(staging,dir);
+  }catch(e){fs.rmSync(staging,{recursive:true,force:true});throw e;}
   return {runId:record.runId,files:written,publication:'private-task-evidence; review/redact before PR publication',result:result.result};
  }
 }
 function hash(value){return crypto.createHash('sha256').update(Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex');}
-module.exports={Remote,target,sshArguments,BOOTSTRAP,hash};
+module.exports={Remote,target,sshArguments,BOOTSTRAP,hash,transport};

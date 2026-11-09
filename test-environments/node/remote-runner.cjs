@@ -10,8 +10,9 @@ function cancelled(){if(fs.existsSync(path.join(dir,'cancel.json'))){write({stat
 function git(args){return execFileSync('git',['-C',run.plan.repositoryRoot,...args],{encoding:'utf8',timeout:90000,stdio:['ignore','pipe','pipe']}).trim();}
 try{
  write({supervisorPid:process.pid,supervisorIdentity:identity(process.pid)});if(cancelled())process.exit();
- git(['fetch','--no-tags','origin',`refs/pull/${run.plan.pr.number}/head`]);if(cancelled())process.exit();
- const commit=git(['rev-parse','FETCH_HEAD']);if(commit!==run.plan.pr.commit)throw Object.assign(Error(),{code:'PR_HEAD_CHANGED'});
+ const ref=`refs/test-environments/${path.basename(dir)}`;
+ git(['fetch','--no-tags','--no-write-fetch-head','origin',`refs/pull/${run.plan.pr.number}/head:${ref}`]);if(cancelled())process.exit();
+ const commit=git(['rev-parse',ref]);if(commit!==run.plan.pr.commit)throw Object.assign(Error(),{code:'PR_HEAD_CHANGED'});
  const checkout=path.join(dir,'checkout');git(['worktree','add','--detach',checkout,commit]);write({checkout,actualCommit:commit,stage:'build-start'});if(cancelled())process.exit();
  const source=run.plan.source,core=new Environments(path.join(dir,'catalog'));
  core.saveProject({...source.project,root:checkout});

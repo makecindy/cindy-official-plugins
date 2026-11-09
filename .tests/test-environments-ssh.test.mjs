@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {execFileSync,spawn} from 'node:child_process';
 import {setTimeout as wait} from 'node:timers/promises';
-const require=createRequire(import.meta.url);
+const require=createRequire(import.meta.url),agentRequire=createRequire(new URL('../test-environments/node/remote-agent.cjs',import.meta.url));
 const {Environments,safeEnv}=require('../test-environments/node/core.cjs');
 const {Remote,target,sshArguments,BOOTSTRAP,hash}=require('../test-environments/node/remote.cjs');
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'test-environments-ssh-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
@@ -46,10 +46,13 @@ test('simulated SSH runs actual pinned Git worktree, shared CLI, sample/verify c
  const planned=await r.invoke('remote_plan',{target:f.target,profile:'daily',pr:{repo:'example/test-project',number:17,commit:f.commit},requirements:[{kind:'human',label:'Real trackpad input in the actual sidebar'},{kind:'device-tool',label:'Physical phone',deviceId:'example-device'}]});
  assert.equal(planned.execution,'not_executed');const runId=planned.runId;
  try{
+  fs.writeFileSync(path.join(f.repo,'.git','FETCH_HEAD'),'existing local fetch receipt');
   const started=await r.invoke('remote_start',{runId});assert.equal(started.execution,'requested');
   assert.throws(()=>r.read('invalid'),{code:'INVALID_REMOTE_ID'});
   await assert.rejects(r.invoke('remote_start',{runId}),{code:'REMOTE_ALREADY_REQUESTED'});
   const active=await until(()=>r.invoke('remote_status',{runId}),s=>s.state==='running');assert.equal(active.actualCommit,f.commit);
+  assert.equal(fs.readFileSync(path.join(f.repo,'.git','FETCH_HEAD'),'utf8'),'existing local fetch receipt');
+  assert.ok(Array.isArray(active.accounts));
   assert.notEqual(active.checkout,fs.realpathSync(f.repo));assert.equal(fs.readFileSync(path.join(f.repo,'local-uncommitted.txt'),'utf8'),'must remain');
   for(const action of ['prepare','verify']){
    await r.invoke('remote_action',{runId,action});
@@ -99,4 +102,76 @@ test('a definitively rejected start stays not-executed rather than being confuse
  const core=new Environments(dir);
  assert.throws(()=>core.invoke('remote',{operation:'exec'}),{code:'UNKNOWN_OPERATION'});
  await assert.rejects(core.invoke('remote',{operation:'start',runId:'invalid'}),{code:'INVALID_REMOTE_ID'});
+});
+
+test('SSH preserves split UTF-8 receipts and distinguishes errors after process launch',async()=>{
+ const {transport}=require('../test-environments/node/remote.cjs');
+ const {EventEmitter}=await import('node:events');const {PassThrough}=await import('node:stream');
+ function child(mode){const c=new EventEmitter();c.stdin=new PassThrough();c.stdout=new PassThrough();c.kill=()=>{};
+  queueMicrotask(()=>{if(mode!=='before')c.emit('spawn');if(mode!=='reply'){c.emit('error',Error('spawn failure'));return;}
+   for(const byte of Buffer.from(JSON.stringify({ok:true,data:{label:'电脑乙🙂'}})))c.stdout.write(Buffer.from([byte]));c.emit('close',0);});return c;}
+ assert.equal((await transport({host:'example.test'},{},{spawnProcess:()=>child('reply')})).label,'电脑乙🙂');
+ await assert.rejects(transport({host:'example.test'},{},{spawnProcess:()=>child('after')}),{execution:'unknown'});
+ await assert.rejects(transport({host:'example.test'},{},{spawnProcess:()=>child('before')}),{execution:'not_executed'});
+});
+
+test('collection validates the whole manifest before writing and keeps independent evidence snapshots',t=>{
+ const dir=fixture(t),r=new Remote(dir),runId='00000000-0000-4000-8000-000000000002';r.save({runId});const record=r.read(runId),outputDir=path.join(dir,'task');
+ const file=(name,text)=>({name,content:Buffer.from(text).toString('base64'),sha256:hash(Buffer.from(text))});
+ assert.throws(()=>r.collect(record,{files:[file('result.json','new'),{...file('app.log','bad'),sha256:'0'.repeat(64)}]},outputDir),{code:'ARTIFACT_HASH_MISMATCH'});
+ assert.equal(fs.existsSync(outputDir),false);
+ assert.throws(()=>r.collect(record,{files:[file('result.json','one'),file('result.json','two')]},outputDir),{code:'INVALID_ARTIFACTS'});
+ const first=r.collect(record,{files:[file('result.json','old'),file('inspection.png','old image')]},outputDir);
+ const second=r.collect(record,{files:[file('result.json','new')]},outputDir);
+ assert.notEqual(path.dirname(first.files[0].path),path.dirname(second.files[0].path));
+ assert.equal(fs.readFileSync(first.files[0].path,'utf8'),'old');assert.equal(fs.existsSync(path.join(path.dirname(second.files[0].path),'inspection.png')),false);
+});
+
+test('overlapping requests cannot overwrite an unknown action receipt with stale status',async t=>{
+ const dir=fixture(t);let finish;
+ const r=new Remote(dir,{send:async()=>new Promise(resolve=>{finish=resolve;})}),runId='00000000-0000-4000-8000-000000000003';r.save({runId,target:{host:'example.test'},state:'running'});
+ const pending=r.invoke('remote_status',{runId});
+ await assert.rejects(new Remote(dir).invoke('remote_action',{runId,action:'verify'}),{code:'REMOTE_REQUEST_BUSY'});
+ finish({state:'running'});await pending;
+ assert.equal(fs.existsSync(path.join(path.dirname(r.file(runId)),'.request-lock')),false);
+});
+
+test('cancelled runs refuse new commands and account switches without dispatching to the app',async t=>{
+ const f=setup(t),r=f.remote;
+ const p=await r.invoke('remote_plan',{target:f.target,profile:'daily',pr:{repo:'example/test-project',number:17,commit:f.commit}});
+ const record=r.read(p.runId),dir=path.join(f.b,'store','ssh-runs',p.runId);fs.mkdirSync(dir,{recursive:true});
+ fs.writeFileSync(path.join(dir,'run.json'),JSON.stringify({plan:record.plan,planHash:record.planHash,actions:[]}));fs.writeFileSync(path.join(dir,'cancel.json'),'{}');
+ await assert.rejects(r.invoke('remote_action',{runId:p.runId,action:'verify'}),{code:'REMOTE_RUN_STOPPING',execution:'not_executed'});
+ await assert.rejects(r.invoke('remote_select_account',{runId:p.runId,account:'example'}),{code:'REMOTE_RUN_STOPPING',execution:'not_executed'});
+ assert.equal(fs.existsSync(path.join(dir,'catalog','jobs')),false);
+});
+
+test('an abandoned request lock can be reconciled without trusting a reused PID',async t=>{
+ const dir=fixture(t),r=new Remote(dir,{send:async()=>({state:'running'})}),runId='00000000-0000-4000-8000-000000000004';r.save({runId,target:{host:'example.test'},state:'unknown'});
+ const lock=path.join(path.dirname(r.file(runId)),'.request-lock');fs.mkdirSync(lock);
+ fs.writeFileSync(path.join(lock,'00000000-0000-4000-8000-000000000005.json'),JSON.stringify({pid:process.pid,identity:'a different process start'}));
+ assert.equal((await r.invoke('remote_status',{runId})).state,'running');assert.equal(r.read(runId).state,'running');assert.equal(fs.existsSync(lock),false);
+});
+
+test('cancellation during command registration stops the new job and status exposes only public account references',async t=>{
+ const vm=await import('node:vm'),dir=fixture(t),runId='00000000-0000-4000-8000-000000000006',runDir=path.join(dir,'ssh-runs',runId);fs.mkdirSync(runDir,{recursive:true});
+ const stopped=[],run={planHash:'example-hash',jobId:'main-job',actions:[],plan:{profile:'daily',source:{project:{commands:{verify:['example']}}},requirements:[]}};
+ fs.writeFileSync(path.join(runDir,'run.json'),JSON.stringify(run));
+ class Core{
+  status(){return {state:'running'};}jobs(){return [{jobId:'main-job',action:'start',state:'running'}];}
+  read(){return {accounts:{a:{id:'a',project:'project',label:'Example',selector:'account-a',sessions:{private:'not-public'},token:'must-not-leak'}}};}
+  start(){fs.writeFileSync(path.join(runDir,'cancel.json'),'{}');return {jobId:'new-action'};}stop(id){stopped.push(id);}
+ }
+ const context={module:{exports:{}},require:name=>name==='./core.cjs'?{Environments:Core,defaultHome:()=>dir,atomic:require('../test-environments/node/core.cjs').atomic}:agentRequire(name)};
+ vm.runInNewContext(fs.readFileSync(new URL('../test-environments/node/remote-agent.cjs',import.meta.url),'utf8'),context);
+ const request={runId,planHash:'example-hash'},result=await context.module.exports.dispatch({...request,method:'action',action:'verify',actionId:'00000000-0000-4000-8000-000000000007'});
+ assert.equal(result.execution,'requested');assert.deepEqual(stopped,['new-action']);
+ const status=context.module.exports.status(request);assert.equal(status.accounts[0].id,'a');assert.equal(JSON.stringify(status.accounts).includes('must-not-leak'),false);assert.equal(JSON.stringify(status.accounts).includes('sessions'),false);
+});
+
+test('remote evidence reads stay bounded across file growth and short reads',async t=>{
+ const vm=await import('node:vm'),dir=fixture(t),file=path.join(dir,'app.log');fs.writeFileSync(file,'abcdefghij');
+ const context={module:{exports:{}},require:name=>name==='node:fs'?{...fs,fstatSync:fd=>({...fs.fstatSync(fd),size:3,isFile:()=>true}),readSync:(fd,bytes,offset,length,position)=>fs.readSync(fd,bytes,offset,Math.min(1,length),position)}:agentRequire(name),Buffer};
+ vm.runInNewContext(fs.readFileSync(new URL('../test-environments/node/remote-agent.cjs',import.meta.url),'utf8'),context);
+ assert.equal(context.module.exports.readArtifact(file,4).toString(),'abc');
 });

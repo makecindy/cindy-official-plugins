@@ -10,7 +10,8 @@ let child,childExited=false,stopping=false,userData,receipt,receiptIdentity,last
 let failureCode,wasReady=false,lastTick=Date.now(),activeStartupMs=0;
 const session=plan.configuration.mode==='acceptance'&&plan.readiness==='cindy'?new SessionMonitor(plan,dir):null;
 let observing=false,lastAccountPoll=0;
-function write(patch){state={...state,...patch,supervisorPid:process.pid,updatedAt:Date.now()};const tmp=path.join(dir,`${crypto.randomUUID()}.tmp`);fs.writeFileSync(tmp,JSON.stringify(state)+'\n',{mode:0o600});fs.renameSync(tmp,path.join(dir,'status.json'));}
+const supervisorIdentity=identity(process.pid);
+function write(patch){state={...state,...patch,supervisorPid:process.pid,supervisorIdentity,updatedAt:Date.now()};const tmp=path.join(dir,`${crypto.randomUUID()}.tmp`);fs.writeFileSync(tmp,JSON.stringify(state)+'\n',{mode:0o600});fs.renameSync(tmp,path.join(dir,'status.json'));}
 function alive(pid){try{process.kill(pid,0);return true;}catch{return false;}}
 function inspect(){
   if(!userData)return;

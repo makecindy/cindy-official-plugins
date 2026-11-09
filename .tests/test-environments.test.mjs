@@ -292,3 +292,30 @@ test('real runner and owned CDP transport capture app accounts without acceptanc
   if(runner.exitCode===null&&runner.signalCode===null){fs.writeFileSync(path.join(job,'cancel.json'),'{}');await exited;}
  }
 });
+
+test('online verification reports the latest account and requires the requested control setting',async t=>{
+ const {plan,job,application}=realAccountPlan(t);
+ for(const change of ['signed-out','account','control']){
+  const initial=snapshot();const changed=change==='signed-out'?snapshot(null):change==='account'?snapshot('account-b'):{...initial,remoteControl:true};
+  const monitor=new SessionMonitor({...plan,configuration:{...plan.configuration,remoteControl:'off'}},job,{perform:async(_p,_s,op)=>op==='verify'?{...changed,verified:true}:{...initial,remoteControl:false}});
+  const result=await monitor.poll({application});assert.notEqual(result.state,'ready');
+  assert.equal(result.login.authenticated,changed.authenticated);
+  assert.equal(result.currentAccount?.accountKey,changed.authenticated?changed.accounts.find(a=>a.isCurrent)?.accountKey:undefined);
+  if(change==='control')assert.equal(result.code,'REMOTE_CONTROL_UNCONFIRMED');
+ }
+});
+
+test('a reused supervisor PID cannot preserve stale ready/account verification',t=>{
+ const {app}=fixture(t),jobId='stale-supervisor',dir=path.join(app.home,'jobs',jobId);fs.mkdirSync(dir,{recursive:true});
+ fs.writeFileSync(path.join(dir,'status.json'),JSON.stringify({jobId,state:'ready',supervisorPid:process.pid,supervisorIdentity:'different process start',verification:'application-account-online',accountVerifiedAt:1}));
+ const result=app.status(jobId);assert.equal(result.state,'unknown');assert.equal(result.verification,undefined);assert.equal(result.accountVerifiedAt,undefined);
+ assert.throws(()=>app.stop(jobId),{code:'JOB_UNCONFIRMED'});
+});
+
+test('the public remote worker preserves unknown execution on a lost operation receipt',async()=>{
+ let onRequest,reply;
+ class App{async invoke(){throw Error('lost receipt');}}
+ const context={require:name=>name==='./core.cjs'?{Environments:App}:{createInterface:()=>({on:(_event,callback)=>{onRequest=callback;}})},process:{stdin:{},stdout:{write:text=>{reply=JSON.parse(text);}}}};
+ vm.runInNewContext(fs.readFileSync(path.join(root,'node/worker.cjs'),'utf8'),context);
+ await onRequest(JSON.stringify({id:1,method:'remote',params:{operation:'start'}}));assert.equal(reply.result.execution,'unknown');
+});
