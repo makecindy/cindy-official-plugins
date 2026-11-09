@@ -1606,3 +1606,151 @@ test('CLI: persisted CI wait batches successes and keeps feedback arriving durin
   assert.equal(late.code, 0);
   assert.match(JSON.parse(late.stdout).report, /Late feedback must survive/);
 });
+
+ test('missing required check keeps the existing fifteen-minute registration watchdog', () => {
+  const s = snap({ checks:[check('fast','passed',{required:true}),check('late','pending',{required:true,expected:true})] });
+  let result = evaluateWatch(freshWatch(s,T0),s,T0);
+  assert.equal(result.events.some(e=>e.kind==='checks-passed'),false);
+  result = evaluateWatch(result.next,s,T0+15*MIN);
+  assert.equal(result.events.some(e=>e.kind==='no-checks'),true);
+  const again = evaluateWatch(result.next,s,T0+20*MIN);
+  assert.equal(again.events.some(e=>e.kind==='no-checks'),false);
+});
+
+test('replay: late aggregate registration preserves the CI batch deadline', async t => {
+  const fx=createFixture(t);
+  const waiting=snap({verdict:'WAITING_CI',blockers:['pending_checks'],comments:[comment('start','human',iso(T0))],checks:[
+    check('shard','pending',{workflowName:'ci'}),check('aggregate','pending',{expected:true,workflowName:'required-app:42',required:true})]});
+  fx.setSnapshot(waiting);assert.equal((await fx.run()).code,0);
+  const plan=fx.writeWait({kind:'checks',headSha:waiting.latestCommitOid,reason:'CI batch',afterMinutes:30,checks:[{name:'shard',workflowName:'ci'},{name:'aggregate',workflowName:'required-app:42'}],threads:[]});
+  assert.equal((await fx.run(['--wait',plan])).code,0);
+  const until=fx.readState().wait.until;
+  for(let n=0;n<4;n++){fx.advance(5);assert.equal((await fx.run()).code,2);}
+  fx.setSnapshot({...waiting,checks:[check('shard','pending',{workflowName:'ci'}),check('aggregate','passed',{workflowName:'ci',required:true})]});
+  fx.advance(5);assert.equal((await fx.run()).code,2);assert.equal(fx.readState().wait.until,until);
+  fx.advance(5);assert.equal((await fx.run()).code,0,'original deadline still applies');
+});
+
+test('inventory failure survives resume; new CI failures still wake', async t => {
+  const fx=createFixture(t);
+  const s=snap({verdict:'NEEDS_WORK',blockers:['required_checks_unavailable'],gate:{requiredChecksUnavailable:true}});
+  fx.setSnapshot(s);assert.equal((await fx.run()).code,0);
+  assert.equal((await fx.run(['--resume','observed API failure'])).code,0);
+  fx.advance(5); assert.equal((await fx.run()).code,0,'second failure gets one notice');
+  await fx.run(['--resume','noted persistent rules failure']);
+  for(let n=0;n<12;n++){fx.advance(5);assert.equal((await fx.run()).code,2);}
+  fx.setSnapshot({...s,checks:[check('new-failure','failed')]});fx.advance(5);
+  assert.equal((await fx.run()).code,0);
+});
+
+test('trace records continuous decisions and receipts without comment or resume text', async t => {
+  const fx=createFixture(t);
+  fx.setSnapshot(snap({comments:[comment('private','human',iso(T0),'private comment should never be recorded')]}));
+  await fx.run();await fx.run(['--resume','private model explanation']);fx.advance(5);await fx.run();
+  const file=fx.stateFile()+'.trace.jsonl';const text=fs.readFileSync(file,'utf8');
+  assert.ok(!text.includes('private comment should never'));assert.ok(!text.includes('private model explanation'));
+  const rows=text.trim().split('\n').map(JSON.parse);
+  assert.equal(rows.length,3);assert.equal(rows[1].decision,'resume');assert.ok(rows[2].before.watch);
+  const script=path.join(path.dirname(gatePath),'pr-follow-replay.mjs');
+  const run=await new Promise(resolve=>execFile(process.execPath,[script,file],{encoding:'utf8'},(error,stdout,stderr)=>resolve({error,stdout,stderr})));
+  assert.equal(run.error,null,run.stderr);
+  const result=JSON.parse(run.stdout);assert.equal(result.complete,true);assert.deepEqual(result.differences,[]);
+});
+
+ test('rules outage does not swallow CI green and intermittent failures preserve human wait', async t => {
+  const fx=createFixture(t);
+  const green=snap({verdict:'BLOCKED_HUMAN',blockers:['approval_required'],reviewDecision:'REVIEW_REQUIRED'});
+  const outage={...green,gate:{requiredChecksUnavailable:true},blockers:[...green.blockers,'required_checks_unavailable']};
+  fx.setSnapshot({...outage,checks:[check('build','pending',{required:true})]});
+  assert.equal((await fx.run()).code,2);
+  fx.advance(5);assert.equal((await fx.run()).code,0);await fx.run(['--resume','noted']);
+  fx.setSnapshot(outage);fx.advance(10);
+  const completed=await fx.run();assert.equal(completed.code,0);assert.match(completed.stdout,/checks-passed/);
+  const plan=fx.writeWait({kind:'human',headSha:outage.latestCommitOid,reason:'await approval',afterMinutes:null,checks:[],threads:[]});
+  assert.equal((await fx.run(['--wait',plan])).code,0);
+  for(let n=1;n<=16;n++){fx.advance(30);fx.setSnapshot(n%4===0?outage:green);assert.equal((await fx.run()).code,2);assert.equal(fx.readState().wait.kind,'human');}
+ });
+ test('permanent rules outage allows human waits with at most daily acknowledged reminders', async t => {
+  const fx=createFixture(t);
+  const s=snap({verdict:'BLOCKED_HUMAN',reviewDecision:'REVIEW_REQUIRED',blockers:['approval_required','required_checks_unavailable'],gate:{requiredChecksUnavailable:true}});
+  fx.setSnapshot(s);let notices=[];
+  for(let i=0;i<=144;i++){
+    const r=await fx.run([], {CINDY_PR_TRACE:'0'});
+    if(r.code===0){
+      if(r.stdout.includes('required-checks-unavailable'))notices.push(fx.now());
+      const plan=fx.writeWait({kind:'human',headSha:s.latestCommitOid,reason:'await approval',afterMinutes:null,checks:[],threads:[]});
+      assert.equal((await fx.run(['--wait',plan],{CINDY_PR_TRACE:'0'})).code,0);
+    }
+    fx.advance(30);
+  }
+  assert.equal(notices.length,3);for(let i=1;i<notices.length;i++)assert.ok(notices[i]-notices[i-1]>=24*60*MIN);
+ });
+
+test('transient inventory failure preserves an existing defer deadline',async t=>{
+ const fx=createFixture(t);const s=snap();fx.setSnapshot(s);await fx.run();await fx.run(['--defer','30']);
+ const due=fx.readState().nextAllowAt;
+ fx.advance(10);fx.setSnapshot({...s,verdict:'NOT_READY',blockers:['required_checks_unavailable'],gate:{requiredChecksUnavailable:true}});
+ assert.equal((await fx.run()).code,2);assert.equal(fx.readState().nextAllowAt,due);
+ fx.setSnapshot(s);fx.advance(20);const r=await fx.run();assert.equal(r.code,0);assert.match(r.stdout,/defer-expired/);
+});
+
+test('ready withheld during an outage is delivered on recovery and survives missing ack',async t=>{
+ const fx=createFixture(t);const s=snap();
+ fx.setSnapshot({...s,verdict:'NOT_READY',blockers:['required_checks_unavailable'],gate:{requiredChecksUnavailable:true}});
+ assert.equal((await fx.run()).code,0);await fx.run(['--resume','cannot confirm ready']);
+ fx.advance(5);fx.setSnapshot(s);const recovered=await fx.run();assert.equal(recovered.code,0);assert.match(recovered.stdout,/rules-recovered/);
+ fx.advance(5);assert.equal((await fx.run()).code,0,'unacknowledged recovery remains pending');
+ await fx.run(['--ack']);fx.advance(5);assert.equal((await fx.run()).code,2,'confirmed recovery does not repeat');
+});
+
+test('a required check added on the same head starts the registration watchdog once', () => {
+  const done = snap({ checks: [check('fast', 'passed', { required: true })] });
+  const added = snap({ checks: [check('fast', 'passed', { required: true }), check('late', 'pending', { required: true, expected: true })] });
+  let r = evaluateWatch(seenWatch(done), added, T0);
+  assert.equal(r.events.some(e => e.kind === 'no-checks'), false);
+  assert.ok(r.next.checksAwaitedSince, 'timer starts at first sight');
+  r = evaluateWatch(r.next, added, T0 + 16 * MIN);
+  assert.deepEqual(r.events.filter(e => e.kind === 'no-checks'), [{ kind: 'no-checks', minutes: 16, missing: ['late'] }]);
+  for (const m of [20, 40, 120]) {
+    r = evaluateWatch(r.next, added, T0 + m * MIN);
+    assert.equal(r.events.some(e => e.kind === 'no-checks'), false, 'no repeat after the reminder');
+  }
+  // The missing item registers and later a different one goes missing: a new reminder is allowed.
+  r = evaluateWatch(r.next, done, T0 + 130 * MIN);
+  const other = snap({ checks: [check('fast', 'passed', { required: true }), check('later', 'pending', { required: true, expected: true })] });
+  r = evaluateWatch(r.next, other, T0 + 131 * MIN);
+  r = evaluateWatch(r.next, other, T0 + 150 * MIN);
+  assert.equal(r.events.some(e => e.kind === 'no-checks'), true);
+});
+
+test('a rules-outage reminder that was never acknowledged still owes the recovery review', async t => {
+  const fx = createFixture(t); const s = snap();
+  fx.setSnapshot(s); assert.equal((await fx.run()).code, 0); await fx.run(['--ack']);
+  const outage = { ...s, verdict: 'NOT_READY', blockers: ['required_checks_unavailable'], gate: { requiredChecksUnavailable: true } };
+  fx.setSnapshot(outage); fx.advance(5); await fx.run(); fx.advance(5);
+  const reminded = await fx.run(); assert.equal(reminded.code, 0); assert.match(reminded.stdout, /required-checks-unavailable/);
+  fx.setSnapshot(s); fx.advance(5);
+  const recovered = await fx.run(); assert.equal(recovered.code, 0); assert.match(recovered.stdout, /rules-recovered/);
+  // Resuming confirms only the earliest release (the outage reminder); recovery is then delivered again.
+  await fx.run(['--resume', 'noted']); fx.advance(5);
+  const again = await fx.run(); assert.equal(again.code, 0); assert.match(again.stdout, /rules-recovered/);
+  await fx.run(['--ack']); fx.advance(5);
+  const last = await fx.run(); assert.equal(last.code, 2, `delivered once: ${last.stdout}`);
+});
+
+test('replay refuses to call a trace complete when a recorded round is missing', async t => {
+  const fx = createFixture(t);
+  fx.setSnapshot(snap({ comments: [comment('c1', 'human', iso(T0), 'first')] })); await fx.run(); await fx.run(['--ack']);
+  fx.advance(5); fx.setSnapshot(snap({ comments: [comment('c2', 'human', iso(T0 + 5 * MIN), 'second')] })); await fx.run(); await fx.run(['--ack']);
+  const file = fx.stateFile() + '.trace.jsonl';
+  const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+  assert.deepEqual(lines.map(l => JSON.parse(l).seq), [1, 2, 3, 4]);
+  const script = path.join(path.dirname(gatePath), 'pr-follow-replay.mjs');
+  const replay = lines => new Promise(resolve => {
+    const copy = file + '.copy'; fs.writeFileSync(copy, lines.join('\n') + '\n');
+    execFile(process.execPath, [script, copy], { encoding: 'utf8' }, (error, stdout) => resolve(JSON.parse(stdout)));
+  });
+  assert.equal((await replay(lines)).complete, true);
+  const holed = await replay([lines[0], lines[1], lines[3]]);
+  assert.equal(holed.complete, false); assert.equal(holed.gaps, 1);
+});

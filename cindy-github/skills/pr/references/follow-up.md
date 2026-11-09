@@ -168,3 +168,54 @@ full-read fallback remain unchanged.
 - `pr-snapshot.mjs`: read-only facts, including merge-queue state, required checks and the viewer; `--probe` prints the small change fingerprint. Not a pre-run hook by itself: its exit codes do not match the hook protocol.
 - `pr-cleanup-plan.mjs`: read-only local cleanup plan after merge or close.
 - `pr-preflight.mjs`: read-only checks before pushing (not on the default branch, DCO only when the repository requires it, Prettier only when configured, uncommitted or unpulled changes), plus the rule files and PR template to follow.
+
+## Required checks and delivery evidence
+
+Full snapshots read active rulesets and the classic protection visible to the current account.
+A null GraphQL branchProtectionRule can mean absent OR not visible; it is not proof of an empty
+classic policy for non-admin accounts. GitHub mergeability/protection remains authoritative. Only absent check names get an
+ExpectedCheck placeholder. Once a real check registers, GitHub's status and merge protection are
+responsible for its application requirements; missing app metadata does not create a duplicate.
+An expected target can become a real workflow without changing a checks wait or its original deadline.
+Aggregate jobs often register last: while actual checks are pending, missing placeholders do not
+trigger the registration watchdog. After actual activity stops, the existing fifteen-minute window
+provides a grace period. The next observation determines when that window starts.
+
+Rules-read failures do not discard checks or feedback. After two consecutive failed full reads, a dedicated rules-read notice survives
+resume/ack and brief recoveries, and repeats at most daily once acknowledged; normal new events still wake. Unacknowledged
+notices retain the existing retry/backoff. Do not report ready with unreadable rules. Ordinary check completion still wakes, and human
+approval waits remain available during the outage. Transient rule calls retain one retry. No stale rules
+cache or new polling loop is added. The lightweight probe may defer a rules-only change until the
+existing full-read cadence; the final snapshot always reads rules again.
+
+The bot settle window accepts completed SUCCESS checks from the expected reviewer's exact App
+slug on the current commit. Latest attempts per app/check are considered. Failed/cancelled/skipped
+checks are not successful completion. This ends batching, not merge protection or feedback handling.
+Bots without reliable checks retain review/reaction signals and the twenty-minute cap.
+
+Before reporting ready or an authorized merge, refresh with --expect-head <verified-head> --strict-exit.
+Base movement alone does not invalidate the round. GitHub's expected-head merge check and branch
+protections remain authoritative; a snapshot is not an atomic merge guard.
+
+## Local evidence and continuous replay
+
+Each gate observation and finish receipt appends to <state-file>.trace.jsonl (2 MiB plus one rotated
+file), with a shared 32 MiB budget per state directory and fourteen-day retention enforced on
+writes. Pacing-only firings without new inputs are not recorded. Bodies become fixed empty/redacted/approval markers; explanations and API error text are
+omitted. Raw comment text is never retained. Identifiers, timings, check identities and local
+pre-observation state remain private diagnostic data. CINDY_PR_TRACE=0 disables recording.
+Recording failures never change the gate decision. Oversized/failed samples are explicit replay gaps.
+
+Run `node <skill-dir>/scripts/pr-follow-replay.mjs <trace.jsonl> [candidate-scripts-directory]`.
+The trace must be chronological and for one PR; concatenate .1 before the current file when needed.
+Replay seeds once, then carries state through observations and recorded ack/wait/resume actions.
+It never changes production state or calls a model. It reports wake counts and decision differences,
+not an inferred empty-work rate. Missing snapshots or rejected model receipts stop the replay with
+an explicit gap; a different candidate may require inputs the original run never collected.
+This is evidence-driven comparison, not simulation of what a model would choose under a new policy.
+
+A suppressed rules-read notice follows the ordinary waiting/defer/retry flow; it must not drop
+an existing deadline. If a delivered round could not confirm ready solely because rules were
+unknown, the same-head watch retains that obligation. When a later snapshot is READY with readable
+rules, `rules-recovered` requests one reassessment through the existing pending/ack protocol.
+A transient failure that never prevented a ready result does not create this recovery event.

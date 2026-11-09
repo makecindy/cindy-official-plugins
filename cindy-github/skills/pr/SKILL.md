@@ -69,7 +69,12 @@ To take over an existing PR, use the link or number given, or the current branch
 7. Verify with the narrowest tests, lint and type checks that cover the change, using the commands the repository's rules name (its own test gate when it has one). Write long test output to a log file and read the log to find failures instead of re-running a whole suite because the terminal cut it off. A failure unrelated to this PR is a baseline problem when it also fails on an up-to-date base: say so with that evidence, do not mix a fix for it into this PR, and do not let it block the push. Stage only related files.
 8. **One push per round.** Check the PR is still open, run `pr-preflight.mjs` as in section 2 (with `--base <the PR's base branch>` when that is not the default branch), then `git push` once with all of this round's commits; confirm with `gh pr view --json commits` that they landed. Every extra intermediate push makes every bot review an intermediate state again.
 9. Reply in each thread you handled (what changed, which commit) before resolving it: `gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread-id>`. Where the reviewer is mistaken or the comment is stale, reply with evidence and resolve; do not distort the product to please a comment.
-10. Re-run the snapshot to confirm: active and outdated unresolved threads are both zero, checks are green or pending on the new head.
+10. Before reporting ready or performing an already-authorized merge, refresh the snapshot with
+    `--expect-head <verified-head> --strict-exit`. If the head changed, verify its results again.
+    Unknown required-check rules prevent a ready claim but do not stop observing real checks.
+    Base movement alone does not invalidate the round; use GitHub's mergeability, branch protections
+    and expected-head check for an authorized merge.
+    Re-run the snapshot to confirm: active and outdated unresolved threads are both zero, checks are green or pending on the new head.
 
 Hard convergence lines (the check output repeats them with the current round number):
 

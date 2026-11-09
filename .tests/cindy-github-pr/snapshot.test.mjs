@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import nodeTest from 'node:test';
 
-import { decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { runGate, decide, isHumanOnlyReviewPending, watchFromSnapshot, evaluateWatch } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 import { splitHttpResponse, rateLimitRetryAt } from '../../cindy-github/skills/pr/scripts/lib/gh.mjs';
 import {
   parseGitHubRemote,
@@ -51,6 +51,7 @@ if [ "$1" = api ] && [ "$2" = graphql ]; then
   cat "$d/resp-graphql.json"; exit 0
 fi
 case "$2" in
+  */rules/branches/*) if [ -s "$d/resp-rules-error" ]; then cat "$d/resp-rules-error" >&2; exit 1; fi; cat "$d/resp-rules.json"; exit 0 ;;
   */compare/head-sha...group-sha) cat "$d/resp-compare.json"; exit 0 ;;
   */compare/*) echo "Wrong ancestry direction" >&2; exit 1 ;;
 esac
@@ -61,10 +62,13 @@ exit 1
   const write = (name, value) => fs.writeFileSync(path.join(root, name), JSON.stringify(value));
   return (overrides = {}, comparison = 'ahead', heads = {}) => {
     const data = { comparison, checkHead: 'head-sha', restHead: 'head-sha', ...heads, pr: {
-      state: 'OPEN', headRefOid: 'head-sha', mergeStateStatus: 'CLEAN',
+      state: 'OPEN', headRefOid: 'head-sha', mergeStateStatus: 'CLEAN', baseRefName: 'main', baseRef: { branchProtectionRule: null },
       reviewThreads: { nodes: [] }, mergeQueueEntry: null,
       timelineItems: { nodes: [removal] }, ...overrides,
     } };
+    if (data.pr.baseRef && !Object.hasOwn(data.pr.baseRef, 'branchProtectionRule')) data.pr.baseRef.branchProtectionRule = null;
+    write('resp-rules.json', data.rules ?? []);
+    fs.writeFileSync(path.join(root, 'resp-rules-error'), data.rulesError ?? '');
     write('resp-prview.json', { headRefOid: data.checkHead, statusCheckRollup: data.rollup ?? [{ __typename: 'CheckRun', name: 'PR check', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     write('resp-graphql.json', { data: { viewer: { login: 'me' }, repository: { pullRequest: data.pr } } });
     write('resp-probe.json', { data: { repository: { pullRequest: data.pr } } });
@@ -341,4 +345,92 @@ test('checks keep only the latest run per name, carry required flags, and the pr
     commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [{ state: 'SUCCESS', count: 3 }, { state: 'QUEUED', count: 0 }] } } } }] },
   }, 'ahead', { args: ['--probe'] });
   assert.deepEqual(probe, { status: 'OPEN false MERGEABLE head-sha  SUCCESS:3 ', remarks: '2 c2 0  1 0', base: 'base-sha' });
+});
+
+test('required inventory: missing checks wait, rules change, unknown stays unknown', t => {
+  const run = fixture(t);
+  const pr = { timelineItems: { nodes: [] } };
+  const rules = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'late-test' }] } }];
+  const missing = run(pr, 'ahead', { rules });
+  assert.equal(missing.verdict, 'WAITING_CI');
+  assert.equal(missing.checks.find(c => c.name === 'late-test').expected, true);
+  assert.equal(missing.checksSummary.pending, 1);
+  const completed = run(pr, 'ahead', { rules, rollup: [{ __typename: 'CheckRun', name: 'late-test', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  assert.equal(completed.verdict, 'READY');
+  assert.equal(completed.checks[0].required, true);
+  assert.equal(run(pr).checks.some(c => c.expected), false, 'inventory is reread, not cached forever');
+  const unknown = run(pr, 'ahead', { rules: { message: 'unavailable' } });
+  assert.equal(unknown.gate.requiredChecksUnavailable, true);
+  assert.notEqual(unknown.verdict, 'READY');
+  assert.equal(run({ ...pr, baseRef: null }).gate.requiredChecksUnavailable, true);
+});
+
+test('registered checks do not gain phantom placeholders when app metadata differs', t => {
+  const run = fixture(t);
+  const baseRef = { branchProtectionRule: { requiresStatusChecks: true, requiredStatusChecks: [{ context: 'verify', app: { databaseId: 42 } }] } };
+  const c = { __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://example.test/check', startedAt: '2026-11-10T00:00:00Z', completedAt: '2026-11-10T00:01:00Z' };
+  const pr = id => ({ baseRef, timelineItems: { nodes: [] }, commits: { nodes: [{ commit: { oid: 'head-sha', statusCheckRollup: { contexts: { nodes: [{ ...c, checkSuite: { app: { databaseId: id, slug: 'test-bot' } } }] } } } }] } });
+  assert.equal(run(pr(43), 'ahead', { rollup: [c] }).checks.some(c => c.expected), false);
+  const valid = run(pr(42), 'ahead', { rollup: [c] });
+  assert.equal(valid.verdict, 'READY');
+  assert.equal(valid.reviewerChecks[0].headSha, 'head-sha');
+});
+
+test('delivery snapshot detects head/base changes without scheduling a model round', t => {
+  const run = fixture(t);
+  const pr = { timelineItems: { nodes: [] }, baseRef: { target: { oid: 'base-new' } } };
+  const args = ['--expect-head', 'head-sha'];
+  assert.equal(run(pr, 'ahead', { args }).verdict, 'READY');
+  args[1] = 'head-old';
+  assert.ok(run(pr, 'ahead', { args }).blockers.includes('delivery_evidence_changed'));
+});
+
+test('full snapshot -> persisted gate: delayed check, restart before ack, late failure', async t => {
+  const read = fixture(t);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-chain-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let now = Date.parse('2026-11-10T10:00:00Z');
+  let current;
+  const poll = async (extra = []) => {
+    let stdout = '';
+    const code = await runGate(['https://github.com/acme/game/pull/54', '--state-dir', dir, '--no-pacing', '--json', ...extra], {
+      now: () => now, runSnapshot: async () => ({ code: 0, stdout: JSON.stringify(current), stderr: '' }),
+      runProbe: async () => ({ code: 1 }), readTrigger: async () => null,
+      out: s => { stdout += s; }, err: () => {},
+    });
+    return { code, data: JSON.parse(stdout) };
+  };
+  const rules = [{type:'required_status_checks',parameters:{required_status_checks:[{context:'late'}]}}];
+  const pr = { timelineItems:{nodes:[]} };
+  current = read(pr, 'ahead', {rules});
+  assert.equal((await poll()).code, 2, 'missing required check does not announce green');
+  const rollup = [{__typename:'CheckRun',name:'late',status:'COMPLETED',conclusion:'SUCCESS'}];
+  current = read(pr, 'ahead', {rules,rollup}); now += 5*60000;
+  assert.equal((await poll()).code, 0);
+  now += 5*60000;
+  assert.equal((await poll()).data.reason, 'retry-unacked', 'new invocation restores pending event from disk');
+  assert.equal((await poll(['--ack'])).code, 0);
+  now += 5*60000;
+  assert.equal((await poll()).code, 2, 'acknowledged success is not delivered twice');
+  current = read(pr, 'ahead', {rules,rollup:[...rollup,{__typename:'CheckRun',name:'late-optional',status:'COMPLETED',conclusion:'FAILURE'}]});
+  now += 5*60000;
+  const failed = await poll();
+  assert.equal(failed.code, 0);
+  assert.match(failed.data.detail, /checks-failed/);
+});
+
+test('rules HTTP 403 does not kill the snapshot or hide CI', t => {
+  const run=fixture(t);
+  const s=run({timelineItems:{nodes:[]}},'ahead',{rulesError:'gh: Resource not accessible (HTTP 403)'});
+  assert.equal(s.gate.requiredChecksUnavailable,true);
+  assert.equal(s.checksSummary.unavailable,false);
+  assert.equal(s.checks.length,1);
+  assert.notEqual(s.verdict,'READY');
+});
+
+test('two policies for the same absent name produce one wait target',t=>{
+ const run=fixture(t);
+ const rules=[{type:'required_status_checks',parameters:{required_status_checks:[{context:'late',integration_id:42},{context:'late'}]}}];
+ const s=run({timelineItems:{nodes:[]}},'ahead',{rules});
+ assert.equal(s.checks.filter(c=>c.name==='late').length,1);
 });

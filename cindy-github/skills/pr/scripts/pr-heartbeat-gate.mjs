@@ -75,6 +75,7 @@
  *   --draft-reminder-hours N、--max-work-pending-passes N
  */
 
+import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
 import { checkOutcome, inspectWait, makeWait, waitFacts } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
@@ -765,6 +766,11 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   const events = [];
   const headSha = snap?.latestCommitOid ?? null;
   const headMoved = headSha !== watch.headSha;
+  let inventoryRecoveryOwed = !headMoved && Boolean(watch.inventoryRecoveryOwed);
+  if (inventoryRecoveryOwed && !snap.gate?.requiredChecksUnavailable && snap.verdict === 'READY') {
+    events.push({ kind: 'rules-recovered' });
+    inventoryRecoveryOwed = false;
+  }
 
   // 读不到检查时(快照标了 unavailable)保留原状态,不把「没读到」当成「没有检查」。
   let failedChecks = headMoved ? [] : watch.failedChecks ?? [];
@@ -811,16 +817,25 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
   // 这个 PR 以前跑过检查,新 head 却迟迟没有任何检查:可能没触发,也可能被禁用了。
   const everHadChecks = Boolean(watch.everHadChecks) || checks.length > 0;
   let checksAwaitedSince = watch.checksAwaitedSince ?? null;
-  if (watch.everHadChecks) {
+  let noChecksReminded = Boolean(watch.noChecksReminded);
+  const missingRequired = checks.some((c) => c.expected === true);
+  const runningActual = checks.some(c => !c.expected && checkOutcome(c) === 'pending');
+  if (watch.everHadChecks || missingRequired) {
     // 计时从 head 前进的那一刻开始,哪怕这一轮检查读不到:watch.headSha 会随之推进,
     // 之后 headMoved 不会再为 true,读取恢复时才起算就永远起算不了。
     if (headMoved) checksAwaitedSince = isoAt(now);
+    if (missingRequired && runningActual) checksAwaitedSince = isoAt(now);
+    // 同一提交上新增(或恢复读取后首次发现)的缺失必需检查:首次看到就起算。提醒过一次后
+    // 不再重新起算,直到缺失项补齐或 head 前进。
+    if (headMoved || !missingRequired) noChecksReminded = false;
+    if (missingRequired && !noChecksReminded && checksAwaitedSince === null && !checksUnavailable) checksAwaitedSince = isoAt(now);
     if (!checksUnavailable) {
-      if (checks.length > 0) checksAwaitedSince = null;
+      if (checks.length > 0 && !missingRequired) checksAwaitedSince = null;
       const awaitedMs = checksAwaitedSince === null ? 0 : now - Date.parse(checksAwaitedSince);
-      if (awaitedMs >= NO_CHECKS_MS) {
-        events.push({ kind: 'no-checks', minutes: Math.round(awaitedMs / 60_000) });
+      if (awaitedMs >= NO_CHECKS_MS && !runningActual) {
+        events.push({ kind: 'no-checks', minutes: Math.round(awaitedMs / 60_000), ...(missingRequired ? { missing: checks.filter(c => c.expected).map(c => c.name) } : {}) });
         checksAwaitedSince = null;
+        noChecksReminded = true;
       }
     }
   }
@@ -868,8 +883,8 @@ export function evaluateWatch(watch, snap, now, lastKnownConflicting = null) {
     exhausted: commentsOnly && wakes >= COMMENT_WAKE_LIMIT,
     next: {
       headSha, failedChecks, passed, passedChecks, owedChecks, remarksThrough, remarkIds,
-      conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, everHadChecks, baseSha,
-      waitFacts: waitFacts(snap),
+      conflicting, isDraft, queueProblems, wakes, checksAwaitedSince, noChecksReminded, everHadChecks, baseSha,
+      waitFacts: waitFacts(snap), inventoryRecoveryOwed,
     },
   };
 }
@@ -905,6 +920,8 @@ export function eventReport(events, snap, exhausted = false) {
         const outcome = String(c.conclusion ?? c.status ?? '').toLowerCase();
         return `  - ${c.name}${outcome && outcome !== 'failure' ? ` (${outcome})` : ''}${c.detailsUrl ? ` ${c.detailsUrl}` : ''}`;
       }));
+    } else if (e.kind === 'rules-recovered') {
+      lines.push('- Required-check rules are readable again. Reassess the previously withheld ready-to-merge result.');
     } else if (e.kind === 'checks-passed') {
       lines.push(`- All ${e.count} ${e.required ? 'required ' : ''}${e.count === 1 ? 'check' : 'checks'} passed${commit}.`);
     } else if (e.kind === 'remarks') {
@@ -914,7 +931,9 @@ export function eventReport(events, snap, exhausted = false) {
         return `  - ${r.author ?? 'someone'}${r.path ? ` on ${r.path}` : ''}: ${said}${r.url ? ` ${r.url}` : ''}`;
       }));
     } else if (e.kind === 'no-checks') {
-      lines.push(`- No checks have reported${commit} after ${e.minutes} minutes, although this PR ran checks before. They may not have been triggered.`);
+      lines.push(e.missing?.length
+        ? `- Required checks have not registered${commit} after ${e.minutes} minutes: ${e.missing.join(', ')}. Check whether they were triggered.`
+        : `- No checks have reported${commit} after ${e.minutes} minutes, although this PR ran checks before. They may not have been triggered.`);
     } else if (e.kind === 'conflicting') {
       lines.push(`- The branch now conflicts with ${base}.`);
     } else if (e.kind === 'draft-entered') {
@@ -991,8 +1010,14 @@ export function decide({
 
   // 基线:新跟进从空白起;旧版 gate 留下的状态(只有指纹)从这次快照起,不补报旧事。
   const legacy = !previous?.watch && Boolean(previous?.fingerprint || previous?.pendingFingerprint);
-  const baseline = previous?.watch
+  let baseline = previous?.watch
     ?? (legacy ? watchFromSnapshot(snap, now, lastKnownConflicting) : freshWatch(snap, now));
+  // 规则故障提醒还没被确认就恢复了:待确认的那份记着「欠一次复核」,不能因为已确认的 watch
+  // 没有这个标记而丢掉。
+  if (pendingWatch?.inventoryRecoveryOwed === true && !baseline.inventoryRecoveryOwed
+      && pendingWatch.headSha === baseline.headSha) {
+    baseline = { ...baseline, inventoryRecoveryOwed: true };
+  }
   const result = evaluateWatch(baseline, snap, now, lastKnownConflicting);
   const waiting = inspectWait(previous?.wait, snap);
   // A wait was installed only after ack; base noise must not defeat retries of its deadline.
@@ -1068,6 +1093,16 @@ export function decide({
       nextPendingKey: 'terminal',
       nextPendingCount: pendingKey === 'terminal' ? pendingCount + 1 : 1,
     };
+  }
+  if (snap.gate?.requiredChecksUnavailable) {
+    const sustained = (previous?.inventoryFailures ?? 0) + 1 >= 2;
+    const due = sustained && (!previous?.inventoryNoticeAt || now - previous.inventoryNoticeAt >= 24 * 3_600_000);
+    // The observation failure is independent of a model's resume/ack. Keep checking real news.
+    if (!result.events.length && (!waiting.wait?.until || now < waiting.wait.until)) {
+      if (pendingKey === 'required-checks-unavailable' || due) {
+        return passPending('required-checks-unavailable', 'required-check rules unavailable; do not report ready; observation continues', '', 'required-checks-unavailable', result.next);
+      }
+    }
   }
   if (waiting.wait && !result.next.waitFacts.complete && !snap.gate?.truncated) {
     return passPending('wait-unavailable', 'cannot verify the wait condition: snapshot is incomplete', '', 'wait-unavailable', baseline);
@@ -1532,7 +1567,7 @@ async function gateMain(argv, ctx) {
     return EXIT_SKIP;
   }
 
-  const checkSucceeded = !snap.gate?.truncated && !snap.checksSummary?.unavailable
+  const checkSucceeded = !snap.gate?.truncated && !snap.gate?.requiredChecksUnavailable && !snap.checksSummary?.unavailable
     && !(snap.blockers ?? []).includes('merge_queue_unavailable');
   // 推送后收齐:新提交第一次被看到的时刻,和要等的 bot reviewer(本 PR 见过的 + 本仓库近期见过的)。
   // 开始跟进时已在的提交不知道何时推送,不算新提交(不压)。
@@ -1555,6 +1590,11 @@ async function gateMain(argv, ctx) {
     settle,
   });
   const passed = decision.exitCode === EXIT_PASS;
+  if (passed && snap.gate?.requiredChecksUnavailable && snap.verdict === 'NOT_READY'
+      && !snap.isDraft && decision.nextPendingWatch?.headSha === snap.latestCommitOid) {
+    decision.nextPendingWatch = { ...decision.nextPendingWatch, inventoryRecoveryOwed: true };
+  }
+  if (passed && snap.gate?.requiredChecksUnavailable) decision.detail += '; rules unknown: observed check results are not proof the PR is ready to merge';
   writeState(repoFile, { ...repoState, reviewerBots: repoBots });
   // 回合状态:per-head 持久化,供「回合制与收敛止损」的机判使用(references/review-convergence.md)。
   // 这些信息理论上能从即时快照推导,但快照的 reviews 窗口只有 50 条、defer 痕迹又只活
@@ -1621,6 +1661,8 @@ async function gateMain(argv, ctx) {
     // 旧版状态的未确认指纹:在 agent 确认前保留,让升级那一轮能继续按未确认处理
     ...(previous?.pendingFingerprint && !previous?.watch && decision.nextPendingWatch
       ? { pendingFingerprint: previous.pendingFingerprint } : {}),
+    inventoryFailures: snap.gate?.requiredChecksUnavailable ? (previous?.inventoryFailures ?? 0) + 1 : 0,
+    inventoryNoticeAt: decision.nextPendingKey === 'required-checks-unavailable' && passed ? now : previous?.inventoryNoticeAt ?? null,
     currentFingerprint: decision.fingerprint,
     verdict: snap.verdict ?? null,
     blockers: snap.blockers ?? [],
@@ -1756,12 +1798,60 @@ export async function runGate(argv, {
   out = (text) => process.stdout.write(text),
   err = (text) => process.stderr.write(text),
 } = {}) {
+  let record, traceFile, args, code;
+  const at = now();
   try {
-    return await gateMain(argv, { env, now, runSnapshot: snapshotRunner, runProbe: probeRunner, readTrigger, out, err });
+    args = parseArgs(argv, env);
+    try {
+    if (!args.help && !args.lastResult && !args.suggest && env.CINDY_PR_TRACE !== '0') {
+      const file = stateFilePath(args.stateDir, args.repo, args.number);
+      traceFile = file + '.trace.jsonl';
+      record = { schema: 1, at, replayable: true, repo: args.repo, number: args.number,
+        argv: argv.filter((v,i) => !['--state-dir','--snapshot','--wait'].includes(v)
+          && !['--state-dir','--snapshot','--wait'].includes(argv[i-1])),
+        before: scrub(readState(file), HUMAN_APPROVAL_LANGUAGE),
+        repoBefore: scrub(readState(repoStateFilePath(args.stateDir,args.repo)), HUMAN_APPROVAL_LANGUAGE),
+        ...(args.waitFile ? {waitPlan:{...scrub(JSON.parse(fs.readFileSync(args.waitFile,'utf8')),HUMAN_APPROVAL_LANGUAGE),reason:'recorded wait'}} : {}) };
+    }
+    } catch { record = null; }
+    const ctx = { env, now: () => at, out, err,
+      runSnapshot: async (...a) => {
+        const value = await snapshotRunner(...a);
+        if (record) {
+          try { record.snapshot = scrub(JSON.parse(value.stdout), HUMAN_APPROVAL_LANGUAGE); }
+          catch { record.replayable = false; record.omitted = 'snapshot-failed'; }
+        }
+        return value;
+      },
+      runProbe: async (...a) => { const value = await probeRunner(...a); if (record) { try { record.probe = value.code === 0 ? JSON.parse(value.stdout) : null; } catch { record.probe = null; } } return value; },
+      readTrigger: async (...a) => { const value = await readTrigger(...a); if (record) record.trigger = value ? {kind:value.kind} : null; return value; },
+    };
+    code = await gateMain(argv, ctx);
   } catch (error) {
     err(`[pr-heartbeat-gate] ${error.message}\n`);
-    return EXIT_BLOCK;
+    code = EXIT_BLOCK;
   }
+  if (record) {
+    const state = readState(stateFilePath(args.stateDir,args.repo,args.number));
+    record.exitCode = code;
+    record.decision = args.waitFile ? 'wait' : args.resumeReason ? 'resume' : args.ack ? 'ack'
+      : args.deferMinutes !== undefined ? 'defer' : state?.lastResult?.reason ?? 'error';
+    // Never retain the human/model explanation passed to resume.
+    if (record.argv.includes('--resume')) record.argv[record.argv.indexOf('--resume')+1] = 'recorded resume';
+    // Pacing-only firings contain no new evidence. Do not duplicate the old state each tick.
+    if (record.snapshot || Object.hasOwn(record,'probe') || ['wait','resume','ack','defer'].includes(record.decision) || record.replayable === false) {
+      // 连续编号放在状态文件旁的小文件里(不动状态本身),写入失败也照常前进:
+      // 下一条成功记录的编号会跳号,回放据此标出缺口。
+      try {
+        const seqFile = `${stateFilePath(args.stateDir, args.repo, args.number)}.trace-seq`;
+        const last = Number.parseInt(fs.existsSync(seqFile) ? fs.readFileSync(seqFile, 'utf8') : '0', 10) || 0;
+        record.seq = last + 1;
+        fs.writeFileSync(seqFile, String(record.seq), { mode: 0o600 });
+      } catch { /* Numbering must not change the follow decision. */ }
+      appendTrace(traceFile, record);
+    }
+  }
+  return code;
 }
 
 const entryPath = process.argv[1] ? realpathOrSelf(process.argv[1]) : null;

@@ -106,3 +106,26 @@ test('settle: pending reviews, status comments, inline findings and EYES are not
     assert.deepEqual(botsAnswered(snap, [bot], head, T0), [bot]);
   }
 });
+
+test('bot check completion uses app identity, current head and latest successful attempt', () => {
+  const c = { name: 'Review', appSlug: 'review-bot', appId: 42, headSha: 'head', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: new Date(T0).toISOString(), completedAt: new Date(T0 + MIN).toISOString() };
+  const answered = checks => botsAnswered({ reviewerChecks: checks }, ['review-bot'], 'head', T0);
+  assert.deepEqual(answered([c]), ['review-bot']);
+  for (const patch of [{headSha:'old'}, {appSlug:'other'}, {appId:null}, {status:'IN_PROGRESS'}, {conclusion:'FAILURE'}, {conclusion:'CANCELLED'}, {conclusion:'SKIPPED'}, {completedAt:null}]) {
+    assert.deepEqual(answered([{...c,...patch}]), [], JSON.stringify(patch));
+  }
+  const newer = {...c, startedAt:new Date(T0+2*MIN).toISOString(), status:'IN_PROGRESS', conclusion:null};
+  assert.deepEqual(answered([c,newer]), []);
+  assert.deepEqual(answered([{...c,conclusion:'FAILURE'}, {...newer,status:'COMPLETED',conclusion:'SUCCESS',completedAt:new Date(T0+3*MIN).toISOString()}]), ['review-bot']);
+  assert.deepEqual(botsAnswered({reviewerChecks:[c],checksSummary:{unavailable:true}}, ['review-bot'], 'head', T0), []);
+});
+
+test('a queued bot rerun without a start time keeps the earlier success from counting', () => {
+  const c = { name: 'Review', appSlug: 'review-bot', appId: 42, headSha: 'head', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: new Date(T0).toISOString(), completedAt: new Date(T0 + MIN).toISOString() };
+  const answered = checks => botsAnswered({ reviewerChecks: checks }, ['review-bot'], 'head', T0);
+  for (const status of ['QUEUED', 'PENDING', 'WAITING']) {
+    assert.deepEqual(answered([c, { ...c, status, conclusion: null, startedAt: null, completedAt: null }]), [], status);
+  }
+  assert.deepEqual(answered([c, { ...c, name: 'Other', status: 'QUEUED', conclusion: null, startedAt: null, completedAt: null }]), [], 'another queued check of the same app also blocks');
+  assert.deepEqual(answered([c, { ...c, status: 'COMPLETED', conclusion: 'CANCELLED', startedAt: null, completedAt: null }]), ['review-bot'], 'a finished run that never started is not pending');
+});
