@@ -46,7 +46,7 @@ const SNAPSHOT=`const auth=await api.authInitialize();
  const login=authenticated?null:await api.authGetLoginState();
  const database=authenticated&&typeof auth.dataOwnerId==='string'&&api.localDb?.ensureReady
    ?await api.localDb.ensureReady(auth.dataOwnerId):null;
- return {supported:true,authenticated,databaseReady:database?.ready===true,
+ return {supported:true,authenticated,databaseReady:database?.ready===true,loginUiOpen:['#/login','#/add-account'].includes(window.location?.hash),
   accounts:saved.accounts.map(a=>({accountKey:a.accountKey,displayName:a.displayName,isCurrent:a.isCurrent===true,region:a.region,email:a.email,orgName:a.orgName,kind:a.kind})),
   step:authenticated?'authenticated':login?.state?.step||null,
   code:database?.error?.code||(login?.success===false?login.code:null),
@@ -63,13 +63,15 @@ function projectSnapshot(value){
       ...(['personal','org'].includes(a.kind)?{kind:a.kind}:{})};
   });
   if(accounts.filter(a=>a.isCurrent).length>1)fail('INVALID_ACCOUNT_SNAPSHOT','Ambiguous current account.');
-  return {authenticated:value.authenticated===true,databaseReady:value.databaseReady===true,accounts,
+  return {authenticated:value.authenticated===true,databaseReady:value.databaseReady===true,loginUiOpen:value.loginUiOpen===true,accounts,
     step:bounded(value.step,80),code:bounded(value.code,100),remoteControl:typeof value.remoteControl==='boolean'?value.remoteControl:null,verified:value.verified===true,
     operationError:['ACCOUNT_REAUTH_REQUIRED','CREDENTIAL_STORE_UNAVAILABLE','ACCOUNT_NOT_FOUND'].includes(value.operationError)?value.operationError:null};
 }
 function accountExpression(operation='snapshot',args={}){
   let action='';
   if(operation==='sync')action='await api.authSyncAccounts();';
+  else if(operation==='add-account')action=`if(typeof api.authBeginAddAccount!=='function'||!window.location)throw Error('APP_ADD_ACCOUNT_UNAVAILABLE');
+    const state=await api.authInitialize();window.location.hash=state.mode==='cloud'&&state.isAuthenticated===true?'/add-account':'/login';`;
   else if(operation==='select'){
     if(typeof args.accountKey!=='string'||!args.accountKey||args.accountKey.length>512||args.accountKey.includes('\0'))fail('INVALID_ACCOUNT','Choose an existing account reference.');
     action=`await api.authSwitchAccount(${JSON.stringify(args.accountKey)});`;

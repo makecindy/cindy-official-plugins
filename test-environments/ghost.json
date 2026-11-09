@@ -3,9 +3,9 @@
   "minCindyVersion": "0.1.124",
   "id": "test-environments",
   "name": "Test Environments",
-  "description": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "whenToUse": "Launch projects, select real accounts, prepare samples, run acceptance cases and stop. Remember app-owned login profiles separately on each computer.",
-  "version": "1.3.0",
+  "description": "Add and choose real test accounts. Reuse app-owned login on this computer; ask the conversation to handle builds, startup and tests.",
+  "whenToUse": "Add and choose real test accounts. Reuse app-owned login on this computer; ask the conversation to handle builds, startup and tests.",
+  "version": "1.4.0",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -89,54 +89,6 @@
         },
         "required": [
           "project"
-        ],
-        "additionalProperties": false
-      }
-    },
-    {
-      "name": "save_account",
-      "description": "Save a real application account reference using its opaque account key. The application retains encrypted sessions; plugin edits preserve remembered local profiles. Identity cannot be rebound.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "account": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "project": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              },
-              "selector": {
-                "type": "string",
-                "description": "Opaque application accountKey from the owned app account list, not a nickname or credential."
-              },
-              "loginSource": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "project",
-              "label",
-              "selector"
-            ],
-            "additionalProperties": false
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "account"
         ],
         "additionalProperties": false
       }
@@ -601,17 +553,22 @@
     },
     {
       "name": "login_accounts",
-      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials.",
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials. Optionally remember the selected account for the next test. Returns selectedAccount; bind_login_account uses it when account is omitted.",
       "parameters": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Optional saved account ID to select for subsequent tests. Does not switch a running client."
+          }
+        },
         "required": [],
         "additionalProperties": false
       }
     },
     {
       "name": "bind_login_account",
-      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first.",
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first. Omit account to use the account selected on the plugin page.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -623,9 +580,29 @@
           }
         },
         "required": [
-          "account",
           "project"
         ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_account",
+      "description": "Open the real client login to add another account. The app saves its session and supplies its real server data. Omit project/region only when an unambiguous existing client setup is available; otherwise the conversation sets up the intended source project first. Never request credentials or API configuration.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "global",
+              "cn"
+            ]
+          }
+        },
+        "required": [],
         "additionalProperties": false
       }
     }
@@ -658,6 +635,5 @@
     "ja": "locales/ja.json",
     "ko": "locales/ko.json"
   },
-  "releaseNotes": "Use Cindy’s existing native directory picker instead of project-name/path forms. Select a project and start in one click, reusing stable test defaults. Compact running state, account, sample/check, evidence and stop into one panel. Keep advanced management and SSH revision review. Respect picker cancellation and retain request deduplication while the native dialog is open. Author remains omitted.",
-  "pick": true
+  "releaseNotes": "Account-only page: add a real account in the client, remember the selected account and view app-owned storage. Project, PR, package, SSH and test orchestration belong in the conversation. Remove configuration forms and the unused directory-picker permission. No client/server changes or credential copying."
 }

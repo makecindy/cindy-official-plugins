@@ -1,7 +1,7 @@
 {
   "name": "测试环境",
-  "description": "启动项目、选正式账号、准备样本、执行验收并停止；在每台电脑分别记住应用保管的登录档案。",
-  "whenToUse": "启动项目、选正式账号、准备样本、执行验收并停止；在每台电脑分别记住应用保管的登录档案。",
+  "description": "添加和选用真实测试账号，复用应用在本机保存的登录态；构建、启动和测试交给对话处理。",
+  "whenToUse": "添加和选用真实测试账号，复用应用在本机保存的登录态；构建、启动和测试交给对话处理。",
   "mainView": {
     "title": "测试环境"
   },
@@ -11,9 +11,6 @@
     },
     "save_project": {
       "description": "保存项目与参数数组命令；以本机用户执行，不得在参数里保存密码或令牌。"
-    },
-    "save_account": {
-      "description": "使用应用返回的 accountKey 保存正式账号引用；应用保管加密登录态。编辑保留本机档案记录，已有引用不能改绑身份。"
     },
     "save_profile": {
       "description": "保存可复用启动方案。Cindy 桌面的持久隔离档案可以登录正式账号，验收需 debugPort；每台电脑分别登录。"
@@ -49,10 +46,13 @@
       "description": "通用 SSH 验收流程。catalog 查看指定电脑的档案与硬件；plan 提供 target、profile 和 pr（repo/number，可选 commit）。省略 commit 时从目标 Git 读取 PR 当前版本，预览精确 SHA 后再 start。start 使用新工作树和 B 本机登录；status/stop/select_account/action/collect 使用同一 runId。action 仅执行已保存的 prepare/verify 参数；collect 取回限量、校验摘要的结果、可选日志和私有截图。沿用 OpenSSH 主机信任，不保存密码/私钥、不转发 Agent、不复制凭证。B 未登录正常授权；跨设备首次授权未实现。回执丢失先查原运行，不盲目重试。命令成功不代替真机和人工证据；不自动发布 PR，分享前脱敏。"
     },
     "login_accounts": {
-      "description": "列出本机跨项目保存的测试账号引用。可用只表示已发现匹配的应用档案，不保证登录仍有效；不含凭证。"
+      "description": "列出本机应用保存的账号引用与档案位置；可传 account 记住下次测试选择。返回 selectedAccount。已保存不等于登录仍有效，不立即切换正在运行的客户端。"
     },
     "bind_login_account": {
-      "description": "为 Cindy 源码项目选择已保存账号，复用应用保管的隔离档案。优先使用应用报告的区域，缺失时沿用已观察档案的版本。不启动、不复制凭证；先停止占用该档案的实例。"
+      "description": "给当前任务的 Cindy 源码项目绑定已保存的账号档案；省略 account 时使用页面选中的账号。只复用应用档案，不复制凭证，不自动启动。"
+    },
+    "add_account": {
+      "description": "打开真实客户端的登录页添加账号，由应用保存登录态。页面不配置 API 或假数据。对话先准备目标项目及版本；省略项目时仅能复用唯一明确的客户端环境。"
     }
   }
 }

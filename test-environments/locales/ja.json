@@ -1,7 +1,7 @@
 {
   "name": "テスト環境",
-  "description": "プロジェクト起動、実アカウント選択、サンプル準備、受入確認、停止。各パソコンのアプリ管理ログインプロファイルを記録します。",
-  "whenToUse": "プロジェクト起動、実アカウント選択、サンプル準備、受入確認、停止。各パソコンのアプリ管理ログインプロファイルを記録します。",
+  "description": "実際のテストアカウントを追加・選択し、アプリが保存したログインを再利用します。ビルド、起動とテストは会話で行います。",
+  "whenToUse": "実際のテストアカウントを追加・選択し、アプリが保存したログインを再利用します。ビルド、起動とテストは会話で行います。",
   "mainView": {
     "title": "テスト環境"
   },
@@ -11,9 +11,6 @@
     },
     "save_project": {
       "description": "プロジェクトとコマンド引数を保存します。秘密情報を引数に保存しないでください。"
-    },
-    "save_account": {
-      "description": "アプリの不透明な accountKey で実アカウント参照を保存します。暗号化セッションはアプリが保持し、編集時も端末のプロファイル履歴を維持します。別の本人情報への変更はできません。"
     },
     "save_profile": {
       "description": "起動設定を保存します。Cindy の永続分離プロファイルでも実アカウントを使えます。検証には debugPort が必要で、各パソコンでログインします。"
@@ -49,10 +46,13 @@
       "description": "共通 SSH 検証です。catalog は対象端末の設定を取得。plan は target、profile、PR repo/number と任意の commit を受け取り、省略時は対象 Git から現在の SHA を読みます。確認後 start が新しい worktree と B のログインを使います。status/stop/select_account/action/collect は同じ runId。action は保存した prepare/verify のみ、collect は制限付きログ・画像・結果をハッシュ確認して取得。既存 SSH 信頼を使い、秘密鍵・パスワード保存、Agent 転送、認証情報コピーはしません。未ログインは通常認証が必要です。初回端末間認証は未実装。返信不明時は同じ実行を確認し、重複起動しないでください。実機と人手の証拠は別途必要です。PR へ自動公開しません。"
     },
     "login_accounts": {
-      "description": "この端末に保存したプロジェクト共通のテストアカウント参照を一覧表示します。保存先の存在はログインの有効性を保証しません。認証情報は含みません。"
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials. Optionally remember the selected account for the next test. Returns selectedAccount; bind_login_account uses it when account is omitted."
     },
     "bind_login_account": {
-      "description": "保存済みアカウントのアプリ管理プロファイルを再利用します。地域情報がない場合は既存プロファイルのバージョンを使います。起動や認証情報のコピーは行いません。使用中のインスタンスは先に停止してください。"
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first. Omit account to use the account selected on the plugin page."
+    },
+    "add_account": {
+      "description": "Open the real client login to add another account. The app saves its session and supplies its real server data. Omit project/region only when an unambiguous existing client setup is available; otherwise the conversation sets up the intended source project first. Never request credentials or API configuration."
     }
   }
 }

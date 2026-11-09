@@ -10,8 +10,18 @@ class SessionMonitor {
     this.target = plan.account; this.attempted = null; this.verifiedKey = null; this.verifiedAt = 0;
     this.observedKey = null; this.reauthCode = null;
     this.lastVerificationAttempt = -Infinity; this.remoteAttempted = false;
+    this.addingAccount = false; this.loginRequestError = null;
   }
   async poll(status) {
+    const addFile = path.join(this.dir, 'add-account.json');
+    try {
+      JSON.parse(fs.readFileSync(addFile, 'utf8'));
+      fs.unlinkSync(addFile);
+      this.target = null; this.attempted = null; this.verifiedKey = null; this.reauthCode = null;
+      this.addingAccount = true; this.loginRequestError = null; this.lastVerificationAttempt = -Infinity;
+      try { await this.perform(this.plan, status, 'add-account'); }
+      catch { this.loginRequestError = 'ADD_ACCOUNT_UNCONFIRMED'; }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const requestFile = path.join(this.dir, 'select-account.json');
     try {
       const request = JSON.parse(fs.readFileSync(requestFile, 'utf8'));
@@ -19,6 +29,7 @@ class SessionMonitor {
       fs.unlinkSync(requestFile);
       this.target = request.account; this.attempted = null; this.verifiedKey = null; this.reauthCode = null;
       this.remoteAttempted = false; this.lastVerificationAttempt = -Infinity;
+      this.addingAccount = false; this.loginRequestError = null;
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     let snapshot = await this.perform(this.plan, status, 'snapshot');
     const saved = this.remember(this.plan.catalogHome, this.plan, status.application, snapshot);
@@ -29,6 +40,11 @@ class SessionMonitor {
       sessionStorage: 'target-application-on-this-computer'};
     if(!saved.saved)return {...base,state:'checking-account',code:saved.reason,
       nextAction:'Account history has not been saved. Refresh the catalog or restore the original profile; application sessions remain intact.'};
+    if(this.loginRequestError)return {...base,state:'waiting-for-owner',code:this.loginRequestError,verification:undefined,
+      nextAction:'Opening the real application login was not confirmed. Inspect this instance before requesting it again; no credentials or sample identities were created.'};
+    if(this.addingAccount&&snapshot.loginUiOpen)return {...base,state:'waiting-for-owner',code:'ACCOUNT_LOGIN_OPEN',verification:undefined,
+      nextAction:'Complete sign-in in the real application. Its own server provides this account’s existing data; the plugin stores only its public reference.'};
+    if(this.addingAccount&&snapshot.authenticated&&!snapshot.loginUiOpen)this.addingAccount=false;
     const current = () => snapshot.authenticated ? snapshot.accounts.find(a => a.isCurrent)?.accountKey : null;
     if(!snapshot.authenticated&&this.verifiedKey)this.reauthCode='ACCOUNT_REAUTH_REQUIRED';
     if (this.observedKey !== current()) {this.verifiedKey = null;this.lastVerificationAttempt = -Infinity;this.observedKey = current();}

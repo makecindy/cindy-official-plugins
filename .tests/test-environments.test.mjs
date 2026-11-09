@@ -349,3 +349,37 @@ test('native-picked project setup reuses canonical roots and profiles without re
  const alias=path.join(dir,'source-link');fs.symlinkSync(root,alias,'dir');const second=app.ensureTestProject({root:alias,label:'Folder name'});assert.equal(second.project.id,first.project.id);assert.equal(second.profile.id,first.profile.id);assert.equal(second.project.label,'My Cindy');assert.equal(app.catalog().profiles[first.profile.id].account,'a');assert.equal(Object.keys(app.catalog().projects).length,1);assert.equal(Object.keys(app.catalog().profiles).length,1);assert.equal(app.jobs().length,0);assert.equal(JSON.stringify(second).includes(root),false);
  assert.equal(app.ensureTestProject({project:first.project.id}).profile.id,first.profile.id);const revision=app.catalog().revision;assert.throws(()=>app.ensureTestProject({root:dir,label:'Not source'}),{code:'INVALID_PROJECT'});assert.equal(app.catalog().revision,revision);assert.throws(()=>app.ensureTestProject({project:'missing'}),{code:'PROJECT_NOT_FOUND'});
 });
+
+// The real add-account page owns auth; the plugin never handles a password or token.
+test('add-account navigation uses the existing client page without initializing or copying credentials',async()=>{
+ let begins=0;const location={hash:'#/cc-agent'},api={authListAccounts:async()=>({accounts:[]}),authGetLoginState:async()=>({}),authBeginAddAccount:async()=>begins++,authInitialize:async()=>({mode:'cloud',isAuthenticated:true})};
+ await vm.runInNewContext(accountExpression('add-account'),{window:{electronAPI:api,location}});assert.equal(location.hash,'/add-account');assert.equal(begins,0);
+ api.authInitialize=async()=>({mode:'cloud',isAuthenticated:false});await vm.runInNewContext(accountExpression('add-account'),{window:{electronAPI:api,location}});assert.equal(location.hash,'/login');
+});
+test('adding a second account suspends the pinned first account until real login completes',async t=>{
+ const {plan,job,application}=realAccountPlan(t);let open=true,current='account-a';const ops=[];
+ const monitor=new SessionMonitor({...plan,account:{selector:'account-a'}},job,{perform:async(_p,_s,op)=>{ops.push(op);return {...snapshot(current),loginUiOpen:open,verified:op==='verify'};}});
+ fs.writeFileSync(path.join(job,'add-account.json'),'{}');assert.equal((await monitor.poll({application})).code,'ACCOUNT_LOGIN_OPEN');assert.equal(fs.existsSync(path.join(job,'add-account.json')),false);
+ open=false;current='account-b';const result=await monitor.poll({application});assert.equal(result.currentAccount.accountKey,'account-b');assert.equal(result.state,'ready');assert.equal(ops.filter(op=>op==='add-account').length,1);assert.equal(ops.includes('select'),false);
+});
+test('unconfirmed add-account dispatch is consumed once and cannot falsely report readiness',async t=>{
+ const {plan,job,application}=realAccountPlan(t);let requests=0;const monitor=new SessionMonitor(plan,job,{perform:async(_p,_s,op)=>{if(op==='add-account'){requests++;throw Error('lost reply');}return snapshot();}});
+ fs.writeFileSync(path.join(job,'add-account.json'),'{}');for(let i=0;i<3;i++)assert.equal((await monitor.poll({application})).code,'ADD_ACCOUNT_UNCONFIRMED');assert.equal(requests,1);
+});
+test('page selection persists and binding omitted account uses the exact chosen native reference',t=>{
+ const {app,plan,application}=realAccountPlan(t);rememberAccounts(app.home,plan,application,snapshot());const accounts=app.loginAccounts().accounts;
+ const selected=app.invoke('login_accounts',{account:accounts[1].id});assert.equal(selected.selectedAccount,accounts[1].id);assert.equal(new Environments(app.home).loginAccounts().selectedAccount,accounts[1].id);
+ const result=app.invoke('bind_login_account',{project:'cindy'});assert.equal(result.account.id,accounts[1].id);assert.equal(app.plan(result.profile.id).account.selector,'account-b');assert.equal(app.jobs().length,0);
+ assert.throws(()=>app.invoke('login_accounts',{account:'missing'}),{code:'ACCOUNT_NOT_FOUND'});assert.equal(app.loginAccounts().selectedAccount,accounts[1].id);
+});
+test('empty and ambiguous account launch contexts never guess a project or create a job',t=>{
+ const {app,dir}=fixture(t);assert.throws(()=>app.invoke('add_account'),{code:'ACCOUNT_CONTEXT_REQUIRED'});
+ fs.mkdirSync(path.join(dir,'scripts'));fs.writeFileSync(path.join(dir,'scripts/restart-desktop-remote.mjs'),'');
+ app.saveProject({id:'one',label:'Example',root:dir,adapter:'cindy'});assert.throws(()=>app.invoke('add_account'),{code:'ACCOUNT_CONTEXT_REQUIRED'});
+ assert.equal(app.jobs().length,0);
+});
+test('add account queues for the exact live client, hides stale readiness and refuses a duplicate request',t=>{
+ const {app,plan,dir}=realAccountPlan(t);fs.mkdirSync(path.join(dir,'apps/desktop/src/renderer'),{recursive:true});fs.writeFileSync(path.join(dir,'apps/desktop/src/renderer/router.tsx'),"path: 'add-account'");
+ const jobId='live-example',job=path.join(app.home,'jobs',jobId);fs.mkdirSync(job,{recursive:true});fs.writeFileSync(path.join(job,'plan.json'),JSON.stringify({...plan,accountActions:['add-account']}));fs.writeFileSync(path.join(job,'status.json'),JSON.stringify({jobId,profile:'daily',projectRoot:plan.projectRoot,action:'start',state:'ready',verification:'application-account-online'}));
+ assert.equal(app.invoke('add_account').jobId,jobId);assert.equal(app.status(jobId).verification,undefined);assert.equal(app.status(jobId).code,'ACCOUNT_LOGIN_REQUESTED');assert.throws(()=>app.invoke('add_account'),{code:'SELECTION_PENDING'});assert.equal(app.jobs().length,1);
+});

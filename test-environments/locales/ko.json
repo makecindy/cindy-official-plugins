@@ -1,7 +1,7 @@
 {
   "name": "테스트 환경",
-  "description": "프로젝트 시작, 실제 계정 선택, 샘플 준비, 검수 실행, 중지. 컴퓨터마다 앱이 보관하는 로그인 프로필을 기억합니다.",
-  "whenToUse": "프로젝트 시작, 실제 계정 선택, 샘플 준비, 검수 실행, 중지. 컴퓨터마다 앱이 보관하는 로그인 프로필을 기억합니다.",
+  "description": "실제 테스트 계정을 추가하고 선택하며 앱이 저장한 로그인을 재사용합니다. 빌드, 시작 및 테스트는 대화로 처리합니다.",
+  "whenToUse": "실제 테스트 계정을 추가하고 선택하며 앱이 저장한 로그인을 재사용합니다. 빌드, 시작 및 테스트는 대화로 처리합니다.",
   "mainView": {
     "title": "테스트 환경"
   },
@@ -11,9 +11,6 @@
     },
     "save_project": {
       "description": "프로젝트와 명령 인수를 저장합니다. 인수에 비밀 정보를 저장하지 마세요."
-    },
-    "save_account": {
-      "description": "앱의 불투명한 accountKey로 실제 계정 참조를 저장합니다. 암호화 세션은 앱이 보관하며 편집해도 로컬 프로필 기록을 유지합니다. 기존 신원은 바꿀 수 없습니다."
     },
     "save_profile": {
       "description": "재사용할 실행 설정을 저장합니다. Cindy의 영구 격리 프로필에서도 실제 계정을 씁니다. 검수에는 debugPort가 필요하며 컴퓨터마다 로그인합니다."
@@ -49,10 +46,13 @@
       "description": "공통 SSH 검증입니다. catalog는 대상 설정과 하드웨어를 읽습니다. plan은 target, profile, PR repo/number 및 선택적 commit을 받으며 생략 시 대상 Git에서 현재 SHA를 읽습니다. 확인 후 start는 새 worktree와 B의 로그인을 사용합니다. status/stop/select_account/action/collect는 같은 runId를 사용합니다. action은 저장된 prepare/verify만 실행하며 collect는 제한된 로그·이미지·결과의 해시를 확인합니다. 기존 SSH 신뢰를 사용하고 키·비밀번호 저장, Agent 전달이나 자격 증명 복사를 하지 않습니다. B 미로그인은 정상 인증이 필요하며 기기 간 최초 인증은 미구현입니다. 응답이 불명확하면 같은 실행을 먼저 확인하세요. 실제 기기·사람의 증거가 필요하며 PR에 자동 공개하지 않습니다."
     },
     "login_accounts": {
-      "description": "이 컴퓨터의 프로젝트 간 테스트 계정 참조를 표시합니다. 프로필이 있어도 로그인이 유효하다는 보장은 없습니다. 자격 증명은 포함하지 않습니다."
+      "description": "List this computer’s saved test account references across projects. Available means a matching app-owned profile was observed, not proof that its login is still valid. No credentials. Optionally remember the selected account for the next test. Returns selectedAccount; bind_login_account uses it when account is omitted."
     },
     "bind_login_account": {
-      "description": "저장된 계정의 앱 관리 프로필을 재사용합니다. 앱이 지역을 제공하지 않으면 관찰된 프로필 버전을 사용합니다. 앱을 시작하거나 자격 증명을 복사하지 않습니다. 같은 프로필을 사용하는 인스턴스를 먼저 중지하세요."
+      "description": "Choose a saved test account for a Cindy source project and reuse its existing app-owned isolated profile. Use the app-reported region when available, otherwise the observed profile version. Does not launch or copy credentials. Stop any instance already using that profile first. Omit account to use the account selected on the plugin page."
+    },
+    "add_account": {
+      "description": "Open the real client login to add another account. The app saves its session and supplies its real server data. Omit project/region only when an unambiguous existing client setup is available; otherwise the conversation sets up the intended source project first. Never request credentials or API configuration."
     }
   }
 }
