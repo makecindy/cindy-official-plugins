@@ -30,7 +30,9 @@ class SessionMonitor {
     if(!saved.saved)return {...base,state:'checking-account',code:saved.reason,
       nextAction:'Account history has not been saved. Refresh the catalog or restore the original profile; application sessions remain intact.'};
     const current = () => snapshot.authenticated ? snapshot.accounts.find(a => a.isCurrent)?.accountKey : null;
+    if(!snapshot.authenticated&&this.verifiedKey)this.reauthCode='ACCOUNT_REAUTH_REQUIRED';
     if (this.observedKey !== current()) {this.verifiedKey = null;this.lastVerificationAttempt = -Infinity;this.observedKey = current();}
+    if(!snapshot.authenticated&&this.reauthCode==='ACCOUNT_REAUTH_REQUIRED')return {...base,state:'waiting-for-owner',code:this.reauthCode,verification:undefined,nextAction:'The previously verified local session is no longer authenticated. Reauthorize through normal Cindy sign-in on this computer; no automatic account switch is retried.'};
     if (this.target && current() !== this.target.selector) {
       this.verifiedKey = null;
       if (!snapshot.accounts.some(a => a.accountKey === this.target.selector))
@@ -50,6 +52,7 @@ class SessionMonitor {
       return {...base, state: 'waiting-for-owner', code: 'ACCOUNT_SIGN_IN_REQUIRED',
         nextAction: 'Use normal application sign-in. The persistent profile retains every app-saved account; no tokens are copied to the plugin.'};
     }
+    this.reauthCode=null;
     if (!snapshot.databaseReady)
       return {...base, state: 'checking-account', code: snapshot.code || 'DATABASE_NOT_READY', nextAction: 'Wait for this account’s application database to be ready.'};
     const remote = this.plan.configuration.remoteControl;

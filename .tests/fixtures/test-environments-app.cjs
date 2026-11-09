@@ -13,13 +13,13 @@ let current = null;
 const saved = new Set();
 const api = {
   authInitialize: async () => {
-    const requested = JSON.parse(fs.readFileSync(path.join(dir, 'account.json'))).current;
+    const login = JSON.parse(fs.readFileSync(path.join(dir, 'account.json'))), requested = login.current;
     if (requested) { current = requested; saved.add(current); }
-    return {mode: current ? 'cloud' : 'signed-out', isAuthenticated: !!current, dataOwnerId: current, token: 'must-not-leak'};
+    return {mode: current && !login.expired ? 'cloud' : 'signed-out', isAuthenticated: !!current && !login.expired, dataOwnerId: current, token: 'must-not-leak'};
   },
   authListAccounts: async () => ({accounts: [...saved].map(accountKey => ({accountKey, displayName: accountKey, isCurrent: current === accountKey, refreshToken: 'must-not-leak'}))}),
   authGetLoginState: async () => ({success: true, state: {step: 'identifier'}}),
-  authSwitchAccount: async accountKey => { if (!saved.has(accountKey)) throw Error('ACCOUNT_NOT_FOUND'); current = accountKey; },
+  authSwitchAccount: async accountKey => { if (JSON.parse(fs.readFileSync(path.join(dir, 'account.json'))).expired) throw Error('[ACCOUNT_REAUTH_REQUIRED] Simulated expired account'); if (!saved.has(accountKey)) throw Error('ACCOUNT_NOT_FOUND'); current = accountKey; fs.writeFileSync(path.join(dir, 'account.json'), JSON.stringify({current})); },
   authRefresh: async () => !!current,
   localDb: {ensureReady: async () => ({ready: !!current})},
   deviceLink: {getState: async () => ({remoteControlEnabled: false})},

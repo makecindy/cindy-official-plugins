@@ -9,7 +9,7 @@ const ACCOUNT_COPY={
  'zh-CN':['选用账号','记住账号','正式账号在每台电脑分别登录。应用保存加密登录态，插件记住对应档案；授权过期后需重新登录。','本机登录档案','历史账号；本机不可用时需登录','核对账号中'],
  ja:['アカウントを選択','アカウントを記録','実アカウントは各パソコンでログインします。暗号化セッションはアプリ、プロファイル参照はプラグインが保持します。期限切れ時は再ログインが必要です。','この端末のプロファイル','履歴です。この端末で利用できない場合はログインしてください。','アカウントを確認中'],
  ko:['계정 선택','계정 기억','실제 계정은 컴퓨터마다 로그인합니다. 암호화 세션은 앱이, 프로필 참조는 플러그인이 보관합니다. 인증 만료 시 다시 로그인해야 합니다.','이 컴퓨터의 프로필','계정 기록입니다. 이 컴퓨터에서 사용할 수 없으면 로그인하세요.','계정 확인 중']};
-for(const key of Object.keys(COPY))COPY[key].push(...ACCOUNT_COPY[key]);
+for(const key of Object.keys(COPY))COPY[key].push(...ACCOUNT_COPY[key],{en:'Prepare samples','zh-CN':'准备样本',ja:'サンプルを準備',ko:'샘플 준비'}[key],{en:'This local sign-in has expired. Sign in again in the target application; other computers keep their own sessions.','zh-CN':'本机登录已失效，请在目标应用中重新登录。其他电脑的登录态不受影响。',ja:'この端末のログインが失効しました。対象アプリで再ログインしてください。他の端末のセッションには影響しません。',ko:'이 컴퓨터의 로그인이 만료되었습니다. 대상 앱에서 다시 로그인하세요. 다른 컴퓨터의 세션은 유지됩니다.'}[key]);
 let locale='en',db,tab='profiles',busy=false;const $=id=>document.getElementById(id),t=n=>(COPY[locale]||COPY.en)[n];
 const channel=new BroadcastChannel('test-environments-pages'),pending=new Map();
 channel.onmessage=({data})=>{if(data?.type!=='response')return;const p=pending.get(data.id);if(!p)return;clearTimeout(p.timer);clearInterval(p.resend);pending.delete(data.id);data.result?.ok?p.resolve(data.result.data):p.reject(Object.assign(new Error(data.result?.message||t(55)),{code:data.result?.errorCode}));};
@@ -33,6 +33,7 @@ async function render(){
  }
  if(tab==='jobs'){
  const states={ready:61,'waiting-for-owner':62,'checking-account':77,preparing:63,running:64,stopped:65,completed:66,failed:67,unknown:68,stopping:69,starting:70};card.append(el('p',t(states[record.state]??68),'badge'));actions.append(button(t(22),()=>output(record)));if(!['stopped','completed'].includes(record.state))actions.append(button(t(16),async()=>{output(await call('stop',{jobId:record.jobId}));await render();}));
+ if(record.code==='ACCOUNT_REAUTH_REQUIRED')card.append(el('p',t(79),'meta'));
  const profile=db.profiles[record.profile];
  if(record.application&&profile&&['preparing','checking-account','waiting-for-owner','ready'].includes(record.state)){
  actions.append(button(t(73),async()=>{output(await call('import_cindy',{project:profile.project,jobId:record.jobId}));await refresh();}));
@@ -44,7 +45,7 @@ async function render(){
  }
  }else{
  actions.append(button(t(9),()=>edit(record)));if(tab==='profiles'){
- if(record.platform!=='desktop'&&record.platform!=='linux')actions.append(button(t(14),async()=>{output(await call('start',{profile:record.id,action:'prepare'}));tab='jobs';await render();}));
+ if(db.projects[record.project]?.commands?.prepare||(record.platform!=='desktop'&&record.platform!=='linux'))actions.append(button(t(db.projects[record.project]?.commands?.prepare?78:14),async()=>{output(await call('start',{profile:record.id,action:'prepare'}));tab='jobs';await render();}));
  if(db.projects[record.project]?.commands?.verify)actions.append(button(t(15),async()=>{output(await call('start',{profile:record.id,action:'verify'}));tab='jobs';await render();}));
  actions.append(button(t(12),async()=>output(await call('plan',{profile:record.id}))),button(t(13),async()=>{output(await call('start',{profile:record.id}));notice(t(56));tab='jobs';await render();},'primary'));
  }if(tab==='projects'&&record.adapter==='cindy')actions.append(button(t(18),async()=>{output(await call('import_cindy',{project:record.id}));await refresh();}));

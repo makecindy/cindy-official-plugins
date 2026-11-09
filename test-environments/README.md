@@ -38,7 +38,7 @@ Local acceptance and generic SSH orchestration are delivered together in PR #309
 
 ## Generic SSH template (unified test package)
 
-Unified test package 1.1.2 includes local acceptance and generic SSH orchestration; computers are parameters.
+Unified test package 1.1.3 includes local acceptance and generic SSH orchestration; computers are parameters.
 Use AI/CLI remote_catalog(target) to inspect B's profiles and observed model, then
 remote_plan(target,profile,pr,requirements). Review it and remote_start the returned
 runId. Reuse that ID for status, account selection, remote_action, stop and collection.
@@ -63,3 +63,6 @@ are reclaimed only after checking process identity, without trusting a reused PI
 remote_status.accounts exposes this run’s discovered catalog IDs for remote_select_account, without credentials.
 Each collection validates the entire manifest before creating an independent evidence subdirectory;
 old screenshots cannot mix with a new result, and failed collections do not deliver partial files.
+
+Desktop profiles with a configured prepare command expose Prepare samples, completing start/prepare/verify/stop from the page.
+A previously verified local session that expires retains explicit reauthorization guidance without automatically retrying account switches.

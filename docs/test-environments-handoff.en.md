@@ -86,8 +86,9 @@ query the same run instead of blindly repeating start/actions. See the [SSH/auth
 
 ## Current-code evidence and gaps
 
-Unified test package: **1.1.2**. This revision fixes stop/action races, stale account and
+Unified test package: **1.1.3**. This revision fixes stop/action races, stale account and
 process status, SSH UTF-8 receipts, execution uncertainty, shared FETCH_HEAD and mixed evidence.
+Version 1.1.3 also adds the desktop Prepare samples button and persistent reauthorization guidance after a verified session expires. See [click testing](test-environments-click-check.md).
 See the [self-check record](test-environments-self-check.md) for fixes, regression evidence and integration gaps.
 Current automated coverage includes:
 

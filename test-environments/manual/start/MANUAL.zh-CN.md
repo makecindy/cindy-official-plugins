@@ -93,7 +93,7 @@ macOS PTY 所需 Python 3，以及核对端口归属的 lsof。
 
 ## 通用 SSH 模板（统一测试包）
 
-统一测试包 1.1.2 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
+统一测试包 1.1.3 同时包含本机验收与通用 SSH 编排，电脑是参数，不是固定目标。
 通过 AI/CLI 先 remote_catalog(target) 读目标电脑的档案和实际型号，再 remote_plan(target,profile,pr,requirements)，
 检查计划后用返回的 runId 调 remote_start；后续 remote_status、remote_select_account、remote_action、
 remote_stop、remote_collect 始终引用同一运行。target.host 是已配置的 SSH 别名/主机名，target.node
@@ -112,3 +112,6 @@ AI 实际调用统一 `remote` 工具，以 operation 选择 catalog/plan/start/
 忙碌时等待回执；进程退出留下的锁按进程启动身份核对后恢复，不信任复用的 PID。
 remote_status.accounts 返回本次运行发现的账号目录 ID，供 remote_select_account 使用；不包含登录凭证。
 每次 collect 先验证完整清单，再生成独立证据子目录；旧截图不会混入新结果，失败不交付半套文件。
+
+项目配置 prepare 命令后，桌面方案卡片也显示“准备样本”，可从界面完成启动、准备、验证和停止。
+已经联网核验过的本机登录态失效后持续提示重新授权，不自动重试账号切换。

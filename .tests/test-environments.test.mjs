@@ -319,3 +319,11 @@ test('the public remote worker preserves unknown execution on a lost operation r
  vm.runInNewContext(fs.readFileSync(path.join(root,'node/worker.cjs'),'utf8'),context);
  await onRequest(JSON.stringify({id:1,method:'remote',params:{operation:'start'}}));assert.equal(reply.result.execution,'unknown');
 });
+
+test('a previously verified session becoming signed out keeps explicit reauthorization guidance without switching again',async t=>{
+ const {plan,job,application}=realAccountPlan(t);let current='account-a',switches=0;
+ const monitor=new SessionMonitor({...plan,account:{selector:'account-a'}},job,{perform:async(_p,_s,op)=>{if(op==='select')switches++;return {...snapshot(current),verified:op==='verify'};}});
+ assert.equal((await monitor.poll({application})).state,'ready');current=null;
+ for(let i=0;i<2;i++){const state=await monitor.poll({application});assert.equal(state.state,'waiting-for-owner');assert.equal(state.code,'ACCOUNT_REAUTH_REQUIRED');assert.equal(state.verification,undefined);}
+ assert.equal(switches,0);
+});

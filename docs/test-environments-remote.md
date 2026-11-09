@@ -67,7 +67,7 @@ size checks and real SSH/hardware evidence. Without an actual selected B, simula
 transport plus local Git/process tests must be labeled simulated, never cross-computer
 hardware acceptance.
 
-## Unified implementation draft (PR #309, test package 1.1.2)
+## Unified implementation draft (PR #309, test package 1.1.3)
 
 The unified AI remote tool and CLI workflow entries include remote_catalog, remote_plan, remote_start,
 remote_status, remote_stop, remote_select_account, remote_action and remote_collect.

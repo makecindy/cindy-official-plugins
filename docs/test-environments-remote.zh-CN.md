@@ -56,7 +56,7 @@ B 的已保存档案及验收项目。常用电脑可以复用已有 SSH 配置�
 独立工作树、证据越界/大小校验及实际 SSH/硬件验证。没有选定的真实 B 时，可以验证模拟传输和
 本机 Git/进程链路，但必须标为模拟，不能宣称跨电脑真机验收已完成。
 
-## 统一实现草稿（PR #309，测试包 1.1.2）
+## 统一实现草稿（PR #309，测试包 1.1.3）
 
 已实现通用 AI/CLI 工具 remote_catalog、remote_plan、remote_start、remote_status、remote_stop、
 remote_select_account、remote_action、remote_collect。每次传 target.host，可选 target.node；
