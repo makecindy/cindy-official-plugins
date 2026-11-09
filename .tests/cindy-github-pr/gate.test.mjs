@@ -1160,6 +1160,26 @@ test('replay: a resolved thread reopened later wakes a human wait', async (t) =>
   assert.match(`${result.json().report ?? ''} ${result.json().detail}`, /thread old-thread/);
 });
 
+test('replay: a second reopened thread breaks the backoff of an unacknowledged first one', async (t) => {
+  const fx = createFixture(t);
+  const node = (id, isResolved) => ({ id, isResolved, comments: [] });
+  const s = humanBlocked({ reviewThreads: { nodes: [node('security-thread', false), node('old-a', true), node('old-b', true)] } });
+  await startWait(fx, s);
+  const reopen = (...ids) => fx.setSnapshot({ ...s, reviewThreads: { nodes: [
+    node('security-thread', false), node('old-a', !ids.includes('old-a')), node('old-b', !ids.includes('old-b'))] } });
+  reopen('old-a');
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    fx.advance(5);
+    assert.equal((await fx.run(['--json'])).code, 0);
+  }
+  fx.advance(5);
+  assert.equal((await fx.run(['--json'])).json().reason, 'retry-backoff');
+  reopen('old-a', 'old-b');
+  const second = await fx.run(['--json']);
+  assert.equal(second.code, 0, 'a different reopened thread is not the old event');
+  assert.match(second.json().report ?? '', /thread old-b/);
+});
+
 test('replay: wait is bound to the released head; own push clears it and keeps the bot settle window', async (t) => {
   const fx = createFixture(t);
   const s = humanBlocked({ reviews: [{ author: 'review-bot', authorIsBot: true, commitOid: 'aaa1111', submittedAt: iso(T0 - MIN), state: 'COMMENTED' }] });

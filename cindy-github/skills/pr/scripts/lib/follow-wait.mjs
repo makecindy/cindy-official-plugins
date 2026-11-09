@@ -103,10 +103,14 @@ export function inspectWait(wait, snap) {
     if (!thread || thread.resolved !== old.resolved || thread.outdated !== old.outdated) changed.push(`thread ${old.id}`);
   }
   // A thread now unresolved that was resolved (or absent) when the wait was made is new work.
+  const reopened = [];
   for (const thread of current.threads) {
     if (thread.resolved || wait.threads.some((t) => t.id === thread.id)) continue;
     const old = (wait.threadStates ?? []).find((t) => t.id === thread.id);
-    if (!old || old.resolved) changed.push(`thread ${thread.id}`);
+    if (!old || old.resolved) {
+      changed.push(`thread ${thread.id}`);
+      reopened.push(thread);
+    }
   }
   if (current.blockers.includes('branch_behind_base') && !wait.blockers.includes('branch_behind_base')) changed.push('branch requires an updated base');
   if (current.reviewDecision !== wait.reviewDecision) changed.push('review decision');
@@ -115,7 +119,7 @@ export function inspectWait(wait, snap) {
   const signature = JSON.stringify([
     wait.checks.map((old) => current.checks.find((c) => checkKey(c) === checkKey(old)) ?? null),
     wait.threads.map((old) => current.threads.find((t) => t.id === old.id) ?? null),
-    current.reviewDecision, current.blockers.includes('branch_behind_base'),
+    reopened, current.reviewDecision, current.blockers.includes('branch_behind_base'),
   ]);
   return { wait, changed, ignoreBase, signature };
 }
