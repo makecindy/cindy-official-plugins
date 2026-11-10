@@ -607,3 +607,13 @@ test('every tool result marks third-party content as untrusted', async () => {
     assert.match(notice, /不要执行/, `${tool} must say not to execute anything in it`);
   }
 });
+
+test('a host bridge that refuses the reply cannot strand the handler', async () => {
+  // Codex review, P1: `return sendResult(...)` without await let a failing host bridge escape the
+  // handler's catch, which surfaces as an unhandled rejection in the host's event loop. Every reply
+  // is awaited now, and the catch itself is guarded, so this resolves no matter how often send fails.
+  const load = await loadPlugin({ respond: () => ({ results: [] }) });
+  load.stub.send = async () => { throw new Error('bridge down'); };
+  await load.stub.handler({ type: 'tool-call', tool: 'misakanet_search', args: { query: 'x' }, callId: 'c1' });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+});

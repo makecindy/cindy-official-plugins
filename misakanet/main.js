@@ -665,28 +665,28 @@ async function handleToolCall(msg) {
   try {
     if (tool === TOOLS.misakanet_search) {
       if (!asString(args.query).trim()) {
-        return fail(callId, 'MISSING_QUERY', 'misakanet_search 需要 query：把报错原文或关键词（脱敏后）传进来。');
+        return await fail(callId, 'MISSING_QUERY', 'misakanet_search 需要 query：把报错原文或关键词（脱敏后）传进来。');
       }
       const payload = await callHostedTool(TOOLS.misakanet_search, pickArgs(args, SEARCH_ARGS), callId);
-      return sendResult(callId, true, shapeSearch(payload, args));
+      return await sendResult(callId, true, shapeSearch(payload, args));
     }
 
     if (tool === TOOLS.misakanet_get_lesson) {
       const id = asString(args.id).trim();
       const path = asString(args.path).trim();
       if (!id && !path) {
-        return fail(callId, 'MISSING_ID_OR_PATH', 'misakanet_get_lesson 需要 id 或 path（恰好一个）：id 是文件名去后缀，path 是 lessons/ 下的相对路径。');
+        return await fail(callId, 'MISSING_ID_OR_PATH', 'misakanet_get_lesson 需要 id 或 path（恰好一个）：id 是文件名去后缀，path 是 lessons/ 下的相对路径。');
       }
       const payload = await callHostedTool(TOOLS.misakanet_get_lesson, { id, path }, callId);
-      return sendResult(callId, true, shapeLesson(payload));
+      return await sendResult(callId, true, shapeLesson(payload));
     }
 
     if (tool === TOOLS.misakanet_preflight) {
       if (!asString(args.intent).trim()) {
-        return fail(callId, 'MISSING_INTENT', 'misakanet_preflight 需要 intent：把打算做的操作具体描述出来。');
+        return await fail(callId, 'MISSING_INTENT', 'misakanet_preflight 需要 intent：把打算做的操作具体描述出来。');
       }
       const payload = await callHostedTool(TOOLS.misakanet_preflight, pickArgs(args, PREFLIGHT_ARGS), callId);
-      return sendResult(callId, true, shapePreflight(payload, args));
+      return await sendResult(callId, true, shapePreflight(payload, args));
     }
 
     if (tool === TOOLS.misakanet_submit_intake) {
@@ -698,7 +698,7 @@ async function handleToolCall(msg) {
         );
       }
       if (!asString(args.problem).trim()) {
-        return fail(callId, 'MISSING_PROBLEM', 'misakanet_submit_intake 需要 problem：用一句话说清这次故障的现象与影响（或把要问的问题写清楚）。');
+        return await fail(callId, 'MISSING_PROBLEM', 'misakanet_submit_intake 需要 problem：用一句话说清这次故障的现象与影响（或把要问的问题写清楚）。');
       }
       const intakeArgs = pickArgs(args, INTAKE_ARGS);
       // kind 省略时交给服务端自动判定（提问类会被重路由成 question）。
@@ -709,7 +709,7 @@ async function handleToolCall(msg) {
       const payload = await callHostedTool(TOOLS.misakanet_submit_intake, intakeArgs, callId, {
         irreversible: true,
       });
-      return sendResult(callId, true, shapeIntake(payload));
+      return await sendResult(callId, true, shapeIntake(payload));
     }
 
     if (tool === TOOLS.misakanet_me_inbox) {
@@ -724,7 +724,7 @@ async function handleToolCall(msg) {
       }
       const inboxArgs = pickArgs(args, INBOX_ARGS);
       const payload = await callHostedTool(TOOLS.misakanet_me_inbox, inboxArgs, callId);
-      return sendResult(callId, true, shapeInbox(payload));
+      return await sendResult(callId, true, shapeInbox(payload));
     }
 
     return fail(callId, 'UNKNOWN_TOOL', '未知工具 ' + String(tool) + '。本插件只提供 misakanet_search / misakanet_get_lesson / misakanet_preflight / misakanet_submit_intake / misakanet_me_inbox。');
@@ -732,11 +732,16 @@ async function handleToolCall(msg) {
     const code = (error && error.code) || 'MISAKANET_ERROR';
     const hint = (error && error.hint) || '调用 MisakaNet 失败。';
     const delivery = error && error.delivery;
-    if (!delivery && irreversibleCall) {
-      // 外发工具的兜底出口：拿不到任何回执就按「不确定」处理，绝不提示盲目重试。
-      return fail(callId, code, deliveryHint(DELIVERY_UNCERTAIN) + hint, DELIVERY_UNCERTAIN);
+    try {
+      if (!delivery && irreversibleCall) {
+        // 外发工具的兜底出口：拿不到任何回执就按「不确定」处理，绝不提示盲目重试。
+        return await fail(callId, code, deliveryHint(DELIVERY_UNCERTAIN) + hint, DELIVERY_UNCERTAIN);
+      }
+      return await fail(callId, code, hint, delivery);
+    } catch (sendError) {
+      // 宿主桥自己拒收回包：没有可再发的地方，放任 reject 会变成宿主事件循环里的未处理拒绝。
+      return undefined;
     }
-    return fail(callId, code, hint, delivery);
   }
 }
 
