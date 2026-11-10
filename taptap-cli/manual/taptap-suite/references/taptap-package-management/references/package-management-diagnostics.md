@@ -6,7 +6,7 @@
 
 1. 先调 `package-management get-available-package-types`，拿本次实际返回的 `available_package_types`。
 2. `available_package_types` 为空时不要重试同一个命令；按响应的 `empty_reason` 分流（`declared_package_types` 只是创建声明的核对值，不代表可上传类型）：
-   - `package_type_undeclared`：还没保存创建时的包体类型，也没有已绑定的 APK/PC 包体。先与用户确认方向，再用 `call_tool(name:"qualification save-qualification-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{app_features:{package_types:["<类型>"]}}})` 补存创建时的同一类型，读回后重调本接口；不要猜类型、不要新建游戏、不要改用其它类型试探。
+   - `package_type_undeclared`：还没保存创建时的包体类型，也没有已绑定的 APK/PC 包体。先与用户确认方向，再用 `call_tool(name:"qualification save-qualification-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{app_features:{package_types:["<类型>"]}}, idempotency_key:"<package-type-key>", dry_run:true})` 预览；用户确认后复用同一参数与 key 加 `yes:true` 执行，补存创建时的同一类型，读回后重调本接口；不要猜类型、不要新建游戏、不要改用其它类型试探。
    - `declared_not_applicable`：已保存声明与当前形态或包体状态冲突（例如声明 `apk` 但小游戏类目已是 H5）。不要尝试切换或清空类型，直接说明冲突并请用户到开发者中心核对。
    - `form_has_no_upload_target`：当前形态（Tap 制造 / UrhoX 小游戏 / 关卡分发）不承载可上传包体，补声明也不会产生可用类型。只说明结论，不要引导补声明或换类型。
    - `launcher_only`：纯启动器分发，本来就不承载包体，不需要上传。

@@ -1232,6 +1232,13 @@ test('the 2026.11.6 sync keeps material handoff, empty-matrix and draft idempote
     assert.match(diagnostics, new RegExp(reason), `the empty-matrix branch ${reason} must be documented`);
   }
   assert.match(diagnostics, /不得据此放宽上传或绑定/);
+  // The recovery is itself a write: the plugin rejects a call with neither
+  // `dry_run` nor `yes` (CONFIRM_REQUIRED), so the example has to carry the
+  // preview gate and the confirmed write on the same intent key.
+  const saveTypeExample = diagnostics.split('\n').find((line) => line.includes('save-qualification-draft"'));
+  assert.ok(saveTypeExample, 'the empty-matrix branch must show the package-type save call');
+  assert.ok(saveTypeExample.includes('dry_run:true'), 'the package-type save example must preview before writing');
+  assert.ok(saveTypeExample.includes('yes:true'), 'the package-type save example must show the confirmed write');
   assert.match(diagnostics, /「A\. 查包体库状态」第 2 步/, 'the self-test step must point at the explicit branch');
   assert.doesNotMatch(diagnostics, /只说明当前应用没有可用的包体库入口/, 'the old one-line answer is gone');
 
