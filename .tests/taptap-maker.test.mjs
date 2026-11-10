@@ -174,6 +174,33 @@ test('所有动态工具共用 120 秒请求窗口并保留独立进度 token', 
   }
 });
 
+test('Runtime 转发远端进度以续期长请求，不生成假心跳', async () => {
+  const sent = [];
+  const timeout = vendorMakerSource.match(/MAKER_TOOL_CALL_TIMEOUT_MS = ([^;]+);/);
+  assert.ok(timeout);
+  const context = createContext({});
+  new Script('var MAKER_TOOL_CALL_TIMEOUT_MS = ' + timeout[1] + ';\n'
+    + makerBundleFunction('createRemoteProxyProgressHandler') + '\n'
+    + makerBundleFunction('createRemoteProxyCallToolOptions')).runInContext(context);
+  const extra = { sendNotification: async (value) => { sent.push(value); } };
+  const options = context.createRemoteProxyCallToolOptions('request-a', extra);
+  assert.equal(options.resetTimeoutOnProgress, true);
+  assert.ok(options.timeout > 120_000);
+  assert.equal(sent.length, 0);
+  options.onprogress({ progress: 1, total: 2, message: 'Rendering' });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{
+    method: 'notifications/progress',
+    params: { progressToken: 'request-a', progress: 1, total: 2, message: 'Rendering' },
+  }]);
+  context.createRemoteProxyCallToolOptions(undefined, extra).onprogress({ progress: 2 });
+  assert.equal(sent.length, 1, 'missing caller token must not broadcast progress');
+  const disconnected = context.createRemoteProxyCallToolOptions('request-b', {
+    sendNotification: async () => { throw new Error('closed'); },
+  });
+  disconnected.onprogress({ progress: 2 });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
 test('生图默认开启或显式开启时保持原请求和结果', async () => {
   for (const preferences of [{}, { makerImageEnabled: true }]) {
     for (const name of imageToolNames) {
@@ -632,7 +659,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.26');
+  assert.equal(manifest.version, '2.1.27');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -679,7 +706,7 @@ test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => 
   assert.match(consoleTool.description, /不自动构建、提交或安装游戏运行环境/);
   assert.deepEqual(provisioning.ghosts['taptap-maker'], { audience: { emails: [] } });
   assert.equal(vendorPackage.name, '@taptap/maker');
-  assert.equal(vendorPackage.version, '0.0.40');
+  assert.equal(vendorPackage.version, '0.0.41');
   assert.match(makerMcpSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   assert.match(makerChildSource, /TAPTAP_MAKER_DISTRIBUTION = 'cindy_plugin'/);
   const statusTool = manifest.tools.find((tool) => tool.name === 'maker_status');
@@ -772,7 +799,7 @@ test('maker_validate refuses readonly sessions before spawning a worker', async 
 
 test('官方 Runtime 保留远端错误结果的 executed 执行态', () => {
   const functionSource = vendorMakerSource.match(
-    /function normalizeRemoteProxyExecutionState\(value\) \{[\s\S]*?\n\}/,
+    /function normalizeRemoteProxyExecutionState\([^)]*\) \{[\s\S]*?\n\}/,
   );
   assert.ok(functionSource, 'Runtime must define normalizeRemoteProxyExecutionState');
   const context = createContext({ normalized: null });
@@ -3376,7 +3403,7 @@ test('新版 Git 指引统一转换到获授权的通用 Git 和 Maker 插件入
   }
 });
 
-test('0.0.40 云端诊断指引不建议绕过插件执行 cloud-commit', async () => {
+test('云端诊断指引不建议绕过插件执行 cloud-commit', async () => {
   const context = createContext({});
   new Script(makerBundleFunction('nextActionForFailure')).runInContext(context);
   for (const classification of ['cloud_workspace_blocked', 'remote_rejected', 'unknown']) {
@@ -3390,4 +3417,19 @@ test('0.0.40 云端诊断指引不建议绕过插件执行 cloud-commit', async 
     assert.equal(response.result.structuredContent.automatic_retry, false);
     assert.match(response.result.structuredContent.message, /确认结果前不要重试/);
   }
+});
+
+test('0.0.41 云端工作区阻塞同时识别上游中文和历史英文消息', () => {
+  const pattern = vendorMakerSource.match(/CLOUD_WORKSPACE_BLOCKED_PATTERN = ([^\n]+);/);
+  assert.ok(pattern);
+  const context = createContext({});
+  new Script('const CLOUD_WORKSPACE_BLOCKED_PATTERN = ' + pattern[1] + ';\n' +
+    makerBundleFunction('isCloudWorkspaceBlockedMessage')).runInContext(context);
+  for (const message of [
+    'remote: [pre-receive] 云端工作区有未提交改动，请先提交',
+    'cloud workspace has uncommitted changes that this push would overwrite',
+    'Working directory has unstaged changes',
+    'Could not update working tree to new HEAD',
+  ]) assert.equal(context.isCloudWorkspaceBlockedMessage(message), true, message);
+  assert.equal(context.isCloudWorkspaceBlockedMessage('remote: permission denied'), false);
 });

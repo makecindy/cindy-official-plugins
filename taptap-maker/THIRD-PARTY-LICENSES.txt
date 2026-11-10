@@ -2032,7 +2032,7 @@ Third-Party Notices for the Cindy TapTap Maker plugin
 =====================================================
 
 This plugin ships a vendored copy of the official @taptap/maker npm package
-(version 0.0.40, MIT, https://github.com/taptap/instant-games-open-mcp). Its
+(version 0.0.41, MIT, https://github.com/taptap/instant-games-open-mcp). Its
 MIT license text is reproduced in vendor/taptap-maker/LICENSE, which covers
 TapTap's own code only.
 The bundle retains ten compatibility patch groups: preserve the remote
@@ -2050,10 +2050,43 @@ guidance, and recognizes old and new cloud-workspace blocking messages.
 The tenth patch retains uncertain canvas generation and recognition requests,
 pauses automatic recovery at its wait limit, and supports stopping subsequent
 015 workflow steps during preparation and recovery waits.
-Runtime 0.0.40 retains the upstream removal of the ChatGPT recognition fallback.
-No bundled dependency names were added relative to 0.0.39; embedded UI editor
-changes retain the existing MIT and Yoga license texts. The official npm
-provenance identifies source commit de3c9220027861b21a491e92c2fb573fd7f65cd3.
+An additional V11 patch removes the Neon Ink demo and its dedicated resource
+mappings at the user's request, retaining six styles and all 43 motion effects.
+Three reviewed file patches correct per-axis UI positioning, bound furniture
+animation RGBA pixels to 128 MiB before frame allocation, reject preview/archive
+path overlap, release exported frames, and repair the furniture guide link.
+They are reproduced by the 0.0.41 recipe's filePatches with pinned file hashes.
+Runtime 0.0.41 retains the upstream removal of the ChatGPT recognition fallback.
+Runtime 0.0.41 adds browser-bundled Fengari and sprintf-js for UI motion.
+Their full license texts appear below. Existing editor/Yoga notices remain.
+Official npm provenance identifies source commit
+460c47b4a5d09773764ead183cca87db9f81a835.
+The upstream bundle also embeds LuaTween from the source declared in
+https://github.com/529951164/Lua-Tween at
+a2eedd07e4b06c681ee3d2386d2e3c72c0582479. On 2026-11-11, its author
+liangdong confirmed personal authorship and MIT licensing.
+
+LuaTween - MIT License
+Copyright (c) liangdong
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
 The paired repository READMEs
 document this complete patch list for future upgrades.
 
@@ -3003,3 +3036,59 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+fengari
+
+MIT License
+
+Copyright © 2017-2019 Benoit Giannangeli
+Copyright © 2017-2025 Daurnimator
+Copyright © 1994–2017 Lua.org, PUC-Rio.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+sprintf-js
+
+Copyright (c) 2007-2014, Alexandru Marasteanu <hello [at) alexei (dot] ro>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+* Neither the name of this software nor the names of its contributors may be
+  used to endorse or promote products derived from this software without
+  specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

@@ -4,6 +4,28 @@
 
 ## Read first
 
+### 2.1.27: Runtime 0.0.41
+
+Use the official npm release with a separate 0.0.41 recipe. Retain V1-V10:
+adapt V1/V5/V10 bundle aliases, including the injected stop-state check, and
+retain both Chinese and English cloud-workspace blocking messages in V9.
+The new project-check and UI-motion assets come from the verified release.
+V11 removes the requested Neon Ink demo and its dedicated resource mappings;
+the other six styles and all 43 motion effects remain.
+Fengari and sprintf-js license texts are included. On 2026-11-11, LuaTween's
+author liangdong confirmed authorship and MIT licensing; the complete MIT
+notice is bundled. An unavailable source URL does not invalidate that confirmation.
+Use an existing published, working local game for plugin acceptance. Attribute
+game-resource and native-engine errors separately; do not expand a Maker MCP
+upgrade into engine fixes or gameplay acceptance for unchanged input paths.
+The 0.0.41 recipe also records exact patches for three bundled files: explicit
+positions skip automatic anchoring only on the specified axis; furniture exports
+reject animations exceeding 128 MiB of retained RGBA pixels before allocating
+frames and release each animation after export; preview directories cannot overlap
+the output directory or ZIP path; the furniture guide links to the bundled Skill.
+These patches run in staging alongside bundle patches before the complete inventory
+check, so failure leaves the installed vendor unchanged.
+
 ### 2.1.26: Runtime 0.0.40
 
 Use the official npm release and a separate 0.0.40 recipe, retaining V1-V10.
