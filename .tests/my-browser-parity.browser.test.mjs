@@ -12,7 +12,7 @@ import http from 'node:http';
 import {generateKeyPairSync,createHash} from 'node:crypto';
 const require=createRequire(import.meta.url),root=path.resolve(import.meta.dirname,'../my-browser');
 const {createBridge}=require('../my-browser/node/bridge.cjs');
-async function launch(grantDebugger){
+async function launch(grantDebugger, startMinimized=false){
   const {chromium}=require(process.env.PLAYWRIGHT_CORE);
   const profile=await fs.mkdtemp(path.join(os.tmpdir(),'parity-e2e-'));
   const cleanup=[];
@@ -113,7 +113,7 @@ ${who==='cross'?'<iframe src="/frame-inner?who=nested" width=400 height=200></if
   proxy.on('connect',(_q,s)=>{s.on('error',()=>{});s.end('HTTP/1.1 403 Forbidden\r\n\r\n');});
   await new Promise(r=>proxy.listen(0,'127.0.0.1',r));cleanup.push(()=>{proxy.closeAllConnections();proxy.close();});
   const context=await chromium.launchPersistentContext(profile,{channel:'chromium',...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:process.env.HEADED?false:true,env:{...process.env,HOME:profile,CFFIXED_USER_HOME:profile},
-    args:['--proxy-server=http://127.0.0.1:'+proxy.address().port,'--proxy-bypass-list=<-loopback>','--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir]});
+    args:[...(startMinimized?['--start-minimized']:[]),'--proxy-server=http://127.0.0.1:'+proxy.address().port,'--proxy-bypass-list=<-loopback>','--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir]});
   cleanup.unshift(()=>context.close());
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
   if(process.env.SW_DEBUG){const t0=Date.now();worker.on('console',m=>console.error('[sw '+(Date.now()-t0)+'ms]',m.type(),m.text().slice(0,300)));worker.on('close',()=>console.error('[sw closed at '+(Date.now()-t0)+'ms]'));context.on('serviceworker',w=>console.error('[new sw at '+(Date.now()-t0)+'ms]'));}
@@ -519,4 +519,19 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
   }finally{await close();}
   assert.deepEqual(results.filter(r=>!r.ok),[]);
   assert.equal(results.length,12);
+});
+
+// Explicit integration tier (PLAYWRIGHT_CORE): real extension, signed legacy bridge and
+// fenced fixture only. A long operation used to expire the bridge's 35s lease.
+test('real Chrome: connection survives a long job and remains usable afterwards', enabled, async () => {
+  const { act, bridge, close } = await launch(false, true);
+  try {
+    const opened = await act('open', { url: 'http://parity.test/' });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    const pending = act('wait', { tabId: opened.tabId, url: 'http://parity.test/', timeMs: 45000 });
+    await new Promise(resolve => setTimeout(resolve, 38000));
+    assert.equal((await bridge.request('status')).extension_connected, true, 'connection stays live while job blocks polling');
+    assert.equal((await pending).ok, true, 'long job result is delivered to its original session');
+    assert.equal((await act('snapshot', { tabId: opened.tabId, url: 'http://parity.test/', maxChars: 1000 })).ok, true);
+  } finally { await close(); }
 });
