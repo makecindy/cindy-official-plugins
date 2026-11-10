@@ -43,6 +43,40 @@ function worker() {
   };
 }
 
+test('opaque host session IDs retain draft ownership and revisions across worker restart', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'opendesign-session-id-'));
+  let w = worker();
+  try {
+    const sessionId = 'exampleCindySession123456', other = 'anotherCindySession654321';
+    const { dir: root } = await w.invoke('prepare', { workdir: temp });
+    const file = 'design.html', html = '<h1>Existing design</h1>';
+    const marker = path.join(root, '.opendesign-project.json');
+    const originalMarker = await fs.readFile(marker, 'utf8');
+    for (const invalid of [undefined, null, 123, {}, [], [sessionId], '', '../outside', 'a/b', 'a_b', 'a b', 'a'.repeat(65)]) {
+      await assert.rejects(w.invoke('bind', { sessionId: invalid, root }), /Trusted session required/);
+      assert.equal(await fs.readFile(marker, 'utf8'), originalMarker);
+    }
+    await w.invoke('bind', { sessionId, root });
+    const saved = await w.invoke('draft-write', { sessionId, file, html, expectedRevision: null });
+    assert.deepEqual(JSON.parse(await fs.readFile(marker, 'utf8')), { version: 1, sessionId });
+    await assert.rejects(w.invoke('bind', { sessionId: other, root }), /different Cindy session/);
+    await w.close();
+    w = worker();
+    await assert.rejects(w.invoke('bind', { sessionId: other, root }), /different Cindy session/);
+    const opened = await w.invoke('bind', { sessionId, root, registeredDraft: { id: crypto.randomUUID(), sessionId, root, file } });
+    assert.equal(opened.sessionId, sessionId);
+    assert.equal((await w.invoke('draft-read', { sessionId, file })).revision, saved.revision);
+    assert.equal(await (await fetch(opened.previewBase + file + '?source=1')).text(), html);
+    await assert.rejects(w.invoke('draft-write', { sessionId, file, html: 'stale', expectedRevision: null }), /Draft changed/);
+    await w.invoke('bind', { sessionId, root, readOnly: true });
+    await assert.rejects(w.invoke('draft-write', { sessionId, file, html: 'readonly', expectedRevision: saved.revision }));
+    assert.equal(await fs.readFile(path.join(root, file), 'utf8'), html);
+  } finally {
+    await w.close();
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
 test('old registered draft recovers a lost marker after restart and retains edits, assets and revisions', async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'opendesign-recovery-'));
   let w = worker();
