@@ -35,10 +35,39 @@ export function waitFacts(snap) {
 }
 
 const KINDS = new Set(['human', 'baseline', 'checks', 'retry']);
+/** A verdict about a failure or an open thread goes stale; a plain pending approval does not. */
+export const HUMAN_REVIEW_MS = 24 * 3_600_000;
+export const HUMAN_REMIND_MS = 3 * 24 * 3_600_000;
+export const setsAside = (wait) => wait.kind === 'human'
+  && (wait.checks.some((c) => c.outcome === 'failed') || wait.threads.some((t) => !t.resolved));
+
+/** When the model must look again; null = relevant events only (a plain approval or merge wait).
+ * Waits recorded before the daily review stored `until: null` for set-aside failures too. */
+export function waitDueAt(wait) {
+  if (wait.until !== null && wait.until !== undefined) return wait.until;
+  return setsAside(wait) ? wait.createdAt + HUMAN_REVIEW_MS : null;
+}
+
+/** A failing check this wait already accounts for: its further attempts are the wait's news. */
+export function handledFailure(wait, check) {
+  const key = checkKey({ name: check.name, workflowName: check.workflowName || '' });
+  return Boolean(wait) && wait.checks.some((old) => old.outcome === 'failed' && checkKey(old) === key);
+}
+
+export function waitIsDue(wait, now) {
+  const at = wait ? waitDueAt(wait) : null;
+  return at !== null && now >= at;
+}
+
+/** What recording this wait owes the user: a message on entry, then a reminder every few days. */
+export function waitNotice(wait, now) {
+  if (!wait || wait.toldAt !== now) return null;
+  return wait.told === 1 ? 'entered' : 'reminder';
+}
 const HUMAN_BLOCKERS = new Set(['required_checks_unavailable','ci_failing', 'unresolved_review_threads', 'branch_protection_blocked', 'approval_required', 'check_action_required', 'changes_requested_waiting_re_review', 'merge_state_unstable']);
 
 /** Validate before ack or any state write. Missing/ambiguous targets fail rather than widening scope. */
-export function makeWait(input, facts, now) {
+export function makeWait(input, facts, now, prior = null) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('--wait expects a JSON object');
   const fields = new Set(['kind', 'headSha', 'reason', 'afterMinutes', 'checks', 'threads']);
   for (const key of Object.keys(input)) if (!fields.has(key)) throw new Error(`unknown wait field: ${key}`);
@@ -76,13 +105,24 @@ export function makeWait(input, facts, now) {
       throw new Error('a human wait must account for every failing check and unresolved thread');
     }
   }
-  return {
+  const wait = {
     kind: input.kind, headSha: facts.headSha, reason: input.reason.trim(),
     createdAt: now, until: minutes === null ? null : now + minutes * 60_000,
     checks, threads, reviewDecision: facts.reviewDecision, blockers: facts.blockers,
     // Every thread as first seen, so a resolved one that is reopened later still wakes the loop.
     threadStates: facts.threads,
   };
+  if (!setsAside(wait)) return wait;
+  // Setting a failure or thread aside for a human is the model's verdict: recheck it at least daily,
+  // and keep the user informed while the same head keeps waiting.
+  wait.until = Math.min(wait.until ?? Infinity, now + HUMAN_REVIEW_MS);
+  const continued = prior && prior.headSha === wait.headSha && setsAside(prior);
+  wait.since = continued ? prior.since ?? prior.createdAt : now;
+  const told = continued ? Number(prior.told) || 0 : 0;
+  const due = told === 0 || now - prior.toldAt >= HUMAN_REMIND_MS;
+  wait.told = due ? told + 1 : told;
+  wait.toldAt = due ? now : prior.toldAt;
+  return wait;
 }
 
 function waitCheck(old, checks) {
@@ -103,14 +143,15 @@ export function inspectWait(wait, snap) {
   const current = waitFacts(snap);
   const changed = [];
   if (!current.complete) return { wait, changed, ignoreBase: false };
-  // A CI wait is one batch. Successful partial progress does not require model work.
-  // Other wait kinds still react to each repaired/retried blocker individually.
-  const checksPending = wait.kind === 'checks' && wait.checks.some((old) =>
-    waitCheck(old, current.checks)?.outcome === 'pending');
+  // The named checks are one batch: while any of them is still running, successful partial
+  // progress and further attempts of a failure the model already handled wait for the rest.
+  const checksPending = wait.checks.some((old) => waitCheck(old, current.checks)?.outcome === 'pending');
   for (const old of wait.checks) {
     const check = waitCheck(old, current.checks);
-    // Never hide a missing target, a failure, or recovery of an already-failed blocker.
+    // Never hide a missing target or a new failure. In a CI wait a failed target was the thing
+    // awaited, so its recovery is reported at once.
     if (checksPending && check?.outcome === 'passed' && old.outcome !== 'failed') continue;
+    if (checksPending && check && check.outcome !== 'pending' && old.outcome === 'failed' && wait.kind !== 'checks') continue;
     // Running is not actionable. Completion of a different attempt is, even with the same verdict.
     if (!check || (check.outcome !== 'pending' && (check.outcome !== old.outcome || check.attempt !== old.attempt))) {
       changed.push(`check ${old.name}`);

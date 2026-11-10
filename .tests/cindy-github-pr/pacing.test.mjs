@@ -82,6 +82,8 @@ test('settle: expected bots answer by a submitted review on the head or a thumbs
 test('settle: only people, the merge queue and draft changes break the wait', () => {
   assert.equal(breaksSettle([{ kind: 'checks-failed' }, { kind: 'remarks', remarks: [{ authorIsBot: true }] }]), false);
   assert.equal(breaksSettle([{ kind: 'remarks', remarks: [{ authorIsBot: false }] }]), true);
+  assert.equal(breaksSettle([{ kind: 'remarks', remarks: [{ authorIsBot: false, state: 'APPROVED', body: '' }] }]), false);
+  assert.equal(breaksSettle([{ kind: 'remarks', remarks: [{ authorIsBot: false, state: 'APPROVED', body: 'rename this' }] }]), true);
   for (const kind of ['merge-queue', 'draft-entered', 'draft-exited']) assert.equal(breaksSettle([{ kind }]), true, kind);
 });
 

@@ -27,11 +27,11 @@ Before any GitHub call the check asks whether a look is due, from what its last 
 
 ## Batching: collect a push's feedback first
 
-After a new commit (one first seen while following, not the commit already there when following started), news that only bots and checks produced is held (`settling`) until every expected bot has answered on that commit, or 20 minutes after the commit was first seen:
+After a new commit (one first seen while following, or the commit of a PR opened less than 20 minutes before following started; not an older commit already there), news that only bots and checks produced is held (`settling`) until every expected bot has answered on that commit, or 20 minutes after the commit was first seen:
 
 - **Expected bots:** bots that reviewed or reacted on this PR, plus bots that reviewed or reacted on other PRs of this repository in the last 14 days (`<owner>__<repo>.repo.json` in the state directory). Plain comment bots (deploy previews) are not waited for; neither is the agent's own account.
 - **Answered:** a submitted review on the new commit, or a 👍 from that bot since the commit was first seen (5 minutes of slack). A review naming an older commit never counts.
-- **Not held:** comments or reviews from people, new conflicts, changes to named wait conditions, merge-queue problems, draft changes, merged or closed, and an update already released but not acknowledged.
+- **Not held:** comments or reviews from people (an approval without a comment asks nothing of the agent and is held with the batch), new conflicts, changes to named wait conditions, merge-queue problems, draft changes, merged or closed, and an update already released but not acknowledged.
 - **Checks are not waited for.** A failure that arrives while the agent works is folded in before its push.
 
 Only submitted `APPROVED`, `CHANGES_REQUESTED` or `COMMENTED` reviews, or a recent 👍,
@@ -103,17 +103,25 @@ checks, merge permissions, thread resolution or the PR's verdict.
 
 | Kind | When to use | Next review |
 |---|---|---|
-| `human` | All remaining failures/threads have been investigated and need a human action | `null`: relevant events only; optional timed review if justified |
+| `human` | All remaining failures/threads have been investigated and need a human action | Only approval or the merge left: `null`, relevant events only. A failing check or open thread set aside: at most one day (`null` means one day) |
 | `baseline` | A named failed check also fails on the base; waiting for its fix | Usually 10–15 minutes during active repair, 30–60 after repeated blockage; batch base commits until then |
 | `checks` | Named CI checks are running; there is no work to do before a result | Choose a time, often 10–20 minutes; successful results are batched until all named checks finish |
 | `retry` | An external temporary dependency needs another attempt | Choose a time from the observed failure and its likely recovery |
 
-Durations are 5–1440 minutes. Only `human` accepts `null`. Repeated baseline failures should get
+Durations are 5–1440 minutes. Only `human` accepts `null`. Setting a failure or thread aside for a
+human is a verdict that can go stale, so it is reviewed daily: confirm the reason still holds (the
+base may have fixed or dismissed it), then wait again or resume. Repeated baseline failures should get
 longer evidence-based waits, not a five-minute timer or repeated reruns. New work is never delayed
 until that timer. After a push use `--resume` and the existing bot settle window; do not extend
 bot batching with successive model waits. A baseline fix must be merged and pushed, not just rerun
 on the old commit. When several causes coexist, use a timed wait and include the handled checks;
-only choose indefinite human waiting when every failing check and unresolved thread is accounted for.
+only choose human waiting when every failing check and unresolved thread is accounted for.
+
+The `wait-set` receipt of such a wait carries `notice` when the user is owed a message: `entered`
+the first time on this head (who has to act, and what), `reminder` every three days while the same
+head keeps waiting (what is still needed, and whether to keep following or stop). Daily renewals in
+between stay silent. A wait recorded before this rule existed is reviewed a day after it was set
+and reported once.
 
 Safety and resumption:
 
@@ -127,12 +135,15 @@ Safety and resumption:
   remain actionable. In a `checks` wait, a successful partial result (including a required-check
   milestone) is absorbed while another named check is pending; all named checks completing or the
   original deadline wakes once. Progress never extends that deadline. A missing target, failure or
-  recovery of a previously failed target still wakes. Other wait kinds keep per-target completion
-  and same-result rerun handling. Named threads resolving/outdating, approval changes and a newly
+  recovery of a previously failed target still wakes. Other wait kinds batch the same way: while a
+  named check is still running, further attempts of a failure the wait already accounts for (a rerun
+  that fails again, or recovers) are reported once, when the named checks have all finished or the
+  deadline arrives, as a changed wait rather than as new failures. A failure the wait does not name
+  is never held. Named threads resolving/outdating, approval changes and a newly
   required base update also wake. Starting a check does not wake.
 - Base movement alone cannot wake when all remaining failures are the exact handled attempts. This
   applies to ordinary polls and host-triggered polls. Baseline waits get their model-chosen deadline;
-  indefinite human waits do not get daily reminders.
+  a human wait gets its daily review only when it sets a failure or thread aside.
 - Expiry uses the same pending/ack/retry mechanism as other events. If the model fails to start or
   crashes, the deadline is retried with backoff, not silently consumed. Replace the wait with
   `--wait`, or clear it with `--resume` after handling the work. Plain `--ack` and legacy `--defer`

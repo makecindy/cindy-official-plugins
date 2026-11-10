@@ -80,7 +80,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.9');
+  assert.equal(manifest.version, '1.5.10');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',

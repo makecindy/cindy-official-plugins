@@ -77,9 +77,9 @@
 
 import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
-import { checkOutcome, inspectWait, makeWait, waitFacts } from './lib/follow-wait.mjs';
+import { checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
-import { breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
+import { SETTLE_MAX_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1024,9 +1024,16 @@ export function decide({
   if (waiting.wait && waiting.ignoreBase) {
     result.events = result.events.filter((e) => e.kind !== 'base-moved');
   }
-  // The ordinary required-check milestone must not bypass an explicit CI batch wait.
+  // The ordinary required-check milestone must not bypass a batch of awaited checks.
   // Keep failures and all non-check events; the original wait deadline remains unchanged.
   if (waiting.checksPending) result.events = result.events.filter((e) => e.kind !== 'checks-passed');
+  // Another attempt of a failure the wait already accounts for is reported as `wait-changed`,
+  // once per batch, not as a new failure for each job that finishes.
+  if (waiting.wait) {
+    result.events = result.events
+      .map((e) => (e.kind === 'checks-failed' ? { ...e, failed: e.failed.filter((c) => !handledFailure(waiting.wait, c)) } : e))
+      .filter((e) => e.kind !== 'checks-failed' || e.failed.length > 0);
+  }
   if (waiting.changed.length > 0) result.events.push({ kind: 'wait-changed', changes: waiting.changed, signature: waiting.signature });
   // Absorbed base commits must not reset the comment-loop guard.
   const commentsOnly = result.events.length > 0 && result.events.every((e) => e.kind === 'remarks');
@@ -1098,7 +1105,7 @@ export function decide({
     const sustained = (previous?.inventoryFailures ?? 0) + 1 >= 2;
     const due = sustained && (!previous?.inventoryNoticeAt || now - previous.inventoryNoticeAt >= 24 * 3_600_000);
     // The observation failure is independent of a model's resume/ack. Keep checking real news.
-    if (!result.events.length && (!waiting.wait?.until || now < waiting.wait.until)) {
+    if (!result.events.length && !waitIsDue(waiting.wait, now)) {
       if (pendingKey === 'required-checks-unavailable' || due) {
         return passPending('required-checks-unavailable', 'required-check rules unavailable; do not report ready; observation continues', '', 'required-checks-unavailable', result.next);
       }
@@ -1149,12 +1156,16 @@ export function decide({
   const quietNote = changedKeys ? `; no news in changedFields=[${changedKeys}]` : '';
   if (waiting.wait) {
     const wait = waiting.wait;
-    if (wait.until !== null && now >= wait.until) {
+    const dueAt = waitDueAt(wait);
+    if (waitIsDue(wait, now)) {
       // Unlike a fire-and-forget timer, keep this pending until an agent really acknowledges it.
-      return passPending('wait-expired', `the ${wait.kind} wait is due: ${wait.reason}`, '',
-        `wait:${wait.createdAt}:${wait.until}`, result.next);
+      const age = setsAside(wait)
+        ? `; set aside for a human ${formatDuration(now - (wait.since ?? wait.createdAt))} ago: recheck that it still holds before waiting again`
+        : '';
+      return passPending('wait-expired', `the ${wait.kind} wait is due: ${wait.reason}${age}`, '',
+        `wait:${wait.createdAt}:${dueAt}`, result.next);
     }
-    return skip('waiting', `${wait.kind}: ${wait.reason}; ${wait.until === null ? 'relevant events only' : `review at ${isoAt(wait.until)}`}${quietNote}`, result.next);
+    return skip('waiting', `${wait.kind}: ${wait.reason}; ${dueAt === null ? 'relevant events only' : `review at ${isoAt(dueAt)}`}${quietNote}`, result.next);
   }
   // defer = 「到点叫我,除非先有事」:未到点跳过,到点放行一次(放行即消费掉)。
   const nextAllowAt = Number(previous?.nextAllowAt) || 0;
@@ -1325,7 +1336,7 @@ export function probeAllowsSkip(previous, probe, now, maxSilenceMs = DEFAULT_MAX
   // News is being held until the bots answer: read in full each time so the hold ends at its deadline.
   if ((Number(previous.settleUntil) || 0) > 0) return false;
   if ((Number(previous.nextAllowAt) || 0) > 0 && now >= Number(previous.nextAllowAt)) return false;
-  if (previous.wait?.until && now >= previous.wait.until) return false;
+  if (waitIsDue(previous.wait, now)) return false;
   if (!(now - (Number(previous.lastFullReadAt) || 0) < FULL_REREAD_MS)) return false;
   const awaited = previous.watch.checksAwaitedSince ? Date.parse(previous.watch.checksAwaitedSince) : NaN;
   if (Number.isFinite(awaited) && now - awaited >= NO_CHECKS_MS) return false;
@@ -1440,7 +1451,7 @@ async function gateMain(argv, ctx) {
     }
     // Validate against the earliest released observation BEFORE acknowledging anything.
     const wait = args.waitFile ? makeWait(JSON.parse(fs.readFileSync(args.waitFile, 'utf8')),
-      facts, now) : null;
+      facts, now, previous.wait) : null;
     let next = promotePending(previous, now);
     if (args.resumeReason) {
       delete next.wait;
@@ -1464,6 +1475,13 @@ async function gateMain(argv, ctx) {
       };
       detail += ` nextAllowAt=${new Date(nextAllowAt).toISOString()}`;
     }
+    const notice = waitNotice(wait, now);
+    if (wait && waitDueAt(wait) !== null) detail += `; review at ${isoAt(waitDueAt(wait))}`;
+    if (notice === 'entered') {
+      detail += '; tell the user now who has to act and what exactly they have to do (in a background round also schedule_notify_current_run)';
+    } else if (notice === 'reminder') {
+      detail += `; a human has not acted for ${formatDuration(now - wait.since)}: remind the user what is still needed and ask whether to keep following or stop (in a background round also schedule_notify_current_run)`;
+    }
     writeState(file, next);
     emit(args, {
       exitCode: EXIT_PASS,
@@ -1472,6 +1490,7 @@ async function gateMain(argv, ctx) {
       reason: wait ? 'wait-set' : args.resumeReason ? 'resumed' : args.deferMinutes !== undefined ? 'defer-set' : 'acked',
       detail,
       ...(wait ? { wait } : {}),
+      ...(notice ? { notice } : {}),
     }, out);
     return EXIT_PASS;
   }
@@ -1570,9 +1589,12 @@ async function gateMain(argv, ctx) {
   const checkSucceeded = !snap.gate?.truncated && !snap.gate?.requiredChecksUnavailable && !snap.checksSummary?.unavailable
     && !(snap.blockers ?? []).includes('merge_queue_unavailable');
   // 推送后收齐:新提交第一次被看到的时刻,和要等的 bot reviewer(本 PR 见过的 + 本仓库近期见过的)。
-  // 开始跟进时已在的提交不知道何时推送,不算新提交(不压)。
+  // 开始跟进时已在的提交不知道何时推送,不算新提交(不压)。例外:PR 刚开出来就开始跟进,
+  // 这个提交和 PR 一样新,bot 正要给结果,从 PR 创建时刻起算同一个收齐窗口。
   const headFirstSeen = Boolean(snap.latestCommitOid) && Boolean(previous?.headOid) && snap.latestCommitOid !== previous.headOid;
-  const headSeenAt = headFirstSeen ? now : Number(previous?.headSeenAt) || null;
+  const openedAt = previous?.headOid ? NaN : Date.parse(snap.createdAt ?? '');
+  const justOpened = Number.isFinite(openedAt) && now >= openedAt && now - openedAt < SETTLE_MAX_MS;
+  const headSeenAt = headFirstSeen ? now : Number(previous?.headSeenAt) || (justOpened ? openedAt : null);
   const repoFile = repoStateFilePath(args.stateDir, args.repo);
   const repoState = readState(repoFile) ?? {};
   const repoBots = updateRepoBots(repoState.reviewerBots, snap, now);

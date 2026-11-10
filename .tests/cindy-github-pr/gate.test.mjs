@@ -1190,9 +1190,63 @@ test('replay: human-only CodeQL wait absorbs 72 base updates and host triggers w
     assert.equal(result.json().reason, 'waiting');
   }
   assert.equal(modelWakes, 0, 'six hours of unrelated main commits must cost zero model calls');
-  fx.advance(2 * 24 * 60);
-  assert.equal((await fx.run(['--json'])).json().reason, 'waiting', 'no daily reminder for an explicit human wait');
   assert.ok(fx.readState().wait);
+});
+
+test('replay: a failure set aside for a human is rechecked daily and the user is told on entry, then every three days', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  const entered = (await startWait(fx, s)).json();
+  assert.equal(entered.notice, 'entered');
+  assert.match(entered.detail, /tell the user now who has to act/);
+  assert.equal(entered.wait.until, T0 + 24 * 60 * MIN, 'afterMinutes: null is capped at one day');
+  const told = [];
+  for (let day = 1; day <= 7; day += 1) {
+    fx.advance(24 * 60 - 5);
+    assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+    fx.advance(5);
+    const due = (await fx.run(['--json'])).json();
+    assert.equal(due.reason, 'wait-expired');
+    assert.match(due.detail, /set aside for a human .* ago: recheck that it still holds/);
+    const renewed = (await fx.run(['--wait', fx.writeWait(waitPlan(s)), '--json'])).json();
+    assert.equal(renewed.wait.since, T0, 'the same head keeps one waiting period');
+    if (renewed.notice) {
+      told.push(day);
+      assert.equal(renewed.notice, 'reminder');
+      assert.match(renewed.detail, /ask whether to keep following or stop/);
+    }
+  }
+  assert.deepEqual(told, [3, 6], 'one model round a day, one reminder every three days');
+});
+
+test('replay: an events-only wait recorded before the daily review is rechecked and reported once', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s);
+  const { since, told, toldAt, ...legacy } = fx.readState().wait;
+  fx.writeState({ wait: { ...legacy, until: null } });
+  fx.advance(24 * 60 - 5);
+  assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+  fx.advance(5);
+  assert.equal((await fx.run(['--pacing', '--json'])).json().reason, 'wait-expired');
+  const renewed = (await fx.run(['--wait', fx.writeWait(waitPlan(s)), '--json'])).json();
+  assert.equal(renewed.notice, 'entered', 'the user was never told about the old wait');
+  assert.equal(renewed.wait.since, T0);
+});
+
+test('replay: a plain approval wait stays events-only and silent; a shorter review time is kept', async (t) => {
+  const fx = createFixture(t);
+  const approval = snap({ verdict: 'BLOCKED_HUMAN', blockers: ['approval_required'], reviewDecision: 'REVIEW_REQUIRED' });
+  const plain = (await startWait(fx, approval, { reason: 'await approval', checks: [], threads: [] })).json();
+  assert.equal(plain.wait.until, null);
+  assert.equal(plain.notice, undefined);
+  fx.advance(7 * 24 * 60);
+  assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+
+  const fx2 = createFixture(t);
+  const timed = (await startWait(fx2, humanBlocked(), { afterMinutes: 60 })).json();
+  assert.equal(timed.wait.until, T0 + 60 * MIN);
+  assert.equal(timed.notice, 'entered');
 });
 
 test('replay: baseline CI failure batches main updates until the model-selected time, then runs once', async (t) => {
@@ -1408,7 +1462,7 @@ test('real CLI: --wait reads a file, persists it, and suppresses irrelevant base
   assert.equal(fs.readFileSync(fx.stateFile(), 'utf8'), before);
   const result = await fx.runVia(gatePath, ['--wait', fx.writeWait(waitPlan(s)), '--json']);
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).wait.until, null);
+  assert.equal(JSON.parse(result.stdout).wait.until - JSON.parse(result.stdout).wait.createdAt, 24 * 60 * MIN);
   fx.setSnapshot({ ...s, baseCommitOid: 'base-new' });
   assert.equal((await fx.runVia(gatePath, ['--triggered', '--json'])).code, 2);
   const resumed = await fx.runVia(gatePath, ['--resume', 'Handled the finding and pushed.', '--json']);
@@ -1558,6 +1612,100 @@ test('replay: batching CI successes preserves failures, feedback, reopened threa
     const r = await fx.run(['--json', '--triggered']);
     assert.equal(r.code, 0, `${label}: ${r.stdout}`);
   }
+});
+
+test('settle: an approval without a comment joins the bot batch; a human comment still wakes at once', async (t) => {
+  const fx = createFixture(t);
+  const first = snap({ reviews: [botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(T0 - 5 * MIN))] });
+  fx.setSnapshot(first);
+  await fx.run();
+  assert.equal((await fx.run(['--ack'])).code, 0);
+  fx.advance(2);
+  const pushed = { latestCommitOid: 'bbb2222', checks: [check('build', 'failed', { required: true })], verdict: 'NEEDS_WORK' };
+  const approval = { id: 'A1', author: 'alice', authorIsBot: false, state: 'APPROVED', body: '', submittedAt: iso(fx.now()), url: 'https://gh/A1', commitOid: 'bbb2222' };
+  fx.setSnapshot(snap({ ...first, ...pushed, reviews: [...first.reviews, approval] }));
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling', 'nothing to do until the bots answer');
+  fx.advance(2);
+  const answered = botReview('R2', 'chatgpt-codex-connector', 'bbb2222', iso(fx.now()));
+  fx.setSnapshot(snap({ ...first, ...pushed, reviews: [...first.reviews, approval, answered] }));
+  const batch = await fx.run(['--json']);
+  assert.equal(batch.code, 0);
+  assert.match(batch.json().report, /alice: approved/);
+  assert.match(batch.json().report, /tighten this/);
+
+  const fx2 = createFixture(t);
+  fx2.setSnapshot(first);
+  await fx2.run();
+  assert.equal((await fx2.run(['--ack'])).code, 0);
+  fx2.advance(2);
+  const withNote = { ...approval, body: 'Approved, but please rename the flag.', submittedAt: iso(fx2.now()) };
+  fx2.setSnapshot(snap({ ...first, ...pushed, reviews: [...first.reviews, withNote] }));
+  assert.equal((await fx2.run(['--json'])).code, 0, 'an approval that asks for something is feedback');
+});
+
+test('settle: following a PR opened minutes ago waits for the repository bots; an older PR is read at once', async (t) => {
+  const fx = createFixture(t);
+  fx.writeRepoState({ reviewerBots: { 'chatgpt-codex-connector': T0 - 60 * MIN } });
+  const approval = { id: 'A1', author: 'alice', authorIsBot: false, state: 'APPROVED', body: '', submittedAt: iso(T0 - MIN), url: 'https://gh/A1', commitOid: 'aaa1111' };
+  const opened = snap({ createdAt: iso(T0 - 3 * MIN), reviews: [approval], checks: [check('build', 'pending', { required: true })], verdict: 'WAITING_CI' });
+  fx.setSnapshot(opened);
+  assert.equal((await fx.run(['--json'])).json().reason, 'settling', 'no first round with nothing to do');
+  fx.advance(4);
+  fx.setSnapshot({ ...opened, reviews: [approval, botReview('R1', 'chatgpt-codex-connector', 'aaa1111', iso(fx.now()))] });
+  const batch = await fx.run(['--json']);
+  assert.equal(batch.code, 0);
+  assert.match(batch.json().report, /tighten this/);
+
+  const late = createFixture(t);
+  late.writeRepoState({ reviewerBots: { 'chatgpt-codex-connector': T0 - 60 * MIN } });
+  late.setSnapshot({ ...opened, createdAt: iso(T0 - 17 * MIN) });
+  assert.equal((await late.run(['--json'])).json().reason, 'settling');
+  late.advance(4);
+  assert.equal((await late.run(['--json'])).code, 0, 'the window ends 20 minutes after the PR was opened');
+
+  const old = createFixture(t);
+  old.writeRepoState({ reviewerBots: { 'chatgpt-codex-connector': T0 - 60 * MIN } });
+  old.setSnapshot({ ...opened, createdAt: iso(T0 - 3 * 60 * MIN) });
+  assert.equal((await old.run(['--json'])).code, 0, 'taking over an existing PR does not wait');
+});
+
+test('replay: reruns of failures a wait already accounts for wake once, when the whole batch has finished', async (t) => {
+  const fx = createFixture(t);
+  const failed = (name, n = 0) => check(name, 'failed', { startedAt: iso(T0 + n * MIN), detailsUrl: `https://ci/${name}/${n}` });
+  const s = snap({
+    verdict: 'NEEDS_WORK', blockers: ['ci_failing'], baseCommitOid: 'base-0',
+    checks: [check('build', 'passed', { required: true }), failed('bundle'), failed('aggregate'), failed('windows')],
+  });
+  const named = { checks: [{ name: 'bundle' }, { name: 'aggregate' }, { name: 'windows' }], threads: [] };
+  await startWait(fx, s, { kind: 'baseline', afterMinutes: 60, reason: 'bundle and aggregate fail on main too; windows was rerun once.', ...named });
+  const withChecks = (...checks) => ({ ...s, checks: [s.checks[0], ...checks] });
+  const wakes = [];
+  const tick = async (label, next) => {
+    fx.advance(1);
+    fx.setSnapshot(next);
+    const result = await fx.run(['--json']);
+    if (result.code === 0) wakes.push(label);
+    return result.json();
+  };
+  const running = (name) => check(name, 'pending');
+  await tick('rerun started', withChecks(running('bundle'), running('aggregate'), running('windows')));
+  await tick('aggregate passed', withChecks(running('bundle'), check('aggregate', 'passed'), running('windows')));
+  await tick('bundle failed again', withChecks(failed('bundle', 3), check('aggregate', 'passed'), running('windows')));
+  await tick('aggregate failed again', withChecks(failed('bundle', 3), failed('aggregate', 4), running('windows')));
+  assert.deepEqual(wakes, [], 'one job still runs: nothing for the model to decide yet');
+  const done = await tick('windows passed', withChecks(failed('bundle', 3), failed('aggregate', 4), check('windows', 'passed')));
+  assert.deepEqual(wakes, ['windows passed']);
+  assert.match(done.report, /check bundle, check aggregate, check windows/);
+  assert.doesNotMatch(done.report, /Checks failed/, 'the handled failures are the wait\'s news, not new failures');
+
+  // A failure the wait does not account for is still reported at once, mid-batch.
+  const fx2 = createFixture(t);
+  await startWait(fx2, s, { kind: 'baseline', afterMinutes: 60, reason: 'same', ...named });
+  fx2.advance(1);
+  fx2.setSnapshot({ ...s, checks: [s.checks[0], check('bundle', 'pending'), failed('aggregate'), failed('windows'), failed('lint')] });
+  const fresh = await fx2.run(['--json']);
+  assert.equal(fresh.code, 0);
+  assert.match(fresh.json().report, /Checks failed[^\n]*\n\s+- lint/);
 });
 
 test('replay: bot progress and partial inline comments do not end the settle window', async (t) => {
