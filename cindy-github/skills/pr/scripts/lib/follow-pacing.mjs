@@ -20,6 +20,7 @@
  * draft changes are never held. Checks are not waited for: the agent looks at them again before it
  * pushes, so a failure that lands while it works joins the same round.
  */
+import { waitIsDue } from './follow-wait.mjs';
 
 export const TICK_MS = 5 * 60_000;
 export const PACE_MS = {
@@ -163,10 +164,14 @@ export function botsAnswered(snap, bots, head, since) {
   return [...answered].sort();
 }
 
+/** An approval without a comment asks nothing of the agent; it joins the batch the bots complete. */
+const bareApproval = (remark) => String(remark.state ?? '').toUpperCase() === 'APPROVED'
+  && !String(remark.body ?? '').trim();
+
 /** Events that wake the agent at once even while a round is settling. */
 export function breaksSettle(events) {
   return events.some((event) =>
-    (event.kind === 'remarks' && (event.remarks ?? []).some((remark) => !remark.authorIsBot))
+    (event.kind === 'remarks' && (event.remarks ?? []).some((remark) => !remark.authorIsBot && !bareApproval(remark)))
     || event.kind === 'conflicting'
     || event.kind === 'wait-changed'
     || event.kind === 'merge-queue'
@@ -207,7 +212,7 @@ export function pacingDue(previous, now, { triggered = false } = {}) {
   const awaited = timeOf(watch.checksAwaitedSince);
   const fast = previous.pendingWatch
     || (nextAllowAt > 0 && now >= nextAllowAt)
-    || (previous.wait?.until && now >= previous.wait.until)
+    || waitIsDue(previous.wait, now)
     || (awaited !== null && now - awaited >= 15 * 60_000)
     || (Number(previous.settleUntil) || 0) > 0
     || Number(previous.retryBackoffUntil) > 0;

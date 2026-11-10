@@ -302,6 +302,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       isDraft
       mergedAt
       closedAt
+      createdAt
       updatedAt
       reviewDecision
       mergeStateStatus
@@ -628,6 +629,7 @@ async function main() {
     isDraft: Boolean(pr.isDraft),
     mergedAt: pr.mergedAt,
     closedAt: pr.closedAt,
+    createdAt: pr.createdAt ?? null,
     updatedAt: pr.updatedAt,
     reviewDecision: pr.reviewDecision,
     mergeStateStatus: pr.mergeStateStatus,
