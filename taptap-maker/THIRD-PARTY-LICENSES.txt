@@ -2052,6 +2052,10 @@ pauses automatic recovery at its wait limit, and supports stopping subsequent
 015 workflow steps during preparation and recovery waits.
 An additional V11 patch removes the Neon Ink demo and its dedicated resource
 mappings at the user's request, retaining six styles and all 43 motion effects.
+Three reviewed file patches correct per-axis UI positioning, bound furniture
+animation RGBA pixels to 128 MiB before frame allocation, reject preview/archive
+path overlap, release exported frames, and repair the furniture guide link.
+They are reproduced by the 0.0.41 recipe's filePatches with pinned file hashes.
 Runtime 0.0.41 retains the upstream removal of the ChatGPT recognition fallback.
 Runtime 0.0.41 adds browser-bundled Fengari and sprintf-js for UI motion.
 Their full license texts appear below. Existing editor/Yoga notices remain.

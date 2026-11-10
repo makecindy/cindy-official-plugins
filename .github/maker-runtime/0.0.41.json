@@ -376,7 +376,7 @@
     "README.md": "25907347c35de3018fea5fc2008b3221e2e23c7caef21c5c32c4d4ce65ccae69",
     "bin/taptap-maker": "d3cd496fb6cdf9606a809570de2920b7e40101939bc1cb6841f4ae7cda97c718",
     "dist/maker.js": "27d37b819626ce06bd129d79b85c591cc9a2404af9a6926160894548d6501765",
-    "docs/MAKER_CONSOLE.md": "910da74d461455c0cd609d83d6c4afbe9d46ac155abecd0e4d3ae9e9cff75a6e",
+    "docs/MAKER_CONSOLE.md": "d9969dcbfb8ac77e2fd34b7b5de3ede4c20fbd8758ab75787cf06a452c5c15cc",
     "docs/MAKER_LOCAL_PREVIEW.md": "5106c1298e2a5db996c2d08ad8896556d00ef26677cbf44b9657ada3af4c65be",
     "docs/MAKER_MCP_CONNECTION_TROUBLESHOOTING.md": "124096b744925688649e8cb6e1884d11507ccae2736892c69df01631c89a6dd6",
     "package.json": "efb088156b7458cd0c2b1b24092ff8b46cf4b32bf16292541cb00cc569bc5164",
@@ -394,7 +394,7 @@
     "skills/maker-scene-furniture-workflow/assets/royal-room-recipe.json": "7d2f933d0313db0f1e8f5bafade94a4389b50bf4047f274563f7883640248009",
     "skills/maker-scene-furniture-workflow/references/game-integration.md": "a147a929d63774073d7b6a181f3ac45d310769272f5b4e64103457638c78418f",
     "skills/maker-scene-furniture-workflow/references/recipe.md": "42caa22cd5e3a67e40be1347eebba70be392884894b76e7ea70f5f2d7c883c32",
-    "skills/maker-scene-furniture-workflow/scripts/scene_assets.py": "83e741d46c61ec7697346cdcde730e29ff2fe413161f85f6c984ea3fef0cb08a",
+    "skills/maker-scene-furniture-workflow/scripts/scene_assets.py": "164282b0ee5dbdf0d2187c268ba919c23b2f99124cb98fbb4e9a7dd1ccf3ebe1",
     "skills/maker-scene-furniture-workflow/scripts/test_scene_assets.py": "61b00961f6576e3088eb15c77de3b5817c29b9a53ccb0d97d2afe672f3ace72b",
     "skills/maker-ui-bbox-workflow/SKILL.md": "cf996c8c46e9bfe4b5effa0ff42d5e7b5b77dba5c2e087037897ac7cd3ca19c9",
     "skills/maker-ui-workflow/SKILL.md": "944fc0d3e50e2ea05853b389c7bb4eb24e55972e50954f0242fcf53d61706716",
@@ -403,7 +403,7 @@
     "skills/maker-ui-workflow/references/responsive.md": "0556b1a2aecb40d4c4affe5991f14414d07d2d0f3941eab6bcae502e8488b333",
     "skills/maker-ui-workflow/references/workflow.md": "05fb27bddbcb2278406e90750eb50d6a4f3c697dbbd0696357bca48af199d902",
     "skills/maker-ui-workflow/scripts/assemble-ui-lib.d.mts": "08ce88f76e622d4d6d186ffb505ac8b53a9f5a5b9b16e96a0f656512c0940d66",
-    "skills/maker-ui-workflow/scripts/assemble-ui.mjs": "79bdd0202fa1683dbf5cc52eea74c8def7060fec40263830ea9e6674c3f35258",
+    "skills/maker-ui-workflow/scripts/assemble-ui.mjs": "578a1d30e76bb9d99d4c297a08348742f5ffbb770ea2402c30b3dfaf36024f25",
     "skills/taptap-maker-dev-kit-guide/SKILL.md": "2dd74a9182ed64af3012b2c5f349002d887bbeecc8c49eebb6c7da604d54cc46",
     "skills/taptap-maker-local/SKILL.md": "f9e03421b2ebe50e1864ad7e20463c6defb3bf5f629a077778786529dce89977",
     "skills/taptap-maker-local/references/assets.md": "72a176878ddf4c159f9da14b06555c99995385d37592130cc1f2a2d26a9bed00",
@@ -420,5 +420,88 @@
     "skills/taptap-maker-local/references/ui-motion.md": "507adb2a1566228ed18c3960a394932e6ee3486fe52bb9d0050816e0ed2cde6d",
     "skills/taptap-maker-local/references/validation.md": "7ce1857bb2d0597e5e02e21b62b5df33c02f49a9905effac6c9355b4ab97946f",
     "skills/update-taptap-mcp/SKILL.md": "8afaa0dd6780bf26fbd9505f8340eead1317e968aa3dd4a47d2bfcf267cddc5e"
-  }
+  },
+  "filePatches": [
+    {
+      "path": "skills/maker-ui-workflow/scripts/assemble-ui.mjs",
+      "originalSha256": "79bdd0202fa1683dbf5cc52eea74c8def7060fec40263830ea9e6674c3f35258",
+      "patchedSha256": "578a1d30e76bb9d99d4c297a08348742f5ffbb770ea2402c30b3dfaf36024f25",
+      "patches": [
+        {
+          "id": "R321-explicit-position-axis",
+          "edits": [
+            {
+              "before": "        Object.assign(node, { left: 0, top: 0, right: 0, bottom: 0 });\n        delete node.width;\n        delete node.height;\n        backgrounds.push(node);\n        continue;\n      }\n      anchor(node, \"left\", \"right\", \"width\", reference.width);\n      anchor(node, \"top\", \"bottom\", \"height\", reference.height);\n      if (overrides[node.id] && [\"width\", \"height\", \"aspectRatio\", \"maxWidth\", \"maxHeight\"].some(\n        (key) => Object.hasOwn(overrides[node.id], key)\n      ))\n        proportionalChildren(node, node.width, node.height);\n      const explicit = overrides[node.id] || {};\n      if (![\"left\", \"right\"].some((key) => Object.hasOwn(explicit, key)) || ![\"top\", \"bottom\"].some((key) => Object.hasOwn(explicit, key)))\n        inferred.push(node.id);\n      content.push(node);\n    }\n    if (config.safeArea !== false) {\n      const uniqueId = (base) => {\n        let id = base, index = 1;\n",
+              "after": "        Object.assign(node, { left: 0, top: 0, right: 0, bottom: 0 });\n        delete node.width;\n        delete node.height;\n        backgrounds.push(node);\n        continue;\n      }\n      const explicit = overrides[node.id] || {};\n      const inferX = ![\"left\", \"right\"].some((key) => Object.hasOwn(explicit, key));\n      const inferY = ![\"top\", \"bottom\"].some((key) => Object.hasOwn(explicit, key));\n      if (inferX) anchor(node, \"left\", \"right\", \"width\", reference.width);\n      if (inferY) anchor(node, \"top\", \"bottom\", \"height\", reference.height);\n      if (overrides[node.id] && [\"width\", \"height\", \"aspectRatio\", \"maxWidth\", \"maxHeight\"].some(\n        (key) => Object.hasOwn(overrides[node.id], key)\n      ))\n        proportionalChildren(node, node.width, node.height);\n      if (inferX || inferY)\n        inferred.push(node.id);\n      content.push(node);\n    }\n    if (config.safeArea !== false) {\n      const uniqueId = (base) => {\n        let id = base, index = 1;\n",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "skills/maker-scene-furniture-workflow/scripts/scene_assets.py",
+      "originalSha256": "83e741d46c61ec7697346cdcde730e29ff2fe413161f85f6c984ea3fef0cb08a",
+      "patchedSha256": "164282b0ee5dbdf0d2187c268ba919c23b2f99124cb98fbb4e9a7dd1ccf3ebe1",
+      "patches": [
+        {
+          "id": "R321-scene-export-bounds",
+          "edits": [
+            {
+              "before": "import math\nimport re\nimport shutil\nimport zipfile\nfrom pathlib import Path\nfrom PIL import Image, ImageChops, ImageDraw, ImageEnhance\n\n\ndef write_json(path, value):\n    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')\n\n\n",
+              "after": "import math\nimport re\nimport shutil\nimport zipfile\nfrom pathlib import Path\nfrom PIL import Image, ImageChops, ImageDraw, ImageEnhance\n\n\n# Bound the retained RGBA pixels before any animation frames are allocated.\nMAX_ANIMATION_BYTES = 128 * 1024 * 1024\n\n\ndef check_frame_budget(size, count):\n    if size[0] * size[1] * count * 4 > MAX_ANIMATION_BYTES:\n        raise ValueError('Animation exceeds 128 MiB of RGBA frames; reduce dimensions or frame count')\n\n\ndef write_json(path, value):\n    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')\n\n\n",
+              "count": 1
+            },
+            {
+              "before": "        positions.append((round((w-rw)*px), round((h-rh)*py+dy*h), rw, rh))\n    left, top = min(0, min(p[0] for p in positions))-2, min(0, min(p[1] for p in positions))-2\n    right, bottom = max(w, max(p[0]+p[2] for p in positions))+2, max(h, max(p[1]+p[3] for p in positions))+2\n    size = (right-left, bottom-top)\n    if max(size) > 4096:\n        raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])\n    frames = []\n    for i, (x, y, rw, rh) in enumerate(positions):\n        frame = Image.new('RGBA', size)\n        frame.alpha_composite(image.resize((rw, rh), Image.Resampling.LANCZOS), (x-left, y-top))\n        # Distribute rounding over frames so arbitrary durations remain exact.\n        frames.append((frame, round((i+1)*duration/count)-round(i*duration/count)))\n",
+              "after": "        positions.append((round((w-rw)*px), round((h-rh)*py+dy*h), rw, rh))\n    left, top = min(0, min(p[0] for p in positions))-2, min(0, min(p[1] for p in positions))-2\n    right, bottom = max(w, max(p[0]+p[2] for p in positions))+2, max(h, max(p[1]+p[3] for p in positions))+2\n    size = (right-left, bottom-top)\n    if max(size) > 4096:\n        raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])\n    check_frame_budget(size, count)\n    frames = []\n    for i, (x, y, rw, rh) in enumerate(positions):\n        frame = Image.new('RGBA', size)\n        frame.alpha_composite(image.resize((rw, rh), Image.Resampling.LANCZOS), (x-left, y-top))\n        # Distribute rounding over frames so arbitrary durations remain exact.\n        frames.append((frame, round((i+1)*duration/count)-round(i*duration/count)))\n",
+              "count": 1
+            },
+            {
+              "before": "    left = math.floor(min(x for x,y in corners))-2\n    top = math.floor(min(y for x,y in corners))-2\n    size = (math.ceil(max(x for x,y in corners))-left+2,\n            math.ceil(max(y for x,y in corners))-top+2)\n    if max(size) > 4096:\n        raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])\n    frames = []\n    for i,(a,b,c,d,tx,ty) in enumerate(transforms):\n        frame = Image.new('RGBA', size)\n        if i == count-1:\n            frame.alpha_composite(image, (-left, -top))\n        elif i > 0:\n",
+              "after": "    left = math.floor(min(x for x,y in corners))-2\n    top = math.floor(min(y for x,y in corners))-2\n    size = (math.ceil(max(x for x,y in corners))-left+2,\n            math.ceil(max(y for x,y in corners))-top+2)\n    if max(size) > 4096:\n        raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])\n    check_frame_budget(size, count)\n    frames = []\n    for i,(a,b,c,d,tx,ty) in enumerate(transforms):\n        frame = Image.new('RGBA', size)\n        if i == count-1:\n            frame.alpha_composite(image, (-left, -top))\n        elif i > 0:\n",
+              "count": 1
+            },
+            {
+              "before": "    \"\"\"Unroll toward image bottom, preserving revealed pixels and the exact final image.\"\"\"\n    w, h = image.size\n    padding = max(4, round(h*.48))\n    size = (w+4, h+padding+4)\n    if max(size) > 4096:\n        raise ValueError('Roll frame exceeds 4096 pixels')\n    alpha = image.getchannel('A').point(lambda value: 255 if value > 128 else 0)\n    frames = []\n    for i in range(count):\n        frame = Image.new('RGBA', size)\n        if i == count-1:\n            frame.alpha_composite(image, (2, padding))\n",
+              "after": "    \"\"\"Unroll toward image bottom, preserving revealed pixels and the exact final image.\"\"\"\n    w, h = image.size\n    padding = max(4, round(h*.48))\n    size = (w+4, h+padding+4)\n    if max(size) > 4096:\n        raise ValueError('Roll frame exceeds 4096 pixels')\n    check_frame_budget(size, count)\n    alpha = image.getchannel('A').point(lambda value: 255 if value > 128 else 0)\n    frames = []\n    for i in range(count):\n        frame = Image.new('RGBA', size)\n        if i == count-1:\n            frame.alpha_composite(image, (2, padding))\n",
+              "count": 1
+            },
+            {
+              "before": "    return frames, [2, padding, w, h]\n\n\ndef extract(root, spec):\n    sequence = spec['sequence']\n    with Image.open(source_path(root, sequence['image'])) as source:\n        atlas = source.convert('RGBA')\n    frames = []\n    for frame in sequence['frames']:\n        x, y, w, h = box(frame['rect'], 'sequence frame', atlas.size, integer=True)\n        if frames and frames[0][0].size != (w, h):\n            raise ValueError('Sequence frames must have equal untrimmed sizes')\n        frames.append((atlas.crop((x, y, x+w, y+h)), frame['durationMs']))\n    return frames, None\n\n\ndef preview(frames, folder, ident):\n    cell, columns = 256, min(8, len(frames))\n",
+              "after": "    return frames, [2, padding, w, h]\n\n\ndef extract(root, spec):\n    sequence = spec['sequence']\n    with Image.open(source_path(root, sequence['image'])) as source:\n        rects = [box(frame['rect'], 'sequence frame', source.size, integer=True)\n                 for frame in sequence['frames']]\n        size = tuple(rects[0][2:])\n        if any(tuple(rect[2:]) != size for rect in rects):\n            raise ValueError('Sequence frames must have equal untrimmed sizes')\n        check_frame_budget(size, len(rects))\n        atlas = source.convert('RGBA')\n    frames = []\n    for frame, (x, y, w, h) in zip(sequence['frames'], rects):\n        frames.append((atlas.crop((x, y, x+w, y+h)), frame['durationMs']))\n    return frames, None\n\n\ndef preview(frames, folder, ident):\n    cell, columns = 256, min(8, len(frames))\n",
+              "count": 1
+            },
+            {
+              "before": "    preview_dir = preview_dir.resolve() if preview_dir else None\n    recipe = load_recipe(root, recipe_path)\n    archive = output.with_name(output.name+'.zip')\n    for path in [output, archive] + ([preview_dir] if preview_dir else []):\n        if path.exists():\n            raise FileExistsError('Choose a new output path: ' + str(path))\n    if preview_dir and (preview_dir == output or preview_dir.is_relative_to(output) or output.is_relative_to(preview_dir)):\n        raise ValueError('Preview and final output must be separate directories')\n    output.mkdir(parents=True)\n    incomplete = output/'.incomplete'; incomplete.touch()\n    if preview_dir:\n        preview_dir.mkdir(parents=True); (preview_dir/'.incomplete').touch()\n    (output/'background').mkdir()\n",
+              "after": "    preview_dir = preview_dir.resolve() if preview_dir else None\n    recipe = load_recipe(root, recipe_path)\n    archive = output.with_name(output.name+'.zip')\n    for path in [output, archive] + ([preview_dir] if preview_dir else []):\n        if path.exists():\n            raise FileExistsError('Choose a new output path: ' + str(path))\n    if preview_dir and any(preview_dir == path or preview_dir.is_relative_to(path) or path.is_relative_to(preview_dir)\n                           for path in (output, archive)):\n        raise ValueError('Preview and final output must be separate directories')\n    output.mkdir(parents=True)\n    incomplete = output/'.incomplete'; incomplete.touch()\n    if preview_dir:\n        preview_dir.mkdir(parents=True); (preview_dir/'.incomplete').touch()\n    (output/'background').mkdir()\n",
+              "count": 1
+            },
+            {
+              "before": "        assets[ident] = dict(id=ident, label=spec.get('label', ident), category=spec['category'],\n                            directory='furniture/'+ident, image='furniture/'+ident+'/image.png',\n                            animation='furniture/'+ident+'/animation.json')\n        if preview_dir:\n            preview_items.append(dict(assetId=ident, title=spec.get('label', ident), category=spec['category'],\n                                      file=ident+'.png', frameSetInfo=preview(frames, preview_dir, ident)))\n    instances = []\n    for spec in recipe['objects']:\n        asset_id = spec.get('reuseOf', spec['id']); animation = animations[asset_id]\n        x, y, w, h = spec['bbox']\n        if 'finalImageRect' in animation:\n            ox, oy, iw, ih = animation['finalImageRect']; fw, fh = animation['frameSize']\n",
+              "after": "        assets[ident] = dict(id=ident, label=spec.get('label', ident), category=spec['category'],\n                            directory='furniture/'+ident, image='furniture/'+ident+'/image.png',\n                            animation='furniture/'+ident+'/animation.json')\n        if preview_dir:\n            preview_items.append(dict(assetId=ident, title=spec.get('label', ident), category=spec['category'],\n                                      file=ident+'.png', frameSetInfo=preview(frames, preview_dir, ident)))\n        for frame, _ in frames:\n            frame.close()\n        frames.clear()\n        image.close()\n    instances = []\n    for spec in recipe['objects']:\n        asset_id = spec.get('reuseOf', spec['id']); animation = animations[asset_id]\n        x, y, w, h = spec['bbox']\n        if 'finalImageRect' in animation:\n            ox, oy, iw, ih = animation['finalImageRect']; fw, fh = animation['frameSize']\n",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "docs/MAKER_CONSOLE.md",
+      "originalSha256": "910da74d461455c0cd609d83d6c4afbe9d46ac155abecd0e4d3ae9e9cff75a6e",
+      "patchedSha256": "d9969dcbfb8ac77e2fd34b7b5de3ede4c20fbd8758ab75787cf06a452c5c15cc",
+      "patches": [
+        {
+          "id": "R321-furniture-guide-link",
+          "edits": [
+            {
+              "before": "调整支持自动保存、撤销和重做；选中后的「恢复自动走线」可清除手动偏移。\n可选 edge.route 只保存相对自动路线的 x/y 偏移，不改变引用关系；复制和模板实例保留偏移。\n\n## 素材刷新与导出\n\n首尾帧房间动画的模板用法、Maker 视频参数、完整抽帧、提示词及排障，见\n[家具弹性入场工作流](MAKER_ROOM_ARRIVAL_WORKFLOW.md)。\n\n画布“更多画布操作 → 刷新素材”可重新核对当前项目素材。新处理记录实际来源内容版本；\n同路径替换后，旧切图等派生结果提示待处理，不自动重新生成。旧成果缺少内容版本时保留\n并提示来源待核实。导出期间禁止切换或卸载画布；取消和失败后释放保护。\n本地图片编辑和去背景在读取原图时记录内容版本，保存重试沿用该次输入；视频抽帧按带版本\n的媒体地址复用解码结果，同路径文件内容改变后重新加载视频。\n",
+              "after": "调整支持自动保存、撤销和重做；选中后的「恢复自动走线」可清除手动偏移。\n可选 edge.route 只保存相对自动路线的 x/y 偏移，不改变引用关系；复制和模板实例保留偏移。\n\n## 素材刷新与导出\n\n首尾帧房间动画的模板用法、Maker 视频参数、完整抽帧、提示词及排障，见\n[家具弹性入场工作流](../skills/maker-scene-furniture-workflow/SKILL.md)。\n\n画布“更多画布操作 → 刷新素材”可重新核对当前项目素材。新处理记录实际来源内容版本；\n同路径替换后，旧切图等派生结果提示待处理，不自动重新生成。旧成果缺少内容版本时保留\n并提示来源待核实。导出期间禁止切换或卸载画布；取消和失败后释放保护。\n本地图片编辑和去背景在读取原图时记录内容版本，保存重试沿用该次输入；视频抽帧按带版本\n的媒体地址复用解码结果，同路径文件内容改变后重新加载视频。\n",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

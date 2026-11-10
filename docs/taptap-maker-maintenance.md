@@ -18,6 +18,13 @@ notice is bundled. An unavailable source URL does not invalidate that confirmati
 Use an existing published, working local game for plugin acceptance. Attribute
 game-resource and native-engine errors separately; do not expand a Maker MCP
 upgrade into engine fixes or gameplay acceptance for unchanged input paths.
+The 0.0.41 recipe also records exact patches for three bundled files: explicit
+positions skip automatic anchoring only on the specified axis; furniture exports
+reject animations exceeding 128 MiB of retained RGBA pixels before allocating
+frames and release each animation after export; preview directories cannot overlap
+the output directory or ZIP path; the furniture guide links to the bundled Skill.
+These patches run in staging alongside bundle patches before the complete inventory
+check, so failure leaves the installed vendor unchanged.
 
 ### 2.1.26: Runtime 0.0.40
 

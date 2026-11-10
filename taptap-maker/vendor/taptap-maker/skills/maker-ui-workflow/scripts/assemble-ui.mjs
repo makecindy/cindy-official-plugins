@@ -2256,14 +2256,16 @@ function adaptLayout(ui, layout) {
         backgrounds.push(node);
         continue;
       }
-      anchor(node, "left", "right", "width", reference.width);
-      anchor(node, "top", "bottom", "height", reference.height);
+      const explicit = overrides[node.id] || {};
+      const inferX = !["left", "right"].some((key) => Object.hasOwn(explicit, key));
+      const inferY = !["top", "bottom"].some((key) => Object.hasOwn(explicit, key));
+      if (inferX) anchor(node, "left", "right", "width", reference.width);
+      if (inferY) anchor(node, "top", "bottom", "height", reference.height);
       if (overrides[node.id] && ["width", "height", "aspectRatio", "maxWidth", "maxHeight"].some(
         (key) => Object.hasOwn(overrides[node.id], key)
       ))
         proportionalChildren(node, node.width, node.height);
-      const explicit = overrides[node.id] || {};
-      if (!["left", "right"].some((key) => Object.hasOwn(explicit, key)) || !["top", "bottom"].some((key) => Object.hasOwn(explicit, key)))
+      if (inferX || inferY)
         inferred.push(node.id);
       content.push(node);
     }

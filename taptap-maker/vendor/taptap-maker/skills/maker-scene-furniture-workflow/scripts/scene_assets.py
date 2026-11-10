@@ -10,6 +10,15 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance
 
 
+# Bound the retained RGBA pixels before any animation frames are allocated.
+MAX_ANIMATION_BYTES = 128 * 1024 * 1024
+
+
+def check_frame_budget(size, count):
+    if size[0] * size[1] * count * 4 > MAX_ANIMATION_BYTES:
+        raise ValueError('Animation exceeds 128 MiB of RGBA frames; reduce dimensions or frame count')
+
+
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
 
@@ -166,6 +175,7 @@ def bake(image, spec):
     size = (right-left, bottom-top)
     if max(size) > 4096:
         raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])
+    check_frame_budget(size, count)
     frames = []
     for i, (x, y, rw, rh) in enumerate(positions):
         frame = Image.new('RGBA', size)
@@ -207,6 +217,7 @@ def bake_sway(image, spec, duration, count):
             math.ceil(max(y for x,y in corners))-top+2)
     if max(size) > 4096:
         raise ValueError('Frame exceeds 4096 pixels: ' + spec['id'])
+    check_frame_budget(size, count)
     frames = []
     for i,(a,b,c,d,tx,ty) in enumerate(transforms):
         frame = Image.new('RGBA', size)
@@ -231,6 +242,7 @@ def bake_roll(image, duration, count):
     size = (w+4, h+padding+4)
     if max(size) > 4096:
         raise ValueError('Roll frame exceeds 4096 pixels')
+    check_frame_budget(size, count)
     alpha = image.getchannel('A').point(lambda value: 255 if value > 128 else 0)
     frames = []
     for i in range(count):
@@ -283,12 +295,15 @@ def bake_roll(image, duration, count):
 def extract(root, spec):
     sequence = spec['sequence']
     with Image.open(source_path(root, sequence['image'])) as source:
+        rects = [box(frame['rect'], 'sequence frame', source.size, integer=True)
+                 for frame in sequence['frames']]
+        size = tuple(rects[0][2:])
+        if any(tuple(rect[2:]) != size for rect in rects):
+            raise ValueError('Sequence frames must have equal untrimmed sizes')
+        check_frame_budget(size, len(rects))
         atlas = source.convert('RGBA')
     frames = []
-    for frame in sequence['frames']:
-        x, y, w, h = box(frame['rect'], 'sequence frame', atlas.size, integer=True)
-        if frames and frames[0][0].size != (w, h):
-            raise ValueError('Sequence frames must have equal untrimmed sizes')
+    for frame, (x, y, w, h) in zip(sequence['frames'], rects):
         frames.append((atlas.crop((x, y, x+w, y+h)), frame['durationMs']))
     return frames, None
 
@@ -317,7 +332,8 @@ def export(root, recipe_path, output, preview_dir=None):
     for path in [output, archive] + ([preview_dir] if preview_dir else []):
         if path.exists():
             raise FileExistsError('Choose a new output path: ' + str(path))
-    if preview_dir and (preview_dir == output or preview_dir.is_relative_to(output) or output.is_relative_to(preview_dir)):
+    if preview_dir and any(preview_dir == path or preview_dir.is_relative_to(path) or path.is_relative_to(preview_dir)
+                           for path in (output, archive)):
         raise ValueError('Preview and final output must be separate directories')
     output.mkdir(parents=True)
     incomplete = output/'.incomplete'; incomplete.touch()
@@ -353,6 +369,10 @@ def export(root, recipe_path, output, preview_dir=None):
         if preview_dir:
             preview_items.append(dict(assetId=ident, title=spec.get('label', ident), category=spec['category'],
                                       file=ident+'.png', frameSetInfo=preview(frames, preview_dir, ident)))
+        for frame, _ in frames:
+            frame.close()
+        frames.clear()
+        image.close()
     instances = []
     for spec in recipe['objects']:
         asset_id = spec.get('reuseOf', spec['id']); animation = animations[asset_id]
