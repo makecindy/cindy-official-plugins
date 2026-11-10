@@ -1171,6 +1171,78 @@ test('the 2026.11.4 sync keeps H5 creation, level upgrade and qualification boun
   assert.doesNotMatch(uploadImage, /DC「权限管理/);
 });
 
+test('the 2026.11.6 sync keeps material handoff, empty-matrix and draft idempotency contracts', () => {
+  // CLI v2026.11.6 makes the qualification handoff resumable (a small-game
+  // privacy or filing draft typed in the developer site can be picked back up
+  // through dedicated commands), routes an empty package-type matrix by
+  // `empty_reason` instead of a retry loop, returns an H5 parse handle, and
+  // requires an explicit idempotency key for draft create/reset. Each change
+  // decides what the agent does next, so the bundled manual has to carry it.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const levelUpgrade = read('taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/MANUAL.md');
+  const qualAnalysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  const qualDraft = read('taptap-suite/references/taptap-qualification/references/qualification-draft.md');
+  const qualLifecycle = read('taptap-suite/references/taptap-qualification/references/qualification-lifecycle.md');
+  const qualMaterials = read('taptap-suite/references/taptap-qualification/references/qualification-materials.md');
+  const handoff = read('taptap-suite/references/taptap-qualification/references/material-handoff-resume.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+
+  // A draft create/reset carries an explicit intent key from preview through
+  // retry; an idempotency conflict is read back, never re-keyed.
+  assert.match(shared, /`create-draft` \/ `reset-draft` 强制显式提供非空 `--idempotency-key`/, 'the shared rules must require an explicit draft key');
+  assert.match(shared, /不得自动换 key 重做/, 'an idempotency conflict is read back, not re-keyed');
+  assert.match(audit, /幂等与失败恢复/, 'reset-draft recovery must start from the key contract');
+  assert.match(audit, /已有草稿时不得换 key 再次重置/, 'an existing draft blocks a second reset under a new key');
+  assert.match(audit, /后续发布后再次开版是新意图/, 'a new draft after publishing is a new intent');
+
+  // A completed level upgrade is not a material submission or a release; the
+  // follow-up checks are separate steps with their own evidence.
+  assert.match(levelUpgrade, /## 升级后的资料与资质检查/, 'the upgrade manual must keep the post-upgrade checklist');
+  assert.match(levelUpgrade, /升级结果不代表资料已提审、审核通过或游戏已上线/);
+  assert.match(levelUpgrade, /升级成功、材料齐全或审核受理都不能代替上线证据/);
+  assert.match(qualAnalysis, /app-edit-level-upgrade\.md#升级后的资料与资质检查/, 'qualification analysis must reach the same checklist');
+
+  // Small-game privacy and filing: the developer-site draft is resumable
+  // through dedicated commands, and the returned facts decide the next step.
+  assert.match(qualification, /material-handoff-resume\.md/, 'the domain manual must link the handoff reference');
+  assert.match(handoff, /^# 全类型资料交接与接续/);
+  assert.match(handoff, /get-mini-app-privacy-progress/);
+  assert.match(handoff, /get-mini-app-filing-progress/);
+  assert.match(handoff, /saved_editable_draft_required/);
+  assert.match(handoff, /ICP_RECORD_UPDATE_UNSUPPORTED/);
+  assert.match(handoff, /FILING_AUTHENTICATED_ENTITY_INCOMPLETE/);
+  assert.doesNotMatch(handoff, /taptap-cli [a-z]/, 'the handoff must stay on the call_tool path');
+  assert.match(qualDraft, /已确认可公开展示的非敏感图片材料/, 'private material never uses the public asset upload');
+  assert.match(qualMaterials, /私密文件不得进入公开素材库/);
+  assert.match(qualMaterials, /DOC\/DOCX 不在文件类型枚举中/);
+  assert.match(qualLifecycle, /## 小游戏隐私与备案/);
+  assert.match(qualLifecycle, /独立隐私快照、备案快照和 assessment 快照互不替换/);
+  assert.match(qualification, /完成后 CLI 查询确认/, 'a developer-site age-grade action is confirmed by a read');
+
+  // An empty package-type matrix has a cause; the agent reads it instead of
+  // retrying the same command, and never widens upload or binding from it.
+  assert.match(packages, /按 `empty_reason` 分流/);
+  for (const reason of ['package_type_undeclared', 'declared_not_applicable', 'form_has_no_upload_target', 'launcher_only']) {
+    assert.match(diagnostics, new RegExp(reason), `the empty-matrix branch ${reason} must be documented`);
+  }
+  assert.match(diagnostics, /不得据此放宽上传或绑定/);
+  assert.match(diagnostics, /「A\. 查包体库状态」第 2 步/, 'the self-test step must point at the explicit branch');
+  assert.doesNotMatch(diagnostics, /只说明当前应用没有可用的包体库入口/, 'the old one-line answer is gone');
+
+  // An H5 upload returns a parse handle; the status query takes that handle and
+  // nothing else, and a missing handle is looked up, not guessed.
+  assert.match(materials, /`data\.artifactId`\(解析查询句柄\)/);
+  assert.match(materials, /get-h5-package-upload-status/);
+  assert.match(materials, /不要传 `h5PackageId` 或 `h5VersionId`/);
+  assert.match(materials, /external\.artifactId/);
+});
+
 test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {
   // CLI v2026.10.28 turns the forum domain from read-only into read + write:
   // post drafts and publishing, first-level and child replies, and two upload

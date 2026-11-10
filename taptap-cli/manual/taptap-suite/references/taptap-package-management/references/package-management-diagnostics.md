@@ -5,21 +5,27 @@
 ### A. 查包体库状态
 
 1. 先调 `package-management get-available-package-types`，拿本次实际返回的 `available_package_types`。
-2. 只用该数组里实际出现的类型（`apk`、`windows`、`mini_app`、`h5`、`spark`），再按类型调对应列表：
+2. `available_package_types` 为空时不要重试同一个命令；按响应的 `empty_reason` 分流（`declared_package_types` 只是创建声明的核对值，不代表可上传类型）：
+   - `package_type_undeclared`：还没保存创建时的包体类型，也没有已绑定的 APK/PC 包体。先与用户确认方向，再用 `call_tool(name:"qualification save-qualification-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{app_features:{package_types:["<类型>"]}}})` 补存创建时的同一类型，读回后重调本接口；不要猜类型、不要新建游戏、不要改用其它类型试探。
+   - `declared_not_applicable`：已保存声明与当前形态或包体状态冲突（例如声明 `apk` 但小游戏类目已是 H5）。不要尝试切换或清空类型，直接说明冲突并请用户到开发者中心核对。
+   - `form_has_no_upload_target`：当前形态（Tap 制造 / UrhoX 小游戏 / 关卡分发）不承载可上传包体，补声明也不会产生可用类型。只说明结论，不要引导补声明或换类型。
+   - `launcher_only`：纯启动器分发，本来就不承载包体，不需要上传。
+   - 字段缺省：矩阵非空时属正常（没有需要解释的成因）；矩阵为空而字段缺省时可能是旧服务，刷新能力信息后重读一次，仍缺省就只说明“包体矩阵为空且原因未下发”，不得据此放宽上传或绑定。
+3. 只用该数组里实际出现的类型（`apk`、`windows`、`mini_app`、`h5`、`spark`），再按类型调对应列表：
    - `apk` → `package-management list-apk-packages`
    - `windows` → `package-management list-pc-packages`
    - `h5` → `package-management list-h5-packages`
    - `mini_app` → `package-management list-mini-app-packages`
    - `spark` → `package-management list-spark-versions`
-3. 用户泛问“当前游戏包体版本号 / 当前包体 / 包体版本”时，先列候选让用户确认；Windows 例外，直接看 `list-pc-packages.result.current_package_id`（为 0 表示没有当前默认包体）。
-4. 这些 `list-*` 都声明了分页（OpenAPI 名 `x-pagination`，catalog 里序列化为 `pagination`），且 catalog 声明的 `page_size` 默认值统一是 **20**。可用 `page` / `page_size` 写进 `args.data`，翻全量传分页控制 flag（`page_all:true`，可配 `page_limit` / `page_delay`）；开发者中心各页面自己的分页条数（APK 20、Windows/小游戏 100、H5/TapTap 制造 10）是页面行为，**不是** API 默认值，不要当成默认值转述。
-5. 某类型的列表返回失败时，只说明该类型当前不可用；不要把失败说成“应用不支持该类型”，也不要据此去开通别的能力。
-6. 向用户解释列表时优先说版本名、包名/文件名、更新时间和状态字段；raw ID 只在用户明确要排查 ID 或接口数据时展示。
-7. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：命中 `pc_package_branch` 白名单时 `1` 游戏本体包、`2` 启动器包（两个角色同时必填）；未命中时 `0` 是默认包体（单槽位模型，**没有启动器包**）。判定信号见 `get-app-module` 的 `other-settings` 字段（`pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型，`pc_whatsnew` = 单槽位模型）。上传/绑定时分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`，不是参数错误）。包体绑定必须按 `taptap-app-edit` 的草稿创建后重读流程执行。`expected` 快照过期或字段不匹配会返回 **409**，插件侧统一呈现为 `conflict`（响应体 `error` 为 `stale_state`，`error_description` 说明槽位已被外部修改），先核对草稿与快照字段并重新读 `list-packages` 后决策，禁止原样重试或自动 `force: true`。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
-8. APK 条目带 `config_status`：`empty` 所有必填字段为空、`warning` 部分必填字段未填、`configured` 已配置完整；`null` 表示未知。不要把它说成审核状态。
-9. TapTap 制造条目的 `status` 为 0 未上线 / 1 当前线上；发布相关的其它状态字段不准确，必须隐藏，不要据此判断是否已发布。
-10. 小游戏条目按 `stage` 分段：`dev` 开发版本、`audit` 审核版本、`published` 线上版本。
-11. 本手册只读包体状态。包体上传（含单个确定包体）转 materials 手册；资料页主包体绑定转 app-edit 手册。
+4. 用户泛问“当前游戏包体版本号 / 当前包体 / 包体版本”时，先列候选让用户确认；Windows 例外，直接看 `list-pc-packages.result.current_package_id`（为 0 表示没有当前默认包体）。
+5. 这些 `list-*` 都声明了分页（OpenAPI 名 `x-pagination`，catalog 里序列化为 `pagination`），且 catalog 声明的 `page_size` 默认值统一是 **20**。可用 `page` / `page_size` 写进 `args.data`，翻全量传分页控制 flag（`page_all:true`，可配 `page_limit` / `page_delay`）；开发者中心各页面自己的分页条数（APK 20、Windows/小游戏 100、H5/TapTap 制造 10）是页面行为，**不是** API 默认值，不要当成默认值转述。
+6. 某类型的列表返回失败时，只说明该类型当前不可用；不要把失败说成“应用不支持该类型”，也不要据此去开通别的能力。
+7. 向用户解释列表时优先说版本名、包名/文件名、更新时间和状态字段；raw ID 只在用户明确要排查 ID 或接口数据时展示。
+8. Windows 分页结果额外返回 `current_package_id`；条目里的 `branch` 必须区分说明：命中 `pc_package_branch` 白名单时 `1` 游戏本体包、`2` 启动器包（两个角色同时必填）；未命中时 `0` 是默认包体（单槽位模型，**没有启动器包**）。判定信号见 `get-app-module` 的 `other-settings` 字段（`pc_game_package_whatsnew`/`pc_launcher_package_whatsnew` = 分支模型，`pc_whatsnew` = 单槽位模型）。上传/绑定时分支与模型不符会被服务端 **422** 拒绝（`failed_precondition`，不是参数错误）。包体绑定必须按 `taptap-app-edit` 的草稿创建后重读流程执行。`expected` 快照过期或字段不匹配会返回 **409**，插件侧统一呈现为 `conflict`（响应体 `error` 为 `stale_state`，`error_description` 说明槽位已被外部修改），先核对草稿与快照字段并重新读 `list-packages` 后决策，禁止原样重试或自动 `force: true`。`status` 为 0 新建 / 1 处理中 / 2 已处理未提审 / 3 处理失败 / 4 审核中 / 5 已过审 / 6 未过审 / 7 解析中断。
+9. APK 条目带 `config_status`：`empty` 所有必填字段为空、`warning` 部分必填字段未填、`configured` 已配置完整；`null` 表示未知。不要把它说成审核状态。
+10. TapTap 制造条目的 `status` 为 0 未上线 / 1 当前线上；发布相关的其它状态字段不准确，必须隐藏，不要据此判断是否已发布。
+11. 小游戏条目按 `stage` 分段：`dev` 开发版本、`audit` 审核版本、`published` 线上版本。
+12. 本手册只读包体状态。包体上传（含单个确定包体）转 materials 手册；资料页主包体绑定转 app-edit 手册。
 
 ### B. 小游戏能力未开通
 
@@ -35,7 +41,7 @@
 1. 用户只说“我要自测 / 自测一下”时，先调 `package-management get-available-package-types`，不要把“自测”直接等同为“自测二维码”。
 2. 如果用户已明确指定包体类型，就按该类型查列表；如果用户说“当前这个包体”但对话里没有明确类型，仍要让用户在可用类型里选择，不要假设页面上下文。
 3. 如果用户没有指定类型且可用类型多于一个，必须用文字候选问用户想自测哪个包体类型。选项只能来自本次返回的 `available_package_types`，例如当前只可用 APK、Windows 时，只展示 APK、Windows；不要补充不可见的小游戏 / H5 / TapTap 制造。
-4. 如果只有一个可用类型，可以直接进入该类型流程；如果没有任何可用类型，只说明当前应用没有可用包体库入口。
+4. 如果只有一个可用类型，可以直接进入该类型流程；如果没有任何可用类型，按「A. 查包体库状态」第 2 步的 `empty_reason` 说明成因，不要只回一句“当前应用没有可用的包体库入口”。
 5. **APK / Windows 没有二维码 operation**。用户要自测 APK 或 Windows 时，只解释 `package-management list-apk-packages` / `list-pc-packages` 返回的候选与状态，并引导用户在开发者中心对应包体页面发起自测；不要调用 `get-test-qr-code`。
 6. **小游戏 / H5 / TapTap 制造自测二维码**：
    - 小游戏：从 `package-management list-mini-app-packages` 里选 `stage=dev` 的候选（审核/线上版本没有自测二维码入口），取它的 `package_id`。

@@ -69,7 +69,7 @@ game.zip
 | `upload-video` | `data.videoId`、`data.validationWarnings` | 上传完成;转码和资料字段写入仍是后续状态 |
 | `upload-apk` | `data.apkId` | 资料页主包体已切换 |
 | `upload-pc-package` | `data.packageId`,以及存在时的绑定预览字段 | Windows 槽位已绑定 |
-| `upload-h5-package` | `data.h5VersionId`、`data.h5PackageId` | H5 主包体已绑定或已审核 |
+| `upload-h5-package` | `data.artifactId`(解析查询句柄)、`data.h5VersionId`、`data.h5PackageId` | H5 主包体已绑定或已审核 |
 | `upload-mini-app-package` | `data.miniAppArtifactId`、`data.taskId` | 直传、complete 和解析已完成;包体记录与提交状态以 packages 手册的查询结果为准 |
 
 小游戏上传成功后不得再次 complete;`artifact_only` 不表示上传未完成。详见 [小游戏交接](taptap-suite/references/taptap-materials/references/mini-app-handoff.md)。
@@ -189,3 +189,5 @@ call_tool(name:"asset-library +ai-image-rules", args:{dev_id, app_id})
 - 资料字段写入、包体槽位绑定、提审、上线:转 app-edit 手册。
 
 已有非关卡 H5 游戏用 `upload-h5-package`，不转换或重建。`readbackErrors` 时保留版本句柄，仅重查失败阶段，不重新上传。H5 只用 H5 主包，禁止上传或绑定 Windows 包体。
+
+H5 上传后查询解析状态时,把回执 `artifactId` 作为 `get-h5-package-upload-status` 的 `artifact_id` 传入:`call_tool(name:"package-management get-h5-package-upload-status", args:{developer_id:"<developerId>", app_id:"<appId>", data:{artifact_id:"<artifactId>"}})`;不要传 `h5PackageId` 或 `h5VersionId`。回执缺少该句柄时可用 `cliTaskId` 查询本地任务的 `external.artifactId`,不要猜 ID 或重新上传。

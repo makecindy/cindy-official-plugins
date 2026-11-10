@@ -81,6 +81,8 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须传稳定的意图 key；同一业务意图从 `--dry-run` 到用户确认后的 `--yes` 必须复用同一个 key，只有业务意图变化时才生成新 key。key 只用可打印 ASCII（如 `bind-main-1`）：中文文件名或标题会让 CLI 在发请求前拒绝，CLI 不会自动转码或替换。
 
+`create-draft` / `reset-draft` 强制显式提供非空 `--idempotency-key`，包括 `--dry-run`。相同 app 的不同创建/重置意图不能复用旧 key；同一意图的超时重试必须保留原 key，不能每次随机生成。遇到 `idempotency_conflict`、`failed_precondition` 或 `result_unknown` 先用 `list-app-versions` 回读核对，不得自动换 key 重做。发布兼容期间旧缓存也可能冲突，只有确认要发起新操作才生成新 key。
+
 遇到 `confirmation_required` 或 exit code 10 时，不要当普通错误。向用户确认后用原命令追加 `--yes` 重试；用户未确认就停止。
 
 如果用户已在当前对话明确确认，首个真实写命令必须直接追加 `--yes`；不要故意先省略 `--yes` 来触发 `confirmation_required`。创建游戏的标准流程是先用 `--dry-run` 预览，用户确认后用相同 `--data` 追加 `--idempotency-key` 和 `--yes` 创建一次。

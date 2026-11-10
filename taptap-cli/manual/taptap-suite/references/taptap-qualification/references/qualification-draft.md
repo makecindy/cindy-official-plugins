@@ -6,7 +6,7 @@
 
 ## 小游戏域材料边界
 
-H5、Spark、Tap 小游戏及包含这些包体的组合，其适用的隐私合规与 ICP 使用小游戏域流程；防沉迷仅在包含 Tap 小游戏时使用该域。纯 H5 / Spark 的防沉迷可属于应用资质审核域，不因包体是轻量类型就转后台。逐项读取 assessment 的 domains、write_domain 与 submit_blockers，分别判断材料所属域、办理渠道和提审条件；可选材料不列为必交，可保存也不等于已满足提审条件。除创意工坊升级中的“不处理个人信息”简单声明外，当前 CLI 不支持这些材料的保存、提审或撤回；前往开发者后台对应材料入口办理，完成后重新读取状态。该例外按 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 核对并取得用户明确确认后提交独立隐私审核；复杂声明仍转开发者后台，不能用 `save-qualification-draft` 代替。不能用应用资料中的资质草稿代替小游戏材料完成，也不能改类型绕过 `failed_precondition`。仅保存 `app_features` 的事实确认仍可使用现有接口；AI、版号、授权等其它材料按当前工具契约处理。
+H5、Spark、Tap 小游戏及包含这些包体的组合，其适用的隐私合规与 ICP 使用小游戏域流程；防沉迷仅在包含 Tap 小游戏时使用该域。纯 H5 / Spark 的防沉迷可属于应用资质审核域，不因包体是轻量类型就转后台。逐项读取 assessment 的 domains、write_domain 与 submit_blockers，分别判断材料所属域、办理渠道和提审条件；可选材料不列为必交，可保存也不等于已满足提审条件。小游戏隐私及备案先按 [全类型交接接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md) 查询当前 schema：支持时接续后台草稿的隐私提审/撤回、查询备案进度及办理适用的 H5_GAME；敏感正文与通用 ICP 仍交接用户直接填写。首次不处理个人信息声明仍按 app-edit 手册的 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 受限流程确认，不能用于替代复杂声明。不能用应用资料中的资质草稿代替小游戏材料完成，也不能改类型绕过 `failed_precondition`。仅保存 `app_features` 的事实确认使用对应接口；AI、版号、授权等其它材料按当前工具契约处理。
 
 ## 创建类型声明与恢复
 
@@ -25,7 +25,7 @@ APK + Windows 的已确认附加用途单独处理：先读取已有 `declared_p
    ```
 
 2. 先读 `qualification get-qualification-assessment`，把本次返回的 `snapshot` 原样放在写请求顶层的 `expected_snapshot`。按 [qualification materials](taptap-suite/references/taptap-qualification/references/qualification-materials.md) 构造输入。`qualification.qualification_type` 是联合类型的判别字段，必须传入；不要传顶层 `qualification_type`，也没有 `kind` 字段。
-3. 只有图片型材料需要先取得 HTTPS URL：图片上传由 `taptap-materials` 执行（即 `call_tool(name:"upload", …)`，成功自动收录素材库），拿到返回的 `data.url` 后再构造 draft 输入。版号、授权书、安全评估等 PDF 或其他非图片文件不走图片上传；当前 CLI 没有通用文件上传命令，应使用已有 HTTPS 文件 URL 或开发者后台页面完成上传。
+3. 只有已确认可公开展示的非敏感图片材料才使用公开素材上传；证件、合同和私密资质即使是图片也转开发者后台，不读取文件正文。公开图片上传由 `taptap-materials` 执行（即 `call_tool(name:"upload", …)`，成功自动收录素材库），拿到返回的 `data.url` 后再构造 draft 输入。版号、授权书、安全评估等 PDF 或其他非图片文件不走图片上传；当前 CLI 没有通用文件上传命令，应使用已有 HTTPS 文件 URL 或开发者后台页面完成上传。
 
 4. 先预览再写入：
 
@@ -49,17 +49,17 @@ APK + Windows 的已确认附加用途单独处理：先读取已有 `declared_p
 
 ## 敏感资质页面交接
 
-涉及实名主体、证件、营业执照、联系人等敏感信息时，不把字段放入 CLI payload，也不在日志或回复中回显敏感值。CLI 不承诺返回资质页面 URL；使用当前开发者后台资质页面入口完成人工填写。
+涉及实名主体、证件、营业执照、联系人等敏感信息时，不把这些信息放入 CLI 请求，也不在日志或回复中回显敏感值。CLI 不承诺返回资质页面 URL；使用当前开发者后台资质页面入口完成人工填写。
 
-优先使用服务端可信 handoff；只有当前环境 origin 与路由已经确认时才构造链接，不能从接口域名猜生产域。路径形态为：
+优先使用服务端返回的可信页面链接；只有当前环境的开发者后台地址和页面路径已经确认时才构造链接，不能从 API 地址猜测开发者后台地址。路径形态为：
 
 ```text
 <已确认的当前环境开发者后台 origin>/v3/<developerId>/app/<appId>/store/qualifications
 ```
 
-目前只有 ICP 支持追加 `?qualification=icp-filing` 自动打开对应模块；其他资质进入总页后，由用户按工具结果指出的资质项填写。用户完成页面操作后，调用 `qualification get-qualification-assessment` 读回；未完成或读取失败保留待办。
+目前只有 ICP 支持追加 `?qualification=icp-filing` 自动打开对应模块；其他资质进入总页后，由用户按工具结果指出的资质项填写。用户填写并保存后，CLI 调用 `get-qualification-assessment`，分别核对材料是否保存、审核进度和生效状态。满足条件且用户要求提审时，再按审核流程预览、确认并提交；材料未完成或查询失败时，说明尚未确认的事项，不自动补写。
 
-不要暴露或调用前端专用的 `present-qualification-input-card`，也不要说 CLI 已打开 modal、已代填或已保存。
+自动化调用只使用 CLI 支持的接口，不调用网页专用的 `present-qualification-input-card`。提供页面链接不代表已打开填写窗口、已代填或已保存；用户在页面完成操作后，由 CLI 查询确认。
 
 保存完成后重新读取 snapshot，不能沿用保存前的确认标识提交审核。发现并发修改或材料冲突时，先确认要保留的内容，再重新查询并核对后续操作；不要自动覆盖。
 

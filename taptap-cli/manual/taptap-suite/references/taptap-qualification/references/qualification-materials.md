@@ -31,9 +31,9 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 
 - `qualification.qualification_type` 是联合类型的判别字段，必须传入；顶层**不接受** `qualification_type`，也没有 `kind` 字段。
 - 文件字段传对象 `{ "type": "img|pdf|video", "url": "<https-url>" }`；多文件字段传对象数组。
-- 只有图片型材料需要先取 HTTPS URL：由 `taptap-materials` 执行图片上传获取；PDF 或其他非图片材料不走图片上传，改用已有 HTTPS 文件 URL 或开发者后台页面。
+- 文件引用使用已确认且获准使用的 HTTPS 地址；不要求已有可用引用的材料重复上传。需要上传本地文件时，只有确认可公开展示的非敏感图片使用 `taptap-materials`；私密文件不得进入公开素材库。PDF/证明视频缺少合适上传能力时由用户在开发者后台上传，再由 CLI 查询保存结果。DOC/DOCX 不在文件类型枚举中，不能伪装成 PDF。
 - 不使用页面表单别名，如 `privacyPolicyUrl`、`policyLink`。
-- ICP 的 `icp_entity_type`、`icp_entity_name`、`icp_entity_license_no` 由 schema 声明为 CLI 输入，但属于敏感主体信息：不在命令、日志或对话里回显，用户不愿在 CLI 填写时转开发者后台资质页面。
+- ICP 的 `icp_entity_type`、`icp_entity_name`、`icp_entity_license_no` 由 schema 声明为 CLI 输入，但属于敏感主体信息：接口具备这些字段不等于本手册会收集它们。本手册将敏感主体信息交由用户在开发者后台填写，不放入 CLI 请求、日志或对话；CLI 查询保存和审核状态，并接续允许的非敏感操作。
 - 不在命令、日志或对话里暴露身份证号、营业执照号、联系人等敏感信息；工具要求人工填写时转页面。
 
 ## 常见示例
@@ -50,7 +50,7 @@ call_tool(name:"schema", args:{_positional:["qualification","save-qualification-
 }
 ```
 
-APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提审。本手册不收集或回显主体证件/联系人；先在同环境开发者后台填妥，再按最新 write_domain 与 submit_blockers 判断能否从 CLI 完成非敏感后续动作。小游戏 ICP 属于独立域，不用应用资质接口代办。
+APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提审。本手册不收集或回显主体证件/联系人；请用户在同一环境的开发者后台填写并保存主体资料。完成后，CLI 查询 `get-qualification-assessment`，核对材料是否保存，再根据 `write_domain` 与 `submit_blockers` 确认能否继续提审；这些字段用于执行判断，不要求用户填写。小游戏 ICP 属于独立域，不用应用资质接口代办。
 
 隐私合规：
 

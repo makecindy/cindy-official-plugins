@@ -57,7 +57,7 @@ call_tool(name:"schema", args:{_positional:["package-management","get-test-qr-co
 
 ## 执行规则
 
-- 先调 `package-management get-available-package-types` 拿 `available_package_types`;只用其中实际返回的类型,不要补充不可见类型。
+- 先调 `package-management get-available-package-types` 拿 `available_package_types`;只用其中实际返回的类型,不要补充不可见类型。矩阵为空时不要重试同一命令,按 `empty_reason` 分流,见 [diagnostics](taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md)「查包体库状态」。
 - 用户泛说"我要自测"时,先列出实际可用类型让用户选,不要把"自测"直接等同为"自测二维码"。
 - **自测二维码**:从对应 `list-*` 里确定目标版本后,直接用顶层 `call_tool(name:"test-qr-code", args:{dev_id, app_id, data:{package_id:"<packageId>"} | data:{version_code:"<sparkVersionCode>"}, output:"<相对路径>.png"})`——一条命令同时完成取地址与出图,`package_id` 和 `version_code` 互斥,只能传其中一个;多个候选时先让用户按版本/时间选。把返回的 `data.file_path` 作为图片附件展示给用户扫码。只有明确需要原始 URI 时才单独调用动态 `package-management get-test-qr-code`。
 - `output` 文件名按目标区分(如 `artifacts/test-qr-<packageId>.png`),不要复用固定名字。`output` 报错不等于重名:提示路径无效时改正为会话工作目录内的相对路径;提示文件已存在且无法确认内容相同时,保留原文件并换一个新的目标文件名。不要靠重试或 `force: true` 绕过;同一个包只渲染一次,不要并行重发,也不能仅凭文件存在就宣称成功。动态命令不在本地补造二维码图片字段。
