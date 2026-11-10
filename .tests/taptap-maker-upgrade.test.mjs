@@ -6,7 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyPatches, sha256, validateArchiveEntries, verifyVendor, fileHashes } from '../.github/scripts/sync-maker-runtime.mjs';
 
-const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.40.json', import.meta.url)));
+const recipe = JSON.parse(readFileSync(new URL('../.github/maker-runtime/0.0.41.json', import.meta.url)));
 const vendor = fileURLToPath(new URL('../taptap-maker/vendor/taptap-maker/', import.meta.url));
 
 test('reviewed upstream can be reconstructed and patched reproducibly', () => {
@@ -72,7 +72,7 @@ test('added bundled dependencies have license texts', () => {
   const notices = readFileSync(new URL('../taptap-maker/THIRD-PARTY-LICENSES.txt', import.meta.url), 'utf8');
   for (const name of ['long', 'marked', 'protobufjs', 'ws', 'Lucide / Feather icon snapshot',
     'pngjs', 'archiver', 'minimatch', 'glob', 'buffer-crc32', 'Urhox UI Editor',
-    'Yoga layout (embedded UI editor)']) {
+    'Yoga layout (embedded UI editor)', 'fengari', 'sprintf-js']) {
     assert.ok(notices.includes('\n' + name + '\n'), name);
   }
   assert.match(notices, /Apache License/);
