@@ -52,7 +52,7 @@ test('bridge learning access requires the paired extension challenge key and sta
   assert.match(background,/X-My-Browser-Learning-Challenge/);
   assert.match(background,/X-My-Browser-Proof/);
   assert.match(background,/learning-auth-v2/);
-  assert.match(background,/if\(r\.challenge\)\{auth=auth\|\|await authReady\(\)\.catch\(\(\)=>null\);if\(!auth\)return null/);
+  assert.match(background,/if\(r\.challenge\)\{auth=auth\|\|await withDeadline\(authReady\(\),3000,Error\('AUTH_TIMEOUT'\)\)\.catch\(\(\)=>null\);if\(!auth\)return null/);
   assert.match(background,/const digest=b64url\(await crypto\.subtle\.digest\('SHA-256'/);
   assert.match(background,/path\+'\\\\n'\+digest/);
   assert.match(background,/learningFetch\(call\.target,'\/learning\/cancel'/);

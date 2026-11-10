@@ -619,3 +619,18 @@ Verification: `my-browser-parity.browser.test.mjs` adds a click that leads to a 
 When an automatic subtitle session detects that the source and target are the same language (including Chinese variants), it now hides Cindy captions in both bilingual and translation-only mode and restores the site's native caption visibility and track state. Previously only translation stopped, so source captions could still appear. The inactive subtitle icon and learning shortcuts follow the same state. Changing to another target language or explicitly choosing Translate anyway resumes subtitles; the saved display preference is preserved.
 
 Verification: `my-browser-same-language.browser.test.mjs` runs the real content scripts in isolated Chromium with fixture caption transport/model responses. It covers both display modes, native captions initially showing or disabled, repeated reads and DOM changes, target-language changes and Translate anyway. The regression fails on the previous content script. The broader learning browser test also fails on the unchanged base at “No visible button 翻译此页面”, before subtitle checks. This version has not been installed in the user's Chrome.
+
+
+## 0.4.69 browser connection recovery (host package 0.4.91)
+
+The worker refreshes the same bridge session independently of page operations. A long wait no longer
+expires the host's 35-second connection lease, and the extension API call on each heartbeat keeps an
+active connection from relying solely on JavaScript timers for the MV3 worker lifetime. Startup and
+alarms remain recovery entry points. This uses the existing `/health` handshake, including on older
+hosts; a changed session causes rediscovery, never a replay of the acknowledged page operation.
+
+Idle tab cleanup runs once in the background, so a stalled tabs/storage call cannot stop polling or
+spawn duplicate close operations. Request deadlines cover boot identity, response headers and body;
+authentication and badge/storage updates are also bounded. Regression tests simulate long operations,
+hung cleanup and response bodies, and a lost result without repeating the operation. The real-browser
+connection test uses an isolated Chromium profile and a fenced fixture bridge, not a user's browser.

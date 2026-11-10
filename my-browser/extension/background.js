@@ -11,6 +11,7 @@ let bridge = null;
 let discovery;
 let wireVersion=WIRE_VERSION;
 let running = false;
+let pageJobActive = false;
 const b64url = bytes => {
   let binary=''; for(const byte of new Uint8Array(bytes)) binary+=String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -565,9 +566,11 @@ async function debuggerScreenshot(tab,a) {
   return {ok:true,execution:'executed',tabId:tab.id,mimeType:'image/'+format,data:shot.data,bytes:Math.floor(shot.data.length*3/4),viaDebugger:true};
 }
 async function connection(state) {
-  await sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}});
-  await chrome.action.setBadgeText({text:state.connected ? '' : '!'});
-  await chrome.action.setBadgeBackgroundColor({color:state.connected ? '#287ad7' : '#b87820'});
+  await withDeadline(Promise.all([
+    sessionStore.set({connection:{...state,version:VERSION,browser:family,clientId}}),
+    chrome.action.setBadgeText({text:state.connected ? '' : '!'}),
+    chrome.action.setBadgeBackgroundColor({color:state.connected ? '#287ad7' : '#b87820'})
+  ]),2000,Error('CONNECTION_UI_TIMEOUT')).catch(() => {});
 }
 // One id per browser launch: storage.session survives the worker restarting but is cleared when the
 // browser restarts. Cindy drops the tab handles it remembered for this browser when the id changes,
@@ -583,16 +586,17 @@ function bootId() {
   } catch { return Promise.resolve(''); } // No session storage: connect without a launch id.
 }
 async function fetchJSON(base,path,session,body,timeout = 5000,version = wireVersion,auth = {}) {
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(),timeout);
-  const boot = await bootId();
-  try {
+  const controller = new AbortController();
+  try { return await withDeadline((async () => {
+    const boot = await bootId();
     const response = await fetch(base+path,{method:body === undefined ? 'GET' : 'POST',
       headers:{...(boot ? {'X-My-Browser-Boot':boot} : {}),'X-My-Browser-Extension':chrome.runtime.id,'X-My-Browser-Origin':chrome.runtime.getURL('').replace(/\/$/,''),'X-My-Browser-Client':clientId,'X-My-Browser-Family':family,'X-My-Browser-Version':version,'X-My-Browser-Installed-Version':VERSION,...(auth.publicKey ? {'X-My-Browser-Key':auth.publicKey} : {}),...(auth.learningChallenge ? {'X-My-Browser-Learning-Challenge':auth.learningChallenge} : {}),...(auth.proof ? {'X-My-Browser-Proof':auth.proof} : {}),...(session ? {'X-My-Browser-Session':session} : {}),...(body === undefined ? {} : {'Content-Type':'application/json'})},
       ...(body === undefined ? {} : {body:JSON.stringify(body)}),signal:controller.signal}).catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     const data = await response.json().catch(()=>{throw Error('BRIDGE_REQUEST_FAILED');});
     if (!response.ok) throw new Error(data.error || 'BRIDGE_REQUEST_FAILED');
     return data;
-  } finally { clearTimeout(timer); }
+  })(),timeout,Error('BRIDGE_REQUEST_FAILED'));
+  } finally { controller.abort(); }
 }
 function discover() {
   if(discovery)return discovery;
@@ -600,7 +604,7 @@ function discover() {
   return discovery;
 }
 async function discoverBridge() {
-  await restore;
+  await withDeadline(restore,3000,Error('STORAGE_TIMEOUT'));
   if (bridge) return bridge;
   let auth=null;
   let diagnostic;
@@ -611,17 +615,17 @@ async function discoverBridge() {
       const port=first+offset,base='http://127.0.0.1:'+port;
       try{
         let r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION);
-        if(r.auth_required){auth=auth||await authReady().catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey});}
-        if(r.challenge){auth=auth||await authReady().catch(()=>null);if(!auth)return null;const proof=await auth.sign(r.challenge);r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey,proof});}
+        if(r.auth_required){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey});}
+        if(r.challenge){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));r=await fetchJSON(base,'/health',null,undefined,450,WIRE_VERSION,{publicKey:auth.publicKey,proof});}
         if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id)return null;
         if(r.version!==WIRE_VERSION&&!['0.4.0','0.4.1','0.4.2','0.4.3','0.4.4','0.4.5','0.4.6','0.4.7','0.4.8','0.4.9','0.4.10','0.4.11','0.4.12'].includes(r.version)&&!/^0\.3\.\d+$/.test(r.version)){diagnostic='UPDATE_CINDY_CHROME';return null;}
         const version=r.version;
-        if(version!==WIRE_VERSION){r=await fetchJSON(base,'/health',null,undefined,450,version);if(r.auth_required){auth=auth||await authReady().catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey});}if(r.challenge){auth=auth||await authReady().catch(()=>null);if(!auth)return null;const proof=await auth.sign(r.challenge);if(!proof)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey,proof});}if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id||r.version!==version)return null;}
+        if(version!==WIRE_VERSION){r=await fetchJSON(base,'/health',null,undefined,450,version);if(r.auth_required){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey});}if(r.challenge){auth=auth||await withDeadline(authReady(),3000,Error('AUTH_TIMEOUT')).catch(()=>null);if(!auth)return null;const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));if(!proof)return null;r=await fetchJSON(base,'/health',null,undefined,450,version,{publicKey:auth.publicKey,proof});}if(r.plugin!=='my-browser'||r.protocol!==3||r.extensionId!==chrome.runtime.id||r.version!==version)return null;}
         if(r.native_binding_required){
           try {
             const registered=await Promise.race([chrome.runtime.sendNativeMessage('com.makecindy.browser',{port,clientId,publicKey:auth.publicKey}),sleep(10000).then(()=>{throw Error('NATIVE_BINDING_UNAVAILABLE');})]);
             if(!registered?.ok)throw Error('NATIVE_BINDING_UNAVAILABLE');
-            const proof=await auth.sign(r.challenge);
+            const proof=await withDeadline(auth.sign(r.challenge),2000,Error('AUTH_TIMEOUT'));
             r=await fetchJSON(base,'/health',null,undefined,1500,version,{publicKey:auth.publicKey,proof});
           }catch{diagnostic='NATIVE_BINDING_UNAVAILABLE';return null;}
         }
@@ -649,8 +653,12 @@ async function getTab(id) {
   }
 }
 async function closeOwned(url) {
+  if (pageJobActive) return false;
   const rec = owned.get(url); if (!rec) return true;
   const tab = await getTab(rec.id);
+  // Cleanup may have waited on Chrome while a job renewed/replaced this record
+  // or the user claimed the tab. Check before closing OR forgetting the record.
+  if (pageJobActive || owned.get(url) !== rec || Date.now()-rec.used <= 600000) return false;
   if (tab) {
     // Keep protected tabs counted. Deleting only the ledger entry made the old three-tab limit illusory.
     if (!rec.created || rec.claimed || tab.active || tab.url !== rec.actualUrl) return false;
@@ -1464,17 +1472,55 @@ async function handle(job,policy,target) {
     return {...fail(e.message in messages ? e.message : 'CHROME_OPERATION_FAILED',messages[e.message] || 'Browser access failed. Inspect the existing page and extension permissions; do not automatically open a replacement.',failureState()),...(e.message==='ADDRESS_UNVERIFIED' ? {reason:e.reason || 'UNKNOWN'} : {}),...(e.message==='PAGE_LOAD_TIMEOUT'?{tabId:e.tabId,status:e.tabStatus}:{}),retryable:false};
   }
 }
+// Separate liveness from page jobs: a valid 60s wait must not expire the host's
+// 35s lease. /health is supported by older hosts too and never takes a page job.
+let heartbeatTimer;
+let heartbeatPending = false;
+async function heartbeat() {
+  if (heartbeatPending) return;
+  heartbeatPending = true;
+  clearTimeout(heartbeatTimer);
+  const target = bridge;
+  try {
+    // An extension API call resets Chrome's service-worker idle timer. A cached
+    // bootId and plain fetch alone do not do that while the browser is idle.
+    await withDeadline(sessionStore.get('cindyBrowserBoot'),2000,Error('STORAGE_TIMEOUT'));
+    if (target) {
+      const status = await fetchJSON(target.base,'/health',target.session,undefined,5000);
+      if (status.plugin !== 'my-browser' || status.extensionId !== chrome.runtime.id ||
+          status.protocol !== 3 || status.session !== target.session) throw Error('SESSION_CHANGED');
+    }
+  } catch {
+    // Keep the target captured by an already acknowledged job. Reconnect only
+    // the next poll; never resend that job to a new bridge or session.
+    if (target && bridge === target) bridge = null;
+  } finally {
+    heartbeatPending = false;
+    heartbeatTimer = setTimeout(heartbeat,10000);
+  }
+}
+let cleanupPending;
+function cleanupInBackground() {
+  // One best-effort cleanup at a time. A stuck tabs/storage call cannot hold up
+  // polling, and must not cause parallel close operations on the same tab.
+  if (!cleanupPending) cleanupPending = cleanup().catch(() => {}).finally(() => { cleanupPending = null; });
+}
 async function chain() {
   if (running) return;
   running = true;
+  void heartbeat();
   try {
     for (;;) {
       let target;
       try {
         target = await discover();
-        if (!target) { await cleanup(); await sleep(3000); continue; }
+        if (!target) { cleanupInBackground(); await sleep(3000); continue; }
         const {job} = await fetchJSON(target.base,'/poll',target.session,undefined,25000);
-        if (!job) { await cleanup(); continue; }
+        if (!job) { cleanupInBackground(); continue; }
+        pageJobActive = true;
+        for (const rec of owned.values()) {
+          if (rec.id === job.payload?.tabId || rec.actualUrl === job.payload?.url) rec.used = Date.now();
+        }
         // A failed/expired ack means DO NOT execute. Only use the exact bridge session that issued the job.
         const ack = await fetchJSON(target.base,'/ack',target.session,{id:job.id});
         if (!ack.ok) continue;
@@ -1487,12 +1533,12 @@ async function chain() {
         // Never retry the browser operation after losing its response.
         bridge = null; await connection({connected:false,message:'Connection interrupted. Check any in-progress action before retrying.'});
         await sleep(1500);
-      }
+      } finally { pageJobActive = false; }
     }
   } finally { running = false; }
 }
 chrome.alarms.create('my-browser-watchdog',{periodInMinutes:0.5});
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') chain(); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'my-browser-watchdog') { void heartbeat(); void chain(); } });
 chrome.runtime.onStartup.addListener(chain);
 chrome.runtime.onInstalled.addListener(chain);
 // An update or reload leaves the pages already open with the previous copy of the content
