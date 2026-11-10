@@ -162,7 +162,7 @@ var MESSAGES = {
     prSettings: 'PR 设置',
     prHideSettings: '收起 PR 设置',
     prAutoRename: '发完自动改名',
-    prAutoRenameHint: '任务标题改成 PR 号和标题',
+    prAutoRenameHint: '任务标题改成 #编号 简短主题',
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prAutoArchive: '合并后自动归档',
@@ -209,7 +209,7 @@ var MESSAGES = {
     prNextAsk: '卡片已显示。等用户点击或在对话里明确说要发，不要再用文字重复询问；点击会以本插件代发的消息送达。创建 PR 后用 card_id 和 pr 再调用 pr_card，renamed / following 只填已经完成的动作。',
     prNextApply: '卡片设置要求发完后做 todo 里的事。做完还没做的，再用 card_id 调用 pr_card，带上 renamed / following。',
     prNextUpdated: '卡片已更新。',
-    prTodoRename: '用 cindy_helper 的 set_current_session_title 把当前任务改名为「{title}」',
+    prTodoRename: '根据「{title}」提炼简短主题，用 cindy_helper 的 set_current_session_title 把当前任务改名为「#编号 简短主题」；保留编号和核心含义，去掉 PR、跟进等流程前缀及冗余描述，不照搬完整 PR 标题',
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
@@ -301,7 +301,7 @@ var MESSAGES = {
     prSettings: 'PR settings',
     prHideSettings: 'Hide PR settings',
     prAutoRename: 'Rename after opening',
-    prAutoRenameHint: 'Retitle the task with the PR number and title',
+    prAutoRenameHint: 'Retitle the task as #number short topic',
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prAutoArchive: 'Archive after merge',
@@ -348,7 +348,7 @@ var MESSAGES = {
     prNextAsk: 'The card is shown. Wait for the user to click or explicitly ask to open it, and do not ask again in text; clicks arrive as messages sent by this plugin. After creating the PR, call pr_card again with card_id and pr; set renamed / following only for actions already done.',
     prNextApply: 'The card settings ask for the todo items after opening. Do any not done yet, then call pr_card with card_id, renamed and following.',
     prNextUpdated: 'Card updated.',
-    prTodoRename: 'Rename the current task to "{title}" with cindy_helper set_current_session_title',
+    prTodoRename: 'Condense "{title}" into "#number short topic" and rename the current task with cindy_helper set_current_session_title; preserve the number and core meaning, omit workflow prefixes such as PR or Follow and redundant wording, and do not copy the full PR title',
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
@@ -440,7 +440,7 @@ var MESSAGES = {
     prSettings: 'PR 設定',
     prHideSettings: 'PR 設定を閉じる',
     prAutoRename: '作成後に自動で改名',
-    prAutoRenameHint: 'タスク名を PR 番号とタイトルに変更します',
+    prAutoRenameHint: 'タスク名を「#番号 短いテーマ」に変更します',
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prAutoArchive: 'マージ後に自動でアーカイブ',
@@ -487,7 +487,7 @@ var MESSAGES = {
     prNextAsk: 'カードを表示しました。ユーザーのクリックか会話での明確な依頼を待ち、テキストで重ねて確認しないでください。クリックはこのプラグインが送るメッセージとして届きます。PR を作成したら card_id と pr を付けて pr_card を再度呼び、renamed / following には完了済みの操作だけを指定してください。',
     prNextApply: 'カード設定により、作成後に todo の操作が必要です。未完了のものを済ませてから、card_id・renamed・following を付けて pr_card を呼んでください。',
     prNextUpdated: 'カードを更新しました。',
-    prTodoRename: 'cindy_helper の set_current_session_title で現在のタスク名を「{title}」に変更する',
+    prTodoRename: '「{title}」から短いテーマをまとめ、cindy_helper の set_current_session_title で現在のタスク名を「#番号 短いテーマ」に変更する。番号と核心を保ち、PR・フォローなどの手順の接頭辞や冗長な説明を省き、PR タイトル全体をそのまま使わない',
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
@@ -579,7 +579,7 @@ var MESSAGES = {
     prSettings: 'PR 설정',
     prHideSettings: 'PR 설정 닫기',
     prAutoRename: '만든 뒤 자동으로 이름 변경',
-    prAutoRenameHint: '작업 제목을 PR 번호와 제목으로 바꿉니다',
+    prAutoRenameHint: '작업 제목을 #번호 짧은 주제로 바꿉니다',
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prAutoArchive: '병합 후 자동 보관',
@@ -626,7 +626,7 @@ var MESSAGES = {
     prNextAsk: '카드를 표시했습니다. 사용자가 클릭하거나 대화에서 분명히 요청할 때까지 기다리고, 텍스트로 다시 묻지 마세요. 클릭은 이 플러그인이 보낸 메시지로 도착합니다. PR을 만든 뒤 card_id와 pr로 pr_card를 다시 호출하고, renamed / following에는 이미 완료한 작업만 넣으세요.',
     prNextApply: '카드 설정에 따라 PR을 만든 뒤 todo 항목을 처리해야 합니다. 아직 하지 않은 항목을 마친 뒤 card_id, renamed, following으로 pr_card를 호출하세요.',
     prNextUpdated: '카드를 업데이트했습니다.',
-    prTodoRename: 'cindy_helper의 set_current_session_title로 현재 작업 이름을 "{title}"(으)로 변경',
+    prTodoRename: '"{title}"을 "#번호 짧은 주제"로 요약하고 cindy_helper의 set_current_session_title로 현재 작업 이름을 변경하세요. 번호와 핵심 의미를 유지하고 PR·팔로우 등의 절차 접두사와 중복 설명은 빼며 전체 PR 제목을 그대로 복사하지 마세요',
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
@@ -2838,7 +2838,7 @@ function prText(value) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 255) : '';
 }
 
-/** 改名用的任务标题:#号 + PR 标题(set_current_session_title 上限 120 字)。 */
+/** 提供给 Agent 精简的标题素材；最终任务名遵循 #编号 简短主题。 */
 function prTaskTitle(card) {
   return ('#' + card.pr.number + ' ' + (card.pr.title || card.repo)).slice(0, PR_TITLE_MAX);
 }
