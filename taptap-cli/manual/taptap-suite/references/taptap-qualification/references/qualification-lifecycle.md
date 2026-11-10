@@ -27,7 +27,7 @@
 
 ## 适龄分级
 
-适龄使用独立的保存、提审和撤回命令。先读取以下 schema；命令不可用时引导用户前往开发者后台办理，不通过普通资料字段写入：
+适龄使用独立的保存、提审和撤回命令。先读取以下 schema；命令不可用时，请用户在开发者后台填写实际适龄分级并保存，按其意图办理提审或撤回。完成后，CLI 查询 `get-qualification-assessment`，核对分级值和审核状态，再继续资料检查；不通过普通资料字段代替适龄审核：
 
 ```text
 call_tool(name:"schema", args:{_positional:["qualification","save-age-grade-qualification"]})
@@ -42,3 +42,7 @@ call_tool(name:"schema", args:{_positional:["qualification","withdraw-age-grade-
 材料补齐后，按 app-edit 手册重新检查资料。用户要求提审时，再依次读取版本快照、预检、确认、提交和查询结果。资质审核通过不代表资料已提审或已发布；建议性缺口应明确提示，阻断项或未知资格不能解释为通过。审核后的版本绑定由服务端处理，CLI 不自行回填审核结果或覆盖用户修改。
 
 编辑 AI 证明前，先读取 `assessment.material_summary.proof_files`。只修改用户指定的包体证明，保留其他包体的文件引用，再提交完整列表；保存后逐项核对结果。文件类型等必要信息缺失时，请用户在开发者后台补齐，不自行猜测。
+
+## 小游戏隐私与备案
+
+小游戏域不调用通用 `qualification submit-qualification`。按 [全类型交接接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md) 查询独立能力、使用对应进度快照，并在开发者后台保存敏感材料后接回。独立隐私快照、备案快照和 assessment 快照互不替换。

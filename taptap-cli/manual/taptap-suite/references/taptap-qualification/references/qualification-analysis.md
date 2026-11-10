@@ -14,7 +14,7 @@
 | unknown_facts | 需要确认的事实；缺失不等于 false，只读不自动补写 |
 | package_types / declared_package_types / package_conflict | 展示分析依据与声明；仅按服务端 conflict 判定是否需要核对，声明内包体尚未全部绑定不算冲突 |
 | target_source | unpublished 优先，再 published，再 declaration；可编辑性另判 |
-| submission_eligibility | eligible / blocked / unknown，来自现有提交判据，可包含豁免 |
+| submission_eligibility | eligible / blocked / unknown，来自服务端提交判据，可包含豁免 |
 | confirmation_guarantee | preflight_only_no_atomic_cas：仅检查执行前的变更，无法防止检查后其他操作者同时修改 |
 
 逐项读取审核状态、是否已生效、是否已保存材料、办理渠道及提交/撤回阻塞项，向用户解释对应结果。驳回原因取自 `reason` / `field_reject_reasons`；提交后用 `submitted_fields` 核对审核范围，适龄也按此处理。材料已经生效与修改申请被驳回可以同时成立，是否允许继续操作应根据阻塞项和服务端校验判断，不能只允许 `uploaded` 状态。
@@ -37,10 +37,10 @@
 
 身份以服务端保存的 `is_level` 为准，H5 不等于关卡。普通离线 H5 仍需隐私、AI 声明和适龄；未知事实由服务端标识，不在手册里复制计算矩阵。关卡的普通资质不适用不代表可以升级/发布。
 
-升级独立查询 `entry_enabled`、`can_apply`、目标包匹配及各 blocker。H5 自身 ICP 不是升级前置，隐私审核中不自行增加门槛；Maker 不能继承 H5 豁免。选包、备案、签约转开发者后台；有限“不处理个人信息”声明依 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 的独立确认流程。升级必须单独确认，成功后区分已升级与原独立，重新读身份并分析普通游戏资质，不自动发布。
+升级独立查询 `entry_enabled`、`can_apply`、目标包匹配及各 blocker。H5 自身 ICP 不是升级前置，隐私审核中不自行增加门槛；Maker 不能继承 H5 豁免。选包、备案、签约转开发者后台；有限“不处理个人信息”声明依 [创意工坊升级](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md) 的独立确认流程。升级必须单独确认。成功后按 [升级后的资料与资质检查](taptap-suite/references/taptap-app-edit/references/app-edit-level-upgrade.md#升级后的资料与资质检查) 重新核对身份、资料及完整资质；已生效且仍适用的材料复用，审核中不重复提审。只处理实际缺项或需修改材料，升级成功不代表资料已提审或游戏已上线，不自动发布。
 
 ## 开发者后台交接
 
-明确目标、材料域、阻塞原因、当前版本及回来后查询命令。优先可信 handoff 链接；只能用确认过的当前环境 serverUrl 与支持的路由构造，不能硬编码生产域、把敏感值塞进 URL 或编造入口。无可靠链接时说明入口未确认，指引当前环境开发者后台对应页面。
+告诉用户要在哪个游戏、哪个资料版本中填写或核对哪项材料，为什么需要到开发者后台办理，以及完成后 CLI 将查询什么。优先使用服务端返回的可信页面链接；自行构造链接时，必须确认当前环境的开发者后台地址和页面路径，不能固定使用生产环境地址、把敏感值塞进 URL 或编造入口。无可靠链接时说明入口未确认，指引当前环境开发者后台对应页面。
 
-主体认证/证件/联系人、ICP 主体信息、常规小游戏隐私/ICP/Tap 小游戏防沉迷、不支持分端写的混合材料、升级选包/备案/签约、整单撤回、无本地上传能力的 PDF 保留为后台办理。回到 CLI 后重读资质/升级/版本状态；未完成、无权限、链接失效均保留待办，不把用户返回当成功。
+主体认证、证件、联系人、ICP 主体信息和复杂隐私正文由用户在开发者后台填写；CLI 不支持的材料保存、文件上传、升级选包/备案/签约或整单撤回，也由用户在对应页面办理。小游戏隐私、防沉迷和备案的具体分工见 [全类型资料交接与接续](taptap-suite/references/taptap-qualification/references/material-handoff-resume.md)。完成页面操作后，CLI 查询对应资质、升级或版本状态，确认结果后再继续；尚未完成、没有权限、链接失效或查询失败时，明确保留待办，不能仅凭用户返回就认定成功。
