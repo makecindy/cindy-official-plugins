@@ -228,12 +228,15 @@ async function callHostedTool(toolName, args, callId, options) {
     params: { name: toolName, arguments: args },
   });
 
+  // Resolve the client id **before** the fetch try: a missing CSPRNG is not a network failure, and
+  // wrapping it as MISAKANET_NETWORK hides the reason (and tells the user the endpoint is down).
+  const headers = buildHeaders(await ensureClientId());
   let response;
   try {
     response = await cindy.fetch({
       url: MCP_URL,
       method: 'POST',
-      headers: buildHeaders(await ensureClientId()),
+      headers,
       body,
       timeoutMs: FETCH_TIMEOUT_MS,
       callId,
@@ -647,7 +650,7 @@ async function handleTurnEnd(msg) {
   }
   if (turns >= CHECKPOINT_AT && (turns - CHECKPOINT_AT) % CHECKPOINT_EVERY === 0) {
     await notify(
-      '该沉淀了：这次会话里可泛化、有判据的教训，用 misakanet_submit_intake 提交（故障 missing_lesson／计划 proposal）；不够价值就别提交。',
+      '该沉淀了：这次会话里可泛化、有判据的教训，用 misakanet_submit_intake 提交（自己解决了、尚无记录的问题用 new_lesson_candidate；计划用 proposal）；不够价值就别提交。',
       'info',
     );
   }
