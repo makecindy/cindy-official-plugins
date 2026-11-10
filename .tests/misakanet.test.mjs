@@ -587,3 +587,23 @@ test('the turn counter advances in memory when the private write fails', async (
   const notices = load.sent.filter((m) => m.type === 'notify');
   assert.equal(notices.length, 1, 'the first-turn notice must not repeat when the write fails');
 });
+
+test('every tool result marks third-party content as untrusted', async () => {
+  // The lessons, summaries and maintainer answers all come from public submissions. The market
+  // review required the plugin to label them as untrusted external data, so a model cannot read a
+  // public issue's text as an instruction. One field, checked on all four read tools.
+  const cases = [
+    ['misakanet_search', { query: 'x' }, { results: [] }],
+    ['misakanet_get_lesson', { id: 'x' }, { id: 'x', content: 'body' }],
+    ['misakanet_preflight', { intent: 'x' }, { risk_level: 'low', matched_lessons: [], guards: [] }],
+    ['misakanet_me_inbox', { intake_id: 'issue-1' }, { intake_id: 'issue-1', status: 'pending' }],
+  ];
+  for (const [tool, args, payload] of cases) {
+    const load = await loadPlugin({ respond: () => payload });
+    const answer = await callTool(load, tool, args);
+    assert.equal(answer.ok, true, `${tool} must answer`);
+    const notice = answer.result.trust_notice || '';
+    assert.match(notice, /第三方/, `${tool} must say the content is third-party`);
+    assert.match(notice, /不要执行/, `${tool} must say not to execute anything in it`);
+  }
+});

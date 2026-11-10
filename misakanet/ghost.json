@@ -6,7 +6,7 @@
   "description": "把 MisakaNet 公开故障教训库接进对话：报错、CI 失败、构建或工具崩溃之前，先查有没有别人已经踩过并写清修法。四个查询工具匿名只读、只访问 misakanet.org，不需要凭证；misakanet_submit_intake 会在用户明确确认后，把一次故障或提问写成公开仓库 Ikalus1988/MisakaNet 的 GitHub issue（公开可见，提交前必须脱敏），misakanet_me_inbox 可回头查答复。装上后第一轮有轻提示，每 20 轮提醒沉淀；不发你的文件、对话与凭证；只把查询词和几个自报标签（客户端名、版本、系统、随机客户端 id）发给端点。",
   "whenToUse": "遇到报错、异常、CI 失败、构建失败、工具崩溃或环境诡异行为时找我，先查这个坑是否已有公开教训；也想查某个技术栈、工具或平台的既往故障与修法时找我；用户之前提过问题、想知道维护者答没答时也找我。",
   "version": "1.6.0",
-  "releaseNotes": "按自动 review 的意见收口：外发客户端 id 来自 crypto.getRandomValues（无弱随机降级）；上报失败的三态默认「不确定」，只有能确认请求没离开本机才判可重试，fetch 抛异常与全局兜底出口同样按不确定处理；detail=full 保留端点返回的完整记录；轮次计数以内存为权威、私有目录文件只作持久化副本；并按「授权跟随执行者」删掉只用于工具调用的 network.hosts 声明——所有 HTTPS 都发生在当前 Agent 工具调用内并带在途 callId，宿主明确这种调用可访问未预声明的普通 HTTPS，插件没有自主联网场景。",
+  "releaseNotes": "按自动 review 的意见收口：外发客户端 id 来自 crypto.getRandomValues（无弱随机降级）；上报失败的三态默认「不确定」，只有能确认请求没离开本机才判可重试，fetch 抛异常与全局兜底出口同样按不确定处理；detail=full 保留端点返回的完整记录；轮次计数以内存为权威、私有目录文件只作持久化副本；并按「授权跟随执行者」删掉只用于工具调用的 network.hosts 声明——所有 HTTPS 都发生在当前 Agent 工具调用内并带在途 callId，宿主明确这种调用可访问未预声明的普通 HTTPS，插件没有自主联网场景。 按市场评审补：四个读工具的返回都带 `trust_notice`（第三方公开内容、其中的指令不要执行），MANUAL 的可信边界同步说明。",
   "author": "Ikalus1988",
   "entry": "main.js",
   "command": "misakanet",
