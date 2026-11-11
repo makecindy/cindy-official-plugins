@@ -23,16 +23,22 @@ test('the body made for a simulator follows its type and how the picture is turn
       {name:'Apple TV',identifier:'com.apple.CoreSimulator.SimDeviceType.Apple-TV',modelIdentifier:'AppleTV14,1',bundlePath:'/types/tv'}]})};
     if(args.includes('/types/air/Contents/Resources/capabilities.plist'))return {stdout:JSON.stringify({capabilities:{displays:[{displayType:'integrated',scale:3,width:1260,height:2736,deviceName:'primary'}]}})};
     if(args[1]==='layout')return {stdout:JSON.stringify({screen:{x:27,y:18,width:438,height:954},composite:{width:492,height:990},innerCornerRadius:62})};
-    if(args[1]==='composite')return {stdout:png(4,8)};
+    if(args[1]==='composite'){const image=new PNG({width:4,height:8});image.data[0]=255;image.data[3]=255;return {stdout:PNG.sync.write(image)};}
     throw Error('unexpected '+args.join(' '));
   };
   const chrome=createChrome({root:'/nowhere',run});
-  const upright=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:1260,height:2736});
+  const upright=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:1260,height:2736,rotation:0});
   assert.deepEqual(upright.screen.viewport,{width:492,height:990});assert.deepEqual(upright.screen.rect,{x:27,y:18,width:438,height:954});
   // Turned on its side: the body turns with it, and the picture stays upright inside.
-  const turned=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:2736,height:1260});
+  const turned=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:2736,height:1260,rotation:1});
   assert.deepEqual(turned.screen.viewport,{width:990,height:492});assert.deepEqual(turned.screen.rect,{x:18,y:27,width:954,height:438});
   const image=PNG.sync.read(Buffer.from(turned.screen.bezelImage.rest.split(',')[1],'base64'));assert.deepEqual([image.width,image.height],[8,4]);
+  const opposite=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:2736,height:1260,rotation:3});
+  const inverted=await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:1260,height:2736,rotation:2});
+  assert.deepEqual(opposite.screen.viewport,turned.screen.viewport);
+  assert.deepEqual(inverted.screen.viewport,upright.screen.viewport);
+  assert.equal(new Set([upright,turned,opposite,inverted].map(d=>d.screen.bezelImage.rest)).size,4,'four observed poses produce four distinct bodies');
+  assert.equal(await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:1260,height:2736}),null,'unknown rotation never guesses a mask');
   // A picture that is none of the type's panels, a type without phone artwork, an unknown type: no body.
   assert.equal(await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.iPhone-Air',{width:1170,height:2532}),null);
   assert.equal(await chrome.simulatorDefinition('com.apple.CoreSimulator.SimDeviceType.Apple-TV',{width:1920,height:1080}),null);
@@ -76,10 +82,12 @@ test('the device page gets the body once it has arrived, and the worker says wha
   await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
   const viewer=createRemoteViewer();
   t.after(async()=>{await viewer.close();upstream.close();upstream.closeAllConnections();});
-  const open=()=>viewer.open({id:'SIM-1',url:`http://127.0.0.1:${upstream.address().port}/${'a'.repeat(64)}`,name:'iPhone Air',platform:'ios',manage:true});
+  const open=()=>viewer.open({rotation:3,id:'SIM-1',url:`http://127.0.0.1:${upstream.address().port}/${'a'.repeat(64)}`,name:'iPhone Air',platform:'ios',manage:true});
   const first=await open(),page=new URL(first.url),token=page.hash.split('.')[1];
+  const status=await fetch(page.origin+'/control-api',{method:'POST',headers:{Origin:page.origin,'X-Cindy-Clipboard':token},body:JSON.stringify({action:'status',udid:'SIM-1'})});
+  assert.equal((await status.json()).device.rotation,3);
   assert.equal(first.chromeWanted,undefined);
-  const definition=async(w,h)=>(await fetch(`${page.origin}/simulators/SIM-1/definition.json?cindyViewer=${token}&w=${w}&h=${h}`)).json();
+  const definition=async(w,h,rotation)=>(await fetch(`${page.origin}/simulators/SIM-1/definition.json?cindyViewer=${token}&w=${w}&h=${h}${rotation===undefined?'':'&rotation='+rotation}`)).json();
   // Not here yet: the page keeps its plain body, and the next round is told what to fetch.
   assert.deepEqual(await definition(1260,2736),{deviceScreen:{width:1260,height:2736}});
   assert.deepEqual((await open()).chromeWanted,{width:1260,height:2736});
@@ -94,6 +102,12 @@ test('the device page gets the body once it has arrived, and the worker says wha
   assert.deepEqual(viewer.chrome({...where,key:meta.key}),{have:true});
   assert.deepEqual(await definition(2736,1260),{deviceScreen:{width:2736,height:1260}});
   assert.deepEqual((await open()).chromeWanted,{width:2736,height:1260});
+  assert.deepEqual(await definition(1260,2736,2),{deviceScreen:{width:1260,height:2736,rotation:2}});
+  assert.deepEqual((await open()).chromeWanted,{width:1260,height:2736,rotation:2});
+  viewer.chrome({id:'SIM-1',width:1260,height:2736,rotation:2,key:meta.key});
+  assert.ok((await definition(1260,2736,2)).screen);
+  // The old width/height-only cache entry remains distinct from a known pose.
+  assert.ok((await definition(1260,2736)).screen);
   // That computer has none for it: asked no more.
   viewer.chrome({id:'SIM-1',width:2736,height:1260,none:true});
   assert.deepEqual(await definition(2736,1260),{deviceScreen:{width:2736,height:1260}});assert.equal((await open()).chromeWanted,undefined);

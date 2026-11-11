@@ -103,11 +103,17 @@
   // Typing goes to the device: keep the hidden field focused, as the local pages do.
   area.addEventListener('mousedown',e=>{if(device?.keyboard){e.preventDefault();keyboard.focus({preventScroll:true});}});
   const KEYS={Enter:'Enter',Tab:'Tab',Backspace:'Backspace',Escape:'Escape',Delete:'Delete',ArrowLeft:'ArrowLeft',ArrowRight:'ArrowRight',ArrowUp:'ArrowUp',ArrowDown:'ArrowDown'};
-  const key=code=>queue({kind:'key',code});
   const text=value=>{for(let i=0;i<value.length;i+=4000)queue({kind:'text',text:value.slice(i,i+4000)});};
   keyboard.addEventListener('keydown',e=>{
-    if(e.isComposing||!device?.keyboard||e.metaKey||e.ctrlKey)return;
-    if(Object.hasOwn(KEYS,e.key)){e.preventDefault();key(KEYS[e.key]);}
+    if(e.isComposing||!device?.keyboard)return;
+    // Let the browser deliver paste once through the existing paste listener.
+    if((e.metaKey||e.ctrlKey)&&e.code==='KeyV')return;
+    const code=KEYS[e.key]||((e.metaKey||e.ctrlKey||e.altKey)&&/^[A-Za-z0-9]{1,32}$/.test(e.code||'')?e.code:null);
+    if(!code||['ShiftLeft','ShiftRight','ControlLeft','ControlRight','AltLeft','AltRight','MetaLeft','MetaRight'].includes(code))return;
+    const modifiers=[];
+    if(e.shiftKey)modifiers.push('shift');if(e.ctrlKey)modifiers.push('control');
+    if(e.altKey)modifiers.push('option');if(e.metaKey)modifiers.push('command');
+    e.preventDefault();queue({kind:'key',code,...(modifiers.length?{modifiers}:{})});
   });
   const typed=()=>{if(keyboard.value&&device?.keyboard)text(keyboard.value);keyboard.value='';};
   keyboard.addEventListener('input',e=>{if(!e.isComposing)typed();});
@@ -140,8 +146,12 @@
   // the computer that runs it from the same artwork as for a device shown
   // there. It arrives a little after the picture; until then, and for models
   // that computer has no artwork for, the plain rounded body stays.
+  const shellPicture=()=>{
+    const rotation=parent.cindySim?.state?.status?.device?.rotation;
+    return picture&&Number.isInteger(rotation)&&rotation>=0&&rotation<=3?{...picture,rotation}:null;
+  };
   const shell=new window.DeviceShell(frame,area,fit,{
-    definitionURL:screen=>`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${screen.width}&h=${screen.height}`,
+    definitionURL:screen=>`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${screen.width}&h=${screen.height}&rotation=${screen.rotation}`,
     retryMs:3000,
   });
   function fit(){
@@ -158,9 +168,9 @@
       controller.state.viewport={width:viewport.width,height:viewport.height};
       void controller.measure?.();
     }
-    shell.update(picture);
+    const pose=shellPicture();if(pose)shell.update(pose);
   }
-  setInterval(()=>{if(!closed&&!document.hidden&&picture)shell.update(picture);},2000);
+  setInterval(()=>{if(!closed&&!document.hidden){const pose=shellPicture();if(pose)shell.update(pose);}},2000);
 
   // ---- picture ----
   const hex=n=>n.toString(16).padStart(2,'0');

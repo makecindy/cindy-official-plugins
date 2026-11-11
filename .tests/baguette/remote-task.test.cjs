@@ -8,7 +8,7 @@ const settle=(ms=10)=>new Promise(r=>setTimeout(r,ms));
 const plain=value=>JSON.parse(JSON.stringify(value));
 const HOST='http://127.0.0.1:7/'+'c'.repeat(64);
 const SIM={udid:'SIM-1',name:'iPhone Air',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-3',deviceType:'iPhone-Air',isAvailable:true,thisTask:true,tasks:1,activeTasks:1,thisTaskActive:true,
-  dataPath:'/Users/someone/Library/private',memoryMode:{mode:'saving',verified:true,disabledServices:56}};
+  dataPath:'/Users/someone/Library/private',rotation:1,memoryMode:{mode:'saving',verified:true,disabledServices:56}};
 const OFF={udid:'SIM-2',name:'iPad mini',state:'Shutdown',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-3',deviceType:'iPad-mini',productFamily:'iPad',isAvailable:true,tasks:0};
 const PHONE={udid:'PHONE-1',name:'My iPhone',state:'Booted',kind:'physical'};
 
@@ -63,6 +63,7 @@ test('the first look shows the running device at once, then the plugin there ans
   assert.deepEqual(plain(state.device.memoryMode),{mode:'saving',verified:true});
   assert.equal(state.viewer.udid,'SIM-1');
   const opened=viewer.calls.filter(c=>c.method==='remote_viewer').at(-1).params;
+  assert.equal(opened.rotation,1);
   assert.deepEqual({id:opened.id,url:opened.url,platform:opened.platform,computer:opened.computer,manage:opened.manage,task:opened._task,devices:opened.devices.map(d=>d.udid)},
     {id:'SIM-1',url:HOST,platform:'ios',computer:'Mac Studio',manage:true,task:'task-1',devices:['SIM-1','SIM-2']});
   // Reading it never starts that computer's own viewer, and nothing local is touched here.
@@ -109,7 +110,7 @@ test('choosing, starting, shutting down and creating run on the computer that ow
 });
 
 test('the device’s own body is fetched from the computer that runs it, in order and only once',async()=>{
-  const key='a'.repeat(32),wanted={width:1260,height:2736},pieces=['{"first":','"second"}'],fed=[];
+  const key='a'.repeat(32),wanted={width:1260,height:2736,rotation:0},pieces=['{"first":','"second"}'],fed=[];
   let have=false,none=false;
   const {provider,viewer}=computers({
     providerWorker:async r=>r.method==='remote_task_state'?{ok:true,device:SIM,devices:[SIM],settings:{enabled:true}}
@@ -123,15 +124,15 @@ test('the device’s own body is fetched from the computer that runs it, in orde
   await viewer.ask({call:'task_state',sessionId:'task-1'});assert.equal(fed.length,0);
   // Then the device page's wish is passed on: is it here already, else each piece in order.
   await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
-  const where={id:'SIM-1',width:1260,height:2736};
+  const where={id:'SIM-1',width:1260,height:2736,rotation:0};
   assert.deepEqual(fed,[{...where,key},{...where,key,index:0,total:2,data:pieces[0]},{...where,key,index:1,total:2,data:pieces[1]}]);
-  assert.deepEqual(plain(provider.calls.find(c=>c.method==='remote_chrome_meta').params),{udid:'SIM-1',width:1260,height:2736});
+  assert.deepEqual(plain(provider.calls.find(c=>c.method==='remote_chrome_meta').params),{udid:'SIM-1',width:1260,height:2736,rotation:0});
   assert.deepEqual(provider.calls.filter(c=>c.method==='remote_chrome_chunk').map(c=>plain(c.params)),[{key,index:0},{key,index:1}]);
   await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);assert.equal(fed.length,3);
   // A model that computer has no artwork for: the worker is told, and the page keeps its plain body.
-  have=false;none=true;wanted.width=2736;wanted.height=1260;
+  have=false;none=true;wanted.rotation=2;
   await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
-  assert.deepEqual(fed.at(-1),{id:'SIM-1',width:2736,height:1260,none:true});
+  assert.deepEqual(fed.at(-1),{id:'SIM-1',width:1260,height:2736,rotation:2,none:true});
 });
 
 test('a plugin there that cannot be asked still shows its running device, and says what needs updating',async()=>{
@@ -252,7 +253,7 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
           return {ok:false,errorCode:'HOST_UPDATE_REQUIRED'};
         }
         return available;}},
-    CindySimModel:{deviceRows:list=>list.map(d=>({...d,available:true})),createResourceSummary:()=>({prune(){},label(){}})}};
+    CindySimModel:{runtimeLabel:()=>'',deviceRows:list=>list.map(d=>({...d,available:true})),createResourceSummary:()=>({prune(){},label(){},update(){}})}};
   vm.createContext(context);vm.runInContext(fs.readFileSync('cindy-simulator/task.js','utf8'),context);await settle();
   const flatten=n=>[n,...(n.children||[]).filter(Boolean).flatMap(flatten)];
   const shown=()=>get('inner').children.flatMap(flatten);
@@ -263,7 +264,17 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
   assert.ok(shown().some(n=>n.props?.text==='Available phone'));assert.ok(button(creation));
   await button('Use').props.onclick();await settle();
   assert.equal(bindings()[0].params.udid,mine[0].udid);
-  // A late response from the old side cannot replace the local choice.
+  // An unresolved initial remote read must not postpone timer registration.
+  // Model an Agent changing the new side's binding after its viewer is already open.
+  if(failure==='pending'){
+    available.device=mine[0];available.viewer={url:'http://127.0.0.1:9/first'};
+    clock+=9000;assert.equal(typeof poll,'function');poll();await settle();
+    assert.equal(get('screen').src,available.viewer.url);
+    available.viewer={url:'http://127.0.0.1:9/agent-changed'};
+    clock+=9000;poll();await settle();assert.equal(get('screen').src,available.viewer.url);
+    available.device=null;available.viewer=null;clock+=9000;poll();await settle();
+  }
+  // A late response from the old side cannot replace the current choice.
   remoteReply?.({ok:true,devices:[{udid:'REMOTE',name:'Remote phone'}],device:null});await settle();
   assert.ok(shown().some(n=>n.props?.text==='Available phone'));
   await button(creation).props.onclick();await settle();

@@ -22,6 +22,11 @@ for(const remote of [false,true])test(`${remote?'remote':'local'} shell rejects 
   f.shell.update(landscape);f.respond(1,landscape);await tick();f.respond(0,portrait);await tick();
   assert.equal(f.mounted.length,1);assert.deepEqual(f.shell.viewport,landscape);
   f.shell.update(portrait);await tick();assert.deepEqual(f.shell.viewport,portrait);assert.equal(f.requests.length,2);
+  if(remote){
+    for(const rotation of [0,1,2,3]){const pose={...landscape,rotation};f.shell.update(pose);f.respond(f.requests.length-1,pose);await tick();}
+    assert.equal(f.requests.length,6,'equal dimensions with opposite rotations load separate bodies');
+    f.shell.update({...landscape,rotation:1});await tick();assert.equal(f.requests.length,6,'known pose reuses its existing body');
+  }
 });
 test('missing or mismatched bodies keep the plain frame and retry after the delay',async()=>{
   const f=setup({retryMs:3000}),size={width:400,height:800};

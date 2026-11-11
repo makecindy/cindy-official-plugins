@@ -15,7 +15,7 @@ const {createDeviceLifecycle,planReclamation}=require('./device-lifecycle.cjs');
 // recycling of on-demand workers.
 const HOLD_MS = 100000, HOLD_POLL_MS = 10000;
 function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async () => false, viewing = () => false, forgetViewer = () => {},
-  tasks = null, existingViewerUrl = () => null, pendingOperation = () => null, pendingJob = () => null, viewerWanted = () => true,
+  tasks = null, rotationOf = () => undefined, existingViewerUrl = () => null, pendingOperation = () => null, pendingJob = () => null, viewerWanted = () => true,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), holdMs = HOLD_MS, holdPollMs = HOLD_POLL_MS}) {
   const lifecycle=createDeviceLifecycle(settingsFile+'.devices.json',now);
   const activeReads=new Map();
@@ -180,7 +180,10 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       }
       if (url) viewer = {udid:device.udid, url:withTask(url, session)};
     }
-    return {ok:true, sessionId:session, device, devices, settings:{...settings}, viewer, viewerClosed, busy:waiting};
+    // Reuse the live stream's observed pose; no extra screen/orientation probe.
+    const rotation = !wantViewer && device ? rotationOf(device.udid) : undefined;
+    const selected = device && Number.isInteger(rotation) && rotation >= 0 && rotation <= 3 ? {...device, rotation} : device;
+    return {ok:true, sessionId:session, device:selected, devices, settings:{...settings}, viewer, viewerClosed, busy:waiting};
   }
   // Agent tools grouped by intent → the worker's own operations.
   const ROUTES = {

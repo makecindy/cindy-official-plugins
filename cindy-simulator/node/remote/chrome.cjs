@@ -8,7 +8,7 @@ const {createHash}=require('node:crypto');
 const CHUNK=40000,MAX_BYTES=4*1024*1024,KEEP=8;
 const KEY=/^[0-9a-f]{32}$/;
 const fail=(code)=>Object.assign(Error(code),{code,execution:'not_executed'});
-const pictureOf=p=>Number.isInteger(p?.width)&&Number.isInteger(p?.height)&&p.width>0&&p.height>0&&p.width<=16384&&p.height<=16384?{width:p.width,height:p.height}:null;
+const pictureOf=p=>(p?.rotation===undefined||(Number.isInteger(p.rotation)&&p.rotation>=0&&p.rotation<=3))&&Number.isInteger(p?.width)&&Number.isInteger(p?.height)&&p.width>0&&p.height>0&&p.width<=16384&&p.height<=16384?{width:p.width,height:p.height,...(p.rotation===undefined?{}:{rotation:p.rotation})}:null;
 const remember=(map,key,value)=>{map.delete(key);map.set(key,value);while(map.size>KEEP)map.delete(map.keys().next().value);};
 
 // On the computer that runs the device.

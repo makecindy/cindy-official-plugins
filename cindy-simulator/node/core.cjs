@@ -605,7 +605,7 @@ function startWorker() {
     pendingOperation:udid=>physical().pending(udid)||android().pending(udid)||appsImpl?.pending(udid),
     pendingJob:udid=>android().runningFor(udid)||appsImpl?.runningFor(udid),
     viewerWanted:()=>require('./viewer.cjs').hasSession(DEVICE_SET)||android().viewer.wanted(),
-    tasks,
+    tasks, rotationOf:udid=>live.rotation(udid),
     existingViewerUrl:async(udid,locale)=>physical().viewer.existing(udid,locale)||(await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale))});
   configureControls(runtime);
   android().configure(runtime);
@@ -648,14 +648,14 @@ function startWorker() {
         else{
           // Only a simulator of this computer; phones attached to it keep their artwork here.
           const device=(await dispatch('devices')).devices.find(d=>d.udid===p.udid&&d.kind!=='physical');
-          result=device?.deviceType?await remoteChrome.meta(device.deviceType,{width:p.width,height:p.height}):{none:true};
+          result=device?.deviceType?await remoteChrome.meta(device.deviceType,{width:p.width,height:p.height,rotation:p.rotation}):{none:true};
         }
         reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...result}});
       }catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
       return;
     }
     if(request.method==='remote_viewer'){
-      try{const p=request.params||{};reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await remote.open({id:p.id,url:p.url,name:p.name,platform:p.platform,devices:p.devices,computer:p.computer,manage:p.manage,locale:p._locale,task:p._task})}});}
+      try{const p=request.params||{};reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await remote.open({id:p.id,url:p.url,name:p.name,platform:p.platform,devices:p.devices,computer:p.computer,manage:p.manage,rotation:p.rotation,locale:p._locale,task:p._task})}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
       return;
     }

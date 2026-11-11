@@ -527,7 +527,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(method==='liveScreen.close'){const key=checkId(p.id,locale),s=sessions.get(key);if(s)end(s);return {closed:!!s};}
     throw fail('UNKNOWN_METHOD',locale);
   }
-  return {request,closeAll,sweep,viewing:()=>[...sessions.values()].some(s=>s.res&&!s.closed),
+  return {request,closeAll,sweep,rotation:udid=>[...sessions.values()].find(s=>s.udid===udid&&!s.closed&&s.size)?.rotation,viewing:()=>[...sessions.values()].some(s=>s.res&&!s.closed),
     stop(){clearInterval(timer);closeAll();}};
 }
 module.exports={createLiveScreen,validEvents,appleTouches,appleRelease,toPortrait,portraitEdge,avccSize,pngSize,jpegSize,androidKey,message,kindOf};

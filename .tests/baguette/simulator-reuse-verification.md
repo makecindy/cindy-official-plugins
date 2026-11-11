@@ -18,3 +18,29 @@ Source: `dash/simulator-remote-view`, based on c218ec0d; package 0.3.44.
 - Targeted remote-task and remote-viewer tests: 15 passed, zero failed (under one second). These are browser-page/protocol regressions with fake streams and RPCs, not two-computer or native-trackpad acceptance.
 - Forge validated and packed 0.3.45 without installation. Host merge/release and two-computer runtime evidence remain outstanding.
 - Full simulator + required repository suites: 1,734 passed, zero failed (54.91 seconds), using the same full regression command listed above.
+
+## Review convergence checkpoint — 2026-11-11
+
+Invariants and owners:
+- Task page owns `side`, `pending` and its one refresh timer. A superseded initial read cannot postpone observer registration or overwrite a newer side's state.
+- The remote page's keyboard listener owns normalization: special keys and editing chords keep modifiers, ordinary text stays on the IME/text path, and paste remains a browser event.
+- `live-screen.cjs` owns the observed device rotation. Existing remote task-state queries carry that value; chrome generation and every existing chrome cache key include it. Picture width/height alone are not an orientation.
+
+Event/state audit:
+
+| Event | Initial read pending | Other side selected | Current device streaming |
+| --- | --- | --- | --- |
+| Refresh/visibility | Observers already registered; current pending read is not duplicated | Read the new side independently of the old read | Read current binding; Agent changes remain visible |
+| Old read resolves/rejects | Accept only if still current | Ignore it | Ignore it |
+| Special key / editing chord | No input until device is live | Route only to displayed device | One complete key with modifiers |
+| IME / paste | No input until live | Route only to displayed device | Text once; paste shortcut is not also forwarded |
+| Rotation 0/1/2/3 | No model orientation guessed without observed rotation | Use that device's rotation | Existing state poll updates rotation; same-size turns use a different chrome cache entry |
+
+Tests must distinguish the previous commit: a pending initial read followed by local selection and an Agent binding change; modifier chords and browser paste; all four bezel rotations, including equal-width/height pairs, through chrome request/cache paths. No new polling loop or cache is introduced.
+
+0.3.46 results:
+- Registers task refresh/visibility observers before the first read. The pending-read regression now follows selection of a streaming local device with a later Agent binding change while the original remote request is still pending.
+- Preserves Shift/Control/Option/Command on special/editing key chords. Ordinary composition remains text; Cmd/Ctrl+V reaches the existing browser paste handler exactly once.
+- Threads the live stream's observed rotation through existing remote task-state reads, the controller status, definition requests, artwork generation and existing cache keys. No new probe or polling loop. Older providers without pose metadata retain a plain body instead of an inferred mask. Orientation follows the existing task/controller refresh cadence, not frame-by-frame synchronization.
+- Direction tests cover all four artwork rotations (distinguished with asymmetric pixels), opposite equal-size poses through the HTTP/cache path, browser shell selection and stale-cache reuse, plus runtime state propagation without opening a local viewer. The existing live-stream orientation test verifies the same rotation source.
+- Targeted suites: 41 passed, zero failed (2.13 seconds). Full simulator/repository suites: 1,736 passed, zero failed (54.88 seconds). Forge validated and packed 0.3.46. No installation or two-computer/native-trackpad acceptance in this round.

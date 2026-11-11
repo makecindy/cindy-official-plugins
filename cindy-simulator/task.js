@@ -316,10 +316,11 @@ onPush((m) => {
   // Memory and disk figures are read for this computer's own devices only.
   resourceView = M.createResourceSummary(lang,(device,refresh)=>rpc('resources',{udid:device.udid,refresh}));
   $('screen').title = lang === 'zh-CN' ? '设备模拟器' : 'Device Simulator';
-  render(); await refresh();
+  render();
   // Bindings can change even while the current device keeps streaming.
   // Asking another computer is slower and dearer: less often, except while it starts or stops a device.
   if (remoteDevice) setInterval(() => { if (!document.hidden && !busy && (remoteOperation() || Date.now() - refreshedAt >= (far() ? 6000 : 4000))) refresh(); }, 2000);
   else setInterval(() => { if (!document.hidden && !busy) refresh(); }, 4000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy) refresh(); });
+  void refresh();
 })();

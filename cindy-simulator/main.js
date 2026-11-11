@@ -179,6 +179,7 @@ async function remoteView(request) {
 // -- on the computer that runs the devices --
 // What a device list entry needs on the other computer, and nothing of this one's paths or records.
 const slimDevice = d => d && {udid:d.udid, name:d.name, state:d.state, runtime:d.runtime, deviceType:d.deviceType, productFamily:d.productFamily,
+  ...(Number.isInteger(d.rotation)&&d.rotation>=0&&d.rotation<=3 ? {rotation:d.rotation} : {}),
   ...(d.platform ? {platform:d.platform} : {}), isAvailable:d.isAvailable !== false, thisTask:d.thisTask === true, tasks:d.tasks || 0,
   activeTasks:d.activeTasks || 0, thisTaskActive:d.thisTaskActive === true,
   ...(d.memoryMode ? {memoryMode:{mode:d.memoryMode.mode, verified:d.memoryMode.verified === true}} : {})};
@@ -212,7 +213,7 @@ async function remoteServe(d) {
   }
   // The device's body (bezel and screen shape) for the other computer's page, in pieces that fit one request.
   if (d.call === 'chrome') {
-    const r = await worker('remote_chrome_meta', {udid:str(d.udid), width:d.width, height:d.height});
+    const r = await worker('remote_chrome_meta', {udid:str(d.udid), width:d.width, height:d.height, rotation:d.rotation});
     return r.ok ? {ok:true, result:r.none ? {none:true} : {key:r.key, size:r.size, chunks:r.chunks}} : failed(r);
   }
   if (d.call === 'chrome_chunk') {
@@ -284,7 +285,7 @@ async function remoteViewer(m, locale, state, extra) {
   const platform = device.platform === 'android' ? 'android' : /tvOS/.test(device.runtime || '') ? 'tvos' : /xrOS|visionOS/.test(device.runtime || '') ? 'visionos'
     : /iPad/.test(device.productFamily || device.deviceType || device.name || '') ? 'ipados' : 'ios';
   const viewer = await worker('remote_viewer', {id:device.udid, url:opened.url, name:device.name, platform:extra.platform || platform,
-    devices:state.devices, computer:extra.computer, manage:extra.manage, _locale:locale, _task:m.sessionId});
+    devices:state.devices, computer:extra.computer, manage:extra.manage, rotation:device.rotation, _locale:locale, _task:m.sessionId});
   // The device page wants the device's own body: fetched from that computer once, off this request.
   if (viewer.ok && viewer.chromeWanted && extra.manage) void remoteBody(m.deviceId, device.udid, viewer.chromeWanted);
   return viewer.ok && viewer.url ? {...state, viewer:{udid:device.udid, url:viewer.url}} : {...state, viewerError:viewer.errorCode || 'NODE_UNAVAILABLE'};
@@ -296,13 +297,14 @@ async function remoteViewer(m, locale, state, extra) {
 const remoteBodies = new Map();
 const BODY_RETRY_MS = 60000;
 async function remoteBody(deviceId, udid, picture) {
-  const id = `${deviceId}|${udid}|${picture.width}x${picture.height}`, known = remoteBodies.get(id);
+  const id = `${deviceId}|${udid}|${picture.width}x${picture.height}|${picture.rotation ?? "unknown"}`, known = remoteBodies.get(id);
   if (known && (known.running || Date.now() - known.at < BODY_RETRY_MS)) return;
   const entry = {running:true, at:Date.now()};
   remoteBodies.set(id, entry);
   try {
-    const where = {id:udid, width:picture.width, height:picture.height};
-    const meta = await remoteAsk(deviceId, {call:'chrome', udid, width:picture.width, height:picture.height});
+    const pose = Number.isInteger(picture.rotation) ? {rotation:picture.rotation} : {};
+    const where = {id:udid, width:picture.width, height:picture.height, ...pose};
+    const meta = await remoteAsk(deviceId, {call:'chrome', udid, width:picture.width, height:picture.height, ...pose});
     // That computer has no body for this model, or its plugin does not know the request: keep the plain one.
     if (meta.ok ? meta.result?.none === true : meta.errorCode === 'UNSUPPORTED') { await worker('remote_chrome', {...where, none:true}); return; }
     const {key, chunks} = meta.ok ? meta.result || {} : {};

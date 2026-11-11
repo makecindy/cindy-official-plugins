@@ -280,3 +280,17 @@ test('single-device shutdown keeps completion evidence when its status confirmat
     assert.deepEqual(calls,phase==='expired'?['shutdown']:['shutdown','devices']);
   }
 });
+
+test('remote task state carries observed live rotation without opening a local viewer',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sim-remote-pose-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  let rotation;let opened=0;
+  const runtime=createRuntime({settingsFile:path.join(dir,'settings.json'),rotationOf:id=>id===udid?rotation:undefined,
+    tasks:{counts:async()=>({}),get:async()=>({udid})},existingViewerUrl:()=>{opened++;return null;},
+    dispatch:async()=>({devices:[{udid,state:'Booted',runtime:'iOS 27.3'}]})});
+  for(const pose of [undefined,0,1,2,3,4]){
+    rotation=pose;
+    const state=await runtime.request('remote_task_state',{_task:'task-1'});
+    assert.equal(state.device.rotation,pose===undefined||pose===4?undefined:pose);
+  }
+  assert.equal(opened,0);
+});

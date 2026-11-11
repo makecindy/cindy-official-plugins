@@ -84,10 +84,10 @@ function createChrome({root,run}){
     return {model:type.name,screen:definitions.get(key)};
   },
   // A simulator shown on another of the user's computers gets the same body.
-  // Its device type and the upright picture's pixel size name the panel and
-  // whether the device is turned; no screen probe and no running viewer needed.
+  // Its type/pixel size name the panel; the live stream owns the actual pose.
+  // Width/height alone cannot distinguish opposite landscape or portrait poses.
   async simulatorDefinition(deviceType,picture){
-    if(!run||typeof deviceType!=='string'||!(picture?.width>0&&picture?.height>0))return null;
+    if(!run||typeof deviceType!=='string'||!(picture?.width>0&&picture?.height>0)||!Number.isInteger(picture.rotation)||picture.rotation<0||picture.rotation>3)return null;
     const entry=(await types()).devicetypes.find(d=>d.identifier===deviceType);
     const type=entry?.modelIdentifier?await model(entry.modelIdentifier):null;if(!type)return null;
     const near=(a,b)=>Math.abs(a-b)<=2; // the picture is trimmed to even sizes on its way
@@ -95,7 +95,7 @@ function createChrome({root,run}){
       near(d.width,picture.width)&&near(d.height,picture.height)||near(d.width,picture.height)&&near(d.height,picture.width));
     if(!panel)return null;
     const turned=(picture.width>picture.height)!==(panel.width>panel.height),w=panel.width/panel.scale,h=panel.height/panel.scale;
-    return this.definition({model:entry.modelIdentifier},{width:turned?h:w,height:turned?w:h,rotation:turned?'rot90':'rot0'});
+    return this.definition({model:entry.modelIdentifier},{width:turned?h:w,height:turned?w:h,rotation:'rot'+picture.rotation*90});
   },clear(){catalog=null;models.clear();artwork.clear();definitions.clear();}};
 }
 module.exports={createChrome,selectPanel,rotationFor,turnRect,turnPNG};

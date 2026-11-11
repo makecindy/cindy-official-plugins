@@ -28,7 +28,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   const views=new Map();
   // Device bodies fetched from the computers that run the devices (see chrome.cjs).
   const bodies=createChromeStore();
-  const sized=p=>`${p.width}x${p.height}`;
+  const sized=p=>`${p.width}x${p.height}|${p.rotation ?? "unknown"}`;
   const url=(id,locale,task)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}#cindyClipboard=${new URL(base).port}.${token}`;
   const assets={'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],
     '/device-shell.js':['../physical/shell.js','text/javascript'],
@@ -43,7 +43,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
       ...(view.platform==='android'?{platform:'android'}:{}),
       runtime:view.platform==='tvos'?'tvOS':view.platform==='visionos'?'visionOS':'',
       productFamily:view.platform==='ipados'?'iPad':view.platform==='tvos'?'Apple TV':view.platform==='visionos'?'Apple Vision':'iPhone',
-      ...listed,kind:'remote'};
+      ...listed,...(view.rotation===undefined?{}:{rotation:view.rotation}),kind:'remote'};
   }
   // That computer's device list as its plugin reports it: only what the device menu shows.
   function listedDevices(value){
@@ -150,7 +150,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
             // The device's own body for the picture as it is turned now. Until it
             // has arrived from that computer the page shows its plain body and
             // asks again; the task page's next round fetches what is wanted.
-            const picture=pictureOf({width:Number(u.searchParams.get('w')),height:Number(u.searchParams.get('h'))});
+            const picture=pictureOf({width:Number(u.searchParams.get('w')),height:Number(u.searchParams.get('h')),...(u.searchParams.has('rotation')?{rotation:Number(u.searchParams.get('rotation'))}:{})});
             if(!picture)return reply(400,{message:'Invalid picture size'});
             const key=view.chrome.get(sized(picture)),screen=key&&key!=='none'?bodies.get(key):null;
             if(!key||(key!=='none'&&!screen))view.wanted=picture;
@@ -180,20 +180,20 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   return {
     viewing:()=>Date.now()-lastSeen<15000,
     // Opens (or re-points) the page for one device; the same device keeps its page while Cindy renews the address.
-    async open({id,url:upstream,name,platform,devices,computer,manage,locale,task}){
+    async open({id,url:upstream,name,platform,devices,computer,manage,rotation,locale,task}){
       if(typeof id!=='string'||!SCREEN_ID.test(id)||typeof upstream!=='string'||!HOST_URL.test(upstream)||!PLATFORMS.includes(platform))
         throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       if(starting)await starting;else if(!server){starting=start().finally(()=>{starting=null;});await starting;}
       const previous=views.get(id);
       views.set(id,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id,devices:listedDevices(devices),
-        computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true,chrome:previous?.chrome||new Map(),wanted:previous?.wanted||null});lastSeen=Date.now();
+        computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true,rotation:Number.isInteger(rotation)&&rotation>=0&&rotation<=3?rotation:undefined,chrome:previous?.chrome||new Map(),wanted:previous?.wanted||null});lastSeen=Date.now();
       // The device page asked for a body that is not here yet: the caller fetches it.
       return {url:url(id,locale,task),ready:true,...(views.get(id).wanted?{chromeWanted:views.get(id).wanted}:{})};
     },
     // The body for one device as it is turned: `none` when that computer has
     // none, a key alone to ask whether it is already here, or its next piece.
-    chrome({id,width,height,none,key,index,total,data}){
-      const view=views.get(id),picture=pictureOf({width,height});
+    chrome({id,width,height,rotation,none,key,index,total,data}){
+      const view=views.get(id),picture=pictureOf({width,height,rotation});
       if(!view||!picture)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       const settle=value=>{view.chrome.set(sized(picture),value);if(view.wanted&&sized(view.wanted)===sized(picture))view.wanted=null;return {have:true};};
       if(none===true)return settle('none');
