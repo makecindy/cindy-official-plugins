@@ -99,6 +99,18 @@ network; only that test device was started or turned.
   which joins the two logic pages (viewer and provider) through a stand-in for
   Cindy's request channel, and by the controller case in `control-page.test.cjs`.
 
+## Device body (same day)
+
+- With the body made by this plugin's provider-side code from this Mac's Xcode
+  artwork (iPhone Air: 10 pieces upright, 3 turned) and handed to the viewer's
+  worker piece by piece, the sidebar shows the iPhone Air body with its side
+  buttons and Dynamic Island mask; a tap still lands on the right App; after
+  rotate the body turns and the page lays out 990×492.
+- The pieces were handed over by a script standing in for the other computer,
+  because the provider's installed plugin predates this. The fetch itself
+  (asked once, in order, `none` when there is no artwork) is covered by
+  `.tests/baguette/remote-task.test.cjs` and `remote-chrome.test.cjs`.
+
 ## Not checked
 
 - Real two-finger trackpad contacts, Option pinch and pan, typing and paste were not

@@ -210,6 +210,15 @@ async function remoteServe(d) {
     const r = await worker('create_device', {name:str(d.name, 64), deviceType:str(d.deviceType), runtime:str(d.runtime)});
     return r.ok && r.udid ? {ok:true, result:{ok:true, udid:r.udid, name:r.name}} : failed(r);
   }
+  // The device's body (bezel and screen shape) for the other computer's page, in pieces that fit one request.
+  if (d.call === 'chrome') {
+    const r = await worker('remote_chrome_meta', {udid:str(d.udid), width:d.width, height:d.height});
+    return r.ok ? {ok:true, result:r.none ? {none:true} : {key:r.key, size:r.size, chunks:r.chunks}} : failed(r);
+  }
+  if (d.call === 'chrome_chunk') {
+    const r = await worker('remote_chrome_chunk', {key:str(d.key, 32), index:d.index});
+    return r.ok ? {ok:true, result:{data:r.data}} : failed(r);
+  }
   if (!SESSION.test(d.sessionId)) return {ok:false, errorCode:'INVALID_ARGUMENT', execution:'not_executed'};
   const running = remoteOps.get(d.sessionId)?.state === 'running';
   if (d.call === 'task_bind') {
@@ -276,7 +285,35 @@ async function remoteViewer(m, locale, state, extra) {
     : /iPad/.test(device.productFamily || device.deviceType || device.name || '') ? 'ipados' : 'ios';
   const viewer = await worker('remote_viewer', {id:device.udid, url:opened.url, name:device.name, platform:extra.platform || platform,
     devices:state.devices, computer:extra.computer, manage:extra.manage, _locale:locale, _task:m.sessionId});
+  // The device page wants the device's own body: fetched from that computer once, off this request.
+  if (viewer.ok && viewer.chromeWanted && extra.manage) void remoteBody(m.deviceId, device.udid, viewer.chromeWanted);
   return viewer.ok && viewer.url ? {...state, viewer:{udid:device.udid, url:viewer.url}} : {...state, viewerError:viewer.errorCode || 'NODE_UNAVAILABLE'};
+}
+// The same body as on the computer that runs the device, so the device looks
+// the same here. That computer makes it from its own artwork; it comes in
+// pieces, is checked by this computer's worker and kept in memory only. One
+// fetch at a time per device and turn; a failed one is tried again later.
+const remoteBodies = new Map();
+const BODY_RETRY_MS = 60000;
+async function remoteBody(deviceId, udid, picture) {
+  const id = `${deviceId}|${udid}|${picture.width}x${picture.height}`, known = remoteBodies.get(id);
+  if (known && (known.running || Date.now() - known.at < BODY_RETRY_MS)) return;
+  const entry = {running:true, at:Date.now()};
+  remoteBodies.set(id, entry);
+  try {
+    const where = {id:udid, width:picture.width, height:picture.height};
+    const meta = await remoteAsk(deviceId, {call:'chrome', udid, width:picture.width, height:picture.height});
+    // That computer has no body for this model, or its plugin does not know the request: keep the plain one.
+    if (meta.ok ? meta.result?.none === true : meta.errorCode === 'UNSUPPORTED') { await worker('remote_chrome', {...where, none:true}); return; }
+    const {key, chunks} = meta.ok ? meta.result || {} : {};
+    if (!/^[0-9a-f]{32}$/.test(key || '') || !Number.isInteger(chunks) || chunks < 1 || chunks > 128) return;
+    if ((await worker('remote_chrome', {...where, key})).have === true) return;
+    for (let index = 0; index < chunks; index++) {
+      const piece = await remoteAsk(deviceId, {call:'chrome_chunk', key, index});
+      if (!piece.ok || typeof piece.result?.data !== 'string') return;
+      if (!(await worker('remote_chrome', {...where, key, index, total:chunks, data:piece.result.data})).ok) return;
+    }
+  } catch { /* tried again later */ } finally { entry.running = false; entry.at = Date.now(); }
 }
 // View only: what Cindy itself lists for that computer, for a plugin there that cannot be asked.
 async function remoteViewOnly(m, locale, computer) {

@@ -12,6 +12,7 @@
 const http=require('node:http'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
 const {randomBytes}=require('node:crypto');
 const {execFile}=require('node:child_process');
+const {createChromeStore,pictureOf}=require('./chrome.cjs');
 
 const GESTURES='../../vendor/baguette/Baguette_Baguette.bundle/Web/baguette/gestures/';
 const GESTURE_FILES=['attachable-event-source','edge-bands','screen-quad','pinch-overlay','mouse-gesture-source','option-hover-preview','touch-gesture-source','wheel-gesture-source','safari-gesture-event-source','pointer-interpreter'];
@@ -23,11 +24,15 @@ const HOST_URL=/^http:\/\/127\.0\.0\.1:\d{2,5}\/[0-9a-f]{64}$/;
 
 function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=()=>new Date()}={}){
   let server,base,token,starting,lastSeen=0,shotTo='desktop';
-  // screen id → {id, upstream, name, platform, devices, computer, manage}
+  // screen id → {id, upstream, name, platform, devices, computer, manage, chrome, wanted}
   const views=new Map();
+  // Device bodies fetched from the computers that run the devices (see chrome.cjs).
+  const bodies=createChromeStore();
+  const sized=p=>`${p.width}x${p.height}`;
   const url=(id,locale,task)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}#cindyClipboard=${new URL(base).port}.${token}`;
   const assets={'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],
     '/remote.js':['screen.js','text/javascript'],'/remote.css':['../physical/screen.css','text/css'],
+    '/bezel.js':['../../vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js','text/javascript'],
     ...Object.fromEntries(GESTURE_FILES.map(name=>[`/gestures/${name}.js`,[GESTURES+name+'.js','text/javascript']]))};
   // The control model reads a platform from these fields. Every device here is
   // one of that computer's: `kind:'remote'` keeps this computer's own operations off it.
@@ -133,12 +138,23 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
           res.setHeader('Content-Security-Policy',CSP);
           res.writeHead(200,{'Content-Type':type});return res.end(await fs.readFile(path.join(__dirname,file)));
         }
-        const match=/^\/simulators\/([^/]{1,400})$/.exec(u.pathname);
+        const match=/^\/simulators\/([^/]{1,400})(\/definition\.json)?$/.exec(u.pathname);
         if(req.method==='GET'&&match){
           let capability=u.searchParams.get('cindyViewer')===token;
           try{const r=new URL(req.headers.referer);capability ||= r.origin===base&&r.searchParams.get('cindyViewer')===token;}catch{}
           if(!capability)return reply(403,{message:'Viewer expired. Reopen the device.'});
-          if(!views.has(decodeURIComponent(match[1])))return reply(404,{message:'Device not opened'});
+          const view=views.get(decodeURIComponent(match[1]));
+          if(!view)return reply(404,{message:'Device not opened'});
+          if(match[2]){
+            // The device's own body for the picture as it is turned now. Until it
+            // has arrived from that computer the page shows its plain body and
+            // asks again; the task page's next round fetches what is wanted.
+            const picture=pictureOf({width:Number(u.searchParams.get('w')),height:Number(u.searchParams.get('h'))});
+            if(!picture)return reply(400,{message:'Invalid picture size'});
+            const key=view.chrome.get(sized(picture)),screen=key&&key!=='none'?bodies.get(key):null;
+            if(!key||(key!=='none'&&!screen))view.wanted=picture;
+            return reply(200,{deviceScreen:picture,...(screen?{screen}:{})});
+          }
           // The device page sits inside the controller page, which sits inside the task page.
           res.setHeader('Content-Security-Policy',CSP);
           res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(await fs.readFile(path.join(__dirname,'screen.html')));
@@ -167,9 +183,21 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
       if(typeof id!=='string'||!SCREEN_ID.test(id)||typeof upstream!=='string'||!HOST_URL.test(upstream)||!PLATFORMS.includes(platform))
         throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       if(starting)await starting;else if(!server){starting=start().finally(()=>{starting=null;});await starting;}
+      const previous=views.get(id);
       views.set(id,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id,devices:listedDevices(devices),
-        computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true});lastSeen=Date.now();
-      return {url:url(id,locale,task),ready:true};
+        computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true,chrome:previous?.chrome||new Map(),wanted:previous?.wanted||null});lastSeen=Date.now();
+      // The device page asked for a body that is not here yet: the caller fetches it.
+      return {url:url(id,locale,task),ready:true,...(views.get(id).wanted?{chromeWanted:views.get(id).wanted}:{})};
+    },
+    // The body for one device as it is turned: `none` when that computer has
+    // none, a key alone to ask whether it is already here, or its next piece.
+    chrome({id,width,height,none,key,index,total,data}){
+      const view=views.get(id),picture=pictureOf({width,height});
+      if(!view||!picture)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
+      const settle=value=>{view.chrome.set(sized(picture),value);if(view.wanted&&sized(view.wanted)===sized(picture))view.wanted=null;return {have:true};};
+      if(none===true)return settle('none');
+      if(data===undefined)return bodies.has(key)?settle(key):{have:false};
+      return bodies.put(key,index,total,data).complete?settle(key):{have:false};
     },
     async close(){await starting?.catch(()=>{});if(server){server.close();server.closeAllConnections();}server=null;base=null;token=null;views.clear();lastSeen=0;}};
 }

@@ -13,7 +13,7 @@ const OFF={udid:'SIM-2',name:'iPad mini',state:'Shutdown',runtime:'com.apple.Cor
 const PHONE={udid:'PHONE-1',name:'My iPhone',state:'Booted',kind:'physical'};
 
 // Two logic pages of the same plugin on two computers, joined by Cindy's request channel.
-function computers({providerHandles=true,providerWorker}={}){
+function computers({providerHandles=true,providerWorker,viewerWorker}={}){
   const pages={},delivered=[];
   function page(self,peer,{worker,view}){
     const buses=new Map(),waiting=new Map();
@@ -44,7 +44,7 @@ function computers({providerHandles=true,providerWorker}={}){
     :r.method==='create_device'?{ok:true,udid:'SIM-NEW',name:r.params.name,dataPath:'/private'}
     :{ok:true,execution:'executed'})});
   provider.receives=providerHandles;
-  const viewer=page('laptop','studio',{worker:async r=>({ok:true,ready:true,url:'http://127.0.0.1:9/control?udid='+r.params.id+'#cindyClipboard=9.t'}),
+  const viewer=page('laptop','studio',{worker:viewerWorker||(async r=>({ok:true,ready:true,url:'http://127.0.0.1:9/control?udid='+r.params.id+'#cindyClipboard=9.t'})),
     view:async r=>r.op==='screens'?{ok:true,screens:[{id:'SIM-1',name:'iPhone Air',platform:'ios',taskIds:['task-1']},{id:'SIM-9',name:'Other task',platform:'ios',taskIds:['task-2']}]}:{ok:true,view:'lv-1',url:HOST}});
   return {provider,viewer,delivered,state};
 }
@@ -106,6 +106,32 @@ test('choosing, starting, shutting down and creating run on the computer that ow
   // Only the listed requests exist; this computer's worker is never asked to manage anything.
   assert.equal((await viewer.ask({call:'erase',sessionId:'task-1',udid:'SIM-2'})).errorCode,'INVALID_ARGUMENT');
   assert.deepEqual([...new Set(viewer.calls.map(c=>c.method).filter(m=>m!=='device_hold'))],['remote_viewer']);
+});
+
+test('the device’s own body is fetched from the computer that runs it, in order and only once',async()=>{
+  const key='a'.repeat(32),wanted={width:1260,height:2736},pieces=['{"first":','"second"}'],fed=[];
+  let have=false,none=false;
+  const {provider,viewer}=computers({
+    providerWorker:async r=>r.method==='remote_task_state'?{ok:true,device:SIM,devices:[SIM],settings:{enabled:true}}
+      :r.method==='remote_chrome_meta'?(none?{ok:true,none:true}:{ok:true,key,size:18,chunks:2})
+      :r.method==='remote_chrome_chunk'?{ok:true,data:pieces[r.params.index]}:{ok:true},
+    viewerWorker:async r=>{
+      if(r.method!=='remote_chrome')return {ok:true,ready:true,url:'http://127.0.0.1:9/control?udid='+r.params.id,...(have?{}:{chromeWanted:wanted})};
+      fed.push(plain(r.params));if(r.params.index===1||r.params.none)have=true;
+      return {ok:true,have:r.params.data===undefined?have:r.params.index===1};}});
+  // View only (that plugin has not answered yet): nothing can be asked of it, so nothing is fetched.
+  await viewer.ask({call:'task_state',sessionId:'task-1'});assert.equal(fed.length,0);
+  // Then the device page's wish is passed on: is it here already, else each piece in order.
+  await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
+  const where={id:'SIM-1',width:1260,height:2736};
+  assert.deepEqual(fed,[{...where,key},{...where,key,index:0,total:2,data:pieces[0]},{...where,key,index:1,total:2,data:pieces[1]}]);
+  assert.deepEqual(plain(provider.calls.find(c=>c.method==='remote_chrome_meta').params),{udid:'SIM-1',width:1260,height:2736});
+  assert.deepEqual(provider.calls.filter(c=>c.method==='remote_chrome_chunk').map(c=>plain(c.params)),[{key,index:0},{key,index:1}]);
+  await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);assert.equal(fed.length,3);
+  // A model that computer has no artwork for: the worker is told, and the page keeps its plain body.
+  have=false;none=true;wanted.width=2736;wanted.height=1260;
+  await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
+  assert.deepEqual(fed.at(-1),{id:'SIM-1',width:2736,height:1260,none:true});
 });
 
 test('a plugin there that cannot be asked still shows its running device, and says what needs updating',async()=>{

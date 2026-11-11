@@ -590,6 +590,10 @@ function startWorker() {
   // They are not this computer's devices: the run switch, idle shutdown and
   // device records never apply to them.
   const remote=require('./remote/viewer.cjs').createRemoteViewer();
+  // The other direction: this computer's simulators shown on another computer get their body from here.
+  const remoteChrome=appleHost?require('./remote/chrome.cjs').createChromeSource({definition:(()=>{
+    const chrome=require('./physical/chrome.cjs').createChrome({root:path.join(ROOT,'remote'),run});
+    return (deviceType,picture)=>chrome.simulatorDefinition(deviceType,picture);})()}):null;
   // In use = a viewer window or phone screen is open, or another process names a running device.
   const inUse=async()=>{
     if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing()||live.viewing())return true;
@@ -632,6 +636,22 @@ function startWorker() {
     if(typeof request.method==='string'&&request.method.startsWith('liveScreen.')){
       try{reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await live.request(request.method,request.params)}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(Number.isInteger(e.completed)?{completed:e.completed}:{})}});}
+      return;
+    }
+    if(['remote_chrome','remote_chrome_meta','remote_chrome_chunk'].includes(request.method)){
+      const p=request.params||{};
+      try{
+        let result;
+        if(request.method==='remote_chrome')result=remote.chrome(p);
+        else if(!remoteChrome)result={none:true};
+        else if(request.method==='remote_chrome_chunk')result=remoteChrome.chunk(p.key,p.index);
+        else{
+          // Only a simulator of this computer; phones attached to it keep their artwork here.
+          const device=(await dispatch('devices')).devices.find(d=>d.udid===p.udid&&d.kind!=='physical');
+          result=device?.deviceType?await remoteChrome.meta(device.deviceType,{width:p.width,height:p.height}):{none:true};
+        }
+        reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...result}});
+      }catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
       return;
     }
     if(request.method==='remote_viewer'){

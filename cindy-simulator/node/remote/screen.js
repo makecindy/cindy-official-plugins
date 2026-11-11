@@ -136,19 +136,48 @@
     const short=Math.min(picture.width,picture.height);
     return device.platform==='ios'?(short>=1000?3:2):device.platform==='ipados'?2:device.platform==='android'?Math.max(1,short/411):1;
   }
+  // The device's own body (bezel, screen position and corner shape), made by
+  // the computer that runs it from the same artwork as for a device shown
+  // there. It arrives a little after the picture; until then, and for models
+  // that computer has no artwork for, the plain rounded body stays.
+  const shell={key:null,viewport:null,pending:false,retryAt:0,generation:0,
+    update(){
+      if(!picture||!window.Baguette?._Bezel)return;
+      const key=picture.width+'x'+picture.height;
+      if(key===this.key&&(this.viewport||this.pending||Date.now()<this.retryAt))return;
+      const generation=++this.generation;this.pending=true;
+      // The device was turned: the old body no longer fits the picture.
+      if(key!==this.key){this.key=key;this.viewport=null;frame.replaceChildren(area);frame.removeAttribute('data-bezel');fit();}
+      void (async()=>{
+        const response=await fetch(`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${picture.width}&h=${picture.height}`,{signal:AbortSignal.timeout(15000)});
+        if(!response.ok)return;
+        const def=(await response.json()).screen;
+        if(!def?.bezelImage?.rest||generation!==this.generation)return;
+        await Promise.all([def.bezelImage.rest,def.maskImage].filter(Boolean).map(async src=>{const image=new Image();image.src=src;await image.decode();}));
+        if(generation!==this.generation)return;
+        // Keep the live canvas and its listeners; only the body around it changes.
+        const bezel=new window.Baguette._Bezel(def,{bare:false});bezel.mount(frame);bezel.canvas.replaceWith(area);
+        bezel.wrapper.className='physical-bezel';bezel.frameImg.className='physical-bezel-image';
+        this.viewport=def.viewport;frame.setAttribute('data-bezel','');fit();
+      })().catch(()=>{}).finally(()=>{if(generation===this.generation){this.pending=false;this.retryAt=Date.now()+3000;}});
+    }};
   function fit(){
     if(!picture)return;
     const s=scale();points={width:picture.width/s,height:picture.height/s};
-    const ratio=Math.min((innerWidth-24)/points.width,(innerHeight-24)/points.height);
-    const width=Math.max(1,points.width*ratio),height=Math.max(1,points.height*ratio);
+    // With its body the whole device is fitted, as for a device shown locally; touches still map to the screen only.
+    const viewport=shell.viewport||points;
+    const ratio=Math.min((innerWidth-24)/viewport.width,(innerHeight-24)/viewport.height);
+    const width=Math.max(1,viewport.width*ratio),height=Math.max(1,viewport.height*ratio);
     frame.style.width=width+'px';frame.style.height=height+'px';
-    frame.style.borderRadius=Math.round((device?.cornerRadius||0)*Math.min(width,height))+'px';
+    frame.style.borderRadius=shell.viewport?'':Math.round((device?.cornerRadius||0)*Math.min(width,height))+'px';
     const controller=parent.cindySim;
-    if(controller?.state&&(controller.state.viewport?.width!==points.width||controller.state.viewport?.height!==points.height)){
-      controller.state.viewport={width:points.width,height:points.height};
+    if(controller?.state&&(controller.state.viewport?.width!==viewport.width||controller.state.viewport?.height!==viewport.height)){
+      controller.state.viewport={width:viewport.width,height:viewport.height};
       void controller.measure?.();
     }
+    shell.update();
   }
+  setInterval(()=>{if(!closed&&!document.hidden)shell.update();},2000);
 
   // ---- picture ----
   const hex=n=>n.toString(16).padStart(2,'0');

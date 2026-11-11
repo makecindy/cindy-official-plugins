@@ -35,9 +35,10 @@ function createChrome({root,run}){
   let catalog;const models=new Map(),artwork=new Map(),definitions=new Map();
   const json=async(file,args)=>JSON.parse((await run(file,args,{timeout:10000,maxBuffer:8*1024*1024})).stdout);
   const plist=file=>json('/usr/bin/plutil',['-convert','json','-o','-',file]);
+  const types=()=>catalog||(catalog=json('/usr/bin/xcrun',['simctl','list','devicetypes','-j']).catch(e=>{catalog=null;throw e;}));
   async function model(identifier){
     if(!identifier)return null;
-    if(!catalog)catalog=json('/usr/bin/xcrun',['simctl','list','devicetypes','-j']).catch(e=>{catalog=null;throw e;});
+    types();
     if(!models.has(identifier))models.set(identifier,(async()=>{
       const type=(await catalog).devicetypes.find(d=>d.modelIdentifier===identifier);
       if(!type||!/^i(?:Phone|Pad)[^/]*$/.test(type.name))return null;
@@ -81,6 +82,20 @@ function createChrome({root,run}){
         maskImage:art.mask?data(art.mask):null,crease:art.crease,bezelImage:{rest:image,bare:image}});
     }
     return {model:type.name,screen:definitions.get(key)};
+  },
+  // A simulator shown on another of the user's computers gets the same body.
+  // Its device type and the upright picture's pixel size name the panel and
+  // whether the device is turned; no screen probe and no running viewer needed.
+  async simulatorDefinition(deviceType,picture){
+    if(!run||typeof deviceType!=='string'||!(picture?.width>0&&picture?.height>0))return null;
+    const entry=(await types()).devicetypes.find(d=>d.identifier===deviceType);
+    const type=entry?.modelIdentifier?await model(entry.modelIdentifier):null;if(!type)return null;
+    const near=(a,b)=>Math.abs(a-b)<=2; // the picture is trimmed to even sizes on its way
+    const panel=type.displays.filter(d=>d.displayType==='integrated'&&d.scale>0).find(d=>
+      near(d.width,picture.width)&&near(d.height,picture.height)||near(d.width,picture.height)&&near(d.height,picture.width));
+    if(!panel)return null;
+    const turned=(picture.width>picture.height)!==(panel.width>panel.height),w=panel.width/panel.scale,h=panel.height/panel.scale;
+    return this.definition({model:entry.modelIdentifier},{width:turned?h:w,height:turned?w:h,rotation:turned?'rot90':'rot0'});
   },clear(){catalog=null;models.clear();artwork.clear();definitions.clear();}};
 }
 module.exports={createChrome,selectPanel,rotationFor,turnRect,turnPNG};
