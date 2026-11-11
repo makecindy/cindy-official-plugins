@@ -45,7 +45,8 @@ test('the remote device opens in the plugin controller with its own device page 
   // The same gesture modules as the local simulator page, and the Mac trackpad's real contacts.
   for(const name of ['pointer-interpreter','mouse-gesture-source','wheel-gesture-source','touch-gesture-source','option-hover-preview','pinch-overlay'])assert.ok(html.includes(`/gestures/${name}.js`),name);
   assert.match(html,/cindy-native-trackpad/);
-  assert.match(html,/src="\/device-shell.js"/);
+  assert.match(html,/src="\/device-shell.js"/);assert.match(html,/src="\/keys.js"/);
+  const keySource=await fetch(`${page.origin}/keys.js`);assert.equal(keySource.status,200);assert.equal(await keySource.text(),await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/keys.cjs'),'utf8'));
   const shell=await fetch(`${page.origin}/device-shell.js`);
   assert.equal(shell.status,200);
   assert.equal(await shell.text(),await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/physical/shell.js'),'utf8'));
@@ -127,17 +128,17 @@ test('only an address Cindy could have issued is accepted',async()=>{
 
 // Feed the real screen page its stream metadata, then drive DOM key events.
 // Provider validation must accept every emitted batch, including mixed text/key input.
-test('remote keyboard sends complete provider-compatible key events and a readable reconnect title',async()=>{
+for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends provider-compatible input and a readable reconnect title`,async()=>{
   const vm=require('node:vm'),{validEvents}=require('../../cindy-simulator/node/live-screen.cjs');
   const nodes=new Map(),events={},sent=[],poses=[],intervals=[];
   const get=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',listeners:{},setAttribute(){},removeAttribute(){},getContext:()=>({}),addEventListener(type,fn){this.listeners[type]=fn;}});return nodes.get(id);};
   const message=data=>{const bytes=Buffer.from(JSON.stringify(data)),packet=Buffer.alloc(5+bytes.length);packet.writeUInt32BE(bytes.length+1);packet[4]=0x10;bytes.copy(packet,5);return packet;};
-  const initial=Buffer.concat([message({type:'device',keyboard:true,maxTouches:2}),message({type:'screen',width:2736,height:1260}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
+  const initial=Buffer.concat([message({type:'device',platform,keyboard:true,maxTouches:2}),message({type:'screen',width:2736,height:1260}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
   let first=true,controller;
   const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang:'zh-CN'}},cindySim:{state:{status:{device:{rotation:1}}}}},
     document:{hidden:false,getElementById:get,addEventListener(){}},innerWidth:500,innerHeight:900,
     addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>intervals.push(fn),setTimeout(){},clearTimeout(){},
-    AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,VideoDecoder:class{},
+    AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,TextEncoder,VideoDecoder:class{},
     window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{attach(){}cancel(){}detach(){}}},DeviceShell:class{update(pose){poses.push(JSON.parse(JSON.stringify(pose)));}}},
     fetch:async(url,options)=>{
       if(url==='/control-api'){sent.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true})};}
@@ -147,13 +148,14 @@ test('remote keyboard sends complete provider-compatible key events and a readab
         cancel:async()=>{},
       })}};
     }};
-  vm.createContext(context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/remote/screen.js'),'utf8'),context);
+  vm.createContext(context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/keys.cjs'),'utf8'),context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/remote/screen.js'),'utf8'),context);
   const settle=()=>new Promise(resolve=>setImmediate(resolve));await settle();
   assert.equal(get('message-title').textContent,'正在重新连接');
   assert.equal(poses.at(-1).rotation,1);
   context.parent.cindySim.state.status.device.rotation=3;intervals[0]();
   assert.deepEqual(poses.at(-1),{width:2736,height:1260,rotation:3});
-  const codes=['Enter','Tab','Backspace','Escape','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
+  const codes=['Enter','Tab','Backspace','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
+  if(platform==='android')codes.push('Delete');
   for(const key of codes)get('keyboard').listeners.keydown({key,preventDefault(){}});
   const chords=[
     {key:'ArrowLeft',code:'ArrowLeft',shiftKey:true,modifiers:['shift']},
@@ -162,14 +164,30 @@ test('remote keyboard sends complete provider-compatible key events and a readab
     {key:'ArrowRight',code:'ArrowRight',altKey:true,modifiers:['option']},
     {key:'Z',code:'KeyZ',metaKey:true,shiftKey:true,modifiers:['shift','command']},
   ];
+  if(platform==='android')chords.push({key:'F5',code:'F5',ctrlKey:true,modifiers:['control']});
   for(const chord of chords)get('keyboard').listeners.keydown({...chord,preventDefault(){}});
+  // Unsupported shortcuts and layout text must not poison a valid queued chord.
+  const bypass=[
+    ...(platform==='ios'?[{key:'F5',code:'F5',ctrlKey:true},{key:'Delete',code:'Delete'}]:[]),
+    {key:'Dead',code:'KeyE',altKey:true}, {key:'é',code:'KeyE',altKey:true},
+    {key:'€',code:'KeyE',ctrlKey:true,altKey:true,getModifierState:name=>name==='AltGraph'},
+    {key:'1',code:'Numpad1',metaKey:true},
+  ];
+  for(const event of bypass)get('keyboard').listeners.keydown({...event,preventDefault(){assert.fail('browser must retain layout text and unsupported keys');}});
   get('keyboard').listeners.keydown({key:'Process',code:'KeyA',isComposing:true,preventDefault(){assert.fail('IME must remain on the text path');}});
   for(const modifier of ['metaKey','ctrlKey'])get('keyboard').listeners.keydown({key:'v',code:'KeyV',[modifier]:true,preventDefault(){assert.fail('browser must deliver paste');}});
   get('keyboard').listeners.paste({clipboardData:{getData:()=> 'pasted'},preventDefault(){}});
   get('keyboard').value='text';get('keyboard').listeners.input({});await settle();await settle();
+  // Real page queue: mixed multi-byte text and JSON escaping across both HTTP limits.
+  const longText=('中😀\\\"'.repeat(10001)+'\u0001'.repeat(10001));
+  get('keyboard').listeners.paste({clipboardData:{getData:()=>longText},preventDefault(){}});
+  for(let i=0;i<100;i++)await settle();
+  const large=sent.filter(p=>p.action==='input');
+  for(const packet of large){assert.ok(Buffer.byteLength(JSON.stringify(packet))<=60000);for(const event of packet.events)assert.ok(Buffer.byteLength(JSON.stringify({events:[event]}))<=16384);}
+  assert.equal(large.flatMap(p=>p.events).filter(e=>e.kind==='text').map(e=>e.text).join(''),'pastedtext'+longText);
   events.pagehide();await settle();
   const batches=sent.filter(p=>p.action==='input').map(p=>p.events);
-  for(const batch of batches)assert.doesNotThrow(()=>validEvents(batch,'en'));
+  for(const batch of batches){assert.doesNotThrow(()=>validEvents(batch,'en'));for(const event of batch)if(event.kind==='key')assert.doesNotThrow(()=>require('../../cindy-simulator/node/keys.cjs')[platform==='android'?'androidKey':'chord'](event.code,event.modifiers??[]));}
   assert.deepEqual(batches.flat().filter(e=>e.kind==='key'),[...codes.map(code=>({kind:'key',code})),...chords.map(({code,modifiers})=>({kind:'key',code,modifiers}))]);
   assert.ok(batches.flat().some(e=>e.kind==='text'&&e.text==='text'));
   assert.equal(batches.flat().filter(e=>e.kind==='text'&&e.text==='pasted').length,1);

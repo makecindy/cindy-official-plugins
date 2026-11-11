@@ -50,3 +50,20 @@ Tests must distinguish the previous commit: a pending initial read followed by l
 - The page and provider use complete key/chord events; host PR #9950 uses desktop key-down/up on its loopback transport, then its existing source-side `LiveScreenInputMapper` reconstructs complete provider events. The worker now translates at that boundary, preserving Shift/Control/Option/Command. Prior page/provider-only tests did not cover this intermediate wire contract.
 - The real worker HTTP test covers 64 chords, key-up order and host-size batching, invalid modifiers before execution, and a later rejected batch reported as unknown after an earlier batch executed. No retry or new input queue is added.
 - Full simulator and required repository suites: 1,738 passed, zero failed (57.23 seconds). Forge validated and packed 0.3.47. No installation, two-computer or native-trackpad acceptance performed.
+
+## 0.3.48 keyboard/text checkpoint — 2026-11-11
+
+The invariant is that browser text is delivered exactly once, accepted editing chords cannot invalidate neighbouring input, and every complete JSON request fits the next transport's byte limit. `screen.js` alone owns the existing waiting/sending queue; `keys.cjs` owns the shared Apple HID and Android chord validation and is now served as the same browser-loadable source. No second key table, queue, retry or polling mechanism is introduced. The remote transport uses each provider’s supported host key subset: Android retains F1–F12 and Delete; Apple rejects these before enqueueing. Numpad codes are outside the host wire contract.
+
+| Browser event | Browser still composing/layout text | Live device, queue idle or sending | Transport boundary |
+| --- | --- | --- | --- |
+| IME, Dead, Option printable, AltGr | Keep browser default; input/compositionend owns resulting text | Append resulting text once | Split at code-point boundaries, at most 4,000 UTF-16 units and 12,000 escaped UTF-8 bytes per text event |
+| Cmd/Ctrl+V | Keep browser paste event | Paste listener appends text once | Same text queue and byte splitter |
+| Supported editing chord | Not intercepted while composing | Validate with shared provider mapping before preventDefault/enqueue | Worker converts complete chords to bounded host down/up batches |
+| Unsupported shortcut | Keep browser default | No key event enters queue, so neighbours survive | Nothing to reject as part of a mixed batch |
+| Large mixed/multibyte paste | Text path | Existing serial queue, in order | Page bounds the entire UTF-8 JSON body to 60,000 bytes; worker retains host 16 KiB/64-event bounds |
+| Failed request / close | No replay | Existing discard/release path | Partial delivery remains unknown, never automatically retried |
+
+Discriminating tests drive the real page with unsupported Ctrl+F5, numpad and Delete around valid chords, Dead/Option/AltGr and IME/paste events, then over 50,000 UTF-16 units of Chinese, emoji, quotes, backslashes and escaped control characters (excluding the provider-forbidden NUL). They compare text exactly, enforce complete-body UTF-8 limits, validate emitted keys against the actual provider mapping and load the shared key source in a browser VM. HTTP coverage checks that the exact shared source is served by the worker. These are automated browser/protocol tests, not physical-keyboard/two-computer acceptance.
+
+0.3.48 results: targeted real-page/worker suites 8 passed; full simulator and required repository suites 1,740 passed, zero failed (54.86 seconds). Forge validated and packed the final 0.3.48 source. No installation or two-computer/native-keyboard acceptance performed. The earlier automated fixture incorrectly included NUL, which the provider intentionally forbids; the final escaped-control coverage uses U+0001 and still validates against the actual provider contract.

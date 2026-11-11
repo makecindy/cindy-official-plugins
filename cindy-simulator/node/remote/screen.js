@@ -54,7 +54,14 @@
     if(sending)return;sending=true;
     try{
       while(waiting.length&&!closed){
-        const events=waiting.splice(0,64);
+        // Bound the complete JSON body, including escaping and multibyte text.
+        const events=[];
+        while(waiting.length&&events.length<64){
+          const next=waiting[0];
+          if(new TextEncoder().encode(JSON.stringify({action:'input',udid,events:[...events,next]})).length>60000)break;
+          events.push(waiting.shift());
+        }
+        if(!events.length)throw Error('INPUT_TOO_LARGE');
         const response=await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'input',udid,events}),signal:AbortSignal.timeout(15000)});
         const result=await response.json().catch(()=>({}));
         if(!response.ok||result.ok===false)throw Object.assign(Error(result.errorCode||'REMOTE_INPUT_FAILED'),result);
@@ -103,16 +110,30 @@
   // Typing goes to the device: keep the hidden field focused, as the local pages do.
   area.addEventListener('mousedown',e=>{if(device?.keyboard){e.preventDefault();keyboard.focus({preventScroll:true});}});
   const KEYS={Enter:'Enter',Tab:'Tab',Backspace:'Backspace',Escape:'Escape',Delete:'Delete',ArrowLeft:'ArrowLeft',ArrowRight:'ArrowRight',ArrowUp:'ArrowUp',ArrowDown:'ArrowDown'};
-  const text=value=>{for(let i=0;i<value.length;i+=4000)queue({kind:'text',text:value.slice(i,i+4000)});};
+  const text=value=>{
+    let chunk='',bytes=0;
+    const encoder=new TextEncoder();
+    for(const character of value){
+      const cost=encoder.encode(JSON.stringify(character)).length-2;
+      if(chunk.length+character.length>4000||bytes+cost>12000){queue({kind:'text',text:chunk});chunk='';bytes=0;}
+      chunk+=character;bytes+=cost;
+    }
+    if(chunk)queue({kind:'text',text:chunk});
+  };
   keyboard.addEventListener('keydown',e=>{
     if(e.isComposing||!device?.keyboard)return;
+    // Dead keys and layout-generated characters belong to browser text input.
+    if(e.key==='Dead'||e.key==='Process'||e.getModifierState?.('AltGraph')||(e.altKey&&!e.metaKey&&e.key.length===1))return;
     // Let the browser deliver paste once through the existing paste listener.
     if((e.metaKey||e.ctrlKey)&&e.code==='KeyV')return;
-    const code=KEYS[e.key]||((e.metaKey||e.ctrlKey||e.altKey)&&/^[A-Za-z0-9]{1,32}$/.test(e.code||'')?e.code:null);
+    const code=KEYS[e.key]||((e.metaKey||e.ctrlKey)?e.code:null);
     if(!code||['ShiftLeft','ShiftRight','ControlLeft','ControlRight','AltLeft','AltRight','MetaLeft','MetaRight'].includes(code))return;
     const modifiers=[];
     if(e.shiftKey)modifiers.push('shift');if(e.ctrlKey)modifiers.push('control');
     if(e.altKey)modifiers.push('option');if(e.metaKey)modifiers.push('command');
+    // Reuse the provider's actual HID mapping; the host wire has no numpad codes.
+    if(code.startsWith('Numpad'))return;
+    try{(device.platform==='android'?window.DeviceKeys.androidKey:window.DeviceKeys.chord)(code,modifiers);}catch{return;}
     e.preventDefault();queue({kind:'key',code,...(modifiers.length?{modifiers}:{})});
   });
   const typed=()=>{if(keyboard.value&&device?.keyboard)text(keyboard.value);keyboard.value='';};
