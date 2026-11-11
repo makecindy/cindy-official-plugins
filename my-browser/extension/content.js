@@ -28,7 +28,7 @@
     for(const rec of translations.values())rec.host.remove();translations.clear();
     for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
-    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;
+    clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;clearOpenedTitle();
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
   let subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
@@ -212,6 +212,8 @@
     body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
     const model=el('div',undefined,'stack settings-section'),change=el('a',t.modelChange,'button-link');change.href='cindy://plugins/my-browser';
     model.append(field(t.modelSettings,change),el('small',t.modelHint));body.append(model);
+    const groups=el('div',undefined,'stack settings-section');
+    groups.append(button(t.tabGroups,async()=>{const result=await sendMessage({type:'cindy-open-options'});if(!result?.ok)throw Error('OPTIONS_UNAVAILABLE');}),el('small',t.tabMarkHint));body.append(groups);
   }
   function onPreferencesChanged(changes,area){
     const change=changes?.cindyReadingPreferences;
@@ -758,16 +760,31 @@
     return agentCopy;
   }
   // A page Browser Use opened says so until the user acts on it with real input (agent events are not trusted).
-  let openedMark;
+  let openedMark,openedTitleObserver,originalTitle,markedTitle,openedByCindy=false,userClaimed=false;
+  // The tab strip must identify Cindy's pages even without optional tabGroups permission.
+  // Observe the head only: page content changes must not turn this into a full-page observer.
+  function updateOpenedTitle(){
+    if(!openedByCindy||!runtimeReady()||document.title===markedTitle)return;
+    originalTitle=document.title;document.title='[Cindy] '+originalTitle;markedTitle=document.title;
+  }
+  function clearOpenedTitle(){
+    openedByCindy=false;openedTitleObserver?.disconnect();openedTitleObserver=null;
+    if(markedTitle!==undefined&&document.title===markedTitle)document.title=originalTitle;
+    originalTitle=markedTitle=undefined;
+  }
   function tookOver(e){
-    if(!e.isTrusted||!openedMark)return;
-    openedMark.remove();openedMark=null;
+    if(!e.isTrusted||!openedByCindy)return;
+    userClaimed=true;clearOpenedTitle();openedMark?.remove();openedMark=null;
     for(const type of ['pointerdown','keydown'])document.removeEventListener(type,tookOver,true);
     sendMessage({type:'cindy-user-took-over'}).catch(()=>{});
   }
   async function showOpenedMark(){
+    if(disposed||userClaimed)return;
+    openedByCindy=true;updateOpenedTitle();
+    if(!openedTitleObserver&&document.head){openedTitleObserver=new MutationObserver(updateOpenedTitle);openedTitleObserver.observe(document.head,{subtree:true,childList:true,characterData:true});}
+    for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
     const copy=await agentStrings();
-    if(disposed||openedMark?.isConnected)return;
+    if(disposed||userClaimed||openedMark?.isConnected)return;
     openedMark=el('div');openedMark.setAttribute('data-cindy-agent-tab','');
     isolateHost(openedMark,{position:'fixed',right:'12px',bottom:'12px',display:'block','z-index':'2147483644','pointer-events':'none'});
     const root=openedMark.attachShadow({mode:'closed'});
@@ -775,7 +792,6 @@
 .pill img{width:15px;height:15px;border-radius:50%;background:#fff}.dot{width:6px;height:6px;border-radius:50%;background:#d93a3a}`));
     const pill=el('div',undefined,'pill');const icon=el('img');icon.src=brandURL;icon.alt='';pill.append(icon,el('span',copy.agentOpened),el('span',undefined,'dot'));
     root.append(pill);document.documentElement.append(openedMark);
-    for(const type of ['pointerdown','keydown'])document.addEventListener(type,tookOver,{capture:true,signal:lifecycle.signal});
   }
   async function markAgent(hidden,clear,opened,ms){
     if(opened){await showOpenedMark();return;}
