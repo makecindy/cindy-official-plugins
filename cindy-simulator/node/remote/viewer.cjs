@@ -23,18 +23,30 @@ const HOST_URL=/^http:\/\/127\.0\.0\.1:\d{2,5}\/[0-9a-f]{64}$/;
 
 function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=()=>new Date()}={}){
   let server,base,token,starting,lastSeen=0,shotTo='desktop';
-  // screen id → {id, upstream, name, platform}
+  // screen id → {id, upstream, name, platform, devices, computer, manage}
   const views=new Map();
   const url=(id,locale,task)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}#cindyClipboard=${new URL(base).port}.${token}`;
   const assets={'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],
     '/remote.js':['screen.js','text/javascript'],'/remote.css':['../physical/screen.css','text/css'],
     ...Object.fromEntries(GESTURE_FILES.map(name=>[`/gestures/${name}.js`,[GESTURES+name+'.js','text/javascript']]))};
-  // The control model reads a platform from these fields.
+  // The control model reads a platform from these fields. Every device here is
+  // one of that computer's: `kind:'remote'` keeps this computer's own operations off it.
   function device(view){
-    return {udid:view.id,name:view.name,state:'Booted',kind:'remote',isAvailable:true,
+    const listed=view.devices.find(d=>d.udid===view.id);
+    return {udid:view.id,name:view.name,state:'Booted',isAvailable:true,
       ...(view.platform==='android'?{platform:'android'}:{}),
       runtime:view.platform==='tvos'?'tvOS':view.platform==='visionos'?'visionOS':'',
-      productFamily:view.platform==='ipados'?'iPad':view.platform==='tvos'?'Apple TV':view.platform==='visionos'?'Apple Vision':'iPhone'};
+      productFamily:view.platform==='ipados'?'iPad':view.platform==='tvos'?'Apple TV':view.platform==='visionos'?'Apple Vision':'iPhone',
+      ...listed,kind:'remote'};
+  }
+  // That computer's device list as its plugin reports it: only what the device menu shows.
+  function listedDevices(value){
+    if(!Array.isArray(value))return [];
+    return value.slice(0,64).filter(d=>d&&typeof d.udid==='string'&&SCREEN_ID.test(d.udid)&&typeof d.name==='string').map(d=>({
+      udid:d.udid,name:d.name.slice(0,128),state:['Booted','Shutdown','Booting','ShuttingDown'].includes(d.state)?d.state:'Shutdown',kind:'remote',
+      isAvailable:d.isAvailable!==false,...(typeof d.runtime==='string'?{runtime:d.runtime.slice(0,160)}:{}),
+      ...(typeof d.deviceType==='string'?{deviceType:d.deviceType.slice(0,160)}:{}),...(typeof d.productFamily==='string'?{productFamily:d.productFamily.slice(0,64)}:{}),
+      ...(d.platform==='android'?{platform:'android'}:{})}));
   }
   function send(view,events,route='/input'){
     return new Promise((resolve,reject)=>{
@@ -78,7 +90,12 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   }
   async function control(view,p){
     switch(p.action){
-      case 'status':lastSeen=Date.now();return {devices:[device(view)],device:device(view),viewerPlatform:'remote',ready:true,generation:1,settings:{enabled:true,screenshotDestination:shotTo}};
+      case 'status':{
+        lastSeen=Date.now();const current=device(view);
+        return {devices:[current,...view.devices.filter(d=>d.udid!==view.id)],device:current,viewerPlatform:'remote',ready:true,generation:1,
+          // Which computer runs it, and whether its plugin takes device management from here.
+          remote:{computer:view.computer,manage:view.manage},settings:{enabled:true,screenshotDestination:shotTo}};
+      }
       case 'activity':lastSeen=Date.now();return {};
       case 'press':if(typeof p.button!=='string'||!/^[a-z0-9-]{1,32}$/.test(p.button))throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT'});await send(view,[{kind:'press',button:p.button}]);return {execution:'executed'};
       case 'input':if(!Array.isArray(p.events)||!p.events.length||p.events.length>64)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT'});await send(view,p.events);return {execution:'executed'};
@@ -146,11 +163,12 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   return {
     viewing:()=>Date.now()-lastSeen<15000,
     // Opens (or re-points) the page for one device; the same device keeps its page while Cindy renews the address.
-    async open({id,url:upstream,name,platform,locale,task}){
+    async open({id,url:upstream,name,platform,devices,computer,manage,locale,task}){
       if(typeof id!=='string'||!SCREEN_ID.test(id)||typeof upstream!=='string'||!HOST_URL.test(upstream)||!PLATFORMS.includes(platform))
         throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       if(starting)await starting;else if(!server){starting=start().finally(()=>{starting=null;});await starting;}
-      views.set(id,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id});lastSeen=Date.now();
+      views.set(id,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id,devices:listedDevices(devices),
+        computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true});lastSeen=Date.now();
       return {url:url(id,locale,task),ready:true};
     },
     async close(){await starting?.catch(()=>{});if(server){server.close();server.closeAllConnections();}server=null;base=null;token=null;views.clear();lastSeen=0;}};

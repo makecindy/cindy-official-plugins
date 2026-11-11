@@ -53,6 +53,15 @@ async function showViewer(url, udid, sessionId, locale) {
 }
 
 cindy.onHostMessage(async function (msg) {
+  // The same plugin on another of the account's computers asks about a task's device (see remoteServe).
+  if (msg.type === 'device-sync-request') {
+    if (typeof cindy.deviceSync !== 'function' || typeof msg.requestId !== 'string') return;
+    let data;
+    try { data = msg.data?.v === 1 && msg.data.kind === REMOTE_KIND ? await remoteServe(msg.data) : {ok:false, errorCode:'UNSUPPORTED', execution:'not_executed'}; }
+    catch { data = {ok:false, errorCode:'NODE_UNAVAILABLE', execution:'unknown'}; }
+    await cindy.deviceSync({op:'reply', requestId:msg.requestId, data}).catch(() => {});
+    return;
+  }
   if (msg.type !== 'tool-call') return;
   // liveScreen.* belong to Cindy's phone view, never to the Agent.
   if (String(msg.tool).startsWith('liveScreen.')) {
@@ -150,36 +159,168 @@ async function openInTask(udid, locale) {
 // Task page and management view. Each action maps to one fixed worker method
 // with sanitized parameters. Cross-task navigation resolves the target from
 // the device's saved binding in the worker, never from a page-supplied task id.
-// A task that lives on another of the account's computers: Cindy lists this
-// plugin's devices there and relays one device's picture and input. The page
-// gets the plugin's own controller around it (node/remote); only the task and
-// computer Cindy put in the page address are ever asked about.
+// ---- A task that lives on another of the account's computers ----
+// Two channels, both only between the same plugin on the same account's
+// computers. The picture and input of one device come through Cindy
+// (cindy.liveScreenView, wrapped by node/remote). Everything else the task page
+// does - which device the task uses, the device list, starting, creating and
+// shutting down - is asked of the plugin on that computer (cindy.deviceSync),
+// which runs its own fixed worker methods under its own run switch. A computer
+// whose plugin predates this still shows its running device, view only.
 const DEVICE = /^[A-Za-z0-9._:-]{1,256}$/, SCREEN = /^[A-Za-z0-9._:-]{1,128}$/;
+const REMOTE_KIND = 'simulator-task', REMOTE_BYTES = 56000;
 async function remoteView(request) {
   try {
     const result = await (typeof cindy.liveScreenView === 'function' ? cindy.liveScreenView(request) : cindy.send({...request, type:'live-screen-view-request'}));
     return result && typeof result === 'object' && typeof result.ok === 'boolean' ? result : {ok:false, errorCode:'HOST_UPDATE_REQUIRED'};
   } catch { return {ok:false, errorCode:'HOST_UPDATE_REQUIRED'}; }
 }
-async function remoteState(m, locale) {
-  if (!SESSION.test(m.sessionId) || typeof m.deviceId !== 'string' || !DEVICE.test(m.deviceId)) return false;
+
+// -- on the computer that runs the devices --
+// What a device list entry needs on the other computer, and nothing of this one's paths or records.
+const slimDevice = d => d && {udid:d.udid, name:d.name, state:d.state, runtime:d.runtime, deviceType:d.deviceType, productFamily:d.productFamily,
+  ...(d.platform ? {platform:d.platform} : {}), isAvailable:d.isAvailable !== false, thisTask:d.thisTask === true, tasks:d.tasks || 0,
+  activeTasks:d.activeTasks || 0, thisTaskActive:d.thisTaskActive === true,
+  ...(d.memoryMode ? {memoryMode:{mode:d.memoryMode.mode, verified:d.memoryMode.verified === true}} : {})};
+const slimCatalog = c => ({ok:true, platforms:{android:{ready:c.platforms?.android?.ready === true}},
+  deviceTypes:(c.deviceTypes || []).map(d => ({identifier:d.identifier, name:d.name, productFamily:d.productFamily, ...(d.platform ? {platform:d.platform} : {}), minRuntimeVersion:d.minRuntimeVersion, maxRuntimeVersion:d.maxRuntimeVersion})),
+  runtimes:(c.runtimes || []).map(r => ({identifier:r.identifier, name:r.name, version:r.version, ...(r.platform ? {platform:r.platform} : {}), ...(Array.isArray(r.supportedDeviceTypes) ? {supportedDeviceTypes:r.supportedDeviceTypes} : {})}))});
+// Starting and shutting down outlast one request: they run here and the other
+// computer reads the outcome with the task's state. One at a time per task.
+const remoteOps = new Map();
+function remoteStart(sessionId, call, udid, run) {
+  const op = {call, udid, state:'running', at:Date.now()};
+  remoteOps.set(sessionId, op);
+  run().then(r => { if (r?.ok === false) Object.assign(op, {state:'failed', errorCode:r.errorCode || 'FAILED'}); else if (remoteOps.get(sessionId) === op) remoteOps.delete(sessionId); },
+    () => Object.assign(op, {state:'failed', errorCode:'NODE_UNAVAILABLE'}));
+  holdWhileRunning();
+}
+async function remoteServe(d) {
+  const locale = d.locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const failed = r => ({ok:false, errorCode:r?.errorCode || 'FAILED', execution:r?.execution || 'unknown'});
+  if (d.call === 'catalog') {
+    const c = await worker('viewer_catalog', {});
+    if (!c.ok) return failed(c);
+    let result = slimCatalog(c);
+    // The version ranges alone still pair models with systems.
+    if (JSON.stringify(result).length > REMOTE_BYTES) result = {...result, runtimes:result.runtimes.map(({supportedDeviceTypes, ...r}) => r)};
+    return {ok:true, result};
+  }
+  if (d.call === 'create') {
+    const r = await worker('create_device', {name:str(d.name, 64), deviceType:str(d.deviceType), runtime:str(d.runtime)});
+    return r.ok && r.udid ? {ok:true, result:{ok:true, udid:r.udid, name:r.name}} : failed(r);
+  }
+  if (!SESSION.test(d.sessionId)) return {ok:false, errorCode:'INVALID_ARGUMENT', execution:'not_executed'};
+  const running = remoteOps.get(d.sessionId)?.state === 'running';
+  if (d.call === 'task_bind') {
+    if (!str(d.udid)) return {ok:false, errorCode:'INVALID_ARGUMENT', execution:'not_executed'};
+    const r = await worker('task_bind', {_task:d.sessionId, udid:d.udid, _locale:locale, _remote:true});
+    if (!r.ok) return failed(r);
+    if (!running) remoteOps.delete(d.sessionId);
+  } else if (d.call === 'task_boot' || d.call === 'shutdown') {
+    if (!str(d.udid)) return {ok:false, errorCode:'INVALID_ARGUMENT', execution:'not_executed'};
+    if (!running) remoteStart(d.sessionId, d.call, d.udid, () => d.call === 'task_boot'
+      ? worker('boot', {udid:d.udid, memoryMode:str(d.memoryMode, 32), _task:d.sessionId, _locale:locale})
+      : worker('settings_shutdown', {udid:d.udid}));
+  } else if (d.call !== 'task_state') return {ok:false, errorCode:'UNSUPPORTED', execution:'not_executed'};
+  const s = await worker('remote_task_state', {_task:d.sessionId, _locale:locale});
+  if (!s.ok) return failed(s);
+  const op = remoteOps.get(d.sessionId);
+  // A failure is told once; the page then shows the device as it is.
+  if (op?.state === 'failed') remoteOps.delete(d.sessionId);
+  // Phones attached to that computer are not offered to other computers.
+  let devices = (s.devices || []).filter(x => x.kind !== 'physical').map(slimDevice);
+  const state = () => ({device:s.device?.kind === 'physical' ? null : slimDevice(s.device), devices, settings:{enabled:s.settings?.enabled !== false},
+    ...(op ? {operation:{call:op.call, udid:op.udid, state:op.state, ...(op.errorCode ? {errorCode:op.errorCode} : {})}} : {})});
+  while (devices.length > 8 && JSON.stringify(state()).length > REMOTE_BYTES) devices = devices.slice(0, Math.ceil(devices.length / 2));
+  return {ok:true, state:state()};
+}
+
+// -- on the computer that shows them --
+async function remoteAsk(deviceId, data) {
+  if (typeof cindy.deviceSync !== 'function') return {ok:false, errorCode:'SYNC_NOT_ALLOWED'};
+  try {
+    const r = await cindy.deviceSync({op:'request', peer:deviceId, data:{v:1, kind:REMOTE_KIND, ...data}});
+    if (!r?.ok) return {ok:false, errorCode:r?.errorCode || 'SYNC_OFFLINE'};
+    return r.data && typeof r.data === 'object' && typeof r.data.ok === 'boolean' ? r.data : {ok:false, errorCode:'REMOTE_PLUGIN_UPDATE_REQUIRED'};
+  } catch { return {ok:false, errorCode:'SYNC_NOT_ALLOWED'}; }
+}
+// A label only: Cindy's own name for that computer, else the one it gave the page.
+async function computerName(deviceId, label) {
+  const given = str(label, 80) || '';
+  if (typeof cindy.deviceSync !== 'function') return given;
+  try { const s = await cindy.deviceSync({op:'status'}); return String(s?.peers?.find(p => p.deviceId === deviceId)?.deviceName || given).slice(0, 80); } catch { return given; }
+}
+// Whether that computer's plugin answers management requests: 'yes', 'no'
+// (asked again after a while: it may be updated), or not known yet. An answer
+// can take the whole request timeout, so the first page load never waits for it.
+const remoteManage = new Map();
+const MANAGE_RETRY_MS = 5 * 60000;
+const NO_MANAGE = new Set(['SYNC_NOT_ALLOWED', 'SYNC_RESULT_UNKNOWN', 'SYNC_REQUEST_EXPIRED', 'SYNC_SECURE_STORAGE_UNAVAILABLE', 'REMOTE_PLUGIN_UPDATE_REQUIRED', 'UNSUPPORTED']);
+function manages(deviceId) {
+  const known = remoteManage.get(deviceId);
+  return known?.state === 'no' && Date.now() - known.at > MANAGE_RETRY_MS ? undefined : known;
+}
+function learnManage(deviceId, reply) {
+  if (reply.ok) remoteManage.set(deviceId, {state:'yes', at:Date.now()});
+  else if (NO_MANAGE.has(reply.errorCode)) remoteManage.set(deviceId, {state:'no', at:Date.now()});
+  return reply;
+}
+// The device shown here: Cindy's address for its picture, wrapped in this computer's controller page.
+async function remoteViewer(m, locale, state, extra) {
+  const device = state.device;
+  if (!device || device.state !== 'Booted' || state.settings?.enabled === false || !SCREEN.test(device.udid)) return state;
+  const opened = await remoteView({op:'open', deviceId:m.deviceId, id:device.udid});
+  if (!opened.ok || typeof opened.url !== 'string') return {...state, viewerError:opened.errorCode || 'REMOTE_UNAVAILABLE'};
+  const platform = device.platform === 'android' ? 'android' : /tvOS/.test(device.runtime || '') ? 'tvos' : /xrOS|visionOS/.test(device.runtime || '') ? 'visionos'
+    : /iPad/.test(device.productFamily || device.deviceType || device.name || '') ? 'ipados' : 'ios';
+  const viewer = await worker('remote_viewer', {id:device.udid, url:opened.url, name:device.name, platform:extra.platform || platform,
+    devices:state.devices, computer:extra.computer, manage:extra.manage, _locale:locale, _task:m.sessionId});
+  return viewer.ok && viewer.url ? {...state, viewer:{udid:device.udid, url:viewer.url}} : {...state, viewerError:viewer.errorCode || 'NODE_UNAVAILABLE'};
+}
+// View only: what Cindy itself lists for that computer, for a plugin there that cannot be asked.
+async function remoteViewOnly(m, locale, computer) {
   const listed = await remoteView({op:'screens', deviceId:m.deviceId});
   if (!listed.ok) return {ok:false, errorCode:listed.errorCode || 'REMOTE_UNAVAILABLE', execution:'not_executed'};
   const screens = (Array.isArray(listed.screens) ? listed.screens : [])
-    .filter(s => s && SCREEN.test(s.id) && Array.isArray(s.taskIds) && s.taskIds.includes(m.sessionId))
-    .map(s => ({id:s.id, name:String(s.name || s.id).slice(0, 128), platform:s.platform}));
+    .filter(s => s && SCREEN.test(s.id) && Array.isArray(s.taskIds) && s.taskIds.includes(m.sessionId));
   // The device the page already shows stays; otherwise the task's first.
   const screen = screens.find(s => s.id === m.screenId) || screens[0];
-  if (!screen) return {ok:true, remote:true, screens};
-  const opened = await remoteView({op:'open', deviceId:m.deviceId, id:screen.id});
-  if (!opened.ok || typeof opened.url !== 'string') return {ok:true, remote:true, screens, screen, viewerError:opened.errorCode || 'REMOTE_UNAVAILABLE'};
-  const viewer = await worker('remote_viewer', {id:screen.id, url:opened.url, name:screen.name, platform:screen.platform, _locale:locale, _task:m.sessionId});
-  return viewer.ok && viewer.url ? {ok:true, remote:true, screens, screen, viewer:{url:viewer.url}}
-    : {ok:true, remote:true, screens, screen, viewerError:viewer.errorCode || 'NODE_UNAVAILABLE'};
+  const device = screen ? {udid:screen.id, name:String(screen.name || screen.id).slice(0, 128), state:'Booted', isAvailable:true, thisTask:true,
+    ...(screen.platform === 'android' ? {platform:'android'} : {}), runtime:screen.platform === 'tvos' ? 'tvOS' : screen.platform === 'visionos' ? 'visionOS' : '',
+    productFamily:screen.platform === 'ipados' ? 'iPad' : 'iPhone'} : null;
+  const state = await remoteViewer(m, locale, {device, devices:device ? [device] : [], settings:{enabled:true}}, {computer, manage:false, platform:screen?.platform});
+  return {ok:true, remote:{computer, manage:false}, ...state};
+}
+async function remoteTask(m, locale) {
+  const calls = ['task_state', 'task_bind', 'task_boot', 'catalog', 'create', 'shutdown'];
+  if (typeof m.deviceId !== 'string' || !DEVICE.test(m.deviceId) || !calls.includes(m.call)) return false;
+  const global = m.call === 'catalog' || m.call === 'create';
+  if (!global && !SESSION.test(m.sessionId)) return false;
+  const known = manages(m.deviceId);
+  const ask = () => remoteAsk(m.deviceId, {call:m.call, sessionId:global ? undefined : m.sessionId, udid:str(m.udid), name:str(m.name, 64),
+    deviceType:str(m.deviceType), runtime:str(m.runtime), memoryMode:str(m.memoryMode, 32), locale}).then(r => learnManage(m.deviceId, r));
+  if (m.call !== 'task_state') {
+    if (known?.state === 'no') return {ok:false, errorCode:'REMOTE_PLUGIN_UPDATE_REQUIRED', execution:'not_executed'};
+    const reply = await ask();
+    if (!reply.ok) return {ok:false, errorCode:reply.errorCode, execution:reply.execution || 'unknown'};
+    if (global) return reply.result;
+    const computer = await computerName(m.deviceId, m.computer);
+    return {ok:true, remote:{computer, manage:true}, ...await remoteViewer(m, locale, reply.state, {computer, manage:true})};
+  }
+  const computer = await computerName(m.deviceId, m.computer);
+  if (known?.state !== 'yes') {
+    // Show what can be shown at once; learn in the background whether more can be asked.
+    if (!known) { remoteManage.set(m.deviceId, {state:'asking', at:Date.now()}); void remoteAsk(m.deviceId, {call:'task_state', sessionId:m.sessionId, locale}).then(r => { if (!learnManage(m.deviceId, r).ok && remoteManage.get(m.deviceId)?.state === 'asking') remoteManage.delete(m.deviceId); }); }
+    return remoteViewOnly(m, locale, computer);
+  }
+  const reply = await ask();
+  if (!reply.ok) return {ok:false, errorCode:reply.errorCode, execution:'not_executed'};
+  return {ok:true, remote:{computer, manage:true}, ...await remoteViewer(m, locale, reply.state, {computer, manage:true})};
 }
 
 const PAGE_ACTIONS = {
-  remote_state: remoteState,
+  remote_task: remoteTask,
   task_state: (m, l) => SESSION.test(m.sessionId) && worker('task_state', {_task:m.sessionId, _locale:l}),
   task_bind: (m, l) => SESSION.test(m.sessionId) && str(m.udid) && worker('task_bind', {_task:m.sessionId, udid:m.udid, _locale:l}),
   task_boot: async (m, l) => {
@@ -226,7 +367,7 @@ const PAGE_ACTIONS = {
     return opened;
   },
 };
-const KEEPS_RUNNING = new Set(['remote_state', 'task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'restart_device', 'open_in_task', 'viewer_url', 'android_install']);
+const KEEPS_RUNNING = new Set(['remote_task', 'task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'restart_device', 'open_in_task', 'viewer_url', 'android_install']);
 if (pages) pages.onmessage = async ({data: msg}) => {
   if (msg?.type === 'ping' && typeof msg.id === 'string') { pages.postMessage({type:'ready', id:msg.id}); return; }
   if (msg?.type !== 'request' || typeof msg.id !== 'string' || !Object.hasOwn(PAGE_ACTIONS, msg.action)) return;

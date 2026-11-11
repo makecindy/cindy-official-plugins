@@ -85,6 +85,20 @@ network; only that test device was started or turned.
 - Screenshot to Desktop writes `<device name> <date time>.png` on the viewer.
 - A stream that ends (the page hidden, the address renewed) reconnects on its own.
 
+## Remote mark and device management (same day)
+
+- The controller's top bar shows "远程 · Dash的Mac Studio" next to the device name
+  (the name comes from Cindy with the page address); the task page's states carry
+  the same mark.
+- The provider's installed plugin predates the management channel, so the viewer's
+  request went unanswered (`SYNC_RESULT_UNKNOWN` after 30 s, asked once): the page
+  stayed view only with the running device, as designed for an older plugin there.
+- Choosing, creating, opening, shutting down and switching devices on the other
+  computer were **not exercised between two real computers**: that needs this
+  version on the provider too. They are covered by `.tests/baguette/remote-task.test.cjs`,
+  which joins the two logic pages (viewer and provider) through a stand-in for
+  Cindy's request channel, and by the controller case in `control-page.test.cjs`.
+
 ## Not checked
 
 - Real two-finger trackpad contacts, Option pinch and pan, typing and paste were not

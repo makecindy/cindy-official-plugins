@@ -39,6 +39,11 @@ svg { display: block; flex: 0 0 auto; }
 .bar .grow { flex: 1; min-width: 8px; }
 .pill { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 9px; border-radius: 9999px; background: var(--card); border: 1px solid var(--board); font-weight: 500; max-width: 60%; transition: background .15s; }
 .pill:hover { background: var(--hover); }
+/* A device that runs on another computer: said next to its name, always in view. */
+.remote-badge { height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 9999px; border: 1px dashed var(--board); color: var(--text-2); font-size: 11px; font-weight: 500; white-space: nowrap; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.remote-badge[hidden] { display: none; }
+.remote-badge svg { flex: 0 0 auto; }
+.remote-badge span { overflow: hidden; text-overflow: ellipsis; }
 .pill .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill .chev { color: var(--text-3); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: 0 0 8px; }

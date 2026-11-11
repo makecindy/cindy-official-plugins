@@ -64,6 +64,8 @@ test('status describes a running remote device and only device input is forwarde
   const status=(await api({action:'status'})).body;
   assert.equal(status.viewerPlatform,'remote');assert.equal(status.ready,true);
   assert.deepEqual({kind:status.device.kind,state:status.device.state,name:status.device.name},{kind:'remote',state:'Booted',name:'iPhone Air'});
+  // Without a list from that computer's plugin, the device shown is the only one, and it cannot be managed.
+  assert.deepEqual(status.devices.map(d=>d.udid),['SIM-1']);assert.deepEqual(status.remote,{computer:'',manage:false});
   const touch={kind:'touch',touches:[{id:0,x:.5,y:.5,phase:'began'}]};
   assert.equal((await api({action:'input',events:[touch]})).body.ok,true);
   assert.equal((await api({action:'press',button:'home'})).body.ok,true);
@@ -81,6 +83,19 @@ test('status describes a running remote device and only device input is forwarde
   for(const action of ['boot','shutdown','create','rename','switch','catalog','resources','open'])
     assert.equal((await api({action})).body.errorCode,'REMOTE_UNSUPPORTED',action);
   assert.equal((await api({action:'input',events:[]})).body.errorCode,'INVALID_ARGUMENT');
+});
+
+test('the controller is told which computer runs the device and what else that computer has',async t=>{
+  const {api}=await opened(t,{computer:'Mac Studio',manage:true,devices:[
+    {udid:'SIM-2',name:'iPad mini',state:'Shutdown',runtime:'iOS-27-3',productFamily:'iPad',dataPath:'/private'},
+    {udid:'SIM-1',name:'iPhone Air',state:'Booted',runtime:'iOS-27-3'},{udid:'bad id',name:'x'},{name:'no id'},'junk']});
+  const status=(await api({action:'status'})).body;
+  assert.deepEqual(status.remote,{computer:'Mac Studio',manage:true});
+  // The device shown first, then that computer's others; all marked as not this computer's.
+  assert.deepEqual(status.devices.map(d=>[d.udid,d.state,d.kind]),[['SIM-1','Booted','remote'],['SIM-2','Shutdown','remote']]);
+  assert.equal(status.device.runtime,'iOS-27-3');assert.equal(JSON.stringify(status).includes('private'),false);
+  // Managing them is the task page's business with that computer, never this worker's.
+  for(const action of ['switch','create','shutdown','boot'])assert.equal((await api({action})).body.errorCode,'REMOTE_UNSUPPORTED',action);
 });
 
 test('a screenshot is the picture shown here, saved like a local one or handed to the clipboard',async t=>{

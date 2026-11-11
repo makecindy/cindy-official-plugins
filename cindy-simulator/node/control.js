@@ -119,6 +119,29 @@
   const remote = () => state.status?.device?.kind === 'remote';
   // Its picture arrives as a stream fitted by the device page itself, like a physical phone's.
   const streamed = () => remote() || state.status?.device?.kind === 'physical';
+  // Its devices are chosen, started, created and shut down by the task page
+  // around this one, which asks the plugin on that computer; an older plugin
+  // there only lets its running device be viewed.
+  const remoteManaged = () => remote() && state.status?.remote?.manage === true;
+  const remoteComputer = () => state.status?.remote?.computer || (lang === 'zh-CN' ? '另一台电脑' : 'another computer');
+  let remoteWaiting = null;
+  function remoteAction(action, extra = {}) {
+    try { window.parent.postMessage({ type: 'cindy-simulator-remote-action', action, ...extra }, '*'); } catch { return; }
+    // The task page replaces this page when the device changes; if it stays, it says how it went.
+    clearTimeout(remoteWaiting?.timer);
+    remoteWaiting = { action, timer: setTimeout(() => remoteSettled({ ok: false, errorCode: 'TIMEOUT' }), 150000) };
+  }
+  function remoteSettled(result) {
+    const waiting = remoteWaiting; if (!waiting) return;
+    clearTimeout(waiting.timer); remoteWaiting = null;
+    if (waiting.action === 'bind') { state.switching = false; state.phase = null; }
+    if (waiting.action === 'shutdown' && !result.ok) state.stopping = false;
+    if (!result.ok) toast(`${waiting.action === 'bind' ? t.switching.failed : t.actionFailed} (${result.errorCode || 'FAILED'})`, 'error');
+    render(); void check();
+  }
+  window.addEventListener?.('message', (event) => {
+    if (event.source === window.parent && event.data?.type === 'cindy-simulator-remote-result' && remote()) remoteSettled({ ok: event.data.ok === true, errorCode: event.data.errorCode });
+  });
   const remoteButton = (id) => { try { return screen.contentWindow?.__remoteButtons?.().includes(id) === true; } catch { return false; } };
   // ---- zoom ----
   // The device page fits the device into its frame; zoom resizes that frame.
@@ -406,6 +429,13 @@
     const p = M.presence(s, state);
     const device = s?.device || state.status?.device;
     $('device-chip').hidden = hub; $('title').hidden = !hub;
+    // Not this computer's device: named for the computer that runs it.
+    const far = remote() || (!s && state.status?.remote);
+    $('remote-badge').hidden = !far;
+    if (far) {
+      $('remote-badge-text').textContent = (lang === 'zh-CN' ? '远程 · ' : 'Remote · ') + remoteComputer();
+      $('remote-badge').title = lang === 'zh-CN' ? `这台设备运行在「${remoteComputer()}」上，这里是远程查看和操作。` : `This device runs on ${remoteComputer()}. You are viewing and operating it from here.`;
+    }
     $('chip-dot').dataset.tone = $('title-dot').dataset.tone = p.tone;
     $('chip-name').textContent = $('title-name').textContent = device?.name || '…';
     const resources = $('resources'), modeButton = $('memory-mode');
@@ -562,6 +592,8 @@
   async function shutdown() {
     if (state.stopping || state.switching || state.status?.device?.state !== 'Booted') return;
     state.stopping = true; blank(); render();
+    // That computer shuts it down; the task page shows the device once it is off.
+    if (remote()) { remoteAction('shutdown'); return; }
     try {
       const result = await api('shutdown');
       if (!result.devices?.some((d) => d.udid === udid && d.state === 'Shutdown')) throw Error('UNCONFIRMED');
@@ -876,7 +908,7 @@
       remote() ? null : item(ICON.bar, state.fullToolbar ? t.closeAdvanced : t.advanced, () => setAdvanced(!state.fullToolbar), { 'aria-expanded': String(state.fullToolbar), 'aria-controls': 'stage' }),
       state.fullToolbar ? item(ICON.key, t.releaseKeys, release, { disabled: !on, title: t.releaseHint }) : null,
       h('div', { class: 'sep' }),
-      state.status?.device?.kind!=='physical' && !remote() ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
+      state.status?.device?.kind!=='physical' && (!remote() || remoteManaged()) ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
     ]);
   });
 
@@ -884,13 +916,14 @@
     const rows = M.deviceRows(state.status?.devices, udid, lang);
     const paused = state.status?.settings?.enabled === false;
     showMenu($('device-chip'), [
-      h('div', { class: 'head', text: t.devices }),
-      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current), disabled: paused || state.switching || !d.available || d.current,
+      h('div', { class: 'head', text: remote() ? (lang === 'zh-CN' ? `「${remoteComputer()}」上的设备` : `Devices on ${remoteComputer()}`) : t.devices }),
+      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current), disabled: paused || state.switching || !d.available || d.current || (remote() && !remoteManaged()),
         title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); switchTo(d.udid); } }, [
         h('span', { class: 'dot', 'data-tone': d.tone }),
         h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
         d.current ? h('span', { html: ICON.check }) : null])),
-      ...(remote() ? [] : [h('div', { class: 'sep' }),
+      // A new device on that computer is created with the task page's own sheet.
+      ...(remote() ? (remoteManaged() ? [h('div', { class: 'sep' }), item(ICON.plus, t.addDevice, () => remoteAction('create'))] : []) : [h('div', { class: 'sep' }),
       item(ICON.plus, t.addDevice, () => openDialog('add'), { disabled: paused }),
       state.status?.device?.kind!=='physical' ? item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }) : null]),
     ]);
@@ -898,6 +931,8 @@
   async function switchTo(targetUdid) {
     if (state.switching || state.stopping) return;
     state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
+    // The task moves to that device on its own computer; the task page then shows it here.
+    if (remote()) { remoteAction('bind', { udid: targetUdid }); return; }
     // Inside a task page the switch also moves that task to the new device.
     try {
       const result = await api('switch', { targetUdid, ...(params.get('task') ? { task: params.get('task') } : {}) });
