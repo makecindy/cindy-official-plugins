@@ -928,17 +928,24 @@
     ]);
   });
 
+  // Both computer groups share row rendering and availability/current-device rules.
+  // Only the callback decides where the operation is executed.
+  function deviceMenuRows(rows, disabled, select) {
+    return rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current),
+      disabled: disabled || state.switching || !d.available || d.current,
+      title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); select(d.udid); } }, [
+      h('span', { class: 'dot', 'data-tone': d.tone }),
+      h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
+      d.current ? h('span', { html: ICON.check }) : null]));
+  }
+
   $('device-chip').addEventListener('click', () => {
     const rows = M.deviceRows(state.status?.devices, udid, lang);
     const paused = state.status?.settings?.enabled === false;
     showMenu($('device-chip'), [
       h('div', { class: 'head', text: remote() ? (lang === 'zh-CN' ? `「${remoteComputer()}」上的设备` : `Devices on ${remoteComputer()}`)
         : sides ? (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') : t.devices }),
-      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current), disabled: paused || state.switching || !d.available || d.current || (remote() && !remoteManaged()),
-        title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); switchTo(d.udid); } }, [
-        h('span', { class: 'dot', 'data-tone': d.tone }),
-        h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
-        d.current ? h('span', { html: ICON.check }) : null])),
+      ...deviceMenuRows(rows, paused || (remote() && !remoteManaged()), switchTo),
       // A new device on that computer is created with the task page's own sheet.
       ...(remote() ? (remoteManaged() ? [h('div', { class: 'sep' }), item(ICON.plus, t.addDevice, () => remoteAction('create', { where: 'remote' }))] : []) : [h('div', { class: 'sep' }),
       item(ICON.plus, t.addDevice, () => openDialog('add'), { disabled: paused }),
@@ -955,10 +962,7 @@
     const rows = M.deviceRows(other.devices.map((d) => ({ ...d, kind: far ? 'remote' : d.kind })), null, lang);
     return [h('div', { class: 'sep' }),
       h('div', { class: 'head', text: far ? (lang === 'zh-CN' ? `「${farName()}」上的设备` : `Devices on ${farName()}`) : (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') }),
-      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': 'false', disabled: state.switching || !d.available || !usable,
-        title: t.switchTo, onclick: () => { closeMenu(); useOther(other.where, d.udid); } }, [
-        h('span', { class: 'dot', 'data-tone': d.tone }),
-        h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })])])),
+      ...deviceMenuRows(rows, !usable, (id) => useOther(other.where, id)),
       usable ? item(ICON.plus, far ? (lang === 'zh-CN' ? `在「${farName()}」上添加设备` : `Add device on ${farName()}`) : (lang === 'zh-CN' ? '在这台电脑上添加设备' : 'Add device on this computer'),
         () => remoteAction('create', { where: other.where })) : null];
   }

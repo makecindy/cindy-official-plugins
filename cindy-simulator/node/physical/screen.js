@@ -5,7 +5,7 @@
   const zh=parent.document.documentElement.lang==='zh-CN',t=(cn,en)=>zh?cn:en;
   canvas.setAttribute('aria-label',t('手机画面','Phone screen'));keyboard.setAttribute('aria-label',t('电脑键盘输入','Computer keyboard input'));
   const overlay=new window.Baguette._PinchOverlay($('screenArea'));
-  const shell=window.PhysicalShell?new window.PhysicalShell(frame,$('screenArea'),()=>fit()):null;
+  const shell=window.DeviceShell?new window.DeviceShell(frame,$('screenArea'),()=>fit()):null;
   let screen=null,available=false,ready=false,preparing=false,closed=false,gesture=null,wheel=null,wheelTimer,epoch=0,queue=Promise.resolve(),queued=0,noticeTimer,fast=false,pendingText=null;
   function connection(error){
     const code=error?.errorCode||error?.code;

@@ -147,6 +147,8 @@ selected mode. Hover tips explain operations and shortcuts; the shared help
 dialog is also available on touch screens and describes the current device's
 input. Toolbar wrapping reserves space beneath the view on narrow screens.
 
+The local and remote task views share device-group rendering and menu rows. Both physical-phone and remote screen pages use `node/physical/shell.js` for bezel loading, rotation, stale-response rejection and retries; each supplies its definition URL. The controller, device model and gesture modules are also shared. Transport, connection recovery and platform operations remain in their respective adapters.
+
 ## Screen streaming
 
 Every device streams H.264 and sends nothing while the screen is still:

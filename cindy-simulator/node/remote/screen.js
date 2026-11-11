@@ -140,27 +140,10 @@
   // the computer that runs it from the same artwork as for a device shown
   // there. It arrives a little after the picture; until then, and for models
   // that computer has no artwork for, the plain rounded body stays.
-  const shell={key:null,viewport:null,pending:false,retryAt:0,generation:0,
-    update(){
-      if(!picture||!window.Baguette?._Bezel)return;
-      const key=picture.width+'x'+picture.height;
-      if(key===this.key&&(this.viewport||this.pending||Date.now()<this.retryAt))return;
-      const generation=++this.generation;this.pending=true;
-      // The device was turned: the old body no longer fits the picture.
-      if(key!==this.key){this.key=key;this.viewport=null;frame.replaceChildren(area);frame.removeAttribute('data-bezel');fit();}
-      void (async()=>{
-        const response=await fetch(`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${picture.width}&h=${picture.height}`,{signal:AbortSignal.timeout(15000)});
-        if(!response.ok)return;
-        const def=(await response.json()).screen;
-        if(!def?.bezelImage?.rest||generation!==this.generation)return;
-        await Promise.all([def.bezelImage.rest,def.maskImage].filter(Boolean).map(async src=>{const image=new Image();image.src=src;await image.decode();}));
-        if(generation!==this.generation)return;
-        // Keep the live canvas and its listeners; only the body around it changes.
-        const bezel=new window.Baguette._Bezel(def,{bare:false});bezel.mount(frame);bezel.canvas.replaceWith(area);
-        bezel.wrapper.className='physical-bezel';bezel.frameImg.className='physical-bezel-image';
-        this.viewport=def.viewport;frame.setAttribute('data-bezel','');fit();
-      })().catch(()=>{}).finally(()=>{if(generation===this.generation){this.pending=false;this.retryAt=Date.now()+3000;}});
-    }};
+  const shell=new window.DeviceShell(frame,area,fit,{
+    definitionURL:screen=>`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${screen.width}&h=${screen.height}`,
+    retryMs:3000,
+  });
   function fit(){
     if(!picture)return;
     const s=scale();points={width:picture.width/s,height:picture.height/s};
@@ -175,9 +158,9 @@
       controller.state.viewport={width:viewport.width,height:viewport.height};
       void controller.measure?.();
     }
-    shell.update();
+    shell.update(picture);
   }
-  setInterval(()=>{if(!closed&&!document.hidden)shell.update();},2000);
+  setInterval(()=>{if(!closed&&!document.hidden&&picture)shell.update(picture);},2000);
 
   // ---- picture ----
   const hex=n=>n.toString(16).padStart(2,'0');

@@ -31,6 +31,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   const sized=p=>`${p.width}x${p.height}`;
   const url=(id,locale,task)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}#cindyClipboard=${new URL(base).port}.${token}`;
   const assets={'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],
+    '/device-shell.js':['../physical/shell.js','text/javascript'],
     '/remote.js':['screen.js','text/javascript'],'/remote.css':['../physical/screen.css','text/css'],
     '/bezel.js':['../../vendor/baguette/Baguette_Baguette.bundle/Web/baguette/parts/bezel.js','text/javascript'],
     ...Object.fromEntries(GESTURE_FILES.map(name=>[`/gestures/${name}.js`,[GESTURES+name+'.js','text/javascript']]))};

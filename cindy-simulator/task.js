@@ -186,27 +186,24 @@ function render() {
       h('button', { class: 'btn cta', text: busy === d.udid ? T.starting : T.start, disabled: !!busy, onclick: () => act('task_boot', { udid: d.udid }, d.udid) }),
       (state.devices || []).length > 1 || remoteDevice ? h('button', { class: 'link', text: T.change, disabled: !!busy, onclick: () => { choosing = true; render(); } }) : null,
     ]));
-  } else if (!remoteDevice) {
-    const actions = [h('button', { class: (state.devices || []).length ? 'btn quiet' : 'btn cta', text: busy === 'create' ? T.creating : T.create, disabled: !!busy, onclick: () => createDevice() })];
-    if (choosing) actions.push(h('button', { class: 'link', text: T.back, onclick: () => { choosing = false; render(); } }));
-    inner.append(hero(GLYPH.big, T.noneTitle, T.noneBody, actions));
-    const list = deviceList(state.devices, 'local', choosing ? state.device?.udid : null);
-    if (list) { inner.append(h('div', { class: 'list-label', text: T.devices })); inner.append(list); }
   } else {
-    // A task on another computer: both computers' devices, each under its own name.
-    const mine = side === 'local' ? state.devices : other?.side === 'local' ? other.devices : null;
-    const theirs = side === 'remote' ? state.devices : other?.side === 'remote' ? other.devices : null;
     const managed = remoteManaged(), current = choosing ? state.device?.udid : null;
-    const actions = [h('button', { class: 'btn quiet', text: busy === 'create' ? T.creating : T.createHere, disabled: !!busy, onclick: () => createDevice('local') }),
-      managed ? h('button', { class: 'btn quiet', text: T.createThere(computer()), disabled: !!busy, onclick: () => createDevice('remote') }) : null];
+    // One selection view; a remote task simply adds a second computer group.
+    const groups = [{ where: 'local', devices: side === 'local' ? state.devices : other?.devices,
+      label: remoteDevice ? T.hereDevices : T.devices, usable: true }];
+    if (remoteDevice) groups.push({ where: 'remote', devices: side === 'remote' ? state.devices : other?.devices,
+      label: T.remoteTag(computer()), usable: managed });
+    const actions = [h('button', { class: remoteDevice || (state.devices || []).length ? 'btn quiet' : 'btn cta',
+      text: busy === 'create' ? T.creating : remoteDevice ? T.createHere : T.create,
+      disabled: !!busy, onclick: () => createDevice('local') })];
+    if (remoteDevice && managed) actions.push(h('button', { class: 'btn quiet', text: T.createThere(computer()), disabled: !!busy, onclick: () => createDevice('remote') }));
     if (choosing) actions.push(h('button', { class: 'link', text: T.back, onclick: () => { choosing = false; render(); } }));
-    inner.append(hero(GLYPH.big, T.noneTitle, managed ? T.bothBody : T.hereBody, actions, false));
-    const here = deviceList(mine, 'local', side === 'local' ? current : null);
-    if (here) { inner.append(h('div', { class: 'list-label', text: T.hereDevices })); inner.append(here); }
-    const there = deviceList(theirs, 'remote', side === 'remote' ? current : null, managed);
-    if (there) { inner.append(h('div', { class: 'list-label', text: T.remoteTag(computer()) })); inner.append(there); }
-    // An older plugin there cannot be asked for its devices: say what would make them available.
-    if (!managed && (side === 'remote' || other?.side === 'remote')) inner.append(h('p', { class: 'status', text: T.remoteViewOnlyBody }));
+    inner.append(hero(GLYPH.big, T.noneTitle, remoteDevice ? (managed ? T.bothBody : T.hereBody) : T.noneBody, actions, false));
+    for (const group of groups) {
+      const list = deviceList(group.devices, group.where, side === group.where ? current : null, group.usable);
+      if (list) { inner.append(h('div', { class: 'list-label', text: group.label })); inner.append(list); }
+    }
+    if (remoteDevice && !managed && (side === 'remote' || other?.side === 'remote')) inner.append(h('p', { class: 'status', text: T.remoteViewOnlyBody }));
   }
   inner.append(h('p', { class: 'status' + (note?.error ? ' error' : ''), text: note?.text || '' }));
 }

@@ -45,6 +45,10 @@ test('the remote device opens in the plugin controller with its own device page 
   // The same gesture modules as the local simulator page, and the Mac trackpad's real contacts.
   for(const name of ['pointer-interpreter','mouse-gesture-source','wheel-gesture-source','touch-gesture-source','option-hover-preview','pinch-overlay'])assert.ok(html.includes(`/gestures/${name}.js`),name);
   assert.match(html,/cindy-native-trackpad/);
+  assert.match(html,/src="\/device-shell.js"/);
+  const shell=await fetch(`${page.origin}/device-shell.js`);
+  assert.equal(shell.status,200);
+  assert.equal(await shell.text(),await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/physical/shell.js'),'utf8'));
   assert.equal((await fetch(`${page.origin}/gestures/pointer-interpreter.js`)).status,200);
   assert.equal((await fetch(`${page.origin}/simulators/SIM-1?cindyViewer=wrong`)).status,403);
   assert.equal((await fetch(`${page.origin}/simulators/OTHER?cindyViewer=${token}`)).status,404);
