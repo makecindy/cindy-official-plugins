@@ -103,7 +103,7 @@
   // Typing goes to the device: keep the hidden field focused, as the local pages do.
   area.addEventListener('mousedown',e=>{if(device?.keyboard){e.preventDefault();keyboard.focus({preventScroll:true});}});
   const KEYS={Enter:'Enter',Tab:'Tab',Backspace:'Backspace',Escape:'Escape',Delete:'Delete',ArrowLeft:'ArrowLeft',ArrowRight:'ArrowRight',ArrowUp:'ArrowUp',ArrowDown:'ArrowDown'};
-  const key=code=>{queue({kind:'key',code,down:true});queue({kind:'key',code,down:false});};
+  const key=code=>queue({kind:'key',code});
   const text=value=>{for(let i=0;i<value.length;i+=4000)queue({kind:'text',text:value.slice(i,i+4000)});};
   keyboard.addEventListener('keydown',e=>{
     if(e.isComposing||!device?.keyboard||e.metaKey||e.ctrlKey)return;

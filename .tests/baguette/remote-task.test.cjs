@@ -232,3 +232,40 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   assert.equal(button('New device on Mac Studio…'),undefined);assert.ok(button('New device here…'));assert.ok(text().includes('My iPhone'));
   assert.ok(text().some(line=>line.includes('Update the Device Simulator plugin there')));
 });
+
+// A failed or hanging read of one computer must not hide the other computer's
+// device picker or creation sheet. Exercise the actual task page, including RPC routing.
+for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported'],['remote','pending'],['local','offline']])test(`other devices remain usable while ${failedSide} task state is ${failure}`,async()=>{
+  const nodes=new Map(),calls=[],sheets=[];let poll,clock=1e6,remoteReply;
+  const mine=[{udid:failedSide==='remote'?'LOCAL-1':'REMOTE-1',name:'Available phone',state:'Booted'}];
+  const available={ok:true,devices:mine,device:null,settings:{enabled:true},remote:{computer:'Studio',manage:true}};
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],replaceChildren(){this.children=[];},append(...n){this.children.push(...n);}});return nodes.get(id);};
+  const context={URL,URLSearchParams,Date:{now:()=>clock},location:{search:'?session=task-1&device=studio'},
+    localStorage:{getItem:()=>failedSide==='local'?'local':null,setItem(){}},addEventListener(){},setInterval:fn=>poll=fn,
+    document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}},
+    CindySimPages:{locale:async()=>'en',h:(tag,props,children=[])=>({tag,props,children}),GLYPH:{},onPush(){},memoryBadge:()=>null,
+      createDevice:async options=>{sheets.push(options);return {udid:'LOCAL-NEW'};},
+      rpc:async(action,params)=>{calls.push({action,params:plain(params)});
+        if(failedSide==='remote'?action==='remote_task':action==='task_state'){
+          if(failure==='pending')return new Promise(resolve=>remoteReply=resolve);
+          if(failure==='offline')throw {errorCode:'DEVICE_OFFLINE'};
+          return {ok:false,errorCode:'HOST_UPDATE_REQUIRED'};
+        }
+        return available;}},
+    CindySimModel:{deviceRows:list=>list.map(d=>({...d,available:true})),createResourceSummary:()=>({prune(){},label(){}})}};
+  vm.createContext(context);vm.runInContext(fs.readFileSync('cindy-simulator/task.js','utf8'),context);await settle();
+  const flatten=n=>[n,...(n.children||[]).filter(Boolean).flatMap(flatten)];
+  const shown=()=>get('inner').children.flatMap(flatten);
+  const button=text=>shown().find(n=>n.tag==='button'&&n.props.text===text);
+  const creation=failedSide==='remote'?'New device here…':'New device on Studio…';
+  const bindings=()=>calls.filter(c=>failedSide==='remote'?c.action==='task_bind':c.action==='remote_task'&&c.params.call==='task_bind');
+  assert.ok(calls.some(c=>failedSide==='remote'?c.action==='manage_state':c.action==='remote_task'),'other read starts independently of the shown result');
+  assert.ok(shown().some(n=>n.props?.text==='Available phone'));assert.ok(button(creation));
+  await button('Use').props.onclick();await settle();
+  assert.equal(bindings()[0].params.udid,mine[0].udid);
+  // A late response from the old side cannot replace the local choice.
+  remoteReply?.({ok:true,devices:[{udid:'REMOTE',name:'Remote phone'}],device:null});await settle();
+  assert.ok(shown().some(n=>n.props?.text==='Available phone'));
+  await button(creation).props.onclick();await settle();
+  assert.equal(typeof sheets[0].call,failedSide==='remote'?'undefined':'function');assert.equal(bindings().at(-1).params.udid,'LOCAL-NEW');
+});

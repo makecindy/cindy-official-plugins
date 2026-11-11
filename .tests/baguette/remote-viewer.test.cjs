@@ -124,3 +124,38 @@ test('only an address Cindy could have issued is accepted',async()=>{
   await assert.rejects(viewer.open({id:'SIM-1',url:'http://127.0.0.1:1234/'+TOKEN,name:'x',platform:'windows'}),{code:'INVALID_ARGUMENT'});
   await viewer.close();
 });
+
+// Feed the real screen page its stream metadata, then drive DOM key events.
+// Provider validation must accept every emitted batch, including mixed text/key input.
+test('remote keyboard sends complete provider-compatible key events and a readable reconnect title',async()=>{
+  const vm=require('node:vm'),{validEvents}=require('../../cindy-simulator/node/live-screen.cjs');
+  const nodes=new Map(),events={},sent=[];
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',listeners:{},setAttribute(){},removeAttribute(){},getContext:()=>({}),addEventListener(type,fn){this.listeners[type]=fn;}});return nodes.get(id);};
+  const message=data=>{const bytes=Buffer.from(JSON.stringify(data)),packet=Buffer.alloc(5+bytes.length);packet.writeUInt32BE(bytes.length+1);packet[4]=0x10;bytes.copy(packet,5);return packet;};
+  const initial=Buffer.concat([message({type:'device',keyboard:true,maxTouches:2}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
+  let first=true,controller;
+  const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang:'zh-CN'}}},
+    document:{hidden:false,getElementById:get,addEventListener(){}},innerWidth:500,innerHeight:900,
+    addEventListener:(type,fn)=>events[type]=fn,setInterval(){},setTimeout(){},clearTimeout(){},
+    AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,VideoDecoder:class{},
+    window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{attach(){}cancel(){}detach(){}}},DeviceShell:class{}},
+    fetch:async(url,options)=>{
+      if(url==='/control-api'){sent.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true})};}
+      controller=options.signal;
+      return {ok:true,body:{getReader:()=>({
+        read:async()=>{if(first){first=false;return {value:initial,done:false};}return new Promise(resolve=>controller.addEventListener('abort',()=>resolve({done:true}),{once:true}));},
+        cancel:async()=>{},
+      })}};
+    }};
+  vm.createContext(context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/remote/screen.js'),'utf8'),context);
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));await settle();
+  assert.equal(get('message-title').textContent,'正在重新连接');
+  const codes=['Enter','Tab','Backspace','Escape','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
+  for(const key of codes)get('keyboard').listeners.keydown({key,preventDefault(){}});
+  get('keyboard').value='text';get('keyboard').listeners.input({});await settle();await settle();
+  events.pagehide();await settle();
+  const batches=sent.filter(p=>p.action==='input').map(p=>p.events);
+  for(const batch of batches)assert.doesNotThrow(()=>validEvents(batch,'en'));
+  assert.deepEqual(batches.flat().filter(e=>e.kind==='key'),codes.map(code=>({kind:'key',code})));
+  assert.ok(batches.flat().some(e=>e.kind==='text'&&e.text==='text'));
+});

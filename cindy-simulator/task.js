@@ -158,9 +158,35 @@ function deviceList(all, where, exclude, usable = true) {
     ]);
   }));
 }
+// Both groups remain selectable even before the shown computer answers.
+function renderDevices(inner) {
+  const managed = remoteManaged(), current = choosing ? state?.device?.udid : null;
+  // One selection view; a remote task simply adds a second computer group.
+  const groups = [{ where: 'local', devices: side === 'local' ? state?.devices : other?.side === 'local' ? other.devices : null,
+    label: remoteDevice ? T.hereDevices : T.devices, usable: true }];
+  if (remoteDevice) groups.push({ where: 'remote', devices: side === 'remote' ? state?.devices : other?.side === 'remote' ? other.devices : null,
+    label: T.remoteTag(computer()), usable: managed });
+  const actions = [h('button', { class: remoteDevice || (state?.devices || []).length ? 'btn quiet' : 'btn cta',
+    text: busy === 'create' ? T.creating : remoteDevice ? T.createHere : T.create,
+    disabled: !!busy, onclick: () => createDevice('local') })];
+  if (remoteDevice && managed) actions.push(h('button', { class: 'btn quiet', text: T.createThere(computer()), disabled: !!busy, onclick: () => createDevice('remote') }));
+  if (choosing) actions.push(h('button', { class: 'link', text: T.back, onclick: () => { choosing = false; render(); } }));
+  inner.append(hero(GLYPH.big, T.noneTitle, remoteDevice ? (managed ? T.bothBody : T.hereBody) : T.noneBody, actions, false));
+  for (const group of groups) {
+    const list = deviceList(group.devices, group.where, side === group.where ? current : null, group.usable);
+    if (list) { inner.append(h('div', { class: 'list-label', text: group.label })); inner.append(list); }
+  }
+  if (remoteDevice && !managed && ((side === 'remote' && state) || other?.side === 'remote')) inner.append(h('p', { class: 'status', text: T.remoteViewOnlyBody }));
+}
 function render() {
   const inner = $('inner'); inner.replaceChildren(); resourceView?.prune();
-  if (!state) { inner.append(hero(GLYPH.big, note?.text || (far() ? T.remoteWaiting : T.loading), '')); return; }
+  if (!state) {
+    if (remoteDevice) {
+      renderDevices(inner);
+      inner.append(h('p', { class: 'status' + (note?.error ? ' error' : ''), text: note?.text || (far() ? T.remoteWaiting : T.loading) }));
+    } else inner.append(hero(GLYPH.big, note?.text || T.loading, ''));
+    return;
+  }
   const operation = remoteOperation();
   // With its own devices switched off (or its plugin unable to be asked), a remote task still offers the other side's.
   if (state.settings?.enabled === false && !remoteDevice) inner.append(hero(GLYPH.pause, T.pausedTitle, T.pausedBody));
@@ -187,23 +213,7 @@ function render() {
       (state.devices || []).length > 1 || remoteDevice ? h('button', { class: 'link', text: T.change, disabled: !!busy, onclick: () => { choosing = true; render(); } }) : null,
     ]));
   } else {
-    const managed = remoteManaged(), current = choosing ? state.device?.udid : null;
-    // One selection view; a remote task simply adds a second computer group.
-    const groups = [{ where: 'local', devices: side === 'local' ? state.devices : other?.devices,
-      label: remoteDevice ? T.hereDevices : T.devices, usable: true }];
-    if (remoteDevice) groups.push({ where: 'remote', devices: side === 'remote' ? state.devices : other?.devices,
-      label: T.remoteTag(computer()), usable: managed });
-    const actions = [h('button', { class: remoteDevice || (state.devices || []).length ? 'btn quiet' : 'btn cta',
-      text: busy === 'create' ? T.creating : remoteDevice ? T.createHere : T.create,
-      disabled: !!busy, onclick: () => createDevice('local') })];
-    if (remoteDevice && managed) actions.push(h('button', { class: 'btn quiet', text: T.createThere(computer()), disabled: !!busy, onclick: () => createDevice('remote') }));
-    if (choosing) actions.push(h('button', { class: 'link', text: T.back, onclick: () => { choosing = false; render(); } }));
-    inner.append(hero(GLYPH.big, T.noneTitle, remoteDevice ? (managed ? T.bothBody : T.hereBody) : T.noneBody, actions, false));
-    for (const group of groups) {
-      const list = deviceList(group.devices, group.where, side === group.where ? current : null, group.usable);
-      if (list) { inner.append(h('div', { class: 'list-label', text: group.label })); inner.append(list); }
-    }
-    if (remoteDevice && !managed && (side === 'remote' || other?.side === 'remote')) inner.append(h('p', { class: 'status', text: T.remoteViewOnlyBody }));
+    renderDevices(inner);
   }
   inner.append(h('p', { class: 'status' + (note?.error ? ' error' : ''), text: note?.text || '' }));
 }
@@ -212,13 +222,16 @@ async function refresh() {
   const request = pending = {};
   try {
     const shown = side;
-    const r = await call('task_state', { sessionId: session, ...(far() && state?.device ? { screenId: state.device.udid } : {}) }, T.timeout);
+    const reading = call('task_state', { sessionId: session, ...(far() && state?.device ? { screenId: state.device.udid } : {}) }, T.timeout);
+    // Read the other computer independently: a failed or hanging request must
+    // never prevent choosing/creating a device on the side that is available.
+    void refreshOther();
+    const r = await reading;
     if (pending !== request || shown !== side) return;
     if (!r.ok) throw r;
     accept(r); refreshedAt = Date.now(); if (note && !note.sticky) note = null;
     // An operation that computer could not finish is told once.
     if (far() && r.operation?.state === 'failed') note = { text: T.remoteFailed(r.operation.errorCode || 'FAILED'), error: true, sticky: true };
-    void refreshOther();
   } catch (error) { if (pending !== request) return; if (!viewerUrl && !note?.sticky) note = { text: errorText(error), error: true }; }
   finally { if (pending === request) pending = null; }
   render();
