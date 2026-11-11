@@ -364,3 +364,68 @@ test('the brand icon is inlined and no extension resource is web-accessible',asy
   assert.match(icon,/globalThis\.CindyBrandIcon='data:image\/png;base64,[A-Za-z0-9+\/=]+'/);
   assert.match(source,/globalThis\.CindyBrandIcon\|\|api\.runtime\.getURL/);
 });
+
+// Regression: ownership used to be invisible in the tab strip unless the user found and granted
+// tabGroups. Exercise the real content-script message entry and DOM in Chromium, without that API.
+test('tab titles mark ownership by default and restore on takeover or extension disposal',{
+  skip:!process.env.PLAYWRIGHT_CORE,timeout:30000,
+},async t=>{
+  const {createRequire}=await import('node:module');
+  const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_CORE);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+  t.after(()=>browser.close());
+  for(const colorScheme of ['light','dark']){
+    const page=await browser.newPage({colorScheme});
+    await page.route('https://example.test/**',route=>route.fulfill({contentType:'text/html',body:'<title>Original</title><button id="takeover">Take over</button>'}));
+    await page.goto('https://example.test/');
+    await page.evaluate(()=>{
+      globalThis.sent=[];
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},
+        async sendMessage(m){sent.push(m);return m.type==='cindy-learning'?{ok:true,locale:'zh-CN',features:[]}:{ok:true,opened:false};}},
+        storage:{local:{async get(){return {cindyReadingPreferences:{autoVideo:false}};}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const name of ['brand-icon','learning-core','subtitle-playback','ui','reading-ui','content'])
+      await page.addScriptTag({path:new URL('../my-browser/extension/'+name+'.js',import.meta.url).pathname});
+    const mark=()=>page.evaluate(()=>new Promise(resolve=>command({type:'cindy-agent-mark',opened:true},{id:'fixture'},resolve)));
+    assert.equal(await page.title(),'Original','user tabs stay unchanged');
+    await mark();assert.equal(await page.title(),'[Cindy] Original');
+    await mark();assert.equal(await page.title(),'[Cindy] Original','repeated messages do not stack prefixes');
+    await page.evaluate(()=>{document.title='Updated';});
+    await page.waitForFunction(()=>document.title==='[Cindy] Updated');
+    await page.evaluate(()=>document.querySelector('title').remove());
+    await page.waitForFunction(()=>document.title==='[Cindy]');
+    await page.evaluate(()=>{document.title='Latest';document.getElementById('takeover').click();});
+    await page.waitForFunction(()=>document.title==='[Cindy] Latest');
+    await page.locator('#takeover').click();
+    assert.equal(await page.title(),'Latest','real user input restores the latest site title');
+    await mark();assert.equal(await page.title(),'Latest','late ownership messages cannot undo takeover');
+    await page.evaluate(()=>{document.title='User title';});
+    assert.equal(await page.title(),'User title');
+    assert.equal(await page.evaluate(()=>sent.filter(m=>m.type==='cindy-user-took-over').length),1);
+    await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'settings'},{id:'fixture'},resolve)));
+    const cdp=await page.context().newCDPSession(page);
+    const {root}=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
+    let optionsButton;
+    function visit(node){
+      if(node.nodeName==='BUTTON'&&node.children?.some(n=>n.nodeValue==='标签分组设置'))optionsButton=node;
+      for(const child of [...(node.children||[]),...(node.shadowRoots||[])])visit(child);
+    }
+    visit(root);assert.ok(optionsButton,'group settings are discoverable in the ordinary panel');
+    const {object}=await cdp.send('DOM.resolveNode',{nodeId:optionsButton.nodeId});
+    const {result}=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:'function(){const r=this.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}}',returnByValue:true});
+    await page.mouse.click(result.value.x,result.value.y);
+    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-options'));
+    await cdp.detach();
+    // A fresh document obtains ownership again through the normal message path.
+    await page.reload();
+    await page.evaluate(()=>{
+      globalThis.browser={runtime:{id:'fixture',getURL:()=>'',onMessage:{addListener(fn){globalThis.command=fn;},removeListener(){}},async sendMessage(m){return m.type==='cindy-agent-tab'?{opened:true}:{ok:true,locale:'en'};}},storage:{local:{async get(){return {};}},onChanged:{addListener(){},removeListener(){}}}};
+    });
+    for(const name of ['brand-icon','learning-core','subtitle-playback','ui','reading-ui','content'])
+      await page.addScriptTag({path:new URL('../my-browser/extension/'+name+'.js',import.meta.url).pathname});
+    await page.waitForFunction(()=>document.title==='[Cindy] Original');
+    await page.evaluate(()=>{browser.runtime.id=undefined;document.dispatchEvent(new Event('cindy-content-script-start'));});
+    assert.equal(await page.title(),'Original','extension disposal removes its own title prefix');
+    await page.close();
+  }
+});

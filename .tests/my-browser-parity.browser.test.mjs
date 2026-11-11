@@ -131,6 +131,8 @@ ${who==='cross'?'<iframe src="/frame-inner?who=nested" width=400 height=200></if
     return {act,worker,bridge,server,user,context,manifest,close};
   }catch(e){await close();throw e;}
 }
+// Ownership prefixes are checked separately; action assertions compare the site's title.
+const siteTitle=value=>value?.replace(/^\[Cindy\] ?/,'');
 const enabled={skip:!process.env.PLAYWRIGHT_CORE,timeout:120000};
 test('real Chrome: agent actions match the dedicated browser without disturbing the user',enabled,async()=>{
   const results=[];const check=(name,ok,detail='')=>results.push({name,ok,detail});
@@ -171,7 +173,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   check('acting on a page shows the Cindy mark, which page reads do not see',marked && !/working on this page|正在自动操作/.test(String(snap.text)+String(snap.elements)),JSON.stringify({marked}));
   const clicked=await act('click',{...T,ref:ref('Click me')});
   const ev=await act('evaluate',{...T,fn:'() => document.title'});
-  check('click + evaluate',clicked.ok && ev.ok && ev.result==='clicked',JSON.stringify(ev));
+  check('click + evaluate',clicked.ok && ev.ok && siteTitle(ev.result)==='clicked',JSON.stringify(ev));
   // A widget that opens on pointerdown opens from one click; one that updates late is toggled once, not twice.
   const menuClick=await act('click',{...T,ref:ref('Profile menu')});
   const lazyClick=await act('click',{...T,ref:ref('Lazy disclosure')});
@@ -197,7 +199,7 @@ test('real Chrome: agent actions match the dedicated browser without disturbing 
   const xy=await act('evaluate',{...T,fn:"() => { const r=b.getBoundingClientRect(); document.title='reset'; return [r.left+r.width/2, r.top+r.height/2]; }"});
   const coords=await act('clickCoords',{...T,x:xy.result[0],y:xy.result[1]});
   const t2=await act('evaluate',{...T,fn:'() => document.title'});
-  check('coordinate click',coords.ok && t2.result==='clicked',JSON.stringify(t2));
+  check('coordinate click',coords.ok && siteTitle(t2.result)==='clicked',JSON.stringify(t2));
   const drag=await act('drag',{...T,startSelector:'#src',endSelector:'#dst'});
   const dropped=await act('evaluate',{...T,fn:'() => dst.textContent'});
   check('drag and drop',drag.ok && dropped.result==='dropped',JSON.stringify({drag,dropped:dropped.result}));
@@ -306,7 +308,7 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     const opened=await act('open',{url:'http://parity.test/frames'});
     const T={tabId:opened.tabId,url:'http://parity.test/frames'};
     let snap;for(let i=0;i<30;i++){snap=await act('snapshot',{...T,maxChars:30000});if(/nested/.test(snap.text||'')&&/Srcdoc text/.test(snap.text||''))break;await new Promise(r=>setTimeout(r,200));}
-    check('snapshot keeps the tab as its address',snap.ok && snap.url==='http://parity.test/frames' && snap.title==='Frames',JSON.stringify({url:snap.url,title:snap.title}));
+    check('snapshot keeps the tab as its address',snap.ok && snap.url==='http://parity.test/frames' && siteTitle(snap.title)==='Frames',JSON.stringify({url:snap.url,title:snap.title}));
     for(const who of ['same','cross','nested'])check('snapshot reads frame '+who,snap.text.includes('Inner text '+who) && snap.elements.includes('Go '+who),snap.text);
     check('snapshot reads a srcdoc frame',snap.text.includes('Srcdoc text') && snap.elements.includes('Srcdoc button'),snap.elements);
     check('snapshot reads the top page too',snap.text.includes('Top page') && snap.elements.includes('Top button'),snap.text);
@@ -324,7 +326,7 @@ test('real Chrome: an iframe reads and acts like the page around it',enabled,asy
     const srcdoc=await act('click',{...T,ref:ref('Srcdoc button')});
     check('click reaches a srcdoc frame',srcdoc.ok,JSON.stringify(srcdoc));
     const top=await act('click',{...T,ref:ref('Top button')});
-    check('a top-page ref still acts on the top page',top.ok && context.pages().find(p=>p.url()===T.url)&&(await context.pages().find(p=>p.url()===T.url).title())==='top clicked',JSON.stringify(top));
+    check('a top-page ref still acts on the top page',top.ok && context.pages().find(p=>p.url()===T.url)&&siteTitle(await context.pages().find(p=>p.url()===T.url).title())==='top clicked',JSON.stringify(top));
     const stale=await act('click',{...T,ref:'0'.repeat(32)});
     check('an unknown ref is stale, not a click somewhere else',stale.error==='STALE_REF',JSON.stringify(stale));
     // A large file into a cross-site frame, addressed by ref.
@@ -415,7 +417,7 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
     const ref=name=>(new RegExp('\\[([a-f0-9]{32})\\] \\S+ '+name)).exec(more.elements)?.[1];
     const page=context.pages().find(p=>p.url()===T.url);
     const clicked=await act('click',{...T,ref:ref('Shadow save')});
-    check('a ref inside a shadow root can be clicked',clicked.ok && (await page.title())==='shadow clicked',JSON.stringify(clicked));
+    check('a ref inside a shadow root can be clicked',clicked.ok && siteTitle(await page.title())==='shadow clicked',JSON.stringify(clicked));
     const typed=await act('type',{...T,ref:ref('Shadow field'),text:'in shadow'});
     check('a ref inside a shadow root can be typed into',typed.ok && (await page.evaluate(()=>document.querySelector('my-field').shadowRoot.getElementById('sf').value))==='in shadow',JSON.stringify(typed));
     const area=await act('type',{...T,ref:ref('Attribute condition'),text:"assertion.sub == 'x'"});
@@ -423,10 +425,10 @@ test('real Chrome: a long navigation does not hide the form on a page',enabled,a
     // Addressed by ref, a pointer action reaches that element, not the host the page reports at its point.
     await page.evaluate(()=>{document.title='reset';});
     const coords=await act('clickCoords',{...T,ref:ref('Shadow save')});
-    check('clickCoords with a shadow ref reaches the inner button',coords.ok && (await page.title())==='shadow clicked',JSON.stringify({coords,title:await page.title()}));
+    check('clickCoords with a shadow ref reaches the inner button',coords.ok && siteTitle(await page.title())==='shadow clicked',JSON.stringify({coords,title:await page.title()}));
     await page.evaluate(()=>{document.title='reset';});
     const dragged=await act('drag',{...T,startRef:ref('Shadow save'),endRef:ref('Attribute condition')});
-    check('drag from a shadow ref starts on the inner button',dragged.ok && (await page.title())==='shadow down',JSON.stringify({dragged,title:await page.title()}));
+    check('drag from a shadow ref starts on the inner button',dragged.ok && siteTitle(await page.title())==='shadow down',JSON.stringify({dragged,title:await page.title()}));
     check('text inside an open shadow root is in the snapshot',more.text.includes('Shadow note text'),more.text);
     const scoped=await act('snapshot',{...T,selector:'[role=main]'});
     check('a selector narrows to the form',!scoped.elements.includes('Nav 0') && scoped.elements.includes('Shadow field') && scoped.truncated===false,scoped.elements);
@@ -500,7 +502,7 @@ test('real Chrome: debugger-only actions run on demand and detach right after',e
     if(!csp.tabId)console.error('csp open',JSON.stringify(csp));
     if(!csp.tabId){const ws=context.serviceWorkers();console.error('workers',ws.length);try{console.error('sw state',JSON.stringify(await ws[ws.length-1].evaluate(async()=>({conn:(await chrome.storage.session.get('connection')).connection,debugged:typeof debugged!=='undefined'?debugged.size:null}))));}catch(e){console.error('sw eval failed',e.message);}}
     const cspEval=await act('evaluate',{tabId:csp.tabId,url:'http://csp.test/',fn:'() => document.title + 1'});
-    check('CSP page evaluates through the debugger',cspEval.ok && cspEval.result==='CSP1' && cspEval.viaDebugger===true,JSON.stringify(cspEval));
+    check('CSP page evaluates through the debugger',cspEval.ok && siteTitle(cspEval.result)==='CSP1' && cspEval.viaDebugger===true,JSON.stringify(cspEval));
     const handoff=await act('focus',{tabId:csp.tabId,url:'http://csp.test/'});
     check('focus in Cindy window hands the page over without taking focus',handoff.ok && handoff.handoff===true,JSON.stringify(handoff));
     const pdf=await act('pdf',T);
