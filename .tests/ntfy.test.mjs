@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
-import { validateGhostManifest } from './contracts/plugin-manifest.0dad3ce10268.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const pluginDir = path.join(root, 'ntfy');

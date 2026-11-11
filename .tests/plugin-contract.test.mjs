@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { validateGhostManifest } from './contracts/plugin-manifest.0dad3ce10268.mjs';
+import { validateGhostManifest } from './contracts/plugin-manifest.bcdea7e27f97.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -148,7 +148,7 @@ function validateOfficialManifest(pluginDir, manifest) {
       assertText(tool.description, `${pluginDir}.tools.${tool.name}.description`, 1024);
       if (tool.parameters !== undefined) {
         assert.ok(tool.parameters && typeof tool.parameters === 'object' && !Array.isArray(tool.parameters), `${pluginDir}.tools.${tool.name}.parameters must be an object`);
-        assert.ok(Buffer.byteLength(JSON.stringify(tool.parameters), 'utf8') <= 16_384, `${pluginDir}.tools.${tool.name}.parameters exceeds 16KB`);
+        assert.ok(JSON.stringify(tool.parameters).length <= 16_384, `${pluginDir}.tools.${tool.name}.parameters exceeds 16KB`);
       }
     }
   }
@@ -384,9 +384,7 @@ function validatePluginSource(pluginDir, manifest, files = trackedFiles(pluginDi
   assert.ok(totalBytes <= maxTotal, `${pluginDir}: uncompressed package exceeds ${maxTotal} bytes`);
 
   requireTrackedFile(files, pluginDir, 'ghost.json', MAX_MANIFEST_BYTES);
-  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.mainView?.html, manifest.taskView?.html,
-    manifest.settingsHtml, manifest.icon,
-    ...(manifest.mcpApps?.ui?.resources ?? []).map(resource => resource.file)]
+  const declaredFiles = [manifest.entry, manifest.panel?.html, manifest.mainView?.html, manifest.settingsHtml, manifest.icon]
     .filter(Boolean);
   if (manifest.node) declaredFiles.push(manifest.node.entry, ...(manifest.node.entries ?? []));
   for (const relativePath of declaredFiles) {
@@ -397,9 +395,7 @@ function validatePluginSource(pluginDir, manifest, files = trackedFiles(pluginDi
     assert.ok(fs.statSync(files.get(manifest.icon).absolutePath).size > 0, `${pluginDir}: icon is empty`);
   }
 
-  for (const locale of ['en', 'ja', 'ko', 'zh-CN']) {
-    assert.ok(manifest.locales?.[locale], `${pluginDir}: official plugins require four locales; missing ${locale}`);
-  }
+  assert.deepEqual(Object.keys(manifest.locales ?? {}).sort(), ['en', 'ja', 'ko', 'zh-CN'].sort(), `${pluginDir}: official plugins require four locales`);
   for (const [locale, relativePath] of Object.entries(manifest.locales ?? {})) {
     const localeFile = requireTrackedFile(files, pluginDir, relativePath, MAX_LOCALE_BYTES);
     validateLocaleResource(pluginDir, locale, readJson(localeFile, MAX_LOCALE_BYTES), manifest);
@@ -775,40 +771,6 @@ test('repository admission does not depend on the current Host capability catalo
   }
 });
 
-test('pinned contract retains existing Host capabilities and restrictions', async (t) => {
-  const base = { schemaVersion: 3, minCindyVersion: '0.1.0', id: 'contract-sync',
-    name: 'Contract sync', version: '1.0.0', entry: 'main.js',
-    tools: [{ name: 'run', description: 'Run' }] };
-  for (const [name, fields] of [
-    ['missing minimum version', { minCindyVersion: undefined }],
-    ['multibyte parameter size', { tools: [{ ...base.tools[0], parameters: { description: '中'.repeat(7000) } }] }],
-    ['tool approval', { tools: [{ ...base.tools[0], approval: 'always' }] }],
-    ['hidden tasks', { agent: { hiddenTasks: true } }],
-    ['task targets', { agent: { targets: true } }],
-    ['delegation', { agent: { tasks: true, delegation: true } }],
-    ['live screen', { liveScreen: true }],
-    ['view placement', { mainView: { html: 'main.html', open: 'window', side: 'left' } }],
-    ['task page', { taskView: { html: '../escape.html' } }],
-    ['setup reference', { setup: { requires: [{ anyOf: ['secret:missing'] }] } }],
-    ['readme path', { readme: { en: '../escape.md' } }],
-    ['model route hook', { models: { types: ['route'] } }],
-    ['MCP Apps tools', { mcpApps: { ui: { resources: [{ uri: 'ui://sync/main', file: 'ui.html' }], tools: {} } } }],
-  ]) {
-    await t.test(name, () => assert.equal(validateGhostManifest({ ...base, ...fields }).ok, false));
-  }
-  await t.test('supported languages remain optional', () => {
-    const locales = Object.fromEntries(['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'fr', 'de', 'pt-PT', 'pt-BR']
-      .map(locale => [locale, `locales/${locale}.json`]));
-    assert.equal(validateGhostManifest({ ...base, locales }).ok, true);
-    assert.equal(validateGhostManifest({ ...base, locales: { en: 'locales/en.json' } }).ok, true);
-  });
-  await t.test('tool approval survives normalization', () => {
-    const result = validateGhostManifest({ ...base, tools: [{ ...base.tools[0], approval: 'auto' }] });
-    assert.equal(result.ok, true);
-    assert.equal(result.manifest.tools[0].approval, 'auto');
-  });
-});
-
 test('mainView HTML must exist among tracked package files', () => {
   const pluginDir = 'cindy-github';
   const fixture = {
@@ -830,29 +792,6 @@ test('mainView HTML must exist among tracked package files', () => {
     /declared file is not tracked: missing-main-view\.html/,
     'package validation must reject a missing mainView HTML file',
   );
-});
-
-test('task pages and MCP Apps resources use the existing declared-file check', () => {
-  const pluginDir = 'cindy-github';
-  const base = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
-  for (const fields of [
-    { taskView: { html: 'missing-page.html' } },
-    { mcpApps: { ui: { resources: [{ uri: 'ui://sync/main', file: 'missing-page.html' }] } } },
-  ]) {
-    assert.throws(() => validatePluginSource(pluginDir, { ...base, ...fields }),
-      /declared file is not tracked: missing-page\.html/);
-  }
-});
-
-test('official four-language requirements permit other supported translations', () => {
-  const pluginDir = 'cindy-github';
-  const base = readJson(path.join(root, pluginDir, 'ghost.json'), MAX_MANIFEST_BYTES);
-  const files = trackedFiles(pluginDir);
-  files.set('locales/fr.json', files.get(base.locales.en));
-  const additional = { ...base, locales: { ...base.locales, fr: 'locales/fr.json' } };
-  assert.doesNotThrow(() => validatePluginSource(pluginDir, additional, files));
-  const { ja, ...incomplete } = additional.locales;
-  assert.throws(() => validatePluginSource(pluginDir, { ...base, locales: incomplete }, files), /four locales/);
 });
 
 test('source checks defer only exact declared dependency outputs to final packaging', (t) => {

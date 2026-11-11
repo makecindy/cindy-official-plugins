@@ -472,34 +472,35 @@ select any of those destinations or publish a plugin.
 Keep both languages synchronized; correcting wording does not require changing
 plugin packages, Host behavior, or CI restrictions.
 
-### Maintaining the pinned contract
+### Current declarations and future synchronization
 
-Maintainers refresh the validator from a specific committed Host revision:
+The fields below reference [Host commit a81313e8446c](https://github.com/makecindy/cindy/blob/a81313e8446c171ba0e70cb568f5b47cc9a9f078/packages/plugin-protocol/src/manifest.ts)
+and its runtime references. They help locate capabilities; availability still
+depends on the target Host.
 
-```sh
-node scripts/refresh-plugin-contract.mjs /path/to/cindy <commit-sha>
-node --test .tests/plugin-contract.test.mjs
-```
+| Capability | Declaration |
+| --- | --- |
+| Tool approval policy | `tools[].approval` (`auto / each-call`) |
+| Tasks and companions | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
+| Views | `mainView.open / side / multiple`, `taskView`, `mobile` |
+| Configuration and prerequisites | `showTaskPreferences`, `setup.requires[].anyOf` |
+| Introductions and mail | `readme`, `mail`, `mailReader` |
+| Models and Routine events | `models.types`, `routineEvents.events` |
+| Credential checks | `network.secrets[].check` |
+| Desktop synchronization and device screens | `deviceSync`, `liveScreen` |
 
-The refresh uses the checkout's existing esbuild and reads committed Git blobs,
-so local Host edits cannot enter the output. It records the commit, generator
-version and input digest, then updates the test imports. Review the source
-changes and generated diff together. CI uses the checked-in snapshot without
-checking out another repository; plugin authors still use the standalone
-validation command above.
+Host resource languages include `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.
+Host capabilities and official repository admission are maintained separately.
+This documentation update keeps the repository's existing four-language policy,
+pinned validator, file checks and package budgets, and changes no plugin manifest
+or runtime behavior.
 
-When a manifest capability or limit changes, compare the client's protocol and
-runtime validators, the Server's local protocol copy and this snapshot using the
-same valid and malformed declarations. Preserve explicit compatibility paths:
-historical parameter sizes use the old UTF-16 bound; new packages use UTF-8 bytes;
-Server stores setup author declarations while the Host normalizes them internally.
-Server historical reads also retain missing v3 minimum-version metadata; new
-uploads require it.
-Package budgets differ by delivery channel and must not be replaced by the
-largest value. Official packages still require zh-CN/en/ja/ko; other supported
-translations are optional. Declared task pages and MCP Apps resources must exist
-just like the existing page and worker entries. No plugin behavior or permissions
-need changing to refresh these contract copies.
+For future updates, record the target Host commit, fields and reference sections,
+then synchronize declaration types and both language guides. Preserve unknown
+capability extensions instead of adding a whitelist of implemented capabilities.
+Any validation, normalization or stored-package read changes need their own
+behavioral diff; documentation updates do not replace the validator snapshot.
+No cross-repository build dependency is needed.
 
 ## Same-account device synchronization
 

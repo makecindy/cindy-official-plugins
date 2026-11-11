@@ -10,18 +10,11 @@ Plugin language strictly follows the Cindy host's current language. Plugins
 must not read `navigator.language` or the operating system language, and must
 not store an independent language preference.
 
-The host currently supports:
-
-- `zh-CN`
-- `zh-TW`
-- `en`
-- `ja`
-- `ko`
-- `es`
-- `fr`
-- `de`
-- `pt-PT`
-- `pt-BR`
+The host currently supports ten resource languages:
+`zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.
+This repository retains its existing admission policy: its pinned validator
+and CI accept `zh-CN / en / ja / ko`, and all four resources remain required.
+Host support for other languages does not change this repository policy.
 
 When the plugin does not provide the host's current language, English is used;
 when the host passes an unknown language, English is used as well. English is
@@ -29,9 +22,7 @@ not a configurable option — it is the protocol-level fallback.
 
 ## Manifest resources
 
-Every official plugin declares at least `zh-CN / en / ja / ko` in `ghost.json`.
-The other supported locales are optional; adding them does not change the
-English fallback or require translations for all ten locales:
+Every official plugin declares four languages in `ghost.json`:
 
 ```json
 {
@@ -67,8 +58,8 @@ the stable tool name, not by array order.
 
 The Cindy client is responsible for:
 
-1. Validating that `locales` contains only the ten supported language/region codes and
-   that `en` is present.
+1. Validating that `locales` contains only Host-supported languages and that
+   `en` is present. The repository's four-language policy is a separate check.
 2. Validating at Forge packaging time and at install time that the resource
    files exist, are valid JSON, are no larger than 64KB each, and fully cover
    the manifest's existing fields and all tools.
@@ -107,8 +98,9 @@ only** — `ghost.json`'s `name` / `description` / `whenToUse` and each tool's
 Not yet covered:
 
 - **Settings pages and self-rendered panels** are migrated independently. Each
-  migrated page reads `/app-context`, supports all four host locales, and falls
-  back to English; migration of the existing pages is in progress.
+  migrated page reads `/app-context`, supports the repository's four locales,
+  and falls back to English for other languages; migration of the existing
+  pages is in progress.
 - **User-facing runtime error copy** (inside each plugin's `main.js`) is likewise
   hardcoded Simplified Chinese.
 

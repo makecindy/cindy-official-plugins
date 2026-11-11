@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import { GHOST_LOCALES } from './contracts/plugin-manifest.0dad3ce10268.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const locales = ['zh-CN', 'en', 'ja', 'ko'];
@@ -99,13 +98,10 @@ test('all official plugins provide complete host-driven locale resources', () =>
   for (const pluginDir of pluginDirs) {
     const manifestPath = path.join(root, pluginDir, 'ghost.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    for (const locale of locales) assert.ok(manifest.locales?.[locale], `${pluginDir}: missing ${locale}`);
-    for (const locale of Object.keys(manifest.locales)) {
-      assert.ok(GHOST_LOCALES.includes(locale), `${pluginDir}: unsupported locale ${locale}`);
-    }
+    assert.deepEqual(Object.keys(manifest.locales ?? {}).sort(), [...locales].sort(), pluginDir);
     const expectedTools = (manifest.tools ?? []).map((tool) => tool.name).sort();
 
-    for (const locale of Object.keys(manifest.locales)) {
+    for (const locale of locales) {
       const localePath = path.join(root, pluginDir, manifest.locales[locale]);
       assert.ok(fs.statSync(localePath).size <= 64 * 1024, `${pluginDir}/${locale} is too large`);
       const resource = JSON.parse(fs.readFileSync(localePath, 'utf8'));
