@@ -67,3 +67,23 @@ The invariant is that browser text is delivered exactly once, accepted editing c
 Discriminating tests drive the real page with unsupported Ctrl+F5, numpad and Delete around valid chords, Dead/Option/AltGr and IME/paste events, then over 50,000 UTF-16 units of Chinese, emoji, quotes, backslashes and escaped control characters (excluding the provider-forbidden NUL). They compare text exactly, enforce complete-body UTF-8 limits, validate emitted keys against the actual provider mapping and load the shared key source in a browser VM. HTTP coverage checks that the exact shared source is served by the worker. These are automated browser/protocol tests, not physical-keyboard/two-computer acceptance.
 
 0.3.48 results: targeted real-page/worker suites 8 passed; full simulator and required repository suites 1,740 passed, zero failed (54.86 seconds). Forge validated and packed the final 0.3.48 source. No installation or two-computer/native-keyboard acceptance performed. The earlier automated fixture incorrectly included NUL, which the provider intentionally forbids; the final escaped-control coverage uses U+0001 and still validates against the actual provider contract.
+
+## Round 5 convergence checkpoint — 2026-11-11
+
+Remaining prerequisites are the two failure families below, current-head CI/review, paired host release, two-computer evidence and explicit merge authorization. The cancelled non-required guidance job is covered by its workflow concurrency policy; all four required checks on 9d4720dc passed.
+
+- Device selection is independent of picture availability: `task.js` owns side/state/choosing; every loaded device state offers the existing selector when no usable picture is available. The same selector renderer routes both computers; transport failures do not change management authority.
+- Ending or failing input must issue a device-wide release after any in-flight input settles. The serial page queue owns delivery order. Remove the speculative local `held` table: the provider's existing `release` event is the sole remote cleanup meaning. Local gesture cancellation is shared and cannot enqueue more gestures while resetting. Cleanup failure is best effort, never recursively retried or replayed.
+
+| Event | Device state unreadable | Device loaded, picture absent/failed | Input idle | Input in flight |
+| --- | --- | --- | --- | --- |
+| Refresh/failure | Shared selector shows available side | Device error plus selector | No input effect | No input effect |
+| Select/create other side | Existing routing, late reads ignored | Existing routing, late reads ignored | Clear old view by existing lifecycle | Existing lifecycle release |
+| Blur/hidden/explicit release | No picture input | No picture input | Clear queued stale gestures, send universal release | Replace waiting gestures with release; send after current result |
+| Close/pagehide | Existing lifecycle | Existing lifecycle | Best-effort universal release | Same queued terminal release, allowed after closed |
+| Input rejection/timeout | Not applicable | Not applicable | No replay | Drop waiting gestures, cancel local state, one universal cleanup request |
+| Cleanup failure | Not applicable | Not applicable | No retry | No recursive cleanup, no replay |
+
+Symmetric audit covers local/remote device states, Booted/Shutdown/paused/operation, HTTP rejection/network loss, ended touch still in flight, blur/hidden/close and cleanup itself rejecting. Tests must distinguish the last head by rejecting touch-up after an acknowledged down while video stays live, and by rejecting picture open while task management succeeds. No new acknowledgement ledger, timer, lock, queue or retry mechanism is added.
+
+0.3.49 results: 37 targeted page/worker/task tests passed (1.01 seconds); full simulator and required repository suites 1,742 passed, zero failed (55.88 seconds). Regression scenarios keep video live while touch-up delivery rejects, make cleanup itself reject without recursion, then close during a pending touch-down and require release after its settlement. The task-page scenario loads a manageable Booted remote device with HOST_UPDATE_REQUIRED from picture open, switches to a local device and creates another locally. Forge validated and packed 0.3.49; no installation or two-computer/native-gesture acceptance in this round.

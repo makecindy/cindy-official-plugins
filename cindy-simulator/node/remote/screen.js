@@ -40,10 +40,10 @@
   // ---- input ----
   // One request at a time, in order. Positions that only move replace the one
   // still waiting, so a slow link never plays a drag back late.
-  let waiting=[],sending=false;
+  let waiting=[],sending=false,resetting=false;
   const movesOnly=e=>e.kind==='touch'&&!e.edge&&e.touches.every(p=>p.phase==='moved');
   function queue(event){
-    if(!live||closed)return;
+    if(!live||closed||resetting)return;
     const tail=waiting[waiting.length-1];
     if(tail&&movesOnly(tail)&&movesOnly(event)&&tail.touches.length===event.touches.length)waiting[waiting.length-1]=event;
     else waiting.push(event);
@@ -52,8 +52,9 @@
   }
   async function flush(){
     if(sending)return;sending=true;
+    let releasing=false;
     try{
-      while(waiting.length&&!closed){
+      while(waiting.length){
         // Bound the complete JSON body, including escaping and multibyte text.
         const events=[];
         while(waiting.length&&events.length<64){
@@ -62,24 +63,25 @@
           events.push(waiting.shift());
         }
         if(!events.length)throw Error('INPUT_TOO_LARGE');
-        const response=await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'input',udid,events}),signal:AbortSignal.timeout(15000)});
+        releasing=events.every(e=>e.kind==='release');
+        const response=await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'input',udid,events}),keepalive:releasing,signal:AbortSignal.timeout(15000)});
         const result=await response.json().catch(()=>({}));
         if(!response.ok||result.ok===false)throw Object.assign(Error(result.errorCode||'REMOTE_INPUT_FAILED'),result);
       }
     }catch(error){
-      // What was not delivered is dropped, never replayed late; the fingers still down are lifted.
-      if(!closed){waiting=[];release();if(error.errorCode!=='VIEW_NOT_READY')notice(t('操作没有送达那台电脑，请重试。','Input did not reach the other computer. Try again.'));}
-    }finally{sending=false;if(waiting.length&&!closed)void flush();}
+      // Drop unconfirmed input without replay; request a universal device cleanup below.
+      waiting=[];cancelLocal();
+      // One best-effort cleanup after the failed request, not a replay or a new queue item.
+      if(!releasing)await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'release',udid}),keepalive:true,signal:AbortSignal.timeout(10000)}).catch(()=>{});
+      if(!closed&&error.errorCode!=='VIEW_NOT_READY')notice(t('操作没有送达那台电脑，请重试。','Input did not reach the other computer. Try again.'));
+    }finally{sending=false;if(waiting.length)void flush();}
   }
-  // The fingers currently down, so a cancelled gesture lifts exactly those.
-  const held=new Map();
   let tapTimer=null,tapUp=null;
   const unit=(value,size)=>Math.max(0,Math.min(1,size>0?value/size:0));
   function touch(phase,fingers,opts){
     if(!points)return;
     if(phase==='began'&&tapUp){clearTimeout(tapTimer);const up=tapUp;tapUp=null;up();}
     const touches=fingers.slice(0,Math.max(1,device?.maxTouches||2)).map((p,id)=>({id,x:unit(p.x,points.width),y:unit(p.y,points.height),phase}));
-    for(const p of touches){if(phase==='ended')held.delete(p.id);else held.set(p.id,p);}
     queue({kind:'touch',touches,...(phase==='began'&&touches.length===1&&opts?.edge?{edge:opts.edge}:{})});
   }
   // The gesture modules' screen: the same verbs as the local simulator's.
@@ -100,12 +102,14 @@
     if(touches){area.setAttribute('data-cindy-trackpad','contacts');interpreter.attach(area);}
     else{area.removeAttribute('data-cindy-trackpad');interpreter.detach();}
   }
-  // Ends whatever gesture is in progress, in order: the modules lift their own
-  // fingers first, then anything still down is cancelled.
+  // Local gesture state is speculative; cleanup never infers remote contacts from it.
+  function cancelLocal(){
+    resetting=true;
+    try{clearTimeout(tapTimer);tapUp=null;interpreter.cancel();overlay.clear();keyboard.value='';}
+    finally{resetting=false;}
+  }
   function release(){
-    clearTimeout(tapTimer);if(tapUp){const up=tapUp;tapUp=null;up();}
-    interpreter.cancel();overlay.clear();keyboard.value='';
-    if(held.size){const touches=[...held.values()].map(p=>({...p,phase:'cancelled'}));held.clear();queue({kind:'touch',touches});}
+    cancelLocal();waiting=[{kind:'release'}];void flush();
   }
   // Typing goes to the device: keep the hidden field focused, as the local pages do.
   area.addEventListener('mousedown',e=>{if(device?.keyboard){e.preventDefault();keyboard.focus({preventScroll:true});}});

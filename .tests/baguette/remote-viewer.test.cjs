@@ -134,14 +134,20 @@ for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends 
   const get=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',listeners:{},setAttribute(){},removeAttribute(){},getContext:()=>({}),addEventListener(type,fn){this.listeners[type]=fn;}});return nodes.get(id);};
   const message=data=>{const bytes=Buffer.from(JSON.stringify(data)),packet=Buffer.alloc(5+bytes.length);packet.writeUInt32BE(bytes.length+1);packet[4]=0x10;bytes.copy(packet,5);return packet;};
   const initial=Buffer.concat([message({type:'device',platform,keyboard:true,maxTouches:2}),message({type:'screen',width:2736,height:1260}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
-  let first=true,controller;
+  let first=true,controller,gesture,failNextUp=false,failCleanup=false,holdDown=false,finishDown;
   const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang:'zh-CN'}},cindySim:{state:{status:{device:{rotation:1}}}}},
     document:{hidden:false,getElementById:get,addEventListener(){}},innerWidth:500,innerHeight:900,
     addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>intervals.push(fn),setTimeout(){},clearTimeout(){},
     AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,TextEncoder,VideoDecoder:class{},
-    window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{attach(){}cancel(){}detach(){}}},DeviceShell:class{update(pose){poses.push(JSON.parse(JSON.stringify(pose)));}}},
+    window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{constructor(screen){gesture=screen;}attach(){}cancel(){}detach(){}}},DeviceShell:class{update(pose){poses.push(JSON.parse(JSON.stringify(pose)));}}},
     fetch:async(url,options)=>{
-      if(url==='/control-api'){sent.push(JSON.parse(options.body));return {ok:true,json:async()=>({ok:true})};}
+      if(url==='/control-api'){
+        const packet=JSON.parse(options.body);sent.push(packet);
+        if(packet.action==='release'&&failCleanup)throw Error('cleanup unavailable');
+        if(packet.action==='input'&&packet.events.some(e=>e.kind==='touch'&&e.touches.some(t=>t.phase==='ended'))&&failNextUp){failNextUp=false;throw Error('lost touch up');}
+        if(holdDown&&packet.events?.some(e=>e.kind==='touch'&&e.touches.some(t=>t.phase==='began')))return new Promise(resolve=>finishDown=()=>resolve({ok:true,json:async()=>({ok:true})}));
+        return {ok:true,json:async()=>({ok:true})};
+      }
       controller=options.signal;
       return {ok:true,body:{getReader:()=>({
         read:async()=>{if(first){first=false;return {value:initial,done:false};}return new Promise(resolve=>controller.addEventListener('abort',()=>resolve({done:true}),{once:true}));},
@@ -185,7 +191,22 @@ for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends 
   const large=sent.filter(p=>p.action==='input');
   for(const packet of large){assert.ok(Buffer.byteLength(JSON.stringify(packet))<=60000);for(const event of packet.events)assert.ok(Buffer.byteLength(JSON.stringify({events:[event]}))<=16384);}
   assert.equal(large.flatMap(p=>p.events).filter(e=>e.kind==='text').map(e=>e.text).join(''),'pastedtext'+longText);
-  events.pagehide();await settle();
+  // An acknowledged down followed by an undelivered up must release the device,
+  // even though the gesture's speculative local state already says "up".
+  gesture.touchDown([{x:10,y:10}]);await settle();
+  assert.ok(sent.at(-1).events.some(e=>e.kind==='touch'&&e.touches[0].phase==='began'));
+  failNextUp=true;failCleanup=true;
+  gesture.touchUp([{x:10,y:10}]);await settle();await settle();
+  assert.equal(sent.at(-1).action,'release');
+  const afterFailure=sent.length;await settle();assert.equal(sent.length,afterFailure,'cleanup failure is not recursively retried');
+  // Blur and close replace unsent input with the same terminal release. It must
+  // follow the in-flight down even after the page closes, without replaying down.
+  failCleanup=false;holdDown=true;
+  gesture.touchDown([{x:20,y:20}]);await settle();
+  const during=sent.length;events.blur();events.pagehide();await settle();assert.equal(sent.length,during);
+  finishDown();await settle();await settle();
+  assert.deepEqual(sent.at(-1).events,[{kind:'release'}]);
+
   const batches=sent.filter(p=>p.action==='input').map(p=>p.events);
   for(const batch of batches){assert.doesNotThrow(()=>validEvents(batch,'en'));for(const event of batch)if(event.kind==='key')assert.doesNotThrow(()=>require('../../cindy-simulator/node/keys.cjs')[platform==='android'?'androidKey':'chord'](event.code,event.modifiers??[]));}
   assert.deepEqual(batches.flat().filter(e=>e.kind==='key'),[...codes.map(code=>({kind:'key',code})),...chords.map(({code,modifiers})=>({kind:'key',code,modifiers}))]);

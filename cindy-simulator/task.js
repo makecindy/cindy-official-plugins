@@ -188,10 +188,11 @@ function render() {
     return;
   }
   const operation = remoteOperation();
+  const changeDevice = () => h('button', { class: 'link', text: T.change, disabled: !!busy, onclick: () => { choosing = true; render(); } });
   // With its own devices switched off (or its plugin unable to be asked), a remote task still offers the other side's.
   if (state.settings?.enabled === false && !remoteDevice) inner.append(hero(GLYPH.pause, T.pausedTitle, T.pausedBody));
   else if (state.settings?.enabled === false && state.device && !choosing) inner.append(hero(GLYPH.pause, T.pausedTitle, far() ? T.remotePausedBody : T.pausedBody,
-    [h('button', { class: 'link', text: T.change, onclick: () => { choosing = true; render(); } })]));
+    [changeDevice()]));
   else if (operation) {
     const name = state.devices?.find((d) => d.udid === operation.udid)?.name || state.device?.name || '';
     inner.append(hero(GLYPH.big, name, operation.call === 'shutdown' ? T.remoteStopping : T.starting, [h('span', { class: 'spinner' })]));
@@ -201,16 +202,19 @@ function render() {
     if (memory) inner.append(memory);
     resourceView?.update(viewerUrl || far() ? null : d);
     if (d.state === 'Booted' && state.viewerClosed) inner.append(hero(GLYPH.big, T.closedTitle, T.closedBody, [
-      h('button', { class: 'btn cta', text: busy === d.udid ? T.opening : T.open, disabled: !!busy, onclick: () => act('task_bind', { udid: d.udid }, d.udid) }),
+      h('button', { class: 'btn cta', text: busy === d.udid ? T.opening : T.open, disabled: !!busy, onclick: () => act('task_bind', { udid: d.udid }, d.udid) }), changeDevice(),
     ]));
-    else if (d.state === 'Booted') inner.append(hero(GLYPH.big, d.name, state.viewerError ? errorText({ errorCode: state.viewerError }) : state.busy ? T.busy : T.connecting, [h('span', { class: 'spinner' })]));
+    else if (d.state === 'Booted') inner.append(hero(GLYPH.big, d.name, state.viewerError ? errorText({ errorCode: state.viewerError }) : state.busy ? T.busy : T.connecting, [
+      state.viewerError ? null : h('span', { class: 'spinner' }),
+      changeDevice(),
+    ]));
     else if(d.kind==='physical')inner.append(hero(GLYPH.big,d.name,lang==='zh-CN'?'手机未连接。请连接 USB 或已配对的网络，解锁并信任这台 Mac。':'Phone disconnected. Connect by USB or a paired network, unlock and trust this Mac.',[
       h('button',{class:'link',text:T.change,onclick:()=>{choosing=true;render();}}),
     ]));
     else inner.append(hero(GLYPH.big, T.offTitle(d.name), null, [
       globalThis.CindySimPages.memoryPicker(d,lang,!!busy),
       h('button', { class: 'btn cta', text: busy === d.udid ? T.starting : T.start, disabled: !!busy, onclick: () => act('task_boot', { udid: d.udid }, d.udid) }),
-      (state.devices || []).length > 1 || remoteDevice ? h('button', { class: 'link', text: T.change, disabled: !!busy, onclick: () => { choosing = true; render(); } }) : null,
+      (state.devices || []).length > 1 || remoteDevice ? changeDevice() : null,
     ]));
   } else {
     renderDevices(inner);

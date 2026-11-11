@@ -236,7 +236,7 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
 
 // A failed or hanging read of one computer must not hide the other computer's
 // device picker or creation sheet. Exercise the actual task page, including RPC routing.
-for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported'],['remote','pending'],['local','offline']])test(`other devices remain usable while ${failedSide} task state is ${failure}`,async()=>{
+for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported'],['remote','pending'],['remote','picture'],['local','offline']])test(`other devices remain usable while ${failedSide} task state is ${failure}`,async()=>{
   const nodes=new Map(),calls=[],sheets=[];let poll,clock=1e6,remoteReply;
   const mine=[{udid:failedSide==='remote'?'LOCAL-1':'REMOTE-1',name:'Available phone',state:'Booted'}];
   const available={ok:true,devices:mine,device:null,settings:{enabled:true},remote:{computer:'Studio',manage:true}};
@@ -248,6 +248,7 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
       createDevice:async options=>{sheets.push(options);return {udid:'LOCAL-NEW'};},
       rpc:async(action,params)=>{calls.push({action,params:plain(params)});
         if(failedSide==='remote'?action==='remote_task':action==='task_state'){
+          if(failure==='picture')return {...available,devices:[{udid:'REMOTE-1',name:'Remote phone',state:'Booted'}],device:{udid:'REMOTE-1',name:'Remote phone',state:'Booted'},viewerError:'HOST_UPDATE_REQUIRED'};
           if(failure==='pending')return new Promise(resolve=>remoteReply=resolve);
           if(failure==='offline')throw {errorCode:'DEVICE_OFFLINE'};
           return {ok:false,errorCode:'HOST_UPDATE_REQUIRED'};
@@ -258,6 +259,7 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
   const flatten=n=>[n,...(n.children||[]).filter(Boolean).flatMap(flatten)];
   const shown=()=>get('inner').children.flatMap(flatten);
   const button=text=>shown().find(n=>n.tag==='button'&&n.props.text===text);
+  if(failure==='picture'){assert.ok(button('Use another device'));assert.ok(!shown().some(n=>n.props?.class==='spinner'));await button('Use another device').props.onclick();await settle();}
   const creation=failedSide==='remote'?'New device here…':'New device on Studio…';
   const bindings=()=>calls.filter(c=>failedSide==='remote'?c.action==='task_bind':c.action==='remote_task'&&c.params.call==='task_bind');
   assert.ok(calls.some(c=>failedSide==='remote'?c.action==='manage_state':c.action==='remote_task'),'other read starts independently of the shown result');
