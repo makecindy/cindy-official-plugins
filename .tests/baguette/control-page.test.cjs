@@ -146,16 +146,28 @@ test('a device on another computer says so, lists that computer’s devices and 
   if(!manage)continue;
   // Switching and creating are asked of the task page, which asks that computer; this page's worker is not.
   row.dispatch('click');
-  assert.deepEqual(JSON.parse(JSON.stringify(posted)),[{data:{type:'cindy-simulator-remote-action',action:'bind',udid:'SIM-OTHER'},origin:'*'}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)),[{data:{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-OTHER'},origin:'*'}]);
   assert.match(f.dom.byId.overlay.textContent,/正在切换/);
   assert.equal(f.calls.some(p=>['switch','create','boot','shutdown','open'].includes(p.action)),false);
   // The task page, if this page is still there afterwards, says how it went.
-  for(const listen of f.messages)listen({source:f.context.parent,data:{type:'cindy-simulator-remote-result',action:'bind',ok:false,errorCode:'FAILED'}});
+  for(const listen of f.messages)listen({source:f.context.parent,data:{type:'cindy-simulator-remote-result',action:'use',ok:false,errorCode:'FAILED'}});
   assert.doesNotMatch(f.dom.byId.overlay.textContent,/正在切换/);assert.match(f.dom.byId.dock.textContent,/切换没有完成/);
  }
  // This computer's own device carries no such mark.
  const local=await boot({respond:()=>status()});
  assert.equal(local.dom.byId['remote-badge'].hidden,true);
+ local.dom.byId['device-chip'].dispatch('click');assert.doesNotMatch(local.dom.body.querySelector('.menu').textContent,/上的设备|这台电脑/);
+ for(const node of local.dom.body.querySelectorAll('.scrim'))node.dispatch('click');
+ // In a task that lives on another computer the same menu also lists that computer's devices, under its name.
+ const sent=[];local.context.parent={postMessage:(data,origin)=>sent.push(JSON.parse(JSON.stringify(data)))};
+ for(const listen of local.messages)listen({source:local.context.parent,data:{type:'cindy-simulator-sides',here:'local',computer:'Mac Studio',other:{devices:[other],manage:true}}});
+ for(const listen of local.messages)listen({source:{},data:{type:'cindy-simulator-sides',here:'local',computer:'Elsewhere',other:{devices:[],manage:true}}});
+ local.dom.byId['device-chip'].dispatch('click');const both=local.dom.body.querySelector('.menu');
+ assert.match(both.textContent,/这台电脑的设备/);assert.match(both.textContent,/「Mac Studio」上的设备/);assert.match(both.textContent,/在「Mac Studio」上添加设备/);assert.match(both.textContent,/重命名/);
+ both.querySelectorAll('button').find(b=>/iPad mini/.test(b.textContent)).dispatch('click');
+ assert.deepEqual(sent,[{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-OTHER'}]);
+ assert.match(local.dom.byId.overlay.textContent,/正在切换/);assert.equal(local.calls.some(p=>p.action==='switch'),false);
+ for(const listen of local.messages)listen({source:local.context.parent,data:{type:'cindy-simulator-remote-result',action:'use',ok:true}});
 });
 test('a disconnected physical phone requests reconnection rather than simulator startup',async()=>{
  const device={...status().device,kind:'physical',state:'Disconnected'};

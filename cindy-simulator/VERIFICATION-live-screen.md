@@ -111,6 +111,18 @@ network; only that test device was started or turned.
   (asked once, in order, `none` when there is no artwork) is covered by
   `.tests/baguette/remote-task.test.cjs` and `remote-chrome.test.cjs`.
 
+## One tab for both computers (same day)
+
+- With no device running for the task, the tab lists this computer's devices under
+  "这台电脑" with "在这台电脑新建…"; the other computer's group was absent with the
+  note about updating its plugin, because the provider's installed plugin predates
+  the management channel.
+- Binding or booting one of this computer's devices from the remote task's tab was
+  **not exercised**: the isolated viewer and the provider run on the same Mac and
+  share one simulator device set, so it would have operated the provider's devices.
+  It is covered by `.tests/baguette/remote-task.test.cjs` (both groups, use and
+  create on either side, the remembered choice, list-only reads of the other side).
+
 ## Not checked
 
 - Real two-finger trackpad contacts, Option pinch and pan, typing and paste were not

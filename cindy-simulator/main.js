@@ -316,7 +316,7 @@ async function remoteBody(deviceId, udid, picture) {
   } catch { /* tried again later */ } finally { entry.running = false; entry.at = Date.now(); }
 }
 // View only: what Cindy itself lists for that computer, for a plugin there that cannot be asked.
-async function remoteViewOnly(m, locale, computer) {
+async function remoteViewOnly(m, locale, computer, attach = true) {
   const listed = await remoteView({op:'screens', deviceId:m.deviceId});
   if (!listed.ok) return {ok:false, errorCode:listed.errorCode || 'REMOTE_UNAVAILABLE', execution:'not_executed'};
   const screens = (Array.isArray(listed.screens) ? listed.screens : [])
@@ -326,7 +326,8 @@ async function remoteViewOnly(m, locale, computer) {
   const device = screen ? {udid:screen.id, name:String(screen.name || screen.id).slice(0, 128), state:'Booted', isAvailable:true, thisTask:true,
     ...(screen.platform === 'android' ? {platform:'android'} : {}), runtime:screen.platform === 'tvos' ? 'tvOS' : screen.platform === 'visionos' ? 'visionOS' : '',
     productFamily:screen.platform === 'ipados' ? 'iPad' : 'iPhone'} : null;
-  const state = await remoteViewer(m, locale, {device, devices:device ? [device] : [], settings:{enabled:true}}, {computer, manage:false, platform:screen?.platform});
+  const listed_ = {device, devices:device ? [device] : [], settings:{enabled:true}};
+  const state = attach ? await remoteViewer(m, locale, listed_, {computer, manage:false, platform:screen?.platform}) : listed_;
   return {ok:true, remote:{computer, manage:false}, ...state};
 }
 async function remoteTask(m, locale) {
@@ -346,14 +347,17 @@ async function remoteTask(m, locale) {
     return {ok:true, remote:{computer, manage:true}, ...await remoteViewer(m, locale, reply.state, {computer, manage:true})};
   }
   const computer = await computerName(m.deviceId, m.computer);
+  // `view:false` only reads that computer's devices (the page shows one of this
+  // computer's): nothing is opened there, and its one remote view stays free.
+  const attach = m.view !== false;
   if (known?.state !== 'yes') {
     // Show what can be shown at once; learn in the background whether more can be asked.
     if (!known) { remoteManage.set(m.deviceId, {state:'asking', at:Date.now()}); void remoteAsk(m.deviceId, {call:'task_state', sessionId:m.sessionId, locale}).then(r => { if (!learnManage(m.deviceId, r).ok && remoteManage.get(m.deviceId)?.state === 'asking') remoteManage.delete(m.deviceId); }); }
-    return remoteViewOnly(m, locale, computer);
+    return remoteViewOnly(m, locale, computer, attach);
   }
   const reply = await ask();
   if (!reply.ok) return {ok:false, errorCode:reply.errorCode, execution:'not_executed'};
-  return {ok:true, remote:{computer, manage:true}, ...await remoteViewer(m, locale, reply.state, {computer, manage:true})};
+  return {ok:true, remote:{computer, manage:true}, ...(attach ? await remoteViewer(m, locale, reply.state, {computer, manage:true}) : reply.state)};
 }
 
 const PAGE_ACTIONS = {

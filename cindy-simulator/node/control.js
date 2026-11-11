@@ -134,14 +134,30 @@
   function remoteSettled(result) {
     const waiting = remoteWaiting; if (!waiting) return;
     clearTimeout(waiting.timer); remoteWaiting = null;
-    if (waiting.action === 'bind') { state.switching = false; state.phase = null; }
+    if (waiting.action === 'use') { state.switching = false; state.phase = null; }
     if (waiting.action === 'shutdown' && !result.ok) state.stopping = false;
-    if (!result.ok) toast(`${waiting.action === 'bind' ? t.switching.failed : t.actionFailed} (${result.errorCode || 'FAILED'})`, 'error');
+    if (!result.ok) toast(`${waiting.action === 'use' ? t.switching.failed : t.actionFailed} (${result.errorCode || 'FAILED'})`, 'error');
     render(); void check();
   }
+  // In a task that lives on another computer the one tab holds both
+  // computers' devices: the task page tells this page about the side it does
+  // not show (`sides.other`), and moves the task between the two.
+  let sides = null;
+  const otherSide = () => (sides?.other ? { where: sides.here === 'remote' ? 'local' : 'remote', ...sides.other } : null);
+  const farName = () => (remote() ? remoteComputer() : sides?.computer || (lang === 'zh-CN' ? '另一台电脑' : 'another computer'));
+  function useOther(where, targetUdid) {
+    if (state.switching || state.stopping) return;
+    state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
+    remoteAction('use', { where, udid: targetUdid });
+  }
   window.addEventListener?.('message', (event) => {
-    if (event.source === window.parent && event.data?.type === 'cindy-simulator-remote-result' && remote()) remoteSettled({ ok: event.data.ok === true, errorCode: event.data.errorCode });
+    if (event.source !== window.parent) return;
+    if (event.data?.type === 'cindy-simulator-remote-result') remoteSettled({ ok: event.data.ok === true, errorCode: event.data.errorCode });
+    else if (event.data?.type === 'cindy-simulator-sides' && (event.data.here === 'local' || event.data.here === 'remote'))
+      sides = { here: event.data.here, computer: typeof event.data.computer === 'string' ? event.data.computer.slice(0, 80) : '',
+        other: Array.isArray(event.data.other?.devices) ? { devices: event.data.other.devices.slice(0, 64), manage: event.data.other.manage === true } : null };
   });
+  if (params.get('task')) { try { window.parent?.postMessage?.({ type: 'cindy-simulator-remote-action', action: 'sides' }, '*'); } catch {} }
   const remoteButton = (id) => { try { return screen.contentWindow?.__remoteButtons?.().includes(id) === true; } catch { return false; } };
   // ---- zoom ----
   // The device page fits the device into its frame; zoom resizes that frame.
@@ -916,23 +932,41 @@
     const rows = M.deviceRows(state.status?.devices, udid, lang);
     const paused = state.status?.settings?.enabled === false;
     showMenu($('device-chip'), [
-      h('div', { class: 'head', text: remote() ? (lang === 'zh-CN' ? `「${remoteComputer()}」上的设备` : `Devices on ${remoteComputer()}`) : t.devices }),
+      h('div', { class: 'head', text: remote() ? (lang === 'zh-CN' ? `「${remoteComputer()}」上的设备` : `Devices on ${remoteComputer()}`)
+        : sides ? (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') : t.devices }),
       ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current), disabled: paused || state.switching || !d.available || d.current || (remote() && !remoteManaged()),
         title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); switchTo(d.udid); } }, [
         h('span', { class: 'dot', 'data-tone': d.tone }),
         h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
         d.current ? h('span', { html: ICON.check }) : null])),
       // A new device on that computer is created with the task page's own sheet.
-      ...(remote() ? (remoteManaged() ? [h('div', { class: 'sep' }), item(ICON.plus, t.addDevice, () => remoteAction('create'))] : []) : [h('div', { class: 'sep' }),
+      ...(remote() ? (remoteManaged() ? [h('div', { class: 'sep' }), item(ICON.plus, t.addDevice, () => remoteAction('create', { where: 'remote' }))] : []) : [h('div', { class: 'sep' }),
       item(ICON.plus, t.addDevice, () => openDialog('add'), { disabled: paused }),
       state.status?.device?.kind!=='physical' ? item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }) : null]),
+      ...otherDevices(),
     ]);
   });
+  // The other computer's devices (or, from one of its devices, this computer's),
+  // under that computer's name. Choosing or creating one is the task page's
+  // doing: it moves the task there and shows that device in this same tab.
+  function otherDevices() {
+    const other = otherSide(); if (!other) return [];
+    const far = other.where === 'remote', usable = !far || other.manage;
+    const rows = M.deviceRows(other.devices.map((d) => ({ ...d, kind: far ? 'remote' : d.kind })), null, lang);
+    return [h('div', { class: 'sep' }),
+      h('div', { class: 'head', text: far ? (lang === 'zh-CN' ? `「${farName()}」上的设备` : `Devices on ${farName()}`) : (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') }),
+      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': 'false', disabled: state.switching || !d.available || !usable,
+        title: t.switchTo, onclick: () => { closeMenu(); useOther(other.where, d.udid); } }, [
+        h('span', { class: 'dot', 'data-tone': d.tone }),
+        h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })])])),
+      usable ? item(ICON.plus, far ? (lang === 'zh-CN' ? `在「${farName()}」上添加设备` : `Add device on ${farName()}`) : (lang === 'zh-CN' ? '在这台电脑上添加设备' : 'Add device on this computer'),
+        () => remoteAction('create', { where: other.where })) : null];
+  }
   async function switchTo(targetUdid) {
     if (state.switching || state.stopping) return;
     state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
     // The task moves to that device on its own computer; the task page then shows it here.
-    if (remote()) { remoteAction('bind', { udid: targetUdid }); return; }
+    if (remote()) { remoteAction('use', { where: 'remote', udid: targetUdid }); return; }
     // Inside a task page the switch also moves that task to the new device.
     try {
       const result = await api('switch', { targetUdid, ...(params.get('task') ? { task: params.get('task') } : {}) });

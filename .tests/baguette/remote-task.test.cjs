@@ -150,57 +150,85 @@ test('a plugin there that cannot be asked still shows its running device, and sa
   assert.deepEqual(plain(reply.data),{ok:false,errorCode:'UNSUPPORTED',execution:'not_executed'});assert.equal(refused.provider.calls.length,0);
 });
 
-test('the task page of a remote task is the same page, marked remote, and asks only the other computer',async()=>{
-  const nodes=new Map(),events={},calls=[],posted=[];
-  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],contentWindow:{postMessage:(data,origin)=>posted.push({data,origin})},replaceChildren(){this.children=[];},append(...children){this.children.push(...children);}});return nodes.get(id);};
+test('in a remote task the one simulator tab holds both computers’ devices, and marks the other computer’s',async()=>{
+  const nodes=new Map(),events={},calls=[],posted=[],saved=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],contentWindow:{postMessage:(data,origin)=>posted.push({data:plain(data),origin})},replaceChildren(){this.children=[];},append(...children){this.children.push(...children);}});return nodes.get(id);};
   let poll,clock=1e6;
-  const remote={computer:'Mac Studio',manage:true},devices=[{udid:'SIM-1',name:'iPhone Air',state:'Booted'},{udid:'SIM-2',name:'iPad mini',state:'Shutdown'}];
-  let answer={ok:true,remote,device:devices[0],devices,settings:{enabled:true},viewer:{url:'http://127.0.0.1:9/control?udid=SIM-1'}};
+  const remote={computer:'Mac Studio',manage:true},theirs=[{udid:'SIM-1',name:'iPhone Air',state:'Booted'},{udid:'SIM-2',name:'iPad mini',state:'Shutdown'}];
+  const mine=[{udid:'LOCAL-1',name:'My iPhone',state:'Booted'}];
+  let there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},viewer:{url:'http://127.0.0.1:9/control?udid=SIM-1'}};
+  let here={ok:true,device:null,devices:mine,settings:{enabled:true},viewer:null};
   const context={URL,URLSearchParams,Date:{now:()=>clock},location:{search:'?session=task-1&device=studio&deviceName=Mac%20Studio'},BroadcastChannel:class{postMessage(){}},
+    localStorage:{getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v)},
     addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>poll=fn,
     document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}}};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('cindy-simulator/pages.js','utf8'),context);
   const pages=context.CindySimPages,sheets=[];
   Object.assign(pages,{locale:async()=>'en',h:(tag,props,children=[])=>({tag,props,children}),memoryBadge:()=>null,memoryPicker:()=>null,memoryArgs:()=>({memoryMode:'saving'}),
-    createDevice:async options=>{sheets.push(options);return {udid:'SIM-NEW'};},
-    rpc:async(action,params)=>{calls.push({action,params:plain(params)});return typeof answer==='function'?answer(params):answer;}});
-  context.CindySimModel={runtimeLabel:()=>'iOS 27.3',deviceRows:list=>list.map(d=>({udid:d.udid,name:d.name,meta:'',tone:'off',available:true})),showMemoryNotice(){assert.fail('local notice');},
-    createResourceSummary(){assert.fail('this computer’s resources are not that device’s');}};
+    createDevice:async options=>{sheets.push(options);return {udid:options.call?'SIM-NEW':'LOCAL-NEW'};},
+    rpc:async(action,params)=>{calls.push({action,params:plain(params)});
+      const answer=action==='remote_task'?there:action==='manage_state'?{ok:true,devices:mine}:here;
+      return typeof answer==='function'?answer(params,action):answer;}});
+  context.CindySimModel={runtimeLabel:()=>'iOS 27.3',deviceRows:list=>list.map(d=>({udid:d.udid,name:d.name,meta:'',tone:'off',available:true})),showMemoryNotice(){},
+    createResourceSummary:()=>({node:null,update(){},prune(){},label:()=>null})};
   vm.runInContext(fs.readFileSync('cindy-simulator/task.js','utf8'),context);await settle();
   const flatten=n=>[n,...(n.children||[]).filter(Boolean).flatMap(flatten)];
   const shown=()=>get('inner').children.flatMap(flatten);
   const text=()=>shown().map(n=>n.props?.text).filter(Boolean);
-  // Every request names the other computer and the action; the page's own request id is left alone.
-  assert.deepEqual(calls,[{action:'remote_task',params:{deviceId:'studio',computer:'Mac Studio',call:'task_state',sessionId:'task-1'}}]);
+  const button=label=>shown().find(n=>n.tag==='button'&&n.props.text===label);
+  const remoteCalls=()=>calls.filter(c=>c.action==='remote_task').map(c=>c.params.call);
+  // The task's device on the other computer shows first; this computer's list is read without opening anything.
+  assert.deepEqual(calls,[{action:'remote_task',params:{deviceId:'studio',computer:'Mac Studio',call:'task_state',sessionId:'task-1'}},{action:'manage_state',params:{}}]);
   assert.equal(get('screen').src,'http://127.0.0.1:9/control?udid=SIM-1');
-  // The controller's device menu: switch to a device that is off, which also starts it.
+  // The controller's device menu is told about this computer's devices too.
+  assert.deepEqual(posted.at(-1),{data:{type:'cindy-simulator-sides',here:'remote',computer:'Mac Studio',other:{devices:mine,manage:true}},origin:'http://127.0.0.1:9'});
+  // From that menu: switch to one of that computer's devices that is off, which also starts it.
   const controller={source:get('screen').contentWindow,origin:'http://127.0.0.1:9'};
   let booting=false;
-  answer=p=>{if(p.call==='task_boot')booting=true;
-    return {ok:true,remote,device:devices[1],devices,settings:{enabled:true},...(booting?{operation:{call:'task_boot',udid:'SIM-2',state:'running'}}:{})};};
-  events.message({...controller,origin:'https://elsewhere.test',data:{type:'cindy-simulator-remote-action',action:'bind',udid:'SIM-2'}});await settle();assert.equal(calls.length,1);
-  events.message({...controller,data:{type:'cindy-simulator-remote-action',action:'bind',udid:'SIM-2'}});await settle();
-  assert.deepEqual(calls.slice(1).filter(c=>c.params.call!=='task_state').map(c=>[c.params.call,c.params.udid,c.params.memoryMode]),[['task_bind','SIM-2',undefined],['task_boot','SIM-2','saving']]);
+  there=p=>{if(p.call==='task_boot')booting=true;
+    return {ok:true,remote,device:theirs[1],devices:theirs,settings:{enabled:true},...(booting?{operation:{call:'task_boot',udid:'SIM-2',state:'running'}}:{})};};
+  const before=calls.length;
+  events.message({...controller,origin:'https://elsewhere.test',data:{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-2'}});await settle();assert.equal(calls.length,before);
+  events.message({...controller,data:{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-2'}});await settle();
+  assert.deepEqual(calls.slice(before).filter(c=>c.action==='remote_task'&&c.params.call!=='task_state').map(c=>[c.params.call,c.params.udid,c.params.memoryMode]),[['task_bind','SIM-2',undefined],['task_boot','SIM-2','saving']]);
   // While that computer starts it, the page says so, and says whose device it is.
   assert.equal(get('screen').src,'about:blank');assert.equal(get('home').hidden,false);
   assert.ok(text().includes('Remote · Mac Studio'));assert.ok(text().includes('Starting…'));
-  // It asks again sooner while that is running, and less often otherwise.
-  const before=calls.length;clock+=2000;poll();await settle();assert.equal(calls.length,before+1);
-  // The controller, had it stayed, would have been told the switch went through.
-  assert.deepEqual(plain(posted.at(-1)),{data:{type:'cindy-simulator-remote-result',action:'bind',ok:true},origin:'http://127.0.0.1:9'});
+  assert.deepEqual(posted.at(-1),{data:{type:'cindy-simulator-remote-result',action:'use',ok:true},origin:'http://127.0.0.1:9'});
   // That computer could not finish: said once, with its reason.
-  answer={ok:true,remote,device:devices[1],devices,settings:{enabled:true},operation:{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT'}};clock+=2000;poll();await settle();
+  there={ok:true,remote,device:theirs[1],devices:theirs,settings:{enabled:true},operation:{call:'task_boot',udid:'SIM-2',state:'failed',errorCode:'BOOT_TIMEOUT'}};clock+=2000;poll();await settle();
   assert.ok(text().some(line=>line.includes('BOOT_TIMEOUT')));
-  // New device: the same sheet, pointed at that computer.
-  answer={ok:true,remote,device:null,devices,settings:{enabled:true}};clock+=7000;poll();await settle();
-  assert.ok(text().includes('Pick one of that computer’s devices for this task, or create a new one there.'));
-  await shown().find(n=>n.tag==='button'&&n.props.text==='New device…').props.onclick();await settle();
-  assert.equal(sheets[0].heading,'New device on Mac Studio');assert.equal(typeof sheets[0].call,'function');
-  assert.deepEqual(calls.filter(c=>c.params.call==='task_bind').at(-1).params,{deviceId:'studio',computer:'Mac Studio',call:'task_bind',sessionId:'task-1',udid:'SIM-NEW'});
-  // A plugin there that cannot be asked: no list and no create, only the explanation.
-  answer={ok:true,remote:{computer:'',manage:false},device:null,devices:[],settings:{enabled:true}};clock+=7000;poll();await settle();
-  // Cindy's own name for that computer still marks the page.
-  assert.ok(text().includes('No device is running for this task'));assert.ok(text().includes('Remote · Mac Studio'));assert.equal(shown().some(n=>n.tag==='button'),false);
-  assert.equal(calls.every(c=>c.action==='remote_task'),true);
+  // Choosing: both computers' devices in the one tab, each under its own name, and a new one on either.
+  there={ok:true,remote,device:null,devices:theirs,settings:{enabled:true}};clock+=9000;poll();await settle();
+  const labels=text();
+  assert.deepEqual(labels.filter(l=>['This computer','My iPhone','Remote · Mac Studio','iPhone Air','iPad mini'].includes(l)),['This computer','My iPhone','Remote · Mac Studio','iPhone Air','iPad mini']);
+  assert.ok(button('New device here…'));assert.ok(button('New device on Mac Studio…'));
+  // One of this computer's own: bound by this computer's worker, shown without the remote mark, and remembered for the task.
+  here=(p,action)=>({ok:true,device:mine[0],devices:mine,settings:{enabled:true},viewer:{url:'http://127.0.0.1:5/control?udid=LOCAL-1'}});
+  const useButtons=shown().filter(n=>n.tag==='button'&&n.props.text==='Use');
+  await useButtons[0].props.onclick();await settle();
+  assert.deepEqual(calls.filter(c=>c.action==='task_bind').at(-1),{action:'task_bind',params:{sessionId:'task-1',udid:'LOCAL-1'}});
+  assert.equal(get('screen').src,'http://127.0.0.1:5/control?udid=LOCAL-1');assert.equal(saved.get('cindy.simulator.side.task-1'),'local');
+  // The other computer's devices are now the other side: listed for the menu, and read without taking its one remote view.
+  clock+=9000;poll();await settle();
+  assert.deepEqual(calls.filter(c=>c.action==='remote_task').at(-1).params,{deviceId:'studio',computer:'Mac Studio',call:'task_state',sessionId:'task-1',view:false});
+  assert.deepEqual(posted.at(-1).data,{type:'cindy-simulator-sides',here:'local',computer:'Mac Studio',other:{devices:theirs,manage:true}});
+  assert.ok(calls.some(c=>c.action==='task_state'&&c.params.sessionId==='task-1'));
+  // From this computer's controller: a new device on the other computer, with the sheet pointed there; the task follows it.
+  const remoteBefore=remoteCalls().length;
+  events.message({source:get('screen').contentWindow,origin:'http://127.0.0.1:5',data:{type:'cindy-simulator-remote-action',action:'create',where:'remote'}});await settle();
+  assert.equal(sheets.at(-1).heading,'New device on Mac Studio');assert.equal(typeof sheets.at(-1).call,'function');
+  assert.ok(remoteCalls().slice(remoteBefore).includes('task_bind'));assert.equal(saved.get('cindy.simulator.side.task-1'),'remote');
+  // And back: a new device on this computer, with the ordinary sheet.
+  here={ok:true,device:null,devices:mine,settings:{enabled:true},viewer:null};
+  clock+=9000;poll();await settle();
+  await button('New device here…').props.onclick();await settle();
+  assert.equal(sheets.at(-1).call,undefined);assert.equal(sheets.at(-1).heading,undefined);
+  assert.deepEqual(calls.filter(c=>c.action==='task_bind').at(-1),{action:'task_bind',params:{sessionId:'task-1',udid:'LOCAL-NEW'}});
+  // A plugin there that cannot be asked: its devices cannot be chosen or created from here, and the page says why; this computer's still can.
+  there={ok:true,remote:{computer:'',manage:false},device:null,devices:[],settings:{enabled:true}};
+  clock+=9000;poll();await settle();clock+=9000;poll();await settle();
+  assert.equal(button('New device on Mac Studio…'),undefined);assert.ok(button('New device here…'));assert.ok(text().includes('My iPhone'));
+  assert.ok(text().some(line=>line.includes('Update the Device Simulator plugin there')));
 });
