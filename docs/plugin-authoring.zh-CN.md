@@ -386,27 +386,29 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
 官方仓插件通过 PR 和仓库工作流发布；客户端社区投稿有独立贡献流程，Forge 的
 `intent: 'publish'` 面向当前组织。仅打包既不选择这些发布目标，也不会发布插件。
 
-### 维护固定契约副本
+### 当前能力声明与后续同步
 
-维护者从指定的 Host 已提交版本刷新校验器：
+以下字段以 [Host 提交 a81313e8446c](https://github.com/makecindy/cindy/blob/a81313e8446c171ba0e70cb568f5b47cc9a9f078/packages/plugin-protocol/src/manifest.ts)
+及对应运行时参考为来源，用于查找能力；实际可用性仍以目标 Host 为准。
 
-```sh
-node scripts/refresh-plugin-contract.mjs /path/to/cindy <commit-sha>
-node --test .tests/plugin-contract.test.mjs
-```
+| 能力 | 声明字段 |
+| --- | --- |
+| 工具审批策略 | `tools[].approval`（`auto / each-call`） |
+| 任务与伙伴协作 | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
+| 界面 | `mainView.open / side / multiple`、`taskView`、`mobile` |
+| 配置与使用前置 | `showTaskPreferences`、`setup.requires[].anyOf` |
+| 介绍与邮件 | `readme`、`mail`、`mailReader` |
+| 模型与例行任务事件 | `models.types`、`routineEvents.events` |
+| 凭证检查 | `network.secrets[].check` |
+| 电脑间同步与设备屏幕 | `deviceSync`、`liveScreen` |
 
-刷新脚本使用该 checkout 已有的 esbuild，并读取 Git 提交中的源文件，本地 Host 未提交
-改动不会混入产物。文件头记录提交、生成器版本及输入摘要，同时更新测试导入。
-审查时对照源文件变化与产物差异；CI 仍使用仓内快照，不 checkout 其它仓库。
-插件作者继续使用前述独立校验命令。
+Host 的资源语言包括 `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`。
+Host 能力与官方仓发布要求分别维护；本文更新不改变本仓现有四语要求、固定校验器、
+文件检查或包预算，也不修改插件清单或运行行为。
 
-声明能力或限制有变化时，用相同的合法、非法声明核对客户端协议与运行时校验器、
-Server 本地协议副本及本快照。保留明确的兼容路径：历史参数大小沿用 UTF-16 字符数，
-新包按 UTF-8 字节数；Server 存储 setup 作者声明，Host 内部另做规范化。
-Server 存量读取还保留旧 v3 缺少最低版本元数据的兼容，新上传必须提供。
-各交付通道的包预算不同，不能一律取最大值。官方插件仍须提供 zh-CN/en/ja/ko，
-其他已支持语种可选。已声明的任务页和 MCP Apps 资源与现有页面、工作进程入口一样，
-必须在包内存在。刷新这些契约副本不需要更改插件行为或权限。
+后续更新先记录目标 Host 提交、对应字段和参考章节，再同步声明类型与中英文说明。
+继续保留未知能力扩展，不按当前实现能力增加白名单。若确需改变校验、规范化或旧包
+读取，单独列出实际行为差异，不随文档更新替换校验快照。无需新增跨仓构建依赖。
 
 ## 同账号设备同步
 

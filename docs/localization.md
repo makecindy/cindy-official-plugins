@@ -13,15 +13,9 @@ not store an independent language preference.
 The host currently supports:
 
 - `zh-CN`
-- `zh-TW`
 - `en`
 - `ja`
 - `ko`
-- `es`
-- `fr`
-- `de`
-- `pt-PT`
-- `pt-BR`
 
 When the plugin does not provide the host's current language, English is used;
 when the host passes an unknown language, English is used as well. English is
@@ -29,9 +23,7 @@ not a configurable option — it is the protocol-level fallback.
 
 ## Manifest resources
 
-Every official plugin declares at least `zh-CN / en / ja / ko` in `ghost.json`.
-The other supported locales are optional; adding them does not change the
-English fallback or require translations for all ten locales:
+Every official plugin declares four languages in `ghost.json`:
 
 ```json
 {
@@ -67,7 +59,7 @@ the stable tool name, not by array order.
 
 The Cindy client is responsible for:
 
-1. Validating that `locales` contains only the ten supported language/region codes and
+1. Validating that `locales` contains only the four supported languages and
    that `en` is present.
 2. Validating at Forge packaging time and at install time that the resource
    files exist, are valid JSON, are no larger than 64KB each, and fully cover
