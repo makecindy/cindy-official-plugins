@@ -1,9 +1,121 @@
-// Generated from Cindy packages/plugin-protocol/src/manifest.ts (bundled with routineEvents.ts)
-// Base: makecindy/cindy@b32efed5b642625140d49f5bf08e9839b78ca39d; releaseNotes-only backport from 60110fa67313dba59a0738dec9da70db7cfadf22
-// source sha256: bcdea7e27f971be5d2dc106553d02fd88dd34101dfdf4200d0b989d015fe3a02
+// Generated from committed Cindy packages/plugin-protocol/src/manifest.ts and its local imports.
+// Source: makecindy/cindy@a81313e8446c171ba0e70cb568f5b47cc9a9f078; esbuild 0.28.1
+// Input sha256 (esbuild version, sorted paths and source bytes): 0dad3ce102681b3d1baae7c66efbb69f6b0d9832cb23ba5c15e42a6cf6b0d8f1
+// Refresh: node scripts/refresh-plugin-contract.mjs <cindy-checkout> a81313e8446c171ba0e70cb568f5b47cc9a9f078
 // Do not edit by hand. Licensed under Apache-2.0; see NOTICE.
 
-// packages/plugin-protocol/src/routineEvents.ts
+// host:packages/plugin-protocol/src/internal/ghostPath.ts
+var GHOST_PATH_SEGMENT_RE = /^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
+function isSafeGhostRelativePath(p) {
+  if (typeof p !== "string" || p.length === 0 || p.length > 256) return false;
+  if (p.includes("\\")) return false;
+  const segments = p.split("/");
+  return segments.every(
+    (seg) => GHOST_PATH_SEGMENT_RE.test(seg) && seg !== "." && seg !== ".." && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(seg)
+  );
+}
+
+// host:packages/plugin-protocol/src/appCsp.ts
+function validateCspDomains(domains) {
+  if (domains && (!Array.isArray(domains) || domains.length > 100))
+    throw new Error("MCP_APP_INVALID_CSP_DOMAIN");
+  return (domains ?? []).map((source) => {
+    if (!/^(https?|wss?):\/\/(?:\*\.)?(?:[a-zA-Z0-9.-]+|\[[a-fA-F0-9:]+\])(?::(?:[0-9]{1,5}|\*))?\/?$/.test(
+      source
+    )) {
+      throw new Error("MCP_APP_INVALID_CSP_DOMAIN");
+    }
+    const url = new URL(
+      source.replace("://*.", "://wildcard.").replace(/:\*(\/?)$/, ":443$1")
+    );
+    if (!url.hostname || url.port && Number(url.port) > 65535)
+      throw new Error("MCP_APP_INVALID_CSP_DOMAIN");
+    return source;
+  });
+}
+
+// host:packages/plugin-protocol/src/toolUi.ts
+var object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+var safeKey = (key) => /^[a-z][a-z0-9_-]{0,63}$/.test(key) && !["__proto__", "constructor", "prototype"].includes(key);
+var cspKeys = ["connectDomains", "resourceDomains", "frameDomains", "baseUriDomains"];
+function parseGhostMcpApps(raw, tools, hosts, safePath) {
+  if (!object(raw)) return null;
+  if (raw.ui !== void 0 && !parseGhostUi(raw.ui, tools, hosts, safePath)) return null;
+  return raw;
+}
+function parseGhostUi(raw, tools, hosts, safePath) {
+  if (!object(raw) || !Array.isArray(raw.resources) || !object(raw.tools) || !Object.keys(raw.tools).length || raw.resources.length > 16 || Object.keys(raw.tools).length > 16) return null;
+  const uris = /* @__PURE__ */ new Set();
+  for (const resource of raw.resources) {
+    if (!object(resource) || typeof resource.uri !== "string" || !resource.uri.startsWith("ui://") || resource.uri.length <= 5 || /[\s\x00-\x1f\x7f]/.test(resource.uri) || uris.has(resource.uri) || !safePath(resource.file) || typeof resource.file !== "string" || !/\.html?$/i.test(resource.file) || resource.prefersBorder !== void 0 && typeof resource.prefersBorder !== "boolean" || resource.domain !== void 0 && typeof resource.domain !== "string") return null;
+    uris.add(resource.uri);
+    if (resource.permissions !== void 0 && (!object(resource.permissions) || Object.entries(resource.permissions).some(([key, value]) => !["camera", "microphone", "geolocation", "clipboardWrite"].includes(key) || !object(value) || Object.keys(value).length))) return null;
+    if (resource.csp !== void 0) {
+      if (!object(resource.csp)) return null;
+      for (const key of cspKeys) {
+        const domains = resource.csp[key];
+        if (domains !== void 0 && (!Array.isArray(domains) || domains.some((value) => typeof value !== "string"))) return null;
+        try {
+          const origins = validateCspDomains(resource.csp[key]);
+          for (const origin of origins) {
+            const hostname = new URL(origin.replace(/:\*(\/?)$/, ":443$1")).hostname.toLowerCase();
+            if (!hosts.some((pattern) => hostname === pattern || pattern.startsWith("*.") && hostname.endsWith(pattern.slice(1)) && hostname.length > pattern.length - 1)) return null;
+          }
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  const names = new Set(tools.map((tool) => tool.name));
+  for (const [name, link] of Object.entries(raw.tools)) {
+    if (!safeKey(name) || !names.has(name) || !object(link) || link.resourceUri !== void 0 && (typeof link.resourceUri !== "string" || !uris.has(link.resourceUri)) || link.visibility !== void 0 && (!Array.isArray(link.visibility) || !link.visibility.length || link.visibility.some((v) => v !== "model" && v !== "app"))) return null;
+  }
+  return raw;
+}
+function validateWithStoredMcpApps(value, validate) {
+  const strict = validate(value);
+  if (strict.ok || !object(value) || !Object.prototype.hasOwnProperty.call(value, "mcpApps")) return strict;
+  const rest = { ...value };
+  delete rest.mcpApps;
+  const compatible = validate(rest);
+  if (!compatible.ok) return compatible;
+  return { ...compatible, manifest: { ...compatible.manifest, mcpApps: value.mcpApps } };
+}
+
+// host:packages/plugin-protocol/src/secretCheck.ts
+function parseGhostSecretCheck(value, hostAllowed) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value;
+  const path = (p) => typeof p === "string" && p.length <= 128 && /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(p) && !p.split(".").some((part) => ["__proto__", "prototype", "constructor"].includes(part));
+  if (typeof v.url !== "string" || v.url.length > 2048) return null;
+  try {
+    const url = new URL(v.url);
+    if (url.protocol !== "https:" || url.port || url.username || url.password || url.hash || !hostAllowed(url.hostname)) return null;
+  } catch {
+    return null;
+  }
+  if (typeof v.bodyFormat !== "string" || v.bodyFormat.length > 4096 || v.bodyFormat.split("{value}").length !== 2) return null;
+  try {
+    const body = JSON.parse(v.bodyFormat.replace("{value}", "check-value"));
+    if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  } catch {
+    return null;
+  }
+  if (!path(v.validPath) || !(typeof v.validValue === "boolean" || typeof v.validValue === "string" && v.validValue.length > 0 && v.validValue.length <= 64)) return null;
+  if (v.expiresAtPath !== void 0 && !path(v.expiresAtPath)) return null;
+  if (v.expiresAtFormat !== void 0 && (!v.expiresAtPath || !["iso", "unix-ms", "unix-seconds"].includes(String(v.expiresAtFormat)))) return null;
+  return {
+    url: v.url,
+    bodyFormat: v.bodyFormat,
+    validPath: v.validPath,
+    validValue: v.validValue,
+    ...v.expiresAtPath !== void 0 ? { expiresAtPath: v.expiresAtPath } : {},
+    ...v.expiresAtFormat !== void 0 ? { expiresAtFormat: v.expiresAtFormat } : {}
+  };
+}
+
+// host:packages/plugin-protocol/src/routineEvents.ts
 function parseGhostRoutineEvents(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const events = raw.events;
@@ -29,12 +141,72 @@ function parseGhostRoutineEvents(raw) {
   return { events: output };
 }
 
-// packages/plugin-protocol/src/manifest.ts
+// host:packages/plugin-protocol/src/pluginModels.ts
+var TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/;
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+function parseGhostModelsNeeds(raw) {
+  if (!isRecord(raw) || !Array.isArray(raw.types) || raw.types.length === 0) return null;
+  const types = raw.types;
+  if (!types.every((type) => typeof type === "string" && TYPE_RE.test(type))) return null;
+  if (new Set(types).size !== types.length) return null;
+  return { types };
+}
+
+// host:packages/plugin-protocol/src/locales.ts
+var GHOST_LOCALES = ["zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "pt-PT", "pt-BR"];
+
+// host:packages/plugin-protocol/src/readme.ts
+var GHOST_README_MAX_BYTES = 128 * 1024;
+var GHOST_README_IMAGE_MAX_BYTES = 512 * 1024;
+var GHOST_README_IMAGES_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
+function validateGhostReadmeDeclaration(value, isReservedPath) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, reason: "readme \u5FC5\u987B\u662F\u8BED\u8A00\u5230\u5305\u5185 Markdown \u6587\u4EF6\u8DEF\u5F84\u7684\u5BF9\u8C61" };
+  }
+  const raw = value;
+  const unknownLocale = Object.keys(raw).find(
+    (locale) => !GHOST_LOCALES.includes(locale)
+  );
+  if (unknownLocale) {
+    return {
+      ok: false,
+      reason: `readme \u542B\u5BBF\u4E3B\u4E0D\u652F\u6301\u7684\u8BED\u8A00 ${JSON.stringify(unknownLocale)}(\u53EF\u7528:${GHOST_LOCALES.join(" / ")})`
+    };
+  }
+  if (raw.en === void 0) {
+    return { ok: false, reason: "readme \u5FC5\u987B\u63D0\u4F9B en\uFF0C\u4F5C\u4E3A\u6240\u6709\u4E0D\u652F\u6301\u8BED\u8A00\u7684\u56FA\u5B9A\u56DE\u9000" };
+  }
+  const normalized = {};
+  const seen = /* @__PURE__ */ new Set();
+  for (const locale of GHOST_LOCALES) {
+    const path = raw[locale];
+    if (path === void 0) continue;
+    if (!isSafeGhostRelativePath(path) || !path.toLowerCase().endsWith(".md")) {
+      return { ok: false, reason: `readme.${locale} \u5FC5\u987B\u662F\u5B89\u88C5\u76EE\u5F55\u5185\u4EE5 .md \u7ED3\u5C3E\u7684\u5B89\u5168\u76F8\u5BF9\u8DEF\u5F84` };
+    }
+    const fold = path.toLowerCase();
+    if (isReservedPath(fold)) {
+      return {
+        ok: false,
+        reason: `readme.${locale} \u8DEF\u5F84 ${JSON.stringify(path)} \u4E0E\u63D2\u4EF6\u5176\u4ED6\u58F0\u660E\u6587\u4EF6\u5927\u5C0F\u5199\u6298\u53E0\u540E\u51B2\u7A81`
+      };
+    }
+    for (const existing of seen) {
+      if (existing.toLowerCase() === fold && existing !== path) {
+        return { ok: false, reason: `readme \u542B\u5927\u5C0F\u5199\u4E0D\u540C\u7684\u91CD\u590D\u8DEF\u5F84 ${JSON.stringify(path)}` };
+      }
+    }
+    seen.add(path);
+    normalized[locale] = path;
+  }
+  return { ok: true, readme: { ...normalized, en: normalized.en } };
+}
+
+// host:packages/plugin-protocol/src/manifest.ts
 var GHOST_MANIFEST_FILE = "ghost.json";
 var CINDY_FILE_EXT = ".cindy";
 var GHOST_MANIFEST_SCHEMA_VERSION = 3;
 var GHOST_MANIFEST_SUMMARY_MAX_CHARS = 300;
-var GHOST_LOCALES = ["zh-CN", "en", "ja", "ko"];
 var GHOST_LOCALE_MAX_BYTES = 64 * 1024;
 var GHOST_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 var WINDOWS_RESERVED_NAME_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -47,6 +219,7 @@ var LEGACY_GHOST_SLOTS = [
   "card",
   "panel",
   "main-view",
+  "task-view",
   "cindy",
   "agent",
   "node",
@@ -56,16 +229,18 @@ var LEGACY_GHOST_SLOTS = [
   "confirm",
   "fs",
   "library",
+  "device-sync",
   "session-context",
   "pick",
   "preview",
   "skill",
   "workspace",
-  "ios-simulator"
+  "ios-simulator",
+  "live-screen"
 ];
 var GHOST_SLOT_NAME_RE = /^[a-z][a-z0-9._:-]{0,127}$/;
 var GHOST_LAUNCH_MODES = ["on-demand", "resident"];
-var GHOST_PANEL_POSITIONS = ["left", "right", "tab"];
+var GHOST_PANEL_POSITIONS = ["left", "right", "top", "bottom", "tab"];
 var GHOST_MAIN_VIEW_ICONS = [
   "puzzle",
   "globe",
@@ -77,6 +252,8 @@ var GHOST_MAIN_VIEW_ICONS = [
   "message-circle",
   "calendar-days"
 ];
+var GHOST_MAIN_VIEW_OPEN_MODES = ["page", "sidebar", "window"];
+var GHOST_TAB_SIDES = ["left", "right", "top", "bottom"];
 var GHOST_NODE_PROTOCOLS = ["json-rpc-stdio", "mcp-stdio"];
 var GHOST_NODE_LIFECYCLES = ["on-demand", "resident"];
 var GHOST_NODE_MAX_SECRET_BINDINGS = 4;
@@ -192,15 +369,6 @@ function ghostIconMimeType(p) {
   if (dot < 0) return null;
   return GHOST_ICON_MIME_BY_EXT[p.slice(dot).toLowerCase()] ?? null;
 }
-var GHOST_PATH_SEGMENT_RE = /^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
-function isSafeGhostRelativePath(p) {
-  if (typeof p !== "string" || p.length === 0 || p.length > 256) return false;
-  if (p.includes("\\")) return false;
-  const segments = p.split("/");
-  return segments.every(
-    (seg) => GHOST_PATH_SEGMENT_RE.test(seg) && seg !== "." && seg !== ".." && !isWindowsReservedName(seg)
-  );
-}
 function compareNumericIdentifiers(left, right) {
   if (left.length !== right.length) return left.length < right.length ? -1 : 1;
   if (left === right) return 0;
@@ -269,7 +437,9 @@ function isGhostManifestReservedRecordKey(value) {
   return GHOST_MANIFEST_RESERVED_RECORD_KEYS.has(value);
 }
 var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
+  "mcpApps",
   "routineEvents",
+  "models",
   "schemaVersion",
   "id",
   "name",
@@ -280,6 +450,7 @@ var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
   "locales",
   "description",
   "whenToUse",
+  "readme",
   "icon",
   "kind",
   "entry",
@@ -291,6 +462,8 @@ var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
   "showTaskPreferences",
   "slots",
   "card",
+  "mail",
+  "mailReader",
   "tools",
   "cindy",
   "model",
@@ -300,6 +473,7 @@ var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
   "keywords",
   "panel",
   "mainView",
+  "taskView",
   "preview",
   "skill",
   "manual",
@@ -309,10 +483,12 @@ var GHOST_MANIFEST_KNOWN_TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
   "confirm",
   "fs",
   "library",
+  "deviceSync",
   "sessionContext",
   "pick",
   "workspace",
-  "iosSimulator"
+  "iosSimulator",
+  "liveScreen"
 ]);
 var V3_BOOLEAN_CAPABILITY_FIELDS = [
   "notify",
@@ -320,16 +496,19 @@ var V3_BOOLEAN_CAPABILITY_FIELDS = [
   "confirm",
   "fs",
   "library",
+  "deviceSync",
   "sessionContext",
   "pick",
   "workspace",
-  "iosSimulator"
+  "iosSimulator",
+  "liveScreen"
 ];
 var V3_DECLARATION_TO_LEGACY_SLOT = [
   ["tools", "tool"],
   ["card", "card"],
   ["panel", "panel"],
   ["mainView", "main-view"],
+  ["taskView", "task-view"],
   ["subscribe", "subscribe"],
   ["skill", "skill"],
   ["cindy", "cindy"],
@@ -344,10 +523,12 @@ var V3_BOOLEAN_TO_LEGACY_SLOT = {
   confirm: "confirm",
   fs: "fs",
   library: "library",
+  deviceSync: "device-sync",
   sessionContext: "session-context",
   pick: "pick",
   workspace: "workspace",
-  iosSimulator: "ios-simulator"
+  iosSimulator: "ios-simulator",
+  liveScreen: "live-screen"
 };
 function prepareGhostManifestForValidation(value) {
   if (!isPlainObject(value)) return { ok: false, reason: "\u6E05\u5355\u4E0D\u662F\u5BF9\u8C61" };
@@ -423,11 +604,25 @@ function dropEmptyLegacyCapabilitySlots(value, slots) {
     return true;
   });
 }
+function validateStoredGhostManifest(value) {
+  return validateWithStoredMcpApps(value, (raw) => validateGhostManifestInput(raw, true));
+}
 function validateGhostManifest(value) {
+  return validateGhostManifestInput(value, false);
+}
+function validateGhostManifestInput(value, preserveHistoricalParameterSize) {
   const preparation = prepareGhostManifestForValidation(value);
   if (!preparation.ok) return preparation;
   const prepared = preparation.prepared;
   const raw = prepared.raw;
+  if (raw.mail !== void 0 && raw.mail !== true) return { ok: false, reason: "mail \u51FA\u73B0\u65F6\u5FC5\u987B\u662F true" };
+  const reader = raw.mailReader;
+  if (raw.mailReader !== void 0 && (!reader || typeof reader !== "object" || typeof reader.tool !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(reader.tool) || reader.markRead !== void 0 && reader.markRead !== true || !Array.isArray(reader.hosts) || !reader.hosts.length || reader.hosts.length > 16 || !reader.hosts.every((h) => typeof h === "string" && h.length <= 253 && /^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}$/.test(h)))) {
+    return { ok: false, reason: "mailReader \u5FC5\u987B\u58F0\u660E\u5408\u6CD5\u7684 tool \u4E0E hosts" };
+  }
+  if (reader && (raw.mail !== true || !Array.isArray(raw.tools) || !raw.tools.some((tool) => isPlainObject(tool) && tool.name === reader.tool))) {
+    return { ok: false, reason: "mailReader \u5FC5\u987B\u540C\u65F6\u58F0\u660E mail: true \u4E0E\u5BF9\u5E94\u7684 tools \u5DE5\u5177" };
+  }
   if (!isValidGhostId(raw.id)) {
     return {
       ok: false,
@@ -462,6 +657,7 @@ function validateGhostManifest(value) {
     raw.settingsHtml,
     isPlainObject(raw.panel) ? raw.panel.html : void 0,
     isPlainObject(raw.mainView) ? raw.mainView.html : void 0,
+    isPlainObject(raw.taskView) ? raw.taskView.html : void 0,
     isPlainObject(raw.node) ? raw.node.entry : void 0,
     ...isPlainObject(raw.node) && Array.isArray(raw.node.entries) ? raw.node.entries : []
   ].filter((value2) => typeof value2 === "string").map((value2) => value2.toLowerCase());
@@ -541,6 +737,17 @@ function validateGhostManifest(value) {
       en: normalized.en
     };
   }
+  let readme;
+  if (raw.readme !== void 0) {
+    const localeFolds = Object.values(locales ?? {}).map((path) => path.toLowerCase());
+    const contentDirFolds = [raw.skill, raw.manual].flatMap((decl) => isPlainObject(decl) && Array.isArray(decl.items) ? decl.items : []).map((item) => isPlainObject(item) ? item.dir : void 0).filter((value2) => typeof value2 === "string").map((value2) => value2.toLowerCase());
+    const result = validateGhostReadmeDeclaration(
+      raw.readme,
+      (fold) => [...declaredFilePathFolds, ...localeFolds].some((path) => pathsConflict(path, fold)) || contentDirFolds.some((dir) => pathsConflict(dir, fold))
+    );
+    if (!result.ok) return result;
+    readme = result.readme;
+  }
   if (raw.description !== void 0 && (typeof raw.description !== "string" || raw.description.trim().length === 0 || raw.description.length > GHOST_MANIFEST_SUMMARY_MAX_CHARS)) {
     return {
       ok: false,
@@ -587,12 +794,6 @@ function validateGhostManifest(value) {
       };
     }
     if (p.position !== void 0) {
-      if (p.position === "top" || p.position === "bottom") {
-        return {
-          ok: false,
-          reason: "panel.position \u7684 top / bottom \u6682\u672A\u652F\u6301(\u6392\u671F\u4E2D),\u5F53\u524D\u53EF\u7528:left / right / tab"
-        };
-      }
       if (!GHOST_PANEL_POSITIONS.includes(p.position)) {
         return {
           ok: false,
@@ -602,7 +803,7 @@ function validateGhostManifest(value) {
       if (p.position === "tab" && (p.minWidth !== void 0 || p.defaultFraction !== void 0)) {
         return {
           ok: false,
-          reason: "panel.minWidth / panel.defaultFraction \u4EC5\u505C\u9760\u5F62\u6001(left / right)\u6709\u6548,position:'tab' \u65F6\u8BF7\u79FB\u9664"
+          reason: "panel.minWidth / panel.defaultFraction \u4EC5\u505C\u9760\u5F62\u6001(left / right / top / bottom)\u6709\u6548,position:'tab' \u65F6\u8BF7\u79FB\u9664"
         };
       }
     }
@@ -638,11 +839,48 @@ function validateGhostManifest(value) {
         reason: "mainView.html \u5FC5\u586B\uFF0C\u4E14\u5FC5\u987B\u662F\u5B89\u88C5\u76EE\u5F55\u5185\u7684\u5B89\u5168\u76F8\u5BF9\u8DEF\u5F84"
       };
     }
+    if (raw.mainView.open !== void 0 && !GHOST_MAIN_VIEW_OPEN_MODES.includes(raw.mainView.open)) {
+      return {
+        ok: false,
+        reason: `mainView.open \u5FC5\u987B\u662F ${GHOST_MAIN_VIEW_OPEN_MODES.join(" / ")}`
+      };
+    }
+    if (raw.mainView.multiple !== void 0 && raw.mainView.multiple !== true) {
+      return { ok: false, reason: "mainView.multiple \u53EA\u63A5\u53D7\u5B57\u9762\u91CF true(\u4E0D\u9700\u8981\u65F6\u7701\u7565)" };
+    }
+    if (raw.mainView.side !== void 0) {
+      if (raw.mainView.open !== "sidebar") {
+        return { ok: false, reason: "mainView.side \u53EA\u5728 open:'sidebar' \u65F6\u6709\u6548,\u5176\u5B83\u6253\u5F00\u65B9\u5F0F\u8BF7\u79FB\u9664" };
+      }
+      if (!GHOST_TAB_SIDES.includes(raw.mainView.side)) {
+        return { ok: false, reason: `mainView.side \u5FC5\u987B\u662F ${GHOST_TAB_SIDES.join(" / ")}` };
+      }
+    }
     mainView = {
-      ...unknownDeclarationFields(raw.mainView, ["html", "title", "icon"]),
+      ...unknownDeclarationFields(raw.mainView, ["html", "title", "icon", "open", "side", "multiple"]),
       ...raw.mainView.title !== void 0 ? { title: raw.mainView.title } : {},
       ...raw.mainView.icon !== void 0 ? { icon: raw.mainView.icon } : {},
+      ...raw.mainView.open !== void 0 ? { open: raw.mainView.open } : {},
+      ...raw.mainView.side !== void 0 ? { side: raw.mainView.side } : {},
+      ...raw.mainView.multiple === true ? { multiple: true } : {},
       html: raw.mainView.html
+    };
+  }
+  let taskView;
+  if (raw.taskView !== void 0) {
+    if (!isPlainObject(raw.taskView)) {
+      return { ok: false, reason: "taskView \u5FC5\u987B\u662F\u5BF9\u8C61" };
+    }
+    if (raw.taskView.title !== void 0 && (typeof raw.taskView.title !== "string" || raw.taskView.title.trim().length === 0 || raw.taskView.title.length > 64)) {
+      return { ok: false, reason: "taskView.title \u5FC5\u987B\u662F 1\u201364 \u5B57\u7B26\u7684\u975E\u7A7A\u5B57\u7B26\u4E32" };
+    }
+    if (!isSafeGhostRelativePath(raw.taskView.html)) {
+      return { ok: false, reason: "taskView.html \u5FC5\u586B\uFF0C\u4E14\u5FC5\u987B\u662F\u5B89\u88C5\u76EE\u5F55\u5185\u7684\u5B89\u5168\u76F8\u5BF9\u8DEF\u5F84" };
+    }
+    taskView = {
+      ...unknownDeclarationFields(raw.taskView, ["html", "title"]),
+      ...raw.taskView.title !== void 0 ? { title: raw.taskView.title } : {},
+      html: raw.taskView.html
     };
   }
   if (!isSafeGhostRelativePath(raw.entry)) {
@@ -709,6 +947,12 @@ function validateGhostManifest(value) {
       reason: 'slots \u58F0\u660E\u4E86 "main-view" \u4F46\u7F3A\u5C11 mainView(html \u5FC5\u586B)'
     };
   }
+  if (taskView !== void 0 && !slots.includes("task-view")) {
+    return { ok: false, reason: '\u58F0\u660E\u4E86 taskView \u4F46 slots \u672A\u5305\u542B "task-view"' };
+  }
+  if (slots.includes("task-view") && taskView === void 0) {
+    return { ok: false, reason: 'slots \u58F0\u660E\u4E86 "task-view" \u4F46\u7F3A\u5C11 taskView(html \u5FC5\u586B)' };
+  }
   if (slots.includes("badge") && panel === void 0) {
     return {
       ok: false,
@@ -772,16 +1016,22 @@ function validateGhostManifest(value) {
             reason: "tools[].parameters \u5FC5\u987B\u662F\u5BF9\u8C61(JSON Schema)"
           };
         try {
-          if (JSON.stringify(t.parameters).length > 16384) {
+          const serialized = JSON.stringify(t.parameters);
+          const size = preserveHistoricalParameterSize ? serialized.length : new TextEncoder().encode(serialized).length;
+          if (size > 16384) {
             return { ok: false, reason: "tools[].parameters \u8FC7\u5927(\u4E0A\u9650 16KB)" };
           }
         } catch {
           return { ok: false, reason: "tools[].parameters \u5FC5\u987B\u53EF\u5E8F\u5217\u5316" };
         }
       }
+      if (t.approval !== void 0 && t.approval !== "auto" && t.approval !== "each-call") {
+        return { ok: false, reason: "tools[].approval \u5FC5\u987B\u662F auto \u6216 each-call" };
+      }
       tools.push({
         name: t.name,
         description: t.description,
+        ...t.approval !== void 0 ? { approval: t.approval } : {},
         ...t.parameters !== void 0 ? { parameters: t.parameters } : {}
       });
     }
@@ -884,6 +1134,8 @@ function validateGhostManifest(value) {
   }
   const routineEvents = raw.routineEvents === void 0 ? void 0 : parseGhostRoutineEvents(raw.routineEvents);
   if (routineEvents === null) return { ok: false, reason: "Invalid routineEvents declaration" };
+  const models = raw.models === void 0 ? void 0 : parseGhostModelsNeeds(raw.models);
+  if (models === null) return { ok: false, reason: 'models must be { "types": [...] } with unique type names' };
   let subscribe;
   if (raw.subscribe !== void 0) {
     if (!isPlainObject(raw.subscribe)) {
@@ -934,6 +1186,9 @@ function validateGhostManifest(value) {
         reason: '\u58F0\u660E\u4E86 subscribe.hooks(\u62E6\u622A\u94A9\u5B50)\u5FC5\u987B\u540C\u65F6\u58F0\u660E launch: "resident"\u2014\u2014\u62E6\u622A\u8981\u6C42\u5E38\u9A7B\u5728\u573A,\u5426\u5219\u6BCF\u6761\u6D88\u606F\u90FD\u8981\u7B49\u51B7\u542F\u52A8'
       };
     }
+  }
+  if (models?.types.includes("route") && !subscribe?.hooks?.includes("will-start-task")) {
+    return { ok: false, reason: "A route model needs subscribe.hooks to include will-start-task" };
   }
   let network;
   if (raw.network !== void 0) {
@@ -1596,6 +1851,13 @@ function validateGhostManifest(value) {
             ...exTtl !== void 0 ? { ttlSeconds: exTtl } : {}
           };
         }
+        const check = s.check === void 0 ? void 0 : parseGhostSecretCheck(
+          s.check,
+          (host) => hosts.some((pattern) => ghostNetworkHostMatches(pattern, host)) && (injectHosts ?? hosts).some((pattern) => ghostNetworkHostMatches(pattern, host))
+        );
+        if (s.check !== void 0 && (!check || source !== void 0 && source !== "user")) {
+          return { ok: false, reason: "network.secrets[].check requires a user secret, a declared injection host, and a bounded response mapping" };
+        }
         secrets.push({
           key: s.key,
           label: s.label,
@@ -1608,6 +1870,7 @@ function validateGhostManifest(value) {
             ...injectHosts !== void 0 ? { hosts: injectHosts } : {}
           },
           ...exchange !== void 0 ? { exchange } : {},
+          ...check ? { check } : {},
           ...oauth !== void 0 ? { oauth } : {}
         });
       }
@@ -1746,22 +2009,42 @@ function validateGhostManifest(value) {
     if (agentRaw.hiddenTasks === true && agentRaw.tasks !== true) {
       return { ok: false, reason: "agent.hiddenTasks: true \u9700\u8981\u540C\u65F6\u58F0\u660E agent.tasks: true" };
     }
+    if (agentRaw.targets !== void 0) {
+      if (typeof agentRaw.targets !== "boolean") return { ok: false, reason: "agent.targets must be boolean" };
+      if (agentRaw.targets === true && agentRaw.tasks !== true) {
+        return { ok: false, reason: "agent.targets: true \u9700\u8981\u540C\u65F6\u58F0\u660E agent.tasks: true" };
+      }
+    }
+    if (agentRaw.delegation !== void 0) {
+      if (typeof agentRaw.delegation !== "boolean") return { ok: false, reason: "agent.delegation must be boolean" };
+      if (agentRaw.delegation === true && (agentRaw.tasks !== true || agentRaw.targets !== true)) {
+        return { ok: false, reason: "agent.delegation requires agent.tasks and agent.targets" };
+      }
+    }
     if (agentRaw.schedule !== void 0 && typeof agentRaw.schedule !== "boolean") {
       return { ok: false, reason: "agent.schedule \u5FC5\u987B\u662F\u5E03\u5C14\u503C" };
     }
-    if (agentRaw.background !== true && agentRaw.errand !== true && agentRaw.schedule !== true && agentRaw.tasks !== true && Object.keys(unknownDeclarationFields(agentRaw, ["background", "errand", "schedule", "tasks", "hiddenTasks"])).length === 0) {
+    if (agentRaw.observe !== void 0 && typeof agentRaw.observe !== "boolean") {
+      return { ok: false, reason: "agent.observe must be boolean" };
+    }
+    if (agentRaw.companions !== void 0 && typeof agentRaw.companions !== "boolean") return { ok: false, reason: "agent.companions must be boolean" };
+    if (agentRaw.background !== true && agentRaw.errand !== true && agentRaw.schedule !== true && agentRaw.tasks !== true && agentRaw.observe !== true && agentRaw.companions !== true && Object.keys(unknownDeclarationFields(agentRaw, ["background", "errand", "schedule", "tasks", "hiddenTasks", "targets", "delegation", "observe", "companions"])).length === 0) {
       return {
         ok: false,
-        reason: "agent \u80FD\u529B\u8BE6\u5355\u53EA\u6709 background: true / errand: true / schedule: true / tasks: true \u56DB\u9879\u52A0\u6863;\u4EC5\u9700\u7528\u6237\u70B9\u51FB\u89E6\u53D1\u65F6\u8BF7\u7701\u7565 agent \u5B57\u6BB5"
+        reason: "agent \u80FD\u529B\u8BE6\u5355\u53EA\u6709 background: true / errand: true / schedule: true / tasks: true / observe: true / companions: true \u516D\u9879\u52A0\u6863;\u4EC5\u9700\u7528\u6237\u70B9\u51FB\u89E6\u53D1\u65F6\u8BF7\u7701\u7565 agent \u5B57\u6BB5"
       };
     }
     agent = {
-      ...unknownDeclarationFields(agentRaw, ["background", "errand", "schedule", "tasks", "hiddenTasks"]),
+      ...unknownDeclarationFields(agentRaw, ["background", "errand", "schedule", "tasks", "hiddenTasks", "targets", "delegation", "observe", "companions"]),
       ...agentRaw.background === true ? { background: true } : {},
       ...agentRaw.errand === true ? { errand: true } : {},
       ...agentRaw.tasks === true ? { tasks: true } : {},
+      ...agentRaw.tasks === true && agentRaw.targets === true ? { targets: true } : {},
+      ...agentRaw.tasks === true && agentRaw.targets === true && agentRaw.delegation === true ? { delegation: true } : {},
       ...agentRaw.tasks === true && agentRaw.hiddenTasks === true ? { hiddenTasks: true } : {},
-      ...agentRaw.schedule === true ? { schedule: true } : {}
+      ...agentRaw.schedule === true ? { schedule: true } : {},
+      ...agentRaw.observe === true ? { observe: true } : {},
+      ...agentRaw.companions === true ? { companions: true } : {}
     };
   }
   let node;
@@ -2004,6 +2287,9 @@ function validateGhostManifest(value) {
       ok: false,
       reason: 'slots \u58F0\u660E\u4E86 "node" \u4F46\u7F3A\u5C11 node \u5DE5\u4F5C\u8FDB\u7A0B\u8BE6\u5355'
     };
+  }
+  if (slots.includes("live-screen") && node === void 0) {
+    return { ok: false, reason: "liveScreen: true \u9700\u8981\u540C\u65F6\u58F0\u660E node \u5DE5\u4F5C\u8FDB\u7A0B" };
   }
   if (node?.secretBindings) {
     for (const binding of node.secretBindings) {
@@ -2393,10 +2679,15 @@ function validateGhostManifest(value) {
       keywords.push(word);
     }
   }
+  if (raw.mcpApps !== void 0 && raw.schemaVersion !== 3) return { ok: false, reason: "mcpApps requires schemaVersion 3" };
+  const parsedMcpApps = raw.mcpApps === void 0 ? void 0 : parseGhostMcpApps(raw.mcpApps, tools ?? [], network?.hosts ?? [], isSafeGhostRelativePath);
+  if (parsedMcpApps === null) return { ok: false, reason: "mcpApps.ui \u9875\u9762\u6216\u5DE5\u5177\u58F0\u660E\u65E0\u6548\uFF0C\u9875\u9762\u57DF\u540D\u5FC5\u987B\u5728 network.hosts \u5185" };
+  const mcpApps = parsedMcpApps;
   return {
     ok: true,
     manifest: {
       ...prepared.unknownV3Fields,
+      ...mcpApps !== void 0 ? { mcpApps } : {},
       schemaVersion: prepared.schemaVersion,
       id: raw.id,
       name: raw.name,
@@ -2408,6 +2699,7 @@ function validateGhostManifest(value) {
       ...locales !== void 0 ? { locales } : {},
       ...raw.description !== void 0 ? { description: raw.description } : {},
       ...raw.whenToUse !== void 0 ? { whenToUse: raw.whenToUse } : {},
+      ...readme !== void 0 ? { readme } : {},
       ...raw.icon !== void 0 ? { icon: raw.icon } : {},
       entry: raw.entry,
       ...raw.launch !== void 0 ? { launch: raw.launch } : {},
@@ -2420,25 +2712,31 @@ function validateGhostManifest(value) {
       ...prepared.schemaVersion === 2 ? { slots } : {},
       ...card !== void 0 || prepared.v3BaseCard || prepared.schemaVersion === 3 && slots.includes("card") ? { card: card ?? {} } : {},
       ...tools !== void 0 ? { tools } : {},
+      ...raw.mail === true ? { mail: true } : {},
+      ...reader ? { mailReader: { ...reader, tool: reader.tool, hosts: [...new Set(reader.hosts)] } } : {},
       ...cindy !== void 0 ? { cindy } : {},
       ...subscribe !== void 0 ? { subscribe } : {},
       ...routineEvents !== void 0 ? { routineEvents } : {},
+      ...models !== void 0 ? { models } : {},
       ...network !== void 0 ? { network } : {},
       ...raw.command !== void 0 ? { command: raw.command } : {},
       ...keywords !== void 0 ? { keywords } : {},
       ...panel !== void 0 ? { panel } : {},
       ...mainView !== void 0 ? { mainView } : {},
+      ...taskView !== void 0 ? { taskView } : {},
       ...preview !== void 0 ? { preview } : {},
       ...skill !== void 0 ? { skill } : {},
       ...prepared.schemaVersion === 3 && slots.includes("notify") ? { notify: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("badge") ? { badge: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("confirm") ? { confirm: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("fs") ? { fs: true } : {},
+      ...slots.includes("device-sync") ? { deviceSync: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("library") ? { library: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("session-context") ? { sessionContext: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("pick") ? { pick: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("workspace") ? { workspace: true } : {},
       ...prepared.schemaVersion === 3 && slots.includes("ios-simulator") ? { iosSimulator: true } : {},
+      ...prepared.schemaVersion === 3 && slots.includes("live-screen") ? { liveScreen: true } : {},
       ...manual !== void 0 ? { manual } : {},
       ...setup !== void 0 ? { setup } : {}
     }
@@ -2454,6 +2752,7 @@ export {
   GHOST_LOCALES,
   GHOST_LOCALE_MAX_BYTES,
   GHOST_MAIN_VIEW_ICONS,
+  GHOST_MAIN_VIEW_OPEN_MODES,
   GHOST_MANIFEST_FILE,
   GHOST_MANIFEST_SCHEMA_VERSION,
   GHOST_MANIFEST_SUMMARY_MAX_CHARS,
@@ -2500,6 +2799,7 @@ export {
   GHOST_SKILL_NAME_RE,
   GHOST_SUBSCRIBE_HOOKS,
   GHOST_SUBSCRIBE_TOPICS,
+  GHOST_TAB_SIDES,
   LEGACY_GHOST_SLOTS,
   compareCindyVersions,
   ghostIconMimeType,
@@ -2511,5 +2811,6 @@ export {
   isValidGhostNetworkHostPattern,
   isVersionlessCindyVersion,
   supportsCindyVersion,
-  validateGhostManifest
+  validateGhostManifest,
+  validateStoredGhostManifest
 };

@@ -472,6 +472,35 @@ select any of those destinations or publish a plugin.
 Keep both languages synchronized; correcting wording does not require changing
 plugin packages, Host behavior, or CI restrictions.
 
+### Maintaining the pinned contract
+
+Maintainers refresh the validator from a specific committed Host revision:
+
+```sh
+node scripts/refresh-plugin-contract.mjs /path/to/cindy <commit-sha>
+node --test .tests/plugin-contract.test.mjs
+```
+
+The refresh uses the checkout's existing esbuild and reads committed Git blobs,
+so local Host edits cannot enter the output. It records the commit, generator
+version and input digest, then updates the test imports. Review the source
+changes and generated diff together. CI uses the checked-in snapshot without
+checking out another repository; plugin authors still use the standalone
+validation command above.
+
+When a manifest capability or limit changes, compare the client's protocol and
+runtime validators, the Server's local protocol copy and this snapshot using the
+same valid and malformed declarations. Preserve explicit compatibility paths:
+historical parameter sizes use the old UTF-16 bound; new packages use UTF-8 bytes;
+Server stores setup author declarations while the Host normalizes them internally.
+Server historical reads also retain missing v3 minimum-version metadata; new
+uploads require it.
+Package budgets differ by delivery channel and must not be replaced by the
+largest value. Official packages still require zh-CN/en/ja/ko; other supported
+translations are optional. Declared task pages and MCP Apps resources must exist
+just like the existing page and worker entries. No plugin behavior or permissions
+need changing to refresh these contract copies.
+
 ## Same-account device synchronization
 
 The optional `deviceSync: true` capability uses `cindy.deviceSync` on supporting
