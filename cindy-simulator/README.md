@@ -163,6 +163,16 @@ Every device streams H.264 and sends nothing while the screen is still:
 - **Input**: iPhone and iPad take up to two fingers on the stream socket, mapped from the upright picture back to the native portrait screen, including the Home-indicator edge. Android takes up to ten through `sendTouch`. Buttons, text (paste) and keys use the existing guarded operations. Apple TV and Vision Pro show the picture with Home (TV also Menu and Play/Pause); their remote and spatial input are not on the phone yet.
 - **Use**: an open phone screen counts as a viewer, so the idle shutdown waits. `control` is the keepalive; a screen without one for a minute closes. Turning simulators off closes every phone screen, and `open`, `input` and `control` return `DISABLED` until it is back on. `list` reads devices only: it starts nothing and does not count as use. Only simulators are listed; physical iPhone/iPad devices are not offered on the phone yet. A device shut down while shown ends its phone screen within seconds.
 
+## Viewing on another computer (0.3.43)
+
+When a task lives on another computer of the same account and this plugin runs a device for it there, this computer's task sidebar shows it with the **same task page and controller**: device chip, zoom, bottom toolbar, click/drag, Option two-finger gestures, wheel, native trackpad entry and touch indicators share the code used for local devices (`node/remote`). This computer needs no Mac, Xcode or Android environment, only this plugin; Cindy asks the user to install it when it is missing.
+
+- **Declaration**: `taskView.remote: true`. A supporting Cindy opens the task page in remote tasks with `device=<that computer>`; older Cindy ignores the field, behavior and `minCindyVersion` are unchanged.
+- **Picture and input**: through `cindy.liveScreenView()` the logic page can only list and open devices this plugin has bound to that task on that computer, and receives a loopback address from Cindy. The worker passes the stream to the device page (WebCodecs) and sends touches, device buttons and text back. It stores no picture and reaches nothing else on that computer.
+- **Viewing and operating only**: boot, shutdown, create, rename, sound, memory mode, file import, recording and advanced tools belong to the computer that runs the device and are not shown. A screenshot is the picture shown on this computer (re-encoded, not the device's original), saved to this computer's Desktop or clipboard.
+- **Connection**: the device page stops reading while hidden. A computer accepts one remote view at a time; when the user's other device (a phone, for example) is viewing, the page offers "View here" and the user decides. Interruptions reconnect automatically.
+- **Not yet provided**: device body artwork (a generic rounded body is shown), the Apple TV remote and Vision Pro spatial controls, device switching and management.
+
 ## Apple TV and Vision Pro
 
 Create either device in the management view or task tab using an installed tvOS

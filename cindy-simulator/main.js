@@ -150,7 +150,36 @@ async function openInTask(udid, locale) {
 // Task page and management view. Each action maps to one fixed worker method
 // with sanitized parameters. Cross-task navigation resolves the target from
 // the device's saved binding in the worker, never from a page-supplied task id.
+// A task that lives on another of the account's computers: Cindy lists this
+// plugin's devices there and relays one device's picture and input. The page
+// gets the plugin's own controller around it (node/remote); only the task and
+// computer Cindy put in the page address are ever asked about.
+const DEVICE = /^[A-Za-z0-9._:-]{1,256}$/, SCREEN = /^[A-Za-z0-9._:-]{1,128}$/;
+async function remoteView(request) {
+  try {
+    const result = await (typeof cindy.liveScreenView === 'function' ? cindy.liveScreenView(request) : cindy.send({...request, type:'live-screen-view-request'}));
+    return result && typeof result === 'object' && typeof result.ok === 'boolean' ? result : {ok:false, errorCode:'HOST_UPDATE_REQUIRED'};
+  } catch { return {ok:false, errorCode:'HOST_UPDATE_REQUIRED'}; }
+}
+async function remoteState(m, locale) {
+  if (!SESSION.test(m.sessionId) || typeof m.deviceId !== 'string' || !DEVICE.test(m.deviceId)) return false;
+  const listed = await remoteView({op:'screens', deviceId:m.deviceId});
+  if (!listed.ok) return {ok:false, errorCode:listed.errorCode || 'REMOTE_UNAVAILABLE', execution:'not_executed'};
+  const screens = (Array.isArray(listed.screens) ? listed.screens : [])
+    .filter(s => s && SCREEN.test(s.id) && Array.isArray(s.taskIds) && s.taskIds.includes(m.sessionId))
+    .map(s => ({id:s.id, name:String(s.name || s.id).slice(0, 128), platform:s.platform}));
+  // The device the page already shows stays; otherwise the task's first.
+  const screen = screens.find(s => s.id === m.screenId) || screens[0];
+  if (!screen) return {ok:true, remote:true, screens};
+  const opened = await remoteView({op:'open', deviceId:m.deviceId, id:screen.id});
+  if (!opened.ok || typeof opened.url !== 'string') return {ok:true, remote:true, screens, screen, viewerError:opened.errorCode || 'REMOTE_UNAVAILABLE'};
+  const viewer = await worker('remote_viewer', {id:screen.id, url:opened.url, name:screen.name, platform:screen.platform, _locale:locale, _task:m.sessionId});
+  return viewer.ok && viewer.url ? {ok:true, remote:true, screens, screen, viewer:{url:viewer.url}}
+    : {ok:true, remote:true, screens, screen, viewerError:viewer.errorCode || 'NODE_UNAVAILABLE'};
+}
+
 const PAGE_ACTIONS = {
+  remote_state: remoteState,
   task_state: (m, l) => SESSION.test(m.sessionId) && worker('task_state', {_task:m.sessionId, _locale:l}),
   task_bind: (m, l) => SESSION.test(m.sessionId) && str(m.udid) && worker('task_bind', {_task:m.sessionId, udid:m.udid, _locale:l}),
   task_boot: async (m, l) => {
@@ -197,7 +226,7 @@ const PAGE_ACTIONS = {
     return opened;
   },
 };
-const KEEPS_RUNNING = new Set(['task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'restart_device', 'open_in_task', 'viewer_url', 'android_install']);
+const KEEPS_RUNNING = new Set(['remote_state', 'task_state', 'task_bind', 'task_boot', 'task_create', 'boot', 'restart_device', 'open_in_task', 'viewer_url', 'android_install']);
 if (pages) pages.onmessage = async ({data: msg}) => {
   if (msg?.type === 'ping' && typeof msg.id === 'string') { pages.postMessage({type:'ready', id:msg.id}); return; }
   if (msg?.type !== 'request' || typeof msg.id !== 'string' || !Object.hasOwn(PAGE_ACTIONS, msg.action)) return;

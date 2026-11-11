@@ -62,3 +62,37 @@ it had the earlier latency, which the end-to-end runs above isolated and fixed.
 - iPhone Duo posture on the phone; Apple TV remote and Vision Pro spatial input
   (not offered on the phone).
 - The packaged 0.3.29 `.cindy` installed in a released Cindy build.
+
+# Viewing on another computer — 2026-11-11
+
+Plugin `cindy-simulator` 0.3.43 source. Viewer: Cindy desktop dev build from
+`makecindy/cindy` branch `dash/desktop-live-screen` in an isolated profile, with
+this source installed from a local `.cindy` package. Provider: a released Cindy on
+the same Mac Studio (macOS 27, Xcode 27.1) running one iOS 27.3 simulator
+(`Cindy iPhone Air`) bound to the task. Both sides were on one machine and one
+network; only that test device was started or turned.
+
+## Checked in the task sidebar
+
+- Without the plugin on the viewer, Cindy shows the notice and the entry that lead
+  to this plugin's page; nothing of the device is drawn.
+- With it, the task page opens by itself with `device=<computer>` and shows the
+  controller (device chip, zoom, More, Home, screenshot, rotate, help) around the
+  remote device at 1260×2736.
+- Click opens an App; a held drag scrolls a list; the wheel sends two touches 80
+  points either side with the touch indicators shown; Home returns to the Home
+  Screen; rotate turns Safari to landscape and the page lays out 2736×1260.
+- Screenshot to Desktop writes `<device name> <date time>.png` on the viewer.
+- A stream that ends (the page hidden, the address renewed) reconnects on its own.
+
+## Not checked
+
+- Real two-finger trackpad contacts, Option pinch and pan, typing and paste were not
+  exercised by hand: script-driven key events do not reach the device page. They use
+  the same gesture modules as the local page (`.tests/baguette/remote-viewer.test.cjs`
+  asserts the modules and the trackpad declaration are loaded).
+- A viewer on Windows or Linux, Android, iPad, Apple TV and Vision Pro devices, two
+  computers on different networks, dark mode and a detached sidebar window.
+- The picture is re-encoded on the way; sharpness and latency were judged by eye only.
+- With providers before the still-picture fix in the same Cindy branch, the first
+  picture appears only once the device's screen changes.

@@ -12,6 +12,8 @@ const TEXT = {
     pausedTitle: 'Simulators are turned off', pausedBody: 'Turn them on in Plugins → Device Simulator to use them here.',
     pluginOff: 'The Device Simulator plugin is turned off.', needXcode: 'Needs full Xcode with the required iOS, tvOS or visionOS runtime installed.',
     failed: 'Not completed. Check the device and try again.', busy: 'Another simulator operation is running. Trying again shortly…', timeout: 'No response from the simulator service. Reopen this tab.',
+    remoteNoneTitle: 'No device is running for this task', remoteNoneBody: 'This task lives on another computer. Once a simulator is opened for it there, it appears here.',
+    remoteWaiting: 'Connecting to the other computer…', remoteUnavailable: 'The other computer cannot be reached right now. Trying again shortly…', remoteHostUpdate: 'Update Cindy on this computer to view devices that run on another computer.',
     devices: 'Devices', back: 'Back', stateFailed: 'The operation completed, but task status or the screen could not be read. Refresh this task; do not repeat the operation.', recordFailed: 'Device operation completed, but its task or App record was not saved. Check storage before assigning or switching devices; do not repeat the operation.',
   },
   'zh-CN': {
@@ -23,12 +25,19 @@ const TEXT = {
     pausedTitle: '模拟器运行已关闭', pausedBody: '在「插件 → 设备模拟器」里打开开关后即可在这里使用。',
     pluginOff: '「设备模拟器」插件已停用。', needXcode: '需要先安装完整的 Xcode 和对应的 iOS、tvOS 或 visionOS 运行时。',
     failed: '操作没有完成，请核对设备后重试。', busy: '有其他模拟器操作正在进行，稍后自动重试…', timeout: '模拟器服务没有响应，请重新打开这个页签。',
+    remoteNoneTitle: '这个任务没有运行中的设备', remoteNoneBody: '这个任务在另一台电脑上。在那台电脑上为它打开模拟器后，会自动显示在这里。',
+    remoteWaiting: '正在连接另一台电脑…', remoteUnavailable: '暂时连不上另一台电脑，稍后自动重试…', remoteHostUpdate: '需要先更新这台电脑上的 Cindy，才能查看另一台电脑上的设备。',
     devices: '设备', back: '返回', stateFailed: '操作已完成，但任务状态或画面未能读取。请刷新此任务，不要重复操作。', recordFailed: '设备操作已完成，但任务绑定或 App 记录未保存。请先检查存储，再分配或切换设备；不要重复设备操作。',
   },
 };
 const { rpc, h, locale, GLYPH, onPush, createDevice: newDevice } = globalThis.CindySimPages;
 const M = globalThis.CindySimModel;
 const session = new URLSearchParams(location.search).get('session') || '';
+// Set by Cindy when the task lives on another of the account's computers: this
+// page then shows the device that computer runs for the task (see main.js
+// remoteState), with the same controller as a device on this computer.
+const remoteDevice = new URLSearchParams(location.search).get('device') || '';
+let remote = null;
 const $ = (id) => document.getElementById(id);
 let T = TEXT.en, lang = 'en', state = null, busy = null, choosing = false, note = null, viewerUrl = null;
 let resourceView = null;
@@ -69,7 +78,30 @@ function deviceList(exclude) {
     ]);
   }));
 }
+function renderRemote() {
+  const inner = $('inner'); inner.replaceChildren();
+  if (!remote) inner.append(hero(GLYPH.big, note?.text || T.remoteWaiting, '', note ? [] : [h('span', { class: 'spinner' })]));
+  else if (!remote.screen) inner.append(hero(GLYPH.big, T.remoteNoneTitle, T.remoteNoneBody));
+  else inner.append(hero(GLYPH.big, remote.screen.name, remote.viewerError ? T.remoteUnavailable : T.connecting, [h('span', { class: 'spinner' })]));
+}
+async function refreshRemote() {
+  if (pending) return;
+  const request = pending = {};
+  try {
+    const r = await rpc('remote_state', { sessionId: session, deviceId: remoteDevice, screenId: remote?.screen?.id }, T.timeout);
+    if (pending !== request) return;
+    if (!r.ok) throw r;
+    remote = r; note = null; show(r.viewer?.url);
+  } catch (error) {
+    if (pending !== request) return;
+    const code = error?.errorCode || error?.code;
+    // A picture already on screen stays: its own page says when the link is down.
+    if (!viewerUrl) { remote = null; note = { text: code === 'HOST_UPDATE_REQUIRED' ? T.remoteHostUpdate : code === 'PLUGIN_OFF' ? T.pluginOff : T.remoteUnavailable, error: true }; }
+  } finally { if (pending === request) pending = null; }
+  renderRemote();
+}
 function render() {
+  if (remoteDevice) { renderRemote(); return; }
   const inner = $('inner'); inner.replaceChildren(); resourceView?.prune();
   if (!state) { inner.append(hero(GLYPH.big, note?.text || T.loading, '')); return; }
   if (state.settings?.enabled === false) inner.append(hero(GLYPH.pause, T.pausedTitle, T.pausedBody));
@@ -140,11 +172,17 @@ async function createDevice() {
 // Only the embedded controller may hand off a newly created device's local choice.
 globalThis.addEventListener('message',event=>{
   const m=event.data;
+  // The remote device page lost its stream: renew the address behind it now.
+  if(remoteDevice && viewerUrl && m?.type==='cindy-simulator-remote-ended'){
+    try { if(event.origin===new URL(viewerUrl).origin) void refreshRemote(); } catch {}
+    return;
+  }
   if(!viewerUrl || event.source!==$('screen').contentWindow || m?.type!=='cindy-simulator-created' || m.sessionId!==session) return;
   try { if(event.origin!==new URL(viewerUrl).origin) return; } catch { return; }
   globalThis.CindySimPages.rememberMemoryChoice(m.udid,m.memoryMode);
 });
 onPush((m) => {
+  if (remoteDevice) return;
   if (m?.type !== 'viewer' || m.sessionId !== session || typeof m.url !== 'string') return;
   pending = null; choosing = false;
   if (m.taskStateError) { state = null; note = { text:T.stateFailed, error:true, sticky:true }; }
@@ -154,6 +192,13 @@ onPush((m) => {
   lang = await locale(); T = TEXT[lang] || TEXT.en; document.documentElement.lang = lang;
   resourceView = M.createResourceSummary(lang,(device,refresh)=>rpc('resources',{udid:device.udid,refresh}));
   $('screen').title = lang === 'zh-CN' ? '设备模拟器' : 'Device Simulator';
+  if (remoteDevice) {
+    renderRemote(); await refreshRemote();
+    // The task's device there can start, stop or change at any time.
+    setInterval(() => { if (!document.hidden) refreshRemote(); }, 6000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshRemote(); });
+    return;
+  }
   render(); await refresh();
   // Bindings can change even while the current device keeps streaming.
   setInterval(() => { if (!document.hidden && !busy) refresh(); }, 4000);
