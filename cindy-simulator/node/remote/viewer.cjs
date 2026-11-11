@@ -70,6 +70,29 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
       request.end(body);
     });
   }
+  // The page uses the provider's complete key events. The host wire uses
+  // desktop key down/up; its source-side mapper reconstructs the same chord.
+  async function input(view,events){
+    const modifierCodes={shift:'ShiftLeft',control:'ControlLeft',option:'AltLeft',command:'MetaLeft'};
+    const groups=events.map(event=>{
+      if(event?.kind!=='key'||typeof event.down==='boolean')return [event];
+      const modifiers=event.modifiers??[];
+      if(typeof event.code!=='string'||!Array.isArray(modifiers)||modifiers.length>4||modifiers.some(m=>!Object.hasOwn(modifierCodes,m)))
+        throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
+      const codes=[...new Set(modifiers)].map(m=>modifierCodes[m]);
+      return [...codes.map(code=>({kind:'key',code,down:true})),{kind:'key',code:event.code,down:true},{kind:'key',code:event.code,down:false},...codes.reverse().map(code=>({kind:'key',code,down:false}))];
+    });
+    // Keep chords together, within the host's existing event and byte limits.
+    let batch=[],executed=false;
+    const flush=async()=>{if(batch.length){await send(view,batch);executed=true;batch=[];}};
+    try{
+      for(const group of groups){
+        if(batch.length+group.length>64||Buffer.byteLength(JSON.stringify({events:[...batch,...group]}))>16384)await flush();
+        batch.push(...group);
+      }
+      await flush();
+    }catch(error){if(executed)error.execution='unknown';throw error;}
+  }
   // The picture as shown: this computer has no direct way to the device itself.
   // Named like a screenshot of a device on this computer (core.cjs desktopFile).
   const shots=new Set();
@@ -104,7 +127,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
       }
       case 'activity':lastSeen=Date.now();return {};
       case 'press':if(typeof p.button!=='string'||!/^[a-z0-9-]{1,32}$/.test(p.button))throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT'});await send(view,[{kind:'press',button:p.button}]);return {execution:'executed'};
-      case 'input':if(!Array.isArray(p.events)||!p.events.length||p.events.length>64)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT'});await send(view,p.events);return {execution:'executed'};
+      case 'input':if(!Array.isArray(p.events)||!p.events.length||p.events.length>64)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT'});await input(view,p.events);return {execution:'executed'};
       case 'screenshot':return screenshot(view,p);
       case 'screenshot_destination':shotTo=p.destination==='clipboard'?'clipboard':'desktop';return {destination:shotTo};
       case 'reveal':reveal(p.path);return {};

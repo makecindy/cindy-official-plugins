@@ -44,3 +44,9 @@ Tests must distinguish the previous commit: a pending initial read followed by l
 - Threads the live stream's observed rotation through existing remote task-state reads, the controller status, definition requests, artwork generation and existing cache keys. No new probe or polling loop. Older providers without pose metadata retain a plain body instead of an inferred mask. Orientation follows the existing task/controller refresh cadence, not frame-by-frame synchronization.
 - Direction tests cover all four artwork rotations (distinguished with asymmetric pixels), opposite equal-size poses through the HTTP/cache path, browser shell selection and stale-cache reuse, plus runtime state propagation without opening a local viewer. The existing live-stream orientation test verifies the same rotation source.
 - Targeted suites: 41 passed, zero failed (2.13 seconds). Full simulator/repository suites: 1,736 passed, zero failed (54.88 seconds). Forge validated and packed 0.3.46. No installation or two-computer/native-trackpad acceptance in this round.
+
+## 0.3.47 host transport regression — 2026-11-11
+
+- The page and provider use complete key/chord events; host PR #9950 uses desktop key-down/up on its loopback transport, then its existing source-side `LiveScreenInputMapper` reconstructs complete provider events. The worker now translates at that boundary, preserving Shift/Control/Option/Command. Prior page/provider-only tests did not cover this intermediate wire contract.
+- The real worker HTTP test covers 64 chords, key-up order and host-size batching, invalid modifiers before execution, and a later rejected batch reported as unknown after an earlier batch executed. No retry or new input queue is added.
+- Full simulator and required repository suites: 1,738 passed, zero failed (57.23 seconds). Forge validated and packed 0.3.47. No installation, two-computer or native-trackpad acceptance performed.

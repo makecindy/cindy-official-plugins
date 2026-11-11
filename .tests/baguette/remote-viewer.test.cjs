@@ -174,3 +174,21 @@ test('remote keyboard sends complete provider-compatible key events and a readab
   assert.ok(batches.flat().some(e=>e.kind==='text'&&e.text==='text'));
   assert.equal(batches.flat().filter(e=>e.kind==='text'&&e.text==='pasted').length,1);
 });
+
+// The page/provider and host wire have deliberately different key contracts.
+// Exercise the real HTTP bridge; counting page emissions alone misses this gap.
+test('remote key chords cross the host wire in bounded batches without lost modifiers',async t=>{
+  const {api,upstream}=await opened(t);
+  const keys=Array.from({length:64},()=>({kind:'key',code:'ArrowLeft',modifiers:['shift','command']}));
+  assert.equal((await api({action:'input',events:keys})).body.ok,true);
+  const packets=upstream.posts.map(p=>p.body.events);
+  assert.ok(packets.length>1);assert.ok(packets.every(events=>events.length<=64));
+  const chord=[['ShiftLeft',true],['MetaLeft',true],['ArrowLeft',true],['ArrowLeft',false],['MetaLeft',false],['ShiftLeft',false]].map(([code,down])=>({kind:'key',code,down}));
+  assert.deepEqual(packets.flat(),keys.flatMap(()=>chord));
+  upstream.posts.length=0;
+  const bad=await api({action:'input',events:[{kind:'key',code:'KeyA',modifiers:['invalid']}]});
+  assert.equal(bad.body.errorCode,'INVALID_ARGUMENT');assert.equal(upstream.posts.length,0);
+  // A later refused batch does not erase the earlier batch's execution.
+  const failed=await api({action:'input',events:[...Array.from({length:32},()=>({kind:'key',code:'Enter'})),{kind:'press',button:'refused'}]});
+  assert.equal(failed.body.execution,'unknown');assert.equal(upstream.posts.length,2);
+});
