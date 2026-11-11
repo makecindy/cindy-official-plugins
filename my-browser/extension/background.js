@@ -1661,6 +1661,9 @@ async function learningRequest(message,sender) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  if(message?.type==='cindy-open-options') {
+    chrome.runtime.openOptionsPage().then(()=>reply({ok:true}),()=>reply({ok:false}));return true;
+  }
   if(message?.type==='cindy-agent-tab'&&sender.tab?.id!=null) {
     loadAgentTabs().then(set=>reply({opened:set.has(sender.tab.id)}),()=>reply({opened:false}));return true;
   }
