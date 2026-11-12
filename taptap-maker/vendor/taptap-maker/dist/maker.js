@@ -182339,7 +182339,12 @@ async function runPatSet(parsed, ctx) {
 }
 async function resolvePatSet(parsed, ctx) {
   if (booleanOption(parsed, "pat_stdin") || booleanOption(parsed, "pat_from_stdin")) {
-    const pat = fs98.readFileSync(0, "utf8").trim();
+    // Cindy supplies virtual stdin over IPC, not OS file descriptor 0.
+    const chunks = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const pat = Buffer.concat(chunks).toString("utf8").trim();
     if (!pat) {
       throw new Error("No PAT found on stdin.");
     }

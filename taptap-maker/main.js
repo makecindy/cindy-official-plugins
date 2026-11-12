@@ -90,6 +90,9 @@ async function accountRequest(action, payload, longRunning, preserveFailure) {
   var parsed = parseAccountResult(result);
   if (parsed.ok === false && !preserveFailure) {
     var failure = new Error(parsed.message || 'TapTap Maker 账号操作失败');
+    if (action === 'set_pat' && ['PAT_AUTH_REQUIRED', 'PAT_FORBIDDEN', 'PAT_NETWORK_ERROR'].includes(parsed.code)) {
+      failure.settingsCode = parsed.code;
+    }
     if (['not_executed', 'executed', 'unknown'].includes(parsed.execution_state)) {
       failure.execution_state = parsed.execution_state;
     }
