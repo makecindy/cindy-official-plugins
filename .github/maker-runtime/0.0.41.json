@@ -3,7 +3,7 @@
   "version": "0.0.41",
   "integrity": "sha512-zdeTup32kMCWv1cDal3lCBfiVUAIxaHhhIlUAPKlRuZXD8FlXV/hwRJ4rYZt5iwVG4/Za8dWLyyYQmCtfPBJxw==",
   "originalSha256": "ec7171d5bb5ea406c66d69b167985d2faeb1feb3a2a6b16707b98445b4535c32",
-  "patchedSha256": "27d37b819626ce06bd129d79b85c591cc9a2404af9a6926160894548d6501765",
+  "patchedSha256": "3b928b7562e16f26a8fe06032fbc91cdd8769d2cba062b4976cba5d658576a43",
   "patches": [
     {
       "id": "V1-executed-state",
@@ -369,13 +369,23 @@
           "count": 1
         }
       ]
+    },
+    {
+      "id": "V12-pat-virtual-stdin",
+      "edits": [
+        {
+          "before": "    const pat = fs98.readFileSync(0, \"utf8\").trim();",
+          "after": "    // Cindy supplies virtual stdin over IPC, not OS file descriptor 0.\n    const chunks = [];\n    for await (const chunk of process.stdin) {\n      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));\n    }\n    const pat = Buffer.concat(chunks).toString(\"utf8\").trim();",
+          "count": 1
+        }
+      ]
     }
   ],
   "vendorHashes": {
     "LICENSE": "3a6ed4d91c318ec454c98c8290bc02706d2f87fd922ef9944c1604cd0b718738",
     "README.md": "25907347c35de3018fea5fc2008b3221e2e23c7caef21c5c32c4d4ce65ccae69",
     "bin/taptap-maker": "d3cd496fb6cdf9606a809570de2920b7e40101939bc1cb6841f4ae7cda97c718",
-    "dist/maker.js": "27d37b819626ce06bd129d79b85c591cc9a2404af9a6926160894548d6501765",
+    "dist/maker.js": "3b928b7562e16f26a8fe06032fbc91cdd8769d2cba062b4976cba5d658576a43",
     "docs/MAKER_CONSOLE.md": "d9969dcbfb8ac77e2fd34b7b5de3ede4c20fbd8758ab75787cf06a452c5c15cc",
     "docs/MAKER_LOCAL_PREVIEW.md": "5106c1298e2a5db996c2d08ad8896556d00ef26677cbf44b9657ada3af4c65be",
     "docs/MAKER_MCP_CONNECTION_TROUBLESHOOTING.md": "124096b744925688649e8cb6e1884d11507ccae2736892c69df01631c89a6dd6",

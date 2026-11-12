@@ -602,7 +602,7 @@ function loadAccountInternals(nodeApi) {
     setTimeout,
   });
   new Script(
-    `${accountSource}\nglobalThis.__accountInternals = { ensureTargetAvailable, projectDirectoryName, projectSyncFailure, runMaker, parseJsonOutput };`,
+    `${accountSource}\nglobalThis.__accountInternals = { ensureTargetAvailable, projectDirectoryName, projectSyncFailure, patSaveFailure, executeAction, runMaker, parseJsonOutput };`,
     { filename: 'taptap-maker/node/account.cjs' },
   ).runInContext(context);
   return context.__accountInternals;
@@ -659,7 +659,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.27');
+  assert.equal(manifest.version, '2.1.30');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -2490,6 +2490,66 @@ test('计划或只读会话拒绝可能写工作区的操作，但仍允许状�
   assert.equal(readHarness.nodeRequests.length, 1);
 });
 
+test('PAT 失败只传固定分类，经过设置桥接后四语言显示恢复提示', async () => {
+  const { patSaveFailure } = loadAccountInternals();
+  const messages = readSettingsMessages();
+  const render = settingsSource.match(/  function requestFailureText\(action, response\) \{[\s\S]*?\n  \}/)[0];
+  const fixtures = [
+    ['TapTap token request failed: HTTP 401 {"code":"AUTH_TOKEN_EXPIRED"}', 'PAT_AUTH_REQUIRED', 'patAuthRequired'],
+    ['TapTap token request failed: HTTP 403', 'PAT_FORBIDDEN', 'patForbidden'],
+    ['TapTap token request timed out', 'PAT_NETWORK_ERROR', 'patNetworkError'],
+    ['fetch failed: ENOTFOUND', 'PAT_NETWORK_ERROR', 'patNetworkError'],
+    ['EACCES: cannot persist credential', 'PAT_SAVE_FAILED', 'patSaveFailed'],
+  ];
+  for (const [detail, code, key] of fixtures) {
+    const result = patSaveFailure(new Error(detail + ' token=example-test-secret'));
+    assert.equal(result.code, code);
+    assert.doesNotMatch(JSON.stringify(result), /example-test-secret|HTTP|EACCES|ENOTFOUND/);
+    const harness = createMainHarness(async () => ({ ok: true, result: { structuredContent: result } }));
+    harness.settingsChannel.onmessage({ data: {
+      type: 'settings-request', reqId: code, action: 'set_pat', payload: { pat: 'example-test-secret' },
+    } });
+    await new Promise(setImmediate);
+    const response = harness.settingsChannel.messages[0];
+    assert.equal(response.ok, false);
+    assert.equal(response.errorCode, code);
+    assert.doesNotMatch(JSON.stringify(response), /example-test-secret/);
+    for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+      const context = createContext({ t: name => messages[locale][name] });
+      new Script(render).runInContext(context);
+      assert.ok(messages[locale][key]);
+      assert.equal(context.requestFailureText('set_pat', response), messages[locale][key]);
+    }
+  }
+});
+
+test('同一账号进程连续保存 PAT，验证失败后仍可再次保存', async () => {
+  let saves = 0;
+  const { executeAction } = loadAccountInternals({ spawnEntry: async (_entry, args) => {
+    assert.deepEqual(Array.from(args), ['pat', 'set', '--pat-stdin', '--json']);
+    const handle = fakeChildHandle();
+    const input = [];
+    handle.stdin.on('data', chunk => input.push(chunk));
+    handle.stdin.once('end', () => {
+      assert.equal(Buffer.concat(input).toString(), 'example-test-pat\n');
+      saves++;
+      if (saves === 3) {
+        handle.stderr.write('TapTap token request failed: HTTP 401 {"code":"AUTH_TOKEN_EXPIRED"}');
+        handle.emit('close', 1, null);
+      } else {
+        handle.stdout.write(JSON.stringify({ step: 'pat', status: 'ok', data: { tap_auth_path: '/example.test/tap-auth.json' } }));
+      }
+    });
+    return handle;
+  } });
+  for (const ok of [true, true, false, true]) {
+    const result = await executeAction({ action: 'set_pat', pat: 'example-test-pat' });
+    assert.equal(result.ok, ok);
+    if (!ok) assert.equal(result.code, 'PAT_AUTH_REQUIRED');
+  }
+  assert.equal(saves, 4);
+});
+
 test('设置页重发同一 reqId 不会重复执行长任务', async () => {
   let resolveNode;
   const nodeResult = new Promise((resolve) => {
@@ -3033,6 +3093,70 @@ test('新版 Runtime transport 能回收 Cindy 代理子进程', async () => {
   assert.equal(child.signalCode, 'SIGTERM');
   await transport.close();
   assert.equal(kills, 1);
+});
+
+test('Runtime PAT 保存从宿主虚拟 stdin 读取完整输入，不访问系统 fd 0', async (t) => {
+  const source = vendorMakerSource.match(/async function runPatSet\([^]*?\nasync function runMcpInstall/);
+  assert.ok(source);
+  const functions = source[0].slice(0, -'async function runMcpInstall'.length);
+  const fixture = 'example-test-pat-凭证';
+  for (const option of ['pat_stdin', 'pat_from_stdin']) {
+    await t.test(option, async () => {
+      const stdin = new PassThrough();
+      const calls = [];
+      const context = createContext({
+        Buffer, process: { stdin },
+        fs98: { readFileSync() { throw new Error('System fd 0 is not the host input'); } },
+        booleanOption: (parsed, name) => parsed[name] === true,
+        saveManualMakerPat: (pat) => calls.push(['save', pat]),
+        makerEnvOption: () => 'prod',
+        requestTapAuthWithPat: async (pat, env) => {
+          calls.push(['exchange', pat, env]);
+          return { kid: 'example-kid' };
+        },
+        emit: () => calls.push(['success']),
+        getPatPath: () => '/example.test/pat.json',
+        getTapAuthPath: () => '/example.test/tap-auth.json',
+        mask: () => 'masked',
+      });
+      new Script(functions).runInContext(context);
+      const bytes = Buffer.from('  ' + fixture + '\r\n');
+      // Prebuffer before the consumer attaches, then split a UTF-8 character.
+      stdin.write(bytes.subarray(0, bytes.length - 4));
+      const saving = context.runPatSet({ [option]: true }, { json: true });
+      // Attach a handler immediately so the old synchronous implementation is
+      // reported as an assertion failure rather than an unhandled rejection.
+      const outcome = saving.then(() => null, (error) => error);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(calls, [], 'must wait for EOF before persisting or exchanging');
+      stdin.end(bytes.subarray(bytes.length - 4));
+      assert.equal(await outcome, null);
+      assert.deepEqual(calls, [['save', fixture], ['exchange', fixture, 'prod'], ['success']]);
+    });
+  }
+  for (const failure of ['empty', 'error', 'closed']) {
+    await t.test(failure, async () => {
+      const stdin = new PassThrough();
+      const calls = [];
+      const context = createContext({
+        Buffer, process: { stdin },
+        fs98: { readFileSync() { throw new Error('System fd 0 is not the host input'); } },
+        booleanOption: (parsed, name) => parsed[name] === true,
+        saveManualMakerPat: () => calls.push('save'),
+        requestTapAuthWithPat: () => calls.push('exchange'),
+      });
+      new Script(functions).runInContext(context);
+      const saving = context.runPatSet({ pat_stdin: true }, { json: true });
+      const rejected = assert.rejects(saving, failure === 'empty'
+        ? /No PAT found on stdin/ : failure === 'error'
+          ? /fixture input failed/ : /Premature close/);
+      if (failure === 'empty') stdin.end(' \r\n\t');
+      else if (failure === 'error') stdin.destroy(new Error('fixture input failed'));
+      else stdin.destroy();
+      await rejected;
+      assert.deepEqual(calls, []);
+    });
+  }
 });
 
 test('deferred child 会保留宿主答复前写入 stdin 的 PAT 字节', async () => {

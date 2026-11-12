@@ -98,6 +98,30 @@ function isMissingLogin(error) {
     || message.includes('unauthorized');
 }
 
+function patSaveFailure(error) {
+  const message = String(error && error.message ? error.message : error);
+  // Only return fixed codes/messages: Runtime errors can contain credentials.
+  if (/\bHTTP 401\b|\bAUTH_TOKEN_EXPIRED\b|\bunauthorized\b|\bPAT expired\b/i.test(message)) {
+    return {
+      ok: false, code: 'PAT_AUTH_REQUIRED',
+      message: 'PAT 已过期或无效，请点击“获取 PAT”生成新凭证后重新保存',
+    };
+  }
+  if (/\bHTTP 403\b/i.test(message)) {
+    return {
+      ok: false, code: 'PAT_FORBIDDEN',
+      message: 'Maker 拒绝此 PAT 的访问权限，请检查账号权限或重新获取 PAT',
+    };
+  }
+  if (/\b(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT)\b|fetch failed|timed?\s*out|timeout|执行超时/i.test(message)) {
+    return {
+      ok: false, code: 'PAT_NETWORK_ERROR',
+      message: '无法连接 Maker 验证 PAT，请检查网络后重试',
+    };
+  }
+  return { ok: false, code: 'PAT_SAVE_FAILED', message: 'TapTap Maker PAT 验证或保存失败，请检查后重试' };
+}
+
 function projectSyncFailure(error) {
   const message = String(error && error.message ? error.message : error);
   if (isMissingLogin(error)) {
@@ -471,8 +495,8 @@ async function executeAction(args) {
         return runMaker(['pat', 'set', '--pat-stdin', '--json'], `${pat}\n`);
       });
       return { ok: true, patHint: maskPat(pat) };
-    } catch {
-      return { ok: false, message: 'TapTap Maker PAT 验证或保存失败，请检查后重试' };
+    } catch (error) {
+      return patSaveFailure(error);
     }
   }
   if (action === 'apps') {
