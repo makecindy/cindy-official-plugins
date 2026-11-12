@@ -57,16 +57,21 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   function send(view,events,route='/input'){
     return new Promise((resolve,reject)=>{
       const body=Buffer.from(JSON.stringify(events?{events}:{}));
+      const fail=error=>reject(Object.assign(error,{code:error.code||'REMOTE_INPUT_FAILED',execution:'unknown'}));
       const request=http.request(view.upstream+route,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':body.length},timeout:10000},response=>{
         const chunks=[];response.on('data',c=>chunks.push(c));
-        response.on('end',()=>{
-          let result={};try{result=JSON.parse(Buffer.concat(chunks));}catch{}
-          if(response.statusCode===200&&result.ok)resolve();
-          else reject(Object.assign(Error(result.errorCode||'REMOTE_INPUT_FAILED'),{code:result.errorCode||'REMOTE_INPUT_FAILED',execution:'not_executed'}));
+        response.once('aborted',()=>fail(Error('REMOTE_INPUT_INTERRUPTED')));
+        response.once('error',fail);
+        response.once('close',()=>{if(!response.complete)fail(Error('REMOTE_INPUT_INTERRUPTED'));});
+        response.once('end',()=>{
+          let result;try{result=JSON.parse(Buffer.concat(chunks));}catch{fail(Error('REMOTE_INPUT_INVALID_RESPONSE'));return;}
+          if(response.statusCode===200&&result?.ok===true)resolve();
+          else if(result?.ok===false)reject(Object.assign(Error(result.errorCode||'REMOTE_INPUT_FAILED'),{code:result.errorCode||'REMOTE_INPUT_FAILED',execution:'not_executed'}));
+          else fail(Error('REMOTE_INPUT_INVALID_RESPONSE'));
         });
       });
-      request.once('timeout',()=>request.destroy(Object.assign(Error('REMOTE_INPUT_TIMEOUT'),{code:'REMOTE_INPUT_TIMEOUT',execution:'unknown'})));
-      request.once('error',error=>reject(Object.assign(error,{code:error.code||'REMOTE_INPUT_FAILED',execution:error.execution||'unknown'})));
+      request.once('timeout',()=>request.destroy(Object.assign(Error('REMOTE_INPUT_TIMEOUT'),{code:'REMOTE_INPUT_TIMEOUT'})));
+      request.once('error',fail);
       request.end(body);
     });
   }

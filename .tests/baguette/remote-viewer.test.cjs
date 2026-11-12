@@ -10,19 +10,23 @@ const {createRemoteViewer}=require('../../cindy-simulator/node/remote/viewer.cjs
 const TOKEN='a'.repeat(64);
 // Stands in for Cindy's loopback address: one stream message, then it records what is posted.
 async function host(){
-  const posts=[];
+  const posts=[],faults=[];
   const server=http.createServer((req,res)=>{
     if(req.url===`/${TOKEN}/stream`){res.writeHead(200);res.write(Buffer.from([0,0,0,3,0x10,0x7b,0x7d]));return;}
     // An address that is no longer open, as Cindy answers it.
     if(req.method!=='POST'||!req.url.startsWith(`/${TOKEN}/`)){res.writeHead(404,{'Content-Type':'application/json'});res.end('{"ok":false,"errorCode":"VIEW_CLOSED"}');return;}
     const chunks=[];req.on('data',c=>chunks.push(c));req.on('end',()=>{
       posts.push({url:req.url,body:JSON.parse(Buffer.concat(chunks).toString()||'{}')});
+      const fault=faults.shift();
+      if(fault==='reset'){res.destroy();return;}
+      if(fault==='truncated'){res.writeHead(200,{'Content-Type':'application/json'});res.write('{"ok":');setImmediate(()=>res.destroy());return;}
+      if(fault==='malformed'||fault==='empty'){res.writeHead(200,{'Content-Type':'application/json'});res.end(fault==='malformed'?'{"ok":':'');return;}
       const refused=req.url.endsWith('/input')&&posts.at(-1).body.events?.[0]?.button==='refused';
       res.writeHead(refused?409:200,{'Content-Type':'application/json'});res.end(JSON.stringify(refused?{ok:false,errorCode:'VIEW_NOT_READY'}:{ok:true}));
     });
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  return {url:`http://127.0.0.1:${server.address().port}/${TOKEN}`,posts,close:()=>{server.close();server.closeAllConnections();}};
+  return {url:`http://127.0.0.1:${server.address().port}/${TOKEN}`,posts,faults,close:()=>{server.close();server.closeAllConnections();}};
 }
 async function opened(t,extra={}){
   const desktop=await fs.mkdtemp(path.join(os.tmpdir(),'remote-shot-'));
@@ -30,7 +34,7 @@ async function opened(t,extra={}){
   t.after(async()=>{await viewer.close();upstream.close();await fs.rm(desktop,{recursive:true,force:true});});
   const {url}=await viewer.open({id:'SIM-1',url:upstream.url,name:'iPhone Air',platform:'ios',locale:'zh-CN',task:'task-1',...extra});
   const page=new URL(url),token=page.hash.split('.')[1];
-  const api=async(body)=>{const r=await fetch(page.origin+'/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token,Origin:page.origin},body:JSON.stringify({udid:'SIM-1',...body})});return {status:r.status,body:await r.json()};};
+  const api=async(body,signal)=>{const r=await fetch(page.origin+'/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token,Origin:page.origin},signal,body:JSON.stringify({udid:'SIM-1',...body})});return {status:r.status,body:await r.json()};};
   return {viewer,upstream,page,token,api,desktop};
 }
 
@@ -246,4 +250,25 @@ test('remote key chords cross the host wire in bounded batches without lost modi
   // A later refused batch does not erase the earlier batch's execution.
   const failed=await api({action:'input',events:[...Array.from({length:32},()=>({kind:'key',code:'Enter'})),{kind:'press',button:'refused'}]});
   assert.equal(failed.body.execution,'unknown');assert.equal(upstream.posts.length,2);
+});
+
+
+test('interrupted or invalid upstream responses settle as unknown without replay, and later input still works',async t=>{
+  const {api,upstream}=await opened(t);
+  for(const fault of ['truncated','reset','malformed','empty']){
+    for(const action of ['input','press','retry']){
+      upstream.faults.push(fault);
+      const before=upstream.posts.length;
+      const result=await api({action,button:'home',events:[{kind:'text',text:'once'}]},AbortSignal.timeout(1000));
+      assert.equal(result.status,409,`${fault}/${action}`);
+      assert.equal(result.body.execution,'unknown',`${fault}/${action}`);
+      assert.equal(upstream.posts.length,before+1,'never replay an unconfirmed request');
+      assert.equal((await api({action:'press',button:'home'},AbortSignal.timeout(1000))).body.ok,true);
+    }
+  }
+  // A successful earlier batch cannot turn an interrupted later result into a refusal.
+  upstream.faults.push('ok','truncated');
+  const before=upstream.posts.length;
+  const result=await api({action:'input',events:Array.from({length:64},()=>({kind:'key',code:'Enter'}))},AbortSignal.timeout(1000));
+  assert.equal(result.body.execution,'unknown');assert.equal(upstream.posts.length,before+2);
 });

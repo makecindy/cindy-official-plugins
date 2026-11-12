@@ -113,3 +113,31 @@ round; this change adds no host API dependency or transport behavior.
 - Required repository suites plus `.tests/cindy-simulator.test.mjs`: 904 passed,
   zero failed (55.88 seconds). This invocation runs the simulator aggregate once;
   older totals above also included its constituent files separately.
+
+## Upstream response lifecycle checkpoint — 2026-11-12
+
+Invariant: every terminal HTTP request/response outcome settles `send`; only a
+complete parsed acknowledgement establishes execution/refusal. Interrupted or
+unreadable replies remain unknown and are never replayed. `send` alone owns its
+Promise; native Promise settlement handles duplicate terminal events. The page
+keeps its existing queue/drop/release ownership. No new state table or retries.
+
+| Event | Awaiting headers | Reading body | Already settled |
+| --- | --- | --- | --- |
+| request error/timeout | Reject unknown | Reject unknown | No second effect |
+| response aborted/error/incomplete close | N/A | Reject unknown | No second effect |
+| complete valid ok:true / ok:false | N/A | Resolve / reject not_executed | No second effect |
+| complete invalid or empty JSON | N/A | Reject unknown | No second effect |
+
+All existing send callers (input batches, press, retry and best-effort release)
+share this terminal handling. Input preserves unknown after earlier successful
+batches. Release retains its existing swallowed failure, and the page retains its
+approved conservative notice. Real loopback HTTP regression interrupts a partial
+body, resets before headers, returns malformed/empty bodies and interrupts a later
+batch; it verifies one request per operation and subsequent input availability.
+- Before the fix, the real truncated-body case hit its one-second test deadline;
+  after the fix, all 11 remote-viewer cases pass (0.44 seconds).
+- Required repository suites plus the simulator aggregate: 905 passed, zero
+  failed (56.33 seconds). Forge validated and packed version 0.3.51 without
+  installation. This is loopback/VM evidence, not two-computer acceptance;
+  host release and native two-computer/trackpad validation remain outstanding.
