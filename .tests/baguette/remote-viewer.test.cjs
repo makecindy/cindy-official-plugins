@@ -128,14 +128,14 @@ test('only an address Cindy could have issued is accepted',async()=>{
 
 // Feed the real screen page its stream metadata, then drive DOM key events.
 // Provider validation must accept every emitted batch, including mixed text/key input.
-for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends provider-compatible input and a readable reconnect title`,async()=>{
+for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`remote ${platform} ${lang} keyboard sends provider-compatible input and a readable reconnect title`,async()=>{
   const vm=require('node:vm'),{validEvents}=require('../../cindy-simulator/node/live-screen.cjs');
   const nodes=new Map(),events={},sent=[],poses=[],intervals=[];
   const get=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',listeners:{},setAttribute(){},removeAttribute(){},getContext:()=>({}),addEventListener(type,fn){this.listeners[type]=fn;}});return nodes.get(id);};
   const message=data=>{const bytes=Buffer.from(JSON.stringify(data)),packet=Buffer.alloc(5+bytes.length);packet.writeUInt32BE(bytes.length+1);packet[4]=0x10;bytes.copy(packet,5);return packet;};
   const initial=Buffer.concat([message({type:'device',platform,keyboard:true,maxTouches:2}),message({type:'screen',width:2736,height:1260}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
-  let first=true,controller,gesture,failNextUp=false,failCleanup=false,holdDown=false,finishDown;
-  const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang:'zh-CN'}},cindySim:{state:{status:{device:{rotation:1}}}}},
+  let first=true,controller,gesture,failNextUp=false,failCleanup=false,holdDown=false,finishDown,failInputAfter=null,inputExecution='unknown';
+  const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang}},cindySim:{state:{status:{device:{rotation:1}}}}},
     document:{hidden:false,getElementById:get,addEventListener(){}},innerWidth:500,innerHeight:900,
     addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>intervals.push(fn),setTimeout(){},clearTimeout(){},
     AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,TextEncoder,VideoDecoder:class{},
@@ -143,6 +143,7 @@ for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends 
     fetch:async(url,options)=>{
       if(url==='/control-api'){
         const packet=JSON.parse(options.body);sent.push(packet);
+        if(packet.action==='input'&&failInputAfter!==null&&failInputAfter--===0){failInputAfter=null;return {ok:false,json:async()=>({ok:false,errorCode:'REMOTE_INPUT_FAILED',execution:inputExecution})};}
         if(packet.action==='release'&&failCleanup)throw Error('cleanup unavailable');
         if(packet.action==='input'&&packet.events.some(e=>e.kind==='touch'&&e.touches.some(t=>t.phase==='ended'))&&failNextUp){failNextUp=false;throw Error('lost touch up');}
         if(holdDown&&packet.events?.some(e=>e.kind==='touch'&&e.touches.some(t=>t.phase==='began')))return new Promise(resolve=>finishDown=()=>resolve({ok:true,json:async()=>({ok:true})}));
@@ -156,7 +157,7 @@ for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends 
     }};
   vm.createContext(context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/keys.cjs'),'utf8'),context);vm.runInContext(await fs.readFile(path.join(__dirname,'../../cindy-simulator/node/remote/screen.js'),'utf8'),context);
   const settle=()=>new Promise(resolve=>setImmediate(resolve));await settle();
-  assert.equal(get('message-title').textContent,'正在重新连接');
+  assert.equal(get('message-title').textContent,lang==='zh-CN'?'正在重新连接':'Reconnecting');
   assert.equal(poses.at(-1).rotation,1);
   context.parent.cindySim.state.status.device.rotation=3;intervals[0]();
   assert.deepEqual(poses.at(-1),{width:2736,height:1260,rotation:3});
@@ -191,6 +192,21 @@ for(const platform of ['ios','android'])test(`remote ${platform} keyboard sends 
   const large=sent.filter(p=>p.action==='input');
   for(const packet of large){assert.ok(Buffer.byteLength(JSON.stringify(packet))<=60000);for(const event of packet.events)assert.ok(Buffer.byteLength(JSON.stringify({events:[event]}))<=16384);}
   assert.equal(large.flatMap(p=>p.events).filter(e=>e.kind==='text').map(e=>e.text).join(''),'pastedtext'+longText);
+  // A rejection, unknown result or a later failed batch must never invite replay.
+  // Exercise the real page queue and visible notice for both supported UI languages.
+  for(const [execution,successfulBatches] of [['not_executed',0],['unknown',0],['unknown',1]]){
+    inputExecution=execution;failInputAfter=successfulBatches;
+    const before=sent.length;
+    get('keyboard').listeners.paste({clipboardData:{getData:()=>longText},preventDefault(){}});
+    for(let i=0;i<10;i++)await settle();
+    const requests=sent.slice(before);
+    assert.equal(requests.filter(p=>p.action==='input').length,successfulBatches+1);
+    assert.equal(requests.filter(p=>p.action==='release').length,1);
+    assert.equal(get('notice-text').textContent,lang==='zh-CN'
+      ?'操作结果尚未确认，请先查看设备上的实际结果，避免重复输入。'
+      :'The result is unconfirmed. Check the device before entering it again.');
+    const after=sent.length;await settle();assert.equal(sent.length,after,'failed input must not replay');
+  }
   // An acknowledged down followed by an undelivered up must release the device,
   // even though the gesture's speculative local state already says "up".
   gesture.touchDown([{x:10,y:10}]);await settle();

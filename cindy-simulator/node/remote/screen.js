@@ -73,7 +73,7 @@
       waiting=[];cancelLocal();
       // One best-effort cleanup after the failed request, not a replay or a new queue item.
       if(!releasing)await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'release',udid}),keepalive:true,signal:AbortSignal.timeout(10000)}).catch(()=>{});
-      if(!closed&&error.errorCode!=='VIEW_NOT_READY')notice(t('操作没有送达那台电脑，请重试。','Input did not reach the other computer. Try again.'));
+      if(!closed&&error.errorCode!=='VIEW_NOT_READY')notice(t('操作结果尚未确认，请先查看设备上的实际结果，避免重复输入。','The result is unconfirmed. Check the device before entering it again.'));
     }finally{sending=false;if(waiting.length)void flush();}
   }
   let tapTimer=null,tapUp=null;

@@ -87,3 +87,29 @@ Remaining prerequisites are the two failure families below, current-head CI/revi
 Symmetric audit covers local/remote device states, Booted/Shutdown/paused/operation, HTTP rejection/network loss, ended touch still in flight, blur/hidden/close and cleanup itself rejecting. Tests must distinguish the last head by rejecting touch-up after an acknowledged down while video stays live, and by rejecting picture open while task management succeeds. No new acknowledgement ledger, timer, lock, queue or retry mechanism is added.
 
 0.3.49 results: 37 targeted page/worker/task tests passed (1.01 seconds); full simulator and required repository suites 1,742 passed, zero failed (55.88 seconds). Regression scenarios keep video live while touch-up delivery rejects, make cleanup itself reject without recursion, then close during a pending touch-down and require release after its settlement. The task-page scenario loads a manageable Booted remote device with HOST_UPDATE_REQUIRED from picture open, switches to a local device and creates another locally. Forge validated and packed 0.3.49; no installation or two-computer/native-gesture acceptance in this round.
+
+## 0.3.50 input-result notice — 2026-11-12
+
+User approved the conservative Chinese/English notice. Invariant: a failed input
+request must not imply that earlier batches or a request with a lost response did
+nothing, or invite replay. The page owns the existing queue and notice; the worker
+owns execution metadata. All failure paths reuse the same notice and existing
+one-shot release. No new delivery state, retry or confirmation bookkeeping.
+
+| Input outcome | Notice | Pending input / cleanup |
+| --- | --- | --- |
+| Explicit not_executed | Check the device before entering again | Drop queue, one best-effort release |
+| Unknown response | Same conservative notice | Same cleanup, no replay |
+| Earlier batch succeeded, later batch failed | Same conservative notice | Same cleanup, no replay |
+| Cleanup itself fails | No stronger delivery claim | No recursive cleanup retry |
+
+The real page VM regression now exercises iOS/Android × zh-CN/en. It drives long
+paste events and checks request counts, the visible notice, and no automatic
+replay for the first three outcomes; the existing lost-up/failed-cleanup and
+in-flight-down close cases still run. Before the copy change, all four variants
+failed on the old misleading notice; afterward all 10 remote-viewer tests pass.
+Forge validated and packed 0.3.50. No installation or two-computer testing in this
+round; this change adds no host API dependency or transport behavior.
+- Required repository suites plus `.tests/cindy-simulator.test.mjs`: 904 passed,
+  zero failed (55.88 seconds). This invocation runs the simulator aggregate once;
+  older totals above also included its constituent files separately.
