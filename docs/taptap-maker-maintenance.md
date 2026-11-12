@@ -4,6 +4,34 @@
 
 ## Read first
 
+### 2.1.30: Windows PAT integration verification
+
+On 2026-11-12, installed commit 5896bcc from fix/taptap-maker-pat-stdin in place
+as local 2.1.30 on Windows 10 / Cindy 0.1.133 (source commit
+95e70d24407638cac83220f46f0751c42017fe1e). A temporary verification package used
+the real Cindy account worker, childSpawn, and Runtime 0.0.41: both user-provided
+valid PATs saved successfully, replacement and repeated saving succeeded, an
+invalid placeholder returned PAT_AUTH_REQUIRED / HTTP 401, and restoring a valid
+PAT returned connected status and a working project query.
+
+The original settings.html / settings.js were also loaded inside the plugin
+sandbox, exercising the original form submission, BroadcastChannel, main.js,
+and account worker. Valid saves cleared the input, displayed success, and loaded
+projects. Invalid input displayed the localized error and error class; recovery
+cleared that error state. Test placeholders were mapped to the PAT file only
+inside the temporary account entry; credentials were not returned to the page
+or model. This is settings-script integration verification in the actual host,
+not manual interaction with the plugin detail page or visual color verification;
+it does not replace the recorded macOS visual evidence.
+
+After testing, removed the temporary tools and file-reading entry and reinstalled
+the original 5896bcc package, retaining the valid account. All 109 Maker tests
+and 53 contract/localization/provisioning tests passed, as did the 0.0.41 recipe
+check. Publishing workflow tests had 8 passes and 4 failures because jq is absent
+on this computer; no publishing scripts or assertions were weakened. Neither
+PAT appeared in the main or Agent log. No additional production code or logging
+was needed to verify this fix.
+
 ### 2.1.30: Account error message color
 
 Settings uses the host error color for account failures, restoring normal text
