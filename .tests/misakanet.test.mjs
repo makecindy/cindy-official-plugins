@@ -689,11 +689,13 @@ test('search: a kind filter that matched nothing at all is still a real zero hit
   assert.match(answer.result.note, /没有命中任何教训/);
 });
 
-test('the storage disclosure names what the private directory really holds', async () => {
-  // `did-turn-end` writes a per-session turn counter and the announcement state into
-  // `checkpoint.json` next to the client id. The market review asked for that to be disclosed
-  // wherever the copy claims the private directory holds "only a client id" — the manifest
-  // description and every locale's tool text.
+test('the storage disclosure says what is sent and what stays local', async () => {
+  // Two different facts, and the copy has to name both:
+  //   · the random client id and the OS tag go to the endpoint on every request (it counts
+  //     distinct clients) — they are NOT local-only;
+  //   · the per-session turn counter stays in the private directory and is never uploaded.
+  // The market review caught an earlier draft that dropped the first half while fixing the
+  // second, so both halves are asserted here, in every language.
   const manifestText = readFileSync(join(PACKAGE, 'ghost.json'), 'utf8');
   const locales = ['zh-CN', 'en', 'ja', 'ko'];
   const counters = {
@@ -702,9 +704,16 @@ test('the storage disclosure names what the private directory really holds', asy
     ja: /ターン数/,
     ko: /턴 수/,
   };
+  const sent = {
+    'zh-CN': /发给端点/,
+    en: /go to the endpoint/,
+    ja: /端点へ送られ/,
+    ko: /엔드포인트로 전송/,
+  };
   const manifest = JSON.parse(manifestText);
-  assert.match(manifest.description, /私有目录/, 'the manifest description must disclose the private directory');
   assert.match(manifest.description, counters['zh-CN'], 'the manifest description must name the turn counter');
+  assert.match(manifest.description, sent['zh-CN'], 'the manifest description must say what goes to the endpoint');
+  assert.match(manifest.description, /随机客户端 id/, 'the manifest description must name the client id');
   for (const lang of locales) {
     const doc = JSON.parse(readFileSync(join(PACKAGE, 'locales', `${lang}.json`), 'utf8'));
     const tools = doc.tools;
@@ -713,5 +722,28 @@ test('the storage disclosure names what the private directory really holds', asy
       : tools.find((t) => t.name === 'misakanet_search');
     const description = typeof entry === 'string' ? entry : entry.description;
     assert.match(description, counters[lang], `${lang}: the search tool text must name the turn counter`);
+    assert.match(description, sent[lang], `${lang}: the search tool text must say what goes to the endpoint`);
+    // `whenToUse` is how a model finds the preflight tool — without the risky-operation
+    // trigger, `misakanet_preflight` is never reachable from the description the model sees.
+    assert.match(doc.whenToUse, /高风险|high-risk|risky operation|高リスク|고위험/, `${lang}: whenToUse must mention risky operations`);
   }
+  assert.match(manifest.whenToUse, /高风险/, 'the manifest whenToUse must mention risky operations');
+});
+
+test('search: a kind-filtered empty result carries no intake suggestion', async () => {
+  // The lessons exist; the filter hid them. Handing the agent the endpoint's `suggestion` and
+  // `intake` there invites it to file a duplicate of a lesson that is already public.
+  const load = await loadPlugin({
+    respond: () => ({
+      results: [],
+      matched_before_filter: 4,
+      filtered_by_kind: 'evidence',
+      suggestion: 'No MisakaNet lesson matched with kind=evidence.',
+      intake: { tool: 'misakanet_submit_intake', args: { kind: 'missing_lesson' } },
+    }),
+  });
+  const answer = await callTool(load, 'misakanet_search', { query: 'pip install timeout', kind: 'evidence' });
+  assert.equal(answer.result.kind_filtered_empty, true);
+  assert.equal(answer.result.suggestion, undefined);
+  assert.equal(answer.result.intake, undefined);
 });
