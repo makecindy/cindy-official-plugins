@@ -670,3 +670,48 @@ test('a host bridge that refuses the reply cannot strand the handler', async () 
   await load.stub.handler({ type: 'tool-call', tool: 'misakanet_search', args: { query: 'x' }, callId: 'c1' });
   await new Promise((resolve) => setTimeout(resolve, 25));
 });
+
+test('search: a kind filter that matched nothing at all is still a real zero hit', async () => {
+  // The filtered-empty branch is only for "there were hits, the filter hid them". If the
+  // endpoint says there were none before the filter, the query really found nothing, and
+  // calling it "filtered empty" would hide a genuine miss behind a hint to change the filter.
+  const load = await loadPlugin({
+    respond: () => ({
+      results: [],
+      matched_before_filter: 0,
+      filtered_by_kind: 'evidence',
+      no_match: true,
+    }),
+  });
+  const answer = await callTool(load, 'misakanet_search', { query: 'nothing matches', kind: 'evidence' });
+  assert.equal(answer.result.kind_filtered_empty, undefined);
+  assert.equal(answer.result.no_match, true);
+  assert.match(answer.result.note, /没有命中任何教训/);
+});
+
+test('the storage disclosure names what the private directory really holds', async () => {
+  // `did-turn-end` writes a per-session turn counter and the announcement state into
+  // `checkpoint.json` next to the client id. The market review asked for that to be disclosed
+  // wherever the copy claims the private directory holds "only a client id" — the manifest
+  // description and every locale's tool text.
+  const manifestText = readFileSync(join(PACKAGE, 'ghost.json'), 'utf8');
+  const locales = ['zh-CN', 'en', 'ja', 'ko'];
+  const counters = {
+    'zh-CN': /轮次计数/,
+    en: /turn counter/,
+    ja: /ターン数/,
+    ko: /턴 수/,
+  };
+  const manifest = JSON.parse(manifestText);
+  assert.match(manifest.description, /私有目录/, 'the manifest description must disclose the private directory');
+  assert.match(manifest.description, counters['zh-CN'], 'the manifest description must name the turn counter');
+  for (const lang of locales) {
+    const doc = JSON.parse(readFileSync(join(PACKAGE, 'locales', `${lang}.json`), 'utf8'));
+    const tools = doc.tools;
+    const entry = typeof tools === 'object' && !Array.isArray(tools)
+      ? tools.misakanet_search
+      : tools.find((t) => t.name === 'misakanet_search');
+    const description = typeof entry === 'string' ? entry : entry.description;
+    assert.match(description, counters[lang], `${lang}: the search tool text must name the turn counter`);
+  }
+});
