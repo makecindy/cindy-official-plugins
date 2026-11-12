@@ -811,7 +811,7 @@ test('passAdvisories:只剩人类 blocker 且 thread 将尽时提示临门一脚
   });
   const notes = passAdvisories(nearMerge, 3);
   assert.equal(notes.length, 2);
-  assert.match(notes[1], /almost there.*wait \*\*silently\*\*.*do not notify/);
+  assert.match(notes[1], /almost there.*user must decide, notify and ask again this round.*only when no user decision remains/);
   assert.equal(passAdvisories({ ...nearMerge, blockers: [...nearMerge.blockers, 'ci_failing'] }, 3).length, 1);
 });
 
@@ -1193,7 +1193,7 @@ test('replay: human-only CodeQL wait absorbs 72 base updates and host triggers w
   assert.ok(fx.readState().wait);
 });
 
-test('replay: a failure set aside for a human is rechecked daily and the user is told on entry, then every three days', async (t) => {
+test('replay: a failure set aside for a human is rechecked daily and the user is told on entry and every renewal', async (t) => {
   const fx = createFixture(t);
   const s = humanBlocked();
   const entered = (await startWait(fx, s)).json();
@@ -1213,10 +1213,25 @@ test('replay: a failure set aside for a human is rechecked daily and the user is
     if (renewed.notice) {
       told.push(day);
       assert.equal(renewed.notice, 'reminder');
-      assert.match(renewed.detail, /ask whether to keep following or stop/);
+      assert.match(renewed.detail, /ask for that specific decision again with a recommendation/);
     }
   }
-  assert.deepEqual(told, [3, 6], 'one model round a day, one reminder every three days');
+  assert.deepEqual(told, [1, 2, 3, 4, 5, 6, 7], 'each actual renewal reminds the user');
+});
+
+test('replay: same-day human wait renewals remind each round without waking idle polls', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s, { afterMinutes: 5 });
+  for (let round = 1; round <= 2; round += 1) {
+    fx.advance(5);
+    assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+    const renewed = (await fx.run(['--wait', fx.writeWait(waitPlan(s, { afterMinutes: 5 })), '--json'])).json();
+    assert.equal(renewed.notice, 'reminder');
+    assert.equal(renewed.wait.since, T0);
+    assert.match(renewed.detail, /ask for that specific decision again/);
+    assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+  }
 });
 
 test('replay: an events-only wait recorded before the daily review is rechecked and reported once', async (t) => {

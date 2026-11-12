@@ -1237,7 +1237,7 @@ export function passAdvisories(snap, roundCount, extras = {}) {
   const activeUnresolved = Number(snap.reviewThreads?.unresolvedCount);
   if (humanBlockers.length && !hardAgentWork && Number.isFinite(activeUnresolved) && activeUnresolved <= 2) {
     notes.push(
-      `almost there: only ${activeUnresolved} active thread(s) left and blockers include ${humanBlockers.join('/')} (only a human can move these). Finish the remaining threads, then wait **silently**: waiting for approval or merge is not a decision for the user, so do not notify, and do not widen the fix just to find work`,
+      `almost there: only ${activeUnresolved} active thread(s) left and blockers include ${humanBlockers.join('/')} (only a human can move these). Finish the remaining threads; if the user must decide, notify and ask again this round with progress and a recommendation. Wait silently only when no user decision remains (another reviewer or an already-authorized merge); do not widen the fix just to find work`,
     );
   }
   const additions = Number(snap.additions);
@@ -1480,7 +1480,7 @@ async function gateMain(argv, ctx) {
     if (notice === 'entered') {
       detail += '; tell the user now who has to act and what exactly they have to do (in a background round also schedule_notify_current_run)';
     } else if (notice === 'reminder') {
-      detail += `; a human has not acted for ${formatDuration(now - wait.since)}: remind the user what is still needed and ask whether to keep following or stop (in a background round also schedule_notify_current_run)`;
+      detail += `; still waiting for human action after ${formatDuration(now - wait.since)}: state progress and the blocker; if the user must decide, ask for that specific decision again with a recommendation (in a background round also schedule_notify_current_run)`;
     }
     writeState(file, next);
     emit(args, {
