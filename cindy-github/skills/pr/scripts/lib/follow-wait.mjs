@@ -37,7 +37,6 @@ export function waitFacts(snap) {
 const KINDS = new Set(['human', 'baseline', 'checks', 'retry']);
 /** A verdict about a failure or an open thread goes stale; a plain pending approval does not. */
 export const HUMAN_REVIEW_MS = 24 * 3_600_000;
-export const HUMAN_REMIND_MS = 3 * 24 * 3_600_000;
 export const setsAside = (wait) => wait.kind === 'human'
   && (wait.checks.some((c) => c.outcome === 'failed') || wait.threads.some((t) => !t.resolved));
 
@@ -59,7 +58,7 @@ export function waitIsDue(wait, now) {
   return at !== null && now >= at;
 }
 
-/** What recording this wait owes the user: a message on entry, then a reminder every few days. */
+/** What recording this wait owes the user: a message on entry and on every model renewal. */
 export function waitNotice(wait, now) {
   if (!wait || wait.toldAt !== now) return null;
   return wait.told === 1 ? 'entered' : 'reminder';
@@ -119,9 +118,8 @@ export function makeWait(input, facts, now, prior = null) {
   const continued = prior && prior.headSha === wait.headSha && setsAside(prior);
   wait.since = continued ? prior.since ?? prior.createdAt : now;
   const told = continued ? Number(prior.told) || 0 : 0;
-  const due = told === 0 || now - prior.toldAt >= HUMAN_REMIND_MS;
-  wait.told = due ? told + 1 : told;
-  wait.toldAt = due ? now : prior.toldAt;
+  wait.told = told + 1;
+  wait.toldAt = now;
   return wait;
 }
 

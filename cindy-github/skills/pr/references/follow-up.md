@@ -118,9 +118,10 @@ on the old commit. When several causes coexist, use a timed wait and include the
 only choose human waiting when every failing check and unresolved thread is accounted for.
 
 The `wait-set` receipt of such a wait carries `notice` when the user is owed a message: `entered`
-the first time on this head (who has to act, and what), `reminder` every three days while the same
-head keeps waiting (what is still needed, and whether to keep following or stop). Daily renewals in
-between stay silent. A wait recorded before this rule existed is reviewed a day after it was set
+the first time on this head, then `reminder` on every model renewal, including a same-day renewal.
+Each actual round states progress and the blocker; if the user must decide, ask that specific
+question again with a recommendation. No-change polls still skip without a message or model call.
+An absent receipt notice does not override a pending user decision known to the agent. A wait recorded before this rule existed is reviewed a day after it was set
 and reported once.
 
 Safety and resumption:
@@ -170,7 +171,7 @@ full-read fallback remain unchanged.
 
 - `round=N`, with checkpoint instructions from round 5 and convergence mode from round 10 (`references/review-convergence.md`).
 - **Scope growth:** the diff grew at least 1.5× and by 300+ lines since following started. Machinery grown under review should usually be deleted.
-- **Almost there:** only human blockers left and at most two active threads. Finish them, then wait silently.
+- **Almost there:** only human blockers left and at most two active threads. Finish them, then ask again if a user decision remains; otherwise wait silently.
 - **Hotspot:** one file has 8+ review threads. Redesign or declare scope instead of patching further.
 
 ## Files
