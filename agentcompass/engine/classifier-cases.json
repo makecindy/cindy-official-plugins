@@ -1,0 +1,1747 @@
+{
+  "version": "2026-11-11",
+  "route_definitions": {
+    "computer_use": "Operate a live desktop, browser, or application GUI via screenshots, mouse clicks, keyboard input, or window automation.",
+    "visual_analysis": "Read-only inspection or comparison of images, screenshots, UI mockups, or design frames without writing UI code or clicking a live GUI.",
+    "frontend_implementation": "Implement or style UI components, layouts, CSS, React/Vue/Tkinter views, or visual interactions in code.",
+    "general_implementation": "Implement, modify, or refactor backend, CLI, service, or library code in a repository.",
+    "debug_review": "Diagnose a bug, race condition, crash, or regression; fix an isolated defect; OR perform a read-only code/diff/release/security review or independent audit.",
+    "exploration_analysis": "Read-only codebase exploration, dependency mapping, log/telemetry forensics, or architectural tracing.",
+    "research_packet": "Execute a quantitative experiment, backtest, statistical evaluation, or benchmark script and report metrics.",
+    "web_research": "Survey public documentation, vendor specs, open-web articles, historical/cultural motifs, or academic literature and synthesize findings (even if the output is saved to a local Markdown path).",
+    "text_in_text_out": "Draft, translate, polish, or restructure self-contained text, narrative dialogue, documentation, or copy when the needed source material is already in the brief.",
+    "self_contained_code": "Write or verify a standalone algorithm, data structure, or script whose specification/inputs are self-contained in the brief without needing un-inlined local repository modules.",
+    "bounded_bulk_work": "Apply a uniform, mechanical transformation or checklist across many files or items.",
+    "tool_execution": "Run an explicit operational runbook, build/release pipeline, or CLI command sequence.",
+    "complex_build_plan": "Author a multi-phase engineering specification, system migration plan, or architectural blueprint before implementation.",
+    "direction_reasoning": "High-depth mathematical proof/derivation, formal critique, or first-principles strategic/architectural paradigm design."
+  },
+  "dimension_rubric": {
+    "anti_inflation_rule": "Score ONLY functional work the worker performs, never brief length or Markdown structure. Coordinator headers (`Parent session agent ID`, `工作目录`), role/AGENTS/SKILL docs, communication rules, and output/receipt paths are boilerplate—ignore them for `reasoning_depth`, `code_complexity` and `axis_demand`.",
+    "local_only_positive_vs_negative": "CONTRAST RULE for `local_only`: `true` when depending on un-inlined files/dirs/repos on THIS machine (reading, copying, searching, editing, building, or testing local files) or local processes/daemons/GUI/env. `false` when all required inputs are inlined or from the public web (`web_research`, `self_contained_code`, `text_in_text_out`, `direction_reasoning`, `complex_build_plan`), even if a local output path is named.",
+    "read_only_review": "CONTRAST RULE for `read_only_review`: `true` ONLY for read-only code/PR/diff/branch/security/release reviews or independent audits that write NO repo production/test code (`code_complexity: 0`, `work_kind: debug_review`, even when saving a review report file to a specified path). `false` when fixing issues from a prior review (`Fix the review findings`), implementing/modifying code, diagnosing live runtime/log symptoms without a diff/code audit, or running ops commands.",
+    "wants_fast": "CONTRAST RULE for `wants_fast`: `true` ONLY when affirmatively requesting fast mode, priority tier, urgent/ASAP turnaround, or a pre-reset quota sprint (`pre-reset sprint`, `before quota resets`, `重置前冲刺`) without negation. `false` when negated (`Do NOT use fast mode`, `no rush`, `不用开启fast`), when fast/immediate only describes an in-task runtime step (`click Save immediately`), when merely mentioning quota/reset without requesting fast execution, or when unmentioned.",
+    "reasoning_depth": "`1` (Routine): explicit command/checklist/runbook, trivial config tweak, or mechanical bulk edit; `2` (Standard/Hard): single/multi-module feature, bug diagnosis/fix, read-only PR review, or structured research; `3` (Coupled): cross-module refactor with strict invariants, deep concurrency forensics, or migration plan in an existing system; `4` (Frontier): whole-product/system architecture or detailed game-system/economy/combat math from scratch, ultra-low-latency network design, or formal mathematical proof/critique.",
+    "multi_task_vs_single_task": "`multi_task: true` ONLY when bundling 2+ independent deliverables assignable to separate workers in parallel. Sequential steps (`diagnose -> fix -> test -> report`) or one report covering sub-questions is ONE task (`multi_task: false, task_count: 1`).",
+    "axis_demand": "Level 0..3 per category: how much THIS task needs it. divergence: 0 a known spec or checklist, 1 small judgment calls, 2 several options to compare or a research/data-analysis question to investigate and synthesize, 3 open-ended creative writing, open research synthesis, or a first-principles redesign. coding: 0 no code read or written, 1 a small script or config change or a test-verified result, 2 a production module with its tests or a review/audit of one, 3 coupled modules, concurrency, protocol or core-library work, a whole-system review, or a costly irreversible defect. aesthetics: 0 no visual output, 1 tidy formatting only, 2 a user-facing screen/page/chart/document whose look matters, 3 design-led work (a new interface or interaction, a visual identity, a 3D scene). tool_operation: 0 reads files and runs a few shell commands, 1 routine tool or API calls, 2 heavy tool/API orchestration or the worker itself stays inside a live external system (game, ticket queue, order book, live page or chat) where slow turns hurt, 3 reads images or screenshots inside the loop or operates a GUI. Writing or fixing software about real-time systems is coding, not a live loop.",
+    "expected_hours": "Measured on this host: agents finish a review, investigation, multi-file fix or runbook brief in about 0.3h (middle half 0.2-0.6) and a feature across 8+ files in 1-3h. This overrides the schema's generic hour examples: a multi-file feature or investigation is 0.3-0.6h, not 1-3. Brief length, headings and boilerplate add nothing."
+  },
+  "calibration_cases": [
+    {
+      "id": "gui_click_save",
+      "task": "Open the local settings window, click Save, and take a verification screenshot.",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "visual_design_diff",
+      "task": "Inspect the supplied screenshot `artifacts/login_actual.png` against `artifacts/login_mockup.png` and list every spacing, typography, and alignment discrepancy. Do not edit code.",
+      "expected_profile": {
+        "work_kind": "visual_analysis",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.4,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 0,
+          "aesthetics": 2,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "markdown_web_research_with_output_path",
+      "task": "# 任务：1970年代流行文化与时代器物调研及玩法母题提案\n\n- 工作目录：`E:/P4/ CatchCatch`\n- 产出落盘：`docs/research/motif-notes/1970s_流行文化与时代器物调研.md`\n\n## 背景与目标\n我们的叙事解谜项目需要围绕 1970 年代欧美与东亚流行文化、日常器物（卡带机、拨盘电话、显像管电视、街头报刊亭等）开展公开资料调研，并在此基础上发散提出 5 个可转化为解谜交互机关的创意玩法母题。\n\n## 交付要求\n1. 梳理 1970 年代标志性器物与文化符号的真实历史细节；\n2. 提出 5 个高辨识度的解谜交互母题方案，说明核心机制与叙事反差。",
+      "expected_profile": {
+        "work_kind": "web_research",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "expected_hours": 1.0,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 3,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "public_vendor_survey",
+      "task": "Search official vendor documentation and public benchmarks to compare WebGPU compute shader subgroup support across Chrome, Edge, and Safari in 2026, and write a structured compatibility table.",
+      "expected_profile": {
+        "work_kind": "web_research",
+        "interaction_style": "text_only",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "expected_hours": 0.8,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "markdown_inlined_spec_self_contained_code",
+      "task": "# Task: Implement standalone weighted interval merger (`tools/interval_merger.py`)\n\n## Specification (Self-Contained)\nWrite a pure Python 3.11 module `interval_merger.py` with no third-party dependencies that implements:\n`merge_weighted_intervals(intervals: list[tuple[int, int, float]], min_gap: int = 0) -> list[tuple[int, int, float]]`\nRules:\n- Intervals are half-open `[start, end)` with `start < end` and positive float weight.\n- Overlapping or adjacent intervals within `min_gap` merge into `[min_start, max_end)` with length-weighted average weight.\n- Include a `unittest` suite covering empty input, nested intervals, negative coordinates, and `min_gap > 0`.",
+      "expected_profile": {
+        "work_kind": "self_contained_code",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "expected_hours": 0.5,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "markdown_creative_dialogue_text_only",
+      "task": "# 任务：第二章嫌疑人私信与备忘录文案编写\n\n- 交付路径：`docs/narrative/ch2_suspect_dm.md`\n\n## 角色设定（已内联）\n- 林夏（24岁，独立摄影师，表面客气但极度防备，说话简短带反问）\n- 陈默（29岁，旧书店店主，习惯用账目和旧物打比方）\n\n## 任务要求\n根据上述内联人设，编写林夏与陈默在案发当晚的 12 条熟人私信往来及 2 则手机备忘录，制造口供时间线上的微妙矛盾。",
+      "expected_profile": {
+        "work_kind": "text_in_text_out",
+        "interaction_style": "text_only",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 3,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "single_module_fix_with_reference_paths",
+      "task": "# Task: Fix stop race in `app/upload_queue.py`\n\n- Read rules: `AGENTS.md`, `docs/architecture.md`\n- Target module: `app/upload_queue.py`\n- Unit tests: `tests/test_upload_queue.py`\n- Output receipt: `.agent-compass/receipts/upload_fix.json`\n\n## Problem\nWhen `UploadQueue.stop()` is called while a worker thread is retrying a failed chunk, the thread ignores the stop event until all retries finish. Fix the retry loop in `app/upload_queue.py` to wake immediately on `_stop_event` and add a regression test in `tests/test_upload_queue.py`. Run `pytest tests/test_upload_queue.py` locally to verify.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "upstream_pr_copying_local_plugin_files",
+      "task": "# 任务：向 makecindy/cindy-official-plugins 提交 AgentCompass 插件的上游 PR\n\n1. 克隆上游仓库 `https://github.com/makecindy/cindy-official-plugins.git` 到临时目录并切新分支；\n2. 将本机已开发验证完成的插件目录 `E:\\PROJECTS\\cindy-agentcompass-plugin\\plugin\\`（含 `plugin.json`、`index.ts`、`README.md`、`skills/agent-compass/SKILL.md`）复制到 `plugins/agent-compass/` 并注册到 `provisioning.json`；\n3. 运行上游测试门禁并提交 PR。",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "security_diff_review",
+      "task": "# Task: Independent security & invariant review of commit `a81f3c2` (read-only)\n\nInspect `git show a81f3c2` across `skills/agent-compass/scripts/router_gate_hook.py` and `skills/agent-compass/scripts/dispatch_flow.py`. Verify whether a subagent launch can bypass the 15-minute ledger check or spoof `parent_id`. Do NOT modify any repository files; return a structured audit report with exact line citations.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": true,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "memory_diagnosis",
+      "task": "Investigate intermittent high CPU and memory growth in the local tray process over 6 hours of uptime. Inspect `tray/router_window.py`, `tray/router_data.py`, and `~/.agent-compass/tray-error.log`, test competing hypotheses (polling timer leak vs Tkinter canvas item accumulation vs subprocess handle leak), and isolate the root cause.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "exploration",
+        "reasoning_depth": 3,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.4,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "coupled_cross_module_refactor",
+      "task": "Refactor the quota reservation and ledger reconciliation pipeline across `allocator.py`, `route_judge.py`, `dispatch_flow.py`, and `dispatch_registry.py` so in-flight Paseo dispatches and CLI workers share a single atomic SQLite reservation lifecycle, and update all contract tests.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 3,
+        "code_complexity": 3,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.85,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 3,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "first_principles_architecture_critique",
+      "task": "# Task: First-principles critique and redesign of multi-agent scoring utility\n\nGiven the following self-contained mathematical specification of our current linear additive router score `S = w_f * F + w_a * min(1, (A - floor)/span) - lambda * C_opp + B_reset`, prove why additive `B_reset` violates scale invariance across task durations and derive a dimensionally consistent utility formulation with formal boundary guarantees.",
+      "expected_profile": {
+        "work_kind": "direction_reasoning",
+        "interaction_style": "advisory",
+        "reasoning_depth": 4,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "expected_hours": 1.5,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 3,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "release_runbook",
+      "task": "Execute the local release verification checklist: run `python -X utf8 skills/agent-compass/scripts/test_allocator.py`, `python -X utf8 skills/agent-compass/scripts/test_route_judge.py`, and `git status --short`, and report the exact pass/fail counts.",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "mixed_independent_tasks_split",
+      "task": "Please complete these two tasks: (1) Fix the SQLite lock timeout in `skills/agent-compass/scripts/dispatch_registry.py` and run its unit tests; (2) Search public documentation to compare 2026 TTS pricing across ElevenLabs, OpenAI, and Volcengine and save a summary table.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.4,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": true,
+        "task_count": "2",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "frontier_game_architecture",
+      "task": "为我们的新游戏设计整体技术架构：客户端/服务器拆分、实体与系统框架、存档与同步方案、资源管线和热更新，给出模块边界、关键接口和取舍理由。",
+      "expected_profile": {
+        "interaction_style": "exploration",
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "work_kind": "complex_build_plan",
+        "reasoning_depth": 4,
+        "expected_hours": 2.5,
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 3,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "frontier_game_system_design",
+      "task": "细化游戏的养成与战斗系统设计：数值框架、成长曲线、技能与属性交互、经济产出消耗平衡，给出完整规则、公式和边界情况。",
+      "expected_profile": {
+        "interaction_style": "exploration",
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "work_kind": "direction_reasoning",
+        "reasoning_depth": 4,
+        "expected_hours": 2.0,
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 3,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "frontier_vps_low_latency_architecture",
+      "task": "Design an ultra-low-latency VPS network architecture for real-time game traffic: region placement, kernel/NIC tuning, UDP relay topology, failover and anycast, with latency budgets per hop and the trade-offs.",
+      "expected_profile": {
+        "interaction_style": "exploration",
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": false,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "work_kind": "complex_build_plan",
+        "reasoning_depth": 4,
+        "expected_hours": 2.0,
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_game_dailies_cn",
+      "task": "你是该游戏的唯一执行子 Agent，禁止编写自动化脚本，直接在模拟器窗口中持续观察画面并操作游戏角色完成今日日常任务、主线刷本与竞技场对局，直到体力耗尽。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 2.5,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_game_dungeon_en",
+      "task": "Operate the mobile game client in the local Android emulator yourself in a continuous loop: watch the combat screen, trigger skills when cooldowns finish, collect drops, and re-enter the dungeon until 10 runs are completed.",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 2.0,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_ticket_sniping_cn",
+      "task": "守着浏览器里的演出票务页面，盯着12:00开售倒计时，一旦放票或有人退票回流出现余票，第一时间点击选座并立即提交抢票订单。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.5,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_flash_sale_en",
+      "task": "Keep watching the limited-edition product page in the open browser window and click Add to Cart and Checkout immediately as soon as the flash sale countdown hits zero.",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_orderbook_watch_cn",
+      "task": "在本地行情客户端持续实时盯盘，观察买卖盘口价差与挂单量变化，当价差收窄到阈值以内时立刻点击下单按钮完成成交。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 1.0,
+        "hours_confidence": "medium",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_course_polling_click_cn",
+      "task": "每隔几秒轮询刷新教务选课网页，持续盯着目标课程名额列，一旦名额从0变成有空位立刻点击选课并确认提交。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.5,
+        "hours_confidence": "medium",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_livestream_chat_cn",
+      "task": "一直守在打开的直播间页面里盯着实时滚动弹幕，看到观众提问产品价格或优惠券时第一时间在聊天框发送对应回复。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 1.0,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_app_appointment_cn",
+      "task": "通过 adb 守着手机 App 的专家号放号预约页面，持续刷新等待状态变为可预约后马上点击抢号并确认就诊人。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.5,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "non_realtime_write_ticket_script_cn",
+      "task": "编写一个 Python 抢票脚本 `scripts/ticket_sniper.py`，支持并发轮询票务接口、解析放票状态并在发现余票时立即发送下单请求，附带单元测试。",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_fix_flash_sale_bot_en",
+      "task": "Fix the token-refresh race condition in the flash-sale sniping bot `bots/flash_buyer.py` so concurrent polling workers do not overwrite the session cookie, and add a regression test.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_write_game_afk_tool_cn",
+      "task": "实现游戏日常挂机刷本自动化工具模块 `automation/daily_farm.py`，封装 adb 截图模板匹配与战斗结算点击逻辑，并补齐单元测试。",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_analyze_game_afk_logs_cn",
+      "task": "分析昨晚模拟器游戏挂机刷本的运行日志 `logs/afk_session_20261105.log`，统计每轮对局耗时分布与掉线重连报错原因，输出汇总报告。",
+      "expected_profile": {
+        "work_kind": "exploration_analysis",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_analyze_orderbook_latency_en",
+      "task": "Analyze the live order-book watcher telemetry in `logs/order_watcher.jsonl` to identify why p99 tick-to-order latency spiked during the market open.",
+      "expected_profile": {
+        "work_kind": "exploration_analysis",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_fix_game_automation_code_cn",
+      "task": "修复游戏自动化代码 `src/game_bot/window_controller.py` 中模拟器窗口失焦后鼠标点击坐标偏移的 bug，运行测试确认通过。",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_oneoff_gui_click_cn",
+      "task": "打开桌面客户端设置窗口，将语言切换为简体中文，点击保存按钮并截图验证设置已生效。",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.15,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "non_realtime_write_livestream_bot_cn",
+      "task": "开发直播间弹幕自动回复机器人脚本 `tools/danmu_responder.py`，对接弹幕 WebSocket 流并按关键词规则匹配回复文案。",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_api_orderbook_arbitrage_cn",
+      "task": "通过 WebSocket 持续监听币安 BTC/USDT 盘口深度，一旦你观察到跨市场价差达到阈值立即调用本地 REST API 下单套利（由你在循环中持续盯盘决策下单，不操作 GUI）。",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.7,
+        "hours_confidence": "medium",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 2
+        }
+      }
+    },
+    {
+      "id": "realtime_loop_cli_ticket_api_polling_cn",
+      "task": "在命令行中循环调用 curl 轮询票务余票接口，一旦返回余票大于 0 立即发送 POST 请求锁单完成抢票（由你亲自在循环中轮询并立即执行，不打开浏览器）。",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.35,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 2
+        }
+      }
+    },
+    {
+      "id": "non_realtime_fix_client_realtime_status_bug_cn",
+      "task": "修复客户端页面的实时状态更新 bug",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_implement_web_realtime_push_cn",
+      "task": "实现网页的实时消息推送功能",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_design_realtime_trading_dashboard_cn",
+      "task": "设计一个实时看盘界面",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.4,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 2,
+          "aesthetics": 3,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_add_game_countdown_modal_cn",
+      "task": "给游戏客户端加一个倒计时弹窗",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 2,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_optimize_ticket_page_load_cn",
+      "task": "优化抢票页面的首屏加载速度",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.35,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_diagnose_quote_page_refresh_latency_cn",
+      "task": "排查行情页面的实时刷新延迟问题",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_oneoff_browser_click_save_cn",
+      "task": "打开浏览器页面立刻点击保存按钮",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.1,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "non_realtime_oneoff_client_toggle_dark_mode_cn",
+      "task": "在客户端窗口里马上切换一下夜间模式",
+      "expected_profile": {
+        "work_kind": "computer_use",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": true,
+        "needs_gui": true,
+        "local_only": true,
+        "expected_hours": 0.1,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 3
+        }
+      }
+    },
+    {
+      "id": "non_realtime_diagnose_trading_page_blank_screen_cn",
+      "task": "帮我看一下盯盘页面为什么白屏",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_add_livestream_danmu_component_cn",
+      "task": "给直播间页面增加实时弹幕展示组件",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 2,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_fix_app_flash_sale_css_cn",
+      "task": "修复 App 秒杀活动页面的样式错位",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 2,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "non_realtime_implement_realtime_page_refresh_cn",
+      "task": "实现实时刷新页面與修复页面轮询逻辑，并在前端设计盯盘看板、排查客户端循环等待异常。",
+      "expected_profile": {
+        "work_kind": "frontend_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.35,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 2,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "fast_mode_requested_positive",
+      "task": "Enable fast mode for urgent turnaround: fix the off-by-one pagination slice in `api/items.py` and run unit tests.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": true,
+        "read_only_review": false,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "fast_mode_negated_negative",
+      "task": "Do NOT use fast mode or priority tier (no rush): fix the off-by-one pagination slice in `api/items.py` and run unit tests.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": false,
+        "read_only_review": false,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "low",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "readonly_branch_review_positive",
+      "task": "按 interrogate 技能对 `origin/main...feature/auth-session` 做独立对抗审查，只读不改仓库代码，把审查报告落盘到 `.route-briefs/review-auth.md`。",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": false,
+        "read_only_review": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "fix_review_findings_negative",
+      "task": "Fix the two defects reported in the adversarial review of `feature/auth-session` in `src/session.py` and run pytest.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": false,
+        "read_only_review": false,
+        "expected_hours": 0.3,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "fast_quota_sprint_positive",
+      "task": "Pre-reset sprint before weekly quota resets in 2 hours (重置前冲刺): implement the CSV export filter in `reports/export.py` and run unit tests.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": true,
+        "read_only_review": false,
+        "expected_hours": 0.2,
+        "hours_confidence": "high",
+        "urgency": "high",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "normal_quota_mention_negative",
+      "task": "Update the unit test in `tests/test_quota_window.py` that checks how weekly reset timestamps are formatted when a window resets.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "wants_fast": false,
+        "read_only_review": false,
+        "expected_hours": 0.15,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "long_review_brief_with_boilerplate",
+      "task": "Parent session agent ID: 7c1e. Role: independent reviewer; read AGENTS.md and the review skill first. Communicate only through the parent channel. Review the diff of branch feature/retry-backoff against main in the local repository (about 12 files, 600 changed lines): check the retry and backoff logic for races and unbounded growth, the new config parsing for bad input, and whether the tests cover each change. Do not modify code. Write the findings to reports/retry-review.md, each with severity, file:line, evidence and a suggested fix, then send the parent a short summary. Constraints: no network, no new dependencies, keep the report under two pages.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": true,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "long_feature_brief_with_tests",
+      "task": "Context: the local scheduler service retries failed jobs immediately. Requirements: (1) add exponential backoff with jitter in a new module backoff.py; (2) wire it into worker.py, queue.py and config.py; (3) make the base delay and cap configurable with validation; (4) log each retry once; (5) add unit tests for the delay curve and the config validation; (6) run the existing test suite and fix any regressions you cause. Follow the repository style, keep the change small, and describe it in the final report.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.35,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "long_runbook_brief_with_checks",
+      "task": "Run this release checklist on this machine in order and stop at the first failure: 1. git status must be clean; 2. run the unit tests; 3. build the package; 4. verify the built version string matches the tag; 5. install it into a fresh virtual environment; 6. run the CLI help and a dry run; 7. record the output of each step in a table with pass/fail; 8. report the table and the artifact path. Do not change any source file.",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.25,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "wide_rename_refactor_many_files",
+      "task": "Rename the concept `lane` to `channel` across the two local packages (about 15 files: modules, tests, docs and config keys). Keep behaviour identical, keep old config keys working with a deprecation warning, update every test and doc reference, run the full test suites of both packages and fix whatever breaks.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 3,
+        "code_complexity": 3,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.85,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 3,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "long_log_investigation_read_only",
+      "task": "Read-only investigation on this machine: the nightly sync job slowed from 5 to 40 minutes after last Tuesday. Use the job logs in logs/sync/ and the deploy history in the repository to find when it started and what changed, rank the three most likely causes with evidence, and write the result to notes/sync-slowdown.md. Do not change code or configuration.",
+      "expected_profile": {
+        "work_kind": "exploration_analysis",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.3,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 2,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "handoff_finish_remaining_review_findings",
+      "task": "Continue from the handoff in notes/handoff.md: the previous worker finished three of five review findings on branch fix/launch-race in the local repository. Fix the remaining two (a race in the launcher start path and a missing timeout on the status poll) in the existing files, update the tests, run the suite, and report what changed.",
+      "expected_profile": {
+        "work_kind": "general_implementation",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.2,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "git_land_pull_request_ops",
+      "task": "Land the open pull request #1 on main in the local repository: rebase the branch on main, fast-forward main, close the PR with a comment, and resync the other local worktrees to the new main. Report the resulting commit hashes.",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.15,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 0,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "read_only_multi_round_scoring_review",
+      "task": "Review rounds 12 to 13 of the quota-economy scoring change, read-only: read the diff, the design notes and the tests, check that the economic invariants still hold, and list findings with file:line and severity. Do not modify any code; save the review to reports/round-13.md.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.25,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": true,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 2,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "pre_release_verification_read_mostly",
+      "task": "Pre-release verification of v1.2 on this machine, read-mostly: run the full test suites, build the wheel, install it into a clean environment, exercise the CLI help and one dry run, and report anything that fails. Do not change any source file.",
+      "expected_profile": {
+        "work_kind": "tool_execution",
+        "interaction_style": "engineering",
+        "reasoning_depth": 1,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.25,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "single_stale_fixture_test_fix",
+      "task": "The unit test test_provider_fetch in tests/test_usage.py fails because its fixture is stale after a field rename. Fix the one fixture file and confirm the test passes.",
+      "expected_profile": {
+        "work_kind": "debug_review",
+        "interaction_style": "engineering",
+        "reasoning_depth": 2,
+        "code_complexity": 2,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.1,
+        "hours_confidence": "high",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 0
+        }
+      }
+    },
+    {
+      "id": "research_packet_backtest_replay",
+      "task": "Run the prepared research packet docs/packets/replay.md: replay the strategy over the last ten days of stored data, compare fills and PnL with the production log, and write the table and findings to reports/replay.md.",
+      "expected_profile": {
+        "work_kind": "research_packet",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.6,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "research_packet_data_pull_and_stats",
+      "task": "Execute the research packet: pull the three monthly datasets it lists, run the provided statistics script, check the results against the thresholds in the packet and report pass or fail per threshold.",
+      "expected_profile": {
+        "work_kind": "research_packet",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 1,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.5,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 0,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    },
+    {
+      "id": "research_packet_read_only_log_collection",
+      "task": "Follow the packet: read-only collection of the shadow runtime logs from the remote host over ssh, compute the listed metrics, and write the comparison to notes/shadow-vs-expected.md. Change nothing on the host.",
+      "expected_profile": {
+        "work_kind": "research_packet",
+        "interaction_style": "exploration",
+        "reasoning_depth": 2,
+        "code_complexity": 0,
+        "needs_visual": false,
+        "needs_gui": false,
+        "local_only": true,
+        "expected_hours": 0.4,
+        "hours_confidence": "medium",
+        "urgency": "unknown",
+        "multi_task": false,
+        "task_count": "1",
+        "wants_fast": false,
+        "read_only_review": false,
+        "axis_demand": {
+          "divergence": 1,
+          "coding": 1,
+          "aesthetics": 0,
+          "tool_operation": 1
+        }
+      }
+    }
+  ]
+}

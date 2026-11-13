@@ -1,593 +1,371 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at a2215b3e2dc57cd6a3689b05ae8d4927e7926b7f (MIT), itself ported from AgentCompass.
-// Only the import paths differ from the source; regenerate rather than edit.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at ac494f31dda6dc516e985594208e28fca85aa5fb (MIT), itself ported from AgentCompass.
+// Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
- * Multi-Protocol Request Extractor & Deterministic 10-Field Task Profiler
+ * Multi-Protocol Request Extractor & Task Profile Schema
  *
- * Ported from AgentCompass (`skills/agent-compass/scripts/allocator.py` and `route_judge.py`).
+ * A task profile comes from the classifier (`src/scorer-live.js`) or from the caller, never from the task's text:
+ * without one the router does not route (`unroutedDecision`). The profile is `task_intake.py`'s: two integers
+ * (`reasoning_depth`, `code_complexity`), the flags, the task count, and `axis_demand`, how much the task needs of each of the
+ * four capability categories (0..3). Nothing else scores.
  * Pure ES2022 module (zero Node-only imports) so it runs identically in both Bun and `moejs`.
  */
 
-import {
-  CANONICAL_ROUTES,
-  DEPTH_BY_DIFFICULTY,
-  HARD_BY_DEFAULT,
-  INTERACTION_STYLES,
-  KIND_TRAITS,
-} from "./catalog.mjs";
+import { DIFFICULTY_ORDER, INTERACTION_STYLES, ROUTES } from "./catalog.mjs";
+import { FIVE_AXIS_DEMAND_SCHEMA, validateAxisDemand } from "./axis-scores.mjs";
+import { analyzeTurnState } from "./continuity.mjs";
 
 export const PROFILE_INTEGERS = {
   reasoning_depth: [1, 4],
   code_complexity: [0, 3],
-  context_scale: [1, 3],
-  divergence: [1, 3],
-  hallucination_risk: [1, 3],
-  error_cost: [1, 3],
 };
 
-export const PROFILE_FLAGS = ["needs_visual", "needs_gui", "local_only"];
+export const PROFILE_FLAGS = ["needs_visual", "needs_gui", "local_only", "wants_fast", "read_only_review"];
+export const PROFILE_KINDS = Object.keys(ROUTES);
+export const ACCESS_LEVELS = ["read-only", "write"];
+export const HOURS_RANGE = [0.05, 24.0];
+export const CONFIDENCE_LEVELS = ["low", "medium", "high"];
+export const URGENCY_LEVELS = ["unknown", "low", "normal", "high"];
+export const TASK_COUNTS = ["1", "2", "3", ">3"];
+export { DIFFICULTY_ORDER };
 
-export const DIVERGENT_WORDS = [
-  "brainstorm",
-  "creative",
-  "novel",
-  "innovat",
-  "propose",
-  "formulate",
-  "scheme",
-  "roadmap",
-  "hypothesis",
-  "ideat",
-  "divergent",
-  "制定方案",
-  "设计方案",
-  "新方案",
-  "创造性",
-  "发散",
-  "创新",
-  "新方向",
-  "提出假设",
-  "路线图",
-  "架构创新",
-];
+export const WANTS_FAST_QUESTION =
+  'True ONLY when the assignment affirmatively requests fast mode, priority service tier, urgent/ASAP turnaround, or a pre-reset quota sprint (e.g. "pre-reset sprint", "before quota resets", "重置前冲刺") for the task itself, and does not negate or opt out of fast mode (e.g. "do not use fast mode", "no fast mode", or "not urgent" -> false). False for action adverbs inside runtime steps (e.g. "click Save immediately when the button appears"), ordinary mentions of quota/reset without requesting fast execution, or ordinary tasks without an explicit speed/fast request.';
 
-export const READONLY_REVIEW_PHRASES = [
-  "(read-only)",
-  "read-only review",
-  "read-only investigation",
-  "read-only code",
-  "read-only audit",
-  "read-only release",
-  "read-only diff",
-  "read-only diagnostic",
-  "read-only inspection",
-  "independent review",
-  "independent code and",
-  "independent audit",
-  "no repo code edits",
-  "write no application code",
-  "write no production code",
-  "do not edit repo",
-  "do not modify repo",
-  "do not change repo",
-  "只读审阅",
-  "只读代码审查",
-  "只读审查",
-  "只读排查",
-  "独立代码审查",
-  "独立审查",
-  "不修改仓库代码",
-];
+export const READ_ONLY_REVIEW_QUESTION =
+  "True ONLY when the assignment is a read-only code, diff, branch, security, or release review/audit that inspects existing material and reports findings without writing or modifying repository production/test code (code_complexity = 0, even if the reviewer saves its review report file to a specified output path). False when the worker implements, fixes, or refactors code (including fixing issues found by a prior review), runs operational/release commands, or performs general exploration/research that is not a code/diff/release audit.";
 
-export const GUI_WORDS = [
-  "click",
-  "screenshot",
-  " gui",
-  "desktop app",
-  "mouse",
-  "点击",
-  "截图",
-  "桌面",
-  "鼠标",
-];
+export const ACCESS_QUESTION =
+  'Whether this brief only reads, inspects, reviews, or analyzes without modifying workspace files or state ("read-only"), or writes, edits, creates, or deletes workspace files or runs mutating commands ("write"). Any brief with read_only_review=true is "read-only"; any brief with code_complexity > 0 is "write".';
 
-export const COMPUTER_USE_PHRASES = [
-  "click the",
-  "click save",
-  "take a screenshot",
-  "capture a screenshot",
-  "use the mouse",
-  "with the mouse",
-  "mouse and keyboard",
-  "keyboard and mouse",
-  "operate the browser",
-  "operate the desktop",
-  "点击",
-  "截取屏幕",
-  "截屏操作",
-  "用鼠标",
-  "键鼠",
-  "鼠标键盘",
-  "操作浏览器",
-  "操作桌面",
-];
+export const MULTI_TASK_QUESTION =
+  "True when the brief bundles more than one separate task: deliverables that different workers could produce at the same time without waiting for each other's result (e.g. collect reference images, compare game engines, design the gameplay loop). False for one task, however many steps: investigate-fix-test-release, implement plus its tests, a review plus its report, the remaining steps of a handoff, a brief that already assigns one share of a larger task, or a sequence where each part needs the previous part's output.";
 
-export const CODE_FILE_RE =
-  /[\w-]\.(?:py|pyw|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swift|lua|sh|ps1)(?!\w)(?!\.\w)/i;
+export const TASK_COUNT_QUESTION =
+  "How many separate tasks, in the sense of multi_task, the brief holds: 1 when multi_task is false.";
 
-const OBJECTIVE_LOCAL_RUNTIME_RE =
-  /\b(?:ssh|ssh-agent|vps|localhost|127\.0\.0\.1|pytest|unittest|sqlite|daemon|worktree|adb|emulator|intranet|webhook|credentials?)\b/i;
+/** The classifier's schema. Integers carry minimum/maximum, never an integer enum (Gemini's protobuf schema rejects those). */
+export const TASK_PROFILE_SCHEMA = {
+  type: "object",
+  properties: {
+    reasoning_depth: {
+      type: "integer",
+      minimum: 1,
+      maximum: 4,
+      description:
+        "How hard the thinking is, not how long the brief is. 1 = routine or direct execution with obvious steps, even when the brief is long and sectioned (run an existing script, checklist, drift round, build/install/switch release runbook; a mechanical edit or constant tweak; click and screenshot; reformat text); 2 = standard engineering or analysis with a clear direction (implement or fix one module, a standard read-only review of a diff/module, execute a structured research packet and report metrics, diagnose one subsystem); 3 = cross-module architectural design/refactor, subtle concurrency or distributed-invariant debugging, or orchestrating a multi-stage research line; 4 = frontier mathematical, strategic or architectural critique and formulation.",
+    },
+    code_complexity: {
+      type: "integer",
+      minimum: 0,
+      maximum: 3,
+      description:
+        "Production code the worker itself writes or modifies (NOT the complexity of code being read or reviewed). 0 = none: ANY read-only code/release/diff review or independent audit (even when saving a review report file to a specified path), diagnosis that only proposes, running existing CLI/release/test commands, log or data exploration, text drafting; 1 = a small script, config/constant tweak, localized helper, or analysis scripts inside a research packet; 2 = a production module implemented, fixed or refactored with its unit tests; 3 = complex multi-module, concurrency, protocol or core-library changes.",
+    },
+    needs_visual: { type: "boolean", description: "True when the work must look at images, screenshots or other visual input." },
+    needs_gui: {
+      type: "boolean",
+      description: "True when the work must operate a desktop or browser GUI through screenshots, mouse and keyboard.",
+    },
+    local_only: {
+      type: "boolean",
+      description:
+        "True when the task explicitly depends on existing files, directories, or repositories on this machine (reading, copying, searching, editing, building, or testing un-inlined local files) or on local processes/GUI/environment. False when all required inputs are inlined in the prompt or fetched from the public web (web_research, self_contained_code, text_in_text_out, direction_reasoning, complex_build_plan)—even if the brief has a workspace header or names a local target path where the finished output will be saved.",
+    },
+    wants_fast: { type: "boolean", description: WANTS_FAST_QUESTION },
+    read_only_review: { type: "boolean", description: READ_ONLY_REVIEW_QUESTION },
+    access: { type: "string", enum: [...ACCESS_LEVELS], description: ACCESS_QUESTION },
+    interaction_style: {
+      type: "string",
+      enum: [...INTERACTION_STYLES],
+      description:
+        "engineering = write or change software; exploration = explore a codebase, run experiments or backtests, analyze logs or data; text_only = pure text in and out or public web lookup; advisory = direction reasoning or complex build planning.",
+    },
+    expected_hours: {
+      type: "number",
+      minimum: HOURS_RANGE[0],
+      maximum: HOURS_RANGE[1],
+      description:
+        "Active worker-hours this task needs at an ordinary agent pace (a few tool calls = 0.1; one module fix with a test = 0.5; a multi-file feature or investigation = 1-3; a long multi-stage build = 4 or more). Estimate work, never money, quota or balances. Use 0.5 when the text gives no basis and set hours_confidence low.",
+    },
+    hours_confidence: {
+      type: "string",
+      enum: [...CONFIDENCE_LEVELS],
+      description:
+        "How well the text supports expected_hours: high = scope and steps are explicit; medium = scope is clear but steps are not; low = guess.",
+    },
+    urgency: {
+      type: "string",
+      enum: [...URGENCY_LEVELS],
+      description:
+        'unknown unless the text itself states a deadline, an incident or "asap"; then high/normal/low. Never infer urgency from topic or tone. Shown in the result so the caller can see it; fast mode is controlled by wants_fast, not urgency.',
+    },
+    multi_task: { type: "boolean", description: MULTI_TASK_QUESTION },
+    task_count: { type: "string", enum: [...TASK_COUNTS], description: TASK_COUNT_QUESTION },
+    axis_demand: FIVE_AXIS_DEMAND_SCHEMA,
+  },
+  required: [
+    ...Object.keys(PROFILE_INTEGERS),
+    ...PROFILE_FLAGS,
+    "access",
+    "expected_hours",
+    "hours_confidence",
+    "urgency",
+    "interaction_style",
+    "multi_task",
+    "task_count",
+    "axis_demand",
+  ],
+};
 
-const LOCAL_MACHINE_RE =
-  /(?:[A-Za-z]:[\\/]|~\/|\\\\)|\b(?:working tree|git checkout|local repo|this repo|local daemon|local git)\b/i;
+export const UNROUTED_NOTICE = "未路由：分类不可用";
 
-const MULTI_TASK_MARK_RE =
-  /(?:^|\n)\s*(?:#{1,4}\s*)?(?:task|deliverable|part|module|workstream|任务|交付物|模块|工作线)\s*(?:[1-9a-d]|[一二三四五六])\s*[.:：\-—]/gi;
-
-export function multiTaskMarks(objective) {
-  return String(objective || "").match(MULTI_TASK_MARK_RE) || [];
+/**
+ * What a request is sent on with when it has no task profile: no routing decision, the client's model as it asked.
+ */
+export function unroutedDecision(reason) {
+  return { ok: false, routed: false, notice: UNROUTED_NOTICE, reason, targetModel: null, targetEffort: null };
 }
 
-const COUPLED_SIGNALS = [
-  "cross-module",
-  "multi-module",
-  "refactor",
-  "architecture",
-  "concurrency",
-  "deadlock",
-  "race condition",
-  "distributed",
-  "migration",
-  "subsystem",
-  "orchestrat",
-  "跨模块",
-  "多模块",
-  "架构重构",
-  "并发",
-  "死锁",
-  "竞态",
-  "迁移方案",
-  "子系统",
-];
-
-const FRONTIER_SIGNALS = [
-  "formal proof",
-  "mathematical proof",
-  "mathematical critique",
-  "theorem",
-  "optimal-stopping",
-  "frontier reasoning",
-  "prove or refute",
-  "形式化证明",
-  "数学证明",
-  "数学推导",
-  "定理推导",
-];
-
-export function inferKindFromObjective(objective) {
-  const text = ` ${String(objective || "").toLowerCase()} `;
-  const namesCode = CODE_FILE_RE.test(text);
-  if (!namesCode && COMPUTER_USE_PHRASES.some((w) => text.includes(w))) {
-    return "computer_use";
+/**
+ * A profile the caller passed, checked like the classifier's: `{ profile }`, `{ error }`, or `null` when there is none.
+ * Image parts in the request are a structured signal, so they hold whatever the profile says: the work reads images (needs_visual,
+ * tool_operation 3), and a model that cannot read them leaves the pool.
+ */
+export function resolveCallerProfile(raw, hasVisualInput = false) {
+  if (raw === undefined || raw === null) return null;
+  try {
+    const profile = validateProfile(raw);
+    return { profile: hasVisualInput ? { ...profile, needs_visual: true, axis_demand: { ...profile.axis_demand, tool_operation: 3 } } : profile };
+  } catch (err) {
+    return { error: `invalid_caller_profile: ${String(err?.message || err).slice(0, 120)}` };
   }
-  const rules = [
-    [
-      "direction_reasoning",
-      [
-        "formal proof",
-        "mathematical critique",
-        "optimal-stopping",
-        "frontier reasoning",
-        "critique the architecture",
-        "prove or refute",
-        "brainstorm",
-        "first-principles",
-        "first principles",
-        "unconventional",
-        "creative architecture",
-        "creative product",
-        "creative direction",
-        "novel product",
-        "形式化证明",
-        "数学推导",
-        "架构批判",
-        "战略权衡",
-        "头脑风暴",
-        "脑暴",
-        "第一性原理",
-      ],
-    ],
-    [
-      "complex_build_plan",
-      [
-        "migration plan",
-        "migration spec",
-        "implementation specification",
-        "multi-phase",
-        "system architecture plan",
-        "new scheme",
-        "plan a new scheme",
-        "规划一个新方案",
-        "迁移方案",
-        "迁移计划",
-        "分阶段设计",
-        "系统建设方案",
-      ],
-    ],
-    [
-      "bounded_bulk_work",
-      [
-        "bulk ",
-        "batch rename",
-        "mechanical refactor",
-        "uniform rule",
-        "codemod",
-        "批量",
-        "机械替换",
-        "统一替换",
-      ],
-    ],
-    [
-      "web_research",
-      [
-        "web survey",
-        "web research",
-        "vendor survey",
-        "public documentation",
-        "search the web",
-        "search public",
-        "open-web",
-        "literature survey",
-        "网页调研",
-        "文献综述",
-        "厂商调研",
-        "搜索官网",
-        "公开文档",
-      ],
-    ],
-    [
-      "text_in_text_out",
-      [
-        "translate",
-        "translation of",
-        "draft a document",
-        "draft documentation",
-        "rewrite the text",
-        "summarize the text",
-        "翻译",
-        "撰写文档",
-        "文案",
-        "润色",
-        "摘要",
-      ],
-    ],
-    [
-      "visual_analysis",
-      [
-        "visual diff",
-        "design diff",
-        "inspect screenshot",
-        "compare screenshot",
-        "compare screenshots",
-        "inspect the image",
-        "inspect the screenshot",
-        "inspect the supplied screenshot",
-        "compare the screenshots",
-        "layout misalignment",
-        "screenshot review",
-        "ui screenshot",
-        "design inspection",
-        "视觉对比",
-        "截图对比",
-        "检查截图",
-        "设计稿检查",
-        "看图分析",
-      ],
-    ],
-    [
-      "debug_review",
-      [
-        "bug",
-        "fix ",
-        "deadlock",
-        "race condition",
-        "regression",
-        "review the diff",
-        "code review",
-        "diff review",
-        "read-only review",
-        "(read-only)",
-        "independent review",
-        "invariant audit",
-        "security audit",
-        "memory leak",
-        "diagnos",
-        "rendering glitch",
-        "intermittent failure",
-        "报错",
-        "排查",
-        "修复",
-        "死锁",
-        "代码审查",
-        "只读审阅",
-        "只读审查",
-        "安全审计",
-        "内存泄漏",
-      ],
-    ],
-    [
-      "frontend_implementation",
-      [
-        "frontend",
-        "react",
-        "css",
-        "tailwind",
-        "mockup",
-        "desktop ui",
-        "game ui",
-        "界面",
-        "前端",
-        "样式",
-        "组件",
-      ],
-    ],
-    [
-      "research_packet",
-      [
-        "backtest",
-        "quantitative experiment",
-        "benchmark suite",
-        "statistical evaluation",
-        "research packet",
-        "simulation",
-        "data analysis pipeline",
-        "回测",
-        "定量实验",
-        "评测",
-        "仿真",
-        "统计检验",
-      ],
-    ],
-    [
-      "tool_execution",
-      [
-        "runbook",
-        "checklist",
-        "deploy",
-        "release commands",
-        "health check",
-        "run the test suite",
-        "巡检",
-        "发版",
-        "运行测试",
-        "操作手册",
-        "发布流程",
-      ],
-    ],
-    [
-      "exploration_analysis",
-      [
-        "explore",
-        "investigate",
-        "trace",
-        "map the codebase",
-        "architecture exploration",
-        "调研",
-        "分析",
-        "梳理",
-        "探索仓库",
-        "架构追踪",
-      ],
-    ],
-    [
-      "self_contained_code",
-      [
-        "standalone",
-        "self-contained",
-        "algorithm",
-        "isolated module",
-        "独立算法",
-        "独立脚本",
-        "自包含",
-        "实现算法",
-      ],
-    ],
-  ];
+}
 
-  const debugKeywords = rules.find(([k]) => k === "debug_review")?.[1] || [];
-  const debugging = debugKeywords.some((word) => text.includes(word));
-  for (const [kind, keywords] of rules) {
-    if (kind === "text_in_text_out" && (namesCode || debugging)) {
-      continue;
-    }
-    if (keywords.some((w) => text.includes(w))) {
-      return kind;
+function extractSystemSummary(rawSystem, maxPreviewChars = 2000) {
+  if (!rawSystem) return { preview: "", totalChars: 0 };
+  if (typeof rawSystem === "string") {
+    return {
+      preview: rawSystem.slice(0, maxPreviewChars),
+      totalChars: rawSystem.length,
+    };
+  }
+  if (!Array.isArray(rawSystem)) return { preview: "", totalChars: 0 };
+  let preview = "";
+  let totalChars = 0;
+  for (const part of rawSystem) {
+    if (!part) continue;
+    const t =
+      typeof part === "string"
+        ? part
+        : typeof part.text === "string"
+          ? part.text
+          : typeof part.input_text === "string"
+            ? part.input_text
+            : typeof part.content === "string"
+              ? part.content
+              : "";
+    if (t) {
+      totalChars += t.length;
+      if (preview.length < maxPreviewChars) {
+        preview += (preview ? "\n" : "") + t.slice(0, maxPreviewChars - preview.length);
+      }
     }
   }
-  return objective && String(objective).trim() ? "general_implementation" : "other_or_mixed";
+  return { preview, totalChars };
 }
 
-export function isReadonlyReviewTask(objective, profile = null) {
-  if (profile && profile.needs_gui) return false;
-  const text = ` ${String(objective || "").toLowerCase()} ${String(profile?.reason || "").toLowerCase()} `;
-  if (READONLY_REVIEW_PHRASES.some((p) => text.includes(p))) return true;
-  return /\bread-only\b[^.]{0,40}\b(?:review|audit|investig|diagnos|inspect|check)\b/i.test(text);
+/**
+ * Parse a Magpie request body (`chat`, `responses`, `anthropic`, or `gemini`)
+ * into a normalized routing evidence envelope in a single bounded O(N) pass.
+ */
+export function extractRequestFacts(body, ctx = {}) {
+  if (!body || typeof body !== "object") {
+    return {
+      model: "",
+      objective: "",
+      turnText: "",
+      lastUserText: "",
+      previousUser: "",
+      previousUserText: "",
+      previousAssistantText: "",
+      systemText: "",
+      hasVisualInput: false,
+      hasVisual: false,
+      hasCurrentTurnVisual: false,
+      hasComputerUse: false,
+      demandsFrontierEscalation: false,
+      isToolFollowup: false,
+      within: false,
+      turn: 0,
+      toolCount: 0,
+      scannedChars: 0,
+      extractedTurns: 0,
+      estimatedTokens: 0,
+      estimatedInputTokens: 0,
+      firstWords: "",
+      sessionKey: "",
+      agent: ctx?.agent || "",
+      protocol: ctx?.protocol || "",
+    };
+  }
+
+  const model = typeof body.model === "string" ? body.model : "";
+  const sysSource =
+    body.system !== undefined
+      ? body.system
+      : body.instructions !== undefined
+        ? body.instructions
+        : body.systemInstruction?.parts;
+  const { preview: systemText, totalChars: sysChars } = extractSystemSummary(sysSource, 2000);
+
+  const turnState = analyzeTurnState(body, ctx);
+  const effectiveObjective = turnState.lastUserText || "";
+  const effectivePrevUser = turnState.previousUserText || "";
+  const hasVisual = Boolean(turnState.hasAnyVisual);
+  const totalChars = sysChars + (turnState.totalChars || 0);
+  const hasExplicitEstimatedTokens =
+    Number.isFinite(body?.estimated_input_tokens) ||
+    Number.isFinite(ctx?.estimated_input_tokens);
+  const estimatedTokens = Number(
+    body?.estimated_input_tokens ||
+      ctx?.estimated_input_tokens ||
+      Math.ceil(totalChars / 4)
+  );
+
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const needsObj = body?.needs && typeof body.needs === "object" ? body.needs : null;
+  const callerProfile = [ctx?.state?.profile, ctx?.profile, body.profile].find((p) => p && typeof p === "object");
+
+  return {
+    model,
+    objective: effectiveObjective,
+    turnText: effectiveObjective,
+    lastUserText: effectiveObjective,
+    previousUser: effectivePrevUser,
+    previousUserText: effectivePrevUser,
+    previousAssistantText: turnState.previousAssistantText || "",
+    systemText,
+    hasVisualInput: hasVisual,
+    hasVisual,
+    hasCurrentTurnVisual: Boolean(turnState.hasCurrentTurnVisual),
+    hasComputerUse: Boolean(needsObj?.gui === true || callerProfile?.needs_gui === true),
+    demandsFrontierEscalation: Number(callerProfile?.reasoning_depth) >= 3,
+    ...(callerProfile ? { callerProfile } : {}),
+    isToolFollowup: Boolean(turnState.isToolFollowup || turnState.within),
+    within: Boolean(turnState.within || turnState.isToolFollowup),
+    turn: turnState.turn,
+    toolCount: tools.length,
+    scannedChars: turnState.scannedChars || 0,
+    extractedTurns: turnState.extractedTurns || 0,
+    estimatedTokens,
+    estimatedInputTokens: estimatedTokens,
+    hasExplicitEstimatedTokens,
+    firstWords: turnState.firstWords,
+    sessionKey: turnState.sessionKey,
+    agent: ctx?.agent || "",
+    protocol: ctx?.protocol || "",
+  };
 }
 
-export function inferDivergence(objective, kind = null, style = null) {
-  if (kind === "computer_use") return 1;
-  if (kind === "complex_build_plan" || kind === "direction_reasoning" || style === "advisory") {
-    return 3;
-  }
-  const text = ` ${String(objective || "").toLowerCase()} `;
-  if (DIVERGENT_WORDS.some((w) => text.includes(w))) {
-    return 3;
-  }
-  if (
-    [
-      "intermittent",
-      "unknown cause",
-      "hypothes",
-      "race condition",
-      "deadlock",
-      "root cause",
-      "root-cause",
-      "memory leak",
-      "security audit",
-      "invariant audit",
-      "偶发",
-      "未知根因",
-      "死锁",
-      "竞态",
-      "根因",
-      "安全审计",
-      "内存泄漏",
-    ].some((w) => text.includes(w))
-  ) {
-    return 2;
-  }
-  return 1;
+/**
+ * A profile from a request's structured signals alone (image parts, explicit `needs.gui`), used only when the turn has no
+ * text (`!facts.objective`) and the user set a candidate pool or a pin (contract R2, R3). It asks for nothing the signals
+ * do not state: the category demand is zero except the tool operation a GUI or an image needs.
+ */
+export function noTextProfile(facts = {}) {
+  const gui = Boolean(facts.hasComputerUse);
+  const image = Boolean(facts.hasVisualInput || gui);
+  return {
+    work_kind: gui ? "computer_use" : "other_or_mixed",
+    reasoning_depth: 1,
+    code_complexity: 0,
+    needs_visual: image,
+    needs_gui: gui,
+    local_only: gui,
+    wants_fast: false,
+    read_only_review: false,
+    access: "read-only",
+    interaction_style: "engineering",
+    expected_hours: 0.4,
+    hours_confidence: "medium",
+    urgency: "unknown",
+    multi_task: false,
+    task_count: "1",
+    axis_demand: { divergence: 0, coding: 0, aesthetics: 0, tool_operation: image ? 3 : 0 },
+  };
 }
 
-export function inferReasoningDepth(objective, kind, explicitDifficulty = null) {
-  if (explicitDifficulty && DEPTH_BY_DIFFICULTY[explicitDifficulty]) {
-    return DEPTH_BY_DIFFICULTY[explicitDifficulty];
-  }
-  const text = ` ${String(objective || "").toLowerCase()} `;
-  if (FRONTIER_SIGNALS.some((w) => text.includes(w))) {
-    return 4;
-  }
-  if (COUPLED_SIGNALS.some((w) => text.includes(w)) || kind === "complex_build_plan" || kind === "direction_reasoning") {
-    return 3;
-  }
-  if (HARD_BY_DEFAULT.includes(kind) || kind === "self_contained_code") {
-    return 2;
-  }
-  return 1;
+/** The schema's task-count band for a band or a positive whole number; anything else is an invalid profile. */
+export function taskCountBucket(value) {
+  if (typeof value === "string" && TASK_COUNTS.includes(value)) return value;
+  const whole = typeof value === "number" && Number.isInteger(value) ? value : null;
+  if (whole !== null && whole >= 1) return TASK_COUNTS[Math.min(whole, 4) - 1];
+  throw new Error(`task.profile.task_count must be one of ${TASK_COUNTS.join(", ")} or a positive whole number`);
 }
 
+/** A task profile with every field checked, or an `Error`. `reason`, `work_kind` and the hours estimate may be omitted. */
 export function validateProfile(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("task.profile must be an object");
-  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("task.profile must be an object");
   const profile = {};
   if (raw.work_kind !== undefined && raw.work_kind !== null) {
-    if (typeof raw.work_kind !== "string" || !(raw.work_kind in KIND_TRAITS)) {
-      throw new Error(`task.profile.work_kind must be one of ${Object.keys(KIND_TRAITS).join(", ")}`);
+    if (typeof raw.work_kind !== "string" || !PROFILE_KINDS.includes(raw.work_kind)) {
+      throw new Error(`task.profile.work_kind must be one of ${PROFILE_KINDS.join(", ")}`);
     }
     profile.work_kind = raw.work_kind;
   }
   for (const [name, [low, high]] of Object.entries(PROFILE_INTEGERS)) {
-    if (name === "divergence" && !(name in raw)) {
-      profile.divergence = 1;
-      continue;
-    }
-    const val = Number(raw[name]);
-    if (!Number.isInteger(val) || val < low || val > high) {
+    const value = raw[name];
+    if (typeof value !== "number" || !Number.isInteger(value) || value < low || value > high) {
       throw new Error(`task.profile.${name} must be an integer from ${low} to ${high}`);
     }
-    profile[name] = val;
+    profile[name] = value;
   }
-  for (const flag of PROFILE_FLAGS) {
-    profile[flag] = Boolean(raw[flag]);
+  for (const name of PROFILE_FLAGS) {
+    if (typeof raw[name] !== "boolean") throw new Error(`task.profile.${name} must be true or false`);
+    profile[name] = raw[name];
   }
-  const style = raw.interaction_style || "engineering";
-  if (!INTERACTION_STYLES.includes(style)) {
+  if (profile.read_only_review === true && profile.code_complexity !== 0) {
+    throw new Error(`task.profile.read_only_review true contradicts task.profile.code_complexity ${profile.code_complexity} (must be 0)`);
+  }
+  if (raw.access !== undefined && raw.access !== null) {
+    if (!ACCESS_LEVELS.includes(raw.access)) throw new Error(`task.profile.access must be one of ${ACCESS_LEVELS.join(", ")}`);
+    if (raw.access === "read-only" && profile.code_complexity !== 0) {
+      throw new Error(`task.profile.access 'read-only' contradicts task.profile.code_complexity ${profile.code_complexity} (must be 0)`);
+    }
+    if (profile.read_only_review === true && raw.access === "write") {
+      throw new Error("task.profile.access 'write' contradicts task.profile.read_only_review true");
+    }
+    profile.access = raw.access;
+  }
+  // The hours estimate is the classifier's to give; with no caller `expected_hours` it is the task's budget.
+  if (raw.expected_hours !== undefined && raw.expected_hours !== null) {
+    if (typeof raw.expected_hours !== "number" || !Number.isFinite(raw.expected_hours)) {
+      throw new Error("task.profile.expected_hours must be a finite number");
+    }
+    profile.expected_hours = Math.round(Math.min(Math.max(raw.expected_hours, HOURS_RANGE[0]), HOURS_RANGE[1]) * 100) / 100;
+  }
+  for (const [name, levels] of [
+    ["hours_confidence", CONFIDENCE_LEVELS],
+    ["urgency", URGENCY_LEVELS],
+  ]) {
+    if (raw[name] !== undefined && raw[name] !== null) {
+      if (!levels.includes(raw[name])) throw new Error(`task.profile.${name} must be one of ${levels.join(", ")}`);
+      profile[name] = raw[name];
+    }
+  }
+  if (!INTERACTION_STYLES.includes(raw.interaction_style)) {
     throw new Error(`task.profile.interaction_style must be one of ${INTERACTION_STYLES.join(", ")}`);
   }
-  profile.interaction_style = style;
-  const hours = Number(raw.expected_hours ?? 0.5);
-  profile.expected_hours = Number.isFinite(hours)
-    ? Math.round(Math.min(Math.max(hours, 0.05), 24.0) * 100) / 100
-    : 0.5;
-  profile.hours_confidence = ["low", "medium", "high"].includes(raw.hours_confidence)
-    ? raw.hours_confidence
-    : "medium";
-  profile.urgency = ["unknown", "low", "normal", "high"].includes(raw.urgency) ? raw.urgency : "unknown";
-  if (typeof raw.reason === "string" && raw.reason.trim()) {
-    profile.reason = raw.reason.trim().slice(0, 300);
+  profile.interaction_style = raw.interaction_style;
+  if (typeof raw.reason === "string" && raw.reason.trim()) profile.reason = raw.reason.trim().slice(0, 300).trimEnd();
+  if (typeof raw.multi_task !== "boolean") throw new Error("task.profile.multi_task must be true or false");
+  profile.multi_task = raw.multi_task;
+  profile.task_count = taskCountBucket(raw.task_count);
+  if (profile.multi_task !== (profile.task_count !== "1")) {
+    throw new Error(`task.profile.multi_task ${profile.multi_task} contradicts task.profile.task_count ${profile.task_count}`);
   }
-  profile.multi_task = Boolean(raw.multi_task);
-  profile.task_count = ["1", "2", "3", ">3"].includes(raw.task_count) ? raw.task_count : "1";
+  // The classifier always answers the category demand.
+  if (raw.axis_demand === undefined || raw.axis_demand === null) throw new Error("task.profile.axis_demand is required");
+  profile.axis_demand = validateAxisDemand(raw.axis_demand);
   return profile;
 }
-
-/**
- * Deterministic 10-field task profile (the `< 1 ms` offline twin of the System-One scorer).
- * Ported directly from `allocator.py:infer_task_profile`.
- */
-export function inferTaskProfile(task = {}, routes = CANONICAL_ROUTES) {
-  const objective = typeof task.objective === "string" ? task.objective : "";
-  let kind = task.work_kind && routes[task.work_kind] ? task.work_kind : inferKindFromObjective(objective);
-  const needs = task.needs && typeof task.needs === "object" ? task.needs : {};
-  const implies = routes[kind]?.implies || {};
-  const depth = inferReasoningDepth(objective, kind, task.difficulty);
-
-  let [code, context, risk, cost, style] = KIND_TRAITS[kind] || KIND_TRAITS.other_or_mixed;
-  if (isReadonlyReviewTask(objective)) {
-    code = 0;
-    if (kind === "general_implementation") {
-      kind = "debug_review";
-    }
-  }
-  const gui =
-    kind === "computer_use" ||
-    Boolean(needs.gui) ||
-    (kind === "other_or_mixed" && GUI_WORDS.some((w) => ` ${objective.toLowerCase()} `.includes(w)));
-
-  if (depth >= 3) {
-    context = Math.max(context, 2);
-    if (style === "engineering" && code > 0) {
-      code = Math.max(code, 2);
-      if (objective.toLowerCase().includes("concurrency") || objective.toLowerCase().includes("protocol") || objective.includes("并发")) {
-        code = 3;
-      }
-    }
-  }
-  if (needs.critical) {
-    cost = 3;
-  }
-  const divergence = inferDivergence(objective, kind, style);
-  const evidence = `${objective} ${task.context || ""} ${task.cwd || ""}`;
-  const localHit = OBJECTIVE_LOCAL_RUNTIME_RE.test(evidence) || LOCAL_MACHINE_RE.test(evidence);
-  const localOnly =
-    needs.local_only !== undefined ? Boolean(needs.local_only) : Boolean(localHit || implies.local_only);
-
-  const expectedHours =
-    Number.isFinite(Number(task.expected_hours ?? task.hours)) && Number(task.expected_hours ?? task.hours) > 0
-      ? Number(task.expected_hours ?? task.hours)
-      : depth === 1
-        ? 0.4
-        : depth === 2
-          ? 1.0
-          : depth === 3
-            ? 2.0
-            : 3.5;
-
-  const marks = multiTaskMarks(objective);
-  const multiTask =
-    task.multi_task !== undefined ? Boolean(task.multi_task) : marks.length >= 2;
-  const taskCount =
-    task.task_count ||
-    (!multiTask ? "1" : marks.length === 2 ? "2" : marks.length === 3 ? "3" : ">3");
-
-  return validateProfile({
-    work_kind: kind,
-    reasoning_depth: depth,
-    code_complexity: code,
-    context_scale: context,
-    divergence,
-    hallucination_risk: risk,
-    error_cost: cost,
-    needs_visual: Boolean(needs.visual || task.hasVisualInput || implies.visual || gui),
-    needs_gui: gui,
-    local_only: localOnly,
-    interaction_style: style,
-    expected_hours: expectedHours,
-    hours_confidence: "medium",
-    urgency: "unknown",
-    multi_task: multiTask,
-    task_count: taskCount,
-  });
-}
-
-export const profileTask = inferTaskProfile;

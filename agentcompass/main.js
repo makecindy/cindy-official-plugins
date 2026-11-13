@@ -68,22 +68,44 @@
     }
     return reply;
   }
-  async function writePrepare(msg,task,rawCatalog) {
+  async function writePrepare(msg,task,rawCatalog,extra={}) {
     const catalog={models:(rawCatalog?.models || []).map(row=>({
       route:row.route,
       ...(row.efforts ? {efforts:row.efforts} : {}),
       ...(row.supportsFastMode!==undefined ? {supportsFastMode:row.supportsFastMode} : {}),
     }))};
     const raw=JSON.stringify(catalog);
-    if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'prepare',{task,catalog});
+    if (utf8Bytes(raw)<=MAX_RPC_BYTES) return await node(msg,'prepare',{task,catalog,...extra});
     const parts=splitUtf8(raw,MAX_RPC_BYTES);
     const stream=String(msg.callId || '')+':'+String(++streamSeq)+':'+String(parts.length);
     let reply=null;
     for (let i=0;i<parts.length;i++) {
       const done=i===parts.length-1;
-      reply=await node(msg,'prepare',{...(done ? {task} : {}),stream,index:i,chunk:parts[i],done});
+      reply=await node(msg,'prepare',{...(done ? {task,...extra} : {}),stream,index:i,chunk:parts[i],done});
     }
     return reply;
+  }
+  // One structured classification through Cindy's quick-text channel: no Agent, no tools, no task, no session. Cindy picks the
+  // model (the plugin card's, else its auxiliary chain) and answers within 60 s; the timer only ends the wait on a host that never does.
+  async function runClassifier(classifier,callId) {
+    const attemptId=classifier.attemptId;
+    const failed=(code,error)=>({ok:false,attemptId,reason:'classifier_'+String(code || 'error').toLowerCase(),error});
+    let timer=null;
+    const expired=new Promise((_,reject)=>{
+      if (typeof setTimeout==='function') timer=setTimeout(()=>reject(Object.assign(
+        Error('Cindy did not answer the classification within '+classifier.timeoutMs+' ms'),{code:'TIMEOUT'})),classifier.timeoutMs);
+    });
+    try {
+      const reply=await Promise.race([cindy.send({type:'cindy-request',kind:'oneshot_text',prompt:classifier.prompt,expectJson:true,
+        ...(callId ? {callId} : {})}),expired]);
+      if (reply?.ok!==true) return failed(reply?.errorCode,reply?.message || 'Cindy refused the classification request.');
+      if (typeof reply.text!=='string' || !reply.text.trim()) return failed('EMPTY_OUTPUT','Cindy returned no classification text.');
+      return {ok:true,attemptId,model:reply.model || null,rawOutput:reply.text};
+    } catch(error) {
+      return failed(error?.code,error?.message || String(error));
+    } finally {
+      if (timer!==null && typeof clearTimeout==='function') clearTimeout(timer);
+    }
   }
   const memory = new Map();
   async function persist(msg,operation,record) {
@@ -230,12 +252,49 @@
         : 'No input was accepted. Cleanup archives or hands back the draft.'
     };
   }
+  function accountNotice(record) {
+    const dec=record?.router?.decision, top=record?.router;
+    const list=Array.isArray(dec?.warnings) ? dec.warnings : Array.isArray(top?.warnings) ? top.warnings : [];
+    const warn=dec?.warning || top?.warning;
+    const warnings=warn ? [...list,warn] : list;
+    const raw=Array.isArray(dec?.accounts) ? dec.accounts : Array.isArray(top?.accounts) ? top.accounts : [];
+    const accounts=raw.map(a=>({
+      key:a.key,provider:a.provider,account:a.account,plan:a.plan,state:a.state,dispatchable:a.dispatchable,
+      ...(a.reason ? {reason:a.reason} : {}),
+      ...(a.failing_since ? {failing_since:a.failing_since} : {}),
+    }));
+    return {
+      ...(warnings[0] ? {warnings} : {}),
+      ...(accounts[0] ? {accounts} : {}),
+    };
+  }
+  function routerAnswer(record) {
+    const router=record?.router || {};
+    const reason=router.reason || router.error_code || router.decision?.reason || router.error || null;
+    if (reason==='accounts_unavailable') {
+      return {
+        ...router,
+        status:'blocked',
+        reason:'accounts_unavailable',
+        ...accountNotice(record),
+        decision:{...(router.decision || {}),reason:'accounts_unavailable'},
+        error:router.error && router.error!=='accounts_unavailable'
+          ? router.error
+          : 'All candidate accounts are unavailable; refusing to dispatch to an inactive or failing account. Nothing was started.',
+        next_action:router.next_action ||
+          'Fix the account subscription, sign-in, or usage telemetry in Cindy (Pi routes sharing the same provider account are excluded too; it recovers automatically after the next healthy Codex session log in Cindy, or by removing its entry in quota-state.json), then roll again. Nothing was started.',
+      };
+    }
+    return {...router,...accountNotice(record)};
+  }
   function unconfirmed(record,operation) {
     const why={unknown_create:'Cindy may have created the draft, but its answer never arrived. Inspect the Cindy task list; nothing is created again.',
       unknown_send:'Delivery to task '+record.taskId+' is unconfirmed. Status keeps checking its durable runs; the input is never resent.',
       sending:'The send of task '+record.taskId+' is in progress or unconfirmed.',
       creating:'The draft is being created.'}[record.state];
-    return {status:record.state,operation,taskId:record.taskId || null,error:record.error || null,next_tool:next('status',operation),
+    return {status:record.state,operation,taskId:record.taskId || null,error:record.error || null,
+      ...accountNotice(record),
+      next_tool:next('status',operation),
       next_action:why};
   }
   async function collect(msg,operation,record) {
@@ -243,12 +302,14 @@
     if (!record.runId) {
       if (record.createRejected || record.state==='create_rejected') return {status:'create_rejected',operation,
         taskId:null,task_id:null,error:record.error || null,error_code:record.errorCode || null,executed:false,
+        ...accountNotice(record),
         next_tool:{ghost_id:'agentcompass',tool:'roll',args:{task:record.task || ''}},
         next_action:'No Cindy task was created because tasks.create was refused. Fix the reported issue and call roll again to retry.'};
       if (UNCONFIRMED.has(record.state)) return unconfirmed(record,operation);
       if (['blocked','send_rejected'].includes(record.state)) return {status:record.state,operation,taskId:record.taskId || null,
-        task_id:record.taskId || null,executed:false,error:record.error || null,...draftOutcome(record,operation)};
-      return {status:record.state,operation,next_tool:next('status',operation),
+        task_id:record.taskId || null,executed:false,error:record.error || null,...accountNotice(record),...draftOutcome(record,operation)};
+      if (record.state==='prepared' && ['self','split','launched','blocked'].includes(record.router?.status)) return {operation,...routerAnswer(record)};
+      return {status:record.state,operation,...accountNotice(record),next_tool:next('status',operation),
         cause:'No Cindy task was started for this operation yet.'};
     }
     const run=await cindy.tasks.getRun({runId:record.runId});
@@ -281,6 +342,7 @@
       message_pages_read:(record.artifacts || []).length,
       final_result_summary:output.slice(0,4000),summary_shortened:shortened,
       full_result_artifacts:record.artifacts || [],
+      ...accountNotice(record),
       ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {}),
       next_tool:next(done ? 'cleanup' : 'status',operation),
       next_action:done ? 'Read the exact output message/artifacts. Cleanup archives when supported, otherwise gives the confirmed task ID for manual archiving in Cindy.' :
@@ -290,10 +352,16 @@
   async function roll(msg,ctx,canArchive) {
     for (const [op,mem] of memory) if (mem.createRejected) await tryPersist(msg,op,mem);
     // The catalog the built-in engine routes over: exactly what this Cindy can run now.
-    const prepared=await writePrepare(msg,msg.args.task,await cindy.tasks.models());
+    const rawCatalog=await cindy.tasks.models();
+    const initExtra={classifyViaHost:true,...(msg.args.profile!=null ? {profile:msg.args.profile} : {})};
+    let prepared=await writePrepare(msg,msg.args.task,rawCatalog,initExtra);
+    if (prepared.state==='classify' && prepared.classifier) {
+      const classification=await runClassifier(prepared.classifier,msg.callId);
+      prepared=await writePrepare(msg,msg.args.task,rawCatalog,{...initExtra,classification});
+    }
     const operation=prepared.operation;
-    // self, split or a router-side launch: the router's own answer, not a Cindy task.
-    if (prepared.router?.status!=='native' && prepared.state==='prepared') return prepared.router;
+    // self, split, blocked or a router-side launch: the router's own answer, not a Cindy task.
+    if (prepared.router?.status!=='native' && (prepared.state==='prepared' || prepared.state==='blocked')) return routerAnswer(prepared);
     return await exclusive('op\0'+operation,async()=>{
       let record=await loadRecord(msg,operation);
       if (record.state!=='prepared' || record.createRejected) return await collect(msg,operation,await reconcile(msg,operation,record));
@@ -337,11 +405,11 @@
       record.taskId=task.taskId;
       if (!sameRoute(task.resolvedConfig,route) || task.permissionMode!=='bypassPermissions' ||
           task.planModeEnabled || task.workingDir!==ctx.workdir) {
-        record.state='blocked';record.error='Created draft has different route/permissions/workdir. Configure plugin task directory to the current project; no model input sent.';
+        record.state='blocked';record.error='Created draft has different route/permissions/workdir. On the AgentCompass plugin page set Working folder to the project of this session and Write access to Full access; no model input sent.';
         await discardDraft(record,canArchive);
         const saveError=await tryPersist(msg,operation,record);
         return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,executed:false,error:record.error,
-          ...draftOutcome(record,operation),
+          ...draftOutcome(record,operation),...accountNotice(record),
           ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
       }
       record.sendRequest={taskId:task.taskId,expectedRevision:task.revision,requestKey:operation+':send',text:record.prompt};
@@ -353,7 +421,7 @@
         await discardDraft(record,canArchive);
         await tryPersist(msg,operation,record);
         return {status:'blocked',operation,taskId:task.taskId,task_id:task.taskId,runId:null,run_id:null,executed:false,
-          error:record.error,...draftOutcome(record,operation),
+          error:record.error,...draftOutcome(record,operation),...accountNotice(record),
           receipt_saved:false,receipt_error:preSendError};
       }
       let run, failure;
@@ -373,6 +441,7 @@
       return {status:record.state,operation,taskId:record.taskId,runId:record.runId || null,
         task_id:record.taskId,run_id:record.runId || null,
         error:record.error || null,error_code:record.errorCode || null,automatic_callback:false,
+        ...accountNotice(record),
         ...(record.state==='send_rejected' ? {executed:false,...draftOutcome(record,operation)} : {next_tool:next('status',operation)}),
         ...(saveError ? {receipt_saved:false,receipt_error:saveError} : {})};
     });
@@ -512,6 +581,6 @@
     handle(msg).then(
       result=>cindy.send({type:'tool-result',callId:msg.callId,ok:true,result}),
       error=>cindy.send({type:'tool-result',callId:msg.callId,ok:false,errorCode:'ROUTER_BLOCKED',
-        message:error.message+' Check plugin permissions, task directory and exact account mapping; no automatic retry.'}));
+        message:error.message==='Task is empty' ? error.message : error.message+' Check plugin permissions, task directory and exact account mapping; no automatic retry.'}));
   });
 })();

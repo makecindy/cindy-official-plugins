@@ -17,6 +17,28 @@ const HOME_STATE = path.join(os.homedir(), '.agent-compass', 'cindy-plugin');
 //   ~/.agent-compass/cindy-plugin/config.json {"engine": "cli"}: the external CLI found on PATH or in ~/.local/bin, the
 //     built-in engine when it is not installed
 //   none of them (a market install): the built-in engine
+function validateClassifierConfig(value) {
+  if (!value || typeof value !== 'object') return {};
+  const out = {};
+  if (value.classifierTimeoutMs !== undefined) {
+    if (typeof value.classifierTimeoutMs !== 'number' || !Number.isInteger(value.classifierTimeoutMs) ||
+        value.classifierTimeoutMs < 100 || value.classifierTimeoutMs > 65000)
+      throw Error('"classifierTimeoutMs" must be an integer between 100 and 65000');
+    out.classifierTimeoutMs = value.classifierTimeoutMs;
+  }
+  if (value.classifierCacheTtlMs !== undefined) {
+    if (typeof value.classifierCacheTtlMs !== 'number' || !Number.isInteger(value.classifierCacheTtlMs) ||
+        value.classifierCacheTtlMs < 0 || value.classifierCacheTtlMs > 86400000)
+      throw Error('"classifierCacheTtlMs" must be an integer between 0 and 86400000');
+    out.classifierCacheTtlMs = value.classifierCacheTtlMs;
+  }
+  if (value.stateRoot !== undefined) {
+    if (typeof value.stateRoot !== 'string' || !value.stateRoot.trim())
+      throw Error('"stateRoot" must be a non-empty string');
+    out.stateRoot = value.stateRoot;
+  }
+  return out;
+}
 function settings() {
   for (const file of [path.join(__dirname, 'router.json'), path.join(HOME_STATE, 'router.json')]) {
     if (!fs.existsSync(file)) continue;
@@ -29,7 +51,8 @@ function settings() {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
     const engine = value?.engine ?? 'builtin';
     if (!['builtin', 'cli'].includes(engine)) throw Error('"engine" must be "builtin" or "cli"');
-    return {engine, source:null, optIn:file};
+    const clf = validateClassifierConfig(value);
+    return {engine, ...clf, source:null, optIn:file};
   } catch (error) {return {source:file, error:'Unreadable plugin configuration '+file+': '+error.message};}
 }
 const stateRoot = conf => conf.stateRoot || HOME_STATE;
@@ -96,7 +119,9 @@ function context(value) {
 function owned(root, operation, ctx) {
   if (typeof operation !== 'string' || !/^[a-f0-9]{40}$/.test(operation)) throw Error('Invalid operation');
   const dir = path.join(root, operation);
-  const record = JSON.parse(fs.readFileSync(path.join(dir, 'receipt.json'), 'utf8'));
+  const file = path.join(dir, 'receipt.json');
+  if (!fs.existsSync(file)) throw Error('Unknown operation '+operation+': no receipt. Nothing is recorded for it; roll the task to start it.');
+  const record = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (record.parent !== ctx.session_id) throw Error('Operation belongs to a different parent session');
   return {dir, record};
 }
@@ -117,12 +142,147 @@ function contract(result, ctx, task) {
   return {bundle:{...bundle,harness,modeId},prompt:prompt+RETURN_CHANNEL};
 }
 const writeDiag = (file, data) => {try {fs.writeFileSync(file, data);} catch {}};
+// Routes Cindy refused to create a task on. A retry routes elsewhere for 15 min, doubling with each consecutive refusal up
+// to 2 h; a task created on the route clears it. Only refusals about the route itself count: a malformed request or a
+// busy task says nothing about the route, and a lost answer is never a refusal.
+const ROUTE_REFUSALS = new Set(['ROUTE_UNAVAILABLE','UNSUPPORTED_CAPABILITY','PERMISSION_DENIED']);
+const COOLDOWN_MS = 15*60000, COOLDOWN_MAX_MS = 120*60000;
+const bundleKey = bundle => bundle?.providerId && bundle.model ? bundle.harness+'\0'+bundle.providerId+'\0'+bundle.model : null;
+const cooldownFile = root => path.join(root, 'route-cooldowns.json');
+function cooldowns(root) {
+  try {
+    const value=JSON.parse(fs.readFileSync(cooldownFile(root), 'utf8'));
+    return value && typeof value==='object' && !Array.isArray(value) ? value : {};
+  } catch {return {};}
+}
+function noteCreate(root, before, after, now=Date.now()) {
+  const key=bundleKey(after.bundle);
+  if (!key) return;
+  const all=cooldowns(root);
+  if (after.createRejected && !before.createRejected && ROUTE_REFUSALS.has(after.errorCode)) {
+    const old=all[key];
+    // A refusal more than 2 h after the last cooldown ended starts a new streak.
+    const streak=old && now-old.until<=COOLDOWN_MAX_MS ? old.failures+1 : 1;
+    all[key]={until:now+Math.min(COOLDOWN_MS*2**(streak-1), COOLDOWN_MAX_MS), code:after.errorCode, failures:streak};
+  } else if (after.taskId && !before.taskId && all[key]) delete all[key];
+  else return;
+  atomic(cooldownFile(root), all);
+}
+// Classifier failures. Cindy chooses the quick-text model, so a retry cannot go elsewhere: it answers at once with the failure and
+// where to change the model, and asks the host again only after 30 s, doubling to 5 min; a classified task clears it. Only a failure
+// that says the channel itself cannot answer cools every task (no model to use, or not allowed); anything else may be that task's
+// doing (an INTERNAL or TIMEOUT from the provider, a malformed answer), so it cools only that task's text, in every session.
+// RATE_LIMITED is Cindy's limit on requests in flight and cools nothing.
+const CLASSIFIER_COOLDOWN_MS = 30000, CLASSIFIER_COOLDOWN_MAX_MS = 5*60000;
+const CHANNEL_FAILURES = new Set(['classifier_no_candidate', 'classifier_permission_denied']);
+const UNRECORDED_FAILURES = new Set(['classifier_rate_limited']);
+const classifierCooldownFile = root => path.join(root, 'classifier-cooldowns.json');
+function classifierCooldowns(root) {
+  try {
+    const value=JSON.parse(fs.readFileSync(classifierCooldownFile(root), 'utf8'));
+    return value && typeof value==='object' && !Array.isArray(value) ? value : {};
+  } catch {return {};}
+}
+// What decides the quick-text model, as far as the plugin can see it: a change ends every cooldown at once, since the failure was about
+// the old choice. The model on the plugin card has no API; Cindy keeps it in <app data>/owners/<owner>/ghost-errand-prefs.json under
+// `errand`, an undocumented file, so a change there is only noticed while that holds (`sessions` beside it changes all the time).
+function classifierChoice(mod, catalog) {
+  const cards=[];
+  for (const app of mod.cindyAppDirs(process.env, os.homedir())) {
+    let owners=[];
+    try {owners=fs.readdirSync(path.join(app, 'owners')).sort();} catch {}
+    for (const owner of owners) {
+      try {cards.push(JSON.parse(fs.readFileSync(path.join(app, 'owners', owner, 'ghost-errand-prefs.json'), 'utf8')).errand ?? null);} catch {}
+    }
+  }
+  let declared=null;
+  try {declared=JSON.parse(fs.readFileSync(path.join(__dirname, 'ghost.json'), 'utf8')).cindy?.oneshotModel ?? null;} catch {}
+  return digest(JSON.stringify([declared, cards, (catalog?.models || []).map(row => row?.route)]));
+}
+// A clock moved back is capped here and kept, so the five minutes run out; capping each read alone would never end the wait.
+function classifierCooling(root, taskDigest, choice, now=Date.now()) {
+  const all=classifierCooldowns(root);
+  let changed=false;
+  for (const [key, entry] of Object.entries(all)) {
+    if (entry?.choice!==choice) {delete all[key];changed=true;}
+    else if (entry.until>now+CLASSIFIER_COOLDOWN_MAX_MS) {entry.until=now+CLASSIFIER_COOLDOWN_MAX_MS;changed=true;}
+  }
+  if (changed) atomic(classifierCooldownFile(root), all);
+  return [all.channel, all['task:'+taskDigest]].find(entry => entry && entry.until>now) || null;
+}
+function noteClassifierOutcome(root, taskDigest, result, choice, now=Date.now()) {
+  const all=classifierCooldowns(root);
+  if (result.profile_source!=='unavailable') {
+    if (!all.channel && !all['task:'+taskDigest]) return;
+    delete all.channel;
+    delete all['task:'+taskDigest];
+  } else {
+    const reason=result.decision?.reason || 'classifier_failed';
+    if (UNRECORDED_FAILURES.has(reason)) return;
+    const key=CHANNEL_FAILURES.has(reason) ? 'channel' : 'task:'+taskDigest;
+    const old=all[key];
+    const failures=old?.choice===choice && now-old.until<=CLASSIFIER_COOLDOWN_MAX_MS ? old.failures+1 : 1;
+    all[key]={until:now+Math.min(CLASSIFIER_COOLDOWN_MS*2**(failures-1), CLASSIFIER_COOLDOWN_MAX_MS), failures, reason,
+      error:result.error, model:result.classifier_model || null, choice};
+    for (const [other, entry] of Object.entries(all)) if (!entry || now-entry.until>CLASSIFIER_COOLDOWN_MAX_MS) delete all[other];
+  }
+  atomic(classifierCooldownFile(root), all);
+}
+// The answer to one classification request; an answer nobody asked for, or that arrives too late, is refused.
+const PENDING_CLASSIFY_TTL_MS = 5*60000;
 let engine=null;
-async function builtin(task, catalog, dir) {
+async function builtin(input, catalog, dir, root, conf = {}, extra = {}) {
   engine ||= import(pathToFileURL(path.join(__dirname, 'engine', 'route.mjs')).href);
-  const result=(await engine).routeTask(task, catalog, {env:process.env});
+  const mod = await engine;
+  const cacheFile = path.join(root, 'score-cache.json');
+  const pendingFile = path.join(dir, 'pending-classify.json');
+  const taskDigest = digest(mod.taskCacheDescriptor(input));
+  let classification = null;
+  if (extra.classification !== undefined && extra.classification !== null) {
+    let pending = null;
+    try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf8')); } catch {}
+    try { fs.rmSync(pendingFile, {force: true}); } catch {}
+    const clf = extra.classification;
+    const answered = clf.ok === true ? typeof clf.rawOutput === 'string' : clf.ok === false;
+    if (!answered || !pending || pending.parent !== extra.parent || pending.taskDigest !== taskDigest ||
+        typeof clf.attemptId !== 'string' || clf.attemptId !== pending.attemptId ||
+        !(Date.now() - pending.createdAt <= PENDING_CLASSIFY_TTL_MS)) {
+      const blocked = mod.unsolicitedClassificationRoute();
+      writeDiag(path.join(dir, 'router.stdout.json'), JSON.stringify(blocked, null, 2));
+      return blocked;
+    }
+    classification = {...clf, calibration_cases: pending.calibrationCases};
+  } else if (extra.classifyViaHost && extra.profile == null) {
+    const req = mod.prepareClassifierRequest(input, {config: conf, cacheFile});
+    if (!req.cached) {
+      const cooling = req.overLimitBy ? null : classifierCooling(root, taskDigest, classifierChoice(mod, catalog));
+      const refused = req.overLimitBy ? mod.classifierTaskTooLongRoute(req) : cooling ? mod.classifierCoolingRoute(cooling) : null;
+      if (refused) {
+        writeDiag(path.join(dir, 'router.stdout.json'), JSON.stringify(refused, null, 2));
+        return refused;
+      }
+      const attemptId = crypto.randomUUID();
+      atomic(pendingFile, {parent: extra.parent, taskDigest, attemptId, calibrationCases: req.calibrationCases, createdAt: Date.now()});
+      return {status: 'classify', engine: 'builtin', classifier: {attemptId, prompt: req.prompt, timeoutMs: req.timeoutMs}};
+    }
+  }
+  const result = mod.routeTask(input, catalog, {
+    env: process.env,
+    cooling: cooldowns(root),
+    config: conf,
+    cacheFile,
+    stateFile: path.join(root, 'quota-state.json'),
+    profile: extra.profile ?? null,
+    classification,
+  });
+  // Only a classification this plugin asked for can come to here, so only that can fill the shared cache or touch the record.
+  if (classification) try {noteClassifierOutcome(root, taskDigest, result, classifierChoice(mod, catalog));} catch {}
   writeDiag(path.join(dir,'router.stdout.json'),JSON.stringify(result,null,2));
-  if (result.status==='blocked') throw Error(result.error);
+  if (result.status === 'blocked') {
+    if (result.decision?.reason === 'no_runnable_model') throw Error(result.error);
+    if (result.decision?.reason === 'no_route' || result.decision?.reason === 'accounts_unavailable' || result.profile_source === 'unavailable') return result;
+    throw Error(result.error);
+  }
   return result;
 }
 async function external(command, task, ctx, dir, timeoutMs=110000) {
@@ -153,6 +313,21 @@ async function external(command, task, ctx, dir, timeoutMs=110000) {
       try {
         if (timedOut || signal || code===null) throw Error(timedOut ? 'Router timed out' : 'Router terminated by '+(signal || 'signal'));
         const result=JSON.parse(text);
+        // v0.6.0: every System-One classifier failed. The router starts no worker on a guess, and neither does this plugin.
+        if (result.status==='scorer_unavailable' || result.error==='scorer_unavailable') {
+          resolve({
+            ...result,
+            status:'blocked',
+            engine:'cli',
+            profile:null,
+            profile_source:'unavailable',
+            decision:{...(result.decision || {}), reason:'scorer_unavailable', profile_source:'unavailable'},
+            error:'The AgentCompass classifiers are all unavailable; nothing was started.',
+            next_action:result.next_action || result.next ||
+              'Fix a classifier of the AgentCompass install (agentcompass doctor), or remove the CLI configuration (router.json, or {"engine":"cli"} in config.json) to use the built-in engine, then roll again. Nothing was started.',
+          });
+          return;
+        }
         if (code!==0 && !['self','split'].includes(result.status)) throw Error(result.error || result.next || 'Router blocked');
         resolve({...result, engine:'cli'});
       } catch(error) {
@@ -164,15 +339,18 @@ async function external(command, task, ctx, dir, timeoutMs=110000) {
   });
 }
 // The engine for this roll: the configured CLI, an opted-in CLI when it is installed, otherwise the built-in engine.
-async function route(conf, task, ctx, dir, catalog) {
-  if (conf.engine==='cli' && conf.command) return await external(conf.command, task, ctx, dir, conf.timeoutMs);
-  if (conf.engine==='cli') {
-    const found=discover();
-    if (found) return await external([found, 'roll'], task, ctx, dir);
-    const result=await builtin(task, catalog, dir);
-    return {...result, engine_note:'config.json asks for the AgentCompass CLI, which is not installed: the built-in engine routed this task.'};
+async function route(conf, task, ctx, dir, catalog, root, extra = {}) {
+  const found=conf.engine==='cli' && !conf.command ? discover() : null;
+  if (conf.engine==='cli' && (conf.command || found)) {
+    if (extra.profile!=null) return {status:'blocked', engine:'cli', profile:null, profile_source:'unavailable',
+      decision:{reason:'profile_not_supported_by_cli', profile_source:'unavailable'},
+      error:'The configured AgentCompass CLI classifies the task itself and takes no profile; the profile was not used and nothing was started.',
+      next_action:'Call roll without `profile`, or remove the CLI configuration (router.json, or {"engine":"cli"} in config.json) to use the built-in engine.'};
+    return conf.command ? await external(conf.command, task, ctx, dir, conf.timeoutMs) : await external([found, 'roll'], task, ctx, dir);
   }
-  return await builtin(task, catalog, dir);
+  const result=await builtin(task, catalog, dir, root, conf, extra);
+  if (conf.engine!=='cli' || result.status==='classify') return result;
+  return {...result, engine_note:'config.json asks for the AgentCompass CLI, which is not installed: the built-in engine routed this task.'};
 }
 // One preparation per operation at a time; different operations never wait for each other.
 const busy=new Map();
@@ -214,7 +392,31 @@ async function handle(method, params) {
     // Nothing was created yet: route again with the current configuration, account map and catalog, so a retry after
     // a fix is not stuck on the answer that failed.
     const mappings=accountMappings(conf);
-    const result=await route(conf,params.task,ctx,dir,catalog);
+    const result=await route(conf,params.task,ctx,dir,catalog,root,{
+      operation,
+      parent:ctx.session_id,
+      classifyViaHost:Boolean(params.classifyViaHost),
+      profile:params.profile,
+      classification:params.classification,
+    });
+    if (result.status==='classify') {
+      return {operation, parent:ctx.session_id, state:'classify', engine:result.engine, classifier:result.classifier};
+    }
+    // A blocked answer is not saved over the receipt: a caller may already hold this operation from an earlier answer.
+    if (result.status==='blocked') {
+      return {
+        operation,
+        parent:ctx.session_id,
+        state:'blocked',
+        engine:result.engine,
+        router:result,
+        bundle:null,
+        prompt:'',
+        directory:ctx.workdir,
+        mappings,
+        attempts:(old?.attempts || 0)+1,
+      };
+    }
     // self/split/a router-side launch are the router's answer to the parent, not a Cindy task.
     const {bundle,prompt}=result.status==='native' ? contract(result,ctx,params.task) : {bundle:null,prompt:''};
     const record={parent:ctx.session_id, state:'prepared', engine:result.engine, router:result, bundle, prompt,
@@ -229,6 +431,8 @@ async function handle(method, params) {
     const update=params.record;
     if (!update || update.parent!==record.parent) throw Error('Parent cannot be changed');
     atomic(path.join(dir,'receipt.json'),update);
+    // The receipt is saved; a cooldown that cannot be written only loses a routing preference.
+    try {noteCreate(root,record,update);} catch {}
     return {saved:true};
   }
   if (method==='output') {
