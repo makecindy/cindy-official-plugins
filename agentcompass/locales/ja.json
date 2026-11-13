@@ -1,0 +1,11 @@
+{
+  "name": "AgentCompass",
+  "description": "Cindy のクイックテキスト通路で作業を分類し、内蔵 AgentCompass エンジンでルーティングし、親セッションのモードに関わらず親プロジェクトディレクトリで bypassPermissions（Claude）/ full-access（Codex・Pi）の子タスクを開始して正確な結果を回収します。",
+  "whenToUse": "Cindy の Claude・Codex・Pi セッションから、AgentCompass を通じて独立した作業を委任するときに使います。",
+  "tools": {
+    "roll": {"description": "タスク全文をそのまま Cindy のクイックテキスト通路で分類し（エージェント・ツール・タスク・セッションなしのモデル要求 1 回。ユーザーのモデルクォータを消費し、結果は 10 分間キャッシュ）、内蔵の AgentCompass エンジン（または自身で分類する設定済みの AgentCompass CLI）で、この Cindy のライブなモデルカタログ上でルーティングし、完全に一致するカタログのルートを 1 つ開始します。親セッション自身のモードに関わらず親プロジェクトディレクトリで bypassPermissions（Claude）または full-access（Codex・Pi）の子タスクを作成します。split と self の回答ではタスクを開始しませんが、分類でクォータは消費済みです。分類に失敗すると blocked を返し、何を変えるべきかを示します。実験的な tasks 機能と、一致するよう設定されたプラグインのタスクディレクトリが必要です。操作 ID と具体的な status ツール呼び出しを返します。自動コールバックはありません。session_context を自分で渡さないでください。", "parameters": {"/properties/task": {"description": "変更していない課題の全文。"}, "/properties/profile": {"description": "任意の完全なタスクプロファイル（AgentCompass v0.6.0）。分類モデルの代わりに使います。required の項目はすべて必須で、axis_demand は divergence、coding、aesthetics、tool_operation の各 0〜3 の整数レベルを持つオブジェクトです。不足しているもの、または旧プロファイルの項目を含むものは拒否されます。設定済みの AgentCompass CLI を使う場合は拒否されます。"}}},
+    "status": {"description": "同じ操作を回収します。ホストに永続化された実行とページ単位のメッセージを読み、全出力をディスクに保存して、正確な最終メッセージの要約を返します。実行が終了状態になり messages_complete が true になるまで呼び出し、その後 cleanup を呼びます。配信が不明な場合はホストの実行記録で照合し、再送しません。"},
+    "stop": {"description": "Cindy 公式のスコープ付きキャンセル API でこのプラグインの実行をキャンセルし、ホストの確認を短時間待ちます。まだ stopping と報告される実行は終了していません。終了状態になるまで status で回収してください。"},
+    "cleanup": {"description": "タスク上のすべての実行が終了し、メッセージをすべて回収したら、このプラグインのタスクをアーカイブします。そうでなければ拒否し、呼ぶべきツールを示します。ホストにアーカイブ API がない場合は、Cindy で手動アーカイブするための確認済みタスク ID を返します。履歴の削除や任意プロセスへのシグナル送信は行いません。"}
+  }
+}
