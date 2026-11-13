@@ -211,7 +211,7 @@
     },
     {
       "id": "upstream_pr_copying_local_plugin_files",
-      "task": "# 任务：向 makecindy/cindy-official-plugins 提交 AgentCompass 插件的上游 PR\n\n1. 克隆上游仓库 `https://github.com/makecindy/cindy-official-plugins.git` 到临时目录并切新分支；\n2. 将本机已开发验证完成的插件目录 `E:\\PROJECTS\\cindy-agentcompass-plugin\\plugin\\`（含 `plugin.json`、`index.ts`、`README.md`、`skills/agent-compass/SKILL.md`）复制到 `plugins/agent-compass/` 并注册到 `provisioning.json`；\n3. 运行上游测试门禁并提交 PR。",
+      "task": "# 任务：向 makecindy/cindy-official-plugins 提交 AgentCompass 插件的上游 PR\n\n1. 克隆上游仓库 `https://github.com/makecindy/cindy-official-plugins.git` 到临时目录并切新分支；\n2. 将本机已开发验证完成的插件目录 `D:\\work\\cindy-agentcompass-plugin\\plugin\\`（含 `plugin.json`、`index.ts`、`README.md`、`skills/agent-compass/SKILL.md`）复制到 `plugins/agent-compass/` 并注册到 `provisioning.json`；\n3. 运行上游测试门禁并提交 PR。",
       "expected_profile": {
         "work_kind": "general_implementation",
         "interaction_style": "engineering",
