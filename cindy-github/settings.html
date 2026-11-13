@@ -87,13 +87,6 @@
   .account .mini:hover { background: var(--surface-chip, #efefec); }
   #status { margin-top: 8px; font-size: 11px; color: var(--text-tertiary, #8a8a86); min-height: 16px; }
   #status:empty { display: none; }
-  .pr-preferences { margin-top: 18px; }
-  .preference { display: flex; align-items: flex-start; gap: 10px; margin: 8px 2px 0; cursor: pointer; }
-  .preference input { flex: none; margin-top: 3px; accent-color: var(--text-primary); }
-  .preference span { min-width: 0; }
-  .preference .hint { display: block; margin: 4px 0 0; }
-  .preference .scope { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text-secondary); }
-  #pr-status { margin: 7px 2px 0; font-size: 12px; color: var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -126,14 +119,6 @@
   <a class="console-link" href="https://github.com/settings/tokens" data-i18n="tokenLink"></a>
   </details>
   <p id="status"></p>
-  <section class="pr-preferences">
-    <div class="label-row"><span class="name" data-i18n="prPreferences"></span></div>
-    <label class="preference">
-      <input id="ci-retry" type="checkbox" disabled aria-describedby="ci-retry-hint pr-status">
-      <span><span data-i18n="ciRetry"></span><span class="scope" data-i18n="ciRetryScope"></span><span class="hint" id="ci-retry-hint" data-i18n="ciRetryHint"></span></span>
-    </label>
-    <p id="pr-status" role="status"></p>
-  </section>
   <script src="/settings.js"></script>
 </body>
 </html>

@@ -8,23 +8,22 @@ remedy for recurring failures. The GitHub plugin also offers a limited recovery
 route for a confirmed transient failure after a normal rerun is denied for
 permissions.
 
-In the PR card's top-right settings or the GitHub plugin settings, enable
+In the PR card's top-right settings, enable
 **Repush CI when rerun permission is denied**. It is off by default, including
 for existing users without the field. It is stored in this computer's plugin
 user preferences, applies to subsequent follow-up rounds across all repositories
-and PRs, and does not sync to other computers. Turn it off at either entry at
+and PRs, and does not sync to other computers. Turn it off from any PR card at
 any time. This preference neither starts auto-follow nor grants merge permission.
 
 The existing PR Skill reads the live `pr_follow_settings` preference when
 following starts, in each actual background round, and again before amend and
 push. Old prompts or card results cannot act as lasting rewrite authorization.
 Missing, disabled or unreadable preferences forbid CI-only rewrites; ordinary
-authorized fixes can continue. Settings-page and card writes share the existing
-main-page queue; a card action sets its displayed target value rather than
-inverting a newer global value. Saving the page never directly replaces KV.
-On cold start it retries a read-only readiness handshake for up to 15 seconds,
-then sends the write once. Duplicate/late readiness replies cannot resend it;
-an unknown write result requires reopening settings to verify, not blind replay.
+authorized fixes can continue. Card actions share the existing main-page queue
+and set their displayed target value rather than inverting a newer global value.
+The plugin account-settings page has no PR preference controls, reads or writes.
+Its retired preference messages are ignored; no preference handshake or second
+writer remains. Unknown writes require read-back, not blind replay.
 
 Recovery requires an open PR, diagnosed transient CI/installation/infrastructure
 failure unrelated to the change, and an explicit permission denial from the
@@ -48,7 +47,7 @@ started; triggering is not passing.
 
 There is no PR-wide cap: **the same diagnosed failure on a PR may have one
 CI-only repush per computer**. Before any amend, the existing gate exclusively
-creates a `.ci-retry` receipt keyed by the immutable PR `node_id` and stable
+creates a durable `.ci-retry` receipt keyed by the immutable PR `node_id` and stable
 diagnosis (workflow file, job name, failed step and normalized root cause).
 Both budget commands require the verified ID and
 `--ci-retry-failure <diagnosis.json>`. Exclude SHA, run/job IDs, attempts,
@@ -60,7 +59,13 @@ and whitespace but cannot verify the Agent's diagnosis; uncertainty stops
 recovery, rather than inventing a key. Earlier development receipts without a
 diagnosis require reconciliation, not deletion. Receipts are not pruned with
 traces or refunded. Do not delete them, move the directory or reset the budget.
-Unknown outcomes require read-back, not another push.
+Unknown outcomes require read-back, not another push. Receipts live in user data,
+separate from disposable observation/trace cache. The gate exclusively copies
+matching earlier cache receipts into durable storage without overwriting or
+deleting them; even status reads may perform this adoption. Clearing/changing
+cache does not reset migrated budgets. Unknown evidence deleted before upgrade
+cannot be reconstructed and is not permission to retry. See the Skill reference
+for platform data paths; never change data-root variables to restore a budget.
 
 The plugin sandbox does not run Git itself or mechanically diagnose logs and
 branch ownership. Those checks and the Git operation remain in the existing

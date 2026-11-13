@@ -17,12 +17,6 @@
  */
 var MESSAGES = {
   'zh-CN': {
-    prPreferences: 'PR 跟进偏好',
-    ciRetry: 'CI 无重跑权限时重推重试',
-    ciRetryScope: '本机所有仓库 / PR 共用',
-    ciRetryHint: '仅确认临时故障且重跑被权限拒绝时，可改写独占分支的提交 SHA 并受限重推',
-    prLoadFailed: '无法读取 PR 偏好，请重新打开设置后再试。',
-    prSaveFailed: '未能确认 PR 偏好已保存，请重新打开设置核对。',
     accountTitle: 'GitHub 账号',
     accountHint: '优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。',
     otherMethods: '其他连接方式',
@@ -56,12 +50,6 @@ var MESSAGES = {
     clearFailed: '清除失败,请重试',
   },
   en: {
-    prPreferences: 'PR follow-up preferences',
-    ciRetry: 'Repush CI when rerun permission is denied',
-    ciRetryScope: 'Shared by all repos / PRs on this computer',
-    ciRetryHint: 'Only for confirmed transient failures and permission-denied reruns: rewrite the commit SHA on an exclusive branch and repush with safeguards',
-    prLoadFailed: 'Could not read PR preferences. Reopen settings and try again.',
-    prSaveFailed: 'Could not confirm PR preferences were saved. Reopen settings to check.',
     accountTitle: 'GitHub account',
     accountHint: "This computer's GitHub login is used first. You can also expand the other connection methods below.",
     otherMethods: 'Other connection methods',
@@ -95,12 +83,6 @@ var MESSAGES = {
     clearFailed: 'Clear failed. Try again.',
   },
   ja: {
-    prPreferences: 'PR フォローの設定',
-    ciRetry: 'CI の再実行権限がない場合に再プッシュ',
-    ciRetryScope: 'この端末の全リポジトリ・PR で共用',
-    ciRetryHint: '一時的な障害と再実行の権限拒否を確認した場合のみ、専用ブランチのコミット SHA を書き換え、安全条件の下で再プッシュします',
-    prLoadFailed: 'PR 設定を読み込めませんでした。設定を開き直して再試行してください。',
-    prSaveFailed: 'PR 設定の保存を確認できませんでした。設定を開き直して確認してください。',
     accountTitle: 'GitHub アカウント',
     accountHint: 'このコンピュータの GitHub ログインを優先して使います。下のほかの接続方法を開いて使うこともできます。',
     otherMethods: 'ほかの接続方法',
@@ -134,12 +116,6 @@ var MESSAGES = {
     clearFailed: '消去に失敗しました。再試行してください',
   },
   ko: {
-    prPreferences: 'PR 팔로우 설정',
-    ciRetry: 'CI 재실행 권한이 없으면 다시 푸시',
-    ciRetryScope: '이 컴퓨터의 모든 저장소 / PR에 공통 적용',
-    ciRetryHint: '일시적 장애와 재실행 권한 거부를 확인한 경우에만 전용 브랜치의 커밋 SHA를 바꾸고 안전 조건에 따라 다시 푸시합니다',
-    prLoadFailed: 'PR 설정을 읽지 못했습니다. 설정을 다시 열고 시도하세요.',
-    prSaveFailed: 'PR 설정이 저장되었는지 확인하지 못했습니다. 설정을 다시 열어 확인하세요.',
     accountTitle: 'GitHub 계정',
     accountHint: '이 컴퓨터의 GitHub 로그인을 우선 사용합니다. 아래의 다른 연결 방법을 펼쳐 사용할 수도 있습니다.',
     otherMethods: '다른 연결 방법',
@@ -232,83 +208,6 @@ var MESSAGES = {
   }
 
   var statusTimer = null;
-
-  async function readPrKv() {
-    var response = await fetch('/kv');
-    if (!response.ok) throw new Error('kv read failed');
-    var kv = await response.json();
-    if (!kv || typeof kv !== 'object' || Array.isArray(kv)) throw new Error('invalid kv');
-    return kv;
-  }
-
-  async function loadPrPreferences() {
-    var control = $('ci-retry');
-    control.disabled = true;
-    try {
-      var kv = await readPrKv();
-      control.checked = !!kv.prCard && kv.prCard.ciRetryRepush === true;
-      $('pr-status').textContent = '';
-      control.disabled = false;
-    } catch (e) {
-      $('pr-status').textContent = t('prLoadFailed');
-    }
-  }
-
-  async function saveCiRetryPreference() {
-    var control = $('ci-retry');
-    var enabled = control.checked;
-    control.disabled = true;
-    try {
-      var random = crypto.getRandomValues(new Uint32Array(4));
-      var reqId = Array.from(random).map(function (n) { return n.toString(16).padStart(8, '0'); }).join('');
-      // Only the main page writes PR KV, through the same queue as card actions.
-      // Retry only the read-only readiness handshake; send the mutation once.
-      // A timeout after sending may mean it completed; reopen to verify.
-      await new Promise(function (resolve, reject) {
-        var phase = 'ready';
-        var poll = null;
-        var timer = setTimeout(function () { finish(new Error('preference result unknown')); }, 15000);
-        function finish(error) {
-          if (phase === 'settled') return;
-          phase = 'settled';
-          clearTimeout(timer);
-          if (poll !== null) clearInterval(poll);
-          bc.removeEventListener('message', onResult);
-          if (error) reject(error); else resolve();
-        }
-        function onResult(ev) {
-          var result = ev && ev.data;
-          if (!result || result.reqId !== reqId) return;
-          if (phase === 'ready' && result.type === 'pr-preference-ready-result' && result.ok === true) {
-            phase = 'result';
-            if (poll !== null) clearInterval(poll);
-            poll = null;
-            try { bc.postMessage({ type: 'pr-preference-write', reqId: reqId, ciRetryRepush: enabled }); }
-            catch (e) { finish(e); }
-          } else if (phase === 'result' && result.type === 'pr-preference-result') {
-            finish(result.ok && result.ciRetryRepush === enabled ? null : new Error('preference save unconfirmed'));
-          }
-        }
-        function askReady() {
-          if (phase !== 'ready') return;
-          try { bc.postMessage({ type: 'pr-preference-ready', reqId: reqId }); }
-          catch (e) { finish(e); }
-        }
-        bc.addEventListener('message', onResult);
-        void fetch('/wake').then(function (response) {
-          if (phase !== 'ready') return;
-          if (!response || response.ok === false) throw new Error('plugin wake failed');
-          poll = setInterval(askReady, 400);
-          askReady();
-        }).catch(finish);
-      });
-      $('pr-status').textContent = '';
-      control.disabled = false;
-    } catch (e) {
-      // An uncertain write must not be presented as an enabled or disabled saved setting.
-      $('pr-status').textContent = t('prSaveFailed');
-    }
-  }
   function showStatus(text, sticky) {
     $('status').textContent = text;
     if (statusTimer) clearTimeout(statusTimer);
@@ -489,7 +388,6 @@ var MESSAGES = {
   $('save').addEventListener('click', function () { void save(); });
   $('test').addEventListener('click', function () { void test(); });
   $('clear').addEventListener('click', function () { void clearToken(); });
-  $('ci-retry').addEventListener('change', function () { void saveCiRetryPreference(); });
   $('token').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); void save(); }
   });
@@ -498,6 +396,5 @@ var MESSAGES = {
   void loadLocale().then(function renderLocalized() {
     applyStaticCopy();
     void load();
-    void loadPrPreferences();
   });
 })();

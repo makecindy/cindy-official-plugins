@@ -504,6 +504,7 @@ export function parseArgs(argv, env = process.env) {
     reserveCiRetry,
     ciRetryId,
     ciRetryFailure,
+    ciRetryDir: ciRetryDataDir(env),
     snapshot,
     stateDir: stateDir || path.join(os.homedir(), '.cache', 'cindy-pr'),
     maxSnapshotFailures,
@@ -578,6 +579,27 @@ export function adoptLegacyStateFile(stateDir, repo, number, file) {
 export function ciRetryFilePath(stateDir, prNodeId, failure) {
   const identity = failure === undefined ? prNodeId : JSON.stringify([prNodeId, failure]);
   return path.join(stateDir, `ci-retry-${createHash('sha256').update(identity).digest('hex')}.ci-retry`);
+}
+
+export function ciRetryDataDir(env = process.env) {
+  if (env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME)) return path.join(env.XDG_STATE_HOME, 'cindy-pr', 'ci-retry');
+  const base = process.platform === 'win32'
+    ? (env.LOCALAPPDATA && path.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path.join(os.homedir(), 'AppData', 'Local'))
+    : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support')
+      : path.join(os.homedir(), '.local', 'state');
+  return path.join(base, 'Cindy', 'pr-recovery');
+}
+
+function adoptCiRetryEvidence(stateDir, retryDir, prNodeId, failure) {
+  for (const diagnosis of [undefined, failure]) {
+    const source = ciRetryFilePath(stateDir, prNodeId, diagnosis);
+    const target = ciRetryFilePath(retryDir, prNodeId, diagnosis);
+    try { fs.statSync(source); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    fs.mkdirSync(retryDir, { recursive: true });
+    // Keep the old evidence too. Exclusive copying cannot overwrite a newer receipt.
+    try { fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
 }
 
 function readCiRetryFailure(file) {
@@ -1449,6 +1471,7 @@ async function gateMain(argv, ctx) {
   // Same diagnosed failure on the same PR, across all heads and follow-up restarts.
   // Exclusive creation prevents two callers from both consuming its one attempt.
   // A distinct diagnosis may have its own attempt; there is no PR-wide cap.
+  // Keep receipts in durable user data, independently of observation cache.
   // Never refund or prune this sentinel with the
   // observation/trace state: an interrupted push may already have reached GitHub.
   // This is a budget receipt only; the agent must read live plugin preferences and
@@ -1457,12 +1480,13 @@ async function gateMain(argv, ctx) {
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
     const failure = readCiRetryFailure(args.ciRetryFailure);
+    adoptCiRetryEvidence(args.stateDir, args.ciRetryDir, args.ciRetryId, failure);
     // Earlier development builds recorded only the PR identity, so their fault is
     // unknown. Do not silently discard a possibly executed rewrite during upgrade.
-    if (fs.existsSync(ciRetryFilePath(args.stateDir, args.ciRetryId))) {
+    if (fs.existsSync(ciRetryFilePath(args.ciRetryDir, args.ciRetryId))) {
       throw new Error('Legacy CI retry evidence has no diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
     }
-    const retryFile = ciRetryFilePath(args.stateDir, args.ciRetryId, failure);
+    const retryFile = ciRetryFilePath(args.ciRetryDir, args.ciRetryId, failure);
     if (args.reserveCiRetry) {
       fs.mkdirSync(path.dirname(retryFile), { recursive: true });
       try {

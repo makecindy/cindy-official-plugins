@@ -49,9 +49,18 @@ auto-merge, queue operations, direct main pushes, permission changes or bypasses
 
 ## Verify, consume the budget, amend and push
 
-Use the current `<skill-dir>` and existing gate state directory. Keep the same
-state location as this PR's follow-up; never create another state directory,
-delete the budget sentinel or reset the budget to obtain another attempt.
+Use the current `<skill-dir>` and this PR's existing observation-cache directory
+for the gate. Retry receipts are stored separately in durable user data, never
+in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
+otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
+`~/Library/Application Support/Cindy/pr-recovery`, and other systems use
+`~/.local/state/Cindy/pr-recovery`. The gate adopts matching earlier cache
+receipts with exclusive copying, retaining the originals and never overwriting
+durable evidence. An unreadable or damaged receipt fails closed. Clearing or
+changing observation cache does not reset migrated budgets. Never change the
+data-root environment, delete receipts or reset budgets to obtain another try.
+Earlier evidence already deleted before migration cannot be reconstructed;
+an uncertain prior outcome still stops recovery.
 
 There is no PR-wide retry cap. Each distinct diagnosed failure on a PR may have
 one CI-only repush. Before checking/reserving its budget, write a diagnosis JSON
@@ -107,8 +116,9 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Require exit 0, `reason: "ci-retry-reserved"` and the matching
    `reservation.sourceHead` and normalized `reservation.failure`. This receipt
    only consumes budget; it does not authorize Git operations.
-   `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without writes
-   or GitHub calls. The budget survives changed SHAs, gate acknowledgements,
+   `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without GitHub calls;
+   it only writes when adopting existing cache evidence into durable storage.
+   The budget survives cache cleanup, changed SHAs, gate acknowledgements,
    follow-up restarts, repository renames/transfers and interrupted operations.
    The sentinel is keyed by the immutable PR node ID and stable diagnosis,
    never the mutable URL, head SHA or run ID.

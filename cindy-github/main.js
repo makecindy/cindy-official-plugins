@@ -3790,25 +3790,6 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
-  if (m && m.type === 'pr-preference-ready' && /^[a-f0-9]{32}$/.test(m.reqId)) {
-    // Read-only handshake: /wake may finish before this listener is installed.
-    bc.postMessage({ type: 'pr-preference-ready-result', reqId: m.reqId, ok: true });
-    return;
-  }
-  if (m && m.type === 'pr-preference-write' && /^[a-f0-9]{32}$/.test(m.reqId) && typeof m.ciRetryRepush === 'boolean') {
-    // The settings page sends a target value, never a KV snapshot. This existing
-    // queue is the single writer for both settings-page and card preferences.
-    void enqueuePr(async function () {
-      var ok = false;
-      try {
-        await writePrSettings(function (next) { next.ciRetryRepush = m.ciRetryRepush; });
-        var saved = await readPrSettings();
-        ok = !saved.unreadable && saved.ciRetryRepush === m.ciRetryRepush;
-      } catch (e) { /* A failed or uncertain write is never retried automatically. */ }
-      bc.postMessage({ type: 'pr-preference-result', reqId: m.reqId, ok: ok, ciRetryRepush: ok ? m.ciRetryRepush : null });
-    });
-    return;
-  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
