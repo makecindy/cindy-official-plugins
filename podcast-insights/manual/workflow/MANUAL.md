@@ -80,3 +80,5 @@ regeneration after failures. Quotes are source extractions, not proof of ASR or
 interpretation accuracy. Navigation ranges cover all original paragraphs and are
 not manually verified semantic boundaries. Chapter questions must read/cite the
 original version, never treat saved notes as a substitute for source evidence.
+
+For chapter questions, pass the supplied transcript_id in every podcast_read call, including continuation, and every podcast_cite reference. Use offset=from_segment_idx and evidence only through to_segment_idx. A missing requested version must stop the answer, never fall back to another version. Omit transcript_id only for an ordinary current-version read/citation.

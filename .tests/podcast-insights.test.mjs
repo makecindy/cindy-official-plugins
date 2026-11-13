@@ -1349,3 +1349,49 @@ test('reading-only delivery preserves unsupported jobs and transcript without pr
     assert.equal((await h.service.run('podcast_read',{episode_id:eid})).segments[0].text,'Existing original evidence.');
   }finally{h.close();}
 });
+
+// #330 P1: a chapter task can start after a replacement transcript is imported.
+// Production runtime -> Service/SQLite: pin read/continuation/cite to the question's
+// source version, with two versions in one citation call and a foreign episode ID.
+test('chapter follow-up reads and cites its original version after transcript replacement',async()=>{
+  const h=harness();try{
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'Original chapter evidence.',start:1,end:3},{text:'Original closing evidence.',start:4,end:6}])});
+    const old=await h.service.run('podcast_read',{episode_id:eid}),tid=old.segments[0].transcript_id;
+    const sent=[];h.tasks={capabilities:async()=>({operations:['create','send']}),create:async()=>({taskId:'follow-up',revision:1}),send:async a=>{sent.push(a);return {ok:true};}};
+    const runtime=runtimeHarness(h);await runtime.request('chapter_ask',{episode_id:eid,transcript_id:tid,from_segment_idx:0,to_segment_idx:1,question:'What is the evidence?'},'version-question');
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement chapter evidence.'});
+    const current=await h.service.run('podcast_read',{episode_id:eid}),newTid=current.segments[0].transcript_id;
+    const page=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,max_chars:8});
+    assert.equal(page.segments[0].transcript_id,tid);assert.equal(page.segments[0].text,'Original');
+    const next=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,offset:page.next_offset,char_offset:page.next_char_offset,max_chars:200});assert.match(next.segments[0].text,/chapter evidence/);
+    const around=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,around_segment:old.segments[1].id});assert.equal(around.segments[0].idx,1);
+    const timed=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,from_ms:4000});assert.equal(timed.segments[0].idx,1);
+    const refs=await h.service.run('podcast_cite',{references:[{episode_id:eid,transcript_id:tid,quote:'Original chapter evidence.'},{episode_id:eid,transcript_id:newTid,quote:'Replacement chapter evidence.'},{episode_id:eid,transcript_id:tid,quote:'Replacement chapter evidence.'}]});
+    assert.deepEqual(refs.citations.map(c=>c.status),['exact','exact','not_found']);assert.equal(refs.citations[0].transcript_id,tid);assert.equal(refs.citations[1].transcript_id,newTid);
+    await assert.rejects(h.service.run('podcast_read',{episode_id:eid,transcript_id:'missing-version'}),/TRANSCRIPT_VERSION_UNAVAILABLE/);
+    const foreign=await seed(h,{guid:'other-episode'});await assert.rejects(h.service.run('podcast_cite',{references:[{episode_id:foreign,transcript_id:tid,quote:'Original chapter evidence.'}]}),/TRANSCRIPT_VERSION_UNAVAILABLE/);
+    assert.match(sent[0].text,/transcript_id.*every podcast_read/);assert.match(sent[0].text,/every podcast_cite reference/);
+  }finally{h.close();}
+});
+
+// #330 P2: artificial ASR spaces straddle a 12000-character storage boundary.
+// Production generation/export and both actual binders must match reading text
+// without modifying saved raw source or merging unrelated source intervals.
+test('reading and export search clean Chinese spacing across storage boundaries',async()=>{
+  const h=harness(),R=require('../podcast-insights/reading.js');try{
+    const eid=await seed(h),source='x'.repeat(11998)+'量 子计 算 tail';
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:source});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});minutesModel(h);
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));assert.equal(d.segments.length,2);assert.equal(d.segments.map(s=>s.text).join(''),source);
+    const exports=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exports.push(a);return {ok:true};};await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+    function exercise(bind){
+      let input;const nodes=d.segments.map(s=>({textContent:s.text,hidden:false})),count={};
+      const container={querySelector:s=>s==='[data-transcript-search]'?{addEventListener:(_,fn)=>{input=fn;}}:s==='[data-match-count]'?count:null,querySelectorAll:s=>s==='[data-transcript-segment]'?nodes:[]};
+      bind(container,d);
+      for(const value of ['量子计算','量 子计 算']){input({target:{value}});assert.deepEqual(nodes.map(n=>n.hidden),[false,false]);assert.match(count.textContent,/^2 /);}
+      input({target:{value:'missing'}});assert.ok(nodes.every(n=>n.hidden));input({target:{value:''}});assert.ok(nodes.every(n=>!n.hidden));
+    }
+    exercise(R.bind);const script=exports[0].content.match(/<script>([\s\S]*)<\/script>/)[1];exercise(container=>vm.runInNewContext(script,{document:container}));
+    assert.equal(JSON.parse(exports[1].content).segments.map(s=>s.text).join(''),source);
+  }finally{h.close();}
+});

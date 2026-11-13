@@ -127,7 +127,8 @@
     "MINUTES_RENDER_FAILED": "The reading page could not be loaded. Reopen the plugin.",
     "MINUTES_NOT_FOUND": "No reading notes yet. Generate them first.",
     "MINUTES_EXPORT_FAILED": "Export incomplete. Check working directory permissions and retry.",
-    "PROVIDER_UNAVAILABLE": "This provider is unavailable in this version. Its jobs and data are retained. Check status in the original integration version; do not resubmit."
+    "PROVIDER_UNAVAILABLE": "This provider is unavailable in this version. Its jobs and data are retained. Check status in the original integration version; do not resubmit.",
+    "TRANSCRIPT_VERSION_UNAVAILABLE": "The requested transcript version is unavailable. Reopen the current notes; no other transcript is substituted."
   },
   "quoteTooLong": "Quote exceeds 1200 characters. Select a shorter passage; nothing was saved.",
   "excerptNotice": "Excerpt around the matching words; […] marks omitted source text. Open the library for the complete passage.",

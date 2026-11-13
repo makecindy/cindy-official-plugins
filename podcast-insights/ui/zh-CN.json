@@ -127,7 +127,8 @@
     "MINUTES_RENDER_FAILED": "阅读页未能加载，请重新打开插件。",
     "MINUTES_NOT_FOUND": "尚无知识纪要，请先生成。",
     "MINUTES_EXPORT_FAILED": "纪要导出未完成，请检查工作目录权限后重试。",
-    "PROVIDER_UNAVAILABLE": "此版本不支持该供应商。原有任务与数据已保留；请在原接入版本核对状态，不要重新提交。"
+    "PROVIDER_UNAVAILABLE": "此版本不支持该供应商。原有任务与数据已保留；请在原接入版本核对状态，不要重新提交。",
+    "TRANSCRIPT_VERSION_UNAVAILABLE": "指定的原文版本不可用，请重新打开当前纪要；不会改用另一份转录回答。"
   },
   "quoteTooLong": "引用超过1200字符，请缩短选中的原文；本次未保存",
   "excerptNotice": "展示命中原句附近的上下文；[…] 表示省略的原文。完整段落请在资料库核验。",

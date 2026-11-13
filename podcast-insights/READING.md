@@ -1,4 +1,4 @@
-# Automatic reading notes (0.4.12)
+# Automatic reading notes (0.4.13)
 
 From an episode with an existing transcript, open **Reading notes → Generate**.
 The plugin starts a Cindy task which calls `podcast_minutes` to organize the
@@ -15,7 +15,7 @@ not manually verified semantic boundaries or sentence-level timestamps.
 The reader supports a collapsible contents list, source jumps, full-transcript
 search, and chapter questions which open a new Cindy task with the chapter,
 source version and original segment range. Answers must retrieve and cite the
-original transcript. The question task must retrieve source evidence before answering.
+original transcript. The question task passes transcript_id on every podcast_read call (including continuation) and every podcast_cite reference. This keeps the original version even if a replacement is imported after the task starts. An unavailable or foreign-episode version fails without substituting the active transcript.
 
 Read mode removes artificial Chinese character spacing and splits at sentence
 punctuation and selected discourse pauses. It never changes original stored
@@ -50,3 +50,5 @@ Chapter ranges merge overlapping evidence spans, including decisions and quotati
 
 
 Model citation excerpts are capped at600 UTF-16 code units. Long passages are split for citation selection only, preferring pauses/word boundaries and preserving surrogate pairs. Prompt and evidence extraction use the same excerpt mapping to original segment IDs; semantic reading paragraphs, raw text and source timing are unchanged.
+
+Full-transcript search uses the same Chinese spacing cleanup as the reading view across artificial storage cuts, retaining the original block mapping. Stored text and source time ranges remain unchanged.

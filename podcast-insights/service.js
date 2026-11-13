@@ -162,6 +162,12 @@
       const all=r.episodes || [],episodes=C.budgetRows(all.map(e=>({id:e.id,guid:e.guid,title:e.title})),500,40000),rawTranscripts=r.transcripts || [],transcripts=C.budgetRows(rawTranscripts,50,16000);
       return {show_id:r.show_id,episodes,episode_count:all.length,episodes_omitted:all.length-episodes.length,transcripts,transcript_count:rawTranscripts.length,transcripts_omitted:rawTranscripts.length-transcripts.length,truncated:!!r.truncated,results_truncated:episodes.length<all.length||transcripts.length<rawTranscripts.length,...(r.rss_found===false?{rss_found:false}:{}),continuation:{tool:'podcast_library',args:{show_id:r.show_id,offset:0,include_guid:true}},max_output_bytes:60000};
     }
+    async transcriptId(eid,value){
+      const requested=value!==undefined;
+      const rows=await this.rows('SELECT id FROM transcripts WHERE episode_id=? AND '+(requested?'id=?':'is_active=1'),[eid,...(requested?[C.string(value,128)]:[])]);
+      if(requested&&!rows.length)C.fail('TRANSCRIPT_VERSION_UNAVAILABLE');
+      return rows[0]?.id || null;
+    }
     async segmentRows(eid,tid){return this.rows('SELECT g.* FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND '+(tid?'t.id=?':'t.is_active=1')+' ORDER BY g.idx',[eid,...(tid?[tid]:[])]);}
     // Keep only a quote-length suffix and its source-row indices. Empty
     // normalized cues do not expand the window; gaps reset it entirely.
@@ -191,7 +197,8 @@
         // exact boundary-spanning, normalized single-segment, then normalized
         // boundary-spanning. A normalized hit in an earlier segment must not
         // hide an exact quote in a later segment.
-        let rows=segmentCache.get(e.id);if(!rows){rows=await this.segmentRows(e.id);segmentCache.set(e.id,rows);}
+        const tid=await this.transcriptId(e.id,ref.transcript_id),cacheKey=JSON.stringify([e.id,tid]);
+        let rows=segmentCache.get(cacheKey);if(!rows){rows=tid?await this.segmentRows(e.id,tid):[];segmentCache.set(cacheKey,rows);}
         let found=rows.find(g=>g.text.includes(quote));
         if(found)found={...found,status:'exact'};
         if(!found)found=this.findAcross(rows,quote);
@@ -200,7 +207,7 @@
         if(!found)found=this.findAcross(rows,quote,true);
         const shownQuote=20000-used>=quote.length?quote:'';used+=shownQuote.length;
         if(found){delete found.norm;Object.assign(found,C.excerpt(found.text,quote,Math.min(800,20000-used)));used+=found.text.length;}
-        results.push(found?{...found,episode_id:e.id,episode_title:e.title,show_title:e.show_title,...this.publicSource(e),quote:shownQuote,quote_omitted:!shownQuote,reference_index,interpretation_verified:false}:{episode_id:e.id,quote:shownQuote,quote_omitted:!shownQuote,reference_index,status:'not_found'});
+        results.push(found?{...found,episode_id:e.id,episode_title:e.title,show_title:e.show_title,...this.publicSource(e),quote:shownQuote,quote_omitted:!shownQuote,reference_index,interpretation_verified:false}:{episode_id:e.id,quote:shownQuote,quote_omitted:!shownQuote,reference_index,...(tid?{transcript_id:tid}:{}),status:'not_found'});
       }
       const citations=C.budgetRows(results,20,59000),omitted=results.length-citations.length;
       return {citations,text_chars:citations.reduce((n,r)=>n+(r.text?.length || 0)+r.quote.length,0),max_text_chars:20000,max_output_bytes:60000,citations_omitted:omitted,next_reference_index:omitted?citations.length:null,results_truncated:omitted>0||citations.some(r=>r.text_truncated||r.quote_omitted),interpretation_verified:false};
@@ -347,9 +354,10 @@
       }
       if(tool==='podcast_read'){
         const rawEpisode=await this.episode(a.episode_id),e={...this.publicEpisode(rawEpisode),...this.publicSource(rawEpisode)};const limit=Math.max(1,Math.min(20000,Number(a.max_chars)||10000));let offset=Math.max(0,Number(a.offset)||0);
-        if(a.around_segment){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE g.id=? AND t.episode_id=? AND t.is_active=1',[a.around_segment,e.id]))[0];if(!r)C.fail('SEGMENT_NOT_FOUND');offset=r.idx;}
-        if(a.from_ms!=null){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.is_active=1 AND g.start_ms>=? ORDER BY g.idx LIMIT 1',[e.id,a.from_ms]))[0];if(!r)return {episode:e,segments:[],next_offset:null};offset=r.idx;}
-        const rows=await this.rows('SELECT g.id,g.transcript_id,g.idx,g.text,g.speaker,g.start_ms,g.end_ms FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.is_active=1 AND g.idx>=? ORDER BY g.idx LIMIT 2000',[e.id,offset]);if(!rows.length && e.transcript_state!=='ready')C.fail('NO_TRANSCRIPT');
+        const tid=await this.transcriptId(e.id,a.transcript_id);
+        if(a.around_segment){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE g.id=? AND t.episode_id=? AND t.id=?',[a.around_segment,e.id,tid]))[0];if(!r)C.fail('SEGMENT_NOT_FOUND');offset=r.idx;}
+        if(a.from_ms!=null){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.id=? AND g.start_ms>=? ORDER BY g.idx LIMIT 1',[e.id,tid,a.from_ms]))[0];if(!r)return {episode:e,transcript_id:tid,segments:[],next_offset:null};offset=r.idx;}
+        const rows=await this.rows('SELECT g.id,g.transcript_id,g.idx,g.text,g.speaker,g.start_ms,g.end_ms FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.id=? AND g.idx>=? ORDER BY g.idx LIMIT 2000',[e.id,tid,offset]);if(!rows.length && e.transcript_state!=='ready')C.fail('NO_TRANSCRIPT');
         const segments=[];let n=0,next_offset=null,next_char_offset;
         for(const raw of rows){
           const charOffset=raw.idx===offset?Math.max(0,Math.floor(Number(a.char_offset)||0)):0;
@@ -373,7 +381,7 @@
           if(take<remaining.length){next_offset=raw.idx;next_char_offset=charOffset+take;break;}
         }
         if(next_offset===null&&rows.length===2000)next_offset=rows.at(-1).idx+1;
-        return {episode:e,segments,next_offset,...(next_char_offset===undefined?{}:{next_char_offset}),max_output_bytes:60000};
+        return {episode:e,transcript_id:tid,segments,next_offset,...(next_char_offset===undefined?{}:{next_char_offset}),max_output_bytes:60000};
       }
       if(tool==='podcast_search'){
         const q=C.norm(C.string(a.query,300));if(!q)C.fail('INVALID_QUERY');
