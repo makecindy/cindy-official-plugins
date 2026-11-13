@@ -2,7 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id),channel=new BroadcastChannel('podcast-insights-v2'),pending=new Map();
   let pendingFocus=null;
-  let ui,show='',episode='',next=null,episodeOffset=null,notesNext=null,nextChar=0,highlight='',busy=false,refreshPending=false,readerNeedsRetry=false,readerVersion='';
+  let ui,show='',episode='',next=null,episodeOffset=null,notesNext=null,nextChar=0,highlight='',busy=false,refreshPending=false,readerNeedsRetry=false,readerVersion='',readerTranscript='';
   let libraryScroll=0,minutesStale=false,minutesId='',viewMode='library',navigation=0,selectionQueue=Promise.resolve();
   function saveSelection(selected,token=navigation){
     const work=selectionQueue.then(async()=>{if(token!==navigation)return;const r=await fetch('/kv');if(!r.ok)throw new Error(ui.selectionSaveFailed);const cfg=await r.json();if(token!==navigation)return;const saved=await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,selected})});if(!saved.ok)throw new Error(ui.selectionSaveFailed);});
@@ -20,7 +20,7 @@
   function connect(){const reqId=crypto.randomUUID();return new Promise((resolve,reject)=>{const send=()=>channel.postMessage({type:'ping',reqId});const repeat=setInterval(send,250);const timer=setTimeout(()=>{clearInterval(repeat);pending.delete(reqId);reject(new Error(ui.timeout));},15000);pending.set(reqId,{resolve:()=>{clearInterval(repeat);resolve();},reject,timer});send();});}
   const node=(tag,text)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;return e;};
   const button=(text,fn)=>{const b=node('button',text);b.type='button';b.onclick=()=>act(fn);return b;};
-  async function act(fn){if(busy)return;busy=true;try{await fn();}catch(e){notice(e.message);}finally{busy=false;if(pendingFocus){const focus=pendingFocus;pendingFocus=null;act(()=>focus.mode==='minutes'?openMinutes(focus.episode_id):read(focus.episode_id,0,0,focus.segment_id));}else if(refreshPending){refreshPending=false;act(()=>refresh());}}}
+  async function act(fn){if(busy)return;busy=true;try{await fn();}catch(e){notice(e.message);}finally{busy=false;if(pendingFocus){const focus=pendingFocus;pendingFocus=null;act(()=>focus.mode==='minutes'?openMinutes(focus.episode_id):read(focus.episode_id,0,0,focus.segment_id,focus.transcript_id));}else if(refreshPending){refreshPending=false;act(()=>refresh());}}}
   const stamp=ms=>{if(ms==null)return ui.unknown;const seconds=Math.floor(ms/1000);return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(n=>String(n).padStart(2,'0')).join(':');};
   const confirmDelete=async(kind,id)=>{if(!confirm(ui.confirmDelete))return;await request('delete',{kind,id,confirm:true});episode='';highlight='';readerVersion='';readerNeedsRetry=false;next=null;nextChar=0;notesNext=null;$('reader').replaceChildren();$('episode-actions').hidden=true;$('more').hidden=true;$('notes').replaceChildren();$('more-notes').hidden=true;await refresh();await notes(false);notice(ui.deletedBackup);};
   function updateMinutesStale(stale){
@@ -42,8 +42,8 @@
       if(viewMode==='minutes'&&episode){const latest=await request('minutes_document',{episode_id:episode});if(latest.available&&latest.id!==minutesId)await openMinutes(episode,latest);else updateMinutesStale(!latest.available||latest.stale);return;}
     }
     if(!append&&episode){
-      if(readerNeedsRetry)await read(episode,0,0,highlight);
-      else if(readerVersion){
+      if(readerNeedsRetry)await read(episode,0,0,highlight,readerTranscript);
+      else if(readerVersion&&!readerTranscript){
         const latest=await request('podcast_read',{episode_id:episode,max_chars:1});
         if(latest.segments[0]?.transcript_id!==readerVersion)await read(episode);
       }
@@ -51,7 +51,7 @@
   }
   function renderSegment(s,e){
     const block=node('div');block.className='item'+(highlight===s.id?' selected':'');block.id='segment-'+s.id;
-    if(s.episode_title){block.append(node('p',s.show_title+' · '+s.episode_title),button(ui.viewLibrary,()=>read(s.episode_id,0,0,s.id)));}
+    if(s.episode_title){block.append(node('p',s.show_title+' · '+s.episode_title),button(ui.viewLibrary,()=>read(s.episode_id,0,0,s.id,s.transcript_id)));}
     block.append(node('small',(s.speaker || ui.noSpeaker)+' · '+stamp(s.start_ms)));
     const quote=node('blockquote');
     const q=$('query').value,idx=q?s.text.toLowerCase().indexOf(q.toLowerCase()):-1;
@@ -65,14 +65,14 @@
       await request('note',{segment_id:s.id,quote:q,note});await notes();notice(ui.noteSaved);
     }));return block;
   }
-  async function read(eid,offset=0,charOffset=0,focusSegment=''){
-    if(offset===0&&charOffset===0){navigation++;viewMode='transcript';minutesId='';}
+  async function read(eid,offset=0,charOffset=0,focusSegment='',transcriptId=''){
+    if(offset===0&&charOffset===0){navigation++;viewMode='transcript';minutesId='';readerTranscript=transcriptId;}
     detailMode(false);$('reader').classList.remove('reading-empty');$('search').hidden=false;$('notes').hidden=false;$('export').hidden=false;
     if(episode!==eid || (offset===0&&charOffset===0)){highlight=focusSegment;readerVersion='';next=null;nextChar=0;$('more').hidden=true;$('reader').replaceChildren();notice('');}
-    const previousVersion=readerVersion;episode=eid;readerNeedsRetry=!readerVersion;$('episode-actions').hidden=false;const r=await request('podcast_read',{episode_id:eid,offset,char_offset:charOffset,...(highlight&&offset===0&&charOffset===0?{around_segment:highlight}:{})});const responseVersion=r.segments[0]?.transcript_id || '';if((offset!==0||charOffset!==0)&&previousVersion!==responseVersion){await read(eid);return;}readerNeedsRetry=false;readerVersion=responseVersion;episode=eid;$('episode-title').textContent=r.episode.title;$('episode-actions').hidden=false;
+    const previousVersion=readerVersion;episode=eid;readerNeedsRetry=!readerVersion;$('episode-actions').hidden=false;const r=await request('podcast_read',{episode_id:eid,offset,char_offset:charOffset,...(readerTranscript||readerVersion?{transcript_id:readerTranscript||readerVersion}:{}),...(highlight&&offset===0&&charOffset===0?{around_segment:highlight}:{})});const responseVersion=r.transcript_id || r.segments[0]?.transcript_id || '';if((offset!==0||charOffset!==0)&&previousVersion!==responseVersion){await read(eid,0,0,highlight,readerTranscript);return;}readerNeedsRetry=false;readerVersion=responseVersion;episode=eid;$('episode-title').textContent=r.episode.title;$('episode-actions').hidden=false;
     if(offset===0&&charOffset===0)$('reader').replaceChildren();for(const s of r.segments)$('reader').append(renderSegment(s,r.episode));next=r.next_offset;nextChar=r.next_char_offset || 0;$('more').hidden=next==null;
     if(highlight)document.getElementById('segment-'+highlight)?.scrollIntoView({block:'center'});
-    if(offset===0&&charOffset===0)await saveSelection({episode_id:eid,mode:'transcript',segment_id:focusSegment||undefined});
+    if(offset===0&&charOffset===0)await saveSelection({episode_id:eid,mode:'transcript',segment_id:focusSegment||undefined,...(readerTranscript?{transcript_id:readerTranscript}:{})});
   }
   async function openMinutes(eid,preloaded,restore){
     if(!eid)return;const token=++navigation;episode=eid;viewMode='minutes';notice(ui.minutesLoading);const r=preloaded||await request('minutes_document',{episode_id:eid});minutesId=r.id||'';
@@ -95,7 +95,7 @@
   channel.onmessage=event=>{const m=event.data;if(m.type==='response'||m.type==='pong'){const p=pending.get(m.reqId);if(!p)return;clearTimeout(p.timer);pending.delete(m.reqId);(m.type==='pong'||m.ok)?p.resolve(m.result):p.reject(new Error(m.message || ui.failed));}
     if(m.type==='changed'){if(busy)refreshPending=true;else act(()=>refresh());}
     if(m.type==='minutes-focus'){if(busy)pendingFocus={...m,mode:'minutes'};else act(()=>openMinutes(m.episode_id));}
-    if(m.type==='focus'){if(busy)pendingFocus=m;else act(()=>read(m.episode_id,0,0,m.segment_id));}
+    if(m.type==='focus'){if(busy)pendingFocus=m;else act(()=>read(m.episode_id,0,0,m.segment_id,m.transcript_id));}
   };
   addEventListener('podcast-ui-ready',()=>{ui=PodcastUI;
     $('import').onsubmit=e=>{e.preventDefault();act(async()=>{const r=await request('import_link',{url:$('url').value});notice(r.message || ui.openTask);});};
@@ -105,6 +105,6 @@
     $('cloud').onclick=()=>act(async()=>{const r=await request('cloud',{episode_id:episode});notice(r.message || ui.openTask);});
     $('file').onchange=()=>act(async()=>{const file=$('file').files[0];if(!file)return;if(file.size>5*1024*1024)throw new Error(ui.fileTooLarge);await request('podcast_import_transcript',{episode_id:episode,format:file.name.split('.').at(-1).toLowerCase(),content:await file.text()});$('file').value='';highlight='';await read(episode);});
     $('more-notes').onclick=()=>act(()=>notes(true));$('more').onclick=()=>act(()=>read(episode,next,nextChar));$('export').onclick=()=>act(async()=>{const ids=Array.from($('notes').querySelectorAll('input:checked')).map(e=>e.value);if(!ids.length){notice(ui.selectNotes);return;}const r=await request('export_notes',{ids});notice(r.cancelled?ui.cancelled:ui.exported);});
-    act(async()=>{const r=await fetch('/wake');if(!r.ok)throw new Error(ui.failed);await connect();await refresh();await notes();const cfg=await (await fetch('/kv')).json();if(cfg.selected){try{if(cfg.selected.mode==='minutes')await openMinutes(cfg.selected.episode_id,undefined,cfg.selected);else await read(cfg.selected.episode_id,0,0,cfg.selected.segment_id);}catch(e){notice(e.message);}}request('resume').catch(e=>notice(e.message));});
+    act(async()=>{const r=await fetch('/wake');if(!r.ok)throw new Error(ui.failed);await connect();await refresh();await notes();const cfg=await (await fetch('/kv')).json();if(cfg.selected){try{if(cfg.selected.mode==='minutes')await openMinutes(cfg.selected.episode_id,undefined,cfg.selected);else await read(cfg.selected.episode_id,0,0,cfg.selected.segment_id,cfg.selected.transcript_id);}catch(e){notice(e.message);}}request('resume').catch(e=>notice(e.message));});
   });
 })();

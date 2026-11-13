@@ -1,4 +1,4 @@
-# Automatic reading notes (0.4.13)
+# Automatic reading notes (0.4.14)
 
 From an episode with an existing transcript, open **Reading notes → Generate**.
 The plugin starts a Cindy task which calls `podcast_minutes` to organize the
@@ -52,3 +52,5 @@ Chapter ranges merge overlapping evidence spans, including decisions and quotati
 Model citation excerpts are capped at600 UTF-16 code units. Long passages are split for citation selection only, preferring pauses/word boundaries and preserving surrogate pairs. Prompt and evidence extraction use the same excerpt mapping to original segment IDs; semantic reading paragraphs, raw text and source timing are unchanged.
 
 Full-transcript search uses the same Chinese spacing cleanup as the reading view across artificial storage cuts, retaining the original block mapping. Stored text and source time ranges remain unchanged.
+
+Citation cards keep the cited transcript version when opening the Library, restoring the saved selection and loading more text. Existing cards resolve their source version from the stored segment. Opening an episode normally still uses the active transcript. Full-transcript search matches source text only; speaker labels and other interface text do not count as matches.

@@ -168,17 +168,18 @@ test('chapter ranges include interleaved point decision and quotation evidence',
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function runtimeHarness(h,missingCapability,failUi=false){
-  let listener,channel;const messages=[],waiters=new Map(),timers=[];
+  let listener,channel,config={};const messages=[],waiters=new Map(),timers=[];
   const ui=JSON.parse(fs.readFileSync(new URL('../podcast-insights/ui/en.json',import.meta.url),'utf8'));
   const ctx={PodcastCore:C,PodcastService:missingCapability?Service:class{constructor(){return h.service;}},crypto:globalThis.crypto,Date,
-    fetch:async()=>{if(failUi)throw new Error('Synthetic UI load failure');return {ok:true,json:async()=>ui};},
+    fetch:async(path,options)=>{if(failUi)throw new Error('Synthetic UI load failure');if(path==='/kv'){if(options?.method==='PUT')config=JSON.parse(options.body);return {ok:true,json:async()=>config};}return {ok:true,json:async()=>ui};},
     BroadcastChannel:class{constructor(){channel=this;}postMessage(m){messages.push(m);if(m.type==='response')waiters.get(m.reqId)?.resolve(m);}},
     setInterval:()=>0,clearInterval(){},setTimeout:(f,ms)=>{timers.push({f,ms});return timers.length;},
-    cindy:{tasks:h.tasks,library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);}},
+    cindy:{tasks:h.tasks,library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);if(m.type==='card-update')waiters.get('action:'+m.callId)?.resolve(m);}},
   };
   if(missingCapability)delete ctx.cindy[missingCapability];
   vm.runInNewContext(fs.readFileSync(new URL('../podcast-insights/runtime.js',import.meta.url),'utf8'),ctx);
-  return {messages,timers,
+  return {messages,timers,get config(){return config;},
+    action:actionId=>{const done=deferred();waiters.set('action:focus-click',done);listener({type:'event',name:'card-action',actionId,spawnCallId:'focus-click'});return done.promise;},
     call:(tool,args,callId)=>{const done=deferred();waiters.set(callId,done);listener({type:'tool-call',tool,args,callId});return done.promise;},
     request:(tool,args,reqId)=>{const done=deferred();waiters.set(reqId,done);channel.onmessage({data:{type:'request',tool,args,reqId}});return done.promise;},
   };
@@ -1394,4 +1395,72 @@ test('reading and export search clean Chinese spacing across storage boundaries'
     exercise(R.bind);const script=exports[0].content.match(/<script>([\s\S]*)<\/script>/)[1];exercise(container=>vm.runInNewContext(script,{document:container}));
     assert.equal(JSON.parse(exports[1].content).segments.map(s=>s.text).join(''),source);
   }finally{h.close();}
+});
+
+// #330 remaining P2: real runtime card actions and view.js selection restoration,
+// refresh and character pagination previously dropped the cited source version.
+// Minimal case: old long paragraph, replacement, then click the old citation.
+function transcriptView(h,config){
+  const elements=new Map(),reads=[],saved=[];let ready,channel;
+  function element(){return {children:[],hidden:false,value:'',textContent:'',classList:{contains:()=>false,toggle(){},remove(){}},append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},querySelectorAll:()=>[],scrollIntoView(){}};}
+  const get=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);};
+  const ui=JSON.parse(fs.readFileSync(new URL('../podcast-insights/ui/en.json',import.meta.url)));
+  const ctx={crypto:globalThis.crypto,PodcastUI:ui,HTMLButtonElement:class{},setTimeout,clearTimeout,setInterval,clearInterval,
+    document:{getElementById:get,body:element(),createElement:()=>element(),createTextNode:text=>({textContent:text}),querySelector:()=>element()},window:{scrollY:0,scrollTo(){}},
+    addEventListener:(_,fn)=>{ready=fn;},fetch:async(path,options)=>{if(options?.method==='PUT'){config=JSON.parse(options.body);saved.push(config.selected);}return {ok:true,json:async()=>config};},
+    BroadcastChannel:class{constructor(){channel=this;}postMessage(m){queueMicrotask(async()=>{
+      if(m.type==='ping'){this.onmessage({data:{type:'pong',reqId:m.reqId}});return;}
+      let result;
+      try{if(m.tool==='podcast_read'){reads.push(m.args);result=await h.service.run(m.tool,m.args);}
+      else if(m.tool==='podcast_library')result={shows:[],episodes:[],used_bytes:0,next_offset:null};
+      else if(m.tool==='minutes_index')result={minutes:[]};else if(m.tool==='notes')result={notes:[],next_offset:null};else result={};
+      this.onmessage({data:{type:'response',reqId:m.reqId,ok:true,result}});
+      }catch(e){this.onmessage({data:{type:'response',reqId:m.reqId,ok:false,message:e.message}});}
+    });}},
+  };
+  vm.runInNewContext(fs.readFileSync(new URL('../podcast-insights/view.js',import.meta.url),'utf8'),ctx);ready();
+  return {get,reads,saved,focus:m=>channel.onmessage({data:{type:'focus',...m}}),changed:()=>channel.onmessage({data:{type:'changed'}})};
+}
+async function flushView(){for(let i=0;i<30;i++)await new Promise(resolve=>setImmediate(resolve));}
+test('citation cards restore and continue the cited version across refresh and reopen',async()=>{
+  const h=harness();try{
+    const eid=await seed(h),source='Original evidence. '+'x'.repeat(11990)+' closing original.';
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:source});
+    const old=await h.service.run('podcast_read',{episode_id:eid}),tid=old.transcript_id,seg=old.segments[0].id;
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement evidence.'});
+    const runtime=runtimeHarness(h);await runtime.call('podcast_cite',{references:[{episode_id:eid,transcript_id:tid,quote:'Original evidence.'}]},'old-citation');
+    const html=runtime.messages.find(m=>m.type==='card-update').html,action=html.match(/data-ghost-action="([^"]+)"/)[1];
+    assert.equal(action,'focus:'+eid+':'+seg+':'+tid);
+    await runtime.action(action);assert.equal(runtime.config.selected.transcript_id,tid);
+    const focus=runtime.messages.find(m=>m.type==='focus');assert.equal(focus.transcript_id,tid);
+    // Saved selection loads on a newly opened page.
+    const view=transcriptView(h,runtime.config);await flushView();
+    assert.equal(view.reads[0].transcript_id,tid);assert.equal(view.get('notice').textContent,'');assert.equal(view.saved.at(-1).transcript_id,tid);
+    view.changed();await flushView();assert.ok(view.reads.every(a=>a.transcript_id===tid));
+    while(!view.get('more').hidden){view.get('more').onclick();await flushView();}
+    assert.ok(view.reads.some(a=>a.char_offset>0));assert.ok(view.reads.every(a=>a.transcript_id===tid));
+    const rendered=view.get('reader').children.flatMap(n=>n.children).filter(n=>n.textContent).map(n=>n.textContent).join('');assert.ok(rendered.includes('Original evidence.'));assert.ok(!rendered.includes('Replacement evidence.'));
+    const ordinary=transcriptView(h,{selected:{episode_id:eid}});await flushView();assert.equal(ordinary.reads[0].transcript_id,undefined);
+    ordinary.focus(focus);await flushView();assert.equal(ordinary.reads.at(-1).transcript_id,tid);assert.equal(ordinary.saved.at(-1).transcript_id,tid);
+    await runtime.action('focus:'+eid+':'+seg);assert.equal(runtime.config.selected.transcript_id,tid,'pre-update cards resolve the stored segment version');
+    const selected=JSON.stringify(runtime.config.selected);await runtime.action('focus:'+eid+':'+seg+':missing');assert.equal(JSON.stringify(runtime.config.selected),selected,'invalid version does not overwrite selection');
+  }finally{h.close();}
+});
+
+// #330 P2: transcript UI labels are not evidence. Exercise the real binder and
+// generated standalone script, with rendered segment text including those labels.
+test('reading and export search exclude interface labels but retain source matches',()=>{
+  const R=require('../podcast-insights/reading.js');
+  for(const language of ['en','zh-CN']){
+    const d={language,episode:{title:'Fixture',show_title:'Fixture'},created_at:'2026-11-13',overview:'Fixture',key_points:[],chapters:[],links:[],segments:[{id:'a',idx:0,text:'Actual evidence.',start_ms:0,end_ms:1,speaker:'A'},{id:'b',idx:1,text:'A transcript with speaker 原文 and 量 子.',start_ms:2,end_ms:3,speaker:'B'}]};
+    const markup=R.render(d),sections=[...markup.matchAll(/<section class="transcript-segment"[\s\S]*?<\/section>/g)].map(m=>m[0].replace(/<[^>]*>/g,''));
+    const script=R.documentHTML(d,'').match(/<script>([\s\S]*)<\/script>/)[1];
+    for(const bind of [c=>R.bind(c,d),c=>vm.runInNewContext(script,{document:c})]){
+      let input;const count={},nodes=sections.map(textContent=>({textContent,hidden:false}));
+      const container={querySelector:s=>s==='[data-transcript-search]'?{addEventListener:(_,fn)=>{input=fn;}}:s==='[data-match-count]'?count:null,querySelectorAll:s=>s==='[data-transcript-segment]'?nodes:[]};bind(container);
+      for(const value of ['speaker','transcript','原文','量子']){input({target:{value}});assert.deepEqual(nodes.map(n=>n.hidden),[true,false],language+': '+value);assert.match(count.textContent,/^1 /);}
+      for(const value of ['Show unchanged transcript','查看未整理原文']){input({target:{value}});assert.ok(nodes.every(n=>n.hidden));assert.match(count.textContent,/^0 /);}
+      input({target:{value:''}});assert.ok(nodes.every(n=>!n.hidden));
+    }
+  }
 });
