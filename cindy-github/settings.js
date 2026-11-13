@@ -17,6 +17,11 @@
  */
 var MESSAGES = {
   'zh-CN': {
+    prPreferences: 'PR 跟进偏好',
+    ciRetry: 'CI 无重跑权限时重推重试',
+    ciRetryHint: '默认关闭。本机当前插件用户的所有仓库和 PR 跟进共用，不同步到其他电脑。仅确认临时故障且正常重跑被权限拒绝时，可改写本任务独占分支的提交 SHA，并用 force-with-lease 重推，每个 PR 最多一次。可随时关闭；不授权合并或绕过门禁。',
+    prLoadFailed: '无法读取 PR 偏好，请重新打开设置后再试。',
+    prSaveFailed: '未能确认 PR 偏好已保存，请重新打开设置核对。',
     accountTitle: 'GitHub 账号',
     accountHint: '优先使用本机 GitHub 登录，也可以展开下方的其他连接方式。',
     otherMethods: '其他连接方式',
@@ -50,6 +55,11 @@ var MESSAGES = {
     clearFailed: '清除失败,请重试',
   },
   en: {
+    prPreferences: 'PR follow-up preferences',
+    ciRetry: 'Repush CI when rerun permission is denied',
+    ciRetryHint: 'Off by default. Shared by all repositories and PR follow-ups for this plugin user on this computer; not synced to other computers. Only for confirmed transient failures after a normal rerun is denied for permissions: rewrite the commit SHA on this task’s exclusive branch and repush with force-with-lease, at most once per PR. Turn off anytime; does not authorize merging or bypassing gates.',
+    prLoadFailed: 'Could not read PR preferences. Reopen settings and try again.',
+    prSaveFailed: 'Could not confirm PR preferences were saved. Reopen settings to check.',
     accountTitle: 'GitHub account',
     accountHint: "This computer's GitHub login is used first. You can also expand the other connection methods below.",
     otherMethods: 'Other connection methods',
@@ -83,6 +93,11 @@ var MESSAGES = {
     clearFailed: 'Clear failed. Try again.',
   },
   ja: {
+    prPreferences: 'PR フォローの設定',
+    ciRetry: 'CI の再実行権限がない場合に再プッシュ',
+    ciRetryHint: '初期状態はオフ。このコンピュータの現在のプラグインユーザーの全リポジトリ・PR フォローで共用し、他のコンピュータには同期しません。一時的な障害と通常の再実行の権限拒否を確認した場合のみ、このタスク専用ブランチのコミット SHA を書き換えて force-with-lease で再プッシュします。PR ごとに最大1回。いつでもオフにでき、マージやゲートの回避は許可しません。',
+    prLoadFailed: 'PR 設定を読み込めませんでした。設定を開き直して再試行してください。',
+    prSaveFailed: 'PR 設定の保存を確認できませんでした。設定を開き直して確認してください。',
     accountTitle: 'GitHub アカウント',
     accountHint: 'このコンピュータの GitHub ログインを優先して使います。下のほかの接続方法を開いて使うこともできます。',
     otherMethods: 'ほかの接続方法',
@@ -116,6 +131,11 @@ var MESSAGES = {
     clearFailed: '消去に失敗しました。再試行してください',
   },
   ko: {
+    prPreferences: 'PR 팔로우 설정',
+    ciRetry: 'CI 재실행 권한이 없으면 다시 푸시',
+    ciRetryHint: '기본값은 꺼짐입니다. 이 컴퓨터의 현재 플러그인 사용자의 모든 저장소와 PR 팔로우에 적용되며 다른 컴퓨터에는 동기화되지 않습니다. 일시적 장애와 정상 재실행의 권한 거부를 확인한 경우에만 이 작업의 전용 브랜치에서 커밋 SHA를 바꾸고 force-with-lease로 다시 푸시합니다. PR당 최대 1회이며 언제든 끌 수 있습니다. 병합이나 검증 우회는 허용하지 않습니다.',
+    prLoadFailed: 'PR 설정을 읽지 못했습니다. 설정을 다시 열고 시도하세요.',
+    prSaveFailed: 'PR 설정이 저장되었는지 확인하지 못했습니다. 설정을 다시 열어 확인하세요.',
     accountTitle: 'GitHub 계정',
     accountHint: '이 컴퓨터의 GitHub 로그인을 우선 사용합니다. 아래의 다른 연결 방법을 펼쳐 사용할 수도 있습니다.',
     otherMethods: '다른 연결 방법',
@@ -208,6 +228,48 @@ var MESSAGES = {
   }
 
   var statusTimer = null;
+
+  async function readPrKv() {
+    var response = await fetch('/kv');
+    if (!response.ok) throw new Error('kv read failed');
+    var kv = await response.json();
+    if (!kv || typeof kv !== 'object' || Array.isArray(kv)) throw new Error('invalid kv');
+    return kv;
+  }
+
+  async function loadPrPreferences() {
+    var control = $('ci-retry');
+    control.disabled = true;
+    try {
+      var kv = await readPrKv();
+      control.checked = !!kv.prCard && kv.prCard.ciRetryRepush === true;
+      $('pr-status').textContent = '';
+      control.disabled = false;
+    } catch (e) {
+      $('pr-status').textContent = t('prLoadFailed');
+    }
+  }
+
+  async function saveCiRetryPreference() {
+    var control = $('ci-retry');
+    var enabled = control.checked;
+    control.disabled = true;
+    try {
+      // /kv replaces the object: re-read at the click, and change only this preference.
+      var kv = await readPrKv();
+      kv.prCard = Object.assign({}, kv.prCard, { ciRetryRepush: enabled });
+      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
+      if (!response.ok) throw new Error('kv write failed');
+      // Acknowledgement alone is not a read-back of the persisted value.
+      var saved = await readPrKv();
+      if ((!!saved.prCard && saved.prCard.ciRetryRepush === true) !== enabled) throw new Error('kv verification failed');
+      $('pr-status').textContent = '';
+      control.disabled = false;
+    } catch (e) {
+      // An uncertain write must not be presented as an enabled or disabled saved setting.
+      $('pr-status').textContent = t('prSaveFailed');
+    }
+  }
   function showStatus(text, sticky) {
     $('status').textContent = text;
     if (statusTimer) clearTimeout(statusTimer);
@@ -388,6 +450,7 @@ var MESSAGES = {
   $('save').addEventListener('click', function () { void save(); });
   $('test').addEventListener('click', function () { void test(); });
   $('clear').addEventListener('click', function () { void clearToken(); });
+  $('ci-retry').addEventListener('change', function () { void saveCiRetryPreference(); });
   $('token').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); void save(); }
   });
@@ -396,5 +459,6 @@ var MESSAGES = {
   void loadLocale().then(function renderLocalized() {
     applyStaticCopy();
     void load();
+    void loadPrPreferences();
   });
 })();

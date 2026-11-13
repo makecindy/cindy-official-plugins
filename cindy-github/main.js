@@ -165,6 +165,8 @@ var MESSAGES = {
     prAutoRenameHint: '任务标题改成 #编号 简短主题',
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
+    prCiRetry: 'CI 无重跑权限时重推重试',
+    prCiRetryHint: '默认关闭。本机所有 PR 跟进共用；仅确认临时故障且重跑被权限拒绝时，可改写独占分支的提交 SHA 并受限重推，每个 PR 最多一次。可随时关闭，不授权合并',
     prAutoArchive: '合并后自动归档',
     prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
     prArchiveTask: '归档任务',
@@ -304,6 +306,8 @@ var MESSAGES = {
     prAutoRenameHint: 'Retitle the task as #number short topic',
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
+    prCiRetry: 'Repush CI when rerun permission is denied',
+    prCiRetryHint: 'Off by default. Applies to all PR follow-ups on this computer. Only for confirmed transient failures and permission-denied reruns: rewrite the commit SHA on an exclusive branch and repush, at most once per PR. Turn off anytime; does not authorize merging',
     prAutoArchive: 'Archive after merge',
     prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
     prArchiveTask: 'Archive task',
@@ -443,6 +447,8 @@ var MESSAGES = {
     prAutoRenameHint: 'タスク名を「#番号 短いテーマ」に変更します',
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
+    prCiRetry: 'CI の再実行権限がない場合に再プッシュ',
+    prCiRetryHint: '初期状態はオフ。このコンピュータの全 PR フォローで共用します。一時的な障害と再実行の権限拒否を確認した場合のみ、専用ブランチのコミット SHA を書き換えて再プッシュします。PR ごとに最大1回。いつでもオフにでき、マージは許可しません',
     prAutoArchive: 'マージ後に自動でアーカイブ',
     prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
     prArchiveTask: 'タスクをアーカイブ',
@@ -582,6 +588,8 @@ var MESSAGES = {
     prAutoRenameHint: '작업 제목을 #번호 짧은 주제로 바꿉니다',
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
+    prCiRetry: 'CI 재실행 권한이 없으면 다시 푸시',
+    prCiRetryHint: '기본값은 꺼짐입니다. 이 컴퓨터의 모든 PR 팔로우에 적용됩니다. 일시적 장애와 재실행 권한 거부를 확인한 경우에만 전용 브랜치의 커밋 SHA를 바꾸고 다시 푸시합니다. PR당 최대 1회이며 언제든 끌 수 있습니다. 병합은 허용하지 않습니다',
     prAutoArchive: '병합 후 자동 보관',
     prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
     prArchiveTask: '작업 보관',
@@ -2673,13 +2681,15 @@ function prSettingsFrom(kv) {
   // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
   return {
     autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, autoArchive: s.autoArchive === true,
+    ciRetryRepush: s.ciRetryRepush === true,
     followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
   };
 }
 
 /** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
 function prSettingsForAgent(settings, autoFollow) {
-  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  if (settings.unreadable) return { unreadable: true };
+  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow, ci_retry_repush: settings.ciRetryRepush };
   var m = settings.followModel;
   if (m) {
     out.follow_model = {
@@ -2704,7 +2714,13 @@ async function writePrSettings(change) {
   var kv = await readKv();
   var next = prSettingsFrom(kv);
   change(next);
-  kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
+  kv.prCard = Object.assign({}, kv.prCard, { autoRename: next.autoRename, autoFollow: next.autoFollow });
+  // Preserve unknown preferences; explicitly remove the optional values that were turned off.
+  delete kv.prCard.autoArchive;
+  delete kv.prCard.followModel;
+  delete kv.prCard.lastFollowModel;
+  delete kv.prCard.ciRetryRepush;
+  if (next.ciRetryRepush) kv.prCard.ciRetryRepush = true;
   if (next.autoArchive) kv.prCard.autoArchive = true;
   if (next.followModel) kv.prCard.followModel = next.followModel;
   if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
@@ -3149,6 +3165,7 @@ function prSettingsPanel(settings) {
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prSettingRow('prset:ciRetry', t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
     '</div>';
@@ -3265,7 +3282,7 @@ function renderPrCard(card, settings) {
 function prCardHeight(card) {
   var h = 120;
   if (card.note) h += 22;
-  if (card.settingsOpen && prHasSettings(card)) h += 160;
+  if (card.settingsOpen && prHasSettings(card)) h += 400;
   return Math.min(900, h);
 }
 
@@ -3496,6 +3513,7 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action !== 'pr:open-task') event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
   if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
@@ -3506,7 +3524,6 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   } else {
     event.head = card.head;
     if (card.base) event.base = card.base;
-    event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
   }
   var r;
   try {
@@ -3656,9 +3673,9 @@ async function prCardAction(msg) {
   var handedOff = false;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
-  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
+  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive' || action === 'prset:ciRetry') {
     try {
-      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
+      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : action === 'prset:ciRetry' ? 'ciRetryRepush' : 'autoArchive');
     } catch (e) {
       card.note = t('prSettingFailed');
     }
