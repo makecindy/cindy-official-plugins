@@ -62,8 +62,9 @@ data-root environment, delete receipts or reset budgets to obtain another try.
 Earlier evidence already deleted before migration cannot be reconstructed;
 an uncertain prior outcome still stops recovery.
 
-There is no PR-wide retry cap. Each distinct diagnosed failure on a PR may have
-one CI-only repush. Before checking/reserving its budget, write a diagnosis JSON
+Each PR has a hard total of **two CI-only repush attempts per computer**, with
+at most one per diagnosed failure. At two, stop and report regardless of a new
+diagnosis; do not amend, push or reset the budget. Before checking/reserving its budget, write a diagnosis JSON
 file with exactly four nonempty strings: `workflow` (workflow file path), `job`
 (stable job name, not numeric job ID), `step` (failed step name), and `cause`
 (normalized root cause supported by the logs). For example:
@@ -106,28 +107,38 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    If anything differs, stop and reconcile safely; do not fetch/reset away an
    unknown remote commit. Record the verified remote SHA as the fixed lease.
 3. Read live `pr_follow_settings` again. If still enabled and all conditions
-   hold, consume the **single CI-only repush attempt for this diagnosed failure
-   on this PR/computer**:
+   hold, consume one of the **two total CI-only repush attempts for this PR/computer**,
+   requiring that this diagnosed failure has not consumed one already:
 
    ```sh
    node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json
    ```
 
    Require exit 0, `reason: "ci-retry-reserved"` and the matching
-   `reservation.sourceHead` and normalized `reservation.failure`. This receipt
+   `reservation.sourceHead` and normalized `reservation.failure`. The return
+   includes `pr_limit: 2`, `pr_consumed` and `pr_remaining`. A status result with
+   `available: false` forbids a new reservation, including exhaustion by different
+   diagnoses; a successful reserve reports the consumed receipt, not a new available
+   attempt. This receipt
    only consumes budget; it does not authorize Git operations.
    `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without GitHub calls;
-   it only writes when adopting existing cache evidence into durable storage.
+   it only writes when adopting earlier receipts into the fixed durable slots.
    The budget survives cache cleanup, changed SHAs, gate acknowledgements,
    follow-up restarts, repository renames/transfers and interrupted operations.
-   The sentinel is keyed by the immutable PR node ID and stable diagnosis,
-   never the mutable URL, head SHA or run ID.
+   Two exclusive, append-only slot files are keyed by the immutable PR node ID;
+   each records the stable diagnosis, never a mutable URL or run ID as identity.
+   Concurrent callers cannot allocate a third slot or reserve the same fault twice.
    A denied, corrupt or uncertain
    reservation means stop: no amend/push. Even a failed push consumes the attempt.
-   A different diagnosed failure can have its own attempt without deleting any
-   prior receipt; the same failure cannot start an amend/force-push loop by
+   A different diagnosed failure can consume the second slot without deleting any
+   prior receipt; after two total attempts all diagnoses stop. The same failure cannot start an amend/force-push loop by
    changing job/run IDs or head SHA. Earlier development receipts lacking a
    diagnosis stop recovery for reconciliation; do not silently discard them.
+   All matching old per-failure receipts in durable data and the current cache
+   count toward the two slots, even when querying another diagnosis. Migration
+   retains the originals and never overwrites durable evidence. More than two
+   older attempts, unreadable receipts or unknown prior identity/outcome stop
+   recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck the PR is open, the preference is enabled, and local/index/remote
    facts still match before `git commit --amend --no-edit`. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use

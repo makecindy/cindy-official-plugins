@@ -118,17 +118,48 @@ or rejected response, and unavailable read-back. These are simulated-host
 regressions, not real Cindy fault injection. The actual unknown-state UI on
 desktop/mobile remains unverified; normal known-state copy/layout is unchanged.
 
+## Fixed total invariant — 1.5.19
+
+At most two successful CI-only reservations per immutable PR ID on this computer,
+and at most one per stable diagnosis. The gate owns two exclusive durable slots;
+it writes each once, never expires, refunds or clears it. This replaces new
+per-diagnosis receipt allocation; it adds no lock, scheduler or Git retry.
+All new and migrated reservations share the same slot allocator and validator.
+
+| Event / prior history | Expected outcome |
+| --- | --- |
+| First / second distinct fault | Consume one remaining slot before Git; return its head/diagnosis |
+| Third distinct fault | Reject, stop and report regardless of diagnosis |
+| Same fault, changed SHA or URL | Reject without consuming another slot |
+| Concurrent same / distinct faults | One success per fault; no more than two total successes |
+| Earlier cache/durable per-failure receipts | Count all current-PR diagnoses toward two; never overwrite originals |
+| More than two older attempts, corrupt/partial/unknown evidence | Fail closed; no reset or new attempt |
+| Crash, failed push, cache cleanup or restart | Consumed slots persist; status permits read-back only |
+
+Three new/expanded CLI regressions first failed against 754f1fe. The focused
+suite then passed 13 tests, including old receipt migration and concurrent real
+Node processes. This is isolated local budget/Git evidence, not the missing
+real GitHub permission-denied recovery acceptance. No 1.5.19 live install or
+real preference change was performed.
+The four required repository suites plus the plugin suite passed together:
+310 passed, 19 skipped, 0 failed in 106.5 seconds (same Windows/Node environment).
+The final focused CLI suite passed 13 tests in 5.1 seconds after the status/help
+wording update; the Git fixtures remain local, not GitHub recovery evidence.
+
 ## Remaining prerequisites
 
 - Actual phone display. The deleted settings-page preference handshake no
   longer requires cold-start acceptance; it is absent, not claimed tested.
-- Disabled preference observed in an actual scheduled follow-up round.
+- The disabled-preference scheduled observation was recorded at 2026-11-13
+  13:21:38 UTC in [this reply](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6854235302).
+  It is historical, not current rewrite authorization or a full recovery test.
 - A real eligible permission-denied rerun through signed/unsigned recovery,
   exact leased push, original PR head read-back and actual CI triggering.
 - The maintainers' explicit decision on the branch-rewrite scope, now one
-  attempt per diagnosed failure with no PR-wide cap. The
+  attempt per diagnosed failure and two total per PR/computer. The
   [maintainer's original comment](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6850756870)
-  promises a later decision; it is not approval.
+  promises a later decision; it is not approval. The [later decision](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6857743258)
+  requires a fixed total cap before another full review, not final approval.
 
 Local fixtures/generated previews do not replace these prerequisites. Fork CI
 approval remains a maintainer action. No merge, publishing, permission changes

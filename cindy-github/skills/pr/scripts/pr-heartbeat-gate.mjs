@@ -53,7 +53,7 @@
  *   --resume <reason>          已处理或推送：确认本轮并清除等待，继续观察。
  *   --last-result              只读输出最近一轮普通 gate 的 run/skip/block、reason、detail 与
  *                              事件清单(零 API、不改状态)。
- *   --ci-retry-status          读取本机该 PR 同一故障的一次性 CI 重推额度(不授权 Git 操作)。
+ *   --ci-retry-status          读取本机每 PR 总共两次、同一故障一次的 CI 重推额度(不授权 Git 操作)。
  *   --reserve-ci-retry <SHA>   在 Git 操作前消费额度；独立于 head/心跳状态，崩溃也不返还。
  *   --ci-retry-id <PR node ID> 两项额度操作必填；使用从当前 PR 读取的不可变 node_id。
  *   --ci-retry-failure <file>  两项额度操作必填；稳定诊断 JSON（workflow/job/step/cause）。
@@ -590,26 +590,85 @@ export function ciRetryDataDir(env = process.env) {
   return path.join(base, 'Cindy', 'pr-recovery');
 }
 
-function adoptCiRetryEvidence(stateDir, retryDir, prNodeId, failure) {
-  for (const diagnosis of [undefined, failure]) {
-    const source = ciRetryFilePath(stateDir, prNodeId, diagnosis);
-    const target = ciRetryFilePath(retryDir, prNodeId, diagnosis);
-    try { fs.statSync(source); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    fs.mkdirSync(retryDir, { recursive: true });
-    // Keep the old evidence too. Exclusive copying cannot overwrite a newer receipt.
-    try { fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL); }
-    catch (error) { if (error.code !== 'EEXIST') throw error; }
-  }
-}
-
-function readCiRetryFailure(file) {
-  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+function normalizeCiRetryFailure(value) {
   const keys = ['workflow', 'job', 'step', 'cause'];
   if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length ||
       keys.some(key => typeof value[key] !== 'string' || !value[key].trim() || value[key].length > 1000)) {
     throw new Error('CI retry diagnosis requires only workflow, job, step and cause strings; exclude SHA/run/job IDs, attempts and timestamps');
   }
   return Object.fromEntries(keys.map(key => [key, value[key].trim().replace(/\s+/g, ' ').toLowerCase()]));
+}
+
+function readCiRetryFailure(file) {
+  return normalizeCiRetryFailure(JSON.parse(fs.readFileSync(file, 'utf8')));
+}
+
+const CI_RETRY_PR_LIMIT = 2;
+
+function ciRetrySlots(retryDir, prNodeId) {
+  const prefix = ciRetryFilePath(retryDir, prNodeId);
+  return Array.from({ length: CI_RETRY_PR_LIMIT }, (_, i) => `${prefix}-${i + 1}.slot`);
+}
+
+function validateCiRetryReservation(value, prNodeId) {
+  if (value?.prNodeId !== prNodeId || !/^[a-f0-9]{40}$/.test(value?.sourceHead ?? '') || !Number.isFinite(value?.reservedAt) ||
+      JSON.stringify(normalizeCiRetryFailure(value.failure)) !== JSON.stringify(value.failure)) throw new Error('invalid CI retry reservation');
+  return value;
+}
+
+function readCiRetrySlots(retryDir, prNodeId) {
+  return ciRetrySlots(retryDir, prNodeId).map(file => {
+    try { return validateCiRetryReservation(JSON.parse(fs.readFileSync(file, 'utf8')), prNodeId); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  });
+}
+
+function claimCiRetrySlot(retryDir, reservation) {
+  const files = ciRetrySlots(retryDir, reservation.prNodeId);
+  // Every collision consumes an existing fixed slot; no lock, refund or unbounded retry.
+  for (let attempt = 0; attempt <= CI_RETRY_PR_LIMIT; attempt++) {
+    const slots = readCiRetrySlots(retryDir, reservation.prNodeId);
+    const existing = slots.find(value => value && JSON.stringify(value.failure) === JSON.stringify(reservation.failure));
+    if (existing) return { created: false, reservation: existing };
+    const index = slots.indexOf(null);
+    if (index < 0) throw new Error('CI repush PR total limit of 2 consumed; stop and report, do not amend or push again');
+    fs.mkdirSync(retryDir, { recursive: true });
+    try {
+      fs.writeFileSync(files[index], JSON.stringify(reservation), { flag: 'wx', mode: 0o600 });
+      return { created: true, reservation };
+    } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
+  throw new Error('CI retry evidence changed concurrently; stop and verify, do not repeat the operation');
+}
+
+function legacyCiRetryEvidence(dir, prNodeId) {
+  let names;
+  try { names = fs.readdirSync(dir); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  // Earlier per-failure filenames hide the PR ID. Inspect all old receipts so a
+  // different diagnosis cannot hide previous consumption; unreadable data stops.
+  return names.filter(name => /^ci-retry-[a-f0-9]{64}\.ci-retry$/.test(name)).sort().flatMap(name => {
+    const file = path.join(dir, name);
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!/^PR_[A-Za-z0-9_+/=-]{6,200}$/.test(value?.prNodeId ?? '')) throw new Error('invalid legacy CI retry identity');
+    if (file !== ciRetryFilePath(dir, value.prNodeId, value.failure)) throw new Error('invalid legacy CI retry identity');
+    if (value?.prNodeId !== prNodeId) return [];
+    if (!value.failure) throw new Error('Legacy CI retry evidence has no diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
+    validateCiRetryReservation(value, prNodeId);
+    return [{ file, value }];
+  });
+}
+
+function adoptCiRetryEvidence(stateDir, retryDir, prNodeId) {
+  for (const { file, value } of legacyCiRetryEvidence(stateDir, prNodeId)) {
+    const target = ciRetryFilePath(retryDir, prNodeId, value.failure);
+    fs.mkdirSync(retryDir, { recursive: true });
+    try { fs.copyFileSync(file, target, fs.constants.COPYFILE_EXCL); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
+  // Existing durable evidence wins over a stale cache copy. Migration uses the
+  // same exclusive slots as new reservations, and never overwrites or deletes.
+  for (const { value } of legacyCiRetryEvidence(retryDir, prNodeId)) claimCiRetrySlot(retryDir, value);
 }
 
 function readState(file) {
@@ -1470,7 +1529,7 @@ async function gateMain(argv, ctx) {
 
   // Same diagnosed failure on the same PR, across all heads and follow-up restarts.
   // Exclusive creation prevents two callers from both consuming its one attempt.
-  // A distinct diagnosis may have its own attempt; there is no PR-wide cap.
+  // Distinct diagnoses share two fixed exclusive slots for the immutable PR ID.
   // Keep receipts in durable user data, independently of observation cache.
   // Never refund or prune this sentinel with the
   // observation/trace state: an interrupted push may already have reached GitHub.
@@ -1480,35 +1539,24 @@ async function gateMain(argv, ctx) {
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
     const failure = readCiRetryFailure(args.ciRetryFailure);
-    adoptCiRetryEvidence(args.stateDir, args.ciRetryDir, args.ciRetryId, failure);
-    // Earlier development builds recorded only the PR identity, so their fault is
-    // unknown. Do not silently discard a possibly executed rewrite during upgrade.
-    if (fs.existsSync(ciRetryFilePath(args.ciRetryDir, args.ciRetryId))) {
-      throw new Error('Legacy CI retry evidence has no diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
-    }
-    const retryFile = ciRetryFilePath(args.ciRetryDir, args.ciRetryId, failure);
+    adoptCiRetryEvidence(args.stateDir, args.ciRetryDir, args.ciRetryId);
     if (args.reserveCiRetry) {
-      fs.mkdirSync(path.dirname(retryFile), { recursive: true });
-      try {
-        fs.writeFileSync(retryFile, JSON.stringify({ prNodeId: args.ciRetryId, failure, sourceHead: args.reserveCiRetry, reservedAt: now }), { flag: 'wx', mode: 0o600 });
-      } catch (error) {
-        if (error.code === 'EEXIST') throw new Error('CI repush budget already consumed for this failure on this PR; verify the previous outcome, do not amend or push again');
-        throw error;
-      }
+      const claim = claimCiRetrySlot(args.ciRetryDir, { prNodeId: args.ciRetryId, failure, sourceHead: args.reserveCiRetry, reservedAt: now });
+      if (!claim.created) throw new Error('CI repush budget already consumed for this failure on this PR; verify the previous outcome, do not amend or push again');
     }
     // Malformed or unreadable evidence fails closed. Never reinterpret it as unused.
-    let reservation = null;
-    try {
-      reservation = JSON.parse(fs.readFileSync(retryFile, 'utf8'));
-      if (reservation?.prNodeId !== args.ciRetryId || JSON.stringify(reservation?.failure) !== JSON.stringify(failure) || !/^[a-f0-9]{40}$/.test(reservation?.sourceHead ?? '') || !Number.isFinite(reservation?.reservedAt)) throw new Error('invalid CI retry reservation');
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
+    const slots = readCiRetrySlots(args.ciRetryDir, args.ciRetryId);
+    const reservation = slots.find(value => value && JSON.stringify(value.failure) === JSON.stringify(failure)) ?? null;
+    const consumed = slots.filter(Boolean).length;
     emit(args, {
       exitCode: EXIT_PASS, repo: args.repo, number: args.number,
       reason: args.reserveCiRetry ? 'ci-retry-reserved' : 'ci-retry-status',
-      detail: 'Budget only, not authorization. Read live pr_follow_settings and follow references/ci-retry.md before Git writes.',
-      available: reservation === null, reservation, reservation_only: true,
+      detail: !args.reserveCiRetry && consumed === CI_RETRY_PR_LIMIT
+        ? 'PR total limit of 2 consumed. Stop and report; no new amend or push regardless of diagnosis. Verify any previous outcome.'
+        : 'Budget only, not authorization. Read live pr_follow_settings and follow references/ci-retry.md before Git writes.',
+      available: reservation === null && consumed < CI_RETRY_PR_LIMIT,
+      pr_limit: CI_RETRY_PR_LIMIT, pr_consumed: consumed, pr_remaining: CI_RETRY_PR_LIMIT - consumed,
+      reservation, reservation_only: true,
     }, out);
     return EXIT_PASS;
   }

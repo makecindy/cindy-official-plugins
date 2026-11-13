@@ -48,6 +48,7 @@ test('same failure budget survives changed SHAs, observation resets, casing and 
   const fx = fixture(t);
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
   assert.equal(fs.existsSync(fx.stateDir), false, 'status is read-only');
+  assert.equal(fs.existsSync(fx.retryDir), false, 'unused status creates no receipt or directory');
   const first = await fx.run(['--reserve-ci-retry', oldHead]);
   assert.equal(first.code, 0);
   assert.equal(first.result.reason, 'ci-retry-reserved');
@@ -68,7 +69,7 @@ test('same failure budget survives changed SHAs, observation resets, casing and 
   assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId, failure), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId', failure));
 });
 
-test('distinct verified failures on one PR can retry without resetting previous failure evidence', async t => {
+test('two distinct failures consume the PR total and a third stops regardless of diagnosis', async t => {
   const fx = fixture(t);
   assert.equal((await fx.process(['--reserve-ci-retry', oldHead])).code, 0);
   fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'runner network unavailable' }));
@@ -80,6 +81,69 @@ test('distinct verified failures on one PR can retry without resetting previous 
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, false);
   assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 1);
   assert.equal((await fx.run(['--ci-retry-status'])).result.reservation.sourceHead, oldHead);
+  fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'runner disk unavailable' }));
+  const exhausted = await fx.run(['--ci-retry-status']);
+  assert.equal(exhausted.result.available, false);
+  assert.equal(exhausted.result.pr_limit, 2);
+  assert.equal(exhausted.result.pr_consumed, 2);
+  assert.equal(exhausted.result.pr_remaining, 0);
+  const third = await fx.process(['--reserve-ci-retry', newHead]);
+  assert.equal(third.code, 1);
+  assert.match(third.stderr, /PR total.*2/);
+  assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/new-owner/transferred/pull/42')).result.available, false);
+});
+
+test('concurrent distinct failures cannot exceed two total reservations across processes', async t => {
+  const fx = fixture(t);
+  const results = await Promise.all(Array.from({ length: 6 }, (_, i) => {
+    const diagnosis = path.join(fx.root, `fault-${i}.json`);
+    fs.writeFileSync(diagnosis, JSON.stringify({ ...failure, cause: `isolated fixture fault ${i}` }));
+    return fx.process(['--ci-retry-failure', diagnosis, '--reserve-ci-retry', oldHead]);
+  }));
+  assert.equal(results.filter(r => r.code === 0).length, 2);
+  assert.equal((await fx.run(['--ci-retry-status'])).result.available, false);
+});
+
+test('earlier different-failure receipts count toward the total even when querying a new failure', async t => {
+  const fx = fixture(t);
+  fs.mkdirSync(fx.stateDir, { recursive: true });
+  fs.mkdirSync(fx.retryDir, { recursive: true });
+  for (const [dir, cause] of [[fx.stateDir, 'old cache fault'], [fx.retryDir, 'old durable fault']]) {
+    const diagnosed = { ...failure, cause };
+    fs.writeFileSync(ciRetryFilePath(dir, prNodeId, diagnosed), JSON.stringify({ prNodeId, failure: diagnosed, sourceHead: oldHead, reservedAt: 123 }));
+  }
+  const migrated = await fx.run(['--ci-retry-status']);
+  assert.equal(migrated.result.available, false);
+  assert.equal(migrated.result.pr_consumed, 2);
+  assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 1);
+  fs.rmSync(fx.stateDir, { recursive: true });
+  assert.equal((await fx.process(['--state-dir', path.join(fx.root, 'new-cache'), '--reserve-ci-retry', newHead])).code, 1);
+});
+
+test('one old receipt leaves only one slot; over-limit legacy history and damaged slots stop recovery', async t => {
+  const fx = fixture(t);
+  fs.mkdirSync(fx.retryDir, { recursive: true });
+  const old = { ...failure, cause: 'old distinct fault' };
+  fs.writeFileSync(ciRetryFilePath(fx.retryDir, prNodeId, old), JSON.stringify({ prNodeId, failure: old, sourceHead: oldHead, reservedAt: 123 }));
+  assert.equal((await fx.run(['--ci-retry-status'])).result.pr_remaining, 1);
+  assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 0);
+  const slot = fs.readdirSync(fx.retryDir).find(name => name.endsWith('.slot'));
+  fs.writeFileSync(path.join(fx.retryDir, slot), '{');
+  assert.equal((await fx.run(['--ci-retry-status'])).code, 1, 'partial write/crash cannot restore a slot');
+});
+
+test('legacy history beyond two fails closed and another PR has its own total', async t => {
+  const fx = fixture(t);
+  fs.mkdirSync(fx.retryDir, { recursive: true });
+  for (let i = 0; i < 3; i++) {
+    const old = { ...failure, cause: `old fault ${i}` };
+    fs.writeFileSync(ciRetryFilePath(fx.retryDir, prNodeId, old), JSON.stringify({ prNodeId, failure: old, sourceHead: oldHead, reservedAt: 123 }));
+  }
+  const stopped = await fx.run(['--reserve-ci-retry', newHead]);
+  assert.equal(stopped.code, 1);
+  assert.match(stopped.stderr, /PR total.*2/);
+  const other = await fx.process(['--ci-retry-id', 'PR_otherImmutableId', '--reserve-ci-retry', oldHead]);
+  assert.equal(other.code, 0, 'separate immutable PR IDs have separate totals');
 });
 
 test('missing, invalid and legacy diagnosis evidence cannot start a new retry', async t => {

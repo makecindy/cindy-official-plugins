@@ -50,24 +50,27 @@ remote commit ends the attempt; the Agent must not update the lease and blindly
 push again. It checks the new SHA on the original PR and whether CI actually
 started; triggering is not passing.
 
-There is no PR-wide cap: **the same diagnosed failure on a PR may have one
-CI-only repush per computer**. Before any amend, the existing gate exclusively
-creates a durable `.ci-retry` receipt keyed by the immutable PR `node_id` and stable
-diagnosis (workflow file, job name, failed step and normalized root cause).
+**At most two CI-only repush attempts per PR/computer, and at most one per
+diagnosed failure.** At the total limit, stop and report even for another fault.
+Before any amend, the existing gate exclusively creates one of two fixed durable
+slot receipts keyed by the immutable PR `node_id`, recording the stable diagnosis
+(workflow file, job name, failed step and normalized root cause).
 Both budget commands require the verified ID and
 `--ci-retry-failure <diagnosis.json>`. Exclude SHA, run/job IDs, attempts,
 timestamps and transient paths. Head changes, restarts, renames/transfers,
 observation resets and interrupted operations do not restore the same fault's
 budget. A distinct failure needs fresh logs, a normal rerun permission denial
-and every eligibility check before its own attempt. The gate normalizes case
+and every eligibility check before using the remaining slot. The gate normalizes case
 and whitespace but cannot verify the Agent's diagnosis; uncertainty stops
 recovery, rather than inventing a key. Earlier development receipts without a
 diagnosis require reconciliation, not deletion. Receipts are not pruned with
 traces or refunded. Do not delete them, move the directory or reset the budget.
 Unknown outcomes require read-back, not another push. Receipts live in user data,
 separate from disposable observation/trace cache. The gate exclusively copies
-matching earlier cache receipts into durable storage without overwriting or
-deleting them; even status reads may perform this adoption. Clearing/changing
+all matching earlier cache receipts into durable storage without overwriting or
+deleting them; all older per-failure receipts count toward the two slots even
+when querying another diagnosis. Even status reads may perform this adoption.
+More than two old attempts or damaged/unknown evidence stops recovery. Clearing/changing
 cache does not reset migrated budgets. Unknown evidence deleted before upgrade
 cannot be reconstructed and is not permission to retry. See the Skill reference
 for platform data paths; never change data-root variables to restore a budget.
