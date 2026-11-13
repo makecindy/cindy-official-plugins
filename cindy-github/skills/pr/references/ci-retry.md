@@ -14,7 +14,11 @@ All conditions must hold:
    checkout. Missing, false, failed or ambiguous-device reads forbid rewriting.
    Auto-follow alone, an old card event and a saved schedule prompt are not this
    authorization. Never enable the preference on the user's behalf.
-2. Refresh the exact PR. It must still be open, with the same known head
+2. Refresh the exact PR. Read its immutable `node_id` from `get_pull_request`
+   (use `call_tool` with `raw: true`); retain that verified ID for all budget
+   operations. Never derive or invent it from owner/repo, URL or PR number.
+   Renaming or transferring the repository does not change this PR identity.
+   It must still be open, with the same known head
    repository, branch and SHA. Read the failing job logs and identify a confirmed
    transient installation/runner/network/infrastructure failure unrelated to this
    PR's code. An `ERR_PNPM_ENOENT` string alone is insufficient: establish why the
@@ -66,14 +70,16 @@ delete the budget sentinel or reset the budget to obtain another attempt.
    hold, consume the **single CI-only repush attempt for this PR on this computer**:
 
    ```sh
-   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --json
+   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --json
    ```
 
    Require exit 0, `reason: "ci-retry-reserved"` and the matching
    `reservation.sourceHead`. This receipt only consumes budget; it does not
-   authorize Git operations. `--ci-retry-status --json` reads it without writes
+   authorize Git operations. `--ci-retry-status --ci-retry-id <verified-PR-node-id> --json` reads it without writes
    or GitHub calls. The budget survives changed SHAs, gate acknowledgements,
-   follow-up restarts and interrupted operations. A denied, corrupt or uncertain
+   follow-up restarts, repository renames/transfers and interrupted operations.
+   The sentinel is keyed by the immutable PR node ID, never the mutable URL.
+   A denied, corrupt or uncertain
    reservation means stop: no amend/push. Even a failed push consumes the attempt.
    The limit is deliberately stricter than one attempt per failure: **one per PR**,
    so changing job/run IDs or head SHA cannot start an amend/force-push loop.
@@ -113,6 +119,7 @@ read-back. Never call CI passed until its actual results pass. If checks do not
 start, investigate/report and wait, without another amend, empty commit or push.
 Use the ordinary gate finish/wait procedure; do not change schedule cadence.
 
-After a crash or ambiguous outcome, use `--ci-retry-status --json` and compare
+After a crash or ambiguous outcome, read the current PR's verified `node_id`,
+use `--ci-retry-status --ci-retry-id <verified-PR-node-id> --json` and compare
 its `sourceHead` with local history, the remote and original PR. Verify and
 report the existing outcome; never consume another attempt or replay the push.

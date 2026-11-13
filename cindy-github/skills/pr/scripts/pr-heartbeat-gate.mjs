@@ -55,6 +55,7 @@
  *                              事件清单(零 API、不改状态)。
  *   --ci-retry-status          读取本机该 PR 的一次性 CI 重推额度(不读偏好、不授权 Git 操作)。
  *   --reserve-ci-retry <SHA>   在 Git 操作前消费额度；独立于 head/心跳状态，崩溃也不返还。
+ *   --ci-retry-id <PR node ID> 两项额度操作必填；使用从当前 PR 读取的不可变 node_id。
  *   --defer <分钟>             **隐含 --ack**,并约定到点再唤起一次(期间有新事件照常唤起)。
  *                              兼容旧计时器；不能替换已有的具体等待。
  *   --wait <path>              隐含 --ack；JSON 指定具体等待项与复查时间，见 references/follow-up.md。
@@ -293,7 +294,7 @@ function formatDuration(ms) {
 function usage(err = (text) => process.stderr.write(text)) {
   err(
     'Usage: node pr-heartbeat-gate.mjs <PR_URL|number> [--repo owner/name] ' +
-      '[--ack | --resume <reason> | --wait <plan.json>] [--defer <minutes>] [--last-result] [--ci-retry-status | --reserve-ci-retry <SHA>] [--snapshot <path>] [--state-dir <dir>] ' +
+      '[--ack | --resume <reason> | --wait <plan.json>] [--defer <minutes>] [--last-result] [--ci-retry-status | --reserve-ci-retry <SHA>] [--ci-retry-id <PR-node-ID>] [--snapshot <path>] [--state-dir <dir>] ' +
       '[--max-snapshot-failures <n>] [--max-pass-attempts <n>] ' +
       '[--retry-backoff-minutes <n>] [--max-silence-hours <n>] [--json]\n',
   );
@@ -311,6 +312,7 @@ export function parseArgs(argv, env = process.env) {
   let lastResult = false;
   let ciRetryStatus = false;
   let reserveCiRetry;
+  let ciRetryId;
   let snapshot = env.PR_SNAPSHOT_SCRIPT?.trim() || DEFAULT_SNAPSHOT;
   let stateDir = env.CINDY_PR_STATE_DIR?.trim() || '';
   let maxSnapshotFailures = DEFAULT_MAX_SNAPSHOT_FAILURES;
@@ -364,6 +366,11 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--ci-retry-status') {
       ciRetryStatus = true;
+      continue;
+    }
+    if (arg === '--ci-retry-id') {
+      ciRetryId = argv[++i];
+      if (!/^PR_[A-Za-z0-9_+/=-]{6,200}$/.test(ciRetryId ?? '')) throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
       continue;
     }
     if (arg === '--reserve-ci-retry') {
@@ -448,6 +455,9 @@ export function parseArgs(argv, env = process.env) {
   }
 
   if (!spec) throw new Error('missing PR url or number');
+  if (Boolean(ciRetryStatus || reserveCiRetry) !== Boolean(ciRetryId)) {
+    throw new Error('CI retry status/reservation requires --ci-retry-id from the verified GitHub PR; do not derive it from owner/repo or number');
+  }
   if ((ciRetryStatus || reserveCiRetry) && ((ciRetryStatus && reserveCiRetry) || ack || suggest || lastResult || waitFile || resumeReason || deferMinutes !== undefined)) {
     throw new Error('CI retry status/reservation must be a separate command');
   }
@@ -482,6 +492,7 @@ export function parseArgs(argv, env = process.env) {
     lastResult,
     ciRetryStatus,
     reserveCiRetry,
+    ciRetryId,
     snapshot,
     stateDir: stateDir || path.join(os.homedir(), '.cache', 'cindy-pr'),
     maxSnapshotFailures,
@@ -551,6 +562,10 @@ export function adoptLegacyStateFile(stateDir, repo, number, file) {
   } catch {
     // Nothing to adopt, or the directory is not writable: start from a fresh baseline as before.
   }
+}
+
+export function ciRetryFilePath(stateDir, prNodeId) {
+  return path.join(stateDir, `ci-retry-${createHash('sha256').update(prNodeId).digest('hex')}.ci-retry`);
 }
 
 function readState(file) {
@@ -1407,7 +1422,6 @@ async function gateMain(argv, ctx) {
   }
 
   const file = stateFilePath(args.stateDir, args.repo, args.number);
-  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
   const now = ctx.now();
 
   // Same PR, all heads and follow-up restarts. Exclusive creation prevents two callers
@@ -1416,11 +1430,13 @@ async function gateMain(argv, ctx) {
   // This is a budget receipt only; the agent must read live plugin preferences and
   // establish every safety condition in references/ci-retry.md before any Git write.
   if (args.ciRetryStatus || args.reserveCiRetry) {
-    const retryFile = stateFilePath(args.stateDir, args.repo.toLowerCase(), args.number) + '.ci-retry';
+    // A PR node_id survives repository renames/transfers and URL aliases.
+    // The agent obtains it from the live PR, not from the mutable repository name.
+    const retryFile = ciRetryFilePath(args.stateDir, args.ciRetryId);
     if (args.reserveCiRetry) {
       fs.mkdirSync(path.dirname(retryFile), { recursive: true });
       try {
-        fs.writeFileSync(retryFile, JSON.stringify({ sourceHead: args.reserveCiRetry, reservedAt: now }), { flag: 'wx', mode: 0o600 });
+        fs.writeFileSync(retryFile, JSON.stringify({ prNodeId: args.ciRetryId, sourceHead: args.reserveCiRetry, reservedAt: now }), { flag: 'wx', mode: 0o600 });
       } catch (error) {
         if (error.code === 'EEXIST') throw new Error('CI repush budget already consumed for this PR; verify the previous outcome, do not amend or push again');
         throw error;
@@ -1430,7 +1446,7 @@ async function gateMain(argv, ctx) {
     let reservation = null;
     try {
       reservation = JSON.parse(fs.readFileSync(retryFile, 'utf8'));
-      if (!/^[a-f0-9]{40}$/.test(reservation?.sourceHead ?? '') || !Number.isFinite(reservation?.reservedAt)) throw new Error('invalid CI retry reservation');
+      if (reservation?.prNodeId !== args.ciRetryId || !/^[a-f0-9]{40}$/.test(reservation?.sourceHead ?? '') || !Number.isFinite(reservation?.reservedAt)) throw new Error('invalid CI retry reservation');
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -1443,6 +1459,7 @@ async function gateMain(argv, ctx) {
     return EXIT_PASS;
   }
 
+  adoptLegacyStateFile(args.stateDir, args.repo, args.number, file);
   // --last-result:只读最近一轮普通 gate 的实际结果。preRunHook 本身只负责 run/skip；
   // 被 run 唤起的 AI 再结合这份 reason/detail/report 与 fresh snapshot 自主决定是否通知。
   if (args.lastResult) {

@@ -19,7 +19,9 @@ The existing PR Skill reads the live `pr_follow_settings` preference when
 following starts, in each actual background round, and again before amend and
 push. Old prompts or card results cannot act as lasting rewrite authorization.
 Missing, disabled or unreadable preferences forbid CI-only rewrites; ordinary
-authorized fixes can continue.
+authorized fixes can continue. Settings-page and card writes share the existing
+main-page queue; a card action sets its displayed target value rather than
+inverting a newer global value. Saving the page never directly replaces KV.
 
 Recovery requires an open PR, diagnosed transient CI/installation/infrastructure
 failure unrelated to the change, and an explicit permission denial from the
@@ -38,8 +40,10 @@ push again. It checks the new SHA on the original PR and whether CI actually
 started; triggering is not passing.
 
 The existing follow-up gate reserves one attempt **per PR per computer**, before
-any amend. A small exclusive-create `.ci-retry` file beside its observation state
-survives head changes, restarts, observation resets and interrupted operations.
+any amend. A small exclusive-create `.ci-retry` file in the same state directory
+is keyed by the immutable PR `node_id` read from the live GitHub PR, not its URL.
+It survives repository renames/transfers, head changes, restarts, observation
+resets and interrupted operations. Both budget commands require that verified ID.
 It is not pruned with traces or refunded after failure. Do not delete it, move the
 state directory or reset it to obtain another attempt. Unknown outcomes require
 read-back, not another push. Even a different later failure on that PR has no

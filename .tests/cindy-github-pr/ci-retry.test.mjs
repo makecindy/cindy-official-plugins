@@ -5,20 +5,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runGate, stateFilePath } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
+import { runGate, stateFilePath, ciRetryFilePath } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 
 const gate = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
 const url = 'https://github.com/example/repo/pull/42';
+const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ci-retry-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
-  const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...flags];
+  const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...(flags.includes('--ci-retry-status') || flags.includes('--reserve-ci-retry') ? ['--ci-retry-id', prNodeId] : []), ...flags];
   return {
     root, stateDir,
-    sentinel: stateFilePath(stateDir, 'example/repo', 42) + '.ci-retry',
+    sentinel: ciRetryFilePath(stateDir, prNodeId),
     async run(flags, target) {
       let stdout = '', stderr = '';
       const code = await runGate(args(flags, target), {
@@ -55,7 +56,9 @@ test('one CI reservation survives changed SHAs, observation resets, casing and f
   assert.match(repeated.stderr, /already consumed/);
   assert.equal((await fx.run(['--reserve-ci-retry', newHead], 'https://github.com/EXAMPLE/REPO/pull/42')).code, 1);
   assert.equal((await fx.run(['--ci-retry-status'])).result.reservation.sourceHead, oldHead);
-  assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/example/repo/pull/43')).result.available, true);
+  assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/example/renamed/pull/42')).result.available, false, 'repository rename preserves PR identity');
+  assert.equal((await fx.run(['--reserve-ci-retry', newHead], 'https://github.com/new-owner/transferred/pull/42')).code, 1, 'repository transfer cannot restore the budget');
+  assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId'));
 });
 
 test('CI reservation is atomic across processes and never refunded after an interrupted operation', async t => {
@@ -64,6 +67,17 @@ test('CI reservation is atomic across processes and never refunded after an inte
   assert.deepEqual(results.map(r => r.code).sort(), [0, 1]);
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, false);
   assert.equal((await fx.run(['--reserve-ci-retry', oldHead])).code, 1);
+});
+
+test('CI quota cannot fall back to a mutable URL when the verified PR identity is missing', async t => {
+  const fx = fixture(t);
+  for (const option of [['--ci-retry-status'], ['--reserve-ci-retry', oldHead]]) {
+    let error = '';
+    const code = await runGate([url, '--state-dir', fx.stateDir, ...option], { out() {}, err: text => { error += text; } });
+    assert.equal(code, 1);
+    assert.match(error, /requires --ci-retry-id/);
+  }
+  assert.equal(fs.existsSync(fx.stateDir), false);
 });
 
 test('invalid, damaged and unwritable CI evidence fails closed without consuming ordinary gate state', async t => {

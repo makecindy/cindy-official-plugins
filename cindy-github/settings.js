@@ -255,14 +255,32 @@ var MESSAGES = {
     var enabled = control.checked;
     control.disabled = true;
     try {
-      // /kv replaces the object: re-read at the click, and change only this preference.
-      var kv = await readPrKv();
-      kv.prCard = Object.assign({}, kv.prCard, { ciRetryRepush: enabled });
-      var response = await fetch('/kv', { method: 'PUT', body: JSON.stringify(kv) });
-      if (!response.ok) throw new Error('kv write failed');
-      // Acknowledgement alone is not a read-back of the persisted value.
-      var saved = await readPrKv();
-      if ((!!saved.prCard && saved.prCard.ciRetryRepush === true) !== enabled) throw new Error('kv verification failed');
+      var random = crypto.getRandomValues(new Uint32Array(4));
+      var reqId = Array.from(random).map(function (n) { return n.toString(16).padStart(8, '0'); }).join('');
+      // Only the main page writes PR KV, through the same queue as card actions.
+      // Send once. A timeout may mean the queued save completed; reopen to verify.
+      await new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = setTimeout(function () { finish(new Error('preference result unknown')); }, 15000);
+        function finish(error) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          bc.removeEventListener('message', onResult);
+          if (error) reject(error); else resolve();
+        }
+        function onResult(ev) {
+          var result = ev && ev.data;
+          if (!result || result.type !== 'pr-preference-result' || result.reqId !== reqId) return;
+          finish(result.ok && result.ciRetryRepush === enabled ? null : new Error('preference save unconfirmed'));
+        }
+        bc.addEventListener('message', onResult);
+        void fetch('/wake').then(function (response) {
+          if (settled) return;
+          if (!response || response.ok === false) throw new Error('plugin wake failed');
+          bc.postMessage({ type: 'pr-preference-write', reqId: reqId, ciRetryRepush: enabled });
+        }).catch(finish);
+      });
       $('pr-status').textContent = '';
       control.disabled = false;
     } catch (e) {

@@ -3165,7 +3165,7 @@ function prSettingsPanel(settings) {
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
-    prSettingRow('prset:ciRetry', t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush) +
+    prSettingRow('prset:ciRetry:' + (settings.ciRetryRepush ? 'off' : 'on'), t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
     '</div>';
@@ -3673,9 +3673,17 @@ async function prCardAction(msg) {
   var handedOff = false;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
-  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive' || action === 'prset:ciRetry') {
+  } else if (action === 'prset:ciRetry:on' || action === 'prset:ciRetry:off') {
     try {
-      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : action === 'prset:ciRetry' ? 'ciRetryRepush' : 'autoArchive');
+      settings = await writePrSettings(function (next) { next.ciRetryRepush = action === 'prset:ciRetry:on'; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:ciRetry') {
+    // An old card has no explicit target. Refresh it, never infer new rewrite consent.
+  } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
+    try {
+      settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
     } catch (e) {
       card.note = t('prSettingFailed');
     }
@@ -3776,6 +3784,20 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-preference-write' && /^[a-f0-9]{32}$/.test(m.reqId) && typeof m.ciRetryRepush === 'boolean') {
+    // The settings page sends a target value, never a KV snapshot. This existing
+    // queue is the single writer for both settings-page and card preferences.
+    void enqueuePr(async function () {
+      var ok = false;
+      try {
+        await writePrSettings(function (next) { next.ciRetryRepush = m.ciRetryRepush; });
+        var saved = await readPrSettings();
+        ok = !saved.unreadable && saved.ciRetryRepush === m.ciRetryRepush;
+      } catch (e) { /* A failed or uncertain write is never retried automatically. */ }
+      bc.postMessage({ type: 'pr-preference-result', reqId: m.reqId, ok: ok, ciRetryRepush: ok ? m.ciRetryRepush : null });
+    });
+    return;
+  }
   if (!m || m.type !== 'test-connection' || !m.reqId) return;
   if (seenTestReqs[m.reqId]) return;
   // 去重表只为吸收 settings 页的重发风暴,超量直接清零重来(常驻期不泄漏)。
