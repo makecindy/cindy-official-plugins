@@ -60,7 +60,7 @@
         const normalized=normalize(raw,owners),text=normalized.text;
         for(let at=text.indexOf(q);at>=0;at=text.indexOf(q,at+1))for(let i=normalized.owners[at];i<=normalized.owners[at+q.length-1];i++)hits.add(i);
       }
-      let matches=0;nodes.forEach((node,i)=>{const hit=!q||hits.has(i)||normalize(node.textContent.toLocaleLowerCase()).text.includes(q);node.hidden=!hit;if(hit)matches++;});
+      let matches=0;nodes.forEach((node,i)=>{const hit=!q||hits.has(i);node.hidden=!hit;if(hit)matches++;});
       container.querySelector('[data-match-count]').textContent=q?matches+' '+L.matches:L.all;
     });
     container.querySelectorAll('a[href^="#"]').forEach(a=>a.addEventListener('click',e=>{const target=container.querySelector(a.getAttribute('href'));if(target&&body){e.preventDefault();target.hidden=false;body.scrollTo({top:body.scrollTop+target.getBoundingClientRect().top-body.getBoundingClientRect().top-24,behavior:'auto'});target.tabIndex=-1;target.focus({preventScroll:true});sync();}}));
