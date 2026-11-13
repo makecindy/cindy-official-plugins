@@ -80,7 +80,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.15');
+  assert.equal(manifest.version, '1.5.16');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -618,6 +618,10 @@ test('settings.html ships no hardcoded copy before the host locale is known', ()
 // card HTML on desktop and projects only its text plus aria-label buttons on the phone,
 // so the visible text and the actions handed to the task's agent are the contract.
 const zhCopy = createRuntime().context.MESSAGES['zh-CN'];
+const followWorkflow = {
+  skill: 'pr', entry: 'skills/pr/SKILL.md', checker: 'skills/pr/scripts/pr-heartbeat-gate.mjs',
+  read: zhCopy.prFollowWorkflowRead, on_manual_failure: zhCopy.prFollowWorkflowFallback,
+};
 const fill = (text, vars) => text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
 
 function visibleText(html) {
@@ -740,6 +744,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   assert.equal(cardId, ask.callId);
   assert.deepEqual(ask.reply.result, {
     card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false }, next: zhCopy.prNextAsk,
+    follow_workflow: followWorkflow,
   });
   const askCard = runtime.lastCard(cardId);
   assert.equal(askCard.state, 'done');
@@ -758,6 +763,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
     event: {
       card_id: cardId, action: 'publish', repo: 'octo/repo', head: 'feat/pr-card', base: 'main',
       settings: { auto_rename: false, auto_follow: false },
+      follow_workflow: followWorkflow,
     },
   }]);
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
@@ -1286,6 +1292,7 @@ test('card settings pick the auto-follow model with the host picker and hand its
 
   await runtime.tool({ card_id: cardId, pr: '7' });
   await runtime.click(cardId, 'pr:follow');
+  assert.deepEqual(runtime.agentRuns.at(-1).event.follow_workflow, followWorkflow);
   assert.deepEqual(runtime.agentRuns.at(-1).event.follow_model, {
     model_agent_kind: 'claude-code', provider_id: 'anthropic', model: 'claude-sonnet-5-5', effort: 'medium', fast_mode: false, label: 'Sonnet 5.5 · Anthropic',
   });
@@ -1644,6 +1651,15 @@ test('IM follow settings share card preferences and selected remote model withou
   const runtime = createPrRuntime({ kv: { unrelated: 'keep', prCard: { autoRename: true, autoFollow: true, followModel: model } }, github: prGraphql() });
   const read = await runtime.tool({}, 'pr_follow_settings');
   assert.equal(read.reply.ok, true);
+  assert.deepEqual(read.reply.result.follow_workflow, followWorkflow);
+  // Recover from a missing Manual using files actually shipped with this plugin,
+  // without depending on an assumed checkout or install-directory layout.
+  for (const entry of [followWorkflow.entry, followWorkflow.checker]) {
+    assert.ok(readFileSync(new URL(`../cindy-github/${entry}`, import.meta.url), 'utf8').length > 0);
+  }
+  assert.match(followWorkflow.read, /同一 namespace/);
+  assert.match(followWorkflow.on_manual_failure, /ghost_manual.*未声明手册/);
+  assert.match(followWorkflow.on_manual_failure, /不要另写、复制或内联/);
   assert.deepEqual(read.reply.result.settings, {
     auto_rename: true, auto_follow: true,
     follow_model: { model_agent_kind: 'claude-code', provider_id: 'example-provider', model: 'example-model', effort: 'high', fast_mode: false, agent_device_id: 'example-device', label: 'Example' },
