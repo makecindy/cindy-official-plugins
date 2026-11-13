@@ -520,7 +520,8 @@ async function invoke(method, p) {
     return { dir };
   }
   if (method === "bind") {
-    if (!/^[0-9a-f-]{36}$/i.test(p.sessionId))
+    // Match main.js: Host-issued session IDs are opaque, not necessarily UUIDs.
+    if (typeof p.sessionId !== "string" || !/^[a-zA-Z0-9-]{1,64}$/.test(p.sessionId))
       throw Error("Trusted session required");
     const root = await serializeWrite("bind:" + path.resolve(p.root), () => projectRoot(p));
     if (!path.isAbsolute(root)) throw Error("Local directory required");

@@ -7,8 +7,9 @@ const source = fs.readFileSync(
   __dirname + "/../../opendesign-trial/main.js",
   "utf8",
 );
-const sid = "11111111-1111-4111-8111-111111111111",
-  other = "22222222-2222-4222-8222-222222222222";
+// Current Host IDs are opaque strings; legacy UUIDs remain covered by worker.cjs.
+const sid = "exampleCindySession123456",
+  other = "anotherCindySession654321";
 const ctx = {
   session_id: sid,
   workdir: "/project",
@@ -187,6 +188,7 @@ test("every draft entry returns a stable standard file link including escaped pa
 test("untrusted, remote and readonly contexts do nothing", async () => {
   for (const context of [
     undefined,
+    ...[123, [sid], {}, '', '../outside', 'a/b', 'a_b', 'a b', 'a'.repeat(65)].map(session_id => ({ ...ctx, session_id })),
     { ...ctx, workdir_is_local: false },
     { ...ctx, workdir_is_read_only: true },
   ]) {
