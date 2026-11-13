@@ -3784,6 +3784,11 @@ var seenTestReqs = {};
 
 bc.onmessage = function (ev) {
   var m = ev && ev.data;
+  if (m && m.type === 'pr-preference-ready' && /^[a-f0-9]{32}$/.test(m.reqId)) {
+    // Read-only handshake: /wake may finish before this listener is installed.
+    bc.postMessage({ type: 'pr-preference-ready-result', reqId: m.reqId, ok: true });
+    return;
+  }
   if (m && m.type === 'pr-preference-write' && /^[a-f0-9]{32}$/.test(m.reqId) && typeof m.ciRetryRepush === 'boolean') {
     // The settings page sends a target value, never a KV snapshot. This existing
     // queue is the single writer for both settings-page and card preferences.

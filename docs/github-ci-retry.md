@@ -22,6 +22,9 @@ Missing, disabled or unreadable preferences forbid CI-only rewrites; ordinary
 authorized fixes can continue. Settings-page and card writes share the existing
 main-page queue; a card action sets its displayed target value rather than
 inverting a newer global value. Saving the page never directly replaces KV.
+On cold start it retries a read-only readiness handshake for up to 15 seconds,
+then sends the write once. Duplicate/late readiness replies cannot resend it;
+an unknown write result requires reopening settings to verify, not blind replay.
 
 Recovery requires an open PR, diagnosed transient CI/installation/infrastructure
 failure unrelated to the change, and an explicit permission denial from the

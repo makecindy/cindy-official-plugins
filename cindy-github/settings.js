@@ -258,27 +258,44 @@ var MESSAGES = {
       var random = crypto.getRandomValues(new Uint32Array(4));
       var reqId = Array.from(random).map(function (n) { return n.toString(16).padStart(8, '0'); }).join('');
       // Only the main page writes PR KV, through the same queue as card actions.
-      // Send once. A timeout may mean the queued save completed; reopen to verify.
+      // Retry only the read-only readiness handshake; send the mutation once.
+      // A timeout after sending may mean it completed; reopen to verify.
       await new Promise(function (resolve, reject) {
-        var settled = false;
+        var phase = 'ready';
+        var poll = null;
         var timer = setTimeout(function () { finish(new Error('preference result unknown')); }, 15000);
         function finish(error) {
-          if (settled) return;
-          settled = true;
+          if (phase === 'settled') return;
+          phase = 'settled';
           clearTimeout(timer);
+          if (poll !== null) clearInterval(poll);
           bc.removeEventListener('message', onResult);
           if (error) reject(error); else resolve();
         }
         function onResult(ev) {
           var result = ev && ev.data;
-          if (!result || result.type !== 'pr-preference-result' || result.reqId !== reqId) return;
-          finish(result.ok && result.ciRetryRepush === enabled ? null : new Error('preference save unconfirmed'));
+          if (!result || result.reqId !== reqId) return;
+          if (phase === 'ready' && result.type === 'pr-preference-ready-result' && result.ok === true) {
+            phase = 'result';
+            if (poll !== null) clearInterval(poll);
+            poll = null;
+            try { bc.postMessage({ type: 'pr-preference-write', reqId: reqId, ciRetryRepush: enabled }); }
+            catch (e) { finish(e); }
+          } else if (phase === 'result' && result.type === 'pr-preference-result') {
+            finish(result.ok && result.ciRetryRepush === enabled ? null : new Error('preference save unconfirmed'));
+          }
+        }
+        function askReady() {
+          if (phase !== 'ready') return;
+          try { bc.postMessage({ type: 'pr-preference-ready', reqId: reqId }); }
+          catch (e) { finish(e); }
         }
         bc.addEventListener('message', onResult);
         void fetch('/wake').then(function (response) {
-          if (settled) return;
+          if (phase !== 'ready') return;
           if (!response || response.ok === false) throw new Error('plugin wake failed');
-          bc.postMessage({ type: 'pr-preference-write', reqId: reqId, ciRetryRepush: enabled });
+          poll = setInterval(askReady, 400);
+          askReady();
         }).catch(finish);
       });
       $('pr-status').textContent = '';

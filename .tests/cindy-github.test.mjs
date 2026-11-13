@@ -238,10 +238,10 @@ function createSettings(options = {}) {
     AbortController,
     BroadcastChannel: options.BroadcastChannel ?? class { postMessage() {} addEventListener() {} removeEventListener() {} },
     crypto: webcrypto,
-    setTimeout: () => 0,
-    clearTimeout() {},
-    clearInterval() {},
-    setInterval: () => 0,
+    setTimeout: options.setTimeout ?? (() => 0),
+    clearTimeout: options.clearTimeout ?? (() => {}),
+    clearInterval: options.clearInterval ?? (() => {}),
+    setInterval: options.setInterval ?? (() => 0),
     fetch: async (url, init = {}) => {
       fetchCalls.push({ url, init });
       if (url === '/app-context') {
@@ -249,6 +249,7 @@ function createSettings(options = {}) {
         return { ok: true, json: async () => ({ ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } }) };
       }
       if (url === '/kv' && options.preferences) return options.preferences(url, init);
+      if (url === '/wake' && options.wake) return options.wake();
       if (url === '/kv') return { ok: true, json: async () => ({}) };
       if (url === '/secrets') {
         if (options.secretsFail) throw new Error('offline');
@@ -1678,13 +1679,15 @@ test('IM preferences remain available when cards cannot be delivered; missing di
   assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false, ci_retry_repush: false });
 });
 
-function broadcastHub() {
+function broadcastHub(messages = [], drop = () => false) {
   const channels = [];
   return class {
     constructor() { this.listeners = new Set(); channels.push(this); }
     addEventListener(_, listener) { this.listeners.add(listener); }
     removeEventListener(_, listener) { this.listeners.delete(listener); }
     postMessage(message) {
+      messages.push(structuredClone(message));
+      if (drop(message)) return;
       for (const channel of channels) if (channel !== this) queueMicrotask(() => {
         const event = { data: structuredClone(message) };
         channel.onmessage?.(event);
@@ -1693,6 +1696,113 @@ function broadcastHub() {
     }
   };
 }
+
+function preferenceTimers() {
+  let poll = null, deadline = null, polling = false;
+  return {
+    options: {
+      setInterval(fn) { poll = fn; polling = true; return 1; },
+      clearInterval() { polling = false; },
+      setTimeout(fn, ms) { if (ms === 15000) deadline = fn; return 2; },
+      clearTimeout() {},
+    },
+    poll() { poll?.(); },
+    expire() { assert.ok(deadline, 'a bounded save deadline was installed'); deadline(); },
+    get polling() { return polling; },
+  };
+}
+
+test('cold-start preferences wait for a receiver and send exactly one write after repeated readiness replies', async () => {
+  let kv = { prCard: { ciRetryRepush: true } }, writes = 0;
+  const preferences = async (_, init) => {
+    if (init.method === 'PUT') { kv = JSON.parse(init.body); writes++; return { ok: true }; }
+    return { ok: true, json: async () => structuredClone(kv) };
+  };
+  const messages = [], BroadcastChannel = broadcastHub(messages), timers = preferenceTimers();
+  const page = createSettings({ preferences, BroadcastChannel, ...timers.options });
+  await flushAsync();
+  const control = page.elements.get('ci-retry');
+  control.checked = false;
+  control.listeners.change();
+  await flushAsync();
+  assert.equal(messages.filter(m => m.type === 'pr-preference-write').length, 0, 'no receiver is ready yet');
+  assert.equal(writes, 0);
+  new BroadcastChannel().postMessage({ type: 'pr-preference-ready-result', reqId: 'foreign-request', ok: true });
+  await flushAsync();
+  assert.equal(writes, 0, 'another page cannot settle this handshake');
+  const runtime = createPrRuntime({ preferences, BroadcastChannel });
+  timers.poll();
+  await flushAsync();
+  const probe = messages.find(m => m.type === 'pr-preference-ready');
+  assert.ok(probe, 'readiness queries survive the cold-start gap');
+  const late = new BroadcastChannel();
+  late.postMessage({ type: 'pr-preference-ready-result', reqId: probe.reqId, ok: true });
+  late.postMessage({ type: 'pr-preference-ready-result', reqId: probe.reqId, ok: true });
+  timers.poll();
+  await flushAsync();
+  assert.equal(messages.filter(m => m.type === 'pr-preference-write').length, 1);
+  assert.equal(writes, 1);
+  assert.equal(timers.polling, false);
+  assert.equal(control.disabled, false);
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+});
+
+test('lost preference receipt and late readiness cannot replay a write after another explicit choice', async () => {
+  let kv = { prCard: { ciRetryRepush: true } }, writes = 0;
+  const preferences = async (_, init) => {
+    if (init.method === 'PUT') { kv = JSON.parse(init.body); writes++; return { ok: true }; }
+    return { ok: true, json: async () => structuredClone(kv) };
+  };
+  const messages = [], BroadcastChannel = broadcastHub(messages, m => m.type === 'pr-preference-result'), timers = preferenceTimers();
+  const runtime = createPrRuntime({ preferences, BroadcastChannel });
+  const page = createSettings({ preferences, BroadcastChannel, ...timers.options });
+  await flushAsync();
+  page.elements.get('ci-retry').checked = false;
+  page.elements.get('ci-retry').listeners.change();
+  await flushAsync();
+  assert.equal(writes, 1);
+  assert.equal(kv.prCard.ciRetryRepush === true, false);
+  const request = messages.find(m => m.type === 'pr-preference-write');
+  const late = new BroadcastChannel();
+  late.postMessage({ type: 'pr-preference-ready-result', reqId: request.reqId, ok: true });
+  timers.poll();
+  await flushAsync();
+  assert.equal(writes, 1, 'duplicate readiness while awaiting the receipt cannot replay the write');
+  timers.expire();
+  await flushAsync();
+  assert.equal(page.elements.get('ci-retry').disabled, true);
+  assert.equal(page.elements.get('pr-status').textContent, page.messages['zh-CN'].prSaveFailed);
+  const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  await runtime.click(card.callId, 'prset:ciRetry:on');
+  late.postMessage({ type: 'pr-preference-ready-result', reqId: request.reqId, ok: true });
+  timers.poll();
+  await flushAsync();
+  assert.equal(writes, 2, 'only the original page write and later explicit card action');
+  assert.equal(kv.prCard.ciRetryRepush, true);
+  assert.equal(messages.filter(m => m.type === 'pr-preference-write').length, 1);
+  assert.equal(timers.polling, false);
+});
+
+test('readiness timeout and wake failure never send a late preference write', async () => {
+  for (const wake of [undefined, async () => ({ ok: false }), async () => { throw new Error('wake unavailable'); }]) {
+    const messages = [], BroadcastChannel = broadcastHub(messages), timers = preferenceTimers();
+    const page = createSettings({ wake, BroadcastChannel, ...timers.options });
+    await flushAsync();
+    page.elements.get('ci-retry').checked = true;
+    page.elements.get('ci-retry').listeners.change();
+    await flushAsync();
+    if (!wake) timers.expire();
+    await flushAsync();
+    const probe = messages.find(m => m.type === 'pr-preference-ready');
+    if (probe) new BroadcastChannel().postMessage({ type: 'pr-preference-ready-result', reqId: probe.reqId, ok: true });
+    timers.poll();
+    await flushAsync();
+    assert.equal(messages.filter(m => m.type === 'pr-preference-write').length, 0);
+    assert.equal(timers.polling, false);
+    assert.equal(page.elements.get('ci-retry').disabled, true);
+    assert.equal(page.elements.get('pr-status').textContent, page.messages['zh-CN'].prSaveFailed);
+  }
+});
 
 test('CI preference page and card share one writer under interleaved saves', async () => {
   let kv = { untouched: 'keep', prCard: { ciRetryRepush: true } };
