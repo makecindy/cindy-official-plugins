@@ -2,7 +2,7 @@
 
 Approved scope: [proposal #158](https://github.com/makecindy/cindy-official-plugins/issues/158#issuecomment-6120456702). M1 imports and original-evidence workflows plus optional M2 AssemblyAI cloud transcription. In-app playback is deferred to M3.
 
-Open the sidebar library, import RSS / Apple Podcasts / Xiaoyuzhou or public audio URLs ending in `.mp3`, `.m4a`, `.wav`, `.ogg`, `.aac` or `.flac`, then search or read the available transcript. Query strings and fragments are allowed. Link import in the page creates a visible Cindy task; match RSS candidates and confirm cloud fees in its cards. Tools expose eight stable `podcast_*` names. The optional key is stored only by Cindy; Agent arguments cannot submit paid transcription.
+Open the sidebar library, import RSS / Apple Podcasts / Xiaoyuzhou or public audio URLs ending in `.mp3`, `.m4a`, `.wav`, `.ogg`, `.aac` or `.flac`, then search or read the available transcript. Query strings and fragments are allowed. Link import in the page creates a visible Cindy task; match RSS candidates and confirm cloud fees in its cards. Tools expose nine stable `podcast_*` names. The optional key is stored only by Cindy; Agent arguments cannot submit paid transcription.
 
 Build: `node podcast-insights/build.mjs`. Tests: `node --test .tests/podcast-insights.test.mjs`. Requires stable/Beta Cindy >=0.1.103. Metadata locales cover en/zh-CN/ja/ko; runtime pages support Chinese and English with English fallback.
 
@@ -54,3 +54,9 @@ Additional0.2.5 fixes: source retrieval refuses the credentialed AssemblyAI API 
 0.2.20: HTML evidence uses the pinned parse5 standard parser; excludes plaintext/raw-text/template contexts without executing scripts or fetching resources. WebVTT cue entities decode once. Publisher retries retain active cloud status; continuation restarts on transcript-version changes; deletion refreshes notes. Progress cards show current recovery errors. Restart reclaims only incomplete inactive user/publisher versions, retaining completed history, active and cloud versions. Parser provenance: THIRD-PARTY-LICENSES.txt.
 
 0.2.21: Unknown-job cards retain a safe default recovery hint when UI localization initialization fails.
+
+## 0.4.12: automatic reading notes
+
+See [automatic reading notes](READING.md): model-generated chapters with extracted
+source evidence, complete transcript reading/search, chapter questions and HTML/JSON
+export. Uses existing transcripts and Cindy text-model quota, without audio retranscription.

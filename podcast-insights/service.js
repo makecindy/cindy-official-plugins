@@ -1,6 +1,7 @@
 (function(root){
   'use strict';
   const C=typeof module!=='undefined'?require('./core.js'):root.PodcastCore;
+  const Minutes=typeof module!=='undefined'?require('./minutes.js'):root.PodcastMinutes;
   const schema=[
     'CREATE TABLE IF NOT EXISTS shows(id TEXT PRIMARY KEY,feed_url TEXT UNIQUE,title TEXT,author TEXT,language TEXT,link TEXT,source_kind TEXT,added_at TEXT,updated_at TEXT)',
     'CREATE TABLE IF NOT EXISTS episodes(id TEXT PRIMARY KEY,show_id TEXT,guid TEXT,title TEXT,published_at TEXT,duration_s REAL,audio_bytes INTEGER,audio_url TEXT,page_url TEXT,transcript_state TEXT,audio_media_hash TEXT,remote_transcripts TEXT,UNIQUE(show_id,guid))',
@@ -15,7 +16,7 @@
   ];
   const now=()=>new Date().toISOString(), id=()=>crypto.randomUUID();
   class Service{
-    constructor(host){this.host=host;this.ready=null;}
+    constructor(host){this.host=host;this.ready=null;this.minutes=new Minutes(this);}
     async io(a){const r=await this.host.library(a);if(!r?.ok || r.state==='unavailable') C.fail(r?.errorCode || 'LIBRARY_UNAVAILABLE');return r;}
     async sql(sql,params=[]){return this.io({op:'db.exec',dbPath:'podcasts.sqlite',sql,params});}
     async rows(sql,params=[]){return (await this.sql(sql,params)).rows || [];}
@@ -67,7 +68,7 @@
     async episode(eid){const e=(await this.rows('SELECT e.id,e.show_id,e.guid,e.title,e.published_at,e.duration_s,e.audio_bytes,e.audio_url,e.page_url,e.transcript_state,s.title AS show_title FROM episodes e JOIN shows s ON s.id=e.show_id WHERE e.id=?',[eid]))[0];if(!e)C.fail('EPISODE_NOT_FOUND');return e;}
     publicJob(j){
       if(!j)return j;const safe={};
-      for(const key of ['id','episode_id','provider','state','remote_id','est_usd','submitted_at','checked_at','card_id','submission_outcome','local_state_persisted','recovery_incomplete'])if(j[key]!==undefined)safe[key]=j[key];
+      for(const key of ['id','episode_id','provider','state','remote_id','est_usd','submitted_at','checked_at','card_id','submission_outcome','upload_outcome','minute_outcome','local_state_persisted','recovery_incomplete'])if(j[key]!==undefined)safe[key]=j[key];
       for(const key of ['error','errorCode'])if(j[key]!==undefined)safe[key]=String(j[key]).slice(0,128);
       return safe;
     }
@@ -115,6 +116,7 @@
       // Reject malformed selectors before any source fetch or database write.
       this.validateEpisodeSelector(a.episodes);
       let source=C.url(a.url), u=new URL(source), feed, kind='rss';
+      if(/(^|\.)youtube\.com$/.test(u.hostname)||u.hostname==='youtu.be')C.fail('YOUTUBE_IMPORT_UNSUPPORTED');
       if(u.hostname==='podcasts.apple.com'){
         const aid=u.pathname.match(/id(\d+)/)?.[1];if(!aid)C.fail('INVALID_URL');
         const j=JSON.parse(await this.network('https://itunes.apple.com/lookup?id='+aid+'&entity=podcast',callId));
@@ -160,6 +162,12 @@
       const all=r.episodes || [],episodes=C.budgetRows(all.map(e=>({id:e.id,guid:e.guid,title:e.title})),500,40000),rawTranscripts=r.transcripts || [],transcripts=C.budgetRows(rawTranscripts,50,16000);
       return {show_id:r.show_id,episodes,episode_count:all.length,episodes_omitted:all.length-episodes.length,transcripts,transcript_count:rawTranscripts.length,transcripts_omitted:rawTranscripts.length-transcripts.length,truncated:!!r.truncated,results_truncated:episodes.length<all.length||transcripts.length<rawTranscripts.length,...(r.rss_found===false?{rss_found:false}:{}),continuation:{tool:'podcast_library',args:{show_id:r.show_id,offset:0,include_guid:true}},max_output_bytes:60000};
     }
+    async transcriptId(eid,value){
+      const requested=value!==undefined;
+      const rows=await this.rows('SELECT id FROM transcripts WHERE episode_id=? AND '+(requested?'id=?':'is_active=1'),[eid,...(requested?[C.string(value,128)]:[])]);
+      if(requested&&!rows.length)C.fail('TRANSCRIPT_VERSION_UNAVAILABLE');
+      return rows[0]?.id || null;
+    }
     async segmentRows(eid,tid){return this.rows('SELECT g.* FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND '+(tid?'t.id=?':'t.is_active=1')+' ORDER BY g.idx',[eid,...(tid?[tid]:[])]);}
     // Keep only a quote-length suffix and its source-row indices. Empty
     // normalized cues do not expand the window; gaps reset it entirely.
@@ -189,7 +197,8 @@
         // exact boundary-spanning, normalized single-segment, then normalized
         // boundary-spanning. A normalized hit in an earlier segment must not
         // hide an exact quote in a later segment.
-        let rows=segmentCache.get(e.id);if(!rows){rows=await this.segmentRows(e.id);segmentCache.set(e.id,rows);}
+        const tid=await this.transcriptId(e.id,ref.transcript_id),cacheKey=JSON.stringify([e.id,tid]);
+        let rows=segmentCache.get(cacheKey);if(!rows){rows=tid?await this.segmentRows(e.id,tid):[];segmentCache.set(cacheKey,rows);}
         let found=rows.find(g=>g.text.includes(quote));
         if(found)found={...found,status:'exact'};
         if(!found)found=this.findAcross(rows,quote);
@@ -198,7 +207,7 @@
         if(!found)found=this.findAcross(rows,quote,true);
         const shownQuote=20000-used>=quote.length?quote:'';used+=shownQuote.length;
         if(found){delete found.norm;Object.assign(found,C.excerpt(found.text,quote,Math.min(800,20000-used)));used+=found.text.length;}
-        results.push(found?{...found,episode_id:e.id,episode_title:e.title,show_title:e.show_title,...this.publicSource(e),quote:shownQuote,quote_omitted:!shownQuote,reference_index,interpretation_verified:false}:{episode_id:e.id,quote:shownQuote,quote_omitted:!shownQuote,reference_index,status:'not_found'});
+        results.push(found?{...found,episode_id:e.id,episode_title:e.title,show_title:e.show_title,...this.publicSource(e),quote:shownQuote,quote_omitted:!shownQuote,reference_index,interpretation_verified:false}:{episode_id:e.id,quote:shownQuote,quote_omitted:!shownQuote,reference_index,...(tid?{transcript_id:tid}:{}),status:'not_found'});
       }
       const citations=C.budgetRows(results,20,59000),omitted=results.length-citations.length;
       return {citations,text_chars:citations.reduce((n,r)=>n+(r.text?.length || 0)+r.quote.length,0),max_text_chars:20000,max_output_bytes:60000,citations_omitted:omitted,next_reference_index:omitted?citations.length:null,results_truncated:omitted>0||citations.some(r=>r.text_truncated||r.quote_omitted),interpretation_verified:false};
@@ -208,6 +217,7 @@
       if(e.duration_s>14400 || e.audio_bytes>256*1024*1024)C.fail('AUDIO_TOO_LARGE');
       if(!(await this.host.credentialsStatus()))C.fail('AAI_KEY_MISSING');
       const existing=(await this.rows("SELECT * FROM jobs WHERE episode_id=? AND state IN ('prepared','claiming','submitting','submitted','unknown') ORDER BY submitted_at DESC LIMIT 1",[eid]))[0];if(existing){
+        if(existing.provider!=='assemblyai')C.fail('PROVIDER_JOB_EXISTS');
         if(existing.state==='claiming')return this.prepareAfterClaim(existing,eid,cardId);
         if(existing.state==='prepared'){
           const est=e.duration_s==null?null:e.duration_s/3600*0.23;
@@ -235,6 +245,7 @@
       if(event?.type!=='event'||event.name!=='card-action'||!event.userActionToken||event.actionId!=='transcribe:'+jid)C.fail('USER_CLICK_REQUIRED');
       const j=(await this.rows('SELECT * FROM jobs WHERE id=?',[jid]))[0];if(!j)C.fail('JOB_NOT_FOUND');
       if(j.card_id!==event.callId)C.fail('USER_CLICK_REQUIRED');
+      if(j.provider!=='assemblyai')C.fail('PROVIDER_UNAVAILABLE');
       if(j.state!=='prepared')return {job:j,already_submitted:true};
       if(!(await this.host.credentialsStatus()))C.fail('AAI_KEY_MISSING');
       const e=await this.episode(j.episode_id),est=e.duration_s==null?null:e.duration_s/3600*0.23;
@@ -289,6 +300,7 @@
       return (await this.rows('SELECT * FROM jobs WHERE id=?',[j.id]))[0];
     }
     async check(j,deadline=Infinity){
+      if(j.provider!=='assemblyai')return {...j,error:'PROVIDER_UNAVAILABLE'};
       const fetchStatus=url=>{const remaining=deadline-Date.now();if(remaining<=0)C.fail('STATUS_BUDGET_EXHAUSTED');return this.network(url,null,null,true,Math.min(60000,remaining));};
       if(j.state==='claiming')return this.releaseClaim(j);
       if(j.state==='submitting')j={...j,state:'unknown',error:'SUBMISSION_UNKNOWN'};
@@ -327,6 +339,7 @@
     }
     async runData(tool,a={},callId,options={}){
       await this.init();
+      if(tool==='podcast_minutes')return this.minutes.run(a,callId);
       if(tool==='podcast_import')return this.importReceipt(await this.importSource(a,callId));
       if(tool==='podcast_import_transcript'){await this.episode(a.episode_id);return this.store(a.episode_id,C.segments(a.content,a.format),'user',a.format);}
       if(tool==='podcast_library'){
@@ -341,9 +354,10 @@
       }
       if(tool==='podcast_read'){
         const rawEpisode=await this.episode(a.episode_id),e={...this.publicEpisode(rawEpisode),...this.publicSource(rawEpisode)};const limit=Math.max(1,Math.min(20000,Number(a.max_chars)||10000));let offset=Math.max(0,Number(a.offset)||0);
-        if(a.around_segment){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE g.id=? AND t.episode_id=? AND t.is_active=1',[a.around_segment,e.id]))[0];if(!r)C.fail('SEGMENT_NOT_FOUND');offset=r.idx;}
-        if(a.from_ms!=null){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.is_active=1 AND g.start_ms>=? ORDER BY g.idx LIMIT 1',[e.id,a.from_ms]))[0];if(!r)return {episode:e,segments:[],next_offset:null};offset=r.idx;}
-        const rows=await this.rows('SELECT g.id,g.transcript_id,g.idx,g.text,g.speaker,g.start_ms,g.end_ms FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.is_active=1 AND g.idx>=? ORDER BY g.idx LIMIT 2000',[e.id,offset]);if(!rows.length && e.transcript_state!=='ready')C.fail('NO_TRANSCRIPT');
+        const tid=await this.transcriptId(e.id,a.transcript_id);
+        if(a.around_segment){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE g.id=? AND t.episode_id=? AND t.id=?',[a.around_segment,e.id,tid]))[0];if(!r)C.fail('SEGMENT_NOT_FOUND');offset=r.idx;}
+        if(a.from_ms!=null){const r=(await this.rows('SELECT g.idx FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.id=? AND g.start_ms>=? ORDER BY g.idx LIMIT 1',[e.id,tid,a.from_ms]))[0];if(!r)return {episode:e,transcript_id:tid,segments:[],next_offset:null};offset=r.idx;}
+        const rows=await this.rows('SELECT g.id,g.transcript_id,g.idx,g.text,g.speaker,g.start_ms,g.end_ms FROM segments g JOIN transcripts t ON t.id=g.transcript_id WHERE t.episode_id=? AND t.id=? AND g.idx>=? ORDER BY g.idx LIMIT 2000',[e.id,tid,offset]);if(!rows.length && e.transcript_state!=='ready')C.fail('NO_TRANSCRIPT');
         const segments=[];let n=0,next_offset=null,next_char_offset;
         for(const raw of rows){
           const charOffset=raw.idx===offset?Math.max(0,Math.floor(Number(a.char_offset)||0)):0;
@@ -367,7 +381,7 @@
           if(take<remaining.length){next_offset=raw.idx;next_char_offset=charOffset+take;break;}
         }
         if(next_offset===null&&rows.length===2000)next_offset=rows.at(-1).idx+1;
-        return {episode:e,segments,next_offset,...(next_char_offset===undefined?{}:{next_char_offset}),max_output_bytes:60000};
+        return {episode:e,transcript_id:tid,segments,next_offset,...(next_char_offset===undefined?{}:{next_char_offset}),max_output_bytes:60000};
       }
       if(tool==='podcast_search'){
         const q=C.norm(C.string(a.query,300));if(!q)C.fail('INVALID_QUERY');
@@ -429,7 +443,7 @@
       const eids='SELECT id FROM episodes WHERE '+where;
       if((await this.rows("SELECT id FROM jobs WHERE state IN ('claiming','submitting','submitted','unknown') AND episode_id IN ("+eids+') LIMIT 1',params)).length)C.fail('ACTIVE_CLOUD_JOB');
       await this.io({op:'db.backup',dbPath:'podcasts.sqlite',label:'pre-delete'});
-      const statements=[{sql:'DELETE FROM segments WHERE transcript_id IN (SELECT id FROM transcripts WHERE episode_id IN ('+eids+'))',params},{sql:'DELETE FROM transcripts WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM notes WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM jobs WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM episodes WHERE '+where,params}];
+      const statements=[{sql:"DELETE FROM meta WHERE key IN (SELECT 'minutes:' || id FROM episodes WHERE "+where+")",params},{sql:'DELETE FROM segments WHERE transcript_id IN (SELECT id FROM transcripts WHERE episode_id IN ('+eids+'))',params},{sql:'DELETE FROM transcripts WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM notes WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM jobs WHERE episode_id IN ('+eids+')',params},{sql:'DELETE FROM episodes WHERE '+where,params}];
       if(kind==='show')statements.push({sql:'DELETE FROM shows WHERE id=?',params});if(kind==='all')statements.push({sql:'DELETE FROM shows',params:[]},{sql:"DELETE FROM meta WHERE key LIKE 'import:%'",params:[]});
       await this.batch(statements);return {deleted:true,backup_retained:true,legacy_files_retained:true};
     }

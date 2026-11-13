@@ -89,6 +89,83 @@ async function seed(h,overrides={}){
   const r=await h.service.ingest({title:'Synthetic show',episodes:[{guid:'episode-1',title:'Synthetic episode',audio_url:'https://audio.example.test/one.mp3',page_url:'https://example.test/episode',duration_s:3600,audio_bytes:10000,transcripts:[],...overrides}]},'https://example.test/feed','rss');return r.episodes[0].id;
 }
 const click=(jid,extra={})=>({type:'event',name:'card-action',actionId:'transcribe:'+jid,userActionToken:'host-issued-test-token',callId:'estimate-1',spawnCallId:'progress-1',...extra});
+// Minutes regression: production Service.run plus real SQLite/Library entry points.
+// Gap: no generated-reading coverage. Tier: existing SQLite contract. Minimal input:
+// two source paragraphs, model excerpts, then a replacement transcript version.
+function minutesModel(h,transform=x=>x){
+  let count=0;
+  h.host.text=async a=>{
+    count++;assert.equal(a.callId,'minutes-test');
+    if(a.prompt.includes('SOURCE=')){
+      const src=JSON.parse(a.prompt.split('SOURCE=')[1]);
+      const p={text:'A grounded insight',segment_idx:src[0].idx,excerpt_idx:0};
+      return {ok:true,model:'fixture/model',text:JSON.stringify(transform({chapters:[{title:'A chapter',summary:'A faithful chapter summary.',start_idx:src[0].idx,end_idx:src.at(-1).idx,points:[p],quotes:[p],decisions:[]}]}))};
+    }
+    return {ok:true,model:'fixture/model',text:JSON.stringify({overview:'A faithful overview.',key_points:[{chapter_index:0,point_index:0}]})};
+  };
+  return ()=>count;
+}
+test('minutes generation preserves all original segments and caches by active version',async()=>{
+  const h=harness();try{const eid=await seed(h);const source=[{text:'原文第一句。但是这是第二句。',start:0,end:12,speaker:'A'},{text:'The next original sentence.',start:13,end:20,speaker:'B'}];await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify(source)});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    const count=minutesModel(h);const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');
+    assert.equal(r.segment_count,2);assert.equal(r.chapter_count,1);assert.equal(r.interpretation_verified,false);
+    const d=JSON.parse(h.files.get(r.path));assert.deepEqual(d.segments.map(s=>s.text),source.map(s=>s.text));assert.equal(d.chapters[0].points[0].start_ms,0);assert.equal(d.chapters[0].points[0].end_ms,12000);assert.deepEqual(d.chapters[0].decisions,[]);
+    const runtime=runtimeHarness(h),index=await runtime.request('minutes_index',{},'saved-reading-index');assert.equal(index.ok,true);assert.equal(index.result.minutes.length,1);assert.equal(index.result.minutes[0].episode_id,eid);assert.equal(index.result.minutes[0].chapter_count,1);
+    assert.match(h.files.get(r.html_path),/data-transcript-search/);assert.match(h.files.get(r.html_path),/The next original sentence/);
+    const exported=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exported.push(a);return {ok:true};};
+    const artifact=await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');assert.equal(exported.length,2);assert.equal(exported[0].callId,'minutes-test');assert.equal(exported[0].path,artifact.task_path);assert.equal(JSON.parse(exported[1].content).segments.length,2);
+    assert.deepEqual(d.chapters.flatMap(c=>Array.from({length:c.end_idx-c.start_idx+1},(_,i)=>i+c.start_idx)),[0,1]);
+    assert.equal((await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test')).cached,true);assert.equal(count(),2);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement source.'});assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).stale,true);
+  }finally{h.close();}
+});
+// PR #285: a supported unpunctuated source must not exceed the model excerpt cap.
+// Exercise TXT import, model prompt/identifier selection, artifacts and citation tools.
+test('minutes bounded excerpts support long unpunctuated originals without changing the reader',async()=>{
+  const R=require('../podcast-insights/reading.js');
+  for(const original of ['x'.repeat(600),'x'.repeat(601),'x'.repeat(1200),'a'.repeat(599)+'😀'+'b'.repeat(200),('a long clause without sentence punctuation ').repeat(20)]){
+    const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:original});
+      h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+      let excerptCount=0,calls=0;
+      h.host.text=async a=>{calls++;if(!a.prompt.includes('SOURCE='))return {ok:true,text:JSON.stringify({overview:'A source-backed overview.',key_points:[{chapter_index:0,point_index:0}]})};
+        const src=JSON.parse(a.prompt.split('SOURCE=')[1]);excerptCount=src[0].excerpts.length;
+        for(const e of src[0].excerpts){assert.ok(e.text.length<=600,'overlong model excerpt');assert.ok(C.norm(original).includes(C.norm(e.text)));assert.equal(e.text.isWellFormed(),true);}
+        const evidence=src[0].excerpts.map(e=>({text:'Original evidence',segment_idx:src[0].idx,excerpt_idx:e.excerpt_idx}));
+        return {ok:true,text:JSON.stringify({chapters:[{title:'Source chapter',summary:'A faithful source summary.',points:evidence,decisions:[],quotes:[]}]})};
+      };
+      const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');assert.equal(calls,2);
+      const d=JSON.parse(h.files.get(r.path));assert.equal(d.segments[0].text,original.trim());assert.equal(d.chapters[0].points.length,excerptCount);
+      for(const p of d.chapters[0].points){assert.equal(p.segment_id,d.segments[0].id);const cite=await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]});assert.ok(['exact','normalized'].includes(cite.citations[0].status));}
+      if(!original.includes(' '))assert.equal(R.paragraphs(original).length,1,'reading view must retain semantic paragraph');
+    }finally{h.close();}
+  }
+});
+test('minutes rejects fabricated evidence or omitted coverage before committing an artifact',async()=>{
+  for(const corrupt of [d=>{d.chapters[0].points[0].excerpt_idx=999;return d;},d=>{d.chapters=[];return d;}]){
+    const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Only original evidence.'});minutesModel(h,corrupt);await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_INVALID_OUTPUT|MINUTES_COVERAGE_FAILED/);assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).available,false);}finally{h.close();}
+  }
+});
+test('minutes model unavailable never starts audio or loses an old reading record',async()=>{
+  const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Existing evidence.'});await h.service.sql('INSERT INTO meta VALUES(?,?)',['minutes:'+eid,JSON.stringify({id:'previous',transcript_id:'old',language:'zh-CN',path:'previous.json'})]);h.host.text=async()=>({ok:false,errorCode:'NO_CANDIDATE'});await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_MODEL_UNAVAILABLE/);assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).id,'previous');assert.equal(h.calls.length,0);}finally{h.close();}
+});
+test('YouTube unsupported gives a specific error before fetching or changing the library',async()=>{
+  const h=harness();try{await assert.rejects(h.service.run('podcast_import',{url:'https://www.youtube.com/watch?v=synthetic'},'minutes-test'),/YOUTUBE_IMPORT_UNSUPPORTED/);assert.equal(h.calls.length,0);assert.equal((await h.service.run('podcast_library')).episodes.length,0);}finally{h.close();}
+});
+test('reading semantics preserve long clauses and escape transcript markup in standalone output',()=>{
+  const R=require('../podcast-insights/reading.js');const long='完整语义'.repeat(80)+'，这是同一个意思。';assert.deepEqual(R.paragraphs(long),[long]);assert.deepEqual(R.paragraphs('我 们 开 始。 但是继续， 所以停顿。'),['我们开始。','但是继续，','所以停顿。']);
+  const d={language:'zh-CN',episode:{title:'<script>unsafe</script>',show_title:'Test'},created_at:'2026-11-05',overview:'Overview',key_points:[],chapters:[],links:[],segments:[{id:'one',idx:0,text:'</script><img src=x onerror=alert(1)>',start_ms:null,end_ms:null}]};const html=R.documentHTML(d,'');assert.ok(!html.includes('<img src=x'));assert.ok(html.includes('&lt;img'));new vm.Script(html.match(/<script>([\s\S]*)<\/script>/)[1]);
+});
+test('chapter ranges include interleaved point decision and quotation evidence',async()=>{
+  const h=harness();try{const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify(Array.from({length:5},(_,i)=>({text:'Original '+i,start:i*10,end:i*10+5,speaker:String(i)})))});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h,()=>({chapters:[{title:'One',summary:'Summary one',points:[{text:'Point',segment_idx:0,excerpt_idx:0}],decisions:[{text:'Choice',segment_idx:4,excerpt_idx:0}],quotes:[]},{title:'Two',summary:'Summary two',points:[{text:'Point',segment_idx:2,excerpt_idx:0}],decisions:[],quotes:[{text:'Quotation',segment_idx:1,excerpt_idx:0}]}]}));
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+    for(const c of d.chapters)for(const p of [...c.points,...c.decisions,...c.quotes])assert.ok(c.start_idx<=p.segment_idx&&p.segment_idx<=c.end_idx,JSON.stringify(c));
+    assert.deepEqual(d.chapters.flatMap(c=>Array.from({length:c.end_idx-c.start_idx+1},(_,i)=>c.start_idx+i)),[0,1,2,3,4]);
+  }finally{h.close();}
+});
+
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function runtimeHarness(h,missingCapability,failUi=false){
   let listener,channel;const messages=[],waiters=new Map(),timers=[];
@@ -97,7 +174,7 @@ function runtimeHarness(h,missingCapability,failUi=false){
     fetch:async()=>{if(failUi)throw new Error('Synthetic UI load failure');return {ok:true,json:async()=>ui};},
     BroadcastChannel:class{constructor(){channel=this;}postMessage(m){messages.push(m);if(m.type==='response')waiters.get(m.reqId)?.resolve(m);}},
     setInterval:()=>0,clearInterval(){},setTimeout:(f,ms)=>{timers.push({f,ms});return timers.length;},
-    cindy:{library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);}},
+    cindy:{tasks:h.tasks,library:h.host.library,fetch:h.host.fetch,request:async()=>({context:{locale:'en'}}),onHostMessage:f=>{listener=f;},send:async m=>{messages.push(m);if(m.type==='tool-result')waiters.get(m.callId)?.resolve(m);}},
   };
   if(missingCapability)delete ctx.cindy[missingCapability];
   vm.runInNewContext(fs.readFileSync(new URL('../podcast-insights/runtime.js',import.meta.url),'utf8'),ctx);
@@ -106,6 +183,14 @@ function runtimeHarness(h,missingCapability,failUi=false){
     request:(tool,args,reqId)=>{const done=deferred();waiters.set(reqId,done);channel.onmessage({data:{type:'request',tool,args,reqId}});return done.promise;},
   };
 }
+test('reading actions create native Cindy tasks with original chapter context',async()=>{
+  const h=harness();try{const sent=[];h.tasks={capabilities:async()=>({operations:['create','send']}),create:async()=>({taskId:'native-task',revision:1}),send:async a=>{sent.push(a);return {ok:true};}};
+    const runtime=runtimeHarness(h);const result=await runtime.request('minutes_generate',{action:'generate',episode_id:'synthetic-episode',language:'zh-CN'},'generate-reading');assert.equal(result.ok,true);assert.match(sent[0].text,/podcast_minutes/);
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Source evidence.'});const active=(await h.service.rows('SELECT id FROM transcripts WHERE episode_id=? AND is_active=1',[eid]))[0];
+    await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'How does this apply?'},'ask-reading');assert.equal(sent.length,2);assert.match(sent[1].text,/podcast_read and podcast_cite/);assert.ok(sent[1].text.includes(active.id));assert.match(sent[1].text,/from_segment_idx/);assert.equal(h.calls.length,0);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement evidence.'});const stale=await runtime.request('chapter_ask',{episode_id:eid,transcript_id:active.id,from_segment_idx:0,to_segment_idx:0,question:'Old question'},'stale-question');assert.equal(stale.ok,false);assert.equal(stale.errorCode,'MINUTES_SOURCE_CHANGED');assert.equal(sent.length,2);
+  }finally{h.close();}
+});
 test('long TXT, MD and JSON split without invented internal timestamps',()=>{
   const text='a'.repeat(25001);
   for(const format of ['txt','md','json']){
@@ -1142,7 +1227,7 @@ test('restart reclaims only incomplete non-cloud inactive transcript versions',a
 
 test('cloud progress cards show current localized errors and unknown recovery guidance',async()=>{
   const h=harness();try{const runtime=runtimeHarness(h);await runtime.call('podcast_library',{},'start-progress');
-    h.service.run=async()=>({jobs:[{id:'progress-errors',state:'unknown',card_id:'progress-slot',errorCode:'NETWORK_FAILED',recovery_incomplete:true}]});
+    h.service.run=async()=>({jobs:[{id:'progress-errors',provider:'assemblyai',state:'unknown',card_id:'progress-slot',errorCode:'NETWORK_FAILED',recovery_incomplete:true}]});
     await runtime.request('resume',{},'resume-progress');
     const poll=runtime.timers.find(t=>t.ms>=15000);assert.ok(poll);poll.f();
     for(let i=0;i<30&&!runtime.messages.some(m=>m.type==='card-update'&&m.callId==='progress-slot');i++)await new Promise(resolve=>setImmediate(resolve));
@@ -1152,10 +1237,161 @@ test('cloud progress cards show current localized errors and unknown recovery gu
 
 test('unknown progress cards survive failed UI localization initialization',async()=>{
   const h=harness();try{const runtime=runtimeHarness(h,undefined,true);await runtime.call('podcast_library',{},'failed-ui-start');
-    h.service.run=async()=>({jobs:[{id:'failed-ui-job',state:'unknown',card_id:'failed-ui-slot',recovery_incomplete:true}]});
+    h.service.run=async()=>({jobs:[{id:'failed-ui-job',provider:'assemblyai',state:'unknown',card_id:'failed-ui-slot',recovery_incomplete:true}]});
     await runtime.request('resume',{},'failed-ui-resume');
     const poll=runtime.timers.find(t=>t.ms>=15000);assert.ok(poll);poll.f();
     for(let i=0;i<30&&!runtime.messages.some(m=>m.type==='card-update'&&m.callId==='failed-ui-slot');i++)await new Promise(resolve=>setImmediate(resolve));
     const card=runtime.messages.find(m=>m.type==='card-update'&&m.callId==='failed-ui-slot');assert.ok(card);assert.match(card.html,/Check provider jobs; do not resubmit/);
+  }finally{h.close();}
+});
+
+// #285 P2 regressions: real Service import/generation/export and Reading.bind.
+// Existing tests checked rendered markup, not search input or cumulative hours.
+// Minimal inputs: a keyword split at 12000 and JSON time at 25h. Tier: SQLite/unit.
+test('reading and exported binder find storage-boundary words and retain cumulative hours',async()=>{
+  const R=require('../podcast-insights/reading.js'),vm=await import('node:vm');
+  const h=harness();try{
+    const eid=await seed(h);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'x'.repeat(11998)+'量子计算 tail'});
+    assert.equal((await h.service.run('podcast_search',{query:'量子计算'})).evidence.length,1);
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h);
+    async function generate(){const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test');return JSON.parse(h.files.get(r.path));}
+    const d=await generate();assert.equal(d.segments.length,2);
+    const exports=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exports.push(a);return {ok:true};};
+    await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+    function exercise(bind){
+      let input;const count={},nodes=d.segments.map(s=>({textContent:s.text,hidden:false}));
+      const container={querySelector:s=>s==='[data-transcript-search]'?{addEventListener:(_,fn)=>{input=fn;}}:s==='[data-match-count]'?count:null,querySelectorAll:s=>s==='[data-transcript-segment]'?nodes:[]};
+      bind(container,d);input({target:{value:'量子计算'}});assert.deepEqual(nodes.map(n=>n.hidden),[false,false]);assert.match(count.textContent,/^2 /);
+      input({target:{value:'absent'}});assert.ok(nodes.every(n=>n.hidden));input({target:{value:''}});assert.ok(nodes.every(n=>!n.hidden));
+    }
+    exercise(R.bind);
+    const script=exports[0].content.match(/<script>([\s\S]*)<\/script>/)[1];
+    // Execute the actual exported script against the same DOM adapter.
+    exercise((container)=>vm.runInNewContext(script,{document:container}));
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'Long recording evidence.',start:90000,end:90061}])});
+    const timed=await generate();assert.equal(timed.segments[0].start_ms,90000000);
+    for(const html of [R.render(timed),R.documentHTML(timed,'')])assert.match(html,/25:00:00–25:01:01/);
+  }finally{h.close();}
+});
+
+// #285 P2: unlike cite, minutes accepted punctuation-only model quotations.
+// Service/SQLite unit regression: missing excerpt_idx + quote '...' must not
+// save an artifact; existing coverage only rejected missing excerpt identifiers.
+test('minutes rejects empty normalized quotes while retaining source excerpt and valid quote mapping',async()=>{
+  const h=harness();try{
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Only original evidence'});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h,d=>{d.chapters[0].points[0]={...d.chapters[0].points[0]};delete d.chapters[0].points[0].excerpt_idx;d.chapters[0].points[0].quote='...';return d;});
+    await assert.rejects(h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),/MINUTES_QUOTE_MISMATCH/);
+    assert.equal((await h.service.run('podcast_minutes',{action:'read',episode_id:eid})).available,false);
+    assert.equal(h.files.size,0);assert.equal(h.db.prepare("SELECT count(*) AS n FROM meta WHERE key=?").get('minutes:'+eid).n,0);
+    await assert.rejects(h.service.run('podcast_cite',{references:[{episode_id:eid,quote:'...'}]}),/INVALID_INPUT/);
+    minutesModel(h,d=>{d.chapters[0].points[0]={...d.chapters[0].points[0]};delete d.chapters[0].points[0].excerpt_idx;d.chapters[0].points[0].quote='only ORIGINAL evidence';return d;});
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+    assert.equal(d.chapters[0].points[0].quote,'only ORIGINAL evidence');assert.equal(d.chapters[0].quotes[0].quote,'Only original evidence');
+    for(const p of [d.chapters[0].points[0],d.chapters[0].quotes[0]]){
+      assert.equal(p.segment_id,d.segments[0].id);
+      const c=await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]});assert.ok(['exact','normalized'].includes(c.citations[0].status));
+    }
+  }finally{h.close();}
+});
+
+// #285 chapter range regression: production Service import/generate/export to
+// Reading.render; previous coverage used one timed segment. SQLite/unit tier.
+// Two segments (0-5s,55-60s) must display the full chapter, not its first segment.
+test('chapter headings use first start and last end through Service reading and HTML export',async()=>{
+  const R=require('../podcast-insights/reading.js'),h=harness();try{
+    const eid=await seed(h);
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});
+    minutesModel(h);h.host.readingCSS=async()=>'';const exported=[];h.host.writeTaskFile=async a=>{exported.push(a);return {ok:true};};
+    for(const [start,end,lastStart,lastEnd,expected] of [[0,5,55,60,'00:00:00–00:01:00'],[90000,90005,90055,90060,'25:00:00–25:01:00'],[0,5,55,null,'00:00:00'],[null,null,55,60,'时间未知–00:01:00'],[null,null,null,null,'时间未知']]){
+      await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'First source evidence',start,end},{text:'Last source evidence',start:lastStart,end:lastEnd,speaker:'B'}])});
+      const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));
+      assert.equal(d.chapters[0].start_idx,0);assert.equal(d.chapters[0].end_idx,1);
+      exported.length=0;await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+      for(const html of [R.render(d),h.files.get(r.html_path),exported[0].content]){
+        const heading=html.match(/id="chapter-0"><p class="meta">([^<]*)<\/p>/)[1];assert.equal(heading,'01 / '+expected);
+      }
+      const p=d.chapters[0].points[0];assert.equal(p.segment_id,d.segments[0].id);assert.equal(p.start_ms,d.segments[0].start_ms);assert.equal(p.end_ms,d.segments[0].end_ms);
+      assert.equal((await h.service.run('podcast_cite',{references:[{episode_id:eid,quote:p.quote}]})).citations[0].status,'exact');
+      // Incomplete historical records retain unknown/omitted endpoint semantics.
+      const missing=structuredClone(d);missing.segments=[];
+      assert.match(R.render(missing),/01 \/ 时间未知<\/p>/);
+    }
+  }finally{h.close();}
+});
+
+// Split delivery compatibility: a pre-existing unsupported provider job must
+// remain intact and can never be submitted/reconciled using AssemblyAI.
+// Tier: production Service + SQLite. Gap: removed provider's persisted jobs.
+test('reading-only delivery preserves unsupported jobs and transcript without provider fallback',async()=>{
+  const h=harness();try{
+    const eid=await seed(h);
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Existing original evidence.'});
+    const job={id:'legacy-provider-job',episode_id:eid,provider:'legacy-provider',state:'unknown',remote_id:'legacy-remote',est_usd:null,submitted_at:'2026-11-01T00:00:00Z',checked_at:'',error:'',card_id:'estimate-1',audio_url:'https://audio.example.test/one.mp3'};
+    await h.service.sql('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',Object.values(job));
+    await h.service.sql('INSERT INTO meta VALUES(?,?)',['legacy-provider:receipt','retained']);
+    for(const state of ['unknown','prepared']){
+      await h.service.sql('UPDATE jobs SET state=? WHERE id=?',[state,job.id]);
+      const status=await h.service.run('podcast_status',{job_id:job.id});
+      assert.equal(status.jobs[0].error,'PROVIDER_UNAVAILABLE');assert.equal(status.jobs[0].state,state);
+      await assert.rejects(h.service.submitFromClick(job.id,click(job.id)),/PROVIDER_UNAVAILABLE/);
+      await assert.rejects(h.service.run('podcast_transcribe',{episode_id:eid},'estimate-1'),/PROVIDER_JOB_EXISTS/);
+      const runtime=runtimeHarness(h);await runtime.call('podcast_status',{job_id:job.id},'unsupported');
+      assert.ok(runtime.timers.every(t=>t.ms!==15000));
+      for(const card of runtime.messages.filter(m=>m.type==='card-update'))assert.doesNotMatch(card.html,/data-ghost-action="transcribe:/);
+      assert.equal((await h.service.rows('SELECT * FROM jobs WHERE id=?',[job.id]))[0].remote_id,job.remote_id);
+    }
+    assert.equal(h.calls.length,0);
+    assert.equal((await h.service.rows('SELECT value FROM meta WHERE key=?',['legacy-provider:receipt']))[0].value,'retained');
+    assert.equal((await h.service.run('podcast_read',{episode_id:eid})).segments[0].text,'Existing original evidence.');
+  }finally{h.close();}
+});
+
+// #330 P1: a chapter task can start after a replacement transcript is imported.
+// Production runtime -> Service/SQLite: pin read/continuation/cite to the question's
+// source version, with two versions in one citation call and a foreign episode ID.
+test('chapter follow-up reads and cites its original version after transcript replacement',async()=>{
+  const h=harness();try{
+    const eid=await seed(h);await h.service.run('podcast_import_transcript',{episode_id:eid,format:'json',content:JSON.stringify([{text:'Original chapter evidence.',start:1,end:3},{text:'Original closing evidence.',start:4,end:6}])});
+    const old=await h.service.run('podcast_read',{episode_id:eid}),tid=old.segments[0].transcript_id;
+    const sent=[];h.tasks={capabilities:async()=>({operations:['create','send']}),create:async()=>({taskId:'follow-up',revision:1}),send:async a=>{sent.push(a);return {ok:true};}};
+    const runtime=runtimeHarness(h);await runtime.request('chapter_ask',{episode_id:eid,transcript_id:tid,from_segment_idx:0,to_segment_idx:1,question:'What is the evidence?'},'version-question');
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:'Replacement chapter evidence.'});
+    const current=await h.service.run('podcast_read',{episode_id:eid}),newTid=current.segments[0].transcript_id;
+    const page=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,max_chars:8});
+    assert.equal(page.segments[0].transcript_id,tid);assert.equal(page.segments[0].text,'Original');
+    const next=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,offset:page.next_offset,char_offset:page.next_char_offset,max_chars:200});assert.match(next.segments[0].text,/chapter evidence/);
+    const around=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,around_segment:old.segments[1].id});assert.equal(around.segments[0].idx,1);
+    const timed=await h.service.run('podcast_read',{episode_id:eid,transcript_id:tid,from_ms:4000});assert.equal(timed.segments[0].idx,1);
+    const refs=await h.service.run('podcast_cite',{references:[{episode_id:eid,transcript_id:tid,quote:'Original chapter evidence.'},{episode_id:eid,transcript_id:newTid,quote:'Replacement chapter evidence.'},{episode_id:eid,transcript_id:tid,quote:'Replacement chapter evidence.'}]});
+    assert.deepEqual(refs.citations.map(c=>c.status),['exact','exact','not_found']);assert.equal(refs.citations[0].transcript_id,tid);assert.equal(refs.citations[1].transcript_id,newTid);
+    await assert.rejects(h.service.run('podcast_read',{episode_id:eid,transcript_id:'missing-version'}),/TRANSCRIPT_VERSION_UNAVAILABLE/);
+    const foreign=await seed(h,{guid:'other-episode'});await assert.rejects(h.service.run('podcast_cite',{references:[{episode_id:foreign,transcript_id:tid,quote:'Original chapter evidence.'}]}),/TRANSCRIPT_VERSION_UNAVAILABLE/);
+    assert.match(sent[0].text,/transcript_id.*every podcast_read/);assert.match(sent[0].text,/every podcast_cite reference/);
+  }finally{h.close();}
+});
+
+// #330 P2: artificial ASR spaces straddle a 12000-character storage boundary.
+// Production generation/export and both actual binders must match reading text
+// without modifying saved raw source or merging unrelated source intervals.
+test('reading and export search clean Chinese spacing across storage boundaries',async()=>{
+  const h=harness(),R=require('../podcast-insights/reading.js');try{
+    const eid=await seed(h),source='x'.repeat(11998)+'量 子计 算 tail';
+    await h.service.run('podcast_import_transcript',{episode_id:eid,format:'txt',content:source});
+    h.host.library=new Proxy(h.host.library,{apply:async(target,that,args)=>args[0].op==='write'?(h.files.set(args[0].path,args[0].content),{ok:true}):target(...args)});minutesModel(h);
+    const r=await h.service.run('podcast_minutes',{action:'generate',episode_id:eid},'minutes-test'),d=JSON.parse(h.files.get(r.path));assert.equal(d.segments.length,2);assert.equal(d.segments.map(s=>s.text).join(''),source);
+    const exports=[];h.host.readingCSS=async()=>'';h.host.writeTaskFile=async a=>{exports.push(a);return {ok:true};};await h.service.run('podcast_minutes',{action:'export',episode_id:eid},'minutes-test');
+    function exercise(bind){
+      let input;const nodes=d.segments.map(s=>({textContent:s.text,hidden:false})),count={};
+      const container={querySelector:s=>s==='[data-transcript-search]'?{addEventListener:(_,fn)=>{input=fn;}}:s==='[data-match-count]'?count:null,querySelectorAll:s=>s==='[data-transcript-segment]'?nodes:[]};
+      bind(container,d);
+      for(const value of ['量子计算','量 子计 算']){input({target:{value}});assert.deepEqual(nodes.map(n=>n.hidden),[false,false]);assert.match(count.textContent,/^2 /);}
+      input({target:{value:'missing'}});assert.ok(nodes.every(n=>n.hidden));input({target:{value:''}});assert.ok(nodes.every(n=>!n.hidden));
+    }
+    exercise(R.bind);const script=exports[0].content.match(/<script>([\s\S]*)<\/script>/)[1];exercise(container=>vm.runInNewContext(script,{document:container}));
+    assert.equal(JSON.parse(exports[1].content).segments.map(s=>s.text).join(''),source);
   }finally{h.close();}
 });
