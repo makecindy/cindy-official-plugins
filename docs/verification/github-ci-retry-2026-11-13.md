@@ -6,6 +6,41 @@ Environment: Cindy 0.1.136 Beta, Windows 10.0.26100, Node v22.22.3.
 Only the isolated `local` GitHub development instance was installed/updated.
 The marketplace instance and its preferences were left unchanged.
 
+## Additional real-device check — 1.5.19 / 97d540e
+
+At 2026-11-13 18:09 UTC (2026-11-14 02:09 +08:00), Cindy Forge updated the
+existing `_ns__local__cindy-github` instance to 1.5.19, returning
+`action: updated`, `enabled: true`, `namespace: local`. This was an explicitly
+authorized update, not a marketplace replacement. The tested package source is
+97d540e; subsequent changes to this record do not change its packaged content.
+
+- The live settings before and after update were identical:
+  `auto_rename:false, auto_follow:true, ci_retry_repush:true`. This was the
+  pre-existing value, not an enablement performed by the Agent. Account setup
+  remained ready; the marketplace instance was retained.
+- The actual iPhone operator opened local test [PR #1](https://github.com/yan-xdt/cindy-official-plugins/pull/1)'s
+  settings and checked the retry switch, shared-scope label and SHA description.
+  Both Light and Dark were reported complete with no horizontal overflow;
+  the preference was left unchanged. This is an on-device human observation,
+  not a generated preview, browser-width emulation or Agent screenshot. The
+  phone client version was not read; no full-screen/private image was captured
+  or uploaded. It does not cover fault-injected unknown-state UI.
+- Through the actual installed local plugin, normal rerun of
+  [run 43421933262](https://github.com/yan-xdt/cindy-official-plugins/actions/runs/43421933262)
+  was accepted. Read-back showed **attempt 3, completed/success**, job
+  `controlled-check` 132072958905, with all steps successful. The original PR
+  remained closed/unmerged and head remained
+  `1296be40f2082aa1e8bc01cb7f5d078beba533a1`; no branch rewrite was attempted.
+
+This is genuine Cindy/mobile display and GitHub normal-rerun evidence, **not**
+permission-denied recovery acceptance. Repository metadata confirmed that the
+current isolated-repository account has `admin`, `maintain` and `push` access;
+it does not supply a real rerun denial. The fixture is an intentional test,
+not a diagnosed infrastructure failure. No credentials, permissions, live
+preference or production branches were changed to manufacture eligibility.
+The real denial → guarded rewrite → original PR new SHA/CI path and disabling
+during that recovery remain unverified; their review thread stays open.
+
 ## Actual desktop observation: 1.5.14 / 209ef92
 
 The PR card enabled the preference; the live tool returned `true`. The settings
@@ -139,8 +174,8 @@ All new and migrated reservations share the same slot allocator and validator.
 Three new/expanded CLI regressions first failed against 754f1fe. The focused
 suite then passed 13 tests, including old receipt migration and concurrent real
 Node processes. This is isolated local budget/Git evidence, not the missing
-real GitHub permission-denied recovery acceptance. No 1.5.19 live install or
-real preference change was performed.
+real GitHub permission-denied recovery acceptance. At that CLI-check stage no
+1.5.19 live install was performed; the later installation is recorded above.
 The four required repository suites plus the plugin suite passed together:
 310 passed, 19 skipped, 0 failed in 106.5 seconds (same Windows/Node environment).
 The final focused CLI suite passed 13 tests in 5.1 seconds after the status/help
@@ -148,18 +183,17 @@ wording update; the Git fixtures remain local, not GitHub recovery evidence.
 
 ## Remaining prerequisites
 
-- Actual phone display. The deleted settings-page preference handshake no
-  longer requires cold-start acceptance; it is absent, not claimed tested.
+- Normal phone display passed the 1.5.19 human check above; fault-injected
+  unknown-state UI remains unverified. The deleted settings-page preference
+  handshake does not require cold-start acceptance.
 - The disabled-preference scheduled observation was recorded at 2026-11-13
   13:21:38 UTC in [this reply](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6854235302).
   It is historical, not current rewrite authorization or a full recovery test.
 - A real eligible permission-denied rerun through signed/unsigned recovery,
   exact leased push, original PR head read-back and actual CI triggering.
-- The maintainers' explicit decision on the branch-rewrite scope, now one
-  attempt per diagnosed failure and two total per PR/computer. The
-  [maintainer's original comment](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6850756870)
-  promises a later decision; it is not approval. The [later decision](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6857743258)
-  requires a fixed total cap before another full review, not final approval.
+- The [maintainer's explicit scope decision](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6860544540)
+  confirmed one attempt per failure and two total per PR. Its thread has been
+  resolved. This does not approve the unverified recovery path or authorize merge.
 
 Local fixtures/generated previews do not replace these prerequisites. Fork CI
 approval remains a maintainer action. No merge, publishing, permission changes

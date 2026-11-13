@@ -5,6 +5,33 @@
 环境：Cindy 0.1.136 Beta、Windows 10.0.26100、Node v22.22.3。
 仅安装/更新隔离的 `local` GitHub 开发实例，市场版及其偏好保持原样。
 
+## 追加真机验收 — 1.5.19 / 97d540e
+
+2026-11-13 18:09 UTC（2026-11-14 02:09 +08:00），经明确授权，Cindy Forge
+把已有 `_ns__local__cindy-github` 原位更新到 1.5.19，返回 `action: updated`、
+`enabled: true`、`namespace: local`。未覆盖市场版。实测包源码为 97d540e，
+后续对本记录的修改不改变该包内容。
+
+- 更新前后实时设置完全一致：`auto_rename:false, auto_follow:true,
+  ci_retry_repush:true`。这是更新前已有值，Agent 没有开启开关。账号状态仍为
+  ready，市场实例保留。
+- iPhone 现场操作者打开 local [隔离 PR #1](https://github.com/yan-xdt/cindy-official-plugins/pull/1)
+  的设置，核对重推开关、共用范围和 SHA 说明；浅色、深色均反馈显示完整，
+  无横向溢出，开关保持不动。这是手机现场人工观察，不是生成图、浏览器窄屏
+  仿真或 Agent 截图。未读取手机客户端版本；本轮没有采集或上传整屏/私人图片，
+  也未覆盖故障注入后的未知态界面。
+- 通过实际安装的 local 插件正常 rerun
+  [run 43421933262](https://github.com/yan-xdt/cindy-official-plugins/actions/runs/43421933262)，
+  收到接受回执，随后回读为 **attempt 3、completed/success**；job
+  `controlled-check` 132072958905 的所有步骤成功。原测试 PR 保持 closed、未合并，
+  head 仍为 `1296be40f2082aa1e8bc01cb7f5d078beba533a1`，未尝试改写分支。
+
+这是实际 Cindy/手机显示及 GitHub 正常重跑证据，**不是真实权限拒绝后的恢复验收**。
+仓库元信息确认，当前隔离仓库账号有 `admin`、`maintain`、`push` 权限，不能提供
+真实 rerun 拒绝。夹具是受控测试，不是已诊断的基础设施故障。本轮未通过修改凭证、
+权限、真实偏好或生产分支来制造资格。真实拒绝 → 受限改写 → 原 PR 新 SHA/CI，
+以及该恢复过程中关闭生效，仍未验证；对应验收线程继续保留。
+
 ## 真实桌面观察：1.5.14 / 209ef92
 
 在 PR 卡片开启后，实时工具返回 `true`；设置页显示勾选，关闭后工具返回 `false`。
@@ -114,24 +141,23 @@ gate 持有两个排他持久名额，每个只写一次，不过期、不退款
 
 三项新增/扩展 CLI 回归先在 754f1fe 上失败；定向套件修复后 13 项通过，包含旧回执
 迁移与真实 Node 跨进程并发。这是隔离本地额度/Git 证据，不替代真实 GitHub 权限
-拒绝后的恢复验收。本轮未安装 1.5.19，也未改真实偏好。
+拒绝后的恢复验收。该次 CLI 检查时尚未安装 1.5.19；后续真实安装见前文追加记录。
 四项仓库规定测试与插件测试合跑：310 通过、19 跳过、0 失败，106.5 秒，环境为
 上文 Windows/Node。状态/帮助文案更新后的最终 CLI 定向套件 13 项通过，5.1 秒；
 Git fixture 仍是本地证据，不冒充 GitHub 恢复实测。
 
 ## 剩余验收与决定
 
-- 实际手机显示。设置页的偏好握手已删除，不再要求验收该冷启动路径；这是路径移除，
-  不声称它已实测通过。
+- 正常手机显示已通过上文 1.5.19 人工真机验收；故障注入后的未知态界面未验证。
+  设置页偏好握手已删除，不再要求验收该冷启动路径。
 - 实际调度读取关闭值已在 2026-11-13 13:21:38 UTC 记录于
   [这条回复](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6854235302)。
   这是历史观察，不是当前改写授权或完整恢复测试。
 - 真实合格的 rerun 权限拒绝，经签名/未签名恢复、精确 lease、原 PR head 回读及
   CI 实际触发的完整链路。
-- 维护者对分支改写范围的明确决定：当前为同一故障一次、本机每 PR 累计最多两次。
-  [维护者原始评论](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6850756870)
-  表示之后另行决定，不视为批准。[后续决定](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6857743258)
-  要求加固定总上限后再完整审查，不视为最终批准。
+- [维护者的明确范围决定](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6860544540)
+  已确认同一故障一次、每 PR 累计两次，对应线程已解决；不等于未验收恢复路径
+  获批，也不授权合并。
 
 本地 fixture 和生成预览不能替代这些前提。fork CI 批准仍由维护者处理；未执行
 合并、发布、改权限，也未修改 makecindy/cindy#10355。
