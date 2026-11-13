@@ -474,9 +474,9 @@ plugin packages, Host behavior, or CI restrictions.
 
 ### Current declarations and future synchronization
 
-The fields below reference [Host commit a81313e8446c](https://github.com/makecindy/cindy/blob/a81313e8446c171ba0e70cb568f5b47cc9a9f078/packages/plugin-protocol/src/manifest.ts)
-and its runtime references. They help locate capabilities; availability still
-depends on the target Host.
+The fields below reference [Host commit 94475474ec](https://github.com/makecindy/cindy/blob/94475474ec60d13f94790d0548e74b7d75ce9de6/packages/plugin-protocol/src/manifest.ts)
+(`v0.1.135`) and its runtime references. They help locate capabilities;
+availability still depends on the target Host.
 
 | Capability | Declaration |
 | --- | --- |
@@ -486,8 +486,13 @@ depends on the target Host.
 | Configuration and prerequisites | `showTaskPreferences`, `setup.requires[].anyOf` |
 | Introductions and mail | `readme`, `mail`, `mailReader` |
 | Models and Routine events | `models.types`, `routineEvents.events` |
+| Static system prompt | `systemPrompt` (v3, `scope: "selected-task"`) |
+| Event hooks | `subscribe.hooks` values `will-start-turn`, `will-model-request`, `will-compose-context`, `will-search-memory` |
 | Credential checks | `network.secrets[].check` |
 | Desktop synchronization and device screens | `deviceSync`, `liveScreen` |
+
+Page resources remain under `mcpApps.ui`: `resources` and `tools` must not both be
+empty; a page opened only through a named entry may use empty `tools: {}`.
 
 Host resource languages include `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.
 Host capabilities and official repository admission are maintained separately.
