@@ -36,7 +36,11 @@ normal push when possible.
 
 When all conditions hold, the Agent may amend without editing the commit intent
 or changing its tree, parents or author, preserving the repository's DCO rules.
-This changes the commit SHA. The push must use an explicit destination and
+This changes the commit SHA. Preserve signed-commit provenance: a signed head requires verified original
+signatures and an existing, available automatic signing configuration before
+budget consumption. Otherwise recovery stops, including one-off `git commit -S`
+without automatic signing. Verify the replacement signature before pushing;
+missing/invalid/unknown signatures remain unpushed. The explicit push uses
 `--force-with-lease=refs/heads/<branch>:<verified-remote-SHA>`. An intervening
 remote commit ends the attempt; the Agent must not update the lease and blindly
 push again. It checks the new SHA on the original PR and whether CI actually
@@ -64,3 +68,6 @@ task Agent workflow and task authorization; the gate enforces the retry budget,
 not those factual judgments. No platform scopes, credentials, Host runtime or
 service changes are added. No empty commits, bare force pushes, merge, auto-merge,
 queue changes, direct main pushes or permission changes are authorized.
+
+See the [runtime evidence and remaining gaps](verification/github-ci-retry-2026-11-13.md),
+including cropped actual screenshots and separately labeled generated previews.

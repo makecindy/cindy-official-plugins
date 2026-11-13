@@ -19,6 +19,7 @@ var MESSAGES = {
   'zh-CN': {
     prPreferences: 'PR 跟进偏好',
     ciRetry: 'CI 无重跑权限时重推重试',
+    ciRetryScope: '本机所有仓库 / PR 共用',
     ciRetryHint: '仅确认临时故障且重跑被权限拒绝时，可改写独占分支的提交 SHA 并受限重推',
     prLoadFailed: '无法读取 PR 偏好，请重新打开设置后再试。',
     prSaveFailed: '未能确认 PR 偏好已保存，请重新打开设置核对。',
@@ -57,6 +58,7 @@ var MESSAGES = {
   en: {
     prPreferences: 'PR follow-up preferences',
     ciRetry: 'Repush CI when rerun permission is denied',
+    ciRetryScope: 'Shared by all repos / PRs on this computer',
     ciRetryHint: 'Only for confirmed transient failures and permission-denied reruns: rewrite the commit SHA on an exclusive branch and repush with safeguards',
     prLoadFailed: 'Could not read PR preferences. Reopen settings and try again.',
     prSaveFailed: 'Could not confirm PR preferences were saved. Reopen settings to check.',
@@ -95,6 +97,7 @@ var MESSAGES = {
   ja: {
     prPreferences: 'PR フォローの設定',
     ciRetry: 'CI の再実行権限がない場合に再プッシュ',
+    ciRetryScope: 'この端末の全リポジトリ・PR で共用',
     ciRetryHint: '一時的な障害と再実行の権限拒否を確認した場合のみ、専用ブランチのコミット SHA を書き換え、安全条件の下で再プッシュします',
     prLoadFailed: 'PR 設定を読み込めませんでした。設定を開き直して再試行してください。',
     prSaveFailed: 'PR 設定の保存を確認できませんでした。設定を開き直して確認してください。',
@@ -133,6 +136,7 @@ var MESSAGES = {
   ko: {
     prPreferences: 'PR 팔로우 설정',
     ciRetry: 'CI 재실행 권한이 없으면 다시 푸시',
+    ciRetryScope: '이 컴퓨터의 모든 저장소 / PR에 공통 적용',
     ciRetryHint: '일시적 장애와 재실행 권한 거부를 확인한 경우에만 전용 브랜치의 커밋 SHA를 바꾸고 안전 조건에 따라 다시 푸시합니다',
     prLoadFailed: 'PR 설정을 읽지 못했습니다. 설정을 다시 열고 시도하세요.',
     prSaveFailed: 'PR 설정이 저장되었는지 확인하지 못했습니다. 설정을 다시 열어 확인하세요.',

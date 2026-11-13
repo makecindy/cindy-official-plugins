@@ -181,3 +181,46 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   assert.throws(() => git(work, ['push', `--force-with-lease=refs/heads/ci-fixture:${after}`, 'origin', 'HEAD:refs/heads/ci-fixture']), /stale info|rejected/);
   assert.equal(git(work, ['ls-remote', '--heads', 'origin', 'refs/heads/ci-fixture']).split(/\s/)[0], intervening);
 });
+
+test('signed Git fixture verifies one-off signing, configured amend and unavailable-key failure', async t => {
+  const fx = fixture(t);
+  const work = path.join(fx.root, 'signed');
+  const key = path.join(fx.root, 'fixture-signing-key');
+  const git = (argv, env = {}) => execFileSync('git', argv, { cwd: work, env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  fs.mkdirSync(work);
+  execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'ada@example.test', '-f', key], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const allowed = path.join(fx.root, 'allowed-signers');
+  fs.writeFileSync(allowed, 'ada@example.test ' + fs.readFileSync(key + '.pub', 'utf8'));
+  git(['init', '-b', 'main']);
+  for (const [name, value] of [
+    ['user.name', 'Ada Example'], ['user.email', 'ada@example.test'],
+    ['gpg.format', 'ssh'], ['user.signingkey', key], ['gpg.ssh.allowedSignersFile', allowed],
+    ['commit.gpgsign', 'false'],
+  ]) git(['config', name, value]);
+  fs.writeFileSync(path.join(work, 'code.txt'), 'signed fixture\n');
+  git(['add', 'code.txt']);
+  git(['commit', '-S', '-s', '-m', 'signed intent'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
+  const original = git(['rev-parse', 'HEAD']);
+  const tree = git(['rev-parse', 'HEAD^{tree}']);
+  assert.match(git(['cat-file', 'commit', 'HEAD']), /^gpgsig /m);
+  git(['verify-commit', 'HEAD']);
+  assert.equal(git(['config', '--type=bool', '--get', 'commit.gpgsign']), 'false');
+  // A one-off -S is not automatic signing: leave the original and budget intact.
+  assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
+  assert.equal(git(['rev-parse', 'HEAD']), original);
+  assert.equal(fs.existsSync(fx.stateDir), false);
+
+  // Model the separate, already-configured signing environment in the workflow.
+  git(['config', 'commit.gpgsign', 'true']);
+  assert.equal((await fx.run(['--reserve-ci-retry', original])).code, 0);
+  git(['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
+  const amended = git(['rev-parse', 'HEAD']);
+  assert.notEqual(amended, original);
+  assert.equal(git(['rev-parse', 'HEAD^{tree}']), tree);
+  assert.match(git(['cat-file', 'commit', 'HEAD']), /^gpgsig /m);
+  git(['verify-commit', amended]);
+  // Unavailable key: Git must fail, without producing an unsigned replacement.
+  git(['config', 'user.signingkey', path.join(fx.root, 'unavailable-key')]);
+  assert.throws(() => git(['commit', '--amend', '--no-edit']));
+  assert.equal(git(['rev-parse', 'HEAD']), amended);
+});

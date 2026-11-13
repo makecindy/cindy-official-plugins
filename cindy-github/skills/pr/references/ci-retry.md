@@ -79,6 +79,18 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    Require a single verified push destination matching the PR head repository.
    Never infer `origin` is the PR's head remote. Use the explicit target ref
    `refs/heads/<PR-head-branch>` throughout; verify it with `git check-ref-format`.
+   Inspect `git cat-file commit HEAD` for a `gpgsig` / `gpgsig-sha256` header.
+   Before consuming budget, a signed head requires its original signature to
+   verify (`git verify-commit HEAD`) and the existing effective signing setup
+   to sign the replacement noninteractively with an authorized identity.
+   Require `git config --type=bool --get commit.gpgsign` to be `true` and inspect
+   the effective signer/key configuration and availability. An original created
+   only with a one-off `git commit -S`, without effective automatic signing,
+   is ineligible. Unknown readiness, unavailable keys, required user interaction
+   or failed original verification stops recovery before reserve/amend; do not
+   enable signing, select another key, weaken verification or silently strip
+   the signature. Git's normal signing failure must fail the amend, not fall
+   back to an unsigned commit.
 2. Read that exact ref with `git ls-remote --heads <verified-remote> <exact-ref>`.
    Its SHA must equal both local HEAD and the current GitHub PR head. Inspect
    the PR commit list and task history for other people's or unknown commits.
@@ -115,6 +127,11 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    cannot legitimately be supplied, stop. After amend verify a **new** SHA and
    unchanged tree, parents and author; compare the message (only required DCO
    additions may differ). If hooks changed the tree or SHA is unchanged, stop.
+   If the old head was signed, require a signature header on the new commit and
+   successful `git verify-commit <new-SHA>` with the authorized signer before
+   any push. A missing, invalid or unknown signature means leave it unpushed
+   and report the result; never discard the old provenance silently. Local
+   verification is not evidence that GitHub's Verified badge was preserved.
 5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
    state, head, clean worktree and exact remote ref. All must still match the
    original verified state apart from the intended local new SHA. If disabled

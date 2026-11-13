@@ -166,6 +166,7 @@ var MESSAGES = {
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
     prCiRetry: 'CI 无重跑权限时重推重试',
+    prCiRetryScope: '本机所有仓库 / PR 共用',
     prCiRetryHint: '仅确认临时故障且重跑被权限拒绝时，可改写独占分支的提交 SHA 并受限重推',
     prAutoArchive: '合并后自动归档',
     prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
@@ -307,6 +308,7 @@ var MESSAGES = {
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
     prCiRetry: 'Repush CI when rerun permission is denied',
+    prCiRetryScope: 'Shared by all repos / PRs on this computer',
     prCiRetryHint: 'Only for confirmed transient failures and permission-denied reruns: rewrite the commit SHA on an exclusive branch and repush with safeguards',
     prAutoArchive: 'Archive after merge',
     prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
@@ -448,6 +450,7 @@ var MESSAGES = {
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
     prCiRetry: 'CI の再実行権限がない場合に再プッシュ',
+    prCiRetryScope: 'この端末の全リポジトリ・PR で共用',
     prCiRetryHint: '一時的な障害と再実行の権限拒否を確認した場合のみ、専用ブランチのコミット SHA を書き換え、安全条件の下で再プッシュします',
     prAutoArchive: 'マージ後に自動でアーカイブ',
     prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
@@ -589,6 +592,7 @@ var MESSAGES = {
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
     prCiRetry: 'CI 재실행 권한이 없으면 다시 푸시',
+    prCiRetryScope: '이 컴퓨터의 모든 저장소 / PR에 공통 적용',
     prCiRetryHint: '일시적 장애와 재실행 권한 거부를 확인한 경우에만 전용 브랜치의 커밋 SHA를 바꾸고 안전 조건에 따라 다시 푸시합니다',
     prAutoArchive: '병합 후 자동 보관',
     prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
@@ -3098,11 +3102,13 @@ function prContextLine(card) {
   return '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + parts.join(PR_SEP) + '</div>';
 }
 
-function prSettingRow(action, label, hint, on) {
+function prSettingRow(action, label, hint, on, scope) {
   // data-ghost-toggle:手机端把这一行画成原生开关(文字取按钮里的标题和说明)。
-  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: label }) : t('prTurnOn', { name: label })) + '" ' +
+  var accessibleLabel = scope ? label + ' (' + scope + ')' : label;
+  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: accessibleLabel }) : t('prTurnOn', { name: accessibleLabel })) + '" ' +
     'style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;text-align:left;--hover:' + PR_HOVER + '">' +
-    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) + '</div>' +
+    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) +
+    (scope ? '<span style="display:inline-block;margin-left:6px;font-size:11px;font-weight:400;color:var(--text-secondary)">' + prEsc(scope) + '</span>' : '') + '</div>' +
     '<div style="font-size:12px;line-height:16px;color:var(--text-secondary)">' + prEsc(hint) + '</div></div>' +
     '<span style="position:relative;flex:none;width:36px;height:20px;border-radius:9999px;background:' + (on ? PR_BLUE : 'light-dark(#808080,#787878)') + '">' +
     '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
@@ -3165,7 +3171,7 @@ function prSettingsPanel(settings) {
     '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
-    prSettingRow('prset:ciRetry:' + (settings.ciRetryRepush ? 'off' : 'on'), t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush) +
+    prSettingRow('prset:ciRetry:' + (settings.ciRetryRepush ? 'off' : 'on'), t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush, t('prCiRetryScope')) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
     '</div>';
