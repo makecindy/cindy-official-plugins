@@ -1,28 +1,17 @@
 // The built-in AgentCompass router for Cindy: classifies the task through Cindy's quick-text channel (or uses an explicit caller
 // profile), applies the profile-driven split and self gates, and ranks every route the user's Cindy can actually run (its live
-// `tasks.models()` catalog) with the AgentCompass v0.6.0 allocator, which also prices the quota of the Codex account the CLI's own
-// rate-limit telemetry describes. No keyword/regex task heuristics, no network, no credentials, no third-party modules.
+// `tasks.models()` catalog) with the AgentCompass v0.6.0 allocator, by capability fit and session continuity: the catalog cannot say
+// which connection is the user's own sign-in and which is the Cindy gateway, so no quota reading is attached to any of them and every
+// row runs on the engine's built-in gateway account. No keyword/regex task heuristics, no network, no credentials, no third-party modules.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {selectBestRoute} from './allocator.mjs';
 import {FIVE_AXES, validateAxisDemand} from './axis-scores.mjs';
 import {ACCESS_LEVELS, CONFIDENCE_LEVELS, HOURS_RANGE, PROFILE_FLAGS, PROFILE_INTEGERS, PROFILE_KINDS, TASK_COUNTS, URGENCY_LEVELS,
   TASK_PROFILE_SCHEMA as ENGINE_PROFILE_SCHEMA, validateProfile} from './profiler.mjs';
-import {DIRECT_SOURCES, INTERACTION_STYLES, MODELS, MODEL_ALIASES, ROUTES, resolveModel} from './catalog.mjs';
+import {INTERACTION_STYLES, ROUTES} from './catalog.mjs';
 import {taskKind} from './task-intake.mjs';
 import {GATEWAY_ACCOUNT} from './fleet.mjs';
-import {canonicalWindowId, configuredPlan, planDefaults} from './plans.mjs';
-import {
-  ACCOUNT_STATES,
-  DEFAULT_USAGE_MAX_AGE_HOURS,
-  formatQuotaAccountList,
-  listQuotaAccounts,
-  normalizePlan,
-  quotaAccountWarnings,
-} from './quota.mjs';
-
-export {ACCOUNT_STATES, formatQuotaAccountList, listQuotaAccounts, normalizePlan, quotaAccountWarnings};
 
 const HOURS_CONFIDENCE_SET = new Set(CONFIDENCE_LEVELS);
 const URGENCY_SET = new Set(URGENCY_LEVELS);
@@ -483,177 +472,11 @@ export function prepareClassifierRequest(input, {config = null, cacheFile = null
   };
 }
 
-// ---- quota: the newest rate-limit snapshot the Codex CLI wrote into its own session logs --------------------------
-// Cindy's own data directories, which the plugin process is not told about.
-export function cindyAppDirs(env = process.env, home = os.homedir()) {
-  const appData = process.platform === 'win32' ? env.APPDATA || path.join(home, 'AppData', 'Roaming')
-    : process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support')
-    : env.XDG_CONFIG_HOME || path.join(home, '.config');
-  return ['CindyGlobal', 'Cindy'].map(product => path.join(appData, product));
-}
-
-// Cindy runs Codex with its own CODEX_HOME (<app data>/CindyGlobal/codex-home), which the plugin process does not inherit.
-export function codexHomes(env = process.env, home = os.homedir()) {
-  if (env.CODEX_HOME) return [env.CODEX_HOME];
-  return [path.join(home, '.codex'), ...cindyAppDirs(env, home).map(dir => path.join(dir, 'codex-home'))];
-}
-
-const QUOTA_TAIL_BYTES = 256 * 1024;
-let quotaCache = {key: '', limits: null};
-
-function newestSession(home) {
-  let days = 0;
-  const sessions = [];
-  try {
-    // sessions/YYYY/MM/DD/rollout-*.jsonl: compare mtimes across date directories so sessions crossing midnight win.
-    const desc = dir => fs.readdirSync(dir).filter(n => /^\d+$/.test(n)).sort().reverse().map(n => path.join(dir, n));
-    outer: for (const year of desc(path.join(home, 'sessions'))) for (const month of desc(year)) for (const day of desc(month)) {
-      const files = fs.readdirSync(day).filter(n => n.endsWith('.jsonl'));
-      for (const name of files) {
-        const file = path.join(day, name), stat = fs.statSync(file);
-        sessions.push({file, mtime: stat.mtimeMs, size: stat.size, home});
-      }
-      if (files.length && ++days >= 30) break outer;
-    }
-  } catch {}
-  sessions.sort((a, b) => b.mtime - a.mtime);
-  return sessions[0] ? {...sessions[0], recent: sessions} : null;
-}
-
-function readTail(file, size, maxBytes = QUOTA_TAIL_BYTES) {
-  const fd = fs.openSync(file, 'r');
-  try {
-    if (!fs.fstatSync(fd).isFile()) throw Error('not a regular file');
-    const length = Math.min(size, maxBytes);
-    const offset = Math.max(0, size - length);
-    const buf = Buffer.allocUnsafe(length);
-    const bytesRead = fs.readSync(fd, buf, 0, length, offset);
-    const text = buf.subarray(0, bytesRead).toString('utf8');
-    return offset > 0 ? text.slice(text.indexOf('\n') + 1) : text;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-function resolveQuotaStateFile(env, homes, {stateFile = null, cacheFile = null, config = null} = {}) {
-  if (stateFile) return stateFile;
-  if (cacheFile) return path.join(path.dirname(cacheFile), 'quota-state.json');
-  if (config?.stateRoot) return path.join(config.stateRoot, 'quota-state.json');
-  if (env?.CODEX_HOME) return path.join(env.CODEX_HOME, '.cindy-quota-state.json');
-  const userHome = env?.HOME || env?.USERPROFILE;
-  if (userHome) return path.join(userHome, '.agent-compass', 'cindy-plugin', 'quota-state.json');
-  return homes?.[0] ? path.join(homes[0], '.cindy-quota-state.json') : null;
-}
-
-function recordQuotaFailure(stateFile, home, reason, file, now) {
-  if (!stateFile || !home) return now;
-  const key = path.resolve(home);
-  const entries = readDiskScoreCache(stateFile);
-  const existing = entries[key];
-  if (existing && typeof existing.failing_since === 'number' && existing.failing_since <= now) {
-    return existing.failing_since;
-  }
-  entries[key] = {failing_since: now, reason, file};
-  writeDiskScoreCache(stateFile, entries);
-  return now;
-}
-
-function clearQuotaFailure(stateFile, home) {
-  if (!stateFile || !home) return;
-  const key = path.resolve(home);
-  const entries = readDiskScoreCache(stateFile);
-  if (key in entries) {
-    delete entries[key];
-    writeDiskScoreCache(stateFile, entries);
-  }
-}
-
-export function codexQuota(env = process.env, now = Date.now(), homes = codexHomes(env), options = {}) {
-  // Prefer Cindy's managed codex-home when it has session logs so a standalone ~/.codex login does not override it.
-  const cindySessions = homes.length > 1 ? homes.slice(1).map(newestSession).filter(Boolean).sort((a, b) => b.mtime - a.mtime) : [];
-  const newest = cindySessions[0] || homes.map(newestSession).filter(Boolean).sort((a, b) => b.mtime - a.mtime)[0];
-  if (!newest) return {source: 'codex-cli-sessions', status: 'unknown', reason: 'no Codex session log'};
-  const stateFile = resolveQuotaStateFile(env, homes, options);
-  let chosen = newest;
-  const failQuota = reason => {
-    const failingSinceMs = recordQuotaFailure(stateFile, chosen.home, reason, chosen.file, now);
-    const dispatchable = now - failingSinceMs < DEFAULT_USAGE_MAX_AGE_HOURS * 3600000;
-    return {source: 'codex-cli-sessions', status: 'unknown', state: ACCOUNT_STATES.USAGE_FAILING, dispatchable,
-      failing_since: new Date(failingSinceMs).toISOString(), error: reason, reason, file: chosen.file};
-  };
-  let limits = null;
-  for (let i = 0; i < 20 && newest.recent[i]; i++) {
-    const session = newest.recent[i];
-    const cacheKey = `${session.file}:${session.mtime}:${session.size}`;
-    let cur = quotaCache.key === cacheKey ? quotaCache.limits : undefined;
-    if (cur === undefined) {
-      let text = '';
-      try {
-        text = readTail(session.file, session.size);
-      } catch {
-        chosen = session;
-        return failQuota('unreadable Codex session log');
-      }
-      cur = null;
-      let sawRateLimits = false;
-      for (let from = Infinity, at; (at = text.lastIndexOf('"rate_limits"', from)) >= 0;) {
-        sawRateLimits = true;
-        const lineStart = text.lastIndexOf('\n', at) + 1;
-        const line = text.slice(lineStart, (text.indexOf('\n', at) + 1 || text.length + 1) - 1);
-        try {
-          const row = JSON.parse(line);
-          const candidate = row.payload?.rate_limits || row.rate_limits || row.msg?.rate_limits || null;
-          if (candidate && typeof candidate === 'object') {
-            cur = candidate;
-            break;
-          }
-        } catch {}
-        if (lineStart <= 1) break;
-        from = lineStart - 2;
-      }
-      if (!cur && sawRateLimits) cur = {corrupt: true};
-      quotaCache = {key: cacheKey, limits: cur};
-    }
-    if (cur) {
-      chosen = session;
-      limits = cur;
-      break;
-    }
-  }
-  if (!limits) {
-    clearQuotaFailure(stateFile, newest.home);
-    return {source: 'codex-cli-sessions', status: 'unknown', reason: 'no rate-limit snapshot in the newest session'};
-  }
-  if (limits.corrupt) {
-    return failQuota('corrupt rate-limit snapshot in Codex session log');
-  }
-  clearQuotaFailure(stateFile, chosen.home);
-  const plan = normalizePlan('codex', limits.plan_type);
-  if (plan.inactive) {
-    const ageMs = Math.max(0, now - chosen.mtime);
-    const staleInactive = ageMs > DEFAULT_USAGE_MAX_AGE_HOURS * 3600000;
-    const reason = staleInactive
-      ? `subscription is not active (${plan.raw}) in session log from ${(ageMs / 3600000).toFixed(1)}h ago; dispatching to refresh telemetry`
-      : `subscription is not active (${plan.raw})`;
-    return {source: 'codex-cli-sessions', status: staleInactive ? 'unknown' : ACCOUNT_STATES.PLAN_INACTIVE,
-      state: ACCOUNT_STATES.PLAN_INACTIVE, dispatchable: staleInactive, stale_plan_inactive: staleInactive,
-      reason, plan: plan.raw, plan_key: plan.key, observed_at: new Date(chosen.mtime).toISOString(), file: chosen.file};
-  }
-  const windows = ['primary', 'secondary'].map(k => limits?.[k]).filter(w => w && Number.isFinite(w.used_percent))
-    // A window that has already reset says nothing about now.
-    .filter(w => !w.resets_at || w.resets_at * 1000 > now);
-  if (!windows.length) return {source: 'codex-cli-sessions', status: 'unknown', reason: 'snapshot windows have reset', plan: plan.raw, plan_key: plan.key, file: chosen.file};
-  const used = Math.max(...windows.map(w => w.used_percent));
-  return {source: 'codex-cli-sessions', status: used >= 95 ? 'exhausted' : used >= 80 ? 'high' : 'ok', state: ACCOUNT_STATES.READY, dispatchable: true,
-    used_percent: used, windows: windows.map(w => ({used_percent: w.used_percent, window_minutes: w.window_minutes ?? null, resets_at: w.resets_at ?? null})),
-    observed_at: new Date(chosen.mtime).toISOString(), plan: plan.raw, plan_key: plan.key, file: chosen.file};
-}
-
 // ---- routing -------------------------------------------------------------------------------------------------------
-// Where the user can act on a classifier failure: Cindy, not this plugin, chooses the quick-text model. The plugin sees a change of the
-// card, oneshotModel and the catalog; it cannot see the auxiliary chain or a permission, so those wait for the cooldown to run out.
+// Where the user can act on a classifier failure: Cindy, not this plugin, chooses the quick-text model. The plugin sees a change of
+// oneshotModel and of the catalog; it cannot see the model picked on the plugin card, the auxiliary chain or a permission, so those wait for the cooldown to run out.
 const CLASSIFIER_UNSEEN_FIX =
-  'A fix the plugin cannot see, such as the auxiliary model in Cindy settings or a permission, still waits out the cooldown, up to 5 minutes; a complete explicit `profile` does not wait.';
+  'A fix the plugin cannot see, such as another model on the plugin card, the auxiliary model in Cindy settings or a permission, still waits out the cooldown, up to 5 minutes; a complete explicit `profile` does not wait.';
 const CLASSIFIER_MODEL_HINT =
   'Cindy chooses the classifier model: the model picked on the AgentCompass plugin card, else its auxiliary model chain. ' +
   'Pick another model on the plugin card (or fix the auxiliary model in Cindy settings), or pass a complete explicit `profile`, then roll again. ' +
@@ -691,7 +514,7 @@ export function classifierCoolingRoute(entry, now = Date.now()) {
     entry.model || null,
     {
       cooldown: {reason: entry.reason, failures: entry.failures, retry_after_seconds: retryAfterSeconds},
-      nextAction: `Cindy is asked again after ${retryAfterSeconds} s, or at once when the model on the AgentCompass plugin card, its declared oneshotModel or the catalog changes. ` +
+      nextAction: `Cindy is asked again after ${retryAfterSeconds} s, or at once when the declared oneshotModel or the catalog changes. ` +
         `Pick another model on the plugin card, or pass a complete explicit \`profile\`, which needs no classifier. ${CLASSIFIER_UNSEEN_FIX} Nothing was started.`,
     },
   );
@@ -717,43 +540,10 @@ export function classifierTaskTooLongRoute({overLimitBy, limit}) {
   );
 }
 
-// One window of the Codex CLI's rate-limit snapshot as a quota reading, named as AgentCompass names a Codex window (5 h `five_hour`,
-// 7 d `usage`, any other length `usage-<minutes>m`): its length, the share used and the time to its reset.
-function quotaWindowOf(window, now) {
-  const minutes = Math.round(Number(window.window_minutes));
-  const resetsAt = Number(window.resets_at);
-  const resetsIn = Number(window.resets_in_seconds);
-  return {
-    name: minutes === 300 ? 'five_hour' : minutes === 10080 || !(minutes > 0) ? 'usage' : `usage-${minutes}m`,
-    used: window.used_percent,
-    ...(minutes > 0 ? {hours: minutes / 60} : {}),
-    ...(Number.isFinite(resetsAt) && resetsAt > 0 ? {resetHours: (resetsAt * 1000 - now) / 3600000}
-      : Number.isFinite(resetsIn) && resetsIn > 0 ? {resetHours: resetsIn / 3600} : {}),
-  };
-}
-
-// The windows of a reading the account's plan has data for. A window its plan does not list (the plan data of a Codex Pro has the
-// weekly window only) cannot be priced, and the engine would take the whole account out of automatic routing for it: it is left
-// out of what is passed on and named, so the account's other windows still route. A plan nobody reported keeps every window.
-function pricedWindows(plan, windows) {
-  const template = (planDefaults('codex', configuredPlan('codex', plan)) || {}).windows;
-  if (!template) return {kept: windows, ignored: []};
-  const kept = [], ignored = [];
-  for (const window of windows) (canonicalWindowId(window.name, template) in template ? kept : ignored).push(window);
-  return {kept, ignored};
-}
-
 // The AgentCompass harness order of a route kind is data (`ROUTES[kind].harness_order`): the harness it names first goes first.
 function harnessRank(kind, harness) {
   const first = (ROUTES[kind]?.harness_order || [])[0];
   return first && harness === first ? 0 : 1;
-}
-
-// AgentCompass's fast contract is data: a model row declares `fast_capable`, and fast runs only on the harness of its `api_family`.
-function modelHasFastMode(model, harness) {
-  const resolved = resolveModel(String(model || ''), MODELS, MODEL_ALIASES);
-  const data = DIRECT_SOURCES.includes(resolved.source) ? MODELS[resolved.key] : null;
-  return data?.fast_capable === true && data.api_family === harness;
 }
 
 // The engine names each row it leaves out with its reason; a catalog of fifty rows would answer with fifty lines of mostly one
@@ -771,7 +561,6 @@ function exclusionsByReason(lines) {
     return named.length ? `${reason}: ${named.slice(0, ROWS_NAMED).join(', ')}${named.length > ROWS_NAMED ? ` and ${named.length - ROWS_NAMED} more` : ''}` : reason;
   });
 }
-const FAST_BELOW_PERCENT = 60;
 
 /**
  * task: the assignment, unchanged. catalog: Cindy's `tasks.models()` reply. Returns the router answer:
@@ -781,16 +570,12 @@ const FAST_BELOW_PERCENT = 60;
  */
 // cooling: {routeKey: {until, code}} routes Cindy recently refused to create; skipped while another route can run.
 export function routeTask(task, catalog, {
-  env = process.env,
   now = Date.now(),
-  quota = null,
-  accounts: callerAccounts = null,
   cooling = {},
   profile: callerProfile = null,
   classification = null,
   config = null,
   cacheFile = null,
-  stateFile = null,
   useCache = true,
   constraintModel = null,
   pinnedModel = null,
@@ -929,69 +714,8 @@ export function routeTask(task, catalog, {
   const allCooling = skipped.length === runnable.length;
   const rows = allCooling ? runnable : runnable.filter(row => !coolingOf(row));
 
-  // The quota the engine prices. Connections the Codex CLI's telemetry describes: only an explicitly matched providerId, or the
-  // sole Codex connection. The engine reads each window's own length, share used and reset, and the plan the account reports; a
-  // plan nobody reported leaves the account's capacity unknown, and its routes out of automatic routing, as in AgentCompass.
-  const codexProviders = new Set(rows.filter(r => r.route.agentKind === 'codex').map(r => r.route.providerId));
-  const codex = quota || (codexProviders.size === 1 ? codexQuota(env, now, codexHomes(env), {stateFile, cacheFile, config})
-    : {source: 'codex-cli-sessions', status: 'unknown', reason: codexProviders.size ? 'multiple Codex connections' : 'no Codex connection in catalog'});
-  const matchesCodex = providerId => codexProviders.has(providerId) &&
-    (codex.providerId ? providerId === codex.providerId : codexProviders.size === 1);
-  const boundCodex = codex.providerId || (codexProviders.size === 1 ? [...codexProviders][0] : null);
-  const codexPlan = normalizePlan('codex', codex.plan ?? codex.plan_type);
-  const hasCodexUsage = typeof codex.used_percent === 'number';
-  const hasCodexState = Boolean(
-    hasCodexUsage || codex.state || codex.error || codex.http_status || codex.error_code || codex.disabled ||
-    codexPlan.inactive || (codex.status && codex.status !== 'unknown')
-  );
-  const codexRead = Array.isArray(codex.windows) && codex.windows.length
-    ? codex.windows.map(window => quotaWindowOf(window, now))
-    : hasCodexUsage ? [{name: 'usage', used: codex.used_percent}] : [];
-  const {kept: codexWindows, ignored: codexIgnored} = pricedWindows(codex.plan ?? codex.plan_type, codexRead);
-  const codexReading = boundCodex && hasCodexState ? {[`codex/${boundCodex}`]: {
-    ...codex,
-    provider: 'codex',
-    account: boundCodex,
-    plan: codex.plan ?? codex.plan_type ?? null,
-    status: codex.state || (hasCodexUsage && !codex.error && !codex.http_status && !codex.error_code && !codex.stale ? ACCOUNT_STATES.READY : codex.status),
-    error: codex.error ?? (codex.state === ACCOUNT_STATES.USAGE_FAILING || codex.status === ACCOUNT_STATES.USAGE_FAILING ? (codex.reason || 'reading failing') : null),
-    windows: codexWindows,
-    fetched_at: codex.fetched_at ?? null,
-    last_success_at: codex.last_success_at ?? null,
-  }} : null;
-  const rawCodexAccounts = codexReading ? listQuotaAccounts(codexReading, now) : [];
-  // A subscription reported inactive by a session log that is itself stale: the account is dispatched on, to refresh the telemetry.
-  const codexAccounts = codex.stale_plan_inactive
-    ? rawCodexAccounts.map(a => ({
-        ...a,
-        dispatchable: true,
-        reason: codex.reason,
-        warnings: [`${a.key}: ${ACCOUNT_STATES.PLAN_INACTIVE}: ${codex.reason}`],
-      }))
-    : rawCodexAccounts;
-  const quotaSnapshot = callerAccounts || (codex.stale_plan_inactive ? null : codexReading);
-  const quotaAccounts = callerAccounts ? listQuotaAccounts(callerAccounts, now) : codexAccounts;
-  const accountOf = row => quotaAccounts.find(a =>
-    a.account === row.route.providerId ||
-    a.key === `${HARNESS[row.route.agentKind]}/${row.route.providerId}` ||
-    (a.provider === 'codex' && matchesCodex(row.route.providerId))
-  ) || null;
-  const codexAccount = codexAccounts[0] || null;
-  const codexInfo = codexAccount ? {
-    ...codex,
-    state: codexAccount.state,
-    dispatchable: codexAccount.dispatchable,
-    ...(codex.plan !== undefined || codexAccount.plan ? {plan: codex.plan ?? codexAccount.plan, plan_key: normalizePlan('codex', codexAccount.plan).key} : {}),
-    ...(codexAccount.reason ? {reason: codexAccount.reason} : {}),
-  } : codex;
-  const accountWarnings = [
-    ...quotaAccounts.flatMap(a => a.warnings),
-    ...(!callerAccounts && codexIgnored.length ? [`codex/${boundCodex}: no plan data for the ${codexIgnored.map(w => `${w.name} (${w.used}% used)`).join(', ')} window of plan ${codex.plan ?? codex.plan_type}; not priced`] : []),
-  ];
-  const accountDecisionInfo = quotaAccounts.length ? {accounts: quotaAccounts} : {};
-
-  // One catalog row is one pool entry: the efforts this row offers are its dispatch table, and the account it draws on is the one
-  // bound above, else the unmetered gateway. Rows of the harness a route kind names first go first: the engine breaks a tie of
+  // One catalog row is one pool entry: the efforts this row offers are its dispatch table, and every row draws on the engine's
+  // built-in unmetered gateway account: no quota reading is attached to a connection. Rows of the harness a route kind names first go first: the engine breaks a tie of
   // everything else (one model at one effort on two harnesses) by that order, so it moves no other model.
   const kind = taskKind({profile}, ROUTES);
   const ordered = [...rows].sort((a, b) => harnessRank(kind, HARNESS[a.route.agentKind]) - harnessRank(kind, HARNESS[b.route.agentKind]));
@@ -1005,14 +729,13 @@ export function routeTask(task, catalog, {
       id,
       model: row.route.model,
       harness,
-      account: quotaSnapshot && accountOf(row) ? accountOf(row).key : GATEWAY_ACCOUNT,
+      account: GATEWAY_ACCOUNT,
       ...(offered.length ? {efforts: offered} : {}),
     };
   });
   const rowOf = candidate => rowById.get(candidate.id) || rowById.get(String(candidate.id).slice(0, String(candidate.id).lastIndexOf(':')));
   const decision = selectBestRoute(profile, {
     candidateModels: entries,
-    quotas: quotaSnapshot,
     now,
     constraintModel: pinModel,
     constraintEffort: pinEffort,
@@ -1024,28 +747,12 @@ export function routeTask(task, catalog, {
     ...outcome,
     ...classifierInfo,
     ...pinnedInfo,
-    quota: codexInfo,
-    ...accountDecisionInfo,
     ...(skipped.length ? {cooling_down: skipped} : {}),
   };
   if (decision.error === 'invalid_caller_profile') {
     return unavailableRoute('invalid_caller_profile', `Invalid caller profile: ${decision.warnings.join('; ')}`, null, {
       nextAction: `Give every field a caller profile needs (${CALLER_REQUIRED_KEYS.join(', ')}). Nothing was started.`,
     });
-  }
-  if (decision.error === 'accounts_unavailable') {
-    const reasons = [...new Set(quotaAccounts.filter(a => a.dispatchable === false).map(a => `${a.key}: ${a.state}${a.reason ? ` (${a.reason})` : ''}`))];
-    const listed = reasons.length ? reasons.join('; ') : decision.warnings.join('; ');
-    return {
-      status: 'blocked',
-      engine: 'builtin',
-      reason: 'accounts_unavailable',
-      ...outcome,
-      ...accountDecisionInfo,
-      decision: {reason: 'accounts_unavailable', ...base, warnings: accountWarnings, excluded: reasons},
-      error: `All candidate accounts are unavailable (${listed}); refusing to dispatch to an inactive or failing account. Nothing was started.`,
-      next_action: 'Fix the account subscription, sign-in, or usage telemetry in Cindy (Pi routes sharing the same provider account are excluded too; it recovers automatically after the next healthy Codex session log in Cindy, or by removing its entry in quota-state.json), then roll again. Nothing was started.',
-    };
   }
   const best = decision.ok ? decision.topCandidates[0] : null;
   const bestRow = best ? rowOf(best) : null;
@@ -1060,7 +767,7 @@ export function routeTask(task, catalog, {
         ...base,
         refusal: decision.refusal,
         // The engine's own warning of a blocked route is `excluded` joined into one line, so it is not repeated.
-        warnings: accountWarnings,
+        warnings: decision.warnings,
         excluded: exclusionsByReason(decision.excluded),
       },
       error: pinned
@@ -1068,16 +775,13 @@ export function routeTask(task, catalog, {
         : 'No model in the Cindy catalog can run this task: each one is out of automatic routing for the reason in `decision.excluded`; nothing was started. Naming a model dispatches it.',
     };
   }
-  const wantsFast = profile.wants_fast === true;
-  // Fast mode: asked for by the profile, offered by this Codex row, declared by the model's own data, with known quota under 60%.
-  const fastOf = (candidate, row) => wantsFast && HARNESS[row.route.agentKind] === 'codex' && Boolean(row.supportsFastMode) &&
-    modelHasFastMode(row.route.model, 'codex') && matchesCodex(row.route.providerId) &&
-    typeof codex.used_percent === 'number' && codex.used_percent < FAST_BELOW_PERCENT && codexAccount?.state === ACCOUNT_STATES.READY;
+  // Fast mode is never chosen: it needs a quota reading attached to the Codex sign-in's own connection, which the catalog cannot name.
+  // `wants_fast` stays in the profile and in the decision as stated.
   const launchEffort = (candidate, row) => (offeredEfforts(row).filter(Boolean).length ? candidate.effort : (row.route.effort ?? ''));
   const route = bestRow.route;
   const harness = HARNESS[route.agentKind];
   const bundle = {provider: harness, harness, account: route.providerId, providerId: route.providerId,
-    model: route.model, effort: launchEffort(best, bestRow), fast: fastOf(best, bestRow), modeId: MODE[harness]};
+    model: route.model, effort: launchEffort(best, bestRow), fast: false, modeId: MODE[harness]};
   return {
     status: 'native',
     engine: 'builtin',
@@ -1087,14 +791,13 @@ export function routeTask(task, catalog, {
       canonical_model: decision.canonicalModel,
       score: decision.score,
       components: decision.components,
-      selected_quota: decision.quota,
-      wants_fast: wantsFast,
-      warnings: [...decision.warnings, ...accountWarnings.filter(w => !decision.warnings.includes(w))],
+      wants_fast: profile.wants_fast === true,
+      warnings: decision.warnings,
       ...(allCooling ? {cooldown_warning: 'Cindy recently refused to create a task on every runnable route; this one may be refused again.'} : {}),
       alternatives: decision.topCandidates.slice(1).flatMap(c => {
         const row = rowOf(c);
         return row ? [{agentKind: row.route.agentKind, providerId: row.route.providerId, model: row.route.model,
-          effort: launchEffort(c, row), fast: fastOf(c, row), score: c.score}] : [];
+          effort: launchEffort(c, row), fast: false, score: c.score}] : [];
       }),
     },
   };

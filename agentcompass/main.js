@@ -282,7 +282,7 @@
           ? router.error
           : 'All candidate accounts are unavailable; refusing to dispatch to an inactive or failing account. Nothing was started.',
         next_action:router.next_action ||
-          'Fix the account subscription, sign-in, or usage telemetry in Cindy (Pi routes sharing the same provider account are excluded too; it recovers automatically after the next healthy Codex session log in Cindy, or by removing its entry in quota-state.json), then roll again. Nothing was started.',
+          'Fix the account subscription, sign-in or usage telemetry the router lists in `accounts`, then roll again. Nothing was started.',
       };
     }
     return {...router,...accountNotice(record)};

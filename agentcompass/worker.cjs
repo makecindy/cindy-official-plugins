@@ -183,21 +183,13 @@ function classifierCooldowns(root) {
     return value && typeof value==='object' && !Array.isArray(value) ? value : {};
   } catch {return {};}
 }
-// What decides the quick-text model, as far as the plugin can see it: a change ends every cooldown at once, since the failure was about
-// the old choice. The model on the plugin card has no API; Cindy keeps it in <app data>/owners/<owner>/ghost-errand-prefs.json under
-// `errand`, an undocumented file, so a change there is only noticed while that holds (`sessions` beside it changes all the time).
+// What decides the quick-text model, as far as the plugin can see it without reading anything of Cindy's: the model this plugin declares and the
+// catalog. A change of either ends every cooldown at once, since the failure was about the old choice. A model picked on the plugin card
+// (or the auxiliary chain) is not visible to the plugin: that waits for the cooldown, at most 5 minutes, or for a cached answer to expire.
 function classifierChoice(mod, catalog) {
-  const cards=[];
-  for (const app of mod.cindyAppDirs(process.env, os.homedir())) {
-    let owners=[];
-    try {owners=fs.readdirSync(path.join(app, 'owners')).sort();} catch {}
-    for (const owner of owners) {
-      try {cards.push(JSON.parse(fs.readFileSync(path.join(app, 'owners', owner, 'ghost-errand-prefs.json'), 'utf8')).errand ?? null);} catch {}
-    }
-  }
   let declared=null;
   try {declared=JSON.parse(fs.readFileSync(path.join(__dirname, 'ghost.json'), 'utf8')).cindy?.oneshotModel ?? null;} catch {}
-  return digest(JSON.stringify([declared, cards, (catalog?.models || []).map(row => row?.route)]));
+  return digest(JSON.stringify([declared, (catalog?.models || []).map(row => row?.route)]));
 }
 // A clock moved back is capped here and kept, so the five minutes run out; capping each read alone would never end the wait.
 function classifierCooling(root, taskDigest, choice, now=Date.now()) {
@@ -267,11 +259,9 @@ async function builtin(input, catalog, dir, root, conf = {}, extra = {}) {
     }
   }
   const result = mod.routeTask(input, catalog, {
-    env: process.env,
     cooling: cooldowns(root),
     config: conf,
     cacheFile,
-    stateFile: path.join(root, 'quota-state.json'),
     profile: extra.profile ?? null,
     classification,
   });
@@ -280,7 +270,7 @@ async function builtin(input, catalog, dir, root, conf = {}, extra = {}) {
   writeDiag(path.join(dir,'router.stdout.json'),JSON.stringify(result,null,2));
   if (result.status === 'blocked') {
     if (result.decision?.reason === 'no_runnable_model') throw Error(result.error);
-    if (result.decision?.reason === 'no_route' || result.decision?.reason === 'accounts_unavailable' || result.profile_source === 'unavailable') return result;
+    if (result.decision?.reason === 'no_route' || result.profile_source === 'unavailable') return result;
     throw Error(result.error);
   }
   return result;

@@ -1,9 +1,10 @@
 // AgentCompass plugin (agentcompass/). Source and full sandbox suite: https://github.com/akiiwa-games/cindy-agentcompass-plugin
 // Part 1: main.js at the official tasks API boundary with a fixture host (exact route and permission per harness,
-//         fast mode, unchanged task, idempotent create/send, honest stop/cancel/cleanup, PR #274 regressions).
+//         a fast route only when the router names one, unchanged task, idempotent create/send, honest stop/cancel/cleanup, PR #274 regressions).
 // Part 1b: the live classifier through Cindy's quick-text channel at the logic page (no keyword fallback, cache, refusals, split/self).
 // Part 2: the built-in routing engine (agentcompass/engine/route.mjs, AgentCompass v0.6.0 scoring) over the catalog a real Cindy 0.1.121
-//         reported, driven by task profiles: the tests assert rules (exact catalog rows, gates, quota, fast mode), never a hand-picked winner.
+//         reported, driven by task profiles: the tests assert rules (exact catalog rows, gates, no quota attached, fast mode never chosen,
+//         no file of Cindy's or of a Codex home read), never a hand-picked winner.
 // Part 3: the real worker.cjs as a node child over JSON-RPC stdio: zero-configuration built-in routing, and the
 //         opted-in external CLI (`router.json` or `config.json {"engine":"cli"}`).
 import assert from 'node:assert/strict';
@@ -15,7 +16,8 @@ import vm from 'node:vm';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {clearClassifierCache, codexHomes, codexQuota, prepareClassifierRequest, routeTask, selfGate, splitGate} from '../agentcompass/engine/route.mjs';
+import * as routeModule from '../agentcompass/engine/route.mjs';
+import {clearClassifierCache, prepareClassifierRequest, routeTask, selfGate, splitGate} from '../agentcompass/engine/route.mjs';
 
 const source=fs.readFileSync(new URL('../agentcompass/main.js',import.meta.url),'utf8');
 const ctx={session_id:'true-parent',workdir:'E:/project',workdir_is_local:true,workdir_is_read_only:false};
@@ -608,7 +610,7 @@ function classifierFixture(options={}) {
           if (!req.cached) return {ok:true,result:{operation,parent:params.context.session_id,state:'classify',engine:'builtin',
             classifier:{attemptId:'attempt-'+operation.slice(0,8),prompt:req.prompt,timeoutMs:options.timeoutMs ?? req.timeoutMs}}};
         }
-        const routed=routeTask(params.task,params.catalog,{quota:{source:'test',status:'ok',used_percent:15,plan:'pro'},
+        const routed=routeTask(params.task,params.catalog,{
           profile:params.profile ?? null,classification:params.classification ?? null});
         if (routed.status==='blocked') return {ok:true,result:{operation,parent:params.context.session_id,state:'blocked',engine:'builtin',
           router:routed,bundle:null,prompt:'',mappings:[]}};
@@ -767,7 +769,6 @@ const REAL_CATALOG = {
 const WITH_CLAUDE = {models: [...REAL_CATALOG.models,
   ...['claude-opus-5-5', 'claude-sonnet-5-5'].map(model => ({route: {agentKind: 'cc', providerId: 'anthropic', model, effort: 'high', fastMode: false},
     efforts: ['low', 'medium', 'high', 'max'], supportsFastMode: false}))]};
-const OK_QUOTA = {source: 'test', status: 'ok', used_percent: 17, plan: 'pro'};
 // The classifier's answer, as the logic page hands it to the engine: every field of the profile, none of them read from the task text.
 const profileOf = (overrides = {}) => ({
   work_kind: 'general_implementation', interaction_style: 'engineering', reasoning_depth: 2, code_complexity: 1, access: 'write',
@@ -776,7 +777,7 @@ const profileOf = (overrides = {}) => ({
   read_only_review: false, reason: 'classified by a fixture', ...overrides,
 });
 const TASK = 'The task text decides nothing: only the profile does.';
-const routeBuiltIn = (overrides = {}, catalog = REAL_CATALOG, quota = OK_QUOTA, extra = {}) => routeTask(TASK, catalog, {quota, profile: profileOf(overrides), ...extra});
+const routeBuiltIn = (overrides = {}, catalog = REAL_CATALOG, extra = {}) => routeTask(TASK, catalog, {profile: profileOf(overrides), ...extra});
 const MODE = {claude: 'bypassPermissions', codex: 'full-access', pi: 'full-access'};
 function inCatalog(result, catalog) {
   const b = result.route.bundle;
@@ -792,14 +793,14 @@ const GRID = [
 ].map(profileOf);
 
 test('split and self are decided by the profile alone, never by the task text', () => {
-  const split = routeTask(TASK, REAL_CATALOG, {quota: OK_QUOTA, profile: profileOf({multi_task: true, task_count: '3'})});
+  const split = routeTask(TASK, REAL_CATALOG, {profile: profileOf({multi_task: true, task_count: '3'})});
   assert.deepEqual([split.status, split.task_count, split.engine, split.route], ['split', '3', 'builtin', undefined]);
-  const self = routeTask(TASK, REAL_CATALOG, {quota: OK_QUOTA, profile: profileOf({self: true})});
+  const self = routeTask(TASK, REAL_CATALOG, {profile: profileOf({self: true})});
   assert.equal(self.status, 'self');
   assert.match(self.next_action, /current session/);
   // The same text with another profile routes: nothing in it is read.
   const text = 'Two independent tasks:\n1. Add a dark theme.\n2. Fix the CSV export.\nDo not delegate this.';
-  assert.equal(routeTask(text, REAL_CATALOG, {quota: OK_QUOTA, profile: profileOf()}).status, 'native');
+  assert.equal(routeTask(text, REAL_CATALOG, {profile: profileOf()}).status, 'native');
   assert.equal(splitGate(profileOf()), null);
   assert.equal(selfGate(profileOf()), null);
   assert.ok(splitGate(profileOf({multi_task: true, task_count: '2'})));
@@ -808,7 +809,7 @@ test('split and self are decided by the profile alone, never by the task text', 
 
 test('without a profile the engine routes nothing: no keyword fallback', () => {
   for (const task of ['Rename foo to bar in util.py.', 'Two independent tasks:\n1. A\n2. B', 'What is a mutex?']) {
-    const result = routeTask(task, REAL_CATALOG, {quota: OK_QUOTA});
+    const result = routeTask(task, REAL_CATALOG);
     assert.equal(result.status, 'blocked', task);
     assert.equal(result.route, undefined);
   }
@@ -818,7 +819,7 @@ test('native routes are exact rows of the catalog Cindy listed, at an effort and
   let native = 0;
   for (const profile of GRID) {
     for (const catalog of [REAL_CATALOG, WITH_CLAUDE]) {
-      const result = routeTask(TASK, catalog, {quota: OK_QUOTA, profile});
+      const result = routeTask(TASK, catalog, {profile});
       if (result.status === 'native') {
         native++;
         assert.ok(inCatalog(result, catalog), JSON.stringify(result.route.bundle));
@@ -835,95 +836,49 @@ test('native routes are exact rows of the catalog Cindy listed, at an effort and
   assert.ok(native >= GRID.length, `${native} of ${GRID.length * 2} routed`);
 });
 
-test('fast mode needs wants_fast, a fast-capable codex row and known quota under 60%; urgency alone never turns it on', () => {
+test('no quota is attached to any connection: every row runs on the built-in gateway account, nothing leaves routing for a quota reason, and a decision lists no account', () => {
+  for (const catalog of [REAL_CATALOG, WITH_CLAUDE, {models: [...REAL_CATALOG.models].reverse()}]) {
+    const routed = routeBuiltIn({}, catalog);
+    assert.equal(routed.status, 'native', 'a catalog of Codex rows only still routes');
+    assert.ok(inCatalog(routed, catalog));
+    assert.equal(routed.decision.accounts, undefined, 'no quota account is listed');
+    assert.equal(routed.decision.quota, undefined);
+    assert.equal(routed.decision.selected_quota, undefined);
+    assert.deepEqual(routed.decision.excluded ?? [], []);
+    assert.ok(!routed.decision.warnings.some(line => /quota|capacity|account/i.test(line)), JSON.stringify(routed.decision.warnings));
+  }
+  const named = routeBuiltIn({}, WITH_CLAUDE, {constraintModel: 'gpt-6-sol'});
+  assert.equal(named.status, 'native', 'naming a model still dispatches it');
+});
+
+test('fast mode is never chosen: wants_fast stays in the profile and the decision as stated, whatever the row offers', () => {
   const sol = {constraintModel: 'gpt-6.1-sol:medium'};
-  const fast = routeBuiltIn({wants_fast: true, urgency: 'high'}, REAL_CATALOG, OK_QUOTA, sol);
-  assert.equal(fast.route.bundle.fast, true);
-  assert.equal(fast.route.bundle.harness, 'codex');
-  assert.equal(fast.decision.wants_fast, true);
-  assert.ok(inCatalog(fast, REAL_CATALOG));
-  assert.equal(routeBuiltIn({wants_fast: false}, REAL_CATALOG, OK_QUOTA, sol).route.bundle.fast, false);
-  assert.equal(routeBuiltIn({wants_fast: false, urgency: 'high'}, REAL_CATALOG, OK_QUOTA, sol).route.bundle.fast, false, 'urgency alone does not enable it');
-  assert.equal(routeBuiltIn({wants_fast: true}, REAL_CATALOG, {...OK_QUOTA, used_percent: 70}, sol).route.bundle.fast, false, 'quota at 70%');
-  assert.equal(routeBuiltIn({wants_fast: true}, REAL_CATALOG, {source: 'test', status: 'unknown'}, sol).route.bundle.fast, false, 'unknown quota');
+  assert.ok(REAL_CATALOG.models.some(row => row.route.agentKind === 'codex' && row.route.model === 'gpt-6.1-sol' && row.supportsFastMode), 'the catalog has a Codex row that offers fast mode');
+  for (const wants of [true, false]) {
+    const routed = routeBuiltIn({wants_fast: wants, urgency: 'high'}, REAL_CATALOG, sol);
+    assert.equal(routed.route.bundle.harness, 'codex');
+    assert.equal(routed.route.bundle.fast, false, `wants_fast ${wants}: no quota reading is attached, so fast mode is never on`);
+    assert.equal(routed.decision.wants_fast, wants);
+    assert.ok(inCatalog(routed, REAL_CATALOG));
+  }
   const piOnly = {models: REAL_CATALOG.models.filter(row => row.route.agentKind === 'pi')};
-  assert.equal(routeBuiltIn({wants_fast: true}, piOnly, OK_QUOTA, sol).route.bundle.fast, false, 'Pi has no fast feature');
+  assert.equal(routeBuiltIn({wants_fast: true}, piOnly, sol).route.bundle.fast, false, 'Pi has no fast feature');
 });
 
-test('quota: an exhausted Codex window takes that account out of automatic routing and another connection routes', () => {
-  const now = Date.now();
-  const window = (used, minutes) => ({used_percent: used, window_minutes: minutes, resets_at: now / 1000 + 3600});
-  const exhausted = {source: 'test', status: 'exhausted', used_percent: 100, plan: 'pro', windows: [window(100, 10080)]};
-  const moved = routeBuiltIn({}, WITH_CLAUDE, exhausted, {now});
-  assert.equal(moved.route.bundle.harness, 'claude');
-  assert.equal(moved.decision.quota.status, 'exhausted');
-  const only = routeBuiltIn({}, REAL_CATALOG, exhausted, {now});
-  assert.equal(only.status, 'blocked', 'with no other connection nothing is started');
-  assert.equal(only.decision.reason, 'no_route');
-  assert.ok(only.decision.excluded.length > 0);
-  const roomy = routeBuiltIn({}, REAL_CATALOG, {...exhausted, status: 'ok', used_percent: 30, windows: [window(30, 10080)]}, {now});
-  assert.equal(roomy.status, 'native');
-  assert.ok(['codex', 'pi'].includes(roomy.route.bundle.harness));
-  // More of a window used never makes a route cheaper.
-  const cost = used => routeBuiltIn({}, REAL_CATALOG, {...exhausted, status: 'ok', used_percent: used, windows: [window(used, 10080)]}, {now, constraintModel: 'gpt-6.1-sol:high'})
-    .decision.selected_quota.cost;
-  assert.ok(cost(10) <= cost(50) && cost(50) <= cost(80), `${cost(10)} ${cost(50)} ${cost(80)}`);
-});
-
-test("with no CODEX_HOME the telemetry Cindy's own Codex writes (<app data>/CindyGlobal/codex-home) counts, newest first", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'user-home-'));
-  try {
-    const env = {APPDATA: path.join(home, 'AppData', 'Roaming'), XDG_CONFIG_HOME: path.join(home, '.config')};
-    const homes = codexHomes(env, home);
-    assert.equal(homes[0], path.join(home, '.codex'));
-    assert.match(homes[1], /CindyGlobal[\\/]codex-home$/);
-    assert.deepEqual(codexHomes({CODEX_HOME: '/x'}, home), ['/x']);
-    const now = Date.UTC(2026, 10, 3, 12);
-    const write = (root, used, age) => {
-      const day = path.join(root, 'sessions', '2026', '11', '03');
-      fs.mkdirSync(day, {recursive: true});
-      const file = path.join(day, 'rollout-a.jsonl');
-      fs.writeFileSync(file, JSON.stringify({type: 'event_msg', payload: {type: 'token_count',
-        rate_limits: {primary: {used_percent: used, window_minutes: 10080, resets_at: now / 1000 + 600}, secondary: null}}}) + '\n');
-      const at = new Date(now - age);
-      fs.utimesSync(file, at, at);
-    };
-    assert.equal(codexQuota(env, now, homes).status, 'unknown');
-    write(homes[1], 22, 1000);
-    assert.deepEqual([codexQuota(env, now, homes).used_percent, codexQuota(env, now, homes).file.startsWith(homes[1])], [22, true]);
-    write(homes[0], 70, 60000);
-    assert.equal(codexQuota(env, now, homes).used_percent, 22);
-    write(homes[0], 99, 100);
-    assert.equal(codexQuota(env, now, homes).used_percent, 22);
-    // A session started in an earlier date folder that was updated more recently than today's folder wins by mtime.
-    const prevDay = path.join(homes[1], 'sessions', '2026', '11', '02');
-    fs.mkdirSync(prevDay, {recursive: true});
-    const prevFile = path.join(prevDay, 'rollout-prev.jsonl');
-    fs.writeFileSync(prevFile, JSON.stringify({type: 'event_msg', payload: {type: 'token_count',
-      rate_limits: {primary: {used_percent: 98, window_minutes: 10080, resets_at: now / 1000 + 600}, secondary: null}}}) + '\n');
-    const newerAt = new Date(now - 200);
-    fs.utimesSync(prevFile, newerAt, newerAt);
-    assert.deepEqual([codexQuota(env, now, homes).status, codexQuota(env, now, homes).used_percent, codexQuota(env, now, homes).file],
-      ['exhausted', 98, prevFile]);
-  } finally {fs.rmSync(home, {recursive: true, force: true});}
-});
-
-test('a snapshot not bound to a connection is not applied across several Codex connections, and a row that offers no effort is launched with none', () => {
-  const multiCodex = {models: [
-    {route: {agentKind: 'codex', providerId: 'openai-a', model: 'gpt-6.1-sol', effort: 'high', fastMode: false}, efforts: ['high'], supportsFastMode: true},
-    {route: {agentKind: 'codex', providerId: 'openai-b', model: 'gpt-6.1-sol', effort: 'high', fastMode: false}, efforts: ['high'], supportsFastMode: true},
-  ]};
-  const exhausted = {source: 'test', status: 'exhausted', used_percent: 100, plan: 'pro'};
-  const unbound = routeBuiltIn({wants_fast: true, urgency: 'high'}, multiCodex, exhausted);
-  assert.equal(unbound.status, 'native', 'an unbound single-home snapshot is not applied across several Codex connections');
-  assert.equal(unbound.decision.accounts, undefined);
-  const bound = routeBuiltIn({wants_fast: true, urgency: 'high'}, multiCodex, {...exhausted, providerId: 'openai-a'});
-  assert.equal(bound.status, 'native');
-  assert.equal(bound.route.bundle.providerId, 'openai-b', 'a bound snapshot takes out only its own connection');
-  assert.equal(bound.route.bundle.fast, false, 'fast mode is never on for a connection whose quota is not the snapshot');
+test('a row that offers no effort is launched with none', () => {
   const emptyEffort = routeBuiltIn({}, {models: [{route: {agentKind: 'codex', providerId: 'openai', model: 'gpt-6.1-sol', effort: '', fastMode: false}, efforts: [], supportsFastMode: false}]});
   assert.equal(emptyEffort.status, 'native');
   assert.equal(emptyEffort.route.bundle.effort, '');
+});
+
+// Cindy's data directory is private app data and a Codex home is the Codex CLI's: the plugin reads nothing under either, and no quota reading
+// is attached to a connection (the catalog cannot say which one is the user's own sign-in).
+test("the plugin reads nothing of Cindy's private app data and nothing under a Codex home", () => {
+  const dir = fileURLToPath(new URL('../agentcompass/', import.meta.url));
+  const files = ['main.js', 'worker.cjs', 'engine/route.mjs', 'ghost.json', ...fs.readdirSync(path.join(dir, 'locales')).map(n => 'locales/' + n)];
+  const banned = /ghost-errand-prefs|['"`]owners['"`]|[\/]owners|CODEX_HOME|codex-home|\.codex|CindyGlobal|rate_limits|session logs?|APPDATA|XDG_CONFIG_HOME|Application Support|quota-state|homedir\(\)\s*,\s*['"`]\.(?:codex|config)/i;
+  for (const rel of files) assert.doesNotMatch(fs.readFileSync(path.join(dir, rel), 'utf8'), banned, rel);
+  for (const name of ['codexQuota', 'codexHomes', 'cindyAppDirs']) assert.equal(typeof routeModule[name], 'undefined', name);
 });
 
 test('a row with a gap in its data leaves automatic routing; naming the model dispatches it with the data error', () => {
@@ -932,7 +887,7 @@ test('a row with a gap in its data leaves automatic routing; naming the model di
   assert.equal(refused.status, 'blocked');
   assert.equal(refused.decision.reason, 'no_route');
   assert.ok(refused.decision.excluded.length > 0);
-  const named = routeBuiltIn({}, sparkOnly, OK_QUOTA, {constraintModel: 'gpt-5.3-codex-spark'});
+  const named = routeBuiltIn({}, sparkOnly, {constraintModel: 'gpt-5.3-codex-spark'});
   assert.equal(named.status, 'native', JSON.stringify(named.decision?.refusal ?? named.decision?.excluded));
   assert.ok(named.decision.warnings.some(line => /data error/.test(line)), 'the gap is not silent');
 });
@@ -940,7 +895,7 @@ test('a row with a gap in its data leaves automatic routing; naming the model di
 test('nothing runnable: an empty or foreign catalog is blocked, never guessed', () => {
   assert.equal(routeBuiltIn({}, {models: []}).status, 'blocked');
   assert.equal(routeBuiltIn({}, {models: [{route: {agentKind: 'gemini', providerId: 'g', model: 'x', effort: ''}}]}).status, 'blocked');
-  assert.equal(routeTask(TASK, undefined, {quota: OK_QUOTA, profile: profileOf()}).status, 'blocked');
+  assert.equal(routeTask(TASK, undefined, {profile: profileOf()}).status, 'blocked');
 });
 
 // ---- Part 3: the real worker.cjs as a node child over JSON-RPC stdio
@@ -1041,13 +996,21 @@ test('zero configuration: the built-in engine routes over the catalog Cindy pass
   assert.deepEqual(JSON.parse(fs.readFileSync(outReplies[1].result.artifact, 'utf8')), fullPage);
 });
 
-test('built-in split, self, a read-only exploration and fast mode with fresh Codex quota telemetry, all from the profile', () => {
+test('built-in split, self, a read-only exploration and wants_fast, all from the profile; an exhausted Codex log in the home changes no route and is not read', () => {
   const p = plugin(codex, 0, 'none');
-  const sessions = path.join(p.home, '.codex', 'sessions', '2026', '11', '03');
-  fs.mkdirSync(sessions, {recursive: true});
-  fs.writeFileSync(path.join(sessions, 'rollout-x.jsonl'), JSON.stringify({type: 'event_msg', payload: {type: 'token_count',
-    rate_limits: {primary: {used_percent: 12, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 3600},
-      secondary: {used_percent: 12, window_minutes: 10080, resets_at: Math.floor(Date.now() / 1000) + 86400}, plan_type: 'pro'}}}) + '\n');
+  // What a quota reading or a card model would have been taken from: an exhausted Codex log in each Codex home and a prefs file.
+  const logLine = JSON.stringify({type: 'event_msg', payload: {type: 'token_count', rate_limits: {plan_type: 'plus',
+    primary: {used_percent: 99, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 3600},
+    secondary: {used_percent: 99, window_minutes: 10080, resets_at: Math.floor(Date.now() / 1000) + 86400}}}}) + '\n';
+  const appData = path.join(p.home, 'AppData', 'Roaming');
+  for (const home of [path.join(p.home, '.codex'), path.join(appData, 'CindyGlobal', 'codex-home')]) {
+    const day = path.join(home, 'sessions', '2026', '11', '03');
+    fs.mkdirSync(day, {recursive: true});
+    fs.writeFileSync(path.join(day, 'rollout-x.jsonl'), logLine);
+  }
+  const owner = path.join(appData, 'CindyGlobal', 'owners', '0123456789abcdef0123');
+  fs.mkdirSync(owner, {recursive: true});
+  fs.writeFileSync(path.join(owner, 'ghost-errand-prefs.json'), JSON.stringify({errand: {agentcompass: {model: 'bad-model', agentKind: 'codex'}}}));
   const explore = {work_kind: 'exploration_analysis', interaction_style: 'exploration', code_complexity: 0, access: 'read-only',
     axis_demand: {divergence: 2, coding: 0, aesthetics: 0, tool_operation: 1}};
   const replies = rpc(p, [
@@ -1062,10 +1025,19 @@ test('built-in split, self, a read-only exploration and fast mode with fresh Cod
   const picked = replies[2].result.bundle;
   assert.ok(REAL_CATALOG.models.some(row => row.route.agentKind === picked.harness && row.route.providerId === picked.providerId && row.route.model === picked.model),
     'the exploration route is a row Cindy listed: ' + JSON.stringify(picked));
-  const fastRoute = replies[3].result.bundle;
-  assert.equal(replies[3].result.router.decision.quota.used_percent, 12);
-  if (fastRoute.fast) assert.equal(fastRoute.harness, 'codex', 'only a Codex row has a fast mode');
-  assert.equal(replies[4].result.bundle.fast, false, 'urgency alone never turns fast mode on');
+  assert.equal(replies[3].result.router.decision.wants_fast, true, 'wants_fast is echoed as the profile stated it');
+  assert.equal(replies[3].result.bundle.fast, false, 'fast mode is never chosen');
+  assert.equal(replies[4].result.bundle.fast, false);
+  for (const i of [3, 4]) {
+    const {decision} = replies[i].result.router;
+    assert.equal(decision.quota, undefined, 'the exhausted log is not read');
+    assert.equal(decision.accounts, undefined);
+    assert.deepEqual(decision.excluded ?? [], []);
+  }
+  // The same route as in a home with no log: what lies under a Codex home does not matter.
+  const clean = plugin(codex, 0, 'none');
+  const [bare] = rpc(clean, [prepare(clean, 'text four', 4, REAL_CATALOG, {profile: profileOf({wants_fast: true, urgency: 'high'})})]);
+  assert.deepEqual(bare.result.bundle, replies[3].result.bundle);
 });
 
 test('the built-in engine never classifies by itself: a prepare without a profile or a classification is blocked and leaves no receipt', () => {

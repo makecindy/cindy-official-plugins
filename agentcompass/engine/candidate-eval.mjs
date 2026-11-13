@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at ac494f31dda6dc516e985594208e28fca85aa5fb (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 35a7aea5b6bc4028bb78c460482b6d3ad8708948 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Candidate evaluation (`candidate_eval.py`): one bundle against one task, its gates, exclusions (rule B) and breakdown.
@@ -307,13 +307,15 @@ export function evaluateBundle(bundle, task, ctx) {
   if (namedBundle && ![bundle.id, bundle.source_id, bundle.pin_carrier].includes(namedBundle)) taskExclude(EXPLICIT_BUNDLE_CONSTRAINT);
 
   // Rule B: a demanded category with no data at all, no cited usd on a metered account, or unknown image_input modality when
-  // the task demands image input (tool_operation 3), leaves automatic routing; naming the model still dispatches it, with the
+  // the task demands image input (needs_visual, or tool_operation 3), leaves automatic routing; naming the model still dispatches it, with the
   // data error as a warning and its cost unpriced.
   const state = info.five_axis || { missing: [...FIVE_AXES], usd_status: "missing" };
   const billed = !(spec.unmetered || spec.unlimited);
   const named0 = !pool && (modelPinMatches(task, bundle, ownModel) || task.pinned_bundle === bundle.id);
   const imgInfo = state.image_input || { status: "missing" };
-  const needsImageInput = (task.five_axis_demand.tool_operation || 0) >= IMAGE_INPUT_LEVEL && !pool;
+  // The task reads images when the classifier says so (needs_visual, which task intake also sets for needs_gui) or when it
+  // demands tool_operation 3: a model that takes no image input cannot do either.
+  const needsImageInput = (Boolean(task.needs_visual) || (task.five_axis_demand.tool_operation || 0) >= IMAGE_INPUT_LEVEL) && !pool;
   const eff = scoringEffort(bundle, info);
   const values = fiveAxisValues(state, eff);
   if (needsImageInput && imgInfo.status === "no") exclude(`model does not accept image input (${imgInfo.source || "public data"})`);

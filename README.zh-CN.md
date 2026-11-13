@@ -61,7 +61,7 @@
 | <img src="./x-manager/assets/icon.png" width="22" alt=""> | X Manager | [`x-manager`](./x-manager) | 在 X（Twitter）上搜舆情、发帖——xAI x_search，Grok 订阅 / API key 双通道降级，发帖走 X 官方 API v2；目前定向灰度中 |
 | <img src="./ntfy/assets/icon.png" width="22" alt=""> | ntfy | [`ntfy`](./ntfy) | 通过你自己的 ntfy 服务器向手机或电脑发送推送通知；访问令牌由 Cindy 保管，只发送给对应服务器；自选安装 |
 | <img src="./decision-gate/assets/icon.png" width="22" alt=""> | 决策闸门 | [`decision-gate`](./decision-gate) | 按你写的规则开新任务时选模型，并在自动化和例行任务运行前判断要不要跑 |
-| <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | 把独立工作交给最合适的模型：通过 Cindy 的 quick-text 通道由模型为任务做画像（需要 Cindy 账号），内置 AgentCompass 引擎在这台 Cindy 能运行的模型中选出 harness、模型与档位（额度读自本地 Codex 会话日志尾部），在父项目目录以 `bypassPermissions`（Claude）/ `full-access`（Codex、Pi）启动普通 Cindy 任务并取回确切结果；自选安装 |
+| <img src="./agentcompass/assets/icon.png" width="22" alt=""> | AgentCompass | [`agentcompass`](./agentcompass) | 把独立工作交给最合适的模型：通过 Cindy 的 quick-text 通道由模型为任务做画像（需要 Cindy 账号），内置 AgentCompass 引擎在这台 Cindy 能运行的模型中选出 harness、模型与档位（仅按能力匹配，不做额度经济，也没有 fast 模式），在父项目目录以 `bypassPermissions`（Claude）/ `full-access`（Codex、Pi）启动普通 Cindy 任务并取回确切结果；自选安装 |
 
 想要的插件不在这里？[提议一个](#提交你的插件)——或者自己写一个提交上来。
 
