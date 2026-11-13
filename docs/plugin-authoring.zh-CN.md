@@ -388,7 +388,7 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
 
 ### 当前能力声明与后续同步
 
-以下字段以 [Host 提交 a81313e8446c](https://github.com/makecindy/cindy/blob/a81313e8446c171ba0e70cb568f5b47cc9a9f078/packages/plugin-protocol/src/manifest.ts)
+以下字段以 [Host 提交 94475474ec](https://github.com/makecindy/cindy/blob/94475474ec60d13f94790d0548e74b7d75ce9de6/packages/plugin-protocol/src/manifest.ts)（v0.1.135）
 及对应运行时参考为来源，用于查找能力；实际可用性仍以目标 Host 为准。
 
 | 能力 | 声明字段 |
@@ -399,8 +399,13 @@ Host 自动回调插件。旧 `cindy-request` 图片/视频生成接口用于存
 | 配置与使用前置 | `showTaskPreferences`、`setup.requires[].anyOf` |
 | 介绍与邮件 | `readme`、`mail`、`mailReader` |
 | 模型与例行任务事件 | `models.types`、`routineEvents.events` |
+| 静态系统提示词 | `systemPrompt`（v3，`scope: "selected-task"`） |
+| 事件钩子 | `subscribe.hooks` 的 `will-start-turn`、`will-model-request`、`will-compose-context`、`will-search-memory` |
 | 凭证检查 | `network.secrets[].check` |
 | 电脑间同步与设备屏幕 | `deviceSync`、`liveScreen` |
+
+页面资源仍由 `mcpApps.ui` 声明：`resources` 与 `tools` 至少一项非空；只提供页面、
+由具名入口打开时可以使用空的 `tools: {}`。
 
 Host 的资源语言包括 `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`。
 Host 能力与官方仓发布要求分别维护；本文更新不改变本仓现有四语要求、固定校验器、
