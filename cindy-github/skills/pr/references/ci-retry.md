@@ -53,6 +53,24 @@ Use the current `<skill-dir>` and existing gate state directory. Keep the same
 state location as this PR's follow-up; never create another state directory,
 delete the budget sentinel or reset the budget to obtain another attempt.
 
+There is no PR-wide retry cap. Each distinct diagnosed failure on a PR may have
+one CI-only repush. Before checking/reserving its budget, write a diagnosis JSON
+file with exactly four nonempty strings: `workflow` (workflow file path), `job`
+(stable job name, not numeric job ID), `step` (failed step name), and `cause`
+(normalized root cause supported by the logs). For example:
+
+```json
+{"workflow":".github/workflows/verify.yml","job":"verify-checks","step":"install dependencies","cause":"package store unavailable"}
+```
+
+Do not put commit SHAs, run/job IDs, attempts, timestamps or transient paths in
+the diagnosis. Reuse it when the same fault recurs on a new run/head; a changed
+SHA, log wording or symptom alone is not a new cause. A different diagnosis
+requires new log evidence, the normal rerun denial and all eligibility checks
+again. When unsure whether it is the same fault, stop rather than inventing a
+new key. The gate normalizes case/whitespace and hashes these four fields with
+the immutable PR ID; it cannot verify the Agent's causal diagnosis.
+
 1. Inspect `git status --porcelain=v1 --untracked-files=all`, the index and
    ongoing merge/rebase/cherry-pick state. Require a clean task checkout. Any WIP
    stops this route; do not stage, stash, reset or overwrite it. Read repository
@@ -67,22 +85,27 @@ delete the budget sentinel or reset the budget to obtain another attempt.
    If anything differs, stop and reconcile safely; do not fetch/reset away an
    unknown remote commit. Record the verified remote SHA as the fixed lease.
 3. Read live `pr_follow_settings` again. If still enabled and all conditions
-   hold, consume the **single CI-only repush attempt for this PR on this computer**:
+   hold, consume the **single CI-only repush attempt for this diagnosed failure
+   on this PR/computer**:
 
    ```sh
-   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --json
+   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json
    ```
 
    Require exit 0, `reason: "ci-retry-reserved"` and the matching
-   `reservation.sourceHead`. This receipt only consumes budget; it does not
-   authorize Git operations. `--ci-retry-status --ci-retry-id <verified-PR-node-id> --json` reads it without writes
+   `reservation.sourceHead` and normalized `reservation.failure`. This receipt
+   only consumes budget; it does not authorize Git operations.
+   `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without writes
    or GitHub calls. The budget survives changed SHAs, gate acknowledgements,
    follow-up restarts, repository renames/transfers and interrupted operations.
-   The sentinel is keyed by the immutable PR node ID, never the mutable URL.
+   The sentinel is keyed by the immutable PR node ID and stable diagnosis,
+   never the mutable URL, head SHA or run ID.
    A denied, corrupt or uncertain
    reservation means stop: no amend/push. Even a failed push consumes the attempt.
-   The limit is deliberately stricter than one attempt per failure: **one per PR**,
-   so changing job/run IDs or head SHA cannot start an amend/force-push loop.
+   A different diagnosed failure can have its own attempt without deleting any
+   prior receipt; the same failure cannot start an amend/force-push loop by
+   changing job/run IDs or head SHA. Earlier development receipts lacking a
+   diagnosis stop recovery for reconciliation; do not silently discard them.
 4. Recheck the PR is open, the preference is enabled, and local/index/remote
    facts still match before `git commit --amend --no-edit`. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use
@@ -112,7 +135,7 @@ delete the budget sentinel or reset the budget to obtain another attempt.
 Check the new SHA appears on the **original PR** and exact remote branch. Check
 GitHub Actions/check suites for that SHA and this PR event; a new SHA alone does
 not prove CI started (fork workflow rules/path filters may prevent it). Record
-old/new SHA, failed run and permission-denied evidence, consumed budget, push
+old/new SHA, stable diagnosis, failed run and permission-denied evidence, consumed budget, push
 outcome and observed CI run/check identifiers in this task's follow-up record.
 Report separately: not executed, executed and verified, or unknown pending
 read-back. Never call CI passed until its actual results pass. If checks do not
@@ -120,6 +143,7 @@ start, investigate/report and wait, without another amend, empty commit or push.
 Use the ordinary gate finish/wait procedure; do not change schedule cadence.
 
 After a crash or ambiguous outcome, read the current PR's verified `node_id`,
-use `--ci-retry-status --ci-retry-id <verified-PR-node-id> --json` and compare
+reuse the recorded diagnosis and use
+`--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` and compare
 its `sourceHead` with local history, the remote and original PR. Verify and
 report the existing outcome; never consume another attempt or replay the push.

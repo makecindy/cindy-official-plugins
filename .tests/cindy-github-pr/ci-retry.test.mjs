@@ -11,15 +11,18 @@ const gate = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-hear
 const url = 'https://github.com/example/repo/pull/42';
 const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
+const failure = { workflow: '.github/workflows/verify.yml', job: 'verify', step: 'install dependencies', cause: 'package store unavailable' };
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ci-retry-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const stateDir = path.join(root, 'state');
-  const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...(flags.includes('--ci-retry-status') || flags.includes('--reserve-ci-retry') ? ['--ci-retry-id', prNodeId] : []), ...flags];
+  const diagnosis = path.join(root, 'diagnosis.json');
+  fs.writeFileSync(diagnosis, JSON.stringify(failure));
+  const args = (flags, target = url) => [target, '--state-dir', stateDir, '--json', ...(flags.includes('--ci-retry-status') || flags.includes('--reserve-ci-retry') ? ['--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosis] : []), ...flags];
   return {
-    root, stateDir,
-    sentinel: ciRetryFilePath(stateDir, prNodeId),
+    root, stateDir, diagnosis,
+    sentinel: ciRetryFilePath(stateDir, prNodeId, failure),
     async run(flags, target) {
       let stdout = '', stderr = '';
       const code = await runGate(args(flags, target), {
@@ -38,7 +41,7 @@ function fixture(t) {
   };
 }
 
-test('one CI reservation survives changed SHAs, observation resets, casing and follow-up restarts', async t => {
+test('same failure budget survives changed SHAs, observation resets, casing and follow-up restarts', async t => {
   const fx = fixture(t);
   assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
   assert.equal(fs.existsSync(fx.stateDir), false, 'status is read-only');
@@ -58,7 +61,42 @@ test('one CI reservation survives changed SHAs, observation resets, casing and f
   assert.equal((await fx.run(['--ci-retry-status'])).result.reservation.sourceHead, oldHead);
   assert.equal((await fx.run(['--ci-retry-status'], 'https://github.com/example/renamed/pull/42')).result.available, false, 'repository rename preserves PR identity');
   assert.equal((await fx.run(['--reserve-ci-retry', newHead], 'https://github.com/new-owner/transferred/pull/42')).code, 1, 'repository transfer cannot restore the budget');
-  assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId'));
+  assert.notEqual(ciRetryFilePath(fx.stateDir, prNodeId, failure), ciRetryFilePath(fx.stateDir, 'PR_anotherImmutableId', failure));
+});
+
+test('distinct verified failures on one PR can retry without resetting previous failure evidence', async t => {
+  const fx = fixture(t);
+  assert.equal((await fx.process(['--reserve-ci-retry', oldHead])).code, 0);
+  fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'runner network unavailable' }));
+  assert.equal((await fx.run(['--ci-retry-status'])).result.available, true);
+  assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 0);
+  assert.equal(fs.readdirSync(fx.stateDir).length, 2);
+  // Changing head/run details or superficial spelling must not invent a new fault.
+  fs.writeFileSync(fx.diagnosis, JSON.stringify({ cause: ' PACKAGE   STORE UNAVAILABLE ', step: failure.step, job: 'VERIFY', workflow: failure.workflow }));
+  assert.equal((await fx.run(['--ci-retry-status'])).result.available, false);
+  assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 1);
+  assert.equal((await fx.run(['--ci-retry-status'])).result.reservation.sourceHead, oldHead);
+});
+
+test('missing, invalid and legacy diagnosis evidence cannot start a new retry', async t => {
+  const fx = fixture(t);
+  let error = '';
+  assert.equal(await runGate([url, '--ci-retry-id', prNodeId, '--reserve-ci-retry', oldHead], { out() {}, err: text => { error += text; } }), 1);
+  assert.match(error, /requires --ci-retry-failure/);
+  for (const value of [{ ...failure, runId: 123 }, { ...failure, cause: '' }, { ...failure, step: null }, []]) {
+    fs.writeFileSync(fx.diagnosis, JSON.stringify(value));
+    assert.equal((await fx.run(['--reserve-ci-retry', oldHead])).code, 1);
+  }
+  fs.writeFileSync(fx.diagnosis, '{');
+  assert.equal((await fx.run(['--ci-retry-status'])).code, 1);
+  fs.unlinkSync(fx.diagnosis);
+  assert.equal((await fx.run(['--reserve-ci-retry', oldHead])).code, 1);
+  assert.equal(fs.existsSync(fx.stateDir), false);
+  fs.writeFileSync(fx.diagnosis, JSON.stringify(failure));
+  fs.mkdirSync(fx.stateDir);
+  fs.writeFileSync(ciRetryFilePath(fx.stateDir, prNodeId), JSON.stringify({ prNodeId, sourceHead: oldHead, reservedAt: 123 }));
+  assert.equal((await fx.run(['--ci-retry-status'])).code, 1);
+  assert.equal((await fx.run(['--reserve-ci-retry', newHead])).code, 1);
 });
 
 test('CI reservation is atomic across processes and never refunded after an interrupted operation', async t => {

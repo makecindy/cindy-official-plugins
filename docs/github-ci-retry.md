@@ -42,15 +42,21 @@ remote commit ends the attempt; the Agent must not update the lease and blindly
 push again. It checks the new SHA on the original PR and whether CI actually
 started; triggering is not passing.
 
-The existing follow-up gate reserves one attempt **per PR per computer**, before
-any amend. A small exclusive-create `.ci-retry` file in the same state directory
-is keyed by the immutable PR `node_id` read from the live GitHub PR, not its URL.
-It survives repository renames/transfers, head changes, restarts, observation
-resets and interrupted operations. Both budget commands require that verified ID.
-It is not pruned with traces or refunded after failure. Do not delete it, move the
-state directory or reset it to obtain another attempt. Unknown outcomes require
-read-back, not another push. Even a different later failure on that PR has no
-second CI-only repush budget.
+There is no PR-wide cap: **the same diagnosed failure on a PR may have one
+CI-only repush per computer**. Before any amend, the existing gate exclusively
+creates a `.ci-retry` receipt keyed by the immutable PR `node_id` and stable
+diagnosis (workflow file, job name, failed step and normalized root cause).
+Both budget commands require the verified ID and
+`--ci-retry-failure <diagnosis.json>`. Exclude SHA, run/job IDs, attempts,
+timestamps and transient paths. Head changes, restarts, renames/transfers,
+observation resets and interrupted operations do not restore the same fault's
+budget. A distinct failure needs fresh logs, a normal rerun permission denial
+and every eligibility check before its own attempt. The gate normalizes case
+and whitespace but cannot verify the Agent's diagnosis; uncertainty stops
+recovery, rather than inventing a key. Earlier development receipts without a
+diagnosis require reconciliation, not deletion. Receipts are not pruned with
+traces or refunded. Do not delete them, move the directory or reset the budget.
+Unknown outcomes require read-back, not another push.
 
 The plugin sandbox does not run Git itself or mechanically diagnose logs and
 branch ownership. Those checks and the Git operation remain in the existing

@@ -10,10 +10,10 @@
       "description": "执行 list_tools 返回的具体 GitHub 操作，args 按其参数 schema 传入。仓库级操作必须显式传 owner 与 repo；在 Git 仓库中工作时可从 git remote get-url origin 推导。响应默认剥除 API 链接字段但保留 html_url；传 raw=true 获取原始 JSON。结果超过 50KB 时自动写入会话工作目录并只返回文件路径，out_file 可指定路径。下载 Actions 产物或日志 ZIP 时，必须在 ghost_call 顶层 save_dir 提供目标目录。"
     },
     "pr_card": {
-      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和任务入口；新版直接跳转，旧版点击后在回复中提供链接，open-task 仅为导航。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，每 PR 最多一次，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。"
+      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和任务入口；新版直接跳转，旧版点击后在回复中提供链接，open-task 仅为导航。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，同一故障最多一次，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。"
     },
     "pr_follow_settings": {
-      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，每 PR 最多一次，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。"
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，同一故障最多一次，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。"
     }
   }
 }
