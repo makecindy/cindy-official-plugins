@@ -70,3 +70,13 @@ Metadata exceeding title500/author300/language64 chars, GUID/URL4000, date128 or
 0.2.19 (ja): JSON：配列または {segments:[...]}。text（別名 body）、start/end（別名 startTime/endTime）は秒単位で、ミリ秒ではありません。speaker は任意。HTML はコメント、入れ子の template、raw-text 要素を除外します。一般的なページ可視性/CSS 抽出器ではありません。
 
 0.2.19 (ko): JSON: 배열 또는 {segments:[...]}; text(별칭 body), start/end(별칭 startTime/endTime)는 밀리초가 아닌 초 단위이며 speaker는 선택 사항입니다. HTML 주석, 중첩 template, raw-text 컨테이너를 제외하며 일반적인 페이지 가시성/CSS 추출기가 아닙니다.
+# Automatic reading notes
+
+For an existing active transcript, call podcast_minutes with action=generate,
+episode_id and language=zh-CN or en. It uses Cindy text model quota, never audio
+transcription. On success use action=export for standalone HTML/JSON in this task's
+outputs/ directory. read gives metadata; section_offset pages chapters. Avoid blind
+regeneration after failures. Quotes are source extractions, not proof of ASR or
+interpretation accuracy. Navigation ranges cover all original paragraphs and are
+not manually verified semantic boundaries. Chapter questions must read/cite the
+original version, never treat saved notes as a substitute for source evidence.
