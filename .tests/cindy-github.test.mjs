@@ -1820,6 +1820,77 @@ test('CI preference read failures and uncertain card writes do not enable or bli
   assert.equal((await unreadable.tool({}, 'pr_follow_settings')).reply.ok, false);
 });
 
+test('failed preference reads display unknown instead of an enabled authorization as off', async () => {
+  let fail = false, writes = 0;
+  const runtime = createPrRuntime({ preferences: async (_, init) => {
+    if (init.method === 'PUT') writes++;
+    return fail ? { ok: false } : { ok: true, json: async () => ({ prCard: { ciRetryRepush: true } }) };
+  } });
+  const entry = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  await runtime.click(entry.callId, 'prui:settings');
+  fail = true;
+  const failed = await runtime.tool({ card_id: entry.callId });
+  assert.deepEqual(failed.reply.result.settings, { unreadable: true });
+  const html = runtime.lastCard(entry.callId).html;
+  assert.doesNotMatch(html, /data-ghost-action="prset:/, 'unknown must not manufacture toggle/model choices');
+  assert.ok(visibleText(html).includes(zhCopy.prSettingsUnknown));
+  assert.match(html, /data-ghost-action="prui:settingsRefresh"/);
+  fail = false;
+  await runtime.click(entry.callId, 'prui:settingsRefresh');
+  assert.match(runtime.lastCard(entry.callId).html, /prset:ciRetry:off" data-ghost-toggle="on"/);
+  assert.equal(writes, 0, 'refresh only reads, never grants or revokes authorization');
+});
+
+test('uncertain preference mutations read back actual state without replaying the write', async () => {
+  for (const action of ['prset:ciRetry:on', 'prset:ciRetry:off', 'prset:rename']) {
+    for (const mode of ['throw', 'rejected', 'readback-fails', 'accepted-readback-fails']) {
+      let kv = { prCard: { ciRetryRepush: action !== 'prset:ciRetry:on' } }, writes = 0, readbacks = 0, unavailable = false;
+      const runtime = createPrRuntime({ preferences: async (_, init) => {
+        if (init.method === 'PUT') {
+          kv = JSON.parse(init.body); writes++;
+          if (mode === 'rejected') return { ok: false };
+          unavailable = mode === 'readback-fails' || mode === 'accepted-readback-fails';
+          if (mode === 'accepted-readback-fails') return { ok: true };
+          throw new Error('response lost after persistence');
+        }
+        if (writes) readbacks++;
+        return unavailable ? { ok: false } : { ok: true, json: async () => structuredClone(kv) };
+      } });
+      const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+      await runtime.click(card.callId, 'prui:settings');
+      await runtime.click(card.callId, action);
+      assert.ok(readbacks > 0, 'a failed PUT result must be reconciled with a read');
+      const html = runtime.lastCard(card.callId).html;
+      if (unavailable) {
+        assert.doesNotMatch(html, /data-ghost-action="prset:/);
+        assert.ok(visibleText(html).includes(zhCopy.prSettingsUnknown));
+      } else {
+        assert.ok(visibleText(html).includes(zhCopy.prSettingFailed));
+        assert.match(html, kv.prCard.ciRetryRepush ? /prset:ciRetry:off" data-ghost-toggle="on"/ : /prset:ciRetry:on" data-ghost-toggle="off"/);
+      }
+      unavailable = false;
+      await runtime.click(card.callId, 'prui:settingsRefresh');
+      assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, kv.prCard.ciRetryRepush === true);
+      assert.equal(writes, 1, 'read-back and refresh cannot repeat an uncertain mutation');
+    }
+  }
+});
+
+test('malformed preference storage is unknown and cannot overwrite unrelated data', async () => {
+  for (const kv of [null, [], 1, 'invalid']) {
+    let writes = 0;
+    const runtime = createPrRuntime({ preferences: async (_, init) => {
+      if (init.method === 'PUT') writes++;
+      return { ok: true, json: async () => kv };
+    } });
+    const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+    assert.deepEqual(card.reply.result.settings, { unreadable: true });
+    await runtime.click(card.callId, 'prset:ciRetry:on');
+    assert.equal(writes, 0);
+    assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.ok, false);
+  }
+});
+
 test('releasing a source task reservation lets the dedicated task claim the follow-up', async () => {
   const runtime = createPrRuntime({ github: prGraphql() });
   const source = await runtime.tool({ repo: 'octo/repo', pr: 42, claim_follow: true });

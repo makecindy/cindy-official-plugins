@@ -24,6 +24,11 @@ and set their displayed target value rather than inverting a newer global value.
 The plugin account-settings page has no PR preference controls, reads or writes.
 Its retired preference messages are ignored; no preference handshake or second
 writer remains. Unknown writes require read-back, not blind replay.
+Unreadable or malformed storage is displayed as unknown, with no toggle/model
+choices, rather than as Off. A read-only Refresh action can recover the current
+state. Every preference action reads back current settings, including a save
+whose response was lost; an unconfirmed result is not reported as not saved.
+If read-back also fails, the panel stays unknown and grants no new authorization.
 
 Recovery requires an open PR, diagnosed transient CI/installation/infrastructure
 failure unrelated to the change, and an explicit permission denial from the

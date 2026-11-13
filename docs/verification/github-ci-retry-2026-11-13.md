@@ -89,6 +89,35 @@ fixture verifies that removing or changing the cache cannot reopen the same
 failure's budget, and that an older cache receipt cannot replace durable evidence.
 Migration cannot recover evidence that had already been deleted before upgrade.
 
+## Preference visibility invariant — 1.5.18
+
+Unknown preference state must never appear as a confirmed Off state. The
+existing main-page queue remains the sole preference writer; there is no new
+cache, retry or coordinator. Card rendering and Agent tool returns project the
+same known/unreadable state. Every preference action uses one final read-back,
+including settings other than CI retry; Refresh is read-only.
+
+| Read/write event | Panel/result |
+| --- | --- |
+| Valid read, CI flag missing or false | Known Off, explicit On action |
+| Valid read, CI flag true | Known On, explicit Off action |
+| Read failure or malformed root storage | Unknown message and read-only Refresh; no toggle/model choices |
+| PUT response unconfirmed, read-back succeeds | Show current values with an unconfirmed-save note; no repeated PUT |
+| PUT response unconfirmed, read-back fails | Unknown panel; no claim that authorization is Off or the mutation did not execute |
+| Successful PUT, subsequent read fails | Unknown panel rather than optimistic confirmation |
+| Refresh recovers | Show the new known state without a write or Agent/Git action |
+
+Three production-entry regression tests failed against 195cfc4 before the fix.
+The four required repository suites plus the plugin suite passed together:
+306 passed, 19 skipped, 0 failed in 132.1 seconds, on the Windows/Node environment
+above. The final focused three-test run also passed, including successful PUT
+followed by failed read-back. No new package was installed for this observation.
+They cover storage read failure/recovery, malformed JSON root values, enable,
+disable and another preference save whose mutation persisted before a thrown
+or rejected response, and unavailable read-back. These are simulated-host
+regressions, not real Cindy fault injection. The actual unknown-state UI on
+desktop/mobile remains unverified; normal known-state copy/layout is unchanged.
+
 ## Remaining prerequisites
 
 - Actual phone display. The deleted settings-page preference handshake no
