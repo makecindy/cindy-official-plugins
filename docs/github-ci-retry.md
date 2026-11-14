@@ -38,6 +38,14 @@ exclusive branch with write permission, no WIP, no rewrite ban and no unknown or
 other people's commits. Required real fixes take priority and are batched into a
 normal push when possible.
 
+CI-only recovery also stops if there is any retained approval, a merge-queue
+entry, enabled auto-merge or unknown/incomplete information about those states.
+The Agent reads the complete reviews and live queue/auto-merge state before
+reservation/amend and again immediately before push. This option does not
+authorize invalidating approvals, dequeueing or disabling auto-merge; it cannot
+be used to clear those states to make a retry eligible. These read-backs are not
+an atomic lock; concurrent/unknown side effects are reported, not auto-repaired.
+
 When all conditions hold, the Agent may amend without editing the commit intent
 or changing its tree, parents or author, preserving the repository's DCO rules.
 This changes the commit SHA. Preserve signed-commit provenance: a signed head requires verified original

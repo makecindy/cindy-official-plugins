@@ -42,6 +42,20 @@ All conditions must hold:
    write permission for the actual head repository (a fork may differ from the
    base), and that neither task permissions nor branch rules prohibit this push.
    A successful fetch is not evidence of write permission.
+6. Preserve completed review/merge work. Read the complete current review list
+   using the plugin's existing `graphql` tool and cursor pagination of
+   `reviews(first: 100, after: $cursor)` (`nodes { state }` and
+   `pageInfo { hasNextPage endCursor }`). Read `headRefOid`, `mergeQueueEntry`
+   and `autoMergeRequest` on the same PR too; every page must still match the
+   verified head. The REST review tool's first 100 entries and snapshot's last
+   50 are not proof of completeness. Require no retained
+   `APPROVED` review, a successfully read null queue entry, and confirmed disabled
+   auto-merge. Do not infer absence from `reviewDecision`, a truncated review
+   window, missing fields or a failed/unsupported query. Any approval, queue
+   entry, auto-merge request or unknown state stops this CI-only route before
+   reservation/amend, even if stale-approval dismissal might be disabled.
+   The preference does not authorize dismissing approvals, leaving a queue,
+   disabling auto-merge or requesting these changes to make recovery eligible.
 
 If any condition fails, report the specific blocker and record a concrete wait
 using the existing follow-up gate. Enabling this option never authorizes merge,
@@ -112,7 +126,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    the PR commit list and task history for other people's or unknown commits.
    If anything differs, stop and reconcile safely; do not fetch/reset away an
    unknown remote commit. Record the verified remote SHA as the fixed lease.
-3. Read live `pr_follow_settings` again. If still enabled and all conditions
+3. Read live `pr_follow_settings` again and recheck eligibility 6's complete
+   review/queue/auto-merge state. If still enabled and all conditions
    hold, consume one of the **two total CI-only repush attempts for this PR/computer**,
    requiring that this diagnosed failure has not consumed one already:
 
@@ -145,7 +160,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    retains the originals and never overwrites durable evidence. More than two
    older attempts, unreadable receipts or unknown prior identity/outcome stop
    recovery; migration never grants two fresh attempts on top of old history.
-4. Recheck the PR is open, the preference is enabled, and local/index/remote
+4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
+   the PR is open, the preference is enabled, and local/index/remote
    facts still match before `git commit --amend --no-edit`. Preserve the code
    tree, parents, author, commit intent and existing trailers; never use
    `--reset-author`, `--allow-empty`, identity overrides or disable hooks. Follow
@@ -160,7 +176,10 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    and report the result; never discard the old provenance silently. Local
    verification is not evidence that GitHub's Verified badge was preserved.
 5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
-   state, head, clean worktree and exact remote ref. All must still match the
+   state, complete reviews, queue entry, auto-merge, head, clean worktree and exact
+   remote ref. Eligibility 6 must still hold immediately before push. If an
+   approval/queue/auto-merge appears or any read becomes unknown, stop; do not
+   push or alter the merge workflow. All must still match the
    original verified state apart from the intended local new SHA. If disabled
    now, leave the local amend unpushed and report it; do not reset it automatically.
    Push exactly once:
@@ -181,6 +200,10 @@ GitHub Actions/check suites for that SHA and this PR event; a new SHA alone does
 not prove CI started (fork workflow rules/path filters may prevent it). Record
 old/new SHA, stable diagnosis, failed run and permission-denied evidence, consumed budget, push
 outcome and observed CI run/check identifiers in this task's follow-up record.
+Read back review/queue state too. These checks are not an atomic GitHub lock;
+if a concurrent change or uncertain push affected approvals or queue state,
+report the actual/unknown side effect and stop, without trying to restore,
+dismiss, dequeue or re-enqueue anything automatically.
 Report separately: not executed, executed and verified, or unknown pending
 read-back. Never call CI passed until its actual results pass. If checks do not
 start, investigate/report and wait, without another amend, empty commit or push.

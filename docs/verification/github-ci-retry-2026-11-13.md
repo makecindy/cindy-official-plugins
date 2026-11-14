@@ -252,6 +252,34 @@ repository suites plus plugin suite passed together: 319 passed, 19 skipped,
 zero failures in 133.9 seconds, same Windows/Node environment. No live plugin
 or user data directory was modified by these isolated fixtures.
 
+## Merge-work protection and unknown-panel height — source 1.5.23
+
+The Agent workflow now excludes any retained approval, queue entry, enabled
+auto-merge or unknown/incomplete reads of those states. One eligibility rule
+is reused before reservation/amend and immediately before push; no new query
+worker, permission, lock or Git executor is added. After reservation, a new
+blocker stops without refund; after amend, it leaves the local commit unpushed.
+Post-push concurrent/unknown side effects must be reported, never auto-repaired.
+No live approvals, queue entries or auto-merge settings were changed/tested.
+This is a Skill boundary, not a mechanically enforced GitHub atomic lock.
+
+The card height now receives the same settings state as its renderer: a compact
+unknown panel declares less height than full settings, closed settings remove
+that allowance and a successful read restores it. The production-tool regression
+first failed against 072a156 and covers asking/open/closed/merged PR stages,
+unknown -> close/reopen -> refreshed-known, with zero preference writes.
+
+No new package was installed. The local instance remains 1.5.19; actual
+unknown-state desktop/phone height, inherited copy-link rendering and the real
+permission-denied recovery chain remain unverified. This simulated-Host height
+regression is not a real-device observation.
+
+Five focused card regressions passed in 0.3 seconds. The four required
+repository suites plus plugin suite passed together: 320 passed, 19 skipped,
+zero failures in 147.1 seconds on the Windows/Node environment above. The
+review/queue rule was reviewed as Agent instructions; no live merge workflow
+was exercised or claimed as verified.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

@@ -1851,6 +1851,34 @@ test('failed preference reads display unknown instead of an enabled authorizatio
   assert.equal(writes, 0, 'refresh only reads, never grants or revokes authorization');
 });
 
+test('unknown settings use a compact declared height and restore it on refresh for every PR stage', async () => {
+  for (const stage of ['ask', 'open', 'closed', 'merged']) {
+    let fail = false, writes = 0;
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7, state: stage === 'closed' ? 'CLOSED' : 'OPEN', merged: stage === 'merged' }),
+      preferences: async (_, init) => {
+        if (init.method === 'PUT') writes++;
+        return fail ? { ok: false } : { ok: true, json: async () => ({}) };
+      },
+    });
+    const entry = await runtime.tool(stage === 'ask' ? { repo: 'octo/repo', head: 'feature' } : { repo: 'octo/repo', pr: 7 });
+    await runtime.click(entry.callId, 'prui:settings');
+    const known = runtime.lastCard(entry.callId).height;
+    fail = true;
+    await runtime.tool({ card_id: entry.callId });
+    const unknown = runtime.lastCard(entry.callId).height;
+    assert.ok(unknown < known, stage + ': shorter unknown panel must not retain full settings height');
+    await runtime.click(entry.callId, 'prui:settings');
+    assert.ok(runtime.lastCard(entry.callId).height < unknown, stage + ': closing removes the panel height');
+    await runtime.click(entry.callId, 'prui:settings');
+    assert.equal(runtime.lastCard(entry.callId).height, unknown);
+    fail = false;
+    await runtime.click(entry.callId, 'prui:settingsRefresh');
+    assert.equal(runtime.lastCard(entry.callId).height, known, stage + ': successful read restores the full panel');
+    assert.equal(writes, 0);
+  }
+});
+
 test('uncertain preference mutations read back actual state without replaying the write', async () => {
   for (const action of ['prset:ciRetry:on', 'prset:ciRetry:off', 'prset:rename']) {
     for (const mode of ['throw', 'rejected', 'readback-fails', 'accepted-readback-fails']) {

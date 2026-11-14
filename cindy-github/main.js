@@ -3326,10 +3326,10 @@ function renderPrCard(card, settings) {
 }
 
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
-function prCardHeight(card) {
+function prCardHeight(card, settings) {
   var h = 120;
   if (card.note) h += 22;
-  if (card.settingsOpen && prHasSettings(card)) h += 400;
+  if (card.settingsOpen && prHasSettings(card)) h += settings && settings.unreadable ? 120 : 400;
   return Math.min(900, h);
 }
 
@@ -3341,7 +3341,7 @@ async function sendPrCard(card, settings, sourceCallId) {
     // Agent 用 pr_card 更新结果时换回 done。
     type: 'card-update', callId: prAnchor(card), v: 2,
     state: !other && (card.stage === 'publishing' || card.pending) ? 'working' : 'done',
-    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card),
+    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card, settings),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
