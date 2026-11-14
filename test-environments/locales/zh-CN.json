@@ -1,0 +1,58 @@
+{
+  "name": "测试环境",
+  "description": "添加和选用真实测试账号，复用应用在本机保存的登录态；构建、启动和测试交给对话处理。",
+  "whenToUse": "添加和选用真实测试账号，复用应用在本机保存的登录态；构建、启动和测试交给对话处理。",
+  "mainView": {
+    "title": "测试环境"
+  },
+  "tools": {
+    "catalog": {
+      "description": "查看项目、正式账号及本机登录档案历史、启动方案和用例。不返回凭证；账号在列表中不代表登录仍有效。"
+    },
+    "save_project": {
+      "description": "保存项目与参数数组命令；以本机用户执行，不得在参数里保存密码或令牌。"
+    },
+    "save_profile": {
+      "description": "保存可复用启动方案。Cindy 桌面的持久隔离档案可以登录正式账号，验收需 debugPort；每台电脑分别登录。"
+    },
+    "save_case": {
+      "description": "保存有序验收步骤与预期结果；保存本身不执行测试。"
+    },
+    "remove": {
+      "description": "仅移除目录条目，先解除引用；应用数据和凭证保留。"
+    },
+    "import_cindy": {
+      "description": "通过本插件运行的 Cindy 应用同步接口，记住其中保存的全部账号。可指定 jobId；未指定时必须只有一个匹配的活动实例。不复制凭证，不扫描日常宿主档案。"
+    },
+    "plan": {
+      "description": "只预览启动、选账号、准备样本、执行验收、停止的命令与流程；移动端交给 Baguette。不传未交接的客户端 WIP 参数。"
+    },
+    "start": {
+      "description": "启动方案并立即返回持久 jobId；Cindy 验收自动记录应用保存的正式账号、单次选择目标身份并联网核验。本机未登录或授权过期时等待正常登录；样本与用例仍需实际执行，等待时勿重复启动。"
+    },
+    "status": {
+      "description": "查看运行状态、账号记录与联网身份核验。ready 表示账号和应用可用，不代表样本或验收已通过；unknown 时先检查准确实例。"
+    },
+    "stop": {
+      "description": "仅停止本次运行及已核实归属的进程；保留应用保存的所有账号、加密登录态、数据和账号历史，不执行登出。查询直至 stopped。"
+    },
+    "inspect": {
+      "description": "通过本次运行专属调试端口检查桌面应用，锁屏时也可用；返回经过筛选的登录状态、账号数量和可选私有截图。不返回令牌、Cookie、原始认证状态或其他应用数据。"
+    },
+    "select_account": {
+      "description": "请求将准确的本插件 Cindy 验收实例切换到同项目已记录的正式账号。只返回已请求，需查询状态；本机缺少或过期的登录需正常登录。不确定时不自动重试，先检查实际实例，再明确请求切换。不导出凭证。"
+    },
+    "remote": {
+      "description": "通用 SSH 验收流程。catalog 查看指定电脑的档案与硬件；plan 提供 target、profile 和 pr（repo/number，可选 commit）。省略 commit 时从目标 Git 读取 PR 当前版本，预览精确 SHA 后再 start。start 使用新工作树和 B 本机登录；status/stop/select_account/action/collect 使用同一 runId。action 仅执行已保存的 prepare/verify 参数；collect 取回限量、校验摘要的结果、可选日志和私有截图。沿用 OpenSSH 主机信任，不保存密码/私钥、不转发 Agent、不复制凭证。B 未登录正常授权；跨设备首次授权未实现。回执丢失先查原运行，不盲目重试。命令成功不代替真机和人工证据；不自动发布 PR，分享前脱敏。"
+    },
+    "login_accounts": {
+      "description": "列出本机应用保存的账号引用与档案位置；可传 account 记住下次测试选择。返回 selectedAccount。已保存不等于登录仍有效，不立即切换正在运行的客户端。"
+    },
+    "bind_login_account": {
+      "description": "给当前任务的 Cindy 源码项目绑定已保存的账号档案；省略 account 时使用页面选中的账号。只复用应用档案，不复制凭证，不自动启动。"
+    },
+    "add_account": {
+      "description": "打开真实客户端的登录页添加账号，由应用保存登录态。页面不配置 API 或假数据。对话先准备目标项目及版本；省略项目时仅能复用唯一明确的客户端环境。"
+    }
+  }
+}
