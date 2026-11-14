@@ -181,6 +181,25 @@ The four required repository suites plus the plugin suite passed together:
 The final focused CLI suite passed 13 tests in 5.1 seconds after the status/help
 wording update; the Git fixtures remain local, not GitHub recovery evidence.
 
+## Main synchronization — source 1.5.20 (2026-11-14)
+
+Merged main `0410e4862d18b47083aafcb8f381c793a1373b60` into the existing
+feature branch. Kept upstream baseline-wait backoff and base-movement handling
+alongside the bounded recovery budget. Resolved the manifest/version-test
+conflict with source version 1.5.20 and no hard-coded release number in the
+authentication contract test. No new retry mechanism or permission was added.
+
+The live local instance remains 1.5.19. Version 1.5.20 was not installed or
+tested on the phone. Its main.js and preference UI are unchanged from 1.5.19;
+the existing normal-display evidence applies to those unchanged paths. Local
+tests of the integrated wait/recovery scripts are separate from live evidence.
+The real permission-denied recovery prerequisite below remains unmet.
+
+The four required repository suites plus the GitHub plugin suite passed after
+integration: 313 passed, 19 skipped, zero failures in 110.0 seconds on the same
+Windows/Node environment. The checks include the inherited baseline-wait
+backoff/base-movement cases and the existing recovery-budget/Git fixtures.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

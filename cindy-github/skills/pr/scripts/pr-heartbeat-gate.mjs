@@ -81,7 +81,7 @@
 
 import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
-import { checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
+import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
@@ -1158,6 +1158,8 @@ export function decide({
   const waiting = inspectWait(previous?.wait, snap);
   // A wait was installed only after ack; base noise must not defeat retries of its deadline.
   if (waiting.wait && waiting.ignoreBase) {
+    // A baseline wait exists to catch the base's fix: absorb the commit but look within the hour.
+    if (result.events.some((e) => e.kind === 'base-moved')) waiting.wait = baseMovedWait(waiting.wait, now);
     result.events = result.events.filter((e) => e.kind !== 'base-moved');
   }
   // The ordinary required-check milestone must not bypass a batch of awaited checks.
@@ -1297,7 +1299,9 @@ export function decide({
       // Unlike a fire-and-forget timer, keep this pending until an agent really acknowledges it.
       const age = setsAside(wait)
         ? `; set aside for a human ${formatDuration(now - (wait.since ?? wait.createdAt))} ago: recheck that it still holds before waiting again`
-        : '';
+        : wait.baseMovedAt
+          ? `; the base moved ${formatDuration(now - wait.baseMovedAt)} ago: look for the fix there first`
+          : '';
       return passPending('wait-expired', `the ${wait.kind} wait is due: ${wait.reason}${age}`, '',
         `wait:${wait.createdAt}:${dueAt}`, result.next);
     }
@@ -1647,6 +1651,9 @@ async function gateMain(argv, ctx) {
     }
     const notice = waitNotice(wait, now);
     if (wait && waitDueAt(wait) !== null) detail += `; review at ${isoAt(waitDueAt(wait))}`;
+    if (wait && Number.isInteger(wait.step)) {
+      detail += ` (backoff step ${wait.step + 1}/${BACKOFF_STEPS_MIN.length}; the same blocker on this head waits longer each renewal, up to ${BACKOFF_STEPS_MIN.at(-1) / 60} h)`;
+    }
     if (notice === 'entered') {
       detail += '; tell the user now who has to act and what exactly they have to do (in a background round also schedule_notify_current_run)';
     } else if (notice === 'reminder') {
