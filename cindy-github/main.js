@@ -162,6 +162,7 @@ var MESSAGES = {
     prSettings: 'PR 设置',
     prSettingsUnknown: '设置状态未知，无法确认重推授权已关闭。请刷新后核对。',
     prRefreshSettings: '刷新 PR 设置',
+    prCopyLink: '复制链接',
     prHideSettings: '收起 PR 设置',
     prAutoRename: '发完自动改名',
     prAutoRenameHint: '任务标题改成 #编号 简短主题',
@@ -306,6 +307,7 @@ var MESSAGES = {
     prSettings: 'PR settings',
     prSettingsUnknown: 'Settings are unknown; repush permission is not confirmed off. Refresh to check.',
     prRefreshSettings: 'Refresh PR settings',
+    prCopyLink: 'Copy link',
     prHideSettings: 'Hide PR settings',
     prAutoRename: 'Rename after opening',
     prAutoRenameHint: 'Retitle the task as #number short topic',
@@ -450,6 +452,7 @@ var MESSAGES = {
     prSettings: 'PR 設定',
     prSettingsUnknown: '設定は不明で、再プッシュ許可がオフとは確認できません。更新して確認してください。',
     prRefreshSettings: 'PR 設定を更新',
+    prCopyLink: 'リンクをコピー',
     prHideSettings: 'PR 設定を閉じる',
     prAutoRename: '作成後に自動で改名',
     prAutoRenameHint: 'タスク名を「#番号 短いテーマ」に変更します',
@@ -594,6 +597,7 @@ var MESSAGES = {
     prSettings: 'PR 설정',
     prSettingsUnknown: '설정 상태가 알 수 없으며 다시 푸시 권한이 꺼졌는지 확인되지 않았습니다. 새로고침하여 확인하세요.',
     prRefreshSettings: 'PR 설정 새로고침',
+    prCopyLink: '링크 복사',
     prHideSettings: 'PR 설정 닫기',
     prAutoRename: '만든 뒤 자동으로 이름 변경',
     prAutoRenameHint: '작업 제목을 #번호 짧은 주제로 바꿉니다',
@@ -3197,6 +3201,30 @@ function prGearButton(open) {
     prGearGlyph());
 }
 
+/** 两张叠放的圆角方块,与 App 的复制图标同形;新版宿主按 data-ghost-icon="copy" 换成 App 图标。 */
+function prCopyGlyph() {
+  return '<span data-ghost-icon="copy" style="position:relative;display:block;width:16px;height:16px">' +
+    prSpan('left:5.6px;top:5.6px;width:9.6px;height:9.6px;border:1.6px solid currentColor;border-radius:2px') +
+    prSpan('left:0.8px;top:0.8px;width:9.6px;height:9.6px;border-top:1.6px solid currentColor;border-left:1.6px solid currentColor;border-top-left-radius:2px') +
+    '</span>';
+}
+
+/**
+ * 复制 PR 链接按钮(data-ghost-copy-link),与标题栏 PR 浮窗里的复制按钮对应:点击由 Cindy 写剪贴板,
+ * 插件收不到这次点击。写成 display:none,新版 Cindy 认得才露出来;旧版和手机一直藏着。
+ */
+function prCopyButton(pr) {
+  if (!pr || !/^https:\/\/github\.com\//.test(pr.url || '')) return '';
+  return '<button data-ghost-copy-link="' + prEsc(pr.url) + '" aria-label="' + prEsc(t('prCopyLink')) + '"' +
+    ' style="display:none;flex:none;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9999px;' +
+    'color:var(--text-tertiary);--hover:' + PR_HOVER + '">' + prCopyGlyph() + '</button>';
+}
+
+/** 标题行右侧的图标按钮:复制链接在前,设置在后。 */
+function prHeaderButtons(copy, gear) {
+  return copy || gear ? '<div style="display:flex;flex:none;align-self:flex-start;gap:2px">' + copy + gear + '</div>' : '';
+}
+
 function prStatsParts(card) {
   var parts = [];
   // 改动还没提交时只报文件数,不显示「0 个提交」。
@@ -3222,7 +3250,7 @@ function renderPrReference(card, owner) {
     prEsc(t('prOpenTask')) + ' ↗</button>';
   return '<style>*{box-sizing:border-box}</style><div data-ghost-width="full" style="overflow:hidden;border:1px solid var(--border-default);border-radius:12px;' +
     'background:var(--surface-elevated);color:var(--text-primary);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5">' +
-    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], '') + prFooter(status, taskLink, '', '') + '</div>';
+    prHeader(tile, prEsc(title), [prEsc(card.repo), prEsc(owner.pending === 'follow' ? t('prOtherStarting') : owner.pending === 'stop' ? t('prOtherStopping') : t('prReadOnly'))], prHeaderButtons(prCopyButton(pr), '')) + prFooter(status, taskLink, '', '') + '</div>';
 }
 
 function prHasSettings(card) {
@@ -3286,7 +3314,7 @@ function renderPrCard(card, settings) {
     left += '<div style="margin-top:4px;color:var(--error-fg,#d93025)">' + prEsc(card.note) + '</div>';
   }
   var openOnly = card.stage === 'open' ? prOpenOnly(card) : '';
-  var body = prHeader(tile, title, meta, gear ? prGearButton(card.settingsOpen) : '') + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
+  var body = prHeader(tile, title, meta, prHeaderButtons(prCopyButton(card.pr), gear ? prGearButton(card.settingsOpen) : '')) + prFooter(left, actions, openOnly, prArchiveButton(card, settings));
   // Settings remain available after merge/close, including when the host updates an open snapshot.
   if (gear && card.settingsOpen) body += prSettingsPanel(settings);
   // 排到本轮末尾、铺满消息列:宿主把卡放在「已更改 N 个文件」卡之后,与它同宽。

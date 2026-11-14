@@ -200,6 +200,25 @@ integration: 313 passed, 19 skipped, zero failures in 110.0 seconds on the same
 Windows/Node environment. The checks include the inherited baseline-wait
 backoff/base-movement cases and the existing recovery-budget/Git fixtures.
 
+## Main copy-link integration — source 1.5.21 (2026-11-14)
+
+Merged main `2bc837d71b785b1ceb5ce178520dd2b1db9aa9cf` into the existing
+branch. Retained both the upstream hidden Host-handled PR copy-link button and
+all four languages of this PR's unknown-preference/refresh messages. The
+header composition change is inherited from main; preference storage, live
+reads and bounded recovery behavior are unchanged. Source version is 1.5.21.
+
+The installed local plugin remains 1.5.19. Unlike the earlier 1.5.20 sync,
+this integration changes main.js card rendering, so the earlier phone check
+does not establish the new header/copy-link behavior. No new installation or
+live clipboard/phone verification was performed. Local card regressions are
+not claimed as device evidence; the genuine recovery prerequisite remains.
+
+The four required repository suites and plugin suite passed together after
+this integration: 314 passed, 19 skipped, zero failures in 107.4 seconds
+(Windows/Node environment above), including the inherited copy-link card test
+and existing preference/read-back and bounded-recovery regressions.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

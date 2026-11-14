@@ -885,6 +885,16 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   ]);
 });
 
+// Rule (2026-11-14): like the title-bar PR popover, the PR card offers "Copy link". Cindy does the copying,
+// so the button only declares the PR URL, stays hidden for hosts that do not know it, and never dispatches.
+test('PR cards carry a hidden host copy-link button for the PR URL', async () => {
+  const runtime = createPrRuntime({ github: prGraphql({ number: 7, title: 'Fix login' }) });
+  const cardId = (await runtime.tool({ repo: 'octo/repo', pr: '7' })).reply.result.card_id;
+  const button = runtime.lastCard(cardId).html.match(/<button data-ghost-copy-link=[^>]*>/)?.[0] ?? '';
+  assert.match(button, /^<button data-ghost-copy-link="https:\/\/github\.com\/octo\/repo\/pull\/7" aria-label="复制链接" style="display:none;/);
+  assert.doesNotMatch(button, /data-ghost-action|data-ghost-link|data-ghost-task-archive/);
+});
+
 // Rule (2026-11-06): the archive-task button is Cindy's, not the plugin's. Every card for a PR carries it
 // hidden (so a merge outside the card can reveal it), outside the open-only group, with the plugin's
 // snapshot once it read the PR ended; the "Archive after merge" setting adds the auto marker.
