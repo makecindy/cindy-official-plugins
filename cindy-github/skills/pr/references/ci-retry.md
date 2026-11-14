@@ -54,11 +54,17 @@ for the gate. Retry receipts are stored separately in durable user data, never
 in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
 otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
 `~/Library/Application Support/Cindy/pr-recovery`, and other systems use
-`~/.local/state/Cindy/pr-recovery`. The gate adopts matching earlier cache
-receipts with exclusive copying, retaining the originals and never overwriting
+`~/.local/state/Cindy/pr-recovery`. The gate preserves earlier cache receipt
+files with exclusive copying, retaining the originals and never overwriting
 durable evidence. An unreadable or damaged receipt fails closed. Clearing or
 changing observation cache does not reset migrated budgets. Never change the
 data-root environment, delete receipts or reset budgets to obtain another try.
+Legacy files are copied byte-for-byte with exclusive creation before decoding
+or validating them. Missing diagnoses and damaged/unknown identities remain
+fail-closed in durable storage even after cache cleanup; they are not discarded
+or assigned new diagnoses. Existing durable copies are never overwritten.
+GitHub node IDs are opaque: use the exact verified value, including legacy
+base64 IDs; a `PR_` prefix is not required. Do not substitute a URL or number.
 Earlier evidence already deleted before migration cannot be reconstructed;
 an uncertain prior outcome still stops recovery.
 

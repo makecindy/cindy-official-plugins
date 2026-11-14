@@ -67,9 +67,12 @@ diagnosis require reconciliation, not deletion. Receipts are not pruned with
 traces or refunded. Do not delete them, move the directory or reset the budget.
 Unknown outcomes require read-back, not another push. Receipts live in user data,
 separate from disposable observation/trace cache. The gate exclusively copies
-all matching earlier cache receipts into durable storage without overwriting or
+earlier cache receipt files into durable storage before decoding or validating,
+without overwriting or
 deleting them; all older per-failure receipts count toward the two slots even
 when querying another diagnosis. Even status reads may perform this adoption.
+Missing diagnoses and malformed evidence remain fail-closed after cache cleanup.
+Use the exact verified opaque PR node ID; legacy base64 IDs are supported too.
 More than two old attempts or damaged/unknown evidence stops recovery. Clearing/changing
 cache does not reset migrated budgets. Unknown evidence deleted before upgrade
 cannot be reconstructed and is not permission to retry. See the Skill reference

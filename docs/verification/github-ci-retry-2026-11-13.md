@@ -219,6 +219,39 @@ this integration: 314 passed, 19 skipped, zero failures in 107.4 seconds
 (Windows/Node environment above), including the inherited copy-link card test
 and existing preference/read-back and bounded-recovery regressions.
 
+## Legacy evidence invariant — source 1.5.22 (2026-11-14)
+
+Unknown earlier consumption must remain unknown after cache deletion and
+restart. Migration keeps the existing raw receipt filenames and exclusive-copy
+operation, but copies before decoding/validation. A missing diagnosis, broken
+JSON or invalid diagnosis is preserved durably and still refuses status/new
+reservations; no new marker, lock, scheduler or storage mechanism is introduced.
+Valid existing durable evidence is never overwritten. A valid other-PR receipt
+does not consume this PR's slots; an unreadable/unattributable receipt remains
+fail-closed rather than being discarded. The same bounded opaque-ID check is
+used by CLI parsing and legacy receipt validation; legacy GitHub base64 IDs
+are accepted without inventing or translating a replacement identity.
+
+| Event | Expected result |
+| --- | --- |
+| Unknown legacy receipt first encountered | Exclusive raw copy, then reject |
+| Cache deleted/replaced, process restarted | Durable unknown evidence still rejects |
+| Existing durable receipt | Never overwrite from stale cache |
+| Verified legacy node ID | Adopt/query/reserve using the exact ID |
+| Different PR or diagnosis | Existing per-PR total and per-diagnosis limits apply |
+
+Both new CLI regressions failed against acef06c: all three unknown-evidence
+variants failed durability checks, and the legacy ID failed before querying.
+These are isolated process/filesystem tests, not real GitHub recovery evidence.
+The new version is not installed; local remains 1.5.19 and the inherited 1.5.21
+header/copy-link runtime gap above remains. The real recovery prerequisite is
+not resolved by this patch.
+
+The focused CLI suite passed 18 tests in 6.2 seconds. The four required
+repository suites plus plugin suite passed together: 319 passed, 19 skipped,
+zero failures in 133.9 seconds, same Windows/Node environment. No live plugin
+or user data directory was modified by these isolated fixtures.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

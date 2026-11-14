@@ -372,7 +372,7 @@ export function parseArgs(argv, env = process.env) {
     }
     if (arg === '--ci-retry-id') {
       ciRetryId = argv[++i];
-      if (!/^PR_[A-Za-z0-9_+/=-]{6,200}$/.test(ciRetryId ?? '')) throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
+      if (!validCiRetryId(ciRetryId)) throw new Error('--ci-retry-id expects the immutable node_id read from the current GitHub PR');
       continue;
     }
     if (arg === '--reserve-ci-retry') {
@@ -576,6 +576,12 @@ export function adoptLegacyStateFile(stateDir, repo, number, file) {
   }
 }
 
+function validCiRetryId(value) {
+  // GitHub node IDs are opaque: legacy base64 and current prefixed IDs both
+  // work. The Agent must verify that this exact value came from the PR.
+  return typeof value === 'string' && /^[A-Za-z0-9_+/=-]{6,256}$/.test(value);
+}
+
 export function ciRetryFilePath(stateDir, prNodeId, failure) {
   const identity = failure === undefined ? prNodeId : JSON.stringify([prNodeId, failure]);
   return path.join(stateDir, `ci-retry-${createHash('sha256').update(identity).digest('hex')}.ci-retry`);
@@ -641,16 +647,19 @@ function claimCiRetrySlot(retryDir, reservation) {
   throw new Error('CI retry evidence changed concurrently; stop and verify, do not repeat the operation');
 }
 
-function legacyCiRetryEvidence(dir, prNodeId) {
+function legacyCiRetryFiles(dir) {
   let names;
   try { names = fs.readdirSync(dir); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  return names.filter(name => /^ci-retry-[a-f0-9]{64}\.ci-retry$/.test(name)).sort().map(name => path.join(dir, name));
+}
+
+function legacyCiRetryEvidence(dir, prNodeId) {
   // Earlier per-failure filenames hide the PR ID. Inspect all old receipts so a
   // different diagnosis cannot hide previous consumption; unreadable data stops.
-  return names.filter(name => /^ci-retry-[a-f0-9]{64}\.ci-retry$/.test(name)).sort().flatMap(name => {
-    const file = path.join(dir, name);
+  return legacyCiRetryFiles(dir).flatMap(file => {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!/^PR_[A-Za-z0-9_+/=-]{6,200}$/.test(value?.prNodeId ?? '')) throw new Error('invalid legacy CI retry identity');
+    if (!validCiRetryId(value?.prNodeId)) throw new Error('invalid legacy CI retry identity');
     if (file !== ciRetryFilePath(dir, value.prNodeId, value.failure)) throw new Error('invalid legacy CI retry identity');
     if (value?.prNodeId !== prNodeId) return [];
     if (!value.failure) throw new Error('Legacy CI retry evidence has no diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
@@ -660,8 +669,10 @@ function legacyCiRetryEvidence(dir, prNodeId) {
 }
 
 function adoptCiRetryEvidence(stateDir, retryDir, prNodeId) {
-  for (const { file, value } of legacyCiRetryEvidence(stateDir, prNodeId)) {
-    const target = ciRetryFilePath(retryDir, prNodeId, value.failure);
+  // Preserve raw earlier evidence before decoding or rejecting it. Otherwise
+  // a cache cleanup can erase an unknown outcome and restore fresh slots.
+  for (const file of legacyCiRetryFiles(stateDir)) {
+    const target = path.join(retryDir, path.basename(file));
     fs.mkdirSync(retryDir, { recursive: true });
     try { fs.copyFileSync(file, target, fs.constants.COPYFILE_EXCL); }
     catch (error) { if (error.code !== 'EEXIST') throw error; }

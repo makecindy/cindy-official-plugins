@@ -204,6 +204,42 @@ test('CI quota cannot fall back to a mutable URL when the verified PR identity i
   assert.equal(fs.existsSync(fx.stateDir), false);
 });
 
+test('unreconciled old evidence remains fail-closed after cache deletion and restart', async t => {
+  for (const kind of ['no diagnosis', 'broken JSON', 'invalid diagnosis']) await t.test(kind, async t => {
+    const fx = fixture(t);
+    fs.mkdirSync(fx.stateDir);
+    const oldFailure = kind === 'invalid diagnosis' ? { ...failure, cause: '' } : undefined;
+    const cached = ciRetryFilePath(fx.stateDir, prNodeId, oldFailure);
+    const bytes = kind === 'broken JSON' ? '{' : JSON.stringify({ prNodeId, sourceHead: oldHead, reservedAt: 123, ...(oldFailure ? { failure: oldFailure } : {}) });
+    fs.writeFileSync(cached, bytes);
+    assert.equal((await fx.process(['--ci-retry-status'])).code, 1);
+    assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes, 'preserve raw evidence before rejecting it');
+    assert.equal(path.relative(fx.root, path.resolve(fx.stateDir)), 'state');
+    fs.rmSync(fx.stateDir, { recursive: true });
+    assert.equal((await fx.process(['--ci-retry-status'])).code, 1, 'a new process must not restore the quota');
+    assert.equal((await fx.process(['--state-dir', path.join(fx.root, 'replacement-cache'), '--reserve-ci-retry', newHead])).code, 1);
+  });
+});
+
+test('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable slots', async t => {
+  const fx = fixture(t);
+  const legacy = 'MDExOlB1bGxSZXF1ZXN0MQ==';
+  const flags = ['--ci-retry-id', legacy];
+  const initial = await fx.process([...flags, '--ci-retry-status']);
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(JSON.parse(initial.stdout).available, true);
+  fs.mkdirSync(fx.stateDir);
+  fs.writeFileSync(ciRetryFilePath(fx.stateDir, legacy, failure), JSON.stringify({ prNodeId: legacy, failure, sourceHead: oldHead, reservedAt: 123 }));
+  const adopted = await fx.process([...flags, '--ci-retry-status']);
+  assert.equal(adopted.code, 0, adopted.stderr);
+  assert.equal(JSON.parse(adopted.stdout).pr_consumed, 1);
+  assert.equal(JSON.parse(adopted.stdout).available, false);
+  assert.equal((await fx.process([...flags, '--reserve-ci-retry', newHead])).code, 1);
+  fs.writeFileSync(fx.diagnosis, JSON.stringify({ ...failure, cause: 'different fixture fault' }));
+  assert.equal((await fx.process([...flags, '--reserve-ci-retry', newHead])).code, 0);
+  assert.equal((await fx.run(['--ci-retry-status'])).result.pr_consumed, 0, 'another opaque PR ID has its own quota');
+});
+
 test('invalid, damaged and unwritable CI evidence fails closed without consuming ordinary gate state', async t => {
   const fx = fixture(t);
   for (const flags of [
