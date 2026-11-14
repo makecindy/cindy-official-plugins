@@ -35,6 +35,32 @@ export function waitFacts(snap) {
 }
 
 const KINDS = new Set(['human', 'baseline', 'checks', 'retry']);
+/** Waits for something outside the PR to change: the program paces them, starting often and
+ * slowing down while the same blocker stays put. The model may ask for an earlier look, never a later one. */
+export const BACKOFF_KINDS = new Set(['baseline', 'retry']);
+export const BACKOFF_STEPS_MIN = [15, 30, 60, 120, 240, 480, 720];
+/** A baseline wait looks at the base this soon after it moves, batching further base commits. */
+export const BASE_RECHECK_MS = 60 * 60_000;
+
+/** The blocker a wait is about: its failing checks and open threads, independent of attempts. */
+const blockerKey = (wait) => JSON.stringify([
+  wait.checks.filter((c) => c.outcome === 'failed').map(checkKey).sort(),
+  wait.threads.filter((t) => !t.resolved).map((t) => t.id).sort(),
+]);
+
+/** Next backoff step: renewing the same blocker on the same head moves one step slower. */
+function backoffStep(wait, prior) {
+  const continued = prior && BACKOFF_KINDS.has(prior.kind) && prior.headSha === wait.headSha
+    && Number.isInteger(prior.step) && blockerKey(prior) === blockerKey(wait);
+  return continued ? Math.min(prior.step + 1, BACKOFF_STEPS_MIN.length - 1) : 0;
+}
+
+/** An absorbed base commit brings a baseline wait's review forward, at most BASE_RECHECK_MS away. */
+export function baseMovedWait(wait, now) {
+  if (!wait || wait.kind !== 'baseline' || wait.until === null || wait.until === undefined) return wait;
+  const until = Math.min(wait.until, now + BASE_RECHECK_MS);
+  return { ...wait, until, baseMovedAt: wait.baseMovedAt ?? now };
+}
 /** A verdict about a failure or an open thread goes stale; a plain pending approval does not. */
 export const HUMAN_REVIEW_MS = 24 * 3_600_000;
 export const setsAside = (wait) => wait.kind === 'human'
@@ -75,9 +101,9 @@ export function makeWait(input, facts, now, prior = null) {
   if (input.headSha !== facts.headSha) throw new Error('wait headSha must match the acknowledged observation');
   if (typeof input.reason !== 'string' || !input.reason.trim() || input.reason.length > 2000) throw new Error('wait reason must be 1–2000 characters');
   const minutes = input.afterMinutes;
-  if (!(minutes === null && input.kind === 'human')
+  if (!(minutes === null && (input.kind === 'human' || BACKOFF_KINDS.has(input.kind)))
     && !(typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 5 && minutes <= 1440)) {
-    throw new Error('afterMinutes must be 5–1440; only a human wait may use null (events only)');
+    throw new Error('afterMinutes must be 5–1440; null means events only for a human wait and the program pace for baseline/retry');
   }
   if (!Array.isArray(input.checks) || !Array.isArray(input.threads)) throw new Error('wait checks and threads must be arrays (use [] when empty)');
   const checks = input.checks.map((target) => {
@@ -111,6 +137,12 @@ export function makeWait(input, facts, now, prior = null) {
     // Every thread as first seen, so a resolved one that is reopened later still wakes the loop.
     threadStates: facts.threads,
   };
+  if (BACKOFF_KINDS.has(wait.kind)) {
+    wait.step = backoffStep(wait, prior);
+    const paced = BACKOFF_STEPS_MIN[wait.step];
+    wait.until = now + Math.min(minutes ?? paced, paced) * 60_000;
+    return wait;
+  }
   if (!setsAside(wait)) return wait;
   // Setting a failure or thread aside for a human is the model's verdict: recheck it at least daily,
   // and keep the user informed while the same head keeps waiting.

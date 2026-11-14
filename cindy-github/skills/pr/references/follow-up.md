@@ -52,7 +52,7 @@ The check keeps a `watch`: what the agent has already been told about. It wakes 
 - **Checks failed:** a check failed (including cancelled, timed out or needing action) that had not failed on this commit before. Reported once per commit and name; a re-run that replaced a failed attempt no longer counts, because the snapshot keeps only the latest run of each check.
 - **Checks passed:** all required checks passed (all checks when the repository marks none as required). Non-required checks still running at that moment get one more update when they all finish; later changes to them do not wake.
 - **Comments:** new comments, reviews with a body or a verdict, and review-thread comments from anyone except the account the agent uses. Edits count as new. Empty "commented" reviews are skipped; their thread comments carry the content.
-- **Base moved while failing:** a check is failing and the base branch got a new commit (`base-moved`), for example a fix for a baseline failure. Both the probe and full snapshot read the live GraphQL `baseRef.target.oid`; the REST pull base SHA can lag behind the branch. When the updated base contains the fix, merge it into the PR, verify and push, then confirm CI on the new head. While nothing fails the base is not watched, so ordinary base progress never wakes. During an explicit wait, base movement is absorbed only when every currently failing check is the exact named attempt already handled; a timed baseline wait revisits the accumulated base updates at its deadline. Any other failure retains the ordinary base watch.
+- **Base moved while failing:** a check is failing and the base branch got a new commit (`base-moved`), for example a fix for a baseline failure. Both the probe and full snapshot read the live GraphQL `baseRef.target.oid`; the REST pull base SHA can lag behind the branch. When the updated base contains the fix, merge it into the PR, verify and push, then confirm CI on the new head. While nothing fails the base is not watched, so ordinary base progress never wakes. During an explicit wait, base movement is absorbed only when every currently failing check is the exact named attempt already handled; a baseline wait brings its review forward to at most one hour after the first absorbed base commit (later commits join that look), so a fix on the base is picked up within the hour even late in the backoff. Any other failure retains the ordinary base watch.
 - **Conflict:** the branch started to conflict with the base. GitHub's mergeability recomputation ("unknown") neither raises nor clears it.
 - **No checks:** 15 minutes after a new commit, no check has reported, although this PR ran checks before.
 - **Draft:** the PR became a draft (`draft-entered`) or left draft (`draft-exited`).
@@ -104,14 +104,24 @@ checks, merge permissions, thread resolution or the PR's verdict.
 | Kind | When to use | Next review |
 |---|---|---|
 | `human` | All remaining failures/threads have been investigated and need a human action | Only approval or the merge left: `null`, relevant events only. A failing check or open thread set aside: at most one day (`null` means one day) |
-| `baseline` | A named failed check also fails on the base; waiting for its fix | Usually 10–15 minutes during active repair, 30–60 after repeated blockage; batch base commits until then |
+| `baseline` | A named failed check is not caused by this PR and needs a fix on the base: it also fails there, or it is shared CI tooling, dependency install or infrastructure (even when base CI passes intermittently) | `null`: the program's backoff (below). A base commit brings the review forward to within an hour |
 | `checks` | Named CI checks are running; there is no work to do before a result | Choose a time, often 10–20 minutes; successful results are batched until all named checks finish |
-| `retry` | An external temporary dependency needs another attempt | Choose a time from the observed failure and its likely recovery |
+| `retry` | An external temporary dependency needs another attempt | `null`: the program's backoff (below) |
 
-Durations are 5–1440 minutes. Only `human` accepts `null`. Setting a failure or thread aside for a
+**Backoff for `baseline` and `retry`.** The program paces these: the first wait on a blocker looks
+again after 15 minutes, and each renewal of the same blocker on the same head moves one step slower:
+15 min → 30 min → 1 h → 2 h → 4 h → 8 h → 12 h, then every 12 hours. The two kinds share the step.
+A new head (for example after merging the base's fix and pushing), `--resume`, or a different set of
+failing checks or threads starts again at 15 minutes. `afterMinutes` may only bring a look earlier
+(for example an announced fix ETA); a longer value is clamped to the current step. The receipt names
+the step. Use `human` only when a person must act on this PR itself (a decision, approval or
+permission); a CI failure caused by shared tooling is `baseline`, not `human`.
+
+Durations are 5–1440 minutes. `null` means relevant events only for `human` and the program's
+backoff for `baseline`/`retry`; `checks` needs a number. Setting a failure or thread aside for a
 human is a verdict that can go stale, so it is reviewed daily: confirm the reason still holds (the
-base may have fixed or dismissed it), then wait again or resume. Repeated baseline failures should get
-longer evidence-based waits, not a five-minute timer or repeated reruns. New work is never delayed
+base may have fixed or dismissed it), then wait again or resume. Repeated baseline failures get longer
+waits through the backoff, not a five-minute timer or repeated reruns. New work is never delayed
 until that timer. After a push use `--resume` and the existing bot settle window; do not extend
 bot batching with successive model waits. A baseline fix must be merged and pushed, not just rerun
 on the old commit. When several causes coexist, use a timed wait and include the handled checks;
@@ -143,8 +153,9 @@ Safety and resumption:
   is never held. Named threads resolving/outdating, approval changes and a newly
   required base update also wake. Starting a check does not wake.
 - Base movement alone cannot wake when all remaining failures are the exact handled attempts. This
-  applies to ordinary polls and host-triggered polls. Baseline waits get their model-chosen deadline;
-  a human wait gets its daily review only when it sets a failure or thread aside.
+  applies to ordinary polls and host-triggered polls. A baseline wait brings its deadline forward to
+  at most one hour after the first such commit; `retry` and `human` waits keep theirs. A human wait
+  gets its daily review only when it sets a failure or thread aside.
 - Expiry uses the same pending/ack/retry mechanism as other events. If the model fails to start or
   crashes, the deadline is retried with backoff, not silently consumed. Replace the wait with
   `--wait`, or clear it with `--resume` after handling the work. Plain `--ack` and legacy `--defer`
