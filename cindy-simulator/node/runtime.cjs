@@ -15,7 +15,7 @@ const {createDeviceLifecycle,planReclamation}=require('./device-lifecycle.cjs');
 // recycling of on-demand workers.
 const HOLD_MS = 100000, HOLD_POLL_MS = 10000;
 function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async () => false, viewing = () => false, forgetViewer = () => {},
-  tasks = null, existingViewerUrl = () => null, pendingOperation = () => null, pendingJob = () => null, viewerWanted = () => true,
+  tasks = null, rotationOf = () => undefined, existingViewerUrl = () => null, pendingOperation = () => null, pendingJob = () => null, viewerWanted = () => true,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), holdMs = HOLD_MS, holdPollMs = HOLD_POLL_MS}) {
   const lifecycle=createDeviceLifecycle(settingsFile+'.devices.json',now);
   const activeReads=new Map();
@@ -159,7 +159,9 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     });
   }
   const withTask = (url, session) => url.replace('#', `&task=${encodeURIComponent(session)}#`);
-  async function taskState(session, locale) {
+  // `viewer:false` is for a task page on another computer: it reads the state
+  // but must not start this computer's viewer or count as someone watching here.
+  async function taskState(session, locale, {viewer:wantViewer=true}={}) {
     if (!tasks || !validSession(session)) throw failure('INVALID_ARGUMENT', 'Unknown task.');
     const devices = await annotate((await dispatch('devices', {includeMemoryModes:true})).devices, session);
     const binding = await tasks.get(session);
@@ -168,7 +170,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
     try { settings = await load(); } catch { settings = {enabled:false, idleMinutes:null}; }
     let viewer = null, waiting = false;
     const restarting = device?.operation?.name === 'settings_restart' || (device?.platform==='android'&&device?.operation?.name==='audio');
-    if (device && (device.state === 'Booted' || restarting) && settings.enabled && !viewerClosed) {
+    if (wantViewer && device && (device.state === 'Booted' || restarting) && settings.enabled && !viewerClosed) {
       // Reuse a running viewer without taking the runtime lock, so a page refresh
       // never makes an Agent tool call fail with BUSY.
       let url = await existingViewerUrl(device.udid, locale);
@@ -178,7 +180,10 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       }
       if (url) viewer = {udid:device.udid, url:withTask(url, session)};
     }
-    return {ok:true, sessionId:session, device, devices, settings:{...settings}, viewer, viewerClosed, busy:waiting};
+    // Reuse the live stream's observed pose; no extra screen/orientation probe.
+    const rotation = !wantViewer && device ? rotationOf(device.udid) : undefined;
+    const selected = device && Number.isInteger(rotation) && rotation >= 0 && rotation <= 3 ? {...device, rotation} : device;
+    return {ok:true, sessionId:session, device:selected, devices, settings:{...settings}, viewer, viewerClosed, busy:waiting};
   }
   // Agent tools grouped by intent → the worker's own operations.
   const ROUTES = {
@@ -248,6 +253,7 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       return manager.start(params);
     }
     if (method === 'task_state') return taskState(params._task, params._locale);
+    if (method === 'remote_task_state') return taskState(params._task, params._locale, {viewer:false});
     if (method === 'task_target') {
       const sessionId = tasks ? await tasks.latestForDevice(params.udid) : null;
       if (!sessionId) throw failure('TASK_NOT_BOUND', 'No task uses this device. Refresh the device list.');
@@ -261,11 +267,11 @@ function createRuntime({dispatch, settingsFile, now = Date.now, inUse = async ()
       if (!listed.some(d => deviceId(d.udid) === params.udid)) throw failure('INVALID_ARGUMENT', 'Unknown device. Refresh the list.');
       await lifecycle.use(params.udid);
       await tasks.bind(params._task, params.udid);
-      viewerClosed = false;
+      if (!params._remote) viewerClosed = false;
       const result = {ok:true, execution:'executed', sessionId:params._task, boundUdid:params.udid};
       // Binding is already durable. Status/viewer failure cannot undo it or
       // make the caller believe that its previous device is still assigned.
-      return await recordUpdate(result, 'taskStateError', async () => Object.assign(result, await taskState(params._task, params._locale)),
+      return await recordUpdate(result, 'taskStateError', async () => Object.assign(result, await taskState(params._task, params._locale, {viewer:!params._remote})),
         'Task binding was saved, but its status or screen could not be read. Refresh the task; do not repeat the binding.');
       } finally {const n=activeReads.get(params.udid)-1;if(n)activeReads.set(params.udid,n);else activeReads.delete(params.udid);}
     }

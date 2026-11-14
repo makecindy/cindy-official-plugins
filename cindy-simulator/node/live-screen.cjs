@@ -11,7 +11,7 @@ const http=require('node:http');
 const {randomBytes}=require('node:crypto');
 const {deviceId}=require('./device-id.cjs');
 const M=require('./control-model.js');
-const {chord}=require('./keys.cjs');
+const {chord,androidKey}=require('./keys.cjs');
 const {toNative}=require('./android/geometry.cjs');
 
 const SCREEN=0x10,PNG=0x06,MAX_MESSAGE=8*1024*1024,MAX_BUFFERED=4*1024*1024;
@@ -107,14 +107,6 @@ function toPortrait(x,y,rotation){return rotation===1?{x:y,y:1-x}:rotation===2?{
 function portraitEdge(edge,rotation){return edge==='bottom'&&rotation?(rotation===3?'top':'right'):edge;}
 function kindOf(device){const p=M.platform(device);return p==='android'?'android':p==='tvOS'?'tvos':p==='visionOS'?'visionos':M.family(device)==='ipad'?'ipados':'ios';}
 const stateOf=device=>({Booted:'running',Booting:'starting'})[device.state]||'off';
-const PUNCTUATION={Minus:'-',Equal:'=',BracketLeft:'[',BracketRight:']',Backslash:'\\',Semicolon:';',Quote:"'",Backquote:'`',Comma:',',Period:'.',Slash:'/'};
-// KeyboardEvent.code to the Android key names typeText accepts.
-function androidKey(code,modifiers){
-  const base=/^Key[A-Z]$/.test(code)?code.slice(3).toLowerCase():/^Digit\d$/.test(code)?code.slice(5):code==='Space'?'space':PUNCTUATION[code]
-    ||(/^(Enter|Escape|Tab|Backspace|Delete|Arrow(Up|Down|Left|Right)|F([1-9]|1[0-2]))$/.test(code)?code:null);
-  if(!base)throw Error('Unsupported key');
-  return [...modifiers.map(m=>({shift:'shift',control:'ctrl',option:'alt',command:'cmd'})[m]),base].join('+');
-}
 function validEvents(events,locale){
   if(!Array.isArray(events)||events.length>64)throw fail('INVALID_ARGUMENT',locale,undefined,'events: an array of at most 64');
   return events.map((e,i)=>{
@@ -527,7 +519,7 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
     if(method==='liveScreen.close'){const key=checkId(p.id,locale),s=sessions.get(key);if(s)end(s);return {closed:!!s};}
     throw fail('UNKNOWN_METHOD',locale);
   }
-  return {request,closeAll,sweep,viewing:()=>[...sessions.values()].some(s=>s.res&&!s.closed),
+  return {request,closeAll,sweep,rotation:udid=>[...sessions.values()].find(s=>s.udid===udid&&!s.closed&&s.size)?.rotation,viewing:()=>[...sessions.values()].some(s=>s.res&&!s.closed),
     stop(){clearInterval(timer);closeAll();}};
 }
 module.exports={createLiveScreen,validEvents,appleTouches,appleRelease,toPortrait,portraitEdge,avccSize,pngSize,jpegSize,androidKey,message,kindOf};

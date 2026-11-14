@@ -106,12 +106,59 @@
     // The capability travels in the frame URL: Cindy's panel is not an HTTP
     // origin, so this frame can hold no cookie.
     // The device with its bezel, like Simulator; the guest owns its orientation.
-    screen.src = !M.handheld(state.status?.device)
+    // A device on another computer always uses the plugin's remote device page.
+    screen.src = !remote() && !M.handheld(state.status?.device)
       ? `/platform-stage.html?udid=${encodeURIComponent(udid)}&lang=${lang}&platform=${M.platform(state.status?.device)}&cindyViewer=${encodeURIComponent(token || '')}`
       : `/simulators/${encodeURIComponent(udid)}?handheld=0${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
     state.viewport = null; state.fitPct = 0; state.pose = null; state.view3D = null; state.panel3D = null;
   }
   function blank() { stopFitMotion(); state.generation = null; screen.src = 'about:blank'; }
+  // The device runs on another of the account's computers (node/remote): this
+  // page shows and operates it; starting, stopping, creating, renaming, sound
+  // and files stay with the computer that runs it.
+  const remote = () => state.status?.device?.kind === 'remote';
+  // Its picture arrives as a stream fitted by the device page itself, like a physical phone's.
+  const streamed = () => remote() || state.status?.device?.kind === 'physical';
+  // Its devices are chosen, started, created and shut down by the task page
+  // around this one, which asks the plugin on that computer; an older plugin
+  // there only lets its running device be viewed.
+  const remoteManaged = () => remote() && state.status?.remote?.manage === true;
+  const remoteComputer = () => state.status?.remote?.computer || (lang === 'zh-CN' ? '另一台电脑' : 'another computer');
+  let remoteWaiting = null;
+  function remoteAction(action, extra = {}) {
+    try { window.parent.postMessage({ type: 'cindy-simulator-remote-action', action, ...extra }, '*'); } catch { return; }
+    // The task page replaces this page when the device changes; if it stays, it says how it went.
+    clearTimeout(remoteWaiting?.timer);
+    remoteWaiting = { action, timer: setTimeout(() => remoteSettled({ ok: false, errorCode: 'TIMEOUT' }), 150000) };
+  }
+  function remoteSettled(result) {
+    const waiting = remoteWaiting; if (!waiting) return;
+    clearTimeout(waiting.timer); remoteWaiting = null;
+    if (waiting.action === 'use') { state.switching = false; state.phase = null; }
+    if (waiting.action === 'shutdown' && !result.ok) state.stopping = false;
+    if (!result.ok) toast(`${waiting.action === 'use' ? t.switching.failed : t.actionFailed} (${result.errorCode || 'FAILED'})`, 'error');
+    render(); void check();
+  }
+  // In a task that lives on another computer the one tab holds both
+  // computers' devices: the task page tells this page about the side it does
+  // not show (`sides.other`), and moves the task between the two.
+  let sides = null;
+  const otherSide = () => (sides?.other ? { where: sides.here === 'remote' ? 'local' : 'remote', ...sides.other } : null);
+  const farName = () => (remote() ? remoteComputer() : sides?.computer || (lang === 'zh-CN' ? '另一台电脑' : 'another computer'));
+  function useOther(where, targetUdid) {
+    if (state.switching || state.stopping) return;
+    state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
+    remoteAction('use', { where, udid: targetUdid });
+  }
+  window.addEventListener?.('message', (event) => {
+    if (event.source !== window.parent) return;
+    if (event.data?.type === 'cindy-simulator-remote-result') remoteSettled({ ok: event.data.ok === true, errorCode: event.data.errorCode });
+    else if (event.data?.type === 'cindy-simulator-sides' && (event.data.here === 'local' || event.data.here === 'remote'))
+      sides = { here: event.data.here, computer: typeof event.data.computer === 'string' ? event.data.computer.slice(0, 80) : '',
+        other: Array.isArray(event.data.other?.devices) ? { devices: event.data.other.devices.slice(0, 64), manage: event.data.other.manage === true } : null };
+  });
+  if (params.get('task')) { try { window.parent?.postMessage?.({ type: 'cindy-simulator-remote-action', action: 'sides' }, '*'); } catch {} }
+  const remoteButton = (id) => { try { return screen.contentWindow?.__remoteButtons?.().includes(id) === true; } catch { return false; } };
   // ---- zoom ----
   // The device page fits the device into its frame; zoom resizes that frame.
   // Percentages are of actual size (one device point per CSS pixel).
@@ -193,7 +240,7 @@
     // Keep the point at the centre of the view in place while the frame grows or shrinks.
     rememberScrollCenter();
     const {x:cx,y:cy} = scrollFocus;
-    const physical = state.status?.device?.kind === 'physical' && state.viewport;
+    const physical = streamed() && state.viewport;
     if (state.view3D) {
       const view = state.view3D, padding = framePadding();
       state.fitPct = fit3DPct(view, width, height, padding);
@@ -234,7 +281,7 @@
     renderZoom();
   }
   async function viewport() {
-    if (state.viewport) return state.viewport;
+    if (state.viewport || remote()) return state.viewport;
     try {
       if (!M.handheld(state.status?.device)) {
         const v = await api('viewport');
@@ -312,7 +359,7 @@
     }
     state.view3D = null; state.panel3D = null;
     const v = await viewport();
-    if (state.status?.device?.kind === 'physical') {
+    if (streamed()) {
       const {width,height} = stageSize(), padding = framePadding();
       if (!v || !(width > 0 && height > 0)) return;
       const fit = Math.max(0, Math.min((width - 24 - padding.insetX) / v.width,
@@ -357,7 +404,7 @@
   function decorate() {
     let doc; try { doc = screen.contentDocument; } catch { return; }
     if (!doc?.documentElement || doc.location?.href === 'about:blank') return;
-    const workbench = state.fullToolbar && M.platform(state.status?.device) === 'iOS' && state.status?.device?.kind !== 'physical';
+    const workbench = state.fullToolbar && M.platform(state.status?.device) === 'iOS' && !streamed();
     if (workbench) { doc.documentElement.setAttribute('data-cindy-full', ''); stage.setAttribute('data-full', ''); } else { doc.documentElement.removeAttribute('data-cindy-full'); stage.removeAttribute('data-full'); }
     // The full workbench previously loaded without the embedding stylesheet.
     // Toggle that stylesheet in place so its panels remain available too.
@@ -398,14 +445,21 @@
     const p = M.presence(s, state);
     const device = s?.device || state.status?.device;
     $('device-chip').hidden = hub; $('title').hidden = !hub;
+    // Not this computer's device: named for the computer that runs it.
+    const far = remote() || (!s && state.status?.remote);
+    $('remote-badge').hidden = !far;
+    if (far) {
+      $('remote-badge-text').textContent = (lang === 'zh-CN' ? '远程 · ' : 'Remote · ') + remoteComputer();
+      $('remote-badge').title = lang === 'zh-CN' ? `这台设备运行在「${remoteComputer()}」上，这里是远程查看和操作。` : `This device runs on ${remoteComputer()}. You are viewing and operating it from here.`;
+    }
     $('chip-dot').dataset.tone = $('title-dot').dataset.tone = p.tone;
     $('chip-name').textContent = $('title-name').textContent = device?.name || '…';
     const resources = $('resources'), modeButton = $('memory-mode');
     resources.replaceChildren(resourceView.node,modeButton);
     $('title-sub').replaceChildren(h('span',{text:[M.runtimeLabel(device?.runtime), t[p.key]].filter(Boolean).join(' · ')}), ...(hub ? [resources] : []));
-    resources.hidden = !device || state.lost || state.switching;
+    resources.hidden = !device || state.lost || state.switching || remote();
     $('status').textContent = t[p.key];
-    const memoryText = device?.state === 'Booted' ? M.memoryStatus(state.lost ? {...device,memoryMode:null} : device, lang,memoryChoices.get(udid)) : '';
+    const memoryText = device?.state === 'Booted' && !remote() ? M.memoryStatus(state.lost ? {...device,memoryMode:null} : device, lang,memoryChoices.get(udid)) : '';
     modeButton.hidden = !memoryText;
     const modeText = memoryText.replace(/^(内存模式：|Memory mode: )/,'');
     modeButton.replaceChildren(
@@ -415,10 +469,10 @@
     );
     label(modeButton,memoryText + (lang === 'zh-CN' ? ' · 查看与更改' : ' · View / change'));
     modeButton.disabled = state.lost || state.stopping || state.switching;
-    resourceView.update(state.lost || state.switching ? null : device);
+    resourceView.update(state.lost || state.switching || remote() ? null : device);
     const on = live();
     const sound=s?.audio,playing=sound?.enabled===true;
-    $('btn-audio').hidden=device?.kind==='physical';
+    $('btn-audio').hidden=device?.kind==='physical'||remote();
     $('btn-audio').disabled=!on||typeof sound?.enabled!=='boolean'||state.audioBusy;
     $('btn-audio').setAttribute('aria-pressed',String(playing));
     label($('btn-audio'),typeof sound?.enabled!=='boolean'?(lang==='zh-CN'?'声音状态待确认':'Sound status unavailable'):(playing?(lang==='zh-CN'?'静音':'Mute'):(lang==='zh-CN'?'在电脑上播放声音':'Play sound on computer')));
@@ -427,9 +481,9 @@
     $('audio-playing').removeAttribute('hidden');
     const handheld = M.handheld(device);
     $('tools').hidden = !on;
-    $('btn-rotl').hidden = $('btn-rotr').hidden = !handheld || device?.kind==='physical';
-    $('tv-remote').hidden = !on || M.platform(device) !== 'tvOS';
-    visionBar.hidden = !on || M.platform(device) !== 'visionOS';
+    $('btn-rotl').hidden = $('btn-rotr').hidden = !handheld || device?.kind==='physical' || (remote() && on && !remoteButton('rotate-left'));
+    $('tv-remote').hidden = !on || M.platform(device) !== 'tvOS' || remote();
+    visionBar.hidden = !on || M.platform(device) !== 'visionOS' || remote();
     stage.dataset.vision = M.platform(device) === 'visionOS' ? 'true' : 'false';
     for (const id of ['btn-home', 'btn-shot', 'btn-shot-menu', 'btn-rotl', 'btn-rotr']) $(id).disabled = !on;
     $('btn-shot').disabled = !on || savingShotTo || !!$('btn-shot').dataset.busy;
@@ -501,7 +555,7 @@
       // A completed selection may point at a stopped device. Use its own
       // state immediately, never load its stream using the source's state.
       if (s.device?.udid !== udid) s.device = s.devices?.find((d) => d.udid === udid);
-      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.kind==='physical'?'physical':s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
+      if (!state.switching && !state.stopping && s.device?.state === 'Booted' && s.viewerPlatform && (s.device.kind==='remote'?'remote':s.device.kind==='physical'?'physical':s.device.platform==='android'?'android':'ios')!==s.viewerPlatform) {
         const opened=await api('open');
         if(opened.url){const next=new URL(opened.url);for(const key of ['task','embed'])if(params.get(key))next.searchParams.set(key,params.get(key));location.replace(next.href);return;}
       }
@@ -554,6 +608,8 @@
   async function shutdown() {
     if (state.stopping || state.switching || state.status?.device?.state !== 'Booted') return;
     state.stopping = true; blank(); render();
+    // That computer shuts it down; the task page shows the device once it is off.
+    if (remote()) { remoteAction('shutdown'); return; }
     try {
       const result = await api('shutdown');
       if (!result.devices?.some((d) => d.udid === udid && d.state === 'Shutdown')) throw Error('UNCONFIRMED');
@@ -622,7 +678,10 @@
       const view = screen.contentWindow;
       const orientation = M.handheld(state.status?.device) && view?.__cindyPose?.get?.() == null
         ? view?.__nativeOrientation?.() : undefined;
-      const r = await api('screenshot', { to, orientation });
+      // A device on another computer: the picture as shown here.
+      const png = remote() ? view?.__nativeCapture?.() : undefined;
+      if (remote() && !png) throw Error('NO_PICTURE');
+      const r = await api('screenshot', remote() ? { to, png } : { to, orientation });
       if(to==='clipboard'&&r.clipboardPng){const bytes=Uint8Array.from(atob(r.clipboardPng),c=>c.charCodeAt(0));await navigator.clipboard.write([new ClipboardItem({'image/png':new Blob([bytes],{type:'image/png'})})]);}
       if (to === 'clipboard') toast(t.shotCopied, 'ok');
       else toast(t.shotDesktop, 'ok', r.path && { label: t.reveal, run: () => api('reveal', { path: r.path }).catch(() => {}) });
@@ -852,41 +911,66 @@
     const on = live();
     showMenu($('btn-more'), [
       ...(state.status?.device?.platform === 'android' ? [item(ICON.key, lang === 'zh-CN' ? '返回' : 'Back', () => native('__nativeBack'), { disabled: !on })] : []),
-      state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
+      state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) && (!remote() || remoteButton('shake')) ? item(ICON.shake, t.shake, () => native('__nativeShake'), { disabled: !on }) : null,
       state.status?.device?.kind!=='physical' && ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.grid, t.appSwitcher, () => native('__nativeAppSwitcher'), { disabled: !on }) : null,
       ['iOS','android'].includes(M.platform(state.status?.device)) ? item(ICON.key, keyboardEnabled() ? t.phoneKeyboard : t.computerKeyboard, toggleKeyboard, { disabled: !on }) : null,
-      ...(state.status?.device?.platform === 'android' ? [
+      ...(state.status?.device?.platform === 'android' && !remote() ? [
         item(ICON.key, lang === 'zh-CN' ? '复制设备剪贴板' : 'Copy device clipboard', () => native('__nativeCopy'), {disabled:!on}),
         item(ICON.plus, lang === 'zh-CN' ? '导入 APK、图片或视频…' : 'Import APK, image or video…', () => native('__nativeImport'), {disabled:!on}),
         item(ICON.camera, screen.contentWindow?.__nativeRecording?.() ? (lang === 'zh-CN' ? '停止录像并保存' : 'Stop recording & save') : (lang === 'zh-CN' ? '开始录像' : 'Start recording'), () => native('__nativeRecord'), {disabled:!on}),
       ] : []),
       h('div', { class: 'sep' }),
       item(ICON.refresh, t.recover, recover, { disabled: state.recovering || state.switching }),
-      item(ICON.bar, state.fullToolbar ? t.closeAdvanced : t.advanced, () => setAdvanced(!state.fullToolbar), { 'aria-expanded': String(state.fullToolbar), 'aria-controls': 'stage' }),
+      remote() ? null : item(ICON.bar, state.fullToolbar ? t.closeAdvanced : t.advanced, () => setAdvanced(!state.fullToolbar), { 'aria-expanded': String(state.fullToolbar), 'aria-controls': 'stage' }),
       state.fullToolbar ? item(ICON.key, t.releaseKeys, release, { disabled: !on, title: t.releaseHint }) : null,
       h('div', { class: 'sep' }),
-      state.status?.device?.kind!=='physical' ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
+      state.status?.device?.kind!=='physical' && (!remote() || remoteManaged()) ? item(ICON.power, t.shutdown, confirmShutdown, { 'data-danger': true, disabled: !state.status || state.status.device?.state !== 'Booted' || state.switching }) : null,
     ]);
   });
+
+  // Both computer groups share row rendering and availability/current-device rules.
+  // Only the callback decides where the operation is executed.
+  function deviceMenuRows(rows, disabled, select) {
+    return rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current),
+      disabled: disabled || state.switching || !d.available || d.current,
+      title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); select(d.udid); } }, [
+      h('span', { class: 'dot', 'data-tone': d.tone }),
+      h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
+      d.current ? h('span', { html: ICON.check }) : null]));
+  }
 
   $('device-chip').addEventListener('click', () => {
     const rows = M.deviceRows(state.status?.devices, udid, lang);
     const paused = state.status?.settings?.enabled === false;
     showMenu($('device-chip'), [
-      h('div', { class: 'head', text: t.devices }),
-      ...rows.map((d) => h('button', { class: 'item', role: 'menuitemradio', 'aria-checked': String(d.current), disabled: paused || state.switching || !d.available || d.current,
-        title: d.current ? t.current : t.switchTo, onclick: () => { closeMenu(); switchTo(d.udid); } }, [
-        h('span', { class: 'dot', 'data-tone': d.tone }),
-        h('span', { class: 'label' }, [h('span', { text: d.name }), h('span', { class: 'sub', text: d.meta })]),
-        d.current ? h('span', { html: ICON.check }) : null])),
-      h('div', { class: 'sep' }),
+      h('div', { class: 'head', text: remote() ? (lang === 'zh-CN' ? `「${remoteComputer()}」上的设备` : `Devices on ${remoteComputer()}`)
+        : sides ? (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') : t.devices }),
+      ...deviceMenuRows(rows, paused || (remote() && !remoteManaged()), switchTo),
+      // A new device on that computer is created with the task page's own sheet.
+      ...(remote() ? (remoteManaged() ? [h('div', { class: 'sep' }), item(ICON.plus, t.addDevice, () => remoteAction('create', { where: 'remote' }))] : []) : [h('div', { class: 'sep' }),
       item(ICON.plus, t.addDevice, () => openDialog('add'), { disabled: paused }),
-      state.status?.device?.kind!=='physical' ? item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }) : null,
+      state.status?.device?.kind!=='physical' ? item(ICON.pencil, t.rename, () => openDialog('rename'), { disabled: paused }) : null]),
+      ...otherDevices(),
     ]);
   });
+  // The other computer's devices (or, from one of its devices, this computer's),
+  // under that computer's name. Choosing or creating one is the task page's
+  // doing: it moves the task there and shows that device in this same tab.
+  function otherDevices() {
+    const other = otherSide(); if (!other) return [];
+    const far = other.where === 'remote', usable = !far || other.manage;
+    const rows = M.deviceRows(other.devices.map((d) => ({ ...d, kind: far ? 'remote' : d.kind })), null, lang);
+    return [h('div', { class: 'sep' }),
+      h('div', { class: 'head', text: far ? (lang === 'zh-CN' ? `「${farName()}」上的设备` : `Devices on ${farName()}`) : (lang === 'zh-CN' ? '这台电脑的设备' : 'Devices on this computer') }),
+      ...deviceMenuRows(rows, !usable, (id) => useOther(other.where, id)),
+      usable ? item(ICON.plus, far ? (lang === 'zh-CN' ? `在「${farName()}」上添加设备` : `Add device on ${farName()}`) : (lang === 'zh-CN' ? '在这台电脑上添加设备' : 'Add device on this computer'),
+        () => remoteAction('create', { where: other.where })) : null];
+  }
   async function switchTo(targetUdid) {
     if (state.switching || state.stopping) return;
     state.switching = true; state.phase = 'preparing'; state.switchTarget = targetUdid; blank(); render();
+    // The task moves to that device on its own computer; the task page then shows it here.
+    if (remote()) { remoteAction('use', { where: 'remote', udid: targetUdid }); return; }
     // Inside a task page the switch also moves that task to the new device.
     try {
       const result = await api('switch', { targetUdid, ...(params.get('task') ? { task: params.get('task') } : {}) });

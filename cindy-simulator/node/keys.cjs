@@ -51,4 +51,13 @@ function parseKey(text){
 /** True when every character can be typed on a US keyboard (what HID typing supports). */
 function typeable(text){return /^[\x20-\x7e\n\t]*$/.test(text);}
 
-module.exports={chord,parseKey,typeable};
+const PUNCTUATION={Minus:'-',Equal:'=',BracketLeft:'[',BracketRight:']',Backslash:'\\',Semicolon:';',Quote:"'",Backquote:'`',Comma:',',Period:'.',Slash:'/'};
+// KeyboardEvent.code to the Android key names typeText accepts.
+function androidKey(code,modifiers){
+  const base=/^Key[A-Z]$/.test(code)?code.slice(3).toLowerCase():/^Digit\d$/.test(code)?code.slice(5):code==='Space'?'space':PUNCTUATION[code]
+    ||(/^(Enter|Escape|Tab|Backspace|Delete|Arrow(Up|Down|Left|Right)|F([1-9]|1[0-2]))$/.test(code)?code:null);
+  if(!base)throw Error('Unsupported key');
+  return [...modifiers.map(m=>({shift:'shift',control:'ctrl',option:'alt',command:'cmd'})[m]),base].join('+');
+}
+if(typeof module!=='undefined')module.exports={chord,parseKey,typeable,androidKey};
+else window.DeviceKeys={chord,parseKey,typeable,androidKey};

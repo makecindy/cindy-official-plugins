@@ -145,7 +145,7 @@ test('the stream sends screen JSON before the first frame, starts on a keyframe 
   ws.binary(envelope(2,[1,2,3]));ws.binary(envelope(3,[4]));
   await until(()=>stream.messages().length>=4);
   const messages=stream.messages();
-  assert.deepEqual(screenOf(messages[0]),{type:'screen',width:1178,height:2556,rotation:1});
+  assert.deepEqual(screenOf(messages[0]),{type:'screen',width:1178,height:2556,rotation:1});assert.equal(f.live.rotation(PHONE),1);
   assert.deepEqual(messages.slice(1).map(m=>m[0]),[1,2,3]);
   assert.deepEqual([...messages[2]],[2,1,2,3],'frames are Baguette envelopes as is');
   // Frames are followed by one orientation probe once they pause; a still screen sends nothing and is not probed.
@@ -164,7 +164,7 @@ test('the stream sends screen JSON before the first frame, starts on a keyframe 
   await ws.reply('landscape-right');
   ws.binary(envelope(3,[6]));
   await until(()=>stream.messages().length>=8);
-  assert.deepEqual(screenOf(stream.messages()[6]),{type:'screen',width:1178,height:2556,rotation:3});
+  assert.deepEqual(screenOf(stream.messages()[6]),{type:'screen',width:1178,height:2556,rotation:3});assert.equal(f.live.rotation(PHONE),3);
   ws.binary(avcc('1206x2622'));await until(()=>stream.messages().length>=10);
   assert.deepEqual(screenOf(stream.messages()[8]),{type:'screen',width:1206,height:2622,rotation:3},'a new picture size is announced first');
   ws.close();await until(()=>stream.ended());

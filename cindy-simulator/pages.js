@@ -81,7 +81,10 @@
   };
   let catalogCache = null;
   async function catalog() { if (!catalogCache) { const c = await rpc('catalog', {}); if (!c?.ok) throw c; catalogCache = c; } return catalogCache; }
-  function createDevice({ family = 'any', lang = 'en' } = {}) {
+  // `call` replaces the page RPC when the device is created on another computer
+  // (the task page of a remote task): that computer's models and systems are
+  // asked each time, and its Android environment is not set up from here.
+  function createDevice({ family = 'any', lang = 'en', call = null, heading = null } = {}) {
     const T = SHEET[lang] || SHEET.en, M = root.CindySimModel;
     return new Promise((resolve) => {
       const nameInput = h('input', { maxlength: '64', autocomplete: 'off', spellcheck: 'false' });
@@ -95,7 +98,7 @@
       const setup = h('button', {class:'btn quiet',type:'button',text:T.setup,hidden:true});
       const row = (label, control) => h('label', { class: 'sheet-row' }, [h('span', { text: label }), control]);
       const form = h('form', { class: 'sheet', method: 'dialog' }, [
-        h('h2', { text: T[family] || T.iphone }),
+        h('h2', { text: heading || T[family] || T.iphone }),
         h('div', { class: 'sheet-group' }, [row(T.name, nameInput), row(T.os, osSelect), row(T.model, modelSelect)]),
         modeChoice, error, setup, h('div', { class: 'sheet-actions' }, [cancel, create])]);
       const dialog = h('dialog', { class: 'sheet-dialog' }, [form]);
@@ -121,7 +124,7 @@
       error.textContent = T.loading;
       function populate(c) {
         cat = c;
-        setup.hidden=(family!=='android'&&family!=='any')||c.platforms?.android?.ready===true;
+        setup.hidden=!!call||(family!=='android'&&family!=='any')||c.platforms?.android?.ready===true;
         const runtimes = c.runtimes.filter((r) => models().some((d) => M.runtimesFor(c, d.identifier).some((v) => v.identifier === r.identifier)))
           .sort((a, b) => String(b.version).localeCompare(String(a.version), undefined, { numeric: true }));
         if (!runtimes.length) { error.textContent = T.none; return; }
@@ -137,7 +140,7 @@
         const apple = selected ? M.platform(selected) !== 'android' : family !== 'android' && family !== 'any';
         error.textContent = e?.message || (apple ? T.iosFailed : T.failed);
       }
-      catalog().then(populate).catch(showError);
+      (call ? call('catalog', {}).then((c) => { if (!c?.ok) throw c; return c; }) : catalog()).then(populate).catch(showError);
       setup.addEventListener('click',async()=>{try{if(await setupAndroid(lang)){catalogCache=null;populate(await catalog());}}catch(e){showError(e);}});
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -145,7 +148,7 @@
         const memoryMode = modeChoice.hidden ? null : selectedMode;
         create.disabled = true; create.textContent = T.creating; error.textContent = '';
         try {
-          const r = await rpc('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
+          const r = await (call || rpc)('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
           if (!r?.ok) throw r;
           if (r.udid && memoryMode) memoryChoices.set(r.udid,memoryMode);
           finish({ udid: r.udid, name: r.name || name });

@@ -586,6 +586,14 @@ function startWorker() {
   const live=require('./live-screen.cjs').createLiveScreen({devices:async()=>(await dispatch('devices')).devices,tasks,controls:()=>runtime,
     appleBase:()=>require('./viewer.cjs').nativeBase(BINARY,DEVICE_SET,children,clipboardAction),android,appleHost});
   require('./viewer.cjs').configureLive(()=>live.viewing()?1:0);
+  // Devices on the account's other computers, shown here (remote/viewer.cjs).
+  // They are not this computer's devices: the run switch, idle shutdown and
+  // device records never apply to them.
+  const remote=require('./remote/viewer.cjs').createRemoteViewer();
+  // The other direction: this computer's simulators shown on another computer get their body from here.
+  const remoteChrome=appleHost?require('./remote/chrome.cjs').createChromeSource({definition:(()=>{
+    const chrome=require('./physical/chrome.cjs').createChrome({root:path.join(ROOT,'remote'),run});
+    return (deviceType,picture)=>chrome.simulatorDefinition(deviceType,picture);})()}):null;
   // In use = a viewer window or phone screen is open, or another process names a running device.
   const inUse=async()=>{
     if(require('./viewer.cjs').viewing()||android().viewer.viewing()||physical().viewer.viewing()||live.viewing())return true;
@@ -597,7 +605,7 @@ function startWorker() {
     pendingOperation:udid=>physical().pending(udid)||android().pending(udid)||appsImpl?.pending(udid),
     pendingJob:udid=>android().runningFor(udid)||appsImpl?.runningFor(udid),
     viewerWanted:()=>require('./viewer.cjs').hasSession(DEVICE_SET)||android().viewer.wanted(),
-    tasks,
+    tasks, rotationOf:udid=>live.rotation(udid),
     existingViewerUrl:async(udid,locale)=>physical().viewer.existing(udid,locale)||(await android().owns(udid)?android().viewer.existing(udid,locale):require('./viewer.cjs').existingViewerUrl(udid,locale))});
   configureControls(runtime);
   android().configure(runtime);
@@ -611,7 +619,7 @@ function startWorker() {
   recycle.unref();
   let stopping=false;
   const stop=async()=>{
-    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);clearInterval(reclaimTimer);live.stop();
+    if(stopping)return;stopping=true;clearInterval(timer);clearInterval(recycle);clearInterval(reclaimTimer);live.stop();void remote.close();
     await trackpadImpl?.stop();
     await spatialImpl?.stop();
     // Host may force termination before this completes. User-facing stop
@@ -629,6 +637,34 @@ function startWorker() {
       try{reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await live.request(request.method,request.params)}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(Number.isInteger(e.completed)?{completed:e.completed}:{})}});}
       return;
+    }
+    if(['remote_chrome','remote_chrome_meta','remote_chrome_chunk'].includes(request.method)){
+      const p=request.params||{};
+      try{
+        let result;
+        if(request.method==='remote_chrome')result=remote.chrome(p);
+        else if(!remoteChrome)result={none:true};
+        else if(request.method==='remote_chrome_chunk')result=remoteChrome.chunk(p.key,p.index);
+        else{
+          // Only a simulator of this computer; phones attached to it keep their artwork here.
+          const device=(await dispatch('devices')).devices.find(d=>d.udid===p.udid&&d.kind!=='physical');
+          result=device?.deviceType?await remoteChrome.meta(device.deviceType,{width:p.width,height:p.height,rotation:p.rotation}):{none:true};
+        }
+        reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...result}});
+      }catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
+      return;
+    }
+    if(request.method==='remote_viewer'){
+      try{const p=request.params||{};reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await remote.open({id:p.id,url:p.url,name:p.name,platform:p.platform,devices:p.devices,computer:p.computer,manage:p.manage,rotation:p.rotation,locale:p._locale,task:p._task})}});}
+      catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
+      return;
+    }
+    // A remote device page is open: keep this worker alive for it, without
+    // counting it as a viewer of this computer's own devices.
+    if(request.method==='device_hold'&&remote.viewing()){
+      let running=false;try{running=(await runtime.request('device_hold',request.params)).running===true;}catch{}
+      if(!running){await new Promise(resolve=>setTimeout(resolve,20000));running=remote.viewing();}
+      return reply({jsonrpc:'2.0',id:request.id,result:{ok:true,running}});
     }
       try {reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await runtime.request(request.method,request.params)}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed',...(e.busy?{busy:e.busy}:{})}});}

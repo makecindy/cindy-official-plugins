@@ -36,12 +36,13 @@ function fakeDocument(template='control.html'){
 }
 
 async function boot({respond,abortSignal=AbortSignal,query='',template='control.html'}){
- const dom=fakeDocument(template);const calls=[];let intervals=[];
+ const dom=fakeDocument(template);const calls=[],messages=[];let intervals=[];
  const context={
   document:dom.document,URLSearchParams,URL,AbortSignal:abortSignal,Error,Object,JSON,Math,Date,String,Array,Number,Promise,console,parseFloat,clearTimeout,setTimeout,
   location:{search:'?udid='+udid+query,hash:'#cindyClipboard=123.token',href:'http://127.0.0.1:1/control?udid='+udid+'&lang=zh-CN'+query+'#cindyClipboard=123.token',origin:'http://127.0.0.1:1'},
   history:{replaceState(_s,_t,url){context.location.href=String(url);}},
   ResizeObserver:class{observe(){}},setInterval:fn=>{intervals.push(fn);return intervals.length;},
+  addEventListener:(name,fn)=>{if(name==='message')messages.push(fn);},
   fetch:async(_url,opts)=>{const body=JSON.parse(opts.body);calls.push(body);const r=await respond(body,opts);if(r instanceof Error)throw r;if(r?.httpStatus)return {ok:false,status:r.httpStatus,json:async()=>({error:'denied'})};return {ok:true,status:200,json:async()=>r};},
  };
  context.globalThis=context;context.window=context;
@@ -49,7 +50,7 @@ async function boot({respond,abortSignal=AbortSignal,query='',template='control.
  vm.runInContext(fs.readFileSync(path.join(node,'control-model.js'),'utf8'),context);
  vm.runInContext(fs.readFileSync(path.join(node,'control.js'),'utf8'),context);
  await new Promise(r=>setImmediate(r));
- return {dom,calls,context,poll:()=>intervals[0](),tick:()=>intervals[1](),sim:context.cindySim};
+ return {dom,calls,context,messages,poll:()=>intervals[0](),tick:()=>intervals[1](),sim:context.cindySim};
 }
 const status=(over={})=>({ready:true,parked:false,generation:1,device:{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'com.apple.CoreSimulator.SimRuntime.iOS-27-1',deviceType:'x.iPhone-17-Pro'},devices:[{udid,name:'iPhone 17 Pro',state:'Booted',runtime:'iOS 27.1',deviceType:'x.iPhone-17-Pro'},{udid:other,name:'iPad',state:'Shutdown',runtime:'iOS 27.0',deviceType:'x.iPad'}],settings:{enabled:true,idleMinutes:15},idleDeadline:Date.now()+15*60000,...over});
 
@@ -129,6 +130,44 @@ test('physical phones use the shared screen, screenshot and keyboard controls wi
  f.dom.byId['btn-more'].dispatch('click');const menu=f.dom.body.querySelector('.menu');
  assert.match(menu.textContent,/使用手机键盘/);assert.doesNotMatch(menu.textContent,/关闭设备|摇一摇|完整工具/);
  assert.equal(f.calls.some(p=>p.action==='connect'),false);
+});
+test('a device on another computer says so, lists that computer’s devices and leaves managing them to the task page',async()=>{
+ const device={...status().device,kind:'remote'},other={udid:'SIM-OTHER',name:'iPad mini',state:'Shutdown',kind:'remote',runtime:'iOS 27.3'};
+ for(const manage of [true,false]){
+  const f=await boot({respond:()=>status({device,devices:[device,other],viewerPlatform:'remote',remote:{computer:'Mac Studio',manage}})});
+  const posted=[];f.context.parent={postMessage:(data,origin)=>posted.push({data,origin})};
+  // Always in view next to the device name: which computer runs it.
+  assert.equal(f.dom.byId['remote-badge'].hidden,false);assert.equal(f.dom.byId['remote-badge-text'].textContent,'远程 · Mac Studio');
+  assert.match(f.dom.byId.screen.src,/\/simulators\//);assert.equal(f.dom.byId['btn-audio'].hidden,true);
+  f.dom.byId['device-chip'].dispatch('click');let menu=f.dom.body.querySelector('.menu');
+  assert.match(menu.textContent,/「Mac Studio」上的设备/);assert.match(menu.textContent,/iPad mini/);assert.doesNotMatch(menu.textContent,/重命名/);
+  const row=menu.querySelectorAll('button').find(b=>/iPad mini/.test(b.textContent));
+  assert.equal(row.disabled,!manage);assert.equal(/添加设备/.test(menu.textContent),manage);
+  if(!manage)continue;
+  // Switching and creating are asked of the task page, which asks that computer; this page's worker is not.
+  row.dispatch('click');
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)),[{data:{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-OTHER'},origin:'*'}]);
+  assert.match(f.dom.byId.overlay.textContent,/正在切换/);
+  assert.equal(f.calls.some(p=>['switch','create','boot','shutdown','open'].includes(p.action)),false);
+  // The task page, if this page is still there afterwards, says how it went.
+  for(const listen of f.messages)listen({source:f.context.parent,data:{type:'cindy-simulator-remote-result',action:'use',ok:false,errorCode:'FAILED'}});
+  assert.doesNotMatch(f.dom.byId.overlay.textContent,/正在切换/);assert.match(f.dom.byId.dock.textContent,/切换没有完成/);
+ }
+ // This computer's own device carries no such mark.
+ const local=await boot({respond:()=>status()});
+ assert.equal(local.dom.byId['remote-badge'].hidden,true);
+ local.dom.byId['device-chip'].dispatch('click');assert.doesNotMatch(local.dom.body.querySelector('.menu').textContent,/上的设备|这台电脑/);
+ for(const node of local.dom.body.querySelectorAll('.scrim'))node.dispatch('click');
+ // In a task that lives on another computer the same menu also lists that computer's devices, under its name.
+ const sent=[];local.context.parent={postMessage:(data,origin)=>sent.push(JSON.parse(JSON.stringify(data)))};
+ for(const listen of local.messages)listen({source:local.context.parent,data:{type:'cindy-simulator-sides',here:'local',computer:'Mac Studio',other:{devices:[other],manage:true}}});
+ for(const listen of local.messages)listen({source:{},data:{type:'cindy-simulator-sides',here:'local',computer:'Elsewhere',other:{devices:[],manage:true}}});
+ local.dom.byId['device-chip'].dispatch('click');const both=local.dom.body.querySelector('.menu');
+ assert.match(both.textContent,/这台电脑的设备/);assert.match(both.textContent,/「Mac Studio」上的设备/);assert.match(both.textContent,/在「Mac Studio」上添加设备/);assert.match(both.textContent,/重命名/);
+ both.querySelectorAll('button').find(b=>/iPad mini/.test(b.textContent)).dispatch('click');
+ assert.deepEqual(sent,[{type:'cindy-simulator-remote-action',action:'use',where:'remote',udid:'SIM-OTHER'}]);
+ assert.match(local.dom.byId.overlay.textContent,/正在切换/);assert.equal(local.calls.some(p=>p.action==='switch'),false);
+ for(const listen of local.messages)listen({source:local.context.parent,data:{type:'cindy-simulator-remote-result',action:'use',ok:true}});
 });
 test('a disconnected physical phone requests reconnection rather than simulator startup',async()=>{
  const device={...status().device,kind:'physical',state:'Disconnected'};
