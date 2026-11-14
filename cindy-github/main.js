@@ -160,12 +160,17 @@ var MESSAGES = {
     prStop: '停止',
     prStopping: '正在停止跟进',
     prSettings: 'PR 设置',
+    prSettingsUnknown: '设置状态未知，无法确认重推授权已关闭。请刷新后核对。',
+    prRefreshSettings: '刷新 PR 设置',
     prCopyLink: '复制链接',
     prHideSettings: '收起 PR 设置',
     prAutoRename: '发完自动改名',
     prAutoRenameHint: '任务标题改成 #编号 简短主题',
     prAutoFollow: '发完自动跟进',
     prAutoFollowHint: '后台修 CI 和 review 意见，需要你时再通知',
+    prCiRetry: 'CI 无重跑权限时重推重试',
+    prCiRetryScope: '本机所有仓库 / PR 共用',
+    prCiRetryHint: '仅确认临时故障且重跑被权限拒绝时，可改写独占分支的提交 SHA 并受限重推',
     prAutoArchive: '合并后自动归档',
     prAutoArchiveHint: '你看过已合并的卡片、离开这个任务后归档；有未提交的改动时保留',
     prArchiveTask: '归档任务',
@@ -199,7 +204,7 @@ var MESSAGES = {
     prMergeWaiting: '等待合并',
     prHandoffFailed: '没能交给 Agent，请直接在对话里告诉它',
     prHandoffUnknown: '不确定是否已交给 Agent，请先看对话，不要重复点',
-    prSettingFailed: '设置没有保存，请稍后再试',
+    prSettingFailed: '设置保存结果未确认，请先核对当前状态，不要重复操作',
     prNeedRepo: '需要 repo(owner/repo 形式)',
     prNeedHead: '询问卡片需要 head(改动所在的分支)',
     prBadPr: 'pr 需要是 GitHub PR 链接或编号',
@@ -300,12 +305,17 @@ var MESSAGES = {
     prStop: 'Stop',
     prStopping: 'Stopping',
     prSettings: 'PR settings',
+    prSettingsUnknown: 'Settings are unknown; repush permission is not confirmed off. Refresh to check.',
+    prRefreshSettings: 'Refresh PR settings',
     prCopyLink: 'Copy link',
     prHideSettings: 'Hide PR settings',
     prAutoRename: 'Rename after opening',
     prAutoRenameHint: 'Retitle the task as #number short topic',
     prAutoFollow: 'Follow after opening',
     prAutoFollowHint: 'Fix CI and review feedback in the background and notify you only when needed',
+    prCiRetry: 'Repush CI when rerun permission is denied',
+    prCiRetryScope: 'Shared by all repos / PRs on this computer',
+    prCiRetryHint: 'Only for confirmed transient failures and permission-denied reruns: rewrite the commit SHA on an exclusive branch and repush with safeguards',
     prAutoArchive: 'Archive after merge',
     prAutoArchiveHint: 'Archive the task after you have seen it merged and moved on; kept while anything is uncommitted',
     prArchiveTask: 'Archive task',
@@ -339,7 +349,7 @@ var MESSAGES = {
     prMergeWaiting: 'Waiting to merge',
     prHandoffFailed: 'Could not hand this to the agent. Tell it in the conversation instead.',
     prHandoffUnknown: 'Not sure the agent received this. Check the conversation before clicking again.',
-    prSettingFailed: 'The setting was not saved. Try again later.',
+    prSettingFailed: 'The save outcome is unconfirmed. Check the current state before acting again.',
     prNeedRepo: 'repo is required (owner/repo)',
     prNeedHead: 'An ask card needs head (the branch with the changes)',
     prBadPr: 'pr must be a GitHub pull request URL or number',
@@ -440,12 +450,17 @@ var MESSAGES = {
     prStop: 'フォロー停止',
     prStopping: 'フォローを停止しています',
     prSettings: 'PR 設定',
+    prSettingsUnknown: '設定は不明で、再プッシュ許可がオフとは確認できません。更新して確認してください。',
+    prRefreshSettings: 'PR 設定を更新',
     prCopyLink: 'リンクをコピー',
     prHideSettings: 'PR 設定を閉じる',
     prAutoRename: '作成後に自動で改名',
     prAutoRenameHint: 'タスク名を「#番号 短いテーマ」に変更します',
     prAutoFollow: '作成後に自動でフォロー',
     prAutoFollowHint: 'バックグラウンドで CI とレビュー指摘を直し、必要なときだけ通知します',
+    prCiRetry: 'CI の再実行権限がない場合に再プッシュ',
+    prCiRetryScope: 'この端末の全リポジトリ・PR で共用',
+    prCiRetryHint: '一時的な障害と再実行の権限拒否を確認した場合のみ、専用ブランチのコミット SHA を書き換え、安全条件の下で再プッシュします',
     prAutoArchive: 'マージ後に自動でアーカイブ',
     prAutoArchiveHint: 'マージ済みのカードを見てこのタスクを離れたらアーカイブします。未コミットの変更があるときは残します',
     prArchiveTask: 'タスクをアーカイブ',
@@ -479,7 +494,7 @@ var MESSAGES = {
     prMergeWaiting: 'マージ待ち',
     prHandoffFailed: 'エージェントに渡せませんでした。会話で直接伝えてください',
     prHandoffUnknown: 'エージェントに届いたか分かりません。もう一度押す前に会話を確認してください',
-    prSettingFailed: '設定を保存できませんでした。しばらくしてから再試行してください',
+    prSettingFailed: '保存結果を確認できません。操作を繰り返す前に現在の状態を確認してください。',
     prNeedRepo: 'repo(owner/repo 形式)が必要です',
     prNeedHead: '確認カードには head(変更のあるブランチ)が必要です',
     prBadPr: 'pr には GitHub の PR URL か番号を指定してください',
@@ -580,12 +595,17 @@ var MESSAGES = {
     prStop: '중지',
     prStopping: '팔로우 중지 중',
     prSettings: 'PR 설정',
+    prSettingsUnknown: '설정 상태가 알 수 없으며 다시 푸시 권한이 꺼졌는지 확인되지 않았습니다. 새로고침하여 확인하세요.',
+    prRefreshSettings: 'PR 설정 새로고침',
     prCopyLink: '링크 복사',
     prHideSettings: 'PR 설정 닫기',
     prAutoRename: '만든 뒤 자동으로 이름 변경',
     prAutoRenameHint: '작업 제목을 #번호 짧은 주제로 바꿉니다',
     prAutoFollow: '만든 뒤 자동으로 팔로우',
     prAutoFollowHint: '백그라운드에서 CI와 리뷰 의견을 고치고 필요할 때만 알립니다',
+    prCiRetry: 'CI 재실행 권한이 없으면 다시 푸시',
+    prCiRetryScope: '이 컴퓨터의 모든 저장소 / PR에 공통 적용',
+    prCiRetryHint: '일시적 장애와 재실행 권한 거부를 확인한 경우에만 전용 브랜치의 커밋 SHA를 바꾸고 안전 조건에 따라 다시 푸시합니다',
     prAutoArchive: '병합 후 자동 보관',
     prAutoArchiveHint: '병합된 카드를 보고 이 작업을 떠나면 보관합니다. 커밋하지 않은 변경이 있으면 남겨 둡니다',
     prArchiveTask: '작업 보관',
@@ -619,7 +639,7 @@ var MESSAGES = {
     prMergeWaiting: '병합 대기 중',
     prHandoffFailed: '에이전트에게 전달하지 못했습니다. 대화에서 직접 말해 주세요',
     prHandoffUnknown: '에이전트에게 전달됐는지 확실하지 않습니다. 다시 누르기 전에 대화를 확인하세요',
-    prSettingFailed: '설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요',
+    prSettingFailed: '저장 결과를 확인하지 못했습니다. 다시 조작하기 전에 현재 상태를 확인하세요.',
     prNeedRepo: 'repo(owner/repo 형식)가 필요합니다',
     prNeedHead: '확인 카드에는 head(변경이 있는 브랜치)가 필요합니다',
     prBadPr: 'pr은 GitHub PR URL이나 번호여야 합니다',
@@ -2648,7 +2668,8 @@ async function readKv() {
   var r = await fetch('/kv');
   if (!r || r.ok === false) throw new Error('kv unavailable');
   var kv = await r.json();
-  return kv && typeof kv === 'object' && !Array.isArray(kv) ? kv : {};
+  if (!kv || typeof kv !== 'object' || Array.isArray(kv)) throw new Error('invalid kv');
+  return kv;
 }
 
 var PR_AGENT_KINDS = { cc: 1, codex: 1, pi: 1 };
@@ -2677,13 +2698,15 @@ function prSettingsFrom(kv) {
   // lastFollowModel:切回「跟随当前任务」时记住上次指定的模型,再切回「指定模型」直接用它。
   return {
     autoRename: s.autoRename === true, autoFollow: s.autoFollow === true, autoArchive: s.autoArchive === true,
+    ciRetryRepush: s.ciRetryRepush === true,
     followModel: prFollowModelFrom(s.followModel), lastFollowModel: prFollowModelFrom(s.lastFollowModel),
   };
 }
 
 /** 交给 Agent 的设置:跟进模型按定时任务参数的写法给出,没选就不带(沿用当前任务)。 */
 function prSettingsForAgent(settings, autoFollow) {
-  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow };
+  if (settings.unreadable) return { unreadable: true };
+  var out = { auto_rename: settings.autoRename, auto_follow: autoFollow, ci_retry_repush: settings.ciRetryRepush };
   var m = settings.followModel;
   if (m) {
     out.follow_model = {
@@ -2708,7 +2731,13 @@ async function writePrSettings(change) {
   var kv = await readKv();
   var next = prSettingsFrom(kv);
   change(next);
-  kv.prCard = { autoRename: next.autoRename, autoFollow: next.autoFollow };
+  kv.prCard = Object.assign({}, kv.prCard, { autoRename: next.autoRename, autoFollow: next.autoFollow });
+  // Preserve unknown preferences; explicitly remove the optional values that were turned off.
+  delete kv.prCard.autoArchive;
+  delete kv.prCard.followModel;
+  delete kv.prCard.lastFollowModel;
+  delete kv.prCard.ciRetryRepush;
+  if (next.ciRetryRepush) kv.prCard.ciRetryRepush = true;
   if (next.autoArchive) kv.prCard.autoArchive = true;
   if (next.followModel) kv.prCard.followModel = next.followModel;
   if (next.lastFollowModel) kv.prCard.lastFollowModel = next.lastFollowModel;
@@ -3086,11 +3115,13 @@ function prContextLine(card) {
   return '<div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">' + parts.join(PR_SEP) + '</div>';
 }
 
-function prSettingRow(action, label, hint, on) {
+function prSettingRow(action, label, hint, on, scope) {
   // data-ghost-toggle:手机端把这一行画成原生开关(文字取按钮里的标题和说明)。
-  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: label }) : t('prTurnOn', { name: label })) + '" ' +
+  var accessibleLabel = scope ? label + ' (' + scope + ')' : label;
+  return '<button data-ghost-action="' + action + '" data-ghost-toggle="' + (on ? 'on' : 'off') + '" aria-label="' + prEsc(on ? t('prTurnOff', { name: accessibleLabel }) : t('prTurnOn', { name: accessibleLabel })) + '" ' +
     'style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;text-align:left;--hover:' + PR_HOVER + '">' +
-    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) + '</div>' +
+    '<div style="min-width:0"><div style="font-size:13px;line-height:18px;font-weight:500">' + prEsc(label) +
+    (scope ? '<span style="display:inline-block;margin-left:6px;font-size:11px;font-weight:400;color:var(--text-secondary)">' + prEsc(scope) + '</span>' : '') + '</div>' +
     '<div style="font-size:12px;line-height:16px;color:var(--text-secondary)">' + prEsc(hint) + '</div></div>' +
     '<span style="position:relative;flex:none;width:36px;height:20px;border-radius:9999px;background:' + (on ? PR_BLUE : 'light-dark(#808080,#787878)') + '">' +
     '<span style="position:absolute;top:2px;left:' + (on ? 18 : 2) + 'px;width:16px;height:16px;border-radius:50%;background:#fcfcfc"></span></span></button>';
@@ -3149,10 +3180,15 @@ function prModelRow(settings) {
 }
 
 function prSettingsPanel(settings) {
-  return '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
-    '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>' +
+  var heading = '<div style="padding:8px 8px 10px;border-top:1px solid var(--border-default)">' +
+    '<div style="padding:4px 8px;font-size:12px;line-height:16px;font-weight:600;color:var(--text-tertiary)">' + prEsc(t('prSettings')) + '</div>';
+  if (settings.unreadable) return heading +
+    '<div role="status" style="padding:8px;color:var(--text-secondary)">' + prEsc(t('prSettingsUnknown')) + '</div>' +
+    prPillButton('prui:settingsRefresh', t('prRefreshSettings')) + '</div>';
+  return heading +
     prSettingRow('prset:rename', t('prAutoRename'), t('prAutoRenameHint'), settings.autoRename) +
     prSettingRow('prset:follow', t('prAutoFollow'), t('prAutoFollowHint'), settings.autoFollow) +
+    prSettingRow('prset:ciRetry:' + (settings.ciRetryRepush ? 'off' : 'on'), t('prCiRetry'), t('prCiRetryHint'), settings.ciRetryRepush, t('prCiRetryScope')) +
     prSettingRow('prset:archive', t('prAutoArchive'), t('prAutoArchiveHint'), settings.autoArchive) +
     prModelRow(settings) +
     '</div>';
@@ -3290,10 +3326,10 @@ function renderPrCard(card, settings) {
 }
 
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
-function prCardHeight(card) {
+function prCardHeight(card, settings) {
   var h = 120;
   if (card.note) h += 22;
-  if (card.settingsOpen && prHasSettings(card)) h += 160;
+  if (card.settingsOpen && prHasSettings(card)) h += settings && settings.unreadable ? 120 : 400;
   return Math.min(900, h);
 }
 
@@ -3305,7 +3341,7 @@ async function sendPrCard(card, settings, sourceCallId) {
     // Agent 用 pr_card 更新结果时换回 done。
     type: 'card-update', callId: prAnchor(card), v: 2,
     state: !other && (card.stage === 'publishing' || card.pending) ? 'working' : 'done',
-    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card),
+    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card, settings),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
@@ -3524,6 +3560,7 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action !== 'pr:open-task') event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
   if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
@@ -3534,7 +3571,6 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   } else {
     event.head = card.head;
     if (card.base) event.base = card.base;
-    event.settings = prSettingsForAgent(settings, settings.autoFollow && action === 'pr:publish');
   }
   var r;
   try {
@@ -3684,6 +3720,17 @@ async function prCardAction(msg) {
   var handedOff = false;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
+  } else if (action === 'prui:settingsRefresh' && prHasSettings(card)) {
+    // The settings were read at entry. Refresh is read-only, not a retry of a save.
+    card.settingsOpen = true;
+  } else if (action === 'prset:ciRetry:on' || action === 'prset:ciRetry:off') {
+    try {
+      settings = await writePrSettings(function (next) { next.ciRetryRepush = action === 'prset:ciRetry:on'; });
+    } catch (e) {
+      card.note = t('prSettingFailed');
+    }
+  } else if (action === 'prset:ciRetry') {
+    // An old card has no explicit target. Refresh it, never infer new rewrite consent.
   } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
     try {
       settings = await togglePrSetting(action === 'prset:rename' ? 'autoRename' : action === 'prset:follow' ? 'autoFollow' : 'autoArchive');
@@ -3761,6 +3808,9 @@ async function prCardAction(msg) {
       }
     }
   }
+  // Reconcile every preference action, including a PUT whose response was lost.
+  // Never render pre-write values as the result or repeat an uncertain mutation.
+  if (action.indexOf('prset:') === 0) settings = await readPrSettings();
   if (!(await savePrCard(card))) {
     if (handedOff) {
       // 点击已经交给 Agent:卡片不能退回有按钮的旧状态,否则用户会把同一件事再派一遍。

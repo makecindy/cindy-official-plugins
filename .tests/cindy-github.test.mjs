@@ -5,6 +5,7 @@ import { createContext, Script } from 'node:vm';
 
 // CI runs only .tests/<plugin>.test.mjs for a changed plugin; the /pr Skill's script tests ride along here.
 import './cindy-github-pr/cleanup-plan.test.mjs';
+import './cindy-github-pr/ci-retry.test.mjs';
 import './cindy-github-pr/gate.test.mjs';
 import './cindy-github-pr/preflight.test.mjs';
 import './cindy-github-pr/pacing.test.mjs';
@@ -80,7 +81,6 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.15');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -103,7 +103,7 @@ test('connection tests never cache an identity that the plugin cannot attribute 
 test('settings show only host availability and fallback-token storage state', () => {
   assert.match(settingsSource, /function renderHostAccount\(available\)/);
   assert.doesNotMatch(settingsSource, /renderHostAccount\(hostAvailable,\s*\w+/);
-  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource|fetch\(['"]\/kv/);
+  assert.doesNotMatch(settingsSource, /connectedLogin|connectedSource/);
   assert.doesNotMatch(settingsSource, /else void test\(\)/);
   assert.match(settingsSource, /检查当前 GitHub 连接/);
   assert.doesNotMatch(settingsSource, /gh auth token/);
@@ -234,17 +234,18 @@ function createSettings(options = {}) {
   const context = createContext({
     document,
     AbortController,
-    BroadcastChannel: class { postMessage() {} addEventListener() {} removeEventListener() {} },
-    setTimeout: () => 0,
-    clearTimeout() {},
-    clearInterval() {},
-    setInterval: () => 0,
+    BroadcastChannel: options.BroadcastChannel ?? class { postMessage() {} addEventListener() {} removeEventListener() {} },
+    setTimeout: options.setTimeout ?? (() => 0),
+    clearTimeout: options.clearTimeout ?? (() => {}),
+    clearInterval: options.clearInterval ?? (() => {}),
+    setInterval: options.setInterval ?? (() => 0),
     fetch: async (url, init = {}) => {
       fetchCalls.push({ url, init });
       if (url === '/app-context') {
         if (options.appContext) return options.appContext();
         return { ok: true, json: async () => ({ ok: true, context: { region: 'cn', locale: options.locale ?? 'zh-CN' } }) };
       }
+      if (url === '/wake' && options.wake) return options.wake();
       if (url === '/secrets') {
         if (options.secretsFail) throw new Error('offline');
         return { ok: true, json: async () => [{ key: 'github_pat', saved: options.saved ?? false, tail: options.tail,
@@ -570,7 +571,7 @@ for (const locale of hostLocales) {
     const m = page.messages[locale];
     assert.equal(page.fetchCalls[0].url, '/app-context', 'locale is resolved before any copy is rendered');
     assert.equal(page.document.documentElement.lang, locale);
-    assert.equal(page.copyNodes['data-i18n'].length, 8);
+    assert.equal(page.fetchCalls.some(call => call.url === '/kv'), false, 'account settings do not access PR preferences');
     for (const node of page.copyNodes['data-i18n']) {
       const key = node.getAttribute('data-i18n');
       if (key !== 'save') assert.equal(node.textContent, m[key], key);
@@ -690,8 +691,9 @@ function createPrRuntime(options = {}) {
   };
   const context = createContext({
     cindy,
-    BroadcastChannel: class { postMessage() {} },
+    BroadcastChannel: options.BroadcastChannel ?? class { postMessage() {} },
     fetch: async (url, init = {}) => {
+      if (options.preferences && url === '/kv') return options.preferences(url, init);
       if (String(url).startsWith('/agent-models') && options.agentModels) {
         const device = new URL(url, 'http://plugin').searchParams.get('agent_device_id');
         const models = typeof options.agentModels === 'function' ? options.agentModels(device) : options.agentModels;
@@ -739,7 +741,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
   const cardId = ask.reply.result.card_id;
   assert.equal(cardId, ask.callId);
   assert.deepEqual(ask.reply.result, {
-    card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false }, next: zhCopy.prNextAsk,
+    card_id: cardId, stage: 'ask', settings: { auto_rename: false, auto_follow: false, ci_retry_repush: false }, next: zhCopy.prNextAsk,
   });
   const askCard = runtime.lastCard(cardId);
   assert.equal(askCard.state, 'done');
@@ -757,7 +759,7 @@ test('pr_card asks first, hands the click to the task agent, then updates the sa
     userMessage: zhCopy.prClickPublish,
     event: {
       card_id: cardId, action: 'publish', repo: 'octo/repo', head: 'feat/pr-card', base: 'main',
-      settings: { auto_rename: false, auto_follow: false },
+      settings: { auto_rename: false, auto_follow: false, ci_retry_repush: false },
     },
   }]);
   assert.deepEqual(visibleText(runtime.lastCard(cardId).html), [
@@ -854,7 +856,7 @@ test('card settings persist in /kv and become one-time todos once the PR exists'
   // A bare number resolves against the repository recorded on the card.
   const opened = await runtime.tool({ card_id: cardId, pr: '7' });
   const url = 'https://github.com/octo/repo/pull/7';
-  assert.deepEqual(opened.reply.result.settings, { auto_rename: false, auto_follow: true });
+  assert.deepEqual(opened.reply.result.settings, { auto_rename: false, auto_follow: true, ci_retry_repush: false });
   assert.deepEqual(opened.reply.result.todo, [fill(zhCopy.prTodoFollow, { url })]);
   assert.equal(opened.reply.result.next, zhCopy.prNextApply);
   assert.equal((await runtime.tool({ card_id: cardId })).reply.result.todo, undefined);
@@ -923,7 +925,7 @@ for (const state of ['MERGED', 'CLOSED']) {
     assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prui:settings"/);
     await runtime.click(cardId, 'prui:settings');
     assert.match(runtime.lastCard(cardId).html, /data-ghost-action="prset:archive"/);
-    assert.equal(runtime.lastCard(cardId).height, 280);
+    assert.equal(runtime.lastCard(cardId).height, 520);
     await runtime.click(cardId, 'prset:archive');
     assert.equal(runtime.kv.prCard.autoArchive, true);
     await runtime.tool({ card_id: cardId });
@@ -1645,7 +1647,7 @@ test('IM follow settings share card preferences and selected remote model withou
   const read = await runtime.tool({}, 'pr_follow_settings');
   assert.equal(read.reply.ok, true);
   assert.deepEqual(read.reply.result.settings, {
-    auto_rename: true, auto_follow: true,
+    auto_rename: true, auto_follow: true, ci_retry_repush: false,
     follow_model: { model_agent_kind: 'claude-code', provider_id: 'example-provider', model: 'example-model', effort: 'high', fast_mode: false, agent_device_id: 'example-device', label: 'Example' },
   });
   assert.equal(runtime.cards(read.callId).length, 0);
@@ -1679,7 +1681,252 @@ test('IM preferences remain available when cards cannot be delivered; missing di
   assert.match(failed.message, /无法读取.*设置/);
   options.kvFails = false;
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.auto_follow, true);
-  assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false });
+  assert.deepEqual((await createPrRuntime().tool({}, 'pr_follow_settings')).reply.result.settings, { auto_rename: false, auto_follow: false, ci_retry_repush: false });
+});
+
+test('two PR cards serialize other preference saves with a later CI disable', async () => {
+  let kv = { untouched: 'keep', prCard: { ciRetryRepush: true } };
+  const blocked = deferred(), release = deferred();
+  let held = false, writing = 0, maxWriting = 0;
+  const preferences = async (_, init) => {
+    if (init.method === 'PUT') {
+      writing++; maxWriting = Math.max(maxWriting, writing);
+      const next = JSON.parse(init.body);
+      if (next.prCard.autoRename && !held) { held = true; blocked.resolve(); await release.promise; }
+      kv = next; writing--; return { ok: true, status: 204 };
+    }
+    return { ok: true, json: async () => structuredClone(kv) };
+  };
+  const runtime = createPrRuntime({ preferences });
+  const first = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  const second = await runtime.tool({ repo: 'example/other', head: 'feature' });
+  const rename = runtime.click(first.callId, 'prset:rename');
+  await blocked.promise;
+  const disable = runtime.click(second.callId, 'prset:ciRetry:off');
+  release.resolve();
+  await Promise.all([rename, disable]);
+  assert.equal(kv.prCard.ciRetryRepush === true, false);
+  assert.equal(kv.prCard.autoRename, true);
+  assert.equal(kv.untouched, 'keep');
+  assert.equal(maxWriting, 1);
+});
+
+test('account settings and retired preference messages cannot change CI authorization', async () => {
+  const page = createSettings();
+  await flushAsync();
+  assert.equal(page.elements.has('ci-retry'), false);
+  assert.equal(page.fetchCalls.some(call => call.url === '/kv'), false);
+  let channel, writes = 0;
+  const runtime = createPrRuntime({
+    BroadcastChannel: class { constructor() { channel = this; } postMessage() {} },
+    preferences: async (_, init) => {
+      if (init.method === 'PUT') writes++;
+      return { ok: true, json: async () => ({ prCard: { ciRetryRepush: false } }) };
+    },
+  });
+  channel.onmessage({ data: { type: 'pr-preference-ready', reqId: 'a'.repeat(32) } });
+  channel.onmessage({ data: { type: 'pr-preference-write', reqId: 'a'.repeat(32), ciRetryRepush: true } });
+  await flushAsync();
+  assert.equal(writes, 0);
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+});
+
+test('stale CI card actions express their displayed target and never invert a fresh disable', async () => {
+  const runtime = createPrRuntime({ kv: { prCard: { ciRetryRepush: true } } });
+  const first = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  const second = await runtime.tool({ repo: 'example/other', head: 'feature' });
+  await runtime.click(first.callId, 'prui:settings');
+  assert.match(runtime.lastCard(first.callId).html, /prset:ciRetry:off" data-ghost-toggle="on"/);
+  await runtime.click(second.callId, 'prset:ciRetry:off');
+  await runtime.click(first.callId, 'prset:ciRetry:off');
+  await runtime.click(first.callId, 'prset:ciRetry:off');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  // Pre-upgrade cards carry no target; refresh them, without interpreting them as consent.
+  await runtime.click(first.callId, 'prset:ciRetry');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  await runtime.click(first.callId, 'prset:ciRetry:on');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, true);
+});
+
+test('CI repush preference defaults off, stays independent of follow, and treats only true as enabled', async () => {
+  for (const value of [undefined, false, 'true', 1, null, true]) {
+    const runtime = createPrRuntime({ kv: { prCard: { autoFollow: true, ciRetryRepush: value } } });
+    const settings = (await runtime.tool({}, 'pr_follow_settings')).reply.result.settings;
+    assert.equal(settings.auto_follow, true);
+    assert.equal(settings.ci_retry_repush, value === true);
+    assert.equal(runtime.agentRuns.length, 0);
+    assert.equal(runtime.files.size, 0);
+  }
+});
+
+test('PR cards persist one live CI preference across reloads, repositories and follow rounds', async () => {
+  const original = { unrelated: { keep: 1 }, prCard: { autoFollow: true, autoRename: true, autoArchive: true,
+    lastFollowModel: { route: { agentKind: 'codex', providerId: '', model: 'example-model', effort: '', fastMode: false }, label: 'Example' },
+    futurePreference: 'keep' } };
+  let kv = structuredClone(original);
+  let writes = 0;
+  const preferences = async (url, init) => {
+    assert.equal(url, '/kv');
+    if (init.method === 'PUT') { kv = JSON.parse(init.body); writes++; return { ok: true, status: 204 }; }
+    return { ok: true, json: async () => structuredClone(kv) };
+  };
+  const runtime = createPrRuntime({ preferences, github: prGraphql() });
+  const entry = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  assert.equal(entry.reply.result.settings.ci_retry_repush, false);
+  assert.equal(writes, 0, 'displaying a PR card does not change preferences');
+  await runtime.click(entry.callId, 'prset:ciRetry:on');
+  assert.deepEqual(kv, { ...original, prCard: { ...original.prCard, ciRetryRepush: true } });
+
+  const first = await runtime.tool({ repo: 'octo/repo', pr: 42, following: true });
+  const id = first.reply.result.card_id;
+  assert.equal(first.reply.result.settings.ci_retry_repush, true);
+  await runtime.click(id, 'prui:settings');
+  assert.match(runtime.lastCard(id).html, /prset:ciRetry:off" data-ghost-toggle="on"/);
+  const restarted = createPrRuntime({ preferences });
+  assert.equal((await restarted.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, true);
+  const otherRepo = await restarted.tool({ repo: 'example/another', head: 'feature' });
+  assert.equal(otherRepo.reply.result.settings.ci_retry_repush, true);
+
+  // An already-running follow-up reads again rather than treating its first card result as a grant.
+  await runtime.click(id, 'prset:ciRetry:off');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  assert.equal((await runtime.tool({ card_id: id })).reply.result.settings.ci_retry_repush, false);
+  const reloaded = createPrRuntime({ preferences });
+  assert.equal((await reloaded.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  assert.equal(kv.prCard.autoFollow, true);
+  const { ciRetryRepush, ...otherPreferences } = kv.prCard;
+  assert.deepEqual(otherPreferences, original.prCard, 'changing CI authorization preserves other preferences');
+  assert.deepEqual(kv.unrelated, original.unrelated);
+  assert.equal(runtime.agentRuns.length, 0, 'changing this switch never starts follow-up or Git');
+});
+
+test('disabling from another PR card applies to the existing card and next follow handoff', async () => {
+  const runtime = createPrRuntime({ kv: { prCard: { ciRetryRepush: true } }, github: prGraphql() });
+  const card = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+  assert.equal(card.reply.result.settings.ci_retry_repush, true);
+  const other = await runtime.tool({ repo: 'example/another', head: 'feature' });
+  await runtime.click(other.callId, 'prset:ciRetry:off');
+  await runtime.click(card.callId, 'pr:follow');
+  assert.equal(runtime.agentRuns.at(-1).event.settings.ci_retry_repush, false);
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+});
+
+test('CI preference read failures and uncertain card writes do not enable or blindly retry recovery', async () => {
+  let writes = 0;
+  const preferences = async (_, init) => {
+    if (init.method === 'PUT') { writes++; throw new Error('unknown write outcome'); }
+    return { ok: true, json: async () => ({ prCard: { ciRetryRepush: false } }) };
+  };
+  const runtime = createPrRuntime({ preferences });
+  const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  await runtime.click(card.callId, 'prset:ciRetry:on');
+  assert.equal(writes, 1, 'no blind retry after a possibly completed write');
+  assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+  assert.ok(visibleText(runtime.lastCard(card.callId).html).includes(zhCopy.prSettingFailed));
+  const unreadable = createPrRuntime({ github: prGraphql(), kvFails: true });
+  const failed = await unreadable.tool({ repo: 'octo/repo', pr: 42 });
+  assert.deepEqual(failed.reply.result.settings, { unreadable: true });
+  await unreadable.click(failed.callId, 'prset:ciRetry:on');
+  assert.equal((await unreadable.tool({}, 'pr_follow_settings')).reply.ok, false);
+});
+
+test('failed preference reads display unknown instead of an enabled authorization as off', async () => {
+  let fail = false, writes = 0;
+  const runtime = createPrRuntime({ preferences: async (_, init) => {
+    if (init.method === 'PUT') writes++;
+    return fail ? { ok: false } : { ok: true, json: async () => ({ prCard: { ciRetryRepush: true } }) };
+  } });
+  const entry = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  await runtime.click(entry.callId, 'prui:settings');
+  fail = true;
+  const failed = await runtime.tool({ card_id: entry.callId });
+  assert.deepEqual(failed.reply.result.settings, { unreadable: true });
+  const html = runtime.lastCard(entry.callId).html;
+  assert.doesNotMatch(html, /data-ghost-action="prset:/, 'unknown must not manufacture toggle/model choices');
+  assert.ok(visibleText(html).includes(zhCopy.prSettingsUnknown));
+  assert.match(html, /data-ghost-action="prui:settingsRefresh"/);
+  fail = false;
+  await runtime.click(entry.callId, 'prui:settingsRefresh');
+  assert.match(runtime.lastCard(entry.callId).html, /prset:ciRetry:off" data-ghost-toggle="on"/);
+  assert.equal(writes, 0, 'refresh only reads, never grants or revokes authorization');
+});
+
+test('unknown settings use a compact declared height and restore it on refresh for every PR stage', async () => {
+  for (const stage of ['ask', 'open', 'closed', 'merged']) {
+    let fail = false, writes = 0;
+    const runtime = createPrRuntime({
+      github: prGraphql({ number: 7, state: stage === 'closed' ? 'CLOSED' : 'OPEN', merged: stage === 'merged' }),
+      preferences: async (_, init) => {
+        if (init.method === 'PUT') writes++;
+        return fail ? { ok: false } : { ok: true, json: async () => ({}) };
+      },
+    });
+    const entry = await runtime.tool(stage === 'ask' ? { repo: 'octo/repo', head: 'feature' } : { repo: 'octo/repo', pr: 7 });
+    await runtime.click(entry.callId, 'prui:settings');
+    const known = runtime.lastCard(entry.callId).height;
+    fail = true;
+    await runtime.tool({ card_id: entry.callId });
+    const unknown = runtime.lastCard(entry.callId).height;
+    assert.ok(unknown < known, stage + ': shorter unknown panel must not retain full settings height');
+    await runtime.click(entry.callId, 'prui:settings');
+    assert.ok(runtime.lastCard(entry.callId).height < unknown, stage + ': closing removes the panel height');
+    await runtime.click(entry.callId, 'prui:settings');
+    assert.equal(runtime.lastCard(entry.callId).height, unknown);
+    fail = false;
+    await runtime.click(entry.callId, 'prui:settingsRefresh');
+    assert.equal(runtime.lastCard(entry.callId).height, known, stage + ': successful read restores the full panel');
+    assert.equal(writes, 0);
+  }
+});
+
+test('uncertain preference mutations read back actual state without replaying the write', async () => {
+  for (const action of ['prset:ciRetry:on', 'prset:ciRetry:off', 'prset:rename']) {
+    for (const mode of ['throw', 'rejected', 'readback-fails', 'accepted-readback-fails']) {
+      let kv = { prCard: { ciRetryRepush: action !== 'prset:ciRetry:on' } }, writes = 0, readbacks = 0, unavailable = false;
+      const runtime = createPrRuntime({ preferences: async (_, init) => {
+        if (init.method === 'PUT') {
+          kv = JSON.parse(init.body); writes++;
+          if (mode === 'rejected') return { ok: false };
+          unavailable = mode === 'readback-fails' || mode === 'accepted-readback-fails';
+          if (mode === 'accepted-readback-fails') return { ok: true };
+          throw new Error('response lost after persistence');
+        }
+        if (writes) readbacks++;
+        return unavailable ? { ok: false } : { ok: true, json: async () => structuredClone(kv) };
+      } });
+      const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+      await runtime.click(card.callId, 'prui:settings');
+      await runtime.click(card.callId, action);
+      assert.ok(readbacks > 0, 'a failed PUT result must be reconciled with a read');
+      const html = runtime.lastCard(card.callId).html;
+      if (unavailable) {
+        assert.doesNotMatch(html, /data-ghost-action="prset:/);
+        assert.ok(visibleText(html).includes(zhCopy.prSettingsUnknown));
+      } else {
+        assert.ok(visibleText(html).includes(zhCopy.prSettingFailed));
+        assert.match(html, kv.prCard.ciRetryRepush ? /prset:ciRetry:off" data-ghost-toggle="on"/ : /prset:ciRetry:on" data-ghost-toggle="off"/);
+      }
+      unavailable = false;
+      await runtime.click(card.callId, 'prui:settingsRefresh');
+      assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, kv.prCard.ciRetryRepush === true);
+      assert.equal(writes, 1, 'read-back and refresh cannot repeat an uncertain mutation');
+    }
+  }
+});
+
+test('malformed preference storage is unknown and cannot overwrite unrelated data', async () => {
+  for (const kv of [null, [], 1, 'invalid']) {
+    let writes = 0;
+    const runtime = createPrRuntime({ preferences: async (_, init) => {
+      if (init.method === 'PUT') writes++;
+      return { ok: true, json: async () => kv };
+    } });
+    const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+    assert.deepEqual(card.reply.result.settings, { unreadable: true });
+    await runtime.click(card.callId, 'prset:ciRetry:on');
+    assert.equal(writes, 0);
+    assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.ok, false);
+  }
 });
 
 test('releasing a source task reservation lets the dedicated task claim the follow-up', async () => {

@@ -5,8 +5,8 @@
   "name": "GitHub",
   "description": "在 Cindy 中管理 GitHub 仓库、Issues、PR 和 Actions。提交 PR 时显示交互卡片，帮你发出 PR，并自动跟进 CI 和评审直到合并。默认使用本机 GitHub 登录，支持 github.com。",
   "whenToUse": "仅用于 github.com 仓库和链接，GitLab 实例请使用 GitLab。可查询或修改 issue 与 PR，提交和回复 code review，合并 PR，查看仓库、分支、commit 与文件，触发或查看 GitHub Actions，管理 release，搜索代码、仓库与用户，或下载 Actions 产物与日志。问用户要不要发 PR、发出后展示 PR 状态时用 PR 卡片。优先使用本机 GitHub 登录；在插件详情页连接账号，或配置备用 Token。",
-  "version": "1.5.15",
-  "releaseNotes": "PR 自动跟进每轮遇到待用户确认的事项都会重新询问，并说明进展和阻塞原因，避免静默等待。",
+  "version": "1.5.23",
+  "releaseNotes": "新增默认关闭的 CI 无重跑权限时重推重试偏好。本机所有 PR 跟进共用，启用后仅允许核实条件下改写独占分支的提交 SHA 并受限重推，同一故障最多一次，每个 PR 累计最多两次，到上限停止并报告；可随时关闭。同步主干的跟进等待退避和待确认事项提醒。",
   "locales": {
     "en": "locales/en.json",
     "zh-CN": "locales/zh-CN.json",
@@ -100,7 +100,7 @@
     },
     {
       "name": "pr_card",
-      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和任务入口；新版直接跳转，旧版点击后在回复中提供链接，open-task 仅为导航。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。",
+      "description": "在 Cindy 对话里展示 PR 卡片。询问是否发 PR 时传 repo、head、base，可附 commits、files；用户点击或明确要求后，Agent 才提交并创建 PR。创建后用 card_id 和 pr 更新原卡片，按 todo 执行发布后的改名／跟进设置；renamed、following 只报告已完成的操作。仅展示已有 PR 不会自动启动跟进。开始前传 claim_follow=true，仅成功且 follow_claimed=true 才能创建定时任务；其它任务正在跟进时返回 existing_task，卡片只显示状态、原因和任务入口；新版直接跳转，旧版点击后在回复中提供链接，open-task 仅为导航。停止需先删除并核实定时任务，再报告 following=false，随后用户可选择其它任务跟进。后台轮次用 card_id 刷新；需提醒时用 to_latest 移到最新回复。卡片不显示在 IM 渠道。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，同一故障最多一次，每个 PR 累计最多两次，到上限停止并报告，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -174,7 +174,7 @@
     },
     {
       "name": "pr_follow_settings",
-      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。",
+      "description": "只读获取与 PR 卡片共用的自动改名、自动跟进和跟进模型偏好。不显示卡片、不创建任务、不启动跟进；返回 settings，不代表跟进已经开启。IM 发 PR 后也用此入口读取偏好，再按 pr 流程创建并核验跟进。读取失败时设置未知，不当作关闭。 返回 ci_retry_repush：本机插件用户所有 PR 跟进共用的默认关闭偏好，不同步其他电脑；开启仅允许按 pr Skill 条件改写独占分支提交 SHA 并受限重推，同一故障最多一次，每个 PR 累计最多两次，到上限停止并报告，不授权合并。每轮及重写/推送前重新读取，失败或缺失不得重写。",
       "parameters": {
         "type": "object",
         "properties": {}

@@ -1,0 +1,216 @@
+# Optional recovery when CI rerun permission is denied
+
+This is an Agent workflow using the existing GitHub tools and task shell, not
+an autonomous Git worker. The plugin cannot establish branch ownership or
+diagnose CI logs by itself. The Agent must establish the facts below. Unknown
+facts stop recovery; do not replace them with assumptions or a checklist flag.
+
+## Eligibility
+
+All conditions must hold:
+
+1. Read `cindy-github` / `pr_follow_settings` now. Require successful
+   `settings.ci_retry_repush === true` on the computer hosting this PR task and
+   checkout. Missing, false, failed or ambiguous-device reads forbid rewriting.
+   Auto-follow alone, an old card event and a saved schedule prompt are not this
+   authorization. Never enable the preference on the user's behalf.
+2. Refresh the exact PR. Read its immutable `node_id` from `get_pull_request`
+   (use `call_tool` with `raw: true`); retain that verified ID for all budget
+   operations. Never derive or invent it from owner/repo, URL or PR number.
+   Renaming or transferring the repository does not change this PR identity.
+   It must still be open, with the same known head
+   repository, branch and SHA. Read the failing job logs and identify a confirmed
+   transient installation/runner/network/infrastructure failure unrelated to this
+   PR's code. An `ERR_PNPM_ENOENT` string alone is insufficient: establish why the
+   missing file is an environment failure, not a changed path or dependency.
+   Deterministic baseline failures wait for their fix; actual code errors get a
+   real fix. Do not treat unknown logs as a flake.
+3. Prefer a real fix or required base merge already being prepared: batch the
+   recovery with that normal push and verify CI there instead of rewriting solely
+   to start another run. Do not add empty commits. Pushing the identical SHA does
+   not trigger a new run.
+4. Attempt the normal rerun first, once, using the run for the current head.
+   Continue only with an explicit permission denial (for example `403 Must have
+   admin rights to Repository`). Rate limiting, timeout/unknown outcome, workflow
+   approval, `action_required`, environment/maintainer approval and protection-rule
+   blocks are not eligible. Verify an unknown rerun outcome rather than retrying
+   through a different route. Never bypass GitHub approvals or repository gates.
+5. Establish from this task's creation/checkout history and current repository
+   rules that the head is a task-owned, exclusive feature branch that may safely
+   be rewritten. Shared branches, unknown ownership, `main`/default/base/release
+   branches, rewrite bans and another person's commits are ineligible. Confirm
+   write permission for the actual head repository (a fork may differ from the
+   base), and that neither task permissions nor branch rules prohibit this push.
+   A successful fetch is not evidence of write permission.
+6. Preserve completed review/merge work. Read the complete current review list
+   using the plugin's existing `graphql` tool and cursor pagination of
+   `reviews(first: 100, after: $cursor)` (`nodes { state }` and
+   `pageInfo { hasNextPage endCursor }`). Read `headRefOid`, `mergeQueueEntry`
+   and `autoMergeRequest` on the same PR too; every page must still match the
+   verified head. The REST review tool's first 100 entries and snapshot's last
+   50 are not proof of completeness. Require no retained
+   `APPROVED` review, a successfully read null queue entry, and confirmed disabled
+   auto-merge. Do not infer absence from `reviewDecision`, a truncated review
+   window, missing fields or a failed/unsupported query. Any approval, queue
+   entry, auto-merge request or unknown state stops this CI-only route before
+   reservation/amend, even if stale-approval dismissal might be disabled.
+   The preference does not authorize dismissing approvals, leaving a queue,
+   disabling auto-merge or requesting these changes to make recovery eligible.
+
+If any condition fails, report the specific blocker and record a concrete wait
+using the existing follow-up gate. Enabling this option never authorizes merge,
+auto-merge, queue operations, direct main pushes, permission changes or bypasses.
+
+## Verify, consume the budget, amend and push
+
+Use the current `<skill-dir>` and this PR's existing observation-cache directory
+for the gate. Retry receipts are stored separately in durable user data, never
+in that cache: `$XDG_STATE_HOME/cindy-pr/ci-retry` when set to an absolute path;
+otherwise Windows uses `%LOCALAPPDATA%/Cindy/pr-recovery`, macOS uses
+`~/Library/Application Support/Cindy/pr-recovery`, and other systems use
+`~/.local/state/Cindy/pr-recovery`. The gate preserves earlier cache receipt
+files with exclusive copying, retaining the originals and never overwriting
+durable evidence. An unreadable or damaged receipt fails closed. Clearing or
+changing observation cache does not reset migrated budgets. Never change the
+data-root environment, delete receipts or reset budgets to obtain another try.
+Legacy files are copied byte-for-byte with exclusive creation before decoding
+or validating them. Missing diagnoses and damaged/unknown identities remain
+fail-closed in durable storage even after cache cleanup; they are not discarded
+or assigned new diagnoses. Existing durable copies are never overwritten.
+GitHub node IDs are opaque: use the exact verified value, including legacy
+base64 IDs; a `PR_` prefix is not required. Do not substitute a URL or number.
+Earlier evidence already deleted before migration cannot be reconstructed;
+an uncertain prior outcome still stops recovery.
+
+Each PR has a hard total of **two CI-only repush attempts per computer**, with
+at most one per diagnosed failure. At two, stop and report regardless of a new
+diagnosis; do not amend, push or reset the budget. Before checking/reserving its budget, write a diagnosis JSON
+file with exactly four nonempty strings: `workflow` (workflow file path), `job`
+(stable job name, not numeric job ID), `step` (failed step name), and `cause`
+(normalized root cause supported by the logs). For example:
+
+```json
+{"workflow":".github/workflows/verify.yml","job":"verify-checks","step":"install dependencies","cause":"package store unavailable"}
+```
+
+Do not put commit SHAs, run/job IDs, attempts, timestamps or transient paths in
+the diagnosis. Reuse it when the same fault recurs on a new run/head; a changed
+SHA, log wording or symptom alone is not a new cause. A different diagnosis
+requires new log evidence, the normal rerun denial and all eligibility checks
+again. When unsure whether it is the same fault, stop rather than inventing a
+new key. The gate normalizes case/whitespace and hashes these four fields with
+the immutable PR ID; it cannot verify the Agent's causal diagnosis.
+
+1. Inspect `git status --porcelain=v1 --untracked-files=all`, the index and
+   ongoing merge/rebase/cherry-pick state. Require a clean task checkout. Any WIP
+   stops this route; do not stage, stash, reset or overwrite it. Read repository
+   rules, `git remote -v`, the actual push URL(s), `git branch --show-current`,
+   `git rev-parse HEAD`, and the head commit's tree, parents, author and message.
+   Require a single verified push destination matching the PR head repository.
+   Never infer `origin` is the PR's head remote. Use the explicit target ref
+   `refs/heads/<PR-head-branch>` throughout; verify it with `git check-ref-format`.
+   Inspect `git cat-file commit HEAD` for a `gpgsig` / `gpgsig-sha256` header.
+   Before consuming budget, a signed head requires its original signature to
+   verify (`git verify-commit HEAD`) and the existing effective signing setup
+   to sign the replacement noninteractively with an authorized identity.
+   Require `git config --type=bool --get commit.gpgsign` to be `true` and inspect
+   the effective signer/key configuration and availability. An original created
+   only with a one-off `git commit -S`, without effective automatic signing,
+   is ineligible. Unknown readiness, unavailable keys, required user interaction
+   or failed original verification stops recovery before reserve/amend; do not
+   enable signing, select another key, weaken verification or silently strip
+   the signature. Git's normal signing failure must fail the amend, not fall
+   back to an unsigned commit.
+2. Read that exact ref with `git ls-remote --heads <verified-remote> <exact-ref>`.
+   Its SHA must equal both local HEAD and the current GitHub PR head. Inspect
+   the PR commit list and task history for other people's or unknown commits.
+   If anything differs, stop and reconcile safely; do not fetch/reset away an
+   unknown remote commit. Record the verified remote SHA as the fixed lease.
+3. Read live `pr_follow_settings` again and recheck eligibility 6's complete
+   review/queue/auto-merge state. If still enabled and all conditions
+   hold, consume one of the **two total CI-only repush attempts for this PR/computer**,
+   requiring that this diagnosed failure has not consumed one already:
+
+   ```sh
+   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json
+   ```
+
+   Require exit 0, `reason: "ci-retry-reserved"` and the matching
+   `reservation.sourceHead` and normalized `reservation.failure`. The return
+   includes `pr_limit: 2`, `pr_consumed` and `pr_remaining`. A status result with
+   `available: false` forbids a new reservation, including exhaustion by different
+   diagnoses; a successful reserve reports the consumed receipt, not a new available
+   attempt. This receipt
+   only consumes budget; it does not authorize Git operations.
+   `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without GitHub calls;
+   it only writes when adopting earlier receipts into the fixed durable slots.
+   The budget survives cache cleanup, changed SHAs, gate acknowledgements,
+   follow-up restarts, repository renames/transfers and interrupted operations.
+   Two exclusive, append-only slot files are keyed by the immutable PR node ID;
+   each records the stable diagnosis, never a mutable URL or run ID as identity.
+   Concurrent callers cannot allocate a third slot or reserve the same fault twice.
+   A denied, corrupt or uncertain
+   reservation means stop: no amend/push. Even a failed push consumes the attempt.
+   A different diagnosed failure can consume the second slot without deleting any
+   prior receipt; after two total attempts all diagnoses stop. The same failure cannot start an amend/force-push loop by
+   changing job/run IDs or head SHA. Earlier development receipts lacking a
+   diagnosis stop recovery for reconciliation; do not silently discard them.
+   All matching old per-failure receipts in durable data and the current cache
+   count toward the two slots, even when querying another diagnosis. Migration
+   retains the originals and never overwrites durable evidence. More than two
+   older attempts, unreadable receipts or unknown prior identity/outcome stop
+   recovery; migration never grants two fresh attempts on top of old history.
+4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),
+   the PR is open, the preference is enabled, and local/index/remote
+   facts still match before `git commit --amend --no-edit`. Preserve the code
+   tree, parents, author, commit intent and existing trailers; never use
+   `--reset-author`, `--allow-empty`, identity overrides or disable hooks. Follow
+   repository DCO rules: preserve matching sign-offs; add `-s` only with the
+   configured identity and when valid for this author. If a matching sign-off
+   cannot legitimately be supplied, stop. After amend verify a **new** SHA and
+   unchanged tree, parents and author; compare the message (only required DCO
+   additions may differ). If hooks changed the tree or SHA is unchanged, stop.
+   If the old head was signed, require a signature header on the new commit and
+   successful `git verify-commit <new-SHA>` with the authorized signer before
+   any push. A missing, invalid or unknown signature means leave it unpushed
+   and report the result; never discard the old provenance silently. Local
+   verification is not evidence that GitHub's Verified badge was preserved.
+5. Read live `pr_follow_settings` immediately before pushing, and refresh PR
+   state, complete reviews, queue entry, auto-merge, head, clean worktree and exact
+   remote ref. Eligibility 6 must still hold immediately before push. If an
+   approval/queue/auto-merge appears or any read becomes unknown, stop; do not
+   push or alter the merge workflow. All must still match the
+   original verified state apart from the intended local new SHA. If disabled
+   now, leave the local amend unpushed and report it; do not reset it automatically.
+   Push exactly once:
+
+   ```sh
+   git push --force-with-lease=refs/heads/<branch>:<original-verified-remote-SHA> <verified-remote> HEAD:refs/heads/<branch>
+   ```
+
+   Never use bare `--force`, implicit lease expectations, or multiple push URLs.
+   A lease failure ends recovery. Do not refresh the expected SHA and push again.
+   A network error may mean executed: read back the exact remote ref and original
+   PR before deciding what happened, with no automatic second push.
+
+## Verify and report
+
+Check the new SHA appears on the **original PR** and exact remote branch. Check
+GitHub Actions/check suites for that SHA and this PR event; a new SHA alone does
+not prove CI started (fork workflow rules/path filters may prevent it). Record
+old/new SHA, stable diagnosis, failed run and permission-denied evidence, consumed budget, push
+outcome and observed CI run/check identifiers in this task's follow-up record.
+Read back review/queue state too. These checks are not an atomic GitHub lock;
+if a concurrent change or uncertain push affected approvals or queue state,
+report the actual/unknown side effect and stop, without trying to restore,
+dismiss, dequeue or re-enqueue anything automatically.
+Report separately: not executed, executed and verified, or unknown pending
+read-back. Never call CI passed until its actual results pass. If checks do not
+start, investigate/report and wait, without another amend, empty commit or push.
+Use the ordinary gate finish/wait procedure; do not change schedule cadence.
+
+After a crash or ambiguous outcome, read the current PR's verified `node_id`,
+reuse the recorded diagnosis and use
+`--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` and compare
+its `sourceHead` with local history, the remote and original PR. Verify and
+report the existing outcome; never consume another attempt or replay the push.

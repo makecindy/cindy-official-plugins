@@ -886,7 +886,7 @@ test('manual/unknown removal still wakes investigation, not automatic reenqueuin
 
 test('state files of different repositories never share a name, and ordinary names keep the old form', () => {
   const dir = '/state';
-  assert.equal(stateFilePath(dir, 'acme/app', 12), '/state/acme__app-12.json');
+  assert.equal(stateFilePath(dir, 'acme/app', 12), path.join(dir, 'acme__app-12.json'));
   assert.notEqual(stateFilePath(dir, 'acme__tools/app', 12), stateFilePath(dir, 'acme/tools__app', 12));
   assert.ok(path.basename(stateFilePath(dir, 'acme__tools/app', 12)).startsWith('~'));
 });
