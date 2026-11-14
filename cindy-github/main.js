@@ -212,6 +212,8 @@ var MESSAGES = {
     prNextUpdated: '卡片已更新。',
     prTodoRename: '根据「{title}」提炼简短主题，用 cindy_helper 的 set_current_session_title 把当前任务改名为「#编号 简短主题」；保留编号和核心含义，去掉 PR、跟进等流程前缀及冗余描述，不照搬完整 PR 标题',
     prTodoFollow: '按 pr 技能开始后台跟进 {url}',
+    prFollowWorkflowRead: 'entry 和 checker 是插件包内相对路径。从当前会话可用 Skills 中找到同一 namespace 的 cindy-github 插件 pr 技能，按列出的实际文件路径读取 SKILL.md；checker 位于该技能目录的 scripts/pr-heartbeat-gate.mjs。',
+    prFollowWorkflowFallback: '若 ghost_manual 仅返回未声明手册，仍按上述入口读取随包技能和跟进检查器。不要在业务仓库搜索，不要另写、复制或内联实现跟进脚本。若技能入口不可用，报告具体缺口；本回执只提供读取入口，不代表已获跟进或合并授权。',
     prClickPublish: '用户在 PR 卡片上点了「发 PR」。按 pr 技能现在提交、推送并创建这个 PR(ready for review)；创建后按事件里的 settings 处理改名和跟进，再用 card_id 调用 pr_card 更新卡片。',
     prClickPublishDraft: '用户在 PR 卡片上点了「发成草稿」。按 pr 技能现在提交、推送并创建 draft PR；创建后按事件里的 settings 处理改名，再用 card_id 调用 pr_card 更新卡片。',
     prClickFollow: '用户在 PR 卡片上点了「自动跟进到合并」。按 pr 技能开始后台跟进 {url}，再用 card_id 调用 pr_card，following=true。',
@@ -352,6 +354,8 @@ var MESSAGES = {
     prNextUpdated: 'Card updated.',
     prTodoRename: 'Condense "{title}" into "#number short topic" and rename the current task with cindy_helper set_current_session_title; preserve the number and core meaning, omit workflow prefixes such as PR or Follow and redundant wording, and do not copy the full PR title',
     prTodoFollow: 'Start following {url} in the background with the pr Skill',
+    prFollowWorkflowRead: 'entry and checker are relative to the plugin package. Find the pr Skill of the cindy-github plugin with the same namespace in this session\'s available Skills and read SKILL.md at its listed file path; checker is scripts/pr-heartbeat-gate.mjs inside that Skill directory.',
+    prFollowWorkflowFallback: 'If ghost_manual only reports that no manual is declared, use the bundled Skill and follow-up checker through the entry above. Do not search the business repository or write, copy or inline a replacement follow-up script. If the Skill entry is unavailable, report the specific gap. This receipt provides reading locations only, not authorization to follow or merge.',
     prClickPublish: 'The user clicked "Open PR" on the PR card. Commit, push and open this pull request now with the pr Skill (ready for review); afterwards handle renaming and following as the event settings say, then call pr_card with card_id to update the card.',
     prClickPublishDraft: 'The user clicked "Open as draft" on the PR card. Commit, push and open a draft pull request now with the pr Skill; afterwards handle renaming as the event settings say, then call pr_card with card_id to update the card.',
     prClickFollow: 'The user clicked "Auto-follow until merged" on the PR card. Start following {url} in the background with the pr Skill, then call pr_card with card_id and following=true.',
@@ -492,6 +496,8 @@ var MESSAGES = {
     prNextUpdated: 'カードを更新しました。',
     prTodoRename: '「{title}」から短いテーマをまとめ、cindy_helper の set_current_session_title で現在のタスク名を「#番号 短いテーマ」に変更する。番号と核心を保ち、PR・フォローなどの手順の接頭辞や冗長な説明を省き、PR タイトル全体をそのまま使わない',
     prTodoFollow: 'pr スキルで {url} のバックグラウンドフォローを開始する',
+    prFollowWorkflowRead: 'entry と checker はプラグインパッケージ内の相対パスです。この会話の利用可能な Skills から同じ namespace の cindy-github プラグインの pr スキルを探し、表示された実際のファイルパスで SKILL.md を読んでください。checker はそのスキル内の scripts/pr-heartbeat-gate.mjs です。',
+    prFollowWorkflowFallback: 'ghost_manual がマニュアル未宣言のみを返した場合も、上記の入口から同梱スキルとフォロー用チェックを読んでください。作業対象リポジトリを検索したり、代替フォロースクリプトを新規作成・コピー・インライン実装したりしないでください。スキル入口が利用できない場合は具体的な不足を報告してください。この応答は読み取り先だけを示し、フォローやマージの許可を意味しません。',
     prClickPublish: 'ユーザーが PR カードの「PR を作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、この PR をレビュー可能な状態で作成してください。作成後はイベントの settings に従って改名とフォローを処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickPublishDraft: 'ユーザーが PR カードの「下書きで作成」を押しました。pr スキルに従って今すぐコミット・プッシュし、下書き PR を作成してください。作成後はイベントの settings に従って改名を処理し、card_id を付けて pr_card でカードを更新してください。',
     prClickFollow: 'ユーザーが PR カードの「マージまで自動フォロー」を押しました。pr スキルで {url} のバックグラウンドフォローを開始し、card_id と following=true を付けて pr_card を呼んでください。',
@@ -632,6 +638,8 @@ var MESSAGES = {
     prNextUpdated: '카드를 업데이트했습니다.',
     prTodoRename: '"{title}"을 "#번호 짧은 주제"로 요약하고 cindy_helper의 set_current_session_title로 현재 작업 이름을 변경하세요. 번호와 핵심 의미를 유지하고 PR·팔로우 등의 절차 접두사와 중복 설명은 빼며 전체 PR 제목을 그대로 복사하지 마세요',
     prTodoFollow: 'pr 스킬로 {url} 백그라운드 팔로우 시작',
+    prFollowWorkflowRead: 'entry와 checker는 플러그인 패키지 내 상대 경로입니다. 이 대화의 사용 가능한 Skills에서 같은 namespace의 cindy-github 플러그인 pr 스킬을 찾고, 표시된 실제 파일 경로에서 SKILL.md를 읽으세요. checker는 해당 스킬 디렉터리의 scripts/pr-heartbeat-gate.mjs입니다.',
+    prFollowWorkflowFallback: 'ghost_manual이 매뉴얼 미선언만 보고해도 위 진입점에서 번들 스킬과 팔로우 검사기를 읽으세요. 작업 대상 저장소를 검색하거나 대체 팔로우 스크립트를 새로 작성·복사·인라인 구현하지 마세요. 스킬 진입점을 사용할 수 없으면 구체적인 부족 사항을 보고하세요. 이 응답은 읽기 위치만 제공하며 팔로우나 병합을 허가하지 않습니다.',
     prClickPublish: '사용자가 PR 카드에서 "PR 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 이 PR을 리뷰 가능한 상태로 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경과 팔로우를 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickPublishDraft: '사용자가 PR 카드에서 "초안으로 만들기"를 눌렀습니다. pr 스킬에 따라 지금 커밋·푸시하고 초안 PR을 만드세요. 만든 뒤 이벤트의 settings에 따라 이름 변경을 처리하고, card_id로 pr_card를 호출해 카드를 업데이트하세요.',
     prClickFollow: '사용자가 PR 카드에서 "병합까지 자동 팔로우"를 눌렀습니다. pr 스킬로 {url} 백그라운드 팔로우를 시작하고, card_id와 following=true로 pr_card를 호출하세요.',
@@ -3346,6 +3354,18 @@ function sendPrMovedStub(card, from, callId) {
 
 /* ── pr_card 工具 ── */
 
+// Manual discovery and bundled Skills are separate host surfaces. Keep the recovery
+// route in tool receipts and click handoffs, where an agent without the Skill can see it.
+function prFollowWorkflow() {
+  return {
+    skill: 'pr',
+    entry: 'skills/pr/SKILL.md',
+    checker: 'skills/pr/scripts/pr-heartbeat-gate.mjs',
+    read: t('prFollowWorkflowRead'),
+    on_manual_failure: t('prFollowWorkflowFallback'),
+  };
+}
+
 async function prCardTool(args, callId) {
   var a = args && typeof args === 'object' ? args : {};
   var sessionId = a.session_context && a.session_context.session_id;
@@ -3524,6 +3544,9 @@ async function handOffPr(card, action, settings, msg, taskUrl) {
   else if (action === 'pr:open-task') text = t('prClickOpenTask', { url: taskUrl });
   else text = t('prClickStop', { url: url });
   var event = { card_id: card.id, action: action.slice(3), repo: card.repo };
+  if (action === 'pr:publish' || action === 'pr:draft' || action === 'pr:follow') {
+    event.follow_workflow = prFollowWorkflow();
+  }
   if (action === 'pr:open-task') event.task_url = taskUrl;
   if (card.pr) {
     event.pr_number = card.pr.number;
@@ -3849,6 +3872,7 @@ cindy.onHostMessage(async function (msg) {
       r = fail(t('unknownTool', { tool: msg.tool }));
     }
     if (r.ok) {
+      if (msg.tool === 'pr_card' || msg.tool === 'pr_follow_settings') r.result.follow_workflow = prFollowWorkflow();
       cindy.send({ type: 'tool-result', callId: msg.callId, ok: true, result: r.result });
     } else {
       cindy.send({ type: 'tool-result', callId: msg.callId, ok: false, message: r.message });
