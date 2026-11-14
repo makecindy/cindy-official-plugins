@@ -1,0 +1,12 @@
+Academic Research Skills plugin for Cindy Official Plugins.
+
+Acknowledgments & References:
+
+1. Workflow Inspiration:
+   This plugin is an original, clean-room implementation by 1254084397 (Cong Zhang), inspired conceptually by the research workflows of academic-research-skills-codex (https://github.com/Imbad0202/academic-research-skills-codex, Copyright (c) 2026 Cheng-I Wu, CC BY-NC 4.0).
+   All code (main.js), schemas (ghost.json), tests, manuals (manual/ars-suite/MANUAL.md, manual/ars-suite/skills/*.md), and reference SOPs (manual/ars-suite/references/*.md) in this plugin package are original works authored for Cindy and do NOT contain upstream files, code, or materials subject to CC BY-NC 4.0.
+
+2. Crossref REST API
+   Provider: Crossref (https://www.crossref.org/)
+   API Terms: Open metadata retrieval under Crossref free public API terms.
+   Usage: Online bibliographic queries and DOI metadata retrieval without credentials.
