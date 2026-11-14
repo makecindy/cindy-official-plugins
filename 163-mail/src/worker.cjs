@@ -255,24 +255,109 @@ async function listFolders(credentials, deps) {
   });
 }
 
+const FALLBACK_SCAN_LIMIT = 200;
+const SEARCH_FETCH_FIELDS = Object.freeze({
+  uid: true,
+  envelope: true,
+  flags: true,
+  internalDate: true,
+  size: true,
+});
+
+// 复刻 imapflow (lib/search-compiler.js 的 processDateField + tools.formatDate)：
+// BEFORE 带时刻时顺延一天以包含当天，随后只取 UTC 日历日。回退过滤因此与
+// 服务端 SINCE / BEFORE 的「按日」边界一致，而不是拿带时刻的 Date 直接比较。
+function imapSearchDateBoundary(value, field) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = field === 'before' && date.toISOString().substring(11) !== '00:00:00.000Z'
+    ? new Date(date.getTime() + 24 * 3600 * 1000)
+    : date;
+  return Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+}
+
+// 回退过滤必须与 buildSearchCriteria 的顶层条件保持同一语义；只使用
+// envelope / flags 中已有的字段，不下载正文，避免回退路径放大 IO。
+function envelopeMatchesCriteria(message, action) {
+  const envelope = message.envelope || {};
+  const normalized = (value) => String(value || '').toLowerCase();
+  const includes = (haystack, needle) => normalized(haystack).includes(normalized(needle).trim());
+
+  if (typeof action.from === 'string' && action.from.trim()
+    && !includes(addressText(envelope.from), action.from)) return false;
+  if (typeof action.to === 'string' && action.to.trim()
+    && !includes(addressText(envelope.to), action.to)) return false;
+  if (typeof action.subject === 'string' && action.subject.trim()
+    && !includes(envelope.subject, action.subject)) return false;
+  if (typeof action.unread === 'boolean') {
+    const seen = flagsArray(message.flags).includes('\\Seen');
+    if (seen === action.unread) return false;
+  }
+  if (typeof action.text === 'string' && action.text.trim()) {
+    const haystack = [
+      envelope.subject,
+      addressText(envelope.from),
+      addressText(envelope.to),
+    ].map(normalized).join('\n');
+    if (!haystack.includes(normalized(action.text).trim())) return false;
+  }
+  const since = parseSearchDate(action.since, 'since');
+  const before = parseSearchDate(action.before, 'before');
+  if (since || before) {
+    // IMAP SINCE / BEFORE 比较的是 internalDate（收信日期），不是邮件头里的
+    // envelope.date（发信日期）。只有服务端未返回 internalDate 时才兜底。
+    const raw = message.internalDate || envelope.date;
+    const when = raw ? new Date(raw).getTime() : NaN;
+    if (!Number.isFinite(when)) return false;
+    const sinceBoundary = since ? imapSearchDateBoundary(since, 'since') : null;
+    const beforeBoundary = before ? imapSearchDateBoundary(before, 'before') : null;
+    if (sinceBoundary !== null && when < sinceBoundary) return false;
+    if (beforeBoundary !== null && when >= beforeBoundary) return false;
+  }
+  return true;
+}
+
 async function search(credentials, action, deps) {
   const folder = action.folder || 'INBOX';
   const maxResults = Number.isInteger(action.max_results)
     ? Math.min(20, Math.max(1, action.max_results))
     : 10;
+  const byUidAscending = (left, right) => left - right;
   return withImap(credentials, deps, (client) => withMailbox(client, folder, async () => {
-    const uids = await client.search(buildSearchCriteria(action), { uid: true });
-    const selected = uids.slice(-maxResults).reverse();
+    const criteria = buildSearchCriteria(action);
+    // IMAP 不保证 SEARCH / FETCH 返回的 UID 有序；先按 UID 升序再取最近的一批。
+    const uids = ((await client.search(criteria, { uid: true })) || [])
+      .slice().sort(byUidAscending);
+    let candidates = uids;
+    let fetchedById = null;
+
+    // 163 IMAP 的条件型 SEARCH 会静默返回空（issue #277），连纯 ASCII 条件也一样。
+    // 仅当带过滤条件且服务端返回空时回退：退化为 SEARCH ALL，扫描最近若干封，
+    // 在客户端按 envelope 过滤。客户端过滤是服务端语义的子集，不会引入假阳性。
+    if (!criteria.all && candidates.length === 0) {
+      const allUids = ((await client.search({ all: true }, { uid: true })) || [])
+        .slice().sort(byUidAscending);
+      const scan = allUids.slice(-FALLBACK_SCAN_LIMIT);
+      if (scan.length > 0) {
+        const scanned = ((await client.fetchAll(scan, SEARCH_FETCH_FIELDS, { uid: true })) || [])
+          .slice().sort((left, right) => left.uid - right.uid);
+        fetchedById = new Map(scanned.map((message) => [message.uid, message]));
+        candidates = scanned
+          .filter((message) => envelopeMatchesCriteria(message, action))
+          .map((message) => message.uid);
+      }
+    }
+
+    const selected = candidates.slice().sort(byUidAscending).slice(-maxResults).reverse();
     if (selected.length === 0) return { folder, total: 0, messages: [] };
-    const messages = await client.fetchAll(
+    const byUid = fetchedById || new Map((await client.fetchAll(
       selected,
-      { uid: true, envelope: true, flags: true, internalDate: true, size: true },
+      SEARCH_FETCH_FIELDS,
       { uid: true },
-    );
-    const byUid = new Map(messages.map((message) => [message.uid, message]));
+    )).map((message) => [message.uid, message]));
     return {
       folder,
-      total: uids.length,
+      total: candidates.length,
       messages: selected.map((uid) => byUid.get(uid)).filter(Boolean)
         .map((message) => summaryFromMessage(message, folder)),
     };
