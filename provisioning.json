@@ -114,6 +114,9 @@
       "audience": {
         "emails": []
       }
+    },
+    "misakanet": {
+      "audience": { "emails": [] }
     }
   }
 }
