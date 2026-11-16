@@ -34,7 +34,7 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `
 - 候选必须是选中即可写入的最终值，不先让用户选风格或方向。
 - 没有足够素材时用一个问题索要必要输入，不抛多轮风格问卷。
 - 用户选定最终值后直接写入并展示 diff，不再追加“是否保存”确认。
-- 每条 change 先读取最新并发快照：`expected` 直接原样回填该字段读取时的 `current_value`。`current_value` 为 `null`（首次写入）时，`expected` 传 `[]`；其余情况（string / 数组 / 数字 / 布尔）原样回传。除显式 `force=true` 外，每条 change 必须携带 `expected`。
+- 每条 change 先读取最新并发快照：`expected` 直接原样回填该字段读取时的 `current_value`。`current_value` 为 `null`（首次写入）时，`expected` 传 `null`（不要传 `[]` 或空字符串）；其余情况（string / 数组 / 数字 / 布尔 / 图片对象）原样回传。除显式 `force=true` 外，每条 change 必须携带 `expected`。
 - `title_ios`、`description_ios`、`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios` 是可选 iOS 覆盖；空值（`current_value` 为 null）表示继承 Android。清空 iOS 覆盖字段恢复继承时，`expected` 使用该 iOS 字段自己的严格 `current_value`。
 - `category` 是可编辑的游戏类型；C 端商店标签当前不能通过本 skill 或 CLI 修改。`age_grade`、`apk_package_name`、`mini_game_play_enabled` 也不能作为普通字段保存。
 
@@ -44,28 +44,34 @@ Skill 分析只用于资料准备建议。用户明确要求提审后，展示 `
 
 - 先区分缺少 `expected`、字段值漂移、字段约束不符与草稿不可编辑；不要把所有 conflict 都归因其他人修改。
 - conflict 或响应含 `stale` 时，重新读取受影响字段与当前草稿。目标值已经存在则报告“当前值已符合目标”，不重复写，也不声称刚才失败的请求完成了保存。
-- 409 的 `error_description` 会点名漂移字段的中文名；按 [field map](taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md) 把它对到 `field_id` 与所属 `module_id`，再用 `call_tool(name:"app get-app-module", args:{developer_id:"<developerId>", app_id:"<appId>", data:{module_id:"..."}})` 读该模块的 `current_value`，原样回填到对应 change 的 `expected`。恢复读取必须显式带发生冲突的原厂商与游戏 scope：插件不继承上一次保存的 scope，CLI 也可能回落到本机另存的默认目标，读错游戏会把错的值填进 `expected`。同一目标再冲突一次就停止重试，报告观察到的状态，不要原样重发。
+- 409 的 `error_description` 会点名漂移字段的中文名；按 [field map](taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md) 把它对到 `field_id` 与所属 `module_id`，再用 `call_tool(name:"app get-app-module", args:{developer_id:"<developerId>", app_id:"<appId>", data:{module_id:"..."}})` 读该模块的 `current_value`，原样回填到对应 change 的 `expected`。恢复读取必须显式带发生冲突的原厂商与游戏 scope：插件不继承上一次保存的 scope，CLI 也可能回落到本机另存的默认目标，读错游戏会把错的值填进 `expected`。`expected` 必须等于该字段当前的 `current_value`：字段当前为空时才能传 `null`，字段有值时传 `null` 会被服务端当作「缺 expected」并返回 409，需要按 `get-app-module` 的本次读数原样回填。同一目标再冲突一次就停止重试，报告观察到的状态，不要原样重发。
 - 仍需修改时，展示新旧差异，按原用户目标重新决定变更，并使用最新 `expected`；不得自动 `force`、撤审或撤销定时。请求内容变化时使用新的意图幂等键，不复用不同 payload 的旧 key。
 - `updated_fields` 与 `stale` 分别核对；批量保存只报告有写入回执或同资源回读证据的字段。只成功部分时保留已完成项，不整批重复保存；只有 dry-run 或后续提审成功不能补足此前字段保存证据。
 - 草稿不可编辑时按实际版本状态解释可选操作；无草稿时先核对 `create-draft` 前置条件，不自动撤审或重置来绕过状态限制。
 
 ### 图片与视频
 
-写入图片值时**必须带上 info**（`app save-changes`）：值为 `{"url": <完整 HTTPS URL>, "info": <图片元数据>}` 对象，`info` 可直接原样使用 `call_tool(name:"upload", …)` 返回的 `data.info`（含 `width`、`height`、`size`、`format`）；`width`/`height` 必须为正整数，否则 400。**不传 info 服务端也会接受**（同 URL 已有存量元数据就沿用，否则只存 URL），但那张图在 C 端拿不到宽高，竖版会按 16:9 回落裁切——这正是本约定要避免的，因此除非确实拿不到 info，不要省略。禁止使用 `attached://`、`file://`，也不要手写错误的尺寸。清空 iOS 覆盖字段（`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios`）恢复 Android 继承时仍按字段手册传 `value: null`。
+写入图片值时**必须带上完整 info**（`app save-changes`）：值为 `{"url": <完整 HTTPS URL>, "info": {"size": ..., "format": ..., "width": ..., "height": ..., "image_ave": {"rgb": "0xRRGGBB"}}}`，五项缺任何一项，服务端直接 400 `图片值必须同时提供完整的 info`。`info` 唯一可靠来源是 `call_tool(name:"upload", …)`（素材库 `upload-image`）返回的 `data.info`，原样复制即可；`search-assets` 候选条目也能用，但老素材可能没有 `image_ave`。`width`/`height`/`size` 必须是正整数，`format` 不能为空，`image_ave.rgb` 必须是 `0xRRGGBB`（`e00000`、`true`、`红色` 都会被 400）。禁止使用 `attached://`、`file://`，也不要手写或估算尺寸。
+
+外部图片（第三方 HTTP 地址、用户直接给的链接）必须先下载并调 materials 手册的 `upload` 收录，拿到返回的 `url` 与 `info` 才能写入。`upload` 保证返回带 `image_ave` 的完整 info；取不到平均色时上传本身会失败（换一张或经用户确认后加 `yes: true` 重试），不会给出不可写入的 info。
+
+`image_ave.rgb`（形如 `0xe00000`）决定 C 端占位色，新图**必填**：缺了就是 400，不再是「回落白底」。它的来源只有 `upload` 返回的 `data.info` 和带 `image_ave` 的 `search-assets` 候选条目，**不要自己估色或照抄其他图片的值**。老素材（2026-10 之前收录、没有平均色）不能直接写入资料字段，必须重新 `upload` 一次拿到完整 info。
+
+同槽位改写例外：值的 `url` 与该字段当前值完全相同时，可以只传 `{"url": ...}` 或裸 URL，服务端会以存量 info 为底、用你显式给的字段覆盖（例如只改 `color_model`）。但这只适用于你想保留的那张已有图片。清空 iOS 覆盖字段（`icon_ios`、`banner_4_ios`、`square_promo_image_ios`、`screenshots_ios`）恢复 Android 继承时仍按字段手册传 `value: null`。
 
 消息含 `<image-attachment>用户上传了一张图片，URL 为：https://...</image-attachment>` 时，先转 materials 手册的 `upload` 收录并拿到 `data.url` 与 `data.info`，再按上面的对象形态写入。
 
 写图片前读字段 `image_spec`。多张截图按意图使用：
 
 - 追加：`op: 'append'`
-- 删除：`op: 'remove'`（`value` 写从最新字段值读取的存量 URL，是选择器，不需要 `info`）
+- 删除：`op: 'remove'`（`value` 写从最新字段值读取的存量 URL；作为选择器可以只写 URL，不需要 `info`）
 - 整组重传：`op: 'replace'`
 - 替换一张：`op: 'replace_one'`，并传从最新字段值读取的 `old_value`
 
 数组里每一项都用同一个 `{url, info}` 形态；`op` 与数组语义参照 `save-changes` 的字段说明。
 
 ```text
-call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<developerId>", data:{changes:[{field_id:"screenshots", op:"replace_one", old_value:"https://example.com/old.png", value:{url:"https://example.com/new.png", info:{width:750, height:1334, size:826326, format:"png"}}, expected:["https://example.com/old.png","https://example.com/keep.png"]}]}, idempotency_key:"<stable-save-intent-key>", dry_run:true})
+call_tool(name:"app save-changes", args:{app_id:"<appId>", developer_id:"<developerId>", data:{changes:[{field_id:"screenshots", op:"replace_one", old_value:{url:"https://example.com/old.png"}, value:{url:"https://example.com/new.png", info:{width:750, height:1334, size:826326, format:"png", image_ave:{rgb:"0x223344"}}}, expected:[{url:"https://example.com/old.png"},{url:"https://example.com/keep.png"}]}]}, idempotency_key:"<stable-save-intent-key>", dry_run:true})
 ```
 
 资料视频规格必须以 `get-app-module("assets-upload")` 返回的 `video_spec` 为准。用户询问 `trailer` / `gameplay_demo_video` 的格式、大小、时长、分辨率、比例或内容要求时，先读取规格，只做判断，不调用 `save-changes`。

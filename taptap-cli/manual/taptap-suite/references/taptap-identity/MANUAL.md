@@ -25,7 +25,7 @@ identity 是所有业务手册的前置定位能力。它只确认登录态、�
 | 查看自己有哪些厂商 | `call_tool(name:"developer +list")` |
 | 创建厂商、注册厂商、申请厂商或入驻开发者 | 首轮直接提供当前环境配置的开发者中心 `serverUrl`;环境未知时只用 `call_tool(name:"auth status", args:{offline:true})` 读取,不查厂商列表或网页 |
 | 用户指定厂商名但没给 ID | 先列 developer 候选;多候选让用户选 |
-| 当前账号没有开发者账号 | 使用 `overview` 返回的 `developers.guidance.create_url` 和 `docs_url`;按共享规范分别以裸 URL 单独一行提供,完成入驻后重新 `developer +list` |
+| 当前账号没有开发者账号 | 使用 `overview` 返回的 `developers.guidance.create_url` 和 `docs_url`;按共享规范分别以裸 URL 单独一行提供,完成入驻后重新 `developer +list`。恢复口径见 [前置条件与账号状态恢复](taptap-suite/references/prerequisite-recovery.md) |
 | 按游戏名找 app | `call_tool(name:"app +list", args:{dev_id, kw:"<keyword>"})` |
 | 查看某厂商下所有 app | `call_tool(name:"app +list", args:{dev_id, page_all:true, page_size:50})` |
 | 用户说"切到某厂商/某游戏" | `developer +enter` / `app +select` 校验并保存 CLI scope;不要声称切换了网页状态 |
@@ -38,12 +38,12 @@ identity 是所有业务手册的前置定位能力。它只确认登录态、�
 - `page_url_source=api_response` 表示入口来自服务端响应;`derived_from_developer_scope` 表示根据已确认 scope 推导的规范资料页,只能作为人工查看入口,不能声称是服务端返回的页面 URL。
 - 用户泛问"当前账号能做什么 / 给我一个总览"时优先用 `overview`,不要手工串联 `auth status`、`developer +list`、`app +list` 和 `developer +suggest`。
 - `overview` 只返回各厂商的游戏样例和总数,不做自动翻页;不要先尝试通用连续分页参数。用户明确需要完整列表时,再按它返回的 developerId 分别调用 `app +list`(page_all:true, page_size:50)。
-- `app +list` 的标量查询条件必须使用 `kw`、`page`、`page_size`、`page_all`;不要把关键词和分页字段包进 `data`。
+- `app +list` 的标量查询条件必须使用 `kw`、`page`、`page_size`、`page_all`;不要把关键词和分页字段包进 `data`。`kw` 传纯数字且名称/标识无匹配时会按 app ID 兜底查找;结果里的 `id_lookup` 说明匹配页,`reason=app_id_no_match` 表示该 developer 下没有这个 ID。
 - `app +list` / `overview` 的游戏条目包含 `review_status_label` 和状态可用性;按服务端返回的标签原样回答状态,不自行改写,也不把多个游戏归为同一状态;缺失时按条目显示"未知"。需要版本、包体或更细的发布信息时转 app-edit 手册。
 - 显式传入 `dev_id` 时,CLI 会先确认该厂商属于当前账号可见范围;不可见的 DevID 直接报错,不再把权限 / scope 错误误报成"关键词无匹配"。
 - 常规身份发现统一使用 `app +list`,不要退回内部 tool 入口。
 - 多候选必须让用户选择,不自动取第一个,也不复用历史对话里的旧 ID。
-- `developer +list` / `overview` 明确返回零个开发者账号时,不要继续猜 DevID,也不要只返回空列表。原样使用本次 `developers.guidance.create_url` 和 `docs_url`:先说明页面用途,再将每个 URL 分别单独一行输出且各只展示一次;不要改写为生产域名、Markdown 链接或搜索结果。完成入驻后重新执行 `developer +list`。如果用户确认已有厂商,则改为检查当前登录账号或让管理员添加权限。
+- `developer +list` / `overview` 明确返回零个开发者账号时,不要继续猜 DevID,也不要只返回空列表。原样使用本次 `developers.guidance.create_url` 和 `docs_url`:先说明页面用途,再将每个 URL 分别单独一行输出且各只展示一次;不要改写为生产域名、Markdown 链接或搜索结果。完成入驻后重新执行 `developer +list`。如果用户确认已有厂商,则改为检查当前登录账号或让管理员添加权限。完整恢复口径见 [前置条件与账号状态恢复](taptap-suite/references/prerequisite-recovery.md)。
 - 未执行 `developer +enter` / `app +select` 时,交给其它业务手册的下一条调用显式带 `dev_id` 和 `app_id`;已保存 CLI scope 时可省略,显式参数始终优先。
 - "进入/切到某游戏"只保存当前 profile 的 CLI scope,不代表网页状态已切换。
 - 身份发现页面链接优先使用每个游戏本次返回的完整 `page_url`;缺失时使用 CLI 根据已确认 ID 推导的规范资料页,并按 `page_url_source` 说明来源。不改写服务端已返回的路径。

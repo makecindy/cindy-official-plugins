@@ -6,11 +6,16 @@
 
 1. 先调 `package-management get-available-package-types`，拿本次实际返回的 `available_package_types`。
 2. `available_package_types` 为空时不要重试同一个命令；按响应的 `empty_reason` 分流（`declared_package_types` 只是创建声明的核对值，不代表可上传类型）：
-   - `package_type_undeclared`：还没保存创建时的包体类型，也没有已绑定的 APK/PC 包体。先与用户确认方向，再用 `call_tool(name:"qualification save-qualification-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{app_features:{package_types:["<类型>"]}}, idempotency_key:"<package-type-key>", dry_run:true})` 预览；用户确认后复用同一参数与 key 加 `yes:true` 执行，补存创建时的同一类型，读回后重调本接口；不要猜类型、不要新建游戏、不要改用其它类型试探。
-   - `declared_not_applicable`：已保存声明与当前形态或包体状态冲突（例如声明 `apk` 但小游戏类目已是 H5）。不要尝试切换或清空类型，直接说明冲突并请用户到开发者中心核对。
+   - `package_type_undeclared`：还没保存创建时的包体类型，也没有已绑定的 APK/PC 包体。先与用户确认方向，再用 `call_tool(name:"qualification save-qualification-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{app_features:{package_types:["<类型>"]}}, idempotency_key:"<package-type-key>", dry_run:true})` 预览；用户确认后复用同一参数与 key 加 `yes:true` 执行，补存创建时的同一类型，读回后重调本接口；不要猜类型、不要新建游戏、不要改用其它类型试探。跨域恢复口径见 [前置条件与账号状态恢复](taptap-suite/references/prerequisite-recovery.md)。
+   - `declared_not_applicable`：已保存声明与当前形态或包体状态冲突（例如声明 `spark` 但应用仍是 H5、仍有 H5 包体）。不要尝试切换或清空类型。先调 `call_tool(name:"package-management diagnose-package-type", args:{developer_id:"<developerId>", app_id:"<appId>"})`，按返回的 `suggestedAction` 分流：
+     - `recover_declaration`：把 `nextCommand`（`recover-package-type-declaration`，受控恢复命令）交给用户，说明这是平台受控的声明修正（evidence-bound），不是自行切换类型；需人工确认后执行。若命令不存在，先让用户在本机终端运行 `taptap-cli update` 刷新能力目录再试。
+     - `contact_support`：没有可自动判定的修复目标，只说明冲突并请平台协助，不要重试切换或重建游戏。
+     - H5 上传在冲突时会于任何写请求之前直接失败并给出同一恢复提示；不要重复上传、换类型或重建游戏来绕过。
    - `form_has_no_upload_target`：当前形态（Tap 制造 / UrhoX 小游戏 / 关卡分发）不承载可上传包体，补声明也不会产生可用类型。只说明结论，不要引导补声明或换类型。
    - `launcher_only`：纯启动器分发，本来就不承载包体，不需要上传。
    - 字段缺省：矩阵非空时属正常（没有需要解释的成因）；矩阵为空而字段缺省时可能是旧服务，刷新能力信息后重读一次，仍缺省就只说明“包体矩阵为空且原因未下发”，不得据此放宽上传或绑定。
+
+补充：矩阵非空时按矩阵判断即可；若已保存声明为 native（`apk`/`windows`）且矩阵提供了更多 native 类型，`diagnose-package-type` 会返回 `suggestedAction=additive_declaration`，按 `nextCommand` 用 `save-qualification-draft` 追加即可，属正常保存、不算换类型，不要描述成“修复声明冲突”。
 3. 只用该数组里实际出现的类型（`apk`、`windows`、`mini_app`、`h5`、`spark`），再按类型调对应列表：
    - `apk` → `package-management list-apk-packages`
    - `windows` → `package-management list-pc-packages`
@@ -29,9 +34,9 @@
 
 ### B. 小游戏能力未开通
 
-1. `package-management get-available-package-types` 的 `available_package_types` 不含 `mini_app` 时，只说明当前应用没有开通 Tap 小游戏包体。
+1. 开通状态只看 `package-management list-mini-app-packages`：明确报「小游戏功能尚未开通」= 未开通；返回列表（含空列表）就是已开通；权限、网络等其它失败只说明本次无法确认，按实际错误处理，不据此改口说未开通。`available_package_types` 不含 `mini_app` 不能当未开通的证据——它同时叠加了创建声明与附加用途，APK 主包体但 main 未绑 APK、或声明与形态冲突时都会缺 `mini_app`（缺数组时先按 A.2 的 `empty_reason` 分流）。
 2. 只有已确认原类型及附加用途允许 Tap 小游戏，且用户明确要求开通时，才展示开通影响并等待确认，之后调用 `package-management get-or-create-mini-app`。
-3. 调用成功后重调 `package-management get-available-package-types` 验证 `mini_app` 是否出现，再查 `package-management list-mini-app-packages`。
+3. 开通成功后用 `package-management list-mini-app-packages` 能返回列表验证即可，不要再用 `get-available-package-types` 验证。APK 主包体游戏要等 main 槽位绑好 APK 后（服务端已放行该附加用途），`mini_app` 才会重新出现在类型列表里。
 4. 用户取消或未确认时，不继续查小游戏列表或二维码。
 5. H5 游戏可能为关卡游戏或非关卡游戏，不能仅凭 H5 类型推断身份。可用时查 `package-management list-h5-packages`；权限、网络或类目查询失败不能当成主体未开通。只有已可靠确认原 H5 类型、服务端明确返回小游戏主体未开通且用户要求继续上传时，才单独说明开通影响与协议要求，并按明确授权调用 `package-management get-or-create-mini-app`；不能代替用户同意协议、转换关卡或申请升级。新建 H5 正常会自动建立主体；缺失可能是创建后处理失败，不能盲目重建游戏。开通遇到白名单或权限限制时保留 appId 和版本句柄并交接核查；开通后重新查询实际能力。
 6. 小游戏分包测试不在 CLI 进行；CLI 只能查看已提交包体的状态。当前接口不返回页面路径，不要自行补全或拼接页面路径。
