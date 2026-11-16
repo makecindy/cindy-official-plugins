@@ -10,7 +10,7 @@
 
 这里的 3+1／3+2 指卡片种类：3 种基础卡搭配 1 或 2 种奖品卡。每种奖品卡对应自己的奖品、概率和库存。兑换某项奖品时消耗每种基础卡各 1 张及该奖品对应的奖品卡 1 张；3+2 不要求同时集齐两种奖品卡才能兑换一次，已消耗的基础卡不能用于另一轮兑换。
 
-- **3+1**：先读配置，明确保留对象；多出的奖品卡按 [删除预览](taptap-suite/references/taptap-game-sign/references/card-collection.md) 及已有授权处理，再回读确认 3 种基础卡和 1 种目标奖品卡。不能擅自决定删除对象或只留空另一张卡冒充完成。
+- **3+1**：先读配置，明确保留对象；多出的奖品卡按 [删除预览](#删除预览) 及已有授权处理，再回读确认 3 种基础卡和 1 种目标奖品卡。不能擅自决定删除对象或只留空另一张卡冒充完成。
 - **3+2**：复用现有两张奖品卡；缺少时才按下述新增规则补充，再回读确认 3 张基础卡和 2 张奖品卡。已选 3+1 时不自动补回第二张奖品卡。
 - 面向厂商的卡片表格按下方「卡片展示」组织，ID 留在内部用于保存、删除、导码和回读。
 
@@ -87,13 +87,13 @@ call_tool(name:"game-sign delete-card", args:{
 
 `add_count` 是本次追加的正整数件数，不是目标剩余库存。例如回读剩余 20 件，用户要求补到 100 件，本次增加 80 件；用户要求“再加 100 件”则传 100。补到目标值时依据最新库存计算，存在并发领取或其他补库时不能保证最终剩余恰好等于目标。写后回读同一卡片的库存；新一次追加会再次增加库存，结果未知时先核实，不能换幂等键重发。
 
-库存按奖品类型处理：`GOODS` 使用 `add-card-stock`，`REDEEM_CODE` 使用 [导码与恢复](taptap-suite/references/taptap-game-sign/references/code-import.md) 的 `--card-id` 对应参数。写后回读同一目标；业务拒绝或库存未变化时说明实际结果，不换 key 连续重试。需人工核实则使用当前环境的可靠入口。
+库存按奖品类型处理：`GOODS` 使用 `add-card-stock`，`REDEEM_CODE` 使用 [导码与恢复](taptap-suite/references/taptap-game-sign/references/code-import.md) 的 `card_id` 参数。写后回读同一目标；业务拒绝或库存未变化时说明实际结果，不换 key 连续重试。需人工核实则使用当前环境的可靠入口。
 
 基础卡不可删除。奖品卡删除前核实目标与授权，删除后回读配置。提审要求奖品库存满足服务端条件，readiness 通过不替代提交时的最终校验。
 
 ## 集卡兑换码交接
 
-集卡导码要求奖品类型为 `REDEEM_CODE`，使用 card_id；prepare/import/get-code-import 支持互斥的 award_id/card_id。不得将 card_id 当成 award_id。本地导码走 [导码与恢复](taptap-suite/references/taptap-game-sign/references/code-import.md) 的 `--card-id` 对应参数，导入后核实处理结果和库存。需要核实未知结果时可交接已验证的页面，并回读 get-config 和 check-readiness。
+集卡导码要求奖品类型为 `REDEEM_CODE`，使用 card_id；prepare/import/get-code-import 支持互斥的 award_id/card_id。不得将 card_id 当成 award_id。本地导码走 [导码与恢复](taptap-suite/references/taptap-game-sign/references/code-import.md) 的 `card_id` 参数，导入后核实处理结果和库存。需要核实未知结果时可交接已验证的页面，并回读 get-config 和 check-readiness。
 
 人工核实需要当前环境中已验证的开发者页面入口，优先使用本次服务端返回的地址或用户提供的已确认链接。没有可靠入口时说明缺口，不根据上传地址、服务地址或猜测的路径拼接页面。
 

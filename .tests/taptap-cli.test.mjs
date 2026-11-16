@@ -2077,7 +2077,6 @@ test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the p
   // Image values now carry five info fields, and expected matches the real shape.
   assert.match(shared, /允许子目录/, 'the @file rule must allow subdirectories inside the working directory');
   assert.match(fieldMap, /`expected` 传 `null`/, 'a first write uses null, not []');
-  assert.match(shared, /允许子目录/);
   assert.match(fieldMap, /图片字段的 `current_value` 是对象/, 'image current_value is an object');
   assert.match(appEdit, /image_ave/, 'image writes need the average colour');
   assert.match(materials, /image_ave\.rgb/, 'the upload handle must keep the average colour');
