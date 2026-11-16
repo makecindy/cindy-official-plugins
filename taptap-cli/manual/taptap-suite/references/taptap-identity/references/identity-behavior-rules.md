@@ -98,7 +98,7 @@ scope 切换后，历史 turn 里的事实仍然可被引用（这是合法且�
 
 ### app +list 参数规范
 
-- 关键词：`--kw "<keyword>"`
+- 关键词：`--kw "<keyword>"`；纯数字关键词在名称/标识无匹配时会自动按 app ID 兜底翻页查找（返回 `id_lookup` 记录匹配页；没找到时 `reason=app_id_no_match`）
 - 指定起始页：`--page <N>`
 - 指定每页条数：`--page-size <N>`，最大 50
 - 获取全部页面：`--page-all`；可配 `--page-limit <N>` 和 `--page-delay <ms>`

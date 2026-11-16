@@ -32,7 +32,7 @@ call_tool(name:"app get-level-upgrade", args:{developer_id:"<developerId>", app_
 | `KIND_NETWORK` | 联网办理依据。按返回解释，不自行要求扫描或把联网识别提升为升级硬门槛。 |
 | `KIND_SELF_ICP` | 游戏自身 ICP，与小游戏备案分开。H5 当前升级规则不要求自身 ICP；Maker 按其实际返回判断，不套用 H5 豁免。 |
 | `KIND_GAME_FILING` | 小游戏备案。未开通广告时可能为本次不需要；不能以普通资质 ICP 通过代替此项。 |
-| `KIND_SIGNING` | TapTap 开发者激励协议。是否需要以实际返回为准；SCE 内容授权协议不能代替。 |
+| `KIND_SIGNING` | TapTap 开发者激励协议。签约要在升级页发起并落到本次升级操作上；tcm／激励计划里显示已加入（入驻生效）不等于本次升级签约完成，不能据此判断“已经签过”。是否需要以实际返回为准；SCE 内容授权协议不能代替。 |
 
 按包体、联网情况、备案和协议等业务名称，用中文说明各项是否满足、是否本次需要及具体原因；不能只显示失败项，也不能把原始枚举拼进总结。`STATUS_PASSED` 表示已满足；`STATUS_NOT_REQUIRED` 表示本次不需要，不代表已办理；`STATUS_PENDING` 须结合 `reason_code`、`message` 区分待办理与审核等待；`STATUS_REJECTED` 展示整改原因；`STATUS_UNKNOWN` 或未知枚举表示无法确认。没有审核中证据时，不把 pending 一律说成审核中。
 
@@ -42,7 +42,7 @@ call_tool(name:"app get-level-upgrade", args:{developer_id:"<developerId>", app_
 | `ACTION_SELECT_PACKAGE` | 交接后台选包／准备包；遵守锁包限制，回来后按下节核验目标。 |
 | `ACTION_OPEN_SELF_ICP` | 交接后台办理自身 ICP，主体敏感信息留在网页填写。 |
 | `ACTION_OPEN_GAME_FILING` | 交接后台办理小游戏备案；若已审核中则说明等待，不要求重复补材。 |
-| `ACTION_SIGN_INCENTIVE` | 交接后台完成激励签约，不代签。 |
+| `ACTION_SIGN_INCENTIVE` | 交接后台完成激励签约，不代签；不要因为激励计划已入驻就跳过这一步，也不要重复确认签约。 |
 | `ACTION_NONE` | 没有该项办理动作，不代表整体可升级；仍检查身份、入口及 `can_apply`。 |
 | 未知动作 | 保留已知事实，说明不支持的动作并交接人工核对，不猜测写操作。 |
 

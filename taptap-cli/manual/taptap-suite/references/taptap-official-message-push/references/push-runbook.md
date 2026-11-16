@@ -1,5 +1,7 @@
 # official-message-push runbook:额度、预览、查重与发送
 
+> 命令名已缩短（如 `get-info`）。历史长名（如 `get-official-message-push-info`）仍作为 alias 可用，无需改脚本；`--help` 与 `schema` 均会同时接受两种写法。
+
 本文是 Agent 的执行参考，不是默认用户回复模板。业务回复按 [official-message-push 手册](taptap-suite/references/taptap-official-message-push/MANUAL.md) 与 shared execution 的输出规则组织；用户明确要求技术细节时才展示调用细节。
 
 示例 ID、链接、时间和数量只说明结构，执行时替换为当前目标与用户已授权的值。写操作先 `dry_run: true` 预览，用户确认后用相同参数加 `yes: true`，同一意图复用 `idempotency_key`。
@@ -29,7 +31,7 @@
 ## 1. 读额度与关注规模
 
 ```text
-call_tool(name:"official-message-push get-official-message-push-info", args:{
+call_tool(name:"official-message-push get-info", args:{
   developer_id:"<developerId>", app_id:"<appId>"})
 ```
 
@@ -45,7 +47,7 @@ call_tool(name:"official-message-push get-official-message-push-info", args:{
 ## 2. 预览推送内容
 
 ```text
-call_tool(name:"official-message-push preview-official-message-push-object", args:{
+call_tool(name:"official-message-push preview-object", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{url:"https://www.taptap.cn/moment/123"}})
 ```
@@ -64,7 +66,7 @@ call_tool(name:"official-message-push preview-official-message-push-object", arg
 
 ```text
 # 分页需要实际读取，不能与 dry_run 组合
-call_tool(name:"official-message-push list-official-message-push-tasks", args:{
+call_tool(name:"official-message-push list-tasks", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{status:"created", page:1, page_size:20},
   page_all:true, page_limit:1000})
@@ -87,7 +89,7 @@ call_tool(name:"official-message-push list-official-message-push-tasks", args:{
 
 ```text
 # 定时（push_time 用带偏移的 RFC3339）
-call_tool(name:"official-message-push create-official-message-push-task", args:{
+call_tool(name:"official-message-push create-task", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{url:"https://www.taptap.cn/moment/123", scope:"android",
         send_mode:"scheduled", push_time:"2026-11-03T20:00:00+08:00",
@@ -95,7 +97,7 @@ call_tool(name:"official-message-push create-official-message-push-task", args:{
   idempotency_key:"<stable-key>", dry_run:true})
 
 # 立即
-call_tool(name:"official-message-push create-official-message-push-task", args:{
+call_tool(name:"official-message-push create-task", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{url:"https://www.taptap.cn/moment/123", scope:"all",
         send_mode:"now", preview_fingerprint:"<指纹>"},
@@ -122,14 +124,14 @@ call_tool(name:"official-message-push create-official-message-push-task", args:{
 | `failed_precondition` 没有关注用户 | 0 关注未确认 | 说明没有接收人；用户坚持测试才传 `confirmed_zero_fans` |
 | `failed_precondition` 同一链接已有待发送任务 | 可能上次创建已成功 | 重新查询并匹配目标；一致则回读复用，不一致才展示差异并确认处理 |
 | `failed_precondition` 相近时间已有范围重叠任务 | 连续触达 | 错开时间，或用户确认后传 `confirmed_nearby_pending_task` |
-| `failed_precondition` 预览后内容已变化 | 指纹不匹配 | 重新 `preview-official-message-push-object` 再创建 |
+| `failed_precondition` 预览后内容已变化 | 指纹不匹配 | 重新 `preview-object` 再创建 |
 | `invalid_argument`（定时规则） | 时间太近/不是今天明天/在 01:00–07:00 | 按返回的 `error.message` / `error.hint` 改时间 |
-| `result_unknown` | 提交后没回读到任务 | 用 `list-official-message-push-tasks` 核实，不直接重试 |
+| `result_unknown` | 提交后没回读到任务 | 用 `list-tasks` 核实，不直接重试 |
 
 ## 5. 取消待发送任务
 
 ```text
-call_tool(name:"official-message-push cancel-official-message-push-task", args:{
+call_tool(name:"official-message-push cancel-task", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{task_id:"<taskId>"},
   idempotency_key:"<stable-key>", dry_run:true})
@@ -139,7 +141,7 @@ call_tool(name:"official-message-push cancel-official-message-push-task", args:{
 
 ## 6. 发送后效果
 
-用 `list-official-message-push-tasks` 取 `status=sent` 的任务：
+用 `list-tasks` 取 `status=sent` 的任务：
 
 - 事实数据：`push_user_count`（推送人数）、`page_view`（浏览）、`page_view_push`（推送带来的浏览）、`page_view_rate`（转化率）。
 - 数据缺口：`stat_time=0` 或样本很少 → 提醒可能回流延迟，稍后复查。

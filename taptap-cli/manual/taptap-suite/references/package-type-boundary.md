@@ -9,4 +9,5 @@
 - 新建首包、仍无实际版本类目时，调用 `get-available-package-types` 读取 `declared_package_types`，非关卡 H5 游戏应精确为 `["h5"]`，Tap 小游戏应精确为 `["mini_app"]`，并与创建交接一致；`available_package_types` 不能代替声明读回。此阶段声明缺失或不符时停止，不根据附件补猜。
 - 已有实际版本类目的游戏沿可靠的服务端包体事实确认类型，并与创建交接比对；不能仅因没有草稿声明就阻止存量 H5 上传。若声明仍存在且与实际类目或交接冲突，必须停止。
 - APK/Windows 附加用途也必须显式保存：仅声明 `["apk"]` 不允许上传 Windows，仅声明 `["windows"]` 不允许上传 APK。用户已确认 APK + Windows 用途时，先增量保存 `["apk","windows"]` 并读回 `declared_package_types` 确认两项均在；保留原类型，不能删除或替换已有声明。随后仍须满足原有平台、槽位和权限门禁，声明本身不授予能力。H5 与 Tap 小游戏仍各自保持单一类型，不能借附加用途混入其它类型。
+- APK 主包体下的 Tap 小游戏附加用途是例外：该用途只进 `apk_mini_game_play`（APK 试玩小游戏）附加槽，不改变主包体方向，因此**不把 `mini_app` 加进创建声明**。在此场景下，已开通 Tap 小游戏、主体类目不是 H5、且 `main` 槽位已绑 APK 时，`available_package_types` 会同时给出 `apk` 与 `mini_app`，可正常上传并把候选绑到 `slot=apk_mini_game_play`；未绑 APK 时不会因该附加用途给出 `mini_app`，仍须先绑 APK 主包体。独立 Tap 小游戏不受此条约束：仍按创建选择声明 `["mini_app"]`，并用 `slot=main` + `package.type=mini_app` 绑定主包体。
 - `created:true` 与 `package_type_saved:false` 表示游戏已创建、类型尚未保存；保留返回的 appId，先补存同一类型并读回再上传，不重放创建或重建游戏。`package_type_saved` 缺失也不能当作已保存。创建类型声明不是永久不可变锁：开发者后台删除或改写声明后，首包阶段遇到缺失、或任一阶段与实际类目/创建交接不一致时必须停止，不能擅自用当前附件重写声明。

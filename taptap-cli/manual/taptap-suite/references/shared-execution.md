@@ -38,7 +38,7 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 - `--dev-id` / `--app-id` 只在 operation 声明对应 scope 字段时存在；其余业务字段统一放入 `--data`。
 - 动态命令的 `--data` 是完整 operation input；CLI 按接口定义的 `inputs` 拆分 query 和 body。
-- 短 JSON 可 inline；复杂或多行 JSON 用 `@file`，文件必须位于会话工作目录（CLI 以会话工作目录为 cwd 解析该相对路径），并且是 **UTF-8 无 BOM** 的 JSON。经本插件调用时没有可用的 stdin，`-` 不可用；插件直接把 JSON 作为参数传给 CLI，没有 shell 引号问题，`data` 解析失败只可能是内容或文件编码不对。
+- 短 JSON 可 inline；复杂或多行 JSON 用 `@file`：本地文件可用相对路径或会话工作目录内的绝对路径，允许子目录，但解析 `..` 和符号链接后的目标必须仍在工作目录内；文件还必须是 **UTF-8 无 BOM** 的 JSON。经本插件调用时没有可用的 stdin，`-` 不可用；插件直接把 JSON 作为参数传给 CLI，没有 shell 引号问题，`data` 解析失败只可能是内容、文件编码或路径越界不对。
 - `data` 解析失败且请求没有发出时，先修正 JSON 语法与文件编码再重试；不要把修复输入误报成修复服务端。
 - CLI 默认输出 JSON，普通命令、脚本、Skill 示例和生成命令都不追加冗余的 `--format json`。只有命令自身默认输出文本或原始内容，而调用方明确需要结构化 JSON 时才显式追加；切换人类可读或流式输出时使用 `pretty` / `table` / `ndjson` / `csv`。
 - JSON 是 agent 的执行输入，不是默认用户话术。回复用户时按“结论 -> 当前状态/缺口 -> 风险 -> 下一步”组织，把字段 ID、camelCase key、数值枚举和内部工具名翻译为业务标签；用户未要求调试时，不贴完整 raw JSON、schema 或底层请求。

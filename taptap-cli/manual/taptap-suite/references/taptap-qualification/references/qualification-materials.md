@@ -65,6 +65,8 @@ APK ICP 需要完整主体字段，单独 icp_number + icp_file 不代表可提�
 }
 ```
 
+AI 接入声明的最小输入（不提供 AIGC 服务、无证明文件时）：`qualification_type=ai-declaration`、`aigc_qualification.provide_aigc_service=false`、`aigc_qualification.package_types=["<包体>"]`；不需要 `proof_file`/`proof_files`。如用户已明确「游戏不含 AI 生成内容」这一事实，可同时用 `app_features.has_ai_content=false` 一并保存（未确认时不要默认填 false）。
+
 AI 内容声明：
 
 ```json
@@ -150,6 +152,8 @@ IP 授权书：
 
 AI 的 `proof_files` 会替换完整证明列表，每项格式为 `{ "package_type":"apk", "file":{"type":"pdf","url":"<https-url>"} }`。不同包体可以使用不同文件。删除某个包体的证明时，提交其余包体的完整列表；传 `[]` 表示全部清空，省略该字段表示保留。
 
-`proof_file` 与 `package_types` 用于向指定包体添加同一份证明，不删除其他包体的文件；不能与 `proof_files` 同时传入。用户确认不提供 AI 服务时，设置 `provide_aigc_service=false`；是否删除已保存的证明须另行确认。
+AI 接入声明（`ai-declaration`）**即使不传任何证明文件，也必须在 `aigc_qualification.package_types` 声明适用包体**（如 `["apk"]`）。只传 `provide_aigc_service` 时服务端可能返回成功，但读回仍是 `pending_upload`、`has_saved_material=false`——保存后必须回读 `has_saved_material` / `status` 确认已落库；没有落库就补 `package_types` 重试。
+
+`proof_file` 与 `package_types` 用于向指定包体添加同一份证明，不删除其他包体的文件；不能与 `proof_files` 同时传入。用户确认不提供 AI 服务时，设置 `provide_aigc_service=false`，并同样在 `aigc_qualification.package_types` 声明适用包体；是否删除已保存的证明须另行确认。
 
 数组字段在 schema 允许时用 `[]` 清空；省略或 `null` 不猜删除。其他可选标量或禁止清空字段在没有明确删除契约时转开发者后台，不以空字符串冒充删除。版号/软著文本与扫描件成对补齐，AI 服务证明、防沉迷条件项按服务端完整性校验。

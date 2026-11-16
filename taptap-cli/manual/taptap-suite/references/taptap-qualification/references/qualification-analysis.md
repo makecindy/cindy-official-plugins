@@ -23,6 +23,32 @@
 
 例如，`effective_approved=true` 且 `status=reviewing` 时，说明当前资质有效、修改申请审核中；`status=rejected` 时，说明当前资质仍有效、修改申请被驳回，应展示驳回原因，不把当前资质列为缺口。首次提交且 `effective_approved=false` 时，即使已保存或正在审核，也仍待完成。read_state=partial/unknown、未知事实、冲突、读取失败或资格 unknown 必须单独展示；非必须空槽不列入缺口。资质齐全、可提审、已发布、分发开放分别确认。
 
+## 缺口输出格式（给用户看）
+
+`requirements[].subject` 是英文 key，输出时按下面映射成中文，并把「已保存待审核」与「需补材料」分开，不要笼统说“待完成”：
+
+| subject | 中文名 | 需要的材料 / 下一步 |
+| --- | --- | --- |
+| `privacy-compliance` | 隐私合规 | 隐私政策链接或托管模式；小游戏域走专用命令 |
+| `anti-addiction` | 防沉迷合规 | 防沉迷接入方式与对应材料 |
+| `ai-declaration` | AI 接入声明 | 是否提供 AIGC、适用包体；不提供时也要声明 `package_types` |
+| `age-grade` | 适龄分级 | 适龄等级及审核 |
+| `game-license` | 游戏版号 | 版号批文与扫描件 |
+| `icp-filing` | ICP 备案 | 备案号、主体信息与文件 |
+| `software-copyright` | 软件著作权 | 登记号与证书 |
+| `authorization-letters` | IP 授权书 | 授权书文件 |
+| `security-assessment` | 安全评估 | 安全评估报告 |
+
+输出建议（示例）：
+
+- 已保存但未通过审核（`effective_approved=false`，`status` 为 uploaded / reviewing / rejected）：<中文名>，需要提交资质审核（或处理驳回原因）。
+- 尚未保存材料（`status=pending_upload` 或 `has_saved_material=false`）：<中文名>，需要先准备 <材料>。
+- 只列 required 或用户确认适用的项；optional 空槽单独说明，不混进“必须缺项”。
+
+字段口径：`status` 是草稿/申请状态（已保存的草稿也是 uploaded），`effective_status` 是当前生效（已审核通过）状态；不要把 `status=uploaded` 说成“已生效”，也不要把 `effective_status=pending_upload` 说成“材料一定缺失”。
+
+保存 AI 声明/资质材料后，回读 assessment 时比较前后 `snapshot`：快照变化说明本次写入生效；快照不变说明是幂等确认或没有变化，应结合 `has_saved_material` 与 `status` 说明，不能只凭接口 ok 判断。
+
 ## 信息不完整时的处理
 
 查询失败或缺少 assessment 时，说明无法完成资质核验，重新查询或前往开发者后台核实。不得把缺失字段或没有警告解释为资质齐全。
