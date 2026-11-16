@@ -1462,7 +1462,8 @@ test('the image handoff always carries the upload info on field writes', () => {
     'taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md',
   );
   assert.match(rollback, /`from` 对图片字段只给出纯 URL/);
-  assert.match(rollback, /直接把它写回去即可/);
+  assert.match(rollback, /同槽位改写例外/, 'rollback needs the same-slot exception, not a bare write');
+  assert.match(rollback, /完整 `info`/, 'rolling back to a different image needs its full info');
   assert.match(rollback, /重新收录/);
 });
 
@@ -2101,6 +2102,8 @@ test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the p
   const analysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
   assert.match(analysis, /## 缺口输出格式/, 'gap output maps subjects to Chinese names');
   assert.match(analysis, /privacy-compliance/, 'the subject map must cover privacy');
+  assert.match(analysis, /审核中（`status=reviewing`）/, 'a submitted gap is waiting, not pending submission');
+  assert.doesNotMatch(analysis, /status` 为 uploaded \/ reviewing \/ rejected/, 'review states are not lumped together');
   assert.match(qualification, /也必须在 `aigc_qualification.package_types` 声明适用包体/, 'AI declaration needs package types');
   assert.match(handoff, /回执里的 `h5VersionId`/, 'the privacy version id source is named');
 });

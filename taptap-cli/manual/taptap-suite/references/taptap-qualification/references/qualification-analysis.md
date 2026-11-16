@@ -41,8 +41,10 @@
 
 输出建议（示例）：
 
-- 已保存但未通过审核（`effective_approved=false`，`status` 为 uploaded / reviewing / rejected）：<中文名>，需要提交资质审核（或处理驳回原因）。
 - 尚未保存材料（`status=pending_upload` 或 `has_saved_material=false`）：<中文名>，需要先准备 <材料>。
+- 已保存待提交（`status=uploaded`，`effective_approved=false`）：<中文名>，材料已保存，需要提交资质审核。
+- 审核中（`status=reviewing`）：<中文名>，已提交，等待审核结果；不要重复提交。
+- 被驳回（`status=rejected`）：<中文名>，处理驳回原因后重新提交。
 - 只列 required 或用户确认适用的项；optional 空槽单独说明，不混进“必须缺项”。
 
 字段口径：`status` 是草稿/申请状态（已保存的草稿也是 uploaded），`effective_status` 是当前生效（已审核通过）状态；不要把 `status=uploaded` 说成“已生效”，也不要把 `effective_status=pending_upload` 说成“材料一定缺失”。

@@ -52,7 +52,7 @@
 > | `taptap-cli schema app save-changes` | `call_tool(name:"schema", args:{_positional:["app","save-changes"]})` |
 > | `taptap-cli task +list` | `call_tool(name:"task", args:{_positional:["+list"]})` |
 >
-> **参数模型(务必按此传参)**:`developer_id` / `app_id` 是 scope 字段,直接传,插件会自动映射成 `--dev-id` / `--app-id`;其余业务字段**必须放进 `args.data`(JSON 对象)**。除 scope 和 `data` 外的键都是控制 flag,透传成对应 `--flag`(如 `dry_run` → `--dry-run`),合法性由 CLI 校验。本地文件路径必须是**相对会话工作目录**的路径:CLI 以会话工作目录为基准校验,拒绝绝对路径与 `../` 越界。输出已默认是结构化 JSON envelope,不要传 `--json` 或 `--format json`。
+> **参数模型(务必按此传参)**:`developer_id` / `app_id` 是 scope 字段,直接传,插件会自动映射成 `--dev-id` / `--app-id`;其余业务字段**必须放进 `args.data`(JSON 对象)**。除 scope 和 `data` 外的键都是控制 flag,透传成对应 `--flag`(如 `dry_run` → `--dry-run`),合法性由 CLI 校验。本地文件路径分三类:位置参数/上传文件必须是**相对会话工作目录**的路径,跨目录素材先复制进来;`args.data` 的 `@file` 可用相对路径或工作目录内的绝对路径(允许子目录),但解析 `..` 与符号链接后必须仍在目录内;`output`/`output_dir` 等导出目标必须相对。输出已默认是结构化 JSON envelope,不要传 `--json` 或 `--format json`。
 
 **CRITICAL — 具体业务必须先按下方路由读取对应业务手册,再调业务工具;不要跳过手册直接裸调。**
 
