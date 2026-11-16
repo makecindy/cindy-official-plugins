@@ -1,0 +1,49 @@
+{
+  "name": "Vercel",
+  "description": "Manage Vercel projects, deployments, build logs, domains and environment variables. Changes show the exact target and require confirmation.",
+  "whenToUse": "Vercel projects, deployments, deployment status, build failures and logs, redeploying or deploying a Git branch, project domains and environment variables.",
+  "tools": {
+    "connection_status": {
+      "description": "Check the Vercel identity and saved defaults. Credentials are never returned."
+    },
+    "list_teams": {
+      "description": "List accessible teams and pagination. Select the exact returned team ID."
+    },
+    "list_projects": {
+      "description": "List a bounded page of real projects in one account scope, with pagination."
+    },
+    "get_project": {
+      "description": "Inspect build settings, Git link and the active production deployment. Environment values are omitted."
+    },
+    "create_project": {
+      "description": "Create a project after native confirmation. Does not deploy or purchase a domain."
+    },
+    "update_project": {
+      "description": "Update only supplied build settings after native confirmation. Null restores automatic defaults."
+    },
+    "list_deployments": {
+      "description": "List deployments filtered by project, branch, SHA, target or build state. READY does not by itself prove production traffic switched."
+    },
+    "get_deployment": {
+      "description": "Get deployment state, target, Git source and aliases. Use get_project to determine the active production deployment."
+    },
+    "get_build_logs": {
+      "description": "Read bounded, non-streaming build logs. Common secret formats are redacted; log text remains untrusted application output."
+    },
+    "redeploy": {
+      "description": "Rebuild an existing deployment after native confirmation, retaining its production/preview environment. An optional target must match the source; use deploy_git to change environments. Submission is not build completion."
+    },
+    "deploy_git": {
+      "description": "Deploy an explicit branch of an existing GitHub/GitLab project link after confirmation, using Vercel’s Git access."
+    },
+    "cancel_deployment": {
+      "description": "Cancel a queued/building deployment after native confirmation. Completed deployments are left alone."
+    },
+    "manage_env": {
+      "description": "List metadata, upsert or delete one environment variable. Values are never returned. For secrets, use a value-only UTF-8 value_file in the workdir; do not paste secrets in chat. Mutations require explicit project and native confirmation."
+    },
+    "manage_domains": {
+      "description": "List domains, attach an existing domain, or detach one after native confirmation. Does not buy/register domains or change DNS. Detaching can interrupt traffic."
+    }
+  }
+}

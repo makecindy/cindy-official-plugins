@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Vercel connection</title><link rel="stylesheet" href="/settings.css"><script src="/settings.js" defer></script></head>
+<body>
+  <section aria-labelledby="connection-title">
+    <div class="heading"><h2 id="connection-title" data-i18n="connection">Connect Vercel</h2><span id="credential-state" class="status">…</span></div>
+    <p class="hint" data-i18n="intro">Connect once to manage your Vercel projects from a conversation.</p>
+    <form id="token-form">
+      <label for="token" data-i18n="token">Vercel access token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a Vercel token" aria-describedby="token-help">
+      <p id="token-help" class="hint" data-i18n="tokenHelp">Lumi stores the token securely and sends it only to api.vercel.com. It is never sent to the AI.</p>
+      <a href="https://vercel.com/account/tokens" data-i18n="getToken">Create a token in Vercel ↗</a>
+      <div class="actions"><button type="submit" id="save-token" data-i18n="saveToken">Save token</button><button type="button" id="test" class="secondary" data-i18n="test">Test connection</button><button type="button" id="clear-token" class="quiet" data-i18n="clear">Disconnect</button></div>
+    </form>
+    <p id="connection-result" class="feedback" role="status" aria-live="polite"></p>
+  </section>
+  <section aria-labelledby="defaults-title">
+    <h2 id="defaults-title" data-i18n="defaults">Defaults</h2>
+    <p class="hint" data-i18n="defaultsHelp">Optional shortcuts for reads. Changes still name their project explicitly.</p>
+    <form id="defaults-form">
+      <label for="team" data-i18n="team">Team ID</label><input id="team" autocomplete="off" spellcheck="false" placeholder="Blank = personal account">
+      <p class="hint" data-i18n="teamHelp">Ask Lumi to list your Vercel teams to find the exact ID.</p>
+      <label for="project" data-i18n="project">Default project</label><input id="project" autocomplete="off" spellcheck="false" placeholder="Project name or ID">
+      <div class="actions"><button type="submit" data-i18n="saveDefaults">Save defaults</button></div>
+    </form>
+    <p id="defaults-result" class="feedback" role="status" aria-live="polite"></p>
+  </section>
+  <p class="hint footer" data-i18n="independent">Independent Lumi plugin. Not affiliated with or endorsed by Vercel.</p>
+</body></html>

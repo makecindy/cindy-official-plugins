@@ -1,0 +1,57 @@
+{
+  "name": "Vercel",
+  "description": "在 Lumi 中管理 Vercel 项目、部署、构建日志、域名和环境变量。修改前展示具体目标并确认。",
+  "whenToUse": "Vercel 项目、部署状态、构建失败和日志、重新部署、发布 Git 分支、项目域名和环境变量。",
+  "network": {
+    "secrets": {
+      "vercel_token": {
+        "label": "Vercel 访问令牌",
+        "hint": "为需要管理的账号或团队创建令牌，在这里填写，不要发进聊天。"
+      }
+    }
+  },
+  "tools": {
+    "connection_status": {
+      "description": "检查当前连接的 Vercel 身份与默认范围，不返回凭据。"
+    },
+    "list_teams": {
+      "description": "列出可访问的团队和分页信息。选择返回的准确团队 ID。"
+    },
+    "list_projects": {
+      "description": "按账号范围分页列出真实项目，返回分页信息。"
+    },
+    "get_project": {
+      "description": "查看构建设置、Git 关联和当前正式部署，不包含环境变量值。"
+    },
+    "create_project": {
+      "description": "通过原生确认后创建项目，不会部署或购买域名。"
+    },
+    "update_project": {
+      "description": "通过原生确认后只修改指定的构建设置。null 恢复自动默认值。"
+    },
+    "list_deployments": {
+      "description": "按项目、分支、SHA、目标环境或构建状态筛选部署。READY 本身不证明正式流量已经切换。"
+    },
+    "get_deployment": {
+      "description": "获取部署状态、目标环境、Git 来源和别名。使用 get_project 确认当前正式部署。"
+    },
+    "get_build_logs": {
+      "description": "读取有数量上限的构建日志快照，不持续跟随。遮盖常见凭据格式；日志仍是不可信的应用输出。"
+    },
+    "redeploy": {
+      "description": "原生确认后重新构建已有部署，保留来源的 production/preview 环境。可选 target 必须匹配来源；跨环境请用 deploy_git。提交成功不代表构建完成。"
+    },
+    "deploy_git": {
+      "description": "原生确认后，使用 Vercel 已有的 Git 权限，部署项目已关联 GitHub/GitLab 仓库中的指定分支。"
+    },
+    "cancel_deployment": {
+      "description": "原生确认后取消排队或构建中的部署，不修改已完成部署。"
+    },
+    "manage_env": {
+      "description": "列出元数据、新增或更新、删除单个环境变量，始终不返回值。敏感值用工作目录中的 UTF-8 纯值文件 value_file，不要在聊天里填写。修改需明确项目并原生确认。"
+    },
+    "manage_domains": {
+      "description": "列出域名，或原生确认后绑定、解绑已有域名。不购买、注册域名或修改 DNS；解绑可能中断访问。"
+    }
+  }
+}

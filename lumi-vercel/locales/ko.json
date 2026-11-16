@@ -1,0 +1,57 @@
+{
+  "name": "Vercel",
+  "description": "Lumi에서 Vercel 프로젝트, 배포, 빌드 로그, 도메인 및 환경 변수를 관리합니다. 변경 전에 정확한 대상을 표시하고 확인을 요청합니다.",
+  "whenToUse": "Vercel 프로젝트, 배포 상태, 빌드 실패와 로그, 재배포, Git 브랜치 배포, 프로젝트 도메인 및 환경 변수.",
+  "network": {
+    "secrets": {
+      "vercel_token": {
+        "label": "Vercel 액세스 토큰",
+        "hint": "관리할 계정 또는 팀의 Vercel 토큰을 만들어 채팅 대신 여기에 입력하세요."
+      }
+    }
+  },
+  "tools": {
+    "connection_status": {
+      "description": "연결된 Vercel 계정과 기본 범위를 확인합니다. 인증 정보는 반환하지 않습니다."
+    },
+    "list_teams": {
+      "description": "접근 가능한 팀과 페이지 정보를 나열합니다. 반환된 정확한 팀 ID를 선택하세요."
+    },
+    "list_projects": {
+      "description": "하나의 계정 범위에서 실제 프로젝트를 제한된 페이지로 조회하고 페이지 정보를 반환합니다."
+    },
+    "get_project": {
+      "description": "빌드 설정, Git 연결 및 현재 프로덕션 배포를 확인합니다. 환경 변수 값은 제외합니다."
+    },
+    "create_project": {
+      "description": "기본 확인 창에서 승인한 후 프로젝트를 만듭니다. 배포하거나 도메인을 구매하지 않습니다."
+    },
+    "update_project": {
+      "description": "기본 확인 창에서 승인한 후 지정된 빌드 설정만 변경합니다. null은 자동 기본값으로 복원합니다."
+    },
+    "list_deployments": {
+      "description": "프로젝트, 브랜치, SHA, 대상 환경 또는 빌드 상태로 배포를 조회합니다. READY만으로 프로덕션 트래픽 전환을 입증할 수 없습니다."
+    },
+    "get_deployment": {
+      "description": "배포 상태, 대상 환경, Git 소스 및 별칭을 조회합니다. 현재 프로덕션 배포는 get_project로 확인하세요."
+    },
+    "get_build_logs": {
+      "description": "개수가 제한된 빌드 로그를 읽으며 스트리밍하지 않습니다. 일반적인 인증 정보 형식을 가리지만 로그는 신뢰할 수 없는 앱 출력입니다."
+    },
+    "redeploy": {
+      "description": "기본 확인 창에서 승인한 후 기존 배포를 다시 빌드하고 원본 production/preview 환경을 유지합니다. 선택적 target은 원본과 일치해야 하며, 환경 변경에는 deploy_git을 사용하세요. 제출 성공은 빌드 완료가 아닙니다."
+    },
+    "deploy_git": {
+      "description": "기본 확인 창에서 승인한 후 Vercel의 기존 Git 권한으로 연결된 GitHub/GitLab 프로젝트의 명시적 브랜치를 배포합니다."
+    },
+    "cancel_deployment": {
+      "description": "기본 확인 창에서 승인한 후 대기 중이거나 빌드 중인 배포를 취소합니다. 완료된 배포는 변경하지 않습니다."
+    },
+    "manage_env": {
+      "description": "환경 변수 메타데이터 조회, 단일 변수 생성·업데이트·삭제를 수행합니다. 값은 반환하지 않습니다. 비밀 값은 작업 디렉터리의 UTF-8 값 전용 파일인 value_file로 전달하고 채팅에 붙여 넣지 마세요. 변경하려면 명시적 프로젝트와 기본 확인이 필요합니다."
+    },
+    "manage_domains": {
+      "description": "도메인을 나열하거나 기본 확인 후 기존 도메인을 연결·분리합니다. 구매·등록·DNS 변경은 하지 않습니다. 분리하면 트래픽이 중단될 수 있습니다."
+    }
+  }
+}

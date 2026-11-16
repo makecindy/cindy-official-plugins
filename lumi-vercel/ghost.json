@@ -1,0 +1,587 @@
+{
+  "schemaVersion": 3,
+  "minLumiVersion": "0.1.131",
+  "id": "lumi-vercel",
+  "name": "Vercel",
+  "description": "Manage Vercel projects, deployments, build logs, domains and environment variables. Changes show the exact target and require confirmation.",
+  "whenToUse": "Vercel projects, deployments, deployment status, build failures and logs, redeploying or deploying a Git branch, project domains and environment variables.",
+  "version": "1.0.0",
+  "entry": "main.js",
+  "launch": "on-demand",
+  "command": "vercel",
+  "icon": "assets/icon.png",
+  "readme": {
+    "en": "README.md",
+    "zh-CN": "README.zh-CN.md"
+  },
+  "settingsHtml": "settings.html",
+  "showTaskPreferences": false,
+  "confirm": true,
+  "network": {
+    "hosts": [
+      "api.vercel.com"
+    ],
+    "secrets": [
+      {
+        "key": "vercel_token",
+        "label": "Vercel access token",
+        "hint": "Create a Vercel token for the account or team you want to manage. Paste it here, never in chat.",
+        "url": "https://vercel.com/account/tokens",
+        "inject": {
+          "header": "Authorization",
+          "format": "Bearer {value}",
+          "hosts": [
+            "api.vercel.com"
+          ]
+        }
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "connection_status",
+      "description": "Check the Vercel identity and saved defaults. Credentials are never returned.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_teams",
+      "description": "List accessible teams and pagination. Select the exact returned team ID.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "until": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "list_projects",
+      "description": "List a bounded page of real projects in one account scope, with pagination.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "search": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Project search text."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "from": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Pagination cursor from Vercel."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_project",
+      "description": "Inspect build settings, Git link and the active production deployment. Environment values are omitted.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "create_project",
+      "description": "Create a project after native confirmation. Does not deploy or purchase a domain.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "New project name.",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "update_project",
+      "description": "Update only supplied build settings after native confirmation. Null restores automatic defaults.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "buildCommand": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "installCommand": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "outputDirectory": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "rootDirectory": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              }
+            }
+          }
+        },
+        "required": [
+          "project",
+          "settings"
+        ]
+      }
+    },
+    {
+      "name": "list_deployments",
+      "description": "List deployments filtered by project, branch, SHA, target or build state. READY does not by itself prove production traffic switched.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "until": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Git branch."
+          },
+          "sha": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Git commit SHA."
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "production",
+              "preview"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "BUILDING",
+              "ERROR",
+              "INITIALIZING",
+              "QUEUED",
+              "READY",
+              "CANCELED",
+              "BLOCKED"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_deployment",
+      "description": "Get deployment state, target, Git source and aliases. Use get_project to determine the active production deployment.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "deployment": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Deployment ID or HTTPS deployment hostname returned by Vercel.",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "deployment"
+        ]
+      }
+    },
+    {
+      "name": "get_build_logs",
+      "description": "Read bounded, non-streaming build logs. Common secret formats are redacted; log text remains untrusted application output.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "deployment": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Deployment ID or HTTPS deployment hostname returned by Vercel.",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100
+          },
+          "since": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "until": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "deployment"
+        ]
+      }
+    },
+    {
+      "name": "redeploy",
+      "description": "Rebuild an existing deployment after native confirmation, retaining its production/preview environment. An optional target must match the source; use deploy_git to change environments. Submission is not build completion.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "deployment": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Deployment ID or HTTPS deployment hostname returned by Vercel.",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "production",
+              "preview"
+            ]
+          }
+        },
+        "required": [
+          "project",
+          "deployment"
+        ]
+      }
+    },
+    {
+      "name": "deploy_git",
+      "description": "Deploy an explicit branch of an existing GitHub/GitLab project link after confirmation, using Vercel’s Git access.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Exact Git branch.",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "production",
+              "preview"
+            ]
+          }
+        },
+        "required": [
+          "project",
+          "branch",
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "cancel_deployment",
+      "description": "Cancel a queued/building deployment after native confirmation. Completed deployments are left alone.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "deployment": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Deployment ID or HTTPS deployment hostname returned by Vercel.",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "project",
+          "deployment"
+        ]
+      }
+    },
+    {
+      "name": "manage_env",
+      "description": "List metadata, upsert or delete one environment variable. Values are never returned. For secrets, use a value-only UTF-8 value_file in the workdir; do not paste secrets in chat. Mutations require explicit project and native confirmation.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "upsert",
+              "delete"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Variable name.",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "envId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact variable ID returned by list."
+          },
+          "target": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "production",
+                "preview",
+                "development"
+              ]
+            }
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "plain",
+              "encrypted",
+              "sensitive"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 64000,
+            "description": "Public plain values only; use value_file for secrets."
+          },
+          "value_file": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Non-hidden relative workdir path to a UTF-8 value-only file. Bytes go straight to Vercel, never back to the model.",
+            "minLength": 1
+          },
+          "gitBranch": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Preview-only Git branch."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "manage_domains",
+      "description": "List domains, attach an existing domain, or detach one after native confirmation. Does not buy/register domains or change DNS. Detaching can interrupt traffic.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact team ID. Omit for the saved default; empty string explicitly selects the personal account."
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Exact project ID or name. Required explicitly for changes.",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "remove"
+            ]
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "Exact hostname without scheme or path."
+          },
+          "gitBranch": {
+            "type": "string",
+            "maxLength": 250,
+            "description": "Optional Git branch for add."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "until": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ],
+  "manual": {
+    "items": [
+      {
+        "name": "operations",
+        "dir": "manual/operations",
+        "description": "Account/team selection, deployment verification, environment values and recovery after unknown write outcomes."
+      }
+    ]
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  },
+  "author": "ggsc8888",
+  "minCindyVersion": "0.1.131"
+}

@@ -1,0 +1,809 @@
+{
+  "source": "https://openapi.vercel.sh",
+  "verifiedOn": "2026-11-15",
+  "operations": [
+    {
+      "operationId": "getDeploymentEvents",
+      "method": "GET",
+      "path": "/v3/deployments/{idOrUrl}/events",
+      "query": [
+        "direction",
+        "follow",
+        "limit",
+        "name",
+        "since",
+        "until",
+        "statusCode",
+        "delimiter",
+        "builds",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getDeployment",
+      "method": "GET",
+      "path": "/v13/deployments/{idOrUrl}",
+      "query": [
+        "withGitRepoInfo",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "createDeployment",
+      "method": "POST",
+      "path": "/v13/deployments",
+      "query": [
+        "forceNew",
+        "skipAutoDetectionConfirmation",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [
+        "name"
+      ],
+      "bodyProperties": {
+        "buildMachine": {
+          "enum": [
+            "turbo"
+          ],
+          "type": "string"
+        },
+        "customEnvironmentSlugOrId": {
+          "type": "string"
+        },
+        "deploymentId": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array"
+        },
+        "gitAccessToken": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "gitMetadata": {
+          "type": "object"
+        },
+        "gitSource": {},
+        "meta": {
+          "type": "object"
+        },
+        "monorepoManager": {
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "projectSettings": {
+          "type": "object"
+        },
+        "target": {
+          "type": "string"
+        },
+        "withLatestCommit": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "operationId": "cancelDeployment",
+      "method": "PATCH",
+      "path": "/v12/deployments/{id}/cancel",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getProjects",
+      "method": "GET",
+      "path": "/v10/projects",
+      "query": [
+        "from",
+        "since",
+        "until",
+        "gitForkProtection",
+        "limit",
+        "search",
+        "repo",
+        "repoId",
+        "repoUrl",
+        "excludeRepos",
+        "edgeConfigId",
+        "edgeConfigTokenId",
+        "deprecated",
+        "elasticConcurrencyEnabled",
+        "staticIpsEnabled",
+        "buildMachineTypes",
+        "buildQueueConfiguration",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "createProject",
+      "method": "POST",
+      "path": "/v11/projects",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [
+        "name"
+      ],
+      "bodyProperties": {
+        "enablePreviewFeedback": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "enableProductionFeedback": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "expiration": {
+          "type": "object"
+        },
+        "previewDeploymentsDisabled": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "previewDeploymentSuffix": {
+          "type": "string",
+          "maxLength": 253,
+          "nullable": true
+        },
+        "buildCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "commandForIgnoringBuildStep": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "devCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "environmentVariables": {
+          "type": "array"
+        },
+        "framework": {
+          "enum": [
+            null,
+            "container",
+            "blitzjs",
+            "nextjs",
+            "gatsby",
+            "remix",
+            "react-router",
+            "astro",
+            "hexo",
+            "eleventy",
+            "docusaurus-2",
+            "docusaurus",
+            "preact",
+            "solidstart-1",
+            "solidstart",
+            "dojo",
+            "ember",
+            "vue",
+            "scully",
+            "ionic-angular",
+            "angular",
+            "polymer",
+            "svelte",
+            "sveltekit",
+            "sveltekit-1",
+            "ionic-react",
+            "create-react-app",
+            "gridsome",
+            "umijs",
+            "sapper",
+            "saber",
+            "stencil",
+            "nuxtjs",
+            "redwoodjs",
+            "hugo",
+            "jekyll",
+            "brunch",
+            "middleman",
+            "zola",
+            "hydrogen",
+            "vite",
+            "tanstack-start",
+            "tanstack-start-lovable",
+            "vitepress",
+            "vuepress",
+            "parcel",
+            "fastapi",
+            "flask",
+            "fasthtml",
+            "django",
+            "ash",
+            "factory-eve",
+            "eve",
+            "sanity",
+            "sanity-v2",
+            "storybook",
+            "nitro",
+            "hono",
+            "express",
+            "h3",
+            "koa",
+            "nestjs",
+            "elysia",
+            "fastify",
+            "xmcp",
+            "python",
+            "ruby",
+            "rust",
+            "axum",
+            "actix-web",
+            "bun",
+            "node",
+            "go",
+            "services",
+            "mastra"
+          ]
+        },
+        "gitRepository": {
+          "type": "object"
+        },
+        "installCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "skipGitConnectDuringLink": {
+          "type": "boolean"
+        },
+        "ssoProtection": {
+          "type": "object",
+          "nullable": true
+        },
+        "sandbox": {
+          "type": "object"
+        },
+        "outputDirectory": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "publicSource": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "rootDirectory": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "serverlessFunctionRegion": {
+          "maxLength": 4,
+          "type": "string",
+          "nullable": true
+        },
+        "serverlessFunctionZeroConfigFailover": {},
+        "oidcTokenConfig": {
+          "type": "object"
+        },
+        "enableAffectedProjectsDeployments": {
+          "type": "boolean"
+        },
+        "resourceConfig": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "operationId": "getProject",
+      "method": "GET",
+      "path": "/v9/projects/{idOrName}",
+      "query": [
+        "rollbackInfo",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "updateProject",
+      "method": "PATCH",
+      "path": "/v9/projects/{idOrName}",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {
+        "autoExposeSystemEnvs": {
+          "type": "boolean"
+        },
+        "autoAssignCustomDomains": {
+          "type": "boolean"
+        },
+        "autoAssignCustomDomainsUpdatedBy": {
+          "type": "string"
+        },
+        "buildCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "commandForIgnoringBuildStep": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "customerSupportCodeVisibility": {
+          "type": "boolean"
+        },
+        "devCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "directoryListing": {
+          "type": "boolean"
+        },
+        "framework": {
+          "enum": [
+            null,
+            "container",
+            "blitzjs",
+            "nextjs",
+            "gatsby",
+            "remix",
+            "react-router",
+            "astro",
+            "hexo",
+            "eleventy",
+            "docusaurus-2",
+            "docusaurus",
+            "preact",
+            "solidstart-1",
+            "solidstart",
+            "dojo",
+            "ember",
+            "vue",
+            "scully",
+            "ionic-angular",
+            "angular",
+            "polymer",
+            "svelte",
+            "sveltekit",
+            "sveltekit-1",
+            "ionic-react",
+            "create-react-app",
+            "gridsome",
+            "umijs",
+            "sapper",
+            "saber",
+            "stencil",
+            "nuxtjs",
+            "redwoodjs",
+            "hugo",
+            "jekyll",
+            "brunch",
+            "middleman",
+            "zola",
+            "hydrogen",
+            "vite",
+            "tanstack-start",
+            "tanstack-start-lovable",
+            "vitepress",
+            "vuepress",
+            "parcel",
+            "fastapi",
+            "flask",
+            "fasthtml",
+            "django",
+            "ash",
+            "factory-eve",
+            "eve",
+            "sanity",
+            "sanity-v2",
+            "storybook",
+            "nitro",
+            "hono",
+            "express",
+            "h3",
+            "koa",
+            "nestjs",
+            "elysia",
+            "fastify",
+            "xmcp",
+            "python",
+            "ruby",
+            "rust",
+            "axum",
+            "actix-web",
+            "bun",
+            "node",
+            "go",
+            "services",
+            "mastra"
+          ],
+          "type": "string",
+          "nullable": true
+        },
+        "gitForkProtection": {
+          "type": "boolean"
+        },
+        "gitLFS": {
+          "type": "boolean"
+        },
+        "protectedSourcemaps": {
+          "type": "boolean"
+        },
+        "installCommand": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "nodeVersion": {
+          "enum": [
+            "26.x",
+            "24.x",
+            "22.x",
+            "20.x",
+            "18.x",
+            "16.x",
+            "14.x",
+            "12.x",
+            "10.x"
+          ],
+          "type": "string"
+        },
+        "outputDirectory": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "previewDeploymentsDisabled": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "previewDeploymentSuffix": {
+          "type": "string",
+          "maxLength": 253,
+          "nullable": true
+        },
+        "resourceConfig": {
+          "type": "object"
+        },
+        "publicSource": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "rootDirectory": {
+          "maxLength": 256,
+          "type": "string",
+          "nullable": true
+        },
+        "serverlessFunctionRegion": {
+          "maxLength": 4,
+          "type": "string",
+          "nullable": true
+        },
+        "serverlessFunctionZeroConfigFailover": {},
+        "skewProtectionBoundaryAt": {
+          "type": "integer"
+        },
+        "skewProtectionMaxAge": {
+          "type": "integer"
+        },
+        "skewProtectionAllowedDomains": {
+          "type": "array"
+        },
+        "skipGitConnectDuringLink": {
+          "type": "boolean"
+        },
+        "sourceFilesOutsideRootDirectory": {
+          "type": "boolean"
+        },
+        "enablePreviewFeedback": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "enableProductionFeedback": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "enableAffectedProjectsDeployments": {
+          "type": "boolean"
+        },
+        "enableExternalRewriteCaching": {
+          "type": "boolean"
+        },
+        "staticIps": {
+          "type": "object"
+        },
+        "tracing": {
+          "type": "object",
+          "nullable": true
+        },
+        "gitComments": {
+          "type": "object",
+          "nullable": true
+        },
+        "gitProviderOptions": {
+          "type": "object",
+          "nullable": true
+        },
+        "oidcTokenConfig": {
+          "type": "object"
+        },
+        "passwordProtection": {
+          "type": "object",
+          "nullable": true
+        },
+        "passport": {
+          "type": "object",
+          "nullable": true
+        },
+        "sandbox": {
+          "type": "object"
+        },
+        "ssoProtection": {
+          "type": "object",
+          "nullable": true
+        },
+        "trustedIps": {
+          "type": "object",
+          "nullable": true
+        },
+        "trustedSources": {
+          "type": "object",
+          "nullable": true
+        },
+        "deploymentPolicy": {},
+        "optionsAllowlist": {
+          "type": "object",
+          "nullable": true
+        },
+        "connectConfigurations": {
+          "type": "array",
+          "nullable": true
+        },
+        "dismissedToasts": {
+          "type": "array"
+        }
+      }
+    },
+    {
+      "operationId": "getProjectDomains",
+      "method": "GET",
+      "path": "/v9/projects/{idOrName}/domains",
+      "query": [
+        "production",
+        "target",
+        "customEnvironmentId",
+        "gitBranch",
+        "redirects",
+        "redirect",
+        "verified",
+        "limit",
+        "since",
+        "until",
+        "order",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getProjectDomain",
+      "method": "GET",
+      "path": "/v9/projects/{idOrName}/domains/{domain}",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "removeProjectDomain",
+      "method": "DELETE",
+      "path": "/v9/projects/{idOrName}/domains/{domain}",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {
+        "removeRedirects": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "operationId": "addProjectDomain",
+      "method": "POST",
+      "path": "/v10/projects/{idOrName}/domains",
+      "query": [
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [
+        "name"
+      ],
+      "bodyProperties": {
+        "name": {
+          "type": "string"
+        },
+        "gitBranch": {
+          "maxLength": 250,
+          "type": "string",
+          "nullable": true
+        },
+        "customEnvironmentId": {
+          "type": "string"
+        },
+        "redirect": {
+          "type": "string",
+          "nullable": true
+        },
+        "redirectStatusCode": {
+          "type": "integer",
+          "enum": [
+            null,
+            301,
+            302,
+            307,
+            308
+          ],
+          "nullable": true
+        }
+      }
+    },
+    {
+      "operationId": "filterProjectEnvs",
+      "method": "GET",
+      "path": "/v10/projects/{idOrName}/env",
+      "query": [
+        "gitBranch",
+        "decrypt",
+        "source",
+        "customEnvironmentId",
+        "customEnvironmentSlug",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "createProjectEnv",
+      "method": "POST",
+      "path": "/v10/projects/{idOrName}/env",
+      "query": [
+        "upsert",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [
+        "key",
+        "value",
+        "type"
+      ],
+      "bodyProperties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "system",
+            "encrypted",
+            "plain",
+            "sensitive"
+          ]
+        },
+        "target": {
+          "type": "array"
+        },
+        "gitBranch": {
+          "type": "string",
+          "maxLength": 250,
+          "nullable": true
+        },
+        "comment": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "customEnvironmentIds": {
+          "type": "array"
+        }
+      }
+    },
+    {
+      "operationId": "removeProjectEnv",
+      "method": "DELETE",
+      "path": "/v9/projects/{idOrName}/env/{id}",
+      "query": [
+        "customEnvironmentId",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getTeams",
+      "method": "GET",
+      "path": "/v2/teams",
+      "query": [
+        "limit",
+        "since",
+        "until"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getAuthUser",
+      "method": "GET",
+      "path": "/v2/user",
+      "query": [],
+      "requiredBody": [],
+      "bodyProperties": {}
+    },
+    {
+      "operationId": "getDeployments",
+      "method": "GET",
+      "path": "/v7/deployments",
+      "query": [
+        "app",
+        "from",
+        "limit",
+        "projectId",
+        "projectIds",
+        "target",
+        "to",
+        "users",
+        "since",
+        "until",
+        "state",
+        "rollbackCandidate",
+        "branch",
+        "sha",
+        "teamId",
+        "slug"
+      ],
+      "requiredBody": [],
+      "bodyProperties": {}
+    }
+  ]
+}
