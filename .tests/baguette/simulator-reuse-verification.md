@@ -141,3 +141,27 @@ batch; it verifies one request per operation and subsequent input availability.
   failed (56.33 seconds). Forge validated and packed version 0.3.51 without
   installation. This is loopback/VM evidence, not two-computer acceptance;
   host release and native two-computer/trackpad validation remain outstanding.
+
+
+## Main merge compatibility checkpoint — 2026-11-18
+
+Merged main `ded6b33b` (#345). Only manifest version and release notes conflicted.
+Version is now 0.3.52; both existing release notes are retained. No new behavior
+is designed in this resolution: main owns its foldable/Apple TV/Vision Pro
+gestures, and this PR retains shared keyboard validation and the existing
+provider rotation lookup. The automatic merge keeps main’s live-screen changes.
+
+Invariant: input validation remains shared through keys.cjs, orientation remains
+owned by live-screen.cjs, and merging main must retain both existing feature sets.
+The event/state ownership and failure cleanup matrices above are unchanged.
+Symmetric audit: compared the merged provider and its tests to main; the remaining
+provider difference is shared Android key mapping plus the rotation getter, with
+rotation assertions in the existing stream/orientation tests. The aggregate
+simulator suite includes the upstream foldable/TV/Vision Pro regressions and this
+PR’s remote viewer/task/chrome regressions. No additional locks, retries or state.
+
+This is local automated evidence only; no install/restart or real two-computer
+acceptance was performed. Host support has since shipped in stable v0.1.139.
+
+Validation: required repository suites plus the simulator aggregate: 908 passed,
+zero failed (57.53 seconds). Manifest validation and git diff --check passed.

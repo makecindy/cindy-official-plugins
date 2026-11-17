@@ -2,7 +2,7 @@
 
 批准范围：[提案 #158](https://github.com/makecindy/cindy-official-plugins/issues/158#issuecomment-6120456702)。首版包含 M1 导入与原文取证，以及可选的 M2 AssemblyAI 云转写；站内回放留到 M3。
 
-从侧边栏打开资料库，导入 RSS、Apple Podcasts、小宇宙或以 `.mp3`、`.m4a`、`.wav`、`.ogg`、`.aac`、`.flac` 结尾的公开音频 URL，再读取与检索已有转录；允许查询参数和片段。页面链接导入会创建可见的 Cindy 任务；在任务卡片中选择 RSS 候选、确认云费用。提供8个 `podcast_*` 工具。可选密钥只由 Cindy 保存，Agent 参数不能提交付费转写。
+从侧边栏打开资料库，导入 RSS、Apple Podcasts、小宇宙或以 `.mp3`、`.m4a`、`.wav`、`.ogg`、`.aac`、`.flac` 结尾的公开音频 URL，再读取与检索已有转录；允许查询参数和片段。页面链接导入会创建可见的 Cindy 任务；在任务卡片中选择 RSS 候选、确认云费用。提供9个 `podcast_*` 工具。可选密钥只由 Cindy 保存，Agent 参数不能提交付费转写。
 
 构建：`node podcast-insights/build.mjs`。测试：`node --test .tests/podcast-insights.test.mjs`。最低要求正式稳定版 / Beta Cindy0.1.103。清单资源覆盖中英日韩；页面和运行时支持中英文，其余回退英文。
 
@@ -56,3 +56,8 @@ SQLite 迁移保留旧版0.1.x JSON、回执、结论与导出原文件，使用
 0.2.20：HTML 证据改用固定版本标准解析器 parse5，统一排除 plaintext、raw-text 和 template 上下文，不执行脚本或请求资源。WebVTT 字符引用单次解码；发布方重试保留活动云任务状态；续页遇到转录版本变化从头重读；删除后刷新笔记。进度卡显示本次恢复错误。重启只清理未完成且非活动的用户/发布方版本，保留已完成历史、活动和云版本。解析器来源及许可见 THIRD-PARTY-LICENSES.txt。
 
 0.2.21：界面语言资源初始化失败时，待核对云任务卡仍显示默认恢复指引，不会因提示文案缺失而停止更新。
+
+## 0.4.12：自动知识纪要
+
+见[自动知识纪要](READING.zh-CN.md)：模型整理章节、程序提取原文依据、完整转录阅读与
+搜索、章节追问及 HTML/JSON 导出。使用已有转录，消耗 Cindy 文本模型用量，不重新转录音频。

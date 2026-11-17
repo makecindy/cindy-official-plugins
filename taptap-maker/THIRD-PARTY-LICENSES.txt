@@ -1,3 +1,7 @@
+Local modification to @taptap/maker 0.0.41:
+PAT input uses the stdin stream for Cindy IPC compatibility instead of reading
+OS file descriptor 0. No additional third-party dependencies are introduced.
+
 Additional components introduced by Runtime 0.0.37
 
 ================================================================================

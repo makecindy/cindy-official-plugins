@@ -77,7 +77,7 @@
 
 import { appendTrace, scrub } from './lib/follow-trace.mjs';
 import { createHash } from 'node:crypto';
-import { checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
+import { BACKOFF_STEPS_MIN, baseMovedWait, checkOutcome, handledFailure, inspectWait, makeWait, setsAside, waitDueAt, waitFacts, waitIsDue, waitNotice } from './lib/follow-wait.mjs';
 import { mergeQueueFingerprint } from './lib/merge-queue.mjs';
 import { SETTLE_MAX_MS, breaksSettle, expectedBots, pacingDue, reviewerBotsOf, settleState, updateRepoBots } from './lib/follow-pacing.mjs';
 import { execFile } from 'node:child_process';
@@ -1022,6 +1022,8 @@ export function decide({
   const waiting = inspectWait(previous?.wait, snap);
   // A wait was installed only after ack; base noise must not defeat retries of its deadline.
   if (waiting.wait && waiting.ignoreBase) {
+    // A baseline wait exists to catch the base's fix: absorb the commit but look within the hour.
+    if (result.events.some((e) => e.kind === 'base-moved')) waiting.wait = baseMovedWait(waiting.wait, now);
     result.events = result.events.filter((e) => e.kind !== 'base-moved');
   }
   // The ordinary required-check milestone must not bypass a batch of awaited checks.
@@ -1161,7 +1163,9 @@ export function decide({
       // Unlike a fire-and-forget timer, keep this pending until an agent really acknowledges it.
       const age = setsAside(wait)
         ? `; set aside for a human ${formatDuration(now - (wait.since ?? wait.createdAt))} ago: recheck that it still holds before waiting again`
-        : '';
+        : wait.baseMovedAt
+          ? `; the base moved ${formatDuration(now - wait.baseMovedAt)} ago: look for the fix there first`
+          : '';
       return passPending('wait-expired', `the ${wait.kind} wait is due: ${wait.reason}${age}`, '',
         `wait:${wait.createdAt}:${dueAt}`, result.next);
     }
@@ -1237,7 +1241,7 @@ export function passAdvisories(snap, roundCount, extras = {}) {
   const activeUnresolved = Number(snap.reviewThreads?.unresolvedCount);
   if (humanBlockers.length && !hardAgentWork && Number.isFinite(activeUnresolved) && activeUnresolved <= 2) {
     notes.push(
-      `almost there: only ${activeUnresolved} active thread(s) left and blockers include ${humanBlockers.join('/')} (only a human can move these). Finish the remaining threads, then wait **silently**: waiting for approval or merge is not a decision for the user, so do not notify, and do not widen the fix just to find work`,
+      `almost there: only ${activeUnresolved} active thread(s) left and blockers include ${humanBlockers.join('/')} (only a human can move these). Finish the remaining threads; if the user must decide, notify and ask again this round with progress and a recommendation. Wait silently only when no user decision remains (another reviewer or an already-authorized merge); do not widen the fix just to find work`,
     );
   }
   const additions = Number(snap.additions);
@@ -1477,10 +1481,13 @@ async function gateMain(argv, ctx) {
     }
     const notice = waitNotice(wait, now);
     if (wait && waitDueAt(wait) !== null) detail += `; review at ${isoAt(waitDueAt(wait))}`;
+    if (wait && Number.isInteger(wait.step)) {
+      detail += ` (backoff step ${wait.step + 1}/${BACKOFF_STEPS_MIN.length}; the same blocker on this head waits longer each renewal, up to ${BACKOFF_STEPS_MIN.at(-1) / 60} h)`;
+    }
     if (notice === 'entered') {
       detail += '; tell the user now who has to act and what exactly they have to do (in a background round also schedule_notify_current_run)';
     } else if (notice === 'reminder') {
-      detail += `; a human has not acted for ${formatDuration(now - wait.since)}: remind the user what is still needed and ask whether to keep following or stop (in a background round also schedule_notify_current_run)`;
+      detail += `; still waiting for human action after ${formatDuration(now - wait.since)}: state progress and the blocker; if the user must decide, ask for that specific decision again with a recommendation (in a background round also schedule_notify_current_run)`;
     }
     writeState(file, next);
     emit(args, {

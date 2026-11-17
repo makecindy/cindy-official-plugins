@@ -364,9 +364,10 @@
     const root=overlayHost.attachShadow({mode:'closed'});
     const css=U.css+`
       .captions-root{position:absolute;inset:0;pointer-events:none}
-      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out,left .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:min(70%,900px);padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.55);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:400;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.3;overflow-wrap:anywhere}.caption-box[data-caption-theme=light]{background:rgba(255,255,255,.8);color:#1a1a1a;text-shadow:none}.caption-box[data-provisional=true] .caption-translation{opacity:.82}.caption-hint{position:absolute;bottom:var(--caption-bottom,16px);left:50%;transform:translateX(-50%);max-width:88%;padding:6px 14px;border-radius:9999px;background:rgba(18,18,17,.6);color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;line-height:18px;text-align:center}
+      .caption-box{position:absolute;bottom:var(--caption-bottom,16px);transition:bottom .18s ease-out,left .18s ease-out;left:50%;transform:translateX(-50%);width:max-content;max-width:min(90%,1400px);padding:6px 14px 8px;border-radius:8px;background:rgba(18,18,17,.55);color:#fff;text-align:center;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:400;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.3;overflow-wrap:anywhere}.caption-box[data-caption-theme=light]{background:rgba(255,255,255,.8);color:#1a1a1a;text-shadow:none}.caption-box[data-provisional=true] .caption-translation{opacity:.82}.caption-hint{position:absolute;bottom:var(--caption-bottom,16px);left:50%;transform:translateX(-50%);max-width:88%;padding:6px 14px;border-radius:9999px;background:rgba(18,18,17,.6);color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;line-height:18px;text-align:center}
       .caption-original{font-size:calc(var(--caption-size)*.78);font-weight:400;opacity:.86;white-space:pre-line}
       .caption-translation{font-size:var(--caption-size);margin-top:5px;white-space:pre-line}
+      .caption-box[data-measuring=true] .caption-original,.caption-box[data-measuring=true] .caption-translation{white-space:pre}
       @media(prefers-reduced-motion:reduce){.caption-box{transition:none}}
       .caption-bar{position:absolute;bottom:8px;right:70px;display:flex;gap:4px;align-items:center;padding:3px;border-radius:9999px;background:rgba(18,18,17,.55);pointer-events:auto;opacity:0;transition:opacity .15s}
       .captions-root[data-controls=true] .caption-bar,.caption-bar:hover,.caption-bar:focus-within{opacity:1}.caption-bar .label{font-size:12px;padding:0 8px}.caption-bar button{min-height:0;padding:2px 6px;background:transparent;border:0}.caption-bar button svg{width:24px;height:24px;display:block}
@@ -435,6 +436,11 @@
       const key=[original.textContent,translation.textContent,original.hidden,translation.hidden,bounds.width,bounds.height,bottom,captionSize].join('|');
       if(key===fitKey)return;fitKey=key;
       let size=captionSize;surface.style.setProperty('--caption-size',size+'px');
+      // Keep each caption on one line when a slightly smaller font is enough; longer captions still wrap.
+      box.dataset.measuring='true';
+      const ratio=Math.min(1,...[original,translation].filter(n=>!n.hidden&&n.textContent).map(n=>n.clientWidth/n.scrollWidth));
+      delete box.dataset.measuring;
+      if(ratio<1&&ratio>=.8){size=Math.max(11,size*ratio*.98);surface.style.setProperty('--caption-size',size+'px');}
       const available=Math.max(24,bounds.height-bottom-12);
       for(let step=0;step<5&&box.getBoundingClientRect().height>available&&size>11;step++){
         size=Math.max(11,size*.87);surface.style.setProperty('--caption-size',size+'px');

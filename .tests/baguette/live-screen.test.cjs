@@ -31,11 +31,11 @@ class FakeSocket{
   text(value){this.onmessage?.({data:JSON.stringify(value)});}
   // The orientation probe (Baguette's describe-ui over HTTP) for this device, answered by reply().
   probe(){this.probes++;return new Promise(resolve=>this.pending.push(resolve));}
-  reply(orientation){this.pending.shift()?.({ok:true,tree:{screen:{orientation}}});return new Promise(r=>setImmediate(r));}
+  reply(orientation,litPanel){this.pending.shift()?.({ok:true,tree:{screen:{orientation,...(litPanel?{target:{litPanel}}:{})}}});return new Promise(r=>setImmediate(r));}
   // Baguette: an avcC on connect, then answers the orientation probe.
-  answer(orientation){if(this.pending.length)this.reply(orientation);}
+  answer(orientation,litPanel){if(this.pending.length)this.reply(orientation,litPanel);}
 }
-function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices=list(),tasks=null,request=null}={}){
+function fixture(t,{enabled=true,orientation='portrait',panel,size='1178x2556',devices=list(),tasks=null,request=null}={}){
   const calls=[],touches=[],sendTouch=[];let on=enabled,offset=0;const busy={times:0};
   const state={enabled:()=>on,set:v=>{on=v;}};
   const runtime={
@@ -52,7 +52,9 @@ function fixture(t,{enabled=true,orientation='portrait',size='1178x2556',devices
     serve:({sink:s,control:c,res,signal})=>{sink=s;control=c;s.begin('application/x-cindy-android-avcc');return new Promise(resolve=>{streamed=resolve;signal.addEventListener('abort',resolve,{once:true});});},
     rpc:async(endpoint,method,body)=>{sendTouch.push(body.touches);return {};},
     describeUi:async(base,udid)=>FakeSocket.all.findLast(ws=>ws.url.includes(`/simulators/${udid}/`)).probe(),
-    WebSocket:class extends FakeSocket{constructor(url){super(url);setImmediate(()=>{this.binary(avcc(size));this.answer(orientation);});}}});
+    hinge:async()=>panel?{ok:true,foldable:true,litPanel:panel}:{ok:true,foldable:false},
+    // As on iPhone Duo, a foldable's stream reports its hinge only after the first frame.
+    WebSocket:class extends FakeSocket{constructor(url){super(url);setImmediate(()=>{this.binary(avcc(size));if(panel)this.text({type:'hinge',angleDegrees:180});this.answer(orientation,panel);});}}});
   t.after(()=>live.stop());
   return {live,calls,touches,sendTouch,busy,state,sink:()=>sink,control:()=>control,end:()=>streamed?.(),advance:ms=>{offset+=ms;}};
 }
@@ -271,6 +273,25 @@ test('orientation buttons set an absolute pose, so later relative turns start fr
     ['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}]]);
 });
 
+test('a foldable offers its postures, and its inner panel turns the device a quarter from the shape asked for',async t=>{
+  // iPhone Duo held upright: the inner panel shows landscape-left. The probe has not answered
+  // yet when the first press arrives (it takes over a second): the hinge route tells the panel.
+  const f=fixture(t,{orientation:null,panel:'secondary'});
+  const opened=await f.live.request('liveScreen.open',{id:PHONE,_locale:'zh-CN'});
+  assert.deepEqual(opened.screen.buttons.slice(-3),[{id:'posture-closed',icon:'menu',label:'合上'},{id:'posture-open',icon:'menu',label:'半展开'},{id:'posture-flat',icon:'menu',label:'展开'}]);
+  await f.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'orientation-portrait'},{kind:'press',button:'orientation-landscape'},
+    {kind:'press',button:'rotate-right'},{kind:'press',button:'posture-closed'},{kind:'press',button:'posture-open'},{kind:'press',button:'posture-flat'}]});
+  assert.deepEqual(f.calls,[['set_state',{udid:PHONE,orientation:'landscape-right'}],['set_state',{udid:PHONE,orientation:'portrait'}],
+    ['set_state',{udid:PHONE,orientation:'portrait-upside-down'}],
+    // Folding lights the outer panel: the device turns back to the landscape asked for; unfolding again turns it once more, then flat keeps it.
+    ['set_state',{udid:PHONE,posture:'closed'}],['set_state',{udid:PHONE,orientation:'landscape-right'}],
+    ['set_state',{udid:PHONE,posture:'open'}],['set_state',{udid:PHONE,orientation:'portrait-upside-down'}],['set_state',{udid:PHONE,posture:'flat'}]]);
+  // A phone without a hinge neither lists nor takes the postures.
+  const phone=fixture(t);const plain=await phone.live.request('liveScreen.open',{id:PHONE});
+  assert.ok(plain.screen.buttons.every(b=>!b.id.startsWith('posture-')));
+  await code(phone.live.request('liveScreen.input',{id:PHONE,events:[{kind:'press',button:'posture-flat'}]}),'INVALID_ARGUMENT');
+});
+
 test('a requested turn the picture follows shows at once; one the App refuses does not',async t=>{
   const f=fixture(t);
   const opened=await f.live.request('liveScreen.open',{id:PHONE});
@@ -425,12 +446,11 @@ test('a run of keys becomes one keyboard operation, up to 40 keys each',async t=
   assert.deepEqual(f.calls[0][1].keys,['shift+KeyQ','KeyA']);
 });
 
-test('Apple TV and Vision Pro forward H.264 without touches and offer their basic buttons',async t=>{
+test('Apple TV and Vision Pro forward H.264, take one finger on TV and offer their basic buttons',async t=>{
   const f=fixture(t,{size:'1920x1080'});
   const opened=await f.live.request('liveScreen.open',{id:TV,_locale:'en'});
   assert.equal(FakeSocket.all.at(-1).url,`ws://127.0.0.1:9/simulators/${TV}/stream?format=avcc&version=v2`);
-  assert.deepEqual({...opened.screen,buttons:opened.screen.buttons.map(b=>b.id)},{platform:'tvos',width:1920,height:1080,cornerRadius:0,maxTouches:0,keyboard:false,buttons:['home','menu','play-pause']});
-  await code(f.live.request('liveScreen.input',{id:TV,events:[{kind:'touch',touches:[{id:0,x:0,y:0,phase:'began'}]}]}),'UNSUPPORTED');
+  assert.deepEqual({...opened.screen,buttons:opened.screen.buttons.map(b=>b.id)},{platform:'tvos',width:1920,height:1080,cornerRadius:0,maxTouches:1,keyboard:false,buttons:['home','menu','play-pause']});
   await code(f.live.request('liveScreen.input',{id:TV,events:[{kind:'text',text:'a'}]}),'UNSUPPORTED');
   await f.live.request('liveScreen.input',{id:TV,events:[{kind:'press',button:'menu'},{kind:'press',button:'play-pause'}]});
   assert.deepEqual(f.calls,[['press',{udid:TV,button:'menu'}],['press',{udid:TV,button:'play-pause'}]]);
@@ -438,6 +458,54 @@ test('Apple TV and Vision Pro forward H.264 without touches and offer their basi
   await code(f.live.request('liveScreen.open',{id:VISION}),'NOT_RUNNING');
   await code(f.live.request('liveScreen.open',{id:PAD}),'NOT_RUNNING');
   await code(f.live.request('liveScreen.open',{id:'00000000-0000-4000-8000-0000000000FF'}),'NOT_FOUND');
+});
+
+const touch=(phase,x,y,id=0)=>({kind:'touch',touches:[{id,x,y,phase}]});
+const both=(phase,a,b)=>({kind:'touch',touches:[{id:0,x:a[0],y:a[1],phase},{id:1,x:b[0],y:b[1],phase}]});
+const strip=calls=>calls.map(([m,p])=>m==='press'?[m,p.button,p.duration]:[m,p.phase,p.mode??null,p.x,p.y]);
+test('Apple TV: a finger on the picture is the Siri Remote; a tap clicks and a still hold is a long click',async t=>{
+  const f=fixture(t,{size:'1920x1080'});
+  await f.live.request('liveScreen.open',{id:TV});
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.505,.5),touch('ended',.505,.5)]});
+  f.advance(600);
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.2,.2)]});f.advance(700);
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('ended',.2,.2)]});
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.7,.5),touch('moved',.8,.4),touch('ended',.8,.4)]});
+  // A swipe left down by a closed screen is lifted.
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.5,.8)]});
+  await f.live.request('liveScreen.input',{id:TV,events:[{kind:'release'}]});
+  const gestures=f.calls.filter(c=>c[0]==='viewer_trackpad').map(c=>c[1].gesture);
+  assert.deepEqual(strip(f.calls),[['press','select',undefined],['press','select',.7],
+    ['viewer_trackpad','began',null,.5,.5],['viewer_trackpad','changed',null,.8,.4],['viewer_trackpad','ended',null,.8,.4],
+    ['viewer_trackpad','began',null,.5,.5],['viewer_trackpad','changed',null,.5,.8],['viewer_trackpad','ended',null,.5,.8]]);
+  assert.equal(new Set(gestures).size,2,'one native contact per swipe');
+});
+
+test('Vision Pro: one finger pinches where it touches, two turn the head, and Reset View recentres',async t=>{
+  const devices=list().map(d=>d.udid===VISION?{...d,state:'Booted'}:d);
+  const f=fixture(t,{size:'1920x1080',devices});
+  const opened=await f.live.request('liveScreen.open',{id:VISION,_locale:'zh-CN'});
+  assert.deepEqual([opened.screen.maxTouches,opened.screen.keyboard],[2,true]);
+  assert.deepEqual(opened.screen.buttons,[{id:'home',icon:'home',label:'主屏幕'},{id:'view-reset',icon:'rotate-left',label:'复位视角'}]);
+  // Tap, then drag.
+  await f.live.request('liveScreen.input',{id:VISION,events:[touch('began',.3,.4),touch('ended',.3,.4)]});
+  await f.live.request('liveScreen.input',{id:VISION,events:[touch('began',.3,.4),touch('moved',.5,.4),touch('ended',.5,.4)]});
+  // Two fingers: the head turns by how far their centre moved.
+  await f.live.request('liveScreen.input',{id:VISION,events:[both('began',[.4,.5],[.6,.5]),both('moved',[.5,.4],[.7,.4]),both('ended',[.5,.4],[.7,.4])]});
+  await f.live.request('liveScreen.input',{id:VISION,events:[{kind:'press',button:'view-reset'}]});
+  const r=strip(f.calls).map(c=>c.map(v=>typeof v==='number'?Math.round(v*100)/100:v));
+  assert.deepEqual(r,[['viewer_spatial','began','interact',.3,.4],['viewer_spatial','ended','interact',.3,.4],
+    ['viewer_spatial','began','interact',.3,.4],['viewer_spatial','changed','interact',.5,.4],['viewer_spatial','ended','interact',.5,.4],
+    ['viewer_spatial','began','tilt',0,0],['viewer_spatial','changed','tilt',.1,-.1],['viewer_spatial','ended','tilt',.1,-.1],
+    ['viewer_spatial','began','reset',0,0],['viewer_spatial','ended','reset',0,0]]);
+  assert.ok(f.calls.every(([,p])=>p.aspect===1920/1080));
+  // A finger held still pinches before it moves or lifts.
+  f.calls.length=0;
+  await f.live.request('liveScreen.input',{id:VISION,events:[touch('began',.6,.6)]});
+  await until(()=>f.calls.length===1,2000);
+  assert.deepEqual(strip(f.calls),[['viewer_spatial','began','interact',.6,.6]]);
+  await f.live.request('liveScreen.input',{id:VISION,events:[touch('ended',.6,.6)]});
+  assert.deepEqual(strip(f.calls).at(-1),['viewer_spatial','ended','interact',.6,.6]);
 });
 
 test('Apple devices are unsupported where Baguette cannot run',async t=>{

@@ -99,7 +99,9 @@
 
 ### 字段写入的并发凭证
 
-除显式 `force=true` 外，每条 change 必须携带 `expected`，取值是该字段读取时的严格 `current_value` 原样回填；`current_value` 为 `null`（首次写入）时，`expected` 传 `[]`。
+除显式 `force=true` 外，每条 change 必须携带 `expected`，取值是该字段读取时的严格 `current_value` 原样回填；`current_value` 为 `null`（首次写入）时，`expected` 传 `null`（不要传 `[]` 或空字符串）；服务端要求 `expected` 与真值严格相等，空数组只适用于「真值就是空数组」的字段。
+
+**图片字段的 `current_value` 是对象，不是字符串**：`get-app-module` 对 `icon`、`logo`、`banner_4`、`screenshots` 等图片字段返回 `{"url": ..., "info": {"size": ..., "format": ..., "width": ..., "height": ..., "image_ave": {"rgb": "0xRRGGBB"}}}`；老素材可能没有 `info`。`expected` 直接把这个对象原样回填（裸 URL 字符串服务端仍兼容，但对象是默认形态）；数组图片字段的 `current_value` 是这类对象的数组。
 
 ### TapLink 下架与替代能力
 用户在资料编辑 / 基础信息语境里问 TapLink、Taplink、tap link、启动链接、跳转链接、现在还有没有 TapLink、是不是去掉了时，不能按 `basic-info`、`level_game_launch_link` 或当前字段可见性来解释，也不要说“这个游戏当前没有可用的链接类配置项”。TapLink 不是当前资料编辑字段。

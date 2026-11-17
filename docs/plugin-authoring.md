@@ -472,6 +472,41 @@ select any of those destinations or publish a plugin.
 Keep both languages synchronized; correcting wording does not require changing
 plugin packages, Host behavior, or CI restrictions.
 
+### Current declarations and future synchronization
+
+The fields below reference [Host commit 94475474ec](https://github.com/makecindy/cindy/blob/94475474ec60d13f94790d0548e74b7d75ce9de6/packages/plugin-protocol/src/manifest.ts)
+(`v0.1.135`) and its runtime references. They help locate capabilities;
+availability still depends on the target Host.
+
+| Capability | Declaration |
+| --- | --- |
+| Tool approval policy | `tools[].approval` (`auto / each-call`) |
+| Tasks and companions | `agent.tasks / hiddenTasks / targets / delegation / observe / companions` |
+| Views | `mainView.open / side / multiple`, `taskView`, `mobile` |
+| Configuration and prerequisites | `showTaskPreferences`, `setup.requires[].anyOf` |
+| Introductions and mail | `readme`, `mail`, `mailReader` |
+| Models and Routine events | `models.types`, `routineEvents.events` |
+| Static system prompt | `systemPrompt` (v3, `scope: "selected-task"`) |
+| Event hooks | `subscribe.hooks` values `will-start-turn`, `will-model-request`, `will-compose-context`, `will-search-memory` |
+| Credential checks | `network.secrets[].check` |
+| Desktop synchronization and device screens | `deviceSync`, `liveScreen` |
+
+Page resources remain under `mcpApps.ui`: `resources` and `tools` must not both be
+empty; a page opened only through a named entry may use empty `tools: {}`.
+
+Host resource languages include `zh-CN / zh-TW / en / ja / ko / es / fr / de / pt-PT / pt-BR`.
+Host capabilities and official repository admission are maintained separately.
+This documentation update keeps the repository's existing four-language policy,
+pinned validator, file checks and package budgets, and changes no plugin manifest
+or runtime behavior.
+
+For future updates, record the target Host commit, fields and reference sections,
+then synchronize declaration types and both language guides. Preserve unknown
+capability extensions instead of adding a whitelist of implemented capabilities.
+Any validation, normalization or stored-package read changes need their own
+behavioral diff; documentation updates do not replace the validator snapshot.
+No cross-repository build dependency is needed.
+
 ## Same-account device synchronization
 
 The optional `deviceSync: true` capability uses `cindy.deviceSync` on supporting

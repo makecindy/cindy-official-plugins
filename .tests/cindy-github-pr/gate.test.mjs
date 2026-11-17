@@ -811,7 +811,7 @@ test('passAdvisories:只剩人类 blocker 且 thread 将尽时提示临门一脚
   });
   const notes = passAdvisories(nearMerge, 3);
   assert.equal(notes.length, 2);
-  assert.match(notes[1], /almost there.*wait \*\*silently\*\*.*do not notify/);
+  assert.match(notes[1], /almost there.*user must decide, notify and ask again this round.*only when no user decision remains/);
   assert.equal(passAdvisories({ ...nearMerge, blockers: [...nearMerge.blockers, 'ci_failing'] }, 3).length, 1);
 });
 
@@ -1193,7 +1193,7 @@ test('replay: human-only CodeQL wait absorbs 72 base updates and host triggers w
   assert.ok(fx.readState().wait);
 });
 
-test('replay: a failure set aside for a human is rechecked daily and the user is told on entry, then every three days', async (t) => {
+test('replay: a failure set aside for a human is rechecked daily and the user is told on entry and every renewal', async (t) => {
   const fx = createFixture(t);
   const s = humanBlocked();
   const entered = (await startWait(fx, s)).json();
@@ -1213,10 +1213,25 @@ test('replay: a failure set aside for a human is rechecked daily and the user is
     if (renewed.notice) {
       told.push(day);
       assert.equal(renewed.notice, 'reminder');
-      assert.match(renewed.detail, /ask whether to keep following or stop/);
+      assert.match(renewed.detail, /ask for that specific decision again with a recommendation/);
     }
   }
-  assert.deepEqual(told, [3, 6], 'one model round a day, one reminder every three days');
+  assert.deepEqual(told, [1, 2, 3, 4, 5, 6, 7], 'each actual renewal reminds the user');
+});
+
+test('replay: same-day human wait renewals remind each round without waking idle polls', async (t) => {
+  const fx = createFixture(t);
+  const s = humanBlocked();
+  await startWait(fx, s, { afterMinutes: 5 });
+  for (let round = 1; round <= 2; round += 1) {
+    fx.advance(5);
+    assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+    const renewed = (await fx.run(['--wait', fx.writeWait(waitPlan(s, { afterMinutes: 5 })), '--json'])).json();
+    assert.equal(renewed.notice, 'reminder');
+    assert.equal(renewed.wait.since, T0);
+    assert.match(renewed.detail, /ask for that specific decision again/);
+    assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+  }
 });
 
 test('replay: an events-only wait recorded before the daily review is rechecked and reported once', async (t) => {
@@ -1249,11 +1264,12 @@ test('replay: a plain approval wait stays events-only and silent; a shorter revi
   assert.equal(timed.notice, 'entered');
 });
 
-test('replay: baseline CI failure batches main updates until the model-selected time, then runs once', async (t) => {
+test('replay: baseline CI failure batches main updates until the paced time, then runs once', async (t) => {
   const fx = createFixture(t);
   const s = snap({ checks: [check('build', 'failed')], baseCommitOid: 'base-0', verdict: 'NEEDS_WORK', blockers: ['ci_failing'] });
-  await startWait(fx, s, { kind: 'baseline', afterMinutes: 30, checks: [{ name: 'build' }], threads: [], reason: 'The same test fails on main; recheck whether its fix has landed.' });
-  for (let tick = 1; tick <= 5; tick += 1) {
+  const set = (await startWait(fx, s, { kind: 'baseline', afterMinutes: 30, checks: [{ name: 'build' }], threads: [], reason: 'The same test fails on main; recheck whether its fix has landed.' })).json();
+  assert.equal(set.wait.until, T0 + 15 * MIN, 'the first wait on a blocker looks again after 15 minutes, not later');
+  for (let tick = 1; tick <= 2; tick += 1) {
     fx.advance(5);
     fx.setSnapshot({ ...s, baseCommitOid: `base-${tick}` });
     assert.equal((await fx.run(['--json', '--triggered'])).code, 2);
@@ -1273,6 +1289,98 @@ test('replay: baseline CI failure batches main updates until the model-selected 
   assert.equal((await fx.run(['--json'])).code, 0);
   assert.equal((await fx.run(['--ack'])).code, 0);
   assert.equal((await fx.run(['--json'])).code, 2, 'CI result handled exactly once');
+});
+
+const baselineBlocked = (extra = {}) => snap({
+  checks: [check('build', 'failed'), check('lint', 'passed')], baseCommitOid: 'base-0',
+  verdict: 'NEEDS_WORK', blockers: ['ci_failing'], ...extra,
+});
+const baselinePlan = (s, extra = {}) => waitPlan(s, {
+  kind: 'baseline', afterMinutes: null, checks: [{ name: 'build' }], threads: [],
+  reason: 'The dependency install fails on shared CI tooling; wait for the fix on main.', ...extra,
+});
+
+test('replay: renewing the same baseline blocker backs off from 15 minutes to 12 hours', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const paced = [];
+  for (let round = 0; round < 9; round += 1) {
+    const set = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+    assert.equal(set.reason, 'wait-set');
+    assert.match(set.detail, /backoff step \d\/7/);
+    const minutes = (set.wait.until - fx.now()) / MIN;
+    paced.push(minutes);
+    fx.advance(minutes - 5);
+    assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+    fx.advance(5);
+    assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+  }
+  assert.deepEqual(paced, [15, 30, 60, 120, 240, 480, 720, 720, 720]);
+});
+
+test('replay: baseline backoff clamps a longer request, keeps a shorter one and restarts on new blockers', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  const wait = async (plan) => {
+    const set = (await fx.run(['--wait', fx.writeWait(plan), '--json'])).json();
+    assert.equal(set.reason, 'wait-set', set.detail);
+    return [set.wait.step, (set.wait.until - fx.now()) / MIN];
+  };
+  assert.deepEqual(await wait(baselinePlan(s, { afterMinutes: 600 })), [0, 15], 'a longer request is clamped');
+  assert.deepEqual(await wait(baselinePlan(s, { afterMinutes: 10 })), [1, 10], 'a shorter request is kept');
+  assert.deepEqual(await wait(baselinePlan(s, { kind: 'retry' })), [2, 60], 'retry and baseline share the streak');
+  // Another failing check is a different blocker: start frequent again.
+  const wider = baselineBlocked({ checks: [check('build', 'failed'), check('lint', 'failed')] });
+  fx.setSnapshot(wider);
+  await fx.run(['--json']);
+  assert.deepEqual(await wait(baselinePlan(wider, { checks: [{ name: 'build' }, { name: 'lint' }] })), [0, 15]);
+  assert.deepEqual(await wait(baselinePlan(wider, { checks: [{ name: 'build' }, { name: 'lint' }] })), [1, 30]);
+  // A new head (after merging main and pushing) restarts the pace too.
+  assert.equal((await fx.run(['--resume', 'Merged main and pushed.'])).code, 0);
+  const pushed = baselineBlocked({ latestCommitOid: 'new-head' });
+  fx.setSnapshot(pushed);
+  await fx.run(['--json']);
+  assert.deepEqual(await wait(baselinePlan(pushed)), [0, 15]);
+});
+
+test('replay: a base commit brings a long baseline wait forward to within the hour and batches the rest', async (t) => {
+  const fx = createFixture(t);
+  const s = baselineBlocked();
+  fx.setSnapshot(s);
+  await fx.run(['--json']);
+  // Walk the backoff up to the 12-hour step.
+  for (let round = 0; round < 6; round += 1) {
+    const set = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+    fx.advance((set.wait.until - fx.now()) / MIN);
+    assert.equal((await fx.run(['--json'])).json().reason, 'wait-expired');
+  }
+  const long = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+  assert.equal(long.wait.until - fx.now(), 720 * MIN);
+  const setAt = fx.now();
+  fx.advance(30);
+  fx.setSnapshot({ ...s, baseCommitOid: 'base-fix' });
+  const absorbed = (await fx.run(['--triggered', '--json'])).json();
+  assert.equal(absorbed.reason, 'waiting', 'a base commit alone does not wake the model at once');
+  assert.equal(fx.readState().wait.until, setAt + 90 * MIN);
+  // Later base commits do not push the review further out.
+  for (let tick = 1; tick <= 6; tick += 1) {
+    fx.advance(5);
+    fx.setSnapshot({ ...s, baseCommitOid: `base-later-${tick}` });
+    assert.equal((await fx.run(['--json'])).json().reason, 'waiting');
+  }
+  assert.equal(fx.readState().wait.until, setAt + 90 * MIN);
+  fx.advance(30);
+  const due = (await fx.run(['--json'])).json();
+  assert.equal(due.reason, 'wait-expired');
+  assert.match(due.detail, /the base moved .* ago: look for the fix there first/);
+  // Renewing (no fix found) keeps the slow step and drops the base marker.
+  const renewed = (await fx.run(['--wait', fx.writeWait(baselinePlan(s)), '--json'])).json();
+  assert.equal(renewed.wait.until - fx.now(), 720 * MIN);
+  assert.equal(renewed.wait.baseMovedAt, undefined);
 });
 
 test('replay: important new events pierce a human wait immediately, even through a host trigger', async (t) => {
@@ -1420,7 +1528,7 @@ test('wait validation: reject unknown scope, unhandled work, stale head and unsa
   const before = fx.readState();
   for (const extra of [
     { headSha: 'wrong-head' }, { afterMinutes: 0 }, { afterMinutes: 1441 }, { afterMinutes: '30' },
-    { kind: 'baseline', afterMinutes: null }, { reason: '' }, { arbitraryField: true },
+    { kind: 'checks', afterMinutes: null }, { reason: '' }, { arbitraryField: true },
     { checks: [] }, { threads: [] }, { checks: [{ name: 'unknown' }] }, { threads: ['unknown'] },
   ]) {
     const result = await fx.run(['--wait', fx.writeWait(waitPlan(s, extra))]);

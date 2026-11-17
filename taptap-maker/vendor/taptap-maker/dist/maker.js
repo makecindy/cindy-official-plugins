@@ -144087,7 +144087,7 @@ function createUiRecognitionUiWithHost(options3) {
             allowPaid: true,
             recover: true
           };
-          if (options3.autoStopped?.(source)) throw new Error("已停止后续，未继续提交识图。");
+          if (options3.autoStopped?.(source2)) throw new Error("已停止后续，未继续提交识图。");
           attempt = await withCanvasTimeout(
             () => options3.store.recognizeUi(current.id, input2),
             375e3
@@ -144105,7 +144105,7 @@ function createUiRecognitionUiWithHost(options3) {
         pendingCreated = true;
         options3.changed();
         if (!await options3.save()) throw new Error("识图请求尚未保存，未提交模型。");
-        if (options3.autoStopped?.(source)) throw new Error("已停止后续，未提交识图。");
+        if (options3.autoStopped?.(source2)) throw new Error("已停止后续，未提交识图。");
         submitted = true;
         attempt = await withCanvasTimeout(
           () => options3.store.recognizeUi(current.id, {
@@ -182339,7 +182339,12 @@ async function runPatSet(parsed, ctx) {
 }
 async function resolvePatSet(parsed, ctx) {
   if (booleanOption(parsed, "pat_stdin") || booleanOption(parsed, "pat_from_stdin")) {
-    const pat = fs98.readFileSync(0, "utf8").trim();
+    // Cindy supplies virtual stdin over IPC, not OS file descriptor 0.
+    const chunks = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const pat = Buffer.concat(chunks).toString("utf8").trim();
     if (!pat) {
       throw new Error("No PAT found on stdin.");
     }

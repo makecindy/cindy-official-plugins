@@ -4,7 +4,7 @@
   "name": "Cindy Chrome",
   "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages and in-player subtitles. Page text goes to your configured AI.",
   "whenToUse": "Use Cindy Chrome for translation and in-player subtitles in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
-  "version": "0.4.92",
+  "version": "0.4.93",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -244,5 +244,5 @@
       "*.youtube.com"
     ]
   },
-  "releaseNotes": "Cindy 打开的网页默认在标签标题显示 [Cindy] 标记，用户接手后恢复标题；扩展设置面板新增标签分组设置入口，无需新增权限。需要更新 Chrome 扩展。\n修复浏览器扩展间歇断线：页面长操作独立保活，闲置页清理不再阻塞连接，连接请求超时后自动恢复且不重复执行页面操作。需要同时更新 Chrome 扩展。\n修复同语言自动字幕仍显示原字幕的问题：双语和仅译文模式都退出显示，恢复网站原有字幕状态；切换目标语言或点击仍然翻译可恢复。需要同时更新 Chrome 扩展。\n精简浏览器面板：只保留翻译此页面一个主按钮；已适配的视频网站不再重复显示字幕按钮；设置改用统一开关，模型设置可直接跳转到 Cindy；面板外观跟随系统深浅色。\n「打开视频时自动开启字幕」从 YouTube 扩展到 Vimeo、TED、B 站和 Dailymotion。\n下线 PDF / 文本 / Markdown 阅读器，扩展体积减小约 7.7 MB。需要同时更新 Chrome 扩展。\n视频字幕新增支持 X、TikTok、Dailymotion、B 站，TED、Vimeo 改进了字幕语言选择；嵌入的 YouTube、Vimeo、Dailymotion、B 站播放器也能使用。需要同时更新 Chrome 扩展。"
+  "releaseNotes": "视频字幕尽量单行显示：字幕框加宽，略超出时稍微缩小字号，原文和译文不再为一点点长度折成两行；很长的句子仍会换行。需要更新 Chrome 扩展。\nCindy 打开的网页默认在标签标题显示 [Cindy] 标记，用户接手后恢复标题；扩展设置面板新增标签分组设置入口，无需新增权限。需要更新 Chrome 扩展。\n修复浏览器扩展间歇断线：页面长操作独立保活，闲置页清理不再阻塞连接，连接请求超时后自动恢复且不重复执行页面操作。需要同时更新 Chrome 扩展。\n修复同语言自动字幕仍显示原字幕的问题：双语和仅译文模式都退出显示，恢复网站原有字幕状态；切换目标语言或点击仍然翻译可恢复。需要同时更新 Chrome 扩展。\n精简浏览器面板：只保留翻译此页面一个主按钮；已适配的视频网站不再重复显示字幕按钮；设置改用统一开关，模型设置可直接跳转到 Cindy；面板外观跟随系统深浅色。\n「打开视频时自动开启字幕」从 YouTube 扩展到 Vimeo、TED、B 站和 Dailymotion。\n下线 PDF / 文本 / Markdown 阅读器，扩展体积减小约 7.7 MB。需要同时更新 Chrome 扩展。\n视频字幕新增支持 X、TikTok、Dailymotion、B 站，TED、Vimeo 改进了字幕语言选择；嵌入的 YouTube、Vimeo、Dailymotion、B 站播放器也能使用。需要同时更新 Chrome 扩展。"
 }
