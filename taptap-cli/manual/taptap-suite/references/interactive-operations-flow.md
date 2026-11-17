@@ -33,11 +33,11 @@
 
 ## 阶段 1：准备签到内容
 
-1. 已有 `review_id` 时直接 `get-game-sign-activity` / `get-game-sign-config`；否则完整读取 `list-game-sign-activities`，按活动标题、时间确认唯一对象。多候选时停止让用户选择，不自动接着改同标题草稿。
-2. 仅确需新活动时 `create-game-sign-activity`；保存 `review_id`，配置每日奖励和可选集卡。`add-game-sign-card` 返回的 `card_id` 必须传给后续保存及库存操作。
+1. 已有 `review_id` 时直接 `game-sign get-activity` / `game-sign get-config`；否则完整读取 `game-sign list-activities`，按活动标题、时间确认唯一对象。多候选时停止让用户选择，不自动接着改同标题草稿。
+2. 仅确需新活动时 `game-sign create-activity`；保存 `review_id`，配置每日奖励和可选集卡。`add-card` 返回的 `card_id` 必须传给后续保存及库存操作。
 3. 按 [code import](taptap-suite/references/taptap-game-sign/references/code-import.md) 导码；每日奖励与集卡卡片不能互换 `award_id`/`card_id`。缺能力保留待办；恢复同一本地 task，查询目标最近记录及库存。受理结果不代表本文件完成，不将旧导入记录当成本次成功。
-4. `check-game-sign-readiness` 无 error 后，若用户明确要求并确认提审，再 `submit-game-sign-review`。审核中保持待办，按需查询，不无限等待或重复提交。
-5. 回读审核状态和时间：`ACCEPT` 仅代表审核通过；`GAME_SIGN_START` 才是进行中。`get-game-sign-activity` 返回的 `activity_url` 还须确认为当前活动可用链接，ID/URL 非空不等于已生效。
+4. `game-sign check-readiness` 无 error 后，若用户明确要求并确认提审，再 `game-sign submit-review`。审核中保持待办，按需查询，不无限等待或重复提交。
+5. 回读审核状态和时间：`ACCEPT` 仅代表审核通过；`GAME_SIGN_START` 才是进行中。`game-sign get-activity` 返回的 `activity_url` 还须确认为当前活动可用链接，ID/URL 非空不等于已生效。
 
 签到链接尚未可用时不创建面向它的推送。签到是系统同步展示条目，不在公告域手动创建替代条目；可以准备文字方案，不能以换 `label_type` 绕过同步规则。
 
@@ -46,12 +46,12 @@
 优先用记录的 `content_id` 调 `get-whats-new`，核对当前 scope、`label_type` 和 URL 是否属于阶段 1 的活动。没有 ID 时完整查询两种状态：
 
 ```text
-call_tool(name:"whats-new list-whats-new", args:{
+call_tool(name:"whats-new list", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{type:"activity", status:"online", page:1, page_size:20},
   page_all:true, page_limit:1000})
 
-call_tool(name:"whats-new list-whats-new", args:{
+call_tool(name:"whats-new list", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{type:"activity", status:"offline", page:1, page_size:20},
   page_all:true, page_limit:1000})

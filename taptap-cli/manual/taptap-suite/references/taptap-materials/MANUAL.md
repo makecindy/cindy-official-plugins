@@ -24,7 +24,7 @@ inspect 输出位于成功 envelope 的 `data` 下(`data.materials[]`、`data.su
 
 | 物料 | 上传调用(先 dry_run,确认后同参数加 yes) | 上传后交接 |
 | --- | --- | --- |
-| 本地图片 | `call_tool(name:"upload", args:{_positional:["<image>"], dev_id, app_id, idempotency_key})` | app-edit 手册决定字段用途;`app save-changes` 的图片新值按 `{"url", "info"}` 写入(不带 info 会回落 16:9) |
+| 本地图片 | `call_tool(name:"upload", args:{_positional:["<image>"], dev_id, app_id, idempotency_key})` | app-edit 手册决定字段用途;`app save-changes` 的图片新值按 `{"url", "info"}` 写入,info 五项(`size`/`format`/`width`/`height`/`image_ave.rgb`)缺一项服务端就 400 |
 | 本地视频 | `call_tool(name:"upload-video", args:{_positional:["<video>"], dev_id, app_id, scene:"trailer 或 gameplay_demo_video"})` | app-edit 手册用返回的 `videoId` 写入 |
 | APK | `call_tool(name:"upload-apk", args:{_positional:["<apk>"], dev_id, app_id})` | packages 手册查状态,再转 app-edit 手册 |
 | Windows 包 | `call_tool(name:"upload-pc-package", args:{_positional:["<package>"], dev_id, app_id, launch_exe, version, windows_branch})` | packages 手册查状态,再转 app-edit 手册。**包体类别以接口返回为准**:没有 PC 包体分支能力的应用只有默认包体(`windows_branch=0`),有分支能力时才有游戏本体包(1)/启动器包(2);不传 `windows_branch` 时由上游 CLI 读 `get-app-module` 自动判定,判定失败会要求显式传 0/1/2。不要主动问用户要不要启动器包 |
@@ -59,13 +59,13 @@ game.zip
 5. 成功以顶层 `ok=true` 或 exit code 0 判断;缺少 `yes` 的确认门禁是 exit code 10(插件返回 `CONFIRM_REQUIRED`);其它失败按返回的 error 停止和恢复,不把业务内字段当作成功。
 6. 单项部分失败时保留已返回的远端句柄,按文件记录结果。只重试没有远端句柄的失败项,不能整批重跑。H5 和 Tap 小游戏可用 `task +list|get|resume` 恢复已有任务;其下一步是否可执行完全由当前 Catalog 的 `enabled` / `disabled_reason` 决定。不得重构 upload token。
 7. 大文件上传超时返回 `TIMEOUT` 时,加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令恢复;不要盲目重发完整上传。
-8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。图片交接必须同时给到 `upload` 返回的 `data.url` 与 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象(省略 info 不报错,但 C 端会按 16:9 回落),以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
+8. 完成上传后,按"上传结果 → 当前远端状态 → 用户确认 → 后续处理"的顺序交接;交接去向统一以上方「上传快速决策」表和本部分指出的交接目标为准,不在正文其他位置重复声明。图片交接必须同时给到 `upload` 返回的 `data.url` 与完整 `data.info`,由消费方按自己的 schema 取值:`app save-changes` 的图片新值是 `{"url": ..., "info": ...}` 对象,五项(`size`/`format`/`width`/`height`/`image_ave.rgb`)缺一项服务端就 400;以 URL 为值的下游(如资质草稿的 `{"type": "img", "url": ...}` 文件字段)仍只用 `data.url`;视频仍用 `upload-video` 返回的 `videoId`。不得在本部分自动执行 `save-changes`、`select-package`、`clear-package`、审核或发布。APK、Windows、H5 转 app-edit 手册后必须重新读取候选和当前 schema 声明时的 `package_slots`,不能复用上传前快照。
 
 ### 上传结果句柄
 
 | Shortcut | 成功后保留的字段 | 不应推断 |
 | --- | --- | --- |
-| `upload` | `data.url`、`data.info.width/height/size/format`、`data.assetId` | asset ID 只表示素材库收录结果,不表示图片已写入资料字段 |
+| `upload` | `data.url`、`data.info.width/height/size/format`、`data.info.image_ave.rgb`、`data.assetId` | 成功返回一律是完整五项(含 `image_ave.rgb`);取不到平均色时上传直接失败,不会给出缺字段的 info。asset ID 只表示素材库收录结果,不表示图片已写入资料字段 |
 | `upload-video` | `data.videoId`、`data.validationWarnings` | 上传完成;转码和资料字段写入仍是后续状态 |
 | `upload-apk` | `data.apkId` | 资料页主包体已切换 |
 | `upload-pc-package` | `data.packageId`,以及存在时的绑定预览字段 | Windows 槽位已绑定 |
@@ -87,6 +87,8 @@ dry-run 的 JSON 是预览,不包含上述远端句柄。图片、APK、PC、H5�
 **CRITICAL — 只有当前 `get-video-detail` 返回非空 `play_url` 才能证明视频可播;上传成功、转码中或审核中都不能表述为可播放。**
 
 **CRITICAL — 多个场景一次调用 `asset-library search-assets` 并传 `target_scenes` 数组,不要按场景循环调用。**
+
+**CRITICAL — 素材库的场景推荐不等于尺寸合规:`icon` 必须是 1:1 且宽高均 ≥512 像素(JPG/PNG、不预加圆角),按候选返回的 `width` / `height` 校验;没有 1:1 候选时如实说明缺少方形参考图并转上传/生图,不得拿横版宣传图当图标参考。**
 
 **CRITICAL — 不得用模型凭空生成游戏截图。截图必须来自真实运行中的游戏或用户提供的真实游戏画面;模型只允许裁剪、缩放、转格式和压缩。**
 

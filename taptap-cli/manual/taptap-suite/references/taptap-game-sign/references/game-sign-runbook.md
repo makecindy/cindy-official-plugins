@@ -10,11 +10,11 @@
 
 | 顺序 | 动作 | 进入下一阶段的条件 |
 | --- | --- | --- |
-| 1 主体 | 新建收集方案后 create；编辑回读后 update | `get-game-sign-activity` 核对标题、时间、兑换配置与开关；记录 `review_id`，仍是草稿 |
-| 2 每日奖励及库存 | 按累计天数升序保存每档内容与图片，再处理该档兑换码 | `get-game-sign-config` 核对对应 `award_id`；本次导入完成且库存符合预期 |
-| 3 集卡及库存 | 仅开启时：读取预置卡，必要时新增取得 `card_id` → 保存卡片和奖品 → 按类型补库存 | 回读同一 `card_id` 的类型、封面、概率、奖品及库存 |
-| 4 自检 | 配置和库存回读完成后 `check-game-sign-readiness` | `ready_to_submit=true`；解释 warning，不用通过结果覆盖未完成的用户要求 |
-| 5 提审 | 仅授权包含提审时 `submit-game-sign-review` | 回读进入审核中；只要求配置时在此之前交付摘要 |
+| 1 主体 | 新建收集方案后 create；编辑回读后 update | `get-activity` 核对标题、时间、兑换配置与开关；记录 `review_id`，仍是草稿 |
+| 2 每日奖励及库存 | 按累计天数升序保存每档内容与图片，再处理该档兑换码 | `get-config` 核对对应 `award_id`；本次导入完成且库存符合预期 |
+| 3 集卡及库存 | 仅开启时：读取预置卡，必要时新增取得 `card_id` → 保存卡片和奖品 → 按类型补库存 | 按 [回读边界](taptap-suite/references/taptap-game-sign/references/card-collection.md) 核对同一卡片并披露未返回项；兑换码须完成导入与库存核实 |
+| 4 自检 | 配置和库存回读完成后 `check-readiness` | `ready_to_submit=true`；解释 warning，不用通过结果覆盖未完成的用户要求 |
+| 5 提审 | 仅授权包含提审时 `submit-review` | 回读进入审核中；只要求配置时在此之前交付摘要 |
 | 6 审核结果核对 | 回读审核状态、时间及活动链接 | 区分审核中、通过未开始和可签到；不承诺自动审核或后台轮询 |
 
 任一步失败/结果未知即停在该阶段，记录已完成项、目标 ID、未确认结果和下一步；恢复先回读，避免重复加库存、重复导码或重建活动。
@@ -32,17 +32,17 @@
 
 ```text
 # 无 review_id 时定位活动（分页需要实际读取）
-call_tool(name:"game-sign list-game-sign-activities", args:{
+call_tool(name:"game-sign list-activities", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{page:1, page_size:20}, page_all:true, page_limit:1000})
 
 # 读活动/审核状态
-call_tool(name:"game-sign get-game-sign-activity", args:{
+call_tool(name:"game-sign get-activity", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"}})
 
 # 读主体、奖励、集卡与库存
-call_tool(name:"game-sign get-game-sign-config", args:{
+call_tool(name:"game-sign get-config", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"}})
 ```
@@ -60,7 +60,7 @@ call_tool(name:"game-sign get-game-sign-config", args:{
 - 说明和入口不能都为空；不得把邮件发放列为选项，也不得把示例说明当成已确认的游戏能力。
 
 ```text
-call_tool(name:"game-sign create-game-sign-activity", args:{
+call_tool(name:"game-sign create-activity", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{title:"<活动标题>", color:"#FF8800",
         game_sign_start_time:<秒级时间戳>, game_sign_end_time:<秒级时间戳>,
@@ -77,8 +77,9 @@ call_tool(name:"game-sign create-game-sign-activity", args:{
 
 ## 2. 本地图片交接
 
-- 累计签到奖品图：144×144 透明 PNG；集卡封面：342×426 PNG；集卡奖品图：216×216 透明 PNG；活动头图用游戏 16:9 宣传图。
-- 本地图片交给 `taptap-materials` 的 `upload` shortcut，交接时带游戏、`review_id`、目标天数/`award_id`/`card_id` 和用途；回传 `data.url` 与 `data.info` 后写目标字段（奖励 `picture`、卡片 `cover_url`），不修改游戏资料，不要求用户复制 URL。
+- 累计签到奖品图：144×144 PNG；集卡封面：342×426 PNG；集卡奖品图：216×216 PNG；奖品图使用透明背景，活动头图用游戏 16:9 宣传图。
+- 图片格式、尺寸、比例不符合用途要求时，先说明具体差异，优先准备符合规格的素材；裁剪、缩放、去背景或换用途需沿用对应授权，不擅自处理。透明背景按素材展示要求准备；不能仅因没有透明通道就断言保存或提审一定失败。操作是否被拒绝以实际校验结果为准；也不能因为保存成功就把不合规格的图片说成合格。只在用户已明确要求保留当前素材作草稿、且实际操作允许时保存，并列明素材待办。
+- 本地图片交给 `taptap-materials` 的 `upload` shortcut，交接时带游戏、`review_id`、目标天数/`award_id`/`card_id` 和用途；回传 `data.url` 与 `data.info` 后写目标字段（奖励 `picture`、卡片 `cover_url`），不修改游戏资料，不要求用户复制 URL。按对应用途校验图片规格，不能借用商店图标规格。
 - 上传成功不代表符合展示要求；上传预览没有远端 URL，不能提前假设上传结果。
 
 ## 3. 每日奖励
@@ -87,21 +88,21 @@ call_tool(name:"game-sign create-game-sign-activity", args:{
 
 ```text
 # 新增第 1 天
-call_tool(name:"game-sign save-game-sign-award", args:{
+call_tool(name:"game-sign save-award", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>", days:1, content:"钻石x100",
         picture:"https://cdn.example.com/a1.png", state:"<游戏内兑换说明>"},
   idempotency_key:"<stable-key>", dry_run:true})
 
 # 修改已有奖励：带 award_id
-call_tool(name:"game-sign save-game-sign-award", args:{
+call_tool(name:"game-sign save-award", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>", award_id:"<awardId>", days:1, content:"钻石x200",
         picture:"https://cdn.example.com/a1.png", state:"<兑换说明>"},
   idempotency_key:"<stable-key>", dry_run:true})
 
 # 删除奖励（纠错）
-call_tool(name:"game-sign delete-game-sign-award", args:{
+call_tool(name:"game-sign delete-award", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>", award_id:"<awardId>"},
   idempotency_key:"<stable-key>", dry_run:true})
@@ -114,7 +115,7 @@ call_tool(name:"game-sign delete-game-sign-award", args:{
 本地文件走 [导码与恢复](taptap-suite/references/taptap-game-sign/references/code-import.md) 的 `game-sign +import-codes`；每日奖励用 `award_id`，集卡用 `card_id`，两者互斥。提交受理不等于本文件导入完成，必须回读目标库存：
 
 ```text
-call_tool(name:"game-sign get-game-sign-code-import", args:{
+call_tool(name:"game-sign get-code-import", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>", award_id:"<awardId>"}})
 ```
@@ -124,44 +125,9 @@ call_tool(name:"game-sign get-game-sign-code-import", args:{
 
 ## 5. 集卡（可选）
 
-开启集卡后先读 `get-game-sign-config`，核对服务端预置卡片、类型与 ID。配置现有卡片时复用原 `card_id`；确需新增且当前限制允许时才 `add-game-sign-card`，用返回的 `card_id` 保存。存在预置卡不等于禁止新增；满额时不自动删卡腾位。可补回缺失的 SR/SSR 奖品卡，不能新增基础卡或任意扩充等级。
+开启集卡时按 [集卡配置与库存](taptap-suite/references/taptap-game-sign/references/card-collection.md) 执行：方案选择、卡片增删、异常恢复、展示和补库存均以该文档为准；纯玩法咨询见 [对照案例](taptap-suite/references/taptap-game-sign/references/game-sign-examples.md)。
 
-```text
-# 开启集卡（仅本次要求开启且当前未开启时；新建已开启则跳过）
-call_tool(name:"game-sign update-game-sign-activity", args:{
-  developer_id:"<developerId>", app_id:"<appId>",
-  data:{review_id:"<reviewId>", title:"<活动标题>", color:"#224488",
-        game_sign_start_time:<start>, game_sign_end_time:<end>,
-        activity_end_time:<end>, enable_card_collection:true},
-  idempotency_key:"<stable-key>", dry_run:true})
-
-# 基础卡：名称与封面，rate=0
-call_tool(name:"game-sign save-game-sign-card", args:{
-  developer_id:"<developerId>", app_id:"<appId>",
-  data:{review_id:"<reviewId>", card_id:"<cardId>", card_title:"基础卡",
-        cover_url:"https://cdn.example.com/c.png", rate:0},
-  idempotency_key:"<stable-key>", dry_run:true})
-
-# 奖品卡（非 BASIC）：10% 对应 rate=10000（100000 为 100%），必须带 award
-call_tool(name:"game-sign save-game-sign-card", args:{
-  developer_id:"<developerId>", app_id:"<appId>",
-  data:{review_id:"<reviewId>", card_id:"<cardId>", card_title:"紫卡",
-        cover_url:"https://cdn.example.com/c.png", rate:10000,
-        award:{title:"钻石x500", picture_url:"https://cdn.example.com/a.png",
-               type:"GOODS", redemption_conditions:"<集卡规则>",
-               state:"<实物领奖说明>", expire_time:<秒级时间戳>}},
-  idempotency_key:"<stable-key>", dry_run:true})
-
-# 实物库存
-call_tool(name:"game-sign add-game-sign-card-stock", args:{
-  developer_id:"<developerId>", app_id:"<appId>",
-  data:{review_id:"<reviewId>", card_id:"<cardId>", add_count:100},
-  idempotency_key:"<stable-key>", dry_run:true})
-```
-
-`award` 字段：`title`、`picture_url`、`type`（`GOODS` 实物 / `REDEEM_CODE` 兑换码）、`sub_type`（`REDEEM_CODE_GAME` / `REDEEM_CODE_JD`）、`expire_time`（秒级时间戳，必填）、`redemption_conditions`、`state`、`exchange_url`。
-
-配置必填条件：
+## 配置必填条件
 
 | 场景 | 必填 | 不额外要求 |
 | --- | --- | --- |
@@ -173,26 +139,26 @@ call_tool(name:"game-sign add-game-sign-card-stock", args:{
 | 每日奖励 | 游戏内兑换 `state` / 网页兑换 `exchange_url` | 未选择方式的空字段 |
 | 活动主体 | 游戏内兑换 `redeem_method` / 网页兑换 `redeem_url` | 未选择方式的空字段 |
 
-这些信息缺失时，即使保存成功也不能视为配置完整。奖品卡规则与中奖说明是不同信息，不能相互替代。库存按类型处理：`GOODS` 用 `add-game-sign-card-stock`，`REDEEM_CODE` 用导码。基础卡不可删除；删奖品卡前核实目标与授权，删除后回读配置。
+这些信息缺失时，即使保存成功也不能视为配置完整。奖品卡规则与中奖说明是不同信息，不能相互替代。库存与增删卡规则见 [集卡配置](taptap-suite/references/taptap-game-sign/references/card-collection.md)。
 
 ## 6. 提审前自检
 
 运营审核要求每日奖励每档不少于 1000，集卡奖品卡每张不少于 5 件（不要套到实物奖品卡）。自检通过不替代提交时的最终校验。
 
 ```text
-call_tool(name:"game-sign check-game-sign-readiness", args:{
+call_tool(name:"game-sign check-readiness", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"}})
 ```
 
 | code | 含义 | 下一步 |
 | --- | --- | --- |
-| `time_range_invalid` | 开始≥结束，或兑换截止早于签到结束 | 改 `update-game-sign-activity` |
-| `no_award` | 没有任何奖励 | 先 `save-game-sign-award` |
+| `time_range_invalid` | 开始≥结束，或兑换截止早于签到结束 | 改 `update-activity` |
+| `no_award` | 没有任何奖励 | 先 `save-award` |
 | `award_incomplete` | 奖励缺图片 | 补 `picture` |
 | `code_not_imported` | 缺礼包码：未导入兑换码且无可用库存 | 按 code-import 导入对应奖励 |
 | `code_processing` | 兑换码导入中 | 等 `COMPLETED` 再提审 |
-| `card_incomplete` | 开启集卡但没卡或缺封面 | 用 `save-game-sign-card` 补封面 |
+| `card_incomplete` | 开启集卡但没卡或缺封面 | 有卡缺封面才用 `save-card`；0 张卡或缺基础卡按 [集卡配置](taptap-suite/references/taptap-game-sign/references/card-collection.md) 的异常流程核实，不能靠补封面或反复新增奖品卡修复 |
 | `card_no_stock` | 奖品卡没有奖品或库存为 0 | 配置奖品；GOODS 补实物库存、REDEEM_CODE 导码 |
 | `status_not_editable` | 状态不允许再次提审 | 看是否需要撤回或等下一期 |
 
@@ -201,12 +167,12 @@ call_tool(name:"game-sign check-game-sign-readiness", args:{
 ## 7. 提交 / 撤回审核
 
 ```text
-call_tool(name:"game-sign submit-game-sign-review", args:{
+call_tool(name:"game-sign submit-review", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"},
   idempotency_key:"<stable-key>", dry_run:true})
 
-call_tool(name:"game-sign withdraw-game-sign-review", args:{
+call_tool(name:"game-sign withdraw-review", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"},
   idempotency_key:"<stable-key>", dry_run:true})
@@ -237,7 +203,7 @@ call_tool(name:"game-sign withdraw-game-sign-review", args:{
 ## 10. 名单导出
 
 ```text
-call_tool(name:"game-sign export-game-sign-physical-prize-recipients", args:{
+call_tool(name:"game-sign export-physical-prize-recipients", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{review_id:"<reviewId>"}})
 ```

@@ -1446,13 +1446,14 @@ test('the image handoff always carries the upload info on field writes', () => {
   ]) {
     assert.match(text, /data\.info/, `${label} must hand over the upload info`);
   }
-  assert.match(appEdit, /"info": <图片元数据>/, 'app-edit must state the value shape');
+  assert.match(appEdit, /五项缺任何一项/, 'app-edit must state that all five info fields are required');
+  assert.match(appEdit, /image_ave/, 'app-edit must carry the average colour into the value');
   assert.match(appEdit, /value:\{url:.*info:\{width:/, 'app-edit must show an info-bearing example');
   assert.match(appEdit, /remove.*不需要 `info`/, 'remove selectors stay bare URLs');
   assert.match(appEdit, /value: null/, 'clearing an iOS override keeps its null value');
-  assert.match(materials, /不带 info 会回落 16:9/, 'materials must state the fallback');
+  assert.match(materials, /info 五项/, 'materials must say the five info fields are mandatory');
   assert.match(materials, /资质草稿/, 'materials must scope the object shape to app save-changes');
-  assert.match(ingest, /不带 info 不会报错/, 'ingest must state the tolerated-but-worse path');
+  assert.match(ingest, /缺任何一项/, 'ingest must state which info fields the server rejects');
 
   // Rollback: `changes[].from` is a bare URL for image fields; writing it back
   // works, but an image without info still falls back to the 16:9 crop, so the
@@ -2021,7 +2022,7 @@ test('the 2026.10.31 interaction operations manuals are routed and carry their s
   assert.match(push, /不能默认全部/, 'the push scope must not default to all followers');
 
   const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
-  assert.match(sign, /check-game-sign-readiness/, 'sign review must be gated on readiness');
+  assert.match(sign, /check-readiness/, 'sign review must be gated on readiness');
   assert.match(sign, /award_id/, 'daily awards must be addressed by award_id');
   assert.match(sign, /card_id/, 'cards must be addressed by card_id');
 
@@ -2030,3 +2031,78 @@ test('the 2026.10.31 interaction operations manuals are routed and carry their s
   assert.match(codes, /task_id/, 'code import must resume the same task');
   assert.match(codes, /禁止自动再提交或换 key 重导/, 'unknown submissions are not free retries');
 });
+
+test('the 2026.11.16 sync keeps recovery, image metadata and card plans on the plugin path', () => {
+  // Upstream main after the 2026.11.6 sync changed what the agent must do when
+  // the server refuses on business state, made complete image metadata
+  // mandatory, and split card collection out of the game-sign runbook. Each of
+  // those is a decision the agent can only make from the bundled manual.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const suite = read('taptap-suite/MANUAL.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const prerequisite = read('taptap-suite/references/prerequisite-recovery.md');
+  const packages = read('taptap-suite/references/taptap-package-management/MANUAL.md');
+  const diagnostics = read('taptap-suite/references/taptap-package-management/references/package-management-diagnostics.md');
+  const boundary = read('taptap-suite/references/package-type-boundary.md');
+  const identity = read('taptap-suite/references/taptap-identity/MANUAL.md');
+  const fieldMap = read('taptap-suite/references/taptap-app-edit/references/app-edit-field-map.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/references/app-edit-fields-and-packages.md');
+  const materials = read('taptap-suite/references/taptap-materials/MANUAL.md');
+  const search = read('taptap-suite/references/taptap-materials/references/asset-library-search.md');
+  const sign = read('taptap-suite/references/taptap-game-sign/MANUAL.md');
+  const runbook = read('taptap-suite/references/taptap-game-sign/references/game-sign-runbook.md');
+  const cards = read('taptap-suite/references/taptap-game-sign/references/card-collection.md');
+  const examples = read('taptap-suite/references/taptap-game-sign/references/game-sign-examples.md');
+  const qualification = read('taptap-suite/references/taptap-qualification/references/qualification-materials.md');
+  const handoff = read('taptap-suite/references/taptap-qualification/references/material-handoff-resume.md');
+  const push = read('taptap-suite/references/taptap-official-message-push/references/push-runbook.md');
+
+  // State-class failures get one routing page instead of ad-hoc retries.
+  assert.match(suite, /prerequisite-recovery\.md/, 'the suite entry must route to the recovery page');
+  assert.match(identity, /prerequisite-recovery\.md/, 'identity must reach the recovery page');
+  for (const key of ['api/failed_precondition', 'QUALIFICATION_DOMAIN_UNSUPPORTED', '发布额度不足', '国内隐私维护资格']) {
+    assert.match(prerequisite, new RegExp(key), `the recovery matrix must cover ${key}`);
+  }
+  assert.doesNotMatch(prerequisite, /taptap-cli [a-z]/, 'the recovery page must stay on the call_tool path');
+
+  // Package type conflicts become a diagnosed, evidence-bound recovery.
+  assert.match(boundary, /apk_mini_game_play/, 'the APK mini-game slot exception must be documented');
+  assert.match(diagnostics, /diagnose-package-type/, 'the conflict branch must query the diagnosis');
+  assert.match(diagnostics, /recover-package-type-declaration/, 'the recovery must name the controlled command');
+  assert.match(diagnostics, /additive_declaration/, 'a normal additive declaration is not a conflict');
+  assert.match(diagnostics, /list-mini-app-packages/, 'mini-app capability is read from the package list');
+  assert.match(packages, /明确报「小游戏功能尚未开通」才判为未开通/, 'the manual must not infer capability from the type matrix');
+
+  // Image values now carry five info fields, and expected matches the real shape.
+  assert.match(shared, /允许子目录/, 'the @file rule must allow subdirectories inside the working directory');
+  assert.match(fieldMap, /`expected` 传 `null`/, 'a first write uses null, not []');
+  assert.match(shared, /允许子目录/);
+  assert.match(fieldMap, /图片字段的 `current_value` 是对象/, 'image current_value is an object');
+  assert.match(appEdit, /image_ave/, 'image writes need the average colour');
+  assert.match(materials, /image_ave\.rgb/, 'the upload handle must keep the average colour');
+  assert.match(search, /场景推荐不等于尺寸合规/, 'scene recommendations are not size compliance');
+  assert.match(search, /按 `asset_id` 去重/, 'cross-scene duplicates are deduplicated');
+
+  // Card collection is a 3+1 / 3+2 plan with its own recovery and preview rules.
+  assert.match(sign, /card-collection\.md/, 'the game-sign manual must route to card collection');
+  assert.match(sign, /game-sign-examples\.md/, 'the game-sign manual must route to the user guide');
+  assert.match(cards, /3\+1/, 'the 3+1 plan must be documented');
+  assert.match(cards, /3\+2/, 'the 3+2 plan must be documented');
+  assert.match(cards, /## 删除预览/, 'deleting a card needs a visible preview');
+  assert.match(cards, /## 回读与结果说明/, 'card reads must distinguish saved from verified');
+  assert.match(cards, /待提交／审核拒绝/, 'stock top-up is limited to editable states');
+  assert.match(examples, /## 发送前检查/, 'the user guide keeps the pre-send check');
+  assert.match(runbook, /export-physical-prize-recipients/, 'the export uses the short command name');
+  assert.match(runbook, /save-card/, 'card operations use the short command names');
+  assert.match(runbook, /不能靠补封面或反复新增奖品卡修复/, 'card_incomplete has the explicit branch');
+  assert.match(push, /历史长名/, 'the push runbook records that old names remain aliases');
+
+  // Qualification hides internal keys and needs explicit package types for AI.
+  const analysis = read('taptap-suite/references/taptap-qualification/references/qualification-analysis.md');
+  assert.match(analysis, /## 缺口输出格式/, 'gap output maps subjects to Chinese names');
+  assert.match(analysis, /privacy-compliance/, 'the subject map must cover privacy');
+  assert.match(qualification, /也必须在 `aigc_qualification.package_types` 声明适用包体/, 'AI declaration needs package types');
+  assert.match(handoff, /回执里的 `h5VersionId`/, 'the privacy version id source is named');
+});
+

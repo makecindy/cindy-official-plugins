@@ -47,7 +47,7 @@
 > | `taptap-cli app get-app-module --dev-id 1 --app-id 2 --data '{"module_id":"basic-info"}'` | `call_tool(name:"app get-app-module", args:{developer_id:"1", app_id:"2", data:{module_id:"basic-info"}})` |
 > | `--dry-run` | `args.dry_run: true` |
 > | `--yes` | `args.yes: true`(仅用户明确同意后) |
-> | `--data @file.json` | `args.data: {...}`(内联 JSON 对象),或传字符串 `"@relative-file.json"`——文件由 CLI 相对**会话工作目录**解析,所以文件放在当前工作目录时可直接用。`-` stdin 经本插件调用时不可用 |
+> | `--data @file.json` | `args.data: {...}`(内联 JSON 对象),或传字符串 `"@relative-file.json"`——文件由 CLI 相对**会话工作目录**解析:可用相对路径或工作目录内的绝对路径,允许子目录,但 `..` 与符号链接解析后仍须落在工作目录内。`-` stdin 经本插件调用时不可用 |
 > | `taptap-cli upload ./icon.png --app-id 2 --dev-id 1 --yes` | `call_tool(name:"upload", args:{_positional:["./icon.png"], app_id:"2", developer_id:"1", yes:true})` |
 > | `taptap-cli schema app save-changes` | `call_tool(name:"schema", args:{_positional:["app","save-changes"]})` |
 > | `taptap-cli task +list` | `call_tool(name:"task", args:{_positional:["+list"]})` |
@@ -118,6 +118,7 @@
 | Reference | 什么时候读 | 读取方式 |
 | --- | --- | --- |
 | shared execution | 复杂流程、写操作、确认门禁、错误处理和输出边界 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/shared-execution.md"})` |
+| 前置条件与账号状态恢复 | 无开发者账号、多开发者未指定 scope、包体类型未声明、发布额度不足、小游戏隐私配置未开通、资质材料域等「服务端状态拒绝」的分流与下一步 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/prerequisite-recovery.md"})` |
 | CLI command patterns | 命令树、上传命令与快捷命令的具体形态 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/cli-command-patterns.md"})` |
 | feedback | CLI 问题反馈的触发条件、脱敏和回执话术 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/feedback.md"})` |
 | business routing | 请求横跨多个业务域或路由不确定 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/business-routing.md"})` |

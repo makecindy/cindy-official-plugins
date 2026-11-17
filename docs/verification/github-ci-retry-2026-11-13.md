@@ -280,6 +280,38 @@ zero failures in 147.1 seconds on the Windows/Node environment above. The
 review/queue rule was reviewed as Agent instructions; no live merge workflow
 was exercised or claimed as verified.
 
+## Main conflict synchronization — source 1.5.24 (2026-11-17)
+
+Merged main `f5e6f5c` into the existing feature branch. The two conflicts were
+the manifest version/release notes and main's old fixed-version test assertion.
+The package is now 1.5.24; the existing contract suites enforce SemVer and
+version growth instead of pinning this authentication test to main's 1.5.16.
+Main's publish-click wording and draft-reporting guidance are retained. The
+recovery script, limits, approval/queue guards, preference storage and four
+locale resources are byte-identical to 1d189e2. No machinery or permission was
+added; main's unrelated changes are inherited without edits.
+
+The four required repository suites plus plugin suite initially returned
+316 passed, 19 skipped and four publishing-test failures in 69.2 seconds on
+Windows / Node v22.22.3. Those failures selected WSL bash, which could not open
+the Windows temporary script paths. With Git Bash selected through this test
+process's PATH, the publishing suite passed all 12 tests in 114.2 seconds;
+the other suites were not repeated. No test or production code was changed
+to accommodate the environment. Manifest validation passed. A real index-tree
+`git archive` package was normalized and checked in memory: 31 files,
+221997 compressed bytes and 614794 expanded bytes, with required legal files,
+locales, safe paths, limits and matching packaged source. No package file was
+retained or installed.
+
+GitHub now shows all 16 review threads resolved. Direct GraphQL identifies
+`yan-xdt` as resolver of the original acceptance thread; the effective approval
+on 1d189e2 was Greptile's existing review, not a new maintainer runtime report.
+Neither that state change nor this synchronization supplies the missing real
+recovery evidence. The last actually tested runtime remains 1.5.19; 1.5.24 was
+not installed. The inherited header/copy-link and unknown-panel runtime gaps
+remain, as does the genuine denied-rerun recovery prerequisite below. No live
+rerun, preference/credential/permission change or recovery quota use occurred.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
