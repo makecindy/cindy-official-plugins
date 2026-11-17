@@ -303,15 +303,22 @@
   }
   function restorePage(){cancel();translated=false;observer?.disconnect();observer=null;for(const rec of translations.values())unpresent(rec);translations.clear();if(status)note(t.restore);}
   // Bilingual: the translation is added under the original (as its next sibling, or inside a div-built
-  // block). Translation only: the block's own text is replaced in place, keeping links and layout,
-  // and put back on restore unless the page has rewritten it meanwhile.
+  // block). Translation only: the block's visible text is replaced in place and put back on restore
+  // unless the page has rewritten it meanwhile. Hidden text is left alone (writing there would hide
+  // the translation), and a block with links or controls is shown bilingually instead, so their
+  // labels and click areas stay intact.
+  const interactive='a[href],button,input,select,textarea,summary,label,[role="button"],[role="link"],[contenteditable]';
+  const visibleText=tn=>{const e=tn.parentElement;return !!e&&(typeof e.checkVisibility==='function'?e.checkVisibility():typeof e.getClientRects!=='function'||e.getClientRects().length>0);};
+  function inPlace(node,translation){
+    if(node.querySelector?.(interactive))return null;
+    const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),originals=[];let first=true,tn;
+    while((tn=walker.nextNode())){if(!tn.data.trim()||tn.parentElement?.closest('[data-cindy-translation]')||!visibleText(tn))continue;const next=first?translation:'';originals.push([tn,tn.data,next]);first=false;}
+    if(!originals.length)return null;
+    for(const [n,,next] of originals)n.data=next;return originals;
+  }
   function present(node,rec){
-    rec.host=null;rec.originals=null;
-    if(rec.translation!=null&&prefs.webMode==='translation'){
-      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),originals=[];let first=true,tn;
-      while((tn=walker.nextNode())){if(!tn.data.trim()||tn.parentElement?.closest('[data-cindy-translation]'))continue;const next=first?rec.translation:'';originals.push([tn,tn.data,next]);first=false;}
-      for(const [n,,next] of originals)n.data=next;rec.originals=originals;
-    }else if(rec.translation!=null){
+    rec.host=null;rec.originals=rec.translation!=null&&prefs.webMode==='translation'?inPlace(node,rec.translation):null;
+    if(!rec.originals&&rec.translation!=null){
       const h=el('span');
       // Named-slot content (e.g. Reddit post titles) has no visible default
       // slot. Project the sibling into the same slot without editing the link.

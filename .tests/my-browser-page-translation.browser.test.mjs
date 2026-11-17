@@ -257,6 +257,8 @@ test('div-built feeds translate their text blocks inside each block without brea
   await page.route('https://feed.test/**',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`
     <style>body{font:16px/1.5 sans-serif}.row{display:flex;gap:12px}.card{width:200px}</style>
     <article><p id="post">A feed post written by someone you follow.</p></article>
+    <p id="linked">Read <a id="doc" href="/docs">the documentation</a> before you start.</p>
+    <p id="hint"><span hidden>Tip</span>Visible article text for readers.</p>
     <aside id="hot"><div class="row"><span class="rank">1</span><a id="topic" style="display:block" href="/t">Index opens above 3600 points</a></div></aside>
     <div class="row"><div class="card"><div id="value">3584.58</div><div id="name">Shanghai composite</div></div>
       <div class="card"><div id="same">已经是中文的标题</div></div></div>`}));
@@ -295,7 +297,13 @@ test('div-built feeds translate their text blocks inside each block without brea
   assert.equal(await page.locator('#topic').innerText(),'译文：Index opens above 3600 points');
   assert.equal(await page.locator('#topic').getAttribute('href'),'/t');
   assert.equal(await page.locator('#name').innerText(),'译文：Shanghai composite');
-  assert.equal(await page.locator('[data-cindy-translation]').count(),0);
+  // 2026-11-17 review: in-place replacement emptied inline links and wrote into hidden text.
+  // A block with a link stays bilingual so the link keeps its label; hidden text is skipped.
+  assert.equal(await page.locator('#doc').innerText(),'the documentation');
+  assert.equal(await page.locator('#linked + [data-cindy-translation]').count(),1);
+  assert.equal(await page.locator('#hint').innerText(),'译文：Visible article text for readers.');
+  assert.equal(await page.locator('#hint span').textContent(),'Tip');
+  assert.equal(await page.locator('[data-cindy-translation]').count(),1,'only the linked block stays bilingual');
   await page.waitForTimeout(450);
   assert.equal(await page.evaluate(()=>sentTexts.length),requests,'switching the display makes no new model requests');
   await setMode('both');
@@ -305,6 +313,7 @@ test('div-built feeds translate their text blocks inside each block without brea
   assert.equal(await page.locator('[data-cindy-translation]').count(),0,'restore removes every injected translation');
   assert.equal(await page.locator('#name').innerText(),'Shanghai composite','restore puts the original text back');
   assert.equal(await page.locator('#topic').innerText(),'Index opens above 3600 points');
+  assert.equal(await page.locator('#hint').innerText(),'Visible article text for readers.');
   // From the side panel the page translates in place without opening the page panel.
   const panelCommand=action=>page.evaluate(action=>new Promise(resolve=>command({type:'cindy-page',action},{id:'fixture'},resolve)),action);
   const panelsBefore=await page.locator('[data-cindy-panel]:visible').count();

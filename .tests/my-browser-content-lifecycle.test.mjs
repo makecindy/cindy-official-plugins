@@ -376,19 +376,8 @@ test('tab titles mark ownership by default and restore on takeover or extension 
     assert.equal(await page.title(),'User title');
     assert.equal(await page.evaluate(()=>sent.filter(m=>m.type==='cindy-user-took-over').length),1);
     await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'settings'},{id:'fixture'},resolve)));
-    const cdp=await page.context().newCDPSession(page);
-    const {root}=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
-    let optionsButton;
-    function visit(node){
-      if(node.nodeName==='BUTTON'&&node.children?.some(n=>n.nodeValue==='标签分组设置'))optionsButton=node;
-      for(const child of [...(node.children||[]),...(node.shadowRoots||[])])visit(child);
-    }
-    visit(root);assert.ok(optionsButton,'group settings are discoverable in the ordinary panel');
-    const {object}=await cdp.send('DOM.resolveNode',{nodeId:optionsButton.nodeId});
-    const {result}=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:'function(){const r=this.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}}',returnByValue:true});
-    await page.mouse.click(result.value.x,result.value.y);
-    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-options'));
-    await cdp.detach();
+    // Settings live in the side panel now; the page only asks the extension to open it there.
+    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-sidepanel'&&m.view==='settings'));
     // A fresh document obtains ownership again through the normal message path.
     await page.reload();
     await page.evaluate(()=>{

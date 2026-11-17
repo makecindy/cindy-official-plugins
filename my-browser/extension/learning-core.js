@@ -24,7 +24,7 @@
   function sameLanguage(a,b){const base=v=>typeof v==='string'&&!v.startsWith('custom:')?v.toLowerCase().split(/[-_]/)[0]:'';const x=base(a),y=base(b);return !!x&&x===y;}
   function languageName(value){return Object.hasOwn(languages,value)?languages[value]:validTarget(value)?value.slice(7):'';}
   const operations = new Set(['translate','explain','summary','conversation','save','list','remove','review','import','preferences','config','task','subtitles','subtitle-document','subtitle-cache-clear','models','model-favorite']);
-  const efforts=new Set(['minimal','low','medium','high','xhigh','max','ultra']);
+  const efforts=new Set(['none','minimal','low','medium','high','xhigh','max','ultra']);
   function string(value,max,required=false) {
     if (typeof value !== 'string' || value.length>max || (required && !value.trim())) throw Error('INVALID_INPUT');
     return value;

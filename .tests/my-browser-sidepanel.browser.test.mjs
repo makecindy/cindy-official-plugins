@@ -16,6 +16,7 @@ test('sidepanel chats with the active page and cancels stale work',{skip:!proces
       if(message.request.op==='models')return {ok:true,preferences:'ok',favorites:f.favorites,recents:[{providerId:'b',modelId:'deep',agent:'codex'}],models:[{name:'Fixture Fast',provider:'Provider A',visible:true,route:{agentKind:'pi',providerId:'a',model:'fast',effort:'',fastMode:false},efforts:[]},{name:'Fixture Deep',provider:'Provider B',visible:true,supportsFastMode:true,defaultEffort:'medium',route:{agentKind:'codex',providerId:'b',model:'deep',effort:'medium',fastMode:false},efforts:['low','medium','high']}]};
       if(message.request.op==='model-favorite'){const m=message.request.mutation;if(m.kind==='add')f.favorites=[...f.favorites,{uid:'fav-'+f.favorites.length,...m.item}];if(m.kind==='remove')f.favorites=f.favorites.filter(x=>x.uid!==m.expected.uid);return {ok:true,favorites:f.favorites};}
       if(f.hold)return new Promise(resolve=>f.finish=resolve);
+      if(f.answer)return {ok:true,text:f.answer};
       return {ok:true,text:'答案是 **42**。<script>bad()</script>\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nx()\n```\n\n[bad](javascript:alert(1)) [ok](https://example.test/)'};
     }}};
   });
@@ -86,6 +87,18 @@ test('sidepanel chats with the active page and cancels stale work',{skip:!proces
   await page.evaluate(()=>fixture.finish({ok:true,text:'stale result'}));
   assert.equal(await page.locator('.message').count(),0);
   assert.ok(await page.evaluate(()=>fixture.calls.some(c=>c.type==='cindy-cancel')));
+  // 2026-11-17 review: a long last answer emptied the next question's context, breaking follow-ups.
+  await page.evaluate(()=>{fixture.hold=false;fixture.answer='第一点。'+'细节'.repeat(3000);});
+  await page.locator('#question').fill('总结要点');await page.locator('#send').click();await page.locator('.message.assistant').waitFor();
+  await page.locator('#question').fill('解释第二点');await page.locator('#send').click();
+  await page.waitForFunction(()=>fixture.calls.filter(c=>c.request?.scenario==='webpage-chat').at(-1).request.instruction==='解释第二点');
+  const followUp=await page.evaluate(()=>fixture.calls.filter(c=>c.request?.scenario==='webpage-chat').at(-1).request.context);
+  assert.match(followUp,/^user: 总结要点\nassistant: 第一点。/);assert.ok(followUp.length<=4000);
+  // "Default model" puts the side panel back on Cindy Chrome's own model setting.
+  await page.locator('#model').click();await page.locator('.mp-panel.settled').waitFor();
+  await page.locator('.mp-row[data-anchor="default"]').click();
+  assert.equal(await page.locator('#model').innerText(),'默认模型');
+  await page.waitForFunction(()=>!('sidepanelModel' in fixture.stored));
   for(const scheme of ['light','dark']){await page.emulateMedia({colorScheme:scheme});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=320));}
   assert.deepEqual(errors,[]);
   // Same production extraction function against real layout, with form/hidden exclusions.

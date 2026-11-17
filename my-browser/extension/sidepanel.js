@@ -137,8 +137,9 @@ function readChatPage() {
       const result=results.find(r=>r.frameId===0),page=result?.result;
       if(pending!==id||revision!==generation||page?.source.url!==chosen.url)throw Error('PAGE_CHANGED');
       if(!page?.text?.trim()){ setStatus(copy.noText);return; }
-      // Keep complete recent turns within the existing relay context budget.
-      let context='';for(const m of [...chat.messages].reverse()){const line=m.role+': '+m.text+'\n';if(line.length+context.length>4000)break;context=line+context;}
+      // Recent turns within the relay's 4000-character context budget. Each message is capped first, so
+      // a long answer is shortened instead of pushing the whole last turn out.
+      let context='';for(const m of [...chat.messages].reverse()){const text=m.text.length>1800?m.text.slice(0,1800)+'…':m.text,line=m.role+': '+text+'\n';if(line.length+context.length>4000)break;context=line+context;}
       userMessage={role:'user',text:question};chat.messages.push(userMessage);$('question').value='';grow();render();
       const response=await chrome.runtime.sendMessage({type:'cindy-learning',id,tabId:chosen.id,documentId:result.documentId,chatId:chat.id,request:{op:'conversation',scenario:'webpage-chat',instruction:question,text:page.text,context,source:page.source,...(model?{route:model}:{})}});
       if(pending!==id||revision!==generation)return;
@@ -164,7 +165,10 @@ function readChatPage() {
   $('settings').append(icon('gear',17));
   const L=globalThis.CindyLearning;
   async function readPrefs(){try{return (await chrome.storage.local.get('cindyReadingPreferences')).cindyReadingPreferences||{};}catch{return {};}}
-  async function savePrefs(changes){const stored=await readPrefs();const merged={...stored,...changes};
+  // One read-merge-write at a time, so two quick changes cannot overwrite each other.
+  let saving=Promise.resolve();
+  function savePrefs(changes){const run=saving.then(()=>writePrefs(changes));saving=run.catch(()=>{});return run;}
+  async function writePrefs(changes){const stored=await readPrefs();const merged={...stored,...changes};
     if(changes.autoSites){const sites={...(stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{})};for(const [o,v] of Object.entries(changes.autoSites)){if(v===undefined)delete sites[o];else sites[o]=v;}merged.autoSites=sites;}
     await chrome.storage.local.set({cindyReadingPreferences:merged});}
   function toggleRow(label,hint,checked,onChange){const row=el('label','setting-row'),text=el('span','setting-text');text.append(el('span',undefined,label));if(hint)text.append(el('small',undefined,hint));

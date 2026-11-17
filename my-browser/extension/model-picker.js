@@ -187,6 +187,8 @@
         for(const items of groups.values())sections.push({title:items[0].provider||items[0].providerId,items:items.map(row=>({kind:'model',cfg:rowConfig(row),row}))});
         if(!sections.length)return empty(copy.noMatch);
       }
+      // "Default" follows Cindy Chrome's own model setting; the only way back after picking a model.
+      if(effective==='all'&&!query.trim())list.append(defaultRow());
       for(const s of sections){list.append(el('div','mp-section',s.title));for(const item of s.items)list.append(rowEl(item,effective));}
       const hl=el('span','mp-glide');list.prepend(hl);glide=hl;
       list.onpointermove=e=>{const rs=[...list.querySelectorAll('.mp-row')];let best=null,dist=1e9;for(const r of rs){const b=r.getBoundingClientRect(),dd=e.clientY<b.top?b.top-e.clientY:e.clientY>b.bottom?e.clientY-b.bottom:0;if(dd<dist){dist=dd;best=r;}}moveGlide(best);};
@@ -203,6 +205,11 @@
     }
     function scrollToSelected(){const r=list?.querySelector('.mp-row.selected');if(r)list.scrollTop=Math.max(0,r.offsetTop+r.offsetHeight/2-list.clientHeight*.35);}
 
+    function defaultRow(){
+      const on=!selected(),r=el('div','mp-row'+(on?' selected':''));r.tabIndex=0;r.setAttribute('role','option');r.setAttribute('aria-selected',String(on));r.dataset.anchor='default';
+      const line=el('div','mp-line'),name=el('span','mp-name',status.defaultLabel());line.append(el('span','mp-icon'),name);r.append(line);
+      r.onclick=()=>{select(null);close();status.done();};return r;
+    }
     function rowEl({kind,cfg,row,uid},effective){
       const sel=selected(),d=data(),prefsOk=d.preferences==='ok';
       const isSelected=kind==='favorite'?sel?.favoriteUid===uid:kind==='model'?!!sel&&!sel.favoriteUid&&sel.providerId===row.providerId&&sel.modelId===row.modelId:false;

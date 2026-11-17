@@ -465,6 +465,9 @@ test('a model picked in the side panel runs that exact route; other requests kee
   // Only this computer's routes, and only for webpage chat.
   assert.throws(()=>core.validate({op:'conversation',scenario:'webpage-chat',instruction:'q',text:'t',route:{...route,agentDeviceId:'other'}}),/INVALID_INPUT/);
   assert.throws(()=>core.validate({op:'translate',text:'t',route}),/INVALID_INPUT/);
+  // 2026-11-17 review: the picker offers "Off" (`none`) where a model has it; validation must accept it.
+  assert.equal(core.validate({op:'conversation',scenario:'webpage-chat',instruction:'q',text:'t',route:{...route,effort:'none'}}).route.effort,'none');
+  assert.equal(core.validate({op:'model-favorite',mutation:{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'none'}}}).mutation.item.effort,'none');
   // Favorite edits keep Cindy's favorite shape; anything else is rejected before reaching Cindy.
   await service.handle(profile,{op:'model-favorite',mutation:{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'high',extra:'x'}}});
   assert.deepEqual(edits,[{kind:'add',item:{providerId:'b',modelId:'deep',agent:'codex',effort:'high'}}]);
