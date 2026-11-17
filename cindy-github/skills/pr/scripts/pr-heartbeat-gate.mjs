@@ -651,13 +651,15 @@ function legacyCiRetryFiles(dir) {
   let names;
   try { names = fs.readdirSync(dir); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-  return names.filter(name => /^ci-retry-[a-f0-9]{64}\.ci-retry$/.test(name)).sort().map(name => path.join(dir, name));
+  // Both historical writers: immutable-ID hashes and earliest URL state filenames.
+  return names.filter(name => /^(?:ci-retry-[a-f0-9]{64}|.+\.json)\.ci-retry$/.test(name)).sort().map(name => path.join(dir, name));
 }
 
 function legacyCiRetryEvidence(dir, prNodeId) {
   // Earlier per-failure filenames hide the PR ID. Inspect all old receipts so a
   // different diagnosis cannot hide previous consumption; unreadable data stops.
   return legacyCiRetryFiles(dir).flatMap(file => {
+    if (file.endsWith('.json.ci-retry')) throw new Error('Legacy URL CI retry evidence lacks an immutable PR ID and diagnosis; reconcile its previous outcome before any further CI rewrite, do not delete it');
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!validCiRetryId(value?.prNodeId)) throw new Error('invalid legacy CI retry identity');
     if (file !== ciRetryFilePath(dir, value.prNodeId, value.failure)) throw new Error('invalid legacy CI retry identity');

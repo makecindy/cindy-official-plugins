@@ -80,6 +80,9 @@ without overwriting or
 deleting them; all older per-failure receipts count toward the two slots even
 when querying another diagnosis. Even status reads may perform this adoption.
 Missing diagnoses and malformed evidence remain fail-closed after cache cleanup.
+The earliest `*.json.ci-retry` URL receipts are also copied raw and block further
+budget operations: they lack an immutable ID/diagnosis, and another URL cannot
+prove they are unrelated after a rename/transfer. Never invent missing identity.
 Use the exact verified opaque PR node ID; legacy base64 IDs are supported too.
 More than two old attempts or damaged/unknown evidence stops recovery. Clearing/changing
 cache does not reset migrated budgets. Unknown evidence deleted before upgrade

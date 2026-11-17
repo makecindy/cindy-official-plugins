@@ -367,6 +367,48 @@ in 63.9 seconds. Manifest validation and the exact index-tree archive/content
 check passed (31 files, 222073 compressed bytes, 614968 expanded bytes);
 the normalized package was inspected in memory without retaining a file.
 
+## Historical receipt discovery — source 1.5.26 (2026-11-17)
+
+Round 15 belongs to the existing unknown-evidence durability family. Historical
+writer inspection found the omitted namespace: initial 1.5.14 (`8dcb0c1`)
+wrote `<stateFilePath>.ci-retry` with only `sourceHead` and `reservedAt`.
+The existing discovery function now covers both `*.json.ci-retry` (plain and
+encoded repository names) and immutable-ID/per-diagnosis hash names. The same
+exclusive raw-copy path preserves them before any rejection; no new marker,
+allocator, storage system, lock or retry is added. This is a complete namespace
+audit of the earlier URL, per-ID, per-diagnosis and current fixed-slot formats.
+
+**Invariant:** unknown past consumption cannot become fresh quota because its
+filename format, URL, cache directory or process changed. Discovery has one
+owner, `legacyCiRetryFiles`; allocation remains the existing two-slot owner.
+
+| Evidence/event | Result |
+| --- | --- |
+| Plain/encoded URL receipt, including broken bytes | Exclusive raw durable copy, then stop |
+| Stale cache copy replaces the original | Durable bytes are not overwritten |
+| Cache deleted/replaced; process restarts; URL changes | Durable unknown evidence still stops status/reserve |
+| URL-only evidence seen with another claimed node ID | Cannot prove it unrelated; no inferred identity or new slot |
+| Valid other-PR immutable-ID receipt | Existing separate-PR accounting remains unchanged |
+
+URL-only receipts lack both immutable identity and diagnosis, so they
+conservatively block budget operations until their previous outcome is
+reconciled, even for another URL. No URL-to-ID conversion or guessed diagnosis
+is introduced. The three added URL scenarios failed first on f109fcb while the
+three older unknown-evidence variants passed. The focused CLI suite then
+passed 21 tests in 7.8 seconds. Extended tests also verify raw-byte preservation,
+cache deletion/replacement, process restart and no new slot allocation.
+
+These are isolated CLI/filesystem fixtures with temporary data roots; real
+user quotas, credentials, permissions and preferences were untouched. Source
+1.5.26 is not installed. `main.js`, settings and locales are unchanged from
+1.5.25, so all documented real recovery/UI verification gaps still apply.
+
+The four required repository suites plus plugin suite passed 332 tests,
+19 skipped, zero failures in 120.9 seconds on Windows / Node v22.22.3 with
+Git Bash selected for this test process. Manifest and index-tree package checks
+passed: 31 files, 222310 compressed bytes and 615575 expanded bytes, inspected
+in memory with no retained package file.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

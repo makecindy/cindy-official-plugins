@@ -36,8 +36,8 @@ function fixture(t) {
       });
       return { code, stdout, stderr, result: stdout ? JSON.parse(stdout) : null };
     },
-    process(flags) {
-      return new Promise(resolve => execFile(process.execPath, [gate, ...args(flags)], { env }, (error, stdout, stderr) => {
+    process(flags, target) {
+      return new Promise(resolve => execFile(process.execPath, [gate, ...args(flags, target)], { env }, (error, stdout, stderr) => {
         resolve({ code: error?.code ?? 0, stdout, stderr });
       }));
     },
@@ -205,19 +205,29 @@ test('CI quota cannot fall back to a mutable URL when the verified PR identity i
 });
 
 test('unreconciled old evidence remains fail-closed after cache deletion and restart', async t => {
-  for (const kind of ['no diagnosis', 'broken JSON', 'invalid diagnosis']) await t.test(kind, async t => {
+  for (const kind of ['no diagnosis', 'broken JSON', 'invalid diagnosis', 'URL receipt', 'encoded URL receipt', 'broken URL receipt']) await t.test(kind, async t => {
     const fx = fixture(t);
     fs.mkdirSync(fx.stateDir);
+    const urlReceipt = kind.includes('URL');
+    const repo = kind === 'encoded URL receipt' ? 'example/repo__name' : 'example/repo';
+    const target = `https://github.com/${repo}/pull/42`;
     const oldFailure = kind === 'invalid diagnosis' ? { ...failure, cause: '' } : undefined;
-    const cached = ciRetryFilePath(fx.stateDir, prNodeId, oldFailure);
-    const bytes = kind === 'broken JSON' ? '{' : JSON.stringify({ prNodeId, sourceHead: oldHead, reservedAt: 123, ...(oldFailure ? { failure: oldFailure } : {}) });
+    const cached = urlReceipt ? stateFilePath(fx.stateDir, repo, 42) + '.ci-retry' : ciRetryFilePath(fx.stateDir, prNodeId, oldFailure);
+    // The first 1.5.14 writer stored only these two fields at a lower-case URL filename.
+    const bytes = kind.startsWith('broken') ? '{' : JSON.stringify({ ...(urlReceipt ? {} : { prNodeId }), sourceHead: oldHead, reservedAt: 123, ...(oldFailure ? { failure: oldFailure } : {}) });
     fs.writeFileSync(cached, bytes);
-    assert.equal((await fx.process(['--ci-retry-status'])).code, 1);
+    assert.equal((await fx.process(['--ci-retry-status'], target)).code, 1);
     assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes, 'preserve raw evidence before rejecting it');
+    fs.writeFileSync(cached, 'stale replacement');
+    assert.equal((await fx.process(['--reserve-ci-retry', newHead], target)).code, 1);
+    assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes, 'stale cache must not overwrite durable unknown evidence');
     assert.equal(path.relative(fx.root, path.resolve(fx.stateDir)), 'state');
     fs.rmSync(fx.stateDir, { recursive: true });
-    assert.equal((await fx.process(['--ci-retry-status'])).code, 1, 'a new process must not restore the quota');
-    assert.equal((await fx.process(['--state-dir', path.join(fx.root, 'replacement-cache'), '--reserve-ci-retry', newHead])).code, 1);
+    assert.equal((await fx.process(['--ci-retry-status'], target)).code, 1, 'a new process must not restore the quota');
+    assert.equal((await fx.process(['--state-dir', path.join(fx.root, 'replacement-cache'), '--reserve-ci-retry', newHead], 'https://github.com/new-owner/renamed/pull/42')).code, 1);
+    if (urlReceipt) assert.equal((await fx.process(['--ci-retry-id', 'PR_otherImmutableId', '--ci-retry-status'], target)).code, 1,
+      'a URL-only receipt cannot be proved unrelated to another immutable ID');
+    assert.equal(fs.readdirSync(fx.retryDir).some(name => name.endsWith('.slot')), false, 'unknown old outcomes cannot allocate new slots');
   });
 });
 

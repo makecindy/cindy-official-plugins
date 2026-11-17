@@ -77,6 +77,10 @@ Legacy files are copied byte-for-byte with exclusive creation before decoding
 or validating them. Missing diagnoses and damaged/unknown identities remain
 fail-closed in durable storage even after cache cleanup; they are not discarded
 or assigned new diagnoses. Existing durable copies are never overwritten.
+This includes the earliest `*.json.ci-retry` URL receipts, which have neither
+an immutable PR ID nor a diagnosis. They stop budget operations even for a
+different URL: names cannot prove identity after renames/transfers. Preserve
+their raw bytes; do not invent an ID or diagnosis to make them usable.
 GitHub node IDs are opaque: use the exact verified value, including legacy
 base64 IDs; a `PR_` prefix is not required. Do not substitute a URL or number.
 Earlier evidence already deleted before migration cannot be reconstructed;
