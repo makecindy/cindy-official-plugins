@@ -269,7 +269,7 @@ test('div-built feeds translate their text blocks inside each block without brea
       async sendMessage(m){
         if(m.type!=='cindy-learning')return {ok:true};
         if(m.request.op==='config')return {ok:true,locale:'zh-CN'};
-        if(m.request.op==='translate'){sentTexts.push(...m.request.texts);return {ok:true,translations:m.request.texts.map(text=>/[一-鿿]/.test(text)?text:'译文：'+text)};}
+        if(m.request.op==='translate'){sentTexts.push(...m.request.texts);globalThis.lastTarget=m.request.target;return {ok:true,translations:m.request.texts.map(text=>/[一-鿿]/.test(text)?text:(m.request.target==='ja'?'訳：':'译文：')+text)};}
         throw Error('Unexpected request '+m.request.op);
       }},storage:{local:{async get(){return {cindyReadingPreferences:{webTarget:'zh-CN',autoVideo:false}};}},onChanged:{addListener(fn){globalThis.prefsChanged=fn;},removeListener(){}}}};
   });
@@ -320,6 +320,12 @@ test('div-built feeds translate their text blocks inside each block without brea
   assert.deepEqual(await panelCommand('translate'),{ok:true,translated:true});
   assert.ok(await page.locator('[data-cindy-translation]').count()>=2);
   assert.equal(await page.locator('[data-cindy-panel]:visible').count(),panelsBefore);
+  assert.deepEqual(await panelCommand('state'),{ok:true,translated:true});
+  // 2026-11-17 review: changing the language in side panel settings re-translates the page
+  // instead of leaving old-language blocks next to new ones.
+  await page.evaluate(()=>prefsChanged({cindyReadingPreferences:{newValue:{webTarget:'ja',webMode:'both'},oldValue:{webTarget:'zh-CN',webMode:'both'}}},'local'));
+  await page.waitForFunction(()=>globalThis.lastTarget==='ja'&&document.querySelectorAll('[data-cindy-translation]').length>=2);
+  assert.equal(await page.locator('#name [data-cindy-translation]').count(),1);
   assert.deepEqual(await panelCommand('state'),{ok:true,translated:true});
   assert.deepEqual(await panelCommand('translate'),{ok:true,translated:false});
   assert.equal(await page.locator('[data-cindy-translation]').count(),0);

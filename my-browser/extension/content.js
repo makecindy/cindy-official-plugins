@@ -215,11 +215,15 @@
     const siteWasEnabled=previous.autoSites?.[location.origin]===true,siteIsEnabled=stored.autoSites?.[location.origin]===true;
     const nextVideoTarget=L.validTarget(stored.videoTarget)?stored.videoTarget:prefs.videoTarget;
     const videoTargetChanged=nextVideoTarget!==prefs.videoTarget;
+    const webTargetChanged=L.validTarget(stored.webTarget)&&stored.webTarget!==target;
     target=L.validTarget(stored.webTarget)?stored.webTarget:target;
     const webMode=stored.webMode==='translation'?'translation':'both';
     // Switching bilingual / translation only re-presents what is already translated, without new model calls.
     if(webMode!==prefs.webMode){prefs.webMode=webMode;for(const [n,r] of translations)if(n.isConnected){unpresent(r);present(n,r);}}
     prefs.webTarget=target;
+    // A new language from settings (now in the side panel) re-translates a translated page, so it
+    // never mixes old-language blocks with new ones loaded while scrolling.
+    if(webTargetChanged&&translated){restorePage();togglePage().catch(report);}
     prefs.videoTarget=nextVideoTarget;
     prefs.videoMode=stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
     if(['both','translation'].includes(stored.lastVideoMode))prefs.lastVideoMode=stored.lastVideoMode;
