@@ -176,7 +176,11 @@ function readChatPage() {
   async function showSettings(){
     const view=$('settings-view'),prefs=await readPrefs();view.replaceChildren();
     const head=el('div','settings-head'),back=el('button','icon-button');back.type='button';back.title=copy.back;back.setAttribute('aria-label',copy.back);back.append(icon('back',17));back.onclick=hideSettings;head.append(back,el('h2',undefined,copy.settings));view.append(head);
-    const target=L.validTarget(prefs.webTarget)?prefs.webTarget:(locale==='zh-CN'?'zh-CN':'en');
+    // Same rule pages use to pick the language: saved setting, then the plugin's older saved target,
+    // then Chinese. Showing anything else would not match what Translate actually produces.
+    let target=L.validTarget(prefs.webTarget)?prefs.webTarget:null;
+    if(!target){try{const r=await chrome.runtime.sendMessage({type:'cindy-learning',id:crypto.randomUUID(),request:{op:'preferences'}});if(r?.ok&&L.validTarget(r.target))target=r.target;}catch{}}
+    target||='zh-CN';
     const langRow=el('label','setting-row'),select=el('select','setting-select');langRow.append(el('span','setting-text',copy.target),select);
     for(const code of new Set([target,...L.commonLanguages])){const o=el('option',undefined,L.languageName(code));o.value=code;o.selected=code===target;select.append(o);}
     select.onchange=()=>savePrefs({webTarget:select.value}).catch(()=>{});
