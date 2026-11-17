@@ -4,6 +4,14 @@
 
 ## Read first
 
+### 2.1.31: Recognition submission variable fix
+
+Correct both V10 stop checks in the 0.0.41 recipe from source to the actual
+source2 parameter, updating the bundle and hashes together. Regression tests
+execute the bundled recognition function through initial submission, recovery
+of the original request, and both stop paths. Upgrade checks must reach request
+dispatch; early returns or string matches do not verify patched variable bindings.
+
 ### 2.1.30: Windows PAT integration verification
 
 On 2026-11-12, installed commit 5896bcc from fix/taptap-maker-pat-stdin in place
