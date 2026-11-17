@@ -25,13 +25,13 @@
   function dispose(){
     if(disposed)return;disposed=true;panelEpoch++;generation++;lifecycle.abort();clearInterval(navigationTimer);
     requests.clear();progressHandlers.clear();stopPage();stopVideo();
-    for(const rec of translations.values())rec.host.remove();translations.clear();
+    for(const rec of translations.values())unpresent(rec);translations.clear();
     for(const entry of document.querySelectorAll('[data-cindy-player-entry]'))entry.remove();
     selectionButton?.remove();selectionButton=null;host?.remove();host=null;shadow=null;footer=null;status=null;
     clearTimeout(agentMarkTimer);agentMark?.remove();agentMark=null;openedMark?.remove();openedMark=null;clearOpenedTitle();
     try{api?.runtime?.onMessage?.removeListener(onRuntimeMessage);api?.storage?.onChanged?.removeListener(onPreferencesChanged);}catch{}
   }
-  let subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
+  let localeKnown=false,subtitleCacheSupported=false,expandedLanguages=false,prefs={selectionButton:false,videoTarget:'zh-CN',videoMode:'both',videoSize:'medium',autoVideo:true,bufferPause:false,backgroundFill:false,captionTheme:'dark',autoSites:{}},selectionPoint=null,configuring=null,subtitleSegmentation=false,subtitleEditorial=false,locale=/^zh/i.test(globalThis.navigator?.language||'')?'zh-CN':'en',t=U.copy(locale),target='zh-CN',host,shadow,body,status,footer,cancelButton,selected='',selectedContext='',lastResult='',taskKey='',taskPayload='',generation=0,translated=false;
   let cueMedia,cueMediaSource='',video,cues=[],activeCue=-1,repeat=false,autoPause=false,previousCue=-1,videoHandler,videoSession,videoTimer;
   const progressHandlers=new Map(),requests=new Set(),translations=new Map();let observer,translateRunning=null;
   function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -132,13 +132,13 @@
   function speak(text,language){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=language||target;u.rate=0.9;speechSynthesis.speak(u);}
   async function configure(){
     if(configuring)return configuring;
-    configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';t=U.copy(locale);
+    configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';localeKnown=true;t=U.copy(locale);
       const selectionRevision=selectionPreferenceRevision;
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
       const selectionButtonEnabled=selectionRevision===selectionPreferenceRevision?stored.selectionButton===true:prefs.selectionButton;
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{}};
+      prefs={selectionButton:selectionButtonEnabled,webTarget:target,webMode:stored.webMode==='translation'?'translation':'both',videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:'both',lastVideoMode:stored.lastVideoMode==='translation'?'translation':'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause===true,backgroundFill:stored.backgroundFill===true,captionTheme:stored.captionTheme==='light'?'light':'dark',autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{}};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -172,9 +172,9 @@
   function close(){panelEpoch++;rememberVideo(false);cancel();stopVideo();speechSynthesis.cancel();host?.remove();host=null;shadow=null;footer=null;status=null;ensureVideoEntry();}
   function hidePanel(){panelEpoch++;host?.style.setProperty('display','none','important');}
   function makePanel(){
-    if(host){host.style.setProperty('display','block','important');host.style.removeProperty('left');host.style.setProperty('right','16px','important');host.style.setProperty('top','16px','important');return;}
+    if(host){host.style.setProperty('display','block','important');host.style.removeProperty('left');host.style.setProperty('right','16px','important');host.style.setProperty('top','16px','important');host.style.removeProperty('bottom');host.style.removeProperty('--panel-max');return;}
     host=el('div');host.setAttribute('data-cindy-panel','');isolateHost(host,{position:'fixed',display:'block','z-index':'2147483646',top:'16px',right:'16px',width:'min(336px,calc(100vw - 32px))','max-height':'calc(100vh - 32px)'});
-    shadow=host.attachShadow({mode:'closed'});shadow.append(el('style',U.css+`.panel{display:flex;flex-direction:column;max-height:calc(100vh - 32px);background:var(--card);border:1px solid var(--board);border-radius:12px;overflow:hidden}header{padding:12px 16px;border-bottom:1px solid var(--board)}.heading{flex-wrap:nowrap}main{padding:20px;overflow:auto;min-height:0}footer{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--board)}footer .status{flex:1;min-width:0}footer button{flex:none}.selection-source{font-size:12px;color:var(--muted);max-height:90px;overflow:auto}.result{font-size:16px;line-height:1.7}.result:empty{display:none}details{border-top:1px solid var(--board);padding-top:12px}summary{cursor:pointer;font-size:12px;color:var(--muted)}details .stack{margin-top:12px}`));
+    shadow=host.attachShadow({mode:'closed'});shadow.append(el('style',U.css+`.selection-actions{gap:4px}.selection-actions button.active{background:var(--hover);font-weight:500}.panel{display:flex;flex-direction:column;max-height:var(--panel-max,calc(100vh - 32px));background:var(--card);border:1px solid var(--board);border-radius:12px;overflow:hidden}header{padding:12px 16px;border-bottom:1px solid var(--board)}.heading{flex-wrap:nowrap}main{padding:20px;overflow:auto;min-height:0}footer{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--board)}footer .status{flex:1;min-width:0}footer button{flex:none}.selection-source{font-size:12px;color:var(--muted);max-height:90px;overflow:auto}.result{font-size:16px;line-height:1.7}.result:empty{display:none}details{border-top:1px solid var(--board);padding-top:12px}summary{cursor:pointer;font-size:12px;color:var(--muted)}details .stack{margin-top:12px}`));
     const panel=el('section',undefined,'panel cindy-root');panel.setAttribute('aria-label','Cindy');const header=el('header',undefined,'row heading'),brand=el('img');brand.className='brand';brand.src=brandURL;brand.alt='';
     header.append(brand,el('h1','Cindy','grow'),iconButton(t.settings,'M4 7h9M17 7h3M15 5v4M4 17h3M11 17h9M9 15v4',showSettings),iconButton(t.close,'M6 6l12 12M18 6 6 18',hidePanel));
     body=el('main',undefined,'stack');status=el('div','','status');status.setAttribute('role','status');footer=el('footer');cancelButton=button(t.cancel,()=>{if(videoSession){videoSession.paused=true;videoSession.retryButton.hidden=false;}cancel();videoSession?.playback?.update();stopPage();note(t.cancel);},'quiet');footer.append(status,cancelButton);panel.append(header,body,footer);shadow.append(panel);document.documentElement.append(host);updateFooter();
@@ -201,19 +201,11 @@
     const download=el('a',t.downloadCindy,'text-link');download.href='https://cindy.app/download/';download.target='_blank';download.rel='noopener';
     body.append(el('h2',t.clientGuideTitle),intro,steps,actions,el('small',t.clientGuideNote),download);
   }
-  function selectionButtonCheckbox(){
-    const label=el('label',undefined,'field'),input=el('input');input.type='checkbox';input.checked=prefs.selectionButton===true;
-    input.className='selection-button-checkbox switch-input';
-    input.addEventListener('change',()=>{prefs.selectionButton=input.checked;if(!input.checked){selectionButton?.remove();selectionButton=null;}savePreferences({selectionButton:input.checked}).catch(report);});
-    label.append(el('span',t.selectionButton),input);return label;
-  }
-  function showSettings(){clear('settings');const head=el('div',undefined,'subpage-head'),back=button('‹',()=>videoSession?videoSettings():showPageHome());back.setAttribute('aria-label',t.back);back.title=t.back;head.append(back,el('h2',t.settings));body.append(head);
-    body.append(selectionButtonCheckbox());
-    body.append(field(t.autoVideo,switchControl(t.autoVideo,prefs.autoVideo,v=>{prefs.autoVideo=v;return savePreferences({autoVideo:v});})));
-    const model=el('div',undefined,'stack settings-section'),change=el('a',t.modelChange,'button-link');change.href='cindy://plugins/my-browser';
-    model.append(field(t.modelSettings,change),el('small',t.modelHint));body.append(model);
-    const groups=el('div',undefined,'stack settings-section');
-    groups.append(button(t.tabGroups,async()=>{const result=await sendMessage({type:'cindy-open-options'});if(!result?.ok)throw Error('OPTIONS_UNAVAILABLE');}),el('small',t.tabMarkHint));body.append(groups);
+  // Settings live in the side panel; the page panel only opens them there (the click is the user
+  // gesture Chrome needs). If Chrome refuses, say where to find them.
+  async function showSettings(){
+    const r=await sendMessage({type:'cindy-open-sidepanel',view:'settings'}).catch(()=>null);
+    if(!r?.ok)note(String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh')?'点浏览器工具栏上的 Cindy 图标，在侧边栏的设置里修改。':'Click the Cindy icon in the toolbar and change it in the side panel settings.');
   }
   function onPreferencesChanged(changes,area){
     const change=changes?.cindyReadingPreferences;
@@ -224,6 +216,9 @@
     const nextVideoTarget=L.validTarget(stored.videoTarget)?stored.videoTarget:prefs.videoTarget;
     const videoTargetChanged=nextVideoTarget!==prefs.videoTarget;
     target=L.validTarget(stored.webTarget)?stored.webTarget:target;
+    const webMode=stored.webMode==='translation'?'translation':'both';
+    // Switching bilingual / translation only re-presents what is already translated, without new model calls.
+    if(webMode!==prefs.webMode){prefs.webMode=webMode;for(const [n,r] of translations)if(n.isConnected){unpresent(r);present(n,r);}}
     prefs.webTarget=target;
     prefs.videoTarget=nextVideoTarget;
     prefs.videoMode=stored.videoMode==='original'?'off':['both','translation','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
@@ -232,7 +227,6 @@
     selectionPreferenceRevision++;
     prefs.selectionButton=stored.selectionButton===true;
     if(!prefs.selectionButton){selectionButton?.remove();selectionButton=null;}
-    const checkbox=body?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
     prefs.bufferPause=stored.bufferPause===true;
     prefs.backgroundFill=stored.backgroundFill===true;
     prefs.autoVideo=stored.autoVideo!==false;
@@ -267,7 +261,7 @@
   }
   async function open(action){
     carried=resuming=null;const epoch=panelEpoch;
-    if(action==='selection'&&window.getSelection()?.toString().trim())selection();
+    if((action==='selection'||action==='selection-explain')&&window.getSelection()?.toString().trim())selection();
     if(action==='settings'&&videoSession){showSettings();videoSession.overlay.openSettings(false);return;}
     // Choosing another player on the page moves the session there.
     if(action==='video'&&videoSession&&requestedMedia&&requestedMedia!==video)stopVideo();
@@ -277,14 +271,27 @@
     if(!await preparePanel(epoch)||epoch!==panelEpoch||!runtimeReady())return;
     if(action==='translate-page'){const work=togglePage();showPageHome(true);await work;return;}
     if(action==='settings'){showSettings();return;}
-    if(action==='video'||(youtubeSite&&action!=='selection')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
+    if(action==='selection-explain'&&selected){showSelection('explain');await analyze('explain');return;}
+    if(action==='video'||(youtubeSite&&action!=='selection'&&action!=='selection-explain')){await showVideo();if(action!=='auto')videoSession?.overlay?.openSettings();return;}
     if(action==='selection'&&selected){showSelection();await translateSelection();return;}
     showPageHome();
   }
-  function showSelection(){clear('selection');if(selectionPoint){host.style.setProperty('left',Math.max(12,Math.min(selectionPoint.x,innerWidth-348))+'px','important');host.style.setProperty('top',Math.max(12,Math.min(selectionPoint.y,innerHeight-300))+'px','important');host.style.removeProperty('right');}
-    body.append(el('p',selected,'selection-source'),el('p',lastResult,'result'));const actions=el('div',undefined,'row');actions.append(button(t.explain,()=>analyze('explain'),'text-link'),button(t.copyText,async()=>{await navigator.clipboard.writeText(lastResult);note(t.copied);},'quiet'));body.append(actions);
-    const more=el('details'),moreBody=el('div',undefined,'stack');more.append(el('summary',t.more),moreBody);const input=el('textarea');input.value=selected;input.setAttribute('aria-label',t.source);input.oninput=()=>{selected=input.value;lastResult='';};moreBody.append(input,button(t.translate,translateSelection),button(t.summary,()=>analyze('summary')),button(t.listen,()=>speak(lastResult||selected)));
-    const instruction=el('textarea');instruction.placeholder=t.taskInstruction;instruction.setAttribute('aria-label',t.taskInstruction);moreBody.append(instruction,button(t.handoff,async()=>{if(!selected.trim())return;const payload=JSON.stringify([selected,selectedContext,instruction.value,source().url]);if(payload!==taskPayload){taskKey=L.uuid();taskPayload=payload;}note(t.working);const r=await request({op:'task',id:taskKey,text:selected,context:selectedContext,instruction:instruction.value});note(t.taskSent+' '+r.title);}));body.append(more);
+  // Selection card: the result and three actions (translate, explain, copy). The card fits between
+  // its top and the bottom of the window; a long result scrolls inside it.
+  function selectionLabels(){return String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh')?{translate:'翻译',explain:'解释',copy:'复制',copied:'已复制'}:{translate:'Translate',explain:'Explain',copy:'Copy',copied:'Copied'};}
+  function showSelection(mode='translate'){clear('selection');
+    if(selectionPoint){
+      // Below the selection when there is room, otherwise above it: the card never covers the selected line.
+      const below=innerHeight-selectionPoint.y-12,above=(selectionPoint.above??selectionPoint.y)-12,useBelow=below>=260||below>=above;
+      host.style.setProperty('left',Math.max(12,Math.min(selectionPoint.x,innerWidth-348))+'px','important');host.style.removeProperty('right');
+      if(useBelow){host.style.setProperty('top',Math.max(12,selectionPoint.y)+'px','important');host.style.removeProperty('bottom');}
+      else{host.style.setProperty('bottom',(innerHeight-above-12)+'px','important');host.style.removeProperty('top');}
+      host.style.setProperty('--panel-max',Math.max(160,useBelow?below:above)+'px');}
+    const labels=selectionLabels();
+    body.append(el('p',selected,'selection-source'),el('p',lastResult,'result'));const actions=el('div',undefined,'row selection-actions');
+    const pick=(label,next,run)=>{const b=button(label,()=>{if(mode!==next){mode=next;paint();}return run();},mode===next?'quiet active':'quiet');b.setAttribute('aria-pressed',String(mode===next));return b;};
+    const paint=()=>actions.replaceChildren(pick(labels.translate,'translate',translateSelection),pick(labels.explain,'explain',()=>analyze('explain')),button(labels.copy,async()=>{if(!lastResult)return;await navigator.clipboard.writeText(lastResult);note(labels.copied);},'quiet'));
+    paint();body.append(actions);
   }
   async function translateSelection(){if(!selected.trim())return;const g=++generation,result=body.querySelector('.result');note(t.working);
     try{const r=await request({op:'translate',text:selected});if(g!==generation||!result?.isConnected||body.querySelector('.result')!==result)return;lastResult=r.translations[0];result.textContent=lastResult;note('');}
@@ -294,9 +301,57 @@
     try{const r=await request({op,text:selected,context:selectedContext});if(g!==generation||!result?.isConnected||body.querySelector('.result')!==result)return;lastResult=r.text;result.textContent=lastResult;note('');}
     catch(e){if(g===generation&&result?.isConnected&&body.querySelector('.result')===result)throw e;}
   }
-  function restorePage(){cancel();translated=false;observer?.disconnect();observer=null;for(const [node,rec]of translations){rec.host.remove();}translations.clear();if(status)note(t.restore);}
+  function restorePage(){cancel();translated=false;observer?.disconnect();observer=null;for(const rec of translations.values())unpresent(rec);translations.clear();if(status)note(t.restore);}
+  // Bilingual: the translation is added under the original (as its next sibling, or inside a div-built
+  // block). Translation only: the block's own text is replaced in place, keeping links and layout,
+  // and put back on restore unless the page has rewritten it meanwhile.
+  function present(node,rec){
+    rec.host=null;rec.originals=null;
+    if(rec.translation!=null&&prefs.webMode==='translation'){
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT),originals=[];let first=true,tn;
+      while((tn=walker.nextNode())){if(!tn.data.trim()||tn.parentElement?.closest('[data-cindy-translation]'))continue;const next=first?rec.translation:'';originals.push([tn,tn.data,next]);first=false;}
+      for(const [n,,next] of originals)n.data=next;rec.originals=originals;
+    }else if(rec.translation!=null){
+      const h=el('span');
+      // Named-slot content (e.g. Reddit post titles) has no visible default
+      // slot. Project the sibling into the same slot without editing the link.
+      if(node.hasAttribute('slot'))h.slot=node.slot;
+      h.setAttribute('data-cindy-translation','');
+      const root=h.attachShadow({mode:'closed'});root.append(el('style',':host{display:block;margin:'+(rec.inside?'2px 0 0':'6px 0 12px')+';font:inherit;color:inherit;opacity:.8}'),el('span',rec.translation));if(rec.inside)node.append(h);else node.after(h);rec.host=h;
+    }
+    rec.text=node.innerText;
+  }
+  function unpresent(rec){rec.host?.remove();for(const [n,data,set] of rec.originals||[])if(n.isConnected&&n.data===set)n.data=data;rec.host=null;rec.originals=null;}
+  const shown=rec=>!!(rec.host?.isConnected||rec.originals);
   const pageTextSelector='p,h1,h2,h3,li,blockquote,figcaption,[slot="title"]';
-  function candidates(){return [...(document.querySelector('article,main,[role=main]')||document.body).querySelectorAll(pageTextSelector)].filter(n=>!translations.has(n)&&!n.closest('pre,code,nav,footer,header,textarea,[contenteditable],script,style')&&n.getClientRects().length&&n.innerText?.trim().length>2&&n.innerText.length<=4000&&!n.querySelector(pageTextSelector)&&n.getBoundingClientRect().top<innerHeight*2&&n.getBoundingClientRect().bottom>0);}
+  const skipTranslation='pre,code,nav,footer,header,textarea,input,select,button,[contenteditable],script,style,svg,[aria-hidden="true"],[data-cindy-translation],[data-cindy-panel]';
+  const nearViewport=n=>{if(!n.getClientRects().length)return false;const r=n.getBoundingClientRect();return r.top<innerHeight*2&&r.bottom>0;};
+  const readable=n=>{const text=n.innerText?.trim()||'';return text.length>2&&text.length<=4000&&(text.match(/\p{L}/gu)||[]).length>=2;};
+  const inlineDisplay=d=>d==='inline'||d==='inline-block'||d==='inline-flex'||d==='contents'||d==='none'||d==='ruby';
+  // Paragraph tags keep their translation as the next sibling. Many sites (feeds, cards, hot lists)
+  // are built from divs instead: their innermost text block takes the translation inside, so a
+  // horizontal card or flex row keeps its layout.
+  function candidates(){
+    // The whole visible page: portals and feeds put hot lists and cards outside the first article.
+    const root=document.body,picked=[];
+    for(const n of root.querySelectorAll(pageTextSelector))
+      if(!translations.has(n)&&!n.closest(skipTranslation)&&readable(n)&&!n.querySelector(pageTextSelector)&&nearViewport(n))picked.push({node:n,inside:false});
+    const seen=new Set(picked.map(c=>c.node)),blocks=[];
+    for(const n of root.querySelectorAll('div,section,td,dd,dt,a,span,label'))
+      if(!seen.has(n)&&nearViewport(n)&&!inlineDisplay(getComputedStyle(n).display)&&!n.closest(skipTranslation)&&!n.closest(pageTextSelector)&&!n.querySelector(pageTextSelector)&&readable(n))blocks.push(n);
+    const outer=new Set();for(const n of blocks){let a=n.parentElement;while(a&&a!==root&&!outer.has(a)){outer.add(a);a=a.parentElement;}}
+    const leaves=blocks.filter(n=>!outer.has(n)&&!translations.has(n));if(!leaves.length)return picked;
+    // Top of the page first, whichever rule found the text.
+    return picked.concat(leaves.map(node=>({node,inside:true}))).sort((a,b)=>a.node.compareDocumentPosition(b.node)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1);
+  }
+  // The side panel translates without opening the page panel, and shows the state on its own button.
+  let pageError=null;
+  async function pageCommand(action){
+    if(action==='state')return {ok:true,translated:translated||translations.size>0};
+    if(translated||translations.size){restorePage();return {ok:true,translated:false};}
+    await configure();pageError=null;await togglePage();
+    return pageError?{ok:false,error:pageError,translated:false}:{ok:true,translated};
+  }
   async function translateVisible(){
     const g=generation;
     if(!translated||translateRunning===g)return;
@@ -304,24 +359,21 @@
     translateRunning=g;
     try{
       const nodes=candidates().slice(0,12),texts=[];const accepted=[];
-      for(const n of nodes){if(texts.join('').length+n.innerText.length>18000)break;texts.push(n.innerText);accepted.push(n);}
+      for(const c of nodes){const n=c.node;if(texts.join('').length+n.innerText.length>18000)break;texts.push(n.innerText);accepted.push(c);}
       if(!accepted.length)return;
       const r=await request({op:'translate',texts});if(g!==generation||!translated)return;
-      accepted.forEach((node,i)=>{
+      accepted.forEach(({node,inside},i)=>{
         if(!node.isConnected||node.innerText!==texts[i])return;
-        const h=el('span');
-        // Named-slot content (e.g. Reddit post titles) has no visible default
-        // slot. Project the sibling into the same slot without editing the link.
-        if(node.hasAttribute('slot'))h.slot=node.slot;
-        h.setAttribute('data-cindy-translation','');
-        const root=h.attachShadow({mode:'closed'});root.append(el('style',':host{display:block;margin:6px 0 12px;font:inherit;color:inherit;opacity:.8}'),el('span',r.translations[i]));node.after(h);translations.set(node,{host:h,text:texts[i]});
+        // Text already in the reader's language needs no second copy.
+        const same=typeof r.translations[i]!=='string'||r.translations[i].trim()===texts[i].trim();
+        const rec={inside,translation:same?null:r.translations[i]};present(node,rec);translations.set(node,rec);
       });
-      if(status)note(`${t.progress} ${translations.size}`);
-    }catch(e){if(g===generation){translated=false;observer?.disconnect();report(e);}}
+      if(status)note(`${t.progress} ${[...translations.values()].filter(shown).length}`);
+    }catch(e){if(g===generation){translated=false;observer?.disconnect();pageError=e?.message||String(e);report(e);}}
     finally{if(translateRunning===g)translateRunning=null;if(translated&&g===generation&&candidates().length)queueTranslate();}
   }
   async function togglePage(){if(translated||translations.size){restorePage();return;}translated=true;note(t.working);
-    observer=new MutationObserver(()=>{for(const [n,r]of translations)if(!n.isConnected||n.innerText!==r.text){r.host.remove();translations.delete(n);}queueTranslate();});observer.observe(document.body,{subtree:true,childList:true,characterData:true});await translateVisible();}
+    observer=new MutationObserver(()=>{for(const [n,r]of translations)if(!n.isConnected||n.innerText!==r.text){unpresent(r);translations.delete(n);}queueTranslate();});observer.observe(document.body,{subtree:true,childList:true,characterData:true});await translateVisible();}
   let translateTimer;function queueTranslate(){clearTimeout(translateTimer);translateTimer=setTimeout(()=>translateVisible(),350);}
   window.addEventListener('scroll',()=>{if(translated)queueTranslate();},{passive:true,signal:lifecycle.signal});
   function stopVideo(){if(videoSession)rememberVideo(false);clearTimeout(videoTimer);if(video&&videoSession?.seekHandler)video.removeEventListener('seeked',videoSession.seekHandler);videoSession?.playback?.dispose();videoSession?.overlay?.destroy();videoSession=null;if(video&&videoHandler)video.removeEventListener('timeupdate',videoHandler);videoHandler=null;video=null;activeCue=-1;previousCue=-1;}
@@ -494,6 +546,9 @@
     const play=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick);},sync=()=>{if(overlayHost.parentElement!==frameOf())frameOf().append(overlayHost);position();videoHandler?.();};
     media.addEventListener('play',play);media.addEventListener('seeked',sync);media.addEventListener('loadedmetadata',sync);document.addEventListener('fullscreenchange',sync);window.addEventListener('scroll',position,{passive:true});window.addEventListener('resize',position);if(!media.paused)play();
     let iconOn=null;const update=()=>{box.dataset.captionTheme=prefs.captionTheme||'dark';if(iconOn!==captionsEnabled()){iconOn=captionsEnabled();toggle.replaceChildren(captionIcon(iconOn));}toggle.title=t.video+' · '+(prefs.videoMode==='off'?t.off:prefs.videoMode==='original'?t.source:L.languageName(prefs.videoTarget));position();progress();};update();
+    // While the settings card is open it must sit above the player's own layers (YouTube's end-screen
+    // grid otherwise covers it); closed, captions return below the player's controls and menus.
+    new MutationObserver(()=>overlayHost.style.setProperty('z-index',settings.hidden?'60':'2147483000','important')).observe(settings,{attributes:true,attributeFilter:['hidden']});
     overlayHost.addEventListener('keydown',e=>{if(e.key==='Escape'){settings.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
     const outside=e=>{if(!e.composedPath().includes(overlayHost)&&!e.composedPath().includes(controlHost)){settings.hidden=true;toggle.setAttribute('aria-expanded','false');}};document.addEventListener('pointerdown',outside);
     return {
@@ -735,7 +790,7 @@
   let selectionButton, selectionStart, selectionDragged=false;
   const selectionStartupRevision=selectionPreferenceRevision;
   extensionCall(()=>api.storage.local.get('cindyReadingPreferences')).then(data=>{if(selectionStartupRevision===selectionPreferenceRevision)prefs.selectionButton=data.cindyReadingPreferences?.selectionButton===true;}).catch(()=>{});
-  const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&n.hasAttribute('data-cindy-captions'));
+  const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&(n.hasAttribute('data-cindy-captions')||n.hasAttribute('data-cindy-selection-entry')));
   document.addEventListener('mousedown',e=>{
     if(!e.isTrusted||e.button!==0||selectionEventIsOurs(e))return;
     selectionButton?.remove();selectionButton=null;
@@ -752,7 +807,23 @@
     // A click or double-click selects text on the page but is not an explicit
     // request for Cindy. Only a real drag may create the contextual entry.
     if(prefs.selectionButton!==true||!dragged||!window.getSelection()?.toString().trim()||!selected)return;
-    if(!runtimeReady())return;selectionPoint={x:e.clientX,y:e.clientY+12};const h=el('div');h.dataset.cindySelectionEntry='true';isolateHost(h,{position:'fixed',left:Math.min(e.clientX,innerWidth-90)+'px',top:Math.min(e.clientY+12,innerHeight-45)+'px','z-index':'2147483645'});const s=h.attachShadow({mode:'closed'}),root=el('div',undefined,'cindy-root');root.append(button('Cindy',()=>{h.remove();return open('selection');},'primary'));s.append(el('style',U.css),root);document.documentElement.append(h);selectionButton=h;
+    if(!runtimeReady())return;
+    let rect;try{rect=window.getSelection().getRangeAt(0).getBoundingClientRect();}catch{}
+    if(!rect||!rect.width&&!rect.height)rect={left:e.clientX,right:e.clientX,top:e.clientY,bottom:e.clientY};
+    selectionPoint={x:rect.left,y:rect.bottom+8,above:rect.top-8};
+    // Before Cindy has told the page its interface language, follow the browser's.
+    const zh=String(localeKnown?locale:globalThis.navigator?.language||'').startsWith('zh'),labels=zh?{translate:'翻译',explain:'解释'}:{translate:'Translate',explain:'Explain'};
+    const h=el('div');h.dataset.cindySelectionEntry='true';
+    const above=rect.top>52,top=above?rect.top-44:Math.min(rect.bottom+8,innerHeight-44),left=Math.max(8,Math.min(rect.left,innerWidth-200));
+    isolateHost(h,{position:'fixed',left:left+'px',top:Math.max(8,top)+'px','z-index':'2147483645'});
+    const s=h.attachShadow({mode:'closed'}),bar=el('div',undefined,'bar');bar.setAttribute('role','toolbar');bar.setAttribute('aria-label','Cindy');
+    const mark=el('img');mark.src=brandURL;mark.alt='';mark.className='mark';bar.append(mark);
+    for(const [label,action] of [[labels.translate,'selection'],[labels.explain,'selection-explain']]){const b=el('button',label);b.type='button';b.onclick=()=>{h.remove();selectionButton=null;return open(action);};bar.append(b);}
+    s.append(el('style',`:host{all:initial}.bar{display:flex;align-items:center;gap:2px;height:36px;padding:0 4px 0 6px;border:1px solid #d7d7d4;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.15);font:13px/18px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",Inter,sans-serif;color:#262626;animation:in .12s ease-out}
+      .mark{width:18px;height:18px;border-radius:5px;margin-right:4px}button{all:unset;height:28px;padding:0 10px;border-radius:7px;cursor:pointer;color:inherit;white-space:nowrap}button:hover{background:#e5e5e5}button:focus-visible{box-shadow:0 0 0 2px rgba(65,124,221,.5)}
+      @keyframes in{from{opacity:0;transform:translateY(4px)}}@media(prefers-reduced-motion:reduce){.bar{animation:none}}
+      @media(prefers-color-scheme:dark){.bar{background:#2c2c2a;border-color:#3c3c3a;color:#d4d4d4;box-shadow:0 4px 16px rgba(0,0,0,.5)}button:hover{background:#3c3c3a}}`),bar);
+    document.documentElement.append(h);selectionButton=h;
   },{signal:lifecycle.signal});
   // While the agent works on this page: a thin Cindy-red glow around the viewport and a small label.
   // It never takes clicks, lives in a closed shadow root (so page reads do not see it) and fades a few
@@ -824,7 +895,9 @@
     // A mark re-sent after the page loaded only lasts for the time the worker has left.
     agentMarkTimer=setTimeout(endAgentMark,Number.isFinite(ms)&&ms>0?Math.min(ms,AGENT_MARK_MS):AGENT_MARK_MS);
   }
-  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true,m.ms).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
+  function onRuntimeMessage(m,_sender,reply){if(!runtimeReady())return;if(m?.type==='cindy-agent-mark'&&_sender.id===api.runtime.id){markAgent(m.hidden===true,m.clear===true,m.opened===true,m.ms).then(()=>reply({ok:true}),()=>reply({ok:false}));return true;}if(m?.type==='cindy-learning-progress'){if(_sender.id===api.runtime.id)progressHandlers.get(m.id)?.(m.progress);return;}// Side panel page commands use their own type: older page scripts open their panel for any unknown cindy-ui action.
+    if(m?.type==='cindy-page'&&_sender.id===api.runtime.id&&!inFrame&&['state','translate'].includes(m.action)){pageCommand(m.action).then(r=>{if(!disposed)reply(r);},e=>{if(!disposed)reply({ok:false,error:e?.message||String(e)});});return true;}
+    if(m?.type!=='cindy-ui')return;if(inFrame?!m.frame||!allMedia().length:m.frame)return;open(m.action).then(()=>{if(!disposed)reply({ok:true});},e=>{report(e);if(!disposed)reply({ok:false,error:e.message});}).catch(()=>{});return true;}
   api.runtime.onMessage.addListener(onRuntimeMessage);
   let autoOpening=false,nextAutoAttempt=0,autoTranslatedURL='';
   async function autoOpen(){

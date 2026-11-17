@@ -2,3 +2,7 @@ Go runtime and standard library 1.27.2 (native browser bootstrap executable)
 Source: https://go.dev/
 License: BSD-3-Clause; full text: native-host/GO-LICENSE
 No third-party Go modules. Built from native-host/ source with CGO disabled.
+
+marked 16.4.2 (Markdown parser for the side panel chat; extension/vendor/marked.umd.js, unmodified official build)
+Source: https://github.com/markedjs/marked
+License: MIT; full text: extension/vendor/marked-LICENSE.md

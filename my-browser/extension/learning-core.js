@@ -23,7 +23,8 @@
   function backgroundSubtitleChunk(chunks,time,now=Date.now(),ahead=Infinity){const open=(chunks||[]).filter(c=>!c.done&&!c.error&&!c.busy&&!(c.retryAt>now)).sort((a,b)=>a.words[0].start-b.words[0].start);return open.find(c=>c.words.at(-1).end>time&&c.words[0].start<=time+ahead)||open.find(c=>c.words.at(-1).end<=time)||null;}
   function sameLanguage(a,b){const base=v=>typeof v==='string'&&!v.startsWith('custom:')?v.toLowerCase().split(/[-_]/)[0]:'';const x=base(a),y=base(b);return !!x&&x===y;}
   function languageName(value){return Object.hasOwn(languages,value)?languages[value]:validTarget(value)?value.slice(7):'';}
-  const operations = new Set(['translate','explain','summary','conversation','save','list','remove','review','import','preferences','config','task','subtitles','subtitle-document','subtitle-cache-clear']);
+  const operations = new Set(['translate','explain','summary','conversation','save','list','remove','review','import','preferences','config','task','subtitles','subtitle-document','subtitle-cache-clear','models','model-favorite']);
+  const efforts=new Set(['minimal','low','medium','high','xhigh','max','ultra']);
   function string(value,max,required=false) {
     if (typeof value !== 'string' || value.length>max || (required && !value.trim())) throw Error('INVALID_INPUT');
     return value;
@@ -84,6 +85,24 @@
     if(out.op==='import') {
       if(!Array.isArray(input.entries) || input.entries.length>500) throw Error('IMPORT_TOO_LARGE');
       out.entries=input.entries.map(e=>validate({...e,op:'save'}));
+    }
+    // A model the user picked in the side panel. Only routes of the plugin's own computer:
+    // the Host re-validates the exact source, model, effort and Fast before running.
+    if(input.route!==undefined) {
+      const r=input.route;
+      if(out.op!=='conversation'||out.scenario!=='webpage-chat'||!r||typeof r!=='object'||Array.isArray(r)||r.agentDeviceId!==undefined||
+        !['cc','codex','pi'].includes(r.agentKind)||![true,false,'ultrafast'].includes(r.fastMode)||(r.effort!==''&&!efforts.has(r.effort)))throw Error('INVALID_INPUT');
+      out.route={agentKind:r.agentKind,providerId:string(r.providerId,200,true),model:string(r.model,200,true),effort:r.effort,fastMode:r.fastMode};
+    }
+    // A favorite edit from the side panel, in the shape Cindy's favorites already use.
+    if(out.op==='model-favorite') {
+      const fav=(f,uid)=>{
+        if(!f||typeof f!=='object'||Array.isArray(f)||!['cc','codex','pi'].includes(f.agent)||(f.effort!==undefined&&!efforts.has(f.effort))||(f.fast!==undefined&&f.fast!==true&&f.fast!=='ultrafast'))throw Error('INVALID_INPUT');
+        return {...(uid?{uid:string(f.uid,512,true)}:{}),providerId:string(f.providerId,512,true),modelId:string(f.modelId,512,true),agent:f.agent,...(f.effort!==undefined?{effort:f.effort}:{}),...(f.fast!==undefined?{fast:f.fast}:{})};
+      };
+      const m=input.mutation;
+      if(!m||!['add','update','remove'].includes(m.kind))throw Error('INVALID_INPUT');
+      out.mutation=m.kind==='add'?{kind:'add',item:fav(m.item)}:m.kind==='remove'?{kind:'remove',expected:fav(m.expected,true)}:{kind:'update',expected:fav(m.expected,true),item:fav(m.item)};
     }
     if(out.op==='list') {
       out.offset=Number.isInteger(input.offset)&&input.offset>=0?input.offset:0;

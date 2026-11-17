@@ -640,3 +640,16 @@ connection test uses an isolated Chromium profile and a fenced fixture bridge, n
 Pages Cindy opens now carry a `[Cindy]` title prefix by default, without extra permissions. It follows changes to the page title and is removed when you take over with real input or the old extension content script is disposed. Your existing pages are not marked as Cindy-owned. Chrome-protected pages that do not allow content scripts cannot show this prefix. The optional red tab group remains available through **Tab group settings** in the extension panel settings. No permission or host API changes.
 
 Verified with the real content script in isolated headless Chrome, in light and dark modes: repeated ownership messages, dynamic and missing titles, simulated versus real input, late messages after takeover, disposal, and the settings entry. Extension transport is a fixture; this is not installed-Cindy or live-site verification.
+
+
+## Chat with the current webpage
+
+Click the extension icon (or press Alt+Shift+C) to open Chrome's native side panel and ask about the page you are on. Each send reads the visible page text (up to 18,000 characters, never form inputs); a partial excerpt is noted. Chats are separate per page, and switching pages cancels pending work.
+
+- **Model picker** beside the send button, matching the Cindy app's composer: recent, favorites, all and per-provider views, search, and a configuration card for effort, Fast and engine. Favorites are the app's own and stay in sync both ways; recent models are read-only. Needs a Cindy that offers `agent.modelPreferences` (declared by this plugin; Cindy asks once on install/update). Older Cindy versions show the model list only.
+- **Answers** stream in while they are written (Cindy with `runPreview`) and render as Markdown in the app's styles (bundled `marked`, raw HTML dropped, only http(s)/mailto links).
+- **Visible in Cindy**: every side panel chat is an ordinary task titled "Webpage chat · <page title>"; the message shows your question, and the page excerpt travels as attached context. Chats are not archived automatically.
+- **Translate** in the panel header translates the page in place (or shows the original); no page panel opens. Text blocks built from divs are translated too, and Settings → Display offers bilingual or translation only.
+- **Settings** (gear) hold translation language and display, per-site auto translation, the text-selection toolbar (Translate / Explain), automatic video subtitles, the translation model link, and the optional red tab group with an illustration. The page panel's settings button opens these.
+
+Update both the extension and the plugin. The new Chrome `sidePanel` permission only enables the native panel; site permissions, pairing and model authorization are unchanged.

@@ -2,24 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const core=createRequire(import.meta.url)('../my-browser/extension/learning-core.js');
 
 const source=fs.readFileSync(new URL('../my-browser/extension/background.js',import.meta.url),'utf8');
 
 function harness() {
   const noop={addListener(){}};
   const badges=new Map(),calls=[],updates=new Set();
-  let failed=false,closed=false,pending;
+  let failed=false,closed=false,pending,documentId='doc',tabUrl='https://example.test/page';
   const chrome={
-    runtime:{getManifest:()=>({version:'0.4.23'}),onStartup:noop,onInstalled:noop,onMessage:noop},
+    runtime:{id:'fixture-extension',getURL:path=>'chrome-extension://fixture-extension/'+path,getManifest:()=>({version:'0.4.23'}),onStartup:noop,onInstalled:noop,onMessage:noop},
     storage:{local:{get:async()=>({clientId:'fixture'}),set:async()=>{}},session:{get:async()=>({}),set:async()=>{}}},
-    tabs:{onRemoved:noop,onActivated:noop,onUpdated:{addListener:fn=>updates.add(fn),removeListener:fn=>updates.delete(fn)},
+    tabs:{get:async id=>({id,url:tabUrl,title:'Page'}),onRemoved:noop,onActivated:noop,onUpdated:{addListener:fn=>updates.add(fn),removeListener:fn=>updates.delete(fn)},
       async sendMessage(tabId,message){calls.push({tabId,message});if(pending){const result=pending;pending=null;return result;}if(failed)throw Error('Receiving end does not exist');}},
     alarms:{create(){},onAlarm:noop},
     action:{async setBadgeText({tabId,text}){if(closed&&tabId!==undefined)throw Error('No tab');if(text===null)badges.delete(tabId);else badges.set(tabId,text);},async setBadgeBackgroundColor(){}},
   };
-  const context={chrome,MyBrowserNetwork:{create:()=>({})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout};
-  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.badgeTest={openOnTab,connection};',context);
-  return {...context.badgeTest,calls,updated:(...args)=>{for(const fn of updates)fn(...args);},listeners:()=>updates.size,
+  const context={chrome,CindyLearning:core,MyBrowserNetwork:{create:()=>({document:async()=>documentId})},navigator:{userAgent:'Chrome'},URL,crypto:globalThis.crypto,setTimeout,clearTimeout};
+  vm.runInNewContext(source.replace(/\nchain\(\);\s*$/,'')+'\nglobalThis.badgeTest={openOnTab,connection,learningRequest,setChatTransport(fn){discover=async()=>({learning:true});learningFetch=fn;}};',context);
+  return {...context.badgeTest,calls,navigate:()=>{documentId='new-doc';},updated:(...args)=>{for(const fn of updates)fn(...args);},listeners:()=>updates.size,
     badge:tabId=>badges.get(tabId)??badges.get(undefined)??'',fail:value=>{failed=value;},close:()=>{closed=true;},
     defer:()=>{let resolve,reject;pending=new Promise((yes,no)=>{resolve=yes;reject=no;});return {resolve,reject};}};
 }
@@ -106,4 +108,18 @@ test('the toolbar icon follows the light or dark appearance reported by pages',a
   send({type:'cindy-color-scheme',dark:false});send({type:'cindy-color-scheme',dark:true});send({type:'cindy-color-scheme',dark:true});
   send({type:'cindy-color-scheme',dark:'yes'});send({type:'cindy-color-scheme',dark:false},'other-extension');
   assert.deepEqual(icons,['icons/action-light-16.png','icons/action-dark-16.png'],'first report applies, repeats and invalid or foreign messages do not');
+});
+
+// The real request entry must bind sidepanel questions to the captured document.
+test('sidepanel requests reject stale documents and bind valid page-chat scopes',async()=>{
+  const h=harness(),sent=[];h.setChatTransport(async(_target,path,body)=>{sent.push({path,body});return path==='/learning/result'?{done:true,result:{ok:true,text:'Answer'}}:{ok:true};});
+  const sender={url:'chrome-extension://fixture-extension/sidepanel.html',documentId:'panel-doc'};
+  const message={id:crypto.randomUUID(),tabId:1,documentId:'doc',chatId:crypto.randomUUID(),request:{op:'conversation',scenario:'webpage-chat',instruction:'Explain',text:'Page',source:{url:'https://example.test/page'}}};
+  // Supply the production validator just as importScripts does in Chrome.
+  await assert.rejects(h.learningRequest(message,{...sender,url:'chrome-extension://fixture-extension/permissions.html'}),/INVALID_SOURCE/);
+  assert.equal((await h.learningRequest(message,sender)).text,'Answer');
+  assert.equal(sent.find(x=>x.path==='/learning/start').body.request.view,'page-chat:1:'+message.chatId);
+  const before=sent.filter(x=>x.path==='/learning/start').length;h.navigate();
+  await assert.rejects(h.learningRequest({...message,id:crypto.randomUUID()},sender),/PAGE_CHANGED/);
+  assert.equal(sent.filter(x=>x.path==='/learning/start').length,before);
 });
