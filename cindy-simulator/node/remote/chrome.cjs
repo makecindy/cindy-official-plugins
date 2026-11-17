@@ -52,11 +52,14 @@ function createChromeStore(){
   return {
     has:key=>ready.has(key),
     get:key=>ready.get(key)||null,
-    // Pieces arrive in order; anything else starts over rather than guessing.
+    // Each download is ordered, but identical bodies from different devices
+    // can overlap. An already received identical piece must not reset progress.
     put(key,index,total,data){
       if(!KEY.test(key)||!Number.isInteger(index)||!Number.isInteger(total)||total<1||total>Math.ceil(MAX_BYTES/CHUNK)||index<0||index>=total||typeof data!=='string'||!data.length||data.length>CHUNK)throw fail('INVALID_ARGUMENT');
       if(ready.has(key))return {complete:true};
-      const pending=index===0?{total,parts:[]}:partial.get(key);
+      const previous=partial.get(key);
+      if(previous?.total===total&&index<previous.parts.length&&previous.parts[index]===data)return {complete:false};
+      const pending=index===0?{total,parts:[]}:previous;
       if(!pending||pending.total!==total||pending.parts.length!==index){partial.delete(key);throw fail('CHROME_OUT_OF_ORDER');}
       pending.parts.push(data);remember(partial,key,pending);
       if(pending.parts.length<total)return {complete:false};

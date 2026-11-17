@@ -165,3 +165,39 @@ acceptance was performed. Host support has since shipped in stable v0.1.139.
 
 Validation: required repository suites plus the simulator aggregate: 908 passed,
 zero failed (57.53 seconds). Manifest validation and git diff --check passed.
+
+
+## Shared-body download checkpoint — 0.3.53, 2026-11-18
+
+Failure family: independently ordered downloads of identical content wrote the
+same partial prefix. Invariant: any interleaving of valid downloads for one
+content key must produce the same verified body as a single complete download,
+including when another download stops early. createChromeStore alone owns the
+partial prefix and verified ready entry; individual device views only reference
+the verified content key. No transfer ids, extra caches, locks or retries.
+
+| Event | No prefix | Prefix present | Verified body |
+| --- | --- | --- | --- |
+| Chunk 0 | Start prefix | Identical duplicate is a no-op | Already complete |
+| Next ordered chunk | Reject | Append once | Already complete |
+| Duplicate received chunk | N/A | Same total/index/data: no-op | Already complete |
+| One source stops/fails before delivering its next chunk | No change | Other ordered source continues | No change |
+| Skipped or conflicting chunk | Existing validation/reset semantics | Existing validation/reset semantics | Already complete |
+| Last chunk | Verify hash, shape and PNG data | Same single verification/cleanup path | Already complete |
+
+Symmetric audit: duplicate first/middle/last chunks, fast/slow and abandoned
+producers all use the same put predicate. Existing malformed/order/hash/PNG tests
+remain; the content and chunk-count limits are unchanged. No automatic replay or
+network contract changes. All valid interleavings for two three-chunk downloads,
+including every possible early stop of the second source, are enumerated (35
+schedules). A real loopback viewer regression opens two device pages and feeds
+independent identical sources in A0/B0/A1/B1 order, then reads both definitions
+through the public HTTP routes and checks cache reuse. Both new regressions fail
+on 088e12c3 with CHROME_OUT_OF_ORDER and pass after the fix.
+
+This is source/store and loopback viewer evidence, not real two-computer runtime
+acceptance. No client installation or restart was performed.
+
+Before synchronizing the next upstream fix: 910 required repository/simulator
+tests passed, zero failures (57.16 seconds). The focused body suite passed all
+five cases (0.12 seconds); both new cases failed on the previous implementation.

@@ -116,3 +116,49 @@ test('the device page gets the body once it has arrived, and the worker says wha
   assert.equal((await fetch(`${page.origin}/bezel.js`)).status,200);
   assert.throws(()=>viewer.chrome({id:'OTHER',width:1,height:1,none:true}),{code:'INVALID_ARGUMENT'});
 });
+
+// Enumerate every valid interleaving, rather than testing just one timing.
+function interleavings(left,right,prefix=[]){
+  if(!left.length&&!right.length)return [prefix];
+  return [...(left.length?interleavings(left.slice(1),right,[...prefix,left[0]]):[]),
+    ...(right.length?interleavings(left,right.slice(1),[...prefix,right[0]]):[])];
+}
+
+test('identical body downloads share progress under every ordered interleaving, including an abandoned download',async()=>{
+  const sources=[createChromeSource({definition:async()=>body()}),createChromeSource({definition:async()=>body()})];
+  const metas=await Promise.all(sources.map(source=>source.meta('known',{width:1260,height:2736})));
+  assert.equal(metas[0].key,metas[1].key);
+  const {key,chunks}=metas[0],sequence=n=>Array.from({length:n},(_,index)=>index);
+  for(let abandonedAt=0;abandonedAt<=chunks;abandonedAt++){
+    for(const order of interleavings(sequence(chunks).map(index=>[0,index]),sequence(abandonedAt).map(index=>[1,index]))){
+      const store=createChromeStore();
+      for(const [who,index] of order){
+        store.put(key,index,chunks,sources[who].chunk(key,index).data);
+      }
+      assert.deepEqual(store.get(key).rect,body().screen.rect);
+      assert.equal(store.get(key).maskImage,body().screen.maskImage);
+    }
+  }
+});
+
+test('two device pages can finish the same body while their transfers overlap',async t=>{
+  const viewer=createRemoteViewer();t.after(()=>viewer.close());
+  const pages=await Promise.all(['SIM-A','SIM-B'].map(id=>viewer.open({id,url:`http://127.0.0.1:54321/${'a'.repeat(64)}`,name:'iPhone Air',platform:'ios',manage:true})));
+  const sources=[createChromeSource({definition:async()=>body()}),createChromeSource({definition:async()=>body()})];
+  const metas=await Promise.all(sources.map(source=>source.meta('known',{width:1260,height:2736})));
+  assert.equal(metas[0].key,metas[1].key);
+  const {key,chunks}=metas[0];
+  const where=who=>({id:who===0?'SIM-A':'SIM-B',width:1260,height:2736,rotation:0,key});
+  for(let index=0;index<chunks;index++){
+    for(let who=0;who<2;who++){
+      assert.equal(viewer.chrome({...where(who),index,total:chunks,data:sources[who].chunk(key,index).data}).have,index===chunks-1);
+    }
+  }
+  for(let who=0;who<2;who++){
+    const page=new URL(pages[who].url),token=page.hash.split('.')[1];
+    const definition=await (await fetch(`${page.origin}/simulators/${where(who).id}/definition.json?cindyViewer=${token}&w=1260&h=2736&rotation=0`)).json();
+    assert.deepEqual(definition.screen.rect,body().screen.rect);
+    assert.equal(definition.screen.maskImage,body().screen.maskImage);
+    assert.deepEqual(viewer.chrome(where(who)),{have:true});
+  }
+});
