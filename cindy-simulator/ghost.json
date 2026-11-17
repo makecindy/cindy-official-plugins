@@ -5,7 +5,7 @@
   "name": "设备模拟器",
   "description": "在统一设备列表和任务侧栏中查看、操作 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器，以及 USB 或网络配对的 iPhone/iPad 真机。支持输入、截图、App 管理和日志；真机需要 Mac、Xcode 27+ 和开发者模式；文字定位与输入需要签名组件。真机不参与模拟器自动关机。 Apple 模拟器需要 macOS 15+、Apple Silicon、完整 Xcode 和对应运行时；安卓模拟器支持 Mac、Windows x64、Linux x64，安装环境前确认下载大小和许可。",
   "whenToUse": "连接、查看和操作 iPhone/iPad 真机；使用 iPhone、iPad、Apple TV、Vision Pro 与安卓模拟器。App 安装启动、触摸输入、截图、界面检查和日志排查。先 devices 选择精确设备，再按手册验证结果。",
-  "version": "0.3.43",
+  "version": "0.3.44",
   "kind": "chip",
   "entry": "main.js",
   "icon": "assets/icon.png",
@@ -1089,5 +1089,5 @@
       }
     ]
   },
-  "releaseNotes": "手机上查看模拟器：iPhone Duo 等折叠屏可以合上、半展开或展开，展开后横竖屏不再转反；Apple TV 可在画面上滑动移动焦点、轻点确认；Vision Pro 可单指捏合点按和拖动、双指转头看，并新增复位视角按钮。"
+  "releaseNotes": "手机上操作 Apple TV 和 Vision Pro 时，手指停住不再自动松开：Vision Pro 按住或拖动后停住、Apple TV 滑动后停住都能继续操作；关闭画面时不再继续发送操作。"
 }

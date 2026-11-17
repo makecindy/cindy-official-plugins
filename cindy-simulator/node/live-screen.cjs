@@ -30,6 +30,9 @@ const RELEASE_TRIES=30,RELEASE_WAIT_MS=100;
 // picture's width) is a tap; one held still HOLD_MS is a long press (TV) or a
 // held pinch (Vision Pro).
 const SLOP=.03,HOLD_MS=450;
+// A held contact repeats its last sample this often (the native helpers lift
+// after 750 ms without input), like the desktop viewer's heartbeat.
+const BEAT_MS=250;
 // A device shut down while shown keeps its stream open and simply stops
 // sending, like a still screen: once the picture is still this long, check
 // (at most this often) that it still runs.
@@ -469,72 +472,104 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
   // TV: a moving finger is the Siri Remote's touch surface; a tap clicks, a
   // still hold is a long click. Vision Pro: one finger pinches where it
   // touches (tap, drag or hold); two fingers turn the head.
-  // Contact samples run one at a time in order, including a hold's timer.
+  // Every contact sample (a step, a hold's timer, the heartbeat, the lift on
+  // closing) runs on one queue per screen, in order, so a lift never overtakes
+  // a sample still in flight; once the screen closes only the lift is sent.
   function remoteChain(s,fn){const next=s.chain.then(fn);s.chain=next.catch(()=>{});return next;}
   const remoteSize=s=>s.size||{width:1,height:1};
-  async function trackpadSend(s,phase,p){await operation('viewer_trackpad',{udid:s.udid,gesture:s.remote.gesture,phase,x:p.x,y:p.y});}
+  const HELD=new Set(['trackpad','interact','tilt']);
+  async function trackpadSend(s,r,phase,p){await operation('viewer_trackpad',{udid:s.udid,gesture:r.gesture,phase,x:p.x,y:p.y});}
   async function spatialSend(s,value,phases){
     const {width,height}=remoteSize(s),gesture=value.gesture||randomUUID();
     for(const phase of phases)await operation('viewer_spatial',{udid:s.udid,gesture,phase,x:0,y:0,aspect:Math.min(4,Math.max(.5,width/height)),...value,gesture});
     return gesture;
   }
-  const clampUnit=v=>Math.min(1,Math.max(0,v));
+  const resend=(s,r)=>r.mode==='trackpad'?trackpadSend(s,r,'changed',r.last):spatialSend(s,{gesture:r.gesture,mode:r.mode,...r.sample},['changed']);
   const centre=ts=>({x:ts.reduce((a,t)=>a+t.x,0)/ts.length,y:ts.reduce((a,t)=>a+t.y,0)/ts.length});
+  // A failed sample: the native contact is gone or unknown. Forget it and let
+  // the fingers lift before the next gesture.
+  function drop(s,r){clearTimeout(r.timer);clearInterval(r.beat);if(s.remote===r)s.remote={mode:'drain'};}
+  // The native helpers lift a contact after 750 ms without input, while a
+  // phone sends nothing for a still finger: repeat the last sample, as the
+  // desktop viewer does, until the contact ends.
+  function heartbeat(s,r){
+    clearInterval(r.beat);
+    r.beat=setInterval(()=>{
+      if(s.remote!==r||s.closed||!HELD.has(r.mode)){clearInterval(r.beat);return;}
+      remoteChain(s,async()=>{if(s.remote===r&&!s.closed&&HELD.has(r.mode))await resend(s,r);}).catch(()=>drop(s,r));
+    },BEAT_MS);
+    r.beat.unref?.();
+  }
   // Start a Vision Pro pinch at the finger's first point (a hold or a drag).
   async function pinchBegin(s,r){
     r.gesture=randomUUID();r.mode='interact';r.sample={x:r.start.x,y:r.start.y};
     await spatialSend(s,{gesture:r.gesture,mode:'interact',x:r.start.x,y:r.start.y},['began']);
+    heartbeat(s,r);
   }
-  async function remoteLift(s){
-    const r=s.remote;clearTimeout(r.timer);
-    if(r.mode==='trackpad'){r.mode=null;await remoteChain(s,()=>trackpadSend(s,'ended',r.last));}
-    else if(r.mode==='interact'||r.mode==='tilt'){const value={gesture:r.gesture,mode:r.mode,...r.sample};r.mode=null;await remoteChain(s,()=>spatialSend(s,value,['ended']));}
-    s.remote={mode:null};
+  async function tiltBegin(s,ts){
+    const r={mode:'tilt',ids:ts.map(t=>t.id),start:centre(ts),gesture:randomUUID(),sample:{x:0,y:0}};
+    s.remote=r;
+    await spatialSend(s,{gesture:r.gesture,mode:'tilt',x:0,y:0},['began']);
+    heartbeat(s,r);
   }
-  async function remoteStep(s,e){
-    await s.chain;
-    if(e.kind==='release')return remoteLift(s);
-    const r=s.remote,live=e.touches.filter(t=>!ENDED.has(t.phase)),by=new Map(e.touches.map(t=>[t.id,t]));
+  // On the queue: end the contact the phone holds, if any.
+  async function liftNow(s){
+    const r=s.remote;s.remote={mode:null};clearTimeout(r.timer);clearInterval(r.beat);
+    if(r.mode==='trackpad')await trackpadSend(s,r,'ended',r.last);
+    else if(r.mode==='interact'||r.mode==='tilt')await spatialSend(s,{gesture:r.gesture,mode:r.mode,...r.sample},['ended']);
+  }
+  const remoteLift=s=>remoteChain(s,()=>liftNow(s));
+  function remoteStep(s,e){
+    return remoteChain(s,async()=>{
+      const r=s.remote;
+      try{await remoteTouch(s,e);}catch(error){drop(s,s.remote===r?r:s.remote);throw error;}
+    });
+  }
+  async function remoteTouch(s,e){
+    if(e.kind==='release')return liftNow(s);
+    if(s.closed)return;
+    const live=e.touches.filter(t=>!ENDED.has(t.phase)),by=new Map(e.touches.map(t=>[t.id,t]));
     const vision=s.kind==='visionos',{width,height}=remoteSize(s);
-    // Fingers that stay after a gesture ends start nothing until all lift.
-    if(r.mode==='drain'){if(!live.length)s.remote={mode:null};return;}
+    const after=async()=>{await liftNow(s);s.remote={mode:live.length?'drain':null};};
+    // Fingers that stay after a gesture ends start nothing until all lift; a
+    // touch whose every finger just landed is a new gesture.
+    if(s.remote.mode==='drain'){if(live.length&&!live.every(t=>t.phase==='began'))return;s.remote={mode:null};}
+    const r=s.remote;
     if(r.mode===null){
       const fresh=live.filter(t=>t.phase==='began');
       if(!fresh.length||live.length>fresh.length){if(live.length)s.remote={mode:'drain'};return;}
       if(vision&&fresh.length>1)return tiltBegin(s,fresh);
       const t=fresh[0];
-      s.remote={mode:'pending',id:t.id,start:{x:t.x,y:t.y},last:{x:t.x,y:t.y},at:now()};
-      const pending=s.remote;
+      const pending=s.remote={mode:'pending',id:t.id,start:{x:t.x,y:t.y},last:{x:t.x,y:t.y},at:now()};
       // Held still: Vision Pro pinches and keeps holding; TV waits for the lift.
-      if(vision)pending.timer=setTimeout(()=>{if(s.remote===pending&&pending.mode==='pending')remoteChain(s,()=>pinchBegin(s,pending)).catch(()=>{s.remote={mode:'drain'};});},HOLD_MS);
+      if(vision)pending.timer=setTimeout(()=>{
+        remoteChain(s,async()=>{if(s.remote===pending&&pending.mode==='pending'&&!s.closed)await pinchBegin(s,pending);}).catch(()=>drop(s,pending));
+      },HOLD_MS);
       return;
     }
     if(r.mode==='tilt'){
-      if(r.ids.some(id=>!by.has(id)||ENDED.has(by.get(id).phase))){await remoteLift(s);s.remote={mode:live.length?'drain':null};return;}
+      if(r.ids.some(id=>!by.has(id)||ENDED.has(by.get(id).phase)))return after();
       const c=centre(r.ids.map(id=>by.get(id)));
       r.sample={x:Math.max(-4,Math.min(4,c.x-r.start.x)),y:Math.max(-4,Math.min(4,c.y-r.start.y))};
-      return spatialSend(s,{gesture:r.gesture,mode:'tilt',...r.sample},['changed']);
+      return resend(s,r);
     }
     const t=by.get(r.id);
     // A second finger: Vision Pro turns the head instead; TV keeps one finger.
-    if(vision&&live.length>1&&t&&!ENDED.has(t.phase)){
-      clearTimeout(r.timer);
-      if(r.mode==='interact'){await remoteLift(s);}
-      s.remote={mode:null};return tiltBegin(s,live.slice(0,2));
-    }
+    if(vision&&live.length>1&&t&&!ENDED.has(t.phase)){await liftNow(s);return tiltBegin(s,live.slice(0,2));}
     if(!t)return;
     const p={x:t.x,y:t.y},far=Math.hypot((p.x-r.start.x)*width,(p.y-r.start.y)*height)>SLOP*width;
-    if(t.phase==='cancelled'){await remoteLift(s);s.remote={mode:live.length?'drain':null};return;}
+    if(t.phase==='cancelled')return after();
     if(r.mode==='pending'&&t.phase==='moved'&&far){
       clearTimeout(r.timer);r.last=p;
-      if(vision){await pinchBegin(s,r);r.sample={x:p.x,y:p.y};return spatialSend(s,{gesture:r.gesture,mode:'interact',...r.sample},['changed']);}
+      // Closed while the contact began: only the lift follows.
+      if(vision){await pinchBegin(s,r);r.sample={x:p.x,y:p.y};return s.closed?undefined:resend(s,r);}
       r.mode='trackpad';r.gesture=randomUUID();
-      await trackpadSend(s,'began',r.start);return trackpadSend(s,'changed',p);
+      await trackpadSend(s,r,'began',r.start);heartbeat(s,r);return s.closed?undefined:resend(s,r);
     }
     if(r.mode==='trackpad'||r.mode==='interact'){
       r.last=p;if(r.mode==='interact')r.sample={x:p.x,y:p.y};
-      if(t.phase==='moved')return r.mode==='trackpad'?trackpadSend(s,'changed',p):spatialSend(s,{gesture:r.gesture,mode:'interact',...r.sample},['changed']);
-      if(t.phase==='ended'){await remoteLift(s);s.remote={mode:live.length?'drain':null};}
+      if(t.phase==='moved')return resend(s,r);
+      if(t.phase==='ended')return after();
       return;
     }
     if(r.mode==='pending'&&t.phase==='ended'){
@@ -543,11 +578,6 @@ function createLiveScreen({devices,tasks,controls,appleBase,android,appleHost=pr
       const held=(now()-r.at)/1000;
       return operation('press',{udid:s.udid,button:'select',...(held*1000>=HOLD_MS?{duration:Math.min(5,held)}:{})});
     }
-  }
-  async function tiltBegin(s,ts){
-    const start=centre(ts),r={mode:'tilt',ids:ts.map(t=>t.id),start,gesture:randomUUID(),sample:{x:0,y:0}};
-    s.remote=r;
-    await spatialSend(s,{gesture:r.gesture,mode:'tilt',x:0,y:0},['began']);
   }
   async function appleStep(s,e,locale){
     if((s.kind==='tvos'||s.kind==='visionos')&&(e.kind==='touch'||e.kind==='release'))return remoteStep(s,e);
