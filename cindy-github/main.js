@@ -2529,11 +2529,12 @@ var PR_FILES_KEPT = 50;
 var PR_TITLE_MAX = 120;
 var PR_TRIGGER = '[UI_ACTION_TRIGGER]';
 
-/* 同一张卡片可能同时收到工具调用和按钮点击;全部串行,状态不互相覆盖。 */
+/* 卡片/偏好操作与实时授权读取共用队列,后到的读取不能越过先到的设置变更。 */
 var prQueue = Promise.resolve();
 
 function enqueuePr(fn) {
-  var run = prQueue.then(fn);
+  // Locale initialization must wait inside the reserved position too.
+  var run = prQueue.then(ensureLocale).then(fn);
   prQueue = run.catch(function () {});
   return run;
 }
@@ -3326,10 +3327,10 @@ function renderPrCard(card, settings) {
 }
 
 /** 声明高度宁低勿高:宿主按实际内容量高只会往上调,声明偏高会在卡片下方留白。 */
-function prCardHeight(card, settings) {
+function prCardHeight(card, settings, reference) {
   var h = 120;
   if (card.note) h += 22;
-  if (card.settingsOpen && prHasSettings(card)) h += settings && settings.unreadable ? 120 : 400;
+  if (!reference && card.settingsOpen && prHasSettings(card)) h += settings && settings.unreadable ? 120 : 400;
   return Math.min(900, h);
 }
 
@@ -3341,7 +3342,7 @@ async function sendPrCard(card, settings, sourceCallId) {
     // Agent 用 pr_card 更新结果时换回 done。
     type: 'card-update', callId: prAnchor(card), v: 2,
     state: !other && (card.stage === 'publishing' || card.pending) ? 'working' : 'done',
-    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card, settings),
+    html: other ? renderPrReference(card, other) : renderPrCard(card, settings), height: prCardHeight(card, settings, other),
   };
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
@@ -3873,7 +3874,6 @@ cindy.onHostMessage(async function (msg) {
   }
   if (msg && msg.type === 'event' && msg.name === 'card-action') {
     try {
-      await ensureLocale();
       await enqueuePr(function () { return prCardAction(msg); });
     } catch (e) {
       // 点击没有回执通道;卡片保持上一版,宿主的「运行中」由超时兜底收口。
@@ -3882,14 +3882,14 @@ cindy.onHostMessage(async function (msg) {
   }
   if (!msg || msg.type !== 'tool-call') return;
   try {
-    await ensureLocale();
+    if (msg.tool !== 'pr_follow_settings' && msg.tool !== 'pr_card') await ensureLocale();
     var r;
     if (msg.tool === 'list_tools') {
       r = listTools(msg.args || {});
     } else if (msg.tool === 'call_tool') {
       r = await callTool(msg.args || {}, msg.callId);
     } else if (msg.tool === 'pr_follow_settings') {
-      var settings = await readPrSettings();
+      var settings = await enqueuePr(readPrSettings);
       r = settings.unreadable
         ? fail(t('prSettingsReadFailed'))
         : { ok: true, result: { settings: prSettingsForAgent(settings, settings.autoFollow) } };

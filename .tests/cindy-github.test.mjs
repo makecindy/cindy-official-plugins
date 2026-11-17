@@ -657,7 +657,7 @@ function createPrRuntime(options = {}) {
   let kv = options.kv ?? {};
   const cindy = {
     ...(options.pickModel ? { pickModel: options.pickModel } : {}),
-    async request() { return { ok: true, context: { locale: 'zh-CN' } }; },
+    async request() { return options.requestContext ? options.requestContext() : { ok: true, context: { locale: 'zh-CN' } }; },
     onHostMessage(fn) { handler = fn; },
     async send(message) {
       sent.push(message);
@@ -719,6 +719,7 @@ function createPrRuntime(options = {}) {
     cards,
     lastCard: (callId) => cards(callId).at(-1),
     setGithub(github) { options.github = github; },
+    contextChanged: (context) => handler({ type: 'host-context-changed', context }),
     async tool(args, tool = 'pr_card') {
       const callId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
       await handler({ type: 'tool-call', tool, callId, args: tool === 'pr_card' ? { session_context: { session_id: 's1' }, ...args } : args });
@@ -1731,6 +1732,106 @@ test('account settings and retired preference messages cannot change CI authoriz
   assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
 });
 
+test('authorization reads wait behind an earlier preference save and queued CI disable', async () => {
+  let kv = { untouched: 'keep', prCard: { ciRetryRepush: true } }, writes = 0, settled = false;
+  const blocked = deferred(), release = deferred();
+  const runtime = createPrRuntime({ preferences: async (_, init) => {
+    if (init.method === 'PUT') {
+      if (++writes === 1) { blocked.resolve(); await release.promise; }
+      kv = JSON.parse(init.body);
+      return { ok: true };
+    }
+    return { ok: true, json: async () => structuredClone(kv) };
+  } });
+  const first = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+  const second = await runtime.tool({ repo: 'example/other', head: 'feature' });
+  const rename = runtime.click(first.callId, 'prset:rename');
+  await blocked.promise;
+  const disable = runtime.click(second.callId, 'prset:ciRetry:off');
+  const read = runtime.tool({}, 'pr_follow_settings').then(value => { settled = true; return value; });
+  try {
+    await flushAsync();
+    assert.equal(settled, false, 'a queued disable must precede the later authorization read');
+  } finally {
+    release.resolve();
+    await Promise.all([rename, disable, read]);
+  }
+  assert.equal((await read).reply.result.settings.ci_retry_repush, false);
+  assert.equal(kv.prCard.autoRename, true);
+  assert.equal(kv.untouched, 'keep');
+  assert.equal(writes, 2);
+  assert.equal(runtime.agentRuns.length, 0);
+});
+
+test('authorization reads wait for an earlier disable even while locale initialization is pending', async () => {
+  let kv = { prCard: { ciRetryRepush: true } }, settled = false, writes = 0;
+  const preferences = async (_, init) => {
+    if (init.method === 'PUT') { writes++; kv = JSON.parse(init.body); return { ok: true }; }
+    return { ok: true, json: async () => structuredClone(kv) };
+  };
+  const warm = createPrRuntime({ preferences });
+  const card = await warm.tool({ repo: 'example/repo', head: 'feature' });
+  const requested = deferred(), release = deferred();
+  const runtime = createPrRuntime({ files: warm.files, preferences, requestContext: async () => {
+    requested.resolve(); await release.promise;
+    return { ok: true, context: { locale: 'zh-CN' } };
+  } });
+  const disable = runtime.click(card.callId, 'prset:ciRetry:off');
+  await requested.promise;
+  await runtime.contextChanged({ locale: 'en' });
+  const read = runtime.tool({}, 'pr_follow_settings').then(value => { settled = true; return value; });
+  try {
+    await flushAsync();
+    assert.equal(settled, false, 'locale refresh cannot let a later reader overtake the earlier click');
+  } finally {
+    release.resolve();
+    await Promise.all([disable, read]);
+  }
+  assert.equal((await read).reply.result.settings.ci_retry_repush, false);
+  assert.equal(writes, 1);
+});
+
+test('authorization reads wait for a pending disable and its uncertain readback', async (t) => {
+  for (const outcome of ['accepted', 'response-lost', 'readback-fails']) {
+    await t.test(outcome, async () => {
+      let kv = { prCard: { ciRetryRepush: true } }, unavailable = false, writes = 0, settled = false;
+      const blocked = deferred(), release = deferred();
+      const runtime = createPrRuntime({ preferences: async (_, init) => {
+        if (init.method === 'PUT') {
+          writes++; blocked.resolve(); await release.promise;
+          kv = JSON.parse(init.body);
+          if (outcome === 'accepted') return { ok: true };
+          unavailable = outcome === 'readback-fails';
+          throw new Error('write response lost');
+        }
+        return unavailable ? { ok: false } : { ok: true, json: async () => structuredClone(kv) };
+      } });
+      const card = await runtime.tool({ repo: 'example/repo', head: 'feature' });
+      const disable = runtime.click(card.callId, 'prset:ciRetry:off');
+      await blocked.promise;
+      const read = runtime.tool({}, 'pr_follow_settings').then(value => { settled = true; return value; });
+      try {
+        await flushAsync();
+        assert.equal(settled, false, 'pending writes must not yield the old enabled grant');
+      } finally {
+        release.resolve();
+        await Promise.all([disable, read]);
+      }
+      const { reply } = await read;
+      if (unavailable) {
+        assert.equal(reply.ok, false);
+        assert.equal(reply.result, undefined, 'unreadable reconciliation cannot supply authorization');
+      } else {
+        assert.equal(reply.result.settings.ci_retry_repush, false);
+      }
+      unavailable = false;
+      assert.equal((await runtime.tool({}, 'pr_follow_settings')).reply.result.settings.ci_retry_repush, false);
+      assert.equal(writes, 1, 'an uncertain mutation is never retried');
+      assert.equal(runtime.agentRuns.length, 0);
+    });
+  }
+});
+
 test('stale CI card actions express their displayed target and never invert a fresh disable', async () => {
   const runtime = createPrRuntime({ kv: { prCard: { ciRetryRepush: true } } });
   const first = await runtime.tool({ repo: 'example/repo', head: 'feature' });
@@ -1876,6 +1977,42 @@ test('unknown settings use a compact declared height and restore it on refresh f
     await runtime.click(entry.callId, 'prui:settingsRefresh');
     assert.equal(runtime.lastCard(entry.callId).height, known, stage + ': successful read restores the full panel');
     assert.equal(writes, 0);
+  }
+});
+
+test('read-only reference cards omit open settings height and restore it when ownership ends', async (t) => {
+  for (const unreadable of [false, true]) {
+    await t.test(unreadable ? 'unknown settings' : 'known settings', async () => {
+      let fail = false, writes = 0;
+      const runtime = createPrRuntime({ github: prGraphql(), preferences: async (_, init) => {
+        if (init.method === 'PUT') writes++;
+        return fail ? { ok: false } : { ok: true, json: async () => ({}) };
+      } });
+      const viewer = await runtime.tool({ repo: 'octo/repo', pr: 42 });
+      const collapsed = runtime.lastCard(viewer.callId).height;
+      await runtime.click(viewer.callId, 'prui:settings');
+      const expanded = runtime.lastCard(viewer.callId).height;
+      assert.ok(expanded > collapsed);
+      const owner = await runtime.tool({ repo: 'octo/repo', pr: 42,
+        ...(unreadable ? { claim_follow: true } : { following: true }),
+        session_context: { session_id: 'other-task' } });
+      fail = unreadable;
+      const refresh = await runtime.tool({ card_id: viewer.callId });
+      assert.equal(refresh.reply.result.disposition, 'existing_task');
+      assert.equal(runtime.lastCard(viewer.callId).height, collapsed, 'reference renderer has no settings panel');
+      assert.doesNotMatch(runtime.lastCard(viewer.callId).html, /data-ghost-action="(?:prset:|prui:settings)/);
+      assert.equal(JSON.parse(runtime.files.get(`pr-cards/${viewer.callId}.json`)).settingsOpen, true);
+      await runtime.click(viewer.callId, 'prui:settingsRefresh');
+      assert.equal(runtime.lastCard(viewer.callId).height, collapsed);
+      await runtime.tool({ card_id: owner.callId, following: false, session_context: { session_id: 'other-task' } });
+      await runtime.tool({ card_id: viewer.callId });
+      const restored = runtime.lastCard(viewer.callId).height;
+      assert.ok(restored > collapsed, 'local settings remain open after the other owner releases');
+      if (unreadable) assert.ok(restored < expanded);
+      else assert.equal(restored, expanded);
+      assert.equal(writes, 0);
+      assert.equal(runtime.agentRuns.length, 0);
+    });
   }
 });
 

@@ -312,6 +312,61 @@ not installed. The inherited header/copy-link and unknown-panel runtime gaps
 remain, as does the genuine denied-rerun recovery prerequisite below. No live
 rerun, preference/credential/permission change or recovery quota use occurred.
 
+## Preference ordering and reference layout — source 1.5.25 (2026-11-17)
+
+Round 14 groups the two findings into the existing preference-ordering and
+render/height-consistency families. The correction reuses the established
+coordinator: `prQueue` still owns card/preference changes, and the Agent's
+`pr_follow_settings` read now joins that same queue. `sendPrCard` owns the
+normal/reference rendering choice and supplies it to height calculation too.
+No new queue, lock, cache, receipt, storage or retry mechanism is introduced.
+
+**Ordering invariant:** a later authorization read cannot overtake an earlier
+queued preference action or its reconciliation. **Layout invariant:** only
+the actually rendered settings panel contributes settings height.
+
+| Event/state | Expected result |
+| --- | --- |
+| Other preference save pending; disable queued; read arrives | Read waits behind both actions, then returns disabled |
+| Cold-start click awaits locale context; host locale changes | Later tool still waits behind that click |
+| Disable PUT pending | No old enabled grant returned while it is pending |
+| Disable accepted, or response lost with readable state | Read returns the reconciled current value; no replay |
+| Write response lost and readback unavailable | Reader fails without a settings grant; later recovery is read-only |
+| Local known/unknown settings open | Full/compact panel height, respectively |
+| Another task owns follow-up; known/unknown local settings open | Reference card has no settings allowance; local open state is preserved |
+| Other owner releases follow-up | Restore the local full/compact settings panel |
+
+The symmetric audit covers on/off, other preference writes and all Agent-facing
+settings paths: card tools and click handoffs already share the queue; the
+standalone read was the bypass. Unreadable results still fail closed. Reference
+refreshes and clicks reuse the same rendering/height decision; they never write
+preferences or change ownership. This orders messages in the existing sandbox,
+not GitHub/Git actions in another process: a later click cannot revoke a grant
+already returned, so the immediate pre-push live read remains required.
+
+All three PR entry points reserve their queue position before locale setup.
+Locale initialization also runs inside that position: a host locale update
+cannot let a later reader/tool pass a cold-start click still awaiting context.
+A fourth regression reproduced that gap in the initial one-line queue fix;
+it now shares the same coordinator rather than adding another guard or state.
+
+All three new regressions failed on 279d951, covering the queued/active disable
+and both known/unknown reference states. After the fix, the focused new and
+adjacent production-tool regressions, including delayed locale setup, passed
+13 tests in 0.23 seconds. These use
+a simulated Host with controlled promises; they are not real Cindy/GitHub
+recovery or phone measurements. Source 1.5.25 is not installed. The changed
+live-read ordering and reference-card layout need corresponding real runtime
+coverage in addition to the existing recovery/header/unknown-panel gaps.
+
+The four required repository suites plus plugin suite passed 328 tests,
+19 skipped, zero failures in 106.2 seconds on Windows / Node v22.22.3 with
+Git Bash selected for this test process. After the final locale-coordinator
+consolidation, the plugin suite was rerun: 264 passed, 19 skipped, zero failures
+in 63.9 seconds. Manifest validation and the exact index-tree archive/content
+check passed (31 files, 222073 compressed bytes, 614968 expanded bytes);
+the normalized package was inspected in memory without retaining a file.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
