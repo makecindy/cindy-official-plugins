@@ -75,9 +75,11 @@
   // and the name follows the model until edited.
   const SHEET = {
     en: { any: 'New device', android:'New Android', setup:'Set up Android…', iphone: 'New iPhone', ipad: 'New iPad', tv: 'New Apple TV', vision: 'New Vision Pro', name: 'Name', os: 'OS Version', model: 'Model', create: 'Create', cancel: 'Cancel', creating: 'Creating…',
-      loading: 'Loading models…', none: 'No matching runtime. Set up Android here, or install Apple runtimes in Xcode.', failed: 'Could not create the device. Check the environment and available disk space, then try again.', iosFailed: 'Not created. Check Xcode and try again.' },
+      loading: 'Loading models…', none: 'No matching runtime. Set up Android here, or install Apple runtimes in Xcode.', failed: 'Could not create the device. Check the environment and available disk space, then try again.', iosFailed: 'Not created. Check Xcode and try again.',
+      unknownLocal: 'Could not confirm whether the device was created. Check the local device list before taking further action.', unknownRemote: "Could not confirm whether the device was created. Check the remote computer's device list before taking further action." },
     'zh-CN': { any: '新建设备', android:'新建安卓设备', setup:'安装安卓环境…', iphone: '新建 iPhone', ipad: '新建 iPad', tv: '新建 Apple TV', vision: '新建 Vision Pro', name: '名称', os: '系统版本', model: '机型', create: '创建', cancel: '取消', creating: '正在创建…',
-      loading: '正在读取机型…', none: '没有匹配的系统。可在这里安装安卓环境，Apple 系统请通过 Xcode 安装。', failed: '没有创建成功，请检查运行环境和可用磁盘空间后重试。', iosFailed: '没有创建成功，请检查 Xcode 后重试。' },
+      loading: '正在读取机型…', none: '没有匹配的系统。可在这里安装安卓环境，Apple 系统请通过 Xcode 安装。', failed: '没有创建成功，请检查运行环境和可用磁盘空间后重试。', iosFailed: '没有创建成功，请检查 Xcode 后重试。',
+      unknownLocal: '无法确认设备是否已创建。请先检查本机设备列表，再决定下一步。', unknownRemote: '无法确认设备是否已创建。请先检查远程电脑的设备列表，再决定下一步。' },
   };
   let catalogCache = null;
   async function catalog() { if (!catalogCache) { const c = await rpc('catalog', {}); if (!c?.ok) throw c; catalogCache = c; } return catalogCache; }
@@ -152,7 +154,13 @@
           if (!r?.ok) throw r;
           if (r.udid && memoryMode) memoryChoices.set(r.udid,memoryMode);
           finish({ udid: r.udid, name: r.name || name });
-        } catch (e) { showError(e); create.disabled = false; create.textContent = T.create; }
+        } catch (e) {
+          // Only explicit non-execution evidence permits the existing retry advice.
+          // Missing replies, timeouts and unclassified failures may follow creation.
+          if (e?.execution === 'not_executed') showError(e);
+          else error.textContent = call ? T.unknownRemote : T.unknownLocal;
+          create.disabled = false; create.textContent = T.create;
+        }
       });
     });
   }

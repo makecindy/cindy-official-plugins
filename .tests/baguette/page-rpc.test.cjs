@@ -144,7 +144,7 @@ test('shared create sheet preserves backend errors and uses platform-correct fal
       runtimes:[{identifier:platform==='android'?'android:36':'ios',platform,version:'36',name:'Test OS'}]});await flush();
     const form=f.nodes.find(n=>n.tag==='form'),error=f.nodes.find(n=>n.className==='sheet-error'),submit=f.nodes.find(n=>n.type==='submit');
     const operation=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
-    f.finish({ok:false,...(detail?{message:'ENOSPC: device metadata could not be written'}:{})},1);await operation;
+    f.finish({ok:false,execution:'not_executed',...(detail?{message:'ENOSPC: device metadata could not be written'}:{})},1);await operation;
     if(detail)assert.equal(error.textContent,'ENOSPC: device metadata could not be written');
     else assert.equal(error.textContent.includes('Xcode'),platform==='ios');
     assert.equal(submit.disabled,false);assert.equal(f.calls.length,2);assert.equal(f.nodes.find(n=>n.tag==='dialog').removed,undefined);
@@ -159,6 +159,58 @@ test('shared create sheet preserves backend errors and uses platform-correct fal
     assert.equal(f.nodes.find(n=>n.className==='sheet-error').textContent,'Android SDK metadata unreadable');
     f.nodes.find(n=>n.tag==='dialog').listeners.cancel({preventDefault(){}});assert.equal(await pending,null);
   }
+});
+
+test('creation uncertainty uses the correct computer notice without replay; known failures retain retry advice',async()=>{
+ const notices={
+  en:{local:"Could not confirm whether the device was created. Check the local device list before taking further action.",remote:"Could not confirm whether the device was created. Check the remote computer's device list before taking further action."},
+  'zh-CN':{local:'无法确认设备是否已创建。请先检查本机设备列表，再决定下一步。',remote:'无法确认设备是否已创建。请先检查远程电脑的设备列表，再决定下一步。'}
+ };
+ for(const lang of ['en','zh-CN'])for(const platform of ['ios','android'])for(const remote of [false,true])
+ for(const outcome of ['unknown','timeout','missing','throw','not_executed']){
+  const f=fixture('pages',{steps:3}),calls=[];
+  const catalog={ok:true,deviceTypes:[{identifier:platform==='android'?'android:phone':'iphone',platform,name:'Test phone',family:'iphone'}],
+   runtimes:[{identifier:platform==='android'?'android:36':'ios',platform,version:'36',name:'Test OS'}]};
+  let finish,fail;
+  const response=new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
+  const call=async action=>{calls.push(action);return action==='catalog'?catalog:calls.length===2?response:{ok:true,udid:'created'};};
+  if(!remote)f.start();
+  const pending=f.create({lang,family:'any',...(remote?{call}:{})});await flush();
+  if(!remote){f.tick();await flush();f.finish(catalog);await flush();}
+  const form=f.nodes.find(n=>n.tag==='form'),error=f.nodes.find(n=>n.className==='sheet-error'),submit=f.nodes.find(n=>n.type==='submit');
+  const operation=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
+  if(outcome==='timeout'){
+   if(remote)fail(Object.assign(Error('No response'),{code:'TIMEOUT'}));
+   else await f.advance(125000); // Exercise the actual page RPC's post-dispatch timeout.
+  }else if(outcome==='throw'){
+   if(remote)fail(Error('connection lost; try again'));
+   else f.fail(Error('connection lost; try again'),1);
+  }else{
+   const result=outcome==='missing'?(remote?undefined:{ok:false}):{ok:false,execution:outcome,message:outcome==='unknown'?'Not created. Try again.':undefined};
+   if(remote)finish(result);else f.finish(result,1);
+  }
+  await operation;
+  if(outcome==='not_executed'){
+   assert.match(error.textContent,/重试|try again/);
+   assert.equal(error.textContent.includes('Xcode'),platform==='ios');
+  }else assert.equal(error.textContent,notices[lang][remote?'remote':'local'],`${lang}/${platform}/${remote}/${outcome}`);
+  assert.equal(submit.disabled,false);
+  assert.equal(f.nodes.find(n=>n.tag==='dialog').removed,undefined);
+  if(outcome==='timeout'&&!remote){f.finish({ok:true,udid:'late-created'},1);await flush();assert.equal(error.textContent,notices[lang].local,'a late reply cannot replace the settled unknown notice');}
+  for(let i=0;i<3;i++){f.tick();await flush();}
+  assert.equal(remote?calls.length:f.calls.length,2,'one catalog and one create; never automatically replay');
+  const success=form.listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
+  if(!remote)f.finish({ok:true,udid:'created'},2);
+  await success;assert.equal((await pending).udid,'created','user can explicitly create after checking the list');
+  assert.equal(remote?calls.length:f.calls.length,3);
+ }
+ for(const remote of [false,true]){
+  const f=fixture('pages');if(!remote)f.start();
+  const pending=f.create({family:'any',call:remote?async()=>{throw Error('Catalog unavailable');}:null});await flush();
+  if(!remote){f.tick();await flush();f.finish({ok:false,execution:'unknown',message:'Catalog unavailable'});await flush();}
+  assert.equal(f.nodes.find(n=>n.className==='sheet-error').textContent,'Catalog unavailable','catalog failure never uses a creation notice');
+  f.nodes.find(n=>n.tag==='dialog').listeners.cancel({preventDefault(){}});await pending;
+ }
 });
 
 test('startup probes never replay slow page or settings operations, on success or failure',async()=>{

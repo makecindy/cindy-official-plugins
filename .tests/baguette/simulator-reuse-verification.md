@@ -208,3 +208,44 @@ retain version 0.3.53 and both release notes. The final required repository suit
 and simulator aggregate pass 913 tests, zero failures (65.63 seconds). Manifest
 validation and git diff --check pass. Package/runtime verification remains CI
 and genuine two-computer acceptance; no installed version was claimed tested.
+
+## Creation result notice checkpoint — 0.3.54, 2026-11-18
+
+User approved the maintainer's exact bilingual notice and manual-create behavior
+in https://github.com/makecindy/cindy-official-plugins/pull/324#issuecomment-6961935602.
+Invariant: a failed create may offer retry advice only when its result explicitly
+says `execution: 'not_executed'`. Unknown, missing, timed-out or rejected replies
+must ask the user to inspect the correct computer's device list first. The shared
+pages.js create sheet owns the notice and button state for local and remote
+creation; its existing call adapter identifies the computer. No additional state,
+request bookkeeping, locks, retries or automatic replay are introduced.
+
+| Event | Catalog loading | Create in flight | Failed create settled |
+| --- | --- | --- | --- |
+| Success | Populate existing model/runtime controls | Close sheet with returned device | No automatic request |
+| Explicit not_executed | Existing catalog error | Existing backend/platform error and retry advice, re-enable Create | User may explicitly submit again |
+| Unknown, missing reply or rejected call | Existing catalog error, no creation claim | Bilingual local/remote list notice, re-enable Create | No automatic request |
+| Request timeout | Existing catalog error | Same conservative list notice, re-enable Create | Late response cannot replace settled notice |
+| User submits after checking | Not enabled without model/runtime | Existing disabled Create button | Exactly one new create |
+
+Symmetric audit covers local BroadcastChannel RPC and remote call adapter,
+iOS/Android, Chinese/English, explicit unknown with misleading backend text,
+missing execution evidence, undefined remote result, thrown error, actual local
+post-dispatch timeout and late success, known not_executed, catalog errors and
+manual subsequent success. Existing shared-sheet tests still preserve detailed
+backend errors for known non-execution. The new regression fails on 186e671e
+because it displays "Not created. Try again." for explicit unknown; after the
+change all 14 focused page-RPC tests pass (40 creation outcome combinations plus
+catalog cases in the new regression). These are real source scripts executed in
+a VM with a DOM fixture and transport fakes, not two-computer or installed-client
+acceptance. Existing controller-side forms do not claim failed creation or offer
+retry on unknown; this change keeps the shared sheet as the only changed UI path.
+
+No new Host APIs, permissions, dependencies, installation or restart. The current
+task exposes no Forge pack tool; repository validation and CI packaging remain
+the package evidence. Genuine two-computer runtime acceptance remains outstanding.
+
+Validation on Node.js v22.21.1: required repository suites plus the simulator
+aggregate passed 914 tests, zero failures (64.35 seconds). Manifest validation
+and git diff --check passed. No installed-client or visual-theme acceptance is
+claimed for this copy change; the existing layout and theme styles are unchanged.
