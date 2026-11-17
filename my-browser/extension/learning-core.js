@@ -4,6 +4,9 @@
   // One budget shared by the browser, bridge and public-task adapter. Each
   // model attempt can wait behind one active run in the two-slot scheduler.
   const learningTiming=Object.freeze({model:240000,cancel:15000,queue:30000,transport:30000,resultRetention:330000});
+  // Streamed answer text in progress updates: every hop (task → bridge → extension) keeps up to
+  // this many characters, matching Cindy's relay limit; the task sends at most this much.
+  const progressTextMax=32768;
   function learningRequestTimeout(req){
     if(!['subtitles','subtitle-document','translate','explain','summary','conversation','task'].includes(req.op))return learningTiming.transport;
     const attempts=req.op==='subtitles'?(req.editorial?2:3):req.op==='translate'?2:1;
@@ -357,7 +360,7 @@
     return {...entry,interval:days,due:now+(days?days*86400000:600000),reviews:(entry.reviews||0)+1,updated:now};
   }
   function uuid(){if(globalThis.crypto.randomUUID)return globalThis.crypto.randomUUID();const bytes=globalThis.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;return Array.from(bytes,(v,i)=>([4,6,8,10].includes(i)?'-':'')+v.toString(16).padStart(2,'0')).join('');}
-  const api={pickCaptionTrack,captionsMatchLanguage,youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
+  const api={pickCaptionTrack,captionsMatchLanguage,youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,progressTextMax,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
   if(typeof module==='object'&&module.exports)module.exports=api;
   root.CindyLearning=api;
 })(globalThis);

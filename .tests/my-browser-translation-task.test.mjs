@@ -500,10 +500,13 @@ test('side panel chats forward the run text while it is written; subtitles do no
   const f=fixture();f.auto(false);const getRun=f.tasks.getRun;let polls=0;
   f.tasks.getRun=async req=>{const run=await getRun(req);polls++;
     if(polls===1)return {...run,preview:{text:'## Partial'}};
+    if(polls===2)return {...run,preview:{text:'y'.repeat(globalThis.CindyLearning.progressTextMax+50)}};
     f.runs.get(run.runId).status='completed';return {...run,status:'completed'};};
   const seen=[],progress=async(stage,detail)=>{seen.push({stage,...detail});};
   await f.make()({purpose:'webpage-chat',question:'q',prompt:'Answer: q',source:{url:'https://example.test/a'}},{progress});
   assert.ok(seen.some(p=>p.stage==='generating'&&p.text==='## Partial'));
+  // Long answers keep streaming within the limit every relay accepts.
+  assert.ok(seen.some(p=>p.text?.length===globalThis.CindyLearning.progressTextMax));
   seen.length=0;polls=0;
   await f.make()({prompt:'translate',source:{url:'https://www.youtube.com/watch?v=x'}},{progress});
   assert.ok(!seen.some(p=>p.text));

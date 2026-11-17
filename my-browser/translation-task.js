@@ -1,5 +1,6 @@
 import './extension/learning-core.js';
 const timing=globalThis.CindyLearning.learningTiming;
+const progressTextMax=globalThis.CindyLearning.progressTextMax;
 // Execute through the existing public task API; never oneshot_text, a custom
 // harness, or a log-only companion session.
 //
@@ -185,8 +186,8 @@ export function createTranslationTask({tasks,load,save,locale=()=> 'en',interval
     while(!terminal.has(run.status)){
       await active();if(now()>=deadline)fail('TIMEOUT');
       // Side panel chats show the answer as it is written (hosts with runPreview); the final
-      // answer still comes from the finished run's message.
-      const preview=stream&&run.status==='running'&&typeof run.preview?.text==='string'&&run.preview.text.trim()?run.preview.text:'';
+      // answer still comes from the finished run's message. Capped so no relay drops it.
+      const preview=stream&&run.status==='running'&&typeof run.preview?.text==='string'&&run.preview.text.trim()?run.preview.text.slice(0,progressTextMax):'';
       // Lazy startup may temporarily expose neither the input nor execution.
       // Keep following this run, never replace it merely for being reconciling.
       if(preview)await progress('generating',{text:preview});

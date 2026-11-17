@@ -101,6 +101,11 @@ test('learning requests are authenticated, deduplicated and cancellable',async t
   assert.equal(progress.stage,'model');assert.equal(progress.attempt,2);assert.equal(progress.prompt,undefined);
   await bridge.request('learningProgress',{id:job.id,progress:{stage:'untrusted arbitrary text'}});
   assert.equal((await signed('/learning/result',{id:job.id})).progress.stage,'model');
+  // 2026-11-17 review: the bundled bridge dropped streamed answer text, so the side panel never streamed on it.
+  await bridge.request('learningProgress',{id:job.id,progress:{stage:'generating',text:'## Partial'}});
+  assert.equal((await signed('/learning/result',{id:job.id})).progress.text,'## Partial');
+  await bridge.request('learningProgress',{id:job.id,progress:{stage:'generating',text:'x'.repeat(core.progressTextMax+1)}});
+  assert.equal((await signed('/learning/result',{id:job.id})).progress.text,undefined,'text past the shared limit is not held');
   const config={id:crypto.randomUUID(),request:{op:'config'}};await signed('/learning/start',config);await signed('/learning/cancel',{id:config.id});
   assert.equal((await bridge.request('learningResult',{id:config.id,result:{ok:true}})).ok,false);
 });
