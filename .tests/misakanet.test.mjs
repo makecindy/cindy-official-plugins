@@ -350,6 +350,52 @@ test('search: a real zero hit is still a zero hit', async () => {
   assert.match(answer.result.note, /没有命中任何教训/);
 });
 
+test('search: a zero hit with a domain filter is marked, and the note says to drop the domain', async () => {
+  // The endpoint only reports the *kind* filter, so a zero hit with a domain filter cannot be
+  // told apart from a real miss. Measured on production 2026-11-17: domain-carrying queries miss
+  // far more often (python 5 of 6 empty). The marker plus the note keep the agent from reporting
+  // a lesson that exists but was filtered out.
+  const load = await loadPlugin({
+    respond: () => ({
+      results: [],
+      no_match: true,
+      suggestion: 'No MisakaNet lesson matched "pip install timeout".',
+      intake: { tool: 'misakanet_submit_intake', args: { kind: 'missing_lesson' } },
+    }),
+  });
+  const answer = await callTool(load, 'misakanet_search', { query: 'pip install timeout', domain: 'python' });
+  assert.equal(answer.result.domain_filtered_empty, true);
+  assert.match(answer.result.note, /domain=python/);
+  assert.match(answer.result.note, /去掉 domain/);
+  assert.doesNotMatch(answer.result.note, /加 domain/);
+});
+
+test('search: a zero hit without a domain is still a plain miss', async () => {
+  const load = await loadPlugin({
+    respond: () => ({ results: [], no_match: true, suggestion: 'nothing matched' }),
+  });
+  const answer = await callTool(load, 'misakanet_search', { query: 'how do I configure MCP auth' });
+  assert.equal(answer.result.domain_filtered_empty, undefined);
+  assert.match(answer.result.note, /没有命中任何教训/);
+  assert.match(answer.result.note, /加 domain/);
+});
+
+test('the first-turn notice names the plugin version and how to actually get the next one', async () => {
+  // Measured on production 2026-11-17: 48% of the plugin's last-7-day searches ran on builds
+  // three versions behind. A self-signed .cindy package installs as a local source, and local
+  // sources do not follow market updates — so a new release never reaches those machines
+  // unless something says so out loud.
+  const load = await loadPlugin();
+  await load.stub.handler({ type: 'event', name: 'did-turn-end', data: { sessionId: 'v1' } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const notices = load.sent.filter((m) => m.type === 'notify');
+  assert.equal(notices.length, 1);
+  const text = String(notices[0].text || '');
+  assert.match(text, /插件 \d+\.\d+\.\d+/, text);
+  assert.match(text, /插件市场/, text);
+  assert.match(text, /不会自动更新/, text);
+});
+
 test('the package declares exactly five tools, and answers nothing else', async () => {
   // The host only dispatches a tool the manifest declares, so the plugin's handler ignores
   // anything else **on purpose**: answering a tool it does not own would be answering on
@@ -405,6 +451,19 @@ test('me_inbox: a dedup_key is a reference too', async () => {
   assert.equal(answer.ok, true);
   assert.equal(answer.result.status, 'pending');
   assert.deepEqual(JSON.parse(load.requests[0].body).params.arguments, { dedup_key: 'a28a0593' });
+});
+
+test('me_inbox: two references at once is refused, and nothing is sent', async () => {
+  // Two references leave "which report is this?" to the endpoint. The plugin refuses before the
+  // request instead: one answer, one report.
+  const load = await loadPlugin();
+  const answer = await callTool(load, 'misakanet_me_inbox', {
+    intake_id: 'issue-4238',
+    dedup_key: 'a28a0593',
+  });
+  assert.equal(answer.ok, false);
+  assert.equal(answer.errorCode, 'AMBIGUOUS_INTAKE_REF');
+  assert.equal(load.requests.length, 0, 'an ambiguous lookup must not reach the endpoint');
 });
 
 test('the manifest declares the turn subscription, the resident launch and the notice capability', async () => {
