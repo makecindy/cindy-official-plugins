@@ -12,7 +12,7 @@ test('sidepanel chats with the active page and cancels stale work',{skip:!proces
     window.fixture={tab:{id:1,url:'https://example.test/one',title:'First page'},calls:[],listeners:{},hold:false,stored:{},favorites:[]};const f=window.fixture;
     window.chrome={permissions:{contains:async()=>f.granted===true,request:async a=>{f.calls.push({permission:'request',...a});f.granted=f.allow===true;return f.granted;},remove:async a=>{f.calls.push({permission:'remove',...a});f.granted=false;return true;}},storage:{local:{get:async()=>({...f.stored}),set:async v=>Object.assign(f.stored,v),remove:async k=>{delete f.stored[k];}}},windows:{getCurrent:async()=>({id:9})},tabs:{query:async()=>[f.tab],sendMessage:async(id,m)=>{f.calls.push({tab:id,...m});return m.type==='cindy-page'&&m.action==='translate'?{ok:true,translated:true}:{ok:true};},onActivated:{addListener:fn=>f.listeners.active=fn},onUpdated:{addListener:fn=>f.listeners.update=fn}},scripting:{executeScript:async()=>[{frameId:0,documentId:'document-1',result:{text:'Answer: 42',source:{url:f.tab.url,title:f.tab.title}}}]},runtime:{onMessage:{addListener:fn=>{const prev=f.listeners.runtime;f.listeners.runtime=m=>{prev?.(m);fn(m);};}},sendMessage:async message=>{
       f.calls.push(message);if(message.type==='cindy-cancel')return {ok:true};
-      if(message.request.op==='preferences')return {ok:true,target:'fr'};
+      if(message.request.op==='preferences')return new Promise(resolve=>f.releasePrefs=()=>resolve({ok:true,target:'fr'}));
       if(message.request.op==='config')return {ok:true,locale:'zh-CN',features:['webpage-chat-v1','webpage-chat-models-v1']};
       if(message.request.op==='models')return {ok:true,preferences:'ok',favorites:f.favorites,recents:[{providerId:'b',modelId:'deep',agent:'codex'}],models:[{name:'Fixture Fast',provider:'Provider A',visible:true,route:{agentKind:'pi',providerId:'a',model:'fast',effort:'',fastMode:false},efforts:[]},{name:'Fixture Deep',provider:'Provider B',visible:true,supportsFastMode:true,defaultEffort:'medium',route:{agentKind:'codex',providerId:'b',model:'deep',effort:'medium',fastMode:false},efforts:['low','medium','high']}]};
       if(message.request.op==='model-favorite'){const m=message.request.mutation;if(m.kind==='add')f.favorites=[...f.favorites,{uid:'fav-'+f.favorites.length,...m.item}];if(m.kind==='remove')f.favorites=f.favorites.filter(x=>x.uid!==m.expected.uid);return {ok:true,favorites:f.favorites};}
@@ -32,8 +32,12 @@ test('sidepanel chats with the active page and cancels stale work',{skip:!proces
   // Settings write the same preferences the page scripts read.
   await page.locator('#settings').click();
   // 2026-11-17 review: with no saved webTarget, settings show the plugin's older saved target,
-  // the language pages actually translate into.
-  await page.locator('.setting-select').waitFor();assert.equal(await page.locator('.setting-select').inputValue(),'fr');
+  // the language pages actually translate into. Only the language waits for Cindy; the page opens at once.
+  await page.getByRole('switch',{name:'选中文字时显示 Cindy 按钮'}).waitFor();
+  assert.equal(await page.locator('.setting-select').isDisabled(),true);
+  await page.evaluate(()=>fixture.releasePrefs());
+  await page.waitForFunction(()=>!document.querySelector('.setting-select').disabled);
+  assert.equal(await page.locator('.setting-select').inputValue(),'fr');
   await page.getByRole('switch',{name:'选中文字时显示 Cindy 按钮'}).check();
   await page.evaluate(()=>{fixture.stored.cindyReadingPreferences={...fixture.stored.cindyReadingPreferences,autoVideo:false,videoMode:'translation'};});
   await page.getByRole('switch',{name:'选中文字时显示 Cindy 按钮'}).uncheck();await page.getByRole('switch',{name:'选中文字时显示 Cindy 按钮'}).check();

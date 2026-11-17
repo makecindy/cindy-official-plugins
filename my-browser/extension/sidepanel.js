@@ -173,17 +173,24 @@ function readChatPage() {
     await chrome.storage.local.set({cindyReadingPreferences:merged});}
   function toggleRow(label,hint,checked,onChange){const row=el('label','setting-row'),text=el('span','setting-text');text.append(el('span',undefined,label));if(hint)text.append(el('small',undefined,hint));
     const input=el('input','switch');input.type='checkbox';input.setAttribute('role','switch');input.checked=checked;input.onchange=()=>onChange(input.checked).catch(()=>{input.checked=!input.checked;});row.append(text,input);return row;}
+  let settingsGen=0;
   async function showSettings(){
-    const view=$('settings-view'),prefs=await readPrefs();view.replaceChildren();
+    // Local reads only, then one synchronous build; a newer open supersedes an older one.
+    const gen=++settingsGen,tabAccess={permissions:['tabGroups']},prefs=await readPrefs();
+    const granted=chrome.permissions?await chrome.permissions.contains(tabAccess).catch(()=>false):false;
+    if(gen!==settingsGen)return;
+    const view=$('settings-view');view.replaceChildren();
     const head=el('div','settings-head'),back=el('button','icon-button');back.type='button';back.title=copy.back;back.setAttribute('aria-label',copy.back);back.append(icon('back',17));back.onclick=hideSettings;head.append(back,el('h2',undefined,copy.settings));view.append(head);
     // Same rule pages use to pick the language: saved setting, then the plugin's older saved target,
-    // then Chinese. Showing anything else would not match what Translate actually produces.
-    let target=L.validTarget(prefs.webTarget)?prefs.webTarget:null;
-    if(!target){try{const r=await chrome.runtime.sendMessage({type:'cindy-learning',id:crypto.randomUUID(),request:{op:'preferences'}});if(r?.ok&&L.validTarget(r.target))target=r.target;}catch{}}
-    target||='zh-CN';
+    // then Chinese. Showing anything else would not match what Translate actually produces. The
+    // older target comes from Cindy, so only this select waits for it; the rest opens at once.
     const langRow=el('label','setting-row'),select=el('select','setting-select');langRow.append(el('span','setting-text',copy.target),select);
-    for(const code of new Set([target,...L.commonLanguages])){const o=el('option',undefined,L.languageName(code));o.value=code;o.selected=code===target;select.append(o);}
+    const fill=target=>{select.replaceChildren();for(const code of new Set([target,...L.commonLanguages])){const o=el('option',undefined,L.languageName(code));o.value=code;o.selected=code===target;select.append(o);}};
     select.onchange=()=>savePrefs({webTarget:select.value}).catch(()=>{});
+    if(L.validTarget(prefs.webTarget))fill(prefs.webTarget);
+    else{fill('zh-CN');select.disabled=true;
+      chrome.runtime.sendMessage({type:'cindy-learning',id:crypto.randomUUID(),request:{op:'preferences'}}).catch(()=>null)
+        .then(r=>{if(gen!==settingsGen||!select.isConnected)return;if(r?.ok&&L.validTarget(r.target))fill(r.target);select.disabled=false;});}
     // Bilingual or translation only; open pages switch what is already translated without new model calls.
     const modeRow=el('div','setting-row'),seg=el('div','segmented');seg.setAttribute('role','radiogroup');seg.setAttribute('aria-label',copy.webMode);modeRow.append(el('span','setting-text',copy.webMode),seg);
     for(const [value,label] of [['both',copy.bilingual],['translation',copy.translationOnly]]){const b=el('button',undefined,label);b.type='button';b.setAttribute('role','radio');b.setAttribute('aria-checked',String((prefs.webMode==='translation'?'translation':'both')===value));
@@ -195,9 +202,8 @@ function readChatPage() {
     group2.append(toggleRow(copy.selectionButton,'',prefs.selectionButton===true,v=>savePrefs({selectionButton:v})),toggleRow(copy.autoVideo,'',prefs.autoVideo!==false,v=>savePrefs({autoVideo:v})));
     // Tab groups need Chrome's optional tabGroups permission: the switch shows whether it is granted,
     // and asks Chrome only when turned on (the click is the user gesture Chrome requires).
-    const group3=el('div','setting-group'),tabAccess={permissions:['tabGroups']};
+    const group3=el('div','setting-group');
     if(chrome.permissions){
-      const granted=await chrome.permissions.contains(tabAccess).catch(()=>false);
       const art=el('div','setting-art');art.append(globalThis.CindyTabGroupArt(locale==='zh-CN'||locale==='zh-TW',{compact:true}));
       group3.append(toggleRow(copy.tabGroups,copy.tabGroupsHint,granted,async v=>{const ok=v?await chrome.permissions.request(tabAccess):await chrome.permissions.remove(tabAccess);if(!ok)throw Error('PERMISSION');}),art);
     }
