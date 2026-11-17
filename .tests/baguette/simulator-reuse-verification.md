@@ -201,3 +201,10 @@ acceptance. No client installation or restart was performed.
 Before synchronizing the next upstream fix: 910 required repository/simulator
 tests passed, zero failures (57.16 seconds). The focused body suite passed all
 five cases (0.12 seconds); both new cases failed on the previous implementation.
+
+Final combined result also merges main c7f3e375 (#346), retaining its stationary
+TV/Vision Pro touch fix without changing its implementation. Manifest conflicts
+retain version 0.3.53 and both release notes. The final required repository suites
+and simulator aggregate pass 913 tests, zero failures (65.63 seconds). Manifest
+validation and git diff --check pass. Package/runtime verification remains CI
+and genuine two-computer acceptance; no installed version was claimed tested.

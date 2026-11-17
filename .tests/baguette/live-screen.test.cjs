@@ -508,6 +508,55 @@ test('Vision Pro: one finger pinches where it touches, two turn the head, and Re
   assert.deepEqual(strip(f.calls).at(-1),['viewer_spatial','ended','interact',.6,.6]);
 });
 
+test('a held TV swipe or Vision Pro pinch keeps its native contact alive until the finger lifts',async t=>{
+  // The native helpers lift a contact after 750 ms without input; a still finger sends nothing.
+  const f=fixture(t,{size:'1920x1080'});
+  await f.live.request('liveScreen.open',{id:TV});
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.7,.5)]});
+  await new Promise(r=>setTimeout(r,700));
+  const held=f.calls.filter(c=>c[0]==='viewer_trackpad');
+  assert.ok(held.length>=4,`heartbeat samples while held: ${held.length}`);
+  assert.ok(held.slice(1).every(([,p])=>p.phase==='changed'&&p.x===.7&&p.y===.5&&p.gesture===held[0][1].gesture));
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('ended',.7,.5)]});
+  const count=f.calls.length;await new Promise(r=>setTimeout(r,400));
+  assert.equal(f.calls.length,count,'no samples after the lift');
+  assert.equal(f.calls.at(-1)[1].phase,'ended');
+
+  const devices=list().map(d=>d.udid===VISION?{...d,state:'Booted'}:d);
+  const v=fixture(t,{size:'1920x1080',devices});
+  await v.live.request('liveScreen.open',{id:VISION});
+  await v.live.request('liveScreen.input',{id:VISION,events:[touch('began',.6,.6)]});
+  await new Promise(r=>setTimeout(r,1300));
+  const pinch=v.calls.filter(c=>c[0]==='viewer_spatial');
+  assert.equal(pinch[0][1].phase,'began');
+  assert.ok(pinch.length>=3&&pinch.slice(1).every(([,p])=>p.phase==='changed'&&p.mode==='interact'&&p.x===.6),`held pinch samples: ${pinch.length}`);
+  await v.live.request('liveScreen.input',{id:VISION,events:[touch('ended',.6,.6)]});
+  assert.equal(v.calls.at(-1)[1].phase,'ended');
+});
+
+test('closing while a contact begins lifts it only after the start, and sends nothing more',async t=>{
+  let release;const gate=new Promise(r=>{release=r;});
+  const f=fixture(t,{size:'1920x1080',request:async(method,params)=>{if(method==='viewer_trackpad'&&params.phase==='began')await gate;return {execution:'executed'};}});
+  await f.live.request('liveScreen.open',{id:TV});
+  const input=f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.8,.5),touch('moved',.9,.5)]}).catch(()=>{});
+  await until(()=>f.calls.length===1);
+  await f.live.request('liveScreen.close',{id:TV});
+  assert.equal(f.calls.length,1,'the lift waits for the start in flight');
+  release();await input;await new Promise(r=>setTimeout(r,400));
+  const sent=f.calls.map(([,p])=>[p.phase,p.gesture]);
+  assert.deepEqual(sent.map(x=>x[0]),['began','ended']);
+  assert.equal(sent[1][1],sent[0][1]);
+});
+
+test('a new touch after a failed contact starts a new gesture',async t=>{
+  let fail=true;
+  const f=fixture(t,{size:'1920x1080',request:async(method,params)=>{if(fail&&params.phase==='changed'){fail=false;throw Object.assign(Error('expired'),{code:'INPUT_EXPIRED'});}return {execution:'executed'};}});
+  await f.live.request('liveScreen.open',{id:TV});
+  await code(f.live.request('liveScreen.input',{id:TV,events:[touch('began',.5,.5),touch('moved',.8,.5)]}),'INPUT_EXPIRED');
+  await f.live.request('liveScreen.input',{id:TV,events:[touch('began',.4,.4),touch('ended',.4,.4)]});
+  assert.deepEqual(strip(f.calls).at(-1),['press','select',undefined]);
+});
+
 test('Apple devices are unsupported where Baguette cannot run',async t=>{
   const live=L.createLiveScreen({devices:async()=>list(),controls:()=>({assertEnabled:async()=>{},touch(){}}),appleHost:false,WebSocket:FakeSocket});t.after(()=>live.stop());
   await code(live.request('liveScreen.open',{id:PHONE}),'UNSUPPORTED');
