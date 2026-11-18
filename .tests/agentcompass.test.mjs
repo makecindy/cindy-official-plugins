@@ -890,8 +890,10 @@ test('a row with a gap in its data leaves automatic routing; naming the model di
   const named = routeBuiltIn({}, sparkOnly, {constraintModel: 'gpt-5.3-codex-spark'});
   assert.equal(named.status, 'native', JSON.stringify(named.decision?.refusal ?? named.decision?.excluded));
   assert.ok(named.decision.warnings.some(line => /data error/.test(line)), 'the gap is not silent');
-  // roll takes only task and profile, so the blocked answer does not tell its caller to name a model
-  assert.doesNotMatch(refused.error, /nam(e|ing) a model/i);
+  // roll takes only task and profile, so no line of either answer tells its caller to name a model; the reason and the gap stay
+  const said = [refused.error, ...refused.decision.excluded, ...refused.decision.warnings, ...named.decision.warnings];
+  for (const line of said) assert.doesNotMatch(line, /\bname (?:the|a) model\b|\bname it to\b|\bnaming (?:the|a) model\b/i);
+  assert.ok(refused.decision.excluded.some(line => /data error: .*\(out of automatic routing( at this effort)?\)/.test(line)), JSON.stringify(refused.decision.excluded));
 });
 
 // Cindy launches the task, so a row runs at every effort the catalog lists for it: the launch table shipped with the engine's data

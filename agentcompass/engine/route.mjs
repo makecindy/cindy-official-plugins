@@ -546,12 +546,19 @@ function harnessRank(kind, harness) {
   return first && harness === first ? 0 : 1;
 }
 
+// The engine's text for a row out of automatic routing ends by telling its caller to name the model, which an engine caller can do
+// (`constraintModel`). A `roll` caller cannot: roll takes only `task` and `profile`. What the caller reads keeps the reason and the
+// missing data and drops that instruction; the engine's own wording is unchanged.
+const callerText = line => String(line)
+  .replace(/; name the model to dispatch it\)/g, ')')
+  .replace(/ \(name it to dispatch it\)/g, '');
+
 // The engine names each row it leaves out with its reason; a catalog of fifty rows would answer with fifty lines of mostly one
 // reason. One line per reason, with the rows it takes out.
 const ROWS_NAMED = 6;
 function exclusionsByReason(lines) {
   const byReason = new Map();
-  for (const line of new Set(lines)) {
+  for (const line of new Set(lines.map(callerText))) {
     const at = line.indexOf(': ');
     const reason = at < 0 ? line : line.slice(at + 2);
     byReason.set(reason, [...(byReason.get(reason) || []), at < 0 ? '' : line.slice(0, at)]);
@@ -768,7 +775,7 @@ export function routeTask(task, catalog, {
         ...base,
         refusal: decision.refusal,
         // The engine's own warning of a blocked route is `excluded` joined into one line, so it is not repeated.
-        warnings: decision.warnings,
+        warnings: decision.warnings.map(callerText),
         excluded: exclusionsByReason(decision.excluded),
       },
       error: pinned
@@ -793,7 +800,7 @@ export function routeTask(task, catalog, {
       score: decision.score,
       components: decision.components,
       wants_fast: profile.wants_fast === true,
-      warnings: decision.warnings,
+      warnings: decision.warnings.map(callerText),
       ...(allCooling ? {cooldown_warning: 'Cindy recently refused to create a task on every runnable route; this one may be refused again.'} : {}),
       alternatives: decision.topCandidates.slice(1).flatMap(c => {
         const row = rowOf(c);
