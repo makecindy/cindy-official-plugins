@@ -249,3 +249,18 @@ Validation on Node.js v22.21.1: required repository suites plus the simulator
 aggregate passed 914 tests, zero failures (64.35 seconds). Manifest validation
 and git diff --check passed. No installed-client or visual-theme acceptance is
 claimed for this copy change; the existing layout and theme styles are unchanged.
+
+## Main #347 conflict integration — 0.3.55, 2026-11-18
+
+Merged upstream 05cdd227 (#347). The only conflict was cindy-simulator's version:
+main 0.3.45 versus this branch 0.3.54. The combined version is 0.3.55 and retains
+upstream mainView.preferredIcon=tablet-smartphone. The other upstream icon and
+manifest changes match origin/main exactly. No simulator page, worker, transport,
+creation-copy or test implementation changed. Existing source-level evidence for
+0.3.54 therefore remains applicable; it is not installed-client acceptance.
+
+Required repository suites and simulator aggregate passed 914 tests, zero failed
+(60.34 seconds), on Node.js v22.21.1. Manifest validation and git diff --check
+passed. No new machinery, permissions, dependencies, install or restart. Actual
+two-computer runtime acceptance is still incomplete; the maintainer must assess
+that evidence on the then-current head before merge.
