@@ -714,7 +714,8 @@ export function routeTask(task, catalog, {
   const allCooling = skipped.length === runnable.length;
   const rows = allCooling ? runnable : runnable.filter(row => !coolingOf(row));
 
-  // One catalog row is one pool entry: the efforts this row offers are its dispatch table, and every row draws on the engine's
+  // One catalog row is one pool entry: the efforts this row offers are the ones it runs at (the engine's shipped launch table removes
+  // none of them), and every row draws on the engine's
   // built-in unmetered gateway account: no quota reading is attached to a connection. Rows of the harness a route kind names first go first: the engine breaks a tie of
   // everything else (one model at one effort on two harnesses) by that order, so it moves no other model.
   const kind = taskKind({profile}, ROUTES);
@@ -772,7 +773,7 @@ export function routeTask(task, catalog, {
       },
       error: pinned
         ? `No route Cindy offers is what was named (${[pinModel, pinEffort].filter(Boolean).join(', ')}) and can run this task; nothing was started.`
-        : 'No model in the Cindy catalog can run this task: each one is out of automatic routing for the reason in `decision.excluded`; nothing was started. Naming a model dispatches it.',
+        : 'No model in the Cindy catalog can run this task: each one is out of automatic routing for the reason in `decision.excluded`; nothing was started. Do the task in this session, or make another model available in Cindy and roll again.',
     };
   }
   // Fast mode is never chosen: it needs a quota reading attached to the Codex sign-in's own connection, which the catalog cannot name.

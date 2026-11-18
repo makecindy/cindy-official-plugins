@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at 35a7aea5b6bc4028bb78c460482b6d3ad8708948 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/fleet.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * The fleet the allocator ranks over, built from what the gateway has: a candidate pool and a quota snapshot.
@@ -156,22 +156,16 @@ export function effortRows(entry, fleet) {
   const fixedBySuffix = suffix && EFFORT_ORDER.includes(suffix);
   const model = fixedBySuffix ? modelName : stripped;
   const provider = obj.provider || inferModelProviderFamily(model, fleet.aliases) || "gateway";
+  // A row that lists its efforts is launched at those: the list is the host's (Cindy's `tasks.models()`) or the operator's
+  // (Magpie's plugin options), and either outranks the launch table shipped with a version, which speaks only for a row that
+  // lists none. An effort the data does not score leaves automatic routing in the evaluation with the missing data named.
+  const listed = Array.isArray(obj.efforts) ? obj.efforts.map(lc).filter(Boolean) : [];
   let efforts;
-  let notDispatchable = false;
   if (fixedBySuffix) efforts = [obj.effort ? lc(obj.effort) : suffix];
   else if (obj.effort) efforts = [lc(obj.effort)];
-  else if (Array.isArray(obj.efforts)) {
-    const listed = obj.efforts.map(lc).filter(Boolean);
-    const allowed = dispatchAllowedEfforts({ ...obj, model, provider }, fleet, model);
-    efforts = allowed && allowed.length > 0 ? listed.filter((e) => allowed.includes(e)) : listed;
-    if (efforts.length === 0 && listed.length > 0) {
-      efforts = listed;
-      notDispatchable = true;
-    }
-  } else {
-    efforts = bareEfforts(provider, model, fleet);
-  }
-  const own = Array.isArray(obj.efforts) ? obj.efforts.map(lc) : null;
+  else if (listed.length > 0) efforts = listed;
+  else efforts = bareEfforts(provider, model, fleet);
+  const own = listed.length > 0 ? listed : null;
   const split = efforts.length > 1 && obj.id;
   return efforts.map((effort) => ({
     ...obj,
@@ -179,7 +173,6 @@ export function effortRows(entry, fleet) {
     effort,
     provider,
     ...(fixedBySuffix ? { offered_efforts: [effort], effort_fixed: true } : own ? { offered_efforts: own } : {}),
-    ...(notDispatchable ? { not_dispatchable: true } : {}),
     ...(split ? { id: `${obj.id}:${effort}`, source_id: obj.id } : {}),
   }));
 }

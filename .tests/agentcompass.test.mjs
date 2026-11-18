@@ -890,6 +890,27 @@ test('a row with a gap in its data leaves automatic routing; naming the model di
   const named = routeBuiltIn({}, sparkOnly, {constraintModel: 'gpt-5.3-codex-spark'});
   assert.equal(named.status, 'native', JSON.stringify(named.decision?.refusal ?? named.decision?.excluded));
   assert.ok(named.decision.warnings.some(line => /data error/.test(line)), 'the gap is not silent');
+  // roll takes only task and profile, so the blocked answer does not tell its caller to name a model
+  assert.doesNotMatch(refused.error, /nam(e|ing) a model/i);
+});
+
+// Cindy launches the task, so a row runs at every effort the catalog lists for it: the launch table shipped with the engine's data
+// (which lists gpt-6-luna at high only) removes none of them, neither the whole row nor some of its efforts.
+test('a catalog row runs at every effort it lists, whatever the shipped launch table holds', () => {
+  const mediumOnly = {models: [{route: {agentKind: 'codex', providerId: 'xd', model: 'openai/gpt-6-luna', effort: 'medium', fastMode: false}, efforts: ['medium'], supportsFastMode: false}]};
+  const routed = routeBuiltIn({}, mediumOnly);
+  assert.equal(routed.status, 'native', JSON.stringify(routed.decision?.excluded));
+  assert.equal(routed.route.bundle.effort, 'medium');
+  assert.ok(inCatalog(routed, mediumOnly));
+  const listed = ['low', 'medium', 'high', 'xhigh', 'max'];
+  for (const agentKind of ['cc', 'codex', 'pi']) {
+    const catalog = {models: [{route: {agentKind, providerId: 'xd', model: 'openai/gpt-6-luna', effort: 'high', fastMode: false}, efforts: listed, supportsFastMode: false}]};
+    for (const effort of listed) {
+      const named = routeBuiltIn({}, catalog, {constraintModel: `gpt-6-luna:${effort}`});
+      assert.equal(named.status, 'native', `${agentKind} @${effort}: ${JSON.stringify(named.decision?.excluded)}`);
+      assert.equal(named.route.bundle.effort, effort);
+    }
+  }
 });
 
 test('nothing runnable: an empty or foreign catalog is blocked, never guessed', () => {

@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at 35a7aea5b6bc4028bb78c460482b6d3ad8708948 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/allocator.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * AgentCompass allocator for the Magpie gateway: the port of `allocator.py` (`plan`) onto a gateway's inputs.
@@ -416,13 +416,13 @@ function rowsNaming(list, model, catalog, pins) {
   return { rows: rows.filter((row) => rowKeyOf(row.model, fleet) === key), fleet };
 }
 
-/** R2 for one row: dispatch table, within the row's own list, without what the user disabled. A row's own effort is what it runs. */
+/** R2 for one row: its own list when it has one, else the dispatch table, without what the user disabled. A row's own effort is what it runs. */
 function rowOffers(row, effort, fleet) {
   if (row.disabled && !row.disabled_by_default) return false;
   if (row.disabled_efforts?.includes(effort)) return false;
   if (row.effort_fixed) return row.effort === effort;
-  if (row.offered_efforts && !row.offered_efforts.includes(effort)) return false;
-  if (effort === row.effort && !row.not_dispatchable) return true;
+  if (row.offered_efforts) return row.offered_efforts.includes(effort);
+  if (effort === row.effort) return true;
   // A row with no effort of its own (a family or unknown name, a fixed-effort model) runs as it is: nothing to step
   if (row.effort === null || row.effort === undefined) return true;
   const allowed = dispatchAllowedEfforts(row, fleet, row.model);

@@ -3,7 +3,7 @@
   "minCindyVersion": "0.1.121",
   "id": "agentcompass",
   "name": "AgentCompass",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": "akiiwa-games",
   "kind": "chip",
   "description": "Classify work through Cindy's quick-text channel, route it with the built-in AgentCompass engine, start matched child tasks in the parent project directory with bypassPermissions (Claude) / full-access (Codex, Pi), and collect exact results.",

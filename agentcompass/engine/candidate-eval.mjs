@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 35a7aea5b6bc4028bb78c460482b6d3ad8708948 (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Candidate evaluation (`candidate_eval.py`): one bundle against one task, its gates, exclusions (rule B) and breakdown.
@@ -155,11 +155,12 @@ export function namedEffortBundles(task, ctx) {
     const carriers = rows.filter((r) => (!r.disabled || r.disabled_by_default) && !r.discovery_unavailable && !hasFixedEffort(r, fleet));
     // Each level goes to the first row that offers it, so the answer does not depend on the order of the rows.
     for (const carrier of carriers) {
-      const allowed = dispatchAllowedEfforts(carrier, fleet, model);
+      // A carrier's own list decides what it may run at; only a carrier without one asks the launch table.
+      const own = Array.isArray(carrier.offered_efforts) ? carrier.offered_efforts : null;
+      const allowed = own || dispatchAllowedEfforts(carrier, fleet, model);
       const levels = (allowed !== null ? !allowed.includes(effort) : !task.constraint_model) ? [] : [effort];
       for (const level of levels) {
-        const own = Array.isArray(carrier.offered_efforts) ? carrier.offered_efforts : Array.isArray(carrier.efforts) ? carrier.efforts : null;
-        if (written.has(level) || (own && !own.includes(level))) continue;
+        if (written.has(level)) continue;
         written.add(level);
         const rowId = `${carrier.id}@${level}`;
         found[rowId] = { ...carrier, id: rowId, effort: level, pin_carrier: carrier.id };
@@ -270,7 +271,6 @@ export function evaluateBundle(bundle, task, ctx) {
     exclude("unchecked in model management");
   }
   if (bundle.discovery_unavailable) exclude(typeof bundle.discovery_unavailable === "string" ? bundle.discovery_unavailable : "model not detected by discovery for 7+ days");
-  if (bundle.not_dispatchable) exclude(`${bundle.model}@${bundle.effort}: not in dispatch_efforts of ${bundle.provider || bundle.account || "its route"}`);
   if (ctx.unavailable.has(bundle.id) || (bundle.source_id && ctx.unavailable.has(bundle.source_id))) exclude(MARKED_BY_PARENT);
   const cooling = coolingReason(bundle, ctx.launch_failures, now);
   if (cooling) exclude(cooling);
