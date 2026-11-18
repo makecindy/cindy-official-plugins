@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-ranking.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Ranking and ordering of evaluated candidates (`candidate_ranking.py`).

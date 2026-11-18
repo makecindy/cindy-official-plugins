@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/candidate-eval.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Candidate evaluation (`candidate_eval.py`): one bundle against one task, its gates, exclusions (rule B) and breakdown.
@@ -17,8 +17,10 @@ import { DIRECT_SOURCES, healthKey, modelLeaf, nameFixesEffort, resolveModel, ro
 import {
   FIVE_AXES,
   IMAGE_INPUT_LEVEL,
-  TOOL_LEVEL_FACETS,
+  FACET_CATEGORY,
+  LEVEL_FACETS,
   atEffort,
+  facetAtEffort,
   fiveAxisFit,
   fiveAxisHeadroom,
   fiveAxisLevel,
@@ -178,10 +180,10 @@ export function whenFailure(bundle, task) {
   if (!rule || typeof rule !== "object") return null;
   const pinned = task.pinned_bundle || task.constraint_bundle;
   if (pinned && bundle.id && (pinned === bundle.id || pinned === bundle.source_id)) return null;
-  if ("max_reasoning_depth" in rule) {
-    const depth = task.profile && task.profile.reasoning_depth;
-    if (!isNum(depth) || depth > Number(rule.max_reasoning_depth)) {
-      return `its when rule allows reasoning depth up to ${rule.max_reasoning_depth}, the task has ${depth}`;
+  if ("max_primary_level" in rule) {
+    const depth = task.profile && task.profile.primary_level;
+    if (!isNum(depth) || depth > Number(rule.max_primary_level)) {
+      return `its when rule allows primary level up to ${rule.max_primary_level}, the task has ${depth}`;
     }
   }
   if ("min_difficulty" in rule) {
@@ -293,7 +295,7 @@ export function evaluateBundle(bundle, task, ctx) {
     }
   }
   if (spec.verified === false && !task.include_unverified) exclude("account not verified as launchable");
-  if (info.advisor_only && !(info.advisor_for || []).includes(kind)) exclude("advisor only; cannot execute");
+  if (info.advisor_only && (!(info.advisor_for || []).includes(kind) || (task.profile || {}).access === "write")) exclude("advisor only; cannot execute");
   const accountOut = result.excluded.length > 0; // out by the account, the checkbox, a hold or billing: not by this task
   if (info.excluded_when === "local_only" && task.local_only) {
     taskExclude("the parent marked this work local-only (it must run on this machine: in-place edits, local tools, secrets or live accounts); this worker runs remotely");
@@ -322,9 +324,9 @@ export function evaluateBundle(bundle, task, ctx) {
 
   const missingTargets = (axis, level) => {
     if (level < five.demanded_level) return [];
-    if (axis === "tool_operation") {
-      const selected = TOOL_LEVEL_FACETS[level] || [];
-      return selected.filter((f) => ((values.tool_operation || {})[f] ?? null) === null).map((f) => `tool_operation.${f}`);
+    if (axis in LEVEL_FACETS) {
+      const selected = LEVEL_FACETS[axis][level] || [];
+      return selected.filter((f) => ((values[axis] || {})[f] ?? null) === null).map((f) => `${FACET_CATEGORY[f]}.${f}`);
     }
     if (values[axis] !== null && values[axis] !== undefined) return [];
     const cell = (state.categories || {})[axis] || {};
@@ -349,8 +351,12 @@ export function evaluateBundle(bundle, task, ctx) {
   }
   let blindMsg = null;
   if (blind.length > 0) {
-    const effNote = eff && blind.some((a) => (((state.categories || {})[a] || {}).value ?? null) !== null) ? ` at effort ${eff}` : "";
-    blindMsg = `no trusted data for the demanded category ${blind.join(", ")} on ${model}${effNote} (missing ${missingList.join(", ")}; fill with \`agentcompass score set ${model} ${missingList[0]} <1..3>\` or in the tray Manual Scores panel)`;
+    const cats = state.categories || {};
+    const hasHigh = missingList.some((t) =>
+      t.includes(".") ? facetAtEffort(cats, t.slice(0, t.indexOf(".")), t.slice(t.indexOf(".") + 1), "high") !== null : ((cats[t] || {}).value ?? null) !== null,
+    );
+    const effNote = eff && hasHigh ? ` at effort ${eff}` : "";
+    blindMsg = `no trusted data for the demanded category ${blind.join(", ")} on ${model}${effNote} (missing ${missingList.join(", ")}; fill with \`agentcompass score set ${model} ${missingList[0]} <level>\` or in the tray Manual Scores panel)`;
   }
   if (blindMsg && !pool) result._five_blind_msg = blindMsg;
   const errors = [
@@ -600,10 +606,17 @@ export function evaluateBundle(bundle, task, ctx) {
   // burn is priced in its usd and its gain in the categories' effort shift). The economy decides.
   const [fit, axisRows] = fiveAxisFit(values, task.five_axis_demand, task.five_axis_targets);
   result._five_values = values; // the economy re-reads this candidate's scores at its effort over the demand grid
-  // The candidate's four category scores at this effort: what the radar and the explanation show (tool_operation: the weaker
-  // of its facets that have a value).
-  const tool = Object.values(values.tool_operation).filter((z) => z !== null && z !== undefined);
-  const shown = { ...Object.fromEntries(FIVE_AXES.filter((a) => a !== "tool_operation").map((a) => [a, values[a]])), tool_operation: tool.length > 0 ? Math.min(...tool) : null };
+  // The candidate's four category scores at this effort: what the radar and the explanation show (`aesthetics` and
+  // `tool_operation`: the weaker of their facets that have a value).
+  const shown = {};
+  for (const a of FIVE_AXES) {
+    if (a in LEVEL_FACETS) {
+      const present = Object.values(values[a] || {}).filter((z) => z !== null && z !== undefined);
+      shown[a] = present.length > 0 ? Math.min(...present) : null;
+    } else {
+      shown[a] = values[a];
+    }
+  }
   for (const [a, v] of Object.entries(shown)) result.components[a] = v === null || v === undefined ? null : pyRound(v, 4);
   for (const [a, v] of Object.entries(fiveAxisShares(values, ctx.targets))) result.components[`share_${a}`] = v;
   const rows = Object.values(axisRows);

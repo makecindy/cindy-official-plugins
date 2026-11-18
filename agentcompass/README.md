@@ -7,7 +7,7 @@ Hand independent work from a Cindy session to the model that fits it, and get th
 A [Cindy](https://github.com/makecindy/cindy) plugin with four tools: `roll`, `status`, `stop` and `cleanup`. `roll` takes a whole task, decides whether it should be
 split, answered in the current session or delegated, and if delegated picks the harness, model and effort from the models **this Cindy can actually run**,
 starts that route as an ordinary Cindy task, checks that Cindy runs what was routed, and later hands back the task's final message. The scoring is the
-[AgentCompass](https://github.com/akiiwa-games/AgentCompass) v0.6.0 engine, carried inside the plugin as plain JavaScript: nothing else has to be installed, and
+[AgentCompass](https://github.com/akiiwa-games/AgentCompass) v0.7.0 engine, carried inside the plugin as plain JavaScript: nothing else has to be installed, and
 the plugin makes no network request.
 
 ## Rules you must know
@@ -51,4 +51,4 @@ This directory is a copy of the plugin's `plugin/` folder; its source, unit test
 
 The same engine routes Claude Code, Codex CLI, Pi, Paseo and others through `agentcompass roll`, and Magpie requests through
 [magpie-agentcompass-router](https://github.com/akiiwa-games/magpie-agentcompass-router). Scoring and quota rules live once, in AgentCompass's
-[technical reference](https://github.com/akiiwa-games/AgentCompass/blob/v0.6.0/docs/technical-reference.md).
+[technical reference](https://github.com/akiiwa-games/AgentCompass/blob/v0.7.0/docs/technical-reference.md).

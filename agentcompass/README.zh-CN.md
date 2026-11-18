@@ -6,7 +6,7 @@
 
 一个 [Cindy](https://github.com/makecindy/cindy) 插件，提供 `roll`、`status`、`stop`、`cleanup` 四个工具。`roll` 接收完整任务，判断应拆分、留在当前会话回答，还是委派；
 委派时从**这台 Cindy 实际能运行的模型**中选出 harness、模型与档位，把该路由作为普通 Cindy 任务启动，核对 Cindy 运行的确是所选路由，并在完成后交回任务的最终消息。
-打分使用 [AgentCompass](https://github.com/akiiwa-games/AgentCompass) v0.6.0 引擎，以纯 JavaScript 内置于插件：无需安装其他任何东西，插件不发起任何网络请求。
+打分使用 [AgentCompass](https://github.com/akiiwa-games/AgentCompass) v0.7.0 引擎，以纯 JavaScript 内置于插件：无需安装其他任何东西，插件不发起任何网络请求。
 
 ## 必须知道的规则
 
@@ -46,4 +46,4 @@
 ## 与其他宿主的关系
 
 同一引擎通过 `agentcompass roll` 为 Claude Code、Codex CLI、Pi、Paseo 等路由，并通过 [magpie-agentcompass-router](https://github.com/akiiwa-games/magpie-agentcompass-router) 为 Magpie 请求路由。
-打分与额度规则只在 AgentCompass 的[技术参考](https://github.com/akiiwa-games/AgentCompass/blob/v0.6.0/docs/technical-reference.md)中定义一次。
+打分与额度规则只在 AgentCompass 的[技术参考](https://github.com/akiiwa-games/AgentCompass/blob/v0.7.0/docs/technical-reference.md)中定义一次。

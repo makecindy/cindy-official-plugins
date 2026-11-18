@@ -1,121 +1,130 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/profiler-core.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Multi-Protocol Request Extractor & Task Profile Schema
  *
  * A task profile comes from the classifier (`src/scorer-live.js`) or from the caller, never from the task's text:
- * without one the router does not route (`unroutedDecision`). The profile is `task_intake.py`'s: two integers
- * (`reasoning_depth`, `code_complexity`), the flags, the task count, and `axis_demand`, how much the task needs of each of the
- * four capability categories (0..3). Nothing else scores.
+ * without one the router does not route (`unroutedDecision`). The profile is `task_intake.py`'s: one of 11 work kinds with its
+ * depth (`primary_level`) and an optional second kind, the access split, the flags, the hours and the task count. `axis_demand`,
+ * how much the task needs of each of the four capability categories (0..3), is projected from the kinds and depths through the
+ * declared signature table (`WORK_KIND_SIGNATURES`); nothing else scores.
  * Pure ES2022 module (zero Node-only imports) so it runs identically in both Bun and `moejs`.
  */
 
-import { DIFFICULTY_ORDER, INTERACTION_STYLES, ROUTES } from "./catalog.mjs";
-import { FIVE_AXIS_DEMAND_SCHEMA, validateAxisDemand } from "./axis-scores.mjs";
+import { DIFFICULTY_ORDER } from "./catalog.mjs";
+import { FIVE_AXES, validateAxisDemand } from "./axis-scores.mjs";
 import { analyzeTurnState } from "./continuity.mjs";
 
-export const PROFILE_INTEGERS = {
-  reasoning_depth: [1, 4],
-  code_complexity: [0, 3],
+/** The 11 atomic work kinds the classifier answers (`task_intake.WORK_KINDS`). */
+export const WORK_KINDS = [
+  "creative_ideation",
+  "architecture_reasoning",
+  "code_implementation",
+  "frontend_ui",
+  "code_audit",
+  "exploration_forensics",
+  "web_research",
+  "visual_analysis",
+  "text_processing",
+  "live_loop",
+  "gui_control",
+];
+export const PROFILE_KINDS = [...WORK_KINDS, "other_or_mixed"];
+export const SECONDARY_KINDS = ["none", ...WORK_KINDS];
+
+/**
+ * Role codes per (creativity, coding, aesthetics, tool_operation) for depth s in {1, 2, 3}: `0` -> 0; `B` -> 1 when s >= 2 (a
+ * baseline); `S` -> s - 1 (supporting); `P` -> s (the primary bottleneck); `F2` -> 2 and `F3` -> 3 (tool_operation floors of a live
+ * text/API loop and a live GUI).
+ */
+export const ROLE_FN = {
+  0: () => 0,
+  B: (s) => (s >= 2 ? 1 : 0),
+  S: (s) => s - 1,
+  P: (s) => s,
+  F2: () => 2,
+  F3: () => 3,
+};
+/** The role each work kind gives each category: a maintainer declaration (2026-11-17, AgentCompass `references/work-kinds.md`). */
+export const WORK_KIND_SIGNATURES = {
+  creative_ideation: ["P", "0", "B", "0"],
+  architecture_reasoning: ["S", "P", "0", "0"],
+  code_implementation: ["B", "P", "0", "B"],
+  frontend_ui: ["B", "P", "P", "B"],
+  code_audit: ["B", "P", "0", "0"],
+  exploration_forensics: ["S", "P", "0", "B"],
+  web_research: ["S", "B", "0", "B"],
+  visual_analysis: ["B", "B", "P", "0"],
+  text_processing: ["B", "0", "B", "0"],
+  live_loop: ["0", "S", "0", "F2"],
+  gui_control: ["0", "B", "S", "F3"],
 };
 
-export const PROFILE_FLAGS = ["needs_visual", "needs_gui", "local_only", "wants_fast", "read_only_review"];
-export const PROFILE_KINDS = Object.keys(ROUTES);
+export const PROFILE_INTEGERS = { primary_level: [1, 3], secondary_level: [0, 3] };
+export const REQUIRED_BOOL_FLAGS = ["local_only", "needs_visual", "wants_fast"];
 export const ACCESS_LEVELS = ["read-only", "write"];
 export const HOURS_RANGE = [0.05, 24.0];
-export const CONFIDENCE_LEVELS = ["low", "medium", "high"];
-export const URGENCY_LEVELS = ["unknown", "low", "normal", "high"];
 export const TASK_COUNTS = ["1", "2", "3", ">3"];
 export { DIFFICULTY_ORDER };
 
+export const WORK_KIND_QUESTION =
+  "Primary observable activity of the assignment (choose the core deliverable; ignore role/receipt boilerplate): creative_ideation = cross-domain association, de-novo concept/mechanism invention, creative writing, dialogue, open brainstorming; architecture_reasoning = first-principles system architecture, mathematical/formal proof, rigorous trade-off critique or planning without editing code; code_implementation = write, fix, refactor, or test backend, CLI, library, algorithm, data/experiment script, or config code; frontend_ui = implement or restyle user-facing UI, web/desktop views, CSS, animations, charts, or interactive components; code_audit = independent read-only code, PR, diff, branch, security, or release review/audit (even when saving a report file); exploration_forensics = read-only codebase mapping, log/database/metric forensics, or runtime root-cause diagnosis without modifying code; web_research = open-web, literature, vendor, documentation, or multi-source public fact gathering and synthesis; visual_analysis = static offline inspection of images, photos, screenshots, mockups, OCR, UI layout diffs, or fine-grained visual styling/material classification; text_processing = bounded rule-based text cleaning, translation, formatting, mechanical extraction, or summarization; live_loop = low-latency observe-act loop attached to a live external text/API stream (live market, ticket polling, live chat); gui_control = operate a live desktop, browser, or mobile GUI via screenshots, mouse clicks, and keyboard actions.";
+export const PRIMARY_LEVEL_QUESTION =
+  "Depth of the primary work_kind (1..3), based on task complexity rather than prompt length: 1 = routine/localized (small script or config tweak, checklist/runbook, coarse OCR, simple lookup or formatting); 2 = standard module/analysis (implement, fix, or audit a production module with tests, standard UI page/chart or mockup diff, structured research synthesis); 3 = frontier/coupled/fine-grained (cross-module concurrency/protocol architecture, de-novo cross-domain invention, design-led UI system, or fine-grained outfit/material/lighting visual classification).";
+export const SECONDARY_KIND_QUESTION =
+  'Optional second distinct work_kind ONLY when a single worker must execute a genuinely composite task spanning two atomic domains (e.g. code_implementation + creative_ideation for inventing a novel mechanism and coding it, frontend_ui + gui_control for coding UI and clicking through a live browser); use "none" whenever the task belongs to one primary domain (including normal test running, git/CLI usage, or reading files before coding).';
+export const SECONDARY_LEVEL_QUESTION =
+  'Depth of secondary_kind: MUST be 0 when secondary_kind is "none"; otherwise 1..3 rating only the secondary part\'s own depth.';
+export const ACCESS_QUESTION =
+  'Whether this brief only reads, inspects, reviews, diagnoses, or returns output in its reply without modifying workspace files or state ("read-only"), or creates, edits, or deletes workspace files or runs mutating commands ("write"). code_audit is ALWAYS "read-only" (even when saving a review report file); local repository code_implementation and frontend_ui are ALWAYS "write".';
+export const LOCAL_ONLY_QUESTION =
+  "True when the task explicitly depends on existing un-inlined files, directories, repositories, processes, or GUI on this machine. False when all required inputs are inlined in the prompt or fetched from the public web—even if the brief has a workspace header or names a local output path.";
+export const NEEDS_VISUAL_QUESTION =
+  "True when the worker must inspect images, photos, screenshots, mockups, or operate a GUI (always true for visual_analysis and gui_control); false for pure text/code work.";
 export const WANTS_FAST_QUESTION =
   'True ONLY when the assignment affirmatively requests fast mode, priority service tier, urgent/ASAP turnaround, or a pre-reset quota sprint (e.g. "pre-reset sprint", "before quota resets", "重置前冲刺") for the task itself, and does not negate or opt out of fast mode (e.g. "do not use fast mode", "no fast mode", or "not urgent" -> false). False for action adverbs inside runtime steps (e.g. "click Save immediately when the button appears"), ordinary mentions of quota/reset without requesting fast execution, or ordinary tasks without an explicit speed/fast request.';
-
-export const READ_ONLY_REVIEW_QUESTION =
-  "True ONLY when the assignment is a read-only code, diff, branch, security, or release review/audit that inspects existing material and reports findings without writing or modifying repository production/test code (code_complexity = 0, even if the reviewer saves its review report file to a specified output path). False when the worker implements, fixes, or refactors code (including fixing issues found by a prior review), runs operational/release commands, or performs general exploration/research that is not a code/diff/release audit.";
-
-export const ACCESS_QUESTION =
-  'Whether this brief only reads, inspects, reviews, or analyzes without modifying workspace files or state ("read-only"), or writes, edits, creates, or deletes workspace files or runs mutating commands ("write"). Any brief with read_only_review=true is "read-only"; any brief with code_complexity > 0 is "write".';
-
-export const MULTI_TASK_QUESTION =
-  "True when the brief bundles more than one separate task: deliverables that different workers could produce at the same time without waiting for each other's result (e.g. collect reference images, compare game engines, design the gameplay loop). False for one task, however many steps: investigate-fix-test-release, implement plus its tests, a review plus its report, the remaining steps of a handoff, a brief that already assigns one share of a larger task, or a sequence where each part needs the previous part's output.";
-
 export const TASK_COUNT_QUESTION =
-  "How many separate tasks, in the sense of multi_task, the brief holds: 1 when multi_task is false.";
+  'How many independent parallel tasks the brief bundles ("1" when it is a single task, including multi-step sequential workflows like investigate-fix-test, implement+tests, or review+report; "2", "3", or ">3" ONLY when different workers could produce separate deliverables in parallel without waiting on one another).';
 
-/** The classifier's schema. Integers carry minimum/maximum, never an integer enum (Gemini's protobuf schema rejects those). */
+/** The classifier's schema (`task_intake.TASK_PROFILE_SCHEMA`). Integers carry minimum/maximum, never an integer enum (Gemini's protobuf schema rejects those). */
 export const TASK_PROFILE_SCHEMA = {
   type: "object",
   properties: {
-    reasoning_depth: {
-      type: "integer",
-      minimum: 1,
-      maximum: 4,
-      description:
-        "How hard the thinking is, not how long the brief is. 1 = routine or direct execution with obvious steps, even when the brief is long and sectioned (run an existing script, checklist, drift round, build/install/switch release runbook; a mechanical edit or constant tweak; click and screenshot; reformat text); 2 = standard engineering or analysis with a clear direction (implement or fix one module, a standard read-only review of a diff/module, execute a structured research packet and report metrics, diagnose one subsystem); 3 = cross-module architectural design/refactor, subtle concurrency or distributed-invariant debugging, or orchestrating a multi-stage research line; 4 = frontier mathematical, strategic or architectural critique and formulation.",
-    },
-    code_complexity: {
-      type: "integer",
-      minimum: 0,
-      maximum: 3,
-      description:
-        "Production code the worker itself writes or modifies (NOT the complexity of code being read or reviewed). 0 = none: ANY read-only code/release/diff review or independent audit (even when saving a review report file to a specified path), diagnosis that only proposes, running existing CLI/release/test commands, log or data exploration, text drafting; 1 = a small script, config/constant tweak, localized helper, or analysis scripts inside a research packet; 2 = a production module implemented, fixed or refactored with its unit tests; 3 = complex multi-module, concurrency, protocol or core-library changes.",
-    },
-    needs_visual: { type: "boolean", description: "True when the work must look at images, screenshots or other visual input." },
-    needs_gui: {
-      type: "boolean",
-      description: "True when the work must operate a desktop or browser GUI through screenshots, mouse and keyboard.",
-    },
-    local_only: {
-      type: "boolean",
-      description:
-        "True when the task explicitly depends on existing files, directories, or repositories on this machine (reading, copying, searching, editing, building, or testing un-inlined local files) or on local processes/GUI/environment. False when all required inputs are inlined in the prompt or fetched from the public web (web_research, self_contained_code, text_in_text_out, direction_reasoning, complex_build_plan)—even if the brief has a workspace header or names a local target path where the finished output will be saved.",
-    },
-    wants_fast: { type: "boolean", description: WANTS_FAST_QUESTION },
-    read_only_review: { type: "boolean", description: READ_ONLY_REVIEW_QUESTION },
+    work_kind: { type: "string", enum: [...WORK_KINDS], description: WORK_KIND_QUESTION },
+    primary_level: { type: "integer", minimum: 1, maximum: 3, description: PRIMARY_LEVEL_QUESTION },
+    secondary_kind: { type: "string", enum: [...SECONDARY_KINDS], description: SECONDARY_KIND_QUESTION },
+    secondary_level: { type: "integer", minimum: 0, maximum: 3, description: SECONDARY_LEVEL_QUESTION },
     access: { type: "string", enum: [...ACCESS_LEVELS], description: ACCESS_QUESTION },
-    interaction_style: {
-      type: "string",
-      enum: [...INTERACTION_STYLES],
-      description:
-        "engineering = write or change software; exploration = explore a codebase, run experiments or backtests, analyze logs or data; text_only = pure text in and out or public web lookup; advisory = direction reasoning or complex build planning.",
-    },
+    local_only: { type: "boolean", description: LOCAL_ONLY_QUESTION },
+    needs_visual: { type: "boolean", description: NEEDS_VISUAL_QUESTION },
+    wants_fast: { type: "boolean", description: WANTS_FAST_QUESTION },
     expected_hours: {
       type: "number",
       minimum: HOURS_RANGE[0],
       maximum: HOURS_RANGE[1],
       description:
-        "Active worker-hours this task needs at an ordinary agent pace (a few tool calls = 0.1; one module fix with a test = 0.5; a multi-file feature or investigation = 1-3; a long multi-stage build = 4 or more). Estimate work, never money, quota or balances. Use 0.5 when the text gives no basis and set hours_confidence low.",
+        "Active worker-hours this task needs at an ordinary agent pace (quick check, runbook, or small review = 0.1-0.25; standard investigation, bug fix, or 1-5 file feature with tests = 0.3-0.6; wide 8+ file refactor or broad survey = 1-3; multi-stage build or sustained live loop = 4 or more). Estimate work, never money, quota or balances; brief length and boilerplate add nothing. Use 0.5 when the text gives no basis.",
     },
-    hours_confidence: {
-      type: "string",
-      enum: [...CONFIDENCE_LEVELS],
-      description:
-        "How well the text supports expected_hours: high = scope and steps are explicit; medium = scope is clear but steps are not; low = guess.",
-    },
-    urgency: {
-      type: "string",
-      enum: [...URGENCY_LEVELS],
-      description:
-        'unknown unless the text itself states a deadline, an incident or "asap"; then high/normal/low. Never infer urgency from topic or tone. Shown in the result so the caller can see it; fast mode is controlled by wants_fast, not urgency.',
-    },
-    multi_task: { type: "boolean", description: MULTI_TASK_QUESTION },
     task_count: { type: "string", enum: [...TASK_COUNTS], description: TASK_COUNT_QUESTION },
-    axis_demand: FIVE_AXIS_DEMAND_SCHEMA,
   },
-  required: [
-    ...Object.keys(PROFILE_INTEGERS),
-    ...PROFILE_FLAGS,
-    "access",
-    "expected_hours",
-    "hours_confidence",
-    "urgency",
-    "interaction_style",
-    "multi_task",
-    "task_count",
-    "axis_demand",
-  ],
+  required: ["work_kind", "primary_level", "secondary_kind", "secondary_level", "access", "local_only", "needs_visual", "wants_fast", "expected_hours", "task_count"],
 };
+
+const isInt = (value) => typeof value === "number" && Number.isInteger(value);
+
+/** `project_axis_demand`: the four category levels of `(work_kind, primary_level, secondary_kind, secondary_level)`, the max of both kinds' roles. */
+export function projectAxisDemand(workKind, primaryLevel, secondaryKind = "none", secondaryLevel = 0) {
+  if (!(workKind in WORK_KIND_SIGNATURES)) throw new Error(`task.profile.work_kind must be one of ${WORK_KINDS.join(", ")}`);
+  if (!isInt(primaryLevel) || primaryLevel < 1 || primaryLevel > 3) throw new Error("task.profile.primary_level must be an integer from 1 to 3");
+  if (!SECONDARY_KINDS.includes(secondaryKind)) throw new Error(`task.profile.secondary_kind must be one of ${SECONDARY_KINDS.join(", ")}`);
+  if (!isInt(secondaryLevel) || secondaryLevel < 0 || secondaryLevel > 3) throw new Error("task.profile.secondary_level must be an integer from 0 to 3");
+  const primary = WORK_KIND_SIGNATURES[workKind].map((r) => ROLE_FN[r](primaryLevel));
+  const levels =
+    secondaryKind !== "none" && secondaryLevel > 0
+      ? WORK_KIND_SIGNATURES[secondaryKind].map((r, i) => Math.max(primary[i], ROLE_FN[r](secondaryLevel)))
+      : primary;
+  return Object.fromEntries(FIVE_AXES.map((a, i) => [a, levels[i]]));
+}
 
 export const UNROUTED_NOTICE = "未路由：分类不可用";
 
@@ -193,7 +202,6 @@ export function extractRequestFacts(body, ctx = {}) {
       hasVisual: false,
       hasCurrentTurnVisual: false,
       hasComputerUse: false,
-      demandsFrontierEscalation: false,
       isToolFollowup: false,
       within: false,
       turn: 0,
@@ -249,7 +257,6 @@ export function extractRequestFacts(body, ctx = {}) {
     hasVisual,
     hasCurrentTurnVisual: Boolean(turnState.hasCurrentTurnVisual),
     hasComputerUse: Boolean(needsObj?.gui === true || callerProfile?.needs_gui === true),
-    demandsFrontierEscalation: Number(callerProfile?.reasoning_depth) >= 3,
     ...(callerProfile ? { callerProfile } : {}),
     isToolFollowup: Boolean(turnState.isToolFollowup || turnState.within),
     within: Boolean(turnState.within || turnState.isToolFollowup),
@@ -270,28 +277,24 @@ export function extractRequestFacts(body, ctx = {}) {
 /**
  * A profile from a request's structured signals alone (image parts, explicit `needs.gui`), used only when the turn has no
  * text (`!facts.objective`) and the user set a candidate pool or a pin (contract R2, R3). It asks for nothing the signals
- * do not state: the category demand is zero except the tool operation a GUI or an image needs.
+ * do not state: the category demand is stated explicitly, zero except the tool operation a GUI or an image needs. The work kind
+ * is the one the signal names (`gui_control` for a GUI, `visual_analysis` for an image) and `text_processing` otherwise, at depth 1.
  */
 export function noTextProfile(facts = {}) {
   const gui = Boolean(facts.hasComputerUse);
   const image = Boolean(facts.hasVisualInput || gui);
   return {
-    work_kind: gui ? "computer_use" : "other_or_mixed",
-    reasoning_depth: 1,
-    code_complexity: 0,
-    needs_visual: image,
-    needs_gui: gui,
-    local_only: gui,
-    wants_fast: false,
-    read_only_review: false,
+    work_kind: gui ? "gui_control" : image ? "visual_analysis" : "text_processing",
+    primary_level: 1,
+    secondary_kind: "none",
+    secondary_level: 0,
     access: "read-only",
-    interaction_style: "engineering",
+    local_only: gui,
+    needs_visual: image,
+    wants_fast: false,
     expected_hours: 0.4,
-    hours_confidence: "medium",
-    urgency: "unknown",
-    multi_task: false,
     task_count: "1",
-    axis_demand: { divergence: 0, coding: 0, aesthetics: 0, tool_operation: image ? 3 : 0 },
+    axis_demand: { creativity: 0, coding: 0, aesthetics: 0, tool_operation: image ? 3 : 0 },
   };
 }
 
@@ -303,69 +306,69 @@ export function taskCountBucket(value) {
   throw new Error(`task.profile.task_count must be one of ${TASK_COUNTS.join(", ")} or a positive whole number`);
 }
 
-/** A task profile with every field checked, or an `Error`. `reason`, `work_kind` and the hours estimate may be omitted. */
+function checkInt(raw, name, low, high) {
+  const value = raw[name];
+  if (!isInt(value) || value < low || value > high) throw new Error(`task.profile.${name} must be an integer from ${low} to ${high}`);
+  return value;
+}
+
+function derivedFlag(raw, name, derived, contradiction) {
+  if (raw[name] === undefined || raw[name] === null) return derived;
+  if (typeof raw[name] !== "boolean") throw new Error(`task.profile.${name} must be true or false`);
+  if (derived && raw[name] === false) throw new Error(contradiction);
+  return raw[name];
+}
+
+/**
+ * `validate_profile`: a task profile with every field checked and the derived fields filled (`axis_demand`, `needs_gui`,
+ * `read_only_review`, `multi_task`), or an `Error`. A derived field the input carries is checked against its derivation; an
+ * explicit `axis_demand` stands as given. A profile of the older shape (`reasoning_depth`, `interaction_style`, ...) is refused:
+ * it has no `work_kind` of the 11 and no `primary_level`.
+ */
 export function validateProfile(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("task.profile must be an object");
-  const profile = {};
-  if (raw.work_kind !== undefined && raw.work_kind !== null) {
-    if (typeof raw.work_kind !== "string" || !PROFILE_KINDS.includes(raw.work_kind)) {
-      throw new Error(`task.profile.work_kind must be one of ${PROFILE_KINDS.join(", ")}`);
-    }
-    profile.work_kind = raw.work_kind;
+  const workKind = raw.work_kind;
+  if (typeof workKind !== "string" || !WORK_KINDS.includes(workKind)) throw new Error(`task.profile.work_kind must be one of ${WORK_KINDS.join(", ")}`);
+  const primaryLevel = checkInt(raw, "primary_level", 1, 3);
+  const secondaryKind = raw.secondary_kind;
+  if (typeof secondaryKind !== "string" || !SECONDARY_KINDS.includes(secondaryKind)) {
+    throw new Error(`task.profile.secondary_kind must be one of ${SECONDARY_KINDS.join(", ")}`);
   }
-  for (const [name, [low, high]] of Object.entries(PROFILE_INTEGERS)) {
-    const value = raw[name];
-    if (typeof value !== "number" || !Number.isInteger(value) || value < low || value > high) {
-      throw new Error(`task.profile.${name} must be an integer from ${low} to ${high}`);
-    }
-    profile[name] = value;
-  }
-  for (const name of PROFILE_FLAGS) {
+  const secondaryLevel = checkInt(raw, "secondary_level", 0, 3);
+  if (secondaryKind === "none" && secondaryLevel !== 0) throw new Error("task.profile.secondary_level must be 0 when secondary_kind is 'none'");
+  if (secondaryKind !== "none" && secondaryLevel === 0) throw new Error("task.profile.secondary_level must be 1 to 3 when secondary_kind is not 'none'");
+  if (secondaryKind === workKind) throw new Error("task.profile.secondary_kind must differ from work_kind (use 'none' for single-domain tasks)");
+  const profile = { work_kind: workKind, primary_level: primaryLevel, secondary_kind: secondaryKind, secondary_level: secondaryLevel };
+  for (const name of REQUIRED_BOOL_FLAGS) {
     if (typeof raw[name] !== "boolean") throw new Error(`task.profile.${name} must be true or false`);
     profile[name] = raw[name];
   }
-  if (profile.read_only_review === true && profile.code_complexity !== 0) {
-    throw new Error(`task.profile.read_only_review true contradicts task.profile.code_complexity ${profile.code_complexity} (must be 0)`);
+  const kindsUsed = secondaryKind === "none" ? [workKind] : [workKind, secondaryKind];
+  profile.needs_gui = derivedFlag(raw, "needs_gui", kindsUsed.includes("gui_control"), "task.profile.needs_gui false contradicts gui_control");
+  if (profile.needs_gui || kindsUsed.includes("visual_analysis")) profile.needs_visual = true;
+  profile.read_only_review = derivedFlag(raw, "read_only_review", workKind === "code_audit", "task.profile.read_only_review false contradicts work_kind 'code_audit'");
+  const access = raw.access;
+  if (!ACCESS_LEVELS.includes(access)) throw new Error(`task.profile.access must be one of ${ACCESS_LEVELS.join(", ")}`);
+  if (profile.read_only_review === true && access === "write") throw new Error("task.profile.access 'write' contradicts read_only_review / work_kind 'code_audit'");
+  if (profile.local_only === true && ["code_implementation", "frontend_ui"].includes(workKind) && access === "read-only") {
+    throw new Error(`task.profile.access 'read-only' contradicts local '${workKind}'`);
   }
-  if (raw.access !== undefined && raw.access !== null) {
-    if (!ACCESS_LEVELS.includes(raw.access)) throw new Error(`task.profile.access must be one of ${ACCESS_LEVELS.join(", ")}`);
-    if (raw.access === "read-only" && profile.code_complexity !== 0) {
-      throw new Error(`task.profile.access 'read-only' contradicts task.profile.code_complexity ${profile.code_complexity} (must be 0)`);
-    }
-    if (profile.read_only_review === true && raw.access === "write") {
-      throw new Error("task.profile.access 'write' contradicts task.profile.read_only_review true");
-    }
-    profile.access = raw.access;
-  }
-  // The hours estimate is the classifier's to give; with no caller `expected_hours` it is the task's budget.
+  profile.access = access;
   if (raw.expected_hours !== undefined && raw.expected_hours !== null) {
-    if (typeof raw.expected_hours !== "number" || !Number.isFinite(raw.expected_hours)) {
-      throw new Error("task.profile.expected_hours must be a finite number");
-    }
+    if (typeof raw.expected_hours !== "number" || !Number.isFinite(raw.expected_hours)) throw new Error("task.profile.expected_hours must be a finite number");
     profile.expected_hours = Math.round(Math.min(Math.max(raw.expected_hours, HOURS_RANGE[0]), HOURS_RANGE[1]) * 100) / 100;
   }
-  for (const [name, levels] of [
-    ["hours_confidence", CONFIDENCE_LEVELS],
-    ["urgency", URGENCY_LEVELS],
-  ]) {
-    if (raw[name] !== undefined && raw[name] !== null) {
-      if (!levels.includes(raw[name])) throw new Error(`task.profile.${name} must be one of ${levels.join(", ")}`);
-      profile[name] = raw[name];
-    }
-  }
-  if (!INTERACTION_STYLES.includes(raw.interaction_style)) {
-    throw new Error(`task.profile.interaction_style must be one of ${INTERACTION_STYLES.join(", ")}`);
-  }
-  profile.interaction_style = raw.interaction_style;
   if (typeof raw.reason === "string" && raw.reason.trim()) profile.reason = raw.reason.trim().slice(0, 300).trimEnd();
-  if (typeof raw.multi_task !== "boolean") throw new Error("task.profile.multi_task must be true or false");
-  profile.multi_task = raw.multi_task;
   profile.task_count = taskCountBucket(raw.task_count);
-  if (profile.multi_task !== (profile.task_count !== "1")) {
-    throw new Error(`task.profile.multi_task ${profile.multi_task} contradicts task.profile.task_count ${profile.task_count}`);
+  const derivedMulti = profile.task_count !== "1";
+  if (raw.multi_task !== undefined && raw.multi_task !== null) {
+    if (typeof raw.multi_task !== "boolean") throw new Error("task.profile.multi_task must be true or false");
+    if (raw.multi_task !== derivedMulti) throw new Error(`task.profile.multi_task ${raw.multi_task} contradicts task.profile.task_count '${profile.task_count}'`);
   }
-  // The classifier always answers the category demand.
-  if (raw.axis_demand === undefined || raw.axis_demand === null) throw new Error("task.profile.axis_demand is required");
-  profile.axis_demand = validateAxisDemand(raw.axis_demand);
+  profile.multi_task = derivedMulti;
+  profile.axis_demand =
+    raw.axis_demand !== undefined && raw.axis_demand !== null
+      ? validateAxisDemand(raw.axis_demand)
+      : projectAxisDemand(workKind, primaryLevel, secondaryKind, secondaryLevel);
   return profile;
 }

@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/continuity.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Session Affinity, Turn-Loop Lock, Cache-Temperature Hold & Monotonic Effort Ratchet.
@@ -1255,7 +1255,7 @@ export class SessionContinuityStore {
       model: "",
       effort: "medium",
       provider: "",
-      workKind: "general_implementation",
+      workKind: "other_or_mixed",
       difficulty: "routine",
       tokens: 0,
       requestTokens: 0,
@@ -1327,7 +1327,7 @@ export class SessionContinuityStore {
         target: decision.model || existing?.target || "",
         effort: decision.effort || existing?.effort || "medium",
         provider: decision.provider ?? existing?.provider ?? "",
-        workKind: decision.workKind || existing?.workKind || "general_implementation",
+        workKind: decision.workKind || existing?.workKind || "other_or_mixed",
         difficulty: decision.difficulty || existing?.difficulty || "routine",
         tokens,
         requestTokens: estTokens > 0 ? estTokens : prevReqTokens,

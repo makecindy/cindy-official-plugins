@@ -1,4 +1,4 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-economy.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/quota-economy.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
  * Quota economy and pricing (`quota_economy.py`, quota economy v3.1): usd rates, the quota price of a window and the
@@ -317,7 +317,7 @@ export function fiveAxisSpendCost(rec, ladder, spendUsd, taskHours, spendMax = n
 // The demands a window's value ladder is read over: every mix of the three thinking categories (tool_operation 0).
 export const FIVE_AXIS_DEMAND_GRID = (() => {
   const grid = [];
-  for (let d1 = 0; d1 < 4; d1++) for (let d2 = 0; d2 < 4; d2++) for (let d3 = 0; d3 < 4; d3++) if (d1 || d2 || d3) grid.push({ divergence: d1, coding: d2, aesthetics: d3, tool_operation: 0 });
+  for (let d1 = 0; d1 < 4; d1++) for (let d2 = 0; d2 < 4; d2++) for (let d3 = 0; d3 < 4; d3++) if (d1 || d2 || d3) grid.push({ creativity: d1, coding: d2, aesthetics: d3, tool_operation: 0 });
   return grid;
 })();
 

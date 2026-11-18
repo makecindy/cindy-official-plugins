@@ -303,7 +303,7 @@ async function external(command, task, ctx, dir, timeoutMs=110000) {
       try {
         if (timedOut || signal || code===null) throw Error(timedOut ? 'Router timed out' : 'Router terminated by '+(signal || 'signal'));
         const result=JSON.parse(text);
-        // v0.6.0: every System-One classifier failed. The router starts no worker on a guess, and neither does this plugin.
+        // v0.7.0: every System-One classifier failed. The router starts no worker on a guess, and neither does this plugin.
         if (result.status==='scorer_unavailable' || result.error==='scorer_unavailable') {
           resolve({
             ...result,

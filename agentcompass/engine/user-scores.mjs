@@ -1,19 +1,27 @@
-// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at 2ff86a04f1e5ddadddd77365ec2a03a704f8d15c (MIT), itself ported from AgentCompass.
+// Vendored from akiiwa-games/magpie-agentcompass-router src/user-scores.js at c27dd73065cddb0c01a45d6010f03ad2740a5e56 (MIT), itself ported from AgentCompass.
 // Only the import paths differ from the source; regenerate with scripts/vendor_engine.mjs rather than edit.
 /**
- * Manual capability scores (`user_scores.py`): a maintainer layer (`MAINTAINER_SCORES`, from AgentCompass's
- * `references/user-scores.json`) and an operator's own layer (the plugin option `userScores`), both on the 1..3 demand-level
- * scale, mapped onto the panel's z-scale through the targets (`level 1 -> t1, 2 -> t2, 3 -> t3`). Precedence:
+ * Manual capability scores (`user_scores.py`, schema 3): a maintainer layer (`MAINTAINER_SCORES`, from AgentCompass's
+ * `references/user-scores.json`) and an operator's own layer (the plugin option `userScores`), both on the demand-level scale
+ * mapped onto the panel's z-scale through the facet's targets: `1` = the panel's weakest (`t1`), `2` = the panel median (`t2`),
+ * `3` = the panel's best (`t3`), linear between them and beyond them (a level above 3 is above the panel's best). Precedence:
  * `local user > maintainer > measured > estimated`.
+ *
+ * An operator's `userScores` written for an earlier schema is carried into schema 3 by the same steps AgentCompass applies to a
+ * local file (`LOCAL_UPGRADES`): schema 1 (plugin 0.2.x, AgentCompass through v0.6.6; a table without `schema_version` is that
+ * shape) names the first category `divergence`, schema 2 had level 3 = the anchor; the declared conversion of
+ * `references/level-3-conversion.json` (`LEVEL3_CONVERSIONS`) moves those levels onto the current scale.
  *
  * Pure ES2022 module with zero external or Node-only dependencies (Bun and Magpie's `moejs`).
  */
 
 import { pyRound } from "./catalog.mjs";
+import { LEVEL3_CONVERSIONS } from "./reference-data.mjs";
 
-export const CATEGORIES = ["divergence", "coding", "aesthetics", "tool_operation"];
+export const SCHEMA_VERSION = 3;
+export const CATEGORIES = ["creativity", "coding", "aesthetics", "tool_operation"];
 export const CATEGORY_FACETS = {
-  divergence: ["creative_writing"],
+  creativity: ["creative_writing"],
   coding: ["execution", "faithfulness"],
   aesthetics: ["design"],
   tool_operation: ["responsiveness", "image_recognition"],
@@ -42,18 +50,119 @@ export function parseTarget(target) {
 
 export function normalizeLevel(level) {
   if (typeof level === "boolean" || level === null || level === undefined || level === "") {
-    throw new Error("Score level must be a finite number on the 1..3 demand scale.");
+    throw new Error("Score level must be a finite number on the demand-level scale.");
   }
   const value = Number(level);
-  if (!Number.isFinite(value)) throw new Error(`Score level ${JSON.stringify(level)} must be a finite number on the 1..3 demand scale.`);
+  if (!Number.isFinite(value)) throw new Error(`Score level ${JSON.stringify(level)} must be a finite number on the demand-level scale.`);
   return pyRound(value, 6);
+}
+
+const ROUND_LEVELS = 2; // decimals of a converted level
+
+/**
+ * `convert_level`: a level written with level 3 = the anchor, carried onto the scale whose level 3 is the panel maximum. At or
+ * below 2 it stays; above 2 it becomes `2 + (L - 2) * (A - 2)`, A = the anchor's level on the facet; on a plateau facet (a declared
+ * `above_3_slope`) it is 2 up to level 3 and `2 + (L - 3) * s` above.
+ */
+export function convertLevel(level, anchorLevel, aboveSlope = null, ndigits = ROUND_LEVELS) {
+  const lv = normalizeLevel(level);
+  if (lv <= 2.0) return lv;
+  if (aboveSlope !== null && aboveSlope !== undefined) return pyRound(2.0 + Math.max(lv - 3.0, 0.0) * aboveSlope, ndigits);
+  return pyRound(2.0 + (lv - 2.0) * (anchorLevel - 2.0), ndigits);
+}
+
+/** `(category, facet)` of a score target; a category of one facet stands for that facet's scale. */
+function facetOf(target) {
+  const [cat, facet] = parseTarget(target);
+  return [cat, facet === null && CATEGORY_FACETS[cat].length === 1 ? CATEGORY_FACETS[cat][0] : facet];
+}
+
+/**
+ * `convert_scores`: `{ model: { target: entry } }` converted by `convertLevel` with the facet's anchor level and slope. A category
+ * entry of several facets above level 2 is written per facet (except a facet the model has its own entry for); everything but
+ * `level` is kept.
+ */
+export function convertScores(scores, anchorLevels, aboveSlopes) {
+  const out = {};
+  for (const [model, entries] of Object.entries(scores)) {
+    const converted = {};
+    const explicit = new Set(Object.keys(entries).filter((t) => parseTarget(t)[1] !== null));
+    for (const [target, entry] of Object.entries(entries)) {
+      const [cat, facet] = parseTarget(target);
+      if (facet === null && CATEGORY_FACETS[cat].length > 1) {
+        if (normalizeLevel(entry.level) <= 2.0) {
+          converted[target] = { ...entry };
+          continue;
+        }
+        for (const f of CATEGORY_FACETS[cat]) {
+          const key = `${cat}.${f}`;
+          if (!explicit.has(key)) converted[key] = { ...entry, level: convertLevel(entry.level, anchorLevels[key], aboveSlopes[key] ?? null) };
+        }
+        continue;
+      }
+      const key = facetOf(target).join(".");
+      converted[target] = { ...entry, level: convertLevel(entry.level, anchorLevels[key], aboveSlopes[key] ?? null) };
+    }
+    out[model] = Object.fromEntries(Object.keys(converted).sort().map((k) => [k, converted[k]]));
+  }
+  return out;
+}
+
+const entryOf = (rec) => (isRow(rec) ? rec : { level: rec });
+const entriesOf = (scores) =>
+  Object.fromEntries(
+    Object.entries(scores).map(([m, targets]) => [m, isRow(targets) ? Object.fromEntries(Object.entries(targets).map(([k, r]) => [k, entryOf(r)])) : targets]),
+  );
+
+/** Schema 1 named the first category `divergence`; schema 2 names it `creativity`. */
+function schema1To2(doc) {
+  const scores = {};
+  for (const [model, targets] of Object.entries(doc.scores)) {
+    scores[model] = isRow(targets)
+      ? Object.fromEntries(
+          Object.entries(targets).map(([t, e]) => [String(t).split(".")[0] === "divergence" ? `creativity${t.slice("divergence".length)}` : t, e]),
+        )
+      : targets;
+  }
+  return { ...doc, schema_version: 2, scores };
+}
+
+/** Schema 2 levels had level 3 = the anchor; schema 3 levels have level 3 = the panel maximum (the declared conversion). */
+function schema2To3(doc) {
+  const conversion = LEVEL3_CONVERSIONS["2"];
+  const rows = Object.fromEntries(Object.entries(doc.scores).filter(([, t]) => isRow(t)));
+  return { ...doc, schema_version: 3, scores: { ...doc.scores, ...convertScores(rows, conversion.anchor_levels, conversion.above_3_slopes) } };
+}
+
+/** `LOCAL_UPGRADES`: the step from each schema an earlier release documented to the next. */
+export const LOCAL_UPGRADES = { 1: schema1To2, 2: schema2To3 };
+
+/**
+ * The operator's `userScores` as a `{ schema_version, scores }` document carried into `SCHEMA_VERSION`: a document names its
+ * `schema_version`; a bare `{ model: { target: level } }` table (or `{ scores }` without one) is the shape plugin 0.2.x documented,
+ * schema 1. Nothing is dropped: every entry is converted, or refused with its name.
+ */
+export function upgradeScores(raw) {
+  const named = isRow(raw) && isRow(raw.scores);
+  const version = named && raw.schema_version !== undefined ? raw.schema_version : 1;
+  if (![1, 2, SCHEMA_VERSION].includes(version)) {
+    throw new Error(`userScores schema_version ${JSON.stringify(version)} is not one this plugin reads (1, 2 or ${SCHEMA_VERSION})`);
+  }
+  const scores = named ? raw.scores : raw;
+  if (!isRow(scores)) throw new Error("userScores must be an object mapping model -> { target: level | { level, as_of, note } }");
+  for (const [model, targets] of Object.entries(scores)) {
+    if (!String(model ?? "").trim() || !isRow(targets)) throw new Error(`Invalid model entry ${JSON.stringify(model)} in userScores`);
+  }
+  let doc = { schema_version: version, scores: entriesOf(scores) };
+  while (doc.schema_version in LOCAL_UPGRADES) doc = LOCAL_UPGRADES[doc.schema_version](doc);
+  return doc;
 }
 
 /** The `{ model: { target: { level, as_of, kind, note? } } }` table of a layer, every entry checked, or an `Error`. */
 export function validateScores(raw, kind = "user") {
   if (raw === undefined || raw === null) return {};
-  const scores = isRow(raw) && isRow(raw.scores) ? raw.scores : raw;
-  if (!isRow(scores)) throw new Error("userScores must be an object mapping model -> { target: level | { level, as_of, note } }");
+  if (!isRow(raw)) throw new Error("userScores must be an object mapping model -> { target: level | { level, as_of, note } }");
+  const scores = upgradeScores(raw).scores;
   const out = {};
   for (const [model, targets] of Object.entries(scores)) {
     const name = String(model ?? "").trim();
@@ -74,53 +183,38 @@ export function validateScores(raw, kind = "user") {
   return out;
 }
 
-/** `(t1, t2, t3)` on the current panel z-scale for `category` or `category.facet`. */
+/** `(t1, t2, t3)` on the current panel z-scale for `category` or `category.facet` (a category of one facet reads that facet's scale). */
 export function targetTriad(targets, category, facet = null) {
   const block = (targets || {})[category] || {};
-  if (facet !== null) {
-    const levels = ((block.facets || {})[facet] || {}).levels || {};
-    if (["1", "2", "3"].every((k) => isNumber((levels[k] || {}).target))) return [levels["1"].target, levels["2"].target, levels["3"].target];
-    if (category === "tool_operation") {
-      const l3 = (((block.levels || {})["3"] || {}).by_facet || {})[facet] || {};
-      const l2 = (((block.levels || {})["2"] || {}).by_facet || {})[facet] || {};
-      if (isNumber(l3.zero) && isNumber(l3.target)) {
-        const t1 = l3.zero;
-        const t3 = l3.target;
-        return [t1, isNumber(l2.target) ? l2.target : 0.5 * (t1 + t3), t3];
-      }
-    }
-  }
-  const levels = block.levels || {};
+  const f = facet === null && (CATEGORY_FACETS[category] || []).length === 1 ? CATEGORY_FACETS[category][0] : facet;
+  const levels = (f !== null ? ((block.facets || {})[f] || {}).levels : block.levels) || {};
   if (["1", "2", "3"].every((k) => isNumber((levels[k] || {}).target))) return [levels["1"].target, levels["2"].target, levels["3"].target];
-  throw new Error(`Panel targets for ${category}${facet ? `.${facet}` : ""} are missing from anchor.targets`);
+  throw new Error(`Panel targets for ${category}${f ? `.${f}` : ""} are missing from anchor.targets`);
+}
+
+function scale(t1, t2, t3) {
+  if (!(t1 < t2 && t2 < t3)) throw new Error(`A level scale needs t1 < t2 < t3, got (${t1}, ${t2}, ${t3}).`);
+  return [t1, t2, t3];
 }
 
 /**
- * Map demand-level `level` (`1 -> t1`, `2 -> t2`, `3 -> t3`) onto panel z-scores. Decimals in `[1, 3]` interpolate; above 3 it
- * extrapolates by `t3 - t2` (`t2 - t1` where they coincide, as on `tool_operation.responsiveness`); below 1 by `t2 - t1`.
+ * Map demand-level `level` (`1 -> t1`, `2 -> t2`, `3 -> t3`) onto panel z-scores: linear between the points, and beyond them with
+ * the step of the nearest pair (`t3 - t2` above 3, `t2 - t1` below 1).
  */
 export function levelToZ(level, t1, t2, t3) {
   const lv = normalizeLevel(level);
-  const stepLo = t2 - t1;
-  const stepHi = t3 - t2;
-  if (lv <= 2.0) return t1 + (lv - 1.0) * stepLo;
-  if (lv <= 3.0) return t2 + (lv - 2.0) * stepHi;
-  return t3 + (lv - 3.0) * (stepHi > 0.0 ? stepHi : stepLo);
+  [t1, t2, t3] = scale(t1, t2, t3);
+  if (lv <= 2.0) return t1 + (lv - 1.0) * (t2 - t1);
+  return t2 + (lv - 2.0) * (t3 - t2);
 }
 
-/** The inverse of `levelToZ`: a panel z-score on the `1..3` demand-level scale. */
+/** The inverse of `levelToZ`, unclamped: a value above the panel maximum is a level above 3. */
 export function zToLevel(z, t1, t2, t3) {
   if (typeof z === "boolean" || !Number.isFinite(Number(z))) throw new Error("Panel z-score must be a finite number.");
   const zf = Number(z);
-  const stepLo = t2 - t1;
-  const stepHi = t3 - t2;
-  if (zf <= t2) {
-    if (stepLo <= 0.0) return zf >= t2 ? 2.0 : 1.0;
-    return pyRound(1.0 + (zf - t1) / stepLo, 4);
-  }
-  if (stepHi > 0.0) return zf <= t3 ? pyRound(2.0 + (zf - t2) / stepHi, 4) : pyRound(3.0 + (zf - t3) / stepHi, 4);
-  if (stepLo <= 0.0) return 3.0;
-  return pyRound(3.0 + (zf - t3) / stepLo, 4);
+  [t1, t2, t3] = scale(t1, t2, t3);
+  if (zf <= t2) return pyRound(1.0 + (zf - t1) / (t2 - t1), 4);
+  return pyRound(2.0 + (zf - t2) / (t3 - t2), 4);
 }
 
 const facetHasAnyScore = (cell) =>
@@ -197,12 +291,18 @@ function pav(values) {
   return blocks.flatMap(([sum, n]) => Array.from({ length: n }, () => sum / n));
 }
 
+/** `rises_with_effort`: ability facets never decrease with effort; `tool_operation.responsiveness` falls as effort rises. */
+export function risesWithEffort(cat, facet) {
+  return !(cat === "tool_operation" && facet === "responsiveness");
+}
+
 /**
- * `{ by_effort, measured }` of a facet a manual score sets to `zVal`: the score sets High, and also the model's `fixed_effort`;
- * efforts the facet measured keep their values, its other efforts follow its own curve moved to `zVal` at High, and an ability
- * facet is made non-decreasing with the set efforts held at `zVal`.
+ * `{ by_effort, measured }` of a facet a manual score sets to `zVal`: the score sets High, and also the model's `fixedEffort`;
+ * efforts the facet measured keep their values, its other efforts follow its own curve moved to `zVal` at High. The curve is then
+ * made monotone in the facet's direction (`risesWithEffort`) with the set efforts held at `zVal`: a rising facet is
+ * non-decreasing, a falling one non-increasing (bounded as its mirror image); efforts between two set ones are `zVal`.
  */
-function manualByEffort(zVal, ownCell, ability, fixedEffort = null) {
+function manualByEffort(zVal, ownCell, rises, fixedEffort = null) {
   const pinned = EFFORTS.filter((e) => e === "high" || e === fixedEffort);
   const by = {};
   for (const [e, v] of Object.entries((ownCell || {}).by_effort || {})) if (EFFORTS.includes(e) && v !== null && v !== undefined) by[e] = Number(v);
@@ -212,17 +312,18 @@ function manualByEffort(zVal, ownCell, ability, fixedEffort = null) {
   for (const e of pinned) out[e] = zVal;
   if ("high" in by) for (const [e, v] of Object.entries(by)) if (!(e in out)) out[e] = zVal + v - by.high;
   out = Object.fromEntries(EFFORTS.filter((e) => e in out).map((e) => [e, out[e]]));
-  if (ability) {
-    const lo = EFFORTS.indexOf(pinned[0]);
-    const hi = EFFORTS.indexOf(pinned[pinned.length - 1]);
-    const keys = Object.keys(out);
-    const below = keys.filter((e) => EFFORTS.indexOf(e) < lo);
-    const above = keys.filter((e) => EFFORTS.indexOf(e) > hi);
-    pav(below.map((e) => out[e])).forEach((v, i) => (out[below[i]] = Math.min(v, zVal)));
-    pav(above.map((e) => out[e])).forEach((v, i) => (out[above[i]] = Math.max(v, zVal)));
-    for (const e of keys) if (lo < EFFORTS.indexOf(e) && EFFORTS.indexOf(e) < hi) out[e] = zVal;
-  }
-  out = Object.fromEntries(Object.entries(out).map(([e, v]) => [e, pyRound(v, 4)]));
+  const sign = rises ? 1.0 : -1.0;
+  const signed = Object.fromEntries(Object.entries(out).map(([e, v]) => [e, sign * v]));
+  const held = sign * zVal;
+  const lo = EFFORTS.indexOf(pinned[0]);
+  const hi = EFFORTS.indexOf(pinned[pinned.length - 1]);
+  const keys = Object.keys(signed);
+  const below = keys.filter((e) => EFFORTS.indexOf(e) < lo);
+  const above = keys.filter((e) => EFFORTS.indexOf(e) > hi);
+  pav(below.map((e) => signed[e])).forEach((v, i) => (signed[below[i]] = Math.min(v, held)));
+  pav(above.map((e) => signed[e])).forEach((v, i) => (signed[above[i]] = Math.max(v, held)));
+  for (const e of keys) if (lo < EFFORTS.indexOf(e) && EFFORTS.indexOf(e) < hi) signed[e] = held;
+  out = Object.fromEntries(Object.entries(signed).map(([e, v]) => [e, pyRound(sign * v, 4)]));
   return { by_effort: out, measured: measured.filter((e) => out[e] === pyRound(by[e], 4)) };
 }
 
@@ -248,7 +349,7 @@ function applyOneLayer(fiveState, entries, targets, fixedEffort = null) {
       for (const f of CATEGORY_FACETS[cat]) {
         const zf = pyRound(levelToZ(rec.level, ...targetTriad(targets, cat, f)), 4);
         zMap[f] = zf;
-        const { by_effort: byEffort, measured } = manualByEffort(zf, facets[f], !(cat === "tool_operation" && f === "responsiveness"), fixedEffort);
+        const { by_effort: byEffort, measured } = manualByEffort(zf, facets[f], risesWithEffort(cat, f), fixedEffort);
         facets[f] = { value: zf, by_effort: byEffort, measured_efforts: measured, status, manual: { ...rec, target, z: zf } };
         delete estimates[`${cat}.${f}`];
       }
@@ -271,7 +372,7 @@ function applyOneLayer(fiveState, entries, targets, fixedEffort = null) {
         }
       }
       const zVal = pyRound(levelToZ(rec.level, ...targetTriad(targets, cat, facet)), 4);
-      const { by_effort: byEffort, measured } = manualByEffort(zVal, facets[facet], !(cat === "tool_operation" && facet === "responsiveness"), fixedEffort);
+      const { by_effort: byEffort, measured } = manualByEffort(zVal, facets[facet], risesWithEffort(cat, facet), fixedEffort);
       facets[facet] = { value: zVal, by_effort: byEffort, measured_efforts: measured, status, manual: { ...rec, target, z: zVal } };
       delete estimates[`${cat}.${facet}`];
       cell = recomputeCategory(cat, cell, status);
