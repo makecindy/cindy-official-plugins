@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cindy</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body>
+<!-- Chrome's own panel header already shows the Cindy icon and name. -->
+<header class="bar">
+  <button id="tools" class="tool-button" type="button"><span id="tools-icon"></span><span id="tools-label"></span></button>
+  <button id="new-chat" class="icon-button" type="button" hidden></button>
+  <button id="settings" class="icon-button" type="button"></button>
+</header>
+<section id="settings-view" class="settings" hidden></section>
+<main id="messages" aria-live="polite" aria-relevant="additions text"></main>
+<footer>
+  <p id="status" role="status"></p>
+  <form id="composer" class="composer">
+    <div class="page-chip" id="page-chip"><span class="chip-icon" id="page-icon"></span><span id="page" class="page-title"></span></div>
+    <textarea id="question" rows="1" maxlength="4000" aria-label="Ask about this page" placeholder="Ask about this page…"></textarea>
+    <div class="toolbar">
+      <button id="model" class="model-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+      <button id="send" class="send" type="submit"></button>
+      <button id="stop" class="send" type="button" hidden><span class="stop-square"></span></button>
+    </div>
+  </form>
+  <p id="privacy" class="privacy"></p>
+</footer>
+<script src="learning-core.js"></script><script src="ui.js"></script><script src="model-marks.js"></script><script src="model-picker.js"></script><script src="vendor/marked.umd.js"></script><script src="markdown.js"></script><script src="tab-group-art.js"></script><script src="sidepanel.js"></script>
+</body></html>

@@ -659,7 +659,7 @@ test('account commands retain their existing output limit', async () => {
 test('manifest、手动安装策略和官方 Runtime 版本保持一致', () => {
   assert.equal(manifest.id, 'taptap-maker');
   assert.equal(manifest.author, 'Cindy');
-  assert.equal(manifest.version, '2.1.30');
+  assert.equal(manifest.version, '2.1.31');
   assert.equal(manifest.minCindyVersion, '0.1.64');
   assert.match(
     manifest.tools.find((tool) => tool.name === 'maker_build').description,
@@ -3430,6 +3430,56 @@ test('015 明确未执行或已取回结果仍可继续原有队列', async () =
     harness.tasks.shift()();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(harness.calls, ['start', 'retry', 'start']);
+  }
+});
+
+test('识图首次提交和恢复使用当前卡片检查停止状态', async () => {
+  for (const recover of [false, true]) {
+    for (const stopped of [false, true]) {
+      const node = { id: 'cut', assetPath: 'assets/cut.png', uiRecognition: {
+        enabled: true, inputRole: 'text-free', results: [],
+        ...(recover ? { pendingId: 'original-request' } : {}),
+      } };
+      const current = { id: 'canvas', revision: 3, nodes: [node] };
+      const calls = [];
+      const checked = [];
+      const context = createContext({
+        selectedUiRecognition: () => undefined, canvasCapabilityReason: () => undefined,
+        canvasReferences: () => [], refreshCanvasMedia: async () => false,
+        withCanvasTimeout: fn => fn(), crypto: { randomUUID: () => 'new-request' },
+        createImageBitmap: async () => ({ width: 100, height: 200, close() {} }),
+        window: { confirm: () => true },
+      });
+      new Script(makerBundleFunction('createUiRecognitionUiWithHost')).runInContext(context);
+      const ui = context.createUiRecognitionUiWithHost({
+        current: () => current, render() {}, remember() {}, changed() {},
+        readSource: async () => ({}), save: async () => true,
+        autoStopped: value => { checked.push(value); return stopped; },
+        store: {
+          recognitionModels: async () => [{ id: 'fixture-model', source: 'server' }],
+          recognitionStatus: async () => ({ status: 'pending', model: 'fixture-model',
+            recovery: { width: 100, height: 200 } }),
+          recognizeUi: async (canvasId, input) => {
+            calls.push({ canvasId, input });
+            return { status: 'running', error: 'fixture-request-pending' };
+          },
+        },
+      });
+      await assert.rejects(ui.runImage('cut', async () => false, !recover),
+        stopped ? /已停止后续/ : /fixture-request-pending/);
+      assert.deepEqual(checked, [node]);
+      assert.equal(calls.length, stopped ? 0 : 1);
+      const requestId = recover ? 'original-request' : 'new-request';
+      assert.equal(node.uiRecognition.pendingId, stopped && !recover ? undefined : requestId);
+      if (!stopped) {
+        assert.equal(calls[0].canvasId, 'canvas');
+        assert.equal(calls[0].input.nodeId, node.id);
+        assert.equal(calls[0].input.id, requestId);
+        assert.equal(calls[0].input.recover, recover ? true : undefined);
+        assert.equal(calls[0].input.width, 100);
+        assert.equal(calls[0].input.height, 200);
+      }
+    }
   }
 });
 

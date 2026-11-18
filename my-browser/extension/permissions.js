@@ -29,6 +29,7 @@ function paint(locale) {
   text = COPY[locale] || (/^zh/i.test(locale || '') ? COPY['zh-CN'] : COPY.en);
   document.documentElement.lang = text === COPY.en ? 'en' : locale;
   $('group-title').textContent = text.groupTitle; $('group-intro').textContent = text.groupIntro;
+  $('group-art').replaceChildren(globalThis.CindyTabGroupArt(text !== COPY.en));
   for (const f of features) { $(f.key+'-allow').textContent = text.allow; $(f.key+'-revoke').textContent = text.revoke; }
 }
 async function render(f,note) {
