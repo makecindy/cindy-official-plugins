@@ -86,7 +86,7 @@
   // `call` replaces the page RPC when the device is created on another computer
   // (the task page of a remote task): that computer's models and systems are
   // asked each time, and its Android environment is not set up from here.
-  function createDevice({ family = 'any', lang = 'en', call = null, heading = null } = {}) {
+  function createDevice({ family = 'any', lang = 'en', call = null, heading = null, scope = '' } = {}) {
     const T = SHEET[lang] || SHEET.en, M = root.CindySimModel;
     return new Promise((resolve) => {
       const nameInput = h('input', { maxlength: '64', autocomplete: 'off', spellcheck: 'false' });
@@ -152,7 +152,7 @@
         try {
           const r = await (call || rpc)('create', { name, deviceType: modelSelect.value, runtime: osSelect.value });
           if (!r?.ok) throw r;
-          if (r.udid && memoryMode) memoryChoices.set(r.udid,memoryMode);
+          if (r.udid && memoryMode) memoryChoices.set(memoryKey(r.udid,{scope}),memoryMode);
           finish({ udid: r.udid, name: r.name || name });
         } catch (e) {
           // Only explicit non-execution evidence permits the existing retry advice.
@@ -197,28 +197,35 @@
     });
   }
   const memoryChoices=new Map();
-  function rememberMemoryChoice(udid,mode) {
-    if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(udid,mode);
+  // The same simulator ID may exist on multiple computers. Local callers keep
+  // the default scope; remote task controls carry both identity and transport.
+  const memoryKey=(udid,{scope=''}={})=>JSON.stringify([scope,udid]);
+  function rememberMemoryChoice(udid,mode,context={}) {
+    if(typeof udid==='string' && /^[0-9a-f-]{36}$/i.test(udid) && ['saving','standard','minimal'].includes(mode)) memoryChoices.set(memoryKey(udid,context),mode);
   }
-  function memoryArgs(device) {
-    return device && device.kind!=='physical' && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(device.udid)||'saving'} : {};
+  function memoryArgs(device,context={}) {
+    return device && device.kind!=='physical' && root.CindySimModel.platform(device)==='iOS' ? {memoryMode:memoryChoices.get(memoryKey(device.udid,context))||'saving'} : {};
   }
-  function memoryPicker(device,lang,disabled=false) {
+  function memoryPicker(device,lang,disabled=false,context={}) {
     const M=root.CindySimModel;if(!device||device.kind==='physical'||M.platform(device)!=='iOS')return null;
-    return M.memoryPicker(memoryArgs(device).memoryMode,lang,mode=>memoryChoices.set(device.udid,mode),disabled);
+    return M.memoryPicker(memoryArgs(device,context).memoryMode,lang,mode=>memoryChoices.set(memoryKey(device.udid,context),mode),disabled);
   }
 
-  function memoryBadge(device,lang,disabled=false,compact=false) {
+  function memoryDetails(device,lang,context={},changed=()=>{}) {
+    const M=root.CindySimModel;
+    return M.showMemoryDetails(context.computer ? {...device,name:context.computer+' / '+device.name} : device,lang,{value:memoryChoices.get(memoryKey(device.udid,context)),onChange:mode=>{
+      memoryChoices.set(memoryKey(device.udid,context),mode);changed(mode);
+    },onRestart:device.state==='Booted' ? async mode=>{
+      const result=await M.restartMemoryMode(device,mode,context.request || rpc);
+      M.showMemoryNotice(result,lang,mode,device.name);
+    } : undefined});
+  }
+  function memoryBadge(device,lang,disabled=false,compact=false,context={}) {
     if(device?.kind==='physical')return null;
-    const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(device.udid));
+    const M=root.CindySimModel,text=M.memoryStatus(device,lang,memoryChoices.get(memoryKey(device.udid,context)));
     if (!text) return null;
     const button=h('button',{class:compact?'memory-badge memory-icon':'memory-badge',type:'button',disabled,'aria-haspopup':'dialog',
-      onclick:()=>M.showMemoryDetails(device,lang,{value:memoryChoices.get(device.udid),onChange:mode=>{
-        memoryChoices.set(device.udid,mode);update(M.memoryStatus(device,lang,mode));
-      },onRestart:device.state==='Booted' ? async mode=>{
-        const result=await M.restartMemoryMode(device,mode,rpc);
-        M.showMemoryNotice(result,lang,mode,device.name);
-      } : undefined})});
+      onclick:()=>memoryDetails(device,lang,context,mode=>update(M.memoryStatus(device,lang,mode)))});
     if(compact)button.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4m6-4v4M9 18v4m6-4v4M2 9h4m-4 6h4m12-6h4m-4 6h4"/><path d="M10 10h4v4h-4z"/></svg>';
     function update(label){button.title=label;button.setAttribute('aria-label',label);if(!compact)button.textContent=label;}
     update(text);
@@ -230,5 +237,5 @@
     return resources.label(device);
   }
 
-  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, memoryArgs, memoryPicker, memoryBadge, rememberMemoryChoice, resourceLabel, onPush: (fn) => listeners.add(fn) };
+  root.CindySimPages = { rpc, h, locale, GLYPH, createDevice, catalog, setupAndroid, memoryArgs, memoryPicker, memoryBadge, memoryDetails, rememberMemoryChoice, resourceLabel, onPush: (fn) => listeners.add(fn) };
 })(globalThis);

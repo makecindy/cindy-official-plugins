@@ -13,7 +13,7 @@ const OFF={udid:'SIM-2',name:'iPad mini',state:'Shutdown',runtime:'com.apple.Cor
 const PHONE={udid:'PHONE-1',name:'My iPhone',state:'Booted',kind:'physical'};
 
 // Two logic pages of the same plugin on two computers, joined by Cindy's request channel.
-function computers({providerHandles=true,providerWorker,viewerWorker}={}){
+function computers({providerHandles=true,providerWorker,viewerWorker,rejectRestart=false}={}){
   const pages={},delivered=[];
   function page(self,peer,{worker,view}){
     const buses=new Map(),waiting=new Map();
@@ -26,6 +26,7 @@ function computers({providerHandles=true,providerWorker,viewerWorker}={}){
         if(r.op==='reply'){waiting.get(r.requestId)?.({ok:true,data:r.data});waiting.delete(r.requestId);return {ok:true};}
         // A plugin there that does not answer leaves the result unknown, as Cindy reports it.
         if(!pages[r.peer]?.receives)return {ok:false,errorCode:'SYNC_RESULT_UNKNOWN'};
+        if(rejectRestart && r.data.call==='restart_device')return {ok:true,data:{ok:false,errorCode:'UNSUPPORTED',execution:'not_executed'}};
         delivered.push(plain(r.data));
         const requestId=`${self}-${++sequence}`;
         return new Promise(resolve=>{pages[r.peer].waiting.set(requestId,resolve);void pages[r.peer].deliver({type:'device-sync-request',requestId,peer:self,data:plain(r.data)});});
@@ -153,7 +154,7 @@ test('a plugin there that cannot be asked still shows its running device, and sa
 
 test('in a remote task the one simulator tab holds both computers’ devices, and marks the other computer’s',async()=>{
   const nodes=new Map(),events={},calls=[],posted=[],saved=new Map();
-  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],contentWindow:{postMessage:(data,origin)=>posted.push({data:plain(data),origin})},replaceChildren(){this.children=[];},append(...children){this.children.push(...children);}});return nodes.get(id);};
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],contentWindow:{postMessage:(data,origin)=>posted.push({data:plain(data),origin})},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);}});return nodes.get(id);};
   let poll,clock=1e6;
   const remote={computer:'Mac Studio',manage:true},theirs=[{udid:'SIM-1',name:'iPhone Air',state:'Booted'},{udid:'SIM-2',name:'iPad mini',state:'Shutdown'}];
   const mine=[{udid:'LOCAL-1',name:'My iPhone',state:'Booted'}];
@@ -165,8 +166,8 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
     document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}}};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('cindy-simulator/pages.js','utf8'),context);
-  const pages=context.CindySimPages,sheets=[];
-  Object.assign(pages,{locale:async()=>'en',h:(tag,props,children=[])=>({tag,props,children}),memoryBadge:()=>null,memoryPicker:()=>null,memoryArgs:()=>({memoryMode:'saving'}),
+  const pages=context.CindySimPages,sheets=[],badges=[],details=[];
+  Object.assign(pages,{locale:async()=>'en',h:(tag,props,children=[])=>({tag,props,children}),memoryDetails:(device,lang,context)=>details.push({device,context}),memoryBadge:(device,lang,disabled,compact,context)=>{badges.push({device,disabled,context});return null;},memoryPicker:()=>null,memoryArgs:()=>({memoryMode:'saving'}),
     createDevice:async options=>{sheets.push(options);return {udid:options.call?'SIM-NEW':'LOCAL-NEW'};},
     rpc:async(action,params)=>{calls.push({action,params:plain(params)});
       const answer=action==='remote_task'?there:action==='manage_state'?{ok:true,devices:mine}:here;
@@ -182,10 +183,15 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   // The task's device on the other computer shows first; this computer's list is read without opening anything.
   assert.deepEqual(calls,[{action:'remote_task',params:{deviceId:'studio',computer:'Mac Studio',call:'task_state',sessionId:'task-1'}},{action:'manage_state',params:{}}]);
   assert.equal(get('screen').src,'http://127.0.0.1:9/control?udid=SIM-1');
+  assert.equal(badges.at(-1).context.scope,'studio');
   // The controller's device menu is told about this computer's devices too.
   assert.deepEqual(posted.at(-1),{data:{type:'cindy-simulator-sides',here:'remote',computer:'Mac Studio',other:{devices:mine,manage:true}},origin:'http://127.0.0.1:9'});
   // From that menu: switch to one of that computer's devices that is off, which also starts it.
   const controller={source:get('screen').contentWindow,origin:'http://127.0.0.1:9'};
+  events.message({...controller,data:{type:'cindy-simulator-remote-action',action:'memory',udid:'SIM-OTHER'}});
+  assert.equal(details.length,0,'stale controller cannot open another device');
+  events.message({...controller,data:{type:'cindy-simulator-remote-action',action:'memory',udid:'SIM-1'}});
+  assert.equal(details.length,1);assert.equal(details[0].context.scope,'studio');
   let booting=false;
   there=p=>{if(p.call==='task_boot')booting=true;
     return {ok:true,remote,device:theirs[1],devices:theirs,settings:{enabled:true},...(booting?{operation:{call:'task_boot',udid:'SIM-2',state:'running'}}:{})};};
@@ -205,6 +211,8 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   const labels=text();
   assert.deepEqual(labels.filter(l=>['This computer','My iPhone','Remote · Mac Studio','iPhone Air','iPad mini'].includes(l)),['This computer','My iPhone','Remote · Mac Studio','iPhone Air','iPad mini']);
   assert.ok(button('New device here…'));assert.ok(button('New device on Mac Studio…'));
+  const remoteMemory=badges.find(b=>b.device.udid==='SIM-1').context;
+  assert.equal(badges.find(b=>b.device.udid==='LOCAL-1').context.request,undefined);
   // One of this computer's own: bound by this computer's worker, shown without the remote mark, and remembered for the task.
   here=(p,action)=>({ok:true,device:mine[0],devices:mine,settings:{enabled:true},viewer:{url:'http://127.0.0.1:5/control?udid=LOCAL-1'}});
   const useButtons=shown().filter(n=>n.tag==='button'&&n.props.text==='Use');
@@ -219,7 +227,7 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   // From this computer's controller: a new device on the other computer, with the sheet pointed there; the task follows it.
   const remoteBefore=remoteCalls().length;
   events.message({source:get('screen').contentWindow,origin:'http://127.0.0.1:5',data:{type:'cindy-simulator-remote-action',action:'create',where:'remote'}});await settle();
-  assert.equal(sheets.at(-1).heading,'New device on Mac Studio');assert.equal(typeof sheets.at(-1).call,'function');
+  assert.equal(sheets.at(-1).heading,'New device on Mac Studio');assert.equal(typeof sheets.at(-1).call,'function');assert.equal(sheets.at(-1).scope,'studio');
   assert.ok(remoteCalls().slice(remoteBefore).includes('task_bind'));assert.equal(saved.get('cindy.simulator.side.task-1'),'remote');
   // And back: a new device on this computer, with the ordinary sheet.
   here={ok:true,device:null,devices:mine,settings:{enabled:true},viewer:null};
@@ -227,6 +235,18 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   await button('New device here…').props.onclick();await settle();
   assert.equal(sheets.at(-1).call,undefined);assert.equal(sheets.at(-1).heading,undefined);
   assert.deepEqual(calls.filter(c=>c.action==='task_bind').at(-1),{action:'task_bind',params:{sessionId:'task-1',udid:'LOCAL-NEW'}});
+  // A remote row's dialog keeps its owner when the current task has switched local.
+  there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},operation:{call:'restart_device',udid:'SIM-1',state:'running'}};
+  const restarted=await remoteMemory.request('restart_device',{udid:'SIM-1',memoryMode:'standard'});await settle();
+  assert.equal(restarted.ok,true);assert.ok(text().includes('Restarting…'));
+  assert.equal(calls.filter(c=>c.action==='restart_device').length,0);
+  assert.deepEqual(calls.filter(c=>c.params.call==='restart_device').map(c=>c.params),[{deviceId:'studio',computer:'Mac Studio',call:'restart_device',sessionId:'task-1',udid:'SIM-1',memoryMode:'standard'}]);
+  there={...there,viewer:{url:'http://127.0.0.1:9/control?udid=SIM-1'},operation:{call:'restart_device',udid:'SIM-1',state:'failed',errorCode:'BOOT_TIMEOUT'}};
+  clock+=9000;poll();await settle();
+  assert.ok(text().some(line=>line.includes('Could not confirm the restart completed')));
+  assert.equal(get('task-notice').hidden,false);
+  assert.ok(get('task-notice').children.flatMap(flatten).some(n=>n.props?.text?.includes('Could not confirm the restart completed')));
+  assert.equal(calls.filter(c=>c.params.call==='restart_device').length,1);
   // A plugin there that cannot be asked: its devices cannot be chosen or created from here, and the page says why; this computer's still can.
   there={ok:true,remote:{computer:'',manage:false},device:null,devices:[],settings:{enabled:true}};
   clock+=9000;poll();await settle();clock+=9000;poll();await settle();
@@ -240,7 +260,7 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
   const nodes=new Map(),calls=[],sheets=[];let poll,clock=1e6,remoteReply;
   const mine=[{udid:failedSide==='remote'?'LOCAL-1':'REMOTE-1',name:'Available phone',state:'Booted'}];
   const available={ok:true,devices:mine,device:null,settings:{enabled:true},remote:{computer:'Studio',manage:true}};
-  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],replaceChildren(){this.children=[];},append(...n){this.children.push(...n);}});return nodes.get(id);};
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{children:[],replaceChildren(...children){this.children=children;},append(...n){this.children.push(...n);}});return nodes.get(id);};
   const context={URL,URLSearchParams,Date:{now:()=>clock},location:{search:'?session=task-1&device=studio'},
     localStorage:{getItem:()=>failedSide==='local'?'local':null,setItem(){}},addEventListener(){},setInterval:fn=>poll=fn,
     document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}},
@@ -281,4 +301,44 @@ for(const [failedSide,failure] of [['remote','offline'],['remote','unsupported']
   assert.ok(shown().some(n=>n.props?.text==='Available phone'));
   await button(creation).props.onclick();await settle();
   assert.equal(typeof sheets[0].call,failedSide==='remote'?'undefined':'function');assert.equal(bindings().at(-1).params.udid,'LOCAL-NEW');
+});
+
+
+test('remote memory restart reuses the provider worker and operation lifecycle without replay',async()=>{
+ let finish;
+ const world=computers({providerWorker:async r=>{
+  if(r.method==='remote_task_state')return {ok:true,...world.state};
+  if(r.method==='settings_restart')return new Promise(resolve=>finish=resolve);
+  return {ok:true};
+ }});
+ const {viewer,provider}=world;
+ const params={call:'restart_device',sessionId:'task-1',udid:'SIM-1',memoryMode:'standard'};
+ const started=await viewer.ask(params);
+ assert.deepEqual(plain(started.operation),{call:'restart_device',udid:'SIM-1',state:'running'});
+ assert.deepEqual(plain(provider.calls.find(c=>c.method==='settings_restart').params),{udid:'SIM-1',memoryMode:'standard'});
+ const again=await viewer.ask(params);
+ assert.equal(again.ok,false);assert.equal(again.execution,'not_executed');assert.equal(again.errorCode,'BUSY');
+ assert.equal(provider.calls.filter(c=>c.method==='settings_restart').length,1);
+ assert.equal(viewer.calls.some(c=>c.method==='settings_restart'),false);
+ finish({ok:false,errorCode:'BOOT_TIMEOUT',execution:'unknown'});await settle();
+ assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).operation.state,'failed');
+ await viewer.ask({call:'task_state',sessionId:'task-1'});
+ assert.equal(provider.calls.filter(c=>c.method==='settings_restart').length,1,'state reads never restart again');
+ const retry=await viewer.ask({...params,memoryMode:'minimal'});
+ assert.equal(retry.operation.state,'running');
+ finish({ok:true});await settle();
+ assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).operation,undefined);
+ assert.equal(provider.calls.filter(c=>c.method==='settings_restart').length,2,'only a new explicit action retries');
+});
+
+
+test('older remote restart rejection does not disable its existing management or fall back locally',async()=>{
+ const {provider,viewer}=computers({rejectRestart:true});
+ await viewer.ask({call:'task_state',sessionId:'task-1'});
+ assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).remote.manage,true);
+ const result=await viewer.ask({call:'restart_device',sessionId:'task-1',udid:'SIM-1',memoryMode:'standard'});
+ assert.equal(result.ok,false);assert.equal(result.execution,'not_executed');
+ assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).remote.manage,true);
+ assert.equal(provider.calls.some(c=>c.method==='settings_restart'),false);
+ assert.equal(viewer.calls.some(c=>c.method==='settings_restart'),false);
 });

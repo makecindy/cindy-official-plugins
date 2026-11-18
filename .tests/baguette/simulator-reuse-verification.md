@@ -308,3 +308,49 @@ not installed-client or genuine two-computer acceptance; that remains incomplete
 Required repository suites plus simulator aggregate:915 tests passed, zero
 failures (70.91s), Node.js v22.21.1. Manifest validation, git diff --check and
 preflight passed. Main05cdd227 remains included. No install or restart performed.
+
+## Round 13 computer-bound memory controls - 0.3.57, 2026-11-18
+
+The user chose full remote memory-mode restart support, rather than removing
+its action. Remaining families are execution-side identity and real two-computer
+acceptance; previous input and creation decisions remain unchanged.
+
+Invariant: every memory choice and restart retains the computer and device it
+was created for; no remote operation may fall back to this computer's worker.
+The shared page owns [computer, device] choices. The task page owns routing,
+including requests from the live controller. The provider's existing remoteOps
+owns progress; the existing worker owns the atomic shutdown/boot and device
+validation. No new queue, lock, retry, cache or persisted state is introduced.
+
+| Event / state | Expected result |
+| --- | --- |
+| Choose a mode, running or off, same ID on two computers | Only the selected computer's page-local choice changes |
+| Create on either computer | Keep chosen mode under that computer for its next explicit boot |
+| Restart from a row, current device, or live controller | Same shared dialog; one request to the owning computer |
+| Change selected side after opening a dialog | Its captured computer remains the target |
+| Provider restart still running / duplicate explicit request | Existing progress continues; duplicate returns BUSY without execution |
+| Restart resolves / fails / reply becomes unknown | Poll state; no automatic restart replay; failures stay visible even over a recovered screen |
+| Old remote plugin rejects restart | No local fallback and no loss of its older management capabilities |
+| Physical phone or unsupported platform | Existing worker validates before shutdown; memory UI stays limited to iOS simulators |
+
+Symmetric audit covers both computer groups, the current device, off-device
+startup, shared creation, live controller forwarding, and local settings/viewer
+callers retaining their default local scope. The live remote controller receives
+only the validated mode and verification bit, not private provider paths.
+The same dialog and theme styles are reused in Chinese and English.
+
+Tests use actual page/model scripts in DOM fixtures, two plugin logic pages
+connected by a simulated Host channel, and the real remote viewer HTTP server.
+These are not genuine two-computer Cindy acceptance. No installed plugin or
+user device was restarted. The execution Host reports an unversioned 0.0.0
+build; it cannot establish stable runtime compatibility. This change uses only
+existing plugin RPC/deviceSync and worker interfaces, with no new Host grant.
+The stable host prerequisite remains v0.1.139 containing #9950.
+
+Validation: the two new computer-isolation/remote-restart regressions failed on
+fb33b459 before the fix. Final focused page, task, controller and HTTP suites:
+111 passed, 0 failed (10.50 seconds). Required repository suites plus the single
+simulator aggregate: 919 passed, 0 failed (76.97 seconds), Node v22.21.1.
+Manifest validation, diff whitespace check and PR preflight passed. Forge pack
+is unavailable on this task's tool surface; packaging is checked by PR CI,
+not claimed as a local Forge artifact. No real two-computer test was performed.

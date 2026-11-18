@@ -98,14 +98,15 @@ test('status describes a running remote device and only device input is forwarde
 test('the controller is told which computer runs the device and what else that computer has',async t=>{
   const {api}=await opened(t,{computer:'Mac Studio',manage:true,devices:[
     {udid:'SIM-2',name:'iPad mini',state:'Shutdown',runtime:'iOS-27-3',productFamily:'iPad',dataPath:'/private'},
-    {udid:'SIM-1',name:'iPhone Air',state:'Booted',runtime:'iOS-27-3'},{udid:'bad id',name:'x'},{name:'no id'},'junk']});
+    {udid:'SIM-1',name:'iPhone Air',state:'Booted',runtime:'iOS-27-3',memoryMode:{mode:'standard',verified:true,privatePath:'/private'}},{udid:'bad id',name:'x'},{name:'no id'},'junk']});
   const status=(await api({action:'status'})).body;
   assert.deepEqual(status.remote,{computer:'Mac Studio',manage:true});
   // The device shown first, then that computer's others; all marked as not this computer's.
   assert.deepEqual(status.devices.map(d=>[d.udid,d.state,d.kind]),[['SIM-1','Booted','remote'],['SIM-2','Shutdown','remote']]);
+  assert.deepEqual(status.device.memoryMode,{mode:'standard',verified:true});
   assert.equal(status.device.runtime,'iOS-27-3');assert.equal(JSON.stringify(status).includes('private'),false);
   // Managing them is the task page's business with that computer, never this worker's.
-  for(const action of ['switch','create','shutdown','boot'])assert.equal((await api({action})).body.errorCode,'REMOTE_UNSUPPORTED',action);
+  for(const action of ['switch','create','shutdown','boot','restart_device'])assert.equal((await api({action})).body.errorCode,'REMOTE_UNSUPPORTED',action);
 });
 
 test('a screenshot is the picture shown here, saved like a local one or handed to the clipboard',async t=>{

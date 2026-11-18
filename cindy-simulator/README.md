@@ -51,6 +51,8 @@ The live sidebar's Add Device dialog also offers iOS memory modes. Successful cr
 
 New-device sheets offer Saving (default), Standard and Minimal for iOS runtimes only, with the same tradeoff descriptions as the startup picker. After creation, the existing page-local choice is assigned to the new device for its next explicit boot; creation does not start it. Reloading the page clears this choice, as with existing startup selections.
 
+Remote iOS simulators also support memory-mode selection and Restart & apply from the live controller and device list. They reuse the local dialog and the owning computer's worker restart operation. Page-local choices are keyed by computer and device, including newly created devices. Restart progress uses the existing remote task state; a lost reply or failed restart is never automatically replayed, and an unconfirmed result stays visible above a recovered screen. Both computers need the updated plugin; an older peer cannot fall back to restarting a local device.
+
 Restart & apply now completes shutdown and startup as one worker operation. Task and management refreshes retain the controller during restart, so an intermediate off state cannot interrupt applying the selected memory mode.
 
 The Chinese saving-mode label is shortened to “节省” throughout the GUI; its behavior and `saving` identifier are unchanged.

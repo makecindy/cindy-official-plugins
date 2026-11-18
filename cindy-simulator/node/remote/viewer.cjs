@@ -52,6 +52,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
       udid:d.udid,name:d.name.slice(0,128),state:['Booted','Shutdown','Booting','ShuttingDown'].includes(d.state)?d.state:'Shutdown',kind:'remote',
       isAvailable:d.isAvailable!==false,...(typeof d.runtime==='string'?{runtime:d.runtime.slice(0,160)}:{}),
       ...(typeof d.deviceType==='string'?{deviceType:d.deviceType.slice(0,160)}:{}),...(typeof d.productFamily==='string'?{productFamily:d.productFamily.slice(0,64)}:{}),
+      ...(d.memoryMode ? {memoryMode:{mode:['saving','standard','minimal','custom','unknown'].includes(d.memoryMode.mode)?d.memoryMode.mode:'unknown',verified:d.memoryMode.verified===true}} : {}),
       ...(d.platform==='android'?{platform:'android'}:{})}));
   }
   function send(view,events,route='/input'){

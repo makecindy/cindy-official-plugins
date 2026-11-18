@@ -19,7 +19,7 @@ const TEXT = {
     remotePluginUpdate: 'Update the Device Simulator plugin on the other computer to choose, start or create its devices from here.',
     remoteViewOnlyBody: 'Once a simulator is opened for this task on the other computer, it appears here. Update the Device Simulator plugin there to choose or create devices from here.',
     remotePausedBody: 'Simulators are turned off on the other computer. Turn them on there in Plugins → Device Simulator.',
-    remoteStopping: 'Shutting down…', remoteFailed: (code) => `The other computer did not complete it (${code}). Check the device there and try again.`,
+    remoteRestartFailed: 'Could not confirm the restart completed. Check the device on the remote computer before taking further action.', remoteRestarting: 'Restarting…', remoteStopping: 'Shutting down…', remoteFailed: (code) => `The other computer did not complete it (${code}). Check the device there and try again.`,
     remoteCreate: (name) => name ? `New device on ${name}` : 'New device on the other computer',
     // One tab for both in such a task: this computer's own devices and that computer's.
     hereDevices: 'This computer', createHere: 'New device here…', createThere: (name) => name ? `New device on ${name}…` : 'New device on the other computer…',
@@ -42,7 +42,7 @@ const TEXT = {
     remotePluginUpdate: '需要先更新另一台电脑上的「设备模拟器」插件，才能在这里选择、启动或新建它的设备。',
     remoteViewOnlyBody: '在另一台电脑上为这个任务打开模拟器后，会自动显示在这里。更新那台电脑上的「设备模拟器」插件后，可以在这里选择或新建设备。',
     remotePausedBody: '另一台电脑上的模拟器运行已关闭，请在那台电脑的「插件 → 设备模拟器」里打开。',
-    remoteStopping: '正在关闭…', remoteFailed: (code) => `另一台电脑没有完成这次操作（${code}）。请在那台电脑上核对设备后重试。`,
+    remoteRestartFailed: '无法确认重启是否完成。请先检查远程电脑上的设备状态，再决定下一步。', remoteRestarting: '正在重启…', remoteStopping: '正在关闭…', remoteFailed: (code) => `另一台电脑没有完成这次操作（${code}）。请在那台电脑上核对设备后重试。`,
     remoteCreate: (name) => name ? `在「${name}」上新建设备` : '在另一台电脑上新建设备',
     hereDevices: '这台电脑', createHere: '在这台电脑新建…', createThere: (name) => name ? `在「${name}」上新建…` : '在另一台电脑上新建…',
     bothBody: '选一台设备给这个任务用：可以用这台电脑的，也可以用另一台电脑的；两边都可以新建。',
@@ -69,6 +69,19 @@ const far = () => !!remoteDevice && side === 'remote';
 const callOn = (where, action, params, timeoutText) => remoteDevice && where === 'remote'
   ? rpc('remote_task', { deviceId: remoteDevice, computer: remoteName, call: action, ...params }, timeoutText) : rpc(action, params, timeoutText);
 const call = (action, params, timeoutText) => callOn(side, action, params, timeoutText);
+// Capture the owning computer in each control, including rows for the side not
+// currently shown. Reuse the worker's restart; never route through local RPC.
+const memoryContext = (where = side) => remoteDevice && where === 'remote' ? {
+  scope: remoteDevice, computer: computer(),
+  request: async (action, params) => {
+    if (busy) throw Error('BUSY');
+    setSide(where);
+    const result = await act(action, params, params.udid);
+    if (!result) throw Error('RESTART_UNCONFIRMED');
+    return {ok:true};
+  },
+} : {};
+
 // What is known of the side not shown: {side, devices, computer, manage}.
 let other = null, otherAt = 0, otherBusy = false;
 const computer = () => (far() ? state?.remote?.computer : other?.computer) || remoteName;
@@ -151,7 +164,7 @@ function deviceList(all, where, exclude, usable = true) {
     return h('div', { class: 'device' }, [
       h('span', { class: 'glyph', html: GLYPH[row.family] }),
       h('div', { class: 'text' }, [h('div', { class: 'name', text: row.name }),
-        globalThis.CindySimPages.memoryBadge(d,lang,!!busy),
+        globalThis.CindySimPages.memoryBadge(d,lang,!!busy || !usable,false,memoryContext(where)),
         where === 'local' ? resourceView?.label(d) : null,
         h('div', { class: 'meta' }, [h('span', { class: 'dot', 'data-tone': busy === row.udid ? 'busy' : row.tone }), h('span', { text: row.meta + (others > 0 ? ' · ' + T.inOther(others) : '') })])]),
       busy === row.udid ? h('span', { class: 'spinner' }) : h('button', { class: 'btn sm', text: T.use, disabled: !!busy || !row.available || !usable, onclick: () => use(where, row.udid) }),
@@ -179,6 +192,15 @@ function renderDevices(inner) {
   if (remoteDevice && !managed && ((side === 'remote' && state) || other?.side === 'remote')) inner.append(h('p', { class: 'status', text: T.remoteViewOnlyBody }));
 }
 function render() {
+  // A failed restart may still leave a live screen. Keep its result visible
+  // above that screen, using the same dismissible notice as local boot results.
+  const notice = $('task-notice');
+  if (notice) {
+    notice.hidden = !viewerUrl || !note?.text;
+    notice.replaceChildren(...(notice.hidden ? [] : [h('div',{class:'memory-result'},[
+      h('span',{text:note.text}),h('button',{type:'button',text:lang==='zh-CN'?'关闭':'Dismiss',onclick:()=>{note=null;render();}}),
+    ])]));
+  }
   const inner = $('inner'); inner.replaceChildren(); resourceView?.prune();
   if (!state) {
     if (remoteDevice) {
@@ -195,10 +217,10 @@ function render() {
     [changeDevice()]));
   else if (operation) {
     const name = state.devices?.find((d) => d.udid === operation.udid)?.name || state.device?.name || '';
-    inner.append(hero(GLYPH.big, name, operation.call === 'shutdown' ? T.remoteStopping : T.starting, [h('span', { class: 'spinner' })]));
+    inner.append(hero(GLYPH.big, name, operation.call === 'shutdown' ? T.remoteStopping : operation.call === 'restart_device' ? T.remoteRestarting : T.starting, [h('span', { class: 'spinner' })]));
   } else if (state.device && !choosing) {
     const d = state.device;
-    const memory = globalThis.CindySimPages.memoryBadge(d,lang,!!busy);
+    const memory = globalThis.CindySimPages.memoryBadge(d,lang,!!busy || (far() && !remoteManaged()),false,memoryContext());
     if (memory) inner.append(memory);
     resourceView?.update(viewerUrl || far() ? null : d);
     if (d.state === 'Booted' && state.viewerClosed) inner.append(hero(GLYPH.big, T.closedTitle, T.closedBody, [
@@ -212,7 +234,7 @@ function render() {
       h('button',{class:'link',text:T.change,onclick:()=>{choosing=true;render();}}),
     ]));
     else inner.append(hero(GLYPH.big, T.offTitle(d.name), null, [
-      globalThis.CindySimPages.memoryPicker(d,lang,!!busy),
+      globalThis.CindySimPages.memoryPicker(d,lang,!!busy,memoryContext()),
       h('button', { class: 'btn cta', text: busy === d.udid ? T.starting : T.start, disabled: !!busy, onclick: () => act('task_boot', { udid: d.udid }, d.udid) }),
       (state.devices || []).length > 1 || remoteDevice ? changeDevice() : null,
     ]));
@@ -235,7 +257,7 @@ async function refresh() {
     if (!r.ok) throw r;
     accept(r); refreshedAt = Date.now(); if (note && !note.sticky) note = null;
     // An operation that computer could not finish is told once.
-    if (far() && r.operation?.state === 'failed') note = { text: T.remoteFailed(r.operation.errorCode || 'FAILED'), error: true, sticky: true };
+    if (far() && r.operation?.state === 'failed') note = { text: r.operation.call === 'restart_device' ? T.remoteRestartFailed : T.remoteFailed(r.operation.errorCode || 'FAILED'), error: true, sticky: true };
   } catch (error) { if (pending !== request) return; if (!viewerUrl && !note?.sticky) note = { text: errorText(error), error: true }; }
   finally { if (pending === request) pending = null; }
   render();
@@ -246,7 +268,7 @@ async function act(action, params, marker) {
   busy = marker; note = null; render();
   try {
     const device = state?.devices?.find(d=>d.udid===params.udid)||state?.device;
-    const memory = action==='task_boot' ? globalThis.CindySimPages.memoryArgs(device) : {};
+    const memory = action==='task_boot' ? globalThis.CindySimPages.memoryArgs(device,memoryContext()) : {};
     const r = await call(action, { sessionId: session, ...params, ...memory }, T.timeout);
     if (pending !== request) return;
     if (!r.ok) throw r;
@@ -254,8 +276,9 @@ async function act(action, params, marker) {
     if (r.taskBindingError || r.appContextError) { note = { text: T.recordFailed, error: true, sticky: true }; return; }
     if (r.taskStateError) { state = null; choosing = false; show(null); note = { text: T.stateFailed, error: true, sticky: true }; return; }
     choosing = false; accept(r);
+    if (action === 'restart_device' && r.operation?.state === 'failed') { note = {text:T.remoteRestartFailed,error:true,sticky:true}; return; }
     return true;
-  } catch (error) { if (pending === request) note = { text: errorText(error), error: true, sticky: true }; }
+  } catch (error) { if (pending === request) note = { text: action === 'restart_device' ? T.remoteRestartFailed : errorText(error), error: true, sticky: true }; }
   finally { busy = null; render(); if (pending === request) { pending = null; if (!viewerUrl) refresh(); } }
 }
 // Same sheet as the management view (name, OS version, model); the new device
@@ -263,7 +286,7 @@ async function act(action, params, marker) {
 async function createDevice(where = side) {
   if (busy) return;
   const there = !!remoteDevice && where === 'remote';
-  const made = await newDevice({ family: 'any', lang, ...(there ? { call: (action, params) => callOn('remote', action, params, T.timeout), heading: T.remoteCreate(computer()) } : {}) });
+  const made = await newDevice({ family: 'any', lang, scope: there ? remoteDevice : '', ...(there ? { call: (action, params) => callOn('remote', action, params, T.timeout), heading: T.remoteCreate(computer()) } : {}) });
   if (!made?.udid) return;
   setSide(where);
   return act('task_bind', { udid: made.udid }, 'create');
@@ -291,7 +314,10 @@ globalThis.addEventListener('message',event=>{
       const settle = (ok) => { try { $('screen').contentWindow?.postMessage({ type: 'cindy-simulator-remote-result', action: m.action, ok: ok === true, errorCode: ok === true ? undefined : 'FAILED' }, origin); } catch {} };
       const where = m.where === 'local' ? 'local' : 'remote';
       if(where==='remote' && !remoteManaged()){ settle(false); return; }
-      if(m.action==='use' && typeof m.udid==='string') void (async () => {
+      if(m.action==='memory' && far() && state?.device?.udid===m.udid && !busy && !remoteOperation()) {
+        globalThis.CindySimPages.memoryDetails(state.device,lang,memoryContext());
+      }
+      else if(m.action==='use' && typeof m.udid==='string') void (async () => {
         let ok = await use(where, m.udid);
         // As in the controller's own menu, switching to a device that is off also starts it.
         if (ok && state?.device?.udid === m.udid && state.device.state === 'Shutdown' && !remoteOperation()) ok = await act('task_boot', { udid: m.udid }, m.udid);

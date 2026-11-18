@@ -127,6 +127,7 @@
   let remoteWaiting = null;
   function remoteAction(action, extra = {}) {
     try { window.parent.postMessage({ type: 'cindy-simulator-remote-action', action, ...extra }, '*'); } catch { return; }
+    if (action === 'memory') return; // Opens the task page's shared dialog; no operation has started.
     // The task page replaces this page when the device changes; if it stays, it says how it went.
     clearTimeout(remoteWaiting?.timer);
     remoteWaiting = { action, timer: setTimeout(() => remoteSettled({ ok: false, errorCode: 'TIMEOUT' }), 150000) };
@@ -455,12 +456,13 @@
     $('chip-dot').dataset.tone = $('title-dot').dataset.tone = p.tone;
     $('chip-name').textContent = $('title-name').textContent = device?.name || '…';
     const resources = $('resources'), modeButton = $('memory-mode');
-    resources.replaceChildren(resourceView.node,modeButton);
+    resources.replaceChildren(...(remote() ? [] : [resourceView.node]),modeButton);
     $('title-sub').replaceChildren(h('span',{text:[M.runtimeLabel(device?.runtime), t[p.key]].filter(Boolean).join(' · ')}), ...(hub ? [resources] : []));
-    resources.hidden = !device || state.lost || state.switching || remote();
+    resources.hidden = !device || state.lost || state.switching;
     $('status').textContent = t[p.key];
-    const memoryText = device?.state === 'Booted' && !remote() ? M.memoryStatus(state.lost ? {...device,memoryMode:null} : device, lang,memoryChoices.get(udid)) : '';
+    const memoryText = device?.state === 'Booted' ? M.memoryStatus(state.lost ? {...device,memoryMode:null} : device, lang,remote() ? undefined : memoryChoices.get(udid)) : '';
     modeButton.hidden = !memoryText;
+    if (remote() && !memoryText) resources.hidden = true;
     const modeText = memoryText.replace(/^(内存模式：|Memory mode: )/,'');
     modeButton.replaceChildren(
       h('span',{text:lang === 'zh-CN' ? '（' : ' ('}),
@@ -468,7 +470,7 @@
       h('span',{text:lang === 'zh-CN' ? '）' : ')'})
     );
     label(modeButton,memoryText + (lang === 'zh-CN' ? ' · 查看与更改' : ' · View / change'));
-    modeButton.disabled = state.lost || state.stopping || state.switching;
+    modeButton.disabled = state.lost || state.stopping || state.switching || (remote() && !remoteManaged());
     resourceView.update(state.lost || state.switching || remote() ? null : device);
     const on = live();
     const sound=s?.audio,playing=sound?.enabled===true;
@@ -638,6 +640,7 @@
   });
   $('memory-mode').addEventListener('click', () => {
     if (state.lost || state.stopping || state.switching) return;
+    if (remote()) { if (remoteManaged()) remoteAction('memory',{udid}); return; }
     const target = udid;
     M.showMemoryDetails(state.status.device, lang, {value:memoryChoices.get(target),onChange:mode=>{
       memoryChoices.set(target,mode);if (udid === target) render();

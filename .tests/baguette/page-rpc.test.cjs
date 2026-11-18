@@ -27,7 +27,7 @@ function fixture(page,{steps=1}={}){
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('cindy-simulator/node/control-model.js','utf8'),context);
   vm.runInContext(fs.readFileSync(`cindy-simulator/${page}.js`,'utf8'),context);
-  return {messages,calls,nodes,pages:context.CindySimPages,create:options=>context.CindySimPages.createDevice(options),finish:(value,index=0)=>results[index].finish(value),fail:(error,index)=>results[index].fail(error),intervals,timers,
+  return {messages,calls,nodes,model:context.CindySimModel,pages:context.CindySimPages,create:options=>context.CindySimPages.createDevice(options),finish:(value,index=0)=>results[index].finish(value),fail:(error,index)=>results[index].fail(error),intervals,timers,
     advance:async ms=>{now+=ms;for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();},
     rpc:(action,extra={})=>page==='pages'?context.CindySimPages.rpc(action,{sessionId:'task-1',udid:'device-1',...extra}):vm.runInContext(`rpc(${JSON.stringify(action)},${JSON.stringify(extra)})`,context),
     tick:()=>{for(const {fn,ms} of [...intervals.values()])if(ms===500)fn();},
@@ -122,15 +122,16 @@ test('creation families keep Android, iPhone, TV and Vision runtimes separate af
 });
 
 test('creation hands the selected iOS mode to the existing next-boot choice without starting a device',async()=>{
- for(const mode of ['saving','standard','minimal']){
-  const f=fixture('pages',{steps:3});f.start();const pending=f.create({lang:'zh-CN',family:'iphone'});await flush();f.tick();await flush();
+ for(const scope of ['', 'studio'])for(const mode of ['saving','standard','minimal']){
+  const f=fixture('pages',{steps:3});f.start();const pending=f.create({lang:'zh-CN',family:'iphone',scope});await flush();f.tick();await flush();
   f.finish({ok:true,deviceTypes:[{identifier:'t.iPhone',name:'iPhone'}],runtimes:[{identifier:'r.iOS-27',name:'iOS 27',version:'27',supportedDeviceTypes:['t.iPhone']}]});await flush();
   assert.equal(f.nodes.find(n=>n['data-mode']==='saving')['aria-pressed'],'true');
   f.nodes.find(n=>n['data-mode']===mode).listeners.click();
   const submission=f.nodes.find(n=>n.tag==='form').listeners.submit({preventDefault(){}});await flush();f.tick();await flush();
   assert.equal(f.calls[1].method,'create_device');
   f.finish({ok:true,udid:'created'},1);await submission;await pending;
-  const args=f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'});
+  const args=f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'},{scope});
+  if(scope)assert.equal(f.pages.memoryArgs({udid:'created',runtime:'r.iOS-27'}).memoryMode,'saving');
   assert.equal(args.memoryMode,mode);assert.equal(f.calls.length,2,'creation never boots implicitly');
   const boot=f.rpc('boot',{udid:'created',...args});await flush();f.tick();await flush();
   assert.equal(f.calls[2].params.memoryMode,mode);f.finish({ok:true},2);await boot;
@@ -285,4 +286,37 @@ test('compound task actions retain completed evidence across rejected, timed out
   else assert.ok(result[action==='task_create'?'taskBindingError':'taskStateError']);
   assert.deepEqual(f.calls.map(c=>c.method),action==='task_boot'?['boot','task_state']:['create_device','task_bind']);
  }
+});
+
+
+test('memory controls keep same-ID choices and restart requests on their owning computer',async()=>{
+ const f=fixture('pages'),d={udid:'11111111-1111-4111-8111-111111111111',name:'iPhone',runtime:'iOS-27',state:'Booted',memoryMode:{mode:'saving',verified:true}};
+ const requests=[],choices=[];
+ f.model.showMemoryDetails=(_device,_lang,choice)=>choices.push(choice);
+ const studio={scope:'studio',request:async(action,params)=>{requests.push({peer:'studio',action,params});return {ok:true};}};
+ const laptop={scope:'laptop',request:async(action,params)=>{requests.push({peer:'laptop',action,params});return {ok:true};}};
+ for(const [context,mode] of [[{},'minimal'],[studio,'standard'],[laptop,'saving']]){
+  f.pages.memoryBadge(d,'en',false,false,context).listeners.click();
+  choices.at(-1).onChange(mode);
+ }
+ assert.equal(f.pages.memoryArgs(d).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'standard');
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'saving');
+ // A dialog keeps its original route even if the task selects another side later.
+ await choices[1].onRestart('standard');await choices[2].onRestart('saving');
+ assert.deepEqual(requests.map(r=>[r.peer,r.action,r.params.udid,r.params.memoryMode]),[
+  ['studio','restart_device',d.udid,'standard'],['laptop','restart_device',d.udid,'saving']]);
+ assert.equal(f.messages.length,0,'remote controls never fall back to the local bridge');
+ f.pages.rememberMemoryChoice(d.udid,'minimal',studio);
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'saving');
+ f.pages.memoryPicker({...d,state:'Shutdown'},'en',false,laptop);
+ f.nodes.filter(n=>n['data-mode']==='standard').at(-1).listeners.click();
+ assert.equal(f.pages.memoryArgs(d,laptop).memoryMode,'standard');
+ assert.equal(f.pages.memoryArgs(d,studio).memoryMode,'minimal');
+ assert.equal(f.pages.memoryArgs(d).memoryMode,'minimal');
+ const broken={scope:'studio',request:async()=>({ok:false,errorCode:'UNSUPPORTED',execution:'not_executed'})};
+ f.pages.memoryBadge(d,'zh-CN',false,false,broken).listeners.click();
+ await assert.rejects(choices.at(-1).onRestart('standard'),/BOOT_UNCONFIRMED/);
+ assert.equal(f.messages.length,0,'unsupported peers cannot restart locally');
 });

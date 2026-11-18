@@ -1084,3 +1084,19 @@ test('fold Fit follows metadata before a slow viewport read, eases scale and cen
  screen.contentDocument={getElementById:()=>null};resolve({width:4,height:4});await new Promise(r=>setImmediate(r));
  assert.equal(f.sim.state.viewport.width,800,'old-document response is ignored');
 });
+
+
+test('remote live memory mode opens the task-owned dialog without local commands in both languages',async()=>{
+ for(const template of ['control.html','control.zh-CN.html'])for(const manage of [true,false]){
+  const device={...status().device,kind:'remote',memoryMode:{mode:'standard',verified:true}};
+  const f=await boot({template,query:'&task=task-1',respond:()=>status({device,devices:[device],viewerPlatform:'remote',remote:{computer:'Mac Studio',manage}})});
+  const posted=[];f.context.parent={postMessage:m=>posted.push(JSON.parse(JSON.stringify(m)))};
+  const button=f.dom.byId['memory-mode'];
+  assert.equal(button.hidden,false);assert.equal(f.dom.byId.resources.hidden,false);assert.equal(button.disabled,!manage);
+  assert.match(button.textContent,/标准|Standard/);
+  button.dispatch('click');await new Promise(r=>setImmediate(r));
+  assert.deepEqual(posted,manage?[{type:'cindy-simulator-remote-action',action:'memory',udid}]:[]);
+  assert.equal(f.dom.body.querySelector('.memory-dialog'),null,'the controller does not create its local dialog');
+  assert.equal(f.calls.some(p=>['restart_device','shutdown','boot'].includes(p.action)),false);
+ }
+});

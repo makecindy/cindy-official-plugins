@@ -186,7 +186,7 @@ const slimDevice = d => d && {udid:d.udid, name:d.name, state:d.state, runtime:d
 const slimCatalog = c => ({ok:true, platforms:{android:{ready:c.platforms?.android?.ready === true}},
   deviceTypes:(c.deviceTypes || []).map(d => ({identifier:d.identifier, name:d.name, productFamily:d.productFamily, ...(d.platform ? {platform:d.platform} : {}), minRuntimeVersion:d.minRuntimeVersion, maxRuntimeVersion:d.maxRuntimeVersion})),
   runtimes:(c.runtimes || []).map(r => ({identifier:r.identifier, name:r.name, version:r.version, ...(r.platform ? {platform:r.platform} : {}), ...(Array.isArray(r.supportedDeviceTypes) ? {supportedDeviceTypes:r.supportedDeviceTypes} : {})}))});
-// Starting and shutting down outlast one request: they run here and the other
+// Starting, restarting and shutting down outlast one request: they run here and the other
 // computer reads the outcome with the task's state. One at a time per task.
 const remoteOps = new Map();
 function remoteStart(sessionId, call, udid, run) {
@@ -227,10 +227,12 @@ async function remoteServe(d) {
     const r = await worker('task_bind', {_task:d.sessionId, udid:d.udid, _locale:locale, _remote:true});
     if (!r.ok) return failed(r);
     if (!running) remoteOps.delete(d.sessionId);
-  } else if (d.call === 'task_boot' || d.call === 'shutdown') {
+  } else if (d.call === 'task_boot' || d.call === 'shutdown' || d.call === 'restart_device') {
     if (!str(d.udid)) return {ok:false, errorCode:'INVALID_ARGUMENT', execution:'not_executed'};
+    if (running && d.call === 'restart_device') return {ok:false, errorCode:'BUSY', execution:'not_executed'};
     if (!running) remoteStart(d.sessionId, d.call, d.udid, () => d.call === 'task_boot'
       ? worker('boot', {udid:d.udid, memoryMode:str(d.memoryMode, 32), _task:d.sessionId, _locale:locale})
+      : d.call === 'restart_device' ? worker('settings_restart', {udid:d.udid, memoryMode:str(d.memoryMode, 32)})
       : worker('settings_shutdown', {udid:d.udid}));
   } else if (d.call !== 'task_state') return {ok:false, errorCode:'UNSUPPORTED', execution:'not_executed'};
   const s = await worker('remote_task_state', {_task:d.sessionId, _locale:locale});
@@ -279,6 +281,7 @@ function learnManage(deviceId, reply) {
 // The device shown here: Cindy's address for its picture, wrapped in this computer's controller page.
 async function remoteViewer(m, locale, state, extra) {
   const device = state.device;
+  if (state.operation?.call === 'restart_device' && state.operation.state === 'running') return state;
   if (!device || device.state !== 'Booted' || state.settings?.enabled === false || !SCREEN.test(device.udid)) return state;
   const opened = await remoteView({op:'open', deviceId:m.deviceId, id:device.udid});
   if (!opened.ok || typeof opened.url !== 'string') return {...state, viewerError:opened.errorCode || 'REMOTE_UNAVAILABLE'};
@@ -333,13 +336,13 @@ async function remoteViewOnly(m, locale, computer, attach = true) {
   return {ok:true, remote:{computer, manage:false}, ...state};
 }
 async function remoteTask(m, locale) {
-  const calls = ['task_state', 'task_bind', 'task_boot', 'catalog', 'create', 'shutdown'];
+  const calls = ['task_state', 'task_bind', 'task_boot', 'catalog', 'create', 'shutdown', 'restart_device'];
   if (typeof m.deviceId !== 'string' || !DEVICE.test(m.deviceId) || !calls.includes(m.call)) return false;
   const global = m.call === 'catalog' || m.call === 'create';
   if (!global && !SESSION.test(m.sessionId)) return false;
   const known = manages(m.deviceId);
   const ask = () => remoteAsk(m.deviceId, {call:m.call, sessionId:global ? undefined : m.sessionId, udid:str(m.udid), name:str(m.name, 64),
-    deviceType:str(m.deviceType), runtime:str(m.runtime), memoryMode:str(m.memoryMode, 32), locale}).then(r => learnManage(m.deviceId, r));
+    deviceType:str(m.deviceType), runtime:str(m.runtime), memoryMode:str(m.memoryMode, 32), locale}).then(r => m.call === 'restart_device' && !r.ok ? r : learnManage(m.deviceId, r));
   if (m.call !== 'task_state') {
     if (known?.state === 'no') return {ok:false, errorCode:'REMOTE_PLUGIN_UPDATE_REQUIRED', execution:'not_executed'};
     const reply = await ask();
