@@ -655,7 +655,7 @@ function startWorker() {
       return;
     }
     if(request.method==='remote_viewer'){
-      try{const p=request.params||{};reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await remote.open({id:p.id,url:p.url,name:p.name,platform:p.platform,devices:p.devices,computer:p.computer,manage:p.manage,rotation:p.rotation,locale:p._locale,task:p._task})}});}
+      try{const p=request.params||{};reply({jsonrpc:'2.0',id:request.id,result:{ok:true,...await remote.open({peer:p.peer,id:p.id,url:p.url,name:p.name,platform:p.platform,devices:p.devices,computer:p.computer,manage:p.manage,rotation:p.rotation,locale:p._locale,task:p._task})}});}
       catch(e){reply({jsonrpc:'2.0',id:request.id,result:{ok:false,errorCode:e.code||'FAILED',message:e.message,execution:e.execution||'not_executed'}});}
       return;
     }

@@ -136,18 +136,19 @@ test('only an address Cindy could have issued is accepted',async()=>{
 // Provider validation must accept every emitted batch, including mixed text/key input.
 for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`remote ${platform} ${lang} keyboard sends provider-compatible input and a readable reconnect title`,async()=>{
   const vm=require('node:vm'),{validEvents}=require('../../cindy-simulator/node/live-screen.cjs');
-  const nodes=new Map(),events={},sent=[],poses=[],intervals=[];
+  const nodes=new Map(),events={},sent=[],poses=[],intervals=[],urls=[];
   const get=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',listeners:{},setAttribute(){},removeAttribute(){},getContext:()=>({}),addEventListener(type,fn){this.listeners[type]=fn;}});return nodes.get(id);};
   const message=data=>{const bytes=Buffer.from(JSON.stringify(data)),packet=Buffer.alloc(5+bytes.length);packet.writeUInt32BE(bytes.length+1);packet[4]=0x10;bytes.copy(packet,5);return packet;};
   const initial=Buffer.concat([message({type:'device',platform,keyboard:true,maxTouches:2}),message({type:'screen',width:2736,height:1260}),message({type:'state',state:'reconnecting'}),message({type:'state',state:'live'})]);
   let first=true,controller,gesture,failNextUp=false,failCleanup=false,holdDown=false,finishDown,failInputAfter=null,inputExecution='unknown';
-  const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token'},parent:{document:{documentElement:{lang}},cindySim:{state:{status:{device:{rotation:1}}}}},
+  const context={URLSearchParams,location:{pathname:'/simulators/SIM-1',search:'?cindyViewer=token&peer=studio'},parent:{document:{documentElement:{lang}},cindySim:{state:{status:{device:{rotation:1}}}}},
     document:{hidden:false,getElementById:get,addEventListener(){}},innerWidth:500,innerHeight:900,
     addEventListener:(type,fn)=>events[type]=fn,setInterval:fn=>intervals.push(fn),setTimeout(){},clearTimeout(){},
     AbortController,AbortSignal,Uint8Array,DataView,TextDecoder,TextEncoder,VideoDecoder:class{},
-    window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{constructor(screen){gesture=screen;}attach(){}cancel(){}detach(){}}},DeviceShell:class{update(pose){poses.push(JSON.parse(JSON.stringify(pose)));}}},
+    window:{Baguette:{_PinchOverlay:class{clear(){}},_PointerInterpreter:class{constructor(screen){gesture=screen;}attach(){}cancel(){}detach(){}}},DeviceShell:class{constructor(_frame,_area,_fit,options){assert.match(options.definitionURL({width:100,height:200,rotation:0}),/&peer=studio/);}update(pose){poses.push(JSON.parse(JSON.stringify(pose)));}}},
     fetch:async(url,options)=>{
-      if(url==='/control-api'){
+      urls.push(url);
+      if(url==='/control-api?peer=studio'){
         const packet=JSON.parse(options.body);sent.push(packet);
         if(packet.action==='input'&&failInputAfter!==null&&failInputAfter--===0){failInputAfter=null;return {ok:false,json:async()=>({ok:false,errorCode:'REMOTE_INPUT_FAILED',execution:inputExecution})};}
         if(packet.action==='release'&&failCleanup)throw Error('cleanup unavailable');
@@ -165,6 +166,7 @@ for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`r
   const settle=()=>new Promise(resolve=>setImmediate(resolve));await settle();
   assert.equal(get('message-title').textContent,lang==='zh-CN'?'正在重新连接':'Reconnecting');
   assert.equal(poses.at(-1).rotation,1);
+  assert.ok(urls.includes('/remote-stream?udid=SIM-1&peer=studio'));
   context.parent.cindySim.state.status.device.rotation=3;intervals[0]();
   assert.deepEqual(poses.at(-1),{width:2736,height:1260,rotation:3});
   const codes=['Enter','Tab','Backspace','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'];
@@ -291,4 +293,32 @@ test('an active but unconfirmed host response ends within the whole-request dead
  assert.equal((await api({action:'release'})).body.ok,true);
  assert.equal((await api({action:'input',events:[{kind:'text',text:'new'}]})).body.ok,true);
  assert.deepEqual(upstream.posts.map(p=>p.body.events[0].kind),['text','release','text']);
+});
+
+
+test('same simulator ID on two computers isolates status, input, stream, renewal and body',async t=>{
+ const a=await host(),b=await host(),viewer=createRemoteViewer();
+ t.after(async()=>{await viewer.close();a.close();b.close();});
+ const open=(peer,upstream,name)=>viewer.open({peer,id:'SIM-1',url:upstream,name,platform:'ios'});
+ const first=new URL((await open('studio',a.url,'Studio phone')).url);
+ const second=new URL((await open('laptop',b.url,'Laptop phone')).url);
+ assert.notEqual(first.href,second.href);
+ const api=async(page,action)=>{
+  const r=await fetch(page.origin+'/control-api?peer='+page.searchParams.get('peer'),{method:'POST',headers:{Origin:page.origin,'Content-Type':'application/json','X-Cindy-Clipboard':page.hash.split('.')[1]},body:JSON.stringify({udid:'SIM-1',action,button:'home'})});return r.json();
+ };
+ assert.equal((await api(first,'status')).device.name,'Studio phone');
+ assert.equal((await api(second,'status')).device.name,'Laptop phone');
+ await api(first,'press');await api(second,'press');assert.equal(a.posts.length,1);assert.equal(b.posts.length,1);
+ viewer.chrome({peer:'studio',id:'SIM-1',width:100,height:200,rotation:0,none:true});
+ const definition=async page=>(await fetch(page.origin+'/simulators/SIM-1/definition.json?cindyViewer='+page.hash.split('.')[1]+'&peer='+page.searchParams.get('peer')+'&w=100&h=200&rotation=0')).json();
+ await definition(first);await definition(second);
+ assert.equal((await open('studio',a.url,'Studio renewed')).chromeWanted,undefined);
+ assert.deepEqual((await open('laptop',b.url,'Laptop phone')).chromeWanted,{width:100,height:200,rotation:0});
+ await open('studio',a.url.replace(TOKEN,'b'.repeat(64)),'Studio renewed');
+ assert.equal((await api(second,'status')).device.name,'Laptop phone');
+ await api(second,'press');assert.equal(b.posts.length,2);
+ for(const [page,expected] of [[first,410],[second,200]]){
+  const response=await fetch(page.origin+'/remote-stream?udid=SIM-1&peer='+page.searchParams.get('peer'),{headers:{'X-Cindy-Clipboard':page.hash.split('.')[1]}});
+  assert.equal(response.status,expected);await response.body.cancel();
+ }
 });

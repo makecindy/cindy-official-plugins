@@ -125,7 +125,7 @@ test('the device’s own body is fetched from the computer that runs it, in orde
   await viewer.ask({call:'task_state',sessionId:'task-1'});assert.equal(fed.length,0);
   // Then the device page's wish is passed on: is it here already, else each piece in order.
   await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
-  const where={id:'SIM-1',width:1260,height:2736,rotation:0};
+  const where={peer:'studio',id:'SIM-1',width:1260,height:2736,rotation:0};
   assert.deepEqual(fed,[{...where,key},{...where,key,index:0,total:2,data:pieces[0]},{...where,key,index:1,total:2,data:pieces[1]}]);
   assert.deepEqual(plain(provider.calls.find(c=>c.method==='remote_chrome_meta').params),{udid:'SIM-1',width:1260,height:2736,rotation:0});
   assert.deepEqual(provider.calls.filter(c=>c.method==='remote_chrome_chunk').map(c=>plain(c.params)),[{key,index:0},{key,index:1}]);
@@ -133,7 +133,7 @@ test('the device’s own body is fetched from the computer that runs it, in orde
   // A model that computer has no artwork for: the worker is told, and the page keeps its plain body.
   have=false;none=true;wanted.rotation=2;
   await viewer.ask({call:'task_state',sessionId:'task-1'});await settle(40);
-  assert.deepEqual(fed.at(-1),{id:'SIM-1',width:1260,height:2736,rotation:2,none:true});
+  assert.deepEqual(fed.at(-1),{peer:'studio',id:'SIM-1',width:1260,height:2736,rotation:2,none:true});
 });
 
 test('a plugin there that cannot be asked still shows its running device, and says what needs updating',async()=>{
@@ -166,13 +166,13 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
     document:{hidden:false,documentElement:{},getElementById:get,addEventListener(){}}};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('cindy-simulator/pages.js','utf8'),context);
-  const pages=context.CindySimPages,sheets=[],badges=[],details=[];
+  const pages=context.CindySimPages,sheets=[],badges=[],details=[],notices=[];
   Object.assign(pages,{locale:async()=>'en',h:(tag,props,children=[])=>({tag,props,children}),memoryDetails:(device,lang,context)=>details.push({device,context}),memoryBadge:(device,lang,disabled,compact,context)=>{badges.push({device,disabled,context});return null;},memoryPicker:()=>null,memoryArgs:()=>({memoryMode:'saving'}),
     createDevice:async options=>{sheets.push(options);return {udid:options.call?'SIM-NEW':'LOCAL-NEW'};},
     rpc:async(action,params)=>{calls.push({action,params:plain(params)});
       const answer=action==='remote_task'?there:action==='manage_state'?{ok:true,devices:mine}:here;
       return typeof answer==='function'?answer(params,action):answer;}});
-  context.CindySimModel={runtimeLabel:()=>'iOS 27.3',deviceRows:list=>list.map(d=>({udid:d.udid,name:d.name,meta:'',tone:'off',available:true})),showMemoryNotice(){},
+  context.CindySimModel={runtimeLabel:()=>'iOS 27.3',deviceRows:list=>list.map(d=>({udid:d.udid,name:d.name,meta:'',tone:'off',available:true})),showMemoryNotice:(...args)=>notices.push(args),
     createResourceSummary:()=>({node:null,update(){},prune(){},label:()=>null})};
   vm.runInContext(fs.readFileSync('cindy-simulator/task.js','utf8'),context);await settle();
   const flatten=n=>[n,...(n.children||[]).filter(Boolean).flatMap(flatten)];
@@ -247,6 +247,17 @@ test('in a remote task the one simulator tab holds both computers’ devices, an
   assert.equal(get('task-notice').hidden,false);
   assert.ok(get('task-notice').children.flatMap(flatten).some(n=>n.props?.text?.includes('Could not confirm the restart completed')));
   assert.equal(calls.filter(c=>c.params.call==='restart_device').length,1);
+  for(const action of ['task_boot','shutdown','restart_device']){
+   there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},operation:{call:action,udid:'SIM-1',state:'failed',errorCode:'IMMEDIATE_FAILURE'}};
+   assert.equal(await vm.runInContext(`act('${action}',{udid:'SIM-1'},'SIM-1')`,context),undefined);
+   assert.ok(text().some(line=>line.includes(action==='restart_device'?'Could not confirm':'IMMEDIATE_FAILURE')));
+  }
+  for(const throughAction of [true,false]){
+   there={ok:true,remote,device:theirs[0],devices:theirs,settings:{enabled:true},operation:{call:'restart_device',udid:'SIM-1',state:'completed',memoryMode:{mode:'custom',requested:'standard',verified:false,warning:'Unverified services'}}};
+   if(throughAction)await vm.runInContext("act('restart_device',{udid:'SIM-1'},'SIM-1')",context);
+   else {clock+=9000;poll();await settle();}
+  }
+  assert.equal(notices.length,2);assert.equal(notices[0][0].memoryMode.warning,'Unverified services');
   // A plugin there that cannot be asked: its devices cannot be chosen or created from here, and the page says why; this computer's still can.
   there={ok:true,remote:{computer:'',manage:false},device:null,devices:[],settings:{enabled:true}};
   clock+=9000;poll();await settle();clock+=9000;poll();await settle();
@@ -341,4 +352,13 @@ test('older remote restart rejection does not disable its existing management or
  assert.equal((await viewer.ask({call:'task_state',sessionId:'task-1'})).remote.manage,true);
  assert.equal(provider.calls.some(c=>c.method==='settings_restart'),false);
  assert.equal(viewer.calls.some(c=>c.method==='settings_restart'),false);
+});
+
+
+test('completed remote restart preserves mode warnings once, including immediate completion',async()=>{
+ const memoryMode={mode:'custom',requested:'standard',verified:false,warning:'Services could not be verified.'};
+ const world=computers({providerWorker:async r=>r.method==='remote_task_state'?{ok:true,...world.state}:r.method==='settings_restart'?{ok:true,memoryMode}:{ok:true}});
+ const result=await world.viewer.ask({call:'restart_device',sessionId:'task-1',udid:'SIM-1',memoryMode:'standard'});
+ assert.equal(result.operation.state,'completed');assert.deepEqual(plain(result.operation.memoryMode),memoryMode);
+ assert.equal((await world.viewer.ask({call:'task_state',sessionId:'task-1'})).operation,undefined);
 });

@@ -192,7 +192,10 @@ const remoteOps = new Map();
 function remoteStart(sessionId, call, udid, run) {
   const op = {call, udid, state:'running', at:Date.now()};
   remoteOps.set(sessionId, op);
-  run().then(r => { if (r?.ok === false) Object.assign(op, {state:'failed', errorCode:r.errorCode || 'FAILED'}); else if (remoteOps.get(sessionId) === op) remoteOps.delete(sessionId); },
+  run().then(r => { if (r?.ok === false) Object.assign(op, {state:'failed', errorCode:r.errorCode || 'FAILED'}); else if (remoteOps.get(sessionId) === op) {
+      if (r?.memoryMode) Object.assign(op,{state:'completed',memoryMode:{mode:r.memoryMode.mode,requested:r.memoryMode.requested,verified:r.memoryMode.verified===true,warning:typeof r.memoryMode.warning==='string'?r.memoryMode.warning.slice(0,500):undefined}});
+      else remoteOps.delete(sessionId);
+    } },
     () => Object.assign(op, {state:'failed', errorCode:'NODE_UNAVAILABLE'}));
   holdWhileRunning();
 }
@@ -239,11 +242,11 @@ async function remoteServe(d) {
   if (!s.ok) return failed(s);
   const op = remoteOps.get(d.sessionId);
   // A failure is told once; the page then shows the device as it is.
-  if (op?.state === 'failed') remoteOps.delete(d.sessionId);
+  if (op && op.state !== 'running') remoteOps.delete(d.sessionId);
   // Phones attached to that computer are not offered to other computers.
   let devices = (s.devices || []).filter(x => x.kind !== 'physical').map(slimDevice);
   const state = () => ({device:s.device?.kind === 'physical' ? null : slimDevice(s.device), devices, settings:{enabled:s.settings?.enabled !== false},
-    ...(op ? {operation:{call:op.call, udid:op.udid, state:op.state, ...(op.errorCode ? {errorCode:op.errorCode} : {})}} : {})});
+    ...(op ? {operation:{call:op.call, udid:op.udid, state:op.state, ...(op.errorCode ? {errorCode:op.errorCode} : {}), ...(op.memoryMode ? {memoryMode:op.memoryMode} : {})}} : {})});
   while (devices.length > 8 && JSON.stringify(state()).length > REMOTE_BYTES) devices = devices.slice(0, Math.ceil(devices.length / 2));
   return {ok:true, state:state()};
 }
@@ -287,7 +290,7 @@ async function remoteViewer(m, locale, state, extra) {
   if (!opened.ok || typeof opened.url !== 'string') return {...state, viewerError:opened.errorCode || 'REMOTE_UNAVAILABLE'};
   const platform = device.platform === 'android' ? 'android' : /tvOS/.test(device.runtime || '') ? 'tvos' : /xrOS|visionOS/.test(device.runtime || '') ? 'visionos'
     : /iPad/.test(device.productFamily || device.deviceType || device.name || '') ? 'ipados' : 'ios';
-  const viewer = await worker('remote_viewer', {id:device.udid, url:opened.url, name:device.name, platform:extra.platform || platform,
+  const viewer = await worker('remote_viewer', {peer:m.deviceId, id:device.udid, url:opened.url, name:device.name, platform:extra.platform || platform,
     devices:state.devices, computer:extra.computer, manage:extra.manage, rotation:device.rotation, _locale:locale, _task:m.sessionId});
   // The device page wants the device's own body: fetched from that computer once, off this request.
   if (viewer.ok && viewer.chromeWanted && extra.manage) void remoteBody(m.deviceId, device.udid, viewer.chromeWanted);
@@ -306,7 +309,7 @@ async function remoteBody(deviceId, udid, picture) {
   remoteBodies.set(id, entry);
   try {
     const pose = Number.isInteger(picture.rotation) ? {rotation:picture.rotation} : {};
-    const where = {id:udid, width:picture.width, height:picture.height, ...pose};
+    const where = {peer:deviceId, id:udid, width:picture.width, height:picture.height, ...pose};
     const meta = await remoteAsk(deviceId, {call:'chrome', udid, width:picture.width, height:picture.height, ...pose});
     // That computer has no body for this model, or its plugin does not know the request: keep the plain one.
     if (meta.ok ? meta.result?.none === true : meta.errorCode === 'UNSUPPORTED') { await worker('remote_chrome', {...where, none:true}); return; }

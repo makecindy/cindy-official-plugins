@@ -1100,3 +1100,13 @@ test('remote live memory mode opens the task-owned dialog without local commands
   assert.equal(f.calls.some(p=>['restart_device','shutdown','boot'].includes(p.action)),false);
  }
 });
+
+
+test('remote controller preserves computer identity through status and its screen URL',async()=>{
+ const device={...status().device,kind:'remote'};
+ const f=await boot({query:'&peer=studio',respond:()=>status({device,devices:[device],viewerPlatform:'remote',remote:{manage:true}})});
+ assert.match(f.dom.byId.screen.src,/peer=studio/);
+ const urls=[],fetch=f.context.fetch;f.context.fetch=(url,options)=>{urls.push(url);return fetch(url,options);};
+ f.poll();await new Promise(r=>setImmediate(r));
+ assert.ok(urls.includes('/control-api?peer=studio'));
+});

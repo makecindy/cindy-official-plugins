@@ -7,6 +7,8 @@
 (() => {
   const udid=decodeURIComponent(location.pathname.split('/')[2]),token=new URLSearchParams(location.search).get('cindyViewer');
   const $=id=>document.getElementById(id),canvas=$('display'),ctx=canvas.getContext('2d'),frame=$('nativeDeviceFrame'),area=$('screenArea'),keyboard=$('keyboard');
+  const peerQuery=new URLSearchParams(location.search).has('peer')?`&peer=${encodeURIComponent(new URLSearchParams(location.search).get('peer'))}`:'';
+  const controlUrl='/control-api'+(peerQuery?'?'+peerQuery.slice(1):'');
   const zh=parent.document.documentElement.lang==='zh-CN',t=(cn,en)=>zh?cn:en;
   canvas.setAttribute('aria-label',t('设备画面','Device screen'));keyboard.setAttribute('aria-label',t('电脑键盘输入','Computer keyboard input'));
   let device=null,picture=null,points=null,live=false,closed=false,drawn=false,noticeTimer,abort=null;
@@ -33,7 +35,7 @@
   $('takeover').textContent=t('在这里查看','View here');
   $('takeover').addEventListener('click',()=>{
     $('takeover').hidden=true;$('message-retry').style.display='';
-    void fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'retry',udid}),signal:AbortSignal.timeout(15000)}).catch(()=>{});
+    void fetch(controlUrl,{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'retry',udid}),signal:AbortSignal.timeout(15000)}).catch(()=>{});
   });
   function notice(message){clearTimeout(noticeTimer);$('notice-text').textContent=message;$('notice').hidden=!message;if(message)noticeTimer=setTimeout(()=>{$('notice').hidden=true;},5000);}
 
@@ -66,7 +68,7 @@
         }
         if(!events.length)throw Error('INPUT_TOO_LARGE');
         releasing=events.every(e=>e.kind==='release');
-        const response=await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'input',udid,events}),keepalive:releasing,signal:AbortSignal.timeout(15000)});
+        const response=await fetch(controlUrl,{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'input',udid,events}),keepalive:releasing,signal:AbortSignal.timeout(15000)});
         const result=await response.json().catch(()=>({}));
         if(!response.ok||result.ok===false)throw Object.assign(Error(result.errorCode||'REMOTE_INPUT_FAILED'),result);
       }
@@ -74,7 +76,7 @@
       // Drop unconfirmed input without replay; request a universal device cleanup below.
       waiting=[];cancelLocal();
       // One best-effort cleanup after the failed request, not a replay or a new queue item.
-      if(!releasing)await fetch('/control-api',{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'release',udid}),keepalive:true,signal:AbortSignal.timeout(10000)}).catch(()=>{});
+      if(!releasing)await fetch(controlUrl,{method:'POST',headers:{'Content-Type':'application/json','X-Cindy-Clipboard':token},body:JSON.stringify({action:'release',udid}),keepalive:true,signal:AbortSignal.timeout(10000)}).catch(()=>{});
       if(!closed&&error.errorCode!=='VIEW_NOT_READY')notice(t('操作结果尚未确认，请先查看设备上的实际结果，避免重复输入。','The result is unconfirmed. Check the device before entering it again.'));
     }finally{sending=false;if(waiting.length)void flush();}
   }
@@ -178,7 +180,7 @@
     return picture&&Number.isInteger(rotation)&&rotation>=0&&rotation<=3?{...picture,rotation}:null;
   };
   const shell=new window.DeviceShell(frame,area,fit,{
-    definitionURL:screen=>`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${screen.width}&h=${screen.height}&rotation=${screen.rotation}`,
+    definitionURL:screen=>`${location.pathname}/definition.json?cindyViewer=${encodeURIComponent(token)}&w=${screen.width}&h=${screen.height}&rotation=${screen.rotation}${peerQuery}`,
     retryMs:3000,
   });
   function fit(){
@@ -208,7 +210,7 @@
       try{
         if(typeof VideoDecoder==='undefined')throw Error('UNSUPPORTED');
         abort=new AbortController();
-        const response=await fetch(`/remote-stream?udid=${encodeURIComponent(udid)}`,{headers:{'X-Cindy-Clipboard':token},signal:abort.signal});
+        const response=await fetch(`/remote-stream?udid=${encodeURIComponent(udid)}${peerQuery}`,{headers:{'X-Cindy-Clipboard':token},signal:abort.signal});
         if(!response.ok)throw Error('CLOSED');
         reader=response.body.getReader();
         let bytes=new Uint8Array(0),stamp=0,needsKey=true,config=null;

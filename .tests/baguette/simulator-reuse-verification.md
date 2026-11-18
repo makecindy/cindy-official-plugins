@@ -354,3 +354,48 @@ simulator aggregate: 919 passed, 0 failed (76.97 seconds), Node v22.21.1.
 Manifest validation, diff whitespace check and PR preflight passed. Forge pack
 is unavailable on this task's tool surface; packaging is checked by PR CI,
 not claimed as a local Forge artifact. No real two-computer test was performed.
+
+## Round 14 terminal outcomes and computer identity - 0.3.58, 2026-11-18
+
+Two failure families: a terminal operation outcome must reach the UI whether it
+arrives in the action response or a poll; every viewer route must retain its
+computer and device. The user already authorized complete remote memory restart
+support. This round restores the existing local warning behavior remotely.
+
+Owners: remoteOps retains its existing single operation, now including a bounded
+memory outcome until the existing one-time state delivery. acceptOperation is the
+single terminal-outcome consumer for action and polling responses. The existing
+views map uses [peer, udid], carried through main, worker, controller URL, device
+frame, stream, input and body queries. No second registry or new lock, queue,
+retry, persistence or timer is added. Deleting these identity/outcome fields
+would break the original correct-device operation and full restart parity goals.
+The growing diff also includes tests, paired documentation and integrated main;
+previous worker batching machinery was already removed in 0.3.56.
+
+| Event | Running | Failed | Completed with memory outcome |
+| --- | --- | --- | --- |
+| Action response | Show existing progress | Show failure, return false | Shared local memory notice |
+| State poll | Show existing progress | Same failure consumer | Same memory notice consumer |
+| Next read after terminal delivery | No replay | No repeat delivery | No repeat delivery |
+| Two peers share a UDID | Separate upstream, input, stream and body binding | Renewal affects only same peer | No cross-peer mutation |
+
+Symmetric audit: boot, shutdown and restart; immediate and deferred worker
+completion; known mismatch, unverified and warning-only successful boot; both
+controller and device frame routing; address renewal and shell fetches. Only
+mode/requested/verified and at most 500 warning characters cross the outcome
+boundary. Remote artwork remains content-addressed in the existing store, while
+its per-view attachment and wanted picture are scoped by peer.
+
+Three regressions fail against 32588485: lost completed restart outcome, task
+handling of immediate terminal outcomes, and two real HTTP upstreams with the
+same simulator ID. The latter checks separate status, input, renewal, stream and
+body queries. Actual controller/screen-script fixtures additionally verify peer
+propagation. These remain VM/loopback tests, not real two-computer Cindy testing.
+No device was installed or restarted. Genuine two-computer acceptance remains
+required. Main bfadffb3 was merged without simulator conflicts.
+
+Final validation: focused real-page/logic/HTTP suites 80 passed, 0 failed
+(10.46 seconds). Required repository suites and single simulator aggregate:
+922 passed, 0 failed (69.11 seconds), Node v22.21.1. Manifest validation and
+whitespace checks passed. No local Forge package or runtime install is claimed;
+CI packaging will run on the pushed head.

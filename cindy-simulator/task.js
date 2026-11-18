@@ -243,6 +243,18 @@ function render() {
   }
   inner.append(h('p', { class: 'status' + (note?.error ? ' error' : ''), text: note?.text || '' }));
 }
+// Both an action reply and a later poll can carry the provider's terminal result.
+function acceptOperation(r) {
+  const op = far() && r.operation;
+  if (!op) return true;
+  if (op.state === 'failed') {
+    note = {text:op.call === 'restart_device' ? T.remoteRestartFailed : T.remoteFailed(op.errorCode || 'FAILED'),error:true,sticky:true};
+    return false;
+  }
+  if (op.memoryMode) M.showMemoryNotice({memoryMode:op.memoryMode},lang,op.memoryMode.requested,
+    r.devices?.find(d=>d.udid===op.udid)?.name || op.udid);
+  return true;
+}
 async function refresh() {
   if (busy || pending) return;
   const request = pending = {};
@@ -256,8 +268,7 @@ async function refresh() {
     if (pending !== request || shown !== side) return;
     if (!r.ok) throw r;
     accept(r); refreshedAt = Date.now(); if (note && !note.sticky) note = null;
-    // An operation that computer could not finish is told once.
-    if (far() && r.operation?.state === 'failed') note = { text: r.operation.call === 'restart_device' ? T.remoteRestartFailed : T.remoteFailed(r.operation.errorCode || 'FAILED'), error: true, sticky: true };
+    acceptOperation(r);
   } catch (error) { if (pending !== request) return; if (!viewerUrl && !note?.sticky) note = { text: errorText(error), error: true }; }
   finally { if (pending === request) pending = null; }
   render();
@@ -276,7 +287,7 @@ async function act(action, params, marker) {
     if (r.taskBindingError || r.appContextError) { note = { text: T.recordFailed, error: true, sticky: true }; return; }
     if (r.taskStateError) { state = null; choosing = false; show(null); note = { text: T.stateFailed, error: true, sticky: true }; return; }
     choosing = false; accept(r);
-    if (action === 'restart_device' && r.operation?.state === 'failed') { note = {text:T.remoteRestartFailed,error:true,sticky:true}; return; }
+    if (!acceptOperation(r)) return;
     return true;
   } catch (error) { if (pending === request) note = { text: action === 'restart_device' ? T.remoteRestartFailed : errorText(error), error: true, sticky: true }; }
   finally { busy = null; render(); if (pending === request) { pending = null; if (!viewerUrl) refresh(); } }

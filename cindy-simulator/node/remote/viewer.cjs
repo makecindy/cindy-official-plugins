@@ -26,10 +26,12 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   let server,base,token,starting,lastSeen=0,shotTo='desktop';
   // screen id → {id, upstream, name, platform, devices, computer, manage, chrome, wanted}
   const views=new Map();
+  const identity=(peer,id)=>JSON.stringify([peer || '',id]);
+  const peerQuery=peer=>peer?`&peer=${encodeURIComponent(peer)}`:'';
   // Device bodies fetched from the computers that run the devices (see chrome.cjs).
   const bodies=createChromeStore();
   const sized=p=>`${p.width}x${p.height}|${p.rotation ?? "unknown"}`;
-  const url=(id,locale,task)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}#cindyClipboard=${new URL(base).port}.${token}`;
+  const url=(id,locale,task,peer)=>`${base}/control?udid=${encodeURIComponent(id)}&lang=${locale==='zh-CN'?'zh-CN':'en'}${task?`&task=${encodeURIComponent(task)}`:''}${peerQuery(peer)}#cindyClipboard=${new URL(base).port}.${token}`;
   const assets={'/control.js':['../control.js','text/javascript'],'/control-model.js':['../control-model.js','text/javascript'],'/control.css':['../control.css','text/css'],
     '/device-shell.js':['../physical/shell.js','text/javascript'],
     '/keys.js':['../keys.cjs','text/javascript'],'/remote.js':['screen.js','text/javascript'],'/remote.css':['../physical/screen.css','text/css'],
@@ -160,7 +162,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
           let capability=u.searchParams.get('cindyViewer')===token;
           try{const r=new URL(req.headers.referer);capability ||= r.origin===base&&r.searchParams.get('cindyViewer')===token;}catch{}
           if(!capability)return reply(403,{message:'Viewer expired. Reopen the device.'});
-          const view=views.get(decodeURIComponent(match[1]));
+          const view=views.get(identity(u.searchParams.get('peer'),decodeURIComponent(match[1])));
           if(!view)return reply(404,{message:'Device not opened'});
           if(match[2]){
             // The device's own body for the picture as it is turned now. Until it
@@ -178,7 +180,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
         }
         if(req.method==='GET'&&u.pathname==='/remote-stream'){
           if(req.headers['x-cindy-clipboard']!==token||(req.headers.origin&&req.headers.origin!==base))return reply(403,{message:'Viewer expired. Reopen the device.'});
-          const view=views.get(u.searchParams.get('udid'));if(!view)return reply(404,{message:'Device not opened'});
+          const view=views.get(identity(u.searchParams.get('peer'),u.searchParams.get('udid')));if(!view)return reply(404,{message:'Device not opened'});
           lastSeen=Date.now();return pipe(view,res);
         }
         if(req.method!=='POST'||u.pathname!=='/control-api'||req.headers.origin!==base||req.headers['x-cindy-clipboard']!==token)return reply(403,{message:'Viewer expired. Reopen the device.'});
@@ -186,7 +188,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
         for await(const c of req){size+=c.length;if(size>MAX_SHOT)return reply(413,{message:'Input too large'});chunks.push(c);}
         const p=JSON.parse(Buffer.concat(chunks));
         if(p.action!=='screenshot'&&size>MAX_INPUT)return reply(413,{message:'Input too large'});
-        const view=views.get(p.udid);if(!view)return reply(404,{message:'Device not opened'});
+        const view=views.get(identity(u.searchParams.get('peer'),p.udid));if(!view)return reply(404,{message:'Device not opened'});
         return reply(200,{ok:true,...await control(view,p)});
       }catch(e){if(!res.headersSent)reply(409,{ok:false,errorCode:e.code||'VIEWER_FAILED',message:e.message,execution:e.execution||'unknown'});else res.end();}
     });
@@ -196,20 +198,20 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   return {
     viewing:()=>Date.now()-lastSeen<15000,
     // Opens (or re-points) the page for one device; the same device keeps its page while Cindy renews the address.
-    async open({id,url:upstream,name,platform,devices,computer,manage,rotation,locale,task}){
-      if(typeof id!=='string'||!SCREEN_ID.test(id)||typeof upstream!=='string'||!HOST_URL.test(upstream)||!PLATFORMS.includes(platform))
+    async open({peer='',id,url:upstream,name,platform,devices,computer,manage,rotation,locale,task}){
+      if(typeof peer!=='string'||peer.length>128||typeof id!=='string'||!SCREEN_ID.test(id)||typeof upstream!=='string'||!HOST_URL.test(upstream)||!PLATFORMS.includes(platform))
         throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       if(starting)await starting;else if(!server){starting=start().finally(()=>{starting=null;});await starting;}
-      const previous=views.get(id);
-      views.set(id,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id,devices:listedDevices(devices),
+      const key=identity(peer,id),previous=views.get(key);
+      views.set(key,{id,upstream,platform,name:typeof name==='string'&&name?name.slice(0,128):id,devices:listedDevices(devices),
         computer:typeof computer==='string'?computer.slice(0,80):'',manage:manage===true,rotation:Number.isInteger(rotation)&&rotation>=0&&rotation<=3?rotation:undefined,chrome:previous?.chrome||new Map(),wanted:previous?.wanted||null});lastSeen=Date.now();
       // The device page asked for a body that is not here yet: the caller fetches it.
-      return {url:url(id,locale,task),ready:true,...(views.get(id).wanted?{chromeWanted:views.get(id).wanted}:{})};
+      return {url:url(id,locale,task,peer),ready:true,...(views.get(key).wanted?{chromeWanted:views.get(key).wanted}:{})};
     },
     // The body for one device as it is turned: `none` when that computer has
     // none, a key alone to ask whether it is already here, or its next piece.
-    chrome({id,width,height,rotation,none,key,index,total,data}){
-      const view=views.get(id),picture=pictureOf({width,height,rotation});
+    chrome({peer='',id,width,height,rotation,none,key,index,total,data}){
+      const view=views.get(identity(peer,id)),picture=pictureOf({width,height,rotation});
       if(!view||!picture)throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
       const settle=value=>{view.chrome.set(sized(picture),value);if(view.wanted&&sized(view.wanted)===sized(picture))view.wanted=null;return {have:true};};
       if(none===true)return settle('none');

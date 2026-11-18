@@ -7,6 +7,7 @@
   const t = M.strings(lang);
   const params = new URLSearchParams(location.search);
   let udid = params.get('udid');
+  const peerQuery=params.has('peer')?`&peer=${encodeURIComponent(params.get('peer'))}`:'';
   const token = new URLSearchParams(location.hash.slice(1)).get('cindyClipboard')?.split('.')[1];
   const $ = (id) => document.getElementById(id);
   const screen = $('screen'), stage = $('stage'), scroll = $('scroll'), frame = $('frame'), overlay = $('overlay'), dock = $('dock');
@@ -84,7 +85,7 @@
   async function api(action, extra = {}) {
     let r;
     try {
-      r = await fetch('/control-api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Cindy-Clipboard': token },
+      r = await fetch('/control-api'+(peerQuery?'?'+peerQuery.slice(1):''), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Cindy-Clipboard': token },
         // Every control action uses the worker's existing request budget (115s).
         // Keep the HTTP response alive through it, including screenshots and recovery.
         body: JSON.stringify({ ...extra, action, udid, locale: lang }), signal: AbortSignal.timeout(120000) });
@@ -109,7 +110,7 @@
     // A device on another computer always uses the plugin's remote device page.
     screen.src = !remote() && !M.handheld(state.status?.device)
       ? `/platform-stage.html?udid=${encodeURIComponent(udid)}&lang=${lang}&platform=${M.platform(state.status?.device)}&cindyViewer=${encodeURIComponent(token || '')}`
-      : `/simulators/${encodeURIComponent(udid)}?handheld=0${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
+      : `/simulators/${encodeURIComponent(udid)}?handheld=0${peerQuery}${token ? `&cindyViewer=${encodeURIComponent(token)}` : ''}${location.hash}`;
     state.viewport = null; state.fitPct = 0; state.pose = null; state.view3D = null; state.panel3D = null;
   }
   function blank() { stopFitMotion(); state.generation = null; screen.src = 'about:blank'; }
@@ -290,7 +291,7 @@
         return state.viewport;
       }
       const w = screen.contentWindow;
-      const def = await (await w.fetch(`/simulators/${encodeURIComponent(udid)}/definition.json?cindyViewer=${encodeURIComponent(token || '')}`)).json();
+      const def = await (await w.fetch(`/simulators/${encodeURIComponent(udid)}/definition.json?cindyViewer=${encodeURIComponent(token || '')}${peerQuery}`)).json();
       const v = def?.screen?.viewport;
       if (!state.viewport && v?.width > 0 && v?.height > 0) state.viewport = { width: v.width, height: v.height };
     } catch {}
