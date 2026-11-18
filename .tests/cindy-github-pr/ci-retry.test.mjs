@@ -300,6 +300,40 @@ test('unreconciled old evidence remains fail-closed after cache deletion and res
   });
 });
 
+test('legacy evidence survives invalid current diagnoses, cache cleanup and process restart', async t => {
+  for (const command of [['--ci-retry-status'], ['--reserve-ci-retry', oldHead]]) {
+    for (const diagnosis of ['missing file', 'broken JSON', 'invalid fields']) {
+      for (const legacy of ['known failure', 'unknown URL receipt']) await t.test(`${command[0]} / ${diagnosis} / ${legacy}`, async t => {
+        const fx = fixture(t);
+        fs.mkdirSync(fx.stateDir);
+        const known = legacy === 'known failure';
+        const cached = known ? ciRetryFilePath(fx.stateDir, prNodeId, failure) : stateFilePath(fx.stateDir, 'example/repo', 42) + '.ci-retry';
+        const bytes = JSON.stringify({ ...(known ? { prNodeId, failure } : {}), sourceHead: oldHead, reservedAt: 123 });
+        fs.writeFileSync(cached, bytes);
+        if (diagnosis === 'missing file') fs.unlinkSync(fx.diagnosis);
+        else fs.writeFileSync(fx.diagnosis, diagnosis === 'broken JSON' ? '{' : JSON.stringify({ ...failure, cause: '' }));
+        assert.equal((await fx.process(command)).code, 1, 'invalid diagnosis cannot start a reservation');
+        assert.equal(fs.readFileSync(path.join(fx.retryDir, path.basename(cached)), 'utf8'), bytes,
+          'persist raw legacy evidence before parsing this invocation diagnosis');
+        assert.equal(fs.readFileSync(cached, 'utf8'), bytes, 'retain original cache evidence');
+        assert.equal(path.relative(fx.root, path.resolve(fx.stateDir)), 'state');
+        fs.rmSync(fx.stateDir, { recursive: true });
+        fs.writeFileSync(fx.diagnosis, JSON.stringify(failure));
+        const restarted = await fx.process(['--ci-retry-status']);
+        if (known) {
+          assert.equal(restarted.code, 0, restarted.stderr);
+          const status = JSON.parse(restarted.stdout);
+          assert.equal(status.available, false);
+          assert.equal(status.pr_consumed, 1, 'retain the prior attempt, not a new reservation');
+          assert.equal(status.reservation.sourceHead, oldHead);
+        } else assert.equal(restarted.code, 1, 'unknown legacy outcome remains fail-closed');
+        assert.equal((await fx.process(['--reserve-ci-retry', newHead])).code, 1);
+        assert.equal(fs.readdirSync(fx.retryDir).filter(name => name.endsWith('.slot')).length, known ? 1 : 0);
+      });
+    }
+  }
+});
+
 test('opaque legacy GitHub PR IDs work in CLI, old evidence adoption and durable slots', async t => {
   const fx = fixture(t);
   const legacy = 'MDExOlB1bGxSZXF1ZXN0MQ==';

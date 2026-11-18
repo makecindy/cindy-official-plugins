@@ -210,7 +210,11 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    diagnosis stop recovery for reconciliation; do not silently discard them.
    All matching old per-failure receipts in durable data and the current cache
    count toward the two slots, even when querying another diagnosis. Migration
-   retains the originals and never overwrites durable evidence. More than two
+   retains the originals and never overwrites durable evidence. It preserves old
+   evidence before reading this invocation's diagnosis, so a missing, damaged or
+   invalid diagnosis cannot leave old outcomes vulnerable to cache cleanup.
+   Such an invocation cannot create a new reservation; adopting a verified older
+   attempt only retains its existing consumption. More than two
    older attempts, unreadable receipts or unknown prior identity/outcome stop
    recovery; migration never grants two fresh attempts on top of old history.
 4. Recheck eligibility 6 (no approval, queue or auto-merge; all states known),

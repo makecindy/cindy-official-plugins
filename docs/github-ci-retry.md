@@ -69,6 +69,9 @@ observation directory with `--state-dir`, including status/crash recovery.
 An explicit follower directory must not be replaced by an environment/default
 cache, or old receipts may be missed. Unknown directory means stop; the durable
 receipt data root and quota remain unchanged.
+Legacy evidence is preserved before the current diagnosis is read. A missing,
+damaged or invalid diagnosis cannot bypass that preservation or create a new
+reservation; migration only retains already-consumed older attempts.
 
 **At most two CI-only repush attempts per PR/computer, and at most one per
 diagnosed failure.** At the total limit, stop and report even for another fault.

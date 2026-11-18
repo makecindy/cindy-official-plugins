@@ -540,6 +540,34 @@ only. Executable plugin/recovery code is unchanged from e47ec22. Source 1.5.30
 was not installed; real recovery/UI prerequisites remain unmet. No real
 preference, credential, permission, quota, merge or publication changed.
 
+## Preserve old evidence before the current diagnosis — source 1.5.31 (2026-11-18)
+
+Round 20 addresses [diagnosis failure before migration](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4615271337).
+The status/reserve entry point now calls the existing legacy adoption before
+reading the current diagnosis file. Its exclusive raw copy therefore survives
+a missing file, invalid JSON or invalid fields. Migration retains already-used
+attempts; invalid current diagnoses cannot create a new reservation. No new
+storage, lock, queue, retry or allocator was introduced.
+
+All 12 cases failed first on 7a53d71 because the durable raw copy was absent.
+After the order change, the focused matrix passed (13 tests including its
+parent, 3.4 seconds): status/reserve, three diagnosis errors, and known versus
+unknown URL-named old evidence. New processes after isolated cache deletion
+still report one previously consumed attempt or reject the unknown outcome,
+and cannot reserve the same failure anew. Original and durable receipt bytes
+are preserved. These are isolated CLI fixtures, not live recovery acceptance.
+
+All four required repository suites plus plugin tests passed: 348 passed,
+19 Windows platform skips, zero failures in 140.9 seconds, using the same
+Windows/Node/test-process Git Bash environment as 1.5.30.
+Manifest and staged-tree package/content checks passed: tree
+`38c5f55364e9c8356c26d4aecc6fa250601f3f95`, 31 files, 224409 compressed bytes,
+620747 expanded bytes; archive inspected only in memory. Main/settings/locales
+are unchanged from 1.5.30; the packaged gate changes only the adoption/read
+order above. Source 1.5.31 was not installed, and real recovery/UI prerequisites
+remain unmet. No real preference, credentials, permissions, quota, CI-only
+rewrite, merge or publication changed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

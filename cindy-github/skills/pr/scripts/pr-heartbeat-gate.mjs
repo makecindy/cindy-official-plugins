@@ -1555,8 +1555,9 @@ async function gateMain(argv, ctx) {
   if (args.ciRetryStatus || args.reserveCiRetry) {
     // A PR node_id survives repository renames/transfers and URL aliases.
     // The agent obtains it from the live PR, not from the mutable repository name.
-    const failure = readCiRetryFailure(args.ciRetryFailure);
+    // Preserve previous outcomes even when this invocation's diagnosis is invalid.
     adoptCiRetryEvidence(args.stateDir, args.ciRetryDir, args.ciRetryId);
+    const failure = readCiRetryFailure(args.ciRetryFailure);
     if (args.reserveCiRetry) {
       const claim = claimCiRetrySlot(args.ciRetryDir, { prNodeId: args.ciRetryId, failure, sourceHead: args.reserveCiRetry, reservedAt: now });
       if (!claim.created) throw new Error('CI repush budget already consumed for this failure on this PR; verify the previous outcome, do not amend or push again');
