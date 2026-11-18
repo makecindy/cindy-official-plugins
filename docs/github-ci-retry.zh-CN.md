@@ -41,6 +41,12 @@ CI-only 恢复均停止。Agent 在预留/改写前读取完整 review 与实时
 不能刷新 lease 后盲推。随后核对新 SHA 确实进入原 PR，以及 CI 是否真正启动；启动
 不代表通过。
 
+动态 ref、远端、URL、ID 和路径始终作为独立参数数据，包括完整 lease 选项及
+refspec。既有 Agent 优先使用不经 shell 的 argv 调用；仅支持任务 shell 时，按实际
+shell 对每个完整参数作字面量引用。Git ref 校验和 JSON 编码不承担 shell 转义。
+[参数边界](../cindy-github/skills/pr/references/ci-retry.md#argument-boundary)同样覆盖只读查询、
+额度操作、验签及崩溃恢复，不新增执行器。
+
 **本机每个 PR 累计最多两次 CI-only 重推，同一故障最多一次。** 达到总上限后，
 即使诊断不同也停止并报告，不再 amend/push。每次 amend 前，既有 gate 用不可变 PR
 `node_id` 排他创建两个固定持久名额之一，记录稳定诊断（workflow 文件、job 名称、

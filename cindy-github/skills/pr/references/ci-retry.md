@@ -5,6 +5,48 @@ an autonomous Git worker. The plugin cannot establish branch ownership or
 diagnose CI logs by itself. The Agent must establish the facts below. Unknown
 facts stop recovery; do not replace them with assumptions or a checklist flag.
 
+## Argument boundary
+
+Treat every ref, remote, URL, node ID, SHA and path read from Git/GitHub as data.
+Git ref validation does not escape shell syntax: legal refs can contain `$()`,
+backticks, quotes, semicolons and ampersands. This rule applies to every command
+in this workflow, including reads, reservation, signature checks and crash recovery.
+Prefer the existing task tool's separate executable/argument-list interface with
+no shell. Never join these arrays into command text, or use `JSON.stringify` as
+shell escaping. Do not interpolate values into JavaScript source either.
+
+If the existing tool accepts shell text only, literal-quote each **complete**
+argument for that actual shell, including the whole lease option and refspec.
+In POSIX shells use single-quoted literals and encode an embedded single quote
+as `'\''`; in PowerShell use single-quoted literals and double embedded single
+quotes (`''`). Double-quoting substituted text does not protect `$()` or backticks.
+Do not apply those rules to cmd.exe, use eval/Invoke-Expression, or reparse a
+constructed command. Stop if the tool/shell cannot preserve an argument exactly.
+Native argument forwarding also depends on the shell version; verify the literal
+round-trip when using a shell-only interface, including embedded quotes, or stop.
+Keep the existing executor and authorization; do not add a Git runner.
+
+The following defines argument data, not an executable recovery script. Bind the
+identifiers from verified structured reads; never paste their contents into this
+code or an unquoted shell assignment. `gatePath` is the resolved current gate
+script, and `diagnosisPath` is the existing diagnosis file. Pass the Git arrays
+to `git` and the gate arrays to the already selected Node executable. The `--`
+separators prevent remote data from being interpreted as Git options.
+
+```js
+// Argument lists for the existing task execution tool.
+const exactRef = 'refs/heads/' + verifiedBranch;
+const checkRefArgs = ['check-ref-format', exactRef];
+const remoteArgs = ['ls-remote', '--heads', '--', verifiedRemote, exactRef];
+const reserveArgs = [gatePath, prUrl, '--reserve-ci-retry', originalRemoteSha,
+  '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
+const statusArgs = [gatePath, prUrl, '--ci-retry-status',
+  '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
+const verifyArgs = ['verify-commit', newSha];
+const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,
+  '--', verifiedRemote, 'HEAD:' + exactRef];
+```
+
 ## Eligibility
 
 All conditions must hold:
@@ -125,7 +167,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    enable signing, select another key, weaken verification or silently strip
    the signature. Git's normal signing failure must fail the amend, not fall
    back to an unsigned commit.
-2. Read that exact ref with `git ls-remote --heads <verified-remote> <exact-ref>`.
+2. Read that exact ref using `git` with `remoteArgs` above.
    Its SHA must equal both local HEAD and the current GitHub PR head. Inspect
    the PR commit list and task history for other people's or unknown commits.
    If anything differs, stop and reconcile safely; do not fetch/reset away an
@@ -135,9 +177,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    hold, consume one of the **two total CI-only repush attempts for this PR/computer**,
    requiring that this diagnosed failure has not consumed one already:
 
-   ```sh
-   node "<skill-dir>/scripts/pr-heartbeat-gate.mjs" <PR_URL> --reserve-ci-retry <verified-remote-SHA> --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json
-   ```
+   Use the selected Node executable with `reserveArgs` above, preserving each
+   argument boundary. This remains a budget operation, not a Git executor.
 
    Require exit 0, `reason: "ci-retry-reserved"` and the matching
    `reservation.sourceHead` and normalized `reservation.failure`. The return
@@ -146,7 +187,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    diagnoses; a successful reserve reports the consumed receipt, not a new available
    attempt. This receipt
    only consumes budget; it does not authorize Git operations.
-   `--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` reads it without GitHub calls;
+   The selected Node executable with `statusArgs` reads it without GitHub calls;
    it only writes when adopting earlier receipts into the fixed durable slots.
    The budget survives cache cleanup, changed SHAs, gate acknowledgements,
    follow-up restarts, repository renames/transfers and interrupted operations.
@@ -175,7 +216,7 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    unchanged tree, parents and author; compare the message (only required DCO
    additions may differ). If hooks changed the tree or SHA is unchanged, stop.
    If the old head was signed, require a signature header on the new commit and
-   successful `git verify-commit <new-SHA>` with the authorized signer before
+   successful `git` verification with `verifyArgs` and the authorized signer before
    any push. A missing, invalid or unknown signature means leave it unpushed
    and report the result; never discard the old provenance silently. Local
    verification is not evidence that GitHub's Verified badge was preserved.
@@ -188,9 +229,8 @@ the immutable PR ID; it cannot verify the Agent's causal diagnosis.
    now, leave the local amend unpushed and report it; do not reset it automatically.
    Push exactly once:
 
-   ```sh
-   git push --force-with-lease=refs/heads/<branch>:<original-verified-remote-SHA> <verified-remote> HEAD:refs/heads/<branch>
-   ```
+   Use `git` with `pushArgs` above: the lease is one complete argument, the remote
+   is one argument after `--`, and the destination refspec is one argument.
 
    Never use bare `--force`, implicit lease expectations, or multiple push URLs.
    A lease failure ends recovery. Do not refresh the expected SHA and push again.
@@ -215,6 +255,6 @@ Use the ordinary gate finish/wait procedure; do not change schedule cadence.
 
 After a crash or ambiguous outcome, read the current PR's verified `node_id`,
 reuse the recorded diagnosis and use
-`--ci-retry-status --ci-retry-id <verified-PR-node-id> --ci-retry-failure <diagnosis.json> --json` and compare
+the selected Node executable with `statusArgs` (rebound from those verified data) and compare
 its `sourceHead` with local history, the remote and original PR. Verify and
 report the existing outcome; never consume another attempt or replay the push.

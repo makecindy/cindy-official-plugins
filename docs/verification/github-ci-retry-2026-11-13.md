@@ -473,6 +473,47 @@ preference read-back/order/reference-card regressions. Environment: Windows
 for the test process. No real preference, credential, permission, recovery quota,
 installation, CI-only rewrite, PR merge or publication was changed/performed.
 
+## Literal recovery arguments — source 1.5.29 (2026-11-18)
+
+Round 18 addresses the shell-interpretation family identified in
+[this review](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4614443000).
+**Invariant:** observed refs, remotes, URLs, IDs, SHAs and paths remain complete
+argument data through every recovery step. The existing task execution tool owns
+argument delivery; no Git executor, queue, storage or retry was added.
+
+| Path | Boundary and verification |
+| --- | --- |
+| Ref validation / remote query | Full ref and remote stay separate argv; Git format validation is not shell escaping |
+| Reserve / status / crash recovery | Gate path, URL, node ID and diagnosis path remain independent arguments |
+| Signature verification | New SHA stays one argument to the existing Git executable |
+| Push | Whole lease option, remote after `--`, and whole refspec are separate arguments |
+| Shell-only task tool | Literal-quote for the actual shell/version; stop if exact round-trip cannot be established |
+
+Unsafe interpolated command templates were replaced with shared argument-list
+examples. The main Skill boundary and both public guides use the same contract;
+POSIX/PowerShell literal quoting is described, including embedded quotes, and
+JSON encoding/double-quoted substituted source is explicitly insufficient.
+
+The new regression failed against the 2431ead guide before the fix. Afterwards,
+eight branch-name variants across six argument lists survived real Node argv
+round-trips byte-for-byte, including quotes, `$()`, backticks, semicolons,
+ampersands and Unicode. The existing real local Git transport test now consumes
+the documented query/push lists with a metacharacter branch and a spaced/quoted
+remote path; exact lease succeeds and an intervening commit is rejected. The
+two focused tests passed in 5.7 seconds. These are isolated process/Git fixtures,
+not a live Cindy shell or genuine GitHub permission-denied recovery acceptance.
+
+All four required repository suites plus plugin tests passed: 334 passed,
+19 Windows platform skips, zero failures in 121.1 seconds (Windows 10.0.26100 /
+Node v22.22.3, existing Git Bash/jq/unzip selected for the test process).
+Manifest and staged-tree package/content checks passed: tree
+`35171b7d847a962b0ee6fead4f88c5453b33e788`, 31 files, 224023 compressed bytes,
+619697 expanded bytes; archive inspected in memory only. Packaged changes are
+workflow guidance and version/release notes; executable plugin/recovery code is
+unchanged from 2431ead. No installation, real preference/credential/permission
+or quota change, CI-only rewrite, merge or publication was performed. Existing
+real recovery/UI prerequisites remain unmet.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected

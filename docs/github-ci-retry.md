@@ -58,6 +58,13 @@ remote commit ends the attempt; the Agent must not update the lease and blindly
 push again. It checks the new SHA on the original PR and whether CI actually
 started; triggering is not passing.
 
+Dynamic refs, remotes, URLs, IDs and paths stay separate argument data, including
+the complete lease option and refspec. The existing Agent uses a no-shell argv
+call when available, or literal-quotes every argument for its actual task shell.
+Git ref validation and JSON encoding do not escape shell syntax. The
+[argument boundary](../cindy-github/skills/pr/references/ci-retry.md#argument-boundary)
+also covers reads, budget operations, signature checks and crash recovery.
+
 **At most two CI-only repush attempts per PR/computer, and at most one per
 diagnosed failure.** At the total limit, stop and report even for another fault.
 Before any amend, the existing gate exclusively creates one of two fixed durable

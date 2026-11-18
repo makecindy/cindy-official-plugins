@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
 
 const gate = fileURLToPath(new URL('../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs', import.meta.url));
@@ -12,6 +13,47 @@ const url = 'https://github.com/example/repo/pull/42';
 const prNodeId = 'PR_exampleImmutableId';
 const oldHead = 'a'.repeat(40), newHead = 'b'.repeat(40);
 const failure = { workflow: '.github/workflows/verify.yml', job: 'verify', step: 'install dependencies', cause: 'package store unavailable' };
+
+function guideArguments(values) {
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
+  const source = guide.match(/```js\n(\/\/ Argument lists for the existing task execution tool\.[\s\S]*?)\n```/)?.[1];
+  assert.ok(source, 'the recovery guide must define argument lists, not shell command templates');
+  return runInNewContext(source + '\n({ checkRefArgs, remoteArgs, reserveArgs, statusArgs, verifyArgs, pushArgs })', values);
+}
+
+test('recovery guide passes dynamic refs, remotes and paths as literal argument data', () => {
+  const branches = ['feature/plain', 'topic$(id)', 'topic;whoami', "topic'quoted", 'topic"quoted', 'topic`whoami`', 'topic&whoami', 'topic/日本語'];
+  for (const verifiedBranch of branches) {
+    const values = {
+      verifiedBranch,
+      verifiedRemote: "remote'$(id);&`name`",
+      originalRemoteSha: oldHead,
+      newSha: newHead,
+      gatePath: "/example/skill dir's $(id);&`path`/gate.mjs",
+      prUrl: 'https://github.com/example/repo/pull/42',
+      prNodeId: 'MDExOlB1bGxSZXF1ZXN0MTIzNDU2Nzg5MA==',
+      diagnosisPath: "/example/diagnosis dir's $(id);&`path`/fault.json",
+    };
+    const plan = guideArguments(values);
+    const exactRef = 'refs/heads/' + verifiedBranch;
+    const expected = {
+      checkRefArgs: ['check-ref-format', exactRef],
+      remoteArgs: ['ls-remote', '--heads', '--', values.verifiedRemote, exactRef],
+      reserveArgs: [values.gatePath, values.prUrl, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
+      statusArgs: [values.gatePath, values.prUrl, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
+      verifyArgs: ['verify-commit', newHead],
+      pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, 'HEAD:' + exactRef],
+    };
+    // Git accepts these refs; its format check cannot make a shell interpolation safe.
+    execFileSync('git', plan.checkRefArgs, { stdio: 'pipe' });
+    for (const [name, args] of Object.entries(expected)) {
+      const received = execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', ...plan[name]], { encoding: 'utf8', shell: false });
+      assert.deepEqual(JSON.parse(received), args, name + ': preserve each argument without shell expansion');
+    }
+  }
+  const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(guide, /git (?:ls-remote|push|verify-commit)[^\n]*<(?:branch|verified|exact|new-SHA)/);
+});
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-ci-retry-'));
@@ -276,7 +318,12 @@ test('invalid, damaged and unwritable CI evidence fails closed without consuming
 // touching a real user's PR, branch, credentials or persisted plugin preference.
 test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses an intervening commit', async t => {
   const fx = fixture(t);
-  const remote = path.join(fx.root, 'remote.git'), work = path.join(fx.root, 'work'), other = path.join(fx.root, 'other');
+  const remote = path.join(fx.root, "remote dir's $(id);&.git"), work = path.join(fx.root, 'work'), other = path.join(fx.root, 'other');
+  const branch = "ci$(id);'&", ref = 'refs/heads/' + branch;
+  const plan = originalRemoteSha => guideArguments({
+    verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha, newSha: newHead,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis,
+  });
   const git = (cwd, argv, env = {}) => execFileSync('git', argv, {
     cwd, env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
@@ -286,12 +333,12 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   fs.writeFileSync(path.join(work, 'code.txt'), 'original tree\n');
   git(work, ['add', 'code.txt']);
   git(work, ['commit', '-s', '-m', 'fixture intent'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' });
-  git(work, ['switch', '-c', 'ci-fixture']);
-  git(work, ['push', 'origin', 'HEAD:refs/heads/ci-fixture']);
+  git(work, ['switch', '-c', branch]);
+  git(work, ['push', '--', 'origin', 'HEAD:' + ref]);
   const before = git(work, ['rev-parse', 'HEAD']);
   const tree = git(work, ['rev-parse', 'HEAD^{tree}']);
   const authorAndMessage = git(work, ['show', '-s', '--format=%an%n%ae%n%aI%n%P%n%B', 'HEAD']);
-  assert.equal(git(work, ['ls-remote', '--heads', 'origin', 'refs/heads/ci-fixture']).split(/\s/)[0], before);
+  assert.equal(git(work, plan(before).remoteArgs).split(/\s/)[0], before);
   assert.equal((await fx.run(['--reserve-ci-retry', before])).code, 0);
   git(work, ['commit', '--amend', '--no-edit'], { GIT_COMMITTER_DATE: '2026-01-01T00:00:01Z' });
   const after = git(work, ['rev-parse', 'HEAD']);
@@ -299,20 +346,20 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   assert.equal(git(work, ['rev-parse', 'HEAD^{tree}']), tree);
   assert.equal(git(work, ['show', '-s', '--format=%an%n%ae%n%aI%n%P%n%B', 'HEAD']), authorAndMessage);
   assert.match(authorAndMessage, /Signed-off-by: Ada Example <ada@example\.test>/);
-  git(work, ['push', `--force-with-lease=refs/heads/ci-fixture:${before}`, 'origin', 'HEAD:refs/heads/ci-fixture']);
-  assert.equal(git(work, ['ls-remote', '--heads', 'origin', 'refs/heads/ci-fixture']).split(/\s/)[0], after);
+  git(work, plan(before).pushArgs);
+  assert.equal(git(work, plan(before).remoteArgs).split(/\s/)[0], after);
   assert.equal((await fx.run(['--reserve-ci-retry', after])).code, 1);
 
   // A collaborator advances the ref; reusing the original verified SHA must fail.
-  git(fx.root, ['clone', '--branch', 'ci-fixture', remote, other]);
+  git(fx.root, ['clone', '--branch', branch, '--', remote, other]);
   for (const [key, value] of [['user.name', 'Other Example'], ['user.email', 'other@example.test'], ['commit.gpgsign', 'false']]) git(other, ['config', key, value]);
   fs.writeFileSync(path.join(other, 'other.txt'), 'collaborator\n');
   git(other, ['add', 'other.txt']);
   git(other, ['commit', '-s', '-m', 'intervening work']);
-  git(other, ['push', 'origin', 'HEAD:refs/heads/ci-fixture']);
+  git(other, ['push', '--', 'origin', 'HEAD:' + ref]);
   const intervening = git(other, ['rev-parse', 'HEAD']);
-  assert.throws(() => git(work, ['push', `--force-with-lease=refs/heads/ci-fixture:${after}`, 'origin', 'HEAD:refs/heads/ci-fixture']), /stale info|rejected/);
-  assert.equal(git(work, ['ls-remote', '--heads', 'origin', 'refs/heads/ci-fixture']).split(/\s/)[0], intervening);
+  assert.throws(() => git(work, plan(after).pushArgs), /stale info|rejected/);
+  assert.equal(git(work, plan(after).remoteArgs).split(/\s/)[0], intervening);
 });
 
 test('signed Git fixture verifies one-off signing, configured amend and unavailable-key failure', async t => {
