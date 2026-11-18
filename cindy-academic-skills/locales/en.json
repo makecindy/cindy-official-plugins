@@ -1,0 +1,55 @@
+{
+  "name": "Academic Research & Publishing Suite",
+  "description": "End-to-end academic research, statistical analysis, and publication figure suite: 10-stage workflow, Crossref DOI verification, statistical decision trees, APA tables, figure scripts, integrity gates, and peer review.",
+  "whenToUse": "Use across the research lifecycle: topic scoping, literature verification, statistical test selection, APA table formatting, scientific figure scripting, integrity auditing, peer review, and rebuttal drafting.",
+  "tools": {
+    "pipeline_stage_orchestrator": {
+      "description": "ARS 10-stage pipeline orchestrator: diagnose current research phases, issue Material Passports (evidence-chain audit records), chart sequential next steps, and enforce human-in-the-loop checkpoints."
+    },
+    "socratic_research_guide": {
+      "description": "Socratic research mentor & RQ blueprint builder: multi-turn heuristic dialogue refining broad concepts into rigorous scientific questions, scored via FINER criteria with candidate hypotheses."
+    },
+    "verify_doi": {
+      "description": "Validate paper DOIs via the Crossref REST API to verify scholarly authenticity, extracting titles, authors, journals, publication years, citation counts, and abstracts to block AI hallucinations. No API key required."
+    },
+    "search_crossref": {
+      "description": "Search the official Crossref repository by keyword, title, or author to retrieve registered papers with verified DOIs and bibliographic metadata, eliminating fabricated citations."
+    },
+    "three_way_lit_scan": {
+      "description": "3W literature matrix scanner (Why problem/gap, How methodology/controls, What findings/bounds) synthesizing cross-study consensus, theoretical debates, and open research gaps."
+    },
+    "academic_integrity_audit": {
+      "description": "Pre-review and pre-submission academic integrity gate (Stage 2.5 / 4.5): audit manuscripts against 7 structural failure modes (hallucinated references, overclaiming, baseline flaws, statistical errors, etc.)."
+    },
+    "academic_paper_analysis": {
+      "description": "Structured scholarly literature analyzer: decompose abstracts, methods, or core passages across key dimensions (objectives, hypotheses, methodology, evidence chains, novelty, and limitations) for systematic research synthesis."
+    },
+    "claim_citation_alignment": {
+      "description": "Claim-faithfulness (L3) verification: cross-check manuscript assertions against cited source findings to detect out-of-context citations and ungrounded claims."
+    },
+    "academic_style_audit": {
+      "description": "Academic style calibration & formulaic prose elimination: audit and eliminate hollow buzzwords (delve, testament to), vague quantifiers, and unsubstantiated superlatives while preserving the author's scholarly voice."
+    },
+    "peer_review_evaluation": {
+      "description": "Multi-perspective peer review simulation: evaluate manuscript validity, theoretical novelty, and methodological rigor from the perspectives of Editor-in-Chief, methodology reviewers, and Devil's Advocate using a 0-100 rubric."
+    },
+    "rebuttal_matrix_coach": {
+      "description": "Point-by-point rebuttal matrix coach: decompose reviewer critique into structured revision matrices, guiding evidence additions, empirical revisions, and line-by-line response letters."
+    },
+    "author_disclosure_statement": {
+      "description": "CRediT author contribution and ethics disclosure generator: create formalized Contributor Roles Taxonomy statements, AI assistance statements, and conflict of interest declarations aligned with major journal policies."
+    },
+    "bibtex_format_converter": {
+      "description": "Bibliographic format converter & BibTeX normalizer: convert publication metadata or freeform references into standard BibTeX entries and APA 7.0 citations."
+    },
+    "statistical_analysis_advisor": {
+      "description": "Statistical test decision tree & assumption diagnostics: recommend optimal statistical models (t-tests, ANOVA, non-parametric, regression) based on variable types, distributions, and study designs, with assumption checklists and anti-p-hacking adjustments."
+    },
+    "academic_data_summary": {
+      "description": "Scholarly statistical reporting & APA 7.0 / Nature-style three-line table generator: format exact test statistics, p-values, effect sizes, and confidence intervals into publication-grade prose and Markdown three-line tables."
+    },
+    "scientific_figure_designer": {
+      "description": "Multi-panel scientific figure studio: design multi-panel evidence architectures (Panel a-d inferential roles), exact 89/180mm dimensions, Okabe-Ito palettes, Nature captions, and publication-ready Python or R plotting scripts."
+    }
+  }
+}

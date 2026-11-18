@@ -144,6 +144,49 @@ channel.onmessage = async ev => {
 
 // Browser-initiated learning requests are delivered by the paired local bridge.
 let learningService,hostLocale='en';
+// The side panel's model menu, built from what Cindy gives plugins: runnable routes from
+// cindy.tasks, display data from the read-only catalog, and (when the user approved
+// modelPreferences) the app's favorites and recently used models. Only this computer's
+// models; reading never calls a model.
+const MODEL_AGENT={'claude-code':'cc',codex:'codex',pi:'pi'};
+const modelKey=(agent,providerId,model)=>[agent,providerId,model].join('\n');
+async function sidePanelModels() {
+  const caps=await cindy.tasks.capabilities?.().catch(()=>null);
+  if(!caps?.operations?.includes('models')||!caps.operations.includes('setModel'))return {models:[],favorites:[],recents:[],preferences:'unsupported'};
+  const [{models=[]}={},catalog,prefs]=await Promise.all([
+    cindy.tasks.models(),
+    fetch('/agent-models').then(r=>r.ok?r.json():null).catch(()=>null),
+    fetch('/model-preferences').then(async r=>r.status===404?{state:'unsupported'}:r.status===403?{state:'denied'}:r.ok?{state:'ok',...await r.json()}:{state:'unavailable'}).catch(()=>({state:'unavailable'})),
+  ]);
+  const named=new Map();
+  for(const m of catalog?.models||[])named.set(modelKey(MODEL_AGENT[m.agent],m.providerId,m.id),m);
+  const out=[],seen=new Set(),str=(v,max)=>typeof v==='string'&&v.length<=max?v:undefined;
+  for(const {route,efforts,supportsFastMode} of models){
+    if(!route||route.agentDeviceId)continue;
+    const key=modelKey(route.agentKind,route.providerId,route.model);if(seen.has(key))continue;seen.add(key);
+    const info=named.get(key)||{};
+    out.push({name:info.name||route.model,provider:info.providerName||'',visible:info.visible!==false,
+      description:str(info.description,600),icon:str(info.icon,64),group:str(info.group,64),logoKind:str(info.logoKind,64),
+      contextWindow:Number.isSafeInteger(info.contextWindow)?info.contextWindow:undefined,
+      efforts:Array.isArray(efforts)?efforts.filter(e=>typeof e==='string').slice(0,8):[],
+      effortDisplayNames:info.effortDisplayNames&&typeof info.effortDisplayNames==='object'?info.effortDisplayNames:undefined,
+      defaultEffort:route.effort||'',supportsFastMode:supportsFastMode===true||info.supportsFastMode===true,
+      route:{agentKind:route.agentKind,providerId:route.providerId,model:route.model,effort:route.effort||'',fastMode:route.fastMode??false}});
+    if(out.length>=200)break;
+  }
+  const local=item=>item&&seen.has(modelKey(item.agent,item.providerId,item.modelId));
+  return {models:out,preferences:prefs.state,
+    favorites:prefs.state==='ok'&&Array.isArray(prefs.favorites)?prefs.favorites.filter(local).slice(0,100):[],
+    recents:prefs.state==='ok'&&Array.isArray(prefs.recents)?prefs.recents.filter(local).slice(0,20):[]};
+}
+// Star toggles in the side panel edit the app's own favorites (two-way, same list).
+async function sidePanelFavorite(mutation) {
+  const r=await fetch('/model-preferences/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(mutation)});
+  if(r.status===404)throw Error('UPDATE_CINDY');
+  const body=await r.json().catch(()=>null);
+  if(!r.ok||!body?.ok)throw Error(body?.errorCode||'FAVORITE_FAILED');
+  return {favorites:Array.isArray(body.favorites)?body.favorites:[]};
+}
 async function getLearningService() {
   if(!learningService)learningService=Promise.all([import('/extension/learning-core.js'),import('/learning-service.js'),import('/translation-task.js')]).then(([,module,adapter])=>module.createLearningService({
     core:globalThis.CindyLearning,locale:()=>hostLocale,tasks:cindy.tasks,
@@ -151,7 +194,9 @@ async function getLearningService() {
       load:async()=>(await load()).cfg.translationTask,
       save:binding=>serialize(async()=>{const {cfg}=await load();const r=await fetch('/kv',{method:'PUT',body:JSON.stringify({...cfg,translationTask:binding})});if(!r.ok)throw Error('SAVE_FAILED');})
     }),
-    library:args=>cindy.send({type:'library-request',...args})
+    library:args=>cindy.send({type:'library-request',...args}),
+    models:sidePanelModels,
+    favorite:sidePanelFavorite
   }));
   return learningService;
 }
