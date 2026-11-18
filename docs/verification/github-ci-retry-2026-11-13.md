@@ -441,6 +441,38 @@ repeated. Environment: Windows 10.0.26100 / Node v22.22.3. No installation,
 credential/permission/preference change, real recovery quota operation, CI-only
 rewrite, merge or publishing was performed.
 
+## Publish-progress synchronization — source 1.5.28 (2026-11-18)
+
+This synchronization incorporates `main` at `9e2cf0e` (#350). It preserves the
+upstream immediate working-card update before a slow publish/draft handoff,
+the four translated progress messages, and the upstream one-second spacing
+between updates. The save-path conflict retains this PR's preference read-back
+before the upstream recorded-state/early-return logic. The obsolete release-number
+assertion stays removed; manifest version 1.5.28 is above main's 1.5.18.
+
+The existing preference queue, reference-card height guard, authorization reads,
+recovery scripts and durable per-PR quota rules remain in place. No additional
+executor, queue, storage, retry or timer was introduced beyond the code inherited
+from main. The source is not installed. Publishing progress and the inherited
+header/unknown-state/read-ordering paths have not received new real Cindy/phone
+verification; earlier known-state observations retain their original versions
+and limits. The maintainer's [new reply](https://github.com/makecindy/cindy-official-plugins/pull/332#issuecomment-6979001728)
+still requires genuine denied-rerun recovery evidence and a subsequent review;
+fork workflow approval remains their responsibility.
+
+Manifest validation and an exact staged-tree package/content check passed:
+tree `f5de1cf86f88c7536281b4f4a1c148e01ce8a0e7`, 31 files, 222837 compressed
+bytes and 616797 expanded bytes. Every archived plugin/legal file was compared
+with its tracked bytes. The normalized archive was inspected in memory only.
+
+The four required repository suites plus the plugin suite passed on the first
+run: 333 passed, 19 Windows platform skips, zero failures in 176.2 seconds.
+This includes the upstream slow-handoff progress test and the existing
+preference read-back/order/reference-card regressions. Environment: Windows
+10.0.26100 / Node v22.22.3, with existing Git Bash, jq and unzip selected only
+for the test process. No real preference, credential, permission, recovery quota,
+installation, CI-only rewrite, PR merge or publication was changed/performed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
