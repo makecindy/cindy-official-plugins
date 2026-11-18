@@ -409,6 +409,38 @@ Git Bash selected for this test process. Manifest and index-tree package checks
 passed: 31 files, 222310 compressed bytes and 615575 expanded bytes, inspected
 in memory with no retained package file.
 
+## Main synchronization — source 1.5.27 (2026-11-18)
+
+Merged `main` at `931dbf6` in `28606c9`. The two conflicts were the manifest
+version/release notes and an obsolete fixed-version assertion in the host-login
+test. Version 1.5.27 preserves both this PR's bounded, default-off CI recovery
+and the upstream optional ordinary PR trigger guidance, including its fallback
+for older Hosts. No schedule or real preference was changed.
+
+Compared with `e1e86d9`, the only changed files inside `cindy-github` are
+`ghost.json` and `skills/pr/SKILL.md`. Runtime code, recovery scripts, settings
+and four-language resources are byte-identical. Existing evidence for unchanged
+paths remains applicable with its original version and limitations; this source
+was not installed and the recovery/UI prerequisites below remain unmet. The
+inherited optional trigger guidance was not exercised through a real scheduler.
+
+Manifest validation and the committed-tree package/content check passed:
+31 files, 222488 compressed bytes and 616009 expanded bytes. The normalized
+archive was checked in memory against every tracked plugin and legal-file byte;
+no artifact was retained.
+
+The required repository and plugin coverage totals 332 passed and 19 Windows
+platform skips, with no remaining failures. The first combined run had five
+failures: one catalog comparison read the pre-merge HEAD, and four publishing
+checks used the wrong Bash. After the merge commit the catalog contract passed.
+Publishing then passed 11/12 with Git Bash and the already-verified jq 1.8.2
+wrapper; the remaining packaging test passed alone after adding Git's existing
+`usr/bin` (unzip) to the test process PATH. No test or production code was changed
+to accommodate the environment, and the already-passing plugin suite was not
+repeated. Environment: Windows 10.0.26100 / Node v22.22.3. No installation,
+credential/permission/preference change, real recovery quota operation, CI-only
+rewrite, merge or publishing was performed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
