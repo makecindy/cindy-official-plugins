@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { runGate, stateFilePath, ciRetryFilePath, ciRetryDataDir } from '../../cindy-github/skills/pr/scripts/pr-heartbeat-gate.mjs';
@@ -33,14 +33,15 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
       prUrl: 'https://github.com/example/repo/pull/42',
       prNodeId: 'MDExOlB1bGxSZXF1ZXN0MTIzNDU2Nzg5MA==',
       diagnosisPath: "/example/diagnosis dir's $(id);&`path`/fault.json",
+      observationStateDir: "/example/observation state's $(id);&`path`",
     };
     const plan = guideArguments(values);
     const exactRef = 'refs/heads/' + verifiedBranch;
     const expected = {
       checkRefArgs: ['check-ref-format', exactRef],
       remoteArgs: ['ls-remote', '--heads', '--', values.verifiedRemote, exactRef],
-      reserveArgs: [values.gatePath, values.prUrl, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
-      statusArgs: [values.gatePath, values.prUrl, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
+      reserveArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--reserve-ci-retry', oldHead, '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
+      statusArgs: [values.gatePath, values.prUrl, '--state-dir', values.observationStateDir, '--ci-retry-status', '--ci-retry-id', values.prNodeId, '--ci-retry-failure', values.diagnosisPath, '--json'],
       verifyArgs: ['verify-commit', newHead],
       pushArgs: ['push', '--force-with-lease=' + exactRef + ':' + oldHead, '--', values.verifiedRemote, 'HEAD:' + exactRef],
     };
@@ -53,6 +54,32 @@ test('recovery guide passes dynamic refs, remotes and paths as literal argument 
   }
   const guide = fs.readFileSync(new URL('../../cindy-github/skills/pr/references/ci-retry.md', import.meta.url), 'utf8');
   assert.doesNotMatch(guide, /git (?:ls-remote|push|verify-commit)[^\n]*<(?:branch|verified|exact|new-SHA)/);
+});
+
+test('recovery guide preserves the follower observation directory for reserve and status', t => {
+  for (const command of ['statusArgs', 'reserveArgs']) {
+    const fx = fixture(t);
+    const observationStateDir = path.join(fx.root, "custom state's $(id);&");
+    fs.mkdirSync(observationStateDir);
+    const raw = JSON.stringify({ sourceHead: oldHead, reservedAt: 123 });
+    fs.writeFileSync(stateFilePath(observationStateDir, 'example/repo', 42) + '.ci-retry', raw);
+    const plan = guideArguments({
+      verifiedBranch: 'feature', verifiedRemote: 'origin', originalRemoteSha: oldHead,
+      newSha: newHead, gatePath: gate, prUrl: url, prNodeId,
+      diagnosisPath: fx.diagnosis, observationStateDir,
+    });
+    // Keep even the broken-guide reproduction inside temporary directories.
+    // The explicit follower directory must win over a different inherited default.
+    const result = spawnSync(process.execPath, plan[command], {
+      env: { ...process.env, XDG_STATE_HOME: path.join(fx.root, 'durable'), CINDY_PR_STATE_DIR: path.join(fx.root, 'unused-default') },
+      encoding: 'utf8', shell: false,
+    });
+    assert.equal(result.status, 1, command + ': old unknown evidence must stop the first budget operation: ' + result.stdout + result.stderr);
+    const files = fs.readdirSync(fx.retryDir);
+    assert.ok(files.some(name => fs.readFileSync(path.join(fx.retryDir, name), 'utf8') === raw), 'preserve original receipt bytes');
+    assert.ok(files.every(name => !name.endsWith('.slot')), 'do not allocate new quota');
+    assert.equal(fs.readFileSync(stateFilePath(observationStateDir, 'example/repo', 42) + '.ci-retry', 'utf8'), raw);
+  }
 });
 
 function fixture(t) {
@@ -322,7 +349,7 @@ test('isolated Git fixture preserves tree/author/DCO and an exact lease refuses 
   const branch = "ci$(id);'&", ref = 'refs/heads/' + branch;
   const plan = originalRemoteSha => guideArguments({
     verifiedBranch: branch, verifiedRemote: 'origin', originalRemoteSha, newSha: newHead,
-    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis,
+    gatePath: gate, prUrl: url, prNodeId, diagnosisPath: fx.diagnosis, observationStateDir: fx.stateDir,
   });
   const git = (cwd, argv, env = {}) => execFileSync('git', argv, {
     cwd, env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],

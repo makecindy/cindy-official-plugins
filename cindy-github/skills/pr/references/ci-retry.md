@@ -29,7 +29,14 @@ Keep the existing executor and authorization; do not add a Git runner.
 The following defines argument data, not an executable recovery script. Bind the
 identifiers from verified structured reads; never paste their contents into this
 code or an unquoted shell assignment. `gatePath` is the resolved current gate
-script, and `diagnosisPath` is the existing diagnosis file. Pass the Git arrays
+script, and `diagnosisPath` is the existing diagnosis file. Resolve the current
+follower's **effective observation-cache directory** as `observationStateDir`:
+its explicit `--state-dir` takes precedence over `CINDY_PR_STATE_DIR` or the
+default selection. Carry that same directory in both budget commands and crash
+recovery; never substitute the durable receipt directory or a fresh cache.
+If the actual follower directory cannot be established, stop before any budget
+operation. This preserves discovery of legacy receipts kept in custom caches;
+it changes neither the durable data root nor quota. Pass the Git arrays
 to `git` and the gate arrays to the already selected Node executable. The `--`
 separators prevent remote data from being interpreted as Git options.
 
@@ -38,9 +45,10 @@ separators prevent remote data from being interpreted as Git options.
 const exactRef = 'refs/heads/' + verifiedBranch;
 const checkRefArgs = ['check-ref-format', exactRef];
 const remoteArgs = ['ls-remote', '--heads', '--', verifiedRemote, exactRef];
-const reserveArgs = [gatePath, prUrl, '--reserve-ci-retry', originalRemoteSha,
+const reserveArgs = [gatePath, prUrl, '--state-dir', observationStateDir,
+  '--reserve-ci-retry', originalRemoteSha,
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
-const statusArgs = [gatePath, prUrl, '--ci-retry-status',
+const statusArgs = [gatePath, prUrl, '--state-dir', observationStateDir, '--ci-retry-status',
   '--ci-retry-id', prNodeId, '--ci-retry-failure', diagnosisPath, '--json'];
 const verifyArgs = ['verify-commit', newSha];
 const pushArgs = ['push', '--force-with-lease=' + exactRef + ':' + originalRemoteSha,

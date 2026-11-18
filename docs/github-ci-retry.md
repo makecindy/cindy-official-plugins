@@ -64,6 +64,11 @@ call when available, or literal-quotes every argument for its actual task shell.
 Git ref validation and JSON encoding do not escape shell syntax. The
 [argument boundary](../cindy-github/skills/pr/references/ci-retry.md#argument-boundary)
 also covers reads, budget operations, signature checks and crash recovery.
+Both budget commands explicitly carry the current follower's effective
+observation directory with `--state-dir`, including status/crash recovery.
+An explicit follower directory must not be replaced by an environment/default
+cache, or old receipts may be missed. Unknown directory means stop; the durable
+receipt data root and quota remain unchanged.
 
 **At most two CI-only repush attempts per PR/computer, and at most one per
 diagnosed failure.** At the total limit, stop and report even for another fault.

@@ -46,6 +46,9 @@ refspec。既有 Agent 优先使用不经 shell 的 argv 调用；仅支持任�
 shell 对每个完整参数作字面量引用。Git ref 校验和 JSON 编码不承担 shell 转义。
 [参数边界](../cindy-github/skills/pr/references/ci-retry.md#argument-boundary)同样覆盖只读查询、
 额度操作、验签及崩溃恢复，不新增执行器。
+预留与 status/崩溃恢复两种额度命令都用 `--state-dir` 明确沿用当前跟进实际选中的
+观察目录；不能用环境变量/默认缓存替代显式目录而漏查旧回执。目录未知则停止，
+持久回执数据根和额度均不改变。
 
 **本机每个 PR 累计最多两次 CI-only 重推，同一故障最多一次。** 达到总上限后，
 即使诊断不同也停止并报告，不再 amend/push。每次 amend 前，既有 gate 用不可变 PR

@@ -514,6 +514,32 @@ unchanged from 2431ead. No installation, real preference/credential/permission
 or quota change, CI-only rewrite, merge or publication was performed. Existing
 real recovery/UI prerequisites remain unmet.
 
+## Preserve the follower observation directory — source 1.5.30 (2026-11-18)
+
+Round 19 addresses the [custom state-dir finding](https://github.com/makecindy/cindy-official-plugins/pull/332#discussion_r4614941349).
+Both documented budget argument lists now explicitly carry the current follower's
+effective `--state-dir`, including status after a crash. An explicit directory
+wins over an inherited environment/default cache; an unknown directory stops
+budget operations. The existing executor owns argument delivery, the follower
+configuration owns directory selection, and existing migration owns legacy
+receipt adoption. No new storage, queue, retry or execution code was added.
+
+Two fresh isolated CLI fixtures use the earliest URL-named receipt format in a
+custom directory and a different inherited default. Reserve and status each
+stop on unknown old evidence, retain its exact bytes in the source and durable
+copy, and allocate no slot. The literal-argv regression also covers the custom
+directory's spaces, quotes and shell metacharacters. Both focused guide tests
+passed in 3.1 seconds. These fixtures are not real Cindy/GitHub recovery evidence.
+
+The four required repository suites plus plugin tests passed: 335 passed,
+19 Windows platform skips, zero failures in 153.7 seconds, with the same
+Windows/Node/test-process Git Bash environment as 1.5.29. Manifest and staged-tree
+package/content checks passed: tree `9fa81963a9f02f5983ee1cc6b2695aca70818fa9`,
+31 files, 224267 compressed bytes and 620334 expanded bytes, inspected in memory
+only. Executable plugin/recovery code is unchanged from e47ec22. Source 1.5.30
+was not installed; real recovery/UI prerequisites remain unmet. No real
+preference, credential, permission, quota, merge or publication changed.
+
 ## Remaining prerequisites
 
 - Normal phone display passed the 1.5.19 human check above; fault-injected
