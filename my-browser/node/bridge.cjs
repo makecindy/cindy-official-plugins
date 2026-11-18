@@ -273,7 +273,7 @@ function createBridge(options = {}) {
       if(method==='learningProgress'){
         if(!item.result&&['accepted','opening-task','submitting-task','stopping','cache','queued','waiting-previous','model','generating','validating','saving'].includes(params.progress?.stage)){
           const previous=item.progress||{},attempt=Number.isInteger(params.progress.attempt)?Math.min(3,Math.max(1,params.progress.attempt)):previous.attempt||1;
-          item.progress={stage:params.progress.stage,attempt,...(Number.isSafeInteger(params.progress.receivedChars)&&params.progress.receivedChars>=0?{receivedChars:params.progress.receivedChars}:{}),startedAt:previous.startedAt||item.created,updatedAt:previous.stage===params.progress.stage&&previous.attempt===attempt?previous.updatedAt:Date.now()};
+          item.progress={stage:params.progress.stage,attempt,...(Number.isSafeInteger(params.progress.receivedChars)&&params.progress.receivedChars>=0?{receivedChars:params.progress.receivedChars}:{}),...(typeof params.progress.text==='string'&&params.progress.text.length<=L.progressTextMax?{text:params.progress.text}:{}),startedAt:previous.startedAt||item.created,updatedAt:previous.stage===params.progress.stage&&previous.attempt===attempt?previous.updatedAt:Date.now()};
         }
         return {ok:true};
       }

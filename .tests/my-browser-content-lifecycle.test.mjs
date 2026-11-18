@@ -66,19 +66,6 @@ test('selection preference changes hide a visible popup and apply to later drags
   assert.equal(visibleSelectionButtons(f).length,1);
 });
 
-test('selection checkbox persists its value and preserves unrelated preferences',async()=>{
-  const f=fixture(async()=>({ok:true,enabled:false}),{autoVideo:false});await settle();
-  const replies=[];[...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
-  await settle();await settle();
-  assert.equal(replies[0]?.ok,true);
-  const checkbox=f.nodes.find(n=>n.type==='checkbox');assert.ok(checkbox);assert.equal(checkbox.checked,false);
-  checkbox.checked=true;checkbox.handlers.change();await settle();await settle();
-  assert.equal(f.preferences().selectionButton,true);assert.equal(f.preferences().autoVideo,false);
-  const reopened=fixture(undefined,f.preferences());await settle();dragSelection(reopened);
-  assert.equal(visibleSelectionButtons(reopened).length,1);
-  f.setPreferences({...f.preferences(),selectionButton:false});assert.equal(checkbox.checked,false);
-});
-
 test('a late startup preference read cannot undo a newer storage change',async()=>{
   let resolveRead;const f=fixture();
   f.chrome.storage.local.get=()=>new Promise(resolve=>{resolveRead=resolve;});await settle();
@@ -91,35 +78,21 @@ test('configure keeps a newer selection setting while legacy preferences are pen
   let resolveLegacy;
   const f=fixture(m=>m.request?.op==='preferences'?new Promise(resolve=>{resolveLegacy=resolve;}):Promise.resolve({ok:true,enabled:false}),{selectionButton:true});
   await settle();const replies=[];
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
+  [...f.listeners][0]({type:'cindy-ui',action:'open'},{id:'fixture'},r=>replies.push(r));
   await settle();assert.equal(typeof resolveLegacy,'function');
   f.setPreferences({selectionButton:false});
   resolveLegacy({ok:true,target:'zh-CN'});await settle();await settle();
   assert.equal(replies[0]?.ok,true);
-  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,false);
   dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
 });
 
 test('configure preserves a saved selection setting when no update intervenes',async()=>{
   const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:true});await settle();
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  [...f.listeners][0]({type:'cindy-ui',action:'open'},{id:'fixture'},()=>{});
   await settle();await settle();
-  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,true);
   dragSelection(f);assert.equal(visibleSelectionButtons(f).length,1);
 });
 
-test('selection checkbox synchronizes after its settings body moves into the player shadow root',async()=>{
-  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:false});await settle();
-  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
-  await settle();await settle();
-  const checkbox=f.nodes.findLast(n=>n.type==='checkbox'),settingsBody=checkbox.parentNode.parentNode;
-  const originalParent=settingsBody.parentNode;
-  const playerRoot=f.context.document.createElement('div').attachShadow({mode:'closed'});
-  playerRoot.append(settingsBody);
-  assert.equal(originalParent.querySelector('.selection-button-checkbox'),null);
-  f.setPreferences({selectionButton:true});assert.equal(checkbox.checked,true);
-  f.setPreferences({selectionButton:false});assert.equal(checkbox.checked,false);
-});
 test('a reloaded extension leaves no URL polling or page listeners after runtime disappears',async()=>{
   const f=fixture();await settle();const tick=[...f.timers.values()][0];
   f.chrome.runtime=undefined;f.context.location.href+='?photo=1';
@@ -403,19 +376,8 @@ test('tab titles mark ownership by default and restore on takeover or extension 
     assert.equal(await page.title(),'User title');
     assert.equal(await page.evaluate(()=>sent.filter(m=>m.type==='cindy-user-took-over').length),1);
     await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'settings'},{id:'fixture'},resolve)));
-    const cdp=await page.context().newCDPSession(page);
-    const {root}=await cdp.send('DOM.getDocument',{depth:-1,pierce:true});
-    let optionsButton;
-    function visit(node){
-      if(node.nodeName==='BUTTON'&&node.children?.some(n=>n.nodeValue==='标签分组设置'))optionsButton=node;
-      for(const child of [...(node.children||[]),...(node.shadowRoots||[])])visit(child);
-    }
-    visit(root);assert.ok(optionsButton,'group settings are discoverable in the ordinary panel');
-    const {object}=await cdp.send('DOM.resolveNode',{nodeId:optionsButton.nodeId});
-    const {result}=await cdp.send('Runtime.callFunctionOn',{objectId:object.objectId,functionDeclaration:'function(){const r=this.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}}',returnByValue:true});
-    await page.mouse.click(result.value.x,result.value.y);
-    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-options'));
-    await cdp.detach();
+    // Settings live in the side panel now; the page only asks the extension to open it there.
+    await page.waitForFunction(()=>sent.some(m=>m.type==='cindy-open-sidepanel'&&m.view==='settings'));
     // A fresh document obtains ownership again through the normal message path.
     await page.reload();
     await page.evaluate(()=>{

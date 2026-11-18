@@ -1625,6 +1625,16 @@ async function learningRequest(message,sender) {
     const request=globalThis.CindyLearning.validate(message.request);
     // Which tab asked: translation tasks follow the video per tab, not per browser.
     if(Number.isInteger(sender.tab?.id))request.view='tab:'+sender.tab.id;else delete request.view;
+    // The app's model favorites and recents are for the side panel's model menu only.
+    if(['models','model-favorite'].includes(request.op)&&sender.url!==chrome.runtime.getURL('sidepanel.html'))throw Error('INVALID_SOURCE');
+    if(internal && request.op==='conversation' && request.scenario==='webpage-chat') {
+      if(sender.url!==chrome.runtime.getURL('sidepanel.html') || !Number.isInteger(message.tabId) || typeof message.documentId!=='string'||! /^[a-f0-9-]{36}$/.test(message.chatId||''))throw Error('INVALID_SOURCE');
+      page=await chrome.tabs.get(message.tabId);boundDocument=message.documentId;
+      if(page.url!==request.source.url)throw Error('PAGE_CHANGED');
+      await checkCurrent();
+      request.view='page-chat:'+page.id+':'+message.chatId;
+      request.source={url:page.url,title:(page.title||'').slice(0,500)};
+    }
     if(!internal) {
       // Besides the top document, only known video player frames may ask.
       const embedded=sender.frameId>0&&globalThis.CindySiteCaptions.embedded(sender.url);
@@ -1649,7 +1659,10 @@ async function learningRequest(message,sender) {
       await checkCurrent();
       const result=await learningFetch(target,'/learning/result',{id},()=>checkCurrent(),deadline);
       if(result.done)return result.result;
-      if(page&&result.progress){const serialized=JSON.stringify(result.progress);if(serialized!==lastProgress){lastProgress=serialized;await chrome.tabs.sendMessage(page.id,{type:'cindy-learning-progress',id,progress:result.progress},{documentId:sender.documentId}).catch(()=>{});}}
+      if(result.progress){const serialized=JSON.stringify(result.progress);if(serialized!==lastProgress){lastProgress=serialized;
+        // The side panel follows its own requests (and streams the answer text); pages get theirs by document.
+        if(internal)await chrome.runtime.sendMessage({type:'cindy-learning-progress',id,progress:result.progress}).catch(()=>{});
+        else if(page)await chrome.tabs.sendMessage(page.id,{type:'cindy-learning-progress',id,progress:result.progress},{documentId:sender.documentId}).catch(()=>{});}}
       await sleep(450);
     }
     throw Error('TIMEOUT');
@@ -1661,6 +1674,15 @@ async function learningRequest(message,sender) {
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  if(message?.type==='cindy-open-sidepanel'&&sender.tab?.windowId!=null&&chrome.sidePanel) {
+    // Open first, while the page click still counts as the user gesture Chrome requires.
+    const view=message.view==='settings'?'settings':null;
+    // A panel that is about to load reads the requested view; one already open gets the message.
+    chrome.storage.session?.set({sidepanelView:view}).catch(()=>{});
+    chrome.sidePanel.open({windowId:sender.tab.windowId}).then(()=>{
+      chrome.runtime.sendMessage({type:'cindy-sidepanel-view',view}).catch(()=>{});reply({ok:true});
+    },()=>reply({ok:false}));return true;
+  }
   if(message?.type==='cindy-open-options') {
     chrome.runtime.openOptionsPage().then(()=>reply({ok:true}),()=>reply({ok:false}));return true;
   }
@@ -1717,7 +1739,9 @@ if(chrome.contextMenus) {
   });
   chrome.contextMenus.onClicked.addListener((info,tab)=>{if(tab?.id)openOnTab(tab.id,info.menuItemId==='cindy-selection'?'selection':'translate-page');});
 }
-chrome.action.onClicked?.addListener(tab=>{if(tab?.id)openOnTab(tab.id);});
+// Native Chrome panel; page tools remain available from the panel and context menu.
+chrome.sidePanel?.setPanelBehavior({openPanelOnActionClick:true}).catch(()=>{});
+chrome.action.onClicked?.addListener(tab=>{if(!chrome.sidePanel&&tab?.id)openOnTab(tab.id);});
 // Toolbar icon follows the browser's light or dark appearance, reported by open pages.
 let actionScheme=null; // unknown after a worker restart: the first report always applies
 chrome.runtime.onMessage.addListener((m,sender)=>{
@@ -1727,7 +1751,8 @@ chrome.runtime.onMessage.addListener((m,sender)=>{
 });
 chrome.commands?.onCommand.addListener(async command=>{
   const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-  if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');
+  if(command==='open-cindy'&&chrome.sidePanel&&tab?.windowId!=null)await chrome.sidePanel.open({windowId:tab.windowId});
+  else if(tab?.id)openOnTab(tab.id,command==='translate-page'?'translate-page':'open');
 });
 
 // Captions some sites publish outside text tracks. Authorized like every other
