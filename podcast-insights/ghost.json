@@ -5,7 +5,7 @@
   "name": "Podcast Insights",
   "description": "Import podcasts and transcripts, verify original quotes, and compare views with evidence. Optional user-confirmed paid cloud transcription.",
   "whenToUse": "Podcast transcripts, summaries, content questions, cross-show viewpoints, original quotes, speakers and timestamps. Searches imported material only.",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "entry": "main.js",
   "icon": "assets/podcast-icon.jpg",
   "launch": "on-demand",
@@ -325,6 +325,7 @@
     "tasks": true
   },
   "mainView": {
+    "preferredIcon": "podcast",
     "title": "Podcast library",
     "icon": "database",
     "html": "main-view.html"
