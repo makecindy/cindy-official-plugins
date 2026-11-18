@@ -129,7 +129,7 @@ var MESSAGES = {
     prPublishDraft: '发成草稿',
     prPublishingTitle: '正在发 PR',
     prPublishingDraftTitle: '正在发草稿 PR',
-    prPublishingMeta: '已交给 Agent，完成后这里会更新',
+    prPublishingMeta: '完成后会在这里显示 PR',
     prQueuedMeta: '已排队，当前回复结束后开始',
     prStateOpen: '已发布',
     prStateDraft: '草稿',
@@ -269,7 +269,7 @@ var MESSAGES = {
     prPublishDraft: 'Open as draft',
     prPublishingTitle: 'Opening the pull request',
     prPublishingDraftTitle: 'Opening a draft pull request',
-    prPublishingMeta: 'Handed to the agent. This card updates when it is done.',
+    prPublishingMeta: 'The pull request will appear here when it is ready.',
     prQueuedMeta: 'Queued. It starts after the current reply.',
     prStateOpen: 'Open',
     prStateDraft: 'Draft',
@@ -409,7 +409,7 @@ var MESSAGES = {
     prPublishDraft: '下書きで作成',
     prPublishingTitle: 'PR を作成しています',
     prPublishingDraftTitle: '下書き PR を作成しています',
-    prPublishingMeta: 'エージェントに渡しました。完了するとこのカードが更新されます',
+    prPublishingMeta: '作成が完了すると、ここに PR が表示されます',
     prQueuedMeta: 'キューに追加しました。現在の返信が終わると始まります',
     prStateOpen: '公開済み',
     prStateDraft: '下書き',
@@ -549,7 +549,7 @@ var MESSAGES = {
     prPublishDraft: '초안으로 만들기',
     prPublishingTitle: 'PR을 만드는 중',
     prPublishingDraftTitle: '초안 PR을 만드는 중',
-    prPublishingMeta: '에이전트에게 맡겼습니다. 끝나면 이 카드가 업데이트됩니다',
+    prPublishingMeta: '생성이 완료되면 여기에 PR이 표시됩니다',
     prQueuedMeta: '대기열에 추가했습니다. 현재 응답이 끝나면 시작합니다',
     prStateOpen: '게시됨',
     prStateDraft: '초안',
@@ -3300,6 +3300,10 @@ function prCardHeight(card) {
 async function sendPrCard(card, settings, sourceCallId) {
   var active = await findPrCardOwner(card.repo, card.pr && card.pr.number, card.head, card.id, card.sessionId);
   var other = active && prFollowActive(active) && active.sessionId !== card.sessionId ? active : null;
+  return deliverPrCard(card, settings, sourceCallId, other);
+}
+
+async function deliverPrCard(card, settings, sourceCallId, other) {
   var msg = {
     // 正在发、正在开启或停止跟进时报 working:宿主才播卡内转圈(静态版会剥掉动画),
     // Agent 用 pr_card 更新结果时换回 done。
@@ -3310,7 +3314,7 @@ async function sendPrCard(card, settings, sourceCallId) {
   // 后续工具调用改的是之前那张卡片:带上当前调用作凭证,宿主才会重开旧卡片。
   if (sourceCallId) msg.sourceCallId = sourceCallId;
   // Resolves true when the host took the update, false when it refused it (so the caller can say so).
-  return Promise.resolve(cindy.send(msg)).then(function () { return true; }, function () { return false; });
+  try { await cindy.send(msg); return true; } catch (e) { return false; }
 }
 
 /** 挪走后留在原处的一行:PR 号和标题,提示最新状态在下方。没有按钮,点击不会落到这里。 */
@@ -3682,6 +3686,7 @@ async function prCardAction(msg) {
   }
   card.note = null;
   var handedOff = false;
+  var nextUpdateAt = 0;
   if (action === 'prui:settings' && prHasSettings(card)) {
     card.settingsOpen = !card.settingsOpen;
   } else if (action === 'prset:rename' || action === 'prset:follow' || action === 'prset:archive') {
@@ -3746,6 +3751,12 @@ async function prCardAction(msg) {
         restoreCard();
         card.note = t('prSaveFailed');
       } else {
+        // The phone's delivery receipt only covers dispatch to this plugin. Show the saved
+        // state while the task is waking up. Ownership was checked in this serialized action.
+        if (publishing && await deliverPrCard(card, settings, null, null)) {
+          // The host accepts one update per second on the same click.
+          nextUpdateAt = Date.now() + 1000;
+        }
         var handoff = await handOffPr(card, action, settings, msg);
         // An unclear result (the call threw, or no verdict) may still have reached the agent: keep the in-progress
         // state with its note, so the same action cannot be sent twice. Only a clear refusal restores the buttons.
@@ -3761,7 +3772,12 @@ async function prCardAction(msg) {
       }
     }
   }
-  if (!(await savePrCard(card))) {
+  var recorded = await savePrCard(card);
+  // A normal handoff leaves the working card exactly as shown.
+  if (recorded && nextUpdateAt && handedOff && !card.queued && !card.note) return;
+  var wait = nextUpdateAt - Date.now();
+  if (wait > 0) await new Promise(function (resolve) { setTimeout(resolve, wait); });
+  if (!recorded) {
     if (handedOff) {
       // 点击已经交给 Agent:卡片不能退回有按钮的旧状态,否则用户会把同一件事再派一遍。
       // 画交出后的进行中状态(没有操作按钮)并提示先看对话;Agent 之后用 card_id 回写时仍读到旧记录,照常更新。

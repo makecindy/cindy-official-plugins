@@ -80,7 +80,7 @@ test('manifest pins host GitHub login injection to the GitHub API', () => {
   assert.deepEqual(manifest.card, { externalLinks: true });
   assert.deepEqual(manifest.agent, {});
   const auth = manifest.network?.secrets?.find((secret) => secret.key === 'github_pat');
-  assert.equal(manifest.version, '1.5.17');
+  assert.equal(manifest.version, '1.5.18');
   assert.deepEqual(auth, {
     key: 'github_pat',
     label: 'GitHub 登录',
@@ -1066,6 +1066,26 @@ test('when the final save after marking ready fails, the card shows the real sta
   healed = true;
   await runtime.click(cardId, 'pr:follow');
   assert.equal(runtime.agentRuns.at(-1)?.event.action, 'follow');
+});
+
+test('publish and draft clicks replace the buttons before a slow agent handoff completes', async () => {
+  for (const action of ['pr:publish', 'pr:draft']) {
+    let started, finish;
+    const starting = new Promise(resolve => { started = resolve; });
+    const receipt = new Promise(resolve => { finish = resolve; });
+    const runtime = createPrRuntime({ agentRun: () => { started(); return receipt; } });
+    const { callId } = await runtime.tool({ repo: 'octo/repo', head: 'feat/x', base: 'main' });
+    const click = runtime.click(callId, action);
+    await starting;
+    const pending = runtime.lastCard(callId);
+    finish({ ok: true, disposition: 'queued' });
+    await click;
+    assert.equal(pending.state, 'working');
+    assert.doesNotMatch(pending.html, /data-ghost-action="pr:(publish|draft)"/);
+    assert.ok(visibleText(runtime.lastCard(callId).html).includes(zhCopy.prQueuedMeta));
+    await runtime.click(callId, action);
+    assert.equal(runtime.agentRuns.length, 1);
+  }
 });
 
 test('a click is recorded before it is handed over: no record, nothing sent; handed over, a lost save cannot offer it again', async () => {
