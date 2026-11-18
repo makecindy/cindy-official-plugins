@@ -58,7 +58,7 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
     return new Promise((resolve,reject)=>{
       const body=Buffer.from(JSON.stringify(events?{events}:{}));
       const fail=error=>reject(Object.assign(error,{code:error.code||'REMOTE_INPUT_FAILED',execution:'unknown'}));
-      const request=http.request(view.upstream+route,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':body.length},timeout:10000},response=>{
+      const request=http.request(view.upstream+route,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':body.length},signal:AbortSignal.timeout(10000)},response=>{
         const chunks=[];response.on('data',c=>chunks.push(c));
         response.once('aborted',()=>fail(Error('REMOTE_INPUT_INTERRUPTED')));
         response.once('error',fail);
@@ -70,7 +70,6 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
           else fail(Error('REMOTE_INPUT_INVALID_RESPONSE'));
         });
       });
-      request.once('timeout',()=>request.destroy(Object.assign(Error('REMOTE_INPUT_TIMEOUT'),{code:'REMOTE_INPUT_TIMEOUT'})));
       request.once('error',fail);
       request.end(body);
     });
@@ -78,26 +77,14 @@ function createRemoteViewer({desktop=()=>path.join(os.homedir(),'Desktop'),now=(
   // The page uses the provider's complete key events. The host wire uses
   // desktop key down/up; its source-side mapper reconstructs the same chord.
   async function input(view,events){
-    const modifierCodes={shift:'ShiftLeft',control:'ControlLeft',option:'AltLeft',command:'MetaLeft'};
-    const groups=events.map(event=>{
-      if(event?.kind!=='key'||typeof event.down==='boolean')return [event];
-      const modifiers=event.modifiers??[];
-      if(typeof event.code!=='string'||!Array.isArray(modifiers)||modifiers.length>4||modifiers.some(m=>!Object.hasOwn(modifierCodes,m)))
-        throw Object.assign(Error('INVALID_ARGUMENT'),{code:'INVALID_ARGUMENT',execution:'not_executed'});
-      const codes=[...new Set(modifiers)].map(m=>modifierCodes[m]);
-      return [...codes.map(code=>({kind:'key',code,down:true})),{kind:'key',code:event.code,down:true},{kind:'key',code:event.code,down:false},...codes.reverse().map(code=>({kind:'key',code,down:false}))];
-    });
-    // Keep chords together, within the host's existing event and byte limits.
-    let batch=[],executed=false;
-    const flush=async()=>{if(batch.length){await send(view,batch);executed=true;batch=[];}};
-    try{
-      for(const group of groups){
-        if(batch.length+group.length>64||Buffer.byteLength(JSON.stringify({events:[...batch,...group]}))>16384)await flush();
-        batch.push(...group);
-      }
-      await flush();
-    }catch(error){if(executed)error.execution='unknown';throw error;}
+    const wire=require('../keys.cjs').hostEvents(events);
+    // One page request is one host request: there can be no hidden later
+    // batches after the page times out, releases the device or accepts input.
+    if(wire.length>64||Buffer.byteLength(JSON.stringify({events:wire}))>16384)
+      throw Object.assign(Error('INPUT_TOO_LARGE'),{code:'INPUT_TOO_LARGE',execution:'not_executed'});
+    await send(view,wire);
   }
+
   // The picture as shown: this computer has no direct way to the device itself.
   // Named like a screenshot of a device on this computer (core.cjs desktopFile).
   const shots=new Set();

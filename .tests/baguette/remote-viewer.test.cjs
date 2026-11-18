@@ -18,6 +18,7 @@ async function host(){
     const chunks=[];req.on('data',c=>chunks.push(c));req.on('end',()=>{
       posts.push({url:req.url,body:JSON.parse(Buffer.concat(chunks).toString()||'{}')});
       const fault=faults.shift();
+      if(fault==='drip'){res.writeHead(200,{'Content-Type':'application/json'});res.write(' ');const timer=setInterval(()=>res.write(' '),100);res.once('close',()=>clearInterval(timer));return;}
       if(fault==='reset'){res.destroy();return;}
       if(fault==='truncated'){res.writeHead(200,{'Content-Type':'application/json'});res.write('{"ok":');setImmediate(()=>res.destroy());return;}
       if(fault==='malformed'||fault==='empty'){res.writeHead(200,{'Content-Type':'application/json'});res.end(fault==='malformed'?'{"ok":':'');return;}
@@ -176,6 +177,7 @@ for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`r
     {key:'Z',code:'KeyZ',metaKey:true,shiftKey:true,modifiers:['shift','command']},
   ];
   if(platform==='android')chords.push({key:'F5',code:'F5',ctrlKey:true,modifiers:['control']});
+  for(let i=0;i<20;i++)chords.push({key:'Z',code:'KeyZ',metaKey:true,ctrlKey:true,altKey:true,shiftKey:true,modifiers:['shift','control','option','command']});
   for(const chord of chords)get('keyboard').listeners.keydown({...chord,preventDefault(){}});
   // Unsupported shortcuts and layout text must not poison a valid queued chord.
   const bypass=[
@@ -194,7 +196,11 @@ for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`r
   get('keyboard').listeners.paste({clipboardData:{getData:()=>longText},preventDefault(){}});
   for(let i=0;i<100;i++)await settle();
   const large=sent.filter(p=>p.action==='input');
-  for(const packet of large){assert.ok(Buffer.byteLength(JSON.stringify(packet))<=60000);for(const event of packet.events)assert.ok(Buffer.byteLength(JSON.stringify({events:[event]}))<=16384);}
+  for(const packet of large){
+    const wire=packet.events.flatMap(e=>e.kind==='key'?Array(2+2*new Set(e.modifiers??[]).size).fill({kind:'key',code:e.code,down:true}):[e]);
+    assert.ok(wire.length<=64,'page must bound expanded host key events');
+    assert.ok(Buffer.byteLength(JSON.stringify({events:wire}))<=16384,'one page request must fit one host request');
+    assert.ok(Buffer.byteLength(JSON.stringify(packet))<=60000);for(const event of packet.events)assert.ok(Buffer.byteLength(JSON.stringify({events:[event]}))<=16384);}
   assert.equal(large.flatMap(p=>p.events).filter(e=>e.kind==='text').map(e=>e.text).join(''),'pastedtext'+longText);
   // A rejection, unknown result or a later failed batch must never invite replay.
   // Exercise the real page queue and visible notice for both supported UI languages.
@@ -238,18 +244,18 @@ for(const platform of ['ios','android'])for(const lang of ['zh-CN','en'])test(`r
 // Exercise the real HTTP bridge; counting page emissions alone misses this gap.
 test('remote key chords cross the host wire in bounded batches without lost modifiers',async t=>{
   const {api,upstream}=await opened(t);
-  const keys=Array.from({length:64},()=>({kind:'key',code:'ArrowLeft',modifiers:['shift','command']}));
+  const keys=Array.from({length:10},()=>({kind:'key',code:'ArrowLeft',modifiers:['shift','command']}));
   assert.equal((await api({action:'input',events:keys})).body.ok,true);
   const packets=upstream.posts.map(p=>p.body.events);
-  assert.ok(packets.length>1);assert.ok(packets.every(events=>events.length<=64));
+  assert.equal(packets.length,1,'worker forwards exactly one packet');assert.ok(packets.every(events=>events.length<=64));
   const chord=[['ShiftLeft',true],['MetaLeft',true],['ArrowLeft',true],['ArrowLeft',false],['MetaLeft',false],['ShiftLeft',false]].map(([code,down])=>({kind:'key',code,down}));
   assert.deepEqual(packets.flat(),keys.flatMap(()=>chord));
   upstream.posts.length=0;
   const bad=await api({action:'input',events:[{kind:'key',code:'KeyA',modifiers:['invalid']}]});
   assert.equal(bad.body.errorCode,'INVALID_ARGUMENT');assert.equal(upstream.posts.length,0);
-  // A later refused batch does not erase the earlier batch's execution.
+  // An oversized logical batch is rejected before any input can execute.
   const failed=await api({action:'input',events:[...Array.from({length:32},()=>({kind:'key',code:'Enter'})),{kind:'press',button:'refused'}]});
-  assert.equal(failed.body.execution,'unknown');assert.equal(upstream.posts.length,2);
+  assert.equal(failed.body.execution,'not_executed');assert.equal(upstream.posts.length,0);
 });
 
 
@@ -266,9 +272,22 @@ test('interrupted or invalid upstream responses settle as unknown without replay
       assert.equal((await api({action:'press',button:'home'},AbortSignal.timeout(1000))).body.ok,true);
     }
   }
-  // A successful earlier batch cannot turn an interrupted later result into a refusal.
-  upstream.faults.push('ok','truncated');
+  // No hidden worker batches can survive the page's request lifetime.
   const before=upstream.posts.length;
   const result=await api({action:'input',events:Array.from({length:64},()=>({kind:'key',code:'Enter'}))},AbortSignal.timeout(1000));
-  assert.equal(result.body.execution,'unknown');assert.equal(upstream.posts.length,before+2);
+  assert.equal(result.body.execution,'not_executed');assert.equal(upstream.posts.length,before);
+});
+
+// Body activity must not extend a batch past the page's 15s timeout.
+test('an active but unconfirmed host response ends within the whole-request deadline', {timeout:13000}, async t=>{
+ const {api,upstream}=await opened(t);
+ upstream.faults.push('drip');
+ const before=Date.now();
+ const result=await api({action:'input',events:[{kind:'text',text:'once'}]},AbortSignal.timeout(12000));
+ assert.equal(result.body.execution,'unknown');
+ assert.ok(Date.now()-before<11500,'absolute 10s limit precedes page timeout despite response activity');
+ assert.equal(upstream.posts.length,1,'no hidden later batch or replay');
+ assert.equal((await api({action:'release'})).body.ok,true);
+ assert.equal((await api({action:'input',events:[{kind:'text',text:'new'}]})).body.ok,true);
+ assert.deepEqual(upstream.posts.map(p=>p.body.events[0].kind),['text','release','text']);
 });

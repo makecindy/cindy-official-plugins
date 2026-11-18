@@ -59,6 +59,8 @@
         const events=[];
         while(waiting.length&&events.length<64){
           const next=waiting[0];
+          const wire=window.DeviceKeys.hostEvents([...events,next]);
+          if(wire.length>64||new TextEncoder().encode(JSON.stringify({events:wire})).length>16384)break;
           if(new TextEncoder().encode(JSON.stringify({action:'input',udid,events:[...events,next]})).length>60000)break;
           events.push(waiting.shift());
         }

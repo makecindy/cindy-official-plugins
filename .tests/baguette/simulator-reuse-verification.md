@@ -264,3 +264,47 @@ Required repository suites and simulator aggregate passed 914 tests, zero failed
 passed. No new machinery, permissions, dependencies, install or restart. Actual
 two-computer runtime acceptance is still incomplete; the maintainer must assess
 that evidence on the then-current head before merge.
+
+## Round 12 input-lifetime convergence — 0.3.56, 2026-11-18
+
+Failure family: page requests were split again by the worker, so hidden worker
+batches could outlive the page's 15s input timeout and universal cleanup.
+Chosen convergence: remove the worker's second batching loop, its batch/executed
+state and partial-batch bookkeeping. The page's existing serial queue is the sole
+batch owner. Shared keys.hostEvents computes the exact chord expansion for both
+page sizing and worker forwarding; the page respects host 64-event/16-KiB limits
+without cutting chords or text, and the worker rejects oversized packets before
+sending anything. Each page input request forwards at most one host request.
+
+| Event | Page waiting | One host request in flight | Settled |
+| --- | --- | --- | --- |
+| More input | Existing serial queue, with exact expanded host bounds | Existing queue waits | Next page packet only after confirmation |
+| Complete success | No hidden worker work | Resolve once | Existing queue advances |
+| Refusal / interruption / malformed result | Existing failure path | Settle once with existing execution semantics | Existing discard and best-effort release, no replay |
+| Slow response, including continuous body activity | No independent worker queue | Absolute 10s AbortSignal ends request before page's 15s timeout | Unknown; no later worker batch exists |
+| Release / page close | Existing release replaces unsent page input | Existing page queue preserves its current ordering | No worker tail can execute after cleanup |
+| Oversized raw control request | No state mutation | Reject before forwarding, not_executed | No automatic splitting or retry |
+
+Symmetric audit: input, press, retry and release share the existing send/settle
+function and its absolute timeout; response aborted/error/close/invalid JSON
+handling stays intact. The transport cannot revoke input already accepted by the
+remote Host/device: such unconfirmed in-flight execution remains unknown and
+requires checking the device. This fix removes unsent worker tails, not a claim of
+remote transactional cancellation. No locks, additional queue, request ledger,
+retry or persistence were added; the former inactivity timer was replaced by an
+absolute limit with the same 10s value.
+
+Regressions run real screen.js in a VM/DOM fixture for iOS/Android and zh-CN/en:
+long escaped/multibyte paste and a burst of four-modifier chords must fit a single
+host packet per page request, preserve text/chords and keep existing failure and
+release behavior. Real loopback HTTP tests verify one forwarded packet, rejection
+before dispatch, interrupted results and subsequent cleanup/new input. Six cases
+fail on 8647025d and pass after removing worker batching. A separate real HTTP
+response sends body activity every100ms: old code remains unresolved until the
+12s test-side deadline; new code returns unknown at10s, then accepts release/new
+input in order. Focused suite:12 passed (10.47s). This is VM/loopback evidence,
+not installed-client or genuine two-computer acceptance; that remains incomplete.
+
+Required repository suites plus simulator aggregate:915 tests passed, zero
+failures (70.91s), Node.js v22.21.1. Manifest validation, git diff --check and
+preflight passed. Main05cdd227 remains included. No install or restart performed.
