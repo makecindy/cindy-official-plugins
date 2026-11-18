@@ -17,7 +17,7 @@ A unified Cindy browser companion candidate. **0.4.10** brings compact reading c
 - Speaking practice, collections and review controls are removed at the user's request. Existing Library records and legacy API operations are preserved. This package is not a full Trancy replacement.
 - New Cindy task: uses the ordinary task API, creates an explicitly owned task and separates user instructions from quoted webpage material. It never takes over an unrelated active task; uncertain submissions retain their request keys.
 
-Requires **Cindy 0.1.97+**, an available task model and Library. The plugin logic and local bridge remain resident to receive user clicks. Model credentials stay in Cindy. Task permission follows the existing Host approval flow; refusing it prevents model translation but does not prevent browser reading/control.
+Requires **Cindy 0.1.140+**, an available task model and Library. The plugin logic and local bridge remain resident to receive user clicks. Model credentials stay in Cindy. Task permission follows the existing Host approval flow; refusing it prevents model translation but does not prevent browser reading/control.
 
 Shortcuts: `Alt+Shift+T` toggles page translation; `Alt+Shift+C` opens Cindy. Pages open before installation need a user refresh to load content scripts and establish current-document address evidence.
 
