@@ -1,0 +1,483 @@
+{
+  "schemaVersion": 3,
+  "minCindyVersion": "0.1.124",
+  "id": "test-environments",
+  "name": "Test Environments",
+  "description": "Reusable test accounts, launch profiles and acceptance cases for desktop and mobile projects.",
+  "whenToUse": "Reusable test accounts, launch profiles and acceptance cases for desktop and mobile projects.",
+  "version": "1.0.4",
+  "kind": "chip",
+  "entry": "main.js",
+  "icon": "assets/icon.png",
+  "tools": [
+    {
+      "name": "catalog",
+      "description": "List projects, account references, launch profiles and acceptance cases. No credentials. Call first to choose exact IDs.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_project",
+      "description": "Save a project and its argv commands. Commands execute as this computer user. Never store secrets in arguments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              },
+              "adapter": {
+                "type": "string",
+                "enum": [
+                  "cindy",
+                  "command"
+                ]
+              },
+              "commands": {
+                "type": "object",
+                "properties": {
+                  "prepare": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "start": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "verify": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "root",
+              "adapter"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_account",
+      "description": "Save a named account reference; the application retains credentials. Existing identity cannot be rebound.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "selector": {
+                "type": "string"
+              },
+              "loginSource": {
+                "type": "string"
+              },
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "project",
+              "label",
+              "selector"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_profile",
+      "description": "Save launch settings. Cindy desktop requires isolated storage; legacy preserves the original login flow.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "account": {
+                "type": "string"
+              },
+              "isolated": {
+                "type": "string"
+              },
+              "fixture": {
+                "type": "string"
+              },
+              "loginSource": {
+                "type": "string"
+              },
+              "serveLogin": {
+                "type": "string"
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "artifactPath": {
+                "type": "string"
+              },
+              "bundleId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "ios",
+                  "android",
+                  "linux"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "legacy",
+                  "acceptance"
+                ]
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "global",
+                  "cn"
+                ]
+              },
+              "remoteControl": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "off",
+                  "on"
+                ]
+              },
+              "background": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "off",
+                  "on"
+                ]
+              },
+              "debugPort": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "project",
+              "platform",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "save_case",
+      "description": "Save ordered acceptance actions and expected outcomes. Saving does not run a test.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "testCase": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "profile": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "expected": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "expected"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "profile",
+              "steps"
+            ],
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "testCase"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "remove",
+      "description": "Remove a catalog entry only. Dependencies must be reassigned first; application data and credentials remain.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "accounts",
+              "profiles",
+              "cases"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "import_cindy",
+      "description": "Import public account aliases from the existing local Cindy dev profile catalog. Never copies credentials.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "plan",
+      "description": "Resolve exact argv and configuration without executing. For mobile, returns simulator handoff; use baguette-simulator on the exact device.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "prepare",
+              "verify"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "start",
+      "description": "Start a saved profile action; returns a persistent jobId immediately. Query status, never repeat while waiting. No process-start result proves login.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "prepare",
+              "verify"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "status",
+      "description": "Read one job or all jobs, actual readiness and sign-in requirements. Unknown state requires inspection, not blind retry.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "stop",
+      "description": "Stop only this plugin job and its verified owned process. Preserve login and data. Query status until stopped.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "inspect",
+      "description": "Inspect this job’s owned desktop app through its local debug port, including while the desktop is locked. Returns only login step/error and an optional private screenshot path. Set debugPort before starting. Never reads credentials or another app.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "screenshot": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "node": {
+    "entry": "node/worker.cjs",
+    "protocol": "json-rpc-stdio",
+    "lifecycle": "on-demand",
+    "idleTimeoutSeconds": 120
+  },
+  "author": "Chris",
+  "command": "test-environments",
+  "mainView": {
+    "title": "Test Environments",
+    "icon": "code",
+    "html": "manage.html"
+  },
+  "settingsHtml": "manage.html",
+  "manual": {
+    "items": [
+      {
+        "dir": "manual/start",
+        "name": "start",
+        "description": "Accounts, profiles, launch lifecycle, CLI and simulator handoff."
+      }
+    ]
+  },
+  "locales": {
+    "en": "locales/en.json",
+    "zh-CN": "locales/zh-CN.json",
+    "ja": "locales/ja.json",
+    "ko": "locales/ko.json"
+  }
+}

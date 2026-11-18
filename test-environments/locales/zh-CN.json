@@ -1,0 +1,46 @@
+{
+  "name": "测试环境",
+  "description": "本地复用账号引用、启动方案与验收用例。",
+  "whenToUse": "本地复用账号引用、启动方案与验收用例。",
+  "mainView": {
+    "title": "测试环境"
+  },
+  "tools": {
+    "catalog": {
+      "description": "查看项目、账号引用、启动方案和验收用例。不返回凭证；先调用以选择准确的 ID。"
+    },
+    "save_project": {
+      "description": "保存项目与参数数组命令；以本机用户执行，不得在参数里保存密码或令牌。"
+    },
+    "save_account": {
+      "description": "保存具名账号引用，凭证仍由应用保管；已有账号引用不能改绑身份。"
+    },
+    "save_profile": {
+      "description": "保存启动配置。Cindy 桌面必须隔离数据；legacy 保留原登录流程。"
+    },
+    "save_case": {
+      "description": "保存有序验收步骤与预期结果；保存本身不执行测试。"
+    },
+    "remove": {
+      "description": "仅移除目录条目，先解除引用；应用数据和凭证保留。"
+    },
+    "import_cindy": {
+      "description": "导入本地 Cindy 开发档案中的公开账号别名，不复制凭证。"
+    },
+    "plan": {
+      "description": "只解析命令与配置，不执行；移动端返回模拟器交接说明，使用 baguette-simulator 操作准确设备。"
+    },
+    "start": {
+      "description": "启动已保存方案，立即返回持久 jobId；等待时查询状态，勿重复启动。进程启动不等于登录成功。"
+    },
+    "status": {
+      "description": "读取单次或全部运行的真实状态与登录需求；unknown 时先检查，不能盲目重试。"
+    },
+    "stop": {
+      "description": "只停止本插件运行及已核实归属的进程；保留登录与数据，继续查询直至 stopped。"
+    },
+    "inspect": {
+      "description": "通过本次运行专属调试端口检查桌面应用，锁屏时也可用；可保存私有截图，不读取凭证。"
+    }
+  }
+}
